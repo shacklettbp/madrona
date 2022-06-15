@@ -1,10 +1,4 @@
-set(SOURCES
-    functionality.cpp
-)
-
-#add_library(madrona_core
-#    ${SOURCES}
-#)
+add_subdirectory(core)
 
 if (CUDAToolkit_FOUND)
     add_subdirectory(train)

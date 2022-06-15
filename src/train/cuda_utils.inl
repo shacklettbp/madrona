@@ -1,19 +1,6 @@
 namespace madrona {
 namespace cu {
 
-cudaError_t checkCuda(cudaError_t res, const char *msg,
-                                    bool fatal = true) noexcept
-{
-    if (res != cudaSuccess) {
-        printCudaError(res, msg);
-        if (fatal) {
-            std::abort();
-        }
-    }
-
-    return res;
-}
-
 void *allocGPU(size_t num_bytes)
 {
     void *ptr;
@@ -68,6 +55,31 @@ cudaStream_t makeStream()
     REQ_CUDA(cudaStreamCreate(&strm));
 
     return strm;
+}
+
+void checkCuda(cudaError_t res, const char *file,
+               int line) noexcept
+{
+    if (res != cudaSuccess) {
+        cudaError(res, file, line);
+    }
+}
+
+void checkCuDrv(CUresult res, const char *file,
+                int line) noexcept
+{
+    if (res != CUDA_SUCCESS) {
+        cuDrvError(res, file, line);
+    }
+}
+
+
+void checkNVRTC(nvrtcResult res, const char *file,
+                int line) noexcept
+{
+    if (res != NVRTC_SUCCESS) {
+        nvrtcError(res, file, line);
+    }
 }
 
 }

@@ -28,9 +28,8 @@ public:
     JobQueue &jobQueue;
 };
 
-template <typename Fn>
-__global__ void jobEntry(JobQueue *job_queue, void *data);
-
 }
 
+#ifdef __NVCC__
 #include "job.inl"
+#endif

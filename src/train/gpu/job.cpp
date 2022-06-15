@@ -1,13 +1,9 @@
-#include <cstdint>
-#include <iostream>
-
-#include "cuda_utils.hpp"
-#include "job"
+#include <madrona/job.hpp>
 
 namespace madrona {
 
 // Only a single thread block can run this function
-__global__ void jobSystem(JobQueue *job_queue)
+void jobSystem(JobQueue *job_queue)
 {
     uint32_t thread_pos = threadIdx.x;
 
@@ -33,30 +29,9 @@ __global__ void jobSystem(JobQueue *job_queue)
     }
 }
 
-void initTraining()
-{
-    auto strm = cu::makeStream();
-
-    int v = 5;
-    JobQueue *job_queue = initJobQueue(strm, [v] __device__ (Context &ctx) {
-        printf("Hi %d\n", v);
-    });
-
-    jobSystem<<<1, 1024, 0, strm>>>(job_queue);
-
-    REQ_CUDA(cudaStreamSynchronize(strm));
-
-    return 0;
 }
 
-}
-
-int main(int argc, char *argv[])
+extern "C" __global__ void jobSystemKernel(JobQueue *job_queue)
 {
-    (void)argc;
-    (void)argv;
-
-    madrona::initTraining();
-
-    return 0;
+    madrona::jobSystem(job_queue);
 }
