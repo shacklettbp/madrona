@@ -16,6 +16,11 @@ namespace gpuTrain {
 
 namespace madrona {
 
+namespace InternalConfig {
+static constexpr uint32_t numLaunchKernelThreads = 512;
+static constexpr uint32_t numJobSystemKernelThreads = 1024;
+}
+
 using GPUJobQueue = gpuTrain::madrona::JobQueue;
 
 static HeapArray<char> makeEntryCode(const char *entry_func,
@@ -219,7 +224,7 @@ JobQueue *initJobSystem(cudaStream_t strm, Fn &&fn)
 }
 #endif
 
-GPUJobQueue * initJobSystem(uint32_t num_worlds, cudaStream_t strm)
+static GPUJobQueue * initJobSystem(uint32_t num_worlds, cudaStream_t strm)
 {
     // Expand buffers based on number of parallel worlds
     (void)num_worlds;
@@ -239,32 +244,16 @@ GPUJobQueue * initJobSystem(uint32_t num_worlds, cudaStream_t strm)
     return job_queue;
 }
 
-struct TrainingExecutor::Impl {
-    cudaStream_t cuStream;
-    gpuTrain::madrona::JobQueue *jobSystemState;
-    CUgraphExec runGraph;
-};
-
-TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
-                                   const CompileConfig &compile_cfg)
-    : impl_(nullptr)
+static CUgraphExec makeRunGraph(GPUJobQueue *job_sys_state,
+                                CUfunction launch_kernel,
+                                CUfunction job_sys_kernel,
+                                uint32_t num_launch_blocks)
 {
-    auto strm = cu::makeStream();
-    
-    CUfunction launch_kernel, job_system_kernel;
-    buildKernels(compile_cfg, train_cfg.gpuID,
-                 &launch_kernel, &job_system_kernel);
-
-    auto *job_queue = initJobSystem(train_cfg.numWorlds, strm);
-
-    uint32_t num_launch_blocks = utils::divideRoundUp(train_cfg.numWorlds,
-                                                      512u);
-
     // Assumes that the launch kernel and job system kernel have the same
     // arguments
     
     std::array<char, sizeof(uint64_t)> kernel_arg_buffer;
-    memcpy(kernel_arg_buffer.data(), &job_queue, sizeof(uint64_t));
+    memcpy(kernel_arg_buffer.data(), &job_sys_state, sizeof(uint64_t));
 
     size_t arg_buffer_size = kernel_arg_buffer.size();
     std::array launch_config {
@@ -281,7 +270,7 @@ TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
         .gridDimX = num_launch_blocks,
         .gridDimY = 1,
         .gridDimZ = 1,
-        .blockDimX = 512,
+        .blockDimX = InternalConfig::numLaunchKernelThreads,
         .blockDimY = 1,
         .blockDimZ = 1,
         .sharedMemBytes = 0,
@@ -293,9 +282,9 @@ TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
     REQ_CU(cuGraphAddKernelNode(&launch_node, run_graph,
         nullptr, 0, &kernel_node_params));
 
-    kernel_node_params.func = job_system_kernel;
+    kernel_node_params.func = job_sys_kernel;
     kernel_node_params.gridDimX = 1;
-    kernel_node_params.blockDimX = 1024;
+    kernel_node_params.blockDimX = InternalConfig::numJobSystemKernelThreads;
 
     CUgraphNode job_sys_node;
     REQ_CU(cuGraphAddKernelNode(&job_sys_node, run_graph,
@@ -307,10 +296,37 @@ TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
 
     REQ_CU(cuGraphDestroy(run_graph));
 
+    return run_graph_exec;
+}
+
+struct TrainingExecutor::Impl {
+    cudaStream_t cuStream;
+    gpuTrain::madrona::JobQueue *jobSystemState;
+    CUgraphExec runGraph;
+};
+
+TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
+                                   const CompileConfig &compile_cfg)
+    : impl_(nullptr)
+{
+    auto strm = cu::makeStream();
+    
+    CUfunction launch_kernel, job_system_kernel;
+    buildKernels(compile_cfg, train_cfg.gpuID,
+                 &launch_kernel, &job_system_kernel);
+
+    auto *job_sys_state = initJobSystem(train_cfg.numWorlds, strm);
+
+    uint32_t num_launch_blocks = utils::divideRoundUp(train_cfg.numWorlds,
+        InternalConfig::numLaunchKernelThreads);
+
+    auto run_graph = makeRunGraph(job_sys_state, launch_kernel,
+                                  job_system_kernel, num_launch_blocks);
+
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,
-        job_queue,
-        run_graph_exec,
+        job_sys_state,
+        run_graph,
     });
 }
 
