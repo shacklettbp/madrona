@@ -1,0 +1,3 @@
+[submodule "external/madrona-deps"]
+	path = external/madrona-deps
+	url = https://github.com/shacklettbp/madrona-deps.git

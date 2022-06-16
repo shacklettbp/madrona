@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <initializer_list>
 
@@ -13,16 +14,17 @@ public:
     {}
 
     Span(std::initializer_list<T> init)
-        : ptr_(init.data()), n_(init.size())
+        : ptr_(init.begin()), n_(init.size())
     {}
 
-    T * data() { return ptr_; }
-    const T * data() const { return ptr_; }
+    constexpr T * data() const { return ptr_; }
 
-    uint32_t size() { return n_; }
+    constexpr uint32_t size() const { return n_; }
 
-    T & operator[](uint32_t idx) { return ptr_[idx]; }
-    const T & operator[](uint32_t idx) const { return ptr_[idx]; }
+    T & operator[](uint32_t idx) const { return ptr_[idx]; }
+
+    T * begin() const { return ptr_; }
+    T * end() const { return ptr_ + n_; }
 
 private:
     T *ptr_;

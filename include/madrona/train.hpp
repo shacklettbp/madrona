@@ -12,10 +12,17 @@ struct TrainConfig {
     uint32_t gpuID;
 };
 
+struct CompileConfig {
+    Span<const char * const> userSources;
+    Span<const char * const> userCompileFlags;
+    const char *entryFunc;
+    const char *entryNamespace;
+};
+
 class TrainingExecutor {
 public:
-    TrainingExecutor(const TrainConfig &cfg,
-                     Span<const char *> user_cpp_files);
+    TrainingExecutor(const TrainConfig &train_cfg,
+                     const CompileConfig &compile_cfg);
     ~TrainingExecutor();
 
     void run();

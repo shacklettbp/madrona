@@ -4,51 +4,20 @@
 #include <array>
 #include <fstream>
 
-using namespace std;
-
 namespace madrona {
 namespace cu {
 
-HeapArray<char> compileToCUBIN(const char *src_path, int gpu_id,
-                               const char **extra_options,
-                               uint32_t num_extra_options)
+HeapArray<char> compileSrcToCUBIN(const char *src,
+                                  const char *src_path,
+                                  const char **compile_flags,
+                                  uint32_t num_compile_flags)
 {
-    ifstream src_file(src_path, ios::binary | ios::ate);
-    size_t num_src_bytes = src_file.tellg();
-    src_file.seekg(ios::beg);
-
-    HeapArray<char> src(num_src_bytes + 1);
-    src_file.read(src.data(), num_src_bytes);
-    src_file.close();
-    src[num_src_bytes] = '\0';
-
     nvrtcProgram prog;
-    REQ_NVRTC(nvrtcCreateProgram(&prog, src.data(), src_path, 0,
+    REQ_NVRTC(nvrtcCreateProgram(&prog, src, src_path, 0,
                                  nullptr, nullptr));
 
-    // Compute architecture string for this GPU
-    cudaDeviceProp dev_props;
-    REQ_CUDA(cudaGetDeviceProperties(&dev_props, gpu_id));
-    string arch_str = "sm_" + to_string(dev_props.major) + to_string(dev_props.minor);
-
-    array const_nvrtc_opts {
-        MADRONA_NVRTC_OPTIONS
-        "-arch", arch_str.c_str(),
-        "--device-debug",
-        "--extra-device-vectorization",
-    };
-
-    HeapArray<const char *> nvrtc_options(
-        const_nvrtc_opts.size() + num_extra_options);
-    memcpy(nvrtc_options.data(), const_nvrtc_opts.data(),
-           sizeof(const char *) * const_nvrtc_opts.size());
-
-    for (int i = 0; i < (int)num_extra_options; i++) {
-        nvrtc_options[const_nvrtc_opts.size() + i] = extra_options[i];
-    }
-
-    nvrtcResult res = nvrtcCompileProgram(prog, nvrtc_options.size(),
-        nvrtc_options.data());
+    nvrtcResult res = nvrtcCompileProgram(prog, num_compile_flags,
+        compile_flags);
 
     auto print_compile_log = [&prog]() {
         // Retrieve log output
@@ -58,7 +27,7 @@ HeapArray<char> compileToCUBIN(const char *src_path, int gpu_id,
         if (log_size > 1) {
             HeapArray<char> nvrtc_log(log_size);
             REQ_NVRTC(nvrtcGetProgramLog(prog, nvrtc_log.data()));
-            printf("%s\n", nvrtc_log.data());
+            fprintf(stderr, "%s\n\n", nvrtc_log.data());
         }
 
     };
@@ -78,6 +47,25 @@ HeapArray<char> compileToCUBIN(const char *src_path, int gpu_id,
     REQ_NVRTC(nvrtcDestroyProgram(&prog));
 
     return cubin_data;
+}
+
+HeapArray<char> compileFileToCUBIN(const char *src_path,
+                                   const char **compile_flags,
+                                   uint32_t num_compile_flags)
+{
+    using namespace std;
+
+    ifstream src_file(src_path, ios::binary | ios::ate);
+    size_t num_src_bytes = src_file.tellg();
+    src_file.seekg(ios::beg);
+
+    HeapArray<char> src(num_src_bytes + 1);
+    src_file.read(src.data(), num_src_bytes);
+    src_file.close();
+    src[num_src_bytes] = '\0';
+
+    return compileSrcToCUBIN(src.data(), src_path,
+                             compile_flags, num_compile_flags);
 }
 
 }

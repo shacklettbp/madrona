@@ -6,10 +6,12 @@ add_library(madrona_train STATIC
 target_link_libraries(madrona_train PUBLIC
     madrona_core CUDA::nvrtc CUDA::cudart)
 
-set(NVRTC_COMPILE_FLAGS -std=c++20 -default-device -rdc true
-    -use_fast_math -lineinfo -extended-lambda -dopt=on)
+file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
 
-set(GPU_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gpu/)
+set(NVRTC_COMPILE_FLAGS -std=c++20 -default-device -rdc=true
+    -use_fast_math -lineinfo -dopt=on)
+
+set(GPU_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gpu)
 set(TRAIN_GPU_SOURCES
     ${GPU_SRC_DIR}/job.cpp
 )
@@ -27,7 +29,8 @@ set(NVRTC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/gpu
     ${MADRONA_TRAIN_INCLUDES}
     ${MADRONA_CORE_INCLUDES}
-    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+    ${CUDAToolkit_INCLUDE_DIRS}
+    ${CUDAToolkit_INCLUDE_DIRS}/cuda/std
 )
 
 set(NVRTC_OPTIONS)
@@ -40,10 +43,40 @@ endforeach()
 set(NVRTC_OPTIONS "${NVRTC_OPTIONS}")
 
 target_compile_definitions(madrona_train PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:MADRONA_NVRTC_OPTIONS=${NVRTC_OPTIONS}>
-    $<$<COMPILE_LANGUAGE:CXX>:MADRONA_TRAIN_INTERNAL_CPP=${INTERNAL_SRC_LIST}>
+    MADRONA_NVRTC_OPTIONS=${NVRTC_OPTIONS}
+    MADRONA_TRAIN_INTERNAL_CPP=${INTERNAL_SRC_LIST}
+    MADRONA_CUDADEVRT_PATH=\"${CUDA_DEVICE_RUNTIME}\"
 )
 
-#add_executable(train train.cu)
-#target_link_libraries(train PRIVATE
-#    madrona_train)
+# Helper function for library users to get list of sources / compileflags
+function(madrona_build_compile_defns OUT_TARGET_NAME OUT_SRC_DEFN OUT_FLAG_DEFN)
+    set(ALL_TARGET_SOURCES "")
+    set(ALL_TARGET_INCLUDES "")
+    foreach(t ${ARGN})
+        get_target_property(TARGET_SOURCES ${t} SOURCES) 
+        list(FILTER TARGET_SOURCES INCLUDE REGEX ".+\.cpp")
+        list(APPEND ALL_TARGET_SOURCES ${TARGET_SOURCES})
+
+        get_target_property(TARGET_INCLUDES ${t} INCLUDE_DIRECTORIES) 
+        list(APPEND ALL_TARGET_INCLUDES ${TARGET_INCLUDES})
+    endforeach()
+
+    set(SRC_LIST)
+    foreach(src ${ALL_TARGET_SOURCES})
+        set(SRC_LIST "${SRC_LIST}\"${CMAKE_CURRENT_SOURCE_DIR}/${src}\", ")
+    endforeach()
+    set(SRC_LIST "${SRC_LIST}")
+
+    set(INCLUDE_LIST)
+    foreach(i ${ALL_TARGET_INCLUDES})
+        set(INCLUDE_LIST "${INCLUDE_LIST}\"-I${i}\", ")
+    endforeach()
+    set(INCLUDE_LIST "${INCLUDE_LIST}")
+
+    add_library(${OUT_TARGET_NAME} INTERFACE)
+
+    target_compile_definitions(${OUT_TARGET_NAME} INTERFACE
+        ${OUT_SRC_DEFN}=${SRC_LIST}
+        ${OUT_FLAG_DEFN}=${INCLUDE_LIST}
+    )
+endfunction()
