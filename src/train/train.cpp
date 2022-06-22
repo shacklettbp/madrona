@@ -7,61 +7,86 @@
 #include "cuda_utils.hpp"
 #include "cpp_compile.hpp"
 
-// Wrap this header in the gpuTrain namespace. This is a weird situation where the
-// CPU job system headers are available but we need access to the GPU header
-// in order to do initial setup.
+// Wrap this header in the gpuTrain namespace. This is a weird situation where
+// the CPU job system headers are available but we need access to the GPU
+// header in order to do initial setup.
 namespace gpuTrain {
 #include "gpu/madrona/job.hpp"
 }
 
 namespace madrona {
 
-namespace InternalConfig {
+namespace ICfg {
 static constexpr uint32_t numLaunchKernelThreads = 512;
 static constexpr uint32_t numJobSystemKernelThreads = 1024;
 }
 
-using GPUJobQueue = gpuTrain::madrona::JobQueue;
+using GPUJobManager = gpuTrain::madrona::JobManager;
+using GPUJob = gpuTrain::madrona::Job;
 
-static HeapArray<char> makeEntryCode(const char *entry_func,
-                                     const char *entry_namespace)
+struct GPUKernels {
+    CUmodule mod;
+    CUfunction initJobSystem;
+    CUfunction runJobSystem;
+    CUfunction queueUserInit;
+    CUfunction queueUserRun;
+};
+
+struct GPUEngineState {
+    GPUJobManager *jobSystemState;
+};
+
+struct TrainingExecutor::Impl {
+    cudaStream_t cuStream;
+    CUmodule cuModule;
+    GPUJobManager *jobSystemState;
+    CUgraphExec runGraph;
+};
+
+static HeapArray<char> makeEntryCode(const char *init_func,
+                                     const char *run_func,
+                                     const char *user_namespace)
 {
     const char *entry_code_template = R"__(
-namespace madrona {
-struct JobQueue;
-extern void jobSystem(JobQueue *);
-}
+#include <madrona/job.hpp>
 
+// Forward declare user functions
 namespace %s {
-extern void %s(madrona::JobQueue *job);
+extern void %s(madrona::Context &ctx);
+extern void %s(madrona::Context &ctx);
 }
 
-extern "C" __global__ void launchKernel(madrona::JobQueue *job_queue)
+extern "C" __global__ void madronaTrainQueueUserInitKernel()
 {
-    %s::%s(job_queue);
+    madrona::Context ctx {};
+    ctx.queueJob([](madrona::Context &ctx) {
+        ::%s::%s(ctx);
+    });
 }
 
-extern "C" __global__ void jobSystemKernel(madrona::JobQueue *job_queue)
+extern "C" __global__ void madronaTrainQueueUserRunKernel()
 {
-    madrona::jobSystem(job_queue);
+    madrona::Context ctx {};
+    ctx.queueJob([](madrona::Context &ctx) {
+        ::%s::%s(ctx);
+    });
 }
 )__";
 
-    HeapArray<char> entry_code(1 + strlen(entry_code_template) - 2 * 4 +
-                               2 * (strlen(entry_func) + 
-                                    strlen(entry_namespace)));
+    HeapArray<char> entry_code(1 + strlen(entry_code_template) - 2 * 7 +
+                               3 * strlen(user_namespace) +
+                               2 * strlen(init_func) + 2 * strlen(run_func));
     
     snprintf(entry_code.data(), entry_code.size(),
-             entry_code_template, entry_namespace, entry_func,
-             entry_namespace, entry_func);
+             entry_code_template, user_namespace, init_func, run_func,
+             user_namespace, init_func, user_namespace, run_func);
 
     return entry_code;
 }
 
-static void compileCode(const char **sources, uint32_t num_sources,
-                        const char **compile_flags, uint32_t num_compile_flags,
-                        const char *entry_code,
-                        CUfunction *launch_kernel, CUfunction *job_sys_kernel)
+static CUmodule compileCode(const char **sources, uint32_t num_sources,
+    const char **compile_flags, uint32_t num_compile_flags,
+    const char *entry_code)
 {
     static std::array<char, 4096> linker_info_log;
     static std::array<char, 4096> linker_error_log;
@@ -136,12 +161,10 @@ static void compileCode(const char **sources, uint32_t num_sources,
 
     REQ_CU(cuLinkDestroy(linker));
 
-    REQ_CU(cuModuleGetFunction(launch_kernel, mod, "launchKernel"));
-    REQ_CU(cuModuleGetFunction(job_sys_kernel, mod, "jobSystemKernel"));
+    return mod;
 }
 
-static void buildKernels(const CompileConfig &cfg, uint32_t gpu_id,
-                         CUfunction *init_job, CUfunction *job_system)
+static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
 {
     using namespace std;
 
@@ -188,10 +211,24 @@ static void buildKernels(const CompileConfig &cfg, uint32_t gpu_id,
         cout << flag << endl;
     }
 
-    compileCode(all_cpp_files.data(),
+    HeapArray<char> entry_code =
+        makeEntryCode(cfg.initFunc, cfg.runFunc, cfg.userNamespace);
+
+    GPUKernels gpu_kernels;
+    gpu_kernels.mod = compileCode(all_cpp_files.data(),
         all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
-        makeEntryCode(cfg.entryFunc, cfg.entryNamespace).data(),
-        init_job, job_system);
+        entry_code.data());
+
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.initJobSystem, gpu_kernels.mod,
+                               "madronaTrainInitializeJobSystemKernel"));
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.runJobSystem, gpu_kernels.mod,
+                               "madronaTrainJobSystemKernel"));
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.queueUserInit, gpu_kernels.mod,
+                               "madronaTrainQueueUserInitKernel"));
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.queueUserRun, gpu_kernels.mod,
+                               "madronaTrainQueueUserRunKernel"));
+
+    return gpu_kernels;
 }
 
 #if 0
@@ -224,58 +261,122 @@ JobQueue *initJobSystem(cudaStream_t strm, Fn &&fn)
 }
 #endif
 
-static GPUJobQueue * initJobSystem(uint32_t num_worlds, cudaStream_t strm)
+template <typename ...Ts>
+HeapArray<void *> makeKernelArgBuffer(Ts ...args)
 {
+    uint32_t num_arg_bytes = 0;
+    auto incrementArgSize = [&num_arg_bytes](auto v) {
+        using T = decltype(v);
+        num_arg_bytes = utils::roundUp(num_arg_bytes,
+                                       (uint32_t)std::alignment_of_v<T>);
+        num_arg_bytes += sizeof(T);
+    };
+
+    ( incrementArgSize(args), ... );
+
+    uint32_t arg0_alignment = ( std::alignment_of_v<decltype(args)>, ... );
+
+    uint32_t total_buf_size = sizeof(void *) * 5;
+    uint32_t arg_size_ptr_offset =
+        utils::roundUp(total_buf_size, (uint32_t)std::alignment_of_v<size_t>);
+
+    total_buf_size = arg_size_ptr_offset + sizeof(size_t);
+
+    uint32_t arg_ptr_offset = utils::roundUp(total_buf_size, arg0_alignment);
+
+    total_buf_size = arg_ptr_offset + num_arg_bytes;
+
+    HeapArray<void *> arg_buffer(utils::divideRoundUp(
+            total_buf_size, (uint32_t)sizeof(void *)));
+
+    size_t *arg_size_start = (size_t *)(
+        (char *)arg_buffer.data() + arg_size_ptr_offset);
+
+    new (arg_size_start) size_t(num_arg_bytes);
+
+    void *arg_start = (char *)arg_buffer.data() + arg_ptr_offset;
+
+    uint32_t cur_arg_offset = 0;
+    auto copyArgs = [arg_start, &cur_arg_offset](auto v) {
+        using T = decltype(v);
+
+        cur_arg_offset =
+            utils::roundUp(cur_arg_offset, (uint32_t)std::alignment_of_v<T>);
+
+        memcpy((char *)arg_start + cur_arg_offset, &v, sizeof(T));
+
+        cur_arg_offset += sizeof(T);
+    };
+
+    ( copyArgs(args), ... );
+
+    arg_buffer[0] = CU_LAUNCH_PARAM_BUFFER_POINTER;
+    arg_buffer[1] = arg_start;
+    arg_buffer[2] = CU_LAUNCH_PARAM_BUFFER_SIZE;
+    arg_buffer[3] = arg_size_start;
+    arg_buffer[4] = CU_LAUNCH_PARAM_END;
+
+    return arg_buffer;
+}
+
+static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
+                                             const GPUKernels &gpu_kernels,
+                                             cudaStream_t strm)
+{
+
     // Expand buffers based on number of parallel worlds
     (void)num_worlds;
 
-    auto job_queue = (GPUJobQueue *)cu::allocGPU(sizeof(GPUJobQueue));
-    auto queue_staging = (GPUJobQueue *)cu::allocStaging(sizeof(GPUJobQueue));
+    auto job_mgr = (GPUJobManager *)cu::allocGPU(sizeof(GPUJobManager));
 
-    queue_staging->jobHead = 0;
-    queue_staging->numWaitingJobs = 0;
-    queue_staging->numOutstandingJobs = 0;
+    auto arg_buffer = makeKernelArgBuffer(job_mgr);
 
-    cu::cpyCPUToGPU(strm, job_queue, queue_staging, sizeof(GPUJobQueue));
+    auto launchKernel = [&](CUfunction f, uint32_t num_blocks,
+                            uint32_t num_threads) {
+        REQ_CU(cuLaunchKernel(f, num_blocks, 1, 1, num_threads, 1, 1,
+                              0, strm, nullptr, arg_buffer.data()));
+    };
+
+    launchKernel(gpu_kernels.initJobSystem, 1, 1);
+    // FIXME: this will break with more than 1024 worlds
+    // Need to figure out proper way to pass in world index mapping for a
+    // given thread
+    launchKernel(gpu_kernels.queueUserInit, 1, num_worlds); 
+    launchKernel(gpu_kernels.runJobSystem, 1,
+                 ICfg::numJobSystemKernelThreads);
+    launchKernel(gpu_kernels.queueUserRun, 1,
+                 ICfg::numJobSystemKernelThreads);
+
     REQ_CUDA(cudaStreamSynchronize(strm));
 
-    cu::deallocCPU(queue_staging);
+    void *job_mgr_cache = job_mgr + sizeof(GPUJobManager) /* + FIXME */;
 
-    return job_queue;
+    REQ_CUDA(cudaMemcpy(job_mgr_cache, job_mgr,
+                        utils::roundUp(sizeof(GPUJobManager),
+                                       std::alignment_of_v<GPUJob>) +
+                            sizeof(GPUJob),
+                        cudaMemcpyDeviceToDevice));
 }
 
-static CUgraphExec makeRunGraph(GPUJobQueue *job_sys_state,
-                                CUfunction launch_kernel,
+static CUgraphExec makeRunGraph(void **arg_config,
+                                CUfunction queue_run_kernel,
                                 CUfunction job_sys_kernel,
                                 uint32_t num_launch_blocks)
 {
-    // Assumes that the launch kernel and job system kernel have the same
-    // arguments
-    
-    std::array<char, sizeof(uint64_t)> kernel_arg_buffer;
-    memcpy(kernel_arg_buffer.data(), &job_sys_state, sizeof(uint64_t));
-
-    size_t arg_buffer_size = kernel_arg_buffer.size();
-    std::array launch_config {
-        CU_LAUNCH_PARAM_BUFFER_POINTER, (void *)kernel_arg_buffer.data(),
-        CU_LAUNCH_PARAM_BUFFER_SIZE, (void *)&arg_buffer_size,
-        CU_LAUNCH_PARAM_END,
-    };
-
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
 
     CUDA_KERNEL_NODE_PARAMS kernel_node_params {
-        .func = launch_kernel,
+        .func = queue_run_kernel,
         .gridDimX = num_launch_blocks,
         .gridDimY = 1,
         .gridDimZ = 1,
-        .blockDimX = InternalConfig::numLaunchKernelThreads,
+        .blockDimX = ICfg::numLaunchKernelThreads,
         .blockDimY = 1,
         .blockDimZ = 1,
         .sharedMemBytes = 0,
         .kernelParams = nullptr,
-        .extra = launch_config.data(),
+        .extra = arg_config,
     };
 
     CUgraphNode launch_node;
@@ -284,7 +385,7 @@ static CUgraphExec makeRunGraph(GPUJobQueue *job_sys_state,
 
     kernel_node_params.func = job_sys_kernel;
     kernel_node_params.gridDimX = 1;
-    kernel_node_params.blockDimX = InternalConfig::numJobSystemKernelThreads;
+    kernel_node_params.blockDimX = ICfg::numJobSystemKernelThreads;
 
     CUgraphNode job_sys_node;
     REQ_CU(cuGraphAddKernelNode(&job_sys_node, run_graph,
@@ -299,32 +400,26 @@ static CUgraphExec makeRunGraph(GPUJobQueue *job_sys_state,
     return run_graph_exec;
 }
 
-struct TrainingExecutor::Impl {
-    cudaStream_t cuStream;
-    gpuTrain::madrona::JobQueue *jobSystemState;
-    CUgraphExec runGraph;
-};
-
 TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
                                    const CompileConfig &compile_cfg)
     : impl_(nullptr)
 {
     auto strm = cu::makeStream();
     
-    CUfunction launch_kernel, job_system_kernel;
-    buildKernels(compile_cfg, train_cfg.gpuID,
-                 &launch_kernel, &job_system_kernel);
+    GPUKernels gpu_kernels = buildKernels(compile_cfg, train_cfg.gpuID);
 
-    auto *job_sys_state = initJobSystem(train_cfg.numWorlds, strm);
+    GPUEngineState eng_state = initEngineAndUserState(train_cfg.numWorlds,
+                                                      gpu_kernels, strm);
 
     uint32_t num_launch_blocks = utils::divideRoundUp(train_cfg.numWorlds,
-        InternalConfig::numLaunchKernelThreads);
+        ICfg::numLaunchKernelThreads);
 
-    auto run_graph = makeRunGraph(job_sys_state, launch_kernel,
-                                  job_system_kernel, num_launch_blocks);
+    auto run_graph = makeRunGraph(arg_config.data(), gpu_kernels.queueUserRun,
+                                  gpu_kernels.runJobSystem, num_launch_blocks);
 
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,
+        gpu_kernels.mod,
         job_sys_state,
         run_graph,
     });
@@ -333,6 +428,7 @@ TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
 TrainingExecutor::~TrainingExecutor()
 {
     REQ_CU(cuGraphExecDestroy(impl_->runGraph));
+    REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
 }
 

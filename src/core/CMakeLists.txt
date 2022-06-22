@@ -1,12 +1,12 @@
 set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona")
 add_library(madrona_core STATIC
+    ${INC_DIR}/fwd.hpp
     ${INC_DIR}/memory.hpp  ${INC_DIR}/memory.inl
     ${INC_DIR}/heap_array.hpp ${INC_DIR}/span.hpp
     ${INC_DIR}/utils.hpp
     ${INC_DIR}/crash.hpp crash.cpp
+    ${INC_DIR}/job.hpp ${INC_DIR}/job.inl job.cpp
     #${INC_DIR}/table.hpp ${INC_DIR}/table.inl table.cpp
-    #${INC_DIR}/fwd.hpp
-    #${INC_DIR}/job.hpp ${INC_DIR}/job.inl job.cpp
     #${INC_DIR}/hash.hpp
     #${INC_DIR}/platform_utils.hpp ${INC_DIR}/platform_utils.inl
     #    platform_utils.cpp

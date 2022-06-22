@@ -8,8 +8,15 @@ target_link_libraries(madrona_train PUBLIC
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
 
-set(NVRTC_COMPILE_FLAGS -std=c++20 -default-device -rdc=true
-    -use_fast_math -lineinfo -dopt=on)
+set(MADRONA_TRAIN_GPU_COMPILE_FLAGS
+    -std=c++20
+    -default-device
+    -rdc=true
+    -use_fast_math
+    -lineinfo
+    -dopt=on
+    -DMADRONA_TRAIN_MODE=1
+)
 
 set(GPU_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gpu)
 set(TRAIN_GPU_SOURCES
@@ -37,7 +44,7 @@ set(NVRTC_OPTIONS)
 foreach(f ${NVRTC_INCLUDE_DIRS})
     set(NVRTC_OPTIONS "${NVRTC_OPTIONS}\"-I${f}\", ")
 endforeach()
-foreach(f ${NVRTC_COMPILE_FLAGS})
+foreach(f ${MADRONA_TRAIN_GPU_COMPILE_FLAGS})
     set(NVRTC_OPTIONS "${NVRTC_OPTIONS}\"${f}\", ")
 endforeach()
 set(NVRTC_OPTIONS "${NVRTC_OPTIONS}")

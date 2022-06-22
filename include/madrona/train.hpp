@@ -13,10 +13,11 @@ struct TrainConfig {
 };
 
 struct CompileConfig {
+    const char *initFunc;
+    const char *runFunc;
+    const char *userNamespace;
     Span<const char * const> userSources;
     Span<const char * const> userCompileFlags;
-    const char *entryFunc;
-    const char *entryNamespace;
 };
 
 class TrainingExecutor {

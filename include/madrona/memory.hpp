@@ -90,6 +90,9 @@ public:
     inline void dealloc(void *ptr);
 };
 
+// FIXME:
+using InitAlloc = DefaultAlloc;
+
 }
 
 #include "memory.inl"
