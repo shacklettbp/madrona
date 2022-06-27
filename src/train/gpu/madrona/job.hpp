@@ -19,7 +19,7 @@ struct Job {
     EntryPtr fn;
     void *data;
     uint32_t numLaunches;
-    uint32_t numBytePerJob;
+    uint32_t numBytesPerJob;
 };
 
 // New types not used by the CPU implementation are hidden in the gpuTrain
@@ -28,9 +28,8 @@ namespace gpuTrain {
 
 struct JobSystemConstants {
     void *jobSystemStateAddr;
-    uint32_t queueOffset;
-    uint32_t jobsOffset;
-    uint32_t dataOffset;
+    uint32_t jobGridsOffset;
+    uint32_t jobListOffset;
     uint32_t maxJobsPerQueue;
 };
 
@@ -51,6 +50,7 @@ private:
     void markJobFinished();
 
     uint32_t grid_id_;
+    uint32_t world_id_;
 };
 
 class JobManager {
@@ -58,7 +58,7 @@ public:
     uint32_t numWaitingJobs;
     uint32_t numOutstandingJobs;
 
-    std::array<uint32_t, 4> activeGrids;
+    std::array<uint32_t, 8> activeGrids;
 };
 
 }
