@@ -15,7 +15,6 @@ namespace ICfg {
 static constexpr uint32_t maxNumJobsPerWorld = 1024;
 static constexpr uint32_t jobDataPerWorld = 65536;
 static constexpr uint32_t numJobGrids = 256;
-static constexpr uint32_t numWarpThreads = 32;
 static constexpr uint32_t numJobSystemKernelThreads = 1024;
 
 }
@@ -31,7 +30,8 @@ struct alignas(64) RunData {
 struct JobGridInfo {
     uint32_t waitJobHead;
     uint32_t waitJobTail;
-    uint32_t numWaitingJobs;
+    uint32_t waitQueueLock;
+    std::atomic_uint32_t numRunning;
     WaitData waitData;
     RunData runData;
 };
@@ -58,10 +58,22 @@ static inline Job *getBaseJobList(JobManager *mgr)
 
 static void initializeJobSystem(JobManager *mgr)
 {
-    mgr->numWaitingJobs = 0;
     mgr->numOutstandingJobs = 0;
-
     mgr->activeGrids.fill(0);
+
+    auto grids = getGridInfo(mgr);
+
+    for (int i = 0; i < (int)ICfg::numJobGrids; i++) {
+        grids[i].waitJobHead = 0;
+        grids[i].waitJobTail = 0;
+        grids[i].waitQueueLock = 0;
+        grids[i].numRunning = 0;
+    }
+}
+
+static inline void freeJobData(void *data)
+{
+    free(data);
 }
 
 static inline bool isJobReady(Job &job)
@@ -87,7 +99,7 @@ static uint32_t warpInclusiveScan(uint32_t mask, uint32_t lane_id,
 static inline uint32_t warpExclusiveScan(uint32_t mask, uint32_t lane_id,
                                          uint32_t val)
 {
-    return warpInclusiveScan(val) - val;
+    return warpInclusiveScan(mask, lane_id, val) - val;
 }
 
 static inline uint32_t getHighestSetBit(uint32_t mask)
@@ -95,11 +107,34 @@ static inline uint32_t getHighestSetBit(uint32_t mask)
     return mask == 0u ? 0u : 31u - __clz(mask);
 }
 
-static inline uint32_t getNumLowerSetBits(uint32_t mask, uint32_t idx)
+static inline uint32_t getNumHigherSetBits(uint32_t mask, uint32_t idx)
 {
-    mask >>= (32 - idx);
+    mask >>= idx + 1;
 
     return __popc(mask);
+}
+
+static inline uint32_t getNumLowerSetBits(uint32_t mask, uint32_t idx)
+{
+    mask <<= (32 - idx);
+
+    return __popc(mask);
+}
+
+static inline bool checkGEWrapped(uint32_t a, uint32_t b)
+{
+    return uint32_t(a - b) <= (1u << 31u);
+}
+
+static inline bool checkLTWrapped(uint32_t a, uint32_t b)
+{
+    return uint32_t(a - b) > (1u << 31u);
+}
+
+static inline uint32_t wrapQueueIdx(uint32_t idx, uint32_t num_elems)
+{
+    // Assumes num_elems is a power of 2
+    return idx & (num_elems - 1);
 }
 
 // Only a single thread block can run this function
@@ -117,67 +152,163 @@ static void jobLoop()
     const auto job_mgr = getJobManager();
     const auto base_job_grids = getGridInfo(job_mgr);
     const auto base_job_list = getBaseJobList(job_mgr);
-    const uint32_t max_jobs_per_queue = jobSysConsts().maxJobsPerQueue;
+    const uint32_t max_jobs_per_grid = jobSysConsts().maxJobsPerGrid;
+
+    __shared__ std::array<uint32_t, job_mgr->activeGrids.size()>
+        active_grids_tmp;
 
     cuda::barrier<cuda::thread_scope_thread> cpy_barrier;
     init(&cpy_barrier, 1);
 
-    auto findFirstReadyJob = [lane_id](JobGridInfo &run_grid, Job *job_list) {
+    auto wrapQueueIdx = [max_jobs_per_grid](uint32_t idx) -> uint32_t {
+        return wrapQueueIdx(idx, max_jobs_per_grid);
+    };
+
+    auto findFirstReadyJob = [lane_id, &wrapQueueIdx](
+        Job *job_list, uint32_t job_head, uint32_t job_tail) {
         int first_job_idx = -1;
         if (lane_id == 0) {
-            for (int job_offset = 0;
-                 job_offset < (int)run_grid.numWaitingJobs;
-                 job_offset++) {
-                int job_idx = run_grid.waitJobHead + job_offset;
-                Job &cur_job = job_list[job_idx];
+            for (uint32_t job_idx = job_head;
+                 checkLTWrapped(job_idx, job_tail); job_idx++) {
+                int wrapped_idx = (int)wrapQueueIdx(job_idx);
+                Job &cur_job = job_list[wrapped_idx];
 
                 if (isJobReady(cur_job)) {
-                    first_job_idx = job_idx;
+                    first_job_idx = wrapped_idx;
                     break;
                 }
             }
         }
 
-        __syncwarp();
-
         return __shfl_sync(FULL_MASK, first_job_idx, 0);
     };
 
+    auto getFreeGrid = [lane_id, &active_grids_tmp]() {
+        int run_grid_idx = -1;
+        if (lane_id == 0) {
+#pragma unroll
+            for (int bitfield_idx = 0;
+                 bitfield_idx < (int)active_grids_tmp.size();
+                 bitfield_idx++) {
+                uint32_t *grid_bitfield_ptr = active_grids_tmp[bitfield_idx];
+
+                uint32_t old_bitfield, set_bitfield;
+                do {
+                    old_bitfield = *grid_bitfield_ptr;
+
+                    uint32_t inverse = ~old_bitfield;
+
+                    // All grids running
+                    if (inverse == 0) {
+                        run_grid_idx = -1;
+                        break;
+                    }
+
+                    uint32_t idx = 31 - __clz(inverse);
+
+                    uint32_t mask = 1 << idx;
+
+                    set_bitfield = old_bitfield | mask;
+
+                    run_grid_idx = idx;
+                } while (atomicCAS(grid_bitfield_ptr, old_bitfield,
+                                   set_bitfield);
+
+                if (run_grid_idx != -1) {
+                    run_grid_idx = bitfield_idx * 32 + run_grid_idx;
+
+                    break;
+                }
+            }
+        }
+
+        return __shfl_sync(FULL_MASK, run_grid_idx, 0);
+    };
+
+    auto nextLoopSetup = 
+        [job_mgr, &active_grids_tmp, warp_id, lane_id]() {
+        std::atomic_thread_fence(std::memory_order_acquire);
+
+        if (warp_id == 0 && lane_id == 0) {
+            for (int i = 0; i < (int)active_grids_tmp.size(); i++) {
+                active_grids_tmp[i] = job_mgr->activeGrids[i];
+            }
+        }
+
+        __syncthreads();
+    };
+
+    nextLoopSetup();
     while (true) {
-        for (int grid_offset = 0; grid_offset < (int)grids_per_warp;
-             grid_offset++) {
-            uint32_t grid_idx = warp_id * grids_per_warp + grid_offset;
+        for (int wait_grid_offset = 0; wait_grid_offset < (int)grids_per_warp;
+             wait_grid_offset++) {
+            uint32_t wait_grid_idx =
+                warp_id * grids_per_warp + wait_grid_offset;
 
-            // FIXME: check if grid is still active, if so, skip
-
-            JobGridInfo &run_grid = base_job_grids[grid_idx];
+            JobGridInfo &wait_grid = base_job_grids[wait_grid_idx];
             Job *waiting_jobs = base_job_list +
-                grid_offset * max_jobs_per_queue;
+                grid_offset * max_jobs_per_grid;
 
-            int first_job_idx = findFirstReadyJob(run_grid, waiting_jobs);
+            uint32_t job_head = wait_grid.waitJobHead;
+            // Cache the value of job tail, and use it across the warp,
+            // it can be incremented by other threads
+            uint32_t job_tail;
+            if (lane_id == 0) {
+                job_tail = wait_grid.waitJobTail;
+            }
+            job_tail = __shfl_sync(FULL_MASK, job_tail, 0);
 
+            int first_job_idx =
+                findFirstReadyJob(wait_grid, job_head, job_tail);
             if (first_job_idx == -1) {
                 continue;
             }
 
+            int run_grid_idx = getFreeGrid();
+            if (run_grid_idx == -1) {
+                break;
+            }
+
+            JobGridInfo &run_grid = base_job_grids[run_grid_idx];
+
             Job::EntryPtr first_ptr = waiting_jobs[first_job_idx].fn;
+            auto isJobMergable = [first_ptr](Job &job) {
+                return job.fn == first_ptr && isJobReady(job);
+            };
+
             uint32_t num_bytes_per_job =
                 waiting_jobs[first_job_idx].numBytesPerJob;
 
             uint32_t num_job_launches = 0;
-            uint32_t base_wait_coalesce_idx = first_job_idx;
 
-            int num_mergeable_jobs = run_grid.numWaitingJobs - first_job_idx;
-
-            for (int job_offset = 0; job_offset < num_mergeable_jobs;
+            // Could start from the unwrapped version of first_job_idx,
+            // but would need to change findFirstReadyJob to return
+            // a separate failure boolean
+            for (uint32_t job_offset = job_head;
+                 /* Termination handled in loop */;
                  job_offset += ICfg::numWarpThreads) {
-                int job_idx = first_job_idx + job_offset + lane_id;
-                Job cur_job = waiting_jobs[job_idx];
+                uint32_t job_idx = job_offset + lane_id;
 
-                bool merge_job = cur_job.fn == first_ptr && isJobReady(cur_job);
+                bool inbounds = checkLTWrapped(job_idx, job_tail);
+                uint32_t inbounds_mask = __ballot_sync(FULL_MASK, inbounds);
 
-                uint32_t merge_mask = __ballot_sync(FULL_MASK, merge_job);
-                uint32_t coalesce_mask = ~merge_mask;
+                // Warp is fully out of bounds
+                if (inbounds_mask == 0) {
+                    break;
+                }
+
+                // Note that this has to continue, so that the next iteration
+                // of the loop (guaranteed to terminate) won't deadlock
+                // due to the use of FULL_MASK
+                if (!inbounds) {
+                    continue;
+                }
+
+                Job cur_job = waiting_jobs[wrapQueueIdx(job_idx)];
+
+                bool merge_job = isJobMergable(cur_job);
+
+                uint32_t merge_mask = __ballot_sync(inbounds_mask, merge_job);
 
                 // Copy job data into grid's run buffer
                 if (merge_job) {
@@ -186,8 +317,8 @@ static void jobLoop()
                         warpExclusiveScan(merge_mask, lane_id,
                                           cur_num_launches);
 
-                    cuda::memcpy_async(
-                        dst + num_prior_launches * num_bytes_per_job,
+                    cuda::memcpy_async(run_grid.runData.buf + 
+                            num_prior_launches * num_bytes_per_job,
                         cur_job.data, cur_num_launches * num_bytes_per_job,
                         cpy_barrier);
 
@@ -196,28 +327,9 @@ static void jobLoop()
                 } 
 
                 // Get current running total of jobs merged together for launch
-                __syncwarp();
-
                 uint32_t top_merge_thread = getHighestSetBit(merge_mask);
-                num_job_launches = __shfl_sync(FULL_MASK,
+                num_job_launches = __shfl_sync(inbounds_mask,
                     num_job_launches, top_merge_thread);
-
-                // Coalesce jobs that won't be launched to make the waiting
-                // list contiguous
-                if (!merge_job) {
-                    int coalesce_idx = base_wait_coalesce_idx +
-                        getNumLowerSetBits(coalesce_mask, lane_id);
-
-                    if (coalesce_idx != job_idx) {
-                        waiting_jobs[coalesce_idx] = cur_job;
-                    }
-
-                    base_wait_coalesce_idx = coalesce_idx + 1;
-                }
-
-                uint32_t top_coalesce_thread = getHighestSetBit(coalesce_mask);
-                base_wait_coalesce_idx = __shfl_sync(FULL_MASK,
-                    base_wait_coalesce_idx, top_coalesce_thread);
             }
 
             // Wait for all the async copies
@@ -225,27 +337,84 @@ static void jobLoop()
 
             __syncwarp();
 
-            // FIXME: synchronization with trying to queue into this grid?
-            if (lane_id == 0) {
-                run_grid.numWaitingJobs -= num_job_launches;
+            uint32_t base_wait_coalesce_idx = job_tail - 1u;
+
+            // Free job data for jobs that have been copied into the run
+            // data block, coalesce waiting job list
+            // Unfortunately, this loop is in reverse, because the list needs
+            // to be coalesced into the tail
+            for (uint32_t job_offset = job_tail - 1u;
+                 /* Termination handled in loop */;
+                 job_offset -= ICfg::numWarpThreads) {
+
+                uint32_t job_idx = job_offset - lane_id;
+
+                bool inbounds = checkGEWrapped(job_offset, job_head);
+                uint32_t inbounds_mask = __ballot_sync(FULL_MASK, inbounds);
+
+                if (inbounds_mask == 0) {
+                    break;
+                }
+
+                if (!inbounds) {
+                    continue;
+                }
+
+                Job cur_job = waiting_jobs[wrapQueueIdx(job_idx)];
+
+                bool mergable = isJobMergable(cur_job);
+
+                if (mergable) {
+                    freeJobData(cur_job);
+                }
+
+                // The sync here also ensures all threads are done
+                // using cur_job before any pointers are overwritten
+                // when coalescing the list
+                uint32_t coalesce_mask =
+                    __ballot_sync(inbounds_mask, !mergable);
+
+                // Coalesce jobs that won't be launched to make the waiting
+                // list contiguous
+                if (!mergable) {
+                    // Lower threads in the warp are farther ahead in the
+                    // array due to reading backwards
+                    uint32_t coalesce_idx = base_wait_coalesce_idx -
+                        getNumLowerSetBits(coalesce_mask, lane_id);
+
+                    if (coalesce_idx != job_idx) {
+                        waiting_jobs[wrapQueueIdx(coalesce_idx)] = cur_job;
+                    }
+
+                    base_wait_coalesce_idx = coalesce_idx - 1u;
+                }
+
+                uint32_t top_coalesce_thread = getHighestSetBit(coalesce_mask);
+                base_wait_coalesce_idx = __shfl_sync(inbounds_mask,
+                    base_wait_coalesce_idx, top_coalesce_thread);
             }
 
+            if (lane_id == 0) {
+                wait_grid.waitJobHead = base_wait_coalesce_idx;
+            }
+
+            std::atomic_thread_fence(std::memory_order_release);
+
+            if (lane_id == 0) {
+                uint32_t num_blocks = utils::divideRoundUp(num_job_launches,
+                    ICfg::numJobLaunchKernelThreads);
+
+                first_ptr<<<num_blocks, ICfg::numJobLaunchKernelThreads>>>(
+                    this, run_grid.runData.buf, num_job_launches);
+            }
         }
 
-        uint32_t cur_num_jobs = job_mgr->numWaitingJobs;
+        __nanosleep(500);
 
-        if (thread_pos < cur_num_jobs) {
-            Job job = job_queue[job_mgr->jobHead + thread_pos];
-            job.fn<<<1, 1>>>(this, job.data);
-        }
-
-        __syncthreads();
-
-        if (thread_pos == 0) {
-            atomicAdd(&job_mgr->jobHead, cur_num_jobs);
-            atomicSub(&job_mgr->numWaitingJobs, cur_num_jobs);
-            atomicAdd(&job_mgr->numOutstandingJobs, cur_num_jobs);
-        }
+        // Call this function at the end of the loop, in order to use
+        // the same __syncthreads / acquire call for reading the activeGrid
+        // bitfields and checking numOutstandingJobs
+        nextLoopSetup();
 
         if (job_mgr->numOutstandingJobs == 0) {
             break;
@@ -253,37 +422,136 @@ static void jobLoop()
     }
 }
 
-void Context::queueJob(Job job)
+uint32_t Context::computeWaveInfo()
 {
+    uint32_t active = __activemask();
+    uint32_t num_active = __popc(active);
+
+    uint32_t sel_idx = getHighestSetBit(active);
+    int coalesced_idx = getNumLowerSetBits(coalesce_mask, lane_id_);
+
+    return WaveInfo {
+        .activeMask = active,
+        .numActive = num_active,
+        .leaderLane = sel_idx,
+        .coalescedIDX = coalesced_idx,
+    };
+}
+
+void * Context::allocJob(uint32_t total_bytes)
+{
+    return malloc(total_bytes);
+}
+
+void Context::queueJob(Job::EntryPtr func, gpuTrain::JobBase *data,
+                       uint32_t num_launches, uint32_t num_bytes_per_job)
+{
+    Job job {
+        .fn = func,
+        .data = data,
+        .numLaunches = num_launches,
+        .numBytesPerJob = num_bytes_per_job,
+    };
+
     auto job_mgr = getJobManager();
 
+    const auto base_job_grids = getGridInfo(job_mgr);
+    const auto base_job_list = getBaseJobList(job_mgr);
+    const uint32_t max_jobs_per_grid = jobSysConsts().maxJobsPerGrid;
 
+    JobGridInfo &cur_grid = base_job_grids[grid_id_];
+    Job *job_list = base_job_list + grid_id_ * max_jobs_per_grid;
 
-    atomicAdd(&job_mgr->numWaitingJobs, 1u);
+    // Get lock
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    while (atomicCAS(&cur_grid.waitQueueLock, 0, 1) != 0) {}
+
+    uint32_t cur_job_pos = cur_grid.waitJobTail;
+    job_list[wrapQueueIdx(cur_job_pos, max_jobs_per_grid)] = job;
+
+    cur_grid.waitJobTail++;
+
+    cur_grid.waitQueueLock = 0;
+    
+    atomicAdd(&job_mgr->numOutstandingJobs, num_launches);
+
+    std::atomic_thread_fence(std::memory_order_release);
 }
 
-void Context::markJobFinished()
+void Context::markJobFinished(uint32_t num_jobs)
 {
+    __syncthreads();
+
+    if (threadIdx.x != 0) return;
+
     auto job_mgr = getJobManager();
-    atomicSub(&job_mgr->numOutstandingJobs, 1u);
+
+    JobGridInfo &cur_grid = getGridInfo(job_mgr)[grid_id_];
+
+    atomicSub(&job_mgr->numOutstandingJobs, num_jobs);
+
+    uint32_t prev_running = cur_grid.numRunning.fetch_sub(num_jobs,
+        std::memory_order_acq_rel);
+
+    if (prev_running == num_jobs) {
+        uint32_t grid_bitfield = grid_id_ / 32;
+        uint32_t grid_bit = grid_id_ % 32;
+        uint32_t mask = ~(1u << grid_bit);
+
+        atomicAnd(&job_mgr->activeGrids[grid_bitfield], mask);
+    }
+
+    std::atomic_thread_fence(std::memory_order_release);
 }
 
-}
-}
-
-extern "C" __global__ void madronaTrainComputeJobSystemConstants(
-    uint32_t num_worlds, size_t *out_buffer_size, uint32_t *out_buffer
-    madrona::gpuTrain::jobSysConstants *out_constants)
+static inline uint32_t computeMaxNumJobs(uint32_t num_worlds)
 {
-    uint32_t max_num_jobs = ICfg::maxNumJobsPerWorld * num_worlds;
-    out_constants.maxNumJobs = max_num_jobs;
+    // FIXME: scaling linearly like this probably doesn't make sense
+    return ICfg::maxNumJobsPerWorld * num_worlds;
+}
+
+}
+}
+
+extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
+    uint32_t num_worlds,
+    madrona::gpuTrain::JobSystemConstants *out_constants,
+    size_t *job_system_buffer_size)
+{
+    uint32_t max_num_jobs_per_grid =
+        madrona::gpuTrain::computeMaxNumJobs(num_worlds);
+
+    size_t total_bytes = sizeof(JobManager);
+
+    uint64_t grid_offset = madrona::utils::roundUp(total_bytes,
+        std::alignment_of_v<JobGridInfo>);
+
+    total_bytes = grid_offset + sizeof(JobGridInfo) * ICfg::numJobGrids;
+
+    uint64_t wait_job_offset = madrona::utils::roundUp(total_bytes,
+        std::alignment_of_v<Job>);
+
+    uint64_t num_job_bytes = 
+        sizeof(Job) * ICfg::numJobGrids * max_num_jobs_per_grid;
+
+    total_bytes = wait_job_offset + num_job_bytes;
+
+    *out_constants = JobSystemConstants {
+        .jobSystemStateAddr = nullptr,
+        .jobGridsOffset = grid_offset,
+        .jobListOffset = wait_job_offset,
+        .maxJobsPerGrid = max_num_jobs_per_grid,
+    };
+
+    *job_system_buffer_size = total_bytes;
 }
 
 extern "C" __global__  void madronaTrainInitializeJobSystemKernel()
 {
     auto job_mgr = madrona::gpuTrain::getJobManager();
     new (job_mgr) JobManager();
-    madrona::gpUTrain::initializeJobSystem(job_mgr);
+    madrona::gpuTrain::initializeJobSystem(job_mgr);
 }
 
 extern "C" __global__ void madronaTrainJobSystemKernel()
