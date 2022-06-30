@@ -7,6 +7,15 @@
 namespace madrona {
 namespace utils {
 
+#ifdef MADRONA_TRAIN_MODE
+
+inline int __builtin_clz(int v)
+{
+    return __clz(v);
+}
+
+#endif
+
 template <typename T>
 constexpr inline T divideRoundUp(T a, T b)
 {

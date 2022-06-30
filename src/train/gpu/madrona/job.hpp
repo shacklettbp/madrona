@@ -41,7 +41,7 @@ struct JobContainer : JobBase {
 }
 
 struct Job {
-    using EntryPtr = void (*)(Context &, gpuTrain::JobBase *,
+    using EntryPtr = void (*)(gpuTrain::JobBase *,
                               uint32_t num_launches, uint32_t grid_id);
     EntryPtr fn;
     gpuTrain::JobBase *data;
@@ -55,6 +55,8 @@ public:
 
     template <typename Fn>
     inline void queueJob(Fn &&fn);
+
+    void markJobFinished(uint32_t num_jobs);
 
 private:
     struct WaveInfo {
@@ -71,13 +73,6 @@ private:
     void queueJob(Job::EntryPtr func, gpuTrain::JobBase *data,
                   uint32_t num_launches, uint32_t num_bytes_per_job);
 
-    template <typename Fn>
-    static CU_GLOBAL void jobEntry(gpuTrain::JobBase *job_data,
-                                   uint32_t num_launches,
-                                   uint32_t grid_id);
-
-    void markJobFinished(uint32_t num_jobs);
-
     uint32_t grid_id_;
     uint32_t world_id_;
     uint32_t lane_id_;
@@ -86,8 +81,7 @@ private:
 class JobManager {
 public:
     uint32_t numOutstandingJobs;
-
-    std::array<uint32_t, 8> activeGrids;
+    uint32_t activeGrids[8];
 };
 
 }

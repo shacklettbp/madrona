@@ -1,7 +1,15 @@
+#include <atomic>
+#include <array>
+#include <cuda/barrier>
+
+namespace std {
+
+using namespace cuda::std;
+
+}
+
 #include <madrona/job.hpp>
 #include <madrona/utils.hpp>
-
-#include <cuda/barrier>
 
 extern "C" {
 __constant__ madrona::gpuTrain::JobSystemConstants madronaTrainJobSysConstants;
@@ -16,6 +24,7 @@ static constexpr uint32_t maxNumJobsPerWorld = 1024;
 static constexpr uint32_t jobDataPerWorld = 65536;
 static constexpr uint32_t numJobGrids = 256;
 static constexpr uint32_t numJobSystemKernelThreads = 1024;
+static constexpr uint32_t allActive = ~0u;
 
 }
 
@@ -59,7 +68,10 @@ static inline Job *getBaseJobList(JobManager *mgr)
 static void initializeJobSystem(JobManager *mgr)
 {
     mgr->numOutstandingJobs = 0;
-    mgr->activeGrids.fill(0);
+
+    for (int i = 0; i < 8; i++) {
+        mgr->activeGrids[i] = 0;
+    }
 
     auto grids = getGridInfo(mgr);
 
@@ -149,28 +161,25 @@ static void jobLoop()
     constexpr uint32_t grids_per_warp =
         ICfg::numJobGrids / total_num_warps;
 
-    const auto job_mgr = getJobManager();
-    const auto base_job_grids = getGridInfo(job_mgr);
-    const auto base_job_list = getBaseJobList(job_mgr);
+    auto job_mgr = getJobManager();
+    auto base_job_grids = getGridInfo(job_mgr);
+    auto base_job_list = getBaseJobList(job_mgr);
+
     const uint32_t max_jobs_per_grid = jobSysConsts().maxJobsPerGrid;
 
-    __shared__ std::array<uint32_t, job_mgr->activeGrids.size()>
-        active_grids_tmp;
+    static __shared__ uint32_t active_grids_tmp[8];
 
     cuda::barrier<cuda::thread_scope_thread> cpy_barrier;
     init(&cpy_barrier, 1);
 
-    auto wrapQueueIdx = [max_jobs_per_grid](uint32_t idx) -> uint32_t {
-        return wrapQueueIdx(idx, max_jobs_per_grid);
-    };
-
-    auto findFirstReadyJob = [lane_id, &wrapQueueIdx](
+    auto findFirstReadyJob = [lane_id, max_jobs_per_grid](
         Job *job_list, uint32_t job_head, uint32_t job_tail) {
         int first_job_idx = -1;
         if (lane_id == 0) {
             for (uint32_t job_idx = job_head;
                  checkLTWrapped(job_idx, job_tail); job_idx++) {
-                int wrapped_idx = (int)wrapQueueIdx(job_idx);
+                int wrapped_idx =
+                    (int)wrapQueueIdx(job_idx, max_jobs_per_grid);
                 Job &cur_job = job_list[wrapped_idx];
 
                 if (isJobReady(cur_job)) {
@@ -180,17 +189,15 @@ static void jobLoop()
             }
         }
 
-        return __shfl_sync(FULL_MASK, first_job_idx, 0);
+        return __shfl_sync(ICfg::allActive, first_job_idx, 0);
     };
 
-    auto getFreeGrid = [lane_id, &active_grids_tmp]() {
+    auto getFreeGrid = [lane_id]() {
         int run_grid_idx = -1;
         if (lane_id == 0) {
 #pragma unroll
-            for (int bitfield_idx = 0;
-                 bitfield_idx < (int)active_grids_tmp.size();
-                 bitfield_idx++) {
-                uint32_t *grid_bitfield_ptr = active_grids_tmp[bitfield_idx];
+            for (int bitfield_idx = 0; bitfield_idx < 8; bitfield_idx++) {
+                uint32_t *grid_bitfield_ptr = &active_grids_tmp[bitfield_idx];
 
                 uint32_t old_bitfield, set_bitfield;
                 do {
@@ -212,7 +219,7 @@ static void jobLoop()
 
                     run_grid_idx = idx;
                 } while (atomicCAS(grid_bitfield_ptr, old_bitfield,
-                                   set_bitfield);
+                                   set_bitfield));
 
                 if (run_grid_idx != -1) {
                     run_grid_idx = bitfield_idx * 32 + run_grid_idx;
@@ -222,15 +229,14 @@ static void jobLoop()
             }
         }
 
-        return __shfl_sync(FULL_MASK, run_grid_idx, 0);
+        return __shfl_sync(ICfg::allActive, run_grid_idx, 0);
     };
 
-    auto nextLoopSetup = 
-        [job_mgr, &active_grids_tmp, warp_id, lane_id]() {
+    auto nextLoopSetup = [job_mgr, warp_id, lane_id]() {
         std::atomic_thread_fence(std::memory_order_acquire);
 
         if (warp_id == 0 && lane_id == 0) {
-            for (int i = 0; i < (int)active_grids_tmp.size(); i++) {
+            for (int i = 0; i < 8; i++) {
                 active_grids_tmp[i] = job_mgr->activeGrids[i];
             }
         }
@@ -247,7 +253,7 @@ static void jobLoop()
 
             JobGridInfo &wait_grid = base_job_grids[wait_grid_idx];
             Job *waiting_jobs = base_job_list +
-                grid_offset * max_jobs_per_grid;
+                wait_grid_offset * max_jobs_per_grid;
 
             uint32_t job_head = wait_grid.waitJobHead;
             // Cache the value of job tail, and use it across the warp,
@@ -256,10 +262,10 @@ static void jobLoop()
             if (lane_id == 0) {
                 job_tail = wait_grid.waitJobTail;
             }
-            job_tail = __shfl_sync(FULL_MASK, job_tail, 0);
+            job_tail = __shfl_sync(ICfg::allActive, job_tail, 0);
 
             int first_job_idx =
-                findFirstReadyJob(wait_grid, job_head, job_tail);
+                findFirstReadyJob(waiting_jobs, job_head, job_tail);
             if (first_job_idx == -1) {
                 continue;
             }
@@ -290,7 +296,8 @@ static void jobLoop()
                 uint32_t job_idx = job_offset + lane_id;
 
                 bool inbounds = checkLTWrapped(job_idx, job_tail);
-                uint32_t inbounds_mask = __ballot_sync(FULL_MASK, inbounds);
+                uint32_t inbounds_mask =
+                    __ballot_sync(ICfg::allActive, inbounds);
 
                 // Warp is fully out of bounds
                 if (inbounds_mask == 0) {
@@ -299,12 +306,12 @@ static void jobLoop()
 
                 // Note that this has to continue, so that the next iteration
                 // of the loop (guaranteed to terminate) won't deadlock
-                // due to the use of FULL_MASK
+                // due to the use of an all active mask
                 if (!inbounds) {
                     continue;
                 }
 
-                Job cur_job = waiting_jobs[wrapQueueIdx(job_idx)];
+                Job cur_job = waiting_jobs[wrapQueueIdx(job_idx, max_jobs_per_grid)];
 
                 bool merge_job = isJobMergable(cur_job);
 
@@ -350,7 +357,8 @@ static void jobLoop()
                 uint32_t job_idx = job_offset - lane_id;
 
                 bool inbounds = checkGEWrapped(job_offset, job_head);
-                uint32_t inbounds_mask = __ballot_sync(FULL_MASK, inbounds);
+                uint32_t inbounds_mask =
+                    __ballot_sync(ICfg::allActive, inbounds);
 
                 if (inbounds_mask == 0) {
                     break;
@@ -360,12 +368,13 @@ static void jobLoop()
                     continue;
                 }
 
-                Job cur_job = waiting_jobs[wrapQueueIdx(job_idx)];
+                Job cur_job =
+                    waiting_jobs[wrapQueueIdx(job_idx, max_jobs_per_grid)];
 
                 bool mergable = isJobMergable(cur_job);
 
                 if (mergable) {
-                    freeJobData(cur_job);
+                    freeJobData(cur_job.data);
                 }
 
                 // The sync here also ensures all threads are done
@@ -383,7 +392,9 @@ static void jobLoop()
                         getNumLowerSetBits(coalesce_mask, lane_id);
 
                     if (coalesce_idx != job_idx) {
-                        waiting_jobs[wrapQueueIdx(coalesce_idx)] = cur_job;
+                        int wrapped_coalesce_idx =
+                            wrapQueueIdx(coalesce_idx, max_jobs_per_grid);
+                        waiting_jobs[wrapped_coalesce_idx] = cur_job;
                     }
 
                     base_wait_coalesce_idx = coalesce_idx - 1u;
@@ -405,7 +416,8 @@ static void jobLoop()
                     ICfg::numJobLaunchKernelThreads);
 
                 first_ptr<<<num_blocks, ICfg::numJobLaunchKernelThreads>>>(
-                    this, run_grid.runData.buf, num_job_launches);
+                    (JobBase *)run_grid.runData.buf, num_job_launches,
+                    run_grid_idx);
             }
         }
 
@@ -422,13 +434,23 @@ static void jobLoop()
     }
 }
 
-uint32_t Context::computeWaveInfo()
+static inline uint32_t computeMaxNumJobs(uint32_t num_worlds)
 {
+    // FIXME: scaling linearly like this probably doesn't make sense
+    return ICfg::maxNumJobsPerWorld * num_worlds;
+}
+
+}
+
+Context::WaveInfo Context::computeWaveInfo()
+{
+    using namespace gpuTrain;
+
     uint32_t active = __activemask();
     uint32_t num_active = __popc(active);
 
     uint32_t sel_idx = getHighestSetBit(active);
-    int coalesced_idx = getNumLowerSetBits(coalesce_mask, lane_id_);
+    uint32_t coalesced_idx = getNumLowerSetBits(active, lane_id_);
 
     return WaveInfo {
         .activeMask = active,
@@ -446,6 +468,8 @@ void * Context::allocJob(uint32_t total_bytes)
 void Context::queueJob(Job::EntryPtr func, gpuTrain::JobBase *data,
                        uint32_t num_launches, uint32_t num_bytes_per_job)
 {
+    using namespace gpuTrain;
+
     Job job {
         .fn = func,
         .data = data,
@@ -481,6 +505,8 @@ void Context::queueJob(Job::EntryPtr func, gpuTrain::JobBase *data,
 
 void Context::markJobFinished(uint32_t num_jobs)
 {
+    using namespace gpuTrain;
+
     __syncthreads();
 
     if (threadIdx.x != 0) return;
@@ -505,13 +531,6 @@ void Context::markJobFinished(uint32_t num_jobs)
     std::atomic_thread_fence(std::memory_order_release);
 }
 
-static inline uint32_t computeMaxNumJobs(uint32_t num_worlds)
-{
-    // FIXME: scaling linearly like this probably doesn't make sense
-    return ICfg::maxNumJobsPerWorld * num_worlds;
-}
-
-}
 }
 
 extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
@@ -519,12 +538,15 @@ extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
     madrona::gpuTrain::JobSystemConstants *out_constants,
     size_t *job_system_buffer_size)
 {
+    using namespace madrona;
+    using namespace madrona::gpuTrain;
+
     uint32_t max_num_jobs_per_grid =
         madrona::gpuTrain::computeMaxNumJobs(num_worlds);
 
     size_t total_bytes = sizeof(JobManager);
 
-    uint64_t grid_offset = madrona::utils::roundUp(total_bytes,
+    uint64_t grid_offset = utils::roundUp(total_bytes,
         std::alignment_of_v<JobGridInfo>);
 
     total_bytes = grid_offset + sizeof(JobGridInfo) * ICfg::numJobGrids;
@@ -539,8 +561,8 @@ extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
 
     *out_constants = JobSystemConstants {
         .jobSystemStateAddr = nullptr,
-        .jobGridsOffset = grid_offset,
-        .jobListOffset = wait_job_offset,
+        .jobGridsOffset = (uint32_t)grid_offset,
+        .jobListOffset = (uint32_t)wait_job_offset,
         .maxJobsPerGrid = max_num_jobs_per_grid,
     };
 
@@ -549,12 +571,15 @@ extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
 
 extern "C" __global__  void madronaTrainInitializeJobSystemKernel()
 {
-    auto job_mgr = madrona::gpuTrain::getJobManager();
+    using namespace madrona;
+    using namespace madrona::gpuTrain;
+
+    auto job_mgr = getJobManager();
     new (job_mgr) JobManager();
-    madrona::gpuTrain::initializeJobSystem(job_mgr);
+    initializeJobSystem(job_mgr);
 }
 
 extern "C" __global__ void madronaTrainJobSystemKernel()
 {
-    madrona::gpuTrain::jobLoop()
+    madrona::gpuTrain::jobLoop();
 }

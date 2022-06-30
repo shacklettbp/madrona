@@ -64,7 +64,7 @@ extern "C" __global__ void madronaTrainQueueUserInitKernel(uint32_t num_worlds)
     
     if (invocation_idx >= num_worlds) return;
 
-    uint32_t lane_id = threadIdx.x % ICfg::numWarpThreads;
+    uint32_t lane_id = threadIdx.x %% madrona::gpuTrain::ICfg::numWarpThreads;
 
     madrona::Context ctx(0, invocation_idx, lane_id);
     ctx.queueJob([](madrona::Context &ctx) {
@@ -78,7 +78,7 @@ extern "C" __global__ void madronaTrainQueueUserRunKernel(uint32_t num_worlds)
     
     if (invocation_idx >= num_worlds) return;
 
-    uint32_t lane_id = threadIdx.x % ICfg::numWarpThreads;
+    uint32_t lane_id = threadIdx.x %% madrona::gpuTrain::ICfg::numWarpThreads;
 
     madrona::Context ctx(0, invocation_idx, lane_id);
     ctx.queueJob([](madrona::Context &ctx) {
@@ -228,13 +228,15 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     HeapArray<char> entry_code =
         makeEntryCode(cfg.initFunc, cfg.runFunc, cfg.userNamespace);
 
+    printf("%s\n", entry_code.data());
+
     GPUKernels gpu_kernels;
     gpu_kernels.mod = compileCode(all_cpp_files.data(),
         all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
         entry_code.data());
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeJobSystemConsts,
-        gpu_kernels.mod, "madronaTrainInitializeJobSystemConstantsKernel"));
+        gpu_kernels.mod, "madronaTrainComputeJobSystemConstantsKernel"));
     REQ_CU(cuModuleGetFunction(&gpu_kernels.initJobSystem, gpu_kernels.mod,
                                "madronaTrainInitializeJobSystemKernel"));
     REQ_CU(cuModuleGetFunction(&gpu_kernels.runJobSystem, gpu_kernels.mod,
@@ -280,59 +282,76 @@ JobQueue *initJobSystem(cudaStream_t strm, Fn &&fn)
 template <typename ...Ts>
 HeapArray<void *> makeKernelArgBuffer(Ts ...args)
 {
-    uint32_t num_arg_bytes = 0;
-    auto incrementArgSize = [&num_arg_bytes](auto v) {
-        using T = decltype(v);
-        num_arg_bytes = utils::roundUp(num_arg_bytes,
-                                       (uint32_t)std::alignment_of_v<T>);
-        num_arg_bytes += sizeof(T);
-    };
+    if constexpr (sizeof...(args) == 0) {
+        HeapArray<void *> arg_buffer(6);
+        arg_buffer[0] = (void *)uintptr_t(0);
+        arg_buffer[1] = CU_LAUNCH_PARAM_BUFFER_POINTER;
+        arg_buffer[2] = nullptr;
+        arg_buffer[3] = CU_LAUNCH_PARAM_BUFFER_SIZE;
+        arg_buffer[4] = &arg_buffer[0];
+        arg_buffer[5] = CU_LAUNCH_PARAM_END;
 
-    ( incrementArgSize(args), ... );
+        return arg_buffer;
+    } else {
+        uint32_t num_arg_bytes = 0;
+        auto incrementArgSize = [&num_arg_bytes](auto v) {
+            using T = decltype(v);
+            num_arg_bytes = utils::roundUp(num_arg_bytes,
+                                           (uint32_t)std::alignment_of_v<T>);
+            num_arg_bytes += sizeof(T);
+        };
 
-    uint32_t arg0_alignment = ( std::alignment_of_v<decltype(args)>, ... );
+        ( incrementArgSize(args), ... );
 
-    uint32_t total_buf_size = sizeof(void *) * 5;
-    uint32_t arg_size_ptr_offset =
-        utils::roundUp(total_buf_size, (uint32_t)std::alignment_of_v<size_t>);
+        auto getArg0Align = [](auto arg0, auto ...) {
+            return std::alignment_of_v<decltype(arg0)>;
+        };
 
-    total_buf_size = arg_size_ptr_offset + sizeof(size_t);
+        uint32_t arg0_alignment = getArg0Align(args...);
 
-    uint32_t arg_ptr_offset = utils::roundUp(total_buf_size, arg0_alignment);
+        uint32_t total_buf_size = sizeof(void *) * 5;
+        uint32_t arg_size_ptr_offset = utils::roundUp(total_buf_size,
+            (uint32_t)std::alignment_of_v<size_t>);
 
-    total_buf_size = arg_ptr_offset + num_arg_bytes;
+        total_buf_size = arg_size_ptr_offset + sizeof(size_t);
 
-    HeapArray<void *> arg_buffer(utils::divideRoundUp(
-            total_buf_size, (uint32_t)sizeof(void *)));
+        uint32_t arg_ptr_offset =
+            utils::roundUp(total_buf_size, arg0_alignment);
 
-    size_t *arg_size_start = (size_t *)(
-        (char *)arg_buffer.data() + arg_size_ptr_offset);
+        total_buf_size = arg_ptr_offset + num_arg_bytes;
 
-    new (arg_size_start) size_t(num_arg_bytes);
+        HeapArray<void *> arg_buffer(utils::divideRoundUp(
+                total_buf_size, (uint32_t)sizeof(void *)));
 
-    void *arg_start = (char *)arg_buffer.data() + arg_ptr_offset;
+        size_t *arg_size_start = (size_t *)(
+            (char *)arg_buffer.data() + arg_size_ptr_offset);
 
-    uint32_t cur_arg_offset = 0;
-    auto copyArgs = [arg_start, &cur_arg_offset](auto v) {
-        using T = decltype(v);
+        new (arg_size_start) size_t(num_arg_bytes);
 
-        cur_arg_offset =
-            utils::roundUp(cur_arg_offset, (uint32_t)std::alignment_of_v<T>);
+        void *arg_start = (char *)arg_buffer.data() + arg_ptr_offset;
 
-        memcpy((char *)arg_start + cur_arg_offset, &v, sizeof(T));
+        uint32_t cur_arg_offset = 0;
+        auto copyArgs = [arg_start, &cur_arg_offset](auto v) {
+            using T = decltype(v);
 
-        cur_arg_offset += sizeof(T);
-    };
+            cur_arg_offset = utils::roundUp(cur_arg_offset,
+                                            (uint32_t)std::alignment_of_v<T>);
 
-    ( copyArgs(args), ... );
+            memcpy((char *)arg_start + cur_arg_offset, &v, sizeof(T));
 
-    arg_buffer[0] = CU_LAUNCH_PARAM_BUFFER_POINTER;
-    arg_buffer[1] = arg_start;
-    arg_buffer[2] = CU_LAUNCH_PARAM_BUFFER_SIZE;
-    arg_buffer[3] = arg_size_start;
-    arg_buffer[4] = CU_LAUNCH_PARAM_END;
+            cur_arg_offset += sizeof(T);
+        };
 
-    return arg_buffer;
+        ( copyArgs(args), ... );
+
+        arg_buffer[0] = CU_LAUNCH_PARAM_BUFFER_POINTER;
+        arg_buffer[1] = arg_start;
+        arg_buffer[2] = CU_LAUNCH_PARAM_BUFFER_SIZE;
+        arg_buffer[3] = arg_size_start;
+        arg_buffer[4] = CU_LAUNCH_PARAM_END;
+
+        return arg_buffer;
+    }
 }
 
 static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
@@ -343,6 +362,8 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
                                uint32_t num_threads,
                                HeapArray<void *> &args) {
+        printf("%u %u\n", num_blocks, num_threads);
+
         REQ_CU(cuLaunchKernel(f, num_blocks, 1, 1, num_threads, 1, 1,
                               0, strm, nullptr, args.data()));
     };
@@ -351,12 +372,11 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
         sizeof(GPUJobSystemConstants));
 
     auto job_sys_size_readback = (size_t *)cu::allocReadback(
-        sizeof(size_t) * 2);
+        sizeof(size_t));
 
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    job_consts_readback,
-                                                   job_sys_size_readback,
-                                                   job_sys_size_readback + 1);
+                                                   job_sys_size_readback);
 
     auto queue_args = makeKernelArgBuffer(num_worlds);
 
@@ -380,8 +400,8 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
 
     launchKernel(gpu_kernels.initJobSystem, 1, 1, no_args);
     
-    uint32_t num_queue_blocks = divideRoundUp(num_worlds,
-                                              ICfg::numInitQueueThreads);
+    uint32_t num_queue_blocks =
+        utils::divideRoundUp(num_worlds, ICfg::numInitQueueThreads);
 
     launchKernel(gpu_kernels.queueUserInit, num_queue_blocks,
                  ICfg::numInitQueueThreads, queue_args); 
@@ -390,6 +410,10 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
                  ICfg::numJobSystemKernelThreads, no_args);
 
     REQ_CUDA(cudaStreamSynchronize(strm));
+
+    return GPUEngineState {
+        job_mgr,
+    };
 }
 
 static CUgraphExec makeRunGraph(CUfunction queue_run_kernel,
