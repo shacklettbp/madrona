@@ -253,7 +253,7 @@ static void jobLoop()
 
             JobGridInfo &wait_grid = base_job_grids[wait_grid_idx];
             Job *waiting_jobs = base_job_list +
-                wait_grid_offset * max_jobs_per_grid;
+                wait_grid_idx * max_jobs_per_grid;
 
             uint32_t job_head = wait_grid.waitJobHead;
             // Cache the value of job tail, and use it across the warp,
@@ -330,13 +330,13 @@ static void jobLoop()
                         cpy_barrier);
 
                     num_job_launches = num_prior_launches + cur_num_launches;
-
                 } 
 
                 // Get current running total of jobs merged together for launch
                 uint32_t top_merge_thread = getHighestSetBit(merge_mask);
                 num_job_launches = __shfl_sync(inbounds_mask,
                     num_job_launches, top_merge_thread);
+
             }
 
             // Wait for all the async copies
@@ -356,7 +356,7 @@ static void jobLoop()
 
                 uint32_t job_idx = job_offset - lane_id;
 
-                bool inbounds = checkGEWrapped(job_offset, job_head);
+                bool inbounds = checkGEWrapped(job_idx, job_head);
                 uint32_t inbounds_mask =
                     __ballot_sync(ICfg::allActive, inbounds);
 
@@ -375,7 +375,7 @@ static void jobLoop()
 
                 if (mergable) {
                     freeJobData(cur_job.data);
-                }
+                } 
 
                 // The sync here also ensures all threads are done
                 // using cur_job before any pointers are overwritten
@@ -400,13 +400,15 @@ static void jobLoop()
                     base_wait_coalesce_idx = coalesce_idx - 1u;
                 }
 
-                uint32_t top_coalesce_thread = getHighestSetBit(coalesce_mask);
-                base_wait_coalesce_idx = __shfl_sync(inbounds_mask,
-                    base_wait_coalesce_idx, top_coalesce_thread);
+                if (coalesce_mask != 0) {
+                    uint32_t top_coalesce_thread = getHighestSetBit(coalesce_mask);
+                    base_wait_coalesce_idx = __shfl_sync(inbounds_mask,
+                        base_wait_coalesce_idx, top_coalesce_thread);
+                }
             }
 
             if (lane_id == 0) {
-                wait_grid.waitJobHead = base_wait_coalesce_idx;
+                wait_grid.waitJobHead = base_wait_coalesce_idx + 1;
             }
 
             std::atomic_thread_fence(std::memory_order_release);

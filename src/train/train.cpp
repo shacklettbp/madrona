@@ -228,8 +228,6 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     HeapArray<char> entry_code =
         makeEntryCode(cfg.initFunc, cfg.runFunc, cfg.userNamespace);
 
-    printf("%s\n", entry_code.data());
-
     GPUKernels gpu_kernels;
     gpu_kernels.mod = compileCode(all_cpp_files.data(),
         all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
@@ -362,8 +360,6 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
                                uint32_t num_threads,
                                HeapArray<void *> &args) {
-        printf("%u %u\n", num_blocks, num_threads);
-
         REQ_CU(cuLaunchKernel(f, num_blocks, 1, 1, num_threads, 1, 1,
                               0, strm, nullptr, args.data()));
     };
