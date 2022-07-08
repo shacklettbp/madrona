@@ -34,10 +34,10 @@ get_target_property(MADRONA_TRAIN_INCLUDES madrona_train INCLUDE_DIRECTORIES)
 
 set(NVRTC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/gpu
+    ${CMAKE_CURRENT_SOURCE_DIR}/gpu/overrides
     ${MADRONA_TRAIN_INCLUDES}
     ${MADRONA_CORE_INCLUDES}
     ${CUDAToolkit_INCLUDE_DIRS}
-    ${CUDAToolkit_INCLUDE_DIRS}/cuda/std
 )
 
 set(NVRTC_OPTIONS)
@@ -60,8 +60,11 @@ function(madrona_build_compile_defns OUT_TARGET_NAME OUT_SRC_DEFN OUT_FLAG_DEFN)
     set(ALL_TARGET_SOURCES "")
     set(ALL_TARGET_INCLUDES "")
     foreach(t ${ARGN})
+        get_target_property(TARGET_DIR ${t} SOURCE_DIR) 
+
         get_target_property(TARGET_SOURCES ${t} SOURCES) 
         list(FILTER TARGET_SOURCES INCLUDE REGEX ".+\.cpp")
+        list(TRANSFORM TARGET_SOURCES PREPEND "${TARGET_DIR}/")
         list(APPEND ALL_TARGET_SOURCES ${TARGET_SOURCES})
 
         get_target_property(TARGET_INCLUDES ${t} INCLUDE_DIRECTORIES) 
@@ -70,7 +73,7 @@ function(madrona_build_compile_defns OUT_TARGET_NAME OUT_SRC_DEFN OUT_FLAG_DEFN)
 
     set(SRC_LIST)
     foreach(src ${ALL_TARGET_SOURCES})
-        set(SRC_LIST "${SRC_LIST}\"${CMAKE_CURRENT_SOURCE_DIR}/${src}\", ")
+        set(SRC_LIST "${SRC_LIST}\"${src}\", ")
     endforeach()
     set(SRC_LIST "${SRC_LIST}")
 

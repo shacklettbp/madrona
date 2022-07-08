@@ -1,0 +1,10 @@
+namespace cuda {
+namespace std {
+}
+}
+
+namespace std {
+
+using namespace cuda::std;
+
+}
