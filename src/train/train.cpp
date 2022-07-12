@@ -70,7 +70,7 @@ extern "C" __global__ void madronaTrainQueueUserInitKernel(uint32_t num_worlds)
     madrona::Context ctx(0, 0, invocation_idx, lane_id);
     ctx.queueJob([](madrona::Context &ctx) {
         ::%s::%s(ctx);
-    });
+    }, false);
 }
 
 extern "C" __global__ void madronaTrainQueueUserRunKernel(uint32_t num_worlds)
@@ -84,7 +84,7 @@ extern "C" __global__ void madronaTrainQueueUserRunKernel(uint32_t num_worlds)
     madrona::Context ctx(0, 0, invocation_idx, lane_id);
     ctx.queueJob([](madrona::Context &ctx) {
         ::%s::%s(ctx);
-    });
+    }, false);
 }
 )__";
 

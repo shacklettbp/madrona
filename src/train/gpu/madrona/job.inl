@@ -88,22 +88,17 @@ JobID Context::queueJob(Fn &&fn, bool is_child, Args && ...dependencies)
 
     auto wave_info = computeWaveInfo();
 
+    JobID queue_job_id = getNewJobID(is_child);
+
     gpuTrain::JobBase *base_store;
-    JobID queue_job_id;
     if (lane_id_ == wave_info.leaderLane) {
         base_store = (gpuTrain::JobBase *)allocJob(
             sizeof(JobContainer) * wave_info.numActive);
-
-        queue_job_id = getNewJobID(wave_info.numActive, is_child);
     }
 
     // Sync store point & id with wave
     base_store = (gpuTrain::JobBase *)__shfl_sync(wave_info.activeMask,
         (uintptr_t)base_store, wave_info.leaderLane);
-    queue_job_id.gen = __shfl_sync(wave_info.activeMask, queue_job_id.gen,
-                                   wave_info.leaderLane);
-    queue_job_id.id = __shfl_sync(wave_info.activeMask, queue_job_id.id,
-                                   wave_info.leaderLane);
 
     void *store = (char *)base_store +
         sizeof(JobContainer) * wave_info.coalescedIDX;

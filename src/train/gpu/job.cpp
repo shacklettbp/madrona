@@ -475,7 +475,7 @@ static inline uint32_t computeMaxNumJobs(uint32_t num_worlds)
 static inline JobID allocateJobTrackerSlot(JobManager *job_mgr,
                                            JobTracker *trackers,
                                            uint32_t parent_id,
-                                           uint32_t num_launches)
+                                           uint32_t num_invocations)
 {
     JobID cur_head = 
         job_mgr->freeTrackerHead.load(std::memory_order_acquire);
@@ -494,6 +494,8 @@ static inline JobID allocateJobTrackerSlot(JobManager *job_mgr,
         cur_head, new_head, std::memory_order_release,
         std::memory_order_acquire));
 
+    __syncwarp();
+
     uint32_t job_id = cur_head.id;
 
     // FIXME
@@ -503,7 +505,7 @@ static inline JobID allocateJobTrackerSlot(JobManager *job_mgr,
 
     JobTracker &tracker = trackers[job_id];
     tracker.parent.store(parent_id, std::memory_order_relaxed);
-    tracker.numOutstanding.store(num_launches, std::memory_order_release);
+    tracker.numOutstanding.store(num_invocations, std::memory_order_release);
     uint32_t prev_gen = tracker.gen.fetch_add(1, std::memory_order_acq_rel);
 
     return JobID {
@@ -541,19 +543,21 @@ static inline void decrementJobTracker(uint32_t job_id)
 
     while (job_id != ICfg::jobTrackerTerm) {
         JobTracker &tracker = job_trackers[job_id];
-        uint32_t next_job_id = tracker.parent.load(std::memory_order_relaxed);
-
-        printf("%u\n", next_job_id);
 
         uint32_t prev_outstanding =
             tracker.numOutstanding.fetch_sub(1, std::memory_order_acq_rel);
 
         if (prev_outstanding == 1) {
             freeJobTrackerSlot(job_id);
-        }
 
-        job_id = next_job_id;
+            job_id =
+                tracker.parent.load(std::memory_order_relaxed);
+        } else {
+            break;
+        }
     }
+
+    __syncwarp();
 }
 
 }
@@ -581,7 +585,7 @@ void * Context::allocJob(uint32_t total_bytes)
     return malloc(total_bytes);
 }
 
-JobID Context::getNewJobID(uint32_t num_launches, bool link_parent)
+JobID Context::getNewJobID(bool link_parent)
 {
     using namespace gpuTrain;
 
@@ -591,13 +595,13 @@ JobID Context::getNewJobID(uint32_t num_launches, bool link_parent)
     uint32_t parent_id;
     if (link_parent) {
         parent_id = job_id_;
-        trackers[job_id_].numOutstanding.fetch_add(num_launches,
-                                                   std::memory_order_release);
+        trackers[parent_id].numOutstanding.fetch_add(1,
+           std::memory_order_release);
     } else {
         parent_id = ICfg::jobTrackerTerm;
     }
 
-    return allocateJobTrackerSlot(job_mgr, trackers, parent_id, num_launches);
+    return allocateJobTrackerSlot(job_mgr, trackers, parent_id, 1);
 }
 
 void Context::addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,

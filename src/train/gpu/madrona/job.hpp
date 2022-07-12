@@ -103,7 +103,7 @@ private:
 
     void * allocJob(uint32_t total_bytes);
 
-    JobID getNewJobID(uint32_t num_launches, bool link_parent);
+    JobID getNewJobID(bool link_parent);
 
     void addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,
                        uint32_t num_launches, uint32_t num_bytes_per_job);
