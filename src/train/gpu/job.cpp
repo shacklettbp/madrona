@@ -29,20 +29,15 @@ static constexpr uint32_t jobTrackerTerm = ~0u;
 
 }
 
-struct alignas(64) WaitData {
-    char buf[16 * 1024 * 1024];
-};
-
 struct alignas(64) RunData {
-    char buf[16 * 1024 * 1024];
+    char buf[128 * 1024];
 };
 
 struct JobGridInfo {
-    uint32_t waitJobHead;
-    uint32_t waitJobTail;
-    uint32_t waitQueueLock;
+    std::atomic_uint32_t waitJobHead;
+    std::atomic_uint32_t waitJobTail;
+    std::atomic_uint32_t waitQueueLock;
     std::atomic_uint32_t numRunning;
-    WaitData waitData;
     RunData runData;
 };
 
@@ -88,10 +83,10 @@ static void initializeJobSystem(JobManager *mgr)
     auto grids = getGridInfo(mgr);
 
     for (int i = 0; i < (int)ICfg::numJobGrids; i++) {
-        grids[i].waitJobHead = 0;
-        grids[i].waitJobTail = 0;
-        grids[i].waitQueueLock = 0;
-        grids[i].numRunning = 0;
+        grids[i].waitJobHead.store(0, std::memory_order_relaxed);
+        grids[i].waitJobTail.store(0, std::memory_order_relaxed);
+        grids[i].waitQueueLock.store(0, std::memory_order_relaxed);
+        grids[i].numRunning.store(0, std::memory_order_relaxed);
     }
 
     mgr->freeTrackerHead.store(JobID { 0, 0 }, std::memory_order_relaxed);
@@ -285,12 +280,16 @@ static void jobLoop()
             Job *waiting_jobs = base_job_list +
                 wait_grid_idx * max_jobs_per_grid;
 
-            uint32_t job_head = wait_grid.waitJobHead;
+            // Relaxed is safe for head & tail, because
+            // nextLoopSetup() does an acquire barrier
+            uint32_t job_head =
+                wait_grid.waitJobHead.load(std::memory_order_relaxed);
             // Cache the value of job tail, and use it across the warp,
             // it can be incremented by other threads
             uint32_t job_tail;
             if (lane_id == 0) {
-                job_tail = wait_grid.waitJobTail;
+                job_tail =
+                    wait_grid.waitJobTail.load(std::memory_order_relaxed);
             }
             job_tail = __shfl_sync(ICfg::allActive, job_tail, 0);
 
@@ -364,9 +363,9 @@ static void jobLoop()
 
                 // Get current running total of jobs merged together for launch
                 uint32_t top_merge_thread = getHighestSetBit(merge_mask);
+
                 num_job_launches = __shfl_sync(inbounds_mask,
                     num_job_launches, top_merge_thread);
-
             }
 
             // Wait for all the async copies
@@ -438,7 +437,8 @@ static void jobLoop()
             }
 
             if (lane_id == 0) {
-                wait_grid.waitJobHead = base_wait_coalesce_idx + 1;
+                wait_grid.waitJobHead.store(base_wait_coalesce_idx + 1,
+                                            std::memory_order_relaxed);
             }
 
             std::atomic_thread_fence(std::memory_order_release);
@@ -446,7 +446,7 @@ static void jobLoop()
             if (lane_id == 0) {
                 uint32_t num_blocks = utils::divideRoundUp(num_job_launches,
                     ICfg::numJobLaunchKernelThreads);
-
+                
                 first_ptr<<<num_blocks, ICfg::numJobLaunchKernelThreads>>>(
                     (JobBase *)run_grid.runData.buf, num_job_launches,
                     run_grid_idx);
@@ -472,39 +472,11 @@ static inline uint32_t computeMaxNumJobs(uint32_t num_worlds)
     return ICfg::maxNumJobsPerWorld * num_worlds;
 }
 
-}
-
-Context::WaveInfo Context::computeWaveInfo()
-{
-    using namespace gpuTrain;
-
-    uint32_t active = __activemask();
-    uint32_t num_active = __popc(active);
-
-    uint32_t sel_idx = getHighestSetBit(active);
-    uint32_t coalesced_idx = getNumLowerSetBits(active, lane_id_);
-
-    return WaveInfo {
-        .activeMask = active,
-        .numActive = num_active,
-        .leaderLane = sel_idx,
-        .coalescedIDX = coalesced_idx,
-    };
-}
-
-void * Context::allocJob(uint32_t total_bytes)
-{
-    return malloc(total_bytes);
-}
-
-static inline JobID allocateJobTrackerSlot(uint32_t parent_id,
+static inline JobID allocateJobTrackerSlot(JobManager *job_mgr,
+                                           JobTracker *trackers,
+                                           uint32_t parent_id,
                                            uint32_t num_launches)
 {
-    using namespace gpuTrain;
-
-    auto job_mgr = getJobManager();
-    JobTracker *trackers = getJobTrackers(job_mgr);
-
     JobID cur_head = 
         job_mgr->freeTrackerHead.load(std::memory_order_acquire);
 
@@ -542,8 +514,6 @@ static inline JobID allocateJobTrackerSlot(uint32_t parent_id,
 
 static inline void freeJobTrackerSlot(uint32_t job_id)
 {
-    using namespace gpuTrain;
-
     auto job_mgr = getJobManager();
     JobTracker *trackers = getJobTrackers(job_mgr);
 
@@ -566,15 +536,14 @@ static inline void freeJobTrackerSlot(uint32_t job_id)
 
 static inline void decrementJobTracker(uint32_t job_id)
 {
-    using namespace gpuTrain;
-
     auto job_mgr = getJobManager();
     JobTracker *job_trackers = getJobTrackers(job_mgr);
-
 
     while (job_id != ICfg::jobTrackerTerm) {
         JobTracker &tracker = job_trackers[job_id];
         uint32_t next_job_id = tracker.parent.load(std::memory_order_relaxed);
+
+        printf("%u\n", next_job_id);
 
         uint32_t prev_outstanding =
             tracker.numOutstanding.fetch_sub(1, std::memory_order_acq_rel);
@@ -587,12 +556,48 @@ static inline void decrementJobTracker(uint32_t job_id)
     }
 }
 
+}
+
+Context::WaveInfo Context::computeWaveInfo()
+{
+    using namespace gpuTrain;
+
+    uint32_t active = __activemask();
+    uint32_t num_active = __popc(active);
+
+    uint32_t sel_idx = getHighestSetBit(active);
+    uint32_t coalesced_idx = getNumLowerSetBits(active, lane_id_);
+
+    return WaveInfo {
+        .activeMask = active,
+        .numActive = num_active,
+        .leaderLane = sel_idx,
+        .coalescedIDX = coalesced_idx,
+    };
+}
+
+void * Context::allocJob(uint32_t total_bytes)
+{
+    return malloc(total_bytes);
+}
+
 JobID Context::getNewJobID(uint32_t num_launches, bool link_parent)
 {
     using namespace gpuTrain;
 
-    return allocateJobTrackerSlot(link_parent ? job_id_ : ICfg::jobTrackerTerm,
-                                  num_launches);
+    auto job_mgr = getJobManager();
+    JobTracker *trackers = getJobTrackers(job_mgr);
+
+    uint32_t parent_id;
+    if (link_parent) {
+        parent_id = job_id_;
+        trackers[job_id_].numOutstanding.fetch_add(num_launches,
+                                                   std::memory_order_release);
+    } else {
+        parent_id = ICfg::jobTrackerTerm;
+    }
+
+    return allocateJobTrackerSlot(job_mgr, trackers, parent_id, num_launches);
 }
 
 void Context::addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,
@@ -617,16 +622,18 @@ void Context::addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,
     Job *job_list = base_job_list + grid_id_ * max_jobs_per_grid;
 
     // Get lock
-    std::atomic_thread_fence(std::memory_order_acquire);
+    uint32_t expected = 0;
+    while (!cur_grid.waitQueueLock.compare_exchange_weak(expected, 1,
+        std::memory_order_acq_rel, std::memory_order_relaxed)) {
+        expected = 0;
+    }
 
-    while (atomicCAS(&cur_grid.waitQueueLock, 0, 1) != 0) {}
-
-    uint32_t cur_job_pos = cur_grid.waitJobTail;
+    uint32_t cur_job_pos = cur_grid.waitJobTail.load(std::memory_order_acquire);
     job_list[wrapQueueIdx(cur_job_pos, max_jobs_per_grid)] = job;
 
-    cur_grid.waitJobTail++;
+    cur_grid.waitJobTail.fetch_add(1, std::memory_order_relaxed);
 
-    cur_grid.waitQueueLock = 0;
+    cur_grid.waitQueueLock.store(0, std::memory_order_relaxed);
     
     atomicAdd(&job_mgr->numOutstandingJobs, num_launches);
 
