@@ -55,7 +55,7 @@ __global__ void jobEntry(gpuTrain::JobBase *job_data,
 
     Context ctx(job_container.jobID, grid_id, job_container.worldID, lane_id);
 
-    (*(job_container.fn))(ctx);
+    (job_container.fn)(ctx);
 
     // Calls the destructor for the functor
     job_container.~JobContainer();
