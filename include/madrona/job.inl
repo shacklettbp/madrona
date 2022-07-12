@@ -1,35 +1,17 @@
 namespace madrona {
 
-template <typename Fn>
-Job Context::makeJob(Fn &&fn)
+// FIXME: implement is_child and dependencies
+template <typename Fn, typename... Args>
+inline JobID Context::queueJob(Fn &&fn, bool is_child,
+                               Args... dependencies)
 {
-    return job_mgr_->makeJob(std::forward<Fn>(fn), worker_idx_);
-}
+    Job job = job_mgr_->makeJob(std::forward<Fn>(fn), worker_idx_);
+    (void)is_child;
 
-template <typename Fn>
-JobID Context::queueJob(Fn &&fn, Span<const JobID> dependencies, JobPriority prio)
-{
-    Job job = makeJob(std::forward<Fn>(fn));
-    return queueJob(job, dependencies, prio);
-}
+    ( (void)dependencies, ... );
 
-JobID Context::queueJob(Job job, Span<const JobID> dependencies, JobPriority prio)
-{
-    return job_mgr_->queueJob(worker_idx_, job,
-                              dependencies.data(), dependencies.size(), prio);
-}
-
-JobID Context::queueJobs(Span<const Job> jobs, Span<const JobID> dependencies,
-                         JobPriority prio)
-{
-    return queueJobs(jobs.data(), jobs.size(), dependencies, prio);
-}
-
-JobID Context::queueJobs(const Job *jobs, uint32_t num_jobs,
-                         Span<const JobID> dependencies, JobPriority prio)
-{
-    return job_mgr_->queueJobs(worker_idx_, jobs, num_jobs,
-                               dependencies.data(), dependencies.size(), prio);
+    return job_mgr_->queueJob(worker_idx_, job, nullptr, 0,
+                              JobPriority::Normal);
 }
 
 template <typename Fn>

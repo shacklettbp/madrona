@@ -25,6 +25,7 @@ static constexpr uint32_t jobDataPerWorld = 65536;
 static constexpr uint32_t numJobGrids = 256;
 static constexpr uint32_t numJobSystemKernelThreads = 1024;
 static constexpr uint32_t allActive = ~0u;
+static constexpr uint32_t jobTrackerTerm = ~0u;
 
 }
 
@@ -43,6 +44,12 @@ struct JobGridInfo {
     std::atomic_uint32_t numRunning;
     WaitData waitData;
     RunData runData;
+};
+
+struct alignas(16) JobTracker {
+    std::atomic_uint32_t gen;
+    std::atomic_uint32_t parent;
+    std::atomic_uint32_t numOutstanding;
 };
 
 static inline JobSystemConstants &jobSysConsts()
@@ -65,6 +72,11 @@ static inline Job *getBaseJobList(JobManager *mgr)
     return (Job *)((char *)mgr + jobSysConsts().jobListOffset);
 }
 
+static inline JobTracker *getJobTrackers(JobManager *mgr)
+{
+    return (JobTracker *)((char *)mgr + jobSysConsts().jobTrackerOffset);
+}
+
 static void initializeJobSystem(JobManager *mgr)
 {
     mgr->numOutstandingJobs = 0;
@@ -81,6 +93,24 @@ static void initializeJobSystem(JobManager *mgr)
         grids[i].waitQueueLock = 0;
         grids[i].numRunning = 0;
     }
+
+    mgr->freeTrackerHead.store(JobID { 0, 0 }, std::memory_order_relaxed);
+    auto trackers = getJobTrackers(mgr);
+
+    int num_trackers = jobSysConsts().maxJobsPerGrid * ICfg::numJobGrids;
+
+    for (int i = 0; i < num_trackers; i++) {
+        JobTracker &tracker = trackers[i];
+        tracker.gen.store(0, std::memory_order_relaxed);
+        if (i < num_trackers - 1) {
+            tracker.parent.store(i + 1, std::memory_order_relaxed);
+        } else {
+            tracker.parent.store(ICfg::jobTrackerTerm, std::memory_order_relaxed);
+        }
+        tracker.numOutstanding.store(0, std::memory_order_relaxed);
+    }
+
+    std::atomic_thread_fence(std::memory_order_release);
 }
 
 static inline void freeJobData(void *data)
@@ -467,8 +497,106 @@ void * Context::allocJob(uint32_t total_bytes)
     return malloc(total_bytes);
 }
 
-void Context::queueJob(Job::EntryPtr func, gpuTrain::JobBase *data,
-                       uint32_t num_launches, uint32_t num_bytes_per_job)
+static inline JobID allocateJobTrackerSlot(uint32_t parent_id,
+                                           uint32_t num_launches)
+{
+    using namespace gpuTrain;
+
+    auto job_mgr = getJobManager();
+    JobTracker *trackers = getJobTrackers(job_mgr);
+
+    JobID cur_head = 
+        job_mgr->freeTrackerHead.load(std::memory_order_acquire);
+
+    JobID new_head;
+
+    do {
+        if (cur_head.id == ICfg::jobTrackerTerm) {
+            break;
+        }
+
+        new_head.gen = cur_head.gen + 1;
+        new_head.id =
+            trackers[cur_head.id].parent.load(std::memory_order_relaxed);
+    } while (!job_mgr->freeTrackerHead.compare_exchange_weak(
+        cur_head, new_head, std::memory_order_release,
+        std::memory_order_acquire));
+
+    uint32_t job_id = cur_head.id;
+
+    // FIXME
+    if (job_id == ICfg::jobTrackerTerm) {
+        assert(false);
+    }
+
+    JobTracker &tracker = trackers[job_id];
+    tracker.parent.store(parent_id, std::memory_order_relaxed);
+    tracker.numOutstanding.store(num_launches, std::memory_order_release);
+    uint32_t prev_gen = tracker.gen.fetch_add(1, std::memory_order_acq_rel);
+
+    return JobID {
+        prev_gen + 1,
+        job_id,
+    };
+}
+
+static inline void freeJobTrackerSlot(uint32_t job_id)
+{
+    using namespace gpuTrain;
+
+    auto job_mgr = getJobManager();
+    JobTracker *trackers = getJobTrackers(job_mgr);
+
+    JobTracker &tracker = trackers[job_id];
+
+    JobID new_head;
+    new_head.id = job_id;
+
+    JobID cur_head = job_mgr->freeTrackerHead.load(
+        std::memory_order_relaxed);
+
+    do {
+        new_head.gen = cur_head.gen + 1;
+
+        tracker.parent.store(cur_head.id, std::memory_order_relaxed);
+    } while (!job_mgr->freeTrackerHead.compare_exchange_weak(
+           cur_head, new_head,
+           std::memory_order_release, std::memory_order_relaxed));
+}
+
+static inline void decrementJobTracker(uint32_t job_id)
+{
+    using namespace gpuTrain;
+
+    auto job_mgr = getJobManager();
+    JobTracker *job_trackers = getJobTrackers(job_mgr);
+
+
+    while (job_id != ICfg::jobTrackerTerm) {
+        JobTracker &tracker = job_trackers[job_id];
+        uint32_t next_job_id = tracker.parent.load(std::memory_order_relaxed);
+
+        uint32_t prev_outstanding =
+            tracker.numOutstanding.fetch_sub(1, std::memory_order_acq_rel);
+
+        if (prev_outstanding == 1) {
+            freeJobTrackerSlot(job_id);
+        }
+
+        job_id = next_job_id;
+    }
+}
+
+JobID Context::getNewJobID(uint32_t num_launches, bool link_parent)
+{
+    using namespace gpuTrain;
+
+    return allocateJobTrackerSlot(link_parent ? job_id_ : ICfg::jobTrackerTerm,
+                                  num_launches);
+}
+
+void Context::addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,
+                            uint32_t num_launches, uint32_t num_bytes_per_job)
 {
     using namespace gpuTrain;
 
@@ -509,6 +637,8 @@ void Context::markJobFinished(uint32_t num_jobs)
 {
     using namespace gpuTrain;
 
+    decrementJobTracker(job_id_);
+
     __syncthreads();
 
     if (threadIdx.x != 0) return;
@@ -546,6 +676,8 @@ extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
     uint32_t max_num_jobs_per_grid =
         madrona::gpuTrain::computeMaxNumJobs(num_worlds);
 
+    uint32_t max_num_jobs = ICfg::numJobGrids * max_num_jobs_per_grid;
+
     size_t total_bytes = sizeof(JobManager);
 
     uint64_t grid_offset = utils::roundUp(total_bytes,
@@ -556,16 +688,24 @@ extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
     uint64_t wait_job_offset = madrona::utils::roundUp(total_bytes,
         std::alignment_of_v<Job>);
 
-    uint64_t num_job_bytes = 
-        sizeof(Job) * ICfg::numJobGrids * max_num_jobs_per_grid;
+    uint64_t num_job_bytes = sizeof(Job) * max_num_jobs;
 
     total_bytes = wait_job_offset + num_job_bytes;
+
+    uint64_t tracker_offset = madrona::utils::roundUp(total_bytes,
+        std::alignment_of_v<JobTracker>);
+
+    // FIXME: using max_num_jobs for this doesn't quite max sense, because
+    // there will be more outstanding trackers than waiting jobs due to
+    // parent trackers remaining alive until children finish
+    total_bytes = tracker_offset + sizeof(JobTracker) * max_num_jobs;
 
     *out_constants = JobSystemConstants {
         .jobSystemStateAddr = nullptr,
         .jobGridsOffset = (uint32_t)grid_offset,
         .jobListOffset = (uint32_t)wait_job_offset,
         .maxJobsPerGrid = max_num_jobs_per_grid,
+        .jobTrackerOffset = (uint32_t)tracker_offset,
     };
 
     *job_system_buffer_size = total_bytes;

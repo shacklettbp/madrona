@@ -40,22 +40,9 @@ public:
     Context(JobManager &job_mgr, int worker_idx);
     AllocContext mem;
 
-    template <typename Fn>
-    inline Job makeJob(Fn &&fn);
-
-    template <typename Fn>
-    inline JobID queueJob(Fn &&fn, Span<const JobID> dependencies = {},
-                          JobPriority prio = JobPriority::Normal);
-
-    inline JobID queueJob(Job job, Span<const JobID> dependencies = {},
-                          JobPriority prio = JobPriority::Normal);
-
-    inline JobID queueJobs(Span<const Job> jobs,
-                           Span<const JobID> dependencies = {},
-                           JobPriority prio = JobPriority::Normal);
-    inline JobID queueJobs(const Job *jobs, uint32_t num_jobs,
-                           Span<const JobID> dependencies = {},
-                           JobPriority prio = JobPriority::Normal);
+    template <typename Fn, typename... Args>
+    inline JobID queueJob(Fn &&fn, bool is_child = true,
+                          Args... dependencies);
 
 private:
     JobManager * const job_mgr_;

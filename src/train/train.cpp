@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <iostream>
 #include <array>
+#include <atomic>
 
 #include <madrona/train.hpp>
 
@@ -11,6 +12,7 @@
 // the CPU job system headers are available but we need access to the GPU
 // header in order to do initial setup.
 namespace gpuTrain {
+using namespace madrona;
 #include "gpu/madrona/job.hpp"
 }
 
@@ -22,7 +24,6 @@ static constexpr uint32_t numInitQueueThreads = 512;
 }
 
 using GPUJobManager = gpuTrain::madrona::JobManager;
-using GPUJob = gpuTrain::madrona::Job;
 using GPUJobSystemConstants = gpuTrain::madrona::gpuTrain::JobSystemConstants;
 
 struct GPUKernels {
@@ -66,7 +67,7 @@ extern "C" __global__ void madronaTrainQueueUserInitKernel(uint32_t num_worlds)
 
     uint32_t lane_id = threadIdx.x %% madrona::gpuTrain::ICfg::numWarpThreads;
 
-    madrona::Context ctx(0, invocation_idx, lane_id);
+    madrona::Context ctx(0, 0, invocation_idx, lane_id);
     ctx.queueJob([](madrona::Context &ctx) {
         ::%s::%s(ctx);
     });
@@ -80,7 +81,7 @@ extern "C" __global__ void madronaTrainQueueUserRunKernel(uint32_t num_worlds)
 
     uint32_t lane_id = threadIdx.x %% madrona::gpuTrain::ICfg::numWarpThreads;
 
-    madrona::Context ctx(0, invocation_idx, lane_id);
+    madrona::Context ctx(0, 0, invocation_idx, lane_id);
     ctx.queueJob([](madrona::Context &ctx) {
         ::%s::%s(ctx);
     });
