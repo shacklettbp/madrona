@@ -66,19 +66,9 @@ struct Job {
                               uint32_t num_launches, uint32_t grid_id);
     EntryPtr fn;
     gpuTrain::JobBase *data;
-    uint32_t numLaunches;
+    uint32_t numInvocations;
     uint32_t numBytesPerJob;
 };
-
-// Interface options:
-// * Simple: Make job, register all dependencies, then submit
-//      - This is almost like defining a small task graph and submitting it in one go
-//      - Issues:
-//          - Hard to compose. Code that is submitting job A needs to submit all dependencies of job A
-//      - Advantages:
-//          - This side steps the "Queue dependency on job A while job A is finishing" race condition
-// * More flexible / Unity-like: 
-// - 
 
 class Context {
 public:
@@ -88,6 +78,10 @@ public:
     template <typename Fn, typename... Args>
     inline JobID queueJob(Fn &&fn, bool is_child = true,
                           Args && ...dependencies);
+
+    template <typename Fn, typename... Args>
+    inline JobID queueMultiJob(Fn &&fn, uint32_t num_invocations,
+        bool is_child = true, Args && ...dependencies);
 
     void markJobFinished(uint32_t num_jobs);
 
@@ -101,12 +95,13 @@ private:
 
     WaveInfo computeWaveInfo();
 
-    void * allocJob(uint32_t total_bytes);
-
     JobID getNewJobID(bool link_parent);
 
+    gpuTrain::JobBase * allocJob(uint32_t bytes_per_job, WaveInfo wave_info);
+
     void addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,
-                       uint32_t num_launches, uint32_t num_bytes_per_job);
+                       uint32_t num_invocations, uint32_t num_bytes_per_job,
+                       uint32_t lane_id, WaveInfo wave_info);
 
     uint32_t job_id_;
     uint32_t grid_id_;

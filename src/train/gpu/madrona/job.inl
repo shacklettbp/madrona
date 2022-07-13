@@ -37,7 +37,7 @@ JobContainer<Fn, N>::JobContainer(uint32_t world_id, uint32_t job_id, Fn &&func,
 
 template <typename Fn, size_t N>
 __global__ void jobEntry(gpuTrain::JobBase *job_data,
-                         uint32_t num_launches,
+                         uint32_t num_invocations,
                          uint32_t grid_id)
 {
     uint32_t lane_id = threadIdx.x % ICfg::numWarpThreads;
@@ -45,7 +45,7 @@ __global__ void jobEntry(gpuTrain::JobBase *job_data,
     uint32_t invocation_idx =
         threadIdx.x + blockIdx.x * ICfg::numJobLaunchKernelThreads;
 
-    if (invocation_idx >= num_launches) {
+    if (invocation_idx >= num_invocations) {
         return;
     }
 
@@ -60,11 +60,11 @@ __global__ void jobEntry(gpuTrain::JobBase *job_data,
     // Calls the destructor for the functor
     job_container.~JobContainer();
 
-    uint32_t num_block_launches = min(
-        num_launches - blockIdx.x * ICfg::numJobLaunchKernelThreads,
+    uint32_t num_block_invocations = min(
+        num_invocations - blockIdx.x * ICfg::numJobLaunchKernelThreads,
         ICfg::numJobLaunchKernelThreads);
 
-    ctx.markJobFinished(num_block_launches);
+    ctx.markJobFinished(num_block_invocations);
 }
 
 }
@@ -78,38 +78,38 @@ Context::Context(uint32_t job_id, uint32_t grid_id, uint32_t world_id,
 {}
 
 template <typename Fn, typename... Args>
-JobID Context::queueJob(Fn &&fn, bool is_child, Args && ...dependencies)
+JobID Context::queueJob(Fn &&fn, bool is_child,
+                        Args && ...dependencies)
+{
+    return queueMultiJob(std::forward<Fn>(fn), 1, is_child,
+                         std::forward<Args>(dependencies)...);
+}
+
+template <typename Fn, typename... Args>
+JobID Context::queueMultiJob(Fn &&fn, uint32_t num_invocations,
+                             bool is_child, Args && ...dependencies)
 {
     constexpr std::size_t num_deps = sizeof...(Args);
 
     auto func_ptr = gpuTrain::jobEntry<Fn, num_deps>;
 
-    using JobContainer = gpuTrain::JobContainer<Fn, num_deps>;
+    using FnJobContainer = gpuTrain::JobContainer<Fn, num_deps>;
 
     auto wave_info = computeWaveInfo();
 
     JobID queue_job_id = getNewJobID(is_child);
 
-    gpuTrain::JobBase *base_store;
-    if (lane_id_ == wave_info.leaderLane) {
-        base_store = (gpuTrain::JobBase *)allocJob(
-            sizeof(JobContainer) * wave_info.numActive);
-    }
+    auto store = allocJob(sizeof(FnJobContainer), wave_info);
+    new (store) FnJobContainer(world_id_, queue_job_id.id,
+                               std::forward<Fn>(fn),
+                               std::forward<Args>(dependencies)...);
 
-    // Sync store point & id with wave
-    base_store = (gpuTrain::JobBase *)__shfl_sync(wave_info.activeMask,
-        (uintptr_t)base_store, wave_info.leaderLane);
+    __syncwarp(wave_info.activeMask);
 
-    void *store = (char *)base_store +
-        sizeof(JobContainer) * wave_info.coalescedIDX;
+    addToWaitList(func_ptr, store, num_invocations,
+                  sizeof(FnJobContainer), lane_id_, wave_info);
 
-    new (store) JobContainer(world_id_, queue_job_id.id, std::forward<Fn>(fn),
-                             std::forward<Args>(dependencies)...);
-
-    if (lane_id_ == wave_info.leaderLane) {
-        addToWaitList(func_ptr, base_store, wave_info.numActive,
-                      sizeof(JobContainer));
-    }
+    __syncwarp(wave_info.activeMask);
 
     return queue_job_id;
 }
