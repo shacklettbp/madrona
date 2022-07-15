@@ -14,15 +14,6 @@ struct JobID {
 // New types not used by the CPU implementation are hidden in the gpuTrain
 // namespace.
 namespace gpuTrain {
-struct GPUImplConstants {
-    void *jobSystemStateAddr;
-    void *stateManagerAddr;
-    uint32_t jobGridsOffset;
-    uint32_t jobListOffset;
-    uint32_t maxJobsPerGrid;
-    uint32_t jobTrackerOffset;
-};
-
 struct JobBase {
     inline JobBase(uint32_t world_id, uint32_t job_id, uint32_t num_deps);
 
