@@ -2,17 +2,13 @@
 #include <array>
 #include <cuda/barrier>
 
-namespace std {
-
-using namespace cuda::std;
-
-}
-
-#include <madrona/job.hpp>
+#include <madrona/context.hpp>
 #include <madrona/utils.hpp>
 
+#include <madrona/gpu_train/const.hpp>
+
 extern "C" {
-__constant__ madrona::gpuTrain::JobSystemConstants madronaTrainJobSysConstants;
+__constant__ madrona::gpuTrain::GPUImplConsts madronaTrainGPUImplConsts;
 }
 
 namespace madrona {
@@ -47,29 +43,24 @@ struct alignas(16) JobTracker {
     std::atomic_uint32_t numOutstanding;
 };
 
-static inline JobSystemConstants &jobSysConsts()
-{
-    return madronaTrainJobSysConstants;
-}
-
 static inline JobManager * getJobManager()
 {
-    return (JobManager *)jobSysConsts().jobSystemStateAddr;
+    return (JobManager *)GPUImplConsts::get().baseAddr;
 }
 
 static inline JobGridInfo *getGridInfo(JobManager *mgr)
 {
-    return (JobGridInfo *)((char *)mgr + jobSysConsts().jobGridsOffset);
+    return (JobGridInfo *)((char *)mgr + GPUImplConsts::get().jobGridsOffset);
 }
 
 static inline Job *getBaseJobList(JobManager *mgr)
 {
-    return (Job *)((char *)mgr + jobSysConsts().jobListOffset);
+    return (Job *)((char *)mgr + GPUImplConsts::get().jobListOffset);
 }
 
 static inline JobTracker *getJobTrackers(JobManager *mgr)
 {
-    return (JobTracker *)((char *)mgr + jobSysConsts().jobTrackerOffset);
+    return (JobTracker *)((char *)mgr + GPUImplConsts::get().jobTrackerOffset);
 }
 
 static void initializeJobSystem(JobManager *mgr)
@@ -92,7 +83,7 @@ static void initializeJobSystem(JobManager *mgr)
     mgr->freeTrackerHead.store(JobID { 0, 0 }, std::memory_order_relaxed);
     auto trackers = getJobTrackers(mgr);
 
-    int num_trackers = jobSysConsts().maxJobsPerGrid * ICfg::numJobGrids;
+    int num_trackers = GPUImplConsts::get().maxJobsPerGrid * ICfg::numJobGrids;
 
     for (int i = 0; i < num_trackers; i++) {
         JobTracker &tracker = trackers[i];
@@ -221,7 +212,7 @@ static void jobLoop()
     auto base_job_grids = getGridInfo(job_mgr);
     auto base_job_list = getBaseJobList(job_mgr);
 
-    const uint32_t max_jobs_per_grid = jobSysConsts().maxJobsPerGrid;
+    const uint32_t max_jobs_per_grid = GPUImplConsts::get().maxJobsPerGrid;
 
     static __shared__ uint32_t active_grids_tmp[8];
 
@@ -591,17 +582,13 @@ static inline void queueMultiJobInWaitList(
 
     const auto base_job_grids = getGridInfo(job_mgr);
     const auto base_job_list = getBaseJobList(job_mgr);
-    const uint32_t max_jobs_per_grid = jobSysConsts().maxJobsPerGrid;
+    const uint32_t max_jobs_per_grid = GPUImplConsts::get().maxJobsPerGrid;
 
     JobGridInfo &cur_grid = base_job_grids[grid_id];
     Job *job_list = base_job_list + grid_id * max_jobs_per_grid;
 
     // Get lock
-    uint32_t expected = 0;
-    while (!cur_grid.waitQueueLock.compare_exchange_weak(expected, 1,
-        std::memory_order_acq_rel, std::memory_order_relaxed)) {
-        expected = 0;
-    }
+    while (cur_grid.waitQueueLock.exchange(1, std::memory_order_acq_rel)) {}
 
     uint32_t cur_job_pos = cur_grid.waitJobTail.load(std::memory_order_acquire);
     job_list[wrapQueueIdx(cur_job_pos, max_jobs_per_grid)] = job;
@@ -723,9 +710,9 @@ void Context::markJobFinished(uint32_t num_jobs)
 
 }
 
-extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
+extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     uint32_t num_worlds,
-    madrona::gpuTrain::JobSystemConstants *out_constants,
+    madrona::gpuTrain::GPUImplConsts *out_constants,
     size_t *job_system_buffer_size)
 {
     using namespace madrona;
@@ -737,6 +724,11 @@ extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
     uint32_t max_num_jobs = ICfg::numJobGrids * max_num_jobs_per_grid;
 
     size_t total_bytes = sizeof(JobManager);
+
+    uint64_t state_mgr_offset = utils::roundUp(total_bytes,
+        std::alignment_of_v<StateManager>);
+
+    total_bytes = state_mgr_offset + sizeof(StateManager);
 
     uint64_t grid_offset = utils::roundUp(total_bytes,
         std::alignment_of_v<JobGridInfo>);
@@ -758,8 +750,9 @@ extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
     // parent trackers remaining alive until children finish
     total_bytes = tracker_offset + sizeof(JobTracker) * max_num_jobs;
 
-    *out_constants = JobSystemConstants {
-        .jobSystemStateAddr = nullptr,
+    *out_constants = GPUImplConsts {
+        .baseAddr = nullptr,
+        .stateManagerOffset = (uint32_t)state_mgr_offset,
         .jobGridsOffset = (uint32_t)grid_offset,
         .jobListOffset = (uint32_t)wait_job_offset,
         .maxJobsPerGrid = max_num_jobs_per_grid,
@@ -769,7 +762,7 @@ extern "C" __global__ void madronaTrainComputeJobSystemConstantsKernel(
     *job_system_buffer_size = total_bytes;
 }
 
-extern "C" __global__  void madronaTrainInitializeJobSystemKernel()
+extern "C" __global__  void madronaTrainInitializeKernel()
 {
     using namespace madrona;
     using namespace madrona::gpuTrain;
@@ -777,6 +770,12 @@ extern "C" __global__  void madronaTrainInitializeJobSystemKernel()
     auto job_mgr = getJobManager();
     new (job_mgr) JobManager();
     initializeJobSystem(job_mgr);
+
+    auto state_mgr = (StateManager *)(
+        (char *)GPUImplConsts::get().baseAddr +
+        GPUImplConsts::get().stateManagerOffset);
+
+    new (state_mgr) StateManager(1024);
 }
 
 extern "C" __global__ void madronaTrainJobSystemKernel()

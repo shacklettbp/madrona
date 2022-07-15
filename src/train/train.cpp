@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <iostream>
 #include <array>
-#include <atomic>
 
 #include <madrona/train.hpp>
 
@@ -13,7 +12,7 @@
 // header in order to do initial setup.
 namespace gpuTrain {
 using namespace madrona;
-#include "gpu/madrona/job.hpp"
+#include "gpu/madrona/gpu_train/const.hpp"
 }
 
 namespace madrona {
@@ -23,20 +22,19 @@ static constexpr uint32_t numJobSystemKernelThreads = 1024;
 static constexpr uint32_t numInitQueueThreads = 512;
 }
 
-using GPUJobManager = gpuTrain::madrona::JobManager;
-using GPUJobSystemConstants = gpuTrain::madrona::gpuTrain::JobSystemConstants;
+using GPUImplConsts = gpuTrain::madrona::gpuTrain::GPUImplConsts;
 
 struct GPUKernels {
     CUmodule mod;
-    CUfunction computeJobSystemConsts;
-    CUfunction initJobSystem;
+    CUfunction computeGPUImplConsts;
+    CUfunction init;
     CUfunction runJobSystem;
     CUfunction queueUserInit;
     CUfunction queueUserRun;
 };
 
 struct GPUEngineState {
-    GPUJobManager *jobSystemState;
+    void *stateBuffer;
 };
 
 struct TrainingExecutor::Impl {
@@ -51,7 +49,7 @@ static HeapArray<char> makeEntryCode(const char *init_func,
                                      const char *user_namespace)
 {
     const char *entry_code_template = R"__(
-#include <madrona/job.hpp>
+#include <madrona/context.hpp>
 
 // Forward declare user functions
 namespace %s {
@@ -234,10 +232,10 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
         all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
         entry_code.data());
 
-    REQ_CU(cuModuleGetFunction(&gpu_kernels.computeJobSystemConsts,
-        gpu_kernels.mod, "madronaTrainComputeJobSystemConstantsKernel"));
-    REQ_CU(cuModuleGetFunction(&gpu_kernels.initJobSystem, gpu_kernels.mod,
-                               "madronaTrainInitializeJobSystemKernel"));
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
+        gpu_kernels.mod, "madronaTrainComputeGPUImplConstantsKernel"));
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.init, gpu_kernels.mod,
+                               "madronaTrainInitializeKernel"));
     REQ_CU(cuModuleGetFunction(&gpu_kernels.runJobSystem, gpu_kernels.mod,
                                "madronaTrainJobSystemKernel"));
     REQ_CU(cuModuleGetFunction(&gpu_kernels.queueUserInit, gpu_kernels.mod,
@@ -247,36 +245,6 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
 
     return gpu_kernels;
 }
-
-#if 0
-__global__ void setInitialJobKernelAddress(JobQueue *job_queue)
-{
-    job_queue->jobs[0].fn = jobEntry<Fn>;
-}
-
-JobQueue *initJobSystem(cudaStream_t strm, Fn &&fn)
-{
-    JobQueue *job_queue = (JobQueue *)cu::allocGPU(sizeof(JobQueue));
-    JobQueue *queue_staging = (JobQueue *)cu::allocStaging(sizeof(JobQueue));
-
-    queue_staging->jobHead = 0;
-    queue_staging->numWaitingJobs = 1;
-    queue_staging->numOutstandingJobs = 0;
-
-    setInitialJobKernelAddress<Fn><<<1, 1, 0, strm>>>(queue_staging);
-
-    queue_staging->jobs[0].arg = &job_queue->jobData.buffer;
-
-    new (&(queue_staging->jobData.buffer)[0]) Fn(std::forward<Fn>(fn));
-
-    cu::cpyCPUToGPU(strm, job_queue, queue_staging, sizeof(JobQueue));
-    REQ_CUDA(cudaStreamSynchronize(strm));
-
-    cu::deallocCPU(queue_staging);
-
-    return job_queue;
-}
-#endif
 
 template <typename ...Ts>
 HeapArray<void *> makeKernelArgBuffer(Ts ...args)
@@ -365,37 +333,37 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
                               0, strm, nullptr, args.data()));
     };
 
-    auto job_consts_readback = (GPUJobSystemConstants *)cu::allocReadback(
-        sizeof(GPUJobSystemConstants));
+    auto gpu_consts_readback = (GPUImplConsts *)cu::allocReadback(
+        sizeof(GPUImplConsts));
 
-    auto job_sys_size_readback = (size_t *)cu::allocReadback(
+    auto gpu_state_size_readback = (size_t *)cu::allocReadback(
         sizeof(size_t));
 
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
-                                                   job_consts_readback,
-                                                   job_sys_size_readback);
+                                                   gpu_consts_readback,
+                                                   gpu_state_size_readback);
 
     auto queue_args = makeKernelArgBuffer(num_worlds);
 
     auto no_args = makeKernelArgBuffer();
 
-    launchKernel(gpu_kernels.computeJobSystemConsts, 1, 1,
+    launchKernel(gpu_kernels.computeGPUImplConsts, 1, 1,
                  compute_consts_args);
 
     REQ_CUDA(cudaStreamSynchronize(strm));
 
-    auto job_mgr = (GPUJobManager *)cu::allocGPU(job_sys_size_readback[0]);
-    job_consts_readback->jobSystemStateAddr = job_mgr;
+    auto gpu_state_buffer = cu::allocGPU(*gpu_state_size_readback);
+    gpu_consts_readback->baseAddr = gpu_state_buffer;
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
     REQ_CU(cuModuleGetGlobal(&job_sys_consts_addr, &job_sys_consts_size,
-                             gpu_kernels.mod, "madronaTrainJobSysConstants"));
+                             gpu_kernels.mod, "madronaTrainGPUImplConsts"));
 
-    REQ_CU(cuMemcpyHtoD(job_sys_consts_addr, job_consts_readback,
+    REQ_CU(cuMemcpyHtoD(job_sys_consts_addr, gpu_consts_readback,
                         job_sys_consts_size));
 
-    launchKernel(gpu_kernels.initJobSystem, 1, 1, no_args);
+    launchKernel(gpu_kernels.init, 1, 1, no_args);
     
     uint32_t num_queue_blocks =
         utils::divideRoundUp(num_worlds, ICfg::numInitQueueThreads);
@@ -409,7 +377,7 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     REQ_CUDA(cudaStreamSynchronize(strm));
 
     return GPUEngineState {
-        job_mgr,
+        gpu_state_buffer,
     };
 }
 

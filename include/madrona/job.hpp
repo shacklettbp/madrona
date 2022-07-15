@@ -32,22 +32,7 @@ private:
     EntryPtr func_;
     void *data_;
 
-friend class JobManager;
-};
-
-class Context {
-public:
-    Context(JobManager &job_mgr, int worker_idx);
-    AllocContext mem;
-
-    template <typename Fn, typename... Args>
-    inline JobID queueJob(Fn &&fn, bool is_child = true,
-                          Args... dependencies);
-
-private:
-    JobManager * const job_mgr_;
-    const int worker_idx_;
-
+friend class Context;
 friend class JobManager;
 };
 
@@ -60,8 +45,9 @@ public:
                bool pin_workers = true);
     ~JobManager();
 
-    template <typename Fn>
-    inline Job makeJob(Fn &&fn, int thread_idx);
+    inline void * allocJob(int worker_idx, uint32_t num_bytes,
+                           uint32_t alignment);
+    inline void deallocJob(int worker_idx, void *ptr, uint32_t num_bytes);
 
     inline JobID queueJob(int thread_idx, Job job,
                           const JobID *deps, uint32_t num_dependencies,
@@ -121,7 +107,6 @@ private:
     JobID queueJob(int thread_idx, Job::EntryPtr job_func, void *job_data,
                    const JobID *deps, uint32_t num_dependencies,
                    JobPriority prio);
-    inline void deallocJob(int worker_idx, void *ptr, uint32_t num_bytes);
 
     void workerThread(const int thread_idx);
     void ioThread(const int thread_idx);

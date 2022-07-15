@@ -1,5 +1,6 @@
 #include <madrona/job.hpp>
 #include <madrona/utils.hpp>
+#include <madrona/context.hpp>
 
 #if defined(__linux__) or defined(__APPLE__)
 #include <signal.h>
@@ -56,11 +57,6 @@ static inline void workerYield()
     STATIC_UNIMPLEMENTED();
 #endif
 }
-
-Context::Context(JobManager &job_mgr, int worker_idx)
-    : job_mgr_(&job_mgr),
-      worker_idx_(worker_idx)
-{}
 
 static inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
 {
@@ -595,7 +591,9 @@ static inline bool getNextJob(void *const queue_start,
 
 void JobManager::workerThread(const int thread_idx)
 {
-    Context thread_job_ctx(*this, thread_idx);
+    StateManager state_mgr(0);
+
+    Context thread_job_ctx(*this, state_mgr, thread_idx);
 
     const int num_queues = threads_.size();
 
@@ -632,7 +630,9 @@ void JobManager::workerThread(const int thread_idx)
 
 void JobManager::ioThread(const int thread_idx)
 {
-    Context thread_job_ctx(*this, thread_idx);
+    StateManager state_mgr(0);
+
+    Context thread_job_ctx(*this, state_mgr, thread_idx);
 
     const int num_queues = threads_.size();
 
