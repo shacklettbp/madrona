@@ -12,6 +12,9 @@ public:
 
     inline StateManager & state();
 
+    template <typename T>
+    T & world();
+
     template <typename Fn, typename... Args>
     inline JobID queueJob(Fn &&fn, bool is_child = true,
                           Args && ...dependencies);

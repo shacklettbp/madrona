@@ -6,8 +6,9 @@ namespace madrona {
 namespace gpuTrain {
 
 struct GPUImplConsts {
-    void *baseAddr;
-    uint32_t stateManagerOffset;
+    void *jobSystemAddr;
+    void *stateManagerAddr;
+    void *worldDataAddr;
     uint32_t jobGridsOffset;
     uint32_t jobListOffset;
     uint32_t maxJobsPerGrid;

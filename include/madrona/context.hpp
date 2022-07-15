@@ -8,10 +8,14 @@ namespace madrona {
 
 class Context {
 public:
-    Context(JobManager &job_mgr, StateManager &state_mgr, int worker_idx);
+    Context(JobManager &job_mgr, StateManager &state_mgr, void *world_data,
+            int worker_idx);
 
     AllocContext mem;
     inline StateManager & state();
+
+    template <typename T>
+    inline T & world();
 
     template <typename Fn, typename... Deps>
     inline JobID queueJob(Fn &&fn, bool is_child = true,
@@ -32,9 +36,6 @@ public:
 
     template <typename T>
     TableRef table();
-
-    template <typename T>
-    T world();
 #endif
 
 private:
@@ -43,6 +44,7 @@ private:
 
     JobManager * const job_mgr_;
     StateManager * const state_mgr_;
+    void * const world_data_;
     const int worker_idx_;
 };
 

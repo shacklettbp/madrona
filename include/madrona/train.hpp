@@ -9,6 +9,8 @@ namespace madrona {
 
 struct TrainConfig {
     uint32_t numWorlds;
+    uint32_t numWorldDataBytes;
+    uint32_t worldDataAlignment;
     uint32_t gpuID;
 };
 

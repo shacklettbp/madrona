@@ -4,6 +4,7 @@ namespace madrona {
 
 template <typename Fn>
 JobManager::JobManager(int desired_num_workers, int num_io,
+                       StateManager &state_mgr, void *world_data,
                        Fn &&fn, bool pin_workers)
     : JobManager(desired_num_workers, num_io,
         [](Context &ctx, void *data) {
@@ -12,6 +13,8 @@ JobManager::JobManager(int desired_num_workers, int num_io,
             fn_ptr->~Fn();
         },
         &fn,
+        state_mgr,
+        world_data,
         pin_workers)
 {}
 

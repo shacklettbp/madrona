@@ -309,6 +309,7 @@ static inline Job *getJobArray(JobQueueTail *tail)
 
 JobManager::JobManager(int desired_num_workers, int num_io,
                        Job::EntryPtr start_func, void *start_data,
+                       StateManager &state_mgr, void *world_data,
                        bool pin_workers)
     : threads_(getNumWorkers(desired_num_workers) + num_io, InitAlloc()),
       alloc_state_(Alloc::makeSharedState(InitAlloc(),
@@ -374,21 +375,23 @@ JobManager::JobManager(int desired_num_workers, int num_io,
 
     const int num_workers = threads_.size() - num_io;
     for (int i = 0; i < num_workers; i++) {
-        threads_.emplace(i, [this, i, pin_workers]() {
+        threads_.emplace(i,
+                         [this, i, pin_workers, &state_mgr, world_data]() {
             disableThreadSignals();
             if (pin_workers) {
                 setThreadAffinity(i);
             }
 
-            workerThread(i);
+            workerThread(i, state_mgr, world_data);
         });
     }
 
     for (int i = 0; i < num_io; i++) {
         int thread_idx = num_workers + i;
-        threads_.emplace(thread_idx, [this, thread_idx]() {
+        threads_.emplace(thread_idx,
+                         [this, thread_idx, &state_mgr, world_data]() {
             disableThreadSignals();
-            ioThread(thread_idx);
+            ioThread(thread_idx, state_mgr, world_data);
         });
     }
 
@@ -589,11 +592,10 @@ static inline bool getNextJob(void *const queue_start,
     return false;
 }
 
-void JobManager::workerThread(const int thread_idx)
+void JobManager::workerThread(const int thread_idx, StateManager &state_mgr,
+                              void *world_data)
 {
-    StateManager state_mgr(0);
-
-    Context thread_job_ctx(*this, state_mgr, thread_idx);
+    Context thread_job_ctx(*this, state_mgr, world_data, thread_idx);
 
     const int num_queues = threads_.size();
 
@@ -628,11 +630,10 @@ void JobManager::workerThread(const int thread_idx)
     }
 }
 
-void JobManager::ioThread(const int thread_idx)
+void JobManager::ioThread(const int thread_idx, StateManager &state_mgr,
+                          void *world_data)
 {
-    StateManager state_mgr(0);
-
-    Context thread_job_ctx(*this, state_mgr, thread_idx);
+    Context thread_job_ctx(*this, state_mgr, world_data, thread_idx);
 
     const int num_queues = threads_.size();
 

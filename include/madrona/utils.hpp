@@ -46,5 +46,15 @@ constexpr inline uint32_t intLog2(uint32_t v)
     return sizeof(unsigned int) * 8 - __builtin_clz(v) - 1;
 }
 
+template <typename> struct PackDelegator;
+template <template <typename...> typename T, typename ...Args>
+struct PackDelegator<T<Args...>> {
+    template <typename Fn>
+    static auto call(Fn &&fn) -> decltype(fn.template operator()<Args...>())
+    {
+        return fn.template operator()<Args...>();
+    }
+};
+
 }
 }

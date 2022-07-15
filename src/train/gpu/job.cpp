@@ -45,7 +45,7 @@ struct alignas(16) JobTracker {
 
 static inline JobManager * getJobManager()
 {
-    return (JobManager *)GPUImplConsts::get().baseAddr;
+    return (JobManager *)GPUImplConsts::get().jobSystemAddr;
 }
 
 static inline JobGridInfo *getGridInfo(JobManager *mgr)
@@ -712,6 +712,8 @@ void Context::markJobFinished(uint32_t num_jobs)
 
 extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     uint32_t num_worlds,
+    uint32_t num_world_data_bytes,
+    uint32_t world_data_alignment,
     madrona::gpuTrain::GPUImplConsts *out_constants,
     size_t *job_system_buffer_size)
 {
@@ -729,6 +731,12 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
         std::alignment_of_v<StateManager>);
 
     total_bytes = state_mgr_offset + sizeof(StateManager);
+
+    uint64_t world_data_offset =
+        utils::roundUp(total_bytes, (size_t)world_data_alignment);
+
+    total_bytes =
+        world_data_offset + (size_t)num_world_data_bytes * num_worlds;
 
     uint64_t grid_offset = utils::roundUp(total_bytes,
         std::alignment_of_v<JobGridInfo>);
@@ -751,8 +759,9 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     total_bytes = tracker_offset + sizeof(JobTracker) * max_num_jobs;
 
     *out_constants = GPUImplConsts {
-        .baseAddr = nullptr,
-        .stateManagerOffset = (uint32_t)state_mgr_offset,
+        .jobSystemAddr = (void *)0ul,
+        .stateManagerAddr = (void *)state_mgr_offset,
+        .worldDataAddr = (void *)world_data_offset,
         .jobGridsOffset = (uint32_t)grid_offset,
         .jobListOffset = (uint32_t)wait_job_offset,
         .maxJobsPerGrid = max_num_jobs_per_grid,
@@ -771,11 +780,7 @@ extern "C" __global__  void madronaTrainInitializeKernel()
     new (job_mgr) JobManager();
     initializeJobSystem(job_mgr);
 
-    auto state_mgr = (StateManager *)(
-        (char *)GPUImplConsts::get().baseAddr +
-        GPUImplConsts::get().stateManagerOffset);
-
-    new (state_mgr) StateManager(1024);
+    new (GPUImplConsts::get().stateManagerAddr) StateManager(1024);
 }
 
 extern "C" __global__ void madronaTrainJobSystemKernel()

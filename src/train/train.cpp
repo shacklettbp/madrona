@@ -322,6 +322,8 @@ HeapArray<void *> makeKernelArgBuffer(Ts ...args)
 }
 
 static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
+                                             uint32_t num_world_data_bytes,
+                                             uint32_t world_data_alignment,
                                              const GPUKernels &gpu_kernels,
                                              cudaStream_t strm)
 {
@@ -340,6 +342,8 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
         sizeof(size_t));
 
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
+                                                   num_world_data_bytes,
+                                                   world_data_alignment,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
@@ -353,7 +357,21 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     REQ_CUDA(cudaStreamSynchronize(strm));
 
     auto gpu_state_buffer = cu::allocGPU(*gpu_state_size_readback);
-    gpu_consts_readback->baseAddr = gpu_state_buffer;
+
+    // The initial values of these pointers are equal to their offsets from
+    // the base pointer. Now that we have the base pointer, write the
+    // real pointer values.
+    gpu_consts_readback->jobSystemAddr =
+        (char *)gpu_consts_readback->jobSystemAddr +
+        (uintptr_t)gpu_state_buffer;
+
+    gpu_consts_readback->stateManagerAddr =
+        (char *)gpu_consts_readback->stateManagerAddr +
+        (uintptr_t)gpu_state_buffer;
+
+    gpu_consts_readback->worldDataAddr =
+        (char *)gpu_consts_readback->worldDataAddr +
+        (uintptr_t)gpu_state_buffer;
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
@@ -437,8 +455,9 @@ TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
     
     GPUKernels gpu_kernels = buildKernels(compile_cfg, train_cfg.gpuID);
 
-    GPUEngineState eng_state = initEngineAndUserState(train_cfg.numWorlds,
-                                                      gpu_kernels, strm);
+    GPUEngineState eng_state = initEngineAndUserState(
+        train_cfg.numWorlds, train_cfg.numWorldDataBytes,
+        train_cfg.worldDataAlignment, gpu_kernels, strm);
 
     auto run_graph = makeRunGraph(gpu_kernels.queueUserRun,
                                   gpu_kernels.runJobSystem,

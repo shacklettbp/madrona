@@ -12,6 +12,9 @@ struct Entity {
     static constexpr inline Entity none();
 };
 
+template <typename... Components>
+struct Archetype {};
+
 #if 0
 template <typename... ColTypes>
 struct Query {

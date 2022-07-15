@@ -49,8 +49,13 @@ Context::Context(uint32_t job_id, uint32_t grid_id, uint32_t world_id,
 
 StateManager & Context::state()
 {
-    return *(StateManager *)((char *)gpuTrain::GPUImplConsts::get().baseAddr +
-         gpuTrain::GPUImplConsts::get().stateManagerOffset);
+    return *(StateManager *)gpuTrain::GPUImplConsts::get().stateManagerAddr;
+}
+
+template <typename T>
+T & Context::world()
+{
+    return ((T *)gpuTrain::GPUImplConsts::get().worldDataAddr)[world_id_];
 }
 
 template <typename Fn, typename... Deps>

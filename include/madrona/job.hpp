@@ -41,8 +41,8 @@ public:
     class Alloc;
 
     template <typename Fn>
-    JobManager(int desired_num_workers, int num_io, Fn &&fn,
-               bool pin_workers = true);
+    JobManager(int desired_num_workers, int num_io, StateManager &state_mgr,
+               void *world_data, Fn &&fn, bool pin_workers = true);
     ~JobManager();
 
     inline void * allocJob(int worker_idx, uint32_t num_bytes,
@@ -102,14 +102,17 @@ private:
     };
 
     JobManager(int desired_num_workers, int num_io, Job::EntryPtr start_func,
-               void *start_data, bool pin_workers);
+               void *start_data, StateManager &state_mgr, void *world_data,
+               bool pin_workers);
 
     JobID queueJob(int thread_idx, Job::EntryPtr job_func, void *job_data,
                    const JobID *deps, uint32_t num_dependencies,
                    JobPriority prio);
 
-    void workerThread(const int thread_idx);
-    void ioThread(const int thread_idx);
+    void workerThread(const int thread_idx, StateManager &state_mgr,
+                      void *world_data);
+    void ioThread(const int thread_idx, StateManager &state_mgr,
+                  void *world_data);
 
     HeapArray<std::thread, InitAlloc> threads_;
 

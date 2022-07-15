@@ -2,6 +2,8 @@
 
 #include <madrona/ecs.hpp>
 
+#include <type_traits>
+
 namespace madrona {
 
 class StateManager {
@@ -13,6 +15,9 @@ public:
 
     template <typename T>
     Entity componentID();
+
+    template <typename T>
+    void registerArchetype();
 
 private:
     uint32_t num_components_;

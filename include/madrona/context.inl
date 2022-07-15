@@ -2,11 +2,17 @@
 
 namespace madrona {
 
-inline StateManager & Context::state() { return *state_mgr_; }
+StateManager & Context::state() { return *state_mgr_; }
+
+template <typename T>
+T & Context::world()
+{
+    return *(T *)world_data_;
+}
  
 // FIXME: implement is_child and dependencies
 template <typename Fn, typename... Deps>
-inline JobID Context::queueJob(Fn &&fn, bool is_child,
+JobID Context::queueJob(Fn &&fn, bool is_child,
                                Deps &&... dependencies)
 {
     Job job = makeJob(std::forward<Fn>(fn));
