@@ -1,7 +1,7 @@
 set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona")
 add_library(madrona_core STATIC
     ${INC_DIR}/fwd.hpp
-    ${INC_DIR}/memory.hpp  ${INC_DIR}/memory.inl
+    ${INC_DIR}/memory.hpp  ${INC_DIR}/memory.inl memory.cpp
     ${INC_DIR}/heap_array.hpp ${INC_DIR}/span.hpp
     ${INC_DIR}/utils.hpp
     ${INC_DIR}/crash.hpp crash.cpp

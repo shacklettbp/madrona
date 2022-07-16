@@ -57,6 +57,7 @@ void StateManager::registerArchetype()
     std::atomic_thread_fence(std::memory_order_acquire);
 
 
+
     register_lock_.store(0, std::memory_order_relaxed);
     std::atomic_thread_fence(std::memory_order_release);
 }

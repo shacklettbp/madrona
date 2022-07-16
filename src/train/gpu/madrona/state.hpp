@@ -8,11 +8,6 @@ namespace madrona {
 
 class StateManager {
 public:
-    struct Config {
-        uint32_t maxComponents;
-        uint32_t worldDataSize;
-    };
-
     StateManager(uint32_t max_components);
 
     template <typename T>
