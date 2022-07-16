@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <type_traits>
 #include <madrona/crash.hpp>
@@ -54,6 +55,30 @@ struct PackDelegator<T<Args...>> {
     {
         return fn.template operator()<Args...>();
     }
+};
+
+class SpinLock {
+public:
+    SpinLock() : lock_(0) {}
+
+    void lock()
+    {
+        std::atomic_thread_fence(std::memory_order_acquire);
+        while (lock_.test_and_set(std::memory_order_relaxed)) {
+            while (lock_.test(std::memory_order_relaxed)) {}
+
+            std::atomic_thread_fence(std::memory_order_acquire);
+        }
+    }
+
+    void unlock()
+    {
+        lock_.clear(std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_release);
+    }
+
+private:
+    std::atomic_flag lock_;
 };
 
 }

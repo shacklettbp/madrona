@@ -4,49 +4,50 @@
 
 namespace madrona {
 
-namespace ComponentID {
-template <typename T> Entity id;
-}
-
-namespace ArchetypeID {
-template <typename T> Entity id;
-}
-
 template <typename T>
+Entity IDManager::registerType()
+{
+    uint32_t id = IDManager::assignID(
+#ifdef _MSC_VER
+        __FUNCDNAME__
+#else
+        __PRETTY_FUNCTION__
+#endif
+        );
+
+    return Entity {
+        id,
+    };
+}
+
+// Defining this static member in here rather than ecs.inl is a little
+// weird, but the GPU implementation needs to be different due to
+// the lack of static initialization support in nvcc, and ecs.inl is
+// currently shared.
+template <typename ComponentT>
+Entity Component<ComponentT>::_id = IDManager::registerType<ComponentT>();
+
+template <typename ComponentT>
 Entity StateManager::registerComponent()
 {
-    uint32_t component_id = num_components_++;
-    Entity entity { component_id };
-
-    ComponentID::id<T> = entity;
-
-    return entity;
+    // FIXME: register size & alignment
+    return ComponentT::_id;
 }
 
-template <typename T>
+template <typename ComponentT>
 Entity StateManager::componentID()
 {
-    return ComponentID::id<T>;
+    return ComponentT::_id;
 }
 
-template <template<typename ...> class A, typename... Components>
-struct ComponentExtractor {
-    static constexpr uint32_t numComponents = sizeof...(Components);
-};
-
-template <typename T>
+template <typename ArchetypeT>
 void StateManager::registerArchetype()
 {
-    using Delegator = utils::PackDelegator<T>;
+    using Delegator = utils::PackDelegator<ArchetypeT>;
 
-    uint32_t num_components = Delegator::call([]<typename... Args>() {
-        static_assert(std::is_same_v<T, Archetype<Args...>>);
-
-        uint32_t num_components = sizeof...(Args);
-
+    Delegator::call([]<typename... Args>() {
+        static_assert(std::is_same_v<ArchetypeT, Archetype<Args...>>);
         // do actual stuff
-
-        return num_components;
     });
 }
 

@@ -4,24 +4,23 @@
 
 namespace madrona {
 
-namespace ComponentID {
-template <typename T> Entity id = Entity::none();
-}
+template <typename ComponentT>
+Entity Component<ComponentT>::_id = Entity::none();
 
-template <typename T>
+template <typename ComponentT>
 Entity StateManager::registerComponent()
 {
     // Get lock
     while (register_lock_.exchange(1, std::memory_order_acq_rel)) {}
     std::atomic_thread_fence(std::memory_order_acquire);
 
-    Entity component_id = ComponentID::id<T>;
+    Entity component_id = ComponentT::_id;
 
     if (component_id == Entity::none()) {
         uint32_t new_component_id = num_components_++;
         component_id.id = new_component_id;
 
-        ComponentID::id<T> = component_id;
+        ComponentT::_id = component_id;
     }
 
     register_lock_.store(0, std::memory_order_relaxed);
@@ -30,18 +29,18 @@ Entity StateManager::registerComponent()
     return component_id;
 }
 
-template <typename T>
+template <typename ComponentT>
 Entity StateManager::componentID()
 {
-    return ComponentID::id<T>;
+    return ComponentT::_id;
 }
 
-template <typename T>
+template <typename ArchetypeT>
 void StateManager::registerArchetype()
 {
-    using Delegator = utils::PackDelegator<T>;
+    using Delegator = utils::PackDelegator<ArchetypeT>;
     uint32_t num_components = Delegator::call([]<typename... Args>() {
-        static_assert(std::is_same_v<T, Archetype<Args...>>);
+        static_assert(std::is_same_v<ArchetypeT, Archetype<Args...>>);
 
         uint32_t num_components = sizeof...(Args);
 

@@ -45,8 +45,10 @@ else ()
     message(FATAL_ERROR "Unsupported compiler frontend")
 endif()
 
-target_link_libraries(madrona_core PUBLIC 
-    madrona_sys_defns
+target_link_libraries(madrona_core
+    PUBLIC 
+        madrona_sys_defns
+    PRIVATE
 )
 
 target_include_directories(madrona_core

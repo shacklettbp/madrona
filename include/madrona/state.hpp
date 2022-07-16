@@ -2,25 +2,36 @@
 
 #include <madrona/ecs.hpp>
 
-#include <type_traits>
-
 namespace madrona {
+
+class IDManager {
+public:
+    template <typename T>
+    static Entity registerType();
+
+    static uint32_t numTypes();
+
+private:
+    IDManager() = delete;
+    ~IDManager() = delete;
+
+    static uint32_t assignID(const char *identifier);
+};
 
 class StateManager {
 public:
     StateManager(uint32_t max_components);
 
-    template <typename T>
+    template <typename ComponentT>
     Entity registerComponent();
 
-    template <typename T>
+    template <typename ComponentT>
     Entity componentID();
 
-    template <typename T>
+    template <typename ArchetypeT>
     void registerArchetype();
 
 private:
-    uint32_t num_components_;
 };
 
 }

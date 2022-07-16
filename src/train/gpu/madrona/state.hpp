@@ -10,13 +10,13 @@ class StateManager {
 public:
     StateManager(uint32_t max_components);
 
-    template <typename T>
+    template <typename ComponentT>
     Entity registerComponent();
 
-    template <typename T>
+    template <typename ComponentT>
     Entity componentID();
 
-    template <typename T>
+    template <typename ArchetypeT>
     void registerArchetype();
 
 private:

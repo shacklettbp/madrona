@@ -11,10 +11,6 @@
 
 namespace madrona {
 
-namespace InternalConfig {
-    inline constexpr size_t BumpAllocBlockSize = 2 * 1024 * 1024;
-};
-
 AllocScope::AllocScope(const PolyAlloc &alloc, AllocScope *parent,
                        AllocContext *ctx)
     : cur_alloc_(alloc), parent_(parent), ctx_(ctx)

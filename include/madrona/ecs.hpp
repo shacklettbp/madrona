@@ -15,6 +15,14 @@ struct Entity {
 template <typename... Components>
 struct Archetype {};
 
+template <typename ComponentT>
+struct Component {
+private:
+    static Entity _id;
+
+friend class StateManager;
+};
+
 #if 0
 template <typename... ColTypes>
 struct Query {
