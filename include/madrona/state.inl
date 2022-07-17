@@ -2,6 +2,8 @@
 
 #include <madrona/utils.hpp>
 
+#include <array>
+
 namespace madrona {
 
 template <typename T>
@@ -18,8 +20,12 @@ Entity StateManager::registerComponent()
 {
     StateManager::registerType(&TypeID<ComponentT>::id);
 
-    // FIXME: register size & alignment
-    return TypeID<ComponentT>::id;
+    Entity component_entity = TypeID<ComponentT>::id;
+
+    saveComponentInfo(component_entity, std::alignment_of_v<ComponentT>,
+                      sizeof(ComponentT));
+
+    return component_entity;
 }
 
 template <typename ArchetypeT>
@@ -29,12 +35,22 @@ Entity StateManager::registerArchetype()
 
     using Delegator = utils::PackDelegator<ArchetypeT>;
 
-    Delegator::call([]<typename... Args>() {
+    auto archetype_components = Delegator::call([]<typename... Args>() {
         static_assert(std::is_same_v<ArchetypeT, Archetype<Args...>>);
-        // do actual stuff
-    });
+        std::array archetype_components {
+            TypeID<Args>::id
+            ...
+        };
 
-    return TypeID<ArchetypeT>::id;
+        return archetype_components;
+    });
+    
+    Entity archetype_entity = TypeID<ArchetypeT>::id;
+
+    saveArchetypeInfo(archetype_entity,
+        Span(archetype_components.data(), archetype_components.size()));
+
+    return archetype_entity;
 }
 
 template <typename ComponentT>

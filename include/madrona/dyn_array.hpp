@@ -16,7 +16,7 @@ namespace madrona {
 
 // Not a replacement for std::vector!
 // This class memcpys items on expansion
-template <typename T, typename A = PolyAlloc>
+template <typename T, typename A = DefaultAlloc>
 class DynArray {
 public:
     using RefT = std::add_lvalue_reference_t<T>;

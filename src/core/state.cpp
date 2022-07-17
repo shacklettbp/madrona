@@ -9,30 +9,35 @@
 
 namespace madrona {
 
-struct TypeInfo {
-    Entity *idPtr;
+struct IDInfo {
+    Entity *ptr;
     std::string_view typeName;
     std::size_t nameHash;
 };
 
 struct TypeIDTracker {
     utils::SpinLock typeLock;
-    DynArray<TypeInfo, InitAlloc> typeInfos;
+    DynArray<IDInfo, InitAlloc> ids;
     uint32_t numRegisteredTypes;
 };
+
+StateManager::StateManager(uint32_t max_components)
+    : type_infos_(max_components, InitAlloc()),
+      archetype_components_(0)
+{}
 
 static TypeIDTracker &getSingletonTracker()
 {
     static TypeIDTracker id_tracker {
         .typeLock {},
-        .typeInfos { 0, InitAlloc() },
+        .ids { 0, InitAlloc() },
         .numRegisteredTypes = 0,
     };
 
     return id_tracker;
 }
 
-std::string_view extractTypeName(const char *compiler_name)
+static std::string_view extractTypeName(const char *compiler_name)
 {
     static const char compiler_prefix[] =
 #ifdef _MSC_VER
@@ -94,16 +99,16 @@ Entity StateManager::trackByName(Entity *ptr, const char *compiler_name)
     // since registerType won't be called again for that type, the shared
     // library's ID variable would be left at Entity::none() even though
     // it is tracked in the typeInfos list.
-    for (const TypeInfo &type_info : tracker.typeInfos) {
-        if (type_hash == type_info.nameHash &&
-            type_name == type_info.typeName) {
-            cur_type_entity = *type_info.idPtr;
+    for (const IDInfo &id_info : tracker.ids) {
+        if (type_hash == id_info.nameHash &&
+            type_name == id_info.typeName) {
+            cur_type_entity = *id_info.ptr;
             break;
         }
     }
 
-    tracker.typeInfos.push_back({
-        .idPtr = ptr,
+    tracker.ids.push_back({
+        .ptr = ptr,
         .typeName = type_name,
         .nameHash = type_hash,
     });
@@ -112,7 +117,7 @@ Entity StateManager::trackByName(Entity *ptr, const char *compiler_name)
     // into trackByName, the lock is released before the code that 
     // calls this function takes the return value and stores it in the
     // global ID variable. This can cause a race with the above for loop,
-    // where type_info.idPtr still points to uninitialized memory. To avoid
+    // where type_info.ptr still points to uninitialized memory. To avoid
     // this, assign the entity value (usually Entity::none()) here, even
     // though it will be immediately assigned afterwards as well.
     *ptr = cur_type_entity;
@@ -142,32 +147,50 @@ void StateManager::registerType(Entity *ptr)
         .id = type_id,
     };
 
-    const TypeInfo *matched_type_info = nullptr;
-    for (const TypeInfo &candidate_type_info : tracker.typeInfos) {
-        if (candidate_type_info.idPtr == ptr) {
-            matched_type_info = &candidate_type_info;
+    const IDInfo *matched_id_info = nullptr;
+    for (const IDInfo &candidate_id_info : tracker.ids) {
+        if (candidate_id_info.ptr == ptr) {
+            matched_id_info = &candidate_id_info;
             break;
         }
     }
 
     // If type_info is null, that implies the static member initializer
     // for this type was never called, which makes no sense.
-    assert(matched_type_info != nullptr);
+    assert(matched_id_info != nullptr);
 
     // Find all registered ID memory locations that refer to this type and
     // set them with the newly assigned ID. This covers all code
     // (libraries etc) that is loaded before the callto registerType.
-    for (const TypeInfo &type_info : tracker.typeInfos) {
-        if (matched_type_info->nameHash == type_info.nameHash &&
-            matched_type_info->typeName == type_info.typeName) {
-            *type_info.idPtr = type_entity;
+    for (const IDInfo &id_info : tracker.ids) {
+        if (matched_id_info->nameHash == id_info.nameHash &&
+            matched_id_info->typeName == id_info.typeName) {
+            *id_info.ptr = type_entity;
         }
     }
 }
 
-StateManager::StateManager(uint32_t max_components)
+void StateManager::saveComponentInfo(Entity id, uint32_t alignment,
+                                     uint32_t num_bytes)
 {
-    (void)max_components;
+    type_infos_[id.id] = TypeInfo {
+        .alignment = alignment,
+        .numBytes = num_bytes,
+    };
 }
+
+void StateManager::saveArchetypeInfo(Entity id, Span<Entity> components)
+{
+    uint32_t offset = archetype_components_.size();
+    for (Entity e : components) {
+        archetype_components_.push_back(e);
+    }
+
+    type_infos_[id.id] = TypeInfo {
+        .componentOffset = offset,
+        .numComponents = components.size(),
+    };
+}
+
 
 }
