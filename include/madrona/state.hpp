@@ -10,6 +10,7 @@ namespace madrona {
 class StateManager {
 public:
     StateManager(uint32_t max_types);
+    ~StateManager();
 
     template <typename ComponentT>
     Entity registerComponent();
@@ -24,16 +25,7 @@ public:
     Entity archetypeID();
 
 private:
-    union TypeInfo {
-        struct {
-            uint32_t alignment;
-            uint32_t numBytes;
-        };
-        struct {
-            uint32_t componentOffset;
-            uint32_t numComponents;
-        };
-    };
+    struct TypeInfo;
 
     template <typename T> struct TypeID;
 
@@ -46,7 +38,7 @@ private:
     void saveComponentInfo(Entity id, uint32_t alignment, uint32_t num_bytes);
     void saveArchetypeInfo(Entity id, Span<Entity> components);
 
-    HeapArray<TypeInfo, InitAlloc> type_infos_;
+    TypeInfo *type_infos_;
     DynArray<Entity> archetype_components_;
 };
 

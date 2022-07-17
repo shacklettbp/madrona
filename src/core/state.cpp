@@ -9,6 +9,19 @@
 
 namespace madrona {
 
+struct StateManager::TypeInfo {
+    union {
+        struct {
+            uint32_t alignment;
+            uint32_t numBytes;
+        };
+        struct {
+            uint32_t componentOffset;
+            uint32_t numComponents;
+        };
+    };
+};
+
 struct IDInfo {
     Entity *ptr;
     std::string_view typeName;
@@ -22,9 +35,15 @@ struct TypeIDTracker {
 };
 
 StateManager::StateManager(uint32_t max_components)
-    : type_infos_(max_components, InitAlloc()),
+    : type_infos_(
+        (TypeInfo *)InitAlloc().alloc(max_components * sizeof(TypeInfo))),
       archetype_components_(0)
 {}
+
+StateManager::~StateManager()
+{
+    InitAlloc().dealloc(type_infos_);
+}
 
 static TypeIDTracker &getSingletonTracker()
 {
