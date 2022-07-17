@@ -34,12 +34,14 @@ static TypeIDTracker &getSingletonTracker()
 std::string_view extractTypeName(const char *compiler_name)
 {
     static const char compiler_prefix[] =
-#ifdef _MSV_VER
+#ifdef _MSC_VER
         STATIC_UNIMPLEMENTED();
 #elif defined(__clang__)
-        ""
+        "static madrona::Entity madrona::StateManager::trackType(madrona::Entity *) [T = "
 #elif defined(__GNUC__)
-        ""
+        "static madrona::Entity madrona::StateManager::trackType(madrona::Entity*) [with T = "
+#else
+        STATIC_UNIMPLEMENTED();
 #endif
         ;
 
@@ -47,7 +49,15 @@ std::string_view extractTypeName(const char *compiler_name)
 
     std::string_view type_name(compiler_name);
 
-    size_t end_pos = type_name.find_last_of(']');
+    size_t end_pos =
+#ifdef _MSC_VER
+        STATIC_UNIMPLEMENTED();
+#elif defined(__clang__) or defined(__GNUC__)
+        type_name.find_last_of(']')
+#else
+        STATIC_UNIMPLEMENTED();
+#endif
+        ;
 
     return type_name.substr(0, end_pos);
 }
