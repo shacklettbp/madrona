@@ -7,21 +7,11 @@ namespace madrona {
 struct Entity {
     uint32_t id;
 
-    bool operator!=(Entity o) const;
-
     static constexpr inline Entity none();
 };
 
 template <typename... Components>
 struct Archetype {};
-
-template <typename ComponentT>
-struct Component {
-private:
-    static Entity _id;
-
-friend class StateManager;
-};
 
 #if 0
 template <typename... ColTypes>

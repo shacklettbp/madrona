@@ -3,6 +3,7 @@
 #include <atomic>
 
 #include <madrona/ecs.hpp>
+#include <madrona/utils.hpp>
 
 namespace madrona {
 
@@ -13,16 +14,20 @@ public:
     template <typename ComponentT>
     Entity registerComponent();
 
+    template <typename ArchetypeT>
+    Entity registerArchetype();
+
     template <typename ComponentT>
     Entity componentID();
 
-    template <typename ArchetypeT>
-    void registerArchetype();
-
 private:
-    uint32_t num_components_;
+    template <typename T> struct TypeID;
 
-    std::atomic_uint32_t register_lock_;
+    template <typename T>
+    static Entity registerType();
+
+    static inline uint32_t num_components_ = 0;
+    static inline utils::SpinLock register_lock_ {};
 };
 
 }

@@ -112,7 +112,7 @@ public:
     RefT emplace_back(Args &&...args)
     {
         if (n_ == capacity_) [[unlikely]] {
-            expand();
+            expand(n_ + 1);
         }
 
         new (&ptr_[n_]) T(std::forward<Args>(args)...);
@@ -123,7 +123,7 @@ public:
     RefT push_back(const T &v)
     {
         if (n_ == capacity_) [[unlikely]] {
-            expand();
+            expand(n_ + 1);
         }
 
         new (&ptr_[n_]) T(v);
@@ -134,7 +134,7 @@ public:
     RefT push_back(T &&v)
     {
         if (n_ == capacity_) [[unlikely]] {
-            expand();
+            expand(n_ + 1);
         }
 
         new (&ptr_[n_]) T(std::move(v));
@@ -181,7 +181,7 @@ public:
     size_t size() const { return n_; }
 
 private:
-    void expand(size_t new_size = 0)
+    void expand(size_t new_size)
     {
         size_t new_capacity = capacity_ * expansion_factor_;
         new_capacity = std::max(new_capacity, new_size);

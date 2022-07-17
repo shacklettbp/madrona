@@ -4,20 +4,6 @@
 
 namespace madrona {
 
-class IDManager {
-public:
-    template <typename T>
-    static Entity registerType();
-
-    static uint32_t numTypes();
-
-private:
-    IDManager() = delete;
-    ~IDManager() = delete;
-
-    static uint32_t assignID(const char *identifier);
-};
-
 class StateManager {
 public:
     StateManager(uint32_t max_components);
@@ -25,13 +11,26 @@ public:
     template <typename ComponentT>
     Entity registerComponent();
 
+    template <typename ArchetypeT>
+    Entity registerArchetype();
+
     template <typename ComponentT>
     Entity componentID();
 
-    template <typename ArchetypeT>
-    void registerArchetype();
+    template <typename ComponentT>
+    Entity archetypeID();
+
 
 private:
+    template <typename T> struct TypeID;
+
+    template <typename T>
+    static Entity trackType(Entity *ptr);
+
+    static Entity trackByName(Entity *ptr, const char *name);
+
+    static void registerType(Entity *ptr);
+
 };
 
 }

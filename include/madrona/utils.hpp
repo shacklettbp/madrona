@@ -59,8 +59,6 @@ struct PackDelegator<T<Args...>> {
 
 class SpinLock {
 public:
-    SpinLock() : lock_(0) {}
-
     void lock()
     {
         std::atomic_thread_fence(std::memory_order_acquire);
@@ -78,7 +76,7 @@ public:
     }
 
 private:
-    std::atomic_flag lock_;
+    std::atomic_flag lock_ { false };
 };
 
 }
