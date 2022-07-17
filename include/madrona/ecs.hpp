@@ -13,7 +13,6 @@ struct Entity {
 template <typename... Components>
 struct Archetype {};
 
-#if 0
 template <typename... ColTypes>
 struct Query {
     uint32_t size() const;
@@ -22,9 +21,10 @@ struct Query {
     ColType *col() const;
 
     template <typename ColType>
-    ColType &get(Entity entity_id) const;
+    ColType &get(Entity entity) const;
 };
 
+#if 0
 struct TableRef {
     template <typename T>
     T &get(Entity entity_id) const;

@@ -2,12 +2,10 @@
 
 namespace madrona {
 
-Context::Context(JobManager &job_mgr, StateManager &state_mgr, void *world_data,
-                 int worker_idx)
-    : job_mgr_(&job_mgr),
-      state_mgr_(&state_mgr),
-      world_data_(world_data),
-      worker_idx_(worker_idx)
+Context::Context(Context::Init &&init)
+    : job_mgr_(init.jobMgr),
+      state_mgr_(init.stateMgr),
+      worker_idx_(init.workerIdx)
 {}
 
 }

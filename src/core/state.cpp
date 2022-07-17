@@ -180,7 +180,7 @@ void StateManager::registerType(Entity *ptr)
 
     // Find all registered ID memory locations that refer to this type and
     // set them with the newly assigned ID. This covers all code
-    // (libraries etc) that is loaded before the callto registerType.
+    // (libraries etc) that is loaded before the call to registerType.
     for (const IDInfo &id_info : tracker.ids) {
         if (matched_id_info->nameHash == id_info.nameHash &&
             matched_id_info->typeName == id_info.typeName) {

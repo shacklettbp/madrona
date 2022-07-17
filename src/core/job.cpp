@@ -595,7 +595,11 @@ static inline bool getNextJob(void *const queue_start,
 void JobManager::workerThread(const int thread_idx, StateManager &state_mgr,
                               void *world_data)
 {
-    Context thread_job_ctx(*this, state_mgr, world_data, thread_idx);
+    Context thread_job_ctx(Context::Init {
+        .jobMgr = this,
+        .stateMgr = &state_mgr,
+        .workerIdx = thread_idx,
+    });
 
     const int num_queues = threads_.size();
 
@@ -633,7 +637,11 @@ void JobManager::workerThread(const int thread_idx, StateManager &state_mgr,
 void JobManager::ioThread(const int thread_idx, StateManager &state_mgr,
                           void *world_data)
 {
-    Context thread_job_ctx(*this, state_mgr, world_data, thread_idx);
+    Context thread_job_ctx(Context::Init {
+        .jobMgr = this,
+        .stateMgr = &state_mgr,
+        .workerIdx = thread_idx,
+    });
 
     const int num_queues = threads_.size();
 
