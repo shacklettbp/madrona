@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <functional>
+#include <mutex>
 #include <string_view>
 
 namespace madrona {
