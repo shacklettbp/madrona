@@ -38,11 +38,15 @@ friend class JobManager;
 
 class JobManager {
 public:
-    class Alloc;
+    template <typename StartFn> struct Init;
 
-    template <typename Fn>
-    JobManager(int desired_num_workers, int num_io, StateManager &state_mgr,
-               void *world_data, Fn &&fn, bool pin_workers = true);
+    template <typename ContextT, typename DataT, typename StartFn>
+    static Init<StartFn> makeInit(int desired_num_workers, int num_io,
+                                  StateManager &state_mgr, DataT *ctx_data,
+                                  StartFn &&start_fn, bool pin_workers = true);
+
+    template <typename StartFn>
+    JobManager(const Init<StartFn> &init);
     ~JobManager();
 
     inline void * allocJob(int worker_idx, uint32_t num_bytes,
@@ -101,24 +105,25 @@ private:
         std::atomic_uint32_t numOutstanding;
     };
 
-    JobManager(int desired_num_workers, int num_io, Job::EntryPtr start_func,
-               void *start_data, StateManager &state_mgr, void *world_data,
+    JobManager(int desired_num_workers, int num_io, StateManager *state_mgr,
+               uint32_t num_ctx_bytes, uint32_t ctx_alignment,
+               void (*ctx_init)(void *, void *, WorkerInit &&),
+               void *ctx_data, Job::EntryPtr start_func, void *start_data,
                bool pin_workers);
 
     JobID queueJob(int thread_idx, Job::EntryPtr job_func, void *job_data,
                    const JobID *deps, uint32_t num_dependencies,
                    JobPriority prio);
 
-    void workerThread(const int thread_idx, StateManager &state_mgr,
-                      void *world_data);
-    void ioThread(const int thread_idx, StateManager &state_mgr,
-                  void *world_data);
+    void workerThread(const int thread_idx, Context *ctx);
+    void ioThread(const int thread_idx, Context *ctx);
 
     HeapArray<std::thread, InitAlloc> threads_;
 
     Alloc::SharedState alloc_state_;
     HeapArray<Alloc, InitAlloc> job_allocs_;
 
+    void *const ctx_store_;
     void *const queue_store_;
     void *const high_start_;
     void *const normal_start_;

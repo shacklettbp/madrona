@@ -2,6 +2,8 @@
 #include <madrona/utils.hpp>
 #include <madrona/context.hpp>
 
+#include "worker_init.hpp"
+
 #if defined(__linux__) or defined(__APPLE__)
 #include <signal.h>
 #include <unistd.h>
@@ -307,14 +309,22 @@ static inline Job *getJobArray(JobQueueTail *tail)
     return (Job *)((char *)tail + sizeof(JobQueueTail));
 }
 
-JobManager::JobManager(int desired_num_workers, int num_io,
-                       Job::EntryPtr start_func, void *start_data,
-                       StateManager &state_mgr, void *world_data,
+JobManager::JobManager(int desired_num_workers,
+                       int num_io,
+                       StateManager *state_mgr,
+                       uint32_t num_ctx_bytes,
+                       uint32_t ctx_alignment,
+                       void (*ctx_init)(void *, void *, WorkerInit &&),
+                       void *ctx_data,
+                       Job::EntryPtr start_func,
+                       void *start_data,
                        bool pin_workers)
     : threads_(getNumWorkers(desired_num_workers) + num_io, InitAlloc()),
       alloc_state_(Alloc::makeSharedState(InitAlloc(),
                                           InternalConfig::numJobAllocArenas)),
       job_allocs_(threads_.size(), InitAlloc()),
+      ctx_store_(InitAlloc().alloc(threads_.size() * (uint64_t)num_ctx_bytes +
+                                   (uint64_t)ctx_alignment - 1ul)),
       queue_store_(InitAlloc().alloc(
           3u * threads_.size() * InternalConfig::jobQueueBytesPerThread +
             std::alignment_of_v<JobQueueHead>)),
@@ -330,8 +340,18 @@ JobManager::JobManager(int desired_num_workers, int num_io,
           .numOutstanding = 0,
       }
 {
+    char *ctx_store_start = (char *)utils::roundUp((uintptr_t)ctx_store_,
+                                                   (uintptr_t)ctx_alignment);
+
     for (int i = 0, n = threads_.size(); i < n; i++) {
         job_allocs_.emplace(i, alloc_state_);
+
+        void *cur_ctx_ptr = ctx_store_start + i * num_ctx_bytes;
+        ctx_init(cur_ctx_ptr, ctx_data, WorkerInit {
+            .jobMgr = this,
+            .stateMgr = state_mgr,
+            .workerIdx = i,
+        });
     }
 
     auto initQueue = [](void *queue_start, int thread_idx) {
@@ -375,23 +395,27 @@ JobManager::JobManager(int desired_num_workers, int num_io,
 
     const int num_workers = threads_.size() - num_io;
     for (int i = 0; i < num_workers; i++) {
-        threads_.emplace(i,
-                         [this, i, pin_workers, &state_mgr, world_data]() {
+        auto cur_ctx_ptr = 
+            (Context *)(ctx_store_start + i * num_ctx_bytes);
+
+        threads_.emplace(i, [this, i, pin_workers, cur_ctx_ptr]() {
             disableThreadSignals();
             if (pin_workers) {
                 setThreadAffinity(i);
             }
 
-            workerThread(i, state_mgr, world_data);
+            workerThread(i, cur_ctx_ptr);
         });
     }
 
     for (int i = 0; i < num_io; i++) {
         int thread_idx = num_workers + i;
-        threads_.emplace(thread_idx,
-                         [this, thread_idx, &state_mgr, world_data]() {
+        auto cur_ctx_ptr = 
+            (Context *)(ctx_store_start + thread_idx * num_ctx_bytes);
+
+        threads_.emplace(thread_idx, [this, thread_idx, cur_ctx_ptr]() {
             disableThreadSignals();
-            ioThread(thread_idx, state_mgr, world_data);
+            ioThread(thread_idx, cur_ctx_ptr);
         });
     }
 
@@ -410,6 +434,8 @@ JobManager::~JobManager()
     InitAlloc().dealloc(alloc_state_.memoryBase);
 
     InitAlloc().dealloc(queue_store_);
+
+    InitAlloc().dealloc(ctx_store_);
 }
 
 JobID JobManager::queueJob(int thread_idx,
@@ -592,15 +618,8 @@ static inline bool getNextJob(void *const queue_start,
     return false;
 }
 
-void JobManager::workerThread(const int thread_idx, StateManager &state_mgr,
-                              void *world_data)
+void JobManager::workerThread(const int thread_idx, Context *ctx)
 {
-    Context thread_job_ctx(Context::Init {
-        .jobMgr = this,
-        .stateMgr = &state_mgr,
-        .workerIdx = thread_idx,
-    });
-
     const int num_queues = threads_.size();
 
     Job next_job;
@@ -628,21 +647,14 @@ void JobManager::workerThread(const int thread_idx, StateManager &state_mgr,
             continue;
         }
 
-        next_job.func_(thread_job_ctx, next_job.data_);
+        next_job.func_(*ctx, next_job.data_);
 
         job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
     }
 }
 
-void JobManager::ioThread(const int thread_idx, StateManager &state_mgr,
-                          void *world_data)
+void JobManager::ioThread(const int thread_idx, Context *ctx)
 {
-    Context thread_job_ctx(Context::Init {
-        .jobMgr = this,
-        .stateMgr = &state_mgr,
-        .workerIdx = thread_idx,
-    });
-
     const int num_queues = threads_.size();
 
     Job next_job;
@@ -656,7 +668,7 @@ void JobManager::ioThread(const int thread_idx, StateManager &state_mgr,
             continue;
         }
 
-        next_job.func_(thread_job_ctx, next_job.data_);
+        next_job.func_(*ctx, next_job.data_);
 
         job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
     }

@@ -8,8 +8,7 @@ namespace madrona {
 
 class Context {
 public:
-    struct Init;
-    Context(Init &&init);
+    Context(WorkerInit &&init);
 
     AllocContext mem;
     inline StateManager & state();
@@ -62,7 +61,7 @@ private:
 template <typename ContextT>
 class CustomContext : public Context {
 public:
-    inline CustomContext(Context::Init &&base_init);
+    inline CustomContext(WorkerInit &&worker_init);
 
     template <typename Fn, typename... Deps>
     inline JobID submit(Fn &&fn, bool is_child = true,

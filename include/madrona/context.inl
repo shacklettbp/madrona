@@ -2,12 +2,6 @@
 
 namespace madrona {
 
-struct Context::Init {
-    JobManager *jobMgr;
-    StateManager *stateMgr;
-    int workerIdx;
-};
-
 StateManager & Context::state() { return *state_mgr_; }
 
 template <typename Fn, typename... Deps>
@@ -108,8 +102,8 @@ Job Context::makeJob(Fn &&fn)
 }
 
 template <typename ContextT>
-CustomContext<ContextT>::CustomContext(Context::Init &&base_init)
-    : Context(std::forward<Context::Init>(base_init))
+CustomContext<ContextT>::CustomContext(WorkerInit &&worker_init)
+    : Context(std::forward<WorkerInit>(worker_init))
 {}
 
 template <typename ContextT>
