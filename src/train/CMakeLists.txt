@@ -65,6 +65,7 @@ function(madrona_build_compile_defns OUT_TARGET_NAME OUT_SRC_DEFN OUT_FLAG_DEFN)
 
         get_target_property(TARGET_SOURCES ${t} SOURCES) 
         list(FILTER TARGET_SOURCES INCLUDE REGEX ".+\.cpp")
+        list(TRANSFORM TARGET_SOURCES REPLACE "${TARGET_DIR}" "")
         list(TRANSFORM TARGET_SOURCES PREPEND "${TARGET_DIR}/")
         list(APPEND ALL_TARGET_SOURCES ${TARGET_SOURCES})
 
