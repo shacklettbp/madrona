@@ -4,12 +4,12 @@
 
 namespace madrona {
 
-template <typename StartFn>
+template <typename DataT, typename StartFn>
 struct JobManager::Init {
     StartFn startData;
     Job::EntryPtr startCB;
     void (*ctxInitCB)(void *, void *, WorkerInit &&);
-    void *ctxData;
+    DataT ctxData;
     StateManager *stateMgr;
     int desiredNumWorkers;
     int numIOWorkers;
@@ -19,12 +19,15 @@ struct JobManager::Init {
 };
 
 template <typename ContextT, typename DataT, typename StartFn>
-JobManager::Init<StartFn> JobManager::makeInit(
+JobManager::Init<DataT, StartFn> JobManager::makeInit(
     int desired_num_workers, int num_io, StateManager &state_mgr,
-    DataT *ctx_data, StartFn &&start_fn, bool pin_workers)
+    const DataT &ctx_data, StartFn &&start_fn, bool pin_workers)
 {
     static_assert(std::is_trivially_destructible_v<ContextT>,
                   "Context types with custom destructors are not supported");
+
+    static_assert(std::is_trivially_copyable_v<DataT>,
+                  "Context data must be trivially copyable");
 
     return {
         std::move(start_fn),
@@ -35,9 +38,9 @@ JobManager::Init<StartFn> JobManager::makeInit(
             fn_ptr->~StartFn();
         },
         [](void *ctx, void *data, WorkerInit &&init) {
-            new (ctx) ContextT((DataT *)data, std::forward<WorkerInit>(init));
+            new (ctx) ContextT(data, std::forward<WorkerInit>(init));
         },
-        (void *)ctx_data,
+        ctx_data,
         &state_mgr,
         desired_num_workers,
         num_io,
@@ -47,11 +50,12 @@ JobManager::Init<StartFn> JobManager::makeInit(
     };
 }
 
-template <typename StartFn>
-JobManager::JobManager(const Init<StartFn> &init)
+template <typename DataT, typename StartFn>
+JobManager::JobManager(const Init<DataT, StartFn> &init)
     : JobManager(init.desiredNumWorkers, init.numIOWorkers,
                  init.stateMgr, init.numCtxBytes, init.ctxAlignment,
-                 init.ctxInitCB, init.ctxData, init.startCB,
+                 init.ctxInitCB, (void *)&init.ctxData, sizeof(DataT),
+                 std::alignment_of_v<DataT>, init.startCB,
                  (void *)&init.startData, init.pinWorkers)
 {}
 

@@ -3,27 +3,40 @@
 #include <madrona/job.hpp>
 #include <madrona/state.hpp>
 
+#include <madrona/gpu_train/worker_init.hpp>
+
 namespace madrona {
 
 class Context {
 public:
-    inline Context(uint32_t job_id, uint32_t grid_id, uint32_t world_id,
-                   uint32_t lane_id);
+    inline Context(WorkerInit &&init);
 
     inline StateManager & state();
 
-    template <typename T>
-    T & world();
+    template <typename Fn, typename... Args>
+    inline JobID submit(Fn &&fn, bool is_child = true,
+                        Args && ...dependencies);
 
     template <typename Fn, typename... Args>
-    inline JobID queueJob(Fn &&fn, bool is_child = true,
-                          Args && ...dependencies);
-
-    template <typename Fn, typename... Args>
-    inline JobID queueMultiJob(Fn &&fn, uint32_t num_invocations,
+    inline JobID submitN(Fn &&fn, uint32_t num_invocations,
         bool is_child = true, Args && ...dependencies);
 
+    template <typename... ColTypes, typename Fn, typename... Deps>
+    inline JobID forAll(const Query<ColTypes...> &query, Fn &&fn,
+                        bool is_child = true,
+                        Deps && ... dependencies);
+
     void markJobFinished(uint32_t num_jobs);
+
+protected:
+    template <typename ContextT, typename Fn, typename... Deps>
+    inline JobID submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
+                            Deps && ... dependencies);
+
+    template <typename ContextT, typename... ColTypes, typename Fn,
+              typename... Deps>
+    inline JobID forAllImpl(const Query<ColTypes...> &query, Fn &&fn,
+                            bool is_child, Deps && ... dependencies);
 
 private:
     struct WaveInfo {

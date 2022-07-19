@@ -8,7 +8,8 @@ namespace gpuTrain {
 struct GPUImplConsts {
     void *jobSystemAddr;
     void *stateManagerAddr;
-    void *worldDataAddr;
+    void *ctxDataAddr;
+    uint32_t numCtxDataBytes;
     uint32_t jobGridsOffset;
     uint32_t jobListOffset;
     uint32_t maxJobsPerGrid;

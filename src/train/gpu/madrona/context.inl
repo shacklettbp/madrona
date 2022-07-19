@@ -5,7 +5,7 @@
 namespace madrona {
 namespace gpuTrain {
 
-template <typename Fn, size_t N>
+template <typename ContextT, typename Fn, size_t N>
 __global__ void jobEntry(gpuTrain::JobBase *job_data,
                         uint32_t num_invocations,
                         uint32_t grid_id)
@@ -23,7 +23,18 @@ __global__ void jobEntry(gpuTrain::JobBase *job_data,
     JobContainer &job_container =
         static_cast<JobContainer *>(job_data)[invocation_idx];
 
-    Context ctx(job_container.jobID, grid_id, job_container.worldID, lane_id);
+    WorkerInit worker_init {
+        .jobID = job_container.jobID,
+        .gridID = grid_id,
+        .worldID = job_container.worldID,
+        .laneID = lane_id,
+    };
+
+    char *ctx_data_base = (char *)gpuTrain::GPUImplConsts::get().ctxDataAddr;
+    void *ctx_data = ctx_data_base +
+        worker_init.worldID * gpuTrain::GPUImplConsts::get().numCtxDataBytes;
+
+    ContextT ctx(ctx_data, std::move(worker_init));
 
     (job_container.fn)(ctx);
 
@@ -39,12 +50,11 @@ __global__ void jobEntry(gpuTrain::JobBase *job_data,
 
 }
 
-Context::Context(uint32_t job_id, uint32_t grid_id, uint32_t world_id,
-                 uint32_t lane_id)
-    : job_id_(job_id),
-      grid_id_(grid_id),
-      world_id_(world_id),
-      lane_id_(lane_id)
+Context::Context(WorkerInit &&init)
+    : job_id_(init.jobID),
+      grid_id_(init.gridID),
+      world_id_(init.worldID),
+      lane_id_(init.laneID)
 {}
 
 StateManager & Context::state()
@@ -52,27 +62,37 @@ StateManager & Context::state()
     return *(StateManager *)gpuTrain::GPUImplConsts::get().stateManagerAddr;
 }
 
-template <typename T>
-T & Context::world()
+template <typename Fn, typename... Deps>
+JobID Context::submit(Fn &&fn, bool is_child, Deps && ... dependencies)
 {
-    return ((T *)gpuTrain::GPUImplConsts::get().worldDataAddr)[world_id_];
+    return submitImpl<Context>(std::forward<Fn>(fn), 1, is_child,
+                               std::forward<Deps>(dependencies)...);
 }
 
 template <typename Fn, typename... Deps>
-JobID Context::queueJob(Fn &&fn, bool is_child,
-                        Deps && ...dependencies)
+JobID Context::submitN(Fn &&fn, uint32_t num_invocations,
+                       bool is_child, Deps && ... dependencies)
 {
-    return queueMultiJob(std::forward<Fn>(fn), 1, is_child,
-                         std::forward<Deps>(dependencies)...);
+    return submitImpl<Context>(std::forward<Fn>(fn), num_invocations, is_child,
+                               std::forward<Deps>(dependencies)...);
 }
 
-template <typename Fn, typename... Deps>
-JobID Context::queueMultiJob(Fn &&fn, uint32_t num_invocations,
-                             bool is_child, Deps && ...dependencies)
+template <typename... ColTypes, typename Fn, typename... Deps>
+JobID Context::forAll(const Query<ColTypes...> &query, Fn &&fn,
+             bool is_child, Deps && ... dependencies)
+{
+    return forallImpl<Context>(query, std::forward<Fn>(fn), is_child,
+                               std::forward<Deps>(dependencies)...);
+}
+
+// FIXME: implement is_child, dependencies, num_invocations
+template <typename ContextT, typename Fn, typename... Deps>
+JobID Context::submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
+                          Deps &&... dependencies)
 {
     constexpr std::size_t num_deps = sizeof...(Deps);
 
-    auto func_ptr = gpuTrain::jobEntry<Fn, num_deps>;
+    auto func_ptr = gpuTrain::jobEntry<ContextT, Fn, num_deps>;
 
     using FnJobContainer = gpuTrain::JobContainer<Fn, num_deps>;
 

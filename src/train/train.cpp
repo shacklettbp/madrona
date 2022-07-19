@@ -2,6 +2,8 @@
 #include <iostream>
 #include <array>
 
+#include <string>
+
 #include <madrona/train.hpp>
 
 #include "cuda_utils.hpp"
@@ -44,62 +46,96 @@ struct TrainingExecutor::Impl {
     CUgraphExec runGraph;
 };
 
-static HeapArray<char> makeEntryCode(const char *init_func,
-                                     const char *run_func,
-                                     const char *user_namespace)
+static void getUserEntries(const char *entry_class, CUmodule mod,
+                           const char **compile_flags,
+                           uint32_t num_compile_flags,
+                           CUfunction *init_out, CUfunction *run_out)
 {
-    const char *entry_code_template = R"__(
-#include <madrona/context.hpp>
+    static const char mangle_code_postfix[] = R"__(
+#include <cstdint>
 
-// Forward declare user functions
-namespace %s {
-extern void %s(madrona::Context &ctx);
-extern void %s(madrona::Context &ctx);
-}
+namespace madrona { namespace gpuTrain {
 
-extern "C" __global__ void madronaTrainQueueUserInitKernel(uint32_t num_worlds)
-{
-    uint32_t invocation_idx = threadIdx.x + blockDim.x * blockIdx.x;
-    
-    if (invocation_idx >= num_worlds) return;
+template <typename T> __global__ void submitInit(uint32_t) {}
+template <typename T> __global__ void submitRun(uint32_t) {}
 
-    uint32_t lane_id = threadIdx.x %% madrona::gpuTrain::ICfg::numWarpThreads;
-
-    madrona::Context ctx(0, 0, invocation_idx, lane_id);
-    ctx.queueJob([](madrona::Context &ctx) {
-        ::%s::%s(ctx);
-    }, false);
-}
-
-extern "C" __global__ void madronaTrainQueueUserRunKernel(uint32_t num_worlds)
-{
-    uint32_t invocation_idx = threadIdx.x + blockDim.x * blockIdx.x;
-    
-    if (invocation_idx >= num_worlds) return;
-
-    uint32_t lane_id = threadIdx.x %% madrona::gpuTrain::ICfg::numWarpThreads;
-
-    madrona::Context ctx(0, 0, invocation_idx, lane_id);
-    ctx.queueJob([](madrona::Context &ctx) {
-        ::%s::%s(ctx);
-    }, false);
-}
+} }
 )__";
 
-    HeapArray<char> entry_code(1 + strlen(entry_code_template) - 2 * 7 +
-                               3 * strlen(user_namespace) +
-                               2 * strlen(init_func) + 2 * strlen(run_func));
-    
-    snprintf(entry_code.data(), entry_code.size(),
-             entry_code_template, user_namespace, init_func, run_func,
-             user_namespace, init_func, user_namespace, run_func);
+    static const char init_template[] =
+        "::madrona::gpuTrain::submitInit<::";
+    static const char run_template[] =
+        "::madrona::gpuTrain::submitRun<::";
 
-    return entry_code;
+    std::string_view entry_view(entry_class);
+
+    // If user prefixed with ::, trim off as it will be added later
+    if (entry_view[0] == ':' && entry_view[1] == ':') {
+        entry_view = entry_view.substr(2);
+    }
+
+    std::string fwd_declare; 
+
+    // Find all namespace separators
+    int num_namespaces = 0;
+    size_t prev_off = 0, off = 0;
+    while ((off = entry_view.find("::", prev_off)) != std::string_view::npos) {
+        auto ns_view = entry_view.substr(prev_off, off - prev_off);
+
+        fwd_declare += "namespace ";
+        fwd_declare += ns_view;
+        fwd_declare += " { ";
+
+        prev_off = off + 2;
+        num_namespaces++;
+    }
+
+    auto class_view = entry_view.substr(prev_off);
+    if (class_view.size() == 0) {
+        FATAL("Invalid entry class name\n");
+    }
+
+    fwd_declare += "class ";
+    fwd_declare += class_view;
+    fwd_declare += "; ";
+
+    for (int i = 0; i < num_namespaces; i++) {
+        fwd_declare += "} ";
+    }
+
+    std::string mangle_code = std::move(fwd_declare);
+    mangle_code += mangle_code_postfix;
+
+    std::string init_name = init_template;
+    init_name += entry_view;
+    init_name += ">";
+
+    std::string run_name = run_template;
+    run_name += entry_view;
+    run_name += ">";
+
+    nvrtcProgram prog;
+    REQ_NVRTC(nvrtcCreateProgram(&prog, mangle_code.c_str(), "mangle.cpp",
+                                 0, nullptr, nullptr));
+
+    REQ_NVRTC(nvrtcAddNameExpression(prog, init_name.c_str()));
+    REQ_NVRTC(nvrtcAddNameExpression(prog, run_name.c_str()));
+
+    REQ_NVRTC(nvrtcCompileProgram(prog, num_compile_flags, compile_flags));
+
+    const char *init_lowered;
+    REQ_NVRTC(nvrtcGetLoweredName(prog, init_name.c_str(), &init_lowered));
+    const char *run_lowered;
+    REQ_NVRTC(nvrtcGetLoweredName(prog, run_name.c_str(), &run_lowered));
+
+    REQ_CU(cuModuleGetFunction(init_out, mod, init_lowered));
+    REQ_CU(cuModuleGetFunction(run_out, mod, run_lowered));
+
+    REQ_NVRTC(nvrtcDestroyProgram(&prog));
 }
 
 static CUmodule compileCode(const char **sources, uint32_t num_sources,
-    const char **compile_flags, uint32_t num_compile_flags,
-    const char *entry_code)
+    const char **compile_flags, uint32_t num_compile_flags)
 {
     static std::array<char, 4096> linker_info_log;
     static std::array<char, 4096> linker_error_log;
@@ -151,10 +187,6 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
         checkLinker(cuLinkAddData(linker, CU_JIT_INPUT_CUBIN, cubin.data(),
                              cubin.size(), name, 0, nullptr, nullptr));
     };
-
-    addToLinker(cu::compileSrcToCUBIN(entry_code, "generated_launch.cpp",
-                                      compile_flags, num_compile_flags),
-                "generated_launch.cpp");
 
     for (int i = 0; i < (int)num_sources; i++) {
         addToLinker(cu::compileFileToCUBIN(sources[i], compile_flags,
@@ -224,13 +256,9 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
         cout << flag << endl;
     }
 
-    HeapArray<char> entry_code =
-        makeEntryCode(cfg.initFunc, cfg.runFunc, cfg.userNamespace);
-
     GPUKernels gpu_kernels;
     gpu_kernels.mod = compileCode(all_cpp_files.data(),
-        all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
-        entry_code.data());
+        all_cpp_files.size(), compile_flags.data(), compile_flags.size());
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
         gpu_kernels.mod, "madronaTrainComputeGPUImplConstantsKernel"));
@@ -238,10 +266,10 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
                                "madronaTrainInitializeKernel"));
     REQ_CU(cuModuleGetFunction(&gpu_kernels.runJobSystem, gpu_kernels.mod,
                                "madronaTrainJobSystemKernel"));
-    REQ_CU(cuModuleGetFunction(&gpu_kernels.queueUserInit, gpu_kernels.mod,
-                               "madronaTrainQueueUserInitKernel"));
-    REQ_CU(cuModuleGetFunction(&gpu_kernels.queueUserRun, gpu_kernels.mod,
-                               "madronaTrainQueueUserRunKernel"));
+
+    getUserEntries(cfg.entryName, gpu_kernels.mod, base_compile_flags.data(),
+        base_compile_flags.size(), &gpu_kernels.queueUserInit,
+        &gpu_kernels.queueUserRun);
 
     return gpu_kernels;
 }
@@ -322,8 +350,9 @@ HeapArray<void *> makeKernelArgBuffer(Ts ...args)
 }
 
 static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
-                                             uint32_t num_world_data_bytes,
-                                             uint32_t world_data_alignment,
+                                             void *ctx_data,
+                                             uint32_t num_ctx_data_bytes,
+                                             uint32_t ctx_data_alignment,
                                              const GPUKernels &gpu_kernels,
                                              cudaStream_t strm)
 {
@@ -342,8 +371,8 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
         sizeof(size_t));
 
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
-                                                   num_world_data_bytes,
-                                                   world_data_alignment,
+                                                   num_ctx_data_bytes,
+                                                   ctx_data_alignment,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
@@ -369,9 +398,16 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
         (char *)gpu_consts_readback->stateManagerAddr +
         (uintptr_t)gpu_state_buffer;
 
-    gpu_consts_readback->worldDataAddr =
-        (char *)gpu_consts_readback->worldDataAddr +
+    gpu_consts_readback->ctxDataAddr =
+        (char *)gpu_consts_readback->ctxDataAddr +
         (uintptr_t)gpu_state_buffer;
+
+    for (int i = 0; i < (int)num_worlds; i++) {
+        cudaMemcpyAsync((char *)gpu_consts_readback->ctxDataAddr +
+                            i * num_ctx_data_bytes,
+                        ctx_data, num_ctx_data_bytes,
+                        cudaMemcpyHostToDevice, strm);
+    }
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
@@ -456,8 +492,8 @@ TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
     GPUKernels gpu_kernels = buildKernels(compile_cfg, train_cfg.gpuID);
 
     GPUEngineState eng_state = initEngineAndUserState(
-        train_cfg.numWorlds, train_cfg.numWorldDataBytes,
-        train_cfg.worldDataAlignment, gpu_kernels, strm);
+        train_cfg.numWorlds, train_cfg.ctxData, train_cfg.numCtxDataBytes,
+        train_cfg.ctxDataAlignment, gpu_kernels, strm);
 
     auto run_graph = makeRunGraph(gpu_kernels.queueUserRun,
                                   gpu_kernels.runJobSystem,

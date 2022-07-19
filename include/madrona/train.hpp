@@ -9,15 +9,14 @@ namespace madrona {
 
 struct TrainConfig {
     uint32_t numWorlds;
-    uint32_t numWorldDataBytes;
-    uint32_t worldDataAlignment;
+    void *ctxData;
+    uint32_t numCtxDataBytes;
+    uint32_t ctxDataAlignment;
     uint32_t gpuID;
 };
 
 struct CompileConfig {
-    const char *initFunc;
-    const char *runFunc;
-    const char *userNamespace;
+    const char *entryName;
     Span<const char * const> userSources;
     Span<const char * const> userCompileFlags;
 };
@@ -34,5 +33,8 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+// Not necessary on CPU-side currently
+template <typename ContextT, typename BaseT> class TrainingEntry {};
 
 }

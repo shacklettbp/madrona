@@ -38,15 +38,17 @@ friend class JobManager;
 
 class JobManager {
 public:
-    template <typename StartFn> struct Init;
+    template <typename StartFn, typename DataT> struct Init;
 
     template <typename ContextT, typename DataT, typename StartFn>
-    static Init<StartFn> makeInit(int desired_num_workers, int num_io,
-                                  StateManager &state_mgr, DataT *ctx_data,
-                                  StartFn &&start_fn, bool pin_workers = true);
+    static Init<DataT, StartFn> makeInit(int desired_num_workers, int num_io,
+                                         StateManager &state_mgr,
+                                         const DataT &ctx_data,
+                                         StartFn &&start_fn,
+                                         bool pin_workers = true);
 
-    template <typename StartFn>
-    JobManager(const Init<StartFn> &init);
+    template <typename DataT, typename StartFn>
+    JobManager(const Init<DataT, StartFn> &init);
     ~JobManager();
 
     inline void * allocJob(int worker_idx, uint32_t num_bytes,
@@ -108,8 +110,9 @@ private:
     JobManager(int desired_num_workers, int num_io, StateManager *state_mgr,
                uint32_t num_ctx_bytes, uint32_t ctx_alignment,
                void (*ctx_init)(void *, void *, WorkerInit &&),
-               void *ctx_data, Job::EntryPtr start_func, void *start_data,
-               bool pin_workers);
+               void *ctx_data, uint32_t num_ctx_data_bytes,
+               uint32_t ctx_data_alignment, Job::EntryPtr start_func,
+               void *start_data, bool pin_workers);
 
     JobID queueJob(int thread_idx, Job::EntryPtr job_func, void *job_data,
                    const JobID *deps, uint32_t num_dependencies,

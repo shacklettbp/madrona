@@ -316,6 +316,8 @@ JobManager::JobManager(int desired_num_workers,
                        uint32_t ctx_alignment,
                        void (*ctx_init)(void *, void *, WorkerInit &&),
                        void *ctx_data,
+                       uint32_t num_ctx_data_bytes,
+                       uint32_t ctx_data_alignment,
                        Job::EntryPtr start_func,
                        void *start_data,
                        bool pin_workers)
@@ -324,7 +326,8 @@ JobManager::JobManager(int desired_num_workers,
                                           InternalConfig::numJobAllocArenas)),
       job_allocs_(threads_.size(), InitAlloc()),
       ctx_store_(InitAlloc().alloc(threads_.size() * (uint64_t)num_ctx_bytes +
-                                   (uint64_t)ctx_alignment - 1ul)),
+          (uint64_t)ctx_alignment - 1ul + (uint64_t)num_ctx_data_bytes +
+          (uint64_t)ctx_data_alignment - 1ul)),
       queue_store_(InitAlloc().alloc(
           3u * threads_.size() * InternalConfig::jobQueueBytesPerThread +
             std::alignment_of_v<JobQueueHead>)),
@@ -343,11 +346,17 @@ JobManager::JobManager(int desired_num_workers,
     char *ctx_store_start = (char *)utils::roundUp((uintptr_t)ctx_store_,
                                                    (uintptr_t)ctx_alignment);
 
+    void *ctx_data_ptr = (void *)utils::roundUp(
+        (uintptr_t)(ctx_store_start + num_ctx_bytes * threads_.size()),
+        (uintptr_t)ctx_data_alignment);
+
+    memcpy(ctx_data_ptr, ctx_data, num_ctx_data_bytes);
+
     for (int i = 0, n = threads_.size(); i < n; i++) {
         job_allocs_.emplace(i, alloc_state_);
 
         void *cur_ctx_ptr = ctx_store_start + i * num_ctx_bytes;
-        ctx_init(cur_ctx_ptr, ctx_data, WorkerInit {
+        ctx_init(cur_ctx_ptr, ctx_data_ptr, WorkerInit {
             .jobMgr = this,
             .stateMgr = state_mgr,
             .workerIdx = i,

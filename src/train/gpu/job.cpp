@@ -712,8 +712,8 @@ void Context::markJobFinished(uint32_t num_jobs)
 
 extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     uint32_t num_worlds,
-    uint32_t num_world_data_bytes,
-    uint32_t world_data_alignment,
+    uint32_t num_ctx_data_bytes,
+    uint32_t ctx_data_alignment,
     madrona::gpuTrain::GPUImplConsts *out_constants,
     size_t *job_system_buffer_size)
 {
@@ -732,11 +732,11 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
 
     total_bytes = state_mgr_offset + sizeof(StateManager);
 
-    uint64_t world_data_offset =
-        utils::roundUp(total_bytes, (size_t)world_data_alignment);
+    uint64_t ctx_data_offset =
+        utils::roundUp(total_bytes, (size_t)ctx_data_alignment);
 
     total_bytes =
-        world_data_offset + (size_t)num_world_data_bytes * num_worlds;
+        ctx_data_offset + (size_t)num_ctx_data_bytes * num_worlds;
 
     uint64_t grid_offset = utils::roundUp(total_bytes,
         std::alignment_of_v<JobGridInfo>);
@@ -761,7 +761,8 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     *out_constants = GPUImplConsts {
         .jobSystemAddr = (void *)0ul,
         .stateManagerAddr = (void *)state_mgr_offset,
-        .worldDataAddr = (void *)world_data_offset,
+        .ctxDataAddr = (void *)ctx_data_offset,
+        .numCtxDataBytes = num_ctx_data_bytes,
         .jobGridsOffset = (uint32_t)grid_offset,
         .jobListOffset = (uint32_t)wait_job_offset,
         .maxJobsPerGrid = max_num_jobs_per_grid,
