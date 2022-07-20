@@ -27,6 +27,18 @@ JobID Context::forAll(const Query<ColTypes...> &query, Fn &&fn,
                                std::forward<Deps>(dependencies)...);
 }
 
+template <typename Fn, typename... Deps>
+inline JobID Context::ioRead(std::string_view path, Fn &&fn,
+                             bool is_child = true, Deps && .. dependencies)
+{
+    IOPromise promise = io_mgr_->makePromise();
+    Job job = makeJob([promise, std::move(fn)](Context &ctx) {
+        fn(ctx, io_mgr_.getBuffer(promise));
+    });
+
+    io_mgr->load(promise, path, job);
+}
+
 // FIXME: implement is_child, dependencies, num_invocations
 template <typename ContextT, typename Fn, typename... Deps>
 JobID Context::submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,

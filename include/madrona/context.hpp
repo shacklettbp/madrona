@@ -3,6 +3,7 @@
 #include <madrona/job.hpp>
 #include <madrona/ecs.hpp>
 #include <madrona/state.hpp>
+#include <madrona/io.hpp>
 
 namespace madrona {
 
@@ -26,6 +27,10 @@ public:
     inline JobID forAll(const Query<ColTypes...> &query, Fn &&fn,
                         bool is_child = true,
                         Deps && ... dependencies);
+
+    template <typename Fn, typename... Deps>
+    inline JobID ioRead(const char *path, Fn &&fn, bool is_child = true,
+                        Deps && .. dependencies);
 
 #if 0
     template <typename... QueryArgs>
@@ -51,6 +56,7 @@ private:
 
     JobManager * const job_mgr_;
     StateManager * const state_mgr_;
+    IOManager * const io_mgr_;
     const int worker_idx_;
 };
 
