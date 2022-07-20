@@ -85,10 +85,40 @@ private:
 
     struct empty_type {};
 
-    struct StorageImpl {
+    template <typename U, bool trivial =
+        std::is_trivially_destructible_v<U>>
+    struct StorageImpl;
+
+    template <typename U>
+    struct StorageImpl<U, true> {
         union {
-          empty_type empty;
-          T value;
+            empty_type empty;
+            T value;
+        };
+
+        bool initialized;
+
+        constexpr StorageImpl()
+            : empty(),
+              initialized(false)
+        {}
+
+        template <typename... Args>
+        constexpr StorageImpl(Args&& ...args)
+            : value(std::forward<Args>(args)...),
+              initialized(true)
+        {}
+
+        constexpr void destruct() {}
+
+        ~StorageImpl() = default;
+    };
+
+    template <typename U>
+    struct StorageImpl<U, false> {
+        union {
+            empty_type empty;
+            T value;
         };
 
         bool initialized;
@@ -109,18 +139,16 @@ private:
                 value.~T();
             }
         }
-    };
 
-    template <typename U, bool trivial =
-        std::is_trivially_destructible_v<U>>
-    struct Destruct : StorageImpl {
-        using StorageImpl::StorageImpl;
+        constexpr ~StorageImpl() {
+            destruct();
+        }
     };
 
     template <typename U, bool trivial =
         std::is_trivially_copy_constructible_v<U>>
-    struct CopyConstruct : Destruct<U> {
-        using Destruct<U>::Destruct;
+    struct CopyConstruct : StorageImpl<U> {
+        using StorageImpl<U>::StorageImpl;
     };
 
     template <typename U, bool trivial =
@@ -145,17 +173,8 @@ private:
         using CopyAssign<U>::CopyAssign;
     };
 
-    template <typename U> struct Destruct<U, false> : StorageImpl {
-        using StorageImpl::StorageImpl;
-    
-        constexpr ~Destruct()
-        {
-            this->destruct();
-        }
-    };
-
-    template <typename U> struct CopyConstruct<U, false> : Destruct<U> {
-        using Destruct<U>::Destruct;
+    template <typename U> struct CopyConstruct<U, false> : StorageImpl<U> {
+        using StorageImpl<U>::StorageImpl;
     
         constexpr CopyConstruct(const CopyConstruct &o)
         {
