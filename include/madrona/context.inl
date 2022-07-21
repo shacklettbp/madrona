@@ -28,15 +28,19 @@ JobID Context::forAll(const Query<ColTypes...> &query, Fn &&fn,
 }
 
 template <typename Fn, typename... Deps>
-inline JobID Context::ioRead(std::string_view path, Fn &&fn,
-                             bool is_child = true, Deps && .. dependencies)
+inline JobID Context::ioRead(const char *path, Fn &&fn,
+                             bool is_child, Deps && ... dependencies)
 {
     IOPromise promise = io_mgr_->makePromise();
-    Job job = makeJob([promise, std::move(fn)](Context &ctx) {
-        fn(ctx, io_mgr_.getBuffer(promise));
+    Job job = makeJob([promise, fn=std::move(fn), io_mgr=io_mgr_](
+            Context &ctx) {
+        fn(ctx, io_mgr->getBuffer(promise));
     });
 
-    io_mgr->load(promise, path, job);
+    io_mgr_->load(promise, path, job);
+
+    (void)is_child;
+    ( (void)dependencies, ... );
 }
 
 // FIXME: implement is_child, dependencies, num_invocations

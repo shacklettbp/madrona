@@ -30,7 +30,7 @@ public:
 
     template <typename Fn, typename... Deps>
     inline JobID ioRead(const char *path, Fn &&fn, bool is_child = true,
-                        Deps && .. dependencies);
+                        Deps && ... dependencies);
 
 #if 0
     template <typename... QueryArgs>
