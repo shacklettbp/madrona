@@ -7,7 +7,7 @@ namespace gpuTrain {
 namespace ICfg {
 
 static constexpr uint32_t numWarpThreads = 32;
-static constexpr uint32_t numJobLaunchKernelThreads = 512;
+static constexpr uint32_t numJobLaunchKernelThreads = 256;
 
 }
 

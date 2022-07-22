@@ -9,7 +9,8 @@ using namespace std;
 
 namespace madrona {
 
-void fatal(const char *file, int line, const char *fmt, ...)
+void fatal(const char *file, int line, const char *funcname,
+           const char *fmt, ...)
 {
     // Use a fixed size buffer for the error message. This sets an upper
     // bound on total memory size, and wastes 4kb on memory, but is very
@@ -23,13 +24,15 @@ void fatal(const char *file, int line, const char *fmt, ...)
     fatal(CrashInfo {
         file,
         line,
+        funcname,
         buffer.data(),
     });
 }
 
 void fatal(const CrashInfo &crash)
 {
-    fprintf(stderr, "Error at %s:%d\n", crash.file, crash.line);
+    fprintf(stderr, "Error at %s:%d in %s\n", crash.file, crash.line,
+            crash.funcname);
     if (crash.msg) {
         fprintf(stderr, "%s\n", crash.msg);
     }

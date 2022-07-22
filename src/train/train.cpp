@@ -21,7 +21,7 @@ namespace madrona {
 
 namespace ICfg {
 static constexpr uint32_t numJobSystemKernelThreads = 1024;
-static constexpr uint32_t numInitQueueThreads = 512;
+static constexpr uint32_t numEntryQueueThreads = 512;
 }
 
 using GPUImplConsts = gpuTrain::madrona::gpuTrain::GPUImplConsts;
@@ -420,10 +420,10 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     launchKernel(gpu_kernels.init, 1, 1, no_args);
     
     uint32_t num_queue_blocks =
-        utils::divideRoundUp(num_worlds, ICfg::numInitQueueThreads);
+        utils::divideRoundUp(num_worlds, ICfg::numEntryQueueThreads);
 
     launchKernel(gpu_kernels.queueUserInit, num_queue_blocks,
-                 ICfg::numInitQueueThreads, queue_args); 
+                 ICfg::numEntryQueueThreads, queue_args); 
 
     launchKernel(gpu_kernels.runJobSystem, 1,
                  ICfg::numJobSystemKernelThreads, no_args);
@@ -443,7 +443,7 @@ static CUgraphExec makeRunGraph(CUfunction queue_run_kernel,
     auto no_args = makeKernelArgBuffer();
 
     uint32_t num_queue_blocks = utils::divideRoundUp(num_worlds,
-        ICfg::numInitQueueThreads);
+        ICfg::numEntryQueueThreads);
 
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
@@ -453,7 +453,7 @@ static CUgraphExec makeRunGraph(CUfunction queue_run_kernel,
         .gridDimX = num_queue_blocks,
         .gridDimY = 1,
         .gridDimZ = 1,
-        .blockDimX = ICfg::numInitQueueThreads,
+        .blockDimX = ICfg::numEntryQueueThreads,
         .blockDimY = 1,
         .blockDimZ = 1,
         .sharedMemBytes = 0,

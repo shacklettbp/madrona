@@ -58,27 +58,27 @@ cudaStream_t makeStream()
 }
 
 void checkCuda(cudaError_t res, const char *file,
-               int line) noexcept
+               int line, const char *funcname) noexcept
 {
     if (res != cudaSuccess) {
-        cudaError(res, file, line);
+        cudaError(res, file, line, funcname);
     }
 }
 
 void checkCuDrv(CUresult res, const char *file,
-                int line) noexcept
+                int line, const char *funcname) noexcept
 {
     if (res != CUDA_SUCCESS) {
-        cuDrvError(res, file, line);
+        cuDrvError(res, file, line, funcname);
     }
 }
 
 
 void checkNVRTC(nvrtcResult res, const char *file,
-                int line) noexcept
+                int line, const char *funcname) noexcept
 {
     if (res != NVRTC_SUCCESS) {
-        nvrtcError(res, file, line);
+        nvrtcError(res, file, line, funcname);
     }
 }
 

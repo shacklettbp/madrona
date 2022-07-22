@@ -6,24 +6,24 @@ namespace madrona {
 namespace cu {
 
 [[noreturn]] void cudaError(cudaError_t err, const char *file,
-                            int line) noexcept
+                            int line, const char *funcname) noexcept
 {
-    fatal(file, line, "%s", cudaGetErrorString(err));
+    fatal(file, line, funcname, "%s", cudaGetErrorString(err));
 }
 
 [[noreturn]] void cuDrvError(CUresult err, const char *file,
-                             int line) noexcept
+                             int line, const char *funcname) noexcept
 {
     const char *name, *desc;
     cuGetErrorName(err, &name);
     cuGetErrorString(err, &desc);
-    fatal(file, line, "%s: %s", name, desc);
+    fatal(file, line, funcname, "%s: %s", name, desc);
 }
 
 [[noreturn]] void nvrtcError(nvrtcResult err, const char *file,
-                             int line) noexcept
+                             int line, const char *funcname) noexcept
 {
-    fatal(file, line, "%s", nvrtcGetErrorString(err));
+    fatal(file, line, funcname, "%s", nvrtcGetErrorString(err));
 }
 
 }

@@ -22,6 +22,7 @@ set(GPU_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gpu)
 set(TRAIN_GPU_SOURCES
     ${GPU_SRC_DIR}/job.cpp
     ${GPU_SRC_DIR}/state.cpp
+    ${GPU_SRC_DIR}/crash.cpp
 )
     
 set(INTERNAL_SRC_LIST)
@@ -57,10 +58,16 @@ target_compile_definitions(madrona_train PRIVATE
 )
 
 # Helper function for library users to get list of sources / compileflags
-function(madrona_build_compile_defns OUT_TARGET_NAME OUT_SRC_DEFN OUT_FLAG_DEFN)
+function(madrona_build_compile_defns)
+    set(one_val_args OUT_TARGET SOURCES_DEFN FLAGS_DEFN)
+    set(multi_val_args SRC_TARGETS CUSTOM_FLAGS)
+
+    cmake_parse_arguments(M "" "${one_val_args}" "${multi_val_args}"
+                          ${ARGN})
+
     set(ALL_TARGET_SOURCES "")
     set(ALL_TARGET_INCLUDES "")
-    foreach(t ${ARGN})
+    foreach(t ${M_SRC_TARGETS})
         get_target_property(TARGET_DIR ${t} SOURCE_DIR) 
 
         get_target_property(TARGET_SOURCES ${t} SOURCES) 
@@ -71,6 +78,10 @@ function(madrona_build_compile_defns OUT_TARGET_NAME OUT_SRC_DEFN OUT_FLAG_DEFN)
 
         get_target_property(TARGET_INCLUDES ${t} INCLUDE_DIRECTORIES) 
         list(APPEND ALL_TARGET_INCLUDES ${TARGET_INCLUDES})
+
+        get_target_property(TARGET_INTERFACE_INCLUDES ${t}
+            INTERFACE_INCLUDE_DIRECTORIES) 
+        list(APPEND ALL_TARGET_INCLUDES ${TARGET_INTERFACE_INCLUDES})
     endforeach()
 
     set(SRC_LIST)
@@ -79,16 +90,21 @@ function(madrona_build_compile_defns OUT_TARGET_NAME OUT_SRC_DEFN OUT_FLAG_DEFN)
     endforeach()
     set(SRC_LIST "${SRC_LIST}")
 
-    set(INCLUDE_LIST)
+    set(ALL_FLAGS)
     foreach(i ${ALL_TARGET_INCLUDES})
-        set(INCLUDE_LIST "${INCLUDE_LIST}\"-I${i}\", ")
+        set(ALL_FLAGS "${ALL_FLAGS}\"-I${i}\", ")
     endforeach()
-    set(INCLUDE_LIST "${INCLUDE_LIST}")
 
-    add_library(${OUT_TARGET_NAME} INTERFACE)
+    foreach(i ${M_CUSTOM_FLAGS})
+        set(ALL_FLAGS "${ALL_FLAGS}\"${i}\", ")
+    endforeach()
 
-    target_compile_definitions(${OUT_TARGET_NAME} INTERFACE
-        ${OUT_SRC_DEFN}=${SRC_LIST}
-        ${OUT_FLAG_DEFN}=${INCLUDE_LIST}
+    set(ALL_FLAGS "${ALL_FLAGS}")
+
+    add_library(${M_OUT_TARGET} INTERFACE)
+    
+    target_compile_definitions(${M_OUT_TARGET} INTERFACE
+        ${M_SOURCES_DEFN}=${SRC_LIST}
+        ${M_FLAGS_DEFN}=${ALL_FLAGS}
     )
 endfunction()
