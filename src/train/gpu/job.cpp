@@ -65,27 +65,32 @@ static inline JobTracker *getJobTrackers(JobManager *mgr)
 
 static void initializeJobSystem(JobManager *mgr)
 {
-    mgr->numOutstandingJobs = 0;
+    if (threadIdx.x == 0) {
+        mgr->numOutstandingJobs = 0;
 
-    for (int i = 0; i < 8; i++) {
-        mgr->activeGrids[i] = 0;
+        for (int i = 0; i < 8; i++) {
+            mgr->activeGrids[i] = 0;
+        }
+
+        mgr->freeTrackerHead.store(JobID { 0, 0 }, std::memory_order_relaxed);
     }
+
+    __syncthreads();
 
     auto grids = getGridInfo(mgr);
 
-    for (int i = 0; i < (int)ICfg::numJobGrids; i++) {
+    for (int i = threadIdx.x; i < (int)ICfg::numJobGrids; i += blockDim.x) {
         grids[i].waitJobHead.store(0, std::memory_order_relaxed);
         grids[i].waitJobTail.store(0, std::memory_order_relaxed);
         grids[i].waitQueueLock.store(0, std::memory_order_relaxed);
         grids[i].numRunning.store(0, std::memory_order_relaxed);
     }
 
-    mgr->freeTrackerHead.store(JobID { 0, 0 }, std::memory_order_relaxed);
     auto trackers = getJobTrackers(mgr);
 
     int num_trackers = GPUImplConsts::get().maxJobsPerGrid * ICfg::numJobGrids;
 
-    for (int i = 0; i < num_trackers; i++) {
+    for (int i = threadIdx.x; i < num_trackers; i += blockDim.x) {
         JobTracker &tracker = trackers[i];
         tracker.gen.store(0, std::memory_order_relaxed);
         if (i < num_trackers - 1) {
@@ -778,10 +783,17 @@ extern "C" __global__  void madronaTrainInitializeKernel()
     using namespace madrona::gpuTrain;
 
     auto job_mgr = getJobManager();
-    new (job_mgr) JobManager();
+
+    if (threadIdx.x == 0) {
+        new (job_mgr) JobManager();
+    }
+    __syncthreads();
+
     initializeJobSystem(job_mgr);
 
-    new (GPUImplConsts::get().stateManagerAddr) StateManager(1024);
+    if (threadIdx.x == 0) {
+        new (GPUImplConsts::get().stateManagerAddr) StateManager(1024);
+    }
 }
 
 extern "C" __global__ void madronaTrainJobSystemKernel()

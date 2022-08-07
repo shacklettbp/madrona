@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 
 #include <madrona/ecs.hpp>
 #include <madrona/utils.hpp>
@@ -28,6 +29,10 @@ private:
 
     static inline uint32_t num_components_ = 0;
     static inline utils::SpinLock register_lock_ {};
+
+    static constexpr uint32_t max_archetype_components_ = 16384;
+
+    std::array<uint32_t, max_archetype_components_> archetype_components_;
 };
 
 }

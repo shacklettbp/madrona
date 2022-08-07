@@ -417,7 +417,8 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     REQ_CU(cuMemcpyHtoD(job_sys_consts_addr, gpu_consts_readback,
                         job_sys_consts_size));
 
-    launchKernel(gpu_kernels.init, 1, 1, no_args);
+    launchKernel(gpu_kernels.init, 1, ICfg::numJobSystemKernelThreads,
+                 no_args);
     
     uint32_t num_queue_blocks =
         utils::divideRoundUp(num_worlds, ICfg::numEntryQueueThreads);
