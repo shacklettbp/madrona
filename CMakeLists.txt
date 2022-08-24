@@ -48,3 +48,8 @@ add_subdirectory(external)
 add_compile_options(-Wall -Wextra -Wshadow)
 
 add_subdirectory(src)
+
+if (MADRONA_ENABLE_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

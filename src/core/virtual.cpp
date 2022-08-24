@@ -48,7 +48,9 @@ VirtualRegion::VirtualRegion(uint64_t max_chunks, uint64_t init_chunks)
     base_ = base;
     total_size_ = total_size;
 
-    commit(0, init_chunks);
+    if (init_chunks > 0) {
+        commit(0, init_chunks);
+    }
 }
 
 VirtualRegion::~VirtualRegion()
@@ -99,7 +101,7 @@ VirtualStore::VirtualStore(uint32_t bytes_per_item, uint32_t max_items)
 
 void VirtualStore::expand(uint32_t num_items)
 {
-    if (num_items == committed_items_) {
+    if (num_items > committed_items_) {
         region_.commit(committed_chunks_, 1);
         committed_chunks_++;
 

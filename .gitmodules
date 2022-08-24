@@ -1,3 +1,6 @@
 [submodule "external/madrona-deps"]
 	path = external/madrona-deps
 	url = https://github.com/shacklettbp/madrona-deps.git
+[submodule "external/googletest"]
+	path = external/googletest
+	url = https://github.com/google/googletest.git

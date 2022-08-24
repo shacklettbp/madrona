@@ -99,7 +99,7 @@ Entity StateManager::makeEntity(Args && ...args)
            "Trying to construct entity with wrong number of arguments");
 
 
-    Entity new_row = archetype.tbl.makeRow();
+    Entity new_row = archetype.tbl.addRow();
 
     auto tbl_index = archetype.tbl.getIndex(new_row);
 
@@ -127,7 +127,7 @@ Entity StateManager::makeEntity(Args && ...args)
 void StateManager::destroyEntity(Entity e)
 {
     auto &archetype = *archetype_infos_[e.archetype];
-    archetype.tbl.destroyRow(e);
+    archetype.tbl.removeRow(e);
 }
 
 template <typename T>

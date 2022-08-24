@@ -21,3 +21,8 @@ elseif (IS_WINDOWS)
 elseif (IS_MAC)
     target_compile_definitions(madrona_sys_defns INTERFACE "IS_MAC=1")
 endif ()
+
+if (MADRONA_ENABLE_TESTS)
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    add_subdirectory(googletest)
+endif ()

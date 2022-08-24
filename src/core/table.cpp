@@ -27,24 +27,24 @@ Table::Table(const TypeInfo *component_types, uint32_t num_components, uint32_t 
     }
 }
 
-Entity Table::makeRow()
+Entity Table::addRow()
 {
+    uint32_t idx = num_rows_++;
+
     for (VirtualStore &col : columns_) {
         col.expand(num_rows_);
     }
 
     idx_to_id_.expand(num_rows_);
 
-    Entity e = makeID(num_rows_);
+    Entity e = makeID(idx);
 
-    *(uint32_t *)idx_to_id_[num_rows_] = e.id;
-
-    num_rows_++;
+    *(uint32_t *)idx_to_id_[idx] = e.id;
 
     return e;
 }
 
-void Table::destroyRow(Entity e)
+void Table::removeRow(Entity e)
 {
     uint32_t delete_idx = idToIndex(e);
     if (delete_idx == ~0u) {
@@ -66,6 +66,12 @@ void Table::destroyRow(Entity e)
     }
 
     freeID(e.id);
+
+    for (VirtualStore &col : columns_) {
+        col.shrink(num_rows_);
+    }
+
+    idx_to_id_.shrink(num_rows_);
 }
 
 Entity Table::makeID(uint32_t idx)

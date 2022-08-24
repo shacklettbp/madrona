@@ -20,13 +20,13 @@ public:
     Table(const TypeInfo *component_types, uint32_t num_components,
           uint32_t table_id);
 
-    Entity makeRow();
-    void destroyRow(Entity e);
+    Entity addRow();
+    void removeRow(Entity e);
 
     struct Index {
         uint32_t idx;
 
-        inline bool valid() const { return idx == ~0u; }
+        inline bool valid() const { return idx != ~0u; }
     };
 
     inline Index getIndex(Entity e) const;
