@@ -47,6 +47,11 @@ constexpr inline uint32_t intLog2(uint32_t v)
     return sizeof(unsigned int) * 8 - __builtin_clz(v) - 1;
 }
 
+constexpr inline uint64_t int64Log2(uint64_t v)
+{
+    return sizeof(unsigned long long) * 8 - __builtin_clzll(v) - 1;
+}
+
 template <typename> struct PackDelegator;
 template <template <typename...> typename T, typename ...Args>
 struct PackDelegator<T<Args...>> {

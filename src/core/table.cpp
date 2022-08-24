@@ -6,24 +6,26 @@
 namespace madrona {
 
 namespace ICfg {
-inline constexpr uint32_t idBlockRowsLog2 =
-    utils::intLog2(VirtualRegion::chunkSize() / sizeof(uint32_t));
-inline constexpr uint64_t maxRowsPerTable = 1u << 30u;
-};
+inline constexpr uint32_t maxRowsPerTable = 1u << 30u;
+}
 
 Table::Table(const TypeInfo *component_types, uint32_t num_components, uint32_t table_id)
     : table_id_(table_id),
       num_rows_(0),
       free_id_head_(~0u),
-      id_to_idx_(sizeof(GenIndex), ICfg::maxRowsPerTable),
+      id_to_idx_(sizeof(GenIndex), alignof(GenIndex), 0, ICfg::maxRowsPerTable),
       num_ids_(0),
-      idx_to_id_(sizeof(uint32_t), ICfg::maxRowsPerTable),
+      idx_to_id_(sizeof(uint32_t), alignof(uint32_t), 128, ICfg::maxRowsPerTable),
       columns_()
 {
     for (int i = 0; i < (int)num_components; i++) {
-        uint32_t num_bytes = component_types[i].numBytes;
+        const TypeInfo &type = component_types[i];
 
-        columns_.emplace_back(num_bytes, ICfg::maxRowsPerTable);
+        // 3rd argument is offsetting the start from the page aligned boundary
+        // to avoid everything mapping to the same cache sets. Should revisit -
+        // maybe add a random offset for each Table as well?
+        columns_.emplace_back(type.numBytes, type.alignment, 128 * (i + 2),
+                              ICfg::maxRowsPerTable);
     }
 }
 
