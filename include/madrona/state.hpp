@@ -4,42 +4,74 @@
 #include <madrona/heap_array.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/span.hpp>
+#include <madrona/table.hpp>
+#include <madrona/optional.hpp>
 
 namespace madrona {
 
+class StateManager;
+
+class ArchetypeID {
+    ArchetypeID(uint32_t i) : id(i) {};
+    uint32_t id;
+friend class StateManager;
+};
+
+class ComponentID {
+    ComponentID(uint32_t i) : id(i) {};
+    uint32_t id;
+friend class StateManager;
+};
+
 class StateManager {
 public:
-    StateManager(uint32_t max_types);
-    ~StateManager();
+    StateManager();
 
     template <typename ComponentT>
-    Entity registerComponent();
+    ComponentID registerComponent();
 
     template <typename ArchetypeT>
-    Entity registerArchetype();
+    ArchetypeID registerArchetype();
 
     template <typename ComponentT>
-    Entity componentID();
+    ComponentID componentID() const;
+
+    template <typename ArchetypeT>
+    ArchetypeID archetypeID() const;
 
     template <typename ComponentT>
-    Entity archetypeID();
+    inline ComponentT & getComponent(Entity entity);
+
+    template <typename... ComponentTs>
+    inline Query<ComponentTs...> query();
+
+    template <typename ArchetypeT, typename... Args>
+    inline Entity makeEntity(Args && ...args);
+
+    inline void destroyEntity(Entity e);
 
 private:
-    struct TypeInfo;
+    struct ArchetypeInfo {
+        uint32_t componentOffset;
+        uint32_t numComponents;
+        Table tbl;
+    };
 
     template <typename T> struct TypeID;
 
     template <typename T>
-    static Entity trackType(Entity *ptr);
-    static Entity trackByName(Entity *ptr, const char *name);
+    static uint32_t trackType(uint32_t *ptr);
+    static uint32_t trackByName(uint32_t *ptr, const char *name);
 
-    static void registerType(Entity *ptr);
+    static void registerType(uint32_t *ptr, bool component);
 
-    void saveComponentInfo(Entity id, uint32_t alignment, uint32_t num_bytes);
-    void saveArchetypeInfo(Entity id, Span<Entity> components);
+    void saveComponentInfo(uint32_t id, uint32_t alignment,
+                           uint32_t num_bytes);
+    void saveArchetypeInfo(uint32_t id, Span<ComponentID> components);
 
-    TypeInfo *type_infos_;
-    DynArray<Entity> archetype_components_;
+    DynArray<TypeInfo> component_infos_;
+    DynArray<ComponentID> archetype_components_;
+    DynArray<Optional<ArchetypeInfo>> archetype_infos_;
 };
 
 }

@@ -9,7 +9,8 @@ add_library(madrona_core STATIC
     ${INC_DIR}/ecs.hpp ${INC_DIR}/ecs.inl
     ${INC_DIR}/state.hpp ${INC_DIR}/state.inl state.cpp
     ${INC_DIR}/context.hpp ${INC_DIR}/context.inl context.cpp
-    #${INC_DIR}/table.hpp ${INC_DIR}/table.inl table.cpp
+    ${INC_DIR}/table.hpp ${INC_DIR}/table.inl table.cpp
+    ${INC_DIR}/virtual.hpp virtual.cpp
     #${INC_DIR}/hash.hpp
     #${INC_DIR}/platform_utils.hpp ${INC_DIR}/platform_utils.inl
     #    platform_utils.cpp

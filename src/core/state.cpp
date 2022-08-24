@@ -9,21 +9,12 @@
 
 namespace madrona {
 
-struct StateManager::TypeInfo {
-    union {
-        struct {
-            uint32_t alignment;
-            uint32_t numBytes;
-        };
-        struct {
-            uint32_t componentOffset;
-            uint32_t numComponents;
-        };
-    };
-};
+namespace ICfg {
+static constexpr uint32_t unassignedTypeID = ~0u;
+}
 
 struct IDInfo {
-    Entity *ptr;
+    uint32_t *ptr;
     std::string_view typeName;
     std::size_t nameHash;
 };
@@ -31,26 +22,23 @@ struct IDInfo {
 struct TypeIDTracker {
     utils::SpinLock typeLock;
     DynArray<IDInfo, InitAlloc> ids;
-    uint32_t numRegisteredTypes;
+    uint32_t numRegisteredComponents;
+    uint32_t numRegisteredArchetypes;
 };
 
-StateManager::StateManager(uint32_t max_components)
-    : type_infos_(
-        (TypeInfo *)InitAlloc().alloc(max_components * sizeof(TypeInfo))),
-      archetype_components_(0)
+StateManager::StateManager()
+    : component_infos_(0),
+      archetype_components_(0),
+      archetype_infos_(0)
 {}
-
-StateManager::~StateManager()
-{
-    InitAlloc().dealloc(type_infos_);
-}
 
 static TypeIDTracker &getSingletonTracker()
 {
     static TypeIDTracker id_tracker {
         .typeLock {},
         .ids { 0, InitAlloc() },
-        .numRegisteredTypes = 0,
+        .numRegisteredComponents = 0,
+        .numRegisteredArchetypes = 0,
     };
 
     return id_tracker;
@@ -102,7 +90,7 @@ static std::string_view extractTypeName(const char *compiler_name)
 // updated. This ensures that the IDs assigned to each type are strictly
 // defined by registration order, rather than implementation defined global
 // initialization order.
-Entity StateManager::trackByName(Entity *ptr, const char *compiler_name)
+uint32_t StateManager::trackByName(uint32_t *ptr, const char *compiler_name)
 {
     std::string_view type_name = extractTypeName(compiler_name);
     size_t type_hash = std::hash<std::string_view>{}(type_name);
@@ -111,7 +99,7 @@ Entity StateManager::trackByName(Entity *ptr, const char *compiler_name)
 
     std::lock_guard lock(tracker.typeLock);
 
-    Entity cur_type_entity = Entity::none();
+    uint32_t cur_type_id = ICfg::unassignedTypeID;
 
     // This loop ensures that a shared library loaded after type A has already
     // been registered will get the final ID assigned to type A. Otherwise,
@@ -121,7 +109,7 @@ Entity StateManager::trackByName(Entity *ptr, const char *compiler_name)
     for (const IDInfo &id_info : tracker.ids) {
         if (type_hash == id_info.nameHash &&
             type_name == id_info.typeName) {
-            cur_type_entity = *id_info.ptr;
+            cur_type_id = *id_info.ptr;
             break;
         }
     }
@@ -139,8 +127,8 @@ Entity StateManager::trackByName(Entity *ptr, const char *compiler_name)
     // where type_info.ptr still points to uninitialized memory. To avoid
     // this, assign the entity value (usually Entity::none()) here, even
     // though it will be immediately assigned afterwards as well.
-    *ptr = cur_type_entity;
-    return cur_type_entity;
+    *ptr = cur_type_id;
+    return cur_type_id;
 }
 
 // Actually assign the type IDs, this is called by user code that explicitly
@@ -149,10 +137,10 @@ Entity StateManager::trackByName(Entity *ptr, const char *compiler_name)
 // Performance isn't a huge issue here, since registration should only happen
 // in user initialization code, but this could be optimized by switching
 // to some kind of hash map on names, at the cost of memory usage.
-void StateManager::registerType(Entity *ptr)
+void StateManager::registerType(uint32_t *ptr, bool component)
 {
     // Already registered, presumably to another StateManager
-    if (*ptr != Entity::none()) {
+    if (*ptr != ICfg::unassignedTypeID) {
         return;
     }
 
@@ -160,11 +148,12 @@ void StateManager::registerType(Entity *ptr)
 
     std::lock_guard lock(tracker.typeLock);
 
-    uint32_t type_id = tracker.numRegisteredTypes++;
-
-    Entity type_entity {
-        .id = type_id,
-    };
+    uint32_t type_id;
+    if (component) {
+        type_id = tracker.numRegisteredComponents++;
+    } else {
+        type_id = tracker.numRegisteredArchetypes++;
+    }
 
     const IDInfo *matched_id_info = nullptr;
     for (const IDInfo &candidate_id_info : tracker.ids) {
@@ -184,32 +173,53 @@ void StateManager::registerType(Entity *ptr)
     for (const IDInfo &id_info : tracker.ids) {
         if (matched_id_info->nameHash == id_info.nameHash &&
             matched_id_info->typeName == id_info.typeName) {
-            *id_info.ptr = type_entity;
+            *id_info.ptr = type_id;
         }
     }
 }
 
-void StateManager::saveComponentInfo(Entity id, uint32_t alignment,
+void StateManager::saveComponentInfo(uint32_t id,
+                                     uint32_t alignment,
                                      uint32_t num_bytes)
 {
-    type_infos_[id.id] = TypeInfo {
+    // IDs are globally assigned, technically there is an edge case where
+    // there are gaps in the IDs assigned to a specific StateManager
+    // for component_infos_ just use default initialization of the
+    // unregistered components
+    if (id >= component_infos_.size()) {
+        component_infos_.resize(id + 1);
+    }
+
+    component_infos_[id] = TypeInfo {
         .alignment = alignment,
         .numBytes = num_bytes,
     };
 }
 
-void StateManager::saveArchetypeInfo(Entity id, Span<Entity> components)
+void StateManager::saveArchetypeInfo(uint32_t id, Span<ComponentID> components)
 {
     uint32_t offset = archetype_components_.size();
-    for (Entity e : components) {
-        archetype_components_.push_back(e);
+    HeapArray<TypeInfo> type_infos(components.size());
+    for (int i = 0; i < (int)components.size(); i++) {
+        ComponentID component_id = components[i];
+
+        archetype_components_.push_back(component_id);
+        type_infos[i] = component_infos_[component_id.id];
     }
 
-    type_infos_[id.id] = TypeInfo {
+    Table archetype_tbl(type_infos.data(), type_infos.size(), id);
+
+    // IDs are globally assigned, technically there is an edge case where
+    // there are gaps in the IDs assigned to a specific StateManager
+    if (id >= archetype_infos_.size()) {
+        archetype_infos_.resize(id + 1);
+    }
+
+    archetype_infos_[id].emplace(ArchetypeInfo {
         .componentOffset = offset,
         .numComponents = components.size(),
-    };
+        .tbl = std::move(archetype_tbl),
+    });
 }
-
 
 }
