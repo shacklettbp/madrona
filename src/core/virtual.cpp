@@ -121,12 +121,18 @@ void VirtualRegion::commit(uint64_t start_chunk, uint64_t num_chunks)
 
 void VirtualRegion::decommit(uint64_t start_chunk, uint64_t num_chunks)
 {
+#if defined(__linux__) or defined(__APPLE__)
     int res = madvise(base_ + (start_chunk << chunk_shift_),
                       num_chunks << chunk_shift_, MADV_FREE);
 
     if (res != 0) {
         FATAL("Failed to decommit %lu chunks for VirtualRegion", num_chunks);
     }
+#elif defined(_WIN32)
+    STATIC_UNIMPLEMENTED();
+#else
+    STATIC_UNIMPLEMENTED();
+#endif
 }
 
 static uint64_t computeChunkShift(uint32_t bytes_per_item)
