@@ -6,21 +6,12 @@
 
 namespace madrona {
 
-template <typename T>
-struct StateManager::TypeID {
-    static uint32_t id;
-};
-
-template <typename T>
-uint32_t StateManager::TypeID<T>::id =
-    StateManager::trackType<T>(&StateManager::TypeID<T>::id);
-
 template <typename ComponentT>
 ComponentID StateManager::registerComponent()
 {
-    StateManager::registerType(&TypeID<ComponentT>::id, true);
+    TypeTracker::registerType<ComponentT>(&next_component_id_);
 
-    uint32_t id = TypeID<ComponentT>::id;
+    uint32_t id = TypeTracker::typeID<ComponentT>();
 
     saveComponentInfo(id, std::alignment_of_v<ComponentT>,
                       sizeof(ComponentT));
@@ -33,21 +24,25 @@ ComponentID StateManager::registerComponent()
 template <typename ArchetypeT>
 ArchetypeID StateManager::registerArchetype()
 {
-    StateManager::registerType(&TypeID<ArchetypeT>::id, false);
+    TypeTracker::registerType<ArchetypeT>(&next_archetype_id_);
 
     using Delegator = utils::PackDelegator<ArchetypeT>;
 
     auto archetype_components = Delegator::call([]<typename... Args>() {
         static_assert(std::is_same_v<ArchetypeT, Archetype<Args...>>);
+        int component_idx = 0;
+        auto registerArchetypeComponent = [&component_idx]() {
+        };
+
         std::array archetype_components {
-            ComponentID { TypeID<Args>::id }
+            ComponentID { TypeTracker::typeID<Args>() }
             ...
         };
 
         return archetype_components;
     });
     
-    uint32_t id = TypeID<ArchetypeT>::id;
+    uint32_t id = TypeTracker::typeID<ArchetypeT>();
 
     saveArchetypeInfo(id,
         Span(archetype_components.data(), archetype_components.size()));
@@ -61,7 +56,7 @@ template <typename ComponentT>
 ComponentID StateManager::componentID() const
 {
     return ComponentID {
-        TypeID<ComponentT>::id,
+        TypeTracker::typeID<ComponentT>(),
     };
 }
 
@@ -69,12 +64,12 @@ template <typename ArchetypeT>
 ArchetypeID StateManager::archetypeID() const
 {
     return ArchetypeID {
-        TypeID<ArchetypeT>::id,
+        TypeTracker::typeID<ArchetypeT>(),
     };
 }
 
 template <typename ComponentT>
-ComponentT & StateManager::getComponent(Entity entity)
+ComponentT & StateManager::get(Entity entity)
 {
 }
 
@@ -135,18 +130,6 @@ void StateManager::destroyEntity(Entity e)
 {
     auto &archetype = *archetype_infos_[e.archetype];
     archetype.tbl.removeRow(e);
-}
-
-template <typename T>
-uint32_t StateManager::trackType(uint32_t *ptr)
-{
-    return StateManager::trackByName(ptr,
-#ifdef _MSC_VER
-        __FUNCDNAME__
-#else
-        __PRETTY_FUNCTION__
-#endif
-        );
 }
 
 }

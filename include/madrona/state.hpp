@@ -7,6 +7,7 @@
 #include <madrona/table.hpp>
 #include <madrona/query.hpp>
 #include <madrona/optional.hpp>
+#include <madrona/type_tracker.hpp>
 
 namespace madrona {
 
@@ -39,7 +40,7 @@ public:
     ArchetypeID archetypeID() const;
 
     template <typename ComponentT>
-    inline ComponentT & getComponent(Entity entity);
+    inline ComponentT & get(Entity entity);
 
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
@@ -59,14 +60,6 @@ private:
         Table tbl;
     };
 
-    template <typename T> struct TypeID;
-
-    template <typename T>
-    static uint32_t trackType(uint32_t *ptr);
-    static uint32_t trackByName(uint32_t *ptr, const char *name);
-
-    static void registerType(uint32_t *ptr, bool component);
-
     void saveComponentInfo(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
     void saveArchetypeInfo(uint32_t id, Span<ComponentID> components);
@@ -74,6 +67,9 @@ private:
     DynArray<TypeInfo> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeInfo>> archetype_infos_;
+
+    static uint32_t next_component_id_;
+    static uint32_t next_archetype_id_;
 };
 
 }

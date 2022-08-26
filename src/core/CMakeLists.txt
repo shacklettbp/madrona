@@ -7,6 +7,7 @@ add_library(madrona_core STATIC
     ${INC_DIR}/crash.hpp crash.cpp
     ${INC_DIR}/job.hpp ${INC_DIR}/job.inl job.cpp
     ${INC_DIR}/ecs.hpp ${INC_DIR}/ecs.inl
+    ${INC_DIR}/type_tracker.hpp ${INC_DIR}/type_tracker.inl type_tracker.cpp
     ${INC_DIR}/state.hpp ${INC_DIR}/state.inl state.cpp
     ${INC_DIR}/context.hpp ${INC_DIR}/context.inl context.cpp
     ${INC_DIR}/table.hpp ${INC_DIR}/table.inl table.cpp
