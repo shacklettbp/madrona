@@ -30,9 +30,16 @@ ArchetypeID StateManager::registerArchetype()
 
     auto archetype_components = Delegator::call([]<typename... Args>() {
         static_assert(std::is_same_v<ArchetypeT, Archetype<Args...>>);
-        int component_idx = 0;
-        auto registerArchetypeComponent = [&component_idx]() {
+        uint32_t column_idx = 0;
+        auto registerColumnIndex =
+                [&column_idx]<typename ComponentT>() {
+            using LookupT = typename ArchetypeRef<ArchetypeT>::
+                template ComponentLookup<ComponentT>;
+
+            TypeTracker::registerType<LookupT>(&column_idx);
         };
+
+        ( registerColumnIndex.template operator()<Args>(), ... );
 
         std::array archetype_components {
             ComponentID { TypeTracker::typeID<Args>() }
@@ -87,7 +94,7 @@ template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT> StateManager::archetype()
 {
     auto archetype_id = archetypeID<ArchetypeT>();
-    return ArchetypeRef<ArchetypeT>(&archetype_infos_[archetype_id.id].tbl);
+    return ArchetypeRef<ArchetypeT>(&archetype_infos_[archetype_id.id]->tbl);
 }
 
 template <typename ArchetypeT, typename ...Args>

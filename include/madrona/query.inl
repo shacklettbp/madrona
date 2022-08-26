@@ -1,16 +1,8 @@
 #pragma once
 
+#include <madrona/type_tracker.hpp>
+
 namespace madrona {
-
-template <typename ArchetypeT>
-template <typename ComponentT>
-struct ArchetypeRef<ArchetypeT>::ComponentLookup {
-    static uint32_t idx;
-};
-
-template <typename ArchetypeT>
-template <typename ComponentT>
-uint32_t ArchetypeRef<ArchetypeT>::ComponentLookup<ComponentT>::idx = 0;
 
 template <typename ComponentT>
 ComponentRef<ComponentT>::Result::Result(ComponentT *ptr)
@@ -76,11 +68,6 @@ ComponentT * ComponentRef<ComponentT>::end() const
 }
 
 template <typename ArchetypeT>
-ArchetypeRef<ArchetypeT>::ArchetypeRef(Table *tbl)
-    : tbl_(tbl)
-{}
-
-template <typename ArchetypeT>
 Table::Index ArchetypeRef<ArchetypeT>::getIndex(Entity e) const
 {
     return tbl_->getIndex(e);
@@ -131,10 +118,15 @@ const ComponentT & ArchetypeRef<ArchetypeT>::get(Table::Index idx) const
 }
 
 template <typename ArchetypeT>
+ArchetypeRef<ArchetypeT>::ArchetypeRef(Table *tbl)
+    : tbl_(tbl)
+{}
+
+template <typename ArchetypeT>
 template <typename ComponentT>
 uint32_t ArchetypeRef<ArchetypeT>::getComponentIndex() const
 {
-    return ComponentLookup<ComponentT>::id;
+    return TypeTracker::typeID<ComponentLookup<ComponentT>>();
 }
 
 }
