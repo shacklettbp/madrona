@@ -44,7 +44,7 @@ public:
     ArchetypeID archetypeID() const;
 
     template <typename ComponentT>
-    inline ComponentT & get(Entity entity);
+    inline ResultRef<ComponentT> get(Entity entity);
 
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();

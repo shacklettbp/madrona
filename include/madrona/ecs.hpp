@@ -14,11 +14,19 @@ struct Entity {
     static constexpr inline Entity none();
 };
 
-template <typename... Components> struct Archetype {};
+struct Loc {
+    uint32_t idx;
 
+    inline bool valid() const;
+};
+
+template <typename... Components> struct Archetype {};
 
 inline bool operator==(Entity a, Entity b);
 inline bool operator!=(Entity a, Entity b);
+
+inline bool operator==(Loc a, Loc b);
+inline bool operator!=(Loc a, Loc b);
 
 }
 

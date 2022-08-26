@@ -23,15 +23,9 @@ public:
     Entity addRow();
     void removeRow(Entity e);
 
-    struct Index {
-        uint32_t idx;
-
-        inline bool valid() const { return idx != ~0u; }
-    };
-
-    inline Index getIndex(Entity e) const;
-    inline void * getValue(uint32_t column_idx, Index idx);
-    inline const void * getValue(uint32_t column_idx, Index idx) const;
+    inline Loc getLoc(Entity e) const;
+    inline void * getValue(uint32_t column_idx, Loc loc);
+    inline const void * getValue(uint32_t column_idx, Loc loc) const;
 
     inline void * data(uint32_t col_idx);
     inline const void * data(uint32_t col_idx) const;

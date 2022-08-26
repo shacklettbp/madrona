@@ -11,6 +11,11 @@ constexpr Entity Entity::none()
     };
 }
 
+bool Loc::valid() const
+{
+    return idx != ~0u;
+}
+
 bool operator==(Entity a, Entity b)
 {
     return a.gen == b.gen && a.archetype == b.archetype &&
@@ -21,5 +26,16 @@ bool operator!=(Entity a, Entity b)
 {
     return !(a == b);
 }
+
+bool operator==(Loc a, Loc b)
+{
+    return a.idx == b.idx;
+}
+
+bool operator!=(Loc a, Loc b)
+{
+    return !(a == b);
+}
+
 
 }

@@ -11,23 +11,23 @@ uint32_t Table::idToIndex(Entity e) const
     return idx.idx;
 }
 
-Table::Index Table::getIndex(Entity e) const
+Loc Table::getLoc(Entity e) const
 {
-    return Index {
+    return Loc {
         idToIndex(e),
     };
 }
 
-void * Table::getValue(uint32_t column_idx, Table::Index idx)
+void * Table::getValue(uint32_t column_idx, Loc loc)
 {
     VirtualStore &col = columns_[column_idx];
-    return col[idx.idx];
+    return col[loc.idx];
 }
 
-const void * Table::getValue(uint32_t column_idx, Table::Index idx) const
+const void * Table::getValue(uint32_t column_idx, Loc loc) const
 {
     const VirtualStore &col = columns_[column_idx];
-    return col[idx.idx];
+    return col[loc.idx];
 }
 
 void * Table::data(uint32_t col_idx)

@@ -21,7 +21,7 @@ TEST(Table, Indexing)
 
     Entity init_e = tbl.addRow();
 
-    EXPECT_TRUE(tbl.getIndex(init_e).valid());
+    EXPECT_TRUE(tbl.getLoc(init_e).valid());
 
     vector<Entity> entities;
 
@@ -30,7 +30,7 @@ TEST(Table, Indexing)
     }
 
     for (int i = 0; i < num_entities; i++) {
-        EXPECT_TRUE(tbl.getIndex(entities[i]).valid());
+        EXPECT_TRUE(tbl.getLoc(entities[i]).valid());
     }
 
     for (int i = 0; i < num_entities; i += 10) {
@@ -38,7 +38,7 @@ TEST(Table, Indexing)
     }
 
     for (int i = 0; i < num_entities; i++) {
-        EXPECT_EQ(tbl.getIndex(entities[i]).valid(), i % 10 != 0);
+        EXPECT_EQ(tbl.getLoc(entities[i]).valid(), i % 10 != 0);
     }
 
     vector<Entity> new_entities;
@@ -59,11 +59,11 @@ TEST(Table, Indexing)
     }
 
     for (const auto &e : deleted_entities) {
-        EXPECT_FALSE(tbl.getIndex(e).valid());
+        EXPECT_FALSE(tbl.getLoc(e).valid());
     }
 
     for (int i = 0; i < num_entities; i++) {
-        auto idx = tbl.getIndex(entities[i]);
+        auto idx = tbl.getLoc(entities[i]);
         EXPECT_TRUE(idx.valid());
         auto addr = (uint32_t *)tbl.getValue(0, idx);
 
@@ -71,23 +71,23 @@ TEST(Table, Indexing)
     }
 
     for (int i = 0; i < num_entities; i++) {
-        auto idx = tbl.getIndex(entities[i]);
+        auto idx = tbl.getLoc(entities[i]);
         auto addr = (uint32_t *)tbl.getValue(0, idx);
         EXPECT_EQ(*addr, i);
     }
 
     for (int i = 0; i < num_entities; i++) {
         if (i % 5 == 0) {
-            auto idx = tbl.getIndex(entities[i]);
+            auto idx = tbl.getLoc(entities[i]);
             EXPECT_TRUE(idx.valid());
             auto addr = (uint32_t *)tbl.getValue(0, idx);
             EXPECT_EQ(*addr, i );
 
             tbl.removeRow(entities[i]);
-            idx = tbl.getIndex(entities[i]);
+            idx = tbl.getLoc(entities[i]);
             EXPECT_FALSE(idx.valid());
         } else {
-            auto idx = tbl.getIndex(entities[i]);
+            auto idx = tbl.getLoc(entities[i]);
             EXPECT_TRUE(idx.valid());
             auto addr = (uint32_t *)tbl.getValue(0, idx);
             EXPECT_EQ(*addr, i);
@@ -97,7 +97,7 @@ TEST(Table, Indexing)
     for (int i = 0; i < num_entities; i++) {
         if (i % 5 == 0) { continue; }
 
-        auto idx = tbl.getIndex(entities[i]);
+        auto idx = tbl.getLoc(entities[i]);
         EXPECT_TRUE(idx.valid());
         auto addr = (uint32_t *)tbl.getValue(0, idx);
         EXPECT_EQ(*addr, i);
@@ -133,7 +133,7 @@ TEST(Table, MultiColumn)
     for (int i = 0; i < num_entities; i++) {
         entities.push_back(tbl.addRow());
 
-        auto idx = tbl.getIndex(entities[i]);
+        auto idx = tbl.getLoc(entities[i]);
 
         auto first = (uint32_t *)tbl.getValue(0, idx);
 
@@ -163,7 +163,7 @@ TEST(Table, MultiColumn)
             continue;
         }
 
-        auto idx = tbl.getIndex(entities[i]);
+        auto idx = tbl.getLoc(entities[i]);
 
         auto first = (uint32_t *)tbl.getValue(0, idx);
         auto second = (V *)tbl.getValue(1, idx);
@@ -197,7 +197,7 @@ TEST(Table, DeleteMany)
     for (int i = 0; i < num_entities; i++) {
         entities.push_back(tbl.addRow());
 
-        auto idx = tbl.getIndex(entities[i]);
+        auto idx = tbl.getLoc(entities[i]);
 
         auto ptr = (uint32_t *)tbl.getValue(0, idx);
         *ptr = i;
@@ -208,16 +208,16 @@ TEST(Table, DeleteMany)
     }
 
     for (int i = 0; i < 2; i++) {
-        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getIndex(entities[i]));
+        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getLoc(entities[i]));
         EXPECT_EQ(*ptr, i);
     }
 
     for (int i = 0; i < 2; i++) {
-        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getIndex(entities[i]));
+        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getLoc(entities[i]));
         EXPECT_EQ(*ptr, i);
     }
     for (int i = num_entities - 2; i < num_entities; i++) {
-        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getIndex(entities[i]));
+        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getLoc(entities[i]));
         EXPECT_EQ(*ptr, i);
     }
 }

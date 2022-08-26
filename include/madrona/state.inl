@@ -76,8 +76,9 @@ ArchetypeID StateManager::archetypeID() const
 }
 
 template <typename ComponentT>
-ComponentT & StateManager::get(Entity entity)
+ResultRef<ComponentT> StateManager::get(Entity entity)
 {
+    entity.archetype;
 }
 
 template <typename ...ComponentTs>
@@ -110,11 +111,11 @@ Entity StateManager::makeEntity(Args && ...args)
 
     Entity new_row = archetype.tbl.addRow();
 
-    auto tbl_index = archetype.tbl.getIndex(new_row);
+    auto tbl_loc = archetype.tbl.getLoc(new_row);
 
     int column_idx = 0;
 
-    auto constructNextComponent = [this, &column_idx, &archetype, &tbl_index](
+    auto constructNextComponent = [this, &column_idx, &archetype, &tbl_loc](
             auto &&arg) {
         using ComponentT = std::remove_reference_t<decltype(arg)>;
 
@@ -122,7 +123,7 @@ Entity StateManager::makeEntity(Args && ...args)
                archetype_components_[archetype.componentOffset +
                    column_idx].id);
 
-        new (archetype.tbl.getValue(column_idx, tbl_index)) 
+        new (archetype.tbl.getValue(column_idx, tbl_loc)) 
             ComponentT(std::forward<ComponentT>(arg));
 
         column_idx++;

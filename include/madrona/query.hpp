@@ -5,6 +5,18 @@
 
 namespace madrona {
 
+template <typename T>
+class ResultRef {
+public:
+    inline ResultRef(T *ptr);
+
+    inline T & value();
+    inline bool valid() const;
+
+private:
+    T *ptr_;
+};
+
 template <typename... ComponentTs>
 class Query {
 public:
@@ -19,22 +31,11 @@ private:
 template <typename ComponentT>
 class ComponentRef {
 public:
-    class Result {
-    public:
-        inline Result(ComponentT *ptr);
-    
-        inline ComponentT & value();
-        inline bool valid() const;
-    
-    private:
-        ComponentT *ptr_;
-    };
-
     ComponentRef(Table *tbl, uint32_t col_idx);
 
-    inline Result operator[](Entity e) const;
+    inline ResultRef<ComponentT> operator[](Entity e) const;
 
-    inline ComponentT & operator[](Table::Index idx) const;
+    inline ComponentT & operator[](Loc idx) const;
 
     inline ComponentT * data() const;
     inline uint32_t size() const;
@@ -50,7 +51,7 @@ private:
 template <typename ArchetypeT>
 class ArchetypeRef {
 public:
-    inline Table::Index getIndex(Entity e) const;
+    inline Loc getLoc(Entity e) const;
 
     template <typename ComponentT>
     inline ComponentRef<ComponentT> component();
@@ -59,19 +60,28 @@ public:
     inline ComponentRef<const ComponentT> component() const;
 
     template <typename ComponentT>
-    using Result = typename ComponentRef<ComponentT>::Result;
+    inline ResultRef<ComponentT> get(Entity e);
+    template <typename ComponentT>
+    inline ResultRef<const ComponentT> get(Entity e) const;
 
     template <typename ComponentT>
-    inline Result<ComponentT> get(Entity e);
+    inline ComponentT & get(Loc idx);
     template <typename ComponentT>
-    inline Result<const ComponentT> get(Entity e) const;
-
-    template <typename ComponentT>
-    inline ComponentT & get(Table::Index idx);
-    template <typename ComponentT>
-    inline const ComponentT & get(Table::Index idx) const;
+    inline const ComponentT & get(Loc idx) const;
 
     inline uint32_t size() const;
+
+    struct Iter {
+        Loc loc;
+
+        inline Loc operator*();
+        inline Iter & operator++();
+        inline bool operator==(Iter o);
+        inline bool operator!=(Iter o);
+    };
+
+    inline Iter begin() const;
+    inline Iter end() const;
 
 private:
     template <typename ComponentT> struct ComponentLookup {};
