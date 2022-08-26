@@ -11,15 +11,19 @@
 
 namespace madrona {
 
-class ArchetypeID {
-    ArchetypeID(uint32_t i) : id(i) {};
+struct ArchetypeID {
     uint32_t id;
+
+private:
+    ArchetypeID(uint32_t i) : id(i) {};
 friend class StateManager;
 };
 
-class ComponentID {
-    ComponentID(uint32_t i) : id(i) {};
+struct ComponentID {
     uint32_t id;
+
+private:
+    ComponentID(uint32_t i) : id(i) {};
 friend class StateManager;
 };
 
