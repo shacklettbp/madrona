@@ -88,6 +88,13 @@ Query<ComponentTs...> StateManager::query()
     ( getContainingArchetypes(componentID<ComponentTs>()), ... );
 }
 
+template <typename ArchetypeT>
+ArchetypeRef<ArchetypeT> StateManager::archetype()
+{
+    auto archetype_id = archetypeID<ArchetypeT>();
+    return ArchetypeRef<ArchetypeT>(&archetype_infos_[archetype_id.id].tbl);
+}
+
 template <typename ArchetypeT, typename ...Args>
 Entity StateManager::makeEntity(Args && ...args)
 {

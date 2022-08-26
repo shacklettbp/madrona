@@ -5,11 +5,10 @@
 #include <madrona/dyn_array.hpp>
 #include <madrona/span.hpp>
 #include <madrona/table.hpp>
+#include <madrona/query.hpp>
 #include <madrona/optional.hpp>
 
 namespace madrona {
-
-class StateManager;
 
 class ArchetypeID {
     ArchetypeID(uint32_t i) : id(i) {};
@@ -44,6 +43,9 @@ public:
 
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
+
+    template <typename ArchetypeT>
+    inline ArchetypeRef<ArchetypeT> archetype();
 
     template <typename ArchetypeT, typename... Args>
     inline Entity makeEntity(Args && ...args);

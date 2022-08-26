@@ -30,4 +30,14 @@ const void * Table::getValue(uint32_t column_idx, Table::Index idx) const
     return col[idx.idx];
 }
 
+void * Table::data(uint32_t col_idx)
+{
+    return columns_[col_idx][0];
+}
+
+const void * Table::data(uint32_t col_idx) const
+{
+    return columns_[col_idx][0];
+}
+
 }

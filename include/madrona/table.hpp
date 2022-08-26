@@ -30,8 +30,11 @@ public:
     };
 
     inline Index getIndex(Entity e) const;
-    inline void *getValue(uint32_t column_idx, Index idx);
-    inline const void *getValue(uint32_t column_idx, Index idx) const;
+    inline void * getValue(uint32_t column_idx, Index idx);
+    inline const void * getValue(uint32_t column_idx, Index idx) const;
+
+    inline void * data(uint32_t col_idx);
+    inline const void * data(uint32_t col_idx) const;
 
     inline uint32_t numRows() const { return num_rows_; }
 
