@@ -62,6 +62,7 @@ private:
         uint32_t componentOffset;
         uint32_t numComponents;
         Table tbl;
+        StaticHashMap columnLookup;
     };
 
     void saveComponentInfo(uint32_t id, uint32_t alignment,

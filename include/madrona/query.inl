@@ -67,6 +67,11 @@ ComponentT * ComponentRef<ComponentT>::end() const
 }
 
 template <typename ArchetypeT>
+ArchetypeRef<ArchetypeT>::ArchetypeRef(Table *tbl)
+    : tbl_(tbl)
+{}
+
+template <typename ArchetypeT>
 Loc ArchetypeRef<ArchetypeT>::getLoc(Entity e) const
 {
     return tbl_->getLoc(e);
@@ -164,11 +169,6 @@ auto ArchetypeRef<ArchetypeT>::end() const -> Iter
         },
     };
 }
-
-template <typename ArchetypeT>
-ArchetypeRef<ArchetypeT>::ArchetypeRef(Table *tbl)
-    : tbl_(tbl)
-{}
 
 template <typename ArchetypeT>
 template <typename ComponentT>

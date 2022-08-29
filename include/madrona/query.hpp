@@ -17,17 +17,6 @@ private:
     T *ptr_;
 };
 
-template <typename... ComponentTs>
-class Query {
-public:
-    template <typename Fn>
-    void forAll(Fn &&fn);
-
-private:
-    static constexpr uint32_t num_components_ =
-        sizeof...(ComponentTs);
-};
-
 template <typename ComponentT>
 class ComponentRef {
 public:
@@ -48,9 +37,22 @@ private:
     uint32_t col_idx_;
 };
 
+template <typename... ComponentTs>
+class Query {
+public:
+    template <typename Fn>
+    void forAll(Fn &&fn);
+
+private:
+    static constexpr uint32_t num_components_ =
+        sizeof...(ComponentTs);
+};
+
 template <typename ArchetypeT>
 class ArchetypeRef {
 public:
+    inline ArchetypeRef(Table *tbl);
+
     inline Loc getLoc(Entity e) const;
 
     template <typename ComponentT>
@@ -85,8 +87,6 @@ public:
 
 private:
     template <typename ComponentT> struct ComponentLookup {};
-
-    inline ArchetypeRef(Table *tbl);
 
     template <typename ComponentT>
     inline uint32_t getComponentIndex() const;
