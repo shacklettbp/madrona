@@ -32,7 +32,7 @@ public:
 
     inline uint32_t numRows() const { return num_rows_; }
 
-    static constexpr uint32_t maxComponents = 64;
+    static constexpr uint32_t maxColumns = 64;
 
 private:
     struct GenIndex {
@@ -53,7 +53,7 @@ private:
     VirtualStore id_to_idx_;
     uint32_t num_ids_;
     VirtualStore idx_to_id_;
-    StackArray<VirtualStore, maxComponents> columns_;
+    StackArray<VirtualStore, maxColumns> columns_;
 };
 
 }

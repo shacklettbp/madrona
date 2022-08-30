@@ -20,6 +20,17 @@ public:
         return Optional<T>(std::in_place, std::forward<Args>(args)...);
     }
 
+    static constexpr void noneAt(Optional<T> *ptr)
+    {
+        new (ptr) Optional<T>();
+    }
+
+    template <typename... Args>
+    static constexpr void makeAt(Optional<T> *ptr, Args && ...args)
+    {
+        new (ptr) Optional<T>(std::in_place, std::forward<Args>(args)...);
+    }
+
     template <typename U = T,
               typename = std::enable_if_t<std::is_copy_constructible_v<U>>>
     explicit (!std::is_same_v<U, T>)

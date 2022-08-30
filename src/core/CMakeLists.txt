@@ -9,6 +9,7 @@ add_library(madrona_core STATIC
     ${INC_DIR}/ecs.hpp ${INC_DIR}/ecs.inl
     ${INC_DIR}/type_tracker.hpp ${INC_DIR}/type_tracker.inl type_tracker.cpp
     ${INC_DIR}/state.hpp ${INC_DIR}/state.inl state.cpp
+    ${INC_DIR}/hashmap.hpp ${INC_DIR}/hashmap.inl hashmap.cpp
     ${INC_DIR}/context.hpp ${INC_DIR}/context.inl context.cpp
     ${INC_DIR}/table.hpp ${INC_DIR}/table.inl table.cpp
     ${INC_DIR}/virtual.hpp virtual.cpp

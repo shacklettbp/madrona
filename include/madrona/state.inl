@@ -78,7 +78,23 @@ ArchetypeID StateManager::archetypeID() const
 template <typename ComponentT>
 ResultRef<ComponentT> StateManager::get(Entity entity)
 {
-    entity.archetype;
+    uint32_t archetype_idx = entity.archetype;
+
+    ArchetypeInfo &archetype = *archetype_infos_[archetype_idx];
+
+    auto col_idx = archetype.columnLookup.lookup(componentID<ComponentT>().id);
+
+    if (!col_idx.has_value()) {
+        return ResultRef<ComponentT>(nullptr);
+    }
+
+    auto loc = archetype.tbl.getLoc(entity);
+    if (!loc.valid()) {
+        return ResultRef<ComponentT>(nullptr);
+    }
+
+    return ResultRef<ComponentT>(
+        (ComponentT *)archetype.tbl.getValue(*col_idx, loc));
 }
 
 template <typename ...ComponentTs>
@@ -136,7 +152,7 @@ Entity StateManager::makeEntity(Args && ...args)
 
 void StateManager::destroyEntity(Entity e)
 {
-    auto &archetype = *archetype_infos_[e.archetype];
+    ArchetypeInfo &archetype = *archetype_infos_[e.archetype];
     archetype.tbl.removeRow(e);
 }
 

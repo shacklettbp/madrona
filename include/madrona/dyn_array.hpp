@@ -65,19 +65,31 @@ public:
 
     void clear()
     {
-        for (size_t i = 0; i < n_; i++) {
-            ptr_[i].~T();
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            for (size_t i = 0; i < n_; i++) {
+                ptr_[i].~T();
+            }
         }
         n_ = 0;
     }
 
-    void resize(size_t new_size)
+    template <typename Fn>
+    void resize(size_t new_size, Fn &&fn)
     {
-        assert(new_size >= n_);
-
         if (new_size > capacity_) {
             expand(new_size);
+            
+            for (size_t i = n_; i < new_size; i++) {
+                fn(&ptr_[i]);
+            }
+        } else {
+            for (size_t i = new_size; i < n_; i++) {
+                if constexpr (!std::is_trivially_destructible_v<T>) {
+                    ptr_[i].~T();
+                }
+            }
         }
+
         n_ = new_size;
     }
 

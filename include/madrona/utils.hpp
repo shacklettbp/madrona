@@ -42,7 +42,17 @@ constexpr inline bool isPower2(uint64_t v)
     return (v & (v - 1)) == 0;
 }
 
-constexpr inline uint32_t intLog2(uint32_t v)
+constexpr inline bool isPower2(uint32_t v)
+{
+    return (v & (v - 1)) == 0;
+}
+
+constexpr inline uint32_t int32NextPow2(uint32_t v)
+{
+    return 1u << (32u - __builtin_clz(v - 1));
+}
+
+constexpr inline uint32_t int32Log2(uint32_t v)
 {
     return sizeof(unsigned int) * 8 - __builtin_clz(v) - 1;
 }
@@ -50,6 +60,17 @@ constexpr inline uint32_t intLog2(uint32_t v)
 constexpr inline uint64_t int64Log2(uint64_t v)
 {
     return sizeof(unsigned long long) * 8 - __builtin_clzll(v) - 1;
+}
+
+// https://github.com/skeeto/hash-prospector
+constexpr inline uint32_t int32Hash(uint32_t x)
+{
+    x ^= x >> 16u;
+    x *= 0x7feb352du;
+    x ^= x >> 15u;
+    x *= 0x846ca68bu;
+    x ^= x >> 16u;
+    return x;
 }
 
 template <typename> struct PackDelegator;

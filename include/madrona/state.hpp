@@ -8,6 +8,7 @@
 #include <madrona/query.hpp>
 #include <madrona/optional.hpp>
 #include <madrona/type_tracker.hpp>
+#include <madrona/hashmap.hpp>
 
 namespace madrona {
 
@@ -58,11 +59,14 @@ public:
     inline void destroyEntity(Entity e);
 
 private:
+    using ColumnMap = StaticIntegerMap<128>;
+    static constexpr uint32_t max_archetype_components_ = ColumnMap::numFree();
+
     struct ArchetypeInfo {
         uint32_t componentOffset;
         uint32_t numComponents;
         Table tbl;
-        StaticHashMap columnLookup;
+        ColumnMap columnLookup;
     };
 
     void saveComponentInfo(uint32_t id, uint32_t alignment,

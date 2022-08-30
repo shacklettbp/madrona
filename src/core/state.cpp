@@ -24,7 +24,7 @@ void StateManager::saveComponentInfo(uint32_t id,
     // for component_infos_ just use default initialization of the
     // unregistered components
     if (id >= component_infos_.size()) {
-        component_infos_.resize(id + 1);
+        component_infos_.resize(id + 1, [](auto) {});
     }
 
     component_infos_[id] = TypeInfo {
@@ -36,26 +36,40 @@ void StateManager::saveComponentInfo(uint32_t id,
 void StateManager::saveArchetypeInfo(uint32_t id, Span<ComponentID> components)
 {
     uint32_t offset = archetype_components_.size();
+
+    // FIXME Candidates for tmp allocator
     HeapArray<TypeInfo> type_infos(components.size());
+    HeapArray<IntegerMapPair> lookup_input(components.size());
+
     for (int i = 0; i < (int)components.size(); i++) {
         ComponentID component_id = components[i];
 
         archetype_components_.push_back(component_id);
         type_infos[i] = component_infos_[component_id.id];
+
+        lookup_input[i] = IntegerMapPair {
+            .key = component_id.id,
+            .value = (uint32_t)i,
+        };
     }
 
     Table archetype_tbl(type_infos.data(), type_infos.size(), id);
 
+    ColumnMap column_lookup(lookup_input.data(), lookup_input.size());
+
     // IDs are globally assigned, technically there is an edge case where
     // there are gaps in the IDs assigned to a specific StateManager
     if (id >= archetype_infos_.size()) {
-        archetype_infos_.resize(id + 1);
+        archetype_infos_.resize(id + 1, [](auto ptr) {
+            Optional<ArchetypeInfo>::noneAt(ptr);
+        });
     }
 
     archetype_infos_[id].emplace(ArchetypeInfo {
         .componentOffset = offset,
         .numComponents = components.size(),
         .tbl = std::move(archetype_tbl),
+        .columnLookup = std::move(column_lookup),
     });
 }
 

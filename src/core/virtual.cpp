@@ -24,7 +24,7 @@ VirtualRegion::VirtualRegion(uint64_t max_bytes, uint64_t chunk_shift,
 #endif
 
     if (chunk_shift == 0) {
-        chunk_shift = utils::intLog2(page_size);
+        chunk_shift = utils::int32Log2(page_size);
     }
 
     uint64_t chunk_size = 1ull << chunk_shift;

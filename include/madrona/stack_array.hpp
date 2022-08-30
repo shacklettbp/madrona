@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <type_traits>
 
 namespace madrona {
@@ -8,8 +9,8 @@ template <typename T, size_t N>
 class StackArray {
 public:
     StackArray()
-        : size_(0),
-          b_()
+        : b_(),
+          size_(0)
     {}
 
     ~StackArray()
@@ -55,11 +56,11 @@ public:
     size_t size() const { return size_; }
 
 private:
-    size_t size_;
     union {
         bool b_;
         T arr_[N];
     };
+    size_t size_;
 };
 
 }
