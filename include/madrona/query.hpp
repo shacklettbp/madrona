@@ -44,8 +44,15 @@ public:
     void forAll(Fn &&fn);
 
 private:
+    Query(const uint32_t *indices, uint32_t num_archetypes);
+
     static constexpr uint32_t num_components_ =
         sizeof...(ComponentTs);
+
+    const uint32_t *indices_;
+    uint32_t num_archetypes_;
+
+friend class StateManager;
 };
 
 template <typename ArchetypeT>

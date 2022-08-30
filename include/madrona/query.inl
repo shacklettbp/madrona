@@ -66,6 +66,12 @@ ComponentT * ComponentRef<ComponentT>::end() const
     return data() + size();
 }
 
+template <typename... ComponentTs>
+Query<ComponentTs...>::Query(const uint32_t *indices, uint32_t num_archetypes)
+    : indices_(indices),
+      num_archetypes_(num_archetypes)
+{}
+
 template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT>::ArchetypeRef(Table *tbl)
     : tbl_(tbl)

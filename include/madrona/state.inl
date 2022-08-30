@@ -97,14 +97,19 @@ ResultRef<ComponentT> StateManager::get(Entity entity)
         (ComponentT *)archetype.tbl.getValue(*col_idx, loc));
 }
 
-template <typename ...ComponentTs>
+template <typename... ComponentTs>
 Query<ComponentTs...> StateManager::query()
 {
-    auto getContainingArchetypes = [this](Entity component_id) {
-        
+    std::array component_ids {
+        componentID<ComponentTs>()
+        ...
     };
 
-    ( getContainingArchetypes(componentID<ComponentTs>()), ... );
+    const uint32_t *query_indices;
+    uint32_t num_archetypes = 
+        makeQuery(component_ids.data(), component_ids.size(), &query_indices);
+
+    return Query<ComponentTs...>(query_indices, num_archetypes);
 }
 
 template <typename ArchetypeT>
@@ -114,7 +119,7 @@ ArchetypeRef<ArchetypeT> StateManager::archetype()
     return ArchetypeRef<ArchetypeT>(&archetype_infos_[archetype_id.id]->tbl);
 }
 
-template <typename ArchetypeT, typename ...Args>
+template <typename ArchetypeT, typename... Args>
 Entity StateManager::makeEntity(Args && ...args)
 {
     ArchetypeID archetype_id = archetypeID<ArchetypeT>();

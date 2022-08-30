@@ -14,7 +14,7 @@ struct IntegerMapPair {
 
 struct StaticMapHelper {
     static void buildMap(uint32_t *key_storage, uint32_t *value_storage,
-                         uint32_t storage_size, IntegerMapPair *inputs,
+                         uint32_t storage_size, const IntegerMapPair *inputs,
                          uint32_t num_inputs, uint32_t shift_idx,
                          uint32_t constant_idx);
 
@@ -27,7 +27,7 @@ struct StaticMapHelper {
 template <uint32_t maxN>
 class StaticIntegerMap {
 public:
-    StaticIntegerMap(IntegerMapPair *inputs, uint32_t num_inputs);
+    StaticIntegerMap(const IntegerMapPair *inputs, uint32_t num_inputs);
 
     inline bool exists(uint32_t key) const;
     inline uint32_t operator[](uint32_t key) const;

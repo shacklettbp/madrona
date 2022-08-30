@@ -16,7 +16,7 @@ uint32_t StaticMapHelper::map(uint32_t key, uint32_t shift,
 }
 
 template <uint32_t maxN>
-StaticIntegerMap<maxN>::StaticIntegerMap(IntegerMapPair *inputs,
+StaticIntegerMap<maxN>::StaticIntegerMap(const IntegerMapPair *inputs,
                                          uint32_t num_inputs)
     : keys_(),
       values_()

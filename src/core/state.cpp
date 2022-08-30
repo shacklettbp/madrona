@@ -12,7 +12,8 @@ namespace madrona {
 StateManager::StateManager()
     : component_infos_(0),
       archetype_components_(0),
-      archetype_infos_(0)
+      archetype_infos_(0),
+      query_data_(0)
 {}
 
 void StateManager::saveComponentInfo(uint32_t id,
@@ -71,6 +72,45 @@ void StateManager::saveArchetypeInfo(uint32_t id, Span<ComponentID> components)
         .tbl = std::move(archetype_tbl),
         .columnLookup = std::move(column_lookup),
     });
+}
+
+uint32_t StateManager::makeQuery(const ComponentID *components,
+                                 uint32_t num_components,
+                                 const uint32_t **indices_out)
+{
+    DynArray<uint32_t, TmpAlloc> query_indices(0);
+
+    uint32_t matching_archetypes = 0;
+    for (int archetype_idx = 0; archetype_idx < (int)archetype_infos_.size();
+         archetype_idx++) {
+        auto &archetype = *archetype_infos_[archetype_idx];
+
+        bool has_components = true;
+        for (int component_idx = 0; component_idx < (int)num_components; 
+             component_idx++) {
+            ComponentID component = components[component_idx];
+            if (!archetype.columnLookup.exists(component.id)) {
+                has_components = false;
+                break;
+            }
+        }
+
+        if (!has_components) {
+            continue;
+        }
+
+        query_indices.push_back(uint32_t(archetype_idx));
+        matching_archetypes += 1;
+
+        for (int component_idx = 0; component_idx < (int)num_components;
+             component_idx++) {
+            ComponentID component = components[component_idx];
+            query_indices.push_back(archetype.columnLookup[component.id]);
+        }
+    }
+
+    *indices_out = nullptr;
+    return matching_archetypes;
 }
 
 uint32_t StateManager::next_component_id_ = 0;

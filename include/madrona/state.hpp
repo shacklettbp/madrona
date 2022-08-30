@@ -73,9 +73,13 @@ private:
                            uint32_t num_bytes);
     void saveArchetypeInfo(uint32_t id, Span<ComponentID> components);
 
+    uint32_t makeQuery(const ComponentID *components, uint32_t num_components,
+                       const uint32_t **indices_out);
+
     DynArray<TypeInfo> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeInfo>> archetype_infos_;
+    DynArray<uint32_t> query_data_;
 
     static uint32_t next_component_id_;
     static uint32_t next_archetype_id_;

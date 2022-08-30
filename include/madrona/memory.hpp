@@ -92,6 +92,7 @@ public:
 
 // FIXME:
 using InitAlloc = DefaultAlloc;
+using TmpAlloc = DefaultAlloc;
 
 }
 

@@ -8,7 +8,8 @@
 namespace madrona {
 
 void StaticMapHelper::buildMap(uint32_t *key_storage, uint32_t *value_storage,
-                               uint32_t storage_size, IntegerMapPair *inputs,
+                               uint32_t storage_size,
+                               const IntegerMapPair *inputs,
                                uint32_t num_inputs, uint32_t shift_idx,
                                uint32_t constant_idx)
 {
