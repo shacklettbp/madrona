@@ -123,15 +123,17 @@ void StateManager::forAll(Query<ComponentTs...> query, Fn &&fn)
         int archetype_idx = query_data_[cur_offset++];
         auto &archetype = *archetype_infos_[archetype_idx];
 
-        std::tuple column_ptrs {
-            (ComponentTs *)archetype.tbl.data(query_data_[cur_offset++])
+        std::array column_ptrs {
+            // Hacky, use ComponentTs to force parameter pack expansion
+            // but we actually just want a void * for simplicity
+            (void *)(ComponentTs *)archetype.tbl.data(query_data_[cur_offset++])
             ...
         };
 
         const int num_rows = archetype.tbl.numRows();
         for (int i = 0; i < num_rows; i++) {
             std::apply([i, &fn](auto ...ptrs) {
-                fn(ptrs[i] ...);
+                fn(((ComponentTs *)ptrs)[i] ...);
             }, column_ptrs);
         }
     }
