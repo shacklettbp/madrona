@@ -10,9 +10,6 @@ class Query {
 private:
     Query(uint32_t indices_offset, uint32_t num_archetypes);
 
-    static constexpr uint32_t num_components_ =
-        sizeof...(ComponentTs);
-
     uint32_t indices_offset_;
     uint32_t num_archetypes_;
 

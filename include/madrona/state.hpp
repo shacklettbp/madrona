@@ -51,7 +51,10 @@ public:
     inline Query<ComponentTs...> query();
 
     template <typename... ComponentTs, typename Fn>
-    inline void forAll(Query<ComponentTs...> query, Fn &&fn);
+    inline void iterateArchetypes(Query<ComponentTs...> query, Fn &&fn);
+
+    template <typename... ComponentTs, typename Fn>
+    inline void iterateEntities(Query<ComponentTs...> query, Fn &&fn);
 
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype();
@@ -71,6 +74,10 @@ private:
         Table tbl;
         ColumnMap columnLookup;
     };
+
+    template <typename... ComponentTs, typename Fn, uint32_t... Indices>
+    void iterateArchetypesImpl(Query<ComponentTs...> query, Fn &&fn,
+                               std::integer_sequence<uint32_t, Indices...>);
 
     void saveComponentInfo(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
