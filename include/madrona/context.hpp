@@ -14,6 +14,12 @@ public:
     AllocContext mem;
     inline StateManager & state();
 
+    template <typename ArchetypeT>
+    inline ArchetypeRef<ArchetypeT> archetype();
+
+    template <typename... ComponentTs>
+    inline Query<ComponentTs...> query();
+
     template <typename Fn, typename... Deps>
     inline JobID submit(Fn &&fn, bool is_child = true,
                           Deps && ... dependencies);
@@ -31,14 +37,6 @@ public:
     template <typename Fn, typename... Deps>
     inline JobID ioRead(const char *path, Fn &&fn, bool is_child = true,
                         Deps && ... dependencies);
-
-#if 0
-    template <typename... QueryArgs>
-    inline Query<QueryArgs...> query();
-
-    template <typename T>
-    TableRef table();
-#endif
 
 protected:
     template <typename ContextT, typename Fn, typename... Deps>

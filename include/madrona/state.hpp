@@ -47,6 +47,9 @@ public:
     template <typename ComponentT>
     inline ResultRef<ComponentT> get(Entity entity);
 
+    template <typename ArchetypeT>
+    inline ArchetypeRef<ArchetypeT> archetype();
+
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 
@@ -55,9 +58,6 @@ public:
 
     template <typename... ComponentTs, typename Fn>
     inline void iterateEntities(Query<ComponentTs...> query, Fn &&fn);
-
-    template <typename ArchetypeT>
-    inline ArchetypeRef<ArchetypeT> archetype();
 
     template <typename ArchetypeT, typename... Args>
     inline Entity makeEntity(Args && ...args);

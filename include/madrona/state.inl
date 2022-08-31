@@ -97,6 +97,13 @@ ResultRef<ComponentT> StateManager::get(Entity entity)
         (ComponentT *)archetype.tbl.getValue(*col_idx, loc));
 }
 
+template <typename ArchetypeT>
+ArchetypeRef<ArchetypeT> StateManager::archetype()
+{
+    auto archetype_id = archetypeID<ArchetypeT>();
+    return ArchetypeRef<ArchetypeT>(&archetype_infos_[archetype_id.id]->tbl);
+}
+
 template <typename... ComponentTs>
 Query<ComponentTs...> StateManager::query()
 {
@@ -150,13 +157,6 @@ void StateManager::iterateEntities(Query<ComponentTs...> query, Fn &&fn)
             fn(ptrs[i] ...);
         }
     });
-}
-
-template <typename ArchetypeT>
-ArchetypeRef<ArchetypeT> StateManager::archetype()
-{
-    auto archetype_id = archetypeID<ArchetypeT>();
-    return ArchetypeRef<ArchetypeT>(&archetype_infos_[archetype_id.id]->tbl);
 }
 
 template <typename ArchetypeT, typename... Args>

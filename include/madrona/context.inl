@@ -4,6 +4,18 @@ namespace madrona {
 
 StateManager & Context::state() { return *state_mgr_; }
 
+template <typename ArchetypeT>
+ArchetypeRef<ArchetypeT> Context::archetype()
+{
+    return state_mgr_->archetype<ArchetypeT>();
+}
+
+template <typename... ComponentTs>
+Query<ComponentTs...> Context::query()
+{
+    return state_mgr_->query<ComponentTs...>();
+}
+
 template <typename Fn, typename... Deps>
 JobID Context::submit(Fn &&fn, bool is_child, Deps && ... dependencies)
 {
