@@ -76,7 +76,7 @@ void StateManager::saveArchetypeInfo(uint32_t id, Span<ComponentID> components)
 
 uint32_t StateManager::makeQuery(const ComponentID *components,
                                  uint32_t num_components,
-                                 const uint32_t **indices_out)
+                                 uint32_t *offset)
 {
     DynArray<uint32_t, TmpAlloc> query_indices(0);
 
@@ -99,8 +99,9 @@ uint32_t StateManager::makeQuery(const ComponentID *components,
             continue;
         }
 
-        query_indices.push_back(uint32_t(archetype_idx));
         matching_archetypes += 1;
+
+        query_indices.push_back(uint32_t(archetype_idx));
 
         for (int component_idx = 0; component_idx < (int)num_components;
              component_idx++) {
@@ -109,7 +110,11 @@ uint32_t StateManager::makeQuery(const ComponentID *components,
         }
     }
 
-    *indices_out = nullptr;
+    *offset = query_data_.size();
+    query_data_.resize(*offset + query_indices.size(), [](auto) {});
+    memcpy(&query_data_[*offset], query_indices.data(),
+           sizeof(uint32_t) * query_indices.size());
+
     return matching_archetypes;
 }
 

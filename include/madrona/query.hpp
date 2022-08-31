@@ -5,6 +5,21 @@
 
 namespace madrona {
 
+template <typename... ComponentTs>
+class Query {
+private:
+    Query(uint32_t indices_offset, uint32_t num_archetypes);
+
+    static constexpr uint32_t num_components_ =
+        sizeof...(ComponentTs);
+
+    uint32_t indices_offset_;
+    uint32_t num_archetypes_;
+
+friend class StateManager;
+};
+
+
 template <typename T>
 class ResultRef {
 public:
@@ -35,24 +50,6 @@ public:
 private:
     Table *tbl_;
     uint32_t col_idx_;
-};
-
-template <typename... ComponentTs>
-class Query {
-public:
-    template <typename Fn>
-    void forAll(Fn &&fn);
-
-private:
-    Query(const uint32_t *indices, uint32_t num_archetypes);
-
-    static constexpr uint32_t num_components_ =
-        sizeof...(ComponentTs);
-
-    const uint32_t *indices_;
-    uint32_t num_archetypes_;
-
-friend class StateManager;
 };
 
 template <typename ArchetypeT>

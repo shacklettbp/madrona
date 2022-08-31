@@ -105,11 +105,36 @@ Query<ComponentTs...> StateManager::query()
         ...
     };
 
-    const uint32_t *query_indices;
+    uint32_t offset;
     uint32_t num_archetypes = 
-        makeQuery(component_ids.data(), component_ids.size(), &query_indices);
+        makeQuery(component_ids.data(), component_ids.size(), &offset);
 
-    return Query<ComponentTs...>(query_indices, num_archetypes);
+    return Query<ComponentTs...>(offset, num_archetypes);
+}
+
+template <typename... ComponentTs, typename Fn>
+void StateManager::forAll(Query<ComponentTs...> query, Fn &&fn)
+{
+    const int num_archetypes = query.num_archetypes_;
+
+    uint32_t cur_offset = query.indices_offset_;
+    for (int query_archetype_idx = 0; query_archetype_idx < num_archetypes;
+         query_archetype_idx++) {
+        int archetype_idx = query_data_[cur_offset++];
+        auto &archetype = *archetype_infos_[archetype_idx];
+
+        std::tuple column_ptrs {
+            (ComponentTs *)archetype.tbl.data(query_data_[cur_offset++])
+            ...
+        };
+
+        const int num_rows = archetype.tbl.numRows();
+        for (int i = 0; i < num_rows; i++) {
+            std::apply([i, &fn](auto ...ptrs) {
+                fn(ptrs[i] ...);
+            }, column_ptrs);
+        }
+    }
 }
 
 template <typename ArchetypeT>

@@ -67,8 +67,8 @@ ComponentT * ComponentRef<ComponentT>::end() const
 }
 
 template <typename... ComponentTs>
-Query<ComponentTs...>::Query(const uint32_t *indices, uint32_t num_archetypes)
-    : indices_(indices),
+Query<ComponentTs...>::Query(uint32_t indices_offset, uint32_t num_archetypes)
+    : indices_offset_(indices_offset),
       num_archetypes_(num_archetypes)
 {}
 

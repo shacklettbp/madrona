@@ -50,6 +50,9 @@ public:
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 
+    template <typename... ComponentTs, typename Fn>
+    inline void forAll(Query<ComponentTs...> query, Fn &&fn);
+
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype();
 
@@ -74,7 +77,7 @@ private:
     void saveArchetypeInfo(uint32_t id, Span<ComponentID> components);
 
     uint32_t makeQuery(const ComponentID *components, uint32_t num_components,
-                       const uint32_t **indices_out);
+                       uint32_t *offset);
 
     DynArray<TypeInfo> component_infos_;
     DynArray<ComponentID> archetype_components_;
