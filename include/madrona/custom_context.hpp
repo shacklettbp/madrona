@@ -18,8 +18,8 @@ public:
                          bool is_child = true,
                          Deps && ... dependencies);
 
-    template <typename... ColTypes, typename Fn, typename... Deps>
-    inline JobID forAll(const Query<ColTypes...> &query, Fn &&fn,
+    template <typename... ComponentTs, typename Fn, typename... Deps>
+    inline JobID forAll(Query<ComponentTs...> query, Fn &&fn,
                         bool is_child = true,
                         Deps && ... dependencies);
 };

@@ -19,7 +19,7 @@ Query<ComponentTs...> Context::query()
 template <typename Fn, typename... Deps>
 JobID Context::submit(Fn &&fn, bool is_child, Deps && ... dependencies)
 {
-    return submitImpl<Context>(std::forward<Fn>(fn), 1, is_child,
+    return submitImpl<Context>(std::forward<Fn>(fn), is_child,
                                std::forward<Deps>(dependencies)...);
 }
 
@@ -27,13 +27,13 @@ template <typename Fn, typename... Deps>
 JobID Context::submitN(Fn &&fn, uint32_t num_invocations,
                        bool is_child, Deps && ... dependencies)
 {
-    return submitImpl<Context>(std::forward<Fn>(fn), num_invocations, is_child,
-                               std::forward<Deps>(dependencies)...);
+    return submitNImpl<Context>(std::forward<Fn>(fn), num_invocations,
+        is_child, std::forward<Deps>(dependencies)...);
 }
 
-template <typename... ColTypes, typename Fn, typename... Deps>
-JobID Context::forAll(const Query<ColTypes...> &query, Fn &&fn,
-             bool is_child, Deps && ... dependencies)
+template <typename... ComponentTs, typename Fn, typename... Deps>
+JobID Context::forAll(Query<ComponentTs...> query, Fn &&fn,
+                      bool is_child, Deps && ... dependencies)
 {
     return forallImpl<Context>(query, std::forward<Fn>(fn), is_child,
                                std::forward<Deps>(dependencies)...);
@@ -57,8 +57,21 @@ inline JobID Context::ioRead(const char *path, Fn &&fn,
 
 // FIXME: implement is_child, dependencies, num_invocations
 template <typename ContextT, typename Fn, typename... Deps>
-JobID Context::submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
+JobID Context::submitImpl(Fn &&fn, bool is_child,
                           Deps &&... dependencies)
+{
+    auto wrapper = [fn = std::forward<Fn>(fn)](ContextT &ctx, uint32_t) {
+        fn(ctx);
+    };
+
+    submitNImpl(std::forward<Fn>(wrapper), 1, is_child,
+                std::forward<Deps>(dependencies)...);
+}
+
+// FIXME: implement is_child, dependencies, num_invocations
+template <typename ContextT, typename Fn, typename... Deps>
+JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
+                           Deps &&... dependencies)
 {
     Job job = makeJob<ContextT>(std::forward<Fn>(fn));
     (void)is_child;
@@ -70,31 +83,38 @@ JobID Context::submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
                               JobPriority::Normal);
 }
 
-template <typename ContextT, typename... ColTypes, typename Fn,
+template <typename ContextT, typename... ComponentTs, typename Fn,
           typename... Deps>
-JobID Context::forAllImpl(const Query<ColTypes...> &query, Fn &&fn,
+JobID Context::forAllImpl(Query<ComponentTs...> query, Fn &&fn,
                           bool is_child, Deps && ... dependencies)
 {
-    const uint32_t num_entities = query.size();
+    state_mgr_->iterateArchetypes(query, [fn = std::forward<Fn>(fn)](
+            int num_rows, auto ...ptrs) {
+        if (num_rows == 0) {
+            return;
+        }
 
-    auto query_loop = [fn=std::move(fn), query, num_entities](
-        ContextT &ctx, Entity entity) {
-        fn(ctx, query.template get<ColTypes>(entity)...);
-    };
+        auto wrapper = [fn = std::forward<Fn>(fn), ptrs ...](
+                Context &ctx, uint32_t idx) {
+            fn(ctx, ptrs[idx]...);
+        };
 
-    return submitImpl<ContextT>(std::move(query_loop), num_entities, is_child,
-                                std::forward<Deps>(dependencies)...);
+        submitImpl<ContextT>(std::move(wrapper), num_rows, is_child,
+                             std::forward<Deps>(dependencies)...);
+    });
 }
 
 template <typename ContextT, typename Fn>
-Job Context::makeJob(Fn &&fn)
+Job Context::makeJob(Fn &&fn, uint32_t num_invocations)
 {
     Job job;
+    job.invocation_offset_ = 0;
+    job.num_invocations_ = num_invocations;
 
     if constexpr (std::is_empty_v<Fn>) {
-        job.func_ = [](Context &ctx_base, void *) {
+        job.func_ = [](Context &ctx_base, void *, uint32_t invocation_idx) {
             ContextT &ctx = static_cast<ContextT &>(ctx_base);
-            Fn()(ctx);
+            Fn()(ctx, invocation_idx);
         };
         job.data_ = nullptr;
     } else {
@@ -112,11 +132,12 @@ Job Context::makeJob(Fn &&fn)
 
         new (store) Fn(std::forward<Fn>(fn));
 
-        job.func_ = [](Context &ctx_base, void *data) {
+        job.func_ = [](Context &ctx_base, void *data,
+                       uint32_t invocation_idx) {
             ContextT &ctx = static_cast<ContextT &>(ctx_base);
 
             auto fn_ptr = (Fn *)data;
-            (*fn_ptr)(ctx);
+            (*fn_ptr)(ctx, invocation_idx);
             fn_ptr->~Fn();
 
             // Important note: jobs may be freed by different threads

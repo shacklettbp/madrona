@@ -12,7 +12,7 @@ template <typename Fn, typename... Deps>
 JobID CustomContext<ContextT>::submit(Fn &&fn, bool is_child,
                                       Deps && ... dependencies)
 {
-    return submitImpl<ContextT>(std::forward<Fn>(fn), 1, is_child,
+    return submitImpl<ContextT>(std::forward<Fn>(fn), is_child,
                                 std::forward<Deps>(dependencies)...);
 }
 
@@ -21,13 +21,14 @@ template <typename Fn, typename... Deps>
 JobID CustomContext<ContextT>::submitN(Fn &&fn, uint32_t num_invocations,
                                        bool is_child, Deps && ... dependencies)
 {
-    return submitImpl<ContextT>(std::forward<Fn>(fn), num_invocations,
-                                is_child, std::forward<Deps>(dependencies)...);
+    return submitNImpl<ContextT>(
+        std::forward<Fn>(fn), num_invocations, is_child,
+        std::forward<Deps>(dependencies)...);
 }
 
 template <typename ContextT>
-template <typename... ColTypes, typename Fn, typename... Deps>
-JobID CustomContext<ContextT>::forAll(const Query<ColTypes...> &query, Fn &&fn,
+template <typename... ComponentTs, typename Fn, typename... Deps>
+JobID CustomContext<ContextT>::forAll(Query<ComponentTs...> query, Fn &&fn,
                                       bool is_child, Deps && ... dependencies)
 {
     return forallImpl<ContextT>(query, std::forward<Fn>(fn), is_child,

@@ -28,9 +28,11 @@ friend class JobManager;
 
 class Job {
 private:
-    using EntryPtr = void (*)(Context &, void *);
+    using EntryPtr = void (*)(Context &, void *, uint32_t);
     EntryPtr func_;
     void *data_;
+    uint32_t invocation_offset_;
+    uint32_t num_invocations_;
 
 friend class Context;
 friend class JobManager;

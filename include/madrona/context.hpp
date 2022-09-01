@@ -29,8 +29,8 @@ public:
                          bool is_child = true,
                          Deps && ... dependencies);
 
-    template <typename... ColTypes, typename Fn, typename... Deps>
-    inline JobID forAll(const Query<ColTypes...> &query, Fn &&fn,
+    template <typename... ComponentTs, typename Fn, typename... Deps>
+    inline JobID forAll(Query<ComponentTs...> query, Fn &&fn,
                         bool is_child = true,
                         Deps && ... dependencies);
 
@@ -40,17 +40,20 @@ public:
 
 protected:
     template <typename ContextT, typename Fn, typename... Deps>
-    inline JobID submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
+    inline JobID submitImpl(Fn &&fn, bool is_child, Deps && ... dependencies);
+
+    template <typename ContextT, typename Fn, typename... Deps>
+    inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
                             Deps && ... dependencies);
 
-    template <typename ContextT, typename... ColTypes, typename Fn,
+    template <typename ContextT, typename... ComponentTs, typename Fn,
               typename... Deps>
-    inline JobID forAllImpl(const Query<ColTypes...> &query, Fn &&fn,
+    inline JobID forAllImpl(Query<ComponentTs...> query, Fn &&fn,
                             bool is_child, Deps && ... dependencies);
 
 private:
     template <typename ContextT, typename Fn>
-    Job makeJob(Fn &&fn);
+    Job makeJob(Fn &&fn, uint32_t num_invocations);
 
     JobManager * const job_mgr_;
     StateManager * const state_mgr_;

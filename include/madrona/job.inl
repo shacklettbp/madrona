@@ -31,10 +31,10 @@ JobManager::Init<DataT, StartFn> JobManager::makeInit(
 
     return {
         std::move(start_fn),
-        [](Context &ctx_base, void *data) {
+        [](Context &ctx_base, void *data, uint32_t invocation_idx) {
             auto fn_ptr = (StartFn *)data;
             ContextT &ctx = static_cast<ContextT &>(ctx_base);
-            (*fn_ptr)(ctx);
+            (*fn_ptr)(ctx, invocation_idx);
             fn_ptr->~StartFn();
         },
         [](void *ctx, void *data, WorkerInit &&init) {

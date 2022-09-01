@@ -396,9 +396,9 @@ JobManager::JobManager(int desired_num_workers,
     };
 
     // Initial job
-    queueJob(0, [](Context &ctx, void *ptr) {
+    queueJob(0, [](Context &ctx, void *ptr, uint32_t invocation_idx) {
         auto &start = *(StartWrapper *)ptr;
-        start.func(ctx, start.data);
+        start.func(ctx, start.data, invocation_idx);
         start.launched.store(true, memory_order::release);
     }, &start_wrapper, nullptr, 0, JobPriority::Normal);
 
@@ -656,7 +656,8 @@ void JobManager::workerThread(const int thread_idx, Context *ctx)
             continue;
         }
 
-        next_job.func_(*ctx, next_job.data_);
+        // FIXME
+        next_job.func_(*ctx, next_job.data_, 0);
 
         job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
     }
@@ -677,7 +678,8 @@ void JobManager::ioThread(const int thread_idx, Context *ctx)
             continue;
         }
 
-        next_job.func_(*ctx, next_job.data_);
+        // FIXME
+        next_job.func_(*ctx, next_job.data_, 0);
 
         job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
     }
