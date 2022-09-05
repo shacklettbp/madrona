@@ -29,15 +29,7 @@ struct JobContainerBase {
     JobID id;
     uint32_t numDependencies;
 
-    template <size_t N>
-    struct DepsArray {
-        JobID dependencies[N];
-    };
-
-    template <> struct DepsArray<0> {
-        template <typename... DepTs>
-        inline DepsArray(DepTs...) {}
-    };
+    template <size_t N> struct DepsArray;
 };
 
 template <typename Fn, size_t N>

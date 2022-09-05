@@ -423,7 +423,8 @@ static inline void freeJobTrackerSlot(JobTrackerInfo &tracker_info,
 
 static inline JobID getNewJobID(JobTrackerInfo &tracker_info,
                                 uint32_t parent_job_idx,
-                                uint32_t num_invocations)
+                                uint32_t num_invocations,
+                                uint32_t num_outstanding)
 {
     JobTracker *trackers = getTrackerArray(tracker_info);
 
@@ -441,7 +442,7 @@ static inline JobID getNewJobID(JobTrackerInfo &tracker_info,
     uint32_t prev_gen = tracker.gen.fetch_add(1, memory_order::acq_rel);
 
     tracker.parent.store(parent_job_idx, memory_order::relaxed);
-    tracker.numOutstanding.store(1, memory_order::relaxed);
+    tracker.numOutstanding.store(num_outstanding, memory_order::relaxed);
     tracker.remainingInvocations.store(num_invocations, memory_order::relaxed);
 
     atomic_thread_fence(memory_order::release);
@@ -464,9 +465,9 @@ static inline void decrementJobTracker(JobTrackerInfo &tracker_info,
             tracker.numOutstanding.fetch_sub(1, memory_order::acq_rel);
 
         if (prev_outstanding == 1) {
+            uint32_t parent = tracker.parent.load(memory_order::relaxed);
             freeJobTrackerSlot(tracker_info, job_id);
-
-            job_id = tracker.parent.load(memory_order::relaxed);
+            job_id = parent;
         } else {
             break;
         }
@@ -767,9 +768,14 @@ JobID JobManager::queueJob(int thread_idx, Job::EntryPtr job_func,
                            uint32_t num_invocations, uint32_t parent_job_idx,
                            JobPriority prio)
 {
+    // relaxed is ok here on the assumption that addToRunQueue and
+    // addToWaitQueue issue a release fence (addToWaitQueue does this with
+    // utils::SpinLock)
+    job_counts_.numOutstanding.fetch_add(1, memory_order::relaxed);
+
     JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
 
-    JobID id = getNewJobID(tracker_info, parent_job_idx, num_invocations);
+    JobID id = getNewJobID(tracker_info, parent_job_idx, num_invocations, 1);
 
     job_data->id = id;
 
@@ -786,7 +792,7 @@ JobID JobManager::queueJob(int thread_idx, Job::EntryPtr job_func,
 
 JobID JobManager::getProxyJobID(uint32_t parent_job_idx)
 {
-    return getNewJobID(getTrackerInfo(tracker_base_), parent_job_idx, 0);
+    return getNewJobID(getTrackerInfo(tracker_base_), parent_job_idx, 0, 0);
 }
 
 void JobManager::markJobFinished(int thread_idx, JobContainerBase *job,
@@ -797,11 +803,11 @@ void JobManager::markJobFinished(int thread_idx, JobContainerBase *job,
 
     uint32_t job_idx = job->id.idx;
 
-    uint32_t remaining_invocations =
+    uint32_t prev_remaining_invocations =
         trackers[job_idx].remainingInvocations.fetch_sub(
             1, memory_order::acq_rel);
 
-    if (remaining_invocations == 0) {
+    if (prev_remaining_invocations == 1) {
         decrementJobTracker(tracker_info, job_idx);
 
         // Important note: jobs may be freed by different threads
@@ -849,8 +855,6 @@ void JobManager::addToRunQueue(int thread_idx,
     if (prio == JobPriority::IO) {
         io_sema_.release(1);
     }
-
-    job_counts_.numOutstanding.fetch_add(1, memory_order::relaxed);
 
     atomic_thread_fence(memory_order::release);
 }
@@ -968,11 +972,16 @@ void JobManager::findReadyJobs(int thread_idx)
 
         Job *waiting_jobs = getWaitingJobs(wait_queue);
 
+        // FIXME: this currently uses a very basic strategy to keeping
+        // the array contiguous, which is just to copy all still waiting
+        // jobs forward in the ring buffer. This ensures order is
+        // preserved, but is a lot of needless copying. Consider switching
+        // to a linked list here
         uint32_t cur_tail = wait_queue->tail;
         for (uint32_t wait_idx = wait_queue->head;
-             wait_idx != cur_tail;
-             wait_idx = ((wait_idx + 1) & ICfg::waitQueueIndexMask)) {
-            Job job = waiting_jobs[wait_idx];
+             wait_idx != cur_tail; wait_idx++) {
+            
+            Job job = waiting_jobs[wait_idx & ICfg::waitQueueIndexMask];
             if (isRunnable(tracker_info, job.data)) {
                 addToRunQueue(thread_idx, job.func, job.data, 0,
                               job.numInvocations, JobPriority::Normal);
@@ -1126,6 +1135,8 @@ void JobManager::runJob(const int thread_idx,
                 num_invocations -= split_num_invocations;
                 uint32_t split_offset = invocation_offset + num_invocations;
 
+                job_counts_.numOutstanding.fetch_add(1, memory_order::release);
+
                 // FIXME, again priority issues here
                 addToRunQueue(thread_idx, fn, job_data, split_offset,
                               split_num_invocations, JobPriority::Normal);
@@ -1137,13 +1148,15 @@ void JobManager::runJob(const int thread_idx,
         invocation_offset += 1;
         num_invocations -= 1;
     }
+
+    job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
 }
 
 void JobManager::workerThread(const int thread_idx, Context *ctx)
 {
     Job cur_job;
 
-    while (job_counts_.numOutstanding.load(memory_order::acquire) > 0) {
+    while (true) {
         bool job_found = false;
 
         if (job_counts_.numHigh.load(memory_order::relaxed) > 0) {
@@ -1160,14 +1173,16 @@ void JobManager::workerThread(const int thread_idx, Context *ctx)
 
         // All the queues are empty
         if (!job_found) {
-            workerYield();
-            continue;
+            if (job_counts_.numOutstanding.load(memory_order::acquire) > 0) {
+                workerYield();
+                continue;
+            } else {
+                break;
+            }
         }
 
         runJob(thread_idx, ctx, cur_job.func, cur_job.data,
                cur_job.invocationOffset, cur_job.numInvocations);
-
-        job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
     }
 }
 
@@ -1175,18 +1190,20 @@ void JobManager::ioThread(const int thread_idx, Context *ctx)
 {
     Job cur_job;
 
-    while (job_counts_.numOutstanding.load(memory_order::acquire) > 0) {
+    while (true) {
         bool job_found = getNextJob(io_base_, thread_idx, false, &cur_job);
 
         if (!job_found) {
-            io_sema_.acquire();
-            continue;
+            if (job_counts_.numOutstanding.load(memory_order::acquire) > 0) {
+                io_sema_.acquire();
+                continue;
+            } else {
+                break;
+            }
         }
 
         runJob(thread_idx, ctx, cur_job.func, cur_job.data,
                cur_job.invocationOffset, cur_job.numInvocations);
-
-        job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
     }
 }
 

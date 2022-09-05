@@ -12,6 +12,20 @@ JobID JobID::none()
     };
 }
 
+template <size_t N>
+struct JobContainerBase::DepsArray {
+    JobID dependencies[N];
+
+    template <typename... DepTs>
+    inline DepsArray(DepTs ...deps)
+        : dependencies { deps ... }
+    {}
+};
+
+template <> struct JobContainerBase::DepsArray<0> {
+    template <typename... DepTs>
+    inline DepsArray(DepTs...) {}
+};
 
 template <typename Fn, size_t N>
 template <typename... DepTs>
@@ -20,7 +34,7 @@ JobContainer<Fn, N>::JobContainer(Fn &&func, DepTs ...deps)
           .id = JobID::none(), // Assigned in JobManager::queueJob
           .numDependencies = N,
       },
-      dependencies { deps ... },
+      dependencies(deps...),
       fn(std::forward<Fn>(func))
 {}
 
@@ -106,8 +120,7 @@ JobID JobManager::queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
 
     void *store = allocJob(thread_idx, job_size, job_alignment);
 
-    auto container = new (store) ContainerT(std::forward<Fn>(fn), num_invocations,
-                                            deps...);
+    auto container = new (store) ContainerT(std::forward<Fn>(fn), deps...);
 
     Job::EntryPtr stateless_ptr = [](Context &ctx_base, JobContainerBase *data,
                                      uint32_t invocation_idx) {

@@ -33,7 +33,7 @@ template <typename... ComponentTs, typename Fn, typename... Deps>
 JobID Context::forAll(Query<ComponentTs...> query, Fn &&fn,
                       bool is_child, Deps && ... dependencies)
 {
-    return forallImpl<Context>(query, std::forward<Fn>(fn), is_child,
+    return forAllImpl<Context>(query, std::forward<Fn>(fn), is_child,
                                std::forward<Deps>(dependencies)...);
 }
 
@@ -64,8 +64,8 @@ JobID Context::submitImpl(Fn &&fn, bool is_child,
         fn(ctx);
     };
 
-    submitNImpl(std::forward<Fn>(wrapper), 1, is_child,
-                std::forward<Deps>(dependencies)...);
+    return submitNImpl<ContextT>(std::forward<decltype(wrapper)>(wrapper), 1,
+        is_child, std::forward<Deps>(dependencies)...);
 }
 
 template <typename ContextT, typename Fn, typename... Deps>
