@@ -1129,24 +1129,37 @@ void JobManager::runJob(const int thread_idx,
     };
 
     while (num_invocations > 0) {
-        if (checkQueueEmpty()) {
-            if (num_invocations > 1) {
-                uint32_t split_num_invocations = num_invocations / 2;
-                num_invocations -= split_num_invocations;
-                uint32_t split_offset = invocation_offset + num_invocations;
+        uint32_t cur_offset = invocation_offset++;
+        num_invocations -= 1;
 
-                job_counts_.numOutstanding.fetch_add(1, memory_order::release);
+        // FIXME: improvement - check empty on first iteration,
+        // after that, only check every N iterations (possibly determined
+        // by # of iteration CPU cycles). There are probably some
+        // heuristics here like if num_invocations >> num threads,
+        // leave some iterations in this loop rather than fully splitting
+        if (checkQueueEmpty()) {
+            if (num_invocations > 0) {
+                uint32_t b_num_invocations = num_invocations / 2;
+                uint32_t a_num_invocations =
+                    num_invocations - b_num_invocations;
+
+                uint32_t a_offset = invocation_offset;
+                uint32_t b_offset = a_offset + a_num_invocations;
+
+                job_counts_.numOutstanding.fetch_add(2, memory_order::release);
 
                 // FIXME, again priority issues here
-                addToRunQueue(thread_idx, fn, job_data, split_offset,
-                              split_num_invocations, JobPriority::Normal);
+                addToRunQueue(thread_idx, fn, job_data, a_offset,
+                              a_num_invocations, JobPriority::Normal);
+
+                addToRunQueue(thread_idx, fn, job_data, b_offset,
+                              b_num_invocations, JobPriority::Normal);
+
+                num_invocations = 0;
             }
         }
 
-        fn(*ctx, job_data, invocation_offset);
-
-        invocation_offset += 1;
-        num_invocations -= 1;
+        fn(*ctx, job_data, cur_offset);
     }
 
     job_counts_.numOutstanding.fetch_sub(1, memory_order::release);

@@ -166,7 +166,9 @@ Entity StateManager::makeEntity(Args && ...args)
 
     ArchetypeInfo &archetype = *archetype_infos_[archetype_id.id];
 
-    assert(sizeof...(Args) == archetype.numComponents &&
+    constexpr uint32_t num_args = sizeof...(Args);
+
+    assert(num_args == 0 || num_args == archetype.numComponents &&
            "Trying to construct entity with wrong number of arguments");
 
 
@@ -178,14 +180,15 @@ Entity StateManager::makeEntity(Args && ...args)
 
     auto constructNextComponent = [this, &column_idx, &archetype, &tbl_loc](
             auto &&arg) {
-        using ComponentT = std::remove_reference_t<decltype(arg)>;
+        using ArgT = decltype(arg);
+        using ComponentT = std::remove_reference_t<ArgT>;
 
         assert(componentID<ComponentT>().id ==
                archetype_components_[archetype.componentOffset +
                    column_idx].id);
 
         new (archetype.tbl.getValue(column_idx, tbl_loc)) 
-            ComponentT(std::forward<ComponentT>(arg));
+            ComponentT(std::forward<ArgT>(arg));
 
         column_idx++;
     };
