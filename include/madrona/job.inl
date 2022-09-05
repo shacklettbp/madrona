@@ -96,8 +96,8 @@ JobID JobManager::queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
         offsetof(ContainerT, dependencies) == sizeof(JobContainerBase),
         "Dependencies at incorrect offset in container type");
 
-    static constexpr size_t job_size = sizeof(ContainerT);
-    static constexpr size_t job_alignment = std::alignment_of_v<ContainerT>;
+    static constexpr uint64_t job_size = sizeof(ContainerT);
+    static constexpr uint64_t job_alignment = alignof(ContainerT);
     static_assert(job_size <= JobManager::Alloc::maxJobSize,
                   "Job lambda capture is too large");
     static_assert(job_alignment <= JobManager::Alloc::maxJobAlignment,
