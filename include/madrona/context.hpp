@@ -12,7 +12,6 @@ public:
     Context(WorkerInit &&init);
 
     AllocContext mem;
-    inline StateManager & state();
 
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype();
@@ -20,45 +19,46 @@ public:
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 
-    template <typename Fn, typename... Deps>
+    template <typename Fn, typename... DepTs>
     inline JobID submit(Fn &&fn, bool is_child = true,
-                          Deps && ... dependencies);
+                        DepTs && ... dependencies);
 
-    template <typename Fn, typename... Deps>
+    template <typename Fn, typename... DepTs>
     inline JobID submitN(Fn &&fn, uint32_t num_invocations,
                          bool is_child = true,
-                         Deps && ... dependencies);
+                         DepTs && ... dependencies);
 
-    template <typename... ComponentTs, typename Fn, typename... Deps>
+    template <typename... ComponentTs, typename Fn, typename... DepTs>
     inline JobID forAll(Query<ComponentTs...> query, Fn &&fn,
                         bool is_child = true,
-                        Deps && ... dependencies);
+                        DepTs && ... dependencies);
 
-    template <typename Fn, typename... Deps>
+    template <typename Fn, typename... DepTs>
     inline JobID ioRead(const char *path, Fn &&fn, bool is_child = true,
-                        Deps && ... dependencies);
+                        DepTs && ... dependencies);
+
+    inline StateManager & state();
 
 protected:
-    template <typename ContextT, typename Fn, typename... Deps>
-    inline JobID submitImpl(Fn &&fn, bool is_child, Deps && ... dependencies);
+    template <typename ContextT, typename Fn, typename... DepTs>
+    inline JobID submitImpl(Fn &&fn, bool is_child, DepTs && ... dependencies);
 
-    template <typename ContextT, typename Fn, typename... Deps>
+    template <typename ContextT, typename Fn, typename... DepTs>
     inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
-                            Deps && ... dependencies);
+                            DepTs && ... dependencies);
 
     template <typename ContextT, typename... ComponentTs, typename Fn,
-              typename... Deps>
+              typename... DepTs>
     inline JobID forAllImpl(Query<ComponentTs...> query, Fn &&fn,
-                            bool is_child, Deps && ... dependencies);
+                            bool is_child, DepTs && ... dependencies);
 
 private:
-    template <typename ContextT, typename Fn>
-    Job makeJob(Fn &&fn, uint32_t num_invocations);
-
     JobManager * const job_mgr_;
     StateManager * const state_mgr_;
     IOManager * const io_mgr_;
     const int worker_idx_;
+
+friend class JobManager;
 };
 
 }

@@ -13,13 +13,13 @@ public:
 
     inline StateManager & state();
 
-    template <typename Fn, typename... Args>
+    template <typename Fn, typename... Deps>
     inline JobID submit(Fn &&fn, bool is_child = true,
-                        Args && ...dependencies);
+                        Deps && ...dependencies);
 
-    template <typename Fn, typename... Args>
+    template <typename Fn, typename... Deps>
     inline JobID submitN(Fn &&fn, uint32_t num_invocations,
-        bool is_child = true, Args && ...dependencies);
+        bool is_child = true, Deps && ...dependencies);
 
     template <typename... ColTypes, typename Fn, typename... Deps>
     inline JobID forAll(const Query<ColTypes...> &query, Fn &&fn,

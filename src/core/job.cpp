@@ -16,37 +16,84 @@ using std::memory_order;
 
 namespace madrona {
 
-struct alignas(64) JobQueueHead {
+struct JobQueue {
     atomic_uint32_t head;
     atomic_uint32_t correction;
     atomic_uint32_t auth;
-};
-
-struct alignas(8) JobQueueTail {
+    char pad[116];
     atomic_uint32_t tail;
 };
 
-static_assert(alignof(JobQueueHead) % alignof(Job) == 0);
+struct WaitQueue {
+    utils::SpinLock lock;
+    uint32_t head;
+    uint32_t tail;
+};
+
 static_assert(atomic_uint32_t::is_always_lock_free);
 
-namespace InternalConfig {
-    constexpr static int jobQueueSizePerThread = 16384;
-    constexpr static uint32_t jobQueueIndexMask =
-        (uint32_t)jobQueueSizePerThread - 1;
+struct JobTrackerInfo {
+    // This alignment requirement is necessary to get
+    // efficient 64 bit atomics out of clang with libstdcxx on linux
+    struct alignas(std::atomic_uint64_t) Head {
+        uint32_t idx;
+        uint32_t gen;
+    };
+
+    std::atomic<Head> head;
+    static_assert(decltype(head)::is_always_lock_free);
+};
+
+struct JobTracker {
+    atomic_uint32_t gen;
+    atomic_uint32_t parent;
+    atomic_uint32_t numOutstanding;
+    atomic_uint32_t remainingInvocations;
+};
+
+namespace ICfg {
+    constexpr static int waitQueueSizePerThread = 4096;
+    constexpr static int runQueueSizePerThread = 1024;
+
+    constexpr static uint32_t waitQueueIndexMask =
+        (uint32_t)waitQueueSizePerThread - 1;
+    constexpr static uint32_t runQueueIndexMask =
+        (uint32_t)runQueueSizePerThread - 1;
 
     constexpr static uint32_t jobQueueSentinel = 0xFFFFFFFF;
-    
-    constexpr static uint32_t jobQueueBytesPerThread = []() {
-        constexpr uint32_t bytes_per_thread =
-            sizeof(JobQueueHead) + sizeof(JobQueueTail) + 
-            jobQueueSizePerThread * sizeof(Job);
 
-        return utils::roundUp(bytes_per_thread,
-                              (uint32_t)std::alignment_of_v<JobQueueHead>);
-    }();
+    constexpr static uint64_t jobQueueStartAlignment = 128;
+
+    template <uint64_t num_jobs>
+    static constexpr uint64_t computeWaitQueueBytes()
+    {
+        constexpr uint64_t bytes_per_thread =
+            sizeof(WaitQueue) + num_jobs * sizeof(Job);
+
+        return utils::roundUp(bytes_per_thread, jobQueueStartAlignment);
+    }
+
+    constexpr static uint64_t waitQueueBytesPerThread =
+        computeWaitQueueBytes<waitQueueSizePerThread>();
+
+    template <uint64_t num_jobs>
+    static constexpr uint64_t computeRunQueueBytes()
+    {
+        static_assert(offsetof(JobQueue, tail) == jobQueueStartAlignment);
+
+        constexpr uint64_t bytes_per_thread =
+            sizeof(JobQueue) + num_jobs * sizeof(Job);
+
+        return utils::roundUp(bytes_per_thread, jobQueueStartAlignment);
+    }
+    
+    constexpr static uint64_t runQueueBytesPerThread =
+        computeRunQueueBytes<runQueueSizePerThread>();
 
     constexpr static uint32_t jobAllocSentinel = 0xFFFFFFFF;
     constexpr static uint32_t numJobAllocArenas = 1024;
+
+    constexpr static uint32_t jobTrackerTerm = ~0u;
 }
 
 static inline void workerYield()
@@ -65,7 +112,7 @@ static inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
     uint32_t cur_head = shared.freeHead.load(memory_order::acquire);
     uint32_t new_head, arena_idx;
     do {
-        if (cur_head == InternalConfig::jobAllocSentinel) {
+        if (cur_head == ICfg::jobAllocSentinel) {
             FATAL("Out of job memory");
         }
 
@@ -131,9 +178,9 @@ void * JobManager::Alloc::alloc(SharedState &shared,
         // the cur_arena_ can immediately be reused by resetting offsets to 0
         if (post_metadata != 0) {
             // Get next free arena. First check the cached arena in next_arena_
-            if (next_arena_ != InternalConfig::jobAllocSentinel) {
+            if (next_arena_ != ICfg::jobAllocSentinel) {
                 cur_arena_ = next_arena_;
-                next_arena_ = InternalConfig::jobAllocSentinel;
+                next_arena_ = ICfg::jobAllocSentinel;
             } else {
                 cur_arena_ = acquireArena(shared);
             }
@@ -171,7 +218,7 @@ void JobManager::Alloc::dealloc(SharedState &shared,
     if (post_metadata == 0) {
         // If this thread doesn't have a cached free arena, store there,
         // otherwise release to global free list
-        if (next_arena_ == InternalConfig::jobAllocSentinel) {
+        if (next_arena_ == ICfg::jobAllocSentinel) {
             next_arena_ = arena_idx;
         } else {
             releaseArena(shared, arena_idx);
@@ -286,128 +333,260 @@ static void setThreadAffinity(int thread_idx)
 #endif
 }
 
-static inline void * alignQueue(void *start)
-{
-    return (void *)utils::roundUp((uintptr_t)start,
-        (uintptr_t)std::alignment_of_v<JobQueueHead>);
-}
-
-static inline JobQueueHead * getQueueHead(
+static inline JobQueue * getRunQueue(
     void *queue_base, const int thread_idx)
 {
-    return (JobQueueHead *)((char *)queue_base +
-        thread_idx * InternalConfig::jobQueueBytesPerThread);
+    return (JobQueue *)((char *)queue_base +
+        thread_idx * ICfg::runQueueBytesPerThread);
 }
 
-static inline JobQueueTail * getQueueTail(JobQueueHead *head)
+static inline WaitQueue * getWaitQueue(
+    void *queue_base, const int thread_idx)
 {
-    return (JobQueueTail *)((char *)head + sizeof(JobQueueHead));
+    return (WaitQueue *)((char *)queue_base +
+        thread_idx * ICfg::waitQueueBytesPerThread);
 }
 
-static inline Job *getJobArray(JobQueueTail *tail)
+
+static inline Job * getJobArray(JobQueue *queue)
 {
-    return (Job *)((char *)tail + sizeof(JobQueueTail));
+    return (Job *)((char *)queue + sizeof(JobQueue));
 }
 
-JobManager::JobManager(int desired_num_workers,
-                       int num_io,
-                       StateManager *state_mgr,
+static inline Job * getWaitingJobs(WaitQueue *queue)
+{
+    return (Job *)((char *)queue + sizeof(WaitQueue));
+}
+
+static inline JobTrackerInfo & getTrackerInfo(void *base)
+{
+    return *(JobTrackerInfo *)base;
+}
+
+static inline JobTracker * getTrackerArray(JobTrackerInfo &head)
+{
+    return (JobTracker *)((char *)&head + sizeof(JobTrackerInfo));
+}
+
+struct JobManager::Init {
+    void *ctxInitData;
+    uint32_t numCtxInitBytes;
+    void (*ctxInitFn)(void *, void *, WorkerInit &&);
+    uint32_t numCtxBytes;
+    void (*startFn)(Context &, void *);
+    void *startData;
+    int numWorkers;
+    int numIO;
+    int numThreads;
+    StateManager *stateMgr;
+    bool pinWorkers;
+    void *perThreadData;
+    void *ctxBase;
+    void *ctxInitPtr;
+    void *highBase;
+    void *normalBase;
+    void *ioBase;
+    void *waitingBase;
+    void *trackerBase;
+    int numTrackerSlots;
+};
+
+JobManager::JobManager(void *ctx_init_data,
+                       uint32_t num_ctx_init_bytes,
+                       uint32_t ctx_init_alignment,
+                       void (*ctx_init_fn)(void *, void *, WorkerInit &&),
                        uint32_t num_ctx_bytes,
                        uint32_t ctx_alignment,
-                       void (*ctx_init)(void *, void *, WorkerInit &&),
-                       void *ctx_data,
-                       uint32_t num_ctx_data_bytes,
-                       uint32_t ctx_data_alignment,
-                       Job::EntryPtr start_func,
+                       void (*start_fn)(Context &, void *),
                        void *start_data,
+                       int desired_num_workers,
+                       int num_io,
+                       StateManager *state_mgr,
                        bool pin_workers)
-    : threads_(getNumWorkers(desired_num_workers) + num_io, InitAlloc()),
+    : JobManager([=]() {
+        int num_workers = getNumWorkers(desired_num_workers);
+        int num_threads = num_workers + num_io;
+
+        uint64_t num_per_thread_bytes = 0;
+
+        uint64_t ctx_offset = 0;
+        num_per_thread_bytes =
+            ctx_offset + (uint64_t)num_threads * (uint64_t)num_ctx_bytes;
+
+        uint64_t ctx_init_offset =
+            utils::roundUp(num_per_thread_bytes, (uint64_t)ctx_init_alignment);
+        num_per_thread_bytes = ctx_init_offset + num_ctx_init_bytes;
+
+        uint64_t high_offset =
+            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+        num_per_thread_bytes =
+            high_offset + threads_.size() * ICfg::runQueueBytesPerThread;
+
+        uint64_t normal_offset =
+            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+        num_per_thread_bytes =
+            normal_offset + threads_.size() * ICfg::runQueueBytesPerThread;
+
+        uint64_t io_offset =
+            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+        num_per_thread_bytes =
+            io_offset + threads_.size() * ICfg::runQueueBytesPerThread;
+
+        uint64_t wait_offset =
+            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+        num_per_thread_bytes =
+            wait_offset + threads_.size() * ICfg::waitQueueBytesPerThread;
+
+        int num_tracker_slots = num_threads * (
+              ICfg::waitQueueSizePerThread + ICfg::runQueueSizePerThread);
+        uint64_t tracker_offset =
+            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+
+        static_assert(sizeof(JobTrackerInfo) % alignof(JobTracker) == 0);
+
+        num_per_thread_bytes = tracker_offset + sizeof(JobTrackerInfo) +
+            num_tracker_slots * sizeof(JobTracker);
+
+        // Add extra space so the start of the pointer can be aligned to
+        // ctx_alignment
+        num_per_thread_bytes += ctx_alignment - 1;
+
+        void *per_thread_data = InitAlloc().alloc(num_per_thread_bytes);
+
+        char *per_thread_aligned = (char *)utils::roundUp(
+            (uintptr_t)per_thread_data, (uintptr_t)ctx_alignment);
+
+        return Init {
+            .ctxInitData = ctx_init_data,
+            .numCtxInitBytes = num_ctx_init_bytes,
+            .ctxInitFn = ctx_init_fn,
+            .numCtxBytes = num_ctx_bytes,
+            .startFn = start_fn,
+            .startData = start_data,
+            .numWorkers = num_workers,
+            .numIO = num_io,
+            .numThreads = num_threads,
+            .stateMgr = state_mgr,
+            .pinWorkers = pin_workers,
+            .perThreadData = per_thread_data,
+            .ctxBase = per_thread_aligned + ctx_offset,
+            .ctxInitPtr = per_thread_aligned + ctx_init_offset,
+            .highBase = per_thread_aligned + high_offset,
+            .normalBase = per_thread_aligned + normal_offset,
+            .ioBase = per_thread_aligned + io_offset,
+            .waitingBase = per_thread_aligned + wait_offset,
+            .trackerBase = per_thread_aligned + tracker_offset,
+            .numTrackerSlots = num_tracker_slots,
+        };
+    }())
+{}
+
+JobManager::JobManager(const Init &init)
+    : threads_(init.numThreads, InitAlloc()),
       alloc_state_(Alloc::makeSharedState(InitAlloc(),
-                                          InternalConfig::numJobAllocArenas)),
+                                          ICfg::numJobAllocArenas)),
       job_allocs_(threads_.size(), InitAlloc()),
-      ctx_store_(InitAlloc().alloc(threads_.size() * (uint64_t)num_ctx_bytes +
-          (uint64_t)ctx_alignment - 1ul + (uint64_t)num_ctx_data_bytes +
-          (uint64_t)ctx_data_alignment - 1ul)),
-      queue_store_(InitAlloc().alloc(
-          3u * threads_.size() * InternalConfig::jobQueueBytesPerThread +
-            std::alignment_of_v<JobQueueHead>)),
-      high_start_(alignQueue(queue_store_)),
-      normal_start_((char *)high_start_ + threads_.size() *
-                  InternalConfig::jobQueueBytesPerThread),
-      io_start_((char *)normal_start_ + threads_.size() *
-                InternalConfig::jobQueueBytesPerThread),
-      waiting_start_(nullptr), // FIXME
+      per_thread_data_(init.perThreadData),
+      high_base_(init.highBase),
+      normal_base_(init.normalBase),
+      io_base_(init.ioBase),
+      waiting_base_(init.waitingBase),
+      tracker_base_(init.trackerBase),
       io_sema_(0),
       job_counts_ {
           .numHigh = 0,
           .numOutstanding = 0,
       }
 {
-    char *ctx_store_start = (char *)utils::roundUp((uintptr_t)ctx_store_,
-                                                   (uintptr_t)ctx_alignment);
+    char *ctx_base_ptr = (char *)init.ctxBase;
+    char *ctx_init_ptr = (char *)init.ctxInitPtr;
 
-    void *ctx_data_ptr = (void *)utils::roundUp(
-        (uintptr_t)(ctx_store_start + num_ctx_bytes * threads_.size()),
-        (uintptr_t)ctx_data_alignment);
+    memcpy(ctx_init_ptr, init.ctxInitData, init.numCtxInitBytes);
 
-    memcpy(ctx_data_ptr, ctx_data, num_ctx_data_bytes);
-
-    for (int i = 0, n = threads_.size(); i < n; i++) {
+    for (int i = 0, n = init.numThreads; i < n; i++) {
         job_allocs_.emplace(i, alloc_state_);
 
-        void *cur_ctx_ptr = ctx_store_start + i * num_ctx_bytes;
-        ctx_init(cur_ctx_ptr, ctx_data_ptr, WorkerInit {
+        void *cur_ctx_ptr = ctx_base_ptr + i * init.numCtxBytes;
+        init.ctxInitFn(cur_ctx_ptr, ctx_init_ptr, WorkerInit {
             .jobMgr = this,
-            .stateMgr = state_mgr,
+            .stateMgr = init.stateMgr,
             .workerIdx = i,
         });
     }
 
     auto initQueue = [](void *queue_start, int thread_idx) {
-        JobQueueHead *head = getQueueHead(queue_start, thread_idx);
+        JobQueue *queue = getRunQueue(queue_start, thread_idx);
 
-        new (head) JobQueueHead {
+        new (queue) JobQueue {
             .head = 0,
             .correction = 0,
             .auth = 0,
-        };
-
-        JobQueueTail *tail = getQueueTail(head);
-
-        new (tail) JobQueueTail {
+            .pad = {},
             .tail = 0,
         };
     };
 
     // Setup per-thread queues
     for (int i = 0, n = threads_.size(); i < n; i++) {
-        initQueue(normal_start_, i);
-        initQueue(high_start_, i);
+        initQueue(normal_base_, i);
+        initQueue(high_base_, i);
+        initQueue(io_base_, i);
+
+        WaitQueue *wait_queue = getWaitQueue(waiting_base_, i);
+        new (wait_queue) WaitQueue {
+            {},
+            0,
+            0,
+        };
     }
 
-    struct StartWrapper {
-        Job::EntryPtr func;
+    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+    tracker_info.head = {
+        .idx = 0,
+        .gen = 0,
+    };
+
+    JobTracker *trackers = getTrackerArray(tracker_info);
+
+    for (int i = 0, n = init.numTrackerSlots; i < n; i++) {
+        JobTracker &tracker = trackers[i];
+
+        tracker.gen.store(0, memory_order::relaxed);
+        if (i < n - 1) {
+            tracker.parent.store(i + 1, memory_order::relaxed);
+        } else {
+            tracker.parent.store(ICfg::jobTrackerTerm, memory_order::relaxed);
+        }
+
+        tracker.numOutstanding.store(0, memory_order::relaxed);
+    }
+
+    struct StartWrapper : JobContainerBase {
+        void (*func)(Context &, void *);
         void *data;
         atomic_bool launched;
     } start_wrapper {
-        start_func,
-        start_data,
+        JobContainerBase { 0, 0 },
+        init.startFn,
+        init.startData,
         false,
     };
 
     // Initial job
-    queueJob(0, [](Context &ctx, void *ptr, uint32_t invocation_idx) {
+    queueJob(0, [](Context &ctx, JobContainerBase *ptr, uint32_t) {
         auto &start = *(StartWrapper *)ptr;
-        start.func(ctx, start.data, invocation_idx);
+        start.func(ctx, start.data);
         start.launched.store(true, memory_order::release);
-    }, &start_wrapper, nullptr, 0, JobPriority::Normal);
+    }, &start_wrapper, 1, false, JobPriority::Normal);
 
-    const int num_workers = threads_.size() - num_io;
-    for (int i = 0; i < num_workers; i++) {
+    atomic_thread_fence(memory_order::release);
+
+    for (int i = 0; i < init.numWorkers; i++) {
         auto cur_ctx_ptr = 
-            (Context *)(ctx_store_start + i * num_ctx_bytes);
+            (Context *)(ctx_base_ptr + i * init.numCtxBytes);
 
-        threads_.emplace(i, [this, i, pin_workers, cur_ctx_ptr]() {
+        threads_.emplace(i, [this, i, pin_workers = init.pinWorkers,
+                             cur_ctx_ptr]() {
             disableThreadSignals();
             if (pin_workers) {
                 setThreadAffinity(i);
@@ -417,10 +596,10 @@ JobManager::JobManager(int desired_num_workers,
         });
     }
 
-    for (int i = 0; i < num_io; i++) {
-        int thread_idx = num_workers + i;
+    for (int i = 0; i < init.numIO; i++) {
+        int thread_idx = init.numWorkers + i;
         auto cur_ctx_ptr = 
-            (Context *)(ctx_store_start + thread_idx * num_ctx_bytes);
+            (Context *)(ctx_base_ptr + thread_idx * init.numCtxBytes);
 
         threads_.emplace(thread_idx, [this, thread_idx, cur_ctx_ptr]() {
             disableThreadSignals();
@@ -442,41 +621,229 @@ JobManager::~JobManager()
 {
     InitAlloc().dealloc(alloc_state_.memoryBase);
 
-    InitAlloc().dealloc(queue_store_);
-
-    InitAlloc().dealloc(ctx_store_);
+    InitAlloc().dealloc(per_thread_data_);
 }
 
-JobID JobManager::queueJob(int thread_idx,
-                           Job::EntryPtr job_func, void *job_data,
-                           const JobID *deps, uint32_t num_dependencies,
-                           JobPriority prio)
+static inline uint32_t allocateJobTrackerSlot(JobTrackerInfo &tracker_info)
 {
-    (void)deps;
-    (void)num_dependencies;
+    JobTracker *trackers = getTrackerArray(tracker_info);
 
-    JobQueueTail *queue_tail;
-    if (prio == JobPriority::High) {
-        queue_tail = getQueueTail(getQueueHead(high_start_, thread_idx));
-    } else if (prio == JobPriority::Normal) {
-        queue_tail = getQueueTail(getQueueHead(normal_start_, thread_idx));
-    } else {
-        queue_tail = getQueueTail(getQueueHead(io_start_, thread_idx));
+    // FIXME unify this lock free linked list code with GPU impl if possible
+    JobTrackerInfo::Head cur_head =
+        tracker_info.head.load(memory_order::acquire);
+
+    JobTrackerInfo::Head new_head;
+
+    do {
+        if (cur_head.idx == ICfg::jobTrackerTerm) {
+            break;
+        }
+
+        JobTracker &cur_tracker = trackers[cur_head.idx];
+
+        new_head.gen = cur_head.gen + 1;
+        new_head.idx = cur_tracker.parent.load(memory_order::relaxed);
+    } while (!tracker_info.head.compare_exchange_weak(
+        cur_head, new_head, memory_order::release,
+        memory_order::acquire));
+
+    uint32_t job_idx = cur_head.idx;
+
+    if (job_idx == ICfg::jobTrackerTerm) [[unlikely]] {
+        FATAL("Out of job ids");
     }
 
-    atomic_uint32_t &tail = queue_tail->tail;
+    return job_idx;
+}
+
+static inline void freeJobTrackerSlot(JobTrackerInfo &tracker_info,
+                                      uint32_t job_id)
+{
+    JobTracker *trackers = getTrackerArray(tracker_info);
+    JobTracker &tracker = trackers[job_id];
+
+    JobTrackerInfo::Head new_head;
+    new_head.idx = job_id;
+
+    JobTrackerInfo::Head cur_head =
+        tracker_info.head.load(memory_order::relaxed);
+
+    do {
+        new_head.gen = cur_head.gen + 1;
+
+        tracker.parent.store(cur_head.idx, memory_order::relaxed);
+    } while (!tracker_info.head.compare_exchange_weak(
+           cur_head, new_head,
+           memory_order::release, memory_order::relaxed));
+}
+
+static inline JobID getNewJobID(JobTrackerInfo &tracker_info,
+                                uint32_t parent_job_idx,
+                                uint32_t num_invocations)
+{
+    JobTracker *trackers = getTrackerArray(tracker_info);
+
+    if (parent_job_idx != ICfg::jobTrackerTerm) {
+        JobTracker &parent = trackers[parent_job_idx];
+        parent.numOutstanding.fetch_add(1, memory_order::release);
+    }
+
+    uint32_t tracker_slot = allocateJobTrackerSlot(tracker_info);
+
+    JobTracker &tracker = trackers[tracker_slot];
+
+    // Update generation first, in case there are dependencies of the
+    // parent that may still check this tracker
+    uint32_t prev_gen = tracker.gen.fetch_add(1, memory_order::acq_rel);
+
+    tracker.parent.store(parent_job_idx, memory_order::relaxed);
+    tracker.numOutstanding.store(1, memory_order::relaxed);
+    tracker.remainingInvocations.store(num_invocations, memory_order::relaxed);
+
+    atomic_thread_fence(memory_order::release);
+
+    return JobID {
+        .id = tracker_slot,
+        .gen = prev_gen + 1,
+    };
+}
+
+static inline void decrementJobTracker(JobTrackerInfo &tracker_info, 
+                                       uint32_t job_id)
+{
+    JobTracker *trackers = getTrackerArray(tracker_info);
+
+    while (job_id != ICfg::jobTrackerTerm) {
+        JobTracker &tracker = trackers[job_id];
+
+        uint32_t prev_outstanding =
+            tracker.numOutstanding.fetch_sub(1, memory_order::acq_rel);
+
+        if (prev_outstanding == 1) {
+            freeJobTrackerSlot(tracker_info, job_id);
+
+            job_id = tracker.parent.load(memory_order::relaxed);
+        } else {
+            break;
+        }
+    }
+}
+
+static inline bool isRunnable(JobTrackerInfo &tracker_info,
+                              JobContainerBase *job_data)
+{
+    const JobTracker *trackers = getTrackerArray(tracker_info);
+
+    int num_deps = job_data->numDependencies;
+
+    if (num_deps == 0) {
+        return true;
+    }
+
+    auto dependencies = (const JobID *)(
+        (char *)job_data + sizeof(JobContainerBase));
+
+    atomic_thread_fence(memory_order::acquire);
+
+    for (int i = 0; i < num_deps; i++) {
+        JobID dependency = dependencies[i];
+        const JobTracker &tracker = trackers[dependency.id];
+
+        if (tracker.gen.load(memory_order::relaxed) != dependency.gen) {
+            continue;
+        }
+
+        if (tracker.numOutstanding.load(memory_order::relaxed) > 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+JobID JobManager::queueJob(int thread_idx, Job::EntryPtr job_func,
+                           JobContainerBase *job_data,
+                           uint32_t num_invocations, bool is_child,
+                           JobPriority prio)
+{
+    uint32_t parent_job_idx;
+    if (is_child) {
+        parent_job_idx = job_data->id;
+    } else {
+        parent_job_idx = ICfg::jobTrackerTerm;
+    }
+
+    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+
+    JobID id = getNewJobID(tracker_info, parent_job_idx, num_invocations);
+
+    job_data->id = id.id;
+
+    if (isRunnable(tracker_info, job_data)) {
+        addToRunQueue(thread_idx, job_func, job_data, 0,
+                      num_invocations, prio);
+    } else {
+        addToWaitQueue(thread_idx, job_func, job_data, num_invocations,
+                       prio);
+    }
+
+    return id;
+}
+
+void JobManager::markJobFinished(int worker_idx, JobContainerBase *job,
+                                 uint32_t job_size)
+{
+    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+    JobTracker *trackers = getTrackerArray(tracker_info);
+
+    uint32_t job_idx = job->id;
+
+    uint32_t remaining_invocations =
+        trackers[job_idx].remainingInvocations.fetch_sub(
+            1, memory_order::acq_rel);
+
+    if (remaining_invocations == 0) {
+        decrementJobTracker(tracker_info, job_idx);
+
+        // Important note: jobs may be freed by different threads
+        deallocJob(worker_idx, job, job_size);
+    }
+}
+
+void JobManager::addToRunQueue(int thread_idx,
+                               Job::EntryPtr job_func,
+                               JobContainerBase *job_data,
+                               uint32_t invocation_offset,
+                               uint32_t num_invocations,
+                               JobPriority prio)
+{
+    JobQueue *queue;
+    if (prio == JobPriority::High) {
+        queue = getRunQueue(high_base_, thread_idx);
+    } else if (prio == JobPriority::Normal) {
+        queue = getRunQueue(normal_base_, thread_idx);
+    } else {
+        queue = getRunQueue(io_base_, thread_idx);
+    }
+
+    atomic_uint32_t &tail_counter = queue->tail;
 
     // No one modifies queue_tail besides this thread
-    uint32_t cur_tail = tail.load(memory_order::relaxed); 
-    uint32_t wrapped_idx = (cur_tail & InternalConfig::jobQueueIndexMask);
+    uint32_t cur_tail = tail_counter.load(memory_order::relaxed);
+    uint32_t wrapped_idx = (cur_tail & ICfg::runQueueIndexMask);
 
-    Job *job_array = getJobArray(queue_tail);
+    Job *job_array = getJobArray(queue);
 
-    job_array[wrapped_idx].func_ = job_func;
-    job_array[wrapped_idx].data_ = job_data;
+    job_array[wrapped_idx] = Job {
+        .func = job_func,
+        .data = job_data,
+        .invocationOffset = invocation_offset,
+        .numInvocations = num_invocations,
+    };
 
-    cur_tail++;
-    tail.store(cur_tail, memory_order::relaxed);
+    cur_tail += 1;
+    tail_counter.store(cur_tail, memory_order::relaxed);
 
     if (prio == JobPriority::High) {
         job_counts_.numHigh.fetch_add(1, memory_order::relaxed);
@@ -488,10 +855,51 @@ JobID JobManager::queueJob(int thread_idx,
     job_counts_.numOutstanding.fetch_add(1, memory_order::relaxed);
 
     atomic_thread_fence(memory_order::release);
-
-    return JobID(0);
 }
 
+void JobManager::addToWaitQueue(int thread_idx,
+                                Job::EntryPtr job_func,
+                                JobContainerBase *job_data,
+                                uint32_t num_invocations,
+                                JobPriority prio)
+{
+    // FIXME Priority is dropped on jobs that need to wait
+    (void)prio;
+
+    auto addJob = [&](WaitQueue *wait_queue) {
+        std::lock_guard lock(wait_queue->lock);
+
+        Job *waiting_jobs = getWaitingJobs(wait_queue);
+
+        uint32_t new_idx = ((wait_queue->tail++) & ICfg::waitQueueIndexMask);
+
+        waiting_jobs[new_idx] = Job {
+            job_func,
+            job_data,
+            0,
+            num_invocations,
+        };
+    };
+
+    for (int i = 0, n = threads_.size(); i < n; i++) {
+        int queue_idx = (i + thread_idx) % n;
+        WaitQueue *wait_queue = getWaitQueue(waiting_base_, queue_idx);
+
+        if (wait_queue->lock.isLockedOptimistic()) {
+            continue;
+        }
+
+        addJob(wait_queue);
+
+        return;
+    }
+
+    // Failsafe, if couldn't find queue to wait on just spin on current
+    // thread's queue
+    addJob(getWaitQueue(waiting_base_, thread_idx));
+}
+
+#if 0
 JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
                            const JobID *deps, uint32_t num_dependencies,
                            JobPriority prio)
@@ -501,22 +909,22 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
 
     JobQueueTail *queue_tail;
     if (prio == JobPriority::High) {
-        queue_tail = getQueueTail(getQueueHead(high_start_, thread_idx));
+        queue_tail = getQueueTail(getQueueHead(high_base_, thread_idx));
     } else if (prio == JobPriority::Normal) {
-        queue_tail = getQueueTail(getQueueHead(normal_start_, thread_idx));
+        queue_tail = getQueueTail(getQueueHead(normal_base_, thread_idx));
     } else {
-        queue_tail = getQueueTail(getQueueHead(io_start_, thread_idx));
+        queue_tail = getQueueTail(getQueueHead(io_base_, thread_idx));
     }
 
     atomic_uint32_t &tail = queue_tail->tail;
 
     // No one modifies queue_tail besides this thread
     uint32_t cur_tail = tail.load(memory_order::relaxed); 
-    uint32_t wrapped_idx = (cur_tail & InternalConfig::jobQueueIndexMask);
+    uint32_t wrapped_idx = (cur_tail & ICfg::jobQueueIndexMask);
 
     Job *job_array = getJobArray(queue_tail);
 
-    uint32_t num_remaining = InternalConfig::jobQueueSizePerThread - wrapped_idx;
+    uint32_t num_remaining = ICfg::jobQueueSizePerThread - wrapped_idx;
     uint32_t num_fit = std::min(num_remaining, num_jobs);
     memcpy(job_array + wrapped_idx, jobs, num_fit * sizeof(Job));
 
@@ -541,26 +949,71 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
 
     return JobID(0);
 }
+#endif
+
+void JobManager::findReadyJobs(int thread_idx)
+{
+    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+
+    int num_queues = threads_.size();
+
+    int num_found = 0;
+    for (int i = 0; i < num_queues; i++) {
+        int queue_idx = (i + thread_idx) % num_queues;
+        WaitQueue *wait_queue = getWaitQueue(waiting_base_, queue_idx);
+
+        bool lock_succeeded = wait_queue->lock.lockNoSpin();
+
+        if (!lock_succeeded) {
+            continue;
+        }
+
+        Job *waiting_jobs = getWaitingJobs(wait_queue);
+
+        uint32_t cur_tail = wait_queue->tail;
+        for (uint32_t wait_idx = wait_queue->head;
+             wait_idx != cur_tail;
+             wait_idx = ((wait_idx + 1) & ICfg::waitQueueIndexMask)) {
+            Job job = waiting_jobs[wait_idx];
+            if (isRunnable(tracker_info, job.data)) {
+                addToRunQueue(thread_idx, job.func, job.data, 0,
+                              job.numInvocations, JobPriority::Normal);
+                num_found++;
+            } else {
+                uint32_t move_idx =
+                    ((wait_queue->tail++) & ICfg::waitQueueIndexMask);
+                waiting_jobs[move_idx] = job;
+            }
+        }
+
+        wait_queue->head = cur_tail;
+
+        wait_queue->lock.unlock();
+
+        if (num_found > 0) {
+            break;
+        }
+    }
+}
 
 static inline bool checkGEWrapped(uint32_t a, uint32_t b)
 {
     return a - b <= (1u << 31u);
 }
 
-static inline uint32_t getNextJobIndex(JobQueueHead *job_head,
-                                       JobQueueTail *job_tail)
+static inline uint32_t getNextJobIndex(JobQueue *job_queue)
 {
-    atomic_uint32_t &head = job_head->head;
-    atomic_uint32_t &correction = job_head->correction;
-    atomic_uint32_t &auth = job_head->auth;
-    atomic_uint32_t &tail = job_tail->tail;
+    atomic_uint32_t &head = job_queue->head;
+    atomic_uint32_t &correction = job_queue->correction;
+    atomic_uint32_t &auth = job_queue->auth;
+    atomic_uint32_t &tail = job_queue->tail;
 
     uint32_t cur_tail = tail.load(memory_order::relaxed);
     uint32_t cur_correction = correction.load(memory_order::relaxed);
     uint32_t cur_head = head.load(memory_order::relaxed);
 
     if (checkGEWrapped(cur_head - cur_correction, cur_tail)) {
-        return InternalConfig::jobQueueSentinel;
+        return ICfg::jobQueueSentinel;
     }
 
     atomic_thread_fence(memory_order::acquire);
@@ -571,74 +1024,129 @@ static inline uint32_t getNextJobIndex(JobQueueHead *job_head,
     if (checkGEWrapped(cur_head - cur_correction, cur_tail)) [[unlikely]] {
         correction.fetch_add(1, memory_order::release);
 
-        return InternalConfig::jobQueueSentinel;
+        return ICfg::jobQueueSentinel;
     }
 
     return auth.fetch_add(1, memory_order::acq_rel);
 }
 
-static inline bool getNextJob(void *const queue_start,
-                              const int start_idx,
-                              const int num_queues,
-                              Job *next_job)
+bool JobManager::getNextJob(void *const queue_base,
+                            int thread_idx,
+                            bool check_waiting,
+                            Job *next_job)
 {
-    for (int i = 0; i < num_queues; i++) {
-        int queue_idx = (start_idx + i) % num_queues;
-        JobQueueHead *queue_head = getQueueHead(queue_start, queue_idx);
-        JobQueueTail *queue_tail = getQueueTail(queue_head);
-    
-        uint32_t job_idx = getNextJobIndex(queue_head, queue_tail);
-        if (job_idx == InternalConfig::jobQueueSentinel) continue;
-    
-        uint32_t wrapped_job_idx =
-            job_idx & InternalConfig::jobQueueIndexMask;
-    
-        // getNextJobIndex does an acquire fence so safe to read this
-        *next_job = getJobArray(queue_tail)[wrapped_job_idx];
-    
-        // There's no protection to prevent queueJob overwriting
-        // next_job
-        // in between job_idx being assigned and the job actually being
-        // read. If this happens it is a bug where way too many jobs are
-        // being created, or jobs are being processed too slowly, so we
-        // detect and crash with a fatal error (rather than silently
-        // dropping or reading corrupted jobs).
-    
-        uint32_t post_read_tail =
-            queue_tail->tail.load(memory_order::acquire);
-    
-        uint32_t wrapped_tail =
-            post_read_tail & InternalConfig::jobQueueIndexMask;
-    
-        if (checkGEWrapped(post_read_tail,
-            job_idx + InternalConfig::jobQueueSizePerThread)) [[unlikely]] {
-            // Could improve this by printing the job that was read
-            // Or by adding (optional?) detection to queueJob to find
-            // the source of the issue.
-            FATAL("Queue %d has overwritten readers. Detected by thread %d.\n"
-                  "Job: %u, Wrapped Job: %u - Tail: %u, Wrapped Tail: %u\n",
-                  queue_idx, start_idx, job_idx, wrapped_job_idx,
-                  post_read_tail, wrapped_tail);
+    // First, check queue start_idx (the current thread's)
+    JobQueue *queue;
+    uint32_t job_idx;
+    {
+        queue = getRunQueue(queue_base, thread_idx);
+        job_idx = getNextJobIndex(queue);
+
+        if (job_idx == ICfg::jobQueueSentinel && check_waiting) {
+            // Check for waiting jobs
+            findReadyJobs(thread_idx);
+
+            // Recheck current queue
+            job_idx = getNextJobIndex(queue);
         }
-    
-        return true;
+    }
+
+    int num_queues = threads_.size();
+    if (job_idx == ICfg::jobQueueSentinel) {
+        for (int i = 1, n = num_queues - 1; i < n; i++) {
+            int queue_idx = (thread_idx + i) % num_queues;
+            queue = getRunQueue(queue_base, queue_idx);
+        
+            job_idx = getNextJobIndex(queue);
+            if (job_idx != ICfg::jobQueueSentinel) {
+                break;
+            }
+        }
+    }
+
+    if (job_idx == ICfg::jobQueueSentinel) {
+        return false;
     }
     
-    return false;
+    uint32_t wrapped_job_idx = job_idx & ICfg::runQueueIndexMask;
+    
+    // There's no protection to prevent queueJob overwriting next_job
+    // in between job_idx being assigned and the job actually being
+    // read. If this happens it is a bug where way too many jobs are
+    // being created, or jobs are being processed too slowly, so we
+    // detect and crash with a fatal error (rather than silently
+    // dropping or reading corrupted jobs).
+    
+    uint32_t post_read_tail = queue->tail.load(memory_order::acquire);
+    
+    uint32_t wrapped_tail =
+        post_read_tail & ICfg::runQueueIndexMask;
+    
+    if (checkGEWrapped(post_read_tail,
+        job_idx + ICfg::runQueueSizePerThread)) [[unlikely]] {
+        // Could improve this by printing the job that was read
+        // Or by adding (optional?) detection to queueJob to find
+        // the source of the issue.
+        FATAL("Job queue has overwritten readers. Detected by thread %d.\n"
+              "Job: %u, Wrapped Job: %u - Tail: %u, Wrapped Tail: %u\n",
+              thread_idx, job_idx, wrapped_job_idx,
+              post_read_tail, wrapped_tail);
+    }
+
+    // getNextJobIndex does an acquire fence so safe to read this
+    *next_job = getJobArray(queue)[wrapped_job_idx];
+
+    return true;
+}
+
+void JobManager::runJob(const int thread_idx,
+                        Context *ctx,
+                        Job::EntryPtr fn,
+                        JobContainerBase *job_data,
+                        uint32_t invocation_offset,
+                        uint32_t num_invocations)
+{
+    // FIXME, figure out relationship between different queue priorities
+    // Should the normal priority queue always be the work indicator here?
+    JobQueue *check_queue = getRunQueue(normal_base_, thread_idx);
+
+    auto checkQueueEmpty = [check_queue] {
+        uint32_t cur_tail = check_queue->tail.load(memory_order::relaxed);
+        uint32_t cur_correction =
+            check_queue->correction.load(memory_order::relaxed);
+        uint32_t cur_head = check_queue->head.load(memory_order::relaxed);
+
+        return checkGEWrapped(cur_head - cur_correction, cur_tail);
+    };
+
+    while (invocation_offset < num_invocations) {
+        if (checkQueueEmpty()) {
+            uint32_t num_remaining = num_invocations - invocation_offset;
+
+            if (num_remaining > 1) {
+                uint32_t split_num_invocations = num_remaining / 2;
+                num_invocations -= split_num_invocations;
+                uint32_t split_offset = invocation_offset + num_invocations;
+
+                // FIXME, again priority issues here
+                addToRunQueue(thread_idx, fn, job_data, split_offset,
+                              split_num_invocations, JobPriority::Normal);
+            }
+        }
+
+        fn(*ctx, job_data, invocation_offset++);
+    }
 }
 
 void JobManager::workerThread(const int thread_idx, Context *ctx)
 {
-    const int num_queues = threads_.size();
-
-    Job next_job;
+    Job cur_job;
 
     while (job_counts_.numOutstanding.load(memory_order::acquire) > 0) {
         bool job_found = false;
 
         if (job_counts_.numHigh.load(memory_order::relaxed) > 0) {
-            job_found =
-                getNextJob(high_start_, thread_idx, num_queues, &next_job);
+            job_found = getNextJob(high_base_, thread_idx, false, &cur_job);
 
             if (job_found) {
                 job_counts_.numHigh.fetch_sub(1, memory_order::relaxed);
@@ -646,8 +1154,7 @@ void JobManager::workerThread(const int thread_idx, Context *ctx)
         }
 
         if (!job_found) {
-            job_found =
-                getNextJob(normal_start_, thread_idx, num_queues, &next_job);
+            job_found = getNextJob(normal_base_, thread_idx, true, &cur_job);
         }
 
         // All the queues are empty
@@ -656,8 +1163,8 @@ void JobManager::workerThread(const int thread_idx, Context *ctx)
             continue;
         }
 
-        // FIXME
-        next_job.func_(*ctx, next_job.data_, 0);
+        runJob(thread_idx, ctx, cur_job.func, cur_job.data,
+               cur_job.invocationOffset, cur_job.numInvocations);
 
         job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
     }
@@ -665,21 +1172,18 @@ void JobManager::workerThread(const int thread_idx, Context *ctx)
 
 void JobManager::ioThread(const int thread_idx, Context *ctx)
 {
-    const int num_queues = threads_.size();
-
-    Job next_job;
+    Job cur_job;
 
     while (job_counts_.numOutstanding.load(memory_order::acquire) > 0) {
-        bool job_found = 
-                getNextJob(io_start_, thread_idx, num_queues, &next_job);
+        bool job_found = getNextJob(io_base_, thread_idx, false, &cur_job);
 
         if (!job_found) {
             io_sema_.acquire();
             continue;
         }
 
-        // FIXME
-        next_job.func_(*ctx, next_job.data_, 0);
+        runJob(thread_idx, ctx, cur_job.func, cur_job.data,
+               cur_job.invocationOffset, cur_job.numInvocations);
 
         job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
     }

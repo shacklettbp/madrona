@@ -18,51 +18,77 @@ enum class JobPriority {
     IO,
 };
 
-class JobID {
-private:
-    JobID(uint64_t id) : id_(id) {}
-    uint64_t id_;
+struct JobID {
+    uint32_t id;
+    uint32_t gen;
 
-friend class JobManager;
+    static inline JobID none();
 };
 
-class Job {
-private:
-    using EntryPtr = void (*)(Context &, void *, uint32_t);
-    EntryPtr func_;
-    void *data_;
-    uint32_t invocation_offset_;
-    uint32_t num_invocations_;
+struct JobContainerBase {
+    uint32_t id;
+    uint32_t numDependencies;
 
-friend class Context;
-friend class JobManager;
+    template <size_t N>
+    struct DepsArray {
+        JobID dependencies[N];
+    };
+
+    template <> struct DepsArray<0> {};
+};
+
+template <typename Fn, size_t N>
+struct JobContainer : public JobContainerBase {
+    [[no_unique_address]] DepsArray<N> dependencies;
+    [[no_unique_address]] Fn fn;
+
+    template <typename... DepTs>
+    inline JobContainer(Fn &&fn, DepTs ...deps);
+};
+
+struct Job {
+    using EntryPtr = void (*)(Context &, JobContainerBase *, uint32_t);
+
+    EntryPtr func;
+    JobContainerBase *data;
+    uint32_t invocationOffset;
+    uint32_t numInvocations;
 };
 
 class JobManager {
 public:
-    template <typename StartFn, typename DataT> struct Init;
+    template <typename StartFn, typename DataT> struct EntryConfig;
 
     template <typename ContextT, typename DataT, typename StartFn>
-    static Init<DataT, StartFn> makeInit(int desired_num_workers, int num_io,
-                                         StateManager &state_mgr,
-                                         const DataT &ctx_data,
-                                         StartFn &&start_fn,
-                                         bool pin_workers = true);
+    static EntryConfig<DataT, StartFn> makeEntry(
+        DataT &&ctx_data, StartFn &&start_fn);
 
     template <typename DataT, typename StartFn>
-    JobManager(const Init<DataT, StartFn> &init);
+    JobManager(const EntryConfig<DataT, StartFn> &entry_cfg,
+               int desired_num_workers,
+               int num_io,
+               StateManager *state_mgr,
+               bool pin_workers = true);
+
     ~JobManager();
 
-    inline void * allocJob(int worker_idx, uint32_t num_bytes,
-                           uint32_t alignment);
-    inline void deallocJob(int worker_idx, void *ptr, uint32_t num_bytes);
+    template <typename ContextT, typename Fn, typename... DepTs>
+    JobID queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
+                   bool is_child = true,
+                   JobPriority prio = JobPriority::Normal,
+                   DepTs ...deps);
 
-    inline JobID queueJob(int thread_idx, Job job,
-                          const JobID *deps, uint32_t num_dependencies,
-                          JobPriority prio = JobPriority::Normal);
-    JobID queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
+    JobID queueJob(int thread_idx, Job::EntryPtr job_func,
+                   JobContainerBase *job_data, uint32_t num_invocations, 
+                   bool is_child = true,
+                   JobPriority prio = JobPriority::Normal);
+
+#if 0
+    JobID queueJobs(int thread_idx, JobID parent_id,
+                    const Job *jobs, uint32_t num_jobs,
                     const JobID *deps, uint32_t num_dependencies,
                     JobPriority prio = JobPriority::Normal);
+#endif
 
     void waitForAllFinished();
 
@@ -109,16 +135,45 @@ private:
         std::atomic_uint32_t numOutstanding;
     };
 
-    JobManager(int desired_num_workers, int num_io, StateManager *state_mgr,
-               uint32_t num_ctx_bytes, uint32_t ctx_alignment,
-               void (*ctx_init)(void *, void *, WorkerInit &&),
-               void *ctx_data, uint32_t num_ctx_data_bytes,
-               uint32_t ctx_data_alignment, Job::EntryPtr start_func,
-               void *start_data, bool pin_workers);
+    JobManager(void *ctx_init_data,
+               uint32_t num_ctx_init_bytes,
+               uint32_t ctx_init_alignment,
+               void (*ctx_init_fn)(void *, void *, WorkerInit &&),
+               uint32_t num_ctx_bytes,
+               uint32_t ctx_alignment,
+               void (*start_fn)(Context &, void *),
+               void *start_data,
+               int desired_num_workers,
+               int num_io,
+               StateManager *state_mgr,
+               bool pin_workers);
 
-    JobID queueJob(int thread_idx, Job::EntryPtr job_func, void *job_data,
-                   const JobID *deps, uint32_t num_dependencies,
-                   JobPriority prio);
+    struct Init;
+    JobManager(const Init &init);
+
+    inline void * allocJob(int worker_idx, uint32_t num_bytes,
+                           uint32_t alignment);
+    inline void deallocJob(int worker_idx, void *ptr, uint32_t num_bytes);
+
+    void markJobFinished(int worker_idx, JobContainerBase *job,
+                         uint32_t job_size);
+
+    inline void addToRunQueue(int thread_idx, Job::EntryPtr job_func,
+        JobContainerBase *job_data, uint32_t invocation_offset,
+        uint32_t num_invocations, JobPriority prio);
+
+    inline void addToWaitQueue(int thread_idx, Job::EntryPtr job_func,
+        JobContainerBase *job_data, uint32_t num_invocations,
+        JobPriority prio);
+
+    inline void findReadyJobs(int thread_idx);
+
+    inline bool getNextJob(void *queue_base, int thread_idx,
+                           bool check_waiting, Job *job);
+
+    inline void runJob(const int thread_idx, Context *ctx,
+                       Job::EntryPtr fn, JobContainerBase *job_data,
+                       uint32_t invocation_offset, uint32_t num_invocations);
 
     void workerThread(const int thread_idx, Context *ctx);
     void ioThread(const int thread_idx, Context *ctx);
@@ -128,12 +183,12 @@ private:
     Alloc::SharedState alloc_state_;
     HeapArray<Alloc, InitAlloc> job_allocs_;
 
-    void *const ctx_store_;
-    void *const queue_store_;
-    void *const high_start_;
-    void *const normal_start_;
-    void *const io_start_;
-    void *const waiting_start_;
+    void *const per_thread_data_;
+    void *const high_base_;
+    void *const normal_base_;
+    void *const io_base_;
+    void *const waiting_base_;
+    void *const tracker_base_;
     std::counting_semaphore<> io_sema_;
     JobCounts job_counts_;
 };

@@ -95,10 +95,31 @@ public:
         }
     }
 
+    bool lockNoSpin()
+    {
+        return lock_.test_and_set(std::memory_order_acquire) == false;
+    }
+
     void unlock()
     {
         lock_.clear(std::memory_order_relaxed);
         std::atomic_thread_fence(std::memory_order_release);
+    }
+
+    bool isLockedOptimistic() const
+    {
+        bool locked = lock_.test(std::memory_order_relaxed);
+
+        if (locked) {
+            return lock_.test(std::memory_order_acquire);
+        } else {
+            return false;
+        }
+    }
+
+    bool isLocked() const
+    {
+        return lock_.test(std::memory_order_acquire);
     }
 
 private:
