@@ -53,10 +53,15 @@ protected:
                             bool is_child, DepTs && ... dependencies);
 
 private:
+    template <typename ContextT, typename Fn, typename... DepTs>
+    inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
+                            DepTs && ... dependencies);
+
     JobManager * const job_mgr_;
     StateManager * const state_mgr_;
     IOManager * const io_mgr_;
     const int worker_idx_;
+    JobID cur_job_id_;
 
 friend class JobManager;
 };

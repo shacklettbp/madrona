@@ -7,6 +7,9 @@ namespace madrona {
 
 template <typename... ComponentTs>
 class Query {
+public:
+    inline uint32_t numMatchingArchetypes() const;
+
 private:
     Query(uint32_t indices_offset, uint32_t num_archetypes);
 

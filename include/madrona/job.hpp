@@ -19,14 +19,14 @@ enum class JobPriority {
 };
 
 struct JobID {
-    uint32_t id;
+    uint32_t idx;
     uint32_t gen;
 
     static inline JobID none();
 };
 
 struct JobContainerBase {
-    uint32_t id;
+    JobID id;
     uint32_t numDependencies;
 
     template <size_t N>
@@ -34,7 +34,10 @@ struct JobContainerBase {
         JobID dependencies[N];
     };
 
-    template <> struct DepsArray<0> {};
+    template <> struct DepsArray<0> {
+        template <typename... DepTs>
+        inline DepsArray(DepTs...) {}
+    };
 };
 
 template <typename Fn, size_t N>
@@ -72,16 +75,13 @@ public:
 
     ~JobManager();
 
+    inline JobID getProxyJobID(JobID parent_id);
+
     template <typename ContextT, typename Fn, typename... DepTs>
     JobID queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
-                   bool is_child = true,
+                   JobID parent_id,
                    JobPriority prio = JobPriority::Normal,
                    DepTs ...deps);
-
-    JobID queueJob(int thread_idx, Job::EntryPtr job_func,
-                   JobContainerBase *job_data, uint32_t num_invocations, 
-                   bool is_child = true,
-                   JobPriority prio = JobPriority::Normal);
 
 #if 0
     JobID queueJobs(int thread_idx, JobID parent_id,
@@ -155,7 +155,14 @@ private:
                            uint32_t alignment);
     inline void deallocJob(int worker_idx, void *ptr, uint32_t num_bytes);
 
-    void markJobFinished(int worker_idx, JobContainerBase *job,
+    JobID queueJob(int thread_idx, Job::EntryPtr job_func,
+                   JobContainerBase *job_data, uint32_t num_invocations, 
+                   uint32_t parent_job_idx,
+                   JobPriority prio = JobPriority::Normal);
+
+    JobID getProxyJobID(uint32_t parent_job_idx);
+
+    void markJobFinished(int thread_idx, JobContainerBase *job,
                          uint32_t job_size);
 
     inline void addToRunQueue(int thread_idx, Job::EntryPtr job_func,

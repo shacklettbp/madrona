@@ -68,14 +68,14 @@ JobID Context::submitImpl(Fn &&fn, bool is_child,
                 std::forward<Deps>(dependencies)...);
 }
 
-// FIXME: implement is_child, dependencies, num_invocations
-    template <typename ContextT, typename Fn, typename... Deps>
+template <typename ContextT, typename Fn, typename... Deps>
 JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
                            Deps && ...dependencies)
 {
-    return job_mgr_->queueJob(worker_idx_, std::forward<Fn>(fn),
-                              num_invocations, is_child,
-                              std::forward<Deps>(dependencies)...);
+    JobID parent_id = is_child ? cur_job_id_ : JobID::none();
+
+    return submitNImpl<ContextT>(std::forward<Fn>(fn), num_invocations,
+        parent_id, std::forward<Deps>(dependencies)...);
 }
 
 template <typename ContextT, typename... ComponentTs, typename Fn,
@@ -83,21 +83,46 @@ template <typename ContextT, typename... ComponentTs, typename Fn,
 JobID Context::forAllImpl(Query<ComponentTs...> query, Fn &&fn,
                           bool is_child, Deps && ... dependencies)
 {
+    if (query.numMatchingArchetypes() == 0) {
+        return JobID::none();
+    }
+
+    JobID parent_id = is_child ? cur_job_id_ : JobID::none();
+
+    JobID proxy_id = job_mgr_->getProxyJobID(parent_id);
+
     state_mgr_->iterateArchetypes(query,
-            [this, is_child, fn = std::forward<Fn>(fn), dependencies ...](
+            [this, proxy_id, fn = std::forward<Fn>(fn), dependencies ...](
             int num_rows, auto ...ptrs) {
         if (num_rows == 0) {
             return;
         }
 
-        auto wrapper = [fn = std::forward<Fn>(fn), ptrs ...](
-                Context &ctx, uint32_t idx) {
+        // FIXME, is there a better solution here?
+        Fn fn_copy(fn);
+
+        auto wrapper = [fn = std::forward<Fn>(fn_copy), ptrs ...](
+                ContextT &ctx, uint32_t idx) {
             fn(ctx, ptrs[idx]...);
         };
 
-        submitNImpl<ContextT>(std::move(wrapper), num_rows, is_child,
-                              std::forward<Deps>(dependencies)...);
+        // For some reason clang warns that 'this' isn't used without the
+        // explicit this->
+        this->submitNImpl<ContextT>(std::move(wrapper), num_rows, proxy_id,
+                                    std::forward<Deps>(dependencies)...);
     });
+
+    return proxy_id;
+}
+
+template <typename ContextT, typename Fn, typename... Deps>
+JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
+                           Deps && ...dependencies)
+{
+    return job_mgr_->queueJob<ContextT>(worker_idx_, std::forward<Fn>(fn),
+                                        num_invocations, parent_id,
+                                        JobPriority::Normal,
+                                        std::forward<Deps>(dependencies)...);
 }
 
 }

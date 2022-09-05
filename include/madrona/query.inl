@@ -4,6 +4,12 @@
 
 namespace madrona {
 
+template <typename... ComponentTs>
+uint32_t Query<ComponentTs...>::numMatchingArchetypes() const
+{
+    return num_archetypes_;
+}
+
 template <typename ComponentT>
 ResultRef<ComponentT>::ResultRef(ComponentT *ptr)
     : ptr_(ptr)

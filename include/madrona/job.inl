@@ -17,7 +17,7 @@ template <typename Fn, size_t N>
 template <typename... DepTs>
 JobContainer<Fn, N>::JobContainer(Fn &&func, DepTs ...deps)
     : JobContainerBase {
-          .id = ~0u, // Assigned in JobManager::queueJob
+          .id = JobID::none(), // Assigned in JobManager::queueJob
           .numDependencies = N,
       },
       dependencies { deps ... },
@@ -81,9 +81,14 @@ JobManager::JobManager(const EntryConfig<DataT, StartFn> &entry_cfg,
                  pin_workers)
 {}
 
+JobID JobManager::getProxyJobID(JobID parent_id)
+{
+    return getProxyJobID(parent_id.idx);
+}
+
 template <typename ContextT, typename Fn, typename... DepTs>
 JobID JobManager::queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
-                           bool is_child, JobPriority prio, DepTs ...deps)
+                           JobID parent_id, JobPriority prio, DepTs ...deps)
 {
     static constexpr uint32_t num_deps = sizeof...(DepTs);
     using ContainerT = JobContainer<Fn, num_deps>;
@@ -112,11 +117,11 @@ JobID JobManager::queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
         container->fn(ctx, invocation_idx);
         container->~ContainerT();
 
-        ctx.job_mgr_.markJobFinished(ctx.worker_idx_, container, job_size);
+        ctx.job_mgr_->markJobFinished(ctx.worker_idx_, container, job_size);
     };
 
     return queueJob(thread_idx, stateless_ptr, container, num_invocations,
-                    is_child, prio);
+                    parent_id.idx, prio);
 }
 
 void * JobManager::allocJob(int worker_idx, uint32_t num_bytes,
