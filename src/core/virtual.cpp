@@ -44,7 +44,7 @@ VirtualRegion::VirtualRegion(uint64_t max_bytes, uint64_t chunk_shift,
         alignment = 1;
     }
 
-    if (alignment > 1 & alignment % page_size != 0) {
+    if (alignment > 1 && alignment % page_size != 0) {
         FATAL("VirtualRegion alignment must be multiple of page size (or 1)");
     }
 

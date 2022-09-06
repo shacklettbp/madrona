@@ -5,9 +5,9 @@ namespace madrona {
 constexpr Entity Entity::none()
 {
     return Entity {
-        ~0u,
-        ~0u,
-        ~0u,
+        0x3FFFF,
+        0xFFFF,
+        0x3FFFFFFF,
     };
 }
 

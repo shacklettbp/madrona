@@ -200,7 +200,10 @@ private:
 
         auto new_ptr = (T *)alloc_.alloc(new_capacity * sizeof(T));
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"
         memcpy(new_ptr, ptr_, sizeof(T) * n_);
+#pragma GCC diagnostic pop
 
         alloc_.dealloc(ptr_);
 

@@ -51,6 +51,8 @@ inline JobID Context::ioRead(const char *path, Fn &&fn,
 
     (void)is_child;
     ( (void)dependencies, ... );
+
+    return JobID::none();
 }
 
 StateManager & Context::state() { return *state_mgr_; }

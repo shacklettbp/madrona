@@ -170,7 +170,7 @@ Entity StateManager::makeEntity(Args && ...args)
 
     constexpr uint32_t num_args = sizeof...(Args);
 
-    assert(num_args == 0 || num_args == archetype.numComponents &&
+    assert((num_args == 0 || num_args == archetype.numComponents) &&
            "Trying to construct entity with wrong number of arguments");
 
 
