@@ -52,8 +52,8 @@ struct JobTracker {
 };
 
 namespace ICfg {
-    constexpr static int waitQueueSizePerThread = 4096;
-    constexpr static int runQueueSizePerThread = 1024;
+    constexpr static int waitQueueSizePerThread = 1024;
+    constexpr static int runQueueSizePerThread = 4096;
 
     constexpr static uint32_t waitQueueIndexMask =
         (uint32_t)waitQueueSizePerThread - 1;
@@ -1086,11 +1086,11 @@ bool JobManager::getNextJob(void *const queue_base,
     
     uint32_t post_read_tail = queue->tail.load(memory_order::acquire);
     
-    uint32_t wrapped_tail =
-        post_read_tail & ICfg::runQueueIndexMask;
-    
     if (checkGEWrapped(post_read_tail,
         job_idx + ICfg::runQueueSizePerThread)) [[unlikely]] {
+        uint32_t wrapped_tail =
+            post_read_tail & ICfg::runQueueIndexMask;
+    
         // Could improve this by printing the job that was read
         // Or by adding (optional?) detection to queueJob to find
         // the source of the issue.

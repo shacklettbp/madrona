@@ -109,12 +109,16 @@ JobID JobManager::queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
 {
     static constexpr uint32_t num_deps = sizeof...(DepTs);
     using ContainerT = JobContainer<Fn, num_deps>;
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
     static_assert(num_deps == 0 ||
         offsetof(ContainerT, dependencies) == sizeof(JobContainerBase),
         "Dependencies at incorrect offset in container type");
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
+#endif
 
     static constexpr uint64_t job_size = sizeof(ContainerT);
     static constexpr uint64_t job_alignment = alignof(ContainerT);
