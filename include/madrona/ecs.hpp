@@ -20,7 +20,9 @@ struct Loc {
     inline bool valid() const;
 };
 
-template <typename... Components> struct Archetype {};
+template <typename... ComponentTs> struct Archetype {
+    using Base = Archetype<ComponentTs...>;
+};
 
 inline bool operator==(Entity a, Entity b);
 inline bool operator!=(Entity a, Entity b);

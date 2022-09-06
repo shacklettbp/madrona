@@ -37,6 +37,8 @@ public:
     inline JobID ioRead(const char *path, Fn &&fn, bool is_child = true,
                         DepTs && ... dependencies);
 
+    inline JobID currentJobID() const;
+
     inline StateManager & state();
 
 protected:

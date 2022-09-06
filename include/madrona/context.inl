@@ -109,7 +109,7 @@ JobID Context::forAllImpl(Query<ComponentTs...> query, Fn &&fn,
         // For some reason clang warns that 'this' isn't used without the
         // explicit this->
         this->submitNImpl<ContextT>(std::move(wrapper), num_rows, proxy_id,
-                                    std::forward<Deps>(dependencies)...);
+                                    dependencies ...);
     });
 
     return proxy_id;
@@ -123,6 +123,11 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
                                         num_invocations, parent_id,
                                         JobPriority::Normal,
                                         std::forward<Deps>(dependencies)...);
+}
+
+JobID Context::currentJobID() const
+{
+    return cur_job_id_;
 }
 
 }

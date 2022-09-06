@@ -61,15 +61,18 @@ JobManager::EntryConfig<DataT, StartFn> JobManager::makeEntry(
     return {
         std::forward<DataT>(ctx_data),
         [](void *ctx, void *data, WorkerInit &&init) {
-            new (ctx) ContextT(data, std::forward<WorkerInit>(init));
+            new (ctx) ContextT((DataT *)data, std::forward<WorkerInit>(init));
         },
         sizeof(ContextT),
         std::alignment_of_v<ContextT>,
         std::forward<StartFn>(start_fn),
         [](Context &ctx_base, void *data) {
+            auto &ctx = static_cast<ContextT &>(ctx_base);
             auto fn_ptr = (StartFn *)data;
-            ContextT &ctx = static_cast<ContextT &>(ctx_base);
-            (*fn_ptr)(ctx);
+            ctx.submit([fn = std::move(*fn_ptr)](ContextT &ctx) {
+                fn(ctx);
+            }, false);
+
             fn_ptr->~StartFn();
         },
     };

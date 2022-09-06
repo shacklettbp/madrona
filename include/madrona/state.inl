@@ -26,10 +26,12 @@ ArchetypeID StateManager::registerArchetype()
 {
     TypeTracker::registerType<ArchetypeT>(&next_archetype_id_);
 
-    using Delegator = utils::PackDelegator<ArchetypeT>;
+    using Base = typename ArchetypeT::Base;
+
+    using Delegator = utils::PackDelegator<Base>;
 
     auto archetype_components = Delegator::call([]<typename... Args>() {
-        static_assert(std::is_same_v<ArchetypeT, Archetype<Args...>>);
+        static_assert(std::is_same_v<Base, Archetype<Args...>>);
         uint32_t column_idx = 0;
         auto registerColumnIndex =
                 [&column_idx]<typename ComponentT>() {

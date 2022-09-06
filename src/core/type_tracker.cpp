@@ -39,9 +39,9 @@ static std::string_view extractTypeName(const char *compiler_name)
 #ifdef _MSC_VER
         STATIC_UNIMPLEMENTED();
 #elif defined(__clang__)
-        "static madrona::Entity madrona::StateManager::trackType(madrona::Entity *) [T = "
+        "static uint32_t madrona::TypeTracker::trackType(uint32_t *) [T = "
 #elif defined(__GNUC__)
-        "static madrona::Entity madrona::StateManager::trackType(madrona::Entity*) [with T = "
+        "static uint32_t madrona::TypeTracker::trackType(uint32_t*) [with T = "
 #else
         STATIC_UNIMPLEMENTED();
 #endif
@@ -54,8 +54,10 @@ static std::string_view extractTypeName(const char *compiler_name)
     size_t end_pos =
 #ifdef _MSC_VER
         STATIC_UNIMPLEMENTED();
-#elif defined(__clang__) or defined(__GNUC__)
+#elif defined(__clang__)
         type_name.find_last_of(']')
+#elif defined(__GNUC__)
+        type_name.find_last_of(';')
 #else
         STATIC_UNIMPLEMENTED();
 #endif
