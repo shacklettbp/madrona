@@ -718,8 +718,6 @@ JobManager::JobManager(const Init &init)
         start.launched.store(true, memory_order::release);
     }, &start_wrapper, 1, false, JobPriority::Normal);
 
-    atomic_thread_fence(memory_order::release);
-
     for (int i = 0; i < init.numWorkers; i++) {
         auto cur_ctx_ptr = 
             (Context *)(ctx_base_ptr + i * init.numCtxBytes);
@@ -869,8 +867,6 @@ void JobManager::addToWaitQueue(int thread_idx,
     (void)prio;
 
     auto addJob = [&](WaitQueue *wait_queue) {
-        std::lock_guard lock(wait_queue->lock);
-
         Job *waiting_jobs = getWaitingJobs(wait_queue);
 
         uint32_t new_idx = ((wait_queue->tail++) & ICfg::waitQueueIndexMask);
@@ -883,22 +879,24 @@ void JobManager::addToWaitQueue(int thread_idx,
         };
     };
 
+    // First see if there is a queue we can grab with no contention
     for (int i = 0, n = threads_.size(); i < n; i++) {
         int queue_idx = (i + thread_idx) % n;
         WaitQueue *wait_queue = getWaitQueue(waiting_base_, queue_idx);
 
-        if (wait_queue->lock.isLockedOptimistic()) {
-            continue;
+        if (wait_queue->lock.lockNoSpin()) {
+            addJob(wait_queue);
+            wait_queue->lock.unlock();
+            return;
         }
-
-        addJob(wait_queue);
-
-        return;
     }
 
     // Failsafe, if couldn't find queue to wait on just spin on current
     // thread's queue
-    addJob(getWaitQueue(waiting_base_, thread_idx));
+    WaitQueue *default_queue = getWaitQueue(waiting_base_, thread_idx);
+    default_queue->lock.lock();
+    addJob(default_queue);
+    default_queue->lock.unlock();
 }
 
 #if 0
@@ -1076,7 +1074,7 @@ bool JobManager::getNextJob(void *const queue_base,
     }
     
     uint32_t wrapped_job_idx = job_idx & ICfg::runQueueIndexMask;
-    
+
     // There's no protection to prevent queueJob overwriting next_job
     // in between job_idx being assigned and the job actually being
     // read. If this happens it is a bug where way too many jobs are

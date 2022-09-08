@@ -87,39 +87,27 @@ class SpinLock {
 public:
     void lock()
     {
-        std::atomic_thread_fence(std::memory_order_acquire);
-        while (lock_.test_and_set(std::memory_order_relaxed)) {
+        while (lock_.test_and_set(std::memory_order_acquire)) {
             while (lock_.test(std::memory_order_relaxed)) {}
-
-            std::atomic_thread_fence(std::memory_order_acquire);
         }
     }
 
     bool lockNoSpin()
     {
-        return lock_.test_and_set(std::memory_order_acquire) == false;
+        bool prev_locked = lock_.test_and_set(std::memory_order_relaxed);
+
+        if (prev_locked) {
+            return false;
+        }
+
+        std::atomic_thread_fence(std::memory_order_acquire);
+
+        return true;
     }
 
     void unlock()
     {
-        lock_.clear(std::memory_order_relaxed);
-        std::atomic_thread_fence(std::memory_order_release);
-    }
-
-    bool isLockedOptimistic() const
-    {
-        bool locked = lock_.test(std::memory_order_relaxed);
-
-        if (locked) {
-            return lock_.test(std::memory_order_acquire);
-        } else {
-            return false;
-        }
-    }
-
-    bool isLocked() const
-    {
-        return lock_.test(std::memory_order_acquire);
+        lock_.clear(std::memory_order_release);
     }
 
 private:
