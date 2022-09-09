@@ -98,9 +98,14 @@ JobManager::JobManager(const EntryConfig<DataT, StartFn> &entry_cfg,
                  pin_workers)
 {}
 
-JobID JobManager::getProxyJobID(JobID parent_id)
+JobID JobManager::reserveProxyJobID(JobID parent_id)
 {
-    return getProxyJobID(parent_id.idx);
+    return reserveProxyJobID(parent_id.idx);
+}
+
+void JobManager::relinquishProxyJobID(JobID job_id)
+{
+    return relinquishProxyJobID(job_id.idx);
 }
 
 template <typename ContextT, typename Fn, typename... DepTs>

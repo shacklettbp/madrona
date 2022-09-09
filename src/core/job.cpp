@@ -422,10 +422,10 @@ static inline void freeJobTrackerSlot(JobTrackerInfo &tracker_info,
            memory_order::release, memory_order::relaxed));
 }
 
-static inline JobID getNewJobID(JobTrackerInfo &tracker_info,
-                                uint32_t parent_job_idx,
-                                uint32_t num_invocations,
-                                uint32_t num_outstanding)
+static JobID getNewJobID(JobTrackerInfo &tracker_info,
+                         uint32_t parent_job_idx,
+                         uint32_t num_invocations,
+                         uint32_t num_outstanding)
 {
     JobTracker *trackers = getTrackerArray(tracker_info);
 
@@ -443,11 +443,8 @@ static inline JobID getNewJobID(JobTrackerInfo &tracker_info,
     uint32_t prev_gen = tracker.gen.fetch_add(1, memory_order::acq_rel);
 
     tracker.parent.store(parent_job_idx, memory_order::relaxed);
-    tracker.numOutstanding.store(num_outstanding, memory_order::relaxed);
-    tracker.remainingInvocations.store(num_invocations, memory_order::relaxed);
-
-    atomic_thread_fence(memory_order::release);
-
+    tracker.numOutstanding.store(num_outstanding, memory_order::release);
+    tracker.remainingInvocations.store(num_invocations, memory_order::release);
     return JobID {
         .idx = tracker_slot,
         .gen = prev_gen + 1,
@@ -466,6 +463,7 @@ static inline void decrementJobTracker(JobTrackerInfo &tracker_info,
             tracker.numOutstanding.fetch_sub(1, memory_order::acq_rel);
 
         if (prev_outstanding == 1) {
+            // Parent read is synchronized with the numOutstanding modification
             uint32_t parent = tracker.parent.load(memory_order::relaxed);
             freeJobTrackerSlot(tracker_info, job_id);
             job_id = parent;
@@ -489,8 +487,6 @@ static inline bool isRunnable(JobTrackerInfo &tracker_info,
     auto dependencies = (const JobID *)(
         (char *)job_data + sizeof(JobContainerBase));
 
-    atomic_thread_fence(memory_order::acquire);
-
     for (int i = 0; i < num_deps; i++) {
         JobID dependency = dependencies[i];
         const JobTracker &tracker = trackers[dependency.idx];
@@ -503,6 +499,8 @@ static inline bool isRunnable(JobTrackerInfo &tracker_info,
             return false;
         }
     }
+
+    atomic_thread_fence(memory_order::acquire);
 
     return true;
 }
@@ -795,9 +793,15 @@ JobID JobManager::queueJob(int thread_idx, Job::EntryPtr job_func,
     return id;
 }
 
-JobID JobManager::getProxyJobID(uint32_t parent_job_idx)
+JobID JobManager::reserveProxyJobID(uint32_t parent_job_idx)
 {
-    return getNewJobID(getTrackerInfo(tracker_base_), parent_job_idx, 0, 0);
+    return getNewJobID(getTrackerInfo(tracker_base_), parent_job_idx, 0, 1);
+}
+
+void JobManager::relinquishProxyJobID(uint32_t job_idx)
+{
+    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+    decrementJobTracker(tracker_info, job_idx);
 }
 
 void JobManager::markJobFinished(int thread_idx, JobContainerBase *job,

@@ -91,7 +91,7 @@ JobID Context::forAllImpl(Query<ComponentTs...> query, Fn &&fn,
 
     JobID parent_id = is_child ? cur_job_id_ : JobID::none();
 
-    JobID proxy_id = job_mgr_->getProxyJobID(parent_id);
+    JobID proxy_id = job_mgr_->reserveProxyJobID(parent_id);
 
     state_mgr_->iterateArchetypes(query,
             [this, proxy_id, fn = std::forward<Fn>(fn), dependencies ...](
@@ -113,6 +113,11 @@ JobID Context::forAllImpl(Query<ComponentTs...> query, Fn &&fn,
         this->submitNImpl<ContextT>(std::move(wrapper), num_rows, proxy_id,
                                     dependencies ...);
     });
+
+    // Note that even though we "relinquish" the id here, it is still safe
+    // to return the ID, since the generation stored in the ID will simply
+    // be invalid if the entire forall job finishes, just like a normal job id.
+    job_mgr_->relinquishProxyJobID(proxy_id);
 
     return proxy_id;
 }

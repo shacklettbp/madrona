@@ -67,7 +67,8 @@ public:
 
     ~JobManager();
 
-    inline JobID getProxyJobID(JobID parent_id);
+    inline JobID reserveProxyJobID(JobID parent_id);
+    inline void relinquishProxyJobID(JobID job_id);
 
     template <typename ContextT, typename Fn, typename... DepTs>
     JobID queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
@@ -152,7 +153,8 @@ private:
                    uint32_t parent_job_idx,
                    JobPriority prio = JobPriority::Normal);
 
-    JobID getProxyJobID(uint32_t parent_job_idx);
+    JobID reserveProxyJobID(uint32_t parent_job_idx);
+    void relinquishProxyJobID(uint32_t job_idx);
 
     void markJobFinished(int thread_idx, JobContainerBase *job,
                          uint32_t job_size);
