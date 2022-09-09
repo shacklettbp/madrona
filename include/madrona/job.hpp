@@ -157,9 +157,8 @@ private:
     void markJobFinished(int thread_idx, JobContainerBase *job,
                          uint32_t job_size);
 
-    inline void addToRunQueue(int thread_idx, Job::EntryPtr job_func,
-        JobContainerBase *job_data, uint32_t invocation_offset,
-        uint32_t num_invocations, JobPriority prio);
+    template <typename Fn>
+    inline void addToRunQueue(int thread_idx, JobPriority prio, Fn &&add_cb);
 
     inline void addToWaitQueue(int thread_idx, Job::EntryPtr job_func,
         JobContainerBase *job_data, uint32_t num_invocations,

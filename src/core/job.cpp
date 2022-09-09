@@ -121,7 +121,7 @@ static inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
             memory_order::relaxed);
 
         // Update the tag
-        new_head += (1u << 16);
+        new_head += ((uint32_t)1u << (uint32_t)16);
     } while (!shared.freeHead.compare_exchange_weak(cur_head, new_head,
         memory_order::release, memory_order::acquire));
 
@@ -138,7 +138,7 @@ static inline void releaseArena(JobManager::Alloc::SharedState &shared,
     uint32_t new_head;
 
     do {
-        new_head = (cur_head & 0xFFFF0000) + (1u << 16) + arena_idx;
+        new_head = (cur_head & 0xFFFF0000) + ((uint32_t)1u << (uint32_t)16) + arena_idx;
         shared.arenas[arena_idx].metadata.store(cur_head, memory_order::relaxed);
     } while (!shared.freeHead.compare_exchange_weak(cur_head, new_head,
         memory_order::release, memory_order::relaxed));
@@ -160,11 +160,12 @@ void * JobManager::Alloc::alloc(SharedState &shared,
     // guaranteed to meet alignment).
     uint32_t new_offset = utils::roundUpPow2(arena_offset_, alignment);
 
-    // Out of space in this arena, mark this arena as freeable
-    // and get a new one
     if (new_offset + num_bytes <= arena_size_) {
         arena_offset_ = new_offset;
     } else {
+        // Out of space in this arena, mark this arena as freeable
+        // and get a new one
+
         // Marking the arena as freeable just involves adding the total memory
         // used in the arena to the arena's metadata value. Once all jobs in
         // the arena have been freed these values will cancel out and the
@@ -246,7 +247,7 @@ JobManager::Alloc::SharedState JobManager::Alloc::makeSharedState(
     // Build initial linear freelist
     for (int i = 0; i < (int)num_arenas; i++) {
         new (&arenas[i]) Arena {
-            (i < int(num_arenas - 1)) ? i + 1 : 0xFFFFFFFF,
+            (i < int(num_arenas - 1)) ? i + 1 : ICfg::jobQueueSentinel,
         };
     }
 
@@ -766,20 +767,26 @@ JobID JobManager::queueJob(int thread_idx, Job::EntryPtr job_func,
                            uint32_t num_invocations, uint32_t parent_job_idx,
                            JobPriority prio)
 {
-    // relaxed is ok here on the assumption that addToRunQueue and
-    // addToWaitQueue issue a release fence (addToWaitQueue does this with
-    // utils::SpinLock)
-    job_counts_.numOutstanding.fetch_add(1, memory_order::relaxed);
-
     JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
 
     JobID id = getNewJobID(tracker_info, parent_job_idx, num_invocations, 1);
 
     job_data->id = id;
 
+    job_counts_.numOutstanding.fetch_add(1, memory_order::relaxed);
+
     if (isRunnable(tracker_info, job_data)) {
-        addToRunQueue(thread_idx, job_func, job_data, 0,
-                      num_invocations, prio);
+        addToRunQueue(thread_idx, prio,
+            [=](Job *job_array, uint32_t cur_tail) {
+                job_array[cur_tail & ICfg::runQueueIndexMask] = Job {
+                    .func = job_func,
+                    .data = job_data,
+                    .invocationOffset = 0,
+                    .numInvocations = num_invocations,
+                };
+
+                return 1u;
+            });
     } else {
         addToWaitQueue(thread_idx, job_func, job_data, num_invocations,
                        prio);
@@ -813,12 +820,10 @@ void JobManager::markJobFinished(int thread_idx, JobContainerBase *job,
     }
 }
 
+template <typename Fn>
 void JobManager::addToRunQueue(int thread_idx,
-                               Job::EntryPtr job_func,
-                               JobContainerBase *job_data,
-                               uint32_t invocation_offset,
-                               uint32_t num_invocations,
-                               JobPriority prio)
+                               JobPriority prio,
+                               Fn &&add_cb)
 {
     JobQueue *queue;
     if (prio == JobPriority::High) {
@@ -829,32 +834,21 @@ void JobManager::addToRunQueue(int thread_idx,
         queue = getRunQueue(io_base_, thread_idx);
     }
 
-    atomic_uint32_t &tail_counter = queue->tail;
-
     // No one modifies queue_tail besides this thread
-    uint32_t cur_tail = tail_counter.load(memory_order::relaxed);
-    uint32_t wrapped_idx = (cur_tail & ICfg::runQueueIndexMask);
-
+    uint32_t cur_tail = queue->tail.load(memory_order::relaxed);
     Job *job_array = getJobArray(queue);
 
-    job_array[wrapped_idx] = Job {
-        .func = job_func,
-        .data = job_data,
-        .invocationOffset = invocation_offset,
-        .numInvocations = num_invocations,
-    };
-
-    cur_tail += 1;
-    tail_counter.store(cur_tail, memory_order::relaxed);
+    uint32_t num_added = add_cb(job_array, cur_tail);
 
     if (prio == JobPriority::High) {
-        job_counts_.numHigh.fetch_add(1, memory_order::relaxed);
+        job_counts_.numHigh.fetch_add(num_added, memory_order::relaxed);
     }
     if (prio == JobPriority::IO) {
-        io_sema_.release(1);
+        io_sema_.release(num_added);
     }
 
-    atomic_thread_fence(memory_order::release);
+    cur_tail += num_added;
+    queue->tail.store(cur_tail, memory_order::release);
 }
 
 void JobManager::addToWaitQueue(int thread_idx,
@@ -981,8 +975,12 @@ void JobManager::findReadyJobs(int thread_idx)
             
             Job job = waiting_jobs[wait_idx & ICfg::waitQueueIndexMask];
             if (isRunnable(tracker_info, job.data)) {
-                addToRunQueue(thread_idx, job.func, job.data, 0,
-                              job.numInvocations, JobPriority::Normal);
+                addToRunQueue(thread_idx, JobPriority::Normal,
+                    [&job](Job *job_array, uint32_t cur_tail) {
+                        job_array[cur_tail & ICfg::runQueueIndexMask] = job;
+
+                        return 1u;
+                    });
                 num_found++;
             } else {
                 uint32_t move_idx =
@@ -1144,14 +1142,33 @@ void JobManager::runJob(const int thread_idx,
                 uint32_t a_offset = invocation_offset;
                 uint32_t b_offset = a_offset + a_num_invocations;
 
-                job_counts_.numOutstanding.fetch_add(2, memory_order::release);
+                // Relying on synchronize-with provived by addToRunQueue
+                job_counts_.numOutstanding.fetch_add(2, memory_order::relaxed);
 
                 // FIXME, again priority issues here
-                addToRunQueue(thread_idx, fn, job_data, a_offset,
-                              a_num_invocations, JobPriority::Normal);
+                addToRunQueue(thread_idx, JobPriority::Normal,
+                    [=](Job *job_array, uint32_t cur_tail) {
+                        uint32_t first_idx =
+                            cur_tail & ICfg::runQueueIndexMask;
+                        uint32_t second_idx =
+                            (cur_tail + 1) & ICfg::runQueueIndexMask;
 
-                addToRunQueue(thread_idx, fn, job_data, b_offset,
-                              b_num_invocations, JobPriority::Normal);
+                        job_array[first_idx] = Job {
+                            .func = fn,
+                            .data = job_data,
+                            .invocationOffset = a_offset,
+                            .numInvocations = a_num_invocations,
+                        };
+
+                        job_array[second_idx] = Job {
+                            .func = fn,
+                            .data = job_data,
+                            .invocationOffset = b_offset,
+                            .numInvocations = b_num_invocations,
+                        };
+
+                        return 2u;
+                    });
 
                 num_invocations = 0;
             }
