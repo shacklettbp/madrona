@@ -183,6 +183,12 @@ auto ArchetypeRef<ArchetypeT>::end() const -> Iter
 }
 
 template <typename ArchetypeT>
+void ArchetypeRef<ArchetypeT>::clear()
+{
+    tbl_->clear();
+}
+
+template <typename ArchetypeT>
 template <typename ComponentT>
 uint32_t ArchetypeRef<ArchetypeT>::getComponentIndex() const
 {

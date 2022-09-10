@@ -74,6 +74,22 @@ void Table::removeRow(Entity e)
     }
 }
 
+void Table::clear()
+{
+    Entity *ids = (Entity *)columns_[0].data();
+
+    for (int idx = 0, n = num_rows_; idx < n; idx++) {
+        Entity e = ids[idx];
+        freeID(e.id);
+    }
+
+    num_rows_ = 0;
+
+    for (VirtualStore &col : columns_) {
+        col.shrink(num_rows_);
+    }
+}
+
 Entity Table::makeID(uint32_t idx)
 {
     if (free_id_head_ != ~0u) {

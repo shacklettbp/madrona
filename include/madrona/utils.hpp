@@ -49,7 +49,7 @@ constexpr inline bool isPower2(uint32_t v)
 
 constexpr inline uint32_t int32NextPow2(uint32_t v)
 {
-    return 1u << (32u - __builtin_clz(v - 1));
+    return v == 1 ? 1 : (1u << (32u - __builtin_clz(v - 1)));
 }
 
 constexpr inline uint32_t int32Log2(uint32_t v)

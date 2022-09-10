@@ -32,6 +32,8 @@ public:
 
     inline uint32_t numRows() const { return num_rows_; }
 
+    void clear();
+
     static constexpr uint32_t maxColumns = 128;
 
 private:

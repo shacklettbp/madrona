@@ -10,6 +10,7 @@ namespace madrona {
 class Context {
 public:
     Context(WorkerInit &&init);
+    Context(const Context &) = delete;
 
     AllocContext mem;
 
