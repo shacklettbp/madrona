@@ -53,7 +53,7 @@ struct JobTracker {
 
 namespace ICfg {
     constexpr static int waitQueueSizePerThread = 1024;
-    constexpr static int runQueueSizePerThread = 4096;
+    constexpr static int runQueueSizePerThread = 128;
 
     constexpr static uint32_t waitQueueIndexMask =
         (uint32_t)waitQueueSizePerThread - 1;
@@ -94,6 +94,11 @@ namespace ICfg {
     constexpr static uint32_t numJobAllocArenas = 1024;
 
     constexpr static uint32_t jobTrackerTerm = ~0u;
+}
+
+static inline bool checkGEWrapped(uint32_t a, uint32_t b)
+{
+    return a - b <= (1u << 31u);
 }
 
 static inline void workerYield()
@@ -714,8 +719,10 @@ JobManager::JobManager(const Init &init)
     queueJob(0, [](Context &ctx, JobContainerBase *ptr, uint32_t) {
         auto &start = *(StartWrapper *)ptr;
         start.func(ctx, start.data);
+        ctx.job_mgr_->jobFinished(ptr->id.idx);
+
         start.launched.store(true, memory_order::release);
-    }, &start_wrapper, 1, false, JobPriority::Normal);
+    }, &start_wrapper, 1, JobID::none().idx, JobPriority::Normal);
 
     for (int i = 0; i < init.numWorkers; i++) {
         auto cur_ctx_ptr = 
@@ -804,8 +811,17 @@ void JobManager::relinquishProxyJobID(uint32_t job_idx)
     decrementJobTracker(tracker_info, job_idx);
 }
 
-void JobManager::markJobFinished(int thread_idx, JobContainerBase *job,
-                                 uint32_t job_size)
+void JobManager::jobFinished(uint32_t job_idx)
+{
+    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+
+    job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
+
+    decrementJobTracker(tracker_info, job_idx);
+}
+
+void JobManager::markInvocationFinished(int thread_idx, JobContainerBase *job,
+                                        uint32_t job_size)
 {
     JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
     JobTracker *trackers = getTrackerArray(tracker_info);
@@ -817,8 +833,7 @@ void JobManager::markJobFinished(int thread_idx, JobContainerBase *job,
             1, memory_order::acq_rel);
 
     if (prev_remaining_invocations == 1) {
-        decrementJobTracker(tracker_info, job_idx);
-
+        jobFinished(job_idx);
         // Important note: jobs may be freed by different threads
         deallocJob(thread_idx, job, job_size);
     }
@@ -1003,11 +1018,6 @@ void JobManager::findReadyJobs(int thread_idx)
     }
 }
 
-static inline bool checkGEWrapped(uint32_t a, uint32_t b)
-{
-    return a - b <= (1u << 31u);
-}
-
 static inline uint32_t getNextJobIndex(JobQueue *job_queue)
 {
     atomic_uint32_t &head = job_queue->head;
@@ -1034,6 +1044,13 @@ static inline uint32_t getNextJobIndex(JobQueue *job_queue)
         return ICfg::jobQueueSentinel;
     }
 
+    // Note, there is some non intuitive behavior here, where the value of idx
+    // can seem to be past cur_tail above. This isn't a case where too many
+    // items have been dequeued, instead, the producer has added another item
+    // to the queue and another consumer thread has come in and dequeued
+    // the item this thread was planning on dequeuing, so this thread picks
+    // up the later item. If tail is re-read after the fetch add below,
+    // everything would appear consistent.
     return auth.fetch_add(1, memory_order::acq_rel);
 }
 
@@ -1075,7 +1092,7 @@ bool JobManager::getNextJob(void *const queue_base,
         return false;
     }
     
-    uint32_t wrapped_job_idx = job_idx & ICfg::runQueueIndexMask;
+    *next_job = getJobArray(queue)[job_idx & ICfg::runQueueIndexMask];
 
     // There's no protection to prevent queueJob overwriting next_job
     // in between job_idx being assigned and the job actually being
@@ -1086,22 +1103,16 @@ bool JobManager::getNextJob(void *const queue_base,
     
     uint32_t post_read_tail = queue->tail.load(memory_order::acquire);
     
-    if (checkGEWrapped(post_read_tail,
-        job_idx + ICfg::runQueueSizePerThread)) [[unlikely]] {
-        uint32_t wrapped_tail =
-            post_read_tail & ICfg::runQueueIndexMask;
-    
-        // Could improve this by printing the job that was read
-        // Or by adding (optional?) detection to queueJob to find
-        // the source of the issue.
+    if (post_read_tail - job_idx > ICfg::runQueueSizePerThread) [[unlikely]] {
+        // Note, this is not ideal because it doesn't detect the source
+        // of the issue. The tradeoff is that we skip needing to read
+        // the head information when queueing jobs, whereas this
+        // code already has to read the tail once before.
         FATAL("Job queue has overwritten readers. Detected by thread %d.\n"
-              "Job: %u, Wrapped Job: %u - Tail: %u, Wrapped Tail: %u\n",
-              thread_idx, job_idx, wrapped_job_idx,
-              post_read_tail, wrapped_tail);
+              "Job: %u, Tail: %u, Difference: %u, Queue: %p\n",
+              thread_idx, job_idx, post_read_tail, post_read_tail - job_idx,
+              queue);
     }
-
-    // getNextJobIndex does an acquire fence so safe to read this
-    *next_job = getJobArray(queue)[wrapped_job_idx];
 
     return true;
 }
@@ -1137,8 +1148,20 @@ void JobManager::runJob(const int thread_idx,
         // by # of iteration CPU cycles). There are probably some
         // heuristics here like if num_invocations >> num threads,
         // leave some iterations in this loop rather than fully splitting
-        if (checkQueueEmpty()) {
-            if (num_invocations > 0) {
+        if (num_invocations > 0 && checkQueueEmpty()) {
+            if (num_invocations == 1) {
+                addToRunQueue(thread_idx, JobPriority::Normal,
+                    [=](Job *job_array, uint32_t cur_tail) {
+                        job_array[cur_tail & ICfg::runQueueIndexMask] = Job {
+                            .func = fn,
+                            .data = job_data,
+                            .invocationOffset = invocation_offset,
+                            .numInvocations = 1,
+                        };
+
+                        return 1u;
+                    });
+            } else {
                 uint32_t b_num_invocations = num_invocations / 2;
                 uint32_t a_num_invocations =
                     num_invocations - b_num_invocations;
@@ -1146,14 +1169,12 @@ void JobManager::runJob(const int thread_idx,
                 uint32_t a_offset = invocation_offset;
                 uint32_t b_offset = a_offset + a_num_invocations;
 
-                // Relying on synchronize-with provived by addToRunQueue
-                job_counts_.numOutstanding.fetch_add(2, memory_order::relaxed);
-
                 // FIXME, again priority issues here
                 addToRunQueue(thread_idx, JobPriority::Normal,
                     [=](Job *job_array, uint32_t cur_tail) {
                         uint32_t first_idx =
                             cur_tail & ICfg::runQueueIndexMask;
+
                         uint32_t second_idx =
                             (cur_tail + 1) & ICfg::runQueueIndexMask;
 
@@ -1173,15 +1194,13 @@ void JobManager::runJob(const int thread_idx,
 
                         return 2u;
                     });
-
-                num_invocations = 0;
             }
+
+            num_invocations = 0;
         }
 
         fn(*ctx, job_data, cur_offset);
     }
-
-    job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
 }
 
 void JobManager::workerThread(const int thread_idx, Context *ctx)

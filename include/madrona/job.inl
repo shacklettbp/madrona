@@ -69,9 +69,10 @@ JobManager::EntryConfig<DataT, StartFn> JobManager::makeEntry(
         [](Context &ctx_base, void *data) {
             auto &ctx = static_cast<ContextT &>(ctx_base);
             auto fn_ptr = (StartFn *)data;
+
             ctx.submit([fn = std::move(*fn_ptr)](ContextT &ctx) {
                 fn(ctx);
-            }, false);
+            }, false, ctx.currentJobID());
 
             fn_ptr->~StartFn();
         },
@@ -145,7 +146,8 @@ JobID JobManager::queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
         container->fn(ctx, invocation_idx);
         container->~ContainerT();
 
-        ctx.job_mgr_->markJobFinished(ctx.worker_idx_, container, job_size);
+        ctx.job_mgr_->markInvocationFinished(ctx.worker_idx_, container,
+                                             job_size);
     };
 
     return queueJob(thread_idx, stateless_ptr, container, num_invocations,

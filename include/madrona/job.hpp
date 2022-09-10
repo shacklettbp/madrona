@@ -156,8 +156,10 @@ private:
     JobID reserveProxyJobID(uint32_t parent_job_idx);
     void relinquishProxyJobID(uint32_t job_idx);
 
-    void markJobFinished(int thread_idx, JobContainerBase *job,
-                         uint32_t job_size);
+    inline void jobFinished(uint32_t job_idx);
+
+    void markInvocationFinished(int thread_idx, JobContainerBase *job,
+                                uint32_t job_size);
 
     template <typename Fn>
     inline void addToRunQueue(int thread_idx, JobPriority prio, Fn &&add_cb);
