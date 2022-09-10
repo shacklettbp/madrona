@@ -9,6 +9,8 @@
 #include <unistd.h>
 #endif
 
+#include <atomic>
+
 using std::atomic_uint32_t;
 using std::atomic_bool;
 using std::atomic_thread_fence;
@@ -338,6 +340,36 @@ static void setThreadAffinity(int thread_idx)
     STATIC_UNIMPLEMENTED();
 #endif
 }
+
+// 2 phases: workers decrement numRemaining (initialized to # threads)
+// and then spin until it reaches 0. Next, all workers add 1 to numAcked,
+// and the main thread spins until numAcked == # threads, at which point it
+// knows all threads have finished initialization. Simply waiting for
+// numRemaining to be 0 is insufficient, because worker threads may still
+// be spinning, waiting to see that numRemaining is 0, when the ThreadPoolInit
+// struct is freed
+struct ThreadPoolInit {
+    std::atomic_int numRemaining;
+    std::atomic_int numAcked;
+
+    inline void workerWait()
+    {
+        numRemaining.fetch_sub(1, memory_order::release);
+
+        while (numRemaining.load(memory_order::acquire) != 0) {
+            workerYield();
+        }
+
+        numAcked.fetch_add(1, memory_order::release);
+    }
+
+    inline void mainWait(int num_threads)
+    {
+        while (numAcked.load(memory_order::acquire) != num_threads) {
+            workerYield();
+        }
+    }
+};
 
 static inline JobQueue * getRunQueue(
     void *queue_base, const int thread_idx)
@@ -724,19 +756,23 @@ JobManager::JobManager(const Init &init)
         start.launched.store(true, memory_order::release);
     }, &start_wrapper, 1, JobID::none().idx, JobPriority::Normal);
 
+    ThreadPoolInit pool_init { init.numWorkers, 0 };
+
     for (int i = 0; i < init.numWorkers; i++) {
         auto cur_ctx_ptr = 
             (Context *)(ctx_base_ptr + i * init.numCtxBytes);
 
-        threads_.emplace(i, [this, i, pin_workers = init.pinWorkers,
-                             cur_ctx_ptr]() {
+        threads_.emplace(i, [this](int thread_idx, Context *ctx,
+                bool pin_workers, ThreadPoolInit *pool_init) {
             disableThreadSignals();
             if (pin_workers) {
-                setThreadAffinity(i);
+                setThreadAffinity(thread_idx);
             }
 
-            workerThread(i, cur_ctx_ptr);
-        });
+            pool_init->workerWait();
+
+            workerThread(thread_idx, ctx);
+        }, i, cur_ctx_ptr, init.pinWorkers, &pool_init);
     }
 
     for (int i = 0; i < init.numIO; i++) {
@@ -744,11 +780,16 @@ JobManager::JobManager(const Init &init)
         auto cur_ctx_ptr = 
             (Context *)(ctx_base_ptr + thread_idx * init.numCtxBytes);
 
-        threads_.emplace(thread_idx, [this, thread_idx, cur_ctx_ptr]() {
-            disableThreadSignals();
-            ioThread(thread_idx, cur_ctx_ptr);
-        });
+        threads_.emplace(thread_idx, [this](int thread_idx, Context *ctx,
+                ThreadPoolInit *pool_init) {
+
+            pool_init->workerWait();
+
+            ioThread(thread_idx, ctx);
+        }, thread_idx, cur_ctx_ptr, &pool_init);
     }
+
+    pool_init.mainWait(init.numThreads);
 
     // Need to ensure start job has run at this point.
     // Otherwise, the start func closure (located on the stack)
