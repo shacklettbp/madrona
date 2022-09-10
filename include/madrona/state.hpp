@@ -68,7 +68,10 @@ private:
     using ColumnMap = StaticIntegerMap<128>;
     static constexpr uint32_t max_archetype_components_ = ColumnMap::numFree();
 
-    struct ArchetypeInfo {
+    struct ArchetypeStore {
+        struct Init;
+        inline ArchetypeStore(Init &&init);
+
         uint32_t componentOffset;
         uint32_t numComponents;
         Table tbl;
@@ -79,16 +82,16 @@ private:
     void iterateArchetypesImpl(Query<ComponentTs...> query, Fn &&fn,
                                std::integer_sequence<uint32_t, Indices...>);
 
-    void saveComponentInfo(uint32_t id, uint32_t alignment,
+    void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
-    void saveArchetypeInfo(uint32_t id, Span<ComponentID> components);
+    void registerArchetype(uint32_t id, Span<ComponentID> components);
 
     uint32_t makeQuery(const ComponentID *components, uint32_t num_components,
                        uint32_t *offset);
 
     DynArray<TypeInfo> component_infos_;
     DynArray<ComponentID> archetype_components_;
-    DynArray<Optional<ArchetypeInfo>> archetype_infos_;
+    DynArray<Optional<ArchetypeStore>> archetype_stores_;
     DynArray<uint32_t> query_data_;
 
     static uint32_t next_component_id_;

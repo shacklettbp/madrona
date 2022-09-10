@@ -13,7 +13,7 @@ ComponentID StateManager::registerComponent()
 
     uint32_t id = TypeTracker::typeID<ComponentT>();
 
-    saveComponentInfo(id, std::alignment_of_v<ComponentT>,
+    registerComponent(id, std::alignment_of_v<ComponentT>,
                       sizeof(ComponentT));
 
     return ComponentID {
@@ -53,7 +53,7 @@ ArchetypeID StateManager::registerArchetype()
     
     uint32_t id = TypeTracker::typeID<ArchetypeT>();
 
-    saveArchetypeInfo(id,
+    registerArchetype(id,
         Span(archetype_components.data(), archetype_components.size()));
 
     return ArchetypeID {
@@ -82,7 +82,7 @@ ResultRef<ComponentT> StateManager::get(Entity entity)
 {
     uint32_t archetype_idx = entity.archetype;
 
-    ArchetypeInfo &archetype = *archetype_infos_[archetype_idx];
+    ArchetypeStore &archetype = *archetype_stores_[archetype_idx];
 
     auto col_idx = archetype.columnLookup.lookup(componentID<ComponentT>().id);
 
@@ -103,7 +103,7 @@ template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT> StateManager::archetype()
 {
     auto archetype_id = archetypeID<ArchetypeT>();
-    return ArchetypeRef<ArchetypeT>(&archetype_infos_[archetype_id.id]->tbl);
+    return ArchetypeRef<ArchetypeT>(&archetype_stores_[archetype_id.id]->tbl);
 }
 
 template <typename... ComponentTs>
@@ -140,7 +140,7 @@ void StateManager::iterateArchetypesImpl(Query<ComponentTs...> query, Fn &&fn,
     for (int query_archetype_idx = 0; query_archetype_idx < num_archetypes;
          query_archetype_idx++) {
         int archetype_idx = query_data_[cur_offset++];
-        auto &archetype = *archetype_infos_[archetype_idx];
+        auto &archetype = *archetype_stores_[archetype_idx];
 
         int num_rows = archetype.tbl.numRows();
 
@@ -166,7 +166,7 @@ Entity StateManager::makeEntity(Args && ...args)
 {
     ArchetypeID archetype_id = archetypeID<ArchetypeT>();
 
-    ArchetypeInfo &archetype = *archetype_infos_[archetype_id.id];
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id.id];
 
     constexpr uint32_t num_args = sizeof...(Args);
 
@@ -202,7 +202,7 @@ Entity StateManager::makeEntity(Args && ...args)
 
 void StateManager::destroyEntity(Entity e)
 {
-    ArchetypeInfo &archetype = *archetype_infos_[e.archetype];
+    ArchetypeStore &archetype = *archetype_stores_[e.archetype];
     archetype.tbl.removeRow(e);
 }
 

@@ -12,11 +12,27 @@ namespace madrona {
 StateManager::StateManager()
     : component_infos_(0),
       archetype_components_(0),
-      archetype_infos_(0),
+      archetype_stores_(0),
       query_data_(0)
 {}
 
-void StateManager::saveComponentInfo(uint32_t id,
+struct StateManager::ArchetypeStore::Init {
+    uint32_t componentOffset;
+    uint32_t numComponents;
+    uint32_t id;
+    HeapArray<TypeInfo> types;
+    HeapArray<IntegerMapPair> lookupInputs;
+};
+
+StateManager::ArchetypeStore::ArchetypeStore(Init &&init)
+    : componentOffset(init.componentOffset),
+      numComponents(init.numComponents),
+      tbl(init.types.data(), init.types.size(), init.id),
+      columnLookup(init.lookupInputs.data(), init.lookupInputs.size())
+{
+}
+
+void StateManager::registerComponent(uint32_t id,
                                      uint32_t alignment,
                                      uint32_t num_bytes)
 {
@@ -34,7 +50,7 @@ void StateManager::saveComponentInfo(uint32_t id,
     };
 }
 
-void StateManager::saveArchetypeInfo(uint32_t id, Span<ComponentID> components)
+void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
 {
     uint32_t offset = archetype_components_.size();
 
@@ -54,23 +70,20 @@ void StateManager::saveArchetypeInfo(uint32_t id, Span<ComponentID> components)
         };
     }
 
-    Table archetype_tbl(type_infos.data(), type_infos.size(), id);
-
-    ColumnMap column_lookup(lookup_input.data(), lookup_input.size());
-
     // IDs are globally assigned, technically there is an edge case where
     // there are gaps in the IDs assigned to a specific StateManager
-    if (id >= archetype_infos_.size()) {
-        archetype_infos_.resize(id + 1, [](auto ptr) {
-            Optional<ArchetypeInfo>::noneAt(ptr);
+    if (id >= archetype_stores_.size()) {
+        archetype_stores_.resize(id + 1, [](auto ptr) {
+            Optional<ArchetypeStore>::noneAt(ptr);
         });
     }
 
-    archetype_infos_[id].emplace(ArchetypeInfo {
-        .componentOffset = offset,
-        .numComponents = components.size(),
-        .tbl = std::move(archetype_tbl),
-        .columnLookup = std::move(column_lookup),
+    archetype_stores_[id].emplace(ArchetypeStore::Init {
+        offset,
+        components.size(),
+        id,
+        std::move(type_infos),
+        std::move(lookup_input),
     });
 }
 
@@ -81,9 +94,9 @@ uint32_t StateManager::makeQuery(const ComponentID *components,
     DynArray<uint32_t, TmpAlloc> query_indices(0);
 
     uint32_t matching_archetypes = 0;
-    for (int archetype_idx = 0; archetype_idx < (int)archetype_infos_.size();
-         archetype_idx++) {
-        auto &archetype = *archetype_infos_[archetype_idx];
+    for (int archetype_idx = 0, num_archetypes = archetype_stores_.size();
+         archetype_idx < num_archetypes; archetype_idx++) {
+        auto &archetype = *archetype_stores_[archetype_idx];
 
         bool has_components = true;
         for (int component_idx = 0; component_idx < (int)num_components; 

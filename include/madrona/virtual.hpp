@@ -10,6 +10,8 @@ public:
                   uint64_t aligment, uint64_t init_chunks);
     ~VirtualRegion();
 
+    VirtualRegion(const VirtualRegion &) = delete;
+
     inline void *ptr() const { return base_; }
     void commit(uint64_t start_chunk, uint64_t num_chunks);
     void decommit(uint64_t start_chunk, uint64_t num_chunks);
