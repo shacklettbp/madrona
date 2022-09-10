@@ -186,7 +186,11 @@ template <typename ArchetypeT>
 template <typename ComponentT>
 uint32_t ArchetypeRef<ArchetypeT>::getComponentIndex() const
 {
-    return TypeTracker::typeID<ComponentLookup<ComponentT>>();
+    if constexpr (std::is_same_v<ComponentT, Entity>) {
+        return 0;
+    } else {
+        return TypeTracker::typeID<ComponentLookup<ComponentT>>();
+    }
 }
 
 }

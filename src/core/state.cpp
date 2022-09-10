@@ -14,7 +14,9 @@ StateManager::StateManager()
       archetype_components_(0),
       archetype_stores_(0),
       query_data_(0)
-{}
+{
+    registerComponent<Entity>();
+}
 
 struct StateManager::ArchetypeStore::Init {
     uint32_t componentOffset;
@@ -66,7 +68,7 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
 
         lookup_input[i] = IntegerMapPair {
             .key = component_id.id,
-            .value = (uint32_t)i,
+            .value = (uint32_t)i + 1,
         };
     }
 
@@ -102,6 +104,10 @@ uint32_t StateManager::makeQuery(const ComponentID *components,
         for (int component_idx = 0; component_idx < (int)num_components; 
              component_idx++) {
             ComponentID component = components[component_idx];
+            if (component.id == componentID<Entity>().id) {
+                continue;
+            }
+
             if (!archetype.columnLookup.exists(component.id)) {
                 has_components = false;
                 break;
@@ -119,7 +125,11 @@ uint32_t StateManager::makeQuery(const ComponentID *components,
         for (int component_idx = 0; component_idx < (int)num_components;
              component_idx++) {
             ComponentID component = components[component_idx];
-            query_indices.push_back(archetype.columnLookup[component.id]);
+            if (component.id == componentID<Entity>().id) {
+                query_indices.push_back(0);
+            } else {
+                query_indices.push_back(archetype.columnLookup[component.id]);
+            }
         }
     }
 

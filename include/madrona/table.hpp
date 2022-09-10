@@ -32,7 +32,7 @@ public:
 
     inline uint32_t numRows() const { return num_rows_; }
 
-    static constexpr uint32_t maxColumns = 64;
+    static constexpr uint32_t maxColumns = 128;
 
 private:
     struct GenIndex {
@@ -43,8 +43,8 @@ private:
 
     inline uint32_t idToIndex(Entity e) const;
 
-    Entity makeID(uint32_t idx);
-    void freeID(uint32_t id);
+    inline Entity makeID(uint32_t idx);
+    inline void freeID(uint32_t id);
 
     uint32_t table_id_;
     uint32_t num_rows_;
@@ -52,7 +52,6 @@ private:
 
     VirtualStore id_to_idx_;
     uint32_t num_ids_;
-    VirtualStore idx_to_id_;
     StackArray<VirtualStore, maxColumns> columns_;
 };
 

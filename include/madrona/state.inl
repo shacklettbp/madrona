@@ -32,7 +32,7 @@ ArchetypeID StateManager::registerArchetype()
 
     auto archetype_components = Delegator::call([]<typename... Args>() {
         static_assert(std::is_same_v<Base, Archetype<Args...>>);
-        uint32_t column_idx = 0;
+        uint32_t column_idx = 1;
         auto registerColumnIndex =
                 [&column_idx]<typename ComponentT>() {
             using LookupT = typename ArchetypeRef<ArchetypeT>::
@@ -130,6 +130,17 @@ void StateManager::iterateArchetypes(Query<ComponentTs...> query, Fn &&fn)
     iterateArchetypesImpl(query, std::forward<Fn>(fn), IndicesWrapper());
 }
 
+template <typename ComponentT>
+ComponentT * StateManager::getArchetypeComponent(ArchetypeStore &archetype,
+                                                 uint32_t col_idx)
+{
+    if constexpr (std::is_same_v<ComponentT, Entity>) {
+        return (Entity *)archetype.tbl.data(0);
+    } else {
+        return (ComponentT *)archetype.tbl.data(col_idx);
+    }
+}
+
 template <typename... ComponentTs, typename Fn, uint32_t... Indices>
 void StateManager::iterateArchetypesImpl(Query<ComponentTs...> query, Fn &&fn,
     std::integer_sequence<uint32_t, Indices...>)
@@ -144,8 +155,8 @@ void StateManager::iterateArchetypesImpl(Query<ComponentTs...> query, Fn &&fn,
 
         int num_rows = archetype.tbl.numRows();
 
-        fn(num_rows, (ComponentTs *)archetype.tbl.data(
-                query_data_[cur_offset + Indices]) ...);
+        fn(num_rows, getArchetypeComponent<ComponentTs>(archetype,
+            query_data_[cur_offset + Indices]) ...);
 
         cur_offset += sizeof...(ComponentTs);
     }

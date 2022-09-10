@@ -65,14 +65,14 @@ TEST(Table, Indexing)
     for (int i = 0; i < num_entities; i++) {
         auto idx = tbl.getLoc(entities[i]);
         EXPECT_TRUE(idx.valid());
-        auto addr = (uint32_t *)tbl.getValue(0, idx);
+        auto addr = (uint32_t *)tbl.getValue(1, idx);
 
         *addr = i;
     }
 
     for (int i = 0; i < num_entities; i++) {
         auto idx = tbl.getLoc(entities[i]);
-        auto addr = (uint32_t *)tbl.getValue(0, idx);
+        auto addr = (uint32_t *)tbl.getValue(1, idx);
         EXPECT_EQ(*addr, i);
     }
 
@@ -80,7 +80,7 @@ TEST(Table, Indexing)
         if (i % 5 == 0) {
             auto idx = tbl.getLoc(entities[i]);
             EXPECT_TRUE(idx.valid());
-            auto addr = (uint32_t *)tbl.getValue(0, idx);
+            auto addr = (uint32_t *)tbl.getValue(1, idx);
             EXPECT_EQ(*addr, i );
 
             tbl.removeRow(entities[i]);
@@ -89,7 +89,7 @@ TEST(Table, Indexing)
         } else {
             auto idx = tbl.getLoc(entities[i]);
             EXPECT_TRUE(idx.valid());
-            auto addr = (uint32_t *)tbl.getValue(0, idx);
+            auto addr = (uint32_t *)tbl.getValue(1, idx);
             EXPECT_EQ(*addr, i);
         }
     }
@@ -99,7 +99,7 @@ TEST(Table, Indexing)
 
         auto idx = tbl.getLoc(entities[i]);
         EXPECT_TRUE(idx.valid());
-        auto addr = (uint32_t *)tbl.getValue(0, idx);
+        auto addr = (uint32_t *)tbl.getValue(1, idx);
         EXPECT_EQ(*addr, i);
     }
 }
@@ -135,17 +135,17 @@ TEST(Table, MultiColumn)
 
         auto idx = tbl.getLoc(entities[i]);
 
-        auto first = (uint32_t *)tbl.getValue(0, idx);
+        auto first = (uint32_t *)tbl.getValue(1, idx);
 
         *first = i;
-        auto second = (V *)tbl.getValue(1, idx);
+        auto second = (V *)tbl.getValue(2, idx);
         EXPECT_TRUE((uint64_t)second % std::alignment_of_v<V> == 0);
 
         second->x = i * 2;
         second->y = i * 2 + 1;
         second->z = -i;
 
-        auto third = (unsigned char *)tbl.getValue(2, idx);
+        auto third = (unsigned char *)tbl.getValue(3, idx);
         
         *third = i % 256;
     }
@@ -165,9 +165,9 @@ TEST(Table, MultiColumn)
 
         auto idx = tbl.getLoc(entities[i]);
 
-        auto first = (uint32_t *)tbl.getValue(0, idx);
-        auto second = (V *)tbl.getValue(1, idx);
-        auto third = (unsigned char *)tbl.getValue(2, idx);
+        auto first = (uint32_t *)tbl.getValue(1, idx);
+        auto second = (V *)tbl.getValue(2, idx);
+        auto third = (unsigned char *)tbl.getValue(3, idx);
 
         EXPECT_EQ(*first, i);
         EXPECT_EQ(second->x, i * 2);
@@ -199,7 +199,7 @@ TEST(Table, DeleteMany)
 
         auto idx = tbl.getLoc(entities[i]);
 
-        auto ptr = (uint32_t *)tbl.getValue(0, idx);
+        auto ptr = (uint32_t *)tbl.getValue(1, idx);
         *ptr = i;
     }
 
@@ -208,16 +208,16 @@ TEST(Table, DeleteMany)
     }
 
     for (int i = 0; i < 2; i++) {
-        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getLoc(entities[i]));
+        auto ptr = (uint32_t *)tbl.getValue(1, tbl.getLoc(entities[i]));
         EXPECT_EQ(*ptr, i);
     }
 
     for (int i = 0; i < 2; i++) {
-        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getLoc(entities[i]));
+        auto ptr = (uint32_t *)tbl.getValue(1, tbl.getLoc(entities[i]));
         EXPECT_EQ(*ptr, i);
     }
     for (int i = num_entities - 2; i < num_entities; i++) {
-        auto ptr = (uint32_t *)tbl.getValue(0, tbl.getLoc(entities[i]));
+        auto ptr = (uint32_t *)tbl.getValue(1, tbl.getLoc(entities[i]));
         EXPECT_EQ(*ptr, i);
     }
 }

@@ -78,6 +78,11 @@ private:
         ColumnMap columnLookup;
     };
 
+
+    template <typename ComponentT>
+    inline ComponentT *getArchetypeComponent(ArchetypeStore &archetype,
+                                             uint32_t col_idx);
+
     template <typename... ComponentTs, typename Fn, uint32_t... Indices>
     void iterateArchetypesImpl(Query<ComponentTs...> query, Fn &&fn,
                                std::integer_sequence<uint32_t, Indices...>);

@@ -15,9 +15,11 @@ Table::Table(const TypeInfo *component_types, uint32_t num_components, uint32_t 
       free_id_head_(~0u),
       id_to_idx_(sizeof(GenIndex), alignof(GenIndex), 0, ICfg::maxRowsPerTable),
       num_ids_(0),
-      idx_to_id_(sizeof(Entity), alignof(Entity), 128, ICfg::maxRowsPerTable),
       columns_()
 {
+    columns_.emplace_back(sizeof(Entity), alignof(Entity), 128,
+                          ICfg::maxRowsPerTable);
+
     for (int i = 0; i < (int)num_components; i++) {
         const TypeInfo &type = component_types[i];
 
@@ -37,11 +39,9 @@ Entity Table::addRow()
         col.expand(num_rows_);
     }
 
-    idx_to_id_.expand(num_rows_);
-
     Entity e = makeID(idx);
 
-    *(Entity *)idx_to_id_[idx] = e;
+    *(Entity *)columns_[0][idx] = e;
 
     return e;
 }
@@ -57,10 +57,10 @@ void Table::removeRow(Entity e)
     uint32_t to_idx = delete_idx;
 
     if (from_idx != to_idx) {
-        Entity update_entity = *(Entity *)idx_to_id_[from_idx];
+        Entity update_entity = *(Entity *)columns_[0][from_idx];
 
         (*(GenIndex *)id_to_idx_[update_entity.id]).idx = to_idx;
-        *(Entity *)idx_to_id_[to_idx] = update_entity;
+        *(Entity *)columns_[0][to_idx] = update_entity;
 
         for (VirtualStore &col : columns_) {
             memcpy(col[to_idx], col[from_idx], col.numBytesPerItem());
@@ -72,8 +72,6 @@ void Table::removeRow(Entity e)
     for (VirtualStore &col : columns_) {
         col.shrink(num_rows_);
     }
-
-    idx_to_id_.shrink(num_rows_);
 }
 
 Entity Table::makeID(uint32_t idx)
