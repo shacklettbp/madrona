@@ -189,21 +189,21 @@ Entity StateManager::makeEntity(Args && ...args)
 
     auto tbl_loc = archetype.tbl.getLoc(new_row);
 
-    int column_idx = 0;
+    int component_idx = 0;
 
-    auto constructNextComponent = [this, &column_idx, &archetype, &tbl_loc](
+    auto constructNextComponent = [this, &component_idx, &archetype, &tbl_loc](
             auto &&arg) {
         using ArgT = decltype(arg);
         using ComponentT = std::remove_reference_t<ArgT>;
 
         assert(componentID<ComponentT>().id ==
                archetype_components_[archetype.componentOffset +
-                   column_idx].id);
+                   component_idx].id);
 
-        new (archetype.tbl.getValue(column_idx, tbl_loc)) 
+        new (archetype.tbl.getValue(component_idx + 1, tbl_loc))
             ComponentT(std::forward<ArgT>(arg));
 
-        column_idx++;
+        component_idx++;
     };
 
     ( constructNextComponent(std::forward<Args>(args)), ... );
