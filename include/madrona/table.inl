@@ -2,6 +2,10 @@ namespace madrona {
 
 uint32_t Table::idToIndex(Entity e) const
 {
+    if (e.id >= num_ids_) {
+        return ~0u;
+    }
+
     GenIndex idx = *(GenIndex *)id_to_idx_[e.id];
 
     if (idx.gen != e.gen) {

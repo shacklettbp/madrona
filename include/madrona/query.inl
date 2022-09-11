@@ -183,9 +183,15 @@ auto ArchetypeRef<ArchetypeT>::end() const -> Iter
 }
 
 template <typename ArchetypeT>
-void ArchetypeRef<ArchetypeT>::clear()
+void ArchetypeRef<ArchetypeT>::clearData()
 {
-    tbl_->clear();
+    tbl_->clearData();
+}
+
+template <typename ArchetypeT>
+void ArchetypeRef<ArchetypeT>::reset()
+{
+    tbl_->reset();
 }
 
 template <typename ArchetypeT>

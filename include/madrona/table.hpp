@@ -32,7 +32,13 @@ public:
 
     inline uint32_t numRows() const { return num_rows_; }
 
-    void clear();
+    // Clears all data out of the table but preserves ID mapping.
+    // This ensures that future ID lookups will still be consistent
+    void clearData();
+
+    // Clears data and drops all IDs. Note that this will make ID lookups
+    // inconsistent if deleted Entities are later queried from this table.
+    void reset();
 
     static constexpr uint32_t maxColumns = 128;
 

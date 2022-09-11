@@ -74,20 +74,41 @@ void Table::removeRow(Entity e)
     }
 }
 
-void Table::clear()
+void Table::clearData()
 {
     Entity *ids = (Entity *)columns_[0].data();
+    GenIndex *index_lookup = (GenIndex *)id_to_idx_.data();
 
+    // Batched freeID
+    uint32_t prev = free_id_head_;
     for (int idx = 0, n = num_rows_; idx < n; idx++) {
         Entity e = ids[idx];
-        freeID(e.id);
+        GenIndex &gen_idx = index_lookup[e.id];
+        gen_idx.gen++;
+        gen_idx.idx = prev;
+
+        prev = e.id;
     }
+    free_id_head_ = prev;
 
     num_rows_ = 0;
 
     for (VirtualStore &col : columns_) {
         col.shrink(num_rows_);
     }
+}
+
+void Table::reset()
+{
+    num_rows_ = 0;
+
+    for (VirtualStore &col : columns_) {
+        col.shrink(num_rows_);
+    }
+
+    free_id_head_ = ~0u;
+    num_ids_ = 0;
+    id_to_idx_.shrink(num_ids_);
 }
 
 Entity Table::makeID(uint32_t idx)

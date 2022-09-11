@@ -89,7 +89,8 @@ public:
     inline Iter begin() const;
     inline Iter end() const;
 
-    inline void clear();
+    inline void clearData();
+    inline void reset();
 
 private:
     template <typename ComponentT> struct ComponentLookup {};
