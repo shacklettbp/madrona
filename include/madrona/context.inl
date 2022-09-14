@@ -128,6 +128,9 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
 {
     return job_mgr_->queueJob<ContextT>(worker_idx_, std::forward<Fn>(fn),
                                         num_invocations, parent_id,
+#ifdef MADRONA_MW_MODE
+                                        cur_world_id_,
+#endif
                                         JobPriority::Normal,
                                         std::forward<Deps>(dependencies)...);
 }
@@ -136,5 +139,12 @@ JobID Context::currentJobID() const
 {
     return cur_job_id_;
 }
+
+#ifdef MADRONA_MW_MODE
+uint32_t Context::worldID() const
+{
+    return cur_world_id_;
+}
+#endif
 
 }

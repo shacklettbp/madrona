@@ -1,61 +1,36 @@
 set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona")
-add_library(madrona_core STATIC
+
+set(MADRONA_CORE_SRCS
     ${INC_DIR}/fwd.hpp
-    ${INC_DIR}/memory.hpp  ${INC_DIR}/memory.inl memory.cpp
-    ${INC_DIR}/heap_array.hpp ${INC_DIR}/span.hpp
-    ${INC_DIR}/utils.hpp
-    ${INC_DIR}/crash.hpp crash.cpp
     ${INC_DIR}/job.hpp ${INC_DIR}/job.inl job.cpp
-    ${INC_DIR}/ecs.hpp ${INC_DIR}/ecs.inl
-    ${INC_DIR}/type_tracker.hpp ${INC_DIR}/type_tracker.inl type_tracker.cpp
     ${INC_DIR}/state.hpp ${INC_DIR}/state.inl state.cpp
-    ${INC_DIR}/hashmap.hpp ${INC_DIR}/hashmap.inl hashmap.cpp
     ${INC_DIR}/context.hpp ${INC_DIR}/context.inl context.cpp
-    ${INC_DIR}/table.hpp ${INC_DIR}/table.inl table.cpp
-    ${INC_DIR}/virtual.hpp virtual.cpp
     #${INC_DIR}/hash.hpp
     #${INC_DIR}/platform_utils.hpp ${INC_DIR}/platform_utils.inl
     #    platform_utils.cpp
 )
 
-# Disable exceptions & RTTI
-set(FRONTEND_CLANG FALSE)
-set(FRONTEND_GCC FALSE)
-set(FRONTEND_MSVC FALSE)
-
-if (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    set(FRONTEND_CLANG TRUE)
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(FRONTEND_GCC TRUE)
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set(FRONTEND_MSVC TRUE)
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-        set(FRONTEND_MSVC TRUE)
-    else ()
-        set(FRONTEND_CLANG TRUE)
-    endif ()
-endif ()
-
-if (FRONTEND_GCC OR FRONTEND_CLANG)
-    target_compile_options(madrona_core PUBLIC
-        -fno-exceptions -fno-rtti)
-elseif (FRONTEND_MSVC)
-    # Disabling exceptions in MSVC seems painful
-    target_compile_options(madrona_core PUBLIC
-        /GR-)
-else ()
-    message(FATAL_ERROR "Unsupported compiler frontend")
-endif()
+add_library(madrona_core STATIC
+    ${MADRONA_CORE_SRCS}
+)
 
 target_link_libraries(madrona_core
     PUBLIC 
-        madrona_sys_defns
-    PRIVATE
+        madrona_common
 )
 
-target_include_directories(madrona_core
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../include/
+add_library(madrona_mw_core STATIC
+    ${MADRONA_CORE_SRCS}
+)
+
+target_compile_definitions(madrona_mw_core
+    PUBLIC
+        -DMADRONA_MW_MODE=1
+)
+
+target_link_libraries(madrona_mw_core
+    PUBLIC
+        madrona_common
 )
 
 #add_library(madrona_wm STATIC

@@ -8,11 +8,11 @@
 #include <madrona/gpu_train/const.hpp>
 
 extern "C" {
-__constant__ madrona::gpuTrain::GPUImplConsts madronaTrainGPUImplConsts;
+__constant__ madrona::mwGPU::GPUImplConsts madronaTrainGPUImplConsts;
 }
 
 namespace madrona {
-namespace gpuTrain {
+namespace mwGPU {
 
 namespace ICfg {
 
@@ -573,7 +573,7 @@ static inline void decrementJobTracker(uint32_t job_id)
 
 // This function should only be called by the wave leader
 static inline void queueMultiJobInWaitList(
-    Job::EntryPtr func, gpuTrain::JobBase *data, uint32_t grid_id,
+    Job::EntryPtr func, mwGPU::JobBase *data, uint32_t grid_id,
     uint32_t num_invocations, uint32_t num_bytes_per_job)
 {
     Job job {
@@ -611,7 +611,7 @@ static inline void queueMultiJobInWaitList(
 
 Context::WaveInfo Context::computeWaveInfo()
 {
-    using namespace gpuTrain;
+    using namespace mwGPU;
 
     uint32_t active = __activemask();
     uint32_t num_active = __popc(active);
@@ -629,7 +629,7 @@ Context::WaveInfo Context::computeWaveInfo()
 
 JobID Context::getNewJobID(bool link_parent)
 {
-    using namespace gpuTrain;
+    using namespace mwGPU;
 
     auto job_mgr = getJobManager();
     JobTracker *trackers = getJobTrackers(job_mgr);
@@ -648,10 +648,10 @@ JobID Context::getNewJobID(bool link_parent)
 
 // Allocates a shared block of memory for the active threads in wave,
 // where lower threads are given a pointer to an early chunk of the block
-gpuTrain::JobBase * Context::allocJob(uint32_t bytes_per_job,
+mwGPU::JobBase * Context::allocJob(uint32_t bytes_per_job,
                                       WaveInfo wave_info)
 {
-    using namespace gpuTrain;
+    using namespace mwGPU;
 
     void *base_store;
     if (lane_id_ == wave_info.leaderLane) {
@@ -666,13 +666,13 @@ gpuTrain::JobBase * Context::allocJob(uint32_t bytes_per_job,
         (char *)base_store + bytes_per_job * wave_info.coalescedIDX);
 }
 
-void Context::addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,
+void Context::addToWaitList(Job::EntryPtr func, mwGPU::JobBase *data,
                             uint32_t num_invocations,
                             uint32_t num_bytes_per_job,
                             uint32_t lane_id,
                             WaveInfo wave_info)
 {
-    using namespace gpuTrain;
+    using namespace mwGPU;
 
     uint32_t total_num_invocations =
         warpSum(wave_info.activeMask, lane_id, num_invocations);
@@ -685,7 +685,7 @@ void Context::addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,
 
 void Context::markJobFinished(uint32_t num_jobs)
 {
-    using namespace gpuTrain;
+    using namespace mwGPU;
 
     decrementJobTracker(job_id_);
 
@@ -719,14 +719,14 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     uint32_t num_worlds,
     uint32_t num_ctx_data_bytes,
     uint32_t ctx_data_alignment,
-    madrona::gpuTrain::GPUImplConsts *out_constants,
+    madrona::mwGPU::GPUImplConsts *out_constants,
     size_t *job_system_buffer_size)
 {
     using namespace madrona;
-    using namespace madrona::gpuTrain;
+    using namespace madrona::mwGPU;
 
     uint32_t max_num_jobs_per_grid =
-        madrona::gpuTrain::computeMaxNumJobs(num_worlds);
+        madrona::mwGPU::computeMaxNumJobs(num_worlds);
 
     uint32_t max_num_jobs = ICfg::numJobGrids * max_num_jobs_per_grid;
 
@@ -780,7 +780,7 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
 extern "C" __global__  void madronaTrainInitializeKernel()
 {
     using namespace madrona;
-    using namespace madrona::gpuTrain;
+    using namespace madrona::mwGPU;
 
     auto job_mgr = getJobManager();
 
@@ -798,5 +798,5 @@ extern "C" __global__  void madronaTrainInitializeKernel()
 
 extern "C" __global__ void madronaTrainJobSystemKernel()
 {
-    madrona::gpuTrain::jobLoop();
+    madrona::mwGPU::jobLoop();
 }

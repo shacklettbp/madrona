@@ -29,65 +29,75 @@ template <> struct JobContainerBase::DepsArray<0> {
 
 template <typename Fn, size_t N>
 template <typename... DepTs>
-JobContainer<Fn, N>::JobContainer(Fn &&func, DepTs ...deps)
+JobContainer<Fn, N>::JobContainer(
+#ifdef MADRONA_MW_MODE
+                                  uint32_t world_id,
+#endif
+                                   Fn &&func,
+                                   DepTs ...deps)
     : JobContainerBase {
           .id = JobID::none(), // Assigned in JobManager::queueJob
+#ifdef MADRONA_MW_MODE
+          .worldID = world_id,
+#endif
           .numDependencies = N,
       },
       dependencies(deps...),
       fn(std::forward<Fn>(func))
 {}
 
-template <typename DataT, typename StartFn>
+template <typename StartFn>
 struct JobManager::EntryConfig {
-    DataT ctxData;
+    const void *ctxUserdata;
+    uint32_t numUserdataBytes;
+    uint32_t userdataAlignment;
     void (*ctxInitCB)(void *, void *, WorkerInit &&);
     uint32_t numCtxBytes;
     uint32_t ctxAlignment;
     StartFn startData;
-    void (*startCB)(Context &, void *);
+    void (*startCB)(Context *, void *);
 };
 
 template <typename ContextT, typename DataT, typename StartFn>
-JobManager::EntryConfig<DataT, StartFn> JobManager::makeEntry(
-    DataT &&ctx_data, StartFn &&start_fn)
+JobManager::EntryConfig<StartFn> JobManager::makeEntry(
+    const DataT *ctx_userdata, StartFn &&start_fn)
 {
     static_assert(std::is_trivially_destructible_v<ContextT>,
                   "Context types with custom destructors are not supported");
 
     static_assert(std::is_trivially_copyable_v<DataT>,
-                  "Context data must be trivially copyable");
+                  "Context user data must be trivially copyable");
 
     return {
-        std::forward<DataT>(ctx_data),
+        ctx_userdata,
+        sizeof(DataT),
+        alignof(DataT),
         [](void *ctx, void *data, WorkerInit &&init) {
             new (ctx) ContextT((DataT *)data, std::forward<WorkerInit>(init));
         },
         sizeof(ContextT),
         std::alignment_of_v<ContextT>,
         std::forward<StartFn>(start_fn),
-        [](Context &ctx_base, void *data) {
-            auto &ctx = static_cast<ContextT &>(ctx_base);
+        [](Context *ctx_base, void *data) {
+            auto &ctx = *static_cast<ContextT *>(ctx_base);
             auto fn_ptr = (StartFn *)data;
 
-            ctx.submit([fn = std::move(*fn_ptr)](ContextT &ctx) {
+            ctx.submit([fn = StartFn(*fn_ptr)](ContextT &ctx) {
                 fn(ctx);
             }, false, ctx.currentJobID());
-
-            fn_ptr->~StartFn();
         },
     };
 }
 
-template <typename DataT, typename StartFn>
-JobManager::JobManager(const EntryConfig<DataT, StartFn> &entry_cfg,
+template <typename StartFn>
+JobManager::JobManager(const EntryConfig<StartFn> &entry_cfg,
                        int desired_num_workers,
                        int num_io,
                        StateManager *state_mgr,
                        bool pin_workers)
-    : JobManager((void *)&entry_cfg.ctxData,
-                 sizeof(DataT),
-                 alignof(DataT),
+    : JobManager(entry_cfg.ctxUserdata,
+                 entry_cfg.numUserdataBytes,
+                 entry_cfg.userdataAlignment,
                  entry_cfg.ctxInitCB,
                  entry_cfg.numCtxBytes,
                  entry_cfg.ctxAlignment,
@@ -110,8 +120,15 @@ void JobManager::relinquishProxyJobID(JobID job_id)
 }
 
 template <typename ContextT, typename Fn, typename... DepTs>
-JobID JobManager::queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
-                           JobID parent_id, JobPriority prio, DepTs ...deps)
+JobID JobManager::queueJob(int thread_idx,
+                           Fn &&fn,
+                           uint32_t num_invocations,
+                           JobID parent_id,
+#ifdef MADRONA_MW_MODE
+                           uint32_t world_id,
+#endif
+                           JobPriority prio,
+                           DepTs ...deps)
 {
     static constexpr uint32_t num_deps = sizeof...(DepTs);
     using ContainerT = JobContainer<Fn, num_deps>;
@@ -136,18 +153,26 @@ JobID JobManager::queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
 
     void *store = allocJob(thread_idx, job_size, job_alignment);
 
-    auto container = new (store) ContainerT(std::forward<Fn>(fn), deps...);
+    auto container = new (store) ContainerT(
+#ifdef MADRONA_MW_MODE
+        world_id,
+#endif
+        std::forward<Fn>(fn), deps...);
 
-    Job::EntryPtr stateless_ptr = [](Context &ctx_base, JobContainerBase *data,
+    Job::EntryPtr stateless_ptr = [](Context *ctx_base, JobContainerBase *data,
                                      uint32_t invocation_idx) {
-        ContextT &ctx = static_cast<ContextT &>(ctx_base);
+        ContextT &ctx = *static_cast<ContextT *>(ctx_base);
 
         auto container = static_cast<ContainerT *>(data);
         container->fn(ctx, invocation_idx);
-        container->~ContainerT();
 
-        ctx.job_mgr_->markInvocationFinished(ctx.worker_idx_, container,
-                                             job_size);
+        bool cleanup = ctx.job_mgr_->markInvocationFinished(container);
+
+        if (cleanup) {
+            container->~ContainerT();
+            // Important note: jobs may be freed by different threads
+            ctx.job_mgr_->deallocJob(ctx.worker_idx_, container, job_size);
+        }
     };
 
     return queueJob(thread_idx, stateless_ptr, container, num_invocations,

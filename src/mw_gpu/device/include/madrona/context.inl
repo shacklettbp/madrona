@@ -1,12 +1,12 @@
 #pragma once
 
-#include <madrona/gpu_train/const.hpp>
+#include <madrona/mw_gpu/const.hpp>
 
 namespace madrona {
-namespace gpuTrain {
+namespace mwGPU {
 
 template <typename ContextT, typename Fn, size_t N>
-__global__ void jobEntry(gpuTrain::JobBase *job_data,
+__global__ void jobEntry(mwGPU::JobBase *job_data,
                         uint32_t num_invocations,
                         uint32_t grid_id)
 {
@@ -19,7 +19,7 @@ __global__ void jobEntry(gpuTrain::JobBase *job_data,
         return;
     }
 
-    using JobContainer = gpuTrain::JobContainer<Fn, N>;
+    using JobContainer = mwGPU::JobContainer<Fn, N>;
     JobContainer &job_container =
         static_cast<JobContainer *>(job_data)[invocation_idx];
 
@@ -30,9 +30,9 @@ __global__ void jobEntry(gpuTrain::JobBase *job_data,
         .laneID = lane_id,
     };
 
-    char *ctx_data_base = (char *)gpuTrain::GPUImplConsts::get().ctxDataAddr;
+    char *ctx_data_base = (char *)mwGPU::GPUImplConsts::get().ctxDataAddr;
     void *ctx_data = ctx_data_base +
-        worker_init.worldID * gpuTrain::GPUImplConsts::get().numCtxDataBytes;
+        worker_init.worldID * mwGPU::GPUImplConsts::get().numCtxDataBytes;
 
     ContextT ctx(ctx_data, std::move(worker_init));
 
@@ -59,7 +59,7 @@ Context::Context(WorkerInit &&init)
 
 StateManager & Context::state()
 {
-    return *(StateManager *)gpuTrain::GPUImplConsts::get().stateManagerAddr;
+    return *(StateManager *)mwGPU::GPUImplConsts::get().stateManagerAddr;
 }
 
 template <typename Fn, typename... Deps>
@@ -92,9 +92,9 @@ JobID Context::submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
 {
     constexpr std::size_t num_deps = sizeof...(Deps);
 
-    auto func_ptr = gpuTrain::jobEntry<ContextT, Fn, num_deps>;
+    auto func_ptr = mwGPU::jobEntry<ContextT, Fn, num_deps>;
 
-    using FnJobContainer = gpuTrain::JobContainer<Fn, num_deps>;
+    using FnJobContainer = mwGPU::JobContainer<Fn, num_deps>;
 
     auto wave_info = computeWaveInfo();
 

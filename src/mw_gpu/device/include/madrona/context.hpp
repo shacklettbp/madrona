@@ -3,7 +3,7 @@
 #include <madrona/job.hpp>
 #include <madrona/state.hpp>
 
-#include <madrona/gpu_train/worker_init.hpp>
+#include <madrona/mw_gpu/worker_init.hpp>
 
 namespace madrona {
 
@@ -50,9 +50,9 @@ private:
 
     JobID getNewJobID(bool link_parent);
 
-    gpuTrain::JobBase * allocJob(uint32_t bytes_per_job, WaveInfo wave_info);
+    mwGPU::JobBase * allocJob(uint32_t bytes_per_job, WaveInfo wave_info);
 
-    void addToWaitList(Job::EntryPtr func, gpuTrain::JobBase *data,
+    void addToWaitList(Job::EntryPtr func, mwGPU::JobBase *data,
                        uint32_t num_invocations, uint32_t num_bytes_per_job,
                        uint32_t lane_id, WaveInfo wave_info);
 

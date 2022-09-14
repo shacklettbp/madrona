@@ -2,7 +2,7 @@
 
 namespace madrona {
 
-namespace gpuTrain {
+namespace mwGPU {
 
 namespace ICfg {
 

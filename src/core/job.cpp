@@ -55,7 +55,7 @@ struct JobTracker {
 
 namespace ICfg {
     constexpr static int waitQueueSizePerThread = 1024;
-    constexpr static int runQueueSizePerThread = 128;
+    constexpr static int runQueueSizePerThread = 4096;
 
     constexpr static uint32_t waitQueueIndexMask =
         (uint32_t)waitQueueSizePerThread - 1;
@@ -543,11 +543,11 @@ static inline bool isRunnable(JobTrackerInfo &tracker_info,
 }
 
 struct JobManager::Init {
-    void *ctxInitData;
-    uint32_t numCtxInitBytes;
+    const void *ctxUserdataSource;
+    uint32_t numCtxUserdataBytes;
     void (*ctxInitFn)(void *, void *, WorkerInit &&);
     uint32_t numCtxBytes;
-    void (*startFn)(Context &, void *);
+    void (*startFn)(Context *, void *);
     void *startData;
     int numWorkers;
     int numIO;
@@ -556,7 +556,7 @@ struct JobManager::Init {
     bool pinWorkers;
     void *perThreadData;
     void *ctxBase;
-    void *ctxInitPtr;
+    void *ctxUserdataBase;
     void *highBase;
     void *normalBase;
     void *ioBase;
@@ -565,20 +565,21 @@ struct JobManager::Init {
     int numTrackerSlots;
 };
 
-JobManager::JobManager(void *ctx_init_data,
-                       uint32_t num_ctx_init_bytes,
-                       uint32_t ctx_init_alignment,
+JobManager::JobManager(const void *ctx_userdata_src,
+                       uint32_t num_ctx_userdata_bytes,
+                       uint32_t ctx_userdata_alignment,
                        void (*ctx_init_fn)(void *, void *, WorkerInit &&),
                        uint32_t num_ctx_bytes,
                        uint32_t ctx_alignment,
-                       void (*start_fn)(Context &, void *),
+                       void (*start_fn)(Context *, void *),
                        void *start_data,
                        int desired_num_workers,
                        int num_io,
                        StateManager *state_mgr,
                        bool pin_workers)
-    : JobManager([ctx_init_data, num_ctx_init_bytes, ctx_init_alignment,
-                  ctx_init_fn, num_ctx_bytes, ctx_alignment,
+    : JobManager([ctx_userdata_src, num_ctx_userdata_bytes,
+                  ctx_userdata_alignment, ctx_init_fn,
+                  num_ctx_bytes, ctx_alignment,
                   start_fn, start_data, desired_num_workers,
                   num_io, state_mgr, pin_workers]() {
         int num_workers = getNumWorkers(desired_num_workers);
@@ -586,13 +587,23 @@ JobManager::JobManager(void *ctx_init_data,
 
         uint64_t num_per_thread_bytes = 0;
 
-        uint64_t ctx_offset = 0;
-        num_per_thread_bytes =
-            ctx_offset + (uint64_t)num_threads * (uint64_t)num_ctx_bytes;
+        uint64_t total_ctx_bytes =
+            (uint64_t)num_threads * (uint64_t)num_ctx_bytes;
+        uint64_t total_userdata_bytes = num_ctx_userdata_bytes;
+#ifdef MADRONA_MW_MODE
+        int num_worlds = state_mgr->numWorlds();
 
-        uint64_t ctx_init_offset =
-            utils::roundUp(num_per_thread_bytes, (uint64_t)ctx_init_alignment);
-        num_per_thread_bytes = ctx_init_offset + num_ctx_init_bytes;
+        total_ctx_bytes *= num_worlds;
+        total_userdata_bytes *= num_worlds;
+#endif
+
+        uint64_t ctx_offset = 0;
+        num_per_thread_bytes = ctx_offset + total_ctx_bytes;
+
+        uint64_t ctx_userdata_offset = utils::roundUp(num_per_thread_bytes,
+            (uint64_t)ctx_userdata_alignment);
+
+        num_per_thread_bytes = ctx_userdata_offset + total_userdata_bytes;
 
         uint64_t high_offset =
             utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
@@ -633,8 +644,8 @@ JobManager::JobManager(void *ctx_init_data,
                                                 (uintptr_t)ctx_alignment);
 
         return Init {
-            .ctxInitData = ctx_init_data,
-            .numCtxInitBytes = num_ctx_init_bytes,
+            .ctxUserdataSource = ctx_userdata_src,
+            .numCtxUserdataBytes = num_ctx_userdata_bytes,
             .ctxInitFn = ctx_init_fn,
             .numCtxBytes = num_ctx_bytes,
             .startFn = start_fn,
@@ -646,7 +657,7 @@ JobManager::JobManager(void *ctx_init_data,
             .pinWorkers = pin_workers,
             .perThreadData = per_thread_data,
             .ctxBase = base_ptr + ctx_offset,
-            .ctxInitPtr = base_ptr + ctx_init_offset,
+            .ctxUserdataBase = base_ptr + ctx_userdata_offset,
             .highBase = base_ptr + high_offset,
             .normalBase = base_ptr + normal_offset,
             .ioBase = base_ptr + io_offset,
@@ -674,19 +685,17 @@ JobManager::JobManager(const Init &init)
           .numOutstanding = 0,
       }
 {
-    char *ctx_base_ptr = (char *)init.ctxBase;
-
-    memcpy(init.ctxInitPtr, init.ctxInitData, init.numCtxInitBytes);
+    {
+        uint64_t num_userdata_copy_bytes = init.numCtxUserdataBytes;
+#ifdef MADRONA_MW_MODE
+        num_userdata_copy_bytes *= init.stateMgr->numWorlds();
+#endif
+        memcpy(init.ctxUserdataBase, init.ctxUserdataSource,
+               num_userdata_copy_bytes);
+    }
 
     for (int i = 0, n = init.numThreads; i < n; i++) {
         job_allocs_.emplace(i, alloc_state_);
-
-        void *cur_ctx_ptr = ctx_base_ptr + i * init.numCtxBytes;
-        init.ctxInitFn(cur_ctx_ptr, init.ctxInitPtr, WorkerInit {
-            .jobMgr = this,
-            .stateMgr = init.stateMgr,
-            .workerIdx = i,
-        });
     }
 
     auto initQueue = [](void *queue_start, int thread_idx) {
@@ -736,67 +745,122 @@ JobManager::JobManager(const Init &init)
         tracker.numOutstanding.store(0, memory_order::relaxed);
     }
 
-    struct StartWrapper : JobContainerBase {
-        void (*func)(Context &, void *);
+    struct StartWrapper {
+        void (*func)(Context *, void *);
         void *data;
-        atomic_bool launched;
+        atomic_uint32_t remainingLaunches;
     } start_wrapper {
-        JobContainerBase { JobID::none(), 0 },
         init.startFn,
         init.startData,
-        false,
+#ifdef MADRONA_MW_MODE
+        init.stateMgr->numWorlds(),
+#else
+        1,
+#endif
+    };
+
+    struct StartJob : JobContainerBase {
+        StartWrapper *wrapper;
+    };
+   
+    auto entry = [](Context *ctx, JobContainerBase *ptr, uint32_t) {
+        auto &job = *(StartJob *)ptr;
+        auto &start = *(job.wrapper);
+
+        start.func(ctx, start.data);
+        ctx->job_mgr_->jobFinished(job.id.idx);
+
+        start.remainingLaunches.fetch_sub(1, memory_order::release);
     };
 
     // Initial job
-    queueJob(0, [](Context &ctx, JobContainerBase *ptr, uint32_t) {
-        auto &start = *(StartWrapper *)ptr;
-        start.func(ctx, start.data);
-        ctx.job_mgr_->jobFinished(ptr->id.idx);
+    
+#ifdef MADRONA_MW_MODE
+    int num_worlds = init.stateMgr->numWorlds();
 
-        start.launched.store(true, memory_order::release);
-    }, &start_wrapper, 1, JobID::none().idx, JobPriority::Normal);
+    HeapArray<StartJob, TmpAlloc> start_jobs(num_worlds);
 
-    ThreadPoolInit pool_init { init.numWorkers, 0 };
+    for (int i = 0; i < num_worlds; i++) {
+        start_jobs[i] = StartJob {
+            JobContainerBase { JobID::none(), (uint32_t)i, 0 },
+            &start_wrapper,
+        };
+ 
+        queueJob(0, entry, &start_jobs[i], 1, JobID::none().idx,
+                 JobPriority::Normal);
+    }
+#else
+    StartJob start_job {
+        JobContainerBase { JobID::none(), 0 },
+        &start_wrapper,
+    };
 
-    for (int i = 0; i < init.numWorkers; i++) {
-        auto cur_ctx_ptr = 
-            (Context *)(ctx_base_ptr + i * init.numCtxBytes);
+    queueJob(0, entry, &start_job, 1, JobID::none().idx, JobPriority::Normal);
+#endif
 
-        threads_.emplace(i, [this](int thread_idx, Context *ctx,
-                bool pin_workers, ThreadPoolInit *pool_init) {
-            disableThreadSignals();
-            if (pin_workers) {
-                setThreadAffinity(thread_idx);
+    ThreadPoolInit pool_init { init.numThreads, 0 };
+
+    for (int thread_idx = 0; thread_idx < init.numThreads; thread_idx++) {
+#ifdef MADRONA_MW_MODE
+        void *ctx_store = (char *)init.ctxBase + (uint64_t)thread_idx *
+            (uint64_t)init.numCtxBytes * (uint64_t)num_worlds;
+
+        for (int world_idx = 0; world_idx < num_worlds; world_idx++) {
+            void *cur_ctx =
+                (char *)ctx_store + world_idx * (uint64_t)init.numCtxBytes;
+
+            void *cur_userdata = (char *)init.ctxUserdataBase +
+                world_idx * (uint64_t)init.numCtxUserdataBytes;
+
+            init.ctxInitFn(cur_ctx, cur_userdata, WorkerInit {
+                .jobMgr = this,
+                .stateMgr = init.stateMgr,
+                .workerIdx = thread_idx,
+            });
+        }
+#else
+        void *ctx_store = (char *)init.ctxBase + thread_idx * init.numCtxBytes;
+        init.ctxInitFn(ctx_store, init.ctxUserdataBase, WorkerInit {
+            .jobMgr = this,
+            .stateMgr = init.stateMgr,
+            .workerIdx = thread_idx,
+        });
+#endif
+        threads_.emplace(thread_idx, [this](
+                int thread_idx,
+                void *context_base,
+                uint32_t num_context_bytes,
+                int num_workers,
+                bool pin_workers,
+                ThreadPoolInit *pool_init) {
+            bool is_worker = thread_idx < num_workers;
+
+            if (is_worker) {
+                disableThreadSignals();
+                if (pin_workers) {
+                    setThreadAffinity(thread_idx);
+                }
             }
 
             pool_init->workerWait();
 
-            workerThread(thread_idx, ctx);
-        }, i, cur_ctx_ptr, init.pinWorkers, &pool_init);
-    }
-
-    for (int i = 0; i < init.numIO; i++) {
-        int thread_idx = init.numWorkers + i;
-        auto cur_ctx_ptr = 
-            (Context *)(ctx_base_ptr + thread_idx * init.numCtxBytes);
-
-        threads_.emplace(thread_idx, [this](int thread_idx, Context *ctx,
-                ThreadPoolInit *pool_init) {
-
-            pool_init->workerWait();
-
-            ioThread(thread_idx, ctx);
-        }, thread_idx, cur_ctx_ptr, &pool_init);
+            if (is_worker) {
+                workerThread(thread_idx, context_base,
+                             num_context_bytes);
+            } else {
+                ioThread(thread_idx, context_base,
+                         num_context_bytes);
+            }
+        }, thread_idx, ctx_store, init.numCtxBytes, init.numWorkers,
+            init.pinWorkers, &pool_init);
     }
 
     pool_init.mainWait(init.numThreads);
 
     // Need to ensure start job has run at this point.
-    // Otherwise, the start func closure (located on the stack)
-    // can go out of scope before the job actually runs. This is
-    // a bit of a hack to avoid needing to place the entire
-    // constructor in job.inl
-    while (!start_wrapper.launched.load(memory_order::acquire)) {
+    // Otherwise, the start function data can be freed / go out of scope
+    // before the job actually runs.
+    while (start_wrapper.remainingLaunches.load(memory_order::acquire) != 0) {
         workerYield();
     }
 }
@@ -808,9 +872,11 @@ JobManager::~JobManager()
     InitAlloc().dealloc(per_thread_data_);
 }
 
-JobID JobManager::queueJob(int thread_idx, Job::EntryPtr job_func,
+JobID JobManager::queueJob(int thread_idx,
+                           Job::EntryPtr job_func,
                            JobContainerBase *job_data,
-                           uint32_t num_invocations, uint32_t parent_job_idx,
+                           uint32_t num_invocations,
+                           uint32_t parent_job_idx,
                            JobPriority prio)
 {
     JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
@@ -861,8 +927,7 @@ void JobManager::jobFinished(uint32_t job_idx)
     decrementJobTracker(tracker_info, job_idx);
 }
 
-void JobManager::markInvocationFinished(int thread_idx, JobContainerBase *job,
-                                        uint32_t job_size)
+bool JobManager::markInvocationFinished(JobContainerBase *job)
 {
     JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
     JobTracker *trackers = getTrackerArray(tracker_info);
@@ -873,11 +938,13 @@ void JobManager::markInvocationFinished(int thread_idx, JobContainerBase *job,
         trackers[job_idx].remainingInvocations.fetch_sub(
             1, memory_order::acq_rel);
 
-    if (prev_remaining_invocations == 1) {
+    bool finished = prev_remaining_invocations == 1;
+
+    if (finished) {
         jobFinished(job_idx);
-        // Important note: jobs may be freed by different threads
-        deallocJob(thread_idx, job, job_size);
     }
+
+    return finished;
 }
 
 template <typename Fn>
@@ -1240,12 +1307,20 @@ void JobManager::runJob(const int thread_idx,
             num_invocations = 0;
         }
 
-        fn(*ctx, job_data, cur_offset);
+        fn(ctx, job_data, cur_offset);
     }
 }
 
-void JobManager::workerThread(const int thread_idx, Context *ctx)
+void JobManager::workerThread(
+    const int thread_idx, 
+    void *context_base,
+    uint32_t num_context_bytes)
 {
+#ifndef MADRONA_MW_MODE
+    (void)num_context_bytes;
+    Context *ctx = (Context *)context_base;
+#endif
+
     Job cur_job;
 
     while (true) {
@@ -1273,13 +1348,26 @@ void JobManager::workerThread(const int thread_idx, Context *ctx)
             }
         }
 
+#ifdef MADRONA_MW_MODE
+        Context *ctx = (Context *)((char *)context_base + 
+            (uint64_t)cur_job.data->worldID * (uint64_t)num_context_bytes);
+#endif
+
         runJob(thread_idx, ctx, cur_job.func, cur_job.data,
                cur_job.invocationOffset, cur_job.numInvocations);
     }
 }
 
-void JobManager::ioThread(const int thread_idx, Context *ctx)
+void JobManager::ioThread(
+    const int thread_idx, 
+    void *context_base,
+    uint32_t num_context_bytes)
 {
+#ifndef MADRONA_MW_MODE
+    (void)num_context_bytes;
+    Context *ctx = (Context *)context_base;
+#endif
+
     Job cur_job;
 
     while (true) {
@@ -1293,6 +1381,11 @@ void JobManager::ioThread(const int thread_idx, Context *ctx)
                 break;
             }
         }
+
+#ifdef MADRONA_MW_MODE
+        Context *ctx = (Context *)((char *)context_base + 
+            (uint64_t)cur_job.data->worldID * (uint64_t)num_context_bytes);
+#endif
 
         runJob(thread_idx, ctx, cur_job.func, cur_job.data,
                cur_job.invocationOffset, cur_job.numInvocations);

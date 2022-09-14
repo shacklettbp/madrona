@@ -4,17 +4,17 @@
 
 #include <string>
 
-#include <madrona/train.hpp>
+#include <madrona/mw_gpu.hpp>
 
 #include "cuda_utils.hpp"
 #include "cpp_compile.hpp"
 
-// Wrap this header in the gpuTrain namespace. This is a weird situation where
+// Wrap this header in the mwGPU namespace. This is a weird situation where
 // the CPU job system headers are available but we need access to the GPU
 // header in order to do initial setup.
-namespace gpuTrain {
+namespace mwGPU {
 using namespace madrona;
-#include "gpu/madrona/gpu_train/const.hpp"
+#include "device/include/madrona/mw_gpu/const.hpp"
 }
 
 namespace madrona {
@@ -24,7 +24,7 @@ static constexpr uint32_t numJobSystemKernelThreads = 1024;
 static constexpr uint32_t numEntryQueueThreads = 512;
 }
 
-using GPUImplConsts = gpuTrain::madrona::gpuTrain::GPUImplConsts;
+using GPUImplConsts = mwGPU::madrona::mwGPU::GPUImplConsts;
 
 struct GPUKernels {
     CUmodule mod;
@@ -54,7 +54,7 @@ static void getUserEntries(const char *entry_class, CUmodule mod,
     static const char mangle_code_postfix[] = R"__(
 #include <cstdint>
 
-namespace madrona { namespace gpuTrain {
+namespace madrona { namespace mwGPU {
 
 template <typename T> __global__ void submitInit(uint32_t) {}
 template <typename T> __global__ void submitRun(uint32_t) {}
@@ -63,9 +63,9 @@ template <typename T> __global__ void submitRun(uint32_t) {}
 )__";
 
     static const char init_template[] =
-        "::madrona::gpuTrain::submitInit<::";
+        "::madrona::mwGPU::submitInit<::";
     static const char run_template[] =
-        "::madrona::gpuTrain::submitRun<::";
+        "::madrona::mwGPU::submitRun<::";
 
     std::string_view entry_view(entry_class);
 
@@ -214,7 +214,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     using namespace std;
 
     array internal_cpp_files {
-        MADRONA_TRAIN_INTERNAL_CPP
+        MADRONA_MW_GPU_INTERNAL_CPP
     };
 
     HeapArray<const char *> all_cpp_files(internal_cpp_files.size() +

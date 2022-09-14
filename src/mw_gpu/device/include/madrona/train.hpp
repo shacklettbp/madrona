@@ -2,12 +2,12 @@
 
 #include <cstdint>
 
-#include <madrona/gpu_train/entry.hpp>
+#include <madrona/mw_gpu/entry.hpp>
 
 namespace madrona {
 
 template <typename ContextT, typename BaseT>
-class TrainingEntry : gpuTrain::EntryBase<BaseT> {
+class TrainingEntry : mwGPU::EntryBase<BaseT> {
 public:
     static void submitInit(uint32_t invocation_idx);
     static void submitRun(uint32_t invocation_idx);

@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace madrona {
-namespace gpuTrain {
+namespace mwGPU {
 
 template <typename T>
 __global__ void submitInit(uint32_t num_worlds)

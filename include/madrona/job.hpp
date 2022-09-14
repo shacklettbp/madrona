@@ -27,6 +27,9 @@ struct JobID {
 
 struct JobContainerBase {
     JobID id;
+#ifdef MADRONA_MW_MODE
+    uint32_t worldID;
+#endif
     uint32_t numDependencies;
 
     template <size_t N> struct DepsArray;
@@ -37,12 +40,17 @@ struct JobContainer : public JobContainerBase {
     [[no_unique_address]] DepsArray<N> dependencies;
     [[no_unique_address]] Fn fn;
 
+#ifdef MADRONA_MW_MODE
+    template <typename... DepTs>
+    inline JobContainer(uint32_t world_id, Fn &&fn, DepTs ...deps);
+#else
     template <typename... DepTs>
     inline JobContainer(Fn &&fn, DepTs ...deps);
+#endif
 };
 
 struct Job {
-    using EntryPtr = void (*)(Context &, JobContainerBase *, uint32_t);
+    using EntryPtr = void (*)(Context *, JobContainerBase *, uint32_t);
 
     EntryPtr func;
     JobContainerBase *data;
@@ -52,14 +60,14 @@ struct Job {
 
 class JobManager {
 public:
-    template <typename StartFn, typename DataT> struct EntryConfig;
+    template <typename StartFn> struct EntryConfig;
 
     template <typename ContextT, typename DataT, typename StartFn>
-    static EntryConfig<DataT, StartFn> makeEntry(
-        DataT &&ctx_data, StartFn &&start_fn);
+    static EntryConfig<StartFn> makeEntry(
+        const DataT *ctx_userdata, StartFn &&start_fn);
 
-    template <typename DataT, typename StartFn>
-    JobManager(const EntryConfig<DataT, StartFn> &entry_cfg,
+    template <typename StartFn>
+    JobManager(const EntryConfig<StartFn> &entry_cfg,
                int desired_num_workers,
                int num_io,
                StateManager *state_mgr,
@@ -71,8 +79,13 @@ public:
     inline void relinquishProxyJobID(JobID job_id);
 
     template <typename ContextT, typename Fn, typename... DepTs>
-    JobID queueJob(int thread_idx, Fn &&fn, uint32_t num_invocations,
+    JobID queueJob(int thread_idx,
+                   Fn &&fn,
+                   uint32_t num_invocations,
                    JobID parent_id,
+#ifdef MADRONA_MW_MODE
+                   uint32_t world_id,
+#endif
                    JobPriority prio = JobPriority::Normal,
                    DepTs ...deps);
 
@@ -128,13 +141,13 @@ private:
         std::atomic_uint32_t numOutstanding;
     };
 
-    JobManager(void *ctx_init_data,
-               uint32_t num_ctx_init_bytes,
-               uint32_t ctx_init_alignment,
+    JobManager(const void *ctx_userdata_src,
+               uint32_t num_ctx_userdata_bytes,
+               uint32_t ctx_userdata_alignment,
                void (*ctx_init_fn)(void *, void *, WorkerInit &&),
                uint32_t num_ctx_bytes,
                uint32_t ctx_alignment,
-               void (*start_fn)(Context &, void *),
+               void (*start_fn)(Context *, void *),
                void *start_data,
                int desired_num_workers,
                int num_io,
@@ -158,8 +171,7 @@ private:
 
     inline void jobFinished(uint32_t job_idx);
 
-    void markInvocationFinished(int thread_idx, JobContainerBase *job,
-                                uint32_t job_size);
+    bool markInvocationFinished(JobContainerBase *job);
 
     template <typename Fn>
     inline void addToRunQueue(int thread_idx, JobPriority prio, Fn &&add_cb);
@@ -173,12 +185,17 @@ private:
     inline bool getNextJob(void *queue_base, int thread_idx,
                            bool check_waiting, Job *job);
 
-    inline void runJob(const int thread_idx, Context *ctx,
+    inline void runJob(const int thread_idx, Context *ctx_ptr,
                        Job::EntryPtr fn, JobContainerBase *job_data,
                        uint32_t invocation_offset, uint32_t num_invocations);
 
-    void workerThread(const int thread_idx, Context *ctx);
-    void ioThread(const int thread_idx, Context *ctx);
+    void workerThread(const int thread_idx,
+                      void *context_base,
+                      uint32_t num_context_bytes);
+
+    void ioThread(const int thread_idx,
+                  void *context_base,
+                  uint32_t num_context_bytes);
 
     HeapArray<std::thread, InitAlloc> threads_;
 

@@ -11,9 +11,9 @@ struct JobID {
     uint32_t id;
 };
 
-// New types not used by the CPU implementation are hidden in the gpuTrain
+// New types not used by the CPU implementation are hidden in the mwGPU
 // namespace.
-namespace gpuTrain {
+namespace mwGPU {
 struct JobBase {
     inline JobBase(uint32_t world_id, uint32_t job_id, uint32_t num_deps);
 
@@ -43,10 +43,10 @@ struct JobContainer : public JobDependenciesBase<N> {
 }
 
 struct Job {
-    using EntryPtr = void (*)(gpuTrain::JobBase *,
+    using EntryPtr = void (*)(mwGPU::JobBase *,
                               uint32_t num_launches, uint32_t grid_id);
     EntryPtr fn;
-    gpuTrain::JobBase *data;
+    mwGPU::JobBase *data;
     uint32_t numInvocations;
     uint32_t numBytesPerJob;
 };

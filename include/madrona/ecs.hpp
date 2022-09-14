@@ -1,7 +1,5 @@
 #pragma once
 
-#include <madrona/fwd.hpp>
-
 #include <cstdint>
 
 namespace madrona {
@@ -18,6 +16,11 @@ struct Loc {
     uint32_t idx;
 
     inline bool valid() const;
+};
+
+struct IndexHelper {
+    uint32_t prev;
+    uint32_t next;
 };
 
 template <typename... ComponentTs> struct Archetype {

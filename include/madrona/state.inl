@@ -9,6 +9,19 @@ namespace madrona {
 template <typename ComponentT>
 ComponentID StateManager::registerComponent()
 {
+#ifdef MADRONA_MW_MODE
+    std::lock_guard lock(register_lock_);
+
+    uint32_t check_id = TypeTracker::typeID<ComponentT>();
+
+    if (check_id < component_infos_.size() &&
+        component_infos_[check_id].has_value()) {
+        return ComponentID {
+            check_id,
+        };
+    }
+#endif
+
     TypeTracker::registerType<ComponentT>(&next_component_id_);
 
     uint32_t id = TypeTracker::typeID<ComponentT>();
@@ -24,6 +37,19 @@ ComponentID StateManager::registerComponent()
 template <typename ArchetypeT>
 ArchetypeID StateManager::registerArchetype()
 {
+#ifdef MADRONA_MW_MODE
+    std::lock_guard lock(register_lock_);
+
+    uint32_t check_id = TypeTracker::typeID<ArchetypeT>();
+
+    if (check_id < component_infos_.size() &&
+        archetype_stores_[check_id].has_value()) {
+        return ArchetypeID {
+            check_id,
+        };
+    }
+#endif
+
     TypeTracker::registerType<ArchetypeT>(&next_archetype_id_);
 
     using Base = typename ArchetypeT::Base;
@@ -32,7 +58,8 @@ ArchetypeID StateManager::registerArchetype()
 
     auto archetype_components = Delegator::call([]<typename... Args>() {
         static_assert(std::is_same_v<Base, Archetype<Args...>>);
-        uint32_t column_idx = 1;
+        uint32_t column_idx = user_component_offset_;
+
         auto registerColumnIndex =
                 [&column_idx]<typename ComponentT>() {
             using LookupT = typename ArchetypeRef<ArchetypeT>::
@@ -200,7 +227,8 @@ Entity StateManager::makeEntity(Args && ...args)
                archetype_components_[archetype.componentOffset +
                    component_idx].id);
 
-        new (archetype.tbl.getValue(component_idx + 1, tbl_loc))
+        new (archetype.tbl.getValue(
+                component_idx + user_component_offset_, tbl_loc))
             ComponentT(std::forward<ArgT>(arg));
 
         component_idx++;
@@ -216,5 +244,12 @@ void StateManager::destroyEntity(Entity e)
     ArchetypeStore &archetype = *archetype_stores_[e.archetype];
     archetype.tbl.removeRow(e);
 }
+
+#ifdef MADRONA_MW_MODE
+uint32_t StateManager::numWorlds() const
+{
+    return num_worlds_;
+}
+#endif
 
 }

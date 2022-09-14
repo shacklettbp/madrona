@@ -40,6 +40,10 @@ public:
 
     inline JobID currentJobID() const;
 
+#ifdef MADRONA_MW_MODE
+    inline uint32_t worldID() const;
+#endif
+
     inline StateManager & state();
 
 protected:
@@ -65,6 +69,9 @@ private:
     IOManager * const io_mgr_;
     const int worker_idx_;
     JobID cur_job_id_;
+#ifdef MADRONA_MW_MODE
+    uint32_t cur_world_id_;
+#endif
 
 friend class JobManager;
 };

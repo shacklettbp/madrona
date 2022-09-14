@@ -1,43 +1,42 @@
-add_library(madrona_train STATIC
+add_library(madrona_mw_gpu STATIC
     cuda_utils.hpp cuda_utils.inl cuda_utils.cpp
     cpp_compile.hpp cpp_compile.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona/train.hpp train.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona/mw_gpu.hpp entry.cpp)
 
-target_link_libraries(madrona_train PUBLIC
+target_link_libraries(madrona_mw_gpu PUBLIC
     madrona_core CUDA::nvrtc CUDA::cudart)
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
 
-set(MADRONA_TRAIN_GPU_COMPILE_FLAGS
+set(MADRONA_MW_GPU_COMPILE_FLAGS
     -std=c++20
     -default-device
     -rdc=true
     -use_fast_math
     -lineinfo
     -dopt=on
-    -DMADRONA_TRAIN_MODE=1
+    -DMADRONA_GPU_MODE=1
 )
 
-set(GPU_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/gpu)
-set(TRAIN_GPU_SOURCES
-    ${GPU_SRC_DIR}/job.cpp
-    ${GPU_SRC_DIR}/state.cpp
-    ${GPU_SRC_DIR}/crash.cpp
+set(DEVICE_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/device)
+set(DEVICE_SOURCES
+    ${DEVICE_SRC_DIR}/job.cpp
+    ${DEVICE_SRC_DIR}/state.cpp
+    ${DEVICE_SRC_DIR}/crash.cpp
 )
     
 set(INTERNAL_SRC_LIST)
-foreach(f ${TRAIN_GPU_SOURCES})
+foreach(f ${DEVICE_SOURCES})
     set(INTERNAL_SRC_LIST "${INTERNAL_SRC_LIST}\"${f}\", ")
 endforeach()
 set(INTERNAL_SRC_LIST "${INTERNAL_SRC_LIST}")
 
 get_target_property(MADRONA_CORE_INCLUDES madrona_core INCLUDE_DIRECTORIES)
-get_target_property(MADRONA_TRAIN_INCLUDES madrona_train INCLUDE_DIRECTORIES)
+get_target_property(MADRONA_MW_GPU_INCLUDES madrona_mw_gpu INCLUDE_DIRECTORIES)
 
 set(NVRTC_INCLUDE_DIRS
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu/overrides
-    ${MADRONA_TRAIN_INCLUDES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/device/include
+    ${MADRONA_MW_GPU_INCLUDES}
     ${MADRONA_CORE_INCLUDES}
     ${CUDAToolkit_INCLUDE_DIRS}
 )
@@ -46,14 +45,14 @@ set(NVRTC_OPTIONS)
 foreach(f ${NVRTC_INCLUDE_DIRS})
     set(NVRTC_OPTIONS "${NVRTC_OPTIONS}\"-I${f}\", ")
 endforeach()
-foreach(f ${MADRONA_TRAIN_GPU_COMPILE_FLAGS})
+foreach(f ${MADRONA_MW_GPU_COMPILE_FLAGS})
     set(NVRTC_OPTIONS "${NVRTC_OPTIONS}\"${f}\", ")
 endforeach()
 set(NVRTC_OPTIONS "${NVRTC_OPTIONS}")
 
-target_compile_definitions(madrona_train PRIVATE
+target_compile_definitions(madrona_mw_gpu PRIVATE
     MADRONA_NVRTC_OPTIONS=${NVRTC_OPTIONS}
-    MADRONA_TRAIN_INTERNAL_CPP=${INTERNAL_SRC_LIST}
+    MADRONA_MW_GPU_INTERNAL_CPP=${INTERNAL_SRC_LIST}
     MADRONA_CUDADEVRT_PATH=\"${CUDA_DEVICE_RUNTIME}\"
 )
 

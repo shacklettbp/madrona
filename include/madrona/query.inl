@@ -5,6 +5,12 @@
 namespace madrona {
 
 template <typename... ComponentTs>
+Query<ComponentTs...>::Query()
+    : indices_offset_(0),
+      num_archetypes_(0)
+{}
+
+template <typename... ComponentTs>
 uint32_t Query<ComponentTs...>::numMatchingArchetypes() const
 {
     return num_archetypes_;

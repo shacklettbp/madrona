@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace madrona {
-namespace gpuTrain {
+namespace mwGPU {
 
 struct GPUImplConsts {
     void *jobSystemAddr;
@@ -21,14 +21,14 @@ struct GPUImplConsts {
 }
 }
 
-#ifdef MADRONA_TRAIN_MODE
+#ifdef MADRONA_GPU_MODE
 extern "C" {
-extern __constant__ madrona::gpuTrain::GPUImplConsts
+extern __constant__ madrona::mwGPU::GPUImplConsts
     madronaTrainGPUImplConsts;
 }
 
 namespace madrona {
-namespace gpuTrain {
+namespace mwGPU {
 
 GPUImplConsts & GPUImplConsts::get()
 {

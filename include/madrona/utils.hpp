@@ -8,7 +8,7 @@
 namespace madrona {
 namespace utils {
 
-#ifdef MADRONA_TRAIN_MODE
+#ifdef MADRONA_GPU_MODE
 
 inline int __builtin_clz(int v)
 {

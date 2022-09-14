@@ -1,6 +1,6 @@
 #pragma once
 
-#include <madrona/gpu_train/worker_init.hpp>
+#include <madrona/mw_gpu/worker_init.hpp>
 
 namespace madrona {
 
@@ -29,7 +29,7 @@ ContextT TrainingEntry<ContextT, BaseT>::makeContext(
     uint32_t invocation_idx)
 {
     uint32_t lane_id =
-        invocation_idx % madrona::gpuTrain::ICfg::numWarpThreads;
+        invocation_idx % madrona::mwGPU::ICfg::numWarpThreads;
 
     WorkerInit worker_init {
         .jobID = 0,
@@ -38,9 +38,9 @@ ContextT TrainingEntry<ContextT, BaseT>::makeContext(
         .laneID = lane_id,
     };
 
-    char *ctx_data_base = (char *)gpuTrain::GPUImplConsts::get().ctxDataAddr;
+    char *ctx_data_base = (char *)mwGPU::GPUImplConsts::get().ctxDataAddr;
     void *ctx_data = ctx_data_base +
-        worker_init.worldID * gpuTrain::GPUImplConsts::get().numCtxDataBytes;
+        worker_init.worldID * mwGPU::GPUImplConsts::get().numCtxDataBytes;
 
     return ContextT(ctx_data, std::move(worker_init));
 }

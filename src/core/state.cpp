@@ -9,14 +9,30 @@
 
 namespace madrona {
 
-StateManager::StateManager()
-    : component_infos_(0),
+#ifdef MADRONA_MW_MODE
+StateManager::StateManager(int num_worlds)
+    : query_data_(0),
+      component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
-      query_data_(0)
+      num_worlds_(num_worlds),
+      world_indices_(0),
+      register_lock_()
+{
+    registerComponent<Entity>();
+    registerComponent<WorldIndex>();
+    registerComponent<WorldID>();
+}
+#else
+StateManager::StateManager()
+    : query_data_(0),
+      component_infos_(0),
+      archetype_components_(0),
+      archetype_stores_(0)
 {
     registerComponent<Entity>();
 }
+#endif
 
 struct StateManager::ArchetypeStore::Init {
     uint32_t componentOffset;
@@ -32,61 +48,6 @@ StateManager::ArchetypeStore::ArchetypeStore(Init &&init)
       tbl(init.types.data(), init.types.size(), init.id),
       columnLookup(init.lookupInputs.data(), init.lookupInputs.size())
 {
-}
-
-void StateManager::registerComponent(uint32_t id,
-                                     uint32_t alignment,
-                                     uint32_t num_bytes)
-{
-    // IDs are globally assigned, technically there is an edge case where
-    // there are gaps in the IDs assigned to a specific StateManager
-    // for component_infos_ just use default initialization of the
-    // unregistered components
-    if (id >= component_infos_.size()) {
-        component_infos_.resize(id + 1, [](auto) {});
-    }
-
-    component_infos_[id] = TypeInfo {
-        .alignment = alignment,
-        .numBytes = num_bytes,
-    };
-}
-
-void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
-{
-    uint32_t offset = archetype_components_.size();
-
-    // FIXME Candidates for tmp allocator
-    HeapArray<TypeInfo> type_infos(components.size());
-    HeapArray<IntegerMapPair> lookup_input(components.size());
-
-    for (int i = 0; i < (int)components.size(); i++) {
-        ComponentID component_id = components[i];
-
-        archetype_components_.push_back(component_id);
-        type_infos[i] = component_infos_[component_id.id];
-
-        lookup_input[i] = IntegerMapPair {
-            .key = component_id.id,
-            .value = (uint32_t)i + 1,
-        };
-    }
-
-    // IDs are globally assigned, technically there is an edge case where
-    // there are gaps in the IDs assigned to a specific StateManager
-    if (id >= archetype_stores_.size()) {
-        archetype_stores_.resize(id + 1, [](auto ptr) {
-            Optional<ArchetypeStore>::noneAt(ptr);
-        });
-    }
-
-    archetype_stores_[id].emplace(ArchetypeStore::Init {
-        offset,
-        components.size(),
-        id,
-        std::move(type_infos),
-        std::move(lookup_input),
-    });
 }
 
 uint32_t StateManager::makeQuery(const ComponentID *components,
@@ -139,6 +100,85 @@ uint32_t StateManager::makeQuery(const ComponentID *components,
            sizeof(uint32_t) * query_indices.size());
 
     return matching_archetypes;
+}
+
+void StateManager::registerComponent(uint32_t id,
+                                     uint32_t alignment,
+                                     uint32_t num_bytes)
+{
+    // IDs are globally assigned, technically there is an edge case where
+    // there are gaps in the IDs assigned to a specific StateManager
+    if (id >= component_infos_.size()) {
+        component_infos_.resize(id + 1, [](auto ptr) {
+            Optional<TypeInfo>::noneAt(ptr);
+        });
+    }
+
+    component_infos_[id].emplace(TypeInfo {
+        .alignment = alignment,
+        .numBytes = num_bytes,
+    });
+}
+
+void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
+{
+    uint32_t offset = archetype_components_.size();
+    uint32_t num_user_components = components.size();
+
+    uint32_t num_total_components = num_user_components;
+#ifdef MADRONA_MW_MODE
+    num_total_components += 2;
+#endif
+
+    HeapArray<TypeInfo, TmpAlloc> type_infos(num_total_components);
+    HeapArray<IntegerMapPair, TmpAlloc> lookup_input(num_user_components);
+
+    TypeInfo *type_ptr = type_infos.data();
+#ifdef MADRONA_MW_MODE
+    type_ptr[0] = *component_infos_[componentID<WorldIndex>().id];
+    type_ptr[1] = *component_infos_[componentID<WorldID>().id];
+    type_ptr += 2;
+
+    if (world_indices_.size() <= id * num_worlds_) {
+        world_indices_.resize((id + 1) * num_worlds_, [](auto) {});
+    }
+
+    for (int i = 0; i < (int)num_worlds_; i++) {
+        int world_offset = id * num_worlds_;
+        world_indices_[world_offset + i] = WorldIndex {
+            ~0u,
+            ~0u,
+        };
+    }
+#endif
+
+    for (int i = 0; i < (int)num_user_components; i++) {
+        ComponentID component_id = components[i];
+
+        archetype_components_.push_back(component_id);
+        type_ptr[i] = *component_infos_[component_id.id];
+
+        lookup_input[i] = IntegerMapPair {
+            .key = component_id.id,
+            .value = (uint32_t)i + user_component_offset_,
+        };
+    }
+
+    // IDs are globally assigned, technically there is an edge case where
+    // there are gaps in the IDs assigned to a specific StateManager
+    if (archetype_stores_.size() <= id) {
+        archetype_stores_.resize(id + 1, [](auto ptr) {
+            Optional<ArchetypeStore>::noneAt(ptr);
+        });
+    }
+
+    archetype_stores_[id].emplace(ArchetypeStore::Init {
+        offset,
+        components.size(),
+        id,
+        std::move(type_infos),
+        std::move(lookup_input),
+    });
 }
 
 uint32_t StateManager::next_component_id_ = 0;
