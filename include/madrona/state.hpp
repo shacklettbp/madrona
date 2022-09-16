@@ -130,7 +130,7 @@ private:
 
     static constexpr uint32_t user_component_offset_ =
 #ifdef MADRONA_MW_MODE
-        3;
+        2;
 #else
         1;
 #endif

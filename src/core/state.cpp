@@ -127,7 +127,7 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
 
     uint32_t num_total_components = num_user_components;
 #ifdef MADRONA_MW_MODE
-    num_total_components += 2;
+    num_total_components += 1;
 #endif
 
     HeapArray<TypeInfo, TmpAlloc> type_infos(num_total_components);
@@ -135,9 +135,8 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
 
     TypeInfo *type_ptr = type_infos.data();
 #ifdef MADRONA_MW_MODE
-    type_ptr[0] = *component_infos_[componentID<WorldIndex>().id];
-    type_ptr[1] = *component_infos_[componentID<WorldID>().id];
-    type_ptr += 2;
+    type_ptr[0] = *component_infos_[componentID<WorldID>().id];
+    type_ptr += 1;
 
     if (world_indices_.size() <= id * num_worlds_) {
         world_indices_.resize((id + 1) * num_worlds_, [](auto) {});
