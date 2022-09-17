@@ -5,21 +5,19 @@ namespace madrona {
 constexpr Entity Entity::none()
 {
     return Entity {
-        0x3FFFF,
-        0xFFFF,
-        0x3FFFFFFF,
+        ~0u,
+        ~0u,
     };
 }
 
 bool Loc::valid() const
 {
-    return idx != ~0u;
+    return archetype != ~0u;
 }
 
 bool operator==(Entity a, Entity b)
 {
-    return a.gen == b.gen && a.archetype == b.archetype &&
-        a.id == b.id;
+    return a.gen == b.gen && a.id == b.id;
 }
 
 bool operator!=(Entity a, Entity b)
@@ -29,7 +27,7 @@ bool operator!=(Entity a, Entity b)
 
 bool operator==(Loc a, Loc b)
 {
-    return a.idx == b.idx;
+    return a.row == b.row && a.archetype == b.archetype;
 }
 
 bool operator!=(Loc a, Loc b)

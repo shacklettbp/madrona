@@ -51,9 +51,7 @@ class ComponentRef {
 public:
     ComponentRef(Table *tbl, uint32_t col_idx);
 
-    inline ResultRef<ComponentT> operator[](Entity e) const;
-
-    inline ComponentT & operator[](Loc idx) const;
+    inline ComponentT & operator[](uint32_t row) const;
 
     inline ComponentT * data() const;
     inline uint32_t size() const;
@@ -71,8 +69,6 @@ class ArchetypeRef {
 public:
     inline ArchetypeRef(Table *tbl);
 
-    inline Loc getLoc(Entity e) const;
-
     template <typename ComponentT>
     inline ComponentRef<ComponentT> component();
 
@@ -80,21 +76,16 @@ public:
     inline ComponentRef<const ComponentT> component() const;
 
     template <typename ComponentT>
-    inline ResultRef<ComponentT> get(Entity e);
+    inline ComponentT & get(uint32_t idx);
     template <typename ComponentT>
-    inline ResultRef<const ComponentT> get(Entity e) const;
-
-    template <typename ComponentT>
-    inline ComponentT & get(Loc idx);
-    template <typename ComponentT>
-    inline const ComponentT & get(Loc idx) const;
+    inline const ComponentT & get(uint32_t idx) const;
 
     inline uint32_t size() const;
 
     struct Iter {
-        Loc loc;
+        uint32_t idx;
 
-        inline Loc operator*();
+        inline uint32_t operator*();
         inline Iter & operator++();
         inline bool operator==(Iter o);
         inline bool operator!=(Iter o);
@@ -102,9 +93,6 @@ public:
 
     inline Iter begin() const;
     inline Iter end() const;
-
-    inline void clearData();
-    inline void reset();
 
 private:
     template <typename ComponentT> struct ComponentLookup {};

@@ -83,21 +83,9 @@ ComponentRef<ComponentT>::ComponentRef(Table *tbl, uint32_t col_idx)
 {}
 
 template <typename ComponentT>
-ResultRef<ComponentT> ComponentRef<ComponentT>::operator[](Entity e) const
+ComponentT & ComponentRef<ComponentT>::operator[](uint32_t row) const
 { 
-    auto loc = tbl_->getLoc(e);
-
-    if (!loc.valid()) {
-        return ResultRef<ComponentT>(nullptr);
-    }
-
-    return ResultRef<ComponentT>((ComponentT *)tbl_->getValue(col_idx_, loc));
-}
-
-template <typename ComponentT>
-ComponentT & ComponentRef<ComponentT>::operator[](Loc idx) const
-{ 
-    return *(ComponentT *)tbl_->getValue(col_idx_, idx);
+    return data()[row];
 }
 
 template <typename ComponentT>
@@ -127,12 +115,6 @@ ArchetypeRef<ArchetypeT>::ArchetypeRef(Table *tbl)
 {}
 
 template <typename ArchetypeT>
-Loc ArchetypeRef<ArchetypeT>::getLoc(Entity e) const
-{
-    return tbl_->getLoc(e);
-}
-
-template <typename ArchetypeT>
 template <typename ComponentT>
 ComponentRef<ComponentT> ArchetypeRef<ArchetypeT>::component()
 {
@@ -148,28 +130,14 @@ ComponentRef<const ComponentT> ArchetypeRef<ArchetypeT>::component() const
 
 template <typename ArchetypeT>
 template <typename ComponentT>
-ResultRef<ComponentT> ArchetypeRef<ArchetypeT>::get(Entity e)
-{
-    return component<ComponentT>()[e];
-}
-
-template <typename ArchetypeT>
-template <typename ComponentT>
-ResultRef<const ComponentT> ArchetypeRef<ArchetypeT>::get(Entity e) const
-{
-    return component<ComponentT>()[e];
-}
-
-template <typename ArchetypeT>
-template <typename ComponentT>
-ComponentT & ArchetypeRef<ArchetypeT>::get(Loc idx)
+ComponentT & ArchetypeRef<ArchetypeT>::get(uint32_t idx)
 {
     return component<ComponentT>()[idx];
 }
 
 template <typename ArchetypeT>
 template <typename ComponentT>
-const ComponentT & ArchetypeRef<ArchetypeT>::get(Loc idx) const
+const ComponentT & ArchetypeRef<ArchetypeT>::get(uint32_t idx) const
 {
     return component<ComponentT>()[idx];
 }
@@ -181,22 +149,22 @@ uint32_t ArchetypeRef<ArchetypeT>::size() const
 }
 
 template <typename ArchetypeT>
-Loc ArchetypeRef<ArchetypeT>::Iter::operator*()
+uint32_t ArchetypeRef<ArchetypeT>::Iter::operator*()
 {
-    return loc;
+    return idx;
 }
 
 template <typename ArchetypeT>
 auto ArchetypeRef<ArchetypeT>::Iter::operator++() -> Iter &
 {
-    ++loc.idx;
+    ++idx;
     return *this;
 }
 
 template <typename ArchetypeT>
 bool ArchetypeRef<ArchetypeT>::Iter::operator==(Iter o)
 {
-    return loc == o.loc;
+    return idx == o.idx;
 }
 
 template <typename ArchetypeT>
@@ -209,9 +177,7 @@ template <typename ArchetypeT>
 auto ArchetypeRef<ArchetypeT>::begin() const -> Iter
 {
     return Iter {
-        Loc {
-            0,
-        },
+        0,
     };
 }
 
@@ -219,22 +185,8 @@ template <typename ArchetypeT>
 auto ArchetypeRef<ArchetypeT>::end() const -> Iter
 {
     return Iter {
-        Loc {
-            tbl_->numRows(),
-        },
+        tbl_->numRows(),
     };
-}
-
-template <typename ArchetypeT>
-void ArchetypeRef<ArchetypeT>::clearData()
-{
-    tbl_->clearData();
-}
-
-template <typename ArchetypeT>
-void ArchetypeRef<ArchetypeT>::reset()
-{
-    tbl_->reset();
 }
 
 template <typename ArchetypeT>

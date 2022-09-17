@@ -9,12 +9,8 @@ namespace ICfg {
 inline constexpr uint32_t maxRowsPerTable = 1u << 30u;
 }
 
-Table::Table(const TypeInfo *component_types, uint32_t num_components, uint32_t table_id)
-    : table_id_(table_id),
-      num_rows_(0),
-      free_id_head_(~0u),
-      id_to_idx_(sizeof(GenIndex), alignof(GenIndex), 0, ICfg::maxRowsPerTable),
-      num_ids_(0),
+Table::Table(const TypeInfo *component_types, uint32_t num_components)
+    : num_rows_(0),
       columns_()
 {
     columns_.emplace_back(sizeof(Entity), alignof(Entity), 128,
@@ -31,7 +27,7 @@ Table::Table(const TypeInfo *component_types, uint32_t num_components, uint32_t 
     }
 }
 
-Entity Table::addRow()
+uint32_t Table::addRow()
 {
     uint32_t idx = num_rows_++;
 
@@ -39,63 +35,26 @@ Entity Table::addRow()
         col.expand(num_rows_);
     }
 
-    Entity e = makeID(idx);
-
-    *(Entity *)columns_[0][idx] = e;
-
-    return e;
+    return idx;
 }
 
-void Table::removeRow(Entity e)
+bool Table::removeRow(uint32_t row)
 {
-    uint32_t delete_idx = idToIndex(e);
-    if (delete_idx == ~0u) {
-        return;
-    }
-
     uint32_t from_idx = --num_rows_;
-    uint32_t to_idx = delete_idx;
+    uint32_t to_idx = row;
 
-    if (from_idx != to_idx) {
-        Entity update_entity = *(Entity *)columns_[0][from_idx];
-
-        (*(GenIndex *)id_to_idx_[update_entity.id]).idx = to_idx;
-        *(Entity *)columns_[0][to_idx] = update_entity;
-
+    bool need_move = from_idx != to_idx;
+    if (need_move) {
         for (VirtualStore &col : columns_) {
             memcpy(col[to_idx], col[from_idx], col.numBytesPerItem());
         }
     }
 
-    freeID(e.id);
-
     for (VirtualStore &col : columns_) {
         col.shrink(num_rows_);
     }
-}
 
-void Table::clearData()
-{
-    Entity *ids = (Entity *)columns_[0].data();
-    GenIndex *index_lookup = (GenIndex *)id_to_idx_.data();
-
-    // Batched freeID
-    uint32_t prev = free_id_head_;
-    for (int idx = 0, n = num_rows_; idx < n; idx++) {
-        Entity e = ids[idx];
-        GenIndex &gen_idx = index_lookup[e.id];
-        gen_idx.gen++;
-        gen_idx.idx = prev;
-
-        prev = e.id;
-    }
-    free_id_head_ = prev;
-
-    num_rows_ = 0;
-
-    for (VirtualStore &col : columns_) {
-        col.shrink(num_rows_);
-    }
+    return need_move;
 }
 
 void Table::reset()
@@ -105,49 +64,6 @@ void Table::reset()
     for (VirtualStore &col : columns_) {
         col.shrink(num_rows_);
     }
-
-    free_id_head_ = ~0u;
-    num_ids_ = 0;
-    id_to_idx_.shrink(num_ids_);
-}
-
-Entity Table::makeID(uint32_t idx)
-{
-    if (free_id_head_ != ~0u) {
-        uint32_t new_id = free_id_head_;
-        GenIndex &old = *(GenIndex *)id_to_idx_[new_id];
-        free_id_head_ = old.idx;
-        old.idx = idx;
-
-        return Entity {
-            old.gen,
-            table_id_,
-            new_id,
-        };
-    }
-
-    uint32_t id = num_ids_++;
-    id_to_idx_.expand(num_ids_);
-
-    *(GenIndex *)id_to_idx_[id] = {
-        idx,
-        0,
-        0,
-    };
-
-    return Entity {
-        0,
-        table_id_,
-        id,
-    };
-}
-
-void Table::freeID(uint32_t id)
-{
-    GenIndex &idx_map = *(GenIndex *)id_to_idx_[id];
-    idx_map.idx = free_id_head_;
-    idx_map.gen++;
-    free_id_head_ = id;
 }
 
 }

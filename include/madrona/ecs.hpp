@@ -5,15 +5,15 @@
 namespace madrona {
 
 struct Entity {
-    uint64_t gen : 18;
-    uint64_t archetype : 16;
-    uint64_t id : 30;
+    uint32_t gen;
+    uint32_t id;
 
     static constexpr inline Entity none();
 };
 
 struct Loc {
-    uint32_t idx;
+    uint32_t archetype;
+    uint32_t row;
 
     inline bool valid() const;
 };

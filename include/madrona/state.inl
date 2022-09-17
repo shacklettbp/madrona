@@ -7,6 +7,47 @@
 
 namespace madrona {
 
+Loc IDManager::getLoc(Entity e) const
+{
+    if (e.id >= num_ids_) {
+        return Loc {
+            .archetype = ~0u,
+            .row = 0,
+        };
+    }
+
+    const GenLoc *gen_loc = getGenLoc(e.id);
+
+    uint32_t gen = gen_loc->gen;
+
+    if (gen != e.gen) {
+        return Loc {
+            .archetype = ~0u,
+            .row = 0,
+        };
+    }
+
+    return gen_loc->loc;
+}
+
+void IDManager::updateLoc(Entity e, uint32_t row)
+{
+    GenLoc *gen_loc = getGenLoc(e.id);
+    assert(e.gen == gen_loc->gen);
+
+    gen_loc->loc.row = row;
+}
+
+IDManager::GenLoc * IDManager::getGenLoc(uint32_t id)
+{
+    return (GenLoc *)store_.data() + (uintptr_t)id;
+}
+
+const IDManager::GenLoc * IDManager::getGenLoc(uint32_t id) const
+{
+    return (const GenLoc *)store_.data() + (uintptr_t)id;
+}
+
 template <typename ComponentT>
 ComponentID StateManager::registerComponent()
 {
@@ -108,9 +149,12 @@ ArchetypeID StateManager::archetypeID() const
 template <typename ComponentT>
 ResultRef<ComponentT> StateManager::get(Entity entity)
 {
-    uint32_t archetype_idx = entity.archetype;
+    Loc loc = id_mgr_.getLoc(entity);
+    if (!loc.valid()) {
+        return ResultRef<ComponentT>(nullptr);
+    }
 
-    ArchetypeStore &archetype = *archetype_stores_[archetype_idx];
+    ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
 
     auto col_idx = archetype.columnLookup.lookup(componentID<ComponentT>().id);
 
@@ -118,13 +162,8 @@ ResultRef<ComponentT> StateManager::get(Entity entity)
         return ResultRef<ComponentT>(nullptr);
     }
 
-    auto loc = archetype.tbl.getLoc(entity);
-    if (!loc.valid()) {
-        return ResultRef<ComponentT>(nullptr);
-    }
-
     return ResultRef<ComponentT>(
-        (ComponentT *)archetype.tbl.getValue(*col_idx, loc));
+        (ComponentT *)archetype.tbl.data(*col_idx) + loc.row);
 }
 
 template <typename ArchetypeT>
@@ -207,13 +246,13 @@ Entity StateManager::makeEntity(Args && ...args)
     assert((num_args == 0 || num_args == archetype.numComponents) &&
            "Trying to construct entity with wrong number of arguments");
 
-    Entity new_row = archetype.tbl.addRow();
-
-    auto tbl_loc = archetype.tbl.getLoc(new_row);
+    uint32_t new_row = archetype.tbl.addRow();
+    Entity e = id_mgr_.newEntity(archetype_id.id, new_row);
+    ((Entity *)archetype.tbl.data(0))[new_row] = e;
 
     int component_idx = 0;
 
-    auto constructNextComponent = [this, &component_idx, &archetype, &tbl_loc](
+    auto constructNextComponent = [this, &component_idx, &archetype, new_row](
             auto &&arg) {
         using ArgT = decltype(arg);
         using ComponentT = std::remove_reference_t<ArgT>;
@@ -222,8 +261,8 @@ Entity StateManager::makeEntity(Args && ...args)
                archetype_components_[archetype.componentOffset +
                    component_idx].id);
 
-        new (archetype.tbl.getValue(
-                component_idx + user_component_offset_, tbl_loc))
+        new ((ComponentT *)archetype.tbl.data(
+                component_idx + user_component_offset_) + new_row)
             ComponentT(std::forward<ArgT>(arg));
 
         component_idx++;
@@ -231,13 +270,13 @@ Entity StateManager::makeEntity(Args && ...args)
 
     ( constructNextComponent(std::forward<Args>(args)), ... );
 
-    return new_row;
+    return e;
 }
 
-void StateManager::destroyEntity(Entity e)
+template <typename ArchetypeT>
+void StateManager::reset()
 {
-    ArchetypeStore &archetype = *archetype_stores_[e.archetype];
-    archetype.tbl.removeRow(e);
+    reset(archetypeID<ArchetypeT>().id);
 }
 
 #ifdef MADRONA_MW_MODE

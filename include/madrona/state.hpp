@@ -36,6 +36,31 @@ struct WorldID {
 };
 #endif
 
+class IDManager {
+public:
+    IDManager();
+    inline Loc getLoc(Entity e) const;
+    inline void updateLoc(Entity e, uint32_t row);
+
+    Entity newEntity(uint32_t archetype, uint32_t row);
+    void freeEntity(Entity e);
+
+    void bulkFree(Entity *entities, uint32_t num_entities);
+
+private:
+    struct GenLoc {
+        Loc loc;
+        uint32_t gen;
+    };
+
+    inline GenLoc * getGenLoc(uint32_t id);
+    inline const GenLoc * getGenLoc(uint32_t id) const;
+
+    VirtualStore store_;
+    uint32_t num_ids_;
+    uint32_t free_id_head_;
+};
+
 class StateManager {
 public:
 #ifdef MADRONA_MW_MODE
@@ -74,7 +99,10 @@ public:
     template <typename ArchetypeT, typename... Args>
     inline Entity makeEntity(Args && ...args);
 
-    inline void destroyEntity(Entity e);
+    void destroyEntity(Entity e);
+
+    template <typename ArchetypeT>
+    inline void reset();
 
 #ifdef MADRONA_MW_MODE
     template <typename... ComponentTs, typename Fn>
@@ -117,6 +145,9 @@ private:
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, Span<ComponentID> components);
 
+    void reset(uint32_t archetype_id);
+
+    IDManager id_mgr_;
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;

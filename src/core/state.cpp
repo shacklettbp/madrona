@@ -13,9 +13,76 @@ namespace ICfg {
 static constexpr uint32_t maxQueryOffsets = 100'000;
 }
 
+IDManager::IDManager()
+    : store_(sizeof(GenLoc), alignof(GenLoc), 0, ~0u),
+      num_ids_(0),
+      free_id_head_(~0u)
+{}
+
+Entity IDManager::newEntity(uint32_t archetype, uint32_t row)
+{
+    if (free_id_head_ != ~0u) {
+        uint32_t new_id = free_id_head_;
+        GenLoc *new_loc = getGenLoc(new_id);
+        free_id_head_ = new_loc->loc.row;
+
+        new_loc->loc = Loc {
+            .archetype = archetype,
+            .row = row,
+        };
+
+        return Entity {
+            .gen = new_loc->gen,
+            .id = new_id,
+        };
+    }
+
+    uint32_t id = num_ids_++;
+    store_.expand(num_ids_);
+
+    GenLoc *new_loc = getGenLoc(id);
+
+    *new_loc = {
+        .loc = Loc {
+            .archetype = archetype,
+            .row = row,
+        },
+        .gen = 0,
+    };
+
+    return Entity {
+        .gen = 0,
+        .id = id,
+    };
+}
+
+void IDManager::freeEntity(Entity e)
+{
+    GenLoc *gen_loc = getGenLoc(e.id);
+    gen_loc->gen++;
+
+    gen_loc->loc.row = free_id_head_;
+    free_id_head_ = e.id;
+}
+
+void IDManager::bulkFree(Entity *entities, uint32_t num_entities)
+{
+    uint32_t prev = free_id_head_;
+    for (int idx = 0, n = num_entities; idx < n; idx++) {
+        Entity e = entities[idx];
+        GenLoc *gen_loc = getGenLoc(e.id);
+        gen_loc->gen++;
+        gen_loc->loc.row = prev;
+ 
+        prev = e.id;
+    }
+    free_id_head_ = prev;
+}
+
 #ifdef MADRONA_MW_MODE
 StateManager::StateManager(int num_worlds)
-    : component_infos_(0),
+    : id_mgr_(),
+      component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
       num_worlds_(num_worlds),
@@ -26,13 +93,33 @@ StateManager::StateManager(int num_worlds)
 }
 #else
 StateManager::StateManager()
-    : component_infos_(0),
+    : id_mgr_(),
+      component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0)
 {
     registerComponent<Entity>();
 }
 #endif
+
+void StateManager::destroyEntity(Entity e)
+{
+    Loc loc = id_mgr_.getLoc(e);
+    
+    if (!loc.valid()) {
+        return;
+    }
+
+    ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
+    bool row_moved = archetype.tbl.removeRow(loc.row);
+
+    if (row_moved) {
+        Entity moved_entity = ((Entity *)archetype.tbl.data(0))[loc.row];
+        id_mgr_.updateLoc(moved_entity, loc.row);
+    }
+
+    id_mgr_.freeEntity(e);
+}
 
 struct StateManager::ArchetypeStore::Init {
     uint32_t componentOffset;
@@ -45,7 +132,7 @@ struct StateManager::ArchetypeStore::Init {
 StateManager::ArchetypeStore::ArchetypeStore(Init &&init)
     : componentOffset(init.componentOffset),
       numComponents(init.numComponents),
-      tbl(init.types.data(), init.types.size(), init.id),
+      tbl(init.types.data(), init.types.size()),
       columnLookup(init.lookupInputs.data(), init.lookupInputs.size())
 {
 }
@@ -204,6 +291,18 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
         std::move(type_infos),
         std::move(lookup_input),
     });
+}
+
+void StateManager::reset(uint32_t archetype_id)
+{
+    auto &archetype = *archetype_stores_[archetype_id];
+
+    // Free all IDs before deleting the table
+    Entity *entities = (Entity *)archetype.tbl.data(0);
+    uint32_t num_entities = archetype.tbl.numRows();
+    id_mgr_.bulkFree(entities, num_entities);
+
+    archetype.tbl.reset();
 }
 
 StateManager::QueryState StateManager::query_state_ = StateManager::QueryState();
