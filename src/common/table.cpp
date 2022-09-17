@@ -13,16 +13,13 @@ Table::Table(const TypeInfo *component_types, uint32_t num_components)
     : num_rows_(0),
       columns_()
 {
-    columns_.emplace_back(sizeof(Entity), alignof(Entity), 128,
-                          ICfg::maxRowsPerTable);
-
     for (int i = 0; i < (int)num_components; i++) {
         const TypeInfo &type = component_types[i];
 
         // 3rd argument is offsetting the start from the page aligned boundary
         // to avoid everything mapping to the same cache sets. Should revisit -
         // maybe add a random offset for each Table as well?
-        columns_.emplace_back(type.numBytes, type.alignment, 128 * (i + 2),
+        columns_.emplace_back(type.numBytes, type.alignment, 128 * (i + 1),
                               ICfg::maxRowsPerTable);
     }
 }

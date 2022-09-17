@@ -125,8 +125,8 @@ struct StateManager::ArchetypeStore::Init {
     uint32_t componentOffset;
     uint32_t numComponents;
     uint32_t id;
-    HeapArray<TypeInfo> types;
-    HeapArray<IntegerMapPair> lookupInputs;
+    Span<TypeInfo> types;
+    Span<IntegerMapPair> lookupInputs;
 };
 
 StateManager::ArchetypeStore::ArchetypeStore(Init &&init)
@@ -250,18 +250,23 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
     uint32_t offset = archetype_components_.size();
     uint32_t num_user_components = components.size();
 
-    uint32_t num_total_components = num_user_components;
+    uint32_t num_total_components = num_user_components + 1;
 #ifdef MADRONA_MW_MODE
     num_total_components += 1;
 #endif
 
-    HeapArray<TypeInfo, TmpAlloc> type_infos(num_total_components);
-    HeapArray<IntegerMapPair, TmpAlloc> lookup_input(num_user_components);
+    std::array<TypeInfo, max_archetype_components_> type_infos;
+    std::array<IntegerMapPair, max_archetype_components_> lookup_input;
 
     TypeInfo *type_ptr = type_infos.data();
+
+    // Add entity column as first column of every table
+    *type_ptr = *component_infos_[0];
+    type_ptr++;
+
 #ifdef MADRONA_MW_MODE
-    type_ptr[0] = *component_infos_[componentID<WorldID>().id];
-    type_ptr += 1;
+    *type_ptr = *component_infos_[componentID<WorldID>().id];
+    type_ptr++;
 #endif
 
     for (int i = 0; i < (int)num_user_components; i++) {
@@ -288,8 +293,8 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
         offset,
         components.size(),
         id,
-        std::move(type_infos),
-        std::move(lookup_input),
+        Span(type_infos.data(), num_total_components),
+        Span(lookup_input.data(), num_user_components),
     });
 }
 
