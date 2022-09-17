@@ -3,6 +3,7 @@
 #include <madrona/utils.hpp>
 
 #include <array>
+#include <mutex>
 
 namespace madrona {
 
@@ -141,15 +142,18 @@ Query<ComponentTs...> StateManager::query()
         ...
     };
 
-    uint32_t offset;
-    uint32_t num_archetypes = 
-        makeQuery(component_ids.data(), component_ids.size(), &offset);
+    QueryRef *ref = &Query<ComponentTs...>::ref_;
 
-    return Query<ComponentTs...>(offset, num_archetypes);
+    if (ref->numReferences.load(std::memory_order_acquire) == 0) {
+        makeQuery(component_ids.data(), component_ids.size(), ref);
+    }
+
+    return Query<ComponentTs...>(true);
 }
 
 template <typename... ComponentTs, typename Fn>
-void StateManager::iterateArchetypes(Query<ComponentTs...> query, Fn &&fn)
+void StateManager::iterateArchetypes(const Query<ComponentTs...> &query,
+                                     Fn &&fn)
 {
     using IndicesWrapper =
         std::make_integer_sequence<uint32_t, sizeof...(ComponentTs)>;
@@ -169,28 +173,31 @@ ComponentT * StateManager::getArchetypeComponent(ArchetypeStore &archetype,
 }
 
 template <typename... ComponentTs, typename Fn, uint32_t... Indices>
-void StateManager::iterateArchetypesImpl(Query<ComponentTs...> query, Fn &&fn,
-    std::integer_sequence<uint32_t, Indices...>)
+void StateManager::iterateArchetypesImpl(const Query<ComponentTs...> &query,
+    Fn &&fn, std::integer_sequence<uint32_t, Indices...>)
 {
-    uint32_t cur_offset = query.indices_offset_;
+    assert(query.initialized_);
 
-    const int num_archetypes = query.num_archetypes_;
+    uint32_t *cur_query_ptr = &query_state_.queryData[query.ref_.offset];
+    const int num_archetypes = query.ref_.numMatchingArchetypes;
+
     for (int query_archetype_idx = 0; query_archetype_idx < num_archetypes;
          query_archetype_idx++) {
-        int archetype_idx = query_data_[cur_offset++];
+        uint32_t archetype_idx = *(cur_query_ptr++);
+
         auto &archetype = *archetype_stores_[archetype_idx];
 
         int num_rows = archetype.tbl.numRows();
 
         fn(num_rows, getArchetypeComponent<ComponentTs>(archetype,
-            query_data_[cur_offset + Indices]) ...);
+            cur_query_ptr[Indices]) ...);
 
-        cur_offset += sizeof...(ComponentTs);
+        cur_query_ptr += sizeof...(ComponentTs);
     }
 }
 
 template <typename... ComponentTs, typename Fn>
-void StateManager::iterateEntities(Query<ComponentTs...> query, Fn &&fn)
+void StateManager::iterateEntities(const Query<ComponentTs...> &query, Fn &&fn)
 {
     iterateArchetypes(query, [&fn](int num_rows, auto ...ptrs) {
         for (int i = 0; i < num_rows; i++) {
@@ -210,7 +217,6 @@ Entity StateManager::makeEntity(Args && ...args)
 
     assert((num_args == 0 || num_args == archetype.numComponents) &&
            "Trying to construct entity with wrong number of arguments");
-
 
     Entity new_row = archetype.tbl.addRow();
 

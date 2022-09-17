@@ -543,7 +543,6 @@ static inline bool isRunnable(JobTrackerInfo &tracker_info,
 }
 
 struct JobManager::Init {
-    const void *ctxUserdataSource;
     uint32_t numCtxUserdataBytes;
     void (*ctxInitFn)(void *, void *, WorkerInit &&);
     uint32_t numCtxBytes;
@@ -565,8 +564,7 @@ struct JobManager::Init {
     int numTrackerSlots;
 };
 
-JobManager::JobManager(const void *ctx_userdata_src,
-                       uint32_t num_ctx_userdata_bytes,
+JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
                        uint32_t ctx_userdata_alignment,
                        void (*ctx_init_fn)(void *, void *, WorkerInit &&),
                        uint32_t num_ctx_bytes,
@@ -577,7 +575,7 @@ JobManager::JobManager(const void *ctx_userdata_src,
                        int num_io,
                        StateManager *state_mgr,
                        bool pin_workers)
-    : JobManager([ctx_userdata_src, num_ctx_userdata_bytes,
+    : JobManager([num_ctx_userdata_bytes,
                   ctx_userdata_alignment, ctx_init_fn,
                   num_ctx_bytes, ctx_alignment,
                   start_fn, start_data, desired_num_workers,
@@ -644,7 +642,6 @@ JobManager::JobManager(const void *ctx_userdata_src,
                                                 (uintptr_t)ctx_alignment);
 
         return Init {
-            .ctxUserdataSource = ctx_userdata_src,
             .numCtxUserdataBytes = num_ctx_userdata_bytes,
             .ctxInitFn = ctx_init_fn,
             .numCtxBytes = num_ctx_bytes,
@@ -685,15 +682,6 @@ JobManager::JobManager(const Init &init)
           .numOutstanding = 0,
       }
 {
-    {
-        uint64_t num_userdata_copy_bytes = init.numCtxUserdataBytes;
-#ifdef MADRONA_MW_MODE
-        num_userdata_copy_bytes *= init.stateMgr->numWorlds();
-#endif
-        memcpy(init.ctxUserdataBase, init.ctxUserdataSource,
-               num_userdata_copy_bytes);
-    }
-
     for (int i = 0, n = init.numThreads; i < n; i++) {
         job_allocs_.emplace(i, alloc_state_);
     }

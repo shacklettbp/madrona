@@ -19,7 +19,7 @@ public:
                          Deps && ... dependencies);
 
     template <typename... ComponentTs, typename Fn, typename... Deps>
-    inline JobID forAll(Query<ComponentTs...> query, Fn &&fn,
+    inline JobID forAll(const Query<ComponentTs...> &query, Fn &&fn,
                         bool is_child = true,
                         Deps && ... dependencies);
 };

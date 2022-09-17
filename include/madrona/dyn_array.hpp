@@ -83,8 +83,8 @@ public:
                 fn(&ptr_[i]);
             }
         } else {
-            for (size_t i = new_size; i < n_; i++) {
-                if constexpr (!std::is_trivially_destructible_v<T>) {
+            if constexpr (!std::is_trivially_destructible_v<T>) {
+                for (size_t i = new_size; i < n_; i++) {
                     ptr_[i].~T();
                 }
             }

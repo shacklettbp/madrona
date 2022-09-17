@@ -31,8 +31,6 @@ friend class StateManager;
 };
 
 #ifdef MADRONA_MW_MODE
-struct WorldIndex : IndexHelper {};
-
 struct WorldID {
     uint32_t id;
 };
@@ -45,7 +43,6 @@ public:
 #else
     StateManager();
 #endif
-
 
     template <typename ComponentT>
     ComponentID registerComponent();
@@ -69,10 +66,10 @@ public:
     inline Query<ComponentTs...> query();
 
     template <typename... ComponentTs, typename Fn>
-    inline void iterateArchetypes(Query<ComponentTs...> query, Fn &&fn);
+    inline void iterateArchetypes(const Query<ComponentTs...> &query, Fn &&fn);
 
     template <typename... ComponentTs, typename Fn>
-    inline void iterateEntities(Query<ComponentTs...> query, Fn &&fn);
+    inline void iterateEntities(const Query<ComponentTs...> &query, Fn &&fn);
 
     template <typename ArchetypeT, typename... Args>
     inline Entity makeEntity(Args && ...args);
@@ -102,29 +99,34 @@ private:
         ColumnMap columnLookup;
     };
 
+    struct QueryState {
+        QueryState();
+
+        utils::SpinLock lock;
+        VirtualArray<uint32_t> queryData;
+    };
+
     template <typename ComponentT>
     inline ComponentT *getArchetypeComponent(ArchetypeStore &archetype,
                                              uint32_t col_idx);
 
     template <typename... ComponentTs, typename Fn, uint32_t... Indices>
-    void iterateArchetypesImpl(Query<ComponentTs...> query, Fn &&fn,
+    void iterateArchetypesImpl(const Query<ComponentTs...> &query, Fn &&fn,
                                std::integer_sequence<uint32_t, Indices...>);
 
-    uint32_t makeQuery(const ComponentID *components, uint32_t num_components,
-                       uint32_t *offset);
+    void makeQuery(const ComponentID *components, uint32_t num_components,
+                   QueryRef *query_ref);
 
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, Span<ComponentID> components);
 
-    DynArray<uint32_t> query_data_;
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;
 
 #ifdef MADRONA_MW_MODE
     uint32_t num_worlds_;
-    DynArray<WorldIndex> world_indices_;
     utils::SpinLock register_lock_;
 #endif
 
@@ -134,6 +136,8 @@ private:
 #else
         1;
 #endif
+
+    static QueryState query_state_;
 
     static uint32_t next_component_id_;
     static uint32_t next_archetype_id_;

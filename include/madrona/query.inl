@@ -6,15 +6,58 @@ namespace madrona {
 
 template <typename... ComponentTs>
 Query<ComponentTs...>::Query()
-    : indices_offset_(0),
-      num_archetypes_(0)
+    : initialized_(false)
 {}
+
+template <typename... ComponentTs>
+Query<ComponentTs...>::Query(bool initialized)
+    : initialized_(initialized)
+{
+    if (initialized) {
+        ref_.numReferences.fetch_add(1, std::memory_order_release);
+    }
+}
+
+template <typename... ComponentTs>
+Query<ComponentTs...>::Query(Query &&o)
+    : initialized_(o.initialized)
+{
+    o.initialized_ = false;
+}
+
+template <typename... ComponentTs>
+Query<ComponentTs...>::~Query()
+{
+    if (initialized_) {
+        ref_.numReferences.fetch_sub(1, std::memory_order_release);
+    }
+}
+
+template <typename... ComponentTs>
+Query<ComponentTs...> & Query<ComponentTs...>::operator=(Query &&o)
+{
+    if (initialized_) {
+        ref_.numReferences.fetch_sub(1, std::memory_order_release);
+    }
+
+    initialized_ = o.initialized_;
+    o.initialized_ = false;
+
+    return *this;
+}
 
 template <typename... ComponentTs>
 uint32_t Query<ComponentTs...>::numMatchingArchetypes() const
 {
-    return num_archetypes_;
+    return ref_.numMatchingArchetypes;
 }
+
+template <typename... ComponentTs>
+QueryRef Query<ComponentTs...>::ref_ = QueryRef {
+    0,
+    0,
+    0,
+};
 
 template <typename ComponentT>
 ResultRef<ComponentT>::ResultRef(ComponentT *ptr)
@@ -77,12 +120,6 @@ ComponentT * ComponentRef<ComponentT>::end() const
 {
     return data() + size();
 }
-
-template <typename... ComponentTs>
-Query<ComponentTs...>::Query(uint32_t indices_offset, uint32_t num_archetypes)
-    : indices_offset_(indices_offset),
-      num_archetypes_(num_archetypes)
-{}
 
 template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT>::ArchetypeRef(Table *tbl)

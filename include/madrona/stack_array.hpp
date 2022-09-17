@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stddef.h>
+#include <cstddef>
 #include <type_traits>
 
 namespace madrona {
@@ -15,8 +15,10 @@ public:
 
     ~StackArray()
     {
-        for (size_t i = 0; i < size_; i++) {
-            arr_[i].~T();
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            for (size_t i = 0; i < size_; i++) {
+                arr_[i].~T();
+            }
         }
     }
 
@@ -54,6 +56,19 @@ public:
     const T * data() const { return arr_; }
 
     size_t size() const { return size_; }
+
+    constexpr size_t capacity() const { return N; }
+
+    void clear()
+    {
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            for (size_t i = 0; i < size_; i++) {
+                arr_[i].~T();
+            }
+        }
+
+        size_ = 0;
+    }
 
 private:
     union {

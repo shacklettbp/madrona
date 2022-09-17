@@ -30,7 +30,7 @@ JobID Context::submitN(Fn &&fn, uint32_t num_invocations,
 }
 
 template <typename... ComponentTs, typename Fn, typename... Deps>
-JobID Context::forAll(Query<ComponentTs...> query, Fn &&fn,
+JobID Context::forAll(const Query<ComponentTs...> &query, Fn &&fn,
                       bool is_child, Deps && ... dependencies)
 {
     return forAllImpl<Context>(query, std::forward<Fn>(fn), is_child,
@@ -82,7 +82,7 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
 
 template <typename ContextT, typename... ComponentTs, typename Fn,
           typename... Deps>
-JobID Context::forAllImpl(Query<ComponentTs...> query, Fn &&fn,
+JobID Context::forAllImpl(const Query<ComponentTs...> &query, Fn &&fn,
                           bool is_child, Deps && ... dependencies)
 {
     if (query.numMatchingArchetypes() == 0) {

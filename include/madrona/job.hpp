@@ -63,8 +63,7 @@ public:
     template <typename StartFn> struct EntryConfig;
 
     template <typename ContextT, typename DataT, typename StartFn>
-    static EntryConfig<StartFn> makeEntry(
-        const DataT *ctx_userdata, StartFn &&start_fn);
+    static EntryConfig<StartFn> makeEntry(StartFn &&start_fn);
 
     template <typename StartFn>
     JobManager(const EntryConfig<StartFn> &entry_cfg,
@@ -141,8 +140,7 @@ private:
         std::atomic_uint32_t numOutstanding;
     };
 
-    JobManager(const void *ctx_userdata_src,
-               uint32_t num_ctx_userdata_bytes,
+    JobManager(uint32_t num_ctx_userdata_bytes,
                uint32_t ctx_userdata_alignment,
                void (*ctx_init_fn)(void *, void *, WorkerInit &&),
                uint32_t num_ctx_bytes,

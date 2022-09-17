@@ -48,7 +48,6 @@ JobContainer<Fn, N>::JobContainer(
 
 template <typename StartFn>
 struct JobManager::EntryConfig {
-    const void *ctxUserdata;
     uint32_t numUserdataBytes;
     uint32_t userdataAlignment;
     void (*ctxInitCB)(void *, void *, WorkerInit &&);
@@ -59,17 +58,12 @@ struct JobManager::EntryConfig {
 };
 
 template <typename ContextT, typename DataT, typename StartFn>
-JobManager::EntryConfig<StartFn> JobManager::makeEntry(
-    const DataT *ctx_userdata, StartFn &&start_fn)
+JobManager::EntryConfig<StartFn> JobManager::makeEntry(StartFn &&start_fn)
 {
     static_assert(std::is_trivially_destructible_v<ContextT>,
                   "Context types with custom destructors are not supported");
 
-    static_assert(std::is_trivially_copyable_v<DataT>,
-                  "Context user data must be trivially copyable");
-
     return {
-        ctx_userdata,
         sizeof(DataT),
         alignof(DataT),
         [](void *ctx, void *data, WorkerInit &&init) {
@@ -95,8 +89,7 @@ JobManager::JobManager(const EntryConfig<StartFn> &entry_cfg,
                        int num_io,
                        StateManager *state_mgr,
                        bool pin_workers)
-    : JobManager(entry_cfg.ctxUserdata,
-                 entry_cfg.numUserdataBytes,
+    : JobManager(entry_cfg.numUserdataBytes,
                  entry_cfg.userdataAlignment,
                  entry_cfg.ctxInitCB,
                  entry_cfg.numCtxBytes,

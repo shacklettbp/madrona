@@ -30,7 +30,7 @@ public:
                          DepTs && ... dependencies);
 
     template <typename... ComponentTs, typename Fn, typename... DepTs>
-    inline JobID forAll(Query<ComponentTs...> query, Fn &&fn,
+    inline JobID forAll(const Query<ComponentTs...> &query, Fn &&fn,
                         bool is_child = true,
                         DepTs && ... dependencies);
 
@@ -52,17 +52,17 @@ protected:
 
     template <typename ContextT, typename Fn, typename... DepTs>
     inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
-                            DepTs && ... dependencies);
+                             DepTs && ... dependencies);
 
     template <typename ContextT, typename... ComponentTs, typename Fn,
               typename... DepTs>
-    inline JobID forAllImpl(Query<ComponentTs...> query, Fn &&fn,
+    inline JobID forAllImpl(const Query<ComponentTs...> &query, Fn &&fn,
                             bool is_child, DepTs && ... dependencies);
 
 private:
     template <typename ContextT, typename Fn, typename... DepTs>
     inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
-                            DepTs && ... dependencies);
+                             DepTs && ... dependencies);
 
     JobManager * const job_mgr_;
     StateManager * const state_mgr_;

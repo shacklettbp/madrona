@@ -9,24 +9,24 @@
 
 namespace madrona {
 
+namespace ICfg {
+static constexpr uint32_t maxQueryOffsets = 100'000;
+}
+
 #ifdef MADRONA_MW_MODE
 StateManager::StateManager(int num_worlds)
-    : query_data_(0),
-      component_infos_(0),
+    : component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
       num_worlds_(num_worlds),
-      world_indices_(0),
       register_lock_()
 {
     registerComponent<Entity>();
-    registerComponent<WorldIndex>();
     registerComponent<WorldID>();
 }
 #else
 StateManager::StateManager()
-    : query_data_(0),
-      component_infos_(0),
+    : component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0)
 {
@@ -50,11 +50,35 @@ StateManager::ArchetypeStore::ArchetypeStore(Init &&init)
 {
 }
 
-uint32_t StateManager::makeQuery(const ComponentID *components,
-                                 uint32_t num_components,
-                                 uint32_t *offset)
+StateManager::QueryState::QueryState()
+    : lock(),
+      queryData(0, ICfg::maxQueryOffsets)
+{}
+
+void StateManager::makeQuery(const ComponentID *components,
+                             uint32_t num_components,
+                             QueryRef *query_ref)
 {
-    DynArray<uint32_t, TmpAlloc> query_indices(0);
+    std::lock_guard lock(query_state_.lock);
+
+    if (query_ref->numReferences.load(std::memory_order_acquire) > 0) {
+        return;
+    }
+
+    // Enough tmp space for 1 archetype with the maximum number of components
+    StackArray<uint32_t, 1 + max_archetype_components_> tmp_query_indices;
+
+    auto saveTmpIndices = [&](uint32_t cur_offset) {
+        assert(query_state_.queryData.size() + tmp_query_indices.size() <
+               ICfg::maxQueryOffsets);
+
+        query_state_.queryData.resize(cur_offset + tmp_query_indices.size(), [](auto) {});
+        memcpy(&query_state_.queryData[cur_offset], tmp_query_indices.data(),
+               sizeof(uint32_t) * tmp_query_indices.size());
+    };
+
+    const uint32_t query_offset = query_state_.queryData.size();
+    uint32_t cur_offset = query_offset;
 
     uint32_t matching_archetypes = 0;
     for (int archetype_idx = 0, num_archetypes = archetype_stores_.size();
@@ -81,25 +105,35 @@ uint32_t StateManager::makeQuery(const ComponentID *components,
 
         matching_archetypes += 1;
 
-        query_indices.push_back(uint32_t(archetype_idx));
+        if (tmp_query_indices.size() + 1 + num_components >
+                tmp_query_indices.capacity()) {
+            assert(tmp_query_indices.size() > 0);
 
-        for (int component_idx = 0; component_idx < (int)num_components;
+            saveTmpIndices(cur_offset);
+            cur_offset += tmp_query_indices.size();
+            tmp_query_indices.clear();
+        }
+
+        tmp_query_indices.push_back(uint32_t(archetype_idx));
+
+        int component_idx;
+        for (component_idx = 0; component_idx < (int)num_components;
              component_idx++) {
             ComponentID component = components[component_idx];
             if (component.id == componentID<Entity>().id) {
-                query_indices.push_back(0);
+                tmp_query_indices.push_back(0);
             } else {
-                query_indices.push_back(archetype.columnLookup[component.id]);
+                tmp_query_indices.push_back(archetype.columnLookup[component.id]);
             }
         }
     }
 
-    *offset = query_data_.size();
-    query_data_.resize(*offset + query_indices.size(), [](auto) {});
-    memcpy(&query_data_[*offset], query_indices.data(),
-           sizeof(uint32_t) * query_indices.size());
+    if (tmp_query_indices.size() > 0) {
+        saveTmpIndices(cur_offset);
+    }
 
-    return matching_archetypes;
+    query_ref->offset = query_offset;
+    query_ref->numMatchingArchetypes = matching_archetypes;
 }
 
 void StateManager::registerComponent(uint32_t id,
@@ -137,18 +171,6 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
 #ifdef MADRONA_MW_MODE
     type_ptr[0] = *component_infos_[componentID<WorldID>().id];
     type_ptr += 1;
-
-    if (world_indices_.size() <= id * num_worlds_) {
-        world_indices_.resize((id + 1) * num_worlds_, [](auto) {});
-    }
-
-    for (int i = 0; i < (int)num_worlds_; i++) {
-        int world_offset = id * num_worlds_;
-        world_indices_[world_offset + i] = WorldIndex {
-            ~0u,
-            ~0u,
-        };
-    }
 #endif
 
     for (int i = 0; i < (int)num_user_components; i++) {
@@ -179,6 +201,8 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
         std::move(lookup_input),
     });
 }
+
+StateManager::QueryState StateManager::query_state_ = StateManager::QueryState();
 
 uint32_t StateManager::next_component_id_ = 0;
 uint32_t StateManager::next_archetype_id_ = 0;

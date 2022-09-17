@@ -5,22 +5,34 @@
 
 namespace madrona {
 
+struct QueryRef {
+    std::atomic_uint32_t numReferences;
+    uint32_t offset;
+    uint32_t numMatchingArchetypes;
+};
+
 template <typename... ComponentTs>
 class Query {
 public:
     Query();
+    Query(const Query &) = delete;
+    Query(Query &&o);
+
+    ~Query();
+
+    Query & operator=(const Query &) = delete;
+    Query & operator=(Query &&o);
 
     inline uint32_t numMatchingArchetypes() const;
 
 private:
-    Query(uint32_t indices_offset, uint32_t num_archetypes);
+    Query(bool initialized);
+    bool initialized_;
 
-    uint32_t indices_offset_;
-    uint32_t num_archetypes_;
+    static QueryRef ref_;
 
 friend class StateManager;
 };
-
 
 template <typename T>
 class ResultRef {
