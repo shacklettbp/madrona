@@ -55,8 +55,8 @@ uint32_t Query<ComponentTs...>::numMatchingArchetypes() const
 template <typename... ComponentTs>
 QueryRef Query<ComponentTs...>::ref_ = QueryRef {
     0,
-    0,
-    0,
+    ~0u,
+    ~0u,
 };
 
 template <typename ComponentT>

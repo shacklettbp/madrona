@@ -61,9 +61,12 @@ void StateManager::makeQuery(const ComponentID *components,
 {
     std::lock_guard lock(query_state_.lock);
 
-    if (query_ref->numReferences.load(std::memory_order_acquire) > 0) {
+    if (query_ref->numMatchingArchetypes != ~0u) {
         return;
     }
+
+    // FIXME: should reclaim dropped queries in this function by 
+    // recording query_ref and finding unused ranges (numReferences == 0)
 
     // Enough tmp space for 1 archetype with the maximum number of components
     StackArray<uint32_t, 1 + max_archetype_components_> tmp_query_indices;
@@ -103,8 +106,6 @@ void StateManager::makeQuery(const ComponentID *components,
             continue;
         }
 
-        matching_archetypes += 1;
-
         if (tmp_query_indices.size() + 1 + num_components >
                 tmp_query_indices.capacity()) {
             assert(tmp_query_indices.size() > 0);
@@ -114,6 +115,7 @@ void StateManager::makeQuery(const ComponentID *components,
             tmp_query_indices.clear();
         }
 
+        matching_archetypes += 1;
         tmp_query_indices.push_back(uint32_t(archetype_idx));
 
         int component_idx;
@@ -128,9 +130,7 @@ void StateManager::makeQuery(const ComponentID *components,
         }
     }
 
-    if (tmp_query_indices.size() > 0) {
-        saveTmpIndices(cur_offset);
-    }
+    saveTmpIndices(cur_offset);
 
     query_ref->offset = query_offset;
     query_ref->numMatchingArchetypes = matching_archetypes;
