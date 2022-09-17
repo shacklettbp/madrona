@@ -48,8 +48,8 @@ public:
         alloc_.dealloc(ptr_);
     }
 
-    RefT operator=(const DynArray &) = delete;
-    RefT operator=(DynArray &&o)
+    DynArray & operator=(const DynArray &) = delete;
+    DynArray & operator=(DynArray &&o)
     {
         clear();
         alloc_.dealloc(ptr_);
@@ -61,6 +61,8 @@ public:
         o.ptr_ = nullptr;
         o.n_ = 0;
         o.capacity_ = 0;
+
+        return *this;
     }
 
     void clear()

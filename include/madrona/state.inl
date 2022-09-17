@@ -146,15 +146,16 @@ ArchetypeID StateManager::archetypeID() const
     };
 }
 
-template <typename ComponentT>
-ResultRef<ComponentT> StateManager::get(Entity entity)
+Loc StateManager::getLoc(Entity e) const
 {
-    Loc loc = id_mgr_.getLoc(entity);
-    if (!loc.valid()) {
-        return ResultRef<ComponentT>(nullptr);
-    }
+    return id_mgr_.getLoc(e);
+}
 
-    ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
+
+template <typename ComponentT>
+inline ResultRef<ComponentT> StateManager::get(Loc loc)
+{
+    auto &archetype = *archetype_stores_[loc.archetype];
 
     auto col_idx = archetype.columnLookup.lookup(componentID<ComponentT>().id);
 
@@ -165,6 +166,18 @@ ResultRef<ComponentT> StateManager::get(Entity entity)
     return ResultRef<ComponentT>(
         (ComponentT *)archetype.tbl.data(*col_idx) + loc.row);
 }
+
+template <typename ComponentT>
+ResultRef<ComponentT> StateManager::get(Entity entity)
+{
+    Loc loc = id_mgr_.getLoc(entity);
+    if (!loc.valid()) {
+        return ResultRef<ComponentT>(nullptr);
+    }
+
+    return get<ComponentT>(loc);
+}
+
 
 template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT> StateManager::archetype()

@@ -81,6 +81,11 @@ public:
     template <typename ArchetypeT>
     ArchetypeID archetypeID() const;
 
+    inline Loc getLoc(Entity e) const;
+
+    template <typename ComponentT>
+    inline ResultRef<ComponentT> get(Loc loc);
+
     template <typename ComponentT>
     inline ResultRef<ComponentT> get(Entity entity);
 
