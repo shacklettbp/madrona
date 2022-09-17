@@ -161,17 +161,6 @@ void StateManager::iterateArchetypes(const Query<ComponentTs...> &query,
     iterateArchetypesImpl(query, std::forward<Fn>(fn), IndicesWrapper());
 }
 
-template <typename ComponentT>
-ComponentT * StateManager::getArchetypeComponent(ArchetypeStore &archetype,
-                                                 uint32_t col_idx)
-{
-    if constexpr (std::is_same_v<ComponentT, Entity>) {
-        return (Entity *)archetype.tbl.data(0);
-    } else {
-        return (ComponentT *)archetype.tbl.data(col_idx);
-    }
-}
-
 template <typename... ComponentTs, typename Fn, uint32_t... Indices>
 void StateManager::iterateArchetypesImpl(const Query<ComponentTs...> &query,
     Fn &&fn, std::integer_sequence<uint32_t, Indices...>)
@@ -189,7 +178,7 @@ void StateManager::iterateArchetypesImpl(const Query<ComponentTs...> &query,
 
         int num_rows = archetype.tbl.numRows();
 
-        fn(num_rows, getArchetypeComponent<ComponentTs>(archetype,
+        fn(num_rows, (ComponentTs *)archetype.tbl.data(
             cur_query_ptr[Indices]) ...);
 
         cur_query_ptr += sizeof...(ComponentTs);
