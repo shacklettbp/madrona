@@ -86,6 +86,10 @@ void StateManager::makeQuery(const ComponentID *components,
     uint32_t matching_archetypes = 0;
     for (int archetype_idx = 0, num_archetypes = archetype_stores_.size();
          archetype_idx < num_archetypes; archetype_idx++) {
+        if (!archetype_stores_[archetype_idx].has_value()) {
+            continue;
+        }
+
         auto &archetype = *archetype_stores_[archetype_idx];
 
         bool has_components = true;
