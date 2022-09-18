@@ -81,41 +81,37 @@ Entity EntityManager::newEntity(Cache &cache,
     }
 
     // No free IDs, refill the cache from the global free list
-    auto fetchGlobalIDs = [this]() {
-        FreeHead cur_head = free_head_.load(std::memory_order_acquire);
-        FreeHead new_head;
-        GenLoc *gen_loc;
+    FreeHead cur_head = free_head_.load(std::memory_order_acquire);
+    FreeHead new_head;
+    GenLoc *cur_head_loc;
 
-        do {
-            if (cur_head.head == ~0u) {
-                break;
-            }
+    do {
+        if (cur_head.head == ~0u) {
+            break;
+        }
 
-            new_head.gen = new_head.gen + 1;
-            gen_loc = getGenLoc(cur_head.head);
+        new_head.gen = cur_head.gen + 1;
+        cur_head_loc = getGenLoc(cur_head.head);
 
-            // On the global list, 'archetype' acts as the next pointer. This
-            // preserves 'row' for the sublists added by the caches, each of
-            // which is guaranteed to be ICfg::idsPerCache in size.
-            // This works, because there are guaranteed to be no contiguous
-            // blocks by the time a sublist is added to the global list, so
-            // the value of archetype is no longer needed in the sublist
-            // context
-            new_head.head = gen_loc->loc.archetype;
-        } while (!free_head_.compare_exchange_weak(
-            cur_head, new_head, std::memory_order_release,
-            std::memory_order_acquire));
+        // On the global list, 'archetype' acts as the next pointer. This
+        // preserves 'row' for the sublists added by the caches, each of
+        // which is guaranteed to be ICfg::idsPerCache in size.
+        // This works, because there are guaranteed to be no contiguous
+        // blocks by the time a sublist is added to the global list, so
+        // the value of archetype is no longer needed in the sublist
+        // context
+        new_head.head = cur_head_loc->loc.archetype;
+    } while (!free_head_.compare_exchange_weak(
+        cur_head, new_head, std::memory_order_release,
+        std::memory_order_acquire));
 
-        // Assign archetype to 1 (id block of size 1) so as to not confuse
-        // the cache's processing of the freelist
-        gen_loc->loc.archetype = 1;
-
-        return cur_head.head;
-    };
-    
-    uint32_t free_ids = fetchGlobalIDs();
+    uint32_t free_ids = cur_head.head;
 
     if (free_ids != ~0u) {
+        // Assign archetype to 1 (id block of size 1) so as to not confuse
+        // the cache's processing of the freelist
+        cur_head_loc->loc.archetype = 1;
+
         cache.free_head_ = free_ids;
         cache.num_free_ids_ = ICfg::idsPerCache - 1;
         return assignCachedID(&cache.free_head_);
@@ -138,7 +134,7 @@ Entity EntityManager::newEntity(Cache &cache,
 
     uint32_t first_id = block_start;
 
-    GenLoc *entity_loc = getGenLoc(block_start);
+    GenLoc *entity_loc = getGenLoc(first_id);
     *entity_loc = {
         .loc = Loc {
             .archetype = archetype,
@@ -202,6 +198,9 @@ void EntityManager::freeEntity(Cache &cache, Entity e)
         } while (free_head_.compare_exchange_weak(
             cur_head, new_head, std::memory_order_release,
             std::memory_order_relaxed));
+
+        cache.overflow_head_ = ~0u;
+        cache.num_overflow_ids_ = 0;
     }
 }
 
