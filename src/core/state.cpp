@@ -11,38 +11,135 @@ namespace madrona {
 
 namespace ICfg {
 static constexpr uint32_t maxQueryOffsets = 100'000;
+static constexpr uint32_t idsPerCache = 64;
 }
 
-IDManager::IDManager()
-    : store_(sizeof(GenLoc), alignof(GenLoc), 0, ~0u),
-      num_ids_(0),
-      free_id_head_(~0u)
+EntityManager::Cache::Cache()
+    : free_head_(~0u),
+      num_free_ids_(0),
+      overflow_head_(~0u),
+      num_overflow_ids_(0)
 {}
 
-Entity IDManager::newEntity(uint32_t archetype, uint32_t row)
-{
-    if (free_id_head_ != ~0u) {
-        uint32_t new_id = free_id_head_;
-        GenLoc *new_loc = getGenLoc(new_id);
-        free_id_head_ = new_loc->loc.row;
+EntityManager::EntityManager()
+    : store_(sizeof(GenLoc), alignof(GenLoc), 0, ~0u),
+      num_ids_(0),
+      expand_lock_{},
+      free_head_(FreeHead {
+          .gen = 0,
+          .head = ~0u,
+      })
+{}
 
-        new_loc->loc = Loc {
+Entity EntityManager::newEntity(Cache &cache,
+                                uint32_t archetype, uint32_t row)
+{
+    auto assignCachedID = [this, archetype, row](uint32_t *head) {
+        uint32_t new_id = *head;
+        GenLoc *free_loc = getGenLoc(new_id);
+
+        // archetype is overloaded for GenLoc in the freelist
+        // to represent multiple contiguous free IDs
+        uint32_t num_contiguous = free_loc->loc.archetype;
+
+        if (num_contiguous == 1) {
+            *head = free_loc->loc.row;
+        } else {
+            uint32_t next_free = new_id + 1;
+            GenLoc *next_free_loc = getGenLoc(next_free);
+            *next_free_loc = GenLoc {
+                .loc = Loc {
+                    .archetype = num_contiguous - 1,
+                    .row = free_loc->loc.row,
+                },
+                .gen = 0,
+            };
+            *head = next_free;
+        }
+
+        free_loc->loc = Loc {
             .archetype = archetype,
             .row = row,
         };
 
         return Entity {
-            .gen = new_loc->gen,
+            .gen = free_loc->gen,
             .id = new_id,
         };
+    };
+
+    // First, check if there is a free entity in the overflow cache
+    if (cache.num_overflow_ids_ > 0) {
+        cache.num_overflow_ids_ -= 1;
+        return assignCachedID(&cache.overflow_head_);
     }
 
-    uint32_t id = num_ids_++;
-    store_.expand(num_ids_);
+    // Next, check the main cache
+    if (cache.num_free_ids_ > 0) {
+        cache.num_free_ids_ -= 1;
+        return assignCachedID(&cache.free_head_);
+    }
 
-    GenLoc *new_loc = getGenLoc(id);
+    // No free IDs, refill the cache from the global free list
+    auto fetchGlobalIDs = [this]() {
+        FreeHead cur_head = free_head_.load(std::memory_order_acquire);
+        FreeHead new_head;
+        GenLoc *gen_loc;
 
-    *new_loc = {
+        do {
+            if (cur_head.head == ~0u) {
+                break;
+            }
+
+            new_head.gen = new_head.gen + 1;
+            gen_loc = getGenLoc(cur_head.head);
+
+            // On the global list, 'archetype' acts as the next pointer. This
+            // preserves 'row' for the sublists added by the caches, each of
+            // which is guaranteed to be ICfg::idsPerCache in size.
+            // This works, because there are guaranteed to be no contiguous
+            // blocks by the time a sublist is added to the global list, so
+            // the value of archetype is no longer needed in the sublist
+            // context
+            new_head.head = gen_loc->loc.archetype;
+        } while (!free_head_.compare_exchange_weak(
+            cur_head, new_head, std::memory_order_release,
+            std::memory_order_acquire));
+
+        // Assign archetype to 1 (id block of size 1) so as to not confuse
+        // the cache's processing of the freelist
+        gen_loc->loc.archetype = 1;
+
+        return cur_head.head;
+    };
+    
+    uint32_t free_ids = fetchGlobalIDs();
+
+    if (free_ids != ~0u) {
+        cache.free_head_ = free_ids;
+        cache.num_free_ids_ = ICfg::idsPerCache - 1;
+        return assignCachedID(&cache.free_head_);
+    }
+
+    // No free IDs at all, expand the ID store
+    uint32_t block_start;
+    {
+        std::lock_guard lock(expand_lock_);
+
+        // Note there is no double checked locking here.
+        // It's possible that free ids have been returned at this point,
+        // but if there is that much contention overallocating IDs seems
+        // relatively harmless
+
+        block_start = num_ids_;
+        num_ids_ += ICfg::idsPerCache;
+        store_.expand(num_ids_);
+    }
+
+    uint32_t first_id = block_start;
+
+    GenLoc *entity_loc = getGenLoc(block_start);
+    *entity_loc = {
         .loc = Loc {
             .archetype = archetype,
             .row = row,
@@ -50,33 +147,147 @@ Entity IDManager::newEntity(uint32_t archetype, uint32_t row)
         .gen = 0,
     };
 
+    uint32_t free_start = block_start + 1;
+    GenLoc *free_loc = getGenLoc(free_start);
+
+    *free_loc = {
+        .loc = Loc {
+            // In the free list, archetype is overloaded
+            // to handle contiguous free elements
+            .archetype = ICfg::idsPerCache - 1,
+            .row = ~0u,
+        },
+        .gen = 0,
+    };
+
+    cache.free_head_ = free_start;
+    cache.num_free_ids_ = ICfg::idsPerCache - 1;
+
     return Entity {
         .gen = 0,
-        .id = id,
+        .id = first_id,
     };
 }
 
-void IDManager::freeEntity(Entity e)
+void EntityManager::freeEntity(Cache &cache, Entity e)
 {
     GenLoc *gen_loc = getGenLoc(e.id);
     gen_loc->gen++;
+    gen_loc->loc.archetype = 1;
 
-    gen_loc->loc.row = free_id_head_;
-    free_id_head_ = e.id;
+    if (cache.num_free_ids_ < ICfg::idsPerCache) {
+        gen_loc->loc.row = cache.free_head_;
+        cache.free_head_ = e.id;
+        cache.num_free_ids_ += 1;
+
+        return;
+    }
+
+    if (cache.num_overflow_ids_ < ICfg::idsPerCache) {
+        gen_loc->loc.row = cache.overflow_head_;
+        cache.overflow_head_ = e.id;
+        cache.num_overflow_ids_ += 1;
+    }
+
+    // If overflow cache is too big return it to the global free list
+    if (cache.num_overflow_ids_ == ICfg::idsPerCache) {
+        FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
+        FreeHead new_head;
+        new_head.head = cache.overflow_head_;
+        GenLoc *new_loc = getGenLoc(cache.overflow_head_);
+
+        do {
+            new_head.gen = cur_head.gen + 1;
+            new_loc->loc.archetype = cur_head.head;
+        } while (free_head_.compare_exchange_weak(
+            cur_head, new_head, std::memory_order_release,
+            std::memory_order_relaxed));
+    }
 }
 
-void IDManager::bulkFree(Entity *entities, uint32_t num_entities)
+void EntityManager::bulkFree(Cache &cache, Entity *entities,
+                             uint32_t num_entities)
 {
-    uint32_t prev = free_id_head_;
-    for (int idx = 0, n = num_entities; idx < n; idx++) {
-        Entity e = entities[idx];
-        GenLoc *gen_loc = getGenLoc(e.id);
-        gen_loc->gen++;
-        gen_loc->loc.row = prev;
- 
-        prev = e.id;
+    if (num_entities == 0) return;
+
+    // The trick with this function is that the sublists added to the
+    // global free list need to be exactly ICfg::idsPerCache in size
+    // num_entities may not be divisible, so use the cache for any overflow
+    
+    uint32_t cur_chunk_size;
+    for (int base_idx = 0; base_idx < (int)num_entities;
+         base_idx += ICfg::idsPerCache) {
+        uint32_t num_remaining = num_entities - base_idx;
+        cur_chunk_size = std::min(num_remaining, ICfg::idsPerCache);
+
+        for (int sub_idx = 0; sub_idx < (int)cur_chunk_size - 1; sub_idx++) {
+            int idx = base_idx + sub_idx;
+
+            Entity cur = entities[idx];
+            Entity next = entities[idx + 1];
+
+            GenLoc *gen_loc = getGenLoc(cur.id);
+            gen_loc->gen++;
+            gen_loc->loc.row = next.id;
+            gen_loc->loc.archetype = 1;
+        }
+
+        // Link up to the next section of the global list
+        GenLoc *first_loc = getGenLoc(entities[base_idx].id);
+        if (num_remaining > ICfg::idsPerCache) {
+            first_loc->loc.archetype =
+                entities[base_idx + ICfg::idsPerCache].id;
+        }
+
+        GenLoc *last_loc = getGenLoc(entities[num_remaining - 1].id);
+        last_loc->gen++;
+        last_loc->loc.row = ~0u;
+        last_loc->loc.archetype = 1;
     }
-    free_id_head_ = prev;
+
+    // The final chunk has an odd size we need to take care of
+    if (cur_chunk_size > 0) {
+        if (cache.num_overflow_ids_ + cur_chunk_size < ICfg::idsPerCache) {
+
+        }
+    }
+
+    uint32_t num_leftover = num_entities - base_idx;
+    if (num_leftover + cache.num_overflow_ids_ > ICfg::idsPerCache) {
+    }
+
+    uint32_t main_cache_space = ICfg::idsPerCache - cache.num_free_ids_;
+
+
+
+    uint32_t overflow_cache_space =
+        ICfg::idsPerCache - cache.num_overflow_ids_;
+
+    for (int idx = 0, n = num_entities - 1; idx < n; idx++) {
+        Entity cur = entities[idx];
+        Entity next = entities[idx + 1];
+
+        GenLoc *gen_loc = getGenLoc(cur.id);
+        gen_loc->gen++;
+        gen_loc->loc.row = next.id;
+        gen_loc->loc.archetype = 1;
+    }
+
+    Entity last = entities[num_entities - 1];
+    GenLoc *last_loc = getGenLoc(last.id);
+    last_loc->gen++;
+    last_loc->loc.archetype = 1;
+
+    FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
+    FreeHead new_head;
+    new_head.head = entities[0].id;
+
+    do {
+        new_head.gen = cur_head.gen + 1;
+        new_loc->loc.archetype = cur_head.head;
+    } while (free_head_.compare_exchange_weak(
+        cur_head, new_head, std::memory_order_release,
+        std::memory_order_relaxed));
 }
 
 #ifdef MADRONA_MW_MODE

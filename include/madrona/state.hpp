@@ -36,16 +36,33 @@ struct WorldID {
 };
 #endif
 
-class IDManager {
+class EntityManager {
 public:
-    IDManager();
+    class Cache {
+    public:
+        Cache();
+        Cache(const Cache &) = delete;
+    
+    private:
+        uint32_t free_head_;
+        uint32_t num_free_ids_;
+        uint32_t overflow_head_;
+        uint32_t num_overflow_ids_;
+    
+    friend class EntityManager;
+    };
+
+    EntityManager();
+
+    void initCaches(Cache *caches, int num_caches);
+
     inline Loc getLoc(Entity e) const;
     inline void updateLoc(Entity e, uint32_t row);
 
-    Entity newEntity(uint32_t archetype, uint32_t row);
-    void freeEntity(Entity e);
+    Entity newEntity(Cache &cache, uint32_t archetype, uint32_t row);
+    void freeEntity(Cache &cache, Entity e);
 
-    void bulkFree(Entity *entities, uint32_t num_entities);
+    void bulkFree(Cache &cache, Entity *entities, uint32_t num_entities);
 
 private:
     struct GenLoc {
@@ -58,7 +75,17 @@ private:
 
     VirtualStore store_;
     uint32_t num_ids_;
-    uint32_t free_id_head_;
+    utils::SpinLock expand_lock_;
+
+    struct alignas(std::atomic_uint64_t) FreeHead {
+        uint32_t gen;
+        uint32_t head;
+    };
+
+    std::atomic<FreeHead> free_head_;
+};
+
+class Transaction {
 };
 
 class StateManager {
@@ -101,10 +128,23 @@ public:
     template <typename... ComponentTs, typename Fn>
     inline void iterateEntities(const Query<ComponentTs...> &query, Fn &&fn);
 
-    template <typename ArchetypeT, typename... Args>
-    inline Entity makeEntity(Args && ...args);
+    Transaction makeTransaction();
+    void commitTransaction(Transaction &&txn);
 
-    void destroyEntity(Entity e);
+    template <typename ArchetypeT, typename... Args>
+    inline Entity makeEntity(Transaction &txn,
+                             EntityManager::Cache &entity_cache,
+                             Args && ...args);
+
+    void destroyEntity(Transaction &txn, EntityManager::Cache &entity_cache,
+                       Entity e);
+
+    template <typename ArchetypeT, typename... Args>
+    inline Entity makeEntityImmediate(EntityManager::Cache &entity_cache,
+                                      Args && ...args);
+
+    void destroyEntityImmediate(EntityManager::Cache &entity_cache, Entity e);
+    
 
     template <typename ArchetypeT>
     inline void reset();
@@ -152,7 +192,7 @@ private:
 
     void reset(uint32_t archetype_id);
 
-    IDManager id_mgr_;
+    EntityManager id_mgr_;
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;

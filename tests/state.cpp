@@ -122,6 +122,7 @@ TEST(State, Indexing)
 TEST(State, MultiColumn)
 {
     StateManager state;
+    EntityCache entity_cache;
     state.registerComponent<Component1>();
     state.registerComponent<Component2>();
     state.registerComponent<Component3>();
@@ -131,7 +132,7 @@ TEST(State, MultiColumn)
 
     DynArray<Entity> entities(num_entities);
     for (int i = 0; i < num_entities; i++) {
-        entities.push_back(state.makeEntity<Archetype2>());
+        entities.push_back(state.makeEntityImmediate<Archetype2>(entity_cache));
 
         Loc loc = state.getLoc(entities[i]);
         EXPECT_TRUE(loc.valid());
@@ -152,11 +153,11 @@ TEST(State, MultiColumn)
     }
 
     for (int i = 0; i < num_entities; i += 10) {
-        state.destroyEntity(entities[i]);
+        state.destroyEntityImmediate(entity_cache, entities[i]);
     }
 
     for (int i = 0; i < num_entities; i += 10) {
-        entities[i] = state.makeEntity<Archetype2>();
+        entities[i] = state.makeEntityImmediate<Archetype2>(entity_cache);
     }
 
     for (int i = 0; i < num_entities; i++) {
@@ -183,6 +184,7 @@ TEST(State, MultiColumn)
 TEST(State, DeleteMany)
 {
     StateManager state;
+    EntityCache entity_cache;
     state.registerComponent<ComponentBig>();
     state.registerArchetype<Archetype3>();
 
@@ -190,7 +192,8 @@ TEST(State, DeleteMany)
 
     DynArray<Entity> entities(num_entities);
     for (int i = 0; i < num_entities; i++) {
-        entities.push_back(state.makeEntity<Archetype3>());
+        entities.push_back(
+            state.makeEntityImmediate<Archetype3>(entity_cache));
 
         Loc loc = state.getLoc(entities[i]);
 
@@ -199,7 +202,7 @@ TEST(State, DeleteMany)
     }
 
     for (int i = 2; i < num_entities - 2; i++) {
-        state.destroyEntity(entities[i]);
+        state.destroyEntityImmediate(entity_cache, entities[i]);
     }
 
     for (int i = 0; i < 2; i++) {

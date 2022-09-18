@@ -7,7 +7,7 @@
 
 namespace madrona {
 
-Loc IDManager::getLoc(Entity e) const
+Loc EntityManager::getLoc(Entity e) const
 {
     if (e.id >= num_ids_) {
         return Loc {
@@ -30,7 +30,7 @@ Loc IDManager::getLoc(Entity e) const
     return gen_loc->loc;
 }
 
-void IDManager::updateLoc(Entity e, uint32_t row)
+void EntityManager::updateLoc(Entity e, uint32_t row)
 {
     GenLoc *gen_loc = getGenLoc(e.id);
     assert(e.gen == gen_loc->gen);
@@ -38,12 +38,12 @@ void IDManager::updateLoc(Entity e, uint32_t row)
     gen_loc->loc.row = row;
 }
 
-IDManager::GenLoc * IDManager::getGenLoc(uint32_t id)
+auto EntityManager::getGenLoc(uint32_t id) -> GenLoc *
 {
     return (GenLoc *)store_.data() + (uintptr_t)id;
 }
 
-const IDManager::GenLoc * IDManager::getGenLoc(uint32_t id) const
+auto EntityManager::getGenLoc(uint32_t id) const -> const GenLoc *
 {
     return (const GenLoc *)store_.data() + (uintptr_t)id;
 }
