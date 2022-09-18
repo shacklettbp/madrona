@@ -33,17 +33,18 @@ TEST(State, Indexing)
     int num_entities = 1'000'000;
 
     StateManager state;
+    EntityManager::Cache cache;
     state.registerComponent<Component1>();
     state.registerArchetype<Archetype1>();
 
-    Entity init_e = state.makeEntity<Archetype1>();
+    Entity init_e = state.makeEntityImmediate<Archetype1>(cache);
 
     EXPECT_TRUE(state.get<Component1>(init_e).valid());
 
     DynArray<Entity> entities(0);
 
     for (int i = 0; i < num_entities; i++) {
-        entities.push_back(state.makeEntity<Archetype1>());
+        entities.push_back(state.makeEntityImmediate<Archetype1>(cache));
     }
 
     for (int i = 0; i < num_entities; i++) {
@@ -51,7 +52,7 @@ TEST(State, Indexing)
     }
 
     for (int i = 0; i < num_entities; i += 10) {
-        state.destroyEntity(entities[i]);
+        state.destroyEntityImmediate(cache, entities[i]);
     }
 
     for (int i = 0; i < num_entities; i++) {
@@ -72,7 +73,7 @@ TEST(State, Indexing)
 
     entities = std::move(new_entities);
     while ((int)entities.size() != num_entities) {
-        entities.push_back(state.makeEntity<Archetype1>());
+        entities.push_back(state.makeEntityImmediate<Archetype1>(cache));
     }
 
     for (const auto &e : deleted_entities) {
@@ -100,7 +101,7 @@ TEST(State, Indexing)
             EXPECT_TRUE(res.valid());
             EXPECT_EQ(res.value().v, i );
 
-            state.destroyEntity(entities[i]);
+            state.destroyEntityImmediate(cache, entities[i]);
             auto loc = state.getLoc(entities[i]);
             EXPECT_FALSE(loc.valid());
         } else {
@@ -122,7 +123,7 @@ TEST(State, Indexing)
 TEST(State, MultiColumn)
 {
     StateManager state;
-    EntityCache entity_cache;
+    EntityManager::Cache cache;
     state.registerComponent<Component1>();
     state.registerComponent<Component2>();
     state.registerComponent<Component3>();
@@ -132,7 +133,7 @@ TEST(State, MultiColumn)
 
     DynArray<Entity> entities(num_entities);
     for (int i = 0; i < num_entities; i++) {
-        entities.push_back(state.makeEntityImmediate<Archetype2>(entity_cache));
+        entities.push_back(state.makeEntityImmediate<Archetype2>(cache));
 
         Loc loc = state.getLoc(entities[i]);
         EXPECT_TRUE(loc.valid());
@@ -153,11 +154,11 @@ TEST(State, MultiColumn)
     }
 
     for (int i = 0; i < num_entities; i += 10) {
-        state.destroyEntityImmediate(entity_cache, entities[i]);
+        state.destroyEntityImmediate(cache, entities[i]);
     }
 
     for (int i = 0; i < num_entities; i += 10) {
-        entities[i] = state.makeEntityImmediate<Archetype2>(entity_cache);
+        entities[i] = state.makeEntityImmediate<Archetype2>(cache);
     }
 
     for (int i = 0; i < num_entities; i++) {
@@ -184,7 +185,7 @@ TEST(State, MultiColumn)
 TEST(State, DeleteMany)
 {
     StateManager state;
-    EntityCache entity_cache;
+    EntityManager::Cache cache;
     state.registerComponent<ComponentBig>();
     state.registerArchetype<Archetype3>();
 
@@ -193,7 +194,7 @@ TEST(State, DeleteMany)
     DynArray<Entity> entities(num_entities);
     for (int i = 0; i < num_entities; i++) {
         entities.push_back(
-            state.makeEntityImmediate<Archetype3>(entity_cache));
+            state.makeEntityImmediate<Archetype3>(cache));
 
         Loc loc = state.getLoc(entities[i]);
 
@@ -202,7 +203,7 @@ TEST(State, DeleteMany)
     }
 
     for (int i = 2; i < num_entities - 2; i++) {
-        state.destroyEntityImmediate(entity_cache, entities[i]);
+        state.destroyEntityImmediate(cache, entities[i]);
     }
 
     for (int i = 0; i < 2; i++) {

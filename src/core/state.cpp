@@ -213,57 +213,8 @@ void EntityManager::bulkFree(Cache &cache, Entity *entities,
     // The trick with this function is that the sublists added to the
     // global free list need to be exactly ICfg::idsPerCache in size
     // num_entities may not be divisible, so use the cache for any overflow
-    
-    uint32_t cur_chunk_size;
-    for (int base_idx = 0; base_idx < (int)num_entities;
-         base_idx += ICfg::idsPerCache) {
-        uint32_t num_remaining = num_entities - base_idx;
-        cur_chunk_size = std::min(num_remaining, ICfg::idsPerCache);
 
-        for (int sub_idx = 0; sub_idx < (int)cur_chunk_size - 1; sub_idx++) {
-            int idx = base_idx + sub_idx;
-
-            Entity cur = entities[idx];
-            Entity next = entities[idx + 1];
-
-            GenLoc *gen_loc = getGenLoc(cur.id);
-            gen_loc->gen++;
-            gen_loc->loc.row = next.id;
-            gen_loc->loc.archetype = 1;
-        }
-
-        // Link up to the next section of the global list
-        GenLoc *first_loc = getGenLoc(entities[base_idx].id);
-        if (num_remaining > ICfg::idsPerCache) {
-            first_loc->loc.archetype =
-                entities[base_idx + ICfg::idsPerCache].id;
-        }
-
-        GenLoc *last_loc = getGenLoc(entities[num_remaining - 1].id);
-        last_loc->gen++;
-        last_loc->loc.row = ~0u;
-        last_loc->loc.archetype = 1;
-    }
-
-    // The final chunk has an odd size we need to take care of
-    if (cur_chunk_size > 0) {
-        if (cache.num_overflow_ids_ + cur_chunk_size < ICfg::idsPerCache) {
-
-        }
-    }
-
-    uint32_t num_leftover = num_entities - base_idx;
-    if (num_leftover + cache.num_overflow_ids_ > ICfg::idsPerCache) {
-    }
-
-    uint32_t main_cache_space = ICfg::idsPerCache - cache.num_free_ids_;
-
-
-
-    uint32_t overflow_cache_space =
-        ICfg::idsPerCache - cache.num_overflow_ids_;
-
-    for (int idx = 0, n = num_entities - 1; idx < n; idx++) {
+    auto linkToNext = [this, entities](int idx) {
         Entity cur = entities[idx];
         Entity next = entities[idx + 1];
 
@@ -271,20 +222,91 @@ void EntityManager::bulkFree(Cache &cache, Entity *entities,
         gen_loc->gen++;
         gen_loc->loc.row = next.id;
         gen_loc->loc.archetype = 1;
+    };
+    
+    int base_idx;
+    uint32_t num_remaining;
+    GenLoc *global_tail_loc = nullptr;
+    uint32_t num_full_sublists = 0;
+    for (base_idx = 0; base_idx < (int)num_entities;
+         base_idx += ICfg::idsPerCache) {
+
+        num_remaining = num_entities - base_idx;
+        if (num_remaining < ICfg::idsPerCache) {
+            break;
+        }
+
+        uint32_t head_id = entities[base_idx].id;
+        for (int sub_idx = 0; sub_idx < (int)ICfg::idsPerCache; sub_idx++) {
+            int idx = base_idx + sub_idx;
+            linkToNext(idx);
+        }
+
+        if (global_tail_loc != nullptr) {
+            global_tail_loc->loc.archetype = head_id;
+        }
+
+        global_tail_loc = getGenLoc(head_id);
+
+        GenLoc *last_loc = getGenLoc(entities[num_remaining - 1].id);
+        last_loc->gen++;
+        last_loc->loc.row = ~0u;
+        last_loc->loc.archetype = 1;
+        
+        num_full_sublists++;
     }
 
-    Entity last = entities[num_entities - 1];
-    GenLoc *last_loc = getGenLoc(last.id);
-    last_loc->gen++;
-    last_loc->loc.archetype = 1;
+    // The final chunk has an odd size we need to take care of
+    if (num_remaining != ICfg::idsPerCache) {
+        uint32_t start_id = entities[base_idx].id;
+        for (int idx = base_idx; idx < (int)num_entities - 1; idx++) {
+            linkToNext(idx);
+        }
+
+        GenLoc *tail_loc = getGenLoc(entities[num_entities - 1].id);
+        tail_loc->gen++;
+        tail_loc->loc.archetype = 1;
+        tail_loc->loc.row = cache.overflow_head_;
+
+        uint32_t num_from_overflow = ICfg::idsPerCache - num_remaining;
+        if (cache.num_overflow_ids_ < num_from_overflow) {
+            // The extra IDs fit in the overflow cache
+            cache.overflow_head_ = start_id;
+            cache.num_overflow_ids_ += num_remaining;
+        } else {
+            // The extra IDs don't fit in the overflow cache, need to add to global list
+            uint32_t next_id = cache.overflow_head_;
+            GenLoc *overflow_loc;
+            for (int i = 0; i < (int)num_from_overflow; i++) {
+                overflow_loc = getGenLoc(next_id);
+                next_id = overflow_loc->loc.row;
+            }
+
+            overflow_loc->loc.row = ~0u;
+            cache.overflow_head_ = next_id;
+            cache.num_overflow_ids_ -= num_from_overflow;
+
+            if (global_tail_loc != nullptr) {
+                global_tail_loc->loc.archetype = start_id;
+            }
+            global_tail_loc = getGenLoc(start_id);
+            num_full_sublists++;
+        }
+    }
+
+    if (num_full_sublists == 0) {
+        return;
+    }
+
+    uint32_t new_global_head = entities[0].id;
 
     FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
     FreeHead new_head;
-    new_head.head = entities[0].id;
+    new_head.head = new_global_head;
 
     do {
         new_head.gen = cur_head.gen + 1;
-        new_loc->loc.archetype = cur_head.head;
+        global_tail_loc->loc.archetype = cur_head.head;
     } while (free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_release,
         std::memory_order_relaxed));
@@ -292,7 +314,7 @@ void EntityManager::bulkFree(Cache &cache, Entity *entities,
 
 #ifdef MADRONA_MW_MODE
 StateManager::StateManager(int num_worlds)
-    : id_mgr_(),
+    : entity_mgr_(),
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
@@ -304,7 +326,7 @@ StateManager::StateManager(int num_worlds)
 }
 #else
 StateManager::StateManager()
-    : id_mgr_(),
+    : entity_mgr_(),
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0)
@@ -313,9 +335,9 @@ StateManager::StateManager()
 }
 #endif
 
-void StateManager::destroyEntity(Entity e)
+void StateManager::destroyEntityImmediate(EntityManager::Cache &cache, Entity e)
 {
-    Loc loc = id_mgr_.getLoc(e);
+    Loc loc = entity_mgr_.getLoc(e);
     
     if (!loc.valid()) {
         return;
@@ -326,10 +348,10 @@ void StateManager::destroyEntity(Entity e)
 
     if (row_moved) {
         Entity moved_entity = ((Entity *)archetype.tbl.data(0))[loc.row];
-        id_mgr_.updateLoc(moved_entity, loc.row);
+        entity_mgr_.updateLoc(moved_entity, loc.row);
     }
 
-    id_mgr_.freeEntity(e);
+    entity_mgr_.freeEntity(cache, e);
 }
 
 struct StateManager::ArchetypeStore::Init {
@@ -509,14 +531,14 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
     });
 }
 
-void StateManager::reset(uint32_t archetype_id)
+void StateManager::reset(EntityManager::Cache &cache, uint32_t archetype_id)
 {
     auto &archetype = *archetype_stores_[archetype_id];
 
     // Free all IDs before deleting the table
     Entity *entities = (Entity *)archetype.tbl.data(0);
     uint32_t num_entities = archetype.tbl.numRows();
-    id_mgr_.bulkFree(entities, num_entities);
+    entity_mgr_.bulkFree(cache, entities, num_entities);
 
     archetype.tbl.reset();
 }

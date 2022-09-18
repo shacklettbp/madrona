@@ -147,7 +147,7 @@ public:
     
 
     template <typename ArchetypeT>
-    inline void reset();
+    inline void reset(EntityManager::Cache &cache);
 
 #ifdef MADRONA_MW_MODE
     template <typename... ComponentTs, typename Fn>
@@ -190,9 +190,9 @@ private:
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, Span<ComponentID> components);
 
-    void reset(uint32_t archetype_id);
+    void reset(EntityManager::Cache &cache, uint32_t archetype_id);
 
-    EntityManager id_mgr_;
+    EntityManager entity_mgr_;
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;
