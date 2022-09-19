@@ -2,48 +2,73 @@
 
 namespace madrona {
 
+template <typename ComponentT>
+void Context::registerComponent()
+{
+    state_mgr_->registerComponent<ComponentT>();
+}
+
+template <typename ArchetypeT>
+void Context::registerArchetype()
+{
+    state_mgr_->registerArchetype<ArchetypeT>();
+}
+
 template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT> Context::archetype()
 {
-    return state_mgr_->archetype<ArchetypeT>();
+    return state_mgr_->archetype<ArchetypeT>(
+        MADRONA_MW_COND(cur_world_id_));
 }
 
 
 template <typename ArchetypeT, typename... Args>
 Entity Context::makeEntity(Transaction &txn, Args && ...args)
 {
-    return state_mgr_->makeEntity<ArchetypeT>(txn, *state_cache_,
+    return state_mgr_->makeEntity<ArchetypeT>(
+        MADRONA_MW_COND(cur_world_id_,) txn, *state_cache_,
         std::forward<Args>(args)...);
 }
 
 template <typename ArchetypeT, typename... Args>
 Entity Context::makeEntityNow(Args && ...args)
 {
-    return state_mgr_->makeEntityNow<ArchetypeT>(*state_cache_,
+    return state_mgr_->makeEntityNow<ArchetypeT>(
+        MADRONA_MW_COND(cur_world_id_,) *state_cache_,
         std::forward<Args>(args)...);
 }
 
 void Context::destroyEntity(Transaction &txn, Entity e)
 {
-    state_mgr_->destroyEntity(txn, *state_cache_, e);
+    state_mgr_->destroyEntity(MADRONA_MW_COND(cur_world_id_,)
+                              txn, *state_cache_, e);
 }
 
 void Context::destroyEntityNow(Entity e)
 {
-    state_mgr_->destroyEntityNow(*state_cache_, e);
+    state_mgr_->destroyEntityNow(MADRONA_MW_COND(cur_world_id_,)
+                                 *state_cache_, e);
 }
 
 
 template <typename ArchetypeT>
 void Context::clearArchetype()
 {
-    state_mgr_->clear<ArchetypeT>(*state_cache_);
+    state_mgr_->clear<ArchetypeT>(MADRONA_MW_COND(cur_world_id_,)
+                                  *state_cache_);
 }
 
 template <typename... ComponentTs>
 Query<ComponentTs...> Context::query()
 {
     return state_mgr_->query<ComponentTs...>();
+}
+
+template <typename... ComponentTs, typename Fn>
+void Context::forEach(const Query<ComponentTs...> &query, Fn &&fn)
+{
+    state_mgr_->iterateEntities(MADRONA_MW_COND(cur_world_id_,) query,
+                                std::forward<Fn>(fn));
 }
 
 template <typename Fn, typename... Deps>
@@ -62,11 +87,11 @@ JobID Context::submitN(Fn &&fn, uint32_t num_invocations,
 }
 
 template <typename... ComponentTs, typename Fn, typename... Deps>
-JobID Context::forAll(const Query<ComponentTs...> &query, Fn &&fn,
-                      bool is_child, Deps && ... dependencies)
+JobID Context::parallelFor(const Query<ComponentTs...> &query, Fn &&fn,
+                            bool is_child, Deps && ... dependencies)
 {
-    return forAllImpl<Context>(query, std::forward<Fn>(fn), is_child,
-                               std::forward<Deps>(dependencies)...);
+    return parallelForImpl<Context>(query, std::forward<Fn>(fn), is_child,
+                                    std::forward<Deps>(dependencies)...);
 }
 
 template <typename Fn, typename... Deps>
@@ -86,8 +111,6 @@ inline JobID Context::ioRead(const char *path, Fn &&fn,
 
     return JobID::none();
 }
-
-StateManager & Context::state() { return *state_mgr_; }
 
 // FIXME: implement is_child, dependencies, num_invocations
 template <typename ContextT, typename Fn, typename... Deps>
@@ -114,8 +137,8 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
 
 template <typename ContextT, typename... ComponentTs, typename Fn,
           typename... Deps>
-JobID Context::forAllImpl(const Query<ComponentTs...> &query, Fn &&fn,
-                          bool is_child, Deps && ... dependencies)
+JobID Context::parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
+                               bool is_child, Deps && ... dependencies)
 {
     if (query.numMatchingArchetypes() == 0) {
         return JobID::none();
@@ -125,7 +148,7 @@ JobID Context::forAllImpl(const Query<ComponentTs...> &query, Fn &&fn,
 
     JobID proxy_id = job_mgr_->reserveProxyJobID(parent_id);
 
-    state_mgr_->iterateArchetypes(query,
+    state_mgr_->iterateArchetypes(MADRONA_MW_COND(cur_world_id_,) query,
             [this, proxy_id, fn = std::forward<Fn>(fn), dependencies ...](
             int num_rows, auto ...ptrs) {
         if (num_rows == 0) {
@@ -159,12 +182,8 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
                            Deps && ...dependencies)
 {
     return job_mgr_->queueJob<ContextT>(worker_idx_, std::forward<Fn>(fn),
-                                        num_invocations, parent_id,
-#ifdef MADRONA_MW_MODE
-                                        cur_world_id_,
-#endif
-                                        JobPriority::Normal,
-                                        std::forward<Deps>(dependencies)...);
+        num_invocations, parent_id, MADRONA_MW_COND(cur_world_id_, )
+        JobPriority::Normal, std::forward<Deps>(dependencies)...);
 }
 
 JobID Context::currentJobID() const

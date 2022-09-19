@@ -28,12 +28,12 @@ JobID CustomContext<ContextT>::submitN(Fn &&fn, uint32_t num_invocations,
 
 template <typename ContextT>
 template <typename... ComponentTs, typename Fn, typename... Deps>
-JobID CustomContext<ContextT>::forAll(const Query<ComponentTs...> &query,
-                                      Fn &&fn, bool is_child,
-                                      Deps && ... dependencies)
+JobID CustomContext<ContextT>::parallelFor(const Query<ComponentTs...> &query,
+                                           Fn &&fn, bool is_child,
+                                           Deps && ... dependencies)
 {
-    return forAllImpl<ContextT>(query, std::forward<Fn>(fn), is_child,
-                                std::forward<Deps>(dependencies)...);
+    return parallelForImpl<ContextT>(query, std::forward<Fn>(fn), is_child,
+                                      std::forward<Deps>(dependencies)...);
 }
 
 

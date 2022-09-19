@@ -149,47 +149,6 @@ uint32_t ArchetypeRef<ArchetypeT>::size() const
 }
 
 template <typename ArchetypeT>
-uint32_t ArchetypeRef<ArchetypeT>::Iter::operator*()
-{
-    return idx;
-}
-
-template <typename ArchetypeT>
-auto ArchetypeRef<ArchetypeT>::Iter::operator++() -> Iter &
-{
-    ++idx;
-    return *this;
-}
-
-template <typename ArchetypeT>
-bool ArchetypeRef<ArchetypeT>::Iter::operator==(Iter o)
-{
-    return idx == o.idx;
-}
-
-template <typename ArchetypeT>
-bool ArchetypeRef<ArchetypeT>::Iter::operator!=(Iter o)
-{
-    return !(*this == o);
-}
-
-template <typename ArchetypeT>
-auto ArchetypeRef<ArchetypeT>::begin() const -> Iter
-{
-    return Iter {
-        0,
-    };
-}
-
-template <typename ArchetypeT>
-auto ArchetypeRef<ArchetypeT>::end() const -> Iter
-{
-    return Iter {
-        tbl_->numRows(),
-    };
-}
-
-template <typename ArchetypeT>
 template <typename ComponentT>
 uint32_t ArchetypeRef<ArchetypeT>::getComponentIndex() const
 {

@@ -10,3 +10,9 @@
 #elif defined(_MSC_VER)
 #define MADRONA_COMPILER_FUNCTION_NAME __FUNCSIG__
 #endif
+
+#ifdef MADRONA_MW_MODE
+#define MADRONA_MW_COND(...) __VA_ARGS__
+#else
+#define MADRONA_MW_COND(...)
+#endif

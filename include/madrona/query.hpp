@@ -82,18 +82,6 @@ public:
 
     inline uint32_t size() const;
 
-    struct Iter {
-        uint32_t idx;
-
-        inline uint32_t operator*();
-        inline Iter & operator++();
-        inline bool operator==(Iter o);
-        inline bool operator!=(Iter o);
-    };
-
-    inline Iter begin() const;
-    inline Iter end() const;
-
 private:
     template <typename ComponentT> struct ComponentLookup {};
 

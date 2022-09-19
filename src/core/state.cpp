@@ -35,10 +35,9 @@ EntityStore::EntityStore()
       })
 {}
 
-Entity EntityStore::newEntity(Cache &cache,
-                                uint32_t archetype, uint32_t row)
+Entity EntityStore::newEntity(Cache &cache)
 {
-    auto assignCachedID = [this, archetype, row](uint32_t *head) {
+    auto assignCachedID = [this](uint32_t *head) {
         uint32_t new_id = *head;
         GenLoc *free_loc = getGenLoc(new_id);
 
@@ -60,11 +59,6 @@ Entity EntityStore::newEntity(Cache &cache,
             };
             *head = next_free;
         }
-
-        free_loc->loc = Loc {
-            .archetype = archetype,
-            .row = row,
-        };
 
         return Entity {
             .gen = free_loc->gen,
@@ -139,13 +133,7 @@ Entity EntityStore::newEntity(Cache &cache,
     uint32_t first_id = block_start;
 
     GenLoc *entity_loc = getGenLoc(first_id);
-    *entity_loc = {
-        .loc = Loc {
-            .archetype = archetype,
-            .row = row,
-        },
-        .gen = 0,
-    };
+    entity_loc->gen = 0;
 
     uint32_t free_start = block_start + 1;
     GenLoc *free_loc = getGenLoc(free_start);
@@ -337,7 +325,29 @@ StateManager::StateManager()
 }
 #endif
 
-void StateManager::destroyEntityNow(StateCache &cache, Entity e)
+Transaction StateManager::makeTransaction()
+{
+    return Transaction();
+}
+
+void StateManager::commitTransaction(Transaction &&txn)
+{
+    (void)txn;
+}
+
+void StateManager::destroyEntity(MADRONA_MW_COND(uint32_t world_id,)
+                                 Transaction &txn, StateCache &cache, Entity e)
+{
+#ifdef MADRONA_MW_MODE
+    (void)world_id;
+#endif
+    (void)txn.head;
+    (void)cache;
+    (void)e;
+}
+
+void StateManager::destroyEntityNow(MADRONA_MW_COND(uint32_t world_id,)
+                                    StateCache &cache, Entity e)
 {
     Loc loc = entity_store_.getLoc(e);
     
@@ -346,11 +356,18 @@ void StateManager::destroyEntityNow(StateCache &cache, Entity e)
     }
 
     ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
-    bool row_moved = archetype.tbl.removeRow(loc.row);
+    Table &tbl =
+#ifdef MADRONA_MW_MODE
+        archetype.tbls[world_id];
+#else
+        archetype.tbl;
+#endif
+
+    bool row_moved = tbl.removeRow(loc.row);
 
     if (row_moved) {
-        Entity moved_entity = ((Entity *)archetype.tbl.data(0))[loc.row];
-        entity_store_.updateLoc(moved_entity, loc.row);
+        Entity moved_entity = ((Entity *)tbl.data(0))[loc.row];
+        entity_store_.setRow(moved_entity, loc.row);
     }
 
     entity_store_.freeEntity(cache.entity_cache_, e);
@@ -362,14 +379,26 @@ struct StateManager::ArchetypeStore::Init {
     uint32_t id;
     Span<TypeInfo> types;
     Span<IntegerMapPair> lookupInputs;
+#ifdef MADRONA_MW_MODE
+    uint32_t numTables;
+#endif
 };
 
 StateManager::ArchetypeStore::ArchetypeStore(Init &&init)
     : componentOffset(init.componentOffset),
       numComponents(init.numComponents),
+#ifdef MADRONA_MW_MODE
+      tbls(init.numTables),
+#else
       tbl(init.types.data(), init.types.size()),
+#endif
       columnLookup(init.lookupInputs.data(), init.lookupInputs.size())
 {
+#ifdef MADRONA_MW_MODE
+    for (int i = 0; i < (int)init.numTables; i++) {
+        tbls.emplace(i, init.types.data(), init.types.size());
+    }
+#endif
 }
 
 StateManager::QueryState::QueryState()
@@ -530,19 +559,27 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
         id,
         Span(type_infos.data(), num_total_components),
         Span(lookup_input.data(), num_user_components),
+        MADRONA_MW_COND(num_worlds_,)
     });
 }
 
-void StateManager::clear(StateCache &cache, uint32_t archetype_id)
+void StateManager::clear(MADRONA_MW_COND(uint32_t world_id,)
+                         StateCache &cache, uint32_t archetype_id)
 {
-    auto &archetype = *archetype_stores_[archetype_id];
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id];
+    Table &tbl =
+#ifdef MADRONA_MW_MODE
+        archetype.tbls[world_id];
+#else
+        archetype.tbl;
+#endif
 
     // Free all IDs before deleting the table
-    Entity *entities = (Entity *)archetype.tbl.data(0);
-    uint32_t num_entities = archetype.tbl.numRows();
+    Entity *entities = (Entity *)tbl.data(0);
+    uint32_t num_entities = tbl.numRows();
     entity_store_.bulkFree(cache.entity_cache_, entities, num_entities);
 
-    archetype.tbl.clear();
+    tbl.clear();
 }
 
 StateManager::QueryState StateManager::query_state_ = StateManager::QueryState();

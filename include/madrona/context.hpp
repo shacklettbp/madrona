@@ -14,6 +14,14 @@ public:
 
     AllocContext mem;
 
+    // Registration
+    template <typename ComponentT>
+    void registerComponent();
+
+    template <typename ArchetypeT>
+    void registerArchetype();
+
+    // State
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype();
 
@@ -33,6 +41,10 @@ public:
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 
+    template <typename... ComponentTs, typename Fn>
+    inline void forEach(const Query<ComponentTs...> &query, Fn &&fn);
+
+    // Jobs
     template <typename Fn, typename... DepTs>
     inline JobID submit(Fn &&fn, bool is_child = true,
                         DepTs && ... dependencies);
@@ -43,9 +55,9 @@ public:
                          DepTs && ... dependencies);
 
     template <typename... ComponentTs, typename Fn, typename... DepTs>
-    inline JobID forAll(const Query<ComponentTs...> &query, Fn &&fn,
-                        bool is_child = true,
-                        DepTs && ... dependencies);
+    inline JobID parallelFor(const Query<ComponentTs...> &query, Fn &&fn,
+                             bool is_child = true,
+                             DepTs && ... dependencies);
 
     template <typename Fn, typename... DepTs>
     inline JobID ioRead(const char *path, Fn &&fn, bool is_child = true,
@@ -57,8 +69,6 @@ public:
     inline uint32_t worldID() const;
 #endif
 
-    inline StateManager & state();
-
 protected:
     template <typename ContextT, typename Fn, typename... DepTs>
     inline JobID submitImpl(Fn &&fn, bool is_child, DepTs && ... dependencies);
@@ -69,8 +79,8 @@ protected:
 
     template <typename ContextT, typename... ComponentTs, typename Fn,
               typename... DepTs>
-    inline JobID forAllImpl(const Query<ComponentTs...> &query, Fn &&fn,
-                            bool is_child, DepTs && ... dependencies);
+    inline JobID parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
+                                 bool is_child, DepTs && ... dependencies);
 
 private:
     template <typename ContextT, typename Fn, typename... DepTs>

@@ -36,6 +36,28 @@ struct WorldID {
 };
 #endif
 
+class Transaction {
+private:
+    enum Op : uint32_t {
+        Make,
+        Destroy,
+        Modify,
+    };
+
+    static constexpr uint32_t bytes_per_block_ = 8192;
+
+    struct Block {
+        Block *next;
+        uint32_t curOffset;
+        uint32_t numEntries;
+        char data[bytes_per_block_];
+    };
+
+    Block *head;
+
+friend class StateManager;
+};
+
 class EntityStore {
 public:
     class Cache {
@@ -54,12 +76,11 @@ public:
 
     EntityStore();
 
-    void initCaches(Cache *caches, int num_caches);
-
     inline Loc getLoc(Entity e) const;
-    inline void updateLoc(Entity e, uint32_t row);
+    inline void setLoc(Entity e, Loc loc);
+    inline void setRow(Entity e, uint32_t row);
 
-    Entity newEntity(Cache &cache, uint32_t archetype, uint32_t row);
+    Entity newEntity(Cache &cache);
     void freeEntity(Cache &cache, Entity e);
 
     void bulkFree(Cache &cache, Entity *entities, uint32_t num_entities);
@@ -83,9 +104,6 @@ private:
     };
 
     std::atomic<FreeHead> free_head_;
-};
-
-class Transaction {
 };
 
 class StateCache {
@@ -121,46 +139,50 @@ public:
     inline Loc getLoc(Entity e) const;
 
     template <typename ComponentT>
-    inline ResultRef<ComponentT> get(Loc loc);
+    inline ResultRef<ComponentT> get(MADRONA_MW_COND(uint32_t world_id,)
+                                     Loc loc);
 
     template <typename ComponentT>
-    inline ResultRef<ComponentT> get(Entity entity);
+    inline ResultRef<ComponentT> get(MADRONA_MW_COND(uint32_t world_id,)
+                                     Entity entity);
 
     template <typename ArchetypeT>
-    inline ArchetypeRef<ArchetypeT> archetype();
+    inline ArchetypeRef<ArchetypeT> archetype(
+        MADRONA_MW_COND(uint32_t world_id));
 
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 
     template <typename... ComponentTs, typename Fn>
-    inline void iterateArchetypes(const Query<ComponentTs...> &query, Fn &&fn);
+    inline void iterateArchetypes(MADRONA_MW_COND(uint32_t world_id,)
+                                  const Query<ComponentTs...> &query, Fn &&fn);
 
     template <typename... ComponentTs, typename Fn>
-    inline void iterateEntities(const Query<ComponentTs...> &query, Fn &&fn);
+    inline void iterateEntities(MADRONA_MW_COND(uint32_t world_id,)
+                                const Query<ComponentTs...> &query, Fn &&fn);
 
     Transaction makeTransaction();
     void commitTransaction(Transaction &&txn);
 
     template <typename ArchetypeT, typename... Args>
-    inline Entity makeEntity(Transaction &txn, StateCache &cache,
+    inline Entity makeEntity(MADRONA_MW_COND(uint32_t world_id,)
+                             Transaction &txn, StateCache &cache,
                              Args && ...args);
 
-    void destroyEntity(Transaction &txn, StateCache &cache, Entity e);
+    void destroyEntity(MADRONA_MW_COND(uint32_t world_id,)
+                       Transaction &txn, StateCache &cache, Entity e);
 
     template <typename ArchetypeT, typename... Args>
-    inline Entity makeEntityNow(StateCache &cache, Args && ...args);
+    inline Entity makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
+                                StateCache &cache, Args && ...args);
 
-    void destroyEntityNow(StateCache &cache, Entity e);
+    void destroyEntityNow(MADRONA_MW_COND(uint32_t world_id,)
+                          StateCache &cache, Entity e);
 
     template <typename ArchetypeT>
-    inline void clear(StateCache &cache);
+    inline void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache);
 
 #ifdef MADRONA_MW_MODE
-    template <typename... ComponentTs, typename Fn>
-    inline void iterateArchetypesMW(uint32_t num_worlds,
-                                    Query<ComponentTs...> query,
-                                    Fn &&fn);
-
     inline uint32_t numWorlds() const;
 #endif
      
@@ -174,7 +196,11 @@ private:
 
         uint32_t componentOffset;
         uint32_t numComponents;
+#ifdef MADRONA_MW_MODE
+        HeapArray<Table> tbls;
+#else
         Table tbl;
+#endif
         ColumnMap columnLookup;
     };
 
@@ -186,7 +212,8 @@ private:
     };
 
     template <typename... ComponentTs, typename Fn, uint32_t... Indices>
-    void iterateArchetypesImpl(const Query<ComponentTs...> &query, Fn &&fn,
+    void iterateArchetypesImpl(MADRONA_MW_COND(uint32_t world_id,) 
+                               const Query<ComponentTs...> &query, Fn &&fn,
                                std::integer_sequence<uint32_t, Indices...>);
 
     void makeQuery(const ComponentID *components, uint32_t num_components,
@@ -196,7 +223,8 @@ private:
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, Span<ComponentID> components);
 
-    void clear(StateCache &cache, uint32_t archetype_id);
+    void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
+               uint32_t archetype_id);
 
     EntityStore entity_store_;
     DynArray<Optional<TypeInfo>> component_infos_;
