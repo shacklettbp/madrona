@@ -782,8 +782,8 @@ JobManager::JobManager(const Init &init)
             &start_wrapper,
         };
  
-        queueJob(0, entry, &start_jobs[i], 1, JobID::none().idx,
-                 JobPriority::Normal);
+        queueJob(i % init.numWorkers, entry, &start_jobs[i], 1,
+                 JobID::none().idx, JobPriority::Normal);
     }
 #else
     StartJob start_job {
