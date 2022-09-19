@@ -819,6 +819,7 @@ JobManager::JobManager(const Init &init)
                 .stateMgr = init.stateMgr,
                 .stateCache = thread_state_cache,
                 .workerIdx = thread_idx,
+                .worldID = (uint32_t)world_idx,
             });
         }
 #else

@@ -12,7 +12,7 @@ Context::Context(WorkerInit &&init)
       worker_idx_(init.workerIdx),
       cur_job_id_(JobID::none())
 #ifdef MADRONA_MW_MODE
-      , cur_world_id_(0)
+      , cur_world_id_(init.worldID)
 #endif
 {}
 
