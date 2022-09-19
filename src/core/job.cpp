@@ -605,7 +605,7 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
         num_per_thread_bytes = ctx_userdata_offset + total_userdata_bytes;
 
         uint64_t state_cache_offset = utils::roundUp(num_per_thread_bytes,
-            alignof(StateCache));
+            (uint64_t)alignof(StateCache));
 
         num_per_thread_bytes =
             state_cache_offset + sizeof(StateCache) * num_threads;
