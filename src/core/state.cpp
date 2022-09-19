@@ -14,14 +14,18 @@ static constexpr uint32_t maxQueryOffsets = 100'000;
 static constexpr uint32_t idsPerCache = 64;
 }
 
-EntityManager::Cache::Cache()
+EntityStore::Cache::Cache()
     : free_head_(~0u),
       num_free_ids_(0),
       overflow_head_(~0u),
       num_overflow_ids_(0)
 {}
 
-EntityManager::EntityManager()
+StateCache::StateCache()
+    : entity_cache_()
+{}
+
+EntityStore::EntityStore()
     : store_(sizeof(GenLoc), alignof(GenLoc), 0, ~0u),
       num_ids_(0),
       expand_lock_{},
@@ -31,7 +35,7 @@ EntityManager::EntityManager()
       })
 {}
 
-Entity EntityManager::newEntity(Cache &cache,
+Entity EntityStore::newEntity(Cache &cache,
                                 uint32_t archetype, uint32_t row)
 {
     auto assignCachedID = [this, archetype, row](uint32_t *head) {
@@ -165,7 +169,7 @@ Entity EntityManager::newEntity(Cache &cache,
     };
 }
 
-void EntityManager::freeEntity(Cache &cache, Entity e)
+void EntityStore::freeEntity(Cache &cache, Entity e)
 {
     GenLoc *gen_loc = getGenLoc(e.id);
     gen_loc->gen++;
@@ -204,8 +208,8 @@ void EntityManager::freeEntity(Cache &cache, Entity e)
     }
 }
 
-void EntityManager::bulkFree(Cache &cache, Entity *entities,
-                             uint32_t num_entities)
+void EntityStore::bulkFree(Cache &cache, Entity *entities,
+                           uint32_t num_entities)
 {
     if (num_entities == 0) return;
 
@@ -226,7 +230,6 @@ void EntityManager::bulkFree(Cache &cache, Entity *entities,
     int base_idx;
     uint32_t num_remaining;
     GenLoc *global_tail_loc = nullptr;
-    uint32_t num_full_sublists = 0;
     for (base_idx = 0; base_idx < (int)num_entities;
          base_idx += ICfg::idsPerCache) {
 
@@ -236,23 +239,22 @@ void EntityManager::bulkFree(Cache &cache, Entity *entities,
         }
 
         uint32_t head_id = entities[base_idx].id;
+
         for (int sub_idx = 0; sub_idx < (int)ICfg::idsPerCache; sub_idx++) {
             int idx = base_idx + sub_idx;
             linkToNext(idx);
         }
+
+        GenLoc *last_loc = getGenLoc(entities[ICfg::idsPerCache - 1].id);
+        last_loc->gen++;
+        last_loc->loc.row = ~0u;
+        last_loc->loc.archetype = 1;
 
         if (global_tail_loc != nullptr) {
             global_tail_loc->loc.archetype = head_id;
         }
 
         global_tail_loc = getGenLoc(head_id);
-
-        GenLoc *last_loc = getGenLoc(entities[num_remaining - 1].id);
-        last_loc->gen++;
-        last_loc->loc.row = ~0u;
-        last_loc->loc.archetype = 1;
-        
-        num_full_sublists++;
     }
 
     // The final chunk has an odd size we need to take care of
@@ -289,11 +291,12 @@ void EntityManager::bulkFree(Cache &cache, Entity *entities,
                 global_tail_loc->loc.archetype = start_id;
             }
             global_tail_loc = getGenLoc(start_id);
-            num_full_sublists++;
         }
     }
 
-    if (num_full_sublists == 0) {
+    // If global_tail_loc is still unset, there is no full sublist to add
+    // to the global list
+    if (global_tail_loc != nullptr) {
         return;
     }
 
@@ -313,7 +316,7 @@ void EntityManager::bulkFree(Cache &cache, Entity *entities,
 
 #ifdef MADRONA_MW_MODE
 StateManager::StateManager(int num_worlds)
-    : entity_mgr_(),
+    : entity_store_(),
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
@@ -325,7 +328,7 @@ StateManager::StateManager(int num_worlds)
 }
 #else
 StateManager::StateManager()
-    : entity_mgr_(),
+    : entity_store_(),
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0)
@@ -334,9 +337,9 @@ StateManager::StateManager()
 }
 #endif
 
-void StateManager::destroyEntityImmediate(EntityManager::Cache &cache, Entity e)
+void StateManager::destroyEntityNow(StateCache &cache, Entity e)
 {
-    Loc loc = entity_mgr_.getLoc(e);
+    Loc loc = entity_store_.getLoc(e);
     
     if (!loc.valid()) {
         return;
@@ -347,10 +350,10 @@ void StateManager::destroyEntityImmediate(EntityManager::Cache &cache, Entity e)
 
     if (row_moved) {
         Entity moved_entity = ((Entity *)archetype.tbl.data(0))[loc.row];
-        entity_mgr_.updateLoc(moved_entity, loc.row);
+        entity_store_.updateLoc(moved_entity, loc.row);
     }
 
-    entity_mgr_.freeEntity(cache, e);
+    entity_store_.freeEntity(cache.entity_cache_, e);
 }
 
 struct StateManager::ArchetypeStore::Init {
@@ -530,16 +533,16 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
     });
 }
 
-void StateManager::reset(EntityManager::Cache &cache, uint32_t archetype_id)
+void StateManager::clear(StateCache &cache, uint32_t archetype_id)
 {
     auto &archetype = *archetype_stores_[archetype_id];
 
     // Free all IDs before deleting the table
     Entity *entities = (Entity *)archetype.tbl.data(0);
     uint32_t num_entities = archetype.tbl.numRows();
-    entity_mgr_.bulkFree(cache, entities, num_entities);
+    entity_store_.bulkFree(cache.entity_cache_, entities, num_entities);
 
-    archetype.tbl.reset();
+    archetype.tbl.clear();
 }
 
 StateManager::QueryState StateManager::query_state_ = StateManager::QueryState();

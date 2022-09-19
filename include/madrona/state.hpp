@@ -36,7 +36,7 @@ struct WorldID {
 };
 #endif
 
-class EntityManager {
+class EntityStore {
 public:
     class Cache {
     public:
@@ -49,10 +49,10 @@ public:
         uint32_t overflow_head_;
         uint32_t num_overflow_ids_;
     
-    friend class EntityManager;
+    friend class EntityStore;
     };
 
-    EntityManager();
+    EntityStore();
 
     void initCaches(Cache *caches, int num_caches);
 
@@ -86,6 +86,16 @@ private:
 };
 
 class Transaction {
+};
+
+class StateCache {
+public:
+    StateCache();
+
+private:
+    EntityStore::Cache entity_cache_;
+
+friend class StateManager;
 };
 
 class StateManager {
@@ -132,22 +142,18 @@ public:
     void commitTransaction(Transaction &&txn);
 
     template <typename ArchetypeT, typename... Args>
-    inline Entity makeEntity(Transaction &txn,
-                             EntityManager::Cache &entity_cache,
+    inline Entity makeEntity(Transaction &txn, StateCache &cache,
                              Args && ...args);
 
-    void destroyEntity(Transaction &txn, EntityManager::Cache &entity_cache,
-                       Entity e);
+    void destroyEntity(Transaction &txn, StateCache &cache, Entity e);
 
     template <typename ArchetypeT, typename... Args>
-    inline Entity makeEntityImmediate(EntityManager::Cache &entity_cache,
-                                      Args && ...args);
+    inline Entity makeEntityNow(StateCache &cache, Args && ...args);
 
-    void destroyEntityImmediate(EntityManager::Cache &entity_cache, Entity e);
-    
+    void destroyEntityNow(StateCache &cache, Entity e);
 
     template <typename ArchetypeT>
-    inline void reset(EntityManager::Cache &cache);
+    inline void clear(StateCache &cache);
 
 #ifdef MADRONA_MW_MODE
     template <typename... ComponentTs, typename Fn>
@@ -190,9 +196,9 @@ private:
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, Span<ComponentID> components);
 
-    void reset(EntityManager::Cache &cache, uint32_t archetype_id);
+    void clear(StateCache &cache, uint32_t archetype_id);
 
-    EntityManager entity_mgr_;
+    EntityStore entity_store_;
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;

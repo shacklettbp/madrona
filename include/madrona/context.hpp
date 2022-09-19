@@ -17,6 +17,19 @@ public:
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype();
 
+    template <typename ArchetypeT, typename... Args>
+    inline Entity makeEntity(Transaction &txn, Args && ...args);
+
+    template <typename ArchetypeT, typename... Args>
+    inline Entity makeEntityNow(Args && ...args);
+
+    inline void destroyEntity(Transaction &txn, Entity e);
+
+    inline void destroyEntityNow(Entity e);
+
+    template <typename ArchetypeT>
+    inline void clearArchetype();
+
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 
@@ -66,6 +79,7 @@ private:
 
     JobManager * const job_mgr_;
     StateManager * const state_mgr_;
+    StateCache * const state_cache_;
     IOManager * const io_mgr_;
     const int worker_idx_;
     JobID cur_job_id_;

@@ -54,7 +54,7 @@ bool Table::removeRow(uint32_t row)
     return need_move;
 }
 
-void Table::reset()
+void Table::clear()
 {
     num_rows_ = 0;
 

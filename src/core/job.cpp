@@ -556,6 +556,7 @@ struct JobManager::Init {
     void *perThreadData;
     void *ctxBase;
     void *ctxUserdataBase;
+    void *stateCacheBase;
     void *highBase;
     void *normalBase;
     void *ioBase;
@@ -602,6 +603,12 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
             (uint64_t)ctx_userdata_alignment);
 
         num_per_thread_bytes = ctx_userdata_offset + total_userdata_bytes;
+
+        uint64_t state_cache_offset = utils::roundUp(num_per_thread_bytes,
+            alignof(StateCache));
+
+        num_per_thread_bytes =
+            state_cache_offset + sizeof(StateCache) * num_threads;
 
         uint64_t high_offset =
             utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
@@ -655,6 +662,7 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
             .perThreadData = per_thread_data,
             .ctxBase = base_ptr + ctx_offset,
             .ctxUserdataBase = base_ptr + ctx_userdata_offset,
+            .stateCacheBase = base_ptr + state_cache_offset,
             .highBase = base_ptr + high_offset,
             .normalBase = base_ptr + normal_offset,
             .ioBase = base_ptr + io_offset,
@@ -789,6 +797,12 @@ JobManager::JobManager(const Init &init)
     ThreadPoolInit pool_init { init.numThreads, 0 };
 
     for (int thread_idx = 0; thread_idx < init.numThreads; thread_idx++) {
+        // Find the proper state cache for this thread and initialize it before
+        // passing to context
+        StateCache *thread_state_cache = (StateCache *)(
+            (char *)init.stateCacheBase + thread_idx * sizeof(StateCache));
+        new (thread_state_cache) StateCache();
+
 #ifdef MADRONA_MW_MODE
         void *ctx_store = (char *)init.ctxBase + (uint64_t)thread_idx *
             (uint64_t)init.numCtxBytes * (uint64_t)num_worlds;
@@ -803,6 +817,7 @@ JobManager::JobManager(const Init &init)
             init.ctxInitFn(cur_ctx, cur_userdata, WorkerInit {
                 .jobMgr = this,
                 .stateMgr = init.stateMgr,
+                .stateCache = thread_state_cache,
                 .workerIdx = thread_idx,
             });
         }
@@ -811,6 +826,7 @@ JobManager::JobManager(const Init &init)
         init.ctxInitFn(ctx_store, init.ctxUserdataBase, WorkerInit {
             .jobMgr = this,
             .stateMgr = init.stateMgr,
+            .stateCache = thread_state_cache,
             .workerIdx = thread_idx,
         });
 #endif

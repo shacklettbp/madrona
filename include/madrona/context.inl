@@ -8,6 +8,38 @@ ArchetypeRef<ArchetypeT> Context::archetype()
     return state_mgr_->archetype<ArchetypeT>();
 }
 
+
+template <typename ArchetypeT, typename... Args>
+Entity Context::makeEntity(Transaction &txn, Args && ...args)
+{
+    return state_mgr_->makeEntity<ArchetypeT>(txn, *state_cache_,
+        std::forward<Args>(args)...);
+}
+
+template <typename ArchetypeT, typename... Args>
+Entity Context::makeEntityNow(Args && ...args)
+{
+    return state_mgr_->makeEntityNow<ArchetypeT>(*state_cache_,
+        std::forward<Args>(args)...);
+}
+
+void Context::destroyEntity(Transaction &txn, Entity e)
+{
+    state_mgr_->destroyEntity(txn, *state_cache_, e);
+}
+
+void Context::destroyEntityNow(Entity e)
+{
+    state_mgr_->destroyEntityNow(*state_cache_, e);
+}
+
+
+template <typename ArchetypeT>
+void Context::clearArchetype()
+{
+    state_mgr_->clear<ArchetypeT>(*state_cache_);
+}
+
 template <typename... ComponentTs>
 Query<ComponentTs...> Context::query()
 {

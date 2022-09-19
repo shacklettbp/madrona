@@ -7,7 +7,7 @@
 
 namespace madrona {
 
-Loc EntityManager::getLoc(Entity e) const
+Loc EntityStore::getLoc(Entity e) const
 {
     if (e.id >= num_ids_) {
         return Loc {
@@ -30,7 +30,7 @@ Loc EntityManager::getLoc(Entity e) const
     return gen_loc->loc;
 }
 
-void EntityManager::updateLoc(Entity e, uint32_t row)
+void EntityStore::updateLoc(Entity e, uint32_t row)
 {
     GenLoc *gen_loc = getGenLoc(e.id);
     assert(e.gen == gen_loc->gen);
@@ -38,12 +38,12 @@ void EntityManager::updateLoc(Entity e, uint32_t row)
     gen_loc->loc.row = row;
 }
 
-auto EntityManager::getGenLoc(uint32_t id) -> GenLoc *
+auto EntityStore::getGenLoc(uint32_t id) -> GenLoc *
 {
     return (GenLoc *)store_.data() + (uintptr_t)id;
 }
 
-auto EntityManager::getGenLoc(uint32_t id) const -> const GenLoc *
+auto EntityStore::getGenLoc(uint32_t id) const -> const GenLoc *
 {
     return (const GenLoc *)store_.data() + (uintptr_t)id;
 }
@@ -148,9 +148,8 @@ ArchetypeID StateManager::archetypeID() const
 
 Loc StateManager::getLoc(Entity e) const
 {
-    return entity_mgr_.getLoc(e);
+    return entity_store_.getLoc(e);
 }
-
 
 template <typename ComponentT>
 inline ResultRef<ComponentT> StateManager::get(Loc loc)
@@ -170,7 +169,7 @@ inline ResultRef<ComponentT> StateManager::get(Loc loc)
 template <typename ComponentT>
 ResultRef<ComponentT> StateManager::get(Entity entity)
 {
-    Loc loc = entity_mgr_.getLoc(entity);
+    Loc loc = entity_store_.getLoc(entity);
     if (!loc.valid()) {
         return ResultRef<ComponentT>(nullptr);
     }
@@ -248,7 +247,7 @@ void StateManager::iterateEntities(const Query<ComponentTs...> &query, Fn &&fn)
 }
 
 template <typename ArchetypeT, typename... Args>
-Entity StateManager::makeEntityImmediate(EntityManager::Cache &cache,
+Entity StateManager::makeEntityNow(StateCache &cache,
                                          Args && ...args)
 {
     ArchetypeID archetype_id = archetypeID<ArchetypeT>();
@@ -261,7 +260,8 @@ Entity StateManager::makeEntityImmediate(EntityManager::Cache &cache,
            "Trying to construct entity with wrong number of arguments");
 
     uint32_t new_row = archetype.tbl.addRow();
-    Entity e = entity_mgr_.newEntity(cache, archetype_id.id, new_row);
+    Entity e = entity_store_.newEntity(cache.entity_cache_, archetype_id.id,
+                                       new_row);
     ((Entity *)archetype.tbl.data(0))[new_row] = e;
 
     int component_idx = 0;
@@ -288,9 +288,9 @@ Entity StateManager::makeEntityImmediate(EntityManager::Cache &cache,
 }
 
 template <typename ArchetypeT>
-void StateManager::reset(EntityManager::Cache &cache)
+void StateManager::clear(StateCache &cache)
 {
-    reset(cache, archetypeID<ArchetypeT>().id);
+    clear(cache, archetypeID<ArchetypeT>().id);
 }
 
 #ifdef MADRONA_MW_MODE
