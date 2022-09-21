@@ -202,12 +202,12 @@ private:
 
         auto new_ptr = (T *)alloc_.alloc(new_capacity * sizeof(T));
 
-#if defined(__GNUC__) && !defined(__clang__)
+#ifdef MADRONA_GCC
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wclass-memaccess"
 #endif
         memcpy(new_ptr, ptr_, sizeof(T) * n_);
-#if defined(__GNUC__) && !defined(__clang__)
+#if MADRONA_GCC
 #pragma GCC diagnostic pop
 #endif
 

@@ -45,7 +45,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_subdirectory(external)
 
-add_compile_options(-Wall -Wextra)
+add_compile_options(-pedantic -Wall -Wextra)
 
 add_subdirectory(src)
 

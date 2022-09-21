@@ -135,11 +135,6 @@ public:
     };
 
 private:
-    struct alignas(64) JobCounts {
-        std::atomic_uint32_t numHigh;
-        std::atomic_uint32_t numOutstanding;
-    };
-
     JobManager(uint32_t num_ctx_userdata_bytes,
                uint32_t ctx_userdata_alignment,
                void (*ctx_init_fn)(void *, void *, WorkerInit &&),
@@ -207,7 +202,8 @@ private:
     void *const waiting_base_;
     void *const tracker_base_;
     std::counting_semaphore<> io_sema_;
-    JobCounts job_counts_;
+    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_high_;
+    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_outstanding_;
 };
 
 }

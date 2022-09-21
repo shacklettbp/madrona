@@ -685,10 +685,8 @@ JobManager::JobManager(const Init &init)
       waiting_base_(init.waitingBase),
       tracker_base_(init.trackerBase),
       io_sema_(0),
-      job_counts_ {
-          .numHigh = 0,
-          .numOutstanding = 0,
-      }
+      num_high_(0),
+      num_outstanding_(0)
 {
     for (int i = 0, n = init.numThreads; i < n; i++) {
         job_allocs_.emplace(i, alloc_state_);
@@ -890,7 +888,7 @@ JobID JobManager::queueJob(int thread_idx,
 
     job_data->id = id;
 
-    job_counts_.numOutstanding.fetch_add(1, memory_order::relaxed);
+    num_outstanding_.fetch_add(1, memory_order::relaxed);
 
     if (isRunnable(tracker_info, job_data)) {
         addToRunQueue(thread_idx, prio,
@@ -927,7 +925,7 @@ void JobManager::jobFinished(uint32_t job_idx)
 {
     JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
 
-    job_counts_.numOutstanding.fetch_sub(1, memory_order::release);
+    num_outstanding_.fetch_sub(1, memory_order::release);
 
     decrementJobTracker(tracker_info, job_idx);
 }
@@ -973,7 +971,7 @@ void JobManager::addToRunQueue(int thread_idx,
     uint32_t num_added = add_cb(job_array, cur_tail);
 
     if (prio == JobPriority::High) {
-        job_counts_.numHigh.fetch_add(num_added, memory_order::relaxed);
+        num_high_.fetch_add(num_added, memory_order::relaxed);
     }
     if (prio == JobPriority::IO) {
         io_sema_.release(num_added);
@@ -1063,13 +1061,13 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
     tail.store(cur_tail, memory_order::relaxed);
 
     if (prio == JobPriority::High) {
-        job_counts_.numHigh.fetch_add(num_jobs, memory_order::relaxed);
+        num_high_.fetch_add(num_jobs, memory_order::relaxed);
     }
     if (prio == JobPriority::IO) {
         io_sema_.release(num_jobs);
     }
 
-    job_counts_.numOutstanding.fetch_add(num_jobs, memory_order::relaxed);
+    num_outstanding_.fetch_add(num_jobs, memory_order::relaxed);
 
     atomic_thread_fence(memory_order::release);
 
@@ -1331,11 +1329,11 @@ void JobManager::workerThread(
     while (true) {
         bool job_found = false;
 
-        if (job_counts_.numHigh.load(memory_order::relaxed) > 0) {
+        if (num_high_.load(memory_order::relaxed) > 0) {
             job_found = getNextJob(high_base_, thread_idx, false, &cur_job);
 
             if (job_found) {
-                job_counts_.numHigh.fetch_sub(1, memory_order::relaxed);
+                num_high_.fetch_sub(1, memory_order::relaxed);
             }
         }
 
@@ -1345,7 +1343,7 @@ void JobManager::workerThread(
 
         // All the queues are empty
         if (!job_found) {
-            if (job_counts_.numOutstanding.load(memory_order::acquire) > 0) {
+            if (num_outstanding_.load(memory_order::acquire) > 0) {
                 workerYield();
                 continue;
             } else {
@@ -1379,7 +1377,7 @@ void JobManager::ioThread(
         bool job_found = getNextJob(io_base_, thread_idx, false, &cur_job);
 
         if (!job_found) {
-            if (job_counts_.numOutstanding.load(memory_order::acquire) > 0) {
+            if (num_outstanding_.load(memory_order::acquire) > 0) {
                 io_sema_.acquire();
                 continue;
             } else {

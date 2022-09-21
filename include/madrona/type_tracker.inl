@@ -24,7 +24,7 @@ template <typename T>
 uint32_t TypeTracker::trackType(uint32_t *ptr)
 {
     return TypeTracker::trackByName(ptr,
-#ifdef _MSC_VER
+#ifdef MADRONA_MSVC
         __FUNCDNAME__
 #else
         __PRETTY_FUNCTION__

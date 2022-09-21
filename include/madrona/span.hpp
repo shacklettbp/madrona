@@ -15,14 +15,14 @@ public:
 
     // GCC correctly warns that the below constructor is dangerous, but it's
     // convenient as long as the Span doesn't outlive the current expression
-#if defined(__GNUC__) && !defined(__clang__)
+#if MADRONA_GCC
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winit-list-lifetime"
 #endif
     Span(std::initializer_list<T> init)
         : ptr_(init.begin()), n_(init.size())
     {}
-#if defined(__GNUC__) && !defined(__clang__)
+#ifdef MADRONA_GCC
 #pragma GCC diagnostic pop
 #endif
 

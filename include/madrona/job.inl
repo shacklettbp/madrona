@@ -125,14 +125,14 @@ JobID JobManager::queueJob(int thread_idx,
 {
     static constexpr uint32_t num_deps = sizeof...(DepTs);
     using ContainerT = JobContainer<Fn, num_deps>;
-#if defined(__GNUC__) && !defined(__clang__)
+#ifdef MADRONA_GCC
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 #endif
     static_assert(num_deps == 0 ||
         offsetof(ContainerT, dependencies) == sizeof(JobContainerBase),
         "Dependencies at incorrect offset in container type");
-#if defined(__GNUC__) && !defined(__clang__)
+#if MADRONA_GCC
 #pragma GCC diagnostic pop
 #endif
 
@@ -146,10 +146,7 @@ JobID JobManager::queueJob(int thread_idx,
 
     void *store = allocJob(thread_idx, job_size, job_alignment);
 
-    auto container = new (store) ContainerT(
-#ifdef MADRONA_MW_MODE
-        world_id,
-#endif
+    auto container = new (store) ContainerT(MADRONA_MW_COND(world_id,)
         std::forward<Fn>(fn), deps...);
 
     Job::EntryPtr stateless_ptr = [](Context *ctx_base, JobContainerBase *data,
