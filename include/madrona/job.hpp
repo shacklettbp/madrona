@@ -50,9 +50,7 @@ struct JobContainer : public JobContainerBase {
 };
 
 struct Job {
-    using EntryPtr = void (*)(Context *, JobContainerBase *, uint32_t);
-
-    EntryPtr func;
+    void *func;
     JobContainerBase *data;
     uint32_t invocationOffset;
     uint32_t numInvocations;
@@ -77,14 +75,13 @@ public:
     inline JobID reserveProxyJobID(JobID parent_id);
     inline void relinquishProxyJobID(JobID job_id);
 
-    template <typename ContextT, typename Fn, typename... DepTs>
+    template <typename ContextT, bool single_invoke, typename Fn,
+              typename... DepTs>
     JobID queueJob(int thread_idx,
                    Fn &&fn,
                    uint32_t num_invocations,
                    JobID parent_id,
-#ifdef MADRONA_MW_MODE
-                   uint32_t world_id,
-#endif
+                   MADRONA_MW_COND(uint32_t world_id,)
                    JobPriority prio = JobPriority::Normal,
                    DepTs ...deps);
 
@@ -134,7 +131,27 @@ public:
         uint32_t arena_used_bytes_;
     };
 
+    struct RunQueue {
+        std::atomic_uint32_t head;
+        std::atomic_uint32_t correction;
+        std::atomic_uint32_t auth;
+        char pad[MADRONA_CACHE_LINE - sizeof(std::atomic_uint32_t) * 3];
+        std::atomic_uint32_t tail;
+    };
+
 private:
+    template <typename ContextT, typename ContainerT>
+    static void singleInvokeEntry(Context *ctx_base, JobContainerBase *data);
+
+    template <typename ContextT, typename ContainerT>
+    static void multiInvokeEntry(Context *ctx_base, JobContainerBase *data,
+                                 uint64_t invocation_offset,
+                                 uint64_t num_invocations,
+                                 RunQueue *thread_queue);
+
+    using SingleInvokeFn = decltype(&singleInvokeEntry<Context, void>);
+    using MultiInvokeFn = decltype(&multiInvokeEntry<Context, void>);
+
     JobManager(uint32_t num_ctx_userdata_bytes,
                uint32_t ctx_userdata_alignment,
                void (*ctx_init_fn)(void *, void *, WorkerInit &&),
@@ -154,7 +171,7 @@ private:
                            uint32_t alignment);
     inline void deallocJob(int worker_idx, void *ptr, uint32_t num_bytes);
 
-    JobID queueJob(int thread_idx, Job::EntryPtr job_func,
+    JobID queueJob(int thread_idx, void *job_func,
                    JobContainerBase *job_data, uint32_t num_invocations, 
                    uint32_t parent_job_idx,
                    JobPriority prio = JobPriority::Normal);
@@ -162,24 +179,35 @@ private:
     JobID reserveProxyJobID(uint32_t parent_job_idx);
     void relinquishProxyJobID(uint32_t job_idx);
 
-    inline void jobFinished(uint32_t job_idx);
+    inline void jobFinishedImpl(uint32_t job_idx);
+    void jobFinished(uint32_t job_idx);
 
-    bool markInvocationFinished(JobContainerBase *job);
+    bool markInvocationsFinished(JobContainerBase *job,
+                                 uint32_t num_invocations);
 
     template <typename Fn>
     inline void addToRunQueue(int thread_idx, JobPriority prio, Fn &&add_cb);
 
-    inline void addToWaitQueue(int thread_idx, Job::EntryPtr job_func,
+    inline void addToWaitQueue(int thread_idx, void *job_func,
         JobContainerBase *job_data, uint32_t num_invocations,
         JobPriority prio);
 
     inline void findReadyJobs(int thread_idx);
 
+    inline bool isQueueEmpty(uint32_t head, uint32_t correction,
+                             uint32_t tail) const;
+
+    inline uint32_t dequeueJobIndex(RunQueue *run_queue);
+
     inline bool getNextJob(void *queue_base, int thread_idx,
                            bool check_waiting, Job *job);
 
+    void splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
+                  uint32_t invocation_offset, uint32_t num_invocations,
+                  RunQueue *run_queue);
+
     inline void runJob(const int thread_idx, Context *ctx_ptr,
-                       Job::EntryPtr fn, JobContainerBase *job_data,
+                       void *fn, JobContainerBase *job_data,
                        uint32_t invocation_offset, uint32_t num_invocations);
 
     void workerThread(const int thread_idx,

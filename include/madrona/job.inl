@@ -46,6 +46,17 @@ JobContainer<Fn, N>::JobContainer(
       fn(std::forward<Fn>(func))
 {}
 
+bool JobManager::isQueueEmpty(uint32_t head,
+                              uint32_t correction,
+                              uint32_t tail) const
+{
+    auto checkGEWrapped = [](uint32_t a, uint32_t b) {
+        return a - b <= (1u << 31u);
+    };
+
+    return checkGEWrapped(head - correction, tail);
+}
+
 template <typename StartFn>
 struct JobManager::EntryConfig {
     uint32_t numUserdataBytes;
@@ -112,14 +123,79 @@ void JobManager::relinquishProxyJobID(JobID job_id)
     return relinquishProxyJobID(job_id.idx);
 }
 
-template <typename ContextT, typename Fn, typename... DepTs>
+template <typename ContextT, typename ContainerT>
+void JobManager::singleInvokeEntry(Context *ctx_base,
+                                   JobContainerBase *data)
+{
+    ContextT &ctx = *static_cast<ContextT *>(ctx_base);
+    auto container = static_cast<ContainerT *>(data);
+    JobManager *job_mgr = ctx.job_mgr_;
+    
+    container->fn(ctx);
+
+    job_mgr->jobFinished(data->id.idx);
+    
+    if constexpr (!std::is_trivially_destructible_v<ContainerT>) {
+        container->~ContainerT();
+    }
+    // Important note: jobs may be freed by different threads
+    job_mgr->deallocJob(ctx.worker_idx_, data, sizeof(ContainerT));
+}
+
+template <typename ContextT, typename ContainerT>
+void JobManager::multiInvokeEntry(Context *ctx_base,
+                                  JobContainerBase *data,
+                                  uint64_t invocation_offset,
+                                  uint64_t num_invocations,
+                                  RunQueue *thread_queue)
+{
+    ContextT &ctx = *static_cast<ContextT *>(ctx_base);
+    auto container = static_cast<ContainerT *>(data);
+    JobManager *job_mgr = ctx.job_mgr_;
+
+    auto shouldSplit = [](JobManager *job_mgr, RunQueue *queue) {
+        uint32_t cur_tail = queue->tail.load(std::memory_order_relaxed);
+        uint32_t cur_correction =
+            queue->correction.load(std::memory_order_relaxed);
+        uint32_t cur_head = queue->head.load(std::memory_order_relaxed);
+
+        return job_mgr->isQueueEmpty(cur_head, cur_correction, cur_tail);
+    };
+
+    // This loop is never called with num_invocations == 0
+    uint64_t invocation_idx = invocation_offset;
+    uint64_t remaining_invocations = num_invocations;
+    do {
+        uint64_t cur_invocation = invocation_idx++;
+        remaining_invocations -= 1;
+
+        if (remaining_invocations > 0 && shouldSplit(job_mgr, thread_queue)) {
+            job_mgr->splitJob(&multiInvokeEntry<ContextT, ContainerT>, data,
+                invocation_idx, remaining_invocations, thread_queue);
+            remaining_invocations = 0;
+        }
+
+        container->fn(ctx, cur_invocation);
+    } while (remaining_invocations > 0);
+
+    bool cleanup = job_mgr->markInvocationsFinished(data,
+        invocation_idx - invocation_offset);
+    if (cleanup) {
+        if constexpr (!std::is_trivially_destructible_v<ContainerT>) {
+            container->~ContainerT();
+        }
+        // Important note: jobs may be freed by different threads
+        job_mgr->deallocJob(ctx.worker_idx_, data, sizeof(ContainerT));
+    }
+}
+
+template <typename ContextT, bool single_invoke, typename Fn,
+          typename... DepTs>
 JobID JobManager::queueJob(int thread_idx,
                            Fn &&fn,
                            uint32_t num_invocations,
                            JobID parent_id,
-#ifdef MADRONA_MW_MODE
-                           uint32_t world_id,
-#endif
+                           MADRONA_MW_COND(uint32_t world_id,)
                            JobPriority prio,
                            DepTs ...deps)
 {
@@ -132,7 +208,7 @@ JobID JobManager::queueJob(int thread_idx,
     static_assert(num_deps == 0 ||
         offsetof(ContainerT, dependencies) == sizeof(JobContainerBase),
         "Dependencies at incorrect offset in container type");
-#if MADRONA_GCC
+#ifdef MADRONA_GCC
 #pragma GCC diagnostic pop
 #endif
 
@@ -149,23 +225,16 @@ JobID JobManager::queueJob(int thread_idx,
     auto container = new (store) ContainerT(MADRONA_MW_COND(world_id,)
         std::forward<Fn>(fn), deps...);
 
-    Job::EntryPtr stateless_ptr = [](Context *ctx_base, JobContainerBase *data,
-                                     uint32_t invocation_idx) {
-        ContextT &ctx = *static_cast<ContextT *>(ctx_base);
+    void *entry;
+    if constexpr (single_invoke) {
+        SingleInvokeFn fn_ptr = &singleInvokeEntry<ContextT, ContainerT>;
+        entry = (void *)fn_ptr;
+    } else {
+        MultiInvokeFn fn_ptr = &multiInvokeEntry<ContextT, ContainerT>;
+        entry = (void *)fn_ptr;
+    }
 
-        auto container = static_cast<ContainerT *>(data);
-        container->fn(ctx, invocation_idx);
-
-        bool cleanup = ctx.job_mgr_->markInvocationFinished(container);
-
-        if (cleanup) {
-            container->~ContainerT();
-            // Important note: jobs may be freed by different threads
-            ctx.job_mgr_->deallocJob(ctx.worker_idx_, container, job_size);
-        }
-    };
-
-    return queueJob(thread_idx, stateless_ptr, container, num_invocations,
+    return queueJob(thread_idx, entry, container, num_invocations,
                     parent_id.idx, prio);
 }
 

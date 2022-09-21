@@ -117,12 +117,12 @@ template <typename ContextT, typename Fn, typename... Deps>
 JobID Context::submitImpl(Fn &&fn, bool is_child,
                           Deps &&... dependencies)
 {
-    auto wrapper = [fn = std::forward<Fn>(fn)](ContextT &ctx, uint32_t) {
-        fn(ctx);
-    };
+    JobID parent_id = is_child ? cur_job_id_ : JobID::none();
 
-    return submitNImpl<ContextT>(std::forward<decltype(wrapper)>(wrapper), 1,
-        is_child, std::forward<Deps>(dependencies)...);
+    return job_mgr_->queueJob<ContextT, true>(worker_idx_,
+        std::forward<Fn>(fn), 0, parent_id,
+        MADRONA_MW_COND(cur_world_id_, ) JobPriority::Normal,
+        std::forward<Deps>(dependencies)...);
 }
 
 template <typename ContextT, typename Fn, typename... Deps>
@@ -171,7 +171,8 @@ JobID Context::parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
 
     // Note that even though we "relinquish" the id here, it is still safe
     // to return the ID, since the generation stored in the ID will simply
-    // be invalid if the entire forall job finishes, just like a normal job id.
+    // be invalid if the entire parallelFor job finishes, just like a normal
+    // job id.
     job_mgr_->relinquishProxyJobID(proxy_id);
 
     return proxy_id;
@@ -181,9 +182,10 @@ template <typename ContextT, typename Fn, typename... Deps>
 JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
                            Deps && ...dependencies)
 {
-    return job_mgr_->queueJob<ContextT>(worker_idx_, std::forward<Fn>(fn),
-        num_invocations, parent_id, MADRONA_MW_COND(cur_world_id_, )
-        JobPriority::Normal, std::forward<Deps>(dependencies)...);
+    return job_mgr_->queueJob<ContextT, false>(worker_idx_,
+        std::forward<Fn>(fn), num_invocations, parent_id,
+        MADRONA_MW_COND(cur_world_id_, ) JobPriority::Normal,
+        std::forward<Deps>(dependencies)...);
 }
 
 JobID Context::currentJobID() const

@@ -18,14 +18,6 @@ using std::memory_order;
 
 namespace madrona {
 
-struct JobQueue {
-    atomic_uint32_t head;
-    atomic_uint32_t correction;
-    atomic_uint32_t auth;
-    char pad[116];
-    atomic_uint32_t tail;
-};
-
 struct WaitQueue {
     utils::SpinLock lock;
     uint32_t head;
@@ -64,7 +56,7 @@ namespace ICfg {
 
     constexpr static uint32_t jobQueueSentinel = 0xFFFFFFFF;
 
-    constexpr static uint64_t jobQueueStartAlignment = 128;
+    constexpr static uint64_t jobQueueStartAlignment = MADRONA_CACHE_LINE;
 
     template <uint64_t num_jobs>
     static constexpr uint64_t computeWaitQueueBytes()
@@ -81,10 +73,10 @@ namespace ICfg {
     template <uint64_t num_jobs>
     static constexpr uint64_t computeRunQueueBytes()
     {
-        static_assert(offsetof(JobQueue, tail) == jobQueueStartAlignment);
+        static_assert(offsetof(JobManager::RunQueue, tail) == jobQueueStartAlignment);
 
         constexpr uint64_t bytes_per_thread =
-            sizeof(JobQueue) + num_jobs * sizeof(Job);
+            sizeof(JobManager::RunQueue) + num_jobs * sizeof(Job);
 
         return utils::roundUp(bytes_per_thread, jobQueueStartAlignment);
     }
@@ -96,11 +88,6 @@ namespace ICfg {
     constexpr static uint32_t numJobAllocArenas = 1024;
 
     constexpr static uint32_t jobTrackerTerm = ~0u;
-}
-
-static inline bool checkGEWrapped(uint32_t a, uint32_t b)
-{
-    return a - b <= (1u << 31u);
 }
 
 static inline void workerYield()
@@ -371,10 +358,10 @@ struct ThreadPoolInit {
     }
 };
 
-static inline JobQueue * getRunQueue(
+static inline JobManager::RunQueue * getRunQueue(
     void *queue_base, const int thread_idx)
 {
-    return (JobQueue *)((char *)queue_base +
+    return (JobManager::RunQueue *)((char *)queue_base +
         thread_idx * ICfg::runQueueBytesPerThread);
 }
 
@@ -386,9 +373,9 @@ static inline WaitQueue * getWaitQueue(
 }
 
 
-static inline Job * getJobArray(JobQueue *queue)
+static inline Job * getJobArray(JobManager::RunQueue *queue)
 {
-    return (Job *)((char *)queue + sizeof(JobQueue));
+    return (Job *)((char *)queue + sizeof(JobManager::RunQueue));
 }
 
 static inline Job * getWaitingJobs(WaitQueue *queue)
@@ -693,9 +680,9 @@ JobManager::JobManager(const Init &init)
     }
 
     auto initQueue = [](void *queue_start, int thread_idx) {
-        JobQueue *queue = getRunQueue(queue_start, thread_idx);
+        RunQueue *queue = getRunQueue(queue_start, thread_idx);
 
-        new (queue) JobQueue {
+        new (queue) RunQueue {
             .head = 0,
             .correction = 0,
             .auth = 0,
@@ -757,13 +744,13 @@ JobManager::JobManager(const Init &init)
         StartWrapper *wrapper;
     };
    
-    auto entry = [](Context *ctx, JobContainerBase *ptr, uint32_t) {
+    SingleInvokeFn entry = [](Context *ctx, JobContainerBase *ptr) {
         auto &job = *(StartJob *)ptr;
         auto &start = *(job.wrapper);
 
         start.func(ctx, start.data);
-        ctx->job_mgr_->jobFinished(job.id.idx);
 
+        ctx->job_mgr_->jobFinished(job.id.idx);
         start.remainingLaunches.fetch_sub(1, memory_order::release);
     };
 
@@ -780,7 +767,7 @@ JobManager::JobManager(const Init &init)
             &start_wrapper,
         };
  
-        queueJob(i % init.numWorkers, entry, &start_jobs[i], 1,
+        queueJob(i % init.numWorkers, (void *)entry, &start_jobs[i], 0,
                  JobID::none().idx, JobPriority::Normal);
     }
 #else
@@ -789,7 +776,7 @@ JobManager::JobManager(const Init &init)
         &start_wrapper,
     };
 
-    queueJob(0, entry, &start_job, 1, JobID::none().idx, JobPriority::Normal);
+    queueJob(0, (void *)entry, &start_job, 0, JobID::none().idx, JobPriority::Normal);
 #endif
 
     ThreadPoolInit pool_init { init.numThreads, 0 };
@@ -876,7 +863,7 @@ JobManager::~JobManager()
 }
 
 JobID JobManager::queueJob(int thread_idx,
-                           Job::EntryPtr job_func,
+                           void* job_func,
                            JobContainerBase *job_data,
                            uint32_t num_invocations,
                            uint32_t parent_job_idx,
@@ -921,7 +908,7 @@ void JobManager::relinquishProxyJobID(uint32_t job_idx)
     decrementJobTracker(tracker_info, job_idx);
 }
 
-void JobManager::jobFinished(uint32_t job_idx)
+void JobManager::jobFinishedImpl(uint32_t job_idx)
 {
     JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
 
@@ -930,7 +917,14 @@ void JobManager::jobFinished(uint32_t job_idx)
     decrementJobTracker(tracker_info, job_idx);
 }
 
-bool JobManager::markInvocationFinished(JobContainerBase *job)
+// Non-inline version so singleInvokeEntry can call directly
+void JobManager::jobFinished(uint32_t job_idx)
+{
+    jobFinishedImpl(job_idx);
+}
+
+bool JobManager::markInvocationsFinished(JobContainerBase *job,
+                                         uint32_t num_invocations)
 {
     JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
     JobTracker *trackers = getTrackerArray(tracker_info);
@@ -939,15 +933,31 @@ bool JobManager::markInvocationFinished(JobContainerBase *job)
 
     uint32_t prev_remaining_invocations =
         trackers[job_idx].remainingInvocations.fetch_sub(
-            1, memory_order::acq_rel);
+            num_invocations, memory_order::acq_rel);
 
     bool finished = prev_remaining_invocations == 1;
 
     if (finished) {
-        jobFinished(job_idx);
+        jobFinishedImpl(job_idx);
     }
 
     return finished;
+}
+
+template <typename Fn>
+static inline uint32_t addToRunQueueImpl(JobManager::RunQueue *run_queue,
+                                         Fn &&add_cb)
+{
+    // No one modifies queue_tail besides this thread
+    uint32_t cur_tail = run_queue->tail.load(memory_order::relaxed);
+    Job *job_array = getJobArray(run_queue);
+
+    uint32_t num_added = add_cb(job_array, cur_tail);
+
+    cur_tail += num_added;
+    run_queue->tail.store(cur_tail, memory_order::release);
+
+    return num_added;
 }
 
 template <typename Fn>
@@ -955,7 +965,7 @@ void JobManager::addToRunQueue(int thread_idx,
                                JobPriority prio,
                                Fn &&add_cb)
 {
-    JobQueue *queue;
+    RunQueue *queue;
     if (prio == JobPriority::High) {
         queue = getRunQueue(high_base_, thread_idx);
     } else if (prio == JobPriority::Normal) {
@@ -964,11 +974,7 @@ void JobManager::addToRunQueue(int thread_idx,
         queue = getRunQueue(io_base_, thread_idx);
     }
 
-    // No one modifies queue_tail besides this thread
-    uint32_t cur_tail = queue->tail.load(memory_order::relaxed);
-    Job *job_array = getJobArray(queue);
-
-    uint32_t num_added = add_cb(job_array, cur_tail);
+    uint32_t num_added = addToRunQueueImpl(queue, std::forward<Fn>(add_cb));
 
     if (prio == JobPriority::High) {
         num_high_.fetch_add(num_added, memory_order::relaxed);
@@ -976,13 +982,10 @@ void JobManager::addToRunQueue(int thread_idx,
     if (prio == JobPriority::IO) {
         io_sema_.release(num_added);
     }
-
-    cur_tail += num_added;
-    queue->tail.store(cur_tail, memory_order::release);
 }
 
 void JobManager::addToWaitQueue(int thread_idx,
-                                Job::EntryPtr job_func,
+                                void *job_func,
                                 JobContainerBase *job_data,
                                 uint32_t num_invocations,
                                 JobPriority prio)
@@ -1129,7 +1132,7 @@ void JobManager::findReadyJobs(int thread_idx)
     }
 }
 
-static inline uint32_t getNextJobIndex(JobQueue *job_queue)
+uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
 {
     atomic_uint32_t &head = job_queue->head;
     atomic_uint32_t &correction = job_queue->correction;
@@ -1140,7 +1143,7 @@ static inline uint32_t getNextJobIndex(JobQueue *job_queue)
     uint32_t cur_correction = correction.load(memory_order::relaxed);
     uint32_t cur_head = head.load(memory_order::relaxed);
 
-    if (checkGEWrapped(cur_head - cur_correction, cur_tail)) {
+    if (isQueueEmpty(cur_head, cur_correction, cur_tail)) {
         return ICfg::jobQueueSentinel;
     }
 
@@ -1149,9 +1152,8 @@ static inline uint32_t getNextJobIndex(JobQueue *job_queue)
     cur_head = head.fetch_add(1, memory_order::relaxed);
     cur_tail = tail.load(memory_order::acquire);
 
-    if (checkGEWrapped(cur_head - cur_correction, cur_tail)) [[unlikely]] {
+    if (isQueueEmpty(cur_head, cur_correction, cur_tail)) [[unlikely]] {
         correction.fetch_add(1, memory_order::release);
-
         return ICfg::jobQueueSentinel;
     }
 
@@ -1171,18 +1173,18 @@ bool JobManager::getNextJob(void *const queue_base,
                             Job *next_job)
 {
     // First, check queue start_idx (the current thread's)
-    JobQueue *queue;
+    RunQueue *queue;
     uint32_t job_idx;
     {
         queue = getRunQueue(queue_base, thread_idx);
-        job_idx = getNextJobIndex(queue);
+        job_idx = dequeueJobIndex(queue);
 
         if (job_idx == ICfg::jobQueueSentinel && check_waiting) {
             // Check for waiting jobs
             findReadyJobs(thread_idx);
 
             // Recheck current queue
-            job_idx = getNextJobIndex(queue);
+            job_idx = dequeueJobIndex(queue);
         }
     }
 
@@ -1192,7 +1194,7 @@ bool JobManager::getNextJob(void *const queue_base,
             int queue_idx = (thread_idx + i) % num_queues;
             queue = getRunQueue(queue_base, queue_idx);
         
-            job_idx = getNextJobIndex(queue);
+            job_idx = dequeueJobIndex(queue);
             if (job_idx != ICfg::jobQueueSentinel) {
                 break;
             }
@@ -1228,89 +1230,79 @@ bool JobManager::getNextJob(void *const queue_base,
     return true;
 }
 
+void JobManager::splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
+                          uint32_t invocation_offset, uint32_t num_invocations,
+                          RunQueue *run_queue)
+{
+    void *generic_fn = (void *)fn_ptr;
+    if (num_invocations == 1) {
+        addToRunQueueImpl(run_queue,
+            [=](Job *job_array, uint32_t cur_tail) {
+                job_array[cur_tail & ICfg::runQueueIndexMask] = Job {
+                    .func = generic_fn,
+                    .data = job_data,
+                    .invocationOffset = invocation_offset,
+                    .numInvocations = 1,
+                };
+    
+                return 1u;
+            });
+    } else {
+        uint32_t b_num_invocations = num_invocations / 2;
+        uint32_t a_num_invocations =
+            num_invocations - b_num_invocations;
+    
+        uint32_t a_offset = invocation_offset;
+        uint32_t b_offset = a_offset + a_num_invocations;
+    
+        // FIXME, again priority issues here
+        addToRunQueueImpl(run_queue,
+            [=](Job *job_array, uint32_t cur_tail) {
+                uint32_t first_idx =
+                    cur_tail & ICfg::runQueueIndexMask;
+    
+                uint32_t second_idx =
+                    (cur_tail + 1) & ICfg::runQueueIndexMask;
+    
+                job_array[first_idx] = Job {
+                    .func = generic_fn,
+                    .data = job_data,
+                    .invocationOffset = a_offset,
+                    .numInvocations = a_num_invocations,
+                };
+    
+                job_array[second_idx] = Job {
+                    .func = generic_fn,
+                    .data = job_data,
+                    .invocationOffset = b_offset,
+                    .numInvocations = b_num_invocations,
+                };
+    
+                return 2u;
+            });
+    }
+}
+
 void JobManager::runJob(const int thread_idx,
                         Context *ctx,
-                        Job::EntryPtr fn,
+                        void *generic_fn,
                         JobContainerBase *job_data,
                         uint32_t invocation_offset,
                         uint32_t num_invocations)
 {
     ctx->cur_job_id_ = job_data->id;
 
-    // FIXME, figure out relationship between different queue priorities
-    // Should the normal priority queue always be the work indicator here?
-    JobQueue *check_queue = getRunQueue(normal_base_, thread_idx);
+    if (num_invocations == 0) {
+        auto fn = (SingleInvokeFn)generic_fn;
+        fn(ctx, job_data);
+        return;
+    } else {
+        // FIXME, figure out relationship between different queue priorities
+        // Should the normal priority queue always be the work indicator here?
+        RunQueue *check_queue = getRunQueue(normal_base_, thread_idx);
 
-    auto checkQueueEmpty = [check_queue] {
-        uint32_t cur_tail = check_queue->tail.load(memory_order::relaxed);
-        uint32_t cur_correction =
-            check_queue->correction.load(memory_order::relaxed);
-        uint32_t cur_head = check_queue->head.load(memory_order::relaxed);
-
-        return checkGEWrapped(cur_head - cur_correction, cur_tail);
-    };
-
-    while (num_invocations > 0) {
-        uint32_t cur_offset = invocation_offset++;
-        num_invocations -= 1;
-
-        // FIXME: improvement - check empty on first iteration,
-        // after that, only check every N iterations (possibly determined
-        // by # of iteration CPU cycles). There are probably some
-        // heuristics here like if num_invocations >> num threads,
-        // leave some iterations in this loop rather than fully splitting
-        if (num_invocations > 0 && checkQueueEmpty()) {
-            if (num_invocations == 1) {
-                addToRunQueue(thread_idx, JobPriority::Normal,
-                    [=](Job *job_array, uint32_t cur_tail) {
-                        job_array[cur_tail & ICfg::runQueueIndexMask] = Job {
-                            .func = fn,
-                            .data = job_data,
-                            .invocationOffset = invocation_offset,
-                            .numInvocations = 1,
-                        };
-
-                        return 1u;
-                    });
-            } else {
-                uint32_t b_num_invocations = num_invocations / 2;
-                uint32_t a_num_invocations =
-                    num_invocations - b_num_invocations;
-
-                uint32_t a_offset = invocation_offset;
-                uint32_t b_offset = a_offset + a_num_invocations;
-
-                // FIXME, again priority issues here
-                addToRunQueue(thread_idx, JobPriority::Normal,
-                    [=](Job *job_array, uint32_t cur_tail) {
-                        uint32_t first_idx =
-                            cur_tail & ICfg::runQueueIndexMask;
-
-                        uint32_t second_idx =
-                            (cur_tail + 1) & ICfg::runQueueIndexMask;
-
-                        job_array[first_idx] = Job {
-                            .func = fn,
-                            .data = job_data,
-                            .invocationOffset = a_offset,
-                            .numInvocations = a_num_invocations,
-                        };
-
-                        job_array[second_idx] = Job {
-                            .func = fn,
-                            .data = job_data,
-                            .invocationOffset = b_offset,
-                            .numInvocations = b_num_invocations,
-                        };
-
-                        return 2u;
-                    });
-            }
-
-            num_invocations = 0;
-        }
-
-        fn(ctx, job_data, cur_offset);
+        auto fn = (MultiInvokeFn)generic_fn;
+        fn(ctx, job_data, invocation_offset, num_invocations, check_queue);
     }
 }
 
