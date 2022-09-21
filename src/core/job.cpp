@@ -935,7 +935,7 @@ bool JobManager::markInvocationsFinished(JobContainerBase *job,
         trackers[job_idx].remainingInvocations.fetch_sub(
             num_invocations, memory_order::acq_rel);
 
-    bool finished = prev_remaining_invocations == 1;
+    bool finished = prev_remaining_invocations == num_invocations;
 
     if (finished) {
         jobFinishedImpl(job_idx);
