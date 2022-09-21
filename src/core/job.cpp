@@ -24,8 +24,6 @@ struct WaitQueue {
     uint32_t tail;
 };
 
-static_assert(atomic_uint32_t::is_always_lock_free);
-
 struct JobTrackerInfo {
     // This alignment requirement is necessary to get
     // efficient 64 bit atomics out of clang with libstdcxx on linux
