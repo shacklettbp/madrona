@@ -7,53 +7,38 @@
 
 namespace madrona {
 
+template <typename T>
+T & EntityStore::LockedMapStore<T>::operator[](uint32_t idx)
+{
+    return ((T *)store.data())[idx];
+}
+
+template <typename T>
+const T & EntityStore::LockedMapStore<T>::operator[](uint32_t idx) const
+{
+    return ((const T *)store.data())[idx];
+}
+
+template <typename T>
+uint32_t EntityStore::LockedMapStore<T>::size() const
+{
+    return numIDs;
+}
+
 Loc EntityStore::getLoc(Entity e) const
 {
-    if (e.id >= num_ids_) {
-        return Loc {
-            .archetype = ~0u,
-            .row = 0,
-        };
-    }
-
-    const GenLoc *gen_loc = getGenLoc(e.id);
-
-    uint32_t gen = gen_loc->gen;
-
-    if (gen != e.gen) {
-        return Loc {
-            .archetype = ~0u,
-            .row = 0,
-        };
-    }
-
-    return gen_loc->loc;
+    return map_.lookup(e);
 }
 
 void EntityStore::setLoc(Entity e, Loc loc)
 {
-    GenLoc *gen_loc = getGenLoc(e.id);
-    assert(e.gen == gen_loc->gen);
-
-    gen_loc->loc = loc;
+    map_.getRef(e) = loc;
 }
 
 void EntityStore::setRow(Entity e, uint32_t row)
 {
-    GenLoc *gen_loc = getGenLoc(e.id);
-    assert(e.gen == gen_loc->gen);
-
-    gen_loc->loc.row = row;
-}
-
-auto EntityStore::getGenLoc(uint32_t id) -> GenLoc *
-{
-    return (GenLoc *)store_.data() + (uintptr_t)id;
-}
-
-auto EntityStore::getGenLoc(uint32_t id) const -> const GenLoc *
-{
-    return (const GenLoc *)store_.data() + (uintptr_t)id;
+    Loc &loc = map_.getRef(e);
+    loc.row = row;
 }
 
 template <typename ComponentT>

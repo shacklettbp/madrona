@@ -15,6 +15,14 @@ bool Loc::valid() const
     return archetype != ~0u;
 }
 
+Loc Loc::none()
+{
+    return Loc {
+        .archetype = ~0u,
+        .row = 0,
+    };
+}
+
 bool operator==(Entity a, Entity b)
 {
     return a.gen == b.gen && a.id == b.id;

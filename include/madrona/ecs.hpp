@@ -16,6 +16,8 @@ struct Loc {
     uint32_t row;
 
     inline bool valid() const;
+
+    static inline Loc none();
 };
 
 struct IndexHelper {

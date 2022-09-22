@@ -9,6 +9,7 @@
 #include <madrona/optional.hpp>
 #include <madrona/type_tracker.hpp>
 #include <madrona/hashmap.hpp>
+#include <madrona/impl/id_map.hpp>
 
 namespace madrona {
 
@@ -59,20 +60,25 @@ friend class StateManager;
 };
 
 class EntityStore {
-public:
-    class Cache {
-    public:
-        Cache();
-        Cache(const Cache &) = delete;
-    
-    private:
-        uint32_t free_head_;
-        uint32_t num_free_ids_;
-        uint32_t overflow_head_;
-        uint32_t num_overflow_ids_;
-    
-    friend class EntityStore;
+private:
+    template <typename T>
+    struct LockedMapStore {
+        VirtualStore store;
+        uint32_t numIDs;
+        utils::SpinLock expandLock;
+
+        inline T & operator[](uint32_t idx);
+        inline const T & operator[](uint32_t idx) const;
+
+        LockedMapStore(uint32_t init_capacity);
+        uint32_t expand(uint32_t num_new_elems);
+
+        uint32_t size() const;
     };
+
+    using Map = IDMap<Entity, Loc, LockedMapStore>;
+public:
+    using Cache = Map::Cache;
 
     EntityStore();
 
@@ -86,24 +92,7 @@ public:
     void bulkFree(Cache &cache, Entity *entities, uint32_t num_entities);
 
 private:
-    struct GenLoc {
-        Loc loc;
-        uint32_t gen;
-    };
-
-    inline GenLoc * getGenLoc(uint32_t id);
-    inline const GenLoc * getGenLoc(uint32_t id) const;
-
-    VirtualStore store_;
-    uint32_t num_ids_;
-    utils::SpinLock expand_lock_;
-
-    struct alignas(std::atomic_uint64_t) FreeHead {
-        uint32_t gen;
-        uint32_t head;
-    };
-
-    std::atomic<FreeHead> free_head_;
+    Map map_;
 };
 
 class StateCache {

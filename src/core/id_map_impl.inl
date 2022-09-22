@@ -1,58 +1,88 @@
 #pragma once
 
-#include <madrona/cached_freelist.hpp>
+#include <madrona/impl/id_map.hpp>
+#include <cassert>
 
 namespace madrona {
 
-template <typename T>
-CachedFreeList<T>::Cache::Cache()
-    : freeHead(~0u),
-      numFreeIDs(0),
-      overflowHead(~0u),
-      numOverflowIDs(0)
+template <typename K, typename V, template <typename> typename StoreT>
+IDMap<K, V, StoreT>::Cache::Cache()
+    : free_head_(~0u),
+      num_free_ids_(0),
+      overflow_head_(~0u),
+      num_overflow_ids_(0)
 {}
 
-template <typename K, typename V, bool expandable>
-IDMap<K, V, expandable>::IDMap(uint32_t init_capacity)
-    : head_(FreeHead {
+template <typename K, typename V, template <typename> typename StoreT>
+IDMap<K, V, StoreT>::IDMap(uint32_t init_capacity)
+    : free_head_(FreeHead {
           .gen = 0,
           .head = ~0u,
-      })
-{}
+      }),
+      store_(init_capacity)
+{
+    assert(init_capacity % ids_per_cache_ == 0);
 
-template <typename K, typename V, bool expandable>
-K IDMap<K, V, expandable>::acquireID(Cache &cache)
+    for (int base_idx = 0; base_idx < (int)init_capacity;
+         base_idx += ids_per_cache_) {
+        for (int i = 0; i < (int)ids_per_cache_ - 1; i++) {
+            int idx = base_idx + i;
+            Node &cur = store_[idx];
+
+            cur.gen = 0;
+            cur.freeNode.subNext = idx + 1;
+
+            if (i == 0) {
+                if (base_idx + ids_per_cache_ < init_capacity) {
+                    cur.freeNode.globalNext = base_idx + ids_per_cache_;
+                } else {
+                    cur.freeNode.globalNext = ~0u;
+                }
+            } else {
+                cur.freeNode.globalNext = 1;
+            }
+        }
+
+        Node &last = store_[ids_per_cache_ - 1];
+        last.gen = 0;
+        last.freeNode.subNext = ~0u;
+        last.freeNode.globalNext = 1;
+    }
+}
+
+template <typename K, typename V, template <typename> typename StoreT>
+K IDMap<K, V, StoreT>::acquireID(Cache &cache)
 {
     auto assignCachedID = [this](uint32_t *head) {
         uint32_t new_id = *head;
-        GenValue *free_loc = getGenLoc(new_id);
+        Node &node = store_[new_id];
 
-        // archetype is overloaded for GenLoc in the freelist
-        // to represent multiple contiguous free IDs
-        uint32_t num_contiguous = free_loc->loc.archetype;
+        // globalNext is overloaded when FreeNode is in the cached
+        // freelist to represent multiple contiguous IDs. Contiguous
+        // blocks will never be present on the global free list by design
+        // so this overloading is safe
+        uint32_t num_contiguous = node.freeNode.globalNext;
 
         if (num_contiguous == 1) {
-            *head = free_loc->loc.row;
+            *head = node.freeNode.subNext;
         } else {
             uint32_t next_free = new_id + 1;
-            GenLoc *next_free_loc = getGenLoc(next_free);
-            *next_free_loc = GenLoc {
-                .loc = Loc {
-                    .archetype = num_contiguous - 1,
-                    .row = free_loc->loc.row,
-                },
-                .gen = 0,
+            Node &next_node = store_[next_free];
+            next_node.freeNode = FreeNode {
+                .subNext = node.freeNode.subNext,
+                .globalNext = num_contiguous - 1,
             };
+            next_node.gen = 0;
             *head = next_free;
         }
 
-        return Entity {
-            .gen = free_loc->gen,
+        return K {
+            .gen = node.gen,
             .id = new_id,
         };
     };
 
-    // First, check if there is a free entity in the overflow cache
+    // First, check if there is a free node in the overflow cache
     if (cache.num_overflow_ids_ > 0) {
         cache.num_overflow_ids_ -= 1;
         return assignCachedID(&cache.overflow_head_);
@@ -67,7 +97,8 @@ K IDMap<K, V, expandable>::acquireID(Cache &cache)
     // No free IDs, refill the cache from the global free list
     FreeHead cur_head = free_head_.load(std::memory_order_acquire);
     FreeHead new_head;
-    GenLoc *cur_head_loc;
+
+    Node *cur_head_node;
 
     do {
         if (cur_head.head == ~0u) {
@@ -75,16 +106,8 @@ K IDMap<K, V, expandable>::acquireID(Cache &cache)
         }
 
         new_head.gen = cur_head.gen + 1;
-        cur_head_loc = getGenLoc(cur_head.head);
-
-        // On the global list, 'archetype' acts as the next pointer. This
-        // preserves 'row' for the sublists added by the caches, each of
-        // which is guaranteed to be ICfg::idsPerCache in size.
-        // This works, because there are guaranteed to be no contiguous
-        // blocks by the time a sublist is added to the global list, so
-        // the value of archetype is no longer needed in the sublist
-        // context
-        new_head.head = cur_head_loc->loc.archetype;
+        cur_head_node = &store_[cur_head.head];
+        new_head.head = cur_head_node->freeNode.globalNext;
     } while (!free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_release,
         std::memory_order_acquire));
@@ -94,13 +117,16 @@ K IDMap<K, V, expandable>::acquireID(Cache &cache)
     if (free_ids != ~0u) {
         // Assign archetype to 1 (id block of size 1) so as to not confuse
         // the cache's processing of the freelist
-        cur_head_loc->loc.archetype = 1;
+        cur_head_node->freeNode.globalNext = 1;
 
         cache.free_head_ = free_ids;
-        cache.num_free_ids_ = ICfg::idsPerCache - 1;
+        cache.num_free_ids_ = ids_per_cache_ - 1;
         return assignCachedID(&cache.free_head_);
     }
 
+    uint32_t block_start = store_.expand(ids_per_cache_);
+
+#if 0
     // No free IDs at all, expand the ID store
     uint32_t block_start;
     {
@@ -115,66 +141,66 @@ K IDMap<K, V, expandable>::acquireID(Cache &cache)
         num_ids_ += ICfg::idsPerCache;
         store_.expand(num_ids_);
     }
+#endif
 
     uint32_t first_id = block_start;
 
-    GenLoc *entity_loc = getGenLoc(first_id);
-    entity_loc->gen = 0;
+    Node &assigned_node = store_[first_id];
+    assigned_node.gen = 0;
 
     uint32_t free_start = block_start + 1;
-    GenLoc *free_loc = getGenLoc(free_start);
 
-    *free_loc = {
-        .loc = Loc {
-            // In the free list, archetype is overloaded
+    store_[free_start] = Node {
+        .freeNode = FreeNode {
+            .subNext = ~0u,
+            // In the cached sublist, globalNext is overloaded
             // to handle contiguous free elements
-            .archetype = ICfg::idsPerCache - 1,
-            .row = ~0u,
+            .globalNext = ids_per_cache_ - 1,
         },
         .gen = 0,
     };
 
     cache.free_head_ = free_start;
-    cache.num_free_ids_ = ICfg::idsPerCache - 1;
+    cache.num_free_ids_ = ids_per_cache_ - 1;
 
-    return Entity {
+    return K {
         .gen = 0,
         .id = first_id,
     };
 
 }
 
-template <typename K, typename V, bool expandable>
-void CachedFreelist<T>::releaseID(Cache &cache, uint32_t id)
+template <typename K, typename V, template <typename> typename StoreT>
+void IDMap<K, V, StoreT>::releaseID(Cache &cache, K k)
 {
-    GenLoc *gen_loc = getGenLoc(e.id);
-    gen_loc->gen++;
-    gen_loc->loc.archetype = 1;
+    Node &release_node = store_[k.id];
+    release_node.gen++;
+    release_node.freeNode.globalNext = 1;
 
-    if (cache.num_free_ids_ < ICfg::idsPerCache) {
-        gen_loc->loc.row = cache.free_head_;
-        cache.free_head_ = e.id;
+    if (cache.num_free_ids_ < ids_per_cache_) {
+        release_node.freeNode.subNext = cache.free_head_;
+        cache.free_head_ = k.id;
         cache.num_free_ids_ += 1;
 
         return;
     }
 
-    if (cache.num_overflow_ids_ < ICfg::idsPerCache) {
-        gen_loc->loc.row = cache.overflow_head_;
-        cache.overflow_head_ = e.id;
+    if (cache.num_overflow_ids_ < ids_per_cache_) {
+        release_node.freeNode.subNext = cache.overflow_head_;
+        cache.overflow_head_ = k.id;
         cache.num_overflow_ids_ += 1;
     }
 
     // If overflow cache is too big return it to the global free list
-    if (cache.num_overflow_ids_ == ICfg::idsPerCache) {
+    if (cache.num_overflow_ids_ == ids_per_cache_) {
         FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
         FreeHead new_head;
         new_head.head = cache.overflow_head_;
-        GenLoc *new_loc = getGenLoc(cache.overflow_head_);
+        Node &new_node = store_[cache.overflow_head_];
 
         do {
             new_head.gen = cur_head.gen + 1;
-            new_loc->loc.archetype = cur_head.head;
+            new_node.freeNode.globalNext = cur_head.head;
         } while (free_head_.compare_exchange_weak(
             cur_head, new_head, std::memory_order_release,
             std::memory_order_relaxed));
@@ -184,100 +210,101 @@ void CachedFreelist<T>::releaseID(Cache &cache, uint32_t id)
     }
 }
 
-template <typename K, typename V, bool expandable>
-void IDMap::bulkRelease(Cache &cache, K *ids,
-                        uint32_t num_ids)
+template <typename K, typename V, template <typename> typename StoreT>
+void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
+                                      uint32_t num_keys)
 {
-    if (num_entities == 0) return;
+    if (num_keys == 0) return;
 
     // The trick with this function is that the sublists added to the
-    // global free list need to be exactly ICfg::idsPerCache in size
+    // global free list need to be exactly ids_per_cache_ in size
     // num_entities may not be divisible, so use the cache for any overflow
 
-    auto linkToNext = [this, entities](int idx) {
-        Entity cur = entities[idx];
-        Entity next = entities[idx + 1];
+    auto linkToNext = [this, keys](int32_t idx) {
+        uint32_t cur_idx = keys[idx].id;
+        uint32_t next_idx = keys[idx + 1].id;
 
-        GenLoc *gen_loc = getGenLoc(cur.id);
-        gen_loc->gen++;
-        gen_loc->loc.row = next.id;
-        gen_loc->loc.archetype = 1;
+        Node &node = store_[cur_idx];
+        node.gen++;
+        node.freeNode.subNext = next_idx;
+        node.freeNode.globalNext = 1;
     };
     
-    int base_idx;
+    int32_t base_idx;
     uint32_t num_remaining;
-    GenLoc *global_tail_loc = nullptr;
-    for (base_idx = 0; base_idx < (int)num_entities;
-         base_idx += ICfg::idsPerCache) {
+    Node *global_tail_node = nullptr;
+    for (base_idx = 0; base_idx < (int)num_keys;
+         base_idx += ids_per_cache_) {
 
-        num_remaining = num_entities - base_idx;
-        if (num_remaining < ICfg::idsPerCache) {
+        num_remaining = num_keys - base_idx;
+        if (num_remaining < ids_per_cache_) {
             break;
         }
 
-        uint32_t head_id = entities[base_idx].id;
+        uint32_t head_id = keys[base_idx].id;
 
-        for (int sub_idx = 0; sub_idx < (int)ICfg::idsPerCache; sub_idx++) {
+        for (int sub_idx = 0; sub_idx < (int)ids_per_cache_; sub_idx++) {
             int idx = base_idx + sub_idx;
             linkToNext(idx);
         }
 
-        GenLoc *last_loc = getGenLoc(entities[ICfg::idsPerCache - 1].id);
-        last_loc->gen++;
-        last_loc->loc.row = ~0u;
-        last_loc->loc.archetype = 1;
+        Node &last_node = store_[keys[ids_per_cache_ - 1].id];
+        last_node.gen++;
+        last_node.freeNode.subNext = ~0u;
+        last_node.freeNode.globalNext = 1;
 
-        if (global_tail_loc != nullptr) {
-            global_tail_loc->loc.archetype = head_id;
+        if (global_tail_node != nullptr) {
+            global_tail_node->freeNode.globalNext = head_id;
         }
 
-        global_tail_loc = getGenLoc(head_id);
+        global_tail_node = &store_[head_id];
     }
 
     // The final chunk has an odd size we need to take care of
-    if (num_remaining != ICfg::idsPerCache) {
-        uint32_t start_id = entities[base_idx].id;
-        for (int idx = base_idx; idx < (int)num_entities - 1; idx++) {
+    if (num_remaining != ids_per_cache_) {
+        uint32_t start_id = keys[base_idx].id;
+        for (int idx = base_idx; idx < (int)num_keys - 1; idx++) {
             linkToNext(idx);
         }
 
-        GenLoc *tail_loc = getGenLoc(entities[num_entities - 1].id);
-        tail_loc->gen++;
-        tail_loc->loc.archetype = 1;
-        tail_loc->loc.row = cache.overflow_head_;
+        Node &tail_node = store_[keys[num_keys - 1].id];
+        tail_node.gen++;
+        tail_node.freeNode.globalNext = 1;
+        tail_node.freeNode.subNext = cache.overflow_head_;
 
-        uint32_t num_from_overflow = ICfg::idsPerCache - num_remaining;
+        uint32_t num_from_overflow = ids_per_cache_ - num_remaining;
         if (cache.num_overflow_ids_ < num_from_overflow) {
             // The extra IDs fit in the overflow cache
             cache.overflow_head_ = start_id;
             cache.num_overflow_ids_ += num_remaining;
         } else {
-            // The extra IDs don't fit in the overflow cache, need to add to global list
+            // The extra IDs don't fit in the overflow cache, need to add
+            // to global list
             uint32_t next_id = cache.overflow_head_;
-            GenLoc *overflow_loc;
+            Node *overflow_node;
             for (int i = 0; i < (int)num_from_overflow; i++) {
-                overflow_loc = getGenLoc(next_id);
-                next_id = overflow_loc->loc.row;
+                overflow_node = &store_[next_id];
+                next_id = overflow_node->freeNode.subNext;
             }
 
-            overflow_loc->loc.row = ~0u;
+            overflow_node->freeNode.subNext = ~0u;
             cache.overflow_head_ = next_id;
             cache.num_overflow_ids_ -= num_from_overflow;
 
-            if (global_tail_loc != nullptr) {
-                global_tail_loc->loc.archetype = start_id;
+            if (global_tail_node != nullptr) {
+                global_tail_node->freeNode.globalNext = start_id;
             }
-            global_tail_loc = getGenLoc(start_id);
+            global_tail_node = &store_[start_id];
         }
     }
 
-    // If global_tail_loc is still unset, there is no full sublist to add
+    // If global_tail_node is still unset, there is no full sublist to add
     // to the global list
-    if (global_tail_loc != nullptr) {
+    if (global_tail_node != nullptr) {
         return;
     }
 
-    uint32_t new_global_head = entities[0].id;
+    uint32_t new_global_head = keys[0].id;
 
     FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
     FreeHead new_head;
@@ -285,7 +312,7 @@ void IDMap::bulkRelease(Cache &cache, K *ids,
 
     do {
         new_head.gen = cur_head.gen + 1;
-        global_tail_loc->loc.archetype = cur_head.head;
+        global_tail_node->freeNode.globalNext = cur_head.head;
     } while (free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_release,
         std::memory_order_relaxed));
