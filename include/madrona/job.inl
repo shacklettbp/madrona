@@ -4,7 +4,7 @@
 
 namespace madrona {
 
-JobID JobID::none()
+constexpr JobID JobID::none()
 {
     return JobID {
         ~0u,
@@ -113,14 +113,14 @@ JobManager::JobManager(const EntryConfig<StartFn> &entry_cfg,
                  pin_workers)
 {}
 
-JobID JobManager::reserveProxyJobID(JobID parent_id)
+JobID JobManager::reserveProxyJobID(int thread_idx, JobID parent_id)
 {
-    return reserveProxyJobID(parent_id.idx);
+    return reserveProxyJobID(thread_idx, parent_id.id);
 }
 
-void JobManager::relinquishProxyJobID(JobID job_id)
+void JobManager::relinquishProxyJobID(int thread_idx, JobID job_id)
 {
-    return relinquishProxyJobID(job_id.idx);
+    return relinquishProxyJobID(thread_idx, job_id.id);
 }
 
 template <typename ContextT, typename ContainerT>
@@ -133,7 +133,7 @@ void JobManager::singleInvokeEntry(Context *ctx_base,
     
     container->fn(ctx);
 
-    job_mgr->jobFinished(data->id.idx);
+    job_mgr->jobFinished(ctx.worker_idx_, data->id.id);
     
     if constexpr (!std::is_trivially_destructible_v<ContainerT>) {
         container->~ContainerT();
@@ -178,7 +178,7 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
         container->fn(ctx, cur_invocation);
     } while (remaining_invocations > 0);
 
-    bool cleanup = job_mgr->markInvocationsFinished(data,
+    bool cleanup = job_mgr->markInvocationsFinished(ctx.worker_idx_, data,
         invocation_idx - invocation_offset);
     if (cleanup) {
         if constexpr (!std::is_trivially_destructible_v<ContainerT>) {
@@ -235,7 +235,7 @@ JobID JobManager::queueJob(int thread_idx,
     }
 
     return queueJob(thread_idx, entry, container, num_invocations,
-                    parent_id.idx, prio);
+                    parent_id.id, prio);
 }
 
 void * JobManager::allocJob(int worker_idx, uint32_t num_bytes,

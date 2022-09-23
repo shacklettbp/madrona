@@ -43,10 +43,17 @@ IDMap<K, V, StoreT>::IDMap(uint32_t init_capacity)
             }
         }
 
-        Node &last = store_[ids_per_cache_ - 1];
+        Node &last = store_[base_idx + ids_per_cache_ - 1];
         last.gen = 0;
         last.freeNode.subNext = ~0u;
         last.freeNode.globalNext = 1;
+    }
+
+    if (init_capacity > 0) {
+        free_head_.store(FreeHead {
+            .gen = 0,
+            .head = 0,
+        }, std::memory_order_release);
     }
 }
 
@@ -124,24 +131,8 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
         return assignCachedID(&cache.free_head_);
     }
 
-    uint32_t block_start = store_.expand(ids_per_cache_);
-
-#if 0
     // No free IDs at all, expand the ID store
-    uint32_t block_start;
-    {
-        std::lock_guard lock(expand_lock_);
-
-        // Note there is no double checked locking here.
-        // It's possible that free ids have been returned at this point,
-        // but if there is that much contention overallocating IDs seems
-        // relatively harmless
-
-        block_start = num_ids_;
-        num_ids_ += ICfg::idsPerCache;
-        store_.expand(num_ids_);
-    }
-#endif
+    uint32_t block_start = store_.expand(ids_per_cache_);
 
     uint32_t first_id = block_start;
 
@@ -150,15 +141,14 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
 
     uint32_t free_start = block_start + 1;
 
-    store_[free_start] = Node {
-        .freeNode = FreeNode {
-            .subNext = ~0u,
-            // In the cached sublist, globalNext is overloaded
-            // to handle contiguous free elements
-            .globalNext = ids_per_cache_ - 1,
-        },
-        .gen = 0,
-    };
+    Node &next_free_node = store_[free_start];
+    next_free_node.freeNode = FreeNode {
+        .subNext = ~0u,
+        // In the cached sublist, globalNext is overloaded
+        // to handle contiguous free elements
+        .globalNext = ids_per_cache_ - 1,
+    },
+    next_free_node.gen = 0;
 
     cache.free_head_ = free_start;
     cache.num_free_ids_ = ids_per_cache_ - 1;
@@ -171,15 +161,15 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
 }
 
 template <typename K, typename V, template <typename> typename StoreT>
-void IDMap<K, V, StoreT>::releaseID(Cache &cache, K k)
+void IDMap<K, V, StoreT>::releaseID(Cache &cache, uint32_t id)
 {
-    Node &release_node = store_[k.id];
+    Node &release_node = store_[id];
     release_node.gen++;
     release_node.freeNode.globalNext = 1;
 
     if (cache.num_free_ids_ < ids_per_cache_) {
         release_node.freeNode.subNext = cache.free_head_;
-        cache.free_head_ = k.id;
+        cache.free_head_ = id;
         cache.num_free_ids_ += 1;
 
         return;
@@ -187,7 +177,7 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, K k)
 
     if (cache.num_overflow_ids_ < ids_per_cache_) {
         release_node.freeNode.subNext = cache.overflow_head_;
-        cache.overflow_head_ = k.id;
+        cache.overflow_head_ = id;
         cache.num_overflow_ids_ += 1;
     }
 
@@ -248,7 +238,7 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
             linkToNext(idx);
         }
 
-        Node &last_node = store_[keys[ids_per_cache_ - 1].id];
+        Node &last_node = store_[keys[base_idx + ids_per_cache_ - 1].id];
         last_node.gen++;
         last_node.freeNode.subNext = ~0u;
         last_node.freeNode.globalNext = 1;
@@ -300,7 +290,7 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
 
     // If global_tail_node is still unset, there is no full sublist to add
     // to the global list
-    if (global_tail_node != nullptr) {
+    if (global_tail_node == nullptr) {
         return;
     }
 

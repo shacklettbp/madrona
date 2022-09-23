@@ -3,6 +3,7 @@
 #include <madrona/context.hpp>
 
 #include "worker_init.hpp"
+#include "id_map_impl.inl"
 
 #if defined(__linux__) or defined(__APPLE__)
 #include <signal.h>
@@ -24,20 +25,7 @@ struct WaitQueue {
     uint32_t tail;
 };
 
-struct JobTrackerInfo {
-    // This alignment requirement is necessary to get
-    // efficient 64 bit atomics out of clang with libstdcxx on linux
-    struct alignas(std::atomic_uint64_t) Head {
-        uint32_t idx;
-        uint32_t gen;
-    };
-
-    std::atomic<Head> head;
-    static_assert(decltype(head)::is_always_lock_free);
-};
-
 struct JobTracker {
-    atomic_uint32_t gen;
     atomic_uint32_t parent;
     atomic_uint32_t numOutstanding;
     atomic_uint32_t remainingInvocations;
@@ -71,7 +59,8 @@ namespace ICfg {
     template <uint64_t num_jobs>
     static constexpr uint64_t computeRunQueueBytes()
     {
-        static_assert(offsetof(JobManager::RunQueue, tail) == jobQueueStartAlignment);
+        static_assert(offsetof(JobManager::RunQueue, tail) ==
+                      jobQueueStartAlignment);
 
         constexpr uint64_t bytes_per_thread =
             sizeof(JobManager::RunQueue) + num_jobs * sizeof(Job);
@@ -84,8 +73,40 @@ namespace ICfg {
 
     constexpr static uint32_t jobAllocSentinel = 0xFFFFFFFF;
     constexpr static uint32_t numJobAllocArenas = 1024;
+}
 
-    constexpr static uint32_t jobTrackerTerm = ~0u;
+template <typename T>
+struct JobTrackerMapStore
+{
+    inline T & operator[](uint32_t idx);
+    inline const T & operator[](uint32_t idx) const;
+    JobTrackerMapStore(uint32_t) {}
+    uint32_t expand(uint32_t)
+    {
+        FATAL("Out of job IDs\n");
+    }
+
+    static constexpr uint64_t pastMapOffset();
+};
+
+using JobTrackerMap = IDMap<JobID, JobTracker, JobTrackerMapStore>;
+
+template <typename T>
+constexpr uint64_t JobTrackerMapStore<T>::pastMapOffset()
+{
+    return sizeof(JobTrackerMap) - offsetof(JobTrackerMap, store_);
+}
+
+template <typename T>
+T & JobTrackerMapStore<T>::operator[](uint32_t idx)
+{
+    return ((T *)((char *)this + pastMapOffset()))[idx];
+}
+
+template <typename T>
+const T & JobTrackerMapStore<T>::operator[](uint32_t idx) const
+{
+    return ((const T *)((const char *)this + pastMapOffset()))[idx];
 }
 
 static inline void workerYield()
@@ -381,105 +402,45 @@ static inline Job * getWaitingJobs(WaitQueue *queue)
     return (Job *)((char *)queue + sizeof(WaitQueue));
 }
 
-static inline JobTrackerInfo & getTrackerInfo(void *base)
+static inline JobTrackerMap & getTrackerMap(void *base)
 {
-    return *(JobTrackerInfo *)base;
+    return *(JobTrackerMap *)base;
 }
 
-static inline JobTracker * getTrackerArray(JobTrackerInfo &head)
+static inline JobTrackerMap::Cache & getTrackerCache(void *tracker_cache_base,
+                                                     int thread_idx)
 {
-    return (JobTracker *)((char *)&head + sizeof(JobTrackerInfo));
+    return ((JobTrackerMap::Cache *)tracker_cache_base)[thread_idx];
 }
 
-static inline uint32_t allocateJobTrackerSlot(JobTrackerInfo &tracker_info)
-{
-    JobTracker *trackers = getTrackerArray(tracker_info);
-
-    // FIXME unify this lock free linked list code with GPU impl if possible
-    JobTrackerInfo::Head cur_head =
-        tracker_info.head.load(memory_order::acquire);
-
-    JobTrackerInfo::Head new_head;
-
-    do {
-        if (cur_head.idx == ICfg::jobTrackerTerm) {
-            break;
-        }
-
-        JobTracker &cur_tracker = trackers[cur_head.idx];
-
-        new_head.gen = cur_head.gen + 1;
-        new_head.idx = cur_tracker.parent.load(memory_order::relaxed);
-    } while (!tracker_info.head.compare_exchange_weak(
-        cur_head, new_head, memory_order::release,
-        memory_order::acquire));
-
-    uint32_t job_idx = cur_head.idx;
-
-    if (job_idx == ICfg::jobTrackerTerm) [[unlikely]] {
-        FATAL("Out of job ids");
-    }
-
-    return job_idx;
-}
-
-static inline void freeJobTrackerSlot(JobTrackerInfo &tracker_info,
-                                      uint32_t job_id)
-{
-    JobTracker *trackers = getTrackerArray(tracker_info);
-    JobTracker &tracker = trackers[job_id];
-
-    JobTrackerInfo::Head new_head;
-    new_head.idx = job_id;
-
-    JobTrackerInfo::Head cur_head =
-        tracker_info.head.load(memory_order::relaxed);
-
-    do {
-        new_head.gen = cur_head.gen + 1;
-
-        tracker.parent.store(cur_head.idx, memory_order::relaxed);
-    } while (!tracker_info.head.compare_exchange_weak(
-           cur_head, new_head,
-           memory_order::release, memory_order::relaxed));
-}
-
-static JobID getNewJobID(JobTrackerInfo &tracker_info,
+static JobID getNewJobID(JobTrackerMap &tracker_map,
+                         JobTrackerMap::Cache &tracker_cache,
                          uint32_t parent_job_idx,
                          uint32_t num_invocations,
                          uint32_t num_outstanding)
 {
-    JobTracker *trackers = getTrackerArray(tracker_info);
-
-    if (parent_job_idx != ICfg::jobTrackerTerm) {
-        JobTracker &parent = trackers[parent_job_idx];
+    if (parent_job_idx != JobID::none().id) {
+        JobTracker &parent = tracker_map.getRef(parent_job_idx);
         parent.numOutstanding.fetch_add(1, memory_order::release);
     }
 
-    uint32_t tracker_slot = allocateJobTrackerSlot(tracker_info);
-
-    JobTracker &tracker = trackers[tracker_slot];
-
-    // Update generation first, in case there are dependencies of the
-    // parent that may still check this tracker
-    uint32_t prev_gen = tracker.gen.fetch_add(1, memory_order::acq_rel);
+    JobID new_id = tracker_map.acquireID(tracker_cache);
+    JobTracker &tracker = tracker_map.getRef(new_id.id);
 
     tracker.parent.store(parent_job_idx, memory_order::relaxed);
     tracker.numOutstanding.store(num_outstanding, memory_order::release);
     tracker.remainingInvocations.store(num_invocations, memory_order::release);
-    return JobID {
-        .idx = tracker_slot,
-        .gen = prev_gen + 1,
-    };
+    
+    return new_id;
 }
 
-static inline void decrementJobTracker(JobTrackerInfo &tracker_info, 
+static inline void decrementJobTracker(JobTrackerMap &tracker_map, 
+                                       JobTrackerMap::Cache &tracker_cache,
                                        uint32_t job_id)
 {
-    JobTracker *trackers = getTrackerArray(tracker_info);
 
-    while (job_id != ICfg::jobTrackerTerm) {
-        JobTracker &tracker = trackers[job_id];
+    while (job_id != JobID::none().id) {
+        JobTracker &tracker = tracker_map.getRef(job_id);
 
         uint32_t prev_outstanding =
             tracker.numOutstanding.fetch_sub(1, memory_order::acq_rel);
@@ -487,7 +448,8 @@ static inline void decrementJobTracker(JobTrackerInfo &tracker_info,
         if (prev_outstanding == 1) {
             // Parent read is synchronized with the numOutstanding modification
             uint32_t parent = tracker.parent.load(memory_order::relaxed);
-            freeJobTrackerSlot(tracker_info, job_id);
+            
+            tracker_map.releaseID(tracker_cache, job_id);
             job_id = parent;
         } else {
             break;
@@ -495,11 +457,9 @@ static inline void decrementJobTracker(JobTrackerInfo &tracker_info,
     }
 }
 
-static inline bool isRunnable(JobTrackerInfo &tracker_info,
+static inline bool isRunnable(JobTrackerMap &tracker_map,
                               JobContainerBase *job_data)
 {
-    const JobTracker *trackers = getTrackerArray(tracker_info);
-
     int num_deps = job_data->numDependencies;
 
     if (num_deps == 0) {
@@ -511,11 +471,12 @@ static inline bool isRunnable(JobTrackerInfo &tracker_info,
 
     for (int i = 0; i < num_deps; i++) {
         JobID dependency = dependencies[i];
-        const JobTracker &tracker = trackers[dependency.idx];
 
-        if (tracker.gen.load(memory_order::relaxed) != dependency.gen) {
+        if (!tracker_map.present(dependency)) {
             continue;
         }
+
+        const JobTracker &tracker = tracker_map.getRef(dependency);
 
         if (tracker.numOutstanding.load(memory_order::relaxed) > 0) {
             return false;
@@ -547,6 +508,7 @@ struct JobManager::Init {
     void *ioBase;
     void *waitingBase;
     void *trackerBase;
+    void *trackerCacheBase;
     int numTrackerSlots;
 };
 
@@ -615,15 +577,22 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
         num_per_thread_bytes =
             wait_offset + num_threads * ICfg::waitQueueBytesPerThread;
 
+        uint64_t tracker_cache_offset =
+            utils::roundUp(num_per_thread_bytes, alignof(JobTrackerMap::Cache));
+
+        num_per_thread_bytes =
+            tracker_cache_offset + num_threads * sizeof(JobTrackerMap::Cache);
+
         int num_tracker_slots = num_threads * (
               ICfg::waitQueueSizePerThread + ICfg::runQueueSizePerThread);
         uint64_t tracker_offset =
             utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
 
-        static_assert(sizeof(JobTrackerInfo) % alignof(JobTracker) == 0);
+        static_assert(
+            sizeof(JobTrackerMap) % alignof(JobTrackerMap::Node) == 0);
 
-        num_per_thread_bytes = tracker_offset + sizeof(JobTrackerInfo) +
-            num_tracker_slots * sizeof(JobTracker);
+        num_per_thread_bytes = tracker_offset + sizeof(JobTrackerMap) +
+            num_tracker_slots * sizeof(JobTrackerMap::Node);
 
         // Add padding so the base pointer can be aligned
         num_per_thread_bytes += ctx_alignment - 1;
@@ -653,6 +622,7 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
             .ioBase = base_ptr + io_offset,
             .waitingBase = base_ptr + wait_offset,
             .trackerBase = base_ptr + tracker_offset,
+            .trackerCacheBase = base_ptr + tracker_cache_offset,
             .numTrackerSlots = num_tracker_slots,
         };
     }())
@@ -669,6 +639,7 @@ JobManager::JobManager(const Init &init)
       io_base_(init.ioBase),
       waiting_base_(init.waitingBase),
       tracker_base_(init.trackerBase),
+      tracker_cache_base_(init.trackerCacheBase),
       io_sema_(0),
       num_high_(0),
       num_outstanding_(0)
@@ -689,7 +660,10 @@ JobManager::JobManager(const Init &init)
         };
     };
 
-    // Setup per-thread queues
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
+    new (&tracker_map) JobTrackerMap(init.numTrackerSlots);
+
+    // Setup per-thread queues and caches
     for (int i = 0, n = threads_.size(); i < n; i++) {
         initQueue(normal_base_, i);
         initQueue(high_base_, i);
@@ -701,27 +675,9 @@ JobManager::JobManager(const Init &init)
             0,
             0,
         };
-    }
 
-    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
-    tracker_info.head = {
-        .idx = 0,
-        .gen = 0,
-    };
-
-    JobTracker *trackers = getTrackerArray(tracker_info);
-
-    for (int i = 0, n = init.numTrackerSlots; i < n; i++) {
-        JobTracker &tracker = trackers[i];
-
-        tracker.gen.store(0, memory_order::relaxed);
-        if (i < n - 1) {
-            tracker.parent.store(i + 1, memory_order::relaxed);
-        } else {
-            tracker.parent.store(ICfg::jobTrackerTerm, memory_order::relaxed);
-        }
-
-        tracker.numOutstanding.store(0, memory_order::relaxed);
+        JobTrackerMap::Cache &cache = getTrackerCache(tracker_cache_base_, i);
+        new (&cache) JobTrackerMap::Cache();
     }
 
     struct StartWrapper {
@@ -748,7 +704,7 @@ JobManager::JobManager(const Init &init)
 
         start.func(ctx, start.data);
 
-        ctx->job_mgr_->jobFinished(job.id.idx);
+        ctx->job_mgr_->jobFinished(ctx->worker_idx_, job.id.id);
         start.remainingLaunches.fetch_sub(1, memory_order::release);
     };
 
@@ -766,7 +722,7 @@ JobManager::JobManager(const Init &init)
         };
  
         queueJob(i % init.numWorkers, (void *)entry, &start_jobs[i], 0,
-                 JobID::none().idx, JobPriority::Normal);
+                 JobID::none().id, JobPriority::Normal);
     }
 #else
     StartJob start_job {
@@ -774,7 +730,8 @@ JobManager::JobManager(const Init &init)
         &start_wrapper,
     };
 
-    queueJob(0, (void *)entry, &start_job, 0, JobID::none().idx, JobPriority::Normal);
+    queueJob(0, (void *)entry, &start_job, 0, JobID::none().id,
+             JobPriority::Normal);
 #endif
 
     ThreadPoolInit pool_init { init.numThreads, 0 };
@@ -867,15 +824,18 @@ JobID JobManager::queueJob(int thread_idx,
                            uint32_t parent_job_idx,
                            JobPriority prio)
 {
-    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
+    JobTrackerMap::Cache &tracker_cache =
+        getTrackerCache(tracker_cache_base_, thread_idx);
 
-    JobID id = getNewJobID(tracker_info, parent_job_idx, num_invocations, 1);
+    JobID id = getNewJobID(tracker_map, tracker_cache, parent_job_idx,
+                           num_invocations, 1);
 
     job_data->id = id;
 
     num_outstanding_.fetch_add(1, memory_order::relaxed);
 
-    if (isRunnable(tracker_info, job_data)) {
+    if (isRunnable(tracker_map, job_data)) {
         addToRunQueue(thread_idx, prio,
             [=](Job *job_array, uint32_t cur_tail) {
                 job_array[cur_tail & ICfg::runQueueIndexMask] = Job {
@@ -895,48 +855,56 @@ JobID JobManager::queueJob(int thread_idx,
     return id;
 }
 
-JobID JobManager::reserveProxyJobID(uint32_t parent_job_idx)
+JobID JobManager::reserveProxyJobID(int thread_idx, uint32_t parent_job_idx)
 {
-    return getNewJobID(getTrackerInfo(tracker_base_), parent_job_idx, 0, 1);
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
+    JobTrackerMap::Cache &tracker_cache =
+        getTrackerCache(tracker_cache_base_, thread_idx);
+    return getNewJobID(tracker_map, tracker_cache, parent_job_idx, 0, 1);
 }
 
-void JobManager::relinquishProxyJobID(uint32_t job_idx)
+void JobManager::relinquishProxyJobID(int thread_idx, uint32_t job_idx)
 {
-    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
-    decrementJobTracker(tracker_info, job_idx);
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
+    JobTrackerMap::Cache &tracker_cache =
+        getTrackerCache(tracker_cache_base_, thread_idx);
+    decrementJobTracker(tracker_map, tracker_cache, job_idx);
 }
 
-void JobManager::jobFinishedImpl(uint32_t job_idx)
+void JobManager::jobFinishedImpl(int thread_idx, uint32_t job_idx)
 {
-    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
+    JobTrackerMap::Cache &tracker_cache =
+        getTrackerCache(tracker_cache_base_, thread_idx);
 
     num_outstanding_.fetch_sub(1, memory_order::release);
 
-    decrementJobTracker(tracker_info, job_idx);
+    decrementJobTracker(tracker_map, tracker_cache, job_idx);
 }
 
 // Non-inline version so singleInvokeEntry can call directly
-void JobManager::jobFinished(uint32_t job_idx)
+void JobManager::jobFinished(int thread_idx, uint32_t job_idx)
 {
-    jobFinishedImpl(job_idx);
+    jobFinishedImpl(thread_idx, job_idx);
 }
 
-bool JobManager::markInvocationsFinished(JobContainerBase *job,
+bool JobManager::markInvocationsFinished(int thread_idx,
+                                         JobContainerBase *job,
                                          uint32_t num_invocations)
 {
-    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
-    JobTracker *trackers = getTrackerArray(tracker_info);
+    JobTrackerMap &tracker_info = getTrackerMap(tracker_base_);
 
-    uint32_t job_idx = job->id.idx;
+    uint32_t job_id = job->id.id;
 
+    JobTracker &tracker = tracker_info.getRef(job_id);
     uint32_t prev_remaining_invocations =
-        trackers[job_idx].remainingInvocations.fetch_sub(
+        tracker.remainingInvocations.fetch_sub(
             num_invocations, memory_order::acq_rel);
 
     bool finished = prev_remaining_invocations == num_invocations;
 
     if (finished) {
-        jobFinishedImpl(job_idx);
+        jobFinishedImpl(thread_idx, job_id);
     }
 
     return finished;
@@ -1078,7 +1046,7 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
 
 void JobManager::findReadyJobs(int thread_idx)
 {
-    JobTrackerInfo &tracker_info = getTrackerInfo(tracker_base_);
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
 
     int num_queues = threads_.size();
 
@@ -1105,7 +1073,7 @@ void JobManager::findReadyJobs(int thread_idx)
              wait_idx != cur_tail; wait_idx++) {
             
             Job job = waiting_jobs[wait_idx & ICfg::waitQueueIndexMask];
-            if (isRunnable(tracker_info, job.data)) {
+            if (isRunnable(tracker_map, job.data)) {
                 addToRunQueue(thread_idx, JobPriority::Normal,
                     [&job](Job *job_array, uint32_t cur_tail) {
                         job_array[cur_tail & ICfg::runQueueIndexMask] = job;

@@ -72,8 +72,6 @@ private:
 
         LockedMapStore(uint32_t init_capacity);
         uint32_t expand(uint32_t num_new_elems);
-
-        uint32_t size() const;
     };
 
     using Map = IDMap<Entity, Loc, LockedMapStore>;

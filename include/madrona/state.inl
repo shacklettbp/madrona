@@ -19,12 +19,6 @@ const T & EntityStore::LockedMapStore<T>::operator[](uint32_t idx) const
     return ((const T *)store.data())[idx];
 }
 
-template <typename T>
-uint32_t EntityStore::LockedMapStore<T>::size() const
-{
-    return numIDs;
-}
-
 Loc EntityStore::getLoc(Entity e) const
 {
     return map_.lookup(e);

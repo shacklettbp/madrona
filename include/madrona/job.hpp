@@ -19,10 +19,10 @@ enum class JobPriority {
 };
 
 struct JobID {
-    uint32_t idx;
     uint32_t gen;
+    uint32_t id;
 
-    static inline JobID none();
+    static constexpr inline JobID none();
 };
 
 struct JobContainerBase {
@@ -72,8 +72,8 @@ public:
 
     ~JobManager();
 
-    inline JobID reserveProxyJobID(JobID parent_id);
-    inline void relinquishProxyJobID(JobID job_id);
+    inline JobID reserveProxyJobID(int thread_idx, JobID parent_id);
+    inline void relinquishProxyJobID(int thread_idx, JobID job_id);
 
     template <typename ContextT, bool single_invoke, typename Fn,
               typename... DepTs>
@@ -176,13 +176,14 @@ private:
                    uint32_t parent_job_idx,
                    JobPriority prio = JobPriority::Normal);
 
-    JobID reserveProxyJobID(uint32_t parent_job_idx);
-    void relinquishProxyJobID(uint32_t job_idx);
+    JobID reserveProxyJobID(int thread_idx, uint32_t parent_job_idx);
+    void relinquishProxyJobID(int thread_idx, uint32_t job_idx);
 
-    inline void jobFinishedImpl(uint32_t job_idx);
-    void jobFinished(uint32_t job_idx);
+    inline void jobFinishedImpl(int thread_idx, uint32_t job_idx);
+    void jobFinished(int thread_idx, uint32_t job_idx);
 
-    bool markInvocationsFinished(JobContainerBase *job,
+    bool markInvocationsFinished(int thread_idx,
+                                 JobContainerBase *job,
                                  uint32_t num_invocations);
 
     template <typename Fn>
@@ -229,6 +230,7 @@ private:
     void *const io_base_;
     void *const waiting_base_;
     void *const tracker_base_;
+    void *const tracker_cache_base_;
     std::counting_semaphore<> io_sema_;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_high_;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_outstanding_;

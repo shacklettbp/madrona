@@ -21,7 +21,9 @@ EntityStore::LockedMapStore<T>::LockedMapStore(uint32_t init_capacity)
       numIDs(init_capacity),
       expandLock()
 {
-    store.expand(init_capacity);
+    if (init_capacity > 0) {
+        store.expand(init_capacity);
+    }
 }
 
 template <typename T>
