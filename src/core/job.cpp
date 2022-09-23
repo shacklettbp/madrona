@@ -578,7 +578,7 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
             wait_offset + num_threads * ICfg::waitQueueBytesPerThread;
 
         uint64_t tracker_cache_offset =
-            utils::roundUp(num_per_thread_bytes, alignof(JobTrackerMap::Cache));
+            utils::roundUp(num_per_thread_bytes, (uint64_t)alignof(JobTrackerMap::Cache));
 
         num_per_thread_bytes =
             tracker_cache_offset + num_threads * sizeof(JobTrackerMap::Cache);

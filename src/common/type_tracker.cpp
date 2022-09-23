@@ -129,14 +129,14 @@ uint32_t TypeTracker::trackByName(uint32_t *ptr, const char *compiler_name)
 // to some kind of hash map on names, at the cost of memory usage.
 void TypeTracker::registerType(uint32_t *ptr, uint32_t *next_id_ptr)
 {
+    auto &tracker = getSingletonImpl();
+
+    std::lock_guard lock(tracker.typeLock);
+
     // Already registered, presumably multiple StateManagers in use
     if (*ptr != ICfg::unassignedTypeID) {
         return;
     }
-
-    auto &tracker = getSingletonImpl();
-
-    std::lock_guard lock(tracker.typeLock);
 
     uint32_t type_id = (*next_id_ptr)++;
 

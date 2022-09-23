@@ -71,7 +71,7 @@ ArchetypeID StateManager::registerArchetype()
 
     uint32_t check_id = TypeTracker::typeID<ArchetypeT>();
 
-    if (check_id < component_infos_.size() &&
+    if (check_id < archetype_stores_.size() &&
         archetype_stores_[check_id].has_value()) {
         return ArchetypeID {
             check_id,
