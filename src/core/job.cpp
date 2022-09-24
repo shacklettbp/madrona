@@ -1306,7 +1306,10 @@ void JobManager::workerThread(
                 workerYield();
                 continue;
             } else {
-                break;
+                if(should_exit_.load(memory_order::relaxed)) {
+                    break;
+                } else {
+                }
             }
         }
 

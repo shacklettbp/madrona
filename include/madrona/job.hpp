@@ -232,6 +232,7 @@ private:
     void *const tracker_base_;
     void *const tracker_cache_base_;
     std::counting_semaphore<> io_sema_;
+    std::atomic_bool should_exit_;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_high_;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_outstanding_;
 };
