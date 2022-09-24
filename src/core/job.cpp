@@ -33,7 +33,7 @@ struct JobTracker {
 
 namespace ICfg {
     constexpr static int waitQueueSizePerThread = 1024;
-    constexpr static int runQueueSizePerThread = 4096;
+    constexpr static int runQueueSizePerThread = 16384;
 
     constexpr static uint32_t waitQueueIndexMask =
         (uint32_t)waitQueueSizePerThread - 1;
@@ -585,6 +585,7 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
 
         int num_tracker_slots = num_threads * (
               ICfg::waitQueueSizePerThread + ICfg::runQueueSizePerThread);
+
         uint64_t tracker_offset =
             utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
 

@@ -37,15 +37,15 @@ public:
 
     IDMap(uint32_t init_capacity);
 
-    K acquireID(Cache &cache);
+    inline K acquireID(Cache &cache);
 
-    void releaseID(Cache &cache, uint32_t id);
+    inline void releaseID(Cache &cache, uint32_t id);
     inline void releaseID(Cache &cache, K k)
     {
         releaseID(cache, k.id);
     }
 
-    void bulkRelease(Cache &cache, K *keys, uint32_t num_keys);
+    inline void bulkRelease(Cache &cache, K *keys, uint32_t num_keys);
 
     inline V lookup(K k) const
     {
