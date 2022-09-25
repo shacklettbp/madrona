@@ -58,13 +58,19 @@ struct Job {
 
 class JobManager {
 public:
-    template <typename StartFn> struct EntryConfig;
+    template <typename StartFn, typename UpdateFn> struct EntryConfig;
 
     template <typename ContextT, typename DataT, typename StartFn>
-    static EntryConfig<StartFn> makeEntry(StartFn &&start_fn);
+    static EntryConfig<StartFn, void (*)(Context *, void *)> makeEntry(
+        StartFn &&start_fn);
 
-    template <typename StartFn>
-    JobManager(const EntryConfig<StartFn> &entry_cfg,
+    template <typename ContextT, typename DataT, typename StartFn,
+              typename UpdateFn>
+    static EntryConfig<StartFn, UpdateFn> makeEntry(StartFn &&start_fn,
+                                                    UpdateFn &&update_fn);
+
+    template <typename StartFn, typename UpdateFn>
+    JobManager(const EntryConfig<StartFn, UpdateFn> &entry_cfg,
                int desired_num_workers,
                int num_io,
                StateManager *state_mgr,
@@ -159,6 +165,8 @@ private:
                uint32_t ctx_alignment,
                void (*start_fn)(Context *, void *),
                void *start_data,
+               void (*update_fn)(Context *, void *),
+               void *update_data,
                int desired_num_workers,
                int num_io,
                StateManager *state_mgr,
@@ -232,7 +240,8 @@ private:
     void *const tracker_base_;
     void *const tracker_cache_base_;
     std::counting_semaphore<> io_sema_;
-    std::atomic_bool should_exit_;
+    alignas(MADRONA_CACHE_LINE) std::atomic_bool should_exit_;
+    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t worker_wakeup_;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_high_;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_outstanding_;
 };

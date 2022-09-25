@@ -18,62 +18,13 @@ using std::atomic_thread_fence;
 using std::memory_order;
 
 namespace madrona {
-
-struct WaitQueue {
-    utils::SpinLock lock;
-    uint32_t head;
-    uint32_t tail;
-};
+namespace {
 
 struct JobTracker {
     atomic_uint32_t parent;
     atomic_uint32_t numOutstanding;
     atomic_uint32_t remainingInvocations;
 };
-
-namespace ICfg {
-    constexpr static int waitQueueSizePerThread = 1024;
-    constexpr static int runQueueSizePerThread = 16384;
-
-    constexpr static uint32_t waitQueueIndexMask =
-        (uint32_t)waitQueueSizePerThread - 1;
-    constexpr static uint32_t runQueueIndexMask =
-        (uint32_t)runQueueSizePerThread - 1;
-
-    constexpr static uint32_t jobQueueSentinel = 0xFFFFFFFF;
-
-    constexpr static uint64_t jobQueueStartAlignment = MADRONA_CACHE_LINE;
-
-    template <uint64_t num_jobs>
-    static constexpr uint64_t computeWaitQueueBytes()
-    {
-        constexpr uint64_t bytes_per_thread =
-            sizeof(WaitQueue) + num_jobs * sizeof(Job);
-
-        return utils::roundUp(bytes_per_thread, jobQueueStartAlignment);
-    }
-
-    constexpr static uint64_t waitQueueBytesPerThread =
-        computeWaitQueueBytes<waitQueueSizePerThread>();
-
-    template <uint64_t num_jobs>
-    static constexpr uint64_t computeRunQueueBytes()
-    {
-        static_assert(offsetof(JobManager::RunQueue, tail) ==
-                      jobQueueStartAlignment);
-
-        constexpr uint64_t bytes_per_thread =
-            sizeof(JobManager::RunQueue) + num_jobs * sizeof(Job);
-
-        return utils::roundUp(bytes_per_thread, jobQueueStartAlignment);
-    }
-    
-    constexpr static uint64_t runQueueBytesPerThread =
-        computeRunQueueBytes<runQueueSizePerThread>();
-
-    constexpr static uint32_t jobAllocSentinel = 0xFFFFFFFF;
-    constexpr static uint32_t numJobAllocArenas = 1024;
-}
 
 template <typename T>
 struct JobTrackerMapStore
@@ -109,7 +60,100 @@ const T & JobTrackerMapStore<T>::operator[](uint32_t idx) const
     return ((const T *)((const char *)this + pastMapOffset()))[idx];
 }
 
-static inline void workerYield()
+struct LogEntry {
+    JobID jobID;
+    uint32_t numCompleted;
+};
+
+struct WorkerState {
+    uint32_t logHead;
+    uint32_t logTail;
+    uint32_t waitHead;
+    uint32_t waitTail;
+    alignas(MADRONA_CACHE_LINE) atomic_uint32_t wakeUp;
+};
+
+struct SchedulerState {
+    uint32_t numOutstandingJobs;
+    uint32_t runningThreads;
+    alignas(MADRONA_CACHE_LINE) utils::SpinLock lock;
+};
+
+// Plan:
+// - High level goal: remove all contended atomics in job dependency system and outstanding job tracking system.
+// - Centralize job system control into the "Scheduler"
+// - When a worker thread can't find work, it attempts to
+//   wait acquire the Scheduler lock. If this fails, another
+//   thread is running the scheduler, so it will go to sleep
+//   on WorkerWakeup primitive.
+//      - Q: Is this going to create massive contention on the Scheduler lock, or is
+//        there a way to have a relaxed load of the scheduler lock be safe / accurate (double checked locking maybe)
+// - WorkerWakeup primitive: futex / WaitOnAddress / __ulock_wait + spin.
+//      - Futex may not be strictly necessary here, since the assumption is likely that if we're about to wait, we're actually going to be put to sleep by the kernel. On OSX the only alternative seems to be posix cond vars though, which seem really slow. Regardless, the idea would be a couple of rounds of spinning (possibly using the PAUSE instruction?) where the worker makes sure it isn't just about to be woken up.
+//          - Q: Does futex already provide this spin? A: Possibly, but it's irrelevant. This spin should actually be continually looking for new jobs after each PAUSE.
+//  - Worker Logs: each worker thread gets a log. This records every job the worker has completed, including job ID and number of completed invocations.
+//  - Scheduler: the scheduler has 2 jobs: 
+//      - Run through all worker logs and use this to update job dependency info, moving any jobs from wait queue to run queue that have fulfilled dependencies. (Possible optimization: workers could check job dependency info and if they've fully satisified a requirement, just immediately unblock a job in order to skip needing to go through the scheduler).
+//      - Wake up sleeping workers based on # of jobs that are ready for execution
+//      - Related change: when worker decides to split or queue immediately runnable job, it should similarly trigger worker wakeups. Solution could be to wake up 1 worker, which immediately runs and wakes up others. Want to avoid a really heavy search over all threads each time a split occurs. Futex2 / WaitForMultipleObjects are linux / windows options as well (one thread local futex + one "Wake them all" futex).
+//  - Pitfall: scheduler running is potentially a big synchronization point
+//      - Option: Scheduler early outs after finding runnable N jobs
+//      - Option: Some way to parallelize scheduler?
+//  - MW tick synchronization:
+//      - Scheduler runs: finds no runnable work, *and all other workers are sleeping*. At this point it does 3 things:
+//          - Check should_exit flag: if this is true, it wakes all other workers and exits (can imagine more efficient impls here, this will cause N threads worth of scheduler entries - but whatever).sizeof(WaitQueue) +
+//          - Signal external "frame done" futex.
+//          - Point A: Wait on external "Launch next frame" futex. Upon wakeup, rerun scheduler
+//      - JobManager updateLoop inserts dependency on JobID 0 rather than ctx.currentJobID() to update loop resubmission. The idea is that before signaling the launch next frame futex, external code updates JobID 0 (ez option, JobID 0 always has 1 outstanding job, just increase generation). This means after the futex is signaled and the worker at Point A runs, the "next frame" job will be ready and moved to the run queue by the scheduler.
+//      - Alternative: no resubmission of updateJob by itself. Instead, before signalling the "launch next frame" futex, the system manually queues updateJob requests into each worker run queue and signals all workers.
+//      - Issue: Entire above strategy is bugged if you have background work you want to keep going. Can not depend on workers being stopped as termination condition. Similarly, cannot guarantee the system is idle in order to slide updateJobs in manually. Need to use fake dependency strategy + an additional job dependent on ctx.currentJobID that when run increments an atomic. When that atomic reaches # worlds, we signal the "frame done" futex in order to wake up the external thread.
+//          - How do we handle waking up the worker threads in this model? Update the job dependency and then check if the scheduler is locked? If not, run the scheduler ourselves from the external thread? Scheduler could have it's own run queue. Then worker thread model would be: check my run queue -> check scheduler run queue -> try stealing from all other run queues.
+//  - This system almost certainly has a missed wakeup type race where the scheduler incorrectly concludes that no threads need to be woken up, just as other threads fail to acquire the scheduler lock and then go to sleep. Does this mean we need to ensure each worker thread acquires the scheduler before it sleeps?
+
+namespace consts {
+    constexpr static int waitQueueSizePerThread = 1024;
+    constexpr static int runQueueSizePerThread = 16384;
+
+    constexpr static uint32_t waitQueueIndexMask =
+        (uint32_t)waitQueueSizePerThread - 1;
+    constexpr static uint32_t runQueueIndexMask =
+        (uint32_t)runQueueSizePerThread - 1;
+
+    constexpr static uint32_t jobQueueSentinel = 0xFFFFFFFF;
+
+    constexpr static uint64_t jobQueueStartAlignment = MADRONA_CACHE_LINE;
+
+    template <uint64_t num_jobs>
+    static constexpr uint64_t computeWaitQueueBytes()
+    {
+        constexpr uint64_t bytes_per_thread = num_jobs * sizeof(Job);
+
+        return utils::roundUp(bytes_per_thread, jobQueueStartAlignment);
+    }
+
+    constexpr static uint64_t waitQueueBytesPerThread =
+        computeWaitQueueBytes<waitQueueSizePerThread>();
+
+    template <uint64_t num_jobs>
+    static constexpr uint64_t computeRunQueueBytes()
+    {
+        static_assert(offsetof(JobManager::RunQueue, tail) ==
+                      jobQueueStartAlignment);
+
+        constexpr uint64_t bytes_per_thread =
+            sizeof(JobManager::RunQueue) + num_jobs * sizeof(Job);
+
+        return utils::roundUp(bytes_per_thread, jobQueueStartAlignment);
+    }
+    
+    constexpr static uint64_t runQueueBytesPerThread =
+        computeRunQueueBytes<runQueueSizePerThread>();
+
+    constexpr static uint32_t jobAllocSentinel = 0xFFFFFFFF;
+    constexpr static uint32_t numJobAllocArenas = 1024;
+}
+
+inline void workerYield()
 {
 #if defined(__linux__) or defined(__APPLE__)
     sched_yield();
@@ -120,12 +164,12 @@ static inline void workerYield()
 #endif
 }
 
-static inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
+inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
 {
     uint32_t cur_head = shared.freeHead.load(memory_order::acquire);
     uint32_t new_head, arena_idx;
     do {
-        if (cur_head == ICfg::jobAllocSentinel) {
+        if (cur_head == consts::jobAllocSentinel) {
             FATAL("Out of job memory");
         }
 
@@ -144,7 +188,7 @@ static inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
     return arena_idx;
 }
 
-static inline void releaseArena(JobManager::Alloc::SharedState &shared,
+inline void releaseArena(JobManager::Alloc::SharedState &shared,
                                 uint32_t arena_idx)
 {
     uint32_t cur_head = shared.freeHead.load(memory_order::relaxed);
@@ -157,122 +201,7 @@ static inline void releaseArena(JobManager::Alloc::SharedState &shared,
         memory_order::release, memory_order::relaxed));
 }
 
-JobManager::Alloc::Alloc(SharedState &shared)
-    : cur_arena_(acquireArena(shared)),
-      next_arena_(acquireArena(shared)),
-      arena_offset_(0),
-      arena_used_bytes_(0)
-{}
-
-void * JobManager::Alloc::alloc(SharedState &shared,
-                                uint32_t num_bytes,
-                                uint32_t alignment)
-{
-    // Get offset necessary to meet alignment requirements.
-    // Alignment must be less than maxJobAlignment (otherwise base address not
-    // guaranteed to meet alignment).
-    uint32_t new_offset = utils::roundUpPow2(arena_offset_, alignment);
-
-    if (new_offset + num_bytes <= arena_size_) {
-        arena_offset_ = new_offset;
-    } else {
-        // Out of space in this arena, mark this arena as freeable
-        // and get a new one
-
-        // Marking the arena as freeable just involves adding the total memory
-        // used in the arena to the arena's metadata value. Once all jobs in
-        // the arena have been freed these values will cancel out and the
-        // metadata value will be zero.
-        uint32_t post_metadata = shared.arenas[cur_arena_].metadata.fetch_add(
-            arena_used_bytes_, memory_order::acq_rel);
-        post_metadata += arena_used_bytes_;
-
-        // Edge case, if post_metadata == 0, we can skip getting a new arena
-        // because there are no active jobs left in the current arena, so
-        // the cur_arena_ can immediately be reused by resetting offsets to 0
-        if (post_metadata != 0) {
-            // Get next free arena. First check the cached arena in next_arena_
-            if (next_arena_ != ICfg::jobAllocSentinel) {
-                cur_arena_ = next_arena_;
-                next_arena_ = ICfg::jobAllocSentinel;
-            } else {
-                cur_arena_ = acquireArena(shared);
-            }
-        }
-        
-        arena_offset_ = 0;
-        arena_used_bytes_ = 0;
-    }
-
-    void *mem = 
-        (char *)shared.jobMemory + arena_size_ * cur_arena_ + arena_offset_;
-
-    arena_offset_ += num_bytes;
-
-    // Need to track arena_used_bytes_ separately from arena_offset_,
-    // because deallocation code doesn't know how many extra bytes get added
-    // to each job for alignment padding reasons.
-    arena_used_bytes_ += num_bytes;
-
-    return mem;
-}
-
-void JobManager::Alloc::dealloc(SharedState &shared,
-                                void *ptr, uint32_t num_bytes)
-{
-    size_t ptr_offset = (char *)ptr - (char *)shared.jobMemory;
-    uint32_t arena_idx = ptr_offset / arena_size_;
-
-    Arena &arena = shared.arenas[arena_idx];
-
-    uint32_t post_metadata = arena.metadata.fetch_sub(num_bytes,
-                                                      memory_order::acq_rel);
-    post_metadata -= num_bytes;
-
-    if (post_metadata == 0) {
-        // If this thread doesn't have a cached free arena, store there,
-        // otherwise release to global free list
-        if (next_arena_ == ICfg::jobAllocSentinel) {
-            next_arena_ = arena_idx;
-        } else {
-            releaseArena(shared, arena_idx);
-        }
-    }
-}
-
-JobManager::Alloc::SharedState JobManager::Alloc::makeSharedState(
-    InitAlloc alloc, uint32_t num_arenas)
-{
-    if (num_arenas > 65536) {
-        FATAL("Job allocator can only support up to 2^16 arenas.");
-    }
-
-    uint64_t total_bytes = (maxJobAlignment - 1) + num_arenas * arena_size_ +
-        num_arenas * sizeof(Arena);
-
-    void *mem = alloc.alloc(total_bytes);
-
-    void *job_mem =
-        (void *)utils::roundUp((uintptr_t)mem, (uintptr_t)maxJobAlignment);
-
-    Arena *arenas = (Arena *)((char *)job_mem + arena_size_ * num_arenas);
-
-    // Build initial linear freelist
-    for (int i = 0; i < (int)num_arenas; i++) {
-        new (&arenas[i]) Arena {
-            (i < int(num_arenas - 1)) ? i + 1 : ICfg::jobQueueSentinel,
-        };
-    }
-
-    return SharedState {
-        mem,
-        job_mem,
-        arenas,
-        0,
-    };
-}
-
-static void disableThreadSignals()
+void disableThreadSignals()
 {
 #if defined(__linux__) or defined(__APPLE__)
     sigset_t mask;
@@ -295,7 +224,7 @@ static void disableThreadSignals()
     }
 }
 
-static int getNumWorkers(int num_workers)
+int getNumWorkers(int num_workers)
 {
     if (num_workers != 0) {
         return num_workers; 
@@ -315,7 +244,7 @@ static int getNumWorkers(int num_workers)
 #endif
 }
 
-static void setThreadAffinity(int thread_idx)
+void setThreadAffinity(int thread_idx)
 {
 #if defined(__linux__)
     cpu_set_t cpuset;
@@ -377,47 +306,46 @@ struct ThreadPoolInit {
     }
 };
 
-static inline JobManager::RunQueue * getRunQueue(
+inline JobManager::RunQueue * getRunQueue(
     void *queue_base, const int thread_idx)
 {
     return (JobManager::RunQueue *)((char *)queue_base +
-        thread_idx * ICfg::runQueueBytesPerThread);
+        thread_idx * consts::runQueueBytesPerThread);
 }
 
-static inline WaitQueue * getWaitQueue(
+inline WaitQueue * getWaitQueue(
     void *queue_base, const int thread_idx)
 {
     return (WaitQueue *)((char *)queue_base +
-        thread_idx * ICfg::waitQueueBytesPerThread);
+        thread_idx * consts::waitQueueBytesPerThread);
 }
 
-
-static inline Job * getJobArray(JobManager::RunQueue *queue)
+inline Job * getJobArray(JobManager::RunQueue *queue)
 {
     return (Job *)((char *)queue + sizeof(JobManager::RunQueue));
 }
 
-static inline Job * getWaitingJobs(WaitQueue *queue)
+inline Job * getWaitingJobs(WaitQueue *queue)
 {
     return (Job *)((char *)queue + sizeof(WaitQueue));
 }
 
-static inline JobTrackerMap & getTrackerMap(void *base)
+inline JobTrackerMap & getTrackerMap(void *base)
 {
     return *(JobTrackerMap *)base;
 }
 
-static inline JobTrackerMap::Cache & getTrackerCache(void *tracker_cache_base,
-                                                     int thread_idx)
+inline JobTrackerMap::Cache & getTrackerCache(void *tracker_cache_base,
+                                              int thread_idx)
 {
     return ((JobTrackerMap::Cache *)tracker_cache_base)[thread_idx];
 }
 
-static JobID getNewJobID(JobTrackerMap &tracker_map,
-                         JobTrackerMap::Cache &tracker_cache,
-                         uint32_t parent_job_idx,
-                         uint32_t num_invocations,
-                         uint32_t num_outstanding)
+JobID getNewJobID(JobTrackerMap &tracker_map,
+                  JobTrackerMap::Cache &tracker_cache,
+                  uint32_t parent_job_idx,
+                  uint32_t num_invocations,
+                  uint32_t num_outstanding)
 {
     if (parent_job_idx != JobID::none().id) {
         JobTracker &parent = tracker_map.getRef(parent_job_idx);
@@ -434,9 +362,9 @@ static JobID getNewJobID(JobTrackerMap &tracker_map,
     return new_id;
 }
 
-static inline void decrementJobTracker(JobTrackerMap &tracker_map, 
-                                       JobTrackerMap::Cache &tracker_cache,
-                                       uint32_t job_id)
+inline void decrementJobTracker(JobTrackerMap &tracker_map, 
+                                JobTrackerMap::Cache &tracker_cache,
+                                uint32_t job_id)
 {
 
     while (job_id != JobID::none().id) {
@@ -457,8 +385,8 @@ static inline void decrementJobTracker(JobTrackerMap &tracker_map,
     }
 }
 
-static inline bool isRunnable(JobTrackerMap &tracker_map,
-                              JobContainerBase *job_data)
+inline bool isRunnable(JobTrackerMap &tracker_map,
+                       JobContainerBase *job_data)
 {
     int num_deps = job_data->numDependencies;
 
@@ -487,6 +415,140 @@ static inline bool isRunnable(JobTrackerMap &tracker_map,
 
     return true;
 }
+
+template <typename Fn>
+inline uint32_t addToRunQueueImpl(JobManager::RunQueue *run_queue,
+                                  Fn &&add_cb)
+{
+    // No one modifies queue_tail besides this thread
+    uint32_t cur_tail = run_queue->tail.load(memory_order::relaxed);
+    Job *job_array = getJobArray(run_queue);
+
+    uint32_t num_added = add_cb(job_array, cur_tail);
+
+    cur_tail += num_added;
+    run_queue->tail.store(cur_tail, memory_order::release);
+
+    return num_added;
+}
+
+}
+
+JobManager::Alloc::Alloc(SharedState &shared)
+    : cur_arena_(acquireArena(shared)),
+      next_arena_(acquireArena(shared)),
+      arena_offset_(0),
+      arena_used_bytes_(0)
+{}
+
+void * JobManager::Alloc::alloc(SharedState &shared,
+                                uint32_t num_bytes,
+                                uint32_t alignment)
+{
+    // Get offset necessary to meet alignment requirements.
+    // Alignment must be less than maxJobAlignment (otherwise base address not
+    // guaranteed to meet alignment).
+    uint32_t new_offset = utils::roundUpPow2(arena_offset_, alignment);
+
+    if (new_offset + num_bytes <= arena_size_) {
+        arena_offset_ = new_offset;
+    } else {
+        // Out of space in this arena, mark this arena as freeable
+        // and get a new one
+
+        // Marking the arena as freeable just involves adding the total memory
+        // used in the arena to the arena's metadata value. Once all jobs in
+        // the arena have been freed these values will cancel out and the
+        // metadata value will be zero.
+        uint32_t post_metadata = shared.arenas[cur_arena_].metadata.fetch_add(
+            arena_used_bytes_, memory_order::acq_rel);
+        post_metadata += arena_used_bytes_;
+
+        // Edge case, if post_metadata == 0, we can skip getting a new arena
+        // because there are no active jobs left in the current arena, so
+        // the cur_arena_ can immediately be reused by resetting offsets to 0
+        if (post_metadata != 0) {
+            // Get next free arena. First check the cached arena in next_arena_
+            if (next_arena_ != consts::jobAllocSentinel) {
+                cur_arena_ = next_arena_;
+                next_arena_ = consts::jobAllocSentinel;
+            } else {
+                cur_arena_ = acquireArena(shared);
+            }
+        }
+        
+        arena_offset_ = 0;
+        arena_used_bytes_ = 0;
+    }
+
+    void *mem = 
+        (char *)shared.jobMemory + arena_size_ * cur_arena_ + arena_offset_;
+
+    arena_offset_ += num_bytes;
+
+    // Need to track arena_used_bytes_ separately from arena_offset_,
+    // because deallocation code doesn't know how many extra bytes get added
+    // to each job for alignment padding reasons.
+    arena_used_bytes_ += num_bytes;
+
+    return mem;
+}
+
+void JobManager::Alloc::dealloc(SharedState &shared,
+                                void *ptr, uint32_t num_bytes)
+{
+    size_t ptr_offset = (char *)ptr - (char *)shared.jobMemory;
+    uint32_t arena_idx = ptr_offset / arena_size_;
+
+    Arena &arena = shared.arenas[arena_idx];
+
+    uint32_t post_metadata = arena.metadata.fetch_sub(num_bytes,
+                                                      memory_order::acq_rel);
+    post_metadata -= num_bytes;
+
+    if (post_metadata == 0) {
+        // If this thread doesn't have a cached free arena, store there,
+        // otherwise release to global free list
+        if (next_arena_ == consts::jobAllocSentinel) {
+            next_arena_ = arena_idx;
+        } else {
+            releaseArena(shared, arena_idx);
+        }
+    }
+}
+
+JobManager::Alloc::SharedState JobManager::Alloc::makeSharedState(
+    InitAlloc alloc, uint32_t num_arenas)
+{
+    if (num_arenas > 65536) {
+        FATAL("Job allocator can only support up to 2^16 arenas.");
+    }
+
+    uint64_t total_bytes = (maxJobAlignment - 1) + num_arenas * arena_size_ +
+        num_arenas * sizeof(Arena);
+
+    void *mem = alloc.alloc(total_bytes);
+
+    void *job_mem =
+        (void *)utils::roundUp((uintptr_t)mem, (uintptr_t)maxJobAlignment);
+
+    Arena *arenas = (Arena *)((char *)job_mem + arena_size_ * num_arenas);
+
+    // Build initial linear freelist
+    for (int i = 0; i < (int)num_arenas; i++) {
+        new (&arenas[i]) Arena {
+            (i < int(num_arenas - 1)) ? i + 1 : consts::jobQueueSentinel,
+        };
+    }
+
+    return SharedState {
+        mem,
+        job_mem,
+        arenas,
+        0,
+    };
+}
+
 
 struct JobManager::Init {
     uint32_t numCtxUserdataBytes;
@@ -558,24 +620,24 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
             state_cache_offset + sizeof(StateCache) * num_threads;
 
         uint64_t high_offset =
-            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+            utils::roundUp(num_per_thread_bytes, consts::jobQueueStartAlignment);
         num_per_thread_bytes =
-            high_offset + num_threads * ICfg::runQueueBytesPerThread;
+            high_offset + num_threads * consts::runQueueBytesPerThread;
 
         uint64_t normal_offset =
-            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+            utils::roundUp(num_per_thread_bytes, consts::jobQueueStartAlignment);
         num_per_thread_bytes =
-            normal_offset + num_threads * ICfg::runQueueBytesPerThread;
+            normal_offset + num_threads * consts::runQueueBytesPerThread;
 
         uint64_t io_offset =
-            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+            utils::roundUp(num_per_thread_bytes, consts::jobQueueStartAlignment);
         num_per_thread_bytes =
-            io_offset + num_threads * ICfg::runQueueBytesPerThread;
+            io_offset + num_threads * consts::runQueueBytesPerThread;
 
         uint64_t wait_offset =
-            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+            utils::roundUp(num_per_thread_bytes, consts::jobQueueStartAlignment);
         num_per_thread_bytes =
-            wait_offset + num_threads * ICfg::waitQueueBytesPerThread;
+            wait_offset + num_threads * consts::waitQueueBytesPerThread;
 
         uint64_t tracker_cache_offset =
             utils::roundUp(num_per_thread_bytes, (uint64_t)alignof(JobTrackerMap::Cache));
@@ -584,10 +646,10 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
             tracker_cache_offset + num_threads * sizeof(JobTrackerMap::Cache);
 
         int num_tracker_slots = num_threads * (
-              ICfg::waitQueueSizePerThread + ICfg::runQueueSizePerThread);
+              consts::waitQueueSizePerThread + consts::runQueueSizePerThread);
 
         uint64_t tracker_offset =
-            utils::roundUp(num_per_thread_bytes, ICfg::jobQueueStartAlignment);
+            utils::roundUp(num_per_thread_bytes, consts::jobQueueStartAlignment);
 
         static_assert(
             sizeof(JobTrackerMap) % alignof(JobTrackerMap::Node) == 0);
@@ -632,7 +694,7 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
 JobManager::JobManager(const Init &init)
     : threads_(init.numThreads, InitAlloc()),
       alloc_state_(Alloc::makeSharedState(InitAlloc(),
-                                          ICfg::numJobAllocArenas)),
+                                          consts::numJobAllocArenas)),
       job_allocs_(threads_.size(), InitAlloc()),
       per_thread_data_(init.perThreadData),
       high_base_(init.highBase),
@@ -839,7 +901,7 @@ JobID JobManager::queueJob(int thread_idx,
     if (isRunnable(tracker_map, job_data)) {
         addToRunQueue(thread_idx, prio,
             [=](Job *job_array, uint32_t cur_tail) {
-                job_array[cur_tail & ICfg::runQueueIndexMask] = Job {
+                job_array[cur_tail & consts::runQueueIndexMask] = Job {
                     .func = job_func,
                     .data = job_data,
                     .invocationOffset = 0,
@@ -912,22 +974,6 @@ bool JobManager::markInvocationsFinished(int thread_idx,
 }
 
 template <typename Fn>
-static inline uint32_t addToRunQueueImpl(JobManager::RunQueue *run_queue,
-                                         Fn &&add_cb)
-{
-    // No one modifies queue_tail besides this thread
-    uint32_t cur_tail = run_queue->tail.load(memory_order::relaxed);
-    Job *job_array = getJobArray(run_queue);
-
-    uint32_t num_added = add_cb(job_array, cur_tail);
-
-    cur_tail += num_added;
-    run_queue->tail.store(cur_tail, memory_order::release);
-
-    return num_added;
-}
-
-template <typename Fn>
 void JobManager::addToRunQueue(int thread_idx,
                                JobPriority prio,
                                Fn &&add_cb)
@@ -963,7 +1009,7 @@ void JobManager::addToWaitQueue(int thread_idx,
     auto addJob = [&](WaitQueue *wait_queue) {
         Job *waiting_jobs = getWaitingJobs(wait_queue);
 
-        uint32_t new_idx = ((wait_queue->tail++) & ICfg::waitQueueIndexMask);
+        uint32_t new_idx = ((wait_queue->tail++) & consts::waitQueueIndexMask);
 
         waiting_jobs[new_idx] = Job {
             job_func,
@@ -1014,11 +1060,11 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
 
     // No one modifies queue_tail besides this thread
     uint32_t cur_tail = tail.load(memory_order::relaxed); 
-    uint32_t wrapped_idx = (cur_tail & ICfg::jobQueueIndexMask);
+    uint32_t wrapped_idx = (cur_tail & consts::jobQueueIndexMask);
 
     Job *job_array = getJobArray(queue_tail);
 
-    uint32_t num_remaining = ICfg::jobQueueSizePerThread - wrapped_idx;
+    uint32_t num_remaining = consts::jobQueueSizePerThread - wrapped_idx;
     uint32_t num_fit = std::min(num_remaining, num_jobs);
     memcpy(job_array + wrapped_idx, jobs, num_fit * sizeof(Job));
 
@@ -1073,18 +1119,18 @@ void JobManager::findReadyJobs(int thread_idx)
         for (uint32_t wait_idx = wait_queue->head;
              wait_idx != cur_tail; wait_idx++) {
             
-            Job job = waiting_jobs[wait_idx & ICfg::waitQueueIndexMask];
+            Job job = waiting_jobs[wait_idx & consts::waitQueueIndexMask];
             if (isRunnable(tracker_map, job.data)) {
                 addToRunQueue(thread_idx, JobPriority::Normal,
                     [&job](Job *job_array, uint32_t cur_tail) {
-                        job_array[cur_tail & ICfg::runQueueIndexMask] = job;
+                        job_array[cur_tail & consts::runQueueIndexMask] = job;
 
                         return 1u;
                     });
                 num_found++;
             } else {
                 uint32_t move_idx =
-                    ((wait_queue->tail++) & ICfg::waitQueueIndexMask);
+                    ((wait_queue->tail++) & consts::waitQueueIndexMask);
                 waiting_jobs[move_idx] = job;
             }
         }
@@ -1111,7 +1157,7 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
     uint32_t cur_head = head.load(memory_order::relaxed);
 
     if (isQueueEmpty(cur_head, cur_correction, cur_tail)) {
-        return ICfg::jobQueueSentinel;
+        return consts::jobQueueSentinel;
     }
 
     atomic_thread_fence(memory_order::acquire);
@@ -1121,7 +1167,7 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
 
     if (isQueueEmpty(cur_head, cur_correction, cur_tail)) [[unlikely]] {
         correction.fetch_add(1, memory_order::release);
-        return ICfg::jobQueueSentinel;
+        return consts::jobQueueSentinel;
     }
 
     // Note, there is some non intuitive behavior here, where the value of idx
@@ -1146,7 +1192,7 @@ bool JobManager::getNextJob(void *const queue_base,
         queue = getRunQueue(queue_base, thread_idx);
         job_idx = dequeueJobIndex(queue);
 
-        if (job_idx == ICfg::jobQueueSentinel && check_waiting) {
+        if (job_idx == consts::jobQueueSentinel && check_waiting) {
             // Check for waiting jobs
             findReadyJobs(thread_idx);
 
@@ -1156,23 +1202,23 @@ bool JobManager::getNextJob(void *const queue_base,
     }
 
     int num_queues = threads_.size();
-    if (job_idx == ICfg::jobQueueSentinel) {
+    if (job_idx == consts::jobQueueSentinel) {
         for (int i = 1, n = num_queues - 1; i < n; i++) {
             int queue_idx = (thread_idx + i) % num_queues;
             queue = getRunQueue(queue_base, queue_idx);
         
             job_idx = dequeueJobIndex(queue);
-            if (job_idx != ICfg::jobQueueSentinel) {
+            if (job_idx != consts::jobQueueSentinel) {
                 break;
             }
         }
     }
 
-    if (job_idx == ICfg::jobQueueSentinel) {
+    if (job_idx == consts::jobQueueSentinel) {
         return false;
     }
     
-    *next_job = getJobArray(queue)[job_idx & ICfg::runQueueIndexMask];
+    *next_job = getJobArray(queue)[job_idx & consts::runQueueIndexMask];
 
     // There's no protection to prevent queueJob overwriting next_job
     // in between job_idx being assigned and the job actually being
@@ -1183,7 +1229,7 @@ bool JobManager::getNextJob(void *const queue_base,
     
     uint32_t post_read_tail = queue->tail.load(memory_order::acquire);
     
-    if (post_read_tail - job_idx > ICfg::runQueueSizePerThread) [[unlikely]] {
+    if (post_read_tail - job_idx > consts::runQueueSizePerThread) [[unlikely]] {
         // Note, this is not ideal because it doesn't detect the source
         // of the issue. The tradeoff is that we skip needing to read
         // the head information when queueing jobs, whereas this
@@ -1205,7 +1251,7 @@ void JobManager::splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
     if (num_invocations == 1) {
         addToRunQueueImpl(run_queue,
             [=](Job *job_array, uint32_t cur_tail) {
-                job_array[cur_tail & ICfg::runQueueIndexMask] = Job {
+                job_array[cur_tail & consts::runQueueIndexMask] = Job {
                     .func = generic_fn,
                     .data = job_data,
                     .invocationOffset = invocation_offset,
@@ -1226,10 +1272,10 @@ void JobManager::splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
         addToRunQueueImpl(run_queue,
             [=](Job *job_array, uint32_t cur_tail) {
                 uint32_t first_idx =
-                    cur_tail & ICfg::runQueueIndexMask;
+                    cur_tail & consts::runQueueIndexMask;
     
                 uint32_t second_idx =
-                    (cur_tail + 1) & ICfg::runQueueIndexMask;
+                    (cur_tail + 1) & consts::runQueueIndexMask;
     
                 job_array[first_idx] = Job {
                     .func = generic_fn,
@@ -1309,6 +1355,8 @@ void JobManager::workerThread(
                 if(should_exit_.load(memory_order::relaxed)) {
                     break;
                 } else {
+                    uint32_t old = worker_wakeup_.load(memory_order::relaxed);
+                    worker_wakeup_.wait(old, memory_order::relaxed);
                 }
             }
         }
@@ -1339,11 +1387,11 @@ void JobManager::ioThread(
         bool job_found = getNextJob(io_base_, thread_idx, false, &cur_job);
 
         if (!job_found) {
-            if (num_outstanding_.load(memory_order::acquire) > 0) {
+            if (should_exit_.load(memory_order::relaxed)) {
+                break;
+            } else {
                 io_sema_.acquire();
                 continue;
-            } else {
-                break;
             }
         }
 

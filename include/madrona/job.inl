@@ -57,22 +57,64 @@ bool JobManager::isQueueEmpty(uint32_t head,
     return checkGEWrapped(head - correction, tail);
 }
 
-template <typename StartFn>
+template <typename StartFn, typename UpdateFn>
 struct JobManager::EntryConfig {
     uint32_t numUserdataBytes;
     uint32_t userdataAlignment;
     void (*ctxInitCB)(void *, void *, WorkerInit &&);
     uint32_t numCtxBytes;
     uint32_t ctxAlignment;
-    StartFn startData;
-    void (*startCB)(Context *, void *);
+    StartFn startFnData;
+    void (*startWrapper)(Context *, void *);
+    UpdateFn updateFnData;
+    void (*updateLoop)(Context *, void *);
 };
 
 template <typename ContextT, typename DataT, typename StartFn>
-JobManager::EntryConfig<StartFn> JobManager::makeEntry(StartFn &&start_fn)
+JobManager::EntryConfig<StartFn, void (*)(Context *, void *)>
+    JobManager::makeEntry(StartFn &&start_fn)
+{
+    return makeEntry<StartFn, void (*)(Context *, void *)>(
+        std::forward<StartFn>(start_fn), nullptr);
+}
+
+template <typename ContextT, typename DataT, typename StartFn,
+          typename UpdateFn>
+JobManager::EntryConfig<StartFn, UpdateFn> JobManager::makeEntry(
+    StartFn &&start_fn, UpdateFn &&update_fn)
 {
     static_assert(std::is_trivially_destructible_v<ContextT>,
                   "Context types with custom destructors are not supported");
+
+    void (*start_wrapper)(Context *, void *);
+    if constexpr (!std::is_same_v<StartFn, void (*)(Context *, void *)>) {
+        start_wrapper = [](Context *ctx_base, void *data) {
+            auto &ctx = *static_cast<ContextT *>(ctx_base);
+            auto fn_ptr = (StartFn *)data;
+
+            ctx.submit([fn = StartFn(*fn_ptr)](ContextT &ctx) {
+                fn(ctx);
+            }, false, ctx.currentJobID());
+        };
+    } else {
+        start_wrapper = start_fn;
+        start_fn = nullptr;
+    }
+
+    void (*update_wrapper)(Context *, void *);
+    if constexpr (!std::is_same_v<UpdateFn, void (*)(Context *, void *)>) {
+        update_wrapper = [](Context *ctx_base, void *data) {
+            auto &ctx = *static_cast<ContextT *>(ctx_base);
+            auto fn_ptr = (UpdateFn *)data;
+
+            ctx.submit([fn = UpdateFn(*fn_ptr)](ContextT &ctx) {
+                fn(ctx);
+            }, false, ctx.currentJobID());
+        };
+    } else {
+        update_wrapper = update_fn;
+        update_fn = nullptr;
+    }
 
     return {
         sizeof(DataT),
@@ -83,19 +125,14 @@ JobManager::EntryConfig<StartFn> JobManager::makeEntry(StartFn &&start_fn)
         sizeof(ContextT),
         std::alignment_of_v<ContextT>,
         std::forward<StartFn>(start_fn),
-        [](Context *ctx_base, void *data) {
-            auto &ctx = *static_cast<ContextT *>(ctx_base);
-            auto fn_ptr = (StartFn *)data;
-
-            ctx.submit([fn = StartFn(*fn_ptr)](ContextT &ctx) {
-                fn(ctx);
-            }, false, ctx.currentJobID());
-        },
+        start_wrapper,
+        std::forward<UpdateFn>(update_fn),
+        update_wrapper,
     };
 }
 
-template <typename StartFn>
-JobManager::JobManager(const EntryConfig<StartFn> &entry_cfg,
+template <typename StartFn, typename UpdateFn>
+JobManager::JobManager(const EntryConfig<StartFn, UpdateFn> &entry_cfg,
                        int desired_num_workers,
                        int num_io,
                        StateManager *state_mgr,
@@ -105,8 +142,24 @@ JobManager::JobManager(const EntryConfig<StartFn> &entry_cfg,
                  entry_cfg.ctxInitCB,
                  entry_cfg.numCtxBytes,
                  entry_cfg.ctxAlignment,
-                 entry_cfg.startCB,
-                 (void *)&entry_cfg.startData,
+                 entry_cfg.startWrapper,
+                 [&entry_cfg]() {
+                     if constexpr (std::is_same_v<StartFn,
+                            void (*)(Context *, void *)>) {
+                         return nullptr;
+                     } else {
+                         return &entry_cfg.startFnData,
+                     }
+                 }(),
+                 entry_cfg.updateWrapper,
+                 [&entry_cfg]() {
+                     if constexpr (std::is_same_v<UpdateFn,
+                            void (*)(Context *, void *)>) {
+                         return nullptr;
+                     } else {
+                         return &entry_cfg.updateFnData,
+                     }
+                 }(),
                  desired_num_workers,
                  num_io,
                  state_mgr,
