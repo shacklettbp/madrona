@@ -29,17 +29,14 @@ template <> struct JobContainerBase::DepsArray<0> {
 
 template <typename Fn, size_t N>
 template <typename... DepTs>
-JobContainer<Fn, N>::JobContainer(
-#ifdef MADRONA_MW_MODE
-                                  uint32_t world_id,
-#endif
-                                   Fn &&func,
-                                   DepTs ...deps)
+JobContainer<Fn, N>::JobContainer(uint32_t job_size,
+                                  MADRONA_MW_COND(uint32_t world_id,)
+                                  Fn &&func,
+                                  DepTs ...deps)
     : JobContainerBase {
           .id = JobID::none(), // Assigned in JobManager::queueJob
-#ifdef MADRONA_MW_MODE
-          .worldID = world_id,
-#endif
+          .jobSize = job_size,
+          MADRONA_MW_COND(.worldID = world_id,)
           .numDependencies = N,
       },
       dependencies(deps...),
@@ -74,7 +71,7 @@ template <typename ContextT, typename DataT, typename StartFn>
 JobManager::EntryConfig<StartFn, void (*)(Context *, void *)>
     JobManager::makeEntry(StartFn &&start_fn)
 {
-    return makeEntry<StartFn, void (*)(Context *, void *)>(
+    return makeEntry<ContextT, DataT, StartFn, void (*)(Context *, void *)>(
         std::forward<StartFn>(start_fn), nullptr);
 }
 
@@ -146,18 +143,20 @@ JobManager::JobManager(const EntryConfig<StartFn, UpdateFn> &entry_cfg,
                  [&entry_cfg]() {
                      if constexpr (std::is_same_v<StartFn,
                             void (*)(Context *, void *)>) {
+                         (void)entry_cfg;
                          return nullptr;
                      } else {
-                         return &entry_cfg.startFnData,
+                         return (void *)&entry_cfg.startFnData;
                      }
                  }(),
-                 entry_cfg.updateWrapper,
+                 entry_cfg.updateLoop,
                  [&entry_cfg]() {
                      if constexpr (std::is_same_v<UpdateFn,
                             void (*)(Context *, void *)>) {
+                         (void)entry_cfg;
                          return nullptr;
                      } else {
-                         return &entry_cfg.updateFnData,
+                         return (void *)&entry_cfg.updateFnData;
                      }
                  }(),
                  desired_num_workers,
@@ -173,7 +172,7 @@ JobID JobManager::reserveProxyJobID(int thread_idx, JobID parent_id)
 
 void JobManager::relinquishProxyJobID(int thread_idx, JobID job_id)
 {
-    return relinquishProxyJobID(thread_idx, job_id.id);
+    return markInvocationsFinished(thread_idx, nullptr, job_id.id, 1);
 }
 
 template <typename ContextT, typename ContainerT>
@@ -186,13 +185,7 @@ void JobManager::singleInvokeEntry(Context *ctx_base,
     
     container->fn(ctx);
 
-    job_mgr->jobFinished(ctx.worker_idx_, data->id.id);
-    
-    if constexpr (!std::is_trivially_destructible_v<ContainerT>) {
-        container->~ContainerT();
-    }
-    // Important note: jobs may be freed by different threads
-    job_mgr->deallocJob(ctx.worker_idx_, data, sizeof(ContainerT));
+    job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id.id, 0);
 }
 
 template <typename ContextT, typename ContainerT>
@@ -231,15 +224,8 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
         container->fn(ctx, cur_invocation);
     } while (remaining_invocations > 0);
 
-    bool cleanup = job_mgr->markInvocationsFinished(ctx.worker_idx_, data,
+    job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id.id,
         invocation_idx - invocation_offset);
-    if (cleanup) {
-        if constexpr (!std::is_trivially_destructible_v<ContainerT>) {
-            container->~ContainerT();
-        }
-        // Important note: jobs may be freed by different threads
-        job_mgr->deallocJob(ctx.worker_idx_, data, sizeof(ContainerT));
-    }
 }
 
 template <typename ContextT, bool single_invoke, typename Fn,
@@ -254,6 +240,8 @@ JobID JobManager::queueJob(int thread_idx,
 {
     static constexpr uint32_t num_deps = sizeof...(DepTs);
     using ContainerT = JobContainer<Fn, num_deps>;
+    static_assert(std::is_trivially_destructible_v<ContainerT>);
+
 #ifdef MADRONA_GCC
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
@@ -275,8 +263,8 @@ JobID JobManager::queueJob(int thread_idx,
 
     void *store = allocJob(thread_idx, job_size, job_alignment);
 
-    auto container = new (store) ContainerT(MADRONA_MW_COND(world_id,)
-        std::forward<Fn>(fn), deps...);
+    auto container = new (store) ContainerT(
+        job_size, MADRONA_MW_COND(world_id,) std::forward<Fn>(fn), deps...);
 
     void *entry;
     if constexpr (single_invoke) {

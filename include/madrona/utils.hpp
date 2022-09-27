@@ -37,6 +37,14 @@ constexpr inline uint64_t roundUpPow2(uint64_t offset, uint64_t alignment)
     return (offset + alignment - 1) & -alignment;
 }
 
+inline void *alignPtr(void *ptr, uintptr_t alignment)
+{
+    uintptr_t base = (uintptr_t)ptr;
+    uintptr_t aligned = roundUpPow2(base, alignment);
+    uintptr_t offset = aligned - base;
+    return (char *)ptr + offset;
+}
+
 constexpr inline bool isPower2(uint64_t v)
 {
     return (v & (v - 1)) == 0;
@@ -50,6 +58,18 @@ constexpr inline bool isPower2(uint32_t v)
 constexpr inline uint32_t int32NextPow2(uint32_t v)
 {
     return v == 1 ? 1 : (1u << (32u - __builtin_clz(v - 1)));
+}
+
+constexpr inline uint64_t int64NextPow2(uint64_t v)
+{
+    int clz;
+    if constexpr (std::is_same_v<uint64_t, unsigned long>) {
+        clz = __builtin_clzl(v - 1);
+    } else if constexpr (std::is_same_v<uint64_t, unsigned long long>) {
+        clz = __builtin_clzll(v - 1);
+    }
+
+    return v == 1 ? 1 : (1u << (64u - clz));
 }
 
 constexpr inline uint32_t int32Log2(uint32_t v)

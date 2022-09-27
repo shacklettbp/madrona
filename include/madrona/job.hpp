@@ -27,6 +27,7 @@ struct JobID {
 
 struct JobContainerBase {
     JobID id;
+    uint32_t jobSize;
 #ifdef MADRONA_MW_MODE
     uint32_t worldID;
 #endif
@@ -40,13 +41,9 @@ struct JobContainer : public JobContainerBase {
     [[no_unique_address]] DepsArray<N> dependencies;
     [[no_unique_address]] Fn fn;
 
-#ifdef MADRONA_MW_MODE
     template <typename... DepTs>
-    inline JobContainer(uint32_t world_id, Fn &&fn, DepTs ...deps);
-#else
-    template <typename... DepTs>
-    inline JobContainer(Fn &&fn, DepTs ...deps);
-#endif
+    inline JobContainer(uint32_t job_size, MADRONA_MW_COND(uint32_t world_id,)
+                        Fn &&fn, DepTs ...deps);
 };
 
 struct Job {
@@ -146,6 +143,13 @@ public:
     };
 
 private:
+    struct SchedulerState {
+        uint32_t numWaiting;
+        uint32_t numOutstandingJobs;
+        uint32_t runningThreads;
+        alignas(MADRONA_CACHE_LINE) utils::SpinLock lock;
+    };
+
     template <typename ContextT, typename ContainerT>
     static void singleInvokeEntry(Context *ctx_base, JobContainerBase *data);
 
@@ -164,9 +168,9 @@ private:
                uint32_t num_ctx_bytes,
                uint32_t ctx_alignment,
                void (*start_fn)(Context *, void *),
-               void *start_data,
+               void *start_fn_data,
                void (*update_fn)(Context *, void *),
-               void *update_data,
+               void *update_fn_data,
                int desired_num_workers,
                int num_io,
                StateManager *state_mgr,
@@ -187,11 +191,9 @@ private:
     JobID reserveProxyJobID(int thread_idx, uint32_t parent_job_idx);
     void relinquishProxyJobID(int thread_idx, uint32_t job_idx);
 
-    inline void jobFinishedImpl(int thread_idx, uint32_t job_idx);
-    void jobFinished(int thread_idx, uint32_t job_idx);
-
-    bool markInvocationsFinished(int thread_idx,
-                                 JobContainerBase *job,
+    void markInvocationsFinished(int thread_idx,
+                                 JobContainerBase *job_data,
+                                 uint32_t job_idx,
                                  uint32_t num_invocations);
 
     template <typename Fn>
@@ -201,7 +203,7 @@ private:
         JobContainerBase *job_data, uint32_t num_invocations,
         JobPriority prio);
 
-    inline void findReadyJobs(int thread_idx);
+    inline bool schedule(int thread_idx);
 
     inline bool isQueueEmpty(uint32_t head, uint32_t correction,
                              uint32_t tail) const;
@@ -209,7 +211,7 @@ private:
     inline uint32_t dequeueJobIndex(RunQueue *run_queue);
 
     inline bool getNextJob(void *queue_base, int thread_idx,
-                           bool check_waiting, Job *job);
+                           bool run_scheduler, Job *job);
 
     void splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
                   uint32_t invocation_offset, uint32_t num_invocations,
@@ -232,18 +234,21 @@ private:
     Alloc::SharedState alloc_state_;
     HeapArray<Alloc, InitAlloc> job_allocs_;
 
-    void *const per_thread_data_;
+    SchedulerState scheduler_;
+    void *const state_ptr_;
     void *const high_base_;
     void *const normal_base_;
     void *const io_base_;
-    void *const waiting_base_;
     void *const tracker_base_;
     void *const tracker_cache_base_;
+    void *const worker_base_;
+    void *const log_base_;
+    void *const waiting_jobs_;
+    uint32_t num_compute_workers_;
+
     std::counting_semaphore<> io_sema_;
     alignas(MADRONA_CACHE_LINE) std::atomic_bool should_exit_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t worker_wakeup_;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_high_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_outstanding_;
 };
 
 }
