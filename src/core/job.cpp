@@ -1115,7 +1115,7 @@ bool JobManager::schedule(int thread_idx)
         int64_t log_head = worker_state.logHead;
 
         for (; log_head != log_tail; log_head++) {
-            LogEntry &entry = log[log_head];
+            LogEntry &entry = log[log_head & consts::logIndexMask];
 
             // FIXME: need to look VERY carefully at memory order here.
             // In particular the relationship between tracker.remainingInvocations
