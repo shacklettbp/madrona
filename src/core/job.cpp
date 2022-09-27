@@ -376,10 +376,13 @@ JobID getNewJobID(JobTrackerMap &tracker_map,
     JobID new_id = tracker_map.acquireID(tracker_cache);
     JobTracker &tracker = tracker_map.getRef(new_id.id);
 
-    tracker.parent = parent_job_idx;
-    tracker.numOutstandingJobs = init_num_launched; 
-    tracker.remainingInvocations = num_invocations;
-    
+    tracker = JobTracker {
+        .parent = parent_job_idx,
+        .numOutstandingJobs = init_num_launched,
+        .numFinishedJobs = 0,
+        .remainingInvocations = num_invocations,
+    };
+
     return new_id;
 }
 
