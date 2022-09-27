@@ -154,7 +154,7 @@ namespace consts {
     constexpr uint64_t runQueueBytesPerThread = 
         computeRunQueueBytes<runQueueSizePerThread>();
 
-    constexpr int logSizePerThread = 1024;
+    constexpr int logSizePerThread = 4096; // FIXME: should decrease this and add functionality to force scheduler run
     constexpr uint32_t logIndexMask = (uint32_t)logSizePerThread - 1;
     constexpr uint64_t logBytesPerThread = logSizePerThread * sizeof(LogEntry);
 
@@ -445,6 +445,23 @@ inline uint32_t addToRunQueueImpl(JobManager::RunQueue *run_queue,
     run_queue->tail.store(cur_tail, memory_order::release);
 
     return num_added;
+}
+
+inline void addToLog(WorkerState &worker_state, LogEntry *worker_log,
+                     const LogEntry &entry)
+{
+    uint32_t cur_tail = worker_state.logTail.load(memory_order::relaxed);
+    uint32_t new_idx = cur_tail & consts::logIndexMask;
+
+    worker_log[new_idx] = entry;
+
+    uint32_t new_tail = cur_tail + 1;
+    worker_state.logTail.store(new_tail, memory_order::release);
+
+    uint32_t log_head = worker_state.logHead;
+    if (new_tail - log_head > consts::logSizePerThread) [[unlikely]] {
+        FATAL("Worker filled up job system log");
+    }
 }
 
 }
@@ -976,20 +993,14 @@ void JobManager::markInvocationsFinished(int thread_idx,
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
     LogEntry *log = getWorkerLog(log_base_, thread_idx);
 
-    uint32_t cur_tail = worker_state.logTail.load(memory_order::relaxed);
-    uint32_t new_idx = cur_tail & consts::logIndexMask;
-
-    log[new_idx] = LogEntry {
+    addToLog(worker_state, log, LogEntry {
         .type = LogEntry::Type::JobFinished,
         .finished = {
             .jobData = job_data,
             .jobIdx = job_idx,
             .numCompleted = num_invocations,
         },
-    };
-
-    uint32_t new_tail = cur_tail + 1;
-    worker_state.logTail.store(new_tail, memory_order::release);
+    });
 }
 
 template <typename Fn>
@@ -1028,20 +1039,14 @@ void JobManager::addToWaitQueue(int thread_idx,
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
     LogEntry *log = getWorkerLog(log_base_, thread_idx);
 
-    uint32_t cur_tail = worker_state.logTail.load(memory_order::relaxed);
-    uint32_t new_idx = cur_tail & consts::logIndexMask;
-
-    log[new_idx] = LogEntry {
+    addToLog(worker_state, log, LogEntry {
         .type = LogEntry::Type::WaitingJobQueued,
         .waiting = {
             job_func,
             job_data,
             num_invocations,
         },
-    };
-
-    uint32_t new_tail = cur_tail + 1;
-    worker_state.logTail.store(new_tail, memory_order::release);
+    });
 }
 
 #if 0
