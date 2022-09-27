@@ -79,7 +79,7 @@ struct LogEntry {
     };
 
     struct WaitingJobQueued {
-        void *fnPtr;
+        void (*fnPtr)();
         JobContainerBase *jobData;
         uint32_t numInvocations;
     };
@@ -806,6 +806,9 @@ JobManager::JobManager(const Init &init)
 
         start.func(ctx, start.data);
         start.remainingLaunches.fetch_sub(1, memory_order::release);
+
+        ctx->job_mgr_->markInvocationsFinished(ctx->worker_idx_, nullptr,
+                                               ptr->id.id, 0);
     };
 
     // Initial job
@@ -822,7 +825,7 @@ JobManager::JobManager(const Init &init)
             &start_wrapper,
         };
  
-        queueJob(i % init.numWorkers, (void *)entry, &start_jobs[i], 0,
+        queueJob(i % init.numWorkers, (void (*)())entry, &start_jobs[i], 0,
                  JobID::none().id, JobPriority::Normal);
     }
 #else
@@ -831,7 +834,7 @@ JobManager::JobManager(const Init &init)
         &start_wrapper,
     };
 
-    queueJob(0, (void *)entry, &start_job, 0, JobID::none().id,
+    queueJob(0, (void (*)())entry, &start_job, 0, JobID::none().id,
              JobPriority::Normal);
 #endif
 
@@ -919,7 +922,7 @@ JobManager::~JobManager()
 }
 
 JobID JobManager::queueJob(int thread_idx,
-                           void* job_func,
+                           void (*job_func)(),
                            JobContainerBase *job_data,
                            uint32_t num_invocations,
                            uint32_t parent_job_idx,
@@ -1011,7 +1014,7 @@ void JobManager::addToRunQueue(int thread_idx,
 }
 
 void JobManager::addToWaitQueue(int thread_idx,
-                                void *job_func,
+                                void (*job_func)(),
                                 JobContainerBase *job_data,
                                 uint32_t num_invocations,
                                 JobPriority prio)
@@ -1128,8 +1131,10 @@ bool JobManager::schedule(int thread_idx)
                 tracker.remainingInvocations = remaining;
 
                 if (remaining == 0) {
-                    deallocJob(thread_idx, entry.finished.jobData,
-                               entry.finished.jobData->jobSize);
+                    if (entry.finished.jobData != nullptr) {
+                        deallocJob(thread_idx, entry.finished.jobData,
+                                   entry.finished.jobData->jobSize);
+                    }
 
                     scheduler_.numOutstandingJobs--;
                     decrementJobTracker(tracker_map, tracker_cache,
@@ -1158,10 +1163,16 @@ bool JobManager::schedule(int thread_idx)
     for (int64_t i = 0; i < cur_num_waiting; i++) {
         Job &job = waiting_jobs[i];
         if (isRunnable(tracker_map, job.data)) {
-            sched_run_jobs[cur_run_tail & consts::runQueueSizePerThread] = job;
+            sched_run_jobs[cur_run_tail & consts::runQueueIndexMask] = job;
             cur_run_tail++;
 
-            num_new_invocations += job.numInvocations;
+            uint32_t num_invocations = job.numInvocations;
+
+            // num_invocations == 0 is a special case that indicates a one-off
+            // submission as opposed to a parallel for / multi invocation
+            // submission. For the scheduler's purpose, this counts as one
+            // invocation regardless
+            num_new_invocations += num_invocations > 0 ? num_invocations : 1;
         } else {
             int64_t cur_compaction_offset = compaction_offset++;
             if (i != cur_compaction_offset) {
@@ -1326,7 +1337,7 @@ void JobManager::splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
                           uint32_t invocation_offset, uint32_t num_invocations,
                           RunQueue *run_queue)
 {
-    void *generic_fn = (void *)fn_ptr;
+    void (*generic_fn)() = (void (*)())fn_ptr;
     if (num_invocations == 1) {
         addToRunQueueImpl(run_queue,
             [=](Job *job_array, uint32_t cur_tail) {
@@ -1377,7 +1388,7 @@ void JobManager::splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
 
 void JobManager::runJob(const int thread_idx,
                         Context *ctx,
-                        void *generic_fn,
+                        void (*generic_fn)(),
                         JobContainerBase *job_data,
                         uint32_t invocation_offset,
                         uint32_t num_invocations)

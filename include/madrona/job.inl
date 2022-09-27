@@ -266,13 +266,13 @@ JobID JobManager::queueJob(int thread_idx,
     auto container = new (store) ContainerT(
         job_size, MADRONA_MW_COND(world_id,) std::forward<Fn>(fn), deps...);
 
-    void *entry;
+    void (*entry)();
     if constexpr (single_invoke) {
         SingleInvokeFn fn_ptr = &singleInvokeEntry<ContextT, ContainerT>;
-        entry = (void *)fn_ptr;
+        entry = (void (*)())fn_ptr;
     } else {
         MultiInvokeFn fn_ptr = &multiInvokeEntry<ContextT, ContainerT>;
-        entry = (void *)fn_ptr;
+        entry = (void (*)())fn_ptr;
     }
 
     return queueJob(thread_idx, entry, container, num_invocations,

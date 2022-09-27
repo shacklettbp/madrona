@@ -47,7 +47,7 @@ struct JobContainer : public JobContainerBase {
 };
 
 struct Job {
-    void *func;
+    void (*func)();
     JobContainerBase *data;
     uint32_t invocationOffset;
     uint32_t numInvocations;
@@ -183,7 +183,7 @@ private:
                            uint32_t alignment);
     inline void deallocJob(int worker_idx, void *ptr, uint32_t num_bytes);
 
-    JobID queueJob(int thread_idx, void *job_func,
+    JobID queueJob(int thread_idx, void (*job_func)(),
                    JobContainerBase *job_data, uint32_t num_invocations, 
                    uint32_t parent_job_idx,
                    JobPriority prio = JobPriority::Normal);
@@ -199,7 +199,7 @@ private:
     template <typename Fn>
     inline void addToRunQueue(int thread_idx, JobPriority prio, Fn &&add_cb);
 
-    inline void addToWaitQueue(int thread_idx, void *job_func,
+    inline void addToWaitQueue(int thread_idx, void (*job_func)(),
         JobContainerBase *job_data, uint32_t num_invocations,
         JobPriority prio);
 
@@ -217,8 +217,8 @@ private:
                   uint32_t invocation_offset, uint32_t num_invocations,
                   RunQueue *run_queue);
 
-    inline void runJob(const int thread_idx, Context *ctx_ptr,
-                       void *fn, JobContainerBase *job_data,
+    inline void runJob(const int thread_idx, Context *ctx,
+                       void (*generic_fn)(), JobContainerBase *job_data,
                        uint32_t invocation_offset, uint32_t num_invocations);
 
     void workerThread(const int thread_idx,
