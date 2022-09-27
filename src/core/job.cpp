@@ -660,13 +660,13 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
 
         uint64_t log_offset =
             utils::roundUp(num_state_bytes, consts::jobQueueStartAlignment);
-        num_state_bytes =
-            log_offset + num_threads * consts::logSizePerThread;
+        num_state_bytes = log_offset +
+            num_threads * consts::logSizePerThread * sizeof(LogEntry);
 
         uint64_t wait_offset =
             utils::roundUp(num_state_bytes, consts::jobQueueStartAlignment);
-        num_state_bytes =
-            wait_offset + num_worlds * consts::waitQueueSizePerWorld;
+        num_state_bytes = wait_offset +
+            num_worlds * consts::waitQueueSizePerWorld * sizeof(Job);
 
         uint64_t tracker_cache_offset =
             utils::roundUp(num_state_bytes, (uint64_t)alignof(JobTrackerMap::Cache));
@@ -1182,7 +1182,6 @@ bool JobManager::schedule(int thread_idx)
     }
 
     sched_run->tail.store(cur_run_tail, memory_order::release);
-
     scheduler_.numWaiting = compaction_offset;
 
     if (num_new_invocations == 0) {
