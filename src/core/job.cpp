@@ -26,10 +26,11 @@ namespace madrona {
 namespace {
 
 struct JobTracker {
+    std::atomic_uint32_t users;
     uint32_t parent;
-    uint32_t numOutstandingJobs;
-    uint32_t numFinishedJobs;
     uint32_t remainingInvocations;
+    uint32_t numFinishedJobs;
+    std::atomic_uint32_t numOutstandingJobs;
 };
 
 template <typename T>
@@ -136,7 +137,7 @@ namespace consts {
 
     constexpr int waitQueueSizePerWorld = 1024;
 
-    constexpr int runQueueSizePerThread = 16384;
+    constexpr int runQueueSizePerThread = 65536;
     constexpr uint32_t runQueueIndexMask = (uint32_t)runQueueSizePerThread - 1;
 
     template <uint64_t num_jobs>
@@ -370,18 +371,15 @@ JobID getNewJobID(JobTrackerMap &tracker_map,
 {
     if (parent_job_idx != JobID::none().id) {
         JobTracker &parent = tracker_map.getRef(parent_job_idx);
-        parent.numOutstandingJobs += 1; // FIXME: is this guaranteed safe?
+        parent.numOutstandingJobs.fetch_add(1, memory_order::relaxed);
     }
 
     JobID new_id = tracker_map.acquireID(tracker_cache);
     JobTracker &tracker = tracker_map.getRef(new_id.id);
-
-    tracker = JobTracker {
-        .parent = parent_job_idx,
-        .numOutstandingJobs = init_num_launched,
-        .numFinishedJobs = 0,
-        .remainingInvocations = num_invocations,
-    };
+    tracker.parent = parent_job_idx;
+    tracker.remainingInvocations = num_invocations;
+    tracker.numFinishedJobs = 0;
+    tracker.numOutstandingJobs.store(init_num_launched, memory_order::relaxed);
 
     return new_id;
 }
@@ -395,7 +393,8 @@ inline void decrementJobTracker(JobTrackerMap &tracker_map,
         JobTracker &tracker = tracker_map.getRef(job_id);
 
         uint32_t num_finished = ++tracker.numFinishedJobs;
-        uint32_t num_outstanding = tracker.numOutstandingJobs;
+        uint32_t num_outstanding =
+            tracker.numOutstandingJobs.load(memory_order::relaxed);
 
         if (num_finished == num_outstanding) {
             uint32_t parent = tracker.parent;
@@ -696,7 +695,7 @@ JobManager::JobManager(uint32_t num_ctx_userdata_bytes,
 
         int num_tracker_slots = num_threads * (
               consts::logSizePerThread + consts::runQueueSizePerThread);
-
+        
         uint64_t tracker_offset =
             utils::roundUp(num_state_bytes, consts::jobQueueStartAlignment);
 
