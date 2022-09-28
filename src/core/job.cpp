@@ -1117,7 +1117,14 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
 }
 #endif
 
-bool JobManager::schedule(int thread_idx)
+enum class JobManager::WorkerControl : uint64_t {
+    Run,
+    Loop,
+    Sleep,
+    Exit,
+};
+
+JobManager::WorkerControl JobManager::schedule(int thread_idx)
 {
     JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
     JobTrackerMap::Cache &tracker_cache =
@@ -1223,8 +1230,20 @@ bool JobManager::schedule(int thread_idx)
     sched_run->tail.store(cur_run_tail, memory_order::release);
     scheduler_.numWaiting = compaction_offset;
 
+    if (scheduler_.numOutstandingJobs == 0) {
+        for (int64_t i = 0; i < num_compute_workers_; i++) {
+            WorkerState &worker_state = getWorkerState(worker_base_, i);
+            if (worker_state.wakeUp.load(memory_order::relaxed) == 0) {
+                worker_state.wakeUp.store(i, memory_order::relaxed);
+                worker_state.wakeUp.notify_one();
+                break;
+            }
+        }
+        return WorkerControl::Exit;
+    }
+
     if (num_new_invocations == 0) {
-        return false;
+        return WorkerControl::Sleep;
     }
     
     // Wake up compute workers based on # of jobs
@@ -1242,7 +1261,7 @@ bool JobManager::schedule(int thread_idx)
         }
     }
 
-    return true;
+    return WorkerControl::Run;
 }
 
 uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
@@ -1280,33 +1299,37 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
     return auth.fetch_add(1, memory_order::acq_rel);
 }
 
-bool JobManager::getNextJob(void *const queue_base,
-                            int thread_idx,
-                            bool run_scheduler,
-                            Job *next_job)
+JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
+                                                int thread_idx,
+                                                int init_search_idx,
+                                                bool run_scheduler,
+                                                Job *next_job)
 {
     // First, check the current thread's queue
     RunQueue *queue;
     uint32_t job_idx;
-    bool scheduler_run = false;
+    WorkerControl worker_ctrl = WorkerControl::Loop;
     {
-        queue = getRunQueue(queue_base, thread_idx);
+        queue = getRunQueue(queue_base, init_search_idx);
         job_idx = dequeueJobIndex(queue);
 
-        bool sched_jobs_found = false;
         if (job_idx == consts::jobQueueSentinel && run_scheduler) {
             bool sched_locked = scheduler_.lock.lockNoSpin();
             if (sched_locked) {
-                scheduler_run = true;
-                sched_jobs_found = schedule(thread_idx);
+                worker_ctrl = schedule(thread_idx);
                 scheduler_.lock.unlock();
             }
         }
 
-        if (sched_jobs_found) {
+        if (worker_ctrl == WorkerControl::Run) {
             // Recheck current queue
+            queue = getRunQueue(queue_base, thread_idx);
             job_idx = dequeueJobIndex(queue);
         }
+    }
+
+    if (worker_ctrl == WorkerControl::Exit) {
+        return WorkerControl::Exit;
     }
 
     // Try work stealing
@@ -1325,25 +1348,8 @@ bool JobManager::getNextJob(void *const queue_base,
         }
     }
 
-
     if (job_idx == consts::jobQueueSentinel) {
-        if (scheduler_run) {
-            WorkerState &worker_state =
-                getWorkerState(worker_base_, thread_idx);
-
-            worker_state.wakeUp.store(0, memory_order::relaxed);
-            worker_state.wakeUp.wait(0, memory_order::relaxed);
-            uint32_t wakeup_thread_idx = worker_state.wakeUp.load(memory_order::relaxed);
-
-            queue = getRunQueue(normal_base_, wakeup_thread_idx);
-            job_idx = dequeueJobIndex(queue);
-
-            if (job_idx == consts::jobQueueSentinel) {
-                return false;
-            }
-        } else {
-            return false;
-        }
+        return worker_ctrl;
     }
     
     *next_job = getRunnableJobs(queue)[job_idx & consts::runQueueIndexMask];
@@ -1368,7 +1374,7 @@ bool JobManager::getNextJob(void *const queue_base,
               queue);
     }
 
-    return true;
+    return WorkerControl::Run;
 }
 
 void JobManager::splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
@@ -1459,34 +1465,55 @@ void JobManager::workerThread(
 
     Job cur_job;
 
+    int wakeup_search_idx = thread_idx;
+
+    WorkerControl worker_ctrl = WorkerControl::Loop;
     while (true) {
-        bool job_found = false;
-
         if (num_high_.load(memory_order::relaxed) > 0) {
-            job_found = getNextJob(high_base_, thread_idx, false, &cur_job);
+            worker_ctrl = getNextJob(high_base_, thread_idx, thread_idx,
+                                     false, &cur_job);
 
-            if (job_found) {
+            if (worker_ctrl == WorkerControl::Run) {
                 num_high_.fetch_sub(1, memory_order::relaxed);
             }
+        } 
+
+        if (worker_ctrl == WorkerControl::Loop) {
+            worker_ctrl = getNextJob(normal_base_, thread_idx, thread_idx,
+                                     true, &cur_job);
+        } else if (worker_ctrl == WorkerControl::Sleep) [[unlikely]] {
+            worker_ctrl = getNextJob(normal_base_, thread_idx, wakeup_search_idx,
+                                     true, &cur_job);
         }
 
-        if (!job_found) {
-            job_found = getNextJob(normal_base_, thread_idx, true, &cur_job);
-        }
-
-        // Couldn't find work
-        if (!job_found) {
-            workerPause();
-            continue;
-        }
-
+        if (worker_ctrl == WorkerControl::Run) {
 #ifdef MADRONA_MW_MODE
-        Context *ctx = (Context *)((char *)context_base + 
-            (uint64_t)cur_job.data->worldID * (uint64_t)num_context_bytes);
+            Context *ctx = (Context *)((char *)context_base + 
+                (uint64_t)cur_job.data->worldID * (uint64_t)num_context_bytes);
 #endif
 
-        runJob(thread_idx, ctx, cur_job.func, cur_job.data,
-               cur_job.invocationOffset, cur_job.numInvocations);
+            runJob(thread_idx, ctx, cur_job.func, cur_job.data,
+                   cur_job.invocationOffset, cur_job.numInvocations);
+            
+            worker_ctrl = WorkerControl::Loop;
+        } else if (worker_ctrl == WorkerControl::Loop) {
+            // No available work and couldn't run scheduler
+            workerPause();
+        } else if (worker_ctrl == WorkerControl::Sleep) [[unlikely]] {
+            [&]() __attribute__((noinline, cold)) {
+                WorkerState &worker_state =
+                    getWorkerState(worker_base_, thread_idx);
+
+                worker_state.wakeUp.store(0, memory_order::relaxed);
+                worker_state.wakeUp.wait(0, memory_order::relaxed);
+                uint32_t wakeup_thread_idx =
+                    worker_state.wakeUp.load(memory_order::relaxed);
+
+                wakeup_search_idx = (int)wakeup_thread_idx;
+            }();
+        } else if (worker_ctrl == WorkerControl::Exit) [[unlikely]] {
+            break;
+        }
     }
 }
 
@@ -1503,15 +1530,11 @@ void JobManager::ioThread(
     Job cur_job;
 
     while (true) {
-        bool job_found = getNextJob(io_base_, thread_idx, false, &cur_job);
+        WorkerControl worker_ctrl = getNextJob(io_base_, thread_idx,
+                                               thread_idx, false, &cur_job);
 
-        if (!job_found) {
-            if (should_exit_.load(memory_order::relaxed)) {
-                break;
-            } else {
-                io_sema_.acquire();
-                continue;
-            }
+        if (worker_ctrl != WorkerControl::Run) {
+            io_sema_.acquire();
         }
 
 #ifdef MADRONA_MW_MODE

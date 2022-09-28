@@ -206,15 +206,18 @@ private:
         JobContainerBase *job_data, uint32_t num_invocations,
         JobPriority prio);
 
-    inline bool schedule(int thread_idx);
+    enum class WorkerControl : uint64_t;
+    inline WorkerControl schedule(int thread_idx);
 
     inline bool isQueueEmpty(uint32_t head, uint32_t correction,
                              uint32_t tail) const;
 
     inline uint32_t dequeueJobIndex(RunQueue *run_queue);
 
-    inline bool getNextJob(void *queue_base, int thread_idx,
-                           bool run_scheduler, Job *job);
+    inline WorkerControl getNextJob(void *queue_base, int thread_idx,
+                                    int init_search_idx,
+                                    bool run_scheduler,
+                                    Job *job);
 
     void splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
                   uint32_t invocation_offset, uint32_t num_invocations,
@@ -250,7 +253,6 @@ private:
     uint32_t num_compute_workers_;
 
     std::counting_semaphore<> io_sema_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_bool should_exit_;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_high_;
 };
 
