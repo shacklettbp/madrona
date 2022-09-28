@@ -461,8 +461,8 @@ inline void addToLog(WorkerState &worker_state, LogEntry *worker_log,
     uint32_t log_head = worker_state.logHead;
     if (new_tail - log_head >= consts::logSizePerThread) [[unlikely]] {
         for (uint32_t i = log_head; i != new_tail; i++) {
-            LogEntry &entry = worker_log[i & consts::logIndexMask];
-            switch (entry.type) {
+            LogEntry &debug_entry = worker_log[i & consts::logIndexMask];
+            switch (debug_entry.type) {
                 case LogEntry::Type::JobFinished: {
                     printf("Job finished\n");
                 } break;
