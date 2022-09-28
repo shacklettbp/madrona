@@ -96,6 +96,26 @@ struct LogEntry {
     };
 };
 
+#if 0
+std::vector<LogEntry> globalLog;
+void printGlobalLog()
+{
+    for (LogEntry &entry : globalLog) {
+        switch (entry.type) {
+            case LogEntry::Type::JobFinished: {
+                printf("F: (%u %u) %u %u\n", entry.finished.jobIdx.id, entry.finished.jobIdx.gen, entry.finished.numCompleted, entry.finished.threadID);
+            } break;
+            case LogEntry::Type::WaitingJobQueued: {
+                printf("W: (%u %u) %u\n", entry.waiting.id.id, entry.waiting.id.gen, entry.waiting.numInvocations);
+            } break;
+            case LogEntry::Type::JobCreated: {
+                printf("C: (%u %u) %u %u\n", entry.created.curID.id, entry.created.curID.gen, entry.created.parentID, entry.created.numInvocations);
+            } break;
+        }
+    }
+}
+#endif
+
 struct alignas(MADRONA_CACHE_LINE) WorkerState {
     uint32_t logHead; // Only modified by scheduler
     // Only modified by worker thread. Still has to be atomic for memory
@@ -1308,7 +1328,7 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     // First, check the current thread's queue
     RunQueue *queue;
     uint32_t job_idx;
-    WorkerControl worker_ctrl = WorkerControl::Loop;
+    WorkerControl sched_ctrl = WorkerControl::Loop;
     {
         queue = getRunQueue(queue_base, init_search_idx);
         job_idx = dequeueJobIndex(queue);
@@ -1316,19 +1336,19 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
         if (job_idx == consts::jobQueueSentinel && run_scheduler) {
             bool sched_locked = scheduler_.lock.lockNoSpin();
             if (sched_locked) {
-                worker_ctrl = schedule(thread_idx);
+                sched_ctrl = schedule(thread_idx);
                 scheduler_.lock.unlock();
             }
         }
 
-        if (worker_ctrl == WorkerControl::Run) {
+        if (sched_ctrl == WorkerControl::Run) {
             // Recheck current queue
             queue = getRunQueue(queue_base, thread_idx);
             job_idx = dequeueJobIndex(queue);
         }
     }
 
-    if (worker_ctrl == WorkerControl::Exit) {
+    if (sched_ctrl == WorkerControl::Exit) {
         return WorkerControl::Exit;
     }
 
@@ -1349,7 +1369,11 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     }
 
     if (job_idx == consts::jobQueueSentinel) {
-        return worker_ctrl;
+        // It's possible to get here with a directive of WorkerControl::Run
+        // from the scheduler that still results in no jobs because they were
+        // stolen. This code returns WorkerControl::Loop in that case.
+        return sched_ctrl == WorkerControl::Sleep ?
+            WorkerControl::Sleep : WorkerControl::Loop;
     }
     
     *next_job = getRunnableJobs(queue)[job_idx & consts::runQueueIndexMask];
