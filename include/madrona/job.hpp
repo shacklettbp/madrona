@@ -145,8 +145,8 @@ public:
 private:
     struct SchedulerState {
         uint32_t numWaiting;
-        uint32_t numOutstandingJobs;
-        uint32_t runningThreads;
+        uint32_t numCreatedJobs;
+        uint32_t numFinishedJobs;
         alignas(MADRONA_CACHE_LINE) utils::SpinLock lock;
     };
 

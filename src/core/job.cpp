@@ -97,6 +97,7 @@ struct LogEntry {
 };
 
 #if 0
+#include <vector>
 std::vector<LogEntry> globalLog;
 void printGlobalLog()
 {
@@ -763,8 +764,9 @@ JobManager::JobManager(const Init &init)
                                           consts::numJobAllocArenas)),
       job_allocs_(threads_.size(), InitAlloc()),
       scheduler_ {
-          .numOutstandingJobs = 0,
-          .runningThreads = 0,
+          .numWaiting = 0,
+          .numCreatedJobs = 0,
+          .numFinishedJobs = 0,
           .lock {},
       },
       state_ptr_(init.statePtr),
@@ -1168,7 +1170,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
             decrementJobTracker(tracker_map, tracker_cache,
                                 finished.jobIdx);
 
-            scheduler_.numOutstandingJobs--;
+            scheduler_.numFinishedJobs++;
         }
     };
 
@@ -1182,7 +1184,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
     };
 
     auto handleJobCreated = [&](const LogEntry::JobCreated &created) {
-        scheduler_.numOutstandingJobs++;
+        scheduler_.numCreatedJobs++;
         uint32_t parent_id = created.parentID;
         if (parent_id != ~0u) {
             JobTracker &parent_tracker = tracker_map.getRef(parent_id);
@@ -1250,11 +1252,13 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
     sched_run->tail.store(cur_run_tail, memory_order::release);
     scheduler_.numWaiting = compaction_offset;
 
-    if (scheduler_.numOutstandingJobs == 0) {
+    if (scheduler_.numCreatedJobs > 0 &&
+        scheduler_.numFinishedJobs == scheduler_.numCreatedJobs) [[unlikely]] {
         for (int64_t i = 0; i < num_compute_workers_; i++) {
             WorkerState &worker_state = getWorkerState(worker_base_, i);
             if (worker_state.wakeUp.load(memory_order::relaxed) == 0) {
-                worker_state.wakeUp.store(i, memory_order::relaxed);
+                worker_state.wakeUp.store((uint32_t)i + 1,
+                                          memory_order::relaxed);
                 worker_state.wakeUp.notify_one();
                 break;
             }
@@ -1263,6 +1267,8 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
     }
 
     if (num_new_invocations == 0) {
+        getWorkerState(worker_base_, thread_idx).wakeUp.store(0,
+             memory_order::relaxed);
         return WorkerControl::Sleep;
     }
     
@@ -1274,7 +1280,8 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
         WorkerState &worker_state = getWorkerState(worker_base_, i);
 
         if (worker_state.wakeUp.load(memory_order::relaxed) == 0) {
-            worker_state.wakeUp.store(thread_idx + 1, memory_order::relaxed);
+            worker_state.wakeUp.store((uint32_t)thread_idx + 1,
+                                      memory_order::relaxed);
             worker_state.wakeUp.notify_one();
 
             num_wakeup--;
@@ -1320,10 +1327,10 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
 }
 
 JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
-                                                int thread_idx,
-                                                int init_search_idx,
-                                                bool run_scheduler,
-                                                Job *next_job)
+                                                 int thread_idx,
+                                                 int init_search_idx,
+                                                 bool run_scheduler,
+                                                 Job *next_job)
 {
     // First, check the current thread's queue
     RunQueue *queue;
@@ -1528,12 +1535,11 @@ void JobManager::workerThread(
                 WorkerState &worker_state =
                     getWorkerState(worker_base_, thread_idx);
 
-                worker_state.wakeUp.store(0, memory_order::relaxed);
                 worker_state.wakeUp.wait(0, memory_order::relaxed);
-                uint32_t wakeup_thread_idx =
+                uint32_t wakeup_idx =
                     worker_state.wakeUp.load(memory_order::relaxed);
 
-                wakeup_search_idx = (int)wakeup_thread_idx;
+                wakeup_search_idx = (int)wakeup_idx - 1;
             }();
         } else if (worker_ctrl == WorkerControl::Exit) [[unlikely]] {
             break;
