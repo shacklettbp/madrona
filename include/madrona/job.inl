@@ -185,7 +185,7 @@ void JobManager::singleInvokeEntry(Context *ctx_base,
     
     container->fn(ctx);
 
-    job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id.id, 0);
+    job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id.id, 1);
 }
 
 template <typename ContextT, typename ContainerT>

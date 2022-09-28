@@ -26,11 +26,9 @@ namespace madrona {
 namespace {
 
 struct JobTracker {
-    std::atomic_uint32_t users;
     uint32_t parent;
     uint32_t remainingInvocations;
-    uint32_t numFinishedJobs;
-    std::atomic_uint32_t numOutstandingJobs;
+    uint32_t numOutstandingJobs;
 };
 
 template <typename T>
@@ -71,6 +69,7 @@ struct LogEntry {
     enum class Type : uint32_t {
         JobFinished,
         WaitingJobQueued,
+        JobCreated,
     };
 
     struct JobFinished {
@@ -85,10 +84,15 @@ struct LogEntry {
         uint32_t numInvocations;
     };
 
+    struct JobCreated {
+        uint32_t parentID;
+    };
+
     Type type;
     union {
         JobFinished finished;
         WaitingJobQueued waiting;
+        JobCreated created;
     };
 };
 
@@ -363,27 +367,6 @@ inline JobTrackerMap::Cache & getTrackerCache(void *tracker_cache_base,
     return ((JobTrackerMap::Cache *)tracker_cache_base)[thread_idx];
 }
 
-JobID getNewJobID(JobTrackerMap &tracker_map,
-                  JobTrackerMap::Cache &tracker_cache,
-                  uint32_t parent_job_idx,
-                  uint32_t num_invocations,
-                  uint32_t init_num_launched)
-{
-    if (parent_job_idx != JobID::none().id) {
-        JobTracker &parent = tracker_map.getRef(parent_job_idx);
-        parent.numOutstandingJobs.fetch_add(1, memory_order::relaxed);
-    }
-
-    JobID new_id = tracker_map.acquireID(tracker_cache);
-    JobTracker &tracker = tracker_map.getRef(new_id.id);
-    tracker.parent = parent_job_idx;
-    tracker.remainingInvocations = num_invocations;
-    tracker.numFinishedJobs = 0;
-    tracker.numOutstandingJobs.store(init_num_launched, memory_order::relaxed);
-
-    return new_id;
-}
-
 inline void decrementJobTracker(JobTrackerMap &tracker_map, 
                                 JobTrackerMap::Cache &tracker_cache,
                                 uint32_t job_id)
@@ -392,11 +375,9 @@ inline void decrementJobTracker(JobTrackerMap &tracker_map,
     while (job_id != JobID::none().id) {
         JobTracker &tracker = tracker_map.getRef(job_id);
 
-        uint32_t num_finished = ++tracker.numFinishedJobs;
-        uint32_t num_outstanding =
-            tracker.numOutstandingJobs.load(memory_order::relaxed);
+        uint32_t num_outstanding = --tracker.numOutstandingJobs;
 
-        if (num_finished == num_outstanding) {
+        if (num_outstanding == 0 && tracker.remainingInvocations == 0) {
             uint32_t parent = tracker.parent;
             
             tracker_map.releaseID(tracker_cache, job_id);
@@ -458,7 +439,21 @@ inline void addToLog(WorkerState &worker_state, LogEntry *worker_log,
     worker_state.logTail.store(new_tail, memory_order::release);
 
     uint32_t log_head = worker_state.logHead;
-    if (new_tail - log_head > consts::logSizePerThread) [[unlikely]] {
+    if (new_tail - log_head >= consts::logSizePerThread) [[unlikely]] {
+        for (uint32_t i = log_head; i != new_tail; i++) {
+            LogEntry &entry = worker_log[i & consts::logIndexMask];
+            switch (entry.type) {
+                case LogEntry::Type::JobFinished: {
+                    printf("Job finished\n");
+                } break;
+                case LogEntry::Type::WaitingJobQueued: {
+                    printf("Waiting job queued\n");
+                } break;
+                case LogEntry::Type::JobCreated: {
+                    printf("JobCreated\n");
+                } break;
+            }
+        }
         FATAL("Worker filled up job system log");
     }
 }
@@ -827,7 +822,7 @@ JobManager::JobManager(const Init &init)
         start.remainingLaunches.fetch_sub(1, memory_order::release);
 
         ctx->job_mgr_->markInvocationsFinished(ctx->worker_idx_, nullptr,
-                                               ptr->id.id, 0);
+                                               ptr->id.id, 1);
     };
 
     // Initial job
@@ -940,6 +935,32 @@ JobManager::~JobManager()
     InitAlloc().dealloc(state_ptr_);
 }
 
+JobID JobManager::getNewJobID(int thread_idx,
+                              uint32_t parent_job_idx,
+                              uint32_t num_invocations)
+{
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
+    JobTrackerMap::Cache &tracker_cache =
+        getTrackerCache(tracker_cache_base_, thread_idx);
+    WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
+    LogEntry *log = getWorkerLog(log_base_, thread_idx);
+    JobID new_id = tracker_map.acquireID(tracker_cache);
+
+    JobTracker &tracker = tracker_map.getRef(new_id.id);
+    tracker.parent = parent_job_idx;
+    tracker.remainingInvocations = num_invocations;
+    tracker.numOutstandingJobs = 1;
+
+    addToLog(worker_state, log, LogEntry {
+        .type = LogEntry::Type::JobCreated,
+        .created = {
+            .parentID = parent_job_idx,
+        },
+    });
+
+    return new_id;
+}
+
 JobID JobManager::queueJob(int thread_idx,
                            void (*job_func)(),
                            JobContainerBase *job_data,
@@ -948,11 +969,10 @@ JobID JobManager::queueJob(int thread_idx,
                            JobPriority prio)
 {
     JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
-    JobTrackerMap::Cache &tracker_cache =
-        getTrackerCache(tracker_cache_base_, thread_idx);
-
-    JobID id = getNewJobID(tracker_map, tracker_cache, parent_job_idx,
-                           num_invocations, 1);
+    // num_invocations can be passed in as 0 here to signify a single
+    // invocation job, but for the purposes of dependency tracking it
+    // counts as a single invocation
+    JobID id = getNewJobID(thread_idx, parent_job_idx, std::max(num_invocations, 1u));
 
     job_data->id = id;
 
@@ -978,10 +998,7 @@ JobID JobManager::queueJob(int thread_idx,
 
 JobID JobManager::reserveProxyJobID(int thread_idx, uint32_t parent_job_idx)
 {
-    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
-    JobTrackerMap::Cache &tracker_cache =
-        getTrackerCache(tracker_cache_base_, thread_idx);
-    return getNewJobID(tracker_map, tracker_cache, parent_job_idx, 1, 1);
+    return getNewJobID(thread_idx, parent_job_idx, 1);
 }
 
 void JobManager::markInvocationsFinished(int thread_idx,
@@ -1106,8 +1123,46 @@ bool JobManager::schedule(int thread_idx)
     JobTrackerMap::Cache &tracker_cache =
         getTrackerCache(tracker_cache_base_, thread_idx);
     Job *waiting_jobs = (Job *)waiting_jobs_;
-
     int64_t cur_num_waiting = scheduler_.numWaiting;
+
+    auto handleJobFinished = [&](const LogEntry::JobFinished &finished) {
+        JobTracker &tracker =
+            tracker_map.getRef(finished.jobIdx);
+        uint32_t remaining = tracker.remainingInvocations;
+        remaining -= finished.numCompleted;
+        tracker.remainingInvocations = remaining;
+
+        if (remaining == 0) {
+            if (finished.jobData != nullptr) {
+                deallocJob(thread_idx, finished.jobData,
+                           finished.jobData->jobSize);
+            }
+
+            decrementJobTracker(tracker_map, tracker_cache,
+                                finished.jobIdx);
+
+            scheduler_.numOutstandingJobs--;
+        }
+    };
+
+    auto handleWaitingQueued = [&](const LogEntry::WaitingJobQueued &waiting) {
+        waiting_jobs[cur_num_waiting++] = Job {
+            waiting.fnPtr,
+            waiting.jobData,
+            0,
+            waiting.numInvocations,
+        };
+    };
+
+    auto handleJobCreated = [&](const LogEntry::JobCreated &created) {
+        scheduler_.numOutstandingJobs++;
+        uint32_t parent_id = created.parentID;
+        if (parent_id != ~0u) {
+            JobTracker &parent_tracker = tracker_map.getRef(parent_id);
+            parent_tracker.numOutstandingJobs++;
+        }
+    };
+
     // First, we read all the logs.
     for (int64_t i = 0, n = threads_.size(); i != n; i++) {
         int64_t offset = i + thread_idx;
@@ -1121,39 +1176,16 @@ bool JobManager::schedule(int thread_idx)
         for (; log_head != log_tail; log_head++) {
             LogEntry &entry = log[log_head & consts::logIndexMask];
 
-            // FIXME: need to look VERY carefully at memory order here.
-            // In particular the relationship between tracker.remainingInvocations
-            // and tracker.numOutstandingJobs. Hopefully, log_tail acquire above keeps
-            // us safe by guaranteeing that tracker.numOutstandingJobs is current. The
-            // danger is that we somehow miss an update to tracker.numOutstandingJobs
-            // and incorrectly conclude a job is done when in reality children
-            // are in flight or about to be in flight. The solution here may be
-            // to check tracker.remainingInvocations. If this is > 0 children can still be added
-            // later (and by definition, the job hasn't finished yet?).
-            if (entry.type == LogEntry::Type::JobFinished) {
-                JobTracker &tracker =
-                    tracker_map.getRef(entry.finished.jobIdx);
-                uint32_t remaining = tracker.remainingInvocations;
-                remaining -= entry.finished.numCompleted;
-                tracker.remainingInvocations = remaining;
-
-                if (remaining == 0) {
-                    if (entry.finished.jobData != nullptr) {
-                        deallocJob(thread_idx, entry.finished.jobData,
-                                   entry.finished.jobData->jobSize);
-                    }
-
-                    scheduler_.numOutstandingJobs--;
-                    decrementJobTracker(tracker_map, tracker_cache,
-                                        entry.finished.jobIdx);
-                }
-            } else if (entry.type == LogEntry::Type::WaitingJobQueued) {
-                waiting_jobs[cur_num_waiting++] = Job {
-                    entry.waiting.fnPtr,
-                    entry.waiting.jobData,
-                    0,
-                    entry.waiting.numInvocations,
-                };
+            switch (entry.type) {
+                case LogEntry::Type::JobFinished: {
+                    handleJobFinished(entry.finished);
+                } break;
+                case LogEntry::Type::WaitingJobQueued: {
+                    handleWaitingQueued(entry.waiting);
+                } break;
+                case LogEntry::Type::JobCreated: {
+                    handleJobCreated(entry.created);
+                } break;
             }
         }
 

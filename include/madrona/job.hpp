@@ -196,6 +196,9 @@ private:
                                  uint32_t job_idx,
                                  uint32_t num_invocations);
 
+    inline JobID getNewJobID(int thread_idx, uint32_t parent_job_idx, 
+                             uint32_t num_invocations);
+
     template <typename Fn>
     inline void addToRunQueue(int thread_idx, JobPriority prio, Fn &&add_cb);
 
