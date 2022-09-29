@@ -44,6 +44,9 @@ public:
     template <typename... ComponentTs, typename Fn>
     inline void forEach(const Query<ComponentTs...> &query, Fn &&fn);
 
+    template <typename... ComponentTs>
+    inline uint32_t numMatches(const Query<ComponentTs...> &query);
+
     // Jobs
     template <typename Fn, typename... DepTs>
     inline JobID submit(Fn &&fn, bool is_child = true,

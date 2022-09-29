@@ -71,6 +71,18 @@ void Context::forEach(const Query<ComponentTs...> &query, Fn &&fn)
                                 std::forward<Fn>(fn));
 }
 
+template <typename... ComponentTs>
+uint32_t Context::numMatches(const Query<ComponentTs...> &query)
+{
+    uint32_t num_entities = 0;
+    state_mgr_->iterateArchetypes(MADRONA_MW_COND(cur_world_id_,) query,
+            [&](int num_rows, auto ...) {
+        num_entities += num_rows;
+    });
+
+    return num_entities;
+}
+
 template <typename Fn, typename... Deps>
 JobID Context::submit(Fn &&fn, bool is_child, Deps && ... dependencies)
 {
