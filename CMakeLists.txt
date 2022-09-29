@@ -49,6 +49,10 @@ add_compile_options(-pedantic -Wall -Wextra)
 
 add_subdirectory(src)
 
+if (MADRONA_ENABLE_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
 if (MADRONA_ENABLE_TESTS)
     enable_testing()
     add_subdirectory(tests)
