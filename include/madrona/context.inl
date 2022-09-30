@@ -50,6 +50,12 @@ void Context::destroyEntityNow(Entity e)
                                  *state_cache_, e);
 }
 
+template <typename ComponentT>
+ResultRef<ComponentT> Context::get(Entity e)
+{
+    return state_mgr_->get<ComponentT>(
+        MADRONA_MW_COND(cur_world_id_,) e);
+}
 
 template <typename ArchetypeT>
 void Context::clearArchetype()
@@ -94,6 +100,7 @@ template <typename Fn, typename... Deps>
 JobID Context::submitN(Fn &&fn, uint32_t num_invocations,
                        bool is_child, Deps && ... dependencies)
 {
+    assert(num_invocations > 0);
     return submitNImpl<Context>(std::forward<Fn>(fn), num_invocations,
         is_child, std::forward<Deps>(dependencies)...);
 }

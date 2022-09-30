@@ -1,8 +1,10 @@
 #include "collisions.hpp"
 
 #include <cinttypes>
+#include <random>
 
 using namespace madrona;
+using namespace madrona::math;
 
 namespace CollisionExample {
 
@@ -29,7 +31,7 @@ static Vector3 randomPosition(const AABB &bounds)
     };
 }
 
-Game::Game(Engine &ctx, const BenchmarkConfig &bench)
+CollisionSim::CollisionSim(Engine &ctx)
 {
     // World attributes (constant for now)
     tickCount = 0;
@@ -40,258 +42,180 @@ Game::Game(Engine &ctx, const BenchmarkConfig &bench)
         .pMax = Vector3 { 10, 10, 10, },
     };
 
-    // Must register all components
-    ctx.registerComponent<Position>();
-    ctx.registerComponent<Health>();
-    ctx.registerComponent<Action>();
-    ctx.registerComponent<Mana>();
-    ctx.registerComponent<Quiver>();
-    ctx.registerComponent<CleanupEntity>();
+    // Register components
+    ctx.registerComponent<Translation>();
+    ctx.registerComponent<Rotation>();
+    ctx.registerComponent<PhysicsAABB>();
+    ctx.registerComponent<CandidatePair>();
+    ctx.registerComponent<ContactData>();
 
-    // Must register all archetypes
-    ctx.registerArchetype<Dragon>();
-    ctx.registerArchetype<Knight>();
-    ctx.registerArchetype<CleanupTracker>();
+    // Register archetypes
+    ctx.registerArchetype<CubeObject>();
+    ctx.registerArchetype<CollisionCandidate>();
+    ctx.registerArchetype<Contact>();
 
-    // Queries should be built ahead of time and cached, like this.
-    actionQuery = ctx.query<Position, Action>();
-    healthQuery = ctx.query<Position, Health>();
-    casterQuery = ctx.query<Action, Mana>();
-    archerQuery = ctx.query<Action, Quiver>();
-    cleanupQuery = ctx.query<Entity, Health>();
+    // Build and cache queries outside of sim loop
+    physicsPreprocessQuery =
+        ctx.query<const Translation, const Rotation, PhysicsAABB>();
+    broadphaseQuery =
+        ctx.query<const madrona::Entity, const PhysicsAABB>();
+    candidateQuery =
+        ctx.query<const CandidatePair>();
 
-    int init_num_dragons;
-    int init_num_knights;
+    const int init_num_objects = 100;
 
-    if (bench.enable) {
-        init_num_dragons = bench.numDragons;
-        init_num_knights = bench.numKnights;
-    } else {
-        init_num_dragons = 10;
-        init_num_knights = 20;
-    }
+    // Entity creation / deletion is not thread safe (for now)
+    std::uniform_real_distribution<float> angle_dist(0.f, M_PIf); 
+    for (int i = 0; i < init_num_objects; i++) {
+        Translation rand_pos = randomPosition(worldBounds);
+        Rotation rand_rot = Quat::angleAxis(angle_dist(randGen()),
+            Vector3 { 0, 1, 0 });
 
-    const int dragon_hp = 1000;
-    const int knight_hp = 100;
+        PhysicsAABB aabb = AABB::invalid();
 
-    std::uniform_real_distribution<float> mp_dist(0.f, 50.f);
-    std::uniform_int_distribution<int> arrows_dist(20, 40);
-
-    // Entity creation / deletion is not thread safe
-    for (int i = 0; i < init_num_dragons; i++) {
-        Position rand_pos = randomPosition(worldBounds);
-        Health health { dragon_hp };
-        Action act { 0 };
-        Mana mp { mp_dist(randGen()) };
-
-        ctx.makeEntityNow<Dragon>(rand_pos, health, act, mp);
-    }
-
-    for (int i = 0; i < init_num_knights; i++) {
-        Position rand_pos = randomPosition(worldBounds);
-        Health health { knight_hp };
-        Action act { 0 };
-        Quiver q { arrows_dist(randGen()) };
-
-        ctx.makeEntityNow<Knight>(rand_pos, health, act, q);
+        ctx.makeEntityNow<CubeObject>(rand_pos, rand_rot, aabb);
     }
 }
 
-static JobID actionSelectSystem(Engine &ctx)
+static JobID broadphaseSystem(Engine &ctx)
 {
-    return ctx.parallelFor(ctx.game().actionQuery, [](Engine &ctx,
-                                                      Position &pos,
-                                                      Action &action) {
-        const Game &game = ctx.game();
-
-        if (action.remainingTime > 0) {
-            action.remainingTime -= game.deltaT;
-            return;
-        }
+    // Update all entity bounding boxes:
+    // FIXME: future improvement - sleeping entities for physics
+    JobID preprocess = ctx.parallelFor(ctx.sim().physicsPreprocessQuery,
+            [](Engine &, const Translation &translation,
+               const Rotation &rotation, PhysicsAABB &aabb) {
+        // No actual mesh, just hardcode a fake 2 *unit cube centered around
+        // translation
         
-        std::uniform_real_distribution<float> action_prob(0.f, 1.f);
+        Mat3x4 model_mat = Mat3x4::fromTRS(translation, rotation);
 
-        float move_cutoff = 0.5f;
+        Vector3 cube[8] = {
+            model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
+            model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
+            model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
+            model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
+            model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
+            model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
+            model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
+            model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
+        };
 
-        if (action_prob(randGen()) <= move_cutoff) {
-            ctx.submit([&pos, &action](Engine &ctx) {
-                const AABB &world_bounds = ctx.game().worldBounds;
-
-                // Move
-                std::uniform_real_distribution<float> pos_dist(-1.f, 1.f);
-
-                Vector3 new_pos = pos + Vector3 {
-                    pos_dist(randGen()),
-                    pos_dist(randGen()),
-                    pos_dist(randGen()),
-                };
-
-                new_pos.x = std::clamp(new_pos.x, world_bounds.pMin.x, world_bounds.pMax.x);
-                new_pos.y = std::clamp(new_pos.y, world_bounds.pMin.y, world_bounds.pMax.y);
-                new_pos.z = std::clamp(new_pos.x, world_bounds.pMin.z, world_bounds.pMax.z);
-
-                Vector3 pos_delta = new_pos - pos;
-                pos = new_pos;
-
-                action.remainingTime = pos_delta.length() / ctx.game().moveSpeed;
-            });
-        } 
+        aabb = AABB::point(cube[0]);
+        for (int i = 1; i < 8; i++) {
+            aabb.expand(cube[i]);
+        }
     });
-}
 
-static JobID casterSystem(Engine &ctx, JobID action_job)
-{
-    return ctx.parallelFor(ctx.game().casterQuery, [](Engine &ctx,
-                                                      Action &action,
-                                                      Mana &mana) {
-        const Game &game = ctx.game();
+    // Generate list of CollisionCandidates for narrowphase
+    return ctx.parallelFor(ctx.sim().broadphaseQuery,
+            [](Engine &ctx, Entity a, const PhysicsAABB &a_bbox) {
+        // Note that capturing a_bbox by reference here may seem risky
+        // but as long as entities matching the query aren't being created
+        // deleted in parallel, the location of a_bbox won't change
+        ctx.parallelFor(ctx.sim().broadphaseQuery,
+                [a, &a_bbox](Engine &ctx, Entity b,
+                             const PhysicsAABB &b_bbox) {
+            if (a == b) {
+                return;
+            }
 
-        mana.mp += game.manaRegenRate * game.deltaT;
-
-        if (action.remainingTime > 0) {
-            return;
-        }
-        // move job runs first so if remainingTime == 0, always act (otherwise would do nothing)
-
-        const float cast_cost = 20.f;
-
-        if (mana.mp < cast_cost) {
-            return;
-        }
-
-        mana.mp -= cast_cost;
-
-        auto target_pos = randomPosition(game.worldBounds);
-
-        ctx.parallelFor(game.healthQuery, [target_pos](Engine &,
-                                                       const Position &pos,
-                                                       Health &health) {
-            const float blast_radius = 2.f;
-            const float damage = 20.f;
-
-            if (target_pos.distance(pos) <= blast_radius) {
-                health.hp -= damage;
+            if (a_bbox.overlaps(b_bbox)) {
+                // No threadsafe way to create entities currently. Probably
+                // will change
+                std::lock_guard lock(ctx.sim().candidateCreateLock);
+                ctx.makeEntityNow<CollisionCandidate>(CandidatePair { a, b });
             }
         });
-
-        action.remainingTime = game.castTime;
-    }, true, action_job);
+    }, true, preprocess);
 }
 
-static JobID archerSystem(Engine &ctx, JobID action_job)
+static JobID narrowphaseSystem(Engine &ctx, JobID broadphase_job)
 {
-    return ctx.parallelFor(ctx.game().archerQuery, [](Engine &ctx,
-                                                      Action &action,
-                                                      Quiver &quiver) {
-        if (action.remainingTime > 0 || quiver.numArrows == 0) {
-            return;
+    JobID contact_job = ctx.parallelFor(ctx.sim().candidateQuery, 
+            [](Engine &ctx, const CandidatePair &pair) {
+        // FIXME: Narrow phase is a no-op here, just passing data through to
+        // the solver
+
+        // Here we directly grab the Translation component on the two entities
+        // in the CandidatePair. Note that in reality you'll need more data
+        // than this, like the object / mesh itself, this is just an example.
+        Translation a_pos = ctx.get<Translation>(pair.a).value();
+        Translation b_pos = ctx.get<Translation>(pair.b).value();
+
+        Vector3 to_b = (b_pos - a_pos).normalize();
+        {
+            // Same situation as above - will have better solution here
+            std::lock_guard lock(ctx.sim().contactCreateLock);
+            ctx.makeEntityNow<Contact>(ContactData {
+                to_b,
+                pair.a,
+                pair.b,
+            });
         }
+    }, true, broadphase_job);
 
-        auto dragons = ctx.archetype<Dragon>();
-        uint32_t num_dragons = dragons.size();
-
-        std::uniform_int_distribution<uint32_t> dragon_sel(0, num_dragons - 1);
-
-        uint32_t dragon_idx = dragon_sel(randGen());
-        Health &dragon_health = dragons.get<Health>(dragon_idx);
-
-        const float damage = 15.f;
-        dragon_health.hp -= damage;
-
-        quiver.numArrows -= 1;
-        action.remainingTime = ctx.game().shootTime;
-    }, true, action_job);
+    // Once narrowphase is done, wipe CollisionCandidate table for next frame
+    return ctx.submit([](Engine &ctx) {
+        ctx.clearArchetype<CollisionCandidate>();
+    }, true, contact_job);
 }
 
-void Game::tick(Engine &ctx)
+static JobID solverSystem(Engine &ctx, JobID narrowphase_job)
 {
-    JobID init_action_job = actionSelectSystem(ctx);
+    return ctx.submit([](Engine &ctx) {
+        // Push objects in serial based on the contact normal - total BS.
+        auto contacts = ctx.archetype<Contact>();
+        int num_contacts = (int)contacts.size();
+        ContactData *contacts_data = contacts.component<ContactData>().data();
 
-    JobID cast_job = casterSystem(ctx, init_action_job);
+        for (int i = 0; i < num_contacts; i++) {
+            ContactData &contact = contacts_data[i];
 
-    JobID archer_job = archerSystem(ctx, init_action_job);
+            Translation &a_pos = ctx.get<Translation>(contact.a).value();
+            Translation &b_pos = ctx.get<Translation>(contact.b).value();
 
-    ctx.submit([this](Engine &ctx) {
-        ctx.forEach(cleanupQuery, [&ctx](Entity e, Health &health) {
-            if (health.hp <= 0) {
-                ctx.makeEntityNow<CleanupTracker>(CleanupEntity(e));
-            }
-        });
-
-        auto cleanup_tracker = ctx.archetype<CleanupTracker>();
-        auto cleanup_entities = cleanup_tracker.component<CleanupEntity>();
-        for (int i = 0, n = cleanup_tracker.size(); i < n; i++) {
-            ctx.destroyEntityNow(cleanup_entities[i]);
+            a_pos -= contact.normal;
+            b_pos += contact.normal;
         }
 
-        ctx.clearArchetype<CleanupTracker>();
-    }, true, cast_job, archer_job);
+        ctx.clearArchetype<Contact>();
+    }, true, narrowphase_job);
 }
 
-void Game::gameLoop(Engine &ctx)
+static void tick(Engine &ctx)
 {
-    ctx.submit([this](Engine &ctx) {
-        auto dragons = ctx.archetype<Dragon>();
-        auto knights = ctx.archetype<Knight>();
+    JobID broadphase_job = broadphaseSystem(ctx);
+    JobID narrowphase_job = narrowphaseSystem(ctx, broadphase_job);
 
-        if (dragons.size() == 0) {
-            printf("Knights win!\n");
-            return;
+    solverSystem(ctx, narrowphase_job);
+}
+
+static void simLoop(Engine &ctx)
+{
+    ctx.submit([](Engine &ctx) {
+        if (ctx.sim().tickCount % 10000 == 0) {
+            printf("Tick start %" PRIu64 "\n", ctx.sim().tickCount);
         }
 
-        if (knights.size() == 0) {
-            printf("Dragons win!\n");
-            return;
-        }
-
-        if (tickCount % 10000 == 0) {
-            printf("Tick start %" PRIu64 "\n", tickCount);
-        }
         tick(ctx);
 
-        tickCount += 1;
+        ctx.sim().tickCount += 1;
 
         // While this call appears recursive, all it does is immediately queue
-        // up the gameloop job again with a dependency on the current job
-        // finishing.
-        gameLoop(ctx);
-    }, /* Don't count this as a child job of the current job */ false, ctx.currentJobID());
+        // up the simLoop dependency on the current job finishing.
+        simLoop(ctx);
+    }, /* Don't count this as a child job of the current job */ false,
+    /* The next tick doesn't run until this tick is finished */
+    ctx.currentJobID());
 }
 
-void Game::benchmarkTick(Engine &ctx)
+void CollisionSim::entry(Engine &ctx)
 {
-    JobID init_action_job = actionSelectSystem(ctx);
-    casterSystem(ctx, init_action_job);
-    archerSystem(ctx, init_action_job);
-}
-
-void Game::benchmark(Engine &ctx, const BenchmarkConfig &bench)
-{
-    ctx.submit([this, &bench](Engine &ctx) {
-        if (tickCount == bench.numTicks) {
-            return;
-        }
-
-        benchmarkTick(ctx);
-
-        tickCount++;
-
-        benchmark(ctx, bench);
-    }, false, ctx.currentJobID());
-}
-
-void Game::entry(Engine &ctx, const BenchmarkConfig &bench)
-{
-    Game &game = ctx.game();
+    CollisionSim &sim = ctx.sim();
     // Initialization
-    new (&game) Game(ctx, bench);
+    new (&sim) CollisionSim(ctx);
 
-    // Start game loop
-    if (bench.enable) {
-        game.benchmark(ctx, bench);
-    } else {
-        game.gameLoop(ctx);
-    }
+    simLoop(ctx);
 }
 
 }

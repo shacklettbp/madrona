@@ -16,10 +16,10 @@ target_link_libraries(fvs_mw_core PUBLIC
     madrona_mw_core
 )
 
-add_executable(fvs
+add_executable(fvs_sw
     main.cpp
 )
-target_link_libraries(fvs PRIVATE
+target_link_libraries(fvs_sw PRIVATE
     fvs_sw_core
 )
 

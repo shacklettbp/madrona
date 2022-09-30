@@ -1,31 +1,31 @@
-set(FVS_CORE_SRCS
-    CollisionExample.hpp CollisionExample.inl CollisionExample.cpp
+set(COLLISION_EXAMPLE_SRCS
+    collisions.hpp collisions.inl collisions.cpp
 )
 
-add_library(CollisionExample_sw_core STATIC
-    ${FVS_CORE_SRCS}
+add_library(collisions_sw_core STATIC
+    ${COLLISION_EXAMPLE_SRCS}
 )
-target_link_libraries(CollisionExample_sw_core PUBLIC
+target_link_libraries(collisions_sw_core PUBLIC
     madrona_core
 )
 
-add_library(CollisionExample_mw_core STATIC
-    ${FVS_CORE_SRCS}
+add_library(collisions_mw_core STATIC
+    ${COLLISION_EXAMPLE_SRCS}
 )
-target_link_libraries(CollisionExample_mw_core PUBLIC
+target_link_libraries(collisions_mw_core PUBLIC
     madrona_mw_core
 )
 
-add_executable(CollisionExample
+add_executable(collisions_sw
     main.cpp
 )
-target_link_libraries(CollisionExample PRIVATE
-    CollisionExample_sw_core
+target_link_libraries(collisions_sw PRIVATE
+    collisions_sw_core
 )
 
-add_executable(CollisionExample_mw
+add_executable(collisions_mw
     mw_cpu.cpp
 )
-target_link_libraries(CollisionExample_mw PRIVATE
-    CollisionExample_mw_core
+target_link_libraries(collisions_mw PRIVATE
+    collisions_mw_core
 )

@@ -35,6 +35,9 @@ public:
 
     inline void destroyEntityNow(Entity e);
 
+    template <typename ComponentT>
+    inline ResultRef<ComponentT> get(Entity e);
+
     template <typename ArchetypeT>
     inline void clearArchetype();
 

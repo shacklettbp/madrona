@@ -1,14 +1,14 @@
 #pragma once
 
 #include <madrona/custom_context.hpp>
-#include <madrona/geometry.hpp>
+#include <madrona/math.hpp>
 
 #include <random>
 
 namespace fvs {
 
 // Components
-struct Position : madrona::Vector3 {
+struct Position : madrona::math::Vector3 {
     Position(Vector3 o)
         : Vector3(o)
     {}
@@ -69,7 +69,7 @@ struct Game {
     float castTime;
     float shootTime;
 
-    madrona::AABB worldBounds;
+    madrona::math::AABB worldBounds;
 
     madrona::Query<Position, Action> actionQuery;
     madrona::Query<Position, Health> healthQuery;

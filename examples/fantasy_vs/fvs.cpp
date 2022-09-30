@@ -3,6 +3,7 @@
 #include <cinttypes>
 
 using namespace madrona;
+using namespace madrona::math;
 
 namespace fvs {
 
