@@ -193,7 +193,7 @@ static void tick(Engine &ctx)
 static void simLoop(Engine &ctx)
 {
     ctx.submit([](Engine &ctx) {
-        if (ctx.sim().tickCount % 1 == 0) {
+        if (ctx.sim().tickCount % 10000 == 0) {
             printf("Tick start %" PRIu64 "\n", ctx.sim().tickCount);
         }
 

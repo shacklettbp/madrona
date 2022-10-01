@@ -15,7 +15,7 @@ static void launch()
     JobManager job_mgr(JobManager::makeEntry<Engine, CollisionSim>(
         [](Engine &ctx) {
             CollisionSim::entry(ctx);
-        }), 0, 0, &state_mgr);
+        }), 4, 0, &state_mgr);
     
     job_mgr.waitForAllFinished();
 }

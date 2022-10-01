@@ -1270,10 +1270,9 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
             if (scheduling_worker.wakeUp.load(memory_order::relaxed) != 0) {
                 scheduler_.numSleepingWorkers++;
             }
-            printf("%d sleep %u %u %u %u\n", thread_idx, sched_run_auth, cur_run_tail,
-                   scheduling_worker.numConsecutiveSchedulerCalls, 
-                   scheduler_.numSleepingWorkers);
-            if (scheduler_.numSleepingWorkers == num_compute_workers_) {
+
+            if (/* scheduler_.numWaiting == 0 && */
+                scheduler_.numSleepingWorkers == num_compute_workers_) {
                 assert(false);
                 for (int64_t i = 0; i < num_compute_workers_; i++) {
                     WorkerState &worker_state = getWorkerState(worker_base_, i);
@@ -1307,8 +1306,6 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 
             num_wakeup--;
             scheduler_.numSleepingWorkers--;
-
-            printf("%d waking %ld %u\n", thread_idx, i, scheduler_.numSleepingWorkers);
         }
     }
 
@@ -1369,8 +1366,8 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
             scheduler_.lock.unlock();
         }
 
-        if (sched_ctrl == WorkerControl::Run) {
-            return WorkerControl::Run;
+        if (sched_ctrl != WorkerControl::Loop) {
+            return sched_ctrl;
         }
     }
 
@@ -1392,7 +1389,7 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     }
 
     if (job_idx == consts::jobQueueSentinel) {
-        return sched_ctrl;
+        return WorkerControl::Loop;
     }
 
     *next_job = getRunnableJobs(queue)[job_idx & consts::runQueueIndexMask];
