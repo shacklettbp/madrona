@@ -123,6 +123,9 @@ struct alignas(MADRONA_CACHE_LINE) WorkerState {
     // ordering guarantees (worker releases updates to log tail to guarantee
     // the log entries themselves are visible after an acquire by the scheduler
     atomic_uint32_t logTail; 
+    uint32_t numIdleLoops;
+    uint32_t numConsecutiveSchedulerCalls;
+    bool postWakeup;
     alignas(MADRONA_CACHE_LINE) atomic_uint32_t wakeUp;
 };
 
@@ -765,8 +768,7 @@ JobManager::JobManager(const Init &init)
       job_allocs_(threads_.size(), InitAlloc()),
       scheduler_ {
           .numWaiting = 0,
-          .numCreatedJobs = 0,
-          .numFinishedJobs = 0,
+          .numSleepingWorkers = 0,
           .lock {},
       },
       state_ptr_(init.statePtr),
@@ -811,7 +813,10 @@ JobManager::JobManager(const Init &init)
         new (&worker_state) WorkerState {
             .logHead = 0,
             .logTail = 0,
-            .wakeUp = 1,
+            .numIdleLoops = 0,
+            .numConsecutiveSchedulerCalls = 0,
+            .postWakeup = false,
+            .wakeUp = i + 1,
         };
 
         JobTrackerMap::Cache &cache = getTrackerCache(tracker_cache_base_, i);
@@ -1146,11 +1151,20 @@ enum class JobManager::WorkerControl : uint64_t {
     Exit,
 };
 
-JobManager::WorkerControl JobManager::schedule(int thread_idx)
+JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 {
     JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
     JobTrackerMap::Cache &tracker_cache =
         getTrackerCache(tracker_cache_base_, thread_idx);
+    WorkerState &scheduling_worker =
+        getWorkerState(worker_base_, thread_idx);
+    scheduling_worker.numConsecutiveSchedulerCalls++;
+
+    if (scheduling_worker.postWakeup) {
+        scheduler_.numSleepingWorkers--;
+        scheduling_worker.postWakeup = false;
+    }
+
     Job *waiting_jobs = (Job *)waiting_jobs_;
     int64_t cur_num_waiting = scheduler_.numWaiting;
 
@@ -1169,8 +1183,6 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
 
             decrementJobTracker(tracker_map, tracker_cache,
                                 finished.jobIdx);
-
-            scheduler_.numFinishedJobs++;
         }
     };
 
@@ -1184,7 +1196,6 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
     };
 
     auto handleJobCreated = [&](const LogEntry::JobCreated &created) {
-        scheduler_.numCreatedJobs++;
         uint32_t parent_id = created.parentID;
         if (parent_id != ~0u) {
             JobTracker &parent_tracker = tracker_map.getRef(parent_id);
@@ -1222,18 +1233,18 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
     }
 
     // Move all now runnable jobs to the scheduler's global run queue
-
+    
     RunQueue *sched_run = getRunQueue(normal_base_, thread_idx);
+
     Job *sched_run_jobs = getRunnableJobs(sched_run);
     uint32_t cur_run_tail = sched_run->tail.load(memory_order::relaxed);
     int64_t num_new_invocations = 0;
     int64_t compaction_offset = 0;
+
+    bool first_found_job = true;
     for (int64_t i = 0; i < cur_num_waiting; i++) {
         Job &job = waiting_jobs[i];
         if (isRunnable(tracker_map, job.data)) {
-            sched_run_jobs[cur_run_tail & consts::runQueueIndexMask] = job;
-            cur_run_tail++;
-
             uint32_t num_invocations = job.numInvocations;
 
             // num_invocations == 0 is a special case that indicates a one-off
@@ -1241,6 +1252,14 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
             // submission. For the scheduler's purpose, this counts as one
             // invocation regardless
             num_new_invocations += num_invocations > 0 ? num_invocations : 1;
+
+            if (first_found_job) {
+                *run_job = job;
+                first_found_job = false;
+            } else {
+                sched_run_jobs[cur_run_tail & consts::runQueueIndexMask] = job;
+                cur_run_tail++;
+            }
         } else {
             int64_t cur_compaction_offset = compaction_offset++;
             if (i != cur_compaction_offset) {
@@ -1248,30 +1267,34 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx)
             }
         }
     }
-
-    sched_run->tail.store(cur_run_tail, memory_order::release);
     scheduler_.numWaiting = compaction_offset;
 
-    if (scheduler_.numCreatedJobs > 0 &&
-        scheduler_.numFinishedJobs == scheduler_.numCreatedJobs) [[unlikely]] {
-        for (int64_t i = 0; i < num_compute_workers_; i++) {
-            WorkerState &worker_state = getWorkerState(worker_base_, i);
-            if (worker_state.wakeUp.load(memory_order::relaxed) == 0) {
-                worker_state.wakeUp.store((uint32_t)i + 1,
-                                          memory_order::relaxed);
-                worker_state.wakeUp.notify_one();
-                break;
-            }
-        }
-        return WorkerControl::Exit;
-    }
-
     if (num_new_invocations == 0) {
-        getWorkerState(worker_base_, thread_idx).wakeUp.store(0,
-             memory_order::relaxed);
-        return WorkerControl::Sleep;
+        uint32_t sched_run_auth = sched_run->auth.load(memory_order::relaxed);
+
+        if (sched_run_auth == cur_run_tail &&
+            scheduling_worker.numConsecutiveSchedulerCalls > 1) {
+            scheduler_.numSleepingWorkers++;
+            if (scheduler_.numSleepingWorkers == num_compute_workers_) {
+                assert(false);
+                //for (int64_t i = 0; i < num_compute_workers_; i++) {
+                //    WorkerState &worker_state = getWorkerState(worker_base_, i);
+                //    worker_state.wakeUp.store(i + 1, memory_order::relaxed);
+                //    worker_state.wakeUp.notify_one();
+                //}
+                return WorkerControl::Exit;
+            } else {
+                getWorkerState(worker_base_, thread_idx).wakeUp.store(0,
+                    memory_order::relaxed);
+                return WorkerControl::Sleep;
+            }
+        } else {
+            return WorkerControl::Loop;
+        }
     }
     
+    sched_run->tail.store(cur_run_tail, memory_order::release);
+
     // Wake up compute workers based on # of jobs
     int64_t num_compute_workers = num_compute_workers_;
     int64_t num_wakeup = std::min(num_compute_workers, num_new_invocations);
@@ -1336,6 +1359,8 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     RunQueue *queue;
     uint32_t job_idx;
     WorkerControl sched_ctrl = WorkerControl::Loop;
+    WorkerState &worker_state =
+        getWorkerState(worker_base_, thread_idx);
     {
         queue = getRunQueue(queue_base, init_search_idx);
         job_idx = dequeueJobIndex(queue);
@@ -1343,29 +1368,25 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
         if (job_idx == consts::jobQueueSentinel && run_scheduler) {
             bool sched_locked = scheduler_.lock.lockNoSpin();
             if (sched_locked) {
-                sched_ctrl = schedule(thread_idx);
+                sched_ctrl = schedule(thread_idx, next_job);
                 scheduler_.lock.unlock();
             }
-        }
 
-        if (sched_ctrl == WorkerControl::Run) {
-            // Recheck current queue
-            queue = getRunQueue(queue_base, thread_idx);
-            job_idx = dequeueJobIndex(queue);
+            if (sched_ctrl == WorkerControl::Run) {
+                worker_state.numConsecutiveSchedulerCalls = 0;
+                return WorkerControl::Run;
+            }
         }
-    }
-
-    if (sched_ctrl == WorkerControl::Exit) {
-        return WorkerControl::Exit;
     }
 
     // Try work stealing
     if (job_idx == consts::jobQueueSentinel) {
         int64_t num_queues = threads_.size();
-        for (int64_t i = 1, n = num_queues - 1; i < n; i++) {
+        for (int64_t i = 1; i < num_queues; i++) {
             int64_t unwrapped_idx = i + thread_idx;
-            int64_t queue_idx =
-                unwrapped_idx < num_queues ? unwrapped_idx : unwrapped_idx - n;
+            int64_t queue_idx = unwrapped_idx < num_queues ?
+                unwrapped_idx : unwrapped_idx - num_queues;
+
             queue = getRunQueue(queue_base, queue_idx);
         
             job_idx = dequeueJobIndex(queue);
@@ -1376,12 +1397,10 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     }
 
     if (job_idx == consts::jobQueueSentinel) {
-        // It's possible to get here with a directive of WorkerControl::Run
-        // from the scheduler that still results in no jobs because they were
-        // stolen. This code returns WorkerControl::Loop in that case.
-        return sched_ctrl == WorkerControl::Sleep ?
-            WorkerControl::Sleep : WorkerControl::Loop;
+        return sched_ctrl;
     }
+
+    worker_state.numConsecutiveSchedulerCalls = 0;
     
     *next_job = getRunnableJobs(queue)[job_idx & consts::runQueueIndexMask];
 
@@ -1498,8 +1517,11 @@ void JobManager::workerThread(
 
     int wakeup_search_idx = thread_idx;
 
-    WorkerControl worker_ctrl = WorkerControl::Loop;
+    WorkerState &worker_state =
+        getWorkerState(worker_base_, thread_idx);
+
     while (true) {
+        WorkerControl worker_ctrl = WorkerControl::Loop;
         if (num_high_.load(memory_order::relaxed) > 0) {
             worker_ctrl = getNextJob(high_base_, thread_idx, thread_idx,
                                      false, &cur_job);
@@ -1509,11 +1531,8 @@ void JobManager::workerThread(
             }
         } 
 
-        if (worker_ctrl == WorkerControl::Loop) {
+        if (worker_ctrl != WorkerControl::Run) [[likely]] {
             worker_ctrl = getNextJob(normal_base_, thread_idx, thread_idx,
-                                     true, &cur_job);
-        } else if (worker_ctrl == WorkerControl::Sleep) [[unlikely]] {
-            worker_ctrl = getNextJob(normal_base_, thread_idx, wakeup_search_idx,
                                      true, &cur_job);
         }
 
@@ -1525,21 +1544,18 @@ void JobManager::workerThread(
 
             runJob(thread_idx, ctx, cur_job.func, cur_job.data,
                    cur_job.invocationOffset, cur_job.numInvocations);
-            
-            worker_ctrl = WorkerControl::Loop;
         } else if (worker_ctrl == WorkerControl::Loop) {
             // No available work and couldn't run scheduler
             workerPause();
+            worker_state.numIdleLoops++;
         } else if (worker_ctrl == WorkerControl::Sleep) [[unlikely]] {
             [&]() __attribute__((noinline, cold)) {
-                WorkerState &worker_state =
-                    getWorkerState(worker_base_, thread_idx);
-
                 worker_state.wakeUp.wait(0, memory_order::relaxed);
                 uint32_t wakeup_idx =
                     worker_state.wakeUp.load(memory_order::relaxed);
 
                 wakeup_search_idx = (int)wakeup_idx - 1;
+                worker_state.postWakeup = true;
             }();
         } else if (worker_ctrl == WorkerControl::Exit) [[unlikely]] {
             break;

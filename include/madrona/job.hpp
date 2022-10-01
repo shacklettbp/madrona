@@ -145,8 +145,7 @@ public:
 private:
     struct SchedulerState {
         uint32_t numWaiting;
-        uint32_t numCreatedJobs;
-        uint32_t numFinishedJobs;
+        uint32_t numSleepingWorkers;
         alignas(MADRONA_CACHE_LINE) utils::SpinLock lock;
     };
 
@@ -207,7 +206,7 @@ private:
         JobPriority prio);
 
     enum class WorkerControl : uint64_t;
-    inline WorkerControl schedule(int thread_idx);
+    inline WorkerControl schedule(int thread_idx, Job *run_job);
 
     inline bool isQueueEmpty(uint32_t head, uint32_t correction,
                              uint32_t tail) const;
