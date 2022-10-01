@@ -42,3 +42,11 @@
 #else
 #define MADRONA_CACHE_LINE (64)
 #endif
+
+#if defined(MADRONA_MSVC)
+#define MADRONA_ALWAYS_INLINE [[msvc::forceinline]]
+#define MADRONA_NO_INLINE __declspec(noinline)
+#elif defined(MADRONA_CLANG) || defined(MADRONA_GCC)
+#define MADRONA_ALWAYS_INLINE __attribute__((always_inline))
+#define MADRONA_NO_INLINE __attribute__((noinline))
+#endif
