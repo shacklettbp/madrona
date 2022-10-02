@@ -5,6 +5,8 @@
 
 namespace madrona {
 
+struct JobID;
+
 template <typename K, typename V, template <typename> typename StoreT>
 IDMap<K, V, StoreT>::Cache::Cache()
     : free_head_(~0u),
@@ -30,6 +32,7 @@ IDMap<K, V, StoreT>::IDMap(uint32_t init_capacity)
             Node &cur = store_[idx];
 
             cur.gen = 0;
+            cur.free = true;
             cur.freeNode.subNext = idx + 1;
 
             if (i == 0) {
@@ -45,6 +48,7 @@ IDMap<K, V, StoreT>::IDMap(uint32_t init_capacity)
 
         Node &last = store_[base_idx + ids_per_cache_ - 1];
         last.gen = 0;
+        last.free = true;
         last.freeNode.subNext = ~0u;
         last.freeNode.globalNext = 1;
     }
@@ -58,30 +62,41 @@ IDMap<K, V, StoreT>::IDMap(uint32_t init_capacity)
 }
 
 template <typename K, typename V, template <typename> typename StoreT>
-K IDMap<K, V, StoreT>::acquireID(Cache &cache)
+K IDMap<K, V, StoreT>::acquireID(Cache &cache, V &&new_v)
 {
-    auto assignCachedID = [this](uint32_t *head) {
+    auto assignCachedID = [this](uint32_t *head, V &&new_v) {
         uint32_t new_id = *head;
         Node &node = store_[new_id];
+        if (std::is_same_v<K, JobID>) {
+            if (!node.free) {
+                printf("%u\n", new_id);
+               assert(false); 
+            }
+        }
+        node.free = false;
 
         // globalNext is overloaded when FreeNode is in the cached
         // freelist to represent multiple contiguous IDs. Contiguous
         // blocks will never be present on the global free list by design
         // so this overloading is safe
-        uint32_t num_contiguous = node.freeNode.globalNext;
+        uint32_t num_contiguous =
+            node.freeNode.globalNext.load(std::memory_order_relaxed);
 
         if (num_contiguous == 1) {
             *head = node.freeNode.subNext;
         } else {
             uint32_t next_free = new_id + 1;
             Node &next_node = store_[next_free];
-            next_node.freeNode = FreeNode {
+            new (&next_node.freeNode) FreeNode {
                 .subNext = node.freeNode.subNext,
                 .globalNext = num_contiguous - 1,
             };
             next_node.gen = 0;
             *head = next_free;
         }
+
+        node.freeNode.~FreeNode();
+        new (&node.val) V(std::forward<V>(new_v));
 
         return K {
             .gen = node.gen,
@@ -92,13 +107,15 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
     // First, check if there is a free node in the overflow cache
     if (cache.num_overflow_ids_ > 0) {
         cache.num_overflow_ids_ -= 1;
-        return assignCachedID(&cache.overflow_head_);
+        return assignCachedID(&cache.overflow_head_,
+                              std::forward<V>(new_v));
     }
 
     // Next, check the main cache
     if (cache.num_free_ids_ > 0) {
         cache.num_free_ids_ -= 1;
-        return assignCachedID(&cache.free_head_);
+        return assignCachedID(&cache.free_head_,
+                              std::forward<V>(new_v));
     }
 
     // No free IDs, refill the cache from the global free list
@@ -114,7 +131,8 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
 
         new_head.gen = cur_head.gen + 1;
         cur_head_node = &store_[cur_head.head];
-        new_head.head = cur_head_node->freeNode.globalNext;
+        new_head.head = cur_head_node->freeNode.globalNext.load(
+            std::memory_order_relaxed);
     } while (!free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_acq_rel,
         std::memory_order_acquire));
@@ -124,11 +142,14 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
     if (free_ids != ~0u) {
         // Assign archetype to 1 (id block of size 1) so as to not confuse
         // the cache's processing of the freelist
-        cur_head_node->freeNode.globalNext = 1;
+        TSAN_HAPPENS_AFTER(&(cur_head_node->freeNode.globalNext));
+        cur_head_node->freeNode.globalNext.store(1,
+            std::memory_order_relaxed);
 
         cache.free_head_ = free_ids;
         cache.num_free_ids_ = ids_per_cache_ - 1;
-        return assignCachedID(&cache.free_head_);
+        return assignCachedID(&cache.free_head_,
+                              std::forward<V>(new_v));
     }
 
     // No free IDs at all, expand the ID store
@@ -139,10 +160,12 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
     Node &assigned_node = store_[first_id];
     assigned_node.gen = 0;
 
+    new (&assigned_node.val) V(std::forward<V>(new_v));
+
     uint32_t free_start = block_start + 1;
 
     Node &next_free_node = store_[free_start];
-    next_free_node.freeNode = FreeNode {
+    new (&next_free_node.freeNode) FreeNode {
         .subNext = ~0u,
         // In the cached sublist, globalNext is overloaded
         // to handle contiguous free elements
@@ -165,7 +188,14 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, uint32_t id)
 {
     Node &release_node = store_[id];
     release_node.gen++;
-    release_node.freeNode.globalNext = 1;
+    if (std::is_same_v<K, JobID>) {
+        assert(!release_node.free);
+    }
+    release_node.free = true;
+    // Change active union member
+    release_node.val.~V();
+    new (&release_node.freeNode) FreeNode {};
+    release_node.freeNode.globalNext.store(1, std::memory_order_relaxed);
 
     if (cache.num_free_ids_ < ids_per_cache_) {
         release_node.freeNode.subNext = cache.free_head_;
@@ -190,7 +220,9 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, uint32_t id)
 
         do {
             new_head.gen = cur_head.gen + 1;
-            new_node.freeNode.globalNext = cur_head.head;
+            new_node.freeNode.globalNext.store(cur_head.head,
+                std::memory_order_relaxed);
+            TSAN_HAPPENS_BEFORE(&new_node.freeNode.globalNext);
         } while (free_head_.compare_exchange_weak(
             cur_head, new_head, std::memory_order_release,
             std::memory_order_relaxed));
@@ -216,8 +248,11 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
 
         Node &node = store_[cur_idx];
         node.gen++;
-        node.freeNode.subNext = next_idx;
-        node.freeNode.globalNext = 1;
+
+        new (&node.freeNode) FreeNode {
+            .subNext = next_idx,
+            .globalNext = 1,
+        };
     };
     
     int32_t base_idx;
@@ -240,11 +275,15 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
 
         Node &last_node = store_[keys[base_idx + ids_per_cache_ - 1].id];
         last_node.gen++;
-        last_node.freeNode.subNext = ~0u;
-        last_node.freeNode.globalNext = 1;
+
+        new (&last_node.freeNode) FreeNode {
+            .subNext = ~0u,
+            .globalNext = 1,
+        };
 
         if (global_tail_node != nullptr) {
-            global_tail_node->freeNode.globalNext = head_id;
+            global_tail_node->freeNode.globalNext.store(head_id,
+                std::memory_order_relaxed);
         }
 
         global_tail_node = &store_[head_id];
@@ -259,8 +298,11 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
 
         Node &tail_node = store_[keys[num_keys - 1].id];
         tail_node.gen++;
-        tail_node.freeNode.globalNext = 1;
-        tail_node.freeNode.subNext = cache.overflow_head_;
+
+        new (&tail_node.freeNode) FreeNode {
+            .subNext = cache.overflow_head_,
+            .globalNext = 1,
+        };
 
         uint32_t num_from_overflow = ids_per_cache_ - num_remaining;
         if (cache.num_overflow_ids_ < num_from_overflow) {
@@ -282,7 +324,8 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
             cache.num_overflow_ids_ -= num_from_overflow;
 
             if (global_tail_node != nullptr) {
-                global_tail_node->freeNode.globalNext = start_id;
+                global_tail_node->freeNode.globalNext.store(start_id,
+                    std::memory_order_relaxed);
             }
             global_tail_node = &store_[start_id];
         }
@@ -302,7 +345,8 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
 
     do {
         new_head.gen = cur_head.gen + 1;
-        global_tail_node->freeNode.globalNext = cur_head.head;
+        global_tail_node->freeNode.globalNext.store(
+            cur_head.head, std::memory_order_relaxed);
     } while (free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_release,
         std::memory_order_relaxed));

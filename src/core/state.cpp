@@ -45,7 +45,7 @@ EntityStore::EntityStore()
 
 Entity EntityStore::newEntity(Cache &cache)
 {
-    return map_.acquireID(cache);
+    return map_.acquireID(cache, Loc {});
 }
 
 void EntityStore::freeEntity(Cache &cache, Entity e)

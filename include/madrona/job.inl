@@ -165,14 +165,9 @@ JobManager::JobManager(const EntryConfig<StartFn, UpdateFn> &entry_cfg,
                  pin_workers)
 {}
 
-JobID JobManager::reserveProxyJobID(int thread_idx, JobID parent_id)
-{
-    return reserveProxyJobID(thread_idx, parent_id.id);
-}
-
 void JobManager::relinquishProxyJobID(int thread_idx, JobID job_id)
 {
-    return markInvocationsFinished(thread_idx, nullptr, job_id.id, 1);
+    return markInvocationsFinished(thread_idx, nullptr, job_id, 1);
 }
 
 template <typename ContextT, typename ContainerT>
@@ -185,7 +180,7 @@ void JobManager::singleInvokeEntry(Context *ctx_base,
     
     container->fn(ctx);
 
-    job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id.id, 1);
+    job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id, 1);
 }
 
 template <typename ContextT, typename ContainerT>
@@ -200,6 +195,7 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
     JobManager *job_mgr = ctx.job_mgr_;
 
     auto shouldSplit = [](JobManager *job_mgr, RunQueue *queue) {
+        return false;
         uint32_t cur_tail = queue->tail.load(std::memory_order_relaxed);
         uint32_t cur_correction =
             queue->correction.load(std::memory_order_relaxed);
@@ -224,7 +220,7 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
         container->fn(ctx, cur_invocation);
     } while (remaining_invocations > 0);
 
-    job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id.id,
+    job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id,
         invocation_idx - invocation_offset);
 }
 
@@ -276,7 +272,7 @@ JobID JobManager::queueJob(int thread_idx,
     }
 
     return queueJob(thread_idx, entry, container, num_invocations,
-                    parent_id.id, prio);
+                    parent_id, prio);
 }
 
 void * JobManager::allocJob(int worker_idx, uint32_t num_bytes,

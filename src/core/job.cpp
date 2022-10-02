@@ -26,9 +26,10 @@ namespace madrona {
 namespace {
 
 struct JobTracker {
-    uint32_t parent;
+    JobID parent;
     uint32_t remainingInvocations;
     uint32_t numOutstandingJobs;
+    JobID parent2;
 };
 
 template <typename T>
@@ -74,7 +75,8 @@ struct LogEntry {
 
     struct JobFinished {
         JobContainerBase *jobData;
-        uint32_t jobIdx;
+        JobID jobIdx;
+        JobID parentID;
         uint32_t numCompleted;
     };
 
@@ -82,10 +84,14 @@ struct LogEntry {
         void (*fnPtr)();
         JobContainerBase *jobData;
         uint32_t numInvocations;
+        JobID jobID;
     };
 
     struct JobCreated {
-        uint32_t parentID;
+        JobID jobID;
+        JobID parentID;
+        uint32_t numInvocations; 
+        void (*fnPtr)();
     };
 
     Type type;
@@ -96,29 +102,91 @@ struct LogEntry {
     };
 };
 
-#if 0
-#include <vector>
-std::vector<LogEntry> globalLog;
-void printGlobalLog()
+struct ReleaseDebug {
+    JobID jobID;
+    JobID parentID;
+};
+
+static DynArray<LogEntry> globalLog(0);
+static DynArray<ReleaseDebug> globalReleases(0);
+void saveGlobalLog(bool t = true)
 {
+    FILE *file = fopen(t ? "/tmp/t1" : "/tmp/t2", "w");
     for (LogEntry &entry : globalLog) {
         switch (entry.type) {
             case LogEntry::Type::JobFinished: {
-                printf("F: (%u %u) %u %u\n", entry.finished.jobIdx.id, entry.finished.jobIdx.gen, entry.finished.numCompleted, entry.finished.threadID);
+                fprintf(file, "F: (%u %u) (%u %u) %u\n", entry.finished.jobIdx.id, entry.finished.jobIdx.gen, entry.finished.parentID.id, entry.finished.parentID.gen,
+                        entry.finished.numCompleted);
             } break;
             case LogEntry::Type::WaitingJobQueued: {
-                printf("W: (%u %u) %u\n", entry.waiting.id.id, entry.waiting.id.gen, entry.waiting.numInvocations);
+                fprintf(file, "W: (%u %u) %u\n", entry.waiting.jobID.id, entry.waiting.jobID.gen, entry.waiting.numInvocations);
             } break;
             case LogEntry::Type::JobCreated: {
-                printf("C: (%u %u) %u %u\n", entry.created.curID.id, entry.created.curID.gen, entry.created.parentID, entry.created.numInvocations);
+                fprintf(file, "C: (%u %u) (%u %u) %u %p\n", entry.created.jobID.id, entry.created.jobID.gen, entry.created.parentID.id, entry.created.parentID.gen, entry.created.numInvocations, (void *)entry.created.fnPtr);
             } break;
         }
     }
+    fclose(file);
 }
-#endif
+
+void printWaitingJobs(void *waiting_base, uint32_t num_waiting, JobTrackerMap &tracker_map)
+{
+    printf("Currently waiting jobs\n");
+    Job *waiting = (Job *)waiting_base;
+    for (int i = 0; i < (int)num_waiting; i++) {
+        JobContainerBase *job_data = waiting[i].data;
+        printf("(%u %u) %u %p\n", job_data->id.id, job_data->id.gen,
+               job_data->numDependencies, (void *)waiting[i].func);
+
+        auto dependencies = (const JobID *)(
+            (char *)job_data + sizeof(JobContainerBase));
+
+        for (int j = 0; j < (int)job_data->numDependencies; j++) {
+            JobID dep = dependencies[j];
+            if (!tracker_map.present(dep)) continue;
+
+            JobTracker &tracker = tracker_map.getRef(dependencies[j]);
+
+            printf("\t(%u %u) %u %u\n", dependencies[j].id, dependencies[j].gen, tracker.numOutstandingJobs, tracker.remainingInvocations);
+
+            DynArray<JobID> jobs_of_interest(0);
+            jobs_of_interest.push_back(dep);
+            DynArray<std::pair<uint32_t, uint32_t>> outstandings(0);
+            outstandings.push_back({tracker.numOutstandingJobs,
+                                    tracker.remainingInvocations});
+
+            for (const LogEntry &entry : globalLog) {
+                if (entry.type != LogEntry::Type::JobCreated) {
+                    continue;
+                }
+                for (JobID candidate : jobs_of_interest) {
+                    if (entry.created.parentID.id == candidate.id &&
+                        entry.created.parentID.gen == candidate.gen) {
+                        if (tracker_map.present(entry.created.jobID)) {
+                            jobs_of_interest.push_back(entry.created.jobID);
+                            auto &t = tracker_map.getRef(entry.created.jobID);
+                            outstandings.push_back({
+                                t.numOutstandingJobs,
+                                t.remainingInvocations});
+                        }
+                    }
+                }
+                
+            }
+
+            printf("\t");
+            for (int k = 0; k < (int)jobs_of_interest.size(); k++) {
+                JobID job = jobs_of_interest[k];
+                auto [out, invoke] = outstandings[k];
+                printf("[(%u %u), %u %u] ", job.id, job.gen, out, invoke);
+            }
+            printf("\n");
+        }
+    }
+}
 
 struct alignas(MADRONA_CACHE_LINE) WorkerState {
-    uint32_t logHead; // Only modified by scheduler
+    atomic_uint32_t logHead; // Only modified by scheduler
     // Only modified by worker thread. Still has to be atomic for memory
     // ordering guarantees (worker releases updates to log tail to guarantee
     // the log entries themselves are visible after an acquire by the scheduler
@@ -392,18 +460,33 @@ inline JobTrackerMap::Cache & getTrackerCache(void *tracker_cache_base,
 
 inline void decrementJobTracker(JobTrackerMap &tracker_map, 
                                 JobTrackerMap::Cache &tracker_cache,
-                                uint32_t job_id)
+                                JobID job_id)
 {
 
-    while (job_id != JobID::none().id) {
+    while (job_id.id != JobID::none().id) {
+        if (!tracker_map.present(job_id)) {
+            printf("(%u %u)\n", job_id.id, job_id.gen);
+            saveGlobalLog();
+            assert(false);
+        }
+
         JobTracker &tracker = tracker_map.getRef(job_id);
 
         uint32_t num_outstanding = --tracker.numOutstandingJobs;
 
         if (num_outstanding == 0 && tracker.remainingInvocations == 0) {
-            uint32_t parent = tracker.parent;
+            JobID parent = tracker.parent;
+
+            if (parent.id != ~0u && !tracker_map.present(parent)) {
+                printf("(%u %u) (%u %u)\n", job_id.id, job_id.gen,
+                       parent.id, parent.gen);
+            }
             
             tracker_map.releaseID(tracker_cache, job_id);
+            globalReleases.push_back(ReleaseDebug {
+                job_id,
+                parent,
+            });
             job_id = parent;
         } else {
             break;
@@ -461,7 +544,7 @@ inline void addToLog(WorkerState &worker_state, LogEntry *worker_log,
     uint32_t new_tail = cur_tail + 1;
     worker_state.logTail.store(new_tail, memory_order::release);
 
-    uint32_t log_head = worker_state.logHead;
+    uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
     if (new_tail - log_head >= consts::logSizePerThread) [[unlikely]] {
         for (uint32_t i = log_head; i != new_tail; i++) {
             LogEntry &debug_entry = worker_log[i & consts::logIndexMask];
@@ -847,7 +930,7 @@ JobManager::JobManager(const Init &init)
         start.remainingLaunches.fetch_sub(1, memory_order::release);
 
         ctx->job_mgr_->markInvocationsFinished(ctx->worker_idx_, nullptr,
-                                               ptr->id.id, 1);
+                                               ptr->id, 1);
     };
 
     // Initial job
@@ -865,7 +948,7 @@ JobManager::JobManager(const Init &init)
         };
  
         queueJob(i % init.numWorkers, (void (*)())entry, &start_jobs[i], 0,
-                 JobID::none().id, JobPriority::Normal);
+                 JobID::none(), JobPriority::Normal);
     }
 #else
     StartJob start_job {
@@ -873,7 +956,7 @@ JobManager::JobManager(const Init &init)
         &start_wrapper,
     };
 
-    queueJob(0, (void (*)())entry, &start_job, 0, JobID::none().id,
+    queueJob(0, (void (*)())entry, &start_job, 0, JobID::none(),
              JobPriority::Normal);
 #endif
 
@@ -961,25 +1044,29 @@ JobManager::~JobManager()
 }
 
 JobID JobManager::getNewJobID(int thread_idx,
-                              uint32_t parent_job_idx,
-                              uint32_t num_invocations)
+                              JobID parent_job_idx,
+                              uint32_t num_invocations,
+                              void (*job_func)())
 {
     JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
     JobTrackerMap::Cache &tracker_cache =
         getTrackerCache(tracker_cache_base_, thread_idx);
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
     LogEntry *log = getWorkerLog(log_base_, thread_idx);
-    JobID new_id = tracker_map.acquireID(tracker_cache);
-
-    JobTracker &tracker = tracker_map.getRef(new_id.id);
-    tracker.parent = parent_job_idx;
-    tracker.remainingInvocations = num_invocations;
-    tracker.numOutstandingJobs = 1;
+    JobID new_id = tracker_map.acquireID(tracker_cache, JobTracker {
+        .parent = parent_job_idx,
+        .remainingInvocations = num_invocations,
+        .numOutstandingJobs = 1,
+        .parent2 = parent_job_idx,
+    });
 
     addToLog(worker_state, log, LogEntry {
         .type = LogEntry::Type::JobCreated,
         .created = {
+            .jobID = new_id,
             .parentID = parent_job_idx,
+            .numInvocations = num_invocations,
+            .fnPtr = job_func,
         },
     });
 
@@ -990,14 +1077,15 @@ JobID JobManager::queueJob(int thread_idx,
                            void (*job_func)(),
                            JobContainerBase *job_data,
                            uint32_t num_invocations,
-                           uint32_t parent_job_idx,
+                           JobID parent_job_idx,
                            JobPriority prio)
 {
     JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
     // num_invocations can be passed in as 0 here to signify a single
     // invocation job, but for the purposes of dependency tracking it
     // counts as a single invocation
-    JobID id = getNewJobID(thread_idx, parent_job_idx, std::max(num_invocations, 1u));
+    JobID id = getNewJobID(thread_idx, parent_job_idx, std::max(num_invocations, 1u),
+                           job_func);
 
     job_data->id = id;
 
@@ -1021,24 +1109,27 @@ JobID JobManager::queueJob(int thread_idx,
     return id;
 }
 
-JobID JobManager::reserveProxyJobID(int thread_idx, uint32_t parent_job_idx)
+JobID JobManager::reserveProxyJobID(int thread_idx, JobID parent_job_idx)
 {
-    return getNewJobID(thread_idx, parent_job_idx, 1);
+    return getNewJobID(thread_idx, parent_job_idx, 1, nullptr);
 }
 
 void JobManager::markInvocationsFinished(int thread_idx,
                                          JobContainerBase *job_data,
-                                         uint32_t job_idx,
+                                         JobID job_idx,
                                          uint32_t num_invocations)
 {
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
     LogEntry *log = getWorkerLog(log_base_, thread_idx);
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
+    JobTracker &tracker = tracker_map.getRef(job_idx);
 
     addToLog(worker_state, log, LogEntry {
         .type = LogEntry::Type::JobFinished,
         .finished = {
             .jobData = job_data,
             .jobIdx = job_idx,
+            .parentID = tracker.parent,
             .numCompleted = num_invocations,
         },
     });
@@ -1086,6 +1177,7 @@ void JobManager::addToWaitQueue(int thread_idx,
             job_func,
             job_data,
             num_invocations,
+            job_data->id,
         },
     });
 }
@@ -1167,6 +1259,53 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         uint32_t remaining = tracker.remainingInvocations;
         remaining -= finished.numCompleted;
         tracker.remainingInvocations = remaining;
+        {
+            JobTrackerMap::Node * node = (JobTrackerMap::Node *)&tracker;
+            assert(!node->free);
+        }
+
+        {
+            JobID debug = finished.jobIdx;
+            while (debug.id != ~0u) {
+                if (!tracker_map.present(debug)) {
+                    printf("(%u %u) (%u %u) (%u %u)\n", finished.jobIdx.id,
+                           finished.jobIdx.gen, debug.id, debug.gen,
+                           tracker.parent2.id, tracker.parent2.gen);
+                    saveGlobalLog();
+                    globalLog.clear();
+                    for (int64_t i = 0, n = threads_.size(); i != n; i++) {
+                        WorkerState &worker_state = getWorkerState(worker_base_, i);
+                        LogEntry *log = getWorkerLog(log_base_, i);
+
+                        int64_t log_tail = worker_state.logTail.load(memory_order::acquire);
+                        int64_t log_head = worker_state.logHead;
+
+                        for (; log_head != log_tail; log_head++) {
+                            LogEntry &entry = log[log_head & consts::logIndexMask];
+                            globalLog.push_back(entry);
+                        }
+                    }
+                    saveGlobalLog(false);
+
+                    FILE *f = fopen("/tmp/t3", "w");
+                    for (int i = 0; i < (int)globalReleases.size(); i++) {
+                        fprintf(f, "(%u %u) (%u %u)\n", globalReleases[i].jobID.id,
+                                globalReleases[i].jobID.gen,
+                                globalReleases[i].parentID.id,
+                                globalReleases[i].parentID.gen);
+                    }
+                    fclose(f);
+                    assert(false);
+                }
+
+                JobTracker &tracker_debug = tracker_map.getRef(debug);
+                debug = tracker_debug.parent;
+
+                JobTrackerMap::Node * node = (JobTrackerMap::Node *)&tracker_debug;
+                assert(!node->free);
+
+            }
+        }
 
         if (remaining == 0) {
             if (finished.jobData != nullptr) {
@@ -1189,9 +1328,44 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
     };
 
     auto handleJobCreated = [&](const LogEntry::JobCreated &created) {
-        uint32_t parent_id = created.parentID;
+        uint32_t parent_id = created.parentID.id;
+#if 0
+        {
+            // This doesn't work because the job can legitimately be
+            // deleted before this log message is read
+            JobTracker &debug_tracker = tracker_map.getRef(created.jobID);
+            assert(debug_tracker.parent.id == debug_tracker.parent2.id &&
+                   debug_tracker.parent.gen == debug_tracker.parent2.gen);
+        }
+#endif
+
         if (parent_id != ~0u) {
-            JobTracker &parent_tracker = tracker_map.getRef(parent_id);
+            assert(tracker_map.present(created.parentID));
+            JobTracker &parent_tracker = tracker_map.getRef(created.parentID);
+            {
+                JobID debug = created.parentID;
+                while (debug.id != ~0u) {
+                    {
+                        JobTrackerMap::Node * node = 
+                            (JobTrackerMap::Node *)&tracker_map.getRef(debug.id);
+                        if (node->free) {
+                            printf("(%u %u) (%u %u)\n", created.jobID.id,
+                               created.jobID.gen, debug.id, debug.gen);
+                            saveGlobalLog();
+                            assert(false);
+                        }
+                    }
+                    if (!tracker_map.present(debug)) {
+                        printf("(%u %u) (%u %u)\n", created.jobID.id,
+                               created.jobID.gen, debug.id, debug.gen);
+                        saveGlobalLog();
+                        assert(false);
+                    }
+                    JobTracker &tracker_debug = tracker_map.getRef(debug);
+                    debug = tracker_debug.parent;
+
+                }
+            }
             parent_tracker.numOutstandingJobs++;
         }
     };
@@ -1204,10 +1378,11 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         LogEntry *log = getWorkerLog(log_base_, worker_idx);
 
         int64_t log_tail = worker_state.logTail.load(memory_order::acquire);
-        int64_t log_head = worker_state.logHead;
+        int64_t log_head = worker_state.logHead.load(memory_order::relaxed);
 
         for (; log_head != log_tail; log_head++) {
             LogEntry &entry = log[log_head & consts::logIndexMask];
+            globalLog.push_back(entry);
 
             switch (entry.type) {
                 case LogEntry::Type::JobFinished: {
@@ -1273,6 +1448,8 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 
             if (/* scheduler_.numWaiting == 0 && */
                 scheduler_.numSleepingWorkers == num_compute_workers_) {
+                saveGlobalLog();
+                printWaitingJobs(waiting_jobs_, scheduler_.numWaiting, tracker_map);
                 assert(false);
                 for (int64_t i = 0; i < num_compute_workers_; i++) {
                     WorkerState &worker_state = getWorkerState(worker_base_, i);

@@ -75,7 +75,7 @@ public:
 
     ~JobManager();
 
-    inline JobID reserveProxyJobID(int thread_idx, JobID parent_id);
+    JobID reserveProxyJobID(int thread_idx, JobID parent_id);
     inline void relinquishProxyJobID(int thread_idx, JobID job_id);
 
     template <typename ContextT, bool single_invoke, typename Fn,
@@ -184,19 +184,16 @@ private:
 
     JobID queueJob(int thread_idx, void (*job_func)(),
                    JobContainerBase *job_data, uint32_t num_invocations, 
-                   uint32_t parent_job_idx,
+                   JobID parent_job_idx,
                    JobPriority prio = JobPriority::Normal);
-
-    JobID reserveProxyJobID(int thread_idx, uint32_t parent_job_idx);
-    void relinquishProxyJobID(int thread_idx, uint32_t job_idx);
 
     void markInvocationsFinished(int thread_idx,
                                  JobContainerBase *job_data,
-                                 uint32_t job_idx,
+                                 JobID job_idx,
                                  uint32_t num_invocations);
 
-    inline JobID getNewJobID(int thread_idx, uint32_t parent_job_idx, 
-                             uint32_t num_invocations);
+    inline JobID getNewJobID(int thread_idx, JobID parent_job_idx, 
+                             uint32_t num_invocations, void (*job_func)());
 
     template <typename Fn>
     inline void addToRunQueue(int thread_idx, JobPriority prio, Fn &&add_cb);
