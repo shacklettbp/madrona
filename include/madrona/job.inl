@@ -178,14 +178,18 @@ void JobManager::singleInvokeEntry(Context *ctx_base,
     auto container = static_cast<ContainerT *>(data);
     JobManager *job_mgr = ctx.job_mgr_;
     
+#if 0
     JobID cur_id = data->id;
     JobID orig_parent = job_mgr->getParent(cur_id);
+#endif
 
     container->fn(ctx);
 
+#if 0
     JobID new_parent = job_mgr->getParent(cur_id);
     assert(new_parent.id == orig_parent.id &&
            new_parent.gen == orig_parent.gen);
+#endif
 
     job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id, 1);
 }

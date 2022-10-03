@@ -125,7 +125,7 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache, V &&new_v)
         new_head.head = cur_head_node->freeNode.globalNext.load(
             std::memory_order_relaxed);
     } while (!free_head_.compare_exchange_weak(
-        cur_head, new_head, std::memory_order_acq_rel,
+        cur_head, new_head, std::memory_order_release,
         std::memory_order_acquire));
 
     uint32_t free_ids = cur_head.head;

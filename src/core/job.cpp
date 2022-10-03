@@ -516,6 +516,7 @@ inline void decrementJobTracker(JobTrackerMap &tracker_map,
             }
             
             tracker_map.releaseID(tracker_cache, job_id);
+#if 0
             globalReleases.push_back(ReleaseDebug {
                 job_id,
                 parent,
@@ -528,6 +529,7 @@ inline void decrementJobTracker(JobTrackerMap &tracker_map,
                     thread_idx,
                 },
             });
+#endif
             job_id = parent;
         } else {
             break;
@@ -1323,6 +1325,8 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         uint32_t remaining = tracker.remainingInvocations;
         remaining -= finished.numCompleted;
         tracker.remainingInvocations = remaining;
+
+#if 0
         {
             JobID debug = finished.jobIdx;
             while (debug.id != ~0u) {
@@ -1361,6 +1365,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
                 debug = tracker_debug.parent;
             }
         }
+#endif
 
         if (remaining == 0) {
             if (finished.jobData != nullptr) {
@@ -1397,6 +1402,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         if (parent_id != ~0u) {
             assert(tracker_map.present(created.parentID));
             JobTracker &parent_tracker = tracker_map.getRef(created.parentID);
+#if 0
             {
                 JobID debug = created.parentID;
                 while (debug.id != ~0u) {
@@ -1411,6 +1417,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 
                 }
             }
+#endif
             parent_tracker.numOutstandingJobs++;
         }
     };
@@ -1427,7 +1434,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 
         for (; log_head != log_tail; log_head++) {
             LogEntry &entry = log[log_head & consts::logIndexMask];
-            globalLog.push_back(entry);
+            //globalLog.push_back(entry);
 
             switch (entry.type) {
                 case LogEntry::Type::JobFinished: {
@@ -1738,7 +1745,9 @@ void JobManager::workerThread(
             (uint64_t)cur_job.data->worldID * (uint64_t)num_context_bytes);
 #endif
 
+#if 0
         getParent(cur_job.data->id);
+#endif
 
         runJob(thread_idx, ctx, cur_job.func, cur_job.data,
                cur_job.invocationOffset, cur_job.numInvocations);
