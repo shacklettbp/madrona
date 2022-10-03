@@ -142,7 +142,6 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache, V &&new_v)
     if (free_ids != ~0u) {
         // Assign archetype to 1 (id block of size 1) so as to not confuse
         // the cache's processing of the freelist
-        TSAN_HAPPENS_AFTER(&(cur_head_node->freeNode.globalNext));
         cur_head_node->freeNode.globalNext.store(1,
             std::memory_order_relaxed);
 
@@ -225,7 +224,6 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, uint32_t id)
             new_head.gen = cur_head.gen + 1;
             new_node.freeNode.globalNext.store(cur_head.head,
                 std::memory_order_relaxed);
-            TSAN_HAPPENS_BEFORE(&new_node.freeNode.globalNext);
         } while (!free_head_.compare_exchange_weak(
             cur_head, new_head, std::memory_order_release,
             std::memory_order_relaxed));
