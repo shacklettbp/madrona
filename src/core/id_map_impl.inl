@@ -116,7 +116,7 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
         cur_head_node = &store_[cur_head.head];
         new_head.head = cur_head_node->freeNode.globalNext;
     } while (!free_head_.compare_exchange_weak(
-        cur_head, new_head, std::memory_order_acq_rel,
+        cur_head, new_head, std::memory_order_release,
         std::memory_order_acquire));
 
     uint32_t free_ids = cur_head.head;
@@ -191,7 +191,7 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, uint32_t id)
         do {
             new_head.gen = cur_head.gen + 1;
             new_node.freeNode.globalNext = cur_head.head;
-        } while (free_head_.compare_exchange_weak(
+        } while (!free_head_.compare_exchange_weak(
             cur_head, new_head, std::memory_order_release,
             std::memory_order_relaxed));
 
@@ -303,7 +303,7 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
     do {
         new_head.gen = cur_head.gen + 1;
         global_tail_node->freeNode.globalNext = cur_head.head;
-    } while (free_head_.compare_exchange_weak(
+    } while (!free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_release,
         std::memory_order_relaxed));
 }
