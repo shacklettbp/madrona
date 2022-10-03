@@ -226,7 +226,7 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, uint32_t id)
             new_node.freeNode.globalNext.store(cur_head.head,
                 std::memory_order_relaxed);
             TSAN_HAPPENS_BEFORE(&new_node.freeNode.globalNext);
-        } while (free_head_.compare_exchange_weak(
+        } while (!free_head_.compare_exchange_weak(
             cur_head, new_head, std::memory_order_release,
             std::memory_order_relaxed));
 
@@ -350,7 +350,7 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
         new_head.gen = cur_head.gen + 1;
         global_tail_node->freeNode.globalNext.store(
             cur_head.head, std::memory_order_relaxed);
-    } while (free_head_.compare_exchange_weak(
+    } while (!free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_release,
         std::memory_order_relaxed));
 }
