@@ -1,6 +1,6 @@
 #include <madrona/type_tracker.hpp>
 #include <madrona/memory.hpp>
-#include <madrona/utils.hpp>
+#include <madrona/synch.hpp>
 #include <madrona/dyn_array.hpp>
 
 #include <string_view>

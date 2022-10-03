@@ -118,7 +118,7 @@ void printGlobalLog()
 #endif
 
 struct alignas(MADRONA_CACHE_LINE) WorkerState {
-    uint32_t logHead; // Only modified by scheduler
+    atomic_uint32_t logHead; // Only modified by scheduler
     // Only modified by worker thread. Still has to be atomic for memory
     // ordering guarantees (worker releases updates to log tail to guarantee
     // the log entries themselves are visible after an acquire by the scheduler
@@ -461,7 +461,7 @@ inline void addToLog(WorkerState &worker_state, LogEntry *worker_log,
     uint32_t new_tail = cur_tail + 1;
     worker_state.logTail.store(new_tail, memory_order::release);
 
-    uint32_t log_head = worker_state.logHead;
+    uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
     if (new_tail - log_head >= consts::logSizePerThread) [[unlikely]] {
         for (uint32_t i = log_head; i != new_tail; i++) {
             LogEntry &debug_entry = worker_log[i & consts::logIndexMask];
@@ -969,12 +969,11 @@ JobID JobManager::getNewJobID(int thread_idx,
         getTrackerCache(tracker_cache_base_, thread_idx);
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
     LogEntry *log = getWorkerLog(log_base_, thread_idx);
-    JobID new_id = tracker_map.acquireID(tracker_cache);
-
-    JobTracker &tracker = tracker_map.getRef(new_id.id);
-    tracker.parent = parent_job_idx;
-    tracker.remainingInvocations = num_invocations;
-    tracker.numOutstandingJobs = 1;
+    JobID new_id = tracker_map.acquireID(tracker_cache, JobTracker {
+        .parent = parent_job_idx,
+        .remainingInvocations = num_invocations,
+        .numOutstandingJobs = 1,
+    });
 
     addToLog(worker_state, log, LogEntry {
         .type = LogEntry::Type::JobCreated,
@@ -1204,7 +1203,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         LogEntry *log = getWorkerLog(log_base_, worker_idx);
 
         int64_t log_tail = worker_state.logTail.load(memory_order::acquire);
-        int64_t log_head = worker_state.logHead;
+        int64_t log_head = worker_state.logHead.load(memory_order::relaxed);
 
         for (; log_head != log_tail; log_head++) {
             LogEntry &entry = log[log_head & consts::logIndexMask];
@@ -1222,7 +1221,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
             }
         }
 
-        worker_state.logHead = log_head;
+        worker_state.logHead.store(log_head, memory_order::relaxed);
     }
 
     // Move all now runnable jobs to the scheduler's global run queue
@@ -1360,7 +1359,7 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     uint32_t job_idx = dequeueJobIndex(queue);
 
     if (run_scheduler && job_idx == consts::jobQueueSentinel) {
-        bool sched_locked = scheduler_.lock.lockNoSpin();
+        bool sched_locked = scheduler_.lock.tryLock();
         if (sched_locked) {
             sched_ctrl = schedule(thread_idx, next_job);
             scheduler_.lock.unlock();

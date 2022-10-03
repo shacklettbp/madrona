@@ -24,7 +24,7 @@ public:
 
     struct FreeNode {
         uint32_t subNext;
-        uint32_t globalNext;
+        std::atomic_uint32_t globalNext;
     };
 
     struct Node {
@@ -37,7 +37,8 @@ public:
 
     IDMap(uint32_t init_capacity);
 
-    inline K acquireID(Cache &cache);
+    template <typename Arg>
+    inline K acquireID(Cache &cache, Arg &&new_val);
 
     inline void releaseID(Cache &cache, uint32_t id);
     inline void releaseID(Cache &cache, K k)
