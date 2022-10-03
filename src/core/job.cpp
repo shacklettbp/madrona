@@ -1449,7 +1449,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
             }
         }
 
-        worker_state.logHead = log_head;
+        worker_state.logHead.store(log_head, memory_order::relaxed);
     }
 
     // Move all now runnable jobs to the scheduler's global run queue
