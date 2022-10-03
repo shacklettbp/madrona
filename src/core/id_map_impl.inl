@@ -101,7 +101,7 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache, Arg &&new_val)
         }
 
         node.freeNode.~FreeNode();
-        TSAN_HAPPENS_AFTER(&node.val);
+        //TSAN_HAPPENS_AFTER(&node.freeNode.globalNext);
         new (&node.val) V(std::forward<Arg>(new_val));
 
         return K {
@@ -139,7 +139,7 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache, Arg &&new_val)
         cur_head_node = &store_[cur_head.head];
         new_head.head = cur_head_node->freeNode.globalNext.load(
             std::memory_order_relaxed);
-        TSAN_HAPPENS_BEFORE(&cur_head_node->freeNode.globalNext);
+        //TSAN_HAPPENS_BEFORE(&cur_head_node->freeNode.globalNext);
     } while (!free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_release,
         std::memory_order_acquire));
