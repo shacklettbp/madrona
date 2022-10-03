@@ -1324,11 +1324,6 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         remaining -= finished.numCompleted;
         tracker.remainingInvocations = remaining;
         {
-            JobTrackerMap::Node * node = (JobTrackerMap::Node *)&tracker;
-            assert(!node->free);
-        }
-
-        {
             JobID debug = finished.jobIdx;
             while (debug.id != ~0u) {
                 if (!tracker_map.present(debug)) {
@@ -1364,10 +1359,6 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 
                 JobTracker &tracker_debug = tracker_map.getRef(debug);
                 debug = tracker_debug.parent;
-
-                JobTrackerMap::Node * node = (JobTrackerMap::Node *)&tracker_debug;
-                assert(!node->free);
-
             }
         }
 
@@ -1409,16 +1400,6 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
             {
                 JobID debug = created.parentID;
                 while (debug.id != ~0u) {
-                    {
-                        JobTrackerMap::Node * node = 
-                            (JobTrackerMap::Node *)&tracker_map.getRef(debug.id);
-                        if (node->free) {
-                            printf("(%u %u) (%u %u)\n", created.jobID.id,
-                               created.jobID.gen, debug.id, debug.gen);
-                            saveGlobalLog();
-                            assert(false);
-                        }
-                    }
                     if (!tracker_map.present(debug)) {
                         printf("(%u %u) (%u %u)\n", created.jobID.id,
                                created.jobID.gen, debug.id, debug.gen);

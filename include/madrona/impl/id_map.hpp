@@ -33,7 +33,6 @@ public:
             FreeNode freeNode;
         };
         uint32_t gen;
-        std::atomic_bool free;
     };
 
     IDMap(uint32_t init_capacity);

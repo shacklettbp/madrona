@@ -32,7 +32,6 @@ IDMap<K, V, StoreT>::IDMap(uint32_t init_capacity)
             Node &cur = store_[idx];
 
             cur.gen = 0;
-            cur.free = true;
             cur.freeNode.subNext = idx + 1;
 
             if (i == 0) {
@@ -48,7 +47,6 @@ IDMap<K, V, StoreT>::IDMap(uint32_t init_capacity)
 
         Node &last = store_[base_idx + ids_per_cache_ - 1];
         last.gen = 0;
-        last.free = true;
         last.freeNode.subNext = ~0u;
         last.freeNode.globalNext = 1;
     }
@@ -67,13 +65,6 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache, V &&new_v)
     auto assignCachedID = [this](uint32_t *head, V &&new_v) {
         uint32_t new_id = *head;
         Node &node = store_[new_id];
-        if (std::is_same_v<K, JobID>) {
-            if (!node.free) {
-                printf("%u\n", new_id);
-               assert(false); 
-            }
-        }
-        node.free = false;
 
         // globalNext is overloaded when FreeNode is in the cached
         // freelist to represent multiple contiguous IDs. Contiguous
@@ -187,13 +178,6 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, uint32_t id)
 {
     Node &release_node = store_[id];
     release_node.gen++;
-    if constexpr (std::is_same_v<K, JobID>) {
-        assert(!release_node.free);
-
-        release_node.val.parent2.id = ~0u - 1;
-        release_node.val.parent2.gen = ~0u - 1;
-    }
-    release_node.free = true;
     // Change active union member
     release_node.val.~V();
     new (&release_node.freeNode) FreeNode {};
