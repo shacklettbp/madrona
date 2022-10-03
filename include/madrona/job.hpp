@@ -75,6 +75,8 @@ public:
 
     ~JobManager();
 
+    JobID getParent(JobID job);
+
     JobID reserveProxyJobID(int thread_idx, JobID parent_id);
     inline void relinquishProxyJobID(int thread_idx, JobID job_id);
 

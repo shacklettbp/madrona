@@ -166,6 +166,9 @@ JobID Context::parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
     JobID parent_id = is_child ? cur_job_id_ : JobID::none();
 
     JobID proxy_id = job_mgr_->reserveProxyJobID(worker_idx_, parent_id);
+    JobID debug_parent = job_mgr_->getParent(proxy_id);
+    assert(debug_parent.id == parent_id.id &&
+           debug_parent.gen == parent_id.gen);
 
     state_mgr_->iterateArchetypes(MADRONA_MW_COND(cur_world_id_,) query,
             [this, proxy_id, fn = std::forward<Fn>(fn), dependencies ...](
@@ -187,6 +190,10 @@ JobID Context::parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
         this->submitNImpl<ContextT>(std::move(wrapper), num_rows, proxy_id,
                                     dependencies ...);
     });
+
+    debug_parent = job_mgr_->getParent(proxy_id);
+    assert(debug_parent.id == parent_id.id &&
+           debug_parent.gen == parent_id.gen);
 
     // Note that even though we "relinquish" the id here, it is still safe
     // to return the ID, since the generation stored in the ID will simply

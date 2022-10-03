@@ -178,7 +178,14 @@ void JobManager::singleInvokeEntry(Context *ctx_base,
     auto container = static_cast<ContainerT *>(data);
     JobManager *job_mgr = ctx.job_mgr_;
     
+    JobID cur_id = data->id;
+    JobID orig_parent = job_mgr->getParent(cur_id);
+
     container->fn(ctx);
+
+    JobID new_parent = job_mgr->getParent(cur_id);
+    assert(new_parent.id == orig_parent.id &&
+           new_parent.gen == orig_parent.gen);
 
     job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id, 1);
 }
@@ -204,6 +211,9 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
         return job_mgr->isQueueEmpty(cur_head, cur_correction, cur_tail);
     };
 
+    JobID cur_id = data->id;
+    JobID orig_parent = job_mgr->getParent(cur_id);
+
     // This loop is never called with num_invocations == 0
     uint64_t invocation_idx = invocation_offset;
     uint64_t remaining_invocations = num_invocations;
@@ -219,6 +229,10 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
 
         container->fn(ctx, cur_invocation);
     } while (remaining_invocations > 0);
+
+    JobID new_parent = job_mgr->getParent(cur_id);
+    assert(new_parent.id == orig_parent.id &&
+           new_parent.gen == orig_parent.gen);
 
     job_mgr->markInvocationsFinished(ctx.worker_idx_, data, data->id,
         invocation_idx - invocation_offset);

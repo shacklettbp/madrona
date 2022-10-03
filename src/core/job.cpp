@@ -32,6 +32,7 @@ struct JobTracker {
     JobID parent2;
 };
 
+#if 0
 template <typename T>
 struct JobTrackerMapStore
 {
@@ -65,12 +66,31 @@ const T & JobTrackerMapStore<T>::operator[](uint32_t idx) const
 {
     return ((const T *)((const char *)this + pastMapOffset()))[idx];
 }
+#endif
+
+template <typename T>
+struct JobTrackerMapStore
+{
+    inline T & operator[](uint32_t idx) { return data[idx]; }
+    inline const T & operator[](uint32_t idx) const { return data[idx]; }
+    JobTrackerMapStore(uint32_t size) 
+        : data(size)
+    {}
+    uint32_t expand(uint32_t)
+    {
+        FATAL("Out of job IDs\n");
+    }
+
+    HeapArray<T> data;
+};
+using JobTrackerMap = IDMap<JobID, JobTracker, JobTrackerMapStore>;
 
 struct LogEntry {
     enum class Type : uint32_t {
         JobFinished,
         WaitingJobQueued,
         JobCreated,
+        DebugIDRelease,
     };
 
     struct JobFinished {
@@ -94,11 +114,18 @@ struct LogEntry {
         void (*fnPtr)();
     };
 
+    struct DebugIDRelease {
+        JobID jobID;
+        JobID parentID;
+        int thread;
+    };
+
     Type type;
     union {
         JobFinished finished;
         WaitingJobQueued waiting;
         JobCreated created;
+        DebugIDRelease released;
     };
 };
 
@@ -123,6 +150,11 @@ void saveGlobalLog(bool t = true)
             } break;
             case LogEntry::Type::JobCreated: {
                 fprintf(file, "C: (%u %u) (%u %u) %u %p\n", entry.created.jobID.id, entry.created.jobID.gen, entry.created.parentID.id, entry.created.parentID.gen, entry.created.numInvocations, (void *)entry.created.fnPtr);
+            } break;
+            case LogEntry::Type::DebugIDRelease: {
+                fprintf(file, "R: (%u %u) (%u %u) %d\n", entry.released.jobID.id,
+                        entry.released.jobID.gen, entry.released.parentID.id,
+                        entry.released.parentID.gen, entry.released.thread);
             } break;
         }
     }
@@ -460,7 +492,8 @@ inline JobTrackerMap::Cache & getTrackerCache(void *tracker_cache_base,
 
 inline void decrementJobTracker(JobTrackerMap &tracker_map, 
                                 JobTrackerMap::Cache &tracker_cache,
-                                JobID job_id)
+                                JobID job_id,
+                                int thread_idx)
 {
 
     while (job_id.id != JobID::none().id) {
@@ -486,6 +519,14 @@ inline void decrementJobTracker(JobTrackerMap &tracker_map,
             globalReleases.push_back(ReleaseDebug {
                 job_id,
                 parent,
+            });
+            globalLog.push_back({
+                .type = LogEntry::Type::DebugIDRelease,
+                .released = {
+                    job_id,
+                    parent,
+                    thread_idx,
+                },
             });
             job_id = parent;
         } else {
@@ -1109,6 +1150,29 @@ JobID JobManager::queueJob(int thread_idx,
     return id;
 }
 
+JobID JobManager::getParent(JobID job)
+{
+    JobTrackerMap &tracker_map = getTrackerMap(tracker_base_);
+    JobTracker &tracker = tracker_map.getRef(job);
+    JobID parent = tracker.parent;
+    JobID parent2 = tracker.parent2;
+
+    if (parent.id != parent2.id ||
+        parent.gen != parent2.gen) {
+        printf("P: (%u %u) (%u %u) (%u %u) %u %u\n",
+               job.id, job.gen,
+               parent.id, parent.gen,
+               parent2.id, parent2.gen,
+               tracker.numOutstandingJobs,
+               tracker.remainingInvocations);
+
+        assert(false);
+    }
+
+    return parent;
+}
+
+
 JobID JobManager::reserveProxyJobID(int thread_idx, JobID parent_job_idx)
 {
     return getNewJobID(thread_idx, parent_job_idx, 1, nullptr);
@@ -1314,7 +1378,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
             }
 
             decrementJobTracker(tracker_map, tracker_cache,
-                                finished.jobIdx);
+                                finished.jobIdx, thread_idx);
         }
     };
 
@@ -1692,6 +1756,8 @@ void JobManager::workerThread(
         Context *ctx = (Context *)((char *)context_base + 
             (uint64_t)cur_job.data->worldID * (uint64_t)num_context_bytes);
 #endif
+
+        getParent(cur_job.data->id);
 
         runJob(thread_idx, ctx, cur_job.func, cur_job.data,
                cur_job.invocationOffset, cur_job.numInvocations);

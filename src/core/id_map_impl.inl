@@ -188,8 +188,11 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, uint32_t id)
 {
     Node &release_node = store_[id];
     release_node.gen++;
-    if (std::is_same_v<K, JobID>) {
+    if constexpr (std::is_same_v<K, JobID>) {
         assert(!release_node.free);
+
+        release_node.val.parent2.id = ~0u - 1;
+        release_node.val.parent2.gen = ~0u - 1;
     }
     release_node.free = true;
     // Change active union member
