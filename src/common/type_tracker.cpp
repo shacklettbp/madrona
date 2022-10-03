@@ -1,16 +1,13 @@
 #include <madrona/type_tracker.hpp>
 #include <madrona/memory.hpp>
-#include <madrona/synch.hpp>
+#include <madrona/utils.hpp>
 #include <madrona/dyn_array.hpp>
+#include <madrona/synch.hpp>
 
 #include <string_view>
 #include <mutex>
 
 namespace madrona {
-
-namespace ICfg {
-static constexpr uint32_t unassignedTypeID = ~0u;
-}
 
 struct IDInfo {
     uint32_t *ptr;
@@ -89,7 +86,7 @@ uint32_t TypeTracker::trackByName(uint32_t *ptr, const char *compiler_name)
 
     std::lock_guard lock(tracker.typeLock);
 
-    uint32_t cur_type_id = ICfg::unassignedTypeID;
+    uint32_t cur_type_id = unassignedTypeID;
 
     // This loop ensures that a shared library loaded after type A has already
     // been registered will get the final ID assigned to type A. Otherwise,
@@ -134,7 +131,7 @@ void TypeTracker::registerType(uint32_t *ptr, uint32_t *next_id_ptr)
     std::lock_guard lock(tracker.typeLock);
 
     // Already registered, presumably multiple StateManagers in use
-    if (*ptr != ICfg::unassignedTypeID) {
+    if (*ptr != unassignedTypeID) {
         return;
     }
 

@@ -12,6 +12,7 @@ public:
     template <typename T>
     static void registerType(uint32_t *next_id_ptr);
 
+    static constexpr uint32_t unassignedTypeID = ~0u;
 private:
     template <typename T>
     struct TypeID {

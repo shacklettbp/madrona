@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <type_traits>
 #include <madrona/crash.hpp>

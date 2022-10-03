@@ -24,7 +24,7 @@ public:
 
     struct FreeNode {
         uint32_t subNext;
-        std::atomic_uint32_t globalNext;
+        uint32_t globalNext;
     };
 
     struct Node {
@@ -32,13 +32,12 @@ public:
             V val;
             FreeNode freeNode;
         };
-        uint32_t gen;
+        std::atomic_uint32_t gen;
     };
 
     IDMap(uint32_t init_capacity);
 
-    template <typename Arg>
-    inline K acquireID(Cache &cache, Arg &&new_val);
+    inline K acquireID(Cache &cache);
 
     inline void releaseID(Cache &cache, uint32_t id);
     inline void releaseID(Cache &cache, K k)
@@ -52,7 +51,7 @@ public:
     {
         const Node &node = store_[k.id];
 
-        if (node.gen != k.gen) {
+        if (node.gen.load(std::memory_order_relaxed) != k.gen) {
             return V::none();
         }
 
@@ -62,13 +61,13 @@ public:
     inline bool present(K k) const
     {
         const Node &node = store_[k.id];
-        return node.gen == k.gen;
+        return node.gen.load(std::memory_order_relaxed) == k.gen;
     }
 
     inline V & getRef(K k)
     {
         Node &node = store_[k.id];
-        assert(node.gen == k.gen);
+        assert(node.gen.load(std::memory_order_relaxed) == k.gen);
 
         return node.val;
     }

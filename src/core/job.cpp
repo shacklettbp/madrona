@@ -969,11 +969,12 @@ JobID JobManager::getNewJobID(int thread_idx,
         getTrackerCache(tracker_cache_base_, thread_idx);
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
     LogEntry *log = getWorkerLog(log_base_, thread_idx);
-    JobID new_id = tracker_map.acquireID(tracker_cache, JobTracker {
-        .parent = parent_job_idx,
-        .remainingInvocations = num_invocations,
-        .numOutstandingJobs = 1,
-    });
+    JobID new_id = tracker_map.acquireID(tracker_cache);
+
+    JobTracker &tracker = tracker_map.getRef(new_id.id);
+    tracker.parent = parent_job_idx;
+    tracker.remainingInvocations = num_invocations;
+    tracker.numOutstandingJobs = 1;
 
     addToLog(worker_state, log, LogEntry {
         .type = LogEntry::Type::JobCreated,
@@ -1327,6 +1328,9 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
     }
 
     atomic_thread_fence(memory_order::acquire);
+    TSAN_ACQUIRE(&tail);
+    TSAN_ACQUIRE(&correction);
+    TSAN_ACQUIRE(&head);
 
     cur_head = head.fetch_add(1, memory_order::relaxed);
     cur_tail = tail.load(memory_order::acquire);

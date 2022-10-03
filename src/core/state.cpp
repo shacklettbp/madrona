@@ -45,7 +45,7 @@ EntityStore::EntityStore()
 
 Entity EntityStore::newEntity(Cache &cache)
 {
-    return map_.acquireID(cache, Loc {});
+    return map_.acquireID(cache);
 }
 
 void EntityStore::freeEntity(Cache &cache, Entity e)
@@ -238,6 +238,7 @@ void StateManager::makeQuery(const ComponentID *components,
         for (component_idx = 0; component_idx < (int)num_components;
              component_idx++) {
             ComponentID component = components[component_idx];
+            assert(component.id != TypeTracker::unassignedTypeID);
             if (component.id == componentID<Entity>().id) {
                 tmp_query_indices.push_back(0);
             } else {

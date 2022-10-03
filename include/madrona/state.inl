@@ -120,6 +120,9 @@ ArchetypeID StateManager::registerArchetype()
 template <typename ComponentT>
 ComponentID StateManager::componentID() const
 {
+    static_assert(!std::is_reference_v<ComponentT> &&
+                  !std::is_pointer_v<ComponentT> &&
+                  !std::is_const_v<ComponentT>);
     return ComponentID {
         TypeTracker::typeID<ComponentT>(),
     };
@@ -195,7 +198,7 @@ template <typename... ComponentTs>
 Query<ComponentTs...> StateManager::query()
 {
     std::array component_ids {
-        componentID<ComponentTs>()
+        componentID<std::remove_const_t<ComponentTs>>()
         ...
     };
 

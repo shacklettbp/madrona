@@ -9,8 +9,8 @@
 #include <madrona/optional.hpp>
 #include <madrona/type_tracker.hpp>
 #include <madrona/hashmap.hpp>
-#include <madrona/impl/id_map.hpp>
 #include <madrona/synch.hpp>
+#include <madrona/impl/id_map.hpp>
 
 namespace madrona {
 
