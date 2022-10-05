@@ -65,7 +65,7 @@ CollisionSim::CollisionSim(Engine &ctx)
     const int init_num_objects = 100;
 
     // Entity creation / deletion is not thread safe (for now)
-    std::uniform_real_distribution<float> angle_dist(0.f, M_PIf); 
+    std::uniform_real_distribution<float> angle_dist(0.f, M_PI); 
     for (int i = 0; i < init_num_objects; i++) {
         Translation rand_pos = randomPosition(worldBounds);
         Rotation rand_rot = Quat::angleAxis(angle_dist(randGen()),

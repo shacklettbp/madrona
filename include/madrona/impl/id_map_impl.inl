@@ -2,6 +2,7 @@
 
 #include <madrona/impl/id_map.hpp>
 #include <cassert>
+#include <madrona/synch.hpp>
 
 namespace madrona {
 
@@ -107,6 +108,17 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
 
     Node *cur_head_node;
 
+    // The below do-while has a benign race when reading the globalNext
+    // pointer, because globalNext may be updated by a thread that has
+    // successfully popped cur_head off the list. The thread reading bad
+    // data will immediately fail the CAS check regardless. An alternative
+    // to suppress this would be to move globalNext out of the union and
+    // switch the read to a relaxed atomic load, at the cost of 4 bytes more
+    // storage per node that can't be shared with V.
+    auto getGlobalNext = [](Node *cur_head) TSAN_DISABLED {
+        return cur_head->freeNode.globalNext;
+    };
+
     do {
         if (cur_head.head == ~0u) {
             break;
@@ -114,7 +126,7 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
 
         new_head.gen = cur_head.gen + 1;
         cur_head_node = &store_[cur_head.head];
-        new_head.head = cur_head_node->freeNode.globalNext;
+        new_head.head = getGlobalNext(cur_head_node);
     } while (!free_head_.compare_exchange_weak(
         cur_head, new_head, std::memory_order_release,
         std::memory_order_acquire));

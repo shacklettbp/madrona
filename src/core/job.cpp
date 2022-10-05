@@ -1,9 +1,9 @@
 #include <madrona/job.hpp>
 #include <madrona/utils.hpp>
 #include <madrona/context.hpp>
+#include <madrona/impl/id_map_impl.inl>
 
 #include "worker_init.hpp"
-#include "id_map_impl.inl"
 
 #if defined(__linux__) or defined(__APPLE__)
 #include <signal.h>

@@ -12,24 +12,16 @@
 extern "C" {
 extern void __tsan_acquire(void *addr);
 extern void __tsan_release(void *addr);
-extern void AnnotateHappensBefore(const char *file, int line,
-                                  const volatile void *cv);
-extern void AnnotateHappensAfter(const char *file, int line,
-                                 const volatile void *cv);
 }
 
 #define TSAN_ACQUIRE(addr) __tsan_acquire(addr)
 #define TSAN_RELEASE(addr) __tsan_release(addr)
-#define TSAN_HAPPENS_BEFORE(addr) \
-    AnnotateHappensBefore(__FILE__, __LINE__, addr)
-#define TSAN_HAPPENS_AFTER(addr) \
-    AnnotateHappensAfter(__FILE__, __LINE__, addr)
+#define TSAN_DISABLED __attribute__((no_sanitize_thread))
 
 #else
 #define TSAN_ACQUIRE(addr)
 #define TSAN_RELEASE(addr)
-#define TSAN_HAPPENS_BEFORE(addr)
-#define TSAN_HAPPENS_AFTER(addr)
+#define TSAN_DISABLED
 #endif
 
 namespace madrona {

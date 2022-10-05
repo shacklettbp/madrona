@@ -7,7 +7,7 @@
 #include <mutex>
 #include <string_view>
 
-#include "id_map_impl.inl"
+#include <madrona/impl/id_map_impl.inl>
 
 namespace madrona {
 
