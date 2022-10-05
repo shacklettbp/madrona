@@ -67,6 +67,8 @@ public:
                          bool is_child = true,
                          DepTs && ... dependencies);
 
+    // FIXME: currently this function requires that the query reference
+    // is valid at least until the returned job is completed.
     template <typename... ComponentTs, typename Fn, typename... DepTs>
     inline JobID parallelFor(const Query<ComponentTs...> &query, Fn &&fn,
                              bool is_child = true,

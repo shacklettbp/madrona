@@ -170,38 +170,61 @@ JobID Context::parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
         return JobID::none();
     }
 
-    JobID parent_id = is_child ? cur_job_id_ : JobID::none();
+    // FIXME: add isRunnable check in addition to no dependencies
+    if constexpr (sizeof...(dependencies) == 0) {
+        JobID parent_id = is_child ? cur_job_id_ : JobID::none();
 
-    JobID proxy_id = job_mgr_->reserveProxyJobID(worker_idx_, parent_id);
+        // Additional optimization: skip this proxy ID when only 1 archetype
+        // is present (in fact for > 1 archetype might make sense to just
+        // use the else codepath).
+        JobID proxy_id = job_mgr_->reserveProxyJobID(worker_idx_, parent_id);
 
-    state_mgr_->iterateArchetypes(MADRONA_MW_COND(cur_world_id_,) query,
-            [this, proxy_id, fn = std::forward<Fn>(fn), dependencies ...](
-            int num_rows, auto ...ptrs) {
-        if (num_rows == 0) {
-            return;
-        }
+        state_mgr_->iterateArchetypes(MADRONA_MW_COND(cur_world_id_,)
+                query, [this, &fn, proxy_id, dependencies...](int num_rows,
+                                                              auto ...ptrs) {
+            if (num_rows == 0) {
+                return;
+            }
 
-        // FIXME, is there a better solution here?
-        Fn fn_copy(fn);
+            // Clang complains this is unused without this->
+            this->submitNImpl<ContextT>(
+                    [fn = Fn(fn), ptrs...](ContextT &ctx, uint32_t idx) {
+                fn(ctx, ptrs[idx]...);
+            }, num_rows, proxy_id, dependencies...);
+        });
 
-        auto wrapper = [fn = std::forward<Fn>(fn_copy), ptrs ...](
-                ContextT &ctx, uint32_t idx) {
-            fn(ctx, ptrs[idx]...);
-        };
+        // Note that even though we "relinquish" the id here, it is still safe
+        // to return the ID, since the generation stored in the ID will simply
+        // be invalid if the entire parallelFor job finishes, just like a normal
+        // job id.
+        job_mgr_->relinquishProxyJobID(worker_idx_, proxy_id);
 
-        // For some reason clang warns that 'this' isn't used without the
-        // explicit this->
-        this->submitNImpl<ContextT>(std::move(wrapper), num_rows, proxy_id,
-                                    dependencies ...);
-    });
+        return proxy_id;
+    } else {
+        return submitImpl<ContextT>([fn = std::forward<Fn>(fn), &query] (
+                ContextT &ctx) {
+            ctx.state_mgr_->iterateArchetypes(
+                    MADRONA_MW_COND(ctx.cur_world_id_,) query,
+                    [&ctx, &fn](int num_rows, auto ...ptrs) {
+                if (num_rows == 0) {
+                    return;
+                }
 
-    // Note that even though we "relinquish" the id here, it is still safe
-    // to return the ID, since the generation stored in the ID will simply
-    // be invalid if the entire parallelFor job finishes, just like a normal
-    // job id.
-    job_mgr_->relinquishProxyJobID(worker_idx_, proxy_id);
-
-    return proxy_id;
+                // FIXME reconsider copying ptrs into the closure here
+                // FIXME currently copies the user function's closure
+                // Could allow making a fake jobs with data but not a function
+                // by extending reserveProxyJobID - that job could be dependent
+                // on the parallel for job and hold the user function closure.
+                // If we allowed runtime determined # of dependencies, the
+                // fast path (no dependencies above) could return the dependent
+                // data-only job rather than using the fake ID as a parent
+                ctx.template submitNImpl<ContextT>(
+                        [fn = Fn(fn), ptrs...](ContextT &ctx, uint32_t idx) {
+                    fn(ctx, ptrs[idx]...);
+                }, num_rows, true);
+            });
+        }, is_child, dependencies...);
+    }
 }
 
 template <typename ContextT, typename Fn, typename... Deps>
