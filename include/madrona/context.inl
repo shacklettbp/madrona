@@ -180,8 +180,7 @@ JobID Context::parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
         JobID proxy_id = job_mgr_->reserveProxyJobID(worker_idx_, parent_id);
 
         state_mgr_->iterateArchetypes(MADRONA_MW_COND(cur_world_id_,)
-                query, [this, &fn, proxy_id, dependencies...](int num_rows,
-                                                              auto ...ptrs) {
+                query, [this, &fn, proxy_id](int num_rows, auto ...ptrs) {
             if (num_rows == 0) {
                 return;
             }
@@ -190,7 +189,7 @@ JobID Context::parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
             this->submitNImpl<ContextT>(
                     [fn = Fn(fn), ptrs...](ContextT &ctx, uint32_t idx) {
                 fn(ctx, ptrs[idx]...);
-            }, num_rows, proxy_id, dependencies...);
+            }, num_rows, proxy_id);
         });
 
         // Note that even though we "relinquish" the id here, it is still safe
