@@ -411,11 +411,19 @@ inline void decrementJobTracker(JobTrackerMap &tracker_map,
             uint32_t parent = tracker.parent;
             
             tracker_map.releaseID(tracker_cache, job_id);
+#ifdef TSAN_ENABLED
+            tracker_map.releaseGen(job_id);
+#endif
             job_id = parent;
         } else {
             break;
         }
     }
+}
+
+inline const JobID * getJobDependencies(JobContainerBase *job_base)
+{
+    return (const JobID *)((char *)job_base + sizeof(JobContainerBase));
 }
 
 inline bool isRunnable(JobTrackerMap &tracker_map,
@@ -427,9 +435,7 @@ inline bool isRunnable(JobTrackerMap &tracker_map,
         return true;
     }
 
-    auto dependencies = (const JobID *)(
-        (char *)job_data + sizeof(JobContainerBase));
-
+    const JobID *dependencies = getJobDependencies(job_data);
     for (int i = 0; i < num_deps; i++) {
         JobID dependency = dependencies[i];
 
@@ -1009,6 +1015,16 @@ JobID JobManager::queueJob(int thread_idx,
     job_data->id = id;
 
     if (isRunnable(tracker_map, job_data)) {
+        atomic_thread_fence(memory_order::acquire);
+#ifdef TSAN_ENABLED
+        {
+            const JobID *dependencies = getJobDependencies(job_data);
+            uint32_t num_dependencies = job_data->numDependencies;
+            for (int i = 0; i < (int)num_dependencies; i++) {
+                tracker_map.acquireGen(dependencies[i].id);
+            }
+        }
+#endif
         addToRunQueue(thread_idx, prio,
             [=](Job *job_array, uint32_t cur_tail) {
                 job_array[cur_tail & consts::runQueueIndexMask] = Job {
@@ -1212,6 +1228,13 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 
         int64_t log_tail = worker_state.logTail.load(memory_order::acquire);
         int64_t log_head = worker_state.logHead.load(memory_order::relaxed);
+
+        // This is needed to synchronize all the JobTracker generation updates
+        // (triggered by releaseID under handleJobFinished) with isRunnable
+        // calls outside the scheduler. Unfortunately we need one fence per
+        // log with this impl because the fence has to happen after the acquire
+        // on logTail above.  
+        atomic_thread_fence(memory_order::release);
 
         for (; log_head != log_tail; log_head++) {
             LogEntry &entry = log[log_head & consts::logIndexMask];

@@ -7,6 +7,8 @@
  */
 #pragma once
 
+#include <madrona/synch.hpp>
+
 #include <atomic>
 #include <cstdint>
 
@@ -83,6 +85,23 @@ public:
     {
         return store_[id].val;
     }
+
+#ifdef TSAN_ENABLED
+    // These helpers are needed when TSAN is enabled to allow explicitly
+    // marking Node::gen as acquired and released, which is currently done
+    // with atomic_thread_fence by outside code after updating / reading
+    // multiple IDs.
+
+    inline void acquireGen(uint32_t id)
+    {
+        TSAN_ACQUIRE(&store_[id].gen);
+    }
+
+    inline void releaseGen(uint32_t id)
+    {
+        TSAN_RELEASE(&store_[id].gen);
+    }
+#endif
 
 private:
     using Store = StoreT<Node>;
