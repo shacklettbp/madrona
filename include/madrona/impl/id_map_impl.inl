@@ -9,7 +9,7 @@
 
 #include <madrona/impl/id_map.hpp>
 #include <cassert>
-#include <madrona/synch.hpp>
+#include <madrona/macros.hpp>
 
 namespace madrona {
 
@@ -122,7 +122,8 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
     // to suppress this would be to move globalNext out of the union and
     // switch the read to a relaxed atomic load, at the cost of 4 bytes more
     // storage per node that can't be shared with V.
-    auto getGlobalNext = [](Node *cur_head) TSAN_DISABLED {
+    auto getGlobalNext =
+            [](Node *cur_head) MADRONA_ALWAYS_INLINE TSAN_DISABLED {
         return cur_head->freeNode.globalNext;
     };
 

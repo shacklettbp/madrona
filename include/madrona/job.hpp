@@ -11,7 +11,7 @@
 #include <madrona/memory.hpp>
 #include <madrona/heap_array.hpp>
 #include <madrona/span.hpp>
-#include <madrona/synch.hpp>
+#include <madrona/sync.hpp>
 
 #include <atomic>
 #include <array>

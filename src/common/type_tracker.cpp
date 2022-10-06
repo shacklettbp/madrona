@@ -9,7 +9,7 @@
 #include <madrona/memory.hpp>
 #include <madrona/utils.hpp>
 #include <madrona/dyn_array.hpp>
-#include <madrona/synch.hpp>
+#include <madrona/sync.hpp>
 
 #include <string_view>
 #include <mutex>

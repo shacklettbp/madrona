@@ -7,7 +7,7 @@
  */
 #pragma once
 
-#include <madrona/synch.hpp>
+#include <madrona/sync.hpp>
 
 #include <atomic>
 #include <cstdint>
