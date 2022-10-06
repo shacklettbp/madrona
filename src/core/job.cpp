@@ -860,10 +860,12 @@ JobManager::JobManager(const Init &init)
         auto &start = *(job.wrapper);
 
         start.func(ctx, start.data);
+
+        uint32_t job_id = ptr->id.id;
         start.remainingLaunches.fetch_sub(1, memory_order::release);
 
         ctx->job_mgr_->markInvocationsFinished(ctx->worker_idx_, nullptr,
-                                               ptr->id.id, 1);
+                                               job_id, 1);
     };
 
     // Initial job
