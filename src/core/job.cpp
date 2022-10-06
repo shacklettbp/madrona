@@ -125,13 +125,15 @@ void printGlobalLog()
 #endif
 
 struct alignas(MADRONA_CACHE_LINE) WorkerState {
-    atomic_uint32_t logHead; // Only modified by scheduler
-    // Only modified by worker thread. Still has to be atomic for memory
-    // ordering guarantees (worker releases updates to log tail to guarantee
-    // the log entries themselves are visible after an acquire by the scheduler
-    atomic_uint32_t logTail; 
     uint32_t numIdleLoops;
     uint32_t numConsecutiveSchedulerCalls;
+    atomic_uint32_t logHead; // Only modified by scheduler
+    uint32_t logTailCache; // Scheduler's last read tail value
+    // logTail below is only modified by worker thread.
+    // Still has to be atomic for memory ordering guarantees (worker 
+    // releases updates to log tail to guarantee the log entries themselves are
+    // visible after an acquire fence by the scheduler
+    alignas(MADRONA_CACHE_LINE) atomic_uint32_t logTail; 
     alignas(MADRONA_CACHE_LINE) atomic_uint32_t wakeUp;
 };
 
@@ -823,10 +825,11 @@ JobManager::JobManager(const Init &init)
 
         WorkerState &worker_state = getWorkerState(worker_base_, i);
         new (&worker_state) WorkerState {
-            .logHead = 0,
-            .logTail = 0,
             .numIdleLoops = 0,
             .numConsecutiveSchedulerCalls = 0,
+            .logHead = 0,
+            .logTailCache = 0,
+            .logTail = 0,
             .wakeUp = i + 1,
         };
 
@@ -1219,6 +1222,24 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         }
     };
 
+    // First, read all the log tails and cache them. This allows us to do
+    // a single acquire release barrier (dmb on arm) to ensure that log entries
+    // are consistent with job tails, as well as to release JobTracker
+    // generation updates in bulk.
+
+    for (int64_t i = 0, n = threads_.size(); i < n; i++) { 
+        WorkerState &worker_state = getWorkerState(worker_base_, i);
+        worker_state.logTailCache =
+            worker_state.logTail.load(memory_order::relaxed);
+        TSAN_ACQUIRE(&worker_state.logTail);
+    }
+
+    // Release half synchronizes all the releaseID calls under handleJobFinished
+    // to ensure that when isRunnable is called outside the scheduler, the
+    // job skipping the waitlist is synchronized-with the thread that finished
+    // the dependencies.
+    atomic_thread_fence(memory_order::acq_rel);
+
     // First, we read all the logs.
     for (int64_t i = 0, n = threads_.size(); i != n; i++) {
         int64_t offset = i + thread_idx;
@@ -1226,15 +1247,8 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         WorkerState &worker_state = getWorkerState(worker_base_, worker_idx);
         LogEntry *log = getWorkerLog(log_base_, worker_idx);
 
-        int64_t log_tail = worker_state.logTail.load(memory_order::acquire);
-        int64_t log_head = worker_state.logHead.load(memory_order::relaxed);
-
-        // This is needed to synchronize all the JobTracker generation updates
-        // (triggered by releaseID under handleJobFinished) with isRunnable
-        // calls outside the scheduler. Unfortunately we need one fence per
-        // log with this impl because the fence has to happen after the acquire
-        // on logTail above.  
-        atomic_thread_fence(memory_order::release);
+        uint32_t log_tail = worker_state.logTailCache;
+        uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
 
         for (; log_head != log_tail; log_head++) {
             LogEntry &entry = log[log_head & consts::logIndexMask];
