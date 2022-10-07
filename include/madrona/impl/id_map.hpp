@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include <madrona/macros.hpp>
 #include <madrona/sync.hpp>
 
 #include <atomic>
@@ -113,8 +114,8 @@ private:
         uint32_t head;
     };
 
-    std::atomic<FreeHead> free_head_;
     [[no_unique_address]] Store store_;
+    alignas(MADRONA_CACHE_LINE) std::atomic<FreeHead> free_head_;
 
     static_assert(decltype(free_head_)::is_always_lock_free);
 

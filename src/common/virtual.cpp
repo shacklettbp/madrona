@@ -18,83 +18,104 @@
 
 namespace madrona {
 
+struct VirtualRegion::Init {
+    char *const base;
+    uint64_t chunkShift;
+    uint64_t totalSize;
+    uint64_t initChunks;
+
+    static inline Init make(uint64_t max_bytes, uint64_t chunk_shift,
+                            uint64_t alignment, uint64_t init_chunks)
+    {
+        uint32_t page_size =
+#if defined(__linux__) or defined(__APPLE__)
+            sysconf(_SC_PAGESIZE);
+#elif _WIN32
+            STATIC_UNIMPLEMENTED();
+#else
+            STATIC_UNIMPLEMENTED();
+#endif
+    
+        if (chunk_shift == 0) {
+            chunk_shift = utils::int32Log2(page_size);
+        }
+    
+        uint64_t chunk_size = 1ull << chunk_shift;
+    
+        if (chunk_size % page_size != 0) {
+            FATAL("VirtualRegion chunk size must be multiple of page size");
+        }
+    
+        // alignment == 0 is a special case where we ensure the base pointer is aligned
+        // to the chunk size
+        if (alignment == 0) {
+            alignment = chunk_size;
+        }
+    
+        // mmap guarantees at least alignment to page boundaries already
+        if (alignment <= page_size) {
+            alignment = 1;
+        }
+    
+        if (alignment > 1 && alignment % page_size != 0) {
+            FATAL("VirtualRegion alignment must be multiple of page size (or 1)");
+        }
+    
+        uint64_t max_chunks = utils::divideRoundUp(max_bytes, chunk_size);
+    
+#if defined(__linux__) or defined(__APPLE__)
+        uint64_t overalign_size = (max_chunks << chunk_shift) + alignment - 1;
+    
+#ifdef __linux__
+        constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
+#elif defined(__APPLE__)
+        constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON;
+#endif
+    
+        void *base_attempt =
+            mmap(nullptr, overalign_size, PROT_NONE, mmap_init_flags, -1, 0);
+    
+        if (base_attempt == MAP_FAILED) [[unlikely]] {
+            FATAL("Failed to allocate %lu bytes of virtual address space\n",
+                  overalign_size);
+        }
+    
+        char *base = (char *)utils::roundUp((uintptr_t)base_attempt, (uintptr_t)alignment);
+        uint64_t extra_amount = base - (char *)base_attempt;
+    
+        if (extra_amount > 0) {
+            munmap(base_attempt, extra_amount);
+        }
+    
+        uint64_t total_size = overalign_size - extra_amount;
+    
+#elif _WIN32
+        STATIC_UNIMPLEMENTED();
+#else
+        STATIC_UNIMPLEMENTED();
+#endif
+
+        return Init {
+            .base = base,
+            .chunkShift = chunk_shift,
+            .totalSize = total_size,
+            .initChunks = init_chunks,
+        };
+    }
+};
+
 VirtualRegion::VirtualRegion(uint64_t max_bytes, uint64_t chunk_shift,
                              uint64_t alignment, uint64_t init_chunks)
+    : VirtualRegion(Init::make(max_bytes, chunk_shift, alignment, init_chunks))
+{}
+
+VirtualRegion::VirtualRegion(Init init)
+    : base_(init.base),
+      chunk_shift_(init.chunkShift),
+      total_size_(init.totalSize)
 {
-    uint32_t page_size =
-#if defined(__linux__) or defined(__APPLE__)
-        sysconf(_SC_PAGESIZE);
-#elif _WIN32
-        STATIC_UNIMPLEMENTED();
-#else
-        STATIC_UNIMPLEMENTED();
-#endif
-
-    if (chunk_shift == 0) {
-        chunk_shift = utils::int32Log2(page_size);
-    }
-
-    uint64_t chunk_size = 1ull << chunk_shift;
-
-    if (chunk_size % page_size != 0) {
-        FATAL("VirtualRegion chunk size must be multiple of page size");
-    }
-
-    // alignment == 0 is a special case where we ensure the base pointer is aligned
-    // to the chunk size
-    if (alignment == 0) {
-        alignment = chunk_size;
-    }
-
-    // mmap guarantees at least alignment to page boundaries already
-    if (alignment <= page_size) {
-        alignment = 1;
-    }
-
-    if (alignment > 1 && alignment % page_size != 0) {
-        FATAL("VirtualRegion alignment must be multiple of page size (or 1)");
-    }
-
-    uint64_t max_chunks = utils::divideRoundUp(max_bytes, chunk_size);
-
-#if defined(__linux__) or defined(__APPLE__)
-    uint64_t overalign_size = (max_chunks << chunk_shift) + alignment - 1;
-
-#ifdef __linux__
-    constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
-#elif defined(__APPLE__)
-    constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON;
-#endif
-
-    void *base_attempt =
-        mmap(nullptr, overalign_size, PROT_NONE, mmap_init_flags, -1, 0);
-
-    if (base_attempt == MAP_FAILED) [[unlikely]] {
-        FATAL("Failed to allocate %lu bytes of virtual address space\n",
-              overalign_size);
-    }
-
-    char *base = (char *)utils::roundUp((uintptr_t)base_attempt, (uintptr_t)alignment);
-    uint64_t extra_amount = base - (char *)base_attempt;
-
-    if (extra_amount > 0) {
-        munmap(base_attempt, extra_amount);
-    }
-
-    uint64_t total_size = overalign_size - extra_amount;
-
-#elif _WIN32
-    STATIC_UNIMPLEMENTED();
-#else
-    STATIC_UNIMPLEMENTED();
-#endif
-
-    base_ = base;
-    chunk_shift_ = chunk_shift;
-    total_size_ = total_size;
-
-    if (init_chunks > 0) {
-        commit(0, init_chunks);
+    if (init.initChunks > 0) {
+        commit(0, init.initChunks);
     }
 }
 

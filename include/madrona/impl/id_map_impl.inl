@@ -23,11 +23,11 @@ IDMap<K, V, StoreT>::Cache::Cache()
 
 template <typename K, typename V, template <typename> typename StoreT>
 IDMap<K, V, StoreT>::IDMap(uint32_t init_capacity)
-    : free_head_(FreeHead {
+    : store_(init_capacity),
+      free_head_(FreeHead {
           .gen = 0,
           .head = ~0u,
-      }),
-      store_(init_capacity)
+      })
 {
     assert(init_capacity % ids_per_cache_ == 0);
 
@@ -122,8 +122,13 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
     // to suppress this would be to move globalNext out of the union and
     // switch the read to a relaxed atomic load, at the cost of 4 bytes more
     // storage per node that can't be shared with V.
-    auto getGlobalNext =
-            [](Node *cur_head) MADRONA_ALWAYS_INLINE TSAN_DISABLED {
+    auto getGlobalNext = [](Node *cur_head) 
+#ifdef TSAN_ENABLED
+        TSAN_DISABLED 
+#else
+        MADRONA_ALWAYS_INLINE 
+#endif
+    {
         return cur_head->freeNode.globalNext;
     };
 

@@ -21,8 +21,8 @@ struct Position : madrona::math::Vector3 {
     {}
 };
 
-struct Health {
-    int hp;
+struct alignas(MADRONA_CACHE_LINE) Health {
+    std::atomic_int hp;
 };
 
 struct Mana {

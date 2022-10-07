@@ -16,7 +16,7 @@ namespace madrona {
 class VirtualRegion {
 public:
     VirtualRegion(uint64_t max_bytes, uint64_t chunk_shift,
-                  uint64_t aligment, uint64_t init_chunks);
+                  uint64_t alignment, uint64_t init_chunks);
     ~VirtualRegion();
 
     VirtualRegion(const VirtualRegion &) = delete;
@@ -28,7 +28,10 @@ public:
     inline uint64_t chunkSize() const { return 1 << chunk_shift_; }
 
 private:
-    char *base_;
+    struct Init;
+    inline VirtualRegion(Init init);
+
+    char *const base_;
     uint64_t chunk_shift_;
     uint64_t total_size_;
 };
@@ -59,7 +62,7 @@ public:
 
 private:
     VirtualRegion region_;
-    void *data_;
+    void *const data_;
     uint32_t bytes_per_item_;
     uint32_t start_offset_;
     uint32_t committed_chunks_;

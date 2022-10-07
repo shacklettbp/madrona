@@ -91,21 +91,19 @@ Game::Game(Engine &ctx, const BenchmarkConfig &bench)
 
     // Entity creation / deletion is not thread safe
     for (int i = 0; i < init_num_dragons; i++) {
-        Position rand_pos = randomPosition(worldBounds);
-        Health health { dragon_hp };
-        Action act { 0 };
-        Mana mp { mp_dist(randGen()) };
-
-        ctx.makeEntityNow<Dragon>(rand_pos, health, act, mp);
+        Entity e = ctx.makeEntityNow<Dragon>();
+        ctx.get<Position>(e).value() = randomPosition(worldBounds);
+        ctx.get<Health>(e).value().hp = dragon_hp;
+        ctx.get<Action>(e).value().remainingTime = 0;
+        ctx.get<Mana>(e).value().mp = mp_dist(randGen());
     }
 
     for (int i = 0; i < init_num_knights; i++) {
-        Position rand_pos = randomPosition(worldBounds);
-        Health health { knight_hp };
-        Action act { 0 };
-        Quiver q { arrows_dist(randGen()) };
-
-        ctx.makeEntityNow<Knight>(rand_pos, health, act, q);
+        Entity e = ctx.makeEntityNow<Knight>();
+        ctx.get<Position>(e).value() = randomPosition(worldBounds);
+        ctx.get<Health>(e).value().hp = knight_hp;
+        ctx.get<Action>(e).value().remainingTime = 0;
+        ctx.get<Quiver>(e).value().numArrows = arrows_dist(randGen());
     }
 }
 

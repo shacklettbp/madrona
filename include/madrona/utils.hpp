@@ -13,6 +13,7 @@
 #include <madrona/crash.hpp>
 
 namespace madrona {
+
 namespace utils {
 
 #ifdef MADRONA_GPU_MODE

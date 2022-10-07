@@ -7,6 +7,12 @@
  */
 #pragma once
 
+#include <madrona/virtual.hpp>
+#include <madrona/macros.hpp>
+#include <madrona/sync.hpp>
+#include <madrona/types.hpp>
+
+#include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <cstdint>
@@ -14,6 +20,55 @@
 #include <utility>
 
 namespace madrona {
+
+class OSAlloc {
+    struct Block;
+public:
+    class Cache {
+    public:
+        Cache();
+        Cache(const Cache &) = delete;
+        Cache(Cache &&o);
+
+    private:
+        uint32_t cache_head_;
+        uint32_t num_cache_blocks_;
+
+    friend class OSAlloc;
+    };
+
+    OSAlloc();
+
+    void * getChunk(Cache &cache);
+    void freeChunk(Cache &cache, void *ptr);
+
+    static constexpr uint64_t chunkSize() { return chunk_size_; }
+    static constexpr uint64_t chunkShift() { return chunk_shift_; }
+
+private:
+    struct alignas(std::atomic_uint64_t) FreeHead {
+        uint32_t gen;
+        uint32_t head;
+    };
+
+    // 256 KiB chunks
+    static constexpr uint64_t chunk_shift_ = 18;
+    static constexpr uint64_t chunk_size_ = 1_u64 << chunk_shift_;
+
+    struct Block {
+        union {
+            uint32_t nextFree;
+            char data[chunk_size_];
+        };
+    };
+
+    inline Block * getBlock(uint32_t idx);
+
+    VirtualRegion region_;
+    uint64_t mapped_chunks_;
+    alignas(MADRONA_CACHE_LINE) std::atomic<FreeHead> free_head_;
+    utils::SpinLock expand_lock_;
+};
 
 // Virtual Adapter
 class PolyAlloc {
