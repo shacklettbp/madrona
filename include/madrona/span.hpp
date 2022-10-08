@@ -7,6 +7,8 @@
  */
 #pragma once
 
+#include <madrona/types.hpp>
+
 #include <array>
 #include <cstdint>
 #include <initializer_list>
@@ -16,7 +18,7 @@ namespace madrona {
 template <typename T>
 class Span {
 public:
-    Span(T *ptr, uint32_t num_elems)
+    Span(T *ptr, CountT num_elems)
         : ptr_(ptr), n_(num_elems)
     {}
 
@@ -35,16 +37,16 @@ public:
 
     constexpr T * data() const { return ptr_; }
 
-    constexpr uint32_t size() const { return n_; }
+    constexpr CountT size() const { return n_; }
 
-    T & operator[](uint32_t idx) const { return ptr_[idx]; }
+    T & operator[](IdxT idx) const { return ptr_[idx]; }
 
     T * begin() const { return ptr_; }
     T * end() const { return ptr_ + n_; }
 
 private:
     T *ptr_;
-    uint32_t n_;
+    CountT n_;
 };
 
 }

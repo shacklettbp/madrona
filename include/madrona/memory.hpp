@@ -52,7 +52,7 @@ private:
     };
 
     // 256 KiB chunks
-    static constexpr uint64_t chunk_shift_ = 18;
+    static constexpr uint64_t chunk_shift_ = 12;
     static constexpr uint64_t chunk_size_ = 1_u64 << chunk_shift_;
 
     struct Block {

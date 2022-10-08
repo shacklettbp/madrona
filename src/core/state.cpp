@@ -324,7 +324,7 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
 
     archetype_stores_[id].emplace(ArchetypeStore::Init {
         offset,
-        components.size(),
+        uint32_t(components.size()),
         id,
         Span(type_infos.data(), num_total_components),
         Span(lookup_input.data(), num_user_components),

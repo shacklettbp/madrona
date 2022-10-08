@@ -43,8 +43,12 @@ public:
         }
     }
 
+    // Test and test-and-set
     bool tryLock()
     {
+        bool is_locked = lock_.test(std::memory_order_relaxed);
+        if (is_locked) return false;
+
         bool prev_locked = lock_.test_and_set(std::memory_order_relaxed);
 
         if (prev_locked) {
