@@ -6,16 +6,16 @@ namespace madrona {
 
 // A lock-free list implemented as a linked-list of blocks.
 // Iterable from front to back but not indexable
-template <typename T>
-class BlockList {
+template <typename T, uint64_t num_writers>
+class MultiWriterList {
     struct Block;
 public:
     using RefT = std::add_lvalue_reference_t<T>;
 
-    BlockList();
-    BlockList(const BlockList &) = delete;
-    BlockList(BlockList &&o);
-    ~BlockList();
+    MultiWriterList();
+    MultiWriterList(const MultiWriterList &) = delete;
+    MultiWriterList(MultiWriterList &&o);
+    ~MultiWriterList();
 
     inline RefT push_back(T &&v)
     {
@@ -75,8 +75,8 @@ private:
 friend class Iter;
 };
 
-template <typename T>
-auto BlockList<T>::Iter::operator++() -> Iter &
+template <typename T, uint64_t num_writers>
+auto MultiWriterList<T, num_writers>::Iter::operator++() -> Iter &
 {
     ++offset_;
 
@@ -86,8 +86,8 @@ auto BlockList<T>::Iter::operator++() -> Iter &
     }
 }
 
-template <typename T>
-auto BlockList<T>::Iter::operator++(int) -> Iter
+template <typename T, uint64_t num_writers>
+auto MultiWriterList<T, num_writers>::Iter::operator++(int) -> Iter
 {
     Iter next = *this;
     return ++next;
