@@ -42,6 +42,6 @@ private:
 };
 
 // Not necessary on CPU-side currently
-template <typename ContextT, typename BaseT> class TrainingEntry {};
+template <typename ContextT, typename BaseT> class GPUEntry {};
 
 }

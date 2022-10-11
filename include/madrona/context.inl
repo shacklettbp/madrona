@@ -107,7 +107,6 @@ template <typename Fn, typename... Deps>
 JobID Context::submitN(Fn &&fn, uint32_t num_invocations,
                        bool is_child, Deps && ... dependencies)
 {
-    assert(num_invocations > 0);
     return submitNImpl<Context>(std::forward<Fn>(fn), num_invocations,
         is_child, std::forward<Deps>(dependencies)...);
 }
@@ -155,6 +154,7 @@ template <typename ContextT, typename Fn, typename... Deps>
 JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
                            Deps && ...dependencies)
 {
+    assert(num_invocations > 0);
     JobID parent_id = is_child ? cur_job_id_ : JobID::none();
 
     return submitNImpl<ContextT>(std::forward<Fn>(fn), num_invocations,
