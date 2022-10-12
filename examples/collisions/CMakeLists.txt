@@ -1,5 +1,5 @@
 set(COLLISION_EXAMPLE_SRCS
-    collisions.hpp collisions.inl collisions.cpp
+    collisions.hpp collisions.cpp
 )
 
 add_library(collisions_sw_core STATIC
@@ -14,13 +14,6 @@ add_library(collisions_mw_core STATIC
 )
 target_link_libraries(collisions_mw_core PUBLIC
     madrona_mw_core
-)
-
-add_library(collisions_gpu_core STATIC
-    ${COLLISION_EXAMPLE_SRCS}
-)
-target_link_libraries(collisions_gpu_core PUBLIC
-    madrona_mw_gpu
 )
 
 add_executable(collisions_sw
@@ -45,8 +38,8 @@ if (TARGET madrona_mw_gpu)
             COLLISIONS_SRC_LIST
         FLAGS_DEFN
             COLLISIONS_COMPILE_FLAGS
-        SRC_TARGETS
-            collisions_gpu_core
+        SRCS 
+            ${COLLISION_EXAMPLE_SRCS}
     )
 
     add_executable(collisions_gpu

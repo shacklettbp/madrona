@@ -27,7 +27,7 @@ static void launch(const BenchmarkConfig &bench,
             threads.emplace_back([&bench, &starts, i]() {
                 StateManager state_mgr;
 
-                JobManager job_mgr(JobManager::makeEntry<Engine, Game>(
+                JobManager job_mgr(JobManager::makeEntry<Engine>(
                     [&bench, &starts, i](Engine &ctx) {
                         starts[i] = std::chrono::steady_clock::now();
                         Game::entry(ctx, bench);
@@ -55,7 +55,7 @@ static void launch(const BenchmarkConfig &bench,
     } else {
         StateManager state_mgr;
 
-        JobManager job_mgr(JobManager::makeEntry<Engine, Game>(
+        JobManager job_mgr(JobManager::makeEntry<Engine>(
             [&bench](Engine &ctx) {
                 Game::entry(ctx, bench);
             }), 0, 0, &state_mgr);

@@ -4,10 +4,10 @@ namespace madrona {
 
 namespace mwGPU {
 
-namespace ICfg {
+namespace consts {
 
-static constexpr uint32_t numWarpThreads = 32;
-static constexpr uint32_t numJobLaunchKernelThreads = 256;
+inline constexpr uint32_t numWarpThreads = 32;
+inline constexpr uint32_t numJobLaunchKernelThreads = 256;
 
 }
 

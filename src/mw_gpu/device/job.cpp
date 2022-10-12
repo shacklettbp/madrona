@@ -12,7 +12,7 @@
 #include <madrona/context.hpp>
 #include <madrona/utils.hpp>
 
-#include <madrona/gpu_train/const.hpp>
+#include <madrona/mw_gpu/const.hpp>
 
 extern "C" {
 __constant__ madrona::mwGPU::GPUImplConsts madronaTrainGPUImplConsts;
@@ -724,8 +724,8 @@ void Context::markJobFinished(uint32_t num_jobs)
 
 extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     uint32_t num_worlds,
-    uint32_t num_ctx_data_bytes,
-    uint32_t ctx_data_alignment,
+    uint32_t num_world_data_bytes,
+    uint32_t world_data_alignment,
     madrona::mwGPU::GPUImplConsts *out_constants,
     size_t *job_system_buffer_size)
 {
@@ -737,18 +737,18 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
 
     uint32_t max_num_jobs = ICfg::numJobGrids * max_num_jobs_per_grid;
 
-    size_t total_bytes = sizeof(JobManager);
+    uint64_t total_bytes = sizeof(JobManager);
 
     uint64_t state_mgr_offset = utils::roundUp(total_bytes,
         std::alignment_of_v<StateManager>);
 
     total_bytes = state_mgr_offset + sizeof(StateManager);
 
-    uint64_t ctx_data_offset =
-        utils::roundUp(total_bytes, (size_t)ctx_data_alignment);
+    uint64_t world_data_offset =
+        utils::roundUp(total_bytes, (uint64_t)world_data_alignment);
 
     total_bytes =
-        ctx_data_offset + (size_t)num_ctx_data_bytes * num_worlds;
+        world_data_offset + (uint64_t)num_world_data_bytes * num_worlds;
 
     uint64_t grid_offset = utils::roundUp(total_bytes,
         std::alignment_of_v<JobGridInfo>);
@@ -765,16 +765,16 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     uint64_t tracker_offset = madrona::utils::roundUp(total_bytes,
         std::alignment_of_v<JobTracker>);
 
-    // FIXME: using max_num_jobs for this doesn't quite max sense, because
+    // FIXME: using max_num_jobs for this doesn't quite make sense, because
     // there will be more outstanding trackers than waiting jobs due to
     // parent trackers remaining alive until children finish
-    total_bytes = tracker_offset + sizeof(JobTracker) * max_num_jobs;
+    total_bytes = tracker_offset + sizeof(JobTracker) * max_num_jobs * 2;
 
     *out_constants = GPUImplConsts {
         .jobSystemAddr = (void *)0ul,
         .stateManagerAddr = (void *)state_mgr_offset,
-        .ctxDataAddr = (void *)ctx_data_offset,
-        .numCtxDataBytes = num_ctx_data_bytes,
+        .worldDataAddr = (void *)ctx_data_offset,
+        .numWorldDataBytes = num_world_data_bytes,
         .jobGridsOffset = (uint32_t)grid_offset,
         .jobListOffset = (uint32_t)wait_job_offset,
         .maxJobsPerGrid = max_num_jobs_per_grid,

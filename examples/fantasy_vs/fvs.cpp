@@ -38,6 +38,7 @@ static Vector3 randomPosition(const AABB &bounds)
 }
 
 Game::Game(Engine &ctx, const BenchmarkConfig &bench)
+    : WorldBase(ctx)
 {
     // World attributes (constant for now)
     tickCount = 0;

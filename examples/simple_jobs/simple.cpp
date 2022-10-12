@@ -8,73 +8,39 @@
 #include "simple.hpp"
 
 #include <cinttypes>
-#include <random>
 
 using namespace madrona;
 using namespace madrona::math;
 
 namespace SimpleExample {
 
-// FIXME: thread-safe random number generator.
-// Need to provide this as subroutine in the framework for GPU compat
-static std::mt19937 & randGen()
-{
-    //thread_local std::mt19937 rand_gen { std::random_device {}() };
-    thread_local std::mt19937 rand_gen { 0 };
-
-    return rand_gen;
-}
-
-static Vector3 randomPosition(const AABB &bounds)
-{
-    std::uniform_real_distribution<float> x_dist(bounds.pMin.x, bounds.pMax.x);
-    std::uniform_real_distribution<float> y_dist(bounds.pMin.y, bounds.pMax.y);
-    std::uniform_real_distribution<float> z_dist(bounds.pMin.z, bounds.pMax.z);
-    
-    return Vector3 {
-        x_dist(randGen()),
-        y_dist(randGen()),
-        z_dist(randGen()),
-    };
-}
-
-SimpleSim::SimpleSim(Engine &)
+SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
+    : WorldBase(ctx)
 {
     // World attributes (constant for now)
     tickCount = 0;
     deltaT = 1.f / 60.f;
 
-    worldBounds = {
-        .pMin = Vector3 { -10, -10, 0, },
-        .pMax = Vector3 { 10, 10, 10, },
-    };
+    worldBounds = env_init.worldBounds;
 
-    const int init_num_objects = 100;
-    const int max_collisions = init_num_objects * init_num_objects;
+    const int max_collisions = env_init.numObjs * env_init.numObjs;
 
     sphereObjects =
-        (SphereObject *)malloc(sizeof(SphereObject) * init_num_objects);
+        (SphereObject *)malloc(sizeof(SphereObject) * env_init.numObjs);
     candidatePairs = (CandidatePair *)malloc(
         sizeof(CandidatePair) * max_collisions);
     contacts = (ContactData *)malloc(
         sizeof(ContactData) * max_collisions);
 
-    numSphereObjects = init_num_objects;
+    numSphereObjects = env_init.numObjs;
     numCandidatePairs = 0;
     numContacts = 0;
 
-    std::uniform_real_distribution<float> angle_dist(0.f, M_PI); 
-    for (int i = 0; i < init_num_objects; i++) {
-        Translation rand_pos = randomPosition(worldBounds);
-        Rotation rand_rot = Quat::angleAxis(angle_dist(randGen()),
-            Vector3 { 0, 1, 0 });
-
-        PhysicsAABB aabb = AABB::invalid();
-
+    for (int64_t i = 0; i < (int64_t)env_init.numObjs; i++) {
         sphereObjects[i] = SphereObject {
-            rand_pos,
-            rand_rot,
-            aabb,
+            env_init.objsInit[i].initPosition,
+            env_init.objsInit[i].initRotation,
+            AABB::invalid(),
         };
     }
 }
@@ -223,20 +189,20 @@ static void simLoop(Engine &ctx)
     ctx.currentJobID());
 }
 
-void SimpleSim::entry(Engine &ctx)
+void SimpleSim::entry(Engine &ctx, const EnvInit &env_init)
 {
     SimpleSim &sim = ctx.sim();
     // Initialization
-    new (&sim) SimpleSim(ctx);
+    new (&sim) SimpleSim(ctx, env_init);
 
     simLoop(ctx);
 }
 
-void SimpleSim::init(Engine &ctx)
+void SimpleSim::init(Engine &ctx, const EnvInit &env_init)
 {
     SimpleSim &sim = ctx.sim();
     // Initialization
-    new (&sim) SimpleSim(ctx);
+    new (&sim) SimpleSim(ctx, env_init);
 }
 
 void SimpleSim::update(Engine &ctx)

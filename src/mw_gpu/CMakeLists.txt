@@ -31,13 +31,13 @@ foreach(f ${DEVICE_SOURCES})
 endforeach()
 set(INTERNAL_SRC_LIST "${INTERNAL_SRC_LIST}")
 
-get_target_property(MADRONA_CORE_INCLUDES madrona_core INCLUDE_DIRECTORIES)
+get_target_property(MADRONA_COMMON_INCLUDES madrona_common INCLUDE_DIRECTORIES)
 get_target_property(MADRONA_MW_GPU_INCLUDES madrona_mw_gpu INCLUDE_DIRECTORIES)
 
 set(NVRTC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/device/include
+    ${MADRONA_COMMON_INCLUDES}
     ${MADRONA_MW_GPU_INCLUDES}
-    ${MADRONA_CORE_INCLUDES}
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 
@@ -59,12 +59,12 @@ target_compile_definitions(madrona_mw_gpu PRIVATE
 # Helper function for library users to get list of sources / compileflags
 function(madrona_build_compile_defns)
     set(one_val_args OUT_TARGET SOURCES_DEFN FLAGS_DEFN)
-    set(multi_val_args SRC_TARGETS CUSTOM_FLAGS)
+    set(multi_val_args SRCS EXISTING_TARGETS CUSTOM_FLAGS)
 
     cmake_parse_arguments(M "" "${one_val_args}" "${multi_val_args}"
                           ${ARGN})
 
-    set(ALL_TARGET_SOURCES "")
+    set(ALL_TARGET_SOURCES ${M_SRCS})
     set(ALL_TARGET_INCLUDES "")
     foreach(t ${M_SRC_TARGETS})
         get_target_property(TARGET_DIR ${t} SOURCE_DIR) 

@@ -58,7 +58,7 @@ struct BenchmarkConfig {
 };
 
 // Per-world state object (one per-world created by JobManager)
-struct Game {
+struct Game : public madrona::WorldBase {
     static void entry(Engine &ctx, const BenchmarkConfig &bench);
 
     Game(Engine &ctx, const BenchmarkConfig &bench);
@@ -87,16 +87,10 @@ struct Game {
 
 // madrona::Context subclass, allows easy access to per-world state through
 // game() method
-class Engine : public::madrona::CustomContext<Engine> {
+class Engine : public::madrona::CustomContext<Engine, Game> {
 public:
-    inline Engine(Game *game, madrona::WorkerInit &&init);
-
-    inline Game & game() { return *game_; }
-
-private:
-    Game *game_;
+    using CustomContext::CustomContext;
+    inline Game & game() { return data(); }
 };
 
 }
-
-#include "fvs.inl"

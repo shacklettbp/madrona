@@ -15,8 +15,8 @@ namespace mwGPU {
 struct GPUImplConsts {
     void *jobSystemAddr;
     void *stateManagerAddr;
-    void *ctxDataAddr;
-    uint32_t numCtxDataBytes;
+    void *worldDataAddr;
+    uint32_t numWorldDataBytes;
     uint32_t jobGridsOffset;
     uint32_t jobListOffset;
     uint32_t maxJobsPerGrid;

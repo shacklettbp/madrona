@@ -11,10 +11,10 @@
 
 namespace madrona {
 
-template <typename ContextT>
+template <typename ContextT, typename DataT>
 class CustomContext : public Context {
 public:
-    inline CustomContext(WorkerInit &&worker_init);
+    inline CustomContext(DataT *world_data, WorkerInit &&worker_init);
 
     template <typename Fn, typename... Deps>
     inline JobID submit(Fn &&fn, bool is_child = true,
@@ -29,6 +29,14 @@ public:
     inline JobID parallelFor(const Query<ComponentTs...> &query, Fn &&fn,
                              bool is_child = true,
                              Deps && ... dependencies);
+
+    inline DataT & data() { return *static_cast<DataT *>(data_); }
+
+private:
+    using WorldDataT = DataT;
+
+friend class Context;
+friend class JobManager;
 };
 
 }

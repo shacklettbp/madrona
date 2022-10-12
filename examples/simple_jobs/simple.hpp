@@ -48,14 +48,25 @@ struct SphereObject {
     PhysicsAABB aabb;
 };
 
+struct ObjectInit {
+    Translation initPosition;
+    Rotation initRotation;
+};
+
+struct EnvInit {
+    madrona::math::AABB worldBounds;
+    ObjectInit *objsInit;
+    uint32_t numObjs;
+};
+
 class Engine;
 
 // Per-world state object (one per-world created by JobManager)
-struct SimpleSim {
-    SimpleSim(Engine &ctx);
+struct SimpleSim : public madrona::WorldBase {
+    SimpleSim(Engine &ctx, const EnvInit &env_init);
 
-    static void entry(Engine &ctx);
-    static void init(Engine &ctx);
+    static void entry(Engine &ctx, const EnvInit &env_init);
+    static void init(Engine &ctx, const EnvInit &env_init);
     static void update(Engine &ctx);
 
     uint64_t tickCount;
@@ -74,19 +85,10 @@ struct SimpleSim {
     madrona::utils::SpinLock contactCreateLock {};
 };
 
-// madrona::Context subclass, allows easy access to per-world state through
-// game() method
-class Engine : public::madrona::CustomContext<Engine> {
+class Engine : public::madrona::CustomContext<Engine, SimpleSim> {
 public:
-    inline Engine(SimpleSim *sim, madrona::WorkerInit &&init)
-        : madrona::CustomContext<Engine>(std::move(init)),
-          sim_(sim)
-    {}
-
-    inline SimpleSim & sim() { return *sim_; }
-
-private:
-    SimpleSim *sim_;
+    using CustomContext::CustomContext;
+    inline SimpleSim & sim() { return data(); }
 };
 
 }

@@ -9,14 +9,14 @@
 
 #include <cstdint>
 
-#include <madrona/mw_gpu/entry.hpp>
+#include "mw_gpu/entry.hpp"
 
 namespace madrona {
 
-template <typename ContextT, typename BaseT>
-class TrainingEntry : mwGPU::EntryBase<BaseT> {
+template <typename ContextT, typename InitT, typename BaseT>
+class GPUEntry : mwGPU::EntryBase<BaseT> {
 public:
-    static void submitInit(uint32_t invocation_idx);
+    static void submitInit(uint32_t invocation_idx, void *world_init_ptr);
     static void submitRun(uint32_t invocation_idx);
 
 private:
@@ -25,4 +25,4 @@ private:
 
 }
 
-#include "train.inl"
+#include "mw_gpu.inl"

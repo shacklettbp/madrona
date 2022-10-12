@@ -74,15 +74,15 @@ struct JobManager::EntryConfig {
     void (*updateLoop)(Context *, void *);
 };
 
-template <typename ContextT, typename DataT, typename StartFn>
+template <typename ContextT, typename StartFn>
 JobManager::EntryConfig<StartFn, void (*)(Context *, void *)>
     JobManager::makeEntry(StartFn &&start_fn)
 {
-    return makeEntry<ContextT, DataT, StartFn, void (*)(Context *, void *)>(
+    return makeEntry<ContextT, StartFn, void (*)(Context *, void *)>(
         std::forward<StartFn>(start_fn), nullptr);
 }
 
-template <typename ContextT, typename DataT, typename StartFn,
+template <typename ContextT, typename StartFn,
           typename UpdateFn>
 JobManager::EntryConfig<StartFn, UpdateFn> JobManager::makeEntry(
     StartFn &&start_fn, UpdateFn &&update_fn)
@@ -119,6 +119,8 @@ JobManager::EntryConfig<StartFn, UpdateFn> JobManager::makeEntry(
         update_wrapper = update_fn;
         update_fn = nullptr;
     }
+
+    using DataT = typename ContextT::WorldDataT;
 
     return {
         sizeof(DataT),

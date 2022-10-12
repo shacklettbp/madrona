@@ -10,7 +10,7 @@
 #include <madrona/job.hpp>
 #include <madrona/state.hpp>
 
-#include <madrona/mw_gpu/worker_init.hpp>
+#include "mw_gpu/worker_init.hpp"
 
 namespace madrona {
 
@@ -29,21 +29,22 @@ public:
         bool is_child = true, Deps && ...dependencies);
 
     template <typename... ColTypes, typename Fn, typename... Deps>
-    inline JobID forAll(const Query<ColTypes...> &query, Fn &&fn,
-                        bool is_child = true,
-                        Deps && ... dependencies);
+    inline JobID parallelFor(const Query<ColTypes...> &query, Fn &&fn,
+        bool is_child = true, Deps && ... dependencies);
 
     void markJobFinished(uint32_t num_jobs);
+
+    inline uint32_t worldID() const { return world_id_; }
 
 protected:
     template <typename ContextT, typename Fn, typename... Deps>
     inline JobID submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
                             Deps && ... dependencies);
 
-    template <typename ContextT, typename... ColTypes, typename Fn,
-              typename... Deps>
-    inline JobID forAllImpl(const Query<ColTypes...> &query, Fn &&fn,
-                            bool is_child, Deps && ... dependencies);
+    template <typename ContextT, typename... ComponentTs,
+              typename Fn, typename... Deps>
+    inline JobID parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
+                                 bool is_child, Deps && ... dependencies);
 
 private:
     struct WaveInfo {

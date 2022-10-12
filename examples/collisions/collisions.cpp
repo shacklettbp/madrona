@@ -39,6 +39,7 @@ static Vector3 randomPosition(const AABB &bounds)
 }
 
 CollisionSim::CollisionSim(Engine &ctx)
+    : WorldBase(ctx)
 {
     // World attributes (constant for now)
     tickCount = 0;

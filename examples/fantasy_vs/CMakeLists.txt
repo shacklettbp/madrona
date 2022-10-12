@@ -1,5 +1,5 @@
 set(FVS_CORE_SRCS
-    fvs.hpp fvs.inl fvs.cpp
+    fvs.hpp fvs.cpp
 )
 
 add_library(fvs_sw_core STATIC

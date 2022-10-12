@@ -65,12 +65,11 @@ class JobManager {
 public:
     template <typename StartFn, typename UpdateFn> struct EntryConfig;
 
-    template <typename ContextT, typename DataT, typename StartFn>
+    template <typename ContextT, typename StartFn>
     static EntryConfig<StartFn, void (*)(Context *, void *)> makeEntry(
         StartFn &&start_fn);
 
-    template <typename ContextT, typename DataT, typename StartFn,
-              typename UpdateFn>
+    template <typename ContextT, typename StartFn, typename UpdateFn>
     static EntryConfig<StartFn, UpdateFn> makeEntry(StartFn &&start_fn,
                                                     UpdateFn &&update_fn);
 

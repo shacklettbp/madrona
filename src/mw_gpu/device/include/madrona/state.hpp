@@ -11,7 +11,8 @@
 #include <array>
 
 #include <madrona/ecs.hpp>
-#include <madrona/utils.hpp>
+#include <madrona/sync.hpp>
+#include <madrona/query.hpp>
 
 namespace madrona {
 

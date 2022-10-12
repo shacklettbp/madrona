@@ -14,7 +14,7 @@ static void launch(int num_worlds, const BenchmarkConfig &bench)
 
     HeapArray<std::chrono::time_point<std::chrono::steady_clock>> starts(
         num_worlds);
-    JobManager job_mgr(JobManager::makeEntry<Engine, Game>(
+    JobManager job_mgr(JobManager::makeEntry<Engine>(
         [&bench, &starts](Engine &ctx) {
             starts[ctx.worldID()] = std::chrono::steady_clock::now();
             Game::entry(ctx, bench);

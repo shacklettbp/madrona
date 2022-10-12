@@ -17,10 +17,10 @@ __global__ void jobEntry(mwGPU::JobBase *job_data,
                         uint32_t num_invocations,
                         uint32_t grid_id)
 {
-    uint32_t lane_id = threadIdx.x % ICfg::numWarpThreads;
+    uint32_t lane_id = threadIdx.x % consts::numWarpThreads;
 
     uint32_t invocation_idx =
-        threadIdx.x + blockIdx.x * ICfg::numJobLaunchKernelThreads;
+        threadIdx.x + blockIdx.x * consts::numJobLaunchKernelThreads;
 
     if (invocation_idx >= num_invocations) {
         return;
@@ -37,11 +37,28 @@ __global__ void jobEntry(mwGPU::JobBase *job_data,
         .laneID = lane_id,
     };
 
-    char *ctx_data_base = (char *)mwGPU::GPUImplConsts::get().ctxDataAddr;
-    void *ctx_data = ctx_data_base +
-        worker_init.worldID * mwGPU::GPUImplConsts::get().numCtxDataBytes;
+    constexpr bool is_generic_context = std::is_same_v<ContextT, Context>;
 
-    ContextT ctx(ctx_data, std::move(worker_init));
+    using DataT = std::conditional_t<is_generic_context, WorldBase,
+        typename ContextT::WorldDataT>;
+
+    DataT *world_data;
+
+    // If this is being called with the generic Context base class,
+    // we need to look up the size of the world data in constant memory
+    if constexpr (is_generic_context) {
+        char *world_data_base = 
+            (char *)mwGPU::GPUImplConsts::get().worldDataAddr;
+        world_data = (DataT *)(world_data_base + worker_init.worldID *
+            mwGPU::GPUImplConsts::get().numWorldDataBytes);
+    } else {
+        DataT *world_data_base =
+            (DataT *)mwGPU::GPUImplConsts::get().worldDataAddr;
+
+        world_data = world_data_base + worker_init.worldID;
+    }
+
+    ContextT ctx(world_data, std::move(worker_init));
 
     (job_container.fn)(ctx);
 

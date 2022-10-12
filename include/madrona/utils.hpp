@@ -23,6 +23,16 @@ inline int __builtin_clz(int v)
     return __clz(v);
 }
 
+inline int __builtin_clzl(long int v)
+{
+    return __clzll(v);
+}
+
+inline int __builtin_clzll(long long int v)
+{
+    return __clzll(v);
+}
+
 #endif
 
 template <typename T>

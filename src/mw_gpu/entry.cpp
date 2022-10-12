@@ -357,9 +357,10 @@ HeapArray<void *> makeKernelArgBuffer(Ts ...args)
 }
 
 static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
-                                             void *ctx_data,
-                                             uint32_t num_ctx_data_bytes,
-                                             uint32_t ctx_data_alignment,
+                                             uint32_t num_world_data_bytes,
+                                             uint32_t world_data_alignment,
+                                             void *world_init_ptr,
+                                             uint32_t num_world_init_bytes,
                                              const GPUKernels &gpu_kernels,
                                              cudaStream_t strm)
 {
@@ -371,6 +372,12 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
                               0, strm, nullptr, args.data()));
     };
 
+    uint64_t num_init_bytes =
+        (uint64_t)num_world_init_bytes * (uint64_t)num_worlds;
+    auto init_tmp_buffer = cu::allocGPU(num_init_bytes);
+    cudaMemcpyAsync(init_tmp_buffer, world_init_ptr,
+                    num_init_bytes, cudaMemcpyHostToDevice, strm);
+
     auto gpu_consts_readback = (GPUImplConsts *)cu::allocReadback(
         sizeof(GPUImplConsts));
 
@@ -378,12 +385,12 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
         sizeof(size_t));
 
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
-                                                   num_ctx_data_bytes,
-                                                   ctx_data_alignment,
+                                                   num_world_data_bytes,
+                                                   world_data_alignment,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
-    auto queue_args = makeKernelArgBuffer(num_worlds);
+    auto queue_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
 
     auto no_args = makeKernelArgBuffer();
 
@@ -405,16 +412,9 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
         (char *)gpu_consts_readback->stateManagerAddr +
         (uintptr_t)gpu_state_buffer;
 
-    gpu_consts_readback->ctxDataAddr =
-        (char *)gpu_consts_readback->ctxDataAddr +
+    gpu_consts_readback->worldDataAddr =
+        (char *)gpu_consts_readback->worldDataAddr +
         (uintptr_t)gpu_state_buffer;
-
-    for (int i = 0; i < (int)num_worlds; i++) {
-        cudaMemcpyAsync((char *)gpu_consts_readback->ctxDataAddr +
-                            i * num_ctx_data_bytes,
-                        ctx_data, num_ctx_data_bytes,
-                        cudaMemcpyHostToDevice, strm);
-    }
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
@@ -437,6 +437,8 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
                  ICfg::numJobSystemKernelThreads, no_args);
 
     REQ_CUDA(cudaStreamSynchronize(strm));
+
+    cu::deallocGPU(init_tmp_buffer);
 
     return GPUEngineState {
         gpu_state_buffer,
@@ -491,21 +493,22 @@ static CUgraphExec makeRunGraph(CUfunction queue_run_kernel,
     return run_graph_exec;
 }
 
-TrainingExecutor::TrainingExecutor(const TrainConfig &train_cfg,
+TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
                                    const CompileConfig &compile_cfg)
     : impl_(nullptr)
 {
     auto strm = cu::makeStream();
     
-    GPUKernels gpu_kernels = buildKernels(compile_cfg, train_cfg.gpuID);
+    GPUKernels gpu_kernels = buildKernels(compile_cfg, state_cfg.gpuID);
 
     GPUEngineState eng_state = initEngineAndUserState(
-        train_cfg.numWorlds, train_cfg.ctxData, train_cfg.numCtxDataBytes,
-        train_cfg.ctxDataAlignment, gpu_kernels, strm);
+        state_cfg.numWorlds, state_cfg.numWorldDataBytes,
+        state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
+        state_cfg.numWorldInitBytes, gpu_kernels, strm);
 
     auto run_graph = makeRunGraph(gpu_kernels.queueUserRun,
                                   gpu_kernels.runJobSystem,
-                                  train_cfg.numWorlds);
+                                  state_cfg.numWorlds);
 
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,

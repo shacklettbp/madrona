@@ -19,7 +19,7 @@ static void launch(int num_worlds)
 {
     StateManager state_mgr(num_worlds);
 
-    JobManager job_mgr(JobManager::makeEntry<Engine, CollisionSim>(
+    JobManager job_mgr(JobManager::makeEntry<Engine>(
         [](Engine &ctx) {
             CollisionSim::entry(ctx);
         }), 0, 0, &state_mgr);

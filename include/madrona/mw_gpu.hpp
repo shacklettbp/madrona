@@ -14,11 +14,12 @@
 
 namespace madrona {
 
-struct TrainConfig {
+struct StateConfig {
+    void *worldInitPtr;
+    uint32_t numWorldInitBytes;
+    uint32_t numWorldDataBytes;
+    uint32_t worldDataAlignment;
     uint32_t numWorlds;
-    void *ctxData;
-    uint32_t numCtxDataBytes;
-    uint32_t ctxDataAlignment;
     uint32_t gpuID;
 };
 
@@ -30,7 +31,7 @@ struct CompileConfig {
 
 class TrainingExecutor {
 public:
-    TrainingExecutor(const TrainConfig &train_cfg,
+    TrainingExecutor(const StateConfig &state_cfg,
                      const CompileConfig &compile_cfg);
     ~TrainingExecutor();
 

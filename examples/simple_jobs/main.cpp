@@ -10,6 +10,7 @@
 #include <fstream>
 
 #include "simple.hpp"
+#include "init.hpp"
 
 using namespace madrona;
 
@@ -18,13 +19,17 @@ namespace SimpleExample {
 static void launch()
 {
     StateManager state_mgr;
+
+    EnvInit env_init = generateEnvironmentInitialization();
     
-    JobManager job_mgr(JobManager::makeEntry<Engine, SimpleSim>(
-        [](Engine &ctx) {
-            SimpleSim::entry(ctx);
+    JobManager job_mgr(JobManager::makeEntry<Engine>(
+        [&env_init](Engine &ctx) {
+            SimpleSim::entry(ctx, env_init);
         }), 0, 0, &state_mgr);
     
     job_mgr.waitForAllFinished();
+
+    free(env_init.objsInit);
 }
 
 }

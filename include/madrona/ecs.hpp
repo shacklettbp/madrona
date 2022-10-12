@@ -7,6 +7,8 @@
  */
 #pragma once
 
+#include <madrona/fwd.hpp>
+
 #include <cstdint>
 
 namespace madrona {
@@ -34,6 +36,16 @@ struct IndexHelper {
 
 template <typename... ComponentTs> struct Archetype {
     using Base = Archetype<ComponentTs...>;
+};
+
+// Base class that per-world user data must inherit from
+// In the future may include any per-world data that the engine
+// itself needs. For now, just provides a common base that Context
+// stores a pointer to.
+class WorldBase {
+public:
+    inline WorldBase(Context &) {}
+    WorldBase(const WorldBase &) = delete;
 };
 
 inline bool operator==(Entity a, Entity b);

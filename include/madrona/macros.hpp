@@ -11,7 +11,7 @@
 #define MADRONA_X64 (1)
 #elif defined (__arm64__)
 #define MADRONA_ARM (1)
-#else
+#elif !defined (MADRONA_GPU_MODE)
 #error "Unsupported architecture"
 #endif
 
@@ -21,7 +21,7 @@
 #define MADRONA_CLANG (1)
 #elif defined(__GNUC__)
 #define MADRONA_GCC (1)
-#else
+#elif !defined(MADRONA_GPU_MODE)
 #error "Unsupported compiler"
 #endif
 

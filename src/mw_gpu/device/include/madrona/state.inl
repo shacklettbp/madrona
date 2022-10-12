@@ -1,5 +1,7 @@
 #pragma once
 
+#include <madrona/utils.hpp>
+
 namespace madrona {
 
 template <typename T>

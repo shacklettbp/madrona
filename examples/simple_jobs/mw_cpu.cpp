@@ -10,6 +10,7 @@
 #include <fstream>
 
 #include "simple.hpp"
+#include "init.hpp"
 
 using namespace madrona;
 
@@ -19,12 +20,17 @@ static void launch(int num_worlds)
 {
     StateManager state_mgr(num_worlds);
 
-    JobManager job_mgr(JobManager::makeEntry<Engine, SimpleSim>(
-        [](Engine &ctx) {
-            SimpleSim::entry(ctx);
+    // FIXME: Should have 1 initialization per world
+    EnvInit env_init = generateEnvironmentInitialization();
+
+    JobManager job_mgr(JobManager::makeEntry<Engine>(
+        [&env_init](Engine &ctx) {
+            SimpleSim::entry(ctx, env_init);
         }), 0, 0, &state_mgr);
 
     job_mgr.waitForAllFinished();
+
+    free(env_init.objsInit);
 }
 
 }

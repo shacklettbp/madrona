@@ -50,7 +50,7 @@ struct Contact : madrona::Archetype<ContactData> {};
 class Engine;
 
 // Per-world state object (one per-world created by JobManager)
-struct CollisionSim {
+struct CollisionSim : public madrona::WorldBase {
     CollisionSim(Engine &ctx);
 
     static void entry(Engine &ctx);
@@ -71,16 +71,10 @@ struct CollisionSim {
 
 // madrona::Context subclass, allows easy access to per-world state through
 // game() method
-class Engine : public::madrona::CustomContext<Engine> {
+class Engine : public::madrona::CustomContext<Engine, CollisionSim> {
 public:
-    inline Engine(CollisionSim *sim, madrona::WorkerInit &&init);
-
-    inline CollisionSim & sim() { return *sim_; }
-
-private:
-    CollisionSim *sim_;
+    using CustomContext::CustomContext;
+    inline CollisionSim & sim() { return data(); }
 };
 
 }
-
-#include "collisions.inl"

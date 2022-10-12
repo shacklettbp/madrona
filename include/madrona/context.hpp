@@ -16,7 +16,7 @@ namespace madrona {
 
 class Context {
 public:
-    Context(WorkerInit &&init);
+    Context(WorldBase *world_data, WorkerInit &&init);
     Context(const Context &) = delete;
 
     AllocContext mem;
@@ -80,9 +80,12 @@ public:
 
     inline JobID currentJobID() const;
 
+
 #ifdef MADRONA_MW_MODE
     inline uint32_t worldID() const;
 #endif
+
+    inline WorldBase & data() { return *data_; }
 
 protected:
     template <typename ContextT, typename Fn, typename... DepTs>
@@ -96,6 +99,8 @@ protected:
               typename... DepTs>
     inline JobID parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
                                  bool is_child, DepTs && ... dependencies);
+
+    WorldBase *data_;
 
 private:
     template <typename ContextT, typename Fn, typename... DepTs>

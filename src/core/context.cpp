@@ -11,8 +11,9 @@
 
 namespace madrona {
 
-Context::Context(WorkerInit &&init)
-    : job_mgr_(init.jobMgr),
+Context::Context(WorldBase *world_data, WorkerInit &&init)
+    : data_(world_data),
+      job_mgr_(init.jobMgr),
       state_mgr_(init.stateMgr),
       state_cache_(init.stateCache),
       io_mgr_(nullptr),

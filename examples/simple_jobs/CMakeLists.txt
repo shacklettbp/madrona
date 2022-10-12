@@ -16,10 +16,11 @@ target_link_libraries(simple_ex_mw_core PUBLIC
     madrona_mw_core
 )
 
-add_library(simple_ex_gpu_core STATIC
-    ${EXAMPLE_SRCS} gpu_entry.cpp
+add_library(simple_ex_init STATIC
+    init.cpp init.hpp
 )
-target_link_libraries(simple_ex_gpu_core PUBLIC
+
+target_link_libraries(simple_ex_init PRIVATE 
     madrona_mw_gpu
 )
 
@@ -27,14 +28,14 @@ add_executable(simple_ex_sw
     main.cpp
 )
 target_link_libraries(simple_ex_sw PRIVATE
-    simple_ex_sw_core
+    simple_ex_sw_core simple_ex_init
 )
 
 add_executable(simple_ex_mw
     mw_cpu.cpp
 )
 target_link_libraries(simple_ex_mw PRIVATE
-    simple_ex_mw_core
+    simple_ex_mw_core simple_ex_init
 )
 
 if (TARGET madrona_mw_gpu)
@@ -45,8 +46,8 @@ if (TARGET madrona_mw_gpu)
             SIMPLE_EX_SRC_LIST
         FLAGS_DEFN
             SIMPLE_EX_COMPILE_FLAGS
-        SRC_TARGETS
-            simple_ex_gpu_core
+        SRCS 
+            ${EXAMPLE_SRCS} gpu_entry.cpp
     )
 
     add_executable(simple_ex_gpu
@@ -54,5 +55,5 @@ if (TARGET madrona_mw_gpu)
     )
 
     target_link_libraries(simple_ex_gpu PRIVATE
-        simple_ex_mw_core madrona_mw_gpu simple_ex_gpu_srcs)
+        simple_ex_mw_core simple_ex_init madrona_mw_gpu simple_ex_gpu_srcs)
 endif()
