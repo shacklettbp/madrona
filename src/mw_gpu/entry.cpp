@@ -26,8 +26,8 @@ using namespace madrona;
 
 namespace madrona {
 
-namespace ICfg {
-static constexpr uint32_t numJobSystemKernelThreads = 1024;
+namespace consts {
+static constexpr uint32_t numJobSystemKernelThreads = 512;
 static constexpr uint32_t numEntryQueueThreads = 512;
 }
 
@@ -399,6 +399,7 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
 
     REQ_CUDA(cudaStreamSynchronize(strm));
 
+    printf("%lu\n", *gpu_state_size_readback);
     auto gpu_state_buffer = cu::allocGPU(*gpu_state_size_readback);
 
     // The initial values of these pointers are equal to their offsets from
@@ -424,17 +425,17 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     REQ_CU(cuMemcpyHtoD(job_sys_consts_addr, gpu_consts_readback,
                         job_sys_consts_size));
 
-    launchKernel(gpu_kernels.init, 1, ICfg::numJobSystemKernelThreads,
+    launchKernel(gpu_kernels.init, 1, consts::numJobSystemKernelThreads,
                  no_args);
     
     uint32_t num_queue_blocks =
-        utils::divideRoundUp(num_worlds, ICfg::numEntryQueueThreads);
+        utils::divideRoundUp(num_worlds, consts::numEntryQueueThreads);
 
     launchKernel(gpu_kernels.queueUserInit, num_queue_blocks,
-                 ICfg::numEntryQueueThreads, queue_args); 
+                 consts::numEntryQueueThreads, queue_args); 
 
     launchKernel(gpu_kernels.runJobSystem, 1,
-                 ICfg::numJobSystemKernelThreads, no_args);
+                 consts::numJobSystemKernelThreads, no_args);
 
     REQ_CUDA(cudaStreamSynchronize(strm));
 
@@ -453,7 +454,7 @@ static CUgraphExec makeRunGraph(CUfunction queue_run_kernel,
     auto no_args = makeKernelArgBuffer();
 
     uint32_t num_queue_blocks = utils::divideRoundUp(num_worlds,
-        ICfg::numEntryQueueThreads);
+        consts::numEntryQueueThreads);
 
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
@@ -463,7 +464,7 @@ static CUgraphExec makeRunGraph(CUfunction queue_run_kernel,
         .gridDimX = num_queue_blocks,
         .gridDimY = 1,
         .gridDimZ = 1,
-        .blockDimX = ICfg::numEntryQueueThreads,
+        .blockDimX = consts::numEntryQueueThreads,
         .blockDimY = 1,
         .blockDimZ = 1,
         .sharedMemBytes = 0,
@@ -477,7 +478,7 @@ static CUgraphExec makeRunGraph(CUfunction queue_run_kernel,
 
     kernel_node_params.func = job_sys_kernel;
     kernel_node_params.gridDimX = 1;
-    kernel_node_params.blockDimX = ICfg::numJobSystemKernelThreads;
+    kernel_node_params.blockDimX = consts::numJobSystemKernelThreads;
     kernel_node_params.extra = no_args.data();
 
     CUgraphNode job_sys_node;

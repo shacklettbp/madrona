@@ -153,7 +153,7 @@ private:
     struct SchedulerState {
         uint32_t numWaiting;
         uint32_t numSleepingWorkers;
-        alignas(MADRONA_CACHE_LINE) utils::SpinLock lock;
+        utils::SpinLock lock;
     };
 
     template <typename ContextT, typename ContainerT>

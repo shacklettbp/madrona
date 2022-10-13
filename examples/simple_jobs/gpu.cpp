@@ -40,6 +40,8 @@ int main(int argc, char *argv[])
     }
 
     TrainingExecutor train_exec({
+        .worldInitPtr = env_inits.data(),
+        .numWorldInitBytes = sizeof(EnvInit),
         .numWorldDataBytes = sizeof(SimpleSim),
         .worldDataAlignment = alignof(SimpleSim),
         .numWorlds = uint32_t(num_worlds),
@@ -50,7 +52,7 @@ int main(int argc, char *argv[])
         { SIMPLE_EX_COMPILE_FLAGS },
     });
 
-    constexpr int64_t num_ticks = 1000; 
+    constexpr int64_t num_ticks = 100; 
 
     auto start = std::chrono::system_clock::now();
     for (int64_t i = 0; i < num_ticks; i++) {
@@ -61,7 +63,7 @@ int main(int argc, char *argv[])
     std::chrono::duration<double> diff = end - start;
     double elapsed = diff.count();
 
-    printf("%f %f\n", double(num_ticks * 1024) / elapsed, elapsed);
+    printf("%f %f\n", double(num_ticks * num_worlds) / elapsed, elapsed);
 
     for (int i = 0; i < num_worlds; i++) {
         cudaFree(env_inits[i].objsInit);

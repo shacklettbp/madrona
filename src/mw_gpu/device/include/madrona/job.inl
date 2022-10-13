@@ -43,11 +43,13 @@ template <typename Fn, size_t N>
 template <typename... DepTs>
 JobContainer<Fn, N>::JobContainer(JobID job_id,
                                   uint32_t world_id,
+                                  uint32_t num_invocations,
                                   Fn &&func,
                                   DepTs ...deps)
     : JobContainerBase {
           .jobID = job_id,
           .worldID = world_id,
+          .numInvocations = num_invocations,
           .numDependencies = N,
       },
       dependencies(deps...),

@@ -7,6 +7,8 @@
  */
 #pragma once
 
+#include <madrona/macros.hpp>
+
 #include <atomic>
 
 #if defined(__has_feature)
@@ -34,7 +36,7 @@ extern void __tsan_release(void *addr);
 namespace madrona {
 namespace utils {
 
-class SpinLock {
+class alignas(MADRONA_CACHE_LINE) SpinLock {
 public:
     void lock()
     {

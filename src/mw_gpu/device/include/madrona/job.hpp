@@ -23,6 +23,7 @@ struct JobID {
 struct JobContainerBase {
     JobID jobID;
     uint32_t worldID;
+    uint32_t numInvocations;
     uint32_t numDependencies;
 
     template <size_t N> struct DepsArray;
@@ -35,7 +36,7 @@ struct JobContainer : public JobContainerBase {
 
     template <typename... DepTs>
     inline JobContainer(JobID job_id, uint32_t world_id,
-                        Fn &&fn, DepTs ...deps);
+                        uint32_t num_invocations, Fn &&fn, DepTs ...deps);
 };
 
 struct Job {
@@ -44,14 +45,14 @@ struct Job {
                               uint32_t num_launches, uint32_t grid_id);
     EntryPtr fn;
     JobContainerBase *data;
-    uint32_t numInvocations;
+    uint32_t numCombinedJobs;
     uint32_t numBytesPerJob;
 };
 
 
 class JobManager {
 public:
-    uint32_t numOutstandingJobs;
+    uint32_t numOutstandingInvocations;
     uint32_t activeGrids[8];
 
     std::atomic<JobID> freeTrackerHead;

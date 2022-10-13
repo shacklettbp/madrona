@@ -42,7 +42,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-// Not necessary on CPU-side currently
-template <typename ContextT, typename BaseT> class GPUEntry {};
-
 }

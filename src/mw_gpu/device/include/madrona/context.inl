@@ -112,17 +112,18 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
 
     auto wave_info = computeWaveInfo();
 
-    JobID queue_job_id = getNewJobID(is_child);
+    JobID queue_job_id = getNewJobID(is_child, num_invocations);
 
     auto store = allocJob(sizeof(FnJobContainer), wave_info);
     new (store) FnJobContainer(queue_job_id, world_id_,
+                               num_invocations,
                                std::forward<Fn>(fn),
                                std::forward<DepTs>(dependencies)...);
 
     __syncwarp(wave_info.activeMask);
 
-    addToWaitList(func_ptr, store, num_invocations,
-                  sizeof(FnJobContainer), lane_id_, wave_info);
+    addToWaitList(func_ptr, store, num_invocations, sizeof(FnJobContainer),
+                  lane_id_, wave_info);
 
     __syncwarp(wave_info.activeMask);
 

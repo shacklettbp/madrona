@@ -26,14 +26,14 @@ namespace consts {
 static constexpr uint32_t maxNumJobsPerWorld = 1024;
 static constexpr uint32_t jobDataPerWorld = 65536;
 static constexpr uint32_t numJobGrids = 256;
-static constexpr uint32_t numJobSystemKernelThreads = 1024;
+static constexpr uint32_t numJobSystemKernelThreads = 512;
 static constexpr uint32_t allActive = ~0u;
 static constexpr uint32_t jobTrackerTerm = ~0u;
 
 }
 
 struct alignas(64) RunData {
-    char buf[128 * 16384];
+    char buf[1024 * 1024];
 };
 
 struct JobGridInfo {
@@ -42,13 +42,14 @@ struct JobGridInfo {
     std::atomic_uint32_t waitQueueLock;
     std::atomic_uint32_t numRunning;
     RunData runData;
-    uint32_t jobDataIndices[16384];
-    uint32_t jobInvocationOffsets[16384];
+    uint32_t jobDataIndices[65536 * 16];
+    uint32_t jobInvocationOffsets[65536 * 16];
 };
 
 struct alignas(16) JobTracker {
     std::atomic_uint32_t gen;
     std::atomic_uint32_t parent;
+    std::atomic_uint32_t remainingInvocations;
     std::atomic_uint32_t numOutstanding;
 };
 
@@ -75,7 +76,7 @@ static inline JobTracker *getJobTrackers(JobManager *mgr)
 static void initializeJobSystem(JobManager *mgr)
 {
     if (threadIdx.x == 0) {
-        mgr->numOutstandingJobs = 0;
+        mgr->numOutstandingInvocations = 0;
 
         for (int i = 0; i < 8; i++) {
             mgr->activeGrids[i] = 0;
@@ -113,9 +114,30 @@ static void initializeJobSystem(JobManager *mgr)
     std::atomic_thread_fence(std::memory_order_release);
 }
 
-static inline bool isJobReady(Job &job)
+static inline const JobID * getJobDependencies(JobContainerBase *job_base)
 {
-    (void)job;
+    return (const JobID *)((char *)job_base + sizeof(JobContainerBase));
+}
+
+static inline bool isJobReady(JobManager *job_mgr, Job &job)
+{
+    const JobTracker *trackers = getJobTrackers(job_mgr);
+    for (int job_idx = 0; job_idx < job.numCombinedJobs; job_idx++) {
+        JobContainerBase *job_data = (JobContainerBase *)(
+            (char *)job.data + job.numBytesPerJob * job_idx);
+
+        int num_deps = job_data->numDependencies;
+
+        const JobID *dependencies = getJobDependencies(job_data);
+        for (int i = 0; i < num_deps; i++) {
+            JobID dependency = dependencies[i];
+
+            if (trackers[dependency.id].gen == dependency.gen) {
+                return false;
+            }
+        }
+    }
+
     return true;
 }
 
@@ -233,7 +255,7 @@ static void jobLoop()
     cuda::barrier<cuda::thread_scope_thread> cpy_barrier;
     init(&cpy_barrier, 1);
 
-    auto findFirstReadyJob = [lane_id, max_jobs_per_grid](
+    auto findFirstReadyJob = [job_mgr, lane_id, max_jobs_per_grid](
         Job *job_list, uint32_t job_head, uint32_t job_tail) {
         int first_job_idx = -1;
         if (lane_id == 0) {
@@ -243,7 +265,7 @@ static void jobLoop()
                     (int)wrapQueueIdx(job_idx, max_jobs_per_grid);
                 Job &cur_job = job_list[wrapped_idx];
 
-                if (isJobReady(cur_job)) {
+                if (isJobReady(job_mgr, cur_job)) {
                     first_job_idx = wrapped_idx;
                     break;
                 }
@@ -343,8 +365,8 @@ static void jobLoop()
             JobGridInfo &run_grid = base_job_grids[run_grid_idx];
 
             Job::EntryPtr first_ptr = waiting_jobs[first_job_idx].fn;
-            auto isJobMergable = [first_ptr](Job &job) {
-                return job.fn == first_ptr && isJobReady(job);
+            auto isJobMergable = [first_ptr, job_mgr](Job &job) {
+                return job.fn == first_ptr && isJobReady(job_mgr, job);
             };
 
             uint32_t num_bytes_per_job =
@@ -375,12 +397,8 @@ static void jobLoop()
                 uint32_t merge_mask =
                     __ballot_sync(consts::allActive, merge_job);
 
-                uint32_t cur_num_invocations =
-                    merge_job ? cur_job.numInvocations : 0_u32;
-                uint32_t cur_num_jobs = merge_job ? 1_u32 : 0_u32;
-
-                uint32_t num_prior_invocations = total_num_invocations +
-                    warpExclusiveScan(lane_id, cur_num_invocations);
+                uint32_t cur_num_jobs =
+                    merge_job ? cur_job.numCombinedJobs : 0_u32;
 
                 uint32_t num_prior_jobs = total_num_jobs +
                     warpExclusiveScan(lane_id, cur_num_jobs);
@@ -389,18 +407,48 @@ static void jobLoop()
                 if (merge_job) {
                     cuda::memcpy_async(run_grid.runData.buf + 
                         num_prior_jobs * num_bytes_per_job, cur_job.data,
-                        num_bytes_per_job, cpy_barrier);
+                        num_bytes_per_job * cur_num_jobs, cpy_barrier);
+
+                    assert((num_prior_jobs + cur_num_jobs) * num_bytes_per_job <=
+                           1024 * 1024);
                 } 
 
-                for (int i = 0; i != (int)cur_num_invocations; i++) {
-                    run_grid.jobDataIndices[(int)num_prior_invocations + i] =
-                        num_prior_jobs;
-                    run_grid.jobInvocationOffsets[
-                        (int)num_prior_invocations + i] = i;
+                // FIXME: this is a potentially massive loop that one thread
+                // has to deal with
+                uint32_t combined_num_invocations = 0;
+                for (int job_idx = 0; job_idx != (int)cur_num_jobs; job_idx++) {
+                    JobContainerBase *job_data = (JobContainerBase *)(
+                        (char *)cur_job.data + job_idx * num_bytes_per_job);
+
+                    uint32_t num_invocations = job_data->numInvocations;
+                    combined_num_invocations += num_invocations;
+                }
+
+                uint32_t num_prior_invocations = total_num_invocations +
+                    warpExclusiveScan(lane_id, combined_num_invocations);
+
+                uint32_t num_setup_invocations = 0;
+                for (int job_idx = 0; job_idx != (int)cur_num_jobs; job_idx++) {
+                    JobContainerBase *job_data = (JobContainerBase *)(
+                        (char *)cur_job.data + job_idx * num_bytes_per_job);
+
+                    uint32_t num_invocations = job_data->numInvocations;
+
+                    for (int i = 0; i != (int)num_invocations; i++) {
+                        run_grid.jobDataIndices[(int)num_prior_invocations +
+                            num_setup_invocations] = num_prior_jobs + job_idx;
+                        run_grid.jobInvocationOffsets[(int)num_prior_invocations +
+                            num_setup_invocations] = i;
+
+                        num_setup_invocations++;
+
+                        assert(num_prior_invocations + num_setup_invocations <
+                               65536 * 16);
+                    }
                 }
 
                 total_num_invocations =
-                    num_prior_invocations + cur_num_invocations;
+                    num_prior_invocations + combined_num_invocations;
                 total_num_jobs = num_prior_jobs + cur_num_jobs;
 
                 // Get current running total of jobs merged together for launch
@@ -475,6 +523,7 @@ static void jobLoop()
                 }
             }
 
+
             if (lane_id == 0) {
                 wait_grid.waitJobHead.store(base_wait_coalesce_idx + 1,
                                             std::memory_order_relaxed);
@@ -486,6 +535,9 @@ static void jobLoop()
                 uint32_t num_blocks = utils::divideRoundUp(total_num_invocations,
                     consts::numJobLaunchKernelThreads);
                 
+                run_grid.numRunning.store(total_num_invocations,
+                                          std::memory_order_relaxed);
+
                 first_ptr<<<num_blocks, consts::numJobLaunchKernelThreads>>>(
                     (JobContainerBase *)run_grid.runData.buf,
                     run_grid.jobDataIndices, run_grid.jobInvocationOffsets,
@@ -497,10 +549,10 @@ static void jobLoop()
 
         // Call this function at the end of the loop, in order to use
         // the same __syncthreads / acquire call for reading the activeGrid
-        // bitfields and checking numOutstandingJobs
+        // bitfields and checking numOutstandingInvocations
         nextLoopSetup();
 
-        if (job_mgr->numOutstandingJobs == 0) {
+        if (job_mgr->numOutstandingInvocations == 0) {
             break;
         }
     }
@@ -543,11 +595,13 @@ static inline JobID allocateJobTrackerSlot(JobManager *job_mgr,
 
     JobTracker &tracker = trackers[job_id];
     tracker.parent.store(parent_id, std::memory_order_relaxed);
-    tracker.numOutstanding.store(num_invocations, std::memory_order_release);
-    uint32_t prev_gen = tracker.gen.fetch_add(1, std::memory_order_acq_rel);
+    tracker.remainingInvocations.store(num_invocations,
+                                       std::memory_order_release);
+    tracker.numOutstanding.store(1, std::memory_order_release);
+    uint32_t gen = tracker.gen.load(std::memory_order_relaxed);
 
     return JobID {
-        prev_gen + 1,
+        gen,
         job_id,
     };
 }
@@ -558,6 +612,7 @@ static inline void freeJobTrackerSlot(uint32_t job_id)
     JobTracker *trackers = getJobTrackers(job_mgr);
 
     JobTracker &tracker = trackers[job_id];
+    tracker.gen.fetch_add(1, std::memory_order_acq_rel);
 
     JobID new_head;
     new_head.id = job_id;
@@ -574,11 +629,8 @@ static inline void freeJobTrackerSlot(uint32_t job_id)
            std::memory_order_release, std::memory_order_relaxed));
 }
 
-static inline void decrementJobTracker(JobID job_id)
+static inline void decrementJobTracker(JobTracker *job_trackers, JobID job_id)
 {
-    auto job_mgr = getJobManager();
-    JobTracker *job_trackers = getJobTrackers(job_mgr);
-
     uint32_t cur_id = job_id.id;
     while (cur_id != consts::jobTrackerTerm) {
         JobTracker &tracker = job_trackers[cur_id];
@@ -586,11 +638,13 @@ static inline void decrementJobTracker(JobID job_id)
         uint32_t prev_outstanding =
             tracker.numOutstanding.fetch_sub(1, std::memory_order_acq_rel);
 
-        if (prev_outstanding == 1) {
+        if (prev_outstanding == 1 &&
+            tracker.remainingInvocations.load(std::memory_order_relaxed) == 0) {
+            uint32_t parent = tracker.parent.load(std::memory_order_relaxed);
+
             freeJobTrackerSlot(cur_id);
 
-            cur_id =
-                tracker.parent.load(std::memory_order_relaxed);
+            cur_id = parent;
         } else {
             break;
         }
@@ -600,12 +654,13 @@ static inline void decrementJobTracker(JobID job_id)
 // This function should only be called by the wave leader
 static inline void queueMultiJobInWaitList(
     Job::EntryPtr func, JobContainerBase *data, uint32_t grid_id,
-    uint32_t num_invocations, uint32_t num_bytes_per_job)
+    uint32_t num_jobs, uint32_t total_num_invocations,
+    uint32_t num_bytes_per_job)
 {
     Job job {
         .fn = func,
         .data = data,
-        .numInvocations = num_invocations,
+        .numCombinedJobs = num_jobs,
         .numBytesPerJob = num_bytes_per_job,
     };
 
@@ -628,7 +683,7 @@ static inline void queueMultiJobInWaitList(
 
     cur_grid.waitQueueLock.store(0, std::memory_order_relaxed);
     
-    atomicAdd(&job_mgr->numOutstandingJobs, num_invocations);
+    atomicAdd(&job_mgr->numOutstandingInvocations, total_num_invocations);
 
     std::atomic_thread_fence(std::memory_order_release);
 }
@@ -653,7 +708,7 @@ Context::WaveInfo Context::computeWaveInfo()
     };
 }
 
-JobID Context::getNewJobID(bool link_parent)
+JobID Context::getNewJobID(bool link_parent, uint32_t num_invocations)
 {
     using namespace mwGPU;
 
@@ -669,7 +724,7 @@ JobID Context::getNewJobID(bool link_parent)
         parent_id = consts::jobTrackerTerm;
     }
 
-    return allocateJobTrackerSlot(job_mgr, trackers, parent_id, 1);
+    return allocateJobTrackerSlot(job_mgr, trackers, parent_id, num_invocations);
 }
 
 // Allocates a shared block of memory for the active threads in wave,
@@ -705,30 +760,41 @@ void Context::addToWaitList(Job::EntryPtr func, JobContainerBase *data,
 
     if (lane_id_ == wave_info.leaderLane) {
         queueMultiJobInWaitList(func, data, grid_id_,
-            total_num_invocations, num_bytes_per_job);
+            wave_info.numActive, total_num_invocations,
+            num_bytes_per_job);
     }
 }
 
-void Context::markJobFinished(uint32_t num_jobs)
+void Context::markJobFinished(uint32_t num_invocations)
 {
     using namespace mwGPU;
 
-    decrementJobTracker(job_id_);
+    auto job_mgr = getJobManager();
+    JobTracker *job_trackers = getJobTrackers(job_mgr);
+
+    // Num invocations above is the total invocations in the block.
+    // Since the block may not all be using the same job id, need to
+    // decrement remainingInvocations one at a time currently
+    uint32_t prev_invocations =
+        job_trackers[job_id_.id].remainingInvocations.fetch_sub(
+            1, std::memory_order_acq_rel);
+
+    if (prev_invocations == 1) {
+        decrementJobTracker(job_trackers, job_id_);
+    }
 
     __syncthreads();
 
     if (threadIdx.x != 0) return;
 
-    auto job_mgr = getJobManager();
-
     JobGridInfo &cur_grid = getGridInfo(job_mgr)[grid_id_];
 
-    atomicSub(&job_mgr->numOutstandingJobs, num_jobs);
+    atomicSub(&job_mgr->numOutstandingInvocations, num_invocations);
 
-    uint32_t prev_running = cur_grid.numRunning.fetch_sub(num_jobs,
+    uint32_t prev_running = cur_grid.numRunning.fetch_sub(num_invocations,
         std::memory_order_acq_rel);
 
-    if (prev_running == num_jobs) {
+    if (prev_running == num_invocations) {
         uint32_t grid_bitfield = grid_id_ / 32;
         uint32_t grid_bit = grid_id_ % 32;
         uint32_t mask = ~(1u << grid_bit);
@@ -773,6 +839,7 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
         (uint64_t)alignof(JobGridInfo));
 
     total_bytes = grid_offset + sizeof(JobGridInfo) * consts::numJobGrids;
+    printf("%lu\n", sizeof(JobGridInfo));
 
     uint64_t wait_job_offset = madrona::utils::roundUp(total_bytes,
         (uint64_t)alignof(Job));
