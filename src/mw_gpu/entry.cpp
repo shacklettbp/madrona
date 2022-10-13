@@ -12,6 +12,7 @@
 #include <string>
 
 #include <madrona/mw_gpu.hpp>
+#include <madrona/dyn_array.hpp>
 
 #include "cuda_utils.hpp"
 #include "cpp_compile.hpp"
@@ -147,7 +148,7 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
     static std::array<char, 4096> linker_info_log;
     static std::array<char, 4096> linker_error_log;
 
-    std::array linker_options {
+    DynArray<CUjit_option> linker_options {
         CU_JIT_INFO_LOG_BUFFER,
         CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
         CU_JIT_ERROR_LOG_BUFFER,
@@ -155,13 +156,18 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
         CU_JIT_GENERATE_DEBUG_INFO,
     };
 
-    std::array linker_option_values {
+    DynArray<void *> linker_option_values {
         (void *)linker_info_log.data(),
         (void *)linker_info_log.size(),
         (void *)linker_error_log.data(),
         (void *)linker_error_log.size(),
         (void *)1,
     };
+
+    if (lto) {
+        linker_options.push_back(CU_JIT_LTO);
+        linker_option_values.push_back((void *)1);
+    }
 
     CUlinkState linker;
     REQ_CU(cuLinkCreate(linker_options.size(), linker_options.data(),
@@ -239,13 +245,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     // Compute architecture string for this GPU
     cudaDeviceProp dev_props;
     REQ_CUDA(cudaGetDeviceProperties(&dev_props, gpu_id));
-    string arch_str;
-    if (cfg.enableLTO) {
-        arch_str = "lto_";
-    } else {
-        arch_str = "sm_";
-    }
-    arch_str += to_string(dev_props.major) +
+    string arch_str = "sm_" + to_string(dev_props.major) +
         to_string(dev_props.minor);
 
     array base_compile_flags {

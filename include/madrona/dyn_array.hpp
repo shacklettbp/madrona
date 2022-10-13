@@ -35,6 +35,14 @@ public:
           capacity_(init_capacity)
     {}
 
+    DynArray(std::initializer_list<T> init, A alloc = DefaultAlloc())
+        : DynArray(init.size(), std::move(alloc))
+    {
+        for (const T &t : init) {
+            push_back(t);
+        }
+    }
+
     DynArray(const DynArray &) = delete;
     DynArray(DynArray &&o)
         : alloc_(std::move(o.alloc_)),

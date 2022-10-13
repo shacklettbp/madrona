@@ -53,8 +53,6 @@ HeapArray<char> jitCompileCPPSrc(const char *src,
 
         REQ_NVRTC(nvrtcGetNVVM(prog, nvvm_data.data()));
 
-        REQ_NVRTC(nvrtcDestroyProgram(&prog));
-
         return nvvm_data;
     };
 

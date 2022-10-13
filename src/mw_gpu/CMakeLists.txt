@@ -3,8 +3,9 @@ add_library(madrona_mw_gpu STATIC
     cpp_compile.hpp cpp_compile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona/mw_gpu.hpp entry.cpp)
 
+
 target_link_libraries(madrona_mw_gpu PUBLIC
-    madrona_core CUDA::nvrtc CUDA::cudart)
+    madrona_core CUDA::nvrtc CUDA::cudart CUDA::cuda_driver)
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
 
