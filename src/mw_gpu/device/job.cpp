@@ -839,7 +839,6 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
         (uint64_t)alignof(JobGridInfo));
 
     total_bytes = grid_offset + sizeof(JobGridInfo) * consts::numJobGrids;
-    printf("%lu\n", sizeof(JobGridInfo));
 
     uint64_t wait_job_offset = madrona::utils::roundUp(total_bytes,
         (uint64_t)alignof(Job));

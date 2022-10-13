@@ -399,7 +399,6 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
 
     REQ_CUDA(cudaStreamSynchronize(strm));
 
-    printf("%lu\n", *gpu_state_size_readback);
     auto gpu_state_buffer = cu::allocGPU(*gpu_state_size_readback);
 
     // The initial values of these pointers are equal to their offsets from
