@@ -35,7 +35,6 @@ public:
 private:
     using WorldDataT = DataT;
 
-friend class Context;
 friend class JobManager;
 };
 
