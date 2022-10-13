@@ -14,10 +14,11 @@
 namespace madrona {
 namespace cu {
 
-HeapArray<char> compileSrcToCUBIN(const char *src,
-                                  const char *src_path,
-                                  const char **compile_flags,
-                                  uint32_t num_compile_flags)
+HeapArray<char> jitCompileCPPSrc(const char *src,
+                                 const char *src_path,
+                                 const char **compile_flags,
+                                 uint32_t num_compile_flags,
+                                 bool nvvm_out)
 {
     nvrtcProgram prog;
     REQ_NVRTC(nvrtcCreateProgram(&prog, src, src_path, 0,
@@ -44,21 +45,41 @@ HeapArray<char> compileSrcToCUBIN(const char *src,
         ERR_NVRTC(res);
     }
 
-    size_t num_cubin_bytes;
-    REQ_NVRTC(nvrtcGetCUBINSize(prog, &num_cubin_bytes));
+    auto produceNVVM = [&]() {
+        size_t num_nvvm_bytes;
+        REQ_NVRTC(nvrtcGetNVVMSize(prog, &num_nvvm_bytes));
 
-    HeapArray<char> cubin_data(num_cubin_bytes);
+        HeapArray<char> nvvm_data(num_nvvm_bytes);
 
-    REQ_NVRTC(nvrtcGetCUBIN(prog, cubin_data.data()));
+        REQ_NVRTC(nvrtcGetNVVM(prog, nvvm_data.data()));
+
+        REQ_NVRTC(nvrtcDestroyProgram(&prog));
+
+        return nvvm_data;
+    };
+
+    auto produceCUBIN = [&]() {
+        size_t num_cubin_bytes;
+        REQ_NVRTC(nvrtcGetCUBINSize(prog, &num_cubin_bytes));
+
+        HeapArray<char> cubin_data(num_cubin_bytes);
+
+        REQ_NVRTC(nvrtcGetCUBIN(prog, cubin_data.data()));
+
+        return cubin_data;
+    };
+
+    HeapArray<char> result = nvvm_out ? produceNVVM() : produceCUBIN();
 
     REQ_NVRTC(nvrtcDestroyProgram(&prog));
 
-    return cubin_data;
+    return result;
 }
 
-HeapArray<char> compileFileToCUBIN(const char *src_path,
-                                   const char **compile_flags,
-                                   uint32_t num_compile_flags)
+HeapArray<char> jitCompileCPPFile(const char *src_path,
+                                  const char **compile_flags,
+                                  uint32_t num_compile_flags,
+                                  bool nvvm_out)
 {
     using namespace std;
 
@@ -71,8 +92,8 @@ HeapArray<char> compileFileToCUBIN(const char *src_path,
     src_file.close();
     src[num_src_bytes] = '\0';
 
-    return compileSrcToCUBIN(src.data(), src_path,
-                             compile_flags, num_compile_flags);
+    return jitCompileCPPSrc(src.data(), src_path,
+                            compile_flags, num_compile_flags, nvvm_out);
 }
 
 }

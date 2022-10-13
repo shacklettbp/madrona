@@ -50,9 +50,12 @@ int main(int argc, char *argv[])
         "SimpleExample::GPUEntry",
         { SIMPLE_EX_SRC_LIST },
         { SIMPLE_EX_COMPILE_FLAGS },
+        true,
     });
 
-    constexpr int64_t num_ticks = 100; 
+    constexpr int64_t num_ticks = 10; 
+
+    train_exec.run();
 
     auto start = std::chrono::system_clock::now();
     for (int64_t i = 0; i < num_ticks; i++) {

@@ -12,14 +12,16 @@
 namespace madrona {
 namespace cu {
 
-HeapArray<char> compileSrcToCUBIN(const char *src,
-                                  const char *src_path,
-                                  const char **compile_flags,
-                                  uint32_t num_compile_flags);
+HeapArray<char> jitCompileCPPSrc(const char *src,
+                                 const char *src_path,
+                                 const char **compile_flags,
+                                 uint32_t num_compile_flags,
+                                 bool nvvm_out);
 
-HeapArray<char> compileFileToCUBIN(const char *src_path,
-                                   const char **compile_flags,
-                                   uint32_t num_compile_flags);
+HeapArray<char> jitCompileCPPFile(const char *src_path,
+                                  const char **compile_flags,
+                                  uint32_t num_compile_flags,
+                                  bool nvvm_out);
 
 }
 }

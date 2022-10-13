@@ -27,6 +27,7 @@ struct CompileConfig {
     const char *entryName;
     Span<const char * const> userSources;
     Span<const char * const> userCompileFlags;
+    bool enableLTO;
 };
 
 class TrainingExecutor {

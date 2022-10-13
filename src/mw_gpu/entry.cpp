@@ -142,7 +142,7 @@ template <typename T> __global__ void submitRun(uint32_t) {}
 }
 
 static CUmodule compileCode(const char **sources, uint32_t num_sources,
-    const char **compile_flags, uint32_t num_compile_flags)
+    const char **compile_flags, uint32_t num_compile_flags, bool lto)
 {
     static std::array<char, 4096> linker_info_log;
     static std::array<char, 4096> linker_error_log;
@@ -189,15 +189,18 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
                               MADRONA_CUDADEVRT_PATH,
                               0, nullptr, nullptr));
 
-    auto addToLinker = [checkLinker, linker](HeapArray<char> &&cubin,
-                                             const char *name) {
-        checkLinker(cuLinkAddData(linker, CU_JIT_INPUT_CUBIN, cubin.data(),
+    CUjitInputType linker_input_type = 
+        lto ? CU_JIT_INPUT_NVVM : CU_JIT_INPUT_CUBIN;
+
+
+    auto addToLinker = [&](HeapArray<char> &&cubin, const char *name) {
+        checkLinker(cuLinkAddData(linker, linker_input_type, cubin.data(),
                              cubin.size(), name, 0, nullptr, nullptr));
     };
 
     for (int i = 0; i < (int)num_sources; i++) {
-        addToLinker(cu::compileFileToCUBIN(sources[i], compile_flags,
-                                           num_compile_flags),
+        addToLinker(cu::jitCompileCPPFile(sources[i], compile_flags,
+                                          num_compile_flags, lto),
                     sources[i]);
     }
 
@@ -236,7 +239,13 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     // Compute architecture string for this GPU
     cudaDeviceProp dev_props;
     REQ_CUDA(cudaGetDeviceProperties(&dev_props, gpu_id));
-    string arch_str = "sm_" + to_string(dev_props.major) +
+    string arch_str;
+    if (cfg.enableLTO) {
+        arch_str = "lto_";
+    } else {
+        arch_str = "sm_";
+    }
+    arch_str += to_string(dev_props.major) +
         to_string(dev_props.minor);
 
     array base_compile_flags {
@@ -246,14 +255,24 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
         "--extra-device-vectorization",
     };
 
-    HeapArray<const char *> compile_flags(
-        base_compile_flags.size() + cfg.userCompileFlags.size());
+    uint32_t num_compile_flags = 
+        base_compile_flags.size() + cfg.userCompileFlags.size();
+
+    if (cfg.enableLTO) {
+        num_compile_flags++;
+    }
+
+    HeapArray<const char *> compile_flags(num_compile_flags);
     memcpy(compile_flags.data(), base_compile_flags.data(),
            sizeof(const char *) * base_compile_flags.size());
 
     memcpy(compile_flags.data() + base_compile_flags.size(),
            cfg.userCompileFlags.data(),
            sizeof(const char *) * cfg.userCompileFlags.size());
+
+    if (cfg.enableLTO) {
+        compile_flags[num_compile_flags - 1] = "-dlto";
+    }
 
     for (const char *src : all_cpp_files) {
         cout << src << endl;
@@ -265,7 +284,8 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
 
     GPUKernels gpu_kernels;
     gpu_kernels.mod = compileCode(all_cpp_files.data(),
-        all_cpp_files.size(), compile_flags.data(), compile_flags.size());
+        all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
+        cfg.enableLTO);
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
         gpu_kernels.mod, "madronaTrainComputeGPUImplConstantsKernel"));
