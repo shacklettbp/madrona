@@ -63,7 +63,7 @@ static void getUserEntries(const char *entry_class, CUmodule mod,
 
 namespace madrona { namespace mwGPU {
 
-template <typename T> __global__ void submitInit(uint32_t) {}
+template <typename T> __global__ void submitInit(uint32_t, void *) {}
 template <typename T> __global__ void submitRun(uint32_t) {}
 
 } }

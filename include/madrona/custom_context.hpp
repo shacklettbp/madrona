@@ -30,7 +30,7 @@ public:
                              bool is_child = true,
                              Deps && ... dependencies);
 
-    inline DataT & data() { return *static_cast<DataT *>(data_); }
+    inline DataT & data() const { return *static_cast<DataT *>(data_); }
 
 private:
     using WorldDataT = DataT;

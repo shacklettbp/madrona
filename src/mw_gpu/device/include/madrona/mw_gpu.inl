@@ -15,9 +15,7 @@ template <typename ContextT, typename InitT, typename BaseT>
 void GPUEntry<ContextT, InitT, BaseT>::submitInit(uint32_t invocation_idx,
                                                   void *world_init_ptr)
 {
-    using DataT = typename ContextT::WorldDataT;
-
-    ContextT ctx = makeContext(invocation_idx);
+    ContextT ctx = makeFakeContext(invocation_idx);
 
     InitT *base_init = (InitT *)world_init_ptr;
     InitT *init = base_init + ctx.worldID();
@@ -30,7 +28,7 @@ void GPUEntry<ContextT, InitT, BaseT>::submitInit(uint32_t invocation_idx,
 template <typename ContextT, typename InitT, typename BaseT>
 void GPUEntry<ContextT, InitT, BaseT>::submitRun(uint32_t invocation_idx)
 {
-    ContextT ctx = makeContext(invocation_idx);
+    ContextT ctx = makeFakeContext(invocation_idx);
 
     ctx.submit([](ContextT &ctx) {
         BaseT::run(ctx);
@@ -38,26 +36,15 @@ void GPUEntry<ContextT, InitT, BaseT>::submitRun(uint32_t invocation_idx)
 }
 
 template <typename ContextT, typename InitT, typename BaseT>
-ContextT GPUEntry<ContextT, InitT, BaseT>::makeContext(
+ContextT GPUEntry<ContextT, InitT, BaseT>::makeFakeContext(
     uint32_t invocation_idx)
 {
     uint32_t lane_id =
-        invocation_idx % madrona::mwGPU::ICfg::numWarpThreads;
+        invocation_idx % mwGPU::consts::numWarpThreads;
+    uint32_t world_id = lane_id;
 
-    WorkerInit worker_init {
-        .jobID = 0,
-        .gridID = 0,
-        .worldID = invocation_idx,
-        .laneID = lane_id,
-    };
-
-    using DataT = typename ContextT::WorldDataT;
-
-    DataT *world_data_base =
-        (DataT *)mwGPU::GPUImplConsts::get().worldDataAddr;
-    DataT *world_data = world_data_base + worker_init.worldID;
-
-    return ContextT(world_data, std::move(worker_init));
+    return JobManager::makeContext<ContextT>(JobID { 0, 0 }, 0,
+                                             world_id, lane_id);
 }
 
 }

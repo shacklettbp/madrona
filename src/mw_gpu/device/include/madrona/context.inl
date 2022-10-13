@@ -7,15 +7,17 @@
  */
 #pragma once
 
-#include <madrona/mw_gpu/const.hpp>
+#include "mw_gpu/const.hpp"
 
 namespace madrona {
 namespace mwGPU {
 
 template <typename ContextT, typename Fn, size_t N>
-__global__ void jobEntry(mwGPU::JobBase *job_data,
-                        uint32_t num_invocations,
-                        uint32_t grid_id)
+__global__ void jobEntry(JobContainerBase *job_data,
+                         uint32_t *data_indices,
+                         uint32_t *invocation_offsets,
+                         uint32_t num_invocations,
+                         uint32_t grid_id)
 {
     uint32_t lane_id = threadIdx.x % consts::numWarpThreads;
 
@@ -26,56 +28,32 @@ __global__ void jobEntry(mwGPU::JobBase *job_data,
         return;
     }
 
-    using JobContainer = mwGPU::JobContainer<Fn, N>;
+    uint32_t data_idx = data_indices[invocation_idx];
+    uint32_t local_offset = invocation_offsets[invocation_idx];
+
+    using JobContainer = JobContainer<Fn, N>;
+    static_assert(std::is_trivially_destructible_v<JobContainer>);
+
     JobContainer &job_container =
-        static_cast<JobContainer *>(job_data)[invocation_idx];
+        static_cast<JobContainer *>(job_data)[data_idx];
 
-    WorkerInit worker_init {
-        .jobID = job_container.jobID,
-        .gridID = grid_id,
-        .worldID = job_container.worldID,
-        .laneID = lane_id,
-    };
+    ContextT ctx = JobManager::makeContext<ContextT>(job_container.jobID,
+        grid_id, job_container.worldID, lane_id);
 
-    constexpr bool is_generic_context = std::is_same_v<ContextT, Context>;
-
-    using DataT = std::conditional_t<is_generic_context, WorldBase,
-        typename ContextT::WorldDataT>;
-
-    DataT *world_data;
-
-    // If this is being called with the generic Context base class,
-    // we need to look up the size of the world data in constant memory
-    if constexpr (is_generic_context) {
-        char *world_data_base = 
-            (char *)mwGPU::GPUImplConsts::get().worldDataAddr;
-        world_data = (DataT *)(world_data_base + worker_init.worldID *
-            mwGPU::GPUImplConsts::get().numWorldDataBytes);
-    } else {
-        DataT *world_data_base =
-            (DataT *)mwGPU::GPUImplConsts::get().worldDataAddr;
-
-        world_data = world_data_base + worker_init.worldID;
-    }
-
-    ContextT ctx(world_data, std::move(worker_init));
-
-    (job_container.fn)(ctx);
-
-    // Calls the destructor for the functor
-    job_container.~JobContainer();
+    (job_container.fn)(ctx, local_offset);
 
     uint32_t num_block_invocations = min(
-        num_invocations - blockIdx.x * ICfg::numJobLaunchKernelThreads,
-        ICfg::numJobLaunchKernelThreads);
+        num_invocations - blockIdx.x * consts::numJobLaunchKernelThreads,
+        consts::numJobLaunchKernelThreads);
 
     ctx.markJobFinished(num_block_invocations);
 }
 
 }
 
-Context::Context(WorkerInit &&init)
-    : job_id_(init.jobID),
+Context::Context(WorldBase *world_data, WorkerInit &&init)
+    : data_(world_data),
+      job_id_(init.jobID),
       grid_id_(init.gridID),
       world_id_(init.worldID),
       lane_id_(init.laneID)
@@ -86,48 +64,60 @@ StateManager & Context::state()
     return *(StateManager *)mwGPU::GPUImplConsts::get().stateManagerAddr;
 }
 
-template <typename Fn, typename... Deps>
-JobID Context::submit(Fn &&fn, bool is_child, Deps && ... dependencies)
+template <typename Fn, typename... DepTs>
+JobID Context::submit(Fn &&fn, bool is_child, DepTs && ... dependencies)
 {
     return submitImpl<Context>(std::forward<Fn>(fn), 1, is_child,
                                std::forward<Deps>(dependencies)...);
 }
 
-template <typename Fn, typename... Deps>
+template <typename Fn, typename... DepTs>
 JobID Context::submitN(Fn &&fn, uint32_t num_invocations,
-                       bool is_child, Deps && ... dependencies)
+                       bool is_child, DepTs && ... dependencies)
 {
     return submitImpl<Context>(std::forward<Fn>(fn), num_invocations, is_child,
-                               std::forward<Deps>(dependencies)...);
+                               std::forward<DepTs>(dependencies)...);
 }
 
-template <typename... ColTypes, typename Fn, typename... Deps>
-JobID Context::forAll(const Query<ColTypes...> &query, Fn &&fn,
-             bool is_child, Deps && ... dependencies)
+template <typename... ColTypes, typename Fn, typename... DepTs>
+JobID Context::parallelFor(const Query<ColTypes...> &query, Fn &&fn,
+                           bool is_child, DepTs && ... dependencies)
 {
-    return forallImpl<Context>(query, std::forward<Fn>(fn), is_child,
-                               std::forward<Deps>(dependencies)...);
+    return parallelForImpl<Context>(query, std::forward<Fn>(fn), is_child,
+                                    std::forward<DepTs>(dependencies)...);
+}
+
+
+template <typename ContextT, typename Fn, typename... DepTs>
+JobID Context::submitImpl(Fn &&fn, bool is_child, DepTs && ... dependencies)
+{
+    auto wrapper = [fn = std::forward<Fn>(fn)](ContextT &ctx, uint32_t) {
+        fn(ctx);
+    };
+
+    return submitNImpl<ContextT>(std::move(wrapper), 1, is_child,
+                                 std::forward<DepTs>(dependencies)...);
 }
 
 // FIXME: implement is_child, dependencies, num_invocations
-template <typename ContextT, typename Fn, typename... Deps>
-JobID Context::submitImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
-                          Deps &&... dependencies)
+template <typename ContextT, typename Fn, typename... DepTs>
+JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
+                           DepTs &&... dependencies)
 {
-    constexpr std::size_t num_deps = sizeof...(Deps);
+    constexpr std::size_t num_deps = sizeof...(DepTs);
 
     auto func_ptr = mwGPU::jobEntry<ContextT, Fn, num_deps>;
 
-    using FnJobContainer = mwGPU::JobContainer<Fn, num_deps>;
+    using FnJobContainer = JobContainer<Fn, num_deps>;
 
     auto wave_info = computeWaveInfo();
 
     JobID queue_job_id = getNewJobID(is_child);
 
     auto store = allocJob(sizeof(FnJobContainer), wave_info);
-    new (store) FnJobContainer(world_id_, queue_job_id.id,
+    new (store) FnJobContainer(queue_job_id, world_id_,
                                std::forward<Fn>(fn),
-                               std::forward<Deps>(dependencies)...);
+                               std::forward<DepTs>(dependencies)...);
 
     __syncwarp(wave_info.activeMask);
 

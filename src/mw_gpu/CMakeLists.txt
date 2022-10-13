@@ -65,6 +65,10 @@ function(madrona_build_compile_defns)
                           ${ARGN})
 
     set(ALL_TARGET_SOURCES ${M_SRCS})
+    list(FILTER ALL_TARGET_SOURCES INCLUDE REGEX ".+\.cpp")
+    list(TRANSFORM ALL_TARGET_SOURCES REPLACE "${CMAKE_CURRENT_SOURCE_DIR}" "")
+    list(TRANSFORM ALL_TARGET_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+
     set(ALL_TARGET_INCLUDES "")
     foreach(t ${M_SRC_TARGETS})
         get_target_property(TARGET_DIR ${t} SOURCE_DIR) 

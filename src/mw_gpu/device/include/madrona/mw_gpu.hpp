@@ -20,7 +20,7 @@ public:
     static void submitRun(uint32_t invocation_idx);
 
 private:
-    static ContextT makeContext(uint32_t invocation_idx);
+    static ContextT makeFakeContext(uint32_t invocation_idx);
 };
 
 }
