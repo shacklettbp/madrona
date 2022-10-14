@@ -26,7 +26,7 @@ namespace consts {
 static constexpr uint32_t maxNumJobsPerWorld = 1024;
 static constexpr uint32_t jobDataPerWorld = 65536;
 static constexpr uint32_t numJobGrids = 256;
-static constexpr uint32_t numJobSystemKernelThreads = 256;
+static constexpr uint32_t numJobSystemKernelThreads = 512;
 static constexpr uint32_t allActive = ~0u;
 static constexpr uint32_t jobTrackerTerm = ~0u;
 

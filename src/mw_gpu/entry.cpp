@@ -28,7 +28,7 @@ using namespace madrona;
 namespace madrona {
 
 namespace consts {
-static constexpr uint32_t numJobSystemKernelThreads = 256;
+static constexpr uint32_t numJobSystemKernelThreads = 512;
 static constexpr uint32_t numEntryQueueThreads = 512;
 }
 
