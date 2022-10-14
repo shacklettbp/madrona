@@ -24,10 +24,16 @@ struct StateConfig {
 };
 
 struct CompileConfig {
+    enum class OptMode : uint32_t {
+        Optimize,
+        LTO,
+        Debug,
+    };
+
     const char *entryName;
     Span<const char * const> userSources;
     Span<const char * const> userCompileFlags;
-    bool enableLTO;
+    OptMode optMode = OptMode::Optimize;
 };
 
 class TrainingExecutor {

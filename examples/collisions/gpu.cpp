@@ -27,7 +27,6 @@ int main(int argc, char *argv[])
         "Collisions::TrainingEntry",
         { COLLISIONS_SRC_LIST },
         { COLLISIONS_COMPILE_FLAGS },
-        false,
     });
 
     constexpr int64_t num_ticks = 1000; 

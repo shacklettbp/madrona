@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
         "SimpleExample::GPUEntry",
         { SIMPLE_EX_SRC_LIST },
         { SIMPLE_EX_COMPILE_FLAGS },
-        true,
+        CompileConfig::OptMode::LTO,
     });
 
     constexpr int64_t num_ticks = 10; 

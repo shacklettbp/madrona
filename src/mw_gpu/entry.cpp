@@ -143,7 +143,8 @@ template <typename T> __global__ void submitRun(uint32_t) {}
 }
 
 static CUmodule compileCode(const char **sources, uint32_t num_sources,
-    const char **compile_flags, uint32_t num_compile_flags, bool lto)
+    const char **compile_flags, uint32_t num_compile_flags,
+    CompileConfig::OptMode opt_mode)
 {
     static std::array<char, 4096> linker_info_log;
     static std::array<char, 4096> linker_error_log;
@@ -153,12 +154,6 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
         CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
         CU_JIT_ERROR_LOG_BUFFER,
         CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
-        CU_JIT_GENERATE_DEBUG_INFO,
-        CU_JIT_GENERATE_LINE_INFO,
-        CU_JIT_FTZ,
-        CU_JIT_PREC_DIV,
-        CU_JIT_PREC_SQRT,
-        CU_JIT_FMA,
         CU_JIT_LOG_VERBOSE,
     };
 
@@ -167,18 +162,37 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
         (void *)linker_info_log.size(),
         (void *)linker_error_log.data(),
         (void *)linker_error_log.size(),
-        (void *)1, /* Debug info */
-        (void *)1, /* Line info */
-        (void *)1, /* FTZ */
-        (void *)0, /* PREC_DIV */
-        (void *)0, /* PREC_SQRT */
-        (void *)1, /* FMA */
-        (void *)1,
+        (void *)1, /* Verbose */
     };
 
-    if (lto) {
+    CUjitInputType linker_input_type;
+    if (opt_mode == CompileConfig::OptMode::LTO) {
         linker_options.push_back(CU_JIT_LTO);
         linker_option_values.push_back((void *)1);
+        linker_options.push_back(CU_JIT_FTZ);
+        linker_option_values.push_back((void *)1);
+        linker_options.push_back(CU_JIT_PREC_DIV);
+        linker_option_values.push_back((void *)0);
+        linker_options.push_back(CU_JIT_PREC_SQRT);
+        linker_option_values.push_back((void *)0);
+        linker_options.push_back(CU_JIT_FMA);
+        linker_option_values.push_back((void *)1);
+
+        linker_input_type = CU_JIT_INPUT_NVVM;
+    } else {
+        linker_input_type = CU_JIT_INPUT_CUBIN;
+    }
+
+    if (opt_mode == CompileConfig::OptMode::Debug) {
+        linker_options.push_back(CU_JIT_GENERATE_DEBUG_INFO);
+        linker_option_values.push_back((void *)1);
+        linker_options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
+        linker_option_values.push_back((void *)0);
+    } else {
+        linker_options.push_back(CU_JIT_GENERATE_LINE_INFO);
+        linker_option_values.push_back((void *)1);
+        linker_options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
+        linker_option_values.push_back((void *)4);
     }
 
     CUlinkState linker;
@@ -207,10 +221,6 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
                               MADRONA_CUDADEVRT_PATH,
                               0, nullptr, nullptr));
 
-    CUjitInputType linker_input_type = 
-        lto ? CU_JIT_INPUT_NVVM : CU_JIT_INPUT_CUBIN;
-
-
     auto addToLinker = [&](HeapArray<char> &&cubin, const char *name) {
         checkLinker(cuLinkAddData(linker, linker_input_type, cubin.data(),
                              cubin.size(), name, 0, nullptr, nullptr));
@@ -218,7 +228,8 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
 
     for (int i = 0; i < (int)num_sources; i++) {
         addToLinker(cu::jitCompileCPPFile(sources[i], compile_flags,
-                                          num_compile_flags, lto),
+                        num_compile_flags,
+                        opt_mode == CompileConfig::OptMode::LTO),
                     sources[i]);
     }
 
@@ -260,30 +271,25 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     string arch_str = "sm_" + to_string(dev_props.major) +
         to_string(dev_props.minor);
 
-    array base_compile_flags {
+    DynArray<const char *> compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-arch", arch_str.c_str(),
-        "--device-debug",
-        "--extra-device-vectorization",
     };
 
-    uint32_t num_compile_flags = 
-        base_compile_flags.size() + cfg.userCompileFlags.size();
-
-    if (cfg.enableLTO) {
-        num_compile_flags++;
+    for (const char *user_flag : cfg.userCompileFlags) {
+        compile_flags.push_back(user_flag);
     }
 
-    HeapArray<const char *> compile_flags(num_compile_flags);
-    memcpy(compile_flags.data(), base_compile_flags.data(),
-           sizeof(const char *) * base_compile_flags.size());
+    if (cfg.optMode == CompileConfig::OptMode::Debug) {
+        compile_flags.push_back("--device-debug");
+    } else {
+        compile_flags.push_back("-dopt=on");
+        compile_flags.push_back("--extra-device-vectorization");
+        compile_flags.push_back("-lineinfo");
+    }
 
-    memcpy(compile_flags.data() + base_compile_flags.size(),
-           cfg.userCompileFlags.data(),
-           sizeof(const char *) * cfg.userCompileFlags.size());
-
-    if (cfg.enableLTO) {
-        compile_flags[num_compile_flags - 1] = "-dlto";
+    if (cfg.optMode == CompileConfig::OptMode::LTO) {
+        compile_flags.push_back("-dlto");
     }
 
     for (const char *src : all_cpp_files) {
@@ -297,7 +303,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     GPUKernels gpu_kernels;
     gpu_kernels.mod = compileCode(all_cpp_files.data(),
         all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
-        cfg.enableLTO);
+        cfg.optMode);
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
         gpu_kernels.mod, "madronaTrainComputeGPUImplConstantsKernel"));
@@ -306,8 +312,8 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     REQ_CU(cuModuleGetFunction(&gpu_kernels.runJobSystem, gpu_kernels.mod,
                                "madronaTrainJobSystemKernel"));
 
-    getUserEntries(cfg.entryName, gpu_kernels.mod, base_compile_flags.data(),
-        base_compile_flags.size(), &gpu_kernels.queueUserInit,
+    getUserEntries(cfg.entryName, gpu_kernels.mod, compile_flags.data(),
+        compile_flags.size(), &gpu_kernels.queueUserInit,
         &gpu_kernels.queueUserRun);
 
     return gpu_kernels;
