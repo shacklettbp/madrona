@@ -28,7 +28,7 @@ using namespace madrona;
 namespace madrona {
 
 namespace consts {
-static constexpr uint32_t numJobSystemKernelThreads = 512;
+static constexpr uint32_t numJobSystemKernelThreads = 256;
 static constexpr uint32_t numEntryQueueThreads = 512;
 }
 
@@ -154,6 +154,12 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
         CU_JIT_ERROR_LOG_BUFFER,
         CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
         CU_JIT_GENERATE_DEBUG_INFO,
+        CU_JIT_GENERATE_LINE_INFO,
+        CU_JIT_FTZ,
+        CU_JIT_PREC_DIV,
+        CU_JIT_PREC_SQRT,
+        CU_JIT_FMA,
+        CU_JIT_LOG_VERBOSE,
     };
 
     DynArray<void *> linker_option_values {
@@ -161,6 +167,12 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
         (void *)linker_info_log.size(),
         (void *)linker_error_log.data(),
         (void *)linker_error_log.size(),
+        (void *)1, /* Debug info */
+        (void *)1, /* Line info */
+        (void *)1, /* FTZ */
+        (void *)0, /* PREC_DIV */
+        (void *)0, /* PREC_SQRT */
+        (void *)1, /* FMA */
         (void *)1,
     };
 
