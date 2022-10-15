@@ -6,3 +6,37 @@
  * https://opensource.org/licenses/MIT.
  */
 #include <gtest/gtest.h>
+
+#include <array>
+#include <madrona/hashmap.hpp>
+#include <madrona/span.hpp>
+
+using namespace madrona;
+
+class StaticIntegerMapTest : public testing::Test {
+   protected:
+    void SetUp() override {
+        for (uint32_t i = 0; i < num_elems_; i++) {
+            integer_map_array_[i] = IntegerMapPair{.key = i, .value = i};
+        }
+        static_integer_map_ = new StaticIntegerMap<max_n_>{
+            lookup_inputs_.data(), lookup_inputs_.size()};
+    }
+
+    void TearDown() override { delete static_integer_map_; }
+
+    static constexpr int num_elems_ = 12;
+    static constexpr int max_n_ = 128;
+    std::array<IntegerMapPair, num_elems_> integer_map_array_;
+    Span<IntegerMapPair> lookup_inputs_ = {integer_map_array_.data(),
+                                           num_elems_};
+    StaticIntegerMap<max_n_> *static_integer_map_;
+};
+
+TEST_F(StaticIntegerMapTest, SimpleTest) {
+    EXPECT_EQ(static_integer_map_->numFree(), max_n_ - 2);
+    for (uint32_t i = 0; i < num_elems_; i++) {
+        EXPECT_TRUE(static_integer_map_->exists(i));
+        EXPECT_EQ(*static_integer_map_->lookup(i), i);
+    }
+}
