@@ -14,18 +14,18 @@
 using namespace madrona;
 
 class StaticIntegerMapTest : public testing::Test {
-   protected:
+protected:
     void SetUp() override {
         for (uint32_t i = 0; i < num_elems_; i++) {
             integer_map_array_[i] = IntegerMapPair{.key = i, .value = i};
         }
         static_integer_map_ = new StaticIntegerMap<max_n_>{
-            lookup_inputs_.data(), lookup_inputs_.size()};
+            lookup_inputs_.data(), (uint32_t)lookup_inputs_.size()};
     }
 
     void TearDown() override { delete static_integer_map_; }
 
-    static constexpr int num_elems_ = 12;
+    static constexpr int num_elems_ = 13;
     static constexpr int max_n_ = 128;
     std::array<IntegerMapPair, num_elems_> integer_map_array_;
     Span<IntegerMapPair> lookup_inputs_ = {integer_map_array_.data(),
