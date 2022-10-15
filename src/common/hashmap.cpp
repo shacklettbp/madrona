@@ -45,6 +45,7 @@ static bool searchForPerfectHash(const IntegerMapPair *inputs,
         for (int i = 0; i < (int)num_inputs; i++) {
             uint32_t idx = StaticMapHelper::map(inputs[i].key, capacity_shift,
                                                 cur_multiplier);
+            assert(idx < capacity);
     
             if (slot_tracker[idx]) {
                 // Update the constant by rehashing and forcing to be odd
@@ -88,7 +89,7 @@ void StaticMapHelper::buildMap(uint32_t *key_storage, uint32_t *value_storage,
     uint32_t capacity_shift = 32u - utils::int32Log2(capacity);
     uint32_t multiplier = 0x7feb352du;
 
-    HeapArray<bool> used(capacity);
+    HeapArray<bool> used(storage_size);
     while (!searchForPerfectHash(inputs, num_inputs, capacity, shift_idx,
             constant_idx, capacity_shift, used.data(), &multiplier)) {
         capacity *= 2;
