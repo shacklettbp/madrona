@@ -3,6 +3,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(tests
     id_map.cpp
+    state.cpp
     static_map.cpp
 )
 
