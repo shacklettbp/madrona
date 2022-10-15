@@ -17,8 +17,8 @@
 using namespace madrona;
 
 struct TestID {
-    uint32_t id;
     uint32_t gen;
+    uint32_t id;
 };
 
 struct TestTracker {
