@@ -9,7 +9,6 @@
 
 #include <array>
 #include <madrona/hashmap.hpp>
-#include <madrona/span.hpp>
 
 using namespace madrona;
 
