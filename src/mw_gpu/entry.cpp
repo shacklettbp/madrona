@@ -221,16 +221,24 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
                               MADRONA_CUDADEVRT_PATH,
                               0, nullptr, nullptr));
 
-    auto addToLinker = [&](HeapArray<char> &&cubin, const char *name) {
-        checkLinker(cuLinkAddData(linker, linker_input_type, cubin.data(),
-                             cubin.size(), name, 0, nullptr, nullptr));
+    auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
+        checkLinker(cuLinkAddData(linker, linker_input_type,
+            (char *)cubin.data(), cubin.size(), name, 0, nullptr, nullptr));
     };
 
     for (int i = 0; i < (int)num_sources; i++) {
-        addToLinker(cu::jitCompileCPPFile(sources[i], compile_flags,
-                        num_compile_flags,
-                        opt_mode == CompileConfig::OptMode::LTO),
-                    sources[i]);
+        HeapArray<char> bytecode = cu::jitCompileCPPFile(sources[i],
+            compile_flags, num_compile_flags,
+            opt_mode == CompileConfig::OptMode::LTO);
+
+#if 0
+        printf("%s\n", sources[i]);
+        FILE *f = fopen((std::string("/tmp/") + basename(sources[i])).c_str(), "w");
+        fwrite(bytecode.data(), 1, bytecode.size(), f);
+        fclose(f);
+#endif
+
+        addToLinker(bytecode, sources[i]);
     }
 
     void *linked_cubin;
