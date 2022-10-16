@@ -14,20 +14,15 @@
 namespace madrona {
 namespace cu {
 
-HeapArray<char> jitCompileCPPSrc(const char *src,
-                                 const char *src_path,
-                                 const char **compile_flags,
-                                 uint32_t num_compile_flags,
-                                 bool nvvm_out)
+CompileOutput jitCompileCPPSrc(const char *src,
+                               const char *src_path,
+                               const char **opt_compile_flags,
+                               uint32_t num_opt_compile_flags,
+                               const char **fast_compile_flags,
+                               uint32_t num_fast_compile_flags,
+                               bool nvvm_out)
 {
-    nvrtcProgram prog;
-    REQ_NVRTC(nvrtcCreateProgram(&prog, src, src_path, 0,
-                                 nullptr, nullptr));
-
-    nvrtcResult res = nvrtcCompileProgram(prog, num_compile_flags,
-        compile_flags);
-
-    auto print_compile_log = [&prog]() {
+    auto print_compile_log = [](nvrtcProgram prog) {
         // Retrieve log output
         size_t log_size = 0;
         REQ_NVRTC(nvrtcGetProgramLogSize(prog, &log_size));
@@ -40,12 +35,7 @@ HeapArray<char> jitCompileCPPSrc(const char *src,
 
     };
 
-    print_compile_log();
-    if (res != NVRTC_SUCCESS) {
-        ERR_NVRTC(res);
-    }
-
-    auto produceNVVM = [&]() {
+    auto getNVVM = [](nvrtcProgram prog) {
         size_t num_nvvm_bytes;
         REQ_NVRTC(nvrtcGetNVVMSize(prog, &num_nvvm_bytes));
 
@@ -56,7 +46,17 @@ HeapArray<char> jitCompileCPPSrc(const char *src,
         return nvvm_data;
     };
 
-    auto produceCUBIN = [&]() {
+    auto getPTX = [](nvrtcProgram prog) {
+        size_t num_ptx_bytes;
+        REQ_NVRTC(nvrtcGetPTXSize(prog, &num_ptx_bytes));
+
+        HeapArray<char> ptx(num_ptx_bytes);
+        REQ_NVRTC(nvrtcGetPTX(prog, ptx.data()));
+
+        return ptx;
+    };
+
+    auto getCUBIN = [](nvrtcProgram prog) {
         size_t num_cubin_bytes;
         REQ_NVRTC(nvrtcGetCUBINSize(prog, &num_cubin_bytes));
 
@@ -67,16 +67,54 @@ HeapArray<char> jitCompileCPPSrc(const char *src,
         return cubin_data;
     };
 
-    HeapArray<char> result = nvvm_out ? produceNVVM() : produceCUBIN();
+    auto ltoGetPTX = [&]() {
+        nvrtcProgram fake_prog;
+        REQ_NVRTC(nvrtcCreateProgram(&fake_prog, src, src_path, 0,
+                                     nullptr, nullptr));
+
+        nvrtcResult res = nvrtcCompileProgram(fake_prog,
+            num_fast_compile_flags, fast_compile_flags);
+
+        if (res != NVRTC_SUCCESS) {
+            print_compile_log(fake_prog);
+            ERR_NVRTC(res);
+        }
+
+        HeapArray<char> ptx = getPTX(fake_prog);
+
+        REQ_NVRTC(nvrtcDestroyProgram(&fake_prog));
+
+        return ptx;
+    };
+
+    nvrtcProgram prog;
+    REQ_NVRTC(nvrtcCreateProgram(&prog, src, src_path, 0,
+                                 nullptr, nullptr));
+
+    nvrtcResult res = nvrtcCompileProgram(prog, num_opt_compile_flags,
+        opt_compile_flags);
+
+    print_compile_log(prog);
+    if (res != NVRTC_SUCCESS) {
+        ERR_NVRTC(res);
+    }
+
+    HeapArray<char> ptx = nvvm_out ? ltoGetPTX() : getPTX(prog);
+    HeapArray<char> result = nvvm_out ? getNVVM(prog) : getCUBIN(prog);
 
     REQ_NVRTC(nvrtcDestroyProgram(&prog));
 
-    return result;
+    return CompileOutput {
+        .outputPTX = std::move(ptx),
+        .outputBinary = std::move(result),
+    };
 }
 
-HeapArray<char> jitCompileCPPFile(const char *src_path,
-                                  const char **compile_flags,
-                                  uint32_t num_compile_flags,
+CompileOutput jitCompileCPPFile(const char *src_path,
+                                  const char **opt_compile_flags,
+                                  uint32_t num_opt_compile_flags,
+                                  const char **fast_compile_flags,
+                                  uint32_t num_fast_compile_flags,
                                   bool nvvm_out)
 {
     using namespace std;
@@ -91,7 +129,8 @@ HeapArray<char> jitCompileCPPFile(const char *src_path,
     src[num_src_bytes] = '\0';
 
     return jitCompileCPPSrc(src.data(), src_path,
-                            compile_flags, num_compile_flags, nvvm_out);
+        opt_compile_flags, num_opt_compile_flags,
+        fast_compile_flags, num_fast_compile_flags, nvvm_out);
 }
 
 }

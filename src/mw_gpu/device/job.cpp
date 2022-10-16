@@ -18,6 +18,10 @@ extern "C" {
 __constant__ madrona::mwGPU::GPUImplConsts madronaTrainGPUImplConsts;
 }
 
+extern "C" {
+__global__ void madronaMWGPUMegakernel(uint32_t func_id, madrona::JobContainerBase *data, uint32_t *data_indices, uint32_t *invocation_offsets, uint32_t num_launches, uint32_t grid);
+}
+
 namespace madrona {
 namespace mwGPU {
 
@@ -364,9 +368,9 @@ static void jobLoop()
 
             JobGridInfo &run_grid = base_job_grids[run_grid_idx];
 
-            Job::EntryPtr first_ptr = waiting_jobs[first_job_idx].fn;
-            auto isJobMergable = [first_ptr, job_mgr](Job &job) {
-                return job.fn == first_ptr && isJobReady(job_mgr, job);
+            uint32_t first_func_id = waiting_jobs[first_job_idx].funcID;
+            auto isJobMergable = [first_func_id, job_mgr](Job &job) {
+                return job.funcID == first_func_id && isJobReady(job_mgr, job);
             };
 
             uint32_t num_bytes_per_job =
@@ -538,7 +542,8 @@ static void jobLoop()
                 run_grid.numRunning.store(total_num_invocations,
                                           std::memory_order_relaxed);
 
-                first_ptr<<<num_blocks, consts::numJobLaunchKernelThreads>>>(
+                madronaMWGPUMegakernel<<<num_blocks, consts::numJobLaunchKernelThreads>>>(
+                    first_func_id,
                     (JobContainerBase *)run_grid.runData.buf,
                     run_grid.jobDataIndices, run_grid.jobInvocationOffsets,
                     total_num_invocations, run_grid_idx);
@@ -653,13 +658,13 @@ static inline void decrementJobTracker(JobTracker *job_trackers, JobID job_id)
 
 // This function should only be called by the wave leader
 static inline void queueMultiJobInWaitList(
-    Job::EntryPtr func, JobContainerBase *data, uint32_t grid_id,
+    uint32_t func_id, JobContainerBase *data, uint32_t grid_id,
     uint32_t num_jobs, uint32_t total_num_invocations,
     uint32_t num_bytes_per_job)
 {
     Job job {
-        .fn = func,
         .data = data,
+        .funcID = func_id,
         .numCombinedJobs = num_jobs,
         .numBytesPerJob = num_bytes_per_job,
     };
@@ -747,7 +752,7 @@ JobContainerBase * Context::allocJob(uint32_t bytes_per_job,
         (char *)base_store + bytes_per_job * wave_info.coalescedIDX);
 }
 
-void Context::addToWaitList(Job::EntryPtr func, JobContainerBase *data,
+void Context::addToWaitList(uint32_t func_id, JobContainerBase *data,
                             uint32_t num_invocations,
                             uint32_t num_bytes_per_job,
                             uint32_t lane_id,
@@ -759,7 +764,7 @@ void Context::addToWaitList(Job::EntryPtr func, JobContainerBase *data,
         warpSum(wave_info.activeMask, lane_id, num_invocations);
 
     if (lane_id_ == wave_info.leaderLane) {
-        queueMultiJobInWaitList(func, data, grid_id_,
+        queueMultiJobInWaitList(func_id, data, grid_id_,
             wave_info.numActive, total_num_invocations,
             num_bytes_per_job);
     }

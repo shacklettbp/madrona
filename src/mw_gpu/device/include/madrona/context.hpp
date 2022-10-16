@@ -70,7 +70,7 @@ private:
 
     JobContainerBase * allocJob(uint32_t bytes_per_job, WaveInfo wave_info);
 
-    void addToWaitList(Job::EntryPtr func, JobContainerBase *data,
+    void addToWaitList(uint32_t func_id, JobContainerBase *data,
                        uint32_t num_invocations,
                        uint32_t num_bytes_per_job,
                        uint32_t lane_id, WaveInfo wave_info);

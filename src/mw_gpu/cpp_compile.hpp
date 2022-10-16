@@ -12,16 +12,25 @@
 namespace madrona {
 namespace cu {
 
-HeapArray<char> jitCompileCPPSrc(const char *src,
-                                 const char *src_path,
-                                 const char **compile_flags,
-                                 uint32_t num_compile_flags,
-                                 bool nvvm_out);
+struct CompileOutput {
+    HeapArray<char> outputPTX;
+    HeapArray<char> outputBinary;
+};
 
-HeapArray<char> jitCompileCPPFile(const char *src_path,
-                                  const char **compile_flags,
-                                  uint32_t num_compile_flags,
-                                  bool nvvm_out);
+CompileOutput jitCompileCPPSrc(const char *src,
+                                const char *src_path,
+                                const char **opt_compile_flags,
+                                uint32_t num_opt_compile_flags,
+                                const char **fast_compile_flags,
+                                uint32_t num_fast_compile_flags,
+                                bool nvvm_out);
+
+CompileOutput jitCompileCPPFile(const char *src_path,
+                                const char **compile_flags,
+                                uint32_t num_compile_flags,
+                                const char **fast_compile_flags,
+                                uint32_t num_fast_compile_flags,
+                                bool nvvm_out);
 
 }
 }

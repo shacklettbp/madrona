@@ -12,12 +12,13 @@
 namespace madrona {
 namespace mwGPU {
 
-template <typename ContextT, typename Fn, size_t N>
-__global__ void jobEntry(JobContainerBase *job_data,
-                         uint32_t *data_indices,
-                         uint32_t *invocation_offsets,
-                         uint32_t num_invocations,
-                         uint32_t grid_id)
+template <typename ContextT, typename ContainerT>
+__attribute__((used, always_inline))
+inline void jobEntry(JobContainerBase *job_data,
+                     uint32_t *data_indices,
+                     uint32_t *invocation_offsets,
+                     uint32_t num_invocations,
+                     uint32_t grid_id)
 {
     uint32_t lane_id = threadIdx.x % consts::numWarpThreads;
 
@@ -31,11 +32,10 @@ __global__ void jobEntry(JobContainerBase *job_data,
     uint32_t data_idx = data_indices[invocation_idx];
     uint32_t local_offset = invocation_offsets[invocation_idx];
 
-    using JobContainer = JobContainer<Fn, N>;
-    static_assert(std::is_trivially_destructible_v<JobContainer>);
+    static_assert(std::is_trivially_destructible_v<ContainerT>);
 
-    JobContainer &job_container =
-        static_cast<JobContainer *>(job_data)[data_idx];
+    ContainerT &job_container =
+        static_cast<ContainerT *>(job_data)[data_idx];
 
     ContextT ctx = JobManager::makeContext<ContextT>(job_container.jobID,
         grid_id, job_container.worldID, lane_id);
@@ -48,6 +48,16 @@ __global__ void jobEntry(JobContainerBase *job_data,
 
     ctx.markJobFinished(num_block_invocations);
 }
+
+template <typename ContextT, typename ContainerT>
+struct JobFuncIDBase {
+    static uint32_t id;
+};
+
+template <typename ContextT, typename ContainerT,
+          decltype(jobEntry<ContextT, ContainerT>) =
+            jobEntry<ContextT, ContainerT>>
+struct JobFuncID : JobFuncIDBase<ContextT, ContainerT> {};
 
 }
 
@@ -106,24 +116,24 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
 {
     constexpr std::size_t num_deps = sizeof...(DepTs);
 
-    auto func_ptr = mwGPU::jobEntry<ContextT, Fn, num_deps>;
-
-    using FnJobContainer = JobContainer<Fn, num_deps>;
+    using ContainerT = JobContainer<Fn, num_deps>;
 
     auto wave_info = computeWaveInfo();
 
     JobID queue_job_id = getNewJobID(is_child, num_invocations);
 
-    auto store = allocJob(sizeof(FnJobContainer), wave_info);
-    new (store) FnJobContainer(queue_job_id, world_id_,
-                               num_invocations,
-                               std::forward<Fn>(fn),
-                               std::forward<DepTs>(dependencies)...);
+    auto store = allocJob(sizeof(ContainerT), wave_info);
+    new (store) ContainerT(queue_job_id, world_id_,
+                           num_invocations,
+                           std::forward<Fn>(fn),
+                           std::forward<DepTs>(dependencies)...);
 
     __syncwarp(wave_info.activeMask);
 
-    addToWaitList(func_ptr, store, num_invocations, sizeof(FnJobContainer),
-                  lane_id_, wave_info);
+    uint32_t func_id = mwGPU::JobFuncID<ContextT, ContainerT>::id;
+
+    addToWaitList(func_id, store, num_invocations,
+                  sizeof(ContainerT), lane_id_, wave_info);
 
     __syncwarp(wave_info.activeMask);
 

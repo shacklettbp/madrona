@@ -9,6 +9,7 @@
 #include <iostream>
 #include <array>
 
+#include <fstream>
 #include <string>
 
 #include <madrona/mw_gpu.hpp>
@@ -144,10 +145,11 @@ template <typename T> __global__ void submitRun(uint32_t) {}
 
 static CUmodule compileCode(const char **sources, uint32_t num_sources,
     const char **compile_flags, uint32_t num_compile_flags,
+    const char **fast_compile_flags, uint32_t num_fast_compile_flags,
     CompileConfig::OptMode opt_mode)
 {
-    static std::array<char, 4096> linker_info_log;
-    static std::array<char, 4096> linker_error_log;
+    static std::array<char, 1024 * 1024> linker_info_log;
+    static std::array<char, 1024 * 1024> linker_error_log;
 
     DynArray<CUjit_option> linker_options {
         CU_JIT_INFO_LOG_BUFFER,
@@ -176,6 +178,8 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
         linker_options.push_back(CU_JIT_PREC_SQRT);
         linker_option_values.push_back((void *)0);
         linker_options.push_back(CU_JIT_FMA);
+        linker_option_values.push_back((void *)1);
+        linker_options.push_back(CU_JIT_OPTIMIZE_UNUSED_DEVICE_VARIABLES);
         linker_option_values.push_back((void *)1);
 
         linker_input_type = CU_JIT_INPUT_NVVM;
@@ -226,23 +230,108 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
             (char *)cubin.data(), cubin.size(), name, 0, nullptr, nullptr));
     };
 
+    std::string megakernel_prefix = R"__(#include <cstdint>
+#include <madrona/job.hpp>
+
+extern "C" {
+
+)__";
+
+    std::string megakernel_body = R"__(extern "C" __global__ void madronaMWGPUMegakernel(uint32_t func_id, madrona::JobContainerBase *data, uint32_t *data_indices, uint32_t *invocation_offsets, uint32_t num_launches, uint32_t grid)
+{
+    switch (func_id) {
+)__";
+
+    uint32_t cur_func_id = 0;
+    auto megakernelAddPTXEntries = [&megakernel_prefix, &megakernel_body,
+                                    &cur_func_id](std::string_view ptx) {
+        using namespace std::literals;
+        using SizeT = std::string_view::size_type;
+
+        auto prefix = ".weak .func _ZN7madrona5mwGPU8jobEntry"sv;
+        auto postfix = "EvPNS_16JobContainerBaseEPj"sv;
+        constexpr SizeT start_skip = ".weak .func "sv.size();
+
+        SizeT cur_pos = 0;
+        SizeT found_pos;
+        while ((found_pos = ptx.find(prefix, cur_pos)) != ptx.npos) {
+            SizeT start_pos = found_pos + start_skip;
+            SizeT paren_pos = ptx.find('(', start_pos);
+            SizeT endline_pos = ptx.find('\n', start_pos);
+            cur_pos = paren_pos;
+
+            // This is a forward declaration so skip it
+            if (paren_pos > endline_pos) {
+                continue;
+            }
+
+            auto mangled_fn = ptx.substr(start_pos, paren_pos - start_pos);
+            megakernel_prefix += "void "sv;
+            megakernel_prefix += mangled_fn;
+            megakernel_prefix += "(madrona::JobContainerBase *, uint32_t *, uint32_t *, uint32_t, uint32_t);\n"sv;
+
+            SizeT postfix_start = mangled_fn.find(postfix);
+            assert(postfix_start != mangled_fn.npos);
+
+            SizeT id_common_start = prefix.size() - ".weak .func "sv.size();
+            auto common = mangled_fn.substr(id_common_start,
+                                            postfix_start - id_common_start);
+            
+            auto id_str = std::to_string(cur_func_id);
+
+            megakernel_prefix += "uint32_t ";
+            megakernel_prefix += "_ZN7madrona5mwGPU13JobFuncIDBase"sv;
+            megakernel_prefix += common;
+            megakernel_prefix += "2idE = ";
+            megakernel_prefix += id_str;
+            megakernel_prefix += ";\n";
+
+            megakernel_body += "        case ";
+            megakernel_body += id_str;
+            megakernel_body += ": {\n";
+            megakernel_body += "            ";
+            megakernel_body += mangled_fn;
+            megakernel_body += "(data, data_indices, invocation_offsets, num_launches, grid);\n";
+            megakernel_body += "        } break;\n";
+
+            cur_func_id++;
+        }
+    };
+
     for (int i = 0; i < (int)num_sources; i++) {
-        HeapArray<char> bytecode = cu::jitCompileCPPFile(sources[i],
+        auto [ptx, bytecode] = cu::jitCompileCPPFile(sources[i],
             compile_flags, num_compile_flags,
+            fast_compile_flags, num_fast_compile_flags,
             opt_mode == CompileConfig::OptMode::LTO);
 
-#if 0
-        printf("%s\n", sources[i]);
-        FILE *f = fopen((std::string("/tmp/") + basename(sources[i])).c_str(), "w");
-        fwrite(bytecode.data(), 1, bytecode.size(), f);
-        fclose(f);
-#endif
-
+        megakernelAddPTXEntries(std::string_view(ptx.data(), ptx.size()));
         addToLinker(bytecode, sources[i]);
     }
 
+    megakernel_prefix += R"__(
+}
+)__";
+
+    megakernel_body += R"__(        default:
+            __builtin_unreachable();
+    }
+}
+)__";
+
+    std::string megakernel =
+        std::move(megakernel_prefix) + std::move(megakernel_body);
+
+    auto compiled_megakernel = cu::jitCompileCPPSrc(megakernel.c_str(),
+        "megakernel.cpp", compile_flags, num_compile_flags, fast_compile_flags,
+        num_fast_compile_flags, opt_mode == CompileConfig::OptMode::LTO);
+    addToLinker(compiled_megakernel.outputBinary, "megakernel.cpp");
+
     void *linked_cubin;
-    checkLinker(cuLinkComplete(linker, &linked_cubin, nullptr));
+    size_t cubin_size;
+    checkLinker(cuLinkComplete(linker, &linked_cubin, &cubin_size));
+
+    std::ofstream cubin_out("/tmp/t.cubin", std::ios::binary);
+    cubin_out.write((char *)linked_cubin, cubin_size);
 
     if ((uintptr_t)linker_option_values[1] > 0) {
         printf("CUDA linking info:\n%s\n", linker_info_log.data());
@@ -279,14 +368,22 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     string arch_str = "sm_" + to_string(dev_props.major) +
         to_string(dev_props.minor);
 
-    DynArray<const char *> compile_flags {
+    DynArray<const char *> fast_compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-arch", arch_str.c_str(),
     };
 
     for (const char *user_flag : cfg.userCompileFlags) {
-        compile_flags.push_back(user_flag);
+        fast_compile_flags.push_back(user_flag);
     }
+
+    DynArray<const char *> compile_flags(fast_compile_flags.size());
+    for (const char *flag : fast_compile_flags) {
+        compile_flags.push_back(flag);
+    }
+
+    // No way to disable optimizations in nvrtc besides enabling debug mode
+    fast_compile_flags.push_back("-G");
 
     if (cfg.optMode == CompileConfig::OptMode::Debug) {
         compile_flags.push_back("--device-debug");
@@ -298,6 +395,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
 
     if (cfg.optMode == CompileConfig::OptMode::LTO) {
         compile_flags.push_back("-dlto");
+        compile_flags.push_back("-DMADRONA_MWGPU_LTO_MODE=1");
     }
 
     for (const char *src : all_cpp_files) {
@@ -311,6 +409,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg, uint32_t gpu_id)
     GPUKernels gpu_kernels;
     gpu_kernels.mod = compileCode(all_cpp_files.data(),
         all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
+        fast_compile_flags.data(), fast_compile_flags.size(),
         cfg.optMode);
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,

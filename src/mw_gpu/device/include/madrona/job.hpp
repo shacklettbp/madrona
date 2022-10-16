@@ -40,11 +40,8 @@ struct JobContainer : public JobContainerBase {
 };
 
 struct Job {
-    using EntryPtr = void (*)(JobContainerBase *data, uint32_t *data_indices,
-                              uint32_t *invocation_offsets,
-                              uint32_t num_launches, uint32_t grid_id);
-    EntryPtr fn;
     JobContainerBase *data;
+    uint32_t funcID;
     uint32_t numCombinedJobs;
     uint32_t numBytesPerJob;
 };
