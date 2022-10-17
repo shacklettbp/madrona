@@ -53,6 +53,7 @@ target_compile_definitions(madrona_mw_gpu PRIVATE
     MADRONA_NVRTC_OPTIONS=${NVRTC_OPTIONS}
     MADRONA_MW_GPU_INTERNAL_CPP=${INTERNAL_SRC_LIST}
     MADRONA_CUDADEVRT_PATH=\"${CUDA_DEVICE_RUNTIME}\"
+    MADRONA_MW_GPU_DEVICE_SRC_DIR=\"${DEVICE_SRC_DIR}\"
 )
 
 # Helper function for library users to get list of sources / compileflags

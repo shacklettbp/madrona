@@ -230,14 +230,13 @@ static CUmodule compileCode(const char **sources, uint32_t num_sources,
             (char *)cubin.data(), cubin.size(), name, 0, nullptr, nullptr));
     };
 
-    std::string megakernel_prefix = R"__(#include <cstdint>
-#include <madrona/job.hpp>
+    std::string megakernel_prefix = R"__(#include "megakernel_impl.inl"
 
 extern "C" {
 
 )__";
 
-    std::string megakernel_body = R"__(extern "C" __global__ void madronaMWGPUMegakernel(uint32_t func_id, madrona::JobContainerBase *data, uint32_t *data_indices, uint32_t *invocation_offsets, uint32_t num_launches, uint32_t grid)
+    std::string megakernel_body = R"__(static __attribute__((always_inline)) inline void dispatch(uint32_t func_id, madrona::JobContainerBase *data, uint32_t *data_indices, uint32_t *invocation_offsets, uint32_t num_launches, uint32_t grid)
 {
     switch (func_id) {
 )__";
@@ -321,9 +320,13 @@ extern "C" {
     std::string megakernel =
         std::move(megakernel_prefix) + std::move(megakernel_body);
 
+    std::string fake_megakernel_cpp_path =
+        std::string(MADRONA_MW_GPU_DEVICE_SRC_DIR) + "/megakernel.cpp";
+
     auto compiled_megakernel = cu::jitCompileCPPSrc(megakernel.c_str(),
-        "megakernel.cpp", compile_flags, num_compile_flags, fast_compile_flags,
-        num_fast_compile_flags, opt_mode == CompileConfig::OptMode::LTO);
+        fake_megakernel_cpp_path.c_str(), compile_flags, num_compile_flags,
+        fast_compile_flags, num_fast_compile_flags,
+        opt_mode == CompileConfig::OptMode::LTO);
     addToLinker(compiled_megakernel.outputBinary, "megakernel.cpp");
 
     void *linked_cubin;
