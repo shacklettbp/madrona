@@ -21,7 +21,7 @@ add_library(simple_ex_init STATIC
 )
 
 target_link_libraries(simple_ex_init PRIVATE 
-    madrona_mw_gpu
+    madrona_common
 )
 
 add_executable(simple_ex_sw
