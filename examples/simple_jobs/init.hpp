@@ -6,6 +6,6 @@
 
 namespace SimpleExample {
 
-EnvInit generateEnvironmentInitialization();
+EnvInit generateEnvironmentInitialization(uint64_t benchmark_ticks);
 
 }

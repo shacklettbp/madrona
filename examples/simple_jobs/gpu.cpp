@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
     // FIXME: this is really hacky
     HeapArray<EnvInit> env_inits(num_worlds);
     for (int i = 0; i < num_worlds; i++) {
-        env_inits[i] = generateEnvironmentInitialization();
+        env_inits[i] = generateEnvironmentInitialization(0);
 
         ObjectInit *ptr;
         cudaMalloc(&ptr, env_inits[i].numObjs * sizeof(ObjectInit));

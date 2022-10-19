@@ -55,6 +55,7 @@ struct ObjectInit {
 
 struct EnvInit {
     madrona::math::AABB worldBounds;
+    uint64_t numBenchmarkTicks;
     ObjectInit *objsInit;
     uint32_t numObjs;
 };
@@ -68,6 +69,9 @@ struct SimpleSim : public madrona::WorldBase {
     static void entry(Engine &ctx, const EnvInit &env_init);
     static void init(Engine &ctx, const EnvInit &env_init);
     static void update(Engine &ctx);
+
+    bool benchmarkMode;
+    uint64_t maxTicks;
 
     uint64_t tickCount;
     float deltaT;

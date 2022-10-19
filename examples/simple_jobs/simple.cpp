@@ -17,6 +17,14 @@ namespace SimpleExample {
 SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
     : WorldBase(ctx)
 {
+    if (env_init.numBenchmarkTicks > 0) {
+        benchmarkMode = true;
+        maxTicks = env_init.numBenchmarkTicks;
+    } else {
+        benchmarkMode = false;
+        maxTicks = 0;
+    }
+
     // World attributes (constant for now)
     tickCount = 0;
     deltaT = 1.f / 60.f;
@@ -173,13 +181,18 @@ static void tick(Engine &ctx)
 static void simLoop(Engine &ctx)
 {
     ctx.submit([](Engine &ctx) {
-        if (ctx.sim().tickCount % 10000 == 0) {
-            printf("Tick start %" PRIu64 "\n", ctx.sim().tickCount);
+        if (!ctx.data().benchmarkMode && ctx.data().tickCount % 10000 == 0) {
+            printf("Tick start %" PRIu64 "\n", ctx.data().tickCount);
         }
 
         tick(ctx);
 
         ctx.sim().tickCount += 1;
+
+        if (ctx.data().benchmarkMode &&
+                ctx.data().tickCount == ctx.data().maxTicks) {
+            return;
+        }
 
         // While this call appears recursive, all it does is immediately queue
         // up the simLoop dependency on the current job finishing.

@@ -7,8 +7,6 @@
  */
 #include <madrona/context.hpp>
 
-#include <fstream>
-
 #include "simple.hpp"
 #include "init.hpp"
 
@@ -20,7 +18,7 @@ static void launch()
 {
     StateManager state_mgr;
 
-    EnvInit env_init = generateEnvironmentInitialization();
+    EnvInit env_init = generateEnvironmentInitialization(0);
     
     JobManager job_mgr(JobManager::makeEntry<Engine>(
         [&env_init](Engine &ctx) {
@@ -34,9 +32,7 @@ static void launch()
 
 }
 
-int main(int argc, char *argv[])
+int main(int, char **)
 {
-    (void)argc;
-    (void)argv;
     SimpleExample::launch();
 }

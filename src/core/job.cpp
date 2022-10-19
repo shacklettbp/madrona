@@ -1317,12 +1317,11 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
                 scheduler_.numSleepingWorkers++;
             }
 
-            if (/* scheduler_.numWaiting == 0 && */
-                scheduler_.numSleepingWorkers == num_compute_workers_) {
-                assert(false);
+            if (scheduler_.numWaiting == 0 &&
+                    scheduler_.numSleepingWorkers == num_compute_workers_) {
                 for (int64_t i = 0; i < num_compute_workers_; i++) {
                     WorkerState &worker_state = getWorkerState(worker_base_, i);
-                    worker_state.wakeUp.store(i + 1, memory_order::relaxed);
+                    worker_state.wakeUp.store(~0_u32, memory_order::relaxed);
                     worker_state.wakeUp.notify_one();
                 }
                 return WorkerControl::Exit;
@@ -1592,19 +1591,21 @@ void JobManager::workerThread(
             workerPause();
             worker_state.numIdleLoops++;
         } else if (worker_ctrl == WorkerControl::Sleep) [[unlikely]] {
-            [&]() MADRONA_NO_INLINE __attribute__((cold)) {
-                worker_state.wakeUp.wait(0, memory_order::relaxed);
-                uint32_t wakeup_idx =
-                    worker_state.wakeUp.load(memory_order::relaxed);
-                int wakeup_search_idx = (int)wakeup_idx - 1;
+            worker_state.wakeUp.wait(0, memory_order::relaxed);
+            uint32_t wakeup_idx =
+                worker_state.wakeUp.load(memory_order::relaxed);
+            if (wakeup_idx == ~0_u32) [[unlikely]] {
+                break;
+            }
 
-                worker_ctrl = getNextJob(normal_base_, thread_idx,
-                    wakeup_search_idx, false, &cur_job);
+            int wakeup_search_idx = (int)wakeup_idx - 1;
 
-                if (worker_ctrl == WorkerControl::Run) {
-                    runCurJob();
-                }
-            }();
+            worker_ctrl = getNextJob(normal_base_, thread_idx,
+                wakeup_search_idx, false, &cur_job);
+
+            if (worker_ctrl == WorkerControl::Run) {
+                runCurJob();
+            }
         } else if (worker_ctrl == WorkerControl::Exit) [[unlikely]] {
             break;
         }

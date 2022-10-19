@@ -28,7 +28,7 @@ static Vector3 randomPosition(const AABB &bounds)
     };
 }
 
-EnvInit generateEnvironmentInitialization()
+EnvInit generateEnvironmentInitialization(uint64_t benchmark_ticks)
 {
     const int num_init_objs = 100;
 
@@ -52,6 +52,7 @@ EnvInit generateEnvironmentInitialization()
 
     return EnvInit {
         .worldBounds = world_bounds,
+        .numBenchmarkTicks = benchmark_ticks,
         .objsInit = objs_init,
         .numObjs = num_init_objs,
     };
