@@ -225,6 +225,8 @@ private:
                                     bool run_scheduler,
                                     Job *job);
 
+    inline WorkerControl tryScheduling(int thread_idx, Job *next_job);
+
     void splitJob(MultiInvokeFn fn_ptr, JobContainerBase *job_data,
                   uint32_t invocation_offset, uint32_t num_invocations,
                   RunQueue *run_queue);

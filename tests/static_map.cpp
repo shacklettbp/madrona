@@ -24,7 +24,8 @@ protected:
 
     void TearDown() override { delete static_integer_map_; }
 
-    static constexpr int num_elems_ = 13;
+    // Seems to max out currently at 80 elements (81 can't find perfect hash)
+    static constexpr int num_elems_ = 81;
     static constexpr int max_n_ = 128;
     std::array<IntegerMapPair, num_elems_> integer_map_array_;
     StaticIntegerMap<max_n_> *static_integer_map_;
