@@ -192,6 +192,8 @@ namespace consts {
         computeRunQueueBytes<runQueueSizePerThread>();
 
     constexpr int logSizePerThread = 4096; // FIXME: should decrease this and add functionality to force scheduler run
+    constexpr int logSizeSafetyMargin = logSizePerThread >> 3;
+    constexpr int logSizeMaxSafeCapacity = logSizePerThread - logSizeSafetyMargin;
     constexpr uint32_t logIndexMask = (uint32_t)logSizePerThread - 1;
     constexpr uint64_t logBytesPerThread = logSizePerThread * sizeof(LogEntry);
 
@@ -1395,6 +1397,16 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
     return auth.fetch_add(1, memory_order::acq_rel);
 }
 
+JobManager::WorkerControl JobManager::tryScheduling(int thread_idx, Job *next_job) {
+    WorkerControl sched_ctrl = WorkerControl::Loop;
+    bool sched_locked = scheduler_.lock.tryLock();
+    if (sched_locked) {
+        sched_ctrl = schedule(thread_idx, next_job);
+        scheduler_.lock.unlock();
+    }
+    return sched_ctrl;
+}
+
 JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
                                                  int thread_idx,
                                                  int init_search_idx,
@@ -1403,17 +1415,20 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
 {
     WorkerControl sched_ctrl = WorkerControl::Loop;
 
-    // First, check the current thread's queue
+    WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
+    uint32_t cur_tail = worker_state.logTail.load(memory_order::relaxed);
+    uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
+    // Determine if log capacity is too high (and we should try scheduling).
+    if (cur_tail - log_head > consts::logSizeMaxSafeCapacity) {
+        return tryScheduling(thread_idx, next_job);
+    }
+
+    // First, (if log capacity isn't too high) check the current thread's queue
     RunQueue *queue = getRunQueue(queue_base, init_search_idx);
     uint32_t job_idx = dequeueJobIndex(queue);
 
     if (run_scheduler && job_idx == consts::jobQueueSentinel) {
-        bool sched_locked = scheduler_.lock.tryLock();
-        if (sched_locked) {
-            sched_ctrl = schedule(thread_idx, next_job);
-            scheduler_.lock.unlock();
-        }
-
+        sched_ctrl = tryScheduling(thread_idx, next_job);
         if (sched_ctrl != WorkerControl::Loop) {
             return sched_ctrl;
         }
