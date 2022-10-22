@@ -48,6 +48,21 @@ public:
     WorldBase(const WorldBase &) = delete;
 };
 
+class SystemBase {
+};
+
+template <typename SystemT>
+class System : public SystemBase {
+    inline void operator()(Context &ctx, uint32_t invocation_idx);
+};
+
+template <typename... ComponentTs>
+class ParallelForSystem : public SystemBase {
+public:
+    void run(Context &ctx, uint32_t invocation_idx);
+private:
+};
+
 inline bool operator==(Entity a, Entity b);
 inline bool operator!=(Entity a, Entity b);
 
