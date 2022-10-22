@@ -1403,13 +1403,13 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
     return auth.fetch_add(1, memory_order::acq_rel);
 }
 
-JobManager::WorkerControl JobManager::tryScheduling(int thread_idx, Job *next_job) {
-    WorkerControl sched_ctrl = WorkerControl::LoopIdle;
+JobManager::WorkerControl JobManager::tryScheduling(
+    JobManager::WorkerControl default_ctrl, int thread_idx, Job *next_job) {
     if (scheduler_.lock.tryLock()) {
-        sched_ctrl = schedule(thread_idx, next_job);
+        default_ctrl = schedule(thread_idx, next_job);
         scheduler_.lock.unlock();
     }
-    return sched_ctrl;
+    return default_ctrl;
 }
 
 JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
@@ -1425,9 +1425,7 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
     // Determine if log capacity is too high (and we should try scheduling).
     if (cur_tail - log_head > consts::logSizeMaxSafeCapacity) {
-        sched_ctrl = tryScheduling(thread_idx, next_job);
-        return sched_ctrl != WorkerControl::LoopIdle ? sched_ctrl
-                                                     : WorkerControl::LoopBusy;
+        return tryScheduling(WorkerControl::LoopBusy, thread_idx, next_job);
     }
 
     // First, check the current thread's queue
@@ -1435,7 +1433,8 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     uint32_t job_idx = dequeueJobIndex(queue);
 
     if (run_scheduler && job_idx == consts::jobQueueSentinel) {
-        sched_ctrl = tryScheduling(thread_idx, next_job);
+        sched_ctrl =
+            tryScheduling(WorkerControl::LoopIdle, thread_idx, next_job);
         if (sched_ctrl != WorkerControl::LoopIdle) {
             return sched_ctrl;
         }
