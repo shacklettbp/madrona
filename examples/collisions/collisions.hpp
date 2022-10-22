@@ -49,6 +49,13 @@ struct Contact : madrona::Archetype<ContactData> {};
 
 class Engine;
 
+class BroadPhaseSystem : public madrona::ParallelForSystem<const madrona::Entity,
+                                                           const Translation,
+                                                           const Rotation,
+                                                           PhysicsAABB> {
+public:
+};
+
 // Per-world state object (one per-world created by JobManager)
 struct CollisionSim : public madrona::WorldBase {
     CollisionSim(Engine &ctx);
