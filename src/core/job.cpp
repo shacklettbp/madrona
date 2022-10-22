@@ -1174,7 +1174,8 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
 
 enum class JobManager::WorkerControl : uint64_t {
     Run,
-    Loop,
+    LoopIdle,
+    LoopBusy,
     Sleep,
     Exit,
 };
@@ -1313,27 +1314,32 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
     if (num_new_invocations == 0) {
         uint32_t sched_run_auth = sched_run->auth.load(memory_order::relaxed);
 
-        if (sched_run_auth == cur_run_tail &&
-            scheduling_worker.numConsecutiveSchedulerCalls > 1) {
-            if (scheduling_worker.wakeUp.load(memory_order::relaxed) != 0) {
-                scheduler_.numSleepingWorkers++;
-            }
-
-            if (scheduler_.numWaiting == 0 &&
-                    scheduler_.numSleepingWorkers == num_compute_workers_) {
-                for (int64_t i = 0; i < num_compute_workers_; i++) {
-                    WorkerState &worker_state = getWorkerState(worker_base_, i);
-                    worker_state.wakeUp.store(~0_u32, memory_order::relaxed);
-                    worker_state.wakeUp.notify_one();
+        if (sched_run_auth == cur_run_tail) {
+            if (scheduling_worker.numConsecutiveSchedulerCalls > 1) {
+                if (scheduling_worker.wakeUp.load(memory_order::relaxed) != 0) {
+                    scheduler_.numSleepingWorkers++;
                 }
-                return WorkerControl::Exit;
+
+                if (scheduler_.numWaiting == 0 &&
+                    scheduler_.numSleepingWorkers == num_compute_workers_) {
+                    for (int64_t i = 0; i < num_compute_workers_; i++) {
+                        WorkerState &worker_state =
+                            getWorkerState(worker_base_, i);
+                        worker_state.wakeUp.store(~0_u32,
+                                                  memory_order::relaxed);
+                        worker_state.wakeUp.notify_one();
+                    }
+                    return WorkerControl::Exit;
+                } else {
+                    getWorkerState(worker_base_, thread_idx)
+                        .wakeUp.store(0, memory_order::relaxed);
+                    return WorkerControl::Sleep;
+                }
             } else {
-                getWorkerState(worker_base_, thread_idx).wakeUp.store(0,
-                    memory_order::relaxed);
-                return WorkerControl::Sleep;
+                return WorkerControl::LoopIdle;
             }
         } else {
-            return WorkerControl::Loop;
+            return WorkerControl::LoopBusy;
         }
     }
     
@@ -1398,9 +1404,8 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
 }
 
 JobManager::WorkerControl JobManager::tryScheduling(int thread_idx, Job *next_job) {
-    WorkerControl sched_ctrl = WorkerControl::Loop;
-    bool sched_locked = scheduler_.lock.tryLock();
-    if (sched_locked) {
+    WorkerControl sched_ctrl = WorkerControl::LoopIdle;
+    if (scheduler_.lock.tryLock()) {
         sched_ctrl = schedule(thread_idx, next_job);
         scheduler_.lock.unlock();
     }
@@ -1413,23 +1418,25 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
                                                  bool run_scheduler,
                                                  Job *next_job)
 {
-    WorkerControl sched_ctrl = WorkerControl::Loop;
+    WorkerControl sched_ctrl = WorkerControl::LoopIdle;
 
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
     uint32_t cur_tail = worker_state.logTail.load(memory_order::relaxed);
     uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
     // Determine if log capacity is too high (and we should try scheduling).
     if (cur_tail - log_head > consts::logSizeMaxSafeCapacity) {
-        return tryScheduling(thread_idx, next_job);
+        sched_ctrl = tryScheduling(thread_idx, next_job);
+        return sched_ctrl != WorkerControl::LoopIdle ? sched_ctrl
+                                                     : WorkerControl::LoopBusy;
     }
 
-    // First, (if log capacity isn't too high) check the current thread's queue
+    // First, check the current thread's queue
     RunQueue *queue = getRunQueue(queue_base, init_search_idx);
     uint32_t job_idx = dequeueJobIndex(queue);
 
     if (run_scheduler && job_idx == consts::jobQueueSentinel) {
         sched_ctrl = tryScheduling(thread_idx, next_job);
-        if (sched_ctrl != WorkerControl::Loop) {
+        if (sched_ctrl != WorkerControl::LoopIdle) {
             return sched_ctrl;
         }
     }
@@ -1452,7 +1459,7 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     }
 
     if (job_idx == consts::jobQueueSentinel) {
-        return WorkerControl::Loop;
+        return WorkerControl::LoopIdle;
     }
 
     *next_job = getRunnableJobs(queue)[job_idx & consts::runQueueIndexMask];
@@ -1584,7 +1591,7 @@ void JobManager::workerThread(
     };
 
     while (true) {
-        WorkerControl worker_ctrl = WorkerControl::Loop;
+        WorkerControl worker_ctrl = WorkerControl::LoopIdle;
         if (num_high_.load(memory_order::relaxed) > 0) {
             worker_ctrl = getNextJob(high_base_, thread_idx, thread_idx,
                                      false, &cur_job);
@@ -1601,10 +1608,12 @@ void JobManager::workerThread(
 
         if (worker_ctrl == WorkerControl::Run) {
             runCurJob();
-        } else if (worker_ctrl == WorkerControl::Loop) {
+        } else if (worker_ctrl == WorkerControl::LoopIdle) {
             // No available work and couldn't run scheduler
             workerPause();
             worker_state.numIdleLoops++;
+        } else if (worker_ctrl == WorkerControl::LoopBusy) {
+            continue;
         } else if (worker_ctrl == WorkerControl::Sleep) [[unlikely]] {
             worker_state.wakeUp.wait(0, memory_order::relaxed);
             uint32_t wakeup_idx =
