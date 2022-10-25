@@ -13,6 +13,7 @@ class JobManager;
 class StateCache;
 class StateManager;
 class Context;
+class SystemBase;
 struct WorkerInit;
 
 }

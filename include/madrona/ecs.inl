@@ -30,11 +30,6 @@ Loc Loc::none()
     };
 }
 
-template <typename... ComponentTs>
-void ParallelForSystem<ComponentTs...>::run(Context &ctx, uint32_t invocation_idx)
-{
-}
-
 bool operator==(Entity a, Entity b)
 {
     return a.gen == b.gen && a.id == b.id;
