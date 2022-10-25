@@ -184,6 +184,16 @@ void JobManager::relinquishProxyJobID(int thread_idx, JobID job_id)
     return markInvocationsFinished(thread_idx, nullptr, job_id.id, 1);
 }
 
+bool JobManager::shouldSplitJob(RunQueue *queue)
+{
+    uint32_t cur_tail = queue->tail.load(std::memory_order_relaxed);
+    uint32_t cur_correction =
+        queue->correction.load(std::memory_order_relaxed);
+    uint32_t cur_head = queue->head.load(std::memory_order_relaxed);
+
+    return isQueueEmpty(cur_head, cur_correction, cur_tail);
+}
+
 template <typename ContextT, typename ContainerT>
 void JobManager::singleInvokeEntry(Context *ctx_base,
                                    JobContainerBase *data)
@@ -208,15 +218,6 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
     auto container = static_cast<ContainerT *>(data);
     JobManager *job_mgr = ctx.job_mgr_;
 
-    auto shouldSplit = [](JobManager *job_mgr, RunQueue *queue) {
-        uint32_t cur_tail = queue->tail.load(std::memory_order_relaxed);
-        uint32_t cur_correction =
-            queue->correction.load(std::memory_order_relaxed);
-        uint32_t cur_head = queue->head.load(std::memory_order_relaxed);
-
-        return job_mgr->isQueueEmpty(cur_head, cur_correction, cur_tail);
-    };
-
     // This loop is never called with num_invocations == 0
     uint64_t invocation_idx = invocation_offset;
     uint64_t remaining_invocations = num_invocations;
@@ -224,7 +225,8 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
         uint64_t cur_invocation = invocation_idx++;
         remaining_invocations -= 1;
 
-        if (remaining_invocations > 0 && shouldSplit(job_mgr, thread_queue)) {
+        if (remaining_invocations > 0 &&
+                job_mgr->shouldSplitJob(job_mgr, thread_queue)) {
             job_mgr->splitJob(&multiInvokeEntry<ContextT, ContainerT>, data,
                 invocation_idx, remaining_invocations, thread_queue);
             remaining_invocations = 0;

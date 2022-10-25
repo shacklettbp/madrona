@@ -121,5 +121,26 @@ struct PackDelegator<T<Args...>> {
     }
 };
 
+// Extract the type of the first argument. Not fully fleshed out but works for
+// the needed cases currently.
+template <typename Fn> struct FirstArgTypeExtractor;
+
+template <typename ReturnT, typename FirstT, typename... ArgsT>
+struct FirstArgTypeExtractor<ReturnT(FirstT, ArgsT...)> {
+    using type = FirstT;
+};
+
+template <typename ReturnT, typename ClassT, typename FirstT,
+          typename... ArgsT>
+struct FirstArgTypeExtractor<ReturnT (ClassT::*)(FirstT, ArgsT...)> {
+    using type = FirstT;
+};
+
+template <typename ReturnT, typename ClassT, typename FirstT,
+          typename... ArgsT>
+struct FirstArgTypeExtractor<ReturnT (ClassT::*)(FirstT, ArgsT...) const> {
+    using type = FirstT;
+};
+
 }
 }
