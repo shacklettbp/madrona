@@ -11,8 +11,27 @@
 
 #include <madrona/context.hpp>
 #include <madrona/utils.hpp>
+#include <madrona/memory.hpp>
 
-#include <madrona/mw_gpu/const.hpp>
+#include "mw_gpu/const.hpp"
+#include "mw_gpu/cu_utils.hpp"
+
+// Considerations:
+//  - Enforcing end-user data safety constraints around iteration & creation / deletion: fundamentally, a job needs to not run until it can be run by all worlds.
+//  - This means a given launch should have all the union of all dependencies of all instances of the same launch across worlds. Practically speaking, this means all the children launches of a given parent need to be deferred until the parent has completed across all worlds. Then a merging step has to run, where children jobs that match across worlds need to be grouped together into single launches with shared dependencies.
+//  - Challenges:
+//      - Currently job "uniqueness" isn't enforced. This means job A can launch the same function pointer twice, and the second launch can depend on the first. This could be changed, but may be jarring given the current lambda API
+//      - The above issue implies that searching through the list of children, merging based on function ptr alone is not enough. One solution is (func_ptr, # of launches of ptr in this job). That's annoying because now you need to track per func ptr state while building 
+//  - Advantages:
+//      - This scheme enforces maximum merging of jobs. If this wasn't the case, there would need to be some other mechanism to recover common jobs in conditional execution cases.
+//  - Disadvantages:
+//      - Lots of synchronization, less ability to overlap. Partly lose a major advantage of the megakernel which is that there is now no driver mandated synchronization
+//  - Sketch:
+//      - Every running job has a num_worlds wide log array.
+//
+
+using std::atomic_uint32_t;
+using std::memory_order;
 
 extern "C" {
 __constant__ madrona::mwGPU::GPUImplConsts madronaTrainGPUImplConsts;
@@ -27,54 +46,42 @@ namespace mwGPU {
 
 namespace consts {
 
-static constexpr uint32_t maxNumJobsPerWorld = 1024;
-static constexpr uint32_t jobDataPerWorld = 65536;
-static constexpr uint32_t numJobGrids = 256;
-static constexpr uint32_t numJobSystemKernelThreads = 512;
-static constexpr uint32_t allActive = ~0u;
+static constexpr uint32_t allActive = 0xFFFFFFFF;
 static constexpr uint32_t jobTrackerTerm = ~0u;
 
+static constexpr uint32_t jobsPerWaitQueue = 16384;
+static constexpr uint32_t numWaitQueues = 64;
+
 }
 
-struct alignas(64) RunData {
-    char buf[1024 * 1024];
-};
-
-struct JobGridInfo {
-    std::atomic_uint32_t waitJobHead;
-    std::atomic_uint32_t waitJobTail;
-    std::atomic_uint32_t waitQueueLock;
-    std::atomic_uint32_t numRunning;
-    RunData runData;
-    uint32_t jobDataIndices[65536 * 16];
-    uint32_t jobInvocationOffsets[65536 * 16];
-};
-
-struct alignas(16) JobTracker {
-    std::atomic_uint32_t gen;
-    std::atomic_uint32_t parent;
-    std::atomic_uint32_t remainingInvocations;
+struct JobTracker {
+    uint32_t parent;
     std::atomic_uint32_t numOutstanding;
+    std::atomic_uint32_t remainingInvocations;
 };
 
-static inline JobManager * getJobManager()
-{
-    return (JobManager *)GPUImplConsts::get().jobSystemAddr;
-}
+struct ThreadblockData {
+    ChunkAllocator::Cache chunkCache;
+    std::atomic_uint32_t curChunkID;
+    std::atomic_uint32_t remainingChunkBytes;
+};
 
-static inline JobGridInfo *getGridInfo(JobManager *mgr)
+static __shared__ ThreadblockData tbData;
+
+struct WaitQueue {
+    utils::SpinLock lock;
+    uint32_t numWaiting;
+    Job waitingJobs[consts::jobsPerWaitQueue];
+};
+
+static inline WaitQueue * getWaitQueues(JobManager *mgr, uint32_t idx)
 {
-    return (JobGridInfo *)((char *)mgr + GPUImplConsts::get().jobGridsOffset);
+    return (WaitQueue *)((char *)mgr + GPUImplConsts::get().waitQueueOffset);
 }
 
 static inline Job *getBaseJobList(JobManager *mgr)
 {
     return (Job *)((char *)mgr + GPUImplConsts::get().jobListOffset);
-}
-
-static inline JobTracker *getJobTrackers(JobManager *mgr)
-{
-    return (JobTracker *)((char *)mgr + GPUImplConsts::get().jobTrackerOffset);
 }
 
 static void initializeJobSystem(JobManager *mgr)
@@ -100,9 +107,10 @@ static void initializeJobSystem(JobManager *mgr)
         grids[i].numRunning.store(0, std::memory_order_relaxed);
     }
 
-    auto trackers = getJobTrackers(mgr);
+    auto shared_trackers = getSharedJobTrackers(mgr);
 
-    int num_trackers = GPUImplConsts::get().maxJobsPerGrid * consts::numJobGrids;
+    int num_shared_trackers =
+        GPUImplConsts::get().maxJobsPerGrid * consts::numJobGrids;
 
     for (int i = threadIdx.x; i < num_trackers; i += blockDim.x) {
         JobTracker &tracker = trackers[i];
@@ -143,70 +151,6 @@ static inline bool isJobReady(JobManager *job_mgr, Job &job)
     }
 
     return true;
-}
-
-static uint32_t warpSum(uint32_t mask, uint32_t lane_id, uint32_t val)
-{
-#pragma unroll
-    for (int i = 16; i > 0; i /= 2) {
-        uint32_t read_lane = lane_id ^ i;
-
-        bool other_active = mask & (1 << read_lane);
-
-        if (!other_active) {
-            read_lane = lane_id;
-        }
-
-        uint32_t other = __shfl_sync(mask, val, read_lane);
-
-        if (other_active) {
-            val += other;
-        }
-    }
-
-    return val;
-}
-
-static uint32_t warpInclusiveScan(uint32_t lane_id, uint32_t val)
-{
-#pragma unroll
-    for (int i = 1; i < consts::numWarpThreads; i *= 2) {
-        int tmp = __shfl_up_sync(consts::allActive, val, i);
-        if ((int)lane_id >= i) {
-            val += tmp;
-        }
-    }
-
-    return val;
-}
-
-static inline uint32_t warpExclusiveScan(uint32_t lane_id, uint32_t val)
-{
-    return warpInclusiveScan(lane_id, val) - val;
-}
-
-static inline uint32_t getHighestSetBit(uint32_t mask)
-{
-    return mask == 0u ? 0u : 31u - __clz(mask);
-}
-
-static inline uint32_t getLowestSetBit(uint32_t mask)
-{
-    return mask == 0u ? 0u : __clz(__brev(mask));
-}
-
-static inline uint32_t getNumHigherSetBits(uint32_t mask, uint32_t idx)
-{
-    mask >>= idx + 1;
-
-    return __popc(mask);
-}
-
-static inline uint32_t getNumLowerSetBits(uint32_t mask, uint32_t idx)
-{
-    mask <<= (32 - idx);
-
-    return __popc(mask);
 }
 
 static inline void *allocateJobData(uint32_t total_bytes)
@@ -570,9 +514,7 @@ static inline uint32_t computeMaxNumJobs(uint32_t num_worlds)
 }
 
 static inline JobID allocateJobTrackerSlot(JobManager *job_mgr,
-                                           JobTracker *trackers,
-                                           uint32_t parent_id,
-                                           uint32_t num_invocations)
+                                           JobTracker *trackers)
 {
     JobID cur_head = 
         job_mgr->freeTrackerHead.load(std::memory_order_acquire);
@@ -585,11 +527,10 @@ static inline JobID allocateJobTrackerSlot(JobManager *job_mgr,
         }
 
         new_head.gen = cur_head.gen + 1;
-        new_head.id =
-            trackers[cur_head.id].parent.load(std::memory_order_relaxed);
+        new_head.id = trackers[cur_head.id].parents[0];
     } while (!job_mgr->freeTrackerHead.compare_exchange_weak(
-        cur_head, new_head, std::memory_order_release,
-        std::memory_order_acquire));
+        cur_head, new_head, memory_order::release,
+        memory_order::acquire));
 
     uint32_t job_id = cur_head.id;
 
@@ -598,11 +539,6 @@ static inline JobID allocateJobTrackerSlot(JobManager *job_mgr,
         assert(false);
     }
 
-    JobTracker &tracker = trackers[job_id];
-    tracker.parent.store(parent_id, std::memory_order_relaxed);
-    tracker.remainingInvocations.store(num_invocations,
-                                       std::memory_order_release);
-    tracker.numOutstanding.store(1, std::memory_order_release);
     uint32_t gen = tracker.gen.load(std::memory_order_relaxed);
 
     return JobID {
@@ -617,7 +553,7 @@ static inline void freeJobTrackerSlot(uint32_t job_id)
     JobTracker *trackers = getJobTrackers(job_mgr);
 
     JobTracker &tracker = trackers[job_id];
-    tracker.gen.fetch_add(1, std::memory_order_acq_rel);
+    tracker.gen = tracker.gen + 1;
 
     JobID new_head;
     new_head.id = job_id;
@@ -628,10 +564,10 @@ static inline void freeJobTrackerSlot(uint32_t job_id)
     do {
         new_head.gen = cur_head.gen + 1;
 
-        tracker.parent.store(cur_head.id, std::memory_order_relaxed);
+        tracker.parents[0] = cur_head.id;
     } while (!job_mgr->freeTrackerHead.compare_exchange_weak(
            cur_head, new_head,
-           std::memory_order_release, std::memory_order_relaxed));
+           memory_order::release, memory_order::relaxed));
 }
 
 static inline void decrementJobTracker(JobTracker *job_trackers, JobID job_id)
@@ -645,7 +581,7 @@ static inline void decrementJobTracker(JobTracker *job_trackers, JobID job_id)
 
         if (prev_outstanding == 1 &&
             tracker.remainingInvocations.load(std::memory_order_relaxed) == 0) {
-            uint32_t parent = tracker.parent.load(std::memory_order_relaxed);
+            uint32_t parent = tracker.parent;
 
             freeJobTrackerSlot(cur_id);
 
@@ -695,6 +631,33 @@ static inline void queueMultiJobInWaitList(
 
 }
 
+bool JobManager::startBlockIter(uint32_t block_idx, RunnableJob *out_job)
+{
+}
+
+void JobManager::finishBlockIter(uint32_t block_idx)
+{
+    __syncthreads(); // Ensure entire threadblock has finished
+    uint32_t num_log_entries = 
+        tbRunData.numLogEntries.load(memory_order::relaxed);
+   
+    for (int i = threadIdx.x; i < (int)num_log_entries;
+         i += mwGPU::consts::numMegakernelThreads) {
+        uint8_t offset_lp = tbRunData.dataTmpOffsets[i];
+        int offset = (int)offset_lp * 8;
+
+        LogEntry *log = (LogEntry *)(tbRunData.dataTmp + offset);
+
+    }
+
+    __syncthreads();
+
+
+    if (threadIdx.x == 0) {
+        tbRunData.numLogEntries.store(0, memory_order::relaxed);
+    }
+}
+
 Context::WaveInfo Context::computeWaveInfo()
 {
     using namespace mwGPU;
@@ -702,15 +665,88 @@ Context::WaveInfo Context::computeWaveInfo()
     uint32_t active = __activemask();
     uint32_t num_active = __popc(active);
 
-    uint32_t sel_idx = getLowestSetBit(active);
     uint32_t coalesced_idx = getNumLowerSetBits(active, lane_id_);
 
     return WaveInfo {
         .activeMask = active,
         .numActive = num_active,
-        .leaderLane = sel_idx,
         .coalescedIDX = coalesced_idx,
     };
+}
+
+void Context::stageChildJob(uint32_t func_id, uint32_t num_combined_jobs,
+                            uint32_t bytes_per_job, void *containers)
+{
+    uint32_t offset = 
+        tbScratch.waitQueue.numWaiting.fetch_add(1, memory_order::relaxed);
+
+    tbScratch.waitingJobs[offset] = Job {
+        .data = (JobContainerBase *)containers_tmp,
+        .funcID = func_id,
+        .numCombinedJobs = num_combined_jobs,
+        .bytesPerJob = bytes_per_job,
+    };
+}
+
+JobID Context::waveSetupNewJob(uint32_t func_id, bool link_parent,
+        uint32_t num_invocations, uint32_t bytes_per_job,
+        void **thread_data_store)
+{
+    auto wave_info = computeWaveInfo();
+    auto job_mgr = JobManager::get();
+    auto job_trackers = getJobTrackers(job_mgr);
+
+    JobID child_id;
+    char *tmp_data;
+
+    uint32_t num_total_invocations =
+        __reduce_add_sync(wave_info.activeMask, num_invocations);
+
+    if (wave_info.isLeader()) {
+        child_id = allocateJobTrackerSlot(job_mgr, job_trackers);
+        job_trackers[child_id.id].numOutstanding.store(1, memory_order::relaxed);
+        job_trackers[child_id.id].remainingInvocations.store(
+            num_total_invocations, memory_order::relaxed);
+
+        uint32_t total_bytes = wave_info.numActive * bytes_per_job;
+        tmp_data = (char *)malloc(total_bytes);
+
+        stageChildJob(func_id, tmp_data, bytes_per_job, wave_info.numActive);
+    }
+
+    child_id = {
+        .gen = __shfl_sync(wave_info.activeMask, child_id.gen,
+                           wave_info.leaderLane);
+        .id = __shfl_sync(wave_info.activeMask, child_id.id,
+                          wave_info.leaderLane);
+    };
+
+    uint32_t parent_id;
+    if (link_parent) {
+        parent_id = job_id_.id;
+
+        uint32_t parent_match =
+            __match_any_sync(wave_info.activeMask, parent_id);
+
+        uint32_t top_thread = getHighestSetBit(parent_match);
+        uint32_t num_children = __popc(parent_match);
+
+        if (lane_id_ == top_thread) {
+            trackers[parent_id].numOutstanding.fetch_add(num_children,
+               std::memory_order_relaxed);
+        }
+
+        job_trackers[child_id.id].parents[wave_info.coalescedIDX] = parent_id;
+    } else {
+        parent_id = consts::jobTrackerTerm;
+    }
+
+    tmp_data = (char *)__shfl_sync(wave_info.activeMask, (uintptr_t)tmp_data,
+                                   wave_info.leaderLane);
+
+    *thread_data_store = tmp_data + wave_info.coalescedIDX * bytes_per_job;
+
+    return child_id;
 }
 
 JobID Context::getNewJobID(bool link_parent, uint32_t num_invocations)
@@ -752,11 +788,11 @@ JobContainerBase * Context::allocJob(uint32_t bytes_per_job,
         (char *)base_store + bytes_per_job * wave_info.coalescedIDX);
 }
 
-void Context::addToWaitList(uint32_t func_id, JobContainerBase *data,
-                            uint32_t num_invocations,
-                            uint32_t num_bytes_per_job,
-                            uint32_t lane_id,
-                            WaveInfo wave_info)
+void Context::logNewJob(uint32_t func_id, JobContainerBase *data,
+                        uint32_t num_invocations,
+                        uint32_t num_bytes_per_job,
+                        uint32_t lane_id,
+                        WaveInfo wave_info)
 {
     using namespace mwGPU;
 
@@ -770,44 +806,91 @@ void Context::addToWaitList(uint32_t func_id, JobContainerBase *data,
     }
 }
 
-void Context::markJobFinished(uint32_t num_invocations)
+void Context::markJobFinished()
 {
     using namespace mwGPU;
+    auto job_mgr = JobManager::get();
 
-    auto job_mgr = getJobManager();
-    JobTracker *job_trackers = getJobTrackers(job_mgr);
+    JobTracker *trackers = getJobTracker(job_mgr);
 
-    // Num invocations above is the total invocations in the block.
-    // Since the block may not all be using the same job id, need to
-    // decrement remainingInvocations one at a time currently
-    uint32_t prev_invocations =
-        job_trackers[job_id_.id].remainingInvocations.fetch_sub(
-            1, std::memory_order_acq_rel);
+#pragma loop unroll
+    uint32_t job_idx = job_id_.id;
+    for (int i = 0; i < consts::numWarpThreads; i++) {
+        uint32_t other_job_idx = __shfl_sync(consts::allActive, job_idx);
 
-    if (prev_invocations == 1) {
-        decrementJobTracker(job_trackers, job_id_);
+        uint32_t job_match = __match_any_sync(wave_info.activeMask, job_idx);
+
+        uint32_t top_thread = getHighestSetBit(job_match);
+        uint32_t num_invocations = __popc(job_match);
+
+        if (lane_id_ == top_thread) {
+            uint32_t prev_invocations = 
+                trackers[job_idx].remainingInvocations.fetch_sub(num_invocations,
+                    memory_order::relaxed);
+        }
+
+            if (prev_invocations == num_invocations) {
+                decrementJobTracker(trackers, job_id_);
+            }
+        }
     }
 
     __syncthreads();
 
-    if (threadIdx.x != 0) return;
+    uint32_t num_waiting =
+        tbScratch.waitQueue.numWaiting.load(memory_order::relaxed);
 
-    JobGridInfo &cur_grid = getGridInfo(job_mgr)[grid_id_];
+    if (threadIdx.x == 0) {
+        uint32_t prev_invocations = metadata.remainingInvocations.fetch_sub(
+            num_invocations);
 
-    atomicSub(&job_mgr->numOutstandingInvocations, num_invocations);
-
-    uint32_t prev_running = cur_grid.numRunning.fetch_sub(num_invocations,
-        std::memory_order_acq_rel);
-
-    if (prev_running == num_invocations) {
-        uint32_t grid_bitfield = grid_id_ / 32;
-        uint32_t grid_bit = grid_id_ % 32;
-        uint32_t mask = ~(1u << grid_bit);
-
-        atomicAnd(&job_mgr->activeGrids[grid_bitfield], mask);
+        if (prev_invocations == num_invocations) {
+            scratch =
+                metadata.numStaged.load(memory_order::relaxed);
+        } else {
+            scratch[0] = ~0_u32;
+        }
     }
 
-    std::atomic_thread_fence(std::memory_order_release);
+    __syncthreads();
+
+    uint32_t num_staged = scratch[0];
+    if (num_staged == ~0_u32) {
+        return;
+    }
+
+    // Merge children jobs
+    // FIXME: optimization - do a reduction at the thread block level first
+    // Or, launch a job with num_staged invocations that does this reduction
+    // globally
+
+    StagedJob *staged_jobs = getStagedJobs(metadata);
+
+    cuda::barrier<cuda::thread_scope_block> cpy_barrier;
+    cuda::barrier::init(&cpy_barrier, consts::numMegakernelThreads);
+
+    for (int i = 0; i < num_staged; i += consts::numMegakernelThreads) {
+        int offset = i + threadIdx.x;
+        bool inbounds = offset < num_staged;
+        offset = inbounds ? offset : num_staged - 1;
+
+        StagedJob &staged_job = staged_jobs[offset];
+        uint32_t func_id = staged_job.funcID;
+
+        __syncthreads();
+    }
+    
+    cpy_barrier.arrive_and_wait();
+
+    if (threadIdx.x == 0) {
+        decrementJobTracker(job_mgr, merged_job_id_);
+    }
+}
+
+static inline uint32_t computeNumAllocatorChunks(uint64_t num_bytes)
+{
+    return utils::divideRoundUp(num_bytes,
+        (uint64_t)ChunkAllocator::chunkSize);
 }
 
 }
@@ -816,6 +899,7 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     uint32_t num_worlds,
     uint32_t num_world_data_bytes,
     uint32_t world_data_alignment,
+    uint64_t num_allocator_bytes,
     madrona::mwGPU::GPUImplConsts *out_constants,
     size_t *job_system_buffer_size)
 {
@@ -833,6 +917,17 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
         (uint64_t)alignof(StateManager));
 
     total_bytes = state_mgr_offset + sizeof(StateManager);
+
+    uint64_t chunk_allocator_offset = utils::roundUp(total_bytes,
+        (uint64_t)alignof(ChunkAllocator));
+
+    total_bytes = chunk_allocator_offset + sizeof(ChunkAllocator);
+
+    uint64_t chunk_base_offset = utils::roundUp(total_bytes,
+        (uint64_t)alignof(ChunkAllocator::chunkSize));
+
+    uint64_t num_chunks = computeNumAllocatorChunks(num_allocator_bytes);
+    total_bytes += num_chunks * ChunkAllocator::chunkSize;
 
     uint64_t world_data_offset =
         utils::roundUp(total_bytes, (uint64_t)world_data_alignment);
@@ -863,8 +958,11 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     *out_constants = GPUImplConsts {
         .jobSystemAddr = (void *)0ul,
         .stateManagerAddr = (void *)state_mgr_offset,
+        .chunkAllocatorAddr = (void *)chunk_allocator_offset,
+        .chunkBaseAddr = (void *)chunk_base_offset,
         .worldDataAddr = (void *)world_data_offset,
         .numWorldDataBytes = num_world_data_bytes,
+        .numWorlds = num_worlds,
         .jobGridsOffset = (uint32_t)grid_offset,
         .jobListOffset = (uint32_t)wait_job_offset,
         .maxJobsPerGrid = max_num_jobs_per_grid,
@@ -874,7 +972,8 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     *job_system_buffer_size = total_bytes;
 }
 
-extern "C" __global__  void madronaTrainInitializeKernel()
+extern "C" __global__  void madronaTrainInitializeKernel(
+    uint64_t num_allocator_bytes)
 {
     using namespace madrona;
     using namespace madrona::mwGPU;
@@ -890,6 +989,11 @@ extern "C" __global__  void madronaTrainInitializeKernel()
 
     if (threadIdx.x == 0) {
         new (GPUImplConsts::get().stateManagerAddr) StateManager(1024);
+    }
+
+    if (threadIdx.x == 0) {
+        new (GPUImplConsts::get().chunkAllocatorAddr) ChunkAllocator(
+            computeNumAllocatorChunks(num_allocator_bytes));
     }
 }
 

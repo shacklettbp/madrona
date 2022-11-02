@@ -8,10 +8,13 @@
 #pragma once
 
 #include "mw_gpu/const.hpp"
+#include "mw_gpu/cu_utils.hpp"
 
 namespace madrona {
 namespace mwGPU {
 
+// This function is executed at the thread-block granularity.
+// num_invocations <= consts::numMegakernelThreads
 template <typename ContextT, typename ContainerT>
 __attribute__((used, always_inline))
 inline void jobEntry(JobContainerBase *job_data,
@@ -42,11 +45,7 @@ inline void jobEntry(JobContainerBase *job_data,
 
     (job_container.fn)(ctx, local_offset);
 
-    uint32_t num_block_invocations = min(
-        num_invocations - blockIdx.x * consts::numJobLaunchKernelThreads,
-        consts::numJobLaunchKernelThreads);
-
-    ctx.markJobFinished(num_block_invocations);
+    ctx.markJobFinished(num_invocations);
 }
 
 template <typename ContextT, typename ContainerT>
@@ -109,33 +108,53 @@ JobID Context::submitImpl(Fn &&fn, bool is_child, DepTs && ... dependencies)
                                  std::forward<DepTs>(dependencies)...);
 }
 
-// FIXME: implement is_child, dependencies, num_invocations
 template <typename ContextT, typename Fn, typename... DepTs>
 JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
                            DepTs &&... dependencies)
 {
+    using namespace mwGPU;
+
     constexpr std::size_t num_deps = sizeof...(DepTs);
 
     using ContainerT = JobContainer<Fn, num_deps>;
 
+    UserJobTracker *user_trackers =
+        JobManager::get()->getUserJobTrackers();
+
     auto wave_info = computeWaveInfo();
 
-    JobID queue_job_id = getNewJobID(is_child, num_invocations);
+    // Consolidate dependencies across warp
+    // num_deps is guaranteed to be the same across activemask here
+#if 0
+    uint32_t num_unique_dependencies = 0;
+    auto countUniqueDeps = [&](JobID dep) {
+        UserJobTracker &user_tracker = user_trackers[dep.id];
 
-    auto store = allocJob(sizeof(ContainerT), wave_info);
-    new (store) ContainerT(queue_job_id, world_id_,
-                           num_invocations,
-                           std::forward<Fn>(fn),
-                           std::forward<DepTs>(dependencies)...);
+        uint32_t shared_id = dep.gen == user_tracker.gen ?
+            user_tracker.sharedID : ~0_u32;
 
-    __syncwarp(wave_info.activeMask);
+        uint32_t match_mask = __match_any_sync(wave_info.activeMask,
+                                               shared_id);
+
+        uint32_t top_match = getHighestSetBit(match_mask);
+
+        uint32_t num_add = (top_match == lane_id_ && shared_id != ~0_u32) ?
+            1 : 0;
+        num_unique_dependencies +=
+            __reduce_add_sync(wave_info.activeMask, num_add);
+    };
+#endif
 
     uint32_t func_id = mwGPU::JobFuncID<ContextT, ContainerT>::id;
 
-    addToWaitList(func_id, store, num_invocations,
-                  sizeof(ContainerT), lane_id_, wave_info);
+    void *thread_data_store;
+    JobID job_id = waveSetupNewJob(func_id, is_child, num_invocations,
+        sizeof(ContainerT), &thread_data_store);
 
-    __syncwarp(wave_info.activeMask);
+    new (thread_data_store) ContainerT(job_id, world_id_,
+        num_invocations,
+        std::forward<Fn>(fn),
+        std::forward<DepTs>(dependencies)...);
 
     return queue_job_id;
 }

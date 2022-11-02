@@ -11,7 +11,9 @@ namespace mwGPU {
 namespace consts {
 
 inline constexpr uint32_t numWarpThreads = 32;
-inline constexpr uint32_t numJobLaunchKernelThreads = 256;
+inline constexpr uint32_t numMegakernelThreads = 256;
+inline constexpr uint32_t numMegakernelWarps =
+    numMegakernelThreads / numWarpThreads;
 
 }
 }
@@ -55,6 +57,23 @@ JobContainer<Fn, N>::JobContainer(JobID job_id,
       dependencies(deps...),
       fn(std::forward<Fn>(func))
 {}
+
+JobManager * JobManager::get()
+{
+    return (JobManager *)GPUImplConsts::get().jobSystemAddr;
+}
+
+mwGPU::SharedJobTracker * JobManager::getSharedJobTrackers()
+{
+    return (mwGPU::SharedJobTracker *)((char *)this +
+        mwGPU::GPUImplConsts::get().sharedJobTrackerOffset);
+}
+
+mwGPU::UserJobTracker * JobManager::getUserJobTrackers()
+{
+    return (mwGPU::UserJobTracker *)((char *)this +
+        mwGPU::GPUImplConsts::get().userJobTrackerOffset);
+}
 
 template <typename ContextT>
 ContextT JobManager::makeContext(JobID job_id, uint32_t grid_id,
