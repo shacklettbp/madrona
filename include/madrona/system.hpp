@@ -35,9 +35,9 @@ private:
 };
 
 template <typename SystemT>
-class System : public SystemBase {
+class CustomSystem : public SystemBase {
 public:
-    System(const SystemInit &init);
+    CustomSystem(const SystemInit &init);
 
 };
 
@@ -55,18 +55,18 @@ private:
 };
 
 template <typename Fn, typename... ComponentTs>
-class LambdaParallelFor : public ParallelForSystem<
-        LambdaParallelFor<Fn, ComponentTs...>, ComponentTs...> {
+class LambdaParallelForSystem : public ParallelForSystem<
+        LambdaParallelForSystem<Fn, ComponentTs...>, ComponentTs...> {
     using ContextT = utils::FirstArgTypeExtractor<decltype(Fn::operator())>;
 public:
-    static LambdaParallelFor<Fn, ComponentTs...> * allocate(Context &ctx);
+    static LambdaParallelForSystem<Fn, ComponentTs...> * allocate(Context &ctx);
     static void deallocate(Context &ctx,
-                           LambdaParallelFor<Fn, ComponentTs...> *lambda);
+                           LambdaParallelForSystem<Fn, ComponentTs...> *lambda);
 
     void run(ContextT &ctx, uint32_t invocation_idx);
 
 private:
-    LambdaParallelFor(Fn &&fn);
+    LambdaParallelForSystem(Fn &&fn);
 
     Fn fn;
 };

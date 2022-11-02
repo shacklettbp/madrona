@@ -49,11 +49,18 @@ struct Contact : madrona::Archetype<ContactData> {};
 
 class Engine;
 
-class BroadPhaseSystem : public madrona::ParallelForSystem<const madrona::Entity,
+class BroadPhaseSystem : public madrona::ParallelForSystem<BroadPhaseSystem,
+                                                           const madrona::Entity,
                                                            const Translation,
                                                            const Rotation,
                                                            PhysicsAABB> {
 public:
+    BroadPhaseSystem();
+
+    void run(const madrona::Entity &e, const Translation &t, const Rotation &r,
+             PhysicsAABB &aabb);
+
+private:
 };
 
 // Per-world state object (one per-world created by JobManager)
