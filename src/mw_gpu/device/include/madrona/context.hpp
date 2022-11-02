@@ -32,7 +32,7 @@ public:
     inline JobID parallelFor(const Query<ColTypes...> &query, Fn &&fn,
         bool is_child = true, DepTs && ... dependencies);
 
-    void markJobFinished(uint32_t num_jobs);
+    void markJobFinished();
 
     inline JobID currentJobID() const { return job_id_; }
 
@@ -60,23 +60,27 @@ private:
     struct WaveInfo {
         uint32_t activeMask;
         uint32_t numActive;
-        uint32_t leaderLane;
         uint32_t coalescedIDX;
+
+        inline bool isLeader() const
+        {
+            return coalescedIDX == 0;
+        }
     };
 
     WaveInfo computeWaveInfo();
 
-    JobID getNewJobID(bool link_parent, uint32_t num_invocations);
+    JobID waveSetupNewJob(uint32_t func_id, bool link_parent,
+                          uint32_t num_invocations, uint32_t bytes_per_job,
+                          void **thread_data_store);
 
     JobContainerBase * allocJob(uint32_t bytes_per_job, WaveInfo wave_info);
 
-    void addToWaitList(uint32_t func_id, JobContainerBase *data,
-                       uint32_t num_invocations,
-                       uint32_t num_bytes_per_job,
-                       uint32_t lane_id, WaveInfo wave_info);
+    inline void stageChildJob(uint32_t func_id, uint32_t num_combined_jobs,
+                              uint32_t bytes_per_job, void *containers);
 
     JobID job_id_;
-    uint32_t grid_id_;
+
     uint32_t world_id_;
     uint32_t lane_id_;
 };

@@ -46,13 +46,16 @@ struct Job {
     uint32_t numBytesPerJob;
 };
 
-
 class JobManager {
 public:
     uint32_t numOutstandingInvocations;
-    uint32_t activeGrids[8];
 
     std::atomic<JobID> freeTrackerHead;
+
+    bool startBlockIter(RunnableJob *out_job);
+    void finishBlockIter();
+
+    static inline JobManager * get();
 
     template <typename ContextT>
     static inline ContextT makeContext(JobID job_id, uint32_t grid_id,

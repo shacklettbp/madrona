@@ -236,7 +236,16 @@ extern "C" {
 
 )__";
 
-    std::string megakernel_body = R"__(static __attribute__((always_inline)) inline void dispatch(uint32_t func_id, madrona::JobContainerBase *data, uint32_t *data_indices, uint32_t *invocation_offsets, uint32_t num_launches, uint32_t grid)
+    std::string megakernel_body = R"__(namespace madrona {
+namespace mwGPU {
+
+static __attribute__((always_inline)) inline void dispatch(
+        uint32_t func_id,
+        madrona::JobContainerBase *data,
+        uint32_t *data_indices,
+        uint32_t *invocation_offsets,
+        uint32_t num_launches,
+        uint32_t grid)
 {
     switch (func_id) {
 )__";
@@ -314,6 +323,9 @@ extern "C" {
     megakernel_body += R"__(        default:
             __builtin_unreachable();
     }
+}
+
+}
 }
 )__";
 
@@ -558,6 +570,14 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
 
     gpu_consts_readback->stateManagerAddr =
         (char *)gpu_consts_readback->stateManagerAddr +
+        (uintptr_t)gpu_state_buffer;
+
+    gpu_consts_readback->chunkAllocatorAddr =
+        (char *)gpu_consts_readback->chunkAllocatorAddr +
+        (uintptr_t)gpu_state_buffer;
+
+    gpu_consts_readback->chunkAllocatorAddr =
+        (char *)gpu_consts_readback->chunkBaseAddr +
         (uintptr_t)gpu_state_buffer;
 
     gpu_consts_readback->worldDataAddr =
