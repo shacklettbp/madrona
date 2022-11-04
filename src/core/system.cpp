@@ -3,7 +3,8 @@
 namespace madrona {
 
 SystemBase::SystemBase(EntryFn fn_ptr)
-    : fn_ptr_(fn_ptr)
+    : numInvocations(0),
+      entry_fn_(fn_ptr)
 {}
 
 }
