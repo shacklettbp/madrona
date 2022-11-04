@@ -184,7 +184,7 @@ void JobManager::relinquishProxyJobID(int thread_idx, JobID job_id)
     return markInvocationsFinished(thread_idx, nullptr, job_id.id, 1);
 }
 
-bool JobManager::shouldSplitJob(RunQueue *queue)
+bool JobManager::shouldSplitJob(RunQueue *queue) const
 {
     uint32_t cur_tail = queue->tail.load(std::memory_order_relaxed);
     uint32_t cur_correction =
@@ -226,7 +226,7 @@ void JobManager::multiInvokeEntry(Context *ctx_base,
         remaining_invocations -= 1;
 
         if (remaining_invocations > 0 &&
-                job_mgr->shouldSplitJob(job_mgr, thread_queue)) {
+                job_mgr->shouldSplitJob(thread_queue)) {
             job_mgr->splitJob(&multiInvokeEntry<ContextT, ContainerT>, data,
                 invocation_idx, remaining_invocations, thread_queue);
             remaining_invocations = 0;

@@ -8,43 +8,32 @@
 
 namespace madrona {
 
-class SystemBase;
-
-class SystemInit {
-public:
-    SystemInit(JobManager &job_mgr, StateManager &state_mgr);
-
-private:
-    JobManager *job_mgr_;
-    StateManager *state_mgr_;
-
-friend class SystemBase;
-};
-
 class SystemBase {
 public:
-    using GenericFn = void (*)();
+    using EntryFn = void (*)(SystemBase *, void *, uint32_t);
 
-    SystemBase(GenericFn fn_ptr);
-    void enqueue(Context &ctx);
-
-protected:
-
+    SystemBase(EntryFn entry_fn);
+    std::atomic_uint32_t numInvocations; 
 private:
-    GenericFn fn_ptr_;
+    EntryFn entry_fn_;
+friend class TaskGraph;
 };
 
 template <typename SystemT>
 class CustomSystem : public SystemBase {
 public:
-    CustomSystem(const SystemInit &init);
+    CustomSystem();
 
+private:
+    static void entry(SystemBase *sys, void *data,
+                      uint32_t invocation_offset);
 };
 
+#if 0
 template <typename SystemT, typename... ComponentTs>
 class ParallelForSystem : public SystemBase {
 public:
-    ParallelForSystem(const SystemInit &init);
+    ParallelForSystem();
 
 private:
     using ContextT = utils::FirstArgTypeExtractor<decltype(SystemT::run)>;
@@ -70,6 +59,7 @@ private:
 
     Fn fn;
 };
+#endif
 
 }
 
