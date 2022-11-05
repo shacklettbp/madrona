@@ -42,19 +42,19 @@ public:
 private:
     struct SystemInfo {
         SystemBase *sys;
+        std::atomic_uint32_t curOffset;
+        std::atomic_uint32_t numRemaining;
     };
 
     void workerThread();
 
     TaskGraph(HeapArray<SystemInfo> &&systems);
     HeapArray<std::thread> workers_;
+    std::atomic_uint32_t num_sleeping_workers_;
     std::atomic_uint32_t worker_sleep_;
     std::atomic_uint32_t main_sleep_;
 
-    std::atomic_uint32_t cur_sys_;
-    std::atomic_uint32_t cur_num_invocations_;
-    std::atomic_uint32_t num_remaining_invocations_;
-    std::atomic_uint32_t cur_invocation_offset_;
+    std::atomic_uint32_t cur_sys_idx_;
     void *global_data_;
 
     HeapArray<SystemInfo> sorted_systems_;

@@ -103,6 +103,19 @@ void PreprocessSystem::run(void *gen_data, uint32_t invocation_offset)
 
     SphereIndex &sphere_idx = mgr.sphereIndices[invocation_offset];
     SphereObject &object = mgr.sims[sphere_idx.world].sphereObjects[sphere_idx.offset];
+
+    // Clamp to world bounds
+    SimpleSim &sim = mgr.sims[sphere_idx.world];
+    object.translation.x = std::clamp(object.translation.x,
+                                      sim.worldBounds.pMin.x,
+                                      sim.worldBounds.pMax.x);
+    object.translation.y = std::clamp(object.translation.y,
+                                      sim.worldBounds.pMin.y,
+                                      sim.worldBounds.pMax.y);
+    object.translation.z = std::clamp(object.translation.z,
+                                      sim.worldBounds.pMin.z,
+                                      sim.worldBounds.pMax.z);
+
     // No actual mesh, just hardcode a fake 2 *unit cube centered around
     // translation
     
@@ -153,9 +166,6 @@ void BroadphaseSystem::run(void *gen_data, uint32_t invocation_offset)
 
 void NarrowphaseSystem::run(void *gen_data, uint32_t invocation_offset)
 {
-    if (invocation_offset == 0) {
-        printf("Num candidate collisions %u\n", numInvocations.load(std::memory_order_relaxed));
-    }
     SimManager &mgr = *(SimManager *)gen_data;
     CandidatePair &c = mgr.candidatePairs[invocation_offset];
 
@@ -182,7 +192,6 @@ void SolverSystem::run(void *gen_data, uint32_t invocation_offset)
 {
     SimManager &mgr = *(SimManager *)gen_data;
     uint32_t world_idx = invocation_offset;
-    printf("Solve %u\n", world_idx);
 
     SimpleSim &sim = mgr.sims[world_idx];
 
