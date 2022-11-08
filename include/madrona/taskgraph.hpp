@@ -22,7 +22,7 @@ public:
         SystemID registerSystem(SystemBase &sys,
                                 Span<const SystemID> dependencies);
 
-        TaskGraph * build();
+        TaskGraph build();
     private:
         struct StagedSystem {
             SystemBase *sys;
@@ -60,6 +60,29 @@ private:
     HeapArray<SystemInfo> sorted_systems_;
 
 friend class Builder;
+};
+
+template <typename MgrT, typename InitT>
+class TaskGraphEntry {
+public:
+    inline TaskGraphEntry(const InitT *inits, uint32_t num_worlds)
+        : mgr_(inits, num_worlds),
+          taskgraph_([this]() {
+              TaskGraph::Builder builder;
+              mgr_.taskgraphSetup(builder);
+
+              return builder.build();
+          }())
+    {}
+
+    inline void run()
+    {
+        taskgraph_.run(&mgr_);
+    }
+
+private:
+    MgrT mgr_;
+    TaskGraph taskgraph_;
 };
 
 }

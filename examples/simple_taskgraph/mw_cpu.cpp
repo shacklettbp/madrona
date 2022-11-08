@@ -24,12 +24,12 @@ static void launch(int num_worlds, uint64_t num_benchmark_ticks)
         env_inits.emplace(i, generateEnvironmentInitialization());
     }
 
-    SimManager mgr(env_inits.data(), num_worlds);
+    SimEntry entry(env_inits.data(), num_worlds);
 
     auto start = std::chrono::steady_clock::now();
 
     for (int i = 0; i < (int)num_benchmark_ticks; i++) {
-        mgr.taskgraph->run(&mgr);
+        entry.run();
     }
 
     auto end = std::chrono::steady_clock::now();

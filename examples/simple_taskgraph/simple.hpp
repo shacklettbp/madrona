@@ -103,13 +103,12 @@ struct TestIndex {
 
 struct SimManager {
     SimManager(const EnvInit *env_inits, uint32_t num_worlds);
+    void taskgraphSetup(madrona::TaskGraph::Builder &builder);
 
     PreprocessSystem preprocess;
     BroadphaseSystem broad;
     NarrowphaseSystem narrow;
     SolverSystem solver;
-
-    madrona::TaskGraph *taskgraph;
 
     SimpleSim *sims;
 
@@ -117,6 +116,8 @@ struct SimManager {
     TestIndex *testIndices;
     CandidatePair *candidatePairs;
 };
+
+using SimEntry = madrona::TaskGraphEntry<SimManager, EnvInit>;
 
 class Engine;
 

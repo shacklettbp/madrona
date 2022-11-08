@@ -30,10 +30,16 @@ struct CompileConfig {
         Debug,
     };
 
+    enum class Executor {
+        JobSystem,
+        TaskGraph,
+    };
+
     const char *entryName;
     Span<const char * const> userSources;
     Span<const char * const> userCompileFlags;
     OptMode optMode = OptMode::Optimize;
+    Executor execMode = Executor::TaskGraph;
 };
 
 class TrainingExecutor {
