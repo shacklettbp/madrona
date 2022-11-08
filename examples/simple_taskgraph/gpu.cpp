@@ -8,26 +8,33 @@
 using namespace madrona;
 using namespace std;
 
-using namespace SimpleExample;
+using namespace SimpleTaskgraph;
 
 int main(int argc, char *argv[])
 {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s NUM_WORLDS\n", argv[0]);
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s NUM_WORLDS NUM_TICKS\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     int num_worlds = atoi(argv[1]);
 
     if (num_worlds < 1) {
-        fprintf(stderr, "# Worlds must be >= 1");
+        fprintf(stderr, "NUM_WORLDS must be >= 1");
+        return EXIT_FAILURE;
+    }
+
+    uint64_t num_ticks = std::stoul(argv[2]);
+
+    if (num_ticks == 0) {
+        fprintf(stderr, "NUM_TICKS must be > 0");
         return EXIT_FAILURE;
     }
 
     // FIXME: this is really hacky
     HeapArray<EnvInit> env_inits(num_worlds);
     for (int i = 0; i < num_worlds; i++) {
-        env_inits[i] = generateEnvironmentInitialization(0);
+        env_inits[i] = generateEnvironmentInitialization();
 
         ObjectInit *ptr;
         cudaMalloc(&ptr, env_inits[i].numObjs * sizeof(ObjectInit));
@@ -42,23 +49,22 @@ int main(int argc, char *argv[])
     TrainingExecutor train_exec({
         .worldInitPtr = env_inits.data(),
         .numWorldInitBytes = sizeof(EnvInit),
-        .numWorldDataBytes = sizeof(SimpleSim),
-        .worldDataAlignment = alignof(SimpleSim),
+        .numWorldDataBytes = sizeof(SimManager),
+        .worldDataAlignment = alignof(SimManager),
         .numWorlds = uint32_t(num_worlds),
         .gpuID = 0,
     }, {
-        "SimpleExample::GPUEntry",
-        { SIMPLE_EX_SRC_LIST },
-        { SIMPLE_EX_COMPILE_FLAGS },
+        "SimpleExample::SimEntry",
+        { SIMPLE_TASKGRAPH_SRC_LIST },
+        { SIMPLE_TASKGRAPH_COMPILE_FLAGS },
         CompileConfig::OptMode::LTO,
+        CompileConfig::Executor::TaskGraph,
     });
-
-    constexpr int64_t num_ticks = 10; 
 
     train_exec.run();
 
     auto start = std::chrono::system_clock::now();
-    for (int64_t i = 0; i < num_ticks; i++) {
+    for (int64_t i = 0; i < (int64_t)num_ticks; i++) {
         train_exec.run();
     }
     auto end = std::chrono::system_clock::now();

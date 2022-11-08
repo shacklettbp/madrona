@@ -61,6 +61,17 @@ static JobID broadphaseSystem(Engine &ctx)
         SphereObject &object = ctx.sim().sphereObjects[idx];
         // No actual mesh, just hardcode a fake 2 *unit cube centered around
         // translation
+
+        // Hacky clamp
+        object.translation.x = std::clamp(object.translation.x,
+                                          ctx.sim().worldBounds.pMin.x,
+                                          ctx.sim().worldBounds.pMax.x);
+        object.translation.y = std::clamp(object.translation.y,
+                                          ctx.sim().worldBounds.pMin.y,
+                                          ctx.sim().worldBounds.pMax.y);
+        object.translation.z = std::clamp(object.translation.z,
+                                          ctx.sim().worldBounds.pMin.z,
+                                          ctx.sim().worldBounds.pMax.z);
         
         Mat3x4 model_mat =
             Mat3x4::fromTRS(object.translation, object.rotation);

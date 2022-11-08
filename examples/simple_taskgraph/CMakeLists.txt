@@ -24,22 +24,22 @@ target_link_libraries(simple_taskgraph_cpu PRIVATE
     simple_taskgraph_core simple_taskgraph_init
 )
 
-#if (TARGET madrona_mw_gpu)
-#    madrona_build_compile_defns(
-#        OUT_TARGET
-#            simple_taskgraph_gpu_srcs
-#        SOURCES_DEFN
-#            SIMPLE_TASKGRAPH_SRC_LIST
-#        FLAGS_DEFN
-#            SIMPLE_TASKGRAPH_COMPILE_FLAGS
-#        SRCS 
-#            ${EXAMPLE_SRCS} gpu_entry.cpp
-#    )
-#
-#    add_executable(simple_taskgraph_gpu
-#        gpu.cpp
-#    )
-#
-#    target_link_libraries(simple_taskgraph_gpu PRIVATE
-#        simple_taskgraph_core simple_taskgraph_init madrona_mw_gpu simple_taskgraph_gpu_srcs)
-#endif()
+if (TARGET madrona_mw_gpu)
+    madrona_build_compile_defns(
+        OUT_TARGET
+            simple_taskgraph_gpu_srcs
+        SOURCES_DEFN
+            SIMPLE_TASKGRAPH_SRC_LIST
+        FLAGS_DEFN
+            SIMPLE_TASKGRAPH_COMPILE_FLAGS
+        SRCS 
+            ${EXAMPLE_SRCS}
+    )
+
+    add_executable(simple_taskgraph_gpu
+        gpu.cpp
+    )
+
+    target_link_libraries(simple_taskgraph_gpu PRIVATE
+        simple_taskgraph_core simple_taskgraph_init madrona_mw_gpu simple_taskgraph_gpu_srcs)
+endif()

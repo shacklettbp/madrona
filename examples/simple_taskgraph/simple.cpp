@@ -42,18 +42,10 @@ SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
       broad(),
       narrow(),
       solver(),
-      taskgraph(nullptr),
       sims((SimpleSim *)malloc(sizeof(SimpleSim) * num_worlds)),
       sphereIndices(nullptr),
       testIndices(nullptr)
 {
-    TaskGraph::Builder builder;
-    auto preprocess_id = builder.registerSystem(preprocess, {});
-    auto broad_id = builder.registerSystem(broad, {preprocess_id});
-    auto narrow_id = builder.registerSystem(narrow, { broad_id });
-    builder.registerSystem(solver, { narrow_id });
-    taskgraph = builder.build();
-
     uint32_t total_spheres = 0;
     uint32_t max_collisions = 0;
     for (int i = 0; i < (int)num_worlds; i++) {
@@ -89,6 +81,14 @@ SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
     preprocess.numInvocations.store(total_spheres, std::memory_order_relaxed);
     broad.numInvocations.store(max_collisions, std::memory_order_relaxed);
     solver.numInvocations.store(num_worlds, std::memory_order_relaxed);
+}
+
+void SimManager::taskgraphSetup(TaskGraph::Builder &builder)
+{
+    auto preprocess_id = builder.registerSystem(preprocess, {});
+    auto broad_id = builder.registerSystem(broad, {preprocess_id});
+    auto narrow_id = builder.registerSystem(narrow, { broad_id });
+    builder.registerSystem(solver, { narrow_id });
 }
 
 // Update all entity bounding boxes:
@@ -215,3 +215,16 @@ void SolverSystem::run(void *gen_data, uint32_t invocation_offset)
 }
 
 }
+
+#ifdef MADRONA_GPU_MODE
+extern "C" __global__ void madronaMWGPUInitialize(uint32_t num_worlds,
+                                                  void *inits_raw)
+{
+    using namespace SimpleTaskgraph;
+
+    auto inits = (EnvInit *)inits_raw;
+    SimEntry::init(inits, num_worlds);
+}
+
+#endif
+

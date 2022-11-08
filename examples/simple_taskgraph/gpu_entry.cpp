@@ -2,12 +2,12 @@
 
 #include <madrona/mw_gpu.hpp>
 
-namespace SimpleExample {
+namespace SimpleTaskgraph {
 
-class GPUEntry : public madrona::GPUEntry<Engine, EnvInit, GPUEntry> {
+class GPUEntry : public madrona::GPUTaskgraphEntry<EnvInit, GPUEntry> {
 public:
-    static void init(Engine &ctx, const EnvInit &init) {
-        SimpleSim::init(ctx, init);
+    static void init(const EnvInit *init, uint32_t num_worlds) {
+        SimManager::init( init);
     };
 
     static void run(Engine &ctx) {
