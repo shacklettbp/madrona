@@ -26,6 +26,9 @@ struct GPUImplConsts {
     uint32_t sharedJobTrackerOffset;
     uint32_t userJobTrackerOffset;
 
+    void *taskGraph;
+    void *taskGraphUserData;
+
     static inline GPUImplConsts & get();
 };
 
@@ -35,7 +38,7 @@ struct GPUImplConsts {
 #ifdef MADRONA_GPU_MODE
 extern "C" {
 extern __constant__ madrona::mwGPU::GPUImplConsts
-    madronaTrainGPUImplConsts;
+    madronaMWGPUConsts;
 }
 
 namespace madrona {
@@ -43,7 +46,7 @@ namespace mwGPU {
 
 GPUImplConsts & GPUImplConsts::get()
 {
-    return madronaTrainGPUImplConsts;
+    return madronaMWGPUConsts;
 }
 
 }

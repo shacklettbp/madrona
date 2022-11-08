@@ -14,7 +14,7 @@
 namespace madrona {
 
 template <typename ContextT, typename InitT, typename BaseT>
-class GPUEntry : mwGPU::EntryBase<BaseT> {
+class GPUJobEntry : mwGPU::EntryBase<BaseT> {
 public:
     static void submitInit(uint32_t invocation_idx, void *world_init_ptr);
     static void submitRun(uint32_t invocation_idx);
@@ -22,7 +22,5 @@ public:
 private:
     static ContextT makeFakeContext(uint32_t invocation_idx);
 };
-
-}
 
 #include "mw_gpu.inl"

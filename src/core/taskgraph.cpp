@@ -49,7 +49,7 @@ SystemID TaskGraph::Builder::registerSystem(SystemBase &sys,
     };
 }
 
-TaskGraph * TaskGraph::Builder::build()
+TaskGraph TaskGraph::Builder::build()
 {
     assert(systems_[0].numDependencies == 0);
     HeapArray<SystemInfo> sorted_systems(systems_.size());
@@ -102,7 +102,7 @@ TaskGraph * TaskGraph::Builder::build()
         }
     }
 
-    return new TaskGraph(std::move(sorted_systems));
+    return TaskGraph(std::move(sorted_systems));
 }
 
 TaskGraph::TaskGraph(HeapArray<SystemInfo> &&systems)
