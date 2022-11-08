@@ -34,10 +34,6 @@ using std::atomic_uint32_t;
 using std::memory_order;
 
 extern "C" {
-__constant__ madrona::mwGPU::GPUImplConsts madronaTrainGPUImplConsts;
-}
-
-extern "C" {
 __global__ void madronaMWGPUMegakernel(uint32_t func_id, madrona::JobContainerBase *data, uint32_t *data_indices, uint32_t *invocation_offsets, uint32_t num_launches, uint32_t grid);
 }
 
@@ -895,7 +891,7 @@ static inline uint32_t computeNumAllocatorChunks(uint64_t num_bytes)
 
 }
 
-extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
+extern "C" __global__ void madronaMWGPUComputeConstants(
     uint32_t num_worlds,
     uint32_t num_world_data_bytes,
     uint32_t world_data_alignment,
@@ -972,7 +968,7 @@ extern "C" __global__ void madronaTrainComputeGPUImplConstantsKernel(
     *job_system_buffer_size = total_bytes;
 }
 
-extern "C" __global__  void madronaTrainInitializeKernel(
+extern "C" __global__  void madronaMWGPUInitialize(
     uint64_t num_allocator_bytes)
 {
     using namespace madrona;
