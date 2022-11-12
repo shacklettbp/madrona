@@ -32,3 +32,5 @@ if (MADRONA_ENABLE_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     add_subdirectory(googletest)
 endif ()
+
+add_subdirectory(nanobind EXCLUDE_FROM_ALL)
