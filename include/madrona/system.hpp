@@ -3,6 +3,7 @@
 #include <madrona/fwd.hpp>
 #include <madrona/utils.hpp>
 #include <madrona/query.hpp>
+#include <madrona/context.hpp>
 
 #include <cstdint>
 
@@ -29,20 +30,18 @@ private:
                       uint32_t invocation_offset);
 };
 
-#if 0
 template <typename SystemT, typename... ComponentTs>
 class ParallelForSystem : public SystemBase {
 public:
-    ParallelForSystem();
+    ParallelForSystem(Context &ctx);
 
 private:
-    using ContextT = utils::FirstArgTypeExtractor<decltype(SystemT::run)>;
-
-    static void entry(Context &ctx, uint32_t invocation_offset, uint32_t num_invocations);
+    static void entry(SystemBase *sys, void *data, uint32_t invocation_offset);
 
     Query<ComponentTs...> query_;
 };
 
+#if 0
 template <typename Fn, typename... ComponentTs>
 class LambdaParallelForSystem : public ParallelForSystem<
         LambdaParallelForSystem<Fn, ComponentTs...>, ComponentTs...> {

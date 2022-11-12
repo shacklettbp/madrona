@@ -8,20 +8,31 @@ CustomSystem<SystemT>::CustomSystem()
 {}
 
 template <typename SystemT>
-void CustomSystem<SystemT>::entry(SystemBase *sys_base, void *data,
+void CustomSystem<SystemT>::entry(SystemBase *sys_base,
+                                  void *data,
                                   uint32_t invocation_offset)
 {
     SystemT *sys = static_cast<SystemT *>(sys_base);
     sys->run(data, invocation_offset);
 }
 
-#if 0
 template <typename SystemT, typename... ComponentTs>
-ParallelForSystem<SystemT, ComponentTs...>::ParallelForSystem()
+ParallelForSystem<SystemT, ComponentTs...>::ParallelForSystem(Context &ctx)
     : SystemBase((SystemBase::EntryFn)
-        &ParallelForSystem<SystemT, ComponentTs...>::entry)
+        &ParallelForSystem<SystemT, ComponentTs...>::entry),
+      query_(ctx.query<ComponentTs...>())
 {}
 
+template <typename SystemT, typename... ComponentTs>
+void ParallelForSystem<SystemT, ComponentTs...>::entry(SystemBase *sys_base,
+        void *data, uint32_t invocation_offset)
+{
+    (void)sys_base;
+    (void)data;
+    (void)invocation_offset;
+}
+
+#if 0
 template <typename Fn, typename... ComponentTs>
 LambdaParallelFor<Fn, ComponentTs...>::LambdaParallelForSystem(Fn &&fn)
     : ParallelForSystem<LambdaParallelForSystem<Fn, ComponentTs...>, ComponentTs...>(),

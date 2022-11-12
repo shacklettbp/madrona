@@ -288,7 +288,8 @@ struct AABB {
 
     static inline AABB point(const Vector3 &p)
     {
-        return AABB {
+        return AABB {;
+
             .pMin = p,
             .pMax = p,
         };
