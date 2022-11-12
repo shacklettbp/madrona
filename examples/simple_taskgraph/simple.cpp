@@ -42,6 +42,7 @@ SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
       broad(),
       narrow(),
       solver(),
+      unified(),
       sims((SimpleSim *)malloc(sizeof(SimpleSim) * num_worlds)),
       sphereIndices(nullptr),
       testIndices(nullptr)
@@ -81,31 +82,27 @@ SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
     preprocess.numInvocations.store(total_spheres, std::memory_order_relaxed);
     broad.numInvocations.store(max_collisions, std::memory_order_relaxed);
     solver.numInvocations.store(num_worlds, std::memory_order_relaxed);
+
+    unified.numInvocations.store(num_worlds, std::memory_order_relaxed);
 }
 
 void SimManager::taskgraphSetup(TaskGraph::Builder &builder)
 {
-    auto preprocess_id = builder.registerSystem(preprocess, {});
-    auto broad_id = builder.registerSystem(broad, {preprocess_id});
-    auto narrow_id = builder.registerSystem(narrow, { broad_id });
-    builder.registerSystem(solver, { narrow_id });
+    if (useUnified) {
+        builder.registerSystem(unified, {});
+    } else {
+        auto preprocess_id = builder.registerSystem(preprocess, {});
+        auto broad_id = builder.registerSystem(broad, {preprocess_id});
+        auto narrow_id = builder.registerSystem(narrow, { broad_id });
+        builder.registerSystem(solver, { narrow_id });
+    }
 }
 
-// Update all entity bounding boxes:
-void PreprocessSystem::run(void *gen_data, uint32_t invocation_offset)
+static inline void preprocessObject(SimpleSim &sim, uint32_t obj_id)
 {
-    SimManager &mgr = *(SimManager *)gen_data;
-
-    // Hacky one time setup
-    if (invocation_offset == 0) {
-        mgr.narrow.numInvocations.store(0, std::memory_order_relaxed);
-    }
-
-    SphereIndex &sphere_idx = mgr.sphereIndices[invocation_offset];
-    SphereObject &object = mgr.sims[sphere_idx.world].sphereObjects[sphere_idx.offset];
+    SphereObject &object = sim.sphereObjects[obj_id];
 
     // Clamp to world bounds
-    SimpleSim &sim = mgr.sims[sphere_idx.world];
     object.translation.x = std::clamp(object.translation.x,
                                       sim.worldBounds.pMin.x,
                                       sim.worldBounds.pMax.x);
@@ -139,6 +136,31 @@ void PreprocessSystem::run(void *gen_data, uint32_t invocation_offset)
     }
 }
 
+// Update all entity bounding boxes:
+void PreprocessSystem::run(void *gen_data, uint32_t invocation_offset)
+{
+    SimManager &mgr = *(SimManager *)gen_data;
+
+    // Hacky one time setup
+    if (invocation_offset == 0) {
+        mgr.narrow.numInvocations.store(0, std::memory_order_relaxed);
+    }
+
+    SphereIndex &sphere_idx = mgr.sphereIndices[invocation_offset];
+    SimpleSim &sim = mgr.sims[sphere_idx.world];
+    preprocessObject(sim, sphere_idx.offset);
+}
+
+static inline bool compareObjAABBs(SimpleSim &sim, uint32_t a_idx, uint32_t b_idx)
+{
+    if (a_idx == b_idx) return false;
+
+    SphereObject &a_obj = sim.sphereObjects[a_idx];
+    SphereObject &b_obj = sim.sphereObjects[b_idx];
+
+    return a_obj.aabb.overlaps(b_obj.aabb);
+}
+
 void BroadphaseSystem::run(void *gen_data, uint32_t invocation_offset)
 {
     SimManager &mgr = *(SimManager *)gen_data;
@@ -148,12 +170,8 @@ void BroadphaseSystem::run(void *gen_data, uint32_t invocation_offset)
     uint32_t a_idx = test.a;
     uint32_t b_idx = test.b;
 
-    if (a_idx == b_idx) return;
-
-    SphereObject &a_obj = sim.sphereObjects[a_idx];
-    SphereObject &b_obj = sim.sphereObjects[b_idx];
-
-    if (a_obj.aabb.overlaps(b_obj.aabb)) {
+    bool overlap = compareObjAABBs(sim, a_idx, b_idx);
+    if (overlap) {
         uint32_t candidate_idx = mgr.narrow.numInvocations.fetch_add(1,
              std::memory_order_relaxed);
         mgr.candidatePairs[candidate_idx] = CandidatePair {
@@ -164,37 +182,45 @@ void BroadphaseSystem::run(void *gen_data, uint32_t invocation_offset)
     }
 }
 
-void NarrowphaseSystem::run(void *gen_data, uint32_t invocation_offset)
+template <bool use_atomic>
+static inline void narrowPhase(SimpleSim &sim, uint32_t a_idx, uint32_t b_idx)
 {
-    SimManager &mgr = *(SimManager *)gen_data;
-    CandidatePair &c = mgr.candidatePairs[invocation_offset];
-
-    SimpleSim &sim = mgr.sims[c.world];
-    const SphereObject &a = sim.sphereObjects[c.a];
-    const SphereObject &b = sim.sphereObjects[c.b];
+    const SphereObject &a = sim.sphereObjects[a_idx];
+    const SphereObject &b = sim.sphereObjects[b_idx];
 
     Translation a_pos = a.translation;
     Translation b_pos = b.translation;
     Vector3 to_b = (b_pos - a_pos).normalize();
 
     // FIXME: No actual narrow phase here
-    uint32_t contact_idx =
-        sim.numContacts.fetch_add(1, std::memory_order_relaxed);
+    uint32_t contact_idx;
+
+    if constexpr (use_atomic) {
+        contact_idx =
+            sim.numContacts.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        contact_idx = sim.numContacts.load(std::memory_order_relaxed);
+        sim.numContacts.store(contact_idx + 1, std::memory_order_relaxed);
+    }
 
     sim.contacts[contact_idx] = ContactData {
         to_b,
-        c.a,
-        c.b,
+        a_idx,
+        b_idx,
     };
 }
 
-void SolverSystem::run(void *gen_data, uint32_t invocation_offset)
+void NarrowphaseSystem::run(void *gen_data, uint32_t invocation_offset)
 {
     SimManager &mgr = *(SimManager *)gen_data;
-    uint32_t world_idx = invocation_offset;
+    CandidatePair &c = mgr.candidatePairs[invocation_offset];
 
-    SimpleSim &sim = mgr.sims[world_idx];
+    SimpleSim &sim = mgr.sims[c.world];
+    narrowPhase<true>(sim, c.a, c.b);
+}
 
+static void processContacts(SimpleSim &sim)
+{
     // Push objects in serial based on the contact normal - total BS.
     int num_contacts = sim.numContacts.load(std::memory_order_relaxed);
 
@@ -210,6 +236,42 @@ void SolverSystem::run(void *gen_data, uint32_t invocation_offset)
         a_pos -= contact.normal;
         b_pos += contact.normal;
     }
+}
+
+void SolverSystem::run(void *gen_data, uint32_t invocation_offset)
+{
+    SimManager &mgr = *(SimManager *)gen_data;
+    uint32_t world_idx = invocation_offset;
+
+    SimpleSim &sim = mgr.sims[world_idx];
+
+    processContacts(sim);
+
+    sim.numContacts.store(0, std::memory_order_relaxed);
+}
+
+void UnifiedSystem::run(void *gen_data, uint32_t invocation_offset)
+{
+    SimManager &mgr = *(SimManager *)gen_data;
+
+    uint32_t world_idx = invocation_offset;
+
+    SimpleSim &sim = mgr.sims[world_idx];
+
+    for (int i = 0; i < (int)sim.numSphereObjects; i++) {
+        preprocessObject(sim, i);
+    }
+
+    for (int i = 0; i < (int)sim.numSphereObjects; i++) {
+        for (int j = 0; j < (int)sim.numSphereObjects; j++) {
+            bool overlap = compareObjAABBs(sim, i, j);
+            if (overlap) {
+                narrowPhase<false>(sim, i, j);
+            }
+        }
+    }
+
+    processContacts(sim);
 
     sim.numContacts.store(0, std::memory_order_relaxed);
 }
