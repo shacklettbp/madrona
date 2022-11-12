@@ -61,19 +61,23 @@ struct EnvInit {
 };
 
 struct PreprocessSystem : madrona::CustomSystem<PreprocessSystem> {
-    void run(void *data, uint32_t invocation_offset);
+    inline void run(void *data, uint32_t invocation_offset);
 };
 
 struct BroadphaseSystem : madrona::CustomSystem<BroadphaseSystem> {
-    void run(void *data, uint32_t invocation_offset);
+    inline void run(void *data, uint32_t invocation_offset);
 };
 
 struct NarrowphaseSystem : madrona::CustomSystem<NarrowphaseSystem> {
-    void run(void *data, uint32_t invocation_offset);
+    inline void run(void *data, uint32_t invocation_offset);
 };
 
 struct SolverSystem : madrona::CustomSystem<SolverSystem> {
-    void run(void *data, uint32_t invocation_offset);
+    inline void run(void *data, uint32_t invocation_offset);
+};
+
+struct UnifiedSystem : madrona::CustomSystem<UnifiedSystem> {
+    inline void run(void *data, uint32_t invocation_offset);
 };
 
 struct SimpleSim {
@@ -109,6 +113,9 @@ struct SimManager {
     BroadphaseSystem broad;
     NarrowphaseSystem narrow;
     SolverSystem solver;
+    UnifiedSystem unified;
+
+    bool useUnified = true;
 
     SimpleSim *sims;
 
