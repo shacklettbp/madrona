@@ -60,6 +60,17 @@ struct EnvInit {
     uint32_t numObjs;
 };
 
+struct PhysicsBVH {
+    madrona::math::AABB *aabbs;
+    uint32_t *ids;
+    uint32_t numObjects;
+    const uint32_t maxNumObjects;
+
+    PhysicsBVH(uint32_t max_num_objects);
+    inline void addObject(const madrona::math::AABB &aabb, uint32_t id);
+    inline void update();
+};
+
 struct PreprocessSystem : madrona::CustomSystem<PreprocessSystem> {
     inline void run(void *data, uint32_t invocation_offset);
 };

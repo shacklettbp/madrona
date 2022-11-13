@@ -98,6 +98,20 @@ void SimManager::taskgraphSetup(TaskGraph::Builder &builder)
     }
 }
 
+PhysicsBVH::PhysicsBVH(uint32_t num_max_objects)
+    : aabbs((AABB *)malloc(sizeof(AABB) * num_max_objects)),
+      ids((uint32_t *)malloc(sizeof(uint32_t) * num_max_objects)),
+      numObjects(0),
+      maxNumObjects(num_max_objects)
+{}
+
+void PhysicsBVH::addObject(const AABB &aabb, uint32_t id)
+{
+    uint32_t offset = numObjects++;
+    aabbs[offset] = aabb;
+    ids[offset] = id;
+}
+
 static inline void preprocessObject(SimpleSim &sim, uint32_t obj_id)
 {
     SphereObject &object = sim.sphereObjects[obj_id];
