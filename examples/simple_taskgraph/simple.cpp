@@ -99,17 +99,30 @@ void SimManager::taskgraphSetup(TaskGraph::Builder &builder)
 }
 
 PhysicsBVH::PhysicsBVH(uint32_t num_max_objects)
-    : aabbs((AABB *)malloc(sizeof(AABB) * num_max_objects)),
-      ids((uint32_t *)malloc(sizeof(uint32_t) * num_max_objects)),
-      numObjects(0),
-      maxNumObjects(num_max_objects)
+    : nodes((PhysicsBVHNode *)malloc(sizeof(PhysicsBVHNode) * num_max_objects)),
+      numNodes(0),
+      nodeStorageSize(num_max_objects)
 {}
 
-void PhysicsBVH::addObject(const AABB &aabb, uint32_t id)
+
+void PhysicsBVH::update(SimpleSim &sim,
+                        uint32_t *added_objects, uint32_t num_added_objects,
+                        uint32_t *moved_objects, uint32_t num_moved_objects,
+                        uint32_t *removed_objects, uint32_t num_removed_objects)
 {
-    uint32_t offset = numObjects++;
-    aabbs[offset] = aabb;
-    ids[offset] = id;
+    // FIXME: not supporting removed objects for now
+    (void)removed_objects;
+    (void)num_removed_objects;
+
+    for (int i = 0; i < (int)num_added_objects; i++) {
+
+    }
+
+    for (int i = 0; i < (int)num_moved_objects; i++) {
+        uint32_t move_id = moved_objects[i];
+        SphereObject &sphere_obj = sim.sphereObjects[move_id];
+        uint32_t leaf_id = sphere_obj.leafID;
+    }
 }
 
 static inline void preprocessObject(SimpleSim &sim, uint32_t obj_id)

@@ -25,12 +25,6 @@ struct Rotation : madrona::math::Quat {
     {}
 };
 
-struct PhysicsAABB : madrona::math::AABB {
-    PhysicsAABB(madrona::math::AABB b)
-        : AABB(b)
-    {}
-};
-
 struct CandidatePair {
     uint32_t world;
     uint32_t a;
@@ -41,12 +35,6 @@ struct ContactData {
     madrona::math::Vector3 normal;
     uint32_t a;
     uint32_t b;
-};
-
-struct SphereObject {
-    Translation translation;
-    Rotation rotation;
-    PhysicsAABB aabb;
 };
 
 struct ObjectInit {
@@ -60,15 +48,45 @@ struct EnvInit {
     uint32_t numObjs;
 };
 
+// List of Physics Related Components per-object
+
+struct PhysicsAABB : madrona::math::AABB {
+    PhysicsAABB(madrona::math::AABB b)
+        : AABB(b)
+    {}
+};
+
+struct PhysicsBVHNode {
+    float boundsMinX[4];
+    float boundsMinY[4];
+    float boundsMinZ[4];
+    float boundsMaxX[4];
+    float boundsMaxY[4];
+    float boundsMaxZ[4];
+    uint32_t children[4];
+    uint32_t parentID;
+};
+
+struct SimpleSim;
+
 struct PhysicsBVH {
-    madrona::math::AABB *aabbs;
-    uint32_t *ids;
-    uint32_t numObjects;
-    const uint32_t maxNumObjects;
+    PhysicsBVHNode *nodes;
+    uint32_t numNodes;
+    uint32_t nodeStorageSize;
 
     PhysicsBVH(uint32_t max_num_objects);
-    inline void addObject(const madrona::math::AABB &aabb, uint32_t id);
-    inline void update();
+
+    inline void update(SimpleSim &sim,
+                       uint32_t *added_objects, uint32_t num_added_objects,
+                       uint32_t *moved_objects, uint32_t num_moved_objects,
+                       uint32_t *removed_objects, uint32_t num_removed_objects);
+};
+
+struct SphereObject {
+    Translation translation;
+    Rotation rotation;
+    PhysicsAABB aabb;
+    uint32_t leafID;
 };
 
 struct PreprocessSystem : madrona::CustomSystem<PreprocessSystem> {
