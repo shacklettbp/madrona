@@ -57,29 +57,49 @@ struct PhysicsAABB : madrona::math::AABB {
 };
 
 struct PhysicsBVHNode {
-    float boundsMinX[4];
-    float boundsMinY[4];
-    float boundsMinZ[4];
-    float boundsMaxX[4];
-    float boundsMaxY[4];
-    float boundsMaxZ[4];
-    uint32_t children[4];
-    uint32_t parentID;
+    float minX[4];
+    float minY[4];
+    float minZ[4];
+    float maxX[4];
+    float maxY[4];
+    float maxZ[4];
+    int32_t children[4];
+    int32_t parentID;
+
+    inline void clearChild(int32_t i)
+    {
+        children[i] = 0xFFFFFFFF;
+    }
+
+    inline bool isLeaf(int32_t i)
+    {
+        return children[i] & 0x80000000;
+    }
+
+    inline void setLeaf(int32_t i, int32_t obj_id)
+    {
+        children[i] = 0x80000000 | obj_id;
+    }
 };
 
 struct SimpleSim;
 
 struct PhysicsBVH {
-    PhysicsBVHNode *nodes;
-    uint32_t numNodes;
-    uint32_t nodeStorageSize;
-
-    PhysicsBVH(uint32_t max_num_objects);
+    PhysicsBVH(int32_t initial_node_allocation);
 
     inline void update(SimpleSim &sim,
                        uint32_t *added_objects, uint32_t num_added_objects,
-                       uint32_t *moved_objects, uint32_t num_moved_objects,
-                       uint32_t *removed_objects, uint32_t num_removed_objects);
+                       uint32_t *removed_objects, uint32_t num_removed_objects,
+                       uint32_t *moved_objects, uint32_t num_moved_objects);
+
+    inline void addObject(SimpleSim &sim, uint32_t obj_id);
+
+    static constexpr int32_t sentinel = int32_t(-1);
+
+    PhysicsBVHNode *nodes;
+    int32_t numNodes;
+    int32_t numAllocatedNodes;
+    int32_t freeHead;
 };
 
 struct SphereObject {

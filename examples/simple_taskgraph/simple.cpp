@@ -98,30 +98,91 @@ void SimManager::taskgraphSetup(TaskGraph::Builder &builder)
     }
 }
 
-PhysicsBVH::PhysicsBVH(uint32_t num_max_objects)
-    : nodes((PhysicsBVHNode *)malloc(sizeof(PhysicsBVHNode) * num_max_objects)),
-      numNodes(0),
-      nodeStorageSize(num_max_objects)
-{}
-
+PhysicsBVH::PhysicsBVH(int32_t initial_node_allocation)
+    : nodes((PhysicsBVHNode *)malloc(
+            sizeof(PhysicsBVHNode) * initial_node_allocation)),
+      numNodes(1),
+      numAllocatedNodes(initial_node_allocation),
+      freeHead(sentinel)
+{
+    assert(initial_node_allocation >= 1);
+    nodes[0].parentID = sentinel;
+    for (int i = 0; i < 4; i++) {
+        nodes[0].clearChild(i);
+    }
+}
 
 void PhysicsBVH::update(SimpleSim &sim,
                         uint32_t *added_objects, uint32_t num_added_objects,
-                        uint32_t *moved_objects, uint32_t num_moved_objects,
-                        uint32_t *removed_objects, uint32_t num_removed_objects)
+                        uint32_t *removed_objects, uint32_t num_removed_objects,
+                        uint32_t *moved_objects, uint32_t num_moved_objects)
 {
-    // FIXME: not supporting removed objects for now
-    (void)removed_objects;
-    (void)num_removed_objects;
+    uint32_t num_leaf_parents = utils::divideRoundUp(num_added_objects, 4_u32);
+    uint32_t num_internal_nodes = utils::divideRoundUp(num_added_objects - 1, 3_u32);
 
-    for (int i = 0; i < (int)num_added_objects; i++) {
+    PhysicsBVHNode *node_start = &nodes[numNodes];
+    numNodes += num_internal_nodes;
 
+    PhysicsBVHNode *leaf_parent_start =
+        node_start + num_internal_nodes - num_leaf_parents;
+    for (int32_t i = 0; i < (int32_t)num_leaf_parents; i++) {
+        PhysicsBVHNode &node = leaf_parent_start[i];
+
+        int32_t base_offset = i * 4;
+        for (int j = 0; j < 4; j++) {
+            int32_t offset = base_offset + j;
+            if (offset >= (int32_t)num_added_objects) {
+                node.clearChild(j);
+            } else {
+                uint32_t obj_id = added_objects[offset];
+                SphereObject &obj = sim.sphereObjects[obj_id];
+                node.minX[j] = obj.aabb.pMin.x;
+                node.minY[j] = obj.aabb.pMin.y;
+                node.minZ[j] = obj.aabb.pMin.z;
+                node.maxX[j] = obj.aabb.pMax.x;
+                node.maxY[j] = obj.aabb.pMax.y;
+                node.maxZ[j] = obj.aabb.pMax.z;
+                node.setLeaf(j, offset);
+            }
+        }
     }
+
+    PhysicsBVHNode *prior_level_start = leaf_parent_start;
+    uint32_t num_prior_level = num_leaf_parents;
+    uint32_t num_cur_level;
+    do {
+        num_cur_level = utils::divideRoundUp(num_leaf_parents, 4u);
+        PhysicsBVHNode *cur_level_start = prior_level_start - num_cur_level;
+
+        prior_level_start = cur_level_start;
+        num_prior_level = num_cur_level;
+    } while (num_cur_level > 1);
+
+    uint32_t move_removed_offset = 0;
+    uint32_t move_added_offset = 0;
 
     for (int i = 0; i < (int)num_moved_objects; i++) {
         uint32_t move_id = moved_objects[i];
         SphereObject &sphere_obj = sim.sphereObjects[move_id];
         uint32_t leaf_id = sphere_obj.leafID;
+        PhysicsBVHLeaf &leaf = nodes[leaf_id].leaf;
+        if (!leaf.aabb.contains(sphere_obj.aabb)) {
+            move_removed_objects[move_removed_offset++] = leaf_id;
+            move_added_objects[move_added_offset++] = leaf_id;
+        }
+    }
+
+    // Bulk remove
+    for (int i = 0; i < (int)num_removed_objects; i++) {
+        PhysicsBVHLeaf &leaf = nodes[removed_objects[i]].leaf;
+    }
+
+    for (int i = 0; i < (int)move_removed_offset; i++) {
+        PhysicsBVHLeaf &leaf = nodes[move_removed_objects[i]].leaf;
+    }
+
+    for (int i = 0; i < (int)num_added_objects; i++) {
+
     }
 }
 

@@ -14,6 +14,16 @@
 namespace madrona {
 namespace math {
 
+inline float min(float a, float b)
+{
+    return a < b ? a : b;
+}
+
+inline float max(float a, float b)
+{
+    return a > b ? a : b;
+}
+
 struct Vector3 {
     float x;
     float y;
@@ -247,6 +257,12 @@ struct AABB {
     Vector3 pMin;
     Vector3 pMax;
 
+    inline float surfaceArea() const
+    {
+        Vector3 d = pMax - pMin;
+        return 2.f * (d.x * d.y + d.x * d.z + d.y * d.z);
+    }
+
     inline bool overlaps(const AABB &o) const
     {
         auto [a_min, a_max] = *this;
@@ -255,6 +271,19 @@ struct AABB {
         return a_min.x < b_max.x && b_min.x < a_max.x &&
                a_min.y < b_max.y && b_min.y < a_max.y &&
                a_min.z < b_max.z && b_min.z < a_max.z;
+    }
+    
+    inline bool contains(const AABB &o) const
+    {
+        auto [a_min, a_max] = *this;
+        auto [b_min, b_max] = o;
+
+        return a_min.x <= b_min.x &&
+               a_min.y <= b_min.y &&
+               a_min.z <= b_min.z &&
+               a_max.x >= b_max.x &&
+               a_max.y >= b_max.y &&
+               a_max.z >= b_max.z; 
     }
 
     inline void expand(const Vector3 &p)
@@ -288,10 +317,29 @@ struct AABB {
 
     static inline AABB point(const Vector3 &p)
     {
-        return AABB {;
-
+        return AABB {
             .pMin = p,
             .pMax = p,
+        };
+    }
+
+    static inline AABB merge(const AABB &a, const AABB &b)
+    {
+        Vector3 p_min {
+            min(a.pMin.x, b.pMin.x),
+            min(a.pMin.x, b.pMin.x),
+            min(a.pMin.x, b.pMin.x),
+        };
+
+        Vector3 p_max {
+            min(a.pMax.x, b.pMax.x),
+            min(a.pMax.x, b.pMax.x),
+            min(a.pMax.x, b.pMax.x),
+        };
+
+        return AABB {
+            .pMin = p_min,
+            .pMax = p_max,
         };
     }
 };
