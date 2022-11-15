@@ -131,7 +131,7 @@ void PhysicsBVH::build(SimpleSim &sim,
         int32_t numObjs;
     };
 
-    StackEntry stack[64];
+    StackEntry stack[128];
     stack[0] = StackEntry {
         sentinel,
         sentinel,
@@ -324,17 +324,17 @@ void PhysicsBVH::update(SimpleSim &sim,
                 expanded = true;
             }
 
-            if (obj_aabb.pMax.x < node.maxX[child_offset]) {
+            if (obj_aabb.pMax.x > node.maxX[child_offset]) {
                 node.maxX[child_offset] = obj_aabb.pMax.x;
                 expanded = true;
             }
 
-            if (obj_aabb.pMax.y < node.maxY[child_offset]) {
+            if (obj_aabb.pMax.y > node.maxY[child_offset]) {
                 node.maxY[child_offset] = obj_aabb.pMax.y;
                 expanded = true;
             }
 
-            if (obj_aabb.pMax.z < node.maxZ[child_offset]) {
+            if (obj_aabb.pMax.z > node.maxZ[child_offset]) {
                 node.maxZ[child_offset] = obj_aabb.pMax.z;
                 expanded = true;
             }

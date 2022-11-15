@@ -102,7 +102,7 @@ struct PhysicsBVH {
     template <typename Fn>
     inline void test(madrona::math::AABB &aabb, Fn &&fn)
     {
-        int32_t stack[32];
+        int32_t stack[128];
         stack[0] = 0;
         int32_t stack_size = 1;
 
