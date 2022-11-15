@@ -15,6 +15,13 @@ using namespace madrona::math;
 namespace SimpleTaskgraph {
 
 SimpleSim::SimpleSim(const EnvInit &env_init)
+    : worldBounds(AABB::invalid()),
+      sphereObjects(nullptr),
+      contacts(nullptr),
+      bvhObjIDs(nullptr),
+      numSphereObjects(env_init.numObjs),
+      numContacts(0),
+      bvh(env_init.numObjs * 10)
 {
     worldBounds = env_init.worldBounds;
 
@@ -22,30 +29,38 @@ SimpleSim::SimpleSim(const EnvInit &env_init)
 
     sphereObjects =
         (SphereObject *)malloc(sizeof(SphereObject) * env_init.numObjs);
-    contacts = (ContactData *)malloc(
-        sizeof(ContactData) * max_collisions);
+    contacts =
+        (ContactData *)malloc(sizeof(ContactData) * max_collisions);
+    bvhObjIDs = 
+        (int32_t *)malloc(sizeof(int32_t) * env_init.numObjs);
 
     numSphereObjects = env_init.numObjs;
     numContacts = 0;
 
-    for (int64_t i = 0; i < (int64_t)env_init.numObjs; i++) {
+    for (int i = 0; i < (int)env_init.numObjs; i++) {
         sphereObjects[i] = SphereObject {
             env_init.objsInit[i].initPosition,
             env_init.objsInit[i].initRotation,
             AABB::invalid(),
+            Vector3 {},
+            0xFFFFFFFF,
         };
+        bvhObjIDs[i] = i;
     }
+
+    bvh.update(*this, bvhObjIDs, env_init.numObjs, nullptr, 0, nullptr, 0);
 }
 
 SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
     : preprocess(),
+      bvhUpdate(),
       broad(),
       narrow(),
       solver(),
       unified(),
       sims((SimpleSim *)malloc(sizeof(SimpleSim) * num_worlds)),
       sphereIndices(nullptr),
-      testIndices(nullptr)
+      candidatePairs(nullptr)
 {
     uint32_t total_spheres = 0;
     uint32_t max_collisions = 0;
@@ -57,11 +72,9 @@ SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
     }
 
     sphereIndices = (SphereIndex *)malloc(sizeof(SphereIndex) * total_spheres);
-    testIndices = (TestIndex *)malloc(sizeof(TestIndex) * max_collisions);
     candidatePairs = (CandidatePair *)malloc(sizeof(CandidatePair) * max_collisions);
 
     uint32_t cur_global_sphere = 0;
-    uint32_t cur_global_test = 0;
     for (int world_idx = 0; world_idx < (int)num_worlds; world_idx++) {
         uint32_t num_world_spheres = sims[world_idx].numSphereObjects;
         for (int offset = 0; offset < (int)num_world_spheres; offset++) {
@@ -69,20 +82,13 @@ SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
                 (uint32_t)world_idx,
                 (uint32_t)offset,
             };
-            for (int other = 0; other < (int)num_world_spheres; other++) {
-                testIndices[cur_global_test++] = TestIndex {
-                    (uint32_t)world_idx,
-                    (uint32_t)offset,
-                    (uint32_t)other,
-                };
-            }
         }
     }
 
     preprocess.numInvocations.store(total_spheres, std::memory_order_relaxed);
-    broad.numInvocations.store(max_collisions, std::memory_order_relaxed);
+    bvhUpdate.numInvocations.store(num_worlds, std::memory_order_relaxed);
+    broad.numInvocations.store(total_spheres, std::memory_order_relaxed);
     solver.numInvocations.store(num_worlds, std::memory_order_relaxed);
-
     unified.numInvocations.store(num_worlds, std::memory_order_relaxed);
 }
 
@@ -92,7 +98,8 @@ void SimManager::taskgraphSetup(TaskGraph::Builder &builder)
         builder.registerSystem(unified, {});
     } else {
         auto preprocess_id = builder.registerSystem(preprocess, {});
-        auto broad_id = builder.registerSystem(broad, {preprocess_id});
+        auto bvh_id = builder.registerSystem(bvhUpdate, { preprocess_id });
+        auto broad_id = builder.registerSystem(broad, { bvh_id });
         auto narrow_id = builder.registerSystem(narrow, { broad_id });
         builder.registerSystem(solver, { narrow_id });
     }
@@ -101,88 +108,244 @@ void SimManager::taskgraphSetup(TaskGraph::Builder &builder)
 PhysicsBVH::PhysicsBVH(int32_t initial_node_allocation)
     : nodes((PhysicsBVHNode *)malloc(
             sizeof(PhysicsBVHNode) * initial_node_allocation)),
-      numNodes(1),
+      numNodes(0),
       numAllocatedNodes(initial_node_allocation),
       freeHead(sentinel)
 {
-    assert(initial_node_allocation >= 1);
-    nodes[0].parentID = sentinel;
-    for (int i = 0; i < 4; i++) {
-        nodes[0].clearChild(i);
+}
+
+void PhysicsBVH::build(SimpleSim &sim,
+                       int32_t *added_objects, int32_t num_added_objects)
+{
+    int32_t num_internal_nodes =
+        utils::divideRoundUp((int32_t)num_added_objects - 1, 3);
+
+    int32_t cur_node_offset = numNodes;
+    assert(cur_node_offset == 0); // FIXME
+    numNodes += num_internal_nodes;
+
+    struct StackEntry {
+        int32_t nodeID;
+        int32_t parentID;
+        int32_t offset;
+        int32_t numObjs;
+    };
+
+    StackEntry stack[64];
+    stack[0] = StackEntry {
+        sentinel,
+        sentinel,
+        0,
+        num_added_objects,
+    };
+
+    int32_t stack_size = 1;
+
+    while (stack_size > 0) {
+        StackEntry &entry = stack[stack_size - 1];
+        int32_t node_id;
+        if (entry.numObjs <= 4) {
+            node_id = cur_node_offset++;
+            PhysicsBVHNode &node = nodes[node_id];
+            node.parentID = entry.parentID;
+
+            for (int i = 0; i < 4; i++) {
+                if (i < entry.numObjs) {
+                    int32_t obj_id = added_objects[entry.offset + i];
+                    SphereObject &obj = sim.sphereObjects[obj_id];
+                    node.setLeaf(i, obj_id);
+                    node.minX[i] = obj.aabb.pMin.x;
+                    node.minY[i] = obj.aabb.pMin.y;
+                    node.minZ[i] = obj.aabb.pMin.z;
+                    node.maxX[i] = obj.aabb.pMax.x;
+                    node.maxY[i] = obj.aabb.pMax.y;
+                    node.maxZ[i] = obj.aabb.pMax.z;
+                } else {
+                    node.children[i] = sentinel;
+                    node.minX[i] = FLT_MAX;
+                    node.minY[i] = FLT_MAX;
+                    node.minZ[i] = FLT_MAX;
+                    node.maxX[i] = FLT_MIN;
+                    node.maxY[i] = FLT_MIN;
+                    node.maxZ[i] = FLT_MIN;
+                }
+            }
+        } else if (entry.nodeID == sentinel) {
+            node_id = cur_node_offset++;
+            // Record the node id in the stack entry for when this entry
+            // is reprocessed
+            entry.nodeID = node_id;
+
+            PhysicsBVHNode &node = nodes[node_id];
+            for (int i = 0; i < 4; i++) {
+                node.children[i] = sentinel;
+            }
+            node.parentID = entry.parentID;
+
+            int32_t subarray_elems =
+                utils::divideRoundUp(entry.numObjs, 4);
+            int32_t final_elems = entry.numObjs - subarray_elems * 3;
+
+            stack[stack_size++] = {
+                -1,
+                entry.nodeID,
+                entry.offset,
+                subarray_elems,
+            };
+
+            stack[stack_size++] = {
+                -1,
+                entry.nodeID,
+                entry.offset + subarray_elems,
+                subarray_elems,
+            };
+
+            stack[stack_size++] = {
+                -1,
+                entry.nodeID,
+                entry.offset + subarray_elems * 2,
+                subarray_elems,
+            };
+
+            stack[stack_size++] = {
+                -1,
+                entry.nodeID,
+                entry.offset + subarray_elems * 3,
+                final_elems,
+            };
+
+            // Don't finish processing this node until children are processed
+            continue;
+        } else {
+            // Revisiting this node after having processed children
+            node_id = entry.nodeID;
+        }
+
+        // At this point, remove the current entry from the stack
+        stack_size -= 1;
+
+        PhysicsBVHNode &node = nodes[node_id];
+        if (node.parentID == -1) {
+            continue;
+        }
+
+        AABB combined_aabb  = AABB::invalid(); 
+        for (int i = 0; i < 4; i++) {
+            if (node.children[i] == sentinel) {
+                break;
+            }
+
+            combined_aabb = AABB::merge(combined_aabb, AABB {
+                .pMin = {
+                    node.minX[i],
+                    node.minY[i],
+                    node.minZ[i],
+                },
+                .pMax = {
+                    node.maxX[i],
+                    node.maxY[i],
+                    node.maxZ[i],
+                },
+            });
+        }
+
+        PhysicsBVHNode &parent = nodes[node.parentID];
+        int child_offset;
+        for (child_offset = 0; ; child_offset++) {
+            if (parent.children[child_offset] == sentinel) {
+                break;
+            }
+        }
+
+        parent.children[child_offset] = entry.nodeID;
+        parent.minX[child_offset] = combined_aabb.pMin.x;
+        parent.minY[child_offset] = combined_aabb.pMin.y;
+        parent.minZ[child_offset] = combined_aabb.pMin.z;
+        parent.maxX[child_offset] = combined_aabb.pMax.x;
+        parent.maxY[child_offset] = combined_aabb.pMax.y;
+        parent.maxZ[child_offset] = combined_aabb.pMax.z;
     }
 }
 
 void PhysicsBVH::update(SimpleSim &sim,
-                        uint32_t *added_objects, uint32_t num_added_objects,
-                        uint32_t *removed_objects, uint32_t num_removed_objects,
-                        uint32_t *moved_objects, uint32_t num_moved_objects)
+                        int32_t *added_objects, int32_t num_added_objects,
+                        int32_t *removed_objects, int32_t num_removed_objects,
+                        int32_t *moved_objects, int32_t num_moved_objects)
 {
-    uint32_t num_leaf_parents = utils::divideRoundUp(num_added_objects, 4_u32);
-    uint32_t num_internal_nodes = utils::divideRoundUp(num_added_objects - 1, 3_u32);
-
-    PhysicsBVHNode *node_start = &nodes[numNodes];
-    numNodes += num_internal_nodes;
-
-    PhysicsBVHNode *leaf_parent_start =
-        node_start + num_internal_nodes - num_leaf_parents;
-    for (int32_t i = 0; i < (int32_t)num_leaf_parents; i++) {
-        PhysicsBVHNode &node = leaf_parent_start[i];
-
-        int32_t base_offset = i * 4;
-        for (int j = 0; j < 4; j++) {
-            int32_t offset = base_offset + j;
-            if (offset >= (int32_t)num_added_objects) {
-                node.clearChild(j);
-            } else {
-                uint32_t obj_id = added_objects[offset];
-                SphereObject &obj = sim.sphereObjects[obj_id];
-                node.minX[j] = obj.aabb.pMin.x;
-                node.minY[j] = obj.aabb.pMin.y;
-                node.minZ[j] = obj.aabb.pMin.z;
-                node.maxX[j] = obj.aabb.pMax.x;
-                node.maxY[j] = obj.aabb.pMax.y;
-                node.maxZ[j] = obj.aabb.pMax.z;
-                node.setLeaf(j, offset);
-            }
-        }
+    if (num_added_objects > 0) {
+        build(sim, added_objects, num_added_objects);
     }
-
-    PhysicsBVHNode *prior_level_start = leaf_parent_start;
-    uint32_t num_prior_level = num_leaf_parents;
-    uint32_t num_cur_level;
-    do {
-        num_cur_level = utils::divideRoundUp(num_leaf_parents, 4u);
-        PhysicsBVHNode *cur_level_start = prior_level_start - num_cur_level;
-
-        prior_level_start = cur_level_start;
-        num_prior_level = num_cur_level;
-    } while (num_cur_level > 1);
-
-    uint32_t move_removed_offset = 0;
-    uint32_t move_added_offset = 0;
+    (void)removed_objects;
+    (void)num_removed_objects;
 
     for (int i = 0; i < (int)num_moved_objects; i++) {
-        uint32_t move_id = moved_objects[i];
-        SphereObject &sphere_obj = sim.sphereObjects[move_id];
-        uint32_t leaf_id = sphere_obj.leafID;
-        PhysicsBVHLeaf &leaf = nodes[leaf_id].leaf;
-        if (!leaf.aabb.contains(sphere_obj.aabb)) {
-            move_removed_objects[move_removed_offset++] = leaf_id;
-            move_added_objects[move_added_offset++] = leaf_id;
+        int32_t obj_id = moved_objects[i];
+        SphereObject &obj = sim.sphereObjects[obj_id];
+        AABB obj_aabb = obj.aabb;
+
+        int32_t node_idx = int32_t(obj.leafID >> 2_u32);
+        int32_t sub_idx = int32_t(obj.leafID & 3);
+
+        PhysicsBVHNode &leaf_node = nodes[node_idx];
+        leaf_node.minX[sub_idx] = obj_aabb.pMin.x;
+        leaf_node.minY[sub_idx] = obj_aabb.pMin.y;
+        leaf_node.minZ[sub_idx] = obj_aabb.pMin.z;
+        leaf_node.maxX[sub_idx] = obj_aabb.pMax.x;
+        leaf_node.maxY[sub_idx] = obj_aabb.pMax.y;
+        leaf_node.maxZ[sub_idx] = obj_aabb.pMax.z;
+
+        int32_t child_idx = node_idx;
+        node_idx = leaf_node.parentID;
+
+        while (node_idx != sentinel) {
+            PhysicsBVHNode &node = nodes[node_idx];
+            int child_offset = -1;
+            for (int j = 0; j < 4; j++) {
+                if (node.children[j] == child_idx) {
+                    child_offset = j;
+                    break;
+                }
+            }
+            assert(child_offset != -1);
+
+            bool expanded = false;
+            if (obj_aabb.pMin.x < node.minX[child_offset]) {
+                node.minX[child_offset] = obj_aabb.pMin.x;
+                expanded = true;
+            }
+
+            if (obj_aabb.pMin.y < node.minY[child_offset]) {
+                node.minY[child_offset] = obj_aabb.pMin.y;
+                expanded = true;
+            }
+
+            if (obj_aabb.pMin.z < node.minZ[child_offset]) {
+                node.minZ[child_offset] = obj_aabb.pMin.z;
+                expanded = true;
+            }
+
+            if (obj_aabb.pMax.x < node.maxX[child_offset]) {
+                node.maxX[child_offset] = obj_aabb.pMax.x;
+                expanded = true;
+            }
+
+            if (obj_aabb.pMax.y < node.maxY[child_offset]) {
+                node.maxY[child_offset] = obj_aabb.pMax.y;
+                expanded = true;
+            }
+
+            if (obj_aabb.pMax.z < node.maxZ[child_offset]) {
+                node.maxZ[child_offset] = obj_aabb.pMax.z;
+                expanded = true;
+            }
+
+            if (!expanded) {
+                break;
+            }
+            
+            child_idx = node_idx;
+            node_idx = node.parentID;
         }
-    }
-
-    // Bulk remove
-    for (int i = 0; i < (int)num_removed_objects; i++) {
-        PhysicsBVHLeaf &leaf = nodes[removed_objects[i]].leaf;
-    }
-
-    for (int i = 0; i < (int)move_removed_offset; i++) {
-        PhysicsBVHLeaf &leaf = nodes[move_removed_objects[i]].leaf;
-    }
-
-    for (int i = 0; i < (int)num_added_objects; i++) {
-
     }
 }
 
@@ -222,6 +385,8 @@ static inline void preprocessObject(SimpleSim &sim, uint32_t obj_id)
     for (int i = 1; i < 8; i++) {
         object.aabb.expand(cube[i]);
     }
+
+    object.physCenter = (object.aabb.pMin + object.aabb.pMax) / 2;
 }
 
 // Update all entity bounding boxes:
@@ -239,6 +404,15 @@ void PreprocessSystem::run(void *gen_data, uint32_t invocation_offset)
     preprocessObject(sim, sphere_idx.offset);
 }
 
+void BVHSystem::run(void *gen_data, uint32_t invocation_offset)
+{
+    SimManager &mgr = *(SimManager *)gen_data;
+
+    SimpleSim &sim = mgr.sims[invocation_offset];
+    sim.bvh.update(sim, nullptr, 0, nullptr, 0, sim.bvhObjIDs,
+                   sim.numSphereObjects);
+}
+
 static inline bool compareObjAABBs(SimpleSim &sim, uint32_t a_idx, uint32_t b_idx)
 {
     if (a_idx == b_idx) return false;
@@ -252,22 +426,21 @@ static inline bool compareObjAABBs(SimpleSim &sim, uint32_t a_idx, uint32_t b_id
 void BroadphaseSystem::run(void *gen_data, uint32_t invocation_offset)
 {
     SimManager &mgr = *(SimManager *)gen_data;
+    SphereIndex &sphere_idx = mgr.sphereIndices[invocation_offset];
+    SimpleSim &sim = mgr.sims[sphere_idx.world];
+    SphereObject &obj = sim.sphereObjects[sphere_idx.offset];
 
-    TestIndex &test = mgr.testIndices[invocation_offset];
-    SimpleSim &sim = mgr.sims[test.world];
-    uint32_t a_idx = test.a;
-    uint32_t b_idx = test.b;
-
-    bool overlap = compareObjAABBs(sim, a_idx, b_idx);
-    if (overlap) {
+    sim.bvh.test(obj.aabb, [&](uint32_t other) {
         uint32_t candidate_idx = mgr.narrow.numInvocations.fetch_add(1,
              std::memory_order_relaxed);
-        mgr.candidatePairs[candidate_idx] = CandidatePair {
-            test.world,
-            a_idx,
-            b_idx,
-        };
-    }
+        if (sphere_idx.offset < other) {
+            mgr.candidatePairs[candidate_idx] = CandidatePair {
+                sphere_idx.world,
+                sphere_idx.offset,
+                other,
+            };
+        }
+    });
 }
 
 template <bool use_atomic>

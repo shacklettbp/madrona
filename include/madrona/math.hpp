@@ -327,14 +327,14 @@ struct AABB {
     {
         Vector3 p_min {
             min(a.pMin.x, b.pMin.x),
-            min(a.pMin.x, b.pMin.x),
-            min(a.pMin.x, b.pMin.x),
+            min(a.pMin.y, b.pMin.y),
+            min(a.pMin.z, b.pMin.z),
         };
 
         Vector3 p_max {
-            min(a.pMax.x, b.pMax.x),
-            min(a.pMax.x, b.pMax.x),
-            min(a.pMax.x, b.pMax.x),
+            max(a.pMax.x, b.pMax.x),
+            max(a.pMax.y, b.pMax.y),
+            max(a.pMax.z, b.pMax.z),
         };
 
         return AABB {

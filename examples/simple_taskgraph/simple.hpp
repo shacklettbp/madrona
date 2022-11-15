@@ -80,6 +80,11 @@ struct PhysicsBVHNode {
     {
         children[i] = 0x80000000 | obj_id;
     }
+
+    inline uint32_t leafObjID(int32_t i)
+    {
+        return uint32_t(children[i] & ~0x80000000);
+    }
 };
 
 struct SimpleSim;
@@ -87,12 +92,52 @@ struct SimpleSim;
 struct PhysicsBVH {
     PhysicsBVH(int32_t initial_node_allocation);
 
-    inline void update(SimpleSim &sim,
-                       uint32_t *added_objects, uint32_t num_added_objects,
-                       uint32_t *removed_objects, uint32_t num_removed_objects,
-                       uint32_t *moved_objects, uint32_t num_moved_objects);
+    inline void build(SimpleSim &sim, int32_t *objs, int32_t num_objs);
 
-    inline void addObject(SimpleSim &sim, uint32_t obj_id);
+    inline void update(SimpleSim &sim,
+                       int32_t *added_objects, int32_t num_added_objects,
+                       int32_t *removed_objects, int32_t num_removed_objects,
+                       int32_t *moved_objects, int32_t num_moved_objects);
+
+    template <typename Fn>
+    inline void test(madrona::math::AABB &aabb, Fn &&fn)
+    {
+        int32_t stack[32];
+        stack[0] = 0;
+        int32_t stack_size = 1;
+
+        while (stack_size > 0) {
+            int32_t node_idx = stack[--stack_size];
+            PhysicsBVHNode &node = nodes[node_idx];
+            for (int i = 0; i < 4; i++) {
+                int child_idx = node.children[i];
+                if (child_idx == sentinel) {
+                    continue;
+                }
+
+                madrona::math::AABB child_aabb {
+                    .pMin = {
+                        node.minX[i],
+                        node.minY[i],
+                        node.minZ[i],
+                    },
+                    .pMax = {
+                        node.maxX[i],
+                        node.maxY[i],
+                        node.maxZ[i],
+                    },
+                };
+
+                if (aabb.overlaps(child_aabb)) {
+                    if (node.isLeaf(i)) {
+                        fn(node.leafObjID(i));
+                    } else {
+                        stack[stack_size++] = child_idx;
+                    }
+                }
+            }
+        }
+    }
 
     static constexpr int32_t sentinel = int32_t(-1);
 
@@ -106,10 +151,15 @@ struct SphereObject {
     Translation translation;
     Rotation rotation;
     PhysicsAABB aabb;
+    madrona::math::Vector3 physCenter;
     uint32_t leafID;
 };
 
 struct PreprocessSystem : madrona::CustomSystem<PreprocessSystem> {
+    inline void run(void *data, uint32_t invocation_offset);
+};
+
+struct BVHSystem : madrona::CustomSystem<BVHSystem> {
     inline void run(void *data, uint32_t invocation_offset);
 };
 
@@ -136,8 +186,10 @@ struct SimpleSim {
 
     SphereObject *sphereObjects;
     ContactData *contacts;
+    int32_t *bvhObjIDs;
     uint32_t numSphereObjects;
     std::atomic_uint32_t numContacts;
+    PhysicsBVH bvh;
 
     madrona::utils::SpinLock candidateCreateLock {};
     madrona::utils::SpinLock contactCreateLock {};
@@ -148,17 +200,12 @@ struct SphereIndex {
     uint32_t offset;
 };
 
-struct TestIndex {
-    uint32_t world;
-    uint32_t a;
-    uint32_t b;
-};
-
 struct SimManager {
     SimManager(const EnvInit *env_inits, uint32_t num_worlds);
     void taskgraphSetup(madrona::TaskGraph::Builder &builder);
 
     PreprocessSystem preprocess;
+    BVHSystem bvhUpdate;
     BroadphaseSystem broad;
     NarrowphaseSystem narrow;
     SolverSystem solver;
@@ -169,7 +216,6 @@ struct SimManager {
     SimpleSim *sims;
 
     SphereIndex *sphereIndices;
-    TestIndex *testIndices;
     CandidatePair *candidatePairs;
 };
 
