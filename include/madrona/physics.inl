@@ -3,19 +3,21 @@
 namespace madrona {
 namespace phys {
 
+namespace broadphase {
+
 template <typename Fn>
-void BroadphaseBVH::findOverlaps(madrona::math::AABB &aabb, Fn &&fn)
+void BVH::findOverlaps(madrona::math::AABB &aabb, Fn &&fn) const
 {
     int32_t stack[128];
     stack[0] = 0;
-    int32_t stack_size = 1;
+    CountT stack_size = 1;
 
     while (stack_size > 0) {
         int32_t node_idx = stack[--stack_size];
-        PhysicsBVHNode &node = nodes[node_idx];
+        const Node &node = nodes_[node_idx];
         for (int i = 0; i < 4; i++) {
             int child_idx = node.children[i];
-            if (child_idx == sentinel) {
+            if (child_idx == sentinel_) {
                 continue;
             }
 
@@ -43,29 +45,31 @@ void BroadphaseBVH::findOverlaps(madrona::math::AABB &aabb, Fn &&fn)
     }
 }
 
-bool BroadphaseBVH::Node::isLeaf(IdxT child) const
+bool BVH::Node::isLeaf(IdxT child) const
 {
     return children[child] & 0x80000000;
 }
 
-uint32_t BroadphaseBVH::Node::leafRawEntity(IdxT child) const
+uint32_t BVH::Node::leafRawEntity(IdxT child) const
 {
     return uint32_t(children[child] & ~0x80000000);
 }
 
-void BroadphaseBVH::Node::setLeaf(IdxT child, int32_t entity_id)
+void BVH::Node::setLeaf(IdxT child, int32_t entity_id)
 {
     children[child] = 0x80000000 | entity_id;
 }
 
-void BroadphaseBVH::Node::setInternal(IdxT child, int32_t internal_idx)
+void BVH::Node::setInternal(IdxT child, int32_t internal_idx)
 {
     children[child] = internal_idx;
 }
 
-void BroadphaseBVH::Node::clearChild(IdxT child)
+void BVH::Node::clearChild(IdxT child)
 {
     children[child] = sentinel_;
+}
+
 }
 
 }

@@ -83,7 +83,20 @@ public:
         return node.val;
     }
 
+    inline const V & getRef(K k) const
+    {
+        const Node &node = store_[k.id];
+        assert(node.gen.load(std::memory_order_relaxed) == k.gen);
+
+        return node.val;
+    }
+
     inline V & getRef(int32_t id)
+    {
+        return store_[id].val;
+    }
+
+    inline const V & getRef(int32_t id) const
     {
         return store_[id].val;
     }

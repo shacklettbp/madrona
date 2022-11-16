@@ -89,6 +89,7 @@ public:
     EntityStore();
 
     inline Loc getLoc(Entity e) const;
+    inline Loc getLocUnsafe(int32_t e_id) const;
     inline void setLoc(Entity e, Loc loc);
     inline void setRow(Entity e, uint32_t row);
 
@@ -140,6 +141,10 @@ public:
     template <typename ComponentT>
     inline ResultRef<ComponentT> get(MADRONA_MW_COND(uint32_t world_id,)
                                      Entity entity);
+
+    template <typename ComponentT>
+    inline ComponentT & getUnsafe(MADRONA_MW_COND(uint32_t world_id,)
+                                  int32_t entity_id);
 
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype(

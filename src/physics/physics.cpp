@@ -1,25 +1,25 @@
 #include <madrona/physics.hpp>
 
 namespace madrona {
+using namespace base;
+using namespace math;
+
 namespace phys {
 
-namespace {
+namespace broadphase {
 
-
-
-}
-
-BroadphaseBVH::BroadphaseBVH(CountT max_nodes)
+BVH::BVH(CountT max_nodes)
     : nodes_((Node *)malloc(sizeof(Node) * max_nodes)),
       num_nodes_(0),
       num_allocated_nodes_(max_nodes)
 {
 }
 
-void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
+void BVH::build(Context &ctx, Entity *entities,
+                          CountT num_entities)
 {
     int32_t num_internal_nodes =
-        utils::divideRoundUp(added_entities.size() - 1, CountT(3));
+        utils::divideRoundUp(num_entities - 1, CountT(3));
 
     int32_t cur_node_offset = num_nodes_;
     assert(cur_node_offset == 0); // FIXME
@@ -38,7 +38,7 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
         sentinel_,
         sentinel_,
         0,
-        int32_t(added_entities.size()),
+        int32_t(num_entities),
     };
 
     CountT stack_size = 1;
@@ -53,17 +53,17 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
 
             for (int i = 0; i < 4; i++) {
                 if (i < entry.numObjs) {
-                    uint32_t raw_id = added_entities[entry.offset + i].id;
-                    SphereObject &obj = sim.sphereObjects[obj_id];
-                    node.setLeaf(i, obj_id);
-                    node.minX[i] = obj.aabb.pMin.x;
-                    node.minY[i] = obj.aabb.pMin.y;
-                    node.minZ[i] = obj.aabb.pMin.z;
-                    node.maxX[i] = obj.aabb.pMax.x;
-                    node.maxY[i] = obj.aabb.pMax.y;
-                    node.maxZ[i] = obj.aabb.pMax.z;
+                    int32_t e_id = entities[entry.offset + i].id;
+                    const auto &aabb = ctx.getUnsafe<LeafAABB>(e_id);
+                    node.setLeaf(i, e_id);
+                    node.minX[i] = aabb.pMin.x;
+                    node.minY[i] = aabb.pMin.y;
+                    node.minZ[i] = aabb.pMin.z;
+                    node.maxX[i] = aabb.pMax.x;
+                    node.maxY[i] = aabb.pMax.y;
+                    node.maxZ[i] = aabb.pMax.z;
                 } else {
-                    node.children[i] = sentinel;
+                    node.children[i] = sentinel_;
                     node.minX[i] = FLT_MAX;
                     node.minY[i] = FLT_MAX;
                     node.minZ[i] = FLT_MAX;
@@ -72,21 +72,21 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
                     node.maxZ[i] = FLT_MIN;
                 }
             }
-        } else if (entry.nodeID == sentinel) {
+        } else if (entry.nodeID == sentinel_) {
             node_id = cur_node_offset++;
             // Record the node id in the stack entry for when this entry
             // is reprocessed
             entry.nodeID = node_id;
 
-            BroadphaseBVHNode &node = nodes[node_id];
+            Node &node = nodes_[node_id];
             for (int i = 0; i < 4; i++) {
-                node.children[i] = sentinel;
+                node.children[i] = sentinel_;
             }
             node.parentID = entry.parentID;
 
             // midpoint sort items
-            auto midpoint_split = [&sim, added_objects](
-                                      int32_t base, int32_t num_elems) {
+            auto midpoint_split = [&ctx, entities](
+                    int32_t base, int32_t num_elems) {
                 Vector3 center_min {
                     FLT_MAX,
                     FLT_MAX,
@@ -100,10 +100,10 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
                 };
 
                 for (int i = 0; i < num_elems; i++) {
-                    int32_t obj_id = added_objects[base + i];
-                    SphereObject &obj = sim.sphereObjects[obj_id];
-                    center_min = Vector3::min(center_min, obj.physCenter);
-                    center_max = Vector3::max(center_max, obj.physCenter);
+                    int32_t e_id = entities[base + i].id;
+                    LeafCenter &center = ctx.getUnsafe<LeafCenter>(e_id);
+                    center_min = Vector3::min(center_min, center);
+                    center_max = Vector3::max(center_max, center);
                 }
 
                 auto split = [&](auto get_component) {
@@ -115,9 +115,9 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
 
                     while (start < end) {
                         auto center_component = [&](int32_t idx) {
-                            int32_t obj_id = added_objects[base + idx];
-                            return get_component(
-                                sim.sphereObjects[obj_id].physCenter);
+                            LeafCenter &center = ctx.getUnsafe<LeafCenter>(
+                                entities[base + idx].id);
+                            return get_component(center);
                         };
 
                         while (start < end && center_component(start) < 
@@ -131,8 +131,8 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
                         }
 
                         if (start < end) {
-                            std::swap(added_objects[base + start],
-                                      added_objects[base + end - 1]);
+                            std::swap(entities[base + start],
+                                      entities[base + end - 1]);
                             ++start;
                             --end;
                         }
@@ -221,14 +221,14 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
         // At this point, remove the current entry from the stack
         stack_size -= 1;
 
-        BroadphaseBVHNode &node = nodes[node_id];
+        Node &node = nodes_[node_id];
         if (node.parentID == -1) {
             continue;
         }
 
         AABB combined_aabb  = AABB::invalid(); 
         for (int i = 0; i < 4; i++) {
-            if (node.children[i] == sentinel) {
+            if (node.children[i] == sentinel_) {
                 break;
             }
 
@@ -246,10 +246,10 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
             });
         }
 
-        BroadphaseBVHNode &parent = nodes[node.parentID];
+        Node &parent = nodes_[node.parentID];
         int child_offset;
         for (child_offset = 0; ; child_offset++) {
-            if (parent.children[child_offset] == sentinel) {
+            if (parent.children[child_offset] == sentinel_) {
                 break;
             }
         }
@@ -264,39 +264,39 @@ void BroadphaseBVH::build(Context &ctx, Span<Entity> added_entities)
     }
 }
 
-void BroadphaseBVH::update(SimpleSim &sim,
-                        int32_t *added_objects, int32_t num_added_objects,
-                        int32_t *removed_objects, int32_t num_removed_objects,
-                        int32_t *moved_objects, int32_t num_moved_objects)
+void BVH::update(Context &ctx,
+                 Entity *added_entities, CountT num_added_entities,
+                 Entity *removed_entities, CountT num_removed_entities,
+                 Entity *moved_entities, CountT num_moved_entities)
 {
-    if (num_added_objects > 0) {
-        build(sim, added_objects, num_added_objects);
+    if (num_added_entities > 0) {
+        build(ctx, added_entities, num_added_entities);
     }
 
-    (void)removed_objects;
-    (void)num_removed_objects;
+    (void)removed_entities;
+    (void)num_removed_entities;
 
-    for (int i = 0; i < (int)num_moved_objects; i++) {
-        int32_t obj_id = moved_objects[i];
-        SphereObject &obj = sim.sphereObjects[obj_id];
-        AABB obj_aabb = obj.aabb;
+    for (int i = 0; i < (int)num_moved_entities; i++) {
+        int32_t e_id = moved_entities[i].id;
+        const LeafAABB &leaf_aabb = ctx.getUnsafe<LeafAABB>(e_id);
+        int32_t leaf_idx = ctx.getUnsafe<LeafID>(e_id).idx;
 
-        int32_t node_idx = int32_t(obj.leafID >> 2_u32);
-        int32_t sub_idx = int32_t(obj.leafID & 3);
+        int32_t node_idx = int32_t(leaf_idx >> 2_u32);
+        int32_t sub_idx = int32_t(leaf_idx & 3);
 
-        BroadphaseBVHNode &leaf_node = nodes[node_idx];
-        leaf_node.minX[sub_idx] = obj_aabb.pMin.x;
-        leaf_node.minY[sub_idx] = obj_aabb.pMin.y;
-        leaf_node.minZ[sub_idx] = obj_aabb.pMin.z;
-        leaf_node.maxX[sub_idx] = obj_aabb.pMax.x;
-        leaf_node.maxY[sub_idx] = obj_aabb.pMax.y;
-        leaf_node.maxZ[sub_idx] = obj_aabb.pMax.z;
+        Node &leaf_node = nodes_[node_idx];
+        leaf_node.minX[sub_idx] = leaf_aabb.pMin.x;
+        leaf_node.minY[sub_idx] = leaf_aabb.pMin.y;
+        leaf_node.minZ[sub_idx] = leaf_aabb.pMin.z;
+        leaf_node.maxX[sub_idx] = leaf_aabb.pMax.x;
+        leaf_node.maxY[sub_idx] = leaf_aabb.pMax.y;
+        leaf_node.maxZ[sub_idx] = leaf_aabb.pMax.z;
 
         int32_t child_idx = node_idx;
         node_idx = leaf_node.parentID;
 
-        while (node_idx != sentinel) {
-            BroadphaseBVHNode &node = nodes[node_idx];
+        while (node_idx != sentinel_) {
+            Node &node = nodes_[node_idx];
             int child_offset = -1;
             for (int j = 0; j < 4; j++) {
                 if (node.children[j] == child_idx) {
@@ -307,33 +307,33 @@ void BroadphaseBVH::update(SimpleSim &sim,
             assert(child_offset != -1);
 
             bool expanded = false;
-            if (obj_aabb.pMin.x < node.minX[child_offset]) {
-                node.minX[child_offset] = obj_aabb.pMin.x;
+            if (leaf_aabb.pMin.x < node.minX[child_offset]) {
+                node.minX[child_offset] = leaf_aabb.pMin.x;
                 expanded = true;
             }
 
-            if (obj_aabb.pMin.y < node.minY[child_offset]) {
-                node.minY[child_offset] = obj_aabb.pMin.y;
+            if (leaf_aabb.pMin.y < node.minY[child_offset]) {
+                node.minY[child_offset] = leaf_aabb.pMin.y;
                 expanded = true;
             }
 
-            if (obj_aabb.pMin.z < node.minZ[child_offset]) {
-                node.minZ[child_offset] = obj_aabb.pMin.z;
+            if (leaf_aabb.pMin.z < node.minZ[child_offset]) {
+                node.minZ[child_offset] = leaf_aabb.pMin.z;
                 expanded = true;
             }
 
-            if (obj_aabb.pMax.x > node.maxX[child_offset]) {
-                node.maxX[child_offset] = obj_aabb.pMax.x;
+            if (leaf_aabb.pMax.x > node.maxX[child_offset]) {
+                node.maxX[child_offset] = leaf_aabb.pMax.x;
                 expanded = true;
             }
 
-            if (obj_aabb.pMax.y > node.maxY[child_offset]) {
-                node.maxY[child_offset] = obj_aabb.pMax.y;
+            if (leaf_aabb.pMax.y > node.maxY[child_offset]) {
+                node.maxY[child_offset] = leaf_aabb.pMax.y;
                 expanded = true;
             }
 
-            if (obj_aabb.pMax.z > node.maxZ[child_offset]) {
-                node.maxZ[child_offset] = obj_aabb.pMax.z;
+            if (leaf_aabb.pMax.z > node.maxZ[child_offset]) {
+                node.maxZ[child_offset] = leaf_aabb.pMax.z;
                 expanded = true;
             }
 
@@ -347,6 +347,8 @@ void BroadphaseBVH::update(SimpleSim &sim,
     }
 }
 
+
+}
 
 }
 }

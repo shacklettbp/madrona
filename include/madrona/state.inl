@@ -31,6 +31,11 @@ Loc EntityStore::getLoc(Entity e) const
     return map_.lookup(e);
 }
 
+Loc EntityStore::getLocUnsafe(int32_t e_id) const
+{
+    return map_.getRef(e_id);
+}
+
 void EntityStore::setLoc(Entity e, Loc loc)
 {
     map_.getRef(e) = loc;
@@ -182,6 +187,25 @@ ResultRef<ComponentT> StateManager::get(
     return get<ComponentT>(MADRONA_MW_COND(world_id,) loc);
 }
 
+template <typename ComponentT>
+ComponentT & StateManager::getUnsafe(
+    MADRONA_MW_COND(uint32_t world_id,) int32_t entity_id)
+{
+    Loc loc = entity_store_.getLocUnsafe(entity_id);
+
+    ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
+    Table &tbl =
+#ifdef MADRONA_MW_MODE
+        archetype.tbls[world_id];
+#else
+        archetype.tbl;
+#endif
+
+    auto col_idx =
+        *archetype.columnLookup.lookup(componentID<ComponentT>().id);
+
+    return ((ComponentT *)tbl.data(col_idx))[loc.row];
+}
 
 template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT> StateManager::archetype(

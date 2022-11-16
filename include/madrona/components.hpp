@@ -2,7 +2,7 @@
 #include <madrona/math.hpp>
 
 namespace madrona {
-namespace phys {
+namespace base {
 
 struct Position : math::Vector3 {
     Position(math::Vector3 v)

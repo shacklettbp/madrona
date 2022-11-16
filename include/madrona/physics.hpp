@@ -8,32 +8,48 @@
 namespace madrona {
 namespace phys {
 
-struct BroadphaseAABB : math::AABB {
-    BroadphaseAABB(math::AABB aabb)
-        : AABB(aabb)
-    {}
-};
-
 struct RigidBody {
     math::Vector3 invInertiaTensor;
 };
 
+namespace broadphase {
 
-class BroadphaseBVH {
+struct LeafAABB : math::AABB {
+    LeafAABB(math::AABB aabb)
+        : AABB(aabb)
+    {}
+};
+
+struct LeafCenter : math::Vector3 {
+    LeafCenter(math::Vector3 v)
+        : Vector3(v)
+    {}
+};
+
+struct LeafID {
+    int32_t idx;
+};
+
+class BVH {
 public:
-    BroadphaseBVH(CountT max_nodes);
+    BVH(CountT max_nodes);
 
-    void build(Context &ctx, Span<Entity> added_entities);
+    void build(Context &ctx, Entity *entities,
+               CountT num_entities);
+
     void update(Context &ctx,
-                Span<Entity> added_entities,
-                Span<Entity> removed_entities,
-                Span<Entity> moved_entities);
+                Entity *added_entities,
+                CountT num_added_entities,
+                Entity *removed_entities,
+                CountT num_removed_entities,
+                Entity *moved_entities,
+                CountT num_moved_entities);
 
     template <typename Fn>
-    inline void findOverlaps(madrona::math::AABB &aabb, Fn &&fn);
+    inline void findOverlaps(madrona::math::AABB &aabb, Fn &&fn) const;
 
 private:
-    static constexpr int32_t sentinel_ = 0xFFFFFFFF;
+    static constexpr int32_t sentinel_ = 0xFFFF'FFFF_i32;
 
     struct Node {
         float minX[4];
@@ -59,11 +75,16 @@ private:
 };
 
 
-class BroadphaseSystem : ParallelForSystem<BroadphaseSystem,
-                                           Entity, BroadphaseAABB> {
+class CollisionCandidateSystem : ParallelForSystem<CollisionCandidateSystem,
+                                                   Entity, LeafAABB> {
+public:
     void run();
+
+private:
+    BVH bvh_;
 };
 
+}
 }
 }
 
