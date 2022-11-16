@@ -211,6 +211,24 @@ struct Vector3 {
             a / b.z,
         };
     }
+
+    static inline Vector3 min(Vector3 a, Vector3 b)
+    {
+        return Vector3 {
+            math::min(a.x, b.x),
+            math::min(a.x, b.x),
+            math::min(a.x, b.x),
+        };
+    }
+
+    static inline Vector3 max(Vector3 a, Vector3 b)
+    {
+        return Vector3 {
+            math::max(a.x, b.x),
+            math::max(a.x, b.x),
+            math::max(a.x, b.x),
+        };
+    }
 };
 
 inline float dot(Vector3 a, Vector3 b)
@@ -325,21 +343,9 @@ struct AABB {
 
     static inline AABB merge(const AABB &a, const AABB &b)
     {
-        Vector3 p_min {
-            min(a.pMin.x, b.pMin.x),
-            min(a.pMin.y, b.pMin.y),
-            min(a.pMin.z, b.pMin.z),
-        };
-
-        Vector3 p_max {
-            max(a.pMax.x, b.pMax.x),
-            max(a.pMax.y, b.pMax.y),
-            max(a.pMax.z, b.pMax.z),
-        };
-
         return AABB {
-            .pMin = p_min,
-            .pMax = p_max,
+            .pMin = Vector3::min(a.pMin, b.pMin),
+            .pMax = Vector3::min(a.pMax, b.pMax),
         };
     }
 };

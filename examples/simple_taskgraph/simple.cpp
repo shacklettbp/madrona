@@ -182,36 +182,120 @@ void PhysicsBVH::build(SimpleSim &sim,
             }
             node.parentID = entry.parentID;
 
-            int32_t subarray_elems =
-                utils::divideRoundUp(entry.numObjs, 4);
-            int32_t final_elems = entry.numObjs - subarray_elems * 3;
+            // midpoint sort items
+            auto midpoint_split = [&sim, added_objects](
+                                      int32_t base, int32_t num_elems) {
+                Vector3 center_min {
+                    FLT_MAX,
+                    FLT_MAX,
+                    FLT_MAX,
+                };
 
+                Vector3 center_max {
+                    FLT_MIN,
+                    FLT_MIN,
+                    FLT_MIN,
+                };
+
+                for (int i = 0; i < num_elems; i++) {
+                    int32_t obj_id = added_objects[base + i];
+                    SphereObject &obj = sim.sphereObjects[obj_id];
+                    center_min = Vector3::min(center_min, obj.physCenter);
+                    center_max = Vector3::max(center_max, obj.physCenter);
+                }
+
+                auto split = [&](auto get_component) {
+                    float split_val = 0.5f * (get_component(center_min) +
+                                              get_component(center_max));
+
+                    int start = 0;
+                    int end = num_elems;
+
+                    while (start < end) {
+                        auto center_component = [&](int32_t idx) {
+                            int32_t obj_id = added_objects[base + idx];
+                            return get_component(
+                                sim.sphereObjects[obj_id].physCenter);
+                        };
+
+                        while (start < end && center_component(start) < 
+                               split_val) {
+                            ++start;
+                        }
+
+                        while (start < end && center_component(end - 1) >=
+                               split_val) {
+                            --end;
+                        }
+
+                        if (start < end) {
+                            std::swap(added_objects[base + start],
+                                      added_objects[base + end - 1]);
+                            ++start;
+                            --end;
+                        }
+                    }
+
+                    if (start > 0 && start < num_elems) {
+                        return start;
+                    } else {
+                        return num_elems / 2;
+                    }
+                };
+
+                Vector3 center_diff = center_max - center_min;
+                if (center_diff.x > center_diff.y &&
+                    center_diff.x > center_diff.z) {
+                    return split([](Vector3 v) {
+                        return v.x;
+                    });
+                } else if (center_diff.y > center_diff.x &&
+                           center_diff.y > center_diff.z) {
+                    return split([](Vector3 v) {
+                        return v.y;
+                    });
+                } else {
+                    return split([](Vector3 v) {
+                        return v.z;
+                    });
+                }
+            };
+
+            int32_t second_split = midpoint_split(entry.offset, entry.numObjs);
+            int32_t num_h1 = second_split;
+            int32_t num_h2 = entry.numObjs - second_split;
+
+            int32_t first_split = midpoint_split(entry.offset, num_h1);
+            int32_t third_split =
+                midpoint_split(entry.offset + second_split, num_h2);
+
+            // Setup stack to recurse into fourths
             stack[stack_size++] = {
                 -1,
                 entry.nodeID,
                 entry.offset,
-                subarray_elems,
+                first_split,
             };
 
             stack[stack_size++] = {
                 -1,
                 entry.nodeID,
-                entry.offset + subarray_elems,
-                subarray_elems,
+                entry.offset + first_split,
+                num_h1 - first_split,
             };
 
             stack[stack_size++] = {
                 -1,
                 entry.nodeID,
-                entry.offset + subarray_elems * 2,
-                subarray_elems,
+                entry.offset + num_h1,
+                third_split,
             };
 
             stack[stack_size++] = {
                 -1,
                 entry.nodeID,
-                entry.offset + subarray_elems * 3,
-                final_elems,
+                entry.offset + num_h1 + third_split,
+                num_h2 - third_split,
             };
 
             // Don't finish processing this node until children are processed
