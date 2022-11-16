@@ -9,6 +9,7 @@
 
 #include <madrona/macros.hpp>
 #include <madrona/sync.hpp>
+#include <madrona/types.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -24,17 +25,17 @@ public:
         Cache(const Cache &) = delete;
 
     private:
-        uint32_t free_head_;
-        uint32_t num_free_ids_;
-        uint32_t overflow_head_;
-        uint32_t num_overflow_ids_;
+        int32_t free_head_;
+        int32_t num_free_ids_;
+        int32_t overflow_head_;
+        int32_t num_overflow_ids_;
 
     friend class IDMap;
     };
 
     struct FreeNode {
-        uint32_t subNext;
-        uint32_t globalNext;
+        int32_t subNext;
+        int32_t globalNext;
     };
 
     struct Node {
@@ -45,17 +46,17 @@ public:
         std::atomic_uint32_t gen;
     };
 
-    IDMap(uint32_t init_capacity);
+    IDMap(CountT init_capacity);
 
     inline K acquireID(Cache &cache);
 
-    inline void releaseID(Cache &cache, uint32_t id);
+    inline void releaseID(Cache &cache, int32_t id);
     inline void releaseID(Cache &cache, K k)
     {
         releaseID(cache, k.id);
     }
 
-    inline void bulkRelease(Cache &cache, K *keys, uint32_t num_keys);
+    inline void bulkRelease(Cache &cache, K *keys, CountT num_keys);
 
     inline V lookup(K k) const
     {
@@ -82,7 +83,7 @@ public:
         return node.val;
     }
 
-    inline V & getRef(uint32_t id)
+    inline V & getRef(int32_t id)
     {
         return store_[id].val;
     }
@@ -93,12 +94,12 @@ public:
     // with atomic_thread_fence by outside code after updating / reading
     // multiple IDs.
 
-    inline void acquireGen(uint32_t id)
+    inline void acquireGen(int32_t id)
     {
         TSAN_ACQUIRE(&store_[id].gen);
     }
 
-    inline void releaseGen(uint32_t id)
+    inline void releaseGen(int32_t id)
     {
         TSAN_RELEASE(&store_[id].gen);
     }
@@ -111,7 +112,7 @@ private:
 
     struct alignas(std::atomic_uint64_t) FreeHead {
         uint32_t gen;
-        uint32_t head;
+        int32_t head;
     };
 
     [[no_unique_address]] Store store_;
@@ -119,7 +120,8 @@ private:
 
     static_assert(decltype(free_head_)::is_always_lock_free);
 
-    static constexpr uint32_t ids_per_cache_ = 64;
+    static constexpr CountT ids_per_cache_ = 64;
+    static constexpr int32_t sentinel_ = 0xFFFF'FFFF_i32;
 
     friend Store;
 };

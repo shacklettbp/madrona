@@ -15,13 +15,13 @@
 namespace madrona {
 
 template <typename T>
-T & EntityStore::LockedMapStore<T>::operator[](uint32_t idx)
+T & EntityStore::LockedMapStore<T>::operator[](int32_t idx)
 {
     return ((T *)store.data())[idx];
 }
 
 template <typename T>
-const T & EntityStore::LockedMapStore<T>::operator[](uint32_t idx) const
+const T & EntityStore::LockedMapStore<T>::operator[](int32_t idx) const
 {
     return ((const T *)store.data())[idx];
 }

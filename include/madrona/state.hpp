@@ -72,14 +72,14 @@ private:
     template <typename T>
     struct LockedMapStore {
         VirtualStore store;
-        uint32_t numIDs;
+        CountT numIDs;
         utils::SpinLock expandLock;
 
-        inline T & operator[](uint32_t idx);
-        inline const T & operator[](uint32_t idx) const;
+        inline T & operator[](int32_t idx);
+        inline const T & operator[](int32_t idx) const;
 
-        LockedMapStore(uint32_t init_capacity);
-        uint32_t expand(uint32_t num_new_elems);
+        LockedMapStore(CountT init_capacity);
+        CountT expand(CountT num_new_elems);
     };
 
     using Map = IDMap<Entity, Loc, LockedMapStore>;

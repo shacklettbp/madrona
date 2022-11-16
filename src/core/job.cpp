@@ -81,7 +81,7 @@ struct LogEntry {
 
     struct JobFinished {
         JobContainerBase *jobData;
-        uint32_t jobIdx;
+        int32_t jobIdx;
         uint32_t numCompleted;
     };
 
@@ -403,7 +403,7 @@ inline JobTrackerMap::Cache & getTrackerCache(void *tracker_cache_base,
 
 inline void decrementJobTracker(JobTrackerMap &tracker_map, 
                                 JobTrackerMap::Cache &tracker_cache,
-                                uint32_t job_id)
+                                int32_t job_id)
 {
 
     while (job_id != JobID::none().id) {
@@ -1058,7 +1058,7 @@ JobID JobManager::reserveProxyJobID(int thread_idx, uint32_t parent_job_idx)
 
 void JobManager::markInvocationsFinished(int thread_idx,
                                          JobContainerBase *job_data,
-                                         uint32_t job_idx,
+                                         int32_t job_idx,
                                          uint32_t num_invocations)
 {
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
@@ -1190,7 +1190,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
     scheduling_worker.numConsecutiveSchedulerCalls++;
 
     Job *waiting_jobs = (Job *)waiting_jobs_;
-    int64_t cur_num_waiting = scheduler_.numWaiting;
+    CountT cur_num_waiting = CountT(scheduler_.numWaiting);
 
     auto handleJobFinished = [&](const LogEntry::JobFinished &finished) {
         JobTracker &tracker =

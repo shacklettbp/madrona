@@ -12,20 +12,20 @@ namespace madrona {
 constexpr Entity Entity::none()
 {
     return Entity {
-        ~0u,
-        ~0u,
+        0xFFFF'FFFF_u32,
+        0xFFFF'FFFF_i32,
     };
 }
 
 bool Loc::valid() const
 {
-    return archetype != ~0u;
+    return archetype != 0xFFFF'FFFF_u32;
 }
 
 Loc Loc::none()
 {
     return Loc {
-        .archetype = ~0u,
+        .archetype = 0xFFFF'FFFF_u32,
         .row = 0,
     };
 }

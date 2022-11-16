@@ -18,7 +18,7 @@ using namespace madrona;
 
 struct TestID {
     uint32_t gen;
-    uint32_t id;
+    int32_t id;
 };
 
 struct TestTracker {
@@ -28,17 +28,17 @@ struct TestTracker {
 
 template <typename T, bool expandable>
 struct TestStore {
-    TestStore(uint32_t size)
+    TestStore(CountT size)
         : data_(size)
     {}
 
-    inline T & operator[](uint32_t idx) { return data_[idx]; }
-    inline const T & operator[](uint32_t idx) const { return data_[idx]; }
+    inline T & operator[](int32_t idx) { return data_[idx]; }
+    inline const T & operator[](int32_t idx) const { return data_[idx]; }
 
-    uint32_t expand(uint32_t num_new_elems)
+    CountT expand(CountT num_new_elems)
     {
         if constexpr (expandable) {
-            uint32_t offset = data_.size();
+            CountT offset = data_.size();
             data_.resize(offset + num_new_elems);
 
             return offset;

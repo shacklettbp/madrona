@@ -28,7 +28,7 @@ enum class JobPriority {
 
 struct JobID {
     uint32_t gen;
-    uint32_t id;
+    int32_t id;
 
     static constexpr inline JobID none();
 };
@@ -199,7 +199,7 @@ private:
 
     void markInvocationsFinished(int thread_idx,
                                  JobContainerBase *job_data,
-                                 uint32_t job_idx,
+                                 int32_t job_idx,
                                  uint32_t num_invocations);
 
     inline JobID getNewJobID(int thread_idx, uint32_t parent_job_idx, 

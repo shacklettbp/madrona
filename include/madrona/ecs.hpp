@@ -8,6 +8,7 @@
 #pragma once
 
 #include <madrona/fwd.hpp>
+#include <madrona/types.hpp>
 
 #include <cstdint>
 
@@ -15,7 +16,7 @@ namespace madrona {
 
 struct Entity {
     uint32_t gen;
-    uint32_t id;
+    int32_t id;
 
     static constexpr inline Entity none();
 };

@@ -23,7 +23,7 @@ static constexpr uint32_t maxQueryOffsets = 100'000;
 }
 
 template <typename T>
-EntityStore::LockedMapStore<T>::LockedMapStore(uint32_t init_capacity)
+EntityStore::LockedMapStore<T>::LockedMapStore(CountT init_capacity)
     : store(sizeof(T), alignof(T), 0, ~0u),
       numIDs(init_capacity),
       expandLock()
@@ -34,11 +34,11 @@ EntityStore::LockedMapStore<T>::LockedMapStore(uint32_t init_capacity)
 }
 
 template <typename T>
-uint32_t EntityStore::LockedMapStore<T>::expand(uint32_t num_new_elems)
+CountT EntityStore::LockedMapStore<T>::expand(CountT num_new_elems)
 {
     std::lock_guard lock(expandLock);
 
-    uint32_t offset = numIDs;
+    CountT offset = numIDs;
 
     numIDs += num_new_elems;
     store.expand(numIDs);

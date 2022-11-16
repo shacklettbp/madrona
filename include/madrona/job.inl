@@ -14,8 +14,8 @@ namespace madrona {
 constexpr JobID JobID::none()
 {
     return JobID {
-        ~0u,
-        ~0u,
+        0xFFFF'FFFF_u32,
+        0xFFFF'FFFF_i32,
     };
 }
 
