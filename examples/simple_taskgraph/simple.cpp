@@ -14,6 +14,46 @@ using namespace madrona::math;
 
 namespace SimpleTaskgraph {
 
+static inline void preprocessObject(SimpleSim &sim, uint32_t obj_id)
+{
+    SphereObject &object = sim.sphereObjects[obj_id];
+
+    // Clamp to world bounds
+    object.translation.x = std::clamp(object.translation.x,
+                                      sim.worldBounds.pMin.x,
+                                      sim.worldBounds.pMax.x);
+    object.translation.y = std::clamp(object.translation.y,
+                                      sim.worldBounds.pMin.y,
+                                      sim.worldBounds.pMax.y);
+    object.translation.z = std::clamp(object.translation.z,
+                                      sim.worldBounds.pMin.z,
+                                      sim.worldBounds.pMax.z);
+
+    // No actual mesh, just hardcode a fake 2 *unit cube centered around
+    // translation
+    
+    Mat3x4 model_mat =
+        Mat3x4::fromTRS(object.translation, object.rotation);
+
+    Vector3 cube[8] = {
+        model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
+    };
+
+    object.aabb = AABB::point(cube[0]);
+    for (int i = 1; i < 8; i++) {
+        object.aabb.expand(cube[i]);
+    }
+
+    object.physCenter = (object.aabb.pMin + object.aabb.pMax) / 2;
+}
+
 SimpleSim::SimpleSim(const EnvInit &env_init)
     : worldBounds(AABB::invalid()),
       sphereObjects(nullptr),
@@ -45,6 +85,8 @@ SimpleSim::SimpleSim(const EnvInit &env_init)
             Vector3 {},
             0xFFFFFFFF,
         };
+        preprocessObject(*this, i);
+
         bvhObjIDs[i] = i;
     }
 
@@ -269,19 +311,23 @@ void PhysicsBVH::build(SimpleSim &sim,
             int32_t third_split =
                 midpoint_split(entry.offset + second_split, num_h2);
 
-            // Setup stack to recurse into fourths
-            stack[stack_size++] = {
-                -1,
-                entry.nodeID,
-                entry.offset,
-                first_split,
-            };
+#if 0
+            printf("%u %u\n", entry.offset, entry.numObjs);
+            printf("[%u %u) [%u %u) [%u %u) [%u %u)\n",
+                   entry.offset, entry.offset + first_split,
+                   entry.offset + first_split, entry.offset + first_split + num_h1 - first_split,
+                   entry.offset + num_h1, entry.offset + num_h1 + third_split,
+                   entry.offset + num_h1 + third_split, entry.offset + num_h1 + third_split + num_h2 - third_split);
+#endif
+
+            // Setup stack to recurse into fourths. Put fourths on stack in
+            // reverse order to preserve left-right depth first ordering
 
             stack[stack_size++] = {
                 -1,
                 entry.nodeID,
-                entry.offset + first_split,
-                num_h1 - first_split,
+                entry.offset + num_h1 + third_split,
+                num_h2 - third_split,
             };
 
             stack[stack_size++] = {
@@ -294,8 +340,15 @@ void PhysicsBVH::build(SimpleSim &sim,
             stack[stack_size++] = {
                 -1,
                 entry.nodeID,
-                entry.offset + num_h1 + third_split,
-                num_h2 - third_split,
+                entry.offset + first_split,
+                num_h1 - first_split,
+            };
+
+            stack[stack_size++] = {
+                -1,
+                entry.nodeID,
+                entry.offset,
+                first_split,
             };
 
             // Don't finish processing this node until children are processed
@@ -431,46 +484,6 @@ void PhysicsBVH::update(SimpleSim &sim,
             node_idx = node.parentID;
         }
     }
-}
-
-static inline void preprocessObject(SimpleSim &sim, uint32_t obj_id)
-{
-    SphereObject &object = sim.sphereObjects[obj_id];
-
-    // Clamp to world bounds
-    object.translation.x = std::clamp(object.translation.x,
-                                      sim.worldBounds.pMin.x,
-                                      sim.worldBounds.pMax.x);
-    object.translation.y = std::clamp(object.translation.y,
-                                      sim.worldBounds.pMin.y,
-                                      sim.worldBounds.pMax.y);
-    object.translation.z = std::clamp(object.translation.z,
-                                      sim.worldBounds.pMin.z,
-                                      sim.worldBounds.pMax.z);
-
-    // No actual mesh, just hardcode a fake 2 *unit cube centered around
-    // translation
-    
-    Mat3x4 model_mat =
-        Mat3x4::fromTRS(object.translation, object.rotation);
-
-    Vector3 cube[8] = {
-        model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
-    };
-
-    object.aabb = AABB::point(cube[0]);
-    for (int i = 1; i < 8; i++) {
-        object.aabb.expand(cube[i]);
-    }
-
-    object.physCenter = (object.aabb.pMin + object.aabb.pMax) / 2;
 }
 
 // Update all entity bounding boxes:
