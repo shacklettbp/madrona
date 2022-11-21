@@ -15,7 +15,8 @@ namespace madrona {
 struct QueryRef {
     std::atomic_uint32_t numReferences;
     uint32_t offset;
-    uint32_t numMatchingArchetypes;
+    uint32_t numMatchingArchetypes = 0xFFFF'FFFF;
+    uint32_t numComponents;
 };
 
 template <typename... ComponentTs>
@@ -31,6 +32,7 @@ public:
     Query & operator=(Query &&o);
 
     inline uint32_t numMatchingArchetypes() const;
+    inline QueryRef * getSharedRef() const;
 
 private:
     Query(bool initialized);

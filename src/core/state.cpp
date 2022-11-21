@@ -180,7 +180,7 @@ void StateManager::makeQuery(const ComponentID *components,
 {
     std::lock_guard lock(query_state_.lock);
 
-    if (query_ref->numMatchingArchetypes != ~0u) {
+    if (query_ref->numMatchingArchetypes != 0xFFFF'FFFF) {
         return;
     }
 
@@ -258,6 +258,7 @@ void StateManager::makeQuery(const ComponentID *components,
 
     query_ref->offset = query_offset;
     query_ref->numMatchingArchetypes = matching_archetypes;
+    query_ref->numComponents = num_components;
 }
 
 void StateManager::registerComponent(uint32_t id,

@@ -180,9 +180,17 @@ struct UnifiedSystem : madrona::CustomSystem<UnifiedSystem> {
 };
 
 struct SimpleSim {
-    SimpleSim(const EnvInit &env_init);
+    SimpleSim(madrona::TaskGraph &graph, const EnvInit &env_init);
+
+    static void registerSystems(madrona::TaskGraph::Builder &builder);
 
     madrona::math::AABB worldBounds;
+
+    PreprocessSystem preprocess;
+    BVHSystem bvhUpdate;
+    BroadphaseSystem broad;
+    NarrowphaseSystem narrow;
+    SolverSystem solver;
 
     SphereObject *sphereObjects;
     ContactData *contacts;

@@ -8,13 +8,19 @@
 
 namespace madrona {
 
+struct SharedSystemState {
+    SystemBase **systems;
+    std::atomic_uint32_t numInvocations; 
+    uint32_t sysID;
+};
+
 class SystemBase {
 public:
     inline SystemBase(uint32_t sys_id);
-    std::atomic_uint32_t numInvocations; 
 
 private:
     uint32_t sys_id_;
+    SharedSystemState * shared_;
 friend class TaskGraph;
 };
 

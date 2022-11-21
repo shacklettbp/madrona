@@ -2,6 +2,9 @@
 
 #include <madrona/span.hpp>
 #include <madrona/system.hpp>
+#include <madrona/query.hpp>
+
+#include <madrona/state.hpp>
 
 #include "mw_gpu/const.hpp"
 
@@ -9,32 +12,130 @@
 
 namespace madrona {
 
-struct SystemID {
+namespace mwGPU {
+
+struct EntryData {
+    struct ParallelFor {
+        QueryRef *query;
+    };
+
+    union {
+        ParallelFor parallelFor;
+    };
+};
+
+template <typename EntryT>
+__attribute__((used, always_inline))
+inline void userEntry(WorldBase *world_base, int32_t invocation_idx)
+{
+    EntryT::run(world_base, invocation_idx);
+}
+
+template <typename EntryT>
+struct UserFuncIDBase {
+    static uint32_t id;
+};
+
+template <typename EntryT,
+          decltype(userEntry<EntryT>) = userEntry<EntryT>>
+struct UserFuncID : UserFuncIDBase<EntryT> {};
+
+
+template <typename Fn, typename ...ComponentTs>
+struct ParallelForEntry {
+    static inline void run(EntryData &data,
+                           Context &ctx,
+                           int32_t invocation_idx)
+    {
+        QueryRef *query_ref = data.parallelFor.query;
+        StateManager *state_mgr = mwGPU::getStateManager();
+
+        int32_t cumulative_num_rows = 0;
+        state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref,
+                [&](int32_t num_rows, auto ...raw_ptrs) {
+            int32_t tbl_offset = invocation_idx - cumulative_num_rows;
+            cumulative_num_rows += num_rows;
+            if (tbl_offset >= num_rows) {
+                return false;
+            }
+
+            Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...); // FIXME
+
+            return true;
+        });
+    }
+};
+
+}
+
+struct NodeID {
     uint32_t id;
 };
 
 class TaskGraph {
+private:
+    enum class NodeType {
+        ParallelFor,
+    };
+
+    struct NodeInfo {
+        NodeType type;
+        uint32_t funcID;
+        mwGPU::EntryData data;
+    };
+
+    struct NodeState {
+        NodeInfo info;
+        std::atomic_uint32_t curOffset;
+        std::atomic_uint32_t numRemaining;
+        std::atomic_uint32_t totalNumInvocations;
+    };
+
 public:
     class Builder {
     public:
-        Builder(uint32_t max_num_systems, uint32_t max_num_dependencies);
+        Builder(uint32_t max_num_nodes,
+                uint32_t max_num_dependencies);
         ~Builder();
 
-        SystemID registerSystem(SystemBase &sys,
-                                Span<const SystemID> dependencies);
+        template <typename ComponentT, typename Fn>
+        NodeID parallelForNode(Span<const NodeID> dependencies)
+        {
+            using Entry = typename mwGPU::ParallelForEntry<Fn, ComponentT>;
+            uint32_t func_id = mwGPU::UserFuncID<Entry>::id;
+
+            auto query = mwGPU::getStateManager()->query<ComponentT>();
+            QueryRef *query_ref = query.getSharedRef();
+            query_ref->numReferences.fetch_add(1, std::memory_order_relaxed);
+
+            registerNode(NodeInfo {
+                .type = NodeType::ParallelFor,
+                .funcID = func_id,
+                .data = {
+                    .parallelFor = {
+                        query_ref,
+                    },
+                },
+            }, dependencies);
+        }
 
         void build(TaskGraph *out);
+
     private:
-        struct StagedSystem {
-            SystemBase *sys;
+        NodeID registerNode(const NodeInfo &node_info,
+                            Span<const NodeID> dependencies);
+
+        struct StagedNode {
+            NodeInfo node;
             uint32_t dependencyOffset;
             uint32_t numDependencies;
         };
 
-        StagedSystem *systems_;
-        uint32_t num_systems_;
-        SystemID *all_dependencies_;
+        StagedNode *nodes_;
+        uint32_t num_nodes_;
+        NodeID *all_dependencies_;
         uint32_t num_dependencies_;
+        uint32_t num_worlds_;
     };
 
     enum class WorkerState {
@@ -49,26 +150,21 @@ public:
 
     void init();
 
-    WorkerState getWork(SystemBase **run_sys, uint32_t *run_func_id,
-        uint32_t *run_offset);
+    WorkerState getWork(mwGPU::EntryData **entry_data,
+                        uint32_t *run_func_id, uint32_t *run_offset);
 
     void finishWork();
 
     struct BlockState;
 private:
-    struct SystemInfo {
-        SystemBase *sys;
-        std::atomic_uint32_t curOffset;
-        std::atomic_uint32_t numRemaining;
-    };
-
-    TaskGraph(SystemInfo *systems, uint32_t num_systems);
+    TaskGraph(StateManager &state_mgr, NodeState *nodes, uint32_t num_nodes);
 
     inline void setBlockState();
+    inline uint32_t computeNumInvocations(NodeState &node);
 
-    std::atomic_uint32_t cur_sys_idx_;
-    SystemInfo *sorted_systems_;
-    uint32_t num_systems_;
+    NodeState *sorted_nodes_;
+    uint32_t num_nodes_;
+    std::atomic_uint32_t cur_node_idx_;
     cuda::barrier<cuda::thread_scope_device> init_barrier_;
 
 friend class Builder;

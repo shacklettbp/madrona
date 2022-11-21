@@ -93,6 +93,15 @@ SimpleSim::SimpleSim(const EnvInit &env_init)
     bvh.update(*this, bvhObjIDs, env_init.numObjs, nullptr, 0, nullptr, 0);
 }
 
+void SimpleSim::registerSystems(TaskGraph::Builder &builder)
+{
+    auto preprocess_id = builder.registerSystem<PreprocessSystem>({});
+    auto bvh_id = builder.registerSystem<BVHSystem>({ preprocess_id });
+    auto broad_id = builder.registerSystem<BroadphaseSystem>({ bvh_id });
+    auto narrow_id = builder.registerSystem<NarrowphaseSystem>({ broad_id });
+    builder.registerSystem<SolverSystem>({ narrow_id });
+}
+
 SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
     : preprocess(),
       bvhUpdate(),

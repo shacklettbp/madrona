@@ -60,6 +60,12 @@ uint32_t Query<ComponentTs...>::numMatchingArchetypes() const
 }
 
 template <typename... ComponentTs>
+QueryRef * Query<ComponentTs...>::getSharedRef() const
+{
+    return &ref_;
+}
+
+template <typename... ComponentTs>
 QueryRef Query<ComponentTs...>::ref_ = QueryRef {
     0,
     ~0u,

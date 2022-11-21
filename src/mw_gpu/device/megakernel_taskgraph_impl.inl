@@ -30,8 +30,9 @@ static inline __attribute__((always_inline)) void megakernelImpl()
         void *user_data = GPUImplConsts::get().taskGraphUserData;
 
         SystemBase *cur_sys;
+        WorldBase *world_data;
         uint32_t func_id, invocation_offset;
-        TaskGraph::WorkerState worker_state = taskgraph->getWork(&cur_sys, &func_id, &invocation_offset);
+        TaskGraph::WorkerState worker_state = taskgraph->getWork(&cur_sys, &world_data, &func_id, &invocation_offset);
 
         if (worker_state == TaskGraph::WorkerState::Exit) {
             break;
@@ -43,7 +44,7 @@ static inline __attribute__((always_inline)) void megakernelImpl()
         }
 
         if (worker_state == TaskGraph::WorkerState::Run) {
-            dispatch(func_id, cur_sys, user_data, invocation_offset);
+            dispatch(func_id, world_data, cur_sys, user_data, invocation_offset);
         }
 
         taskgraph->finishWork();

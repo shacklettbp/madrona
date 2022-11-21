@@ -6,21 +6,23 @@ namespace consts {
 static constexpr uint32_t numMegakernelThreads = 256;
 }
 
-TaskGraph::Builder::Builder(uint32_t max_num_systems, uint32_t max_num_dependencies)
-    : systems_((StagedSystem *)malloc(sizeof(StagedSystem) * max_num_systems)),
-      num_systems_(0),
-      all_dependencies_((SystemID *)malloc(sizeof(SystemID) * max_num_dependencies)),
+TaskGraph::Builder::Builder(uint32_t max_num_nodes,
+                            uint32_t max_num_dependencies)
+    : nodes_((StagedNode *)malloc(sizeof(StagedNode) * max_num_systems)),
+      num_nodes_(0),
+      all_dependencies_((NodeID *)malloc(sizeof(NodeID) * max_num_dependencies)),
       num_dependencies_(0)
 {}
 
 TaskGraph::Builder::~Builder()
 {
-    free(systems_);
+    free(nodes_);
     free(all_dependencies_);
 }
 
-SystemID TaskGraph::Builder::registerSystem(SystemBase &sys,
-                        Span<const SystemID> dependencies)
+SystemID TaskGraph::Builder::registerNode(
+    const NodeInfo &node_info,
+    Span<const SystemID> dependencies)
 {
     uint32_t offset = num_dependencies_;
     uint32_t num_deps = dependencies.size();
@@ -31,93 +33,94 @@ SystemID TaskGraph::Builder::registerSystem(SystemBase &sys,
         all_dependencies_[offset + i] = dependencies[i];
     }
 
-    systems_[num_systems_++] = StagedSystem {
-        &sys,
+    nodes_[num_nodes_++] = StagedNode {
+        node_info,
         offset,
         num_deps,
     };
 
-    return SystemID {
-        num_systems_ - 1,
+    return NodeID {
+        num_nodes_ - 1,
     };
 }
 
 void TaskGraph::Builder::build(TaskGraph *out)
 {
-    assert(systems_[0].numDependencies == 0);
-    SystemInfo *sorted_systems = 
-        (SystemInfo *)malloc(sizeof(SystemInfo) * num_systems_);
-    bool *queued = (bool *)malloc(num_systems_ * sizeof(bool));
-    new (&sorted_systems[0]) SystemInfo {
-        systems_[0].sys,
+    assert(nodes_[0].numDependencies == 0);
+    NodeState *sorted_nodes = 
+        (NodeState *)malloc(sizeof(NodeState) * num_nodes_);
+    bool *queued = (bool *)malloc(num_nodes_ * sizeof(bool));
+    new (&sorted_nodes[0]) NodeState {
+        nodes_[0].node,
         0,
         0,
     };
     queued[0] = true;
 
-    uint32_t num_remaining_systems = num_systems_ - 1;
-    uint32_t *remaining_systems =
-        (uint32_t *)malloc(num_remaining_systems * sizeof(uint32_t));
+    uint32_t num_remaining_nodes = num_nodes_ - 1;
+    uint32_t *remaining_nodes =
+        (uint32_t *)malloc(num_remaining_nodes * sizeof(uint32_t));
 
-    for (int64_t i = 1; i < (int64_t)num_systems_; i++) {
+    for (int64_t i = 1; i < (int64_t)num_nodes_; i++) {
         queued[i]  = false;
-        remaining_systems[i - 1] = i;
+        remaining_nodes[i - 1] = i;
     }
 
     uint32_t sorted_idx = 1;
 
-    while (num_remaining_systems > 0) {
-        uint32_t cur_sys_idx = remaining_systems[0];
-        StagedSystem &cur_sys = systems_[cur_sys_idx];
+    while (num_remaining_nodes > 0) {
+        uint32_t cur_node_idx = remaining_nodes[0];
+        StagedNode &cur_node = nodes_[cur_node_idx];
 
         bool dependencies_satisfied = true;
-        for (uint32_t dep_offset = 0; dep_offset < cur_sys.numDependencies;
+        for (uint32_t dep_offset = 0; dep_offset < cur_node.numDependencies;
              dep_offset++) {
-            uint32_t dep_system_idx =
-                all_dependencies_[cur_sys.dependencyOffset + dep_offset].id;
-            if (!queued[dep_system_idx]) {
+            uint32_t dep_nodetem_idx =
+                all_dependencies_[cur_node.dependencyOffset + dep_offset].id;
+            if (!queued[dep_nodetem_idx]) {
                 dependencies_satisfied = false;
                 break;
             }
         }
 
-        remaining_systems[0] =
-            remaining_systems[num_remaining_systems - 1];
+        remaining_nodes[0] =
+            remaining_nodes[num_remaining_nodes - 1];
         if (!dependencies_satisfied) {
-            remaining_systems[num_remaining_systems - 1] =
-                cur_sys_idx;
+            remaining_nodes[num_remaining_nodes - 1] =
+                cur_node_idx;
         } else {
-            queued[cur_sys_idx] = true;
-            new (&sorted_systems[sorted_idx++]) SystemInfo {
-                cur_sys.sys,
+            queued[cur_node_idx] = true;
+            new (&sorted_nodes[sorted_idx++]) NodeState {
+                cur_node.node,
+                0,
                 0,
                 0,
             };
-            num_remaining_systems--;
+            num_remaining_nodes--;
         }
     }
 
-    free(remaining_systems);
+    free(remaining_nodes);
     free(queued);
 
-    new (out) TaskGraph(sorted_systems, num_systems_);
+    new (out) TaskGraph(sorted_nodes, num_nodes_);
 }
 
-TaskGraph::TaskGraph(SystemInfo *systems, uint32_t num_systems)
-    : cur_sys_idx_(num_systems),
-      sorted_systems_(systems),
-      num_systems_(num_systems),
+TaskGraph::TaskGraph(NodeState *nodes, uint32_t num_nodes)
+    : sorted_nodes_(nodes),
+      num_nodes_(num_nodes),
+      cur_node_idx_(num_nodes),
       init_barrier_(82 * 5)
 {}
 
 TaskGraph::~TaskGraph()
 {
-    free(sorted_systems_);
+    free(sorted_nodes_);
 }
 
 struct TaskGraph::BlockState {
     WorkerState state;
-    uint32_t sysIdx;
+    uint32_t nodeIdx;
     uint32_t numInvocations;
     uint32_t funcID;
     uint32_t runOffset;
@@ -152,26 +155,26 @@ void TaskGraph::init()
 
 void TaskGraph::setBlockState()
 {
-    uint32_t sys_idx = cur_sys_idx_.load(std::memory_order_acquire);
-    if (sys_idx == num_systems_) {
+    uint32_t node_idx = cur_node_idx_.load(std::memory_order_acquire);
+    if (node_idx == num_nodes_) {
         sharedBlockState.state = WorkerState::Exit;
         return;
     }
 
-    SystemInfo &cur_sys = sorted_systems_[sys_idx];
+    NodeState &cur_node = sorted_nodes_[node_idx];
 
     uint32_t cur_offset = 
-        cur_sys.curOffset.load(std::memory_order_relaxed);
+        cur_node.curOffset.load(std::memory_order_relaxed);
 
     uint32_t total_invocations =
-        cur_sys.sys->numInvocations.load(std::memory_order_relaxed);
+        cur_node.totalNumInvocations.load(std::memory_order_relaxed);
 
     if (cur_offset >= total_invocations) {
         sharedBlockState.state = WorkerState::Loop;
         return;
     }
 
-    cur_offset = cur_sys.curOffset.fetch_add(consts::numMegakernelThreads,
+    cur_offset = cur_node.curOffset.fetch_add(consts::numMegakernelThreads,
         std::memory_order_relaxed);
 
     if (cur_offset >= total_invocations) {
@@ -180,13 +183,26 @@ void TaskGraph::setBlockState()
     }
 
     sharedBlockState.state = WorkerState::Run;
-    sharedBlockState.sysIdx = sys_idx;
+    sharedBlockState.nodeIdx = node_idx;
     sharedBlockState.numInvocations = total_invocations;
-    sharedBlockState.funcID = cur_sys.sys->sys_id_;
+    sharedBlockState.funcID = cur_node.info.funcID;
     sharedBlockState.runOffset = cur_offset;
 }
 
-TaskGraph::WorkerState TaskGraph::getWork(SystemBase **run_sys,
+uint32_t TaskGraph::computeNumInvocations(NodeState &node)
+{
+    switch (node.info.type) {
+        case NodeType::ParallelFor: {
+            StateManager *state_mgr = mwGPU::getStateManager();
+            QueryRef *query_ref = node.info.data.parallelFor.query;
+            return state_mgr->numMatchingEntities(query_ref);
+        }
+    };
+
+    return 0;
+}
+
+TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,
                                           uint32_t *run_func_id,
                                           uint32_t *run_offset)
 {
@@ -212,7 +228,7 @@ TaskGraph::WorkerState TaskGraph::getWork(SystemBase **run_sys,
         return WorkerState::PartialRun;
     }
 
-    *run_sys = sorted_systems_[sharedBlockState.sysIdx].sys;
+    *entry_data = &sorted_nodes_[sharedBlockState.nodeIdx].info.data;
     *run_func_id = sharedBlockState.funcID;
     *run_offset = thread_offset;
 
@@ -230,33 +246,34 @@ void TaskGraph::finishWork()
         sharedBlockState.numInvocations - sharedBlockState.runOffset,
         consts::numMegakernelThreads);
 
-    uint32_t sys_idx = sharedBlockState.sysIdx;
-    SystemInfo &cur_sys = sorted_systems_[sys_idx];
+    uint32_t node_idx = sharedBlockState.nodeIdx;
+    NodeState &cur_node = sorted_nodes_[node_idx];
 
-    uint32_t prev_remaining = cur_sys.numRemaining.fetch_sub(num_finished,
+    uint32_t prev_remaining = cur_node.numRemaining.fetch_sub(num_finished,
         std::memory_order_acq_rel);
 
     if (prev_remaining == num_finished) {
-        uint32_t next_sys_idx = sys_idx + 1;
+        uint32_t next_node_idx = node_idx + 1;
 
         while (true) {
-            if (next_sys_idx < num_systems_) {
+            if (next_node_idx < num_nodes_) {
                 uint32_t new_num_invocations =
-                    sorted_systems_[next_sys_idx].sys->numInvocations.load(
-                        std::memory_order_relaxed);
+                    computeNumInvocations(sorted_nodes_[next_node_idx]);
 
                 if (new_num_invocations == 0) {
-                    next_sys_idx++;
+                    next_node_idx++;
                     continue;
                 }
 
-                SystemInfo &next_sys = sorted_systems_[next_sys_idx];
+                NodeState &next_node = sorted_nodes_[next_node_idx];
                 next_sys.curOffset.store(0, std::memory_order_relaxed);
                 next_sys.numRemaining.store(new_num_invocations,
                                             std::memory_order_relaxed);
+                next_sys.totalNumInvocations.store(new_num_invocations,
+                    std::memory_order_relaxed);
             }
 
-            cur_sys_idx_.store(next_sys_idx, std::memory_order_release);
+            cur_node_idx_.store(next_node_idx, std::memory_order_release);
             break;
         }
     }

@@ -18,8 +18,6 @@ class Context {
 public:
     inline Context(WorldBase *world_data, WorkerInit &&init);
 
-    inline StateManager & state();
-
     template <typename Fn, typename... DepTs>
     inline JobID submit(Fn &&fn, bool is_child = true,
                         DepTs && ...dependencies);
@@ -68,6 +66,9 @@ private:
         }
     };
 
+#if 0
+    inline StateManager & state();
+
     WaveInfo computeWaveInfo();
 
     JobID waveSetupNewJob(uint32_t func_id, bool link_parent,
@@ -83,6 +84,7 @@ private:
 
     uint32_t world_id_;
     uint32_t lane_id_;
+#endif
 };
 
 }
