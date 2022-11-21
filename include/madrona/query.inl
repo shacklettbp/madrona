@@ -68,8 +68,9 @@ QueryRef * Query<ComponentTs...>::getSharedRef() const
 template <typename... ComponentTs>
 QueryRef Query<ComponentTs...>::ref_ = QueryRef {
     0,
-    ~0u,
-    ~0u,
+    0xFFFF'FFFF,
+    0xFFFF'FFFF,
+    0,
 };
 
 template <typename ComponentT>
