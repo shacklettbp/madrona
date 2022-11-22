@@ -14,13 +14,13 @@ using namespace madrona::math;
 
 namespace SimpleTaskgraph {
 
-static void sphereSystem(Engine &ctx, Translation &t)
+inline void sphereSystem(Engine &ctx, Translation &t)
 {
     (void)ctx;
     printf("(%f %f %f)\n", t.x, t.y, t.z);
 }
 
-static void solverSystem(Engine &ctx, SolverData &)
+inline void solverSystem(Engine &ctx, SolverData &)
 {
     printf("%d\n", ctx.worldID().idx);
 }
@@ -48,6 +48,7 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
     worldBounds = env_init.worldBounds;
 
     Entity e = ctx.makeEntityNow<Sphere>();
+    ctx.makeEntityNow<SolverSystem>();
 
     Translation &t = ctx.getComponent<Sphere, Translation>(e);
     t.x = env_init.objsInit[0].initPosition.x;

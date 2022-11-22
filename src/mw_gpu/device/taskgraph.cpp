@@ -206,7 +206,7 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
 
 TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,
                                           uint32_t *run_func_id,
-                                          uint32_t *run_offset)
+                                          int32_t *run_offset)
 {
     int thread_idx = threadIdx.x;
 
@@ -225,7 +225,7 @@ TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,
     uint32_t num_invocations = sharedBlockState.numInvocations;
     uint32_t base_offset = sharedBlockState.runOffset;
 
-    uint32_t thread_offset = base_offset + thread_idx;
+    int32_t thread_offset = base_offset + thread_idx;
     if (thread_offset >= num_invocations) {
         return WorkerState::PartialRun;
     }

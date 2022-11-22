@@ -116,7 +116,7 @@ public:
         ~Builder();
 
         template <typename ContextT, typename ComponentT, auto Fn>
-        NodeID parallelForNode(Span<const NodeID> dependencies)
+        inline NodeID parallelForNode(Span<const NodeID> dependencies)
         {
             using WorldDataT = typename ContextT::WorldDataT;
 
@@ -172,7 +172,7 @@ public:
 
     WorkerState getWork(mwGPU::EntryData **entry_data,
                         uint32_t *run_func_id,
-                        uint32_t *run_offset);
+                        int32_t *run_offset);
 
     void finishWork();
 

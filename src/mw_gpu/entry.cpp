@@ -261,7 +261,7 @@ namespace mwGPU {
 
 static __attribute__((always_inline)) inline void dispatch(
         uint32_t func_id,
-        mwGPU::EntryData *entry_data,
+        mwGPU::EntryData &entry_data,
         uint32_t invocation_offset)
 {
     switch (func_id) {
@@ -285,17 +285,18 @@ static __attribute__((always_inline)) inline void dispatch(
     } else if (exec_mode == CompileConfig::Executor::TaskGraph) {
         megakernel_prefix = megakernel_taskgraph_prefix;
         megakernel_body = megakernel_taskgraph_body;
-        entry_prefix = ".weak .func _ZN7madrona5mwGPU11systemEntry";
-        entry_postfix = "EvPNS_10SystemBaseEPvj";
-        entry_params = "(madrona::SystemBase *, void *, uint32_t);\n";
-        entry_args = "(sys, user_data, invocation_offset);\n";
-        id_prefix = "_ZN7madrona5mwGPU12SystemIDBase";
+        entry_prefix = ".weak .func _ZN7madrona5mwGPU9userEntry";
+        entry_postfix = "EvRNS0_9EntryDataEi";
+        entry_params = "(madrona::mwGPU::EntryData &, int32_t);\n";
+        entry_args = "(entry_data, invocation_offset);\n";
+        id_prefix = "_ZN7madrona5mwGPU14UserFuncIDBase";
     }
 
     uint32_t cur_func_id = 0;
     auto megakernelAddPTXEntries = [&megakernel_prefix,
         &megakernel_body, &cur_func_id, entry_prefix, entry_postfix,
         entry_params, entry_args, id_prefix](std::string_view ptx) {
+
         using namespace std::literals;
         using SizeT = std::string_view::size_type;
 
