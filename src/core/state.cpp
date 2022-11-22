@@ -188,7 +188,7 @@ void StateManager::makeQuery(const ComponentID *components,
     // recording query_ref and finding unused ranges (numReferences == 0)
 
     // Enough tmp space for 1 archetype with the maximum number of components
-    StackArray<uint32_t, 1 + max_archetype_components_> tmp_query_indices;
+    InlineArray<uint32_t, 1 + max_archetype_components_> tmp_query_indices;
 
     auto saveTmpIndices = [&](uint32_t cur_offset) {
         assert(query_state_.queryData.size() + tmp_query_indices.size() <

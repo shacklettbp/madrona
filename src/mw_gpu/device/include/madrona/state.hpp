@@ -12,6 +12,7 @@
 
 #include <madrona/ecs.hpp>
 #include <madrona/hashmap.hpp>
+#include <madrona/inline_array.hpp>
 #include <madrona/sync.hpp>
 #include <madrona/query.hpp>
 #include <madrona/optional.hpp>
@@ -113,11 +114,11 @@ private:
     uint32_t archetype_component_offset_ = 0;
     uint32_t query_data_offset_ = 0;
     utils::SpinLock query_data_lock_ {};
-    std::array<Optional<TypeInfo>, max_components_> components_;
+    FixedInlineArray<Optional<TypeInfo>, max_components_> components_ {};
     std::array<uint32_t, max_archetype_components_ * max_archetypes_>
-        archetype_components_;
-    std::array<Optional<ArchetypeStore>, max_archetypes_> archetypes_;
-    std::array<uint32_t, max_query_slots_> query_data_;
+        archetype_components_ {};
+    FixedInlineArray<Optional<ArchetypeStore>, max_archetypes_> archetypes_ {};
+    std::array<uint32_t, max_query_slots_> query_data_ {};
 };
 
 }

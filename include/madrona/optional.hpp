@@ -61,11 +61,11 @@ public:
     ~Optional() = default;
 
     template <typename... Args>
-    constexpr T & emplace(Args && ...args)
+    T & emplace(Args && ...args)
     {
         storage_.destruct();
 
-        std::construct_at(&storage_.value, std::forward<Args>(args)...);
+        new (&storage_.value) T(std::forward<Args>(args)...);
         storage_.initialized = true;
 
         return storage_.value;

@@ -205,8 +205,11 @@ class TaskGraphEntryBase {
 public:
     static void init(const InitT *inits, int32_t num_worlds)
     {
+        StateManager *state_mgr = mwGPU::getStateManager();
+        new (state_mgr) StateManager(0);
+
         TaskGraph::Builder builder(1024, 1024);
-        WorldDataT::setup(*mwGPU::getStateManager(), builder);
+        WorldDataT::setup(*state_mgr, builder);
         builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
 
         for (int32_t world_idx = 0; world_idx < num_worlds; world_idx++) {

@@ -9,7 +9,7 @@
 
 #include <madrona/memory.hpp>
 #include <madrona/heap_array.hpp>
-#include <madrona/stack_array.hpp>
+#include <madrona/inline_array.hpp>
 #include <madrona/virtual.hpp>
 #include <madrona/ecs.hpp>
 
@@ -44,7 +44,7 @@ public:
 
 private:
     uint32_t num_rows_;
-    StackArray<VirtualStore, maxColumns> columns_;
+    InlineArray<VirtualStore, maxColumns> columns_;
 };
 
 }

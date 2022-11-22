@@ -279,7 +279,7 @@ void BVH::update(Context &ctx,
     for (int i = 0; i < (int)num_moved_entities; i++) {
         int32_t e_id = moved_entities[i].id;
         const LeafAABB &leaf_aabb = ctx.getUnsafe<LeafAABB>(e_id);
-        int32_t leaf_idx = ctx.getUnsafe<LeafID>(e_id).idx;
+        int32_t leaf_idx = ctx.getUnsafe<LeafID>(e_id).id;
 
         int32_t node_idx = int32_t(leaf_idx >> 2_u32);
         int32_t sub_idx = int32_t(leaf_idx & 3);

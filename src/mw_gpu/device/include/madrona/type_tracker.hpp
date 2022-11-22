@@ -19,7 +19,7 @@ public:
     {
         register_lock_.lock();
 
-        if (TypeID<T>::id == 0xFFFF'FFFF) {
+        if (TypeID<T>::id == unassignedTypeID) {
             uint32_t next_id = (*next_id_ptr)++;
             TypeID<T>::id = next_id;
         }
@@ -29,10 +29,11 @@ public:
         return TypeID<T>::id;
     }
 
+    static constexpr uint32_t unassignedTypeID = 0xFFFF'FFFF;
 private:
     template <typename T>
     struct TypeID {
-        static inline uint32_t id = 0xFFFF'FFFF;
+        static inline uint32_t id = unassignedTypeID;
     };
 
     static inline utils::SpinLock register_lock_ {};

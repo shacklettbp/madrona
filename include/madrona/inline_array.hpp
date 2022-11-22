@@ -9,18 +9,19 @@
 
 #include <cstddef>
 #include <type_traits>
+#include <utility>
 
 namespace madrona {
 
 template <typename T, size_t N>
-class StackArray {
+class InlineArray {
 public:
-    StackArray()
+    InlineArray()
         : b_(),
           size_(0)
     {}
 
-    ~StackArray()
+    ~InlineArray()
     {
         if constexpr (!std::is_trivially_destructible_v<T>) {
             for (size_t i = 0; i < size_; i++) {
@@ -76,6 +77,51 @@ public:
 
         size_ = 0;
     }
+
+private:
+    union {
+        bool b_;
+        T arr_[N];
+    };
+    size_t size_;
+};
+
+template <typename T, size_t N>
+class FixedInlineArray {
+public:
+    FixedInlineArray()
+        : b_(),
+          size_(0)
+    {}
+
+    ~FixedInlineArray()
+    {
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            for (size_t i = 0; i < N; i++) {
+                arr_[i].~T();
+            }
+        }
+    }
+
+    template <typename ...Args>
+    T & emplace(size_t i, Args && ...args)
+    {
+        return *new (&arr_[i]) T(std::forward<Args>(args)...);
+    }
+
+    T & operator[](size_t idx) { return arr_[idx]; }
+    const T & operator[](size_t idx) const { return arr_[idx]; }
+
+    T * begin() { return data(); }
+    T * end() { return data() + N; }
+
+    const T * begin() const { return data(); }
+    const T * end() const { return data() + N; }
+
+    T * data() { return arr_; }
+    const T * data() const { return arr_; }
+
+    constexpr size_t size() const { return N; }
 
 private:
     union {

@@ -9,8 +9,16 @@
 
 namespace madrona {
 
-StateManager::StateManager(uint32_t max_components)
+StateManager::StateManager(uint32_t)
 {
+    for (int32_t i = 0; i < (int32_t)max_components_; i++) {
+        components_.emplace(i, Optional<TypeInfo>::none());
+    }
+
+    for (int32_t i = 0; i < (int32_t)max_archetypes_; i++) {
+        archetypes_.emplace(i, Optional<ArchetypeStore>::none());
+    }
+
     registerComponent<Entity>();
     registerComponent<WorldID>();
 }
@@ -18,7 +26,7 @@ StateManager::StateManager(uint32_t max_components)
 void StateManager::registerComponent(uint32_t id, uint32_t alignment,
                                      uint32_t num_bytes)
 {
-    component_infos_[id].emplace(TypeInfo {
+    components_[id].emplace(TypeInfo {
         .alignment = alignment,
         .numBytes = num_bytes,
     });
@@ -30,7 +38,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
                                              TypeInfo *type_infos,
                                              IntegerMapPair *lookup_input)
     : componentOffset(offset),
-      numComponents(numUserComponents),
+      numUserComponents(num_user_components),
       tbl {},
       columnLookup(lookup_input, num_user_components)
 {
@@ -54,17 +62,18 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
     TypeInfo *type_ptr = type_infos.data();
 
     // Add entity column as first column of every table
-    *type_ptr = *component_infos_[0];
+    *type_ptr = *components_[0];
     type_ptr++;
 
-    *type_ptr = *component_infos_[componentID<WorldID>().id];
+    // Add world ID column as second column of every table
+    *type_ptr = *components_[1];
     type_ptr++;
 
     for (int i = 0; i < (int)num_user_components; i++) {
         ComponentID component_id = components[i];
         archetype_components_[offset + i] = component_id.id;
 
-        type_ptr[i] = *component_infos_[component_id.id];
+        type_ptr[i] = *components_[component_id.id];
 
         lookup_input[i] = IntegerMapPair {
             .key = component_id.id,
@@ -72,10 +81,10 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
         };
     }
 
-    archetype_stores_[id].emplace(offset, num_user_components,
-                                  num_total_components,
-                                  type_infos.data(),
-                                  lookup_input.data());
+    archetypes_[id].emplace(offset, num_user_components,
+                            num_total_components,
+                            type_infos.data(),
+                            lookup_input.data());
 }
 
 void StateManager::makeQuery(const uint32_t *components,
@@ -122,9 +131,11 @@ void StateManager::makeQuery(const uint32_t *components,
             assert(component != TypeTracker::unassignedTypeID);
             if (component == TypeTracker::typeID<Entity>()) {
                 query_data_[query_data_offset_++] = 0;
+            } else if (component == TypeTracker::typeID<WorldID>()) {
+                query_data_[query_data_offset_++] = 1;
             } else {
                 query_data_[query_data_offset_++] = 
-                    archetype.columnLookup[component]);
+                    archetype.columnLookup[component];
             }
         }
     }
