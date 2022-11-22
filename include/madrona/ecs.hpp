@@ -39,6 +39,10 @@ template <typename... ComponentTs> struct Archetype {
     using Base = Archetype<ComponentTs...>;
 };
 
+struct WorldID {
+    int32_t idx;
+};
+
 // Base class that per-world user data must inherit from
 // In the future may include any per-world data that the engine
 // itself needs. For now, just provides a common base that Context

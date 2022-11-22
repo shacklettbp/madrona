@@ -9,6 +9,7 @@
 
 #include <madrona/math.hpp>
 #include <madrona/taskgraph.hpp>
+#include <madrona/custom_context.hpp>
 
 namespace SimpleTaskgraph {
 
@@ -155,6 +156,32 @@ struct SphereObject {
     uint32_t leafID;
 };
 
+struct Sphere : public madrona::Archetype<Translation, Rotation> {};
+
+struct SolverData {};
+
+struct SolverSystem : public madrona::Archetype<SolverData> {};
+
+class Engine;
+
+struct SimpleSim : public madrona::WorldBase {
+    static void setup(madrona::StateManager &state_mgr,
+                      madrona::TaskGraph::Builder &builder);
+
+    SimpleSim(Engine &ctx, const EnvInit &env_init);
+
+    madrona::math::AABB worldBounds;
+
+    std::atomic_uint32_t numObjects;
+};
+
+class Engine : public ::madrona::CustomContext<Engine, SimpleSim> {
+    using CustomContext::CustomContext;
+};
+
+using SimEntry = madrona::TaskGraphEntry<Engine, SimpleSim, EnvInit>;
+
+#if 0
 struct PreprocessSystem : madrona::CustomSystem<PreprocessSystem> {
     inline void run(void *data, uint32_t invocation_offset);
 };
@@ -227,7 +254,7 @@ struct SimManager {
     CandidatePair *candidatePairs;
 };
 
-using SimEntry = madrona::TaskGraphEntry<SimManager, EnvInit>;
+#endif
 
 class Engine;
 

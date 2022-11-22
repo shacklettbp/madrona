@@ -39,12 +39,6 @@ private:
 friend class StateManager;
 };
 
-#ifdef MADRONA_MW_MODE
-struct WorldID {
-    uint32_t id;
-};
-#endif
-
 class Transaction {
 private:
     enum Op : uint32_t {

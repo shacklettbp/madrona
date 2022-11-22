@@ -62,7 +62,7 @@ private:
 friend class Builder;
 };
 
-template <typename MgrT, typename InitT>
+template <typename Engine, typename WorldT, typename InitT>
 class TaskGraphEntry {
 public:
     inline TaskGraphEntry(const InitT *inits, uint32_t num_worlds)
@@ -81,7 +81,7 @@ public:
     }
 
 private:
-    MgrT mgr_;
+    WorldT mgr_;
     TaskGraph taskgraph_;
 };
 

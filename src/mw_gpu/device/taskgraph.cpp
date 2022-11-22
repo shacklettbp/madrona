@@ -1,5 +1,6 @@
 #include <madrona/taskgraph.hpp>
 #include <madrona/crash.hpp>
+#include <madrona/memory.hpp>
 
 namespace madrona {
 namespace consts {
@@ -8,7 +9,7 @@ static constexpr uint32_t numMegakernelThreads = 256;
 
 TaskGraph::Builder::Builder(uint32_t max_num_nodes,
                             uint32_t max_num_dependencies)
-    : nodes_((StagedNode *)malloc(sizeof(StagedNode) * max_num_systems)),
+    : nodes_((StagedNode *)malloc(sizeof(StagedNode) * max_num_nodes)),
       num_nodes_(0),
       all_dependencies_((NodeID *)malloc(sizeof(NodeID) * max_num_dependencies)),
       num_dependencies_(0)
@@ -20,9 +21,9 @@ TaskGraph::Builder::~Builder()
     free(all_dependencies_);
 }
 
-SystemID TaskGraph::Builder::registerNode(
+NodeID TaskGraph::Builder::registerNode(
     const NodeInfo &node_info,
-    Span<const SystemID> dependencies)
+    Span<const NodeID> dependencies)
 {
     uint32_t offset = num_dependencies_;
     uint32_t num_deps = dependencies.size();
@@ -138,16 +139,17 @@ void TaskGraph::init()
     int block_idx = blockIdx.x;
 
     if (block_idx == 0) {
-        SystemInfo &first_sys = sorted_systems_[0];
+        NodeState &first_node = sorted_nodes_[0];
 
-        uint32_t num_invocations =
-            first_sys.sys->numInvocations.load(std::memory_order_relaxed);
-
-        first_sys.numRemaining.store(num_invocations,
+        uint32_t new_num_invocations = computeNumInvocations(first_node);
+        assert(new_num_invocations != 0);
+        first_node.curOffset.store(0, std::memory_order_relaxed);
+        first_node.numRemaining.store(new_num_invocations,
+                                    std::memory_order_relaxed);
+        first_node.totalNumInvocations.store(new_num_invocations,
             std::memory_order_relaxed);
 
-        first_sys.curOffset.store(0, std::memory_order_relaxed);
-        cur_sys_idx_.store(0, std::memory_order_release);
+        cur_node_idx_.store(0, std::memory_order_release);
     } 
 
     init_barrier_.arrive_and_wait();
@@ -266,10 +268,10 @@ void TaskGraph::finishWork()
                 }
 
                 NodeState &next_node = sorted_nodes_[next_node_idx];
-                next_sys.curOffset.store(0, std::memory_order_relaxed);
-                next_sys.numRemaining.store(new_num_invocations,
+                next_node.curOffset.store(0, std::memory_order_relaxed);
+                next_node.numRemaining.store(new_num_invocations,
                                             std::memory_order_relaxed);
-                next_sys.totalNumInvocations.store(new_num_invocations,
+                next_node.totalNumInvocations.store(new_num_invocations,
                     std::memory_order_relaxed);
             }
 
@@ -293,6 +295,11 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
 
     uint64_t total_bytes = sizeof(TaskGraph);
 
+    uint64_t state_mgr_offset = utils::roundUp(total_bytes,
+        (uint64_t)alignof(StateManager));
+
+    total_bytes = state_mgr_offset + sizeof(StateManager);
+
     uint64_t chunk_allocator_offset = utils::roundUp(total_bytes,
         (uint64_t)alignof(ChunkAllocator));
 
@@ -301,16 +308,18 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     uint64_t world_data_offset =
         utils::roundUp(total_bytes, (uint64_t)world_data_alignment);
 
-    total_bytes =
-        world_data_offset + (uint64_t)num_world_data_bytes;
+    uint64_t total_world_bytes =
+        (uint64_t)num_world_data_bytes * (uint64_t)num_worlds;
+
+    total_bytes = world_data_offset + total_world_bytes;
 
     *out_constants = GPUImplConsts {
         .jobSystemAddr = (void *)0ul,
-        .stateManagerAddr = (void *)0ul,
+        .stateManagerAddr = (void *)state_mgr_offset,
         .chunkAllocatorAddr = (void *)chunk_allocator_offset,
         .chunkBaseAddr = (void *)0ul,
-        .worldDataAddr = (void *)0ul,
-        .numWorldDataBytes = 0ul,
+        .worldDataAddr = (void *)world_data_offset,
+        .numWorldDataBytes = num_world_data_bytes,
         .numWorlds = num_worlds,
         .jobGridsOffset = (uint32_t)0,
         .jobListOffset = (uint32_t)0,
@@ -318,7 +327,6 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         .sharedJobTrackerOffset = (uint32_t)0,
         .userJobTrackerOffset = (uint32_t)0,
         .taskGraph = (void *)0ul,
-        .taskGraphUserData = (void *)world_data_offset,
     };
 
     *job_system_buffer_size = total_bytes;

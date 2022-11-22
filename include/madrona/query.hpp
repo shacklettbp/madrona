@@ -10,6 +10,8 @@
 #include <madrona/table.hpp>
 #include <madrona/optional.hpp>
 
+#include <atomic>
+
 namespace madrona {
 
 struct QueryRef {

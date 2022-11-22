@@ -78,7 +78,7 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
                                   lookup_input.data());
 }
 
-void StateManager::makeQuery(const ComponentID *components,
+void StateManager::makeQuery(const uint32_t *components,
                              uint32_t num_components,
                              QueryRef *query_ref)
 {
@@ -98,12 +98,12 @@ void StateManager::makeQuery(const ComponentID *components,
         bool has_components = true;
         for (int component_idx = 0; component_idx < (int)num_components; 
              component_idx++) {
-            ComponentID component = components[component_idx];
-            if (component.id == componentID<Entity>().id) {
+            uint32_t component = components[component_idx];
+            if (component == TypeTracker::typeID<Entity>()) {
                 continue;
             }
 
-            if (!archetype.columnLookup.exists(component.id)) {
+            if (!archetype.columnLookup.exists(component)) {
                 has_components = false;
                 break;
             }
@@ -118,13 +118,13 @@ void StateManager::makeQuery(const ComponentID *components,
 
         for (int32_t component_idx = 0;
              component_idx < (int32_t)num_components; component_idx++) {
-            ComponentID component = components[component_idx];
-            assert(component.id != TypeTracker::unassignedTypeID);
-            if (component.id == componentID<Entity>().id) {
+            uint32_t component = components[component_idx];
+            assert(component != TypeTracker::unassignedTypeID);
+            if (component == TypeTracker::typeID<Entity>()) {
                 query_data_[query_data_offset_++] = 0;
             } else {
                 query_data_[query_data_offset_++] = 
-                    archetype.columnLookup[component.id]);
+                    archetype.columnLookup[component]);
             }
         }
     }

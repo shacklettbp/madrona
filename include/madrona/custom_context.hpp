@@ -36,6 +36,7 @@ private:
     using WorldDataT = DataT;
 
 friend class JobManager;
+friend class TaskGraph;
 };
 
 }

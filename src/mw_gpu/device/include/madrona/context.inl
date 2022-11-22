@@ -11,6 +11,28 @@
 #include "mw_gpu/cu_utils.hpp"
 
 namespace madrona {
+
+Context::Context(WorldBase *world_data, WorkerInit &&init)
+    : data_(world_data),
+      world_id_(init.worldID)
+{}
+
+template <typename ArchetypeT>
+Entity Context::makeEntityNow()
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    return state_mgr->makeEntityNow<ArchetypeT>(world_id_);
+}
+
+template <typename ArchetypeT, typename ComponentT>
+ComponentT & Context::getComponent(Entity e)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    ComponentT *col = state_mgr->getArchetypeColumn<ArchetypeT, ComponentT>();
+    return col[e.id];
+}
+
+#if 0
 namespace mwGPU {
 
 // This function is executed at the thread-block granularity.
@@ -158,5 +180,6 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
 
     return queue_job_id;
 }
+#endif
 
 }

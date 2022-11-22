@@ -11,8 +11,7 @@ namespace mwGPU {
 #endif
 static inline __attribute__((always_inline)) void dispatch(
         uint32_t func_id,
-        SystemBase *sys,
-        void *user_data,
+        mwGPU::EntryData *entry_data,
         uint32_t invocation_offset);
 #ifdef MADRONA_CLANG
 #pragma clang diagnostic pop
@@ -27,12 +26,11 @@ static inline __attribute__((always_inline)) void megakernelImpl()
 
     while (true) {
         TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
-        void *user_data = GPUImplConsts::get().taskGraphUserData;
 
-        SystemBase *cur_sys;
-        WorldBase *world_data;
+        mwGPU::EntryData *entry_data;
         uint32_t func_id, invocation_offset;
-        TaskGraph::WorkerState worker_state = taskgraph->getWork(&cur_sys, &world_data, &func_id, &invocation_offset);
+        TaskGraph::WorkerState worker_state = taskgraph->getWork(
+            &entry_data, &func_id, &invocation_offset);
 
         if (worker_state == TaskGraph::WorkerState::Exit) {
             break;
@@ -44,7 +42,7 @@ static inline __attribute__((always_inline)) void megakernelImpl()
         }
 
         if (worker_state == TaskGraph::WorkerState::Run) {
-            dispatch(func_id, world_data, cur_sys, user_data, invocation_offset);
+            dispatch(func_id, entry_data, invocation_offset);
         }
 
         taskgraph->finishWork();

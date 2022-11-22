@@ -1,16 +1,18 @@
 #pragma once
 
 #include <madrona/span.hpp>
-#include <madrona/system.hpp>
 #include <madrona/query.hpp>
 
 #include <madrona/state.hpp>
 
 #include "mw_gpu/const.hpp"
+#include "mw_gpu/worker_init.hpp"
 
 #include <cuda/barrier>
 
 namespace madrona {
+
+class TaskGraph;
 
 namespace mwGPU {
 
@@ -26,9 +28,9 @@ struct EntryData {
 
 template <typename EntryT>
 __attribute__((used, always_inline))
-inline void userEntry(WorldBase *world_base, int32_t invocation_idx)
+inline void userEntry(EntryData &entry_data, int32_t invocation_idx)
 {
-    EntryT::run(world_base, invocation_idx);
+    EntryT::run(entry_data, invocation_idx);
 }
 
 template <typename EntryT>
@@ -40,11 +42,21 @@ template <typename EntryT,
           decltype(userEntry<EntryT>) = userEntry<EntryT>>
 struct UserFuncID : UserFuncIDBase<EntryT> {};
 
+template <typename ContextT, typename WorldDataT>
+struct EntryBase {
+    static inline ContextT makeContext(WorldID world_id)
+    {
+        auto world = TaskGraph::getWorld(world_id.idx);
+        return ContextT((WorldDataT *)world, WorkerInit {
+            world_id,
+        });
+    }
+};
 
-template <typename Fn, typename ...ComponentTs>
-struct ParallelForEntry {
+template <typename ContextT, typename WorldDataT,
+          auto Fn, typename ...ComponentTs>
+struct ParallelForEntry : public EntryBase<ContextT, WorldDataT> {
     static inline void run(EntryData &data,
-                           Context &ctx,
                            int32_t invocation_idx)
     {
         QueryRef *query_ref = data.parallelFor.query;
@@ -52,12 +64,17 @@ struct ParallelForEntry {
 
         int32_t cumulative_num_rows = 0;
         state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref,
-                [&](int32_t num_rows, auto ...raw_ptrs) {
+                [&](int32_t num_rows, WorldID *world_column,
+                    auto ...raw_ptrs) {
             int32_t tbl_offset = invocation_idx - cumulative_num_rows;
             cumulative_num_rows += num_rows;
             if (tbl_offset >= num_rows) {
                 return false;
             }
+
+            WorldID world_id = world_column[tbl_offset];
+
+            ContextT ctx = ParallelForEntry::makeContext(world_id);
 
             Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...); // FIXME
 
@@ -98,10 +115,13 @@ public:
                 uint32_t max_num_dependencies);
         ~Builder();
 
-        template <typename ComponentT, typename Fn>
+        template <typename ContextT, typename ComponentT, auto Fn>
         NodeID parallelForNode(Span<const NodeID> dependencies)
         {
-            using Entry = typename mwGPU::ParallelForEntry<Fn, ComponentT>;
+            using WorldDataT = typename ContextT::WorldDataT;
+
+            using Entry = typename mwGPU::ParallelForEntry<
+                ContextT, WorldDataT, Fn, ComponentT>;
             uint32_t func_id = mwGPU::UserFuncID<Entry>::id;
 
             auto query = mwGPU::getStateManager()->query<ComponentT>();
@@ -151,13 +171,23 @@ public:
     void init();
 
     WorkerState getWork(mwGPU::EntryData **entry_data,
-                        uint32_t *run_func_id, uint32_t *run_offset);
+                        uint32_t *run_func_id,
+                        uint32_t *run_offset);
 
     void finishWork();
 
+    static inline WorldBase * getWorld(int32_t world_idx)
+    {
+        const auto &consts = mwGPU::GPUImplConsts::get();
+        auto world_ptr = (char *)consts.worldDataAddr +
+            world_idx * (int32_t)consts.numWorldDataBytes;
+
+        return (WorldBase *)world_ptr;
+    }
+
     struct BlockState;
 private:
-    TaskGraph(StateManager &state_mgr, NodeState *nodes, uint32_t num_nodes);
+    TaskGraph(NodeState *nodes, uint32_t num_nodes);
 
     inline void setBlockState();
     inline uint32_t computeNumInvocations(NodeState &node);
@@ -170,22 +200,33 @@ private:
 friend class Builder;
 };
 
-template <typename MgrT, typename InitT>
+template <typename ContextT, typename WorldDataT, typename InitT>
 class TaskGraphEntryBase {
 public:
-    static void init(const InitT *inits, uint32_t num_worlds)
+    static void init(const InitT *inits, int32_t num_worlds)
     {
-        MgrT *mgr = (MgrT *)mwGPU::GPUImplConsts::get().taskGraphUserData;
-        new (mgr) MgrT(inits, num_worlds);
         TaskGraph::Builder builder(1024, 1024);
-        mgr->taskgraphSetup(builder);
+        WorldDataT::setup(*mwGPU::getStateManager(), builder);
         builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
+
+        for (int32_t world_idx = 0; world_idx < num_worlds; world_idx++) {
+            const InitT &init = inits[world_idx];
+            WorldBase *world = TaskGraph::getWorld(world_idx);
+
+            ContextT ctx =
+                mwGPU::EntryBase<ContextT, WorldDataT>::makeContext(WorldID {
+                    world_idx,
+                });
+
+            new (world) WorldDataT(ctx, init);
+        }
     }
 };
 
-template <typename MgrT, typename InitT,
-          decltype(TaskGraphEntryBase<MgrT, InitT>::init) =
-            TaskGraphEntryBase<MgrT, InitT>::init>
-class TaskGraphEntry : public TaskGraphEntryBase<MgrT, InitT> {};
+template <typename ContextT, typename WorldDataT, typename InitT,
+          decltype(TaskGraphEntryBase<ContextT, WorldDataT, InitT>::init) =
+            TaskGraphEntryBase<ContextT, WorldDataT, InitT>::init>
+class TaskGraphEntry :
+    public TaskGraphEntryBase<ContextT, WorldDataT, InitT> {};
 
 }

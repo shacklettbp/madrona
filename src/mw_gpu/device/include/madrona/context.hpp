@@ -7,17 +7,26 @@
  */
 #pragma once
 
-#include <madrona/job.hpp>
 #include <madrona/state.hpp>
 
 #include "mw_gpu/worker_init.hpp"
 
 namespace madrona {
 
+struct JobID {}; // FIXME
+
 class Context {
 public:
     inline Context(WorldBase *world_data, WorkerInit &&init);
 
+    template <typename ArchetypeT>
+    Entity makeEntityNow();
+
+    // FIXME: remove ArchetypeT
+    template <typename ArchetypeT, typename ComponentT>
+    ComponentT & getComponent(Entity e);
+
+#if 0
     template <typename Fn, typename... DepTs>
     inline JobID submit(Fn &&fn, bool is_child = true,
                         DepTs && ...dependencies);
@@ -33,12 +42,14 @@ public:
     void markJobFinished();
 
     inline JobID currentJobID() const { return job_id_; }
+#endif
 
-    inline uint32_t worldID() const { return world_id_; }
+    inline WorldID worldID() const { return world_id_; }
 
     inline WorldBase & data() const { return *data_; }
 
 protected:
+#if 0
     template <typename ContextT, typename Fn, typename... DepTs>
     inline JobID submitImpl(Fn &&fn, bool is_child,
                             DepTs && ... dependencies);
@@ -51,6 +62,7 @@ protected:
               typename Fn, typename... DepTs>
     inline JobID parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
                                  bool is_child, DepTs && ... dependencies);
+#endif
 
     WorldBase *data_;
 
@@ -66,6 +78,7 @@ private:
         }
     };
 
+    WorldID world_id_;
 #if 0
     inline StateManager & state();
 
@@ -82,7 +95,6 @@ private:
 
     JobID job_id_;
 
-    uint32_t world_id_;
     uint32_t lane_id_;
 #endif
 };

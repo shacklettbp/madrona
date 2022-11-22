@@ -11,14 +11,14 @@ ComponentID StateManager::registerComponent()
         &StateManager::num_components_);
 
     return ComponentID {
-        id;
+        id,
     };
 }
 
 template <typename ArchetypeT>
-Entity StateManager::registerArchetype()
+ArchetypeID StateManager::registerArchetype()
 {
-    uint32_t id = TypeTracker::registerType<ArchetypeT>(
+    uint32_t archetype_id = TypeTracker::registerType<ArchetypeT>(
         &StateManager::num_archetypes_);
 
     using Base = typename ArchetypeT::Base;
@@ -51,7 +51,7 @@ Entity StateManager::registerArchetype()
                       archetype_components.size());
 
     return ArchetypeID {
-        id,
+        archetype_id,
     };
 }
 
@@ -63,7 +63,7 @@ Query<ComponentTs...> StateManager::query()
         ...
     };
 
-    QueryRef *ref = &Query<ComponentTs>::ref_;
+    QueryRef *ref = &Query<ComponentTs...>::ref_;
 
     if (ref->numReferences.load(std::memory_order_acquire) == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
@@ -87,7 +87,8 @@ void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
         Table &tbl = archetypes_[archetype_idx]->tbl;
 
         bool early_out =
-            fn(tbl.numRows, tbl.columns[query_values[Indices]] ...);
+            fn(tbl.numRows, (WorldID *)(tbl.columns[1]),
+               tbl.columns[query_values[Indices]] ...);
         if (early_out) {
             return;
         }
@@ -116,16 +117,18 @@ uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)
     for (int i = 0; i < num_archetypes; i++) {
         uint32_t archetype_idx = *query_values;
 
-        Table &tbl = archetypes[archetype_idx]->tbl;
+        Table &tbl = archetypes_[archetype_idx]->tbl;
 
         total_rows += tbl.numRows;
+
+        query_values += 1 + num_components;
     }
 
     return total_rows;
 }
 
 template <typename ArchetypeT>
-Entity StateManager::makeEntityNow()
+Entity StateManager::makeEntityNow(WorldID world_id)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     Table &tbl = archetypes_[archetype_id]->tbl;
@@ -133,10 +136,18 @@ Entity StateManager::makeEntityNow()
     int32_t row = tbl.numRows++;
 
     // FIXME: proper entity mapping on GPU
-    return Entity {
+    Entity e {
         0,
         row,
     };
+
+    Entity *entity_column = (Entity *)tbl.columns[0];
+    WorldID *world_column = (WorldID *)tbl.columns[0];
+
+    entity_column[row] = e;
+    world_column[row] = world_id;
+
+    return e;
 }
 
 template <typename ArchetypeT>
@@ -154,7 +165,7 @@ ComponentT * StateManager::getArchetypeColumn()
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     uint32_t component_id = TypeTracker::typeID<ComponentT>();
     auto &archetype = *archetypes_[archetype_id];
-    int32_t col_idx = archetype.columnLookup.lookup(component_id);
+    int32_t col_idx = *archetype.columnLookup.lookup(component_id);
 
     Table &tbl = archetype.tbl;
 

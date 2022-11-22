@@ -65,7 +65,7 @@ public:
     inline uint32_t numMatchingEntities(QueryRef *query_ref);
 
     template <typename ArchetypeT>
-    Entity makeEntityNow();
+    Entity makeEntityNow(WorldID world_id);
 
     template <typename ArchetypeT>
     void clear();
@@ -94,7 +94,7 @@ private:
     void iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
                                   std::integer_sequence<int32_t, Indices...>);
 
-    void makeQuery(const ComponentID *components,
+    void makeQuery(const uint32_t *components,
                    uint32_t num_components,
                    QueryRef *query_ref);
 

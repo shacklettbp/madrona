@@ -261,8 +261,7 @@ namespace mwGPU {
 
 static __attribute__((always_inline)) inline void dispatch(
         uint32_t func_id,
-        madrona::SystemBase *sys,
-        void *user_data,
+        mwGPU::EntryData *entry_data,
         uint32_t invocation_offset)
 {
     switch (func_id) {
@@ -657,10 +656,6 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
 
     gpu_consts_readback->taskGraph =
         (char *)gpu_consts_readback->taskGraph +
-        (uintptr_t)gpu_state_buffer;
-
-    gpu_consts_readback->taskGraphUserData =
-        (char *)gpu_consts_readback->taskGraphUserData +
         (uintptr_t)gpu_state_buffer;
 
     CUdeviceptr job_sys_consts_addr;

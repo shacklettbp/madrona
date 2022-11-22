@@ -71,7 +71,7 @@ struct CollisionSim : public madrona::WorldBase {
 
 // madrona::Context subclass, allows easy access to per-world state through
 // game() method
-class Engine : public::madrona::CustomContext<Engine, CollisionSim> {
+class Engine : public ::madrona::CustomContext<Engine, CollisionSim> {
 public:
     using CustomContext::CustomContext;
     inline CollisionSim & sim() { return data(); }

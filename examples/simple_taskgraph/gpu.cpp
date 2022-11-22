@@ -49,8 +49,8 @@ int main(int argc, char *argv[])
     TrainingExecutor train_exec({
         .worldInitPtr = env_inits.data(),
         .numWorldInitBytes = sizeof(EnvInit),
-        .numWorldDataBytes = sizeof(SimManager),
-        .worldDataAlignment = alignof(SimManager),
+        .numWorldDataBytes = sizeof(SimpleSim),
+        .worldDataAlignment = alignof(SimpleSim),
         .numWorlds = uint32_t(num_worlds),
         .gpuID = 0,
     }, {

@@ -27,7 +27,6 @@ struct GPUImplConsts {
     uint32_t userJobTrackerOffset;
 
     void *taskGraph;
-    void *taskGraphUserData;
 
     static inline GPUImplConsts & get();
 };

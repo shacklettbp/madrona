@@ -27,7 +27,7 @@ struct LeafCenter : math::Vector3 {
 };
 
 struct LeafID {
-    int32_t idx;
+    int32_t id;
 };
 
 class BVH {

@@ -14,6 +14,77 @@ using namespace madrona::math;
 
 namespace SimpleTaskgraph {
 
+static void sphereSystem(Engine &ctx, Translation &t)
+{
+    (void)ctx;
+    printf("(%f %f %f)\n", t.x, t.y, t.z);
+}
+
+static void solverSystem(Engine &ctx, SolverData &)
+{
+    printf("%d\n", ctx.worldID().idx);
+}
+
+void SimpleSim::setup(madrona::StateManager &state_mgr,
+                      madrona::TaskGraph::Builder &builder)
+{
+    state_mgr.registerComponent<Translation>();
+    state_mgr.registerComponent<Rotation>();
+    state_mgr.registerComponent<SolverData>();
+
+    state_mgr.registerArchetype<Sphere>();
+    state_mgr.registerArchetype<SolverSystem>();
+
+    auto sphere_sys =
+        builder.parallelForNode<Engine, Translation, sphereSystem>({});
+
+    builder.parallelForNode<Engine, SolverData, solverSystem>({ sphere_sys });
+}
+
+SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
+    : WorldBase(ctx),
+      worldBounds(AABB::invalid())
+{
+    worldBounds = env_init.worldBounds;
+
+    Entity e = ctx.makeEntityNow<Sphere>();
+
+    Translation &t = ctx.getComponent<Sphere, Translation>(e);
+    t.x = env_init.objsInit[0].initPosition.x;
+    t.y = env_init.objsInit[0].initPosition.y;
+    t.z = env_init.objsInit[0].initPosition.z;
+
+#if 0
+    const int max_collisions = env_init.numObjs * env_init.numObjs;
+
+    sphereObjects =
+        (SphereObject *)malloc(sizeof(SphereObject) * env_init.numObjs);
+    contacts =
+        (ContactData *)malloc(sizeof(ContactData) * max_collisions);
+    bvhObjIDs = 
+        (int32_t *)malloc(sizeof(int32_t) * env_init.numObjs);
+
+    numSphereObjects = env_init.numObjs;
+    numContacts = 0;
+
+    for (int i = 0; i < (int)env_init.numObjs; i++) {
+        sphereObjects[i] = SphereObject {
+            env_init.objsInit[i].initPosition,
+            env_init.objsInit[i].initRotation,
+            AABB::invalid(),
+            Vector3 {},
+            0xFFFFFFFF,
+        };
+        preprocessObject(*this, i);
+
+        bvhObjIDs[i] = i;
+    }
+
+    bvh.update(*this, bvhObjIDs, env_init.numObjs, nullptr, 0, nullptr, 0);
+#endif
+}
+
+#if 0
 static inline void preprocessObject(SimpleSim &sim, uint32_t obj_id)
 {
     SphereObject &object = sim.sphereObjects[obj_id];
@@ -95,11 +166,6 @@ SimpleSim::SimpleSim(const EnvInit &env_init)
 
 void SimpleSim::registerSystems(TaskGraph::Builder &builder)
 {
-    auto preprocess_id = builder.registerSystem<PreprocessSystem>({});
-    auto bvh_id = builder.registerSystem<BVHSystem>({ preprocess_id });
-    auto broad_id = builder.registerSystem<BroadphaseSystem>({ bvh_id });
-    auto narrow_id = builder.registerSystem<NarrowphaseSystem>({ broad_id });
-    builder.registerSystem<SolverSystem>({ narrow_id });
 }
 
 SimManager::SimManager(const EnvInit *env_inits, uint32_t num_worlds)
@@ -642,6 +708,7 @@ void UnifiedSystem::run(void *gen_data, uint32_t invocation_offset)
 
     sim.numContacts.store(0, std::memory_order_relaxed);
 }
+#endif
 
 }
 
