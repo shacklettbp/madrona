@@ -10,6 +10,8 @@ ComponentID StateManager::registerComponent()
     uint32_t id = TypeTracker::registerType<ComponentT>(
         &StateManager::num_components_);
 
+    registerComponent(id, alignof(ComponentT), sizeof(ComponentT));
+
     return ComponentID {
         id,
     };

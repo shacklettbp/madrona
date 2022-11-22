@@ -17,12 +17,12 @@ namespace SimpleTaskgraph {
 inline void sphereSystem(Engine &ctx, Translation &t)
 {
     (void)ctx;
-    printf("(%f %f %f)\n", t.x, t.y, t.z);
+    //printf("(%f %f %f)\n", t.x, t.y, t.z);
 }
 
 inline void solverSystem(Engine &ctx, SolverData &)
 {
-    printf("%d\n", ctx.worldID().idx);
+    //printf("%d\n", ctx.worldID().idx);
 }
 
 void SimpleSim::setup(madrona::StateManager &state_mgr,

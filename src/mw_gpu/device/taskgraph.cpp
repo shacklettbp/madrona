@@ -199,7 +199,13 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
             QueryRef *query_ref = node.info.data.parallelFor.query;
             return state_mgr->numMatchingEntities(query_ref);
         }
+        default: {
+            assert(false);
+        }
     };
+
+    // For some reason, putting __builtin_unreachable here completely breaks
+    // everything??
 
     return 0;
 }
