@@ -144,7 +144,7 @@ Entity StateManager::makeEntityNow(WorldID world_id)
     };
 
     Entity *entity_column = (Entity *)tbl.columns[0];
-    WorldID *world_column = (WorldID *)tbl.columns[0];
+    WorldID *world_column = (WorldID *)tbl.columns[1];
 
     entity_column[row] = e;
     world_column[row] = world_id;
