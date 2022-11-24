@@ -11,10 +11,14 @@ namespace madrona {
 
 StateManager::StateManager(uint32_t)
 {
+#pragma unroll(1)
     for (int32_t i = 0; i < (int32_t)max_components_; i++) {
         components_.emplace(i, Optional<TypeInfo>::none());
     }
 
+    // Without disabling unrolling, this loop 100x's compilation time for
+    // this file.... Optional must be really slow.
+#pragma unroll(1)
     for (int32_t i = 0; i < (int32_t)max_archetypes_; i++) {
         archetypes_.emplace(i, Optional<ArchetypeStore>::none());
     }
