@@ -30,7 +30,10 @@ StaticIntegerMap<maxN>::StaticIntegerMap(const IntegerMapPair *inputs,
 {
     static_assert(maxN > 0 && utils::isPower2(maxN));
 
-    StaticMapHelper::buildMap(keys_.data(), values_.data(), maxN, inputs,
+    std::array<bool, maxN> scratch_storage;
+
+    StaticMapHelper::buildMap(keys_.data(), values_.data(),
+                              scratch_storage.data(), maxN, inputs,
                               num_inputs, shift_idx_, constant_idx_);
 }
 

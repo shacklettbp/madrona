@@ -70,7 +70,7 @@ static bool searchForPerfectHash(const IntegerMapPair *inputs,
 }
 
 void StaticMapHelper::buildMap(uint32_t *key_storage, uint32_t *value_storage,
-                               uint32_t storage_size,
+                               bool *scratch_storage, uint32_t storage_size,
                                const IntegerMapPair *inputs,
                                uint32_t num_inputs, uint32_t shift_idx,
                                uint32_t constant_idx)
@@ -89,9 +89,8 @@ void StaticMapHelper::buildMap(uint32_t *key_storage, uint32_t *value_storage,
     uint32_t capacity_shift = 32u - utils::int32Log2(capacity);
     uint32_t multiplier = 0x7feb352du;
 
-    HeapArray<bool> used(storage_size);
     while (!searchForPerfectHash(inputs, num_inputs, capacity, shift_idx,
-            constant_idx, capacity_shift, used.data(), &multiplier)) {
+            constant_idx, capacity_shift, scratch_storage, &multiplier)) {
         capacity *= 2;
         capacity_shift -= 1;
 

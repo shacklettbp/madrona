@@ -71,6 +71,7 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
 
     for (int i = 0; i < (int)num_user_components; i++) {
         ComponentID component_id = components[i];
+        assert(component_id.id != TypeTracker::unassignedTypeID);
         archetype_components_[offset + i] = component_id.id;
 
         type_ptr[i] = *components_[component_id.id];

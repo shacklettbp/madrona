@@ -1,7 +1,6 @@
 #pragma once
 #include <madrona/math.hpp>
 #include <madrona/components.hpp>
-#include <madrona/system.hpp>
 #include <madrona/span.hpp>
 #include <madrona/context.hpp>
 
@@ -74,17 +73,8 @@ private:
     const CountT num_allocated_nodes_;
 };
 
-
-class CollisionCandidateSystem : ParallelForSystem<CollisionCandidateSystem,
-                                                   Entity, LeafAABB> {
-public:
-    void run();
-
-private:
-    BVH bvh_;
-};
-
 }
+
 }
 }
 

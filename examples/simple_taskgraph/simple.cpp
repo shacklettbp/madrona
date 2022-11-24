@@ -11,49 +11,102 @@
 
 using namespace madrona;
 using namespace madrona::math;
+using namespace madrona::phys;
 
 namespace SimpleTaskgraph {
 
-inline void sphereSystem(Engine &ctx, Translation &t)
+inline void preprocessSystem(Engine &ctx,
+                             Translation &translation,
+                             const Rotation &rotation,
+                             broadphase::LeafAABB &aabb,
+                             broadphase::LeafCenter &center)
 {
-    (void)ctx;
-    //printf("(%f %f %f)\n", t.x, t.y, t.z);
+    // Clamp to world bounds
+    translation.x = std::clamp(translation.x,
+                               ctx.data().worldBounds.pMin.x,
+                               ctx.data().worldBounds.pMax.x);
+    translation.y = std::clamp(translation.y,
+                               ctx.data().worldBounds.pMin.y,
+                               ctx.data().worldBounds.pMax.y);
+    translation.z = std::clamp(translation.z,
+                               ctx.data().worldBounds.pMin.z,
+                               ctx.data().worldBounds.pMax.z);
+
+    // No actual mesh, just hardcode a fake 2 *unit cube centered around
+    // translation
+    
+    Mat3x4 model_mat = Mat3x4::fromTRS(translation, rotation);
+
+    Vector3 cube[8] = {
+        model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
+    };
+
+    aabb = AABB::point(cube[0]);
+    for (int i = 1; i < 8; i++) {
+        aabb.expand(cube[i]);
+    }
+
+    center = (aabb.pMin + aabb.pMax) / 2;
 }
 
 inline void solverSystem(Engine &ctx, SolverData &)
 {
-    //printf("%d\n", ctx.worldID().idx);
+    printf("%d\n", ctx.worldID().idx);
 }
 
-void SimpleSim::setup(madrona::StateManager &state_mgr,
-                      madrona::TaskGraph::Builder &builder)
+void SimpleSim::setup(StateManager &state_mgr,
+                      TaskGraph::Builder &builder)
 {
     state_mgr.registerComponent<Translation>();
     state_mgr.registerComponent<Rotation>();
     state_mgr.registerComponent<SolverData>();
+    state_mgr.registerComponent<broadphase::LeafAABB>();
+    state_mgr.registerComponent<broadphase::LeafCenter>();
+    state_mgr.registerComponent<broadphase::LeafID>();
 
     state_mgr.registerArchetype<Sphere>();
     state_mgr.registerArchetype<SolverSystem>();
 
-    auto sphere_sys =
-        builder.parallelForNode<Engine, Translation, sphereSystem>({});
+    auto preprocess_sys = builder.parallelForNode<Engine, preprocessSystem,
+            Translation, Rotation, broadphase::LeafAABB,
+            broadphase::LeafCenter>({});
+    
+    builder.parallelForNode<Engine, solverSystem,
+        SolverData>({ preprocess_sys });
 
-    builder.parallelForNode<Engine, SolverData, solverSystem>({ sphere_sys });
+    printf("Setup done\n");
 }
 
 SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
     : WorldBase(ctx),
-      worldBounds(AABB::invalid())
+      worldBounds(AABB::invalid()),
+      spheres((Entity *)malloc(sizeof(Entity) * env_init.numObjs)),
+      numSpheres(env_init.numObjs)
 {
     worldBounds = env_init.worldBounds;
 
-    Entity e = ctx.makeEntityNow<Sphere>();
     ctx.makeEntityNow<SolverSystem>();
 
-    Translation &t = ctx.getComponent<Sphere, Translation>(e);
-    t.x = env_init.objsInit[0].initPosition.x;
-    t.y = env_init.objsInit[0].initPosition.y;
-    t.z = env_init.objsInit[0].initPosition.z;
+    for (int i = 0; i < (int)env_init.numObjs; i++) {
+        Entity e = ctx.makeEntityNow<Sphere>();
+        Translation &translation =ctx.getComponent<Sphere, Translation>(e);
+        Rotation &rotation = ctx.getComponent<Sphere, Rotation>(e);
+        auto &aabb = ctx.getComponent<Sphere, broadphase::LeafAABB>(e);
+        auto &center = ctx.getComponent<Sphere, broadphase::LeafCenter>(e);
+
+        translation = env_init.objsInit[i].initPosition;
+        rotation = env_init.objsInit[i].initRotation;
+        spheres[i] = e;
+
+        preprocessSystem(ctx, translation, rotation, aabb, center);
+    }
 
 #if 0
     const int max_collisions = env_init.numObjs * env_init.numObjs;

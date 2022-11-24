@@ -9,6 +9,7 @@
 #include "mw_gpu/worker_init.hpp"
 
 #include <cuda/barrier>
+#include <cuda/std/tuple>
 
 namespace madrona {
 
@@ -76,7 +77,19 @@ struct ParallelForEntry : public EntryBase<ContextT, WorldDataT> {
 
             ContextT ctx = ParallelForEntry::makeContext(world_id);
 
-            Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...); // FIXME
+
+            // The following should work, but doesn't in cuda 11.7 it seems
+            // Need to put arguments in tuple for some reason instead
+            //Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...);
+
+            cuda::std::tuple typed_ptrs {
+                (ComponentTs *)raw_ptrs
+                ...
+            };
+
+            std::apply([&](auto ...ptrs) {
+                Fn(ctx, ptrs[tbl_offset] ...);
+            }, typed_ptrs);
 
             return true;
         });
@@ -115,16 +128,16 @@ public:
                 uint32_t max_num_dependencies);
         ~Builder();
 
-        template <typename ContextT, typename ComponentT, auto Fn>
+        template <typename ContextT, auto Fn, typename ...ComponentTs>
         inline NodeID parallelForNode(Span<const NodeID> dependencies)
         {
             using WorldDataT = typename ContextT::WorldDataT;
 
             using Entry = typename mwGPU::ParallelForEntry<
-                ContextT, WorldDataT, Fn, ComponentT>;
+                ContextT, WorldDataT, Fn, ComponentTs...>;
             uint32_t func_id = mwGPU::UserFuncID<Entry>::id;
 
-            auto query = mwGPU::getStateManager()->query<ComponentT>();
+            auto query = mwGPU::getStateManager()->query<ComponentTs...>();
             QueryRef *query_ref = query.getSharedRef();
             query_ref->numReferences.fetch_add(1, std::memory_order_relaxed);
 
@@ -209,7 +222,9 @@ public:
         new (state_mgr) StateManager(0);
 
         TaskGraph::Builder builder(1024, 1024);
+
         WorldDataT::setup(*state_mgr, builder);
+
         builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
 
         for (int32_t world_idx = 0; world_idx < num_worlds; world_idx++) {

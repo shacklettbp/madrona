@@ -349,6 +349,7 @@ static __attribute__((always_inline)) inline void dispatch(
     };
 
     for (int i = 0; i < (int)num_sources; i++) {
+        printf("%s\n", sources[i]);
         auto [ptx, bytecode] = cu::jitCompileCPPFile(sources[i],
             compile_flags, num_compile_flags,
             fast_compile_flags, num_fast_compile_flags,
