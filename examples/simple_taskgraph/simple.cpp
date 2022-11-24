@@ -16,26 +16,26 @@ using namespace madrona::phys;
 namespace SimpleTaskgraph {
 
 inline void preprocessSystem(Engine &ctx,
-                             Translation &translation,
+                             Position &position,
                              const Rotation &rotation,
                              broadphase::LeafAABB &aabb,
                              broadphase::LeafCenter &center)
 {
     // Clamp to world bounds
-    translation.x = std::clamp(translation.x,
+    position.x = std::clamp(position.x,
                                ctx.data().worldBounds.pMin.x,
                                ctx.data().worldBounds.pMax.x);
-    translation.y = std::clamp(translation.y,
+    position.y = std::clamp(position.y,
                                ctx.data().worldBounds.pMin.y,
                                ctx.data().worldBounds.pMax.y);
-    translation.z = std::clamp(translation.z,
+    position.z = std::clamp(position.z,
                                ctx.data().worldBounds.pMin.z,
                                ctx.data().worldBounds.pMax.z);
 
     // No actual mesh, just hardcode a fake 2 *unit cube centered around
     // translation
     
-    Mat3x4 model_mat = Mat3x4::fromTRS(translation, rotation);
+    Mat3x4 model_mat = Mat3x4::fromTRS(position, rotation);
 
     Vector3 cube[8] = {
         model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
@@ -61,21 +61,19 @@ inline void solverSystem(Engine &ctx, SolverData &)
     printf("%d\n", ctx.worldID().idx);
 }
 
-void SimpleSim::setup(StateManager &state_mgr,
+void SimpleSim::setup(Engine &ctx,
                       TaskGraph::Builder &builder)
 {
-    state_mgr.registerComponent<Translation>();
-    state_mgr.registerComponent<Rotation>();
-    state_mgr.registerComponent<SolverData>();
-    state_mgr.registerComponent<broadphase::LeafAABB>();
-    state_mgr.registerComponent<broadphase::LeafCenter>();
-    state_mgr.registerComponent<broadphase::LeafID>();
+    base::registerECS(ctx);
+    broadphase::registerECS(ctx);
 
-    state_mgr.registerArchetype<Sphere>();
-    state_mgr.registerArchetype<SolverSystem>();
+    ctx.registerComponent<SolverData>();
+
+    ctx.registerArchetype<Sphere>();
+    ctx.registerArchetype<SolverSystem>();
 
     auto preprocess_sys = builder.parallelForNode<Engine, preprocessSystem,
-            Translation, Rotation, broadphase::LeafAABB,
+            Position, Rotation, broadphase::LeafAABB,
             broadphase::LeafCenter>({});
     
     builder.parallelForNode<Engine, solverSystem,
@@ -96,16 +94,16 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
 
     for (int i = 0; i < (int)env_init.numObjs; i++) {
         Entity e = ctx.makeEntityNow<Sphere>();
-        Translation &translation =ctx.getComponent<Sphere, Translation>(e);
+        Position &position =ctx.getComponent<Sphere, Position>(e);
         Rotation &rotation = ctx.getComponent<Sphere, Rotation>(e);
         auto &aabb = ctx.getComponent<Sphere, broadphase::LeafAABB>(e);
         auto &center = ctx.getComponent<Sphere, broadphase::LeafCenter>(e);
 
-        translation = env_init.objsInit[i].initPosition;
+        position = env_init.objsInit[i].initPosition;
         rotation = env_init.objsInit[i].initRotation;
         spheres[i] = e;
 
-        preprocessSystem(ctx, translation, rotation, aabb, center);
+        preprocessSystem(ctx, position, rotation, aabb, center);
     }
 
 #if 0

@@ -15,6 +15,10 @@ struct SystemID {
 
 class TaskGraph {
 public:
+    struct NodeID {
+        uint32_t id;
+    };
+
     class Builder {
     public:
         Builder();

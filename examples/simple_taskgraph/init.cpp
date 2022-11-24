@@ -42,7 +42,7 @@ EnvInit generateEnvironmentInitialization()
 
     std::uniform_real_distribution<float> angle_dist(0.f, M_PI); 
     for (int64_t i = 0; i < (int64_t)num_init_objs; i++) {
-        Translation rand_pos = randomPosition(world_bounds);
+        Position rand_pos = randomPosition(world_bounds);
         Rotation rand_rot = Quat::angleAxis(angle_dist(randGen()),
             Vector3 { 0, 1, 0 });
 

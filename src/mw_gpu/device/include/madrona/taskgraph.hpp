@@ -98,9 +98,6 @@ struct ParallelForEntry : public EntryBase<ContextT, WorldDataT> {
 
 }
 
-struct NodeID {
-    uint32_t id;
-};
 
 class TaskGraph {
 private:
@@ -122,6 +119,10 @@ private:
     };
 
 public:
+    struct NodeID {
+        uint32_t id;
+    };
+
     class Builder {
     public:
         Builder(uint32_t max_num_nodes,
@@ -223,7 +224,12 @@ public:
 
         TaskGraph::Builder builder(1024, 1024);
 
-        WorldDataT::setup(*state_mgr, builder);
+        {
+            ContextT ctx(nullptr, WorkerInit {
+                int32_t(0xFFFF'FFFF),
+            });
+            WorldDataT::setup(ctx, builder);
+        }
 
         builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
 

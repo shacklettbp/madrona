@@ -14,18 +14,8 @@
 
 namespace SimpleTaskgraph {
 
-// Components
-struct Translation : madrona::math::Vector3 {
-    Translation(madrona::math::Vector3 v)
-        : Vector3(v)
-    {}
-};
-
-struct Rotation : madrona::math::Quat {
-    Rotation(madrona::math::Quat q)
-        : Quat(q)
-    {}
-};
+using Position = madrona::base::Position;
+using Rotation = madrona::base::Rotation;
 
 struct CandidatePair {
     uint32_t world;
@@ -40,7 +30,7 @@ struct ContactData {
 };
 
 struct ObjectInit {
-    Translation initPosition;
+    Position initPosition;
     Rotation initRotation;
 };
 
@@ -149,17 +139,9 @@ struct PhysicsBVH {
     int32_t freeHead;
 };
 
-struct SphereObject {
-    Translation translation;
-    Rotation rotation;
-    PhysicsAABB aabb;
-    madrona::math::Vector3 physCenter;
-    uint32_t leafID;
-};
-
 struct Sphere : public madrona::Archetype<
-    Translation, 
-    Rotation,
+    madrona::base::Position, 
+    madrona::base::Rotation,
     madrona::phys::broadphase::LeafAABB,
     madrona::phys::broadphase::LeafCenter,
     madrona::phys::broadphase::LeafID
@@ -172,7 +154,7 @@ struct SolverSystem : public madrona::Archetype<SolverData> {};
 class Engine;
 
 struct SimpleSim : public madrona::WorldBase {
-    static void setup(madrona::StateManager &state_mgr,
+    static void setup(Engine &ctx,
                       madrona::TaskGraph::Builder &builder);
 
     SimpleSim(Engine &ctx, const EnvInit &env_init);

@@ -17,6 +17,20 @@ Context::Context(WorldBase *world_data, WorkerInit &&init)
       world_id_(init.worldID)
 {}
 
+template <typename ComponentT>
+void Context::registerComponent()
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    state_mgr->registerComponent<ComponentT>();
+}
+
+template <typename ArchetypeT>
+void Context::registerArchetype()
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    state_mgr->registerArchetype<ArchetypeT>();
+}
+
 template <typename ArchetypeT>
 Entity Context::makeEntityNow()
 {

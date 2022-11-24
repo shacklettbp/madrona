@@ -21,7 +21,7 @@ TaskGraph::Builder::~Builder()
     free(all_dependencies_);
 }
 
-NodeID TaskGraph::Builder::registerNode(
+TaskGraph::NodeID TaskGraph::Builder::registerNode(
     const NodeInfo &node_info,
     Span<const NodeID> dependencies)
 {

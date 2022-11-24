@@ -19,6 +19,12 @@ class Context {
 public:
     inline Context(WorldBase *world_data, WorkerInit &&init);
 
+    template <typename ComponentT>
+    void registerComponent();
+
+    template <typename ArchetypeT>
+    void registerArchetype();
+
     template <typename ArchetypeT>
     Entity makeEntityNow();
 

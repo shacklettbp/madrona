@@ -2,7 +2,7 @@
 #include <madrona/math.hpp>
 #include <madrona/components.hpp>
 #include <madrona/span.hpp>
-#include <madrona/context.hpp>
+#include <madrona/taskgraph.hpp>
 
 namespace madrona {
 namespace phys {
@@ -72,6 +72,8 @@ private:
     CountT num_nodes_;
     const CountT num_allocated_nodes_;
 };
+
+void registerECS(Context &ctx);
 
 }
 

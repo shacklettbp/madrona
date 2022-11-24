@@ -1,5 +1,6 @@
 #pragma once
 #include <madrona/math.hpp>
+#include <madrona/fwd.hpp>
 
 namespace madrona {
 namespace base {
@@ -10,11 +11,13 @@ struct Position : math::Vector3 {
     {}
 };
 
-struct Rotation : madrona::math::Quat {
+struct Rotation : math::Quat {
     Rotation(math::Quat q)
         : Quat(q)
     {}
 };
+
+void registerECS(Context &ctx);
 
 }
 }

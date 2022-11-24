@@ -1,4 +1,5 @@
 #include <madrona/physics.hpp>
+#include <madrona/context.hpp>
 
 namespace madrona {
 using namespace base;
@@ -8,6 +9,7 @@ namespace phys {
 
 namespace broadphase {
 
+#if 0
 BVH::BVH(CountT max_nodes)
     : nodes_((Node *)malloc(sizeof(Node) * max_nodes)),
       num_nodes_(0),
@@ -346,7 +348,14 @@ void BVH::update(Context &ctx,
         }
     }
 }
+#endif
 
+void registerECS(Context &ctx)
+{
+    ctx.registerComponent<LeafAABB>();
+    ctx.registerComponent<LeafCenter>();
+    ctx.registerComponent<LeafID>();
+}
 
 }
 
