@@ -15,11 +15,8 @@ using namespace madrona::phys;
 
 namespace SimpleTaskgraph {
 
-inline void preprocessSystem(Engine &ctx,
-                             Position &position,
-                             const Rotation &rotation,
-                             broadphase::LeafAABB &aabb,
-                             broadphase::LeafCenter &center)
+inline void clampSystem(Engine &ctx,
+                        Position &position)
 {
     // Clamp to world bounds
     position.x = std::clamp(position.x,
@@ -31,29 +28,6 @@ inline void preprocessSystem(Engine &ctx,
     position.z = std::clamp(position.z,
                                ctx.data().worldBounds.pMin.z,
                                ctx.data().worldBounds.pMax.z);
-
-    // No actual mesh, just hardcode a fake 2 *unit cube centered around
-    // translation
-    
-    Mat3x4 model_mat = Mat3x4::fromTRS(position, rotation);
-
-    Vector3 cube[8] = {
-        model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
-    };
-
-    aabb = AABB::point(cube[0]);
-    for (int i = 1; i < 8; i++) {
-        aabb.expand(cube[i]);
-    }
-
-    center = (aabb.pMin + aabb.pMax) / 2;
 }
 
 inline void solverSystem(Engine &ctx, SolverData &)
@@ -72,12 +46,13 @@ void SimpleSim::setup(Engine &ctx,
     ctx.registerArchetype<Sphere>();
     ctx.registerArchetype<SolverSystem>();
 
-    auto preprocess_sys = builder.parallelForNode<Engine, preprocessSystem,
-            Position, Rotation, broadphase::LeafAABB,
-            broadphase::LeafCenter>({});
+    auto clamp_sys =
+        builder.parallelForNode<Engine, clampSystem, Position>({});
+
+    auto broadphase_sys = broadphase::setupTasks(builder, { clamp_sys });
     
-    builder.parallelForNode<Engine, solverSystem,
-        SolverData>({ preprocess_sys });
+    builder.parallelForNode<Engine, solverSystem, SolverData>(
+        { broadphase_sys });
 
     printf("Setup done\n");
 }
@@ -94,16 +69,12 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
 
     for (int i = 0; i < (int)env_init.numObjs; i++) {
         Entity e = ctx.makeEntityNow<Sphere>();
-        Position &position =ctx.getComponent<Sphere, Position>(e);
+        Position &position = ctx.getComponent<Sphere, Position>(e);
         Rotation &rotation = ctx.getComponent<Sphere, Rotation>(e);
-        auto &aabb = ctx.getComponent<Sphere, broadphase::LeafAABB>(e);
-        auto &center = ctx.getComponent<Sphere, broadphase::LeafCenter>(e);
 
         position = env_init.objsInit[i].initPosition;
         rotation = env_init.objsInit[i].initRotation;
         spheres[i] = e;
-
-        preprocessSystem(ctx, position, rotation, aabb, center);
     }
 
 #if 0

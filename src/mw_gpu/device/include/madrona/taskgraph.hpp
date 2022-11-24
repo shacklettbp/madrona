@@ -132,10 +132,10 @@ public:
         template <typename ContextT, auto Fn, typename ...ComponentTs>
         inline NodeID parallelForNode(Span<const NodeID> dependencies)
         {
-            using WorldDataT = typename ContextT::WorldDataT;
+            using WorldT = typename WorldTypeExtract<ContextT>::type;
 
             using Entry = typename mwGPU::ParallelForEntry<
-                ContextT, WorldDataT, Fn, ComponentTs...>;
+                ContextT, WorldT, Fn, ComponentTs...>;
             uint32_t func_id = mwGPU::UserFuncID<Entry>::id;
 
             auto query = mwGPU::getStateManager()->query<ComponentTs...>();
@@ -156,6 +156,16 @@ public:
         void build(TaskGraph *out);
 
     private:
+        template <typename ContextT, bool = false>
+        struct WorldTypeExtract {
+            using type = typename ContextT::WorldDataT;
+        };
+
+        template <bool ignore>
+        struct WorldTypeExtract<Context, ignore> {
+            using type = WorldBase;
+        };
+
         NodeID registerNode(const NodeInfo &node_info,
                             Span<const NodeID> dependencies);
 

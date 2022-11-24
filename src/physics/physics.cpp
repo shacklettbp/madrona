@@ -350,12 +350,52 @@ void BVH::update(Context &ctx,
 }
 #endif
 
+inline void preprocessSystem(Context &,
+                             const Position &position,
+                             const Rotation &rotation,
+                             LeafAABB &leaf_aabb,
+                             LeafCenter &leaf_center)
+{
+    // No actual mesh, just hardcode a fake 2 *unit cube centered around
+    // translation
+    
+    Mat3x4 model_mat = Mat3x4::fromTRS(position, rotation);
+
+    Vector3 cube[8] = {
+        model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
+    };
+
+    leaf_aabb = AABB::point(cube[0]);
+    for (int i = 1; i < 8; i++) {
+        leaf_aabb.expand(cube[i]);
+    }
+
+    leaf_center = (leaf_aabb.pMin + leaf_aabb.pMax) / 2;
+}
+
 void registerECS(Context &ctx)
 {
     ctx.registerComponent<LeafAABB>();
     ctx.registerComponent<LeafCenter>();
     ctx.registerComponent<LeafID>();
 }
+
+TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
+                             Span<const TaskGraph::NodeID> deps)
+{
+    auto preprocess_node = builder.parallelForNode<Context,
+        preprocessSystem, Position, Rotation, LeafAABB, LeafCenter>(deps);
+
+    return preprocess_node;
+}
+
 
 }
 

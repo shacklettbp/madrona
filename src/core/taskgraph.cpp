@@ -26,6 +26,7 @@ TaskGraph::Builder::Builder()
       all_dependencies_(0)
 {}
 
+#if 0
 SystemID TaskGraph::Builder::registerSystem(SystemBase &sys,
                         Span<const SystemID> dependencies)
 {
@@ -48,6 +49,7 @@ SystemID TaskGraph::Builder::registerSystem(SystemBase &sys,
         (uint32_t)systems_.size() - 1,
     };
 }
+#endif
 
 TaskGraph TaskGraph::Builder::build()
 {

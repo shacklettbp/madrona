@@ -74,6 +74,8 @@ private:
 };
 
 void registerECS(Context &ctx);
+TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
+                             Span<const TaskGraph::NodeID> deps);
 
 }
 

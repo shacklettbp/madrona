@@ -23,8 +23,14 @@ public:
     public:
         Builder();
 
-        SystemID registerSystem(SystemBase &sys,
-                                Span<const SystemID> dependencies);
+        template <typename ContextT, auto Fn,
+                  typename ...ComponentTs>
+        NodeID parallelForNode(Span<const NodeID> deps)
+        {
+            // FIXME
+            (void)deps;
+            return NodeID { 0 };
+        }
 
         TaskGraph build();
     private:
