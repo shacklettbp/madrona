@@ -38,12 +38,11 @@ inline void solverSystem(Engine &ctx, SolverData &)
 void SimpleSim::registerTypes(ECSRegistry &registry)
 {
     base::registerTypes(registry);
-    broadphase::registerTypes(registry);
+    broadphase::System::registerTypes(registry);
 
-    registry.registerComponent<SolverData>();
+    registry.registerSingleton<SolverData>();
 
     registry.registerArchetype<Sphere>();
-    registry.registerArchetype<SolverSystem>();
 }
 
 void SimpleSim::setupTasks(TaskGraph::Builder &builder)
@@ -51,7 +50,8 @@ void SimpleSim::setupTasks(TaskGraph::Builder &builder)
     auto clamp_sys =
         builder.parallelForNode<Engine, clampSystem, Position>({});
 
-    auto broadphase_sys = broadphase::setupTasks(builder, { clamp_sys });
+    auto broadphase_sys = broadphase::System::setupTasks(builder,
+        { clamp_sys });
     
     builder.parallelForNode<Engine, solverSystem, SolverData>(
         { broadphase_sys });
@@ -63,12 +63,9 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
     : WorldBase(ctx),
       worldBounds(AABB::invalid()),
       spheres((Entity *)malloc(sizeof(Entity) * env_init.numObjs)),
-      numSpheres(env_init.numObjs),
-      broadphaseBVH(env_init.numObjs * 10)
+      numSpheres(env_init.numObjs)
 {
     worldBounds = env_init.worldBounds;
-
-    ctx.makeEntityNow<SolverSystem>();
 
     for (int i = 0; i < (int)env_init.numObjs; i++) {
         Entity e = ctx.makeEntityNow<Sphere>();
@@ -79,6 +76,8 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
         rotation = env_init.objsInit[i].initRotation;
         spheres[i] = e;
     }
+
+    broadphase::System::init(ctx, env_init.numObjs * 10);
 
 #if 0
     const int max_collisions = env_init.numObjs * env_init.numObjs;

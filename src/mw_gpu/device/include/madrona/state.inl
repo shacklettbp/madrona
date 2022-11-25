@@ -16,6 +16,12 @@ void ECSRegistry::registerArchetype()
     state_mgr_->registerArchetype<ArchetypeT>();
 }
 
+template <typename SingletonT>
+void ECSRegistry::registerSingleton()
+{
+    state_mgr_->registerSingleton<SingletonT>();
+}
+
 template <typename ComponentT>
 ComponentID StateManager::registerComponent()
 {
@@ -67,6 +73,30 @@ ArchetypeID StateManager::registerArchetype()
     return ArchetypeID {
         archetype_id,
     };
+}
+
+template <typename SingletonT>
+void StateManager::registerSingleton()
+{
+    using ArchetypeT = SingletonArchetype<SingletonT>;
+
+    registerComponent<SingletonT>();
+    registerArchetype<ArchetypeT>();
+
+    uint32_t num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
+
+    for (uint32_t i = 0; i < num_worlds; i++) {
+        makeEntityNow<ArchetypeT>(WorldID { int32_t(i) });
+    }
+}
+
+template <typename SingletonT>
+SingletonT & StateManager::getSingleton(WorldID world_id)
+{
+    using ArchetypeT = SingletonArchetype<SingletonT>;
+
+    SingletonT *col = getArchetypeColumn<ArchetypeT, SingletonT>();
+    return col[world_id.idx];
 }
 
 template <typename... ComponentTs>

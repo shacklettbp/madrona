@@ -28,6 +28,9 @@ public:
     template <typename ArchetypeT>
     void registerArchetype();
 
+    template <typename SingletonT>
+    SingletonT & getSingleton() { /* FIXME */ }
+
     // State
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype();

@@ -377,31 +377,44 @@ void BVH::updateLeaf(const Position &position,
     printf("%d (%f %f %f)\n", leaf_id.id, leaf_center.x, leaf_center.y, leaf_center.z);
 }
 
-void BVH::updateLeavesSystem(
-    Context &ctx,
-    Loc sys_loc,
-    const Position &pos,
-    const Rotation &rot,
-    const LeafID &leaf_id)
+void System::init(Context &ctx, CountT max_num_leaves)
 {
-    BVH &bvh = ctx.getUnsafe<BVH>(sys_loc);
-    bvh.updateLeaf(pos, rot, leaf_id);
+    BVH &bvh = ctx.getSingleton<BVH>();
+    new (&bvh) BVH(max_num_leaves);
 }
 
-void registerTypes(ECSRegistry &registry)
+void System::registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<LeafID>();
-    registry.registerComponent<BVH>();
+    registry.registerSingleton<BVH>();
 }
 
-TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                             Span<const TaskGraph::NodeID> deps)
+TaskGraph::NodeID System::setupTasks(TaskGraph::Builder &builder,
+                                     Span<const TaskGraph::NodeID> deps)
 {
     auto preprocess_node = builder.parallelForNode<Context,
-        BVH::updateLeavesSystem, Position, Rotation, LeafAABB, LeafCenter>(deps);
+        System::updateLeavesEntry, base::Position,
+        base::Rotation, LeafID>(deps);
 
     return preprocess_node;
 }
+
+void System::updateLeavesEntry(
+    Context &ctx,
+    const base::Position &pos,
+    const base::Rotation &rot,
+    const LeafID &leaf_id)
+{
+    BVH &bvh = ctx.getSingleton<BVH>();
+    bvh.updateLeaf(pos, rot, leaf_id);
+}
+
+void System::updateBVHEntry(
+    Context &, BVH &bvh)
+{
+    bvh.rebuild();
+}
+
 
 
 }

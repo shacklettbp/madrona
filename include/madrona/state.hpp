@@ -116,6 +116,9 @@ public:
     template <typename ArchetypeT>
     void registerArchetype();
 
+    template <typename SingletonT>
+    void registerSingleton() { /* FIXME */ }
+
 private:
     StateManager *state_mgr_;
 };

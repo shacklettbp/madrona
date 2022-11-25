@@ -40,18 +40,11 @@ public:
     void refit(LeafID *leaf_ids, CountT num_moved);
 
     template <typename Fn>
-    inline void findOverlaps(madrona::math::AABB &aabb, Fn &&fn) const;
+    inline void findOverlaps(math::AABB &aabb, Fn &&fn) const;
 
-    inline void updateLeaf(
-        const madrona::base::Position &position,
-        const madrona::base::Rotation &rotation,
-        const LeafID &leaf_id);
-
-    static inline void updateLeavesSystem(
-        Context &ctx,
-        Loc sys_loc,
-        const madrona::base::Position &position,
-        const madrona::base::Rotation &rotation,
+    void updateLeaf(
+        const base::Position &position,
+        const base::Rotation &rotation,
         const LeafID &leaf_id);
 
 private:
@@ -88,10 +81,27 @@ private:
     int32_t num_allocated_leaves_;
 };
 
-void registerTypes(ECSRegistry &registry);
+class System {
+public:
+    static void registerTypes(ECSRegistry &registry);
 
-TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                             Span<const TaskGraph::NodeID> deps);
+    static void init(Context &ctx, CountT max_num_leaves);
+
+    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
+                                        Span<const TaskGraph::NodeID> deps);
+
+private:
+    static void updateLeavesEntry(
+        Context &ctx,
+        const base::Position &position,
+        const base::Rotation &rotation,
+        const LeafID &leaf_id);
+
+    static void updateBVHEntry(
+        Context &ctx, BVH &bvh);
+
+};
+
 
 }
 

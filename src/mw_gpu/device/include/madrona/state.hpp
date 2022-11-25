@@ -57,6 +57,9 @@ public:
     template <typename ArchetypeT>
     void registerArchetype();
 
+    template <typename SingletonT>
+    void registerSingleton();
+
 private:
     StateManager *state_mgr_;
 };
@@ -70,6 +73,12 @@ public:
 
     template <typename ArchetypeT>
     ArchetypeID registerArchetype();
+
+    template <typename SingletonT>
+    void registerSingleton();
+
+    template <typename SingletonT>
+    SingletonT & getSingleton(WorldID world_id);
 
     template <typename... ComponentTs>
     Query<ComponentTs...> query();
@@ -89,6 +98,9 @@ public:
     ComponentT * getArchetypeColumn();
 
 private:
+    template <typename SingletonT>
+    struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
+
     using ColumnMap = StaticIntegerMap<Table::maxColumns>;
     static constexpr uint32_t max_archetype_components_ = ColumnMap::numFree();
 

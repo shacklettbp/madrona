@@ -147,8 +147,6 @@ struct Sphere : public madrona::Archetype<
 
 struct SolverData {};
 
-struct SolverSystem : public madrona::Archetype<SolverData> {};
-
 class Engine;
 
 struct SimpleSim : public madrona::WorldBase {
@@ -162,8 +160,6 @@ struct SimpleSim : public madrona::WorldBase {
 
     madrona::Entity *spheres;
     int32_t numSpheres;
-
-    madrona::phys::broadphase::BVH broadphaseBVH;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, SimpleSim> {
