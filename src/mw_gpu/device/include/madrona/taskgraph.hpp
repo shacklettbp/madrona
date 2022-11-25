@@ -235,13 +235,9 @@ public:
         TaskGraph::Builder builder(1024, 1024);
 
         {
-            ContextT ctx(nullptr, WorkerInit {
-                int32_t(0xFFFF'FFFF),
-            });
-            WorldDataT::setup(ctx, builder);
+            ECSRegistry ecs_registry(*state_mgr);
+            WorldDataT::registerTypes(ecs_registry);
         }
-
-        builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
 
         for (int32_t world_idx = 0; world_idx < num_worlds; world_idx++) {
             const InitT &init = inits[world_idx];
@@ -254,6 +250,10 @@ public:
 
             new (world) WorldDataT(ctx, init);
         }
+
+        WorldDataT::setupTasks(builder);
+
+        builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
     }
 };
 

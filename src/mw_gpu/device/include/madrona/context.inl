@@ -46,6 +46,12 @@ ComponentT & Context::getComponent(Entity e)
     return col[e.id];
 }
 
+template <typename ComponentT>
+ComponentT & Context::getUnsafe(Loc l)
+{
+
+}
+
 #if 0
 namespace mwGPU {
 

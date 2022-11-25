@@ -31,24 +31,33 @@ struct LeafID {
 
 class BVH {
 public:
-    BVH(CountT max_nodes);
+    BVH(CountT max_leaves);
 
-    void build(Context &ctx, Entity *entities,
-               CountT num_entities);
+    inline LeafID reserveLeaf();
 
-    void update(Context &ctx,
-                Entity *added_entities,
-                CountT num_added_entities,
-                Entity *removed_entities,
-                CountT num_removed_entities,
-                Entity *moved_entities,
-                CountT num_moved_entities);
+    void rebuild();
+
+    void refit(LeafID *leaf_ids, CountT num_moved);
 
     template <typename Fn>
     inline void findOverlaps(madrona::math::AABB &aabb, Fn &&fn) const;
 
+    inline void updateLeaf(
+        const madrona::base::Position &position,
+        const madrona::base::Rotation &rotation,
+        const LeafID &leaf_id);
+
+    static inline void updateLeavesSystem(
+        Context &ctx,
+        Loc sys_loc,
+        const madrona::base::Position &position,
+        const madrona::base::Rotation &rotation,
+        const LeafID &leaf_id);
+
 private:
     static constexpr int32_t sentinel_ = 0xFFFF'FFFF_i32;
+
+    inline CountT numInternalNodes(CountT num_leaves) const;
 
     struct Node {
         float minX[4];
@@ -71,9 +80,16 @@ private:
     Node *nodes_;
     CountT num_nodes_;
     const CountT num_allocated_nodes_;
+    LeafAABB *leaf_aabbs_;
+    LeafCenter *leaf_centers_;
+    uint32_t *leaf_parents_;
+    int32_t *sorted_leaves_;
+    std::atomic<int32_t> num_leaves_;
+    int32_t num_allocated_leaves_;
 };
 
-void registerECS(Context &ctx);
+void registerTypes(ECSRegistry &registry);
+
 TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
                              Span<const TaskGraph::NodeID> deps);
 

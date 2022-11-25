@@ -35,17 +35,19 @@ inline void solverSystem(Engine &ctx, SolverData &)
     printf("%d\n", ctx.worldID().idx);
 }
 
-void SimpleSim::setup(Engine &ctx,
-                      TaskGraph::Builder &builder)
+void SimpleSim::registerTypes(ECSRegistry &registry)
 {
-    base::registerECS(ctx);
-    broadphase::registerECS(ctx);
+    base::registerTypes(registry);
+    broadphase::registerTypes(registry);
 
-    ctx.registerComponent<SolverData>();
+    registry.registerComponent<SolverData>();
 
-    ctx.registerArchetype<Sphere>();
-    ctx.registerArchetype<SolverSystem>();
+    registry.registerArchetype<Sphere>();
+    registry.registerArchetype<SolverSystem>();
+}
 
+void SimpleSim::setupTasks(TaskGraph::Builder &builder)
+{
     auto clamp_sys =
         builder.parallelForNode<Engine, clampSystem, Position>({});
 
@@ -61,7 +63,8 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
     : WorldBase(ctx),
       worldBounds(AABB::invalid()),
       spheres((Entity *)malloc(sizeof(Entity) * env_init.numObjs)),
-      numSpheres(env_init.numObjs)
+      numSpheres(env_init.numObjs),
+      broadphaseBVH(env_init.numObjs * 10)
 {
     worldBounds = env_init.worldBounds;
 

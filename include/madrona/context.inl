@@ -71,6 +71,12 @@ ComponentT & Context::getUnsafe(int32_t e_id)
         MADRONA_MW_COND(cur_world_id_,) e_id);
 }
 
+template <typename ComponentT>
+ComponentT & Context::getUnsafe(Loc l)
+{
+    return state_mgr_->getUnsafe<ComponentT>(MADRONA_MW_COND(cur_world_id_,) l);
+}
+
 template <typename ArchetypeT>
 void Context::clearArchetype()
 {

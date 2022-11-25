@@ -192,7 +192,13 @@ ComponentT & StateManager::getUnsafe(
     MADRONA_MW_COND(uint32_t world_id,) int32_t entity_id)
 {
     Loc loc = entity_store_.getLocUnsafe(entity_id);
+    return getUnsafe<ComponentT>(MADRONA_MW_COND(world_id,) loc);
+}
 
+template <typename ComponentT>
+ComponentT & StateManager::getUnsafe(
+    MADRONA_MW_COND(uint32_t world_id,) Loc loc)
+{
     ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
     Table &tbl =
 #ifdef MADRONA_MW_MODE

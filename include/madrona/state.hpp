@@ -106,6 +106,20 @@ private:
 friend class StateManager;
 };
 
+class ECSRegistry {
+public:
+    ECSRegistry(StateManager &state_mgr);
+
+    template <typename ComponentT>
+    void registerComponent();
+
+    template <typename ArchetypeT>
+    void registerArchetype();
+
+private:
+    StateManager *state_mgr_;
+};
+
 class StateManager {
 public:
 #ifdef MADRONA_MW_MODE
@@ -139,6 +153,10 @@ public:
     template <typename ComponentT>
     inline ComponentT & getUnsafe(MADRONA_MW_COND(uint32_t world_id,)
                                   int32_t entity_id);
+
+    template <typename ComponentT>
+    inline ComponentT & getUnsafe(MADRONA_MW_COND(uint32_t world_id,)
+                                  Loc loc);
 
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype(

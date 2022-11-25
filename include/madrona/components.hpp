@@ -17,7 +17,7 @@ struct Rotation : math::Quat {
     {}
 };
 
-void registerECS(Context &ctx);
+void registerTypes(ECSRegistry &registry);
 
 }
 }

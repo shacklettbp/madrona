@@ -32,6 +32,9 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     ComponentT & getComponent(Entity e);
 
+    template <typename ComponentT>
+    ComponentT & getUnsafe(Loc loc);
+
 #if 0
     template <typename Fn, typename... DepTs>
     inline JobID submit(Fn &&fn, bool is_child = true,

@@ -47,6 +47,20 @@ private:
 friend class StateManager;
 };
 
+class ECSRegistry {
+public:
+    ECSRegistry(StateManager &state_mgr);
+
+    template <typename ComponentT>
+    void registerComponent();
+
+    template <typename ArchetypeT>
+    void registerArchetype();
+
+private:
+    StateManager *state_mgr_;
+};
+
 class StateManager {
 public:
     StateManager(uint32_t max_components);

@@ -9,6 +9,10 @@
 
 namespace madrona {
 
+ECSRegistry::ECSRegistry(StateManager &state_mgr)
+    : state_mgr_(&state_mgr)
+{}
+
 StateManager::StateManager(uint32_t)
 {
 #pragma unroll(1)

@@ -142,8 +142,6 @@ struct PhysicsBVH {
 struct Sphere : public madrona::Archetype<
     madrona::base::Position, 
     madrona::base::Rotation,
-    madrona::phys::broadphase::LeafAABB,
-    madrona::phys::broadphase::LeafCenter,
     madrona::phys::broadphase::LeafID
 > {};
 
@@ -154,8 +152,9 @@ struct SolverSystem : public madrona::Archetype<SolverData> {};
 class Engine;
 
 struct SimpleSim : public madrona::WorldBase {
-    static void setup(Engine &ctx,
-                      madrona::TaskGraph::Builder &builder);
+    static void registerTypes(madrona::ECSRegistry &registry);
+
+    static void setupTasks(madrona::TaskGraph::Builder &builder);
 
     SimpleSim(Engine &ctx, const EnvInit &env_init);
 
@@ -163,6 +162,8 @@ struct SimpleSim : public madrona::WorldBase {
 
     madrona::Entity *spheres;
     int32_t numSpheres;
+
+    madrona::phys::broadphase::BVH broadphaseBVH;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, SimpleSim> {

@@ -4,10 +4,10 @@
 namespace madrona {
 namespace base {
 
-void registerECS(Context &ctx)
+void registerTypes(ECSRegistry &registry)
 {
-    ctx.registerComponent<Position>();
-    ctx.registerComponent<Rotation>();
+    registry.registerComponent<Position>();
+    registry.registerComponent<Rotation>();
 }
 
 }

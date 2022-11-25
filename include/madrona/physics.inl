@@ -5,6 +5,16 @@ namespace phys {
 
 namespace broadphase {
 
+LeafID BVH::reserveLeaf()
+{
+    int32_t leaf_idx = num_leaves_.fetch_add(1, std::memory_order_relaxed);
+    assert(leaf_idx < num_allocated_leaves_);
+
+    return LeafID {
+        leaf_idx,
+    };
+}
+
 template <typename Fn>
 void BVH::findOverlaps(madrona::math::AABB &aabb, Fn &&fn) const
 {

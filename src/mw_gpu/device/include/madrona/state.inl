@@ -5,6 +5,18 @@
 namespace madrona {
 
 template <typename ComponentT>
+void ECSRegistry::registerComponent()
+{
+    state_mgr_->registerComponent<ComponentT>();
+}
+
+template <typename ArchetypeT>
+void ECSRegistry::registerArchetype()
+{
+    state_mgr_->registerArchetype<ArchetypeT>();
+}
+
+template <typename ComponentT>
 ComponentID StateManager::registerComponent()
 {
     uint32_t id = TypeTracker::registerType<ComponentT>(

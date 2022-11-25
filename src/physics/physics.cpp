@@ -9,23 +9,28 @@ namespace phys {
 
 namespace broadphase {
 
-#if 0
-BVH::BVH(CountT max_nodes)
-    : nodes_((Node *)malloc(sizeof(Node) * max_nodes)),
+BVH::BVH(CountT max_leaves)
+    : nodes_((Node *)malloc(sizeof(Node) *
+                            numInternalNodes(max_leaves))),
       num_nodes_(0),
-      num_allocated_nodes_(max_nodes)
+      num_allocated_nodes_(numInternalNodes(max_leaves)),
+      leaf_aabbs_((LeafAABB *)malloc(sizeof(LeafAABB) * max_leaves)),
+      leaf_centers_((LeafCenter *)malloc(sizeof(LeafCenter) * max_leaves)),
+      leaf_parents_((uint32_t *)malloc(sizeof(uint32_t) * max_leaves)),
+      sorted_leaves_((int32_t *)malloc(sizeof(int32_t) * max_leaves)),
+      num_leaves_(0),
+      num_allocated_leaves_(max_leaves)
+{}
+
+CountT BVH::numInternalNodes(CountT num_leaves) const
 {
+    return utils::divideRoundUp(num_leaves - 1, CountT(3));
 }
 
-void BVH::build(Context &ctx, Entity *entities,
-                          CountT num_entities)
+void BVH::rebuild()
 {
-    int32_t num_internal_nodes =
-        utils::divideRoundUp(num_entities - 1, CountT(3));
-
-    int32_t cur_node_offset = num_nodes_;
-    assert(cur_node_offset == 0); // FIXME
-    num_nodes_ += num_internal_nodes;
+    int32_t num_internal_nodes = numInternalNodes(num_leaves_);
+    num_nodes_ = num_internal_nodes;
     assert(num_nodes_ <= num_allocated_nodes_);
 
     struct StackEntry {
@@ -40,9 +45,10 @@ void BVH::build(Context &ctx, Entity *entities,
         sentinel_,
         sentinel_,
         0,
-        int32_t(num_entities),
+        int32_t(num_leaves_),
     };
 
+    int32_t cur_node_offset = 0;
     CountT stack_size = 1;
 
     while (stack_size > 0) {
@@ -55,9 +61,11 @@ void BVH::build(Context &ctx, Entity *entities,
 
             for (int i = 0; i < 4; i++) {
                 if (i < entry.numObjs) {
-                    int32_t e_id = entities[entry.offset + i].id;
-                    const auto &aabb = ctx.getUnsafe<LeafAABB>(e_id);
-                    node.setLeaf(i, e_id);
+                    int32_t leaf_id = sorted_leaves_[entry.offset + i];
+                    const auto &aabb = leaf_aabbs_[leaf_id];
+                    leaf_parents_[leaf_id] = ((uint32_t)node_id << 2) | (uint32_t)i;
+
+                    node.setLeaf(i, leaf_id);
                     node.minX[i] = aabb.pMin.x;
                     node.minY[i] = aabb.pMin.y;
                     node.minZ[i] = aabb.pMin.z;
@@ -87,8 +95,13 @@ void BVH::build(Context &ctx, Entity *entities,
             node.parentID = entry.parentID;
 
             // midpoint sort items
-            auto midpoint_split = [&ctx, entities](
+            auto midpoint_split = [this](
                     int32_t base, int32_t num_elems) {
+
+                auto get_center = [this, base](int32_t offset) {
+                    return leaf_centers_[sorted_leaves_[base + offset]];
+                };
+
                 Vector3 center_min {
                     FLT_MAX,
                     FLT_MAX,
@@ -102,8 +115,7 @@ void BVH::build(Context &ctx, Entity *entities,
                 };
 
                 for (int i = 0; i < num_elems; i++) {
-                    int32_t e_id = entities[base + i].id;
-                    LeafCenter &center = ctx.getUnsafe<LeafCenter>(e_id);
+                    const LeafCenter &center = get_center(i);
                     center_min = Vector3::min(center_min, center);
                     center_max = Vector3::max(center_max, center);
                 }
@@ -116,25 +128,19 @@ void BVH::build(Context &ctx, Entity *entities,
                     int end = num_elems;
 
                     while (start < end) {
-                        auto center_component = [&](int32_t idx) {
-                            LeafCenter &center = ctx.getUnsafe<LeafCenter>(
-                                entities[base + idx].id);
-                            return get_component(center);
-                        };
-
-                        while (start < end && center_component(start) < 
-                               split_val) {
+                        while (start < end &&
+                               get_component(get_center(start)) < split_val) {
                             ++start;
                         }
 
-                        while (start < end && center_component(end - 1) >=
-                               split_val) {
+                        while (start < end && get_component(
+                                get_center(end - 1)) >= split_val) {
                             --end;
                         }
 
                         if (start < end) {
-                            std::swap(entities[base + start],
-                                      entities[base + end - 1]);
+                            std::swap(sorted_leaves_[base + start],
+                                      sorted_leaves_[base + end - 1]);
                             ++start;
                             --end;
                         }
@@ -266,25 +272,15 @@ void BVH::build(Context &ctx, Entity *entities,
     }
 }
 
-void BVH::update(Context &ctx,
-                 Entity *added_entities, CountT num_added_entities,
-                 Entity *removed_entities, CountT num_removed_entities,
-                 Entity *moved_entities, CountT num_moved_entities)
+void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
 {
-    if (num_added_entities > 0) {
-        build(ctx, added_entities, num_added_entities);
-    }
+    for (CountT i = 0; i < num_moved; i++) {
+        int32_t leaf_id = moved_leaf_ids[i].id;
+        const LeafAABB &leaf_aabb = leaf_aabbs_[leaf_id];
+        uint32_t leaf_parent = leaf_parents_[leaf_id];
 
-    (void)removed_entities;
-    (void)num_removed_entities;
-
-    for (int i = 0; i < (int)num_moved_entities; i++) {
-        int32_t e_id = moved_entities[i].id;
-        const LeafAABB &leaf_aabb = ctx.getUnsafe<LeafAABB>(e_id);
-        int32_t leaf_idx = ctx.getUnsafe<LeafID>(e_id).id;
-
-        int32_t node_idx = int32_t(leaf_idx >> 2_u32);
-        int32_t sub_idx = int32_t(leaf_idx & 3);
+        int32_t node_idx = int32_t(leaf_parent >> 2_u32);
+        int32_t sub_idx = int32_t(leaf_parent & 3);
 
         Node &leaf_node = nodes_[node_idx];
         leaf_node.minX[sub_idx] = leaf_aabb.pMin.x;
@@ -348,19 +344,14 @@ void BVH::update(Context &ctx,
         }
     }
 }
-#endif
 
-inline void preprocessSystem(Context &,
-                             const Position &position,
-                             const Rotation &rotation,
-                             LeafAABB &leaf_aabb,
-                             LeafCenter &leaf_center)
+void BVH::updateLeaf(const Position &position,
+                     const Rotation &rotation,
+                     const LeafID &leaf_id)
 {
-    // No actual mesh, just hardcode a fake 2 *unit cube centered around
-    // translation
-    
     Mat3x4 model_mat = Mat3x4::fromTRS(position, rotation);
 
+    // No actual mesh, just hardcode a fake 2 *unit cube centered around
     Vector3 cube[8] = {
         model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
         model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
@@ -372,26 +363,42 @@ inline void preprocessSystem(Context &,
         model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
     };
 
+    LeafAABB &leaf_aabb = leaf_aabbs_[leaf_id.id];
+    LeafCenter &leaf_center = leaf_centers_[leaf_id.id];
+
     leaf_aabb = AABB::point(cube[0]);
     for (int i = 1; i < 8; i++) {
         leaf_aabb.expand(cube[i]);
     }
 
     leaf_center = (leaf_aabb.pMin + leaf_aabb.pMax) / 2;
+    sorted_leaves_[leaf_id.id] = leaf_id.id;
+
+    printf("%d (%f %f %f)\n", leaf_id.id, leaf_center.x, leaf_center.y, leaf_center.z);
 }
 
-void registerECS(Context &ctx)
+void BVH::updateLeavesSystem(
+    Context &ctx,
+    Loc sys_loc,
+    const Position &pos,
+    const Rotation &rot,
+    const LeafID &leaf_id)
 {
-    ctx.registerComponent<LeafAABB>();
-    ctx.registerComponent<LeafCenter>();
-    ctx.registerComponent<LeafID>();
+    BVH &bvh = ctx.getUnsafe<BVH>(sys_loc);
+    bvh.updateLeaf(pos, rot, leaf_id);
+}
+
+void registerTypes(ECSRegistry &registry)
+{
+    registry.registerComponent<LeafID>();
+    registry.registerComponent<BVH>();
 }
 
 TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
                              Span<const TaskGraph::NodeID> deps)
 {
     auto preprocess_node = builder.parallelForNode<Context,
-        preprocessSystem, Position, Rotation, LeafAABB, LeafCenter>(deps);
+        BVH::updateLeavesSystem, Position, Rotation, LeafAABB, LeafCenter>(deps);
 
     return preprocess_node;
 }

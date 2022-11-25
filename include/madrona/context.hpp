@@ -48,6 +48,9 @@ public:
     template <typename ComponentT>
     inline ComponentT & getUnsafe(int32_t e_id);
 
+    template <typename ComponentT>
+    inline ComponentT & getUnsafe(Loc l);
+
     template <typename ArchetypeT>
     inline void clearArchetype();
 
