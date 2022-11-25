@@ -274,8 +274,13 @@ void BVH::rebuild()
 
 void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
 {
-    for (CountT i = 0; i < num_moved; i++) {
-        int32_t leaf_id = moved_leaf_ids[i].id;
+    (void)moved_leaf_ids;
+    (void)num_moved;
+
+    int32_t num_moved_hacked = num_leaves_.load(std::memory_order_relaxed);
+
+    for (CountT i = 0; i < num_moved_hacked; i++) {
+        int32_t leaf_id = i;
         const LeafAABB &leaf_aabb = leaf_aabbs_[leaf_id];
         uint32_t leaf_parent = leaf_parents_[leaf_id];
 
@@ -412,7 +417,7 @@ void System::updateLeavesEntry(
 void System::updateBVHEntry(
     Context &, BVH &bvh)
 {
-    bvh.rebuild();
+    bvh.refit(nullptr, 0);
 }
 
 

@@ -67,17 +67,22 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
 {
     worldBounds = env_init.worldBounds;
 
+    broadphase::System::init(ctx, env_init.numObjs * 10);
+
+    broadphase::BVH &bp_bvh = ctx.getSingleton<broadphase::BVH>();
     for (int i = 0; i < (int)env_init.numObjs; i++) {
         Entity e = ctx.makeEntityNow<Sphere>();
         Position &position = ctx.getComponent<Sphere, Position>(e);
         Rotation &rotation = ctx.getComponent<Sphere, Rotation>(e);
+        broadphase::LeafID &leaf_id = ctx.getComponent<Sphere, broadphase::LeafID>(e);
+        leaf_id = bp_bvh.reserveLeaf();
 
         position = env_init.objsInit[i].initPosition;
         rotation = env_init.objsInit[i].initRotation;
         spheres[i] = e;
     }
 
-    broadphase::System::init(ctx, env_init.numObjs * 10);
+    bp_bvh.rebuild();
 
 #if 0
     const int max_collisions = env_init.numObjs * env_init.numObjs;
