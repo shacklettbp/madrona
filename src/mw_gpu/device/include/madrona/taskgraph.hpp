@@ -142,7 +142,7 @@ public:
             QueryRef *query_ref = query.getSharedRef();
             query_ref->numReferences.fetch_add(1, std::memory_order_relaxed);
 
-            registerNode(NodeInfo {
+            return registerNode(NodeInfo {
                 .type = NodeType::ParallelFor,
                 .funcID = func_id,
                 .data = {

@@ -42,9 +42,11 @@ public:
     void refit(LeafID *leaf_ids, CountT num_moved);
 
     template <typename Fn>
-    inline void findOverlaps(math::AABB &aabb, Fn &&fn) const;
+    inline void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
 
-    void updateLeaf(LeafID leaf_id, const CollisionAABB &obj_aabb);
+    void updateLeaf(Entity e,
+                    LeafID leaf_id,
+                    const CollisionAABB &obj_aabb);
 
 private:
     static constexpr int32_t sentinel_ = 0xFFFF'FFFF_i32;
@@ -62,10 +64,11 @@ private:
         int32_t parentID;
     
         inline bool isLeaf(IdxT child) const;
-        inline uint32_t leafRawEntity(IdxT child) const;
+        inline int32_t leafIDX(IdxT child) const;
     
-        inline void setLeaf(IdxT child, int32_t entity_id);
+        inline void setLeaf(IdxT child, int32_t idx);
         inline void setInternal(IdxT child, int32_t internal_idx);
+        inline bool hasChild(IdxT child) const;
         inline void clearChild(IdxT child);
     };
 
@@ -75,6 +78,7 @@ private:
     math::AABB *leaf_aabbs_;
     math::Vector3 *leaf_centers_;
     uint32_t *leaf_parents_;
+    Entity *leaf_entities_;
     int32_t *sorted_leaves_;
     std::atomic<int32_t> num_leaves_;
     int32_t num_allocated_leaves_;
@@ -90,19 +94,31 @@ public:
                                         Span<const TaskGraph::NodeID> deps);
 
 private:
-    static void updateLeavesEntry(
+    static inline void updateLeavesEntry(
         Context &ctx,
+        const Entity &e,
         const LeafID &leaf_id,
         const CollisionAABB &aabb);
 
-    static void updateBVHEntry(
+    static inline void updateBVHEntry(
         Context &ctx, BVH &bvh);
 
-    static void findOverlappingEntry(
-        Context &ctx, const CollisionAABB &obj_aabb);
+    static inline void findOverlappingEntry(
+        Context &ctx,
+        const Entity &e,
+        const CollisionAABB &obj_aabb);
 
 };
 
+}
+
+namespace narrowphase {
+
+class System {
+public:
+    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
+                                        Span<const TaskGraph::NodeID> deps);
+};
 
 }
 

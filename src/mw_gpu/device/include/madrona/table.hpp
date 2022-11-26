@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 
 namespace madrona {
@@ -15,7 +16,7 @@ struct Table {
 
     std::array<void *, maxColumns> columns;
 
-    int32_t numRows;
+    std::atomic_int32_t numRows;
 };
 
 }

@@ -17,14 +17,14 @@ StateManager::StateManager(uint32_t)
 {
 #pragma unroll(1)
     for (int32_t i = 0; i < (int32_t)max_components_; i++) {
-        components_.emplace(i, Optional<TypeInfo>::none());
+        Optional<TypeInfo>::noneAt(&components_[i]);
     }
 
     // Without disabling unrolling, this loop 100x's compilation time for
     // this file.... Optional must be really slow.
 #pragma unroll(1)
     for (int32_t i = 0; i < (int32_t)max_archetypes_; i++) {
-        archetypes_.emplace(i, Optional<ArchetypeStore>::none());
+        Optional<ArchetypeStore>::noneAt(&archetypes_[i]);
     }
 
     registerComponent<Entity>();
@@ -50,7 +50,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
       tbl {},
       columnLookup(lookup_input, num_user_components)
 {
-    tbl.numRows = 0;
+    tbl.numRows.store(0, std::memory_order_relaxed);
     for (int i = 0 ; i < (int)num_columns; i++) {
         tbl.columns[i] = malloc(type_infos[i].numBytes * maxRowsPerTable);
     }
@@ -130,6 +130,7 @@ void StateManager::makeQuery(const uint32_t *components,
         if (!has_components) {
             continue;
         }
+
 
         num_matching_archetypes += 1;
         query_data_[query_data_offset_++] = uint32_t(archetype_idx);

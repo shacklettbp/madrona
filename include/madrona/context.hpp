@@ -54,6 +54,10 @@ public:
     template <typename ComponentT>
     inline ComponentT & getUnsafe(Loc l);
 
+    // FIXME: remove
+    template <typename ArchetypeT, typename ComponentT>
+    ComponentT & getComponent(Entity e);
+
     template <typename ArchetypeT>
     inline void clearArchetype();
 

@@ -34,14 +34,16 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
         all_dependencies_[offset + i] = dependencies[i];
     }
 
-    nodes_[num_nodes_++] = StagedNode {
+    uint32_t node_idx = num_nodes_++;
+
+    nodes_[node_idx] = StagedNode {
         node_info,
         offset,
         num_deps,
     };
 
     return NodeID {
-        num_nodes_ - 1,
+        node_idx,
     };
 }
 
@@ -70,26 +72,23 @@ void TaskGraph::Builder::build(TaskGraph *out)
     uint32_t sorted_idx = 1;
 
     while (num_remaining_nodes > 0) {
-        uint32_t cur_node_idx = remaining_nodes[0];
+        uint32_t cur_node_idx;
+        for (cur_node_idx = 0; queued[cur_node_idx]; cur_node_idx++) {}
+
         StagedNode &cur_node = nodes_[cur_node_idx];
 
         bool dependencies_satisfied = true;
         for (uint32_t dep_offset = 0; dep_offset < cur_node.numDependencies;
              dep_offset++) {
-            uint32_t dep_nodetem_idx =
+            uint32_t dep_node_idx =
                 all_dependencies_[cur_node.dependencyOffset + dep_offset].id;
-            if (!queued[dep_nodetem_idx]) {
+            if (!queued[dep_node_idx]) {
                 dependencies_satisfied = false;
                 break;
             }
         }
 
-        remaining_nodes[0] =
-            remaining_nodes[num_remaining_nodes - 1];
-        if (!dependencies_satisfied) {
-            remaining_nodes[num_remaining_nodes - 1] =
-                cur_node_idx;
-        } else {
+        if (dependencies_satisfied) {
             queued[cur_node_idx] = true;
             new (&sorted_nodes[sorted_idx++]) NodeState {
                 cur_node.node,
@@ -279,7 +278,7 @@ void TaskGraph::finishWork()
                                             std::memory_order_relaxed);
                 next_node.totalNumInvocations.store(new_num_invocations,
                     std::memory_order_relaxed);
-            }
+            } 
 
             cur_node_idx_.store(next_node_idx, std::memory_order_release);
             break;

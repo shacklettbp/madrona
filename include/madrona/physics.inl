@@ -16,7 +16,7 @@ LeafID BVH::reserveLeaf()
 }
 
 template <typename Fn>
-void BVH::findOverlaps(madrona::math::AABB &aabb, Fn &&fn) const
+void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 {
     int32_t stack[128];
     stack[0] = 0;
@@ -26,10 +26,9 @@ void BVH::findOverlaps(madrona::math::AABB &aabb, Fn &&fn) const
         int32_t node_idx = stack[--stack_size];
         const Node &node = nodes_[node_idx];
         for (int i = 0; i < 4; i++) {
-            int child_idx = node.children[i];
-            if (child_idx == sentinel_) {
-                continue;
-            }
+            if (!node.hasChild(i)) {
+                continue; // Technically this could be break?
+            };
 
             madrona::math::AABB child_aabb {
                 .pMin = {
@@ -46,9 +45,10 @@ void BVH::findOverlaps(madrona::math::AABB &aabb, Fn &&fn) const
 
             if (aabb.overlaps(child_aabb)) {
                 if (node.isLeaf(i)) {
-                    fn(node.leafRawEntity(i));
+                    Entity e = leaf_entities_[node.leafIDX(i)];
+                    fn(e);
                 } else {
-                    stack[stack_size++] = child_idx;
+                    stack[stack_size++] = node.children[i];
                 }
             }
         }
@@ -60,19 +60,24 @@ bool BVH::Node::isLeaf(IdxT child) const
     return children[child] & 0x80000000;
 }
 
-uint32_t BVH::Node::leafRawEntity(IdxT child) const
+int32_t BVH::Node::leafIDX(IdxT child) const
 {
-    return uint32_t(children[child] & ~0x80000000);
+    return children[child] & ~0x80000000;
 }
 
-void BVH::Node::setLeaf(IdxT child, int32_t entity_id)
+void BVH::Node::setLeaf(IdxT child, int32_t idx)
 {
-    children[child] = 0x80000000 | entity_id;
+    children[child] = 0x80000000 | idx;
 }
 
 void BVH::Node::setInternal(IdxT child, int32_t internal_idx)
 {
     children[child] = internal_idx;
+}
+
+bool BVH::Node::hasChild(IdxT child) const
+{
+    return children[child] != sentinel_;
 }
 
 void BVH::Node::clearChild(IdxT child)

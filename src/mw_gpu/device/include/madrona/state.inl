@@ -177,7 +177,7 @@ Entity StateManager::makeEntityNow(WorldID world_id)
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     Table &tbl = archetypes_[archetype_id]->tbl;
 
-    int32_t row = tbl.numRows++;
+    int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
 
     // FIXME: proper entity mapping on GPU
     Entity e {

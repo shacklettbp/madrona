@@ -7,6 +7,13 @@ using namespace math;
 
 namespace phys {
 
+struct CandidateCollision {
+    Entity a;
+    Entity b;
+};
+
+struct CandidateArchetype : Archetype<CandidateCollision> {};
+
 static inline AABB computeAABBFromMesh(
     const base::Position &pos,
     const base::Rotation &rot)
@@ -56,6 +63,9 @@ void registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<RigidBody>();
     registry.registerComponent<CollisionAABB>();
+
+    registry.registerComponent<CandidateCollision>();
+    registry.registerArchetype<CandidateArchetype>();
 }
 
 namespace broadphase {
@@ -68,6 +78,7 @@ BVH::BVH(CountT max_leaves)
       leaf_aabbs_((AABB *)malloc(sizeof(AABB) * max_leaves)),
       leaf_centers_((Vector3 *)malloc(sizeof(Vector3) * max_leaves)),
       leaf_parents_((uint32_t *)malloc(sizeof(uint32_t) * max_leaves)),
+      leaf_entities_((Entity *)malloc(sizeof(Entity) * max_leaves)),
       sorted_leaves_((int32_t *)malloc(sizeof(int32_t) * max_leaves)),
       num_leaves_(0),
       num_allocated_leaves_(max_leaves)
@@ -124,7 +135,7 @@ void BVH::rebuild()
                     node.maxY[i] = aabb.pMax.y;
                     node.maxZ[i] = aabb.pMax.z;
                 } else {
-                    node.children[i] = sentinel_;
+                    node.clearChild(i);
                     node.minX[i] = FLT_MAX;
                     node.minY[i] = FLT_MAX;
                     node.minZ[i] = FLT_MAX;
@@ -140,8 +151,8 @@ void BVH::rebuild()
             entry.nodeID = node_id;
 
             Node &node = nodes_[node_id];
-            for (int i = 0; i < 4; i++) {
-                node.children[i] = sentinel_;
+            for (CountT i = 0; i < 4; i++) {
+                node.clearChild(i);
             }
             node.parentID = entry.parentID;
 
@@ -285,9 +296,9 @@ void BVH::rebuild()
             continue;
         }
 
-        AABB combined_aabb  = AABB::invalid(); 
-        for (int i = 0; i < 4; i++) {
-            if (node.children[i] == sentinel_) {
+        AABB combined_aabb = AABB::invalid(); 
+        for (CountT i = 0; i < 4; i++) {
+            if (!node.hasChild(i)) {
                 break;
             }
 
@@ -306,14 +317,14 @@ void BVH::rebuild()
         }
 
         Node &parent = nodes_[node.parentID];
-        int child_offset;
+        CountT child_offset;
         for (child_offset = 0; ; child_offset++) {
             if (parent.children[child_offset] == sentinel_) {
                 break;
             }
         }
 
-        parent.children[child_offset] = node_id;
+        parent.setInternal(child_offset, node_id);
         parent.minX[child_offset] = combined_aabb.pMin.x;
         parent.minY[child_offset] = combined_aabb.pMin.y;
         parent.minZ[child_offset] = combined_aabb.pMin.z;
@@ -401,7 +412,8 @@ void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
     }
 }
 
-void BVH::updateLeaf(LeafID leaf_id,
+void BVH::updateLeaf(Entity e,
+                     LeafID leaf_id,
                      const CollisionAABB &obj_aabb)
 {
     // FIXME, handle difference between potentially inflated leaf AABB and
@@ -410,11 +422,10 @@ void BVH::updateLeaf(LeafID leaf_id,
     leaf_aabb = obj_aabb;
 
     Vector3 &leaf_center = leaf_centers_[leaf_id.id];
-
     leaf_center = (leaf_aabb.pMin + leaf_aabb.pMax) / 2;
-    sorted_leaves_[leaf_id.id] = leaf_id.id;
 
-    printf("%d (%f %f %f)\n", leaf_id.id, leaf_center.x, leaf_center.y, leaf_center.z);
+    leaf_entities_[leaf_id.id] = e;
+    sorted_leaves_[leaf_id.id] = leaf_id.id;
 }
 
 void System::init(Context &ctx, CountT max_num_leaves)
@@ -433,24 +444,25 @@ TaskGraph::NodeID System::setupTasks(TaskGraph::Builder &builder,
                                      Span<const TaskGraph::NodeID> deps)
 {
     auto preprocess_node = builder.parallelForNode<Context,
-        System::updateLeavesEntry, LeafID, CollisionAABB>(deps);
+        System::updateLeavesEntry, Entity, LeafID, CollisionAABB>(deps);
 
     auto refit_node = builder.parallelForNode<Context,
         System::updateBVHEntry, BVH>({preprocess_node});
 
     auto find_overlapping_node = builder.parallelForNode<Context,
-        System::findOverlappingEntry, CollisionAABB>({refit_node});
+        System::findOverlappingEntry, Entity, CollisionAABB>({refit_node});
 
     return find_overlapping_node;
 }
 
 void System::updateLeavesEntry(
     Context &ctx,
+    const Entity &e,
     const LeafID &leaf_id,
     const CollisionAABB &aabb)
 {
     BVH &bvh = ctx.getSingleton<BVH>();
-    bvh.updateLeaf(leaf_id, aabb);
+    bvh.updateLeaf(e, leaf_id, aabb);
 }
 
 void System::updateBVHEntry(
@@ -460,11 +472,40 @@ void System::updateBVHEntry(
 }
 
 void System::findOverlappingEntry(
-    Context &ctx, const CollisionAABB &obj_aabb)
+    Context &ctx,
+    const Entity &e,
+    const CollisionAABB &obj_aabb)
 {
     BVH &bvh = ctx.getSingleton<BVH>();
-    (void)bvh;
-    (void)obj_aabb;
+
+    bvh.findOverlaps(obj_aabb, [&](Entity overlapping_entity) {
+        if (e.id < overlapping_entity.id) {
+            Entity candidate_entity = ctx.makeEntityNow<CandidateArchetype>();
+            CandidateCollision &candidate = ctx.getComponent<
+                CandidateArchetype, CandidateCollision>(candidate_entity);
+
+            candidate.a = e;
+            candidate.b = overlapping_entity;
+        }
+    });
+}
+
+}
+
+namespace narrowphase {
+
+inline void processCandidatesEntry(
+    Context &,
+    const CandidateCollision &candidate_collision)
+{
+    printf("%d %d\n", candidate_collision.a.id, candidate_collision.b.id);
+}
+
+TaskGraph::NodeID System::setupTasks(TaskGraph::Builder &builder,
+                                     Span<const TaskGraph::NodeID> deps)
+{
+    return builder.parallelForNode<Context, processCandidatesEntry,
+        CandidateCollision>(deps);
 }
 
 }
