@@ -747,7 +747,7 @@ static CUgraphExec makeTaskGraphRunGraph(CUfunction megakernel)
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
 
-    uint32_t num_megakernel_blocks = 82 * 5; // FIXME
+    uint32_t num_megakernel_blocks = 82 * 4; // FIXME
 
     CUDA_KERNEL_NODE_PARAMS kernel_node_params {
         .func = megakernel,

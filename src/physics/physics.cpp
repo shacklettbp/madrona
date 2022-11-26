@@ -313,7 +313,7 @@ void BVH::rebuild()
             }
         }
 
-        parent.children[child_offset] = entry.nodeID;
+        parent.children[child_offset] = node_id;
         parent.minX[child_offset] = combined_aabb.pMin.x;
         parent.minY[child_offset] = combined_aabb.pMin.y;
         parent.minZ[child_offset] = combined_aabb.pMin.z;
@@ -330,7 +330,6 @@ void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
 
     int32_t num_moved_hacked = num_leaves_.load(std::memory_order_relaxed);
 
-    printf("Refit\n");
     for (CountT i = 0; i < num_moved_hacked; i++) {
         int32_t leaf_id = i;
         const AABB &leaf_aabb = leaf_aabbs_[leaf_id];
@@ -357,7 +356,7 @@ void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
                 if (node.children[j] == child_idx) {
                     child_offset = j;
                     break;
-                } 
+                }
             }
             assert(child_offset != -1);
 
