@@ -7,6 +7,57 @@ using namespace math;
 
 namespace phys {
 
+static inline AABB computeAABBFromMesh(
+    const base::Position &pos,
+    const base::Rotation &rot)
+{
+    Mat3x4 model_mat = Mat3x4::fromTRS(pos, rot);
+
+    // No actual mesh, just hardcode a fake 2 *unit cube centered around
+    Vector3 cube[8] = {
+        model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
+        model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
+    };
+
+    AABB aabb = AABB::point(cube[0]);
+    for (int i = 1; i < 8; i++) {
+        aabb.expand(cube[i]);
+    }
+
+    return aabb;
+}
+
+CollisionAABB::CollisionAABB(const base::Position &pos,
+                             const base::Rotation &rot)
+    : AABB(computeAABBFromMesh(pos, rot))
+{}
+
+inline void updateAABBEntry(Context &,
+                            const Position &pos,
+                            const Rotation &rot,
+                            CollisionAABB &out_aabb)
+{
+    out_aabb = CollisionAABB(pos, rot);
+}
+
+TaskGraph::NodeID CollisionAABB::setupTasks(TaskGraph::Builder &builder,
+                                            Span<const TaskGraph::NodeID> deps)
+{
+    return builder.parallelForNode<Context, updateAABBEntry, Position, Rotation, CollisionAABB>(deps);
+}
+
+void registerTypes(ECSRegistry &registry)
+{
+    registry.registerComponent<RigidBody>();
+    registry.registerComponent<CollisionAABB>();
+}
+
 namespace broadphase {
 
 BVH::BVH(CountT max_leaves)
@@ -14,8 +65,8 @@ BVH::BVH(CountT max_leaves)
                             numInternalNodes(max_leaves))),
       num_nodes_(0),
       num_allocated_nodes_(numInternalNodes(max_leaves)),
-      leaf_aabbs_((LeafAABB *)malloc(sizeof(LeafAABB) * max_leaves)),
-      leaf_centers_((LeafCenter *)malloc(sizeof(LeafCenter) * max_leaves)),
+      leaf_aabbs_((AABB *)malloc(sizeof(AABB) * max_leaves)),
+      leaf_centers_((Vector3 *)malloc(sizeof(Vector3) * max_leaves)),
       leaf_parents_((uint32_t *)malloc(sizeof(uint32_t) * max_leaves)),
       sorted_leaves_((int32_t *)malloc(sizeof(int32_t) * max_leaves)),
       num_leaves_(0),
@@ -115,7 +166,7 @@ void BVH::rebuild()
                 };
 
                 for (int i = 0; i < num_elems; i++) {
-                    const LeafCenter &center = get_center(i);
+                    const Vector3 &center = get_center(i);
                     center_min = Vector3::min(center_min, center);
                     center_max = Vector3::max(center_max, center);
                 }
@@ -279,9 +330,10 @@ void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
 
     int32_t num_moved_hacked = num_leaves_.load(std::memory_order_relaxed);
 
+    printf("Refit\n");
     for (CountT i = 0; i < num_moved_hacked; i++) {
         int32_t leaf_id = i;
-        const LeafAABB &leaf_aabb = leaf_aabbs_[leaf_id];
+        const AABB &leaf_aabb = leaf_aabbs_[leaf_id];
         uint32_t leaf_parent = leaf_parents_[leaf_id];
 
         int32_t node_idx = int32_t(leaf_parent >> 2_u32);
@@ -305,7 +357,7 @@ void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
                 if (node.children[j] == child_idx) {
                     child_offset = j;
                     break;
-                }
+                } 
             }
             assert(child_offset != -1);
 
@@ -350,31 +402,15 @@ void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
     }
 }
 
-void BVH::updateLeaf(const Position &position,
-                     const Rotation &rotation,
-                     const LeafID &leaf_id)
+void BVH::updateLeaf(LeafID leaf_id,
+                     const CollisionAABB &obj_aabb)
 {
-    Mat3x4 model_mat = Mat3x4::fromTRS(position, rotation);
+    // FIXME, handle difference between potentially inflated leaf AABB and
+    // object AABB
+    AABB &leaf_aabb = leaf_aabbs_[leaf_id.id];
+    leaf_aabb = obj_aabb;
 
-    // No actual mesh, just hardcode a fake 2 *unit cube centered around
-    Vector3 cube[8] = {
-        model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
-    };
-
-    LeafAABB &leaf_aabb = leaf_aabbs_[leaf_id.id];
-    LeafCenter &leaf_center = leaf_centers_[leaf_id.id];
-
-    leaf_aabb = AABB::point(cube[0]);
-    for (int i = 1; i < 8; i++) {
-        leaf_aabb.expand(cube[i]);
-    }
+    Vector3 &leaf_center = leaf_centers_[leaf_id.id];
 
     leaf_center = (leaf_aabb.pMin + leaf_aabb.pMax) / 2;
     sorted_leaves_[leaf_id.id] = leaf_id.id;
@@ -398,20 +434,24 @@ TaskGraph::NodeID System::setupTasks(TaskGraph::Builder &builder,
                                      Span<const TaskGraph::NodeID> deps)
 {
     auto preprocess_node = builder.parallelForNode<Context,
-        System::updateLeavesEntry, base::Position,
-        base::Rotation, LeafID>(deps);
+        System::updateLeavesEntry, LeafID, CollisionAABB>(deps);
 
-    return preprocess_node;
+    auto refit_node = builder.parallelForNode<Context,
+        System::updateBVHEntry, BVH>({preprocess_node});
+
+    auto find_overlapping_node = builder.parallelForNode<Context,
+        System::findOverlappingEntry, CollisionAABB>({refit_node});
+
+    return find_overlapping_node;
 }
 
 void System::updateLeavesEntry(
     Context &ctx,
-    const base::Position &pos,
-    const base::Rotation &rot,
-    const LeafID &leaf_id)
+    const LeafID &leaf_id,
+    const CollisionAABB &aabb)
 {
     BVH &bvh = ctx.getSingleton<BVH>();
-    bvh.updateLeaf(pos, rot, leaf_id);
+    bvh.updateLeaf(leaf_id, aabb);
 }
 
 void System::updateBVHEntry(
@@ -420,7 +460,13 @@ void System::updateBVHEntry(
     bvh.refit(nullptr, 0);
 }
 
-
+void System::findOverlappingEntry(
+    Context &ctx, const CollisionAABB &obj_aabb)
+{
+    BVH &bvh = ctx.getSingleton<BVH>();
+    (void)bvh;
+    (void)obj_aabb;
+}
 
 }
 

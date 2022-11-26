@@ -30,7 +30,7 @@ static Vector3 randomPosition(const AABB &bounds)
 
 EnvInit generateEnvironmentInitialization()
 {
-    const int num_init_objs = 100;
+    const int num_init_objs = 10;
 
     ObjectInit *objs_init = 
         (ObjectInit *)malloc(sizeof(ObjectInit) * num_init_objs);

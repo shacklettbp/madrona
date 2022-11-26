@@ -2,6 +2,8 @@
 #include <madrona/context.hpp>
 
 namespace madrona {
+using namespace math;
+
 namespace base {
 
 void registerTypes(ECSRegistry &registry)

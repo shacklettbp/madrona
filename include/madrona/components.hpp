@@ -1,6 +1,7 @@
 #pragma once
 #include <madrona/math.hpp>
 #include <madrona/fwd.hpp>
+#include <madrona/taskgraph.hpp>
 
 namespace madrona {
 namespace base {

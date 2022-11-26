@@ -11,19 +11,21 @@ struct RigidBody {
     math::Vector3 invInertiaTensor;
 };
 
-namespace broadphase {
-
-struct LeafAABB : math::AABB {
-    LeafAABB(math::AABB aabb)
+struct CollisionAABB : math::AABB {
+    CollisionAABB(math::AABB aabb)
         : AABB(aabb)
     {}
+
+    CollisionAABB(const base::Position &pos,
+                  const base::Rotation &rot);
+    
+    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
+                                        Span<const TaskGraph::NodeID> deps);
 };
 
-struct LeafCenter : math::Vector3 {
-    LeafCenter(math::Vector3 v)
-        : Vector3(v)
-    {}
-};
+void registerTypes(ECSRegistry &registry);
+
+namespace broadphase {
 
 struct LeafID {
     int32_t id;
@@ -42,10 +44,7 @@ public:
     template <typename Fn>
     inline void findOverlaps(math::AABB &aabb, Fn &&fn) const;
 
-    void updateLeaf(
-        const base::Position &position,
-        const base::Rotation &rotation,
-        const LeafID &leaf_id);
+    void updateLeaf(LeafID leaf_id, const CollisionAABB &obj_aabb);
 
 private:
     static constexpr int32_t sentinel_ = 0xFFFF'FFFF_i32;
@@ -73,8 +72,8 @@ private:
     Node *nodes_;
     CountT num_nodes_;
     const CountT num_allocated_nodes_;
-    LeafAABB *leaf_aabbs_;
-    LeafCenter *leaf_centers_;
+    math::AABB *leaf_aabbs_;
+    math::Vector3 *leaf_centers_;
     uint32_t *leaf_parents_;
     int32_t *sorted_leaves_;
     std::atomic<int32_t> num_leaves_;
@@ -93,12 +92,14 @@ public:
 private:
     static void updateLeavesEntry(
         Context &ctx,
-        const base::Position &position,
-        const base::Rotation &rotation,
-        const LeafID &leaf_id);
+        const LeafID &leaf_id,
+        const CollisionAABB &aabb);
 
     static void updateBVHEntry(
         Context &ctx, BVH &bvh);
+
+    static void findOverlappingEntry(
+        Context &ctx, const CollisionAABB &obj_aabb);
 
 };
 

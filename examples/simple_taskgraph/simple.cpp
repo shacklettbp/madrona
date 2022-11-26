@@ -38,6 +38,7 @@ inline void solverSystem(Engine &ctx, SolverData &)
 void SimpleSim::registerTypes(ECSRegistry &registry)
 {
     base::registerTypes(registry);
+    phys::registerTypes(registry);
     broadphase::System::registerTypes(registry);
 
     registry.registerSingleton<SolverData>();
@@ -50,8 +51,10 @@ void SimpleSim::setupTasks(TaskGraph::Builder &builder)
     auto clamp_sys =
         builder.parallelForNode<Engine, clampSystem, Position>({});
 
+    auto aabb_sys = CollisionAABB::setupTasks(builder, {clamp_sys});
+
     auto broadphase_sys = broadphase::System::setupTasks(builder,
-        { clamp_sys });
+        { aabb_sys });
     
     builder.parallelForNode<Engine, solverSystem, SolverData>(
         { broadphase_sys });
@@ -74,12 +77,17 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
         Entity e = ctx.makeEntityNow<Sphere>();
         Position &position = ctx.getComponent<Sphere, Position>(e);
         Rotation &rotation = ctx.getComponent<Sphere, Rotation>(e);
-        broadphase::LeafID &leaf_id = ctx.getComponent<Sphere, broadphase::LeafID>(e);
-        leaf_id = bp_bvh.reserveLeaf();
-
         position = env_init.objsInit[i].initPosition;
         rotation = env_init.objsInit[i].initRotation;
         spheres[i] = e;
+
+        CollisionAABB &aabb = ctx.getComponent<Sphere, CollisionAABB>(e);
+        aabb = CollisionAABB(position, rotation);
+
+        broadphase::LeafID &leaf_id = ctx.getComponent<Sphere, broadphase::LeafID>(e);
+        leaf_id = bp_bvh.reserveLeaf();
+
+        bp_bvh.updateLeaf(leaf_id, aabb);
     }
 
     bp_bvh.rebuild();

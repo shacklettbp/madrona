@@ -40,108 +40,10 @@ struct EnvInit {
     uint32_t numObjs;
 };
 
-// List of Physics Related Components per-object
-
-struct PhysicsAABB : madrona::math::AABB {
-    PhysicsAABB(madrona::math::AABB b)
-        : AABB(b)
-    {}
-};
-
-struct PhysicsBVHNode {
-    float minX[4];
-    float minY[4];
-    float minZ[4];
-    float maxX[4];
-    float maxY[4];
-    float maxZ[4];
-    int32_t children[4];
-    int32_t parentID;
-
-    inline void clearChild(int32_t i)
-    {
-        children[i] = 0xFFFFFFFF;
-    }
-
-    inline bool isLeaf(int32_t i)
-    {
-        return children[i] & 0x80000000;
-    }
-
-    inline void setLeaf(int32_t i, int32_t obj_id)
-    {
-        children[i] = 0x80000000 | obj_id;
-    }
-
-    inline uint32_t leafObjID(int32_t i)
-    {
-        return uint32_t(children[i] & ~0x80000000);
-    }
-};
-
-struct SimpleSim;
-
-struct PhysicsBVH {
-    PhysicsBVH(int32_t initial_node_allocation);
-
-    inline void build(SimpleSim &sim, int32_t *objs, int32_t num_objs);
-
-    inline void update(SimpleSim &sim,
-                       int32_t *added_objects, int32_t num_added_objects,
-                       int32_t *removed_objects, int32_t num_removed_objects,
-                       int32_t *moved_objects, int32_t num_moved_objects);
-
-    template <typename Fn>
-    inline void test(madrona::math::AABB &aabb, Fn &&fn)
-    {
-        int32_t stack[128];
-        stack[0] = 0;
-        int32_t stack_size = 1;
-
-        while (stack_size > 0) {
-            int32_t node_idx = stack[--stack_size];
-            PhysicsBVHNode &node = nodes[node_idx];
-            for (int i = 0; i < 4; i++) {
-                int child_idx = node.children[i];
-                if (child_idx == sentinel) {
-                    continue;
-                }
-
-                madrona::math::AABB child_aabb {
-                    .pMin = {
-                        node.minX[i],
-                        node.minY[i],
-                        node.minZ[i],
-                    },
-                    .pMax = {
-                        node.maxX[i],
-                        node.maxY[i],
-                        node.maxZ[i],
-                    },
-                };
-
-                if (aabb.overlaps(child_aabb)) {
-                    if (node.isLeaf(i)) {
-                        fn(node.leafObjID(i));
-                    } else {
-                        stack[stack_size++] = child_idx;
-                    }
-                }
-            }
-        }
-    }
-
-    static constexpr int32_t sentinel = int32_t(-1);
-
-    PhysicsBVHNode *nodes;
-    int32_t numNodes;
-    int32_t numAllocatedNodes;
-    int32_t freeHead;
-};
-
 struct Sphere : public madrona::Archetype<
     madrona::base::Position, 
     madrona::base::Rotation,
+    madrona::phys::CollisionAABB,
     madrona::phys::broadphase::LeafID
 > {};
 
