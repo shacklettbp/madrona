@@ -45,7 +45,11 @@ void SimpleSim::setupTasks(TaskGraph::Builder &builder)
         builder.parallelForNode<Engine, clampSystem, Position>({});
 
     auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {clamp_sys});
-    (void)phys_sys;
+
+    auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
+        {phys_sys});
+
+    (void)phys_cleanup_sys;
 
     printf("Setup done\n");
 }

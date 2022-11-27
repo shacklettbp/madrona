@@ -20,6 +20,8 @@ struct Contact {
     Vector3 normal;
 };
 
+struct CollisionEventTemporary : Archetype<CollisionEvent> {};
+
 struct SolverData {
     Contact *contacts;
     std::atomic<CountT> numContacts;
@@ -489,7 +491,7 @@ inline void processCandidatesEntry(
     // FIXME real narrowphase
     constexpr float sphere_radius = 1.f;
     Vector3 to_a = b_pos - a_pos;
-    float dist = to_a.length2();
+    float dist = to_a.length();
 
     SolverData &solver = ctx.getSingleton<SolverData>();
 
@@ -499,6 +501,12 @@ inline void processCandidatesEntry(
             candidate_collision.b,
             to_a / dist,
         });
+        
+        Loc loc = ctx.makeTemporary<CollisionEventTemporary>();
+        ctx.getUnsafe<CollisionEvent>(loc) = CollisionEvent {
+            candidate_collision.a,
+            candidate_collision.b,
+        };
     }
 }
 
@@ -546,10 +554,14 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerComponent<RigidBody>();
     registry.registerComponent<CollisionAABB>();
 
+    registry.registerComponent<CollisionEvent>();
+    registry.registerArchetype<CollisionEventTemporary>();
+
     registry.registerComponent<CandidateCollision>();
     registry.registerArchetype<CandidateTemporary>();
 
     registry.registerSingleton<SolverData>();
+
 }
 
 TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
@@ -581,6 +593,11 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     return solver;
 }
 
+TaskGraph::NodeID RigidBodyPhysicsSystem::setupCleanupTasks(
+    TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps)
+{
+    return builder.clearTemporariesNode<CollisionEventTemporary>(deps);
+}
 
 }
 }

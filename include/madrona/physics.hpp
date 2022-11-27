@@ -20,12 +20,20 @@ struct CollisionAABB : math::AABB {
                   const base::Rotation &rot);
 };
 
+struct CollisionEvent {
+    Entity a;
+    Entity b;
+};
+
 struct RigidBodyPhysicsSystem {
     static void init(Context &ctx, CountT max_dynamic_objects,
                      CountT max_contacts_per_step);
     static void registerTypes(ECSRegistry &registry);
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
                                         Span<const TaskGraph::NodeID> deps);
+
+    static TaskGraph::NodeID setupCleanupTasks(TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> deps);
 
 };
 
