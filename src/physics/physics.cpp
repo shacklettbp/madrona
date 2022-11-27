@@ -480,9 +480,9 @@ void System::findOverlappingEntry(
 
     bvh.findOverlaps(obj_aabb, [&](Entity overlapping_entity) {
         if (e.id < overlapping_entity.id) {
-            Entity candidate_entity = ctx.makeEntityNow<CandidateArchetype>();
-            CandidateCollision &candidate = ctx.getComponent<
-                CandidateArchetype, CandidateCollision>(candidate_entity);
+            Loc candidate_loc = ctx.makeTemporary<CandidateArchetype>();
+            CandidateCollision &candidate = ctx.getUnsafe<
+                CandidateCollision>(candidate_loc);
 
             candidate.a = e;
             candidate.b = overlapping_entity;
@@ -495,10 +495,14 @@ void System::findOverlappingEntry(
 namespace narrowphase {
 
 inline void processCandidatesEntry(
-    Context &,
+    Context &ctx,
     const CandidateCollision &candidate_collision)
 {
-    printf("%d %d\n", candidate_collision.a.id, candidate_collision.b.id);
+    Position &a_pos = ctx.getUnsafe<Position>(candidate_collision.a);
+    Position &b_pos = ctx.getUnsafe<Position>(candidate_collision.b);
+
+    printf("(%f %f %f) (%f %f %f)\n",
+            a_pos.x, a_pos.y, a_pos.z, b_pos.x, b_pos.y, b_pos.z);
 }
 
 TaskGraph::NodeID System::setupTasks(TaskGraph::Builder &builder,

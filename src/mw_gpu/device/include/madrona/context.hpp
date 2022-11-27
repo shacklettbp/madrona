@@ -22,9 +22,11 @@ public:
     template <typename ArchetypeT>
     Entity makeEntityNow();
 
-    // FIXME: remove ArchetypeT
-    template <typename ArchetypeT, typename ComponentT>
-    ComponentT & getComponent(Entity e);
+    template <typename ArchetypeT>
+    Loc makeTemporary();
+
+    template <typename ComponentT>
+    ComponentT & getUnsafe(Entity e);
 
     template <typename ComponentT>
     ComponentT & getUnsafe(Loc loc);

@@ -94,8 +94,14 @@ template <typename SingletonT>
 SingletonT & StateManager::getSingleton(WorldID world_id)
 {
     using ArchetypeT = SingletonArchetype<SingletonT>;
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
 
-    SingletonT *col = getArchetypeColumn<ArchetypeT, SingletonT>();
+    // Abuse the fact that the singleton only has one component that is going
+    // to be in column 2
+    
+    Table &tbl = archetypes_[archetype_id]->tbl;
+    SingletonT *col = (SingletonT *)tbl.columns[2];
+
     return col[world_id.idx];
 }
 
@@ -179,10 +185,25 @@ Entity StateManager::makeEntityNow(WorldID world_id)
 
     int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
 
+    Loc loc {
+        archetype_id,
+        row,
+    };
+
+    int32_t entity_slot_idx =
+        entity_store_.numEntities.fetch_add(1, std::memory_order_relaxed);
+    assert(entity_slot_idx < entity_store_.maxEntities);
+
+    EntityStore::EntitySlot &entity_slot =
+        entity_store_.entities[entity_slot_idx];
+
+    entity_slot.loc = loc;
+    entity_slot.gen = 0;
+
     // FIXME: proper entity mapping on GPU
     Entity e {
-        0,
-        row,
+        entity_slot.gen,
+        entity_slot_idx,
     };
 
     Entity *entity_column = (Entity *)tbl.columns[0];
@@ -195,6 +216,25 @@ Entity StateManager::makeEntityNow(WorldID world_id)
 }
 
 template <typename ArchetypeT>
+Loc StateManager::makeTemporary(WorldID world_id)
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    Table &tbl = archetypes_[archetype_id]->tbl;
+
+    int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
+
+    Loc loc {
+        archetype_id,
+        row,
+    };
+
+    WorldID *world_column = (WorldID *)tbl.columns[1];
+    world_column[row] = world_id;
+
+    return loc;
+}
+
+template <typename ArchetypeT>
 void StateManager::clear()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
@@ -203,17 +243,23 @@ void StateManager::clear()
     tbl.numRows = 0;
 }
 
-template <typename ArchetypeT, typename ComponentT>
-ComponentT * StateManager::getArchetypeColumn()
+template <typename ComponentT>
+ComponentT & StateManager::getUnsafe(Entity e)
 {
-    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    const EntityStore::EntitySlot &slot = entity_store_.entities[e.id];
+    return getUnsafe<ComponentT>(slot.loc);
+}
+
+template <typename ComponentT>
+ComponentT & StateManager::getUnsafe(Loc loc)
+{
+    auto &archetype = *archetypes_[loc.archetype];
     uint32_t component_id = TypeTracker::typeID<ComponentT>();
-    auto &archetype = *archetypes_[archetype_id];
     int32_t col_idx = *archetype.columnLookup.lookup(component_id);
 
     Table &tbl = archetype.tbl;
 
-    return (ComponentT *)(tbl.columns[col_idx]);
+    return ((ComponentT *)(tbl.columns[col_idx]))[loc.row];
 }
 
 }

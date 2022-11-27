@@ -65,6 +65,12 @@ ResultRef<ComponentT> Context::get(Entity e)
 }
 
 template <typename ComponentT>
+ComponentT & Context::getUnsafe(Entity e)
+{
+    return getUnsafe<ComponentT>(e.id);
+}
+
+template <typename ComponentT>
 ComponentT & Context::getUnsafe(int32_t e_id)
 {
     return state_mgr_->getUnsafe<ComponentT>(

@@ -78,16 +78,16 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
     broadphase::BVH &bp_bvh = ctx.getSingleton<broadphase::BVH>();
     for (int i = 0; i < (int)env_init.numObjs; i++) {
         Entity e = ctx.makeEntityNow<Sphere>();
-        Position &position = ctx.getComponent<Sphere, Position>(e);
-        Rotation &rotation = ctx.getComponent<Sphere, Rotation>(e);
+        Position &position = ctx.getUnsafe<Position>(e);
+        Rotation &rotation = ctx.getUnsafe<Rotation>(e);
         position = env_init.objsInit[i].initPosition;
         rotation = env_init.objsInit[i].initRotation;
         spheres[i] = e;
 
-        CollisionAABB &aabb = ctx.getComponent<Sphere, CollisionAABB>(e);
+        CollisionAABB &aabb = ctx.getUnsafe<CollisionAABB>(e);
         aabb = CollisionAABB(position, rotation);
 
-        broadphase::LeafID &leaf_id = ctx.getComponent<Sphere, broadphase::LeafID>(e);
+        broadphase::LeafID &leaf_id = ctx.getUnsafe<broadphase::LeafID>(e);
         leaf_id = bp_bvh.reserveLeaf();
 
         bp_bvh.updateLeaf(e, leaf_id, aabb);

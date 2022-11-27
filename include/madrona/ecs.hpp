@@ -23,7 +23,7 @@ struct Entity {
 
 struct Loc {
     uint32_t archetype;
-    uint32_t row;
+    CountT row;
 
     inline bool valid() const;
 

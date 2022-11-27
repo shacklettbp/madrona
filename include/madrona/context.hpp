@@ -45,8 +45,14 @@ public:
 
     inline void destroyEntityNow(Entity e);
 
+    template <typename ArchetypeT>
+    inline Loc makeTemporary() { return Loc {}; }
+
     template <typename ComponentT>
     inline ResultRef<ComponentT> get(Entity e);
+
+    template <typename ComponentT>
+    inline ComponentT & getUnsafe(Entity e);
 
     template <typename ComponentT>
     inline ComponentT & getUnsafe(int32_t e_id);

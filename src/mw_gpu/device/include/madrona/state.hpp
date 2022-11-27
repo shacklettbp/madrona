@@ -64,6 +64,18 @@ private:
     StateManager *state_mgr_;
 };
 
+struct EntityStore {
+    static constexpr CountT maxEntities = 1048576;
+
+    struct EntitySlot {
+        Loc loc;
+        uint32_t gen;
+    };
+
+    std::atomic_int32_t numEntities = 0;
+    std::array<EntitySlot, maxEntities> entities;
+};
+
 class StateManager {
 public:
     StateManager(uint32_t max_components);
@@ -92,10 +104,16 @@ public:
     Entity makeEntityNow(WorldID world_id);
 
     template <typename ArchetypeT>
+    Loc makeTemporary(WorldID world_id);
+
+    template <typename ArchetypeT>
     void clear();
 
-    template <typename ArchetypeT, typename ComponentT>
-    ComponentT * getArchetypeColumn();
+    template <typename ComponentT>
+    ComponentT & getUnsafe(Entity e);
+
+    template <typename ComponentT>
+    ComponentT & getUnsafe(Loc loc);
 
 private:
     template <typename SingletonT>
@@ -145,6 +163,7 @@ private:
         archetype_components_ {};
     FixedInlineArray<Optional<ArchetypeStore>, max_archetypes_> archetypes_ {};
     std::array<uint32_t, max_query_slots_> query_data_ {};
+    EntityStore entity_store_;
 };
 
 }

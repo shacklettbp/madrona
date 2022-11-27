@@ -24,18 +24,23 @@ Entity Context::makeEntityNow()
     return state_mgr->makeEntityNow<ArchetypeT>(world_id_);
 }
 
-template <typename ArchetypeT, typename ComponentT>
-ComponentT & Context::getComponent(Entity e)
+template <typename ArchetypeT>
+Loc Context::makeTemporary()
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    ComponentT *col = state_mgr->getArchetypeColumn<ArchetypeT, ComponentT>();
-    return col[e.id];
+    return state_mgr->makeTemporary<ArchetypeT>(world_id_);
+}
+
+template <typename ComponentT>
+ComponentT & Context::getUnsafe(Entity e)
+{
+    return mwGPU::getStateManager()->getUnsafe<ComponentT>(e);
 }
 
 template <typename ComponentT>
 ComponentT & Context::getUnsafe(Loc l)
 {
-
+    return mwGPU::getStateManager()->getUnsafe<ComponentT>(l);
 }
 
 template <typename SingletonT>
