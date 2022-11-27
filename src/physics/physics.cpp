@@ -12,7 +12,7 @@ struct CandidateCollision {
     Entity b;
 };
 
-struct CandidateArchetype : Archetype<CandidateCollision> {};
+struct CandidateTemporary : Archetype<CandidateCollision> {};
 
 static inline AABB computeAABBFromMesh(
     const base::Position &pos,
@@ -65,7 +65,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<CollisionAABB>();
 
     registry.registerComponent<CandidateCollision>();
-    registry.registerArchetype<CandidateArchetype>();
+    registry.registerArchetype<CandidateTemporary>();
 }
 
 namespace broadphase {
@@ -480,7 +480,7 @@ void System::findOverlappingEntry(
 
     bvh.findOverlaps(obj_aabb, [&](Entity overlapping_entity) {
         if (e.id < overlapping_entity.id) {
-            Loc candidate_loc = ctx.makeTemporary<CandidateArchetype>();
+            Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
             CandidateCollision &candidate = ctx.getUnsafe<
                 CandidateCollision>(candidate_loc);
 
@@ -508,8 +508,13 @@ inline void processCandidatesEntry(
 TaskGraph::NodeID System::setupTasks(TaskGraph::Builder &builder,
                                      Span<const TaskGraph::NodeID> deps)
 {
-    return builder.parallelForNode<Context, processCandidatesEntry,
-        CandidateCollision>(deps);
+    auto process_candidates = builder.parallelForNode<Context,
+        processCandidatesEntry, CandidateCollision>(deps);
+
+    auto clear_candidates = builder.clearTemporariesNode<CandidateTemporary>(
+        {process_candidates});
+
+    return clear_candidates;
 }
 
 }

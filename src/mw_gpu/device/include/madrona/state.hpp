@@ -72,8 +72,11 @@ struct EntityStore {
         uint32_t gen;
     };
 
-    std::atomic_int32_t numEntities = 0;
+    std::atomic_int32_t availableOffset = 0;
+    std::atomic_int32_t deletedOffset = 0;
     std::array<EntitySlot, maxEntities> entities;
+    std::array<int32_t, maxEntities> availableEntities;
+    std::array<int32_t, maxEntities> deletedEntities;
 };
 
 class StateManager {
@@ -104,10 +107,15 @@ public:
     Entity makeEntityNow(WorldID world_id);
 
     template <typename ArchetypeT>
+    void destroyEntityNow(Entity e);
+
+    template <typename ArchetypeT>
     Loc makeTemporary(WorldID world_id);
 
     template <typename ArchetypeT>
-    void clear();
+    void clearTemporaries();
+
+    void clearTemporaries(uint32_t archetype_id);
 
     template <typename ComponentT>
     ComponentT & getUnsafe(Entity e);

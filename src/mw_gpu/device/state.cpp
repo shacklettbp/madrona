@@ -27,6 +27,12 @@ StateManager::StateManager(uint32_t)
         Optional<ArchetypeStore>::noneAt(&archetypes_[i]);
     }
 
+    // Initialize entity store
+    for (CountT i = 0; i < EntityStore::maxEntities; i++) {
+        entity_store_.entities[i].gen = 0;
+        entity_store_.availableEntities[i] = i;
+    }
+
     registerComponent<Entity>();
     registerComponent<WorldID>();
 }
@@ -155,6 +161,12 @@ void StateManager::makeQuery(const uint32_t *components,
     query_ref->numComponents = num_components;
 
     query_data_lock_.unlock();
+}
+
+void StateManager::clearTemporaries(uint32_t archetype_id)
+{
+    Table &tbl = archetypes_[archetype_id]->tbl;
+    tbl.numRows = 0;
 }
 
 }

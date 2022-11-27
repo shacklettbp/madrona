@@ -32,6 +32,14 @@ public:
             return NodeID { 0 };
         }
 
+        template <typename ArchetypeT>
+        NodeID clearTemporariesNode(Span<const NodeID> deps)
+        {
+            // FIXME
+            (void)deps;
+            return NodeID { 0 };
+        }
+
         TaskGraph build();
     private:
         struct StagedSystem {

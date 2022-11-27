@@ -22,8 +22,13 @@ struct EntryData {
         QueryRef *query;
     };
 
+    struct ClearTmp {
+        uint32_t archetypeID;
+    };
+
     union {
         ParallelFor parallelFor;
+        ClearTmp clearTmp;
     };
 };
 
@@ -75,6 +80,12 @@ struct ParallelForEntry : public EntryBase<ContextT, WorldDataT> {
 
             WorldID world_id = world_column[tbl_offset];
 
+            // This entity has been deleted but not actually removed from the
+            // table yet
+            if (world_id.idx == -1) {
+                return true;
+            }
+
             ContextT ctx = ParallelForEntry::makeContext(world_id);
 
 
@@ -96,13 +107,21 @@ struct ParallelForEntry : public EntryBase<ContextT, WorldDataT> {
     }
 };
 
-}
+struct ClearTmpEntry {
+    static inline void run(EntryData &data, int32_t invocation_idx) {
+        uint32_t archetype_id = data.clearTmp.archetypeID;
+        StateManager *state_mgr = mwGPU::getStateManager();
+        state_mgr->clearTemporaries(archetype_id);
+    }
+};
 
+}
 
 class TaskGraph {
 private:
     enum class NodeType {
         ParallelFor,
+        ClearTemporaries,
     };
 
     struct NodeInfo {
@@ -148,6 +167,24 @@ public:
                 .data = {
                     .parallelFor = {
                         query_ref,
+                    },
+                },
+            }, dependencies);
+        }
+
+        template <typename ArchetypeT>
+        inline NodeID clearTemporariesNode(Span<const NodeID> dependencies)
+        {
+            uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
+            uint32_t func_id = mwGPU::UserFuncID<mwGPU::ClearTmpEntry>::id;
+
+            return registerNode(NodeInfo {
+                .type = NodeType::ClearTemporaries,
+                .funcID = func_id,
+                .data = {
+                    .clearTmp = {
+                        archetype_id,
                     },
                 },
             }, dependencies);

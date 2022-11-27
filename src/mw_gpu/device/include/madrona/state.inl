@@ -190,9 +190,11 @@ Entity StateManager::makeEntityNow(WorldID world_id)
         row,
     };
 
-    int32_t entity_slot_idx =
-        entity_store_.numEntities.fetch_add(1, std::memory_order_relaxed);
-    assert(entity_slot_idx < entity_store_.maxEntities);
+    int32_t available_idx =
+        entity_store_.availableOffset.fetch_add(1, std::memory_order_relaxed);
+    assert(available_idx < EntityStore::maxEntities);
+
+    int32_t entity_slot_idx = entity_store_.availableEntities[available_idx];
 
     EntityStore::EntitySlot &entity_slot =
         entity_store_.entities[entity_slot_idx];
@@ -216,6 +218,25 @@ Entity StateManager::makeEntityNow(WorldID world_id)
 }
 
 template <typename ArchetypeT>
+void StateManager::destroyEntityNow(Entity e)
+{
+    EntityStore::EntitySlot &entity_slot =
+        entity_store_.entities[e.id];
+
+    entity_slot.gen++;
+    Loc loc = entity_slot.loc;
+
+    Table &tbl = archetypes_[loc.archetype]->tbl;
+    WorldID *world_column = (WorldID *)tbl.columns[1];
+    world_column[loc.row] = WorldID { -1 };
+
+    int32_t deleted_offset =
+        entity_store_.deletedOffset.fetch_add(1, std::memory_order_relaxed);
+
+    entity_store_.deletedEntities[deleted_offset] = e.id;
+}
+
+template <typename ArchetypeT>
 Loc StateManager::makeTemporary(WorldID world_id)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
@@ -235,12 +256,11 @@ Loc StateManager::makeTemporary(WorldID world_id)
 }
 
 template <typename ArchetypeT>
-void StateManager::clear()
+void StateManager::clearTemporaries()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-    Table &tbl = archetypes_[archetype_id]->tbl;
+    clearTemporaries(archetype_id);
 
-    tbl.numRows = 0;
 }
 
 template <typename ComponentT>

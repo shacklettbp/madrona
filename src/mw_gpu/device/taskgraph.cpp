@@ -198,6 +198,9 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
             QueryRef *query_ref = node.info.data.parallelFor.query;
             return state_mgr->numMatchingEntities(query_ref);
         }
+        case NodeType::ClearTemporaries: {
+            return 1_u32;
+        }
         default: {
             assert(false);
         }
