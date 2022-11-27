@@ -29,7 +29,7 @@ public:
     void registerArchetype();
 
     template <typename SingletonT>
-    SingletonT & getSingleton() { /* FIXME */ }
+    SingletonT & getSingleton() { /* FIXME */ return *(SingletonT *)this; }
 
     // State
     template <typename ArchetypeT>

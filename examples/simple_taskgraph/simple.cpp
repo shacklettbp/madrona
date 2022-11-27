@@ -10,6 +10,7 @@
 #include <cinttypes>
 
 using namespace madrona;
+using namespace madrona::base;
 using namespace madrona::math;
 using namespace madrona::phys;
 
@@ -30,18 +31,10 @@ inline void clampSystem(Engine &ctx,
                                ctx.data().worldBounds.pMax.z);
 }
 
-inline void solverSystem(Engine &ctx, SolverData &)
-{
-    printf("Solver %d\n", ctx.worldID().idx);
-}
-
 void SimpleSim::registerTypes(ECSRegistry &registry)
 {
     base::registerTypes(registry);
-    phys::registerTypes(registry);
-    broadphase::System::registerTypes(registry);
-
-    registry.registerSingleton<SolverData>();
+    RigidBodyPhysicsSystem::registerTypes(registry);
 
     registry.registerArchetype<Sphere>();
 }
@@ -51,16 +44,8 @@ void SimpleSim::setupTasks(TaskGraph::Builder &builder)
     auto clamp_sys =
         builder.parallelForNode<Engine, clampSystem, Position>({});
 
-    auto aabb_sys = CollisionAABB::setupTasks(builder, {clamp_sys});
-
-    auto broadphase_sys = broadphase::System::setupTasks(builder,
-        { aabb_sys });
-
-    auto narrowphase_sys = narrowphase::System::setupTasks(builder,
-        { broadphase_sys });
-    
-    builder.parallelForNode<Engine, solverSystem, SolverData>(
-        { narrowphase_sys });
+    auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {clamp_sys});
+    (void)phys_sys;
 
     printf("Setup done\n");
 }
@@ -73,7 +58,8 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
 {
     worldBounds = env_init.worldBounds;
 
-    broadphase::System::init(ctx, env_init.numObjs * 10);
+    RigidBodyPhysicsSystem::init(ctx, env_init.numObjs * 10,
+                                 env_init.numObjs * 50);
 
     broadphase::BVH &bp_bvh = ctx.getSingleton<broadphase::BVH>();
     for (int i = 0; i < (int)env_init.numObjs; i++) {

@@ -68,6 +68,11 @@ struct Vector3 {
         return (*this - o).length();
     }
 
+    inline float distance2(const Vector3 &o) const
+    {
+        return (*this - o).length2();
+    }
+
     [[nodiscard]] inline Vector3 normalize() const
     {
         return *this * invLength();

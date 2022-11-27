@@ -41,13 +41,11 @@ struct EnvInit {
 };
 
 struct Sphere : public madrona::Archetype<
-    madrona::base::Position, 
-    madrona::base::Rotation,
+    Position, 
+    Rotation,
     madrona::phys::CollisionAABB,
     madrona::phys::broadphase::LeafID
 > {};
-
-struct SolverData {};
 
 class Engine;
 

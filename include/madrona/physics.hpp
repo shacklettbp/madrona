@@ -18,12 +18,16 @@ struct CollisionAABB : math::AABB {
 
     CollisionAABB(const base::Position &pos,
                   const base::Rotation &rot);
-    
-    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                                        Span<const TaskGraph::NodeID> deps);
 };
 
-void registerTypes(ECSRegistry &registry);
+struct RigidBodyPhysicsSystem {
+    static void init(Context &ctx, CountT max_dynamic_objects,
+                     CountT max_contacts_per_step);
+    static void registerTypes(ECSRegistry &registry);
+    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
+                                        Span<const TaskGraph::NodeID> deps);
+
+};
 
 namespace broadphase {
 
@@ -82,42 +86,6 @@ private:
     int32_t *sorted_leaves_;
     std::atomic<int32_t> num_leaves_;
     int32_t num_allocated_leaves_;
-};
-
-class System {
-public:
-    static void registerTypes(ECSRegistry &registry);
-
-    static void init(Context &ctx, CountT max_num_leaves);
-
-    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                                        Span<const TaskGraph::NodeID> deps);
-
-private:
-    static inline void updateLeavesEntry(
-        Context &ctx,
-        const Entity &e,
-        const LeafID &leaf_id,
-        const CollisionAABB &aabb);
-
-    static inline void updateBVHEntry(
-        Context &ctx, BVH &bvh);
-
-    static inline void findOverlappingEntry(
-        Context &ctx,
-        const Entity &e,
-        const CollisionAABB &obj_aabb);
-
-};
-
-}
-
-namespace narrowphase {
-
-class System {
-public:
-    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                                        Span<const TaskGraph::NodeID> deps);
 };
 
 }

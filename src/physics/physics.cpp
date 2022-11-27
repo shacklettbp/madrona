@@ -14,6 +14,33 @@ struct CandidateCollision {
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
 
+struct Contact {
+    Entity a;
+    Entity b;
+    Vector3 normal;
+};
+
+struct SolverData {
+    Contact *contacts;
+    std::atomic<CountT> numContacts;
+    CountT maxContacts;
+
+    inline SolverData(CountT max_contacts_per_step)
+        : contacts((Contact *)malloc(sizeof(Contact) * max_contacts_per_step)),
+          numContacts(0),
+          maxContacts(max_contacts_per_step)
+    {}
+
+    inline void addContact(Contact c)
+    {
+        int32_t contact_idx =
+            numContacts.fetch_add(1, std::memory_order_relaxed);
+        assert(contact_idx < maxContacts);
+
+        contacts[contact_idx] = c;
+    }
+};
+
 static inline AABB computeAABBFromMesh(
     const base::Position &pos,
     const base::Rotation &rot)
@@ -51,21 +78,6 @@ inline void updateAABBEntry(Context &,
                             CollisionAABB &out_aabb)
 {
     out_aabb = CollisionAABB(pos, rot);
-}
-
-TaskGraph::NodeID CollisionAABB::setupTasks(TaskGraph::Builder &builder,
-                                            Span<const TaskGraph::NodeID> deps)
-{
-    return builder.parallelForNode<Context, updateAABBEntry, Position, Rotation, CollisionAABB>(deps);
-}
-
-void registerTypes(ECSRegistry &registry)
-{
-    registry.registerComponent<RigidBody>();
-    registry.registerComponent<CollisionAABB>();
-
-    registry.registerComponent<CandidateCollision>();
-    registry.registerArchetype<CandidateTemporary>();
 }
 
 namespace broadphase {
@@ -428,34 +440,7 @@ void BVH::updateLeaf(Entity e,
     sorted_leaves_[leaf_id.id] = leaf_id.id;
 }
 
-void System::init(Context &ctx, CountT max_num_leaves)
-{
-    BVH &bvh = ctx.getSingleton<BVH>();
-    new (&bvh) BVH(max_num_leaves);
-}
-
-void System::registerTypes(ECSRegistry &registry)
-{
-    registry.registerComponent<LeafID>();
-    registry.registerSingleton<BVH>();
-}
-
-TaskGraph::NodeID System::setupTasks(TaskGraph::Builder &builder,
-                                     Span<const TaskGraph::NodeID> deps)
-{
-    auto preprocess_node = builder.parallelForNode<Context,
-        System::updateLeavesEntry, Entity, LeafID, CollisionAABB>(deps);
-
-    auto refit_node = builder.parallelForNode<Context,
-        System::updateBVHEntry, BVH>({preprocess_node});
-
-    auto find_overlapping_node = builder.parallelForNode<Context,
-        System::findOverlappingEntry, Entity, CollisionAABB>({refit_node});
-
-    return find_overlapping_node;
-}
-
-void System::updateLeavesEntry(
+inline void updateLeavesEntry(
     Context &ctx,
     const Entity &e,
     const LeafID &leaf_id,
@@ -465,13 +450,13 @@ void System::updateLeavesEntry(
     bvh.updateLeaf(e, leaf_id, aabb);
 }
 
-void System::updateBVHEntry(
+inline void updateBVHEntry(
     Context &, BVH &bvh)
 {
     bvh.refit(nullptr, 0);
 }
 
-void System::findOverlappingEntry(
+inline void findOverlappingEntry(
     Context &ctx,
     const Entity &e,
     const CollisionAABB &obj_aabb)
@@ -501,23 +486,101 @@ inline void processCandidatesEntry(
     Position &a_pos = ctx.getUnsafe<Position>(candidate_collision.a);
     Position &b_pos = ctx.getUnsafe<Position>(candidate_collision.b);
 
-    printf("(%f %f %f) (%f %f %f)\n",
-            a_pos.x, a_pos.y, a_pos.z, b_pos.x, b_pos.y, b_pos.z);
+    // FIXME real narrowphase
+    constexpr float sphere_radius = 1.f;
+    Vector3 to_a = b_pos - a_pos;
+    float dist = to_a.length2();
+
+    SolverData &solver = ctx.getSingleton<SolverData>();
+
+    if (dist > 0 && dist <= sphere_radius) {
+        solver.addContact(Contact {
+            candidate_collision.a,
+            candidate_collision.b,
+            to_a / dist,
+        });
+    }
 }
 
-TaskGraph::NodeID System::setupTasks(TaskGraph::Builder &builder,
-                                     Span<const TaskGraph::NodeID> deps)
+}
+
+namespace solver {
+
+inline void contactSolverEntry(Context &ctx, SolverData &solver)
 {
-    auto process_candidates = builder.parallelForNode<Context,
-        processCandidatesEntry, CandidateCollision>(deps);
+    // Push objects in serial based on the contact normal - total BS.
+    CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
+
+    for (CountT i = 0; i < num_contacts; i++) {
+        Contact &contact = solver.contacts[i];
+
+        Position &a_pos = ctx.getUnsafe<Position>(contact.a);
+        Position &b_pos = ctx.getUnsafe<Position>(contact.b);
+
+        a_pos -= contact.normal;
+        b_pos += contact.normal;
+    }
+
+    printf("Num contacts: %d\n", num_contacts);
+
+    solver.numContacts.store(0, std::memory_order_relaxed);
+}
+
+}
+
+void RigidBodyPhysicsSystem::init(Context &ctx, CountT max_dynamic_objects,
+                                  CountT max_contacts_per_world)
+{
+    broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
+    new (&bvh) broadphase::BVH(max_dynamic_objects);
+
+    SolverData &solver = ctx.getSingleton<SolverData>();
+    new (&solver) SolverData(max_contacts_per_world);
+}
+
+void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
+{
+    registry.registerComponent<broadphase::LeafID>();
+    registry.registerSingleton<broadphase::BVH>();
+
+    registry.registerComponent<RigidBody>();
+    registry.registerComponent<CollisionAABB>();
+
+    registry.registerComponent<CandidateCollision>();
+    registry.registerArchetype<CandidateTemporary>();
+
+    registry.registerSingleton<SolverData>();
+}
+
+TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
+    TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps)
+{
+    auto update_aabbs = builder.parallelForNode<Context, updateAABBEntry,
+        Position, Rotation, CollisionAABB>(deps);
+
+    auto preprocess_leaves = builder.parallelForNode<Context,
+        broadphase::updateLeavesEntry, Entity, broadphase::LeafID, 
+        CollisionAABB>({update_aabbs});
+
+    auto refit_bvh = builder.parallelForNode<Context,
+        broadphase::updateBVHEntry, broadphase::BVH>({preprocess_leaves});
+
+    auto find_overlapping = builder.parallelForNode<Context,
+        broadphase::findOverlappingEntry, Entity, CollisionAABB>({refit_bvh});
+
+    auto run_narrowphase = builder.parallelForNode<Context,
+        narrowphase::processCandidatesEntry, CandidateCollision>(
+            {find_overlapping});
 
     auto clear_candidates = builder.clearTemporariesNode<CandidateTemporary>(
-        {process_candidates});
+        {run_narrowphase});
 
-    return clear_candidates;
+    auto solver = builder.parallelForNode<Context,
+        solver::contactSolverEntry, SolverData>({clear_candidates});
+
+    return solver;
 }
 
-}
 
 }
 }
