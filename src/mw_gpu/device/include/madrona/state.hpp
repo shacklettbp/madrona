@@ -123,6 +123,9 @@ public:
     template <typename ComponentT>
     ComponentT & getUnsafe(Loc loc);
 
+    template <typename ArchetypeT, typename ComponentT>
+    ComponentT * getArchetypeColumn();
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};

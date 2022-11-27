@@ -7,6 +7,8 @@
  */
 #include "simple.hpp"
 
+#include <madrona/render.hpp>
+
 #include <cinttypes>
 
 using namespace madrona;
@@ -35,6 +37,7 @@ void SimpleSim::registerTypes(ECSRegistry &registry)
 {
     base::registerTypes(registry);
     RigidBodyPhysicsSystem::registerTypes(registry);
+    render::RenderSetupSystem::registerTypes(registry);
 
     registry.registerArchetype<Sphere>();
 }
@@ -81,6 +84,11 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
         leaf_id = bp_bvh.reserveLeaf();
 
         bp_bvh.updateLeaf(e, leaf_id, aabb);
+        
+        Entity render_e = ctx.makeEntityNow<render::RenderObject>();
+        ctx.getUnsafe<render::RenderEntity>(e).renderEntity = render_e;
+
+        ctx.getUnsafe<render::ObjectID>(render_e).idx = 0;
     }
 
     bp_bvh.rebuild();
@@ -90,12 +98,21 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
 
 #ifdef MADRONA_GPU_MODE
 extern "C" __global__ void madronaMWGPUInitialize(uint32_t num_worlds,
-                                                  void *inits_raw)
+                                                  void *inits_raw,
+                                                  void **render_o2w_out,
+                                                  void **render_obj_ids_out)
 {
     using namespace SimpleTaskgraph;
 
     auto inits = (EnvInit *)inits_raw;
     SimEntry::init(inits, num_worlds);
+
+    *render_o2w_out = madrona::mwGPU::getStateManager()->getArchetypeColumn<
+        madrona::render::RenderObject, madrona::render::ObjectToWorld>();
+
+    *render_obj_ids_out = madrona::mwGPU::getStateManager()->
+        getArchetypeColumn<madrona::render::RenderObject,
+                           madrona::render::ObjectID>();
 }
 
 #endif

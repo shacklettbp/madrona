@@ -11,6 +11,7 @@
 #include <madrona/taskgraph.hpp>
 #include <madrona/custom_context.hpp>
 #include <madrona/physics.hpp>
+#include <madrona/render.hpp>
 
 namespace SimpleTaskgraph {
 
@@ -44,7 +45,8 @@ struct Sphere : public madrona::Archetype<
     Position, 
     Rotation,
     madrona::phys::CollisionAABB,
-    madrona::phys::broadphase::LeafID
+    madrona::phys::broadphase::LeafID,
+    madrona::render::RenderEntity
 > {};
 
 class Engine;

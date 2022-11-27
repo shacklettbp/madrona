@@ -282,4 +282,16 @@ ComponentT & StateManager::getUnsafe(Loc loc)
     return ((ComponentT *)(tbl.columns[col_idx]))[loc.row];
 }
 
+template <typename ArchetypeT, typename ComponentT>
+ComponentT * StateManager::getArchetypeColumn()
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    auto &archetype = *archetypes_[archetype_id];
+
+    uint32_t component_id = TypeTracker::typeID<ComponentT>();
+    int32_t col_idx = *archetype.columnLookup.lookup(component_id);
+
+    return (ComponentT *)(archetype.tbl.columns[col_idx]);
+}
+
 }

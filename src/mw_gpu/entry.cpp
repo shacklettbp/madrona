@@ -46,6 +46,8 @@ struct GPUKernels {
 
 struct GPUEngineState {
     void *stateBuffer;
+    void *renderO2WBase;
+    void *renderIDsBase;
 };
 
 struct TrainingExecutor::Impl {
@@ -622,7 +624,11 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
-    auto init_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
+    auto render_o2w_readback = (void **)cu::allocReadback(sizeof(void *));
+    auto render_obj_ids_readback = (void **)cu::allocReadback(sizeof(void *));
+    auto init_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer,
+                                         render_o2w_readback,
+                                         render_obj_ids_readback);
 
     auto no_args = makeKernelArgBuffer();
 
@@ -632,6 +638,7 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     REQ_CUDA(cudaStreamSynchronize(strm));
 
     auto gpu_state_buffer = cu::allocGPU(*gpu_state_size_readback);
+    cu::deallocCPU(gpu_state_size_readback);
 
     // The initial values of these pointers are equal to their offsets from
     // the base pointer. Now that we have the base pointer, write the
@@ -686,10 +693,17 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
 
     REQ_CUDA(cudaStreamSynchronize(strm));
 
+    void *render_o2w_base = *render_o2w_readback;
+    void *render_obj_ids_base = *render_obj_ids_readback;
+
     cu::deallocGPU(init_tmp_buffer);
+    cu::deallocCPU(render_o2w_readback);
+    cu::deallocCPU(render_obj_ids_readback);
 
     return GPUEngineState {
         gpu_state_buffer,
+        render_o2w_base,
+        render_obj_ids_base,
     };
 }
 

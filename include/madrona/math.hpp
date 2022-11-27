@@ -24,6 +24,35 @@ inline float max(float a, float b)
     return a > b ? a : b;
 }
 
+struct Vector2 {
+    float x;
+    float y;
+
+    inline float dot(const Vector2 &o) const
+    {
+        return x * o.x + y * o.y;
+    }
+
+    inline float length2() const
+    {
+        return x * x + y * y;
+    }
+
+    inline float length() const
+    {
+        return sqrtf(length2());
+    }
+
+    inline float invLength() const
+    {
+#ifdef MADRONA_GPU_MODE
+        return rsqrtf(length2());
+#else
+        return 1.f / length();
+#endif
+    }
+};
+
 struct Vector3 {
     float x;
     float y;

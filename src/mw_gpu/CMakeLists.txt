@@ -34,6 +34,7 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/hashmap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/physics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../render/render_ecs.cpp
 )
     
 set(JOB_SYS_INTERNAL_SRC_LIST)
