@@ -49,6 +49,7 @@ add_library(madrona_render_vk STATIC
     dispatch.hpp dispatch.cpp
     shader.hpp shader.cpp
     utils.hpp utils.cpp utils.inl
+    memory.hpp memory.cpp memory.inl
 )
 
 target_compile_definitions(madrona_render_vk

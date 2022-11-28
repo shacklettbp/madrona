@@ -16,6 +16,8 @@ public:
 
     ~BatchRenderer();
 
+    void render();
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
