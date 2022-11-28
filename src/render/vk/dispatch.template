@@ -1,0 +1,115 @@
+device:
+- vkCreateCommandPool
+- vkResetCommandPool
+- vkDestroyCommandPool
+- vkGetDeviceQueue2
+- vkCreateImage
+- vkDestroyImage
+- vkGetImageMemoryRequirements
+- vkGetImageSparseMemoryRequirements
+- vkQueueBindSparse
+- vkAllocateMemory
+- vkFreeMemory
+- vkBindImageMemory
+- vkCreateImageView
+- vkDestroyImageView
+- vkCreatePipelineLayout
+- vkDestroyPipelineLayout
+- vkCreatePipelineCache
+- vkDestroyPipelineCache
+- vkCreateComputePipelines
+- vkCreateGraphicsPipelines
+- vkDestroyPipeline
+- vkCreateShaderModule
+- vkDestroyShaderModule
+- vkCreateBuffer
+- vkDestroyBuffer
+- vkGetBufferMemoryRequirements
+- vkBindBufferMemory
+- vkMapMemory
+- vkUnmapMemory
+- vkFlushMappedMemoryRanges
+- vkAllocateCommandBuffers
+- vkFreeCommandBuffers
+- vkBeginCommandBuffer
+- vkEndCommandBuffer
+- vkCmdCopyBuffer
+- vkCmdFillBuffer
+- vkQueueSubmit
+- vkCreateFence
+- vkDestroyFence
+- vkWaitForFences
+- vkResetFences
+- vkCmdPipelineBarrier
+- vkCmdCopyBufferToImage
+- vkCmdCopyImageToBuffer
+- vkCreateSemaphore
+- vkDestroySemaphore
+- vkCreateDescriptorSetLayout
+- vkDestroyDescriptorSetLayout
+- vkCreateDescriptorPool
+- vkDestroyDescriptorPool
+- vkResetDescriptorPool
+- vkAllocateDescriptorSets
+- vkFreeDescriptorSets
+- vkUpdateDescriptorSets
+- vkCreateSampler
+- vkDestroySampler
+- vkCmdBindDescriptorSets
+- vkCmdBindPipeline
+- vkCmdDispatch
+- vkCmdPushConstants
+- vkGetMemoryFdKHR
+- vkGetSemaphoreFdKHR
+- vkCreateRenderPass
+- vkCreateFramebuffer
+- vkCmdDraw
+- vkCmdDrawIndexed
+- vkCmdBeginRenderPass
+- vkCmdEndRenderPass
+- vkCmdBindIndexBuffer
+- vkCmdBlitImage
+- vkCmdSetViewport
+- vkCmdSetScissor
+- vkCmdSetLineWidth
+- vkDeviceWaitIdle
+- vkGetDeviceProcAddr
+- vkCreateQueryPool
+- vkDestroyQueryPool
+- vkGetQueryPoolResults
+- vkCmdResetQueryPool
+- need_present:
+    - vkCreateSwapchainKHR
+    - vkGetSwapchainImagesKHR
+    - vkAcquireNextImageKHR
+    - vkQueuePresentKHR
+- need_rt:
+    - vkCreateAccelerationStructureKHR
+    - vkGetAccelerationStructureBuildSizesKHR
+    - vkGetAccelerationStructureDeviceAddressKHR
+    - vkGetBufferDeviceAddress
+    - vkCmdBuildAccelerationStructuresKHR
+    - vkDestroyAccelerationStructureKHR
+    - vkGetDeviceAccelerationStructureCompatibilityKHR
+    - vkCmdCopyAccelerationStructureKHR
+    - vkCmdCopyMemoryToAccelerationStructureKHR
+    - vkCmdCopyAccelerationStructureToMemoryKHR
+    - vkCmdWriteAccelerationStructuresPropertiesKHR
+
+instance:
+- vkEnumeratePhysicalDevices
+- vkGetPhysicalDeviceFeatures2
+- vkGetPhysicalDeviceProperties
+- vkGetPhysicalDeviceProperties2
+- vkGetPhysicalDeviceFormatProperties2
+- vkGetPhysicalDeviceMemoryProperties2
+- vkGetPhysicalDeviceQueueFamilyProperties2
+- vkGetInstanceProcAddr
+- vkCreateDevice
+- vkDestroyInstance
+- need_present:
+    - vkDestroySurfaceKHR
+    - vkGetPhysicalDeviceSurfaceCapabilitiesKHR
+    - vkGetPhysicalDeviceSurfaceFormatsKHR
+    - vkGetPhysicalDeviceSurfacePresentModesKHR
+    - vkGetPhysicalDeviceSurfaceSupportKHR

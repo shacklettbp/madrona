@@ -14,6 +14,7 @@
 
 #include <madrona/mw_gpu.hpp>
 #include <madrona/dyn_array.hpp>
+#include <madrona/batch_renderer.hpp>
 
 #include "cuda_utils.hpp"
 #include "cpp_compile.hpp"
@@ -46,8 +47,7 @@ struct GPUKernels {
 
 struct GPUEngineState {
     void *stateBuffer;
-    void *renderO2WBase;
-    void *renderIDsBase;
+    render::BatchRenderer batchRenderer;
 };
 
 struct TrainingExecutor::Impl {
@@ -700,10 +700,11 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
     cu::deallocCPU(render_o2w_readback);
     cu::deallocCPU(render_obj_ids_readback);
 
+
     return GPUEngineState {
         gpu_state_buffer,
-        render_o2w_base,
-        render_obj_ids_base,
+        render::BatchRenderer(num_worlds, 100 /*FIXME*/, render_o2w_base,
+                              render_obj_ids_base),
     };
 }
 
@@ -816,7 +817,7 @@ TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,
         gpu_kernels.mod,
-        eng_state,
+        std::move(eng_state),
         run_graph,
     });
     

@@ -5,7 +5,7 @@ add_library(madrona_mw_gpu STATIC
 
 
 target_link_libraries(madrona_mw_gpu PUBLIC
-    madrona_core CUDA::nvrtc CUDA::cudart CUDA::cuda_driver)
+    madrona_core madrona_batch_render CUDA::nvrtc CUDA::cudart CUDA::cuda_driver)
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
 
