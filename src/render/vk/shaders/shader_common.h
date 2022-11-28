@@ -17,7 +17,7 @@ struct Vertex {
 struct Mesh {
     uint32_t vertexOffset;
     uint32_t indexOffset;
-    uint32_t numIndices;
+    uint32_t numTriangles;
 };
 
 struct Object {

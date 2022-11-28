@@ -50,6 +50,7 @@ add_library(madrona_render_vk STATIC
     shader.hpp shader.cpp
     utils.hpp utils.cpp utils.inl
     memory.hpp memory.cpp memory.inl
+    scene.hpp scene.cpp
 )
 
 target_compile_definitions(madrona_render_vk
