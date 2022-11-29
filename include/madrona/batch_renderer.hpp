@@ -1,6 +1,7 @@
 #pragma once
 
 #include <madrona/types.hpp>
+#include <madrona/render.hpp>
 #include <memory>
 
 namespace madrona {
@@ -8,15 +9,19 @@ namespace render {
 
 class BatchRenderer {
 public:
-    BatchRenderer(CountT num_worlds,
-                  CountT objs_per_world,
-                  void *o2w_cuda,
-                  void *obj_ids_cuda);
+    BatchRenderer(int64_t gpu_id,
+                  int64_t num_worlds,
+                  int64_t max_instances_per_world,
+                  int64_t max_objects);
     BatchRenderer(BatchRenderer &&o);
 
     ~BatchRenderer();
 
-    void render();
+    AccelStructInstance ** tlasInstancePtrs() const;
+
+    uint64_t * objectsBLASPtr() const;
+
+    void render(const uint32_t *num_instances);
 
 private:
     struct Impl;

@@ -9,6 +9,32 @@ namespace madrona {
 namespace render {
 namespace vk {
 
+void GPURunUtil::begin(const DeviceState &dev) const
+{
+    VkCommandBufferBeginInfo begin_info {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    REQ_VK(dev.dt.beginCommandBuffer(cmd, &begin_info));
+}
+
+void GPURunUtil::submit(const DeviceState &dev) const
+{
+    REQ_VK(dev.dt.endCommandBuffer(cmd));
+
+    VkSubmitInfo submit {};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.waitSemaphoreCount = 0;
+    submit.pWaitSemaphores = nullptr;
+    submit.pWaitDstStageMask = nullptr;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+
+    dev.dt.queueSubmit(queue, 1, &submit, fence);
+    waitForFenceInfinitely(dev, fence);
+
+    dev.dt.resetCommandPool(dev.hdl, pool, 0);
+    resetFence(dev, fence);
+}
+
 int exportBinarySemaphore(const DeviceState &dev, VkSemaphore semaphore)
 {
     VkSemaphoreGetFdInfoKHR fd_info;

@@ -37,7 +37,7 @@ void SimpleSim::registerTypes(ECSRegistry &registry)
 {
     base::registerTypes(registry);
     RigidBodyPhysicsSystem::registerTypes(registry);
-    render::RenderSetupSystem::registerTypes(registry);
+    render::RenderingSystem::registerTypes(registry);
 
     registry.registerArchetype<Sphere>();
 }
@@ -52,7 +52,10 @@ void SimpleSim::setupTasks(TaskGraph::Builder &builder)
     auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
         {phys_sys});
 
-    (void)phys_cleanup_sys;
+    auto renderer_sys = render::RenderingSystem::setupTasks(builder,
+        {phys_cleanup_sys});
+
+    (void)renderer_sys;
 
     printf("Setup done\n");
 }
@@ -85,10 +88,7 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
 
         bp_bvh.updateLeaf(e, leaf_id, aabb);
         
-        Entity render_e = ctx.makeEntityNow<render::RenderObject>();
-        ctx.getUnsafe<render::RenderEntity>(e).renderEntity = render_e;
-
-        ctx.getUnsafe<render::ObjectID>(render_e).idx = 0;
+        ctx.getUnsafe<render::ObjectID>(e).idx = 0;
     }
 
     bp_bvh.rebuild();
@@ -97,22 +97,14 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
 }
 
 #ifdef MADRONA_GPU_MODE
-extern "C" __global__ void madronaMWGPUInitialize(uint32_t num_worlds,
-                                                  void *inits_raw,
-                                                  void **render_o2w_out,
-                                                  void **render_obj_ids_out)
+extern "C" __global__ void madronaMWGPUInitialize(
+        uint32_t num_worlds,
+        void *inits_raw)
 {
     using namespace SimpleTaskgraph;
 
     auto inits = (EnvInit *)inits_raw;
     SimEntry::init(inits, num_worlds);
-
-    *render_o2w_out = madrona::mwGPU::getStateManager()->getArchetypeColumn<
-        madrona::render::RenderObject, madrona::render::ObjectToWorld>();
-
-    *render_obj_ids_out = madrona::mwGPU::getStateManager()->
-        getArchetypeColumn<madrona::render::RenderObject,
-                           madrona::render::ObjectID>();
 }
 
 #endif

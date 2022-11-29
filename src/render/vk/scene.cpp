@@ -236,7 +236,7 @@ static optional<BLASBuildResults> makeBLASes(
 }
 
 Assets Assets::load(const DeviceState &dev,
-                  MemoryAllocator &mem)
+                    MemoryAllocator &mem)
 {
     std::vector<Vertex> vertices {
         Vertex {
@@ -355,19 +355,8 @@ Assets Assets::load(const DeviceState &dev,
     waitForFenceInfinitely(dev, tmp_fence);
     resetFence(dev, tmp_fence);
 
-    VkBufferDeviceAddressInfo vert_addr_info;
-    vert_addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    vert_addr_info.pNext = nullptr;
-    vert_addr_info.buffer = vert_buffer.buffer;
-    VkDeviceAddress vert_dev_addr =
-        dev.dt.getBufferDeviceAddress(dev.hdl, &vert_addr_info);
-
-    VkBufferDeviceAddressInfo idx_addr_info;
-    idx_addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-    idx_addr_info.pNext = nullptr;
-    idx_addr_info.buffer = idx_buffer.buffer;
-    VkDeviceAddress idx_dev_addr =
-        dev.dt.getBufferDeviceAddress(dev.hdl, &idx_addr_info);
+    VkDeviceAddress vert_dev_addr = getDevAddr(dev, vert_buffer.buffer);
+    VkDeviceAddress idx_dev_addr = getDevAddr(dev, idx_buffer.buffer);
 
     REQ_VK(dev.dt.resetCommandPool(dev.hdl, tmp_cmd_pool, 0));
 
@@ -389,12 +378,15 @@ Assets Assets::load(const DeviceState &dev,
 }
 
 TLASData TLASData::setup(const DeviceState &dev,
+                         const GPURunUtil &gpu_run,
+                         int cuda_gpu_id,
                          MemoryAllocator &mem,
                          int64_t num_worlds,
                          uint32_t max_num_instances)
 {
     HeapArray<VkAccelerationStructureGeometryKHR> geometry_infos(num_worlds);
-    HeapArray<VkAccelerationStructureBuildGeometryInfoKHR> build_infos(num_worlds);
+    HeapArray<VkAccelerationStructureBuildGeometryInfoKHR> build_infos(
+        num_worlds);
 
     for (int64_t i = 0; i < num_worlds; i++) {
         VkAccelerationStructureGeometryKHR &geo_info = geometry_infos[i];
@@ -410,7 +402,8 @@ TLASData TLASData::setup(const DeviceState &dev,
         geo_instances.arrayOfPointers = false;
         geo_instances.data.deviceAddress = 0;
 
-        VkAccelerationStructureBuildGeometryInfoKHR &build_info = build_infos[i];
+        VkAccelerationStructureBuildGeometryInfoKHR &build_info = 
+            build_infos[i];
         build_info.sType =
             VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
         build_info.pNext = nullptr;
@@ -435,55 +428,80 @@ TLASData TLASData::setup(const DeviceState &dev,
         VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
         &build_infos[0], &max_num_instances, &size_info);
 
-    uint64_t total_bytes = num_worlds * (size_info.buildScratchSize +
-                                         size_info.accelerationStructureSize);
-    LocalBuffer storage_buf = mem.makeLocalBuffer(total_bytes, true).value();
+    uint64_t total_as_bytes = num_worlds * (size_info.buildScratchSize +
+            size_info.accelerationStructureSize);
 
-    VkBufferDeviceAddressInfoKHR storage_addr_info;
-    storage_addr_info.sType =
-        VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
-    storage_addr_info.pNext = nullptr;
-    storage_addr_info.buffer = storage_buf.buffer;
-    VkDeviceAddress storage_base = dev.dt.getBufferDeviceAddress(dev.hdl,
-        &storage_addr_info);
+    DedicatedBuffer as_storage = mem.makeDedicatedBuffer(total_as_bytes, true);
+    VkDeviceAddress as_storage_base = getDevAddr(dev, as_storage.buf.buffer);
+
+    uint64_t initial_instance_storage_bytes =
+        num_worlds * max_num_instances * sizeof(AccelStructInstance);
+
+    DedicatedBuffer instance_storage = mem.makeDedicatedBuffer(
+        initial_instance_storage_bytes, true);
+    CudaImportedBuffer instance_storage_cuda(dev, cuda_gpu_id,
+        instance_storage.mem, initial_instance_storage_bytes);
+
+    VkDeviceAddress instance_storage_base_addr =
+        getDevAddr(dev, instance_storage.buf.buffer);
+
+    uint64_t num_instance_addrs_bytes =
+        sizeof(AccelStructInstance *) * num_worlds;
+
+    HostBuffer instance_addrs_staging =
+        mem.makeStagingBuffer(num_instance_addrs_bytes);
+    auto instance_addrs_staging_ptr =
+        (AccelStructInstance **)instance_addrs_staging.ptr;
+
+    DedicatedBuffer instance_addrs_storage =
+        mem.makeDedicatedBuffer(num_instance_addrs_bytes);
+    CudaImportedBuffer instance_addrs_storage_cuda(dev, cuda_gpu_id,
+        instance_addrs_storage.mem, num_instance_addrs_bytes);
 
     HeapArray<VkAccelerationStructureKHR> hdls(num_worlds);
-    HeapArray<VkDeviceAddress> tlas_addrs(num_worlds);
-    HeapArray<VkAccelerationStructureBuildRangeInfoKHR> range_infos(num_worlds);
-    HeapArray<VkAccelerationStructureBuildRangeInfoKHR *> range_info_ptrs(num_worlds);
+    HeapArray<uint32_t> max_instances(num_worlds);
 
-    VkDeviceSize cur_storage_offset = 0;
+    HeapArray<VkAccelerationStructureBuildRangeInfoKHR> range_infos(
+        num_worlds);
+    HeapArray<VkAccelerationStructureBuildRangeInfoKHR *> range_info_ptrs(
+        num_worlds);
+
+    VkDeviceSize cur_as_storage_offset = 0;
+    VkDeviceSize cur_instance_storage_offset = 0;
     for (int64_t i = 0; i < num_worlds; i++) {
+        // Prepopulate geometry info with device address
+        geometry_infos[i].geometry.instances.data.deviceAddress =
+            instance_storage_base_addr + cur_instance_storage_offset;
+        instance_addrs_staging_ptr[i] = (AccelStructInstance *)
+            ((char *)instance_storage_cuda.getDevicePointer() +
+            cur_instance_storage_offset);
+        max_instances[i] = max_num_instances;
+
+        cur_instance_storage_offset +=
+            sizeof(AccelStructInstance) * max_num_instances;
+
         VkAccelerationStructureCreateInfoKHR create_info;
         create_info.sType =
             VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
         create_info.pNext = nullptr;
         create_info.createFlags = 0;
-        create_info.buffer = storage_buf.buffer;
-        create_info.offset = cur_storage_offset;
+        create_info.buffer = as_storage.buf.buffer;
+        create_info.offset = cur_as_storage_offset;
         create_info.size = size_info.accelerationStructureSize;
         create_info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
         create_info.deviceAddress = 0;
 
-        cur_storage_offset += size_info.accelerationStructureSize;
+        cur_as_storage_offset += size_info.accelerationStructureSize;
 
         REQ_VK(dev.dt.createAccelerationStructureKHR(dev.hdl, &create_info,
                                                      nullptr, &hdls[i]));
 
-        VkAccelerationStructureDeviceAddressInfoKHR accel_addr_info;
-        accel_addr_info.sType =
-            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-        accel_addr_info.pNext = nullptr;
-        accel_addr_info.accelerationStructure = hdls[i];
-
-        tlas_addrs[i] = dev.dt.getAccelerationStructureDeviceAddressKHR(
-            dev.hdl, &accel_addr_info);
-
         auto &build_info = build_infos[i];
         build_info.dstAccelerationStructure = hdls[i];
-        build_info.scratchData.deviceAddress = storage_base + cur_storage_offset;
+        build_info.scratchData.deviceAddress =
+            as_storage_base + cur_as_storage_offset;
 
-        cur_storage_offset += size_info.buildScratchSize;
+        cur_as_storage_offset += size_info.buildScratchSize;
 
         VkAccelerationStructureBuildRangeInfoKHR &range_info = range_infos[i];
         range_info.primitiveCount = -1;
@@ -494,34 +512,45 @@ TLASData TLASData::setup(const DeviceState &dev,
         range_info_ptrs[i] = &range_info;
     }
 
+    instance_addrs_staging.flush(dev);
+
+    gpu_run.begin(dev);
+
+    VkBufferCopy addrs_copy_info {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = num_instance_addrs_bytes,
+    };
+
+    dev.dt.cmdCopyBuffer(gpu_run.cmd, instance_addrs_staging.buffer,
+                         instance_addrs_storage.buf.buffer, 1,
+                         &addrs_copy_info);
+
+    gpu_run.submit(dev);
+
     return TLASData {
+        std::move(as_storage),
+        std::move(instance_storage),
+        std::move(instance_storage_cuda),
+        std::move(instance_addrs_storage),
+        std::move(instance_addrs_storage_cuda),
         std::move(hdls),
-        std::move(tlas_addrs),
+        std::move(max_instances),
         std::move(geometry_infos),
         std::move(build_infos),
         std::move(range_infos),
         std::move(range_info_ptrs),
-        std::move(storage_buf),
-        max_num_instances,
     };
 }
 
 void TLASData::build(const DeviceState &dev,
-                     uint32_t *num_instances_per_world,
-                     VkDeviceAddress instance_data_addr,
+                     const uint32_t *num_instances_per_world,
                      VkCommandBuffer build_cmd)
 {
     const int64_t num_worlds = hdls.size();
     for (int64_t i = 0; i < num_worlds; i++) {
-        geometryInfos[i].geometry.instances.data.deviceAddress =
-            instance_data_addr;
-
         uint32_t num_instances = num_instances_per_world[i];
-        
-        assert(num_instances <= maxSupportedInstances);
-        instance_data_addr += sizeof(VkAccelerationStructureInstanceKHR) *
-            (uint64_t)num_instances;
-
+        assert(num_instances <= maxInstances[i]);
         auto &range_info = rangeInfos[i];
         range_info.primitiveCount = num_instances;
     }

@@ -14,10 +14,14 @@ namespace mwGPU {
 
 struct GPUImplConsts {
     void *jobSystemAddr;
+    void *taskGraph;
     void *stateManagerAddr;
     void *chunkAllocatorAddr;
     void *chunkBaseAddr;
     void *worldDataAddr;
+    void **rendererASInstancesAddrs;
+    void *rendererInstanceCountsAddr;
+    void *rendererBLASesAddr;
     uint32_t numWorldDataBytes;
     uint32_t numWorlds;
     uint32_t jobGridsOffset;
@@ -25,8 +29,6 @@ struct GPUImplConsts {
     uint32_t maxJobsPerGrid;
     uint32_t sharedJobTrackerOffset;
     uint32_t userJobTrackerOffset;
-
-    void *taskGraph;
 
     static inline GPUImplConsts & get();
 };

@@ -5,6 +5,7 @@
 
 #include "core.hpp"
 #include "memory.hpp"
+#include "cuda_interop.hpp"
 
 namespace madrona {
 namespace render {
@@ -40,24 +41,28 @@ struct Assets {
 };
 
 struct TLASData {
+    DedicatedBuffer accelStructStorage;
+    DedicatedBuffer instanceStorage;
+    CudaImportedBuffer instanceStorageCUDA;
+    DedicatedBuffer instanceAddrsStorage;
+    CudaImportedBuffer instanceAddrsStorageCUDA;
+
     HeapArray<VkAccelerationStructureKHR> hdls;
-    HeapArray<VkDeviceAddress> tlasAddrs;
+    HeapArray<uint32_t> maxInstances;
     HeapArray<VkAccelerationStructureGeometryKHR> geometryInfos;
     HeapArray<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos;
     HeapArray<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
     HeapArray<VkAccelerationStructureBuildRangeInfoKHR *> rangeInfoPtrs;
 
-    LocalBuffer storage;
-    uint32_t maxSupportedInstances;
-
     static TLASData setup(const DeviceState &dev,
+                          const GPURunUtil &gpu_run,
+                          int cuda_gpu_id,
                           MemoryAllocator &mem,
                           int64_t num_worlds,
                           uint32_t max_num_instances);
 
     void build(const DeviceState &dev,
-               uint32_t *num_instances_per_world,
-               VkDeviceAddress instance_data_addr_base,
+               const uint32_t *num_instances_per_world,
                VkCommandBuffer build_cmd);
 
     void free(const DeviceState &dev);

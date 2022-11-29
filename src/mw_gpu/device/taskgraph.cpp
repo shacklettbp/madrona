@@ -323,10 +323,14 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
 
     *out_constants = GPUImplConsts {
         .jobSystemAddr = (void *)0ul,
+        .taskGraph = (void *)0ul,
         .stateManagerAddr = (void *)state_mgr_offset,
         .chunkAllocatorAddr = (void *)chunk_allocator_offset,
         .chunkBaseAddr = (void *)0ul,
         .worldDataAddr = (void *)world_data_offset,
+        .rendererASInstancesAddrs = (void **)0ul,
+        .rendererInstanceCountsAddr = (void *)0ul,
+        .rendererBLASesAddr = (void *)0ul,
         .numWorldDataBytes = num_world_data_bytes,
         .numWorlds = num_worlds,
         .jobGridsOffset = (uint32_t)0,
@@ -334,7 +338,6 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         .maxJobsPerGrid = 0,
         .sharedJobTrackerOffset = (uint32_t)0,
         .userJobTrackerOffset = (uint32_t)0,
-        .taskGraph = (void *)0ul,
     };
 
     *job_system_buffer_size = total_bytes;

@@ -7,9 +7,12 @@
 #include "vk/cuda_interop.hpp"
 #include "vk/memory.hpp"
 #include "vk/scene.hpp"
+#include "vk/utils.hpp"
 
 namespace madrona {
 namespace render {
+
+using namespace vk;
 
 static bool enableValidation()
 {
@@ -18,78 +21,114 @@ static bool enableValidation()
 }
 
 struct BatchRenderer::Impl {
-    cudaStream_t cpyStrm;
-    vk::InstanceState inst;
-    vk::DeviceState dev;
-    vk::MemoryAllocator mem;
-    void *o2wSrc;
-    void *objIDsSrc;
-    uint64_t numO2WBytes;
-    uint64_t numObjIDsBytes;
-    vk::DedicatedBuffer o2wCopyBuffer;
-    vk::DedicatedBuffer objIDsCopyBuffer;
-    vk::CudaImportedBuffer o2wCopyCuda;
-    vk::CudaImportedBuffer objIDsCopyCuda;
-    vk::TLASData tlases;
-    vk::Assets cube;
+    InstanceState inst;
+    DeviceState dev;
+    MemoryAllocator mem;
+    DedicatedBuffer blasAddrBuffer;
+    CudaImportedBuffer blasAddrBufferCUDA;
+    VkQueue renderQueue;
+    VkFence renderFence;
+    VkCommandPool renderCmdPool;
+    VkCommandBuffer renderCmd;
+    TLASData tlases;
+    Assets cube;
 
-    Impl(int64_t num_worlds,
-         int64_t objs_per_world,
-         void *o2w_cuda,
-         void *obj_ids_cuda);
+    inline Impl(int64_t gpu_id,
+                int64_t num_worlds,
+                int64_t max_instances_per_world,
+                int64_t max_objects);
 
-    inline void render();
+    inline void render(const uint32_t *num_instances);
 };
 
-BatchRenderer::Impl::Impl(int64_t num_worlds,
-                          int64_t objs_per_world,
-                          void *o2w_cuda,
-                          void *obj_ids_cuda)
-    : cpyStrm(),
-      inst(nullptr, enableValidation(), false, {}),
-      dev(inst.makeDevice(vk::getUUIDFromCudaID(0), 2, 2, 1, nullptr)),
+BatchRenderer::Impl::Impl(int64_t gpu_id,
+                          int64_t num_worlds,
+                          int64_t max_instances_per_world,
+                          int64_t max_objects)
+    : inst(nullptr, enableValidation(), false, {}),
+      dev(inst.makeDevice(getUUIDFromCudaID(gpu_id), 1, 2, 1,
+                                    nullptr)),
       mem(dev, inst),
-      o2wSrc(o2w_cuda),
-      objIDsSrc(obj_ids_cuda),
-      numO2WBytes(sizeof(ObjectToWorld) *
-        (uint64_t)num_worlds * (uint64_t)objs_per_world),
-      numObjIDsBytes(sizeof(ObjectID) *
-        (uint64_t)num_worlds * (uint64_t)objs_per_world),
-      o2wCopyBuffer(mem.makeDedicatedBuffer(numO2WBytes)),
-      objIDsCopyBuffer(mem.makeDedicatedBuffer(numObjIDsBytes)),
-      o2wCopyCuda(dev, 0, o2wCopyBuffer.mem, numO2WBytes),
-      objIDsCopyCuda(dev, 0, objIDsCopyBuffer.mem, numObjIDsBytes),
-      tlases(vk::TLASData::setup(dev, mem, num_worlds, objs_per_world)),
-      cube(vk::Assets::load(dev, mem))
+      blasAddrBuffer(mem.makeDedicatedBuffer(sizeof(uint64_t) * max_objects)),
+      blasAddrBufferCUDA(dev, gpu_id, blasAddrBuffer.mem,
+          sizeof(uint64_t) * max_objects),
+      renderQueue(makeQueue(dev, dev.computeQF, 0)),
+      renderFence(makeFence(dev, false)),
+      renderCmdPool(makeCmdPool(dev, dev.computeQF)),
+      renderCmd(makeCmdBuffer(dev, renderCmdPool)),
+      tlases(TLASData::setup(dev, GPURunUtil {
+              renderCmdPool,
+              renderCmd,  
+              renderQueue,
+              renderFence, 
+          }, gpu_id, mem, num_worlds, max_instances_per_world)),
+      cube(Assets::load(dev, mem))
 {
-    cudaStreamCreate(&cpyStrm);
+    GPURunUtil gpu_run {
+        renderCmdPool,
+        renderCmd,
+        renderQueue,
+        renderFence,
+    };
+
+    uint64_t num_blas_addr_bytes =
+        sizeof(uint64_t) * cube.blases.accelStructs.size();
+    HostBuffer blas_addr_staging = mem.makeStagingBuffer(num_blas_addr_bytes);
+
+    uint64_t *blas_addrs_staging_ptr = (uint64_t *)blas_addr_staging.ptr;
+    for (int64_t i = 0; i < (int64_t)cube.blases.accelStructs.size(); i++) {
+        blas_addrs_staging_ptr[i] = cube.blases.accelStructs[i].devAddr;
+    }
+
+    gpu_run.begin(dev);
+
+    VkBufferCopy blas_addr_copy {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = num_blas_addr_bytes,
+    };
+
+    dev.dt.cmdCopyBuffer(gpu_run.cmd,
+                         blas_addr_staging.buffer,
+                         blasAddrBuffer.buf.buffer,
+                         1, &blas_addr_copy);
+
+    gpu_run.submit(dev);
 }
 
-void BatchRenderer::Impl::render()
+void BatchRenderer::Impl::render(const uint32_t *num_instances)
 {
-    cudaMemcpyAsync(o2wCopyCuda.getDevicePointer(),
-                    o2wSrc,
-                    numO2WBytes,
-                    cudaMemcpyDeviceToDevice,
-                    cpyStrm);
+    REQ_VK(dev.dt.resetCommandPool(dev.hdl, renderCmdPool, 0));
 
-    cudaMemcpyAsync(objIDsCopyCuda.getDevicePointer(),
-                    objIDsSrc,
-                    numObjIDsBytes,
-                    cudaMemcpyDeviceToDevice,
-                    cpyStrm);
+    VkCommandBufferBeginInfo begin_info {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    REQ_VK(dev.dt.beginCommandBuffer(renderCmd, &begin_info));
 
-    cudaStreamSynchronize(cpyStrm);
+    tlases.build(dev, num_instances, renderCmd);
+
+    REQ_VK(dev.dt.endCommandBuffer(renderCmd));
+
+    VkSubmitInfo submit_info {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.waitSemaphoreCount = 0;
+    submit_info.pWaitSemaphores = nullptr;
+    submit_info.pWaitDstStageMask = nullptr;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &renderCmd;
+    REQ_VK(dev.dt.queueSubmit(renderQueue, 1, &submit_info, renderFence));
+
+    waitForFenceInfinitely(dev, renderFence);
+    resetFence(dev, renderFence);
 }
 
-BatchRenderer::BatchRenderer(CountT num_worlds,
-                             CountT objs_per_world,
-                             void *o2w_cuda,
-                             void *obj_ids_cuda)
+BatchRenderer::BatchRenderer(int64_t gpu_id,
+                             int64_t num_worlds,
+                             int64_t max_instances_per_world,
+                             int64_t max_objects)
     : impl_(nullptr)
 {
-    impl_ = std::unique_ptr<Impl>(new Impl(num_worlds, objs_per_world,
-                                           o2w_cuda, obj_ids_cuda));
+    impl_ = std::unique_ptr<Impl>(
+        new Impl(gpu_id, num_worlds, max_instances_per_world, max_objects));
 }
 
 BatchRenderer::BatchRenderer(BatchRenderer &&o)
@@ -98,9 +137,21 @@ BatchRenderer::BatchRenderer(BatchRenderer &&o)
 
 BatchRenderer::~BatchRenderer() {}
 
-void BatchRenderer::render()
+AccelStructInstance ** BatchRenderer::tlasInstancePtrs() const
 {
-    impl_->render();
+    return (AccelStructInstance **)
+        impl_->tlases.instanceAddrsStorageCUDA.getDevicePointer();
+}
+
+uint64_t * BatchRenderer::objectsBLASPtr() const
+{
+    return (uint64_t *)
+        impl_->blasAddrBufferCUDA.getDevicePointer();
+}
+
+void BatchRenderer::render(const uint32_t *num_instances)
+{
+    impl_->render(num_instances);
 }
 
 }

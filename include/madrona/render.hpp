@@ -6,23 +6,24 @@
 namespace madrona {
 namespace render {
 
-struct ObjectToWorld : math::Mat3x4 {
-    ObjectToWorld(math::Mat3x4 mat)
-        : Mat3x4(mat)
-    {}
+struct AccelStructTransform {
+    float matrix[3][4];
+};
+
+struct AccelStructInstance {
+    AccelStructTransform transform;
+    uint32_t instanceCustomIndex:24;
+    uint32_t mask:8;
+    uint32_t instanceShaderBindingTableRecordOffset:24;
+    uint32_t flags:8;
+    uint64_t accelerationStructureReference;
 };
 
 struct ObjectID {
     int32_t idx;
 };
 
-struct RenderObject : madrona::Archetype<ObjectToWorld, ObjectID> {};
-
-struct RenderEntity {
-    Entity renderEntity;
-};
-
-struct RenderSetupSystem {
+struct RenderingSystem {
     static void registerTypes(ECSRegistry &registry);
 
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,

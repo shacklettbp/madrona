@@ -46,7 +46,7 @@ struct Sphere : public madrona::Archetype<
     Rotation,
     madrona::phys::CollisionAABB,
     madrona::phys::broadphase::LeafID,
-    madrona::render::RenderEntity
+    madrona::render::ObjectID
 > {};
 
 class Engine;

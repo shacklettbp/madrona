@@ -30,8 +30,7 @@ static constexpr VkBufferUsageFlags paramUsage =
     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 
 static constexpr VkBufferUsageFlags hostRTUsage =
-    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 
 static constexpr VkBufferUsageFlags hostUsage =
     stageUsage | shaderUsage | paramUsage | hostRTUsage | commonUsage;
@@ -39,28 +38,24 @@ static constexpr VkBufferUsageFlags hostUsage =
 static constexpr VkBufferUsageFlags indirectUsage =
     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 
-static constexpr VkBufferUsageFlags dedicatedUsage =
-    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-    VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-
 static constexpr VkBufferUsageFlags rtGeometryUsage =
     VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
 static constexpr VkBufferUsageFlags rtAccelScratchUsage =
-    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 
 static constexpr VkBufferUsageFlags rtAccelUsage =
-    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
 
 static constexpr VkBufferUsageFlags localRTUsage =
     rtGeometryUsage | rtAccelScratchUsage | rtAccelUsage;
 
 static constexpr VkBufferUsageFlags localUsage =
     commonUsage | geometryUsage | shaderUsage | indirectUsage | localRTUsage;
+
+static constexpr VkBufferUsageFlags dedicatedUsage =
+    localUsage;
 };
 
 namespace ImageFlags {
@@ -591,6 +586,10 @@ optional<LocalBuffer> MemoryAllocator::makeLocalBuffer(
     VkBufferUsageFlags usage,
     bool dev_addr)
 {
+    if (dev_addr) {
+        usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    }
+
     auto [buffer, reqs] = makeUnboundBuffer(dev, num_bytes, usage);
 
     VkMemoryAllocateInfo alloc;

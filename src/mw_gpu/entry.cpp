@@ -46,8 +46,9 @@ struct GPUKernels {
 };
 
 struct GPUEngineState {
-    void *stateBuffer;
     render::BatchRenderer batchRenderer;
+    void *stateBuffer;
+    uint32_t *rendererInstanceCounts;
 };
 
 struct TrainingExecutor::Impl {
@@ -589,7 +590,8 @@ HeapArray<void *> makeKernelArgBuffer(Ts ...args)
     }
 }
 
-static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
+static GPUEngineState initEngineAndUserState(int gpu_id,
+                                             uint32_t num_worlds,
                                              uint32_t num_world_data_bytes,
                                              uint32_t world_data_alignment,
                                              void *world_init_ptr,
@@ -598,6 +600,10 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
                                              CompileConfig::Executor exec_mode,
                                              cudaStream_t strm)
 {
+    constexpr int64_t max_instances_per_world = 100;
+    render::BatchRenderer batch_renderer(gpu_id, num_worlds,
+                                         max_instances_per_world,
+                                         1000);
 
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
                                uint32_t num_threads,
@@ -624,11 +630,7 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
-    auto render_o2w_readback = (void **)cu::allocReadback(sizeof(void *));
-    auto render_obj_ids_readback = (void **)cu::allocReadback(sizeof(void *));
-    auto init_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer,
-                                         render_o2w_readback,
-                                         render_obj_ids_readback);
+    auto init_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
 
     auto no_args = makeKernelArgBuffer();
 
@@ -647,6 +649,10 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
         (char *)gpu_consts_readback->jobSystemAddr +
         (uintptr_t)gpu_state_buffer;
 
+    gpu_consts_readback->taskGraph =
+        (char *)gpu_consts_readback->taskGraph +
+        (uintptr_t)gpu_state_buffer;
+
     gpu_consts_readback->stateManagerAddr =
         (char *)gpu_consts_readback->stateManagerAddr +
         (uintptr_t)gpu_state_buffer;
@@ -663,9 +669,14 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
         (char *)gpu_consts_readback->worldDataAddr +
         (uintptr_t)gpu_state_buffer;
 
-    gpu_consts_readback->taskGraph =
-        (char *)gpu_consts_readback->taskGraph +
-        (uintptr_t)gpu_state_buffer;
+    gpu_consts_readback->rendererASInstancesAddrs =
+        (void **)batch_renderer.tlasInstancePtrs();
+
+    uint32_t *instance_counts_host = (uint32_t *)
+        cu::allocReadback(sizeof(uint32_t *) * (uint64_t)num_worlds);
+
+    gpu_consts_readback->rendererInstanceCountsAddr = instance_counts_host;
+    gpu_consts_readback->rendererBLASesAddr = batch_renderer.objectsBLASPtr();
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
@@ -693,18 +704,12 @@ static GPUEngineState initEngineAndUserState(uint32_t num_worlds,
 
     REQ_CUDA(cudaStreamSynchronize(strm));
 
-    void *render_o2w_base = *render_o2w_readback;
-    void *render_obj_ids_base = *render_obj_ids_readback;
-
     cu::deallocGPU(init_tmp_buffer);
-    cu::deallocCPU(render_o2w_readback);
-    cu::deallocCPU(render_obj_ids_readback);
-
 
     return GPUEngineState {
+        std::move(batch_renderer),
         gpu_state_buffer,
-        render::BatchRenderer(num_worlds, 100 /*FIXME*/, render_o2w_base,
-                              render_obj_ids_base),
+        instance_counts_host,
     };
 }
 
@@ -802,7 +807,7 @@ TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
     GPUKernels gpu_kernels = buildKernels(compile_cfg, state_cfg.gpuID);
 
     GPUEngineState eng_state = initEngineAndUserState(
-        state_cfg.numWorlds, state_cfg.numWorldDataBytes,
+        (int)state_cfg.gpuID, state_cfg.numWorlds, state_cfg.numWorldDataBytes,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
         state_cfg.numWorldInitBytes, gpu_kernels, 
         compile_cfg.execMode, strm);
@@ -834,6 +839,9 @@ void TrainingExecutor::run()
 {
     REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
+
+    impl_->engineState.batchRenderer.render(
+        impl_->engineState.rendererInstanceCounts);
 }
 
 }

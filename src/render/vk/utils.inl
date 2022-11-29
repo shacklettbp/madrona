@@ -59,6 +59,15 @@ bool QueueState::presentSubmit(const DeviceState &dev,
     return true;
 }
 
+VkDeviceAddress getDevAddr(const DeviceState &dev, VkBuffer buf)
+{
+    VkBufferDeviceAddressInfoKHR addr_info;
+    addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
+    addr_info.pNext = nullptr;
+    addr_info.buffer = buf;
+    return dev.dt.getBufferDeviceAddress(dev.hdl, &addr_info);
+}
+
 VkCommandPool makeCmdPool(const DeviceState &dev, uint32_t qf_idx)
 {
     VkCommandPoolCreateInfo pool_info = {};

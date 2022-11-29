@@ -36,6 +36,18 @@ private:
     mutable std::mutex mutex_;
 };
 
+struct GPURunUtil {
+    VkCommandPool pool;
+    VkCommandBuffer cmd;
+    VkQueue queue;
+    VkFence fence;
+
+    void begin(const DeviceState &dev) const;
+    void submit(const DeviceState &dev) const;
+};
+
+inline VkDeviceAddress getDevAddr(const DeviceState &dev, VkBuffer buf);
+
 inline VkCommandPool makeCmdPool(const DeviceState &dev, uint32_t qf_idx);
 
 inline VkCommandBuffer makeCmdBuffer(
