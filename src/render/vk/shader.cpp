@@ -83,7 +83,7 @@ static vector<uint32_t> compileToSPV(const HeapArray<char> &src,
                                      const string &name,
                                      const string &shader_dir,
                                      const string &full_path,
-                                     const vector<string> &defines)
+                                     Span<const string> defines)
 {
     EShLanguage stage;
     switch (vk_stage) {
@@ -136,8 +136,6 @@ static vector<uint32_t> compileToSPV(const HeapArray<char> &src,
 
     DirStackFileIncluder preprocess_includer;
     preprocess_includer.pushExternalLocalDirectory(shader_dir);
-    preprocess_includer.pushExternalLocalDirectory(
-        string(STRINGIFY(SHADER_DIR)) + "../../");
 
     auto handleError = [&](const char *prefix) {
         FATAL("%s for shader: %s\n%s\n%s\n", prefix, name.c_str(),
@@ -264,11 +262,11 @@ static void mergeReflectedSet(ReflectedSetInfo &dst,
     }
 }
 
-ShaderPipeline::ShaderPipeline(
+PipelineShaders::PipelineShaders(
     const DeviceState &d,
-    const vector<string> &shader_names,
-    const vector<BindingOverride> &binding_overrides,
-    const vector<string> &defines,
+    Span<const string> shader_names,
+    Span<const BindingOverride> binding_overrides,
+    Span<const string> defines,
     const char *shader_dir)
     : dev(d),
       shaders_(),
@@ -288,7 +286,7 @@ ShaderPipeline::ShaderPipeline(
         size_t file_size = fend - fbegin;
 
         if (file_size == 0) {
-            FATAL("Empty shader file");
+            FATAL("Empty shader file at %s", full_path.c_str());
         }
 
         HeapArray<char> shader_src(file_size);
@@ -426,7 +424,7 @@ ShaderPipeline::ShaderPipeline(
     }
 }
 
-ShaderPipeline::~ShaderPipeline()
+PipelineShaders::~PipelineShaders()
 {
     for (VkShaderModule mod : shaders_) {
         dev.dt.destroyShaderModule(dev.hdl, mod, nullptr);
@@ -437,12 +435,12 @@ ShaderPipeline::~ShaderPipeline()
     }
 }
 
-void ShaderPipeline::initCompiler()
+void PipelineShaders::initCompiler()
 {
     glslang::InitializeProcess();
 }
 
-VkDescriptorPool ShaderPipeline::makePool(uint32_t set_id,
+VkDescriptorPool PipelineShaders::makePool(uint32_t set_id,
                                           uint32_t max_sets) const
 {
     const vector<VkDescriptorPoolSize> &base_sizes = base_pool_sizes_[set_id];

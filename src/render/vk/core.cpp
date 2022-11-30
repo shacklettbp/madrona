@@ -491,6 +491,7 @@ DeviceState InstanceState::makeDevice(
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT;
     subgroup_size_features.pNext = &atomic_float_features;
     subgroup_size_features.computeFullSubgroups = true;
+    subgroup_size_features.subgroupSizeControl = true;
 
     VkPhysicalDeviceVulkan12Features vk12_features {};
     vk12_features.sType =

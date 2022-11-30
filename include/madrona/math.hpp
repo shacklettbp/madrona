@@ -51,6 +51,125 @@ struct Vector2 {
         return 1.f / length();
 #endif
     }
+
+    inline Vector2 & operator+=(const Vector2 &o)
+    {
+        x += o.x;
+        y += o.y;
+
+        return *this;
+    }
+
+    inline Vector2 & operator-=(const Vector2 &o)
+    {
+        x -= o.x;
+        y -= o.y;
+
+        return *this;
+    }
+
+    inline Vector2 & operator+=(float o)
+    {
+        x += o;
+        y += o;
+
+        return *this;
+    }
+
+    inline Vector2 & operator-=(float o)
+    {
+        x -= o;
+        y -= o;
+
+        return *this;
+    }
+
+    inline Vector2 & operator*=(float o)
+    {
+        x *= o;
+        y *= o;
+
+        return *this;
+    }
+
+    inline Vector2 & operator/=(float o)
+    {
+        float inv = 1.f / o;
+
+        return *this *= inv;
+    }
+
+    friend inline Vector2 operator-(Vector2 v)
+    {
+        return Vector2 {
+            -v.x,
+            -v.y,
+        };
+    }
+
+    friend inline Vector2 operator+(Vector2 a, const Vector2 &b)
+    {
+        a += b;
+
+        return a;
+    }
+
+    friend inline Vector2 operator-(Vector2 a, const Vector2 &b)
+    {
+        a -= b;
+
+        return a;
+    }
+
+    friend inline Vector2 operator+(Vector2 a, float b)
+    {
+        a += b;
+
+        return a;
+    }
+
+    friend inline Vector2 operator-(Vector2 a, float b)
+    {
+        a -= b;
+
+        return a;
+    }
+
+    friend inline Vector2 operator*(Vector2 a, float b)
+    {
+        a *= b;
+
+        return a;
+    }
+
+    friend inline Vector2 operator/(Vector2 a, float b)
+    {
+        a /= b;
+        return a;
+    }
+
+    friend inline Vector2 operator+(float a, Vector2 b)
+    {
+        return b + a;
+    }
+
+    friend inline Vector2 operator-(float a, Vector2 b)
+    {
+        return -b + a;
+    }
+
+    friend inline Vector2 operator*(float a, Vector2 b)
+    {
+        return b * a;
+    }
+
+    friend inline Vector2 operator/(float a, Vector2 b)
+    {
+        return Vector2 {
+            a / b.x,
+            a / b.y,
+        };
+    }
 };
 
 struct Vector3 {
@@ -263,6 +382,13 @@ struct Vector3 {
             math::max(a.x, b.x),
         };
     }
+};
+
+struct Vector4 {
+    float x;
+    float y;
+    float z;
+    float w;
 };
 
 inline float dot(Vector3 a, Vector3 b)

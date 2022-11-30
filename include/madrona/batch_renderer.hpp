@@ -9,10 +9,16 @@ namespace render {
 
 class BatchRenderer {
 public:
-    BatchRenderer(int64_t gpu_id,
-                  int64_t num_worlds,
-                  int64_t max_instances_per_world,
-                  int64_t max_objects);
+    struct Config {
+        int gpuID;
+        uint32_t renderWidth;
+        uint32_t renderHeight;
+        uint32_t numWorlds;
+        uint32_t maxInstancesPerWorld;
+        uint32_t maxObjects;
+    };
+
+    BatchRenderer(const Config &cfg);
     BatchRenderer(BatchRenderer &&o);
 
     ~BatchRenderer();

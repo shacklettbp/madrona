@@ -601,9 +601,14 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                              cudaStream_t strm)
 {
     constexpr int64_t max_instances_per_world = 100;
-    render::BatchRenderer batch_renderer(gpu_id, num_worlds,
-                                         max_instances_per_world,
-                                         1000);
+    render::BatchRenderer batch_renderer({
+        .gpuID = gpu_id,
+        .renderWidth = 64,
+        .renderHeight = 64,
+        .numWorlds = num_worlds,
+        .maxInstancesPerWorld = max_instances_per_world,
+        .maxObjects = 1000,
+    });
 
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
                                uint32_t num_threads,
@@ -825,7 +830,8 @@ TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
         std::move(eng_state),
         run_graph,
     });
-    
+
+    std::cout << "Initialization finished" << std::endl;
 }
 
 TrainingExecutor::~TrainingExecutor()

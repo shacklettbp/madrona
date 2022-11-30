@@ -4,6 +4,7 @@
 #include "core.hpp"
 
 #include <madrona/math.hpp>
+#include <madrona/span.hpp>
 
 #include <string>
 #include <vector>
@@ -13,14 +14,17 @@ namespace render {
 namespace vk {
 
 namespace shader {
-using float3 = madrona::math::Vector3;
-using float2 = madrona::math::Vector2;
+using vec4 = madrona::math::Vector4;
+using vec3 = madrona::math::Vector3;
+using vec2 = madrona::math::Vector2;
 #include "shaders/shader_common.h"
 }
 
 using shader::Vertex;
+using shader::PackedVertex;
 using shader::Mesh;
 using shader::Object;
+using shader::RTPushConstant;
 
 namespace VulkanConfig {
 
@@ -41,16 +45,16 @@ struct BindingOverride {
     VkDescriptorBindingFlags flags;
 };
 
-class ShaderPipeline {
+class PipelineShaders {
 public:
-    ShaderPipeline(const DeviceState &dev,
-                   const std::vector<std::string> &shader_paths,
-                   const std::vector<BindingOverride> &binding_overrides,
-                   const std::vector<std::string> &defines,
-                   const char *shader_dir);
-    ShaderPipeline(const ShaderPipeline &) = delete;
-    ShaderPipeline(ShaderPipeline &&) = default;
-    ~ShaderPipeline();
+    PipelineShaders(const DeviceState &dev,
+                    Span<const std::string> shader_paths,
+                    Span<const BindingOverride> binding_overrides,
+                    Span<const std::string> defines,
+                    const char *shader_dir);
+    PipelineShaders(const PipelineShaders &) = delete;
+    PipelineShaders(PipelineShaders &&) = default;
+    ~PipelineShaders();
 
     static void initCompiler();
 

@@ -10,7 +10,7 @@ namespace render {
 namespace vk {
 
 DescriptorManager::DescriptorManager(const DeviceState &d,
-                                     const ShaderPipeline &shader,
+                                     const PipelineShaders &shader,
                                      uint32_t set_id)
     : dev(d),
       shader_(shader),
@@ -73,7 +73,7 @@ DescriptorSet DescriptorManager::makeSet()
 }
 
 FixedDescriptorPool::FixedDescriptorPool(const DeviceState &d,
-                                         const ShaderPipeline &shader,
+                                         const PipelineShaders &shader,
                                          uint32_t set_id,
                                          uint32_t pool_size)
     : dev(d),

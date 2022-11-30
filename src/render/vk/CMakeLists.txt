@@ -54,8 +54,6 @@ add_library(madrona_render_vk STATIC
 )
 
 target_compile_definitions(madrona_render_vk
-    PRIVATE
-        "-DSHADER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/shaders/"
     PUBLIC
         "-DVK_NO_PROTOTYPES"
 )

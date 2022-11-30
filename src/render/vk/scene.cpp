@@ -103,7 +103,7 @@ static optional<BLASBuildResults> makeBLASes(
             tri_info.pNext = nullptr;
             tri_info.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
             tri_info.vertexData.deviceAddress = vert_addr;
-            tri_info.vertexStride = sizeof(Vertex);
+            tri_info.vertexStride = sizeof(PackedVertex);
             tri_info.maxVertex = max_num_vertices;
             tri_info.indexType = VK_INDEX_TYPE_UINT32;
             tri_info.indexData.deviceAddress = index_addr;
@@ -235,50 +235,135 @@ static optional<BLASBuildResults> makeBLASes(
     };
 }
 
+static Vector3 encodeNormalTangent(const Vector3 &normal,
+                                   const Vector4 &tangent_plussign)
+{
+    auto packHalf2x16 = [](const Vector2 &v) {
+        _Float16 x_half = v.x;
+        _Float16 y_half = v.y;
+
+        return uint32_t(std::bit_cast<uint16_t>(x_half)) << 16 |
+            uint32_t(std::bit_cast<uint16_t>(y_half));
+    };
+
+    auto packSnorm2x16 = [](const Vector2 &v) {
+        uint16_t x = roundf(min(max(v.x, -1.f), 1.f) * 32767.f);
+        uint16_t y = roundf(min(max(v.y, -1.f), 1.f) * 32767.f);
+
+        return uint32_t(x) << 16 | uint32_t(y);
+    };
+
+    // https://knarkowicz.wordpress.com/2014/04/16/octahedron-normal-vector-encoding/
+    auto octWrap = [](const Vector2 &v) {
+        return Vector2 {
+            (1.f - fabsf(v.y)) * (v.x >= 0.f ? 1.f : -1.f),
+            (1.f - fabsf(v.x)) * (v.y >= 0.f? 1.f : -1.f),
+        };
+    };
+ 
+    auto octEncode = [&octWrap](Vector3 n) {
+        n /= (fabsf(n.x) + fabsf(n.y) + fabsf(n.z));
+
+        Vector2 nxy {n.x, n.y};
+
+        nxy = n.z >= 0.0f ? nxy : octWrap(nxy);
+        nxy = nxy * 0.5f + 0.5f;
+        return nxy;
+    };
+
+    Vector3 tangent = {
+        tangent_plussign.x,
+        tangent_plussign.y,
+        tangent_plussign.z,
+    };
+    float bitangent_sign = tangent_plussign.w;
+
+    uint32_t nxy = packHalf2x16(Vector2 {normal.x, normal.y});
+    uint32_t nzsign = packHalf2x16(Vector2 {normal.z, bitangent_sign});
+
+    Vector2 octtan = octEncode(tangent);
+    uint32_t octtan_snorm = packSnorm2x16(octtan);
+
+    return Vector3 {
+        std::bit_cast<float>(nxy),
+        std::bit_cast<float>(nzsign),
+        std::bit_cast<float>(octtan_snorm),
+    };
+}
+
+static PackedVertex packVertex(const Vertex &v)
+{
+    Vector3 encoded_normal_tangent =
+        encodeNormalTangent(v.normal, v.tangentAndSign);
+
+    return PackedVertex {
+        Vector4 {
+            v.position.x,
+            v.position.y,
+            v.position.z,
+            encoded_normal_tangent.x,
+        },
+        Vector4 {
+            encoded_normal_tangent.y,
+            encoded_normal_tangent.z,
+            v.uv.x,
+            v.uv.y,
+        },
+    };
+}
+
 Assets Assets::load(const DeviceState &dev,
                     MemoryAllocator &mem)
 {
-    std::vector<Vertex> vertices {
-        Vertex {
+    std::vector<PackedVertex> vertices {
+        packVertex(Vertex {
             Vector3 { -1, -1, -1, },
-            Vector3 { },
-            Vector2 { },
-        },
-        Vertex {
+            Vector3 {},
+            Vector4 {},
+            Vector2 {},
+        }),
+        packVertex(Vertex {
             Vector3 {  1, -1, -1, },
-            Vector3 { },
-            Vector2 { },
-        },
-        Vertex {
+            Vector3 {},
+            Vector4 {},
+            Vector2 {},
+        }),
+        packVertex(Vertex {
             Vector3 {  1,  1, -1, },
-            Vector3 { },
-            Vector2 { },
-        },
-        Vertex {
+            Vector3 {},
+            Vector4 {},
+            Vector2 {},
+        }),
+        packVertex(Vertex {
             Vector3 { -1,  1, -1, },
-            Vector3 { },
-            Vector2 { },
-        },
-        Vertex {
+            Vector3 {},
+            Vector4 {},
+            Vector2 {},
+        }),
+        packVertex(Vertex {
             Vector3 { -1, -1,  1, },
-            Vector3 { },
-            Vector2 { },
-        },
-        Vertex {
+            Vector3 {},
+            Vector4 {},
+            Vector2 {},
+        }),
+        packVertex(Vertex {
             Vector3 {  1, -1,  1, },
-            Vector3 { },
-            Vector2 { },
-        },
-        Vertex {
+            Vector3 {},
+            Vector4 {},
+            Vector2 {},
+        }),
+        packVertex(Vertex {
             Vector3 {  1,  1,  1, },
-            Vector3 { },
-            Vector2 { },
-        },
-        Vertex {
+            Vector3 {},
+            Vector4 {},
+            Vector2 {},
+        }),
+        packVertex(Vertex {
             Vector3 { -1,  1,  1, },
-            Vector3 { },
-            Vector2 { },
-        },
+            Vector3 {},
+            Vector4 {},
+            Vector2 {},
+        }),
     };
 
     std::vector<uint32_t> indices {
@@ -298,7 +383,7 @@ Assets Assets::load(const DeviceState &dev,
         Object { 0, 1 },
     };
 
-    uint64_t num_vertex_bytes = sizeof(Vertex) * vertices.size();
+    uint64_t num_vertex_bytes = sizeof(PackedVertex) * vertices.size();
     uint64_t num_index_bytes = sizeof(uint32_t) * indices.size();
 
     LocalBuffer vert_buffer = mem.makeLocalBuffer(num_vertex_bytes, true).value();

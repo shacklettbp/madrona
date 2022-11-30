@@ -43,7 +43,7 @@ struct DescriptorSet {
 class DescriptorManager {
 public:
     DescriptorManager(const DeviceState &dev,
-                      const ShaderPipeline &shader,
+                      const PipelineShaders &shader,
                       uint32_t set_id);
 
     DescriptorManager(const DescriptorManager &) = delete;
@@ -55,7 +55,7 @@ public:
 
 private:
     const DeviceState &dev;
-    const ShaderPipeline &shader_;
+    const PipelineShaders &shader_;
     uint32_t set_id_;
     VkDescriptorSetLayout layout_;
 
@@ -66,7 +66,7 @@ private:
 class FixedDescriptorPool {
 public:
     FixedDescriptorPool(const DeviceState &dev,
-                        const ShaderPipeline &shader,
+                        const PipelineShaders &shader,
                         uint32_t set_id,
                         uint32_t pool_size);
 
