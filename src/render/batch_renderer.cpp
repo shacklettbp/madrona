@@ -234,9 +234,8 @@ static DescriptorState makeDescriptors(const DeviceState &dev,
     view_data_info.offset = 0;
     view_data_info.range = VK_WHOLE_SIZE;
 
-    DescHelper::buffer(desc_updates[0],
-                       rt_set, &view_data_info, 0,
-                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    DescHelper::storage(desc_updates[0],
+                       rt_set, &view_data_info, 0);
 
     HeapArray<VkAccelerationStructureKHR> view_tlas_hdls(cfg.numViews);
     // FIXME
@@ -258,27 +257,26 @@ static DescriptorState makeDescriptors(const DeviceState &dev,
     obj_data_info.offset = sizeof(uint64_t) * asset_mgr.maxObjects;
     obj_data_info.range = sizeof(shader::ObjectData) * asset_mgr.maxObjects;
 
-    DescHelper::buffer(desc_updates[2],
-                       rt_set, &obj_data_info, 0,
-                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    DescHelper::storage(desc_updates[2],
+                       rt_set, &obj_data_info, 2);
 
     VkDescriptorBufferInfo rgb_info;
     rgb_info.buffer = fb.rgb.buf.buffer;
     rgb_info.offset = 0;
     rgb_info.range = VK_WHOLE_SIZE;
 
-    DescHelper::buffer(desc_updates[3],
-                       rt_set, &rgb_info, 0,
-                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    DescHelper::storage(desc_updates[3],
+                       rt_set, &rgb_info, 3);
 
     VkDescriptorBufferInfo depth_info;
     depth_info.buffer = fb.depth.buf.buffer;
     depth_info.offset = 0;
     depth_info.range = VK_WHOLE_SIZE;
 
-    DescHelper::buffer(desc_updates[4],
-                       rt_set, &depth_info, 0,
-                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    DescHelper::storage(desc_updates[4],
+                       rt_set, &depth_info, 4);
+
+    DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
     return DescriptorState {
         std::move(rt_pool),

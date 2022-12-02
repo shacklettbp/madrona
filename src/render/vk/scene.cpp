@@ -107,7 +107,7 @@ static optional<BLASBuildResults> makeBLASes(
             tri_info.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
             tri_info.vertexData.deviceAddress = obj_dev_addr;
             tri_info.vertexStride = sizeof(shader::PackedVertex);
-            tri_info.maxVertex = mesh.numVertices;
+            tri_info.maxVertex = mesh.vertexOffset + mesh.numVertices;
             tri_info.indexType = VK_INDEX_TYPE_UINT32;
             tri_info.indexData.deviceAddress = obj_dev_addr;
             tri_info.transformData.deviceAddress = 0;
@@ -119,7 +119,7 @@ static optional<BLASBuildResults> makeBLASes(
 
             VkAccelerationStructureBuildRangeInfoKHR range_info;
             range_info.primitiveCount = num_triangles;
-            range_info.primitiveOffset = mesh.indexOffset;
+            range_info.primitiveOffset = mesh.indexOffset * sizeof(uint32_t);
             range_info.firstVertex = mesh.vertexOffset;
             range_info.transformOffset = 0;
             range_infos.push_back(range_info);
@@ -387,7 +387,8 @@ void AssetManager::packAssets(void *dst_buffer,
         // Vertex data will get stored after all the shader::MeshData structs
         // so precalculate how much we need to skip ahead by
         int64_t num_meshdata_bytes = utils::roundUpPow2(
-            num_meshes * sizeof(shader::MeshData), 16);
+            num_meshes * sizeof(shader::MeshData), 
+            sizeof(shader::PackedVertex));
 
         int64_t cur_vertex_offset =
             num_meshdata_bytes / sizeof(shader::PackedVertex);
@@ -439,7 +440,10 @@ void AssetManager::packAssets(void *dst_buffer,
         }
 
         int64_t total_obj_bytes = utils::roundUpPow2(
-            (char *)cur_index_ptr - obj_pack_base, 16);
+            (char *)cur_index_ptr - obj_pack_base,
+            sizeof(shader::PackedVertex));
+
+        static_assert(utils::isPower2(sizeof(shader::PackedVertex)));
 
         pack_offset += total_obj_bytes;
         obj_mesh_offset += num_meshes;
@@ -501,6 +505,7 @@ Assets AssetManager::load(const DeviceState &dev,
 
     tmp_queue.submit(dev, 1, &copy_submit, tmp_fence);
     waitForFenceInfinitely(dev, tmp_fence);
+    resetFence(dev, tmp_fence);
 
     int64_t num_objects = metadata.objects.size();
     int64_t base_obj_offset = freeObjectOffset;
