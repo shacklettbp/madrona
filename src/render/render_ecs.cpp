@@ -1,3 +1,4 @@
+#include <atomic>
 #include <madrona/render.hpp>
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
@@ -8,8 +9,17 @@ using namespace math;
 
 namespace render {
 
+// FIXME this is a copy of the PackedCamera / ViewData
+// struct in render/vk/shaders/shader_common.h
+struct ViewData {
+    Quat rotation;
+    Vector4 posAndTanFOV;
+};
+
 struct RendererState {
     std::atomic_uint32_t instanceCount;
+
+    static inline std::atomic_int32_t viewOffset = 0;
 };
 
 static inline AccelStructInstance * getInstanceBuffer(int32_t world_idx)
@@ -33,6 +43,7 @@ static inline uint64_t * getBlases()
 void RenderingSystem::registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<ObjectID>();
+    registry.registerComponent<ActiveView>();
     registry.registerSingleton<RendererState>();
 }
 
@@ -84,21 +95,64 @@ inline void updateInstanceCount(Context &ctx,
     exportInstanceCount(ctx.worldID().idx, inst_count);
 }
 
+inline void updateViewData(Context &,
+                           const Position &pos,
+                           const Rotation &rot,
+                           const ActiveView &view)
+{
+    auto viewdatas =
+        (ViewData *)mwGPU::GPUImplConsts::get().rendererViewDatasAddr;
+
+    ViewData &cur_view = viewdatas[view.viewIdx];
+    cur_view.rotation = rot;
+    cur_view.posAndTanFOV.x = pos.x;
+    cur_view.posAndTanFOV.y = pos.y;
+    cur_view.posAndTanFOV.z = pos.z;
+    cur_view.posAndTanFOV.w = view.tanFOV;
+}
+
 
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
-    auto setup = builder.parallelForNode<Context,
-                                         instanceAccelStructSetup,
-                                         Position,
-                                         Rotation,
-                                         ObjectID>(deps);
+    auto instance_setup = builder.parallelForNode<Context,
+        instanceAccelStructSetup,
+        Position,
+        Rotation,
+        ObjectID>(deps);
+
+    auto viewdata_update = builder.parallelForNode<Context,
+        updateViewData,
+        Position,
+        Rotation,
+        ActiveView>({instance_setup});
 
     auto update_count = builder.parallelForNode<Context,
-                                                updateInstanceCount,
-                                                RendererState>({setup});
+        updateInstanceCount,
+        RendererState>({viewdata_update});
 
     return update_count;
+}
+
+void RenderingSystem::init(Context &ctx)
+{
+    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    new (&renderer_state) RendererState {
+        0,
+    };
+}
+
+ActiveView RenderingSystem::setupView(Context &, float vfov_degrees)
+{
+    int32_t view_offset = RendererState::viewOffset.fetch_add(1,
+        std::memory_order_relaxed);
+
+    float tan_fov = tanf(math::toRadians(vfov_degrees / 2.f));
+
+    return ActiveView {
+        tan_fov, 
+        view_offset,
+    };
 }
 
 }

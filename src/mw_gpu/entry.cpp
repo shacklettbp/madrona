@@ -600,7 +600,7 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                              CompileConfig::Executor exec_mode,
                                              cudaStream_t strm)
 {
-    constexpr int64_t max_instances_per_world = 100;
+    constexpr int64_t max_instances_per_world = 1000;
     render::BatchRenderer batch_renderer({
         .gpuID = gpu_id,
         .renderWidth = 64,
@@ -683,6 +683,9 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
 
     gpu_consts_readback->rendererInstanceCountsAddr = instance_counts_host;
     gpu_consts_readback->rendererBLASesAddr = batch_renderer.objectsBLASPtr();
+
+    gpu_consts_readback->rendererViewDatasAddr =
+        (void *)batch_renderer.viewDataPtr();
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;

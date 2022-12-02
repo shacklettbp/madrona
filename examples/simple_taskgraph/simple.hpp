@@ -49,6 +49,15 @@ struct Sphere : public madrona::Archetype<
     madrona::render::ObjectID
 > {};
 
+struct Agent : public madrona::Archetype<
+    Position,
+    Rotation,
+    madrona::phys::CollisionAABB,
+    madrona::phys::broadphase::LeafID,
+    madrona::render::ObjectID,
+    madrona::render::ActiveView
+> {};
+
 class Engine;
 
 struct SimpleSim : public madrona::WorldBase {
@@ -62,6 +71,8 @@ struct SimpleSim : public madrona::WorldBase {
 
     madrona::Entity *spheres;
     int32_t numSpheres;
+
+    madrona::Entity agent;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, SimpleSim> {

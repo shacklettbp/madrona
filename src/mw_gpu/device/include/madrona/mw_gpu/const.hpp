@@ -22,6 +22,7 @@ struct GPUImplConsts {
     void **rendererASInstancesAddrs;
     void *rendererInstanceCountsAddr;
     void *rendererBLASesAddr;
+    void *rendererViewDatasAddr;
     uint32_t numWorldDataBytes;
     uint32_t numWorlds;
     uint32_t jobGridsOffset;

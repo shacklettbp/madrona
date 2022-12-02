@@ -23,11 +23,20 @@ struct ObjectID {
     int32_t idx;
 };
 
+struct ActiveView {
+    float tanFOV;
+    int32_t viewIdx;
+};
+
 struct RenderingSystem {
     static void registerTypes(ECSRegistry &registry);
 
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
                                         Span<const TaskGraph::NodeID> deps);
+
+    static void init(Context &ctx);
+
+    static ActiveView setupView(Context &ctx, float vfov_degrees);
 };
 
 }

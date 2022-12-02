@@ -11,8 +11,18 @@
 #include <cmath>
 #include <cfloat>
 
+#ifndef M_PI
+#define M_PI (3.14159265358979323846264338327950288f)
+#endif
+
 namespace madrona {
 namespace math {
+
+inline float toRadians(float degrees)
+{
+    constexpr float mult = M_PI / 180.f;
+    return mult * degrees;
+}
 
 inline float min(float a, float b)
 {

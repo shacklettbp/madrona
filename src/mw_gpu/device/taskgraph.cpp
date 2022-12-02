@@ -331,6 +331,7 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         .rendererASInstancesAddrs = (void **)0ul,
         .rendererInstanceCountsAddr = (void *)0ul,
         .rendererBLASesAddr = (void *)0ul,
+        .rendererViewDatasAddr = (void *)0ul,
         .numWorldDataBytes = num_world_data_bytes,
         .numWorlds = num_worlds,
         .jobGridsOffset = (uint32_t)0,
