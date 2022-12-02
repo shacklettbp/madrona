@@ -3,12 +3,14 @@
 
 #include <madrona/math.hpp>
 #include <madrona/dyn_array.hpp>
+#include <vulkan/vulkan_core.h>
 
 #include "vk/core.hpp"
 #include "vk/cuda_interop.hpp"
 #include "vk/memory.hpp"
 #include "vk/scene.hpp"
 #include "vk/utils.hpp"
+#include "vk/descriptors.hpp"
 
 namespace madrona {
 namespace render {
@@ -31,6 +33,25 @@ struct PipelineState {
     VkPipeline rt;
 };
 
+struct FramebufferState {
+    DedicatedBuffer rgb;
+    CudaImportedBuffer rgbCUDA;
+    DedicatedBuffer depth;
+    CudaImportedBuffer depthCUDA;
+    uint32_t renderWidth;
+    uint32_t renderHeight;
+    uint32_t numViews;
+};
+
+struct AssetBuffers {
+    LocalBuffer geometryBuffer;
+};
+
+struct DescriptorState {
+    FixedDescriptorPool rtPool;
+    VkDescriptorSet rtSet;
+};
+
 struct BatchRenderer::Impl {
     InstanceState inst;
     DeviceState dev;
@@ -43,7 +64,12 @@ struct BatchRenderer::Impl {
     VkCommandBuffer renderCmd;
     ShaderState shaderState;
     PipelineState pipelineState;
+    FramebufferState fb;
+    AssetManager assetMgr;
+    DedicatedBuffer viewDataBuffer;
+    CudaImportedBuffer viewDataBufferCUDA;
     TLASData tlases;
+    DescriptorState descriptors;
     Assets cube;
 
     inline Impl(const Config &cfg);
@@ -79,7 +105,7 @@ static ShaderState makeShaderState(const DeviceState &dev,
     PipelineShaders shader(dev,
         { std::string(shader_name) },
         { 
-            BindingOverride { 0, 3, nullptr, cfg.numWorlds, 0 }, // TLAS
+            BindingOverride { 0, 1, nullptr, cfg.numViews, 0 }, // TLAS
         },
         Span<const string>(shader_defines.data(), (CountT)shader_defines.size()),
         STRINGIFY(SHADER_DIR));
@@ -103,7 +129,7 @@ static PipelineState makePipelineState(const DeviceState &dev,
     VkPushConstantRange push_const {
         VK_SHADER_STAGE_COMPUTE_BIT,
         0,
-        sizeof(RTPushConstant),
+        sizeof(shader::RTPushConstant),
     };
 
     // Layout configuration
@@ -161,6 +187,105 @@ static PipelineState makePipelineState(const DeviceState &dev,
     };
 }
 
+static FramebufferState makeFramebuffer(const DeviceState &dev,
+                                        MemoryAllocator &mem,
+                                        const BatchRenderer::Config &cfg)
+{
+    uint64_t num_pixels = (uint64_t)cfg.renderHeight *
+        (uint64_t)cfg.renderWidth * (uint64_t)cfg.numViews;
+
+    uint64_t num_rgb_bytes = num_pixels * 4 * sizeof(uint8_t);
+    uint64_t num_depth_bytes = num_pixels * sizeof(float);
+
+    DedicatedBuffer rgb_buf = mem.makeDedicatedBuffer(num_rgb_bytes);
+    CudaImportedBuffer rgb_buf_cuda(dev, cfg.gpuID, rgb_buf.mem,
+                                    num_rgb_bytes);
+
+    DedicatedBuffer depth_buf = mem.makeDedicatedBuffer(num_depth_bytes);
+    CudaImportedBuffer depth_buf_cuda(dev, cfg.gpuID, depth_buf.mem,
+                                    num_depth_bytes);
+
+    return FramebufferState {
+        std::move(rgb_buf),
+        std::move(rgb_buf_cuda),
+        std::move(depth_buf),
+        std::move(depth_buf_cuda),
+        cfg.renderWidth,
+        cfg.renderHeight,
+        cfg.numViews,
+    };
+}
+
+static DescriptorState makeDescriptors(const DeviceState &dev,
+                                       const BatchRenderer::Config &cfg,
+                                       const ShaderState &shader_state,
+                                       const FramebufferState &fb,
+                                       const AssetManager &asset_mgr,
+                                       const LocalBuffer &view_data_buffer,
+                                       const TLASData &tlas_data)
+{
+    FixedDescriptorPool rt_pool(dev, shader_state.rt, 0, 1);
+    VkDescriptorSet rt_set = rt_pool.makeSet();
+
+    std::array<VkWriteDescriptorSet, 5> desc_updates;
+    
+    VkDescriptorBufferInfo view_data_info;
+    view_data_info.buffer = view_data_buffer.buffer;
+    view_data_info.offset = 0;
+    view_data_info.range = VK_WHOLE_SIZE;
+
+    DescHelper::buffer(desc_updates[0],
+                       rt_set, &view_data_info, 0,
+                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+    HeapArray<VkAccelerationStructureKHR> view_tlas_hdls(cfg.numViews);
+    // FIXME
+    assert(cfg.numViews == cfg.numWorlds);
+    memcpy(view_tlas_hdls.data(),
+           tlas_data.hdls.data(),
+           cfg.numViews * sizeof(VkAccelerationStructureKHR));
+
+    VkWriteDescriptorSetAccelerationStructureKHR as_update;
+    DescHelper::accelStructs(desc_updates[1],
+                             as_update,
+                             rt_set, 
+                             view_tlas_hdls.data(),
+                             cfg.numViews,
+                             1);
+
+    VkDescriptorBufferInfo obj_data_info;
+    obj_data_info.buffer = asset_mgr.addrBuffer.buf.buffer;
+    obj_data_info.offset = sizeof(uint64_t) * asset_mgr.maxObjects;
+    obj_data_info.range = sizeof(shader::ObjectData) * asset_mgr.maxObjects;
+
+    DescHelper::buffer(desc_updates[2],
+                       rt_set, &obj_data_info, 0,
+                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+    VkDescriptorBufferInfo rgb_info;
+    rgb_info.buffer = fb.rgb.buf.buffer;
+    rgb_info.offset = 0;
+    rgb_info.range = VK_WHOLE_SIZE;
+
+    DescHelper::buffer(desc_updates[3],
+                       rt_set, &rgb_info, 0,
+                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+    VkDescriptorBufferInfo depth_info;
+    depth_info.buffer = fb.depth.buf.buffer;
+    depth_info.offset = 0;
+    depth_info.range = VK_WHOLE_SIZE;
+
+    DescHelper::buffer(desc_updates[4],
+                       rt_set, &depth_info, 0,
+                       VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+    return DescriptorState {
+        std::move(rt_pool),
+        rt_set,
+    };
+}
+
 BatchRenderer::Impl::Impl(const Config &cfg)
     : inst(nullptr, enableValidation(), false, {}),
       dev(inst.makeDevice(getUUIDFromCudaID(cfg.gpuID), 1, 2, 1,
@@ -176,44 +301,22 @@ BatchRenderer::Impl::Impl(const Config &cfg)
       renderCmd(makeCmdBuffer(dev, renderCmdPool)),
       shaderState(makeShaderState(dev, cfg)),
       pipelineState(makePipelineState(dev, shaderState)),
+      fb(makeFramebuffer(dev, mem, cfg)),
+      assetMgr(dev, mem, cfg.gpuID, cfg.maxObjects),
+      viewDataBuffer(mem.makeDedicatedBuffer(
+          sizeof(shader::ViewData) * cfg.numViews)),
+      viewDataBufferCUDA(dev, cfg.gpuID, viewDataBuffer.mem,
+          sizeof(shader::ViewData) * cfg.numViews),
       tlases(TLASData::setup(dev, GPURunUtil {
               renderCmdPool,
               renderCmd,  
               renderQueue,
               renderFence, 
           }, cfg.gpuID, mem, cfg.numWorlds, cfg.maxInstancesPerWorld)),
-      cube(Assets::load(dev, mem))
+      descriptors(makeDescriptors(dev, cfg, shaderState, fb, assetMgr,
+                                  viewDataBuffer.buf, tlases)),
+      cube(assetMgr.loadCube(dev, mem))
 {
-    GPURunUtil gpu_run {
-        renderCmdPool,
-        renderCmd,
-        renderQueue,
-        renderFence,
-    };
-
-    uint64_t num_blas_addr_bytes =
-        sizeof(uint64_t) * cube.blases.accelStructs.size();
-    HostBuffer blas_addr_staging = mem.makeStagingBuffer(num_blas_addr_bytes);
-
-    uint64_t *blas_addrs_staging_ptr = (uint64_t *)blas_addr_staging.ptr;
-    for (int64_t i = 0; i < (int64_t)cube.blases.accelStructs.size(); i++) {
-        blas_addrs_staging_ptr[i] = cube.blases.accelStructs[i].devAddr;
-    }
-
-    gpu_run.begin(dev);
-
-    VkBufferCopy blas_addr_copy {
-        .srcOffset = 0,
-        .dstOffset = 0,
-        .size = num_blas_addr_bytes,
-    };
-
-    dev.dt.cmdCopyBuffer(gpu_run.cmd,
-                         blas_addr_staging.buffer,
-                         blasAddrBuffer.buf.buffer,
-                         1, &blas_addr_copy);
-
-    gpu_run.submit(dev);
 }
 
 void BatchRenderer::Impl::render(const uint32_t *num_instances)
@@ -226,6 +329,9 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
 
     dev.dt.cmdBindPipeline(renderCmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                            pipelineState.rt);
+    dev.dt.cmdBindDescriptorSets(renderCmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                 pipelineState.rtLayout, 0, 1,
+                                 &descriptors.rtSet, 0, nullptr);
 
     tlases.build(dev, num_instances, renderCmd);
 
@@ -241,6 +347,12 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1,
         &tlas_barrier, 0, nullptr, 0, nullptr);
+
+    dev.dt.cmdDispatch(
+        renderCmd,
+        fb.renderWidth,
+        fb.renderHeight,
+        fb.numViews);
 
     REQ_VK(dev.dt.endCommandBuffer(renderCmd));
 
@@ -279,6 +391,24 @@ uint64_t * BatchRenderer::objectsBLASPtr() const
 {
     return (uint64_t *)
         impl_->blasAddrBufferCUDA.getDevicePointer();
+}
+
+void * BatchRenderer::viewDataPtr() const
+{
+    return
+        impl_->viewDataBufferCUDA.getDevicePointer();
+}
+
+uint8_t * BatchRenderer::rgbPtr() const
+{
+    return (uint8_t *)
+        impl_->fb.rgbCUDA.getDevicePointer();
+}
+
+float * BatchRenderer::depthPtr() const
+{
+    return (float *)
+        impl_->fb.depthCUDA.getDevicePointer();
 }
 
 void BatchRenderer::render(const uint32_t *num_instances)

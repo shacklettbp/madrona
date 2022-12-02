@@ -4,70 +4,92 @@ namespace madrona {
 namespace render {
 namespace vk {
 
-DescriptorUpdates::DescriptorUpdates(uint32_t max_updates) : updates_()
+void DescHelper::update(const DeviceState &dev,
+                        const VkWriteDescriptorSet *updates,
+                        uint32_t num_desc_updates)
 {
-    updates_.reserve(max_updates);
-}
-
-void DescriptorUpdates::update(const DeviceState &dev)
-{
-    dev.dt.updateDescriptorSets(dev.hdl, updates_.size(), updates_.data(), 0,
+    dev.dt.updateDescriptorSets(dev.hdl, num_desc_updates, updates, 0,
                                 nullptr);
 }
 
-void DescriptorUpdates::textures(VkDescriptorSet desc_set,
-                                 VkDescriptorImageInfo *imgs,
-                                 uint32_t num_textures,
-                                 uint32_t binding,
-                                 uint32_t arr_elem)
+void DescHelper::textures(VkWriteDescriptorSet &update,
+                          VkDescriptorSet desc_set,
+                          VkDescriptorImageInfo *imgs,
+                          uint32_t num_textures,
+                          uint32_t binding,
+                          uint32_t arr_offset)
 {
-    VkWriteDescriptorSet desc_update;
-    desc_update.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    desc_update.pNext = nullptr;
-    desc_update.dstSet = desc_set;
-    desc_update.dstBinding = binding;
-    desc_update.dstArrayElement = arr_elem;
-    desc_update.descriptorCount = num_textures;
-    desc_update.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    desc_update.pImageInfo = imgs;
-    desc_update.pBufferInfo = nullptr;
-    desc_update.pTexelBufferView = nullptr;
-
-    updates_.push_back(desc_update);
+    update.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    update.pNext = nullptr;
+    update.dstSet = desc_set;
+    update.dstBinding = binding;
+    update.dstArrayElement = arr_offset;
+    update.descriptorCount = num_textures;
+    update.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    update.pImageInfo = imgs;
+    update.pBufferInfo = nullptr;
+    update.pTexelBufferView = nullptr;
 }
 
-void DescriptorUpdates::buffer(VkDescriptorSet desc_set,
-                               const VkDescriptorBufferInfo *buf,
-                               uint32_t binding,
-                               VkDescriptorType type)
+void DescHelper::buffer(VkWriteDescriptorSet &update,
+                        VkDescriptorSet desc_set,
+                        const VkDescriptorBufferInfo *buf,
+                        uint32_t binding,
+                        VkDescriptorType type)
 {
-    VkWriteDescriptorSet desc_update;
-    desc_update.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    desc_update.pNext = nullptr;
-    desc_update.dstSet = desc_set;
-    desc_update.dstBinding = binding;
-    desc_update.dstArrayElement = 0;
-    desc_update.descriptorCount = 1;
-    desc_update.descriptorType = type;
-    desc_update.pImageInfo = nullptr;
-    desc_update.pBufferInfo = buf;
-    desc_update.pTexelBufferView = nullptr;
-
-    updates_.push_back(desc_update);
+    update.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    update.pNext = nullptr;
+    update.dstSet = desc_set;
+    update.dstBinding = binding;
+    update.dstArrayElement = 0;
+    update.descriptorCount = 1;
+    update.descriptorType = type;
+    update.pImageInfo = nullptr;
+    update.pBufferInfo = buf;
+    update.pTexelBufferView = nullptr;
 }
 
-void DescriptorUpdates::uniform(VkDescriptorSet desc_set,
-                                const VkDescriptorBufferInfo *buf,
-                                uint32_t binding)
+void DescHelper::uniform(VkWriteDescriptorSet &update,
+                         VkDescriptorSet desc_set,
+                         const VkDescriptorBufferInfo *buf,
+                         uint32_t binding)
 {
-    buffer(desc_set, buf, binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    buffer(update, desc_set, buf, binding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 }
 
-void DescriptorUpdates::storage(VkDescriptorSet desc_set,
-                                const VkDescriptorBufferInfo *buf,
-                                uint32_t binding)
+void DescHelper::storage(VkWriteDescriptorSet &update,
+                         VkDescriptorSet desc_set,
+                         const VkDescriptorBufferInfo *buf,
+                         uint32_t binding)
 {
-    buffer(desc_set, buf, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    buffer(update, desc_set, buf, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+}
+
+void DescHelper::accelStructs(
+    VkWriteDescriptorSet &update,
+    VkWriteDescriptorSetAccelerationStructureKHR &as_update,
+    VkDescriptorSet desc_set,
+    const VkAccelerationStructureKHR *accel_structs,
+    uint32_t num_accel_structs,
+    uint32_t binding,
+    uint32_t arr_offset)
+{
+    as_update.sType =
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    as_update.pNext = nullptr;
+    as_update.accelerationStructureCount = num_accel_structs;
+    as_update.pAccelerationStructures = accel_structs;
+
+    update.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    update.pNext = &as_update;
+    update.dstSet = desc_set;
+    update.dstBinding = binding;
+    update.dstArrayElement = arr_offset;
+    update.descriptorCount = num_accel_structs;
+    update.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    update.pImageInfo = nullptr;
+    update.pBufferInfo = nullptr;
+    update.pTexelBufferView = nullptr;
 }
 
 }

@@ -83,33 +83,43 @@ private:
     VkDescriptorPool pool_;
 };
 
-class DescriptorUpdates {
+class DescHelper {
 public:
-    inline DescriptorUpdates(uint32_t max_updates);
+    static inline void textures(VkWriteDescriptorSet &update,
+                                VkDescriptorSet desc_set,
+                                VkDescriptorImageInfo *views,
+                                uint32_t num_textures,
+                                uint32_t binding,
+                                uint32_t arr_offset = 0);
 
-    inline void textures(VkDescriptorSet desc_set,
-                         VkDescriptorImageInfo *views,
-                         uint32_t num_textures,
-                         uint32_t binding,
-                         uint32_t arr_elem = 0);
+    static inline void buffer(VkWriteDescriptorSet &update,
+                              VkDescriptorSet desc_set,
+                              const VkDescriptorBufferInfo *buf,
+                              uint32_t binding,
+                              VkDescriptorType type);
 
-    inline void buffer(VkDescriptorSet desc_set,
-                       const VkDescriptorBufferInfo *buf,
-                       uint32_t binding,
-                       VkDescriptorType type);
+    static inline void uniform(VkWriteDescriptorSet &update,
+                               VkDescriptorSet desc_set,
+                               const VkDescriptorBufferInfo *buf,
+                               uint32_t binding);
 
-    inline void uniform(VkDescriptorSet desc_set,
-                        const VkDescriptorBufferInfo *buf,
-                        uint32_t binding);
+    static inline void storage(VkWriteDescriptorSet &update,
+                               VkDescriptorSet desc_set,
+                               const VkDescriptorBufferInfo *buf,
+                               uint32_t binding);
 
-    inline void storage(VkDescriptorSet desc_set,
-                        const VkDescriptorBufferInfo *buf,
-                        uint32_t binding);
+    static inline void accelStructs(
+        VkWriteDescriptorSet &update,
+        VkWriteDescriptorSetAccelerationStructureKHR &as_update,
+        VkDescriptorSet desc_set,
+        const VkAccelerationStructureKHR *accel_structs,
+        uint32_t num_accel_structs,
+        uint32_t binding,
+        uint32_t arr_offset = 0);
 
-    inline void update(const DeviceState &dev);
-
-private:
-    std::vector<VkWriteDescriptorSet> updates_;
+    static inline void update(const DeviceState &dev,
+                              const VkWriteDescriptorSet *updates,
+                              uint32_t num_desc_updates);
 };
 
 }

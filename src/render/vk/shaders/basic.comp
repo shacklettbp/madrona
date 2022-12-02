@@ -40,41 +40,94 @@ struct Triangle {
     Vertex c;
 };
 
+// Scene geometry layout:
+// "Asset": a buffer containing index & vertex data for a number of objects
+// Each BLAS corresponds to an object.
+// Each object has N submeshes
+// When processing a hit, we get:
+//  - the index of the triangle hit within the submesh
+//  - the offset of the submesh
+//  - Two custom 32 bit integers set in the TLAS
+//  - The fixed function instance ID (leaf ID in the TLAS, basically)
+// We need several values to fetch the necessary geometry
+//  - The asset buffer address
+//  - The object ID (index somewhere in the above asset buffer address)
+//  - The offset in the asset buffer corresponding to the start of the
+//    submesh's indices.
+//  - Optionally a vertex buffer offset corresponding to the submesh's
+//    vertices. This can be avoided by making all the indices global within
+//    the given asset buffer
+// One solution: Store 2 halves of the asset buffer address in the TLAS
+// integers
+//  - The address would need to be relative for this specific object.
+//    Laid out as follows:
+//      [ RenderMesh, RenderMesh, ... ] [ vertices ] [ indices ]
+//    Each RenderMesh struct would have the appropriate offset into the indices
+//    buffer. RenderMesh array is at the beginning of the asset buffer address
+//    so can be indexed with the submesh offset from the hit info
+//  - # of indirections before fetching indices:
+//      - Fetch RenderMesh.
+//      - Start fetching indices
+//  - Where to put material info?
+//    Put material offset in RenderMesh. Problem: Only have a global
+//    texture descriptor array. Therefore every texture index specified in the
+//    Asset needs to be offset by some value. Could have the first thing
+//    in the Asset buffer be this offset index that is set at load time.
+//  - Downside: Can't separate mesh & materials. Solution: Fill out per-instance
+//    buffer with material index. Don't store any material info in the Asset
+//    buffer. Means the GPU ECS needs to fill out an extra buffer
+//    (the instance data) in addition to the TLAS data.
+// Alternate solution: Put everything in per-instance buffer.
+// struct InstanceData {
+//    vertexAddr;
+//    indexAddr;
+//    meshAddr;
+//    materialAddr;
+//    textureOffset;
+// }
+
+
+layout (buffer_reference, scalar, buffer_reference_align = 16)
+buffer VertexBufferRef {
+    PackedVertex vert;
+};
+
+layout (buffer_reference, scalar, buffer_reference_align = 4)
+buffer IndexBufferRef {
+    uint32_t idx;
+};
+
+layout (buffer_reference, scalar, buffer_reference_align = 4)
+buffer MeshBufferRef {
+    MeshData mesh;
+};
+
 layout (push_constant, scalar) uniform PushConstant {
     RTPushConstant push_const;
 };
 
-layout (set = 0, binding = 0, scalar) readonly buffer Vertices {
-    PackedVertex vertexBuffer[];
+layout (set = 0, binding = 0, scalar) readonly buffer Views {
+    ViewData viewDataBuffer[];
 };
 
-layout (set = 0, binding = 1, scalar) readonly buffer Indices {
-    uint32_t indexBuffer[];
+layout (set = 0, binding = 1)
+    uniform accelerationStructureEXT viewTLASes[];
+
+layout (set = 0, binding = 2, scalar) readonly buffer ObjectDataBuffer {
+    ObjectData objectDataBuffer[];
 };
 
-layout (set = 0, binding = 2, scalar) readonly buffer Meshes {
-    Mesh meshBuffer[];
-};
-
-layout (set = 0, binding = 3)
-    uniform accelerationStructureEXT accelStructs[];
-
-layout (set = 0, binding = 4, scalar) readonly buffer Cameras {
-    PackedCamera cameraBuffer[];
-};
-
-layout (set = 0, binding = 5, scalar) writeonly buffer RGBOut {
+layout (set = 0, binding = 3, scalar) writeonly buffer RGBOut {
     uint8_t rgbOut[];
 };
 
-layout (set = 0, binding = 6, scalar) writeonly buffer DepthOut {
+layout (set = 0, binding = 4, scalar) writeonly buffer DepthOut {
     float depthOut[];
 };
 
-Camera unpackCamera(uint32_t cam_idx)
-{
-    PackedCamera packed = cameraBuffer[cam_idx];
 
+Camera unpackCamera(PackedCamera packed)
+{
     float aspect = float(RES_X) / float(RES_Y);
 
     vec4 rot = packed.rotation;
@@ -92,9 +145,16 @@ Camera unpackCamera(uint32_t cam_idx)
     return Camera(origin, view, up, right, right_scale, up_scale);
 }
 
-Vertex unpackVertex(uint32_t idx)
+void unpackViewData(in uint32_t view_idx, out Camera cam)
 {
-    PackedVertex packed = vertexBuffer[nonuniformEXT(idx)];
+    ViewData view_data = viewDataBuffer[view_idx];
+
+    cam = unpackCamera(view_data.cam);
+}
+
+Vertex unpackVertex(VertexBufferRef vertex_buffer, uint32_t idx)
+{
+    PackedVertex packed = vertex_buffer[idx].vert;
 
     vec4 a = packed.data[0];
     vec4 b = packed.data[1];
@@ -115,23 +175,33 @@ Vertex unpackVertex(uint32_t idx)
     return vert;
 }
 
-u32vec3 fetchTriangleIndices(uint32_t index_offset)
+u32vec3 fetchTriangleIndices(IndexBufferRef index_buffer,
+                             uint32_t index_offset)
 {
     // FIXME: maybe change all this to triangle offset
     return u32vec3(
-        indexBuffer[nonuniformEXT(index_offset)],
-        indexBuffer[nonuniformEXT(index_offset + 1)],
-        indexBuffer[nonuniformEXT(index_offset + 2)]);
+        index_buffer[index_offset].idx,
+        index_buffer[index_offset + 1].idx,
+        index_buffer[index_offset + 2].idx);
 }
 
-Triangle fetchTriangle(uint32_t index_offset)
+Triangle fetchTriangle(uint64_t geo_addr,
+                       uint32_t mesh_offset,
+                       uint32_t index_offset)
 {
-    u32vec3 indices = fetchTriangleIndices(index_offset);
+    MeshBufferRef meshdata_buffer = MeshBufferRef(geo_addr);
+    MeshData meshdata = meshdata_buffer[mesh_offset].mesh;
+
+    VertexBufferRef vertex_buffer = VertexBufferRef(geo_addr);
+    IndexBufferRef index_buffer = IndexBufferRef(geo_addr);
+
+    index_offset += meshdata.indexOffset;
+    u32vec3 indices = fetchTriangleIndices(index_buffer, index_offset);
 
     return Triangle(
-        unpackVertex(indices.x),
-        unpackVertex(indices.y),
-        unpackVertex(indices.z));
+        unpackVertex(vertex_buffer, meshdata.vertexOffset + indices.x),
+        unpackVertex(vertex_buffer, meshdata.vertexOffset + indices.y),
+        unpackVertex(vertex_buffer, meshdata.vertexOffset + indices.z));
 }
 
 #define INTERPOLATE_ATTR(a, b, c, barys) \
@@ -175,11 +245,11 @@ void computeCameraRay(in Camera camera, in u32vec2 idx,
     ray_dir = normalize(ray_dir);
 }
 
-bool traceShadeRay(rayQueryEXT ray_query, in uint32_t tlas_idx,
+bool traceShadeRay(rayQueryEXT ray_query, in uint32_t view_idx,
                    in vec3 ray_origin, in vec3 ray_dir,
                    uint32_t visibility_mask)
 {
-    rayQueryInitializeEXT(ray_query, accelStructs[tlas_idx],
+    rayQueryInitializeEXT(ray_query, viewTLASes[view_idx],
         gl_RayFlagsTerminateOnFirstHitEXT |
             gl_RayFlagsCullBackFacingTrianglesEXT,
         visibility_mask, ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
@@ -203,7 +273,7 @@ bool traceShadowRay(in uint32_t tlas_idx, in vec3 ray_origin,
                     in uint32_t visibility_mask)
 {
     rayQueryEXT ray_query;
-    rayQueryInitializeEXT(ray_query, accelStructs[tlas_idx],
+    rayQueryInitializeEXT(ray_query, viewTLASes[tlas_idx],
         gl_RayFlagsTerminateOnFirstHitEXT, visibility_mask,
         ray_origin, 0.f, ray_dir, ray_len);
 
@@ -224,20 +294,20 @@ bool traceShadowRay(in uint32_t tlas_idx, in vec3 ray_origin,
 void setOutput(uint32_t rgb_offset, uint32_t depth_offset,
                vec3 rgb, float depth)
 {
-    rgbOut[nonuniformEXT(rgb_offset)] =
+    rgbOut[rgb_offset] =
         uint8_t(round(255.f * min(rgb.x, 1.f)));
-    rgbOut[nonuniformEXT(rgb_offset + 1)] =
+    rgbOut[rgb_offset + 1] =
         uint8_t(round(255.f * min(rgb.y, 1.f)));
-    rgbOut[nonuniformEXT(rgb_offset + 2)] =
+    rgbOut[rgb_offset + 2] =
         uint8_t(round(255.f * min(rgb.z, 1.f)));
-    rgbOut[nonuniformEXT(rgb_offset + 3)] = uint8_t(255);
+    rgbOut[rgb_offset + 3] = uint8_t(255);
 
-    depthOut[nonuniformEXT(depth_offset)] = depth;
+    depthOut[depth_offset] = depth;
 }
 
 void getHitParams(in rayQueryEXT ray_query, out vec2 barys,
-                  out uint32_t tri_idx, out uint32_t material_offset,
-                  out uint32_t geo_idx, out uint32_t mesh_offset,
+                  out uint32_t tri_idx, out uint32_t obj_idx,
+                  out uint32_t material_idx, out uint32_t geo_idx,
                   out mat4x3 o2w, out mat4x3 w2o)
 {
     barys = rayQueryGetIntersectionBarycentricsEXT(ray_query, true);
@@ -245,13 +315,13 @@ void getHitParams(in rayQueryEXT ray_query, out vec2 barys,
     tri_idx =
         uint32_t(rayQueryGetIntersectionPrimitiveIndexEXT(ray_query, true));
 
-    material_offset = uint32_t(
-        rayQueryGetIntersectionInstanceCustomIndexEXT(ray_query, true));
-
     geo_idx = 
         uint32_t(rayQueryGetIntersectionGeometryIndexEXT(ray_query, true));
 
-    mesh_offset = uint32_t(
+    obj_idx = uint32_t(
+        rayQueryGetIntersectionInstanceCustomIndexEXT(ray_query, true));
+
+    material_idx = uint32_t(
         rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(
             ray_query, true));
 
@@ -280,7 +350,8 @@ void main()
     uint32_t rgb_out_offset = 4 * pixel_linear_idx;
     uint32_t depth_out_offset = pixel_linear_idx;
 
-    Camera cam = unpackCamera(batch_idx);
+    Camera cam;
+    unpackViewData(batch_idx, cam);
 
     vec3 ray_origin, ray_dir;
     computeCameraRay(cam, idx.xy, ray_origin, ray_dir);
@@ -295,12 +366,14 @@ void main()
     }
 
     vec2 tri_barys;
-    uint32_t tri_idx, material_offset, geo_idx, mesh_offset;
+    uint32_t tri_idx, geo_idx, obj_idx, material_idx;
     mat4x3 o2w, w2o;
     getHitParams(primary_query, tri_barys, tri_idx,
-                 material_offset, geo_idx, mesh_offset, o2w, w2o);
+                 geo_idx, obj_idx, material_idx, o2w, w2o);
 
-    Triangle hit_tri = fetchTriangle(tri_idx);
+    ObjectData object_data = objectDataBuffer[obj_idx];
+
+    Triangle hit_tri = fetchTriangle(object_data.geoAddr, geo_idx, tri_idx);
     vec3 world_a = transformPosition(o2w, hit_tri.a.position);
     vec3 world_b = transformPosition(o2w, hit_tri.b.position);
     vec3 world_c = transformPosition(o2w, hit_tri.c.position);

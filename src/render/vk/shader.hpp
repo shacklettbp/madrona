@@ -20,12 +20,6 @@ using vec2 = madrona::math::Vector2;
 #include "shaders/shader_common.h"
 }
 
-using shader::Vertex;
-using shader::PackedVertex;
-using shader::Mesh;
-using shader::Object;
-using shader::RTPushConstant;
-
 namespace VulkanConfig {
 
 constexpr uint32_t compute_workgroup_size = WORKGROUP_SIZE;

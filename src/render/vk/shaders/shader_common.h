@@ -33,19 +33,21 @@ struct PackedCamera {
     vec4 posAndTanFOV;
 };
 
-struct Mesh {
-    uint32_t vertexOffset;
-    uint32_t indexOffset;
-    uint32_t numTriangles;
-};
-
-struct Object {
-    uint32_t meshOffset;
-    uint32_t numMeshes;
-};
-
 struct RTPushConstant {
     uint32_t frameCounter;
+};
+
+struct MeshData {
+    uint32_t vertexOffset;
+    uint32_t indexOffset;
+};
+
+struct ObjectData {
+    uint64_t geoAddr;
+};
+
+struct ViewData {
+    PackedCamera cam;
 };
 
 #endif

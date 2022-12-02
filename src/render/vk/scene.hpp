@@ -11,6 +11,34 @@ namespace madrona {
 namespace render {
 namespace vk {
 
+struct Mesh {
+    uint32_t vertexOffset;
+    uint32_t numVertices;
+    uint32_t indexOffset;
+    uint32_t numIndices;
+};
+
+struct Object {
+    uint32_t meshOffset;
+    uint32_t numMeshes;
+};
+
+struct SourceMesh {
+    Span<const shader::Vertex> vertices;
+    Span<const uint32_t> indices;
+};
+
+struct SourceObject {
+    Span<const SourceMesh> meshes;
+};
+
+struct AssetMetadata {
+    HeapArray<Mesh> meshes;
+    HeapArray<Object> objects;
+    HeapArray<uint32_t> objectOffsets;
+    uint32_t numGPUDataBytes;
+};
+
 struct BLAS {
     VkAccelerationStructureKHR hdl;
     VkDeviceAddress devAddr;
@@ -33,11 +61,32 @@ public:
 };
 
 struct Assets {
-    LocalBuffer vertices;
-    LocalBuffer indices;
+    LocalBuffer geoBuffer;
     BLASData blases;
+};
 
-    static Assets load(const DeviceState &dev, MemoryAllocator &mem);
+struct AssetManager {
+    HostBuffer addrBufferStaging;
+    DedicatedBuffer addrBuffer;
+    CudaImportedBuffer addrBufferCUDA;
+    int64_t freeObjectOffset;
+    const int64_t maxObjects;
+
+    AssetManager(const DeviceState &dev, MemoryAllocator &mem,
+                 int cuda_gpu_id, int64_t max_objects);
+
+    Optional<AssetMetadata> prepareMetadata(Span<const SourceObject> objects);
+    void packAssets(void *dst_buf,
+                    AssetMetadata &prepared,
+                    Span<const SourceObject> src_objects);
+
+    Assets load(const DeviceState &dev,
+                MemoryAllocator &mem,
+                const AssetMetadata &metadata,
+                HostBuffer &&staged_buffer);
+
+    Assets loadCube(const DeviceState &dev,
+                    MemoryAllocator &mem);
 };
 
 struct TLASData {

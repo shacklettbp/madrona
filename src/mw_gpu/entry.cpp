@@ -606,6 +606,7 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         .renderWidth = 64,
         .renderHeight = 64,
         .numWorlds = num_worlds,
+        .numViews = num_worlds,
         .maxInstancesPerWorld = max_instances_per_world,
         .maxObjects = 1000,
     });

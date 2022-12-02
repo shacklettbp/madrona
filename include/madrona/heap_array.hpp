@@ -24,7 +24,7 @@ class HeapArray {
 public:
     using RefT = std::add_lvalue_reference_t<T>;
 
-    explicit HeapArray(size_t n, A alloc = DefaultAlloc())
+    explicit HeapArray(CountT n, A alloc = DefaultAlloc())
         : alloc_(std::move(alloc)),
           ptr_((T *)alloc_.alloc(n * sizeof(T))),
           n_(n)
@@ -56,7 +56,7 @@ public:
     void clear()
     {
         if constexpr (!std::is_trivially_destructible_v<T>) {
-            for (size_t i = 0; i < n_; i++) {
+            for (CountT i = 0; i < n_; i++) {
                 ptr_[i].~T();
             }
         }
@@ -70,14 +70,14 @@ public:
         alloc_.dealloc(ptr_);
     }
 
-    RefT insert(size_t i, T v)
+    RefT insert(CountT i, T v)
     {
         new (&ptr_[i]) T(std::move(v));
 
         return ptr_[i];
     }
 
-    RefT insert(size_t i, T &&v)
+    RefT insert(CountT i, T &&v)
     {
         new (&ptr_[i]) T(std::move(v));
 
@@ -85,20 +85,20 @@ public:
     }
 
     template <typename... Args>
-    RefT emplace(size_t i, Args &&...args)
+    RefT emplace(CountT i, Args &&...args)
     {
         new (&ptr_[i]) T(std::forward<Args>(args)...);
 
         return ptr_[i];
     }
 
-    void destruct(size_t i)
+    void destruct(CountT i)
     {
         ptr_[i].~T();
     }
 
-    RefT operator[](size_t idx) { return ptr_[idx]; }
-    const RefT operator[](size_t idx) const { return ptr_[idx]; }
+    RefT operator[](CountT idx) { return ptr_[idx]; }
+    const RefT operator[](CountT idx) const { return ptr_[idx]; }
 
     T *data() { return ptr_; }
     const T *data() const { return ptr_; }
@@ -108,12 +108,12 @@ public:
     const T *begin() const { return ptr_; }
     const T *end() const { return ptr_ + n_; }
 
-    size_t size() const { return n_; }
+    CountT size() const { return n_; }
 
 private:
     [[no_unique_address]] A alloc_;
     T *ptr_;
-    const size_t n_;
+    const CountT n_;
 };
 
 }

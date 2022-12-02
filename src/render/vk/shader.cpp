@@ -338,16 +338,6 @@ PipelineShaders::PipelineShaders(
     layouts_.resize(max_set_id + 1);
     base_pool_sizes_.resize(max_set_id + 1);
 
-    for (const auto &desc_set : reflected_sets) {
-        auto &set_pool_sizes = base_pool_sizes_[desc_set.id];
-        for (const auto &rfl_binding : desc_set.bindings) {
-            set_pool_sizes.push_back({
-                rfl_binding.type,
-                rfl_binding.numDescriptors,
-            });
-        }
-    }
-
     vector<HeapArray<VkDescriptorSetLayoutBinding>> binding_infos;
     binding_infos.reserve(reflected_sets.size());
 
@@ -421,6 +411,14 @@ PipelineShaders::PipelineShaders(
         REQ_VK(dev.dt.createDescriptorSetLayout(dev.hdl, &layout_info, nullptr,
                                                 &layout));
         layouts_[set_id] = layout;
+
+        auto &set_pool_sizes = base_pool_sizes_[set_id];
+        for (const auto &binding : set_binding_info) {
+            set_pool_sizes.push_back({
+                binding.descriptorType,
+                binding.descriptorCount,
+            });
+        }
     }
 }
 
