@@ -15,8 +15,8 @@
 #include <madrona/mw_gpu.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/batch_renderer.hpp>
+#include <madrona/cuda_utils.hpp>
 
-#include "cuda_utils.hpp"
 #include "cpp_compile.hpp"
 
 // Wrap this header in the mwGPU namespace. This is a weird situation where
@@ -596,6 +596,8 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                              uint32_t world_data_alignment,
                                              void *world_init_ptr,
                                              uint32_t num_world_init_bytes,
+                                             uint32_t render_width,
+                                             uint32_t render_height,
                                              const GPUKernels &gpu_kernels,
                                              CompileConfig::Executor exec_mode,
                                              cudaStream_t strm)
@@ -603,8 +605,8 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
     constexpr int64_t max_instances_per_world = 1000;
     render::BatchRenderer batch_renderer({
         .gpuID = gpu_id,
-        .renderWidth = 64,
-        .renderHeight = 64,
+        .renderWidth = render_width,
+        .renderHeight = render_height,
         .numWorlds = num_worlds,
         .numViews = num_worlds,
         .maxInstancesPerWorld = max_instances_per_world,
@@ -818,7 +820,8 @@ TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
     GPUEngineState eng_state = initEngineAndUserState(
         (int)state_cfg.gpuID, state_cfg.numWorlds, state_cfg.numWorldDataBytes,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
-        state_cfg.numWorldInitBytes, gpu_kernels, 
+        state_cfg.numWorldInitBytes, state_cfg.renderWidth,
+        state_cfg.renderHeight, gpu_kernels,
         compile_cfg.execMode, strm);
 
     auto run_graph =
@@ -852,6 +855,16 @@ void TrainingExecutor::run()
 
     impl_->engineState.batchRenderer.render(
         impl_->engineState.rendererInstanceCounts);
+}
+
+uint8_t * TrainingExecutor::rgbObservations() const
+{
+    return impl_->engineState.batchRenderer.rgbPtr();
+}
+
+float * TrainingExecutor::depthObservations() const
+{
+    return impl_->engineState.batchRenderer.depthPtr();
 }
 
 }

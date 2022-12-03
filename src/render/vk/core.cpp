@@ -3,6 +3,7 @@
 #include <vulkan/vulkan_core.h>
 #include <madrona/utils.hpp>
 #include <madrona/heap_array.hpp>
+#include <madrona/dyn_array.hpp>
 
 #include "config.hpp"
 #include "utils.hpp"
@@ -131,7 +132,7 @@ static bool checkValidationAvailable(const InitializationDispatch &dt)
 static InstanceInitializer initInstance(
     PFN_vkGetInstanceProcAddr get_inst_addr,
     bool want_validation,
-    const vector<const char *> &extra_exts)
+    Span<const char *const> extra_exts)
 {
     void *libvk = nullptr;
     if (get_inst_addr == VK_NULL_HANDLE) {
@@ -173,7 +174,11 @@ static InstanceInitializer initInstance(
     app_info.apiVersion = VK_API_VERSION_1_2;
 
     vector<const char *> layers;
-    vector<const char *> extensions(extra_exts);
+    DynArray<const char *> extensions(extra_exts.size());
+
+    for (const char *extra_ext : extra_exts) {
+        extensions.push_back(extra_ext);
+    }
 
     vector<VkValidationFeatureEnableEXT> val_enabled;
     VkValidationFeaturesEXT val_features {};
@@ -276,8 +281,9 @@ static VkDebugUtilsMessengerEXT makeDebugCallback(VkInstance hdl,
 InstanceState::InstanceState(PFN_vkGetInstanceProcAddr get_inst_addr,
                              bool enable_validation,
                              bool need_present,
-                             const vector<const char *> &extra_exts)
-    : InstanceState(initInstance(get_inst_addr, enable_validation, extra_exts), need_present)
+                             Span<const char *const> extra_exts)
+    : InstanceState(initInstance(get_inst_addr, enable_validation, extra_exts),
+                    need_present)
 {}
 
 InstanceState::InstanceState(InstanceInitializer init, bool need_present)
@@ -288,6 +294,16 @@ InstanceState::InstanceState(InstanceInitializer init, bool need_present)
                 VK_NULL_HANDLE),
       loader_handle_(init.loaderHandle)
 {}
+
+InstanceState::InstanceState(InstanceState &&o)
+    : hdl(o.hdl),
+      dt(std::move(o.dt)),
+      debug_(std::move(o.debug_)),
+      loader_handle_(o.loader_handle_)
+{
+    o.hdl = VK_NULL_HANDLE;
+    o.loader_handle_ = nullptr;
+}
 
 InstanceState::~InstanceState()
 {
@@ -341,8 +357,7 @@ DeviceState InstanceState::makeDevice(
     uint32_t desired_gfx_queues,
     uint32_t desired_compute_queues,
     uint32_t desired_transfer_queues,
-    add_pointer_t<VkBool32(VkInstance, VkPhysicalDevice, uint32_t)>
-        present_check) const
+    Optional<VkSurfaceKHR> present_surface) const
 {
     vector<const char *> extensions {
         VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
@@ -356,9 +371,20 @@ DeviceState InstanceState::makeDevice(
         VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
     };
 
-    bool need_present = present_check != nullptr;
+    auto present_check = [&](VkPhysicalDevice phy,
+                             uint32_t qf_idx) {
+        if (!present_surface.has_value()) {
+            return true;
+        }
 
-    if (need_present) {
+        VkBool32 supported;
+        REQ_VK(dt.getPhysicalDeviceSurfaceSupportKHR(phy, qf_idx,
+            *present_surface, &supported));
+
+        return supported == VK_TRUE;
+    };
+
+    if (present_surface.has_value()) {
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
 
@@ -406,12 +432,12 @@ DeviceState InstanceState::makeDevice(
             transfer_queue_family = i;
         } else if (!compute_queue_family &&
                    (qf_prop.queueFlags & VK_QUEUE_COMPUTE_BIT) &&
-                   !(qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+                   !(qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+                   present_check(phy, i)) {
             compute_queue_family = i;
             ;
         } else if (!gfx_queue_family &&
-                   (qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
-                   (!need_present || present_check(hdl, phy, i))) {
+                   (qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
             gfx_queue_family = i;
         }
 
@@ -544,7 +570,8 @@ DeviceState InstanceState::makeDevice(
                        num_transfer_queues,
                        phy,
                        dev,
-                       DeviceDispatch(dev, get_dev_addr, need_present, true));
+                       DeviceDispatch(dev, get_dev_addr,
+                                      present_surface.has_value(), true));
 }
 
 }

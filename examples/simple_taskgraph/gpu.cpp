@@ -1,9 +1,13 @@
 #include "simple.hpp"
 #include "init.hpp"
 #include <madrona/mw_gpu.hpp>
+#include <madrona/cuda_utils.hpp>
 
 #include <cstdio>
 #include <cuda_runtime.h>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 using namespace madrona;
 using namespace std;
@@ -46,6 +50,9 @@ int main(int argc, char *argv[])
         env_inits[i].objsInit = ptr;
     }
 
+    uint32_t render_width = 1024;
+    uint32_t render_height = 1024;
+
     TrainingExecutor train_exec({
         .worldInitPtr = env_inits.data(),
         .numWorldInitBytes = sizeof(EnvInit),
@@ -53,6 +60,8 @@ int main(int argc, char *argv[])
         .worldDataAlignment = alignof(SimpleSim),
         .numWorlds = uint32_t(num_worlds),
         .gpuID = 0,
+        .renderWidth = render_width,
+        .renderHeight = render_height,
     }, {
         "SimpleExample::SimEntry",
         { SIMPLE_TASKGRAPH_SRC_LIST },
@@ -61,7 +70,22 @@ int main(int argc, char *argv[])
         CompileConfig::Executor::TaskGraph,
     });
 
+    uint64_t num_observation_bytes =
+        num_worlds * render_width * render_height * 4;
+
+    uint8_t *rgb_observations_gpu = train_exec.rgbObservations();
+    uint8_t *rgb_observations_cpu =
+        (uint8_t *)cu::allocReadback(num_observation_bytes);
+
     train_exec.run();
+
+    cudaMemcpy(rgb_observations_cpu,
+               rgb_observations_gpu,
+               num_observation_bytes,
+               cudaMemcpyDeviceToHost);
+
+    stbi_write_bmp("/tmp/t.bmp", render_width, render_height,
+                   4, rgb_observations_cpu);
 
     auto start = std::chrono::system_clock::now();
     for (int64_t i = 0; i < (int64_t)num_ticks; i++) {

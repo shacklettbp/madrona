@@ -48,13 +48,13 @@ void SimpleSim::setupTasks(TaskGraph::Builder &builder)
     auto clamp_sys =
         builder.parallelForNode<Engine, clampSystem, Position>({});
 
-    auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {clamp_sys});
+    //auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {clamp_sys});
 
-    auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
-        {phys_sys});
+    //auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
+    //    {phys_sys});
 
     auto renderer_sys = render::RenderingSystem::setupTasks(builder,
-        {phys_cleanup_sys});
+        {clamp_sys});
 
     (void)renderer_sys;
 
@@ -103,9 +103,12 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
     }
 
     agent = ctx.makeEntityNow<Agent>();
-    setupEntity(agent, {{ 0, 0, 0 }}, {{ 0, 0, 0, 0 }});
+    setupEntity(agent, {{ 0, 0, 0 }}, {Quat::angleAxis(0.f, {0, 1, 0})});
     ctx.getUnsafe<render::ActiveView>(agent) =
         render::RenderingSystem::setupView(ctx, 90.f);
+
+    Entity test = ctx.makeEntityNow<Sphere>();
+    setupEntity(test, {{ -10, 0, 0 }}, {Quat::angleAxis(0.f, {0, 1, 0})});
 
     bp_bvh.rebuild();
 }

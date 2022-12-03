@@ -6,7 +6,8 @@
  * https://opensource.org/licenses/MIT.
  */
 #include "cpp_compile.hpp"
-#include "cuda_utils.hpp"
+
+#include <madrona/cuda_utils.hpp>
 
 #include <array>
 #include <fstream>

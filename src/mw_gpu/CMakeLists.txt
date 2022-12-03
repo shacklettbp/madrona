@@ -1,5 +1,5 @@
 add_library(madrona_mw_gpu STATIC
-    cuda_utils.hpp cuda_utils.inl cuda_utils.cpp
+    ../../include/madrona/cuda_utils.hpp ../../include/madrona/cuda_utils.inl cuda_utils.cpp
     cpp_compile.hpp cpp_compile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona/mw_gpu.hpp entry.cpp)
 

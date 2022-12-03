@@ -51,6 +51,7 @@ add_library(madrona_render_vk STATIC
     utils.hpp utils.cpp utils.inl
     memory.hpp memory.cpp memory.inl
     scene.hpp scene.cpp
+    present.hpp present.cpp
 )
 
 target_compile_definitions(madrona_render_vk
@@ -61,6 +62,8 @@ target_compile_definitions(madrona_render_vk
 target_include_directories(madrona_render_vk
     PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/dispatch"
+    PRIVATE
+        $<TARGET_PROPERTY:madrona_sdl2,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
 target_link_libraries(madrona_render_vk PRIVATE
@@ -71,6 +74,7 @@ target_link_libraries(madrona_render_vk PRIVATE
     glslang-default-resource-limits
     madrona_common
     madrona_vk_hdrs
+    madrona_sdl2
 )
 
 add_dependencies(madrona_render_vk generate_vk_dispatch)

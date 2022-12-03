@@ -536,7 +536,7 @@ struct Mat3x4 {
         float wz = r.w * r.z;
 
         return {{
-            { s * (1.f - 2.f * (y2 + z2)), 2.f + (xy + wz), 2.f * (xz - wy) },
+            { s * (1.f - 2.f * (y2 + z2)), 2.f * (xy + wz), 2.f * (xz - wy) },
             { 2.f * (xy - wz), s * (1.f - 2.f * (x2 + z2)), 2.f * (yz + wx) },
             { 2.f * (xz + wy), 2.f * (yz - wx), s * (1.f - 2.f * (x2 + y2)) },
             t,

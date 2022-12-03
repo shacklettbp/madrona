@@ -21,6 +21,8 @@ struct StateConfig {
     uint32_t worldDataAlignment;
     uint32_t numWorlds;
     uint32_t gpuID;
+    uint32_t renderWidth;
+    uint32_t renderHeight;
 };
 
 struct CompileConfig {
@@ -49,6 +51,9 @@ public:
     ~TrainingExecutor();
 
     void run();
+
+    uint8_t * rgbObservations() const;
+    float * depthObservations() const;
 
 private:
     struct Impl;

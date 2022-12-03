@@ -2,7 +2,10 @@
 
 #include <array>
 #include <optional>
-#include <vector>
+
+#include <madrona/heap_array.hpp>
+#include <madrona/span.hpp>
+#include <madrona/optional.hpp>
 
 #include "dispatch.hpp"
 
@@ -39,25 +42,24 @@ struct InstanceInitializer;
 
 struct InstanceState {
 public:
-    const VkInstance hdl;
-    const InstanceDispatch dt;
+    VkInstance hdl;
+    InstanceDispatch dt;
 
     InstanceState(PFN_vkGetInstanceProcAddr get_inst_addr,
                   bool enable_validation,
                   bool need_present,
-                  const std::vector<const char *> &extra_exts);
+                  Span<const char *const> extra_exts);
     ~InstanceState();
 
     InstanceState(const InstanceState &) = delete;
-    InstanceState(InstanceState &&) = default;
+    InstanceState(InstanceState &&);
 
     DeviceState makeDevice(
         const DeviceUUID &uuid,
         uint32_t desired_gfx_queues,
         uint32_t desired_compute_queues,
         uint32_t desired_transfer_queues,
-        std::add_pointer_t<VkBool32(VkInstance, VkPhysicalDevice, uint32_t)>
-            present_check) const;
+        Optional<VkSurfaceKHR> present_surface) const;
 
 private:
     InstanceState(InstanceInitializer init, bool need_present);

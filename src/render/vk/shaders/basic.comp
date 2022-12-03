@@ -250,8 +250,8 @@ bool traceShadeRay(rayQueryEXT ray_query, in uint32_t view_idx,
                    uint32_t visibility_mask)
 {
     rayQueryInitializeEXT(ray_query, viewTLASes[view_idx],
-        gl_RayFlagsTerminateOnFirstHitEXT |
-            gl_RayFlagsCullBackFacingTrianglesEXT,
+        gl_RayFlagsTerminateOnFirstHitEXT, // |
+            //gl_RayFlagsCullBackFacingTrianglesEXT,
         visibility_mask, ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
 
     while (rayQueryProceedEXT(ray_query)) {
@@ -356,12 +356,18 @@ void main()
     vec3 ray_origin, ray_dir;
     computeCameraRay(cam, idx.xy, ray_origin, ray_dir);
 
+    if (ISTHREAD0) {
+        debugPrintfEXT("(%f %f %f) (%f %f %f)\n",
+                       ray_origin.x, ray_origin.y, ray_origin.z,
+                       ray_dir.x, ray_dir.y, ray_dir.z);
+    }
+
     rayQueryEXT primary_query;
     bool primary_hit = traceShadeRay(primary_query, batch_idx,
-                                     ray_origin, ray_dir, 3);
+                                     ray_origin, ray_dir, 1);
 
     if (!primary_hit) {
-        setOutput(rgb_out_offset, depth_out_offset, vec3(0, 0, 0), 0);
+        setOutput(rgb_out_offset, depth_out_offset, vec3(0, 0, 1), 0);
         return;
     }
 
