@@ -78,26 +78,6 @@ inline void instanceAccelStructSetup(Context &ctx,
     as_inst.transform.matrix[2][2] = o2w.cols[2].z;
     as_inst.transform.matrix[2][3] = o2w.cols[3].z;
 
-    printf("Incoming: (%f %f %f) (%f %f %f %f)\n"
-           "Mat:\n"
-           "    %f %f %f %f\n"
-           "    %f %f %f %f\n"
-           "    %f %f %f %f\n",
-        pos.x, pos.y, pos.z,
-        rot.x, rot.y, rot.y, rot.w,
-        as_inst.transform.matrix[0][0],
-        as_inst.transform.matrix[0][1],
-        as_inst.transform.matrix[0][2],
-        as_inst.transform.matrix[0][3],
-        as_inst.transform.matrix[1][0],
-        as_inst.transform.matrix[1][1],
-        as_inst.transform.matrix[1][2],
-        as_inst.transform.matrix[1][3],
-        as_inst.transform.matrix[2][0],
-        as_inst.transform.matrix[2][1],
-        as_inst.transform.matrix[2][2],
-        as_inst.transform.matrix[2][3]);
-
     as_inst.instanceCustomIndex = obj_id.idx;
     as_inst.mask = 1;
     as_inst.instanceShaderBindingTableRecordOffset = 0;

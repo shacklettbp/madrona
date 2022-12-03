@@ -71,8 +71,6 @@ struct BatchRenderer::Impl {
     DeviceState dev;
     MemoryAllocator mem;
     Optional<PresentationState> presentState;
-    DedicatedBuffer blasAddrBuffer;
-    CudaImportedBuffer blasAddrBufferCUDA;
     VkQueue renderQueue;
     VkFence renderFence;
     VkCommandPool renderCmdPool;
@@ -85,6 +83,8 @@ struct BatchRenderer::Impl {
     CudaImportedBuffer viewDataBufferCUDA;
     TLASData tlases;
     DescriptorState descriptors;
+    uint32_t launchWidth;
+    uint32_t launchHeight;
     VkSemaphore renderFinished;
     VkSemaphore swapchainReady;
     Assets cube;
@@ -354,10 +354,6 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
                             std::move(*init.presentSurface),
                             dev.computeQF, 1, true) :
           Optional<PresentationState>::none()),
-      blasAddrBuffer(mem.makeDedicatedBuffer(
-          sizeof(uint64_t) * (uint64_t)cfg.maxObjects)),
-      blasAddrBufferCUDA(dev, cfg.gpuID, blasAddrBuffer.mem,
-          sizeof(uint64_t) * (uint64_t)cfg.maxObjects),
       renderQueue(makeQueue(dev, dev.computeQF, 0)),
       renderFence(makeFence(dev, false)),
       renderCmdPool(makeCmdPool(dev, dev.computeQF)),
@@ -378,6 +374,10 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
           }, cfg.gpuID, mem, cfg.numWorlds, cfg.maxInstancesPerWorld)),
       descriptors(makeDescriptors(dev, cfg, shaderState, fb, assetMgr,
                                   viewDataBuffer.buf, tlases)),
+      launchWidth(utils::divideRoundUp(fb.renderWidth,
+                                       VulkanConfig::localWorkgroupX)),
+      launchHeight(utils::divideRoundUp(fb.renderHeight,
+                                        VulkanConfig::localWorkgroupY)),
       renderFinished(presentState.has_value() ? makeBinarySemaphore(dev) :
                      VK_NULL_HANDLE),
       swapchainReady(presentState.has_value() ? makeBinarySemaphore(dev) :
@@ -426,8 +426,8 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
 
     dev.dt.cmdDispatch(
         renderCmd,
-        fb.renderWidth,
-        fb.renderHeight,
+        launchWidth,
+        launchHeight,
         fb.numViews);
 
     REQ_VK(dev.dt.endCommandBuffer(renderCmd));
@@ -486,7 +486,7 @@ AccelStructInstance ** BatchRenderer::tlasInstancePtrs() const
 uint64_t * BatchRenderer::objectsBLASPtr() const
 {
     return (uint64_t *)
-        impl_->blasAddrBufferCUDA.getDevicePointer();
+        impl_->assetMgr.addrBufferCUDA.getDevicePointer();
 }
 
 void * BatchRenderer::viewDataPtr() const

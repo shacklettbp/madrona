@@ -356,18 +356,12 @@ void main()
     vec3 ray_origin, ray_dir;
     computeCameraRay(cam, idx.xy, ray_origin, ray_dir);
 
-    if (ISTHREAD0) {
-        debugPrintfEXT("(%f %f %f) (%f %f %f)\n",
-                       ray_origin.x, ray_origin.y, ray_origin.z,
-                       ray_dir.x, ray_dir.y, ray_dir.z);
-    }
-
     rayQueryEXT primary_query;
     bool primary_hit = traceShadeRay(primary_query, batch_idx,
                                      ray_origin, ray_dir, 1);
 
     if (!primary_hit) {
-        setOutput(rgb_out_offset, depth_out_offset, vec3(0, 0, 1), 0);
+        setOutput(rgb_out_offset, depth_out_offset, vec3(0, 0, 0), 0);
         return;
     }
 
@@ -388,7 +382,7 @@ void main()
 
     float depth = distance(world_position, cam.origin);
 
-    vec3 rgb = vec3(1, 0, 0);
+    vec3 rgb = abs(world_position / 10.f);
 
     if (!oob) {
         setOutput(rgb_out_offset, depth_out_offset, rgb, depth);
