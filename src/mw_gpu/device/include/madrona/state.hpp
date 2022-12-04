@@ -158,6 +158,8 @@ private:
                    uint32_t num_components,
                    QueryRef *query_ref);
 
+    Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
+
     struct ArchetypeStore {
         ArchetypeStore(uint32_t offset, uint32_t num_user_components,
                        uint32_t num_columns,

@@ -181,40 +181,8 @@ template <typename ArchetypeT>
 Entity StateManager::makeEntityNow(WorldID world_id)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-    Table &tbl = archetypes_[archetype_id]->tbl;
 
-    int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
-
-    Loc loc {
-        archetype_id,
-        row,
-    };
-
-    int32_t available_idx =
-        entity_store_.availableOffset.fetch_add(1, std::memory_order_relaxed);
-    assert(available_idx < EntityStore::maxEntities);
-
-    int32_t entity_slot_idx = entity_store_.availableEntities[available_idx];
-
-    EntityStore::EntitySlot &entity_slot =
-        entity_store_.entities[entity_slot_idx];
-
-    entity_slot.loc = loc;
-    entity_slot.gen = 0;
-
-    // FIXME: proper entity mapping on GPU
-    Entity e {
-        entity_slot.gen,
-        entity_slot_idx,
-    };
-
-    Entity *entity_column = (Entity *)tbl.columns[0];
-    WorldID *world_column = (WorldID *)tbl.columns[1];
-
-    entity_column[row] = e;
-    world_column[row] = world_id;
-
-    return e;
+    return makeEntityNow(world_id, archetype_id);
 }
 
 template <typename ArchetypeT>

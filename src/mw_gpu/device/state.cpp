@@ -9,6 +9,56 @@
 
 namespace madrona {
 
+static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
+{
+    using namespace mwGPU;
+
+    tbl.growLock.lock();
+
+    if (tbl.mappedRows > row) {
+        tbl.growLock.unlock();
+        return;
+    }
+
+    HostAllocator *alloc = getHostAllocator();
+    
+    int32_t new_num_rows = tbl.mappedRows * 2;
+
+    if (new_num_rows - tbl.mappedRows > 500'000) {
+        new_num_rows = tbl.mappedRows + 500'000;
+    }
+
+    int32_t min_mapped_rows = Table::maxRowsPerTable;
+    for (int32_t i = 0; i < tbl.numColumns; i++) {
+        void *column_base = tbl.columns[i];
+        uint64_t column_bytes_per_row = tbl.columnSizes[i];
+        uint64_t cur_mapped_bytes = tbl.columnMappedBytes[i];
+
+        int32_t cur_max_rows = cur_mapped_bytes / column_bytes_per_row;
+
+        if (cur_max_rows > new_num_rows) {
+            min_mapped_rows = min(cur_max_rows, min_mapped_rows);
+            continue;
+        }
+
+        uint64_t new_mapped_bytes = column_bytes_per_row * new_num_rows;
+        new_mapped_bytes = alloc->roundUpAlloc(new_mapped_bytes);
+
+        uint64_t mapped_bytes_diff = new_mapped_bytes - cur_mapped_bytes;
+        void *grow_base = (char *)column_base + cur_mapped_bytes;
+        alloc->mapMemory(grow_base, mapped_bytes_diff);
+
+        int32_t new_max_rows = new_mapped_bytes / column_bytes_per_row;
+        min_mapped_rows = min(new_max_rows, min_mapped_rows);
+
+        tbl.columnMappedBytes[i] = new_mapped_bytes;
+    }
+
+    tbl.mappedRows = min_mapped_rows;
+    
+    tbl.growLock.unlock();
+}
+
 ECSRegistry::ECSRegistry(StateManager &state_mgr)
     : state_mgr_(&state_mgr)
 {}
@@ -61,10 +111,14 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
     uint32_t num_worlds = GPUImplConsts::get().numWorlds;
     HostAllocator *alloc = getHostAllocator();
 
+    tbl.numColumns = num_columns;
     tbl.numRows.store(0, std::memory_order_relaxed);
+
+    int32_t min_mapped_rows = Table::maxRowsPerTable;
+
     for (int i = 0 ; i < (int)num_columns; i++) {
-        uint64_t reserve_bytes =
-            (uint64_t)type_infos[i].numBytes * (uint64_t)maxRowsPerTable;
+        uint64_t reserve_bytes = (uint64_t)type_infos[i].numBytes *
+            (uint64_t)Table::maxRowsPerTable;
         reserve_bytes = alloc->roundUpReservation(reserve_bytes);
 
         uint64_t init_bytes =
@@ -72,7 +126,14 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
         init_bytes = alloc->roundUpAlloc(init_bytes);
 
         tbl.columns[i] = alloc->reserveMemory(reserve_bytes, init_bytes);
+        tbl.columnSizes[i] = type_infos[i].numBytes;
+        tbl.columnMappedBytes[i] = init_bytes;
+
+        int num_mapped_in_column = init_bytes / tbl.columnSizes[i];
+
+        min_mapped_rows = min(num_mapped_in_column, min_mapped_rows);
     }
+    tbl.mappedRows = min_mapped_rows;
 }
 
 void StateManager::registerArchetype(uint32_t id, ComponentID *components,
@@ -174,6 +235,48 @@ void StateManager::makeQuery(const uint32_t *components,
     query_ref->numComponents = num_components;
 
     query_data_lock_.unlock();
+}
+
+Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
+{
+    Table &tbl = archetypes_[archetype_id]->tbl;
+
+    int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
+
+    if (row >= tbl.mappedRows) {
+        growTable(tbl, row);
+    }
+
+    Loc loc {
+        archetype_id,
+        row,
+    };
+
+    int32_t available_idx =
+        entity_store_.availableOffset.fetch_add(1, std::memory_order_relaxed);
+    assert(available_idx < EntityStore::maxEntities);
+
+    int32_t entity_slot_idx = entity_store_.availableEntities[available_idx];
+
+    EntityStore::EntitySlot &entity_slot =
+        entity_store_.entities[entity_slot_idx];
+
+    entity_slot.loc = loc;
+    entity_slot.gen = 0;
+
+    // FIXME: proper entity mapping on GPU
+    Entity e {
+        entity_slot.gen,
+        entity_slot_idx,
+    };
+
+    Entity *entity_column = (Entity *)tbl.columns[0];
+    WorldID *world_column = (WorldID *)tbl.columns[1];
+
+    entity_column[row] = e;
+    world_column[row] = world_id;
+
+    return e;
 }
 
 void StateManager::clearTemporaries(uint32_t archetype_id)

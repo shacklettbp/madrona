@@ -36,7 +36,11 @@ extern void __tsan_release(void *addr);
 namespace madrona {
 namespace utils {
 
-class alignas(MADRONA_CACHE_LINE) SpinLock {
+class 
+#ifndef MADRONA_GPU_MODE
+    alignas(MADRONA_CACHE_LINE) 
+#endif
+    SpinLock {
 public:
     void lock()
     {
