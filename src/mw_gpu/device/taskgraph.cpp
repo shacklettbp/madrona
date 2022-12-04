@@ -308,11 +308,6 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
 
     total_bytes = state_mgr_offset + sizeof(StateManager);
 
-    uint64_t chunk_allocator_offset = utils::roundUp(total_bytes,
-        (uint64_t)alignof(ChunkAllocator));
-
-    total_bytes = chunk_allocator_offset + sizeof(ChunkAllocator);
-
     uint64_t world_data_offset =
         utils::roundUp(total_bytes, (uint64_t)world_data_alignment);
 
@@ -321,13 +316,17 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
 
     total_bytes = world_data_offset + total_world_bytes;
 
+    uint64_t allocator_data_offset =
+        utils::roundUp(total_bytes, (uint64_t)alignof(mwGPU::HostAllocator));
+
+    total_bytes = allocator_data_offset + sizeof(mwGPU::HostAllocator);
+
     *out_constants = GPUImplConsts {
         .jobSystemAddr = (void *)0ul,
         .taskGraph = (void *)0ul,
         .stateManagerAddr = (void *)state_mgr_offset,
-        .chunkAllocatorAddr = (void *)chunk_allocator_offset,
-        .chunkBaseAddr = (void *)0ul,
         .worldDataAddr = (void *)world_data_offset,
+        .hostAllocatorAddr = (void *)allocator_data_offset,
         .rendererASInstancesAddrs = (void **)0ul,
         .rendererInstanceCountsAddr = (void *)0ul,
         .rendererBLASesAddr = (void *)0ul,

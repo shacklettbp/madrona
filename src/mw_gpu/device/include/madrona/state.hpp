@@ -17,6 +17,7 @@
 #include <madrona/query.hpp>
 #include <madrona/optional.hpp>
 #include <madrona/type_tracker.hpp>
+#include <madrona/memory.hpp>
 
 #include "mw_gpu/const.hpp"
 
@@ -57,11 +58,11 @@ public:
     template <typename ArchetypeT>
     void registerArchetype();
 
-    template <typename ArchetypeT, typename ComponentT>
-    void exportColumnPointer(uint32_t slot);
-
     template <typename SingletonT>
     void registerSingleton();
+
+    template <typename ArchetypeT, typename ComponentT>
+    void exportColumn(uint32_t slot);
 
 private:
     StateManager *state_mgr_;
@@ -166,7 +167,7 @@ private:
         Table tbl;
         ColumnMap columnLookup;
 
-        static constexpr uint32_t maxRowsPerTable = 131072;
+        static constexpr uint32_t maxRowsPerTable = 1_u32 << 30;
     };
 
     uint32_t archetype_component_offset_ = 0;

@@ -5,12 +5,13 @@
  * license that can be found in the LICENSE file or at
  * https://opensource.org/licenses/MIT.
  */
+#include <array>
 #include <cstdint>
 #include <iostream>
-#include <array>
-
 #include <fstream>
 #include <string>
+
+#include <cuda/atomic>
 
 #include <madrona/mw_gpu.hpp>
 #include <madrona/dyn_array.hpp>
@@ -19,15 +20,19 @@
 
 #include "cpp_compile.hpp"
 
-// Wrap this header in the mwGPU namespace. This is a weird situation where
-// the CPU job system headers are available but we need access to the GPU
-// header in order to do initial setup.
+// Wrap GPU headers in the mwGPU namespace. This is a weird situation where
+// the CPU madrona headers are available but we need access to the GPU
+// headers in order to do initial setup.
 namespace mwGPU {
 using namespace madrona;
 #include "device/include/madrona/mw_gpu/const.hpp"
+#include "device/include/madrona/memory.hpp"
 }
 
 namespace madrona {
+
+using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
+using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
 
 namespace consts {
 static constexpr uint32_t numMegakernelThreads = 256;
@@ -57,6 +62,10 @@ struct GPUKernels {
 struct GPUEngineState {
     render::BatchRenderer batchRenderer;
     void *stateBuffer;
+
+    std::thread allocatorThread;
+    HostChannel *hostAllocatorChannel;
+
     uint32_t *rendererInstanceCounts;
     uint32_t *exportedColumns;
 };
@@ -690,13 +699,100 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
     auto gpu_state_size_readback = (size_t *)cu::allocReadback(
         sizeof(size_t));
 
+    HostChannel *allocator_channel;
+    REQ_CU(cuMemAllocManaged((CUdeviceptr *)&allocator_channel,
+                             sizeof(HostChannel), CU_MEM_ATTACH_HOST));
+    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel, sizeof(HostChannel),
+                       CU_MEM_ADVISE_SET_READ_MOSTLY, CU_DEVICE_CPU));
+    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel, sizeof(HostChannel),
+                       CU_MEM_ADVISE_SET_ACCESSED_BY, CU_DEVICE_CPU));
+
+    CUdevice cu_gpu;
+    REQ_CU(cuCtxGetDevice(&cu_gpu));
+    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel, sizeof(HostChannel),
+                       CU_MEM_ADVISE_SET_ACCESSED_BY, cu_gpu));
+
+    size_t cu_va_alloc_granularity;
+    {
+        CUmemAllocationProp default_prop {};
+        default_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+        default_prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        default_prop.location.id = cu_gpu;
+        REQ_CU(cuMemGetAllocationGranularity(&cu_va_alloc_granularity,
+            &default_prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
+    }
+
+    HostAllocInit alloc_init {
+        (uint64_t)sysconf(_SC_PAGESIZE),
+        (uint64_t)cu_va_alloc_granularity,
+        allocator_channel,
+    };
+
+    std::thread allocator_thread([](HostChannel *channel, CUdevice dev) {
+        using namespace std::chrono_literals;
+        using cuda::std::memory_order_acquire;
+        using cuda::std::memory_order_relaxed;
+        using cuda::std::memory_order_release;
+
+        while (true) {
+            while (channel->ready.load(memory_order_acquire) != 1) {
+                std::this_thread::sleep_for(1ms);
+            }
+            channel->ready.store(0, memory_order_relaxed);
+
+            if (channel->op == HostChannel::Op::Reserve) {
+                uint64_t num_reserve_bytes = channel->reserve.maxBytes;
+                uint64_t num_alloc_bytes = channel->reserve.initNumBytes;
+
+                printf("Reserve request received %lu %lu\n",
+                       num_reserve_bytes, num_alloc_bytes);
+
+                CUdeviceptr dev_ptr;
+                REQ_CU(cuMemAddressReserve(&dev_ptr, num_reserve_bytes,
+                                           0, 0, 0));
+
+                CUmemAllocationProp alloc_prop {};
+                alloc_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+                alloc_prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+                alloc_prop.location.id = dev;
+
+                CUmemGenericAllocationHandle mem;
+                REQ_CU(cuMemCreate(&mem, num_alloc_bytes,
+                                   &alloc_prop, 0));
+
+                REQ_CU(cuMemMap(dev_ptr, num_alloc_bytes,
+                                0, mem, 0));
+
+                REQ_CU(cuMemRelease(mem));
+
+                CUmemAccessDesc access_ctrl;
+                access_ctrl.location = alloc_prop.location;
+                access_ctrl.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+                REQ_CU(cuMemSetAccess(dev_ptr, num_alloc_bytes,
+                                      &access_ctrl, 1));
+
+                printf("Reserved %p\n", (void *)dev_ptr);
+
+                channel->reserve.result = (void *)dev_ptr;
+            } else if (channel->op == HostChannel::Op::Map) {
+                FATAL("unimplemented");
+            } else if (channel->op == HostChannel::Op::Terminate) {
+                break;
+            }
+
+            channel->finished.store(1, memory_order_release);
+        }
+    }, allocator_channel, cu_gpu);
+
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
                                                    world_data_alignment,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
-    auto init_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
+    auto init_ecs_args = makeKernelArgBuffer(alloc_init);
+
+    auto init_worlds_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
 
     auto no_args = makeKernelArgBuffer();
 
@@ -723,16 +819,12 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         (char *)gpu_consts_readback->stateManagerAddr +
         (uintptr_t)gpu_state_buffer;
 
-    gpu_consts_readback->chunkAllocatorAddr =
-        (char *)gpu_consts_readback->chunkAllocatorAddr +
-        (uintptr_t)gpu_state_buffer;
-
-    gpu_consts_readback->chunkAllocatorAddr =
-        (char *)gpu_consts_readback->chunkBaseAddr +
-        (uintptr_t)gpu_state_buffer;
-
     gpu_consts_readback->worldDataAddr =
         (char *)gpu_consts_readback->worldDataAddr +
+        (uintptr_t)gpu_state_buffer;
+
+    gpu_consts_readback->hostAllocatorAddr =
+        (char *)gpu_consts_readback->hostAllocatorAddr +
         (uintptr_t)gpu_state_buffer;
 
     gpu_consts_readback->rendererASInstancesAddrs =
@@ -756,20 +848,22 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                         job_sys_consts_size));
 
     if (exec_mode == CompileConfig::Executor::JobSystem) {
-        launchKernel(gpu_kernels.initECS, 1, consts::numMegakernelThreads,
+        launchKernel(gpu_kernels.initWorlds, 1, consts::numMegakernelThreads,
                      no_args);
     
         uint32_t num_queue_blocks =
             utils::divideRoundUp(num_worlds, consts::numEntryQueueThreads);
 
         launchKernel(gpu_kernels.queueUserInit, num_queue_blocks,
-                     consts::numEntryQueueThreads, init_args); 
+                     consts::numEntryQueueThreads, init_worlds_args); 
 
         launchKernel(gpu_kernels.megakernel, 1,
                      consts::numMegakernelThreads, no_args);
     } else if (exec_mode == CompileConfig::Executor::TaskGraph) {
-        launchKernel(gpu_kernels.initECS, 1, 1, no_args);
-        launchKernel(gpu_kernels.initWorlds, 1, 1, init_args);
+        launchKernel(gpu_kernels.initECS, 1, 1, init_ecs_args);
+        REQ_CUDA(cudaStreamSynchronize(strm));
+
+        launchKernel(gpu_kernels.initWorlds, 1, 1, init_worlds_args);
         launchKernel(gpu_kernels.initTasks, 1, 1, no_args);
     }
 
@@ -780,6 +874,8 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
     return GPUEngineState {
         std::move(batch_renderer),
         gpu_state_buffer,
+        std::move(allocator_thread),
+        allocator_channel,
         instance_counts_host,
         nullptr,
     };
@@ -872,7 +968,7 @@ TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
     : impl_(nullptr)
 {
     // FIXME size limit for device side malloc:
-    cudaDeviceSetLimit(cudaLimitMallocHeapSize, 8ul*1024ul*1024ul*1024ul);
+    cudaDeviceSetLimit(cudaLimitMallocHeapSize, 1ul*1024ul*1024ul*1024ul);
 
     auto strm = cu::makeStream();
     
@@ -904,6 +1000,12 @@ TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
 
 TrainingExecutor::~TrainingExecutor()
 {
+    impl_->engineState.hostAllocatorChannel->op =
+        HostChannel::Op::Terminate;
+    impl_->engineState.hostAllocatorChannel->ready.store(
+        1, cuda::std::memory_order_release);
+    impl_->engineState.allocatorThread.join();
+
     REQ_CU(cuGraphExecDestroy(impl_->runGraph));
     REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));

@@ -1,14 +1,18 @@
 #pragma once
 
 #include <madrona/taskgraph.hpp>
+#include <madrona/memory.hpp>
 
 namespace madrona {
 namespace mwGPU {
 namespace entryKernels {
 
 template <typename ContextT, typename WorldDataT, typename InitT>
-__global__ void initECS()
+__global__ void initECS(HostAllocInit alloc_init)
 {
+    HostAllocator *host_alloc = mwGPU::getHostAllocator();
+    new (host_alloc) HostAllocator(alloc_init);
+
     StateManager *state_mgr = mwGPU::getStateManager();
     new (state_mgr) StateManager(0);
 

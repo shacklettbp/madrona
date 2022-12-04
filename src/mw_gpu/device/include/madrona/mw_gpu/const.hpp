@@ -16,9 +16,8 @@ struct GPUImplConsts {
     void *jobSystemAddr;
     void *taskGraph;
     void *stateManagerAddr;
-    void *chunkAllocatorAddr;
-    void *chunkBaseAddr;
     void *worldDataAddr;
+    void *hostAllocatorAddr;
     void **rendererASInstancesAddrs;
     void *rendererInstanceCountsAddr;
     void *rendererBLASesAddr;

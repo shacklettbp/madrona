@@ -28,6 +28,7 @@ set(JOB_SYS_DEVICE_SOURCES
 
 set(TASK_GRAPH_DEVICE_SOURCES
     ${DEVICE_SRC_DIR}/taskgraph.cpp
+    ${DEVICE_SRC_DIR}/memory.cpp
     ${DEVICE_SRC_DIR}/state.cpp
     ${DEVICE_SRC_DIR}/crash.cpp
     ${DEVICE_SRC_DIR}/const.cpp

@@ -56,9 +56,22 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
       tbl {},
       columnLookup(lookup_input, num_user_components)
 {
+    using namespace mwGPU;
+
+    uint32_t num_worlds = GPUImplConsts::get().numWorlds;
+    HostAllocator *alloc = getHostAllocator();
+
     tbl.numRows.store(0, std::memory_order_relaxed);
     for (int i = 0 ; i < (int)num_columns; i++) {
-        tbl.columns[i] = malloc(type_infos[i].numBytes * maxRowsPerTable);
+        uint64_t reserve_bytes =
+            (uint64_t)type_infos[i].numBytes * (uint64_t)maxRowsPerTable;
+        reserve_bytes = alloc->roundUpReservation(reserve_bytes);
+
+        uint64_t init_bytes =
+            (uint64_t)type_infos[i].numBytes * (uint64_t)num_worlds;
+        init_bytes = alloc->roundUpAlloc(init_bytes);
+
+        tbl.columns[i] = alloc->reserveMemory(reserve_bytes, init_bytes);
     }
 }
 
