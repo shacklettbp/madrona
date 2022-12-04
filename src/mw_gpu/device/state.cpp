@@ -59,8 +59,9 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
     tbl.growLock.unlock();
 }
 
-ECSRegistry::ECSRegistry(StateManager &state_mgr)
-    : state_mgr_(&state_mgr)
+ECSRegistry::ECSRegistry(StateManager &state_mgr, void **export_ptr)
+    : state_mgr_(&state_mgr),
+      export_ptr_(export_ptr)
 {}
 
 StateManager::StateManager(uint32_t)

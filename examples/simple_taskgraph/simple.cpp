@@ -42,6 +42,9 @@ void SimpleSim::registerTypes(ECSRegistry &registry)
 
     registry.registerArchetype<Sphere>();
     registry.registerArchetype<Agent>();
+
+    registry.exportColumn<Agent, Position>(0);
+    registry.exportColumn<Agent, Rotation>(1);
 }
 
 void SimpleSim::setupTasks(TaskGraph::Builder &builder)
@@ -49,13 +52,13 @@ void SimpleSim::setupTasks(TaskGraph::Builder &builder)
     auto clamp_sys =
         builder.parallelForNode<Engine, clampSystem, Position>({});
 
-    //auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {clamp_sys});
+    auto phys_sys = RigidBodyPhysicsSystem::setupTasks(builder, {clamp_sys});
 
-    //auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
-    //    {phys_sys});
+    auto phys_cleanup_sys = RigidBodyPhysicsSystem::setupCleanupTasks(builder,
+        {phys_sys});
 
     auto renderer_sys = render::RenderingSystem::setupTasks(builder,
-        {clamp_sys});
+        {phys_cleanup_sys});
 
     (void)renderer_sys;
 

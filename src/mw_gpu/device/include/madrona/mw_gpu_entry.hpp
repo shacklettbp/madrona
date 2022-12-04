@@ -8,7 +8,7 @@ namespace mwGPU {
 namespace entryKernels {
 
 template <typename ContextT, typename WorldDataT, typename InitT>
-__global__ void initECS(HostAllocInit alloc_init)
+__global__ void initECS(HostAllocInit alloc_init, void **exported_columns)
 {
     HostAllocator *host_alloc = mwGPU::getHostAllocator();
     new (host_alloc) HostAllocator(alloc_init);
@@ -16,7 +16,7 @@ __global__ void initECS(HostAllocInit alloc_init)
     StateManager *state_mgr = mwGPU::getStateManager();
     new (state_mgr) StateManager(0);
 
-    ECSRegistry ecs_registry(*state_mgr);
+    ECSRegistry ecs_registry(*state_mgr, exported_columns);
     WorldDataT::registerTypes(ecs_registry);
 }
 

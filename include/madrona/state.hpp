@@ -119,6 +119,9 @@ public:
     template <typename SingletonT>
     void registerSingleton() { /* FIXME */ }
 
+    template <typename ArchetypeT, typename ComponentT>
+    void exportColumn(int32_t slot);
+
 private:
     StateManager *state_mgr_;
 };

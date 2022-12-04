@@ -67,7 +67,7 @@ struct GPUEngineState {
     HostChannel *hostAllocatorChannel;
 
     uint32_t *rendererInstanceCounts;
-    uint32_t *exportedColumns;
+    HeapArray<void *> exportedColumns;
 };
 
 struct TrainingExecutor::Impl {
@@ -663,6 +663,7 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                              uint32_t world_data_alignment,
                                              void *world_init_ptr,
                                              uint32_t num_world_init_bytes,
+                                             uint32_t num_exported,
                                              uint32_t render_width,
                                              uint32_t render_height,
                                              const GPUKernels &gpu_kernels,
@@ -698,6 +699,9 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
 
     auto gpu_state_size_readback = (size_t *)cu::allocReadback(
         sizeof(size_t));
+
+    auto exported_readback = (void **)cu::allocReadback(
+        sizeof(void *) * num_exported);
 
     HostChannel *allocator_channel;
     REQ_CU(cuMemAllocManaged((CUdeviceptr *)&allocator_channel,
@@ -790,7 +794,7 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
-    auto init_ecs_args = makeKernelArgBuffer(alloc_init);
+    auto init_ecs_args = makeKernelArgBuffer(alloc_init, exported_readback);
 
     auto init_worlds_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
 
@@ -861,8 +865,6 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                      consts::numMegakernelThreads, no_args);
     } else if (exec_mode == CompileConfig::Executor::TaskGraph) {
         launchKernel(gpu_kernels.initECS, 1, 1, init_ecs_args);
-        REQ_CUDA(cudaStreamSynchronize(strm));
-
         launchKernel(gpu_kernels.initWorlds, 1, 1, init_worlds_args);
         launchKernel(gpu_kernels.initTasks, 1, 1, no_args);
     }
@@ -871,13 +873,19 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
 
     cu::deallocGPU(init_tmp_buffer);
 
+    HeapArray<void *> exported_cols(num_exported);
+    memcpy(exported_cols.data(), exported_readback,
+           sizeof(void *) * (uint64_t)num_exported);
+
+    cu::deallocCPU(exported_readback);
+
     return GPUEngineState {
         std::move(batch_renderer),
         gpu_state_buffer,
         std::move(allocator_thread),
         allocator_channel,
         instance_counts_host,
-        nullptr,
+        std::move(exported_cols),
     };
 }
 
@@ -977,8 +985,8 @@ TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
     GPUEngineState eng_state = initEngineAndUserState(
         (int)state_cfg.gpuID, state_cfg.numWorlds, state_cfg.numWorldDataBytes,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
-        state_cfg.numWorldInitBytes, state_cfg.renderWidth,
-        state_cfg.renderHeight, gpu_kernels,
+        state_cfg.numWorldInitBytes, state_cfg.numExportedBuffers,
+        state_cfg.renderWidth, state_cfg.renderHeight, gpu_kernels,
         compile_cfg.execMode, strm);
 
     auto run_graph =
@@ -1028,6 +1036,11 @@ uint8_t * TrainingExecutor::rgbObservations() const
 float * TrainingExecutor::depthObservations() const
 {
     return impl_->engineState.batchRenderer.depthPtr();
+}
+
+void * TrainingExecutor::getExported(CountT slot) const
+{
+    return impl_->engineState.exportedColumns[slot];
 }
 
 }

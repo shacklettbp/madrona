@@ -41,7 +41,7 @@ struct CompileConfig {
     const char *entryName;
     Span<const char * const> userSources;
     Span<const char * const> userCompileFlags;
-    OptMode optMode = OptMode::Optimize;
+    OptMode optMode = OptMode::LTO;
     Executor execMode = Executor::TaskGraph;
 };
 
@@ -55,6 +55,8 @@ public:
 
     uint8_t * rgbObservations() const;
     float * depthObservations() const;
+
+    void * getExported(CountT slot) const;
 
 private:
     struct Impl;

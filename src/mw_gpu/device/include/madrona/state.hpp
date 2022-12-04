@@ -50,7 +50,7 @@ friend class StateManager;
 
 class ECSRegistry {
 public:
-    ECSRegistry(StateManager &state_mgr);
+    ECSRegistry(StateManager &state_mgr, void **export_ptr);
 
     template <typename ComponentT>
     void registerComponent();
@@ -62,10 +62,11 @@ public:
     void registerSingleton();
 
     template <typename ArchetypeT, typename ComponentT>
-    void exportColumn(uint32_t slot);
+    void exportColumn(int32_t slot);
 
 private:
     StateManager *state_mgr_;
+    void **export_ptr_;
 };
 
 struct EntityStore {
@@ -168,8 +169,6 @@ private:
         uint32_t numUserComponents;
         Table tbl;
         ColumnMap columnLookup;
-
-        static constexpr uint32_t maxRowsPerTable = 1_u32 << 30;
     };
 
     uint32_t archetype_component_offset_ = 0;

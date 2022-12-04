@@ -71,6 +71,11 @@ int main(int argc, char *argv[])
         CompileConfig::Executor::TaskGraph,
     });
 
+    void *agent_positions_gpu = train_exec.getExported(0);
+    void *agent_rotations_gpu = train_exec.getExported(1);
+
+    printf("%p %p\n", agent_positions_gpu, agent_rotations_gpu);
+
     uint64_t num_observation_bytes =
         num_worlds * render_width * render_height * 4;
 

@@ -35,6 +35,13 @@ ComponentID StateManager::registerComponent()
     };
 }
 
+template <typename ArchetypeT, typename ComponentT>
+void ECSRegistry::exportColumn(int32_t slot)
+{
+    export_ptr_[slot] =
+        state_mgr_->getArchetypeColumn<ArchetypeT, ComponentT>();
+}
+
 template <typename ArchetypeT>
 ArchetypeID StateManager::registerArchetype()
 {
