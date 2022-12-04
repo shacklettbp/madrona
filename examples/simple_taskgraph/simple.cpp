@@ -8,6 +8,7 @@
 #include "simple.hpp"
 
 #include <madrona/render.hpp>
+#include <madrona/mw_gpu_entry.hpp>
 
 #include <cinttypes>
 
@@ -113,18 +114,6 @@ SimpleSim::SimpleSim(Engine &ctx, const EnvInit &env_init)
     bp_bvh.rebuild();
 }
 
+MADRONA_BUILD_MWGPU_ENTRY(Engine, SimpleSim, EnvInit);
+
 }
-
-#ifdef MADRONA_GPU_MODE
-extern "C" __global__ void madronaMWGPUInitialize(
-        uint32_t num_worlds,
-        void *inits_raw)
-{
-    using namespace SimpleTaskgraph;
-
-    auto inits = (EnvInit *)inits_raw;
-    SimEntry::init(inits, num_worlds);
-}
-
-#endif
-

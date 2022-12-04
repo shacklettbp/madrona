@@ -79,8 +79,6 @@ class Engine : public ::madrona::CustomContext<Engine, SimpleSim> {
     using CustomContext::CustomContext;
 };
 
-using SimEntry = madrona::TaskGraphEntry<Engine, SimpleSim, EnvInit>;
-
 #if 0
 struct PreprocessSystem : madrona::CustomSystem<PreprocessSystem> {
     inline void run(void *data, uint32_t invocation_offset);

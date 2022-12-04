@@ -231,7 +231,7 @@ template <typename K, typename V, template <typename> typename StoreT>
 void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
                                       CountT num_keys)
 {
-    if (num_keys == 0) return;
+    if (num_keys <= 0) return;
 
     // The trick with this function is that the sublists added to the
     // global free list need to be exactly ids_per_cache_ in size
@@ -298,7 +298,7 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
             // The extra IDs don't fit in the overflow cache, need to add
             // to global list
             int32_t next_id = cache.overflow_head_;
-            Node *overflow_node;
+            Node *overflow_node = nullptr;
             for (CountT i = 0; i < num_from_overflow; i++) {
                 overflow_node = &store_[next_id];
                 next_id = overflow_node->freeNode.subNext;

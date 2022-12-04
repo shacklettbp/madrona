@@ -59,6 +59,7 @@ int main(int argc, char *argv[])
         .numWorldDataBytes = sizeof(SimpleSim),
         .worldDataAlignment = alignof(SimpleSim),
         .numWorlds = uint32_t(num_worlds),
+        .numExportedBuffers = 2,
         .gpuID = 0,
         .renderWidth = render_width,
         .renderHeight = render_height,

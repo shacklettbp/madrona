@@ -57,6 +57,9 @@ public:
     template <typename ArchetypeT>
     void registerArchetype();
 
+    template <typename ArchetypeT, typename ComponentT>
+    void exportColumnPointer(uint32_t slot);
+
     template <typename SingletonT>
     void registerSingleton();
 

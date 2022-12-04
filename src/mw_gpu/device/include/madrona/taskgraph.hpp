@@ -261,43 +261,4 @@ private:
 friend class Builder;
 };
 
-template <typename ContextT, typename WorldDataT, typename InitT>
-class TaskGraphEntryBase {
-public:
-    static void init(const InitT *inits, int32_t num_worlds)
-    {
-        StateManager *state_mgr = mwGPU::getStateManager();
-        new (state_mgr) StateManager(0);
-
-        TaskGraph::Builder builder(1024, 1024);
-
-        {
-            ECSRegistry ecs_registry(*state_mgr);
-            WorldDataT::registerTypes(ecs_registry);
-        }
-
-        for (int32_t world_idx = 0; world_idx < num_worlds; world_idx++) {
-            const InitT &init = inits[world_idx];
-            WorldBase *world = TaskGraph::getWorld(world_idx);
-
-            ContextT ctx =
-                mwGPU::EntryBase<ContextT, WorldDataT>::makeContext(WorldID {
-                    world_idx,
-                });
-
-            new (world) WorldDataT(ctx, init);
-        }
-
-        WorldDataT::setupTasks(builder);
-
-        builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
-    }
-};
-
-template <typename ContextT, typename WorldDataT, typename InitT,
-          decltype(TaskGraphEntryBase<ContextT, WorldDataT, InitT>::init) =
-            TaskGraphEntryBase<ContextT, WorldDataT, InitT>::init>
-class TaskGraphEntry :
-    public TaskGraphEntryBase<ContextT, WorldDataT, InitT> {};
-
 }
