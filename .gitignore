@@ -1,3 +1,6 @@
 /build
 /build-debug
 /madrona/__pycache__/
+/pytorch/*
+!/pytorch/setup.py
+!/pytorch/pytorch.cpp

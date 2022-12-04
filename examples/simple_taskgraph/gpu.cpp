@@ -50,8 +50,8 @@ int main(int argc, char *argv[])
         env_inits[i].objsInit = ptr;
     }
 
-    uint32_t render_width = 1024;
-    uint32_t render_height = 1024;
+    uint32_t render_width = 128;
+    uint32_t render_height = 128;
 
     TrainingExecutor train_exec({
         .worldInitPtr = env_inits.data(),
