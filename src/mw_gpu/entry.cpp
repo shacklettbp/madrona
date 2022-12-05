@@ -1006,8 +1006,13 @@ MADRONA_EXPORT TrainingExecutor::TrainingExecutor(
     std::cout << "Initialization finished" << std::endl;
 }
 
+MADRONA_EXPORT TrainingExecutor::TrainingExecutor(TrainingExecutor &&o) 
+    = default;
+
 MADRONA_EXPORT TrainingExecutor::~TrainingExecutor()
 {
+    if (!impl_) return;
+
     impl_->engineState.hostAllocatorChannel->op =
         HostChannel::Op::Terminate;
     impl_->engineState.hostAllocatorChannel->ready.store(

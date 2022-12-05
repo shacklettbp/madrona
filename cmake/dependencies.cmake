@@ -1,0 +1,5 @@
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+find_package(Threads REQUIRED)
+find_package(CUDAToolkit QUIET)
+find_package(Python 3.9 COMPONENTS Interpreter Development.Module QUIET)

@@ -50,6 +50,9 @@ class TrainingExecutor {
 public:
     MADRONA_IMPORT TrainingExecutor(const StateConfig &state_cfg,
                                     const CompileConfig &compile_cfg);
+
+    MADRONA_IMPORT TrainingExecutor(TrainingExecutor &&o);
+
     MADRONA_IMPORT ~TrainingExecutor();
 
     MADRONA_IMPORT void run();

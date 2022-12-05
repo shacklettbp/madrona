@@ -5,7 +5,7 @@ add_library(madrona_python_utils STATIC
 
 target_link_libraries(madrona_python_utils
     PUBLIC
-        madrona_hdrs CUDA::cudart
+        CUDA::cudart
     PRIVATE
         madrona_common madrona_mw_gpu
 )
@@ -13,6 +13,11 @@ target_link_libraries(madrona_python_utils
 function(madrona_python_module module_name)
     nanobind_add_module(${module_name} NB_STATIC
         ${ARGN}
+    )
+
+    target_link_libraries(${module_name}
+        PRIVATE
+            madrona_python_utils madrona_hdrs
     )
 endfunction()
 
@@ -32,8 +37,3 @@ foreach(lib IN LISTS nanobind_lib_target)
         target_compile_options(${lib} PRIVATE "-Wno-everything")
     endif ()
 endforeach()
-
-target_link_libraries(madrona_python
-    PRIVATE
-        madrona_python_utils
-)

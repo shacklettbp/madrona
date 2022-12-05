@@ -7,12 +7,7 @@ include(build_type)
 project(MadronaEngine LANGUAGES C CXX)
 
 include(setup)
-
-set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-find_package(Threads REQUIRED)
-find_package(CUDAToolkit QUIET)
-find_package(Python 3.9 COMPONENTS Interpreter Development.Module QUIET)
+include(dependencies)
 
 add_subdirectory(external)
 add_subdirectory(src)
