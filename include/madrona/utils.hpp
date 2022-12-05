@@ -80,7 +80,11 @@ constexpr inline uint32_t int32NextPow2(uint32_t v)
 
 constexpr inline uint64_t int64NextPow2(uint64_t v)
 {
+#if __cplusplus >= 202002L
     int clz;
+#else
+    int clz = 0;
+#endif
     if constexpr (std::is_same_v<uint64_t, unsigned long>) {
         clz = __builtin_clzl(v - 1);
     } else if constexpr (std::is_same_v<uint64_t, unsigned long long>) {

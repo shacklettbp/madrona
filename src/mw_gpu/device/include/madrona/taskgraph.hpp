@@ -162,10 +162,10 @@ public:
             query_ref->numReferences.fetch_add(1, std::memory_order_relaxed);
 
             return registerNode(NodeInfo {
-                .type = NodeType::ParallelFor,
-                .funcID = func_id,
-                .data = {
-                    .parallelFor = {
+                /* .type = */ NodeType::ParallelFor,
+                /* .funcID = */ func_id,
+                /* .data = */ {
+                    mwGPU::EntryData::ParallelFor {
                         query_ref,
                     },
                 },
@@ -179,15 +179,14 @@ public:
 
             uint32_t func_id = mwGPU::UserFuncID<mwGPU::ClearTmpEntry>::id;
 
-            return registerNode(NodeInfo {
-                .type = NodeType::ClearTemporaries,
-                .funcID = func_id,
-                .data = {
-                    .clearTmp = {
-                        archetype_id,
-                    },
-                },
-            }, dependencies);
+            NodeInfo node_info;
+            node_info.type = NodeType::ClearTemporaries;
+            node_info.funcID = func_id;
+            node_info.data.clearTmp = {
+                archetype_id,
+            };
+
+            return registerNode(node_info, dependencies);
         }
 
         void build(TaskGraph *out);

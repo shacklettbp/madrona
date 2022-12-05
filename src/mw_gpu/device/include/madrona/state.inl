@@ -42,6 +42,37 @@ void ECSRegistry::exportColumn(int32_t slot)
         state_mgr_->getArchetypeColumn<ArchetypeT, ComponentT>();
 }
 
+template <template <typename...> typename T, typename ...ComponentTs>
+struct StateManager::RegistrationHelper<T<ComponentTs...>> {
+    using ArchetypeT = T<ComponentTs...>;
+    static_assert(std::is_same_v<ArchetypeT, Archetype<ComponentTs...>>);
+
+    template <typename ComponentT>
+    static void registerColumnIndex(uint32_t *idx)
+    {
+        using LookupT = typename ArchetypeRef<ArchetypeT>::
+            template ComponentLookup<ComponentT>;
+
+        TypeTracker::registerType<LookupT>(idx);
+    }
+
+    static std::array<ComponentID, sizeof...(ComponentTs)>
+        registerArchetypeComponents()
+    {
+        uint32_t column_idx = user_component_offset_;
+
+        ( registerColumnIndex<ComponentTs>(&column_idx), ... );
+
+        std::array archetype_components {
+            ComponentID { TypeTracker::typeID<ComponentTs>() }
+            ...
+        };
+
+        return archetype_components;
+    }
+
+};
+
 template <typename ArchetypeT>
 ArchetypeID StateManager::registerArchetype()
 {
@@ -50,29 +81,8 @@ ArchetypeID StateManager::registerArchetype()
 
     using Base = typename ArchetypeT::Base;
 
-    using Delegator = utils::PackDelegator<Base>;
-
-    auto archetype_components = Delegator::call([]<typename... Args>() {
-        static_assert(std::is_same_v<Base, Archetype<Args...>>);
-        uint32_t column_idx = user_component_offset_;
-
-        auto registerColumnIndex =
-                [&column_idx]<typename ComponentT>() {
-            using LookupT = typename ArchetypeRef<ArchetypeT>::
-                template ComponentLookup<ComponentT>;
-
-            TypeTracker::registerType<LookupT>(&column_idx);
-        };
-
-        ( registerColumnIndex.template operator()<Args>(), ... );
-
-        std::array archetype_components {
-            ComponentID { TypeTracker::typeID<Args>() }
-            ...
-        };
-
-        return archetype_components;
-    });
+    auto archetype_components =
+        RegistrationHelper<Base>::registerArchetypeComponents();
 
     registerArchetype(archetype_id, archetype_components.data(),
                       archetype_components.size());

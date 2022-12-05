@@ -25,8 +25,8 @@ bool Loc::valid() const
 Loc Loc::none()
 {
     return Loc {
-        .archetype = 0xFFFF'FFFF_u32,
-        .row = 0,
+        0xFFFF'FFFF_u32,
+        0,
     };
 }
 

@@ -1006,7 +1006,7 @@ MADRONA_EXPORT TrainingExecutor::TrainingExecutor(
     std::cout << "Initialization finished" << std::endl;
 }
 
-MADRONA_EXPORT TrainingExecutor::TrainingExecutor(TrainingExecutor &&o) 
+MADRONA_EXPORT TrainingExecutor::TrainingExecutor(TrainingExecutor &&o)
     = default;
 
 MADRONA_EXPORT TrainingExecutor::~TrainingExecutor()

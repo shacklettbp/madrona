@@ -39,16 +39,30 @@ public:
     }
 
     template <typename U = T,
-              typename = std::enable_if_t<std::is_copy_constructible_v<U>>>
-    explicit (!std::is_same_v<U, T>)
+              typename std::enable_if_t<std::is_copy_constructible_v<U> &&
+                  std::is_same_v<U, T>, bool> = false>
     constexpr Optional(const U &v)
         : storage_(v)
     {}
 
     template <typename U = T,
-              typename = std::enable_if_t<std::is_move_constructible_v<U>>>
-    explicit (!std::is_same_v<U, T>)
+              typename std::enable_if_t<std::is_move_constructible_v<U> &&
+                  std::is_same_v<U, T>, bool> = false>
     constexpr Optional(U &&v)
+        : storage_(std::forward<U>(v))
+    {}
+
+    template <typename U = T,
+              typename std::enable_if_t<std::is_copy_constructible_v<U> &&
+                  !std::is_same_v<U, T>, bool> = false>
+    explicit constexpr Optional(const U &v)
+        : storage_(v)
+    {}
+
+    template <typename U = T,
+              typename std::enable_if_t<std::is_move_constructible_v<U> &&
+                  !std::is_same_v<U, T>, bool> = false>
+    explicit constexpr Optional(U &&v)
         : storage_(std::forward<U>(v))
     {}
 
@@ -158,7 +172,10 @@ private:
             }
         }
 
-        constexpr ~StorageImpl() {
+#if __cplusplus >= 202002L
+        constexpr 
+#endif
+        ~StorageImpl() {
             destruct();
         }
     };

@@ -498,24 +498,24 @@ struct AABB {
     static inline AABB invalid()
     {
         return AABB {
-            .pMin = Vector3 {FLT_MAX, FLT_MAX, FLT_MAX},
-            .pMax = Vector3 {FLT_MIN, FLT_MIN, FLT_MIN},
+            /* .pMin = */ Vector3 {FLT_MAX, FLT_MAX, FLT_MAX},
+            /* .pMax = */ Vector3 {FLT_MIN, FLT_MIN, FLT_MIN},
         };
     }
 
     static inline AABB point(const Vector3 &p)
     {
         return AABB {
-            .pMin = p,
-            .pMax = p,
+            /* .pMin = */ p,
+            /* .pMax = */ p,
         };
     }
 
     static inline AABB merge(const AABB &a, const AABB &b)
     {
         return AABB {
-            .pMin = Vector3::min(a.pMin, b.pMin),
-            .pMax = Vector3::min(a.pMax, b.pMax),
+            /* .pMin = */ Vector3::min(a.pMin, b.pMin),
+            /* .pMax = */ Vector3::min(a.pMax, b.pMax),
         };
     }
 };

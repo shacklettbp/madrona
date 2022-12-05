@@ -317,12 +317,12 @@ void BVH::rebuild()
             }
 
             combined_aabb = AABB::merge(combined_aabb, AABB {
-                .pMin = {
+                /* .pMin = */ {
                     node.minX[i],
                     node.minY[i],
                     node.minZ[i],
                 },
-                .pMax = {
+                /* .pMax = */ {
                     node.maxX[i],
                     node.maxY[i],
                     node.maxZ[i],

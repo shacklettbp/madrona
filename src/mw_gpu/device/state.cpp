@@ -92,8 +92,8 @@ void StateManager::registerComponent(uint32_t id, uint32_t alignment,
                                      uint32_t num_bytes)
 {
     components_[id].emplace(TypeInfo {
-        .alignment = alignment,
-        .numBytes = num_bytes,
+        /* .alignment = */ alignment,
+        /* .numBytes = */  num_bytes,
     });
 }
 
@@ -166,8 +166,8 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
         type_ptr[i] = *components_[component_id.id];
 
         lookup_input[i] = IntegerMapPair {
-            .key = component_id.id,
-            .value = (uint32_t)i + user_component_offset_,
+            /* .key = */   component_id.id,
+            /* .value = */ (uint32_t)i + user_component_offset_,
         };
     }
 

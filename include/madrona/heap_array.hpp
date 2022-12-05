@@ -111,7 +111,10 @@ public:
     CountT size() const { return n_; }
 
 private:
-    [[no_unique_address]] A alloc_;
+#if __cplusplus >= 202002L
+    [[no_unique_address]] 
+#endif
+        A alloc_;
     T *ptr_;
     const CountT n_;
 };

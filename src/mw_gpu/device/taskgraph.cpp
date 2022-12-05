@@ -322,22 +322,22 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     total_bytes = allocator_data_offset + sizeof(mwGPU::HostAllocator);
 
     *out_constants = GPUImplConsts {
-        .jobSystemAddr = (void *)0ul,
-        .taskGraph = (void *)0ul,
-        .stateManagerAddr = (void *)state_mgr_offset,
-        .worldDataAddr = (void *)world_data_offset,
-        .hostAllocatorAddr = (void *)allocator_data_offset,
-        .rendererASInstancesAddrs = (void **)0ul,
-        .rendererInstanceCountsAddr = (void *)0ul,
-        .rendererBLASesAddr = (void *)0ul,
-        .rendererViewDatasAddr = (void *)0ul,
-        .numWorldDataBytes = num_world_data_bytes,
-        .numWorlds = num_worlds,
-        .jobGridsOffset = (uint32_t)0,
-        .jobListOffset = (uint32_t)0,
-        .maxJobsPerGrid = 0,
-        .sharedJobTrackerOffset = (uint32_t)0,
-        .userJobTrackerOffset = (uint32_t)0,
+        /*.jobSystemAddr = */                  (void *)0ul,
+        /* .taskGraph = */                     (void *)0ul,
+        /* .stateManagerAddr = */              (void *)state_mgr_offset,
+        /* .worldDataAddr =  */                (void *)world_data_offset,
+        /* .hostAllocatorAddr = */             (void *)allocator_data_offset,
+        /* .rendererASInstancesAddrs = */      (void **)0ul,
+        /* .rendererInstanceCountsAddr = */    (void *)0ul,
+        /* .rendererBLASesAddr = */            (void *)0ul,
+        /* .rendererViewDatasAddr = */         (void *)0ul,
+        /* .numWorldDataBytes = */             num_world_data_bytes,
+        /* .numWorlds = */                     num_worlds,
+        /* .jobGridsOffset = */                (uint32_t)0,
+        /* .jobListOffset = */                 (uint32_t)0,
+        /* .maxJobsPerGrid = */                0,
+        /* .sharedJobTrackerOffset = */        (uint32_t)0,
+        /* .userJobTrackerOffset = */          (uint32_t)0,
     };
 
     *job_system_buffer_size = total_bytes;

@@ -22,8 +22,13 @@ struct CrashInfo {
                         const char *fmt, ...);
 [[noreturn]] void fatal(const CrashInfo &crash);
 
+#if __cplusplus >= 202002L
 #define FATAL(fmt, ...) ::madrona::fatal(__FILE__, __LINE__,\
     MADRONA_COMPILER_FUNCTION_NAME, fmt __VA_OPT__(,) __VA_ARGS__ )
+#else
+#define FATAL(fmt, ...) ::madrona::fatal(__FILE__, __LINE__,\
+    MADRONA_COMPILER_FUNCTION_NAME, fmt ##__VA_ARGS__ )
+#endif
 
 #define STATIC_UNIMPLEMENTED() \
     do { static_assert(false, "Unimplemented"); } while (false)

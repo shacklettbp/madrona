@@ -15,7 +15,7 @@ target_link_libraries(madrona_mw_gpu
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
 
 set(MADRONA_MW_GPU_COMPILE_FLAGS
-    -std=c++20
+    -std=c++17
     -default-device
     -rdc=true
     -use_fast_math
