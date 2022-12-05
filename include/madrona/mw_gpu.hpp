@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <memory>
 
+#include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 
 namespace madrona {
@@ -47,16 +48,16 @@ struct CompileConfig {
 
 class TrainingExecutor {
 public:
-    TrainingExecutor(const StateConfig &state_cfg,
-                     const CompileConfig &compile_cfg);
-    ~TrainingExecutor();
+    MADRONA_IMPORT TrainingExecutor(const StateConfig &state_cfg,
+                                    const CompileConfig &compile_cfg);
+    MADRONA_IMPORT ~TrainingExecutor();
 
-    void run();
+    MADRONA_IMPORT void run();
 
-    uint8_t * rgbObservations() const;
-    float * depthObservations() const;
+    MADRONA_IMPORT uint8_t * rgbObservations() const;
+    MADRONA_IMPORT float * depthObservations() const;
 
-    void * getExported(CountT slot) const;
+    MADRONA_IMPORT void * getExported(CountT slot) const;
 
 private:
     struct Impl;

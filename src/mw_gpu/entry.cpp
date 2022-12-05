@@ -971,8 +971,8 @@ static CUgraphExec makeTaskGraphRunGraph(CUfunction megakernel)
     return run_graph_exec;
 }
 
-TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
-                                   const CompileConfig &compile_cfg)
+MADRONA_EXPORT TrainingExecutor::TrainingExecutor(
+        const StateConfig &state_cfg, const CompileConfig &compile_cfg)
     : impl_(nullptr)
 {
     // FIXME size limit for device side malloc:
@@ -1006,7 +1006,7 @@ TrainingExecutor::TrainingExecutor(const StateConfig &state_cfg,
     std::cout << "Initialization finished" << std::endl;
 }
 
-TrainingExecutor::~TrainingExecutor()
+MADRONA_EXPORT TrainingExecutor::~TrainingExecutor()
 {
     impl_->engineState.hostAllocatorChannel->op =
         HostChannel::Op::Terminate;
@@ -1019,7 +1019,7 @@ TrainingExecutor::~TrainingExecutor()
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
 }
 
-void TrainingExecutor::run()
+MADRONA_EXPORT void TrainingExecutor::run()
 {
     REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
@@ -1028,17 +1028,17 @@ void TrainingExecutor::run()
         impl_->engineState.rendererInstanceCounts);
 }
 
-uint8_t * TrainingExecutor::rgbObservations() const
+MADRONA_EXPORT uint8_t * TrainingExecutor::rgbObservations() const
 {
     return impl_->engineState.batchRenderer.rgbPtr();
 }
 
-float * TrainingExecutor::depthObservations() const
+MADRONA_EXPORT float * TrainingExecutor::depthObservations() const
 {
     return impl_->engineState.batchRenderer.depthPtr();
 }
 
-void * TrainingExecutor::getExported(CountT slot) const
+MADRONA_EXPORT void * TrainingExecutor::getExported(CountT slot) const
 {
     return impl_->engineState.exportedColumns[slot];
 }

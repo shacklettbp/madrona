@@ -1,11 +1,15 @@
-add_library(madrona_mw_gpu STATIC
+add_library(madrona_mw_gpu SHARED
     ../../include/madrona/cuda_utils.hpp ../../include/madrona/cuda_utils.inl cuda_utils.cpp
     cpp_compile.hpp cpp_compile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona/mw_gpu.hpp entry.cpp)
 
 
-target_link_libraries(madrona_mw_gpu PUBLIC
-    madrona_core madrona_batch_render CUDA::nvrtc CUDA::cudart CUDA::cuda_driver)
+target_link_libraries(madrona_mw_gpu
+    PUBLIC
+        madrona_hdrs CUDA::cudart 
+    PRIVATE
+        madrona_core madrona_batch_render
+        CUDA::nvrtc CUDA::cuda_driver)
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
 

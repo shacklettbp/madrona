@@ -5,4 +5,8 @@ add_subdirectory(physics)
 if (CUDAToolkit_FOUND)
     add_subdirectory(render)
     add_subdirectory(mw_gpu)
+
+    if (Python_FOUND)
+        add_subdirectory(python)
+    endif ()
 endif ()

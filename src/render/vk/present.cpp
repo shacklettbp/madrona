@@ -22,16 +22,6 @@ static inline int checkSDL(int res, const char *msg)
     return res;
 }
 
-static inline uint32_t checkSDLUnsigned(uint32_t res, const char *msg)
-{
-    if (res == 0) {
-        FATAL(msg, SDL_GetError());
-    }
-
-    return res;
-}
-
-
 template <typename T>
 static inline T *checkSDLPointer(T *ptr, const char *msg)
 {
@@ -43,7 +33,6 @@ static inline T *checkSDLPointer(T *ptr, const char *msg)
 }
 
 #define REQ_SDL(expr) checkSDL((expr), #expr)
-#define REQ_SDL_UNSIGNED(expr) checkSDLUnsigned((expr), #expr)
 #define NONNULL_SDL(expr) checkSDLPointer((expr), #expr)
 
 PFN_vkGetInstanceProcAddr PresentationState::init()

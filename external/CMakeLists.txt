@@ -33,4 +33,6 @@ if (MADRONA_ENABLE_TESTS)
     add_subdirectory(googletest)
 endif ()
 
-add_subdirectory(nanobind EXCLUDE_FROM_ALL)
+if (Python_FOUND)
+    add_subdirectory(nanobind)
+endif ()

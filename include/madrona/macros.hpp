@@ -57,3 +57,11 @@
 #define MADRONA_ALWAYS_INLINE __attribute__((always_inline))
 #define MADRONA_NO_INLINE __attribute__((noinline))
 #endif
+
+#if defined _WIN32 || defined __CYGWIN__
+#define MADRONA_IMPORT __declspec(dllimport)
+#define MADRONA_EXPORT __declspec(dllexport)
+#else
+#define MADRONA_IMPORT __attribute__ ((visibility ("default")))
+#define MADRONA_EXPORT __attribute__ ((visibility ("default")))
+#endif

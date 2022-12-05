@@ -7,7 +7,7 @@ target_include_directories(glslang SYSTEM
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glslang/SPIRV>
 )
 
-add_library(spirv_reflect SHARED
+add_library(spirv_reflect STATIC
     external/SPIRV-Reflect/spirv_reflect.h external/SPIRV-Reflect/spirv_reflect.c)
 target_include_directories(spirv_reflect
     INTERFACE external/SPIRV-Reflect)

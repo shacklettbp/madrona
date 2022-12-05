@@ -41,5 +41,5 @@ if (TARGET madrona_mw_gpu)
     )
 
     target_link_libraries(simple_taskgraph_gpu PRIVATE
-        simple_taskgraph_init madrona_mw_gpu simple_taskgraph_gpu_srcs)
+        madrona_mw_gpu simple_taskgraph_init simple_taskgraph_gpu_srcs)
 endif()

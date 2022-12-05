@@ -1,4 +1,12 @@
 set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona")
+
+add_library(madrona_hdrs INTERFACE)
+target_include_directories(madrona_hdrs INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+target_link_libraries(madrona_hdrs INTERFACE
+    madrona_sys_defns)
+
 add_library(madrona_common STATIC
     ${INC_DIR}/memory.hpp ${INC_DIR}/memory.inl memory.cpp
     ${INC_DIR}/heap_array.hpp
@@ -47,10 +55,10 @@ endif()
 
 target_link_libraries(madrona_common
     PUBLIC 
-        madrona_sys_defns
-    PRIVATE
+        madrona_hdrs
 )
 
-target_include_directories(madrona_common
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../include/
-)
+set_property(TARGET madrona_common PROPERTY
+    POSITION_INDEPENDENT_CODE TRUE)
+set_property(TARGET madrona_common PROPERTY
+    INTERFACE_POSITION_INDEPENDENT_CODE TRUE)

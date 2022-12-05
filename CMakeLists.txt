@@ -37,13 +37,20 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 find_package(CUDAToolkit QUIET)
+find_package(Python 3.9 COMPONENTS Interpreter Development.Module QUIET)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_subdirectory(external)
 
-add_compile_options(-pedantic -Wall -Wextra)
+# Default hidden visibility for all symbols
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+
+add_compile_options(
+    -pedantic -Wall -Wextra 
+    -march=x86-64-v3)
 
 add_subdirectory(src)
 
