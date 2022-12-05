@@ -1,6 +1,23 @@
-nanobind_add_module(madrona_python NB_STATIC
+add_library(madrona_python_utils STATIC
+     utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona/python.hpp
-    python.cpp
+)
+
+target_link_libraries(madrona_python_utils
+    PUBLIC
+        madrona_hdrs CUDA::cudart
+    PRIVATE
+        madrona_common madrona_mw_gpu
+)
+
+function(madrona_python_module module_name)
+    nanobind_add_module(${module_name} NB_STATIC
+        ${ARGN}
+    )
+endfunction()
+
+madrona_python_module(madrona_python
+    bindings.cpp
 )
 
 # HACK: remove the warnings from the nanobind library. Because of
@@ -18,6 +35,5 @@ endforeach()
 
 target_link_libraries(madrona_python
     PRIVATE
-        madrona_hdrs
-        CUDA::cudart
+        madrona_python_utils
 )

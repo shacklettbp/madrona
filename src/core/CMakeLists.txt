@@ -1,12 +1,11 @@
-set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona")
-
 set(MADRONA_CORE_SRCS
-    ${INC_DIR}/fwd.hpp
-    ${INC_DIR}/job.hpp ${INC_DIR}/job.inl job.cpp
-    ${INC_DIR}/state.hpp ${INC_DIR}/state.inl state.cpp
-    ${INC_DIR}/context.hpp ${INC_DIR}/context.inl context.cpp
-    #${INC_DIR}/hash.hpp
-    #${INC_DIR}/platform_utils.hpp ${INC_DIR}/platform_utils.inl
+    ${MADRONA_INC_DIR}/fwd.hpp
+    ${MADRONA_INC_DIR}/job.hpp ${MADRONA_INC_DIR}/job.inl job.cpp
+    ${MADRONA_INC_DIR}/state.hpp ${MADRONA_INC_DIR}/state.inl state.cpp
+    ${MADRONA_INC_DIR}/context.hpp ${MADRONA_INC_DIR}/context.inl context.cpp
+    #${MADRONA_INC_DIR}/hash.hpp
+    #${MADRONA_INC_DIR}/platform_utils.hpp
+    #${MADRONA_INC_DIR}/platform_utils.inl
     #    platform_utils.cpp
 )
 
@@ -21,8 +20,8 @@ target_link_libraries(madrona_core
 
 add_library(madrona_mw_core STATIC
     ${MADRONA_CORE_SRCS}
-    ${INC_DIR}/taskgraph.hpp taskgraph.cpp
-    ${INC_DIR}/system.hpp system.cpp
+    ${MADRONA_INC_DIR}/taskgraph.hpp taskgraph.cpp
+    ${MADRONA_INC_DIR}/system.hpp system.cpp
 )
 
 target_compile_definitions(madrona_mw_core

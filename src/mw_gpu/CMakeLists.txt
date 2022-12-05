@@ -1,7 +1,8 @@
-add_library(madrona_mw_gpu SHARED
-    ../../include/madrona/cuda_utils.hpp ../../include/madrona/cuda_utils.inl cuda_utils.cpp
+add_library(madrona_mw_gpu STATIC
+    ${MADRONA_INC_DIR}/cuda_utils.hpp ${MADRONA_INC_DIR}/cuda_utils.inl
+        cuda_utils.cpp
     cpp_compile.hpp cpp_compile.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona/mw_gpu.hpp entry.cpp)
+    ${MADRONA_INC_DIR}/mw_gpu.hpp entry.cpp)
 
 
 target_link_libraries(madrona_mw_gpu
