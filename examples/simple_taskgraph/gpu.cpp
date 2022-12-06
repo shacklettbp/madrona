@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
         "SimpleExample::SimEntry",
         { SIMPLE_TASKGRAPH_SRC_LIST },
         { SIMPLE_TASKGRAPH_COMPILE_FLAGS },
-        CompileConfig::OptMode::Optimize,
+        CompileConfig::OptMode::LTO,
         CompileConfig::Executor::TaskGraph,
     });
 
