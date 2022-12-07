@@ -25,6 +25,7 @@ struct ObjectID {
 
 struct ActiveView {
     float tanFOV;
+    math::Vector3 cameraOffset;
     int32_t viewIdx;
 };
 
@@ -36,7 +37,8 @@ struct RenderingSystem {
 
     static void init(Context &ctx);
 
-    static ActiveView setupView(Context &ctx, float vfov_degrees);
+    static ActiveView setupView(Context &ctx, float vfov_degrees,
+                                math::Vector3 camera_offset);
 };
 
 }

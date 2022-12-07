@@ -64,6 +64,9 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     void exportColumn(int32_t slot);
 
+    template <typename SingletonT>
+    void exportSingleton(int32_t slot);
+
 private:
     StateManager *state_mgr_;
     void **export_ptr_;
@@ -130,6 +133,9 @@ public:
 
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * getArchetypeColumn();
+
+    template <typename SingletonT>
+    SingletonT * getSingletonColumn();
 
 private:
     template <typename SingletonT>

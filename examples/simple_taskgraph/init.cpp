@@ -40,7 +40,7 @@ EnvInit generateEnvironmentInitialization()
         .pMax = Vector3 { 10, 10, 10, },
     };
 
-    std::uniform_real_distribution<float> angle_dist(0.f, M_PI); 
+    std::uniform_real_distribution<float> angle_dist(0.f, math::pi); 
     for (int64_t i = 0; i < (int64_t)num_init_objs; i++) {
         Position rand_pos = randomPosition(world_bounds);
         Rotation rand_rot = Quat::angleAxis(angle_dist(randGen()),

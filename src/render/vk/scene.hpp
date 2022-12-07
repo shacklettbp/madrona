@@ -1,6 +1,7 @@
 #pragma once
 
 #include <madrona/render.hpp>
+#include <madrona/scene.hpp>
 #include <madrona/heap_array.hpp>
 
 #include "core.hpp"
@@ -21,15 +22,6 @@ struct Mesh {
 struct Object {
     uint32_t meshOffset;
     uint32_t numMeshes;
-};
-
-struct SourceMesh {
-    Span<const shader::Vertex> vertices;
-    Span<const uint32_t> indices;
-};
-
-struct SourceObject {
-    Span<const SourceMesh> meshes;
 };
 
 struct AssetMetadata {

@@ -11,27 +11,29 @@
 #include <cmath>
 #include <cfloat>
 
-#ifndef M_PI
-#define M_PI (3.14159265358979323846264338327950288f)
-#endif
-
 namespace madrona {
 namespace math {
 
-inline float toRadians(float degrees)
+constexpr inline float pi {3.14159265358979323846264338327950288f};
+
+namespace helpers {
+
+inline constexpr float toRadians(float degrees)
 {
-    constexpr float mult = M_PI / 180.f;
+    constexpr float mult = pi / 180.f;
     return mult * degrees;
 }
 
-inline float min(float a, float b)
+inline constexpr float minf(float a, float b)
 {
     return a < b ? a : b;
 }
 
-inline float max(float a, float b)
+inline constexpr float maxf(float a, float b)
 {
     return a > b ? a : b;
+}
+
 }
 
 struct Vector2 {
@@ -378,18 +380,18 @@ struct Vector3 {
     static inline Vector3 min(Vector3 a, Vector3 b)
     {
         return Vector3 {
-            math::min(a.x, b.x),
-            math::min(a.x, b.x),
-            math::min(a.x, b.x),
+            helpers::minf(a.x, b.x),
+            helpers::minf(a.x, b.x),
+            helpers::minf(a.x, b.x),
         };
     }
 
     static inline Vector3 max(Vector3 a, Vector3 b)
     {
         return Vector3 {
-            math::max(a.x, b.x),
-            math::max(a.x, b.x),
-            math::max(a.x, b.x),
+            helpers::maxf(a.x, b.x),
+            helpers::maxf(a.x, b.x),
+            helpers::maxf(a.x, b.x),
         };
     }
 };
@@ -417,6 +419,92 @@ struct Quat {
     float y;
     float z;
 
+    inline float length2() const
+    {
+        return w * w + x * x + y * y + z * z;
+    }
+
+    inline float length() const
+    {
+        return sqrtf(length2());
+    }
+
+    inline float invLength() const
+    {
+#ifdef MADRONA_GPU_MODE
+        return rsqrtf(length2());
+#else
+        return 1.f / sqrtf(length2());
+#endif
+    }
+
+    [[nodiscard]] inline Quat normalize() const
+    {
+        float inv_length = invLength();
+
+        return Quat {
+            w * inv_length,
+            x * inv_length,
+            y * inv_length,
+            z * inv_length,
+        };
+    }
+
+    [[nodiscard]] inline Quat inv() const
+    {
+        return Quat {
+            w,
+            -x,
+            -y,
+            -z,
+        };
+    }
+
+    inline Quat & operator+=(Quat o)
+    {
+        w += o.w;
+        x += o.x;
+        y += o.y;
+        z += o.z;
+
+        return *this;
+    }
+
+    inline Quat & operator-=(Quat o)
+    {
+        w -= o.w;
+        x -= o.x;
+        y -= o.y;
+        z -= o.z;
+
+        return *this;
+    }
+
+    inline Quat & operator*=(Quat o)
+    {
+        w = (w * o.w - x * o.x - y * o.y - z * o.z);
+        x = (w * o.x + x * o.w + y * o.z - z * o.y);
+        y = (w * o.y - x * o.z + y * o.w + z * o.x);
+        z = (w * o.z + x * o.y - y * o.x + z * o.w);
+
+        return *this;
+    }
+
+    friend inline Quat operator+(Quat a, Quat b)
+    {
+        return a += b;
+    }
+
+    friend inline Quat operator-(Quat a, Quat b)
+    {
+        return a -= b;
+    }
+
+    friend inline Quat operator*(Quat a, Quat b)
+    {
+        return a *= b;
+    }
+
     static inline Quat angleAxis(float angle, Vector3 normal)
     {
         float coshalf = cosf(angle / 2.f);
@@ -430,7 +518,7 @@ struct Quat {
         };
     }
 
-    inline Vector3 rotateDir(Vector3 v)
+    inline Vector3 rotateDir(Vector3 v) const
     {
         Vector3 pure {x, y, z};
         float scalar = w;

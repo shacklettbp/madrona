@@ -42,6 +42,12 @@ void ECSRegistry::exportColumn(int32_t slot)
         state_mgr_->getArchetypeColumn<ArchetypeT, ComponentT>();
 }
 
+template <typename SingletonT>
+void ECSRegistry::exportSingleton(int32_t slot)
+{
+    export_ptr_[slot] = state_mgr->getSingletonColumn<SingletonT>();
+}
+
 template <template <typename...> typename T, typename ...ComponentTs>
 struct StateManager::RegistrationHelper<T<ComponentTs...>> {
     using ArchetypeT = T<ComponentTs...>;
@@ -110,15 +116,7 @@ void StateManager::registerSingleton()
 template <typename SingletonT>
 SingletonT & StateManager::getSingleton(WorldID world_id)
 {
-    using ArchetypeT = SingletonArchetype<SingletonT>;
-    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-
-    // Abuse the fact that the singleton only has one component that is going
-    // to be in column 2
-    
-    Table &tbl = archetypes_[archetype_id]->tbl;
-    SingletonT *col = (SingletonT *)tbl.columns[2];
-
+    SingletonT *col = getSingletonColumn<SingletonT>();
     return col[world_id.idx];
 }
 
@@ -277,6 +275,19 @@ ComponentT * StateManager::getArchetypeColumn()
     int32_t col_idx = *archetype.columnLookup.lookup(component_id);
 
     return (ComponentT *)(archetype.tbl.columns[col_idx]);
+}
+
+template <typename SingletonT>
+SingletonT * StateManager::getSingletonColumn()
+{
+    using ArchetypeT = SingletonArchetype<SingletonT>;
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
+    // Abuse the fact that the singleton only has one component that is going
+    // to be in column 2
+    
+    Table &tbl = archetypes_[archetype_id]->tbl;
+    return (SingletonT *)tbl.columns[2];
 }
 
 }

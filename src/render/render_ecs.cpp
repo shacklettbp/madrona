@@ -103,12 +103,14 @@ inline void updateViewData(Context &,
     auto viewdatas =
         (ViewData *)mwGPU::GPUImplConsts::get().rendererViewDatasAddr;
 
-    ViewData &cur_view = viewdatas[view.viewIdx];
-    cur_view.rotation = rot;
-    cur_view.posAndTanFOV.x = pos.x;
-    cur_view.posAndTanFOV.y = pos.y;
-    cur_view.posAndTanFOV.z = pos.z;
-    cur_view.posAndTanFOV.w = view.tanFOV;
+    auto camera_pos = pos + view.cameraOffset;
+
+    ViewData &renderer_view = viewdatas[view.viewIdx];
+    renderer_view.rotation = rot;
+    renderer_view.posAndTanFOV.x = camera_pos.x;
+    renderer_view.posAndTanFOV.y = camera_pos.y;
+    renderer_view.posAndTanFOV.z = camera_pos.z;
+    renderer_view.posAndTanFOV.w = view.tanFOV;
 }
 
 
@@ -142,15 +144,17 @@ void RenderingSystem::init(Context &ctx)
     };
 }
 
-ActiveView RenderingSystem::setupView(Context &, float vfov_degrees)
+ActiveView RenderingSystem::setupView(Context &, float vfov_degrees,
+                                      math::Vector3 camera_offset)
 {
     int32_t view_offset = RendererState::viewOffset.fetch_add(1,
         std::memory_order_relaxed);
 
-    float tan_fov = tanf(math::toRadians(vfov_degrees / 2.f));
+    float tan_fov = tanf(helpers::toRadians(vfov_degrees / 2.f));
 
     return ActiveView {
         tan_fov, 
+        camera_offset,
         view_offset,
     };
 }

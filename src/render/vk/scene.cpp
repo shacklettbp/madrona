@@ -310,7 +310,7 @@ static Vector3 encodeNormalTangent(const Vector3 &normal,
     };
 }
 
-static shader::PackedVertex packVertex(const shader::Vertex &v)
+static shader::PackedVertex packVertex(const SourceVertex &v)
 {
     Vector3 encoded_normal_tangent =
         encodeNormalTangent(v.normal, v.tangentAndSign);
@@ -560,7 +560,7 @@ Assets AssetManager::load(const DeviceState &dev,
 Assets AssetManager::loadCube(const DeviceState &dev,
                               MemoryAllocator &mem)
 {
-    std::vector<shader::Vertex> vertices {
+    std::vector<SourceVertex> vertices {
         {
             Vector3 { -1, -1, -1, },
             Vector3 {},
