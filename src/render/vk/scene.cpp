@@ -338,13 +338,15 @@ Optional<AssetMetadata> AssetManager::prepareMetadata(
     int64_t total_num_meshes = 0;
     for (const SourceObject &obj : objects) {
         total_bytes += sizeof(shader::MeshData) * obj.meshes.size();
-        total_bytes = alignOffset(total_bytes, 16);
+        total_bytes = alignOffset(total_bytes, sizeof(shader::PackedVertex));
 
         total_num_meshes += obj.meshes.size();
         for (const SourceMesh &mesh : obj.meshes) {
             total_bytes += mesh.vertices.size() * sizeof(shader::PackedVertex);
             total_bytes += mesh.indices.size() * sizeof(uint32_t);
         }
+
+        total_bytes = alignOffset(total_bytes, sizeof(shader::PackedVertex));
     }
 
     if (total_bytes >= (uint64_t(1) << uint64_t(31))) {
@@ -398,7 +400,7 @@ void AssetManager::packAssets(void *dst_buffer,
 
         for (int64_t mesh_idx = 0; mesh_idx < num_meshes; mesh_idx++) {
             const SourceMesh &src_mesh = src_obj.meshes[mesh_idx];
-            Mesh &dst_mesh = metadata.meshes[mesh_idx];
+            Mesh &dst_mesh = metadata.meshes[obj_mesh_offset + mesh_idx];
 
             int64_t num_vertices = src_mesh.vertices.size();
 
