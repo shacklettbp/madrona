@@ -45,7 +45,7 @@ void ECSRegistry::exportColumn(int32_t slot)
 template <typename SingletonT>
 void ECSRegistry::exportSingleton(int32_t slot)
 {
-    export_ptr_[slot] = state_mgr->getSingletonColumn<SingletonT>();
+    export_ptr_[slot] = state_mgr_->getSingletonColumn<SingletonT>();
 }
 
 template <template <typename...> typename T, typename ...ComponentTs>

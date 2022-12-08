@@ -55,6 +55,7 @@ public:
 struct Assets {
     LocalBuffer geoBuffer;
     BLASData blases;
+    CountT objectOffset;
 };
 
 struct AssetManager {

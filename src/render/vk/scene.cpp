@@ -554,6 +554,7 @@ Assets AssetManager::load(const DeviceState &dev,
     return Assets {
         std::move(geo_buffer),
         std::move(blas_build->blases),
+        base_obj_offset,
     };
 }
 

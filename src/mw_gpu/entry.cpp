@@ -1033,6 +1033,12 @@ MADRONA_EXPORT void TrainingExecutor::run()
         impl_->engineState.rendererInstanceCounts);
 }
 
+MADRONA_EXPORT CountT TrainingExecutor::loadObjects(
+    Span<const render::SourceObject> objs)
+{
+    return impl_->engineState.batchRenderer.loadObjects(objs);
+}
+
 MADRONA_EXPORT uint8_t * TrainingExecutor::rgbObservations() const
 {
     return impl_->engineState.batchRenderer.rgbPtr();

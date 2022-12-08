@@ -87,10 +87,12 @@ struct BatchRenderer::Impl {
     uint32_t launchHeight;
     VkSemaphore renderFinished;
     VkSemaphore swapchainReady;
-    Assets cube;
+    DynArray<Assets> loadedAssets;
 
     inline Impl(const Config &cfg);
     inline Impl(const Config &cfg, RendererInit &&init);
+   
+    inline CountT loadObjects(Span<const SourceObject> objs);
 
     inline void render(const uint32_t *num_instances);
 };
@@ -382,7 +384,7 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
                      VK_NULL_HANDLE),
       swapchainReady(presentState.has_value() ? makeBinarySemaphore(dev) :
                      VK_NULL_HANDLE),
-      cube(assetMgr.loadCube(dev, mem))
+      loadedAssets(0)
 {
     if (presentState.has_value()) {
         GPURunUtil tmp_run {
@@ -393,6 +395,20 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
         };
         presentState->forceTransition(dev, tmp_run);
     }
+}
+
+CountT BatchRenderer::Impl::loadObjects(Span<const SourceObject> objs)
+{
+    auto metadata = *assetMgr.prepareMetadata(objs);
+    HostBuffer staging = mem.makeStagingBuffer(metadata.numGPUDataBytes);
+    assetMgr.packAssets(staging.ptr, metadata, objs);
+
+    Assets loaded = assetMgr.load(dev, mem, metadata, std::move(staging));
+
+    CountT offset = loaded.objectOffset;
+    loadedAssets.emplace_back(std::move(loaded));
+
+    return offset;
 }
 
 void BatchRenderer::Impl::render(const uint32_t *num_instances)
@@ -476,6 +492,11 @@ BatchRenderer::BatchRenderer(BatchRenderer &&o)
 {}
 
 BatchRenderer::~BatchRenderer() {}
+
+CountT BatchRenderer::loadObjects(Span<const SourceObject> objs)
+{
+    return impl_->loadObjects(objs);
+}
 
 AccelStructInstance ** BatchRenderer::tlasInstancePtrs() const
 {

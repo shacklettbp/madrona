@@ -611,6 +611,16 @@ struct AABB {
 struct Mat3x4 {
     Vector3 cols[4];
 
+    static inline Mat3x4 fromRows(Vector4 row0, Vector4 row1, Vector4 row2)
+    {
+        return {
+            Vector3 { row0.x, row1.x, row2.x },
+            Vector3 { row0.y, row1.y, row2.y },
+            Vector3 { row0.z, row1.z, row2.z },
+            Vector3 { row0.w, row1.w, row2.w },
+        };
+    }
+
     static inline Mat3x4 fromTRS(Vector3 t, Quat r, float s = 1.f)
     {
         float x2 = r.x * r.x;
