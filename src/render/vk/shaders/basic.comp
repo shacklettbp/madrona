@@ -131,8 +131,8 @@ Camera unpackCamera(PackedCamera packed)
     float aspect = float(RES_X) / float(RES_Y);
 
     vec4 rot = packed.rotation;
-    vec3 view = quatRotate(rot, vec3(0.f, 0.f, 1.f));
-    vec3 up = quatRotate(rot, vec3(0.f, 1.f, 0.f));
+    vec3 view = quatRotate(rot, vec3(0.f, 0.f, -1.f));
+    vec3 up = quatRotate(rot, vec3(0.f, -1.f, 0.f));
     vec3 right = quatRotate(rot, vec3(1.f, 0.f, 0.f));
 
     vec4 pos_fov = packed.posAndTanFOV;
@@ -187,7 +187,7 @@ u32vec3 fetchTriangleIndices(IndexBufferRef index_buffer,
 
 Triangle fetchTriangle(uint64_t geo_addr,
                        uint32_t mesh_offset,
-                       uint32_t index_offset)
+                       uint32_t tri_offset)
 {
     MeshBufferRef meshdata_buffer = MeshBufferRef(geo_addr);
     MeshData meshdata = meshdata_buffer[mesh_offset].mesh;
@@ -195,7 +195,7 @@ Triangle fetchTriangle(uint64_t geo_addr,
     VertexBufferRef vertex_buffer = VertexBufferRef(geo_addr);
     IndexBufferRef index_buffer = IndexBufferRef(geo_addr);
 
-    index_offset += meshdata.indexOffset;
+    uint32_t index_offset = meshdata.indexOffset + tri_offset * 3;
     u32vec3 indices = fetchTriangleIndices(index_buffer, index_offset);
 
     return Triangle(
@@ -306,8 +306,8 @@ void setOutput(uint32_t rgb_offset, uint32_t depth_offset,
 }
 
 void getHitParams(in rayQueryEXT ray_query, out vec2 barys,
-                  out uint32_t tri_idx, out uint32_t obj_idx,
-                  out uint32_t material_idx, out uint32_t geo_idx,
+                  out uint32_t tri_idx, out uint32_t geo_idx,
+                  out uint32_t obj_idx, out uint32_t material_idx,
                   out mat4x3 o2w, out mat4x3 w2o)
 {
     barys = rayQueryGetIntersectionBarycentricsEXT(ray_query, true);
@@ -365,12 +365,12 @@ void main()
         return;
     }
 
-    vec2 tri_barys;
+    vec2 hit_barys;
     uint32_t tri_idx, geo_idx, obj_idx, material_idx;
     mat4x3 o2w, w2o;
-    getHitParams(primary_query, tri_barys, tri_idx,
+    getHitParams(primary_query, hit_barys, tri_idx,
                  geo_idx, obj_idx, material_idx, o2w, w2o);
-
+    
     ObjectData object_data = objectDataBuffer[obj_idx];
 
     Triangle hit_tri = fetchTriangle(object_data.geoAddr, geo_idx, tri_idx);
@@ -378,11 +378,21 @@ void main()
     vec3 world_b = transformPosition(o2w, hit_tri.b.position);
     vec3 world_c = transformPosition(o2w, hit_tri.c.position);
     vec3 world_position =
-        interpolatePosition(world_a, world_b, world_c, tri_barys);
+        interpolatePosition(world_a, world_b, world_c, hit_barys);
+
+    vec3 hit_obj_normal = interpolateNormal(hit_tri.a.normal,
+                                            hit_tri.b.normal,
+                                            hit_tri.c.normal,
+                                            hit_barys);
+
+    vec3 hit_world_normal = transformNormal(w2o, hit_obj_normal);
+
+    float hit_angle = dot(normalize(hit_world_normal), normalize(ray_dir));
 
     float depth = distance(world_position, cam.origin);
+    depth = rayQueryGetIntersectionTEXT(primary_query, true);
 
-    vec3 rgb = abs(world_position / 10.f);
+    vec3 rgb = vec3(depth / 10.f);
 
     if (!oob) {
         setOutput(rgb_out_offset, depth_out_offset, rgb, depth);

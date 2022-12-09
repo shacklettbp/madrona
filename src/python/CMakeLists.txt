@@ -19,6 +19,8 @@ function(madrona_python_module module_name)
         PRIVATE
             madrona_python_utils madrona_hdrs
     )
+     
+    set_target_properties(madrona_python PROPERTIES EXCLUDE_FROM_ALL FALSE)
 endfunction()
 
 madrona_python_module(madrona_python
