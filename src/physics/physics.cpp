@@ -28,7 +28,7 @@ struct SolverData {
     CountT maxContacts;
 
     inline SolverData(CountT max_contacts_per_step)
-        : contacts((Contact *)malloc(sizeof(Contact) * max_contacts_per_step)),
+        : contacts((Contact *)rawAlloc(sizeof(Contact) * max_contacts_per_step)),
           numContacts(0),
           maxContacts(max_contacts_per_step)
     {}
@@ -85,27 +85,32 @@ inline void updateAABBEntry(Context &,
 namespace broadphase {
 
 BVH::BVH(CountT max_leaves)
-    : nodes_((Node *)malloc(sizeof(Node) *
+    : nodes_((Node *)rawAlloc(sizeof(Node) *
                             numInternalNodes(max_leaves))),
       num_nodes_(0),
       num_allocated_nodes_(numInternalNodes(max_leaves)),
-      leaf_aabbs_((AABB *)malloc(sizeof(AABB) * max_leaves)),
-      leaf_centers_((Vector3 *)malloc(sizeof(Vector3) * max_leaves)),
-      leaf_parents_((uint32_t *)malloc(sizeof(uint32_t) * max_leaves)),
-      leaf_entities_((Entity *)malloc(sizeof(Entity) * max_leaves)),
-      sorted_leaves_((int32_t *)malloc(sizeof(int32_t) * max_leaves)),
+      leaf_aabbs_((AABB *)rawAlloc(sizeof(AABB) * max_leaves)),
+      leaf_centers_((Vector3 *)rawAlloc(sizeof(Vector3) * max_leaves)),
+      leaf_parents_((uint32_t *)rawAlloc(sizeof(uint32_t) * max_leaves)),
+      leaf_entities_((Entity *)rawAlloc(sizeof(Entity) * max_leaves)),
+      sorted_leaves_((int32_t *)rawAlloc(sizeof(int32_t) * max_leaves)),
       num_leaves_(0),
       num_allocated_leaves_(max_leaves)
 {}
 
 CountT BVH::numInternalNodes(CountT num_leaves) const
 {
-    return utils::divideRoundUp(num_leaves - 1, CountT(3));
+    return max(utils::divideRoundUp(num_leaves - 1, CountT(3)), CountT(1)) +
+        num_leaves; // + num_leaves should not be necessary but the current
+                    // top down build has an issue where leaves get
+                    // unnecessarily split amongst internal nodes with only
+                    // 1 or 2 children
 }
 
 void BVH::rebuild()
 {
-    int32_t num_internal_nodes = numInternalNodes(num_leaves_);
+    int32_t num_internal_nodes =
+        numInternalNodes(num_leaves_.load(std::memory_order_relaxed));
     num_nodes_ = num_internal_nodes;
     assert(num_nodes_ <= num_allocated_nodes_);
 
@@ -132,12 +137,14 @@ void BVH::rebuild()
         int32_t node_id;
         if (entry.numObjs <= 4) {
             node_id = cur_node_offset++;
+
             Node &node = nodes_[node_id];
             node.parentID = entry.parentID;
 
             for (int i = 0; i < 4; i++) {
                 if (i < entry.numObjs) {
                     int32_t leaf_id = sorted_leaves_[entry.offset + i];
+
                     const auto &aabb = leaf_aabbs_[leaf_id];
                     leaf_parents_[leaf_id] = ((uint32_t)node_id << 2) | (uint32_t)i;
 
@@ -254,15 +261,6 @@ void BVH::rebuild()
             int32_t first_split = midpoint_split(entry.offset, num_h1);
             int32_t third_split =
                 midpoint_split(entry.offset + second_split, num_h2);
-
-#if 0
-            printf("%u %u\n", entry.offset, entry.numObjs);
-            printf("[%u %u) [%u %u) [%u %u) [%u %u)\n",
-                   entry.offset, entry.offset + first_split,
-                   entry.offset + first_split, entry.offset + first_split + num_h1 - first_split,
-                   entry.offset + num_h1, entry.offset + num_h1 + third_split,
-                   entry.offset + num_h1 + third_split, entry.offset + num_h1 + third_split + num_h2 - third_split);
-#endif
 
             // Setup stack to recurse into fourths. Put fourths on stack in
             // reverse order to preserve left-right depth first ordering
@@ -516,6 +514,7 @@ namespace solver {
 
 inline void contactSolverEntry(Context &ctx, SolverData &solver)
 {
+#if 0
     // Push objects in serial based on the contact normal - total BS.
     CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
 
@@ -528,8 +527,7 @@ inline void contactSolverEntry(Context &ctx, SolverData &solver)
         a_pos -= contact.normal;
         b_pos += contact.normal;
     }
-
-    printf("Num contacts: %d\n", num_contacts);
+#endif
 
     solver.numContacts.store(0, std::memory_order_relaxed);
 }

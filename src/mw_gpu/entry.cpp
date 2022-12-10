@@ -31,6 +31,13 @@ using namespace madrona;
 
 namespace madrona {
 
+__attribute__((constructor)) static void setCudaHeapSize()
+{
+    // FIXME size limit for device side malloc:
+    REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
+                                1ul*1024ul*1024ul*1024ul));
+}
+
 using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
 using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
 
@@ -244,9 +251,13 @@ static GPUCompileResults compileCode(
         }
     };
 
+#if 0
+    // Don't need the device runtime without dynamic parallelism
+
     checkLinker(cuLinkAddFile(linker, CU_JIT_INPUT_LIBRARY,
                               MADRONA_CUDADEVRT_PATH,
                               0, nullptr, nullptr));
+#endif
 
     auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
         checkLinker(cuLinkAddData(linker, linker_input_type,
@@ -703,18 +714,20 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
     auto exported_readback = (void **)cu::allocReadback(
         sizeof(void *) * num_exported);
 
-    HostChannel *allocator_channel;
-    REQ_CU(cuMemAllocManaged((CUdeviceptr *)&allocator_channel,
-                             sizeof(HostChannel), CU_MEM_ATTACH_HOST));
-    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel, sizeof(HostChannel),
-                       CU_MEM_ADVISE_SET_READ_MOSTLY, CU_DEVICE_CPU));
-    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel, sizeof(HostChannel),
+    CUdeviceptr allocator_channel_devptr;
+    REQ_CU(cuMemAllocManaged(&allocator_channel_devptr,
+                             sizeof(HostChannel), CU_MEM_ATTACH_GLOBAL));
+    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel_devptr, sizeof(HostChannel),
+                       CU_MEM_ADVISE_SET_READ_MOSTLY, 0));
+    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel_devptr, sizeof(HostChannel),
                        CU_MEM_ADVISE_SET_ACCESSED_BY, CU_DEVICE_CPU));
 
     CUdevice cu_gpu;
     REQ_CU(cuCtxGetDevice(&cu_gpu));
-    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel, sizeof(HostChannel),
+    REQ_CU(cuMemAdvise(allocator_channel_devptr, sizeof(HostChannel),
                        CU_MEM_ADVISE_SET_ACCESSED_BY, cu_gpu));
+
+    HostChannel *allocator_channel = (HostChannel *)allocator_channel_devptr;
 
     size_t cu_va_alloc_granularity;
     {
@@ -975,9 +988,6 @@ MADRONA_EXPORT TrainingExecutor::TrainingExecutor(
         const StateConfig &state_cfg, const CompileConfig &compile_cfg)
     : impl_(nullptr)
 {
-    // FIXME size limit for device side malloc:
-    cudaDeviceSetLimit(cudaLimitMallocHeapSize, 1ul*1024ul*1024ul*1024ul);
-
     auto strm = cu::makeStream();
     
     GPUKernels gpu_kernels = buildKernels(compile_cfg, state_cfg.gpuID);

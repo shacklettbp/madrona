@@ -9,16 +9,16 @@ static constexpr uint32_t numMegakernelThreads = 256;
 
 TaskGraph::Builder::Builder(uint32_t max_num_nodes,
                             uint32_t max_num_dependencies)
-    : nodes_((StagedNode *)malloc(sizeof(StagedNode) * max_num_nodes)),
+    : nodes_((StagedNode *)rawAlloc(sizeof(StagedNode) * max_num_nodes)),
       num_nodes_(0),
-      all_dependencies_((NodeID *)malloc(sizeof(NodeID) * max_num_dependencies)),
+      all_dependencies_((NodeID *)rawAlloc(sizeof(NodeID) * max_num_dependencies)),
       num_dependencies_(0)
 {}
 
 TaskGraph::Builder::~Builder()
 {
-    free(nodes_);
-    free(all_dependencies_);
+    rawDealloc(nodes_);
+    rawDealloc(all_dependencies_);
 }
 
 TaskGraph::NodeID TaskGraph::Builder::registerNode(
@@ -51,8 +51,8 @@ void TaskGraph::Builder::build(TaskGraph *out)
 {
     assert(nodes_[0].numDependencies == 0);
     NodeState *sorted_nodes = 
-        (NodeState *)malloc(sizeof(NodeState) * num_nodes_);
-    bool *queued = (bool *)malloc(num_nodes_ * sizeof(bool));
+        (NodeState *)rawAlloc(sizeof(NodeState) * num_nodes_);
+    bool *queued = (bool *)rawAlloc(num_nodes_ * sizeof(bool));
     new (&sorted_nodes[0]) NodeState {
         nodes_[0].node,
         0,
@@ -62,7 +62,7 @@ void TaskGraph::Builder::build(TaskGraph *out)
 
     uint32_t num_remaining_nodes = num_nodes_ - 1;
     uint32_t *remaining_nodes =
-        (uint32_t *)malloc(num_remaining_nodes * sizeof(uint32_t));
+        (uint32_t *)rawAlloc(num_remaining_nodes * sizeof(uint32_t));
 
     for (int64_t i = 1; i < (int64_t)num_nodes_; i++) {
         queued[i]  = false;
@@ -100,8 +100,8 @@ void TaskGraph::Builder::build(TaskGraph *out)
         }
     }
 
-    free(remaining_nodes);
-    free(queued);
+    rawDealloc(remaining_nodes);
+    rawDealloc(queued);
 
     new (out) TaskGraph(sorted_nodes, num_nodes_);
 }
@@ -115,7 +115,7 @@ TaskGraph::TaskGraph(NodeState *nodes, uint32_t num_nodes)
 
 TaskGraph::~TaskGraph()
 {
-    free(sorted_nodes_);
+    rawDealloc(sorted_nodes_);
 }
 
 struct TaskGraph::BlockState {

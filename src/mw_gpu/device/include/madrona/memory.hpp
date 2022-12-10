@@ -12,6 +12,21 @@
 #endif
 
 namespace madrona {
+
+inline void * rawAlloc(uint64_t num_bytes)
+{
+    assert(num_bytes != 0);
+    void *ptr = malloc(num_bytes);
+    assert(ptr != nullptr);
+
+    return ptr;
+}
+
+inline void rawDealloc(void *ptr)
+{
+    free(ptr);
+}
+
 namespace mwGPU {
 
 struct HostChannel {
