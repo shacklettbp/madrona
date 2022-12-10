@@ -250,32 +250,9 @@ bool traceShadeRay(rayQueryEXT ray_query, in uint32_t view_idx,
                    uint32_t visibility_mask)
 {
     rayQueryInitializeEXT(ray_query, viewTLASes[view_idx],
-        gl_RayFlagsTerminateOnFirstHitEXT, // |
-            //gl_RayFlagsCullBackFacingTrianglesEXT,
+        gl_RayFlagsNoneEXT,
+        //gl_RayFlagsCullBackFacingTrianglesEXT,
         visibility_mask, ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
-
-    while (rayQueryProceedEXT(ray_query)) {
-        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
-            gl_RayQueryCandidateIntersectionTriangleEXT) {
-
-            rayQueryConfirmIntersectionEXT(ray_query);
-        }
-    }
-
-    subgroupBarrier();
-
-    return rayQueryGetIntersectionTypeEXT(ray_query, true) !=
-        gl_RayQueryCommittedIntersectionNoneEXT;
-}
-
-bool traceShadowRay(in uint32_t tlas_idx, in vec3 ray_origin,
-                    in vec3 ray_dir, in float ray_len,
-                    in uint32_t visibility_mask)
-{
-    rayQueryEXT ray_query;
-    rayQueryInitializeEXT(ray_query, viewTLASes[tlas_idx],
-        gl_RayFlagsTerminateOnFirstHitEXT, visibility_mask,
-        ray_origin, 0.f, ray_dir, ray_len);
 
     while (rayQueryProceedEXT(ray_query)) {
         if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
