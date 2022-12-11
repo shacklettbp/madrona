@@ -55,7 +55,7 @@ static constexpr VkBufferUsageFlags localUsage =
     commonUsage | geometryUsage | shaderUsage | indirectUsage | localRTUsage;
 
 static constexpr VkBufferUsageFlags dedicatedUsage =
-    localUsage;
+    localUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 };
 
 namespace ImageFlags {

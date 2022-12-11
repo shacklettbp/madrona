@@ -413,6 +413,11 @@ CountT BatchRenderer::Impl::loadObjects(Span<const SourceObject> objs)
 
 void BatchRenderer::Impl::render(const uint32_t *num_instances)
 {
+    uint32_t swapchain_idx = 0;
+    if (presentState.has_value()) {
+        swapchain_idx = presentState->acquireNext(dev, swapchainReady);
+    }
+
     REQ_VK(dev.dt.resetCommandPool(dev.hdl, renderCmdPool, 0));
 
     VkCommandBufferBeginInfo begin_info {};
@@ -446,6 +451,75 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
         launchHeight,
         fb.numViews);
 
+    if (presentState.has_value()) {
+        VkBufferImageCopy cpy_to_present {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .imageOffset = { 0, 0, 0 },
+            .imageExtent = { fb.renderWidth, fb.renderHeight, 1 },
+        };
+
+        VkImage present_img = presentState->getImage(swapchain_idx);
+
+        VkBufferMemoryBarrier buffer_barrier;
+        buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        buffer_barrier.pNext = nullptr;
+        buffer_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        buffer_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        buffer_barrier.buffer = fb.rgb.buf.buffer;
+        buffer_barrier.offset = 0;
+        buffer_barrier.size = VK_WHOLE_SIZE;
+
+        VkImageMemoryBarrier layout_update;
+        layout_update.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        layout_update.pNext = nullptr;
+        layout_update.srcAccessMask = 0;
+        layout_update.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        layout_update.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        layout_update.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        layout_update.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        layout_update.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        layout_update.image = present_img ;
+        layout_update.subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+
+        dev.dt.cmdPipelineBarrier(renderCmd,
+                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  0, 0, nullptr, 1, &buffer_barrier,
+                                  1, &layout_update);
+
+        dev.dt.cmdCopyBufferToImage(renderCmd, fb.rgb.buf.buffer,
+                                    present_img,
+                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    1, &cpy_to_present);
+
+        layout_update.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        layout_update.dstAccessMask = 0;
+        layout_update.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        layout_update.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        dev.dt.cmdPipelineBarrier(renderCmd,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                  0, 0, nullptr, 0, nullptr,
+                                  1, &layout_update);
+    }
+
     REQ_VK(dev.dt.endCommandBuffer(renderCmd));
 
     VkSubmitInfo submit_info {};
@@ -456,11 +530,9 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &renderCmd;
 
-    uint32_t swapchain_idx = 0;
     VkPipelineStageFlags present_wait_mask =
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     if (presentState.has_value()) {
-        swapchain_idx = presentState->acquireNext(dev, swapchainReady);
         submit_info.waitSemaphoreCount = 1;
         submit_info.pWaitSemaphores = &swapchainReady;
 
