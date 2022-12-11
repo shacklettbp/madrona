@@ -641,14 +641,24 @@ struct Mat3x4 {
         }};
     }
 
-    Vector3 txfmPoint(Vector3 p)
+    inline Vector3 txfmPoint(Vector3 p)
     {
         return cols[0] * p.x + cols[1] * p.y + cols[2] * p.z + cols[3];
     }
 
-    Vector3 txfmDir(Vector3 p)
+    inline Vector3 txfmDir(Vector3 p)
     {
         return cols[0] * p.x + cols[1] * p.y + cols[2] * p.z;
+    }
+
+    inline Mat3x4 compose(const Mat3x4 &o)
+    {
+        return Mat3x4 {
+            txfmDir(o.cols[0]),
+            txfmDir(o.cols[1]),
+            txfmDir(o.cols[2]),
+            txfmPoint(o.cols[3]),
+        };
     }
 };
 
