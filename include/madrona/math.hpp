@@ -15,6 +15,8 @@ namespace madrona {
 namespace math {
 
 constexpr inline float pi {3.14159265358979323846264338327950288f};
+constexpr inline float pi_d2 {pi / 2.f};
+constexpr inline float pi_m2 {pi * 2.f};
 
 namespace helpers {
 

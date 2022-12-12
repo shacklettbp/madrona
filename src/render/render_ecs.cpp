@@ -50,6 +50,7 @@ void RenderingSystem::registerTypes(ECSRegistry &registry)
 inline void instanceAccelStructSetup(Context &ctx,
                                      const Position &pos,
                                      const Rotation &rot,
+                                     const Scale &scale,
                                      const ObjectID &obj_id)
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
@@ -61,7 +62,7 @@ inline void instanceAccelStructSetup(Context &ctx,
     AccelStructInstance &as_inst =
         getInstanceBuffer(ctx.worldID().idx)[inst_idx];
 
-    Mat3x4 o2w = Mat3x4::fromTRS(pos, rot);
+    Mat3x4 o2w = Mat3x4::fromTRS(pos, rot, scale);
 
     as_inst.transform.matrix[0][0] = o2w.cols[0].x;
     as_inst.transform.matrix[0][1] = o2w.cols[1].x;
@@ -121,6 +122,7 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
         instanceAccelStructSetup,
         Position,
         Rotation,
+        Scale,
         ObjectID>(deps);
 
     auto viewdata_update = builder.parallelForNode<Context,

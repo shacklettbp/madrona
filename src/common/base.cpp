@@ -10,6 +10,7 @@ void registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<Position>();
     registry.registerComponent<Rotation>();
+    registry.registerComponent<Scale>();
 }
 
 }

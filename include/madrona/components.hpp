@@ -18,6 +18,12 @@ struct Rotation : math::Quat {
     {}
 };
 
+struct Scale : math::Vector3 {
+    Scale(math::Vector3 v)
+        : Vector3(v)
+    {}
+};
+
 void registerTypes(ECSRegistry &registry);
 
 }
