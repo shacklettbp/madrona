@@ -385,17 +385,7 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
       swapchainReady(presentState.has_value() ? makeBinarySemaphore(dev) :
                      VK_NULL_HANDLE),
       loadedAssets(0)
-{
-    if (presentState.has_value()) {
-        GPURunUtil tmp_run {
-            renderCmdPool,
-            renderCmd,
-            renderQueue,
-            renderFence,
-        };
-        presentState->forceTransition(dev, tmp_run);
-    }
-}
+{}
 
 CountT BatchRenderer::Impl::loadObjects(Span<const SourceObject> objs)
 {
@@ -415,6 +405,8 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
 {
     uint32_t swapchain_idx = 0;
     if (presentState.has_value()) {
+        presentState->processInputs();
+
         swapchain_idx = presentState->acquireNext(dev, swapchainReady);
     }
 

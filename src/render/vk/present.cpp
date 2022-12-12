@@ -259,6 +259,23 @@ PresentationState::PresentationState(const InstanceState &inst,
 {
 }
 
+void PresentationState::processInputs()
+{
+    static std::array<SDL_Event, 1024> events;
+
+    SDL_PumpEvents();
+
+    int num_events;
+    do {
+        num_events = REQ_SDL(SDL_PeepEvents(events.data(), events.size(),
+                             SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT));
+    } while (num_events == events.size());
+
+    // Right now this function pretty much just exists to get
+    // gnome to shut up about the window not responding
+    (void)num_events;
+}
+
 void PresentationState::forceTransition(const DeviceState &dev,
     const GPURunUtil &gpu_run)
 {

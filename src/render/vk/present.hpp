@@ -40,6 +40,8 @@ public:
                       uint32_t num_frames_inflight,
                       bool need_immediate);
 
+    void processInputs();
+
     void forceTransition(const DeviceState &dev,
                          const GPURunUtil &gpu_run);
 
