@@ -100,7 +100,7 @@ BVH::BVH(CountT max_leaves)
 
 CountT BVH::numInternalNodes(CountT num_leaves) const
 {
-    return max(utils::divideRoundUp(num_leaves - 1, CountT(3)), CountT(1)) +
+    return std::max(utils::divideRoundUp(num_leaves - 1, CountT(3)), CountT(1)) +
         num_leaves; // + num_leaves should not be necessary but the current
                     // top down build has an issue where leaves get
                     // unnecessarily split amongst internal nodes with only

@@ -131,9 +131,9 @@ Camera unpackCamera(PackedCamera packed)
     float aspect = float(RES_X) / float(RES_Y);
 
     vec4 rot = packed.rotation;
-    vec3 view = quatRotate(rot, vec3(0.f, 0.f, -1.f));
-    vec3 up = quatRotate(rot, vec3(0.f, -1.f, 0.f));
     vec3 right = quatRotate(rot, vec3(1.f, 0.f, 0.f));
+    vec3 view = quatRotate(rot, vec3(0.f, 1.f, 0.f));
+    vec3 up = quatRotate(rot, vec3(0.f, 0.f, 1.f));
 
     vec4 pos_fov = packed.posAndTanFOV;
 

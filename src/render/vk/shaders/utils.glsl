@@ -72,8 +72,8 @@ vec3 concentricHemisphere(vec2 uv)
 
 vec3 quatRotate(vec4 quat, vec3 dir)
 {
-    vec3 pure = quat.xyz;
-    float scalar = quat.w;
+    vec3 pure = quat.yzw;
+    float scalar = quat.x;
 
     return 2.f * dot(pure, dir) * pure +
         (2.f * scalar * scalar - 1.f) * dir +
@@ -82,7 +82,7 @@ vec3 quatRotate(vec4 quat, vec3 dir)
 
 vec3 quatInvRotate(vec4 quat, vec3 dir)
 {
-    return quatRotate(vec4(-quat.x, -quat.y, -quat.z, quat.w), dir);
+    return quatRotate(vec4(quat.x, -quat.yzw), dir);
 }
 
 vec2 dirToLatLong(vec3 dir)

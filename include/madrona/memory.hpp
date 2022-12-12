@@ -21,6 +21,18 @@
 
 namespace madrona {
 
+// FIXME get rid of these eventually:
+
+inline void * rawAlloc(size_t num_bytes)
+{
+    return malloc(num_bytes);
+}
+
+inline void rawDealloc(void *ptr)
+{
+    free(ptr);
+}
+
 class OSAlloc {
     struct Block;
 public:

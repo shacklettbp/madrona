@@ -482,12 +482,10 @@ struct Quat {
 
     inline Quat & operator*=(Quat o)
     {
-        w = (w * o.w - x * o.x - y * o.y - z * o.z);
-        x = (w * o.x + x * o.w + y * o.z - z * o.y);
-        y = (w * o.y - x * o.z + y * o.w + z * o.x);
-        z = (w * o.z + x * o.y - y * o.x + z * o.w);
-
-        return *this;
+        // Slightly cleaner to implement in terms of operator* because then we
+        // don't need to worry about overwriting members that will be used
+        // later in the multiplication computation
+        return *this = (*this * o);
     }
 
     friend inline Quat operator+(Quat a, Quat b)
@@ -502,7 +500,12 @@ struct Quat {
 
     friend inline Quat operator*(Quat a, Quat b)
     {
-        return a *= b;
+        return Quat {
+            (a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z),
+            (a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y),
+            (a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x),
+            (a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w),
+        };
     }
 
     static inline Quat angleAxis(float angle, Vector3 normal)
@@ -608,6 +611,29 @@ struct AABB {
     }
 };
 
+struct Mat3x3 {
+    Vector3 cols[3];
+
+    inline Vector3 operator*(Vector3 v)
+    {
+        return cols[0] * v.x + cols[1] * v.y + cols[2] * v.z;
+    }
+
+    inline Mat3x3 operator*(const Mat3x3 &o)
+    {
+        return Mat3x3 {
+            *this * o.cols[0],
+            *this * o.cols[1],
+            *this * o.cols[2],
+        };
+    }
+
+    inline Mat3x3 & operator*=(const Mat3x3 &o)
+    {
+        return *this = (*this * o);
+    }
+};
+
 struct Mat3x4 {
     Vector3 cols[4];
 
@@ -621,7 +647,8 @@ struct Mat3x4 {
         };
     }
 
-    static inline Mat3x4 fromTRS(Vector3 t, Quat r, float s = 1.f)
+    static inline Mat3x4 fromTRS(Vector3 t, Quat r,
+                                 Vector3 s = { 1.f, 1.f, 1.f })
     {
         float x2 = r.x * r.x;
         float y2 = r.y * r.y;
@@ -633,10 +660,24 @@ struct Mat3x4 {
         float wy = r.w * r.y;
         float wz = r.w * r.z;
 
+        Vector3 ds = 2.f * s;
+
         return {{
-            { s * (1.f - 2.f * (y2 + z2)), 2.f * (xy + wz), 2.f * (xz - wy) },
-            { 2.f * (xy - wz), s * (1.f - 2.f * (x2 + z2)), 2.f * (yz + wx) },
-            { 2.f * (xz + wy), 2.f * (yz - wx), s * (1.f - 2.f * (x2 + y2)) },
+            { 
+                s.x - ds.x * (y2 + z2),
+                ds.x * (xy + wz),
+                ds.x * (xz - wy),
+            },
+            {
+                ds.y * (xy - wz),
+                s.y - ds.y * (x2 + z2),
+                ds.y * (yz + wx),
+            },
+            {
+                ds.z * (xz + wy),
+                ds.z * (yz - wx),
+                s.z - ds.z * (x2 + y2),
+            },
             t,
         }};
     }
@@ -661,6 +702,10 @@ struct Mat3x4 {
         };
     }
 };
+
+constexpr inline Vector3 up { 0, 0, 1 };
+constexpr inline Vector3 fwd { 0, 1, 0 };
+constexpr inline Vector3 right { 1, 0, 0 };
 
 }
 }
