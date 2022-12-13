@@ -28,11 +28,13 @@ elseif (MADRONA_ANDROID)
     target_compile_definitions(madrona_sys_defns INTERFACE "MADRONA_ANDROID=(1)")
 endif ()
 
+add_subdirectory(meshoptimizer EXCLUDE_FROM_ALL)
+
 if (MADRONA_ENABLE_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    add_subdirectory(googletest)
+    add_subdirectory(googletest EXCLUDE_FROM_ALL)
 endif ()
 
 if (Python_FOUND)
-    add_subdirectory(nanobind)
+    add_subdirectory(nanobind EXCLUDE_FROM_ALL)
 endif ()

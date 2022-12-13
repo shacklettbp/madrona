@@ -1,96 +1,92 @@
 #pragma once
 
-#include <madrona/memory.hpp>
+#include <madrona/types.hpp>
+#include <madrona/utils.hpp>
 
 namespace madrona {
 
-// A lock-free list implemented as a linked-list of blocks.
-// Iterable from front to back but not indexable
-template <typename T, uint64_t num_writers>
-class MultiWriterList {
-    struct Block;
-public:
-    using RefT = std::add_lvalue_reference_t<T>;
+template <typename T,
+          CountT desired_elems_per_block = 0>
+class BlockList {
+    struct BlockBase {};
 
-    MultiWriterList();
-    MultiWriterList(const MultiWriterList &) = delete;
-    MultiWriterList(MultiWriterList &&o);
-    ~MultiWriterList();
-
-    inline RefT push_back(T &&v)
-    {
-
-    }
-
-    class Iter {
-        Block *block_;
-        IdxT offset_;
-
-        inline Iter & operator++();
-        inline Iter operator++(int);
-
-        friend bool operator==(const Iter &a, const Iter &b)
-        {
-            return a.block_ == b.block_ && a.offset_ == b.offset_;
-        }
-
-        friend bool operator!=(const Iter &a, const Iter &b)
-        {
-            return !(a == b);
-        }
+    struct Metadata {
+        BlockBase *next;
+        CountT numElems;
     };
 
-    inline Iter begin()
+    template <CountT num_elems>
+    struct Block : BlockBase {
+        T arr[num_elems];
+        Metadata metadata;
+    };
+
+    static constexpr inline CountT computeElemsPerBlock()
     {
-        return Iter {
-            .block = head_block_,
-            .offset_ = 0,
-        };
+        static_assert(desired_elems_per_block >= 0);
+
+        if constexpr (desired_elems_per_block != 0) {
+            return desired_elems_per_block;
+        }
+
+        constexpr CountT default_block_size = 1024;
+
+        sizeof(T) 
+
+        constexpr CountT num_elems = (default_block_size - sizeof(Metadata)) / sizeof(T);
+
+        using TestT = Block<T>
+
+        if constexpr (num_elems == 0) {
+            return 1;
+        }
+
+        return num_elems;
     }
 
-    inline Iter end()
+    static constexpr inline CountT per_block_ = computeElemsPerBlock();
+
+    struct Block {
+        T arr[per_block_];
+        Metadata metadata;
+    };
+
+
+public:
+    BlockList()
+        : head_(nullptr)
+    {}
+
+    class Iter {
+    public:
+
+    private:
+        Block *cur_block_;
+        CountT cur_offset_;
+
+    friend class BlockList;
+    };
+
+    Iter begin()
+    {
+    }
+
+    Iter end()
     {
         return Iter {
-            .block = tail_block_,
-            .cur_offset_ = tail_block_ ? tail_block_->metadata.numItems : 0,
         };
     }
 
 private:
-    struct BlockMetadata {
+    static inline constexpr CountT num_elems_ =
+        block_size / 
+
+    union Block {
         Block *next;
-        uint32_t numItems;
-    };
-    static constexpr uint64_t items_per_block_ =
-        (OSAlloc::chunkSize() - sizeof(BlockMetadata)) / sizeof(T);
-    struct Block {
-        T data[items_per_block_];
-        BlockMetadata metadata;
+        CountT numElems;
     };
 
-    static_assert(sizeof(Block) <= OSAlloc::chunkSize());
-    Block *head_block_;
-    Block *tail_block_;
-
-friend class Iter;
+    Block *head_;
 };
-
-template <typename T, uint64_t num_writers>
-auto MultiWriterList<T, num_writers>::Iter::operator++() -> Iter &
-{
-    ++offset_;
-
-    if (offset_ == items_per_block_) {
-        offset_ = 0;
-        block_ = block_->next;
-    }
-}
-
-template <typename T, uint64_t num_writers>
-auto MultiWriterList<T, num_writers>::Iter::operator++(int) -> Iter
-{
-    Iter next = *this;
-    return ++next;
-}
 
 }

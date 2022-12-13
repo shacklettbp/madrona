@@ -80,3 +80,12 @@ set_property(TARGET madrona_common PROPERTY
     POSITION_INDEPENDENT_CODE TRUE)
 set_property(TARGET madrona_common PROPERTY
     INTERFACE_POSITION_INDEPENDENT_CODE TRUE)
+
+add_library(madrona_importer STATIC
+    ${MADRONA_INC_DIR}/importer.hpp importer.cpp
+)
+
+target_link_libraries(madrona_importer PRIVATE
+    madrona_common
+    meshoptimizer
+)

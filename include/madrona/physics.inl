@@ -55,32 +55,32 @@ void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
     }
 }
 
-bool BVH::Node::isLeaf(IdxT child) const
+bool BVH::Node::isLeaf(CountT child) const
 {
     return children[child] & 0x80000000;
 }
 
-int32_t BVH::Node::leafIDX(IdxT child) const
+int32_t BVH::Node::leafIDX(CountT child) const
 {
     return children[child] & ~0x80000000;
 }
 
-void BVH::Node::setLeaf(IdxT child, int32_t idx)
+void BVH::Node::setLeaf(CountT child, int32_t idx)
 {
     children[child] = 0x80000000 | idx;
 }
 
-void BVH::Node::setInternal(IdxT child, int32_t internal_idx)
+void BVH::Node::setInternal(CountT child, int32_t internal_idx)
 {
     children[child] = internal_idx;
 }
 
-bool BVH::Node::hasChild(IdxT child) const
+bool BVH::Node::hasChild(CountT child) const
 {
     return children[child] != sentinel_;
 }
 
-void BVH::Node::clearChild(IdxT child)
+void BVH::Node::clearChild(CountT child)
 {
     children[child] = sentinel_;
 }

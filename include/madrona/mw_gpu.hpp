@@ -12,7 +12,7 @@
 
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
-#include <madrona/scene.hpp>
+#include <madrona/importer.hpp>
 
 namespace madrona {
 
@@ -56,7 +56,7 @@ public:
 
     MADRONA_IMPORT ~TrainingExecutor();
 
-    MADRONA_IMPORT CountT loadObjects(Span<const render::SourceObject> objs);
+    MADRONA_IMPORT CountT loadObjects(Span<const imp::SourceObject> objs);
 
     MADRONA_IMPORT void run();
 

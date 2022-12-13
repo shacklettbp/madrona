@@ -2,7 +2,7 @@
 
 #include <madrona/types.hpp>
 #include <madrona/render.hpp>
-#include <madrona/scene.hpp>
+#include <madrona/importer.hpp>
 #include <memory>
 
 namespace madrona {
@@ -25,7 +25,7 @@ public:
 
     ~BatchRenderer();
 
-    CountT loadObjects(Span<const SourceObject> objs);
+    CountT loadObjects(Span<const imp::SourceObject> objs);
 
     AccelStructInstance ** tlasInstancePtrs() const;
     uint64_t * objectsBLASPtr() const;

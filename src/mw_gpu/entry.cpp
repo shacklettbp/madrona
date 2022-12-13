@@ -1044,7 +1044,7 @@ MADRONA_EXPORT void TrainingExecutor::run()
 }
 
 MADRONA_EXPORT CountT TrainingExecutor::loadObjects(
-    Span<const render::SourceObject> objs)
+    Span<const imp::SourceObject> objs)
 {
     return impl_->engineState.batchRenderer.loadObjects(objs);
 }

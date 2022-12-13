@@ -92,7 +92,7 @@ struct BatchRenderer::Impl {
     inline Impl(const Config &cfg);
     inline Impl(const Config &cfg, RendererInit &&init);
    
-    inline CountT loadObjects(Span<const SourceObject> objs);
+    inline CountT loadObjects(Span<const imp::SourceObject> objs);
 
     inline void render(const uint32_t *num_instances);
 };
@@ -387,7 +387,7 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
       loadedAssets(0)
 {}
 
-CountT BatchRenderer::Impl::loadObjects(Span<const SourceObject> objs)
+CountT BatchRenderer::Impl::loadObjects(Span<const imp::SourceObject> objs)
 {
     auto metadata = *assetMgr.prepareMetadata(objs);
     HostBuffer staging = mem.makeStagingBuffer(metadata.numGPUDataBytes);
@@ -557,7 +557,7 @@ BatchRenderer::BatchRenderer(BatchRenderer &&o)
 
 BatchRenderer::~BatchRenderer() {}
 
-CountT BatchRenderer::loadObjects(Span<const SourceObject> objs)
+CountT BatchRenderer::loadObjects(Span<const imp::SourceObject> objs)
 {
     return impl_->loadObjects(objs);
 }

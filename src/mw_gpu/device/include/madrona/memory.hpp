@@ -27,6 +27,20 @@ inline void rawDealloc(void *ptr)
     free(ptr);
 }
 
+
+class DefaultAlloc  {
+public:
+    inline void * alloc(uint64_t num_bytes)
+    {
+        return rawAlloc(num_bytes);
+    }
+
+    inline void dealloc(void *ptr)
+    {
+        rawDealloc(ptr);
+    }
+};
+
 namespace mwGPU {
 
 struct HostChannel {

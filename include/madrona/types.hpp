@@ -25,10 +25,8 @@ inline constexpr int64_t operator "" _i64(unsigned long long v)
 }
 
 #ifndef MADRONA_GPU_MODE
-using IdxT = int64_t;
 using CountT = int64_t;
 #else
-using IdxT = int32_t;
 using CountT = int32_t;
 #endif
 

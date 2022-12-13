@@ -31,10 +31,10 @@ IDMap<K, V, StoreT>::IDMap(CountT init_capacity)
 {
     assert(init_capacity % ids_per_cache_ == 0);
 
-    for (IdxT base_idx = 0; base_idx < init_capacity;
+    for (CountT base_idx = 0; base_idx < init_capacity;
          base_idx += ids_per_cache_) {
-        for (IdxT i = 0; i < ids_per_cache_ - 1; i++) {
-            IdxT idx = base_idx + i;
+        for (CountT i = 0; i < ids_per_cache_ - 1; i++) {
+            CountT idx = base_idx + i;
             Node &cur = store_[idx];
 
             cur.gen.store(0, std::memory_order_relaxed);

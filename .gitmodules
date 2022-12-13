@@ -13,3 +13,6 @@
 [submodule "src/render/vk/external/SPIRV-Reflect"]
 	path = src/render/vk/external/SPIRV-Reflect
 	url = https://github.com/KhronosGroup/SPIRV-Reflect.git
+[submodule "external/meshoptimizer"]
+	path = external/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer.git

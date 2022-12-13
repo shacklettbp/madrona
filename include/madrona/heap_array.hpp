@@ -14,8 +14,9 @@
 #include <type_traits>
 #include <utility>
 
-#include "memory.hpp"
-#include "utils.hpp"
+#include <madrona/memory.hpp>
+#include <madrona/utils.hpp>
+#include <madrona/span.hpp>
 
 namespace madrona {
 
@@ -24,10 +25,18 @@ class HeapArray {
 public:
     using RefT = std::add_lvalue_reference_t<T>;
 
-    explicit HeapArray(CountT n, A alloc = DefaultAlloc())
+    inline explicit HeapArray(CountT n, A alloc = A())
         : alloc_(std::move(alloc)),
           ptr_((T *)alloc_.alloc(n * sizeof(T))),
           n_(n)
+    {}
+
+    // Take ownership of the memory range defined by span. Must be a full
+    // range allocated by alloc
+    inline explicit HeapArray(Span<T> span, A alloc = A())
+        : alloc_(std::move(alloc)),
+          ptr_(span.data()),
+          n_(span.size())
     {}
 
     HeapArray(const HeapArray &) = delete;
@@ -43,8 +52,10 @@ public:
     RefT operator=(const HeapArray &) = delete;
     RefT operator=(HeapArray &&o)
     {
-        clear();
-        alloc_.dealloc(ptr_);
+        if (ptr_ != nullptr) {
+            clear();
+            alloc_.dealloc(ptr_);
+        }
 
         ptr_ = o.ptr_;
         n_ = o.n_;
@@ -68,6 +79,16 @@ public:
 
         clear();
         alloc_.dealloc(ptr_);
+    }
+
+    Span<T> release()
+    {
+        Span<T> span(ptr_, n_);
+
+        ptr_ = nullptr;
+        n_ = 0;
+
+        return span;
     }
 
     RefT insert(CountT i, T v)
@@ -116,7 +137,7 @@ private:
 #endif
         A alloc_;
     T *ptr_;
-    const CountT n_;
+    CountT n_;
 };
 
 }

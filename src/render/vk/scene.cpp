@@ -8,6 +8,7 @@ using namespace std;
 namespace madrona {
 
 using namespace math;
+using namespace imp;
 
 namespace render {
 namespace vk {
@@ -310,23 +311,26 @@ static Vector3 encodeNormalTangent(const Vector3 &normal,
     };
 }
 
-static shader::PackedVertex packVertex(const SourceVertex &v)
+static shader::PackedVertex packVertex(math::Vector3 position,
+                                       math::Vector3 normal,
+                                       math::Vector4 tangent_sign,
+                                       math::Vector2 uv)
 {
     Vector3 encoded_normal_tangent =
-        encodeNormalTangent(v.normal, v.tangentAndSign);
+        encodeNormalTangent(normal, tangent_sign);
 
     return shader::PackedVertex {
         Vector4 {
-            v.position.x,
-            v.position.y,
-            v.position.z,
+            position.x,
+            position.y,
+            position.z,
             encoded_normal_tangent.x,
         },
         Vector4 {
             encoded_normal_tangent.y,
             encoded_normal_tangent.z,
-            v.uv.x,
-            v.uv.y,
+            uv.x,
+            uv.y,
         },
     };
 }
@@ -342,8 +346,20 @@ Optional<AssetMetadata> AssetManager::prepareMetadata(
 
         total_num_meshes += obj.meshes.size();
         for (const SourceMesh &mesh : obj.meshes) {
-            total_bytes += mesh.vertices.size() * sizeof(shader::PackedVertex);
-            total_bytes += mesh.indices.size() * sizeof(uint32_t);
+            if (mesh.faceCounts != nullptr) {
+                FATAL("Render mesh isn't triangular");
+            }
+
+            if (mesh.normals == nullptr) {
+                FATAL("Render mesh missing normals");
+            }
+
+            if (mesh.uvs == nullptr) {
+                FATAL("Render mesh missing uvs");
+            }
+
+            total_bytes += mesh.numVertices * sizeof(shader::PackedVertex);
+            total_bytes += mesh.numFaces * 3 * sizeof(uint32_t);
         }
 
         total_bytes = alignOffset(total_bytes, sizeof(shader::PackedVertex));
@@ -402,15 +418,34 @@ void AssetManager::packAssets(void *dst_buffer,
             const SourceMesh &src_mesh = src_obj.meshes[mesh_idx];
             Mesh &dst_mesh = metadata.meshes[obj_mesh_offset + mesh_idx];
 
-            int64_t num_vertices = src_mesh.vertices.size();
+            int64_t num_vertices = src_mesh.numVertices;
 
             dst_mesh.vertexOffset = uint32_t(cur_vertex_offset); // FIXME
             dst_mesh.numVertices = uint32_t(num_vertices);
             obj_meshdata[mesh_idx].vertexOffset = uint32_t(cur_vertex_offset);
 
             for (int64_t vert_idx = 0; vert_idx < num_vertices; vert_idx++) {
+                math::Vector3 pos = src_mesh.positions[vert_idx];
+                math::Vector3 normal = src_mesh.normals[vert_idx];
+                math::Vector2 uv = src_mesh.uvs[vert_idx];
+
+                // FIXME:
+                math::Vector4 tangent_sign;
+                if (src_mesh.tangentAndSigns == nullptr) {
+                    math::Vector3 a, b;
+                    normal.frame(&a, &b);
+                    tangent_sign = {
+                        a.x,
+                        a.y,
+                        a.z,
+                        1.f,
+                    };
+                } else {
+                    tangent_sign = src_mesh.tangentAndSigns[vert_idx];
+                }
+
                 cur_vertex_ptr[vert_idx] =
-                    packVertex(src_mesh.vertices[vert_idx]);
+                    packVertex(pos, normal, tangent_sign, uv);
             }
 
             cur_vertex_ptr += num_vertices;
@@ -428,13 +463,13 @@ void AssetManager::packAssets(void *dst_buffer,
             const SourceMesh &src_mesh = src_obj.meshes[mesh_idx];
             Mesh &dst_mesh = metadata.meshes[obj_mesh_offset + mesh_idx];
 
-            int64_t num_indices = src_mesh.indices.size();
+            int64_t num_indices = src_mesh.numFaces * 3;
 
             dst_mesh.indexOffset = uint32_t(cur_index_offset); // FIXME
             dst_mesh.numIndices = uint32_t(num_indices);
             obj_meshdata[mesh_idx].indexOffset = uint32_t(cur_index_offset);
 
-            memcpy(cur_index_ptr, src_mesh.indices.data(),
+            memcpy(cur_index_ptr, src_mesh.indices,
                    num_indices * sizeof(uint32_t));
 
             cur_index_ptr += num_indices;
@@ -559,97 +594,6 @@ Assets AssetManager::load(const DeviceState &dev,
         base_obj_offset,
     };
 }
-
-Assets AssetManager::loadCube(const DeviceState &dev,
-                              MemoryAllocator &mem)
-{
-    std::vector<SourceVertex> vertices {
-        {
-            Vector3 { -1, -1, -1, },
-            Vector3 {},
-            Vector4 {},
-            Vector2 {},
-        },
-        {
-            Vector3 {  1, -1, -1, },
-            Vector3 {},
-            Vector4 {},
-            Vector2 {},
-        },
-        {
-            Vector3 {  1,  1, -1, },
-            Vector3 {},
-            Vector4 {},
-            Vector2 {},
-        },
-        {
-            Vector3 { -1,  1, -1, },
-            Vector3 {},
-            Vector4 {},
-            Vector2 {},
-        },
-        {
-            Vector3 { -1, -1,  1, },
-            Vector3 {},
-            Vector4 {},
-            Vector2 {},
-        },
-        {
-            Vector3 {  1, -1,  1, },
-            Vector3 {},
-            Vector4 {},
-            Vector2 {},
-        },
-        {
-            Vector3 {  1,  1,  1, },
-            Vector3 {},
-            Vector4 {},
-            Vector2 {},
-        },
-        {
-            Vector3 { -1,  1,  1, },
-            Vector3 {},
-            Vector4 {},
-            Vector2 {},
-        },
-    };
-
-    std::vector<uint32_t> indices {
-        0, 1, 3, 3, 1, 2,
-        1, 5, 2, 2, 5, 6,
-        5, 4, 6, 6, 4, 7,
-        4, 0, 7, 7, 0, 3,
-        3, 2, 7, 7, 2, 6,
-        4, 5, 0, 0, 5, 1,
-    };
-
-    std::vector<SourceMesh> meshes {
-        {
-            { vertices.data(), CountT(vertices.size()) },
-            { indices.data(), CountT(indices.size()) },
-        },
-    };
-
-    std::vector<SourceObject> objects {
-        { 
-            { meshes.data(), CountT(meshes.size()) },
-        },
-    };
-
-    Span<const SourceObject> objs_view(objects.data(), objects.size());
-
-    AssetMetadata metadata = *prepareMetadata(objs_view);
-
-    HostBuffer staging_buffer =
-        mem.makeStagingBuffer(metadata.numGPUDataBytes);
-
-    packAssets(staging_buffer.ptr, metadata, objs_view);
-
-    staging_buffer.flush(dev);
-
-    return load(dev, mem, metadata, std::move(staging_buffer));
-}
-
 
 TLASData TLASData::setup(const DeviceState &dev,
                          const GPURunUtil &gpu_run,

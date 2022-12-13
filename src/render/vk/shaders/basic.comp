@@ -371,7 +371,7 @@ void main()
 
     float depth = distance(world_position, cam.origin);
 
-    vec3 rgb = vec3(depth / 10.f);
+    vec3 rgb = abs(hit_world_normal);
 
     if (!oob) {
         setOutput(rgb_out_offset, depth_out_offset, rgb, depth);

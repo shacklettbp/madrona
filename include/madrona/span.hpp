@@ -44,7 +44,7 @@ public:
 
     constexpr CountT size() const { return n_; }
 
-    T & operator[](IdxT idx) const { return ptr_[idx]; }
+    T & operator[](CountT idx) const { return ptr_[idx]; }
 
     T * begin() const { return ptr_; }
     T * end() const { return ptr_ + n_; }

@@ -205,6 +205,21 @@ struct Vector3 {
         };
     }
 
+    // Returns two vectors perpendicular to this vector
+    // *this should be a normalized
+    inline void frame(Vector3 *a, Vector3 *b) const
+    {
+        Vector3 arbitrary;
+        if (fabsf(x) < 0.8) {
+            arbitrary = Vector3 { 1, 0, 0 };
+        } else {
+            arbitrary = Vector3 { 0, 1, 0 };
+        }
+
+        *a = cross(arbitrary);
+        *b = cross(*a);
+    }
+
     inline float length2() const
     {
         return x * x + y * y + z * z;

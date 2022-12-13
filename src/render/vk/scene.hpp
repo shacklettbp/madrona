@@ -1,7 +1,7 @@
 #pragma once
 
 #include <madrona/render.hpp>
-#include <madrona/scene.hpp>
+#include <madrona/importer.hpp>
 #include <madrona/heap_array.hpp>
 
 #include "core.hpp"
@@ -68,18 +68,16 @@ struct AssetManager {
     AssetManager(const DeviceState &dev, MemoryAllocator &mem,
                  int cuda_gpu_id, int64_t max_objects);
 
-    Optional<AssetMetadata> prepareMetadata(Span<const SourceObject> objects);
+    Optional<AssetMetadata> prepareMetadata(
+        Span<const imp::SourceObject> src_objects);
     void packAssets(void *dst_buf,
                     AssetMetadata &prepared,
-                    Span<const SourceObject> src_objects);
+                    Span<const imp::SourceObject> src_objects);
 
     Assets load(const DeviceState &dev,
                 MemoryAllocator &mem,
                 const AssetMetadata &metadata,
                 HostBuffer &&staged_buffer);
-
-    Assets loadCube(const DeviceState &dev,
-                    MemoryAllocator &mem);
 };
 
 struct TLASData {

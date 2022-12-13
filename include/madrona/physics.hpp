@@ -75,13 +75,13 @@ private:
         int32_t children[4];
         int32_t parentID;
     
-        inline bool isLeaf(IdxT child) const;
-        inline int32_t leafIDX(IdxT child) const;
+        inline bool isLeaf(CountT child) const;
+        inline int32_t leafIDX(CountT child) const;
     
-        inline void setLeaf(IdxT child, int32_t idx);
-        inline void setInternal(IdxT child, int32_t internal_idx);
-        inline bool hasChild(IdxT child) const;
-        inline void clearChild(IdxT child);
+        inline void setLeaf(CountT child, int32_t idx);
+        inline void setInternal(CountT child, int32_t internal_idx);
+        inline bool hasChild(CountT child) const;
+        inline void clearChild(CountT child);
     };
 
     Node *nodes_;
