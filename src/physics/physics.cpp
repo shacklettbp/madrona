@@ -531,7 +531,7 @@ inline void updatePositions(Context &ctx,
                             Position &pos,
                             Rotation &rot,
                             Velocity &vel,
-                            ObjectID &obj,
+                            const ObjectID &obj_id,
                             InstanceState &inst_state)
 {
     const auto &solver = ctx.getSingleton<SolverData>();
@@ -543,6 +543,17 @@ inline void updatePositions(Context &ctx,
     //cur_velocity += h * gravity;
     
     pos += h * cur_velocity;
+}
+
+inline void updateVelocities(Context &ctx,
+                             const Position &pos,
+                             const InstanceState &inst_state,
+                             Velocity &vel)
+{
+    const auto &solver = ctx.getSingleton<SolverData>();
+    float h = solver.h;
+
+    vel = (pos - inst_state.prevPosition) / h;
 }
 
 inline void solverEntry(Context &ctx, SolverData &solver)
@@ -593,6 +604,8 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerComponent<Velocity>();
     registry.registerComponent<RigidBody>();
     registry.registerComponent<CollisionAABB>();
+    
+    registry.registerComponent<solver::InstanceState>();
 
     registry.registerComponent<CollisionEvent>();
     registry.registerArchetype<CollisionEventTemporary>();
@@ -623,12 +636,20 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     
     auto cur_node = find_overlapping;
     for (CountT i = 0; i < num_substeps; i++) {
+        auto update_positions = builder.parallelForNode<Context,
+            solver::updatePositions, Position, Rotation, Velocity, ObjectID,
+            solver::InstanceState>({cur_node});
+
         auto run_narrowphase = builder.parallelForNode<Context,
             narrowphase::processCandidatesEntry, CandidateCollision>(
-                {cur_node});
+                {update_positions});
+
+        auto solver = builder.parallelForNode<Context,
+            solver::solverEntry, SolverData>({run_narrowphase});
 
         cur_node = builder.parallelForNode<Context,
-            solver::solverEntry, SolverData>({run_narrowphase});
+            solver::updateVelocities, Position,
+            solver::InstanceState, Velocity>({solver});
     }
 
     auto clear_candidates = builder.clearTemporariesNode<CandidateTemporary>(
