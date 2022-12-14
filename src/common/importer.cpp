@@ -108,7 +108,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         auto res = from_chars(start, end, pos_idx);
 
         if (res.ptr == start) {
-            FATAL("Failed to read position idx");
+            FATAL("Failed to read position idx: %s", start);
         }
 
         start = res.ptr;
@@ -189,7 +189,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
 
         // Unindex mesh
         for (const ObjIDX &obj_idx : indices) {
-            fake_indices.push_back(uint32_t(positions.size()));
+            fake_indices.push_back(uint32_t(unindexed_positions.size()));
 
             if (obj_idx.posIdx == 0) {
                 return false;
@@ -293,7 +293,12 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
 
         DynArray<uint32_t> face_counts_copy(face_counts.size());
 
+        bool fully_triangular = true;
         for (uint32_t c : face_counts) {
+            if (c != 3){
+                fully_triangular = false;
+            }
+
             face_counts_copy.push_back(c);
         }
 
@@ -313,15 +318,19 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
             nullptr,
             new_uvs.data(),
             new_indices.data(),
-            face_counts_copy.data(),
+            fully_triangular ? nullptr : face_counts_copy.data(),
             uint32_t(new_positions.size()),
             uint32_t(face_counts_copy.size()),
         });
 
         imported.positionArrays.emplace_back(std::move(new_positions));
         imported.normalArrays.emplace_back(std::move(new_normals));
+        imported.uvArrays.emplace_back(std::move(new_uvs));
         imported.indexArrays.emplace_back(std::move(new_indices));
-        imported.faceCountArrays.emplace_back(std::move(face_counts_copy));
+
+        if (!fully_triangular) {
+            imported.faceCountArrays.emplace_back(std::move(face_counts_copy));
+        }
 
         return true;
     };
@@ -353,7 +362,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         }
 
         if (line[0] == 'f') {
-            const char *start = line.data();
+            const char *start = line.data() + 1;
             const char *end = line.data() + line.size();
 
             int64_t face_count = 0;
@@ -374,6 +383,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
             }
 
             if (face_count == 0) return false;
+            face_counts.push_back(face_count);
         }
     }
 

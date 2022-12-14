@@ -1,3 +1,5 @@
+unset(CMAKE_CXX_VISIBILITY_PRESET)
+
 #add_library(glm INTERFACE)
 #target_include_directories(glm SYSTEM
 #    INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/glm")
@@ -29,6 +31,8 @@ elseif (MADRONA_ANDROID)
 endif ()
 
 add_subdirectory(meshoptimizer EXCLUDE_FROM_ALL)
+set_property(TARGET meshoptimizer PROPERTY
+    POSITION_INDEPENDENT_CODE TRUE)
 
 if (MADRONA_ENABLE_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
