@@ -259,8 +259,16 @@ static Vector3 encodeNormalTangent(const Vector3 &normal,
                                    const Vector4 &tangent_plussign)
 {
     auto packHalf2x16 = [](const Vector2 &v) {
-        __fp16 x_half = v.x;
-        __fp16 y_half = v.y;
+#if defined(MADRONA_GCC)
+        _Float16 x_half, y_half;
+#elif defined(MADRONA_CLANG)
+        __fp16 x_half, y_half;
+#else
+        STATIC_UNIMPLEMEMENTED();
+#endif
+
+        x_half = v.x;
+        y_half = v.y;
 
         return uint32_t(std::bit_cast<uint16_t>(x_half)) << 16 |
             uint32_t(std::bit_cast<uint16_t>(y_half));
