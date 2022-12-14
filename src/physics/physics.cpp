@@ -493,7 +493,7 @@ inline void processCandidatesEntry(
 
     SolverData &solver = ctx.getSingleton<SolverData>();
 
-    if (dist > 0 && dist <= sphere_radius) {
+    if (dist > 0 && dist <= sphere_radius * 2.f) {
         solver.addContact(Contact {
             candidate_collision.a,
             candidate_collision.b,
