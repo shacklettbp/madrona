@@ -95,7 +95,8 @@ BVH::BVH(CountT max_leaves)
       leaf_entities_((Entity *)rawAlloc(sizeof(Entity) * max_leaves)),
       sorted_leaves_((int32_t *)rawAlloc(sizeof(int32_t) * max_leaves)),
       num_leaves_(0),
-      num_allocated_leaves_(max_leaves)
+      num_allocated_leaves_(max_leaves),
+      force_rebuild_(false)
 {}
 
 CountT BVH::numInternalNodes(CountT num_leaves) const
@@ -440,6 +441,16 @@ void BVH::updateLeaf(Entity e,
     sorted_leaves_[leaf_id.id] = leaf_id.id;
 }
 
+void BVH::updateTree()
+{
+    if (force_rebuild_) {
+        force_rebuild_ = false;
+        rebuild();
+    } else {
+        refit(nullptr, 0);
+    }
+}
+
 inline void updateLeavesEntry(
     Context &ctx,
     const Entity &e,
@@ -453,7 +464,7 @@ inline void updateLeavesEntry(
 inline void updateBVHEntry(
     Context &, BVH &bvh)
 {
-    bvh.refit(nullptr, 0);
+    bvh.updateTree();
 }
 
 inline void findOverlappingEntry(
@@ -542,6 +553,12 @@ void RigidBodyPhysicsSystem::init(Context &ctx, CountT max_dynamic_objects,
     new (&solver) SolverData(max_contacts_per_world);
 }
 
+void RigidBodyPhysicsSystem::reset(Context &ctx)
+{
+    broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
+    bvh.rebuildOnUpdate();
+}
+
 void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<broadphase::LeafID>();
@@ -570,11 +587,11 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
         broadphase::updateLeavesEntry, Entity, broadphase::LeafID, 
         CollisionAABB>({update_aabbs});
 
-    auto refit_bvh = builder.parallelForNode<Context,
+    auto bvh_update = builder.parallelForNode<Context,
         broadphase::updateBVHEntry, broadphase::BVH>({preprocess_leaves});
 
     auto find_overlapping = builder.parallelForNode<Context,
-        broadphase::findOverlappingEntry, Entity, CollisionAABB>({refit_bvh});
+        broadphase::findOverlappingEntry, Entity, CollisionAABB>({bvh_update});
 
     auto run_narrowphase = builder.parallelForNode<Context,
         narrowphase::processCandidatesEntry, CandidateCollision>(

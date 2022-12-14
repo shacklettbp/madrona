@@ -28,6 +28,9 @@ struct CollisionEvent {
 struct RigidBodyPhysicsSystem {
     static void init(Context &ctx, CountT max_dynamic_objects,
                      CountT max_contacts_per_step);
+
+    static void reset(Context &ctx);
+
     static void registerTypes(ECSRegistry &registry);
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
                                         Span<const TaskGraph::NodeID> deps);
@@ -49,10 +52,6 @@ public:
 
     inline LeafID reserveLeaf();
 
-    void rebuild();
-
-    void refit(LeafID *leaf_ids, CountT num_moved);
-
     template <typename Fn>
     inline void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
 
@@ -60,10 +59,11 @@ public:
                     LeafID leaf_id,
                     const CollisionAABB &obj_aabb);
 
+    inline void rebuildOnUpdate();
+    void updateTree();
+
 private:
     static constexpr int32_t sentinel_ = 0xFFFF'FFFF_i32;
-
-    inline CountT numInternalNodes(CountT num_leaves) const;
 
     struct Node {
         float minX[4];
@@ -84,6 +84,11 @@ private:
         inline void clearChild(CountT child);
     };
 
+    inline CountT numInternalNodes(CountT num_leaves) const;
+
+    void rebuild();
+    void refit(LeafID *leaf_ids, CountT num_moved);
+
     Node *nodes_;
     CountT num_nodes_;
     const CountT num_allocated_nodes_;
@@ -94,6 +99,7 @@ private:
     int32_t *sorted_leaves_;
     std::atomic<int32_t> num_leaves_;
     int32_t num_allocated_leaves_;
+    bool force_rebuild_;
 };
 
 }

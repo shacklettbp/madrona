@@ -55,6 +55,11 @@ void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
     }
 }
 
+void BVH::rebuildOnUpdate()
+{
+    force_rebuild_ = true;
+}
+
 bool BVH::Node::isLeaf(CountT child) const
 {
     return children[child] & 0x80000000;
