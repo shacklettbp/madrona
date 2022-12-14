@@ -66,15 +66,17 @@ target_include_directories(madrona_render_vk
         $<TARGET_PROPERTY:madrona_sdl2,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
-target_link_libraries(madrona_render_vk PRIVATE
-    CUDA::cudart
-    glslang
-    spirv_reflect
-    SPIRV
-    glslang-default-resource-limits
-    madrona_common
-    madrona_vk_hdrs
-    madrona_sdl2
+target_link_libraries(madrona_render_vk
+    PUBLIC
+        madrona_vk_hdrs
+    PRIVATE
+        CUDA::cudart
+        glslang
+        spirv_reflect
+        SPIRV
+        glslang-default-resource-limits
+        madrona_common
+        madrona_sdl2
 )
 
 add_dependencies(madrona_render_vk generate_vk_dispatch)

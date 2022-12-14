@@ -514,7 +514,6 @@ namespace solver {
 
 inline void contactSolverEntry(Context &ctx, SolverData &solver)
 {
-#if 0
     // Push objects in serial based on the contact normal - total BS.
     CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
 
@@ -527,7 +526,6 @@ inline void contactSolverEntry(Context &ctx, SolverData &solver)
         a_pos -= contact.normal;
         b_pos += contact.normal;
     }
-#endif
 
     solver.numContacts.store(0, std::memory_order_relaxed);
 }

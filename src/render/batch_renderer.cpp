@@ -3,7 +3,6 @@
 
 #include <madrona/math.hpp>
 #include <madrona/dyn_array.hpp>
-#include <vulkan/vulkan_core.h>
 
 #include "vk/core.hpp"
 #include "vk/cuda_interop.hpp"
