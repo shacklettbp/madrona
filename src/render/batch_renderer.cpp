@@ -70,6 +70,7 @@ struct BatchRenderer::Impl {
     DeviceState dev;
     MemoryAllocator mem;
     Optional<PresentationState> presentState;
+    Optional<LocalImage> rgbPresentIntermediate;
     VkQueue renderQueue;
     VkFence renderFence;
     VkCommandPool renderCmdPool;
@@ -353,11 +354,15 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
       presentState(init.presentWindow.has_value() ?
           PresentationState(inst, dev, std::move(*init.presentWindow),
                             std::move(*init.presentSurface),
-                            dev.computeQF, 1, true) :
+                            dev.gfxQF, 1, true) :
           Optional<PresentationState>::none()),
-      renderQueue(makeQueue(dev, dev.computeQF, 0)),
+      rgbPresentIntermediate(presentState.has_value() ?
+          mem.makeConversionImage(cfg.renderHeight, cfg.renderHeight,
+                                  VK_FORMAT_R8G8B8A8_UNORM) :
+          Optional<LocalImage>::none()),
+      renderQueue(makeQueue(dev, dev.gfxQF, 0)),
       renderFence(makeFence(dev, false)),
-      renderCmdPool(makeCmdPool(dev, dev.computeQF)),
+      renderCmdPool(makeCmdPool(dev, dev.gfxQF)),
       renderCmd(makeCmdBuffer(dev, renderCmdPool)),
       shaderState(makeShaderState(dev, cfg, init)),
       pipelineState(makePipelineState(dev, shaderState)),
@@ -470,17 +475,17 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
         buffer_barrier.offset = 0;
         buffer_barrier.size = VK_WHOLE_SIZE;
 
-        VkImageMemoryBarrier layout_update;
-        layout_update.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        layout_update.pNext = nullptr;
-        layout_update.srcAccessMask = 0;
-        layout_update.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        layout_update.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        layout_update.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        layout_update.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        layout_update.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        layout_update.image = present_img ;
-        layout_update.subresourceRange = {
+        std::array<VkImageMemoryBarrier, 2> layout_updates;
+        layout_updates[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        layout_updates[0].pNext = nullptr;
+        layout_updates[0].srcAccessMask = 0;
+        layout_updates[0].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        layout_updates[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        layout_updates[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        layout_updates[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        layout_updates[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        layout_updates[0].image = rgbPresentIntermediate->image;
+        layout_updates[0].subresourceRange = {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
             .levelCount = 1,
@@ -492,23 +497,79 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
                                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                   VK_PIPELINE_STAGE_TRANSFER_BIT,
                                   0, 0, nullptr, 1, &buffer_barrier,
-                                  1, &layout_update);
+                                  1, &layout_updates[0]);
 
         dev.dt.cmdCopyBufferToImage(renderCmd, fb.rgb.buf.buffer,
-                                    present_img,
+                                    rgbPresentIntermediate->image,
                                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     1, &cpy_to_present);
 
-        layout_update.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        layout_update.dstAccessMask = 0;
-        layout_update.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        layout_update.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        layout_updates[0].image = present_img;
+
+        layout_updates[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        layout_updates[1].pNext = nullptr;
+        layout_updates[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        layout_updates[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        layout_updates[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        layout_updates[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        layout_updates[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        layout_updates[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        layout_updates[1].image = rgbPresentIntermediate->image;
+        layout_updates[1].subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+
+        dev.dt.cmdPipelineBarrier(renderCmd,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  0, 0, nullptr, 0, nullptr,
+                                  2, &layout_updates[0]);
+
+        VkImageBlit blit_info {
+            .srcSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .srcOffsets = {
+                { 0, 0, 0 },
+                { int32_t(fb.renderWidth), int32_t(fb.renderHeight), 1 },
+            },
+            .dstSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .dstOffsets = {
+                { 0, 0, 0 },
+                { int32_t(fb.renderWidth), int32_t(fb.renderHeight), 1 },
+            },
+        };
+
+        dev.dt.cmdBlitImage(renderCmd,
+                            rgbPresentIntermediate->image,
+                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            present_img, 
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            1, &blit_info, VK_FILTER_LINEAR);
+
+
+        layout_updates[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        layout_updates[0].dstAccessMask = 0;
+        layout_updates[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        layout_updates[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
         dev.dt.cmdPipelineBarrier(renderCmd,
                                   VK_PIPELINE_STAGE_TRANSFER_BIT,
                                   VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                                   0, 0, nullptr, 0, nullptr,
-                                  1, &layout_update);
+                                  1, &layout_updates[0]);
     }
 
     REQ_VK(dev.dt.endCommandBuffer(renderCmd));

@@ -191,6 +191,9 @@ public:
     LocalImage makeColorAttachment(uint32_t width, uint32_t height);
     LocalImage makeDepthAttachment(uint32_t width, uint32_t height);
 
+    LocalImage makeConversionImage(uint32_t width, uint32_t height,
+                                   VkFormat fmt);
+
 private:
     HostBuffer makeHostBuffer(VkDeviceSize num_bytes,
                               VkBufferUsageFlags usage,

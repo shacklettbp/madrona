@@ -771,6 +771,17 @@ LocalImage MemoryAllocator::makeDepthAttachment(uint32_t width,
                               type_indices_.local);
 }
 
+LocalImage MemoryAllocator::makeConversionImage(uint32_t width,
+                                                uint32_t height,
+                                                VkFormat fmt)
+{
+    return makeDedicatedImage(width, height, 1,
+                              fmt,
+                              VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                              type_indices_.local);
+}
+
 LocalImage MemoryAllocator::makeDedicatedImage(uint32_t width,
                                                uint32_t height,
                                                uint32_t mip_levels,
