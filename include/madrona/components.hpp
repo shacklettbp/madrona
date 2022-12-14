@@ -24,6 +24,10 @@ struct Scale : math::Vector3 {
     {}
 };
 
+struct ObjectID {
+    int32_t idx;
+};
+
 void registerTypes(ECSRegistry &registry);
 
 }

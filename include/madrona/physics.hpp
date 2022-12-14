@@ -7,6 +7,13 @@
 namespace madrona {
 namespace phys {
 
+struct Velocity : public math::Vector3 {
+    Velocity(math::Vector3 v)
+        : Vector3(v)
+    {}
+};
+
+// Per object state
 struct RigidBody {
     math::Vector3 invInertiaTensor;
 };
@@ -26,14 +33,18 @@ struct CollisionEvent {
 };
 
 struct RigidBodyPhysicsSystem {
-    static void init(Context &ctx, CountT max_dynamic_objects,
+    static void init(Context &ctx,
+                     float delta_t,
+                     CountT num_substeps,
+                     CountT max_dynamic_objects,
                      CountT max_contacts_per_step);
 
     static void reset(Context &ctx);
 
     static void registerTypes(ECSRegistry &registry);
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                                        Span<const TaskGraph::NodeID> deps);
+                                        Span<const TaskGraph::NodeID> deps,
+                                        CountT num_substeps);
 
     static TaskGraph::NodeID setupCleanupTasks(TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> deps);
@@ -100,6 +111,14 @@ private:
     std::atomic<int32_t> num_leaves_;
     int32_t num_allocated_leaves_;
     bool force_rebuild_;
+};
+
+}
+
+namespace solver {
+
+struct InstanceState {
+    math::Vector3 prevPosition;
 };
 
 }

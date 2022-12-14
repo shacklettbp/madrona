@@ -19,10 +19,6 @@ struct AccelStructInstance {
     uint64_t accelerationStructureReference;
 };
 
-struct ObjectID {
-    int32_t idx;
-};
-
 struct ActiveView {
     float tanFOV;
     math::Vector3 cameraOffset;

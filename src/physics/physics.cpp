@@ -26,11 +26,15 @@ struct SolverData {
     Contact *contacts;
     std::atomic<CountT> numContacts;
     CountT maxContacts;
+    float h;
 
-    inline SolverData(CountT max_contacts_per_step)
+    inline SolverData(CountT max_contacts_per_step,
+                      float delta_t,
+                      CountT num_substeps)
         : contacts((Contact *)rawAlloc(sizeof(Contact) * max_contacts_per_step)),
           numContacts(0),
-          maxContacts(max_contacts_per_step)
+          maxContacts(max_contacts_per_step),
+          h(delta_t / (float)num_substeps)
     {}
 
     inline void addContact(Contact c)
@@ -523,10 +527,29 @@ inline void processCandidatesEntry(
 
 namespace solver {
 
-inline void contactSolverEntry(Context &ctx, SolverData &solver)
+inline void updatePositions(Context &ctx,
+                            Position &pos,
+                            Rotation &rot,
+                            Velocity &vel,
+                            ObjectID &obj,
+                            InstanceState &inst_state)
+{
+    const auto &solver = ctx.getSingleton<SolverData>();
+    float h = solver.h;
+
+    inst_state.prevPosition = pos;
+
+    Vector3 cur_velocity = vel;
+    //cur_velocity += h * gravity;
+    
+    pos += h * cur_velocity;
+}
+
+inline void solverEntry(Context &ctx, SolverData &solver)
 {
     // Push objects in serial based on the contact normal - total BS.
     CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
+    printf("Solver %d\n", num_contacts);
 
     for (CountT i = 0; i < num_contacts; i++) {
         Contact &contact = solver.contacts[i];
@@ -543,14 +566,17 @@ inline void contactSolverEntry(Context &ctx, SolverData &solver)
 
 }
 
-void RigidBodyPhysicsSystem::init(Context &ctx, CountT max_dynamic_objects,
+void RigidBodyPhysicsSystem::init(Context &ctx,
+                                  float delta_t,
+                                  CountT num_substeps,
+                                  CountT max_dynamic_objects,
                                   CountT max_contacts_per_world)
 {
     broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
     new (&bvh) broadphase::BVH(max_dynamic_objects);
 
     SolverData &solver = ctx.getSingleton<SolverData>();
-    new (&solver) SolverData(max_contacts_per_world);
+    new (&solver) SolverData(max_contacts_per_world, delta_t, num_substeps);
 }
 
 void RigidBodyPhysicsSystem::reset(Context &ctx)
@@ -564,6 +590,7 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerComponent<broadphase::LeafID>();
     registry.registerSingleton<broadphase::BVH>();
 
+    registry.registerComponent<Velocity>();
     registry.registerComponent<RigidBody>();
     registry.registerComponent<CollisionAABB>();
 
@@ -578,7 +605,8 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
 }
 
 TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
-    TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps)
+    TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps,
+    CountT num_substeps)
 {
     auto update_aabbs = builder.parallelForNode<Context, updateAABBEntry,
         Position, Rotation, CollisionAABB>(deps);
@@ -592,18 +620,21 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
 
     auto find_overlapping = builder.parallelForNode<Context,
         broadphase::findOverlappingEntry, Entity, CollisionAABB>({bvh_update});
+    
+    auto cur_node = find_overlapping;
+    for (CountT i = 0; i < num_substeps; i++) {
+        auto run_narrowphase = builder.parallelForNode<Context,
+            narrowphase::processCandidatesEntry, CandidateCollision>(
+                {cur_node});
 
-    auto run_narrowphase = builder.parallelForNode<Context,
-        narrowphase::processCandidatesEntry, CandidateCollision>(
-            {find_overlapping});
+        cur_node = builder.parallelForNode<Context,
+            solver::solverEntry, SolverData>({run_narrowphase});
+    }
 
     auto clear_candidates = builder.clearTemporariesNode<CandidateTemporary>(
-        {run_narrowphase});
+        {cur_node});
 
-    auto solver = builder.parallelForNode<Context,
-        solver::contactSolverEntry, SolverData>({clear_candidates});
-
-    return solver;
+    return clear_candidates;
 }
 
 TaskGraph::NodeID RigidBodyPhysicsSystem::setupCleanupTasks(

@@ -42,7 +42,6 @@ static inline uint64_t * getBlases()
 
 void RenderingSystem::registerTypes(ECSRegistry &registry)
 {
-    registry.registerComponent<ObjectID>();
     registry.registerComponent<ActiveView>();
     registry.registerSingleton<RendererState>();
 }
