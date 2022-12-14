@@ -270,8 +270,8 @@ static Vector3 encodeNormalTangent(const Vector3 &normal,
         x_half = v.x;
         y_half = v.y;
 
-        return uint32_t(std::bit_cast<uint16_t>(x_half)) << 16 |
-            uint32_t(std::bit_cast<uint16_t>(y_half));
+        return uint32_t(std::bit_cast<uint16_t>(y_half)) << 16 |
+            uint32_t(std::bit_cast<uint16_t>(x_half));
     };
 
     auto packSnorm2x16 = [](const Vector2 &v) {
