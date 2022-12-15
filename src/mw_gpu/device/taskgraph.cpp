@@ -110,7 +110,7 @@ TaskGraph::TaskGraph(NodeState *nodes, uint32_t num_nodes)
     : sorted_nodes_(nodes),
       num_nodes_(num_nodes),
       cur_node_idx_(num_nodes),
-      init_barrier_(82 * 4)
+      init_barrier_(MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS)
 {}
 
 TaskGraph::~TaskGraph()

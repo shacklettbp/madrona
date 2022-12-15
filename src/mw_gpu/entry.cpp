@@ -481,7 +481,8 @@ static __attribute__((always_inline)) inline void dispatch(
 }
 
 static GPUKernels buildKernels(const CompileConfig &cfg,
-                               uint32_t gpu_id)
+                               uint32_t num_megakernel_blocks,
+                               std::pair<int, int> cuda_arch)
 {
     using namespace std;
 
@@ -512,15 +513,18 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
            cfg.userSources.data(),
            sizeof(const char *) * cfg.userSources.size());
 
-    // Compute architecture string for this GPU
-    cudaDeviceProp dev_props;
-    REQ_CUDA(cudaGetDeviceProperties(&dev_props, gpu_id));
-    string arch_str = "sm_" + to_string(dev_props.major) +
-        to_string(dev_props.minor);
+    // Build architecture string for this GPU
+    string arch_str = "sm_" + to_string(cuda_arch.first) +
+        to_string(cuda_arch.second);
+
+    std::string threadblock_count_define =
+        std::string("-DMADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS=(") +
+        std::to_string(num_megakernel_blocks) + ")";
 
     DynArray<const char *> fast_compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-arch", arch_str.c_str(),
+        threadblock_count_define.c_str(),
     };
 
     for (const char *user_flag : cfg.userCompileFlags) {
@@ -950,13 +954,12 @@ static CUgraphExec makeJobSysRunGraph(CUfunction queue_run_kernel,
     return run_graph_exec;
 }
 
-static CUgraphExec makeTaskGraphRunGraph(CUfunction megakernel)
+static CUgraphExec makeTaskGraphRunGraph(CUfunction megakernel,
+                                         uint32_t num_megakernel_blocks)
 {
     auto no_args = makeKernelArgBuffer();
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
-
-    uint32_t num_megakernel_blocks = 82 * 4; // FIXME
 
     CUDA_KERNEL_NODE_PARAMS kernel_node_params {
         .func = megakernel,
@@ -988,9 +991,17 @@ MADRONA_EXPORT TrainingExecutor::TrainingExecutor(
         const StateConfig &state_cfg, const CompileConfig &compile_cfg)
     : impl_(nullptr)
 {
+    REQ_CUDA(cudaSetDevice(state_cfg.gpuID));
+    cudaDeviceProp dev_prop;
+    REQ_CUDA(cudaGetDeviceProperties(&dev_prop, state_cfg.gpuID));
+
+    int num_sms = dev_prop.multiProcessorCount;
+    uint32_t num_megakernel_blocks = num_sms * 4;
+
     auto strm = cu::makeStream();
-    
-    GPUKernels gpu_kernels = buildKernels(compile_cfg, state_cfg.gpuID);
+
+    GPUKernels gpu_kernels = buildKernels(compile_cfg, num_megakernel_blocks,
+                                          {dev_prop.major, dev_prop.minor});
 
     GPUEngineState eng_state = initEngineAndUserState(
         (int)state_cfg.gpuID, state_cfg.numWorlds, state_cfg.numWorldDataBytes,
@@ -1004,7 +1015,8 @@ MADRONA_EXPORT TrainingExecutor::TrainingExecutor(
             makeJobSysRunGraph(gpu_kernels.queueUserRun,
                                gpu_kernels.megakernel,
                                state_cfg.numWorlds) :
-            makeTaskGraphRunGraph(gpu_kernels.megakernel);
+            makeTaskGraphRunGraph(gpu_kernels.megakernel,
+                                  num_megakernel_blocks);
 
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,
