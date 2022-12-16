@@ -181,29 +181,33 @@ private:
     };
 
     template <typename U, bool trivial =
-        std::is_trivially_copy_constructible_v<U>>
+        std::is_trivially_copy_constructible_v<U> ||
+        !std::is_copy_constructible_v<U>>
     struct CopyConstruct : StorageImpl<U> {
         using StorageImpl<U>::StorageImpl;
     };
 
     template <typename U, bool trivial =
-        std::is_trivially_move_constructible_v<U>>
+        std::is_trivially_move_constructible_v<U> ||
+        !std::is_move_constructible_v<U>>
     struct MoveConstruct : CopyConstruct<U> {
         using CopyConstruct<U>::CopyConstruct;
     };
 
     template <typename U, bool trivial =
-        std::is_trivially_destructible_v<U> &&
-        std::is_trivially_copy_constructible_v<U> &&
-        std::is_trivially_copy_assignable_v<U>>
+        (std::is_trivially_destructible_v<U> &&
+         std::is_trivially_copy_constructible_v<U> &&
+         std::is_trivially_copy_assignable_v<U>) ||
+        !std::is_copy_assignable_v<U>>
     struct CopyAssign : MoveConstruct<U> {
         using MoveConstruct<U>::MoveConstruct;
     };
 
     template <typename U, bool trivial =
-        std::is_trivially_destructible_v<U> &&
-        std::is_trivially_move_constructible_v<U> &&
-        std::is_trivially_move_assignable_v<U>>
+        (std::is_trivially_destructible_v<U> &&
+         std::is_trivially_move_constructible_v<U> &&
+         std::is_trivially_move_assignable_v<U>) ||
+        !std::is_move_assignable_v<U>>
     struct MoveAssign : CopyAssign<U> {
         using CopyAssign<U>::CopyAssign;
     };

@@ -67,7 +67,7 @@ struct GPUKernels {
 };
 
 struct GPUEngineState {
-    render::BatchRenderer batchRenderer;
+    Optional<render::BatchRenderer> batchRenderer;
     void *stateBuffer;
 
     std::thread allocatorThread;
@@ -686,15 +686,20 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                              cudaStream_t strm)
 {
     constexpr int64_t max_instances_per_world = 1000;
-    render::BatchRenderer batch_renderer({
-        .gpuID = gpu_id,
-        .renderWidth = render_width,
-        .renderHeight = render_height,
-        .numWorlds = num_worlds,
-        .numViews = num_worlds,
-        .maxInstancesPerWorld = max_instances_per_world,
-        .maxObjects = 1000,
-    });
+
+    auto batch_renderer = Optional<render::BatchRenderer>::none();
+
+    if (render_width != 0 && render_height != 0) {
+        batch_renderer.emplace(render::BatchRenderer::Config {
+            .gpuID = gpu_id,
+            .renderWidth = render_width,
+            .renderHeight = render_height,
+            .numWorlds = num_worlds,
+            .numViews = num_worlds,
+            .maxInstancesPerWorld = max_instances_per_world,
+            .maxObjects = 1000,
+        });
+    }
 
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
                                uint32_t num_threads,
@@ -848,17 +853,27 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         (char *)gpu_consts_readback->hostAllocatorAddr +
         (uintptr_t)gpu_state_buffer;
 
-    gpu_consts_readback->rendererASInstancesAddrs =
-        (void **)batch_renderer.tlasInstancePtrs();
+    uint32_t *instance_counts_host;
+    if (batch_renderer.has_value()) {
+        gpu_consts_readback->rendererASInstancesAddrs =
+            (void **)batch_renderer->tlasInstancePtrs();
 
-    uint32_t *instance_counts_host = (uint32_t *)
-        cu::allocReadback(sizeof(uint32_t *) * (uint64_t)num_worlds);
+        instance_counts_host = (uint32_t *)
+            cu::allocReadback(sizeof(uint32_t *) * (uint64_t)num_worlds);
 
-    gpu_consts_readback->rendererInstanceCountsAddr = instance_counts_host;
-    gpu_consts_readback->rendererBLASesAddr = batch_renderer.objectsBLASPtr();
+        gpu_consts_readback->rendererInstanceCountsAddr = instance_counts_host;
 
-    gpu_consts_readback->rendererViewDatasAddr =
-        (void *)batch_renderer.viewDataPtr();
+        gpu_consts_readback->rendererBLASesAddr =
+            batch_renderer->objectsBLASPtr();
+        gpu_consts_readback->rendererViewDatasAddr =
+            (void *)batch_renderer->viewDataPtr();
+    } else {
+        instance_counts_host = nullptr;
+        gpu_consts_readback->rendererASInstancesAddrs = nullptr;
+        gpu_consts_readback->rendererInstanceCountsAddr = nullptr;
+        gpu_consts_readback->rendererBLASesAddr = nullptr;
+        gpu_consts_readback->rendererViewDatasAddr = nullptr;
+    }
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
@@ -1051,24 +1066,26 @@ MADRONA_EXPORT void TrainingExecutor::run()
     REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
 
-    impl_->engineState.batchRenderer.render(
-        impl_->engineState.rendererInstanceCounts);
+    if (impl_->engineState.batchRenderer.has_value()) {
+        impl_->engineState.batchRenderer->render(
+            impl_->engineState.rendererInstanceCounts);
+    }
 }
 
 MADRONA_EXPORT CountT TrainingExecutor::loadObjects(
     Span<const imp::SourceObject> objs)
 {
-    return impl_->engineState.batchRenderer.loadObjects(objs);
+    return impl_->engineState.batchRenderer->loadObjects(objs);
 }
 
 MADRONA_EXPORT uint8_t * TrainingExecutor::rgbObservations() const
 {
-    return impl_->engineState.batchRenderer.rgbPtr();
+    return impl_->engineState.batchRenderer->rgbPtr();
 }
 
 MADRONA_EXPORT float * TrainingExecutor::depthObservations() const
 {
-    return impl_->engineState.batchRenderer.depthPtr();
+    return impl_->engineState.batchRenderer->depthPtr();
 }
 
 MADRONA_EXPORT void * TrainingExecutor::getExported(CountT slot) const
