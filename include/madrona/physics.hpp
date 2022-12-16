@@ -13,23 +13,26 @@ struct Velocity : public math::Vector3 {
     {}
 };
 
-// Per object state
-struct RigidBody {
-    math::Vector3 invInertiaTensor;
-};
-
 struct CollisionAABB : math::AABB {
-    CollisionAABB(math::AABB aabb)
+    inline CollisionAABB(math::AABB aabb)
         : AABB(aabb)
     {}
-
-    CollisionAABB(const base::Position &pos,
-                  const base::Rotation &rot);
 };
 
 struct CollisionEvent {
     Entity a;
     Entity b;
+};
+
+
+// Per object state
+struct RigidBodyMetadata {
+    math::Vector3 invInertiaTensor;
+};
+
+struct ObjectManager {
+    RigidBodyMetadata *metadata;
+    math::AABB *aabbs;
 };
 
 struct RigidBodyPhysicsSystem {

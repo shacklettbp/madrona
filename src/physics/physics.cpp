@@ -73,17 +73,12 @@ static inline AABB computeAABBFromMesh(
     return aabb;
 }
 
-CollisionAABB::CollisionAABB(const base::Position &pos,
-                             const base::Rotation &rot)
-    : AABB(computeAABBFromMesh(pos, rot))
-{}
-
-inline void updateAABBEntry(Context &,
-                            const Position &pos,
-                            const Rotation &rot,
-                            CollisionAABB &out_aabb)
+inline void updateCollisionAABB(Context &,
+                                const Position &pos,
+                                const Rotation &rot,
+                                CollisionAABB &out_aabb)
 {
-    out_aabb = CollisionAABB(pos, rot);
+    out_aabb = computeAABBFromMesh(pos, rot);
 }
 
 namespace broadphase {
@@ -534,6 +529,9 @@ inline void updatePositions(Context &ctx,
                             const ObjectID &obj_id,
                             InstanceState &inst_state)
 {
+    (void)rot;
+    (void)obj_id;
+
     const auto &solver = ctx.getSingleton<SolverData>();
     float h = solver.h;
 
@@ -602,7 +600,6 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerSingleton<broadphase::BVH>();
 
     registry.registerComponent<Velocity>();
-    registry.registerComponent<RigidBody>();
     registry.registerComponent<CollisionAABB>();
     
     registry.registerComponent<solver::InstanceState>();
@@ -621,7 +618,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps,
     CountT num_substeps)
 {
-    auto update_aabbs = builder.parallelForNode<Context, updateAABBEntry,
+    auto update_aabbs = builder.parallelForNode<Context, updateCollisionAABB,
         Position, Rotation, CollisionAABB>(deps);
 
     auto preprocess_leaves = builder.parallelForNode<Context,
