@@ -1,5 +1,4 @@
 #include <madrona/python.hpp>
-#include <madrona/crash.hpp>
 #include <madrona/cuda_utils.hpp>
 
 #include <cassert>

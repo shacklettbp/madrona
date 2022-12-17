@@ -18,8 +18,8 @@ struct CrashInfo {
     const char *msg;
 };
 
-[[noreturn]] void fatal(const char *file, int line, const char *funcname,
-                        const char *fmt, ...);
+[[noreturn]] void fatal(const char *file, int line,
+    const char *funcname, const char *fmt, ...);
 [[noreturn]] void fatal(const CrashInfo &crash);
 
 #if __cplusplus >= 202002L

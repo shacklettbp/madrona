@@ -1,13 +1,11 @@
 add_library(madrona_mw_gpu STATIC
-    ${MADRONA_INC_DIR}/cuda_utils.hpp ${MADRONA_INC_DIR}/cuda_utils.inl
-        cuda_utils.cpp
     cpp_compile.hpp cpp_compile.cpp
     ${MADRONA_INC_DIR}/mw_gpu.hpp entry.cpp)
 
 
 target_link_libraries(madrona_mw_gpu
     PUBLIC
-        madrona_hdrs CUDA::cudart 
+        madrona_hdrs madrona_cuda
     PRIVATE
         madrona_core madrona_batch_render
         CUDA::nvrtc CUDA::cuda_driver)

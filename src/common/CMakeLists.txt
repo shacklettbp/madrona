@@ -1,24 +1,6 @@
 set(MADRONA_INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona"
     CACHE INTERNAL "")
 
-set(FRONTEND_CLANG FALSE)
-set(FRONTEND_GCC FALSE)
-set(FRONTEND_MSVC FALSE)
-
-if (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    set(FRONTEND_CLANG TRUE)
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    set(FRONTEND_GCC TRUE)
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set(FRONTEND_MSVC TRUE)
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-        set(FRONTEND_MSVC TRUE)
-    else ()
-        set(FRONTEND_CLANG TRUE)
-    endif ()
-endif ()
-
 add_library(madrona_hdrs INTERFACE)
 target_include_directories(madrona_hdrs INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include
@@ -88,4 +70,17 @@ add_library(madrona_importer STATIC
 target_link_libraries(madrona_importer PRIVATE
     madrona_common
     meshoptimizer
+)
+
+add_library(madrona_cuda STATIC
+    ${MADRONA_INC_DIR}/cuda_utils.hpp ${MADRONA_INC_DIR}/cuda_utils.inl
+        cuda_utils.cpp
+)
+
+target_link_libraries(madrona_cuda
+    PUBLIC
+        CUDA::cudart
+    PRIVATE
+        CUDA::cuda_driver CUDA::nvrtc
+        madrona_common
 )

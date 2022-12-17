@@ -11,6 +11,8 @@
 #include <cmath>
 #include <cfloat>
 
+#include <madrona/types.hpp>
+
 namespace madrona {
 namespace math {
 
@@ -255,7 +257,20 @@ struct Vector3 {
         return *this * invLength();
     } 
 
-    inline float & operator[](uint32_t i)
+    inline float & operator[](CountT i)
+    {
+        switch (i) {
+            default:
+            case 0:
+                return x;
+            case 1:
+                return y;
+            case 2:
+                return z;
+        }
+    }
+
+    inline float operator[](CountT i) const
     {
         switch (i) {
             default:
@@ -630,6 +645,47 @@ struct AABB {
 
 struct Mat3x3 {
     Vector3 cols[3];
+
+    static inline Mat3x3 fromQuat(Quat r)
+    {
+        float x2 = r.x * r.x;
+        float y2 = r.y * r.y;
+        float z2 = r.z * r.z;
+        float xz = r.x * r.z;
+        float xy = r.x * r.y;
+        float yz = r.y * r.z;
+        float wx = r.w * r.x;
+        float wy = r.w * r.y;
+        float wz = r.w * r.z;
+
+        return {{
+            { 
+                1.f - 2.f * (y2 + z2),
+                2.f * (xy + wz),
+                2.f * (xz - wy),
+            },
+            {
+                2.f * (xy - wz),
+                1.f - 2.f * (x2 + z2),
+                2.f * (yz + wx),
+            },
+            {
+                2.f * (xz + wy),
+                2.f * (yz - wx),
+                1.f - 2.f * (x2 + y2),
+            },
+        }};
+    }
+
+    Vector3 & operator[](CountT i)
+    {
+        return cols[i];
+    }
+
+    Vector3 operator[](CountT i) const
+    {
+        return cols[i];
+    }
 
     inline Vector3 operator*(Vector3 v)
     {

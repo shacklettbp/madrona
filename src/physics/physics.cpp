@@ -47,38 +47,50 @@ struct SolverData {
     }
 };
 
-static inline AABB computeAABBFromMesh(
-    const base::Position &pos,
-    const base::Rotation &rot)
-{
-    Mat3x4 model_mat = Mat3x4::fromTRS(pos, rot);
+struct ObjectData {
+    ObjectManager *mgr;
+};
 
-    // No actual mesh, just hardcode a fake 2 *unit cube centered around
-    Vector3 cube[8] = {
-        model_mat.txfmPoint(Vector3 {-1.f, -1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f, -1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f,  1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f,  1.f, -1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f, -1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f, -1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 { 1.f,  1.f,  1.f}),
-        model_mat.txfmPoint(Vector3 {-1.f,  1.f,  1.f}),
-    };
-
-    AABB aabb = AABB::point(cube[0]);
-    for (int i = 1; i < 8; i++) {
-        aabb.expand(cube[i]);
-    }
-
-    return aabb;
-}
-
-inline void updateCollisionAABB(Context &,
+inline void updateCollisionAABB(Context &ctx,
                                 const Position &pos,
                                 const Rotation &rot,
+                                const ObjectID &obj_id,
                                 CollisionAABB &out_aabb)
 {
-    out_aabb = computeAABBFromMesh(pos, rot);
+    // FIXME: this could all be more efficient with a center + width
+    // AABB representation
+    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+
+    Mat3x3 rot_mat = Mat3x3::fromQuat(rot);
+    AABB obj_aabb = obj_mgr.aabbs[obj_id.idx];
+
+    // RTCD page 86
+#if defined(MADRONA_CLANG) or defined(MADRONA_GCC)
+#pragma GCC unroll 3
+#elif defined(MADRONA_GPU_MODE)
+#pragma unroll
+#endif
+    for (CountT i = 0; i < 3; i++) {
+        out_aabb.pMin[i] = out_aabb.pMax[i] = pos[i];
+
+#if defined(MADRONA_CLANG) or defined(MADRONA_GCC)
+#pragma GCC unroll 3
+#elif defined(MADRONA_GPU_MODE)
+#pragma unroll
+#endif
+        for (CountT j = 0; j < 3; j++) {
+            float e = rot_mat[i][j] * obj_aabb.pMin[j];
+            float f = rot_mat[i][j] * obj_aabb.pMax[j];
+
+            if (e < f) {
+                out_aabb.pMin[i] += e;
+                out_aabb.pMax[i] += f;
+            } else {
+                out_aabb.pMin[i] += f;
+                out_aabb.pMax[i] += e;
+            }
+        }
+    }
 }
 
 namespace broadphase {
@@ -576,6 +588,7 @@ inline void solverEntry(Context &ctx, SolverData &solver)
 }
 
 void RigidBodyPhysicsSystem::init(Context &ctx,
+                                  ObjectManager *obj_mgr,
                                   float delta_t,
                                   CountT num_substeps,
                                   CountT max_dynamic_objects,
@@ -586,12 +599,20 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
 
     SolverData &solver = ctx.getSingleton<SolverData>();
     new (&solver) SolverData(max_contacts_per_world, delta_t, num_substeps);
+
+    ObjectData &objs = ctx.getSingleton<ObjectData>();
+    new (&objs) ObjectData { obj_mgr };
 }
 
 void RigidBodyPhysicsSystem::reset(Context &ctx)
 {
     broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
     bvh.rebuildOnUpdate();
+}
+
+broadphase::LeafID RigidBodyPhysicsSystem::registerObject(Context &ctx)
+{
+    return ctx.getSingleton<broadphase::BVH>().reserveLeaf();
 }
 
 void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
@@ -611,6 +632,7 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerArchetype<CandidateTemporary>();
 
     registry.registerSingleton<SolverData>();
+    registry.registerSingleton<ObjectData>();
 
 }
 
@@ -619,7 +641,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     CountT num_substeps)
 {
     auto update_aabbs = builder.parallelForNode<Context, updateCollisionAABB,
-        Position, Rotation, CollisionAABB>(deps);
+        Position, Rotation, ObjectID, CollisionAABB>(deps);
 
     auto preprocess_leaves = builder.parallelForNode<Context,
         broadphase::updateLeavesEntry, Entity, broadphase::LeafID, 

@@ -14,16 +14,17 @@ public:
 
     PhysicsLoader(StorageType storage_type, CountT max_objects);
     ~PhysicsLoader();
+    PhysicsLoader(PhysicsLoader &&o);
 
-    ObjectManager * getObjectManager() const;
+    CountT loadObjects(const RigidBodyMetadata *metadatas,
+                       const math::AABB *aabbs,
+                       CountT num_objs);
+
+    ObjectManager & getObjectManager();
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
-    ObjectManager *mgr_;
-    CountT cur_loaded_objs_;
-    CountT max_objs_;
-    StorageType storage_type_;
 };
 
 }

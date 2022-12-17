@@ -24,7 +24,6 @@ struct CollisionEvent {
     Entity b;
 };
 
-
 // Per object state
 struct RigidBodyMetadata {
     math::Vector3 invInertiaTensor;
@@ -33,25 +32,6 @@ struct RigidBodyMetadata {
 struct ObjectManager {
     RigidBodyMetadata *metadata;
     math::AABB *aabbs;
-};
-
-struct RigidBodyPhysicsSystem {
-    static void init(Context &ctx,
-                     float delta_t,
-                     CountT num_substeps,
-                     CountT max_dynamic_objects,
-                     CountT max_contacts_per_step);
-
-    static void reset(Context &ctx);
-
-    static void registerTypes(ECSRegistry &registry);
-    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                                        Span<const TaskGraph::NodeID> deps,
-                                        CountT num_substeps);
-
-    static TaskGraph::NodeID setupCleanupTasks(TaskGraph::Builder &builder,
-        Span<const TaskGraph::NodeID> deps);
-
 };
 
 namespace broadphase {
@@ -125,6 +105,28 @@ struct InstanceState {
 };
 
 }
+
+struct RigidBodyPhysicsSystem {
+    static void init(Context &ctx,
+                     ObjectManager *obj_mgr,
+                     float delta_t,
+                     CountT num_substeps,
+                     CountT max_dynamic_objects,
+                     CountT max_contacts_per_step);
+
+    static void reset(Context &ctx);
+    static broadphase::LeafID registerObject(Context &ctx);
+
+    static void registerTypes(ECSRegistry &registry);
+    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
+                                        Span<const TaskGraph::NodeID> deps,
+                                        CountT num_substeps);
+
+    static TaskGraph::NodeID setupCleanupTasks(TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> deps);
+
+};
+
 
 }
 }
