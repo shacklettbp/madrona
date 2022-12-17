@@ -1,5 +1,15 @@
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
-find_package(CUDAToolkit QUIET)
-find_package(Python 3.9 COMPONENTS Interpreter Development.Module QUIET)
+
+if (${MADRONA_REQUIRE_CUDA})
+    find_package(CUDAToolkit REQUIRED)
+else ()
+    find_package(CUDAToolkit QUIET)
+endif ()
+
+if (${MADRONA_REQUIRE_PYTHON})
+    find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
+else ()
+    find_package(Python 3.9 COMPONENTS Interpreter Development.Module QUIET)
+endif ()
