@@ -2,6 +2,8 @@
 #include <madrona/taskgraph.hpp>
 #include <madrona/macros.hpp>
 
+#include "megakernel_consts.hpp"
+
 namespace madrona {
 namespace mwGPU {
 
@@ -53,7 +55,10 @@ static inline __attribute__((always_inline)) void megakernelImpl()
 }
 }
 
-extern "C" __global__ void madronaMWGPUMegakernel()
+extern "C" __global__ void
+__launch_bounds__(madrona::consts::numMegakernelThreads,
+                  madrona::consts::numMegakernelBlocksPerSM)
+madronaMWGPUMegakernel()
 {
     madrona::mwGPU::megakernelImpl();
 }

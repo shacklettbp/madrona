@@ -2,10 +2,9 @@
 #include <madrona/crash.hpp>
 #include <madrona/memory.hpp>
 
+#include "megakernel_consts.hpp"
+
 namespace madrona {
-namespace consts {
-static constexpr uint32_t numMegakernelThreads = 256;
-}
 
 TaskGraph::Builder::Builder(uint32_t max_num_nodes,
                             uint32_t max_num_dependencies)

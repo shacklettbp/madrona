@@ -29,6 +29,8 @@ using namespace madrona;
 #include "device/include/madrona/memory.hpp"
 }
 
+#include "device/megakernel_consts.hpp"
+
 namespace madrona {
 
 __attribute__((constructor)) static void setCudaHeapSize()
@@ -42,7 +44,6 @@ using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
 using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
 
 namespace consts {
-static constexpr uint32_t numMegakernelThreads = 256;
 static constexpr uint32_t numEntryQueueThreads = 512;
 }
 
@@ -1027,7 +1028,7 @@ MADRONA_EXPORT TrainingExecutor::TrainingExecutor(
     REQ_CUDA(cudaGetDeviceProperties(&dev_prop, state_cfg.gpuID));
 
     int num_sms = dev_prop.multiProcessorCount;
-    uint32_t num_megakernel_blocks = num_sms * 4;
+    uint32_t num_megakernel_blocks = num_sms * consts::numMegakernelBlocksPerSM;
 
     auto strm = cu::makeStream();
 
