@@ -223,19 +223,8 @@ template <typename ArchetypeT>
 Loc StateManager::makeTemporary(WorldID world_id)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-    Table &tbl = archetypes_[archetype_id]->tbl;
 
-    int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
-
-    Loc loc {
-        archetype_id,
-        row,
-    };
-
-    WorldID *world_column = (WorldID *)tbl.columns[1];
-    world_column[row] = world_id;
-
-    return loc;
+    return makeTemporary(world_id, archetype_id);
 }
 
 template <typename ArchetypeT>

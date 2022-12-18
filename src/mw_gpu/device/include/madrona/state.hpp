@@ -168,6 +168,7 @@ private:
                    QueryRef *query_ref);
 
     Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
+    Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
 
     struct ArchetypeStore {
         ArchetypeStore(uint32_t offset, uint32_t num_user_components,

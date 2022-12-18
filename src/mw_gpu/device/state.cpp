@@ -36,7 +36,7 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
 
         int32_t cur_max_rows = cur_mapped_bytes / column_bytes_per_row;
 
-        if (cur_max_rows > new_num_rows) {
+        if (cur_max_rows >= new_num_rows) {
             min_mapped_rows = min(cur_max_rows, min_mapped_rows);
             continue;
         }
@@ -278,6 +278,28 @@ Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
     world_column[row] = world_id;
 
     return e;
+}
+
+Loc StateManager::makeTemporary(WorldID world_id,
+                                uint32_t archetype_id)
+{
+    Table &tbl = archetypes_[archetype_id]->tbl;
+
+    int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
+
+    if (row >= tbl.mappedRows) {
+        growTable(tbl, row);
+    }
+
+    Loc loc {
+        archetype_id,
+        row,
+    };
+
+    WorldID *world_column = (WorldID *)tbl.columns[1];
+    world_column[row] = world_id;
+
+    return loc;
 }
 
 void StateManager::clearTemporaries(uint32_t archetype_id)

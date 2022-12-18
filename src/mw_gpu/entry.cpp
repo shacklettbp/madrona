@@ -672,6 +672,75 @@ HeapArray<void *> makeKernelArgBuffer(Ts ...args)
     }
 }
 
+static void mapGPUMemory(CUdevice dev, CUdeviceptr base, uint64_t num_bytes)
+{
+    CUmemAllocationProp alloc_prop {};
+    alloc_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+    alloc_prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    alloc_prop.location.id = dev;
+
+    CUmemGenericAllocationHandle mem;
+    REQ_CU(cuMemCreate(&mem, num_bytes,
+                       &alloc_prop, 0));
+
+    REQ_CU(cuMemMap(base, num_bytes, 0, mem, 0));
+    REQ_CU(cuMemRelease(mem));
+
+    CUmemAccessDesc access_ctrl;
+    access_ctrl.location = alloc_prop.location;
+    access_ctrl.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    REQ_CU(cuMemSetAccess(base, num_bytes,
+                          &access_ctrl, 1));
+
+}
+
+static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
+{
+    using namespace std::chrono_literals;
+    using cuda::std::memory_order_acquire;
+    using cuda::std::memory_order_relaxed;
+    using cuda::std::memory_order_release;
+
+    while (true) {
+        while (channel->ready.load(memory_order_acquire) != 1) {
+            std::this_thread::sleep_for(1ms);
+        }
+        channel->ready.store(0, memory_order_relaxed);
+
+        if (channel->op == HostChannel::Op::Reserve) {
+            uint64_t num_reserve_bytes = channel->reserve.maxBytes;
+            uint64_t num_alloc_bytes = channel->reserve.initNumBytes;
+
+            printf("Reserve request received %lu %lu\n",
+                   num_reserve_bytes, num_alloc_bytes);
+
+            CUdeviceptr dev_ptr;
+            REQ_CU(cuMemAddressReserve(&dev_ptr, num_reserve_bytes,
+                                       0, 0, 0));
+
+            mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
+
+            printf("Reserved %p\n", (void *)dev_ptr);
+
+            channel->reserve.result = (void *)dev_ptr;
+        } else if (channel->op == HostChannel::Op::Map) {
+            void *ptr = channel->map.addr;
+            uint64_t num_bytes = channel->map.numBytes;
+
+            printf("Grow request received %p %lu\n",
+                   ptr, num_bytes);
+
+            mapGPUMemory(dev, (CUdeviceptr)ptr, num_bytes);
+
+            printf("Grew %p\n", ptr);
+        } else if (channel->op == HostChannel::Op::Terminate) {
+            break;
+        }
+
+        channel->finished.store(1, memory_order_release);
+    }
+}
+
 static GPUEngineState initEngineAndUserState(int gpu_id,
                                              uint32_t num_worlds,
                                              uint32_t num_world_data_bytes,
@@ -754,61 +823,8 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         allocator_channel,
     };
 
-    std::thread allocator_thread([](HostChannel *channel, CUdevice dev) {
-        using namespace std::chrono_literals;
-        using cuda::std::memory_order_acquire;
-        using cuda::std::memory_order_relaxed;
-        using cuda::std::memory_order_release;
-
-        while (true) {
-            while (channel->ready.load(memory_order_acquire) != 1) {
-                std::this_thread::sleep_for(1ms);
-            }
-            channel->ready.store(0, memory_order_relaxed);
-
-            if (channel->op == HostChannel::Op::Reserve) {
-                uint64_t num_reserve_bytes = channel->reserve.maxBytes;
-                uint64_t num_alloc_bytes = channel->reserve.initNumBytes;
-
-                printf("Reserve request received %lu %lu\n",
-                       num_reserve_bytes, num_alloc_bytes);
-
-                CUdeviceptr dev_ptr;
-                REQ_CU(cuMemAddressReserve(&dev_ptr, num_reserve_bytes,
-                                           0, 0, 0));
-
-                CUmemAllocationProp alloc_prop {};
-                alloc_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-                alloc_prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-                alloc_prop.location.id = dev;
-
-                CUmemGenericAllocationHandle mem;
-                REQ_CU(cuMemCreate(&mem, num_alloc_bytes,
-                                   &alloc_prop, 0));
-
-                REQ_CU(cuMemMap(dev_ptr, num_alloc_bytes,
-                                0, mem, 0));
-
-                REQ_CU(cuMemRelease(mem));
-
-                CUmemAccessDesc access_ctrl;
-                access_ctrl.location = alloc_prop.location;
-                access_ctrl.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-                REQ_CU(cuMemSetAccess(dev_ptr, num_alloc_bytes,
-                                      &access_ctrl, 1));
-
-                printf("Reserved %p\n", (void *)dev_ptr);
-
-                channel->reserve.result = (void *)dev_ptr;
-            } else if (channel->op == HostChannel::Op::Map) {
-                FATAL("unimplemented");
-            } else if (channel->op == HostChannel::Op::Terminate) {
-                break;
-            }
-
-            channel->finished.store(1, memory_order_release);
-        }
-    }, allocator_channel, cu_gpu);
+    std::thread allocator_thread(
+        gpuVMAllocatorThread, allocator_channel, cu_gpu);
 
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
