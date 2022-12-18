@@ -29,9 +29,35 @@ struct RigidBodyMetadata {
     math::Vector3 invInertiaTensor;
 };
 
+struct CollisionPrimitive {
+    enum class Type : uint32_t {
+        Sphere = 1 << 0,
+        Hull = 1 << 1,
+        Plane = 1 << 2,
+    };
+
+    struct Sphere {
+        float radius;
+    };
+
+    struct Hull {
+        // TODO
+    };
+
+    struct Plane {};
+
+    Type type;
+    union {
+        Sphere sphere;
+        Plane plane;
+        Hull hull;
+    };
+};
+
 struct ObjectManager {
     RigidBodyMetadata *metadata;
     math::AABB *aabbs;
+    CollisionPrimitive *primitives;
 };
 
 namespace broadphase {

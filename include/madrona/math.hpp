@@ -622,7 +622,7 @@ struct AABB {
     {
         return AABB {
             /* .pMin = */ Vector3 {FLT_MAX, FLT_MAX, FLT_MAX},
-            /* .pMax = */ Vector3 {FLT_MIN, FLT_MIN, FLT_MIN},
+            /* .pMax = */ Vector3 {-FLT_MAX, -FLT_MAX, -FLT_MAX},
         };
     }
 

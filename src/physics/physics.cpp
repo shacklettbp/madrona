@@ -15,8 +15,7 @@ struct CandidateCollision {
 struct CandidateTemporary : Archetype<CandidateCollision> {};
 
 struct Contact {
-    Entity a;
-    Entity b;
+    Entity e;
     Vector3 normal;
 };
 
@@ -37,13 +36,15 @@ struct SolverData {
           h(delta_t / (float)num_substeps)
     {}
 
-    inline void addContact(Contact c)
+    inline void addContacts(Span<const Contact> added_contacts)
     {
-        int32_t contact_idx =
-            numContacts.fetch_add(1, std::memory_order_relaxed);
+        int32_t contact_idx = numContacts.fetch_add(added_contacts.size(),
+                                                    std::memory_order_relaxed);
         assert(contact_idx < maxContacts);
 
-        contacts[contact_idx] = c;
+        for (CountT i = 0; i < added_contacts.size(); i++) {
+            contacts[contact_idx + i] = added_contacts[i];
+        }
     }
 };
 
@@ -172,9 +173,9 @@ void BVH::rebuild()
                     node.minX[i] = FLT_MAX;
                     node.minY[i] = FLT_MAX;
                     node.minZ[i] = FLT_MAX;
-                    node.maxX[i] = FLT_MIN;
-                    node.maxY[i] = FLT_MIN;
-                    node.maxZ[i] = FLT_MIN;
+                    node.maxX[i] = -FLT_MAX;
+                    node.maxY[i] = -FLT_MAX;
+                    node.maxZ[i] = -FLT_MAX;
                 }
             }
         } else if (entry.nodeID == sentinel_) {
@@ -204,9 +205,9 @@ void BVH::rebuild()
                 };
 
                 Vector3 center_max {
-                    FLT_MIN,
-                    FLT_MIN,
-                    FLT_MIN,
+                    -FLT_MAX,
+                    -FLT_MAX,
+                    -FLT_MAX,
                 };
 
                 for (int i = 0; i < num_elems; i++) {
@@ -501,32 +502,103 @@ inline void findOverlappingEntry(
 
 namespace narrowphase {
 
-inline void processCandidatesEntry(
+enum class NarrowphaseTest : uint32_t {
+    SphereSphere = 1,
+    HullHull = 2,
+    SphereHull = 3,
+    PlanePlane = 4,
+    SpherePlane = 5,
+    HullPlane = 6,
+};
+
+inline void runNarrowphase(
     Context &ctx,
     const CandidateCollision &candidate_collision)
 {
-    Position &a_pos = ctx.getUnsafe<Position>(candidate_collision.a);
-    Position &b_pos = ctx.getUnsafe<Position>(candidate_collision.b);
-
-    // FIXME real narrowphase
-    constexpr float sphere_radius = 1.f;
-    Vector3 to_a = b_pos - a_pos;
-    float dist = to_a.length();
+    ObjectID a_obj = ctx.getUnsafe<ObjectID>(candidate_collision.a);
+    ObjectID b_obj = ctx.getUnsafe<ObjectID>(candidate_collision.b);
 
     SolverData &solver = ctx.getSingleton<SolverData>();
+    const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
-    if (dist > 0 && dist <= sphere_radius * 2.f) {
-        solver.addContact(Contact {
-            candidate_collision.a,
-            candidate_collision.b,
-            to_a / dist,
-        });
-        
-        Loc loc = ctx.makeTemporary<CollisionEventTemporary>();
-        ctx.getUnsafe<CollisionEvent>(loc) = CollisionEvent {
-            candidate_collision.a,
-            candidate_collision.b,
-        };
+    const CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
+    const CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
+
+    uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
+    uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
+
+    Entity a_entity = candidate_collision.a;
+    Entity b_entity = candidate_collision.b;
+
+    if (raw_type_a > raw_type_b) {
+        std::swap(raw_type_a, raw_type_b);
+        std::swap(a_entity, b_entity);
+        std::swap(a_prim, b_prim);
+    }
+
+    NarrowphaseTest test_type {raw_type_a | raw_type_b};
+
+    Position a_pos = ctx.getUnsafe<Position>(a_entity);
+    Position b_pos = ctx.getUnsafe<Position>(b_entity);
+
+    switch (test_type) {
+    case NarrowphaseTest::SphereSphere: {
+        float a_radius = a_prim->sphere.radius;
+        float b_radius = b_prim->sphere.radius;
+
+        Vector3 to_a = a_pos - b_pos;
+        float dist = to_a.length();
+
+        if (dist > 0 && dist < a_radius + b_radius) {
+            Vector3 to_a_normal = to_a / dist;
+            solver.addContacts({{
+                a_entity,
+                to_a_normal,
+            }, {
+                b_entity,
+                -to_a_normal,
+            }});
+
+
+            Loc loc = ctx.makeTemporary<CollisionEventTemporary>();
+            ctx.getUnsafe<CollisionEvent>(loc) = CollisionEvent {
+                candidate_collision.a,
+                candidate_collision.b,
+            };
+        }
+    } break;
+    case NarrowphaseTest::PlanePlane: {
+        // Do nothing, planes must be static.
+        // Should rework this entire setup so static objects
+        // aren't checked against the BVH
+    } break;
+    case NarrowphaseTest::SpherePlane: {
+        auto sphere = a_prim->sphere;
+        Rotation b_rot = ctx.getUnsafe<Rotation>(b_entity);
+
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = b_rot.rotateDir(base_normal);
+
+        float d = plane_normal.dot(b_pos);
+        float t = plane_normal.dot(a_pos) - d;
+
+        if (t < sphere.radius) {
+            solver.addContacts({{
+                a_entity,
+                plane_normal,
+            }});
+        }
+    } break;
+    case NarrowphaseTest::HullHull: {
+        assert(false);
+    } break;
+    case NarrowphaseTest::SphereHull: {
+        assert(false);
+    } break;
+    case NarrowphaseTest::HullPlane: {
+        assert(false);
+    } break;
+    default: __builtin_unreachable();
     }
 }
 
@@ -575,11 +647,9 @@ inline void solverEntry(Context &ctx, SolverData &solver)
     for (CountT i = 0; i < num_contacts; i++) {
         Contact &contact = solver.contacts[i];
 
-        Position &a_pos = ctx.getUnsafe<Position>(contact.a);
-        Position &b_pos = ctx.getUnsafe<Position>(contact.b);
+        Position &pos = ctx.getUnsafe<Position>(contact.e);
 
-        a_pos -= contact.normal;
-        b_pos += contact.normal;
+        pos += contact.normal;
     }
 
     solver.numContacts.store(0, std::memory_order_relaxed);
@@ -660,7 +730,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
             solver::InstanceState>({cur_node});
 
         auto run_narrowphase = builder.parallelForNode<Context,
-            narrowphase::processCandidatesEntry, CandidateCollision>(
+            narrowphase::runNarrowphase, CandidateCollision>(
                 {update_positions});
 
         auto solver = builder.parallelForNode<Context,

@@ -18,6 +18,7 @@ public:
 
     CountT loadObjects(const RigidBodyMetadata *metadatas,
                        const math::AABB *aabbs,
+                       const CollisionPrimitive *primitives,
                        CountT num_objs);
 
     ObjectManager & getObjectManager();
