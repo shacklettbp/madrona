@@ -485,6 +485,14 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
                                uint32_t num_megakernel_blocks,
                                std::pair<int, int> cuda_arch)
 {
+    CompileConfig::OptMode opt_mode = cfg.optMode;
+    
+    const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
+
+    if (force_debug_env && force_debug_env[0] == '1') {
+        opt_mode = CompileConfig::OptMode::Debug;
+    }
+
     using namespace std;
 
     array job_sys_cpp_files {
@@ -540,7 +548,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     // No way to disable optimizations in nvrtc besides enabling debug mode
     fast_compile_flags.push_back("-G");
 
-    if (cfg.optMode == CompileConfig::OptMode::Debug) {
+    if (opt_mode == CompileConfig::OptMode::Debug) {
         compile_flags.push_back("--device-debug");
     } else {
         compile_flags.push_back("-dopt=on");
@@ -548,7 +556,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         compile_flags.push_back("-lineinfo");
     }
 
-    if (cfg.optMode == CompileConfig::OptMode::LTO) {
+    if (opt_mode == CompileConfig::OptMode::LTO) {
         compile_flags.push_back("-dlto");
         compile_flags.push_back("-DMADRONA_MWGPU_LTO_MODE=1");
     }
@@ -571,7 +579,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     auto compile_results =  compileCode(all_cpp_files.data(),
         all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
         fast_compile_flags.data(), fast_compile_flags.size(),
-        cfg.optMode, cfg.execMode);
+        opt_mode, cfg.execMode);
 
     gpu_kernels.mod = compile_results.mod;
 
