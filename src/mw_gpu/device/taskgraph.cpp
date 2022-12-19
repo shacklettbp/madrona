@@ -20,6 +20,33 @@ TaskGraph::Builder::~Builder()
     rawDealloc(all_dependencies_);
 }
 
+TaskGraph::NodeID TaskGraph::Builder::compactArchetypeNode(
+    uint32_t archetype_id, Span<const NodeID> dependencies)
+{
+    uint32_t func_id =
+        mwGPU::UserFuncID<mwGPU::CompactArchetypeEntry>::id;
+    
+    NodeInfo node_info;
+    node_info.type = NodeType::CompactArchetype;
+    node_info.funcID = func_id;
+    node_info.data.compactArchetype.archetypeID = archetype_id;
+    
+    return registerNode(node_info, dependencies);
+}
+
+TaskGraph::NodeID TaskGraph::Builder::recycleEntitiesNode(
+    Span<const NodeID> dependencies)
+{
+    uint32_t func_id =
+        mwGPU::UserFuncID<mwGPU::RecycleEntitiesEntry>::id;
+
+    NodeInfo node_info;
+    node_info.type = NodeType::RecycleEntities;
+    node_info.funcID = func_id;
+
+    return registerNode(node_info, dependencies);
+}
+
 TaskGraph::NodeID TaskGraph::Builder::registerNode(
     const NodeInfo &node_info,
     Span<const NodeID> dependencies)
@@ -204,6 +231,16 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
             return mwGPU::getStateManager()->numArchetypeRows(
                 node.info.data.compactArchetype.archetypeID);
         }
+        case NodeType::RecycleEntities: {
+            auto [recycle_base, num_deleted] =
+                mwGPU::getStateManager()->fetchRecyclableEntities();
+
+            if (num_deleted > 0) {
+                node.info.data.recycleEntities.recycleBase = recycle_base;
+            }
+
+            return num_deleted;
+        }
         default: {
             __builtin_unreachable();
         }
@@ -230,6 +267,12 @@ void mwGPU::CompactArchetypeEntry::run(EntryData &data, int32_t invocation_idx)
     if (invocation_idx == 0) {
         state_mgr->setIsCompacted(archetype_id);
     }
+}
+
+void mwGPU::RecycleEntitiesEntry::run(EntryData &data, int32_t invocation_idx)
+{
+    mwGPU::getStateManager()->recycleEntities(
+        invocation_idx, data.recycleEntities.recycleBase);
 }
 
 TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,

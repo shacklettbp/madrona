@@ -425,4 +425,33 @@ int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const
     archetypes_[archetype_id]->tbl.numRows.load(std::memory_order_relaxed);
 }
 
+std::pair<int32_t, int32_t> StateManager::fetchRecyclableEntities()
+{
+    int32_t num_deleted =
+        entity_store_.deletedOffset.load(std::memory_order_relaxed);
+
+    int32_t available_end =
+        entity_store_.availableOffset.load(std::memory_order_relaxed);
+
+    int32_t recycle_base = available_end - num_deleted;
+
+    if (num_deleted > 0) {
+        entity_store_.deletedOffset.store(0, std::memory_order_relaxed);
+        entity_store_.availableOffset.store(recycle_base,
+                                            std::memory_order_relaxed);
+    }
+
+    return {
+        recycle_base,
+        num_deleted,
+    };
+}
+
+void StateManager::recycleEntities(int32_t thread_offset,
+                                   int32_t recycle_base)
+{
+    entity_store_.availableEntities[recycle_base + thread_offset] =
+        entity_store_.deletedEntities[thread_offset];
+}
+
 }

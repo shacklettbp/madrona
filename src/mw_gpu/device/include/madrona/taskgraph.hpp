@@ -30,10 +30,15 @@ struct EntryData {
         uint32_t archetypeID;
     };
 
+    struct RecycleEntities {
+        int32_t recycleBase;
+    };
+
     union {
         ParallelFor parallelFor;
         ClearTmp clearTmp;
         CompactArchetype compactArchetype;
+        RecycleEntities recycleEntities;
     };
 };
 
@@ -125,6 +130,10 @@ struct CompactArchetypeEntry {
     static void run(EntryData &data, int32_t invocation_idx);
 };
 
+struct RecycleEntitiesEntry {
+    static void run(EntryData &data, int32_t invocation_idx);
+};
+
 }
 
 class TaskGraph {
@@ -133,6 +142,7 @@ private:
         ParallelFor,
         ClearTemporaries,
         CompactArchetype,
+        RecycleEntities,
     };
 
     struct NodeInfo {
@@ -204,16 +214,10 @@ public:
         inline NodeID compactArchetypeNode(Span<const NodeID> dependencies)
         {
             uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-            uint32_t func_id =
-                mwGPU::UserFuncID<mwGPU::CompactArchetypeEntry>::id;
-
-            NodeInfo node_info;
-            node_info.type = NodeType::CompactArchetype;
-            node_info.funcID = func_id;
-            node_info.data.compactArchetype.archetypeID = archetype_id;
-
-            return registerNode(node_info, dependencies);
+            return compactArchetypeNode(archetype_id, dependencies);
         }
+
+        NodeID recycleEntitiesNode(Span<const NodeID> dependencies);
 
         void build(TaskGraph *out);
 
@@ -227,6 +231,9 @@ public:
         struct WorldTypeExtract<Context, ignore> {
             using type = WorldBase;
         };
+
+        NodeID compactArchetypeNode(uint32_t archetype_id,
+                                    Span<const NodeID> dependencies);
 
         NodeID registerNode(const NodeInfo &node_info,
                             Span<const NodeID> dependencies);

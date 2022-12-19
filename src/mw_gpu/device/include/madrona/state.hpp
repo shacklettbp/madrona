@@ -147,6 +147,11 @@ public:
 
     int32_t numArchetypeRows(uint32_t archetype_id) const;
 
+    std::pair<int32_t, int32_t> fetchRecyclableEntities();
+
+    void recycleEntities(int32_t thread_offset,
+                         int32_t recycle_base);
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
