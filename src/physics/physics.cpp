@@ -437,8 +437,7 @@ void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
     }
 }
 
-void BVH::updateLeaf(Entity e,
-                     LeafID leaf_id,
+void BVH::updateLeaf(LeafID leaf_id,
                      const CollisionAABB &obj_aabb)
 {
     // FIXME, handle difference between potentially inflated leaf AABB and
@@ -449,7 +448,6 @@ void BVH::updateLeaf(Entity e,
     Vector3 &leaf_center = leaf_centers_[leaf_id.id];
     leaf_center = (leaf_aabb.pMin + leaf_aabb.pMax) / 2;
 
-    leaf_entities_[leaf_id.id] = e;
     sorted_leaves_[leaf_id.id] = leaf_id.id;
 }
 
@@ -465,12 +463,11 @@ void BVH::updateTree()
 
 inline void updateLeavesEntry(
     Context &ctx,
-    const Entity &e,
     const LeafID &leaf_id,
     const CollisionAABB &aabb)
 {
     BVH &bvh = ctx.getSingleton<BVH>();
-    bvh.updateLeaf(e, leaf_id, aabb);
+    bvh.updateLeaf(leaf_id, aabb);
 }
 
 inline void updateBVHEntry(
@@ -677,11 +674,13 @@ void RigidBodyPhysicsSystem::reset(Context &ctx)
 {
     broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
     bvh.rebuildOnUpdate();
+    bvh.clearLeaves();
 }
 
-broadphase::LeafID RigidBodyPhysicsSystem::registerObject(Context &ctx)
+broadphase::LeafID RigidBodyPhysicsSystem::registerEntity(Context &ctx,
+                                                          Entity e)
 {
-    return ctx.getSingleton<broadphase::BVH>().reserveLeaf();
+    return ctx.getSingleton<broadphase::BVH>().reserveLeaf(e);
 }
 
 void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
@@ -713,7 +712,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
         Position, Rotation, ObjectID, CollisionAABB>(deps);
 
     auto preprocess_leaves = builder.parallelForNode<Context,
-        broadphase::updateLeavesEntry, Entity, broadphase::LeafID, 
+        broadphase::updateLeavesEntry, broadphase::LeafID, 
         CollisionAABB>({update_aabbs});
 
     auto bvh_update = builder.parallelForNode<Context,

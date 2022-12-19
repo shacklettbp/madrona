@@ -114,8 +114,7 @@ public:
     template <typename ArchetypeT>
     Entity makeEntityNow(WorldID world_id);
 
-    template <typename ArchetypeT>
-    void destroyEntityNow(Entity e);
+    inline void destroyEntityNow(Entity e);
 
     template <typename ArchetypeT>
     Loc makeTemporary(WorldID world_id);
@@ -183,7 +182,7 @@ private:
         uint32_t numUserComponents;
         Table tbl;
         ColumnMap columnLookup;
-        bool needCompaction;
+        bool needsCompaction;
     };
 
     uint32_t archetype_component_offset_ = 0;

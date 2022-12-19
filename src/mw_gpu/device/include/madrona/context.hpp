@@ -25,6 +25,8 @@ public:
     template <typename ArchetypeT>
     Loc makeTemporary();
 
+    inline void destroyEntityNow(Entity e);
+
     template <typename ComponentT>
     ComponentT & getUnsafe(Entity e);
 

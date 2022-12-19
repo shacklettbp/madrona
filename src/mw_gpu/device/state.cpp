@@ -315,12 +315,12 @@ bool StateManager::needsCompaction(uint32_t archetype_id) const
 
 void StateManager::setIsCompacted(uint32_t archetype_id)
 {
-    archetypes_[archetype_id]->setIsCompacted = false;
+    archetypes_[archetype_id]->needsCompaction = false;
 }
 
-bool StateManager::numArchetypeRows(uint32_t archetype_id) const
+int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const
 {
-    archetype_[archetype_id]->tbl.numRows.load(std::memory_order_relaxed);
+    archetypes_[archetype_id]->tbl.numRows.load(std::memory_order_relaxed);
 }
 
 }

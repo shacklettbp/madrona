@@ -31,6 +31,11 @@ Loc Context::makeTemporary()
     return state_mgr->makeTemporary<ArchetypeT>(world_id_);
 }
 
+void Context::destroyEntityNow(Entity e)
+{
+    return mwGPU::getStateManager()->destroyEntityNow(e);
+}
+
 template <typename ComponentT>
 ComponentT & Context::getUnsafe(Entity e)
 {

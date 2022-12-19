@@ -200,7 +200,6 @@ Entity StateManager::makeEntityNow(WorldID world_id)
     return makeEntityNow(world_id, archetype_id);
 }
 
-template <typename ArchetypeT>
 void StateManager::destroyEntityNow(Entity e)
 {
     EntityStore::EntitySlot &entity_slot =

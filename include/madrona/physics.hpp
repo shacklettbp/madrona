@@ -70,17 +70,18 @@ class BVH {
 public:
     BVH(CountT max_leaves);
 
-    inline LeafID reserveLeaf();
+    inline LeafID reserveLeaf(Entity e);
 
     template <typename Fn>
     inline void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
 
-    void updateLeaf(Entity e,
-                    LeafID leaf_id,
+    void updateLeaf(LeafID leaf_id,
                     const CollisionAABB &obj_aabb);
 
     inline void rebuildOnUpdate();
     void updateTree();
+
+    inline void clearLeaves();
 
 private:
     static constexpr int32_t sentinel_ = 0xFFFF'FFFF_i32;
@@ -141,7 +142,7 @@ struct RigidBodyPhysicsSystem {
                      CountT max_contacts_per_step);
 
     static void reset(Context &ctx);
-    static broadphase::LeafID registerObject(Context &ctx);
+    static broadphase::LeafID registerEntity(Context &ctx, Entity e);
 
     static void registerTypes(ECSRegistry &registry);
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,

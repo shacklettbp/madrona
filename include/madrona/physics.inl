@@ -5,10 +5,12 @@ namespace phys {
 
 namespace broadphase {
 
-LeafID BVH::reserveLeaf()
+LeafID BVH::reserveLeaf(Entity e)
 {
     int32_t leaf_idx = num_leaves_.fetch_add(1, std::memory_order_relaxed);
     assert(leaf_idx < num_allocated_leaves_);
+
+    leaf_entities_[leaf_idx] = e;
 
     return LeafID {
         leaf_idx,
@@ -58,6 +60,11 @@ void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 void BVH::rebuildOnUpdate()
 {
     force_rebuild_ = true;
+}
+
+void BVH::clearLeaves()
+{
+    num_leaves_.store(0, std::memory_order_relaxed);
 }
 
 bool BVH::Node::isLeaf(CountT child) const
