@@ -66,6 +66,8 @@ ECSRegistry::ECSRegistry(StateManager &state_mgr, void **export_ptr)
 
 StateManager::StateManager(uint32_t)
 {
+    using namespace mwGPU;
+
 #pragma unroll(1)
     for (int32_t i = 0; i < (int32_t)max_components_; i++) {
         Optional<TypeInfo>::noneAt(&components_[i]);
@@ -79,7 +81,46 @@ StateManager::StateManager(uint32_t)
     }
 
     // Initialize entity store
-    for (CountT i = 0; i < EntityStore::maxEntities; i++) {
+    HostAllocator *alloc = getHostAllocator();
+
+    uint32_t init_mapped_entities = 1'048'576;
+    uint32_t max_mapped_entities = 2'147'483'648;
+
+    uint64_t reserve_entity_bytes =
+        (uint64_t)max_mapped_entities * sizeof(EntityStore::EntitySlot);
+    uint64_t reserve_idx_bytes =
+        (uint64_t)max_mapped_entities * sizeof(int32_t);
+
+    reserve_entity_bytes = alloc->roundUpReservation(reserve_entity_bytes);
+    reserve_idx_bytes = alloc->roundUpReservation(reserve_idx_bytes);
+
+    uint64_t init_entity_bytes =
+        (uint64_t)init_mapped_entities * sizeof(EntityStore::EntitySlot);
+    uint64_t init_idx_bytes =
+        (uint64_t)init_mapped_entities * sizeof(int32_t);
+
+    entity_store_.numSlotGrowBytes = alloc->roundUpAlloc(init_entity_bytes);
+
+    entity_store_.numIdxGrowBytes = alloc->roundUpAlloc(init_idx_bytes);
+
+    // FIXME technically we should find some kind of common multiple here
+    assert(entity_store_.numSlotGrowBytes / sizeof(EntityStore::EntitySlot) ==
+           init_mapped_entities);
+    assert(entity_store_.numIdxGrowBytes / sizeof(int32_t) ==
+           init_mapped_entities);
+
+    entity_store_.entities = (EntityStore::EntitySlot *)alloc->reserveMemory(
+        reserve_entity_bytes, entity_store_.numSlotGrowBytes);
+
+    entity_store_.availableEntities = (int32_t *)alloc->reserveMemory(
+        reserve_entity_bytes, entity_store_.numIdxGrowBytes);
+    entity_store_.deletedEntities = (int32_t *)alloc->reserveMemory(
+        reserve_entity_bytes, entity_store_.numIdxGrowBytes);
+
+    entity_store_.numGrowEntities = init_mapped_entities;
+    entity_store_.numMappedEntities = init_mapped_entities;
+
+    for (int32_t i = 0; i < init_mapped_entities; i++) {
         entity_store_.entities[i].gen = 0;
         entity_store_.availableEntities[i] = i;
     }
@@ -238,6 +279,53 @@ void StateManager::makeQuery(const uint32_t *components,
     query_data_lock_.unlock();
 }
 
+static inline int32_t getEntitySlot(EntityStore &entity_store)
+{
+    int32_t available_idx =
+        entity_store.availableOffset.fetch_add(1, std::memory_order_relaxed);
+
+    if (available_idx < entity_store.numMappedEntities) [[likely]] {
+        return available_idx;
+    }
+
+    entity_store.growLock.lock();
+
+    if (available_idx < entity_store.numMappedEntities) {
+        entity_store.growLock.unlock();
+
+        return available_idx;
+    }
+
+    void *entities_grow_base = (char *)entity_store.entities +
+        (uint64_t)entity_store.numMappedEntities *
+            sizeof(EntityStore::EntitySlot);
+
+    void *available_grow_base =
+        (char *)entity_store.availableEntities +
+            (uint64_t)entity_store.numMappedEntities * sizeof(int32_t);
+
+    void *deleted_grow_base =
+        (char *)entity_store.deletedEntities +
+            (uint64_t)entity_store.numMappedEntities * sizeof(int32_t);
+
+    auto *alloc = mwGPU::getHostAllocator();
+    alloc->mapMemory(entities_grow_base, entity_store.numSlotGrowBytes);
+    alloc->mapMemory(available_grow_base, entity_store.numIdxGrowBytes);
+    alloc->mapMemory(deleted_grow_base, entity_store.numIdxGrowBytes);
+
+    for (int32_t i = 0; i < entity_store.numGrowEntities; i++) {
+        int32_t idx = i + entity_store.numMappedEntities;
+        entity_store.entities[idx].gen = 0;
+        entity_store.availableEntities[idx] = idx;
+    }
+
+    entity_store.numMappedEntities += entity_store.numGrowEntities;
+
+    entity_store.growLock.unlock();
+
+    return available_idx;
+}
+
 Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
 {
     Table &tbl = archetypes_[archetype_id]->tbl;
@@ -253,11 +341,7 @@ Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
         row,
     };
 
-    int32_t available_idx =
-        entity_store_.availableOffset.fetch_add(1, std::memory_order_relaxed);
-    assert(available_idx < EntityStore::maxEntities);
-
-    int32_t entity_slot_idx = entity_store_.availableEntities[available_idx];
+    int32_t entity_slot_idx = getEntitySlot(entity_store_);
 
     EntityStore::EntitySlot &entity_slot =
         entity_store_.entities[entity_slot_idx];

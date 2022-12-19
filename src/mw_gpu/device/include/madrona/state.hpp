@@ -73,8 +73,6 @@ private:
 };
 
 struct EntityStore {
-    static constexpr CountT maxEntities = 1048576;
-
     struct EntitySlot {
         Loc loc;
         uint32_t gen;
@@ -82,9 +80,17 @@ struct EntityStore {
 
     std::atomic_int32_t availableOffset = 0;
     std::atomic_int32_t deletedOffset = 0;
-    std::array<EntitySlot, maxEntities> entities;
-    std::array<int32_t, maxEntities> availableEntities;
-    std::array<int32_t, maxEntities> deletedEntities;
+
+    EntitySlot *entities;
+    int32_t *availableEntities;
+    int32_t *deletedEntities;
+
+    int32_t numMappedEntities;
+    uint32_t numGrowEntities;
+    uint32_t numSlotGrowBytes;
+    uint32_t numIdxGrowBytes;
+
+    utils::SpinLock growLock {};
 };
 
 class StateManager {
