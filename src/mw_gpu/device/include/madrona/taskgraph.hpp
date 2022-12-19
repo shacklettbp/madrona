@@ -26,9 +26,14 @@ struct EntryData {
         uint32_t archetypeID;
     };
 
+    struct CompactArchetype {
+        uint32_t archetypeID;
+    };
+
     union {
         ParallelFor parallelFor;
         ClearTmp clearTmp;
+        CompactArchetype compactArchetype;
     };
 };
 
@@ -108,11 +113,16 @@ struct ParallelForEntry : public EntryBase<ContextT, WorldDataT> {
 };
 
 struct ClearTmpEntry {
-    static inline void run(EntryData &data, int32_t invocation_idx) {
+    static inline void run(EntryData &data, int32_t invocation_idx)
+    {
         uint32_t archetype_id = data.clearTmp.archetypeID;
         StateManager *state_mgr = mwGPU::getStateManager();
         state_mgr->clearTemporaries(archetype_id);
     }
+};
+
+struct CompactArchetypeEntry {
+    static void run(EntryData &data, int32_t invocation_idx);
 };
 
 }
@@ -122,6 +132,7 @@ private:
     enum class NodeType {
         ParallelFor,
         ClearTemporaries,
+        CompactArchetype,
     };
 
     struct NodeInfo {
@@ -185,6 +196,21 @@ public:
             node_info.data.clearTmp = {
                 archetype_id,
             };
+
+            return registerNode(node_info, dependencies);
+        }
+
+        template <typename ArchetypeT>
+        inline NodeID compactArchetypeNode(Span<const NodeID> dependencies)
+        {
+            uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+            uint32_t func_id =
+                mwGPU::UserFuncID<mwGPU::CompactArchetypeEntry>::id;
+
+            NodeInfo node_info;
+            node_info.type = NodeType::CompactArchetype;
+            node_info.funcID = func_id;
+            node_info.data.compactArchetype.archetypeID = archetype_id;
 
             return registerNode(node_info, dependencies);
         }

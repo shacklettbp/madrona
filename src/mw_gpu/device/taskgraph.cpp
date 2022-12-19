@@ -200,15 +200,36 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
         case NodeType::ClearTemporaries: {
             return 1_u32;
         }
+        case NodeType::CompactArchetype: {
+            return mwGPU::getStateManager()->numArchetypeRows(
+                node.info.data.compactArchetype.archetypeID);
+        }
         default: {
-            assert(false);
+            __builtin_unreachable();
         }
     };
 
-    // For some reason, putting __builtin_unreachable here completely breaks
-    // everything??
+    __builtin_unreachable();
+}
 
-    return 0;
+void mwGPU::CompactArchetypeEntry::run(EntryData &data, int32_t invocation_idx)
+{
+    uint32_t archetype_id = data.compactArchetype.archetypeID;
+    StateManager *state_mgr = mwGPU::getStateManager();
+
+    bool need_compact = state_mgr->needsCompaction(archetype_id);
+
+    if (!need_compact) {
+        return;
+    }
+
+    // Actually compact
+
+
+
+    if (invocation_idx == 0) {
+        state_mgr->setIsCompacted(archetype_id);
+    }
 }
 
 TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,

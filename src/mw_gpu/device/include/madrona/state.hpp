@@ -125,6 +125,9 @@ public:
 
     void clearTemporaries(uint32_t archetype_id);
 
+    bool needsCompaction(uint32_t archetype_id) const;
+    void setIsCompacted(uint32_t archetype_id);
+
     template <typename ComponentT>
     ComponentT & getUnsafe(Entity e);
 
@@ -136,6 +139,8 @@ public:
 
     template <typename SingletonT>
     SingletonT * getSingletonColumn();
+
+    int32_t numArchetypeRows(uint32_t archetype_id) const;
 
 private:
     template <typename SingletonT>
@@ -178,6 +183,7 @@ private:
         uint32_t numUserComponents;
         Table tbl;
         ColumnMap columnLookup;
+        bool needCompaction;
     };
 
     uint32_t archetype_component_offset_ = 0;

@@ -308,4 +308,19 @@ void StateManager::clearTemporaries(uint32_t archetype_id)
     tbl.numRows = 0;
 }
 
+bool StateManager::needsCompaction(uint32_t archetype_id) const
+{
+    return archetypes_[archetype_id]->needsCompaction;
+}
+
+void StateManager::setIsCompacted(uint32_t archetype_id)
+{
+    archetypes_[archetype_id]->setIsCompacted = false;
+}
+
+bool StateManager::numArchetypeRows(uint32_t archetype_id) const
+{
+    archetype_[archetype_id]->tbl.numRows.load(std::memory_order_relaxed);
+}
+
 }
