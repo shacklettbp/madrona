@@ -25,18 +25,21 @@ __global__ void initWorlds(int32_t num_worlds,
                            void *inits_raw)
 {
     InitT *inits = (InitT *)inits_raw;
+    int32_t world_idx = threadIdx.x + blockDim.x * blockIdx.x;
 
-    for (int32_t world_idx = 0; world_idx < num_worlds; world_idx++) {
-        const InitT &init = inits[world_idx];
-        WorldBase *world = TaskGraph::getWorld(world_idx);
-
-        ContextT ctx =
-            mwGPU::EntryBase<ContextT, WorldDataT>::makeContext(WorldID {
-                world_idx,
-            });
-
-        new (world) WorldDataT(ctx, init);
+    if (world_idx >= num_worlds) {
+        return;
     }
+
+    const InitT &init = inits[world_idx];
+    WorldBase *world = TaskGraph::getWorld(world_idx);
+
+    ContextT ctx =
+        mwGPU::EntryBase<ContextT, WorldDataT>::makeContext(WorldID {
+            world_idx,
+        });
+
+    new (world) WorldDataT(ctx, init);
 }
 
 template <typename ContextT, typename WorldDataT, typename InitT>

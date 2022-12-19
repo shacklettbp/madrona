@@ -114,7 +114,7 @@ public:
     template <typename ArchetypeT>
     Entity makeEntityNow(WorldID world_id);
 
-    inline void destroyEntityNow(Entity e);
+    void destroyEntityNow(Entity e);
 
     template <typename ArchetypeT>
     Loc makeTemporary(WorldID world_id);

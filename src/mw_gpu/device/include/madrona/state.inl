@@ -200,24 +200,6 @@ Entity StateManager::makeEntityNow(WorldID world_id)
     return makeEntityNow(world_id, archetype_id);
 }
 
-void StateManager::destroyEntityNow(Entity e)
-{
-    EntityStore::EntitySlot &entity_slot =
-        entity_store_.entities[e.id];
-
-    entity_slot.gen++;
-    Loc loc = entity_slot.loc;
-
-    Table &tbl = archetypes_[loc.archetype]->tbl;
-    WorldID *world_column = (WorldID *)tbl.columns[1];
-    world_column[loc.row] = WorldID { -1 };
-
-    int32_t deleted_offset =
-        entity_store_.deletedOffset.fetch_add(1, std::memory_order_relaxed);
-
-    entity_store_.deletedEntities[deleted_offset] = e.id;
-}
-
 template <typename ArchetypeT>
 Loc StateManager::makeTemporary(WorldID world_id)
 {

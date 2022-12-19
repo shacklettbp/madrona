@@ -922,7 +922,12 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                      consts::numMegakernelThreads, no_args);
     } else if (exec_mode == CompileConfig::Executor::TaskGraph) {
         launchKernel(gpu_kernels.initECS, 1, 1, init_ecs_args);
-        launchKernel(gpu_kernels.initWorlds, 1, 1, init_worlds_args);
+
+        uint32_t num_init_blocks =
+            utils::divideRoundUp(num_worlds, consts::numMegakernelThreads);
+
+        launchKernel(gpu_kernels.initWorlds, num_init_blocks,
+                     consts::numMegakernelThreads, init_worlds_args);
         launchKernel(gpu_kernels.initTasks, 1, 1, no_args);
     }
 
