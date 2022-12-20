@@ -146,7 +146,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
     : componentOffset(offset),
       numUserComponents(num_user_components),
       tbl {},
-      columnLookup(lookup_input, num_user_components)
+      columnLookup(lookup_input, num_columns)
 {
     using namespace mwGPU;
 
@@ -190,6 +190,7 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
     std::array<IntegerMapPair, max_archetype_components_> lookup_input;
 
     TypeInfo *type_ptr = type_infos.data();
+    IntegerMapPair *lookup_input_ptr = lookup_input.data();
 
     // Add entity column as first column of every table
     *type_ptr = *components_[0];
@@ -199,6 +200,18 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
     *type_ptr = *components_[1];
     type_ptr++;
 
+    *lookup_input_ptr = {
+        TypeTracker::typeID<Entity>(),
+        0,
+    };
+    lookup_input_ptr++;
+
+    *lookup_input_ptr = {
+        TypeTracker::typeID<WorldID>(),
+        1,
+    };
+    lookup_input_ptr++;
+
     for (int i = 0; i < (int)num_user_components; i++) {
         ComponentID component_id = components[i];
         assert(component_id.id != TypeTracker::unassignedTypeID);
@@ -206,7 +219,7 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
 
         type_ptr[i] = *components_[component_id.id];
 
-        lookup_input[i] = IntegerMapPair {
+        lookup_input_ptr[i] = IntegerMapPair {
             /* .key = */   component_id.id,
             /* .value = */ (uint32_t)i + user_component_offset_,
         };
