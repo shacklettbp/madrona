@@ -29,6 +29,11 @@ struct EntryData {
     struct CompactArchetype {
         uint32_t archetypeID;
     };
+    
+    struct SortArchetype {
+        uint32_t archetypeID;
+        int32_t columnIndex;
+    };
 
     struct RecycleEntities {
         int32_t recycleBase;
@@ -38,6 +43,7 @@ struct EntryData {
         ParallelFor parallelFor;
         ClearTmp clearTmp;
         CompactArchetype compactArchetype;
+        SortArchetype sortArchetype;
         RecycleEntities recycleEntities;
     };
 };
@@ -130,6 +136,10 @@ struct CompactArchetypeEntry {
     static void run(EntryData &data, int32_t invocation_idx);
 };
 
+struct SortArchetypeEntry {
+    static void run(EntryData &data, int32_t invocation_idx);
+};
+
 struct RecycleEntitiesEntry {
     static void run(EntryData &data, int32_t invocation_idx);
 };
@@ -142,6 +152,7 @@ private:
         ParallelFor,
         ClearTemporaries,
         CompactArchetype,
+        SortArchetype,
         RecycleEntities,
     };
 
@@ -217,6 +228,14 @@ public:
             return compactArchetypeNode(archetype_id, dependencies);
         }
 
+        template <typename ArchetypeT, typename ComponentT>
+        inline NodeID sortArchetypeNode(Span<const NodeID> dependencies)
+        {
+            return sortArchetypeNode(TypeTracker::typeID<ArchetypeT>(),
+                                     TypeTracker::typeID<ComponentT>(),
+                                     dependencies);
+        }
+
         NodeID recycleEntitiesNode(Span<const NodeID> dependencies);
 
         void build(TaskGraph *out);
@@ -234,6 +253,10 @@ public:
 
         NodeID compactArchetypeNode(uint32_t archetype_id,
                                     Span<const NodeID> dependencies);
+
+        NodeID sortArchetypeNode(uint32_t archetype_id,
+                                 uint32_t component_id,
+                                 Span<const NodeID> dependencies);
 
         NodeID registerNode(const NodeInfo &node_info,
                             Span<const NodeID> dependencies);

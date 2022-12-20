@@ -7,6 +7,11 @@
  */
 #include <madrona/state.hpp>
 
+#include <cuda/barrier>
+#include <cub/block/block_radix_sort.cuh>
+
+#include "megakernel_consts.hpp"
+
 namespace madrona {
 
 static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
@@ -146,7 +151,8 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
     : componentOffset(offset),
       numUserComponents(num_user_components),
       tbl {},
-      columnLookup(lookup_input, num_columns)
+      columnLookup(lookup_input, num_columns),
+      dirty(false)
 {
     using namespace mwGPU;
 
@@ -341,7 +347,9 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
 
 Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
 {
-    Table &tbl = archetypes_[archetype_id]->tbl;
+    auto &archetype = *archetypes_[archetype_id];
+    archetype.dirty = true;
+    Table &tbl = archetype.tbl;
 
     int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
 
@@ -407,7 +415,9 @@ void StateManager::destroyEntityNow(Entity e)
     entity_slot.gen++;
     Loc loc = entity_slot.loc;
 
-    Table &tbl = archetypes_[loc.archetype]->tbl;
+    auto &archetype = *archetypes_[loc.archetype];
+    archetype.dirty = true;
+    Table &tbl = archetype.tbl;
     WorldID *world_column = (WorldID *)tbl.columns[1];
     world_column[loc.row] = WorldID { -1 };
 
@@ -423,14 +433,9 @@ void StateManager::clearTemporaries(uint32_t archetype_id)
     tbl.numRows = 0;
 }
 
-bool StateManager::needsCompaction(uint32_t archetype_id) const
+bool StateManager::isDirty(uint32_t archetype_id) const
 {
-    return archetypes_[archetype_id]->needsCompaction;
-}
-
-void StateManager::setIsCompacted(uint32_t archetype_id)
-{
-    archetypes_[archetype_id]->needsCompaction = false;
+    return archetypes_[archetype_id]->dirty;
 }
 
 int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const
@@ -460,11 +465,99 @@ std::pair<int32_t, int32_t> StateManager::fetchRecyclableEntities()
     };
 }
 
+int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
+                                              uint32_t component_id) const
+{
+    return archetypes_[archetype_id]->columnLookup[component_id];
+}
+
 void StateManager::recycleEntities(int32_t thread_offset,
                                    int32_t recycle_base)
 {
     entity_store_.availableEntities[recycle_base + thread_offset] =
         entity_store_.deletedEntities[thread_offset];
+}
+
+void StateManager::sortArchetype(uint32_t archetype_id,
+                                 int32_t column_idx,
+                                 int32_t invocation_idx)
+{
+    using BlockRadixSortT = cub::BlockRadixSort<uint32_t, 
+                                                consts::numMegakernelThreads,
+                                                numElementsPerSortThread,
+                                                int32_t>;
+
+    using TempStorageT = typename BlockRadixSortT::TempStorage;
+
+    static_assert(sizeof(TempStorageT) <=
+                  mwGPU::SharedMemStorage::numSMemBytes);
+
+    auto &archetype = *archetypes_[archetype_id];
+    archetype.dirty = false;
+
+    int32_t num_rows = archetype.tbl.numRows.load(std::memory_order_relaxed);
+
+    uint32_t keys[numElementsPerSortThread];
+    int32_t vals[numElementsPerSortThread];
+
+    uint32_t *col = (uint32_t *)archetype.tbl.columns[column_idx];
+
+#pragma unroll
+    for (int32_t i = 0; i < numElementsPerSortThread; i++) {
+        // Each threadblock is responsible for loading numMegakernelThreads * 2
+        // sequential items. Stride these accesses for warp coalescing
+        // FIXME: There's an issue here with the indexing since the count
+        // from prior threadblocks isn't accounted for
+        int32_t row_idx = invocation_idx + i * consts::numMegakernelThreads;
+
+        if (row_idx < num_rows) {
+            keys[i] = col[row_idx];
+            vals[i] = row_idx;
+        } else {
+            keys[i] = 0xFFFF'FFFF;
+            vals[i] = -1;
+        }
+    }
+
+    auto *sort_smem = (TempStorageT *)mwGPU::SharedMemStorage::buffer;
+
+    BlockRadixSortT(*sort_smem).SortBlockedToStriped(keys, vals);
+
+    auto *raw_smem = (char *)mwGPU::SharedMemStorage::buffer;
+
+    // FIXME: can directly use keys to populate worldID column
+
+    for (int32_t col_idx = 0; col_idx < archetype.tbl.numColumns; col_idx++) {
+        uint32_t elem_bytes = archetype.tbl.columnSizes[col_idx];
+        char *col_base = (char *)archetype.tbl.columns[col_idx];
+
+        assert(elem_bytes * consts::numMegakernelThreads < 
+               mwGPU::SharedMemStorage::numSMemBytes);
+
+#pragma unroll
+        for (int32_t i = 0; i < numElementsPerSortThread; i++) {
+            int32_t orig_idx = vals[i];
+            int32_t new_idx = invocation_idx + i * consts::numMegakernelThreads;
+
+            bool valid = orig_idx != -1;
+
+            __syncthreads();
+
+            if (valid) {
+                memcpy(raw_smem + int64_t(elem_bytes) * int64_t(new_idx),
+                       col_base + int64_t(elem_bytes) * int64_t(new_idx),
+                       elem_bytes);
+            } 
+
+            __syncthreads();
+
+            if (valid) {
+                memcpy(col_base + int64_t(elem_bytes) * int64_t(new_idx),
+                       raw_smem + int64_t(elem_bytes) * int64_t(orig_idx),
+                       elem_bytes);
+            }
+        }
+    }
 }
 
 }

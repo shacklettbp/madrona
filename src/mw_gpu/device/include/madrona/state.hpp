@@ -130,8 +130,7 @@ public:
 
     void clearTemporaries(uint32_t archetype_id);
 
-    bool needsCompaction(uint32_t archetype_id) const;
-    void setIsCompacted(uint32_t archetype_id);
+    bool isDirty(uint32_t archetype_id) const;
 
     template <typename ComponentT>
     ComponentT & getUnsafe(Entity e);
@@ -142,6 +141,9 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * getArchetypeColumn();
 
+    int32_t getArchetypeColumnIndex(uint32_t archetype_id,
+                                    uint32_t component_id) const;
+
     template <typename SingletonT>
     SingletonT * getSingletonColumn();
 
@@ -151,6 +153,12 @@ public:
 
     void recycleEntities(int32_t thread_offset,
                          int32_t recycle_base);
+
+    void sortArchetype(uint32_t archetype_id,
+                       int32_t column_idx,
+                       int32_t invocation_idx);
+
+    static inline constexpr int32_t numElementsPerSortThread = 2;
 
 private:
     template <typename SingletonT>
@@ -193,7 +201,7 @@ private:
         uint32_t numUserComponents;
         Table tbl;
         ColumnMap columnLookup;
-        bool needsCompaction;
+        bool dirty;
     };
 
     uint32_t archetype_component_offset_ = 0;

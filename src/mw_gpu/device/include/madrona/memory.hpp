@@ -103,6 +103,17 @@ inline HostAllocator * getHostAllocator()
         GPUImplConsts::get().hostAllocatorAddr;
 }
 
+namespace SharedMemStorage {
+    struct alignas(64) Chunk {};
+
+    //inline constexpr uint64_t numSMemBytes = 15872;
+    // Use a bit lower than max smem here as there are a few
+    // random places using their own smem allocations
+    inline constexpr uint64_t numSMemBytes = 15040;
+    extern __shared__ Chunk buffer[
+        numSMemBytes / sizeof(Chunk)];
+};
+
 #endif
 
 }

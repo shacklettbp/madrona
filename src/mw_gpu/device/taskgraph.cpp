@@ -20,6 +20,29 @@ TaskGraph::Builder::~Builder()
     rawDealloc(all_dependencies_);
 }
 
+
+TaskGraph::NodeID TaskGraph::Builder::sortArchetypeNode(
+    uint32_t archetype_id,
+    uint32_t component_id,
+    Span<const NodeID> dependencies)
+{
+    using namespace mwGPU;
+
+    StateManager *state_mgr = getStateManager();
+    int32_t column_idx =
+        state_mgr->getArchetypeColumnIndex(archetype_id, component_id);
+
+    uint32_t func_id = UserFuncID<SortArchetypeEntry>::id;
+
+    NodeInfo node_info;
+    node_info.type = NodeType::SortArchetype;
+    node_info.funcID = func_id;
+    node_info.data.sortArchetype.archetypeID = archetype_id;
+    node_info.data.sortArchetype.columnIndex = column_idx;
+
+    return registerNode(node_info, dependencies);
+}
+
 TaskGraph::NodeID TaskGraph::Builder::compactArchetypeNode(
     uint32_t archetype_id, Span<const NodeID> dependencies)
 {
@@ -228,8 +251,36 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
             return 1_u32;
         }
         case NodeType::CompactArchetype: {
+            StateManager *state_mgr = mwGPU::getStateManager();
+            bool needs_compact = state_mgr->isDirty(
+                node.info.data.compactArchetype.archetypeID);
+
+            if (!needs_compact) {
+                return 0;
+            }
+
             return mwGPU::getStateManager()->numArchetypeRows(
                 node.info.data.compactArchetype.archetypeID);
+        }
+        case NodeType::SortArchetype: {
+            StateManager *state_mgr = mwGPU::getStateManager();
+            bool needs_sort = state_mgr->isDirty(
+                node.info.data.sortArchetype.archetypeID);
+
+            if (!needs_sort) {
+                return 0;
+            }
+
+            int32_t num_rows = mwGPU::getStateManager()->numArchetypeRows(
+                node.info.data.sortArchetype.archetypeID);
+
+            int32_t num_threads =
+                num_rows / StateManager::numElementsPerSortThread;
+
+            uint32_t num_blocks = utils::divideRoundUp((uint32_t)num_threads,
+                consts::numMegakernelThreads);
+
+            return num_blocks * consts::numMegakernelThreads;
         }
         case NodeType::RecycleEntities: {
             auto [recycle_base, num_deleted] =
@@ -251,22 +302,22 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
 
 void mwGPU::CompactArchetypeEntry::run(EntryData &data, int32_t invocation_idx)
 {
+#if 0
     uint32_t archetype_id = data.compactArchetype.archetypeID;
     StateManager *state_mgr = mwGPU::getStateManager();
-
-    bool need_compact = state_mgr->needsCompaction(archetype_id);
-
-    if (!need_compact) {
-        return;
-    }
+#endif
 
     // Actually compact
+    assert(false);
+}
 
+void mwGPU::SortArchetypeEntry::run(EntryData &data, int32_t invocation_idx)
+{
+    uint32_t archetype_id = data.sortArchetype.archetypeID;
+    int32_t column_index = data.sortArchetype.columnIndex;
+    StateManager *state_mgr = mwGPU::getStateManager();
 
-
-    if (invocation_idx == 0) {
-        state_mgr->setIsCompacted(archetype_id);
-    }
+    state_mgr->sortArchetype(archetype_id, column_index, invocation_idx);
 }
 
 void mwGPU::RecycleEntitiesEntry::run(EntryData &data, int32_t invocation_idx)
