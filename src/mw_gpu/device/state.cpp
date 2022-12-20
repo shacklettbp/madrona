@@ -527,7 +527,47 @@ void StateManager::sortArchetype(uint32_t archetype_id,
 
     // FIXME: can directly use keys to populate worldID column
 
-    for (int32_t col_idx = 0; col_idx < archetype.tbl.numColumns; col_idx++) {
+    {
+        Entity *entities = (Entity *)archetype.tbl.columns[0];
+        Entity *entities_smem = (Entity *)raw_smem;
+
+        for (int32_t i = 0; i < numElementsPerSortThread; i++) {
+            int32_t orig_idx = vals[i];
+            int32_t new_idx =
+                invocation_idx + i * consts::numMegakernelThreads;
+
+            bool valid = orig_idx != -1;
+
+            __syncthreads();
+
+            if (valid) {
+                entities_smem[new_idx] = entities[new_idx];
+            }
+
+            __syncthreads();
+
+            if (valid) {
+                Entity e = entities_smem[orig_idx];
+                entities[new_idx] = e;
+                entity_store_.entities[e.id].loc.row = new_idx;
+            }
+        }
+    }
+
+    {
+        WorldID *world_ids = (WorldID *)archetype.tbl.columns[1];
+
+        for (int32_t i = 0; i < numElementsPerSortThread; i++) {
+            int32_t new_idx =
+                invocation_idx + i * consts::numMegakernelThreads;
+            
+            if (vals[i] != -1) {
+                world_ids[new_idx].idx = keys[i];
+            }
+        }
+    }
+
+    for (int32_t col_idx = 2; col_idx < archetype.tbl.numColumns; col_idx++) {
         uint32_t elem_bytes = archetype.tbl.columnSizes[col_idx];
         char *col_base = (char *)archetype.tbl.columns[col_idx];
 
