@@ -260,4 +260,11 @@ SingletonT * StateManager::getSingletonColumn()
     return (SingletonT *)tbl.columns[2];
 }
 
+
+const SortState & StateManager::getCurrentSortState(
+    uint32_t archetype_id) const
+{
+    return archetypes_[archetype_id]->sortState;
+}
+
 }

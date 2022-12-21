@@ -32,15 +32,55 @@ TaskGraph::NodeID TaskGraph::Builder::sortArchetypeNode(
     int32_t column_idx =
         state_mgr->getArchetypeColumnIndex(archetype_id, component_id);
 
-    uint32_t func_id = UserFuncID<SortArchetypeEntry>::id;
+    // Optimize for sorts on the WorldID column, where the 
+    // max # of worlds is known
+    int32_t num_passes;
+    if (column_idx == 1) {
+        int32_t num_worlds = GPUImplConsts::get().numWorlds;
+        // num_worlds + 1 to leave room for columns with WorldID == -1
+        int32_t num_bits = 32 - __builtin_clz(num_worlds + 1);
 
-    NodeInfo node_info;
-    node_info.type = NodeType::SortArchetype;
-    node_info.funcID = func_id;
-    node_info.data.sortArchetype.archetypeID = archetype_id;
-    node_info.data.sortArchetype.columnIndex = column_idx;
+        num_passes = utils::divideRoundUp(num_bits, 8);
+    } else {
+        num_passes = 4;
+    }
 
-    return registerNode(node_info, dependencies);
+    NodeInfo setup_node;
+    setup_node.type = NodeType::SortArchetypeSetup;
+    setup_node.funcID = UserFuncID<SortArchetypeEntry::Setup>::id;
+    setup_node.data.sortArchetypeFirst.archetypeID = archetype_id;
+    setup_node.data.sortArchetypeFirst.columnIDX = column_idx;
+    setup_node.data.sortArchetypeFirst.numPasses = num_passes;
+
+    auto upsweep_id = registerNode(histogram_node, dependencies);
+
+    NodeInfo histogram_node;
+    histogram_node.type = NodeType::SortArchetypeHistogram;
+    histogram_node.funcID = UserFuncID<SortArchetypeEntry::Histogram>::id;
+    histogram_node.data.sortArchetypeFirst.archetypeID = archetype_id;
+    histogram_node.data.sortArchetypeFirst.columnIDX = column_idx;
+    histogram_node.data.sortArchetypeFirst.numPasses = num_passes;
+
+    auto upsweep_id = registerNode(histogram_node, dependencies);
+
+    NodeInfo prefix_sum_node;
+    prefix_sum_node.type = NodeType::SortArchetypePrefixSum;
+    prefix_sum_node.funcID = UserFuncID<SortArchetypeEntry::PrefixSum>::id;
+    prefix_sum_node.data.sortArchetypeSubpass.archetypeID = archetype_id;
+
+    auto cur_id = registerNode(prefix_sum_node, {upsweep_id});
+
+    for (int pass_idx = 0; pass_idx < num_passes; pass_idx++) {
+        NodeInfo onesweep_node;
+        onesweep_node.type = NodeType::SortArchetypeOnesweep;
+        onesweep_node.funcID = UserFuncID<SortArchetypeEntry::Onesweep>::id;
+        onesweep_node.data.sortArchetypeSubpass.archetypeID = archetype_id;
+        onesweep_node.data.sortArchetypeSubpass.passIDX = pass_idx;
+        
+        cur_id = registerNode(onesweep_node, {cur_id});
+    }
+
+    return cur_id;
 }
 
 TaskGraph::NodeID TaskGraph::Builder::compactArchetypeNode(
@@ -65,6 +105,19 @@ TaskGraph::NodeID TaskGraph::Builder::recycleEntitiesNode(
 
     NodeInfo node_info;
     node_info.type = NodeType::RecycleEntities;
+    node_info.funcID = func_id;
+
+    return registerNode(node_info, dependencies);
+}
+
+TaskGraph::NodeID TaskGraph::Builder::resetTmpAllocatorNode(
+    Span<const NodeID> dependencies)
+{
+    uint32_t func_id = 
+        mwGPU::UserFuncID<mwGPU::ResetTmpAllocatorEntry>::id;
+
+    NodeInfo node_info;
+    node_info.type = NodeType::ResetTmpAllocator;
     node_info.funcID = func_id;
 
     return registerNode(node_info, dependencies);
@@ -262,25 +315,31 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
             return mwGPU::getStateManager()->numArchetypeRows(
                 node.info.data.compactArchetype.archetypeID);
         }
-        case NodeType::SortArchetype: {
+        case NodeType::SortArchetypeSetup: {
             StateManager *state_mgr = mwGPU::getStateManager();
-            bool needs_sort = state_mgr->isDirty(
-                node.info.data.sortArchetype.archetypeID);
+            bool need_sort = state_mgr->archetypeSetupSortState(
+                node.info.data.sortArchetypeHistogram.archetypeID,
+                node.info.data.sortArchetypeHistogram.columnIDX,
+                node.info.data.sortArchetypeHistogram.numPasses);
 
-            if (!needs_sort) {
-                return 0;
-            }
+            return need_sort ? consts::numMegakernelThreads : 0;
+        }
+        case NodeType::SortArchetypeHistogram: {
+            StateManager *state_mgr = mwGPU::getStateManager();
+            const auto &sort_state = state_mgr->getCurrentSortState(
+                node.info.data.sortArchetypeSubpass.archetypeID);
 
-            int32_t num_rows = mwGPU::getStateManager()->numArchetypeRows(
-                node.info.data.sortArchetype.archetypeID);
+            return sort_state.numSortThreads;
+        }
+        case NodeType::SortArchetypePrefixSum: {
+            return consts::numMegakernelThreads;
+        }
+        case NodeType::SortArchetypeOnesweep: {
+            StateManager *state_mgr = mwGPU::getStateManager();
+            const auto &sort_state = state_mgr->getCurrentSortState(
+                node.info.data.sortArchetypeSubpass.archetypeID);
 
-            int32_t num_threads =
-                num_rows / StateManager::numElementsPerSortThread;
-
-            uint32_t num_blocks = utils::divideRoundUp((uint32_t)num_threads,
-                consts::numMegakernelThreads);
-
-            return num_blocks * consts::numMegakernelThreads;
+            return sort_state.numSortThreads;
         }
         case NodeType::RecycleEntities: {
             auto [recycle_base, num_deleted] =
@@ -291,6 +350,13 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
             }
 
             return num_deleted;
+        }
+        case Nodetype::ResetTmpAllocator: {
+            // Hack, as soon as we evaluate count just do the reset
+            // and pretend no work had to be done
+            TmpAllocator::get().reset();
+
+            return 0;
         }
         default: {
             __builtin_unreachable();
@@ -311,13 +377,32 @@ void mwGPU::CompactArchetypeEntry::run(EntryData &data, int32_t invocation_idx)
     assert(false);
 }
 
-void mwGPU::SortArchetypeEntry::run(EntryData &data, int32_t invocation_idx)
+void mwGPU::SortArchetypeEntry::Histogram::run(EntryData &data,
+                                               int32_t invocation_idx)
 {
-    uint32_t archetype_id = data.sortArchetype.archetypeID;
-    int32_t column_index = data.sortArchetype.columnIndex;
+    uint32_t archetype_id = data.sortArchetypeHistogram.archetypeID;
     StateManager *state_mgr = mwGPU::getStateManager();
 
-    state_mgr->sortArchetype(archetype_id, column_index, invocation_idx);
+    state_mgr->sortArchetypeHistogram(archetype_id, invocation_idx);
+}
+
+void mwGPU::SortArchetypeEntry::PrefixSum::run(EntryData &data,
+                                               int32_t invocation_idx)
+{
+    uint32_t archetype_id = data.sortArchetypeSubpass.archetypeID;
+    StateManager *state_mgr = mwGPU::getStateManager();
+
+    state_mgr->sortArchetypePrefixSum(archetype_id, invocation_idx);
+}
+
+void mwGPU::SortArchetypeEntry::Onesweep::run(EntryData &data,
+                                              int32_t invocation_idx)
+{
+    uint32_t archetype_id = data.sortArchetypeSubpass.archetypeID;
+    int32_t pass_idx = data.sortArchetypeSubpass.passIDX;
+    StateManager *state_mgr = mwGPU::getStateManager();
+
+    state_mgr->sortArchetypeOnesweep(archetype_id, pass_idx, invocation_idx);
 }
 
 void mwGPU::RecycleEntitiesEntry::run(EntryData &data, int32_t invocation_idx)
@@ -430,17 +515,23 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
 
     total_bytes = world_data_offset + total_world_bytes;
 
-    uint64_t allocator_data_offset =
+    uint64_t host_allocator_offset =
         utils::roundUp(total_bytes, (uint64_t)alignof(mwGPU::HostAllocator));
 
-    total_bytes = allocator_data_offset + sizeof(mwGPU::HostAllocator);
+    total_bytes = host_allocator_offset + sizeof(mwGPU::HostAllocator);
+
+    uint64_t tmp_allocator_offset =
+        utils::roundUp(total_bytes, (uint64_t)alignof(mwGPU::TmpAllocator));
+
+    total_bytes = tmp_allocator_offset + sizeof(mwGPU::TmpAllocator);
 
     *out_constants = GPUImplConsts {
         /*.jobSystemAddr = */                  (void *)0ul,
         /* .taskGraph = */                     (void *)0ul,
         /* .stateManagerAddr = */              (void *)state_mgr_offset,
         /* .worldDataAddr =  */                (void *)world_data_offset,
-        /* .hostAllocatorAddr = */             (void *)allocator_data_offset,
+        /* .hostAllocatorAddr = */             (void *)host_allocator_offset,
+        /* .tmpAllocatorAddr */                (void *)tmp_allocator_offset,
         /* .rendererASInstancesAddrs = */      (void **)0ul,
         /* .rendererInstanceCountsAddr = */    (void *)0ul,
         /* .rendererBLASesAddr = */            (void *)0ul,

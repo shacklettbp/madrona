@@ -878,6 +878,10 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         (char *)gpu_consts_readback->hostAllocatorAddr +
         (uintptr_t)gpu_state_buffer;
 
+    gpu_consts_readback->tmpAllocatorAddr =
+        (char *)gpu_consts_readback->tmpAllocatorAddr +
+        (uintptr_t)gpu_state_buffer;
+
     uint32_t *instance_counts_host;
     if (batch_renderer.has_value()) {
         gpu_consts_readback->rendererASInstancesAddrs =

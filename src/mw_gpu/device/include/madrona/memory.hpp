@@ -77,7 +77,13 @@ struct HostAllocInit {
     HostChannel *channel;
 };
 
+}
+}
+
 #ifdef MADRONA_GPU_MODE
+
+namespace madrona {
+namespace mwGPU {
 
 class HostAllocator {
 public:
@@ -114,7 +120,32 @@ namespace SharedMemStorage {
         numSMemBytes / sizeof(Chunk)];
 };
 
-#endif
+}
+
+class TmpAllocator {
+public:
+    TmpAllocator();
+
+    void * alloc(uint64_t num_bytes);
+
+    inline void reset()
+    {
+        offset_.store(0, std::memory_order_relaxed);
+    }
+
+    static inline TmpAllocator & get()
+    {
+        return *(TmpAllocator *)
+            GPUImplConsts::get().tmpAllocatorAddr;
+    }
+
+private:
+    void *base_;
+    std::atomic_uint64_t offset_;
+    uint64_t num_mapped_bytes_;
+    utils::SpinLock grow_lock_;
+};
 
 }
-}
+
+#endif

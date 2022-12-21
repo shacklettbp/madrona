@@ -152,7 +152,10 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
       numUserComponents(num_user_components),
       tbl {},
       columnLookup(lookup_input, num_columns),
-      dirty(false)
+      sortState {
+          0,
+          false,
+      }
 {
     using namespace mwGPU;
 
@@ -348,7 +351,7 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
 Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
-    archetype.dirty = true;
+    archetype.sortState.dirty = true;
     Table &tbl = archetype.tbl;
 
     int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
@@ -416,7 +419,7 @@ void StateManager::destroyEntityNow(Entity e)
     Loc loc = entity_slot.loc;
 
     auto &archetype = *archetypes_[loc.archetype];
-    archetype.dirty = true;
+    archetype.sortState.dirty = true;
     Table &tbl = archetype.tbl;
     WorldID *world_column = (WorldID *)tbl.columns[1];
     world_column[loc.row] = WorldID { -1 };
@@ -431,11 +434,6 @@ void StateManager::clearTemporaries(uint32_t archetype_id)
 {
     Table &tbl = archetypes_[archetype_id]->tbl;
     tbl.numRows = 0;
-}
-
-bool StateManager::isDirty(uint32_t archetype_id) const
-{
-    return archetypes_[archetype_id]->dirty;
 }
 
 int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const
@@ -478,9 +476,147 @@ void StateManager::recycleEntities(int32_t thread_offset,
         entity_store_.deletedEntities[thread_offset];
 }
 
-void StateManager::sortArchetype(uint32_t archetype_id,
-                                 int32_t column_idx,
-                                 int32_t invocation_idx)
+namespace sortConsts {
+inline constexpr int RADIX_BITS = 8;
+inline constexpr int RADIX_DIGITS = 1 << RADIX_BITS;
+inline constexpr int ALIGN_BYTES = 256;
+inline constexpr int MAX_NUM_PASSES =
+    (sizeof(uint32_t) * 8 + RADIX_BITS - 1) / RADIX_BITS;
+}
+
+bool StateManager::archetypeSetupSortState(uint32_t archetype_id,
+                                           int32_t column_idx,
+                                           int32_t num_passes)
+{
+    using namespace sortConsts;
+
+    auto &archetype = *archetypes_[archetype_id];
+    SortState &sort_state = archetype.sortState;
+    if (!sort_state.dirty) {
+        sort_state.cachedNumThreads = 0;
+        return false;
+    }
+
+    int32_t num_rows = mwGPU::getStateManager()->numArchetypeRows(
+        node.info.data.sortArchetypeFirst.archetypeID);
+
+    int32_t num_threads =
+        num_rows / StateManager::numElementsPerSortThread;
+
+    uint32_t num_blocks = utils::divideRoundUp((uint32_t)num_threads,
+        consts::numMegakernelThreads);
+
+    uint32_t rounded_num_threads = num_blocks * consts::numMegakernelThreads;
+
+    constexpr uint64_t onesweep_tile_items =
+        consts::numMegakernelThreads * numElementsPerSortThread;
+
+    constexpr uint64_t value_size = sizeof(int);
+
+    uint64_t bins_offset = 0;
+    uint64_t total_bytes = bins_offset +
+        uint64_t(num_passes * RADIX_DIGITS) * sizeof(uint32_t);
+
+    uint64_t lookback_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = lookback_offset + onesweep_tile_items;
+    uint64_t keys_copy_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = keys_copy_offset + uint64_t(num_rows) * sizeof(uint32_t);
+    uint64_t vals_copy_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = vals_copy_offset + uint64_t(num_rows) * sizeof(int);
+    uint64_t vals_alt_copy_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = vals_alt_copy_offset + uint64_t(num_rows) * sizeof(int);
+    uint64_t counters_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = counters_offset + uint64_t(num_passes) * sizeof(uint32_t);
+
+    char *tmp_buffer = (char *)TmpAllocator::get().alloc(total_bytes);
+
+    sort_state.numSortThreads = rounded_num_threads;
+    sort_state.columnIDX = column_idx;
+    sort_state.numPasses = num_passes;
+    sort_state.bins = (uint32_t *)(tmp_buffer + bins_offset);
+    sort_state.loopback = (uint32_t *)(tmp_buffer + loopback_offset);
+    sort_state.keysAlt = (uint32_t *)(tmp_buffer + keys_copy_offset);
+    sort_state.vals = (int *)(tmp_buffer + vals_copy_offset);
+    sort_state.valsAlt = (int *)(tmp_buffer + vals_alt_copy_offset);
+    sort_state.counters = (uint32_t *)(tmp_buffer + counters_offset);
+
+    sort_state.dirty = false;
+
+    return true;
+}
+
+void StateManager::sortArchetypeHistogram(uint32_t archetype_id,
+                                          int32_t invocation_idx)
+{
+    using namespace sortConsts;
+
+    auto &archetype = *archetypes_[archetype_id];
+    auto &sort_state = archetype.sortState;
+
+    struct HistogramSMem {
+        uint32_t bins[MAX_NUM_PASSES][RADIX_DIGITS];
+    };
+
+    HistogramSMem *smem_tmp = (HistogramSMem *)mwGPU::SharedMemStorage::buffer;
+
+    constexpr int32_t block_items = consts::numMegakernelThreads * numElementsPerSortThread;
+    const int32_t block_idx = invocation_idx / consts::numMegakernelThreads;
+
+    const int num_passes = sort_state.numPasses;
+
+    for (int pass = 0; pass < num_passes; pass++) {
+        smem_tmp.bins[pass][threadIdx.x] = 0;
+    }
+
+    __syncthreads();
+
+    uint32_t *keys = archetype.tbl.columns[sort_state.columnIDX];
+
+#pragma unroll
+    for (int i = 0; i < numElementsPerSortThread; i++) {
+        int32_t row_idx = block_idx * block_items +
+            i * consts::numMegakernelThreads + threadIdx.x;
+        sort_state.vals[row_idx] = row_idx; // Initialize values while we're here
+
+        int current_bit = 0;
+        for (int pass = 0; pass < num_passes; pass++) {
+            cub::ShiftDigitExtractor<uint32_t> digit_extractor(current_bit, RADIX_BITS);
+
+            int bin = digit_extractor.Digit(keys[row_idx]);
+            atomicAdd(&smem_tmp.bins[pass][bin], 1);
+
+            current_bit += RADIX_BITS;
+        }
+    }
+
+    for (int pass = 0; pass < num_passes; pass++) {
+        int32_t bin_count = smem_tmp.bins[pass][threadIdx.x];
+
+        int smem_sum = __reduce_add_sync(0xFFFF'FFFF, bin_count);
+        if (threadIdx.x % 32 == 0) {
+            atomicAdd(&sort_state.bins[pass * RADIX_DIGITS + bin], smem_sum);
+        }
+    }
+}
+
+void StateManager::sortArchetypePrefixSum(uint32_t archetype_id,
+                                          int32_t invocation_idx)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    auto &sort_state = archetype.sortState;
+}
+
+void StateManager::sortArchetypeOnesweep(uint32_t archetype_id,
+                                         int32_t pass_idx,
+                                         int32_t invocation_idx)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    auto &sort_state = archetype.sortState;
+}
+
+void StateManager::sortArchetypeUpsweep(uint32_t archetype_id,
+                                        int32_t column_idx,
+                                        int32_t invocation_idx)
 {
     using BlockRadixSortT = cub::BlockRadixSort<uint32_t, 
                                                 consts::numMegakernelThreads,
@@ -493,7 +629,6 @@ void StateManager::sortArchetype(uint32_t archetype_id,
                   mwGPU::SharedMemStorage::numSMemBytes);
 
     auto &archetype = *archetypes_[archetype_id];
-    archetype.dirty = false;
 
     int32_t num_rows = archetype.tbl.numRows.load(std::memory_order_relaxed);
 

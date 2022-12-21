@@ -30,9 +30,15 @@ struct EntryData {
         uint32_t archetypeID;
     };
     
-    struct SortArchetype {
+    struct SortArchetypeHistogram {
         uint32_t archetypeID;
-        int32_t columnIndex;
+        int32_t columnIDX;
+        int32_t numPasses;
+    };
+
+    struct SortArchetypeSubpass {
+        uint32_t archetypeID;
+        int32_t passIDX;
     };
 
     struct RecycleEntities {
@@ -43,7 +49,8 @@ struct EntryData {
         ParallelFor parallelFor;
         ClearTmp clearTmp;
         CompactArchetype compactArchetype;
-        SortArchetype sortArchetype;
+        SortArchetypeHistogram sortArchetypeHistogram;
+        SortArchetypeSubpass sortArchetypeSubpass;
         RecycleEntities recycleEntities;
     };
 };
@@ -137,11 +144,29 @@ struct CompactArchetypeEntry {
 };
 
 struct SortArchetypeEntry {
-    static void run(EntryData &data, int32_t invocation_idx);
+    struct Setup {
+        static void run(EntryData &data, int32_t invocation_idx);
+    };
+
+    struct Histogram {
+        static void run(EntryData &data, int32_t invocation_idx);
+    };
+
+    struct PrefixSum {
+        static void run(EntryData &data, int32_t invocation_idx);
+    };
+
+    struct Onesweep {
+        static void run(EntryData &data, int32_t invocation_idx);
+    };
 };
 
 struct RecycleEntitiesEntry {
     static void run(EntryData &data, int32_t invocation_idx);
+};
+
+struct ResetTmpAllocatorEntry {
+    static void run(EntryData &, int32_t invocation_idx);
 };
 
 }
@@ -152,8 +177,12 @@ private:
         ParallelFor,
         ClearTemporaries,
         CompactArchetype,
-        SortArchetype,
+        SortArchetypeSetup,
+        SortArchetypeHistogram,
+        SortArchetypePrefixSum,
+        SortArchetypeOnesweep,
         RecycleEntities,
+        ResetTmpAllocator,
     };
 
     struct NodeInfo {
@@ -237,6 +266,8 @@ public:
         }
 
         NodeID recycleEntitiesNode(Span<const NodeID> dependencies);
+
+        NodeID resetTmpAllocatorNode(Span<const NodeID> dependencies);
 
         void build(TaskGraph *out);
 

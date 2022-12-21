@@ -68,6 +68,42 @@ namespace SharedMemStorage {
 __shared__ Chunk buffer[numSMemBytes / sizeof(Chunk)];
 }
 
-
 }
+
+TmpAllocator::TmpAllocator()
+    : base_(mwGPU::getHostAllocator()->reserveMemory(128ul * 1024ul * 1024ul * 1024ul, 0)),
+      offset_(0),
+      num_mapped_bytes_(0),
+      grow_lock_()
+{}
+
+void * TmpAllocator::alloc(uint64_t num_bytes)
+{
+    num_bytes = utils::roundUpPow2(num_bytes, 256);
+    uint64_t alloc_offset = offset_.fetch_add(num_bytes,
+        std::memory_order_relaxed);
+
+    if (alloc_offset >= num_mapped_bytes_) {
+        grow_lock_.lock();
+
+        uint64_t cur_mapped_bytes = num_mapped_bytes_;
+        if (alloc_offset >= cur_mapped_bytes) {
+            auto *host_alloc = mwGPU::getHostAllocator();
+
+            uint64_t num_added_bytes = cur_mapped_bytes;
+            num_added_bytes = host_alloc->roundUpAlloc(
+                std::max(num_added_bytes, 1024 * 1024));
+            num_added_bytes = std::min(num_added_bytes, 256 * 1024 * 1024);
+            host_alloc->mapMemory(
+                (char *)base_ + cur_mapped_bytes, num_added_bytes);
+
+            num_mapped_bytes_ = cur_mapped_bytes + num_added_bytes;
+        }
+
+        grow_lock_.unlock();
+    }
+
+    return (char *)base_ + alloc_offset;
+}
+
 }
