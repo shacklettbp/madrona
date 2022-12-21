@@ -136,7 +136,7 @@ public:
     static inline TmpAllocator & get()
     {
         return *(TmpAllocator *)
-            GPUImplConsts::get().tmpAllocatorAddr;
+            mwGPU::GPUImplConsts::get().tmpAllocatorAddr;
     }
 
 private:

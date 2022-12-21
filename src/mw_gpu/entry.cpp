@@ -727,7 +727,9 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
             REQ_CU(cuMemAddressReserve(&dev_ptr, num_reserve_bytes,
                                        0, 0, 0));
 
-            mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
+            if (num_alloc_bytes > 0) {
+                mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
+            }
 
             printf("Reserved %p\n", (void *)dev_ptr);
 

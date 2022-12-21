@@ -484,7 +484,7 @@ inline constexpr int MAX_NUM_PASSES =
     (sizeof(uint32_t) * 8 + RADIX_BITS - 1) / RADIX_BITS;
 }
 
-bool StateManager::archetypeSetupSortState(uint32_t archetype_id,
+void StateManager::archetypeSetupSortState(uint32_t archetype_id,
                                            int32_t column_idx,
                                            int32_t num_passes)
 {
@@ -493,12 +493,11 @@ bool StateManager::archetypeSetupSortState(uint32_t archetype_id,
     auto &archetype = *archetypes_[archetype_id];
     SortState &sort_state = archetype.sortState;
     if (!sort_state.dirty) {
-        sort_state.cachedNumThreads = 0;
-        return false;
+        sort_state.numSortThreads = 0;
+        return;
     }
 
-    int32_t num_rows = mwGPU::getStateManager()->numArchetypeRows(
-        node.info.data.sortArchetypeFirst.archetypeID);
+    int32_t num_rows = archetype.tbl.numRows.load(std::memory_order_relaxed);
 
     int32_t num_threads =
         num_rows / StateManager::numElementsPerSortThread;
@@ -510,8 +509,6 @@ bool StateManager::archetypeSetupSortState(uint32_t archetype_id,
 
     constexpr uint64_t onesweep_tile_items =
         consts::numMegakernelThreads * numElementsPerSortThread;
-
-    constexpr uint64_t value_size = sizeof(int);
 
     uint64_t bins_offset = 0;
     uint64_t total_bytes = bins_offset +
@@ -534,19 +531,16 @@ bool StateManager::archetypeSetupSortState(uint32_t archetype_id,
     sort_state.columnIDX = column_idx;
     sort_state.numPasses = num_passes;
     sort_state.bins = (uint32_t *)(tmp_buffer + bins_offset);
-    sort_state.loopback = (uint32_t *)(tmp_buffer + loopback_offset);
+    sort_state.lookback = (uint32_t *)(tmp_buffer + lookback_offset);
     sort_state.keysAlt = (uint32_t *)(tmp_buffer + keys_copy_offset);
     sort_state.vals = (int *)(tmp_buffer + vals_copy_offset);
     sort_state.valsAlt = (int *)(tmp_buffer + vals_alt_copy_offset);
     sort_state.counters = (uint32_t *)(tmp_buffer + counters_offset);
-
     sort_state.dirty = false;
-
-    return true;
 }
 
-void StateManager::sortArchetypeHistogram(uint32_t archetype_id,
-                                          int32_t invocation_idx)
+void StateManager::sortArchetype(uint32_t archetype_id,
+                                 int32_t invocation_idx)
 {
     using namespace sortConsts;
 
@@ -565,12 +559,12 @@ void StateManager::sortArchetypeHistogram(uint32_t archetype_id,
     const int num_passes = sort_state.numPasses;
 
     for (int pass = 0; pass < num_passes; pass++) {
-        smem_tmp.bins[pass][threadIdx.x] = 0;
+        smem_tmp->bins[pass][threadIdx.x] = 0;
     }
 
     __syncthreads();
 
-    uint32_t *keys = archetype.tbl.columns[sort_state.columnIDX];
+    uint32_t *keys = (uint32_t *)archetype.tbl.columns[sort_state.columnIDX];
 
 #pragma unroll
     for (int i = 0; i < numElementsPerSortThread; i++) {
@@ -583,38 +577,26 @@ void StateManager::sortArchetypeHistogram(uint32_t archetype_id,
             cub::ShiftDigitExtractor<uint32_t> digit_extractor(current_bit, RADIX_BITS);
 
             int bin = digit_extractor.Digit(keys[row_idx]);
-            atomicAdd(&smem_tmp.bins[pass][bin], 1);
+            atomicAdd(&smem_tmp->bins[pass][bin], 1);
 
             current_bit += RADIX_BITS;
         }
     }
 
+    __syncthreads();
+
     for (int pass = 0; pass < num_passes; pass++) {
-        int32_t bin_count = smem_tmp.bins[pass][threadIdx.x];
+        int32_t bin_count = smem_tmp->bins[pass][threadIdx.x];
 
         int smem_sum = __reduce_add_sync(0xFFFF'FFFF, bin_count);
         if (threadIdx.x % 32 == 0) {
-            atomicAdd(&sort_state.bins[pass * RADIX_DIGITS + bin], smem_sum);
+            atomicAdd(&sort_state.bins[pass * RADIX_DIGITS + threadIdx.x], smem_sum);
         }
     }
 }
 
-void StateManager::sortArchetypePrefixSum(uint32_t archetype_id,
-                                          int32_t invocation_idx)
-{
-    auto &archetype = *archetypes_[archetype_id];
-    auto &sort_state = archetype.sortState;
-}
-
-void StateManager::sortArchetypeOnesweep(uint32_t archetype_id,
-                                         int32_t pass_idx,
-                                         int32_t invocation_idx)
-{
-    auto &archetype = *archetypes_[archetype_id];
-    auto &sort_state = archetype.sortState;
-}
-
-void StateManager::sortArchetypeUpsweep(uint32_t archetype_id,
+#if 0
+void StateManager::sortArchetypeBlock(uint32_t archetype_id,
                                         int32_t column_idx,
                                         int32_t invocation_idx)
 {
@@ -734,5 +716,6 @@ void StateManager::sortArchetypeUpsweep(uint32_t archetype_id,
         }
     }
 }
+#endif
 
 }

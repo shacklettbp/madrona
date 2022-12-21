@@ -30,15 +30,14 @@ struct EntryData {
         uint32_t archetypeID;
     };
     
-    struct SortArchetypeHistogram {
+    struct SortArchetypeSetup {
         uint32_t archetypeID;
         int32_t columnIDX;
         int32_t numPasses;
     };
 
-    struct SortArchetypeSubpass {
+    struct SortArchetype {
         uint32_t archetypeID;
-        int32_t passIDX;
     };
 
     struct RecycleEntities {
@@ -49,8 +48,8 @@ struct EntryData {
         ParallelFor parallelFor;
         ClearTmp clearTmp;
         CompactArchetype compactArchetype;
-        SortArchetypeHistogram sortArchetypeHistogram;
-        SortArchetypeSubpass sortArchetypeSubpass;
+        SortArchetypeSetup sortArchetypeSetup;
+        SortArchetype sortArchetype;
         RecycleEntities recycleEntities;
     };
 };
@@ -148,15 +147,7 @@ struct SortArchetypeEntry {
         static void run(EntryData &data, int32_t invocation_idx);
     };
 
-    struct Histogram {
-        static void run(EntryData &data, int32_t invocation_idx);
-    };
-
-    struct PrefixSum {
-        static void run(EntryData &data, int32_t invocation_idx);
-    };
-
-    struct Onesweep {
+    struct Run {
         static void run(EntryData &data, int32_t invocation_idx);
     };
 };
@@ -178,9 +169,7 @@ private:
         ClearTemporaries,
         CompactArchetype,
         SortArchetypeSetup,
-        SortArchetypeHistogram,
-        SortArchetypePrefixSum,
-        SortArchetypeOnesweep,
+        SortArchetype,
         RecycleEntities,
         ResetTmpAllocator,
     };

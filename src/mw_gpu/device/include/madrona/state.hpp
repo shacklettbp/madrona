@@ -157,7 +157,7 @@ public:
         int32_t columnIDX;
         int32_t numPasses;
         uint32_t *bins;
-        uint32_t *loopback;
+        uint32_t *lookback;
         uint32_t *keysAlt;
         int *vals;
         int *valsAlt;
@@ -165,22 +165,15 @@ public:
         bool dirty;
     };
 
-    uint32_t archetypeSetupSortState(uint32_t archetype_id,
-                                     int32_t column_idx,
-                                     int32_t num_passes);
+    void archetypeSetupSortState(uint32_t archetype_id,
+                                 int32_t column_idx,
+                                 int32_t num_passes);
 
     inline const SortState & getCurrentSortState(
         uint32_t archetype_id) const;
 
-    void sortArchetypeHistogram(uint32_t archetype_id,
-                                int32_t invocation_idx);
-
-    void sortArchetypePrefixSum(uint32_t archetype_id,
-                                int32_t invocation_idx);
-
-    void sortArchetypeOnesweep(uint32_t archetype_id,
-                               int32_t pass_idx,
-                               int32_t invocation_idx);
+    void sortArchetype(uint32_t archetype_id,
+                      int32_t invocation_idx);
 
     static inline constexpr int32_t numElementsPerSortThread = 2;
 

@@ -92,8 +92,8 @@ void * TmpAllocator::alloc(uint64_t num_bytes)
 
             uint64_t num_added_bytes = cur_mapped_bytes;
             num_added_bytes = host_alloc->roundUpAlloc(
-                std::max(num_added_bytes, 1024 * 1024));
-            num_added_bytes = std::min(num_added_bytes, 256 * 1024 * 1024);
+                max(num_added_bytes, uint64_t(1024 * 1024)));
+            num_added_bytes = min(num_added_bytes, uint64_t(256 * 1024 * 1024));
             host_alloc->mapMemory(
                 (char *)base_ + cur_mapped_bytes, num_added_bytes);
 

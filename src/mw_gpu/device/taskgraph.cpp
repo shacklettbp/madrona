@@ -38,7 +38,7 @@ TaskGraph::NodeID TaskGraph::Builder::sortArchetypeNode(
     if (column_idx == 1) {
         int32_t num_worlds = GPUImplConsts::get().numWorlds;
         // num_worlds + 1 to leave room for columns with WorldID == -1
-        int32_t num_bits = 32 - __builtin_clz(num_worlds + 1);
+        int32_t num_bits = 32 - __clz(num_worlds + 1);
 
         num_passes = utils::divideRoundUp(num_bits, 8);
     } else {
@@ -48,39 +48,18 @@ TaskGraph::NodeID TaskGraph::Builder::sortArchetypeNode(
     NodeInfo setup_node;
     setup_node.type = NodeType::SortArchetypeSetup;
     setup_node.funcID = UserFuncID<SortArchetypeEntry::Setup>::id;
-    setup_node.data.sortArchetypeFirst.archetypeID = archetype_id;
-    setup_node.data.sortArchetypeFirst.columnIDX = column_idx;
-    setup_node.data.sortArchetypeFirst.numPasses = num_passes;
+    setup_node.data.sortArchetypeSetup.archetypeID = archetype_id;
+    setup_node.data.sortArchetypeSetup.columnIDX = column_idx;
+    setup_node.data.sortArchetypeSetup.numPasses = num_passes;
 
-    auto upsweep_id = registerNode(histogram_node, dependencies);
+    auto setup_id = registerNode(setup_node, dependencies);
 
-    NodeInfo histogram_node;
-    histogram_node.type = NodeType::SortArchetypeHistogram;
-    histogram_node.funcID = UserFuncID<SortArchetypeEntry::Histogram>::id;
-    histogram_node.data.sortArchetypeFirst.archetypeID = archetype_id;
-    histogram_node.data.sortArchetypeFirst.columnIDX = column_idx;
-    histogram_node.data.sortArchetypeFirst.numPasses = num_passes;
+    NodeInfo run_node;
+    run_node.type = NodeType::SortArchetype;
+    run_node.funcID = UserFuncID<SortArchetypeEntry::Run>::id;
+    run_node.data.sortArchetype.archetypeID = archetype_id;
 
-    auto upsweep_id = registerNode(histogram_node, dependencies);
-
-    NodeInfo prefix_sum_node;
-    prefix_sum_node.type = NodeType::SortArchetypePrefixSum;
-    prefix_sum_node.funcID = UserFuncID<SortArchetypeEntry::PrefixSum>::id;
-    prefix_sum_node.data.sortArchetypeSubpass.archetypeID = archetype_id;
-
-    auto cur_id = registerNode(prefix_sum_node, {upsweep_id});
-
-    for (int pass_idx = 0; pass_idx < num_passes; pass_idx++) {
-        NodeInfo onesweep_node;
-        onesweep_node.type = NodeType::SortArchetypeOnesweep;
-        onesweep_node.funcID = UserFuncID<SortArchetypeEntry::Onesweep>::id;
-        onesweep_node.data.sortArchetypeSubpass.archetypeID = archetype_id;
-        onesweep_node.data.sortArchetypeSubpass.passIDX = pass_idx;
-        
-        cur_id = registerNode(onesweep_node, {cur_id});
-    }
-
-    return cur_id;
+    return registerNode(run_node, {setup_id});
 }
 
 TaskGraph::NodeID TaskGraph::Builder::compactArchetypeNode(
@@ -305,10 +284,10 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
         }
         case NodeType::CompactArchetype: {
             StateManager *state_mgr = mwGPU::getStateManager();
-            bool needs_compact = state_mgr->isDirty(
+            const auto &sort_state = state_mgr->getCurrentSortState(
                 node.info.data.compactArchetype.archetypeID);
 
-            if (!needs_compact) {
+            if (!sort_state.dirty) {
                 return 0;
             }
 
@@ -317,27 +296,15 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
         }
         case NodeType::SortArchetypeSetup: {
             StateManager *state_mgr = mwGPU::getStateManager();
-            bool need_sort = state_mgr->archetypeSetupSortState(
-                node.info.data.sortArchetypeHistogram.archetypeID,
-                node.info.data.sortArchetypeHistogram.columnIDX,
-                node.info.data.sortArchetypeHistogram.numPasses);
+            const auto &sort_state = state_mgr->getCurrentSortState(
+                node.info.data.sortArchetypeSetup.archetypeID);
 
-            return need_sort ? consts::numMegakernelThreads : 0;
+            return sort_state.dirty ? 1 : 0;
         }
-        case NodeType::SortArchetypeHistogram: {
+        case NodeType::SortArchetype: {
             StateManager *state_mgr = mwGPU::getStateManager();
             const auto &sort_state = state_mgr->getCurrentSortState(
-                node.info.data.sortArchetypeSubpass.archetypeID);
-
-            return sort_state.numSortThreads;
-        }
-        case NodeType::SortArchetypePrefixSum: {
-            return consts::numMegakernelThreads;
-        }
-        case NodeType::SortArchetypeOnesweep: {
-            StateManager *state_mgr = mwGPU::getStateManager();
-            const auto &sort_state = state_mgr->getCurrentSortState(
-                node.info.data.sortArchetypeSubpass.archetypeID);
+                node.info.data.sortArchetype.archetypeID);
 
             return sort_state.numSortThreads;
         }
@@ -351,12 +318,8 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
 
             return num_deleted;
         }
-        case Nodetype::ResetTmpAllocator: {
-            // Hack, as soon as we evaluate count just do the reset
-            // and pretend no work had to be done
-            TmpAllocator::get().reset();
-
-            return 0;
+        case NodeType::ResetTmpAllocator: {
+            return 1u;
         }
         default: {
             __builtin_unreachable();
@@ -377,38 +340,34 @@ void mwGPU::CompactArchetypeEntry::run(EntryData &data, int32_t invocation_idx)
     assert(false);
 }
 
-void mwGPU::SortArchetypeEntry::Histogram::run(EntryData &data,
-                                               int32_t invocation_idx)
+void mwGPU::SortArchetypeEntry::Setup::run(EntryData &data,
+                                           int32_t invocation_idx)
 {
-    uint32_t archetype_id = data.sortArchetypeHistogram.archetypeID;
     StateManager *state_mgr = mwGPU::getStateManager();
-
-    state_mgr->sortArchetypeHistogram(archetype_id, invocation_idx);
+    state_mgr->archetypeSetupSortState(
+        data.sortArchetypeSetup.archetypeID,
+        data.sortArchetypeSetup.columnIDX,
+        data.sortArchetypeSetup.numPasses);
 }
 
-void mwGPU::SortArchetypeEntry::PrefixSum::run(EntryData &data,
+void mwGPU::SortArchetypeEntry::Run::run(EntryData &data,
                                                int32_t invocation_idx)
 {
-    uint32_t archetype_id = data.sortArchetypeSubpass.archetypeID;
+    uint32_t archetype_id = data.sortArchetype.archetypeID;
     StateManager *state_mgr = mwGPU::getStateManager();
 
-    state_mgr->sortArchetypePrefixSum(archetype_id, invocation_idx);
-}
-
-void mwGPU::SortArchetypeEntry::Onesweep::run(EntryData &data,
-                                              int32_t invocation_idx)
-{
-    uint32_t archetype_id = data.sortArchetypeSubpass.archetypeID;
-    int32_t pass_idx = data.sortArchetypeSubpass.passIDX;
-    StateManager *state_mgr = mwGPU::getStateManager();
-
-    state_mgr->sortArchetypeOnesweep(archetype_id, pass_idx, invocation_idx);
+    state_mgr->sortArchetype(archetype_id, invocation_idx);
 }
 
 void mwGPU::RecycleEntitiesEntry::run(EntryData &data, int32_t invocation_idx)
 {
     mwGPU::getStateManager()->recycleEntities(
         invocation_idx, data.recycleEntities.recycleBase);
+}
+
+void mwGPU::ResetTmpAllocatorEntry::run(EntryData &, int32_t invocation_idx)
+{
+    TmpAllocator::get().reset();
 }
 
 TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,
@@ -521,9 +480,9 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     total_bytes = host_allocator_offset + sizeof(mwGPU::HostAllocator);
 
     uint64_t tmp_allocator_offset =
-        utils::roundUp(total_bytes, (uint64_t)alignof(mwGPU::TmpAllocator));
+        utils::roundUp(total_bytes, (uint64_t)alignof(TmpAllocator));
 
-    total_bytes = tmp_allocator_offset + sizeof(mwGPU::TmpAllocator);
+    total_bytes = tmp_allocator_offset + sizeof(TmpAllocator);
 
     *out_constants = GPUImplConsts {
         /*.jobSystemAddr = */                  (void *)0ul,

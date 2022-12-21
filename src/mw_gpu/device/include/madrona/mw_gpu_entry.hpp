@@ -13,7 +13,7 @@ __global__ void initECS(HostAllocInit alloc_init, void **exported_columns)
     HostAllocator *host_alloc = mwGPU::getHostAllocator();
     new (host_alloc) HostAllocator(alloc_init);
 
-    TmpAllocator &tmp_alloc = mwGPU::TmpAllocator::get();
+    TmpAllocator &tmp_alloc = TmpAllocator::get();
     new (&tmp_alloc) TmpAllocator();
 
     StateManager *state_mgr = mwGPU::getStateManager();
