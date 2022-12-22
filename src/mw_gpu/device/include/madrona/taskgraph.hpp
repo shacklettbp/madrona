@@ -17,7 +17,17 @@ class TaskGraph;
 
 namespace mwGPU {
 
-struct EntryData {
+struct alignas(64) NodeData {
+    char userData[48];
+    uint32_t numRunInvocations;
+    uint32_t numCountInvocations;
+    uint32_t runID;
+    uint32_t countID;
+};
+
+static_assert(sizeof(NodeData) == 64);
+
+#if 0
     struct ParallelFor {
         QueryRef *query;
     };
@@ -39,9 +49,13 @@ struct EntryData {
     struct SortArchetype {
         uint32_t archetypeID;
     };
-
+    
     struct RecycleEntities {
         int32_t recycleBase;
+    };
+
+    struct CustomData {
+        void *ptr;
     };
 
     union {
@@ -51,137 +65,66 @@ struct EntryData {
         SortArchetypeSetup sortArchetypeSetup;
         SortArchetype sortArchetype;
         RecycleEntities recycleEntities;
+        CustomData custom;
     };
-};
+#endif
 
 template <typename EntryT>
 __attribute__((used, always_inline))
-inline void userEntry(EntryData &entry_data, int32_t invocation_idx)
+inline void userEntry(NodeData &node_data, int32_t invocation_idx)
 {
-    EntryT::run(entry_data, invocation_idx);
+    EntryT::exec(node_data, invocation_idx);
 }
 
 template <typename EntryT>
-struct UserFuncIDBase {
+struct FuncIDBase {
     static uint32_t id;
 };
 
 template <typename EntryT,
           decltype(userEntry<EntryT>) = userEntry<EntryT>>
-struct UserFuncID : UserFuncIDBase<EntryT> {};
+struct UserFuncID : FuncIDBase<EntryT> {};
 
-template <typename ContextT, typename WorldDataT>
-struct EntryBase {
-    static inline ContextT makeContext(WorldID world_id)
-    {
-        auto world = TaskGraph::getWorld(world_id.idx);
-        return ContextT((WorldDataT *)world, WorkerInit {
-            world_id,
-        });
-    }
+template <typename ContextT, bool = false>
+struct WorldTypeExtract {
+    using type = typename ContextT::WorldDataT;
 };
 
-template <typename ContextT, typename WorldDataT,
-          auto Fn, typename ...ComponentTs>
-struct ParallelForEntry : public EntryBase<ContextT, WorldDataT> {
-    static inline void run(EntryData &data,
-                           int32_t invocation_idx)
-    {
-        QueryRef *query_ref = data.parallelFor.query;
-        StateManager *state_mgr = mwGPU::getStateManager();
-
-        int32_t cumulative_num_rows = 0;
-        state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref,
-                [&](int32_t num_rows, WorldID *world_column,
-                    auto ...raw_ptrs) {
-            int32_t tbl_offset = invocation_idx - cumulative_num_rows;
-            cumulative_num_rows += num_rows;
-            if (tbl_offset >= num_rows) {
-                return false;
-            }
-
-            WorldID world_id = world_column[tbl_offset];
-
-            // This entity has been deleted but not actually removed from the
-            // table yet
-            if (world_id.idx == -1) {
-                return true;
-            }
-
-            ContextT ctx = ParallelForEntry::makeContext(world_id);
-
-
-            // The following should work, but doesn't in cuda 11.7 it seems
-            // Need to put arguments in tuple for some reason instead
-            //Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...);
-
-            cuda::std::tuple typed_ptrs {
-                (ComponentTs *)raw_ptrs
-                ...
-            };
-
-            std::apply([&](auto ...ptrs) {
-                Fn(ctx, ptrs[tbl_offset] ...);
-            }, typed_ptrs);
-
-            return true;
-        });
-    }
-};
-
-struct ClearTmpEntry {
-    static inline void run(EntryData &data, int32_t invocation_idx)
-    {
-        uint32_t archetype_id = data.clearTmp.archetypeID;
-        StateManager *state_mgr = mwGPU::getStateManager();
-        state_mgr->clearTemporaries(archetype_id);
-    }
-};
-
-struct CompactArchetypeEntry {
-    static void run(EntryData &data, int32_t invocation_idx);
-};
-
-struct SortArchetypeEntry {
-    struct Setup {
-        static void run(EntryData &data, int32_t invocation_idx);
-    };
-
-    struct Run {
-        static void run(EntryData &data, int32_t invocation_idx);
-    };
-};
-
-struct RecycleEntitiesEntry {
-    static void run(EntryData &data, int32_t invocation_idx);
-};
-
-struct ResetTmpAllocatorEntry {
-    static void run(EntryData &, int32_t invocation_idx);
+template <bool ignore>
+struct WorldTypeExtract<Context, ignore> {
+    using type = WorldBase;
 };
 
 }
 
+template <typename NodeT,
+         int32_t fixed_run_count = 0,
+         int32_t num_count_invocations = 1>
+struct NodeBase {
+    struct RunEntry {
+        static inline void exec(mwGPU::NodeData &storage,
+                                int32_t invocation_idx)
+        {
+            auto ptr = (NodeT *)storage.userData;
+            ptr->run(invocation_idx);
+        }
+    };
+
+    struct CountEntry {
+        static inline void exec(mwGPU::NodeData &storage,
+                                int32_t)
+        {
+            auto ptr = (NodeT *)storage.userData;
+            return ptr->numInvocations();
+        }
+    };
+};
+
 class TaskGraph {
 private:
-    enum class NodeType {
-        ParallelFor,
-        ClearTemporaries,
-        CompactArchetype,
-        SortArchetypeSetup,
-        SortArchetype,
-        RecycleEntities,
-        ResetTmpAllocator,
-    };
-
-    struct NodeInfo {
-        NodeType type;
-        uint32_t funcID;
-        mwGPU::EntryData data;
-    };
-
     struct NodeState {
-        NodeInfo info;
+        uint32_t dataIDX;
+        bool countNode;
         std::atomic_uint32_t curOffset;
         std::atomic_uint32_t numRemaining;
         std::atomic_uint32_t totalNumInvocations;
@@ -198,60 +141,30 @@ public:
                 uint32_t max_num_dependencies);
         ~Builder();
 
-        template <typename ContextT, auto Fn, typename ...ComponentTs>
-        inline NodeID parallelForNode(Span<const NodeID> dependencies)
+        template <typename NodeT,
+                  int32_t fixed_run_count,
+                  int32_t num_count_invokes>
+        inline NodeID addNode(
+            const NodeBase<NodeT, fixed_run_count, num_count_invokes> &node,
+            Span<const NodeID> dependencies)
         {
-            using WorldT = typename WorldTypeExtract<ContextT>::type;
+            mwGPU::NodeData node_data;
+            new (node_data.userData) NodeT(static_cast<NodeT &>(node));
+            if constexpr (fixed_run_count == 0) {
+                node_data.numRunInvocations = 0;
+                node_data.numCountInvocations = num_count_invokes;
+                static_assert(num_count_invokes != 0);
 
-            using Entry = typename mwGPU::ParallelForEntry<
-                ContextT, WorldT, Fn, ComponentTs...>;
-            uint32_t func_id = mwGPU::UserFuncID<Entry>::id;
+                node_data.countID =
+                    mwGPU::UserFuncID<typename NodeT::CountEntry>::id;
+            } else {
+                node_data.numRunInvocations = fixed_run_count;
+                node_data.numCountInvocations = 0;
+            }
 
-            auto query = mwGPU::getStateManager()->query<ComponentTs...>();
-            QueryRef *query_ref = query.getSharedRef();
-            query_ref->numReferences.fetch_add(1, std::memory_order_relaxed);
+            node_data.runID = mwGPU::UserFuncID<typename NodeT::RunEntry>::id;
 
-            return registerNode(NodeInfo {
-                /* .type = */ NodeType::ParallelFor,
-                /* .funcID = */ func_id,
-                /* .data = */ {
-                    mwGPU::EntryData::ParallelFor {
-                        query_ref,
-                    },
-                },
-            }, dependencies);
-        }
-
-        template <typename ArchetypeT>
-        inline NodeID clearTemporariesNode(Span<const NodeID> dependencies)
-        {
-            uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-
-            uint32_t func_id = mwGPU::UserFuncID<mwGPU::ClearTmpEntry>::id;
-
-            NodeInfo node_info;
-            node_info.type = NodeType::ClearTemporaries;
-            node_info.funcID = func_id;
-            node_info.data.clearTmp = {
-                archetype_id,
-            };
-
-            return registerNode(node_info, dependencies);
-        }
-
-        template <typename ArchetypeT>
-        inline NodeID compactArchetypeNode(Span<const NodeID> dependencies)
-        {
-            uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-            return compactArchetypeNode(archetype_id, dependencies);
-        }
-
-        template <typename ArchetypeT, typename ComponentT>
-        inline NodeID sortArchetypeNode(Span<const NodeID> dependencies)
-        {
-            return sortArchetypeNode(TypeTracker::typeID<ArchetypeT>(),
-                                     TypeTracker::typeID<ComponentT>(),
-                                     dependencies);
+            return registerNode(node_data, dependencies, fixed_run_count == 0);
         }
 
         NodeID recycleEntitiesNode(Span<const NodeID> dependencies);
@@ -261,16 +174,6 @@ public:
         void build(TaskGraph *out);
 
     private:
-        template <typename ContextT, bool = false>
-        struct WorldTypeExtract {
-            using type = typename ContextT::WorldDataT;
-        };
-
-        template <bool ignore>
-        struct WorldTypeExtract<Context, ignore> {
-            using type = WorldBase;
-        };
-
         NodeID compactArchetypeNode(uint32_t archetype_id,
                                     Span<const NodeID> dependencies);
 
@@ -278,16 +181,18 @@ public:
                                  uint32_t component_id,
                                  Span<const NodeID> dependencies);
 
-        NodeID registerNode(const NodeInfo &node_info,
-                            Span<const NodeID> dependencies);
+        NodeID registerNode(const mwGPU::NodeData &node_data,
+                            Span<const NodeID> dependencies,
+                            bool runtime_count);
 
         struct StagedNode {
-            NodeInfo node;
+            int32_t dataIDX;
             uint32_t dependencyOffset;
             uint32_t numDependencies;
         };
 
         StagedNode *nodes_;
+        mwGPU::NodeData *node_datas_;
         uint32_t num_nodes_;
         NodeID *all_dependencies_;
         uint32_t num_dependencies_;

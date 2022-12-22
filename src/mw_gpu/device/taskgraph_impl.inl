@@ -6,6 +6,22 @@
 
 namespace madrona {
 
+namespace mwGPU {
+
+#ifdef MADRONA_CLANG
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wundefined-internal"
+#endif
+static inline __attribute__((always_inline)) void dispatch(
+        uint32_t func_id,
+        mwGPU::EntryData &entry_data,
+        uint32_t invocation_offset);
+#ifdef MADRONA_CLANG
+#pragma clang diagnostic pop
+#endif
+
+}
+
 TaskGraph::Builder::Builder(uint32_t max_num_nodes,
                             uint32_t max_num_dependencies)
     : nodes_((StagedNode *)rawAlloc(sizeof(StagedNode) * max_num_nodes)),
@@ -309,14 +325,6 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
             return sort_state.numSortThreads;
         }
         case NodeType::RecycleEntities: {
-            auto [recycle_base, num_deleted] =
-                mwGPU::getStateManager()->fetchRecyclableEntities();
-
-            if (num_deleted > 0) {
-                node.info.data.recycleEntities.recycleBase = recycle_base;
-            }
-
-            return num_deleted;
         }
         case NodeType::ResetTmpAllocator: {
             return 1u;
@@ -327,47 +335,6 @@ uint32_t TaskGraph::computeNumInvocations(NodeState &node)
     };
 
     __builtin_unreachable();
-}
-
-void mwGPU::CompactArchetypeEntry::run(EntryData &data, int32_t invocation_idx)
-{
-#if 0
-    uint32_t archetype_id = data.compactArchetype.archetypeID;
-    StateManager *state_mgr = mwGPU::getStateManager();
-#endif
-
-    // Actually compact
-    assert(false);
-}
-
-void mwGPU::SortArchetypeEntry::Setup::run(EntryData &data,
-                                           int32_t invocation_idx)
-{
-    StateManager *state_mgr = mwGPU::getStateManager();
-    state_mgr->archetypeSetupSortState(
-        data.sortArchetypeSetup.archetypeID,
-        data.sortArchetypeSetup.columnIDX,
-        data.sortArchetypeSetup.numPasses);
-}
-
-void mwGPU::SortArchetypeEntry::Run::run(EntryData &data,
-                                               int32_t invocation_idx)
-{
-    uint32_t archetype_id = data.sortArchetype.archetypeID;
-    StateManager *state_mgr = mwGPU::getStateManager();
-
-    state_mgr->sortArchetype(archetype_id, invocation_idx);
-}
-
-void mwGPU::RecycleEntitiesEntry::run(EntryData &data, int32_t invocation_idx)
-{
-    mwGPU::getStateManager()->recycleEntities(
-        invocation_idx, data.recycleEntities.recycleBase);
-}
-
-void mwGPU::ResetTmpAllocatorEntry::run(EntryData &, int32_t invocation_idx)
-{
-    TmpAllocator::get().reset();
 }
 
 TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,
@@ -447,6 +414,42 @@ void TaskGraph::finishWork()
     }
 }
 
+namespace mwGPU {
+
+static inline __attribute__((always_inline)) void megakernelImpl()
+{
+    {
+        TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
+        taskgraph->init();
+    }
+
+    while (true) {
+        TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
+
+        mwGPU::EntryData *entry_data;
+        uint32_t func_id;
+        int32_t invocation_offset;
+        TaskGraph::WorkerState worker_state = taskgraph->getWork(
+            &entry_data, &func_id, &invocation_offset);
+
+        if (worker_state == TaskGraph::WorkerState::Exit) {
+            break;
+        }
+
+        if (worker_state == TaskGraph::WorkerState::Loop) {
+            __nanosleep(0);
+            continue;
+        }
+
+        if (worker_state == TaskGraph::WorkerState::Run) {
+            dispatch(func_id, *entry_data, invocation_offset);
+        }
+
+        taskgraph->finishWork();
+    }
+}
+
+}
 }
 
 extern "C" __global__ void madronaMWGPUComputeConstants(
@@ -505,4 +508,12 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     };
 
     *job_system_buffer_size = total_bytes;
+}
+
+extern "C" __global__ void
+__launch_bounds__(madrona::consts::numMegakernelThreads,
+                  madrona::consts::numMegakernelBlocksPerSM)
+madronaMWGPUMegakernel()
+{
+    madrona::mwGPU::megakernelImpl();
 }

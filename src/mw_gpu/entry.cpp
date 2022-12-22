@@ -271,7 +271,7 @@ extern "C" {
 
 )__";
 
-    std::string megakernel_taskgraph_prefix = R"__(#include "megakernel_taskgraph_impl.inl"
+    std::string megakernel_taskgraph_prefix = R"__(#include "taskgraph_impl.inl"
 
 extern "C" {
 
