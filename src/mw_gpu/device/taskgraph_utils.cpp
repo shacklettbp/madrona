@@ -197,13 +197,7 @@ void CompactArchetypeNodeBase::run(int32_t invocation_idx)
 
 uint32_t CompactArchetypeNodeBase::numInvocations()
 {
-    StateManager *state_mgr = mwGPU::getStateManager();
-    const auto &sort_state = state_mgr->getCurrentSortState(archetypeID);
-
-    if (!sort_state.dirty) {
-        return 0;
-    }
-
+    assert(false);
     return mwGPU::getStateManager()->numArchetypeRows(archetypeID);
 }
 
@@ -228,21 +222,23 @@ SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id,
 void SortArchetypeNodeBase::sortSetup(int32_t)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    state_mgr->archetypeSetupSortState(archetypeID, columnIDX, numPasses);
 
-    const auto &sort_state = state_mgr->getCurrentSortState(archetypeID);
-
-    if (sort_state.dirty) {
-        numDynamicInvocations = sort_state.numSortThreads;
-    } else {
+    if (!state_mgr->archetypeNeedsSort(archetypeID)) {
         numDynamicInvocations = 0;
+        return;
     }
+
+    sortState =
+        state_mgr->archetypeSetupSortState(archetypeID, columnIDX, numPasses);
+
+    numDynamicInvocations = sortState.numSortThreads;
 }
 
 void SortArchetypeNodeBase::histogram(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    state_mgr->sortArchetype(archetypeID, invocation_idx);
+    state_mgr->sortBuildHistogram(archetypeID, columnIDX, numPasses,
+                                  sortState, invocation_idx);
 }
 
 TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(

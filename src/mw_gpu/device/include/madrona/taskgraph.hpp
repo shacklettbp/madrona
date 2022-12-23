@@ -65,11 +65,11 @@ struct NodeBase {
 
 class TaskGraph {
 private:
-    static inline constexpr uint32_t maxNodeDataBytes = 64;
+    static inline constexpr uint32_t maxNodeDataBytes = 128;
     struct alignas(maxNodeDataBytes) NodeData {
         char userData[maxNodeDataBytes];
     };
-    static_assert(sizeof(NodeData) == 64);
+    static_assert(sizeof(NodeData) == 128);
 
     struct Node {
         uint32_t dataIDX;
@@ -278,6 +278,8 @@ struct SortArchetypeNodeBase : NodeBase {
     uint32_t archetypeID;
     int32_t columnIDX;
     int32_t numPasses;
+
+    mwGPU::SortState sortState;
 };
 
 template <typename ArchetypeT, typename ComponentT>

@@ -261,10 +261,10 @@ SingletonT * StateManager::getSingletonColumn()
 }
 
 
-const StateManager::SortState & StateManager::getCurrentSortState(
+bool  StateManager::archetypeNeedsSort(
     uint32_t archetype_id) const
 {
-    return archetypes_[archetype_id]->sortState;
+    return archetypes_[archetype_id]->needsSort;
 }
 
 }

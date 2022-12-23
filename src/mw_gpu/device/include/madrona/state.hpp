@@ -30,6 +30,17 @@ static inline StateManager *getStateManager()
 {
     return (StateManager *)GPUImplConsts::get().stateManagerAddr;
 }
+
+struct SortState {
+    uint32_t numSortThreads;
+    uint32_t *bins;
+    uint32_t *lookback;
+    uint32_t *keysAlt;
+    int *vals;
+    int *valsAlt;
+    uint32_t *counters;
+};
+
 }
 
 struct ComponentID {
@@ -152,30 +163,17 @@ public:
     void recycleEntities(int32_t thread_offset,
                          int32_t recycle_base);
 
-    struct SortState {
-        uint32_t numSortThreads;
-        int32_t columnIDX;
-        int32_t numPasses;
-        uint32_t *bins;
-        uint32_t *lookback;
-        uint32_t *keysAlt;
-        int *vals;
-        int *valsAlt;
-        uint32_t *counters;
-        bool dirty;
-    };
+    inline bool archetypeNeedsSort(uint32_t archetype_id) const;
 
-    void archetypeSetupSortState(uint32_t archetype_id,
-                                 int32_t column_idx,
-                                 int32_t num_passes);
+    mwGPU::SortState archetypeSetupSortState(uint32_t archetype_id,
+                                             int32_t column_idx,
+                                             int32_t num_passes);
 
-    inline const SortState & getCurrentSortState(
-        uint32_t archetype_id) const;
-
-    void sortArchetype(uint32_t archetype_id,
-                      int32_t invocation_idx);
-
-    static inline constexpr int32_t numElementsPerSortThread = 2;
+    void sortBuildHistogram(uint32_t archetype_id,
+                            int32_t column_idx,
+                            int32_t num_passes,
+                            mwGPU::SortState &sort_state,
+                            int32_t invocation_idx);
 
 private:
     template <typename SingletonT>
@@ -191,6 +189,8 @@ private:
     static constexpr uint32_t max_archetypes_ = 128;
     static constexpr uint32_t user_component_offset_ = 2;
     static constexpr uint32_t max_query_slots_ = 65536;
+    static inline constexpr int32_t num_elems_per_sort_thread_ = 2;
+
 
     template <typename> struct RegistrationHelper;
 
@@ -218,7 +218,7 @@ private:
         uint32_t numUserComponents;
         Table tbl;
         ColumnMap columnLookup;
-        SortState sortState;
+        bool needsSort;
     };
 
     uint32_t archetype_component_offset_ = 0;
