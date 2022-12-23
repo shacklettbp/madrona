@@ -117,20 +117,20 @@ inline void updateViewData(Context &,
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
-    auto instance_setup = builder.parallelForNode<Context,
+    auto instance_setup = builder.addToGraph<ParallelForNode<Context,
         instanceAccelStructSetup,
         Position,
         Rotation,
         Scale,
-        ObjectID>(deps);
+        ObjectID>>(deps);
 
-    auto viewdata_update = builder.parallelForNode<Context,
+    auto viewdata_update = builder.addToGraph<ParallelForNode<Context,
         updateViewData,
         Position,
         Rotation,
         ActiveView>({instance_setup});
 
-    auto update_count = builder.parallelForNode<Context,
+    auto update_count = builder.addToGraph<ParallelForNode<Context,
         updateInstanceCount,
         RendererState>({viewdata_update});
 

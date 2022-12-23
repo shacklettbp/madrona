@@ -22,188 +22,7 @@ static inline __attribute__((always_inline)) void dispatch(
 
 }
 
-TaskGraph::Builder::Builder(uint32_t max_num_nodes,
-                            uint32_t max_num_dependencies)
-    : nodes_((StagedNode *)rawAlloc(sizeof(StagedNode) * max_num_nodes)),
-      num_nodes_(0),
-      all_dependencies_((NodeID *)rawAlloc(sizeof(NodeID) * max_num_dependencies)),
-      num_dependencies_(0)
-{}
-
-TaskGraph::Builder::~Builder()
-{
-    rawDealloc(nodes_);
-    rawDealloc(all_dependencies_);
-}
-
-
-TaskGraph::NodeID TaskGraph::Builder::sortArchetypeNode(
-    uint32_t archetype_id,
-    uint32_t component_id,
-    Span<const NodeID> dependencies)
-{
-    using namespace mwGPU;
-
-    StateManager *state_mgr = getStateManager();
-    int32_t column_idx =
-        state_mgr->getArchetypeColumnIndex(archetype_id, component_id);
-
-    // Optimize for sorts on the WorldID column, where the 
-    // max # of worlds is known
-    int32_t num_passes;
-    if (column_idx == 1) {
-        int32_t num_worlds = GPUImplConsts::get().numWorlds;
-        // num_worlds + 1 to leave room for columns with WorldID == -1
-        int32_t num_bits = 32 - __clz(num_worlds + 1);
-
-        num_passes = utils::divideRoundUp(num_bits, 8);
-    } else {
-        num_passes = 4;
-    }
-
-    NodeInfo setup_node;
-    setup_node.type = NodeType::SortArchetypeSetup;
-    setup_node.funcID = UserFuncID<SortArchetypeEntry::Setup>::id;
-    setup_node.data.sortArchetypeSetup.archetypeID = archetype_id;
-    setup_node.data.sortArchetypeSetup.columnIDX = column_idx;
-    setup_node.data.sortArchetypeSetup.numPasses = num_passes;
-
-    auto setup_id = registerNode(setup_node, dependencies);
-
-    NodeInfo run_node;
-    run_node.type = NodeType::SortArchetype;
-    run_node.funcID = UserFuncID<SortArchetypeEntry::Run>::id;
-    run_node.data.sortArchetype.archetypeID = archetype_id;
-
-    return registerNode(run_node, {setup_id});
-}
-
-TaskGraph::NodeID TaskGraph::Builder::compactArchetypeNode(
-    uint32_t archetype_id, Span<const NodeID> dependencies)
-{
-    uint32_t func_id =
-        mwGPU::UserFuncID<mwGPU::CompactArchetypeEntry>::id;
-    
-    NodeInfo node_info;
-    node_info.type = NodeType::CompactArchetype;
-    node_info.funcID = func_id;
-    node_info.data.compactArchetype.archetypeID = archetype_id;
-    
-    return registerNode(node_info, dependencies);
-}
-
-TaskGraph::NodeID TaskGraph::Builder::recycleEntitiesNode(
-    Span<const NodeID> dependencies)
-{
-    uint32_t func_id =
-        mwGPU::UserFuncID<mwGPU::RecycleEntitiesEntry>::id;
-
-    NodeInfo node_info;
-    node_info.type = NodeType::RecycleEntities;
-    node_info.funcID = func_id;
-
-    return registerNode(node_info, dependencies);
-}
-
-TaskGraph::NodeID TaskGraph::Builder::resetTmpAllocatorNode(
-    Span<const NodeID> dependencies)
-{
-    uint32_t func_id = 
-        mwGPU::UserFuncID<mwGPU::ResetTmpAllocatorEntry>::id;
-
-    NodeInfo node_info;
-    node_info.type = NodeType::ResetTmpAllocator;
-    node_info.funcID = func_id;
-
-    return registerNode(node_info, dependencies);
-}
-
-TaskGraph::NodeID TaskGraph::Builder::registerNode(
-    const NodeInfo &node_info,
-    Span<const NodeID> dependencies)
-{
-    uint32_t offset = num_dependencies_;
-    uint32_t num_deps = dependencies.size();
-
-    num_dependencies_ += num_deps;
-
-    for (int i = 0; i < (int)num_deps; i++) {
-        all_dependencies_[offset + i] = dependencies[i];
-    }
-
-    uint32_t node_idx = num_nodes_++;
-
-    nodes_[node_idx] = StagedNode {
-        node_info,
-        offset,
-        num_deps,
-    };
-
-    return NodeID {
-        node_idx,
-    };
-}
-
-void TaskGraph::Builder::build(TaskGraph *out)
-{
-    assert(nodes_[0].numDependencies == 0);
-    NodeState *sorted_nodes = 
-        (NodeState *)rawAlloc(sizeof(NodeState) * num_nodes_);
-    bool *queued = (bool *)rawAlloc(num_nodes_ * sizeof(bool));
-    new (&sorted_nodes[0]) NodeState {
-        nodes_[0].node,
-        0,
-        0,
-    };
-    queued[0] = true;
-
-    uint32_t num_remaining_nodes = num_nodes_ - 1;
-    uint32_t *remaining_nodes =
-        (uint32_t *)rawAlloc(num_remaining_nodes * sizeof(uint32_t));
-
-    for (int64_t i = 1; i < (int64_t)num_nodes_; i++) {
-        queued[i]  = false;
-        remaining_nodes[i - 1] = i;
-    }
-
-    uint32_t sorted_idx = 1;
-
-    while (num_remaining_nodes > 0) {
-        uint32_t cur_node_idx;
-        for (cur_node_idx = 0; queued[cur_node_idx]; cur_node_idx++) {}
-
-        StagedNode &cur_node = nodes_[cur_node_idx];
-
-        bool dependencies_satisfied = true;
-        for (uint32_t dep_offset = 0; dep_offset < cur_node.numDependencies;
-             dep_offset++) {
-            uint32_t dep_node_idx =
-                all_dependencies_[cur_node.dependencyOffset + dep_offset].id;
-            if (!queued[dep_node_idx]) {
-                dependencies_satisfied = false;
-                break;
-            }
-        }
-
-        if (dependencies_satisfied) {
-            queued[cur_node_idx] = true;
-            new (&sorted_nodes[sorted_idx++]) NodeState {
-                cur_node.node,
-                0,
-                0,
-                0,
-            };
-            num_remaining_nodes--;
-        }
-    }
-
-    rawDealloc(remaining_nodes);
-    rawDealloc(queued);
-
-    new (out) TaskGraph(sorted_nodes, num_nodes_);
-}
-
-TaskGraph::TaskGraph(NodeState *nodes, uint32_t num_nodes)
+TaskGraph::TaskGraph(Node *nodes, uint32_t num_nodes)
     : sorted_nodes_(nodes),
       num_nodes_(num_nodes),
       cur_node_idx_(num_nodes),
@@ -235,7 +54,7 @@ void TaskGraph::init()
     int block_idx = blockIdx.x;
 
     if (block_idx == 0) {
-        NodeState &first_node = sorted_nodes_[0];
+        Node &first_node = sorted_nodes_[0];
 
         uint32_t new_num_invocations = computeNumInvocations(first_node);
         assert(new_num_invocations != 0);
@@ -259,7 +78,7 @@ void TaskGraph::setBlockState()
         return;
     }
 
-    NodeState &cur_node = sorted_nodes_[node_idx];
+    Node &cur_node = sorted_nodes_[node_idx];
 
     uint32_t cur_offset = 
         cur_node.curOffset.load(std::memory_order_relaxed);
@@ -287,54 +106,14 @@ void TaskGraph::setBlockState()
     sharedBlockState.runOffset = cur_offset;
 }
 
-uint32_t TaskGraph::computeNumInvocations(NodeState &node)
+uint32_t TaskGraph::computeNumInvocations(Node &node)
 {
-    switch (node.info.type) {
-        case NodeType::ParallelFor: {
-            StateManager *state_mgr = mwGPU::getStateManager();
-            QueryRef *query_ref = node.info.data.parallelFor.query;
-            return state_mgr->numMatchingEntities(query_ref);
-        }
-        case NodeType::ClearTemporaries: {
-            return 1_u32;
-        }
-        case NodeType::CompactArchetype: {
-            StateManager *state_mgr = mwGPU::getStateManager();
-            const auto &sort_state = state_mgr->getCurrentSortState(
-                node.info.data.compactArchetype.archetypeID);
-
-            if (!sort_state.dirty) {
-                return 0;
-            }
-
-            return mwGPU::getStateManager()->numArchetypeRows(
-                node.info.data.compactArchetype.archetypeID);
-        }
-        case NodeType::SortArchetypeSetup: {
-            StateManager *state_mgr = mwGPU::getStateManager();
-            const auto &sort_state = state_mgr->getCurrentSortState(
-                node.info.data.sortArchetypeSetup.archetypeID);
-
-            return sort_state.dirty ? 1 : 0;
-        }
-        case NodeType::SortArchetype: {
-            StateManager *state_mgr = mwGPU::getStateManager();
-            const auto &sort_state = state_mgr->getCurrentSortState(
-                node.info.data.sortArchetype.archetypeID);
-
-            return sort_state.numSortThreads;
-        }
-        case NodeType::RecycleEntities: {
-        }
-        case NodeType::ResetTmpAllocator: {
-            return 1u;
-        }
-        default: {
-            __builtin_unreachable();
-        }
-    };
-
-    __builtin_unreachable();
+    if (node.fixedCount == 0) {
+        auto data_ptr = (NodeBase *)node_datas_[node.dataIDX].userData;
+        return data_ptr->numDynamicInvocations;
+    } else {
+        return node.fixedCount;
+    }
 }
 
 TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,
@@ -382,7 +161,7 @@ void TaskGraph::finishWork()
         consts::numMegakernelThreads);
 
     uint32_t node_idx = sharedBlockState.nodeIdx;
-    NodeState &cur_node = sorted_nodes_[node_idx];
+    Node &cur_node = sorted_nodes_[node_idx];
 
     uint32_t prev_remaining = cur_node.numRemaining.fetch_sub(num_finished,
         std::memory_order_acq_rel);
@@ -400,7 +179,7 @@ void TaskGraph::finishWork()
                     continue;
                 }
 
-                NodeState &next_node = sorted_nodes_[next_node_idx];
+                Node &next_node = sorted_nodes_[next_node_idx];
                 next_node.curOffset.store(0, std::memory_order_relaxed);
                 next_node.numRemaining.store(new_num_invocations,
                                             std::memory_order_relaxed);

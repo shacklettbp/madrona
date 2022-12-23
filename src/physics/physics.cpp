@@ -708,39 +708,41 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps,
     CountT num_substeps)
 {
-    auto update_aabbs = builder.parallelForNode<Context, updateCollisionAABB,
-        Position, Rotation, ObjectID, CollisionAABB>(deps);
+    auto update_aabbs = builder.addToGraph<ParallelForNode<Context,
+        updateCollisionAABB, Position, Rotation, ObjectID, CollisionAABB>>(
+            deps);
 
-    auto preprocess_leaves = builder.parallelForNode<Context,
+    auto preprocess_leaves = builder.addToGraph<ParallelForNode<Context,
         broadphase::updateLeavesEntry, broadphase::LeafID, 
-        CollisionAABB>({update_aabbs});
+        CollisionAABB>>({update_aabbs});
 
-    auto bvh_update = builder.parallelForNode<Context,
-        broadphase::updateBVHEntry, broadphase::BVH>({preprocess_leaves});
+    auto bvh_update = builder.addToGraph<ParallelForNode<Context,
+        broadphase::updateBVHEntry, broadphase::BVH>>({preprocess_leaves});
 
-    auto find_overlapping = builder.parallelForNode<Context,
-        broadphase::findOverlappingEntry, Entity, CollisionAABB>({bvh_update});
+    auto find_overlapping = builder.addToGraph<ParallelForNode<Context,
+        broadphase::findOverlappingEntry, Entity, CollisionAABB>>(
+            {bvh_update});
     
     auto cur_node = find_overlapping;
     for (CountT i = 0; i < num_substeps; i++) {
-        auto update_positions = builder.parallelForNode<Context,
+        auto update_positions = builder.addToGraph<ParallelForNode<Context,
             solver::updatePositions, Position, Rotation, Velocity, ObjectID,
-            solver::InstanceState>({cur_node});
+            solver::InstanceState>>({cur_node});
 
-        auto run_narrowphase = builder.parallelForNode<Context,
-            narrowphase::runNarrowphase, CandidateCollision>(
+        auto run_narrowphase = builder.addToGraph<ParallelForNode<Context,
+            narrowphase::runNarrowphase, CandidateCollision>>(
                 {update_positions});
 
-        auto solver = builder.parallelForNode<Context,
-            solver::solverEntry, SolverData>({run_narrowphase});
+        auto solver = builder.addToGraph<ParallelForNode<Context,
+            solver::solverEntry, SolverData>>({run_narrowphase});
 
-        cur_node = builder.parallelForNode<Context,
+        cur_node = builder.addToGraph<ParallelForNode<Context,
             solver::updateVelocities, Position,
-            solver::InstanceState, Velocity>({solver});
+            solver::InstanceState, Velocity>>({solver});
     }
 
-    auto clear_candidates = builder.clearTemporariesNode<CandidateTemporary>(
-        {cur_node});
+    auto clear_candidates = builder.addToGraph<
+        ClearTmpNode<CandidateTemporary>({cur_node});
 
     return clear_candidates;
 }
@@ -748,7 +750,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
 TaskGraph::NodeID RigidBodyPhysicsSystem::setupCleanupTasks(
     TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps)
 {
-    return builder.clearTemporariesNode<CollisionEventTemporary>(deps);
+    return builder.addToGraph<ClearTmpNode<CollisionEventTemporary>>(deps);
 }
 
 }
