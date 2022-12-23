@@ -37,10 +37,9 @@ __global__ void initWorlds(int32_t num_worlds,
     const InitT &init = inits[world_idx];
     WorldBase *world = TaskGraph::getWorld(world_idx);
 
-    ContextT ctx =
-        mwGPU::EntryBase<ContextT, WorldDataT>::makeContext(WorldID {
-            world_idx,
-        });
+    ContextT ctx = TaskGraph::makeContext<ContextT>(WorldID {
+        world_idx,
+    });
 
     new (world) WorldDataT(ctx, init);
 }
@@ -48,7 +47,7 @@ __global__ void initWorlds(int32_t num_worlds,
 template <typename ContextT, typename WorldDataT, typename InitT>
 __global__ void initTasks()
 {
-    TaskGraph::Builder builder(1024, 1024);
+    TaskGraph::Builder builder(1024, 1024 * 2, 1024 * 5);
     WorldDataT::setupTasks(builder);
 
     builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);

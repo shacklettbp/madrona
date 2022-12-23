@@ -296,7 +296,7 @@ namespace mwGPU {
 
 static __attribute__((always_inline)) inline void dispatch(
         uint32_t func_id,
-        mwGPU::EntryData &entry_data,
+        NodeBase *node_data,
         uint32_t invocation_offset)
 {
     switch (func_id) {
@@ -321,9 +321,9 @@ static __attribute__((always_inline)) inline void dispatch(
         megakernel_prefix = megakernel_taskgraph_prefix;
         megakernel_body = megakernel_taskgraph_body;
         entry_prefix = ".weak .func _ZN7madrona5mwGPU9userEntry";
-        entry_postfix = "EvRNS0_9EntryDataEi";
-        entry_params = "(madrona::mwGPU::EntryData &, int32_t);\n";
-        entry_args = "(entry_data, invocation_offset);\n";
+        entry_postfix = "EvPNS_8NodeBaseEi";
+        entry_params = "(madrona::NodeBase *, int32_t);\n";
+        entry_args = "(node_data, invocation_offset);\n";
         id_prefix = "_ZN7madrona5mwGPU14UserFuncIDBase";
     }
 

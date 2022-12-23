@@ -69,6 +69,7 @@ private:
     struct alignas(maxNodeDataBytes) NodeData {
         char userData[maxNodeDataBytes];
     };
+    static_assert(sizeof(NodeData) == 64);
 
     struct Node {
         uint32_t dataIDX;
@@ -90,9 +91,9 @@ public:
 
     class Builder {
     public:
-        Builder(uint32_t max_nodes,
-                uint32_t max_node_datas,
-                uint32_t max_num_dependencies);
+        Builder(int32_t max_nodes,
+                int32_t max_node_datas,
+                int32_t max_num_dependencies);
         ~Builder();
 
         template <typename NodeT, typename... Args>
@@ -117,8 +118,13 @@ public:
         void build(TaskGraph *out);
 
     private:
-        NodeID registerNode(Node &&node,
-                            Span<const NodeID> dependencies)
+        template <typename NodeT>
+        static void dynamicCountWrapper(NodeT *node, int32_t);
+
+        NodeID registerNode(uint32_t data_idx,
+                            uint32_t fixed_count,
+                            uint32_t func_id,
+                            Span<const NodeID> dependencies);
 
         struct StagedNode {
             Node node;
@@ -127,9 +133,9 @@ public:
         };
 
         StagedNode *staged_;
-        uint32_t num_nodes_;
+        int32_t num_nodes_;
         NodeData *node_datas_;
-        uint32_t num_datas_;
+        int32_t num_datas_;
         NodeID *all_dependencies_;
         uint32_t num_dependencies_;
         uint32_t num_worlds_;
@@ -147,27 +153,26 @@ public:
 
     void init();
 
-    WorkerState getWork(mwGPU::EntryData **entry_data,
+    WorkerState getWork(NodeBase **node_data,
                         uint32_t *run_func_id,
                         int32_t *run_offset);
 
     void finishWork();
 
-    static inline WorldBase * getWorld(int32_t world_idx)
-    {
-        const auto &consts = mwGPU::GPUImplConsts::get();
-        auto world_ptr = (char *)consts.worldDataAddr +
-            world_idx * (int32_t)consts.numWorldDataBytes;
+    static inline WorldBase * getWorld(int32_t world_idx);
 
-        return (WorldBase *)world_ptr;
-    }
+    template <typename ContextT>
+    static ContextT makeContext(WorldID world_id);
 
     struct BlockState;
 private:
-    TaskGraph(Node *nodes, uint32_t num_nodes);
+    template <typename ContextT, bool> struct WorldTypeExtract;
+
+    TaskGraph(Node *nodes, uint32_t num_nodes,
+              NodeData *node_datas);
 
     inline void setBlockState();
-    inline uint32_t computeNumInvocations(NodeState &node);
+    inline uint32_t computeNumInvocations(Node &node);
 
     Node *sorted_nodes_;
     uint32_t num_nodes_;
@@ -179,38 +184,39 @@ friend class Builder;
 };
 
 template <typename ContextT, auto Fn, typename ...ComponentTs>
-class ParallelForNode : DynamicCountNode<ContextT, Fn, ComponentTs...>> {
+class ParallelForNode : public NodeBase {
 public:
     ParallelForNode();
 
     inline void run(int32_t invocation_idx);
     inline uint32_t numInvocations();
 
-    static TaskGraph::NodeID addToGraph(TaskGraph::Builder &builder,
-                                        Span<const NodeID> dependencies);
+    static TaskGraph::NodeID addToGraph(
+            TaskGraph::Builder &builder,
+            Span<const TaskGraph::NodeID> dependencies);
 
 private:
-    inline ContextT makeContext(WorldID world_id);
-
-    QueryRef query_ref_;
+    QueryRef *query_ref_;
 };
 
 struct ClearTmpNodeBase : NodeBase {
-    ClearTmpNode(uint32_t archetype_id);
+    ClearTmpNodeBase(uint32_t archetype_id);
 
     void run(int32_t);
 
-    static TaskGraph::NodeID addToGraph(TaskGraph::Builder &builder,
-                                        Span<const NodeID> dependencies,
-                                        uint32_t archetype_id);
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies,
+        uint32_t archetype_id);
 
     uint32_t archetypeID;
 };
 
 template <typename ArchetypeT>
 struct ClearTmpNode : ClearTmpNodeBase {
-    static TaskGraph::NodeID addToGraph(TaskGraph::Builder &builder,
-                                        Span<const NodeID> dependencies);
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies);
 };
 
 struct RecycleEntitiesNode : NodeBase {
@@ -219,8 +225,9 @@ struct RecycleEntitiesNode : NodeBase {
     void run(int32_t invocation_idx);
     uint32_t numInvocations();
 
-    static TaskGraph::NodeID addToGraph(TaskGraph::Builder &builder,
-                                        Span<const NodeID> dependencies);
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies);
 
     int32_t recycleBase;
 };
@@ -228,23 +235,30 @@ struct RecycleEntitiesNode : NodeBase {
 struct ResetTmpAllocNode : NodeBase {
     void run(int32_t);
 
-    static TaskGraph::NodeID addToGraph(TaskGraph::Builder &builder,
-                                        Span<const NodeID> dependencies);
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies);
 };
 
 struct CompactArchetypeNodeBase : NodeBase {
-    CompactArchetypeNode(uint32_t archetype_id);
+    CompactArchetypeNodeBase(uint32_t archetype_id);
 
     void run(int32_t invocation_idx);
     uint32_t numInvocations();
+
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies,
+        uint32_t archetype_id);
 
     uint32_t archetypeID;
 };
 
 template <typename ArchetypeT>
 struct CompactArchetypeNode : CompactArchetypeNodeBase {
-    static TaskGraph::NodeID addToGraph(TaskGraph::Builder &builder,
-                                        Span<const NodeID> dependencies);
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies);
 };
 
 struct SortArchetypeNodeBase : NodeBase {
@@ -255,10 +269,11 @@ struct SortArchetypeNodeBase : NodeBase {
     void sortSetup(int32_t);
     void histogram(int32_t invocation_idx);
 
-    TaskGraph::NodeID addToGraph(TaskGraph::Builder &builder,
-                                 Span<const NodeID> dependencies,
-                                 uint32_t archetype_id,
-                                 int32_t component_id)
+    TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies,
+        uint32_t archetype_id,
+        int32_t component_id);
 
     uint32_t archetypeID;
     int32_t columnIDX;
@@ -267,8 +282,9 @@ struct SortArchetypeNodeBase : NodeBase {
 
 template <typename ArchetypeT, typename ComponentT>
 struct SortArchetypeNode : SortArchetypeNodeBase {
-    static TaskGraph::NodeID addToGraph(TaskGraph::Builder &builder,
-                                        Span<const NodeID> dependencies);
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies);
 };
 
 }

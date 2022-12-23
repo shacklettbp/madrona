@@ -14,7 +14,7 @@ namespace mwGPU {
 #endif
 static inline __attribute__((always_inline)) void dispatch(
         uint32_t func_id,
-        mwGPU::EntryData &entry_data,
+        NodeBase *node_data,
         uint32_t invocation_offset);
 #ifdef MADRONA_CLANG
 #pragma clang diagnostic pop
@@ -22,9 +22,10 @@ static inline __attribute__((always_inline)) void dispatch(
 
 }
 
-TaskGraph::TaskGraph(Node *nodes, uint32_t num_nodes)
+TaskGraph::TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
     : sorted_nodes_(nodes),
       num_nodes_(num_nodes),
+      node_datas_(node_datas),
       cur_node_idx_(num_nodes),
       init_barrier_(MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS)
 {}
@@ -102,7 +103,7 @@ void TaskGraph::setBlockState()
     sharedBlockState.state = WorkerState::Run;
     sharedBlockState.nodeIdx = node_idx;
     sharedBlockState.numInvocations = total_invocations;
-    sharedBlockState.funcID = cur_node.info.funcID;
+    sharedBlockState.funcID = cur_node.funcID;
     sharedBlockState.runOffset = cur_offset;
 }
 
@@ -116,7 +117,7 @@ uint32_t TaskGraph::computeNumInvocations(Node &node)
     }
 }
 
-TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,
+TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
                                           uint32_t *run_func_id,
                                           int32_t *run_offset)
 {
@@ -142,7 +143,8 @@ TaskGraph::WorkerState TaskGraph::getWork(mwGPU::EntryData **entry_data,
         return WorkerState::PartialRun;
     }
 
-    *entry_data = &sorted_nodes_[sharedBlockState.nodeIdx].info.data;
+    *node_data = (NodeBase *)
+        node_datas_[sorted_nodes_[sharedBlockState.nodeIdx].dataIDX].userData;
     *run_func_id = sharedBlockState.funcID;
     *run_offset = thread_offset;
 
@@ -205,11 +207,11 @@ static inline __attribute__((always_inline)) void megakernelImpl()
     while (true) {
         TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
 
-        mwGPU::EntryData *entry_data;
+        NodeBase *node_data;
         uint32_t func_id;
         int32_t invocation_offset;
         TaskGraph::WorkerState worker_state = taskgraph->getWork(
-            &entry_data, &func_id, &invocation_offset);
+            &node_data, &func_id, &invocation_offset);
 
         if (worker_state == TaskGraph::WorkerState::Exit) {
             break;
@@ -221,7 +223,7 @@ static inline __attribute__((always_inline)) void megakernelImpl()
         }
 
         if (worker_state == TaskGraph::WorkerState::Run) {
-            dispatch(func_id, *entry_data, invocation_offset);
+            dispatch(func_id, node_data, invocation_offset);
         }
 
         taskgraph->finishWork();

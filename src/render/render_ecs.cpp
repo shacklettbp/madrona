@@ -128,11 +128,11 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
         updateViewData,
         Position,
         Rotation,
-        ActiveView>({instance_setup});
+        ActiveView>>({instance_setup});
 
     auto update_count = builder.addToGraph<ParallelForNode<Context,
         updateInstanceCount,
-        RendererState>({viewdata_update});
+        RendererState>>({viewdata_update});
 
     return update_count;
 }

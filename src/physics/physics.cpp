@@ -742,7 +742,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     }
 
     auto clear_candidates = builder.addToGraph<
-        ClearTmpNode<CandidateTemporary>({cur_node});
+        ClearTmpNode<CandidateTemporary>>({cur_node});
 
     return clear_candidates;
 }

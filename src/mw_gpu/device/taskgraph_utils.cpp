@@ -2,23 +2,29 @@
 
 namespace madrona {
 
-TaskGraph::Builder::Builder(uint32_t max_num_nodes,
-                            uint32_t max_num_dependencies)
-    : nodes_((StagedNode *)rawAlloc(sizeof(StagedNode) * max_num_nodes)),
+TaskGraph::Builder::Builder(int32_t max_num_nodes,
+                            int32_t max_node_datas,
+                            int32_t max_num_dependencies)
+    : staged_((StagedNode *)rawAlloc(sizeof(StagedNode) * max_num_nodes)),
       num_nodes_(0),
+      node_datas_((NodeData *)rawAlloc(sizeof(NodeData) * max_node_datas)),
+      num_datas_(0),
       all_dependencies_((NodeID *)rawAlloc(sizeof(NodeID) * max_num_dependencies)),
       num_dependencies_(0)
 {}
 
 TaskGraph::Builder::~Builder()
 {
-    rawDealloc(nodes_);
     rawDealloc(all_dependencies_);
+    rawDealloc(node_datas_),
+    rawDealloc(staged_);
 }
 
 TaskGraph::NodeID TaskGraph::Builder::registerNode(
-    Node &&node,
-    Span<const NodeID> dependencies)
+    uint32_t data_idx,
+    uint32_t fixed_count,
+    uint32_t func_id,
+    Span<const TaskGraph::NodeID> dependencies)
 {
     uint32_t offset = num_dependencies_;
     uint32_t num_deps = dependencies.size();
@@ -29,10 +35,17 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
         all_dependencies_[offset + i] = dependencies[i];
     }
 
-    uint32_t node_idx = num_nodes_++;
+    int32_t node_idx = num_nodes_++;
 
-    nodes_[node_idx] = StagedNode {
-        std::move(node),
+    new (&staged_[node_idx]) StagedNode {
+        {
+            data_idx,
+            fixed_count,
+            func_id,
+            0,
+            0,
+            0,
+        },
         offset,
         num_deps,
     };
@@ -44,11 +57,23 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
 
 void TaskGraph::Builder::build(TaskGraph *out)
 {
-    assert(nodes_[0].numDependencies == 0);
+    assert(staged_[0].numDependencies == 0);
     Node *sorted_nodes = 
         (Node *)rawAlloc(sizeof(Node) * num_nodes_);
     bool *queued = (bool *)rawAlloc(num_nodes_ * sizeof(bool));
-    new (&sorted_nodes[0]) Node(staged_[0].node);
+
+    uint32_t sorted_idx = 0;
+    auto enqueueInSorted = [&](const Node &node) {
+        new (&sorted_nodes[sorted_idx++]) Node {
+            node.dataIDX,
+            node.fixedCount,
+            node.funcID,
+            0, 0, 0,
+        };
+    };
+
+    enqueueInSorted(staged_[0].node);
+
     queued[0] = true;
 
     uint32_t num_remaining_nodes = num_nodes_ - 1;
@@ -59,8 +84,6 @@ void TaskGraph::Builder::build(TaskGraph *out)
         queued[i]  = false;
         remaining_nodes[i - 1] = i;
     }
-
-    uint32_t sorted_idx = 1;
 
     while (num_remaining_nodes > 0) {
         uint32_t cur_node_idx;
@@ -81,7 +104,7 @@ void TaskGraph::Builder::build(TaskGraph *out)
 
         if (dependencies_satisfied) {
             queued[cur_node_idx] = true;
-            new (&sorted_nodes[sorted_idx++]) Node(cur_staged.node);
+            enqueueInSorted(cur_staged.node);
             num_remaining_nodes--;
         }
     }
@@ -89,7 +112,10 @@ void TaskGraph::Builder::build(TaskGraph *out)
     rawDealloc(remaining_nodes);
     rawDealloc(queued);
 
-    new (out) TaskGraph(sorted_nodes, num_nodes_);
+    auto tg_datas = (NodeData *)rawAlloc(sizeof(NodeData) * num_datas_);
+    memcpy(tg_datas, node_datas_, sizeof(NodeData) * num_datas_);
+
+    new (out) TaskGraph(sorted_nodes, num_nodes_, tg_datas);
 }
 
 ClearTmpNodeBase::ClearTmpNodeBase(uint32_t archetype_id)
@@ -105,7 +131,7 @@ void ClearTmpNodeBase::run(int32_t)
 
 TaskGraph::NodeID ClearTmpNodeBase::addToGraph(
     TaskGraph::Builder &builder,
-    Span<const NodeID> dependencies,
+    Span<const TaskGraph::NodeID> dependencies,
     uint32_t archetype_id)
 {
     return builder.addOneOffNode<ClearTmpNodeBase>(dependencies, archetype_id);
@@ -136,7 +162,7 @@ uint32_t RecycleEntitiesNode::numInvocations()
 
 TaskGraph::NodeID RecycleEntitiesNode::addToGraph(
     TaskGraph::Builder &builder,
-    Span<const NodeID> dependencies)
+    Span<const TaskGraph::NodeID> dependencies)
 {
     return builder.addDynamicCountNode<RecycleEntitiesNode>(dependencies);
 }
@@ -148,7 +174,7 @@ void ResetTmpAllocNode::run(int32_t)
 
 TaskGraph::NodeID ResetTmpAllocNode::addToGraph(
     TaskGraph::Builder &builder,
-    Span<const NodeID> dependencies)
+    Span<const TaskGraph::NodeID> dependencies)
 {
     return builder.addOneOffNode<ResetTmpAllocNode>(dependencies);
 }
@@ -181,14 +207,27 @@ uint32_t CompactArchetypeNodeBase::numInvocations()
     return mwGPU::getStateManager()->numArchetypeRows(archetypeID);
 }
 
-SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id)
-    :  NodeBase(),
-       archetypeID(archetype_id)
+TaskGraph::NodeID CompactArchetypeNodeBase::addToGraph(
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> dependencies,
+    uint32_t archetype_id)
+{
+    return builder.addDynamicCountNode<CompactArchetypeNodeBase>(
+        dependencies, archetype_id);
+}
+
+SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id,
+                                             int32_t column_idx,
+                                             int32_t num_passes)
+    :  NodeBase {},
+       archetypeID(archetype_id),
+       columnIDX(column_idx),
+       numPasses(num_passes)
 {}
 
 void SortArchetypeNodeBase::sortSetup(int32_t)
 {
-    StateManager *state_mgr = getStateManager();
+    StateManager *state_mgr = mwGPU::getStateManager();
     state_mgr->archetypeSetupSortState(archetypeID, columnIDX, numPasses);
 
     const auto &sort_state = state_mgr->getCurrentSortState(archetypeID);
@@ -200,20 +239,17 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     }
 }
 
-void SortArchetypeNodeBase::histogram(EntryData &data,
-                                  int32_t invocation_idx)
+void SortArchetypeNodeBase::histogram(int32_t invocation_idx)
 {
-    uint32_t archetype_id = data.sortArchetype.archetypeID;
-    StateManager *state_mgr = getStateManager();
-
-    state_mgr->sortArchetype(archetype_id, invocation_idx);
+    StateManager *state_mgr = mwGPU::getStateManager();
+    state_mgr->sortArchetype(archetypeID, invocation_idx);
 }
 
 TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     TaskGraph::Builder &builder,
-    Span<const NodeID> dependencies,
+    Span<const TaskGraph::NodeID> dependencies,
     uint32_t archetype_id,
-    int32_t comonent_id)
+    int32_t component_id)
 {
     using namespace mwGPU;
 
@@ -237,9 +273,11 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     auto &node = builder.constructNodeData<SortArchetypeNodeBase>(
         archetype_id, column_idx, num_passes);
 
-    NodeID setup_node = builder.addNodeFn<sortSetup>(node, dependencies, 1);
+    TaskGraph::NodeID setup_node = builder.addNodeFn<
+        &SortArchetypeNodeBase::sortSetup>(node, dependencies, 1);
 
-    return builder.addNodeFn<histogram>(node, {setup_node});
+    return builder.addNodeFn<
+        &SortArchetypeNodeBase::histogram>(node, {setup_node});
 }
 
 }
