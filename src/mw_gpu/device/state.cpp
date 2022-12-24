@@ -7,9 +7,6 @@
  */
 #include <madrona/state.hpp>
 
-#include <cuda/barrier>
-#include <cub/block/block_radix_sort.cuh>
-
 #include "megakernel_consts.hpp"
 
 namespace madrona {
@@ -460,157 +457,11 @@ std::pair<int32_t, int32_t> StateManager::fetchRecyclableEntities()
     };
 }
 
-int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
-                                              uint32_t component_id) const
-{
-    return archetypes_[archetype_id]->columnLookup[component_id];
-}
-
 void StateManager::recycleEntities(int32_t thread_offset,
                                    int32_t recycle_base)
 {
     entity_store_.availableEntities[recycle_base + thread_offset] =
         entity_store_.deletedEntities[thread_offset];
-}
-
-namespace sortConsts {
-inline constexpr int RADIX_BITS = 8;
-inline constexpr int RADIX_DIGITS = 1 << RADIX_BITS;
-inline constexpr int ALIGN_BYTES = 256;
-inline constexpr int MAX_NUM_PASSES =
-    (sizeof(uint32_t) * 8 + RADIX_BITS - 1) / RADIX_BITS;
-}
-
-mwGPU::SortState StateManager::archetypeSetupSortState(uint32_t archetype_id,
-                                                       int32_t column_idx,
-                                                       int32_t num_passes)
-{
-    using namespace sortConsts;
-
-    auto &archetype = *archetypes_[archetype_id];
-
-    int32_t num_rows = archetype.tbl.numRows.load(std::memory_order_relaxed);
-
-    int32_t num_threads =
-        num_rows / num_elems_per_sort_thread_;
-
-    uint32_t num_blocks = utils::divideRoundUp((uint32_t)num_threads,
-        consts::numMegakernelThreads);
-
-    uint32_t rounded_num_threads = num_blocks * consts::numMegakernelThreads;
-
-    constexpr uint64_t onesweep_tile_items =
-        consts::numMegakernelThreads * num_elems_per_sort_thread_;
-
-    uint64_t bins_offset = 0;
-    uint64_t total_bytes = bins_offset +
-        uint64_t(num_passes * RADIX_DIGITS) * sizeof(uint32_t);
-
-    uint64_t lookback_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = lookback_offset + onesweep_tile_items;
-    uint64_t keys_copy_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = keys_copy_offset + uint64_t(num_rows) * sizeof(uint32_t);
-    uint64_t vals_copy_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = vals_copy_offset + uint64_t(num_rows) * sizeof(int);
-    uint64_t vals_alt_copy_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = vals_alt_copy_offset + uint64_t(num_rows) * sizeof(int);
-    uint64_t counters_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = counters_offset + uint64_t(num_passes) * sizeof(uint32_t);
-
-    char *tmp_buffer = (char *)TmpAllocator::get().alloc(total_bytes);
-
-    mwGPU::SortState sort_state;
-    sort_state.numSortThreads = rounded_num_threads;
-    sort_state.bins = (uint32_t *)(tmp_buffer + bins_offset);
-    sort_state.lookback = (uint32_t *)(tmp_buffer + lookback_offset);
-    sort_state.keysAlt = (uint32_t *)(tmp_buffer + keys_copy_offset);
-    sort_state.vals = (int *)(tmp_buffer + vals_copy_offset);
-    sort_state.valsAlt = (int *)(tmp_buffer + vals_alt_copy_offset);
-    sort_state.counters = (uint32_t *)(tmp_buffer + counters_offset);
-
-    return sort_state;
-}
-
-#if __CUDA_ARCH__ < 800
-static uint32_t __reduce_add_sync(uint32_t mask, uint32_t val)
-{
-    uint32_t lane_id = threadIdx.x % 32;
-#pragma unroll
-    for (int i = 16; i > 0; i /= 2) {
-        uint32_t read_lane = lane_id ^ i;
-
-        bool other_active = mask & (1 << read_lane);
-
-        if (!other_active) {
-            read_lane = lane_id;
-        }
-
-        uint32_t other = __shfl_sync(mask, val, read_lane);
-
-        if (other_active) {
-            val += other;
-        }
-    }
-
-    return val;
-}
-#endif
-
-void StateManager::sortBuildHistogram(uint32_t archetype_id,
-                                      int32_t column_idx,
-                                      int32_t num_passes,
-                                      mwGPU::SortState &sort_state,
-                                      int32_t invocation_idx)
-{
-    using namespace sortConsts;
-
-    auto &archetype = *archetypes_[archetype_id];
-
-    struct HistogramSMem {
-        uint32_t bins[MAX_NUM_PASSES][RADIX_DIGITS];
-    };
-
-    auto smem_tmp = (HistogramSMem *)mwGPU::SharedMemStorage::buffer;
-
-    constexpr int32_t block_items =
-        consts::numMegakernelThreads * num_elems_per_sort_thread_;
-    const int32_t block_idx = invocation_idx / consts::numMegakernelThreads;
-
-    for (int pass = 0; pass < num_passes; pass++) {
-        smem_tmp->bins[pass][threadIdx.x] = 0;
-    }
-
-    __syncthreads();
-
-    uint32_t *keys = (uint32_t *)archetype.tbl.columns[column_idx];
-
-#pragma unroll
-    for (int i = 0; i < num_elems_per_sort_thread_; i++) {
-        int32_t row_idx = block_idx * block_items +
-            i * consts::numMegakernelThreads + threadIdx.x;
-        sort_state.vals[row_idx] = row_idx; // Initialize values while we're here
-
-        int current_bit = 0;
-        for (int pass = 0; pass < num_passes; pass++) {
-            cub::ShiftDigitExtractor<uint32_t> digit_extractor(current_bit, RADIX_BITS);
-
-            int bin = digit_extractor.Digit(keys[row_idx]);
-            atomicAdd(&smem_tmp->bins[pass][bin], 1);
-
-            current_bit += RADIX_BITS;
-        }
-    }
-
-    __syncthreads();
-
-    for (int pass = 0; pass < num_passes; pass++) {
-        int32_t bin_count = smem_tmp->bins[pass][threadIdx.x];
-
-        int smem_sum = __reduce_add_sync(0xFFFF'FFFF, bin_count);
-        if (threadIdx.x % 32 == 0) {
-            atomicAdd(&sort_state.bins[pass * RADIX_DIGITS + threadIdx.x], smem_sum);
-        }
-    }
 }
 
 #if 0

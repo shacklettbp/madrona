@@ -30,17 +30,6 @@ static inline StateManager *getStateManager()
 {
     return (StateManager *)GPUImplConsts::get().stateManagerAddr;
 }
-
-struct SortState {
-    uint32_t numSortThreads;
-    uint32_t *bins;
-    uint32_t *lookback;
-    uint32_t *keysAlt;
-    int *vals;
-    int *valsAlt;
-    uint32_t *counters;
-};
-
 }
 
 struct ComponentID {
@@ -150,8 +139,8 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * getArchetypeColumn();
 
-    int32_t getArchetypeColumnIndex(uint32_t archetype_id,
-                                    uint32_t component_id) const;
+    inline void * getArchetypeColumn(uint32_t archetype_id,
+                                     uint32_t component_id);
 
     template <typename SingletonT>
     SingletonT * getSingletonColumn();
@@ -164,16 +153,7 @@ public:
                          int32_t recycle_base);
 
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
-
-    mwGPU::SortState archetypeSetupSortState(uint32_t archetype_id,
-                                             int32_t column_idx,
-                                             int32_t num_passes);
-
-    void sortBuildHistogram(uint32_t archetype_id,
-                            int32_t column_idx,
-                            int32_t num_passes,
-                            mwGPU::SortState &sort_state,
-                            int32_t invocation_idx);
+    inline bool clearArchetypeNeedsSort(uint32_t archetype_id);
 
 private:
     template <typename SingletonT>

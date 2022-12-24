@@ -13,52 +13,6 @@
 
 namespace madrona {
 
-#if 0
-namespace mwGPU {
-
-    struct ParallelFor {
-        QueryRef *query;
-    };
-
-    struct ClearTmp {
-        uint32_t archetypeID;
-    };
-
-    struct CompactArchetype {
-        uint32_t archetypeID;
-    };
-    
-    struct SortArchetypeSetup {
-        uint32_t archetypeID;
-        int32_t columnIDX;
-        int32_t numPasses;
-    };
-
-    struct SortArchetype {
-        uint32_t archetypeID;
-    };
-    
-    struct RecycleEntities {
-        int32_t recycleBase;
-    };
-
-    struct CustomData {
-        void *ptr;
-    };
-
-    union {
-        ParallelFor parallelFor;
-        ClearTmp clearTmp;
-        CompactArchetype compactArchetype;
-        SortArchetypeSetup sortArchetypeSetup;
-        SortArchetype sortArchetype;
-        RecycleEntities recycleEntities;
-        CustomData custom;
-    };
-
-}
-#endif
-
 struct NodeBase {
     uint32_t numDynamicInvocations;
 };
@@ -263,23 +217,40 @@ struct CompactArchetypeNode : CompactArchetypeNodeBase {
 
 struct SortArchetypeNodeBase : NodeBase {
     SortArchetypeNodeBase(uint32_t archetype_id,
-                          int32_t column_idx,
-                          int32_t num_passes);
+                          int32_t num_passes,
+                          uint32_t *keys_col);
 
     void sortSetup(int32_t);
+    void zeroBins(int32_t invocation_idx);
     void histogram(int32_t invocation_idx);
+    void binScan(int32_t invocation_idx);
+    void prepareOnesweep(int32_t invocation_idx);
+    void onesweep(int32_t invocation_idx);
+    void sortColumns(int32_t invocation_idx);
 
-    TaskGraph::NodeID addToGraph(
+    static TaskGraph::NodeID addToGraph(
         TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> dependencies,
         uint32_t archetype_id,
         int32_t component_id);
 
+    // Constant state
     uint32_t archetypeID;
-    int32_t columnIDX;
     int32_t numPasses;
+    uint32_t *keysCol;
 
-    mwGPU::SortState sortState;
+    // Per-run state
+    uint32_t numRows;
+    uint32_t numSortBlocks;
+    uint32_t numSortThreads;
+    uint32_t *bins;
+    uint32_t *lookback;
+    uint32_t *keysAlt;
+    int *indices;
+    int *indicesAlt;
+    uint32_t *counters;
+
+    static inline constexpr uint32_t num_elems_per_sort_thread_ = 2;
 };
 
 template <typename ArchetypeT, typename ComponentT>

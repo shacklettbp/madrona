@@ -239,12 +239,18 @@ template <typename ArchetypeT, typename ComponentT>
 ComponentT * StateManager::getArchetypeColumn()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-    auto &archetype = *archetypes_[archetype_id];
-
     uint32_t component_id = TypeTracker::typeID<ComponentT>();
+
+    return (ComponentT *)getArchetypeColumn(archetype_id, component_id);
+}
+
+void * StateManager::getArchetypeColumn(uint32_t archetype_id,
+                                        uint32_t component_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
     int32_t col_idx = *archetype.columnLookup.lookup(component_id);
 
-    return (ComponentT *)(archetype.tbl.columns[col_idx]);
+    return archetype.tbl.columns[col_idx];
 }
 
 template <typename SingletonT>
@@ -265,6 +271,12 @@ bool  StateManager::archetypeNeedsSort(
     uint32_t archetype_id) const
 {
     return archetypes_[archetype_id]->needsSort;
+}
+
+bool StateManager::clearArchetypeNeedsSort(uint32_t archetype_id)
+
+{
+    archetypes_[archetype_id]->needsSort = false;
 }
 
 }
