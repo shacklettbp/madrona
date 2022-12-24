@@ -137,10 +137,24 @@ public:
     ComponentT & getUnsafe(Loc loc);
 
     template <typename ArchetypeT, typename ComponentT>
-    ComponentT * getArchetypeColumn();
+    ComponentT * getArchetypeComponent();
+
+    inline void * getArchetypeComponent(uint32_t archetype_id,
+                                        uint32_t component_id);
+
+    inline int32_t getArchetypeColumnIndex(uint32_t archetype_id,
+                                           uint32_t component_id);
 
     inline void * getArchetypeColumn(uint32_t archetype_id,
-                                     uint32_t component_id);
+                                     int32_t column_idx);
+
+    inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
+                                                  int32_t column_idx);
+
+    inline int32_t getArchetypeNumColumns(uint32_t archetype_id);
+    inline uint32_t getArchetypeMaxColumnSize(uint32_t archetype_id);
+
+    inline void remapEntity(Entity e, int32_t row_idx);
 
     template <typename SingletonT>
     SingletonT * getSingletonColumn();
@@ -153,7 +167,7 @@ public:
                          int32_t recycle_base);
 
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
-    inline bool clearArchetypeNeedsSort(uint32_t archetype_id);
+    inline void archetypeClearNeedsSort(uint32_t archetype_id);
 
 private:
     template <typename SingletonT>

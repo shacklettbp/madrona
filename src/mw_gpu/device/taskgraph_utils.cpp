@@ -4,6 +4,8 @@
 
 #include <cub/block/block_radix_sort.cuh>
 #include <cub/block/block_scan.cuh>
+#include <cub/block/block_load.cuh>
+#include <cub/agent/agent_radix_sort_onesweep.cuh>
 
 namespace madrona {
 
@@ -215,7 +217,7 @@ TaskGraph::NodeID CompactArchetypeNodeBase::addToGraph(
         dependencies, archetype_id);
 }
 
-#if __CUDA_ARCH__ < 800
+#if 0 && __CUDA_ARCH__ < 800
 static uint32_t __reduce_add_sync(uint32_t mask, uint32_t val)
 {
     uint32_t lane_id = threadIdx.x % 32;
@@ -248,13 +250,29 @@ inline constexpr int MAX_NUM_PASSES =
     (sizeof(uint32_t) * 8 + RADIX_BITS - 1) / RADIX_BITS;
 }
 
+SortArchetypeNodeBase::OnesweepNode::OnesweepNode(ParentNodeT parent,
+                                                  int32_t pass,
+                                                  bool final_pass)
+    : parentNode(parent),
+      passIDX(pass),
+      finalPass(final_pass)
+{}
+
+SortArchetypeNodeBase::RearrangeNode::RearrangeNode(ParentNodeT parent,
+                                                    int32_t col_idx)
+    : parentNode(parent),
+      columnIndex(col_idx)
+{}
+
 SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id,
-                                             int32_t num_passes,
-                                             uint32_t *keys_col)
+                                             int32_t col_idx,
+                                             uint32_t *keys_col,
+                                             int32_t num_passes)
     :  NodeBase {},
        archetypeID(archetype_id),
-       numPasses(num_passes),
-       keysCol(keys_col)
+       sortColumnIndex(col_idx),
+       keysCol(keys_col),
+       numPasses(num_passes)
 {}
 
 void SortArchetypeNodeBase::sortSetup(int32_t)
@@ -267,6 +285,7 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
         numDynamicInvocations = 0;
         return;
     }
+    state_mgr->archetypeClearNeedsSort(archetypeID);
 
     int num_rows = state_mgr->numArchetypeRows(archetypeID);
 
@@ -278,39 +297,62 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
 
     uint32_t rounded_num_threads = num_blocks * consts::numMegakernelThreads;
 
-    constexpr uint64_t onesweep_tile_items =
-        consts::numMegakernelThreads * num_elems_per_sort_thread_;
-
-    uint64_t bins_offset = 0;
-    uint64_t total_bytes = bins_offset +
-        uint64_t(numPasses * RADIX_DIGITS) * sizeof(uint32_t);
-
-    uint64_t lookback_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = lookback_offset + onesweep_tile_items;
+    uint64_t indices_final_offset = 0;
+    uint64_t total_bytes = indices_final_offset +
+        uint64_t(num_rows) * sizeof(int);
+    uint64_t column_copy_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    uint64_t indices_alt_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = indices_alt_offset +
+        uint64_t(num_rows) * sizeof(int);
     uint64_t keys_alt_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
     total_bytes = keys_alt_offset + uint64_t(num_rows) * sizeof(uint32_t);
-    uint64_t indices_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = indices_offset + uint64_t(num_rows) * sizeof(int);
-    uint64_t indices_alt_offset =
-        utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = indices_alt_offset + uint64_t(num_rows) * sizeof(int);
+
+    uint64_t bins_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = bins_offset +
+        uint64_t(numPasses * RADIX_DIGITS) * sizeof(int32_t);
+    uint64_t lookback_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = lookback_offset + 
+        (uint64_t)num_blocks * RADIX_DIGITS * sizeof(int32_t);
     uint64_t counters_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
-    total_bytes = counters_offset + uint64_t(numPasses) * sizeof(uint32_t);
+    total_bytes = counters_offset + uint64_t(numPasses) * sizeof(int32_t);
+
+    uint64_t max_column_bytes =
+        (uint64_t)state_mgr->getArchetypeMaxColumnSize(archetypeID) *
+        (uint64_t)num_rows;
+
+    uint64_t free_column_bytes = total_bytes - column_copy_offset;
+
+    if (free_column_bytes < max_column_bytes) {
+        total_bytes += max_column_bytes - free_column_bytes;
+    }
 
     char *tmp_buffer = (char *)TmpAllocator::get().alloc(total_bytes);
 
     numRows = num_rows;
     numSortBlocks = num_blocks;
     numSortThreads = rounded_num_threads;
-    bins = (uint32_t *)(tmp_buffer + bins_offset);
-    lookback = (uint32_t *)(tmp_buffer + lookback_offset);
-    keysAlt = (uint32_t *)(tmp_buffer + keys_alt_offset);
-    indices = (int *)(tmp_buffer + indices_offset);
-    indicesAlt = (int *)(tmp_buffer + indices_alt_offset);
-    counters = (uint32_t *)(tmp_buffer + counters_offset);
 
-    // Set launch count for next node that computes the histogram
-    numDynamicInvocations = numSortThreads;
+    indicesFinal = (int *)(tmp_buffer + indices_final_offset);
+    columnStaging = tmp_buffer + column_copy_offset;
+    bool alt_final = numPasses % 2 == 1;
+
+    if (alt_final) {
+        indices = (int *)(tmp_buffer + indices_alt_offset);
+        indicesAlt = (int *)(tmp_buffer + indices_final_offset);
+    } else {
+        indices = (int *)(tmp_buffer + indices_final_offset);
+        indicesAlt = (int *)(tmp_buffer + indices_alt_offset);
+    }
+
+    keysAlt = (uint32_t *)(tmp_buffer + keys_alt_offset);
+    bins = (int32_t *)(tmp_buffer + bins_offset);
+    lookback = (int32_t *)(tmp_buffer + lookback_offset);
+    counters = (int32_t *)(tmp_buffer + counters_offset);
+
+    uint32_t num_histogram_bins = numPasses * RADIX_DIGITS;
+
+    // Set launch count for next node that zeros the histogram
+    numDynamicInvocations = num_histogram_bins;
     // Zero counters
     for (int i = 0; i < numPasses; i++) {
         counters[i] = 0;
@@ -320,6 +362,10 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
 void SortArchetypeNodeBase::zeroBins(int32_t invocation_idx)
 {
     bins[invocation_idx] = 0;
+
+    if (invocation_idx == 0) {
+        numDynamicInvocations = numSortThreads;
+    }
 }
 
 void SortArchetypeNodeBase::histogram(int32_t invocation_idx)
@@ -368,16 +414,18 @@ void SortArchetypeNodeBase::histogram(int32_t invocation_idx)
 
     for (int pass = 0; pass < numPasses; pass++) {
         int32_t bin_count = smem_tmp->bins[pass][threadIdx.x];
+        atomicAdd(&bins[pass * RADIX_DIGITS + threadIdx.x], bin_count);
+    }
 
-        int smem_sum = __reduce_add_sync(0xFFFF'FFFF, bin_count);
-        if (threadIdx.x % 32 == 0) {
-            atomicAdd(&bins[pass * RADIX_DIGITS + threadIdx.x], smem_sum);
-        }
+    if (invocation_idx == 0) {
+        numDynamicInvocations = numPasses * RADIX_DIGITS;
     }
 }
 
 void SortArchetypeNodeBase::binScan(int32_t invocation_idx)
 {
+    using namespace sortConsts;
+
     using BlockScanT = cub::BlockScan<uint32_t, consts::numMegakernelThreads>;
     using SMemTmpT = typename BlockScanT::TempStorage;
     auto smem_tmp = (SMemTmpT *)mwGPU::SharedMemStorage::buffer;
@@ -391,14 +439,147 @@ void SortArchetypeNodeBase::binScan(int32_t invocation_idx)
 
     // Setup for prepareOnesweep
     if (invocation_idx == 0) {
-        numDynamicInvocations = numSortBlocks;
+        numDynamicInvocations = numSortBlocks * RADIX_DIGITS;
     }
 }
 
-void SortArchetypeNodeBase::prepareOnesweep(int32_t invocation_idx)
+void SortArchetypeNodeBase::OnesweepNode::prepareOnesweep(
+    int32_t invocation_idx)
 {
+    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
     // Zero out the lookback counters
-    lookback[invocation_idx]  = 0;
+    parent.lookback[invocation_idx]  = 0;
+
+    if (invocation_idx == 0) {
+        numDynamicInvocations = numSortThreads;
+
+        if (passIDX % 2 == 0) {
+            parent.srcKeys = parent.keysCol;
+            parent.dstKeys = parent.keysAlt;
+            parent.srcVals = parent.indices;
+            parent.dstVals = parent.indicesAlt;
+        } else {
+            parent.srcKeys = parent.keysAlt;
+            parent.dstKeys = parent.keysCol;
+            parent.srcVals = parent.indicesAlt;
+            parent.dstVals = parent.indices;
+        }
+    }
+}
+
+struct SortArchetypeNodeBase::CustomOnesweepPolicy {
+    enum
+    {
+        RANK_NUM_PARTS = 1,
+        RADIX_BITS = sortConsts::RADIX_BITS,
+        ITEMS_PER_THREAD = num_elems_per_sort_thread_,
+        BLOCK_THREADS = consts::numMegakernelThreads,
+    };
+
+    static const cub::RadixRankAlgorithm RANK_ALGORITHM =
+        cub::RADIX_RANK_MATCH_EARLY_COUNTS_ANY;
+
+    static const cub::BlockScanAlgorithm SCAN_ALGORITHM =
+        cub::BLOCK_SCAN_RAKING_MEMOIZE;
+
+    static const cub::RadixSortStoreAlgorithm STORE_ALGORITHM =
+        cub::RADIX_SORT_STORE_DIRECT;
+};
+
+void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t invocation_idx)
+{
+    using namespace sortConsts;
+    using namespace mwGPU;
+
+    using AgentT = cub::AgentRadixSortOnesweep<CustomOnesweepPolicy, false,
+        uint32_t, int32_t, int32_t, int32_t>;
+
+    static_assert(sizeof(typename AgentT::TempStorage) <= 
+                  SharedMemStorage::numSMemBytes);
+    
+    auto smem_tmp = (AgentT::TempStorage *)SharedMemStorage::buffer;
+
+    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+
+    int32_t pass = passIDX;
+    AgentT agent(*smem_tmp,
+                 parent.lookback,
+                 parent.counters + pass,
+                 nullptr,
+                 parent.bins + pass * RADIX_DIGITS,
+                 parent.dstKeys,
+                 parent.srcKeys,
+                 parent.dstVals,
+                 parent.srcVals,
+                 parent.numRows,
+                 pass * RADIX_BITS,
+                 RADIX_BITS);
+
+    agent.Process();
+
+    if (invocation_idx == 0) {
+        if (finalPass) {
+            numDynamicInvocations = numRows;
+        } else {
+            // Setup for next pass of prepareOnesweep
+            numDynamicInvocations = numSortBlocks * RADIX_DIGITS;
+        }
+    }
+}
+
+void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
+{
+    if (numPasses % 2 == 0) return;
+
+    keysCol[invocation_idx] = keysAlt[invocation_idx];
+}
+
+void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+
+    uint32_t bytes_per_elem = state_mgr->getArchetypeColumnBytesPerRow(
+        parent.archetypeID, columnIndex);
+
+    void *src = state_mgr->getArchetypeColumn(parent.archetypeID, columnIndex);
+
+    int src_idx = parent.indicesFinal[invocation_idx];
+
+    memcpy((char *)parent.columnStaging +
+                (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
+           (char *)src + (uint64_t)bytes_per_elem * (uint64_t)src_idx,
+           bytes_per_elem);
+}
+
+void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_idx)
+{
+    StateManager *state_mgr = mwGPU::getStateManager():
+    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+
+    auto entities_staging = (Entity *)parent.columnStaging;
+    auto dst = (Entity *)state_mgr->getArchetypeColumn(parent.archetypeID, 0);
+
+    Entity e = entities_staging[invocation_idx];
+    dst[invocation_idx] = e;
+    state_mgr->remapEntity(e, invocation_idx);
+}
+
+void SortArchetypeNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_idx)
+{
+    StateManager *state_mgr = mwGPU::getStateManager():
+    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+
+    auto staging = (char *)parent.columnStaging;
+    auto dst = (char *)state_mgr->getArchetypeColumn(
+        parent.archetypeID, columnIndex);
+
+    uint32_t bytes_per_elem = state_mgr->getArchetypeColumnBytesPerRow(
+        parent.archetypeID, columnIndex);
+
+    memcpy(dst + (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
+           staging + (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
+           bytes_per_elem);
 }
 
 TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
@@ -409,9 +590,14 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
 {
     using namespace mwGPU;
 
+    static_assert(consts::numMegakernelThreads ==
+                  sortConsts::RADIX_DIGITS);
+
     StateManager *state_mgr = getStateManager();
-    auto keys_col = 
-        (uint32_t *)state_mgr->getArchetypeColumn(archetype_id, component_id);
+    int32_t sort_column_idx = state_mgr->getArchetypeColumnIndex(
+        archetype_id, component_id);
+    auto keys_col =  (uint32_t *)state_mgr->getArchetypeColumn(
+        archetype_id, sort_column_idx);
 
     // Optimize for sorts on the WorldID column, where the 
     // max # of worlds is known
@@ -426,24 +612,60 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         num_passes = 4;
     }
 
-    uint32_t num_histogram_bins = num_passes * consts::numMegakernelThreads;
-
-    auto &node = builder.constructNodeData<SortArchetypeNodeBase>(
-        archetype_id, num_passes, keys_col);
+    auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
+        archetype_id, sort_column_idx, keys_col, num_passes);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
-        &SortArchetypeNodeBase::sortSetup>(node, dependencies, 1);
+        &SortArchetypeNodeBase::sortSetup>(data_id, dependencies, 1);
 
     auto zero_bins = builder.addNodeFn<
-        &SortArchetypeNodeBase::zeroBins>(node, {setup}, num_histogram_bins);
+        &SortArchetypeNodeBase::zeroBins>(data_id, {setup});
 
     auto compute_histogram = builder.addNodeFn<
-        &SortArchetypeNodeBase::histogram>(node, {zero_bins});
+        &SortArchetypeNodeBase::histogram>(data_id, {zero_bins});
 
-    auto binscan = builder.addNodeFn<&SortArchetypeNodeBase::binScan>(
-        node, {compute_histogram}, num_histogram_bins);
+    auto cur_task = builder.addNodeFn<&SortArchetypeNodeBase::binScan>(
+        data_id, {compute_histogram});
 
-    return binscan;
+    for (int32_t i = 0; i < num_passes; i++) {
+        auto pass_data = build.constructNodeData<OnesweepNode>(
+            data_id, i, i == num_passes - 1);
+        cur_task = builder.addNodeFn<
+            &OnesweepNode::prepareOnesweep>(pass_data, {cur_task});
+
+        cur_task = builder.addNodeFn<
+            &OnesweepNode::onesweep>(pass_data, {cur_task});
+    }
+
+    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
+        data_id, {cur_task});
+
+    {
+        auto entity_rearrange_data = builder.constructNodeData<RearrangeNode>(
+            data_id, 0);
+
+        cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
+            entity_rearrange_data, {cur_task});
+
+        cur_task = builder.addNodeFn<&RearrangeNode::rearrangeEntities>(
+            entity_rearrange_data, {cur_task});
+    }
+
+    int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
+
+    for (int32_t col_idx = 1; col_idx < num_columns; col_idx++) {
+        if (col_idx == sortColumnIndex) continue;
+        auto rearrange_data = build.constructNodeData<RearrangeNode>(
+            data_id, col_idx);
+
+        cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
+            rearrange_data, {cur_task});
+
+        cur_task = builder.addNodeFn<&RearrangeNode::rearrangeColumn>(
+            rearrange_data, {cur_task});
+    }
+
+    return cur_task;
 }
 
 }

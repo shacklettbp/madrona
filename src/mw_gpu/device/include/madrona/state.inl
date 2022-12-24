@@ -39,7 +39,7 @@ template <typename ArchetypeT, typename ComponentT>
 void ECSRegistry::exportColumn(int32_t slot)
 {
     export_ptr_[slot] =
-        state_mgr_->getArchetypeColumn<ArchetypeT, ComponentT>();
+        state_mgr_->getArchetypeComponent<ArchetypeT, ComponentT>();
 }
 
 template <typename SingletonT>
@@ -236,21 +236,58 @@ ComponentT & StateManager::getUnsafe(Loc loc)
 }
 
 template <typename ArchetypeT, typename ComponentT>
-ComponentT * StateManager::getArchetypeColumn()
+ComponentT * StateManager::getArchetypeComponent()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     uint32_t component_id = TypeTracker::typeID<ComponentT>();
 
-    return (ComponentT *)getArchetypeColumn(archetype_id, component_id);
+    return (ComponentT *)getArchetypeComponent(archetype_id, component_id);
+}
+
+void * StateManager::getArchetypeComponent(uint32_t archetype_id,
+                                           uint32_t component_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    int32_t col_idx = getArchetypeColumnIndex(archetype_id, component_id);
+    return archetype.tbl.columns[col_idx];
+}
+
+int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
+                                              uint32_t component_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    return *archetype.columnLookup.lookup(component_id);
 }
 
 void * StateManager::getArchetypeColumn(uint32_t archetype_id,
-                                        uint32_t component_id)
+                                        int32_t column_idx)
 {
     auto &archetype = *archetypes_[archetype_id];
-    int32_t col_idx = *archetype.columnLookup.lookup(component_id);
+    return archetype.tbl.columns[column_idx];
+}
 
-    return archetype.tbl.columns[col_idx];
+uint32_t StateManager::getArchetypeColumnBytesPerRow(uint32_t archetype_id,
+                                                     int32_t column_idx)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    return archetype.tbl.columnSizes[column_idx];
+}
+
+int32_t StateManager::getArchetypeNumColumns(uint32_t archetype_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    return archetype.tbl.numColumns;
+}
+
+uint32_t StateManager::getArchetypeMaxColumnSize(uint32_t archetype_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    return archetype.tbl.maxColumnSize;
+}
+
+void StateManager::remapEntity(Entity e, int32_t row_idx)
+{
+    entity_store_.entities[e.id].loc.row = row_idx;
 }
 
 template <typename SingletonT>
@@ -266,15 +303,12 @@ SingletonT * StateManager::getSingletonColumn()
     return (SingletonT *)tbl.columns[2];
 }
 
-
-bool  StateManager::archetypeNeedsSort(
-    uint32_t archetype_id) const
+bool StateManager::archetypeNeedsSort(uint32_t archetype_id) const
 {
     return archetypes_[archetype_id]->needsSort;
 }
 
-bool StateManager::clearArchetypeNeedsSort(uint32_t archetype_id)
-
+void StateManager::archetypeClearNeedsSort(uint32_t archetype_id)
 {
     archetypes_[archetype_id]->needsSort = false;
 }

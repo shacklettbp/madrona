@@ -16,3 +16,6 @@
 [submodule "external/meshoptimizer"]
 	path = external/meshoptimizer
 	url = https://github.com/zeux/meshoptimizer.git
+[submodule "external/cub"]
+	path = external/cub
+	url = https://github.com/shacklettbp/cub.git

@@ -13,6 +13,12 @@
 
 namespace madrona {
 
+class TaskGraph;
+
+namespace mwGPU {
+    inline TaskGraph * getTaskGraph();
+}
+
 struct NodeBase {
     uint32_t numDynamicInvocations;
 };
@@ -29,6 +35,7 @@ private:
         uint32_t dataIDX;
         uint32_t fixedCount;
         uint32_t funcID;
+
         std::atomic_uint32_t curOffset;
         std::atomic_uint32_t numRemaining;
         std::atomic_uint32_t totalNumInvocations;
@@ -43,6 +50,9 @@ public:
         int32_t id;
     };
 
+    template <typename NodeT>
+    struct TypedDataID : DataID {};
+
     class Builder {
     public:
         Builder(int32_t max_nodes,
@@ -51,11 +61,12 @@ public:
         ~Builder();
 
         template <typename NodeT, typename... Args>
-        NodeT & constructNodeData(Args &&...args);
+        TypedDataID<NodeT> constructNodeData(Args &&...args);
 
         template <auto fn, typename NodeT>
-        NodeID addNodeFn(const NodeT &node,
+        NodeID addNodeFn(TypedDataID<NodeT> data,
                          Span<const NodeID> dependencies,
+                         Optional<NodeID> parent,
                          int32_t fixed_num_invocations = 0);
 
         template <typename NodeT, int32_t count = 1, typename... Args>
@@ -117,6 +128,9 @@ public:
 
     template <typename ContextT>
     static ContextT makeContext(WorldID world_id);
+
+    template <typename NodeT>
+    NodeT & getNodeData(TypedDataID<NodeT> data_id);
 
     struct BlockState;
 private:
@@ -216,17 +230,39 @@ struct CompactArchetypeNode : CompactArchetypeNodeBase {
 };
 
 struct SortArchetypeNodeBase : NodeBase {
+    struct CustomOnesweepPolicy;
+
+    using ParentNodeT = TaskGraph::TypedDataID<SortArchetypeNodeBase>;
+    struct OnesweepNode : NodeBase {
+        OnesweepNode(ParentNodeT parent, int32_t pass, bool final_pass);
+        ParentNodeT parentNode;
+        int32_t passIDX;
+        bool finalPass;
+
+        void prepareOnesweep(int32_t invocation_idx);
+        void onesweep(int32_t invocation_idx);
+    };
+
+    struct RearrangeNode : NodeBase {
+        RearrangeNode(ParentNodeT parent, int32_t col_idx);
+        TaskGraph::TypedDataID<SortArchetypeNodeBase> parentNode;
+        int32_t columnIndex;
+
+        void stageColumn(int32_t invocation_idx);
+        void rearrangeEntities(int32_t invocation_idx);
+        void rearrangeColumn(int32_t invocation_idx);
+    };
+
     SortArchetypeNodeBase(uint32_t archetype_id,
-                          int32_t num_passes,
-                          uint32_t *keys_col);
+                          int32_t col_idx,
+                          uint32_t *keys_col,
+                          int32_t num_passes);
 
     void sortSetup(int32_t);
     void zeroBins(int32_t invocation_idx);
     void histogram(int32_t invocation_idx);
     void binScan(int32_t invocation_idx);
-    void prepareOnesweep(int32_t invocation_idx);
-    void onesweep(int32_t invocation_idx);
-    void sortColumns(int32_t invocation_idx);
+    void copyKeys(int32_t invocation_idx);
 
     static TaskGraph::NodeID addToGraph(
         TaskGraph::Builder &builder,
@@ -236,19 +272,28 @@ struct SortArchetypeNodeBase : NodeBase {
 
     // Constant state
     uint32_t archetypeID;
-    int32_t numPasses;
+    int32_t sortColumnIndex;
     uint32_t *keysCol;
+    int32_t numPasses;
 
     // Per-run state
     uint32_t numRows;
     uint32_t numSortBlocks;
     uint32_t numSortThreads;
-    uint32_t *bins;
-    uint32_t *lookback;
-    uint32_t *keysAlt;
+    int *indicesFinal; // Points to either indices or indicesAlt
+    void *columnStaging;
     int *indices;
     int *indicesAlt;
-    uint32_t *counters;
+    uint32_t *keysAlt;
+    int32_t *bins;
+    int32_t *lookback;
+    int32_t *counters;
+
+    // Per pass state
+    uint32_t *srcKeys;
+    uint32_t *dstKeys;
+    int *srcVals;
+    int *dstVals;
 
     static inline constexpr uint32_t num_elems_per_sort_thread_ = 2;
 };

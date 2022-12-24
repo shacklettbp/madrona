@@ -161,6 +161,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 
     int32_t min_mapped_rows = Table::maxRowsPerTable;
 
+    uint32_t max_column_size = 0;
     for (int i = 0 ; i < (int)num_columns; i++) {
         uint64_t reserve_bytes = (uint64_t)type_infos[i].numBytes *
             (uint64_t)Table::maxRowsPerTable;
@@ -174,10 +175,13 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
         tbl.columnSizes[i] = type_infos[i].numBytes;
         tbl.columnMappedBytes[i] = init_bytes;
 
+        max_column_size = std::max(tbl.columnSizes[i], max_column_size);
+
         int num_mapped_in_column = init_bytes / tbl.columnSizes[i];
 
         min_mapped_rows = min(num_mapped_in_column, min_mapped_rows);
     }
+    tbl.maxColumnSize = max_column_size;
     tbl.mappedRows = min_mapped_rows;
 }
 
