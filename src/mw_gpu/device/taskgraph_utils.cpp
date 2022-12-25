@@ -31,7 +31,8 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
     uint32_t data_idx,
     uint32_t fixed_count,
     uint32_t func_id,
-    Span<const TaskGraph::NodeID> dependencies)
+    Span<const TaskGraph::NodeID> dependencies,
+    Optional<NodeID> parent_node)
 {
     uint32_t offset = num_dependencies_;
     uint32_t num_deps = dependencies.size();
@@ -53,6 +54,7 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
             0,
             0,
         },
+        parent_node.has_value() ? parent_node->id : -1,
         offset,
         num_deps,
     };
@@ -68,6 +70,7 @@ void TaskGraph::Builder::build(TaskGraph *out)
     Node *sorted_nodes = 
         (Node *)rawAlloc(sizeof(Node) * num_nodes_);
     bool *queued = (bool *)rawAlloc(num_nodes_ * sizeof(bool));
+    int32_t *num_children = (int32_t *)rawAlloc(num_nodes_ * sizeof(uint32_t));
 
     uint32_t sorted_idx = 0;
     auto enqueueInSorted = [&](const Node &node) {
@@ -82,14 +85,22 @@ void TaskGraph::Builder::build(TaskGraph *out)
     enqueueInSorted(staged_[0].node);
 
     queued[0] = true;
+    num_children[0] = 0;
 
     uint32_t num_remaining_nodes = num_nodes_ - 1;
-    uint32_t *remaining_nodes =
-        (uint32_t *)rawAlloc(num_remaining_nodes * sizeof(uint32_t));
 
-    for (int64_t i = 1; i < (int64_t)num_nodes_; i++) {
-        queued[i]  = false;
-        remaining_nodes[i - 1] = i;
+    for (int32_t i = 1; i < (int32_t)num_nodes_; i++) {
+        queued[i] = false;
+        num_children[i] = 0;
+    }
+
+    for (int32_t i = 0; i < (int32_t)num_nodes_; i++) {
+        auto &staged = staged_[i];
+
+        int32_t parent_id = staged.parentID;
+        if (parent_id != -1) {
+            num_children[parent_id] += 1;
+        }
     }
 
     while (num_remaining_nodes > 0) {
@@ -116,7 +127,7 @@ void TaskGraph::Builder::build(TaskGraph *out)
         }
     }
 
-    rawDealloc(remaining_nodes);
+    rawDealloc(num_children);
     rawDealloc(queued);
 
     auto tg_datas = (NodeData *)rawAlloc(sizeof(NodeData) * num_datas_);
@@ -279,10 +290,16 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
 {
     using namespace sortConsts;
 
+    auto taskgraph = mwGPU::getTaskGraph();
     StateManager *state_mgr = mwGPU::getStateManager();
+    int32_t num_columns = state_mgr->getArchetypeNumColumns(archetypeID);
 
     if (!state_mgr->archetypeNeedsSort(archetypeID)) {
         numDynamicInvocations = 0;
+
+        for (int i = 0; i < numPasses; i++) {
+            taskgraph->getNodeData(onesweepNodes[i]).numDynamicInvocations = 0;
+        }
         return;
     }
     state_mgr->archetypeClearNeedsSort(archetypeID);
@@ -357,6 +374,26 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     for (int i = 0; i < numPasses; i++) {
         counters[i] = 0;
     }
+
+    for (int i = 0; i < numPasses; i++) {
+        auto &pass_data = taskgraph->getNodeData(onesweepNodes[i]);
+        pass_data.numDynamicInvocations = numSortBlocks * RADIX_DIGITS;
+
+        if (i % 2 == 0) {
+            pass_data.srcKeys = keysCol;
+            pass_data.dstKeys = keysAlt;
+            pass_data.srcVals = indices;
+            pass_data.dstVals = indicesAlt;
+        } else {
+            pass_data.srcKeys = keysAlt;
+            pass_data.dstKeys = keysCol;
+            pass_data.srcVals = indicesAlt;
+            pass_data.dstVals = indices;
+        }
+    } 
+
+    taskgraph->getNodeData(firstRearrangePassData).numDynamicInvocations =
+        numRows;
 }
 
 void SortArchetypeNodeBase::zeroBins(int32_t invocation_idx)
@@ -437,9 +474,9 @@ void SortArchetypeNodeBase::binScan(int32_t invocation_idx)
 
     bins[invocation_idx] = bin_vals[0];
 
-    // Setup for prepareOnesweep
+    // Setup for copyKeys 
     if (invocation_idx == 0) {
-        numDynamicInvocations = numSortBlocks * RADIX_DIGITS;
+        numDynamicInvocations = numRows;
     }
 }
 
@@ -451,19 +488,7 @@ void SortArchetypeNodeBase::OnesweepNode::prepareOnesweep(
     parent.lookback[invocation_idx]  = 0;
 
     if (invocation_idx == 0) {
-        numDynamicInvocations = numSortThreads;
-
-        if (passIDX % 2 == 0) {
-            parent.srcKeys = parent.keysCol;
-            parent.dstKeys = parent.keysAlt;
-            parent.srcVals = parent.indices;
-            parent.dstVals = parent.indicesAlt;
-        } else {
-            parent.srcKeys = parent.keysAlt;
-            parent.dstKeys = parent.keysCol;
-            parent.srcVals = parent.indicesAlt;
-            parent.dstVals = parent.indices;
-        }
+        numDynamicInvocations = parent.numSortThreads;
     }
 }
 
@@ -507,24 +532,15 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t invocation_idx)
                  parent.counters + pass,
                  nullptr,
                  parent.bins + pass * RADIX_DIGITS,
-                 parent.dstKeys,
-                 parent.srcKeys,
-                 parent.dstVals,
-                 parent.srcVals,
+                 dstKeys,
+                 srcKeys,
+                 dstVals,
+                 srcVals,
                  parent.numRows,
                  pass * RADIX_BITS,
                  RADIX_BITS);
 
     agent.Process();
-
-    if (invocation_idx == 0) {
-        if (finalPass) {
-            numDynamicInvocations = numRows;
-        } else {
-            // Setup for next pass of prepareOnesweep
-            numDynamicInvocations = numSortBlocks * RADIX_DIGITS;
-        }
-    }
 }
 
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
@@ -554,8 +570,9 @@ void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
 
 void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_idx)
 {
-    StateManager *state_mgr = mwGPU::getStateManager():
-    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+    StateManager *state_mgr = mwGPU::getStateManager();
+    auto taskgraph = mwGPU::getTaskGraph();
+    auto &parent = taskgraph->getNodeData(parentNode);
 
     auto entities_staging = (Entity *)parent.columnStaging;
     auto dst = (Entity *)state_mgr->getArchetypeColumn(parent.archetypeID, 0);
@@ -563,12 +580,19 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_
     Entity e = entities_staging[invocation_idx];
     dst[invocation_idx] = e;
     state_mgr->remapEntity(e, invocation_idx);
+
+    if (invocation_idx == 0) {
+        taskgraph->getNodeData(nextRearrangeNode).numDynamicInvocations =
+            numDynamicInvocations;
+        numDynamicInvocations = 0;
+    }
 }
 
 void SortArchetypeNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_idx)
 {
-    StateManager *state_mgr = mwGPU::getStateManager():
-    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+    StateManager *state_mgr = mwGPU::getStateManager();
+    auto taskgraph = mwGPU::getTaskGraph();
+    auto &parent = taskgraph->getNodeData(parentNode);
 
     auto staging = (char *)parent.columnStaging;
     auto dst = (char *)state_mgr->getArchetypeColumn(
@@ -580,6 +604,14 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_id
     memcpy(dst + (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
            staging + (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
            bytes_per_elem);
+
+    if (invocation_idx == 0) {
+        if (nextRearrangeNode.id != -1) {
+            taskgraph->getNodeData(nextRearrangeNode).numDynamicInvocations =
+                numDynamicInvocations;
+        }
+        numDynamicInvocations = 0;
+    }
 }
 
 TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
@@ -614,56 +646,62 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
 
     auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
         archetype_id, sort_column_idx, keys_col, num_passes);
+    auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
-        &SortArchetypeNodeBase::sortSetup>(data_id, dependencies, 1);
+        &SortArchetypeNodeBase::sortSetup>(data_id, dependencies,
+            Optional<TaskGraph::NodeID>::none(), 1);
 
     auto zero_bins = builder.addNodeFn<
-        &SortArchetypeNodeBase::zeroBins>(data_id, {setup});
+        &SortArchetypeNodeBase::zeroBins>(data_id, {setup}, setup);
 
     auto compute_histogram = builder.addNodeFn<
-        &SortArchetypeNodeBase::histogram>(data_id, {zero_bins});
+        &SortArchetypeNodeBase::histogram>(data_id, {zero_bins}, setup);
 
     auto cur_task = builder.addNodeFn<&SortArchetypeNodeBase::binScan>(
-        data_id, {compute_histogram});
+        data_id, {compute_histogram}, setup);
 
     for (int32_t i = 0; i < num_passes; i++) {
-        auto pass_data = build.constructNodeData<OnesweepNode>(
+        auto pass_data = builder.constructNodeData<OnesweepNode>(
             data_id, i, i == num_passes - 1);
+        sort_node_data.onesweepNodes[i] = pass_data;
         cur_task = builder.addNodeFn<
-            &OnesweepNode::prepareOnesweep>(pass_data, {cur_task});
+            &OnesweepNode::prepareOnesweep>(pass_data, {cur_task}, setup);
 
         cur_task = builder.addNodeFn<
-            &OnesweepNode::onesweep>(pass_data, {cur_task});
+            &OnesweepNode::onesweep>(pass_data, {cur_task}, setup);
     }
 
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
-        data_id, {cur_task});
+        data_id, {cur_task}, setup);
 
-    {
-        auto entity_rearrange_data = builder.constructNodeData<RearrangeNode>(
-            data_id, 0);
+    auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
+        data_id, 0);
+    sort_node_data.firstRearrangePassData = cur_rearrange_node;
 
-        cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
-            entity_rearrange_data, {cur_task});
+    cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
+        cur_rearrange_node, {cur_task}, setup);
 
-        cur_task = builder.addNodeFn<&RearrangeNode::rearrangeEntities>(
-            entity_rearrange_data, {cur_task});
-    }
+    cur_task = builder.addNodeFn<&RearrangeNode::rearrangeEntities>(
+        cur_rearrange_node, {cur_task}, setup);
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 
     for (int32_t col_idx = 1; col_idx < num_columns; col_idx++) {
-        if (col_idx == sortColumnIndex) continue;
-        auto rearrange_data = build.constructNodeData<RearrangeNode>(
+        if (col_idx == sort_column_idx) continue;
+        auto prev_rearrange_node = cur_rearrange_node;
+        cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
             data_id, col_idx);
+        builder.getDataRef(prev_rearrange_node).nextRearrangeNode =
+            cur_rearrange_node;
 
         cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
-            rearrange_data, {cur_task});
+            cur_rearrange_node, {cur_task}, setup);
 
         cur_task = builder.addNodeFn<&RearrangeNode::rearrangeColumn>(
-            rearrange_data, {cur_task});
+            cur_rearrange_node, {cur_task}, setup);
     }
+    builder.getDataRef(cur_rearrange_node).nextRearrangeNode = { -1 };
 
     return cur_task;
 }

@@ -35,6 +35,7 @@ private:
         uint32_t dataIDX;
         uint32_t fixedCount;
         uint32_t funcID;
+        uint32_t numChildren;
 
         std::atomic_uint32_t curOffset;
         std::atomic_uint32_t numRemaining;
@@ -66,7 +67,8 @@ public:
         template <auto fn, typename NodeT>
         NodeID addNodeFn(TypedDataID<NodeT> data,
                          Span<const NodeID> dependencies,
-                         Optional<NodeID> parent,
+                         Optional<NodeID> parent_node =
+                             Optional<NodeID>::none(),
                          int32_t fixed_num_invocations = 0);
 
         template <typename NodeT, int32_t count = 1, typename... Args>
@@ -80,6 +82,9 @@ public:
         template <typename NodeT>
         inline NodeID addToGraph(Span<const NodeID> dependencies);
 
+        template <typename NodeT>
+        NodeT & getDataRef(TypedDataID<NodeT> data_id);
+
         void build(TaskGraph *out);
 
     private:
@@ -89,10 +94,12 @@ public:
         NodeID registerNode(uint32_t data_idx,
                             uint32_t fixed_count,
                             uint32_t func_id,
-                            Span<const NodeID> dependencies);
+                            Span<const NodeID> dependencies,
+                            Optional<NodeID> parent_node);
 
         struct StagedNode {
             Node node;
+            int32_t parentID;
             uint32_t dependencyOffset;
             uint32_t numDependencies;
         };
@@ -238,6 +245,10 @@ struct SortArchetypeNodeBase : NodeBase {
         ParentNodeT parentNode;
         int32_t passIDX;
         bool finalPass;
+        uint32_t *srcKeys;
+        uint32_t *dstKeys;
+        int *srcVals;
+        int *dstVals;
 
         void prepareOnesweep(int32_t invocation_idx);
         void onesweep(int32_t invocation_idx);
@@ -247,6 +258,7 @@ struct SortArchetypeNodeBase : NodeBase {
         RearrangeNode(ParentNodeT parent, int32_t col_idx);
         TaskGraph::TypedDataID<SortArchetypeNodeBase> parentNode;
         int32_t columnIndex;
+        TaskGraph::TypedDataID<RearrangeNode> nextRearrangeNode;
 
         void stageColumn(int32_t invocation_idx);
         void rearrangeEntities(int32_t invocation_idx);
@@ -276,6 +288,9 @@ struct SortArchetypeNodeBase : NodeBase {
     uint32_t *keysCol;
     int32_t numPasses;
 
+    std::array<TaskGraph::TypedDataID<OnesweepNode>, 4> onesweepNodes;
+    TaskGraph::TypedDataID<RearrangeNode> firstRearrangePassData;
+
     // Per-run state
     uint32_t numRows;
     uint32_t numSortBlocks;
@@ -288,12 +303,6 @@ struct SortArchetypeNodeBase : NodeBase {
     int32_t *bins;
     int32_t *lookback;
     int32_t *counters;
-
-    // Per pass state
-    uint32_t *srcKeys;
-    uint32_t *dstKeys;
-    int *srcVals;
-    int *dstVals;
 
     static inline constexpr uint32_t num_elems_per_sort_thread_ = 2;
 };

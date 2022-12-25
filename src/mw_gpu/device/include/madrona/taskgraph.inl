@@ -59,6 +59,7 @@ template <auto fn, typename NodeT>
 TaskGraph::NodeID TaskGraph::Builder::addNodeFn(
         TypedDataID<NodeT> data,
         Span<const NodeID> dependencies,
+        Optional<NodeID> parent_node,
         int32_t fixed_num_invocations)
 {
     using namespace mwGPU;
@@ -68,7 +69,8 @@ TaskGraph::NodeID TaskGraph::Builder::addNodeFn(
     return registerNode(uint32_t(data.id),
                         fixed_num_invocations,
                         func_id,
-                        dependencies);
+                        dependencies,
+                        parent_node);
 }
 
 template <typename NodeT, int32_t count, typename... Args>
@@ -78,7 +80,8 @@ TaskGraph::NodeID TaskGraph::Builder::addOneOffNode(
 {
     auto data_id = constructNodeData<NodeT>(
         std::forward<Args>(args)...);
-    return addNodeFn<&NodeT::run>(data_id, dependencies, count);
+    return addNodeFn<&NodeT::run>(data_id, dependencies,
+                                  Optional<NodeID>::none(), count);
 }
 
 template <typename NodeT>
@@ -97,7 +100,7 @@ TaskGraph::NodeID TaskGraph::Builder::addDynamicCountNode(
         std::forward<Args>(args)...);
 
     NodeID count_node = addNodeFn<&Builder::dynamicCountWrapper<NodeT>>(
-        data_id, dependencies, 1);
+        data_id, dependencies, Optional<NodeID>::none(), 1);
 
     return addNodeFn<&NodeT::run>(data_id, {count_node});
 }
@@ -109,6 +112,12 @@ TaskGraph::NodeID TaskGraph::Builder::addToGraph(
     return NodeT::addToGraph(*this, dependencies);
 }
 
+
+template <typename NodeT>
+NodeT & TaskGraph::Builder::getDataRef(TypedDataID<NodeT> data_id)
+{
+    return *(NodeT *)node_datas_[data_id.id].userData;
+}
 
 WorldBase * TaskGraph::getWorld(int32_t world_idx)
 {
