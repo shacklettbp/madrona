@@ -226,6 +226,8 @@ math::Vector3 HalfEdgeMesh::getFaceNormal(const PolygonID &polygon, const math::
 
     auto *hEdge = &halfEdge(mPolygons[polygon]);
     for (int i = 0; i < 3; ++i) {
+        printf("half edge %p\n", hEdge);
+        printf("root vertex %d\n", mPolygons[polygon]);
         points[i] = vertices[hEdge->rootVertex];
         hEdge = &halfEdge(hEdge->next);
     }

@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdio.h>
 #include <madrona/memory.hpp>
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
@@ -331,6 +332,8 @@ Manifold createEdgeContact(const EdgeQuery &query, const CollisionMesh &a, const
 }
 
 Manifold doSAT(const CollisionMesh &a, const CollisionMesh &b) {
+    printf("%d\n", a.halfEdgeMesh->mVertexCount);
+
     Manifold manifold = { nullptr, 0 };
 
     FaceQuery faceQueryA = queryFaceDirections(a, b);
