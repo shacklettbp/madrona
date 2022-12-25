@@ -305,7 +305,7 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
         entity_store.availableOffset.fetch_add(1, std::memory_order_relaxed);
 
     if (available_idx < entity_store.numMappedEntities) [[likely]] {
-        return available_idx;
+        return entity_store.availableEntities[available_idx];
     }
 
     entity_store.growLock.lock();
@@ -313,7 +313,7 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
     if (available_idx < entity_store.numMappedEntities) {
         entity_store.growLock.unlock();
 
-        return available_idx;
+        return entity_store.availableEntities[available_idx];
     }
 
     void *entities_grow_base = (char *)entity_store.entities +
@@ -343,7 +343,7 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
 
     entity_store.growLock.unlock();
 
-    return available_idx;
+    return entity_store.availableEntities[available_idx];
 }
 
 Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)

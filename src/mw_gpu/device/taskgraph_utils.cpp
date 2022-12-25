@@ -576,10 +576,14 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_
 
     auto entities_staging = (Entity *)parent.columnStaging;
     auto dst = (Entity *)state_mgr->getArchetypeColumn(parent.archetypeID, 0);
+    auto worlds = (WorldID *)state_mgr->getArchetypeColumn(parent.archetypeID, 1);
 
     Entity e = entities_staging[invocation_idx];
-    dst[invocation_idx] = e;
-    state_mgr->remapEntity(e, invocation_idx);
+
+    if (worlds[invocation_idx].idx != -1) {
+        dst[invocation_idx] = e;
+        state_mgr->remapEntity(e, invocation_idx);
+    }
 
     if (invocation_idx == 0) {
         taskgraph->getNodeData(nextRearrangeNode).numDynamicInvocations =
@@ -675,25 +679,22 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
         data_id, {cur_task}, setup);
 
-    auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
-        data_id, 0);
-    sort_node_data.firstRearrangePassData = cur_rearrange_node;
-
-    cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
-        cur_rearrange_node, {cur_task}, setup);
-
-    cur_task = builder.addNodeFn<&RearrangeNode::rearrangeEntities>(
-        cur_rearrange_node, {cur_task}, setup);
-
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
+
+    TaskGraph::TypedDataID<RearrangeNode> prev_rearrange_node { -1 };
 
     for (int32_t col_idx = 1; col_idx < num_columns; col_idx++) {
         if (col_idx == sort_column_idx) continue;
-        auto prev_rearrange_node = cur_rearrange_node;
-        cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
+        auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
             data_id, col_idx);
-        builder.getDataRef(prev_rearrange_node).nextRearrangeNode =
-            cur_rearrange_node;
+
+        if (prev_rearrange_node.id == -1) {
+            sort_node_data.firstRearrangePassData = cur_rearrange_node;
+        } else {
+            builder.getDataRef(prev_rearrange_node).nextRearrangeNode =
+                cur_rearrange_node;
+        }
+        prev_rearrange_node = cur_rearrange_node;
 
         cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
             cur_rearrange_node, {cur_task}, setup);
@@ -701,7 +702,20 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         cur_task = builder.addNodeFn<&RearrangeNode::rearrangeColumn>(
             cur_rearrange_node, {cur_task}, setup);
     }
-    builder.getDataRef(cur_rearrange_node).nextRearrangeNode = { -1 };
+
+    auto entities_rearrange_node = builder.constructNodeData<RearrangeNode>(
+        data_id, 0);
+
+    cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
+        entities_rearrange_node, {cur_task}, setup);
+
+    cur_task = builder.addNodeFn<&RearrangeNode::rearrangeEntities>(
+        entities_rearrange_node, {cur_task}, setup);
+
+    assert(prev_rearrange_node.id != -1);
+    builder.getDataRef(prev_rearrange_node).nextRearrangeNode =
+        entities_rearrange_node;
+    builder.getDataRef(entities_rearrange_node).nextRearrangeNode = { -1 };
 
     return cur_task;
 }
