@@ -100,4 +100,5 @@ void BVH::Node::clearChild(CountT child)
 }
 
 }
+
 }
