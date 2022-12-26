@@ -409,6 +409,17 @@ struct Vector3 {
         };
     }
 
+    friend inline Vector3 operator*(Vector3 a, Vector3 b)
+    {
+        return Vector3 {
+            a.x * b.x,
+            a.y * b.y,
+            a.z * b.z
+        };
+    }
+
+
+
     static inline Vector3 min(Vector3 a, Vector3 b)
     {
         return Vector3 {

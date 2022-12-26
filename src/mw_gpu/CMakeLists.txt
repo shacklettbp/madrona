@@ -39,6 +39,9 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/hashmap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/physics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/geometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/narrowphase.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/broadphase.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../render/render_ecs.cpp
 )
     

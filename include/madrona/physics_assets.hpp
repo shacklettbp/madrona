@@ -17,9 +17,10 @@ public:
     PhysicsLoader(PhysicsLoader &&o);
 
     CountT loadObjects(const RigidBodyMetadata *metadatas,
-                       const math::AABB *aabbs,
-                       const CollisionPrimitive *primitives,
-                       CountT num_objs);
+                   const math::AABB *aabbs,
+                   const CollisionPrimitive *primitives,
+                   CountT num_objs);
+
 
     ObjectManager & getObjectManager();
 
