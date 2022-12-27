@@ -332,8 +332,6 @@ Manifold createEdgeContact(const EdgeQuery &query, const CollisionMesh &a, const
 }
 
 Manifold doSAT(const CollisionMesh &a, const CollisionMesh &b) {
-    printf("%d\n", a.halfEdgeMesh->mVertexCount);
-
     Manifold manifold = { nullptr, 0 };
 
     FaceQuery faceQueryA = queryFaceDirections(a, b);

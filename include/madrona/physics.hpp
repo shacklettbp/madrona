@@ -130,17 +130,17 @@ public:
     const HalfEdge &halfEdge(HalfEdgeID id) const;
 
 public:
-    uint32_t mHalfEdgeCount;
-    uint32_t mPolygonCount;
-    uint32_t mEdgeCount;
-    uint32_t mVertexCount;
-
     // For now, just array of indices which point into the half edge array
     PolygonData *mPolygons;
     EdgeData    *mEdges;
     // Where all the half edges are stored
     HalfEdge    *mHalfEdges;
     math::Vector3   *mVertices;
+
+    uint32_t mHalfEdgeCount;
+    uint32_t mPolygonCount;
+    uint32_t mEdgeCount;
+    uint32_t mVertexCount;
 };
 
 // Contains transformed vertices for given geometry

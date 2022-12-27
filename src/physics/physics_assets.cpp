@@ -195,34 +195,36 @@ CountT PhysicsLoader::loadObjects(const RigidBodyMetadata *metadatas,
     switch (impl_->storageType) {
     case StorageType::CPU: {
         for (int i = 0; i < num_objs; ++i) {
-            auto &hEdgeMesh = primitives[i].hull.halfEdgeMesh;
-            memcpy(
-                impl_->polygonDatas + impl_->polygonCount,
-                hEdgeMesh.mPolygons,
-                sizeof(geometry::PolygonData) * hEdgeMesh.mPolygonCount);
-            hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
-            impl_->polygonCount += hEdgeMesh.mPolygonCount;
+            if (primitives[i].type == CollisionPrimitive::Type::Hull) {
+                auto &hEdgeMesh = primitives[i].hull.halfEdgeMesh;
+                memcpy(
+                    impl_->polygonDatas + impl_->polygonCount,
+                    hEdgeMesh.mPolygons,
+                    sizeof(geometry::PolygonData) * hEdgeMesh.mPolygonCount);
+                hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
+                impl_->polygonCount += hEdgeMesh.mPolygonCount;
 
-            memcpy(
-                impl_->edgeDatas + impl_->edgeCount,
-                hEdgeMesh.mEdges,
-                sizeof(geometry::EdgeData) * hEdgeMesh.mEdgeCount);
-            hEdgeMesh.mEdges = impl_->edgeDatas + impl_->edgeCount;
-            impl_->edgeCount += hEdgeMesh.mEdgeCount;
+                memcpy(
+                    impl_->edgeDatas + impl_->edgeCount,
+                    hEdgeMesh.mEdges,
+                    sizeof(geometry::EdgeData) * hEdgeMesh.mEdgeCount);
+                hEdgeMesh.mEdges = impl_->edgeDatas + impl_->edgeCount;
+                impl_->edgeCount += hEdgeMesh.mEdgeCount;
 
-            memcpy(
-                impl_->halfEdges + impl_->halfEdgeCount,
-                hEdgeMesh.mHalfEdges,
-                sizeof(geometry::HalfEdge) * hEdgeMesh.mHalfEdgeCount);
-            hEdgeMesh.mHalfEdges = impl_->halfEdges + impl_->halfEdgeCount;
-            impl_->halfEdgeCount += hEdgeMesh.mHalfEdgeCount;
+                memcpy(
+                    impl_->halfEdges + impl_->halfEdgeCount,
+                    hEdgeMesh.mHalfEdges,
+                    sizeof(geometry::HalfEdge) * hEdgeMesh.mHalfEdgeCount);
+                hEdgeMesh.mHalfEdges = impl_->halfEdges + impl_->halfEdgeCount;
+                impl_->halfEdgeCount += hEdgeMesh.mHalfEdgeCount;
 
-            memcpy(
-                impl_->vertices + impl_->vertexCount,
-                hEdgeMesh.mVertices,
-                sizeof(math::Vector3) * hEdgeMesh.mVertexCount);
-            hEdgeMesh.mVertices = impl_->vertices + impl_->vertexCount;
-            impl_->vertexCount += hEdgeMesh.mVertexCount;
+                memcpy(
+                    impl_->vertices + impl_->vertexCount,
+                    hEdgeMesh.mVertices,
+                    sizeof(math::Vector3) * hEdgeMesh.mVertexCount);
+                hEdgeMesh.mVertices = impl_->vertices + impl_->vertexCount;
+                impl_->vertexCount += hEdgeMesh.mVertexCount;
+            }
         }
 
         memcpy(metadatas_dst, metadatas, num_metadata_bytes);
@@ -231,38 +233,53 @@ CountT PhysicsLoader::loadObjects(const RigidBodyMetadata *metadatas,
     } break;
     case StorageType::CUDA: {
         for (int i = 0; i < num_objs; ++i) {
-            auto &hEdgeMesh = primitives[i].hull.halfEdgeMesh;
-            hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
-            cudaMemcpy(
-                impl_->polygonDatas + impl_->polygonCount,
-                hEdgeMesh.mPolygons,
-                sizeof(geometry::PolygonData) * hEdgeMesh.mPolygonCount,
-                cudaMemcpyHostToDevice);
-            impl_->polygonCount += hEdgeMesh.mPolygonCount;
+            if (primitives[i].type == CollisionPrimitive::Type::Hull) {
+                auto &hEdgeMesh = primitives[i].hull.halfEdgeMesh;
 
-            hEdgeMesh.mEdges = impl_->edgeDatas + impl_->edgeCount;
-            cudaMemcpy(
-                impl_->edgeDatas + impl_->edgeCount,
-                hEdgeMesh.mEdges,
-                sizeof(geometry::EdgeData) * hEdgeMesh.mEdgeCount,
-                cudaMemcpyHostToDevice);
-            impl_->edgeCount += hEdgeMesh.mEdgeCount;
+                printf("mPolygonCount = %d; mPolygons = %p\n", hEdgeMesh.mPolygonCount, hEdgeMesh.mPolygons);
+                cudaMemcpy(
+                    impl_->polygonDatas + impl_->polygonCount,
+                    hEdgeMesh.mPolygons,
+                    sizeof(geometry::PolygonData) * hEdgeMesh.mPolygonCount,
+                    cudaMemcpyHostToDevice);
+                hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
+                impl_->polygonCount += hEdgeMesh.mPolygonCount;
+#if 0
+                printf("%d %d %d %d %d %d\n",
+                        hEdgeMesh.mPolygons[0],
+                        hEdgeMesh.mPolygons[1],
+                        hEdgeMesh.mPolygons[2],
+                        hEdgeMesh.mPolygons[3],
+                        hEdgeMesh.mPolygons[4],
+                        hEdgeMesh.mPolygons[5]);
+#endif
 
-            hEdgeMesh.mHalfEdges = impl_->halfEdges + impl_->halfEdgeCount;
-            cudaMemcpy(
-                impl_->halfEdges + impl_->halfEdgeCount,
-                hEdgeMesh.mHalfEdges,
-                sizeof(geometry::HalfEdge) * hEdgeMesh.mHalfEdgeCount,
-                cudaMemcpyHostToDevice);
-            impl_->halfEdgeCount += hEdgeMesh.mHalfEdgeCount;
+                printf("mEdgeCount = %d; mEdges = %p\n", hEdgeMesh.mEdgeCount, hEdgeMesh.mEdges);
+                cudaMemcpy(
+                    impl_->edgeDatas + impl_->edgeCount,
+                    hEdgeMesh.mEdges,
+                    sizeof(geometry::EdgeData) * hEdgeMesh.mEdgeCount,
+                    cudaMemcpyHostToDevice);
+                hEdgeMesh.mEdges = impl_->edgeDatas + impl_->edgeCount;
+                impl_->edgeCount += hEdgeMesh.mEdgeCount;
 
-            hEdgeMesh.mVertices = impl_->vertices + impl_->vertexCount;
-            cudaMemcpy(
-                impl_->vertices + impl_->vertexCount,
-                hEdgeMesh.mVertices,
-                sizeof(math::Vector3) * hEdgeMesh.mVertexCount,
-                cudaMemcpyHostToDevice);
-            impl_->vertexCount += hEdgeMesh.mVertexCount;
+                printf("mHalfEdgeCount = %d; mHalfEdges = %p\n", hEdgeMesh.mHalfEdgeCount, hEdgeMesh.mHalfEdges);
+                cudaMemcpy(
+                    impl_->halfEdges + impl_->halfEdgeCount,
+                    hEdgeMesh.mHalfEdges,
+                    sizeof(geometry::HalfEdge) * hEdgeMesh.mHalfEdgeCount,
+                    cudaMemcpyHostToDevice);
+                hEdgeMesh.mHalfEdges = impl_->halfEdges + impl_->halfEdgeCount;
+                impl_->halfEdgeCount += hEdgeMesh.mHalfEdgeCount;
+
+                cudaMemcpy(
+                    impl_->vertices + impl_->vertexCount,
+                    hEdgeMesh.mVertices,
+                    sizeof(math::Vector3) * hEdgeMesh.mVertexCount,
+                    cudaMemcpyHostToDevice);
+                hEdgeMesh.mVertices = impl_->vertices + impl_->vertexCount;
+                impl_->vertexCount += hEdgeMesh.mVertexCount;
+            }
         }
 
         cudaMemcpy(metadatas_dst, metadatas, num_metadata_bytes,
