@@ -1,6 +1,7 @@
 #include <madrona/taskgraph.hpp>
 #include <madrona/crash.hpp>
 #include <madrona/memory.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
 
 #include "megakernel_consts.hpp"
 
@@ -263,6 +264,11 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
 
     total_bytes = host_allocator_offset + sizeof(mwGPU::HostAllocator);
 
+    uint64_t host_print_offset =
+        utils::roundUp(total_bytes, (uint64_t)alignof(mwGPU::HostPrint));
+
+    total_bytes = host_print_offset + sizeof(mwGPU::HostPrint);
+
     uint64_t tmp_allocator_offset =
         utils::roundUp(total_bytes, (uint64_t)alignof(TmpAllocator));
 
@@ -274,6 +280,7 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         /* .stateManagerAddr = */              (void *)state_mgr_offset,
         /* .worldDataAddr =  */                (void *)world_data_offset,
         /* .hostAllocatorAddr = */             (void *)host_allocator_offset,
+        /* .hostPrintAddr = */                 (void *)host_print_offset,
         /* .tmpAllocatorAddr */                (void *)tmp_allocator_offset,
         /* .rendererASInstancesAddrs = */      (void **)0ul,
         /* .rendererInstanceCountsAddr = */    (void *)0ul,

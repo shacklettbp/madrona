@@ -51,18 +51,18 @@ inline void checkNVRTC(nvrtcResult res, const char *file,
 }
 }
 
-#define ERR_CUDA(err) madrona::cu::cudaError((err), __FILE__, __LINE__,\
-                                             MADRONA_COMPILER_FUNCTION_NAME)
-#define ERR_CU(err) madrona::cu::cuDrvError((err), __FILE__, __LINE__,\
-                                            MADRONA_COMPILER_FUNCTION_NAME)
-#define ERR_NVRTC(err) madrona::cu::nvrtcError((err), __FILE__, __LINE__,\
+#define ERR_CUDA(err) ::madrona::cu::cudaError((err), __FILE__, __LINE__,\
                                                MADRONA_COMPILER_FUNCTION_NAME)
-
-#define REQ_CUDA(expr) madrona::cu::checkCuda((expr), __FILE__, __LINE__,\
+#define ERR_CU(err) ::madrona::cu::cuDrvError((err), __FILE__, __LINE__,\
                                               MADRONA_COMPILER_FUNCTION_NAME)
-#define REQ_CU(expr) madrona::cu::checkCuDrv((expr), __FILE__, __LINE__,\
-                                             MADRONA_COMPILER_FUNCTION_NAME)
-#define REQ_NVRTC(expr) madrona::cu::checkNVRTC((expr), __FILE__, __LINE__,\
+#define ERR_NVRTC(err) ::madrona::cu::nvrtcError((err), __FILE__, __LINE__,\
+                                                 MADRONA_COMPILER_FUNCTION_NAME)
+
+#define REQ_CUDA(expr) ::madrona::cu::checkCuda((expr), __FILE__, __LINE__,\
                                                 MADRONA_COMPILER_FUNCTION_NAME)
+#define REQ_CU(expr) ::madrona::cu::checkCuDrv((expr), __FILE__, __LINE__,\
+                                               MADRONA_COMPILER_FUNCTION_NAME)
+#define REQ_NVRTC(expr) ::madrona::cu::checkNVRTC((expr), __FILE__, __LINE__,\
+                                                  MADRONA_COMPILER_FUNCTION_NAME)
 
 #include "cuda_utils.inl"

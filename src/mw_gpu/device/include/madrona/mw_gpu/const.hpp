@@ -18,6 +18,7 @@ struct GPUImplConsts {
     void *stateManagerAddr;
     void *worldDataAddr;
     void *hostAllocatorAddr;
+    void *hostPrintAddr;
     void *tmpAllocatorAddr;
     void **rendererASInstancesAddrs;
     void *rendererInstanceCountsAddr;

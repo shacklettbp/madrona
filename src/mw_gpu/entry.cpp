@@ -27,6 +27,101 @@ namespace mwGPU {
 using namespace madrona;
 #include "device/include/madrona/mw_gpu/const.hpp"
 #include "device/include/madrona/memory.hpp"
+#include "device/include/madrona/mw_gpu/host_print.hpp"
+
+namespace madrona {
+namespace mwGPU {
+
+class HostPrintCPU {
+public:
+    inline HostPrintCPU()
+        : channel_([]() {
+              CUdeviceptr channel_devptr;
+              REQ_CU(cuMemAllocManaged(&channel_devptr,
+                                       sizeof(HostPrint::Channel),
+                                       CU_MEM_ATTACH_GLOBAL));
+
+              REQ_CU(cuMemAdvise((CUdeviceptr)channel_devptr, 
+                                 sizeof(HostPrint::Channel),
+                                 CU_MEM_ADVISE_SET_READ_MOSTLY, 0));
+              REQ_CU(cuMemAdvise((CUdeviceptr)channel_devptr,
+                                 sizeof(HostPrint::Channel),
+                                 CU_MEM_ADVISE_SET_ACCESSED_BY, CU_DEVICE_CPU));
+
+              CUdevice cu_gpu;
+              REQ_CU(cuCtxGetDevice(&cu_gpu));
+              REQ_CU(cuMemAdvise(channel_devptr, sizeof(HostPrint::Channel),
+                                 CU_MEM_ADVISE_SET_ACCESSED_BY, cu_gpu));
+
+              auto ptr = (HostPrint::Channel *)channel_devptr;
+              ptr->signal.store(0, cuda::std::memory_order_release);
+
+              std::cout << (void *)ptr << std::endl;
+
+              return ptr;
+          }()),
+          thread_([this]() {
+              printThread();
+          })
+    {}
+
+    HostPrintCPU(HostPrintCPU &&o) = delete;
+
+    inline ~HostPrintCPU()
+    {
+        channel_->signal.store(-1, cuda::std::memory_order_release);
+        thread_.join();
+        REQ_CU(cuMemFree((CUdeviceptr)channel_));
+    }
+
+    inline void initGPUCopy(void *gpu_ptr)
+    {
+        HostPrint gpu_state(channel_);
+
+        cudaMemcpy(gpu_ptr, &gpu_state, sizeof(HostPrint),
+                   cudaMemcpyHostToDevice);
+    }
+
+private:
+    inline void printThread()
+    {
+        using namespace std::chrono_literals;
+        using cuda::std::memory_order_acquire;
+        using cuda::std::memory_order_relaxed;
+
+        const auto reset_duration = 1ms;
+        const auto max_duration = 1s;
+
+        auto cur_duration = reset_duration;
+
+        while (true) {
+            auto signal = channel_->signal.load(memory_order_acquire);
+            if (signal == 0) {
+                std::this_thread::sleep_for(cur_duration);
+
+                cur_duration *= 2;
+                if (cur_duration > max_duration) {
+                    cur_duration = max_duration;
+                }
+                continue;
+            } else if (signal == -1) {
+                break;
+            }
+
+            std::cout << "GPU debug print:\n";
+            std::cout << channel_->buffer << std::flush;
+
+            channel_->signal.store(0, memory_order_relaxed);
+            cur_duration = reset_duration;
+        }
+    }
+
+    HostPrint::Channel *channel_;
+    std::thread thread_;
+};
+
+}
+}
 }
 
 #include "device/megakernel_consts.hpp"
@@ -42,6 +137,8 @@ __attribute__((constructor)) static void setCudaHeapSize()
 
 using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
 using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
+using HostPrint = mwGPU::madrona::mwGPU::HostPrint;
+using HostPrintCPU = mwGPU::madrona::mwGPU::HostPrintCPU;
 
 namespace consts {
 static constexpr uint32_t numEntryQueueThreads = 512;
@@ -73,6 +170,7 @@ struct GPUEngineState {
 
     std::thread allocatorThread;
     HostChannel *hostAllocatorChannel;
+    std::unique_ptr<HostPrintCPU> hostPrint;
 
     uint32_t *rendererInstanceCounts;
     HeapArray<void *> exportedColumns;
@@ -837,6 +935,8 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
     std::thread allocator_thread(
         gpuVMAllocatorThread, allocator_channel, cu_gpu);
 
+    auto host_print = std::make_unique<HostPrintCPU>();
+
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
                                                    world_data_alignment,
@@ -880,6 +980,10 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         (char *)gpu_consts_readback->hostAllocatorAddr +
         (uintptr_t)gpu_state_buffer;
 
+    gpu_consts_readback->hostPrintAddr =
+        (char *)gpu_consts_readback->hostPrintAddr +
+        (uintptr_t)gpu_state_buffer;
+
     gpu_consts_readback->tmpAllocatorAddr =
         (char *)gpu_consts_readback->tmpAllocatorAddr +
         (uintptr_t)gpu_state_buffer;
@@ -905,6 +1009,8 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         gpu_consts_readback->rendererBLASesAddr = nullptr;
         gpu_consts_readback->rendererViewDatasAddr = nullptr;
     }
+
+    host_print->initGPUCopy(gpu_consts_readback->hostPrintAddr);
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
@@ -952,6 +1058,7 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         gpu_state_buffer,
         std::move(allocator_thread),
         allocator_channel,
+        std::move(host_print),
         instance_counts_host,
         std::move(exported_cols),
     };
