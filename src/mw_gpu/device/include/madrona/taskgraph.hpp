@@ -237,7 +237,7 @@ struct CompactArchetypeNode : CompactArchetypeNodeBase {
 };
 
 struct SortArchetypeNodeBase : NodeBase {
-    struct CustomOnesweepPolicy;
+    struct RadixSortOnesweepCustom;
 
     using ParentNodeT = TaskGraph::TypedDataID<SortArchetypeNodeBase>;
     struct OnesweepNode : NodeBase {

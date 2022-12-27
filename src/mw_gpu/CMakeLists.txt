@@ -35,6 +35,7 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${DEVICE_SRC_DIR}/crash.cpp
     ${DEVICE_SRC_DIR}/const.cpp
     ${DEVICE_SRC_DIR}/taskgraph_utils.cpp
+    ${DEVICE_SRC_DIR}/sort_archetype.cpp
     ${DEVICE_SRC_DIR}/host_print.cpp
     # FIXME
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/hashmap.cpp
