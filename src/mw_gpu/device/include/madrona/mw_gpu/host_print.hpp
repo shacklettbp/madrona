@@ -9,6 +9,8 @@ class HostPrintCPU;
 
 class HostPrint {
 public:
+    HostPrint(void *channel_raw);
+
     template <typename... Args>
     static void log(const char *str, Args && ...args);
 
@@ -31,8 +33,6 @@ private:
         int32_t numArgs;
         cuda::std::atomic_int32_t signal;
     };
-
-    inline HostPrint(Channel *channel);
 
     static void logSubmit(const char *str, void **ptrs, FmtType *types,
                           int32_t num_args);

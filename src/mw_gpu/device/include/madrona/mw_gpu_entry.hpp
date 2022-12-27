@@ -2,16 +2,21 @@
 
 #include <madrona/taskgraph.hpp>
 #include <madrona/memory.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
 
 namespace madrona {
 namespace mwGPU {
 namespace entryKernels {
 
 template <typename ContextT, typename WorldDataT, typename InitT>
-__global__ void initECS(HostAllocInit alloc_init, void **exported_columns)
+__global__ void initECS(HostAllocInit alloc_init, void *print_channel,
+                        void **exported_columns)
 {
     HostAllocator *host_alloc = mwGPU::getHostAllocator();
     new (host_alloc) HostAllocator(alloc_init);
+
+    auto host_print = (HostPrint *)GPUImplConsts::get().hostPrintAddr;
+    new (host_print) HostPrint(print_channel);
 
     TmpAllocator &tmp_alloc = TmpAllocator::get();
     new (&tmp_alloc) TmpAllocator();

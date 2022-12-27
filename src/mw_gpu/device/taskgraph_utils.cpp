@@ -7,6 +7,8 @@
 #include <cub/block/block_load.cuh>
 #include <cub/agent/agent_radix_sort_onesweep.cuh>
 
+#include <madrona/mw_gpu/host_print.hpp>
+
 namespace madrona {
 
 TaskGraph::Builder::Builder(int32_t max_num_nodes,
@@ -539,6 +541,10 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t invocation_idx)
                  parent.numRows,
                  pass * RADIX_BITS,
                  RADIX_BITS);
+
+    if (threadIdx.x == 0) {
+        mwGPU::HostPrint::log("Onesweep task, invocation {}\n", invocation_idx);
+    }
 
     agent.Process();
 }

@@ -6,6 +6,11 @@
 namespace madrona {
 namespace mwGPU {
 
+HostPrint::HostPrint(void *channel_raw)
+    : channel_((Channel *)channel_raw),
+      device_lock_()
+{}
+
 void HostPrint::logSubmit(const char *str, void **ptrs, FmtType *types,
                           int32_t num_args)
 {

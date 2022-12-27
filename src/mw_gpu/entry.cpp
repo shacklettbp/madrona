@@ -56,8 +56,6 @@ public:
               auto ptr = (HostPrint::Channel *)channel_devptr;
               ptr->signal.store(0, cuda::std::memory_order_release);
 
-              std::cout << (void *)ptr << std::endl;
-
               return ptr;
           }()),
           thread_([this]() {
@@ -74,12 +72,9 @@ public:
         REQ_CU(cuMemFree((CUdeviceptr)channel_));
     }
 
-    inline void initGPUCopy(void */*gpu_ptr*/)
+    inline void * getChannelPtr()
     {
-        //HostPrint gpu_state(channel_);
-
-        //cudaMemcpy(gpu_ptr, &gpu_state, sizeof(HostPrint),
-        //           cudaMemcpyHostToDevice);
+        return channel_;
     }
 
 private:
@@ -943,7 +938,9 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
-    auto init_ecs_args = makeKernelArgBuffer(alloc_init, exported_readback);
+    auto init_ecs_args = makeKernelArgBuffer(alloc_init,
+                                             host_print->getChannelPtr(),
+                                             exported_readback);
 
     auto init_worlds_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
 
@@ -1009,8 +1006,6 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
         gpu_consts_readback->rendererBLASesAddr = nullptr;
         gpu_consts_readback->rendererViewDatasAddr = nullptr;
     }
-
-    host_print->initGPUCopy(gpu_consts_readback->hostPrintAddr);
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;

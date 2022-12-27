@@ -6,11 +6,6 @@
 namespace madrona {
 namespace mwGPU {
 
-HostPrint::HostPrint(Channel *channel_ptr)
-    : channel_(channel_ptr),
-      device_lock_()
-{}
-
 template <typename... Args>
 void HostPrint::log(const char *str, Args && ...args)
 {
