@@ -83,6 +83,7 @@ private:
         using namespace std::chrono_literals;
         using cuda::std::memory_order_acquire;
         using cuda::std::memory_order_relaxed;
+        using FmtType = HostPrint::FmtType;
 
         const auto reset_duration = 1ms;
         const auto max_duration = 1s;
@@ -103,8 +104,73 @@ private:
                 break;
             }
 
+
             std::cout << "GPU debug print:\n";
-            std::cout << channel_->buffer << std::flush;
+            std::string_view print_str = channel_->buffer;
+            size_t buffer_offset = print_str.length() + 1;
+            size_t str_offset = 0;
+
+            CountT cur_arg = 0;
+            while (str_offset < print_str.size()) {
+                size_t pos = print_str.find("{}", str_offset);
+                std::cout << print_str.substr(str_offset, pos);
+
+                if (pos == print_str.npos) {
+                    break;
+                }
+
+                assert(cur_arg < channel_->numArgs);
+                FmtType type = channel_->args[cur_arg];
+                switch (type) {
+                case FmtType::I32: {
+                    int32_t v;
+                    memcpy(&v, &channel_->buffer[buffer_offset],
+                           sizeof(int32_t));
+                    buffer_offset += sizeof(uint32_t);
+                    std::cout << v;
+                } break;
+                case FmtType::U32: {
+                    uint32_t v;
+                    memcpy(&v, &channel_->buffer[buffer_offset],
+                           sizeof(uint32_t));
+                    buffer_offset += sizeof(uint32_t);
+                    std::cout << v;
+                } break;
+                case FmtType::I64: {
+                    int64_t v;
+                    memcpy(&v, &channel_->buffer[buffer_offset],
+                           sizeof(int64_t));
+                    buffer_offset += sizeof(int64_t);
+                    std::cout << v;
+                } break;
+                case FmtType::U64: {
+                    uint64_t v;
+                    memcpy(&v, &channel_->buffer[buffer_offset],
+                           sizeof(uint64_t));
+                    buffer_offset += sizeof(uint64_t);
+                    std::cout << v;
+                } break;
+                case FmtType::Float: {
+                    float v;
+                    memcpy(&v, &channel_->buffer[buffer_offset],
+                           sizeof(float));
+                    buffer_offset += sizeof(float);
+                    std::cout << v;
+                } break;
+                case FmtType::Ptr: {
+                    void *v;
+                    memcpy(&v, &channel_->buffer[buffer_offset],
+                           sizeof(void *));
+                    buffer_offset += sizeof(void *);
+                    std::cout << v;
+                } break;
+                }
+                
+                cur_arg++;
+                str_offset = pos + 2;
+            }
+
+            std::cout << std::flush;
 
             channel_->signal.store(0, memory_order_relaxed);
             cur_duration = reset_duration;
