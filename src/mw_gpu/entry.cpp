@@ -74,12 +74,12 @@ public:
         REQ_CU(cuMemFree((CUdeviceptr)channel_));
     }
 
-    inline void initGPUCopy(void *gpu_ptr)
+    inline void initGPUCopy(void */*gpu_ptr*/)
     {
-        HostPrint gpu_state(channel_);
+        //HostPrint gpu_state(channel_);
 
-        cudaMemcpy(gpu_ptr, &gpu_state, sizeof(HostPrint),
-                   cudaMemcpyHostToDevice);
+        //cudaMemcpy(gpu_ptr, &gpu_state, sizeof(HostPrint),
+        //           cudaMemcpyHostToDevice);
     }
 
 private:
