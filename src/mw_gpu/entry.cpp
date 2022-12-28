@@ -924,7 +924,7 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                              CompileConfig::Executor exec_mode,
                                              cudaStream_t strm)
 {
-    constexpr int64_t max_instances_per_world = 1000;
+    constexpr int64_t max_instances_per_world = 16384;
 
     auto batch_renderer = Optional<render::BatchRenderer>::none();
 
