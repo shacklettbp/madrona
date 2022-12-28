@@ -424,8 +424,8 @@ struct Vector3 {
     {
         return Vector3 {
             helpers::minf(a.x, b.x),
-            helpers::minf(a.x, b.x),
-            helpers::minf(a.x, b.x),
+            helpers::minf(a.y, b.y),
+            helpers::minf(a.z, b.z),
         };
     }
 
@@ -433,8 +433,8 @@ struct Vector3 {
     {
         return Vector3 {
             helpers::maxf(a.x, b.x),
-            helpers::maxf(a.x, b.x),
-            helpers::maxf(a.x, b.x),
+            helpers::maxf(a.y, b.y),
+            helpers::maxf(a.z, b.z),
         };
     }
 };
@@ -649,7 +649,7 @@ struct AABB {
     {
         return AABB {
             /* .pMin = */ Vector3::min(a.pMin, b.pMin),
-            /* .pMax = */ Vector3::min(a.pMax, b.pMax),
+            /* .pMax = */ Vector3::max(a.pMax, b.pMax),
         };
     }
 };

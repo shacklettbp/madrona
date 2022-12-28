@@ -269,6 +269,67 @@ void BVH::rebuild()
         parent.maxY[child_offset] = combined_aabb.pMax.y;
         parent.maxZ[child_offset] = combined_aabb.pMax.z;
     }
+
+#if 0
+    // validate tree AABBs
+    int32_t num_leaves = num_leaves_.load(std::memory_order_relaxed);
+    for (int32_t i = 0; i < num_leaves; i++) {
+        const AABB &leaf_aabb = leaf_aabbs_[i];
+        uint32_t leaf_parent = leaf_parents_[i];
+
+        int32_t node_idx = int32_t(leaf_parent >> 2_u32);
+        int32_t sub_idx = int32_t(leaf_parent & 3);
+
+        Node *node = &nodes_[node_idx];
+        while (true) {
+            auto invalid = [&]() {
+                printf("%d %d %d\n\t(%f %f %f) (%f %f %f)\n\t(%f %f %f) (%f %f %f)\n",
+                       i, node_idx, sub_idx, leaf_aabb.pMin.x, leaf_aabb.pMin.y, leaf_aabb.pMin.z,
+                       leaf_aabb.pMax.x, leaf_aabb.pMax.y, leaf_aabb.pMax.z,
+                       node->minX[sub_idx], node->minY[sub_idx], node->minZ[sub_idx],
+                       node->maxX[sub_idx], node->maxY[sub_idx], node->maxZ[sub_idx]);
+                assert(false);
+            };
+
+            if (leaf_aabb.pMin.x < node->minX[sub_idx]) {
+                invalid();
+            }
+            if (leaf_aabb.pMin.y < node->minY[sub_idx]) {
+                invalid();
+            }
+            if (leaf_aabb.pMin.z < node->minZ[sub_idx]) {
+                invalid();
+            }
+
+            if (leaf_aabb.pMax.x > node->maxX[sub_idx]) {
+                invalid();
+            }
+            if (leaf_aabb.pMax.y > node->maxY[sub_idx]) {
+                invalid();
+            }
+            if (leaf_aabb.pMax.z > node->maxZ[sub_idx]) {
+                invalid();
+            }
+
+            int child_idx = node_idx;
+            node_idx = node->parentID;
+            if (node_idx == sentinel_) {
+                break;
+            }
+
+            node = &nodes_[node_idx];
+
+            int child_offset = -1;
+            for (int j = 0; j < 4; j++) {
+                if (node->children[j] == child_idx) {
+                    child_offset = j;
+                    break;
+                }
+            }
+            sub_idx = child_offset;
+        };
+    }
+#endif
 }
 
 void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
