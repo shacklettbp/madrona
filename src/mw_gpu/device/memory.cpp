@@ -83,17 +83,28 @@ void * TmpAllocator::alloc(uint64_t num_bytes)
     uint64_t alloc_offset = offset_.fetch_add(num_bytes,
         std::memory_order_relaxed);
 
-    if (alloc_offset >= num_mapped_bytes_) {
+    uint64_t required_bytes = alloc_offset + num_bytes;
+
+    if (required_bytes > num_mapped_bytes_) {
         grow_lock_.lock();
 
         uint64_t cur_mapped_bytes = num_mapped_bytes_;
-        if (alloc_offset >= cur_mapped_bytes) {
+        if (required_bytes > cur_mapped_bytes) {
             auto *host_alloc = mwGPU::getHostAllocator();
 
-            uint64_t num_added_bytes = cur_mapped_bytes;
-            num_added_bytes = host_alloc->roundUpAlloc(
-                max(num_added_bytes, uint64_t(1024 * 1024)));
-            num_added_bytes = min(num_added_bytes, uint64_t(256 * 1024 * 1024));
+            uint64_t min_grow = required_bytes - cur_mapped_bytes;
+
+            // Double by default
+            uint64_t num_added_bytes = 
+                max(max(cur_mapped_bytes, min_grow), uint64_t(1024 * 1024));
+
+            constexpr uint64_t max_normal_grow = 256 * 1024 * 1024;
+            if (min_grow < max_normal_grow) {
+                num_added_bytes = min(num_added_bytes, max_normal_grow);
+            }
+
+            num_added_bytes = host_alloc->roundUpAlloc(num_added_bytes);
+            
             host_alloc->mapMemory(
                 (char *)base_ + cur_mapped_bytes, num_added_bytes);
 

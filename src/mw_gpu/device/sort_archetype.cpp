@@ -9,8 +9,6 @@
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_store.cuh>
 
-#include <madrona/mw_gpu/host_print.hpp>
-
 namespace madrona {
 
 namespace sortConsts {

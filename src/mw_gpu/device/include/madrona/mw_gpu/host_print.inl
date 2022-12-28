@@ -9,6 +9,10 @@ namespace mwGPU {
 template <typename... Args>
 void HostPrint::log(const char *str, Args && ...args)
 {
+#ifdef MADRONA_GPU_MODE
+    __threadfence_system();
+#endif
+
     auto translate_type = [](auto *ptr) {
         using T = std::decay_t<decltype(*ptr)>;
 
@@ -41,6 +45,10 @@ void HostPrint::log(const char *str, Args && ...args)
 
     HostPrint::logSubmit(str, ptrs.data(), types.data(),
                          (int32_t)sizeof...(Args));
+
+#ifdef MADRONA_GPU_MODE
+    __threadfence_system();
+#endif
 }
 
 }

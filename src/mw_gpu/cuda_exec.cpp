@@ -113,11 +113,12 @@ private:
             CountT cur_arg = 0;
             while (str_offset < print_str.size()) {
                 size_t pos = print_str.find("{}", str_offset);
-                std::cout << print_str.substr(str_offset, pos);
-
                 if (pos == print_str.npos) {
+                    std::cout << print_str.substr(str_offset);
                     break;
                 }
+
+                std::cout << print_str.substr(str_offset, pos - str_offset);
 
                 assert(cur_arg < channel_->numArgs);
                 FmtType type = channel_->args[cur_arg];

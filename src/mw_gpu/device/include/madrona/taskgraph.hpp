@@ -289,7 +289,7 @@ struct SortArchetypeNodeBase : NodeBase {
     uint32_t *keysCol;
     int32_t numPasses;
 
-    std::array<TaskGraph::TypedDataID<OnesweepNode>, 4> onesweepNodes;
+    TaskGraph::TypedDataID<OnesweepNode> onesweepNodes[4];
     TaskGraph::TypedDataID<RearrangeNode> firstRearrangePassData;
 
     // Per-run state
