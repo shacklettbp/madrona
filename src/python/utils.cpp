@@ -20,11 +20,12 @@ MADRONA_EXPORT void ExternalSync::wait(uint64_t strm)
     REQ_CUDA(cudaWaitExternalSemaphoresAsync(&sema_, &params, 1, cuda_strm));
 }
 
-MADRONA_EXPORT GPUTensor::GPUTensor(void *dev_ptr, ElementType type,
-                                    Span<const int64_t> dimensions, int gpu_id)
+MADRONA_EXPORT Tensor::Tensor(void *dev_ptr, ElementType type,
+                              Span<const int64_t> dimensions,
+                              Optional<int> gpu_id)
     : dev_ptr_(dev_ptr),
       type_(type),
-      gpu_id_(gpu_id),
+      gpu_id_(gpu_id.has_value() ? *gpu_id : -1),
       num_dimensions_(dimensions.size()),
       dimensions_()
 {

@@ -77,6 +77,11 @@ add_library(madrona_cuda STATIC
         cuda_utils.cpp
 )
 
+target_compile_definitions(madrona_cuda
+    PUBLIC
+        MADRONA_CUDA_SUPPORT=1
+)
+
 target_link_libraries(madrona_cuda
     PUBLIC
         CUDA::cudart

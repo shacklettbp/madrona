@@ -47,14 +47,14 @@ struct CompileConfig {
     Executor execMode = Executor::TaskGraph;
 };
 
-class TrainingExecutor {
+class MWCudaExecutor {
 public:
-    MADRONA_IMPORT TrainingExecutor(const StateConfig &state_cfg,
+    MADRONA_IMPORT MWCudaExecutor(const StateConfig &state_cfg,
                                     const CompileConfig &compile_cfg);
 
-    MADRONA_IMPORT TrainingExecutor(TrainingExecutor &&o);
+    MADRONA_IMPORT MWCudaExecutor(MWCudaExecutor &&o);
 
-    MADRONA_IMPORT ~TrainingExecutor();
+    MADRONA_IMPORT ~MWCudaExecutor();
 
     MADRONA_IMPORT CountT loadObjects(Span<const imp::SourceObject> objs);
 

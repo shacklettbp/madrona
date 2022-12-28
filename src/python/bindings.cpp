@@ -17,33 +17,33 @@ namespace nb = nanobind;
 namespace madrona {
 namespace py {
 
-static nb::dlpack::dtype toDLPackType(GPUTensor::ElementType type)
+static nb::dlpack::dtype toDLPackType(Tensor::ElementType type)
 {
     switch (type) {
-        case GPUTensor::ElementType::UInt8:
+        case Tensor::ElementType::UInt8:
             return nb::dtype<uint8_t>();
-        case GPUTensor::ElementType::Int8:
+        case Tensor::ElementType::Int8:
             return nb::dtype<int8_t>();
-        case GPUTensor::ElementType::Int16:
+        case Tensor::ElementType::Int16:
             return nb::dtype<int16_t>();
-        case GPUTensor::ElementType::Int32:
+        case Tensor::ElementType::Int32:
             return nb::dtype<int32_t>();
-        case GPUTensor::ElementType::Int64:
+        case Tensor::ElementType::Int64:
             return nb::dtype<int64_t>();
-        case GPUTensor::ElementType::Float16:
+        case Tensor::ElementType::Float16:
             return nb::dlpack::dtype {
                 static_cast<uint8_t>(nb::dlpack::dtype_code::Float),
                 sizeof(int16_t) * 8,
                 1,
             };
-        case GPUTensor::ElementType::Float32:
+        case Tensor::ElementType::Float32:
             return nb::dtype<float>();
     }
 }
 
-static GPUTensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
+static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
 {
-    using ET = GPUTensor::ElementType;
+    using ET = Tensor::ElementType;
 
     if (nb::dlpack::dtype_code(dtype.code) == nb::dlpack::dtype_code::Int) {
         switch (dtype.bits) {
@@ -71,24 +71,28 @@ static GPUTensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
         }
     }
 
-    std::cerr << "GPUTensor: Invalid tensor dtype" << std::endl;
+    std::cerr << "Tensor: Invalid tensor dtype" << std::endl;
     abort();
 }
 
 NB_MODULE(madrona_python, m) {
-    nb::class_<GPUTensor>(m, "GPUTensor")
-        .def("__init__", ([](GPUTensor *dst, nb::tensor<> torch_tensor) {
-            if (torch_tensor.device_type() != nb::device::cuda::value) {
-                std::cerr << "Cannot construct GPUTensor from a non CUDA tensor"
-                    << std::endl;
+    nb::class_<Tensor>(m, "Tensor")
+        .def("__init__", ([](Tensor *dst, nb::tensor<> torch_tensor) {
+            Optional<int> gpu_id = Optional<int>::none();
+            if (torch_tensor.device_type() == nb::device::cuda::value) {
+                gpu_id = torch_tensor.device_id();
+            } else if (torch_tensor.device_type() != nb::device::cpu::value) {
+                std::cerr <<
+                    "madrona::Tensor: failed to import unknown tensor type" <<
+                    std::endl;
                 abort();
             }
 
-            std::array<int64_t, GPUTensor::maxDimensions> dims;
+            std::array<int64_t, Tensor::maxDimensions> dims;
 
-            if (torch_tensor.ndim() > GPUTensor::maxDimensions) {
-                std::cerr << "Cannot construct GPUTensor with more than "
-                    << GPUTensor::maxDimensions << " dimensions" << std::endl;
+            if (torch_tensor.ndim() > Tensor::maxDimensions) {
+                std::cerr << "Cannot construct Tensor with more than "
+                    << Tensor::maxDimensions << " dimensions" << std::endl;
                 abort();
             }
 
@@ -96,12 +100,12 @@ NB_MODULE(madrona_python, m) {
                 dims[i] = torch_tensor.shape(i);
             }
 
-            new (dst) GPUTensor(torch_tensor.data(),
+            new (dst) Tensor(torch_tensor.data(),
                                 fromDLPackType(torch_tensor.dtype()),
                                 Span(dims.data(), torch_tensor.ndim()),
-                                torch_tensor.device_id());
+                                gpu_id);
         }))
-        .def("to_torch", [](const GPUTensor &tensor) {
+        .def("to_torch", [](const Tensor &tensor) {
             nb::dlpack::dtype type = toDLPackType(tensor.type());
 
             return nb::tensor<nb::pytorch, void> {
@@ -111,8 +115,10 @@ NB_MODULE(madrona_python, m) {
                 nb::handle(),
                 nullptr,
                 type,
-                nb::device::cuda::value,
-                tensor.gpuID(),
+                tensor.isOnGPU() ?
+                    nb::device::cuda::value :
+                    nb::device::cpu::value,
+                tensor.isOnGPU() ? tensor.gpuID() : 0,
             };
         });
 

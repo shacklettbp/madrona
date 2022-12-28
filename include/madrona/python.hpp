@@ -2,6 +2,7 @@
 
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
+#include <madrona/optional.hpp>
 
 #include <array>
 #include <cuda_runtime.h>
@@ -19,7 +20,7 @@ private:
     cudaExternalSemaphore_t sema_;
 };
 
-class GPUTensor {
+class Tensor {
 public:
     enum class ElementType {
         UInt8,
@@ -31,17 +32,18 @@ public:
         Float32,
     };
 
-    MADRONA_IMPORT GPUTensor(void *dev_ptr, ElementType type,
-                             Span<const int64_t> dimensions,
-                             int gpu_id);
+    MADRONA_IMPORT Tensor(void *dev_ptr, ElementType type,
+                          Span<const int64_t> dimensions,
+                          Optional<int> gpu_id);
     
     inline void * devicePtr() const { return dev_ptr_; }
     inline ElementType type() const { return type_; }
+    inline bool isOnGPU() const { return gpu_id_ != -1; }
     inline int gpuID() const { return gpu_id_; }
     inline int64_t numDims() const { return num_dimensions_; }
     inline const int64_t *dims() const { return dimensions_.data(); }
 
-    static inline constexpr int64_t maxDimensions = 5;
+    static inline constexpr int64_t maxDimensions = 16;
 private:
     void *dev_ptr_;
     ElementType type_;
