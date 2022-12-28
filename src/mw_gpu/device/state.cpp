@@ -434,6 +434,12 @@ void StateManager::clearTemporaries(uint32_t archetype_id)
     tbl.numRows = 0;
 }
 
+void StateManager::resizeArchetype(uint32_t archetype_id, int32_t num_rows)
+{
+    archetypes_[archetype_id]->tbl.numRows.store(
+        num_rows, std::memory_order_relaxed);
+}
+
 int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const
 {
     archetypes_[archetype_id]->tbl.numRows.load(std::memory_order_relaxed);

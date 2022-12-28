@@ -159,6 +159,7 @@ public:
     template <typename SingletonT>
     SingletonT * getSingletonColumn();
 
+    void resizeArchetype(uint32_t archetype_id, int32_t num_rows);
     int32_t numArchetypeRows(uint32_t archetype_id) const;
 
     std::pair<int32_t, int32_t> fetchRecyclableEntities();

@@ -9,6 +9,8 @@
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_store.cuh>
 
+#include <madrona/mw_gpu/host_print.hpp>
+
 namespace madrona {
 
 namespace sortConsts {
@@ -1019,6 +1021,11 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     numRows = num_rows;
     numSortBlocks = num_blocks;
     numSortThreads = rounded_num_threads;
+    if (sortColumnIndex == 1) { // World sort
+        postBinScanThreads = 1;
+    } else {
+        postBinScanThreads = numRows;
+    }
 
     indicesFinal = (int *)(tmp_buffer + indices_final_offset);
     columnStaging = tmp_buffer + column_copy_offset;
@@ -1145,9 +1152,9 @@ void SortArchetypeNodeBase::binScan(int32_t invocation_idx)
 
     bins[invocation_idx] = bin_vals[0];
 
-    // Setup for copyKeys 
+    // Setup for resizeTable 
     if (invocation_idx == 0) {
-        numDynamicInvocations = numRows;
+        numDynamicInvocations = postBinScanThreads;
     }
 }
 
@@ -1193,10 +1200,15 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t invocation_idx)
     agent.Process();
 }
 
+void SortArchetypeNodeBase::resizeTable(int32_t)
+{
+    mwGPU::getStateManager()->resizeArchetype(archetypeID,
+                                              bins[numPasses * 255]);
+    numDynamicInvocations = numRows;
+}
+
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
 {
-    if (numPasses % 2 == 0) return;
-
     keysCol[invocation_idx] = keysAlt[invocation_idx];
 }
 
@@ -1285,10 +1297,12 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     auto keys_col =  (uint32_t *)state_mgr->getArchetypeColumn(
         archetype_id, sort_column_idx);
 
+    bool world_sort = component_id == TypeTracker::typeID<WorldID>();
+
     // Optimize for sorts on the WorldID column, where the 
     // max # of worlds is known
     int32_t num_passes;
-    if (component_id == TypeTracker::typeID<WorldID>()) {
+    if (world_sort) {
         int32_t num_worlds = GPUImplConsts::get().numWorlds;
         // num_worlds + 1 to leave room for columns with WorldID == -1
         int32_t num_bits = 32 - __clz(num_worlds + 1);
@@ -1326,8 +1340,16 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
             &OnesweepNode::onesweep>(pass_data, {cur_task}, setup);
     }
 
-    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
-        data_id, {cur_task}, setup);
+    // FIXME this could be a fixed-size count
+    if (world_sort) {
+        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::resizeTable>(
+            data_id, {cur_task}, setup);
+    }
+
+    if (num_passes % 2 == 1) {
+        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
+            data_id, {cur_task}, setup);
+    }
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 

@@ -274,6 +274,7 @@ struct SortArchetypeNodeBase : NodeBase {
     void zeroBins(int32_t invocation_idx);
     void histogram(int32_t invocation_idx);
     void binScan(int32_t invocation_idx);
+    void resizeTable(int32_t);
     void copyKeys(int32_t invocation_idx);
 
     static TaskGraph::NodeID addToGraph(
@@ -295,6 +296,7 @@ struct SortArchetypeNodeBase : NodeBase {
     uint32_t numRows;
     uint32_t numSortBlocks;
     uint32_t numSortThreads;
+    uint32_t postBinScanThreads;
     int *indicesFinal; // Points to either indices or indicesAlt
     void *columnStaging;
     int *indices;
