@@ -39,6 +39,7 @@ public:
                       uint32_t qf_idx,
                       uint32_t num_frames_inflight,
                       bool need_immediate);
+    ~PresentationState();
 
     void processInputs();
 
@@ -57,6 +58,8 @@ public:
                  const VkSemaphore *wait_semas);
 
 private:
+    const InstanceState *inst_;
+    const DeviceState *dev_;
     Window window_;
     VkSurfaceKHR surface_;
     Swapchain swapchain_;

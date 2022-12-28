@@ -38,6 +38,13 @@ DeviceState::DeviceState(
       dt(std::move(dispatch_table))
 {}
 
+DeviceState::~DeviceState()
+{
+    if (hdl != VK_NULL_HANDLE) {
+        dt.destroyDevice(hdl, nullptr);
+    }
+}
+
 struct InitializationDispatch {
     PFN_vkGetInstanceProcAddr
         getInstanceAddr;
@@ -307,8 +314,10 @@ InstanceState::InstanceState(InstanceState &&o)
 
 InstanceState::~InstanceState()
 {
-    // FIXME: cleanup vulkan stuff
-    
+    if (hdl != VK_NULL_HANDLE) {
+        dt.destroyDebugUtilsMessengerEXT(hdl, debug_, nullptr);
+        dt.destroyInstance(hdl, nullptr);
+    }
     if (loader_handle_ != nullptr) {
         dlclose(loader_handle_);
     }

@@ -78,8 +78,10 @@ device:
 - vkDestroyQueryPool
 - vkGetQueryPoolResults
 - vkCmdResetQueryPool
+- vkDestroyDevice
 - need_present:
     - vkCreateSwapchainKHR
+    - vkDestroySwapchainKHR
     - vkGetSwapchainImagesKHR
     - vkAcquireNextImageKHR
     - vkQueuePresentKHR
@@ -105,6 +107,7 @@ instance:
 - vkGetPhysicalDeviceMemoryProperties2
 - vkGetPhysicalDeviceQueueFamilyProperties2
 - vkGetInstanceProcAddr
+- vkDestroyDebugUtilsMessengerEXT
 - vkCreateDevice
 - vkDestroyInstance
 - need_present:

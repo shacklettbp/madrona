@@ -33,6 +33,7 @@ public:
                 uint32_t num_gfx_queues, uint32_t num_compute_queues,
                 uint32_t num_transfer_queues, VkPhysicalDevice phy_dev,
                 VkDevice dev, DeviceDispatch &&dispatch_table);
+    ~DeviceState();
 
     DeviceState(const DeviceState &) = delete;
     DeviceState(DeviceState &&) = default;

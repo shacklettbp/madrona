@@ -91,6 +91,7 @@ struct BatchRenderer::Impl {
 
     inline Impl(const Config &cfg);
     inline Impl(const Config &cfg, RendererInit &&init);
+    inline ~Impl();
    
     inline CountT loadObjects(Span<const imp::SourceObject> objs);
 
@@ -352,7 +353,8 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
                           init.presentSurface)),
       mem(dev, inst),
       presentState(init.presentWindow.has_value() ?
-          PresentationState(inst, dev, std::move(*init.presentWindow),
+          Optional<PresentationState>::make(inst, dev,
+                            std::move(*init.presentWindow),
                             std::move(*init.presentSurface),
                             dev.gfxQF, 1, true) :
           Optional<PresentationState>::none()),
@@ -391,13 +393,33 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
       loadedAssets(0)
 {}
 
+BatchRenderer::Impl::~Impl()
+{
+    REQ_VK(dev.dt.deviceWaitIdle(dev.hdl));
+
+    dev.dt.destroySemaphore(dev.hdl, swapchainReady, nullptr);
+    dev.dt.destroySemaphore(dev.hdl, renderFinished, nullptr);
+    tlases.free(dev);
+
+    dev.dt.destroyPipeline(dev.hdl, pipelineState.rt, nullptr);
+    dev.dt.destroyPipelineLayout(dev.hdl, pipelineState.rtLayout, nullptr);
+    dev.dt.destroyPipelineCache(dev.hdl, pipelineState.cache, nullptr);
+    dev.dt.destroyCommandPool(dev.hdl, renderCmdPool, nullptr);
+    dev.dt.destroyFence(dev.hdl, renderFence, nullptr);
+}
+
 CountT BatchRenderer::Impl::loadObjects(Span<const imp::SourceObject> objs)
 {
     auto metadata = *assetMgr.prepareMetadata(objs);
     HostBuffer staging = mem.makeStagingBuffer(metadata.numGPUDataBytes);
     assetMgr.packAssets(staging.ptr, metadata, objs);
 
-    Assets loaded = assetMgr.load(dev, mem, metadata, std::move(staging));
+    Assets loaded = assetMgr.load(dev, mem, GPURunUtil {
+        renderCmdPool,
+        renderCmd,
+        renderQueue,
+        renderFence,
+    }, metadata, std::move(staging));
 
     CountT offset = loaded.objectOffset;
     loadedAssets.emplace_back(std::move(loaded));
@@ -606,16 +628,14 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
 }
 
 BatchRenderer::BatchRenderer(const Config &cfg)
-    : impl_(nullptr)
-{
-    impl_ = std::unique_ptr<Impl>(new Impl(cfg));
-}
+    : impl_(new Impl(cfg))
+{}
 
 BatchRenderer::BatchRenderer(BatchRenderer &&o)
     : impl_(std::move(o.impl_))
 {}
 
-BatchRenderer::~BatchRenderer() {}
+BatchRenderer::~BatchRenderer() = default;
 
 CountT BatchRenderer::loadObjects(Span<const imp::SourceObject> objs)
 {

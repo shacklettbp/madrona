@@ -250,13 +250,21 @@ PresentationState::PresentationState(const InstanceState &inst,
                                      uint32_t qf_idx,
                                      uint32_t num_frames_inflight,
                                      bool need_immediate)
-    : window_(std::move(window)),
+    : inst_(&inst),
+      dev_(&dev),
+      window_(std::move(window)),
       surface_(surface),
       swapchain_(makeSwapchain(inst, dev, window_.hdl, surface_,
                                qf_idx, num_frames_inflight,
                                need_immediate)),
       swapchain_imgs_(getSwapchainImages(dev, swapchain_.hdl))
+{}
+
+PresentationState::~PresentationState()
 {
+    dev_->dt.destroySwapchainKHR(dev_->hdl, swapchain_.hdl, nullptr);
+    inst_->dt.destroySurfaceKHR(inst_->hdl, surface_, nullptr);
+    SDL_DestroyWindow((SDL_Window *)window_.hdl);
 }
 
 void PresentationState::processInputs()

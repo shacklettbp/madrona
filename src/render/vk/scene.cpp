@@ -497,60 +497,33 @@ void AssetManager::packAssets(void *dst_buffer,
 
 Assets AssetManager::load(const DeviceState &dev,
                           MemoryAllocator &mem,
+                          const GPURunUtil &gpu_run,
                           const AssetMetadata &metadata,
                           HostBuffer &&staging_buffer)
 {
     LocalBuffer geo_buffer =
         mem.makeLocalBuffer(metadata.numGPUDataBytes, true).value();
 
-    VkQueue tmp_queue_hdl = makeQueue(dev, dev.computeQF, 1);
-    QueueState tmp_queue(tmp_queue_hdl, false);
-    VkFence tmp_fence = makeFence(dev);
-
-    VkCommandPool tmp_cmd_pool = makeCmdPool(dev, dev.computeQF);
-    VkCommandBuffer tmp_cmd_buffer = makeCmdBuffer(dev, tmp_cmd_pool);
-
-    VkCommandBufferBeginInfo begin_info {};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    REQ_VK(dev.dt.beginCommandBuffer(tmp_cmd_buffer, &begin_info));
+    gpu_run.begin(dev);
 
     VkBufferCopy geo_copy_info {
         .srcOffset = 0,
         .dstOffset = 0,
         .size = metadata.numGPUDataBytes,
     };
-    dev.dt.cmdCopyBuffer(tmp_cmd_buffer, staging_buffer.buffer,
+    dev.dt.cmdCopyBuffer(gpu_run.cmd, staging_buffer.buffer,
                          geo_buffer.buffer, 1, &geo_copy_info);
 
-    REQ_VK(dev.dt.endCommandBuffer(tmp_cmd_buffer));
-
-    VkSubmitInfo copy_submit {};
-    copy_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    copy_submit.waitSemaphoreCount = 0;
-    copy_submit.pWaitSemaphores = nullptr;
-    copy_submit.pWaitDstStageMask = nullptr;
-    copy_submit.commandBufferCount = 1;
-    copy_submit.pCommandBuffers = &tmp_cmd_buffer;
-
-    tmp_queue.submit(dev, 1, &copy_submit, tmp_fence);
-    waitForFenceInfinitely(dev, tmp_fence);
-    resetFence(dev, tmp_fence);
+    gpu_run.submit(dev);
 
     VkDeviceAddress geo_dev_addr = getDevAddr(dev, geo_buffer.buffer);
 
-    REQ_VK(dev.dt.resetCommandPool(dev.hdl, tmp_cmd_pool, 0));
-
-    REQ_VK(dev.dt.beginCommandBuffer(tmp_cmd_buffer, &begin_info));
+    gpu_run.begin(dev);
 
     auto blas_build = makeBLASes(
-        dev, mem, metadata, geo_dev_addr, tmp_cmd_buffer);
+        dev, mem, metadata, geo_dev_addr, gpu_run.cmd);
 
-    REQ_VK(dev.dt.endCommandBuffer(tmp_cmd_buffer));
-
-    tmp_queue.submit(dev, 1, &copy_submit, tmp_fence);
-    waitForFenceInfinitely(dev, tmp_fence);
-    resetFence(dev, tmp_fence);
+    gpu_run.submit(dev);
 
     int64_t num_objects = metadata.objects.size();
     int64_t base_obj_offset = freeObjectOffset;
@@ -570,8 +543,7 @@ Assets AssetManager::load(const DeviceState &dev,
 
     addrBufferStaging.flush(dev);
 
-    REQ_VK(dev.dt.resetCommandPool(dev.hdl, tmp_cmd_pool, 0));
-    REQ_VK(dev.dt.beginCommandBuffer(tmp_cmd_buffer, &begin_info));
+    gpu_run.begin(dev);
 
     std::array<VkBufferCopy, 2> addrCopies;
     uint64_t blas_addr_start_offset =
@@ -586,15 +558,11 @@ Assets AssetManager::load(const DeviceState &dev,
     addrCopies[1].dstOffset = object_data_start_offset;
     addrCopies[1].size = sizeof(shader::ObjectData) * num_objects;
 
-    dev.dt.cmdCopyBuffer(tmp_cmd_buffer, addrBufferStaging.buffer,
+    dev.dt.cmdCopyBuffer(gpu_run.cmd, addrBufferStaging.buffer,
                          addrBuffer.buf.buffer, addrCopies.size(),
                          addrCopies.data());
 
-    REQ_VK(dev.dt.endCommandBuffer(tmp_cmd_buffer));
-
-    tmp_queue.submit(dev, 1, &copy_submit, tmp_fence);
-    waitForFenceInfinitely(dev, tmp_fence);
-    resetFence(dev, tmp_fence);
+    gpu_run.submit(dev);
 
     return Assets {
         std::move(geo_buffer),

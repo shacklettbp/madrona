@@ -76,6 +76,7 @@ struct AssetManager {
 
     Assets load(const DeviceState &dev,
                 MemoryAllocator &mem,
+                const GPURunUtil &gpu_run,
                 const AssetMetadata &metadata,
                 HostBuffer &&staged_buffer);
 };
