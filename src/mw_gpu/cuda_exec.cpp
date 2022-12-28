@@ -336,7 +336,8 @@ static GPUCompileResults compileCode(
     const char **sources, uint32_t num_sources,
     const char **compile_flags, uint32_t num_compile_flags,
     const char **fast_compile_flags, uint32_t num_fast_compile_flags,
-    CompileConfig::OptMode opt_mode, CompileConfig::Executor exec_mode)
+    CompileConfig::OptMode opt_mode, CompileConfig::Executor exec_mode,
+    bool verbose_compile)
 {
     static std::array<char, 1024 * 1024> linker_info_log;
     static std::array<char, 1024 * 1024> linker_error_log;
@@ -572,6 +573,7 @@ static __attribute__((always_inline)) inline void dispatch(
         }
     };
 
+    printf("Compiling GPU engine code:\n");
     for (int i = 0; i < (int)num_sources; i++) {
         printf("%s\n", sources[i]);
         auto [ptx, bytecode] = cu::jitCompileCPPFile(sources[i],
@@ -614,10 +616,12 @@ static __attribute__((always_inline)) inline void dispatch(
     size_t cubin_size;
     checkLinker(cuLinkComplete(linker, &linked_cubin, &cubin_size));
 
+#if 0
     std::ofstream cubin_out("/tmp/t.cubin", std::ios::binary);
     cubin_out.write((char *)linked_cubin, cubin_size);
+#endif
 
-    if ((uintptr_t)linker_option_values[1] > 0) {
+    if (verbose_compile && (uintptr_t)linker_option_values[1] > 0) {
         printf("CUDA linking info:\n%s\n", linker_info_log.data());
     }
 
@@ -726,19 +730,24 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         compile_flags.push_back("-DMADRONA_MWGPU_TASKGRAPH=1");
     }
 
-    for (const char *src : all_cpp_files) {
-        cout << src << endl;
-    }
+    char *verbose_compile_env = getenv("MADRONA_MWGPU_VERBOSE_COMPILE");
+    bool verbose_compile = verbose_compile_env && verbose_compile_env[0] == '1';
 
-    for (const char *flag : compile_flags) {
-        cout << flag << endl;
+    if (verbose_compile) {
+        for (const char *src : all_cpp_files) {
+            cout << src << endl;
+        }
+
+        for (const char *flag : compile_flags) {
+            cout << flag << endl;
+        }
     }
 
     GPUKernels gpu_kernels;
     auto compile_results =  compileCode(all_cpp_files.data(),
         all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
         fast_compile_flags.data(), fast_compile_flags.size(),
-        opt_mode, cfg.execMode);
+        opt_mode, cfg.execMode, verbose_compile);
 
     gpu_kernels.mod = compile_results.mod;
 
@@ -869,6 +878,10 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
     using cuda::std::memory_order_relaxed;
     using cuda::std::memory_order_release;
 
+    char *verbose_host_alloc_env = getenv("MADRONA_MWGPU_VERBOSE_HOSTALLOC");
+    bool verbose_host_alloc =
+        verbose_host_alloc_env && verbose_host_alloc_env[0] == '1';
+
     while (true) {
         while (channel->ready.load(memory_order_acquire) != 1) {
             std::this_thread::sleep_for(1ms);
@@ -879,8 +892,10 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
             uint64_t num_reserve_bytes = channel->reserve.maxBytes;
             uint64_t num_alloc_bytes = channel->reserve.initNumBytes;
 
-            printf("Reserve request received %lu %lu\n",
-                   num_reserve_bytes, num_alloc_bytes);
+            if (verbose_host_alloc) {
+                printf("Reserve request received %lu %lu\n",
+                       num_reserve_bytes, num_alloc_bytes);
+            }
 
             CUdeviceptr dev_ptr;
             REQ_CU(cuMemAddressReserve(&dev_ptr, num_reserve_bytes,
@@ -890,19 +905,25 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
                 mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
             }
 
-            printf("Reserved %p\n", (void *)dev_ptr);
+            if (verbose_host_alloc) {
+                printf("Reserved %p\n", (void *)dev_ptr);
+            }
 
             channel->reserve.result = (void *)dev_ptr;
         } else if (channel->op == HostChannel::Op::Map) {
             void *ptr = channel->map.addr;
             uint64_t num_bytes = channel->map.numBytes;
 
-            printf("Grow request received %p %lu\n",
-                   ptr, num_bytes);
+            if (verbose_host_alloc) {
+                printf("Grow request received %p %lu\n",
+                       ptr, num_bytes);
+            }
 
             mapGPUMemory(dev, (CUdeviceptr)ptr, num_bytes);
 
-            printf("Grew %p\n", ptr);
+            if (verbose_host_alloc) {
+                printf("Grew %p\n", ptr);
+            }
         } else if (channel->op == HostChannel::Op::Terminate) {
             break;
         }

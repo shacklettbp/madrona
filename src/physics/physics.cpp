@@ -267,7 +267,7 @@ inline void solverEntry(Context &ctx, SolverData &solver)
     // Push objects in serial based on the contact normal - total BS.
     CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
 
-    printf("Solver # contacts: %d\n", num_contacts);
+    //printf("Solver # contacts: %d\n", num_contacts);
 
     for (CountT i = 0; i < num_contacts; i++) {
         Contact &contact = solver.contacts[i];
