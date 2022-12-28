@@ -107,7 +107,6 @@ instance:
 - vkGetPhysicalDeviceMemoryProperties2
 - vkGetPhysicalDeviceQueueFamilyProperties2
 - vkGetInstanceProcAddr
-- vkDestroyDebugUtilsMessengerEXT
 - vkCreateDevice
 - vkDestroyInstance
 - need_present:

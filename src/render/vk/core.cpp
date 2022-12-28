@@ -315,7 +315,13 @@ InstanceState::InstanceState(InstanceState &&o)
 InstanceState::~InstanceState()
 {
     if (hdl != VK_NULL_HANDLE) {
-        dt.destroyDebugUtilsMessengerEXT(hdl, debug_, nullptr);
+        if (debug_ != VK_NULL_HANDLE) {
+            auto destroy_messenger =
+                reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+                    dt.getInstanceProcAddr(hdl,
+                                           "vkDestroyDebugUtilsMessengerEXT"));
+            destroy_messenger(hdl, debug_, nullptr);
+        }
         dt.destroyInstance(hdl, nullptr);
     }
     if (loader_handle_ != nullptr) {
