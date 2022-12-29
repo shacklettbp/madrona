@@ -160,7 +160,7 @@ inline void runNarrowphase(
                 a_entity,
                 b_entity,
                 { 
-                    a_pos + mid,
+                    makeVector4(a_pos + mid, dist / 2.f),
                     {}, {}, {}
                 },
                 1,
@@ -195,7 +195,7 @@ inline void runNarrowphase(
                 a_entity,
                 Entity::none(),
                 {
-                    a_pos + plane_normal * sphere.radius,
+                    makeVector4(a_pos + plane_normal * sphere.radius, t),
                     {}, {}, {}
                 },
                 1,
@@ -318,7 +318,7 @@ static inline void handleContact(Context &ctx, Contact &contact)
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        Vector3 contact_point = contact.points[i];
+        Vector3 contact_point = contact.points[i].xyz();
 
         handleContactConstraint(a_pos, a_rot, a_state, contact_point);
 

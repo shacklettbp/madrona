@@ -451,16 +451,20 @@ struct Vector4 {
     float y;
     float z;
     float w;
+
+    inline Vector3 xyz() const
+    {
+        return Vector3 {
+            x,
+            y,
+            z,
+        };
+    }
 };
 
 inline Vector4 makeVector4(const Vector3 &xyz, float w)
 {
     return { xyz.x, xyz.y, xyz.z, w };
-}
-
-inline Vector3 makeVector3(const Vector4 &xyzw)
-{
-    return { xyzw.x, xyzw.y, xyzw.z };
 }
 
 inline float dot(Vector3 a, Vector3 b)

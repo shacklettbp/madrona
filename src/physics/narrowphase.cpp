@@ -248,34 +248,34 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
     } else {
         manifold.numContactPoints = 4;
         manifold.contactPoints[0] = contacts[0];
+        Vector3 point0 = manifold.contactPoints[0].xyz();
 
         // Find furthest contact
         float largestD2 = 0.0f;
         int largestD2ContactPointIdx = 0;
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = makeVector3(contacts[i]);
-            float d2 = makeVector3(manifold.contactPoints[0]).distance2(cur_contact);
+            Vector4 cur_contact = contacts[i];
+            float d2 = point0.distance2(cur_contact.xyz());
             if (d2 > largestD2) {
                 largestD2 = d2;
-                manifold.contactPoints[1] = makeVector4(cur_contact, contacts[i].w);
+                manifold.contactPoints[1] = cur_contact;
                 largestD2ContactPointIdx = i;
             }
         }
 
         contacts[largestD2ContactPointIdx] = manifold.contactPoints[0];
 
-        math::Vector3 diff0 =
-            makeVector3(manifold.contactPoints[1]) - makeVector3(manifold.contactPoints[0]);
+        math::Vector3 diff0 = manifold.contactPoints[1].xyz() - point0;
 
         // Find point which maximized area of triangle
         float largestArea = 0.0f;
         int largestAreaContactPointIdx = 0;
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = makeVector3(contacts[i]);
-            math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
+            Vector4 cur_contact = contacts[i];
+            math::Vector3 diff1 = cur_contact.xyz() - point0;
             float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area > largestArea) {
-                manifold.contactPoints[2] = makeVector4(cur_contact, contacts[i].w);
+                manifold.contactPoints[2] = cur_contact;
                 largestAreaContactPointIdx = i;
             }
         }
@@ -283,11 +283,11 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
         contacts[largestAreaContactPointIdx] = manifold.contactPoints[0];
 
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = makeVector3(contacts[i]);
-            math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
+            Vector4 cur_contact = contacts[i];
+            math::Vector3 diff1 = cur_contact.xyz() - point0;
             float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area < largestArea) {
-                manifold.contactPoints[3] = makeVector4(cur_contact, contacts[i].w);
+                manifold.contactPoints[3] = cur_contact;
             }
         }
     }
@@ -341,7 +341,7 @@ Manifold createEdgeContact(const EdgeQuery &query, const CollisionMesh &a, const
     manifold.normal = query.normal;
     manifold.aIsReference = true; // Is this guaranteed?
     
-    if (manifold.normal.dot(makeVector3(manifold.contactPoints[0]) - a.center) < 0.0f) {
+    if (manifold.normal.dot(contact - a.center) < 0.0f) {
         manifold.aIsReference = false;
     }
 
