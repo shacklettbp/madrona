@@ -253,8 +253,8 @@ Manifold createFaceContactPlane(FaceQuery faceQuery, const Plane &plane, const C
         float largestD2 = 0.0f;
         int largestD2ContactPointIdx = 0;
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = makeVector3(contacts[i]);
-            float d2 = makeVector3(manifold.contactPoints[0]).distance2(cur_contact);
+            Vector3 cur_contact = contacts[i].xyz();
+            float d2 = manifold.contactPoints[0].xyz().distance2(cur_contact);
             if (d2 > largestD2) {
                 largestD2 = d2;
                 manifold.contactPoints[1] = makeVector4(cur_contact, contacts[i].w);
@@ -265,14 +265,14 @@ Manifold createFaceContactPlane(FaceQuery faceQuery, const Plane &plane, const C
         contacts[largestD2ContactPointIdx] = manifold.contactPoints[0];
 
         math::Vector3 diff0 =
-            makeVector3(manifold.contactPoints[1]) - makeVector3(manifold.contactPoints[0]);
+            manifold.contactPoints[1].xyz() - manifold.contactPoints[0].xyz();
 
         // Find point which maximized area of triangle
         float largestArea = 0.0f;
         int largestAreaContactPointIdx = 0;
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = makeVector3(contacts[i]);
-            math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
+            Vector3 cur_contact = contacts[i].xyz();
+            math::Vector3 diff1 = cur_contact - manifold.contactPoints[0].xyz();
             float area = plane.normal.dot(diff0.cross(diff1));
             if (area > largestArea) {
                 manifold.contactPoints[2] = makeVector4(cur_contact, contacts[i].w);
@@ -283,8 +283,8 @@ Manifold createFaceContactPlane(FaceQuery faceQuery, const Plane &plane, const C
         contacts[largestAreaContactPointIdx] = manifold.contactPoints[0];
 
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = makeVector3(contacts[i]);
-            math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
+            Vector3 cur_contact = contacts[i].xyz();
+            math::Vector3 diff1 = cur_contact - manifold.contactPoints[0].xyz();
             float area = plane.normal.dot(diff0.cross(diff1));
             if (area < largestArea) {
                 manifold.contactPoints[3] = makeVector4(cur_contact, contacts[i].w);
