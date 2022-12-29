@@ -199,7 +199,6 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
     // Determine minimizing face
     bool a_is_ref = faceQueryA.separation < faceQueryB.separation;
     FaceQuery &minimizingQuery = a_is_ref ? faceQueryA : faceQueryB;
-    FaceQuery &otherQuery = a_is_ref ? faceQueryB : faceQueryA;
 
     const CollisionMesh &referenceHull = a_is_ref ? a : b;
     const CollisionMesh &otherHull = a_is_ref ? b : a;
@@ -283,15 +282,12 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
 
         contacts[largestAreaContactPointIdx] = manifold.contactPoints[0];
 
-        float mostNegative = 0.0f;
-        int mostNegativeAreaContactPointIdx = 0;
         for (CountT i = 1; i < contact_count; ++i) {
             Vector3 cur_contact = makeVector3(contacts[i]);
             math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
             float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area < largestArea) {
                 manifold.contactPoints[3] = makeVector4(cur_contact, contacts[i].w);
-                mostNegativeAreaContactPointIdx = i;
             }
         }
     }

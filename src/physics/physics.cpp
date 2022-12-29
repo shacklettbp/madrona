@@ -213,15 +213,29 @@ inline void runNarrowphase(
         }
 
         Manifold manifold = doSAT(collisionMeshA, collisionMeshB);
+
+        if (manifold.aIsReference) {
+            // Orient the normal vector properly
+            if (manifold.normal.dot(makeVector3(manifold.contactPoints[0]) - a_pos) < 0.0f) {
+                manifold.normal *= -1.0f;
+            }
+        }
+        else {
+            // Orient the normal vector properly
+            if (manifold.normal.dot(makeVector3(manifold.contactPoints[0]) - b_pos) < 0.0f) {
+                manifold.normal *= -1.0f;
+            }
+        }
+
         if (manifold.numContactPoints > 0) {
             solver.addContacts({{
                 manifold.aIsReference ? a_entity : b_entity,
                 manifold.aIsReference ? b_entity : a_entity,
                 {
-                    manifold.contactPoints[0],
-                    manifold.contactPoints[1],
-                    manifold.contactPoints[2],
-                    manifold.contactPoints[3],
+                    makeVector3(manifold.contactPoints[0]),
+                    makeVector3(manifold.contactPoints[1]),
+                    makeVector3(manifold.contactPoints[2]),
+                    makeVector3(manifold.contactPoints[3]),
                 },
                 manifold.numContactPoints,
                 manifold.normal,
