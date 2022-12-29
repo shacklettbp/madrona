@@ -340,6 +340,10 @@ Manifold createEdgeContact(const EdgeQuery &query, const CollisionMesh &a, const
     manifold.numContactPoints = 1;
     manifold.normal = query.normal;
     manifold.aIsReference = true; // Is this guaranteed?
+    
+    if (manifold.normal.dot(makeVector3(manifold.contactPoints[0]) - a.center) < 0.0f) {
+        manifold.aIsReference = false;
+    }
 
     return manifold;
 }
