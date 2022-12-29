@@ -58,19 +58,11 @@ inline void updateCollisionAABB(Context &ctx,
     AABB world_aabb;
 
     // RTCD page 86
-#if defined(MADRONA_CLANG) or defined(MADRONA_GCC)
-#pragma GCC unroll 3
-#elif defined(MADRONA_GPU_MODE)
 #pragma unroll
-#endif
     for (CountT i = 0; i < 3; i++) {
         world_aabb.pMin[i] = world_aabb.pMax[i] = pos[i];
 
-#if defined(MADRONA_CLANG) or defined(MADRONA_GCC)
-#pragma GCC unroll 3
-#elif defined(MADRONA_GPU_MODE)
 #pragma unroll
-#endif
         for (CountT j = 0; j < 3; j++) {
             float e = rot_mat[i][j] * obj_aabb.pMin[j];
             float f = rot_mat[i][j] * obj_aabb.pMax[j];
@@ -249,10 +241,10 @@ inline void runNarrowphase(
                 manifold.aIsReference ? a_entity : b_entity,
                 manifold.aIsReference ? b_entity : a_entity,
                 {
-                    makeVector3(manifold.contactPoints[0]),
-                    makeVector3(manifold.contactPoints[1]),
-                    makeVector3(manifold.contactPoints[2]),
-                    makeVector3(manifold.contactPoints[3]),
+                    manifold.contactPoints[0],
+                    manifold.contactPoints[1],
+                    manifold.contactPoints[2],
+                    manifold.contactPoints[3],
                 },
                 manifold.numContactPoints,
                 manifold.normal,
@@ -306,13 +298,32 @@ inline void updateVelocities(Context &ctx,
     vel.linear = (pos - inst_state.prevPosition) / h;
 }
 
+static inline void handleContactConstraint(Position &pos_ref,
+                                           Rotation &rot_ref,
+                                           InstanceState inst_state,
+                                           Vector3 contact_point)
+{
+    Vector3 cur_translate = pos_ref;
+    Quat cur_rotation = rot_ref;
+}
+
 static inline void handleContact(Context &ctx, Contact &contact)
 {
     Position &a_pos = ctx.getUnsafe<Position>(contact.a);
+    Rotation &a_rot = ctx.getUnsafe<Rotation>(contact.a);
     //Velocity &a_vel = ctx.getUnsafe<Velocity>(contact.a);
-    a_pos += contact.normal;
+    InstanceState a_state = ctx.getUnsafe<InstanceState>(contact.a);
 
-    InstanceState &a_state = ctx.getUnsafe<InstanceState>(contact.a);
+#pragma unroll
+    for (CountT i = 0; i < 4; i++) {
+        if (i >= contact.numPoints) continue;
+
+        Vector3 contact_point = contact.points[i];
+
+        handleContactConstraint(a_pos, a_rot, a_state, contact_point);
+
+        a_pos += contact.normal;
+    }
 
     if (contact.b != Entity::none()) {
         Position &b_pos = ctx.getUnsafe<Position>(contact.b);

@@ -180,8 +180,8 @@ struct CandidateTemporary : Archetype<CandidateCollision> {};
 struct Contact {
     Entity a;
     Entity b;
-    math::Vector3 points[4];
-    int32_t num_points;
+    math::Vector4 points[4];
+    int32_t numPoints;
     math::Vector3 normal;
 };
 
