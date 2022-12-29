@@ -154,10 +154,9 @@ struct CollisionMesh {
 };
 }
 
-struct Velocity : public math::Vector3 {
-    Velocity(math::Vector3 v)
-        : Vector3(v)
-    {}
+struct Velocity {
+    math::Vector3 linear;
+    math::Vector3 angular;
 };
 
 struct CollisionAABB : math::AABB {
@@ -305,7 +304,8 @@ void updateBVHEntry(
 void findOverlappingEntry(
     Context &ctx,
     const Entity &e,
-    const CollisionAABB &obj_aabb);
+    const CollisionAABB &obj_aabb,
+    const Velocity &);
 
 }
 
@@ -313,6 +313,7 @@ namespace solver {
 
 struct InstanceState {
     math::Vector3 prevPosition;
+    math::Quat prevRotation;
 };
 
 }

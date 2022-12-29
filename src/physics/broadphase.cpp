@@ -452,7 +452,8 @@ void updateBVHEntry(
 void findOverlappingEntry(
     Context &ctx,
     const Entity &e,
-    const CollisionAABB &obj_aabb)
+    const CollisionAABB &obj_aabb,
+    const Velocity &)
 {
     BVH &bvh = ctx.getSingleton<BVH>();
 

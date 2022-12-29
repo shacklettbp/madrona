@@ -12,6 +12,7 @@ struct SolverData {
     Contact *contacts;
     std::atomic<CountT> numContacts;
     CountT maxContacts;
+    float deltaT;
     float h;
 
     inline SolverData(CountT max_contacts_per_step,
@@ -20,6 +21,7 @@ struct SolverData {
         : contacts((Contact *)rawAlloc(sizeof(Contact) * max_contacts_per_step)),
           numContacts(0),
           maxContacts(max_contacts_per_step),
+          deltaT(delta_t),
           h(delta_t / (float)num_substeps)
     {}
 
@@ -43,6 +45,7 @@ inline void updateCollisionAABB(Context &ctx,
                                 const Position &pos,
                                 const Rotation &rot,
                                 const ObjectID &obj_id,
+                                const Velocity &vel,
                                 CollisionAABB &out_aabb)
 {
     // FIXME: this could all be more efficient with a center + width
@@ -52,6 +55,8 @@ inline void updateCollisionAABB(Context &ctx,
     Mat3x3 rot_mat = Mat3x3::fromQuat(rot);
     AABB obj_aabb = obj_mgr.aabbs[obj_id.idx];
 
+    AABB world_aabb;
+
     // RTCD page 86
 #if defined(MADRONA_CLANG) or defined(MADRONA_GCC)
 #pragma GCC unroll 3
@@ -59,7 +64,7 @@ inline void updateCollisionAABB(Context &ctx,
 #pragma unroll
 #endif
     for (CountT i = 0; i < 3; i++) {
-        out_aabb.pMin[i] = out_aabb.pMax[i] = pos[i];
+        world_aabb.pMin[i] = world_aabb.pMax[i] = pos[i];
 
 #if defined(MADRONA_CLANG) or defined(MADRONA_GCC)
 #pragma GCC unroll 3
@@ -71,14 +76,39 @@ inline void updateCollisionAABB(Context &ctx,
             float f = rot_mat[i][j] * obj_aabb.pMax[j];
 
             if (e < f) {
-                out_aabb.pMin[i] += e;
-                out_aabb.pMax[i] += f;
+                world_aabb.pMin[i] += e;
+                world_aabb.pMax[i] += f;
             } else {
-                out_aabb.pMin[i] += f;
-                out_aabb.pMax[i] += e;
+                world_aabb.pMin[i] += f;
+                world_aabb.pMax[i] += e;
             }
         }
     }
+
+    constexpr float expansion_factor = 2.f;
+    constexpr float max_accel = 100.f;
+
+    float delta_t = ctx.getSingleton<SolverData>().deltaT;
+    float min_pos_change = max_accel * delta_t * delta_t;
+
+    Vector3 linear_velocity = vel.linear;
+
+#pragma unroll
+    for (int32_t i = 0; i < 3; i++) {
+        float pos_delta = expansion_factor * linear_velocity[i] * delta_t;
+
+        float min_delta = pos_delta - min_pos_change;
+        float max_delta = pos_delta + min_pos_change;
+
+        if (min_delta < 0.f) {
+            world_aabb.pMin[i] += min_delta;
+        }
+        if (max_delta > 0.f) {
+            world_aabb.pMax[i] += max_delta;
+        }
+    }
+
+    out_aabb = world_aabb;
 }
 
 namespace narrowphase {
@@ -257,11 +287,12 @@ inline void updatePositions(Context &ctx,
     float h = solver.h;
 
     inst_state.prevPosition = pos;
+    inst_state.prevRotation = rot;
 
-    Vector3 cur_velocity = vel;
+    Vector3 linear_velocity = vel.linear;
     //cur_velocity += h * gravity;
 
-    pos += h * cur_velocity;
+    pos += h * linear_velocity;
 }
 
 inline void updateVelocities(Context &ctx,
@@ -272,7 +303,21 @@ inline void updateVelocities(Context &ctx,
     const auto &solver = ctx.getSingleton<SolverData>();
     float h = solver.h;
 
-    vel = (pos - inst_state.prevPosition) / h;
+    vel.linear = (pos - inst_state.prevPosition) / h;
+}
+
+static inline void handleContact(Context &ctx, Contact &contact)
+{
+    Position &a_pos = ctx.getUnsafe<Position>(contact.a);
+    //Velocity &a_vel = ctx.getUnsafe<Velocity>(contact.a);
+    a_pos += contact.normal;
+
+    InstanceState &a_state = ctx.getUnsafe<InstanceState>(contact.a);
+
+    if (contact.b != Entity::none()) {
+        Position &b_pos = ctx.getUnsafe<Position>(contact.b);
+        b_pos -= contact.normal;
+    }
 }
 
 inline void solverEntry(Context &ctx, SolverData &solver)
@@ -285,13 +330,7 @@ inline void solverEntry(Context &ctx, SolverData &solver)
     for (CountT i = 0; i < num_contacts; i++) {
         Contact &contact = solver.contacts[i];
 
-        Position &a_pos = ctx.getUnsafe<Position>(contact.a);
-        a_pos += contact.normal;
-
-        if (contact.b != Entity::none()) {
-            Position &b_pos = ctx.getUnsafe<Position>(contact.b);
-            b_pos -= contact.normal;
-        }
+        handleContact(ctx, contact);
     }
 
     solver.numContacts.store(0, std::memory_order_relaxed);
@@ -355,8 +394,8 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     CountT num_substeps)
 {
     auto update_aabbs = builder.addToGraph<ParallelForNode<Context,
-        updateCollisionAABB, Position, Rotation, ObjectID, CollisionAABB>>(
-            deps);
+        updateCollisionAABB, Position, Rotation, ObjectID, Velocity,
+            CollisionAABB>>(deps);
 
     auto preprocess_leaves = builder.addToGraph<ParallelForNode<Context,
         broadphase::updateLeavesEntry, broadphase::LeafID, 
@@ -366,7 +405,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
         broadphase::updateBVHEntry, broadphase::BVH>>({preprocess_leaves});
 
     auto find_overlapping = builder.addToGraph<ParallelForNode<Context,
-        broadphase::findOverlappingEntry, Entity, CollisionAABB>>(
+        broadphase::findOverlappingEntry, Entity, CollisionAABB, Velocity>>(
             {bvh_update});
     
     auto cur_node = find_overlapping;
