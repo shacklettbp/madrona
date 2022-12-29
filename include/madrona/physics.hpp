@@ -179,7 +179,10 @@ struct CandidateCollision {
 struct CandidateTemporary : Archetype<CandidateCollision> {};
 
 struct Contact {
-    Entity e;
+    Entity a;
+    Entity b;
+    math::Vector3 points[4];
+    int32_t num_points;
     math::Vector3 normal;
 };
 
@@ -340,19 +343,21 @@ namespace narrowphase {
 
 struct FaceQuery {
     float separation;
-    int faceIdx;
+    int32_t faceIdx;
 };
 
 struct EdgeQuery {
     float separation;
-    int edgeIdxA;
-    int edgeIdxB;
+    math::Vector3 normal;
+    int32_t edgeIdxA;
+    int32_t edgeIdxB;
 };
 
 struct Manifold {
-    // Also potentially add normal directions for the manifold
-    math::Vector3 *contactPoints;
-    uint32_t contactPointCount;
+    math::Vector3 contactPoints[4];
+    int32_t numContactPoints;
+    math::Vector3 normal;
+    bool aIsReference;
 };
 
 // Returned vertices will be stored in linear bump allocator

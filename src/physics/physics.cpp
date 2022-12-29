@@ -127,17 +127,22 @@ inline void runNarrowphase(
         float a_radius = a_prim->sphere.radius;
         float b_radius = b_prim->sphere.radius;
 
-        Vector3 to_a = a_pos - b_pos;
-        float dist = to_a.length();
+        Vector3 to_b = b_pos - a_pos;
+        float dist = to_b.length();
 
         if (dist > 0 && dist < a_radius + b_radius) {
-            Vector3 to_a_normal = to_a / dist;
+            Vector3 mid = to_b / 2.f;
+
+            Vector3 to_b_normal = to_b / dist;
             solver.addContacts({{
                 a_entity,
-                to_a_normal,
-            }, {
                 b_entity,
-                -to_a_normal,
+                { 
+                    a_pos + mid,
+                    {}, {}, {}
+                },
+                1,
+                to_b_normal,
             }});
 
 
@@ -166,6 +171,12 @@ inline void runNarrowphase(
         if (t < sphere.radius) {
             solver.addContacts({{
                 a_entity,
+                Entity::none(),
+                {
+                    a_pos + plane_normal * sphere.radius,
+                    {}, {}, {}
+                },
+                1,
                 plane_normal,
             }});
         }
@@ -188,33 +199,34 @@ inline void runNarrowphase(
         collisionMeshA.vertexCount = hEdgeA.getVertexCount();
         collisionMeshA.vertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * collisionMeshA.vertexCount);
         collisionMeshA.center = a_pos;
-        for (int v = 0; v < collisionMeshA.vertexCount; ++v)
+        for (int v = 0; v < collisionMeshA.vertexCount; ++v) {
             collisionMeshA.vertices[v] = transformVertex(hEdgeA.vertex(v), a_entity);
+        }
 
         geometry::CollisionMesh collisionMeshB;
         collisionMeshB.halfEdgeMesh = &hEdgeB;
         collisionMeshB.vertexCount = hEdgeB.getVertexCount();
         collisionMeshB.vertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * collisionMeshB.vertexCount);
         collisionMeshB.center = b_pos;
-        for (int v = 0; v < collisionMeshB.vertexCount; ++v)
+        for (int v = 0; v < collisionMeshB.vertexCount; ++v) {
             collisionMeshB.vertices[v] = transformVertex(hEdgeB.vertex(v), b_entity);
-
-        Manifold manifold = doSAT(collisionMeshA, collisionMeshB);
-
-        for (int i = 0; i < manifold.contactPointCount; ++i) {
-            solver.addContacts({{
-                    a_entity,
-                    (manifold.contactPoints[i] - a_pos).normalize(),
-                    }});
-
-            solver.addContacts({{
-                    b_entity,
-                    (manifold.contactPoints[i] - b_pos).normalize(),
-                    }});
         }
 
-        // Add contact points
-        // But struct Contact doesn't have notion of points?
+        Manifold manifold = doSAT(collisionMeshA, collisionMeshB);
+        if (manifold.numContactPoints > 0) {
+            solver.addContacts({{
+                manifold.aIsReference ? a_entity : b_entity,
+                manifold.aIsReference ? b_entity : a_entity,
+                {
+                    manifold.contactPoints[0],
+                    manifold.contactPoints[1],
+                    manifold.contactPoints[2],
+                    manifold.contactPoints[3],
+                },
+                manifold.numContactPoints,
+                manifold.normal,
+            }});
+        }
     } break;
     case NarrowphaseTest::SphereHull: {
         assert(false);
@@ -272,9 +284,13 @@ inline void solverEntry(Context &ctx, SolverData &solver)
     for (CountT i = 0; i < num_contacts; i++) {
         Contact &contact = solver.contacts[i];
 
-        Position &pos = ctx.getUnsafe<Position>(contact.e);
+        Position &a_pos = ctx.getUnsafe<Position>(contact.a);
+        a_pos += contact.normal;
 
-        pos += contact.normal;
+        if (contact.b != Entity::none()) {
+            Position &b_pos = ctx.getUnsafe<Position>(contact.b);
+            b_pos -= contact.normal;
+        }
     }
 
     solver.numContacts.store(0, std::memory_order_relaxed);

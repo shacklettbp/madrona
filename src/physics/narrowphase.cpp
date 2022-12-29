@@ -100,6 +100,7 @@ EdgeQuery queryEdgeDirections(const CollisionMesh &a, const CollisionMesh &b) {
     const auto *hMeshA = a.halfEdgeMesh;
     const auto *hMeshB = b.halfEdgeMesh;
 
+    Vector3 normal;
     int edgeAMaxDistance = 0;
     int edgeBMaxDistance = 0;
     float maxDistance = -FLT_MAX;
@@ -118,10 +119,13 @@ EdgeQuery queryEdgeDirections(const CollisionMesh &a, const CollisionMesh &b) {
             math::Vector3 axis = edgeDirectionA.cross(edgeDirectionB).normalize();
 
             if (buildsMinkowskiFace(a, b, hEdgeA, hEdgeB)) {
+                // FIXME: this edgeDistance function seems to duplicate a lot of the
+                // above work (computing axis, specifically)
                 float separation = edgeDistance(a, b, hEdgeA, hEdgeB);
 
                 if (separation > maxDistance) {
                     maxDistance = separation;
+                    normal = axis;
                     edgeAMaxDistance = edgeIdxA;
                     edgeBMaxDistance = edgeIdxB;
                 }
@@ -129,7 +133,7 @@ EdgeQuery queryEdgeDirections(const CollisionMesh &a, const CollisionMesh &b) {
         }
     }
 
-    return { maxDistance, edgeAMaxDistance, edgeBMaxDistance };
+    return { maxDistance, normal, edgeAMaxDistance, edgeBMaxDistance };
 }
 
 void clipPolygon(
@@ -193,11 +197,12 @@ int findIncidentFace(const CollisionMesh &referenceHull, const CollisionMesh &ot
 
 Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQuery faceQueryB, const CollisionMesh &b) {
     // Determine minimizing face
-    FaceQuery &minimizingQuery = (faceQueryA.separation < faceQueryB.separation) ? faceQueryA : faceQueryB;
-    FaceQuery &otherQuery = (faceQueryA.separation < faceQueryB.separation) ? faceQueryB : faceQueryA;
+    bool a_is_ref = faceQueryA.separation < faceQueryB.separation;
+    FaceQuery &minimizingQuery = a_is_ref ? faceQueryA : faceQueryB;
+    FaceQuery &otherQuery = a_is_ref ? faceQueryB : faceQueryA;
 
-    const CollisionMesh &referenceHull = (faceQueryA.separation < faceQueryB.separation) ? a : b;
-    const CollisionMesh &otherHull = (faceQueryA.separation < faceQueryB.separation) ? b : a;
+    const CollisionMesh &referenceHull = a_is_ref ? a : b;
+    const CollisionMesh &otherHull = a_is_ref ? b : a;
 
     int referenceFaceIdx = minimizingQuery.faceIdx;
 
@@ -224,68 +229,74 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
     Plane referencePlane = referenceHull.halfEdgeMesh->getPlane(referenceFaceIdx, referenceHull.vertices);
 
     math::Vector3 *contacts = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
-    uint32_t contactCount = 0;
+    CountT contact_count = 0;
 
     for (int i = 0; i < incidentFaceVertexCount; ++i) {
         if (float d = getDistanceFromPlane(referencePlane, incidentVertices[i]); d < 0.0f) {
             // Project the point onto the reference plane
-            contacts[contactCount++] = incidentVertices[i] - d * referencePlane.normal;
+            contacts[contact_count++] = incidentVertices[i] - d * referencePlane.normal;
         }
     }
 
-    if (contactCount > 4) {
-        math::Vector3 *reducedContacts = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * 4);
-        reducedContacts[0] = contacts[0];
-        uint32_t reducedCount = 1;
+    Manifold manifold;
+    manifold.normal = referencePlane.normal;
+    manifold.aIsReference = a_is_ref;
+    if (contact_count <= 4) {
+        manifold.numContactPoints = contact_count;
+        for (CountT i = 0; i < contact_count; i++) {
+            manifold.contactPoints[i] = contacts[i];
+        }
+    } else {
+        manifold.numContactPoints = 4;
+        manifold.contactPoints[0] = contacts[0];
 
         // Find furthest contact
         float largestD2 = 0.0f;
         int largestD2ContactPointIdx = 0;
-        for (int i = 1; i < contactCount; ++i) {
-            math::Vector3 diff = reducedContacts[0] - contacts[i];
-            float d2 = diff.dot(diff);
+        for (CountT i = 1; i < contact_count; ++i) {
+            Vector3 cur_contact = contacts[i];
+            float d2 = manifold.contactPoints[0].distance2(cur_contact);
             if (d2 > largestD2) {
                 largestD2 = d2;
-                reducedContacts[1] = contacts[i];
+                manifold.contactPoints[1] = cur_contact;
                 largestD2ContactPointIdx = i;
             }
         }
 
-        contacts[largestD2ContactPointIdx] = contacts[0];
+        contacts[largestD2ContactPointIdx] = manifold.contactPoints[0];
 
-        math::Vector3 diff0 = reducedContacts[1] - reducedContacts[0];
+        math::Vector3 diff0 =
+            manifold.contactPoints[1] - manifold.contactPoints[0];
 
         // Find point which maximized area of triangle
         float largestArea = 0.0f;
         int largestAreaContactPointIdx = 0;
-        for (int i = 1; i < contactCount; ++i) {
-            math::Vector3 diff1 = contacts[i] - reducedContacts[0];
+        for (CountT i = 1; i < contact_count; ++i) {
+            Vector3 cur_contact = contacts[i];
+            math::Vector3 diff1 = cur_contact - manifold.contactPoints[0];
             float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area > largestArea) {
-                reducedContacts[2] = contacts[i];
+                manifold.contactPoints[2] = cur_contact;
                 largestAreaContactPointIdx = i;
             }
         }
 
-        contacts[largestAreaContactPointIdx] = contacts[0];
+        contacts[largestAreaContactPointIdx] = manifold.contactPoints[0];
 
         float mostNegative = 0.0f;
         int mostNegativeAreaContactPointIdx = 0;
-        for (int i = 1; i < contactCount; ++i) {
-            math::Vector3 diff1 = contacts[i] - reducedContacts[0];
+        for (CountT i = 1; i < contact_count; ++i) {
+            Vector3 cur_contact = contacts[i];
+            math::Vector3 diff1 = cur_contact - manifold.contactPoints[0];
             float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area < largestArea) {
-                reducedContacts[3] = contacts[i];
+                manifold.contactPoints[3] = cur_contact;
                 mostNegativeAreaContactPointIdx = i;
             }
         }
-
-        for (int i = 0; i < 4; ++i) {
-            contacts[i] = reducedContacts[i];
-        }
     }
 
-    return {contacts, contactCount};
+    return manifold;
 }
 
 Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2) {
@@ -324,15 +335,22 @@ Manifold createEdgeContact(const EdgeQuery &query, const CollisionMesh &a, const
     Segment segA = a.halfEdgeMesh->getEdgeSegment(a.halfEdgeMesh->edge(query.edgeIdxA), a.vertices);
     Segment segB = b.halfEdgeMesh->getEdgeSegment(b.halfEdgeMesh->edge(query.edgeIdxB), b.vertices);
 
-    math::Vector3 *contact = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3));
     Segment s = shortestSegmentBetween(segA, segB);
-    *contact = 0.5f * (s.p1 + s.p2);
+    Vector3 contact = 0.5f * (s.p1 + s.p2);
 
-    return {contact, 1};
+    Manifold manifold;
+    manifold.contactPoints[0] = contact;
+    manifold.numContactPoints = 1;
+    manifold.normal = query.normal;
+    manifold.aIsReference = true; // Is this guaranteed?
+
+    return manifold;
 }
 
-Manifold doSAT(const CollisionMesh &a, const CollisionMesh &b) {
-    Manifold manifold = { nullptr, 0 };
+Manifold doSAT(const CollisionMesh &a, const CollisionMesh &b)
+{
+    Manifold manifold;
+    manifold.numContactPoints = 0;
 
     FaceQuery faceQueryA = queryFaceDirections(a, b);
     if (faceQueryA.separation > 0.0f) {
