@@ -363,6 +363,7 @@ struct Manifold {
 
 // Returned vertices will be stored in linear bump allocator
 Manifold doSAT(const geometry::CollisionMesh &a, const geometry::CollisionMesh &b);
+Manifold doSATPlane(const geometry::Plane &plane, const geometry::CollisionMesh &a);
 
 inline float abs(float f) {
     return (f < 0.0f) ? -f : f;

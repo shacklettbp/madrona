@@ -255,7 +255,48 @@ inline void runNarrowphase(
         assert(false);
     } break;
     case NarrowphaseTest::HullPlane: {
-        assert(false);
+        // Get half edge mesh for hull A and hull B
+        const auto &hEdgeA = a_prim->hull.halfEdgeMesh;
+
+        auto transformVertex = [&ctx] (math::Vector3 v, Entity &e) {
+            Scale e_scale = ctx.getUnsafe<Scale>(e);
+            Rotation e_rotation = ctx.getUnsafe<Rotation>(e);
+            Position e_position = ctx.getUnsafe<Position>(e);
+
+            return e_position + e_rotation.rotateDir((math::Vector3)e_scale * v);
+        };
+
+        geometry::CollisionMesh collisionMeshA;
+        collisionMeshA.halfEdgeMesh = &hEdgeA;
+        collisionMeshA.vertexCount = hEdgeA.getVertexCount();
+        collisionMeshA.vertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * collisionMeshA.vertexCount);
+        collisionMeshA.center = a_pos;
+        for (int v = 0; v < collisionMeshA.vertexCount; ++v) {
+            collisionMeshA.vertices[v] = transformVertex(hEdgeA.vertex(v), a_entity);
+        }
+
+        Rotation b_rot = ctx.getUnsafe<Rotation>(b_entity);
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = b_rot.rotateDir(base_normal);
+
+        geometry::Plane plane = { b_pos, plane_normal };
+
+        Manifold manifold = doSATPlane(plane, collisionMeshA);
+
+        if (manifold.numContactPoints > 0) {
+            solver.addContacts({{
+                a_entity,
+                Entity::none(),
+                {
+                    makeVector3(manifold.contactPoints[0]),
+                    makeVector3(manifold.contactPoints[1]),
+                    makeVector3(manifold.contactPoints[2]),
+                    makeVector3(manifold.contactPoints[3]),
+                },
+                manifold.numContactPoints,
+                manifold.normal,
+            }});
+        }
     } break;
     default: __builtin_unreachable();
     }

@@ -31,6 +31,13 @@ math::Vector3 findFurthestPoint(const CollisionMesh &m, const math::Vector3 &d) 
     return m.vertices[findFurthestPointIdx(m, d)];
 }
 
+FaceQuery queryFaceDirectionsPlane(const Plane &plane, const CollisionMesh &a) {
+    math::Vector3 supportA = findFurthestPoint(a, -plane.normal);
+    float distance = getDistanceFromPlane(plane, supportA);
+
+    return { distance, 0 };
+}
+
 FaceQuery queryFaceDirections(const CollisionMesh &a, const CollisionMesh &b) {
     const auto *hMesh = a.halfEdgeMesh;
 
@@ -193,6 +200,99 @@ int findIncidentFace(const CollisionMesh &referenceHull, const CollisionMesh &ot
     }
 
     return minimizingFace;
+}
+
+int findIncidentFace(const Plane &referencePlane, const CollisionMesh &otherHull) {
+    float minimizingDotProduct = FLT_MAX;
+    int minimizingFace = -1;
+    for (int i = 0; i < otherHull.halfEdgeMesh->getPolygonCount(); ++i) {
+        math::Vector3 incidentNormal = otherHull.halfEdgeMesh->getFaceNormal(i, otherHull.vertices);
+        float dotProduct = incidentNormal.dot(referencePlane.normal);
+
+        if (dotProduct < minimizingDotProduct) {
+            minimizingDotProduct = dotProduct;
+            minimizingFace = i;
+        }
+    }
+
+    return minimizingFace;
+}
+
+Manifold createFaceContactPlane(FaceQuery faceQuery, const Plane &plane, const CollisionMesh &hull) {
+    // Find incident face
+    int incidentFaceIdx = findIncidentFace(plane, hull);
+
+    uint32_t incidentFaceVertexCount = hull.halfEdgeMesh->getPolygonVertexCount(incidentFaceIdx);
+    const uint32_t kMaxIncidentVertexCount = incidentFaceVertexCount * 2;
+    math::Vector3 *incidentVertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
+    hull.halfEdgeMesh->getPolygonVertices(incidentVertices, incidentFaceIdx, hull.vertices);
+
+    math::Vector4 *contacts = (math::Vector4 *)TmpAllocator::get().alloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
+    CountT contact_count = 0;
+
+    for (int i = 0; i < incidentFaceVertexCount; ++i) {
+        if (float d = getDistanceFromPlane(plane, incidentVertices[i]); d < 0.0f) {
+            // Project the point onto the reference plane (d guaranteed to be negative)
+            contacts[contact_count++] = makeVector4(incidentVertices[i] - d * plane.normal, -d);
+        }
+    }
+
+    Manifold manifold;
+    manifold.normal = plane.normal;
+    manifold.aIsReference = false;
+    if (contact_count <= 4) {
+        manifold.numContactPoints = contact_count;
+        for (CountT i = 0; i < contact_count; i++) {
+            manifold.contactPoints[i] = contacts[i];
+        }
+    } else {
+        manifold.numContactPoints = 4;
+        manifold.contactPoints[0] = contacts[0];
+
+        // Find furthest contact
+        float largestD2 = 0.0f;
+        int largestD2ContactPointIdx = 0;
+        for (CountT i = 1; i < contact_count; ++i) {
+            Vector3 cur_contact = makeVector3(contacts[i]);
+            float d2 = makeVector3(manifold.contactPoints[0]).distance2(cur_contact);
+            if (d2 > largestD2) {
+                largestD2 = d2;
+                manifold.contactPoints[1] = makeVector4(cur_contact, contacts[i].w);
+                largestD2ContactPointIdx = i;
+            }
+        }
+
+        contacts[largestD2ContactPointIdx] = manifold.contactPoints[0];
+
+        math::Vector3 diff0 =
+            makeVector3(manifold.contactPoints[1]) - makeVector3(manifold.contactPoints[0]);
+
+        // Find point which maximized area of triangle
+        float largestArea = 0.0f;
+        int largestAreaContactPointIdx = 0;
+        for (CountT i = 1; i < contact_count; ++i) {
+            Vector3 cur_contact = makeVector3(contacts[i]);
+            math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
+            float area = plane.normal.dot(diff0.cross(diff1));
+            if (area > largestArea) {
+                manifold.contactPoints[2] = makeVector4(cur_contact, contacts[i].w);
+                largestAreaContactPointIdx = i;
+            }
+        }
+
+        contacts[largestAreaContactPointIdx] = manifold.contactPoints[0];
+
+        for (CountT i = 1; i < contact_count; ++i) {
+            Vector3 cur_contact = makeVector3(contacts[i]);
+            math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
+            float area = plane.normal.dot(diff0.cross(diff1));
+            if (area < largestArea) {
+                manifold.contactPoints[3] = makeVector4(cur_contact, contacts[i].w);
+            }
+        }
+    }
+
+    return manifold;
 }
 
 Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQuery faceQueryB, const CollisionMesh &b) {
@@ -384,6 +484,20 @@ Manifold doSAT(const CollisionMesh &a, const CollisionMesh &b)
     }
 
     return manifold;
+}
+
+Manifold doSATPlane(const Plane &plane, const CollisionMesh &a) 
+{
+    Manifold manifold;
+    manifold.numContactPoints = 0;
+
+    FaceQuery faceQuery = queryFaceDirectionsPlane(plane, a);
+
+    if (faceQuery.separation > 0.0f) {
+        return manifold;
+    }
+
+    return createFaceContactPlane(faceQuery, plane, a);
 }
 
 }
