@@ -354,7 +354,7 @@ struct EdgeQuery {
 };
 
 struct Manifold {
-    math::Vector3 contactPoints[4];
+    math::Vector4 contactPoints[4];
     int32_t numContactPoints;
     math::Vector3 normal;
     bool aIsReference;

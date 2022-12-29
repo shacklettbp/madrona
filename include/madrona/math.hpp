@@ -257,6 +257,13 @@ struct Vector3 {
         return *this * invLength();
     } 
 
+    inline Vector3 projectOnto(const Vector3 &other) const
+    {
+        float thisDotOther = this->dot(other);
+        float otherDotOther = other.dot(other);
+        return other * (thisDotOther) / (otherDotOther);
+    }
+
     inline float & operator[](CountT i)
     {
         switch (i) {
@@ -445,6 +452,16 @@ struct Vector4 {
     float z;
     float w;
 };
+
+inline Vector4 makeVector4(const Vector3 &xyz, float w)
+{
+    return { xyz.x, xyz.y, xyz.z, w };
+}
+
+inline Vector3 makeVector3(const Vector4 &xyzw)
+{
+    return { xyzw.x, xyzw.y, xyzw.z };
+}
 
 inline float dot(Vector3 a, Vector3 b)
 {

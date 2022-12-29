@@ -228,13 +228,13 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
     // Now we just keep the ones below the reference face
     Plane referencePlane = referenceHull.halfEdgeMesh->getPlane(referenceFaceIdx, referenceHull.vertices);
 
-    math::Vector3 *contacts = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
+    math::Vector4 *contacts = (math::Vector4 *)TmpAllocator::get().alloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
     CountT contact_count = 0;
 
     for (int i = 0; i < incidentFaceVertexCount; ++i) {
         if (float d = getDistanceFromPlane(referencePlane, incidentVertices[i]); d < 0.0f) {
-            // Project the point onto the reference plane
-            contacts[contact_count++] = incidentVertices[i] - d * referencePlane.normal;
+            // Project the point onto the reference plane (d guaranteed to be negative)
+            contacts[contact_count++] = makeVector4(incidentVertices[i] - d * referencePlane.normal, -d);
         }
     }
 
@@ -254,11 +254,11 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
         float largestD2 = 0.0f;
         int largestD2ContactPointIdx = 0;
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = contacts[i];
-            float d2 = manifold.contactPoints[0].distance2(cur_contact);
+            Vector3 cur_contact = makeVector3(contacts[i]);
+            float d2 = makeVector3(manifold.contactPoints[0]).distance2(cur_contact);
             if (d2 > largestD2) {
                 largestD2 = d2;
-                manifold.contactPoints[1] = cur_contact;
+                manifold.contactPoints[1] = makeVector4(cur_contact, contacts[i].w);
                 largestD2ContactPointIdx = i;
             }
         }
@@ -266,17 +266,17 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
         contacts[largestD2ContactPointIdx] = manifold.contactPoints[0];
 
         math::Vector3 diff0 =
-            manifold.contactPoints[1] - manifold.contactPoints[0];
+            makeVector3(manifold.contactPoints[1]) - makeVector3(manifold.contactPoints[0]);
 
         // Find point which maximized area of triangle
         float largestArea = 0.0f;
         int largestAreaContactPointIdx = 0;
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = contacts[i];
-            math::Vector3 diff1 = cur_contact - manifold.contactPoints[0];
+            Vector3 cur_contact = makeVector3(contacts[i]);
+            math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
             float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area > largestArea) {
-                manifold.contactPoints[2] = cur_contact;
+                manifold.contactPoints[2] = makeVector4(cur_contact, contacts[i].w);
                 largestAreaContactPointIdx = i;
             }
         }
@@ -286,11 +286,11 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
         float mostNegative = 0.0f;
         int mostNegativeAreaContactPointIdx = 0;
         for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = contacts[i];
-            math::Vector3 diff1 = cur_contact - manifold.contactPoints[0];
+            Vector3 cur_contact = makeVector3(contacts[i]);
+            math::Vector3 diff1 = cur_contact - makeVector3(manifold.contactPoints[0]);
             float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area < largestArea) {
-                manifold.contactPoints[3] = cur_contact;
+                manifold.contactPoints[3] = makeVector4(cur_contact, contacts[i].w);
                 mostNegativeAreaContactPointIdx = i;
             }
         }
@@ -337,9 +337,10 @@ Manifold createEdgeContact(const EdgeQuery &query, const CollisionMesh &a, const
 
     Segment s = shortestSegmentBetween(segA, segB);
     Vector3 contact = 0.5f * (s.p1 + s.p2);
+    float depth = (s.p2 - s.p1).length() / 2.0f;
 
     Manifold manifold;
-    manifold.contactPoints[0] = contact;
+    manifold.contactPoints[0] = makeVector4(contact, depth);
     manifold.numContactPoints = 1;
     manifold.normal = query.normal;
     manifold.aIsReference = true; // Is this guaranteed?
