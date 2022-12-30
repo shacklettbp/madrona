@@ -247,7 +247,7 @@ inline void runNarrowphase(
                     manifold.contactPoints[3],
                 },
                 manifold.numContactPoints,
-                manifold.normal,
+                -manifold.normal,
             }});
         }
     } break;
@@ -286,7 +286,7 @@ inline void runNarrowphase(
         if (manifold.numContactPoints > 0) {
             solver.addContacts({{
                 a_entity,
-                Entity::none(),
+                b_entity,
                 {
                     manifold.contactPoints[0],
                     manifold.contactPoints[1],
@@ -294,7 +294,7 @@ inline void runNarrowphase(
                     manifold.contactPoints[3],
                 },
                 manifold.numContactPoints,
-                manifold.normal,
+                -manifold.normal,
             }});
         }
     } break;
