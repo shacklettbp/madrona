@@ -247,7 +247,7 @@ inline void runNarrowphase(
                     manifold.contactPoints[3],
                 },
                 manifold.numContactPoints,
-                -manifold.normal,
+                manifold.normal,
             }});
         }
     } break;
@@ -295,7 +295,7 @@ inline void runNarrowphase(
                     manifold.contactPoints[3],
                 },
                 manifold.numContactPoints,
-                -manifold.normal,
+                manifold.normal,
             }});
         }
     } break;
@@ -534,8 +534,10 @@ static inline void handleContact(Context &ctx,
             a_contact_point + contact.normal * penetration_depth;
 
         // Transform the contact points into local space for a & b
-        Vector3 r1 = a_start_rot.inv().rotateVec(a_contact_point - a_start_pos);
-        Vector3 r2 = b_start_rot.inv().rotateVec(b_contact_point - b_start_pos);
+        Vector3 a_r = 
+            a_start_rot.inv().rotateVec(a_contact_point - a_start_pos);
+        Vector3 b_r =
+            b_start_rot.inv().rotateVec(b_contact_point - b_start_pos);
 
         handleContactConstraint(a_pos, b_pos,
                                 a_rot, b_rot,
@@ -543,8 +545,9 @@ static inline void handleContact(Context &ctx,
                                 a_inv_m, b_inv_m,
                                 a_inv_I, b_inv_I,
                                 a_mu_s, b_mu_s,
-                                r1, r2,
-                                contact.normal,
+                                a_r, b_r,
+                                // Normal needs to point from b to a
+                                -contact.normal,
                                 lambda_n,
                                 lambda_t);
     }
