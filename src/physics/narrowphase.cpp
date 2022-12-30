@@ -1,3 +1,4 @@
+#include <madrona/mw_gpu/host_print.hpp>
 #include <stdint.h>
 #include <stdio.h>
 #include <madrona/memory.hpp>
@@ -297,7 +298,7 @@ Manifold createFaceContactPlane(FaceQuery faceQuery, const Plane &plane, const C
 
 Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQuery faceQueryB, const CollisionMesh &b) {
     // Determine minimizing face
-    bool a_is_ref = faceQueryA.separation < faceQueryB.separation;
+    bool a_is_ref = faceQueryA.separation > faceQueryB.separation;
     FaceQuery &minimizingQuery = a_is_ref ? faceQueryA : faceQueryB;
 
     const CollisionMesh &referenceHull = a_is_ref ? a : b;
@@ -320,6 +321,8 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
 
     // Clip the incident face against the side planes of the reference face
     for (int i = 0; i < sidePlaneCount; ++i) {
+        float dotProduct = planes[i].normal.dot(planes[i].point - incidentVertices[0]);
+
         clipPolygon(planes[i], &incidentFaceVertexCount, incidentVertices, kMaxIncidentVertexCount);
     }
 
@@ -411,7 +414,7 @@ Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2) {
 
     float s, t;
 
-    if (abs(denom) < 0.00001f) {
+    if (fabsf(denom) < 0.00001f) {
         s = 0.0f;
         t = (dotv11 * s - dotv211) / dotv21;
     }

@@ -151,6 +151,9 @@ struct CollisionMesh {
 
     // This is also going to contain FastPolygonList for information about each face
     const geometry::HalfEdgeMesh *halfEdgeMesh;
+
+    math::Vector3 position;
+    math::Quat rotation;
 };
 }
 
