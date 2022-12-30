@@ -263,7 +263,7 @@ inline void runNarrowphase(
             Rotation e_rotation = ctx.getUnsafe<Rotation>(e);
             Position e_position = ctx.getUnsafe<Position>(e);
 
-            return e_position + e_rotation.rotateDir((math::Vector3)e_scale * v);
+            return e_position + e_rotation.rotateVec((math::Vector3)e_scale * v);
         };
 
         geometry::CollisionMesh collisionMeshA;
@@ -277,7 +277,7 @@ inline void runNarrowphase(
 
         Rotation b_rot = ctx.getUnsafe<Rotation>(b_entity);
         constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = b_rot.rotateDir(base_normal);
+        Vector3 plane_normal = b_rot.rotateVec(base_normal);
 
         geometry::Plane plane = { b_pos, plane_normal };
 
