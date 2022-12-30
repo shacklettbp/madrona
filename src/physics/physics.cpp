@@ -185,7 +185,7 @@ inline void runNarrowphase(
         Rotation b_rot = ctx.getUnsafe<Rotation>(b_entity);
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = b_rot.rotateDir(base_normal);
+        Vector3 plane_normal = b_rot.rotateVec(base_normal);
 
         float d = plane_normal.dot(b_pos);
         float t = plane_normal.dot(a_pos) - d;
@@ -193,7 +193,7 @@ inline void runNarrowphase(
         if (t < sphere.radius) {
             solver.addContacts({{
                 a_entity,
-                Entity::none(),
+                b_entity,
                 {
                     makeVector4(a_pos + plane_normal * sphere.radius, t),
                     {}, {}, {}
@@ -213,7 +213,7 @@ inline void runNarrowphase(
             Rotation e_rotation = ctx.getUnsafe<Rotation>(e);
             Position e_position = ctx.getUnsafe<Position>(e);
 
-            return e_position + e_rotation.rotateDir((math::Vector3)e_scale * v);
+            return e_position + e_rotation.rotateVec((math::Vector3)e_scale * v);
         };
 
         geometry::CollisionMesh collisionMeshA;
@@ -306,83 +306,300 @@ inline void runNarrowphase(
 
 namespace solver {
 
-inline void updatePositions(Context &ctx,
-                            Position &pos,
-                            Rotation &rot,
-                            Velocity &vel,
-                            const ObjectID &obj_id,
-                            InstanceState &inst_state)
+inline void substepRigidBodies(Context &ctx,
+                               Position &pos,
+                               Rotation &rot,
+                               Velocity &vel,
+                               const ObjectID &obj_id,
+                               InstanceState &inst_state)
 {
-    (void)rot;
-    (void)obj_id;
-
     const auto &solver = ctx.getSingleton<SolverData>();
+    const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+
     float h = solver.h;
 
-    inst_state.prevPosition = pos;
-    inst_state.prevRotation = rot;
+    Vector3 cur_position = pos;
+    Quat cur_rotation = rot;
+
+    inst_state.prevPosition = cur_position;
+    inst_state.prevRotation = cur_rotation;
 
     Vector3 linear_velocity = vel.linear;
+    Vector3 angular_velocity = vel.angular;
     //cur_velocity += h * gravity;
+ 
+    pos = cur_position + h * linear_velocity;
 
-    pos += h * linear_velocity;
+    Vector3 inv_inertia = obj_mgr.metadata[obj_id.idx].invInertiaTensor;
+    Vector3 inertia = 1.f / inv_inertia;
+
+    Vector3 torque_ext { 0, 0, 0 };
+    Vector3 scaled_angular {
+        angular_velocity.x * inertia.x,
+        angular_velocity.y * inertia.y,
+        angular_velocity.z * inertia.z,
+    };
+
+    angular_velocity +=
+        h * (torque_ext - (cross(angular_velocity, scaled_angular)));
+    vel.angular = angular_velocity;
+
+    Quat angular_quat = 0.5f * h * Quat::fromAngularVec(angular_velocity);
+
+    cur_rotation += angular_quat * cur_rotation;
+    cur_rotation = cur_rotation.normalize();
+    rot = cur_rotation;
 }
 
-inline void updateVelocities(Context &ctx,
-                             const Position &pos,
-                             const InstanceState &inst_state,
-                             Velocity &vel)
+static inline Vector3 multDiag(Vector3 diag, Vector3 v)
 {
-    const auto &solver = ctx.getSingleton<SolverData>();
-    float h = solver.h;
-
-    vel.linear = (pos - inst_state.prevPosition) / h;
+    return Vector3 {
+        diag.x * v.x,
+        diag.y * v.y,
+        diag.z * v.z,
+    };
 }
 
-static inline void handleContactConstraint(Position &pos_ref,
-                                           Rotation &rot_ref,
-                                           InstanceState inst_state,
-                                           Vector3 contact_point)
+static inline float generalizedInverseMass(Vector3 local,
+                                           float inv_m,
+                                           Vector3 inv_I,
+                                           Vector3 n)
 {
-    Vector3 cur_translate = pos_ref;
-    Quat cur_rotation = rot_ref;
+    Vector3 lxn = cross(local, n);
+    return inv_m + dot(multDiag(inv_I, lxn), lxn);
 }
 
-static inline void handleContact(Context &ctx, Contact &contact)
+static MADRONA_ALWAYS_INLINE inline void solvePositionalConstraint(
+    Vector3 &x1, Vector3 &x2,
+    Quat &q1, Quat &q2,
+    Vector3 r1, Vector3 r2,
+    float inv_m1, float inv_m2,
+    Vector3 inv_I1, Vector3 inv_I2,
+    Vector3 n_world, Vector3 n1, Vector3 n2,
+    float c,
+    float alpha_tilde,
+    float &lambda,
+    float lambda_threshold = 0.f)
 {
-    Position &a_pos = ctx.getUnsafe<Position>(contact.a);
-    Rotation &a_rot = ctx.getUnsafe<Rotation>(contact.a);
-    //Velocity &a_vel = ctx.getUnsafe<Velocity>(contact.a);
+    float w1 = generalizedInverseMass(r1, inv_m1, inv_I1, n1);
+    float w2 = generalizedInverseMass(r2, inv_m2, inv_I2, n2);
+
+    float delta_lambda =
+        (-c - alpha_tilde * lambda) / (w1 + w2 + alpha_tilde);
+
+    lambda += delta_lambda;
+
+    if (lambda < lambda_threshold) return;
+
+    Vector3 p = delta_lambda * n_world;
+    Vector3 p_local1 = delta_lambda * n1;
+    Vector3 p_local2 = delta_lambda * n2;
+
+    x1 += p * inv_m1;
+    x2 -= p * inv_m2;
+
+    Vector3 r1_x_p = cross(r1, p_local1);
+    Vector3 r2_x_p = cross(r2, p_local2);
+
+    q1 = q1 + Quat::fromAngularVec(0.5f * multDiag(inv_I1, r1_x_p)) * q1;
+    q2 = q2 - Quat::fromAngularVec(0.5f * multDiag(inv_I2, r2_x_p)) * q2;
+}
+
+static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
+    Vector3 &x1,
+    Vector3 &x2,
+    Quat &q1,
+    Quat &q2,
+    InstanceState inst_state_1,
+    InstanceState inst_state_2,
+    float inv_m1,
+    float inv_m2,
+    Vector3 inv_I1,
+    Vector3 inv_I2,
+    float mu_s1,
+    float mu_s2,
+    Vector3 r1,
+    Vector3 r2,
+    Vector3 n_world,
+    float &lambda_n,
+    float &lambda_t)
+{
+    Vector3 p1 = q1.rotateVec(r1) + x1;
+    Vector3 p2 = q2.rotateVec(r2) + x2;
+
+    float d = dot(p1 - p2, n_world);
+
+    if (d <= 0) {
+        return;
+    }
+
+    Vector3 x1_prev = inst_state_1.prevPosition;
+    Quat q1_prev = inst_state_1.prevRotation;
+
+    Vector3 x2_prev = inst_state_2.prevPosition;
+    Quat q2_prev = inst_state_2.prevRotation;
+
+    Vector3 p1_hat = q1_prev.rotateVec(r1) + x1_prev;
+    Vector3 p2_hat = q2_prev.rotateVec(r2) + x2_prev;
+
+    Vector3 n_local1 = q1.inv().rotateVec(n_world);
+    Vector3 n_local2 = q2.inv().rotateVec(n_world);
+
+    solvePositionalConstraint(x1, x2,
+                              q1, q2,
+                              r1, r2,
+                              inv_m1, inv_m2,
+                              inv_I1, inv_I2,
+                              n_world, n_local1, n_local2,
+                              d, 0, lambda_n);
+
+    Vector3 delta_p = (p1 - p1_hat) - (p2 - p2_hat);
+    Vector3 delta_p_t = delta_p - dot(delta_p, n_world) * n_world;
+
+    float tangential_magnitude = delta_p_t.length();
+
+    if (tangential_magnitude > 0.f) {
+        Vector3 tangent_dir = delta_p_t / tangential_magnitude;
+        Vector3 tangent_dir_local1 = q1.inv().rotateVec(tangent_dir);
+        Vector3 tangent_dir_local2 = q2.inv().rotateVec(tangent_dir);
+
+        float mu_s = 0.5f * (mu_s1 + mu_s2);
+        float lambda_threshold = lambda_n * mu_s;
+
+        solvePositionalConstraint(x1, x2,
+                                  q1, q2,
+                                  r1, r2,
+                                  inv_m1, inv_m2,
+                                  inv_I1, inv_I2,
+                                  tangent_dir, tangent_dir_local1, tangent_dir_local2,
+                                  tangential_magnitude,
+                                  0, lambda_t, lambda_threshold);
+    }
+}
+
+// For now, this function assumes both a & b are dynamic objects.
+// FIXME: Need to add dynamic / static variant or handle missing the velocity
+// component for static objects.
+static inline void handleContact(Context &ctx,
+                                 ObjectManager &obj_mgr,
+                                 Contact contact)
+{
+    Position *a_pos_ptr = &ctx.getUnsafe<Position>(contact.a);
+    Rotation *a_rot_ptr = &ctx.getUnsafe<Rotation>(contact.a);
     InstanceState a_state = ctx.getUnsafe<InstanceState>(contact.a);
+    ObjectID a_id = ctx.getUnsafe<ObjectID>(contact.a);
+    RigidBodyMetadata a_metadata = obj_mgr.metadata[a_id.idx];
+
+    Position *b_pos_ptr = &ctx.getUnsafe<Position>(contact.b);
+    Rotation *b_rot_ptr = &ctx.getUnsafe<Rotation>(contact.b);
+    InstanceState b_state = ctx.getUnsafe<InstanceState>(contact.b);
+    ObjectID b_id = ctx.getUnsafe<ObjectID>(contact.b);
+    RigidBodyMetadata b_metadata = obj_mgr.metadata[b_id.idx];
+
+    float lambda_n = 0.f;
+    float lambda_t = 0.f;
+
+    Vector3 a_start_pos = *a_pos_ptr;
+    Quat a_start_rot = *a_rot_ptr;
+    float a_inv_m = a_metadata.invMass;
+    Vector3 a_inv_I = a_metadata.invInertiaTensor;
+    float a_mu_s = a_metadata.muS;
+
+    Vector3 b_start_pos = *b_pos_ptr;
+    Quat b_start_rot = *b_rot_ptr;
+    float b_inv_m = b_metadata.invMass;
+    Vector3 b_inv_I = b_metadata.invInertiaTensor;
+    float b_mu_s = b_metadata.muS;
+
+    Vector3 a_pos = a_start_pos;
+    Vector3 b_pos = b_start_pos;
+    Quat a_rot = a_start_rot;
+    Quat b_rot = b_start_rot;
 
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        Vector3 contact_point = contact.points[i].xyz();
+        Vector3 a_contact_point = contact.points[i].xyz();
+        float penetration_depth = contact.points[i].w;
 
-        handleContactConstraint(a_pos, a_rot, a_state, contact_point);
+        Vector3 b_contact_point = 
+            a_contact_point + contact.normal * penetration_depth;
 
-        a_pos += contact.normal;
+        // Transform the contact points into local space for a & b
+        Vector3 r1 = a_start_rot.inv().rotateVec(a_contact_point - a_start_pos);
+        Vector3 r2 = b_start_rot.inv().rotateVec(b_contact_point - b_start_pos);
+
+        handleContactConstraint(a_pos, b_pos,
+                                a_rot, b_rot,
+                                a_state, b_state,
+                                a_inv_m, b_inv_m,
+                                a_inv_I, b_inv_I,
+                                a_mu_s, b_mu_s,
+                                r1, r2,
+                                contact.normal,
+                                lambda_n,
+                                lambda_t);
     }
 
-    if (contact.b != Entity::none()) {
-        Position &b_pos = ctx.getUnsafe<Position>(contact.b);
-        b_pos -= contact.normal;
-    }
+    *a_pos_ptr = a_pos;
+    *b_pos_ptr = b_pos;
+
+    *a_rot_ptr = a_rot;
+    *b_rot_ptr = b_rot;
 }
 
-inline void solverEntry(Context &ctx, SolverData &solver)
+inline void solvePositions(Context &ctx, SolverData &solver)
 {
+    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+
     // Push objects in serial based on the contact normal - total BS.
     CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
 
     //printf("Solver # contacts: %d\n", num_contacts);
 
     for (CountT i = 0; i < num_contacts; i++) {
-        Contact &contact = solver.contacts[i];
+        const Contact &contact = solver.contacts[i];
 
-        handleContact(ctx, contact);
+        handleContact(ctx, obj_mgr, contact);
+    }
+}
+
+inline void setVelocities(Context &ctx,
+                          const Position &pos,
+                          const Rotation &rot,
+                          const InstanceState &inst_state,
+                          Velocity &vel)
+{
+    const auto &solver = ctx.getSingleton<SolverData>();
+    float h = solver.h;
+
+    vel.linear = (pos - inst_state.prevPosition) / h;
+
+    Quat cur_rotation = rot;
+    Quat prev_rotation = inst_state.prevRotation;
+
+    Quat delta_q = cur_rotation * prev_rotation.inv();
+
+    Vector3 new_angular = 2.f / h * Vector3 { delta_q.x, delta_q.y, delta_q.z };
+
+    vel.angular = delta_q.w > 0.f ? new_angular : -new_angular;
+}
+
+inline void updateVelocityFromContact(Context &ctx,
+                                      ObjectManager &obj_mgr,
+                                      Contact contact)
+{}
+
+inline void solveVelocities(Context &ctx, SolverData &solver)
+{
+    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+
+    CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
+
+    for (CountT i = 0; i < num_contacts; i++) {
+        const Contact &contact = solver.contacts[i];
+        updateVelocityFromContact(ctx, obj_mgr, contact);
     }
 
     solver.numContacts.store(0, std::memory_order_relaxed);
@@ -462,22 +679,25 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     
     auto cur_node = find_overlapping;
     for (CountT i = 0; i < num_substeps; i++) {
-        auto update_positions = builder.addToGraph<ParallelForNode<Context,
-            solver::updatePositions, Position, Rotation, Velocity, ObjectID,
+        auto rgb_update = builder.addToGraph<ParallelForNode<Context,
+            solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
             solver::InstanceState>>({cur_node});
 
         auto run_narrowphase = builder.addToGraph<ParallelForNode<Context,
             narrowphase::runNarrowphase, CandidateCollision>>(
-                {update_positions});
+                {rgb_update});
 
-        auto solver = builder.addToGraph<ParallelForNode<Context,
-            solver::solverEntry, SolverData>>({run_narrowphase});
+        auto solve_pos = builder.addToGraph<ParallelForNode<Context,
+            solver::solvePositions, SolverData>>({run_narrowphase});
 
-        auto vel_update = builder.addToGraph<ParallelForNode<Context,
-            solver::updateVelocities, Position,
-            solver::InstanceState, Velocity>>({solver});
+        auto vel_set = builder.addToGraph<ParallelForNode<Context,
+            solver::setVelocities, Position, Rotation,
+            solver::InstanceState, Velocity>>({solve_pos});
 
-        cur_node = builder.addToGraph<ResetTmpAllocNode>({vel_update});
+        auto solve_vel = builder.addToGraph<ParallelForNode<Context,
+            solver::solveVelocities, SolverData>>({vel_set});
+
+        cur_node = builder.addToGraph<ResetTmpAllocNode>({solve_vel});
     }
 
     auto clear_candidates = builder.addToGraph<

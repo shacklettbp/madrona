@@ -191,6 +191,9 @@ struct CollisionEventTemporary : Archetype<CollisionEvent> {};
 // Per object state
 struct RigidBodyMetadata {
     math::Vector3 invInertiaTensor;
+    float invMass;
+    float muS;
+    float muD;
 };
 
 struct CollisionPrimitive {

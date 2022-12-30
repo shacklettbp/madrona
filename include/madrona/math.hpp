@@ -524,6 +524,40 @@ struct Quat {
         };
     }
 
+    inline Vector3 rotateVec(Vector3 v) const
+    {
+        Vector3 pure {x, y, z};
+        float scalar = w;
+
+        return 2.f * dot(pure, v) * pure +
+            (2.f * scalar * scalar - 1.f) * v +
+            2.f * scalar * cross(pure, v);
+    }
+
+
+    static inline Quat angleAxis(float angle, Vector3 normal)
+    {
+        float coshalf = cosf(angle / 2.f);
+        float sinhalf = sinf(angle / 2.f);
+
+        return Quat {
+            coshalf,
+            normal.x * sinhalf,
+            normal.y * sinhalf,
+            normal.z * sinhalf,
+        };
+    }
+
+    static inline Quat fromAngularVec(Vector3 v)
+    {
+        return Quat {
+            0,
+            v.x,
+            v.y,
+            v.z,
+        };
+    }
+
     inline Quat & operator+=(Quat o)
     {
         w += o.w;
@@ -552,6 +586,16 @@ struct Quat {
         return *this = (*this * o);
     }
 
+    inline Quat & operator*=(float f)
+    {
+        w *= f;
+        x *= f;
+        y *= f;
+        z *= f;
+
+        return *this;
+    }
+
     friend inline Quat operator+(Quat a, Quat b)
     {
         return a += b;
@@ -572,27 +616,18 @@ struct Quat {
         };
     }
 
-    static inline Quat angleAxis(float angle, Vector3 normal)
+    friend inline Quat operator*(Quat a, float b)
     {
-        float coshalf = cosf(angle / 2.f);
-        float sinhalf = sinf(angle / 2.f);
+        a *= b;
 
-        return Quat {
-            coshalf,
-            normal.x * sinhalf,
-            normal.y * sinhalf,
-            normal.z * sinhalf,
-        };
+        return a;
     }
 
-    inline Vector3 rotateDir(Vector3 v) const
+    friend inline Quat operator*(float b, Quat a)
     {
-        Vector3 pure {x, y, z};
-        float scalar = w;
+        a *= b;
 
-        return 2.f * dot(pure, v) * pure +
-            (2.f * scalar * scalar - 1.f) * v +
-            2.f * scalar * cross(pure, v);
+        return a;
     }
 };
 
