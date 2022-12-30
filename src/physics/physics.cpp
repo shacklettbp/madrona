@@ -280,14 +280,13 @@ inline void runNarrowphase(
         Vector3 plane_normal = b_rot.rotateVec(base_normal);
 
         geometry::Plane plane = { b_pos, plane_normal };
-        // printf("b_rot(%f %f %f %f)\n", b_rot.x, b_rot.y, b_rot.z, b_rot.w);
 
         Manifold manifold = doSATPlane(plane, collisionMeshA);
 
         if (manifold.numContactPoints > 0) {
             solver.addContacts({{
+                b_entity, // Plane is always reference
                 a_entity,
-                b_entity,
                 {
                     manifold.contactPoints[0],
                     manifold.contactPoints[1],
@@ -342,25 +341,20 @@ inline void substepRigidBodies(Context &ctx,
 
     Vector3 inv_inertia = obj_mgr.metadata[obj_id.idx].invInertiaTensor;
 
-    constexpr float kEpsilon = 0.00000001f;
     Vector3 inertia = {
-        (abs(inv_inertia.x) < kEpsilon) ? 0.0f : 1.0f / inv_inertia.x,
-        (abs(inv_inertia.y) < kEpsilon) ? 0.0f : 1.0f / inv_inertia.y,
-        (abs(inv_inertia.z) < kEpsilon) ? 0.0f : 1.0f / inv_inertia.z
+        (inv_inertia.x == 0) ? 0.0f : 1.0f / inv_inertia.x,
+        (inv_inertia.y == 0) ? 0.0f : 1.0f / inv_inertia.y,
+        (inv_inertia.z == 0) ? 0.0f : 1.0f / inv_inertia.z
     };
 
     Vector3 torque_ext { 0, 0, 0 };
-    Vector3 scaled_angular {
-        angular_velocity.x * inertia.x,
-        angular_velocity.y * inertia.y,
-        angular_velocity.z * inertia.z,
-    };
+    Vector3 I_angular = multDiag(inertia, angular_velocity);
 
     angular_velocity +=
-        h * multDiag(inv_inertia, torque_ext - (cross(angular_velocity, scaled_angular)));
+        h * multDiag(inv_inertia, torque_ext - (cross(angular_velocity, I_angular)));
     vel.angular = angular_velocity;
 
-    Quat angular_quat = 0.5f * h * Quat::fromAngularVec(angular_velocity);
+    Quat angular_quat = Quat::fromAngularVec(0.5f * h * angular_velocity);
 
     cur_rotation += angular_quat * cur_rotation;
     cur_rotation = cur_rotation.normalize();
@@ -376,6 +370,7 @@ static inline float generalizedInverseMass(Vector3 local,
     return inv_m + dot(multDiag(inv_I, lxn), lxn);
 }
 
+template <typename Fn>
 static MADRONA_ALWAYS_INLINE inline void solvePositionalConstraint(
     Vector3 &x1, Vector3 &x2,
     Quat &q1, Quat &q2,
@@ -386,7 +381,7 @@ static MADRONA_ALWAYS_INLINE inline void solvePositionalConstraint(
     float c,
     float alpha_tilde,
     float &lambda,
-    float lambda_threshold = 0.f)
+    Fn &&lambda_check)
 {
     float w1 = generalizedInverseMass(r1, inv_m1, inv_I1, n1);
     float w2 = generalizedInverseMass(r2, inv_m2, inv_I2, n2);
@@ -396,7 +391,7 @@ static MADRONA_ALWAYS_INLINE inline void solvePositionalConstraint(
 
     lambda += delta_lambda;
 
-    if (lambda < lambda_threshold) return;
+    if (lambda_check(lambda)) return;
 
     Vector3 p = delta_lambda * n_world;
     Vector3 p_local1 = delta_lambda * n1;
@@ -458,7 +453,8 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
                               inv_m1, inv_m2,
                               inv_I1, inv_I2,
                               n_world, n_local1, n_local2,
-                              d, 0, lambda_n);
+                              d, 0,
+                              lambda_n, [](float) { return false; });
 
     Vector3 delta_p = (p1 - p1_hat) - (p2 - p2_hat);
     Vector3 delta_p_t = delta_p - dot(delta_p, n_world) * n_world;
@@ -480,7 +476,9 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
                                   inv_I1, inv_I2,
                                   tangent_dir, tangent_dir_local1, tangent_dir_local2,
                                   tangential_magnitude,
-                                  0, lambda_t, lambda_threshold);
+                                  0, lambda_t, [lambda_threshold](float lambda) {
+                                      return lambda >= lambda_threshold;
+                                  });
     }
 }
 
@@ -531,7 +529,7 @@ static inline void handleContact(Context &ctx,
         float penetration_depth = contact.points[i].w;
 
         Vector3 b_contact_point = 
-            a_contact_point + contact.normal * penetration_depth;
+            a_contact_point - contact.normal * penetration_depth;
 
         // Transform the contact points into local space for a & b
         Vector3 a_r = 
@@ -546,8 +544,7 @@ static inline void handleContact(Context &ctx,
                                 a_inv_I, b_inv_I,
                                 a_mu_s, b_mu_s,
                                 a_r, b_r,
-                                // Normal needs to point from b to a
-                                -contact.normal,
+                                contact.normal,
                                 lambda_n,
                                 lambda_t);
     }
@@ -599,7 +596,20 @@ inline void setVelocities(Context &ctx,
 inline void updateVelocityFromContact(Context &ctx,
                                       ObjectManager &obj_mgr,
                                       Contact contact)
-{}
+{
+#if 0
+    Position &pos1 = ctx.getUnsafe<Position>(contact.a);
+    Position &pos2 = ctx.getUnsafe<Position>(contact.b);
+    Rotation &rot1 = ctx.getUnsafe<Rotation>(contact.a);
+    Rotation &rot2 = ctx.getUnsafe<Rotation>(contact.b);
+
+    printf("(%f %f %f) (%f %f %f) (%f %f %f %f) (%f %f %f %f)\n",
+           pos1.x, pos1.y, pos1.z,
+           pos2.x, pos2.y, pos2.z,
+           rot1.w, rot1.x, rot1.y, rot1.z,
+           rot2.w, rot2.x, rot2.y, rot2.z);
+#endif
+}
 
 inline void solveVelocities(Context &ctx, SolverData &solver)
 {
