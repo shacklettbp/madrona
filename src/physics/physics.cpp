@@ -165,6 +165,7 @@ inline void runNarrowphase(
                 },
                 1,
                 to_b_normal,
+                0.f,
             }});
 
 
@@ -200,6 +201,7 @@ inline void runNarrowphase(
                 },
                 1,
                 plane_normal,
+                0.f,
             }});
         }
     } break;
@@ -253,6 +255,7 @@ inline void runNarrowphase(
                 },
                 manifold.numContactPoints,
                 manifold.normal,
+                0.f,
             }});
         }
     } break;
@@ -300,6 +303,7 @@ inline void runNarrowphase(
                 },
                 manifold.numContactPoints,
                 manifold.normal,
+                0.f,
             }});
         }
     } break;
@@ -491,12 +495,33 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
     }
 }
 
+static inline MADRONA_ALWAYS_INLINE std::pair<Vector3, Vector3>
+getLocalSpaceContacts(const SubstepStartState &start1,
+                      const SubstepStartState &start2,
+                      const Contact &contact,
+                      CountT point_idx)
+{
+    Vector3 contact1 = contact.points[point_idx].xyz();
+    float penetration_depth = contact.points[point_idx].w;
+
+    Vector3 contact2 = 
+        contact1 - contact.normal * penetration_depth;
+
+    // Transform the contact points into local space for a & b
+    Vector3 r1 = start1.startRotation.inv().rotateVec(
+        contact1 - start1.startPosition);
+    Vector3 r2 = start2.startRotation.inv().rotateVec(
+        contact2 - start2.startPosition);
+
+    return { r1, r2 };
+}
+
 // For now, this function assumes both a & b are dynamic objects.
 // FIXME: Need to add dynamic / static variant or handle missing the velocity
 // component for static objects.
 static inline void handleContact(Context &ctx,
                                  ObjectManager &obj_mgr,
-                                 Contact contact)
+                                 Contact &contact)
 {
     Position *p1_ptr = &ctx.getUnsafe<Position>(contact.ref);
     Rotation *q1_ptr = &ctx.getUnsafe<Rotation>(contact.ref);
@@ -534,17 +559,7 @@ static inline void handleContact(Context &ctx,
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        Vector3 contact1 = contact.points[i].xyz();
-        float penetration_depth = contact.points[i].w;
-
-        Vector3 contact2 = 
-            contact1 - contact.normal * penetration_depth;
-
-        // Transform the contact points into local space for a & b
-        Vector3 r1 = start1.startRotation.inv().rotateVec(
-            contact1 - start1.startPosition);
-        Vector3 r2 = start2.startRotation.inv().rotateVec(
-            contact2 - start2.startPosition);
+        auto [r1, r2] = getLocalSpaceContacts(start1, start2, contact, i);
 
         handleContactConstraint(p1, p2,
                                 q1, q2,
@@ -563,6 +578,8 @@ static inline void handleContact(Context &ctx,
 
     *q1_ptr = q1;
     *q2_ptr = q2;
+
+    contact.lambdaN = lambda_n;
 }
 
 inline void solvePositions(Context &ctx, SolverData &solver)
@@ -575,9 +592,10 @@ inline void solvePositions(Context &ctx, SolverData &solver)
     //printf("Solver # contacts: %d\n", num_contacts);
 
     for (CountT i = 0; i < num_contacts; i++) {
-        const Contact &contact = solver.contacts[i];
-
+        Contact contact = solver.contacts[i];
         handleContact(ctx, obj_mgr, contact);
+
+        solver.contacts[i].lambdaN = contact.lambdaN;
     }
 }
 
@@ -604,13 +622,56 @@ inline void setVelocities(Context &ctx,
 
 inline void updateVelocityFromContact(Context &ctx,
                                       ObjectManager &obj_mgr,
-                                      Contact contact)
+                                      Contact contact,
+                                      float h)
 {
+    Velocity *v1_out = &ctx.getUnsafe<Velocity>(contact.ref);
+    SubstepStartState start1 = ctx.getUnsafe<SubstepStartState>(contact.ref);
+    SubstepVelocityState prev_vel1 = ctx.getUnsafe<SubstepVelocityState>(contact.ref);
+    ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(contact.ref);
+    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
+
+    Velocity *v2_out = &ctx.getUnsafe<Velocity>(contact.alt);
+    SubstepStartState start2 = ctx.getUnsafe<SubstepStartState>(contact.alt);
+    SubstepVelocityState prev_vel2 = ctx.getUnsafe<SubstepVelocityState>(contact.alt);
+    ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
+    RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id1.idx];
+
+    auto [v1, omega1] = *v1_out;
+    auto [v2, omega2] = *v2_out;
+
+    float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
+
+    // h * mu_d * |f_n| in paper
+    float tangential_magnitude = mu_d * fabsf(contact.lambdaN) / h;
+#pragma unroll
+    for (CountT i = 0; i < 4; i++) {
+        if (i >= contact.numPoints) continue;
+
+        auto [r1, r2] = getLocalSpaceContacts(start1, start2, contact, i);
+        Vector3 n = contact.normal;
+
+        Vector3 v = (v1 + cross(omega1, r1)) - (v2 + cross(omega2, r2));
+
+        float vn = dot(n, v);
+        Vector3 vt = v - n * vn;
+
+        float vt_len = vt.length();
+
+        Vector3 delta_v;
+        if (vt_len == 0) {
+            delta_v = Vector3 { 0, 0, 0 };
+        } else {
+            delta_v = -vt / vt_len * helpers::minf(
+                tangential_magnitude, vt_len);
+        }
+    }
+
 #if 0
     Position &p1 = ctx.getUnsafe<Position>(contact.ref);
     Rotation &q1 = ctx.getUnsafe<Rotation>(contact.ref);
     Position &p2 = ctx.getUnsafe<Position>(contact.alt);
-    Rotation &q2 = ctx.getUnsafe<Rotation>(contact.alt);
+    Rotation &q2 = ctx.getUnsafe<Rottion>(contact.alt);
 
     printf("(%f %f %f) (%f %f %f) (%f %f %f %f) (%f %f %f %f)\n",
            p1.x, p1.y, p1.z,
@@ -618,6 +679,9 @@ inline void updateVelocityFromContact(Context &ctx,
            q1.w, q1.x, q1.y, q1.z,
            q2.w, q2.x, q2.y, q2.z);
 #endif
+
+    *v1_out = Velocity { v1, omega1 };
+    *v2_out = Velocity { v2, omega2 };
 }
 
 inline void solveVelocities(Context &ctx, SolverData &solver)
@@ -628,7 +692,7 @@ inline void solveVelocities(Context &ctx, SolverData &solver)
 
     for (CountT i = 0; i < num_contacts; i++) {
         const Contact &contact = solver.contacts[i];
-        updateVelocityFromContact(ctx, obj_mgr, contact);
+        updateVelocityFromContact(ctx, obj_mgr, contact, solver.h);
     }
 
     solver.numContacts.store(0, std::memory_order_relaxed);
