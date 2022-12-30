@@ -323,8 +323,6 @@ inline void substepRigidBodies(Context &ctx,
                                const ObjectID &obj_id,
                                InstanceState &inst_state)
 {
-    Rotation oldRot = rot;
-
     const auto &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
@@ -343,7 +341,13 @@ inline void substepRigidBodies(Context &ctx,
     pos = cur_position + h * linear_velocity;
 
     Vector3 inv_inertia = obj_mgr.metadata[obj_id.idx].invInertiaTensor;
-    Vector3 inertia = 1.f / inv_inertia;
+
+    constexpr float kEpsilon = 0.00000001f;
+    Vector3 inertia = {
+        (abs(inv_inertia.x) < kEpsilon) ? 0.0f : 1.0f / inv_inertia.x,
+        (abs(inv_inertia.y) < kEpsilon) ? 0.0f : 1.0f / inv_inertia.y,
+        (abs(inv_inertia.z) < kEpsilon) ? 0.0f : 1.0f / inv_inertia.z
+    };
 
     Vector3 torque_ext { 0, 0, 0 };
     Vector3 scaled_angular {
@@ -353,7 +357,7 @@ inline void substepRigidBodies(Context &ctx,
     };
 
     angular_velocity +=
-        h * multDiag(inv_inertia, (torque_ext - (cross(angular_velocity, scaled_angular))));
+        h * multDiag(inv_inertia, torque_ext - (cross(angular_velocity, scaled_angular)));
     vel.angular = angular_velocity;
 
     Quat angular_quat = 0.5f * h * Quat::fromAngularVec(angular_velocity);
@@ -361,8 +365,6 @@ inline void substepRigidBodies(Context &ctx,
     cur_rotation += angular_quat * cur_rotation;
     cur_rotation = cur_rotation.normalize();
     rot = cur_rotation;
-
-    printf("%f %f %f %f -> %f %f %f %f\n", oldRot.x, oldRot.y, oldRot.z, oldRot.w, rot.x, rot.y, rot.z, rot.w);
 }
 
 static inline float generalizedInverseMass(Vector3 local,
