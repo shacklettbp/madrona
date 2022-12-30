@@ -280,6 +280,7 @@ inline void runNarrowphase(
         Vector3 plane_normal = b_rot.rotateVec(base_normal);
 
         geometry::Plane plane = { b_pos, plane_normal };
+        // printf("b_rot(%f %f %f %f)\n", b_rot.x, b_rot.y, b_rot.z, b_rot.w);
 
         Manifold manifold = doSATPlane(plane, collisionMeshA);
 
@@ -306,6 +307,15 @@ inline void runNarrowphase(
 
 namespace solver {
 
+static inline Vector3 multDiag(Vector3 diag, Vector3 v)
+{
+    return Vector3 {
+        diag.x * v.x,
+        diag.y * v.y,
+        diag.z * v.z,
+    };
+}
+
 inline void substepRigidBodies(Context &ctx,
                                Position &pos,
                                Rotation &rot,
@@ -313,6 +323,8 @@ inline void substepRigidBodies(Context &ctx,
                                const ObjectID &obj_id,
                                InstanceState &inst_state)
 {
+    Rotation oldRot = rot;
+
     const auto &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
@@ -341,7 +353,7 @@ inline void substepRigidBodies(Context &ctx,
     };
 
     angular_velocity +=
-        h * (torque_ext - (cross(angular_velocity, scaled_angular)));
+        h * multDiag(inv_inertia, (torque_ext - (cross(angular_velocity, scaled_angular))));
     vel.angular = angular_velocity;
 
     Quat angular_quat = 0.5f * h * Quat::fromAngularVec(angular_velocity);
@@ -349,15 +361,8 @@ inline void substepRigidBodies(Context &ctx,
     cur_rotation += angular_quat * cur_rotation;
     cur_rotation = cur_rotation.normalize();
     rot = cur_rotation;
-}
 
-static inline Vector3 multDiag(Vector3 diag, Vector3 v)
-{
-    return Vector3 {
-        diag.x * v.x,
-        diag.y * v.y,
-        diag.z * v.z,
-    };
+    printf("%f %f %f %f -> %f %f %f %f\n", oldRot.x, oldRot.y, oldRot.z, oldRot.w, rot.x, rot.y, rot.z, rot.w);
 }
 
 static inline float generalizedInverseMass(Vector3 local,
