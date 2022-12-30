@@ -178,8 +178,8 @@ struct CandidateCollision {
 struct CandidateTemporary : Archetype<CandidateCollision> {};
 
 struct Contact {
-    Entity a;
-    Entity b;
+    Entity ref;
+    Entity alt;
     math::Vector4 points[4];
     int32_t numPoints;
     math::Vector3 normal;
@@ -314,9 +314,19 @@ void findOverlappingEntry(
 
 namespace solver {
 
-struct InstanceState {
+struct SubstepPrevState {
     math::Vector3 prevPosition;
     math::Quat prevRotation;
+};
+
+struct SubstepStartState {
+    math::Vector3 startPosition;
+    math::Quat startRotation;
+};
+
+struct SubstepVelocityState {
+    math::Vector3 prevLinear;
+    math::Vector3 prevAngular;
 };
 
 }

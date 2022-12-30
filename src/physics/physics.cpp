@@ -320,7 +320,9 @@ inline void substepRigidBodies(Context &ctx,
                                Rotation &rot,
                                Velocity &vel,
                                const ObjectID &obj_id,
-                               InstanceState &inst_state)
+                               SubstepPrevState &prev_state,
+                               SubstepStartState &start_state,
+                               SubstepVelocityState &vel_state)
 {
     const auto &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
@@ -330,14 +332,18 @@ inline void substepRigidBodies(Context &ctx,
     Vector3 cur_position = pos;
     Quat cur_rotation = rot;
 
-    inst_state.prevPosition = cur_position;
-    inst_state.prevRotation = cur_rotation;
+    prev_state.prevPosition = cur_position;
+    prev_state.prevRotation = cur_rotation;
 
     Vector3 linear_velocity = vel.linear;
     Vector3 angular_velocity = vel.angular;
+
+    vel_state.prevLinear = linear_velocity;
+    vel_state.prevAngular = angular_velocity;
+
     //cur_velocity += h * gravity;
  
-    pos = cur_position + h * linear_velocity;
+    cur_position += h * linear_velocity;
 
     Vector3 inv_inertia = obj_mgr.metadata[obj_id.idx].invInertiaTensor;
 
@@ -358,7 +364,12 @@ inline void substepRigidBodies(Context &ctx,
 
     cur_rotation += angular_quat * cur_rotation;
     cur_rotation = cur_rotation.normalize();
+
+    pos = cur_position;
     rot = cur_rotation;
+
+    start_state.startPosition = cur_position;
+    start_state.startRotation = cur_rotation;
 }
 
 static inline float generalizedInverseMass(Vector3 local,
@@ -408,20 +419,13 @@ static MADRONA_ALWAYS_INLINE inline void solvePositionalConstraint(
 }
 
 static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
-    Vector3 &x1,
-    Vector3 &x2,
-    Quat &q1,
-    Quat &q2,
-    InstanceState inst_state_1,
-    InstanceState inst_state_2,
-    float inv_m1,
-    float inv_m2,
-    Vector3 inv_I1,
-    Vector3 inv_I2,
-    float mu_s1,
-    float mu_s2,
-    Vector3 r1,
-    Vector3 r2,
+    Vector3 &x1, Vector3 &x2,
+    Quat &q1, Quat &q2,
+    SubstepPrevState prev1, SubstepPrevState prev2,
+    float inv_m1, float inv_m2,
+    Vector3 inv_I1, Vector3 inv_I2,
+    float mu_s1, float mu_s2,
+    Vector3 r1, Vector3 r2,
     Vector3 n_world,
     float &lambda_n,
     float &lambda_t)
@@ -435,11 +439,11 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
         return;
     }
 
-    Vector3 x1_prev = inst_state_1.prevPosition;
-    Quat q1_prev = inst_state_1.prevRotation;
+    Vector3 x1_prev = prev1.prevPosition;
+    Quat q1_prev = prev1.prevRotation;
 
-    Vector3 x2_prev = inst_state_2.prevPosition;
-    Quat q2_prev = inst_state_2.prevRotation;
+    Vector3 x2_prev = prev2.prevPosition;
+    Quat q2_prev = prev2.prevRotation;
 
     Vector3 p1_hat = q1_prev.rotateVec(r1) + x1_prev;
     Vector3 p2_hat = q2_prev.rotateVec(r2) + x2_prev;
@@ -489,71 +493,71 @@ static inline void handleContact(Context &ctx,
                                  ObjectManager &obj_mgr,
                                  Contact contact)
 {
-    Position *a_pos_ptr = &ctx.getUnsafe<Position>(contact.a);
-    Rotation *a_rot_ptr = &ctx.getUnsafe<Rotation>(contact.a);
-    InstanceState a_state = ctx.getUnsafe<InstanceState>(contact.a);
-    ObjectID a_id = ctx.getUnsafe<ObjectID>(contact.a);
-    RigidBodyMetadata a_metadata = obj_mgr.metadata[a_id.idx];
+    Position *p1_ptr = &ctx.getUnsafe<Position>(contact.ref);
+    Rotation *q1_ptr = &ctx.getUnsafe<Rotation>(contact.ref);
+    SubstepPrevState prev1 = ctx.getUnsafe<SubstepPrevState>(contact.ref);
+    SubstepStartState start1 = ctx.getUnsafe<SubstepStartState>(contact.ref);
+    ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(contact.ref);
+    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
 
-    Position *b_pos_ptr = &ctx.getUnsafe<Position>(contact.b);
-    Rotation *b_rot_ptr = &ctx.getUnsafe<Rotation>(contact.b);
-    InstanceState b_state = ctx.getUnsafe<InstanceState>(contact.b);
-    ObjectID b_id = ctx.getUnsafe<ObjectID>(contact.b);
-    RigidBodyMetadata b_metadata = obj_mgr.metadata[b_id.idx];
+    Position *p2_ptr = &ctx.getUnsafe<Position>(contact.alt);
+    Rotation *q2_ptr = &ctx.getUnsafe<Rotation>(contact.alt);
+    SubstepPrevState prev2 = ctx.getUnsafe<SubstepPrevState>(contact.alt);
+    SubstepStartState start2 = ctx.getUnsafe<SubstepStartState>(contact.alt);
+    ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
+    RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
     float lambda_n = 0.f;
     float lambda_t = 0.f;
 
-    Vector3 a_start_pos = *a_pos_ptr;
-    Quat a_start_rot = *a_rot_ptr;
-    float a_inv_m = a_metadata.invMass;
-    Vector3 a_inv_I = a_metadata.invInertiaTensor;
-    float a_mu_s = a_metadata.muS;
+    Vector3 p1 = *p1_ptr;
+    Vector3 p2 = *p2_ptr;
 
-    Vector3 b_start_pos = *b_pos_ptr;
-    Quat b_start_rot = *b_rot_ptr;
-    float b_inv_m = b_metadata.invMass;
-    Vector3 b_inv_I = b_metadata.invInertiaTensor;
-    float b_mu_s = b_metadata.muS;
+    Quat q1 = *q1_ptr;
+    Quat q2 = *q2_ptr;
 
-    Vector3 a_pos = a_start_pos;
-    Vector3 b_pos = b_start_pos;
-    Quat a_rot = a_start_rot;
-    Quat b_rot = b_start_rot;
+    float inv_m1 = metadata1.invMass;
+    float inv_m2 = metadata2.invMass;
+
+    Vector3 inv_I1 = metadata1.invInertiaTensor;
+    Vector3 inv_I2 = metadata2.invInertiaTensor;
+
+    float mu_s1 = metadata1.muS;
+    float mu_s2 = metadata2.muS;
 
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        Vector3 a_contact_point = contact.points[i].xyz();
+        Vector3 contact1 = contact.points[i].xyz();
         float penetration_depth = contact.points[i].w;
 
-        Vector3 b_contact_point = 
-            a_contact_point - contact.normal * penetration_depth;
+        Vector3 contact2 = 
+            contact1 - contact.normal * penetration_depth;
 
         // Transform the contact points into local space for a & b
-        Vector3 a_r = 
-            a_start_rot.inv().rotateVec(a_contact_point - a_start_pos);
-        Vector3 b_r =
-            b_start_rot.inv().rotateVec(b_contact_point - b_start_pos);
+        Vector3 r1 = start1.startRotation.inv().rotateVec(
+            contact1 - start1.startPosition);
+        Vector3 r2 = start2.startRotation.inv().rotateVec(
+            contact2 - start2.startPosition);
 
-        handleContactConstraint(a_pos, b_pos,
-                                a_rot, b_rot,
-                                a_state, b_state,
-                                a_inv_m, b_inv_m,
-                                a_inv_I, b_inv_I,
-                                a_mu_s, b_mu_s,
-                                a_r, b_r,
+        handleContactConstraint(p1, p2,
+                                q1, q2,
+                                prev1, prev2,
+                                inv_m1, inv_m2,
+                                inv_I1, inv_I2,
+                                mu_s1, mu_s2,
+                                r1, r2,
                                 contact.normal,
                                 lambda_n,
                                 lambda_t);
     }
 
-    *a_pos_ptr = a_pos;
-    *b_pos_ptr = b_pos;
+    *p1_ptr = p1;
+    *p2_ptr = p2;
 
-    *a_rot_ptr = a_rot;
-    *b_rot_ptr = b_rot;
+    *q1_ptr = q1;
+    *q2_ptr = q2;
 }
 
 inline void solvePositions(Context &ctx, SolverData &solver)
@@ -575,16 +579,16 @@ inline void solvePositions(Context &ctx, SolverData &solver)
 inline void setVelocities(Context &ctx,
                           const Position &pos,
                           const Rotation &rot,
-                          const InstanceState &inst_state,
+                          const SubstepPrevState &prev_state,
                           Velocity &vel)
 {
     const auto &solver = ctx.getSingleton<SolverData>();
     float h = solver.h;
 
-    vel.linear = (pos - inst_state.prevPosition) / h;
+    vel.linear = (pos - prev_state.prevPosition) / h;
 
     Quat cur_rotation = rot;
-    Quat prev_rotation = inst_state.prevRotation;
+    Quat prev_rotation = prev_state.prevRotation;
 
     Quat delta_q = cur_rotation * prev_rotation.inv();
 
@@ -598,16 +602,16 @@ inline void updateVelocityFromContact(Context &ctx,
                                       Contact contact)
 {
 #if 0
-    Position &pos1 = ctx.getUnsafe<Position>(contact.a);
-    Position &pos2 = ctx.getUnsafe<Position>(contact.b);
-    Rotation &rot1 = ctx.getUnsafe<Rotation>(contact.a);
-    Rotation &rot2 = ctx.getUnsafe<Rotation>(contact.b);
+    Position &p1 = ctx.getUnsafe<Position>(contact.ref);
+    Rotation &q1 = ctx.getUnsafe<Rotation>(contact.ref);
+    Position &p2 = ctx.getUnsafe<Position>(contact.alt);
+    Rotation &q2 = ctx.getUnsafe<Rotation>(contact.alt);
 
     printf("(%f %f %f) (%f %f %f) (%f %f %f %f) (%f %f %f %f)\n",
-           pos1.x, pos1.y, pos1.z,
-           pos2.x, pos2.y, pos2.z,
-           rot1.w, rot1.x, rot1.y, rot1.z,
-           rot2.w, rot2.x, rot2.y, rot2.z);
+           p1.x, p1.y, p1.z,
+           p2.x, p2.y, p2.z,
+           q1.w, q1.x, q1.y, q1.z,
+           q2.w, q2.x, q2.y, q2.z);
 #endif
 }
 
@@ -665,7 +669,9 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerComponent<Velocity>();
     registry.registerComponent<CollisionAABB>();
 
-    registry.registerComponent<solver::InstanceState>();
+    registry.registerComponent<solver::SubstepPrevState>();
+    registry.registerComponent<solver::SubstepStartState>();
+    registry.registerComponent<solver::SubstepVelocityState>();
 
     registry.registerComponent<CollisionEvent>();
     registry.registerArchetype<CollisionEventTemporary>();
@@ -701,7 +707,8 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
-            solver::InstanceState>>({cur_node});
+            solver::SubstepPrevState, solver::SubstepStartState,
+            solver::SubstepVelocityState>>({cur_node});
 
         auto run_narrowphase = builder.addToGraph<ParallelForNode<Context,
             narrowphase::runNarrowphase, CandidateCollision>>(
@@ -712,7 +719,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
 
         auto vel_set = builder.addToGraph<ParallelForNode<Context,
             solver::setVelocities, Position, Rotation,
-            solver::InstanceState, Velocity>>({solve_pos});
+            solver::SubstepPrevState, Velocity>>({solve_pos});
 
         auto solve_vel = builder.addToGraph<ParallelForNode<Context,
             solver::solveVelocities, SolverData>>({vel_set});
