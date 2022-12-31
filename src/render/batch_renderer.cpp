@@ -3,6 +3,7 @@
 
 #include <madrona/math.hpp>
 #include <madrona/dyn_array.hpp>
+#include <madrona/tracing.hpp>
 
 #include "vk/core.hpp"
 #include "vk/cuda_interop.hpp"
@@ -429,6 +430,7 @@ CountT BatchRenderer::Impl::loadObjects(Span<const imp::SourceObject> objs)
 
 void BatchRenderer::Impl::render(const uint32_t *num_instances)
 {
+    HostEventLogging(renderStart);
     uint32_t swapchain_idx = 0;
     if (presentState.has_value()) {
         presentState->processInputs();
@@ -625,6 +627,7 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
 
     waitForFenceInfinitely(dev, renderFence);
     resetFence(dev, renderFence);
+    HostEventLogging(renderEnd);
 }
 
 BatchRenderer::BatchRenderer(const Config &cfg)

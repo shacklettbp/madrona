@@ -17,6 +17,7 @@
 #include <madrona/dyn_array.hpp>
 #include <madrona/batch_renderer.hpp>
 #include <madrona/cuda_utils.hpp>
+#include <madrona/tracing.hpp>
 
 #include "cpp_compile.hpp"
 
@@ -1289,8 +1290,10 @@ MADRONA_EXPORT MWCudaExecutor::~MWCudaExecutor()
 
 MADRONA_EXPORT void MWCudaExecutor::run()
 {
+    HostEventLogging(megaKernelStart);
     REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
+    HostEventLogging(megaKernelEnd);
 
     if (impl_->engineState.batchRenderer.has_value()) {
         impl_->engineState.batchRenderer->render(
