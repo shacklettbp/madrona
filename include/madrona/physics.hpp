@@ -8,6 +8,7 @@ namespace madrona {
 namespace phys {
 
 namespace geometry {
+
 // TODO: Should probably wrap this with proper RAII (eh?) - not supposed to be an API
 struct FastPolygonList {
     uint32_t maxIndices;
@@ -151,10 +152,8 @@ struct CollisionMesh {
 
     // This is also going to contain FastPolygonList for information about each face
     const geometry::HalfEdgeMesh *halfEdgeMesh;
-
-    math::Vector3 position;
-    math::Quat rotation;
 };
+
 }
 
 struct Velocity {
@@ -186,6 +185,7 @@ struct Contact {
     math::Vector4 points[4];
     int32_t numPoints;
     math::Vector3 normal;
+    float lambdaN[4];
 };
 
 struct CollisionEventTemporary : Archetype<CollisionEvent> {};
@@ -339,6 +339,7 @@ struct RigidBodyPhysicsSystem {
                      ObjectManager *obj_mgr,
                      float delta_t,
                      CountT num_substeps,
+                     math::Vector3 gravity,
                      CountT max_dynamic_objects,
                      CountT max_contacts_per_step);
 
