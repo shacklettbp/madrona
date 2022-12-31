@@ -421,8 +421,8 @@ Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2) {
         t = (-dotv211 * dotv21 + dotv11 * dotv212) / denom;
     }
 
-    s = max(min(s, 1.0f), 0.0f);
-    t = max(min(t, 1.0f), 0.0f);
+    s = fmaxf(fminf(s, 1.0f), 0.0f);
+    t = fmaxf(fminf(t, 1.0f), 0.0f);
 
     return { seg1.p1 + s * v1, seg2.p1 + t * v2 };
 }

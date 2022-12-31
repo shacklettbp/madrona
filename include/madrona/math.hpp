@@ -28,16 +28,6 @@ inline constexpr float toRadians(float degrees)
     return mult * degrees;
 }
 
-inline constexpr float minf(float a, float b)
-{
-    return a < b ? a : b;
-}
-
-inline constexpr float maxf(float a, float b)
-{
-    return a > b ? a : b;
-}
-
 }
 
 struct Vector2 {
@@ -430,18 +420,18 @@ struct Vector3 {
     static inline Vector3 min(Vector3 a, Vector3 b)
     {
         return Vector3 {
-            helpers::minf(a.x, b.x),
-            helpers::minf(a.y, b.y),
-            helpers::minf(a.z, b.z),
+            fminf(a.x, b.x),
+            fminf(a.y, b.y),
+            fminf(a.z, b.z),
         };
     }
 
     static inline Vector3 max(Vector3 a, Vector3 b)
     {
         return Vector3 {
-            helpers::maxf(a.x, b.x),
-            helpers::maxf(a.y, b.y),
-            helpers::maxf(a.z, b.z),
+            fmaxf(a.x, b.x),
+            fmaxf(a.y, b.y),
+            fmaxf(a.z, b.z),
         };
     }
 };

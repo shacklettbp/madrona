@@ -339,6 +339,7 @@ struct RigidBodyPhysicsSystem {
                      ObjectManager *obj_mgr,
                      float delta_t,
                      CountT num_substeps,
+                     math::Vector3 gravity,
                      CountT max_dynamic_objects,
                      CountT max_contacts_per_step);
 

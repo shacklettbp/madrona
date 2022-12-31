@@ -14,15 +14,22 @@ struct SolverData {
     CountT maxContacts;
     float deltaT;
     float h;
+    Vector3 g;
+    float gMagnitude;
+    float restitutionThreshold;
 
     inline SolverData(CountT max_contacts_per_step,
                       float delta_t,
-                      CountT num_substeps)
+                      CountT num_substeps,
+                      Vector3 gravity)
         : contacts((Contact *)rawAlloc(sizeof(Contact) * max_contacts_per_step)),
           numContacts(0),
           maxContacts(max_contacts_per_step),
           deltaT(delta_t),
-          h(delta_t / (float)num_substeps)
+          h(delta_t / (float)num_substeps),
+          g(gravity),
+          gMagnitude(gravity.length()),
+          restitutionThreshold(2.f * gMagnitude * h)
     {}
 
     inline void addContacts(Span<const Contact> added_contacts)
@@ -345,7 +352,7 @@ inline void substepRigidBodies(Context &ctx,
     vel_state.prevLinear = linear_velocity;
     vel_state.prevAngular = angular_velocity;
 
-    //cur_velocity += h * gravity;
+    linear_velocity += h * solver.g;
  
     cur_position += h * linear_velocity;
 
@@ -386,7 +393,7 @@ static inline float generalizedInverseMass(Vector3 local,
 }
 
 template <typename Fn>
-static MADRONA_ALWAYS_INLINE inline void solvePositionalConstraint(
+static MADRONA_ALWAYS_INLINE inline void applyPositionalUpdate(
     Vector3 &x1, Vector3 &x2,
     Quat &q1, Quat &q2,
     Vector3 r1, Vector3 r2,
@@ -455,14 +462,14 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
     Vector3 n_local1 = q1.inv().rotateVec(n_world);
     Vector3 n_local2 = q2.inv().rotateVec(n_world);
 
-    solvePositionalConstraint(x1, x2,
-                              q1, q2,
-                              r1, r2,
-                              inv_m1, inv_m2,
-                              inv_I1, inv_I2,
-                              n_world, n_local1, n_local2,
-                              d, 0,
-                              lambda_n, [](float) { return false; });
+    applyPositionalUpdate(x1, x2,
+                          q1, q2,
+                          r1, r2,
+                          inv_m1, inv_m2,
+                          inv_I1, inv_I2,
+                          n_world, n_local1, n_local2,
+                          d, 0,
+                          lambda_n, [](float) { return false; });
 
     Vector3 delta_p = (p1 - p1_hat) - (p2 - p2_hat);
     Vector3 delta_p_t = delta_p - dot(delta_p, n_world) * n_world;
@@ -477,16 +484,16 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
         float mu_s = 0.5f * (mu_s1 + mu_s2);
         float lambda_threshold = lambda_n * mu_s;
 
-        solvePositionalConstraint(x1, x2,
-                                  q1, q2,
-                                  r1, r2,
-                                  inv_m1, inv_m2,
-                                  inv_I1, inv_I2,
-                                  tangent_dir, tangent_dir_local1, tangent_dir_local2,
-                                  tangential_magnitude,
-                                  0, lambda_t, [lambda_threshold](float lambda) {
-                                      return lambda >= lambda_threshold;
-                                  });
+        applyPositionalUpdate(x1, x2,
+                              q1, q2,
+                              r1, r2,
+                              inv_m1, inv_m2,
+                              inv_I1, inv_I2,
+                              tangent_dir, tangent_dir_local1, tangent_dir_local2,
+                              tangential_magnitude,
+                              0, lambda_t, [lambda_threshold](float lambda) {
+                                  return lambda >= lambda_threshold;
+                              });
     }
 }
 
@@ -615,22 +622,46 @@ inline void setVelocities(Context &ctx,
     vel.angular = delta_q.w > 0.f ? new_angular : -new_angular;
 }
 
-inline void updateVelocityFromContact(Context &ctx,
-                                      ObjectManager &obj_mgr,
-                                      Contact contact,
-                                      float h)
+static inline void applyVelocityUpdate(Vector3 &v1, Vector3 &v2,
+                                       Vector3 &omega1, Vector3 &omega2,
+                                       Vector3 r1, Vector3 r2,
+                                       float inv_m1, float inv_m2,
+                                       Vector3 inv_I1, Vector3 inv_I2,
+                                       Vector3 delta_v_world,
+                                       Vector3 delta_v_l1, Vector3 delta_v_l2,
+                                       float delta_v_magnitude)
+{
+    float w1 = generalizedInverseMass(r1, inv_m1, inv_I1, delta_v_l1);
+    float w2 = generalizedInverseMass(r2, inv_m2, inv_I2, delta_v_l2);
+
+    delta_v_magnitude *= 1.f / (w1 + w2);
+
+    v1 += delta_v_world * delta_v_magnitude * inv_m1;
+    v2 -= delta_v_world * delta_v_magnitude * inv_m2;
+
+    omega1 += multDiag(inv_I1, cross(r1, delta_v_l1 * delta_v_magnitude));
+    omega2 -= multDiag(inv_I2, cross(r2, delta_v_l2 * delta_v_magnitude));
+}
+
+static inline void updateVelocityFromContact(Context &ctx,
+                                             ObjectManager &obj_mgr,
+                                             Contact contact,
+                                             float h,
+                                             float restitution_threshold)
 {
     Velocity *v1_out = &ctx.getUnsafe<Velocity>(contact.ref);
+    Quat q1 = ctx.getUnsafe<Rotation>(contact.ref);
     SubstepStartState start1 = ctx.getUnsafe<SubstepStartState>(contact.ref);
     SubstepVelocityState prev_vel1 = ctx.getUnsafe<SubstepVelocityState>(contact.ref);
     ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(contact.ref);
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
 
     Velocity *v2_out = &ctx.getUnsafe<Velocity>(contact.alt);
+    Quat q2 = ctx.getUnsafe<Rotation>(contact.alt);
     SubstepStartState start2 = ctx.getUnsafe<SubstepStartState>(contact.alt);
     SubstepVelocityState prev_vel2 = ctx.getUnsafe<SubstepVelocityState>(contact.alt);
     ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
-    RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id1.idx];
+    RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
     auto [v1, omega1] = *v1_out;
     auto [v2, omega2] = *v2_out;
@@ -638,7 +669,7 @@ inline void updateVelocityFromContact(Context &ctx,
     float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
 
     // h * mu_d * |f_n| in paper
-    float tangential_magnitude = mu_d * fabsf(contact.lambdaN) / h;
+    float dynamic_friction_magnitude = mu_d * fabsf(contact.lambdaN) / h;
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
@@ -653,13 +684,48 @@ inline void updateVelocityFromContact(Context &ctx,
 
         float vt_len = vt.length();
 
-        Vector3 delta_v;
-        if (vt_len == 0) {
-            delta_v = Vector3 { 0, 0, 0 };
-        } else {
-            delta_v = -vt / vt_len * helpers::minf(
-                tangential_magnitude, vt_len);
+        if (vt_len != 0 && dynamic_friction_magnitude != 0.f) {
+            float corrected_magnitude =
+                -fminf(dynamic_friction_magnitude, vt_len);
+
+            Vector3 delta_world = vt / vt_len;
+
+            Vector3 delta_local1 = q1.inv().rotateVec(delta_world);
+            Vector3 delta_local2 = q2.inv().rotateVec(delta_world);
+
+            applyVelocityUpdate(
+                v1, v2,
+                omega1, omega2,
+                r1, r2,
+                metadata1.invMass, metadata2.invMass,
+                metadata1.invInertiaTensor, metadata2.invInertiaTensor,
+                delta_world, delta_local1, delta_local2,
+                corrected_magnitude);
         }
+
+        Vector3 v_bar =
+            (prev_vel1.prevLinear + cross(prev_vel1.prevAngular, r1)) -
+            (prev_vel2.prevLinear + cross(prev_vel2.prevAngular, r2));
+
+        float vn_bar = dot(n, v_bar);
+
+        float e = 0.4; // FIXME
+        if (fabsf(vn_bar) <= restitution_threshold) {
+            e = 0.f;
+        }
+        float restitution_magnitude = (fminf(-e * vn_bar, 0) - vn);
+
+        Vector3 n_local1 = q1.inv().rotateVec(n);
+        Vector3 n_local2 = q2.inv().rotateVec(n);
+
+        // FIXME: confirm this is pointing in right direction
+        applyVelocityUpdate(
+            v1, v2,
+            omega1, omega2,
+            r1, r2,
+            metadata1.invMass, metadata2.invMass,
+            metadata1.invInertiaTensor, metadata2.invInertiaTensor,
+            n, n_local1, n_local2, restitution_magnitude);
     }
 
 #if 0
@@ -687,7 +753,8 @@ inline void solveVelocities(Context &ctx, SolverData &solver)
 
     for (CountT i = 0; i < num_contacts; i++) {
         const Contact &contact = solver.contacts[i];
-        updateVelocityFromContact(ctx, obj_mgr, contact, solver.h);
+        updateVelocityFromContact(ctx, obj_mgr, contact, solver.h,
+                                  solver.restitutionThreshold);
     }
 
     solver.numContacts.store(0, std::memory_order_relaxed);
@@ -699,6 +766,7 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
                                   ObjectManager *obj_mgr,
                                   float delta_t,
                                   CountT num_substeps,
+                                  math::Vector3 gravity,
                                   CountT max_dynamic_objects,
                                   CountT max_contacts_per_world)
 {
@@ -706,7 +774,7 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
     new (&bvh) broadphase::BVH(max_dynamic_objects);
 
     SolverData &solver = ctx.getSingleton<SolverData>();
-    new (&solver) SolverData(max_contacts_per_world, delta_t, num_substeps);
+    new (&solver) SolverData(max_contacts_per_world, delta_t, num_substeps, gravity);
 
     ObjectData &objs = ctx.getSingleton<ObjectData>();
     new (&objs) ObjectData { obj_mgr };
