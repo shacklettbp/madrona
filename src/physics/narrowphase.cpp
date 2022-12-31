@@ -321,8 +321,6 @@ Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a, FaceQue
 
     // Clip the incident face against the side planes of the reference face
     for (int i = 0; i < sidePlaneCount; ++i) {
-        float dotProduct = planes[i].normal.dot(planes[i].point - incidentVertices[0]);
-
         clipPolygon(planes[i], &incidentFaceVertexCount, incidentVertices, kMaxIncidentVertexCount);
     }
 

@@ -218,15 +218,11 @@ inline void runNarrowphase(
             return e_position + e_rotation.rotateVec((math::Vector3)e_scale * v);
         };
 
-        Rotation a_rot = ctx.getUnsafe<Rotation>(a_entity);
-        Rotation b_rot = ctx.getUnsafe<Rotation>(b_entity);
-
         geometry::CollisionMesh collisionMeshA;
         collisionMeshA.halfEdgeMesh = &hEdgeA;
         collisionMeshA.vertexCount = hEdgeA.getVertexCount();
         collisionMeshA.vertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * collisionMeshA.vertexCount);
         collisionMeshA.center = a_pos;
-        collisionMeshA.rotation = a_rot;
         for (int v = 0; v < collisionMeshA.vertexCount; ++v) {
             collisionMeshA.vertices[v] = transformVertex(hEdgeA.vertex(v), a_entity);
         }
@@ -236,7 +232,6 @@ inline void runNarrowphase(
         collisionMeshB.vertexCount = hEdgeB.getVertexCount();
         collisionMeshB.vertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * collisionMeshB.vertexCount);
         collisionMeshB.center = b_pos;
-        collisionMeshB.rotation = b_rot;
         for (int v = 0; v < collisionMeshB.vertexCount; ++v) {
             collisionMeshB.vertices[v] = transformVertex(hEdgeB.vertex(v), b_entity);
         }

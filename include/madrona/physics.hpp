@@ -8,6 +8,7 @@ namespace madrona {
 namespace phys {
 
 namespace geometry {
+
 // TODO: Should probably wrap this with proper RAII (eh?) - not supposed to be an API
 struct FastPolygonList {
     uint32_t maxIndices;
@@ -151,10 +152,8 @@ struct CollisionMesh {
 
     // This is also going to contain FastPolygonList for information about each face
     const geometry::HalfEdgeMesh *halfEdgeMesh;
-
-    math::Vector3 position;
-    math::Quat rotation;
 };
+
 }
 
 struct Velocity {
