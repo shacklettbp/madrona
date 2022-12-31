@@ -681,6 +681,10 @@ static inline void updateVelocityFromContact(Context &ctx,
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
+        // FIXME: If this contact wasn't actually processed just skip it
+        if (contact.lambdaN[i] == 0.f) continue;
+
+        // FIXME: reconsider separate lambdas?
         // h * mu_d * |f_n| in paper
         float dynamic_friction_magnitude =
             mu_d * fabsf(contact.lambdaN[i]) / h;
@@ -729,7 +733,6 @@ static inline void updateVelocityFromContact(Context &ctx,
         Vector3 n_local1 = q1.inv().rotateVec(n);
         Vector3 n_local2 = q2.inv().rotateVec(n);
 
-        // FIXME: confirm this is pointing in right direction
         applyVelocityUpdate(
             v1, v2,
             omega1, omega2,
