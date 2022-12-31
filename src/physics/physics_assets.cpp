@@ -236,7 +236,6 @@ CountT PhysicsLoader::loadObjects(const RigidBodyMetadata *metadatas,
             if (primitives[i].type == CollisionPrimitive::Type::Hull) {
                 auto &hEdgeMesh = primitives[i].hull.halfEdgeMesh;
 
-                printf("mPolygonCount = %d; mPolygons = %p\n", hEdgeMesh.mPolygonCount, hEdgeMesh.mPolygons);
                 cudaMemcpy(
                     impl_->polygonDatas + impl_->polygonCount,
                     hEdgeMesh.mPolygons,
@@ -244,17 +243,7 @@ CountT PhysicsLoader::loadObjects(const RigidBodyMetadata *metadatas,
                     cudaMemcpyHostToDevice);
                 hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
                 impl_->polygonCount += hEdgeMesh.mPolygonCount;
-#if 0
-                printf("%d %d %d %d %d %d\n",
-                        hEdgeMesh.mPolygons[0],
-                        hEdgeMesh.mPolygons[1],
-                        hEdgeMesh.mPolygons[2],
-                        hEdgeMesh.mPolygons[3],
-                        hEdgeMesh.mPolygons[4],
-                        hEdgeMesh.mPolygons[5]);
-#endif
 
-                printf("mEdgeCount = %d; mEdges = %p\n", hEdgeMesh.mEdgeCount, hEdgeMesh.mEdges);
                 cudaMemcpy(
                     impl_->edgeDatas + impl_->edgeCount,
                     hEdgeMesh.mEdges,
@@ -263,7 +252,6 @@ CountT PhysicsLoader::loadObjects(const RigidBodyMetadata *metadatas,
                 hEdgeMesh.mEdges = impl_->edgeDatas + impl_->edgeCount;
                 impl_->edgeCount += hEdgeMesh.mEdgeCount;
 
-                printf("mHalfEdgeCount = %d; mHalfEdges = %p\n", hEdgeMesh.mHalfEdgeCount, hEdgeMesh.mHalfEdges);
                 cudaMemcpy(
                     impl_->halfEdges + impl_->halfEdgeCount,
                     hEdgeMesh.mHalfEdges,

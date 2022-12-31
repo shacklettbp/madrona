@@ -101,7 +101,7 @@ void HalfEdgeMesh::construct(
         uint32_t firstPolygonHalfEdgeIdx = tmp.halfEdgeCount;
 
         // Create a half edge for each of these
-        for (int vIdx = 0; vIdx < vtxCount; ++vIdx) {
+        for (int vIdx = 0; vIdx < (int)vtxCount; ++vIdx) {
             VertexID a = polygon[vIdx];
             VertexID b = polygon[(vIdx + 1) % vtxCount];
 
@@ -171,18 +171,6 @@ void HalfEdgeMesh::construct(
     mVertices = (math::Vector3 *)malloc(sizeof(math::Vector3) * vertexCount);
     memcpy(mVertices, vertices, sizeof(math::Vector3) * vertexCount);
     mVertexCount = vertexCount;
-
-    // validate
-    for (int i = 0; i < mHalfEdgeCount; ++i) {
-        auto &hEdge = halfEdge(i);
-
-        // assert(hEdge.polygon != halfEdge(hEdge.twin).polygon);
-
-        math::Vector3 normal1 = getFaceNormal(hEdge.polygon, vertices);
-        math::Vector3 normal2 = getFaceNormal(halfEdge(hEdge.twin).polygon, vertices);
-
-        float d = normal1.dot(normal2);
-    }
 #endif
 }
 
@@ -203,7 +191,7 @@ void HalfEdgeMesh::constructCube() {
         { -r, +r, +r }, // 7
     };
 
-    FastPolygonList polygons;
+    FastPolygonList polygons = {};
     // 5 per face, 6 faces
     polygons.allocate(5 * 6);
 
@@ -218,6 +206,8 @@ void HalfEdgeMesh::constructCube() {
 
     construct(polygons, 8, vertices);
 
+    (void)polygons.polygonCount;
+    (void)polygons.edgeCount;
     polygons.free();
 }
 
@@ -286,23 +276,31 @@ uint32_t HalfEdgeMesh::getPolygonVertexCount(const PolygonID &polygon) const {
 }
 
 void HalfEdgeMesh::getPolygonSidePlanes(Plane *planes, const PolygonID &polygon, const math::Vector3 *vertices) const {
+    math::Vector3 polygonNormal = getFaceNormal(polygon, vertices);
+
     // Half edge of the polygon
     uint32_t hEdge = mPolygons[polygon];
     uint32_t start = hEdge;
 
     uint32_t vertexCounter = 0;
-    planes[vertexCounter++] = getPlane(halfEdge(halfEdge(hEdge).twin).polygon, vertices);
+    planes[vertexCounter++] = {
+        vertices[halfEdge(hEdge).rootVertex],
+        -getEdgeDirection(hEdge, vertices).cross(polygonNormal)
+    };
 
     while (halfEdge(hEdge).next != start) {
-        // Should probably improve this readability...
-        // Basically get the side plane by getting the twins of each halfedge and querying
-        // the plane data of the polygon that the twin is attached to
-        planes[vertexCounter++] = getPlane(halfEdge(halfEdge(halfEdge(hEdge).next).twin).polygon, vertices);
-        hEdge = halfEdge(hEdge).next;
+        auto currentHEdge = halfEdge(hEdge).next;
+
+        planes[vertexCounter++] = {
+            vertices[halfEdge(currentHEdge).rootVertex],
+            -getEdgeDirection(currentHEdge, vertices).cross(polygonNormal)
+        };
+
+        hEdge = currentHEdge;
     }
 }
 
-math::Vector3 HalfEdgeMesh::getEdgeDirection(const EdgeData &edge, math::Vector3 *vertices) const {
+math::Vector3 HalfEdgeMesh::getEdgeDirection(const EdgeData &edge, const math::Vector3 *vertices) const {
     auto *hEdge = &halfEdge(edge);
 
     math::Vector3 a = vertices[hEdge->rootVertex];

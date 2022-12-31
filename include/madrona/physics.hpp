@@ -107,7 +107,7 @@ public:
     std::pair<math::Vector3, math::Vector3> getEdgeNormals(const HalfEdge &hEdge, math::Vector3 *vertices) const;
 
     // Normalized direction
-    math::Vector3 getEdgeDirection(const EdgeData &edge, math::Vector3 *vertices) const;
+    math::Vector3 getEdgeDirection(const EdgeData &edge, const math::Vector3 *vertices) const;
 
     Segment getEdgeSegment(const EdgeData &edge, math::Vector3 *vertices) const;
 
