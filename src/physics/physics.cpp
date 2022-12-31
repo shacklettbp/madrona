@@ -337,6 +337,9 @@ inline void substepRigidBodies(Context &ctx,
 {
     const auto &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    const RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
+    Vector3 inv_I = metadata.invInertiaTensor;
+    float inv_m = metadata.invMass;
 
     float h = solver.h;
 
@@ -352,23 +355,24 @@ inline void substepRigidBodies(Context &ctx,
     vel_state.prevLinear = linear_velocity;
     vel_state.prevAngular = angular_velocity;
 
-    linear_velocity += h * solver.g;
+    // FIXME should really implement static objects differently:
+    if (inv_m > 0) {
+        linear_velocity += h * solver.g;
+    }
  
     cur_position += h * linear_velocity;
 
-    Vector3 inv_inertia = obj_mgr.metadata[obj_id.idx].invInertiaTensor;
-
-    Vector3 inertia = {
-        (inv_inertia.x == 0) ? 0.0f : 1.0f / inv_inertia.x,
-        (inv_inertia.y == 0) ? 0.0f : 1.0f / inv_inertia.y,
-        (inv_inertia.z == 0) ? 0.0f : 1.0f / inv_inertia.z
+    Vector3 I = {
+        (inv_I.x == 0) ? 0.0f : 1.0f / inv_I.x,
+        (inv_I.y == 0) ? 0.0f : 1.0f / inv_I.y,
+        (inv_I.z == 0) ? 0.0f : 1.0f / inv_I.z
     };
 
     Vector3 torque_ext { 0, 0, 0 };
-    Vector3 I_angular = multDiag(inertia, angular_velocity);
+    Vector3 I_angular = multDiag(I, angular_velocity);
 
     angular_velocity +=
-        h * multDiag(inv_inertia, torque_ext - (cross(angular_velocity, I_angular)));
+        h * multDiag(inv_I, torque_ext - (cross(angular_velocity, I_angular)));
     vel.angular = angular_velocity;
 
     Quat angular_quat = Quat::fromAngularVec(0.5f * h * angular_velocity);
@@ -427,6 +431,11 @@ static MADRONA_ALWAYS_INLINE inline void applyPositionalUpdate(
 
     q1 = q1 + Quat::fromAngularVec(0.5f * multDiag(inv_I1, r1_x_p)) * q1;
     q2 = q2 - Quat::fromAngularVec(0.5f * multDiag(inv_I2, r2_x_p)) * q2;
+
+    // FIXME these normalizes aren't in the paper but seem necessary since
+    // we immediately will use q1 and q2 after this
+    q1 = q1.normalize();
+    q2 = q2.normalize();
 }
 
 static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
@@ -727,19 +736,6 @@ static inline void updateVelocityFromContact(Context &ctx,
             metadata1.invInertiaTensor, metadata2.invInertiaTensor,
             n, n_local1, n_local2, restitution_magnitude);
     }
-
-#if 0
-    Position &p1 = ctx.getUnsafe<Position>(contact.ref);
-    Rotation &q1 = ctx.getUnsafe<Rotation>(contact.ref);
-    Position &p2 = ctx.getUnsafe<Position>(contact.alt);
-    Rotation &q2 = ctx.getUnsafe<Rottion>(contact.alt);
-
-    printf("(%f %f %f) (%f %f %f) (%f %f %f %f) (%f %f %f %f)\n",
-           p1.x, p1.y, p1.z,
-           p2.x, p2.y, p2.z,
-           q1.w, q1.x, q1.y, q1.z,
-           q2.w, q2.x, q2.y, q2.z);
-#endif
 
     *v1_out = Velocity { v1, omega1 };
     *v2_out = Velocity { v2, omega2 };
