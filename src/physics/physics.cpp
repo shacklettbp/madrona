@@ -532,7 +532,8 @@ getLocalSpaceContacts(const SubstepStartState &start1,
 // component for static objects.
 static inline void handleContact(Context &ctx,
                                  ObjectManager &obj_mgr,
-                                 Contact &contact)
+                                 Contact contact,
+                                 float *lambdas)
 {
     Position *p1_ptr = &ctx.getUnsafe<Position>(contact.ref);
     Rotation *q1_ptr = &ctx.getUnsafe<Rotation>(contact.ref);
@@ -547,9 +548,6 @@ static inline void handleContact(Context &ctx,
     SubstepStartState start2 = ctx.getUnsafe<SubstepStartState>(contact.alt);
     ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
-
-    float lambda_n = 0.f;
-    float lambda_t = 0.f;
 
     Vector3 p1 = *p1_ptr;
     Vector3 p2 = *p2_ptr;
@@ -572,6 +570,9 @@ static inline void handleContact(Context &ctx,
 
         auto [r1, r2] = getLocalSpaceContacts(start1, start2, contact, i);
 
+        float lambda_n = 0.f;
+        float lambda_t = 0.f;
+
         handleContactConstraint(p1, p2,
                                 q1, q2,
                                 prev1, prev2,
@@ -582,6 +583,8 @@ static inline void handleContact(Context &ctx,
                                 contact.normal,
                                 lambda_n,
                                 lambda_t);
+
+        lambdas[i] = lambda_n;
     }
 
     *p1_ptr = p1;
@@ -589,8 +592,6 @@ static inline void handleContact(Context &ctx,
 
     *q1_ptr = q1;
     *q2_ptr = q2;
-
-    contact.lambdaN = lambda_n;
 }
 
 inline void solvePositions(Context &ctx, SolverData &solver)
@@ -604,9 +605,7 @@ inline void solvePositions(Context &ctx, SolverData &solver)
 
     for (CountT i = 0; i < num_contacts; i++) {
         Contact contact = solver.contacts[i];
-        handleContact(ctx, obj_mgr, contact);
-
-        solver.contacts[i].lambdaN = contact.lambdaN;
+        handleContact(ctx, obj_mgr, contact, solver.contacts[i].lambdaN);
     }
 }
 
@@ -625,6 +624,7 @@ inline void setVelocities(Context &ctx,
     Quat prev_rotation = prev_state.prevRotation;
 
     Quat delta_q = cur_rotation * prev_rotation.inv();
+    // FIXME: Should delta_q be normalized? Probably not?
 
     Vector3 new_angular = 2.f / h * Vector3 { delta_q.x, delta_q.y, delta_q.z };
 
@@ -677,11 +677,13 @@ static inline void updateVelocityFromContact(Context &ctx,
 
     float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
 
-    // h * mu_d * |f_n| in paper
-    float dynamic_friction_magnitude = mu_d * fabsf(contact.lambdaN) / h;
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
+
+        // h * mu_d * |f_n| in paper
+        float dynamic_friction_magnitude =
+            mu_d * fabsf(contact.lambdaN[i]) / h;
 
         auto [r1, r2] = getLocalSpaceContacts(start1, start2, contact, i);
         Vector3 n = contact.normal;
