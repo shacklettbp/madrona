@@ -343,24 +343,24 @@ inline void substepRigidBodies(Context &ctx,
 
     float h = solver.h;
 
-    Vector3 cur_position = pos;
-    Quat cur_rotation = rot;
+    Vector3 x = pos;
+    Quat q = rot;
 
-    prev_state.prevPosition = cur_position;
-    prev_state.prevRotation = cur_rotation;
+    Vector3 v = vel.linear;
+    Vector3 omega = vel.angular;
 
-    Vector3 linear_velocity = vel.linear;
-    Vector3 angular_velocity = vel.angular;
+    prev_state.prevPosition = x;
+    prev_state.prevRotation = q;
 
-    vel_state.prevLinear = linear_velocity;
-    vel_state.prevAngular = angular_velocity;
+    vel_state.prevLinear = v;
+    vel_state.prevAngular = omega;
 
     // FIXME should really implement static objects differently:
     if (inv_m > 0) {
-        linear_velocity += h * solver.g;
+        v += h * solver.g;
     }
  
-    cur_position += h * linear_velocity;
+    x += h * v;
 
     Vector3 I = {
         (inv_I.x == 0) ? 0.0f : 1.0f / inv_I.x,
@@ -368,27 +368,30 @@ inline void substepRigidBodies(Context &ctx,
         (inv_I.z == 0) ? 0.0f : 1.0f / inv_I.z
     };
 
-    Vector3 torque_ext { 0, 0, 0 };
-    Vector3 torque_ext_local = cur_rotation.inv().rotateVec(torque_ext);
+    Quat to_local = q.inv();
 
-    Vector3 I_angular = multDiag(I, angular_velocity);
+    // FIXME: skip all this tau_ext stuff if it's 0
+    Vector3 tau_ext { 0, 0, 0 };
+    Vector3 tau_ext_local = to_local.rotateVec(tau_ext);
+    Vector3 omega_local = to_local.rotateVec(omega);
 
-    angular_velocity += h * multDiag(inv_I,
-         torque_ext_local - (cross(angular_velocity, I_angular)));
-    vel.angular = angular_velocity;
+    Vector3 I_omega_local = multDiag(I, omega_local);
 
-    Vector3 angular_world = cur_rotation.rotateVec(angular_velocity);
+    omega_local += h * multDiag(inv_I,
+         tau_ext_local - (cross(omega_local, I_omega_local)));
 
-    Quat angular_quat = Quat::fromAngularVec(0.5f * h * angular_world);
+    omega = q.rotateVec(omega_local);
+    vel.angular = omega;
 
-    cur_rotation += angular_quat * cur_rotation;
-    cur_rotation = cur_rotation.normalize();
+    Quat apply_omega = Quat::fromAngularVec(0.5f * h * omega);
 
-    pos = cur_position;
-    rot = cur_rotation;
+    q += apply_omega * q;
+    q = q.normalize();
 
-    start_state.startPosition = cur_position;
-    start_state.startRotation = cur_rotation;
+    pos = x;
+    rot = q;
+    start_state.startPosition = x;
+    start_state.startRotation = q;
 }
 
 static inline float generalizedInverseMass(Vector3 local,
@@ -433,11 +436,17 @@ static MADRONA_ALWAYS_INLINE inline void applyPositionalUpdate(
     Vector3 r1_x_p = cross(r1, p_local1);
     Vector3 r2_x_p = cross(r2, p_local2);
 
-    q1 = q1 + Quat::fromAngularVec(0.5f * multDiag(inv_I1, r1_x_p)) * q1;
-    q2 = q2 - Quat::fromAngularVec(0.5f * multDiag(inv_I2, r2_x_p)) * q2;
+    Vector3 q1_update_angular_local = 0.5f * multDiag(inv_I1, r1_x_p);
+    Vector3 q1_update_angular = q1.rotateVec(q1_update_angular_local);
 
-    // FIXME these normalizes aren't in the paper but seem necessary since
-    // we immediately will use q1 and q2 after this
+    Vector3 q2_update_angular_local = 0.5f * multDiag(inv_I2, r2_x_p);
+    Vector3 q2_update_angular = q2.rotateVec(q2_update_angular_local);
+
+    q1 += Quat::fromAngularVec(q1_update_angular) * q1;
+    q2 -= Quat::fromAngularVec(q2_update_angular) * q2;
+
+    // Paper doesn't explicitly call for normalization but we immediately
+    // use q1 and q2 for the next constraint
     q1 = q1.normalize();
     q2 = q2.normalize();
 }
@@ -624,8 +633,8 @@ inline void setVelocities(Context &ctx,
 
     vel.linear = (pos - prev_state.prevPosition) / h;
 
-    Quat cur_rotation = rot;
-    Quat prev_rotation = prev_state.prevRotation;
+    Quat q = rot;
+    Quat q_prev = prev_state.prevRotation;
 
     // when cur and prev rotation are equal there should be 0 angular velocity
     // Unfortunately, this computation introduces a small amount of FP error
@@ -633,25 +642,29 @@ inline void setVelocities(Context &ctx,
     // we do a check and if all components match, just set delta_q to the
     // identity quaternion manually
     Quat delta_q;
-    if (cur_rotation.w != prev_rotation.w ||
-        cur_rotation.x != prev_rotation.x ||
-        cur_rotation.y != prev_rotation.y ||
-        cur_rotation.z != prev_rotation.z) {
-        delta_q = cur_rotation * prev_rotation.inv();
+    if (q.w != q_prev.w || q.x != q_prev.x || q.y != q_prev.y || q.z != q_prev.z) {
+        delta_q = q * q_prev.inv();
     } else {
         delta_q = { 1, 0, 0, 0 };
     }
 
-    Vector3 new_angular_world =
+    Vector3 new_omega =
         2.f / h * Vector3 { delta_q.x, delta_q.y, delta_q.z };
 
-    Vector3 new_angular_local = cur_rotation.inv().rotateVec(new_angular_world);
+    vel.angular = delta_q.w > 0.f ? new_omega : -new_omega;
+}
 
-    vel.angular = delta_q.w > 0.f ? new_angular_local : -new_angular_local;
+static inline Vector3 computeRelativeVelocity(
+    Vector3 v1, Vector3 v2,
+    Vector3 omega1, Vector3 omega2,
+    Vector3 dir1, Vector3 dir2)
+{
+    return (v1 + cross(omega1, dir1)) - (v2 + cross(omega2, dir2));
 }
 
 static inline void applyVelocityUpdate(Vector3 &v1, Vector3 &v2,
                                        Vector3 &omega1, Vector3 &omega2,
+                                       Quat q1, Quat q2,
                                        Vector3 r1, Vector3 r2,
                                        float inv_m1, float inv_m2,
                                        Vector3 inv_I1, Vector3 inv_I2,
@@ -667,8 +680,11 @@ static inline void applyVelocityUpdate(Vector3 &v1, Vector3 &v2,
     v1 += delta_v_world * delta_v_magnitude * inv_m1;
     v2 -= delta_v_world * delta_v_magnitude * inv_m2;
 
-    omega1 += multDiag(inv_I1, cross(r1, delta_v_l1 * delta_v_magnitude));
-    omega2 -= multDiag(inv_I2, cross(r2, delta_v_l2 * delta_v_magnitude));
+    Vector3 omega1_update_local = multDiag(inv_I1, cross(r1, delta_v_l1 * delta_v_magnitude));
+    Vector3 omega2_update_local = multDiag(inv_I2, cross(r2, delta_v_l2 * delta_v_magnitude));
+
+    omega1 += q1.rotateVec(omega1_update_local);
+    omega2 -= q2.rotateVec(omega2_update_local);
 }
 
 static inline void updateVelocityFromContact(Context &ctx,
@@ -694,6 +710,10 @@ static inline void updateVelocityFromContact(Context &ctx,
     auto [v1, omega1] = *v1_out;
     auto [v2, omega2] = *v2_out;
 
+    float inv_m1 = metadata1.invMass;
+    float inv_m2 = metadata2.invMass;
+    Vector3 inv_I1 = metadata1.invInertiaTensor;
+    Vector3 inv_I2 = metadata2.invInertiaTensor;
     float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
 
 #pragma unroll
@@ -709,9 +729,15 @@ static inline void updateVelocityFromContact(Context &ctx,
             mu_d * fabsf(contact.lambdaN[i]) / h;
 
         auto [r1, r2] = getLocalSpaceContacts(start1, start2, contact, i);
-        Vector3 n = contact.normal;
+        Vector3 r1_world = q1.rotateVec(r1);
+        Vector3 r2_world = q2.rotateVec(r2);
 
-        Vector3 v = (v1 + cross(omega1, r1)) - (v2 + cross(omega2, r2));
+        Vector3 v = computeRelativeVelocity(
+            v1, v2, omega1, omega2, r1_world, r2_world);
+
+        Vector3 n = contact.normal;
+        Vector3 n_local1 = q1.inv().rotateVec(n);
+        Vector3 n_local2 = q2.inv().rotateVec(n);
 
         float vn = dot(n, v);
         Vector3 vt = v - n * vn;
@@ -730,16 +756,18 @@ static inline void updateVelocityFromContact(Context &ctx,
             applyVelocityUpdate(
                 v1, v2,
                 omega1, omega2,
+                q1, q2,
                 r1, r2,
-                metadata1.invMass, metadata2.invMass,
-                metadata1.invInertiaTensor, metadata2.invInertiaTensor,
+                inv_m1, inv_m2,
+                inv_I1, inv_I2,
                 delta_world, delta_local1, delta_local2,
                 corrected_magnitude);
         }
 
-        Vector3 v_bar =
-            (prev_vel1.prevLinear + cross(prev_vel1.prevAngular, r1)) -
-            (prev_vel2.prevLinear + cross(prev_vel2.prevAngular, r2));
+        Vector3 v_bar = computeRelativeVelocity(
+            prev_vel1.prevLinear, prev_vel2.prevLinear,
+            prev_vel1.prevAngular, prev_vel2.prevAngular,
+            r1_world, r2_world); // FIXME: r1_world or previous location of r1?
 
         float vn_bar = dot(n, v_bar);
 
@@ -749,15 +777,13 @@ static inline void updateVelocityFromContact(Context &ctx,
         }
         float restitution_magnitude = (fminf(-e * vn_bar, 0) - vn);
 
-        Vector3 n_local1 = q1.inv().rotateVec(n);
-        Vector3 n_local2 = q2.inv().rotateVec(n);
-
         applyVelocityUpdate(
             v1, v2,
             omega1, omega2,
+            q1, q2,
             r1, r2,
-            metadata1.invMass, metadata2.invMass,
-            metadata1.invInertiaTensor, metadata2.invInertiaTensor,
+            inv_m1, inv_m2,
+            inv_I1, inv_I2,
             n, n_local1, n_local2, restitution_magnitude);
     }
 
