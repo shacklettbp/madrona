@@ -369,13 +369,17 @@ inline void substepRigidBodies(Context &ctx,
     };
 
     Vector3 torque_ext { 0, 0, 0 };
+    Vector3 torque_ext_local = cur_rotation.inv().rotateVec(torque_ext);
+
     Vector3 I_angular = multDiag(I, angular_velocity);
 
-    angular_velocity +=
-        h * multDiag(inv_I, torque_ext - (cross(angular_velocity, I_angular)));
+    angular_velocity += h * multDiag(inv_I,
+         torque_ext_local - (cross(angular_velocity, I_angular)));
     vel.angular = angular_velocity;
 
-    Quat angular_quat = Quat::fromAngularVec(0.5f * h * angular_velocity);
+    Vector3 angular_world = cur_rotation.rotateVec(angular_velocity);
+
+    Quat angular_quat = Quat::fromAngularVec(0.5f * h * angular_world);
 
     cur_rotation += angular_quat * cur_rotation;
     cur_rotation = cur_rotation.normalize();
@@ -623,12 +627,27 @@ inline void setVelocities(Context &ctx,
     Quat cur_rotation = rot;
     Quat prev_rotation = prev_state.prevRotation;
 
-    Quat delta_q = cur_rotation * prev_rotation.inv();
-    // FIXME: Should delta_q be normalized? Probably not?
+    // when cur and prev rotation are equal there should be 0 angular velocity
+    // Unfortunately, this computation introduces a small amount of FP error
+    // and in some rotations the object winds up with a small delta_q, so
+    // we do a check and if all components match, just set delta_q to the
+    // identity quaternion manually
+    Quat delta_q;
+    if (cur_rotation.w != prev_rotation.w ||
+        cur_rotation.x != prev_rotation.x ||
+        cur_rotation.y != prev_rotation.y ||
+        cur_rotation.z != prev_rotation.z) {
+        delta_q = cur_rotation * prev_rotation.inv();
+    } else {
+        delta_q = { 1, 0, 0, 0 };
+    }
 
-    Vector3 new_angular = 2.f / h * Vector3 { delta_q.x, delta_q.y, delta_q.z };
+    Vector3 new_angular_world =
+        2.f / h * Vector3 { delta_q.x, delta_q.y, delta_q.z };
 
-    vel.angular = delta_q.w > 0.f ? new_angular : -new_angular;
+    Vector3 new_angular_local = cur_rotation.inv().rotateVec(new_angular_world);
+
+    vel.angular = delta_q.w > 0.f ? new_angular_local : -new_angular_local;
 }
 
 static inline void applyVelocityUpdate(Vector3 &v1, Vector3 &v2,
