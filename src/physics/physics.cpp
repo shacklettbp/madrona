@@ -457,9 +457,9 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
     SubstepPrevState prev1, SubstepPrevState prev2,
     float inv_m1, float inv_m2,
     Vector3 inv_I1, Vector3 inv_I2,
-    float mu_s1, float mu_s2,
     Vector3 r1, Vector3 r2,
     Vector3 n_world,
+    float avg_mu_s,
     float &lambda_n,
     float &lambda_t)
 {
@@ -503,8 +503,7 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
         Vector3 tangent_dir_local1 = q1.inv().rotateVec(tangent_dir);
         Vector3 tangent_dir_local2 = q2.inv().rotateVec(tangent_dir);
 
-        float mu_s = 0.5f * (mu_s1 + mu_s2);
-        float lambda_threshold = lambda_n * mu_s;
+        float lambda_threshold = lambda_n * avg_mu_s;
 
         applyPositionalUpdate(x1, x2,
                               q1, q2,
@@ -577,6 +576,8 @@ static inline void handleContact(Context &ctx,
     float mu_s1 = metadata1.muS;
     float mu_s2 = metadata2.muS;
 
+    float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
+
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
@@ -591,9 +592,9 @@ static inline void handleContact(Context &ctx,
                                 prev1, prev2,
                                 inv_m1, inv_m2,
                                 inv_I1, inv_I2,
-                                mu_s1, mu_s2,
                                 r1, r2,
                                 contact.normal,
+                                avg_mu_s,
                                 lambda_n,
                                 lambda_t);
 
