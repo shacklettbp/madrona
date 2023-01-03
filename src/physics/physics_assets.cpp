@@ -1,6 +1,6 @@
 #include <madrona/physics_assets.hpp>
 #include <madrona/cuda_utils.hpp>
-
+#include <madrona/importer.hpp>
 
 namespace madrona {
 namespace phys {
@@ -172,10 +172,62 @@ PhysicsLoader::~PhysicsLoader()
 
 PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 
-CountT PhysicsLoader::loadObjects(const RigidBodyMetadata *metadatas,
-                                  const math::AABB *aabbs,
-                                  const CollisionPrimitive *primitives_original,
-                                  CountT num_objs)
+PhysicsLoader::LoadedHull PhysicsLoader::loadHullFromDisk(
+    const char *obj_path)
+{
+    auto imp_obj = imp::ImportedObject::importObject(obj_path);
+    if (!imp_obj.has_value()) {
+        FATAL("Failed to load collision mesh from %s", obj_path);
+    }
+
+    assert(imp_obj->meshes.size() == 1);
+    const imp::SourceMesh &imp_mesh = imp_obj->meshes[0];
+
+    CountT total_polylist_space = 0;
+
+    // FIXME: should get rid of this FastPolygonList class and combine
+    // with ImportedObject or something
+    for (CountT face_idx = 0; face_idx < imp_mesh.numFaces;
+         face_idx++) {
+        total_polylist_space += imp_mesh.faceCounts[face_idx] + 1;
+    }
+
+    geometry::FastPolygonList poly_list;
+    poly_list.allocate(total_polylist_space);
+
+    CountT cur_idx_offset = 0;
+    for (CountT face_idx = 0; face_idx < imp_mesh.numFaces;
+         face_idx++) {
+        CountT num_face_indices = imp_mesh.faceCounts[face_idx];
+
+        poly_list.addPolygon(Span<const uint32_t>(
+            imp_mesh.indices + cur_idx_offset, num_face_indices));
+        
+        cur_idx_offset += imp_mesh.faceCounts[face_idx];
+    }
+
+    geometry::HalfEdgeMesh he_mesh;
+    he_mesh.construct(poly_list, imp_mesh.numVertices, imp_mesh.positions);
+    poly_list.free();
+
+    math::AABB aabb = math::AABB::point(imp_mesh.positions[0]);
+
+    for (CountT vert_idx = 1; vert_idx < (CountT)imp_mesh.numVertices;
+         vert_idx++) {
+        aabb.expand(imp_mesh.positions[vert_idx]);
+    }
+
+    return LoadedHull {
+        aabb,
+        he_mesh,
+    };
+}
+
+CountT PhysicsLoader::loadObjects(
+    const RigidBodyMetadata *metadatas,
+    const math::AABB *aabbs,
+    const CollisionPrimitive *primitives_original,
+    CountT num_objs)
 {
     CountT cur_offset = impl_->curLoadedObjs;
     impl_->curLoadedObjs += num_objs;

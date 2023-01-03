@@ -22,18 +22,6 @@ FastPolygonList &FastPolygonList::operator=(const FastPolygonList &other) {
     return *this;
 }
 
-void FastPolygonList::constructCube() {
-    allocate(5 * 6);
-
-    // anti clockwise
-    addPolygon(4, 0, 1, 2, 3); // -Z
-    addPolygon(4, 7, 6, 5, 4); // +Z
-    addPolygon(4, 3, 2, 6, 7); // +Y
-    addPolygon(4, 4, 5, 1, 0); // -Y
-    addPolygon(4, 5, 6, 2, 1); // +X
-    addPolygon(4, 0, 3, 7, 4); // -X
-}
-
 void FastPolygonList::allocate(uint32_t maxIdx) {
     maxIndices = maxIdx;
     buffer = (uint32_t *)malloc(sizeof(uint32_t) * maxIndices);
@@ -45,24 +33,26 @@ void FastPolygonList::free() {
 }
 
 // Creation
-template <typename ...T> void FastPolygonList::addPolygon(uint32_t count, T &&...vertexIndices) {
-    uint32_t indexCount = 1 + sizeof...(vertexIndices);
-    uint32_t indices[] = {count, (uint32_t)vertexIndices...};
+void FastPolygonList::addPolygon(Span<const uint32_t> indices)
+{
+    uint32_t index_count = indices.size();
 
-    memcpy(buffer + size, indices, sizeof(uint32_t) * indexCount);
+    buffer[size] = index_count;
 
-    size += indexCount;
+    memcpy(buffer + size + 1, indices.data(), sizeof(uint32_t) * index_count);
+
+    size += index_count + 1;
 
     polygonCount += 1;
 
     // Should be the amount of half edges there are
-    edgeCount += count;
+    edgeCount += index_count;
 }
 
 
 void HalfEdgeMesh::construct(
         FastPolygonList &polygons,
-        uint32_t vertexCount, math::Vector3 *vertices) {
+        uint32_t vertexCount, const math::Vector3 *vertices) {
 #ifndef MADRONA_GPU_MODE
     static HalfEdge dummy = {};
 
@@ -86,61 +76,63 @@ void HalfEdgeMesh::construct(
     // This will be excessive allocation but it's temporary so not big deal
     tmp.edges = (EdgeData *)malloc(sizeof(EdgeData) * polygons.edgeCount);
 
+    // FIXME: std::map??
     std::map<std::pair<VertexID, VertexID>, HalfEdgeID> vtxPairToHalfEdge;
 
     // Proceed with construction
-    for (
-            uint32_t polygonIndex = 0, *polygon = polygons.begin();
+    for (uint32_t poly_idx = 0, *polygon = polygons.begin();
             polygon != polygons.end();
-            polygon = polygons.next(polygon), ++polygonIndex) {
+            polygon = polygons.next(polygon), ++poly_idx) {
         PolygonData *newPolygon = &tmp.polygons[tmp.polygonCount++];
 
-        uint32_t vtxCount = polygons.getPolygonVertexCount(polygon);
+        CountT vtx_count = polygons.getPolygonVertexCount(polygon);
 
         HalfEdge *prev = &dummy;
         uint32_t firstPolygonHalfEdgeIdx = tmp.halfEdgeCount;
 
         // Create a half edge for each of these
-        for (int vIdx = 0; vIdx < (int)vtxCount; ++vIdx) {
-            VertexID a = polygon[vIdx];
-            VertexID b = polygon[(vIdx + 1) % vtxCount];
+        for (CountT v_idx = 0; v_idx < vtx_count; ++v_idx) {
+            VertexID a = polygon[v_idx];
+            VertexID b = polygon[(v_idx + 1) % vtx_count];
 
             std::pair<VertexID, VertexID> edge = {a, b};
 
             if (vtxPairToHalfEdge.find(edge) != vtxPairToHalfEdge.end()) {
-                // This should never happen - most likely something wrong with polygon construction
-                // and the orientation of the faces' vertex indices
-                // PANIC_AND_EXIT
+                // This should never happen - most likely something wrong with
+                // polygon construction and the orientation of the faces'
+                // vertex indices
+                FATAL("Invalid input mesh to halfedge construction");
             }
             else {
                 // We can allocate a new half edge
-                uint32_t hedgeIdx = tmp.halfEdgeCount++;
-                HalfEdge *newHalfEdge = &tmp.halfEdges[hedgeIdx];
-                newHalfEdge->rootVertex = a;
-                newHalfEdge->polygon = polygonIndex;
+                uint32_t hedge_idx = tmp.halfEdgeCount++;
+                HalfEdge *new_half_edge = &tmp.halfEdges[hedge_idx];
+                new_half_edge->rootVertex = a;
+                new_half_edge->polygon = poly_idx;
 
                 // Only set this if the twin was allocated
-                std::pair<VertexID, VertexID> twinEdge = {b, a};
-                if (auto twin = vtxPairToHalfEdge.find(twinEdge); twin != vtxPairToHalfEdge.end()) {
+                std::pair<VertexID, VertexID> twin_edge = {b, a};
+                if (auto twin = vtxPairToHalfEdge.find(twin_edge);
+                        twin != vtxPairToHalfEdge.end()) {
                     // The twin was allocated!
-                    newHalfEdge->twin = twin->second;
-                    tmp.halfEdges[twin->second].twin = hedgeIdx;
+                    new_half_edge->twin = twin->second;
+                    tmp.halfEdges[twin->second].twin = hedge_idx;
 
                     // Only call allocate a new "edge" if the twin was already allocated
-                    EdgeData *newEdge = &tmp.edges[tmp.edgeCount++];
-                    *newEdge = twin->second;
+                    EdgeData *new_edge = &tmp.edges[tmp.edgeCount++];
+                    *new_edge = twin->second;
 
-                    // assert(newHalfEdge->polygon != tmp.halfEdges[newHalfEdge->twin].polygon);
+                    // assert(new_half_edge->polygon != tmp.halfEdges[new_half_edge->twin].polygon);
                 }
 
-                prev->next = hedgeIdx;
-                prev = newHalfEdge;
+                prev->next = hedge_idx;
+                prev = new_half_edge;
 
                 // Insert this half edge into temporary set
-                vtxPairToHalfEdge[edge] = hedgeIdx;
+                vtxPairToHalfEdge[edge] = hedge_idx;
 
                 // Just make the polygon point to some random half edge in the polygon
-                *newPolygon = hedgeIdx;
+                *newPolygon = hedge_idx;
             }
         }
 
@@ -171,59 +163,27 @@ void HalfEdgeMesh::construct(
     mVertices = (math::Vector3 *)malloc(sizeof(math::Vector3) * vertexCount);
     memcpy(mVertices, vertices, sizeof(math::Vector3) * vertexCount);
     mVertexCount = vertexCount;
+
+    free(tmp.polygons);
+    free(tmp.halfEdges);
+    free(tmp.edges);
 #endif
 }
 
-void HalfEdgeMesh::constructCube() {
-    float r = 1.0f;
-
-    math::Vector3 vertices[] = {
-        { -r, -r, -r }, // 0
-        { +r, -r, -r }, // 1
-
-        { +r, +r, -r }, // 2
-        { -r, +r, -r }, // 3
-
-        { -r, -r, +r }, // 4
-        { +r, -r, +r }, // 5
-
-        { +r, +r, +r }, // 6
-        { -r, +r, +r }, // 7
-    };
-
-    FastPolygonList polygons = {};
-    // 5 per face, 6 faces
-    polygons.allocate(5 * 6);
-
-    // anti clockwise
-    polygons.addPolygon(4, 0, 1, 2, 3); // -Z
-    polygons.addPolygon(4, 7, 6, 5, 4); // +Z
-    polygons.addPolygon(4, 3, 2, 6, 7); // +Y
-
-    polygons.addPolygon(4, 4, 5, 1, 0); // -Y
-    polygons.addPolygon(4, 5, 6, 2, 1); // +X
-    polygons.addPolygon(4, 0, 3, 7, 4); // -X
-
-    construct(polygons, 8, vertices);
-
-    (void)polygons.polygonCount;
-    (void)polygons.edgeCount;
-    polygons.free();
-}
-
 math::Vector3 HalfEdgeMesh::getFaceNormal(const PolygonID &polygon, const math::Vector3 *vertices) const {
-    math::Vector3 points[3] = {};
+    math::Vector3 points[3];
 
-    auto *hEdge = &halfEdge(mPolygons[polygon]);
-    for (int i = 0; i < 3; ++i) {
-        points[i] = vertices[hEdge->rootVertex];
-        hEdge = &halfEdge(hEdge->next);
+    auto *h_edge = &halfEdge(mPolygons[polygon]);
+#pragma unroll
+    for (CountT i = 0; i < 3; ++i) {
+        points[i] = vertices[h_edge->rootVertex];
+        h_edge = &halfEdge(h_edge->next);
     }
 
     math::Vector3 a = points[1] - points[0];
     math::Vector3 b = points[2] - points[0];
 
-    return math::cross(b, a).normalize();
+    return math::cross(a, b).normalize();
 }
 
 uint32_t HalfEdgeMesh::getPolygonVertices(
@@ -285,7 +245,7 @@ void HalfEdgeMesh::getPolygonSidePlanes(Plane *planes, const PolygonID &polygon,
     uint32_t vertexCounter = 0;
     planes[vertexCounter++] = {
         vertices[halfEdge(hEdge).rootVertex],
-        -getEdgeDirection(hEdge, vertices).cross(polygonNormal)
+        math::cross(getEdgeDirection(hEdge, vertices), polygonNormal),
     };
 
     while (halfEdge(hEdge).next != start) {
@@ -293,7 +253,7 @@ void HalfEdgeMesh::getPolygonSidePlanes(Plane *planes, const PolygonID &polygon,
 
         planes[vertexCounter++] = {
             vertices[halfEdge(currentHEdge).rootVertex],
-            -getEdgeDirection(currentHEdge, vertices).cross(polygonNormal)
+            math::cross(getEdgeDirection(currentHEdge, vertices), polygonNormal),
         };
 
         hEdge = currentHEdge;

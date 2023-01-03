@@ -19,14 +19,12 @@ struct FastPolygonList {
 
     FastPolygonList &operator=(const FastPolygonList &other);
 
-    void constructCube();
-
     void allocate(uint32_t maxIdx);
 
     void free();
 
     // Creation
-    template <typename ...T> void addPolygon(uint32_t count, T &&...vertexIndices);
+    void addPolygon(Span<const uint32_t> vertex_indices);
 
     // Iteration helper functions
     inline uint32_t *begin() { return &buffer[1]; }
@@ -82,9 +80,7 @@ public:
     // Accept different formats
     void construct(
             FastPolygonList &polygons,
-            uint32_t vertexCount, math::Vector3 *vertices);
-
-    void constructCube();
+            uint32_t vertexCount, const math::Vector3 *vertices);
 
     // Normalized
     math::Vector3 getFaceNormal(const PolygonID &polygon, const math::Vector3 *vertices) const;
