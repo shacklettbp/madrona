@@ -430,7 +430,7 @@ CountT BatchRenderer::Impl::loadObjects(Span<const imp::SourceObject> objs)
 
 void BatchRenderer::Impl::render(const uint32_t *num_instances)
 {
-    HostEventLogging(renderStart);
+    HostEventLogging(HostEvent::renderStart);
     uint32_t swapchain_idx = 0;
     if (presentState.has_value()) {
         presentState->processInputs();
@@ -627,7 +627,7 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
 
     waitForFenceInfinitely(dev, renderFence);
     resetFence(dev, renderFence);
-    HostEventLogging(renderEnd);
+    HostEventLogging(HostEvent::renderEnd);
 }
 
 BatchRenderer::BatchRenderer(const Config &cfg)

@@ -42,6 +42,13 @@ add_library(madrona_common STATIC
     #    platform_utils.cpp
 )
 
+option(MADRONA_ENABLE_TRACING "Enable tracing" OFF)
+if (MADRONA_ENABLE_TRACING)
+    target_compile_definitions(madrona_common PUBLIC
+        MADRONA_TRACING=1
+    )
+endif()
+
 # Disable exceptions & RTTI
 if (FRONTEND_GCC OR FRONTEND_CLANG)
     target_compile_options(madrona_common PUBLIC

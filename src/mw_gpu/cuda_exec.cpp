@@ -1290,10 +1290,10 @@ MADRONA_EXPORT MWCudaExecutor::~MWCudaExecutor()
 
 MADRONA_EXPORT void MWCudaExecutor::run()
 {
-    HostEventLogging(megaKernelStart);
+    HostEventLogging(HostEvent::megaKernelStart);
     REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
-    HostEventLogging(megaKernelEnd);
+    HostEventLogging(HostEvent::megaKernelEnd);
 
     if (impl_->engineState.batchRenderer.has_value()) {
         impl_->engineState.batchRenderer->render(
