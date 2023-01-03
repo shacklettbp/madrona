@@ -322,14 +322,14 @@ struct SubstepPrevState {
     math::Quat prevRotation;
 };
 
-struct SubstepStartState {
-    math::Vector3 startPosition;
-    math::Quat startRotation;
+struct PreSolvePositional {
+    math::Vector3 x;
+    math::Quat q;
 };
 
-struct SubstepVelocityState {
-    math::Vector3 prevLinear;
-    math::Vector3 prevAngular;
+struct PreSolveVelocity {
+    math::Vector3 v;
+    math::Vector3 omega;
 };
 
 }

@@ -326,14 +326,40 @@ static inline Vector3 multDiag(Vector3 diag, Vector3 v)
     };
 }
 
+[[maybe_unused]] static inline std::tuple<float, float, float> computeEnergy(
+    float inv_m, Vector3 inv_I, Vector3 v, Vector3 omega, Quat q)
+{
+    if (inv_m == 0.f || inv_I.x == 0.f || inv_I.y == 0.f || inv_I.z == 0.f) {
+        return {0.f, 0.f, 0.f};
+    }
+
+    float m = 1.f / inv_m;
+    Vector3 I {
+        1.f / inv_I.x,
+        1.f / inv_I.y,
+        1.f / inv_I.z,
+    };
+
+    float linear = m * v.length2();
+
+    Vector3 omega_local = q.inv().rotateVec(omega);
+    float rotational = dot(omega_local, multDiag(I, omega_local));
+
+    return {
+        0.5f * (linear + rotational),
+        0.5f * linear,
+        0.5f * rotational,
+    };
+}
+
 inline void substepRigidBodies(Context &ctx,
                                Position &pos,
                                Rotation &rot,
-                               Velocity &vel,
+                               const Velocity &vel,
                                const ObjectID &obj_id,
                                SubstepPrevState &prev_state,
-                               SubstepStartState &start_state,
-                               SubstepVelocityState &vel_state)
+                               PreSolvePositional &presolve_pos,
+                               PreSolveVelocity &presolve_vel)
 {
     const auto &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
@@ -346,19 +372,18 @@ inline void substepRigidBodies(Context &ctx,
     Vector3 x = pos;
     Quat q = rot;
 
-    Vector3 v = vel.linear;
-    Vector3 omega = vel.angular;
-
     prev_state.prevPosition = x;
     prev_state.prevRotation = q;
 
-    vel_state.prevLinear = v;
-    vel_state.prevAngular = omega;
+    Vector3 v = vel.linear;
+    Vector3 omega = vel.angular;
 
     // FIXME should really implement static objects differently:
     if (inv_m > 0) {
         v += h * solver.g;
     }
+
+    // FIXME: external forces
  
     x += h * v;
 
@@ -381,7 +406,6 @@ inline void substepRigidBodies(Context &ctx,
          tau_ext_local - (cross(omega_local, I_omega_local)));
 
     omega = q.rotateVec(omega_local);
-    vel.angular = omega;
 
     Quat apply_omega = Quat::fromAngularVec(0.5f * h * omega);
 
@@ -390,8 +414,11 @@ inline void substepRigidBodies(Context &ctx,
 
     pos = x;
     rot = q;
-    start_state.startPosition = x;
-    start_state.startRotation = q;
+
+    presolve_pos.x = x;
+    presolve_pos.q = q;
+    presolve_vel.v = v;
+    presolve_vel.omega = omega;
 }
 
 static inline float generalizedInverseMass(Vector3 local,
@@ -492,7 +519,7 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
                           n_world, n_local1, n_local2,
                           d, 0,
                           lambda_n, [](float) { return false; });
-
+ 
     Vector3 delta_p = (p1 - p1_hat) - (p2 - p2_hat);
     Vector3 delta_p_t = delta_p - dot(delta_p, n_world) * n_world;
 
@@ -513,14 +540,19 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
                               tangent_dir, tangent_dir_local1, tangent_dir_local2,
                               tangential_magnitude,
                               0, lambda_t, [lambda_threshold](float lambda) {
-                                  return lambda >= lambda_threshold;
+                                  // If true, this check stops static friction
+                                  // from being applied.
+                                  // Calculation is negated from the paper that
+                                  // seems to have gotten the sign wrong
+                                  // due to the negated lambdas
+                                  return lambda <= lambda_threshold;
                               });
     }
 }
 
 static inline MADRONA_ALWAYS_INLINE std::pair<Vector3, Vector3>
-getLocalSpaceContacts(const SubstepStartState &start1,
-                      const SubstepStartState &start2,
+getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
+                      const PreSolvePositional &presolve_pos2,
                       const Contact &contact,
                       CountT point_idx)
 {
@@ -531,10 +563,8 @@ getLocalSpaceContacts(const SubstepStartState &start1,
         contact1 - contact.normal * penetration_depth;
 
     // Transform the contact points into local space for a & b
-    Vector3 r1 = start1.startRotation.inv().rotateVec(
-        contact1 - start1.startPosition);
-    Vector3 r2 = start2.startRotation.inv().rotateVec(
-        contact2 - start2.startPosition);
+    Vector3 r1 = presolve_pos1.q.inv().rotateVec(contact1 - presolve_pos1.x);
+    Vector3 r2 = presolve_pos2.q.inv().rotateVec(contact2 - presolve_pos2.x);
 
     return { r1, r2 };
 }
@@ -547,22 +577,24 @@ static inline void handleContact(Context &ctx,
                                  Contact contact,
                                  float *lambdas)
 {
-    Position *p1_ptr = &ctx.getUnsafe<Position>(contact.ref);
+    Position *x1_ptr = &ctx.getUnsafe<Position>(contact.ref);
     Rotation *q1_ptr = &ctx.getUnsafe<Rotation>(contact.ref);
     SubstepPrevState prev1 = ctx.getUnsafe<SubstepPrevState>(contact.ref);
-    SubstepStartState start1 = ctx.getUnsafe<SubstepStartState>(contact.ref);
+    PreSolvePositional presolve_pos1 =
+        ctx.getUnsafe<PreSolvePositional>(contact.ref);
     ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(contact.ref);
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
 
-    Position *p2_ptr = &ctx.getUnsafe<Position>(contact.alt);
+    Position *x2_ptr = &ctx.getUnsafe<Position>(contact.alt);
     Rotation *q2_ptr = &ctx.getUnsafe<Rotation>(contact.alt);
     SubstepPrevState prev2 = ctx.getUnsafe<SubstepPrevState>(contact.alt);
-    SubstepStartState start2 = ctx.getUnsafe<SubstepStartState>(contact.alt);
+    PreSolvePositional presolve_pos2 =
+        ctx.getUnsafe<PreSolvePositional>(contact.alt);
     ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
-    Vector3 p1 = *p1_ptr;
-    Vector3 p2 = *p2_ptr;
+    Vector3 x1 = *x1_ptr;
+    Vector3 x2 = *x2_ptr;
 
     Quat q1 = *q1_ptr;
     Quat q2 = *q2_ptr;
@@ -582,12 +614,13 @@ static inline void handleContact(Context &ctx,
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        auto [r1, r2] = getLocalSpaceContacts(start1, start2, contact, i);
+        auto [r1, r2] =
+            getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
 
         float lambda_n = 0.f;
         float lambda_t = 0.f;
 
-        handleContactConstraint(p1, p2,
+        handleContactConstraint(x1, x2,
                                 q1, q2,
                                 prev1, prev2,
                                 inv_m1, inv_m2,
@@ -601,8 +634,8 @@ static inline void handleContact(Context &ctx,
         lambdas[i] = lambda_n;
     }
 
-    *p1_ptr = p1;
-    *p2_ptr = p2;
+    *x1_ptr = x1;
+    *x2_ptr = x2;
 
     *q1_ptr = q1;
     *q2_ptr = q2;
@@ -632,9 +665,10 @@ inline void setVelocities(Context &ctx,
     const auto &solver = ctx.getSingleton<SolverData>();
     float h = solver.h;
 
-    vel.linear = (pos - prev_state.prevPosition) / h;
-
+    Vector3 x = pos;
     Quat q = rot;
+
+    Vector3 x_prev = prev_state.prevPosition;
     Quat q_prev = prev_state.prevRotation;
 
     // when cur and prev rotation are equal there should be 0 angular velocity
@@ -643,15 +677,25 @@ inline void setVelocities(Context &ctx,
     // we do a check and if all components match, just set delta_q to the
     // identity quaternion manually
     Quat delta_q;
-    if (q.w != q_prev.w || q.x != q_prev.x || q.y != q_prev.y || q.z != q_prev.z) {
+    if (q.w != q_prev.w || q.x != q_prev.x ||
+            q.y != q_prev.y || q.z != q_prev.z) {
         delta_q = q * q_prev.inv();
     } else {
         delta_q = { 1, 0, 0, 0 };
     }
 
+    // FIXME: A noticeable amount of energy is lost for bodies that should
+    // be under a constant angular velocity with no resistance. The issue
+    // seems to be that delta_q here is consistently slightly less than
+    // apply_omega in substepRigidBodies, so the angular velocity reduces
+    // a little bit each frame. Investigate whether this is an FP
+    // precision issue or a consequence of linearized angular -> quaternion
+    // formulas and see if it can be mitigated. Dividing delta_q by delta_q.w
+    // seems to fix the issue - does that have unintended consequences?
     Vector3 new_omega =
         2.f / h * Vector3 { delta_q.x, delta_q.y, delta_q.z };
 
+    vel.linear = (x - x_prev) / h;
     vel.angular = delta_q.w > 0.f ? new_omega : -new_omega;
 }
 
@@ -681,8 +725,10 @@ static inline void applyVelocityUpdate(Vector3 &v1, Vector3 &v2,
     v1 += delta_v_world * delta_v_magnitude * inv_m1;
     v2 -= delta_v_world * delta_v_magnitude * inv_m2;
 
-    Vector3 omega1_update_local = multDiag(inv_I1, cross(r1, delta_v_l1 * delta_v_magnitude));
-    Vector3 omega2_update_local = multDiag(inv_I2, cross(r2, delta_v_l2 * delta_v_magnitude));
+    Vector3 omega1_update_local =
+        multDiag(inv_I1, cross(r1, delta_v_l1 * delta_v_magnitude));
+    Vector3 omega2_update_local =
+        multDiag(inv_I2, cross(r2, delta_v_l2 * delta_v_magnitude));
 
     omega1 += q1.rotateVec(omega1_update_local);
     omega2 -= q2.rotateVec(omega2_update_local);
@@ -696,15 +742,19 @@ static inline void updateVelocityFromContact(Context &ctx,
 {
     Velocity *v1_out = &ctx.getUnsafe<Velocity>(contact.ref);
     Quat q1 = ctx.getUnsafe<Rotation>(contact.ref);
-    SubstepStartState start1 = ctx.getUnsafe<SubstepStartState>(contact.ref);
-    SubstepVelocityState prev_vel1 = ctx.getUnsafe<SubstepVelocityState>(contact.ref);
+    PreSolvePositional presolve_pos1 =
+        ctx.getUnsafe<PreSolvePositional>(contact.ref);
+    PreSolveVelocity presolve_vel1 =
+        ctx.getUnsafe<PreSolveVelocity>(contact.ref);
     ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(contact.ref);
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
 
     Velocity *v2_out = &ctx.getUnsafe<Velocity>(contact.alt);
     Quat q2 = ctx.getUnsafe<Rotation>(contact.alt);
-    SubstepStartState start2 = ctx.getUnsafe<SubstepStartState>(contact.alt);
-    SubstepVelocityState prev_vel2 = ctx.getUnsafe<SubstepVelocityState>(contact.alt);
+    PreSolvePositional presolve_pos2 =
+        ctx.getUnsafe<PreSolvePositional>(contact.alt);
+    PreSolveVelocity presolve_vel2 =
+        ctx.getUnsafe<PreSolveVelocity>(contact.alt);
     ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
@@ -721,7 +771,7 @@ static inline void updateVelocityFromContact(Context &ctx,
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        // FIXME: If this contact wasn't actually processed just skip it
+        // FIXME: If this contact point wasn't actually processed just skip it
         if (contact.lambdaN[i] == 0.f) continue;
 
         // FIXME: reconsider separate lambdas?
@@ -729,7 +779,8 @@ static inline void updateVelocityFromContact(Context &ctx,
         float dynamic_friction_magnitude =
             mu_d * fabsf(contact.lambdaN[i]) / h;
 
-        auto [r1, r2] = getLocalSpaceContacts(start1, start2, contact, i);
+        auto [r1, r2] =
+            getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
         Vector3 r1_world = q1.rotateVec(r1);
         Vector3 r2_world = q2.rotateVec(r2);
 
@@ -765,18 +816,21 @@ static inline void updateVelocityFromContact(Context &ctx,
                 corrected_magnitude);
         }
 
+        Vector3 r1_presolve = presolve_pos1.q.rotateVec(r1);
+        Vector3 r2_presolve = presolve_pos2.q.rotateVec(r2);
+
         Vector3 v_bar = computeRelativeVelocity(
-            prev_vel1.prevLinear, prev_vel2.prevLinear,
-            prev_vel1.prevAngular, prev_vel2.prevAngular,
-            r1_world, r2_world); // FIXME: r1_world or previous location of r1?
+            presolve_vel1.v, presolve_vel2.v,
+            presolve_vel1.omega, presolve_vel2.omega,
+            r1_presolve, r2_presolve); // FIXME r1_world or presolve?
 
         float vn_bar = dot(n, v_bar);
 
-        float e = 0.4; // FIXME
+        float e = 0.3f; // FIXME
         if (fabsf(vn_bar) <= restitution_threshold) {
             e = 0.f;
         }
-        float restitution_magnitude = (fminf(-e * vn_bar, 0) - vn);
+        float restitution_magnitude = fminf(-e * vn_bar, 0) - vn;
 
         applyVelocityUpdate(
             v1, v2,
@@ -849,8 +903,8 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerComponent<CollisionAABB>();
 
     registry.registerComponent<solver::SubstepPrevState>();
-    registry.registerComponent<solver::SubstepStartState>();
-    registry.registerComponent<solver::SubstepVelocityState>();
+    registry.registerComponent<solver::PreSolvePositional>();
+    registry.registerComponent<solver::PreSolveVelocity>();
 
     registry.registerComponent<CollisionEvent>();
     registry.registerArchetype<CollisionEventTemporary>();
@@ -886,8 +940,8 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
-            solver::SubstepPrevState, solver::SubstepStartState,
-            solver::SubstepVelocityState>>({cur_node});
+            solver::SubstepPrevState, solver::PreSolvePositional,
+            solver::PreSolveVelocity>>({cur_node});
 
         auto run_narrowphase = builder.addToGraph<ParallelForNode<Context,
             narrowphase::runNarrowphase, CandidateCollision>>(
