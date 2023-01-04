@@ -252,8 +252,7 @@ bool traceShadeRay(rayQueryEXT ray_query, in uint32_t view_idx,
                    uint32_t visibility_mask)
 {
     rayQueryInitializeEXT(ray_query, viewTLASes[view_idx],
-        gl_RayFlagsNoneEXT,
-        //gl_RayFlagsCullBackFacingTrianglesEXT,
+        gl_RayFlagsCullBackFacingTrianglesEXT,
         visibility_mask, ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
 
     while (rayQueryProceedEXT(ray_query)) {

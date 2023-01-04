@@ -121,6 +121,29 @@ enum class NarrowphaseTest : uint32_t {
     HullPlane = 6,
 };
 
+// FIXME: Reduce redundant work on transforming point
+static inline geometry::CollisionMesh buildCollisionMesh(
+    const geometry::HalfEdgeMesh &he_mesh,
+    Vector3 pos, Quat rot, Vector3 scale)
+{
+    auto transformVertex = [pos, rot, scale] (math::Vector3 v) {
+        return pos + rot.rotateVec((math::Vector3)scale * v);
+    };
+
+    geometry::CollisionMesh collision_mesh;
+    collision_mesh.halfEdgeMesh = &he_mesh;
+    collision_mesh.vertexCount = he_mesh.getVertexCount();
+    collision_mesh.vertices = (math::Vector3 *)TmpAllocator::get().alloc(
+        sizeof(math::Vector3) * collision_mesh.vertexCount);
+    collision_mesh.center = pos;
+
+    for (int v = 0; v < collision_mesh.vertexCount; ++v) {
+        collision_mesh.vertices[v] = transformVertex(he_mesh.vertex(v));
+    }
+
+    return collision_mesh;
+}
+
 inline void runNarrowphase(
     Context &ctx,
     const CandidateCollision &candidate_collision)
@@ -148,8 +171,8 @@ inline void runNarrowphase(
 
     NarrowphaseTest test_type {raw_type_a | raw_type_b};
 
-    Position a_pos = ctx.getUnsafe<Position>(a_entity);
-    Position b_pos = ctx.getUnsafe<Position>(b_entity);
+    Vector3 a_pos = ctx.getUnsafe<Position>(a_entity);
+    Vector3 b_pos = ctx.getUnsafe<Position>(b_entity);
 
     switch (test_type) {
     case NarrowphaseTest::SphereSphere: {
@@ -172,7 +195,7 @@ inline void runNarrowphase(
                 },
                 1,
                 to_b_normal,
-                0.f,
+                {},
             }});
 
 
@@ -183,67 +206,23 @@ inline void runNarrowphase(
             };
         }
     } break;
-    case NarrowphaseTest::PlanePlane: {
-        // Do nothing, planes must be static.
-        // Should rework this entire setup so static objects
-        // aren't checked against the BVH
-    } break;
-    case NarrowphaseTest::SpherePlane: {
-        auto sphere = a_prim->sphere;
-        Rotation b_rot = ctx.getUnsafe<Rotation>(b_entity);
-
-        constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = b_rot.rotateVec(base_normal);
-
-        float d = plane_normal.dot(b_pos);
-        float t = plane_normal.dot(a_pos) - d;
-
-        if (t < sphere.radius) {
-            solver.addContacts({{
-                a_entity,
-                b_entity,
-                {
-                    makeVector4(a_pos + plane_normal * sphere.radius, t),
-                    {}, {}, {}
-                },
-                1,
-                plane_normal,
-                0.f,
-            }});
-        }
-    } break;
     case NarrowphaseTest::HullHull: {
         // Get half edge mesh for hull A and hull B
-        const auto &hEdgeA = a_prim->hull.halfEdgeMesh;
-        const auto &hEdgeB = a_prim->hull.halfEdgeMesh;
+        const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
+        const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
 
-        auto transformVertex = [&ctx] (math::Vector3 v, Entity &e) {
-            Scale e_scale = ctx.getUnsafe<Scale>(e);
-            Rotation e_rotation = ctx.getUnsafe<Rotation>(e);
-            Position e_position = ctx.getUnsafe<Position>(e);
+        Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
+        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
+        Vector3 a_scale = ctx.getUnsafe<Scale>(a_entity);
+        Vector3 b_scale = ctx.getUnsafe<Scale>(b_entity);
 
-            return e_position + e_rotation.rotateVec((math::Vector3)e_scale * v);
-        };
+        geometry::CollisionMesh a_collision_mesh =
+            buildCollisionMesh(a_he_mesh, a_pos, a_rot, a_scale);
 
-        geometry::CollisionMesh collisionMeshA;
-        collisionMeshA.halfEdgeMesh = &hEdgeA;
-        collisionMeshA.vertexCount = hEdgeA.getVertexCount();
-        collisionMeshA.vertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * collisionMeshA.vertexCount);
-        collisionMeshA.center = a_pos;
-        for (int v = 0; v < collisionMeshA.vertexCount; ++v) {
-            collisionMeshA.vertices[v] = transformVertex(hEdgeA.vertex(v), a_entity);
-        }
+        geometry::CollisionMesh b_collision_mesh =
+            buildCollisionMesh(b_he_mesh, b_pos, b_rot, b_scale);
 
-        geometry::CollisionMesh collisionMeshB;
-        collisionMeshB.halfEdgeMesh = &hEdgeB;
-        collisionMeshB.vertexCount = hEdgeB.getVertexCount();
-        collisionMeshB.vertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * collisionMeshB.vertexCount);
-        collisionMeshB.center = b_pos;
-        for (int v = 0; v < collisionMeshB.vertexCount; ++v) {
-            collisionMeshB.vertices[v] = transformVertex(hEdgeB.vertex(v), b_entity);
-        }
-
-        Manifold manifold = doSAT(collisionMeshA, collisionMeshB);
+        Manifold manifold = doSAT(a_collision_mesh, b_collision_mesh);
 
         if (manifold.numContactPoints > 0) {
             solver.addContacts({{
@@ -257,41 +236,71 @@ inline void runNarrowphase(
                 },
                 manifold.numContactPoints,
                 manifold.normal,
-                0.f,
+                {},
             }});
         }
     } break;
     case NarrowphaseTest::SphereHull: {
+#if 0
+        auto a_sphere = a_prim->sphere;
+        const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
+        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
+        Vector3 b_scale = ctx.getUnsafe<Rotation>(b_entity);
+
+        geometry::CollisionMesh b_collision_mesh = 
+            buildCollisionMesh(b_he_mesh, b_pos, b_rot, b_scale);
+#endif
         assert(false);
     } break;
-    case NarrowphaseTest::HullPlane: {
-        // Get half edge mesh for hull A and hull B
-        const auto &hEdgeA = a_prim->hull.halfEdgeMesh;
+    case NarrowphaseTest::PlanePlane: {
+        // Do nothing, planes must be static.
+        // Should rework this entire setup so static objects
+        // aren't checked against the BVH
+    } break;
+    case NarrowphaseTest::SpherePlane: {
+        auto sphere = a_prim->sphere;
+        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
 
-        auto transformVertex = [&ctx] (math::Vector3 v, Entity &e) {
-            Scale e_scale = ctx.getUnsafe<Scale>(e);
-            Rotation e_rotation = ctx.getUnsafe<Rotation>(e);
-            Position e_position = ctx.getUnsafe<Position>(e);
+        constexpr Vector3 base_normal = { 0, 0, 1 };
+        Vector3 plane_normal = b_rot.rotateVec(base_normal);
 
-            return e_position + e_rotation.rotateVec((math::Vector3)e_scale * v);
-        };
+        float d = plane_normal.dot(b_pos);
+        float t = plane_normal.dot(a_pos) - d;
 
-        geometry::CollisionMesh collisionMeshA;
-        collisionMeshA.halfEdgeMesh = &hEdgeA;
-        collisionMeshA.vertexCount = hEdgeA.getVertexCount();
-        collisionMeshA.vertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * collisionMeshA.vertexCount);
-        collisionMeshA.center = a_pos;
-        for (int v = 0; v < collisionMeshA.vertexCount; ++v) {
-            collisionMeshA.vertices[v] = transformVertex(hEdgeA.vertex(v), a_entity);
+        float penetration = sphere.radius - t;
+        if (penetration > 0) {
+            Vector3 contact_point = a_pos - t * plane_normal;
+
+            solver.addContacts({{
+                b_entity,
+                a_entity,
+                {
+                    makeVector4(contact_point, penetration),
+                    {}, {}, {}
+                },
+                1,
+                plane_normal,
+                {},
+            }});
         }
+    } break;
+    case NarrowphaseTest::HullPlane: {
+        Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
+        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
+        Vector3 a_scale = ctx.getUnsafe<Scale>(a_entity);
 
-        Rotation b_rot = ctx.getUnsafe<Rotation>(b_entity);
+        // Get half edge mesh for entity a (the hull)
+        const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
+        
+        geometry::CollisionMesh a_collision_mesh =
+            buildCollisionMesh(a_he_mesh, a_pos, a_rot, a_scale);
+
         constexpr Vector3 base_normal = { 0, 0, 1 };
         Vector3 plane_normal = b_rot.rotateVec(base_normal);
 
         geometry::Plane plane = { b_pos, plane_normal };
 
-        Manifold manifold = doSATPlane(plane, collisionMeshA);
+        Manifold manifold = doSATPlane(plane, a_collision_mesh);
 
         if (manifold.numContactPoints > 0) {
             solver.addContacts({{
@@ -305,7 +314,7 @@ inline void runNarrowphase(
                 },
                 manifold.numContactPoints,
                 manifold.normal,
-                0.f,
+                {},
             }});
         }
     } break;
@@ -946,9 +955,11 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
         auto run_narrowphase = builder.addToGraph<ParallelForNode<Context,
             narrowphase::runNarrowphase, CandidateCollision>>(
                 {rgb_update});
+        auto reset_tmp = builder.addToGraph<ResetTmpAllocNode>(
+            {run_narrowphase});
 
         auto solve_pos = builder.addToGraph<ParallelForNode<Context,
-            solver::solvePositions, SolverData>>({run_narrowphase});
+            solver::solvePositions, SolverData>>({reset_tmp});
 
         auto vel_set = builder.addToGraph<ParallelForNode<Context,
             solver::setVelocities, Position, Rotation,
@@ -974,4 +985,3 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupCleanupTasks(
 
 }
 }
-

@@ -34,7 +34,8 @@ struct RenderingSystem {
     static void init(Context &ctx);
 
     static ActiveView setupView(Context &ctx, float vfov_degrees,
-                                math::Vector3 camera_offset);
+                                math::Vector3 camera_offset,
+                                int32_t view_offset);
 };
 
 }

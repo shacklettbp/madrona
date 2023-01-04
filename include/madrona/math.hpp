@@ -434,6 +434,15 @@ struct Vector3 {
             fmaxf(a.z, b.z),
         };
     }
+
+    static constexpr inline Vector3 zero()
+    {
+        return Vector3 {
+            0,
+            0,
+            0,
+        };
+    }
 };
 
 struct Vector4 {

@@ -18,8 +18,6 @@ struct ViewData {
 
 struct RendererState {
     std::atomic_uint32_t instanceCount;
-
-    static inline std::atomic_int32_t viewOffset = 0;
 };
 
 static inline AccelStructInstance * getInstanceBuffer(int32_t world_idx)
@@ -146,15 +144,13 @@ void RenderingSystem::init(Context &ctx)
 }
 
 ActiveView RenderingSystem::setupView(Context &, float vfov_degrees,
-                                      math::Vector3 camera_offset)
+                                      math::Vector3 camera_offset,
+                                      int32_t view_offset)
 {
-    int32_t view_offset = RendererState::viewOffset.fetch_add(1,
-        std::memory_order_relaxed);
-
     float tan_fov = tanf(helpers::toRadians(vfov_degrees / 2.f));
 
     return ActiveView {
-        tan_fov, 
+        tan_fov,
         camera_offset,
         view_offset,
     };

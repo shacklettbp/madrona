@@ -1,6 +1,3 @@
-#include <madrona/mw_gpu/host_print.hpp>
-#include <stdint.h>
-#include <stdio.h>
 #include <madrona/memory.hpp>
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
