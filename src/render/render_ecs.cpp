@@ -14,6 +14,8 @@ namespace render {
 struct ViewData {
     Quat rotation;
     Vector4 posAndTanFOV;
+    uint32_t worldID;
+    uint32_t pad[3];
 };
 
 struct RendererState {
@@ -93,7 +95,7 @@ inline void updateInstanceCount(Context &ctx,
     exportInstanceCount(ctx.worldID().idx, inst_count);
 }
 
-inline void updateViewData(Context &,
+inline void updateViewData(Context &ctx,
                            const Position &pos,
                            const Rotation &rot,
                            const ActiveView &view)
@@ -109,8 +111,8 @@ inline void updateViewData(Context &,
     renderer_view.posAndTanFOV.y = camera_pos.y;
     renderer_view.posAndTanFOV.z = camera_pos.z;
     renderer_view.posAndTanFOV.w = view.tanFOV;
+    renderer_view.worldID = ctx.worldID().idx;
 }
-
 
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)

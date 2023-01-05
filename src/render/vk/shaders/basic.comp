@@ -147,11 +147,13 @@ Camera unpackCamera(PackedCamera packed)
     return Camera(origin, view, up, right, right_scale, up_scale);
 }
 
-void unpackViewData(in uint32_t view_idx, out Camera cam)
+void unpackViewData(in uint32_t view_idx, out Camera cam,
+                    out uint32_t world_id)
 {
     ViewData view_data = viewDataBuffer[view_idx];
 
     cam = unpackCamera(view_data.cam);
+    world_id = view_data.worldID;
 }
 
 Vertex unpackVertex(VertexBufferRef vertex_buffer, uint32_t idx)
@@ -329,13 +331,14 @@ void main()
     uint32_t depth_out_offset = pixel_linear_idx;
 
     Camera cam;
-    unpackViewData(batch_idx, cam);
+    uint32_t world_id;
+    unpackViewData(batch_idx, cam, world_id);
 
     vec3 ray_origin, ray_dir;
     computeCameraRay(cam, idx.xy, ray_origin, ray_dir);
 
     rayQueryEXT primary_query;
-    bool primary_hit = traceShadeRay(primary_query, batch_idx,
+    bool primary_hit = traceShadeRay(primary_query, world_id,
                                      ray_origin, ray_dir, 1);
 
     if (!primary_hit) {
