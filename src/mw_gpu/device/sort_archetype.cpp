@@ -978,7 +978,7 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     int num_rows = state_mgr->numArchetypeRows(archetypeID);
 
     int32_t num_threads =
-        num_rows / num_elems_per_sort_thread_;
+        utils::divideRoundUp(num_rows, (int32_t)num_elems_per_sort_thread_);
 
     uint32_t num_blocks = utils::divideRoundUp((uint32_t)num_threads,
         consts::numMegakernelThreads);
@@ -1200,8 +1200,8 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t invocation_idx)
 
 void SortArchetypeNodeBase::resizeTable(int32_t)
 {
-    mwGPU::getStateManager()->resizeArchetype(archetypeID,
-                                              bins[numPasses * 255]);
+    mwGPU::getStateManager()->resizeArchetype(
+        archetypeID, bins[(numPasses - 1) * 256 + 255]);
     numDynamicInvocations = numRows;
 }
 

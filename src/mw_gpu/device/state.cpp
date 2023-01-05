@@ -442,7 +442,8 @@ void StateManager::resizeArchetype(uint32_t archetype_id, int32_t num_rows)
 
 int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const
 {
-    archetypes_[archetype_id]->tbl.numRows.load(std::memory_order_relaxed);
+    return archetypes_[archetype_id]->tbl.numRows.load(
+        std::memory_order_relaxed);
 }
 
 std::pair<int32_t, int32_t> StateManager::fetchRecyclableEntities()

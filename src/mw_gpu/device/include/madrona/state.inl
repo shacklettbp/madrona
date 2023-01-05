@@ -152,7 +152,8 @@ void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
         Table &tbl = archetypes_[archetype_idx]->tbl;
 
         bool early_out =
-            fn(tbl.numRows, (WorldID *)(tbl.columns[1]),
+            fn(tbl.numRows.load(std::memory_order_relaxed),
+               (WorldID *)(tbl.columns[1]),
                tbl.columns[query_values[Indices]] ...);
         if (early_out) {
             return;
@@ -184,7 +185,7 @@ uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)
 
         Table &tbl = archetypes_[archetype_idx]->tbl;
 
-        total_rows += tbl.numRows;
+        total_rows += tbl.numRows.load(std::memory_order_relaxed);
 
         query_values += 1 + num_components;
     }
