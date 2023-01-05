@@ -20,6 +20,7 @@ struct ViewData {
 
 struct RendererState {
     std::atomic_uint32_t instanceCount;
+    std::atomic_int32_t viewCount;
 };
 
 static inline AccelStructInstance * getInstanceBuffer(int32_t world_idx)
@@ -42,7 +43,8 @@ static inline uint64_t * getBlases()
 
 void RenderingSystem::registerTypes(ECSRegistry &registry)
 {
-    registry.registerComponent<ActiveView>();
+    registry.registerComponent<ViewSettings>();
+    registry.registerComponent<ViewID>();
     registry.registerSingleton<RendererState>();
 }
 
@@ -85,12 +87,13 @@ inline void instanceAccelStructSetup(Context &ctx,
     as_inst.accelerationStructureReference = blases[obj_id.idx];
 }
 
-inline void updateInstanceCount(Context &ctx,
-                                RendererState &renderer)
+inline void updateRendererCounts(Context &ctx,
+                                 RendererState &renderer)
 {
     uint32_t inst_count =
         renderer.instanceCount.load(std::memory_order_relaxed);
     renderer.instanceCount.store(0, std::memory_order_relaxed);
+    renderer.viewCount.store(0, std::memory_order_relaxed);
 
     exportInstanceCount(ctx.worldID().idx, inst_count);
 }
@@ -98,19 +101,28 @@ inline void updateInstanceCount(Context &ctx,
 inline void updateViewData(Context &ctx,
                            const Position &pos,
                            const Rotation &rot,
-                           const ActiveView &view)
+                           const ViewSettings &view_settings,
+                           ViewID &view_id)
 {
+    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+
+    // FIXME: should come up with another way to assign view IDs that is
+    // more stable
+    int32_t view_idx = renderer_state.viewCount.fetch_add(
+        1, std::memory_order_relaxed);
+    view_id.idx = view_idx;
+
     auto viewdatas =
         (ViewData *)mwGPU::GPUImplConsts::get().rendererViewDatasAddr;
 
-    auto camera_pos = pos + view.cameraOffset;
+    auto camera_pos = pos + view_settings.cameraOffset;
 
-    ViewData &renderer_view = viewdatas[view.viewIdx];
+    ViewData &renderer_view = viewdatas[view_idx];
     renderer_view.rotation = rot;
     renderer_view.posAndTanFOV.x = camera_pos.x;
     renderer_view.posAndTanFOV.y = camera_pos.y;
     renderer_view.posAndTanFOV.z = camera_pos.z;
-    renderer_view.posAndTanFOV.w = view.tanFOV;
+    renderer_view.posAndTanFOV.w = view_settings.tanFOV;
     renderer_view.worldID = ctx.worldID().idx;
 }
 
@@ -128,10 +140,11 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
         updateViewData,
         Position,
         Rotation,
-        ActiveView>>({instance_setup});
+        ViewSettings,
+        ViewID>>({instance_setup});
 
     auto update_count = builder.addToGraph<ParallelForNode<Context,
-        updateInstanceCount,
+        updateRendererCounts,
         RendererState>>({viewdata_update});
 
     return update_count;
@@ -142,19 +155,18 @@ void RenderingSystem::init(Context &ctx)
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
     new (&renderer_state) RendererState {
         0,
+        0,
     };
 }
 
-ActiveView RenderingSystem::setupView(Context &, float vfov_degrees,
-                                      math::Vector3 camera_offset,
-                                      int32_t view_offset)
+ViewSettings RenderingSystem::setupView(Context &, float vfov_degrees,
+                                        math::Vector3 camera_offset)
 {
     float tan_fov = tanf(helpers::toRadians(vfov_degrees / 2.f));
 
-    return ActiveView {
+    return ViewSettings {
         tan_fov,
         camera_offset,
-        view_offset,
     };
 }
 
