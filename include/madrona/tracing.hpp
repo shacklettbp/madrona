@@ -49,7 +49,7 @@ namespace madrona
 #endif
     }
 
-    inline void HostEventLogging(HostEvent event)
+    inline void HostEventLogging([[maybe_unused]] HostEvent event)
     {
 #ifdef MADRONA_TRACING
         HOST_TRACING.events.push_back(event);

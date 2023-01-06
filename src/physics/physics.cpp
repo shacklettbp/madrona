@@ -611,6 +611,11 @@ static inline void handleContact(Context &ctx,
     float inv_m1 = metadata1.invMass;
     float inv_m2 = metadata2.invMass;
 
+    // FIXME hack: proper static object support
+    if (inv_m1 == 0 && inv_m2 == 0) {
+        return;
+    }
+
     Vector3 inv_I1 = metadata1.invInertiaTensor;
     Vector3 inv_I2 = metadata2.invInertiaTensor;
 

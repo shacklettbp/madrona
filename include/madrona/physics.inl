@@ -59,6 +59,8 @@ void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 
 float BVH::traceRay(math::Vector3 o, math::Vector3 d, float t_max)
 {
+    using namespace math;
+
     Vector3 inv_d = 1.f / d;
 
     int32_t stack[128];
@@ -91,22 +93,33 @@ float BVH::traceRay(math::Vector3 o, math::Vector3 d, float t_max)
                     // FIXME: this leaf information should probably be copied
                     // inline into the tree to avoid the entity lookup
                     Entity e = leaf_entities_[node.leafIDX(i)];
-
+                    traceRayIntoEntity(o, d, t_max, e);
                 } else {
                     stack[stack_size++] = node.children[i];
                 }
             }
         }
     }
+    
+    // FIXME
+    return false;
 }
 
 bool BVH::traceRayIntoEntity(math::Vector3 o,
                              math::Vector3 d,
-                             float t_max)
+                             float t_max,
+                             Entity e)
 {
     // GPU GEMS II, Fast Ray - Convex Polyhedron Intersection
     
-    using math;
+    using namespace math;
+
+    (void)o;
+    (void)d;
+    (void)t_max;
+    (void)e;
+
+    return false;
 
 #if 0
 /* fast macro version of V3Dot, usable with Point4 */
