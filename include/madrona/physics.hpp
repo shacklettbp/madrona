@@ -4,8 +4,7 @@
 #include <madrona/span.hpp>
 #include <madrona/taskgraph.hpp>
 
-namespace madrona {
-namespace phys {
+namespace madrona::phys {
 
 namespace geometry {
 
@@ -157,12 +156,6 @@ struct Velocity {
     math::Vector3 angular;
 };
 
-struct CollisionAABB : math::AABB {
-    inline CollisionAABB(math::AABB aabb)
-        : AABB(aabb)
-    {}
-};
-
 struct CollisionEvent {
     Entity a;
     Entity b;
@@ -185,7 +178,6 @@ struct Contact {
 };
 
 struct CollisionEventTemporary : Archetype<CollisionEvent> {};
-
 
 // Per object state
 struct RigidBodyMetadata {
@@ -240,18 +232,26 @@ struct LeafID {
 
 class BVH {
 public:
-    BVH(CountT max_leaves);
+    BVH(CountT max_leaves, float leaf_velocity_expansion,
+        float leaf_accel_expansion);
 
     inline LeafID reserveLeaf(Entity e);
 
     template <typename Fn>
     inline void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
 
-    inline float traceRay(math::Vector3 o, math::Vector3 d,
-                          float t_max = float(INFINITY));
+    template <typename Fn>
+    inline void findOverlapsForLeaf(LeafID leaf_id, Fn &&fn) const;
+
+    float traceRay(math::Vector3 o, math::Vector3 d,
+                   float t_max = float(INFINITY));
 
     void updateLeaf(LeafID leaf_id,
-                    const CollisionAABB &obj_aabb);
+                    const math::Vector3 &pos,
+                    const math::Quat &rot,
+                    const math::Vector3 &scale,
+                    const base::ObjectID &obj_id,
+                    const math::Vector3 &linear_vel);
 
     inline void rebuildOnUpdate();
     void updateTree();
@@ -285,37 +285,26 @@ private:
     void rebuild();
     void refit(LeafID *leaf_ids, CountT num_moved);
 
-    inline bool traceRayIntoEntity(math::Vector3 o,
-                                   math::Vector3 d,
-                                   float t_max,
-                                   Entity e);
+    bool traceRayIntoEntity(math::Vector3 o,
+                            math::Vector3 d,
+                            float t_max,
+                            Entity e);
 
     Node *nodes_;
     CountT num_nodes_;
     const CountT num_allocated_nodes_;
     math::AABB *leaf_aabbs_;
-    math::Vector3 *leaf_centers_;
+    math::Vector3 *leaf_positions_;
+    math::Quat *leaf_rotations_;
     uint32_t *leaf_parents_;
     Entity *leaf_entities_;
     int32_t *sorted_leaves_;
     std::atomic<int32_t> num_leaves_;
     int32_t num_allocated_leaves_;
+    float leaf_velocity_expansion_;
+    float leaf_accel_expansion_;
     bool force_rebuild_;
 };
-
-void updateLeavesEntry(
-    Context &ctx,
-    const LeafID &leaf_id,
-    const CollisionAABB &aabb);
-
-void updateBVHEntry(
-    Context &, BVH &bvh);
-
-void findOverlappingEntry(
-    Context &ctx,
-    const Entity &e,
-    const CollisionAABB &obj_aabb,
-    const Velocity &);
 
 }
 
@@ -357,66 +346,8 @@ struct RigidBodyPhysicsSystem {
 
     static TaskGraph::NodeID setupCleanupTasks(TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> deps);
-
 };
 
-
-namespace narrowphase {
-
-struct FaceQuery {
-    float separation;
-    int32_t faceIdx;
-};
-
-struct EdgeQuery {
-    float separation;
-    math::Vector3 normal;
-    int32_t edgeIdxA;
-    int32_t edgeIdxB;
-};
-
-struct Manifold {
-    math::Vector4 contactPoints[4];
-    int32_t numContactPoints;
-    math::Vector3 normal;
-    bool aIsReference;
-};
-
-// Returned vertices will be stored in linear bump allocator
-Manifold doSAT(const geometry::CollisionMesh &a, const geometry::CollisionMesh &b);
-Manifold doSATPlane(const geometry::Plane &plane, const geometry::CollisionMesh &a);
-
-inline float abs(float f) {
-    return (f < 0.0f) ? -f : f;
-}
-
-// Returns the signed distance
-inline float getDistanceFromPlane(const geometry::Plane &plane, const math::Vector3 &a) {
-    float adotn = a.dot(plane.normal);
-    float pdotn = plane.point.dot(plane.normal);
-    return (adotn - pdotn);
-}
-
-// Need to be normalized
-inline bool areParallel(const math::Vector3 &a, const math::Vector3 &b) {
-    float d = abs(a.dot(b));
-
-    return abs(d - 1.0f) < 0.0001f;
-}
-
-// Get intersection on plane of the line passing through 2 points
-inline math::Vector3 planeIntersection(const geometry::Plane &plane, const math::Vector3 &p1, const math::Vector3 &p2) {
-    float distance = getDistanceFromPlane(plane, p1);
-
-    return p1 + (p2 - p1) * (-distance / plane.normal.dot(p2 - p1));
-}
-
-
-}
-
-
-}
 }
 
 #include "physics.inl"
-

@@ -781,6 +781,39 @@ struct Mat3x3 {
         }};
     }
 
+    static inline Mat3x3 fromRS(Quat r, Vector3 s)
+    {
+        float x2 = r.x * r.x;
+        float y2 = r.y * r.y;
+        float z2 = r.z * r.z;
+        float xz = r.x * r.z;
+        float xy = r.x * r.y;
+        float yz = r.y * r.z;
+        float wx = r.w * r.x;
+        float wy = r.w * r.y;
+        float wz = r.w * r.z;
+
+        Vector3 ds = 2.f * s;
+
+        return {{
+            { 
+                s.x - ds.x * (y2 + z2),
+                ds.x * (xy + wz),
+                ds.x * (xz - wy),
+            },
+            {
+                ds.y * (xy - wz),
+                s.y - ds.y * (x2 + z2),
+                ds.y * (yz + wx),
+            },
+            {
+                ds.z * (xz + wy),
+                ds.z * (yz - wx),
+                s.z - ds.z * (x2 + y2),
+            },
+        }};
+    }
+
     Vector3 & operator[](CountT i)
     {
         return cols[i];

@@ -1,328 +1,29 @@
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
 
-namespace madrona {
+#include "physics_impl.hpp"
+
+namespace madrona::phys {
 
 using namespace base;
 using namespace math;
 
-namespace phys {
+SolverData::SolverData(CountT max_contacts_per_step,
+                   float delta_t,
+                   CountT num_substeps,
+                   Vector3 gravity)
+    : contacts((Contact *)rawAlloc(
+          sizeof(Contact) * max_contacts_per_step)),
+      numContacts(0),
+      maxContacts(max_contacts_per_step),
+      deltaT(delta_t),
+      h(delta_t / (float)num_substeps),
+      g(gravity),
+      gMagnitude(gravity.length()),
+      restitutionThreshold(2.f * gMagnitude * h)
+{}
 
-struct SolverData {
-    Contact *contacts;
-    std::atomic<CountT> numContacts;
-    CountT maxContacts;
-    float deltaT;
-    float h;
-    Vector3 g;
-    float gMagnitude;
-    float restitutionThreshold;
-
-    inline SolverData(CountT max_contacts_per_step,
-                      float delta_t,
-                      CountT num_substeps,
-                      Vector3 gravity)
-        : contacts((Contact *)rawAlloc(sizeof(Contact) * max_contacts_per_step)),
-          numContacts(0),
-          maxContacts(max_contacts_per_step),
-          deltaT(delta_t),
-          h(delta_t / (float)num_substeps),
-          g(gravity),
-          gMagnitude(gravity.length()),
-          restitutionThreshold(2.f * gMagnitude * h)
-    {}
-
-    inline void addContacts(Span<const Contact> added_contacts)
-    {
-        int32_t contact_idx = numContacts.fetch_add(added_contacts.size(),
-                                                    std::memory_order_relaxed);
-        assert(contact_idx < maxContacts);
-
-        for (CountT i = 0; i < added_contacts.size(); i++) {
-            contacts[contact_idx + i] = added_contacts[i];
-        }
-    }
 };
-
-struct ObjectData {
-    ObjectManager *mgr;
-};
-
-inline void updateCollisionAABB(Context &ctx,
-                                const Position &pos,
-                                const Rotation &rot,
-                                const ObjectID &obj_id,
-                                const Velocity &vel,
-                                CollisionAABB &out_aabb)
-{
-    // FIXME: this could all be more efficient with a center + width
-    // AABB representation
-    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
-
-    Mat3x3 rot_mat = Mat3x3::fromQuat(rot);
-    AABB obj_aabb = obj_mgr.aabbs[obj_id.idx];
-
-    AABB world_aabb;
-
-    // RTCD page 86
-#pragma unroll
-    for (CountT i = 0; i < 3; i++) {
-        world_aabb.pMin[i] = world_aabb.pMax[i] = pos[i];
-
-#pragma unroll
-        for (CountT j = 0; j < 3; j++) {
-            float e = rot_mat[i][j] * obj_aabb.pMin[j];
-            float f = rot_mat[i][j] * obj_aabb.pMax[j];
-
-            if (e < f) {
-                world_aabb.pMin[i] += e;
-                world_aabb.pMax[i] += f;
-            } else {
-                world_aabb.pMin[i] += f;
-                world_aabb.pMax[i] += e;
-            }
-        }
-    }
-
-    constexpr float expansion_factor = 2.f;
-    constexpr float max_accel = 100.f;
-
-    float delta_t = ctx.getSingleton<SolverData>().deltaT;
-    float min_pos_change = max_accel * delta_t * delta_t;
-
-    Vector3 linear_velocity = vel.linear;
-
-#pragma unroll
-    for (int32_t i = 0; i < 3; i++) {
-        float pos_delta = expansion_factor * linear_velocity[i] * delta_t;
-
-        float min_delta = pos_delta - min_pos_change;
-        float max_delta = pos_delta + min_pos_change;
-
-        if (min_delta < 0.f) {
-            world_aabb.pMin[i] += min_delta;
-        }
-        if (max_delta > 0.f) {
-            world_aabb.pMax[i] += max_delta;
-        }
-    }
-
-    out_aabb = world_aabb;
-}
-
-namespace narrowphase {
-
-enum class NarrowphaseTest : uint32_t {
-    SphereSphere = 1,
-    HullHull = 2,
-    SphereHull = 3,
-    PlanePlane = 4,
-    SpherePlane = 5,
-    HullPlane = 6,
-};
-
-// FIXME: Reduce redundant work on transforming point
-static inline geometry::CollisionMesh buildCollisionMesh(
-    const geometry::HalfEdgeMesh &he_mesh,
-    Vector3 pos, Quat rot, Vector3 scale)
-{
-    auto transformVertex = [pos, rot, scale] (math::Vector3 v) {
-        return pos + rot.rotateVec((math::Vector3)scale * v);
-    };
-
-    geometry::CollisionMesh collision_mesh;
-    collision_mesh.halfEdgeMesh = &he_mesh;
-    collision_mesh.vertexCount = he_mesh.getVertexCount();
-    collision_mesh.vertices = (math::Vector3 *)TmpAllocator::get().alloc(
-        sizeof(math::Vector3) * collision_mesh.vertexCount);
-    collision_mesh.center = pos;
-
-    for (int v = 0; v < collision_mesh.vertexCount; ++v) {
-        collision_mesh.vertices[v] = transformVertex(he_mesh.vertex(v));
-    }
-
-    return collision_mesh;
-}
-
-inline void runNarrowphase(
-    Context &ctx,
-    const CandidateCollision &candidate_collision)
-{
-    ObjectID a_obj = ctx.getUnsafe<ObjectID>(candidate_collision.a);
-    ObjectID b_obj = ctx.getUnsafe<ObjectID>(candidate_collision.b);
-
-    SolverData &solver = ctx.getSingleton<SolverData>();
-    const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
-
-    const CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
-    const CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
-
-    uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
-    uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
-
-    Entity a_entity = candidate_collision.a;
-    Entity b_entity = candidate_collision.b;
-
-    if (raw_type_a > raw_type_b) {
-        std::swap(raw_type_a, raw_type_b);
-        std::swap(a_entity, b_entity);
-        std::swap(a_prim, b_prim);
-    }
-
-    NarrowphaseTest test_type {raw_type_a | raw_type_b};
-
-    Vector3 a_pos = ctx.getUnsafe<Position>(a_entity);
-    Vector3 b_pos = ctx.getUnsafe<Position>(b_entity);
-
-    switch (test_type) {
-    case NarrowphaseTest::SphereSphere: {
-        float a_radius = a_prim->sphere.radius;
-        float b_radius = b_prim->sphere.radius;
-
-        Vector3 to_b = b_pos - a_pos;
-        float dist = to_b.length();
-
-        if (dist > 0 && dist < a_radius + b_radius) {
-            Vector3 mid = to_b / 2.f;
-
-            Vector3 to_b_normal = to_b / dist;
-            solver.addContacts({{
-                a_entity,
-                b_entity,
-                { 
-                    makeVector4(a_pos + mid, dist / 2.f),
-                    {}, {}, {}
-                },
-                1,
-                to_b_normal,
-                {},
-            }});
-
-
-            Loc loc = ctx.makeTemporary<CollisionEventTemporary>();
-            ctx.getUnsafe<CollisionEvent>(loc) = CollisionEvent {
-                candidate_collision.a,
-                candidate_collision.b,
-            };
-        }
-    } break;
-    case NarrowphaseTest::HullHull: {
-        // Get half edge mesh for hull A and hull B
-        const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
-        const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
-
-        Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
-        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-        Vector3 a_scale = ctx.getUnsafe<Scale>(a_entity);
-        Vector3 b_scale = ctx.getUnsafe<Scale>(b_entity);
-
-        geometry::CollisionMesh a_collision_mesh =
-            buildCollisionMesh(a_he_mesh, a_pos, a_rot, a_scale);
-
-        geometry::CollisionMesh b_collision_mesh =
-            buildCollisionMesh(b_he_mesh, b_pos, b_rot, b_scale);
-
-        Manifold manifold = doSAT(a_collision_mesh, b_collision_mesh);
-
-        if (manifold.numContactPoints > 0) {
-            solver.addContacts({{
-                manifold.aIsReference ? a_entity : b_entity,
-                manifold.aIsReference ? b_entity : a_entity,
-                {
-                    manifold.contactPoints[0],
-                    manifold.contactPoints[1],
-                    manifold.contactPoints[2],
-                    manifold.contactPoints[3],
-                },
-                manifold.numContactPoints,
-                manifold.normal,
-                {},
-            }});
-        }
-    } break;
-    case NarrowphaseTest::SphereHull: {
-#if 0
-        auto a_sphere = a_prim->sphere;
-        const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
-        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-        Vector3 b_scale = ctx.getUnsafe<Rotation>(b_entity);
-
-        geometry::CollisionMesh b_collision_mesh = 
-            buildCollisionMesh(b_he_mesh, b_pos, b_rot, b_scale);
-#endif
-        assert(false);
-    } break;
-    case NarrowphaseTest::PlanePlane: {
-        // Do nothing, planes must be static.
-        // Should rework this entire setup so static objects
-        // aren't checked against the BVH
-    } break;
-    case NarrowphaseTest::SpherePlane: {
-        auto sphere = a_prim->sphere;
-        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-
-        constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = b_rot.rotateVec(base_normal);
-
-        float d = plane_normal.dot(b_pos);
-        float t = plane_normal.dot(a_pos) - d;
-
-        float penetration = sphere.radius - t;
-        if (penetration > 0) {
-            Vector3 contact_point = a_pos - t * plane_normal;
-
-            solver.addContacts({{
-                b_entity,
-                a_entity,
-                {
-                    makeVector4(contact_point, penetration),
-                    {}, {}, {}
-                },
-                1,
-                plane_normal,
-                {},
-            }});
-        }
-    } break;
-    case NarrowphaseTest::HullPlane: {
-        Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
-        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-        Vector3 a_scale = ctx.getUnsafe<Scale>(a_entity);
-
-        // Get half edge mesh for entity a (the hull)
-        const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
-        
-        geometry::CollisionMesh a_collision_mesh =
-            buildCollisionMesh(a_he_mesh, a_pos, a_rot, a_scale);
-
-        constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = b_rot.rotateVec(base_normal);
-
-        geometry::Plane plane = { b_pos, plane_normal };
-
-        Manifold manifold = doSATPlane(plane, a_collision_mesh);
-
-        if (manifold.numContactPoints > 0) {
-            solver.addContacts({{
-                b_entity, // Plane is always reference
-                a_entity,
-                {
-                    manifold.contactPoints[0],
-                    manifold.contactPoints[1],
-                    manifold.contactPoints[2],
-                    manifold.contactPoints[3],
-                },
-                manifold.numContactPoints,
-                manifold.normal,
-                {},
-            }});
-        }
-    } break;
-    default: __builtin_unreachable();
-    }
-}
-
-}
 
 namespace solver {
 
@@ -886,7 +587,12 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
                                   CountT max_contacts_per_world)
 {
     broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
-    new (&bvh) broadphase::BVH(max_dynamic_objects);
+
+    // expansion factor is 2 * delta_t to give room
+    // for acceleration within the timestep
+    constexpr float max_inst_accel = 100.f;
+    new (&bvh) broadphase::BVH(max_dynamic_objects, 2.f * delta_t,
+                               max_inst_accel * delta_t * delta_t);
 
     SolverData &solver = ctx.getSingleton<SolverData>();
     new (&solver) SolverData(max_contacts_per_world, delta_t, num_substeps, gravity);
@@ -935,21 +641,8 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps,
     CountT num_substeps)
 {
-    auto update_aabbs = builder.addToGraph<ParallelForNode<Context,
-        updateCollisionAABB, Position, Rotation, ObjectID, Velocity,
-            CollisionAABB>>(deps);
+    auto broadphase_complete = broadphase::setupTasks(builder, deps);
 
-    auto preprocess_leaves = builder.addToGraph<ParallelForNode<Context,
-        broadphase::updateLeavesEntry, broadphase::LeafID, 
-        CollisionAABB>>({update_aabbs});
-
-    auto bvh_update = builder.addToGraph<ParallelForNode<Context,
-        broadphase::updateBVHEntry, broadphase::BVH>>({preprocess_leaves});
-
-    auto find_overlapping = builder.addToGraph<ParallelForNode<Context,
-        broadphase::findOverlappingEntry, Entity, CollisionAABB, Velocity>>(
-            {bvh_update});
-    
     auto cur_node = find_overlapping;
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
@@ -957,14 +650,10 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
             solver::SubstepPrevState, solver::PreSolvePositional,
             solver::PreSolveVelocity>>({cur_node});
 
-        auto run_narrowphase = builder.addToGraph<ParallelForNode<Context,
-            narrowphase::runNarrowphase, CandidateCollision>>(
-                {rgb_update});
-        auto reset_tmp = builder.addToGraph<ResetTmpAllocNode>(
-            {run_narrowphase});
+        auto run_narrowphase = narrowphase::setupTasks(builder, {rgb_update});
 
         auto solve_pos = builder.addToGraph<ParallelForNode<Context,
-            solver::solvePositions, SolverData>>({reset_tmp});
+            solver::solvePositions, SolverData>>({run_narrowphase});
 
         auto vel_set = builder.addToGraph<ParallelForNode<Context,
             solver::setVelocities, Position, Rotation,
