@@ -247,6 +247,9 @@ public:
     template <typename Fn>
     inline void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
 
+    inline float traceRay(math::Vector3 o, math::Vector3 d,
+                          float t_max = float(INFINITY));
+
     void updateLeaf(LeafID leaf_id,
                     const CollisionAABB &obj_aabb);
 
@@ -281,6 +284,11 @@ private:
 
     void rebuild();
     void refit(LeafID *leaf_ids, CountT num_moved);
+
+    inline bool traceRayIntoEntity(math::Vector3 o,
+                                   math::Vector3 d,
+                                   float t_max,
+                                   Entity e);
 
     Node *nodes_;
     CountT num_nodes_;

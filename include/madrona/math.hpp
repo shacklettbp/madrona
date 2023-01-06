@@ -459,6 +459,16 @@ struct Vector4 {
             z,
         };
     }
+
+    static inline Vector4 fromVector3(Vector3 v, float w)
+    {
+        return Vector4 {
+            v.x,
+            v.y,
+            v.z,
+            w,
+        };
+    }
 };
 
 inline Vector4 makeVector4(const Vector3 &xyz, float w)
@@ -682,6 +692,34 @@ struct AABB {
         } else if (p.z > pMax.z) {
             pMax.z = p.z;
         }
+    }
+
+    inline bool rayIntersects(Vector3 ray_o, Vector3 inv_ray_d,
+                              float ray_t_min, float ray_t_max)
+    {
+        // Ray tracing gems II, chapter 2
+        
+        // Absolute distances to lower and upper box coordinates
+        math::Vector3 t_lower = (pMin - ray_o) * inv_ray_d;
+        math::Vector3 t_upper = (pMax - ray_o) * inv_ray_d;
+        // The four t-intervals (for x-/y-/z-slabs, and ray p(t))
+        math::Vector4 t_mins =
+            Vector4::fromVector3(Vector3::min(t_lower, t_upper), ray_t_min);
+        math::Vector4 t_maxes = 
+            Vector4::fromVector3(Vector3::max(t_lower, t_upper), ray_t_max);
+        // Easy to remember: ``max of mins, and min of maxes''
+
+        auto max_component = [](Vector4 v) {
+            return fmaxf(v.x, fmaxf(v.y, fmaxf(v.z, v.w)));
+        };
+
+        auto min_component = [](Vector4 v) {
+            return fminf(v.x, fminf(v.y, fminf(v.z, v.w)));
+        };
+       
+        float t_box_min = max_component(t_mins);
+        float t_box_max = min_component(t_maxes);
+        return t_box_min <= t_box_max;
     }
 
     static inline AABB invalid()
