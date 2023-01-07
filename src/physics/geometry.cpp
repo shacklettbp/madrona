@@ -1,5 +1,5 @@
 #ifndef MADRONA_GPU_MODE
-#include <stdlib.h>
+#include <cstdlib>
 #include <memory.h>
 #include <map>
 #endif
@@ -7,9 +7,10 @@
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
 
-namespace madrona {
+namespace madrona::phys::geometry {
 
-namespace phys::geometry {
+using namespace math;
+
 // Physics geometry representation
 FastPolygonList &FastPolygonList::operator=(const FastPolygonList &other) {
     allocate(other.maxIndices);
@@ -170,7 +171,11 @@ void HalfEdgeMesh::construct(
 #endif
 }
 
-math::Vector3 HalfEdgeMesh::getFaceNormal(const PolygonID &polygon, const math::Vector3 *vertices) const {
+// FIXME: validate where this function needs and doesn't need to
+// return a normalized result
+math::Vector3 HalfEdgeMesh::getFaceNormal(PolygonID polygon,
+                                          const math::Vector3 *vertices) const
+{
     math::Vector3 points[3];
 
     auto *h_edge = &halfEdge(mPolygons[polygon]);
@@ -235,7 +240,11 @@ uint32_t HalfEdgeMesh::getPolygonVertexCount(const PolygonID &polygon) const {
     return vertexCounter;
 }
 
-void HalfEdgeMesh::getPolygonSidePlanes(Plane *planes, const PolygonID &polygon, const math::Vector3 *vertices) const {
+// FIXME: not clear if this belongs in HalfEdgeMesh - current interface forces
+// temporary planes buffer
+void HalfEdgeMesh::getPolygonSidePlanes(Plane *planes, const PolygonID &polygon,
+                                        const math::Vector3 *vertices) const
+{
     math::Vector3 polygonNormal = getFaceNormal(polygon, vertices);
 
     // Half edge of the polygon
@@ -243,21 +252,21 @@ void HalfEdgeMesh::getPolygonSidePlanes(Plane *planes, const PolygonID &polygon,
     uint32_t start = hEdge;
 
     uint32_t vertexCounter = 0;
-    planes[vertexCounter++] = {
-        vertices[halfEdge(hEdge).rootVertex],
-        math::cross(getEdgeDirection(hEdge, vertices), polygonNormal),
-    };
 
-    while (halfEdge(hEdge).next != start) {
-        auto currentHEdge = halfEdge(hEdge).next;
+    do {
+        Vector3 plane_point = vertices[halfEdge(hEdge).rootVertex];
+        Vector3 plane_normal = 
+            cross(getEdgeDirection(hEdge, vertices), polygonNormal);
+
+        float d = dot(plane_normal, plane_point);
 
         planes[vertexCounter++] = {
-            vertices[halfEdge(currentHEdge).rootVertex],
-            math::cross(getEdgeDirection(currentHEdge, vertices), polygonNormal),
+            plane_normal,
+            d,
         };
 
-        hEdge = currentHEdge;
-    }
+        hEdge = halfEdge(hEdge).next;
+    } while (hEdge != start);
 }
 
 math::Vector3 HalfEdgeMesh::getEdgeDirection(const EdgeData &edge, const math::Vector3 *vertices) const {
@@ -293,11 +302,19 @@ math::Vector3 HalfEdgeMesh::getEdgeOrigin(const HalfEdge &edge, math::Vector3 *v
     return vertices[edge.rootVertex];
 }
 
-Plane HalfEdgeMesh::getPlane(const PolygonID &polygon, const math::Vector3 *vertices) const {
-    Plane plane = {};
-    plane.normal = getFaceNormal(polygon, vertices);
-    plane.point = vertices[halfEdge(mPolygons[polygon]).rootVertex];
-    return plane;
+Plane HalfEdgeMesh::getPlane(PolygonID polygon,
+                             const math::Vector3 *vertices) const
+{
+    // FIXME: this doesn't need to be normalized, but getFaceNormal normalizes
+    // the output currently
+    Vector3 normal = getFaceNormal(polygon, vertices);
+    Vector3 point = vertices[halfEdge(mPolygons[polygon]).rootVertex];
+    float d = dot(normal, point);
+
+    return {
+        normal,
+        d,
+    };
 }
 
 std::pair<math::Vector3, math::Vector3> HalfEdgeMesh::getEdgeNormals(const HalfEdge &hEdge, math::Vector3 *vertices) const {
@@ -326,8 +343,6 @@ const EdgeData &HalfEdgeMesh::edge(uint32_t id) const {
 // Can pass a polygon data into here - polygon data is just half edge ID
 const HalfEdge &HalfEdgeMesh::halfEdge(HalfEdgeID id) const {
     return mHalfEdges[id];
-}
-
 }
 
 }

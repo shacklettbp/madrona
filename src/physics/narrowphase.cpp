@@ -43,8 +43,7 @@ static inline float getDistanceFromPlane(
     const Plane &plane, const Vector3 &a)
 {
     float adotn = a.dot(plane.normal);
-    float pdotn = plane.point.dot(plane.normal);
-    return (adotn - pdotn);
+    return (adotn - plane.d);
 }
 
 // Need to be normalized
@@ -606,7 +605,7 @@ static inline void addContactsToSolver(SolverData &solver_data,
     int32_t contact_idx = solver_data.numContacts.fetch_add(
         added_contacts.size(), std::memory_order_relaxed);
 
-    assert(contact_idx < maxContacts);
+    assert(contact_idx < solver_data.maxContacts);
     
     for (CountT i = 0; i < added_contacts.size(); i++) {
         solver_data.contacts[contact_idx + i] = added_contacts[i];
@@ -693,7 +692,7 @@ inline void runNarrowphase(
         Manifold manifold = doSAT(a_collision_mesh, b_collision_mesh);
 
         if (manifold.numContactPoints > 0) {
-            solver.addContacts({{
+            addContactsToSolver(solver, {{
                 manifold.aIsReference ? a_entity : b_entity,
                 manifold.aIsReference ? b_entity : a_entity,
                 {
@@ -739,7 +738,7 @@ inline void runNarrowphase(
         if (penetration > 0) {
             Vector3 contact_point = a_pos - t * plane_normal;
 
-            solver.addContacts({{
+            addContactsToSolver(solver, {{
                 b_entity,
                 a_entity,
                 {
@@ -766,12 +765,12 @@ inline void runNarrowphase(
         constexpr Vector3 base_normal = { 0, 0, 1 };
         Vector3 plane_normal = b_rot.rotateVec(base_normal);
 
-        geometry::Plane plane = { b_pos, plane_normal };
+        geometry::Plane plane { plane_normal, dot(b_pos, plane_normal) };
 
         Manifold manifold = doSATPlane(plane, a_collision_mesh);
 
         if (manifold.numContactPoints > 0) {
-            solver.addContacts({{
+            addContactsToSolver(solver, {{
                 b_entity, // Plane is always reference
                 a_entity,
                 {
@@ -795,7 +794,7 @@ TaskGraph::NodeID setupTasks(
     Span<const TaskGraph::NodeID> deps)
 {
     auto narrowphase = builder.addToGraph<ParallelForNode<Context,
-        runNarrowphase, CandidateCollision>>({rgb_update});
+        runNarrowphase, CandidateCollision>>(deps);
 
     // FIXME do some kind of scoped reset on tmp alloc
     return builder.addToGraph<ResetTmpAllocNode>({narrowphase});

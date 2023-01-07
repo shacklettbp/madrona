@@ -61,9 +61,8 @@ struct HalfEdge {
 };
 
 struct Plane {
-    math::Vector3 point;
-    // Has to be normalized
-    math::Vector3 normal;
+    math::Vector3 normal; // Potentially unnormalized
+    float d;
 };
 
 struct Segment {
@@ -82,7 +81,8 @@ public:
             uint32_t vertexCount, const math::Vector3 *vertices);
 
     // Normalized
-    math::Vector3 getFaceNormal(const PolygonID &polygon, const math::Vector3 *vertices) const;
+    math::Vector3 getFaceNormal(PolygonID polygon,
+                                const math::Vector3 *vertices) const;
 
     // Normalized normal
     Plane getPlane(PolygonID polygon, const math::Vector3 *vertices) const;
@@ -244,8 +244,8 @@ public:
     template <typename Fn>
     inline void findOverlapsForLeaf(LeafID leaf_id, Fn &&fn) const;
 
-    float traceRay(math::Vector3 o, math::Vector3 d,
-                   float t_max = float(INFINITY));
+    Entity traceRay(math::Vector3 o, math::Vector3 d, float *hit_t,
+                    float t_max = float(INFINITY));
 
     void updateLeaf(LeafID leaf_id,
                     const math::Vector3 &pos,
@@ -294,10 +294,11 @@ private:
     void rebuild();
     void refit(LeafID *leaf_ids, CountT num_moved);
 
-    bool traceRayIntoLeaf(int32_t leaf_idx,
-                          math::Vector3 world_ray_o,
-                          math::Vector3 world_ray_d,
-                          float t_max);
+    float traceRayIntoLeaf(int32_t leaf_idx,
+                           math::Vector3 world_ray_o,
+                           math::Vector3 world_ray_d,
+                           float t_min,
+                           float t_max);
 
     Node *nodes_;
     CountT num_nodes_;

@@ -23,8 +23,6 @@ SolverData::SolverData(CountT max_contacts_per_step,
       restitutionThreshold(2.f * gMagnitude * h)
 {}
 
-};
-
 namespace solver {
 
 static inline Vector3 multDiag(Vector3 diag, Vector3 v)
@@ -624,7 +622,6 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerSingleton<broadphase::BVH>();
 
     registry.registerComponent<Velocity>();
-    registry.registerComponent<CollisionAABB>();
 
     registry.registerComponent<solver::SubstepPrevState>();
     registry.registerComponent<solver::PreSolvePositional>();
@@ -647,7 +644,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
 {
     auto broadphase_complete = broadphase::setupTasks(builder, deps);
 
-    auto cur_node = find_overlapping;
+    auto cur_node = broadphase_complete;
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
@@ -681,5 +678,4 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupCleanupTasks(
     return builder.addToGraph<ClearTmpNode<CollisionEventTemporary>>(deps);
 }
 
-}
 }

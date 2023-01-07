@@ -54,9 +54,9 @@ void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
             madrona::math::AABB child_aabb {
                 /* .pMin = */ {
                     node.minX[i],
-                    node.minY[i],&
+                    node.minY[i],
                     node.minZ[i],
-                },&
+                },
                 /* .pMax = */ {
                     node.maxX[i],
                     node.maxY[i],

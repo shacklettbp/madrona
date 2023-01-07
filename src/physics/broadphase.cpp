@@ -486,7 +486,8 @@ void BVH::updateTree()
     }
 }
 
-float BVH::traceRay(math::Vector3 o, math::Vector3 d, float t_max)
+Entity BVH::traceRay(math::Vector3 o, math::Vector3 d, float *hit_t,
+                     float t_max)
 {
     using namespace math;
 
@@ -495,6 +496,8 @@ float BVH::traceRay(math::Vector3 o, math::Vector3 d, float t_max)
     int32_t stack[128];
     stack[0] = 0;
     CountT stack_size = 1;
+
+    Entity hit_entity = Entity::none();
 
     while (stack_size > 0) { 
         int32_t node_idx = stack[--stack_size];
@@ -520,7 +523,12 @@ float BVH::traceRay(math::Vector3 o, math::Vector3 d, float t_max)
             if (child_aabb.rayIntersects(o, inv_d, 0.f, t_max)) {
                 if (node.isLeaf(i)) {
                     int32_t leaf_idx = node.leafIDX(i);
-                    traceRayIntoLeaf(leaf_idx, o, d, t_max);
+                    float hit_t = traceRayIntoLeaf(leaf_idx, o, d, 0.f, t_max);
+
+                    if (hit_t < t_max) {
+                        t_max = hit_t;
+                        hit_entity = leaf_entities_[leaf_idx];
+                    }
                 } else {
                     stack[stack_size++] = node.children[i];
                 }
@@ -528,104 +536,82 @@ float BVH::traceRay(math::Vector3 o, math::Vector3 d, float t_max)
         }
     }
     
-    // FIXME
-    assert(false);
+    *hit_t = t_max;
+    return hit_entity;
 }
 
-/* return codes */
-#define	MISSED		 0
-#define	FRONTFACE	 1
-#define	BACKFACE	-1
-
-//int	RayCvxPolyhedronInt( org, dir, tmax, phdrn, ph_num, tresult, norm )
-//Point3	*org, *dir ;	/* origin and direction of ray */
-//double	tmax ;		/* maximum useful distance along ray */
-//Point4	*phdrn ;	/* list of planes in convex polyhedron */
-//int	ph_num ;	/* number of planes in convex polyhedron */
-//double	*tresult ;	/* returned: distance of intersection along ray */
-//Point3	*norm ;		/* returned: normal of face hit */
-
-static inline bool traceRayIntoConvexPolyhedron(
-    geometry::HalfEdgeMesh *convex_mesh,
-    math::Vector3 ray_o,
-    math::Vector3 ray_d,
-    float t_max)
+static inline float traceRayIntoPlane(
+    Vector3 ray_o, Vector3 ray_d,
+    float t_min, float t_max)
 {
-    // GPU GEMS II, Fast Ray - Convex Polyhedron Intersection
-    
-    Vector4 *pln ;			/* plane equation */
-    double	tnear, tfar, t, vn, vd ;
-    int	fnorm_num, bnorm_num ;	/* front/back face # hit */
+    // ray_o and ray_d have already been transformed into the space of the
+    // plane. normal is (0, 0, 1), d is 0
 
-    float t_near = -FLT_MAX;
-    float t_far = t_max;
+    float denom = ray_d.z;
 
-    CountT num_faces = convex_mesh->getPolygonCount();
-
-    /* Test each plane in polyhedron */
-    for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
-	    /* Compute intersection point T and sidedness */
-        geometry::Plane plane = convex_mesh->getPlane(
-            geometry::PolygonID(face_idx), convex_mesh->vertices());
-
-	    vd = dot( ray_d, pln ) ;
-	    vn = dot( ray_o, pln ) + pln->w ;
-	    if ( vd == 0.0 ) {
-	        /* ray is parallel to plane - check if ray origin is inside plane's
-	           half-space */
-	        if ( vn > 0.0 ) {
-	    	    /* ray origin is outside half-space */
-	    	    return false;
-            }
-	    } else {
-	        /* ray not parallel - get distance to plane */
-	        t = -vn / vd ;
-	        if ( vd < 0.0 ) {
-	    	/* front face - T is a near point */
-	    	if ( t > tfar ) return ( MISSED ) ;
-	    	if ( t > tnear ) {
-	    	    /* hit near face, update normal */
-	    	    fnorm_num = ph_num ;
-	    	    tnear = t ;
-	    	}
-	        } else {
-	    	/* back face - T is a far point */
-	    	if ( t < tnear ) return ( MISSED ) ;
-	    	if ( t < tfar ) {
-	    	    /* hit far face, update normal */
-	    	    bnorm_num = ph_num ;
-	    	    tfar = t ;
-	    	}
-	        }
-	    }
+    if (denom == 0) {
+        return t_max;
     }
 
-    /* survived all tests */
-    /* Note: if ray originates on polyhedron, may want to change 0.0 to some
-     * epsilon to avoid intersecting the originating face.
-     */
-    if ( tnear >= 0.0 ) {
-	/* outside, hitting front face */
-	*norm = *(Point3 *)&phdrn[fnorm_num] ;
-	*tresult = tnear ;
-	return ( FRONTFACE ) ;
+    float t = -ray_o.z / denom;
+
+    if (t >= t_min && t < t_max) {
+        return t;
     } else {
-	if ( tfar < tmax ) {
-	    /* inside, hitting back face */
-	    *norm = *(Point3 *)&phdrn[bnorm_num] ;
-	    *tresult = tfar ;
-	    return ( BACKFACE ) ;
-	} else {
-	    /* inside, but back face beyond tmax */
-	    return ( MISSED ) ;
-	}
+        return t_max;
     }
 }
 
-bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
-                           math::Vector3 world_ray_o,
-                           math::Vector3 world_ray_d,
-                           float t_max)
+// RTCD 5.3.8 (modified from segment to ray). Algorithm also in GPU Gems 2.
+// Intersect ray r(t)=ray_o + , t_min <= t <=t_max against convex polyhedron
+// specified by the n halfspaces defined by the planes p[]. On exit tfirst
+// and tlast define the intersection, if any
+static inline float traceRayIntoConvexPolyhedron(
+    const geometry::HalfEdgeMesh &convex_mesh,
+    Vector3 ray_o, Vector3 ray_d,
+    float t_min, float t_max)
+{
+    // Set initial interval based on t_min & t_max. For a ray, tlast should be
+    // set to +FLT_MAX. For a line, tfirst should also be set to –FLT_MAX
+    float tfirst = t_min;
+    float tlast = t_max;
+   
+    // Intersect segment against each plane
+    CountT num_faces = convex_mesh.getPolygonCount();
+    for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
+        geometry::Plane plane = convex_mesh.getPlane(
+            geometry::PolygonID(face_idx), convex_mesh.vertices());
+
+        float denom = dot(plane.normal, ray_d);
+        float dist = plane.d - dot(plane.normal, ray_o);
+
+        // Test if segment runs parallel to the plane
+        if (denom == 0.0f) {
+            // If so, return “no intersection” if segment lies outside plane
+            if (dist > 0.0f) return t_max;
+        } else {
+            // Compute parameterized t value for intersection with current plane
+            float t = dist / denom;
+            if (denom < 0.0f) {
+                // When entering halfspace, update tfirst if t is larger
+                if (t > tfirst) tfirst = t;
+            } else {
+                // When exiting halfspace, update tlast if t is smaller
+                if (t < tlast) tlast = t;
+            }
+            // Exit with “no intersection” if intersection becomes empty
+            if (tfirst > tlast) return t_max;
+        }
+    }
+
+    return tfirst;
+}
+
+float BVH::traceRayIntoLeaf(int32_t leaf_idx,
+                            math::Vector3 world_ray_o,
+                            math::Vector3 world_ray_d,
+                            float t_min,
+                            float t_max)
 {
     CollisionPrimitive *prim = leaf_primitives_[leaf_idx];
     LeafTransform leaf_txfm = leaf_transforms_[leaf_idx];
@@ -644,10 +630,11 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
 
     switch (prim->type) {
     case CollisionPrimitive::Type::Hull: {
-        traceRayIntoConvexPolyhedron(obj_ray_o, obj_ray_d, t_max);
+        return traceRayIntoConvexPolyhedron(prim->hull.halfEdgeMesh,
+            obj_ray_o, obj_ray_d, t_min, t_max);
     } break;
     case CollisionPrimitive::Type::Plane: {
-        assert(false);
+        return traceRayIntoPlane(obj_ray_o, obj_ray_d, t_min, t_max);
     } break;
     case CollisionPrimitive::Type::Sphere: {
         assert(false);
@@ -661,17 +648,17 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
 inline void updateLeavesEntry(
     Context &ctx,
     const LeafID &leaf_id,
-    const Vector3 &pos,
-    const Quat &rot,
-    const Vector3 &scale,
+    const Position &pos,
+    const Rotation &rot,
+    const Scale &scale,
     const ObjectID &obj_id,
-    const math::Vector3 &linear_vel)
+    const Velocity &vel)
 {
     BVH &bvh = ctx.getSingleton<BVH>();
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
     AABB obj_aabb = obj_mgr.aabbs[obj_id.idx];
 
-    bvh.updateLeaf(leaf_id, pos, rot, scale, linear_vel, obj_aabb);
+    bvh.updateLeaf(leaf_id, pos, rot, scale, vel.linear, obj_aabb);
 }
 
 inline void updateBVHEntry(
@@ -705,7 +692,7 @@ TaskGraph::NodeID setupTasks(
 {
     auto update_leaves = builder.addToGraph<ParallelForNode<Context,
         broadphase::updateLeavesEntry,
-            broadphase::LeafID, 
+            LeafID, 
             Position,
             Rotation,
             Scale,
