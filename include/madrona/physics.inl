@@ -2,14 +2,34 @@
 
 namespace madrona::phys {
 
+namespace geometry {
+
+uint32_t HalfEdgeMesh::getVertexCount() const
+{
+    return mVertexCount;
+}
+
+const math::Vector3 &HalfEdgeMesh::vertex(uint32_t id) const
+{
+    return mVertices[id];
+}
+
+const math::Vector3 * HalfEdgeMesh::vertices() const
+{
+    return mVertices;
+}
+
+}
+
 namespace broadphase {
 
-LeafID BVH::reserveLeaf(Entity e)
+LeafID BVH::reserveLeaf(Entity e, CollisionPrimitive *prim)
 {
     int32_t leaf_idx = num_leaves_.fetch_add(1, std::memory_order_relaxed);
     assert(leaf_idx < num_allocated_leaves_);
 
     leaf_entities_[leaf_idx] = e;
+    leaf_primitives_[leaf_idx] = prim;
 
     return LeafID {
         leaf_idx,

@@ -85,7 +85,7 @@ public:
     math::Vector3 getFaceNormal(const PolygonID &polygon, const math::Vector3 *vertices) const;
 
     // Normalized normal
-    Plane getPlane(const PolygonID &polygon, const math::Vector3 *vertices) const;
+    Plane getPlane(PolygonID polygon, const math::Vector3 *vertices) const;
 
     // Get ordered vertices of a polygon (face)
     uint32_t getPolygonVertices(
@@ -114,8 +114,9 @@ public:
     math::Vector3 getEdgeOrigin(const HalfEdge &edge, math::Vector3 *vertices) const;
 
 public:
-    uint32_t getVertexCount() const;
-    const math::Vector3 &vertex(uint32_t id) const;
+    inline uint32_t getVertexCount() const;
+    inline const math::Vector3 & vertex(uint32_t id) const;
+    inline const math::Vector3 * vertices() const;
 
     uint32_t getPolygonCount() const;
     const PolygonData &polygon(uint32_t id) const;
@@ -235,7 +236,7 @@ public:
     BVH(CountT max_leaves, float leaf_velocity_expansion,
         float leaf_accel_expansion);
 
-    inline LeafID reserveLeaf(Entity e);
+    inline LeafID reserveLeaf(Entity e, CollisionPrimitive *prim);
 
     template <typename Fn>
     inline void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
@@ -250,8 +251,8 @@ public:
                     const math::Vector3 &pos,
                     const math::Quat &rot,
                     const math::Vector3 &scale,
-                    const base::ObjectID &obj_id,
-                    const math::Vector3 &linear_vel);
+                    const math::Vector3 &linear_vel,
+                    const math::AABB &obj_aabb);
 
     inline void rebuildOnUpdate();
     void updateTree();
@@ -280,24 +281,32 @@ private:
         inline void clearChild(CountT child);
     };
 
+    // FIXME: evaluate whether storing this in-line in the tree
+    // makes sense or if we should force a lookup through the entity ID
+    struct LeafTransform {
+        math::Vector3 pos;
+        math::Quat rot;
+        math::Vector3 scale;
+    };
+
     inline CountT numInternalNodes(CountT num_leaves) const;
 
     void rebuild();
     void refit(LeafID *leaf_ids, CountT num_moved);
 
-    bool traceRayIntoEntity(math::Vector3 o,
-                            math::Vector3 d,
-                            float t_max,
-                            Entity e);
+    bool traceRayIntoLeaf(int32_t leaf_idx,
+                          math::Vector3 world_ray_o,
+                          math::Vector3 world_ray_d,
+                          float t_max);
 
     Node *nodes_;
     CountT num_nodes_;
     const CountT num_allocated_nodes_;
-    math::AABB *leaf_aabbs_;
-    math::Vector3 *leaf_positions_;
-    math::Quat *leaf_rotations_;
-    uint32_t *leaf_parents_;
     Entity *leaf_entities_;
+    CollisionPrimitive **leaf_primitives_;
+    math::AABB *leaf_aabbs_;
+    LeafTransform  *leaf_transforms_;
+    uint32_t *leaf_parents_;
     int32_t *sorted_leaves_;
     std::atomic<int32_t> num_leaves_;
     int32_t num_allocated_leaves_;
@@ -337,7 +346,9 @@ struct RigidBodyPhysicsSystem {
                      CountT max_contacts_per_step);
 
     static void reset(Context &ctx);
-    static broadphase::LeafID registerEntity(Context &ctx, Entity e);
+    static broadphase::LeafID registerEntity(Context &ctx,
+                                             Entity e,
+                                             base::ObjectID obj_id);
 
     static void registerTypes(ECSRegistry &registry);
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,

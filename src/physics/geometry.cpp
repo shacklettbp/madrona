@@ -328,15 +328,6 @@ const HalfEdge &HalfEdgeMesh::halfEdge(HalfEdgeID id) const {
     return mHalfEdges[id];
 }
 
-uint32_t HalfEdgeMesh::getVertexCount() const {
-    return mVertexCount;
-}
-
-const math::Vector3 &HalfEdgeMesh::vertex(uint32_t id) const {
-    return mVertices[id];
 }
 
 }
-
-}
-

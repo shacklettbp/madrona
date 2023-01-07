@@ -609,9 +609,13 @@ void RigidBodyPhysicsSystem::reset(Context &ctx)
 }
 
 broadphase::LeafID RigidBodyPhysicsSystem::registerEntity(Context &ctx,
-                                                          Entity e)
+                                                          Entity e,
+                                                          ObjectID obj_id)
 {
-    return ctx.getSingleton<broadphase::BVH>().reserveLeaf(e);
+    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    CollisionPrimitive *prim = &obj_mgr.primitives[obj_id.idx];
+
+    return ctx.getSingleton<broadphase::BVH>().reserveLeaf(e, prim);
 }
 
 void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
