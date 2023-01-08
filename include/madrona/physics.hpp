@@ -237,6 +237,7 @@ public:
         float leaf_accel_expansion);
 
     inline LeafID reserveLeaf(Entity e, CollisionPrimitive *prim);
+    inline math::AABB getLeafAABB(LeafID leaf_id) const;
 
     template <typename Fn>
     inline void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
@@ -247,12 +248,17 @@ public:
     Entity traceRay(math::Vector3 o, math::Vector3 d, float *hit_t,
                     float t_max = float(INFINITY));
 
-    void updateLeaf(LeafID leaf_id,
-                    const math::Vector3 &pos,
-                    const math::Quat &rot,
-                    const math::Vector3 &scale,
-                    const math::Vector3 &linear_vel,
-                    const math::AABB &obj_aabb);
+    void updateLeafPosition(LeafID leaf_id,
+                            const math::Vector3 &pos,
+                            const math::Quat &rot,
+                            const math::Vector3 &scale,
+                            const math::Vector3 &linear_vel,
+                            const math::AABB &obj_aabb);
+
+    math::AABB expandLeaf(LeafID leaf_id,
+                          const math::Vector3 &linear_vel);
+
+    void refitLeaf(LeafID leaf_id, const math::AABB &leaf_aabb);
 
     inline void rebuildOnUpdate();
     void updateTree();
@@ -305,7 +311,7 @@ private:
     const CountT num_allocated_nodes_;
     Entity *leaf_entities_;
     CollisionPrimitive **leaf_primitives_;
-    math::AABB *leaf_aabbs_;
+    math::AABB *leaf_aabbs_; // FIXME: remove this, it's duplicated data
     LeafTransform  *leaf_transforms_;
     uint32_t *leaf_parents_;
     int32_t *sorted_leaves_;

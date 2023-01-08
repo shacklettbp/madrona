@@ -642,9 +642,10 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps,
     CountT num_substeps)
 {
-    auto broadphase_complete = broadphase::setupTasks(builder, deps);
+    auto broadphase_pre =
+        broadphase::setupPreIntegrationTasks(builder, deps);
 
-    auto cur_node = broadphase_complete;
+    auto cur_node = broadphase_pre;
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
@@ -669,7 +670,10 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     auto clear_candidates = builder.addToGraph<
         ClearTmpNode<CandidateTemporary>>({cur_node});
 
-    return clear_candidates;
+    auto broadphase_post =
+        broadphase::setupPostIntegrationTasks(builder, {clear_candidates});
+
+    return broadphase_post;
 }
 
 TaskGraph::NodeID RigidBodyPhysicsSystem::setupCleanupTasks(

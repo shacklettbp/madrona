@@ -36,6 +36,11 @@ LeafID BVH::reserveLeaf(Entity e, CollisionPrimitive *prim)
     };
 }
 
+math::AABB BVH::getLeafAABB(LeafID leaf_id) const
+{
+    return leaf_aabbs_[leaf_id.id];
+}
+
 template <typename Fn>
 void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 {

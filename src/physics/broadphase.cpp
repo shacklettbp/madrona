@@ -78,7 +78,8 @@ void BVH::rebuild()
                     int32_t leaf_id = sorted_leaves_[entry.offset + i];
 
                     const auto &aabb = leaf_aabbs_[leaf_id];
-                    leaf_parents_[leaf_id] = ((uint32_t)node_id << 2) | (uint32_t)i;
+                    leaf_parents_[leaf_id] =
+                        ((uint32_t)node_id << 2) | (uint32_t)i;
 
                     node.setLeaf(i, leaf_id);
                     node.minX[i] = aabb.pMin.x;
@@ -341,90 +342,38 @@ void BVH::rebuild()
 #endif
 }
 
-void BVH::refit(LeafID *moved_leaf_ids, CountT num_moved)
+static inline AABB expandAABBWithMotion(
+    AABB aabb,
+    const Vector3 &linear_velocity,
+    float velocity_expansion_factor,
+    float accel_expansion_factor)
 {
-    (void)moved_leaf_ids;
-    (void)num_moved;
+    // FIXME include external velocity
+#pragma unroll
+    for (int32_t i = 0; i < 3; i++) {
+        float pos_delta =
+            velocity_expansion_factor * linear_velocity[i];
 
-    int32_t num_moved_hacked = num_leaves_.load(std::memory_order_relaxed);
+        float min_delta = pos_delta - accel_expansion_factor;
+        float max_delta = pos_delta + accel_expansion_factor;
 
-    for (CountT i = 0; i < num_moved_hacked; i++) {
-        int32_t leaf_id = i;
-        const AABB &leaf_aabb = leaf_aabbs_[leaf_id];
-        uint32_t leaf_parent = leaf_parents_[leaf_id];
-
-        int32_t node_idx = int32_t(leaf_parent >> 2_u32);
-        int32_t sub_idx = int32_t(leaf_parent & 3);
-
-        Node &leaf_node = nodes_[node_idx];
-        leaf_node.minX[sub_idx] = leaf_aabb.pMin.x;
-        leaf_node.minY[sub_idx] = leaf_aabb.pMin.y;
-        leaf_node.minZ[sub_idx] = leaf_aabb.pMin.z;
-        leaf_node.maxX[sub_idx] = leaf_aabb.pMax.x;
-        leaf_node.maxY[sub_idx] = leaf_aabb.pMax.y;
-        leaf_node.maxZ[sub_idx] = leaf_aabb.pMax.z;
-
-        int32_t child_idx = node_idx;
-        node_idx = leaf_node.parentID;
-
-        while (node_idx != sentinel_) {
-            Node &node = nodes_[node_idx];
-            int child_offset = -1;
-            for (int j = 0; j < 4; j++) {
-                if (node.children[j] == child_idx) {
-                    child_offset = j;
-                    break;
-                }
-            }
-            assert(child_offset != -1);
-
-            bool expanded = false;
-            if (leaf_aabb.pMin.x < node.minX[child_offset]) {
-                node.minX[child_offset] = leaf_aabb.pMin.x;
-                expanded = true;
-            }
-
-            if (leaf_aabb.pMin.y < node.minY[child_offset]) {
-                node.minY[child_offset] = leaf_aabb.pMin.y;
-                expanded = true;
-            }
-
-            if (leaf_aabb.pMin.z < node.minZ[child_offset]) {
-                node.minZ[child_offset] = leaf_aabb.pMin.z;
-                expanded = true;
-            }
-
-            if (leaf_aabb.pMax.x > node.maxX[child_offset]) {
-                node.maxX[child_offset] = leaf_aabb.pMax.x;
-                expanded = true;
-            }
-
-            if (leaf_aabb.pMax.y > node.maxY[child_offset]) {
-                node.maxY[child_offset] = leaf_aabb.pMax.y;
-                expanded = true;
-            }
-
-            if (leaf_aabb.pMax.z > node.maxZ[child_offset]) {
-                node.maxZ[child_offset] = leaf_aabb.pMax.z;
-                expanded = true;
-            }
-
-            if (!expanded) {
-                break;
-            }
-
-            child_idx = node_idx;
-            node_idx = node.parentID;
+        if (min_delta < 0.f) {
+            aabb.pMin[i] += min_delta;
+        }
+        if (max_delta > 0.f) {
+            aabb.pMax[i] += max_delta;
         }
     }
+
+    return aabb;
 }
 
-void BVH::updateLeaf(LeafID leaf_id,
-                     const Vector3 &pos,
-                     const Quat &rot,
-                     const Vector3 &scale,
-                     const Vector3 &linear_vel,
-                     const AABB &obj_aabb)
+void BVH::updateLeafPosition(LeafID leaf_id,
+                             const Vector3 &pos,
+                             const Quat &rot,
+                             const Vector3 &scale,
+                             const Vector3 &linear_vel,
+                             const AABB &obj_aabb)
 {
     // FIXME: this could all be more efficient with a center + width
     // AABB representation
@@ -451,23 +400,11 @@ void BVH::updateLeaf(LeafID leaf_id,
         }
     }
 
-#pragma unroll
-    for (int32_t i = 0; i < 3; i++) {
-        float pos_delta =
-            leaf_velocity_expansion_ * linear_vel[i];
+    AABB expanded_aabb = expandAABBWithMotion(world_aabb, linear_vel,
+                                              leaf_velocity_expansion_,
+                                              leaf_accel_expansion_);
 
-        float min_delta = pos_delta - leaf_accel_expansion_;
-        float max_delta = pos_delta + leaf_accel_expansion_;
-
-        if (min_delta < 0.f) {
-            world_aabb.pMin[i] += min_delta;
-        }
-        if (max_delta > 0.f) {
-            world_aabb.pMax[i] += max_delta;
-        }
-    }
-
-    leaf_aabbs_[leaf_id.id] = world_aabb;
+    leaf_aabbs_[leaf_id.id] = expanded_aabb;
     leaf_transforms_[leaf_id.id] = {
         pos,
         rot,
@@ -476,13 +413,179 @@ void BVH::updateLeaf(LeafID leaf_id,
     sorted_leaves_[leaf_id.id] = leaf_id.id;
 }
 
+AABB BVH::expandLeaf(LeafID leaf_id,
+                     const math::Vector3 &linear_vel)
+{
+    AABB aabb = leaf_aabbs_[leaf_id.id];
+    AABB expanded_aabb = expandAABBWithMotion(aabb, linear_vel,
+        leaf_velocity_expansion_, leaf_accel_expansion_);
+
+    leaf_aabbs_[leaf_id.id] = expanded_aabb;
+
+    return expanded_aabb;
+}
+
+static inline MADRONA_ALWAYS_INLINE float atomicMinF(float *addr, float value)
+{
+#ifdef MADRONA_GPU_MODE
+    float old;
+    if (!signbit(value)) {
+        old = __int_as_float(atomicMin((int *)addr, __float_as_int(value)));
+    } else {
+        old = __uint_as_float(
+            atomicMax((unsigned int *)addr, __float_as_uint(value)));
+    }
+
+    return old;
+#else
+    std::atomic_ref<float> a(*addr);
+
+    float old = a.load(std::memory_order_relaxed);
+
+    while (old > value && !a.compare_exchange_weak(old, value,
+        std::memory_order_relaxed, std::memory_order_relaxed)) {}
+
+    return old;
+#endif
+}
+
+static inline MADRONA_ALWAYS_INLINE float atomicMaxF(float *addr, float value)
+{
+#ifdef MADRONA_GPU_MODE
+    float old;
+
+    // cuda::atomic::fetch_max does not seem to work properly (cuda 11.8)
+    if (!signbit(value)) {
+        old = __int_as_float(
+            atomicMax((int *)addr, __float_as_int(value)));
+    } else {
+        old = __uint_as_float(
+            atomicMin((unsigned int *)addr, __float_as_uint(value)));
+    }
+
+    return old;
+#else
+    std::atomic_ref<float> a(*addr);
+
+    float old = a.load(std::memory_order_relaxed);
+
+    while (old < value && !a.compare_exchange_weak(old, value,
+        std::memory_order_relaxed, std::memory_order_relaxed)) {}
+
+    return old;
+#endif
+}
+
+void BVH::refitLeaf(LeafID leaf_id, const AABB &leaf_aabb)
+{
+    uint32_t leaf_parent = leaf_parents_[leaf_id.id];
+
+    int32_t node_idx = int32_t(leaf_parent >> 2_u32);
+    int32_t sub_idx = int32_t(leaf_parent & 3);
+
+    Node &leaf_node = nodes_[node_idx];
+
+#ifdef MADRONA_GPU_MODE
+    using AtomicFloatRef = cuda::atomic_ref<float>;
+#else
+    using AtomicFloatRef = std::atomic_ref<float>;
+#endif
+
+    {
+        auto nonAtomicMinF = [](float *ptr, float v) {
+            AtomicFloatRef a(*ptr);
+            float old = a.load(std::memory_order_relaxed);
+            if (v < old) {
+                a.store(v, std::memory_order_relaxed);
+            }
+            return old;
+        };
+
+        auto nonAtomicMaxF = [](float *ptr, float v) {
+            AtomicFloatRef a(*ptr);
+            float old = a.load(std::memory_order_relaxed);
+            if (v > old) {
+                a.store(v, std::memory_order_relaxed);
+            }
+            return old;
+        };
+
+        float x_min_prev = 
+            nonAtomicMinF(&leaf_node.minX[sub_idx], leaf_aabb.pMin.x);
+        float y_min_prev =
+            nonAtomicMinF(&leaf_node.minY[sub_idx], leaf_aabb.pMin.y);
+        float z_min_prev =
+            nonAtomicMinF(&leaf_node.minZ[sub_idx], leaf_aabb.pMin.z);
+        float x_max_prev =
+            nonAtomicMaxF(&leaf_node.maxX[sub_idx], leaf_aabb.pMax.x);
+        float y_max_prev =
+            nonAtomicMaxF(&leaf_node.maxY[sub_idx], leaf_aabb.pMax.y);
+        float z_max_prev =
+            nonAtomicMaxF(&leaf_node.maxZ[sub_idx], leaf_aabb.pMax.z);
+
+        bool expanded = leaf_aabb.pMin.x < x_min_prev ||
+                        leaf_aabb.pMin.y < y_min_prev ||
+                        leaf_aabb.pMin.z < z_min_prev ||
+                        leaf_aabb.pMax.x > x_max_prev ||
+                        leaf_aabb.pMax.y > y_max_prev ||
+                        leaf_aabb.pMax.z > z_max_prev;
+
+        if (!expanded) return;
+    }
+
+    int32_t child_idx = node_idx;
+    node_idx = leaf_node.parentID;
+
+    while (node_idx != sentinel_) {
+        Node &node = nodes_[node_idx];
+        int child_offset = -1;
+        for (int j = 0; j < 4; j++) {
+            if (node.children[j] == child_idx) {
+                child_offset = j;
+                break;
+            }
+        }
+        assert(child_offset != -1);
+
+        float x_min_prev =
+            atomicMinF(&node.minX[child_offset], leaf_aabb.pMin.x);
+
+        float y_min_prev =
+            atomicMinF(&node.minY[child_offset], leaf_aabb.pMin.y);
+
+        float z_min_prev =
+            atomicMinF(&node.minZ[child_offset], leaf_aabb.pMin.z);
+
+        float x_max_prev =
+            atomicMaxF(&node.maxX[child_offset], leaf_aabb.pMax.x);
+
+        float y_max_prev =
+            atomicMaxF(&node.maxY[child_offset], leaf_aabb.pMax.y);
+
+        float z_max_prev =
+            atomicMaxF(&node.maxZ[child_offset], leaf_aabb.pMax.z);
+
+        bool expanded = leaf_aabb.pMin.x < x_min_prev ||
+                        leaf_aabb.pMin.y < y_min_prev ||
+                        leaf_aabb.pMin.z < z_min_prev ||
+                        leaf_aabb.pMax.x > x_max_prev ||
+                        leaf_aabb.pMax.y > y_max_prev ||
+                        leaf_aabb.pMax.z > z_max_prev;
+
+        if (!expanded) {
+            break;
+        }
+
+        child_idx = node_idx;
+        node_idx = node.parentID;
+    }
+}
+
 void BVH::updateTree()
 {
     if (force_rebuild_) {
         force_rebuild_ = false;
         rebuild();
-    } else {
-        refit(nullptr, 0);
     }
 }
 
@@ -645,7 +748,7 @@ float BVH::traceRayIntoLeaf(int32_t leaf_idx,
     assert(false);
 }
 
-inline void updateLeavesEntry(
+inline void updateLeafPositionsEntry(
     Context &ctx,
     const LeafID &leaf_id,
     const Position &pos,
@@ -658,13 +761,30 @@ inline void updateLeavesEntry(
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
     AABB obj_aabb = obj_mgr.aabbs[obj_id.idx];
 
-    bvh.updateLeaf(leaf_id, pos, rot, scale, vel.linear, obj_aabb);
+    bvh.updateLeafPosition(leaf_id, pos, rot, scale, vel.linear, obj_aabb);
+}
+
+// FIXME currently unused
+inline void expandLeavesEntry(
+    Context &ctx,
+    const LeafID &leaf_id,
+    const Velocity &vel)
+{
+    BVH &bvh = ctx.getSingleton<BVH>();
+    AABB expanded = bvh.expandLeaf(leaf_id, vel.linear);
+    bvh.refitLeaf(leaf_id, expanded);
 }
 
 inline void updateBVHEntry(
-    Context &, BVH &bvh)
+    Context &ctx, BVH &bvh)
 {
     bvh.updateTree();
+}
+
+inline void refitEntry(Context &ctx, LeafID leaf_id)
+{
+    BVH &bvh = ctx.getSingleton<BVH>();
+    bvh.refitLeaf(leaf_id, bvh.getLeafAABB(leaf_id));
 }
 
 inline void findOverlappingEntry(
@@ -686,12 +806,12 @@ inline void findOverlappingEntry(
     });
 }
 
-TaskGraph::NodeID setupTasks(
+TaskGraph::NodeID setupPreIntegrationTasks(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
-    auto update_leaves = builder.addToGraph<ParallelForNode<Context,
-        broadphase::updateLeavesEntry,
+    auto update_leaves =
+        builder.addToGraph<ParallelForNode<Context, updateLeafPositionsEntry,
             LeafID, 
             Position,
             Rotation,
@@ -702,11 +822,40 @@ TaskGraph::NodeID setupTasks(
     auto bvh_update = builder.addToGraph<ParallelForNode<Context,
         broadphase::updateBVHEntry, broadphase::BVH>>({update_leaves});
 
+    // FIXME Unfortunately need to call refit here, because update
+    // won't necessarily do anything
+    auto refit = builder.addToGraph<ParallelForNode<Context,
+        broadphase::refitEntry, broadphase::LeafID>>({bvh_update});
+
     auto find_overlapping = builder.addToGraph<ParallelForNode<Context,
-        broadphase::findOverlappingEntry, Entity, LeafID>>(
-            {bvh_update});
+        broadphase::findOverlappingEntry, Entity, LeafID>>({refit});
 
     return find_overlapping;
+}
+
+TaskGraph::NodeID setupPostIntegrationTasks(
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> deps)
+{
+#if 0
+    auto expand_leaves = builder.addToGraph<ParallelForNode<Context,
+        expandLeavesEntry, LeafID, Velocity>>({deps});
+#endif
+
+    // FIXME: can we avoid doing a full tree refit here?
+    auto update_leaves =
+        builder.addToGraph<ParallelForNode<Context, updateLeafPositionsEntry,
+            LeafID, 
+            Position,
+            Rotation,
+            Scale,
+            ObjectID,
+            Velocity>>(deps);
+
+    auto refit = builder.addToGraph<ParallelForNode<Context,
+        broadphase::refitEntry, broadphase::LeafID>>({update_leaves});
+
+    return refit;
 }
 
 }
