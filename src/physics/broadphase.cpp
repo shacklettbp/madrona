@@ -589,7 +589,10 @@ void BVH::updateTree()
     }
 }
 
-Entity BVH::traceRay(math::Vector3 o, math::Vector3 d, float *hit_t,
+Entity BVH::traceRay(Vector3 o,
+                     Vector3 d,
+                     float *out_hit_t,
+                     Vector3 *out_hit_normal,
                      float t_max)
 {
     using namespace math;
@@ -600,7 +603,8 @@ Entity BVH::traceRay(math::Vector3 o, math::Vector3 d, float *hit_t,
     stack[0] = 0;
     CountT stack_size = 1;
 
-    Entity hit_entity = Entity::none();
+    Entity closest_hit_entity = Entity::none();
+    Vector3 closest_hit_normal;
 
     while (stack_size > 0) { 
         int32_t node_idx = stack[--stack_size];
@@ -626,11 +630,16 @@ Entity BVH::traceRay(math::Vector3 o, math::Vector3 d, float *hit_t,
             if (child_aabb.rayIntersects(o, inv_d, 0.f, t_max)) {
                 if (node.isLeaf(i)) {
                     int32_t leaf_idx = node.leafIDX(i);
-                    float hit_t = traceRayIntoLeaf(leaf_idx, o, d, 0.f, t_max);
+                    
+                    float hit_t;
+                    Vector3 leaf_hit_normal;
+                    bool leaf_hit = traceRayIntoLeaf(
+                        leaf_idx, o, d, 0.f, t_max, &hit_t, &leaf_hit_normal);
 
-                    if (hit_t < t_max) {
+                    if (leaf_hit) {
                         t_max = hit_t;
-                        hit_entity = leaf_entities_[leaf_idx];
+                        closest_hit_entity = leaf_entities_[leaf_idx];
+                        closest_hit_normal = leaf_hit_normal;
                     }
                 } else {
                     stack[stack_size++] = node.children[i];
@@ -639,13 +648,16 @@ Entity BVH::traceRay(math::Vector3 o, math::Vector3 d, float *hit_t,
         }
     }
     
-    *hit_t = t_max;
-    return hit_entity;
+    *out_hit_t = t_max;
+    *out_hit_normal = closest_hit_normal;
+    return closest_hit_entity;
 }
 
-static inline float traceRayIntoPlane(
+static inline bool traceRayIntoPlane(
     Vector3 ray_o, Vector3 ray_d,
-    float t_min, float t_max)
+    float t_min, float t_max,
+    float *hit_t,
+    Vector3 *hit_normal)
 {
     // ray_o and ray_d have already been transformed into the space of the
     // plane. normal is (0, 0, 1), d is 0
@@ -653,37 +665,44 @@ static inline float traceRayIntoPlane(
     float denom = ray_d.z;
 
     if (denom == 0) {
-        return t_max;
+        return false;
     }
 
     float t = -ray_o.z / denom;
 
-    if (t >= t_min && t < t_max) {
-        return t;
-    } else {
-        return t_max;
+    if (t < t_min || t > t_max) {
+        return false;
     }
+
+    *hit_t = t;
+    return true;
 }
 
 // RTCD 5.3.8 (modified from segment to ray). Algorithm also in GPU Gems 2.
 // Intersect ray r(t)=ray_o + , t_min <= t <=t_max against convex polyhedron
 // specified by the n halfspaces defined by the planes p[]. On exit tfirst
 // and tlast define the intersection, if any
-static inline float traceRayIntoConvexPolyhedron(
+static inline bool traceRayIntoConvexPolyhedron(
     const geometry::HalfEdgeMesh &convex_mesh,
     Vector3 ray_o, Vector3 ray_d,
-    float t_min, float t_max)
+    float t_min, float t_max,
+    float *hit_t,
+    Vector3 *hit_normal)
 {
+    using namespace geometry;
+
     // Set initial interval based on t_min & t_max. For a ray, tlast should be
     // set to +FLT_MAX. For a line, tfirst should also be set to –FLT_MAX
     float tfirst = t_min;
     float tlast = t_max;
-   
+
+    CountT hit_face_idx = -1;
+
     // Intersect segment against each plane
     CountT num_faces = convex_mesh.getPolygonCount();
     for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
-        geometry::Plane plane = convex_mesh.getPlane(
-            geometry::PolygonID(face_idx), convex_mesh.vertices());
+        Plane plane =
+            convex_mesh.getPlane(PolygonID(face_idx), convex_mesh.vertices());
 
         float denom = dot(plane.normal, ray_d);
         float dist = plane.d - dot(plane.normal, ray_o);
@@ -691,30 +710,47 @@ static inline float traceRayIntoConvexPolyhedron(
         // Test if segment runs parallel to the plane
         if (denom == 0.0f) {
             // If so, return “no intersection” if segment lies outside plane
-            if (dist > 0.0f) return t_max;
+            if (dist > 0.0f) return false;
         } else {
             // Compute parameterized t value for intersection with current plane
             float t = dist / denom;
             if (denom < 0.0f) {
                 // When entering halfspace, update tfirst if t is larger
-                if (t > tfirst) tfirst = t;
+                if (t >= tfirst) {
+                    tfirst = t;
+                    hit_face_idx = face_idx;
+                }
             } else {
                 // When exiting halfspace, update tlast if t is smaller
-                if (t < tlast) tlast = t;
+                if (t <= tlast) {
+                    tlast = t;
+                }
             }
             // Exit with “no intersection” if intersection becomes empty
-            if (tfirst > tlast) return t_max;
+            if (tfirst > tlast) return false;
         }
     }
 
-    return tfirst;
+    // Addition from RTCD algo: if ray starts within (or on edge of) convex
+    // polyhedron, skip it
+    if (hit_face_idx == -1) {
+        return false;
+    }
+
+    *hit_t = tfirst;
+    *hit_normal = convex_mesh.getFaceNormal(
+        PolygonID(hit_face_idx), convex_mesh.vertices());
+
+    return true;
 }
 
-float BVH::traceRayIntoLeaf(int32_t leaf_idx,
-                            math::Vector3 world_ray_o,
-                            math::Vector3 world_ray_d,
-                            float t_min,
-                            float t_max)
+bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
+                           math::Vector3 world_ray_o,
+                           math::Vector3 world_ray_d,
+                           float t_min,
+                           float t_max,
+                           float *hit_t,
+                           math::Vector3 *hit_normal)
 {
     CollisionPrimitive *prim = leaf_primitives_[leaf_idx];
     LeafTransform leaf_txfm = leaf_transforms_[leaf_idx];
@@ -731,13 +767,17 @@ float BVH::traceRayIntoLeaf(int32_t leaf_idx,
     obj_ray_d.y /= leaf_txfm.scale.y;
     obj_ray_d.z /= leaf_txfm.scale.z;
 
+    Vector3 obj_hit_normal;
+
+    bool hit_leaf;
     switch (prim->type) {
     case CollisionPrimitive::Type::Hull: {
-        return traceRayIntoConvexPolyhedron(prim->hull.halfEdgeMesh,
-            obj_ray_o, obj_ray_d, t_min, t_max);
+        hit_leaf = traceRayIntoConvexPolyhedron(prim->hull.halfEdgeMesh,
+            obj_ray_o, obj_ray_d, t_min, t_max, hit_t, &obj_hit_normal);
     } break;
     case CollisionPrimitive::Type::Plane: {
-        return traceRayIntoPlane(obj_ray_o, obj_ray_d, t_min, t_max);
+        hit_leaf = traceRayIntoPlane(
+            obj_ray_o, obj_ray_d, t_min, t_max, hit_t, &obj_hit_normal);
     } break;
     case CollisionPrimitive::Type::Sphere: {
         assert(false);
@@ -745,7 +785,9 @@ float BVH::traceRayIntoLeaf(int32_t leaf_idx,
     default: __builtin_unreachable();
     }
 
-    assert(false);
+    *hit_normal = leaf_txfm.rot.rotateVec(obj_hit_normal);
+
+    return hit_leaf;
 }
 
 inline void updateLeafPositionsEntry(

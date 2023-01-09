@@ -245,7 +245,10 @@ public:
     template <typename Fn>
     inline void findOverlapsForLeaf(LeafID leaf_id, Fn &&fn) const;
 
-    Entity traceRay(math::Vector3 o, math::Vector3 d, float *hit_t,
+    Entity traceRay(math::Vector3 o,
+                    math::Vector3 d,
+                    float *out_hit_t,
+                    math::Vector3 *out_hit_normal,
                     float t_max = float(INFINITY));
 
     void updateLeafPosition(LeafID leaf_id,
@@ -300,11 +303,13 @@ private:
     void rebuild();
     void refit(LeafID *leaf_ids, CountT num_moved);
 
-    float traceRayIntoLeaf(int32_t leaf_idx,
-                           math::Vector3 world_ray_o,
-                           math::Vector3 world_ray_d,
-                           float t_min,
-                           float t_max);
+    bool traceRayIntoLeaf(int32_t leaf_idx,
+                          math::Vector3 world_ray_o,
+                          math::Vector3 world_ray_d,
+                          float t_min,
+                          float t_max,
+                          float *hit_t,
+                          math::Vector3 *hit_normal);
 
     Node *nodes_;
     CountT num_nodes_;
