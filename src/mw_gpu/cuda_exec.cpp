@@ -195,7 +195,7 @@ __attribute__((constructor)) static void setCudaHeapSize()
 {
     // FIXME size limit for device side malloc:
     REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
-                                1ul*1024ul*1024ul*1024ul));
+                                8ul*1024ul*1024ul*1024ul));
 }
 
 using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
@@ -947,7 +947,7 @@ static GPUEngineState initEngineAndUserState(int gpu_id,
                                              CompileConfig::Executor exec_mode,
                                              cudaStream_t strm)
 {
-    constexpr int64_t max_instances_per_world = 16384;
+    constexpr int64_t max_instances_per_world = 1024;
 
     auto batch_renderer = Optional<render::BatchRenderer>::none();
 
