@@ -152,6 +152,18 @@ struct CollisionMesh {
 
 }
 
+struct ExternalForce : math::Vector3 {
+    ExternalForce(math::Vector3 v)
+        : Vector3(v)
+    {}
+};
+
+struct ExternalTorque : math::Vector3 {
+    ExternalTorque(math::Vector3 v)
+        : Vector3(v)
+    {}
+};
+
 enum class ResponseType : uint32_t {
     Dynamic,
     Kinematic,

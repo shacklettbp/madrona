@@ -66,6 +66,8 @@ inline void substepRigidBodies(Context &ctx,
                                const Velocity &vel,
                                const ObjectID &obj_id,
                                ResponseType response_type,
+                               ExternalForce &ext_force,
+                               ExternalTorque &ext_torque,
                                SubstepPrevState &prev_state,
                                PreSolvePositional &presolve_pos,
                                PreSolveVelocity &presolve_vel)
@@ -77,6 +79,8 @@ inline void substepRigidBodies(Context &ctx,
     const auto &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
     const RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
+
+    float inv_m = metadata.invMass;
     Vector3 inv_I = metadata.invInertiaTensor;
 
     float h = solver.h;
@@ -93,8 +97,8 @@ inline void substepRigidBodies(Context &ctx,
     if (response_type == ResponseType::Dynamic) {
         v += h * solver.g;
     }
-
-    // FIXME: external forces
+    
+    v += h * inv_m * ext_force;
  
     x += h * v;
 
@@ -106,9 +110,7 @@ inline void substepRigidBodies(Context &ctx,
 
     Quat to_local = q.inv();
 
-    // FIXME: skip all this tau_ext stuff if it's 0
-    Vector3 tau_ext { 0, 0, 0 };
-    Vector3 tau_ext_local = to_local.rotateVec(tau_ext);
+    Vector3 tau_ext_local = to_local.rotateVec(ext_torque);
     Vector3 omega_local = to_local.rotateVec(omega);
 
     Vector3 I_omega_local = multDiag(I, omega_local);
@@ -631,6 +633,8 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerComponent<broadphase::LeafID>();
     registry.registerSingleton<broadphase::BVH>();
 
+    registry.registerComponent<ExternalForce>();
+    registry.registerComponent<ExternalTorque>();
     registry.registerComponent<ResponseType>();
     registry.registerComponent<Velocity>();
 
@@ -660,7 +664,8 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
-            ResponseType, solver::SubstepPrevState, solver::PreSolvePositional,
+            ResponseType, ExternalForce, ExternalTorque,
+            solver::SubstepPrevState, solver::PreSolvePositional,
             solver::PreSolveVelocity>>({cur_node});
 
         auto run_narrowphase = narrowphase::setupTasks(builder, {rgb_update});
