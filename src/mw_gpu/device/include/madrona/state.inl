@@ -221,6 +221,8 @@ template <typename ComponentT>
 ComponentT & StateManager::getUnsafe(Entity e)
 {
     const EntityStore::EntitySlot &slot = entity_store_.entities[e.id];
+    assert(slot.gen == e.gen);
+
     return getUnsafe<ComponentT>(slot.loc);
 }
 
@@ -229,11 +231,12 @@ ComponentT & StateManager::getUnsafe(Loc loc)
 {
     auto &archetype = *archetypes_[loc.archetype];
     uint32_t component_id = TypeTracker::typeID<ComponentT>();
-    int32_t col_idx = *archetype.columnLookup.lookup(component_id);
+    auto col_idx = archetype.columnLookup.lookup(component_id);
+    assert(col_idx.has_value());
 
     Table &tbl = archetype.tbl;
 
-    return ((ComponentT *)(tbl.columns[col_idx]))[loc.row];
+    return ((ComponentT *)(tbl.columns[*col_idx]))[loc.row];
 }
 
 template <typename ArchetypeT, typename ComponentT>

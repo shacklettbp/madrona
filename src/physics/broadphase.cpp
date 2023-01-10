@@ -838,6 +838,14 @@ inline void findOverlappingEntry(
 
     bvh.findOverlapsForLeaf(leaf_id, [&](Entity overlapping_entity) {
         if (e.id < overlapping_entity.id) {
+            // FIXME: Change this so static objects are kept in a separate BVH
+            // and this check can be removed.
+            if (ctx.getUnsafe<ResponseType>(e) == ResponseType::Static &&
+                ctx.getUnsafe<ResponseType>(overlapping_entity) ==
+                    ResponseType::Static) {
+                return;
+            }
+
             Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
             CandidateCollision &candidate = ctx.getUnsafe<
                 CandidateCollision>(candidate_loc);

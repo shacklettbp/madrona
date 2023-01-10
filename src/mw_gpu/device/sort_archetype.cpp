@@ -1246,8 +1246,6 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_
     }
 
     if (invocation_idx == 0) {
-        taskgraph->getNodeData(nextRearrangeNode).numDynamicInvocations =
-            numDynamicInvocations;
         numDynamicInvocations = 0;
     }
 }

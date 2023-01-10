@@ -65,15 +65,19 @@ inline void substepRigidBodies(Context &ctx,
                                Rotation &rot,
                                const Velocity &vel,
                                const ObjectID &obj_id,
+                               ResponseType response_type,
                                SubstepPrevState &prev_state,
                                PreSolvePositional &presolve_pos,
                                PreSolveVelocity &presolve_vel)
 {
+    if (response_type == ResponseType::Static) {
+        return;
+    }
+
     const auto &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
     const RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
     Vector3 inv_I = metadata.invInertiaTensor;
-    float inv_m = metadata.invMass;
 
     float h = solver.h;
 
@@ -86,8 +90,7 @@ inline void substepRigidBodies(Context &ctx,
     Vector3 v = vel.linear;
     Vector3 omega = vel.angular;
 
-    // FIXME should really implement static objects differently:
-    if (inv_m > 0) {
+    if (response_type == ResponseType::Dynamic) {
         v += h * solver.g;
     }
 
@@ -291,6 +294,7 @@ static inline void handleContact(Context &ctx,
     PreSolvePositional presolve_pos1 =
         ctx.getUnsafe<PreSolvePositional>(contact.ref);
     ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(contact.ref);
+    ResponseType resp_type1 = ctx.getUnsafe<ResponseType>(contact.ref);
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
 
     Position *x2_ptr = &ctx.getUnsafe<Position>(contact.alt);
@@ -299,6 +303,7 @@ static inline void handleContact(Context &ctx,
     PreSolvePositional presolve_pos2 =
         ctx.getUnsafe<PreSolvePositional>(contact.alt);
     ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
+    ResponseType resp_type2 = ctx.getUnsafe<ResponseType>(contact.alt);
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
     Vector3 x1 = *x1_ptr;
@@ -310,13 +315,18 @@ static inline void handleContact(Context &ctx,
     float inv_m1 = metadata1.invMass;
     float inv_m2 = metadata2.invMass;
 
-    // FIXME hack: proper static object support
-    if (inv_m1 == 0 && inv_m2 == 0) {
-        return;
-    }
-
     Vector3 inv_I1 = metadata1.invInertiaTensor;
     Vector3 inv_I2 = metadata2.invInertiaTensor;
+
+    if (resp_type1 == ResponseType::Static) {
+        inv_m1 = 0.f;
+        inv_I1 = Vector3::zero();
+    }
+
+    if (resp_type2 == ResponseType::Static) {
+        inv_m2 = 0.f;
+        inv_I2 = Vector3::zero();
+    }
 
     float mu_s1 = metadata1.muS;
     float mu_s2 = metadata2.muS;
@@ -621,6 +631,7 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerComponent<broadphase::LeafID>();
     registry.registerSingleton<broadphase::BVH>();
 
+    registry.registerComponent<ResponseType>();
     registry.registerComponent<Velocity>();
 
     registry.registerComponent<solver::SubstepPrevState>();
@@ -649,7 +660,7 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
-            solver::SubstepPrevState, solver::PreSolvePositional,
+            ResponseType, solver::SubstepPrevState, solver::PreSolvePositional,
             solver::PreSolveVelocity>>({cur_node});
 
         auto run_narrowphase = narrowphase::setupTasks(builder, {rgb_update});

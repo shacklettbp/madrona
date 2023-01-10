@@ -152,6 +152,12 @@ struct CollisionMesh {
 
 }
 
+enum class ResponseType : uint32_t {
+    Dynamic,
+    Kinematic,
+    Static,
+};
+
 struct Velocity {
     math::Vector3 linear;
     math::Vector3 angular;

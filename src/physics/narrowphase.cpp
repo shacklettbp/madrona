@@ -720,9 +720,8 @@ inline void runNarrowphase(
         assert(false);
     } break;
     case NarrowphaseTest::PlanePlane: {
-        // Do nothing, planes must be static.
-        // Should rework this entire setup so static objects
-        // aren't checked against the BVH
+        // Planes must be static, this should never be called
+        assert(false);
     } break;
     case NarrowphaseTest::SpherePlane: {
         auto sphere = a_prim->sphere;
