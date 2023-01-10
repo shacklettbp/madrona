@@ -29,6 +29,7 @@ using namespace madrona;
 #include "device/include/madrona/mw_gpu/const.hpp"
 #include "device/include/madrona/memory.hpp"
 #include "device/include/madrona/mw_gpu/host_print.hpp"
+#include "device/include/madrona/mw_gpu/tracing.hpp"
 
 namespace madrona {
 namespace mwGPU {
@@ -183,6 +184,33 @@ private:
     std::thread thread_;
 };
 
+class DeviceTracingAllocator {
+public:
+    inline DeviceTracingAllocator() {
+        CUdeviceptr tracing_devptr;
+        REQ_CU(cuMemAllocManaged(&tracing_devptr,
+                                 sizeof(DeviceTracing), CU_MEM_ATTACH_GLOBAL));
+        device_tracing_ = (DeviceTracing *)tracing_devptr;
+    }
+    inline ~DeviceTracingAllocator() {
+        auto size = device_tracing_->cur_index_.load(std::memory_order_relaxed);
+        // madrona::WriteToFile<DeviceTracing::DeviceLog>(device_tracing_->device_logs_, size, "/tmp/", "_madrona_device_tracing");
+
+        std::string file_name = "/tmp/" + std::to_string(getpid()) + "_madrona_device_events.bin";
+        std::ofstream myFile(file_name, std::ios::out | std::ios::binary);
+        myFile.write((char *)device_tracing_->device_logs_, size * sizeof(DeviceTracing::DeviceLog));
+        myFile.close();
+
+        REQ_CU(cuMemFree((CUdeviceptr)device_tracing_));
+    }
+    inline void* getTracingPtr() {
+        return device_tracing_;
+    }
+
+private:
+    DeviceTracing *device_tracing_;
+};
+
 }
 }
 }
@@ -202,6 +230,8 @@ using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
 using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
 using HostPrint = mwGPU::madrona::mwGPU::HostPrint;
 using HostPrintCPU = mwGPU::madrona::mwGPU::HostPrintCPU;
+using DeviceTracing = mwGPU::madrona::mwGPU::DeviceTracing;
+using DeviceTracingAllocator = mwGPU::madrona::mwGPU::DeviceTracingAllocator;
 
 namespace consts {
 static constexpr uint32_t numEntryQueueThreads = 512;
@@ -234,6 +264,7 @@ struct GPUEngineState {
     std::thread allocatorThread;
     HostChannel *hostAllocatorChannel;
     std::unique_ptr<HostPrintCPU> hostPrint;
+    std::unique_ptr<DeviceTracingAllocator> deviceTracing;
 
     uint32_t *rendererInstanceCounts;
     HeapArray<void *> exportedColumns;
@@ -1029,6 +1060,8 @@ static GPUEngineState initEngineAndUserState(
 
     auto host_print = std::make_unique<HostPrintCPU>();
 
+    auto device_tracing = std::make_unique<DeviceTracingAllocator>();
+
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
                                                    world_data_alignment,
@@ -1037,6 +1070,7 @@ static GPUEngineState initEngineAndUserState(
 
     auto init_ecs_args = makeKernelArgBuffer(alloc_init,
                                              host_print->getChannelPtr(),
+                                             device_tracing->getTracingPtr(),
                                              exported_readback);
 
     auto init_worlds_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
@@ -1080,6 +1114,10 @@ static GPUEngineState initEngineAndUserState(
 
     gpu_consts_readback->tmpAllocatorAddr =
         (char *)gpu_consts_readback->tmpAllocatorAddr +
+        (uintptr_t)gpu_state_buffer;
+
+    gpu_consts_readback->deviceTracingAddr =
+        (char *)gpu_consts_readback->deviceTracingAddr +
         (uintptr_t)gpu_state_buffer;
 
     uint32_t *instance_counts_host;
@@ -1151,6 +1189,7 @@ static GPUEngineState initEngineAndUserState(
         std::move(allocator_thread),
         allocator_channel,
         std::move(host_print),
+        std::move(device_tracing),
         instance_counts_host,
         std::move(exported_cols),
     };

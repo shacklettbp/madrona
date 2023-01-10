@@ -2,6 +2,7 @@
 #include <madrona/crash.hpp>
 #include <madrona/memory.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
+#include <madrona/mw_gpu/tracing.hpp>
 
 #include "megakernel_consts.hpp"
 
@@ -67,9 +68,11 @@ void TaskGraph::init()
             std::memory_order_relaxed);
 
         cur_node_idx_.store(0, std::memory_order_release);
-    } 
+    }
 
     init_barrier_.arrive_and_wait();
+
+    device_tracing->DeviceEventLogging(mwGPU::DeviceEvent::calibration, 0, 0, 0);
 }
 
 void TaskGraph::setBlockState()
@@ -170,6 +173,9 @@ void TaskGraph::finishWork()
         std::memory_order_acq_rel);
 
     if (prev_remaining == num_finished) {
+
+        device_tracing->DeviceEventLogging(mwGPU::DeviceEvent::nodeFinish, cur_node.funcID, 0, node_idx);
+
         uint32_t next_node_idx = node_idx + 1;
 
         while (true) {
@@ -188,7 +194,9 @@ void TaskGraph::finishWork()
                                             std::memory_order_relaxed);
                 next_node.totalNumInvocations.store(new_num_invocations,
                     std::memory_order_relaxed);
-            } 
+        
+                device_tracing->DeviceEventLogging(mwGPU::DeviceEvent::nodeStart, next_node.funcID, new_num_invocations, next_node_idx);
+            }
 
             cur_node_idx_.store(next_node_idx, std::memory_order_release);
             break;
@@ -234,6 +242,7 @@ static inline __attribute__((always_inline)) void megakernelImpl()
 }
 }
 
+//
 extern "C" __global__ void madronaMWGPUComputeConstants(
     uint32_t num_worlds,
     uint32_t num_world_data_bytes,
@@ -274,6 +283,9 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
 
     total_bytes = tmp_allocator_offset + sizeof(TmpAllocator);
 
+    uint64_t device_tracing_offset = utils::roundUp(total_bytes, (uint64_t)alignof(mwGPU::DeviceTracing*));
+    total_bytes = device_tracing_offset + sizeof(mwGPU::DeviceTracing*);
+
     *out_constants = GPUImplConsts {
         /*.jobSystemAddr = */                  (void *)0ul,
         /* .taskGraph = */                     (void *)0ul,
@@ -282,6 +294,7 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         /* .hostAllocatorAddr = */             (void *)host_allocator_offset,
         /* .hostPrintAddr = */                 (void *)host_print_offset,
         /* .tmpAllocatorAddr */                (void *)tmp_allocator_offset,
+        /* .DeviceTracing = */                 (void **)device_tracing_offset,
         /* .rendererASInstancesAddrs = */      (void **)0ul,
         /* .rendererInstanceCountsAddr = */    (void *)0ul,
         /* .rendererBLASesAddr = */            (void *)0ul,

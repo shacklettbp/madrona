@@ -8,7 +8,7 @@
 
 namespace madrona
 {
-    enum class HostEvent : uint8_t
+    enum class HostEvent : uint32_t
     {
         initStart = 0, // todo: may further split up if necessary
         initEnd = 1,
@@ -18,21 +18,11 @@ namespace madrona
         renderEnd = 5,
     };
 
-    enum class DeviceEvent
-    {
-        TBD,
-    };
-
     struct HostTracing
     {
         // todo: replace vectors with pre-allocated memory pool for lover overhead
         std::vector<HostEvent> events;
         std::vector<uint64_t> time_stamps;
-    };
-
-    struct DeviceTracing
-    {
-        std::vector<DeviceEvent> events;
     };
 
     // TLS is used for easy access from both MWCudaExecutor and applications such as hindseek
@@ -56,6 +46,9 @@ namespace madrona
         HOST_TRACING.time_stamps.push_back(GetTimeStamp());
 #endif
     }
+
+    template <typename T>
+    void WriteToFile(T *events, size_t size, const std::string file_path, const std::string name);
 
     void FinalizeLogging(const std::string file_path);
 } // namespace madrona

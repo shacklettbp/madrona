@@ -9,7 +9,7 @@ namespace mwGPU {
 namespace entryKernels {
 
 template <typename ContextT, typename WorldDataT, typename InitT>
-__global__ void initECS(HostAllocInit alloc_init, void *print_channel,
+__global__ void initECS(HostAllocInit alloc_init, void *print_channel, void *device_tracing,
                         void **exported_columns)
 {
     HostAllocator *host_alloc = mwGPU::getHostAllocator();
@@ -17,6 +17,9 @@ __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
 
     auto host_print = (HostPrint *)GPUImplConsts::get().hostPrintAddr;
     new (host_print) HostPrint(print_channel);
+
+    auto device_tracing_addr = (DeviceTracing **)GPUImplConsts::get().deviceTracingAddr;
+    *device_tracing_addr = reinterpret_cast<DeviceTracing *>(device_tracing);
 
     TmpAllocator &tmp_alloc = TmpAllocator::get();
     new (&tmp_alloc) TmpAllocator();
