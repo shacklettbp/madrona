@@ -48,6 +48,18 @@ ComponentT & Context::getUnsafe(Loc l)
     return mwGPU::getStateManager()->getUnsafe<ComponentT>(l);
 }
 
+template <typename ComponentT>
+ResultRef<ComponentT> Context::get(Entity e)
+{
+    return mwGPU::getStateManager()->get<ComponentT>(e);
+}
+
+template <typename ComponentT>
+ResultRef<ComponentT> Context::get(Loc l)
+{
+    return mwGPU::getStateManager()->get<ComponentT>(l);
+}
+
 template <typename SingletonT>
 SingletonT & Context::getSingleton()
 {

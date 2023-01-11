@@ -239,6 +239,36 @@ ComponentT & StateManager::getUnsafe(Loc loc)
     return ((ComponentT *)(tbl.columns[*col_idx]))[loc.row];
 }
 
+template <typename ComponentT>
+ResultRef<ComponentT> StateManager::get(Entity e)
+{
+    const EntityStore::EntitySlot &slot = entity_store_.entities[e.id];
+    if (slot.gen != e.gen) {
+        return ResultRef<ComponentT>(nullptr);
+    }
+
+    return get<ComponentT>(slot.loc);
+}
+
+template <typename ComponentT>
+ResultRef<ComponentT> StateManager::get(Loc loc)
+{
+    auto &archetype = *archetypes_[loc.archetype];
+    uint32_t component_id = TypeTracker::typeID<ComponentT>();
+    auto col_idx = archetype.columnLookup.lookup(component_id);
+
+    if (!col_idx.has_value()) {
+        return ResultRef<ComponentT>(nullptr);
+    }
+
+    assert(col_idx.has_value());
+
+    Table &tbl = archetype.tbl;
+
+    return ResultRef<ComponentT>(
+        ((ComponentT *)(tbl.columns[*col_idx])) + loc.row);
+}
+
 template <typename ArchetypeT, typename ComponentT>
 ComponentT * StateManager::getArchetypeComponent()
 {

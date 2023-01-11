@@ -136,6 +136,12 @@ public:
     template <typename ComponentT>
     ComponentT & getUnsafe(Loc loc);
 
+    template <typename ComponentT>
+    inline ResultRef<ComponentT> get(Entity e);
+
+    template <typename ComponentT>
+    inline ResultRef<ComponentT> get(Loc loc);
+
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * getArchetypeComponent();
 
