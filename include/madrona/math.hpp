@@ -539,7 +539,7 @@ struct Quat {
         float scalar = w;
 
         Vector3 pure_x_v = cross(pure, v);
-        Vector3 pure_x_pure_x_v = cross(pure_x_v, v);
+        Vector3 pure_x_pure_x_v = cross(pure, pure_x_v);
         
         return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
     }

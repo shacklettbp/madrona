@@ -410,11 +410,6 @@ static inline void handleContact(Context &ctx,
 
     float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
 
-    printf("B (%f %f %f) (%f %f %f) (%f %f %f %f) (%f %f %f %f)\n",
-           x1.x, x1.y, x1.z, x2.x, x2.y, x2.z,
-           q1.w, q1.x, q1.y, q1.z,
-           q2.w, q2.x, q2.y, q2.z);
-
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
@@ -435,12 +430,6 @@ static inline void handleContact(Context &ctx,
                                 avg_mu_s,
                                 lambda_n,
                                 lambda_t);
-
-        printf("A %d (%f %f %f) (%f %f %f) (%f %f %f %f) (%f %f %f %f)\n",
-               i,
-               x1.x, x1.y, x1.z, x2.x, x2.y, x2.z,
-               q1.w, q1.x, q1.y, q1.z,
-               q2.w, q2.x, q2.y, q2.z);
 
         lambdas[i] = lambda_n;
     }
