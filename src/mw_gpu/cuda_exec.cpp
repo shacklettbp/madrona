@@ -193,14 +193,11 @@ public:
         device_tracing_ = (DeviceTracing *)tracing_devptr;
     }
     inline ~DeviceTracingAllocator() {
-        auto size = device_tracing_->cur_index_.load(std::memory_order_relaxed);
-        // madrona::WriteToFile<DeviceTracing::DeviceLog>(device_tracing_->device_logs_, size, "/tmp/", "_madrona_device_tracing");
-
-        std::string file_name = "/tmp/" + std::to_string(getpid()) + "_madrona_device_events.bin";
-        std::ofstream myFile(file_name, std::ios::out | std::ios::binary);
-        myFile.write((char *)device_tracing_->device_logs_, size * sizeof(DeviceTracing::DeviceLog));
-        myFile.close();
-
+#ifdef MADRONA_TRACING
+        ::madrona::WriteToFile<DeviceTracing::DeviceLog>(
+            device_tracing_->device_logs_,
+            device_tracing_->getIndex(), "/tmp/", "_madrona_device_tracing");
+#endif
         REQ_CU(cuMemFree((CUdeviceptr)device_tracing_));
     }
     inline void* getTracingPtr() {
@@ -230,7 +227,6 @@ using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
 using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
 using HostPrint = mwGPU::madrona::mwGPU::HostPrint;
 using HostPrintCPU = mwGPU::madrona::mwGPU::HostPrintCPU;
-using DeviceTracing = mwGPU::madrona::mwGPU::DeviceTracing;
 using DeviceTracingAllocator = mwGPU::madrona::mwGPU::DeviceTracingAllocator;
 
 namespace consts {
@@ -730,6 +726,9 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         MADRONA_NVRTC_OPTIONS
         "-arch", arch_str.c_str(),
         threadblock_count_define.c_str(),
+#ifdef MADRONA_TRACING
+        "-DMADRONA_TRACING=1",
+#endif
     };
 
     for (const char *user_flag : cfg.userCompileFlags) {

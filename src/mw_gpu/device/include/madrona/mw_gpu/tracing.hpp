@@ -39,14 +39,33 @@ namespace madrona
             DeviceLog device_logs_[NUM_EVENT_LOG];
 
         public:
-            inline DeviceTracing()
+            inline uint32_t getIndex()
             {
+                return cur_index_.load(std::memory_order_relaxed);
             }
-            void DeviceEventLogging(DeviceEvent event, uint32_t func_id, uint32_t num_invocations, uint32_t node_id);
 
-            void resetIndex();
+            inline void resetIndex()
+            {
+                cur_index_.store(0, std::memory_order_release);
+            }
 
-            uint32_t getIndex();
+#ifdef MADRONA_GPU_MODE
+            inline void DeviceEventLogging(DeviceEvent event, uint32_t func_id, uint32_t num_invocations, uint32_t node_id)
+            {
+#ifdef MADRONA_TRACING
+                uint32_t sm_id;
+                asm("mov.u32 %0, %smid;"
+                    : "=r"(sm_id));
+                uint32_t log_index = cur_index_.fetch_add(1, std::memory_order_relaxed);
+                if (log_index >= NUM_EVENT_LOG)
+                {
+                    log_index = 0;
+                    resetIndex();
+                }
+                device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, clock64()};
+#endif
+            }
+#endif
 
             friend class DeviceTracingAllocator;
         };

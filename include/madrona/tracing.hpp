@@ -1,8 +1,9 @@
 #pragma once
 
 #include <vector>
-#include <string>
 #include <stdint.h>
+#include <unistd.h>
+#include <fstream>
 
 #include <madrona/macros.hpp>
 
@@ -48,7 +49,13 @@ namespace madrona
     }
 
     template <typename T>
-    void WriteToFile(T *events, size_t size, const std::string file_path, const std::string name);
+    inline void WriteToFile(T *events, size_t size, const std::string file_path, const std::string name)
+    {
+        std::string file_name = file_path + std::to_string(getpid()) + name + ".bin";
+        std::ofstream myFile(file_name, std::ios::out | std::ios::binary);
+        myFile.write((char *)events, size * sizeof(T));
+        myFile.close();
+    }
 
     void FinalizeLogging(const std::string file_path);
 } // namespace madrona

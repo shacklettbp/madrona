@@ -9,8 +9,8 @@ namespace mwGPU {
 namespace entryKernels {
 
 template <typename ContextT, typename WorldDataT, typename InitT>
-__global__ void initECS(HostAllocInit alloc_init, void *print_channel, void *device_tracing,
-                        void **exported_columns)
+__global__ void initECS(HostAllocInit alloc_init, void *print_channel,
+                        void *device_tracing, void **exported_columns)
 {
     HostAllocator *host_alloc = mwGPU::getHostAllocator();
     new (host_alloc) HostAllocator(alloc_init);
