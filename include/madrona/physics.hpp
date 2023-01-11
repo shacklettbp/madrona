@@ -198,6 +198,18 @@ struct Contact {
 
 struct CollisionEventTemporary : Archetype<CollisionEvent> {};
 
+struct JointConstraint {
+    Entity e1;
+    Entity e2;
+    math::Vector3 r1;
+    math::Vector3 r2;
+    math::Quat axes1;
+    math::Quat axes2;
+    float separation;
+};
+
+struct ConstraintData : Archetype<JointConstraint> {};
+
 // Per object state
 struct RigidBodyMetadata {
     math::Vector3 invInertiaTensor;
@@ -373,7 +385,8 @@ struct RigidBodyPhysicsSystem {
                      CountT num_substeps,
                      math::Vector3 gravity,
                      CountT max_dynamic_objects,
-                     CountT max_contacts_per_step);
+                     CountT max_contacts_per_world,
+                     CountT max_joint_constraints_per_world);
 
     static void reset(Context &ctx);
     static broadphase::LeafID registerEntity(Context &ctx,

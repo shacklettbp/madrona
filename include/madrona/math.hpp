@@ -538,11 +538,11 @@ struct Quat {
         Vector3 pure {x, y, z};
         float scalar = w;
 
-        return 2.f * dot(pure, v) * pure +
-            (2.f * scalar * scalar - 1.f) * v +
-            2.f * scalar * cross(pure, v);
+        Vector3 pure_x_v = cross(pure, v);
+        Vector3 pure_x_pure_x_v = cross(pure_x_v, v);
+        
+        return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
     }
-
 
     static inline Quat angleAxis(float angle, Vector3 normal)
     {

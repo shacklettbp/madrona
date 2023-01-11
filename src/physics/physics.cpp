@@ -9,12 +9,16 @@ using namespace base;
 using namespace math;
 
 SolverData::SolverData(CountT max_contacts_per_step,
-                   float delta_t,
-                   CountT num_substeps,
-                   Vector3 gravity)
+                       CountT max_joint_constraints,
+                       float delta_t,
+                       CountT num_substeps,
+                       Vector3 gravity)
     : contacts((Contact *)rawAlloc(
           sizeof(Contact) * max_contacts_per_step)),
       numContacts(0),
+      jointConstraints((JointConstraint *)rawAlloc(
+          sizeof(JointConstraint) * max_joint_constraints)),
+      numJointConstraints(0),
       maxContacts(max_contacts_per_step),
       deltaT(delta_t),
       h(delta_t / (float)num_substeps),
@@ -22,6 +26,14 @@ SolverData::SolverData(CountT max_contacts_per_step,
       gMagnitude(gravity.length()),
       restitutionThreshold(2.f * gMagnitude * h)
 {}
+
+inline void collectConstraintsSystem(Context &ctx,
+                                     JointConstraint &constraint)
+{
+    auto &solver = ctx.getSingleton<SolverData>();
+    solver.jointConstraints[solver.numJointConstraints.fetch_add(1,
+        std::memory_order_relaxed)] = constraint;
+}
 
 namespace solver {
 
@@ -134,52 +146,42 @@ inline void substepRigidBodies(Context &ctx,
     presolve_vel.omega = omega;
 }
 
-static inline float generalizedInverseMass(Vector3 local,
-                                           float inv_m,
-                                           Vector3 inv_I,
-                                           Vector3 n)
+static inline float generalizedInverseMass(Vector3 torque_axis,
+                                           Vector3 rot_axis,
+                                           float inv_m)
 {
-    Vector3 lxn = cross(local, n);
-    return inv_m + dot(multDiag(inv_I, lxn), lxn);
+    return inv_m + dot(torque_axis, rot_axis);
 }
 
-template <typename Fn>
+float computePositionalLambda(
+    Vector3 torque_axis1, Vector3 torque_axis2,
+    Vector3 rot_axis1, Vector3 rot_axis2,
+    float inv_m1, float inv_m2,
+    float c, float alpha_tilde)
+{
+    float w1 = generalizedInverseMass(torque_axis1, rot_axis1, inv_m1);
+    float w2 = generalizedInverseMass(torque_axis2, rot_axis1, inv_m2);
+
+    return -c / (w1 + w2 + alpha_tilde);
+}
+
 static MADRONA_ALWAYS_INLINE inline void applyPositionalUpdate(
     Vector3 &x1, Vector3 &x2,
     Quat &q1, Quat &q2,
-    Vector3 r1, Vector3 r2,
+    Vector3 rot_axis_local1, Vector3 rot_axis_local2,
     float inv_m1, float inv_m2,
-    Vector3 inv_I1, Vector3 inv_I2,
-    Vector3 n_world, Vector3 n1, Vector3 n2,
-    float c,
-    float alpha_tilde,
-    float &lambda,
-    Fn &&lambda_check)
+    Vector3 n,
+    float delta_lambda)
 {
-    float w1 = generalizedInverseMass(r1, inv_m1, inv_I1, n1);
-    float w2 = generalizedInverseMass(r2, inv_m2, inv_I2, n2);
+    x1 += delta_lambda * inv_m1 * n;
+    x2 -= delta_lambda * inv_m2 * n;
 
-    float delta_lambda =
-        (-c - alpha_tilde * lambda) / (w1 + w2 + alpha_tilde);
+    float half_lambda = 0.5f * delta_lambda;
 
-    lambda += delta_lambda;
-
-    if (lambda_check(lambda)) return;
-
-    Vector3 p = delta_lambda * n_world;
-    Vector3 p_local1 = delta_lambda * n1;
-    Vector3 p_local2 = delta_lambda * n2;
-
-    x1 += p * inv_m1;
-    x2 -= p * inv_m2;
-
-    Vector3 r1_x_p = cross(r1, p_local1);
-    Vector3 r2_x_p = cross(r2, p_local2);
-
-    Vector3 q1_update_angular_local = 0.5f * multDiag(inv_I1, r1_x_p);
+    Vector3 q1_update_angular_local = half_lambda * rot_axis_local1;
     Vector3 q1_update_angular = q1.rotateVec(q1_update_angular_local);
 
-    Vector3 q2_update_angular_local = 0.5f * multDiag(inv_I2, r2_x_p);
+    Vector3 q2_update_angular_local = half_lambda * rot_axis_local2;
     Vector3 q2_update_angular = q2.rotateVec(q2_update_angular_local);
 
     q1 += Quat::fromAngularVec(q1_update_angular) * q1;
@@ -189,6 +191,74 @@ static MADRONA_ALWAYS_INLINE inline void applyPositionalUpdate(
     // use q1 and q2 for the next constraint
     q1 = q1.normalize();
     q2 = q2.normalize();
+}
+
+static MADRONA_ALWAYS_INLINE inline float applyPositionalUpdate(
+    Vector3 &x1, Vector3 &x2,
+    Quat &q1, Quat &q2,
+    Vector3 r1, Vector3 r2,
+    float inv_m1, float inv_m2,
+    Vector3 inv_I1, Vector3 inv_I2,
+    Vector3 n_world,
+    float c, float alpha_tilde)
+{
+    Vector3 n_local1 = q1.inv().rotateVec(n_world);
+    Vector3 n_local2 = q2.inv().rotateVec(n_world);
+
+    Vector3 torque_axis_local1 = cross(r1, n_local1);
+    Vector3 torque_axis_local2 = cross(r2, n_local2);
+
+    Vector3 rot_axis_local1 = multDiag(inv_I1, torque_axis_local1);
+    Vector3 rot_axis_local2 = multDiag(inv_I2, torque_axis_local2);
+
+    float lambda = computePositionalLambda(
+        torque_axis_local1, torque_axis_local2,
+        rot_axis_local1, rot_axis_local2,
+        inv_m1, inv_m2,
+        c, 0);
+
+    applyPositionalUpdate(
+        x1, x2,
+        q1, q2,
+        rot_axis_local1, rot_axis_local2,
+        inv_m1, inv_m2,
+        n_world, lambda);
+
+    return lambda;
+}
+
+static MADRONA_ALWAYS_INLINE inline
+std::pair<Quat, Quat> computeAngularUpdate(
+    Quat q1, Quat q2,
+    Vector3 inv_I1, Vector3 inv_I2,
+    Vector3 n, Vector3 n1, Vector3 n2,
+    float theta,
+    float alpha_tilde)
+{
+    Vector3 local_rot_axis1 = multDiag(inv_I1, n1);
+    Vector3 local_rot_axis2 = multDiag(inv_I2, n2);
+
+    float w1 = dot(n1, local_rot_axis1);
+    float w2 = dot(n2, local_rot_axis2);
+
+    float delta_lambda = -theta / (w1 + w2 + alpha_tilde);
+
+    float half_lambda = 0.5f * delta_lambda;
+    Vector3 q1_update_angular_local = half_lambda * local_rot_axis1;
+    Vector3 q2_update_angular_local = half_lambda * local_rot_axis2;
+
+    return {
+        Quat::fromAngularVec(q1_update_angular_local),
+        Quat::fromAngularVec(q2_update_angular_local),
+    };
+}
+
+void applyAngularUpdate(
+    Quat &q1, Quat &q2,
+    Quat q1_update_local, Quat q2_update_local)
+{
+    q1 += q1 * q1_update_local;
+    q2 -= q2 * q2_update_local;
 }
 
 static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
@@ -221,45 +291,50 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
     Vector3 p1_hat = q1_prev.rotateVec(r1) + x1_prev;
     Vector3 p2_hat = q2_prev.rotateVec(r2) + x2_prev;
 
-    Vector3 n_local1 = q1.inv().rotateVec(n_world);
-    Vector3 n_local2 = q2.inv().rotateVec(n_world);
+    lambda_n = applyPositionalUpdate(
+        x1, x2,
+        q1, q2,
+        r1, r2,
+        inv_m1, inv_m2,
+        inv_I1, inv_I2,
+        n_world,
+        d, 0);
 
-    applyPositionalUpdate(x1, x2,
-                          q1, q2,
-                          r1, r2,
-                          inv_m1, inv_m2,
-                          inv_I1, inv_I2,
-                          n_world, n_local1, n_local2,
-                          d, 0,
-                          lambda_n, [](float) { return false; });
- 
     Vector3 delta_p = (p1 - p1_hat) - (p2 - p2_hat);
     Vector3 delta_p_t = delta_p - dot(delta_p, n_world) * n_world;
 
     float tangential_magnitude = delta_p_t.length();
 
     if (tangential_magnitude > 0.f) {
-        Vector3 tangent_dir = delta_p_t / tangential_magnitude;
-        Vector3 tangent_dir_local1 = q1.inv().rotateVec(tangent_dir);
-        Vector3 tangent_dir_local2 = q2.inv().rotateVec(tangent_dir);
+        Vector3 t_world = delta_p_t / tangential_magnitude;
+        Vector3 t_local1 = q1.inv().rotateVec(t_world);
+        Vector3 t_local2 = q2.inv().rotateVec(t_world);
+
+        Vector3 friction_torque_axis_local1 = cross(r1, t_local1);
+        Vector3 friction_torque_axis_local2 = cross(r2, t_local2);
+
+        Vector3 friction_rot_axis_local1 =
+            multDiag(inv_I1, friction_torque_axis_local1);
+
+        Vector3 friction_rot_axis_local2 =
+            multDiag(inv_I2, friction_torque_axis_local2);
+
+        lambda_t = computePositionalLambda(
+            friction_torque_axis_local1, friction_torque_axis_local2,
+            friction_rot_axis_local1, friction_rot_axis_local2,
+            inv_m1, inv_m2,
+            tangential_magnitude, 0);
 
         float lambda_threshold = lambda_n * avg_mu_s;
 
-        applyPositionalUpdate(x1, x2,
-                              q1, q2,
-                              r1, r2,
-                              inv_m1, inv_m2,
-                              inv_I1, inv_I2,
-                              tangent_dir, tangent_dir_local1, tangent_dir_local2,
-                              tangential_magnitude,
-                              0, lambda_t, [lambda_threshold](float lambda) {
-                                  // If true, this check stops static friction
-                                  // from being applied.
-                                  // Calculation is negated from the paper that
-                                  // seems to have gotten the sign wrong
-                                  // due to the negated lambdas
-                                  return lambda <= lambda_threshold;
-                              });
+        if (lambda_t > lambda_threshold) {
+            applyPositionalUpdate(
+                x1, x2,
+                q1, q2,
+                friction_rot_axis_local1, friction_rot_axis_local2,
+                inv_m1, inv_m2,
+                t_world, lambda_t);
+        }
     }
 }
 
@@ -335,6 +410,11 @@ static inline void handleContact(Context &ctx,
 
     float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
 
+    printf("B (%f %f %f) (%f %f %f) (%f %f %f %f) (%f %f %f %f)\n",
+           x1.x, x1.y, x1.z, x2.x, x2.y, x2.z,
+           q1.w, q1.x, q1.y, q1.z,
+           q2.w, q2.x, q2.y, q2.z);
+
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
@@ -356,6 +436,12 @@ static inline void handleContact(Context &ctx,
                                 lambda_n,
                                 lambda_t);
 
+        printf("A %d (%f %f %f) (%f %f %f) (%f %f %f %f) (%f %f %f %f)\n",
+               i,
+               x1.x, x1.y, x1.z, x2.x, x2.y, x2.z,
+               q1.w, q1.x, q1.y, q1.z,
+               q2.w, q2.x, q2.y, q2.z);
+
         lambdas[i] = lambda_n;
     }
 
@@ -366,11 +452,127 @@ static inline void handleContact(Context &ctx,
     *q2_ptr = q2;
 }
 
+inline void handleJointConstraint(Context &ctx,
+                                  JointConstraint joint)
+{
+    Vector3 *x1_ptr = &ctx.getUnsafe<Position>(joint.e1);
+    Vector3 *x2_ptr = &ctx.getUnsafe<Position>(joint.e2);
+    Quat *q1_ptr = &ctx.getUnsafe<Rotation>(joint.e1);
+    Quat *q2_ptr = &ctx.getUnsafe<Rotation>(joint.e2);
+    Vector3 x1 = *x1_ptr;
+    Vector3 x2 = *x2_ptr;
+    Quat q1 = *q1_ptr;
+    Quat q2 = *q2_ptr;
+    ResponseType resp_type1 = ctx.getUnsafe<ResponseType>(joint.e1);
+    ResponseType resp_type2 = ctx.getUnsafe<ResponseType>(joint.e2);
+    ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(joint.e1);
+    ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(joint.e2);
+    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
+    RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
+
+    float inv_m1 = metadata1.invMass;
+    Vector3 inv_I1 = metadata1.invInertiaTensor;
+
+    if (resp_type1 == ResponseType::Static) {
+        inv_m1 = 0.f;
+        inv_I1 = Vector3::zero();
+    }
+
+    float inv_m2 = metadata2.invMass;
+    Vector3 inv_I2 = metadata2.invInertiaTensor;
+
+    if (resp_type2 == ResponseType::Static) {
+        inv_m2 = 0.f;
+        inv_I2 = Vector3::zero();
+    }
+
+    Vector3 basis_axis_fwd = { 0, 0, 1 };
+    Vector3 basis_axis_right = { 1, 0, 0 };
+
+    Vector3 a1_bar = joint.axes1.rotateVec(basis_axis_fwd);
+    Vector3 b1_bar = joint.axes1.rotateVec(basis_axis_right);
+    Vector3 a2_bar = joint.axes2.rotateVec(basis_axis_fwd);
+    Vector3 b2_bar = joint.axes2.rotateVec(basis_axis_right);
+
+    Vector3 a1 = q1.rotateVec(a1_bar);
+    Vector3 b1 = q1.rotateVec(b1_bar);
+    Vector3 a2 = q2.rotateVec(a2_bar);
+    Vector3 b2 = q2.rotateVec(b2_bar);
+
+    Vector3 r1_world = q1.rotateVec(joint.r1) + x1;
+    Vector3 r2_world = q2.rotateVec(joint.r2) + x2;
+    Vector3 delta_r = r2_world - r1_world;
+    float cur_separation = delta_r.length();
+
+    Vector3 pos_correction_dir;
+    if (cur_separation == 0.f) {
+        pos_correction_dir = a1;
+    } else {
+        pos_correction_dir = delta_r / cur_separation;
+    }
+
+    applyPositionalUpdate(
+        x1, x2,
+        q2, q2,
+        joint.r1, joint.r2,
+        inv_m1, inv_m2,
+        inv_I1, inv_I2,
+        pos_correction_dir, cur_separation - joint.separation, 0);
+
+    Vector3 delta_q_a = cross(a1, a2);
+    float delta_q_a_magnitude = delta_q_a.length();
+
+    Quat update_q1, update_q2;
+
+    if (delta_q_a_magnitude > 0) {
+        delta_q_a /= delta_q_a_magnitude;
+        Vector3 delta_q_a_local1 = q1.inv().rotateVec(delta_q_a);
+        Vector3 delta_q_a_local2 = q2.inv().rotateVec(delta_q_a);
+
+        auto [a_update_q1, a_update_q2] = computeAngularUpdate(
+            q1, q2,
+            inv_I1, inv_I2,
+            delta_q_a, delta_q_a_local1, delta_q_a_local2,
+            delta_q_a_magnitude, 0);
+
+        update_q1 = a_update_q1;
+        update_q2 = a_update_q2;
+    } else {
+        update_q1 = Quat { 1, 0, 0, 0 };
+        update_q2 = Quat { 1, 0, 0, 0 };
+    }
+
+    Vector3 delta_q_b = cross(b1, b2);
+    float delta_q_b_magnitude = delta_q_b.length();
+
+    if (delta_q_b_magnitude > 0) {
+        delta_q_b /= delta_q_b_magnitude;
+        Vector3 delta_q_b_local1 = q1.inv().rotateVec(delta_q_b);
+        Vector3 delta_q_b_local2 = q2.inv().rotateVec(delta_q_b);
+
+        auto [b_update_q1, b_update_q2] = computeAngularUpdate(
+            q1, q2,
+            inv_I1, inv_I2,
+            delta_q_b, delta_q_b_local1, delta_q_b_local2,
+            delta_q_b_magnitude, 0);
+
+        update_q1 *= b_update_q1;
+        update_q2 *= b_update_q2;
+    }
+
+    applyAngularUpdate(q1, q2, update_q1, update_q2);
+
+    *x1_ptr = x1;
+    *x2_ptr = x2;
+    *q1_ptr = q1;
+    *q2_ptr = q2;
+}
+
 inline void solvePositions(Context &ctx, SolverData &solver)
 {
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
-    // Push objects in serial based on the contact normal - total BS.
     CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
 
     //printf("Solver # contacts: %d\n", num_contacts);
@@ -379,6 +581,16 @@ inline void solvePositions(Context &ctx, SolverData &solver)
         Contact contact = solver.contacts[i];
         handleContact(ctx, obj_mgr, contact, solver.contacts[i].lambdaN);
     }
+
+    CountT num_joint_constraints =
+        solver.numJointConstraints.load(std::memory_order_relaxed);
+
+    for (CountT i = 0; i < num_joint_constraints; i++) {
+        JointConstraint joint_constraint = solver.jointConstraints[i];
+        handleJointConstraint(ctx, joint_constraint);
+    }
+
+    solver.numJointConstraints.store(0, std::memory_order_relaxed);
 }
 
 inline void setVelocities(Context &ctx,
@@ -432,28 +644,29 @@ static inline Vector3 computeRelativeVelocity(
     return (v1 + cross(omega1, dir1)) - (v2 + cross(omega2, dir2));
 }
 
-static inline void applyVelocityUpdate(Vector3 &v1, Vector3 &v2,
-                                       Vector3 &omega1, Vector3 &omega2,
-                                       Quat q1, Quat q2,
-                                       Vector3 r1, Vector3 r2,
-                                       float inv_m1, float inv_m2,
-                                       Vector3 inv_I1, Vector3 inv_I2,
-                                       Vector3 delta_v_world,
-                                       Vector3 delta_v_l1, Vector3 delta_v_l2,
-                                       float delta_v_magnitude)
+static inline void applyVelocityUpdate(
+    Vector3 &v1, Vector3 &v2,
+    Vector3 &omega1, Vector3 &omega2,
+    Quat q1, Quat q2,
+    Vector3 torque_axis1, Vector3 torque_axis2,
+    float inv_m1, float inv_m2,
+    Vector3 inv_I1, Vector3 inv_I2,
+    Vector3 delta_v,
+    float delta_v_magnitude)
 {
-    float w1 = generalizedInverseMass(r1, inv_m1, inv_I1, delta_v_l1);
-    float w2 = generalizedInverseMass(r2, inv_m2, inv_I2, delta_v_l2);
+    Vector3 rot_axis1 = multDiag(inv_I1, torque_axis1);
+    Vector3 rot_axis2 = multDiag(inv_I2, torque_axis2);
+
+    float w1 = generalizedInverseMass(torque_axis1, rot_axis1, inv_m1);
+    float w2 = generalizedInverseMass(torque_axis2, rot_axis2, inv_m2);
 
     delta_v_magnitude *= 1.f / (w1 + w2);
 
-    v1 += delta_v_world * delta_v_magnitude * inv_m1;
-    v2 -= delta_v_world * delta_v_magnitude * inv_m2;
+    v1 += delta_v_magnitude * inv_m1 * delta_v;
+    v2 -= delta_v_magnitude * inv_m2 * delta_v;
 
-    Vector3 omega1_update_local =
-        multDiag(inv_I1, cross(r1, delta_v_l1 * delta_v_magnitude));
-    Vector3 omega2_update_local =
-        multDiag(inv_I2, cross(r2, delta_v_l2 * delta_v_magnitude));
+    Vector3 omega1_update_local = delta_v_magnitude * rot_axis1;
+    Vector3 omega2_update_local = delta_v_magnitude * rot_axis2;
 
     omega1 += q1.rotateVec(omega1_update_local);
     omega2 -= q2.rotateVec(omega2_update_local);
@@ -530,15 +743,17 @@ static inline void updateVelocityFromContact(Context &ctx,
             Vector3 delta_local1 = q1.inv().rotateVec(delta_world);
             Vector3 delta_local2 = q2.inv().rotateVec(delta_world);
 
+            Vector3 friction_torque_axis_local1 = cross(r1, delta_local1);
+            Vector3 friction_torque_axis_local2 = cross(r2, delta_local2);
+
             applyVelocityUpdate(
                 v1, v2,
                 omega1, omega2,
                 q1, q2,
-                r1, r2,
+                friction_torque_axis_local1, friction_torque_axis_local2,
                 inv_m1, inv_m2,
                 inv_I1, inv_I2,
-                delta_world, delta_local1, delta_local2,
-                corrected_magnitude);
+                delta_world, corrected_magnitude);
         }
 
         Vector3 r1_presolve = presolve_pos1.q.rotateVec(r1);
@@ -557,14 +772,17 @@ static inline void updateVelocityFromContact(Context &ctx,
         }
         float restitution_magnitude = fminf(-e * vn_bar, 0) - vn;
 
+        Vector3 restitution_torque_axis_local1 = cross(r1, n_local1);
+        Vector3 restitution_torque_axis_local2 = cross(r2, n_local2);
+
         applyVelocityUpdate(
             v1, v2,
             omega1, omega2,
             q1, q2,
-            r1, r2,
+            restitution_torque_axis_local1, restitution_torque_axis_local2,
             inv_m1, inv_m2,
             inv_I1, inv_I2,
-            n, n_local1, n_local2, restitution_magnitude);
+            n, restitution_magnitude);
     }
 
     *v1_out = Velocity { v1, omega1 };
@@ -594,7 +812,8 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
                                   CountT num_substeps,
                                   math::Vector3 gravity,
                                   CountT max_dynamic_objects,
-                                  CountT max_contacts_per_world)
+                                  CountT max_contacts_per_world,
+                                  CountT max_joint_constraints_per_world)
 {
     broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
 
@@ -605,7 +824,9 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
                                max_inst_accel * delta_t * delta_t);
 
     SolverData &solver = ctx.getSingleton<SolverData>();
-    new (&solver) SolverData(max_contacts_per_world, delta_t, num_substeps, gravity);
+    new (&solver) SolverData(max_contacts_per_world, 
+                             max_joint_constraints_per_world,
+                             delta_t, num_substeps, gravity);
 
     ObjectData &objs = ctx.getSingleton<ObjectData>();
     new (&objs) ObjectData { obj_mgr };
@@ -648,6 +869,9 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerComponent<CandidateCollision>();
     registry.registerArchetype<CandidateTemporary>();
 
+    registry.registerComponent<JointConstraint>();
+    registry.registerArchetype<ConstraintData>();
+
     registry.registerSingleton<SolverData>();
     registry.registerSingleton<ObjectData>();
 
@@ -657,6 +881,9 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
     TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps,
     CountT num_substeps)
 {
+    auto collect_constraints = builder.addToGraph<ParallelForNode<Context,
+        collectConstraintsSystem, JointConstraint>>(deps);
+
     auto broadphase_pre =
         broadphase::setupPreIntegrationTasks(builder, deps);
 
@@ -671,7 +898,8 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
         auto run_narrowphase = narrowphase::setupTasks(builder, {rgb_update});
 
         auto solve_pos = builder.addToGraph<ParallelForNode<Context,
-            solver::solvePositions, SolverData>>({run_narrowphase});
+            solver::solvePositions, SolverData>>(
+                {run_narrowphase, collect_constraints});
 
         auto vel_set = builder.addToGraph<ParallelForNode<Context,
             solver::setVelocities, Position, Rotation,

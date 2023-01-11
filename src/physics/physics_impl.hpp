@@ -11,6 +11,10 @@ struct ObjectData {
 struct SolverData {
     Contact *contacts;
     std::atomic<CountT> numContacts;
+
+    JointConstraint *jointConstraints;
+    std::atomic<CountT> numJointConstraints;
+
     CountT maxContacts;
     float deltaT;
     float h;
@@ -19,6 +23,7 @@ struct SolverData {
     float restitutionThreshold;
 
     inline SolverData(CountT max_contacts_per_step,
+                      CountT max_joint_constraints,
                       float delta_t,
                       CountT num_substeps,
                       math::Vector3 gravity);
