@@ -726,113 +726,6 @@ THE SOFTWARE.
     }
 };
 
-struct AABB {
-    Vector3 pMin;
-    Vector3 pMax;
-
-    inline float surfaceArea() const
-    {
-        Vector3 d = pMax - pMin;
-        return 2.f * (d.x * d.y + d.x * d.z + d.y * d.z);
-    }
-
-    inline bool overlaps(const AABB &o) const
-    {
-        auto [a_min, a_max] = *this;
-        auto [b_min, b_max] = o;
-
-        return a_min.x < b_max.x && b_min.x < a_max.x &&
-               a_min.y < b_max.y && b_min.y < a_max.y &&
-               a_min.z < b_max.z && b_min.z < a_max.z;
-    }
-    
-    inline bool contains(const AABB &o) const
-    {
-        auto [a_min, a_max] = *this;
-        auto [b_min, b_max] = o;
-
-        return a_min.x <= b_min.x &&
-               a_min.y <= b_min.y &&
-               a_min.z <= b_min.z &&
-               a_max.x >= b_max.x &&
-               a_max.y >= b_max.y &&
-               a_max.z >= b_max.z; 
-    }
-
-    inline void expand(const Vector3 &p)
-    {
-        if (p.x < pMin.x) {
-            pMin.x = p.x;
-        } else if (p.x > pMax.x) {
-            pMax.x = p.x;
-        }
-
-        if (p.y < pMin.y) {
-            pMin.y = p.y;
-        } else if (p.y > pMax.y) {
-            pMax.y = p.y;
-        }
-
-        if (p.z < pMin.z) {
-            pMin.z = p.z;
-        } else if (p.z > pMax.z) {
-            pMax.z = p.z;
-        }
-    }
-
-    inline bool rayIntersects(Vector3 ray_o, Vector3 inv_ray_d,
-                              float ray_t_min, float ray_t_max)
-    {
-        // Ray tracing gems II, chapter 2
-        
-        // Absolute distances to lower and upper box coordinates
-        math::Vector3 t_lower = (pMin - ray_o) * inv_ray_d;
-        math::Vector3 t_upper = (pMax - ray_o) * inv_ray_d;
-        // The four t-intervals (for x-/y-/z-slabs, and ray p(t))
-        math::Vector4 t_mins =
-            Vector4::fromVector3(Vector3::min(t_lower, t_upper), ray_t_min);
-        math::Vector4 t_maxes = 
-            Vector4::fromVector3(Vector3::max(t_lower, t_upper), ray_t_max);
-        // Easy to remember: ``max of mins, and min of maxes''
-
-        auto max_component = [](Vector4 v) {
-            return fmaxf(v.x, fmaxf(v.y, fmaxf(v.z, v.w)));
-        };
-
-        auto min_component = [](Vector4 v) {
-            return fminf(v.x, fminf(v.y, fminf(v.z, v.w)));
-        };
-       
-        float t_box_min = max_component(t_mins);
-        float t_box_max = min_component(t_maxes);
-        return t_box_min <= t_box_max;
-    }
-
-    static inline AABB invalid()
-    {
-        return AABB {
-            /* .pMin = */ Vector3 {FLT_MAX, FLT_MAX, FLT_MAX},
-            /* .pMax = */ Vector3 {-FLT_MAX, -FLT_MAX, -FLT_MAX},
-        };
-    }
-
-    static inline AABB point(const Vector3 &p)
-    {
-        return AABB {
-            /* .pMin = */ p,
-            /* .pMax = */ p,
-        };
-    }
-
-    static inline AABB merge(const AABB &a, const AABB &b)
-    {
-        return AABB {
-            /* .pMin = */ Vector3::min(a.pMin, b.pMin),
-            /* .pMax = */ Vector3::max(a.pMax, b.pMax),
-        };
-    }
-};
-
 struct Mat3x3 {
     Vector3 cols[3];
 
@@ -995,6 +888,145 @@ struct Mat3x4 {
             txfmDir(o.cols[1]),
             txfmDir(o.cols[2]),
             txfmPoint(o.cols[3]),
+        };
+    }
+};
+
+struct AABB {
+    Vector3 pMin;
+    Vector3 pMax;
+
+    inline float surfaceArea() const
+    {
+        Vector3 d = pMax - pMin;
+        return 2.f * (d.x * d.y + d.x * d.z + d.y * d.z);
+    }
+
+    inline bool overlaps(const AABB &o) const
+    {
+        auto [a_min, a_max] = *this;
+        auto [b_min, b_max] = o;
+
+        return a_min.x < b_max.x && b_min.x < a_max.x &&
+               a_min.y < b_max.y && b_min.y < a_max.y &&
+               a_min.z < b_max.z && b_min.z < a_max.z;
+    }
+    
+    inline bool contains(const AABB &o) const
+    {
+        auto [a_min, a_max] = *this;
+        auto [b_min, b_max] = o;
+
+        return a_min.x <= b_min.x &&
+               a_min.y <= b_min.y &&
+               a_min.z <= b_min.z &&
+               a_max.x >= b_max.x &&
+               a_max.y >= b_max.y &&
+               a_max.z >= b_max.z; 
+    }
+
+    inline void expand(const Vector3 &p)
+    {
+        if (p.x < pMin.x) {
+            pMin.x = p.x;
+        } else if (p.x > pMax.x) {
+            pMax.x = p.x;
+        }
+
+        if (p.y < pMin.y) {
+            pMin.y = p.y;
+        } else if (p.y > pMax.y) {
+            pMax.y = p.y;
+        }
+
+        if (p.z < pMin.z) {
+            pMin.z = p.z;
+        } else if (p.z > pMax.z) {
+            pMax.z = p.z;
+        }
+    }
+
+    inline bool rayIntersects(Vector3 ray_o, Vector3 inv_ray_d,
+                              float ray_t_min, float ray_t_max)
+    {
+        // Ray tracing gems II, chapter 2
+        
+        // Absolute distances to lower and upper box coordinates
+        math::Vector3 t_lower = (pMin - ray_o) * inv_ray_d;
+        math::Vector3 t_upper = (pMax - ray_o) * inv_ray_d;
+        // The four t-intervals (for x-/y-/z-slabs, and ray p(t))
+        math::Vector4 t_mins =
+            Vector4::fromVector3(Vector3::min(t_lower, t_upper), ray_t_min);
+        math::Vector4 t_maxes = 
+            Vector4::fromVector3(Vector3::max(t_lower, t_upper), ray_t_max);
+        // Easy to remember: ``max of mins, and min of maxes''
+
+        auto max_component = [](Vector4 v) {
+            return fmaxf(v.x, fmaxf(v.y, fmaxf(v.z, v.w)));
+        };
+
+        auto min_component = [](Vector4 v) {
+            return fminf(v.x, fminf(v.y, fminf(v.z, v.w)));
+        };
+       
+        float t_box_min = max_component(t_mins);
+        float t_box_max = min_component(t_maxes);
+        return t_box_min <= t_box_max;
+    }
+
+    [[nodiscard]] inline AABB applyTRS(const Vector3 &translation,
+                                       const Quat &rotation,
+                                       const Vector3 &scale = { 1, 1, 1}) const
+    {
+        // FIXME: this could all be more efficient with a center + width
+        // AABB representation
+        auto rot_mat = Mat3x3::fromRS(rotation, scale);
+
+         // RTCD page 86
+         AABB txfmed;
+#pragma unroll
+         for (CountT i = 0; i < 3; i++) {
+             txfmed.pMin[i] = txfmed.pMax[i] = translation[i];
+
+#pragma unroll
+             for (CountT j = 0; j < 3; j++) {
+                 float e = rot_mat[i][j] * pMin[j];
+                 float f = rot_mat[i][j] * pMax[j];
+
+                 if (e < f) {
+                     txfmed.pMin[i] += e;
+                     txfmed.pMax[i] += f;
+                 } else {
+                     txfmed.pMin[i] += f;
+                     txfmed.pMax[i] += e;
+                 }
+             }
+         }
+
+         return txfmed;
+    }
+
+    static inline AABB invalid()
+    {
+        return AABB {
+            /* .pMin = */ Vector3 {FLT_MAX, FLT_MAX, FLT_MAX},
+            /* .pMax = */ Vector3 {-FLT_MAX, -FLT_MAX, -FLT_MAX},
+        };
+    }
+
+    static inline AABB point(const Vector3 &p)
+    {
+        return AABB {
+            /* .pMin = */ p,
+            /* .pMax = */ p,
+        };
+    }
+
+    static inline AABB merge(const AABB &a, const AABB &b)
+    {
+        return AABB {
+            /* .pMin = */ Vector3::min(a.pMin, b.pMin),
+            /* .pMax = */ Vector3::max(a.pMax, b.pMax),
         };
     }
 };

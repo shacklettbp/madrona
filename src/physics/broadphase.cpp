@@ -375,31 +375,7 @@ void BVH::updateLeafPosition(LeafID leaf_id,
                              const Vector3 &linear_vel,
                              const AABB &obj_aabb)
 {
-    // FIXME: this could all be more efficient with a center + width
-    // AABB representation
-    Mat3x3 rot_mat = Mat3x3::fromRS(rot, scale);
-
-    // RTCD page 86
-    AABB world_aabb;
-#pragma unroll
-    for (CountT i = 0; i < 3; i++) {
-        world_aabb.pMin[i] = world_aabb.pMax[i] = pos[i];
-
-#pragma unroll
-        for (CountT j = 0; j < 3; j++) {
-            float e = rot_mat[i][j] * obj_aabb.pMin[j];
-            float f = rot_mat[i][j] * obj_aabb.pMax[j];
-
-            if (e < f) {
-                world_aabb.pMin[i] += e;
-                world_aabb.pMax[i] += f;
-            } else {
-                world_aabb.pMin[i] += f;
-                world_aabb.pMax[i] += e;
-            }
-        }
-    }
-
+    AABB world_aabb = obj_aabb.applyTRS(pos, rot, scale);
     AABB expanded_aabb = expandAABBWithMotion(world_aabb, linear_vel,
                                               leaf_velocity_expansion_,
                                               leaf_accel_expansion_);

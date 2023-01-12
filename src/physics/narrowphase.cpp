@@ -616,11 +616,13 @@ inline void runNarrowphase(
     Context &ctx,
     const CandidateCollision &candidate_collision)
 {
-    ObjectID a_obj = ctx.getUnsafe<ObjectID>(candidate_collision.a);
-    ObjectID b_obj = ctx.getUnsafe<ObjectID>(candidate_collision.b);
+    Entity a_entity = candidate_collision.a;
+    Entity b_entity = candidate_collision.b;
 
-    SolverData &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+
+    ObjectID a_obj = ctx.getUnsafe<ObjectID>(a_entity);
+    ObjectID b_obj = ctx.getUnsafe<ObjectID>(b_entity);
 
     const CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
     const CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
@@ -628,19 +630,38 @@ inline void runNarrowphase(
     uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
     uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
 
-    Entity a_entity = candidate_collision.a;
-    Entity b_entity = candidate_collision.b;
-
+    // Swap a & b to be properly ordered based on object type
     if (raw_type_a > raw_type_b) {
-        std::swap(raw_type_a, raw_type_b);
         std::swap(a_entity, b_entity);
+        std::swap(a_obj, b_obj);
         std::swap(a_prim, b_prim);
+        std::swap(raw_type_a, raw_type_b);
     }
-
-    NarrowphaseTest test_type {raw_type_a | raw_type_b};
 
     Vector3 a_pos = ctx.getUnsafe<Position>(a_entity);
     Vector3 b_pos = ctx.getUnsafe<Position>(b_entity);
+    Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
+    Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
+    Vector3 a_scale = ctx.getUnsafe<Scale>(a_entity);
+    Vector3 b_scale = ctx.getUnsafe<Scale>(b_entity);
+
+    {
+        // FIXME: Rechecking the AABBs here seems to only give a very small
+        // performance improvement. Should revisit.
+        AABB a_obj_aabb = obj_mgr.aabbs[a_obj.idx];
+        AABB b_obj_aabb = obj_mgr.aabbs[b_obj.idx];
+
+        AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
+        AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+
+        if (!a_world_aabb.overlaps(b_world_aabb)) {
+            return;
+        }
+    }
+
+    SolverData &solver = ctx.getSingleton<SolverData>();
+
+    NarrowphaseTest test_type {raw_type_a | raw_type_b};
 
     switch (test_type) {
     case NarrowphaseTest::SphereSphere: {
@@ -677,11 +698,6 @@ inline void runNarrowphase(
         // Get half edge mesh for hull A and hull B
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
         const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
-
-        Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
-        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-        Vector3 a_scale = ctx.getUnsafe<Scale>(a_entity);
-        Vector3 b_scale = ctx.getUnsafe<Scale>(b_entity);
 
         geometry::CollisionMesh a_collision_mesh =
             buildCollisionMesh(a_he_mesh, a_pos, a_rot, a_scale);
@@ -751,10 +767,6 @@ inline void runNarrowphase(
         }
     } break;
     case NarrowphaseTest::HullPlane: {
-        Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
-        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-        Vector3 a_scale = ctx.getUnsafe<Scale>(a_entity);
-
         // Get half edge mesh for entity a (the hull)
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
         
