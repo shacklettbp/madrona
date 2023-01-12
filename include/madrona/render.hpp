@@ -19,13 +19,14 @@ struct AccelStructInstance {
     uint64_t accelerationStructureReference;
 };
 
+struct ViewID {
+    int32_t idx;
+};
+
 struct ViewSettings {
     float tanFOV;
     math::Vector3 cameraOffset;
-};
-
-struct ViewID {
-    int32_t idx;
+    ViewID viewID;
 };
 
 struct RenderingSystem {
@@ -37,7 +38,8 @@ struct RenderingSystem {
     static void init(Context &ctx);
 
     static ViewSettings setupView(Context &ctx, float vfov_degrees,
-                                  math::Vector3 camera_offset);
+                                  math::Vector3 camera_offset,
+                                  ViewID view_id);
 };
 
 }

@@ -10,14 +10,20 @@ namespace render {
 
 class BatchRenderer {
 public:
+    enum class CameraMode : uint32_t {
+        Perspective,
+        Lidar,
+    };
+
     struct Config {
         int gpuID;
         uint32_t renderWidth;
         uint32_t renderHeight;
         uint32_t numWorlds;
-        uint32_t numViews;
+        uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;
         uint32_t maxObjects;
+        CameraMode cameraMode;
     };
 
     BatchRenderer(const Config &cfg);

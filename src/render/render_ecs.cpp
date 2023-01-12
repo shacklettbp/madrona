@@ -14,8 +14,6 @@ namespace render {
 struct ViewData {
     Quat rotation;
     Vector4 posAndTanFOV;
-    uint32_t worldID;
-    uint32_t pad[3];
 };
 
 struct RendererState {
@@ -44,7 +42,6 @@ static inline uint64_t * getBlases()
 void RenderingSystem::registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<ViewSettings>();
-    registry.registerComponent<ViewID>();
     registry.registerSingleton<RendererState>();
 }
 
@@ -101,16 +98,11 @@ inline void updateRendererCounts(Context &ctx,
 inline void updateViewData(Context &ctx,
                            const Position &pos,
                            const Rotation &rot,
-                           const ViewSettings &view_settings,
-                           ViewID &view_id)
+                           const ViewSettings &view_settings)
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
 
-    // FIXME: should come up with another way to assign view IDs that is
-    // more stable
-    int32_t view_idx = renderer_state.viewCount.fetch_add(
-        1, std::memory_order_relaxed);
-    view_id.idx = view_idx;
+    int32_t view_idx = view_settings.viewID.idx;
 
     auto viewdatas =
         (ViewData *)mwGPU::GPUImplConsts::get().rendererViewDatasAddr;
@@ -123,7 +115,6 @@ inline void updateViewData(Context &ctx,
     renderer_view.posAndTanFOV.y = camera_pos.y;
     renderer_view.posAndTanFOV.z = camera_pos.z;
     renderer_view.posAndTanFOV.w = view_settings.tanFOV;
-    renderer_view.worldID = ctx.worldID().idx;
 }
 
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
@@ -140,8 +131,7 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
         updateViewData,
         Position,
         Rotation,
-        ViewSettings,
-        ViewID>>({instance_setup});
+        ViewSettings>>({instance_setup});
 
     auto update_count = builder.addToGraph<ParallelForNode<Context,
         updateRendererCounts,
@@ -160,13 +150,15 @@ void RenderingSystem::init(Context &ctx)
 }
 
 ViewSettings RenderingSystem::setupView(Context &, float vfov_degrees,
-                                        math::Vector3 camera_offset)
+                                        math::Vector3 camera_offset,
+                                        ViewID view_id)
 {
     float tan_fov = tanf(helpers::toRadians(vfov_degrees / 2.f));
 
     return ViewSettings {
         tan_fov,
         camera_offset,
+        view_id,
     };
 }
 

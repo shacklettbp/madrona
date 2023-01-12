@@ -111,7 +111,7 @@ layout (set = 0, binding = 0, scalar) readonly buffer Views {
 };
 
 layout (set = 0, binding = 1)
-    uniform accelerationStructureEXT viewTLASes[];
+    uniform accelerationStructureEXT tlases[];
 
 layout (set = 0, binding = 2, scalar) readonly buffer ObjectDataBuffer {
     ObjectData objectDataBuffer[];
@@ -153,7 +153,7 @@ void unpackViewData(in uint32_t view_idx, out Camera cam,
     ViewData view_data = viewDataBuffer[view_idx];
 
     cam = unpackCamera(view_data.cam);
-    world_id = view_data.worldID;
+    world_id = view_idx / MAX_VIEWS_PER_WORLD;
 }
 
 Vertex unpackVertex(VertexBufferRef vertex_buffer, uint32_t idx)
@@ -235,6 +235,9 @@ vec2 interpolateUV(vec2 a, vec2 b, vec2 c, vec2 barys)
 void computeCameraRay(in Camera camera, in u32vec2 idx,
                       out vec3 ray_origin, out vec3 ray_dir)
 {
+    ray_origin = camera.origin;
+
+#ifdef PERSPECTIVE
     vec2 raster = vec2(idx.x, idx.y) + vec2(0.5f);
 
     vec2 screen = vec2((2.f * raster.x) / RES_X - 1,
@@ -243,17 +246,26 @@ void computeCameraRay(in Camera camera, in u32vec2 idx,
     vec3 right = camera.right * camera.rightScale;
     vec3 up = camera.up * camera.upScale;
 
-    ray_origin = camera.origin;
     ray_dir = right * screen.x + up * screen.y + camera.view;
 
     ray_dir = normalize(ray_dir);
+#endif
+
+#ifdef LIDAR
+    float theta = 2.f * M_PI * (float(idx.x) / float(RES_X));
+    vec2 xy = vec2(cos(theta), sin(theta));
+
+    ray_dir = xy.x * camera.right + xy.y * camera.view;
+
+    ray_dir = normalize(ray_dir);
+#endif
 }
 
-bool traceShadeRay(rayQueryEXT ray_query, in uint32_t view_idx,
+bool traceShadeRay(rayQueryEXT ray_query, in uint32_t world_idx,
                    in vec3 ray_origin, in vec3 ray_dir,
                    uint32_t visibility_mask)
 {
-    rayQueryInitializeEXT(ray_query, viewTLASes[view_idx],
+    rayQueryInitializeEXT(ray_query, tlases[world_idx],
         gl_RayFlagsCullBackFacingTrianglesEXT,
         visibility_mask, ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
 

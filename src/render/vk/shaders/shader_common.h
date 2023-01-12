@@ -48,8 +48,6 @@ struct ObjectData {
 
 struct ViewData {
     PackedCamera cam;
-    uint32_t worldID;
-    uint32_t pad[3];
 };
 
 #endif

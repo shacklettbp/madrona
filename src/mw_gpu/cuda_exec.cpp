@@ -934,32 +934,40 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
     }
 }
 
-static GPUEngineState initEngineAndUserState(int gpu_id,
-                                             uint32_t num_worlds,
-                                             uint32_t num_world_data_bytes,
-                                             uint32_t world_data_alignment,
-                                             void *world_init_ptr,
-                                             uint32_t num_world_init_bytes,
-                                             uint32_t num_exported,
-                                             uint32_t render_width,
-                                             uint32_t render_height,
-                                             const GPUKernels &gpu_kernels,
-                                             CompileConfig::Executor exec_mode,
-                                             cudaStream_t strm)
+static GPUEngineState initEngineAndUserState(
+    int gpu_id,
+    uint32_t num_worlds,
+    uint32_t max_views_per_world,
+    uint32_t num_world_data_bytes,
+    uint32_t world_data_alignment,
+    void *world_init_ptr,
+    uint32_t num_world_init_bytes,
+    uint32_t num_exported,
+    StateConfig::CameraMode camera_mode,
+    uint32_t render_width,
+    uint32_t render_height,
+    const GPUKernels &gpu_kernels,
+    CompileConfig::Executor exec_mode,
+    cudaStream_t strm)
 {
     constexpr int64_t max_instances_per_world = 1024;
 
     auto batch_renderer = Optional<render::BatchRenderer>::none();
 
-    if (render_width != 0 && render_height != 0) {
+    if (camera_mode != StateConfig::CameraMode::None) {
+        assert(render_width != 0 && render_height != 0);
+
         batch_renderer.emplace(render::BatchRenderer::Config {
             .gpuID = gpu_id,
             .renderWidth = render_width,
             .renderHeight = render_height,
             .numWorlds = num_worlds,
-            .numViews = num_worlds,
+            .maxViewsPerWorld = max_views_per_world,
             .maxInstancesPerWorld = max_instances_per_world,
             .maxObjects = 1000,
+            .cameraMode = camera_mode == StateConfig::CameraMode::Perspective ?
+                render::BatchRenderer::CameraMode::Perspective :
+                render::BatchRenderer::CameraMode::Lidar,
         });
     }
 
@@ -1246,11 +1254,12 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
                                           {dev_prop.major, dev_prop.minor});
 
     GPUEngineState eng_state = initEngineAndUserState(
-        (int)state_cfg.gpuID, state_cfg.numWorlds, state_cfg.numWorldDataBytes,
+        (int)state_cfg.gpuID, state_cfg.numWorlds,
+        state_cfg.maxViewsPerWorld, state_cfg.numWorldDataBytes,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
         state_cfg.numWorldInitBytes, state_cfg.numExportedBuffers,
-        state_cfg.renderWidth, state_cfg.renderHeight, gpu_kernels,
-        compile_cfg.execMode, strm);
+        state_cfg.cameraMode, state_cfg.renderWidth, state_cfg.renderHeight,
+        gpu_kernels, compile_cfg.execMode, strm);
 
     auto run_graph =
         compile_cfg.execMode == CompileConfig::Executor::JobSystem ?

@@ -110,6 +110,9 @@ static ShaderState makeShaderState(const DeviceState &dev,
     shader_defines.emplace_back(
         string("RES_Y (") + to_string(cfg.renderHeight) + "u)");
 
+    shader_defines.emplace_back(string("MAX_VIEWS_PER_WORLD (") +
+                                to_string(cfg.maxViewsPerWorld) + "u)");
+
     uint32_t num_workgroups_x = divideRoundUp(cfg.renderWidth,
                                               VulkanConfig::localWorkgroupX);
 
@@ -125,6 +128,12 @@ static ShaderState makeShaderState(const DeviceState &dev,
         shader_defines.emplace_back("VALIDATE");
     }
 
+    if (cfg.cameraMode == BatchRenderer::CameraMode::Lidar) {
+        shader_defines.emplace_back("LIDAR");
+    } else if (cfg.cameraMode == BatchRenderer::CameraMode::Perspective) {
+        shader_defines.emplace_back("PERSPECTIVE");
+    }
+
     const char *shader_name = "basic.comp";
 
     PipelineShaders::initCompiler();
@@ -132,9 +141,10 @@ static ShaderState makeShaderState(const DeviceState &dev,
     PipelineShaders shader(dev,
         { std::string(shader_name) },
         { 
-            BindingOverride { 0, 1, nullptr, cfg.numViews, 0 }, // TLAS
+            BindingOverride { 0, 1, nullptr, cfg.numWorlds, 0 }, // TLAS
         },
-        Span<const string>(shader_defines.data(), (CountT)shader_defines.size()),
+        Span<const string>(shader_defines.data(),
+                           (CountT)shader_defines.size()),
         STRINGIFY(SHADER_DIR));
 
     return ShaderState {
@@ -218,8 +228,11 @@ static FramebufferState makeFramebuffer(const DeviceState &dev,
                                         MemoryAllocator &mem,
                                         const BatchRenderer::Config &cfg)
 {
+    CountT max_num_views =
+        (CountT)cfg.numWorlds * (CountT)cfg.maxViewsPerWorld;
+
     uint64_t num_pixels = (uint64_t)cfg.renderHeight *
-        (uint64_t)cfg.renderWidth * (uint64_t)cfg.numViews;
+        (uint64_t)cfg.renderWidth * (uint64_t)max_num_views;
 
     uint64_t num_rgb_bytes = num_pixels * 4 * sizeof(uint8_t);
     uint64_t num_depth_bytes = num_pixels * sizeof(float);
@@ -239,7 +252,7 @@ static FramebufferState makeFramebuffer(const DeviceState &dev,
         std::move(depth_buf_cuda),
         cfg.renderWidth,
         cfg.renderHeight,
-        cfg.numViews,
+        uint32_t(max_num_views),
     };
 }
 
@@ -264,19 +277,17 @@ static DescriptorState makeDescriptors(const DeviceState &dev,
     DescHelper::storage(desc_updates[0],
                        rt_set, &view_data_info, 0);
 
-    HeapArray<VkAccelerationStructureKHR> view_tlas_hdls(cfg.numViews);
-    // FIXME
-    assert(cfg.numViews == cfg.numWorlds);
+    HeapArray<VkAccelerationStructureKHR> view_tlas_hdls(cfg.numWorlds);
     memcpy(view_tlas_hdls.data(),
            tlas_data.hdls.data(),
-           cfg.numViews * sizeof(VkAccelerationStructureKHR));
+           cfg.numWorlds * sizeof(VkAccelerationStructureKHR));
 
     VkWriteDescriptorSetAccelerationStructureKHR as_update;
     DescHelper::accelStructs(desc_updates[1],
                              as_update,
                              rt_set, 
                              view_tlas_hdls.data(),
-                             cfg.numViews,
+                             cfg.numWorlds,
                              1);
 
     VkDescriptorBufferInfo obj_data_info;
@@ -372,9 +383,9 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
       fb(makeFramebuffer(dev, mem, cfg)),
       assetMgr(dev, mem, cfg.gpuID, cfg.maxObjects),
       viewDataBuffer(mem.makeDedicatedBuffer(
-          sizeof(shader::ViewData) * cfg.numViews)),
+          sizeof(shader::ViewData) * fb.numViews)),
       viewDataBufferCUDA(dev, cfg.gpuID, viewDataBuffer.mem,
-          sizeof(shader::ViewData) * cfg.numViews),
+          sizeof(shader::ViewData) * fb.numViews),
       tlases(TLASData::setup(dev, GPURunUtil {
               renderCmdPool,
               renderCmd,  

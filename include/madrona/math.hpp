@@ -567,6 +567,92 @@ struct Quat {
         };
     }
 
+    static inline Quat fromBasis(Vector3 a, Vector3 b, Vector3 c)
+    {
+        //Modified from glm::quat_cast
+#if 0
+===============================================================================
+The MIT License
+-------------------------------------------------------------------------------
+Copyright (c) 2005 - G-Truc Creation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+#endif
+
+        float four_x_squared_minus1 = a.x - b.y - c.z;
+        float four_y_squared_minus1 = b.y - a.x - c.z;
+        float four_z_squared_minus_1 = c.z - a.x - b.y;
+        float four_w_squared_minus1 = a.x + b.y + c.z;
+
+        int biggest_index = 0;
+        float four_biggest_squared_minus1 = four_w_squared_minus1;
+        if(four_x_squared_minus1 > four_biggest_squared_minus1) {
+            four_biggest_squared_minus1 = four_x_squared_minus1;
+            biggest_index = 1;
+        }
+
+        if(four_y_squared_minus1 > four_biggest_squared_minus1) {
+            four_biggest_squared_minus1 = four_y_squared_minus1;
+            biggest_index = 2;
+        }
+
+        if(four_z_squared_minus_1 > four_biggest_squared_minus1) {
+            four_biggest_squared_minus1 = four_z_squared_minus_1;
+            biggest_index = 3;
+        }
+
+        float biggest_val = sqrtf(four_biggest_squared_minus1 + 1.f) * 0.5f;
+        float mult = 0.25f / biggest_val;
+
+        switch(biggest_index) {
+        case 0:
+            return {
+                biggest_val, 
+                (b.z - c.y) * mult,
+                (c.x - a.z) * mult,
+                (a.y - b.x) * mult,
+            };
+        case 1:
+            return {
+                (b.z - c.y) * mult,
+                biggest_val,
+                (a.y + b.x) * mult,
+                (c.x + a.z) * mult,
+            };
+        case 2:
+            return {
+                (c.x - a.z) * mult,
+                (a.y + b.x) * mult,
+                biggest_val,
+                (b.z + c.y) * mult,
+            };
+        case 3:
+            return {
+                (a.y - b.x) * mult,
+                (c.x + a.z) * mult,
+                (b.z + c.y) * mult,
+                biggest_val,
+            };
+        default: __builtin_unreachable();
+        }
+    }
+
     inline Quat & operator+=(Quat o)
     {
         w += o.w;

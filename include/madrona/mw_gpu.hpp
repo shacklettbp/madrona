@@ -17,13 +17,21 @@
 namespace madrona {
 
 struct StateConfig {
+    enum class CameraMode : uint32_t {
+        Perspective,
+        Lidar,
+        None,
+    };
+
     void *worldInitPtr;
     uint32_t numWorldInitBytes;
     uint32_t numWorldDataBytes;
     uint32_t worldDataAlignment;
     uint32_t numWorlds;
+    uint32_t maxViewsPerWorld;
     uint32_t numExportedBuffers;
     uint32_t gpuID;
+    CameraMode cameraMode;
     uint32_t renderWidth;
     uint32_t renderHeight;
 };
