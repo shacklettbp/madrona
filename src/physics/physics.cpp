@@ -160,7 +160,7 @@ float computePositionalLambda(
     float c, float alpha_tilde)
 {
     float w1 = generalizedInverseMass(torque_axis1, rot_axis1, inv_m1);
-    float w2 = generalizedInverseMass(torque_axis2, rot_axis1, inv_m2);
+    float w2 = generalizedInverseMass(torque_axis2, rot_axis2, inv_m2);
 
     return -c / (w1 + w2 + alpha_tilde);
 }
