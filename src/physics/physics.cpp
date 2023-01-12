@@ -261,17 +261,17 @@ std::pair<Quat, Quat> computeAngularUpdate(
     Vector3 q2_update_angular_local = half_lambda * local_rot_axis2;
 
     return {
-        Quat::fromAngularVec(q1_update_angular_local),
-        Quat::fromAngularVec(q2_update_angular_local),
+        Quat::fromAngularVec(q1.rotateVec(q1_update_angular_local)),
+        Quat::fromAngularVec(q2.rotateVec(q2_update_angular_local)),
     };
 }
 
 void applyAngularUpdate(
     Quat &q1, Quat &q2,
-    Quat q1_update_local, Quat q2_update_local)
+    Quat q1_update, Quat q2_update)
 {
-    q1 += q1 * q1_update_local;
-    q2 -= q2 * q2_update_local;
+    q1 = (q1 + q1_update * q1).normalize();
+    q2 = (q2 - q2_update * q2).normalize();
 }
 
 static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
@@ -504,7 +504,7 @@ inline void handleJointConstraint(Context &ctx,
 
     Vector3 r1_world = q1.rotateVec(joint.r1) + x1;
     Vector3 r2_world = q2.rotateVec(joint.r2) + x2;
-    Vector3 delta_r = r2_world - r1_world;
+    Vector3 delta_r = r1_world - r2_world;
     float cur_separation = delta_r.length();
 
     Vector3 pos_correction_dir;
