@@ -84,9 +84,31 @@ inline void substepRigidBodies(Context &ctx,
                                PreSolvePositional &presolve_pos,
                                PreSolveVelocity &presolve_vel)
 {
+    Vector3 x = pos;
+    Quat q = rot;
+
+    Vector3 v = vel.linear;
+    Vector3 omega = vel.angular;
+
     if (response_type == ResponseType::Static) {
+        // FIXME: currently presolve_pos and prev_state need to be set every
+        // frame even for static objects. A better solution would be on
+        // creation / making a non-static object static, these variables are
+        // set once. This would require a dedicated API to control this rather
+        // than just setting objects to ResponseType::Static
+        prev_state.prevPosition = x;
+        prev_state.prevRotation = q;
+
+        presolve_pos.x = x;
+        presolve_pos.q = q;
+        presolve_vel.v = v;
+        presolve_vel.omega = omega;
+
         return;
     }
+
+    prev_state.prevPosition = x;
+    prev_state.prevRotation = q;
 
     const auto &solver = ctx.getSingleton<SolverData>();
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
@@ -96,15 +118,6 @@ inline void substepRigidBodies(Context &ctx,
     Vector3 inv_I = metadata.invInertiaTensor;
 
     float h = solver.h;
-
-    Vector3 x = pos;
-    Quat q = rot;
-
-    prev_state.prevPosition = x;
-    prev_state.prevRotation = q;
-
-    Vector3 v = vel.linear;
-    Vector3 omega = vel.angular;
 
     if (response_type == ResponseType::Dynamic) {
         v += h * solver.g;
