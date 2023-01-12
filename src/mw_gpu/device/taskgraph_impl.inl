@@ -175,7 +175,7 @@ void TaskGraph::finishWork()
     if (prev_remaining == num_finished) {
 
         device_tracing->DeviceEventLogging(mwGPU::DeviceEvent::nodeFinish,
-                                           cur_node.funcID, 0, node_idx);
+                                           cur_node.funcID, sharedBlockState.numInvocations, node_idx);
 
         uint32_t next_node_idx = node_idx + 1;
 
@@ -216,9 +216,9 @@ static inline __attribute__((always_inline)) void megakernelImpl()
         taskgraph->init();
     }
 
-    while (true) {
-        TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
+    TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
 
+    while (true) {
         NodeBase *node_data;
         uint32_t func_id;
         int32_t invocation_offset;
@@ -235,7 +235,13 @@ static inline __attribute__((always_inline)) void megakernelImpl()
         }
 
         if (worker_state == TaskGraph::WorkerState::Run) {
+            taskgraph->device_tracing->DeviceEventLogging(
+                mwGPU::DeviceEvent::blockStart,
+                func_id, invocation_offset, sharedBlockState.nodeIdx);
             dispatch(func_id, node_data, invocation_offset);
+            taskgraph->device_tracing->DeviceEventLogging(
+                mwGPU::DeviceEvent::blockWait,
+                func_id, invocation_offset, sharedBlockState.nodeIdx);
         }
 
         taskgraph->finishWork();

@@ -19,6 +19,9 @@ namespace madrona
             calibration = 0,
             nodeStart = 1,
             nodeFinish = 2,
+            blockStart = 3,
+            blockWait = 4,
+            finalCalibration = 5,
         };
 
         class DeviceTracing
@@ -53,16 +56,19 @@ namespace madrona
             inline void DeviceEventLogging(DeviceEvent event, uint32_t func_id, uint32_t num_invocations, uint32_t node_id)
             {
 #ifdef MADRONA_TRACING
-                uint32_t sm_id;
-                asm("mov.u32 %0, %smid;"
-                    : "=r"(sm_id));
-                uint32_t log_index = cur_index_.fetch_add(1, std::memory_order_relaxed);
-                if (log_index >= NUM_EVENT_LOG)
+                if (threadIdx.x == 0)
                 {
-                    log_index = 0;
-                    resetIndex();
+                    uint32_t sm_id;
+                    asm("mov.u32 %0, %smid;"
+                        : "=r"(sm_id));
+                    uint32_t log_index = cur_index_.fetch_add(1, std::memory_order_relaxed);
+                    if (log_index >= NUM_EVENT_LOG)
+                    {
+                        log_index = 0;
+                        resetIndex();
+                    }
+                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, clock64()};
                 }
-                device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, clock64()};
 #endif
             }
 #endif
