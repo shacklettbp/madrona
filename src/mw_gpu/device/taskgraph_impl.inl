@@ -226,6 +226,9 @@ static inline __attribute__((always_inline)) void megakernelImpl()
             &node_data, &func_id, &invocation_offset);
 
         if (worker_state == TaskGraph::WorkerState::Exit) {
+            taskgraph->device_tracing->DeviceEventLogging(
+                mwGPU::DeviceEvent::blockExit,
+                func_id, invocation_offset, sharedBlockState.nodeIdx);
             break;
         }
 

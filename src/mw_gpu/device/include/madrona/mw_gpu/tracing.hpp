@@ -21,7 +21,7 @@ namespace madrona
             nodeFinish = 2,
             blockStart = 3,
             blockWait = 4,
-            finalCalibration = 5,
+            blockExit = 5,
         };
 
         class DeviceTracing
@@ -35,7 +35,7 @@ namespace madrona
                 uint32_t nodeID;
                 uint32_t blockID;
                 uint32_t smID;
-                int64_t cycleCount;
+                uint64_t cycleCount;
             };
 
             std::atomic_uint32_t cur_index_;
@@ -53,6 +53,13 @@ namespace madrona
             }
 
 #ifdef MADRONA_GPU_MODE
+            __inline__ uint64_t global_timer()
+            {
+                uint64_t timestamp;
+                asm volatile("mov.u64 %0, %%globaltimer;"
+                             : "=l"(timestamp));
+                return timestamp;
+            }
             inline void DeviceEventLogging(DeviceEvent event, uint32_t func_id, uint32_t num_invocations, uint32_t node_id)
             {
 #ifdef MADRONA_TRACING
@@ -67,7 +74,7 @@ namespace madrona
                         log_index = 0;
                         resetIndex();
                     }
-                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, clock64()};
+                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, global_timer()};
                 }
 #endif
             }
