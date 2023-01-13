@@ -252,12 +252,26 @@ void computeCameraRay(in Camera camera, in u32vec2 idx,
 #endif
 
 #ifdef LIDAR
-    float theta = 2.f * M_PI * (float(idx.x) / float(RES_X));
-    vec2 xy = vec2(cos(theta), sin(theta));
+    if (idx.x < 30 && idx.y == 0) {
+        float theta = 2.f * M_PI * (float(idx.x) / float(30));
+        vec2 xy = vec2(cos(theta), sin(theta));
 
-    ray_dir = xy.x * camera.right + xy.y * camera.view;
+        ray_dir = xy.x * camera.right + xy.y * camera.view;
 
-    ray_dir = normalize(ray_dir);
+        ray_dir = normalize(ray_dir);
+    } else {
+        vec2 raster = vec2(idx.x, idx.y) + vec2(0.5f);
+
+        vec2 screen = vec2((2.f * raster.x) / RES_X - 1,
+                           (2.f * raster.y) / RES_Y - 1);
+
+        vec3 right = camera.right * camera.rightScale;
+        vec3 up = camera.up * camera.upScale;
+
+        ray_dir = right * screen.x + up * screen.y + camera.view;
+
+        ray_dir = normalize(ray_dir);
+    }
 #endif
 }
 
