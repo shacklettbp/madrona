@@ -1014,7 +1014,7 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
         total_bytes += max_column_bytes - free_column_bytes;
     }
 
-    char *tmp_buffer = (char *)TmpAllocator::get().alloc(total_bytes);
+    char *tmp_buffer = (char *)mwGPU::TmpAllocator::get().alloc(total_bytes);
 
     numRows = num_rows;
     numSortBlocks = num_blocks;

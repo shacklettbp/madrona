@@ -12,7 +12,7 @@
 
 namespace madrona {
 
-Context::Context(WorldBase *world_data, WorkerInit &&init)
+Context::Context(WorldBase *world_data, const WorkerInit &init)
     : data_(world_data),
       world_id_(init.worldID)
 {}

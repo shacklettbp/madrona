@@ -17,7 +17,7 @@ struct JobID {}; // FIXME
 
 class Context {
 public:
-    inline Context(WorldBase *world_data, WorkerInit &&init);
+    inline Context(WorldBase *world_data, const WorkerInit &init);
 
     template <typename ArchetypeT>
     Entity makeEntityNow();

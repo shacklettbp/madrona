@@ -182,7 +182,7 @@ TaskGraph::NodeID RecycleEntitiesNode::addToGraph(
 
 void ResetTmpAllocNode::run(int32_t)
 {
-    TmpAllocator::get().reset();
+    mwGPU::TmpAllocator::get().reset();
 }
 
 TaskGraph::NodeID ResetTmpAllocNode::addToGraph(
