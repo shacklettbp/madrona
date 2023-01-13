@@ -190,7 +190,7 @@ def block_analysis(step_log):
     print(
         "on average",
         sum(sm_lifetime) / len(sm_lifetime),
-        "% of the time the SM is running, only a rough estimation, the real utilization could be even lower"
+        "% of the time the SM is running, only a rough estimation, the real utilization can be much lower"
     )
 
     return block_exec_time
@@ -199,7 +199,7 @@ def block_analysis(step_log):
 COLORS = ["red", "green", "blue", "orange", "purple", "cyan", "pink", "yellow"]
 
 
-def draw(step_log, nodes, blocks):
+def plot_events(step_log, nodes, blocks, file_name):
     num_sm = len(blocks)
     num_block_per_sm = 4
     num_pixel_per_sm = (num_block_per_sm + 1) * 2
@@ -243,10 +243,10 @@ def draw(step_log, nodes, blocks):
                   fill="green",
                   width=1)
 
-    img.save("megakernel_events.png")
+    img.save(file_name+"_megakernel_events.png")
 
 
-def step_analysis(step=5):
+def step_analysis(step=5, file_name="megakernel_events.png"):
     step_log = LOG_STEPS[step]
 
     variance = [
@@ -273,8 +273,7 @@ def step_analysis(step=5):
     node_exec_time = serialized_analysis(step_log)
 
     block_exec_time = block_analysis(step_log)
-    draw(step_log, node_exec_time, block_exec_time["blocks"])
-    exit()
+    plot_events(step_log, node_exec_time, block_exec_time["blocks"], file_name)
 
 
 if __name__ == "__main__":
@@ -295,6 +294,6 @@ if __name__ == "__main__":
             LOG_STEPS[s]["final_cycles"][b] -= LOG_STEPS[s]["start_timestamp"]
 
     # or pick other steps
-    step_analysis(5)
+    step_analysis(5, sys.argv[1])
 
     # todo: aggregated analysis

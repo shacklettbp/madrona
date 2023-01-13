@@ -242,10 +242,14 @@ static inline __attribute__((always_inline)) void megakernelImpl()
                 mwGPU::DeviceEvent::blockStart,
                 func_id, invocation_offset, sharedBlockState.nodeIdx);
             dispatch(func_id, node_data, invocation_offset);
-            taskgraph->device_tracing->DeviceEventLogging(
-                mwGPU::DeviceEvent::blockWait,
-                func_id, invocation_offset, sharedBlockState.nodeIdx);
         }
+
+        // wait till all warps to finish, to make the blockWait event more accurate
+        __syncthreads();
+        taskgraph->device_tracing->DeviceEventLogging(
+            mwGPU::DeviceEvent::blockWait,
+            func_id, invocation_offset, sharedBlockState.nodeIdx);
+
 
         taskgraph->finishWork();
     }
