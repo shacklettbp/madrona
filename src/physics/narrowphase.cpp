@@ -69,7 +69,7 @@ static uint32_t findFurthestPointIdx(const CollisionMesh &m,
     float maxDistance = d.dot(m.vertices[0]);
     uint32_t vertexIdx = 0;
 
-    for (int i = 1; i < m.vertexCount; ++i) {
+    for (CountT i = 1; i < (CountT)m.vertexCount; ++i) {
         float dp = d.dot(m.vertices[i]);
         if (dp > maxDistance) {
             maxDistance = dp;
@@ -102,7 +102,7 @@ static FaceQuery queryFaceDirections(const CollisionMesh &a,
     int polygonMaxDistance = 0;
     float maxDistance = -FLT_MAX;
 
-    for (int i = 0; i < hMesh->getPolygonCount(); ++i) {
+    for (CountT i = 0; i < (CountT)hMesh->getPolygonCount(); ++i) {
         Plane plane = hMesh->getPlane(i, a.vertices);
         math::Vector3 supportB = findFurthestPoint(b, -plane.normal);
         float distance = getDistanceFromPlane(plane, supportB);
@@ -174,11 +174,11 @@ static EdgeQuery queryEdgeDirections(const CollisionMesh &a, const CollisionMesh
     int edgeBMaxDistance = 0;
     float maxDistance = -FLT_MAX;
 
-    for (int edgeIdxA = 0; edgeIdxA < hMeshA->getEdgeCount(); ++edgeIdxA) {
+    for (CountT edgeIdxA = 0; edgeIdxA < (CountT)hMeshA->getEdgeCount(); ++edgeIdxA) {
         auto edgeDataA = hMeshA->edge(edgeIdxA);
         auto hEdgeA = hMeshA->halfEdge(edgeDataA);
 
-        for (int edgeIdxB = 0; edgeIdxB < hMeshB->getEdgeCount(); ++edgeIdxB) {
+        for (CountT edgeIdxB = 0; edgeIdxB < (CountT)hMeshB->getEdgeCount(); ++edgeIdxB) {
             auto edgeDataB = hMeshB->edge(edgeIdxB);
             auto hEdgeB = hMeshB->halfEdge(edgeDataB);
 
@@ -206,18 +206,19 @@ static EdgeQuery queryEdgeDirections(const CollisionMesh &a, const CollisionMesh
 }
 
 static void clipPolygon(
+        Context &ctx,
         const Plane &clippingPlane,
         uint32_t *vertexCount,
         math::Vector3 *vertices,
         const uint32_t kMaxVertices)
 {
     uint32_t newVertexCount = 0;
-    math::Vector3 *newVertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * (*vertexCount) * 2);
+    math::Vector3 *newVertices = (math::Vector3 *)ctx.tmpAlloc(sizeof(math::Vector3) * (*vertexCount) * 2);
 
     math::Vector3 v1 = vertices[*vertexCount - 1];
     float d1 = getDistanceFromPlane(clippingPlane, v1);
 
-    for (int i = 0; i < *vertexCount; ++i) {
+    for (CountT i = 0; i < (CountT)*vertexCount; ++i) {
         math::Vector3 v2 = vertices[i];
         float d2 = getDistanceFromPlane(clippingPlane, v2);
 
@@ -255,7 +256,7 @@ static int findIncidentFace(const CollisionMesh &referenceHull,
 
     float minimizingDotProduct = FLT_MAX;
     int minimizingFace = -1;
-    for (int i = 0; i < otherHull.halfEdgeMesh->getPolygonCount(); ++i) {
+    for (CountT i = 0; i < (CountT)otherHull.halfEdgeMesh->getPolygonCount(); ++i) {
         math::Vector3 incidentNormal = otherHull.halfEdgeMesh->getFaceNormal(i, otherHull.vertices);
         float dotProduct = incidentNormal.dot(referenceNormal);
 
@@ -273,7 +274,7 @@ static int findIncidentFace(const Plane &referencePlane,
 {
     float minimizingDotProduct = FLT_MAX;
     int minimizingFace = -1;
-    for (int i = 0; i < otherHull.halfEdgeMesh->getPolygonCount(); ++i) {
+    for (CountT i = 0; i < (CountT)otherHull.halfEdgeMesh->getPolygonCount(); ++i) {
         math::Vector3 incidentNormal = otherHull.halfEdgeMesh->getFaceNormal(i, otherHull.vertices);
         float dotProduct = incidentNormal.dot(referencePlane.normal);
 
@@ -286,7 +287,7 @@ static int findIncidentFace(const Plane &referencePlane,
     return minimizingFace;
 }
 
-static Manifold createFaceContactPlane(FaceQuery faceQuery,
+static Manifold createFaceContactPlane(Context &ctx,
                                        const Plane &plane,
                                        const CollisionMesh &hull)
 {
@@ -295,13 +296,13 @@ static Manifold createFaceContactPlane(FaceQuery faceQuery,
 
     uint32_t incidentFaceVertexCount = hull.halfEdgeMesh->getPolygonVertexCount(incidentFaceIdx);
     const uint32_t kMaxIncidentVertexCount = incidentFaceVertexCount * 2;
-    math::Vector3 *incidentVertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
+    math::Vector3 *incidentVertices = (math::Vector3 *)ctx.tmpAlloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
     hull.halfEdgeMesh->getPolygonVertices(incidentVertices, incidentFaceIdx, hull.vertices);
 
-    math::Vector4 *contacts = (math::Vector4 *)TmpAllocator::get().alloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
+    math::Vector4 *contacts = (math::Vector4 *)ctx.tmpAlloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
     CountT contact_count = 0;
 
-    for (int i = 0; i < incidentFaceVertexCount; ++i) {
+    for (CountT i = 0; i < (CountT)incidentFaceVertexCount; ++i) {
         if (float d = getDistanceFromPlane(plane, incidentVertices[i]); d < 0.0f) {
             // Project the point onto the reference plane (d guaranteed to be negative)
             contacts[contact_count++] = makeVector4(incidentVertices[i] - d * plane.normal, -d);
@@ -366,7 +367,8 @@ static Manifold createFaceContactPlane(FaceQuery faceQuery,
     return manifold;
 }
 
-static Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a,
+static Manifold createFaceContact(Context &ctx,
+                                  FaceQuery faceQueryA, const CollisionMesh &a,
                                   FaceQuery faceQueryB, const CollisionMesh &b)
 {
     // Determine minimizing face
@@ -383,27 +385,27 @@ static Manifold createFaceContact(FaceQuery faceQueryA, const CollisionMesh &a,
 
     // Get the side planes of the reference face
     uint32_t sidePlaneCount = referenceHull.halfEdgeMesh->getPolygonVertexCount(referenceFaceIdx);
-    Plane *planes = (Plane *)TmpAllocator::get().alloc(sizeof(Plane) * sidePlaneCount);
+    Plane *planes = (Plane *)ctx.tmpAlloc(sizeof(Plane) * sidePlaneCount);
     referenceHull.halfEdgeMesh->getPolygonSidePlanes(planes, referenceFaceIdx, referenceHull.vertices);
 
     uint32_t incidentFaceVertexCount = otherHull.halfEdgeMesh->getPolygonVertexCount(incidentFaceIdx);
     const uint32_t kMaxIncidentVertexCount = incidentFaceVertexCount * 2;
-    math::Vector3 *incidentVertices = (math::Vector3 *)TmpAllocator::get().alloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
+    math::Vector3 *incidentVertices = (math::Vector3 *)ctx.tmpAlloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
     otherHull.halfEdgeMesh->getPolygonVertices(incidentVertices, incidentFaceIdx, otherHull.vertices);
 
     // Clip the incident face against the side planes of the reference face
-    for (int i = 0; i < sidePlaneCount; ++i) {
-        clipPolygon(planes[i], &incidentFaceVertexCount, incidentVertices, kMaxIncidentVertexCount);
+    for (CountT i = 0; i < (CountT)sidePlaneCount; ++i) {
+        clipPolygon(ctx, planes[i], &incidentFaceVertexCount, incidentVertices, kMaxIncidentVertexCount);
     }
 
     // incidentVertices should now contain the only relevant vertices
     // Now we just keep the ones below the reference face
     Plane referencePlane = referenceHull.halfEdgeMesh->getPlane(referenceFaceIdx, referenceHull.vertices);
 
-    math::Vector4 *contacts = (math::Vector4 *)TmpAllocator::get().alloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
+    math::Vector4 *contacts = (math::Vector4 *)ctx.tmpAlloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
     CountT contact_count = 0;
 
-    for (int i = 0; i < incidentFaceVertexCount; ++i) {
+    for (CountT i = 0; i < (CountT)incidentFaceVertexCount; ++i) {
         if (float d = getDistanceFromPlane(referencePlane, incidentVertices[i]); d < 0.0f) {
             // Project the point onto the reference plane (d guaranteed to be negative)
             contacts[contact_count++] = makeVector4(incidentVertices[i] - d * referencePlane.normal, -d);
@@ -524,7 +526,7 @@ static Manifold createEdgeContact(const EdgeQuery &query,
     return manifold;
 }
 
-Manifold doSAT(const CollisionMesh &a, const CollisionMesh &b)
+Manifold doSAT(Context &ctx, const CollisionMesh &a, const CollisionMesh &b)
 {
     Manifold manifold;
     manifold.numContactPoints = 0;
@@ -552,7 +554,7 @@ Manifold doSAT(const CollisionMesh &a, const CollisionMesh &b)
 
     if (bIsFaceContactA || bIsFaceContactB) {
         // Create face contact
-        manifold = createFaceContact(faceQueryA, a, faceQueryB, b);
+        manifold = createFaceContact(ctx, faceQueryA, a, faceQueryB, b);
     }
     else {
         // Create edge contact
@@ -562,7 +564,7 @@ Manifold doSAT(const CollisionMesh &a, const CollisionMesh &b)
     return manifold;
 }
 
-Manifold doSATPlane(const Plane &plane, const CollisionMesh &a) 
+Manifold doSATPlane(Context &ctx, const Plane &plane, const CollisionMesh &a)
 {
     Manifold manifold;
     manifold.numContactPoints = 0;
@@ -573,11 +575,12 @@ Manifold doSATPlane(const Plane &plane, const CollisionMesh &a)
         return manifold;
     }
 
-    return createFaceContactPlane(faceQuery, plane, a);
+    return createFaceContactPlane(ctx, plane, a);
 }
 
 // FIXME: Reduce redundant work on transforming point
 static inline geometry::CollisionMesh buildCollisionMesh(
+    Context &ctx,
     const geometry::HalfEdgeMesh &he_mesh,
     Vector3 pos, Quat rot, Vector3 scale)
 {
@@ -588,11 +591,11 @@ static inline geometry::CollisionMesh buildCollisionMesh(
     geometry::CollisionMesh collision_mesh;
     collision_mesh.halfEdgeMesh = &he_mesh;
     collision_mesh.vertexCount = he_mesh.getVertexCount();
-    collision_mesh.vertices = (math::Vector3 *)TmpAllocator::get().alloc(
+    collision_mesh.vertices = (Vector3 *)ctx.tmpAlloc(
         sizeof(math::Vector3) * collision_mesh.vertexCount);
     collision_mesh.center = pos;
 
-    for (int v = 0; v < collision_mesh.vertexCount; ++v) {
+    for (CountT v = 0; v < (CountT)collision_mesh.vertexCount; ++v) {
         collision_mesh.vertices[v] = transformVertex(he_mesh.vertex(v));
     }
 
@@ -700,12 +703,12 @@ inline void runNarrowphase(
         const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
 
         geometry::CollisionMesh a_collision_mesh =
-            buildCollisionMesh(a_he_mesh, a_pos, a_rot, a_scale);
+            buildCollisionMesh(ctx, a_he_mesh, a_pos, a_rot, a_scale);
 
         geometry::CollisionMesh b_collision_mesh =
-            buildCollisionMesh(b_he_mesh, b_pos, b_rot, b_scale);
+            buildCollisionMesh(ctx, b_he_mesh, b_pos, b_rot, b_scale);
 
-        Manifold manifold = doSAT(a_collision_mesh, b_collision_mesh);
+        Manifold manifold = doSAT(ctx, a_collision_mesh, b_collision_mesh);
 
         if (manifold.numContactPoints > 0) {
             addContactsToSolver(solver, {{
@@ -741,7 +744,6 @@ inline void runNarrowphase(
     } break;
     case NarrowphaseTest::SpherePlane: {
         auto sphere = a_prim->sphere;
-        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
         Vector3 plane_normal = b_rot.rotateVec(base_normal);
@@ -771,14 +773,14 @@ inline void runNarrowphase(
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
         
         geometry::CollisionMesh a_collision_mesh =
-            buildCollisionMesh(a_he_mesh, a_pos, a_rot, a_scale);
+            buildCollisionMesh(ctx, a_he_mesh, a_pos, a_rot, a_scale);
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
         Vector3 plane_normal = b_rot.rotateVec(base_normal);
 
         geometry::Plane plane { plane_normal, dot(b_pos, plane_normal) };
 
-        Manifold manifold = doSATPlane(plane, a_collision_mesh);
+        Manifold manifold = doSATPlane(ctx, plane, a_collision_mesh);
 
         if (manifold.numContactPoints > 0) {
             addContactsToSolver(solver, {{

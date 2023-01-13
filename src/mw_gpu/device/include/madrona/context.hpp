@@ -60,6 +60,8 @@ public:
     inline JobID currentJobID() const { return job_id_; }
 #endif
 
+    inline void * tmpAlloc(uint64_t num_bytes);
+
     inline WorldID worldID() const { return world_id_; }
 
     inline WorldBase & data() const { return *data_; }

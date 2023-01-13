@@ -108,7 +108,7 @@ friend class StateManager;
 
 class ECSRegistry {
 public:
-    ECSRegistry(StateManager &state_mgr);
+    ECSRegistry(StateManager *state_mgr, void **export_ptr);
 
     template <typename ComponentT>
     void registerComponent();
@@ -117,19 +117,23 @@ public:
     void registerArchetype();
 
     template <typename SingletonT>
-    void registerSingleton() { /* FIXME */ }
+    void registerSingleton();
 
     template <typename ArchetypeT, typename ComponentT>
     void exportColumn(int32_t slot);
 
+    template <typename SingletonT>
+    void exportSingleton(int32_t slot);
+
 private:
     StateManager *state_mgr_;
+    void **export_ptr_;
 };
 
 class StateManager {
 public:
 #ifdef MADRONA_MW_MODE
-    StateManager(int num_worlds);
+    StateManager(CountT num_worlds);
 #else
     StateManager();
 #endif
@@ -139,6 +143,12 @@ public:
 
     template <typename ArchetypeT>
     ArchetypeID registerArchetype();
+
+    template <typename SingletonT>
+    void registerSingleton();
+
+    template <typename SingletonT>
+    SingletonT & getSingleton(MADRONA_MW_COND(uint32_t world_id));
 
     template <typename ComponentT>
     ComponentID componentID() const;
@@ -203,8 +213,14 @@ public:
 #ifdef MADRONA_MW_MODE
     inline uint32_t numWorlds() const;
 #endif
+
+    void * tmpAlloc(MADRONA_MW_COND(uint32_t world_id,) uint64_t num_bytes);
+    void resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id));
      
 private:
+    template <typename SingletonT>
+    struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
+
     using ColumnMap = StaticIntegerMap<128>;
     static constexpr uint32_t max_archetype_components_ = ColumnMap::numFree();
 
@@ -244,10 +260,46 @@ private:
     void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
                uint32_t archetype_id);
 
+    StateCache init_state_cache_; // FIXME remove
     EntityStore entity_store_;
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;
+
+    // FIXME: TmpAllocator doesn't belong here should be per CPU worker
+    struct TmpAllocator {
+        struct Block;
+        struct Metadata {
+            Block *next;
+            CountT offset;
+        };
+
+        static constexpr inline uint64_t numBlockBytes = 64 * 1024;
+
+        static constexpr inline uint64_t numFreeBlockBytes =
+            numBlockBytes - sizeof(Metadata);
+
+        struct Block {
+            char data[numFreeBlockBytes];
+            Metadata metadata;
+        };
+
+        static_assert(sizeof(Block) == numBlockBytes);
+
+        Block *cur_block_;
+
+        TmpAllocator();
+        ~TmpAllocator();
+
+        inline void * alloc(uint64_t num_bytes);
+        void reset();
+    };
+
+#ifdef MADRONA_MW_MODE
+    HeapArray<TmpAllocator> tmp_allocators_;
+#else
+    TmpAllocator tmp_allocator_;
+#endif
 
 #ifdef MADRONA_MW_MODE
     uint32_t num_worlds_;

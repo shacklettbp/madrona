@@ -189,6 +189,15 @@ public:
         return ptr_[n_++];
     }
 
+    CountT uninit_back()
+    {
+        if (n_ == capacity_) [[unlikely]] {
+            expand(n_ + 1);
+        }
+
+        return n_++;
+    }
+
     void pop_back()
     {
         ptr_[--n_].~T();

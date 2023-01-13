@@ -651,6 +651,7 @@ static inline bool traceRayIntoPlane(
     }
 
     *hit_t = t;
+    *hit_normal = Vector3 { 0, 0, 1 };
     return true;
 }
 
@@ -797,8 +798,7 @@ inline void expandLeavesEntry(
     bvh.refitLeaf(leaf_id, expanded);
 }
 
-inline void updateBVHEntry(
-    Context &ctx, BVH &bvh)
+inline void updateBVHEntry(Context &, BVH &bvh)
 {
     bvh.updateTree();
 }

@@ -16,7 +16,7 @@ namespace madrona {
 
 class Context {
 public:
-    Context(WorldBase *world_data, WorkerInit &&init);
+    Context(WorldBase *world_data, const WorkerInit &init);
     Context(const Context &) = delete;
 
     AllocContext mem;
@@ -27,9 +27,6 @@ public:
 
     template <typename ArchetypeT>
     void registerArchetype();
-
-    template <typename SingletonT>
-    SingletonT & getSingleton() { /* FIXME */ return *(SingletonT *)this; }
 
     // State
     template <typename ArchetypeT>
@@ -64,6 +61,9 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     ComponentT & getComponent(Entity e);
 
+    template <typename SingletonT>
+    SingletonT & getSingleton();
+
     template <typename ArchetypeT>
     inline void clearArchetype();
 
@@ -97,7 +97,14 @@ public:
     inline JobID ioRead(const char *path, Fn &&fn, bool is_child = true,
                         DepTs && ... dependencies);
 
+    inline void * tmpAlloc(uint64_t num_bytes);
+
+    // FIXME: this doesn't belong here
+    inline void resetTmpAlloc();
+
+#ifdef MADRONA_USE_JOB_SYSTEM
     inline JobID currentJobID() const;
+#endif
 
 
 #ifdef MADRONA_MW_MODE
@@ -126,12 +133,16 @@ private:
     inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
                              DepTs && ... dependencies);
 
+#ifdef MADRONA_USE_JOB_SYSTEM
     JobManager * const job_mgr_;
     StateManager * const state_mgr_;
     StateCache * const state_cache_;
     IOManager * const io_mgr_;
     const int worker_idx_;
     JobID cur_job_id_;
+#endif
+    StateManager * const state_mgr_;
+    StateCache * const state_cache_;
 #ifdef MADRONA_MW_MODE
     uint32_t cur_world_id_;
 #endif

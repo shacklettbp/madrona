@@ -4,11 +4,12 @@
 #include <sched.h>
 #include <unistd.h>
 
+#include "worker_init.hpp"
 
 namespace madrona {
 namespace {
 
-int getNumCores()
+CountT getNumCores()
 {
     int os_num_threads = sysconf(_SC_NPROCESSORS_ONLN);
 
@@ -21,233 +22,227 @@ int getNumCores()
 
 }
 
-TaskGraph::Builder::Builder()
-    : systems_(0),
+TaskGraph::Builder::Builder(Context &ctx)
+    : ctx_(&ctx),
+      staged_(0),
+      node_datas_(0),
       all_dependencies_(0)
 {}
 
-#if 0
-SystemID TaskGraph::Builder::registerSystem(SystemBase &sys,
-                        Span<const SystemID> dependencies)
+TaskGraph::NodeID TaskGraph::Builder::registerNode(
+    uint32_t data_idx,
+    void (*fn)(NodeBase *, Context *),
+    Span<const NodeID> dependencies,
+    Optional<NodeID> parent_node)
 {
-    uint32_t offset = all_dependencies_.size();
-    uint32_t num_deps = dependencies.size();
+    CountT dependency_offset = all_dependencies_.size();
 
-    all_dependencies_.resize(all_dependencies_.size() + num_deps,
-                             [](auto) {});
+    for (NodeID node_id : dependencies) {
+        all_dependencies_.push_back(node_id);
+    }
 
-    memcpy(&all_dependencies_[offset], dependencies.data(),
-           sizeof(SystemID) * num_deps);
-
-    systems_.push_back(StagedSystem {
-        &sys,
-        offset,
-        num_deps,
+    staged_.push_back({
+        .node = {
+            .fn = fn,
+            .dataIDX = data_idx,
+            .numChildren = 0,
+        },
+        .parentID = parent_node.has_value() ? int32_t(parent_node->id) : -1,
+        .dependencyOffset = uint32_t(dependency_offset),
+        .numDependencies = uint32_t(dependencies.size()),
     });
 
-    return SystemID {
-        (uint32_t)systems_.size() - 1,
+    return NodeID {
+        uint32_t(staged_.size() - 1),
     };
 }
-#endif
 
 TaskGraph TaskGraph::Builder::build()
 {
-    assert(systems_[0].numDependencies == 0);
-    HeapArray<SystemInfo> sorted_systems(systems_.size());
-    HeapArray<bool> queued(systems_.size());
-    new (&sorted_systems[0]) SystemInfo {
-        systems_[0].sys,
-        0,
-        0,
+    assert(staged_[0].numDependencies == 0);
+
+    HeapArray<Node> sorted_nodes(staged_.size());
+    HeapArray<bool> queued(staged_.size());
+    HeapArray<int32_t> num_children(staged_.size());
+
+    int32_t sorted_idx = 0;
+    auto enqueueInSorted = [&](const Node &node) {
+        new (&sorted_nodes[sorted_idx++]) Node(node);
     };
+
+    enqueueInSorted(staged_[0].node);
+
     queued[0] = true;
 
-    HeapArray<uint32_t> remaining_systems(systems_.size() - 1);
+    CountT num_remaining_nodes = staged_.size() - 1;
 
-    for (int64_t i = 1; i < (int64_t)systems_.size(); i++) {
-        queued[i]  = false;
-        remaining_systems[i - 1] = i;
+    for (CountT i = 1; i < staged_.size(); i++) {
+        queued[i] = false;
+        num_children[i] = 0;
     }
 
-    uint32_t sorted_idx = 1;
+    for (CountT i = 0; i < staged_.size(); i++) {
+        auto &staged = staged_[i];
 
-    uint32_t num_remaining_systems = remaining_systems.size();
-    while (num_remaining_systems > 0) {
-        uint32_t cur_sys_idx = remaining_systems[0];
-        StagedSystem &cur_sys = systems_[cur_sys_idx];
+        int32_t parent_id = staged.parentID;
+        if (parent_id != -1) {
+            num_children[parent_id] += 1;
+        }
+    }
+
+    while (num_remaining_nodes > 0) {
+        CountT cur_node_idx;
+        for (cur_node_idx = 0; queued[cur_node_idx]; cur_node_idx++) {}
+
+        StagedNode &cur_staged = staged_[cur_node_idx];
 
         bool dependencies_satisfied = true;
-        for (uint32_t dep_offset = 0; dep_offset < cur_sys.numDependencies;
+        for (CountT dep_offset = 0;
+             dep_offset < (CountT)cur_staged.numDependencies;
              dep_offset++) {
-            uint32_t dep_system_idx =
-                all_dependencies_[cur_sys.dependencyOffset + dep_offset].id;
-            if (!queued[dep_system_idx]) {
+            uint32_t dep_node_idx =
+                all_dependencies_[cur_staged.dependencyOffset + dep_offset].id;
+            if (!queued[dep_node_idx]) {
                 dependencies_satisfied = false;
                 break;
             }
         }
 
-        remaining_systems[0] =
-            remaining_systems[num_remaining_systems - 1];
-        if (!dependencies_satisfied) {
-            remaining_systems[num_remaining_systems - 1] =
-                cur_sys_idx;
-        } else {
-            queued[cur_sys_idx] = true;
-            new (&sorted_systems[sorted_idx++]) SystemInfo {
-                cur_sys.sys,
-                0,
-                0,
-            };
-            num_remaining_systems--;
+        if (dependencies_satisfied) {
+            queued[cur_node_idx] = true;
+            enqueueInSorted(cur_staged.node);
+            num_remaining_nodes--;
         }
     }
 
-    return TaskGraph(std::move(sorted_systems));
+    HeapArray<NodeData> data_cpy(node_datas_.size());
+    memcpy(data_cpy.data(), node_datas_.data(),
+           node_datas_.size() * sizeof(NodeData));
+
+    return TaskGraph(std::move(sorted_nodes), std::move(data_cpy));
 }
 
-TaskGraph::TaskGraph(HeapArray<SystemInfo> &&systems)
-    : workers_(getNumCores()),
-      num_sleeping_workers_(0),
-      worker_sleep_(0),
-      cur_sys_idx_(0),
-      global_data_(nullptr),
-      sorted_systems_(std::move(systems))
+TaskGraph::TaskGraph(HeapArray<Node> &&sorted_nodes,
+                     HeapArray<NodeData> &&node_datas)
+    : sorted_nodes_(std::move(sorted_nodes)),
+      node_datas_(std::move(node_datas))
+{}
+
+void TaskGraph::run(Context *ctx)
 {
-    for (int64_t i = 0; i < (int)workers_.size(); i++) {
-        workers_.emplace(i, [this]() {
+    for (const Node &node : sorted_nodes_) {
+        node.fn((NodeBase *)(&node_datas_[node.dataIDX].userData[0]), ctx);
+    }
+}
+
+ThreadPoolExecutor::ThreadPoolExecutor(CountT num_worlds, CountT num_workers)
+    : workers_(num_workers == 0 ? getNumCores() : num_workers),
+      worker_wakeup_(0),
+      main_wakeup_(0),
+      current_jobs_(nullptr),
+      num_jobs_(0),
+      next_job_(0),
+      num_finished_(0),
+      state_mgr_(num_worlds),
+      state_caches_(num_worlds)
+{
+    for (CountT i = 0; i < num_worlds; i++) {
+        new (&state_caches_[i]) StateCache();
+    }
+
+    for (CountT i = 0; i < workers_.size(); i++) {
+        new (&workers_[i]) std::thread([this]() {
             workerThread();
         });
     }
+}
 
-    while (num_sleeping_workers_.load(std::memory_order::relaxed) !=
-           workers_.size()) {
-        sched_yield();
+ThreadPoolExecutor::~ThreadPoolExecutor()
+{
+    worker_wakeup_.store(-1, std::memory_order_release);
+
+    for (CountT i = 0; i < workers_.size(); i++) {
+        workers_[i].join();
     }
 }
 
-TaskGraph::~TaskGraph()
+void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs)
 {
-    worker_sleep_.store(~0_u32, std::memory_order_release);
-    worker_sleep_.notify_all();
+    current_jobs_ = jobs;
+    num_jobs_ = uint32_t(num_jobs);
+    next_job_.store(0, std::memory_order_relaxed);
+    num_finished_.store(0, std::memory_order_relaxed);
+    worker_wakeup_.store(1, std::memory_order_release);
+    worker_wakeup_.notify_all();
 
-    for (auto &thread : workers_) {
-        thread.join();
-    }
+    main_wakeup_.wait(0, std::memory_order_acquire);
+    main_wakeup_.store(0, std::memory_order_relaxed);
 }
 
-void TaskGraph::run(void *data)
+void ThreadPoolExecutor::ctxInit(void (*init_fn)(void *, const WorkerInit &),
+                                 void *init_data, CountT world_idx)
 {
-    global_data_ = data;
+    WorkerInit worker_init {
+        &state_mgr_,
+        &state_caches_[world_idx],
+        uint32_t(world_idx),
+    };
 
-    SystemInfo &first_sys = sorted_systems_[0];
-
-    uint32_t num_invocations =
-        first_sys.sys->numInvocations.load(std::memory_order_relaxed);
-
-    first_sys.numRemaining.store(num_invocations,
-        std::memory_order_relaxed);
-
-    first_sys.curOffset.store(0, std::memory_order_release);
-
-    cur_sys_idx_.store(0, std::memory_order_release);
-
-    worker_sleep_.store(1, std::memory_order_relaxed);
-    worker_sleep_.notify_all();
-
-    main_sleep_.store(0, std::memory_order_relaxed);
-    main_sleep_.wait(0, std::memory_order_acquire);
+    init_fn(init_data, worker_init);
 }
 
-void TaskGraph::workerThread()
-{
-    num_sleeping_workers_.fetch_add(1, std::memory_order_relaxed);
-    worker_sleep_.wait(0, std::memory_order_relaxed);
-    num_sleeping_workers_.fetch_sub(1, std::memory_order_relaxed);
-    uint32_t wakeup_val = worker_sleep_.load(std::memory_order_relaxed);
-    if (wakeup_val == ~0_u32) {
-        return;
-    }
 
+ECSRegistry ThreadPoolExecutor::getECSRegistry()
+{
+    return ECSRegistry(&state_mgr_, nullptr); // FIXME
+}
+
+void ThreadPoolExecutor::workerThread()
+{
     while (true) {
-        uint32_t sys_idx = cur_sys_idx_.load(std::memory_order_acquire);
-        if (sys_idx == sorted_systems_.size()) {
-            uint32_t prev_sleeping =
-                num_sleeping_workers_.fetch_add(1, std::memory_order_relaxed);
+        worker_wakeup_.wait(0, std::memory_order_relaxed);
 
-            if (prev_sleeping == workers_.size() - 1) {
-                main_sleep_.store(1, std::memory_order_release);
-                main_sleep_.notify_one();
+        int32_t ctrl = worker_wakeup_.load(std::memory_order_acquire);
+        if (ctrl == 0) {
+            continue;
+        } else if (ctrl == -1) {
+            break;
+        }
+
+        while (true) {
+            // FIXME: Is there a potential overflow here if a thread doesn't
+            // see that worker_wakeup_ becomes 0 again?
+            uint32_t job_idx =
+                next_job_.fetch_add(1, std::memory_order_relaxed);
+            if (job_idx == num_jobs_) {
+                worker_wakeup_.store(0, std::memory_order_relaxed);
             }
 
-            worker_sleep_.wait(0, std::memory_order_relaxed);
-            num_sleeping_workers_.fetch_sub(1, std::memory_order_relaxed);
-            wakeup_val = worker_sleep_.load(std::memory_order_relaxed);
-
-            if (wakeup_val == ~0_u32) {
-                return;
-            }
-
-            continue;
-        }
-
-        SystemInfo &cur_sys = sorted_systems_[sys_idx];
-
-        uint32_t cur_offset = 
-            cur_sys.curOffset.load(std::memory_order_relaxed);
-
-        uint32_t total_invocations =
-            cur_sys.sys->numInvocations.load(std::memory_order_relaxed);
-
-        if (cur_offset >= total_invocations) {
-            sched_yield();
-            continue;
-        }
-
-        cur_offset = cur_sys.curOffset.fetch_add(1,
-            std::memory_order_relaxed);
-
-        if (cur_offset >= total_invocations) {
-            sched_yield();
-            continue;
-        }
-
-        cur_sys.sys->entry_fn_(cur_sys.sys, global_data_, cur_offset);
-
-        uint32_t prev_remaining = cur_sys.numRemaining.fetch_sub(1,
-            std::memory_order_acq_rel);
-
-        if (prev_remaining == 1) {
-            uint32_t next_sys_idx = sys_idx + 1;
-
-            while (true) {
-                if (next_sys_idx < sorted_systems_.size()) {
-                    uint32_t new_num_invocations =
-                        sorted_systems_[next_sys_idx].sys->numInvocations.load(
-                            std::memory_order_relaxed);
-
-                    if (new_num_invocations == 0) {
-                        next_sys_idx++;
-                        continue;
-                    }
-
-                    SystemInfo &next_sys = sorted_systems_[next_sys_idx];
-                    next_sys.curOffset.store(0, std::memory_order_relaxed);
-                    next_sys.numRemaining.store(new_num_invocations,
-                                                std::memory_order_relaxed);
-
-                    cur_sys_idx_.store(next_sys_idx, std::memory_order_release);
-                } else {
-                    worker_sleep_.store(0, std::memory_order_relaxed);
-
-                    cur_sys_idx_.store(next_sys_idx, std::memory_order_release);
-                }
-
+            if (job_idx >= num_jobs_) {
                 break;
             }
+
+            current_jobs_[job_idx].fn(current_jobs_[job_idx].data);
+
+            // This has to be acq_rel so the finishing thread has seen
+            // all the other threads' effects
+            uint32_t prev_finished =
+                num_finished_.fetch_add(1, std::memory_order_acq_rel);
+
+            if (prev_finished == num_jobs_ - 1) {
+                main_wakeup_.store(1, std::memory_order_release);
+                main_wakeup_.notify_one();
+            }
         }
     }
+}
+
+TaskGraph::NodeID ResetTmpAllocNode::addToGraph(
+    Context &,
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> dependencies)
+{
+    return builder.addDefaultNode<ResetTmpAllocNode>(dependencies);
 }
 
 }

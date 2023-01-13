@@ -66,6 +66,11 @@ SingletonT & Context::getSingleton()
     return mwGPU::getStateManager()->getSingleton<SingletonT>(world_id_);
 }
 
+inline void * Context::tmpAlloc(uint64_t num_bytes)
+{
+    return mwGPU::TmpAllocator::get().alloc(num_bytes);
+}
+
 #if 0
 namespace mwGPU {
 

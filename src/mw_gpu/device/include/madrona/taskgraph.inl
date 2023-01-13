@@ -112,7 +112,6 @@ TaskGraph::NodeID TaskGraph::Builder::addToGraph(
     return NodeT::addToGraph(*this, dependencies);
 }
 
-
 template <typename NodeT>
 NodeT & TaskGraph::Builder::getDataRef(TypedDataID<NodeT> data_id)
 {
