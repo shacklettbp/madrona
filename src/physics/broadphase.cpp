@@ -672,29 +672,33 @@ static inline bool traceRayIntoConvexPolyhedron(
     float tfirst = t_min;
     float tlast = t_max;
 
-    CountT hit_face_idx = -1;
-
     // Intersect segment against each plane
     CountT num_faces = convex_mesh.getPolygonCount();
+
+    // Our face normals point outside. RTCD uses plane normals pointing inside
+    // the polyhedron, so signs are flipped relative to the book
+    
+    Vector3 closest_normal = Vector3::zero(); 
+
     for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
         Plane plane =
             convex_mesh.getPlane(PolygonID(face_idx), convex_mesh.vertices());
 
         float denom = dot(plane.normal, ray_d);
-        float dist = plane.d - dot(plane.normal, ray_o);
+        float neg_dist = plane.d - dot(plane.normal, ray_o);
 
         // Test if segment runs parallel to the plane
         if (denom == 0.0f) {
             // If so, return “no intersection” if segment lies outside plane
-            if (dist > 0.0f) return false;
+            if (neg_dist < 0.0f) return false;
         } else {
             // Compute parameterized t value for intersection with current plane
-            float t = dist / denom;
+            float t = neg_dist / denom;
             if (denom < 0.0f) {
                 // When entering halfspace, update tfirst if t is larger
                 if (t >= tfirst) {
                     tfirst = t;
-                    hit_face_idx = face_idx;
+                    closest_normal = plane.normal;
                 }
             } else {
                 // When exiting halfspace, update tlast if t is smaller
@@ -707,15 +711,15 @@ static inline bool traceRayIntoConvexPolyhedron(
         }
     }
 
-    // Addition from RTCD algo: if ray starts within (or on edge of) convex
-    // polyhedron, skip it
-    if (hit_face_idx == -1) {
+    // Addition from RTCD algo: if ray only hits backfacing planes
+    // we don't set closest_normal and treat this as a miss
+    if (closest_normal.x == 0 && closest_normal.y == 0 &&
+        closest_normal.z == 0) {
         return false;
     }
 
     *hit_t = tfirst;
-    *hit_normal = convex_mesh.getFaceNormal(
-        PolygonID(hit_face_idx), convex_mesh.vertices());
+    *hit_normal = closest_normal;
 
     return true;
 }
