@@ -235,7 +235,6 @@ struct GPUEngineState {
     HostChannel *hostAllocatorChannel;
     std::unique_ptr<HostPrintCPU> hostPrint;
 
-    uint32_t *rendererInstanceCounts;
     HeapArray<void *> exportedColumns;
 };
 
@@ -954,6 +953,7 @@ static GPUEngineState initEngineAndUserState(
 
     auto batch_renderer = Optional<render::BatchRenderer>::none();
 
+    void *renderer_init_buffer = nullptr;
     if (camera_mode != StateConfig::CameraMode::None) {
         assert(render_width != 0 && render_height != 0);
 
@@ -969,6 +969,14 @@ static GPUEngineState initEngineAndUserState(
                 render::BatchRenderer::CameraMode::Perspective :
                 render::BatchRenderer::CameraMode::Lidar,
         });
+
+        renderer_init_buffer = cu::allocStaging(
+                sizeof(render::RendererInit) * (uint64_t)num_worlds);
+        
+        for (CountT i = 0; i < (CountT)num_worlds; i++) {
+            ((render::RendererInit *)renderer_init_buffer)[i].iface =
+                batch_renderer->getInterface();
+        }
     }
 
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
@@ -1039,7 +1047,12 @@ static GPUEngineState initEngineAndUserState(
                                              host_print->getChannelPtr(),
                                              exported_readback);
 
-    auto init_worlds_args = makeKernelArgBuffer(num_worlds, init_tmp_buffer);
+    // FIXME: this assumes an ordering of the init args
+    auto init_worlds_args = batch_renderer.has_value() ?
+        makeKernelArgBuffer(num_worlds,
+                            init_tmp_buffer,
+                            renderer_init_buffer) :
+        makeKernelArgBuffer(num_worlds, init_tmp_buffer);
 
     auto no_args = makeKernelArgBuffer();
 
@@ -1082,28 +1095,6 @@ static GPUEngineState initEngineAndUserState(
         (char *)gpu_consts_readback->tmpAllocatorAddr +
         (uintptr_t)gpu_state_buffer;
 
-    uint32_t *instance_counts_host;
-    if (batch_renderer.has_value()) {
-        gpu_consts_readback->rendererASInstancesAddrs =
-            (void **)batch_renderer->tlasInstancePtrs();
-
-        instance_counts_host = (uint32_t *)
-            cu::allocReadback(sizeof(uint32_t *) * (uint64_t)num_worlds);
-
-        gpu_consts_readback->rendererInstanceCountsAddr = instance_counts_host;
-
-        gpu_consts_readback->rendererBLASesAddr =
-            batch_renderer->objectsBLASPtr();
-        gpu_consts_readback->rendererViewDatasAddr =
-            (void *)batch_renderer->viewDataPtr();
-    } else {
-        instance_counts_host = nullptr;
-        gpu_consts_readback->rendererASInstancesAddrs = nullptr;
-        gpu_consts_readback->rendererInstanceCountsAddr = nullptr;
-        gpu_consts_readback->rendererBLASesAddr = nullptr;
-        gpu_consts_readback->rendererViewDatasAddr = nullptr;
-    }
-
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
     REQ_CU(cuModuleGetGlobal(&job_sys_consts_addr, &job_sys_consts_size,
@@ -1139,6 +1130,10 @@ static GPUEngineState initEngineAndUserState(
 
     cu::deallocGPU(init_tmp_buffer);
 
+    if (renderer_init_buffer != nullptr) {
+        cu::deallocCPU(renderer_init_buffer);
+    }
+
     HeapArray<void *> exported_cols(num_exported);
     memcpy(exported_cols.data(), exported_readback,
            sizeof(void *) * (uint64_t)num_exported);
@@ -1151,7 +1146,6 @@ static GPUEngineState initEngineAndUserState(
         std::move(allocator_thread),
         allocator_channel,
         std::move(host_print),
-        instance_counts_host,
         std::move(exported_cols),
     };
 }
@@ -1305,8 +1299,7 @@ MADRONA_EXPORT void MWCudaExecutor::run()
     HostEventLogging(HostEvent::megaKernelEnd);
 
     if (impl_->engineState.batchRenderer.has_value()) {
-        impl_->engineState.batchRenderer->render(
-            impl_->engineState.rendererInstanceCounts);
+        impl_->engineState.batchRenderer->render();
     }
 }
 

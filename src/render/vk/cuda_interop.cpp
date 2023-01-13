@@ -21,13 +21,14 @@ static void setActiveDevice(int cuda_id)
     }
 }
 
-static cudaExternalMemory_t importBuffer(int buf_fd, uint64_t num_bytes)
+static cudaExternalMemory_t importBuffer(int buf_fd, uint64_t num_bytes,
+                                         bool dedicated)
 {
     cudaExternalMemoryHandleDesc cuda_ext_info {};
     cuda_ext_info.type = cudaExternalMemoryHandleTypeOpaqueFd;
     cuda_ext_info.handle.fd = buf_fd;
     cuda_ext_info.size = num_bytes;
-    cuda_ext_info.flags = cudaExternalMemoryDedicated;
+    cuda_ext_info.flags = dedicated ? cudaExternalMemoryDedicated : 0;
 
     cudaExternalMemory_t ext_mem;
     cudaError_t res = cudaImportExternalMemory(&ext_mem, &cuda_ext_info);
@@ -59,7 +60,8 @@ static void *mapExternal(cudaExternalMemory_t ext_mem, uint64_t num_bytes)
 CudaImportedBuffer::CudaImportedBuffer(const DeviceState &dev,
                                        int cuda_id,
                                        VkDeviceMemory mem,
-                                       uint64_t num_bytes)
+                                       uint64_t num_bytes,
+                                       bool dedicated)
     : ext_fd_(),
       ext_mem_(),
       dev_ptr_()
@@ -74,7 +76,7 @@ CudaImportedBuffer::CudaImportedBuffer(const DeviceState &dev,
 
     REQ_VK(dev.dt.getMemoryFdKHR(dev.hdl, &fd_info, &ext_fd_));
 
-    ext_mem_ = importBuffer(ext_fd_, num_bytes);
+    ext_mem_ = importBuffer(ext_fd_, num_bytes, dedicated);
     dev_ptr_ = mapExternal(ext_mem_, num_bytes);
 }
 

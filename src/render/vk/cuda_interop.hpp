@@ -14,7 +14,8 @@ public:
     CudaImportedBuffer(const DeviceState &dev,
                        int cuda_id,
                        VkDeviceMemory mem,
-                       uint64_t num_bytes);
+                       uint64_t num_bytes,
+                       bool dedicated = true);
 
     CudaImportedBuffer(const CudaImportedBuffer &) = delete;
     CudaImportedBuffer(CudaImportedBuffer &&);

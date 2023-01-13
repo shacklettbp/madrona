@@ -199,7 +199,7 @@ SingletonT & StateManager::getSingleton(MADRONA_MW_COND(uint32_t world_id))
         archetype_stores_[archetype_id]->tbl;
 #endif
 
-    return *(SingletonT *)tbl.data(2);
+    return *(SingletonT *)tbl.data(user_component_offset_);
 }
 
 template <typename ComponentT>

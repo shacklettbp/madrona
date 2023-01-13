@@ -1,5 +1,21 @@
 add_subdirectory(vk)
 
+add_library(madrona_ecs_render STATIC
+    render_ecs.cpp
+)
+
+target_link_libraries(madrona_ecs_render PUBLIC
+    madrona_mw_core
+)
+
+add_library(madrona_mw_ecs_render STATIC
+    render_ecs.cpp
+)
+
+target_link_libraries(madrona_mw_ecs_render PUBLIC
+    madrona_mw_core
+)
+
 add_library(madrona_batch_render STATIC
     batch_renderer.cpp
 )

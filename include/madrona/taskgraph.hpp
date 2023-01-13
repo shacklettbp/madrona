@@ -41,7 +41,6 @@ public:
     class Builder {
     public:
         Builder(Context &ctx);
-        ~Builder();
 
         template <typename NodeT, typename... Args>
         TypedDataID<NodeT> constructNodeData(Args &&...args);
@@ -128,23 +127,29 @@ private:
     HeapArray<StateCache> state_caches_;
 };
 
-template <typename ContextT, typename WorldT, typename InitT>
+template <typename ContextT, typename WorldT, typename... InitTs>
 class TaskGraphExecutor : private ThreadPoolExecutor {
 public:
-    TaskGraphExecutor(const InitT *inits,
-                      CountT num_worlds,
-                      CountT num_workers = 0);
+    struct Config {
+        uint32_t numWorlds;
+        uint32_t numWorkers = 0;
+    };
+
+    template <typename... Args>
+    TaskGraphExecutor(const Config &cfg,
+                      const Args * ... user_init_ptrs);
 
     inline void run();
 
 private:
     struct WorldContext {
-        WorldT worldData;
         ContextT ctx;
+        WorldT worldData;
         TaskGraph taskgraph;
 
-        inline WorldContext(const InitT &world_init,
-                            const WorkerInit &worker_init);
+        inline WorldContext(const WorkerInit &worker_init,
+                            const InitTs & ...world_inits);
+                            
     };
 
     static inline void stepWorld(void *data_raw);

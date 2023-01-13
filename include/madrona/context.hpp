@@ -108,7 +108,7 @@ public:
 
 
 #ifdef MADRONA_MW_MODE
-    inline uint32_t worldID() const;
+    inline WorldID worldID() const;
 #endif
 
     inline WorldBase & data() { return *data_; }

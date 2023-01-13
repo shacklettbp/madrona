@@ -283,9 +283,9 @@ JobID Context::currentJobID() const
 #endif
 
 #ifdef MADRONA_MW_MODE
-uint32_t Context::worldID() const
+WorldID Context::worldID() const
 {
-    return cur_world_id_;
+    return WorldID { (int32_t)cur_world_id_ };
 }
 #endif
 

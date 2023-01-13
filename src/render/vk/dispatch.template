@@ -29,6 +29,7 @@ device:
 - vkMapMemory
 - vkUnmapMemory
 - vkFlushMappedMemoryRanges
+- vkInvalidateMappedMemoryRanges
 - vkAllocateCommandBuffers
 - vkFreeCommandBuffers
 - vkBeginCommandBuffer
