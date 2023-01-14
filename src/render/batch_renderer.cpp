@@ -417,9 +417,8 @@ BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
         (shader::ViewData **)view_data_addrs_staging.ptr;
 
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
-        view_data_addrs_staging_ptr[i] =
-            ((shader::ViewData *)viewDataAddrsBufferCUDA.getDevicePointer()) +
-            i * cfg.maxViewsPerWorld * sizeof(shader::ViewData);
+        view_data_addrs_staging_ptr[i] = &((shader::ViewData *)
+            viewDataBufferCUDA.getDevicePointer())[i * cfg.maxViewsPerWorld];
     }
 
     view_data_addrs_staging.flush(dev);
