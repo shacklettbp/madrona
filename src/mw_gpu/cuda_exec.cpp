@@ -1022,8 +1022,8 @@ static GPUEngineState initEngineAndUserState(
     uint64_t num_init_bytes =
         (uint64_t)num_world_init_bytes * (uint64_t)num_worlds;
     auto init_tmp_buffer = cu::allocGPU(num_init_bytes);
-    cudaMemcpyAsync(init_tmp_buffer, world_init_ptr,
-                    num_init_bytes, cudaMemcpyHostToDevice, strm);
+    REQ_CUDA(cudaMemcpyAsync(init_tmp_buffer, world_init_ptr,
+        num_init_bytes, cudaMemcpyHostToDevice, strm));
 
     auto gpu_consts_readback = (GPUImplConsts *)cu::allocReadback(
         sizeof(GPUImplConsts));

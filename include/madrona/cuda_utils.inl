@@ -5,6 +5,7 @@
  * license that can be found in the LICENSE file or at
  * https://opensource.org/licenses/MIT.
  */
+
 namespace madrona {
 namespace cu {
 
@@ -68,7 +69,7 @@ void checkCuda(cudaError_t res, const char *file,
                int line, const char *funcname) noexcept
 {
     if (res != cudaSuccess) {
-        cudaError(res, file, line, funcname);
+        cudaRuntimeError(res, file, line, funcname);
     }
 }
 

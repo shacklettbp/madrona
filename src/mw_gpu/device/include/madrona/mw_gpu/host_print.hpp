@@ -1,6 +1,10 @@
 #pragma once
 
+#ifdef MADRONA_GPU_MODE
+
 #include <madrona/sync.hpp>
+
+#endif
 
 namespace madrona {
 namespace mwGPU {
@@ -48,4 +52,6 @@ friend HostPrintCPU;
 }
 }
 
+#ifdef MADRONA_GPU_MODE
 #include "host_print.inl"
+#endif

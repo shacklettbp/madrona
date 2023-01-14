@@ -27,7 +27,6 @@ inline void rawDealloc(void *ptr)
     free(ptr);
 }
 
-
 class DefaultAlloc  {
 public:
     inline void * alloc(uint64_t num_bytes)

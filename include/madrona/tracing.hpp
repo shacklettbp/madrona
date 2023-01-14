@@ -1,9 +1,8 @@
 #pragma once
 
 #include <vector>
+#include <string>
 #include <stdint.h>
-#include <unistd.h>
-#include <fstream>
 
 #include <madrona/macros.hpp>
 
@@ -47,13 +46,17 @@ namespace madrona
 #endif
     }
 
+    void WriteToFile(void *data, size_t num_bytes,
+                     const std::string &file_path,
+                     const std::string &name);
+
+    // FIXME: WriteToFile not a good name for global madrona scope
     template <typename T>
-    inline void WriteToFile(T *events, size_t size, const std::string file_path, const std::string name)
+    inline void WriteToFile(T *events, size_t size,
+                            const std::string &file_path,
+                            const std::string &name)
     {
-        std::string file_name = file_path + std::to_string(getpid()) + name + ".bin";
-        std::ofstream myFile(file_name, std::ios::out | std::ios::binary);
-        myFile.write((char *)events, size * sizeof(T));
-        myFile.close();
+        WriteToFile((void *)events, size * sizeof(T), file_path, name);
     }
 
     void FinalizeLogging(const std::string file_path);

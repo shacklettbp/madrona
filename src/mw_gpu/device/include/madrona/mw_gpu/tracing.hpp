@@ -1,9 +1,12 @@
 #pragma once
 
+#ifdef MADRONA_GPU_MODE
+
 #include <stdint.h>
 #include <atomic>
-
 #include "const.hpp"
+
+#endif
 
 namespace madrona::mwGPU {
 class DeviceTracingManager;

@@ -31,7 +31,7 @@ inline void cpyGPUToCPU(cudaStream_t strm, void *cpu, void *gpu, size_t num_byte
 
 inline cudaStream_t makeStream();
 
-[[noreturn]] MADRONA_IMPORT void cudaError(
+[[noreturn]] MADRONA_IMPORT void cudaRuntimeError(
         cudaError_t err, const char *file,
         int line, const char *funcname) noexcept;
 [[noreturn]] MADRONA_IMPORT void cuDrvError(

@@ -11,7 +11,7 @@
 namespace madrona {
 namespace cu {
 
-[[noreturn]] MADRONA_EXPORT void cudaError(
+[[noreturn]] MADRONA_EXPORT void cudaRuntimeError(
         cudaError_t err, const char *file,
         int line, const char *funcname) noexcept
 {
