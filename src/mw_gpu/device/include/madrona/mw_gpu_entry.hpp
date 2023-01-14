@@ -3,6 +3,7 @@
 #include <madrona/taskgraph.hpp>
 #include <madrona/memory.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
+#include <madrona/mw_gpu/tracing.hpp>
 
 namespace madrona {
 namespace mwGPU {
@@ -10,7 +11,7 @@ namespace entryKernels {
 
 template <typename ContextT, typename WorldDataT, typename... InitTs>
 __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
-                        void *device_tracing, void **exported_columns)
+                        void **exported_columns)
 {
     HostAllocator *host_alloc = mwGPU::getHostAllocator();
     new (host_alloc) HostAllocator(alloc_init);
@@ -18,11 +19,12 @@ __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
     auto host_print = (HostPrint *)GPUImplConsts::get().hostPrintAddr;
     new (host_print) HostPrint(print_channel);
 
-    auto device_tracing_addr = (DeviceTracing **)GPUImplConsts::get().deviceTracingAddr;
-    *device_tracing_addr = reinterpret_cast<DeviceTracing *>(device_tracing);
-
     TmpAllocator &tmp_alloc = TmpAllocator::get();
     new (&tmp_alloc) TmpAllocator();
+
+#ifdef MADRONA_TRACING
+    new (&DeviceTracing::get()) DeviceTracing();
+#endif
 
     StateManager *state_mgr = mwGPU::getStateManager();
     new (state_mgr) StateManager(0);

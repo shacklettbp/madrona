@@ -31,8 +31,7 @@ using namespace madrona;
 #include "device/include/madrona/mw_gpu/host_print.hpp"
 #include "device/include/madrona/mw_gpu/tracing.hpp"
 
-namespace madrona {
-namespace mwGPU {
+namespace madrona::mwGPU {
 
 class HostPrintCPU {
 public:
@@ -184,31 +183,33 @@ private:
     std::thread thread_;
 };
 
-class DeviceTracingAllocator {
-public:
-    inline DeviceTracingAllocator() {
-        CUdeviceptr tracing_devptr;
-        REQ_CU(cuMemAllocManaged(&tracing_devptr,
-                                 sizeof(DeviceTracing), CU_MEM_ATTACH_GLOBAL));
-        device_tracing_ = (DeviceTracing *)tracing_devptr;
-    }
-    inline ~DeviceTracingAllocator() {
 #ifdef MADRONA_TRACING
+class DeviceTracingManager {
+public:
+    inline DeviceTracingManager(void *dev_ptr)
+        : device_tracing_((DeviceTracing *)dev_ptr)
+    {}
+
+    inline ~DeviceTracingManager()
+    {
+        auto readback = (DeviceTracing *)
+            ::madrona::cu::allocReadback(sizeof(DeviceTracing));
+
+        REQ_CUDA(cudaMemcpy(readback, device_tracing_, sizeof(DeviceTracing),
+                            cudaMemcpyDeviceToHost));
+
         ::madrona::WriteToFile<DeviceTracing::DeviceLog>(
-            device_tracing_->device_logs_,
-            device_tracing_->getIndex(), "/tmp/", "_madrona_device_tracing");
-#endif
-        REQ_CU(cuMemFree((CUdeviceptr)device_tracing_));
-    }
-    inline void* getTracingPtr() {
-        return device_tracing_;
+            readback->device_logs_,
+            readback->getIndex(), "/tmp/", "_madrona_device_tracing");
+
+        ::madrona::cu::deallocCPU(readback);
     }
 
 private:
     DeviceTracing *device_tracing_;
 };
+#endif
 
-}
 }
 }
 
@@ -227,7 +228,7 @@ using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
 using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
 using HostPrint = mwGPU::madrona::mwGPU::HostPrint;
 using HostPrintCPU = mwGPU::madrona::mwGPU::HostPrintCPU;
-using DeviceTracingAllocator = mwGPU::madrona::mwGPU::DeviceTracingAllocator;
+using DeviceTracingManager = mwGPU::madrona::mwGPU::DeviceTracingManager;
 
 namespace consts {
 static constexpr uint32_t numEntryQueueThreads = 512;
@@ -260,7 +261,9 @@ struct GPUEngineState {
     std::thread allocatorThread;
     HostChannel *hostAllocatorChannel;
     std::unique_ptr<HostPrintCPU> hostPrint;
-    std::unique_ptr<DeviceTracingAllocator> deviceTracing;
+#ifdef MADRONA_TRACING
+    std::unique_ptr<DeviceTracingManager> deviceTracing;
+#endif
 
     HeapArray<void *> exportedColumns;
 };
@@ -1067,8 +1070,6 @@ static GPUEngineState initEngineAndUserState(
 
     auto host_print = std::make_unique<HostPrintCPU>();
 
-    auto device_tracing = std::make_unique<DeviceTracingAllocator>();
-
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
                                                    world_data_alignment,
@@ -1077,7 +1078,6 @@ static GPUEngineState initEngineAndUserState(
 
     auto init_ecs_args = makeKernelArgBuffer(alloc_init,
                                              host_print->getChannelPtr(),
-                                             device_tracing->getTracingPtr(),
                                              exported_readback);
 
     // FIXME: this assumes an ordering of the init args
@@ -1128,9 +1128,14 @@ static GPUEngineState initEngineAndUserState(
         (char *)gpu_consts_readback->tmpAllocatorAddr +
         (uintptr_t)gpu_state_buffer;
 
+#ifdef MADRONA_TRACING
     gpu_consts_readback->deviceTracingAddr =
         (char *)gpu_consts_readback->deviceTracingAddr +
         (uintptr_t)gpu_state_buffer;
+
+    auto device_tracing = std::make_unique<DeviceTracingManager>(
+        gpu_consts_readback->deviceTracingAddr);
+#endif
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
@@ -1183,7 +1188,9 @@ static GPUEngineState initEngineAndUserState(
         std::move(allocator_thread),
         allocator_channel,
         std::move(host_print),
+#ifdef MADRONA_TRACING
         std::move(device_tracing),
+#endif
         std::move(exported_cols),
     };
 }
@@ -1317,6 +1324,11 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(MWCudaExecutor &&o)
 MADRONA_EXPORT MWCudaExecutor::~MWCudaExecutor()
 {
     if (!impl_) return;
+
+#ifdef MADRONA_TRACING
+    // Seems good to copy the logs before the module is unloaded
+    impl_->engineState.deviceTracing.reset();
+#endif
 
     impl_->engineState.hostAllocatorChannel->op =
         HostChannel::Op::Terminate;

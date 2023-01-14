@@ -72,7 +72,7 @@ void TaskGraph::init()
 
     init_barrier_.arrive_and_wait();
 
-    device_tracing->DeviceEventLogging(mwGPU::DeviceEvent::calibration, 0, 0, 0);
+    mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration, 0, 0, 0);
 }
 
 void TaskGraph::setBlockState()
@@ -174,8 +174,8 @@ void TaskGraph::finishWork()
 
     if (prev_remaining == num_finished) {
 
-        device_tracing->DeviceEventLogging(mwGPU::DeviceEvent::nodeFinish,
-                                           cur_node.funcID, sharedBlockState.numInvocations, node_idx);
+        mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::nodeFinish,
+            cur_node.funcID, sharedBlockState.numInvocations, node_idx);
 
         uint32_t next_node_idx = node_idx + 1;
 
@@ -196,8 +196,7 @@ void TaskGraph::finishWork()
                 next_node.totalNumInvocations.store(new_num_invocations,
                     std::memory_order_relaxed);
 
-                device_tracing->DeviceEventLogging(
-                    mwGPU::DeviceEvent::nodeStart,
+                mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::nodeStart,
                     next_node.funcID, new_num_invocations, next_node_idx);
             }
 
@@ -216,9 +215,9 @@ static inline __attribute__((always_inline)) void megakernelImpl()
         taskgraph->init();
     }
 
-    TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
-
     while (true) {
+        TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
+
         NodeBase *node_data;
         uint32_t func_id;
         int32_t invocation_offset;
@@ -226,7 +225,7 @@ static inline __attribute__((always_inline)) void megakernelImpl()
             &node_data, &func_id, &invocation_offset);
 
         if (worker_state == TaskGraph::WorkerState::Exit) {
-            taskgraph->device_tracing->DeviceEventLogging(
+            DeviceTracing::Log(
                 mwGPU::DeviceEvent::blockExit,
                 func_id, invocation_offset, sharedBlockState.nodeIdx);
             break;
@@ -238,7 +237,7 @@ static inline __attribute__((always_inline)) void megakernelImpl()
         }
 
         if (worker_state == TaskGraph::WorkerState::Run) {
-            taskgraph->device_tracing->DeviceEventLogging(
+            DeviceTracing::Log(
                 mwGPU::DeviceEvent::blockStart,
                 func_id, invocation_offset, sharedBlockState.nodeIdx);
             dispatch(func_id, node_data, invocation_offset);
@@ -246,10 +245,9 @@ static inline __attribute__((always_inline)) void megakernelImpl()
 
         // wait till all warps to finish, to make the blockWait event more accurate
         __syncthreads();
-        taskgraph->device_tracing->DeviceEventLogging(
+        DeviceTracing::Log(
             mwGPU::DeviceEvent::blockWait,
             func_id, invocation_offset, sharedBlockState.nodeIdx);
-
 
         taskgraph->finishWork();
     }
@@ -299,9 +297,9 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     total_bytes = tmp_allocator_offset + sizeof(TmpAllocator);
 
     uint64_t device_tracing_offset = utils::roundUp(
-        total_bytes, (uint64_t)alignof(mwGPU::DeviceTracing *));
+        total_bytes, (uint64_t)alignof(mwGPU::DeviceTracing));
 
-    total_bytes = device_tracing_offset + sizeof(mwGPU::DeviceTracing *);
+    total_bytes = device_tracing_offset + sizeof(mwGPU::DeviceTracing);
 
     *out_constants = GPUImplConsts {
         /*.jobSystemAddr = */                  (void *)0ul,
@@ -311,7 +309,7 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         /* .hostAllocatorAddr = */             (void *)host_allocator_offset,
         /* .hostPrintAddr = */                 (void *)host_print_offset,
         /* .tmpAllocatorAddr */                (void *)tmp_allocator_offset,
-        /* .deviceTracingAddr = */             (void **)device_tracing_offset,
+        /* .deviceTracingAddr = */             (void *)device_tracing_offset,
         /* .numWorldDataBytes = */             num_world_data_bytes,
         /* .numWorlds = */                     num_worlds,
         /* .jobGridsOffset = */                (uint32_t)0,

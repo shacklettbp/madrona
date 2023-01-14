@@ -129,10 +129,6 @@ void TaskGraph::Builder::build(TaskGraph *out)
     memcpy(tg_datas, node_datas_, sizeof(NodeData) * num_datas_);
 
     new (out) TaskGraph(sorted_nodes, num_nodes_, tg_datas);
-
-    // attach device tracing onto task graph and reset the log index
-    out->device_tracing = *(mwGPU::DeviceTracing **)mwGPU::GPUImplConsts::get().deviceTracingAddr;
-    out->device_tracing->resetIndex();
 }
 
 ClearTmpNodeBase::ClearTmpNodeBase(uint32_t archetype_id)

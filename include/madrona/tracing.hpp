@@ -35,8 +35,7 @@ namespace madrona
 #ifdef MADRONA_X64
         return __builtin_ia32_rdtsc();
 #else
-        // todo
-        return 0;
+        STATIC_UNIMPLEMENTED();
 #endif
     }
 

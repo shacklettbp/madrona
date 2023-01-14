@@ -5,8 +5,6 @@
 
 #include <madrona/state.hpp>
 
-#include <madrona/mw_gpu/tracing.hpp>
-
 #include "mw_gpu/const.hpp"
 #include "mw_gpu/worker_init.hpp"
 
@@ -142,7 +140,6 @@ public:
     NodeT & getNodeData(TypedDataID<NodeT> data_id);
 
     struct BlockState;
-    mwGPU::DeviceTracing* device_tracing;
 private:
     template <typename ContextT, bool> struct WorldTypeExtract;
 
