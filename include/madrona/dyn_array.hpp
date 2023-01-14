@@ -113,7 +113,9 @@ public:
     {
         if (new_size > capacity_) {
             expand(new_size);
-            
+        }
+
+        if (new_size > n_) {
             for (CountT i = n_; i < new_size; i++) {
                 fn(&ptr_[i]);
             }
