@@ -765,7 +765,8 @@ void TLASData::build(const DeviceState &dev,
         range_info.primitiveCount = num_instances;
     }
 
-    dev.dt.cmdBuildAccelerationStructuresKHR(build_cmd, 1, buildInfos.data(),
+    dev.dt.cmdBuildAccelerationStructuresKHR(build_cmd, num_worlds,
+                                             buildInfos.data(),
                                              rangeInfoPtrs.data());
 }
 

@@ -81,6 +81,7 @@ inline void updateViewData(Context &ctx,
     auto camera_pos = pos + view_settings.cameraOffset;
 
     PackedViewData &renderer_view = renderer_state.packedViews[view_idx];
+
     renderer_view.rotation = rot;
     renderer_view.posAndTanFOV.x = camera_pos.x;
     renderer_view.posAndTanFOV.y = camera_pos.y;

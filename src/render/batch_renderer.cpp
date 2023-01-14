@@ -373,7 +373,7 @@ BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
                             dev.gfxQF, 1, true) :
           Optional<PresentationState>::none()),
       rgbPresentIntermediate(presentState.has_value() ?
-          mem.makeConversionImage(cfg.renderHeight, cfg.renderHeight,
+          mem.makeConversionImage(cfg.renderWidth, cfg.renderHeight,
                                   VK_FORMAT_R8G8B8A8_UNORM) :
           Optional<LocalImage>::none()),
       renderQueue(makeQueue(dev, dev.gfxQF, 0)),
