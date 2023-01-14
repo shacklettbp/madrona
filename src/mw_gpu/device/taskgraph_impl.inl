@@ -162,11 +162,16 @@ void TaskGraph::finishWork()
 
     if (thread_idx != 0) return;
 
+    uint32_t node_idx = sharedBlockState.nodeIdx;
+
+    mwGPU::DeviceTracing::Log(
+        mwGPU::DeviceEvent::blockWait,
+        sharedBlockState.funcID, sharedBlockState.runOffset, node_idx);
+
     uint32_t num_finished = std::min(
         sharedBlockState.numInvocations - sharedBlockState.runOffset,
         consts::numMegakernelThreads);
 
-    uint32_t node_idx = sharedBlockState.nodeIdx;
     Node &cur_node = sorted_nodes_[node_idx];
 
     uint32_t prev_remaining = cur_node.numRemaining.fetch_sub(num_finished,
@@ -175,7 +180,7 @@ void TaskGraph::finishWork()
     if (prev_remaining == num_finished) {
 
         mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::nodeFinish,
-            cur_node.funcID, sharedBlockState.numInvocations, node_idx);
+            sharedBlockState.funcID, sharedBlockState.numInvocations, node_idx);
 
         uint32_t next_node_idx = node_idx + 1;
 
@@ -242,12 +247,6 @@ static inline __attribute__((always_inline)) void megakernelImpl()
                 func_id, invocation_offset, sharedBlockState.nodeIdx);
             dispatch(func_id, node_data, invocation_offset);
         }
-
-        // wait till all warps to finish, to make the blockWait event more accurate
-        __syncthreads();
-        DeviceTracing::Log(
-            mwGPU::DeviceEvent::blockWait,
-            func_id, invocation_offset, sharedBlockState.nodeIdx);
 
         taskgraph->finishWork();
     }
