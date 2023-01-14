@@ -14,7 +14,7 @@ namespace madrona {
 template <typename ContextT, typename DataT>
 class CustomContext : public Context {
 public:
-    inline CustomContext(DataT *world_data, WorkerInit &&worker_init);
+    inline CustomContext(DataT *world_data, const WorkerInit &worker_init);
 
     template <typename Fn, typename... Deps>
     inline JobID submit(Fn &&fn, bool is_child = true,

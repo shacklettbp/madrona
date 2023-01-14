@@ -120,8 +120,6 @@ namespace SharedMemStorage {
         numSMemBytes / sizeof(Chunk)];
 };
 
-}
-
 class TmpAllocator {
 public:
     TmpAllocator();
@@ -145,6 +143,8 @@ private:
     uint64_t num_mapped_bytes_;
     utils::SpinLock grow_lock_;
 };
+
+}
 
 }
 

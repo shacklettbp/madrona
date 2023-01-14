@@ -228,7 +228,7 @@ static MADRONA_ALWAYS_INLINE inline float applyPositionalUpdate(
         torque_axis_local1, torque_axis_local2,
         rot_axis_local1, rot_axis_local2,
         inv_m1, inv_m2,
-        c, 0);
+        c, alpha_tilde);
 
     applyPositionalUpdate(
         x1, x2,
@@ -244,7 +244,7 @@ static MADRONA_ALWAYS_INLINE inline
 std::pair<Quat, Quat> computeAngularUpdate(
     Quat q1, Quat q2,
     Vector3 inv_I1, Vector3 inv_I2,
-    Vector3 n, Vector3 n1, Vector3 n2,
+    Vector3 n1, Vector3 n2,
     float theta,
     float alpha_tilde)
 {
@@ -535,7 +535,7 @@ inline void handleJointConstraint(Context &ctx,
         auto [a_update_q1, a_update_q2] = computeAngularUpdate(
             q1, q2,
             inv_I1, inv_I2,
-            delta_q_a, delta_q_a_local1, delta_q_a_local2,
+            delta_q_a_local1, delta_q_a_local2,
             delta_q_a_magnitude, 0);
 
         update_q1 = a_update_q1;
@@ -556,7 +556,7 @@ inline void handleJointConstraint(Context &ctx,
         auto [b_update_q1, b_update_q2] = computeAngularUpdate(
             q1, q2,
             inv_I1, inv_I2,
-            delta_q_b, delta_q_b_local1, delta_q_b_local2,
+            delta_q_b_local1, delta_q_b_local2,
             delta_q_b_magnitude, 0);
 
         update_q1 *= b_update_q1;

@@ -20,10 +20,6 @@ struct GPUImplConsts {
     void *hostAllocatorAddr;
     void *hostPrintAddr;
     void *tmpAllocatorAddr;
-    void **rendererASInstancesAddrs;
-    void *rendererInstanceCountsAddr;
-    void *rendererBLASesAddr;
-    void *rendererViewDatasAddr;
     void *deviceTracingAddr;
     uint32_t numWorldDataBytes;
     uint32_t numWorlds;

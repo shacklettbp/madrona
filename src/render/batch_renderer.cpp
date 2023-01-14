@@ -30,7 +30,7 @@ static bool forcePresent()
     return force_present && force_present[0] == '1';
 }
 
-struct RendererInit {
+struct ImplInit {
     bool validationEnabled;
     InstanceState inst;
     Optional<Window> presentWindow;
@@ -82,6 +82,8 @@ struct BatchRenderer::Impl {
     AssetManager assetMgr;
     DedicatedBuffer viewDataBuffer;
     CudaImportedBuffer viewDataBufferCUDA;
+    DedicatedBuffer viewDataAddrsBuffer;
+    CudaImportedBuffer viewDataAddrsBufferCUDA;
     TLASData tlases;
     DescriptorState descriptors;
     uint32_t launchWidth;
@@ -91,17 +93,17 @@ struct BatchRenderer::Impl {
     DynArray<Assets> loadedAssets;
 
     inline Impl(const Config &cfg);
-    inline Impl(const Config &cfg, RendererInit &&init);
+    inline Impl(const Config &cfg, ImplInit &&init);
     inline ~Impl();
    
     inline CountT loadObjects(Span<const imp::SourceObject> objs);
 
-    inline void render(const uint32_t *num_instances);
+    inline void render();
 };
 
 static ShaderState makeShaderState(const DeviceState &dev,
                                    const BatchRenderer::Config &cfg,
-                                   const RendererInit &init)
+                                   const ImplInit &init)
 {
     using namespace std;
     std::vector<string> shader_defines(0);
@@ -322,7 +324,7 @@ static DescriptorState makeDescriptors(const DeviceState &dev,
     };
 }
 
-static RendererInit setupRendererInit(const BatchRenderer::Config &cfg)
+static ImplInit setupImplInit(const BatchRenderer::Config &cfg)
 {
     bool validate = enableValidation();
     bool present = forcePresent();
@@ -356,10 +358,10 @@ static RendererInit setupRendererInit(const BatchRenderer::Config &cfg)
 }
 
 BatchRenderer::Impl::Impl(const Config &cfg)
-    : Impl(cfg, setupRendererInit(cfg))
+    : Impl(cfg, setupImplInit(cfg))
 {}
 
-BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
+BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
     : inst(std::move(init.inst)),
       dev(inst.makeDevice(getUUIDFromCudaID(cfg.gpuID), 1, 2, 1,
                           init.presentSurface)),
@@ -371,7 +373,7 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
                             dev.gfxQF, 1, true) :
           Optional<PresentationState>::none()),
       rgbPresentIntermediate(presentState.has_value() ?
-          mem.makeConversionImage(cfg.renderHeight, cfg.renderHeight,
+          mem.makeConversionImage(cfg.renderWidth, cfg.renderHeight,
                                   VK_FORMAT_R8G8B8A8_UNORM) :
           Optional<LocalImage>::none()),
       renderQueue(makeQueue(dev, dev.gfxQF, 0)),
@@ -386,6 +388,10 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
           sizeof(shader::ViewData) * fb.numViews)),
       viewDataBufferCUDA(dev, cfg.gpuID, viewDataBuffer.mem,
           sizeof(shader::ViewData) * fb.numViews),
+      viewDataAddrsBuffer(mem.makeDedicatedBuffer(
+          sizeof(shader::ViewData *) * cfg.numWorlds)),
+      viewDataAddrsBufferCUDA(dev, cfg.gpuID, viewDataAddrsBuffer.mem,
+          sizeof(shader::ViewData *) * cfg.numWorlds),
       tlases(TLASData::setup(dev, GPURunUtil {
               renderCmdPool,
               renderCmd,  
@@ -403,7 +409,40 @@ BatchRenderer::Impl::Impl(const Config &cfg, RendererInit &&init)
       swapchainReady(presentState.has_value() ? makeBinarySemaphore(dev) :
                      VK_NULL_HANDLE),
       loadedAssets(0)
-{}
+{
+    HostBuffer view_data_addrs_staging =
+        mem.makeStagingBuffer((sizeof(shader::ViewData *) * cfg.numWorlds));
+
+    auto view_data_addrs_staging_ptr =
+        (shader::ViewData **)view_data_addrs_staging.ptr;
+
+    for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
+        view_data_addrs_staging_ptr[i] = &((shader::ViewData *)
+            viewDataBufferCUDA.getDevicePointer())[i * cfg.maxViewsPerWorld];
+    }
+
+    view_data_addrs_staging.flush(dev);
+
+    GPURunUtil gpu_run {
+        renderCmdPool,
+        renderCmd,  
+        renderQueue,
+        renderFence, 
+    };
+    
+    gpu_run.begin(dev);
+
+    VkBufferCopy copy_info {
+        .srcOffset = 0,
+        .dstOffset = 0,
+        .size = sizeof(shader::ViewData *) * cfg.numWorlds,
+    };
+
+    dev.dt.cmdCopyBuffer(gpu_run.cmd, view_data_addrs_staging.buffer,
+                         viewDataAddrsBuffer.buf.buffer, 1, &copy_info);
+
+    gpu_run.submit(dev);
+}
 
 BatchRenderer::Impl::~Impl()
 {
@@ -439,7 +478,7 @@ CountT BatchRenderer::Impl::loadObjects(Span<const imp::SourceObject> objs)
     return offset;
 }
 
-void BatchRenderer::Impl::render(const uint32_t *num_instances)
+void BatchRenderer::Impl::render()
 {
     HostEventLogging(HostEvent::renderStart);
     uint32_t swapchain_idx = 0;
@@ -461,7 +500,7 @@ void BatchRenderer::Impl::render(const uint32_t *num_instances)
                                  pipelineState.rtLayout, 0, 1,
                                  &descriptors.rtSet, 0, nullptr);
 
-    tlases.build(dev, num_instances, renderCmd);
+    tlases.build(dev, tlases.instanceCounts, renderCmd);
 
     VkMemoryBarrier tlas_barrier;
     tlas_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -656,22 +695,18 @@ CountT BatchRenderer::loadObjects(Span<const imp::SourceObject> objs)
     return impl_->loadObjects(objs);
 }
 
-AccelStructInstance ** BatchRenderer::tlasInstancePtrs() const
+RendererInterface BatchRenderer::getInterface() const
 {
-    return (AccelStructInstance **)
-        impl_->tlases.instanceAddrsStorageCUDA.getDevicePointer();
-}
+    impl_->viewDataBufferCUDA.getDevicePointer();
 
-uint64_t * BatchRenderer::objectsBLASPtr() const
-{
-    return (uint64_t *)
-        impl_->assetMgr.addrBufferCUDA.getDevicePointer();
-}
-
-void * BatchRenderer::viewDataPtr() const
-{
-    return
-        impl_->viewDataBufferCUDA.getDevicePointer();
+    return RendererInterface {
+        (AccelStructInstance **)
+            impl_->tlases.instanceAddrsStorageCUDA.getDevicePointer(),
+        impl_->tlases.instanceCounts,
+        (uint64_t *)impl_->assetMgr.addrBufferCUDA.getDevicePointer(),
+        (PackedViewData **)
+            impl_->viewDataAddrsBufferCUDA.getDevicePointer(),
+    };
 }
 
 uint8_t * BatchRenderer::rgbPtr() const
@@ -686,9 +721,9 @@ float * BatchRenderer::depthPtr() const
         impl_->fb.depthCUDA.getDevicePointer();
 }
 
-void BatchRenderer::render(const uint32_t *num_instances)
+void BatchRenderer::render()
 {
-    impl_->render(num_instances);
+    impl_->render();
 }
 
 }

@@ -727,6 +727,16 @@ TLASData TLASData::setup(const DeviceState &dev,
 
     gpu_run.submit(dev);
 
+    uint32_t *instance_counts_buffer;
+    {
+        auto res = cudaHostAlloc((void **)&instance_counts_buffer,
+                                 sizeof(uint32_t) * (uint64_t)num_worlds,
+                                 cudaHostAllocMapped);
+        if (res != cudaSuccess) {
+            FATAL("Failed to allocate instance counts readback buffer");
+        } 
+    }
+
     return TLASData {
         std::move(as_storage),
         std::move(instance_storage),
@@ -739,6 +749,7 @@ TLASData TLASData::setup(const DeviceState &dev,
         std::move(build_infos),
         std::move(range_infos),
         std::move(range_info_ptrs),
+        instance_counts_buffer,
     };
 }
 
@@ -754,7 +765,8 @@ void TLASData::build(const DeviceState &dev,
         range_info.primitiveCount = num_instances;
     }
 
-    dev.dt.cmdBuildAccelerationStructuresKHR(build_cmd, 1, buildInfos.data(),
+    dev.dt.cmdBuildAccelerationStructuresKHR(build_cmd, num_worlds,
+                                             buildInfos.data(),
                                              rangeInfoPtrs.data());
 }
 
@@ -764,6 +776,11 @@ void TLASData::free(const DeviceState &dev)
     for (int64_t i = 0; i < num_worlds; i++) {
         dev.dt.destroyAccelerationStructureKHR(dev.hdl, hdls[i], nullptr);
     }
+
+    auto res = cudaFreeHost(instanceCounts);
+    if (res != cudaSuccess) {
+        FATAL("Failed to free instance counts readback buffer");
+    } 
 }
 
 #if 0

@@ -25,6 +25,8 @@ public:
 
     void clear();
 
+    VkDeviceMemory hdl();
+
 private:
     VkDeviceMemory mem_;
 
@@ -41,9 +43,12 @@ public:
     HostBuffer & operator=(HostBuffer &&);
 
     void flush(const DeviceState &dev);
+    void invalidate(const DeviceState &dev);
     void flush(const DeviceState &dev,
                VkDeviceSize offset,
                VkDeviceSize num_bytes);
+
+    VkDeviceMemory getMemHdl();
 
     VkBuffer buffer;
     void *ptr;

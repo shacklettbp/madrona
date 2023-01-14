@@ -13,6 +13,7 @@
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 #include <madrona/importer.hpp>
+#include <madrona/render.hpp>
 
 namespace madrona {
 
@@ -58,7 +59,7 @@ struct CompileConfig {
 class MWCudaExecutor {
 public:
     MADRONA_IMPORT MWCudaExecutor(const StateConfig &state_cfg,
-                                    const CompileConfig &compile_cfg);
+                                  const CompileConfig &compile_cfg);
 
     MADRONA_IMPORT MWCudaExecutor(MWCudaExecutor &&o);
 

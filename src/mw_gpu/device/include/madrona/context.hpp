@@ -17,7 +17,7 @@ struct JobID {}; // FIXME
 
 class Context {
 public:
-    inline Context(WorldBase *world_data, WorkerInit &&init);
+    inline Context(WorldBase *world_data, const WorkerInit &init);
 
     template <typename ArchetypeT>
     Entity makeEntityNow();
@@ -59,6 +59,8 @@ public:
 
     inline JobID currentJobID() const { return job_id_; }
 #endif
+
+    inline void * tmpAlloc(uint64_t num_bytes);
 
     inline WorldID worldID() const { return world_id_; }
 

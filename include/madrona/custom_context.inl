@@ -11,8 +11,8 @@ namespace madrona {
 
 template <typename ContextT, typename DataT>
 CustomContext<ContextT, DataT>::CustomContext(DataT *world_data,
-                                              WorkerInit &&worker_init)
-    : Context(world_data, std::forward<WorkerInit>(worker_init))
+                                              const WorkerInit &worker_init)
+    : Context(world_data, worker_init)
 {}
 
 template <typename ContextT, typename DataT>

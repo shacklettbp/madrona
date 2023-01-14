@@ -95,6 +95,8 @@ struct TLASData {
     HeapArray<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
     HeapArray<VkAccelerationStructureBuildRangeInfoKHR *> rangeInfoPtrs;
 
+    uint32_t *instanceCounts;
+
     static TLASData setup(const DeviceState &dev,
                           const GPURunUtil &gpu_run,
                           int cuda_gpu_id,

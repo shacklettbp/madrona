@@ -70,6 +70,13 @@ ComponentT & Context::getUnsafe(Entity e)
     return getUnsafe<ComponentT>(e.id);
 }
 
+
+template <typename SingletonT>
+SingletonT & Context::getSingleton()
+{
+    return state_mgr_->getSingleton<SingletonT>(MADRONA_MW_COND(cur_world_id_));
+}
+
 template <typename ComponentT>
 ComponentT & Context::getUnsafe(int32_t e_id)
 {
@@ -138,6 +145,7 @@ JobID Context::parallelFor(const Query<ComponentTs...> &query, Fn &&fn,
                                     std::forward<Deps>(dependencies)...);
 }
 
+#if 0
 template <typename Fn, typename... Deps>
 inline JobID Context::ioRead(const char *path, Fn &&fn,
                              bool is_child, Deps && ... dependencies)
@@ -254,16 +262,30 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
         MADRONA_MW_COND(cur_world_id_, ) JobPriority::Normal,
         std::forward<Deps>(dependencies)...);
 }
+#endif
 
+void * Context::tmpAlloc(uint64_t num_bytes)
+{
+    return state_mgr_->tmpAlloc(MADRONA_MW_COND(cur_world_id_,) num_bytes);
+}
+
+
+void Context::resetTmpAlloc()
+{
+    return state_mgr_->resetTmpAlloc(MADRONA_MW_COND(cur_world_id_));
+}
+
+#ifdef MADRONA_USE_JOB_SYSTEM
 JobID Context::currentJobID() const
 {
     return cur_job_id_;
 }
+#endif
 
 #ifdef MADRONA_MW_MODE
-uint32_t Context::worldID() const
+WorldID Context::worldID() const
 {
-    return cur_world_id_;
+    return WorldID { (int32_t)cur_world_id_ };
 }
 #endif
 

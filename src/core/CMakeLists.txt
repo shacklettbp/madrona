@@ -1,6 +1,6 @@
 set(MADRONA_CORE_SRCS
     ${MADRONA_INC_DIR}/fwd.hpp
-    ${MADRONA_INC_DIR}/job.hpp ${MADRONA_INC_DIR}/job.inl job.cpp
+    #${MADRONA_INC_DIR}/job.hpp ${MADRONA_INC_DIR}/job.inl job.cpp
     ${MADRONA_INC_DIR}/state.hpp ${MADRONA_INC_DIR}/state.inl state.cpp
     ${MADRONA_INC_DIR}/context.hpp ${MADRONA_INC_DIR}/context.inl context.cpp
     #${MADRONA_INC_DIR}/hash.hpp
@@ -18,6 +18,11 @@ target_link_libraries(madrona_core
         madrona_common
 )
 
+target_compile_definitions(madrona_core
+    PUBLIC
+        -DMADRONA_USE_TASK_GRAPH=1
+)
+
 add_library(madrona_mw_core STATIC
     ${MADRONA_CORE_SRCS}
     ${MADRONA_INC_DIR}/taskgraph.hpp taskgraph.cpp
@@ -27,6 +32,7 @@ add_library(madrona_mw_core STATIC
 target_compile_definitions(madrona_mw_core
     PUBLIC
         -DMADRONA_MW_MODE=1
+        -DMADRONA_USE_TASK_GRAPH=1
 )
 
 target_link_libraries(madrona_mw_core

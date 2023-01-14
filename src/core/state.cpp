@@ -22,6 +22,11 @@ namespace ICfg {
 static constexpr uint32_t maxQueryOffsets = 100'000;
 }
 
+ECSRegistry::ECSRegistry(StateManager *state_mgr, void **export_ptr)
+    : state_mgr_(state_mgr),
+      export_ptr_(export_ptr)
+{}
+
 template <typename T>
 EntityStore::LockedMapStore<T>::LockedMapStore(CountT init_capacity)
     : store(sizeof(T), alignof(T), 0, ~0u),
@@ -70,12 +75,57 @@ StateCache::StateCache()
     : entity_cache_()
 {}
 
+StateManager::TmpAllocator::TmpAllocator()
+    : cur_block_((Block *)std::aligned_alloc(sizeof(Block), 256))
+{
+    cur_block_->metadata.next = nullptr;
+    cur_block_->metadata.offset = 0;
+}
+
+StateManager::TmpAllocator::~TmpAllocator()
+{
+    reset();
+}
+
+void * StateManager::TmpAllocator::alloc(uint64_t num_bytes)
+{
+    num_bytes = utils::roundUpPow2(num_bytes, 256);
+
+    assert(num_bytes <= numFreeBlockBytes);
+
+    CountT cur_offset = cur_block_->metadata.offset;
+    if (num_bytes > numFreeBlockBytes - cur_offset) {
+        Block *new_block = (Block *)std::aligned_alloc(sizeof(Block), 256);
+        new_block->metadata.next = cur_block_;
+        cur_block_ = new_block;
+        cur_offset = 0;
+    }
+
+    void *ptr = &cur_block_->data[0] + cur_offset;
+
+    cur_block_->metadata.offset = cur_offset + num_bytes;
+
+    return ptr;
+}
+
+void StateManager::TmpAllocator::reset()
+{
+    Block *cur_block = cur_block_;
+    do {
+        Block *next = cur_block->metadata.next;
+        free(cur_block);
+        cur_block = next;
+    } while (cur_block != nullptr);
+}
+
 #ifdef MADRONA_MW_MODE
-StateManager::StateManager(int num_worlds)
-    : entity_store_(),
+StateManager::StateManager(CountT num_worlds)
+    : init_state_cache_(),
+      entity_store_(),
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
+      tmp_allocators_(num_worlds),
       num_worlds_(num_worlds),
       register_lock_()
 {
@@ -87,7 +137,8 @@ StateManager::StateManager()
     : entity_store_(),
       component_infos_(0),
       archetype_components_(0),
-      archetype_stores_(0)
+      archetype_stores_(0),
+      tmp_allocator_()
 {
     registerComponent<Entity>();
 }
@@ -350,6 +401,26 @@ void StateManager::clear(MADRONA_MW_COND(uint32_t world_id,)
     entity_store_.bulkFree(cache.entity_cache_, entities, num_entities);
 
     tbl.clear();
+}
+
+
+void * StateManager::tmpAlloc(MADRONA_MW_COND(uint32_t world_id,)
+                              uint64_t num_bytes)
+{
+#ifdef MADRONA_MW_MODE
+    return tmp_allocators_[world_id].alloc(num_bytes);
+#else
+    return tmp_allocator_.alloc(num_bytes);
+#endif
+}
+
+void StateManager::resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id))
+{
+#ifdef MADRONA_MW_MODE
+    tmp_allocators_[world_id].reset();
+#else
+    tmp_allocator_.reset();
+#endif
 }
 
 StateManager::QueryState StateManager::query_state_ = StateManager::QueryState();

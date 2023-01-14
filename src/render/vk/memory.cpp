@@ -122,6 +122,12 @@ void AllocDeleter<host_mapped>::clear()
     mem_ = VK_NULL_HANDLE;
 }
 
+template <bool host_mapped>
+VkDeviceMemory AllocDeleter<host_mapped>::hdl()
+{
+    return mem_;
+}
+
 HostBuffer::HostBuffer(VkBuffer buf,
                        void *p,
                        VkMappedMemoryRange mem_range,
@@ -163,6 +169,11 @@ void HostBuffer::flush(const DeviceState &dev)
     dev.dt.flushMappedMemoryRanges(dev.hdl, 1, &mem_range_);
 }
 
+void HostBuffer::invalidate(const DeviceState &dev)
+{
+    dev.dt.invalidateMappedMemoryRanges(dev.hdl, 1, &mem_range_);
+}
+
 void HostBuffer::flush(const DeviceState &dev,
                        VkDeviceSize offset,
                        VkDeviceSize num_bytes)
@@ -171,6 +182,11 @@ void HostBuffer::flush(const DeviceState &dev,
     sub_range.offset = offset;
     sub_range.size = num_bytes;
     dev.dt.flushMappedMemoryRanges(dev.hdl, 1, &sub_range);
+}
+
+VkDeviceMemory HostBuffer::getMemHdl() 
+{
+    return deleter_.hdl();
 }
 
 LocalBuffer::LocalBuffer(VkBuffer buf, AllocDeleter<false> deleter)

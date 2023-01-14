@@ -68,8 +68,6 @@ namespace SharedMemStorage {
 __shared__ Chunk buffer[numSMemBytes / sizeof(Chunk)];
 }
 
-}
-
 TmpAllocator::TmpAllocator()
     : base_(mwGPU::getHostAllocator()->reserveMemory(128ul * 1024ul * 1024ul * 1024ul, 0)),
       offset_(0),
@@ -117,4 +115,5 @@ void * TmpAllocator::alloc(uint64_t num_bytes)
     return (char *)base_ + alloc_offset;
 }
 
+}
 }

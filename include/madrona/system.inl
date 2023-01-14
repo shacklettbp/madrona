@@ -2,6 +2,7 @@
 
 namespace madrona {
 
+#if 0
 template <typename SystemT>
 CustomSystem<SystemT>::CustomSystem()
     : SystemBase(&CustomSystem<SystemT>::entry)
@@ -32,7 +33,6 @@ void ParallelForSystem<SystemT, ComponentTs...>::entry(SystemBase *sys_base,
     (void)invocation_offset;
 }
 
-#if 0
 template <typename Fn, typename... ComponentTs>
 LambdaParallelFor<Fn, ComponentTs...>::LambdaParallelForSystem(Fn &&fn)
     : ParallelForSystem<LambdaParallelForSystem<Fn, ComponentTs...>, ComponentTs...>(),

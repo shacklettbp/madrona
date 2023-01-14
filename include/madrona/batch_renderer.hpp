@@ -15,6 +15,11 @@ public:
         Lidar,
     };
 
+    enum class InputMode : uint32_t {
+        CPU,
+        CUDA,
+    };
+
     struct Config {
         int gpuID;
         uint32_t renderWidth;
@@ -24,6 +29,7 @@ public:
         uint32_t maxInstancesPerWorld;
         uint32_t maxObjects;
         CameraMode cameraMode;
+        InputMode inputMode;
     };
 
     BatchRenderer(const Config &cfg);
@@ -33,14 +39,12 @@ public:
 
     CountT loadObjects(Span<const imp::SourceObject> objs);
 
-    AccelStructInstance ** tlasInstancePtrs() const;
-    uint64_t * objectsBLASPtr() const;
-    void *viewDataPtr() const;
+    RendererInterface getInterface() const;
 
     uint8_t * rgbPtr() const;
     float * depthPtr() const;
 
-    void render(const uint32_t *num_instances);
+    void render();
 
 private:
     struct Impl;

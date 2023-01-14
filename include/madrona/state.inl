@@ -14,6 +14,44 @@
 
 namespace madrona {
 
+template <typename ComponentT>
+void ECSRegistry::registerComponent()
+{
+    state_mgr_->registerComponent<ComponentT>();
+}
+
+template <typename ArchetypeT>
+void ECSRegistry::registerArchetype()
+{
+    state_mgr_->registerArchetype<ArchetypeT>();
+}
+
+template <typename SingletonT>
+void ECSRegistry::registerSingleton()
+{
+    state_mgr_->registerSingleton<SingletonT>();
+}
+
+template <typename ArchetypeT, typename ComponentT>
+void ECSRegistry::exportColumn(int32_t slot)
+{
+    (void)slot;
+    (void)export_ptr_;
+#if 0
+    export_ptr_[slot] =
+        state_mgr_->getArchetypeComponent<ArchetypeT, ComponentT>();
+#endif
+}
+
+template <typename SingletonT>
+void ECSRegistry::exportSingleton(int32_t slot)
+{
+    (void)slot;
+#if 0
+    export_ptr_[slot] = state_mgr_->getSingletonColumn<SingletonT>();
+#endif
+}
+
 template <typename T>
 T & EntityStore::LockedMapStore<T>::operator[](int32_t idx)
 {
@@ -127,6 +165,41 @@ ArchetypeID StateManager::registerArchetype()
     return ArchetypeID {
         id,
     };
+}
+
+
+template <typename SingletonT>
+void StateManager::registerSingleton()
+{
+    using ArchetypeT = SingletonArchetype<SingletonT>;
+
+    registerComponent<SingletonT>();
+    registerArchetype<ArchetypeT>();
+
+#ifdef MADRONA_MW_MODE
+    for (CountT i = 0; i < (CountT)num_worlds_; i++) {
+        makeEntityNow<ArchetypeT>(uint32_t(i), init_state_cache_);
+    }
+#else
+    makeEntityNow<ArchetypeT>(init_state_cache_);
+#endif
+}
+
+
+template <typename SingletonT>
+SingletonT & StateManager::getSingleton(MADRONA_MW_COND(uint32_t world_id))
+{
+    using ArchetypeT = SingletonArchetype<SingletonT>;
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
+    Table &tbl = 
+#ifdef MADRONA_MW_MODE
+        archetype_stores_[archetype_id]->tbls[world_id];
+#else
+        archetype_stores_[archetype_id]->tbl;
+#endif
+
+    return *(SingletonT *)tbl.data(user_component_offset_);
 }
 
 template <typename ComponentT>

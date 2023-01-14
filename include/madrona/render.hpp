@@ -29,13 +29,31 @@ struct ViewSettings {
     ViewID viewID;
 };
 
+// FIXME this is a copy of the PackedCamera / ViewData
+// struct in render/vk/shaders/shader_common.h
+struct PackedViewData {
+    math::Quat rotation;
+    math::Vector4 posAndTanFOV;
+};
+
+struct RendererInterface {
+    AccelStructInstance **tlasInstancePtrs;
+    uint32_t *tlasInstanceCounts;
+    uint64_t *blases;
+    PackedViewData **packedViews;
+};
+
+struct RendererInit {
+    RendererInterface iface;
+};
+
 struct RenderingSystem {
     static void registerTypes(ECSRegistry &registry);
 
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
                                         Span<const TaskGraph::NodeID> deps);
 
-    static void init(Context &ctx);
+    static void init(Context &ctx, const RendererInit &init);
 
     static ViewSettings setupView(Context &ctx, float vfov_degrees,
                                   math::Vector3 camera_offset,
