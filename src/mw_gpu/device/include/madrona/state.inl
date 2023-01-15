@@ -16,6 +16,14 @@ void ECSRegistry::registerArchetype()
     state_mgr_->registerArchetype<ArchetypeT>();
 }
 
+template <typename ArchetypeT>
+void ECSRegistry::registerFixedSizeArchetype(CountT max_num_entities)
+{
+    // FIXME
+    (void)max_num_entities;
+    state_mgr_->registerArchetype<ArchetypeT>();
+}
+
 template <typename SingletonT>
 void ECSRegistry::registerSingleton()
 {

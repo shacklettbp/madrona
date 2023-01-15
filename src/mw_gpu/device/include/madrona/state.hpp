@@ -58,6 +58,9 @@ public:
     template <typename ArchetypeT>
     void registerArchetype();
 
+    template <typename ArchetypeT>
+    void registerFixedSizeArchetype(CountT max_num_entities);
+
     template <typename SingletonT>
     void registerSingleton();
 
