@@ -425,10 +425,31 @@ Entity StateManager::makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
     
     entity_store_.setLoc(e, Loc {
         .archetype = archetype_id.id,
-        .row = new_row,
+        .row = int32_t(new_row),
     });
 
     return e;
+}
+
+template <typename ArchetypeT>
+Loc StateManager::makeTemporary(MADRONA_MW_COND(uint32_t world_id))
+{
+    ArchetypeID archetype_id = archetypeID<ArchetypeT>();
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id.id];
+
+    Table &tbl =
+#ifdef MADRONA_MW_MODE
+        archetype.tbls[world_id];
+#else
+        archetype.tbl;
+#endif
+
+    uint32_t new_row = tbl.addRow();
+
+    return Loc {
+        archetype_id.id,
+        int32_t(new_row),
+    };
 }
 
 template <typename ArchetypeT>

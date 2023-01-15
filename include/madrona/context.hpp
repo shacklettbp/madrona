@@ -43,7 +43,7 @@ public:
     inline void destroyEntityNow(Entity e);
 
     template <typename ArchetypeT>
-    inline Loc makeTemporary() { return Loc {}; }
+    inline Loc makeTemporary();
 
     template <typename ComponentT>
     inline ResultRef<ComponentT> get(Entity e);

@@ -208,6 +208,9 @@ public:
                           StateCache &cache, Entity e);
 
     template <typename ArchetypeT>
+    inline Loc makeTemporary(MADRONA_MW_COND(uint32_t world_id));
+
+    template <typename ArchetypeT>
     inline void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache);
 
 #ifdef MADRONA_MW_MODE

@@ -57,6 +57,13 @@ void Context::destroyEntityNow(Entity e)
                                  *state_cache_, e);
 }
 
+template <typename ArchetypeT>
+Loc Context::makeTemporary()
+{
+    return state_mgr_->makeTemporary<ArchetypeT>(
+        MADRONA_MW_COND(cur_world_id_));
+}
+
 template <typename ComponentT>
 ResultRef<ComponentT> Context::get(Entity e)
 {
