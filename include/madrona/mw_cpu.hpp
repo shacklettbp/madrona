@@ -44,7 +44,7 @@ protected:
     Optional<render::RendererInterface> getRendererInterface();
 
 private:
-    void workerThread();
+    void workerThread(CountT worker_id);
 
     HeapArray<std::thread> workers_;
     alignas(MADRONA_CACHE_LINE) std::atomic_int32_t worker_wakeup_;

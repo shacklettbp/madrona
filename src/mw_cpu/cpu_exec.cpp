@@ -54,8 +54,8 @@ ThreadPoolExecutor::ThreadPoolExecutor(const Config &cfg)
     }
 
     for (CountT i = 0; i < workers_.size(); i++) {
-        new (&workers_[i]) std::thread([this]() {
-            workerThread();
+        new (&workers_[i]) std::thread([this, i]() {
+            workerThread(i);
         });
     }
 }
@@ -117,8 +117,10 @@ Optional<render::RendererInterface> ThreadPoolExecutor::getRendererInterface()
         Optional<render::RendererInterface>::none();
 }
 
-void ThreadPoolExecutor::workerThread()
+void ThreadPoolExecutor::workerThread(CountT worker_id)
 {
+    (void)worker_id;
+
     while (true) {
         worker_wakeup_.wait(0, std::memory_order_relaxed);
 
