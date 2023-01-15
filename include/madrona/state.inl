@@ -453,9 +453,11 @@ Loc StateManager::makeTemporary(MADRONA_MW_COND(uint32_t world_id))
 }
 
 template <typename ArchetypeT>
-void StateManager::clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache)
+void StateManager::clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
+                         bool is_temporary)
 {
-    clear(MADRONA_MW_COND(world_id,) cache, archetypeID<ArchetypeT>().id);
+    clear(MADRONA_MW_COND(world_id,) cache, archetypeID<ArchetypeT>().id,
+          is_temporary);
 }
 
 #ifdef MADRONA_MW_MODE

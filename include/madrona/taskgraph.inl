@@ -88,7 +88,7 @@ void ResetTmpAllocNode::run(Context *ctx)
 template <typename ArchetypeT>
 void ClearTmpNode<ArchetypeT>::run(Context *ctx)
 {
-    ctx->clearArchetype<ArchetypeT>();
+    ctx->clearTemporaries<ArchetypeT>();
 }
 
 template <typename ArchetypeT>

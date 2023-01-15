@@ -67,6 +67,9 @@ public:
     template <typename ArchetypeT>
     inline void clearArchetype();
 
+    template <typename ArchetypeT>
+    inline void clearTemporaries();
+
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 

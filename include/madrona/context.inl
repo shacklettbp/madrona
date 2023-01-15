@@ -101,7 +101,14 @@ template <typename ArchetypeT>
 void Context::clearArchetype()
 {
     state_mgr_->clear<ArchetypeT>(MADRONA_MW_COND(cur_world_id_,)
-                                  *state_cache_);
+                                  *state_cache_, false);
+}
+
+template <typename ArchetypeT>
+void Context::clearTemporaries()
+{
+    state_mgr_->clear<ArchetypeT>(MADRONA_MW_COND(cur_world_id_,)
+                                  *state_cache_, true);
 }
 
 template <typename... ComponentTs>

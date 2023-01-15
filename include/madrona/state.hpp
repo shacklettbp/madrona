@@ -211,7 +211,8 @@ public:
     inline Loc makeTemporary(MADRONA_MW_COND(uint32_t world_id));
 
     template <typename ArchetypeT>
-    inline void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache);
+    inline void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
+                      bool is_temporary);
 
 #ifdef MADRONA_MW_MODE
     inline uint32_t numWorlds() const;
@@ -261,7 +262,7 @@ private:
     void registerArchetype(uint32_t id, Span<ComponentID> components);
 
     void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
-               uint32_t archetype_id);
+               uint32_t archetype_id, bool is_temporary);
 
     StateCache init_state_cache_; // FIXME remove
     EntityStore entity_store_;

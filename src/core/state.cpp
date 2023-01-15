@@ -392,7 +392,8 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
 }
 
 void StateManager::clear(MADRONA_MW_COND(uint32_t world_id,)
-                         StateCache &cache, uint32_t archetype_id)
+                         StateCache &cache, uint32_t archetype_id,
+                         bool is_temporary)
 {
     ArchetypeStore &archetype = *archetype_stores_[archetype_id];
     Table &tbl =
@@ -403,9 +404,11 @@ void StateManager::clear(MADRONA_MW_COND(uint32_t world_id,)
 #endif
 
     // Free all IDs before deleting the table
-    Entity *entities = (Entity *)tbl.data(0);
-    uint32_t num_entities = tbl.numRows();
-    entity_store_.bulkFree(cache.entity_cache_, entities, num_entities);
+    if (!is_temporary) {
+        Entity *entities = (Entity *)tbl.data(0);
+        uint32_t num_entities = tbl.numRows();
+        entity_store_.bulkFree(cache.entity_cache_, entities, num_entities);
+    }
 
     tbl.clear();
 }

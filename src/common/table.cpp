@@ -13,7 +13,7 @@
 namespace madrona {
 
 namespace ICfg {
-inline constexpr uint32_t maxRowsPerTable = 1u << 30u;
+inline constexpr uint32_t maxRowsPerTable = 1u << 28u;
 }
 
 Table::Table(const TypeInfo *component_types, uint32_t num_components)
