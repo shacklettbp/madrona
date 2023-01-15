@@ -81,6 +81,10 @@ void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs)
 
     main_wakeup_.wait(0, std::memory_order_acquire);
     main_wakeup_.store(0, std::memory_order_relaxed);
+
+    if (renderer_.has_value()) {
+        renderer_->render();
+    }
 }
 
 CountT ThreadPoolExecutor::loadObjects(Span<const imp::SourceObject> objs)
