@@ -121,6 +121,26 @@ void ThreadPoolExecutor::workerThread(CountT worker_id)
 {
     (void)worker_id;
 
+    cpu_set_t cpuset;
+    pthread_getaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+
+    const int max_threads = CPU_COUNT(&cpuset);
+
+    CPU_ZERO(&cpuset);
+
+    if (worker_id > max_threads) [[unlikely]] {
+        FATAL("Tried setting thread affinity to %d when %d is max",
+              worker_id, max_threads);
+    }
+
+    CPU_SET(worker_id, &cpuset);
+
+    int res = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+
+    if (res != 0) {
+        FATAL("Failed to set thread affinity to %d", worker_id);
+    }
+
     while (true) {
         worker_wakeup_.wait(0, std::memory_order_relaxed);
 
@@ -132,10 +152,15 @@ void ThreadPoolExecutor::workerThread(CountT worker_id)
         }
 
         while (true) {
-            // FIXME: Is there a potential overflow here if a thread doesn't
-            // see that worker_wakeup_ becomes 0 again?
-            uint32_t job_idx =
+            uint32_t job_idx = next_job_.load(std::memory_order_relaxed);
+
+            if (job_idx >= num_jobs_) {
+                break;
+            }
+
+            job_idx =
                 next_job_.fetch_add(1, std::memory_order_relaxed);
+
             if (job_idx == num_jobs_) {
                 worker_wakeup_.store(0, std::memory_order_relaxed);
             }
