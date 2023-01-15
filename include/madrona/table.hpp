@@ -24,10 +24,12 @@ struct TypeInfo {
 
 class Table {
 public:
-    Table(const TypeInfo *component_types, uint32_t num_components);
+    Table(const TypeInfo *component_types, CountT num_components,
+          CountT init_num_rows);
 
     uint32_t addRow();
     bool removeRow(uint32_t row);
+    void copyRow(uint32_t dst, uint32_t src);
 
     inline void * getValue(uint32_t column_idx, uint32_t row);
     inline const void * getValue(uint32_t column_idx, uint32_t row) const;

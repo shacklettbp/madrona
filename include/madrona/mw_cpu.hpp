@@ -20,7 +20,9 @@ public:
         uint32_t renderWidth;
         uint32_t renderHeight;
         uint32_t maxObjects;
+        uint32_t numExportedBuffers;
         CameraMode cameraMode;
+        int32_t renderGPUID;
         uint32_t numWorkers = 0;
     };
 
@@ -34,6 +36,8 @@ public:
     void run(Job *jobs, CountT num_jobs);
 
     CountT loadObjects(Span<const imp::SourceObject> objs);
+
+    void * getExported(CountT slot) const;
 
 protected:
     void ctxInit(void (*init_fn)(void *, const WorkerInit &),
@@ -55,6 +59,7 @@ private:
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_finished_;
     StateManager state_mgr_;
     HeapArray<StateCache> state_caches_;
+    HeapArray<void *> export_ptrs_;
     Optional<render::BatchRenderer> renderer_;
 };
 
@@ -68,6 +73,7 @@ public:
     inline void run();
 
     using ThreadPoolExecutor::loadObjects;
+    using ThreadPoolExecutor::getExported;
 
 private:
     struct WorldContext {

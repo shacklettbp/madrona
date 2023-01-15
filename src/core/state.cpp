@@ -22,9 +22,9 @@ namespace ICfg {
 static constexpr uint32_t maxQueryOffsets = 100'000;
 }
 
-ECSRegistry::ECSRegistry(StateManager *state_mgr, void **export_ptr)
+ECSRegistry::ECSRegistry(StateManager *state_mgr, void **export_ptrs)
     : state_mgr_(state_mgr),
-      export_ptr_(export_ptr)
+      export_ptrs_(export_ptrs)
 {}
 
 template <typename T>
@@ -182,22 +182,59 @@ void StateManager::destroyEntityNow(MADRONA_MW_COND(uint32_t world_id,)
     }
 
     ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
-    Table &tbl =
-#ifdef MADRONA_MW_MODE
-        archetype.tbls[world_id];
-#else
-        archetype.tbl;
-#endif
 
-    bool row_moved = tbl.removeRow(loc.row);
+    bool row_moved = archetype.tblStorage.removeRow(
+        MADRONA_MW_COND(world_id,) loc.row);
 
     if (row_moved) {
-        Entity moved_entity = ((Entity *)tbl.data(0))[loc.row];
+        Entity moved_entity = archetype.tblStorage.column<Entity>(
+            MADRONA_MW_COND(world_id,) 0)[loc.row];
         entity_store_.setRow(moved_entity, loc.row);
     }
 
     entity_store_.freeEntity(cache.entity_cache_, e);
 }
+
+#ifdef MADRONA_MW_MODE
+StateManager::TableStorage::TableStorage(Span<TypeInfo> types,
+                                         CountT num_worlds,
+                                         CountT max_num_per_world)
+{
+    maxNumPerWorld = max_num_per_world;
+
+    if (max_num_per_world == 0) {
+        new (&tbls) HeapArray<Table>(num_worlds);
+
+        for (CountT i = 0; i < num_worlds; i++) {
+            tbls.emplace(i, types.data(), types.size(), 0);
+        }
+    } else {
+        new (&fixed) Fixed {
+            Table(types.data(), types.size(),
+                  max_num_per_world * num_worlds),
+            HeapArray<int32_t>(num_worlds),
+        };
+
+        for (CountT i = 0; i < num_worlds; i++) {
+            fixed.activeRows[i] = 0;
+        }
+    }
+}
+
+StateManager::TableStorage::~TableStorage()
+{
+    if (maxNumPerWorld == 0) {
+        tbls.~HeapArray<Table>();
+    } else {
+        fixed.~Fixed();
+    }
+}
+
+#else
+StateManager::TableStorage::TableStorage(Span<TypeInfo> types)
+    : tbl(types.data(), types.size(), 0)
+{}
+#endif
 
 struct StateManager::ArchetypeStore::Init {
     uint32_t componentOffset;
@@ -205,27 +242,19 @@ struct StateManager::ArchetypeStore::Init {
     uint32_t id;
     Span<TypeInfo> types;
     Span<IntegerMapPair> lookupInputs;
+    CountT maxNumEntities;
 #ifdef MADRONA_MW_MODE
-    uint32_t numTables;
+    CountT numWorlds;
 #endif
 };
 
 StateManager::ArchetypeStore::ArchetypeStore(Init &&init)
     : componentOffset(init.componentOffset),
       numComponents(init.numComponents),
-#ifdef MADRONA_MW_MODE
-      tbls(init.numTables),
-#else
-      tbl(init.types.data(), init.types.size()),
-#endif
+      tblStorage(init.types
+                 MADRONA_MW_COND(, init.numWorlds, init.maxNumEntities)),
       columnLookup(init.lookupInputs.data(), init.lookupInputs.size())
-{
-#ifdef MADRONA_MW_MODE
-    for (int i = 0; i < (int)init.numTables; i++) {
-        tbls.emplace(i, init.types.data(), init.types.size());
-    }
-#endif
-}
+{}
 
 StateManager::QueryState::QueryState()
     : lock(),
@@ -337,7 +366,8 @@ void StateManager::registerComponent(uint32_t id,
     });
 }
 
-void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
+void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components,
+                                     CountT max_num_entities)
 {
     uint32_t offset = archetype_components_.size();
     uint32_t num_user_components = components.size();
@@ -387,8 +417,26 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components)
         id,
         Span(type_infos.data(), num_total_components),
         Span(lookup_input.data(), num_user_components),
+        max_num_entities,
         MADRONA_MW_COND(num_worlds_,)
     });
+}
+
+void * StateManager::exportColumn(uint32_t archetype_id, uint32_t component_id)
+{
+    auto &archetype = *archetype_stores_[archetype_id];
+    auto col_idx = 
+        *archetype.columnLookup.lookup(component_id);
+
+#ifdef MADRONA_MW_MODE
+    if (archetype.tblStorage.maxNumPerWorld == 0) {
+        FATAL("Can't export non fixed size columns in multi-world mode");
+    } else {
+        return archetype.tblStorage.fixed.tbl.data(col_idx);
+    }
+#else
+    return archetype.tblStorage.tbl.data(col_idx);
+#endif
 }
 
 void StateManager::clear(MADRONA_MW_COND(uint32_t world_id,)
@@ -396,21 +444,17 @@ void StateManager::clear(MADRONA_MW_COND(uint32_t world_id,)
                          bool is_temporary)
 {
     ArchetypeStore &archetype = *archetype_stores_[archetype_id];
-    Table &tbl =
-#ifdef MADRONA_MW_MODE
-        archetype.tbls[world_id];
-#else
-        archetype.tbl;
-#endif
 
     // Free all IDs before deleting the table
     if (!is_temporary) {
-        Entity *entities = (Entity *)tbl.data(0);
-        uint32_t num_entities = tbl.numRows();
+        Entity *entities = archetype.tblStorage.column<Entity>(
+            MADRONA_MW_COND(world_id,) 0);
+        uint32_t num_entities = archetype.tblStorage.numRows(
+            MADRONA_MW_COND(world_id));
         entity_store_.bulkFree(cache.entity_cache_, entities, num_entities);
     }
 
-    tbl.clear();
+    archetype.tblStorage.clear(MADRONA_MW_COND(world_id));
 }
 
 
