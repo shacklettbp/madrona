@@ -117,10 +117,8 @@ Optional<render::RendererInterface> ThreadPoolExecutor::getRendererInterface()
         Optional<render::RendererInterface>::none();
 }
 
-void ThreadPoolExecutor::workerThread(CountT worker_id)
+static inline void pinThread(CountT worker_id)
 {
-    (void)worker_id;
-
     cpu_set_t cpuset;
     pthread_getaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
 
@@ -140,11 +138,16 @@ void ThreadPoolExecutor::workerThread(CountT worker_id)
     if (res != 0) {
         FATAL("Failed to set thread affinity to %d", worker_id);
     }
+}
+
+void ThreadPoolExecutor::workerThread(CountT worker_id)
+{
+    pinThread(worker_id);
 
     while (true) {
         worker_wakeup_.wait(0, std::memory_order_relaxed);
-
         int32_t ctrl = worker_wakeup_.load(std::memory_order_acquire);
+
         if (ctrl == 0) {
             continue;
         } else if (ctrl == -1) {
@@ -152,18 +155,14 @@ void ThreadPoolExecutor::workerThread(CountT worker_id)
         }
 
         while (true) {
-            uint32_t job_idx = next_job_.load(std::memory_order_relaxed);
-
-            if (job_idx >= num_jobs_) {
-                break;
-            }
-
-            job_idx =
+            uint32_t job_idx =
                 next_job_.fetch_add(1, std::memory_order_relaxed);
 
             if (job_idx == num_jobs_) {
                 worker_wakeup_.store(0, std::memory_order_relaxed);
             }
+
+            assert(job_idx < num_jobs_ + 100);
 
             if (job_idx >= num_jobs_) {
                 break;
