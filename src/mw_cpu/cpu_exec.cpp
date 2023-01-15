@@ -83,6 +83,10 @@ void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs)
     main_wakeup_.store(0, std::memory_order_relaxed);
 
     if (renderer_.has_value()) {
+        char *hack = getenv("MADRONA_RENDER_NOOP");
+        if (hack && hack[0] == '1') {
+            return;
+        }
         renderer_->render();
     }
 }

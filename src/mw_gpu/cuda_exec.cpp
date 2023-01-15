@@ -1350,6 +1350,10 @@ MADRONA_EXPORT void MWCudaExecutor::run()
     HostEventLogging(HostEvent::megaKernelEnd);
 
     if (impl_->engineState.batchRenderer.has_value()) {
+        char *hack = getenv("MADRONA_RENDER_NOOP");
+        if (hack && hack[0] == '1') {
+            return;
+        }
         impl_->engineState.batchRenderer->render();
     }
 }
