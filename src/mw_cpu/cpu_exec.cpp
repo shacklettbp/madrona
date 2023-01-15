@@ -63,6 +63,7 @@ ThreadPoolExecutor::ThreadPoolExecutor(const Config &cfg)
 ThreadPoolExecutor::~ThreadPoolExecutor()
 {
     worker_wakeup_.store(-1, std::memory_order_release);
+    worker_wakeup_.notify_all();
 
     for (CountT i = 0; i < workers_.size(); i++) {
         workers_[i].join();

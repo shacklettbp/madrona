@@ -76,7 +76,7 @@ StateCache::StateCache()
 {}
 
 StateManager::TmpAllocator::TmpAllocator()
-    : cur_block_((Block *)std::aligned_alloc(sizeof(Block), 256))
+    : cur_block_((Block *)std::aligned_alloc(256, sizeof(Block)))
 {
     cur_block_->metadata.next = nullptr;
     cur_block_->metadata.offset = 0;
@@ -95,7 +95,7 @@ void * StateManager::TmpAllocator::alloc(uint64_t num_bytes)
 
     CountT cur_offset = cur_block_->metadata.offset;
     if (num_bytes > numFreeBlockBytes - cur_offset) {
-        Block *new_block = (Block *)std::aligned_alloc(sizeof(Block), 256);
+        Block *new_block = (Block *)std::aligned_alloc(256, sizeof(Block));
         new_block->metadata.next = cur_block_;
         cur_block_ = new_block;
         cur_offset = 0;
@@ -111,11 +111,14 @@ void * StateManager::TmpAllocator::alloc(uint64_t num_bytes)
 void StateManager::TmpAllocator::reset()
 {
     Block *cur_block = cur_block_;
-    do {
-        Block *next = cur_block->metadata.next;
+    Block *next_block;
+    while ((next_block = cur_block->metadata.next) != nullptr) {
         free(cur_block);
-        cur_block = next;
-    } while (cur_block != nullptr);
+        cur_block = next_block;
+    }
+
+    cur_block->metadata.offset = 0;
+    cur_block_ = cur_block;
 }
 
 #ifdef MADRONA_MW_MODE
@@ -131,6 +134,10 @@ StateManager::StateManager(CountT num_worlds)
 {
     registerComponent<Entity>();
     registerComponent<WorldID>();
+
+    for (CountT i = 0; i < num_worlds; i++) {
+        tmp_allocators_.emplace(i);
+    }
 }
 #else
 StateManager::StateManager()
