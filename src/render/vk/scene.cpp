@@ -653,7 +653,7 @@ TLASData TLASData::setup(const DeviceState &dev,
             mem, initial_instance_storage_bytes);
 
     VkDeviceAddress instance_storage_base_addr =
-        instance_storage.devAddr(dev);
+        getDevAddr(dev, instance_storage.rendererBuffer().buffer);
 
     uint64_t num_instance_addrs_bytes =
         sizeof(AccelStructInstance *) * num_worlds;

@@ -80,10 +80,8 @@ struct BatchRenderer::Impl {
     PipelineState pipelineState;
     FramebufferState fb;
     AssetManager assetMgr;
-    DedicatedBuffer viewDataBuffer;
-    CudaImportedBuffer viewDataBufferCUDA;
-    DedicatedBuffer viewDataAddrsBuffer;
-    CudaImportedBuffer viewDataAddrsBufferCUDA;
+    EngineToRendererBuffer viewDataBuffer;
+    HostToEngineBuffer viewDataAddrsBuffer;
     TLASData tlases;
     DescriptorState descriptors;
     uint32_t launchWidth;
@@ -363,7 +361,7 @@ BatchRenderer::Impl::Impl(const Config &cfg)
 
 BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
     : inst(std::move(init.inst)),
-      dev(inst.makeDevice(getUUIDFromCudaID(cfg.gpuID), 1, 2, 1,
+      dev(inst.makeDevice(getUUIDFromGPUID(cfg.gpuID), 1, 2, 1,
                           init.presentSurface)),
       mem(dev, inst),
       presentState(init.presentWindow.has_value() ?
@@ -383,23 +381,27 @@ BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
       shaderState(makeShaderState(dev, cfg, init)),
       pipelineState(makePipelineState(dev, shaderState)),
       fb(makeFramebuffer(dev, mem, cfg)),
-      assetMgr(dev, mem, cfg.gpuID, cfg.maxObjects),
-      viewDataBuffer(mem.makeDedicatedBuffer(
-          sizeof(shader::ViewData) * fb.numViews)),
-      viewDataBufferCUDA(dev, cfg.gpuID, viewDataBuffer.mem,
-          sizeof(shader::ViewData) * fb.numViews),
-      viewDataAddrsBuffer(mem.makeDedicatedBuffer(
-          sizeof(shader::ViewData *) * cfg.numWorlds)),
-      viewDataAddrsBufferCUDA(dev, cfg.gpuID, viewDataAddrsBuffer.mem,
-          sizeof(shader::ViewData *) * cfg.numWorlds),
+      assetMgr(dev, mem, cfg.inputMode == InputMode::CPU ? -1 : cfg.gpuID,
+               cfg.maxObjects),
+      viewDataBuffer(cfg.inputMode == InputMode::CUDA ?
+          EngineToRendererBuffer(CudaMode {}, dev, mem,
+              sizeof(shader::ViewData) * fb.numViews, cfg.gpuID) :
+          EngineToRendererBuffer(CpuMode {}, mem,
+              sizeof(shader::ViewData) * fb.numViews)),
+      viewDataAddrsBuffer(cfg.inputMode == InputMode::CUDA ?
+          HostToEngineBuffer(CudaMode {}, dev, mem,
+              sizeof(shader::ViewData *) * cfg.numWorlds, cfg.gpuID) :
+          HostToEngineBuffer(CpuMode {}, 
+              sizeof(shader::ViewData *) * cfg.numWorlds)),
       tlases(TLASData::setup(dev, GPURunUtil {
               renderCmdPool,
               renderCmd,  
               renderQueue,
               renderFence, 
-          }, cfg.gpuID, mem, cfg.numWorlds, cfg.maxInstancesPerWorld)),
+          }, cfg.inputMode == InputMode::CPU ? -1 : cfg.gpuID,
+          mem, cfg.numWorlds, cfg.maxInstancesPerWorld)),
       descriptors(makeDescriptors(dev, cfg, shaderState, fb, assetMgr,
-                                  viewDataBuffer.buf, tlases)),
+                                  viewDataBuffer.rendererBuffer(), tlases)),
       launchWidth(utils::divideRoundUp(fb.renderWidth,
                                        VulkanConfig::localWorkgroupX)),
       launchHeight(utils::divideRoundUp(fb.renderHeight,
@@ -410,38 +412,29 @@ BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
                      VK_NULL_HANDLE),
       loadedAssets(0)
 {
-    HostBuffer view_data_addrs_staging =
-        mem.makeStagingBuffer((sizeof(shader::ViewData *) * cfg.numWorlds));
-
     auto view_data_addrs_staging_ptr =
-        (shader::ViewData **)view_data_addrs_staging.ptr;
+        (shader::ViewData **)viewDataAddrsBuffer.hostPointer();
 
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
         view_data_addrs_staging_ptr[i] = &((shader::ViewData *)
-            viewDataBufferCUDA.getDevicePointer())[i * cfg.maxViewsPerWorld];
+            viewDataBuffer.enginePointer())[i * cfg.maxViewsPerWorld];
     }
 
-    view_data_addrs_staging.flush(dev);
+    if (viewDataAddrsBuffer.needsEngineCopy()) {
+        GPURunUtil gpu_run {
+            renderCmdPool,
+            renderCmd,  
+            renderQueue,
+            renderFence, 
+        };
+        
+        gpu_run.begin(dev);
 
-    GPURunUtil gpu_run {
-        renderCmdPool,
-        renderCmd,  
-        renderQueue,
-        renderFence, 
-    };
-    
-    gpu_run.begin(dev);
+        viewDataAddrsBuffer.toEngine(dev, gpu_run.cmd,
+            0, sizeof(shader::ViewData *) * cfg.numWorlds);
 
-    VkBufferCopy copy_info {
-        .srcOffset = 0,
-        .dstOffset = 0,
-        .size = sizeof(shader::ViewData *) * cfg.numWorlds,
-    };
-
-    dev.dt.cmdCopyBuffer(gpu_run.cmd, view_data_addrs_staging.buffer,
-                         viewDataAddrsBuffer.buf.buffer, 1, &copy_info);
-
-    gpu_run.submit(dev);
+        gpu_run.submit(dev);
+    }
 }
 
 BatchRenderer::Impl::~Impl()
@@ -499,6 +492,10 @@ void BatchRenderer::Impl::render()
     dev.dt.cmdBindDescriptorSets(renderCmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  pipelineState.rtLayout, 0, 1,
                                  &descriptors.rtSet, 0, nullptr);
+
+    viewDataBuffer.toRenderer(dev, renderCmd,
+                              VK_ACCESS_SHADER_READ_BIT,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
     tlases.instanceStorage.toRenderer(dev, renderCmd,
         VK_ACCESS_SHADER_READ_BIT,
@@ -701,15 +698,13 @@ CountT BatchRenderer::loadObjects(Span<const imp::SourceObject> objs)
 
 RendererInterface BatchRenderer::getInterface() const
 {
-    impl_->viewDataBufferCUDA.getDevicePointer();
-
     return RendererInterface {
         (AccelStructInstance **)
             impl_->tlases.instanceAddrsBuffer.enginePointer(),
         impl_->tlases.instanceCounts,
         (uint64_t *)impl_->assetMgr.blasAddrsBuffer.enginePointer(),
         (PackedViewData **)
-            impl_->viewDataAddrsBufferCUDA.getDevicePointer(),
+            impl_->viewDataAddrsBuffer.enginePointer(),
     };
 }
 

@@ -97,7 +97,7 @@ CudaImportedBuffer::~CudaImportedBuffer()
     close(ext_fd_);
 }
 
-DeviceUUID getUUIDFromCudaID(int cuda_id)
+DeviceUUID getUUIDFromGPUID(int gpu_id)
 {
     DeviceUUID uuid;
 
@@ -107,16 +107,16 @@ DeviceUUID getUUIDFromCudaID(int cuda_id)
         FATAL("CUDA failed to enumerate devices");
     }
 
-    if (device_count <= cuda_id) {
+    if (device_count <= gpu_id) {
         FATAL("%d is not a valid CUDA ID given %d supported device\n",
-              cuda_id, device_count);
+              gpu_id, device_count);
     }
 
     cudaDeviceProp props;
-    cudaGetDeviceProperties(&props, cuda_id);
+    cudaGetDeviceProperties(&props, gpu_id);
 
     if (props.computeMode == cudaComputeModeProhibited) {
-        FATAL("%d corresponds to a prohibited device\n", cuda_id);
+        FATAL("%d corresponds to a prohibited device\n", gpu_id);
     }
 
     memcpy(uuid.data(), &props.uuid,

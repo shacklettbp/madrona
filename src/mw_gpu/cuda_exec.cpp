@@ -1001,6 +1001,7 @@ static GPUEngineState initEngineAndUserState(
             .cameraMode = camera_mode == StateConfig::CameraMode::Perspective ?
                 render::BatchRenderer::CameraMode::Perspective :
                 render::BatchRenderer::CameraMode::Lidar,
+            .inputMode = render::BatchRenderer::InputMode::CUDA,
         });
 
         renderer_init_buffer = cu::allocStaging(

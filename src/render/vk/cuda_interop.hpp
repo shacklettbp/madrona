@@ -29,7 +29,7 @@ private:
     void *dev_ptr_;
 };
 
-DeviceUUID getUUIDFromCudaID(int cuda_id);
+DeviceUUID getUUIDFromGPUID(int gpu_id);
 
 }
 }

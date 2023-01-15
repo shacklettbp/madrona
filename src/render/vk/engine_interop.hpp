@@ -55,6 +55,7 @@ struct EngineModeVariant {
     }
 };
 
+// FIXME: most of the uses of this don't need staging to be kept around
 struct HostToEngineBufferCUDA {
     HostBuffer staging;
     DedicatedBuffer devBuffer;
@@ -174,13 +175,12 @@ struct EngineToRendererBuffer : public EngineModeVariant<
         }
     }
 
-    inline VkDeviceAddress devAddr(const DeviceState &dev)
+    inline const LocalBuffer & rendererBuffer() const
     {
-        VkBuffer buf =
-            isCuda ? cuda.devBuffer.buf.buffer : cpu.devBuffer.buf.buffer;
-        return getDevAddr(dev, buf);
+        return isCuda ? cuda.devBuffer.buf : cpu.devBuffer.buf;
     }
 
+    // FIXME: this API isn't great, it stops batching pipeline barriers
     inline void toRenderer(const DeviceState &dev, VkCommandBuffer cmd,
                            VkAccessFlagBits pipeline_access,
                            VkPipelineStageFlagBits pipeline_stage)
