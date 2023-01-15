@@ -450,7 +450,7 @@ BatchRenderer::Impl::~Impl()
 
     dev.dt.destroySemaphore(dev.hdl, swapchainReady, nullptr);
     dev.dt.destroySemaphore(dev.hdl, renderFinished, nullptr);
-    tlases.free(dev);
+    tlases.destroy(dev);
 
     dev.dt.destroyPipeline(dev.hdl, pipelineState.rt, nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, pipelineState.rtLayout, nullptr);
@@ -499,6 +499,10 @@ void BatchRenderer::Impl::render()
     dev.dt.cmdBindDescriptorSets(renderCmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                  pipelineState.rtLayout, 0, 1,
                                  &descriptors.rtSet, 0, nullptr);
+
+    tlases.instanceStorage.toRenderer(dev, renderCmd,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR);
 
     tlases.build(dev, tlases.instanceCounts, renderCmd);
 
@@ -701,7 +705,7 @@ RendererInterface BatchRenderer::getInterface() const
 
     return RendererInterface {
         (AccelStructInstance **)
-            impl_->tlases.instanceAddrsStorageCUDA.getDevicePointer(),
+            impl_->tlases.instanceAddrsBuffer.enginePointer(),
         impl_->tlases.instanceCounts,
         (uint64_t *)impl_->assetMgr.blasAddrsBuffer.enginePointer(),
         (PackedViewData **)

@@ -585,6 +585,8 @@ TLASData TLASData::setup(const DeviceState &dev,
                          int64_t num_worlds,
                          uint32_t max_num_instances)
 {
+    bool cuda_mode = cuda_gpu_id != -1;
+
     HeapArray<VkAccelerationStructureGeometryKHR> geometry_infos(num_worlds);
     HeapArray<VkAccelerationStructureBuildGeometryInfoKHR> build_infos(
         num_worlds);
@@ -644,26 +646,26 @@ TLASData TLASData::setup(const DeviceState &dev,
     uint64_t initial_instance_storage_bytes =
         num_worlds * max_num_instances * sizeof(AccelStructInstance);
 
-    DedicatedBuffer instance_storage = mem.makeDedicatedBuffer(
-        initial_instance_storage_bytes, true);
-    CudaImportedBuffer instance_storage_cuda(dev, cuda_gpu_id,
-        instance_storage.mem, initial_instance_storage_bytes);
+    EngineToRendererBuffer instance_storage = cuda_mode ?
+        EngineToRendererBuffer(CudaMode {},
+            dev, mem, initial_instance_storage_bytes, cuda_gpu_id) :
+        EngineToRendererBuffer(CpuMode {},
+            mem, initial_instance_storage_bytes);
 
     VkDeviceAddress instance_storage_base_addr =
-        getDevAddr(dev, instance_storage.buf.buffer);
+        instance_storage.devAddr(dev);
 
     uint64_t num_instance_addrs_bytes =
         sizeof(AccelStructInstance *) * num_worlds;
 
-    HostBuffer instance_addrs_staging =
-        mem.makeStagingBuffer(num_instance_addrs_bytes);
-    auto instance_addrs_staging_ptr =
-        (AccelStructInstance **)instance_addrs_staging.ptr;
+    HostToEngineBuffer instance_addrs_buffer = cuda_mode ?
+        HostToEngineBuffer(CudaMode {},
+            dev, mem, num_instance_addrs_bytes, cuda_gpu_id) :
+        HostToEngineBuffer(CpuMode {},
+            num_instance_addrs_bytes);
 
-    DedicatedBuffer instance_addrs_storage =
-        mem.makeDedicatedBuffer(num_instance_addrs_bytes);
-    CudaImportedBuffer instance_addrs_storage_cuda(dev, cuda_gpu_id,
-        instance_addrs_storage.mem, num_instance_addrs_bytes);
+    auto instance_addrs_staging_ptr =
+        (AccelStructInstance **)instance_addrs_buffer.hostPointer();
 
     HeapArray<VkAccelerationStructureKHR> hdls(num_worlds);
     HeapArray<uint32_t> max_instances(num_worlds);
@@ -680,7 +682,7 @@ TLASData TLASData::setup(const DeviceState &dev,
         geometry_infos[i].geometry.instances.data.deviceAddress =
             instance_storage_base_addr + cur_instance_storage_offset;
         instance_addrs_staging_ptr[i] = (AccelStructInstance *)
-            ((char *)instance_storage_cuda.getDevicePointer() +
+            ((char *)instance_storage.enginePointer() +
             cur_instance_storage_offset);
         max_instances[i] = max_num_instances;
 
@@ -718,38 +720,32 @@ TLASData TLASData::setup(const DeviceState &dev,
         range_info_ptrs[i] = &range_info;
     }
 
-    instance_addrs_staging.flush(dev);
+    if (instance_addrs_buffer.needsEngineCopy()) {
+        gpu_run.begin(dev);
 
-    gpu_run.begin(dev);
+        instance_addrs_buffer.toEngine(dev, gpu_run.cmd, 0,
+                                       num_instance_addrs_bytes);
 
-    VkBufferCopy addrs_copy_info {
-        .srcOffset = 0,
-        .dstOffset = 0,
-        .size = num_instance_addrs_bytes,
-    };
-
-    dev.dt.cmdCopyBuffer(gpu_run.cmd, instance_addrs_staging.buffer,
-                         instance_addrs_storage.buf.buffer, 1,
-                         &addrs_copy_info);
-
-    gpu_run.submit(dev);
+        gpu_run.submit(dev);
+    }
 
     uint32_t *instance_counts_buffer;
-    {
+    if (cuda_mode) {
         auto res = cudaHostAlloc((void **)&instance_counts_buffer,
                                  sizeof(uint32_t) * (uint64_t)num_worlds,
                                  cudaHostAllocMapped);
         if (res != cudaSuccess) {
             FATAL("Failed to allocate instance counts readback buffer");
         } 
+    } else {
+        instance_counts_buffer =
+            (uint32_t *)malloc(sizeof(uint32_t) * (uint64_t)num_worlds);
     }
 
     return TLASData {
         std::move(as_storage),
         std::move(instance_storage),
-        std::move(instance_storage_cuda),
-        std::move(instance_addrs_storage),
-        std::move(instance_addrs_storage_cuda),
+        std::move(instance_addrs_buffer),
         std::move(hdls),
         std::move(max_instances),
         std::move(geometry_infos),
@@ -757,6 +753,7 @@ TLASData TLASData::setup(const DeviceState &dev,
         std::move(range_infos),
         std::move(range_info_ptrs),
         instance_counts_buffer,
+        cuda_mode,
     };
 }
 
@@ -777,17 +774,21 @@ void TLASData::build(const DeviceState &dev,
                                              rangeInfoPtrs.data());
 }
 
-void TLASData::free(const DeviceState &dev)
+void TLASData::destroy(const DeviceState &dev)
 {
     const int64_t num_worlds = hdls.size();
     for (int64_t i = 0; i < num_worlds; i++) {
         dev.dt.destroyAccelerationStructureKHR(dev.hdl, hdls[i], nullptr);
     }
 
-    auto res = cudaFreeHost(instanceCounts);
-    if (res != cudaSuccess) {
-        FATAL("Failed to free instance counts readback buffer");
-    } 
+    if (cudaMode) {
+        auto res = cudaFreeHost(instanceCounts);
+        if (res != cudaSuccess) {
+            FATAL("Failed to free instance counts readback buffer");
+        } 
+    } else {
+        free(instanceCounts);
+    }
 }
 
 #if 0

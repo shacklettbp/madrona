@@ -86,10 +86,8 @@ struct AssetManager {
 
 struct TLASData {
     DedicatedBuffer accelStructStorage;
-    DedicatedBuffer instanceStorage;
-    CudaImportedBuffer instanceStorageCUDA;
-    DedicatedBuffer instanceAddrsStorage;
-    CudaImportedBuffer instanceAddrsStorageCUDA;
+    EngineToRendererBuffer instanceStorage;
+    HostToEngineBuffer instanceAddrsBuffer;
 
     HeapArray<VkAccelerationStructureKHR> hdls;
     HeapArray<uint32_t> maxInstances;
@@ -99,6 +97,7 @@ struct TLASData {
     HeapArray<VkAccelerationStructureBuildRangeInfoKHR *> rangeInfoPtrs;
 
     uint32_t *instanceCounts;
+    bool cudaMode;
 
     static TLASData setup(const DeviceState &dev,
                           const GPURunUtil &gpu_run,
@@ -111,7 +110,7 @@ struct TLASData {
                const uint32_t *num_instances_per_world,
                VkCommandBuffer build_cmd);
 
-    void free(const DeviceState &dev);
+    void destroy(const DeviceState &dev);
 };
 
 }
