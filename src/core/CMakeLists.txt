@@ -25,8 +25,7 @@ target_compile_definitions(madrona_core
 
 add_library(madrona_mw_core STATIC
     ${MADRONA_CORE_SRCS}
-    ${MADRONA_INC_DIR}/taskgraph.hpp taskgraph.cpp
-    ${MADRONA_INC_DIR}/system.hpp system.cpp
+    ${MADRONA_INC_DIR}/taskgraph.hpp ${MADRONA_INC_DIR}/taskgraph.inl taskgraph.cpp
 )
 
 target_compile_definitions(madrona_mw_core

@@ -96,68 +96,6 @@ private:
 friend class Builder;
 };
 
-class ThreadPoolExecutor {
-public:
-    struct Job {
-        void (*fn)(void *);
-        void *data;
-    };
-
-    ThreadPoolExecutor(CountT num_worlds, CountT num_workers = 0);
-    ~ThreadPoolExecutor();
-    void run(Job *jobs, CountT num_jobs);
-
-protected:
-    void ctxInit(void (*init_fn)(void *, const WorkerInit &),
-                 void *init_data, CountT world_idx);
-
-    ECSRegistry getECSRegistry();
-
-private:
-    void workerThread();
-
-    HeapArray<std::thread> workers_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_int32_t worker_wakeup_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_int32_t main_wakeup_;
-    Job *current_jobs_;
-    uint32_t num_jobs_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t next_job_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_finished_;
-    StateManager state_mgr_;
-    HeapArray<StateCache> state_caches_;
-};
-
-template <typename ContextT, typename WorldT, typename... InitTs>
-class TaskGraphExecutor : private ThreadPoolExecutor {
-public:
-    struct Config {
-        uint32_t numWorlds;
-        uint32_t numWorkers = 0;
-    };
-
-    template <typename... Args>
-    TaskGraphExecutor(const Config &cfg,
-                      const Args * ... user_init_ptrs);
-
-    inline void run();
-
-private:
-    struct WorldContext {
-        ContextT ctx;
-        WorldT worldData;
-        TaskGraph taskgraph;
-
-        inline WorldContext(const WorkerInit &worker_init,
-                            const InitTs & ...world_inits);
-                            
-    };
-
-    static inline void stepWorld(void *data_raw);
-
-    HeapArray<WorldContext> world_contexts_;
-    HeapArray<Job> jobs_;
-};
-
 template <typename ContextT, auto Fn, typename ...ComponentTs>
 class ParallelForNode : public NodeBase {
 public:
