@@ -1,9 +1,12 @@
 import sys
+import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw
+import os
 
 STEP = -1
 NEW_STEP = False
 LOG_STEPS = {}
+OFFSET_RANKINGS = {}
 
 
 def new_step():
@@ -152,7 +155,8 @@ def block_analysis(step_log):
     }
 
     for sm in step_log["SMs"]:
-        for (_, nodeID, blockID), [start, end] in step_log["SMs"][sm].items():
+        for (offset, nodeID, blockID), [start,
+                                        end] in step_log["SMs"][sm].items():
             # confirm clock does proceed within an SM
             assert end > start
             assert start > step_log["sm_base_avg"][sm]
@@ -161,6 +165,14 @@ def block_analysis(step_log):
                 i - step_log["sm_base_avg"][sm] for i in [start, end]
             ]
             sm_execution[sm] += end - start
+
+            funcID = step_log["mapping"][nodeID][0]
+            # hard coding for narrowphase
+            if funcID == 28:
+                if offset not in OFFSET_RANKINGS:
+                    OFFSET_RANKINGS[offset] = end - start
+                else:
+                    OFFSET_RANKINGS[offset] += end - start
 
             if blockID not in block_exec_time["blocks"][sm]:
                 block_exec_time["blocks"][sm][blockID] = [(start, end, nodeID)]
@@ -222,13 +234,19 @@ def plot_events(step_log, nodes, blocks, file_name):
 
     for s, b in blocks.items():
         y = s * num_pixel_per_sm
+        block_offset = {}
 
         for bb, events in b.items():
             draw.line((cast_coor(step_log["final_cycles"][bb]), y, x_limit, y),
                       fill="grey",
                       width=1)
             for e in events:
-                draw.line((cast_coor(e[0]), y, cast_coor(e[1]), y),
+                casted = cast_coor(e[0])
+                # to have an extra space between tasks
+                if bb in block_offset and casted == block_offset[bb]:
+                    casted += 1
+                block_offset[bb] = e[1]
+                draw.line((casted, y, cast_coor(e[1]), y),
                           fill=colors[step_log["mapping"][e[2]]]
                           if step_log["mapping"][e[2]] in colors else "black",
                           width=2)
@@ -243,7 +261,7 @@ def plot_events(step_log, nodes, blocks, file_name):
                   fill="green",
                   width=1)
 
-    img.save(file_name+"_megakernel_events.png")
+    img.save(file_name)
 
 
 def step_analysis(step=5, file_name="megakernel_events.png"):
@@ -277,8 +295,8 @@ def step_analysis(step=5, file_name="megakernel_events.png"):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("python parse_device_tracing.py [file_name]")
+    if len(sys.argv) > 4:
+        print("python parse_device_tracing.py [file_name] [# stps] [optional, start from]")
         exit()
 
     with open(sys.argv[1], 'rb') as f:
@@ -288,12 +306,34 @@ if __name__ == "__main__":
         for i in range(0, len(events), 32):
             get_device_log(events[i:i + 32])
 
+    # default value
+    steps = 1
+    start_from = 5
+    if len(sys.argv) >= 3:
+        steps = int(sys.argv[2])
+    if len(sys.argv) == 4:
+        start_from = int(sys.argv[3])
+    
     for s in LOG_STEPS:
         LOG_STEPS[s]["final_timestamp"] -= LOG_STEPS[s]["start_timestamp"]
         for b in LOG_STEPS[s]["final_cycles"]:
             LOG_STEPS[s]["final_cycles"][b] -= LOG_STEPS[s]["start_timestamp"]
 
-    # or pick other steps
-    step_analysis(5, sys.argv[1])
+    dir_path = sys.argv[1] + "_megakernel_events"
+    isExist = os.path.exists(dir_path)
+    if not isExist:
+        os.mkdir(dir_path)
+    # todo: limit
+    for s in range(start_from, start_from + steps):
+        step_analysis(s, dir_path + "/step{}.png".format(s))
+
+    total_time = sum(v for v in OFFSET_RANKINGS.values())
+    OFFSET_RANKINGS = {k:v/total_time for k,v in OFFSET_RANKINGS.items()}
+    x = sorted(list(OFFSET_RANKINGS.keys()))
+    y = [OFFSET_RANKINGS[xx] for xx in x]
+    plt.plot(x, y)
+    plt.savefig("distribution.png")
+
+    # print(dict(sorted(OFFSET_RANKINGS.items(), key=lambda item: item[1])))
 
     # todo: aggregated analysis
