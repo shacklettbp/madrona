@@ -7,6 +7,7 @@
 #include "core.hpp"
 #include "memory.hpp"
 #include "cuda_interop.hpp"
+#include "engine_interop.hpp"
 
 namespace madrona {
 namespace render {
@@ -59,9 +60,11 @@ struct Assets {
 };
 
 struct AssetManager {
-    HostBuffer addrBufferStaging;
-    DedicatedBuffer addrBuffer;
-    CudaImportedBuffer addrBufferCUDA;
+    HostToEngineBuffer blasAddrsBuffer;
+
+    HostBuffer geoAddrsStagingBuffer;
+    DedicatedBuffer geoAddrsBuffer;
+
     int64_t freeObjectOffset;
     const int64_t maxObjects;
 

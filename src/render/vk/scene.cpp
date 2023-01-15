@@ -245,12 +245,20 @@ AssetManager::AssetManager(const DeviceState &dev,
                            MemoryAllocator &mem,
                            int cuda_gpu_id,
                            int64_t max_objects)
-    : addrBufferStaging(mem.makeStagingBuffer(
-            max_objects * (sizeof(uint64_t) + sizeof(shader::ObjectData)))),
-      addrBuffer(mem.makeDedicatedBuffer(
-            max_objects * (sizeof(uint64_t) + sizeof(shader::ObjectData)))),
-      addrBufferCUDA(dev, cuda_gpu_id, addrBuffer.mem,
-            max_objects * (sizeof(uint64_t) + sizeof(shader::ObjectData))),
+    : blasAddrsBuffer([&]() {
+            uint64_t num_bytes = max_objects * sizeof(uint64_t);
+
+            if (cuda_gpu_id == -1) {
+                return HostToEngineBuffer(CpuMode {}, num_bytes);
+            } else {
+                return HostToEngineBuffer(CudaMode {}, dev, mem, num_bytes,
+                                          cuda_gpu_id);
+            }
+        }()),
+      geoAddrsStagingBuffer(
+          mem.makeStagingBuffer(max_objects * sizeof(shader::ObjectData))),
+      geoAddrsBuffer(
+          mem.makeDedicatedBuffer(max_objects * sizeof(uint64_t))),
       freeObjectOffset(0),
       maxObjects(max_objects)
 {}
@@ -528,10 +536,14 @@ Assets AssetManager::load(const DeviceState &dev,
     int64_t num_objects = metadata.objects.size();
     int64_t base_obj_offset = freeObjectOffset;
 
+    // FIXME: it makes no sense that the staging buffer is as big
+    // as the GPU buffer since the purpose of this code was to allow
+    // incremental uploads of assets. Overall a much smarter solution for
+    // managing free space in the object buffer & uploading is necessary
     uint64_t *blas_addrs_ptr =
-        (uint64_t *)addrBufferStaging.ptr + base_obj_offset;
-    shader::ObjectData *object_data_ptr = (shader::ObjectData *)(
-        (uint64_t *)addrBufferStaging.ptr + maxObjects) + base_obj_offset;
+        (uint64_t *)blasAddrsBuffer.hostPointer() + base_obj_offset;
+    shader::ObjectData *object_data_ptr =
+        (shader::ObjectData *)geoAddrsStagingBuffer.ptr + base_obj_offset;
 
     for (int64_t i = 0; i < num_objects; i++) {
         blas_addrs_ptr[i] = blas_build->blases.accelStructs[i].devAddr;
@@ -541,26 +553,21 @@ Assets AssetManager::load(const DeviceState &dev,
 
     freeObjectOffset += num_objects;
 
-    addrBufferStaging.flush(dev);
+    geoAddrsStagingBuffer.flush(dev);
 
     gpu_run.begin(dev);
 
-    std::array<VkBufferCopy, 2> addrCopies;
-    uint64_t blas_addr_start_offset =
-        (char *)blas_addrs_ptr - (char *)addrBufferStaging.ptr;
-    addrCopies[0].srcOffset = blas_addr_start_offset;
-    addrCopies[0].dstOffset = blas_addr_start_offset;
-    addrCopies[0].size = sizeof(uint64_t) * num_objects;
+    blasAddrsBuffer.toEngine(dev, gpu_run.cmd,
+        sizeof(uint64_t) * base_obj_offset, sizeof(uint64_t) * num_objects);
 
-    uint64_t object_data_start_offset =
-        (char *)object_data_ptr - (char *)addrBufferStaging.ptr;
-    addrCopies[1].srcOffset = object_data_start_offset;
-    addrCopies[1].dstOffset = object_data_start_offset;
-    addrCopies[1].size = sizeof(shader::ObjectData) * num_objects;
+    VkBufferCopy geo_addr_copy {
+        .srcOffset = sizeof(shader::ObjectData) * base_obj_offset,
+        .dstOffset = sizeof(shader::ObjectData) * base_obj_offset,
+        .size = sizeof(shader::ObjectData) * num_objects,
+    };
 
-    dev.dt.cmdCopyBuffer(gpu_run.cmd, addrBufferStaging.buffer,
-                         addrBuffer.buf.buffer, addrCopies.size(),
-                         addrCopies.data());
+    dev.dt.cmdCopyBuffer(gpu_run.cmd, geoAddrsStagingBuffer.buffer,
+                         geoAddrsBuffer.buf.buffer, 1, &geo_addr_copy);
 
     gpu_run.submit(dev);
 

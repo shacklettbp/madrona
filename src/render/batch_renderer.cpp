@@ -293,8 +293,8 @@ static DescriptorState makeDescriptors(const DeviceState &dev,
                              1);
 
     VkDescriptorBufferInfo obj_data_info;
-    obj_data_info.buffer = asset_mgr.addrBuffer.buf.buffer;
-    obj_data_info.offset = sizeof(uint64_t) * asset_mgr.maxObjects;
+    obj_data_info.buffer = asset_mgr.geoAddrsBuffer.buf.buffer;
+    obj_data_info.offset = 0;
     obj_data_info.range = sizeof(shader::ObjectData) * asset_mgr.maxObjects;
 
     DescHelper::storage(desc_updates[2],
@@ -703,7 +703,7 @@ RendererInterface BatchRenderer::getInterface() const
         (AccelStructInstance **)
             impl_->tlases.instanceAddrsStorageCUDA.getDevicePointer(),
         impl_->tlases.instanceCounts,
-        (uint64_t *)impl_->assetMgr.addrBufferCUDA.getDevicePointer(),
+        (uint64_t *)impl_->assetMgr.blasAddrsBuffer.enginePointer(),
         (PackedViewData **)
             impl_->viewDataAddrsBufferCUDA.getDevicePointer(),
     };
