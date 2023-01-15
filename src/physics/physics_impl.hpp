@@ -4,10 +4,6 @@
 
 namespace madrona::phys {
 
-struct ObjectData {
-    ObjectManager *mgr;
-};
-
 struct SolverData {
     Contact *contacts;
     std::atomic<CountT> numContacts;

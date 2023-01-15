@@ -98,6 +98,13 @@ struct Vector2 {
         return *this;
     }
 
+    inline Vector2 &operator*=(Vector2 o) {
+        x *= o.x;
+        y *= o.y;
+
+        return *this;
+    }
+
     inline Vector2 & operator/=(float o)
     {
         float inv = 1.f / o;
@@ -143,6 +150,12 @@ struct Vector2 {
 
     friend inline Vector2 operator*(Vector2 a, float b)
     {
+        a *= b;
+
+        return a;
+    }
+
+    friend inline Vector2 operator*(Vector2 a, Vector2 b) {
         a *= b;
 
         return a;

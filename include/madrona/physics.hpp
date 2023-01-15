@@ -255,6 +255,10 @@ struct ObjectManager {
     math::Vector3 *vertices;
 };
 
+struct ObjectData {
+    ObjectManager *mgr;
+};
+
 namespace broadphase {
 
 struct LeafID {
