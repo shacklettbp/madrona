@@ -712,21 +712,19 @@ static inline void addManifoldToSolver(SolverData &solver_data,
             Vector4::fromVector3(contact_world, depth_world);
     }
     
-    if (manifold.numContactPoints > 0) {
-        addContactsToSolver(solver_data, {{
-            manifold.aIsReference ? a_entity : b_entity,
-            manifold.aIsReference ? b_entity : a_entity,
-            {
-                manifold.contactPoints[0],
-                manifold.contactPoints[1],
-                manifold.contactPoints[2],
-                manifold.contactPoints[3],
-            },
-            manifold.numContactPoints,
-            normal_world * inv_normal_world_len,
-            {},
-        }});
-    }
+    addContactsToSolver(solver_data, {{
+        manifold.aIsReference ? a_entity : b_entity,
+        manifold.aIsReference ? b_entity : a_entity,
+        {
+            manifold.contactPoints[0],
+            manifold.contactPoints[1],
+            manifold.contactPoints[2],
+            manifold.contactPoints[3],
+        },
+        manifold.numContactPoints,
+        normal_world * inv_normal_world_len,
+        {},
+    }});
 }
 
 inline void runNarrowphase(
