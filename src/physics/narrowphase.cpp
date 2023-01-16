@@ -13,7 +13,7 @@ using namespace geometry;
 struct ObjectTransform {
     Vector3 pos;
     Quat rot;
-    Scale sca;
+    Diag3x3 sca;
 };
 
 enum class NarrowphaseTest : uint32_t {
@@ -618,41 +618,17 @@ Manifold doSATPlane(Context &ctx, const Plane &plane, const CollisionMesh &a, Ob
     return createFaceContactPlane(ctx, plane, a, aTransform);
 }
 
-// FIXME: Reduce redundant work on transforming point
-static inline geometry::CollisionMesh buildCollisionMesh(
-    Context &ctx,
-    const geometry::HalfEdgeMesh &he_mesh,
-    ObjectTransform space)
-{
-    auto transformVertex = [space] (math::Vector3 v) {
-        return space.pos + space.rot.rotateVec((math::Vector3)space.sca * v);
-    };
-
-    geometry::CollisionMesh collision_mesh;
-    collision_mesh.halfEdgeMesh = &he_mesh;
-    collision_mesh.vertexCount = he_mesh.getVertexCount();
-    collision_mesh.vertices = (Vector3 *)ctx.tmpAlloc(
-        sizeof(math::Vector3) * collision_mesh.vertexCount);
-    collision_mesh.center = space.pos;
-
-    for (CountT v = 0; v < (CountT)collision_mesh.vertexCount; ++v) {
-        collision_mesh.vertices[v] = transformVertex(he_mesh.vertex(v));
-    }
-
-    return collision_mesh;
-}
-
 static inline geometry::CollisionMesh buildRelativeCollisionMesh(
     Context &ctx,
     const geometry::HalfEdgeMesh &he_mesh,
     // dst_space is for a, src_space is for b
-    ObjectTransform dst_space, ObjectTransform src_space)
+    const ObjectTransform &dst_space, const ObjectTransform &src_space)
 {
-    Scale scale_inv ( {1.0f / dst_space.sca.x, 1.0f / dst_space.sca.y, 1.0f / dst_space.sca.z} );
+    Diag3x3 scale_inv = dst_space.sca.inv();
     Quat rot_inv = dst_space.rot.inv();
     Vector3 pos_inv = -dst_space.pos;
 
-    Scale scale_comp = scale_inv * src_space.sca;
+    Diag3x3 scale_comp = scale_inv * src_space.sca;
     Quat rot_comp = rot_inv * src_space.rot;
     Vector3 pos_comp = scale_inv * (rot_comp.rotateVec(src_space.pos - dst_space.pos));
 
@@ -731,8 +707,8 @@ inline void runNarrowphase(
     Vector3 b_pos = ctx.getUnsafe<Position>(b_entity);
     Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
     Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-    Vector3 a_scale = ctx.getUnsafe<Scale>(a_entity);
-    Vector3 b_scale = ctx.getUnsafe<Scale>(b_entity);
+    Diag3x3 a_scale(ctx.getUnsafe<Scale>(a_entity));
+    Diag3x3 b_scale(ctx.getUnsafe<Scale>(b_entity));
 
     {
         // FIXME: Rechecking the AABBs here seems to only give a very small
@@ -799,7 +775,8 @@ inline void runNarrowphase(
             {a_pos, a_rot, a_scale},
             {b_pos, b_rot, b_scale});
 
-        Manifold manifold = doSAT(ctx, a_collision_mesh, b_collision_mesh, {a_pos, a_rot, a_scale});
+        Manifold manifold = doSAT(ctx, a_collision_mesh, b_collision_mesh,
+                                  {a_pos, a_rot, a_scale});
 
         if (manifold.numContactPoints > 0) {
             addContactsToSolver(solver, {{
@@ -866,11 +843,11 @@ inline void runNarrowphase(
         geometry::CollisionMesh a_collision_mesh =
             buildLocalCollisionMesh(ctx, a_he_mesh);
 
-        Scale scale_inv ( {1.0f / a_scale.x, 1.0f / a_scale.y, 1.0f / a_scale.z} );
+        Diag3x3 scale_inv  = a_scale.inv();
         Quat rot_inv = a_rot.inv();
         Vector3 pos_inv = -a_pos;
 
-        Scale scale_comp = scale_inv * b_scale;
+        Diag3x3 scale_comp = scale_inv * b_scale;
         Quat rot_comp = rot_inv * b_rot;
         Vector3 pos_comp = scale_inv * (rot_comp.rotateVec(b_pos - a_pos));
 

@@ -419,17 +419,6 @@ struct Vector3 {
         };
     }
 
-    friend inline Vector3 operator*(Vector3 a, Vector3 b)
-    {
-        return Vector3 {
-            a.x * b.x,
-            a.y * b.y,
-            a.z * b.z
-        };
-    }
-
-
-
     static inline Vector3 min(Vector3 a, Vector3 b)
     {
         return Vector3 {
@@ -454,6 +443,75 @@ struct Vector3 {
             0,
             0,
             0,
+        };
+    }
+};
+
+struct Diag3x3 {
+    float d0;
+    float d1;
+    float d2;
+
+    inline Diag3x3 inv() const
+    {
+        return Diag3x3 {
+            1.f / d0,
+            1.f / d1,
+            1.f / d2,
+        };
+    }
+
+    static inline Diag3x3 fromVec(Vector3 v)
+    {
+        return Diag3x3 {
+            v.x,
+            v.y,
+            v.z,
+        };
+    }
+
+    inline Diag3x3 & operator*=(Diag3x3 o)
+    {
+        d0 *= o.d0;
+        d1 *= o.d1;
+        d2 *= o.d2;
+
+        return *this;
+    }
+
+    inline Diag3x3 & operator*=(float o)
+    {
+        d0 *= o;
+        d1 *= o;
+        d2 *= o;
+
+        return *this;
+    }
+
+    friend inline Diag3x3 operator*(Diag3x3 a, Diag3x3 b)
+    {
+        a *= b;
+        return a;
+    }
+
+    friend inline Diag3x3 operator*(Diag3x3 a, float b)
+    {
+        a *= b;
+        return a;
+    }
+
+    friend inline Diag3x3 operator*(float a, Diag3x3 b)
+    {
+        b *= a;
+        return b;
+    }
+
+    friend inline Vector3 operator*(Diag3x3 d, Vector3 v)
+    {
+        return Vector3 {
+            d.d0 * v.x,
+            d.d1 * v.y,
+            d.d2 * v.z,
         };
     }
 };
@@ -773,7 +831,7 @@ struct Mat3x3 {
         }};
     }
 
-    static inline Mat3x3 fromRS(Quat r, Vector3 s)
+    static inline Mat3x3 fromRS(Quat r, Diag3x3 s)
     {
         float x2 = r.x * r.x;
         float y2 = r.y * r.y;
@@ -785,23 +843,23 @@ struct Mat3x3 {
         float wy = r.w * r.y;
         float wz = r.w * r.z;
 
-        Vector3 ds = 2.f * s;
+        Diag3x3 ds = 2.f * s;
 
         return {{
             { 
-                s.x - ds.x * (y2 + z2),
-                ds.x * (xy + wz),
-                ds.x * (xz - wy),
+                s.d0 - ds.d0 * (y2 + z2),
+                ds.d0 * (xy + wz),
+                ds.d0 * (xz - wy),
             },
             {
-                ds.y * (xy - wz),
-                s.y - ds.y * (x2 + z2),
-                ds.y * (yz + wx),
+                ds.d1 * (xy - wz),
+                s.d1 - ds.d1 * (x2 + z2),
+                ds.d1 * (yz + wx),
             },
             {
-                ds.z * (xz + wy),
-                ds.z * (yz - wx),
-                s.z - ds.z * (x2 + y2),
+                ds.d2 * (xz + wy),
+                ds.d2 * (yz - wx),
+                s.d2 - ds.d2 * (x2 + y2),
             },
         }};
     }
@@ -850,7 +908,7 @@ struct Mat3x4 {
     }
 
     static inline Mat3x4 fromTRS(Vector3 t, Quat r,
-                                 Vector3 s = { 1.f, 1.f, 1.f })
+                                 Diag3x3 s = { 1.f, 1.f, 1.f })
     {
         float x2 = r.x * r.x;
         float y2 = r.y * r.y;
@@ -862,23 +920,23 @@ struct Mat3x4 {
         float wy = r.w * r.y;
         float wz = r.w * r.z;
 
-        Vector3 ds = 2.f * s;
+        Diag3x3 ds = 2.f * s;
 
         return {{
             { 
-                s.x - ds.x * (y2 + z2),
-                ds.x * (xy + wz),
-                ds.x * (xz - wy),
+                s.d0 - ds.d0 * (y2 + z2),
+                ds.d0 * (xy + wz),
+                ds.d0 * (xz - wy),
             },
             {
-                ds.y * (xy - wz),
-                s.y - ds.y * (x2 + z2),
-                ds.y * (yz + wx),
+                ds.d1 * (xy - wz),
+                s.d1 - ds.d1 * (x2 + z2),
+                ds.d1 * (yz + wx),
             },
             {
-                ds.z * (xz + wy),
-                ds.z * (yz - wx),
-                s.z - ds.z * (x2 + y2),
+                ds.d2 * (xz + wy),
+                ds.d2 * (yz - wx),
+                s.d2 - ds.d2 * (x2 + y2),
             },
             t,
         }};
@@ -959,14 +1017,14 @@ struct AABB {
         }
     }
 
-    inline bool rayIntersects(Vector3 ray_o, Vector3 inv_ray_d,
+    inline bool rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
                               float ray_t_min, float ray_t_max)
     {
         // Ray tracing gems II, chapter 2
         
         // Absolute distances to lower and upper box coordinates
-        math::Vector3 t_lower = (pMin - ray_o) * inv_ray_d;
-        math::Vector3 t_upper = (pMax - ray_o) * inv_ray_d;
+        math::Vector3 t_lower = inv_ray_d * (pMin - ray_o);
+        math::Vector3 t_upper = inv_ray_d * (pMax - ray_o);
         // The four t-intervals (for x-/y-/z-slabs, and ray p(t))
         math::Vector4 t_mins =
             Vector4::fromVector3(Vector3::min(t_lower, t_upper), ray_t_min);
@@ -989,7 +1047,7 @@ struct AABB {
 
     [[nodiscard]] inline AABB applyTRS(const Vector3 &translation,
                                        const Quat &rotation,
-                                       const Vector3 &scale = { 1, 1, 1}) const
+                                       const Diag3x3 &scale = {1, 1, 1}) const
     {
         // FIXME: this could all be more efficient with a center + width
         // AABB representation

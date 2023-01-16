@@ -18,9 +18,9 @@ struct Rotation : math::Quat {
     {}
 };
 
-struct Scale : math::Vector3 {
-    Scale(math::Vector3 v)
-        : Vector3(v)
+struct Scale : math::Diag3x3 {
+    Scale(math::Diag3x3 d)
+        : Diag3x3(d)
     {}
 };
 

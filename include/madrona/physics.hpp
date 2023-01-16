@@ -288,7 +288,7 @@ public:
     void updateLeafPosition(LeafID leaf_id,
                             const math::Vector3 &pos,
                             const math::Quat &rot,
-                            const math::Vector3 &scale,
+                            const math::Diag3x3 &scale,
                             const math::Vector3 &linear_vel,
                             const math::AABB &obj_aabb);
 
@@ -329,7 +329,7 @@ private:
     struct LeafTransform {
         math::Vector3 pos;
         math::Quat rot;
-        math::Vector3 scale;
+        math::Diag3x3 scale;
     };
 
     inline CountT numInternalNodes(CountT num_leaves) const;

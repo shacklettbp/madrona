@@ -371,7 +371,7 @@ static inline AABB expandAABBWithMotion(
 void BVH::updateLeafPosition(LeafID leaf_id,
                              const Vector3 &pos,
                              const Quat &rot,
-                             const Vector3 &scale,
+                             const Diag3x3 &scale,
                              const Vector3 &linear_vel,
                              const AABB &obj_aabb)
 {
@@ -573,7 +573,7 @@ Entity BVH::traceRay(Vector3 o,
 {
     using namespace math;
 
-    Vector3 inv_d = 1.f / d;
+    Diag3x3 inv_d = Diag3x3::fromVec(d).inv();
 
     int32_t stack[128];
     stack[0] = 0;
@@ -739,14 +739,14 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
     Quat rot_to_local = leaf_txfm.rot.inv();
 
     Vector3 obj_ray_o = rot_to_local.rotateVec(world_ray_o - leaf_txfm.pos);
-    obj_ray_o.x /= leaf_txfm.scale.x;
-    obj_ray_o.y /= leaf_txfm.scale.y;
-    obj_ray_o.z /= leaf_txfm.scale.z;
+    obj_ray_o.x /= leaf_txfm.scale.d0;
+    obj_ray_o.y /= leaf_txfm.scale.d1;
+    obj_ray_o.z /= leaf_txfm.scale.d2;
 
     Vector3 obj_ray_d = leaf_txfm.rot.inv().rotateVec(world_ray_d);
-    obj_ray_d.x /= leaf_txfm.scale.x;
-    obj_ray_d.y /= leaf_txfm.scale.y;
-    obj_ray_d.z /= leaf_txfm.scale.z;
+    obj_ray_d.x /= leaf_txfm.scale.d0;
+    obj_ray_d.y /= leaf_txfm.scale.d1;
+    obj_ray_d.z /= leaf_txfm.scale.d2;
 
     Vector3 obj_hit_normal;
 
