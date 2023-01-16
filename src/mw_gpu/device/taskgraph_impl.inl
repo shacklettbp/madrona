@@ -97,7 +97,10 @@ void TaskGraph::setBlockState()
         return;
     }
 
-    cur_offset = cur_node.curOffset.fetch_add(consts::numMegakernelThreads,
+    uint32_t num_threads_per_invocation = cur_node.numThreadsPerInvocation;
+
+    cur_offset = cur_node.curOffset.fetch_add(
+        consts::numMegakernelThreads / num_threads_per_invocation,
         std::memory_order_relaxed);
 
     if (cur_offset >= total_invocations) {
@@ -110,8 +113,7 @@ void TaskGraph::setBlockState()
     sharedBlockState.totalNumInvocations = total_invocations;
     sharedBlockState.funcID = cur_node.funcID;
     sharedBlockState.runOffset = cur_offset;
-    sharedBlockState.numThreadsPerInvocation =
-        cur_node.numThreadsPerInvocation;
+    sharedBlockState.numThreadsPerInvocation = num_threads_per_invocation;
 }
 
 uint32_t TaskGraph::computeNumInvocations(Node &node)

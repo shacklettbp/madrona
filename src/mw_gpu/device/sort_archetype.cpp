@@ -1077,8 +1077,7 @@ void SortArchetypeNodeBase::zeroBins(int32_t invocation_idx)
     bins[invocation_idx] = 0;
 
     if (invocation_idx == 0) {
-        numDynamicInvocations =
-            utils::divideRoundUp(numSortThreads, consts::numMegakernelThreads);
+        numDynamicInvocations = numSortBlocks;
     }
 }
 
@@ -1167,8 +1166,7 @@ void SortArchetypeNodeBase::OnesweepNode::prepareOnesweep(
     parent.lookback[invocation_idx]  = 0;
 
     if (invocation_idx == 0) {
-        numDynamicInvocations = utils::divideRoundUp(parent.numSortThreads,
-            consts::numMegakernelThreads);
+        numDynamicInvocations = parent.numSortBlocks;
     }
 }
 
