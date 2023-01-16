@@ -16,6 +16,28 @@ struct ObjectTransform {
     Diag3x3 sca;
 };
 
+static inline Vector3 transformPoint(const Vector3 &v, const ObjectTransform &transform)
+{
+    return transform.pos + transform.rot.rotateVec(transform.sca * v);
+}
+
+static inline Plane transformPlane(const Plane &plane, const ObjectTransform &transform)
+{
+    Plane new_plane = {};
+
+    Vector3 point = plane.normal * plane.d;
+    Vector3 transformed_point = transformPoint(point, transform);
+
+    Vector3 transformed_normal = transform.rot.rotateVec(plane.normal);
+
+    return { transformed_normal, transformed_normal.dot(transformed_point) };
+}
+
+static inline Vector3 transformDirection(const Vector3 &v, const ObjectTransform &transform)
+{
+    return transform.rot.rotateVec(transform.sca * v);
+}
+
 enum class NarrowphaseTest : uint32_t {
     SphereSphere = 1,
     HullHull = 2,
@@ -211,9 +233,6 @@ static EdgeQuery queryEdgeDirections(const CollisionMesh &a, const CollisionMesh
     return { maxDistance, normal, edgeAMaxDistance, edgeBMaxDistance };
 }
 
-// everything in A's local space
-// A.inv * B
-
 static void clipPolygon(
         Context &ctx,
         const Plane &clippingPlane,
@@ -294,28 +313,6 @@ static int findIncidentFace(const Plane &referencePlane,
     }
 
     return minimizingFace;
-}
-
-static inline Vector3 transformPoint(const Vector3 &v, const ObjectTransform &transform)
-{
-    return transform.pos + transform.rot.rotateVec(transform.sca * v);
-}
-
-static inline Plane transformPlane(const Plane &plane, const ObjectTransform &transform)
-{
-    Plane new_plane = {};
-
-    Vector3 point = plane.normal * plane.d;
-    Vector3 transformed_point = transformPoint(point, transform);
-
-    Vector3 transformed_normal = transform.rot.rotateVec(plane.normal);
-
-    return { transformed_normal, transformed_normal.dot(transformed_point) };
-}
-
-static inline Vector3 transformDirection(const Vector3 &v, const ObjectTransform &transform)
-{
-    return transform.rot.rotateVec(transform.sca * v);
 }
 
 static Manifold createFaceContactPlane(Context &ctx,
@@ -630,7 +627,7 @@ static inline geometry::CollisionMesh buildRelativeCollisionMesh(
 
     Diag3x3 scale_comp = scale_inv * src_space.sca;
     Quat rot_comp = rot_inv * src_space.rot;
-    Vector3 pos_comp = scale_inv * (rot_comp.rotateVec(src_space.pos - dst_space.pos));
+    Vector3 pos_comp = scale_inv * (rot_inv.rotateVec(src_space.pos - dst_space.pos));
 
     auto transformVertex = [scale_comp, rot_comp, pos_comp] (Vector3 v) {
         return pos_comp + rot_comp.rotateVec(scale_comp * v);
