@@ -79,6 +79,7 @@ public:
 
         template <typename NodeT, typename... Args>
         NodeID addDynamicCountNode(Span<const NodeID> dependencies,
+                                   uint32_t num_threads_per_invocation,
                                    Args && ...args);
 
         template <typename NodeT>

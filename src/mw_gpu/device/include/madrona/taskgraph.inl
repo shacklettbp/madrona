@@ -96,6 +96,7 @@ void TaskGraph::Builder::dynamicCountWrapper(NodeT *node, int32_t)
 template <typename NodeT, typename... Args>
 TaskGraph::NodeID TaskGraph::Builder::addDynamicCountNode(
     Span<const NodeID> dependencies,
+    uint32_t num_threads_per_invocation,
     Args && ...args)
 {
     auto data_id = constructNodeData<NodeT>(
@@ -104,7 +105,8 @@ TaskGraph::NodeID TaskGraph::Builder::addDynamicCountNode(
     NodeID count_node = addNodeFn<&Builder::dynamicCountWrapper<NodeT>>(
         data_id, dependencies, Optional<NodeID>::none(), 1);
 
-    return addNodeFn<&NodeT::run>(data_id, {count_node});
+    return addNodeFn<&NodeT::run>(data_id, {count_node},
+        Optional<NodeID>::none(), 0, num_threads_per_invocation);
 }
 
 template <typename NodeT>
@@ -221,7 +223,8 @@ TaskGraph::NodeID CustomParallelForNode<ContextT, Fn, threads_per_invocation,
     Span<const TaskGraph::NodeID> dependencies)
 {
     return builder.addDynamicCountNode<CustomParallelForNode<
-        ContextT, Fn, threads_per_invocation, ComponentTs...>>(dependencies);
+        ContextT, Fn, threads_per_invocation, ComponentTs...>>(
+            dependencies, threads_per_invocation);
 }
 
 template <typename ArchetypeT>

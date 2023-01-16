@@ -1077,11 +1077,12 @@ void SortArchetypeNodeBase::zeroBins(int32_t invocation_idx)
     bins[invocation_idx] = 0;
 
     if (invocation_idx == 0) {
-        numDynamicInvocations = numSortThreads;
+        numDynamicInvocations =
+            utils::divideRoundUp(numSortThreads, consts::numMegakernelThreads);
     }
 }
 
-void SortArchetypeNodeBase::histogram(int32_t invocation_idx)
+void SortArchetypeNodeBase::histogram(int32_t block_idx)
 {
     using namespace sortConsts;
 
@@ -1093,8 +1094,6 @@ void SortArchetypeNodeBase::histogram(int32_t invocation_idx)
 
     constexpr int32_t block_items =
         consts::numMegakernelThreads * num_elems_per_sort_thread_;
-    const int32_t block_idx = invocation_idx / consts::numMegakernelThreads;
-
     for (int pass = 0; pass < numPasses; pass++) {
         smem_tmp->bins[pass][threadIdx.x] = 0;
     }
@@ -1130,18 +1129,22 @@ void SortArchetypeNodeBase::histogram(int32_t invocation_idx)
         atomicAdd(&bins[pass * RADIX_DIGITS + threadIdx.x], bin_count);
     }
 
-    if (invocation_idx == 0) {
-        numDynamicInvocations = numPasses * RADIX_DIGITS;
+    if (block_idx == 0 && threadIdx.x == 0) {
+        numDynamicInvocations = utils::divideRoundUp(
+            uint32_t(numPasses * RADIX_DIGITS), consts::numMegakernelThreads);
     }
 }
 
-void SortArchetypeNodeBase::binScan(int32_t invocation_idx)
+void SortArchetypeNodeBase::binScan(int32_t block_idx)
 {
     using namespace sortConsts;
 
     using BlockScanT = BlockScan<uint32_t, consts::numMegakernelThreads>;
     using SMemTmpT = typename BlockScanT::TempStorage;
     auto smem_tmp = (SMemTmpT *)mwGPU::SharedMemStorage::buffer;
+
+    int32_t invocation_idx = 
+        block_idx * consts::numMegakernelThreads + threadIdx.x;
 
     uint32_t bin_vals[1];
     bin_vals[0] = bins[invocation_idx];
@@ -1164,11 +1167,12 @@ void SortArchetypeNodeBase::OnesweepNode::prepareOnesweep(
     parent.lookback[invocation_idx]  = 0;
 
     if (invocation_idx == 0) {
-        numDynamicInvocations = parent.numSortThreads;
+        numDynamicInvocations = utils::divideRoundUp(parent.numSortThreads,
+            consts::numMegakernelThreads);
     }
 }
 
-void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t invocation_idx)
+void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
 {
     using namespace sortConsts;
     using namespace mwGPU;
@@ -1320,10 +1324,11 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         &SortArchetypeNodeBase::zeroBins>(data_id, {setup}, setup);
 
     auto compute_histogram = builder.addNodeFn<
-        &SortArchetypeNodeBase::histogram>(data_id, {zero_bins}, setup);
+        &SortArchetypeNodeBase::histogram>(data_id, {zero_bins}, setup, 0,
+            consts::numMegakernelThreads);
 
     auto cur_task = builder.addNodeFn<&SortArchetypeNodeBase::binScan>(
-        data_id, {compute_histogram}, setup);
+        data_id, {compute_histogram}, setup, 0, consts::numMegakernelThreads);
 
     for (int32_t i = 0; i < num_passes; i++) {
         auto pass_data = builder.constructNodeData<OnesweepNode>(
@@ -1332,8 +1337,8 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         cur_task = builder.addNodeFn<
             &OnesweepNode::prepareOnesweep>(pass_data, {cur_task}, setup);
 
-        cur_task = builder.addNodeFn<
-            &OnesweepNode::onesweep>(pass_data, {cur_task}, setup);
+        cur_task = builder.addNodeFn<&OnesweepNode::onesweep>(
+            pass_data, {cur_task}, setup, 0, consts::numMegakernelThreads);
     }
 
     // FIXME this could be a fixed-size count

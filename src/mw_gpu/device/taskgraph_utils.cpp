@@ -30,6 +30,8 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
     Span<const TaskGraph::NodeID> dependencies,
     Optional<NodeID> parent_node)
 {
+    assert(consts::numMegakernelThreads % num_threads_per_invocation == 0);
+
     uint32_t offset = num_dependencies_;
     uint32_t num_deps = dependencies.size();
 
@@ -75,6 +77,8 @@ void TaskGraph::Builder::build(TaskGraph *out)
             node.dataIDX,
             node.fixedCount,
             node.funcID,
+            node.numChildren,
+            node.numThreadsPerInvocation,
             0, 0, 0,
         };
     };
@@ -179,7 +183,7 @@ TaskGraph::NodeID RecycleEntitiesNode::addToGraph(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies)
 {
-    return builder.addDynamicCountNode<RecycleEntitiesNode>(dependencies);
+    return builder.addDynamicCountNode<RecycleEntitiesNode>(dependencies, 1);
 }
 
 void ResetTmpAllocNode::run(int32_t)
@@ -222,7 +226,7 @@ TaskGraph::NodeID CompactArchetypeNodeBase::addToGraph(
     uint32_t archetype_id)
 {
     return builder.addDynamicCountNode<CompactArchetypeNodeBase>(
-        dependencies, archetype_id);
+        dependencies, 1, archetype_id);
 }
 
 }
