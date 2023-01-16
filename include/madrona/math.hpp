@@ -1069,6 +1069,7 @@ struct AABB {
     {
         // FIXME: this could all be more efficient with a center + width
         // AABB representation
+        // FIXME: this matrix should to be row major
         auto rot_mat = Mat3x3::fromRS(rotation, scale);
 
          // RTCD page 86
@@ -1079,8 +1080,9 @@ struct AABB {
 
 #pragma unroll
              for (CountT j = 0; j < 3; j++) {
-                 float e = rot_mat[i][j] * pMin[j];
-                 float f = rot_mat[i][j] * pMax[j];
+                 // Flipped because rot_mat is column major
+                 float e = rot_mat[j][i] * pMin[j];
+                 float f = rot_mat[j][i] * pMax[j];
 
                  if (e < f) {
                      txfmed.pMin[i] += e;
