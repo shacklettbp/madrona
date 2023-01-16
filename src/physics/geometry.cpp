@@ -50,7 +50,6 @@ void FastPolygonList::addPolygon(Span<const uint32_t> indices)
     edgeCount += index_count;
 }
 
-
 void HalfEdgeMesh::construct(
         FastPolygonList &polygons,
         uint32_t vertexCount, const math::Vector3 *vertices) {

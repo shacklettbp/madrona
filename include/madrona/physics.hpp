@@ -87,6 +87,9 @@ public:
     // Normalized normal
     Plane getPlane(PolygonID polygon, const math::Vector3 *vertices) const;
 
+    template <typename Fn>
+    void iteratePolygonIndices(PolygonID poly, Fn &&fn);
+
     // Get ordered vertices of a polygon (face)
     uint32_t getPolygonVertices(
             const PolygonID &polygon,
@@ -94,6 +97,7 @@ public:
             const math::Vector3 *vertices) const;
 
     void getPolygonVertices(math::Vector3 *outVertices, const PolygonID &polygon, const math::Vector3 *vertices) const;
+
 
     // Can be used one after the other
     uint32_t getPolygonVertexCount(const PolygonID &polygon) const;

@@ -19,6 +19,23 @@ const math::Vector3 * HalfEdgeMesh::vertices() const
     return mVertices;
 }
 
+
+template <typename Fn>
+void HalfEdgeMesh::iteratePolygonIndices(PolygonID poly,
+                                         Fn &&fn)
+{
+    // Half edge of the polygon
+    uint32_t hEdge = mPolygons[poly];
+    uint32_t start = hEdge;
+
+    fn(halfEdge(hEdge).rootVertex);
+
+    while (halfEdge(hEdge).next != start) {
+        fn(halfEdge(halfEdge(hEdge).next).rootVertex);
+        hEdge = halfEdge(hEdge).next;
+    }
+}
+
 }
 
 namespace broadphase {

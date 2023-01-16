@@ -16,28 +16,6 @@ struct ObjectTransform {
     Diag3x3 sca;
 };
 
-static inline Vector3 transformPoint(const Vector3 &v, const ObjectTransform &transform)
-{
-    return transform.pos + transform.rot.rotateVec(transform.sca * v);
-}
-
-static inline Vector3 transformDirection(const Vector3 &v, const ObjectTransform &transform)
-{
-    return transform.rot.rotateVec(transform.sca * v);
-}
-
-static inline Plane transformPlane(const Plane &plane, const ObjectTransform &transform)
-{
-    Plane new_plane = {};
-
-    Vector3 point = plane.normal * plane.d;
-    Vector3 transformed_point = transformPoint(point, transform);
-
-    Vector3 transformed_normal = transformDirection(plane.normal, transform).normalize();
-
-    return { transformed_normal, transformed_normal.dot(transformed_point) };
-}
-
 enum class NarrowphaseTest : uint32_t {
     SphereSphere = 1,
     HullHull = 2,
@@ -317,8 +295,7 @@ static int findIncidentFace(const Plane &referencePlane,
 
 static Manifold createFaceContactPlane(Context &ctx,
                                        const Plane &plane,
-                                       const CollisionMesh &hull,
-                                       ObjectTransform aTransform)
+                                       const CollisionMesh &hull)
 {
     // Find incident face
     int incidentFaceIdx = findIncidentFace(plane, hull);
@@ -331,18 +308,18 @@ static Manifold createFaceContactPlane(Context &ctx,
     math::Vector4 *contacts = (math::Vector4 *)ctx.tmpAlloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
     CountT contact_count = 0;
 
-    Plane transformedPlane = transformPlane(plane, aTransform);
-
     for (CountT i = 0; i < (CountT)incidentFaceVertexCount; ++i) {
-        Vector3 transformedIncidentPoint = transformPoint(incidentVertices[i], aTransform);
-        if (float d = getDistanceFromPlane(transformedPlane, transformedIncidentPoint); d < 0.0f) {
-            // Project the point onto the reference plane (d guaranteed to be negative)
-            contacts[contact_count++] = makeVector4(transformedIncidentPoint- d * transformedPlane.normal, -d);
+        Vector3 incident_vertex = incidentVertices[i];
+        if (float d = getDistanceFromPlane(plane, incident_vertex); d < 0.0f) {
+            // Project the point onto the reference plane
+            // (d guaranteed to be negative)
+            contacts[contact_count++] =
+                makeVector4(incident_vertex - d * plane.normal, -d);
         }
     }
 
     Manifold manifold;
-    manifold.normal = transformedPlane.normal;
+    manifold.normal = plane.normal;
     manifold.aIsReference = false;
     if (contact_count <= 4) {
         manifold.numContactPoints = contact_count;
@@ -377,7 +354,7 @@ static Manifold createFaceContactPlane(Context &ctx,
         for (CountT i = 1; i < contact_count; ++i) {
             Vector3 cur_contact = contacts[i].xyz();
             math::Vector3 diff1 = cur_contact - manifold.contactPoints[0].xyz();
-            float area = transformedPlane.normal.dot(diff0.cross(diff1));
+            float area = plane.normal.dot(diff0.cross(diff1));
             if (area > largestArea) {
                 manifold.contactPoints[2] = makeVector4(cur_contact, contacts[i].w);
                 largestAreaContactPointIdx = i;
@@ -389,7 +366,7 @@ static Manifold createFaceContactPlane(Context &ctx,
         for (CountT i = 1; i < contact_count; ++i) {
             Vector3 cur_contact = contacts[i].xyz();
             math::Vector3 diff1 = cur_contact - manifold.contactPoints[0].xyz();
-            float area = transformedPlane.normal.dot(diff0.cross(diff1));
+            float area = plane.normal.dot(diff0.cross(diff1));
             if (area < largestArea) {
                 manifold.contactPoints[3] = makeVector4(cur_contact, contacts[i].w);
             }
@@ -401,8 +378,7 @@ static Manifold createFaceContactPlane(Context &ctx,
 
 static Manifold createFaceContact(Context &ctx,
                                   FaceQuery faceQueryA, const CollisionMesh &a,
-                                  FaceQuery faceQueryB, const CollisionMesh &b,
-                                  ObjectTransform aTransform)
+                                  FaceQuery faceQueryB, const CollisionMesh &b)
 {
     // Determine minimizing face
     bool a_is_ref = faceQueryA.separation > faceQueryB.separation;
@@ -438,18 +414,16 @@ static Manifold createFaceContact(Context &ctx,
     math::Vector4 *contacts = (math::Vector4 *)ctx.tmpAlloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
     CountT contact_count = 0;
 
-    Plane transformedPlane = transformPlane(referencePlane, aTransform);
-
     for (CountT i = 0; i < (CountT)incidentFaceVertexCount; ++i) {
-        Vector3 transformedIncidentPoint = transformPoint(incidentVertices[i], aTransform);
-        if (float d = getDistanceFromPlane(transformedPlane, transformedIncidentPoint); d < 0.0f) {
+        Vector3 incidentVertex = incidentVertices[i];
+        if (float d = getDistanceFromPlane(referencePlane, incidentVertex); d < 0.0f) {
             // Project the point onto the reference plane (d guaranteed to be negative)
-            contacts[contact_count++] = makeVector4(transformedIncidentPoint - d * transformedPlane.normal, -d);
+            contacts[contact_count++] = makeVector4(incidentVertex - d * referencePlane.normal, -d);
         }
     }
 
     Manifold manifold;
-    manifold.normal = transformedPlane.normal;
+    manifold.normal = referencePlane.normal;
     manifold.aIsReference = a_is_ref;
     if (contact_count <= 4) {
         manifold.numContactPoints = contact_count;
@@ -484,7 +458,7 @@ static Manifold createFaceContact(Context &ctx,
         for (CountT i = 1; i < contact_count; ++i) {
             Vector4 cur_contact = contacts[i];
             math::Vector3 diff1 = cur_contact.xyz() - point0;
-            float area = transformedPlane.normal.dot(diff0.cross(diff1));
+            float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area > largestArea) {
                 manifold.contactPoints[2] = cur_contact;
                 largestAreaContactPointIdx = i;
@@ -496,7 +470,7 @@ static Manifold createFaceContact(Context &ctx,
         for (CountT i = 1; i < contact_count; ++i) {
             Vector4 cur_contact = contacts[i];
             math::Vector3 diff1 = cur_contact.xyz() - point0;
-            float area = transformedPlane.normal.dot(diff0.cross(diff1));
+            float area = referencePlane.normal.dot(diff0.cross(diff1));
             if (area < largestArea) {
                 manifold.contactPoints[3] = cur_contact;
             }
@@ -540,30 +514,29 @@ static Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2)
 
 static Manifold createEdgeContact(const EdgeQuery &query,
                                   const CollisionMesh &a,
-                                  const CollisionMesh &b,
-                                  ObjectTransform aTransform)
+                                  const CollisionMesh &b)
 {
     Segment segA = a.halfEdgeMesh->getEdgeSegment(a.halfEdgeMesh->edge(query.edgeIdxA), a.vertices);
     Segment segB = b.halfEdgeMesh->getEdgeSegment(b.halfEdgeMesh->edge(query.edgeIdxB), b.vertices);
 
     Segment s = shortestSegmentBetween(segA, segB);
-    Vector3 contact = transformPoint(0.5f * (s.p1 + s.p2), aTransform);
-    float depth = transformDirection(s.p2 - s.p1, aTransform).length() / 2.0f;
+    Vector3 contact = 0.5f * (s.p1 + s.p2);
+    float depth = (s.p2 - s.p1).length() / 2.0f;
 
     Manifold manifold;
     manifold.contactPoints[0] = makeVector4(contact, depth);
     manifold.numContactPoints = 1;
-    manifold.normal = aTransform.rot.rotateVec(query.normal);
+    manifold.normal = query.normal;
     manifold.aIsReference = true; // Is this guaranteed?
     
-    if (manifold.normal.dot(contact - transformPoint(a.center, aTransform)) < 0.0f) {
+    if (manifold.normal.dot(contact - a.center) < 0.0f) {
         manifold.aIsReference = false;
     }
 
     return manifold;
 }
 
-Manifold doSAT(Context &ctx, const CollisionMesh &a, const CollisionMesh &b, ObjectTransform aTransform)
+Manifold doSAT(Context &ctx, const CollisionMesh &a, const CollisionMesh &b)
 {
     Manifold manifold;
     manifold.numContactPoints = 0;
@@ -591,17 +564,17 @@ Manifold doSAT(Context &ctx, const CollisionMesh &a, const CollisionMesh &b, Obj
 
     if (bIsFaceContactA || bIsFaceContactB) {
         // Create face contact
-        manifold = createFaceContact(ctx, faceQueryA, a, faceQueryB, b, aTransform);
+        manifold = createFaceContact(ctx, faceQueryA, a, faceQueryB, b);
     }
     else {
         // Create edge contact
-        manifold = createEdgeContact(edgeQuery, a, b, aTransform);
+        manifold = createEdgeContact(edgeQuery, a, b);
     }
 
     return manifold;
 }
 
-Manifold doSATPlane(Context &ctx, const Plane &plane, const CollisionMesh &a, ObjectTransform aTransform)
+Manifold doSATPlane(Context &ctx, const Plane &plane, const CollisionMesh &a)
 {
     Manifold manifold;
     manifold.numContactPoints = 0;
@@ -612,13 +585,7 @@ Manifold doSATPlane(Context &ctx, const Plane &plane, const CollisionMesh &a, Ob
         return manifold;
     }
 
-    printf("Hull-Plane: (%f %f %f) %f\n",
-           plane.normal.x,
-           plane.normal.y,
-           plane.normal.z,
-           faceQuery.separation);
-
-    return createFaceContactPlane(ctx, plane, a, aTransform);
+    return createFaceContactPlane(ctx, plane, a);
 }
 
 // Builds a transform matrix that transforms from src local space to
@@ -716,6 +683,49 @@ static inline void addContactsToSolver(SolverData &solver_data,
     
     for (CountT i = 0; i < added_contacts.size(); i++) {
         solver_data.contacts[contact_idx + i] = added_contacts[i];
+    }
+}
+
+static inline void addManifoldToSolver(SolverData &solver_data,
+                                       Manifold manifold,
+                                       Vector3 a_translation,
+                                       Quat a_rotation,
+                                       Diag3x3 a_scale,
+                                       Entity a_entity,
+                                       Entity b_entity)
+{
+    Mat3x4 a_o2w = Mat3x4::fromTRS(a_translation, a_rotation, a_scale);
+    
+    Vector3 normal_world = a_o2w.txfmDir(manifold.normal);
+    float inv_normal_world_len = normal_world.invLength();
+    
+    for (CountT i = 0; i < manifold.numContactPoints; i++) {
+        Vector3 contact_world =
+            a_o2w.txfmPoint(manifold.contactPoints[i].xyz());
+
+        // This computation assumes that manifold.normal was normalized
+        // before being transformed. If not, we'd have to take the ratio
+        // between the pre and post transform normal lengths
+        float depth_world = manifold.contactPoints[i].w * inv_normal_world_len;
+    
+        manifold.contactPoints[i] =
+            Vector4::fromVector3(contact_world, depth_world);
+    }
+    
+    if (manifold.numContactPoints > 0) {
+        addContactsToSolver(solver_data, {{
+            manifold.aIsReference ? a_entity : b_entity,
+            manifold.aIsReference ? b_entity : a_entity,
+            {
+                manifold.contactPoints[0],
+                manifold.contactPoints[1],
+                manifold.contactPoints[2],
+                manifold.contactPoints[3],
+            },
+            manifold.numContactPoints,
+            normal_world * inv_normal_world_len,
+            {},
+        }});
     }
 }
 
@@ -817,23 +827,12 @@ inline void runNarrowphase(
             {a_pos, a_rot, a_scale},
             {b_pos, b_rot, b_scale});
 
-        Manifold manifold = doSAT(ctx, a_collision_mesh, b_collision_mesh,
-                                  {a_pos, a_rot, a_scale});
+        Manifold manifold = doSAT(ctx, a_collision_mesh, b_collision_mesh);
 
         if (manifold.numContactPoints > 0) {
-            addContactsToSolver(solver, {{
-                manifold.aIsReference ? a_entity : b_entity,
-                manifold.aIsReference ? b_entity : a_entity,
-                {
-                    manifold.contactPoints[0],
-                    manifold.contactPoints[1],
-                    manifold.contactPoints[2],
-                    manifold.contactPoints[3],
-                },
-                manifold.numContactPoints,
-                manifold.normal,
-                {},
-            }});
+            addManifoldToSolver(solver, manifold,
+                                a_pos, a_rot, a_scale,
+                                a_entity, b_entity);
         }
     } break;
     case NarrowphaseTest::SphereHull: {
@@ -895,22 +894,12 @@ inline void runNarrowphase(
 
         geometry::Plane plane { txfmed_normal, dot(txfmed_normal, txfmed_point) };
 
-        Manifold manifold = doSATPlane(ctx, plane, a_collision_mesh, {a_pos, a_rot, a_scale});
+        Manifold manifold = doSATPlane(ctx, plane, a_collision_mesh);
 
         if (manifold.numContactPoints > 0) {
-            addContactsToSolver(solver, {{
-                b_entity, // Plane is always reference
-                a_entity,
-                {
-                    manifold.contactPoints[0],
-                    manifold.contactPoints[1],
-                    manifold.contactPoints[2],
-                    manifold.contactPoints[3],
-                },
-                manifold.numContactPoints,
-                manifold.normal,
-                {},
-            }});
+            addManifoldToSolver(solver, manifold,
+                                a_pos, a_rot, a_scale,
+                                a_entity, b_entity);
         }
     } break;
     default: __builtin_unreachable();
