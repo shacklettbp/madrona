@@ -120,6 +120,16 @@ CountT ThreadPoolExecutor::loadObjects(Span<const imp::SourceObject> objs)
     return renderer_->loadObjects(objs);
 }
 
+uint8_t * ThreadPoolExecutor::rgbObservations() const
+{
+    return renderer_->rgbPtr();
+}
+
+float * ThreadPoolExecutor::depthObservations() const
+{
+    return renderer_->depthPtr();
+}
+
 void * ThreadPoolExecutor::getExported(CountT slot) const
 {
     return export_ptrs_[slot];

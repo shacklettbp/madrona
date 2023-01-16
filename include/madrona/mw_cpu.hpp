@@ -37,6 +37,9 @@ public:
 
     CountT loadObjects(Span<const imp::SourceObject> objs);
 
+    uint8_t * rgbObservations() const;
+    float * depthObservations() const;
+
     void * getExported(CountT slot) const;
 
 protected:
@@ -74,6 +77,8 @@ public:
 
     using ThreadPoolExecutor::loadObjects;
     using ThreadPoolExecutor::getExported;
+    using ThreadPoolExecutor::rgbObservations;
+    using ThreadPoolExecutor::depthObservations;
 
 private:
     struct WorldContext {
