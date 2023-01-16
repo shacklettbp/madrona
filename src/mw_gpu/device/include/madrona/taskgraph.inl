@@ -60,7 +60,8 @@ TaskGraph::NodeID TaskGraph::Builder::addNodeFn(
         TypedDataID<NodeT> data,
         Span<const NodeID> dependencies,
         Optional<NodeID> parent_node,
-        int32_t fixed_num_invocations)
+        uint32_t fixed_num_invocations,
+        uint32_t num_threads_per_invocation)
 {
     using namespace mwGPU;
 
@@ -68,6 +69,7 @@ TaskGraph::NodeID TaskGraph::Builder::addNodeFn(
 
     return registerNode(uint32_t(data.id),
                         fixed_num_invocations,
+                        num_threads_per_invocation,
                         func_id,
                         dependencies,
                         parent_node);
@@ -94,6 +96,7 @@ void TaskGraph::Builder::dynamicCountWrapper(NodeT *node, int32_t)
 template <typename NodeT, typename... Args>
 TaskGraph::NodeID TaskGraph::Builder::addDynamicCountNode(
     Span<const NodeID> dependencies,
+    uint32_t num_threads_per_invocation,
     Args && ...args)
 {
     auto data_id = constructNodeData<NodeT>(
@@ -102,7 +105,8 @@ TaskGraph::NodeID TaskGraph::Builder::addDynamicCountNode(
     NodeID count_node = addNodeFn<&Builder::dynamicCountWrapper<NodeT>>(
         data_id, dependencies, Optional<NodeID>::none(), 1);
 
-    return addNodeFn<&NodeT::run>(data_id, {count_node});
+    return addNodeFn<&NodeT::run>(data_id, {count_node},
+        Optional<NodeID>::none(), 0, num_threads_per_invocation);
 }
 
 template <typename NodeT>
@@ -144,8 +148,10 @@ NodeT & TaskGraph::getNodeData(TypedDataID<NodeT> data_id)
     return *(NodeT *)node_datas_[data_id.id].userData;
 }
 
-template <typename ContextT, auto Fn, typename ...ComponentTs>
-ParallelForNode<ContextT, Fn, ComponentTs...>::ParallelForNode()
+template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+          typename ...ComponentTs>
+CustomParallelForNode<ContextT, Fn, threads_per_invocation, ComponentTs...>::
+CustomParallelForNode()
     : NodeBase {},
       query_ref_([]() {
           auto query = mwGPU::getStateManager()->query<ComponentTs...>();
@@ -156,8 +162,10 @@ ParallelForNode<ContextT, Fn, ComponentTs...>::ParallelForNode()
       }())
 {}
 
-template <typename ContextT, auto Fn, typename ...ComponentTs>
-void ParallelForNode<ContextT, Fn, ComponentTs...>::run(int32_t invocation_idx)
+template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+          typename ...ComponentTs>
+void CustomParallelForNode<ContextT, Fn, threads_per_invocation,
+                           ComponentTs...>::run(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
 
@@ -198,20 +206,25 @@ void ParallelForNode<ContextT, Fn, ComponentTs...>::run(int32_t invocation_idx)
     });
 }
 
-template <typename ContextT, auto Fn, typename ...ComponentTs>
-uint32_t ParallelForNode<ContextT, Fn, ComponentTs...>::numInvocations()
+template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+          typename ...ComponentTs>
+uint32_t CustomParallelForNode<ContextT, Fn, threads_per_invocation,
+                               ComponentTs...>::numInvocations()
 {
     StateManager *state_mgr = mwGPU::getStateManager();
     return state_mgr->numMatchingEntities(query_ref_);
 }
 
-template <typename ContextT, auto Fn, typename ...ComponentTs>
-TaskGraph::NodeID ParallelForNode<ContextT, Fn, ComponentTs...>::addToGraph(
+template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+          typename ...ComponentTs>
+TaskGraph::NodeID CustomParallelForNode<ContextT, Fn, threads_per_invocation,
+                                        ComponentTs...>::addToGraph(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies)
 {
-    return builder.addDynamicCountNode<
-        ParallelForNode<ContextT, Fn, ComponentTs...>>(dependencies);
+    return builder.addDynamicCountNode<CustomParallelForNode<
+        ContextT, Fn, threads_per_invocation, ComponentTs...>>(
+            dependencies, threads_per_invocation);
 }
 
 template <typename ArchetypeT>

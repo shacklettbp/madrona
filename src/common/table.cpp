@@ -16,8 +16,9 @@ namespace ICfg {
 inline constexpr uint32_t maxRowsPerTable = 1u << 28u;
 }
 
-Table::Table(const TypeInfo *component_types, uint32_t num_components)
-    : num_rows_(0),
+Table::Table(const TypeInfo *component_types, CountT num_components,
+             CountT init_num_rows)
+    : num_rows_(init_num_rows),
       columns_()
 {
     for (int i = 0; i < (int)num_components; i++) {
@@ -28,6 +29,12 @@ Table::Table(const TypeInfo *component_types, uint32_t num_components)
         // maybe add a random offset for each Table as well?
         columns_.emplace_back(type.numBytes, type.alignment,
             MADRONA_CACHE_LINE * (i + 1), ICfg::maxRowsPerTable);
+    }
+
+    if (num_rows_ > 0) {
+        for (VirtualStore &col : columns_) {
+            col.expand(num_rows_);
+        }
     }
 }
 
@@ -49,9 +56,7 @@ bool Table::removeRow(uint32_t row)
 
     bool need_move = from_idx != to_idx;
     if (need_move) {
-        for (VirtualStore &col : columns_) {
-            memcpy(col[to_idx], col[from_idx], col.numBytesPerItem());
-        }
+        copyRow(to_idx, from_idx);
     }
 
     for (VirtualStore &col : columns_) {
@@ -59,6 +64,13 @@ bool Table::removeRow(uint32_t row)
     }
 
     return need_move;
+}
+
+void Table::copyRow(uint32_t dst, uint32_t src)
+{
+    for (VirtualStore &col : columns_) {
+        memcpy(col[dst], col[src], col.numBytesPerItem());
+    }
 }
 
 void Table::clear()

@@ -14,6 +14,29 @@ static CountT getNumCores()
     return os_num_threads;
 }
 
+static inline void pinThread(CountT worker_id)
+{
+    cpu_set_t cpuset;
+    pthread_getaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+
+    const int max_threads = CPU_COUNT(&cpuset);
+
+    CPU_ZERO(&cpuset);
+
+    if (worker_id > max_threads) [[unlikely]] {
+        FATAL("Tried setting thread affinity to %d when %d is max",
+              worker_id, max_threads);
+    }
+
+    CPU_SET(worker_id, &cpuset);
+
+    int res = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+
+    if (res != 0) {
+        FATAL("Failed to set thread affinity to %d", worker_id);
+    }
+}
+
 static Optional<render::BatchRenderer> makeRenderer(
     const ThreadPoolExecutor::Config &cfg)
 {
@@ -22,7 +45,7 @@ static Optional<render::BatchRenderer> makeRenderer(
     }
 
     return Optional<render::BatchRenderer>::make(render::BatchRenderer::Config {
-        .gpuID = 0,
+        .gpuID = cfg.renderGPUID,
         .renderWidth = cfg.renderWidth,
         .renderHeight = cfg.renderHeight,
         .numWorlds = cfg.numWorlds,
@@ -33,7 +56,7 @@ static Optional<render::BatchRenderer> makeRenderer(
             cfg.cameraMode == ThreadPoolExecutor::CameraMode::Perspective ?
                 render::BatchRenderer::CameraMode::Perspective :
                 render::BatchRenderer::CameraMode::Lidar,
-         .inputMode = render::BatchRenderer::InputMode::CPU,
+        .inputMode = render::BatchRenderer::InputMode::CPU,
     });
 }
 
@@ -47,6 +70,7 @@ ThreadPoolExecutor::ThreadPoolExecutor(const Config &cfg)
       num_finished_(0),
       state_mgr_(cfg.numWorlds),
       state_caches_(cfg.numWorlds),
+      export_ptrs_(cfg.numExportedBuffers),
       renderer_(makeRenderer(cfg))
 {
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
@@ -96,6 +120,21 @@ CountT ThreadPoolExecutor::loadObjects(Span<const imp::SourceObject> objs)
     return renderer_->loadObjects(objs);
 }
 
+uint8_t * ThreadPoolExecutor::rgbObservations() const
+{
+    return renderer_->rgbPtr();
+}
+
+float * ThreadPoolExecutor::depthObservations() const
+{
+    return renderer_->depthPtr();
+}
+
+void * ThreadPoolExecutor::getExported(CountT slot) const
+{
+    return export_ptrs_[slot];
+}
+
 void ThreadPoolExecutor::ctxInit(void (*init_fn)(void *, const WorkerInit &),
                                  void *init_data, CountT world_idx)
 {
@@ -106,12 +145,12 @@ void ThreadPoolExecutor::ctxInit(void (*init_fn)(void *, const WorkerInit &),
     };
 
     init_fn(init_data, worker_init);
-}
 
+}
 
 ECSRegistry ThreadPoolExecutor::getECSRegistry()
 {
-    return ECSRegistry(&state_mgr_, nullptr); // FIXME
+    return ECSRegistry(&state_mgr_, export_ptrs_.data());
 }
 
 Optional<render::RendererInterface> ThreadPoolExecutor::getRendererInterface()
@@ -119,29 +158,6 @@ Optional<render::RendererInterface> ThreadPoolExecutor::getRendererInterface()
     return renderer_.has_value() ?
         renderer_->getInterface() :
         Optional<render::RendererInterface>::none();
-}
-
-static inline void pinThread(CountT worker_id)
-{
-    cpu_set_t cpuset;
-    pthread_getaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
-
-    const int max_threads = CPU_COUNT(&cpuset);
-
-    CPU_ZERO(&cpuset);
-
-    if (worker_id > max_threads) [[unlikely]] {
-        FATAL("Tried setting thread affinity to %d when %d is max",
-              worker_id, max_threads);
-    }
-
-    CPU_SET(worker_id, &cpuset);
-
-    int res = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
-
-    if (res != 0) {
-        FATAL("Failed to set thread affinity to %d", worker_id);
-    }
 }
 
 void ThreadPoolExecutor::workerThread(CountT worker_id)

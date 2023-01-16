@@ -36,6 +36,7 @@ private:
         uint32_t fixedCount;
         uint32_t funcID;
         uint32_t numChildren;
+        uint32_t numThreadsPerInvocation;
 
         std::atomic_uint32_t curOffset;
         std::atomic_uint32_t numRemaining;
@@ -69,7 +70,8 @@ public:
                          Span<const NodeID> dependencies,
                          Optional<NodeID> parent_node =
                              Optional<NodeID>::none(),
-                         int32_t fixed_num_invocations = 0);
+                         uint32_t fixed_num_invocations = 0,
+                         uint32_t num_threads_per_invocation = 1);
 
         template <typename NodeT, int32_t count = 1, typename... Args>
         NodeID addOneOffNode(Span<const NodeID> dependencies,
@@ -77,6 +79,7 @@ public:
 
         template <typename NodeT, typename... Args>
         NodeID addDynamicCountNode(Span<const NodeID> dependencies,
+                                   uint32_t num_threads_per_invocation,
                                    Args && ...args);
 
         template <typename NodeT>
@@ -93,6 +96,7 @@ public:
 
         NodeID registerNode(uint32_t data_idx,
                             uint32_t fixed_count,
+                            uint32_t num_threads_per_invocation,
                             uint32_t func_id,
                             Span<const NodeID> dependencies,
                             Optional<NodeID> parent_node);
@@ -158,10 +162,11 @@ private:
 friend class Builder;
 };
 
-template <typename ContextT, auto Fn, typename ...ComponentTs>
-class ParallelForNode : public NodeBase {
+template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+          typename ...ComponentTs>
+class CustomParallelForNode: public NodeBase {
 public:
-    ParallelForNode();
+    CustomParallelForNode();
 
     inline void run(int32_t invocation_idx);
     inline uint32_t numInvocations();
@@ -173,6 +178,9 @@ public:
 private:
     QueryRef *query_ref_;
 };
+
+template <typename ContextT, auto Fn, typename ...ComponentTs>
+using ParallelForNode = CustomParallelForNode<ContextT, Fn, 1, ComponentTs...>;
 
 struct ClearTmpNodeBase : NodeBase {
     ClearTmpNodeBase(uint32_t archetype_id);

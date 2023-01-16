@@ -108,13 +108,16 @@ friend class StateManager;
 
 class ECSRegistry {
 public:
-    ECSRegistry(StateManager *state_mgr, void **export_ptr);
+    ECSRegistry(StateManager *state_mgr, void **export_ptrs);
 
     template <typename ComponentT>
     void registerComponent();
 
     template <typename ArchetypeT>
     void registerArchetype();
+
+    template <typename ArchetypeT>
+    void registerFixedSizeArchetype(CountT max_num_entities);
 
     template <typename SingletonT>
     void registerSingleton();
@@ -127,7 +130,7 @@ public:
 
 private:
     StateManager *state_mgr_;
-    void **export_ptr_;
+    void **export_ptrs_;
 };
 
 class StateManager {
@@ -142,10 +145,16 @@ public:
     ComponentID registerComponent();
 
     template <typename ArchetypeT>
-    ArchetypeID registerArchetype();
+    ArchetypeID registerArchetype(CountT max_num_entities = 0);
 
     template <typename SingletonT>
     void registerSingleton();
+
+    template <typename ArchetypeT, typename ComponentT>
+    ComponentT * exportColumn();
+
+    template <typename SingletonT>
+    SingletonT * exportSingleton();
 
     template <typename SingletonT>
     SingletonT & getSingleton(MADRONA_MW_COND(uint32_t world_id));
@@ -228,17 +237,51 @@ private:
     using ColumnMap = StaticIntegerMap<128>;
     static constexpr uint32_t max_archetype_components_ = ColumnMap::numFree();
 
+    // FIXME: a lot of the conditional logic in this class could be
+    // removed by leveraging the fact that the data structure of 
+    // Table is always just an array of pointers
+    struct TableStorage {
+#ifdef MADRONA_MW_MODE
+        struct Fixed {
+            Table tbl;
+            HeapArray<int32_t> activeRows;
+        };
+
+        union {
+            HeapArray<Table> tbls;
+            Fixed fixed;
+        };
+        CountT maxNumPerWorld;
+
+        inline TableStorage(Span<TypeInfo> types,
+                            CountT num_worlds,
+                            CountT max_num_per_world);
+        ~TableStorage();
+#else
+        inline TableStorage(Span<TypeInfo> types);
+
+        Table tbl;
+#endif
+
+        template <typename ColumnT>
+        inline ColumnT * column(MADRONA_MW_COND(uint32_t world_id,)
+                                CountT col_idx);
+
+        inline CountT numRows(MADRONA_MW_COND(uint32_t world_id));
+
+        inline void clear(MADRONA_MW_COND(uint32_t world_id));
+
+        inline CountT addRow(MADRONA_MW_COND(uint32_t world_id));
+        inline bool removeRow(MADRONA_MW_COND(uint32_t world_id,) CountT row);
+    };
+
     struct ArchetypeStore {
         struct Init;
         inline ArchetypeStore(Init &&init);
 
         uint32_t componentOffset;
         uint32_t numComponents;
-#ifdef MADRONA_MW_MODE
-        HeapArray<Table> tbls;
-#else
-        Table tbl;
-#endif
+        TableStorage tblStorage;
         ColumnMap columnLookup;
     };
 
@@ -259,7 +302,10 @@ private:
 
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
-    void registerArchetype(uint32_t id, Span<ComponentID> components);
+    void registerArchetype(uint32_t id, Span<ComponentID> components,
+                           CountT max_num_entities);
+
+    void * exportColumn(uint32_t archetype_id, uint32_t component_id);
 
     void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
                uint32_t archetype_id, bool is_temporary);

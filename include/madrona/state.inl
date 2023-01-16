@@ -26,6 +26,13 @@ void ECSRegistry::registerArchetype()
     state_mgr_->registerArchetype<ArchetypeT>();
 }
 
+template <typename ArchetypeT>
+void ECSRegistry::registerFixedSizeArchetype(CountT max_num_entities)
+{
+    assert(max_num_entities > 0);
+    state_mgr_->registerArchetype<ArchetypeT>(max_num_entities);
+}
+
 template <typename SingletonT>
 void ECSRegistry::registerSingleton()
 {
@@ -35,21 +42,13 @@ void ECSRegistry::registerSingleton()
 template <typename ArchetypeT, typename ComponentT>
 void ECSRegistry::exportColumn(int32_t slot)
 {
-    (void)slot;
-    (void)export_ptr_;
-#if 0
-    export_ptr_[slot] =
-        state_mgr_->getArchetypeComponent<ArchetypeT, ComponentT>();
-#endif
+    export_ptrs_[slot] = state_mgr_->exportColumn<ArchetypeT, ComponentT>();
 }
 
 template <typename SingletonT>
 void ECSRegistry::exportSingleton(int32_t slot)
 {
-    (void)slot;
-#if 0
-    export_ptr_[slot] = state_mgr_->getSingletonColumn<SingletonT>();
-#endif
+    export_ptrs_[slot] = state_mgr_->exportSingleton<SingletonT>();
 }
 
 template <typename T>
@@ -114,7 +113,7 @@ ComponentID StateManager::registerComponent()
 }
 
 template <typename ArchetypeT>
-ArchetypeID StateManager::registerArchetype()
+ArchetypeID StateManager::registerArchetype(CountT max_num_entities)
 {
 #ifdef MADRONA_MW_MODE
     std::lock_guard lock(register_lock_);
@@ -160,7 +159,8 @@ ArchetypeID StateManager::registerArchetype()
     uint32_t id = TypeTracker::typeID<ArchetypeT>();
 
     registerArchetype(id,
-        Span(archetype_components.data(), archetype_components.size()));
+        Span(archetype_components.data(), archetype_components.size()),
+        max_num_entities);
 
     return ArchetypeID {
         id,
@@ -174,32 +174,44 @@ void StateManager::registerSingleton()
     using ArchetypeT = SingletonArchetype<SingletonT>;
 
     registerComponent<SingletonT>();
-    registerArchetype<ArchetypeT>();
 
 #ifdef MADRONA_MW_MODE
+    registerArchetype<ArchetypeT>(1);
     for (CountT i = 0; i < (CountT)num_worlds_; i++) {
         makeEntityNow<ArchetypeT>(uint32_t(i), init_state_cache_);
     }
 #else
+    registerArchetype<ArchetypeT>(1);
     makeEntityNow<ArchetypeT>(init_state_cache_);
 #endif
 }
 
+template <typename ArchetypeT, typename ComponentT>
+ComponentT * StateManager::exportColumn()
+{
+    return (ComponentT *)exportColumn(
+        archetypeID<ArchetypeT>().id,
+        componentID<ComponentT>().id);
+}
+
+template <typename SingletonT>
+SingletonT * StateManager::exportSingleton()
+{
+    using ArchetypeT = SingletonArchetype<SingletonT>;
+
+    return exportColumn<ArchetypeT, SingletonT>();
+}
 
 template <typename SingletonT>
 SingletonT & StateManager::getSingleton(MADRONA_MW_COND(uint32_t world_id))
 {
     using ArchetypeT = SingletonArchetype<SingletonT>;
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    auto &archetype = *archetype_stores_[archetype_id];
 
-    Table &tbl = 
-#ifdef MADRONA_MW_MODE
-        archetype_stores_[archetype_id]->tbls[world_id];
-#else
-        archetype_stores_[archetype_id]->tbl;
-#endif
-
-    return *(SingletonT *)tbl.data(user_component_offset_);
+    return *archetype.tblStorage.column<SingletonT>(
+        MADRONA_MW_COND(world_id,)
+        user_component_offset_);
 }
 
 template <typename ComponentT>
@@ -231,21 +243,16 @@ inline ResultRef<ComponentT> StateManager::get(
     MADRONA_MW_COND(uint32_t world_id,) Loc loc)
 {
     ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
-    Table &tbl =
-#ifdef MADRONA_MW_MODE
-        archetype.tbls[world_id];
-#else
-        archetype.tbl;
-#endif
-
     auto col_idx = archetype.columnLookup.lookup(componentID<ComponentT>().id);
 
     if (!col_idx.has_value()) {
         return ResultRef<ComponentT>(nullptr);
     }
 
-    return ResultRef<ComponentT>(
-        (ComponentT *)tbl.data(*col_idx) + loc.row);
+    auto col = archetype.tblStorage.column<ComponentT>(
+        MADRONA_MW_COND(world_id,) *col_idx);
+
+    return ResultRef<ComponentT>(col + loc.row);
 }
 
 template <typename ComponentT>
@@ -273,23 +280,24 @@ ComponentT & StateManager::getUnsafe(
     MADRONA_MW_COND(uint32_t world_id,) Loc loc)
 {
     ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
-    Table &tbl =
-#ifdef MADRONA_MW_MODE
-        archetype.tbls[world_id];
-#else
-        archetype.tbl;
-#endif
-
     auto col_idx =
         *archetype.columnLookup.lookup(componentID<ComponentT>().id);
 
-    return ((ComponentT *)tbl.data(col_idx))[loc.row];
+    auto col = archetype.tblStorage.column<ComponentT>(
+        MADRONA_MW_COND(world_id,) col_idx);
+
+    return col[loc.row];
 }
 
 template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT> StateManager::archetype(
     MADRONA_MW_COND(uint32_t world_id))
 {
+#ifdef MADRONA_MW_MODE
+    (void)world_id;
+#endif
+    assert(false);
+#if 0
     auto archetype_id = archetypeID<ArchetypeT>();
 
     ArchetypeStore &archetype = *archetype_stores_[archetype_id.id];
@@ -302,6 +310,7 @@ ArchetypeRef<ArchetypeT> StateManager::archetype(
 #endif
 
     return ArchetypeRef<ArchetypeT>(&tbl);
+#endif
 }
 
 template <typename... ComponentTs>
@@ -349,17 +358,13 @@ void StateManager::iterateArchetypesImpl(MADRONA_MW_COND(uint32_t world_id,)
 
         ArchetypeStore &archetype = *archetype_stores_[archetype_idx];
 
-        Table &tbl = 
-#ifdef MADRONA_MW_MODE
-            archetype.tbls[world_id];
-#else
-            archetype.tbl;
-#endif
+        CountT num_rows =
+            archetype.tblStorage.numRows(MADRONA_MW_COND(world_id));
 
-        int num_rows = tbl.numRows();
-
-        fn(num_rows, (ComponentTs *)tbl.data(
-            cur_query_ptr[Indices]) ...);
+        // FIXME: column API sucks here, hopefully the compiler can
+        // do common subexpression elimination on the world_id index...
+        fn(num_rows, archetype.tblStorage.column<ComponentTs>(
+            MADRONA_MW_COND(world_id,) cur_query_ptr[Indices]) ...);
 
         cur_query_ptr += sizeof...(ComponentTs);
     }
@@ -385,13 +390,6 @@ Entity StateManager::makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
 
     ArchetypeStore &archetype = *archetype_stores_[archetype_id.id];
 
-    Table &tbl =
-#ifdef MADRONA_MW_MODE
-        archetype.tbls[world_id];
-#else
-        archetype.tbl;
-#endif
-
     constexpr uint32_t num_args = sizeof...(Args);
 
     assert((num_args == 0 || num_args == archetype.numComponents) &&
@@ -399,14 +397,14 @@ Entity StateManager::makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
 
     Entity e = entity_store_.newEntity(cache.entity_cache_);
 
-    uint32_t new_row = tbl.addRow();
+    CountT new_row = archetype.tblStorage.addRow(MADRONA_MW_COND(world_id));
 
-    ((Entity *)tbl.data(0))[new_row] = e;
+    archetype.tblStorage.column<Entity>(
+        MADRONA_MW_COND(world_id,) 0)[new_row] = e;
 
     int component_idx = 0;
 
-    auto constructNextComponent = [this, &component_idx, &archetype,
-                                   &tbl, new_row](auto &&arg) {
+    auto constructNextComponent = [&](auto &&arg) {
         using ArgT = decltype(arg);
         using ComponentT = std::remove_reference_t<ArgT>;
 
@@ -414,7 +412,8 @@ Entity StateManager::makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
                archetype_components_[archetype.componentOffset +
                    component_idx].id);
 
-        new ((ComponentT *)tbl.data(
+        new (archetype.tblStorage.column<ComponentT>(
+                MADRONA_MW_COND(world_id,)
                 component_idx + user_component_offset_) + new_row)
             ComponentT(std::forward<ArgT>(arg));
 
@@ -437,14 +436,8 @@ Loc StateManager::makeTemporary(MADRONA_MW_COND(uint32_t world_id))
     ArchetypeID archetype_id = archetypeID<ArchetypeT>();
     ArchetypeStore &archetype = *archetype_stores_[archetype_id.id];
 
-    Table &tbl =
-#ifdef MADRONA_MW_MODE
-        archetype.tbls[world_id];
-#else
-        archetype.tbl;
-#endif
-
-    uint32_t new_row = tbl.addRow();
+    CountT new_row = archetype.tblStorage.addRow(
+        MADRONA_MW_COND(world_id));
 
     return Loc {
         archetype_id.id,
@@ -466,5 +459,85 @@ uint32_t StateManager::numWorlds() const
     return num_worlds_;
 }
 #endif
+
+template <typename ColumnT>
+inline ColumnT * StateManager::TableStorage::column(
+    MADRONA_MW_COND(uint32_t world_id,)
+    CountT col_idx)
+{
+#ifdef MADRONA_MW_MODE
+    if (maxNumPerWorld == 0) {
+        return (ColumnT *)tbls[world_id].data(col_idx);
+    } else {
+        return ((ColumnT *)fixed.tbl.data(col_idx)) +
+            CountT(world_id) * maxNumPerWorld;
+    }
+#else
+    return (ColumnT *)tbl.data(col_idx);
+#endif
+}
+
+inline CountT StateManager::TableStorage::numRows(
+    MADRONA_MW_COND(uint32_t world_id))
+{
+#ifdef MADRONA_MW_MODE
+    if (maxNumPerWorld == 0) {
+        return tbls[world_id].numRows();
+    } else {
+        return fixed.activeRows[world_id];
+    }
+#else
+    return tbl.numRows();
+#endif
+}
+
+void StateManager::TableStorage::clear(
+    MADRONA_MW_COND(uint32_t world_id))
+{
+#ifdef MADRONA_MW_MODE
+    if (maxNumPerWorld == 0) {
+        tbls[world_id].clear();
+    } else {
+        fixed.activeRows[world_id] = 0;
+    }
+#else
+    tbl.clear();
+#endif
+}
+
+CountT StateManager::TableStorage::addRow(
+    MADRONA_MW_COND(uint32_t world_id))
+{
+#ifdef MADRONA_MW_MODE
+    if (maxNumPerWorld == 0) {
+        return tbls[world_id].addRow();
+    } else {
+        return fixed.activeRows[world_id]++;
+    }
+#else
+    return tbl.addRow();
+#endif
+}
+
+bool StateManager::TableStorage::removeRow(MADRONA_MW_COND(uint32_t world_id,)
+                                           CountT row)
+{
+#ifdef MADRONA_MW_MODE
+    if (maxNumPerWorld == 0) {
+        return tbls[world_id].removeRow(row);
+    } else {
+        CountT removed_row = --fixed.activeRows[world_id];
+        if (removed_row == row) {
+            return false;
+        }
+
+        fixed.tbl.copyRow(row, removed_row);
+
+        return true;
+    }
+#else
+    return tbl.removeRow(row);
+#endif
+}
 
 }
