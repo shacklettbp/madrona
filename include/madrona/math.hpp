@@ -447,75 +447,6 @@ struct Vector3 {
     }
 };
 
-struct Diag3x3 {
-    float d0;
-    float d1;
-    float d2;
-
-    inline Diag3x3 inv() const
-    {
-        return Diag3x3 {
-            1.f / d0,
-            1.f / d1,
-            1.f / d2,
-        };
-    }
-
-    static inline Diag3x3 fromVec(Vector3 v)
-    {
-        return Diag3x3 {
-            v.x,
-            v.y,
-            v.z,
-        };
-    }
-
-    inline Diag3x3 & operator*=(Diag3x3 o)
-    {
-        d0 *= o.d0;
-        d1 *= o.d1;
-        d2 *= o.d2;
-
-        return *this;
-    }
-
-    inline Diag3x3 & operator*=(float o)
-    {
-        d0 *= o;
-        d1 *= o;
-        d2 *= o;
-
-        return *this;
-    }
-
-    friend inline Diag3x3 operator*(Diag3x3 a, Diag3x3 b)
-    {
-        a *= b;
-        return a;
-    }
-
-    friend inline Diag3x3 operator*(Diag3x3 a, float b)
-    {
-        a *= b;
-        return a;
-    }
-
-    friend inline Diag3x3 operator*(float a, Diag3x3 b)
-    {
-        b *= a;
-        return b;
-    }
-
-    friend inline Vector3 operator*(Diag3x3 d, Vector3 v)
-    {
-        return Vector3 {
-            d.d0 * v.x,
-            d.d1 * v.y,
-            d.d2 * v.z,
-        };
-    }
-};
-
 struct Vector4 {
     float x;
     float y;
@@ -797,6 +728,75 @@ THE SOFTWARE.
     }
 };
 
+struct Diag3x3 {
+    float d0;
+    float d1;
+    float d2;
+
+    inline Diag3x3 inv() const
+    {
+        return Diag3x3 {
+            1.f / d0,
+            1.f / d1,
+            1.f / d2,
+        };
+    }
+
+    static inline Diag3x3 fromVec(Vector3 v)
+    {
+        return Diag3x3 {
+            v.x,
+            v.y,
+            v.z,
+        };
+    }
+
+    inline Diag3x3 & operator*=(Diag3x3 o)
+    {
+        d0 *= o.d0;
+        d1 *= o.d1;
+        d2 *= o.d2;
+
+        return *this;
+    }
+
+    inline Diag3x3 & operator*=(float o)
+    {
+        d0 *= o;
+        d1 *= o;
+        d2 *= o;
+
+        return *this;
+    }
+
+    friend inline Diag3x3 operator*(Diag3x3 a, Diag3x3 b)
+    {
+        a *= b;
+        return a;
+    }
+
+    friend inline Diag3x3 operator*(Diag3x3 a, float b)
+    {
+        a *= b;
+        return a;
+    }
+
+    friend inline Diag3x3 operator*(float a, Diag3x3 b)
+    {
+        b *= a;
+        return b;
+    }
+
+    friend inline Vector3 operator*(Diag3x3 d, Vector3 v)
+    {
+        return Vector3 {
+            d.d0 * v.x,
+            d.d1 * v.y,
+            d.d2 * v.z,
+        };
+    }
+};
+
 struct Mat3x3 {
     Vector3 cols[3];
 
@@ -891,6 +891,24 @@ struct Mat3x3 {
     inline Mat3x3 & operator*=(const Mat3x3 &o)
     {
         return *this = (*this * o);
+    }
+
+    friend inline Mat3x3 operator*(const Mat3x3 &m, Diag3x3 d)
+    {
+        return Mat3x3 {{
+            m.cols[0] * d.d0,
+            m.cols[1] * d.d1,
+            m.cols[2] * d.d2,
+        }};
+    }
+
+    friend inline Mat3x3 operator*(Diag3x3 d, const Mat3x3 &m)
+    {
+        return Mat3x3 {{
+            { d * m.cols[0] },
+            { d * m.cols[1] },
+            { d * m.cols[2] },
+        }};
     }
 };
 

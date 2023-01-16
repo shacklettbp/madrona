@@ -21,6 +21,11 @@ static inline Vector3 transformPoint(const Vector3 &v, const ObjectTransform &tr
     return transform.pos + transform.rot.rotateVec(transform.sca * v);
 }
 
+static inline Vector3 transformDirection(const Vector3 &v, const ObjectTransform &transform)
+{
+    return transform.rot.rotateVec(transform.sca * v);
+}
+
 static inline Plane transformPlane(const Plane &plane, const ObjectTransform &transform)
 {
     Plane new_plane = {};
@@ -28,14 +33,9 @@ static inline Plane transformPlane(const Plane &plane, const ObjectTransform &tr
     Vector3 point = plane.normal * plane.d;
     Vector3 transformed_point = transformPoint(point, transform);
 
-    Vector3 transformed_normal = transform.rot.rotateVec(plane.normal);
+    Vector3 transformed_normal = transformDirection(plane.normal, transform).normalize();
 
     return { transformed_normal, transformed_normal.dot(transformed_point) };
-}
-
-static inline Vector3 transformDirection(const Vector3 &v, const ObjectTransform &transform)
-{
-    return transform.rot.rotateVec(transform.sca * v);
 }
 
 enum class NarrowphaseTest : uint32_t {
@@ -612,7 +612,60 @@ Manifold doSATPlane(Context &ctx, const Plane &plane, const CollisionMesh &a, Ob
         return manifold;
     }
 
+    printf("Hull-Plane: (%f %f %f) %f\n",
+           plane.normal.x,
+           plane.normal.y,
+           plane.normal.z,
+           faceQuery.separation);
+
     return createFaceContactPlane(ctx, plane, a, aTransform);
+}
+
+// Builds a transform matrix that transforms from src local space to
+// dst local space
+static inline Mat3x4 computeLocalToLocalTransform(
+    Vector3 dst_pos, Quat dst_rot, Diag3x3 dst_scale,
+    Vector3 src_pos, Quat src_rot, Diag3x3 src_scale)
+{
+    // FIXME: add a code path for uniform scale (common case)
+    Diag3x3 inv_dst_scale = dst_scale.inv();
+    Quat inv_dst_rot = dst_rot.inv();
+
+    Vector3 to_dst_translation =
+        inv_dst_scale * inv_dst_rot.rotateVec(src_pos - dst_pos);
+    
+    Quat to_dst_rot = inv_dst_rot * src_rot;
+
+    float x2 = to_dst_rot.x * to_dst_rot.x;
+    float y2 = to_dst_rot.y * to_dst_rot.y;
+    float z2 = to_dst_rot.z * to_dst_rot.z;
+    float xz = to_dst_rot.x * to_dst_rot.z;
+    float xy = to_dst_rot.x * to_dst_rot.y;
+    float yz = to_dst_rot.y * to_dst_rot.z;
+    float wx = to_dst_rot.w * to_dst_rot.x;
+    float wy = to_dst_rot.w * to_dst_rot.y;
+    float wz = to_dst_rot.w * to_dst_rot.z;
+
+    Diag3x3 src_scale2 = 2.f * src_scale;
+
+    return {{
+       { 
+            inv_dst_scale.d0 * (src_scale.d0 - src_scale2.d0 * (y2 + z2)),
+            inv_dst_scale.d1 * src_scale2.d0 * (xy + wz),
+            inv_dst_scale.d2 * src_scale2.d0 * (xz - wy),
+        },
+        {
+            inv_dst_scale.d0 * src_scale2.d1 * (xy - wz),
+            inv_dst_scale.d1 * (src_scale.d1 - src_scale2.d1 * (x2 + z2)),
+            inv_dst_scale.d2 * src_scale2.d1 * (yz + wx),
+        },
+        {
+            inv_dst_scale.d0 * src_scale2.d2 * (xz + wy),
+            inv_dst_scale.d1 * src_scale2.d2 * (yz - wx),
+            inv_dst_scale.d2 * (src_scale.d2 - src_scale2.d2 * (x2 + y2)),
+        },
+        to_dst_translation,
+    }};
 }
 
 static inline geometry::CollisionMesh buildRelativeCollisionMesh(
@@ -621,27 +674,19 @@ static inline geometry::CollisionMesh buildRelativeCollisionMesh(
     // dst_space is for a, src_space is for b
     const ObjectTransform &dst_space, const ObjectTransform &src_space)
 {
-    Diag3x3 scale_inv = dst_space.sca.inv();
-    Quat rot_inv = dst_space.rot.inv();
-    Vector3 pos_inv = -dst_space.pos;
-
-    Diag3x3 scale_comp = scale_inv * src_space.sca;
-    Quat rot_comp = rot_inv * src_space.rot;
-    Vector3 pos_comp = scale_inv * (rot_inv.rotateVec(src_space.pos - dst_space.pos));
-
-    auto transformVertex = [scale_comp, rot_comp, pos_comp] (Vector3 v) {
-        return pos_comp + rot_comp.rotateVec(scale_comp * v);
-    };
+    Mat3x4 src_to_dst = computeLocalToLocalTransform(
+        dst_space.pos, dst_space.rot, dst_space.sca,
+        src_space.pos, src_space.rot, src_space.sca);
 
     geometry::CollisionMesh collision_mesh;
     collision_mesh.halfEdgeMesh = &he_mesh;
     collision_mesh.vertexCount = he_mesh.getVertexCount();
     collision_mesh.vertices = (Vector3 *)ctx.tmpAlloc(
         sizeof(math::Vector3) * collision_mesh.vertexCount);
-    collision_mesh.center = pos_comp;
+    collision_mesh.center = src_to_dst.cols[3];
 
     for (CountT v = 0; v < (CountT)collision_mesh.vertexCount; ++v) {
-        collision_mesh.vertices[v] = transformVertex(he_mesh.vertex(v));
+        collision_mesh.vertices[v] = src_to_dst.txfmPoint(he_mesh.vertex(v));
     }
 
     return collision_mesh;
@@ -840,19 +885,15 @@ inline void runNarrowphase(
         geometry::CollisionMesh a_collision_mesh =
             buildLocalCollisionMesh(ctx, a_he_mesh);
 
-        Diag3x3 scale_inv  = a_scale.inv();
-        Quat rot_inv = a_rot.inv();
-        Vector3 pos_inv = -a_pos;
-
-        Diag3x3 scale_comp = scale_inv * b_scale;
-        Quat rot_comp = rot_inv * b_rot;
-        Vector3 pos_comp = scale_inv * (rot_comp.rotateVec(b_pos - a_pos));
+        // FIXME: not strictly necessary to build this entire matrix here
+        Mat3x4 to_a_local = computeLocalToLocalTransform(
+            a_pos, a_rot, a_scale, b_pos, b_rot, b_scale);
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 plane_normal = rot_comp.rotateVec(base_normal);
+        Vector3 txfmed_normal = to_a_local.txfmDir(base_normal).normalize();
+        Vector3 txfmed_point = to_a_local.txfmPoint(b_pos);
 
-        Vector3 b_transformed_pos = pos_comp + rot_comp.rotateVec(scale_comp * b_pos);
-        geometry::Plane plane { plane_normal, dot(b_transformed_pos, plane_normal) };
+        geometry::Plane plane { txfmed_normal, dot(txfmed_normal, txfmed_point) };
 
         Manifold manifold = doSATPlane(ctx, plane, a_collision_mesh, {a_pos, a_rot, a_scale});
 
