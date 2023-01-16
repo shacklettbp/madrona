@@ -176,7 +176,7 @@ void StateManager::registerSingleton()
     registerComponent<SingletonT>();
 
 #ifdef MADRONA_MW_MODE
-    registerArchetype<ArchetypeT>(num_worlds_);
+    registerArchetype<ArchetypeT>(1);
     for (CountT i = 0; i < (CountT)num_worlds_; i++) {
         makeEntityNow<ArchetypeT>(uint32_t(i), init_state_cache_);
     }
