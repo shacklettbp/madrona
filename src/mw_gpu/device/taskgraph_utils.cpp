@@ -25,6 +25,7 @@ TaskGraph::Builder::~Builder()
 TaskGraph::NodeID TaskGraph::Builder::registerNode(
     uint32_t data_idx,
     uint32_t fixed_count,
+    uint32_t num_threads_per_invocation,
     uint32_t func_id,
     Span<const TaskGraph::NodeID> dependencies,
     Optional<NodeID> parent_node)
@@ -46,6 +47,7 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
             fixed_count,
             func_id,
             0,
+            num_threads_per_invocation,
             0,
             0,
         },
