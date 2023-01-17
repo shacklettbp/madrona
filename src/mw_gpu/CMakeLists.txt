@@ -7,7 +7,7 @@ target_link_libraries(madrona_mw_gpu
     PUBLIC
         madrona_hdrs madrona_cuda
     PRIVATE
-        madrona_core madrona_batch_render
+        madrona_mw_core madrona_batch_render
         CUDA::nvrtc CUDA::cuda_driver)
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
