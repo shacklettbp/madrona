@@ -974,6 +974,8 @@ static GPUEngineState initEngineAndUserState(
     uint32_t world_data_alignment,
     void *world_init_ptr,
     uint32_t num_world_init_bytes,
+    void *user_cfg_host_ptr,
+    uint32_t num_user_cfg_bytes,
     uint32_t num_exported,
     StateConfig::CameraMode camera_mode,
     uint32_t render_width,
@@ -1025,6 +1027,10 @@ static GPUEngineState initEngineAndUserState(
     auto init_tmp_buffer = cu::allocGPU(num_init_bytes);
     REQ_CUDA(cudaMemcpyAsync(init_tmp_buffer, world_init_ptr,
         num_init_bytes, cudaMemcpyHostToDevice, strm));
+
+    auto user_cfg_gpu_buffer = cu::allocGPU(num_user_cfg_bytes);
+    REQ_CUDA(cudaMemcpyAsync(user_cfg_gpu_buffer, user_cfg_host_ptr,
+        num_user_cfg_bytes, cudaMemcpyHostToDevice, strm));
 
     auto gpu_consts_readback = (GPUImplConsts *)cu::allocReadback(
         sizeof(GPUImplConsts));
@@ -1079,7 +1085,10 @@ static GPUEngineState initEngineAndUserState(
 
     auto init_ecs_args = makeKernelArgBuffer(alloc_init,
                                              host_print->getChannelPtr(),
-                                             exported_readback);
+                                             exported_readback,
+                                             user_cfg_gpu_buffer);
+
+    auto init_tasks_args = makeKernelArgBuffer(user_cfg_gpu_buffer);
 
     // FIXME: this assumes an ordering of the init args
     auto init_worlds_args = batch_renderer.has_value() ?
@@ -1166,11 +1175,12 @@ static GPUEngineState initEngineAndUserState(
 
         launchKernel(gpu_kernels.initWorlds, num_init_blocks,
                      consts::numMegakernelThreads, init_worlds_args);
-        launchKernel(gpu_kernels.initTasks, 1, 1, no_args);
+        launchKernel(gpu_kernels.initTasks, 1, 1, init_tasks_args);
     }
 
     REQ_CUDA(cudaStreamSynchronize(strm));
 
+    cu::deallocGPU(user_cfg_gpu_buffer);
     cu::deallocGPU(init_tmp_buffer);
 
     if (renderer_init_buffer != nullptr) {
@@ -1295,9 +1305,11 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
 
     GPUEngineState eng_state = initEngineAndUserState(
         (int)state_cfg.gpuID, state_cfg.numWorlds,
-        state_cfg.maxViewsPerWorld, state_cfg.numWorldDataBytes,
-        state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
-        state_cfg.numWorldInitBytes, state_cfg.numExportedBuffers,
+        state_cfg.maxViewsPerWorld,
+        state_cfg.numWorldDataBytes, state_cfg.worldDataAlignment,
+        state_cfg.worldInitPtr, state_cfg.numWorldInitBytes,
+        state_cfg.userConfigPtr, state_cfg.numUserConfigBytes,
+        state_cfg.numExportedBuffers,
         state_cfg.cameraMode, state_cfg.renderWidth, state_cfg.renderHeight,
         gpu_kernels, compile_cfg.execMode, strm);
 

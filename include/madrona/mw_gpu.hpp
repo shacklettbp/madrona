@@ -26,6 +26,8 @@ struct StateConfig {
 
     void *worldInitPtr;
     uint32_t numWorldInitBytes;
+    void *userConfigPtr;
+    uint32_t numUserConfigBytes;
     uint32_t numWorldDataBytes;
     uint32_t worldDataAlignment;
     uint32_t numWorlds;

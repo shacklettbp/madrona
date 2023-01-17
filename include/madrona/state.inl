@@ -402,6 +402,11 @@ Entity StateManager::makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
     archetype.tblStorage.column<Entity>(
         MADRONA_MW_COND(world_id,) 0)[new_row] = e;
 
+#ifdef MADRONA_MW_MODE
+    archetype.tblStorage.column<WorldID>(world_id, 1)[new_row] =
+        WorldID { (int32_t)world_id };
+#endif
+
     int component_idx = 0;
 
     auto constructNextComponent = [&](auto &&arg) {

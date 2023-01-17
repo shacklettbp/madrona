@@ -335,7 +335,13 @@ void StateManager::makeQuery(const ComponentID *components,
             assert(component.id != TypeTracker::unassignedTypeID);
             if (component.id == componentID<Entity>().id) {
                 tmp_query_indices.push_back(0);
-            } else {
+            } 
+#ifdef MADRONA_MW_MODE
+            else if (component.id == componentID<WorldID>().id) {
+                tmp_query_indices.push_back(1);
+            }
+#endif
+            else {
                 tmp_query_indices.push_back(archetype.columnLookup[component.id]);
             }
         }
@@ -425,8 +431,19 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components,
 void * StateManager::exportColumn(uint32_t archetype_id, uint32_t component_id)
 {
     auto &archetype = *archetype_stores_[archetype_id];
-    auto col_idx = 
-        *archetype.columnLookup.lookup(component_id);
+    uint32_t col_idx;
+
+    if (component_id == componentID<Entity>().id) {
+        col_idx = 0;
+    }
+#ifdef MADRONA_MW_MODE
+    else if (component_id == componentID<WorldID>().id) {
+        col_idx = 1;
+    }
+#endif
+    else {
+        col_idx = *archetype.columnLookup.lookup(component_id);
+    }
 
 #ifdef MADRONA_MW_MODE
     if (archetype.tblStorage.maxNumPerWorld == 0) {
