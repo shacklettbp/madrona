@@ -137,6 +137,7 @@ void HalfEdgeMesh::construct(
                 *newPolygon = hedge_idx;
             }
         }
+        prev->next = firstPolygonHalfEdgeIdx;
 
         math::Vector3 face_points[3];
         auto *h_edge = &tmp.halfEdges[*newPolygon];
@@ -154,8 +155,6 @@ void HalfEdgeMesh::construct(
             n,
             dot(n, face_points[0]),
         };
-
-        prev->next = firstPolygonHalfEdgeIdx;
     }
 
 
