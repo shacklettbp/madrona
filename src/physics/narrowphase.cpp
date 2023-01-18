@@ -569,9 +569,9 @@ static Manifold createFaceContactPlane(const HullState &h,
                 contacts_tmp[num_incident_vertices] =
                     vertex - d * plane.normal;
                 penetration_depths_tmp[num_incident_vertices] = -d;
-            }
 
-            num_incident_vertices += 1;
+                num_incident_vertices += 1;
+            }
         } while (hedge_idx != start_hedge_idx);
     }
 
