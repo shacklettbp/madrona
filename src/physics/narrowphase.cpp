@@ -644,6 +644,7 @@ static Manifold createEdgeContact(const EdgeQuery &query,
     // FIXME: revisit this after modifying solver to handle multi-point
     // manifolds better
 
+    // FIXME: don't need this full function call here.
     Segment s = shortestSegmentBetween(segA, segB);
     Vector3 contact = s.p1;
 
