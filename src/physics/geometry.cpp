@@ -59,6 +59,7 @@ void HalfEdgeMesh::construct(
     // Allocate all temporary things
     struct Temporary {
         PolygonData *polygons;
+        Plane *facePlanes;
         EdgeData *edges;
         HalfEdge *halfEdges;
 
@@ -72,6 +73,7 @@ void HalfEdgeMesh::construct(
 
     // We already know how many polygons there are
     tmp.polygons = (PolygonData *)malloc(sizeof(PolygonData) * polygons.polygonCount);
+    tmp.facePlanes = (Plane *)malloc(sizeof(Plane ) * polygons.polygonCount);
     tmp.halfEdges = (HalfEdge *)malloc(sizeof(HalfEdge) * polygons.edgeCount);
     // This will be excessive allocation but it's temporary so not big deal
     tmp.edges = (EdgeData *)malloc(sizeof(EdgeData) * polygons.edgeCount);
@@ -136,8 +138,26 @@ void HalfEdgeMesh::construct(
             }
         }
 
+        math::Vector3 face_points[3];
+        auto *h_edge = &tmp.halfEdges[*newPolygon];
+        for (CountT i = 0; i < 3; ++i) {
+            face_points[i] = vertices[h_edge->rootVertex];
+            h_edge = &tmp.halfEdges[h_edge->next];
+        }
+
+        math::Vector3 a = face_points[1] - face_points[0];
+        math::Vector3 b = face_points[2] - face_points[0];
+
+        Vector3 n = math::cross(a, b).normalize();
+
+        tmp.facePlanes[poly_idx] = Plane {
+            n,
+            dot(n, face_points[0]),
+        };
+
         prev->next = firstPolygonHalfEdgeIdx;
     }
+
 
     // Copy all these to permanent storage in member pointers
 #if 0
@@ -152,6 +172,10 @@ void HalfEdgeMesh::construct(
     memcpy(mPolygons, tmp.polygons, sizeof(PolygonData) * tmp.polygonCount);
     mPolygonCount = tmp.polygonCount;
 
+    mFacePlanes = (geometry::Plane *)malloc(
+        sizeof(geometry::Plane) * tmp.polygonCount);
+    memcpy(mFacePlanes, tmp.facePlanes, sizeof(geometry::Plane) * tmp.polygonCount);
+
     mEdges = (EdgeData *)malloc(sizeof(EdgeData) * tmp.edgeCount);
     memcpy(mEdges, tmp.edges, sizeof(EdgeData) * tmp.edgeCount);
     mEdgeCount = tmp.edgeCount;
@@ -165,6 +189,7 @@ void HalfEdgeMesh::construct(
     mVertexCount = vertexCount;
 
     free(tmp.polygons);
+    free(tmp.facePlanes);
     free(tmp.halfEdges);
     free(tmp.edges);
 #endif

@@ -133,6 +133,7 @@ public:
 public:
     // For now, just array of indices which point into the half edge array
     PolygonData *mPolygons;
+    Plane *mFacePlanes;
     EdgeData    *mEdges;
     // Where all the half edges are stored
     HalfEdge    *mHalfEdges;
@@ -142,16 +143,6 @@ public:
     uint32_t mPolygonCount;
     uint32_t mEdgeCount;
     uint32_t mVertexCount;
-};
-
-// Contains transformed vertices for given geometry
-struct CollisionMesh {
-    uint32_t vertexCount;
-    math::Vector3 *vertices;
-    math::Vector3 center;
-
-    // This is also going to contain FastPolygonList for information about each face
-    const geometry::HalfEdgeMesh *halfEdgeMesh;
 };
 
 }
@@ -254,6 +245,11 @@ struct ObjectManager {
 
     // Half Edge Mesh Buffers
     geometry::PolygonData *polygonDatas;
+
+    // everywhere needs all 4 components besides finding
+    // the minimizing face
+    geometry::Plane *facePlanes;
+
     geometry::EdgeData *edgeDatas;
     geometry::HalfEdge *halfEdges;
     math::Vector3 *vertices;

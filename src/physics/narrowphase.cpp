@@ -10,12 +10,6 @@ using namespace base;
 using namespace math;
 using namespace geometry;
 
-struct ObjectTransform {
-    Vector3 pos;
-    Quat rot;
-    Diag3x3 sca;
-};
-
 enum class NarrowphaseTest : uint32_t {
     SphereSphere = 1,
     HullHull = 2,
@@ -37,12 +31,110 @@ struct EdgeQuery {
     int32_t edgeIdxB;
 };
 
+struct HullState {
+    const Vector3 *vertices;
+    const Plane *facePlanes;
+    const HalfEdge *halfEdges;
+    const EdgeData *edgeIndices; // FIXME: optimize HE mesh
+    const PolygonData *faceEdgeIndices;
+    int32_t numVertices;
+    int32_t numFaces;
+    int32_t numEdges;
+    Vector3 center;
+};
+
 struct Manifold {
-    math::Vector4 contactPoints[4];
+    math::Vector3 contactPoints[4];
+    float penetrationDepths[4];
     int32_t numContactPoints;
     math::Vector3 normal;
     bool aIsReference;
 };
+
+static HullState makeHullState(
+    const math::Vector3 *obj_vertices,
+    const Plane *obj_planes,
+    const HalfEdge *half_edges,
+    const EdgeData *edge_indices,
+    const PolygonData *face_edge_indices,
+    CountT num_vertices,
+    CountT num_faces,
+    CountT num_edges,
+    Vector3 translation,
+    Quat rotation,
+    Diag3x3 scale,
+    math::Vector3 *dst_vertices,
+    Plane *dst_planes)
+{
+    if (dst_vertices == nullptr) {
+        return HullState {
+            obj_vertices,
+            obj_planes,
+            half_edges,
+            edge_indices,
+            face_edge_indices,
+            (int32_t)num_vertices,
+            (int32_t)num_faces,
+            (int32_t)num_edges,
+            translation,
+        };
+    }
+
+    Mat3x3 unscaled_rot = Mat3x3::fromQuat(rotation);
+    Mat3x3 vertex_txfm = unscaled_rot * scale;
+    Mat3x3 normal_txfm = unscaled_rot * scale.inv();
+
+    for (CountT i = 0; i < num_vertices; i++) {
+        dst_vertices[i] = vertex_txfm * obj_vertices[i] + translation;
+    }
+
+    // FIXME: could significantly optimize this with a uniform scale
+    // version
+    for (CountT i = 0; i < num_faces; i++) {
+        Plane obj_plane = obj_planes[i];
+        Vector3 plane_origin =
+            vertex_txfm * (obj_plane.normal * obj_plane.d) + translation;
+        Vector3 dst_normal = (normal_txfm * obj_plane.normal).normalize();
+
+        dst_planes[i] = {
+            dst_normal,
+            dot(dst_normal, plane_origin),
+        };
+    }
+
+    return HullState {
+        dst_vertices,
+        dst_planes,
+        half_edges,
+        edge_indices,
+        face_edge_indices,
+        (int32_t)num_vertices,
+        (int32_t)num_faces,
+        (int32_t)num_edges,
+        translation,
+    };
+}
+
+static HullState makeHullState(
+    const geometry::HalfEdgeMesh &he_mesh,
+    Vector3 translation,
+    Quat rotation,
+    Diag3x3 scale,
+    math::Vector3 *dst_vertices,
+    Plane *dst_planes)
+{
+    return makeHullState(
+        he_mesh.mVertices,
+        he_mesh.mFacePlanes,
+        he_mesh.mHalfEdges,
+        he_mesh.mEdges,
+        he_mesh.mPolygons,
+        he_mesh.mVertexCount,
+        he_mesh.mPolygonCount,
+        he_mesh.mEdgeCount,
+        translation, rotation, scale,
+        dst_vertices, dst_planes);
+}
 
 // Returns the signed distance
 static inline float getDistanceFromPlane(
@@ -69,47 +161,40 @@ inline math::Vector3 planeIntersection(const geometry::Plane &plane, const math:
 }
 
 
-static uint32_t findFurthestPointIdx(const CollisionMesh &m,
-                                     const math::Vector3 &d)
+static Vector3 findFurthestPoint(const HullState &h,
+                                 const math::Vector3 &d)
 {
-    float maxDistance = d.dot(m.vertices[0]);
-    uint32_t vertexIdx = 0;
+    Vector3 furthest = h.vertices[0];
+    float max_dist = d.dot(h.vertices[0]);
 
-    for (CountT i = 1; i < (CountT)m.vertexCount; ++i) {
-        float dp = d.dot(m.vertices[i]);
-        if (dp > maxDistance) {
-            maxDistance = dp;
-            vertexIdx = i;
+    for (CountT i = 1; i < (CountT)h.numVertices; ++i) {
+        Vector3 vertex = h.vertices[i];
+        float dp = d.dot(vertex);
+        if (dp > max_dist) {
+            max_dist = dp;
+            furthest = vertex;
         }
     }
 
-    return vertexIdx;
-}
-
-static math::Vector3 findFurthestPoint(const CollisionMesh &m,
-                                       const math::Vector3 &d)
-{
-    return m.vertices[findFurthestPointIdx(m, d)];
+    return furthest;
 }
 
 static FaceQuery queryFaceDirectionsPlane(const Plane &plane,
-                                          const CollisionMesh &a) {
-    math::Vector3 supportA = findFurthestPoint(a, -plane.normal);
+                                          const HullState &h) {
+    math::Vector3 supportA = findFurthestPoint(h, -plane.normal);
     float distance = getDistanceFromPlane(plane, supportA);
 
     return { distance, 0 };
 }
 
-static FaceQuery queryFaceDirections(const CollisionMesh &a,
-                                     const CollisionMesh &b)
+static FaceQuery queryFaceDirections(const HullState &a,
+                                     const HullState &b)
 {
-    const auto *hMesh = a.halfEdgeMesh;
-
     int polygonMaxDistance = 0;
     float maxDistance = -FLT_MAX;
 
-    for (CountT i = 0; i < (CountT)hMesh->getPolygonCount(); ++i) {
-        Plane plane = hMesh->getPlane(i, a.vertices);
+    for (CountT i = 0; i < (CountT)a.numFaces; ++i) {
+        Plane plane = a.facePlanes[i];
         math::Vector3 supportB = findFurthestPoint(b, -plane.normal);
         float distance = getDistanceFromPlane(plane, supportB);
 
@@ -137,72 +222,85 @@ static bool isMinkowskiFace(
     return cba * dba < 0.0f && adc * bdc < 0.0f && cba * bdc > 0.0f;
 }
 
-bool buildsMinkowskiFace(
-        const CollisionMesh &a, const CollisionMesh &b,
+static inline std::pair<Vector3, Vector3> getEdgeNormals(
+        const HullState &h, const HalfEdge &h_edge)
+{
+    Vector3 normal1 = h.facePlanes[h_edge.polygon].normal;
+    CountT twin_poly = h.halfEdges[h_edge.twin].polygon;
+    Vector3 normal2 = h.facePlanes[twin_poly].normal;
+
+    return { normal1, normal2 };
+}
+
+static inline Segment getEdgeSegment(
+        const HullState &h, const HalfEdge &h_edge)
+{
+    Vector3 a = h.vertices[h_edge.rootVertex];
+    
+    // FIXME: probably should put both vertex indices inline in the half edge
+    Vector3 b = h.vertices[h.halfEdges[h_edge.next].rootVertex];
+
+    return { a, b };
+}
+
+static inline bool buildsMinkowskiFace(
+        const HullState &a, const HullState &b,
         const HalfEdge &edgeA, const HalfEdge &edgeB)
 {
-    auto [aNormal1, aNormal2] = a.halfEdgeMesh->getEdgeNormals(edgeA, a.vertices);
-    auto [bNormal1, bNormal2] = b.halfEdgeMesh->getEdgeNormals(edgeB, b.vertices);
+    auto [aNormal1, aNormal2] = getEdgeNormals(a, edgeA);
+    auto [bNormal1, bNormal2] = getEdgeNormals(b, edgeB);
 
     return isMinkowskiFace(aNormal1, aNormal2, -bNormal1, -bNormal2);
 }
 
-static float edgeDistance(
-        const CollisionMesh &a, const CollisionMesh &b,
+static inline Vector4 edgeDistance(
+        const HullState &a, const HullState &b,
         const HalfEdge &edgeA, const HalfEdge &edgeB)
 {
-    math::Vector3 dirA = a.halfEdgeMesh->getEdgeDirection(edgeA, a.vertices);
-    math::Vector3 pointA = a.halfEdgeMesh->getEdgeOrigin(edgeA, a.vertices);
+    Segment segment_a = getEdgeSegment(a, edgeA);
+    Segment segment_b = getEdgeSegment(b, edgeB);
 
-    math::Vector3 dirB = b.halfEdgeMesh->getEdgeDirection(edgeB, b.vertices);
-    math::Vector3 pointB = b.halfEdgeMesh->getEdgeOrigin(edgeB, b.vertices);
+    Vector3 dir_a = segment_a.p2 - segment_a.p1;
+    Vector3 dir_b = segment_b.p2 - segment_b.p1;
 
-    if (areParallel(dirA, dirB)) {
-        return -FLT_MAX;
+    if (areParallel(dir_a, dir_b)) {
+        return Vector4::fromVector3({}, -FLT_MAX);
     }
 
-    math::Vector3 normal = dirA.cross(dirB).normalize();
+    math::Vector3 normal = dir_a.cross(dir_b).normalize();
 
-    if (normal.dot(pointA - a.center) < 0.0f) {
+    if (normal.dot(segment_a.p1 - a.center) < 0.0f) {
         normal = -normal;
     }
 
-    return normal.dot(pointB - pointA);
+    float separation = normal.dot(segment_b.p1 - segment_a.p1);
+
+    return Vector4::fromVector3(normal, separation);
 }
 
-static EdgeQuery queryEdgeDirections(const CollisionMesh &a, const CollisionMesh &b)
+static EdgeQuery queryEdgeDirections(const HullState &a, const HullState &b)
 {
-    const auto *hMeshA = a.halfEdgeMesh;
-    const auto *hMeshB = b.halfEdgeMesh;
-
     Vector3 normal;
     int edgeAMaxDistance = 0;
     int edgeBMaxDistance = 0;
     float maxDistance = -FLT_MAX;
 
-    for (CountT edgeIdxA = 0; edgeIdxA < (CountT)hMeshA->getEdgeCount(); ++edgeIdxA) {
-        auto edgeDataA = hMeshA->edge(edgeIdxA);
-        auto hEdgeA = hMeshA->halfEdge(edgeDataA);
+    for (CountT edgeIdxA = 0; edgeIdxA < (CountT)a.numEdges; ++edgeIdxA) {
+        int32_t he_a_idx = a.edgeIndices[edgeIdxA];
+        auto hEdgeA = a.halfEdges[he_a_idx]; // FIXME
 
-        for (CountT edgeIdxB = 0; edgeIdxB < (CountT)hMeshB->getEdgeCount(); ++edgeIdxB) {
-            auto edgeDataB = hMeshB->edge(edgeIdxB);
-            auto hEdgeB = hMeshB->halfEdge(edgeDataB);
-
-            math::Vector3 edgeDirectionA = hMeshA->getEdgeDirection(edgeDataA, a.vertices);
-            math::Vector3 edgeDirectionB = hMeshB->getEdgeDirection(edgeDataB, b.vertices);
-
-            math::Vector3 axis = edgeDirectionA.cross(edgeDirectionB).normalize();
+        for (CountT edgeIdxB = 0; edgeIdxB < (CountT)b.numEdges; ++edgeIdxB) {
+            int32_t he_b_idx = b.edgeIndices[edgeIdxB];
+            auto hEdgeB = b.halfEdges[he_b_idx]; // FIXME
 
             if (buildsMinkowskiFace(a, b, hEdgeA, hEdgeB)) {
-                // FIXME: this edgeDistance function seems to duplicate a lot of the
-                // above work (computing axis, specifically)
-                float separation = edgeDistance(a, b, hEdgeA, hEdgeB);
+                Vector4 axis_and_separation = edgeDistance(a, b, hEdgeA, hEdgeB);
 
-                if (separation > maxDistance) {
-                    maxDistance = separation;
-                    normal = axis;
-                    edgeAMaxDistance = edgeIdxA;
-                    edgeBMaxDistance = edgeIdxB;
+                if (axis_and_separation.w > maxDistance) {
+                    maxDistance = axis_and_separation.w;
+                    normal = axis_and_separation.xyz();
+                    edgeAMaxDistance = he_a_idx;
+                    edgeBMaxDistance = he_b_idx;
                 }
             }
         }
@@ -211,273 +309,275 @@ static EdgeQuery queryEdgeDirections(const CollisionMesh &a, const CollisionMesh
     return { maxDistance, normal, edgeAMaxDistance, edgeBMaxDistance };
 }
 
-static void clipPolygon(
-        Context &ctx,
-        const Plane &clippingPlane,
-        uint32_t *vertexCount,
-        math::Vector3 *vertices,
-        const uint32_t kMaxVertices)
+static CountT findIncidentFace(const HullState &h, Vector3 ref_normal)
 {
-    uint32_t newVertexCount = 0;
-    math::Vector3 *newVertices = (math::Vector3 *)ctx.tmpAlloc(sizeof(math::Vector3) * (*vertexCount) * 2);
+    float min_dot = FLT_MAX;
+    CountT minimizing_face = -1;
+    for (CountT i = 0; i < (CountT)h.numFaces; ++i) {
+        // FIXME: don't need plane.d here
+        Plane face_plane = h.facePlanes[i];
+        float face_dot_ref = dot(face_plane.normal, ref_normal);
 
-    math::Vector3 v1 = vertices[*vertexCount - 1];
-    float d1 = getDistanceFromPlane(clippingPlane, v1);
+        if (face_dot_ref < min_dot) {
+            min_dot = face_dot_ref;
+            minimizing_face = i;
+        }
+    }
 
-    for (CountT i = 0; i < (CountT)*vertexCount; ++i) {
-        math::Vector3 v2 = vertices[i];
-        float d2 = getDistanceFromPlane(clippingPlane, v2);
+    assert(minimizing_face != -1);
+
+    return minimizing_face;
+}
+
+static inline CountT clipPolygon(Vector3 *dst_vertices,
+                                 Plane clipping_plane,
+                                 const Vector3 *input_vertices,
+                                 CountT num_input_vertices)
+{
+    CountT num_new_vertices = 0;
+
+    Vector3 v1 = input_vertices[num_input_vertices - 1];
+    float d1 = getDistanceFromPlane(clipping_plane, v1);
+
+    for (CountT i = 0; i < num_input_vertices; ++i) {
+        Vector3 v2 = input_vertices[i];
+        float d2 = getDistanceFromPlane(clipping_plane, v2);
 
         if (d1 <= 0.0f && d2 <= 0.0f) {
             // Both vertices are behind the plane, keep the second vertex
-            newVertices[newVertexCount++] = v2;
+            dst_vertices[num_new_vertices++] = v2;
         }
         else if (d1 <= 0.0f && d2 > 0.0f) {
             // v1 is behind the plane, the other is in front (out)
-            math::Vector3 intersection = planeIntersection(clippingPlane, v1, v2);
-            newVertices[newVertexCount++] = intersection;
+            Vector3 intersection = planeIntersection(clipping_plane, v1, v2);
+            dst_vertices[num_new_vertices++] = intersection;
         }
         else if (d2 <= 0.0f && d1 > 0.0f) {
-            math::Vector3 intersection = planeIntersection(clippingPlane, v1, v2);
-            newVertices[newVertexCount++] = intersection;
-            newVertices[newVertexCount++] = v2;
+            math::Vector3 intersection = planeIntersection(clipping_plane, v1, v2);
+            dst_vertices[num_new_vertices++] = intersection;
+            dst_vertices[num_new_vertices++] = v2;
         }
-
-        // assert(newVertexCount <= kMaxVertices);
 
         // Now use v2 as the starting vertex
         v1 = v2;
         d1 = d2;
     }
 
-    *vertexCount = newVertexCount;
-    memcpy(vertices, newVertices, sizeof(math::Vector3) * newVertexCount);
+    return num_new_vertices;
 }
 
-static int findIncidentFace(const CollisionMesh &referenceHull,
-                            const CollisionMesh &otherHull,
-                            int referenceFaceIdx)
+static Manifold buildFaceContactManifold(Vector3 contact_normal,
+                                         Vector3 *contacts,
+                                         float *penetration_depths,
+                                         CountT num_contacts,
+                                         bool a_is_ref,
+                                         Vector3 world_offset,
+                                         Quat to_world_frame)
 {
-    math::Vector3 referenceNormal = referenceHull.halfEdgeMesh->getFaceNormal(referenceFaceIdx, referenceHull.vertices);
-
-    float minimizingDotProduct = FLT_MAX;
-    int minimizingFace = -1;
-    for (CountT i = 0; i < (CountT)otherHull.halfEdgeMesh->getPolygonCount(); ++i) {
-        math::Vector3 incidentNormal = otherHull.halfEdgeMesh->getFaceNormal(i, otherHull.vertices);
-        float dotProduct = incidentNormal.dot(referenceNormal);
-
-        if (dotProduct < minimizingDotProduct) {
-            minimizingDotProduct = dotProduct;
-            minimizingFace = i;
-        }
-    }
-
-    return minimizingFace;
-}
-
-static int findIncidentFace(const Plane &referencePlane,
-                            const CollisionMesh &otherHull)
-{
-    float minimizingDotProduct = FLT_MAX;
-    int minimizingFace = -1;
-    for (CountT i = 0; i < (CountT)otherHull.halfEdgeMesh->getPolygonCount(); ++i) {
-        math::Vector3 incidentNormal = otherHull.halfEdgeMesh->getFaceNormal(i, otherHull.vertices);
-        float dotProduct = incidentNormal.dot(referencePlane.normal);
-
-        if (dotProduct < minimizingDotProduct) {
-            minimizingDotProduct = dotProduct;
-            minimizingFace = i;
-        }
-    }
-
-    return minimizingFace;
-}
-
-static Manifold createFaceContactPlane(Context &ctx,
-                                       const Plane &plane,
-                                       const CollisionMesh &hull)
-{
-    // Find incident face
-    int incidentFaceIdx = findIncidentFace(plane, hull);
-
-    uint32_t incidentFaceVertexCount = hull.halfEdgeMesh->getPolygonVertexCount(incidentFaceIdx);
-    const uint32_t kMaxIncidentVertexCount = incidentFaceVertexCount * 2;
-    math::Vector3 *incidentVertices = (math::Vector3 *)ctx.tmpAlloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
-    hull.halfEdgeMesh->getPolygonVertices(incidentVertices, incidentFaceIdx, hull.vertices);
-
-    math::Vector4 *contacts = (math::Vector4 *)ctx.tmpAlloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
-    CountT contact_count = 0;
-
-    for (CountT i = 0; i < (CountT)incidentFaceVertexCount; ++i) {
-        Vector3 incident_vertex = incidentVertices[i];
-        if (float d = getDistanceFromPlane(plane, incident_vertex); d < 0.0f) {
-            // Project the point onto the reference plane
-            // (d guaranteed to be negative)
-            contacts[contact_count++] =
-                makeVector4(incident_vertex - d * plane.normal, -d);
-        }
-    }
-
     Manifold manifold;
-    manifold.normal = plane.normal;
-    manifold.aIsReference = false;
-    if (contact_count <= 4) {
-        manifold.numContactPoints = contact_count;
-        for (CountT i = 0; i < contact_count; i++) {
-            manifold.contactPoints[i] = contacts[i];
-        }
-    } else {
-        manifold.numContactPoints = 4;
-        manifold.contactPoints[0] = contacts[0];
-
-        // Find furthest contact
-        float largestD2 = 0.0f;
-        int largestD2ContactPointIdx = 0;
-        for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = contacts[i].xyz();
-            float d2 = manifold.contactPoints[0].xyz().distance2(cur_contact);
-            if (d2 > largestD2) {
-                largestD2 = d2;
-                manifold.contactPoints[1] = makeVector4(cur_contact, contacts[i].w);
-                largestD2ContactPointIdx = i;
-            }
-        }
-
-        contacts[largestD2ContactPointIdx] = manifold.contactPoints[0];
-
-        math::Vector3 diff0 =
-            manifold.contactPoints[1].xyz() - manifold.contactPoints[0].xyz();
-
-        // Find point which maximized area of triangle
-        float largestArea = 0.0f;
-        int largestAreaContactPointIdx = 0;
-        for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = contacts[i].xyz();
-            math::Vector3 diff1 = cur_contact - manifold.contactPoints[0].xyz();
-            float area = plane.normal.dot(diff0.cross(diff1));
-            if (area > largestArea) {
-                manifold.contactPoints[2] = makeVector4(cur_contact, contacts[i].w);
-                largestAreaContactPointIdx = i;
-            }
-        }
-
-        contacts[largestAreaContactPointIdx] = manifold.contactPoints[0];
-
-        for (CountT i = 1; i < contact_count; ++i) {
-            Vector3 cur_contact = contacts[i].xyz();
-            math::Vector3 diff1 = cur_contact - manifold.contactPoints[0].xyz();
-            float area = plane.normal.dot(diff0.cross(diff1));
-            if (area < largestArea) {
-                manifold.contactPoints[3] = makeVector4(cur_contact, contacts[i].w);
-            }
-        }
-    }
-
-    return manifold;
-}
-
-static Manifold createFaceContact(Context &ctx,
-                                  FaceQuery faceQueryA, const CollisionMesh &a,
-                                  FaceQuery faceQueryB, const CollisionMesh &b)
-{
-    // Determine minimizing face
-    bool a_is_ref = faceQueryA.separation > faceQueryB.separation;
-    FaceQuery &minimizingQuery = a_is_ref ? faceQueryA : faceQueryB;
-
-    const CollisionMesh &referenceHull = a_is_ref ? a : b;
-    const CollisionMesh &otherHull = a_is_ref ? b : a;
-
-    int referenceFaceIdx = minimizingQuery.faceIdx;
-
-    // Find incident face
-    int incidentFaceIdx = findIncidentFace(referenceHull, otherHull, referenceFaceIdx);
-
-    // Get the side planes of the reference face
-    uint32_t sidePlaneCount = referenceHull.halfEdgeMesh->getPolygonVertexCount(referenceFaceIdx);
-    Plane *planes = (Plane *)ctx.tmpAlloc(sizeof(Plane) * sidePlaneCount);
-    referenceHull.halfEdgeMesh->getPolygonSidePlanes(planes, referenceFaceIdx, referenceHull.vertices);
-
-    uint32_t incidentFaceVertexCount = otherHull.halfEdgeMesh->getPolygonVertexCount(incidentFaceIdx);
-    const uint32_t kMaxIncidentVertexCount = incidentFaceVertexCount * 2;
-    math::Vector3 *incidentVertices = (math::Vector3 *)ctx.tmpAlloc(sizeof(math::Vector3) * kMaxIncidentVertexCount);
-    otherHull.halfEdgeMesh->getPolygonVertices(incidentVertices, incidentFaceIdx, otherHull.vertices);
-
-    // Clip the incident face against the side planes of the reference face
-    for (CountT i = 0; i < (CountT)sidePlaneCount; ++i) {
-        clipPolygon(ctx, planes[i], &incidentFaceVertexCount, incidentVertices, kMaxIncidentVertexCount);
-    }
-
-    // incidentVertices should now contain the only relevant vertices
-    // Now we just keep the ones below the reference face
-    Plane referencePlane = referenceHull.halfEdgeMesh->getPlane(referenceFaceIdx, referenceHull.vertices);
-
-    math::Vector4 *contacts = (math::Vector4 *)ctx.tmpAlloc(sizeof(math::Vector4) * kMaxIncidentVertexCount);
-    CountT contact_count = 0;
-
-    for (CountT i = 0; i < (CountT)incidentFaceVertexCount; ++i) {
-        Vector3 incidentVertex = incidentVertices[i];
-        if (float d = getDistanceFromPlane(referencePlane, incidentVertex); d < 0.0f) {
-            // Project the point onto the reference plane (d guaranteed to be negative)
-            contacts[contact_count++] = makeVector4(incidentVertex - d * referencePlane.normal, -d);
-        }
-    }
-
-    Manifold manifold;
-    manifold.normal = referencePlane.normal;
     manifold.aIsReference = a_is_ref;
-    if (contact_count <= 4) {
-        manifold.numContactPoints = contact_count;
-        for (CountT i = 0; i < contact_count; i++) {
+    if (num_contacts <= 4) {
+        manifold.numContactPoints = num_contacts;
+        for (CountT i = 0; i < num_contacts; i++) {
             manifold.contactPoints[i] = contacts[i];
+            manifold.penetrationDepths[i] = penetration_depths[i];
         }
     } else {
         manifold.numContactPoints = 4;
         manifold.contactPoints[0] = contacts[0];
-        Vector3 point0 = manifold.contactPoints[0].xyz();
+        manifold.penetrationDepths[0] = penetration_depths[0];
+        Vector3 point0 = manifold.contactPoints[0];
 
         // Find furthest contact
         float largestD2 = 0.0f;
         int largestD2ContactPointIdx = 0;
-        for (CountT i = 1; i < contact_count; ++i) {
-            Vector4 cur_contact = contacts[i];
-            float d2 = point0.distance2(cur_contact.xyz());
+        for (CountT i = 1; i < num_contacts; ++i) {
+            Vector3 cur_contact = contacts[i];
+            float d2 = point0.distance2(cur_contact);
             if (d2 > largestD2) {
                 largestD2 = d2;
                 manifold.contactPoints[1] = cur_contact;
+                manifold.penetrationDepths[1] = penetration_depths[i];
                 largestD2ContactPointIdx = i;
             }
         }
 
         contacts[largestD2ContactPointIdx] = manifold.contactPoints[0];
 
-        math::Vector3 diff0 = manifold.contactPoints[1].xyz() - point0;
+        math::Vector3 diff0 = manifold.contactPoints[1] - point0;
 
         // Find point which maximized area of triangle
         float largestArea = 0.0f;
         int largestAreaContactPointIdx = 0;
-        for (CountT i = 1; i < contact_count; ++i) {
-            Vector4 cur_contact = contacts[i];
-            math::Vector3 diff1 = cur_contact.xyz() - point0;
-            float area = referencePlane.normal.dot(diff0.cross(diff1));
+        for (CountT i = 1; i < num_contacts; ++i) {
+            Vector3 cur_contact = contacts[i];
+            math::Vector3 diff1 = cur_contact - point0;
+            float area = contact_normal.dot(diff0.cross(diff1));
             if (area > largestArea) {
                 manifold.contactPoints[2] = cur_contact;
+                manifold.penetrationDepths[2] = penetration_depths[i];
                 largestAreaContactPointIdx = i;
             }
         }
 
         contacts[largestAreaContactPointIdx] = manifold.contactPoints[0];
 
-        for (CountT i = 1; i < contact_count; ++i) {
-            Vector4 cur_contact = contacts[i];
-            math::Vector3 diff1 = cur_contact.xyz() - point0;
-            float area = referencePlane.normal.dot(diff0.cross(diff1));
+        for (CountT i = 1; i < num_contacts; ++i) {
+            Vector3 cur_contact = contacts[i];
+            math::Vector3 diff1 = cur_contact - point0;
+            float area = contact_normal.dot(diff0.cross(diff1));
             if (area < largestArea) {
                 manifold.contactPoints[3] = cur_contact;
+                manifold.penetrationDepths[3] = penetration_depths[i];
             }
         }
     }
 
+    for (CountT i = 0; i < (CountT)manifold.numContactPoints; i++) {
+        manifold.contactPoints[i] =
+            to_world_frame.rotateVec(manifold.contactPoints[i]) + world_offset;
+    }
+
+    manifold.normal = to_world_frame.rotateVec(contact_normal);
+
     return manifold;
+}
+
+static Manifold createFaceContact(FaceQuery faceQueryA, const HullState &a,
+                                  FaceQuery faceQueryB, const HullState &b,
+                                  void *a_tmp_buf, void *b_tmp_buf,
+                                  Vector3 world_offset, Quat to_world_frame)
+{
+    // Determine minimizing face
+    bool a_is_ref = faceQueryA.separation > faceQueryB.separation;
+    const FaceQuery &minimizing_query = a_is_ref ? faceQueryA : faceQueryB;
+
+    const HullState &ref_hull = a_is_ref ? a : b;
+    const HullState &other_hull = a_is_ref ? b : a;
+
+    auto ref_tmp_buf = (Vector3 *)(a_is_ref ? a_tmp_buf : b_tmp_buf);
+    auto other_tmp_buf = (Vector3 *)(a_is_ref ? b_tmp_buf : a_tmp_buf);
+
+    CountT ref_face_idx = minimizing_query.faceIdx;
+    Plane ref_plane = ref_hull.facePlanes[ref_face_idx];
+
+    // Find incident face
+    CountT incident_face_idx = findIncidentFace(other_hull, ref_plane.normal);
+
+    // Collect incident vertices
+    CountT other_tmp_offset = 0;
+    {
+        CountT hedge_idx = other_hull.faceEdgeIndices[incident_face_idx];
+        CountT start_hedge_idx = hedge_idx;
+
+        do {
+            const auto &cur_hedge = other_hull.halfEdges[hedge_idx];
+            hedge_idx = cur_hedge.next;
+
+            Vector3 cur_point = other_hull.vertices[cur_hedge.rootVertex];
+            other_tmp_buf[other_tmp_offset++] = cur_point;
+        } while (hedge_idx != start_hedge_idx);
+    }
+
+    Vector3 *clipping_input = other_tmp_buf;
+    CountT num_clipped_vertices = other_tmp_offset;
+
+    Vector3 *clipping_dst = ref_tmp_buf;
+
+    // max output vertices is num_incident_vertices + num planes
+    // but we don't know num planes ahead of time without iterating
+    // through the reference face twice! Alternative would be to cache the
+    // side planes, or store max face size in each mesh. The worst case
+    // buffer sizes here is just the sum of the max face sizes - 1
+
+    // FIXME, this code assumes that clipping_input & clippinst_dst have space
+    // to write incident_vertices + num_planes new vertices
+
+    // Loop over side planes
+    {
+        CountT hedge_idx = ref_hull.faceEdgeIndices[ref_face_idx];
+        CountT start_hedge_idx = hedge_idx;
+
+        auto *cur_hedge = &ref_hull.halfEdges[hedge_idx];
+        Vector3 cur_point = ref_hull.vertices[cur_hedge->rootVertex];
+        do {
+            hedge_idx = cur_hedge->next;
+            cur_hedge = &ref_hull.halfEdges[hedge_idx];
+            Vector3 next_point = ref_hull.vertices[cur_hedge->rootVertex];
+
+            Vector3 edge = next_point - cur_point;
+            Vector3 plane_normal = cross(edge, ref_plane.normal);
+
+            float d = dot(plane_normal, cur_point);
+            cur_point = next_point;
+
+            Plane side_plane {
+                plane_normal,
+                d,
+            };
+
+            num_clipped_vertices = clipPolygon(
+                clipping_dst, side_plane, clipping_input, num_clipped_vertices);
+
+            std::swap(clipping_dst, clipping_input);
+        } while (hedge_idx != start_hedge_idx);
+    }
+
+    // clipping_input has the result due to the final swap
+
+    // Filter clipping_input to ones below ref_plane and save penetration depth
+    float *penetration_depths = (float *)clipping_dst;
+
+    for (CountT i = 0; i < num_clipped_vertices; ++i) {
+        Vector3 vertex = clipping_input[i];
+        if (float d = getDistanceFromPlane(ref_plane, vertex); d < 0.0f) {
+            // Project the point onto the reference plane (d guaranteed to be negative)
+            clipping_input[i] = vertex - d * ref_plane.normal;
+            penetration_depths[i] = -d;
+        }
+    }
+
+    return buildFaceContactManifold(ref_plane.normal, clipping_input,
+                                    penetration_depths, num_clipped_vertices,
+                                    a_is_ref, world_offset, to_world_frame);
+}
+
+static Manifold createFaceContactPlane(const HullState &h,
+                                       Plane plane,
+                                       Vector3 *contacts_tmp,
+                                       float *penetration_depths_tmp,
+                                       Vector3 world_offset,
+                                       Quat to_world_frame)
+{
+    // Find incident face
+    CountT incident_face_idx = findIncidentFace(h, plane.normal);
+
+    // Collect incident vertices
+    CountT num_incident_vertices = 0;
+    {
+        CountT hedge_idx = h.faceEdgeIndices[incident_face_idx];
+        CountT start_hedge_idx = hedge_idx;
+
+        do {
+            const auto &cur_hedge = h.halfEdges[hedge_idx];
+            hedge_idx = cur_hedge.next;
+            Vector3 vertex = h.vertices[cur_hedge.rootVertex];
+
+            if (float d = getDistanceFromPlane(plane, vertex); d < 0.0f) {
+                // Project the point onto the reference plane
+                // (d guaranteed to be negative)
+                contacts_tmp[num_incident_vertices] =
+                    vertex - d * plane.normal;
+                penetration_depths_tmp[num_incident_vertices] = -d;
+            }
+
+            num_incident_vertices += 1;
+        } while (hedge_idx != start_hedge_idx);
+    }
+
+    return buildFaceContactManifold(plane.normal, contacts_tmp,
+        penetration_depths_tmp, num_incident_vertices, false,
+        world_offset, to_world_frame);
 }
 
 static Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2)
@@ -513,30 +613,34 @@ static Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2)
 }
 
 static Manifold createEdgeContact(const EdgeQuery &query,
-                                  const CollisionMesh &a,
-                                  const CollisionMesh &b)
+                                  const HullState &a,
+                                  const HullState &b,
+                                  Vector3 world_offset,
+                                  Quat to_world_frame)
 {
-    Segment segA = a.halfEdgeMesh->getEdgeSegment(a.halfEdgeMesh->edge(query.edgeIdxA), a.vertices);
-    Segment segB = b.halfEdgeMesh->getEdgeSegment(b.halfEdgeMesh->edge(query.edgeIdxB), b.vertices);
+    Segment segA = getEdgeSegment(a, a.halfEdges[query.edgeIdxA]);
+    Segment segB = getEdgeSegment(b, b.halfEdges[query.edgeIdxB]);
 
     Segment s = shortestSegmentBetween(segA, segB);
-    Vector3 contact = 0.5f * (s.p1 + s.p2);
+    Vector3 contact =
+        to_world_frame.rotateVec(0.5f * (s.p1 + s.p2)) + world_offset;
     float depth = (s.p2 - s.p1).length() / 2.0f;
 
     Manifold manifold;
-    manifold.contactPoints[0] = makeVector4(contact, depth);
+    manifold.contactPoints[0] = contact,
+    manifold.penetrationDepths[0] = depth;
     manifold.numContactPoints = 1;
-    manifold.normal = query.normal;
-    manifold.aIsReference = true; // Is this guaranteed?
+    manifold.normal = to_world_frame.rotateVec(query.normal);
     
-    if (manifold.normal.dot(contact - a.center) < 0.0f) {
-        manifold.aIsReference = false;
-    }
+    // Normal always points towards object A 
+    manifold.aIsReference = true;
 
     return manifold;
 }
 
-Manifold doSAT(Context &ctx, const CollisionMesh &a, const CollisionMesh &b)
+Manifold doSAT(const HullState &a, const HullState &b,
+               void *a_tmp_buf, void *b_tmp_buf,
+               Vector3 world_offset, Quat to_world_frame)
 {
     Manifold manifold;
     manifold.numContactPoints = 0;
@@ -564,113 +668,35 @@ Manifold doSAT(Context &ctx, const CollisionMesh &a, const CollisionMesh &b)
 
     if (bIsFaceContactA || bIsFaceContactB) {
         // Create face contact
-        manifold = createFaceContact(ctx, faceQueryA, a, faceQueryB, b);
+        manifold = createFaceContact(faceQueryA, a, faceQueryB, b,
+                                     a_tmp_buf, b_tmp_buf,
+                                     world_offset, to_world_frame);
     }
     else {
         // Create edge contact
-        manifold = createEdgeContact(edgeQuery, a, b);
+        manifold = createEdgeContact(edgeQuery, a, b,
+                                     world_offset, to_world_frame);
     }
 
     return manifold;
 }
 
-Manifold doSATPlane(Context &ctx, const Plane &plane, const CollisionMesh &a)
+Manifold doSATPlane(const Plane &plane, const HullState &h,
+                    void *tmp_buffer1, void *tmp_buffer2,
+                    Vector3 world_offset, Quat to_world_frame)
 {
     Manifold manifold;
     manifold.numContactPoints = 0;
 
-    FaceQuery faceQuery = queryFaceDirectionsPlane(plane, a);
+    FaceQuery faceQuery = queryFaceDirectionsPlane(plane, h);
 
     if (faceQuery.separation > 0.0f) {
         return manifold;
     }
 
-    return createFaceContactPlane(ctx, plane, a);
-}
-
-// Builds a transform matrix that transforms from src local space to
-// dst local space
-static inline Mat3x4 computeLocalToLocalTransform(
-    Vector3 dst_pos, Quat dst_rot, Diag3x3 dst_scale,
-    Vector3 src_pos, Quat src_rot, Diag3x3 src_scale)
-{
-    // FIXME: add a code path for uniform scale (common case)
-    Diag3x3 inv_dst_scale = dst_scale.inv();
-    Quat inv_dst_rot = dst_rot.inv();
-
-    Vector3 to_dst_translation =
-        inv_dst_scale * inv_dst_rot.rotateVec(src_pos - dst_pos);
-    
-    Quat to_dst_rot = inv_dst_rot * src_rot;
-
-    float x2 = to_dst_rot.x * to_dst_rot.x;
-    float y2 = to_dst_rot.y * to_dst_rot.y;
-    float z2 = to_dst_rot.z * to_dst_rot.z;
-    float xz = to_dst_rot.x * to_dst_rot.z;
-    float xy = to_dst_rot.x * to_dst_rot.y;
-    float yz = to_dst_rot.y * to_dst_rot.z;
-    float wx = to_dst_rot.w * to_dst_rot.x;
-    float wy = to_dst_rot.w * to_dst_rot.y;
-    float wz = to_dst_rot.w * to_dst_rot.z;
-
-    Diag3x3 src_scale2 = 2.f * src_scale;
-
-    return {{
-       { 
-            inv_dst_scale.d0 * (src_scale.d0 - src_scale2.d0 * (y2 + z2)),
-            inv_dst_scale.d1 * src_scale2.d0 * (xy + wz),
-            inv_dst_scale.d2 * src_scale2.d0 * (xz - wy),
-        },
-        {
-            inv_dst_scale.d0 * src_scale2.d1 * (xy - wz),
-            inv_dst_scale.d1 * (src_scale.d1 - src_scale2.d1 * (x2 + z2)),
-            inv_dst_scale.d2 * src_scale2.d1 * (yz + wx),
-        },
-        {
-            inv_dst_scale.d0 * src_scale2.d2 * (xz + wy),
-            inv_dst_scale.d1 * src_scale2.d2 * (yz - wx),
-            inv_dst_scale.d2 * (src_scale.d2 - src_scale2.d2 * (x2 + y2)),
-        },
-        to_dst_translation,
-    }};
-}
-
-static inline geometry::CollisionMesh buildRelativeCollisionMesh(
-    Context &ctx,
-    const geometry::HalfEdgeMesh &he_mesh,
-    // dst_space is for a, src_space is for b
-    const ObjectTransform &dst_space, const ObjectTransform &src_space)
-{
-    Mat3x4 src_to_dst = computeLocalToLocalTransform(
-        dst_space.pos, dst_space.rot, dst_space.sca,
-        src_space.pos, src_space.rot, src_space.sca);
-
-    geometry::CollisionMesh collision_mesh;
-    collision_mesh.halfEdgeMesh = &he_mesh;
-    collision_mesh.vertexCount = he_mesh.getVertexCount();
-    collision_mesh.vertices = (Vector3 *)ctx.tmpAlloc(
-        sizeof(math::Vector3) * collision_mesh.vertexCount);
-    collision_mesh.center = src_to_dst.cols[3];
-
-    for (CountT v = 0; v < (CountT)collision_mesh.vertexCount; ++v) {
-        collision_mesh.vertices[v] = src_to_dst.txfmPoint(he_mesh.vertex(v));
-    }
-
-    return collision_mesh;
-}
-
-static inline geometry::CollisionMesh buildLocalCollisionMesh(
-    Context &ctx,
-    const geometry::HalfEdgeMesh &he_mesh)
-{
-    geometry::CollisionMesh collision_mesh = {};
-    collision_mesh.halfEdgeMesh = &he_mesh;
-    collision_mesh.vertexCount = he_mesh.getVertexCount();
-    // No transformation needed
-    collision_mesh.vertices = (Vector3 *)he_mesh.vertices();
-    collision_mesh.center = {0.0f, 0.0f, 0.0f};
-
-    return collision_mesh;
+    return createFaceContactPlane(h, plane,
+                                  (Vector3 *)tmp_buffer1, (float *)tmp_buffer2,
+                                  world_offset, to_world_frame);
 }
 
 static inline void addContactsToSolver(SolverData &solver_data,
@@ -688,41 +714,23 @@ static inline void addContactsToSolver(SolverData &solver_data,
 
 static inline void addManifoldToSolver(SolverData &solver_data,
                                        Manifold manifold,
-                                       Vector3 a_translation,
-                                       Quat a_rotation,
-                                       Diag3x3 a_scale,
-                                       Entity a_entity,
-                                       Entity b_entity)
+                                       Entity a_entity, Entity b_entity)
 {
-    Mat3x4 a_o2w = Mat3x4::fromTRS(a_translation, a_rotation, a_scale);
-    
-    Vector3 normal_world = a_o2w.txfmDir(manifold.normal);
-    float inv_normal_world_len = normal_world.invLength();
-    
-    for (CountT i = 0; i < manifold.numContactPoints; i++) {
-        Vector3 contact_world =
-            a_o2w.txfmPoint(manifold.contactPoints[i].xyz());
-
-        // This computation assumes that manifold.normal was normalized
-        // before being transformed. If not, we'd have to take the ratio
-        // between the pre and post transform normal lengths
-        float depth_world = manifold.contactPoints[i].w * inv_normal_world_len;
-    
-        manifold.contactPoints[i] =
-            Vector4::fromVector3(contact_world, depth_world);
-    }
-    
     addContactsToSolver(solver_data, {{
         manifold.aIsReference ? a_entity : b_entity,
         manifold.aIsReference ? b_entity : a_entity,
         {
-            manifold.contactPoints[0],
-            manifold.contactPoints[1],
-            manifold.contactPoints[2],
-            manifold.contactPoints[3],
+            Vector4::fromVector3(manifold.contactPoints[0],
+                                 manifold.penetrationDepths[0]),
+            Vector4::fromVector3(manifold.contactPoints[1],
+                                 manifold.penetrationDepths[1]),
+            Vector4::fromVector3(manifold.contactPoints[2],
+                                 manifold.penetrationDepths[2]),
+            Vector4::fromVector3(manifold.contactPoints[3],
+                                 manifold.penetrationDepths[3]),
         },
         manifold.numContactPoints,
-        normal_world * inv_normal_world_len,
+        manifold.normal,
         {},
     }});
 }
@@ -731,6 +739,16 @@ inline void runNarrowphase(
     Context &ctx,
     const CandidateCollision &candidate_collision)
 {
+#ifdef MADRONA_GPU_MODE
+    assert(false);
+#else
+    Vector3 tmp_vertices_buffer[512];
+    Plane tmp_faces_buffer[512];
+
+    Vector3 *tmp_vertices = tmp_vertices_buffer;
+    Plane *tmp_faces = tmp_faces_buffer;
+#endif
+
     Entity a_entity = candidate_collision.a;
     Entity b_entity = candidate_collision.b;
 
@@ -770,6 +788,7 @@ inline void runNarrowphase(
         AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
 
         if (!a_world_aabb.overlaps(b_world_aabb)) {
+            printf("Early AABB exit\n");
             return;
         }
     }
@@ -814,22 +833,21 @@ inline void runNarrowphase(
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
         const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
 
-        // A is in local space
-        geometry::CollisionMesh a_collision_mesh =
-            buildLocalCollisionMesh(ctx, a_he_mesh);
+        HullState a_hull_state = makeHullState(a_he_mesh, a_pos, a_rot, a_scale,
+            tmp_vertices, tmp_faces);
 
-        // B has to be converted to A's space
-        geometry::CollisionMesh b_collision_mesh = buildRelativeCollisionMesh(
-            ctx, 
-            b_he_mesh, 
-            {a_pos, a_rot, a_scale},
-            {b_pos, b_rot, b_scale});
+        tmp_vertices += a_hull_state.numVertices;
+        tmp_faces += a_hull_state.numFaces;
 
-        Manifold manifold = doSAT(ctx, a_collision_mesh, b_collision_mesh);
+        HullState b_hull_state = makeHullState(b_he_mesh, b_pos, b_rot, b_scale,
+            tmp_vertices, tmp_faces);
+
+        Manifold manifold = doSAT(a_hull_state, b_hull_state,
+            (void *)a_hull_state.facePlanes, (void *)b_hull_state.facePlanes, // FIXME: if these aren't transformed we can't pass as temporaries!!
+            {0, 0, 0}, {1, 0, 0, 0});
 
         if (manifold.numContactPoints > 0) {
             addManifoldToSolver(solver, manifold,
-                                a_pos, a_rot, a_scale,
                                 a_entity, b_entity);
         }
     } break;
@@ -878,25 +896,34 @@ inline void runNarrowphase(
     case NarrowphaseTest::HullPlane: {
         // Get half edge mesh for entity a (the hull)
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
-        
-        geometry::CollisionMesh a_collision_mesh =
-            buildLocalCollisionMesh(ctx, a_he_mesh);
 
-        // FIXME: not strictly necessary to build this entire matrix here
-        Mat3x4 to_a_local = computeLocalToLocalTransform(
-            a_pos, a_rot, a_scale, b_pos, b_rot, b_scale);
+        HullState a_hull_state = makeHullState(a_he_mesh, a_pos, a_rot,
+            a_scale, tmp_vertices, tmp_faces);
+        
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
-        Vector3 txfmed_normal = to_a_local.txfmDir(base_normal).normalize();
-        Vector3 txfmed_point = to_a_local.txfmPoint(b_pos);
+#if 0
+        Quat inv_a_rot = a_rot.inv();
+        Vector3 plane_origin_a_local = inv_a_rot.rotateVec(b_pos - a_pos);
+        Quat to_a_local_rot = (inv_a_rot * b_rot).normalize();
 
-        geometry::Plane plane { txfmed_normal, dot(txfmed_normal, txfmed_point) };
+        Vector3 plane_normal_a_local =
+            (to_a_local_rot.rotateVec(base_normal)).normalize();
+#endif
 
-        Manifold manifold = doSATPlane(ctx, plane, a_collision_mesh);
+        Vector3 plane_normal = b_rot.rotateVec(base_normal);
+            
+        geometry::Plane plane {
+            plane_normal,
+            dot(plane_normal, b_pos),
+        };
+
+        Manifold manifold = doSATPlane(plane, a_hull_state,
+            tmp_faces, tmp_faces + a_hull_state.numFaces,
+            {0, 0, 0}, {1, 0, 0, 0});
 
         if (manifold.numContactPoints > 0) {
             addManifoldToSolver(solver, manifold,
-                                a_pos, a_rot, a_scale,
                                 a_entity, b_entity);
         }
     } break;

@@ -12,6 +12,7 @@ struct PhysicsLoader::Impl {
 
     // For half edge meshes
     geometry::PolygonData *polygonDatas;
+    geometry::Plane *facePlanes;
     geometry::EdgeData *edgeDatas;
     geometry::HalfEdge *halfEdges;
     math::Vector3 *vertices;
@@ -48,6 +49,9 @@ struct PhysicsLoader::Impl {
         size_t num_polygon_bytes =
             sizeof(geometry::PolygonData) * max_objects * max_polygons_per_object; 
 
+        size_t num_face_plane_bytes =
+            sizeof(geometry::Plane) * max_objects * max_polygons_per_object; 
+
         size_t num_edges_bytes =
             sizeof(geometry::EdgeData) * max_objects * max_edges_per_object; 
 
@@ -58,6 +62,7 @@ struct PhysicsLoader::Impl {
         math::AABB *aabb_ptr;
         CollisionPrimitive *primitives;
         geometry::PolygonData *polygonDatas_ptr;
+        geometry::Plane *facePlanes_ptr;
         geometry::EdgeData *edgeDatas_ptr;
         geometry::HalfEdge *halfEdges_ptr;
         math::Vector3 *vertices_ptr;
@@ -72,6 +77,7 @@ struct PhysicsLoader::Impl {
             primitives = (CollisionPrimitive *)malloc(num_primitive_bytes);
 
             polygonDatas_ptr = (geometry::PolygonData *)malloc(num_polygon_bytes);
+            facePlanes_ptr = (geometry::Plane *)malloc(num_face_plane_bytes);
             edgeDatas_ptr = (geometry::EdgeData *)malloc(num_edges_bytes);
             halfEdges_ptr = (geometry::HalfEdge *)malloc(num_half_edges_bytes);
             vertices_ptr = (math::Vector3 *)malloc(num_vertices_bytes);
@@ -81,6 +87,7 @@ struct PhysicsLoader::Impl {
                 aabb_ptr,
                 primitives,
                 polygonDatas_ptr,
+                facePlanes_ptr,
                 edgeDatas_ptr,
                 halfEdges_ptr,
                 vertices_ptr
@@ -94,6 +101,7 @@ struct PhysicsLoader::Impl {
                 (CollisionPrimitive *)cu::allocGPU(num_primitive_bytes);
 
             polygonDatas_ptr = (geometry::PolygonData *)cu::allocGPU(num_polygon_bytes);
+            facePlanes_ptr = (geometry::Plane *)cu::allocGPU(num_face_plane_bytes);
             edgeDatas_ptr = (geometry::EdgeData *)cu::allocGPU(num_edges_bytes);
             halfEdges_ptr = (geometry::HalfEdge *)cu::allocGPU(num_half_edges_bytes);
             vertices_ptr = (math::Vector3 *)cu::allocGPU(num_vertices_bytes);
@@ -105,6 +113,7 @@ struct PhysicsLoader::Impl {
                 aabb_ptr,
                 primitives,
                 polygonDatas_ptr,
+                facePlanes_ptr,
                 edgeDatas_ptr,
                 halfEdges_ptr,
                 vertices_ptr
@@ -121,6 +130,7 @@ struct PhysicsLoader::Impl {
             .aabbs = aabb_ptr,
             .primitives = primitives,
             .polygonDatas = polygonDatas_ptr,
+            .facePlanes = facePlanes_ptr,
             .edgeDatas = edgeDatas_ptr,
             .halfEdges = halfEdges_ptr,
             .vertices = vertices_ptr,
@@ -153,6 +163,7 @@ PhysicsLoader::~PhysicsLoader()
         free(impl_->aabbs);
         free(impl_->metadatas);
         free(impl_->polygonDatas);
+        free(impl_->facePlanes);
         free(impl_->edgeDatas);
         free(impl_->halfEdges);
         free(impl_->vertices);
@@ -163,6 +174,7 @@ PhysicsLoader::~PhysicsLoader()
         cu::deallocGPU(impl_->aabbs);
         cu::deallocGPU(impl_->metadatas);
         cu::deallocGPU(impl_->polygonDatas);
+        cu::deallocGPU(impl_->facePlanes);
         cu::deallocGPU(impl_->edgeDatas);
         cu::deallocGPU(impl_->halfEdges);
         cu::deallocGPU(impl_->vertices);
@@ -244,6 +256,9 @@ CountT PhysicsLoader::loadObjects(
     CollisionPrimitive *primitives = (CollisionPrimitive *)malloc(sizeof(CollisionPrimitive) * num_objs);
     memcpy(primitives, primitives_original, sizeof(CollisionPrimitive) * num_objs);
 
+    // FIXME: This function seems to leak all the pre-compaction mesh memory
+    // compaction
+
     switch (impl_->storageType) {
     case StorageType::CPU: {
         for (int i = 0; i < num_objs; ++i) {
@@ -254,6 +269,14 @@ CountT PhysicsLoader::loadObjects(
                     hEdgeMesh.mPolygons,
                     sizeof(geometry::PolygonData) * hEdgeMesh.mPolygonCount);
                 hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
+
+                memcpy(
+                    impl_->facePlanes + impl_->polygonCount,
+                    hEdgeMesh.mFacePlanes,
+                    sizeof(geometry::Plane) * hEdgeMesh.mPolygonCount);
+                hEdgeMesh.mFacePlanes =
+                    impl_->facePlanes + impl_->polygonCount;
+
                 impl_->polygonCount += hEdgeMesh.mPolygonCount;
 
                 memcpy(
@@ -294,6 +317,14 @@ CountT PhysicsLoader::loadObjects(
                     sizeof(geometry::PolygonData) * hEdgeMesh.mPolygonCount,
                     cudaMemcpyHostToDevice);
                 hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
+
+                cudaMemcpy(
+                    impl_->facePlanes + impl_->polygonCount,
+                    hEdgeMesh.mFacePlanes,
+                    sizeof(geometry::Plane) * hEdgeMesh.mPolygonCount,
+                    cudaMemcpyHostToDevice);
+                hEdgeMesh.mFacePlanes =
+                    impl_->facePlanes + impl_->polygonCount;
                 impl_->polygonCount += hEdgeMesh.mPolygonCount;
 
                 cudaMemcpy(
