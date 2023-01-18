@@ -792,7 +792,6 @@ inline void runNarrowphase(
         AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
 
         if (!a_world_aabb.overlaps(b_world_aabb)) {
-            printf("Early AABB exit\n");
             return;
         }
     }
