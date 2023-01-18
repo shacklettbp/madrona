@@ -6,8 +6,7 @@
  * https://opensource.org/licenses/MIT.
  */
 #include <madrona/state.hpp>
-
-#include "megakernel_consts.hpp"
+#include <madrona/mw_gpu/megakernel_consts.hpp>
 
 namespace madrona {
 

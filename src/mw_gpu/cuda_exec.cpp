@@ -213,7 +213,7 @@ private:
 }
 }
 
-#include "device/megakernel_consts.hpp"
+#include "device/include/madrona/mw_gpu/megakernel_consts.hpp"
 
 namespace madrona {
 

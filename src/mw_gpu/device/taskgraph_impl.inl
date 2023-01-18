@@ -3,8 +3,7 @@
 #include <madrona/memory.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 #include <madrona/mw_gpu/tracing.hpp>
-
-#include "megakernel_consts.hpp"
+#include <madrona/mw_gpu/megakernel_consts.hpp>
 
 namespace madrona {
 

@@ -6,6 +6,7 @@
 #include <cuda/atomic>
 
 #include <madrona/sync.hpp>
+#include <madrona/mw_gpu/megakernel_consts.hpp>
 
 #include "mw_gpu/const.hpp"
 
@@ -115,6 +116,8 @@ namespace SharedMemStorage {
     // Use a bit lower than max smem here as there are a few
     // random places using their own smem allocations
     inline constexpr uint64_t numSMemBytes = 15040;
+    inline constexpr uint64_t numSMemBytesPerWarp =
+        numSMemBytes / (consts::numMegakernelThreads / 32);
     extern __shared__ Chunk buffer[
         numSMemBytes / sizeof(Chunk)];
 };

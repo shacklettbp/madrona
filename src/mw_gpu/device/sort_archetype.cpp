@@ -1,7 +1,7 @@
 #pragma once
 
 #include <madrona/taskgraph.hpp>
-#include "megakernel_consts.hpp"
+#include <madrona/mw_gpu/megakernel_consts.hpp>
 
 #include <cub/block/block_radix_sort.cuh>
 #include <cub/block/radix_rank_sort_operations.cuh>

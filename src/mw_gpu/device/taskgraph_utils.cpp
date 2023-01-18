@@ -1,6 +1,5 @@
 #include <madrona/taskgraph.hpp>
-
-#include "megakernel_consts.hpp"
+#include <madrona/mw_gpu/megakernel_consts.hpp>
 
 namespace madrona {
 

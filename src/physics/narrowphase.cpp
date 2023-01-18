@@ -759,18 +759,55 @@ static inline void addManifoldToSolver(SolverData &solver_data,
     }});
 }
 
+#ifdef MADRONA_GPU_MODE
+namespace gpuImpl {
+inline constexpr int32_t numSMemFloats =
+    mwGPU::SharedMemStorage::numSMemBytesPerWarp / sizeof(float);
+
+// FIXME: do something actually intelligent here
+inline constexpr int32_t maxNumPlanes = 40;
+inline constexpr int32_t numPlaneFloats = maxNumPlanes * 4;
+inline constexpr int32_t numVertexFloats =
+    numSMemFloats - numPlaneFloats;
+inline constexpr int32_t maxNumVertices = numVertexFloats / 3;
+}
+#endif
+
 inline void runNarrowphase(
     Context &ctx,
     const CandidateCollision &candidate_collision)
 {
 #ifdef MADRONA_GPU_MODE
-    assert(false);
-#else
-    Vector3 tmp_vertices_buffer[512];
-    Plane tmp_faces_buffer[512];
+    int32_t mwgpu_warp_id = threadIdx.x / 32;
+    int32_t mwgpu_lane_id = threadIdx.x % 32;
 
-    Vector3 *tmp_vertices = tmp_vertices_buffer;
+    if (mwgpu_lane_id != 0) {
+        return;
+    }
+
+    Plane *tmp_faces;
+    Vector3 *tmp_vertices;
+    constexpr int32_t max_num_tmp_faces = gpuImpl::maxNumPlanes;
+    constexpr int32_t max_num_tmp_vertices =
+        gpuImpl::maxNumVertices;
+    {
+        auto smem_buf = (char *)mwGPU::SharedMemStorage::buffer;
+        char *warp_smem_base = smem_buf + 
+            mwGPU::SharedMemStorage::numSMemBytesPerWarp * mwgpu_warp_id;
+
+        tmp_faces = (Plane *)warp_smem_base;
+        tmp_vertices = (Vector3 *)(tmp_faces + gpuImpl::maxNumPlanes);
+    }
+
+#else
+    constexpr int32_t max_num_tmp_faces = 512;
+    constexpr int32_t max_num_tmp_vertices = 512;
+
+    Plane tmp_faces_buffer[max_num_tmp_faces];
+    Vector3 tmp_vertices_buffer[max_num_tmp_vertices];
+
     Plane *tmp_faces = tmp_faces_buffer;
+    Vector3 *tmp_vertices = tmp_vertices_buffer;
 #endif
 
     Entity a_entity = candidate_collision.a;
@@ -856,6 +893,12 @@ inline void runNarrowphase(
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
         const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
 
+        assert(a_he_mesh.mPolygonCount + b_he_mesh.mPolygonCount < 
+               max_num_tmp_faces);
+
+        assert(a_he_mesh.mVertexCount + b_he_mesh.mVertexCount < 
+               max_num_tmp_vertices);
+
         HullState a_hull_state = makeHullState(a_he_mesh, a_pos, a_rot, a_scale,
             tmp_vertices, tmp_faces);
 
@@ -920,8 +963,12 @@ inline void runNarrowphase(
         // Get half edge mesh for entity a (the hull)
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
 
+        assert(a_he_mesh.mPolygonCount < max_num_tmp_faces);
+        assert(a_he_mesh.mVertexCount <  max_num_tmp_vertices);
+
         HullState a_hull_state = makeHullState(a_he_mesh, a_pos, a_rot,
             a_scale, tmp_vertices, tmp_faces);
+
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
 #if 0
@@ -957,8 +1004,13 @@ TaskGraph::NodeID setupTasks(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
+#ifdef MADRONA_GPU_MODE
+    auto narrowphase = builder.addToGraph<CustomParallelForNode<Context,
+        runNarrowphase, 32, CandidateCollision>>(deps);
+#else
     auto narrowphase = builder.addToGraph<ParallelForNode<Context,
         runNarrowphase, CandidateCollision>>(deps);
+#endif
 
     // FIXME do some kind of scoped reset on tmp alloc
     return builder.addToGraph<ResetTmpAllocNode>({narrowphase});
