@@ -6,6 +6,7 @@
 
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/cu_utils.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
 #endif
 
 namespace madrona::phys::narrowphase {
@@ -159,15 +160,6 @@ static inline float getDistanceFromPlane(
 {
     float adotn = a.dot(plane.normal);
     return (adotn - plane.d);
-}
-
-// Need to be normalized
-static inline bool areParallel(const math::Vector3 &a,
-                               const math::Vector3 &b)
-{
-    float d = fabsf(a.dot(b));
-
-    return fabsf(d - 1.0f) < 0.0001f;
 }
 
 // Get intersection on plane of the line passing through 2 points
@@ -395,14 +387,24 @@ static inline EdgeTestResult edgeDistance(
     Vector3 dir_a = segment_a.p2 - segment_a.p1;
     Vector3 dir_b = segment_b.p2 - segment_b.p1;
 
-    if (areParallel(dir_a, dir_b)) {
+    Vector3 unnormalized_cross = dir_a.cross(dir_b);
+    float normal_len2 = unnormalized_cross.length2();
+
+    if (normal_len2 == 0) {
         EdgeTestResult result;
         result.separation = -FLT_MAX;
 
         return result;
     }
 
-    math::Vector3 normal = dir_a.cross(dir_b).normalize();
+    float inv_normal_len = 
+#ifdef MADRONA_GPU_MODE
+        rsqrtf(normal_len2);
+#else
+        1.f / sqrtf(normal_len2);
+#endif
+
+    math::Vector3 normal = unnormalized_cross * inv_normal_len;
 
     if (normal.dot(segment_a.p1 - a.center) < 0.0f) {
         normal = -normal;
