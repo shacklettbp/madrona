@@ -5,16 +5,14 @@
 namespace madrona {
 namespace mwGPU {
 
-namespace consts {
 constexpr inline uint32_t numWarpThreads = 32;
-constexpr inline uint32_t allActive = 0xFFFFFFFF;
-}
+constexpr inline uint32_t allActive = 0xFFFF'FFFF;
 
 inline uint32_t warpAllInclusiveScan(uint32_t lane_id, uint32_t val)
 {
 #pragma unroll
-    for (int i = 1; i < consts::numWarpThreads; i *= 2) {
-        int tmp = __shfl_up_sync(consts::allActive, val, i);
+    for (int i = 1; i < numWarpThreads; i *= 2) {
+        int tmp = __shfl_up_sync(allActive, val, i);
         if ((int)lane_id >= i) {
             val += tmp;
         }

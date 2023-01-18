@@ -4,6 +4,10 @@
 
 #include "physics_impl.hpp"
 
+#ifdef MADRONA_GPU_MODE
+#include <madrona/mw_gpu/cu_utils.hpp>
+#endif
+
 namespace madrona::phys::narrowphase {
 
 using namespace base;
@@ -52,6 +56,7 @@ struct Manifold {
 };
 
 static HullState makeHullState(
+    MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
     const math::Vector3 *obj_vertices,
     const Plane *obj_planes,
     const HalfEdge *half_edges,
@@ -84,13 +89,21 @@ static HullState makeHullState(
     Mat3x3 vertex_txfm = unscaled_rot * scale;
     Mat3x3 normal_txfm = unscaled_rot * scale.inv();
 
-    for (CountT i = 0; i < num_vertices; i++) {
+#ifdef MADRONA_GPU_MODE
+    const CountT start_offset = mwgpu_lane_id;
+    constexpr CountT elems_per_iter = mwGPU::numWarpThreads;
+#else
+    constexpr CountT start_offset = 0;
+    constexpr CountT elems_per_iter = 1;
+#endif
+
+    for (CountT i = start_offset; i < num_vertices; i += elems_per_iter) {
         dst_vertices[i] = vertex_txfm * obj_vertices[i] + translation;
     }
 
     // FIXME: could significantly optimize this with a uniform scale
     // version
-    for (CountT i = 0; i < num_faces; i++) {
+    for (CountT i = start_offset; i < num_faces; i += elems_per_iter) {
         Plane obj_plane = obj_planes[i];
         Vector3 plane_origin =
             vertex_txfm * (obj_plane.normal * obj_plane.d) + translation;
@@ -118,6 +131,7 @@ static HullState makeHullState(
 }
 
 static HullState makeHullState(
+    MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
     const geometry::HalfEdgeMesh &he_mesh,
     Vector3 translation,
     Quat rotation,
@@ -126,6 +140,7 @@ static HullState makeHullState(
     Plane *dst_planes)
 {
     return makeHullState(
+        MADRONA_GPU_COND(mwgpu_lane_id,)
         he_mesh.mVertices,
         he_mesh.mFacePlanes,
         he_mesh.mHalfEdges,
@@ -180,28 +195,139 @@ static Vector3 findFurthestPoint(const HullState &h,
     return furthest;
 }
 
-static float getHullDistanceFromPlane(const Plane &plane,
-                                          const HullState &h) {
-    math::Vector3 supportA = findFurthestPoint(h, -plane.normal);
-    float distance = getDistanceFromPlane(plane, supportA);
+#ifdef MADRONA_GPU_MODE
 
-    return distance;
+static inline MADRONA_ALWAYS_INLINE std::pair<float, int32_t> 
+warpFloatMaxAndIdx(float val, int32_t idx)
+{
+#pragma unroll
+    for (int32_t w = 16; w >= 1; w /= 2) {
+        float other_val =
+            __shfl_xor_sync(mwGPU::allActive, val, w);
+        int32_t other_idx =
+            __shfl_xor_sync(mwGPU::allActive, idx, w);
+
+        if (other_val > val) {
+            val = other_val;
+            idx = other_idx;
+        }
+    }
+
+    return { val, idx };
 }
 
-static FaceQuery queryFaceDirections(const HullState &a,
-                                     const HullState &b)
+static inline MADRONA_ALWAYS_INLINE std::pair<float, int32_t>
+warpFloatMinAndIdx(float val, int32_t idx)
 {
+#pragma unroll
+    for (int32_t w = 16; w >= 1; w /= 2) {
+        float other_val =
+            __shfl_xor_sync(mwGPU::allActive, val, w);
+        int32_t other_idx =
+            __shfl_xor_sync(mwGPU::allActive, idx, w);
+
+        if (other_val < val) {
+            val = other_val;
+            idx = other_idx;
+        }
+    }
+
+    return { val, idx };
+}
+
+static Vector3 findFurthestPointWide(
+    const int32_t mwgpu_lane_id,
+    const HullState &h, const math::Vector3 &d)
+{
+    Vector3 furthest;
+    float max_dist = -FLT_MAX;
+
+    const int32_t num_verts = (int32_t)h.numVertices;
+    for (int32_t offset = 0; offset < num_verts; offset += 32) {
+        int32_t idx = offset + mwgpu_lane_id;
+
+        Vector3 vertex;
+        float dp;
+        if (idx < num_verts) {
+            vertex = h.vertices[idx];
+            dp = d.dot(vertex);
+        } else {
+            dp = -FLT_MAX;
+        }
+
+        auto [iter_max, max_lane] = warpFloatMaxAndIdx(dp, idx);
+
+        if (iter_max > max_dist) {
+            max_dist = iter_max;
+            furthest.x =
+                __shfl_sync(mwGPU::allActive, vertex.x, max_lane);
+            furthest.y =
+                __shfl_sync(mwGPU::allActive, vertex.y, max_lane);
+            furthest.z =
+                __shfl_sync(mwGPU::allActive, vertex.z, max_lane);
+        }
+    }
+
+    return furthest;
+}
+#endif
+
+static float getHullDistanceFromPlane(
+    MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
+    const Plane &plane, const HullState &h)
+{
+#ifdef MADRONA_GPU_MODE
+    math::Vector3 supportA = findFurthestPointWide(
+        mwgpu_lane_id, h, -plane.normal);
+#else
+    math::Vector3 supportA = findFurthestPoint(h, -plane.normal);
+#endif
+    
+    return getDistanceFromPlane(plane, supportA);
+}
+
+static FaceQuery queryFaceDirections(
+    MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+    const HullState &a, const HullState &b)
+{
+#ifdef MADRONA_GPU_MODE
+    constexpr CountT elems_per_iter = 32;
+#else
+    constexpr CountT elems_per_iter = 1;
+#endif
+
     int polygonMaxDistance = 0;
     float maxDistance = -FLT_MAX;
 
-    for (CountT i = 0; i < (CountT)a.numFaces; ++i) {
-        Plane plane = a.facePlanes[i];
+    auto distanceFromAFace = [&a, &b](CountT face_idx) {
+        Plane plane = a.facePlanes[face_idx];
         math::Vector3 supportB = findFurthestPoint(b, -plane.normal);
-        float distance = getDistanceFromPlane(plane, supportB);
+        return getDistanceFromPlane(plane, supportB);
+    };
 
-        if (distance > maxDistance) {
-            maxDistance = distance;
-            polygonMaxDistance = i;
+    CountT num_a_faces = (CountT)a.numFaces;
+    for (CountT offset = 0; offset < num_a_faces; offset += elems_per_iter) {
+#ifdef MADRONA_GPU_MODE
+        CountT face_idx = offset + mwgpu_lane_id;
+
+        float face_dist;
+        if (face_idx < num_a_faces) {
+            face_dist = distanceFromAFace(face_idx);
+        } else {
+            face_dist = -FLT_MAX;
+        }
+
+        auto [iter_max_dist, iter_max_idx] =
+            warpFloatMaxAndIdx(face_dist, face_idx);
+#else
+        const CountT face_idx = offset;
+        float iter_max_dist = distanceFromAFace(face_idx);
+        const CountT iter_max_idx = face_idx;
+#endif
+
+        if (iter_max_dist > maxDistance) {
+            maxDistance = iter_max_dist;
+            polygonMaxDistance = iter_max_idx;
         }
     }
 
@@ -254,7 +380,12 @@ static inline bool buildsMinkowskiFace(
     return isMinkowskiFace(aNormal1, aNormal2, -bNormal1, -bNormal2);
 }
 
-static inline Vector4 edgeDistance(
+struct EdgeTestResult {
+    Vector3 normal;
+    float separation;
+};
+
+static inline EdgeTestResult edgeDistance(
         const HullState &a, const HullState &b,
         const HalfEdge &edgeA, const HalfEdge &edgeB)
 {
@@ -265,7 +396,10 @@ static inline Vector4 edgeDistance(
     Vector3 dir_b = segment_b.p2 - segment_b.p1;
 
     if (areParallel(dir_a, dir_b)) {
-        return Vector4::fromVector3({}, -FLT_MAX);
+        EdgeTestResult result;
+        result.separation = -FLT_MAX;
+
+        return result;
     }
 
     math::Vector3 normal = dir_a.cross(dir_b).normalize();
@@ -276,52 +410,136 @@ static inline Vector4 edgeDistance(
 
     float separation = normal.dot(segment_b.p1 - segment_a.p1);
 
-    return Vector4::fromVector3(normal, separation);
+    return {
+        normal,
+        separation,
+    };
 }
 
-static EdgeQuery queryEdgeDirections(const HullState &a, const HullState &b)
+static EdgeQuery queryEdgeDirections(
+    MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+    const HullState &a, const HullState &b)
 {
     Vector3 normal;
     int edgeAMaxDistance = 0;
     int edgeBMaxDistance = 0;
     float maxDistance = -FLT_MAX;
 
+    auto testEdgeSeparation = [&a, &b](const HalfEdge &hedge_a,
+                                       const HalfEdge &hedge_b) {
+        if (buildsMinkowskiFace(a, b, hedge_a, hedge_b)) {
+            return edgeDistance(a, b, hedge_a, hedge_b);
+        } else {
+            EdgeTestResult result;
+            result.separation = -FLT_MAX;
+            return result;
+        }
+    };
+
+
+#ifdef MADRONA_GPU_MODE
+    int32_t a_num_edges = a.numEdges;
+    int32_t b_num_edges = b.numEdges;
+    int32_t num_edge_tests = a_num_edges * b_num_edges;
+    for (int32_t edge_offset_linear = 0; edge_offset_linear < num_edge_tests;
+         edge_offset_linear += 32) {
+        int32_t edge_idx_linear = edge_offset_linear + mwgpu_lane_id;
+        int32_t he_a_idx = edge_idx_linear / a_num_edges;
+        int32_t he_b_idx = edge_idx_linear % a_num_edges;
+
+        EdgeTestResult edge_cmp;
+
+        if (edge_idx_linear >= num_edge_tests ) {
+            edge_cmp.separation = -FLT_MAX;
+        } else {
+            const HalfEdge &hedge_a = a.halfEdges[he_a_idx]; // FIXME
+            const HalfEdge &hedge_b = b.halfEdges[he_b_idx]; // FIXME
+
+            edge_cmp = testEdgeSeparation(hedge_a, hedge_b);
+        }
+
+        auto [iter_max_separation, max_lane_idx] =
+            warpFloatMaxAndIdx(edge_cmp.separation, mwgpu_lane_id);
+
+        if (iter_max_separation > maxDistance) {
+            maxDistance = iter_max_separation;
+            normal.x =  __shfl_sync(mwGPU::allActive,
+                edge_cmp.normal.x, max_lane_idx);
+            normal.y =  __shfl_sync(mwGPU::allActive,
+                edge_cmp.normal.y, max_lane_idx);
+            normal.z =  __shfl_sync(mwGPU::allActive,
+                edge_cmp.normal.z, max_lane_idx);
+
+            edgeAMaxDistance = __shfl_sync(mwGPU::allActive,
+                he_a_idx, max_lane_idx);
+            edgeBMaxDistance = __shfl_sync(mwGPU::allActive,
+                he_b_idx, max_lane_idx);
+        }
+    }
+#else
     for (CountT edgeIdxA = 0; edgeIdxA < (CountT)a.numEdges; ++edgeIdxA) {
         int32_t he_a_idx = a.edgeIndices[edgeIdxA];
-        auto hEdgeA = a.halfEdges[he_a_idx]; // FIXME
+        const HalfEdge &hedge_a = a.halfEdges[he_a_idx]; // FIXME
 
         for (CountT edgeIdxB = 0; edgeIdxB < (CountT)b.numEdges; ++edgeIdxB) {
             int32_t he_b_idx = b.edgeIndices[edgeIdxB];
-            auto hEdgeB = b.halfEdges[he_b_idx]; // FIXME
+            const HalfEdge &hedge_b = b.halfEdges[he_b_idx]; // FIXME
 
-            if (buildsMinkowskiFace(a, b, hEdgeA, hEdgeB)) {
-                Vector4 axis_and_separation = edgeDistance(a, b, hEdgeA, hEdgeB);
+            EdgeTestResult edge_cmp = testEdgeSeparation(hedge_a, hedge_b);
 
-                if (axis_and_separation.w > maxDistance) {
-                    maxDistance = axis_and_separation.w;
-                    normal = axis_and_separation.xyz();
-                    edgeAMaxDistance = he_a_idx;
-                    edgeBMaxDistance = he_b_idx;
-                }
+            if (edge_cmp.separation > maxDistance) {
+                maxDistance = edge_cmp.separation;
+                normal = edge_cmp.normal;
+                edgeAMaxDistance = he_a_idx;
+                edgeBMaxDistance = he_b_idx;
             }
         }
     }
+#endif
 
     return { maxDistance, normal, edgeAMaxDistance, edgeBMaxDistance };
 }
 
-static CountT findIncidentFace(const HullState &h, Vector3 ref_normal)
+static CountT findIncidentFace(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+    const HullState &h, Vector3 ref_normal)
 {
+#ifdef MADRONA_GPU_MODE
+    constexpr CountT elems_per_iter = 32;
+#else
+    constexpr CountT elems_per_iter = 1;
+#endif
+
+    auto computeFaceDotRef = [&h, ref_normal](CountT face_idx) {
+        Plane face_plane = h.facePlanes[face_idx];
+        return dot(face_plane.normal, ref_normal);
+    };
+
     float min_dot = FLT_MAX;
     CountT minimizing_face = -1;
-    for (CountT i = 0; i < (CountT)h.numFaces; ++i) {
-        // FIXME: don't need plane.d here
-        Plane face_plane = h.facePlanes[i];
-        float face_dot_ref = dot(face_plane.normal, ref_normal);
 
-        if (face_dot_ref < min_dot) {
-            min_dot = face_dot_ref;
-            minimizing_face = i;
+    const CountT num_faces = (CountT)h.numFaces;
+    for (CountT offset = 0; offset < num_faces; offset += elems_per_iter) {
+#ifdef MADRONA_GPU_MODE
+        CountT face_idx = offset + mwgpu_lane_id;
+
+        float face_dot_ref;
+        if (face_idx < num_faces) {
+            face_dot_ref = computeFaceDotRef(face_idx);
+        } else{
+            face_dot_ref = FLT_MAX;
+        }
+
+        auto [iter_min, iter_min_idx] =
+            warpFloatMinAndIdx(face_dot_ref, face_idx);
+#else
+        const CountT face_idx = offset;
+        float iter_min = computeFaceDotRef(face_idx);
+        const CountT iter_min_idx = face_idx;
+#endif
+
+        if (iter_min < min_dot) {
+            min_dot = iter_min;
+            minimizing_face = iter_min_idx;
         }
     }
 
@@ -367,14 +585,23 @@ static inline CountT clipPolygon(Vector3 *dst_vertices,
     return num_new_vertices;
 }
 
-static Manifold buildFaceContactManifold(Vector3 contact_normal,
-                                         Vector3 *contacts,
-                                         float *penetration_depths,
-                                         CountT num_contacts,
-                                         bool a_is_ref,
-                                         Vector3 world_offset,
-                                         Quat to_world_frame)
+static Manifold buildFaceContactManifold(
+    MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+    Vector3 contact_normal,
+    Vector3 *contacts,
+    float *penetration_depths,
+    CountT num_contacts,
+    bool a_is_ref,
+    Vector3 world_offset,
+    Quat to_world_frame)
 {
+#ifdef MADRONA_GPU_MODE
+    if (mwgpu_lane_id != 0) {
+        // FIXME: there is some warp-level parallelism below
+        return Manifold {};
+    }
+#endif
+
     Manifold manifold;
     manifold.aIsReference = a_is_ref;
     if (num_contacts <= 4) {
@@ -444,7 +671,8 @@ static Manifold buildFaceContactManifold(Vector3 contact_normal,
     return manifold;
 }
 
-static Manifold createFaceContact(FaceQuery faceQueryA, const HullState &a,
+static Manifold createFaceContact(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+                                  FaceQuery faceQueryA, const HullState &a,
                                   FaceQuery faceQueryB, const HullState &b,
                                   void *a_tmp_buf, void *b_tmp_buf,
                                   Vector3 world_offset, Quat to_world_frame)
@@ -463,10 +691,19 @@ static Manifold createFaceContact(FaceQuery faceQueryA, const HullState &a,
     Plane ref_plane = ref_hull.facePlanes[ref_face_idx];
 
     // Find incident face
-    CountT incident_face_idx = findIncidentFace(other_hull, ref_plane.normal);
+    CountT incident_face_idx = findIncidentFace(
+        MADRONA_GPU_COND(mwgpu_lane_id,) other_hull, ref_plane.normal);
 
-    // Collect incident vertices
-    CountT other_tmp_offset = 0;
+#ifdef MADRONA_GPU_MODE
+    // FIXME, there is warp level parallelism available in clipping,
+    // contact point filtering etc
+    if (mwgpu_lane_id != 0) {
+        return Manifold {};
+    }
+#endif
+
+    // Collect incident vertices: FIXME should have face indices
+    CountT num_incident_vertices = 0;
     {
         CountT hedge_idx = other_hull.faceEdgeIndices[incident_face_idx];
         CountT start_hedge_idx = hedge_idx;
@@ -476,12 +713,13 @@ static Manifold createFaceContact(FaceQuery faceQueryA, const HullState &a,
             hedge_idx = cur_hedge.next;
 
             Vector3 cur_point = other_hull.vertices[cur_hedge.rootVertex];
-            other_tmp_buf[other_tmp_offset++] = cur_point;
+
+            other_tmp_buf[num_incident_vertices++] = cur_point;
         } while (hedge_idx != start_hedge_idx);
     }
 
     Vector3 *clipping_input = other_tmp_buf;
-    CountT num_clipped_vertices = other_tmp_offset;
+    CountT num_clipped_vertices = num_incident_vertices;
 
     Vector3 *clipping_dst = ref_tmp_buf;
 
@@ -491,7 +729,7 @@ static Manifold createFaceContact(FaceQuery faceQueryA, const HullState &a,
     // side planes, or store max face size in each mesh. The worst case
     // buffer sizes here is just the sum of the max face sizes - 1
 
-    // FIXME, this code assumes that clipping_input & clippinst_dst have space
+    // FIXME, this code assumes that clipping_input & clipping_dst have space
     // to write incident_vertices + num_planes new vertices
 
     // Loop over side planes
@@ -541,12 +779,14 @@ static Manifold createFaceContact(FaceQuery faceQueryA, const HullState &a,
         }
     }
 
-    return buildFaceContactManifold(ref_plane.normal, clipping_input,
+    return buildFaceContactManifold(MADRONA_GPU_COND(mwgpu_lane_id,)
+                                    ref_plane.normal, clipping_input,
                                     penetration_depths, num_below_plane,
                                     a_is_ref, world_offset, to_world_frame);
 }
 
-static Manifold createFaceContactPlane(const HullState &h,
+static Manifold createFaceContactPlane(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+                                       const HullState &h,
                                        Plane plane,
                                        Vector3 *contacts_tmp,
                                        float *penetration_depths_tmp,
@@ -554,9 +794,17 @@ static Manifold createFaceContactPlane(const HullState &h,
                                        Quat to_world_frame)
 {
     // Find incident face
-    CountT incident_face_idx = findIncidentFace(h, plane.normal);
+    CountT incident_face_idx =
+        findIncidentFace(MADRONA_GPU_COND(mwgpu_lane_id,) h, plane.normal);
 
-    // Collect incident vertices
+#ifdef MADRONA_GPU_MODE
+    // FIXME, there is warp level parallelism available below
+    if (mwgpu_lane_id != 0) {
+        return Manifold {};
+    }
+#endif
+
+    // Collect incident vertices: FIXME should have face indices
     CountT num_incident_vertices = 0;
     {
         CountT hedge_idx = h.faceEdgeIndices[incident_face_idx];
@@ -579,7 +827,8 @@ static Manifold createFaceContactPlane(const HullState &h,
         } while (hedge_idx != start_hedge_idx);
     }
 
-    return buildFaceContactManifold(plane.normal, contacts_tmp,
+    return buildFaceContactManifold(MADRONA_GPU_COND(mwgpu_lane_id,)
+        plane.normal, contacts_tmp,
         penetration_depths_tmp, num_incident_vertices,
         false /* Plane is always reference, always b */,
         world_offset, to_world_frame);
@@ -662,26 +911,30 @@ static Manifold createEdgeContact(const EdgeQuery &query,
     return manifold;
 }
 
-Manifold doSAT(const HullState &a, const HullState &b,
+Manifold doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+               const HullState &a, const HullState &b,
                void *a_tmp_buf, void *b_tmp_buf,
                Vector3 world_offset, Quat to_world_frame)
 {
     Manifold manifold;
     manifold.numContactPoints = 0;
 
-    FaceQuery faceQueryA = queryFaceDirections(a, b);
+    FaceQuery faceQueryA =
+        queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
     if (faceQueryA.separation > 0.0f) {
         // There is a separating axis - no collision
         return manifold;
     }
 
-    FaceQuery faceQueryB = queryFaceDirections(b, a);
+    FaceQuery faceQueryB =
+        queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) b, a);
     if (faceQueryB.separation > 0.0f) {
         // There is a separating axis - no collision
         return manifold;
     }
 
-    EdgeQuery edgeQuery = queryEdgeDirections(a, b);
+    EdgeQuery edgeQuery =
+        queryEdgeDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
     if (edgeQuery.separation > 0.0f) {
         // There is a separating axis - no collision
         return manifold;
@@ -692,7 +945,8 @@ Manifold doSAT(const HullState &a, const HullState &b,
 
     if (bIsFaceContactA || bIsFaceContactB) {
         // Create face contact
-        manifold = createFaceContact(faceQueryA, a, faceQueryB, b,
+        manifold = createFaceContact(MADRONA_GPU_COND(mwgpu_lane_id,)
+                                     faceQueryA, a, faceQueryB, b,
                                      a_tmp_buf, b_tmp_buf,
                                      world_offset, to_world_frame);
     }
@@ -705,26 +959,29 @@ Manifold doSAT(const HullState &a, const HullState &b,
     return manifold;
 }
 
-Manifold doSATPlane(const Plane &plane, const HullState &h,
+Manifold doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
+                    const Plane &plane, const HullState &h,
                     void *tmp_buffer1, void *tmp_buffer2,
                     Vector3 world_offset, Quat to_world_frame)
 {
     Manifold manifold;
     manifold.numContactPoints = 0;
 
-    float separation = getHullDistanceFromPlane(plane, h);
+    float separation = getHullDistanceFromPlane(
+        MADRONA_GPU_COND(mwgpu_lane_id,) plane, h);
 
     if (separation > 0.0f) {
         return manifold;
     }
 
-    return createFaceContactPlane(h, plane,
+    return createFaceContactPlane(MADRONA_GPU_COND(mwgpu_lane_id,) h, plane,
                                   (Vector3 *)tmp_buffer1, (float *)tmp_buffer2,
                                   world_offset, to_world_frame);
 }
 
-static inline void addContactsToSolver(SolverData &solver_data,
-                                       Span<const Contact> added_contacts)
+static inline void addContactsToSolver(
+    SolverData &solver_data,
+    Span<const Contact> added_contacts)
 {
     int32_t contact_idx = solver_data.numContacts.fetch_add(
         added_contacts.size(), std::memory_order_relaxed);
@@ -736,11 +993,20 @@ static inline void addContactsToSolver(SolverData &solver_data,
     }
 }
 
-static inline void addManifoldToSolver(SolverData &solver_data,
-                                       Manifold manifold,
-                                       Entity a_entity, Entity b_entity)
+static inline void addManifoldToSolver(
+    MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
+    SolverData &solver_data,
+    Manifold manifold,
+    Entity a_entity, Entity b_entity)
 {
-    addContactsToSolver(solver_data, {{
+#ifdef MADRONA_GPU_MODE
+    if (mwgpu_lane_id != 0) {
+        return;
+    }
+#endif
+
+    addContactsToSolver(
+        solver_data, {{
         manifold.aIsReference ? a_entity : b_entity,
         manifold.aIsReference ? b_entity : a_entity,
         {
@@ -778,12 +1044,8 @@ inline void runNarrowphase(
     const CandidateCollision &candidate_collision)
 {
 #ifdef MADRONA_GPU_MODE
-    int32_t mwgpu_warp_id = threadIdx.x / 32;
-    int32_t mwgpu_lane_id = threadIdx.x % 32;
-
-    if (mwgpu_lane_id != 0) {
-        return;
-    }
+    const int32_t mwgpu_warp_id = threadIdx.x / 32;
+    const int32_t mwgpu_lane_id = threadIdx.x % 32;
 
     Plane *tmp_faces;
     Vector3 *tmp_vertices;
@@ -840,8 +1102,6 @@ inline void runNarrowphase(
     Diag3x3 b_scale(ctx.getUnsafe<Scale>(b_entity));
 
     {
-        // FIXME: Rechecking the AABBs here seems to only give a very small
-        // performance improvement. Should revisit.
         AABB a_obj_aabb = obj_mgr.aabbs[a_obj.idx];
         AABB b_obj_aabb = obj_mgr.aabbs[b_obj.idx];
 
@@ -859,6 +1119,7 @@ inline void runNarrowphase(
 
     switch (test_type) {
     case NarrowphaseTest::SphereSphere: {
+        assert(false);
         float a_radius = a_prim->sphere.radius;
         float b_radius = b_prim->sphere.radius;
 
@@ -869,23 +1130,19 @@ inline void runNarrowphase(
             Vector3 mid = to_b / 2.f;
 
             Vector3 to_b_normal = to_b / dist;
-            addContactsToSolver(solver, {{
-                a_entity,
-                b_entity,
-                { 
-                    makeVector4(a_pos + mid, dist / 2.f),
-                    {}, {}, {}
-                },
-                1,
-                to_b_normal,
-                {},
-            }});
 
-            Loc loc = ctx.makeTemporary<CollisionEventTemporary>();
-            ctx.getUnsafe<CollisionEvent>(loc) = CollisionEvent {
-                candidate_collision.a,
-                candidate_collision.b,
-            };
+            addContactsToSolver(
+                solver, {{
+                    a_entity,
+                    b_entity,
+                    { 
+                        makeVector4(a_pos + mid, dist / 2.f),
+                        {}, {}, {}
+                    },
+                    1,
+                    to_b_normal,
+                    {},
+                }});
         }
     } break;
     case NarrowphaseTest::HullHull: {
@@ -899,22 +1156,25 @@ inline void runNarrowphase(
         assert(a_he_mesh.mVertexCount + b_he_mesh.mVertexCount < 
                max_num_tmp_vertices);
 
-        HullState a_hull_state = makeHullState(a_he_mesh, a_pos, a_rot, a_scale,
-            tmp_vertices, tmp_faces);
+        HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
+            a_he_mesh, a_pos, a_rot, a_scale, tmp_vertices, tmp_faces);
 
         tmp_vertices += a_hull_state.numVertices;
         tmp_faces += a_hull_state.numFaces;
 
-        HullState b_hull_state = makeHullState(b_he_mesh, b_pos, b_rot, b_scale,
-            tmp_vertices, tmp_faces);
+        HullState b_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
+            b_he_mesh, b_pos, b_rot, b_scale, tmp_vertices, tmp_faces);
 
-        Manifold manifold = doSAT(a_hull_state, b_hull_state,
+        MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
+
+        Manifold manifold = doSAT(MADRONA_GPU_COND(mwgpu_lane_id,)
+            a_hull_state, b_hull_state,
             (void *)a_hull_state.facePlanes, (void *)b_hull_state.facePlanes, // FIXME: if these aren't transformed we can't pass as temporaries!!
             {0, 0, 0}, {1, 0, 0, 0});
 
         if (manifold.numContactPoints > 0) {
-            addManifoldToSolver(solver, manifold,
-                                a_entity, b_entity);
+            addManifoldToSolver(MADRONA_GPU_COND(mwgpu_lane_id,)
+                                solver, manifold, a_entity, b_entity);
         }
     } break;
     case NarrowphaseTest::SphereHull: {
@@ -934,6 +1194,7 @@ inline void runNarrowphase(
         assert(false);
     } break;
     case NarrowphaseTest::SpherePlane: {
+        assert(false);
         auto sphere = a_prim->sphere;
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
@@ -946,17 +1207,18 @@ inline void runNarrowphase(
         if (penetration > 0) {
             Vector3 contact_point = a_pos - t * plane_normal;
 
-            addContactsToSolver(solver, {{
-                b_entity,
-                a_entity,
-                {
-                    makeVector4(contact_point, penetration),
-                    {}, {}, {}
-                },
-                1,
-                plane_normal,
-                {},
-            }});
+            addContactsToSolver(
+                solver, {{
+                    b_entity,
+                    a_entity,
+                    {
+                        makeVector4(contact_point, penetration),
+                        {}, {}, {}
+                    },
+                    1,
+                    plane_normal,
+                    {},
+                }});
         }
     } break;
     case NarrowphaseTest::HullPlane: {
@@ -966,9 +1228,10 @@ inline void runNarrowphase(
         assert(a_he_mesh.mPolygonCount < max_num_tmp_faces);
         assert(a_he_mesh.mVertexCount <  max_num_tmp_vertices);
 
-        HullState a_hull_state = makeHullState(a_he_mesh, a_pos, a_rot,
-            a_scale, tmp_vertices, tmp_faces);
+        HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
+            a_he_mesh, a_pos, a_rot, a_scale, tmp_vertices, tmp_faces);
 
+        MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
 #if 0
@@ -987,13 +1250,13 @@ inline void runNarrowphase(
             dot(plane_normal, b_pos),
         };
 
-        Manifold manifold = doSATPlane(plane, a_hull_state,
-            tmp_faces, tmp_faces + a_hull_state.numFaces,
+        Manifold manifold = doSATPlane(MADRONA_GPU_COND(mwgpu_lane_id,)
+            plane, a_hull_state, tmp_faces, tmp_faces + a_hull_state.numFaces,
             {0, 0, 0}, {1, 0, 0, 0});
 
         if (manifold.numContactPoints > 0) {
-            addManifoldToSolver(solver, manifold,
-                                a_entity, b_entity);
+            addManifoldToSolver(MADRONA_GPU_COND(mwgpu_lane_id,)
+                solver, manifold, a_entity, b_entity);
         }
     } break;
     default: __builtin_unreachable();

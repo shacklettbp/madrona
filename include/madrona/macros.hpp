@@ -42,6 +42,12 @@
 #define MADRONA_MW_COND(...)
 #endif
 
+#ifdef MADRONA_GPU_MODE
+#define MADRONA_GPU_COND(...) __VA_ARGS__
+#else
+#define MADRONA_GPU_COND(...)
+#endif
+
 #ifdef MADRONA_X64
 #define MADRONA_CACHE_LINE (64)
 #elif defined(MADRONA_ARM) && defined(MADRONA_MACOS)
