@@ -438,24 +438,30 @@ static EdgeQuery queryEdgeDirections(
         }
     };
 
-
 #ifdef MADRONA_GPU_MODE
-    int32_t a_num_edges = a.numEdges;
-    int32_t b_num_edges = b.numEdges;
-    int32_t num_edge_tests = a_num_edges * b_num_edges;
+    const int32_t a_num_edges = a.numEdges;
+    const int32_t b_num_edges = b.numEdges;
+    const int32_t num_edge_tests = a_num_edges * b_num_edges;
     for (int32_t edge_offset_linear = 0; edge_offset_linear < num_edge_tests;
          edge_offset_linear += 32) {
         int32_t edge_idx_linear = edge_offset_linear + mwgpu_lane_id;
-        int32_t he_a_idx = edge_idx_linear / a_num_edges;
-        int32_t he_b_idx = edge_idx_linear % a_num_edges;
+
+        // FIXME: get rid of this level of indirection
+        int32_t edge_idx_a = edge_idx_linear / b_num_edges;
+        int32_t edge_idx_b = edge_idx_linear % b_num_edges;
 
         EdgeTestResult edge_cmp;
+        int32_t he_a_idx;
+        int32_t he_b_idx;
 
         if (edge_idx_linear >= num_edge_tests ) {
             edge_cmp.separation = -FLT_MAX;
         } else {
-            const HalfEdge &hedge_a = a.halfEdges[he_a_idx]; // FIXME
-            const HalfEdge &hedge_b = b.halfEdges[he_b_idx]; // FIXME
+            he_a_idx = a.edgeIndices[edge_idx_a];// FIXME
+            he_b_idx = b.edgeIndices[edge_idx_b];// FIXME
+
+            const HalfEdge &hedge_a = a.halfEdges[he_a_idx]; 
+            const HalfEdge &hedge_b = b.halfEdges[he_b_idx]; 
 
             edge_cmp = testEdgeSeparation(hedge_a, hedge_b);
         }
