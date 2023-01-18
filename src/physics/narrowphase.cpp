@@ -580,7 +580,8 @@ static Manifold createFaceContactPlane(const HullState &h,
     }
 
     return buildFaceContactManifold(plane.normal, contacts_tmp,
-        penetration_depths_tmp, num_incident_vertices, false,
+        penetration_depths_tmp, num_incident_vertices,
+        false /* Plane is always reference, always b */,
         world_offset, to_world_frame);
 }
 
@@ -601,6 +602,7 @@ static Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2)
 
     float s, t;
 
+    // FIXME: validate this epsilon
     if (fabsf(denom) < 0.00001f) {
         s = 0.0f;
         t = (dotv11 * s - dotv211) / dotv21;
@@ -625,18 +627,35 @@ static Manifold createEdgeContact(const EdgeQuery &query,
     Segment segA = getEdgeSegment(a, a.halfEdges[query.edgeIdxA]);
     Segment segB = getEdgeSegment(b, b.halfEdges[query.edgeIdxB]);
 
+#if 0
     Segment s = shortestSegmentBetween(segA, segB);
-    Vector3 contact =
-        to_world_frame.rotateVec(0.5f * (s.p1 + s.p2)) + world_offset;
-    float depth = (s.p2 - s.p1).length() / 2.0f;
+    Vector3 contact = 0.5f * (s.p1 + s.p2);
+    float depth = 0.5f * (s.p2 - s.p1).length();
+#endif
+
+    // Deviation from Gregorius GDC 2015:
+    // Currently the solver expects the contact point to be ON object A.
+    // For Face-Face this means the point is on object A's face, which is
+    // the same as the presentation. In the edge-edge case, the presentation
+    // has the contact point between the edges.
+    // Our solver currently reconstructs the contact points on point B
+    // using the normal depth, so the presentation's method will 
+    // reconstruct the wrong contact points.
+    // FIXME: revisit this after modifying solver to handle multi-point
+    // manifolds better
+
+    Segment s = shortestSegmentBetween(segA, segB);
+    Vector3 contact = s.p1;
 
     Manifold manifold;
-    manifold.contactPoints[0] = contact,
-    manifold.penetrationDepths[0] = depth;
+    manifold.contactPoints[0] = 
+        to_world_frame.rotateVec(contact) + world_offset,
+    manifold.penetrationDepths[0] = -query.separation;
     manifold.numContactPoints = 1;
     manifold.normal = to_world_frame.rotateVec(query.normal);
-    
-    // Normal always points towards object A 
+
+    // Normal always points away from object A (enforced in edgeDistance) &
+    // contact points are on A.
     manifold.aIsReference = true;
 
     return manifold;
