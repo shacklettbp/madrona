@@ -66,11 +66,13 @@ private:
     Optional<render::BatchRenderer> renderer_;
 };
 
-template <typename ContextT, typename WorldT, typename... InitTs>
+template <typename ContextT, typename WorldT, typename ConfigT,
+          typename... InitTs>
 class TaskGraphExecutor : private ThreadPoolExecutor {
 public:
     template <typename... Args>
     TaskGraphExecutor(const Config &cfg,
+                      const ConfigT &user_cfg,
                       const Args * ... user_init_ptrs);
 
     inline void run();
@@ -87,6 +89,7 @@ private:
         TaskGraph taskgraph;
 
         inline WorldContext(const WorkerInit &worker_init,
+                            const ConfigT &user_cfg,
                             const InitTs & ...world_inits);
                             
     };

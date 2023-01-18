@@ -3,6 +3,7 @@ set(MADRONA_CORE_SRCS
     #${MADRONA_INC_DIR}/job.hpp ${MADRONA_INC_DIR}/job.inl job.cpp
     ${MADRONA_INC_DIR}/state.hpp ${MADRONA_INC_DIR}/state.inl state.cpp
     ${MADRONA_INC_DIR}/context.hpp ${MADRONA_INC_DIR}/context.inl context.cpp
+    ${MADRONA_INC_DIR}/components.hpp base.cpp
     #${MADRONA_INC_DIR}/hash.hpp
     #${MADRONA_INC_DIR}/platform_utils.hpp
     #${MADRONA_INC_DIR}/platform_utils.inl

@@ -7,7 +7,7 @@ target_link_libraries(madrona_mw_gpu
     PUBLIC
         madrona_hdrs madrona_cuda
     PRIVATE
-        madrona_core madrona_batch_render
+        madrona_mw_core madrona_batch_render
         CUDA::nvrtc CUDA::cuda_driver)
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
@@ -39,7 +39,7 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${DEVICE_SRC_DIR}/host_print.cpp
     # FIXME
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/hashmap.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/base.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../core/base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/physics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/geometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/narrowphase.cpp
