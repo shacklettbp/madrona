@@ -94,11 +94,13 @@ static HullState makeHullState(
         Plane obj_plane = obj_planes[i];
         Vector3 plane_origin =
             vertex_txfm * (obj_plane.normal * obj_plane.d) + translation;
-        Vector3 dst_normal = (normal_txfm * obj_plane.normal).normalize();
+
+        Vector3 txfmed_normal = (normal_txfm * obj_plane.normal).normalize();
+        float new_d = dot(txfmed_normal, plane_origin);
 
         dst_planes[i] = {
-            dst_normal,
-            dot(dst_normal, plane_origin),
+            txfmed_normal,
+            new_d,
         };
     }
 
@@ -160,7 +162,6 @@ inline math::Vector3 planeIntersection(const geometry::Plane &plane, const math:
     return p1 + (p2 - p1) * (-distance / plane.normal.dot(p2 - p1));
 }
 
-
 static Vector3 findFurthestPoint(const HullState &h,
                                  const math::Vector3 &d)
 {
@@ -179,12 +180,12 @@ static Vector3 findFurthestPoint(const HullState &h,
     return furthest;
 }
 
-static FaceQuery queryFaceDirectionsPlane(const Plane &plane,
+static float getHullDistanceFromPlane(const Plane &plane,
                                           const HullState &h) {
     math::Vector3 supportA = findFurthestPoint(h, -plane.normal);
     float distance = getDistanceFromPlane(plane, supportA);
 
-    return { distance, 0 };
+    return distance;
 }
 
 static FaceQuery queryFaceDirections(const HullState &a,
@@ -528,17 +529,20 @@ static Manifold createFaceContact(FaceQuery faceQueryA, const HullState &a,
     // Filter clipping_input to ones below ref_plane and save penetration depth
     float *penetration_depths = (float *)clipping_dst;
 
+    CountT num_below_plane = 0;
     for (CountT i = 0; i < num_clipped_vertices; ++i) {
         Vector3 vertex = clipping_input[i];
         if (float d = getDistanceFromPlane(ref_plane, vertex); d < 0.0f) {
             // Project the point onto the reference plane (d guaranteed to be negative)
-            clipping_input[i] = vertex - d * ref_plane.normal;
-            penetration_depths[i] = -d;
+            clipping_input[num_below_plane] = vertex - d * ref_plane.normal;
+            penetration_depths[num_below_plane] = -d;
+
+            num_below_plane += 1;
         }
     }
 
     return buildFaceContactManifold(ref_plane.normal, clipping_input,
-                                    penetration_depths, num_clipped_vertices,
+                                    penetration_depths, num_below_plane,
                                     a_is_ref, world_offset, to_world_frame);
 }
 
@@ -688,9 +692,9 @@ Manifold doSATPlane(const Plane &plane, const HullState &h,
     Manifold manifold;
     manifold.numContactPoints = 0;
 
-    FaceQuery faceQuery = queryFaceDirectionsPlane(plane, h);
+    float separation = getHullDistanceFromPlane(plane, h);
 
-    if (faceQuery.separation > 0.0f) {
+    if (separation > 0.0f) {
         return manifold;
     }
 
@@ -899,7 +903,6 @@ inline void runNarrowphase(
 
         HullState a_hull_state = makeHullState(a_he_mesh, a_pos, a_rot,
             a_scale, tmp_vertices, tmp_faces);
-        
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
 #if 0
