@@ -5,6 +5,9 @@
  * license that can be found in the LICENSE file or at
  * https://opensource.org/licenses/MIT.
  */
+
+#include <cassert>
+
 namespace madrona {
 
 PolyAlloc::PolyAlloc(void *state,
@@ -85,7 +88,7 @@ auto AllocContext::with(A &alloc, Fn &&fn, Args &&...args) ->
 
 void * DefaultAlloc::alloc(size_t num_bytes)
 {
-    return malloc(num_bytes);
+    return std::aligned_alloc(64, num_bytes);
 }
 
 void DefaultAlloc::dealloc(void *ptr)
