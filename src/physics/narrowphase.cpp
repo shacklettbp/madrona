@@ -443,28 +443,31 @@ static EdgeQuery queryEdgeDirections(
             edge_cmp = testEdgeSeparation(hedge_a, hedge_b);
         }
 
-        auto [iter_max_separation, max_lane_idx] =
-            warpFloatMaxAndIdx(edge_cmp.separation, mwgpu_lane_id);
-
-        if (iter_max_separation > maxDistance) {
-            maxDistance = iter_max_separation;
-            normal.x =  __shfl_sync(mwGPU::allActive,
-                edge_cmp.normal.x, max_lane_idx);
-            normal.y =  __shfl_sync(mwGPU::allActive,
-                edge_cmp.normal.y, max_lane_idx);
-            normal.z =  __shfl_sync(mwGPU::allActive,
-                edge_cmp.normal.z, max_lane_idx);
-
-            edgeAMaxDistance = __shfl_sync(mwGPU::allActive,
-                he_a_idx, max_lane_idx);
-            edgeBMaxDistance = __shfl_sync(mwGPU::allActive,
-                he_b_idx, max_lane_idx);
+        if (edge_cmp.separation > maxDistance) {
+            maxDistance = edge_cmp.separation;
+            normal = edge_cmp.normal;
+            edgeAMaxDistance = he_a_idx;
+            edgeBMaxDistance = he_b_idx;
 
             if (maxDistance > 0) {
                 break;
             }
         }
     }
+
+    int32_t max_lane_idx;
+    std::tie(maxDistance, max_lane_idx) =
+        warpFloatMaxAndIdx(maxDistance, mwgpu_lane_id);
+
+    normal.x =  __shfl_sync(mwGPU::allActive, normal.x, max_lane_idx);
+    normal.y =  __shfl_sync(mwGPU::allActive, normal.y, max_lane_idx);
+    normal.z =  __shfl_sync(mwGPU::allActive, normal.z, max_lane_idx);
+
+    edgeAMaxDistance = __shfl_sync(mwGPU::allActive,
+        edgeAMaxDistance, max_lane_idx);
+    edgeBMaxDistance = __shfl_sync(mwGPU::allActive,
+        edgeBMaxDistance, max_lane_idx);
+
 #else
     for (CountT edgeIdxA = 0; edgeIdxA < (CountT)a.numEdges; ++edgeIdxA) {
         int32_t he_a_idx = a.edgeIndices[edgeIdxA];
@@ -483,6 +486,7 @@ static EdgeQuery queryEdgeDirections(
                 edgeBMaxDistance = he_b_idx;
 
                 if (maxDistance > 0) {
+                    // FIXME: this goto probably kills autovectorization
                     goto early_out;
                 }
             }
