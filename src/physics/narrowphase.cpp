@@ -4,6 +4,13 @@
 
 #include "physics_impl.hpp"
 
+// Uncomment this to unconditionally disable GPU narrowphase version
+#if 0
+#undef MADRONA_GPU_MODE
+#undef MADRONA_GPU_COND
+#define MADRONA_GPU_COND(...)
+#endif
+
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/cu_utils.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
@@ -320,6 +327,10 @@ static FaceQuery queryFaceDirections(
         if (iter_max_dist > maxDistance) {
             maxDistance = iter_max_dist;
             polygonMaxDistance = iter_max_idx;
+
+            if (maxDistance > 0) {
+                break;
+            }
         }
     }
 
@@ -482,6 +493,10 @@ static EdgeQuery queryEdgeDirections(
                 he_a_idx, max_lane_idx);
             edgeBMaxDistance = __shfl_sync(mwGPU::allActive,
                 he_b_idx, max_lane_idx);
+
+            if (maxDistance > 0) {
+                break;
+            }
         }
     }
 #else
@@ -500,9 +515,15 @@ static EdgeQuery queryEdgeDirections(
                 normal = edge_cmp.normal;
                 edgeAMaxDistance = he_a_idx;
                 edgeBMaxDistance = he_b_idx;
+
+                if (maxDistance > 0) {
+                    goto early_out;
+                }
             }
         }
     }
+
+    early_out:
 #endif
 
     return { maxDistance, normal, edgeAMaxDistance, edgeBMaxDistance };
@@ -1068,7 +1089,6 @@ inline void runNarrowphase(
         tmp_faces = (Plane *)warp_smem_base;
         tmp_vertices = (Vector3 *)(tmp_faces + gpuImpl::maxNumPlanes);
     }
-
 #else
     constexpr int32_t max_num_tmp_faces = 512;
     constexpr int32_t max_num_tmp_vertices = 512;

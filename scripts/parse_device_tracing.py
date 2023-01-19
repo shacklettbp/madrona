@@ -223,7 +223,7 @@ def plot_events(step_log, nodes, blocks, file_name):
         func = step_log["mapping"][n]
         if func not in colors:
             colors[func] = COLORS[len(colors)]
-    # print(colors)
+    print(colors)
 
     img = Image.new("RGB", (x_limit, y_limit), "white")
     draw = ImageDraw.Draw(img)

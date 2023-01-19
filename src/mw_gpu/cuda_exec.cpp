@@ -10,6 +10,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <filesystem>
 
 #include <cuda/atomic>
 
@@ -373,6 +374,87 @@ static GPUCompileResults compileCode(
     static std::array<char, 1024 * 1024> linker_info_log;
     static std::array<char, 1024 * 1024> linker_error_log;
 
+    struct MegakernelCache {
+        HeapArray<char> data;
+        void *cubinStart;
+        size_t numCubinBytes;
+        const char *initECSName;
+        const char *initWorldsName;
+        const char *initTasksName;
+    };
+
+    Optional<MegakernelCache> kernel_cache =
+        Optional<MegakernelCache>::none();
+
+    Optional<std::string> cache_write_path =
+        Optional<std::string>::none();
+
+    do {
+        auto *cache_path =
+            getenv("MADRONA_MWGPU_KERNEL_CACHE");
+
+        if (!cache_path || cache_path[0] == '\0') {
+            break;
+        }
+
+        if (!std::filesystem::exists(cache_path)) {
+            cache_write_path.emplace(cache_path);
+            break;
+        }
+
+        std::ifstream cache_file(cache_path,
+            std::ios::binary | std::ios::ate);
+        if (!cache_file.is_open()) {
+            FATAL("Failed to open megakernel cache file at %s",
+                  cache_path);
+        }
+
+        size_t num_cache_bytes = cache_file.tellg();
+        cache_file.seekg(std::ios::beg);
+        HeapArray<char> cache_data(num_cache_bytes);
+        cache_file.read(cache_data.data(), cache_data.size());
+
+        size_t cur_cache_offset = 0;
+        size_t cache_remaining = cache_data.size();
+
+        size_t init_ecs_len = strnlen(cache_data.data() + cur_cache_offset,
+                                      cache_remaining);
+        if (init_ecs_len == 0 || init_ecs_len == cache_remaining) {
+            FATAL("Invalid cache file: no init ecs string");
+        }
+
+        const char *init_ecs_str = cache_data.data() + cur_cache_offset;
+        cur_cache_offset += init_ecs_len + 1;
+        cache_remaining -= init_ecs_len + 1;
+
+        size_t init_worlds_len = strnlen(cache_data.data() + cur_cache_offset,
+                                         cache_remaining);
+
+        if (init_worlds_len == 0 || init_worlds_len == cache_remaining) {
+            FATAL("Invalid cache_file: no init worlds string");
+        }
+
+        const char *init_worlds_str = cache_data.data() + cur_cache_offset;
+        cur_cache_offset += init_worlds_len + 1;
+        cache_remaining -= init_worlds_len + 1;
+
+        size_t init_tasks_len = strnlen(cache_data.data() + cur_cache_offset,
+                                        cache_remaining);
+
+        if (init_tasks_len == 0 || init_tasks_len == cache_remaining) {
+            FATAL("Invalid cache file: no kernel string\n");
+        }
+
+        const char *init_tasks_str = cache_data.data() + cur_cache_offset;
+        cur_cache_offset += init_tasks_len + 1;
+        cache_remaining -= init_tasks_len + 1;
+
+        size_t aligned_cubin_offset = utils::roundUpPow2(cur_cache_offset, 4);
+        if (aligned_cubin_offset - cur_cache_offset >= cache_remaining) {
+            FATAL("Invalid cache file: no CUBIN");
+        }
+    } while (0);
+
     DynArray<CUjit_option> linker_options {
         CU_JIT_INFO_LOG_BUFFER,
         CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
@@ -629,6 +711,15 @@ static __attribute__((always_inline)) inline void dispatch(
 }
 }
 )__";
+
+    {
+        auto *print_megakernel_pfx = 
+            getenv("MADRONA_MWGPU_PRINT_KERNEL_PREFIX");
+
+        if (print_megakernel_pfx && print_megakernel_pfx[0] == '1') {
+            std::cout << megakernel_prefix << std::endl;
+        }
+    }
 
     std::string megakernel =
         std::move(megakernel_prefix) + std::move(megakernel_body);
