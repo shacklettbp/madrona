@@ -448,10 +448,10 @@ static EdgeQuery queryEdgeDirections(
             normal = edge_cmp.normal;
             edgeAMaxDistance = he_a_idx;
             edgeBMaxDistance = he_b_idx;
+        }
 
-            if (maxDistance > 0) {
-                break;
-            }
+        if (__ballot_sync(mwGPU::allActive, maxDistance > 0) != 0) {
+            break;
         }
     }
 
