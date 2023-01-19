@@ -1267,7 +1267,7 @@ TaskGraph::NodeID setupTasks(
 {
 #ifdef MADRONA_GPU_MODE
     auto narrowphase = builder.addToGraph<CustomParallelForNode<Context,
-        runNarrowphase, 32, CandidateCollision>>(deps);
+        runNarrowphase, 32, 32, CandidateCollision>>(deps);
 #else
     auto narrowphase = builder.addToGraph<ParallelForNode<Context,
         runNarrowphase, CandidateCollision>>(deps);

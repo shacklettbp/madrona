@@ -148,9 +148,12 @@ NodeT & TaskGraph::getNodeData(TypedDataID<NodeT> data_id)
     return *(NodeT *)node_datas_[data_id.id].userData;
 }
 
-template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+template <typename ContextT, auto Fn,
+          int32_t threads_per_invocation,
+          int32_t items_per_invocation,
           typename ...ComponentTs>
-CustomParallelForNode<ContextT, Fn, threads_per_invocation, ComponentTs...>::
+CustomParallelForNode<ContextT, Fn, threads_per_invocation,
+                      items_per_invocation, ComponentTs...>::
 CustomParallelForNode()
     : NodeBase {},
       query_ref_([]() {
@@ -162,69 +165,125 @@ CustomParallelForNode()
       }())
 {}
 
-template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+template <typename ContextT, auto Fn,
+          int32_t threads_per_invocation,
+          int32_t items_per_invocation,
           typename ...ComponentTs>
-void CustomParallelForNode<ContextT, Fn, threads_per_invocation,
-                           ComponentTs...>::run(int32_t invocation_idx)
+void CustomParallelForNode<ContextT, Fn,
+                           threads_per_invocation,
+                           items_per_invocation,
+                           ComponentTs...>::run(const int32_t invocation_idx)
 {
+    const int32_t base_row_idx = invocation_idx * items_per_invocation;
+    int32_t cur_item_offset = 0;
+
     StateManager *state_mgr = mwGPU::getStateManager();
 
     int32_t cumulative_num_rows = 0;
     state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref_,
             [&](int32_t num_rows, WorldID *world_column,
                 auto ...raw_ptrs) {
-        int32_t tbl_offset = invocation_idx - cumulative_num_rows;
-        cumulative_num_rows += num_rows;
-        if (tbl_offset >= num_rows) {
-            return false;
-        }
 
-        WorldID world_id = world_column[tbl_offset];
+        // Special case the vastly common case
+        if constexpr (items_per_invocation == 1) {
+            int32_t tbl_offset = base_row_idx - cumulative_num_rows;
+            cumulative_num_rows += num_rows;
+            if (tbl_offset >= num_rows) {
+                return false;
+            }
 
-        // This entity has been deleted but not actually removed from the
-        // table yet
-        if (world_id.idx == -1) {
+            WorldID world_id = world_column[tbl_offset];
+
+            // This entity has been deleted but not actually removed from the
+            // table yet
+            if (world_id.idx == -1) {
+                return true;
+            }
+
+            ContextT ctx = TaskGraph::makeContext<ContextT>(world_id);
+
+            // The following should work, but doesn't in cuda 11.7 it seems
+            // Need to put arguments in tuple for some reason instead
+            //Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...);
+
+            cuda::std::tuple typed_ptrs {
+                (ComponentTs *)raw_ptrs
+                ...
+            };
+
+            std::apply([&](auto ...ptrs) {
+                Fn(ctx, ptrs[tbl_offset] ...);
+            }, typed_ptrs);
+
+            return true;
+        } else {
+            int32_t prev_cumulative_rows = cumulative_num_rows;
+            cumulative_num_rows += num_rows;
+
+            cuda::std::tuple typed_ptrs {
+                (ComponentTs *)raw_ptrs
+                ...
+            };
+
+#pragma unroll(1)
+            for (; cur_item_offset < items_per_invocation; cur_item_offset++) {
+                int32_t cur_row_idx = base_row_idx + cur_item_offset;
+                int32_t tbl_offset = cur_row_idx - prev_cumulative_rows;
+                if (tbl_offset >= num_rows) {
+                    return false;
+                }
+
+                WorldID world_id = world_column[tbl_offset];
+
+                // This entity has been deleted but not actually removed from the
+                // table yet
+                if (world_id.idx == -1) {
+                    continue;
+                }
+
+                ContextT ctx = TaskGraph::makeContext<ContextT>(world_id);
+
+                std::apply([&](auto ...ptrs) {
+                    Fn(ctx, ptrs[tbl_offset] ...);
+                }, typed_ptrs);
+            }
+
             return true;
         }
-
-        ContextT ctx = TaskGraph::makeContext<ContextT>(world_id);
-
-        // The following should work, but doesn't in cuda 11.7 it seems
-        // Need to put arguments in tuple for some reason instead
-        //Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...);
-
-        cuda::std::tuple typed_ptrs {
-            (ComponentTs *)raw_ptrs
-            ...
-        };
-
-        std::apply([&](auto ...ptrs) {
-            Fn(ctx, ptrs[tbl_offset] ...);
-        }, typed_ptrs);
-
-        return true;
     });
 }
 
-template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+template <typename ContextT, auto Fn,
+          int32_t threads_per_invocation,
+          int32_t items_per_invocation,
           typename ...ComponentTs>
-uint32_t CustomParallelForNode<ContextT, Fn, threads_per_invocation,
+uint32_t CustomParallelForNode<ContextT, Fn,
+                               threads_per_invocation,
+                               items_per_invocation,
                                ComponentTs...>::numInvocations()
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    return state_mgr->numMatchingEntities(query_ref_);
+    int32_t num_entities = state_mgr->numMatchingEntities(query_ref_);
+    return utils::divideRoundUp(num_entities, items_per_invocation);
 }
 
-template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+template <typename ContextT, auto Fn,
+          int32_t threads_per_invocation,
+          int32_t items_per_invocation,
           typename ...ComponentTs>
-TaskGraph::NodeID CustomParallelForNode<ContextT, Fn, threads_per_invocation,
+TaskGraph::NodeID CustomParallelForNode<ContextT, Fn,
+                                        threads_per_invocation,
+                                        items_per_invocation,
                                         ComponentTs...>::addToGraph(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies)
 {
-    return builder.addDynamicCountNode<CustomParallelForNode<
-        ContextT, Fn, threads_per_invocation, ComponentTs...>>(
-            dependencies, threads_per_invocation);
+    return builder.addDynamicCountNode<
+        CustomParallelForNode<
+            ContextT, Fn,
+            threads_per_invocation,
+            items_per_invocation,
+            ComponentTs...>>(dependencies, threads_per_invocation);
 }
 
 template <typename ArchetypeT>

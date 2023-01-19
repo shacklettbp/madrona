@@ -162,13 +162,15 @@ private:
 friend class Builder;
 };
 
-template <typename ContextT, auto Fn, int32_t threads_per_invocation,
+template <typename ContextT, auto Fn,
+          int32_t threads_per_invocation,
+          int32_t items_per_invocation,
           typename ...ComponentTs>
 class CustomParallelForNode: public NodeBase {
 public:
     CustomParallelForNode();
 
-    inline void run(int32_t invocation_idx);
+    inline void run(const int32_t invocation_idx);
     inline uint32_t numInvocations();
 
     static TaskGraph::NodeID addToGraph(
@@ -180,7 +182,8 @@ private:
 };
 
 template <typename ContextT, auto Fn, typename ...ComponentTs>
-using ParallelForNode = CustomParallelForNode<ContextT, Fn, 1, ComponentTs...>;
+using ParallelForNode =
+    CustomParallelForNode<ContextT, Fn, 1, 1, ComponentTs...>;
 
 struct ClearTmpNodeBase : NodeBase {
     ClearTmpNodeBase(uint32_t archetype_id);

@@ -11,6 +11,8 @@ namespace entryKernels {
 
 template <typename ContextT, typename WorldDataT, typename ConfigT,
           typename... InitTs>
+__launch_bounds__(madrona::consts::numMegakernelThreads,
+                  madrona::consts::numMegakernelBlocksPerSM)
 __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
                         void **exported_columns, void *cfg)
 {
@@ -36,6 +38,8 @@ __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
 
 template <typename ContextT, typename WorldDataT, typename ConfigT,
           typename... InitTs>
+__launch_bounds__(madrona::consts::numMegakernelThreads,
+                  madrona::consts::numMegakernelBlocksPerSM)
 __global__ void initWorlds(int32_t num_worlds, InitTs * ...inits)
 {
     int32_t world_idx = threadIdx.x + blockDim.x * blockIdx.x;
@@ -55,6 +59,8 @@ __global__ void initWorlds(int32_t num_worlds, InitTs * ...inits)
 
 template <typename ContextT, typename WorldDataT, typename ConfigT,
           typename... InitTs>
+__launch_bounds__(madrona::consts::numMegakernelThreads,
+                  madrona::consts::numMegakernelBlocksPerSM)
 __global__ void initTasks(void *cfg)
 {
     TaskGraph::Builder builder(1024, 1024 * 2, 1024 * 5);
