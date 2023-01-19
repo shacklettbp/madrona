@@ -255,6 +255,15 @@ struct GPUKernels {
     CUfunction queueUserRun;
 };
 
+struct MegakernelCache {
+    HeapArray<char> data;
+    const void *cubinStart;
+    size_t numCubinBytes;
+    const char *initECSName;
+    const char *initWorldsName;
+    const char *initTasksName;
+};
+
 struct GPUEngineState {
     Optional<render::BatchRenderer> batchRenderer;
     void *stateBuffer;
@@ -364,6 +373,88 @@ template <typename T> __global__ void submitRun(uint32_t) {}
     REQ_NVRTC(nvrtcDestroyProgram(&prog));
 }
 
+
+static void checkAndLoadMegakernelCache(
+    Optional<MegakernelCache> &cache,
+    Optional<std::string> &cache_write_path)
+{
+    auto *cache_path =
+        getenv("MADRONA_MWGPU_KERNEL_CACHE");
+
+    if (!cache_path || cache_path[0] == '\0') {
+        return;
+    }
+
+    if (!std::filesystem::exists(cache_path)) {
+        cache_write_path.emplace(cache_path);
+        return;
+    }
+
+    std::ifstream cache_file(cache_path,
+        std::ios::binary | std::ios::ate);
+    if (!cache_file.is_open()) {
+        FATAL("Failed to open megakernel cache file at %s",
+              cache_path);
+    }
+
+    size_t num_cache_bytes = cache_file.tellg();
+    cache_file.seekg(std::ios::beg);
+    HeapArray<char> cache_data(num_cache_bytes);
+    cache_file.read(cache_data.data(), cache_data.size());
+
+    size_t cur_cache_offset = 0;
+    size_t cache_remaining = cache_data.size();
+
+    size_t init_ecs_len = strnlen(cache_data.data() + cur_cache_offset,
+                                  cache_remaining);
+    if (init_ecs_len == 0 || init_ecs_len == cache_remaining) {
+        FATAL("Invalid cache file: no init ecs string");
+    }
+
+    const char *init_ecs_str = cache_data.data() + cur_cache_offset;
+    cur_cache_offset += init_ecs_len + 1;
+    cache_remaining -= init_ecs_len + 1;
+
+    size_t init_worlds_len = strnlen(cache_data.data() + cur_cache_offset,
+                                     cache_remaining);
+
+    if (init_worlds_len == 0 || init_worlds_len == cache_remaining) {
+        FATAL("Invalid cache_file: no init worlds string");
+    }
+
+    const char *init_worlds_str = cache_data.data() + cur_cache_offset;
+    cur_cache_offset += init_worlds_len + 1;
+    cache_remaining -= init_worlds_len + 1;
+
+    size_t init_tasks_len = strnlen(cache_data.data() + cur_cache_offset,
+                                    cache_remaining);
+
+    if (init_tasks_len == 0 || init_tasks_len == cache_remaining) {
+        FATAL("Invalid cache file: no kernel string\n");
+    }
+
+    const char *init_tasks_str = cache_data.data() + cur_cache_offset;
+    cur_cache_offset += init_tasks_len + 1;
+    cache_remaining -= init_tasks_len + 1;
+
+    size_t aligned_cubin_offset = utils::roundUpPow2(cur_cache_offset, 4);
+    if (aligned_cubin_offset  >= num_cache_bytes) {
+        FATAL("Invalid cache file: no CUBIN");
+    }
+
+    void *cubin_ptr = cache_data.data() + aligned_cubin_offset;
+    size_t num_cubin_bytes = num_cache_bytes - aligned_cubin_offset;
+
+    cache.emplace(MegakernelCache {
+        .data = std::move(cache_data),
+        .cubinStart = cubin_ptr,
+        .numCubinBytes = num_cubin_bytes,
+        .initECSName = init_ecs_str,
+        .initWorldsName = init_worlds_str,
+        .initTasksName = init_tasks_str,
+    });
+}
+
 static GPUCompileResults compileCode(
     const char **sources, uint32_t num_sources,
     const char **compile_flags, uint32_t num_compile_flags,
@@ -374,86 +465,21 @@ static GPUCompileResults compileCode(
     static std::array<char, 1024 * 1024> linker_info_log;
     static std::array<char, 1024 * 1024> linker_error_log;
 
-    struct MegakernelCache {
-        HeapArray<char> data;
-        void *cubinStart;
-        size_t numCubinBytes;
-        const char *initECSName;
-        const char *initWorldsName;
-        const char *initTasksName;
-    };
+    auto kernel_cache = Optional<MegakernelCache>::none();
+    auto cache_write_path = Optional<std::string>::none();
+    checkAndLoadMegakernelCache(kernel_cache, cache_write_path);
 
-    Optional<MegakernelCache> kernel_cache =
-        Optional<MegakernelCache>::none();
+    if (kernel_cache.has_value()) {
+        CUmodule mod;
+        REQ_CU(cuModuleLoadData(&mod, kernel_cache->cubinStart));
 
-    Optional<std::string> cache_write_path =
-        Optional<std::string>::none();
-
-    do {
-        auto *cache_path =
-            getenv("MADRONA_MWGPU_KERNEL_CACHE");
-
-        if (!cache_path || cache_path[0] == '\0') {
-            break;
-        }
-
-        if (!std::filesystem::exists(cache_path)) {
-            cache_write_path.emplace(cache_path);
-            break;
-        }
-
-        std::ifstream cache_file(cache_path,
-            std::ios::binary | std::ios::ate);
-        if (!cache_file.is_open()) {
-            FATAL("Failed to open megakernel cache file at %s",
-                  cache_path);
-        }
-
-        size_t num_cache_bytes = cache_file.tellg();
-        cache_file.seekg(std::ios::beg);
-        HeapArray<char> cache_data(num_cache_bytes);
-        cache_file.read(cache_data.data(), cache_data.size());
-
-        size_t cur_cache_offset = 0;
-        size_t cache_remaining = cache_data.size();
-
-        size_t init_ecs_len = strnlen(cache_data.data() + cur_cache_offset,
-                                      cache_remaining);
-        if (init_ecs_len == 0 || init_ecs_len == cache_remaining) {
-            FATAL("Invalid cache file: no init ecs string");
-        }
-
-        const char *init_ecs_str = cache_data.data() + cur_cache_offset;
-        cur_cache_offset += init_ecs_len + 1;
-        cache_remaining -= init_ecs_len + 1;
-
-        size_t init_worlds_len = strnlen(cache_data.data() + cur_cache_offset,
-                                         cache_remaining);
-
-        if (init_worlds_len == 0 || init_worlds_len == cache_remaining) {
-            FATAL("Invalid cache_file: no init worlds string");
-        }
-
-        const char *init_worlds_str = cache_data.data() + cur_cache_offset;
-        cur_cache_offset += init_worlds_len + 1;
-        cache_remaining -= init_worlds_len + 1;
-
-        size_t init_tasks_len = strnlen(cache_data.data() + cur_cache_offset,
-                                        cache_remaining);
-
-        if (init_tasks_len == 0 || init_tasks_len == cache_remaining) {
-            FATAL("Invalid cache file: no kernel string\n");
-        }
-
-        const char *init_tasks_str = cache_data.data() + cur_cache_offset;
-        cur_cache_offset += init_tasks_len + 1;
-        cache_remaining -= init_tasks_len + 1;
-
-        size_t aligned_cubin_offset = utils::roundUpPow2(cur_cache_offset, 4);
-        if (aligned_cubin_offset - cur_cache_offset >= cache_remaining) {
-            FATAL("Invalid cache file: no CUBIN");
-        }
-    } while (0);
+        return {
+            .mod = mod,
+            .initECSName = kernel_cache->initECSName,
+            .initWorldsName = kernel_cache->initWorldsName,
+            .initTasksName = kernel_cache->initTasksName,
+        };
+    }
 
     DynArray<CUjit_option> linker_options {
         CU_JIT_INFO_LOG_BUFFER,
@@ -738,10 +764,18 @@ static __attribute__((always_inline)) inline void dispatch(
     size_t cubin_size;
     checkLinker(cuLinkComplete(linker, &linked_cubin, &cubin_size));
 
-#if 0
-    std::ofstream cubin_out("/tmp/t.cubin", std::ios::binary);
-    cubin_out.write((char *)linked_cubin, cubin_size);
-#endif
+    if (cache_write_path.has_value()) {
+        std::ofstream cache_file(*cache_write_path, std::ios::binary);
+        cache_file.write(init_ecs_name.data(), init_ecs_name.size() + 1);
+        cache_file.write(init_worlds_name.data(), init_worlds_name.size() + 1);
+        cache_file.write(init_tasks_name.data(), init_tasks_name.size() + 1);
+        while (size_t(cache_file.tellp()) % 4 != 0) {
+            cache_file.put(0);
+        }
+        cache_file.write((char *)linked_cubin, cubin_size);
+
+        cache_file.close();
+    }
 
     if (verbose_compile && (uintptr_t)linker_option_values[1] > 0) {
         printf("CUDA linking info:\n%s\n", linker_info_log.data());

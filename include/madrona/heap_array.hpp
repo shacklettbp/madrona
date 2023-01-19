@@ -49,8 +49,8 @@ public:
         o.ptr_ = nullptr;
     }
 
-    RefT operator=(const HeapArray &) = delete;
-    RefT operator=(HeapArray &&o)
+    HeapArray<T, A> & operator=(const HeapArray &) = delete;
+    HeapArray<T, A> & operator=(HeapArray &&o)
     {
         if (ptr_ != nullptr) {
             clear();
@@ -62,6 +62,8 @@ public:
 
         o.ptr_ = nullptr;
         o.n_ = 0;
+
+        return *this;
     }
 
     void clear()
