@@ -14,7 +14,6 @@
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/cu_utils.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
-#include <nvToolsExtCuda.h>
 #endif
 
 namespace madrona::phys::narrowphase {
