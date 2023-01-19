@@ -126,7 +126,7 @@ def serialized_analysis(step_log):
         i: (normailized[i][-1],
             calibrate(step_log["events"][i][1], step_log["sm_base_avg"]),
             calibrate(step_log["events"][i][2], step_log["sm_base_avg"]))
-        for i in list(normailized.keys())[:-12:-1]
+        for i in list(normailized.keys())[:-11:-1]
     }
 
     print("top 10 nodes amounts {:.3f}% of execution time".format(
@@ -236,7 +236,10 @@ def block_analysis(step_log):
     return block_exec_time
 
 
-COLORS = ["blue", "orange", "red", "green", "purple", "cyan", "pink", "yellow"]
+COLORS = [
+    "blue", "orange", "red", "green", "purple", "cyan", "pink", "yellow",
+    "black", "black"
+]
 
 
 def plot_events(step_log, nodes, blocks, file_name):

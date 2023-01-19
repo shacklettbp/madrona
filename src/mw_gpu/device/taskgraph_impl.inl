@@ -113,7 +113,7 @@ void TaskGraph::setBlockState()
     float num_active_blocks = (float) total_invocations * num_threads_per_invocation / num_active_threads / consts::numSMs;
 
     while (num_active_blocks < 1 && num_active_threads > max(32, num_threads_per_invocation)) {
-        num_active_threads >> 1;
+        num_active_threads /= 2;
         num_active_blocks *= 2;
     }
 
