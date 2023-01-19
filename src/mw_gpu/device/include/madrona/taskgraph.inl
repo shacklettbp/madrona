@@ -174,19 +174,15 @@ void CustomParallelForNode<ContextT, Fn,
                            items_per_invocation,
                            ComponentTs...>::run(const int32_t invocation_idx)
 {
-    const int32_t base_row_idx = invocation_idx * items_per_invocation;
-    int32_t cur_item_offset = 0;
+    // Special case the vastly common case
+    if constexpr (items_per_invocation == 1) {
+        StateManager *state_mgr = mwGPU::getStateManager();
 
-    StateManager *state_mgr = mwGPU::getStateManager();
-
-    int32_t cumulative_num_rows = 0;
-    state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref_,
-            [&](int32_t num_rows, WorldID *world_column,
-                auto ...raw_ptrs) {
-
-        // Special case the vastly common case
-        if constexpr (items_per_invocation == 1) {
-            int32_t tbl_offset = base_row_idx - cumulative_num_rows;
+        int32_t cumulative_num_rows = 0;
+        state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref_,
+                [&](int32_t num_rows, WorldID *world_column,
+                    auto ...raw_ptrs) {
+            int32_t tbl_offset = invocation_idx - cumulative_num_rows;
             cumulative_num_rows += num_rows;
             if (tbl_offset >= num_rows) {
                 return false;
@@ -216,41 +212,45 @@ void CustomParallelForNode<ContextT, Fn,
             }, typed_ptrs);
 
             return true;
-        } else {
-            int32_t prev_cumulative_rows = cumulative_num_rows;
+        });
+    } else {
+        int32_t base_item_idx = invocation_idx * items_per_invocation;
+        int32_t cur_item_offset = 0;
+
+        StateManager *state_mgr = mwGPU::getStateManager();
+        int32_t cumulative_num_rows = 0;
+        state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref_,
+                [&](int32_t num_rows, WorldID *world_column,
+                    auto ...raw_ptrs) {
+            int32_t item_idx = base_item_idx + cur_item_offset;
+            int32_t tbl_offset = item_idx - cumulative_num_rows;
             cumulative_num_rows += num_rows;
+
+            int32_t launch_size = min(num_rows - tbl_offset,
+                                      items_per_invocation);
+            if (launch_size <= 0) {
+                return false;
+            }
+
+            // The following should work, but doesn't in cuda 11.7 it seems
+            // Need to put arguments in tuple for some reason instead
+            //Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...);
 
             cuda::std::tuple typed_ptrs {
                 (ComponentTs *)raw_ptrs
                 ...
             };
 
-#pragma unroll(1)
-            for (; cur_item_offset < items_per_invocation; cur_item_offset++) {
-                int32_t cur_row_idx = base_row_idx + cur_item_offset;
-                int32_t tbl_offset = cur_row_idx - prev_cumulative_rows;
-                if (tbl_offset >= num_rows) {
-                    return false;
-                }
+            std::apply([&](auto ...ptrs) {
+                Fn(world_column + tbl_offset,
+                   ptrs + tbl_offset ...,
+                   launch_size);
+            }, typed_ptrs);
 
-                WorldID world_id = world_column[tbl_offset];
-
-                // This entity has been deleted but not actually removed from the
-                // table yet
-                if (world_id.idx == -1) {
-                    continue;
-                }
-
-                ContextT ctx = TaskGraph::makeContext<ContextT>(world_id);
-
-                std::apply([&](auto ...ptrs) {
-                    Fn(ctx, ptrs[tbl_offset] ...);
-                }, typed_ptrs);
-            }
-
-            return true;
-        }
-    });
+            cur_item_offset += launch_size;
+            return cur_item_offset == items_per_invocation;
+        });
+    }
 }
 
 template <typename ContextT, auto Fn,

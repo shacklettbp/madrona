@@ -14,6 +14,7 @@
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/cu_utils.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
+#include <nvToolsExtCuda.h>
 #endif
 
 namespace madrona::phys::narrowphase {
@@ -1038,7 +1039,7 @@ inline constexpr int32_t maxNumVertices = numVertexFloats / 3;
 }
 #endif
 
-inline void runNarrowphase(
+static inline void runNarrowphase(
     Context &ctx,
     const CandidateCollision &candidate_collision)
 {
@@ -1261,16 +1262,42 @@ inline void runNarrowphase(
     }
 }
 
+inline void runNarrowphaseSystem(
+#ifdef MADRONA_GPU_MODE
+    WorldID *world_ids,
+    const CandidateCollision *candidate_collisions,
+    int32_t num_candidates
+#else
+    Context &ctx,
+    const CandidateCollision &candidate_collision
+#endif
+    )
+{
+#ifdef MADRONA_GPU_MODE
+    for (int32_t i = 0; i < num_candidates; i++) {
+        WorldID world_id = world_ids[i];
+        if (world_id.idx == -1) {
+            continue;
+        }
+
+        Context ctx = TaskGraph::makeContext<Context>(world_id);
+        runNarrowphase(ctx, candidate_collisions[i]);
+    }
+#else
+    runNarrowphase(ctx, candidate_collision);
+#endif
+}
+
 TaskGraph::NodeID setupTasks(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
 #ifdef MADRONA_GPU_MODE
     auto narrowphase = builder.addToGraph<CustomParallelForNode<Context,
-        runNarrowphase, 32, 32, CandidateCollision>>(deps);
+        runNarrowphaseSystem, 32, 8, CandidateCollision>>(deps);
 #else
     auto narrowphase = builder.addToGraph<ParallelForNode<Context,
-        runNarrowphase, CandidateCollision>>(deps);
+        runNarrowphaseSystem, CandidateCollision>>(deps);
 #endif
 
     // FIXME do some kind of scoped reset on tmp alloc
