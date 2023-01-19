@@ -23,9 +23,8 @@ enum class DeviceEvent : uint32_t {
 
 class DeviceTracing {
 private:
-    // for current setting, it is required to be larger than
-    // steps * (#blocks + #nodes)
-    static constexpr inline uint64_t maxLogSize = 10000000;
+    // todo: have a smaller value by enabling log transfering between steps
+    static constexpr inline uint64_t maxLogSize = 40000000;
 
     struct DeviceLog {
         DeviceEvent event;

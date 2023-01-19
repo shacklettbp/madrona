@@ -7,6 +7,7 @@
 
 #include "mw_gpu/const.hpp"
 #include "mw_gpu/worker_init.hpp"
+#include "mw_gpu/megakernel_consts.hpp"
 
 #include <cuda/barrier>
 #include <cuda/std/tuple>
@@ -157,6 +158,7 @@ private:
     uint32_t num_nodes_;
     NodeData *node_datas_;
     std::atomic_uint32_t cur_node_idx_;
+    std::atomic_uint32_t block_sm_offsets_[consts::numSMs];
     cuda::barrier<cuda::thread_scope_device> init_barrier_;
 
 friend class Builder;

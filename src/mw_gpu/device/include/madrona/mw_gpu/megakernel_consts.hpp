@@ -3,6 +3,7 @@
 namespace madrona {
 namespace consts {
 constexpr inline uint32_t numMegakernelThreads = 256;
+constexpr inline uint32_t numSMs = 82;
 constexpr inline uint32_t numMegakernelBlocksPerSM = 4;
 }
 }
