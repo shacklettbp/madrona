@@ -176,24 +176,6 @@ inline math::Vector3 planeIntersection(const geometry::Plane &plane, const math:
     return p1 + (p2 - p1) * (-distance / plane.normal.dot(p2 - p1));
 }
 
-static Vector3 findFurthestPoint(const HullState &h,
-                                 const math::Vector3 &d)
-{
-    Vector3 furthest = h.vertices[0];
-    float max_dist = d.dot(h.vertices[0]);
-
-    for (CountT i = 1; i < (CountT)h.numVertices; ++i) {
-        Vector3 vertex = h.vertices[i];
-        float dp = d.dot(vertex);
-        if (dp > max_dist) {
-            max_dist = dp;
-            furthest = vertex;
-        }
-    }
-
-    return furthest;
-}
-
 #ifdef MADRONA_GPU_MODE
 
 static inline MADRONA_ALWAYS_INLINE std::pair<float, int32_t> 
@@ -234,41 +216,21 @@ warpFloatMinAndIdx(float val, int32_t idx)
     return { val, idx };
 }
 
-static Vector3 findFurthestPointWide(
-    const int32_t mwgpu_lane_id,
-    const HullState &h, const math::Vector3 &d)
+static inline MADRONA_ALWAYS_INLINE float warpFloatMin(float val)
 {
-    Vector3 furthest;
-    float max_dist = -FLT_MAX;
+#pragma unroll
+    for (int32_t w = 16; w >= 1; w /= 2) {
+        float other_val =
+            __shfl_xor_sync(mwGPU::allActive, val, w);
 
-    const int32_t num_verts = (int32_t)h.numVertices;
-    for (int32_t offset = 0; offset < num_verts; offset += 32) {
-        int32_t idx = offset + mwgpu_lane_id;
-
-        Vector3 vertex;
-        float dp;
-        if (idx < num_verts) {
-            vertex = h.vertices[idx];
-            dp = d.dot(vertex);
-        } else {
-            dp = -FLT_MAX;
-        }
-
-        auto [iter_max, max_lane] = warpFloatMaxAndIdx(dp, idx);
-
-        if (iter_max > max_dist) {
-            max_dist = iter_max;
-            furthest.x =
-                __shfl_sync(mwGPU::allActive, vertex.x, max_lane);
-            furthest.y =
-                __shfl_sync(mwGPU::allActive, vertex.y, max_lane);
-            furthest.z =
-                __shfl_sync(mwGPU::allActive, vertex.z, max_lane);
+        if (other_val < val) {
+            val = other_val;
         }
     }
 
-    return furthest;
+    return val;
 }
+
 #endif
 
 static float getHullDistanceFromPlane(
@@ -276,65 +238,69 @@ static float getHullDistanceFromPlane(
     const Plane &plane, const HullState &h)
 {
 #ifdef MADRONA_GPU_MODE
-    math::Vector3 supportA = findFurthestPointWide(
-        mwgpu_lane_id, h, -plane.normal);
+    constexpr CountT elems_per_iter = 32;
 #else
-    math::Vector3 supportA = findFurthestPoint(h, -plane.normal);
+    constexpr CountT elems_per_iter = 1;
 #endif
-    
-    return getDistanceFromPlane(plane, supportA);
+
+    float min_dot_n = FLT_MAX;
+
+    auto computeVertexDotN = [&h, &plane](CountT vert_idx) {
+        Vector3 vertex = h.vertices[vert_idx];
+        return plane.normal.dot(vertex);
+    };
+
+    const CountT num_verts = (CountT)h.numVertices;
+    for (int32_t offset = 0; offset < num_verts; offset += elems_per_iter) {
+#ifdef MADRONA_GPU_MODE
+        int32_t vert_idx = offset + mwgpu_lane_id;
+        float cur_dot;
+        if (vert_idx < num_verts) {
+            cur_dot = computeVertexDotN(vert_idx);
+        } else {
+            cur_dot = FLT_MAX;
+        }
+#else
+        float cur_dot = computeVertexDotN(offset);
+#endif
+
+        if (cur_dot < min_dot_n) {
+            min_dot_n = cur_dot;
+        }
+    }
+
+#ifdef MADRONA_GPU_MODE
+    min_dot_n = warpFloatMin(min_dot_n);
+#endif
+
+    return min_dot_n - plane.d;
 }
 
 static FaceQuery queryFaceDirections(
     MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     const HullState &a, const HullState &b)
 {
-#ifdef MADRONA_GPU_MODE
-    constexpr CountT elems_per_iter = 32;
-#else
-    constexpr CountT elems_per_iter = 1;
-#endif
-
-    int polygonMaxDistance = 0;
-    float maxDistance = -FLT_MAX;
-
-    auto distanceFromAFace = [&a, &b](CountT face_idx) {
-        Plane plane = a.facePlanes[face_idx];
-        math::Vector3 supportB = findFurthestPoint(b, -plane.normal);
-        return getDistanceFromPlane(plane, supportB);
-    };
+    int max_dist_face = -1;
+    float max_dist = -FLT_MAX;
 
     CountT num_a_faces = (CountT)a.numFaces;
-    for (CountT offset = 0; offset < num_a_faces; offset += elems_per_iter) {
-#ifdef MADRONA_GPU_MODE
-        CountT face_idx = offset + mwgpu_lane_id;
+    for (CountT face_idx = 0; face_idx < num_a_faces; face_idx++) {
+        Plane plane = a.facePlanes[face_idx];
+        float face_dist = getHullDistanceFromPlane(
+            MADRONA_GPU_COND(mwgpu_lane_id,) plane, b);
 
-        float face_dist;
-        if (face_idx < num_a_faces) {
-            face_dist = distanceFromAFace(face_idx);
-        } else {
-            face_dist = -FLT_MAX;
-        }
+        if (face_dist > max_dist) {
+            max_dist = face_dist;
+            max_dist_face = face_idx;
 
-        auto [iter_max_dist, iter_max_idx] =
-            warpFloatMaxAndIdx(face_dist, face_idx);
-#else
-        const CountT face_idx = offset;
-        float iter_max_dist = distanceFromAFace(face_idx);
-        const CountT iter_max_idx = face_idx;
-#endif
-
-        if (iter_max_dist > maxDistance) {
-            maxDistance = iter_max_dist;
-            polygonMaxDistance = iter_max_idx;
-
-            if (maxDistance > 0) {
+            if (max_dist > 0) {
                 break;
             }
         }
     }
+    assert(max_dist_face != -1);
 
-    return { maxDistance, polygonMaxDistance };
+    return { max_dist, max_dist_face };
 }
 
 static bool isMinkowskiFace(
@@ -549,7 +515,7 @@ static CountT findIncidentFace(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     const CountT num_faces = (CountT)h.numFaces;
     for (CountT offset = 0; offset < num_faces; offset += elems_per_iter) {
 #ifdef MADRONA_GPU_MODE
-        CountT face_idx = offset + mwgpu_lane_id;
+        const CountT face_idx = offset + mwgpu_lane_id;
 
         float face_dot_ref;
         if (face_idx < num_faces) {
@@ -557,23 +523,23 @@ static CountT findIncidentFace(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         } else{
             face_dot_ref = FLT_MAX;
         }
-
-        auto [iter_min, iter_min_idx] =
-            warpFloatMinAndIdx(face_dot_ref, face_idx);
 #else
         const CountT face_idx = offset;
-        float iter_min = computeFaceDotRef(face_idx);
-        const CountT iter_min_idx = face_idx;
+        float face_dot_ref = computeFaceDotRef(face_idx);
 #endif
 
-        if (iter_min < min_dot) {
-            min_dot = iter_min;
-            minimizing_face = iter_min_idx;
+        if (face_dot_ref < min_dot) {
+            min_dot = face_dot_ref;
+            minimizing_face = face_idx;
         }
     }
 
-    assert(minimizing_face != -1);
+#ifdef MADRONA_GPU_MODE
+    std::tie(min_dot, minimizing_face) = 
+        warpFloatMinAndIdx(min_dot, minimizing_face);
+#endif
 
+    assert(minimizing_face != -1);
     return minimizing_face;
 }
 
