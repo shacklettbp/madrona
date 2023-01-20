@@ -82,7 +82,7 @@ void TaskGraph::init()
         cur_node_idx_.store(0, std::memory_order_release);
 
 #ifdef LIMIT_ACTIVE_BLOCKS
-        for (size_t i = 0; i < consts::numSMs; i++) {
+        for (size_t i = 0; i < num_SMs_; i++) {
             block_sm_offsets_[i].store(0, std::memory_order_relaxed);
         }
 #endif
@@ -125,7 +125,7 @@ void TaskGraph::setBlockState()
     uint32_t num_threads_per_invocation = cur_node.numThreadsPerInvocation;
 
     uint32_t num_active_threads = consts::numMegakernelThreads;
-    float num_active_blocks = (float)(total_invocations - cur_offset) * num_threads_per_invocation / num_active_threads / consts::numSMs;
+    float num_active_blocks = (float)(total_invocations - cur_offset) * num_threads_per_invocation / num_active_threads / num_SMs_;
 
 #ifdef LIMIT_ACTIVE_THREADS
     while (num_active_blocks < 1 && num_active_threads > max(32, num_threads_per_invocation)) {
