@@ -737,7 +737,7 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         Plane ref_plane = a_is_ref ? faceQueryA.plane : faceQueryB.plane;
         CountT ref_face_idx =
             a_is_ref ? faceQueryA.faceIdx : faceQueryB.faceIdx;
-        const HullState &incident_hull = a_is_ref ? a : b;
+        const HullState &incident_hull = a_is_ref ? b : a;
 
         // Find incident face
         CountT incident_face_idx = findIncidentFace(
@@ -1485,7 +1485,7 @@ static MADRONA_ALWAYS_INLINE inline void generateContacts(
             narrowphase_result.bHalfEdges,
             narrowphase_result.aFaceHedgeRoots,
             narrowphase_result.bFaceHedgeRoots,
-            thread_tmp_storage_a, thread_tmp_storage_a,
+            thread_tmp_storage_a, thread_tmp_storage_b,
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
     } break;
