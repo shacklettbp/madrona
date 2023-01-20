@@ -4,15 +4,89 @@
 
 #include "physics_impl.hpp"
 
+#ifdef MADRONA_GPU_MODE
+#include <madrona/mw_gpu/cu_utils.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
+//#define COUNT_GPU_CLOCKS
+#endif
+
+#ifdef COUNT_GPU_CLOCKS
+#define MADRONA_COUNT_CLOCKS
+extern "C" {
+std::atomic_uint64_t narrowphaseAllClocks = 0;
+std::atomic_uint64_t narrowphaseFetchWorldClocks = 0;
+std::atomic_uint64_t narrowphaseSetupClocks = 0;
+std::atomic_uint64_t narrowphasePrepClocks = 0;
+std::atomic_uint64_t narrowphaseSwitchClocks = 0;
+std::atomic_uint64_t narrowphaseSATFaceClocks = 0;
+std::atomic_uint64_t narrowphaseSATEdgeClocks = 0;
+std::atomic_uint64_t narrowphaseSATPlaneClocks = 0;
+std::atomic_uint64_t narrowphaseSATContactClocks = 0;
+std::atomic_uint64_t narrowphaseSATPlaneContactClocks = 0;
+std::atomic_uint64_t narrowphaseSaveContactsClocks = 0;
+std::atomic_uint64_t narrowphaseTxfmHullCtrs = 0;
+}
+#endif
+
+#ifdef MADRONA_COUNT_CLOCKS
+
+class ClockHelper {
+public:
+    inline ClockHelper(std::atomic_uint64_t &counter)
+        : counter_(&counter)
+    {
+        cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
+                                  cuda::thread_scope_thread);
+        start_ = timestamp();
+    }
+
+    inline void end()
+    {
+        cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
+                                  cuda::thread_scope_thread);
+        auto end = timestamp();
+        if (threadIdx.x % 32 == 0) {
+            counter_->fetch_add(end - start_, std::memory_order_relaxed);
+        }
+        counter_ = nullptr;
+    }
+
+    inline ~ClockHelper()
+    {
+        if (counter_ != nullptr) {
+            end();
+        }
+    }
+
+private:
+    inline uint64_t timestamp() const
+    {
+        uint64_t v;
+        asm volatile("mov.u64 %0, %%globaltimer;"
+                     : "=l"(v));
+        return v;
+    }
+
+    std::atomic_uint64_t *counter_;
+    uint64_t start_;
+};
+
+#define PROF_START(name, counter) \
+    ClockHelper name(counter)
+
+#define PROF_END(name) name.end()
+
+#endif
+
+#ifndef PROF_START
+#define PROF_START(name, counter)
+#define PROF_END(name)
+#endif
+
 // Uncomment this to unconditionally disable GPU narrowphase version
 #undef MADRONA_GPU_MODE
 #undef MADRONA_GPU_COND
 #define MADRONA_GPU_COND(...)
-
-#ifdef MADRONA_GPU_MODE
-#include <madrona/mw_gpu/cu_utils.hpp>
-#include <madrona/mw_gpu/host_print.hpp>
-#endif
 
 namespace madrona::phys::narrowphase {
 
@@ -916,6 +990,8 @@ Manifold doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     Manifold manifold;
     manifold.numContactPoints = 0;
 
+    PROF_START(sat_face_ctr, narrowphaseSATFaceClocks);
+
     FaceQuery faceQueryA =
         queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
     if (faceQueryA.separation > 0.0f) {
@@ -930,6 +1006,9 @@ Manifold doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         return manifold;
     }
 
+    PROF_END(sat_face_ctr);
+    PROF_START(sat_edge_ctr, narrowphaseSATEdgeClocks);
+
     EdgeQuery edgeQuery =
         queryEdgeDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
     if (edgeQuery.separation > 0.0f) {
@@ -937,9 +1016,12 @@ Manifold doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         return manifold;
     }
 
+    PROF_END(sat_edge_ctr);
+
     bool bIsFaceContactA = faceQueryA.separation > edgeQuery.separation;
     bool bIsFaceContactB = faceQueryB.separation > edgeQuery.separation;
 
+    PROF_START(sat_contact, narrowphaseSATContactClocks);
     if (bIsFaceContactA || bIsFaceContactB) {
         // Create face contact
         manifold = createFaceContact(MADRONA_GPU_COND(mwgpu_lane_id,)
@@ -964,6 +1046,8 @@ Manifold doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
     Manifold manifold;
     manifold.numContactPoints = 0;
 
+    PROF_START(sat_plane_ctr, narrowphaseSATPlaneClocks);
+
     float separation = getHullDistanceFromPlane(
         MADRONA_GPU_COND(mwgpu_lane_id,) plane, h);
 
@@ -971,6 +1055,9 @@ Manifold doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
         return manifold;
     }
 
+    PROF_END(sat_plane_ctr);
+
+    PROF_START(sat_contact_ctr, narrowphaseSATPlaneContactClocks);
     return createFaceContactPlane(MADRONA_GPU_COND(mwgpu_lane_id,) h, plane,
                                   (Vector3 *)tmp_buffer1, (float *)tmp_buffer2,
                                   world_offset, to_world_frame);
@@ -996,6 +1083,8 @@ static inline void addManifoldToSolver(
     Manifold manifold,
     Loc a_loc, Loc b_loc)
 {
+    PROF_START(save_contacts_ctr, narrowphaseSaveContactsClocks);
+
 #ifdef MADRONA_GPU_MODE
     if (mwgpu_lane_id != 0) {
         return;
@@ -1022,15 +1111,6 @@ static inline void addManifoldToSolver(
     }});
 }
 
-extern "C" {
-std::atomic_uint64_t narrowphasePrepClocks = 0;
-std::atomic_uint64_t narrowphaseBodyClocks = 0;
-}
-
-#ifdef MADRONA_GPU_MODE
-//#define COUNT_GPU_CLOCKS
-#endif
-
 #ifdef MADRONA_GPU_MODE
 namespace gpuImpl {
 inline constexpr int32_t numSMemFloats =
@@ -1049,6 +1129,8 @@ static inline void runNarrowphase(
     Context &ctx,
     const CandidateCollision &candidate_collision)
 {
+    PROF_START(setup_ctr, narrowphaseSetupClocks);
+
 #ifdef MADRONA_GPU_MODE
     const int32_t mwgpu_warp_id = threadIdx.x / 32;
     const int32_t mwgpu_lane_id = threadIdx.x % 32;
@@ -1077,9 +1159,10 @@ static inline void runNarrowphase(
     Vector3 *tmp_vertices = tmp_vertices_buffer;
 #endif
 
-#ifdef COUNT_GPU_CLOCKS
-    uint64_t prep_start = clock64();
-#endif
+    PROF_END(setup_ctr);
+
+    PROF_START(prep_ctr, narrowphasePrepClocks);
+
     Loc a_loc = candidate_collision.a;
     Loc b_loc = candidate_collision.b;
 
@@ -1116,26 +1199,18 @@ static inline void runNarrowphase(
         AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
         AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
         
-#ifdef COUNT_GPU_CLOCKS
-        uint64_t prep_end = clock64();
-        if (mwgpu_lane_id == 0) {
-            narrowphasePrepClocks.fetch_add(prep_end - prep_start,
-                                            std::memory_order_relaxed);
-        }
-#endif
-
         if (!a_world_aabb.overlaps(b_world_aabb)) {
             return;
         }
     }
 
-#ifdef COUNT_GPU_CLOCKS
-    uint64_t body_start = clock64();
-#endif
-
     SolverData &solver = ctx.getSingleton<SolverData>();
 
     NarrowphaseTest test_type {raw_type_a | raw_type_b};
+
+    PROF_END(prep_ctr);
+
+    PROF_START(switch_body, narrowphaseSwitchClocks);
 
     switch (test_type) {
     case NarrowphaseTest::SphereSphere: {
@@ -1176,6 +1251,8 @@ static inline void runNarrowphase(
         assert(a_he_mesh.mVertexCount + b_he_mesh.mVertexCount < 
                max_num_tmp_vertices);
 
+        PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
+
         HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
             a_he_mesh, a_pos, a_rot, a_scale, tmp_vertices, tmp_faces);
 
@@ -1186,6 +1263,8 @@ static inline void runNarrowphase(
             b_he_mesh, b_pos, b_rot, b_scale, tmp_vertices, tmp_faces);
 
         MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
+
+        PROF_END(txfm_hull_ctr);
 
         Manifold manifold = doSAT(MADRONA_GPU_COND(mwgpu_lane_id,)
             a_hull_state, b_hull_state,
@@ -1248,10 +1327,14 @@ static inline void runNarrowphase(
         assert(a_he_mesh.mPolygonCount < max_num_tmp_faces);
         assert(a_he_mesh.mVertexCount <  max_num_tmp_vertices);
 
+        PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
+
         HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
             a_he_mesh, a_pos, a_rot, a_scale, tmp_vertices, tmp_faces);
 
         MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
+
+        PROF_END(txfm_hull_ctr);
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
 #if 0
@@ -1281,15 +1364,6 @@ static inline void runNarrowphase(
     } break;
     default: __builtin_unreachable();
     }
-
-#ifdef COUNT_GPU_CLOCKS
-    uint64_t body_end = clock64();
-
-    if (mwgpu_lane_id == 0) {
-        narrowphaseBodyClocks.fetch_add(body_end - body_start,
-                                        std::memory_order_relaxed);
-    }
-#endif
 }
 
 inline void runNarrowphaseSystem(
@@ -1303,14 +1377,18 @@ inline void runNarrowphaseSystem(
 #endif
     )
 {
+    PROF_START(all_ctr, narrowphaseAllClocks);
 #ifdef MADRONA_GPU_MODE
     for (int32_t i = 0; i < num_candidates; i++) {
+        PROF_START(world_get_ctr, narrowphaseFetchWorldClocks);
         WorldID world_id = world_ids[i];
         if (world_id.idx == -1) {
             continue;
         }
 
         Context ctx = TaskGraph::makeContext<Context>(world_id);
+        PROF_END(world_get_ctr);
+
         runNarrowphase(ctx, candidate_collisions[i]);
     }
 #else
