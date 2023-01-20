@@ -1,95 +1,106 @@
 import sys
 import matplotlib.pyplot as plt
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageColor, ImageFont
 import os
 
-STEP = -1
-NEW_STEP = False
 LOG_STEPS = {}
-OFFSET_RANKINGS = {}
+# FUNC_OFFSET_RANKINGS = {}
 
 
-def new_step():
-    global STEP
-    STEP += 1
-    LOG_STEPS[STEP] = {
-        "base_cycles": {},
-        "events": {},
-        "SMs": {},
-        "mapping": {},
-        "final_cycles": {},
-        "start_timestamp": 0xFFFFFFFFFFFFFFFF,
-        "final_timestamp": 0
-    }
+def parse_device_logs(events):
+    global LOG_STEPS
+    STEP = -1
 
+    def new_step():
+        nonlocal STEP
+        STEP += 1
+        LOG_STEPS[STEP] = {
+            "base_cycles": {},
+            "events": {},
+            "SMs": {},
+            "mapping": {},
+            "final_cycles": {},
+            "start_timestamp": 0xFFFFFFFFFFFFFFFF,
+            "final_timestamp": 0
+        }
 
-def get_device_log(array):
-    global NEW_STEP, STEP, LOG_STEPS
-    event = int.from_bytes(array[:4], byteorder='little')
-    funcID = int.from_bytes(array[4:8], byteorder='little')
-    numInvocations = int.from_bytes(array[8:12], byteorder='little')
-    nodeID = int.from_bytes(array[12:16], byteorder='little')
-    blockID = int.from_bytes(array[16:20], byteorder='little')
-    smID = int.from_bytes(array[20:24], byteorder='little')
-    cycleCount = int.from_bytes(array[24:32], byteorder='little')
+    for i in range(0, len(events), 32):
+        array = events[i:i + 32]
 
-    if event in [1, 2]:
-        if nodeID not in LOG_STEPS[STEP]["mapping"]:
-            LOG_STEPS[STEP]["mapping"][nodeID] = (funcID, numInvocations)
-        else:
-            assert LOG_STEPS[STEP]["mapping"][nodeID] == (funcID,
-                                                          numInvocations)
+        event = int.from_bytes(array[:4], byteorder='little')
+        funcID = int.from_bytes(array[4:8], byteorder='little')
+        numInvocations = int.from_bytes(array[8:12], byteorder='little')
+        nodeID = int.from_bytes(array[12:16], byteorder='little')
+        blockID = int.from_bytes(array[16:20], byteorder='little')
+        smID = int.from_bytes(array[20:24], byteorder='little')
+        cycleCount = int.from_bytes(array[24:32], byteorder='little')
 
-    if event == 0:
-        assert funcID == 0 and numInvocations == 0 and nodeID == 0
-        if not NEW_STEP:
-            NEW_STEP = True
+        if event == 0 and funcID == 1:
             new_step()
-        if smID not in LOG_STEPS[STEP]["base_cycles"]:
-            LOG_STEPS[STEP]["base_cycles"][smID] = {blockID: cycleCount}
+            LOG_STEPS[STEP]["start_timestamp"] = cycleCount
+            continue
         else:
-            assert blockID not in LOG_STEPS[STEP]["base_cycles"][smID]
-            LOG_STEPS[STEP]["base_cycles"][smID][blockID] = cycleCount
+            if STEP == -1:
+                # till we find a correct indicator of the beginning
+                continue
 
-        LOG_STEPS[STEP]["start_timestamp"] = min(
-            LOG_STEPS[STEP]["start_timestamp"], cycleCount)
-        return
-
-    NEW_STEP = False
-
-    if event in [1, 2]:
-        if nodeID not in LOG_STEPS[STEP]["events"]:
-            LOG_STEPS[STEP]["events"][nodeID] = {
-                event: (smID, blockID, cycleCount)
-            }
-        else:
-            assert event not in LOG_STEPS[STEP]["events"][nodeID]
-            LOG_STEPS[STEP]["events"][nodeID][event] = (smID, blockID,
-                                                        cycleCount)
-        return
-
-    if event in [3, 4]:
-        if smID not in LOG_STEPS[STEP]["SMs"]:
-            assert event == 3
-            LOG_STEPS[STEP]["SMs"][smID] = {
-                (numInvocations, nodeID, blockID): [cycleCount]
-            }
-        else:
-            if (numInvocations, nodeID,
-                    blockID) in LOG_STEPS[STEP]["SMs"][smID]:
-                assert event == 4
-                LOG_STEPS[STEP]["SMs"][smID][(numInvocations, nodeID,
-                                              blockID)].append(cycleCount)
+        if event == 0:
+            assert funcID == 0 and numInvocations == 0 and nodeID == 0
+            if smID not in LOG_STEPS[STEP]["base_cycles"]:
+                LOG_STEPS[STEP]["base_cycles"][smID] = {blockID: cycleCount}
             else:
-                LOG_STEPS[STEP]["SMs"][smID][(numInvocations, nodeID,
-                                              blockID)] = [cycleCount]
-        return
+                assert blockID not in LOG_STEPS[STEP]["base_cycles"][smID]
+                LOG_STEPS[STEP]["base_cycles"][smID][blockID] = cycleCount
 
-    if event == 5:
-        assert blockID not in LOG_STEPS[STEP]["final_cycles"]
-        LOG_STEPS[STEP]["final_cycles"][blockID] = cycleCount
-        LOG_STEPS[STEP]["final_timestamp"] = max(
-            LOG_STEPS[STEP]["final_timestamp"], cycleCount)
+            # LOG_STEPS[STEP]["start_timestamp"] = min(
+            #     LOG_STEPS[STEP]["start_timestamp"], cycleCount)
+            # return
+
+        elif event in [1, 2]:
+            if nodeID not in LOG_STEPS[STEP]["mapping"]:
+                LOG_STEPS[STEP]["mapping"][nodeID] = (funcID, numInvocations)
+            else:
+                assert LOG_STEPS[STEP]["mapping"][nodeID] == (funcID,
+                                                              numInvocations)
+
+            if nodeID not in LOG_STEPS[STEP]["events"]:
+                LOG_STEPS[STEP]["events"][nodeID] = {
+                    event: (smID, blockID, cycleCount)
+                }
+            else:
+                assert event not in LOG_STEPS[STEP]["events"][nodeID]
+                LOG_STEPS[STEP]["events"][nodeID][event] = (smID, blockID,
+                                                            cycleCount)
+
+        elif event in [3, 4]:
+            if smID not in LOG_STEPS[STEP]["SMs"]:
+                assert event == 3
+                LOG_STEPS[STEP]["SMs"][smID] = {
+                    (numInvocations, nodeID, blockID): [cycleCount]
+                }
+            else:
+                if (numInvocations, nodeID,
+                        blockID) in LOG_STEPS[STEP]["SMs"][smID]:
+                    assert event == 4
+                    LOG_STEPS[STEP]["SMs"][smID][(numInvocations, nodeID,
+                                                  blockID)].append(cycleCount)
+                else:
+                    LOG_STEPS[STEP]["SMs"][smID][(numInvocations, nodeID,
+                                                  blockID)] = [cycleCount]
+
+        elif event == 5:
+            assert blockID not in LOG_STEPS[STEP]["final_cycles"]
+            LOG_STEPS[STEP]["final_cycles"][blockID] = cycleCount
+            LOG_STEPS[STEP]["final_timestamp"] = max(
+                LOG_STEPS[STEP]["final_timestamp"], cycleCount)
+        else:
+            assert (False & "event {} not supported".format(event))
+
+    # drop the last step which might be corrupted
+    del LOG_STEPS[STEP]
+    print(
+        "At the end, complete traces for {} steps are generated".format(STEP -
+                                                                        1))
 
 
 def serialized_analysis(step_log):
@@ -116,18 +127,17 @@ def serialized_analysis(step_log):
         k: (v[0], v[1], round(v[2] / total_exec_time, 3))
         for k, v in sorted_duration.items()
     }
-    print("execution time percentage for each node", normailized)
+    # print("execution time percentage for each node", normailized)
 
     top10_nodes = {
         i: (normailized[i][-1],
             calibrate(step_log["events"][i][1], step_log["sm_base_avg"]),
             calibrate(step_log["events"][i][2], step_log["sm_base_avg"]))
-        for i in list(normailized.keys())[-10::]
+        for i in list(normailized.keys())[:-11:-1]
     }
 
-    print("top 10 nodes amounts",
-          sum([i[-1] for i in list(normailized.values())][-10::]),
-          "% of execution time")
+    print("Top 10 nodes amounts {:.3f}% of execution time".format(
+        sum([i[-1] for i in list(normailized.values())][-10::]) * 100))
 
     func_percentage = {}
     for k, v in normailized.items():
@@ -139,14 +149,16 @@ def serialized_analysis(step_log):
             func_percentage[v[0]][1] += v[2]
     sorted_func = dict(
         sorted(func_percentage.items(), key=lambda item: item[1][1]))
+    # print("execution time for each func",
+    #       {k: [v[0], v[1] * total_exec_time]
+    #        for k, v in sorted_func.items()})
     print("execution time percentage for each func", sorted_func)
-    # print("total execution time", total_exec_time)
 
     return top10_nodes
 
 
 def block_analysis(step_log):
-    sm_execution = {k: 0 for k in step_log["SMs"].keys()}
+    sm_execution = {k: [] for k in step_log["SMs"].keys()}
     block_exec_time = {
         "blocks": {k: {}
                    for k in step_log["SMs"].keys()},  # horizontal
@@ -164,15 +176,15 @@ def block_analysis(step_log):
             start, end = [
                 i - step_log["sm_base_avg"][sm] for i in [start, end]
             ]
-            sm_execution[sm] += end - start
+            sm_execution[sm].append((start, end))
 
-            funcID = step_log["mapping"][nodeID][0]
+            # funcID = step_log["mapping"][nodeID][0]
             # hard coding for narrowphase
-            if funcID == 28:
-                if offset not in OFFSET_RANKINGS:
-                    OFFSET_RANKINGS[offset] = end - start
-                else:
-                    OFFSET_RANKINGS[offset] += end - start
+            # if funcID == 28:
+            #     if offset not in FUNC_OFFSET_RANKINGS:
+            #         FUNC_OFFSET_RANKINGS[offset] = end - start
+            #     else:
+            #         FUNC_OFFSET_RANKINGS[offset] += end - start
 
             if blockID not in block_exec_time["blocks"][sm]:
                 block_exec_time["blocks"][sm][blockID] = [(start, end, nodeID)]
@@ -194,21 +206,47 @@ def block_analysis(step_log):
             for k, v in block_exec_time["nodes"][sm].items()
         }
 
-    sm_lifetime = sorted([
-        sm_execution[k] / step_log["final_timestamp"]
-        for k in sm_execution.keys()
-    ])
-    # print(sm_lifetime)
+    sm_idle = []
+    for s in sm_execution:
+        intervals = []
+        for start, end in sm_execution[s]:
+            if len(intervals) == 0:
+                intervals.append((start, end))
+                continue
+            p = 0
+            while p < len(intervals):
+                if start > intervals[p][1]:
+                    p += 1
+                    continue
+                elif end < intervals[p][0]:
+                    intervals.insert(p, (start, end))
+                    break
+                else:
+                    intervals[p] = (min(start, intervals[p][0]),
+                                    max(end, intervals[p][1]))
+                    break
+            else:
+                intervals.insert(p, (start, end))
+        gap = 0
+        last_end = 0
+        for start, end in intervals:
+            gap += start - last_end
+            last_end = end
+        sm_idle.append(gap)
+
+    sm_active = sorted([1 - i / step_log["final_timestamp"] for i in sm_idle])
+    # print(sm_active)
     print(
-        "on average",
-        sum(sm_lifetime) / len(sm_lifetime),
-        "% of the time the SM is running, only a rough estimation, the real utilization can be much lower"
-    )
+        "For each SM on average, {:.3f}% of the time there is at least one block is running on"
+        .format(sum(sm_active) / len(sm_active) * 100))
 
     return block_exec_time
 
 
-COLORS = ["red", "green", "blue", "orange", "purple", "cyan", "pink", "yellow"]
+COLORS = [
+    "blue", "orange", "red", "green", "purple", "cyan", "pink", "yellow",
+    "black", "black"
+]
 
 
 def plot_events(step_log, nodes, blocks, file_name):
@@ -216,14 +254,15 @@ def plot_events(step_log, nodes, blocks, file_name):
     num_block_per_sm = 4
     num_pixel_per_sm = (num_block_per_sm + 1) * 2
     x_limit = 4000
-    y_limit = num_sm * num_pixel_per_sm
+    y_blank = 100
+    y_limit = num_sm * num_pixel_per_sm + y_blank
 
     colors = {}
     for n in nodes:
         func = step_log["mapping"][n]
         if func not in colors:
             colors[func] = COLORS[len(colors)]
-    print(colors)
+    print("Color mapping for functions:", colors)
 
     img = Image.new("RGB", (x_limit, y_limit), "white")
     draw = ImageDraw.Draw(img)
@@ -232,46 +271,70 @@ def plot_events(step_log, nodes, blocks, file_name):
         assert (timestamp <= step_log["final_timestamp"])
         return int(timestamp / step_log["final_timestamp"] * limit)
 
+    narrow_gap = {}
+
     for s, b in blocks.items():
         y = s * num_pixel_per_sm
-        block_offset = {}
-
         for bb, events in b.items():
             draw.line((cast_coor(step_log["final_cycles"][bb]), y, x_limit, y),
                       fill="grey",
                       width=1)
             for e in events:
-                casted = cast_coor(e[0])
-                # to have an extra space between tasks
-                if bb in block_offset and casted == block_offset[bb]:
-                    casted += 1
-                block_offset[bb] = e[1]
-                draw.line((casted, y, cast_coor(e[1]), y),
-                          fill=colors[step_log["mapping"][e[2]]]
-                          if step_log["mapping"][e[2]] in colors else "black",
+
+                # to measure the gap between block events of node 150, function 28, narrowphase
+                if e[2] == 150:
+                    if bb not in narrow_gap:
+                        narrow_gap[bb] = [(e[0], e[1])]
+                    else:
+                        narrow_gap[bb].append((e[0], e[1]))
+
+                bar_color = colors[step_log["mapping"][
+                    e[2]]] if step_log["mapping"][e[2]] in colors else "black"
+                draw.line((cast_coor(e[0]), y, cast_coor(e[1]), y),
+                          fill=bar_color,
                           width=2)
+                # lighten the first pixel to indicate starting
+                draw.line(
+                    (cast_coor(e[0]), y, cast_coor(e[0]), y + 1),
+                    fill=tuple(
+                        (i + 255) // 2 for i in ImageColor.getrgb(bar_color)))
             y += 2
 
+    idle_rate = []
+    for _, v in narrow_gap.items():
+        idle_time = 0
+        last_end = v[0][1]
+        for s, e in v[1:]:
+            assert s > last_end
+            idle_time += s - last_end
+            last_end = e
+        idle_rate.append(idle_time / (v[-1][1] - v[0][0]))
+    print(
+        "For {:.3f}% of the running time of node 150 (func id 28, narrowphase), blocks are not doing real tasks"
+        .format(sum(idle_rate) / len(idle_rate) * 100))
+
     # mark the start and the end of major nodes
-    for _, v in nodes.items():
-        draw.line((cast_coor(v[1]), 0, cast_coor(v[1]), y_limit),
-                  fill="red",
-                  width=1)
-        draw.line((cast_coor(v[2]), 0, cast_coor(v[2]), y_limit),
-                  fill="green",
-                  width=1)
+    for n, v in nodes.items():
+        left, right = cast_coor(v[1]), cast_coor(v[2])
+        draw.line((left, 0, left, y_limit), fill="red", width=1)
+        draw.line((right, 0, right, y_limit), fill="green", width=1)
+        draw.text((left, y_limit - y_blank * 0.8),
+                  " func ID: {}\n duration: {:.4f}ms\n {:.1f}%".format(
+                      step_log["mapping"][n], (v[2] - v[1]) / 1000000,
+                      v[0] * 100),
+                  fill=(0, 0, 0))
 
     img.save(file_name)
 
 
-def step_analysis(step=5, file_name="megakernel_events.png"):
+def step_analysis(step, file_name):
     step_log = LOG_STEPS[step]
 
     variance = [
         max(v.values()) - min(v.values())
         for v in step_log["base_cycles"].values()
     ]
-    print("step #", step, " base cycle variance on each sm:", variance)
+    # print("step #", step, " base cycle variance on each sm:", variance)
 
     # step_log["sm_base_avg"] = {
     #     k: sum(v.values()) / len(v.values())
@@ -279,7 +342,7 @@ def step_analysis(step=5, file_name="megakernel_events.png"):
     # }
     # for global timing, no per sm calibration needed anymore
     min_time = min(min(i.values()) for i in step_log["base_cycles"].values())
-    step_log["start_timestamp"] = min_time
+    # step_log["start_timestamp"] = min_time
     step_log["sm_base_avg"] = {
         k: min_time
         for k in step_log["base_cycles"].keys()
@@ -296,24 +359,25 @@ def step_analysis(step=5, file_name="megakernel_events.png"):
 
 if __name__ == "__main__":
     if len(sys.argv) > 4:
-        print("python parse_device_tracing.py [file_name] [# stps] [optional, start from]")
+        print(
+            "python parse_device_tracing.py [log_name] [# stps, default 1] [start from, default 10]"
+        )
         exit()
 
     with open(sys.argv[1], 'rb') as f:
         events = bytearray(f.read())
         assert len(events) % 32 == 0
-        print("# logs", len(events) / 32)
-        for i in range(0, len(events), 32):
-            get_device_log(events[i:i + 32])
+        print("{} events were logged in total".format(len(events) // 32))
+        parse_device_logs(events)
 
     # default value
     steps = 1
-    start_from = 5
+    start_from = 10
     if len(sys.argv) >= 3:
         steps = int(sys.argv[2])
     if len(sys.argv) == 4:
         start_from = int(sys.argv[3])
-    
+
     for s in LOG_STEPS:
         LOG_STEPS[s]["final_timestamp"] -= LOG_STEPS[s]["start_timestamp"]
         for b in LOG_STEPS[s]["final_cycles"]:
@@ -327,13 +391,14 @@ if __name__ == "__main__":
     for s in range(start_from, start_from + steps):
         step_analysis(s, dir_path + "/step{}.png".format(s))
 
-    total_time = sum(v for v in OFFSET_RANKINGS.values())
-    OFFSET_RANKINGS = {k:v/total_time for k,v in OFFSET_RANKINGS.items()}
-    x = sorted(list(OFFSET_RANKINGS.keys()))
-    y = [OFFSET_RANKINGS[xx] for xx in x]
-    plt.plot(x, y)
-    plt.savefig("distribution.png")
-
-    # print(dict(sorted(OFFSET_RANKINGS.items(), key=lambda item: item[1])))
+    # visualize execution time distribution for narrowphase
+    # FUNC_OFFSET_RANKINGS = {
+    #     k: v / sum(v for v in FUNC_OFFSET_RANKINGS.values())
+    #     for k, v in FUNC_OFFSET_RANKINGS.items()
+    # }
+    # x = sorted(list(FUNC_OFFSET_RANKINGS.keys()))
+    # y = [FUNC_OFFSET_RANKINGS[xx] for xx in x]
+    # plt.plot(x, y)
+    # plt.savefig("distribution.png")
 
     # todo: aggregated analysis

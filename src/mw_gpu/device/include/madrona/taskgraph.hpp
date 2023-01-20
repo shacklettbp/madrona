@@ -7,9 +7,14 @@
 
 #include "mw_gpu/const.hpp"
 #include "mw_gpu/worker_init.hpp"
+#include "mw_gpu/megakernel_consts.hpp"
 
 #include <cuda/barrier>
 #include <cuda/std/tuple>
+
+#define LIMIT_ACTIVE_THREADS
+// #define LIMIT_ACTIVE_BLOCKS
+// #define FETCH_MULTI_INVOCATIONS
 
 namespace madrona {
 
@@ -157,6 +162,10 @@ private:
     uint32_t num_nodes_;
     NodeData *node_datas_;
     std::atomic_uint32_t cur_node_idx_;
+    static uint32_t const num_SMs_ = MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS / consts::numMegakernelBlocksPerSM;
+#ifdef LIMIT_ACTIVE_BLOCKS
+    std::atomic_uint32_t block_sm_offsets_[num_SMs_];
+#endif
     cuda::barrier<cuda::thread_scope_device> init_barrier_;
 
 friend class Builder;

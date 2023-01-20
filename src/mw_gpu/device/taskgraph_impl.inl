@@ -43,6 +43,15 @@ struct TaskGraph::BlockState {
     uint32_t funcID;
     uint32_t runOffset;
     uint32_t numThreadsPerInvocation;
+#ifdef LIMIT_ACTIVE_THREADS
+    uint32_t activeThreads;
+#endif
+#ifdef LIMIT_ACTIVE_BLOCKS
+    uint32_t blockSMOffset;
+#endif
+#ifdef FETCH_MULTI_INVOCATIONS
+    uint32_t numInvocationsPerThread;
+#endif
 };
 
 static __shared__ TaskGraph::BlockState sharedBlockState;
@@ -57,6 +66,9 @@ void TaskGraph::init()
     int block_idx = blockIdx.x;
 
     if (block_idx == 0) {
+        // special calibration indicating the beginning of the kernel
+        mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration, 1, 0, 0);
+
         Node &first_node = sorted_nodes_[0];
 
         uint32_t new_num_invocations = computeNumInvocations(first_node);
@@ -68,11 +80,25 @@ void TaskGraph::init()
             std::memory_order_relaxed);
 
         cur_node_idx_.store(0, std::memory_order_release);
+
+#ifdef LIMIT_ACTIVE_BLOCKS
+        for (size_t i = 0; i < num_SMs_; i++) {
+            block_sm_offsets_[i].store(0, std::memory_order_relaxed);
+        }
+#endif
     }
 
     init_barrier_.arrive_and_wait();
 
+    // todo: no longer needed for global timer
     mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration, 0, 0, 0);
+
+#ifdef LIMIT_ACTIVE_BLOCKS
+    uint32_t sm_id;
+    asm("mov.u32 %0, %smid;"
+        : "=r"(sm_id));
+    sharedBlockState.blockSMOffset = block_sm_offsets_[sm_id].fetch_add(1, std::memory_order_relaxed);
+#endif
 }
 
 void TaskGraph::setBlockState()
@@ -98,8 +124,38 @@ void TaskGraph::setBlockState()
 
     uint32_t num_threads_per_invocation = cur_node.numThreadsPerInvocation;
 
-    cur_offset = cur_node.curOffset.fetch_add(
-        consts::numMegakernelThreads / num_threads_per_invocation,
+    uint32_t num_active_threads = consts::numMegakernelThreads;
+    float num_active_blocks = (float)(total_invocations - cur_offset) * num_threads_per_invocation / num_active_threads / num_SMs_;
+
+#ifdef LIMIT_ACTIVE_THREADS
+    while (num_active_blocks < 1 && num_active_threads > max(32, num_threads_per_invocation)) {
+        num_active_threads /= 2;
+        num_active_blocks *= 2;
+    }
+#endif
+
+#ifdef LIMIT_ACTIVE_BLOCKS
+    // didn't find it really helped
+    // potentially because of better cache hit when placing blocks together
+    // maybe only enforce it for certain funcs
+    // useless for large amount of worlds
+    if (sharedBlockState.blockSMOffset > num_active_blocks) {
+        sharedBlockState.state = WorkerState::Loop;
+        return;
+    }
+#endif
+
+    uint32_t num_invocations_per_thread = 1;
+
+#ifdef FETCH_MULTI_INVOCATIONS
+    // only useful when excessive block invocation happened, e.g., warp parallelism narrow phase implementation
+    while (num_active_blocks >= 16) {
+        num_invocations_per_thread *= 2;
+        num_active_blocks /= 2;
+    }
+#endif
+
+    cur_offset = cur_node.curOffset.fetch_add(num_active_threads / num_threads_per_invocation * num_invocations_per_thread,
         std::memory_order_relaxed);
 
     if (cur_offset >= total_invocations) {
@@ -113,6 +169,12 @@ void TaskGraph::setBlockState()
     sharedBlockState.funcID = cur_node.funcID;
     sharedBlockState.runOffset = cur_offset;
     sharedBlockState.numThreadsPerInvocation = num_threads_per_invocation;
+#ifdef LIMIT_ACTIVE_THREADS
+    sharedBlockState.activeThreads = num_active_threads;
+#endif
+#ifdef FETCH_MULTI_INVOCATIONS
+    sharedBlockState.numInvocationsPerThread = num_invocations_per_thread;
+#endif
 }
 
 uint32_t TaskGraph::computeNumInvocations(Node &node)
@@ -146,6 +208,11 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
     uint32_t total_num_invocations = sharedBlockState.totalNumInvocations;
     uint32_t base_offset = sharedBlockState.runOffset;
 
+#ifdef LIMIT_ACTIVE_THREADS
+    if (thread_idx >= sharedBlockState.activeThreads) {
+        return WorkerState::PartialRun;
+    }
+#endif
     int32_t thread_offset = base_offset +
         thread_idx / sharedBlockState.numThreadsPerInvocation;
     if (thread_offset >= total_num_invocations) {
@@ -175,9 +242,17 @@ void TaskGraph::finishWork()
 
     uint32_t num_finished = std::min(
         sharedBlockState.totalNumInvocations - sharedBlockState.runOffset,
-        consts::numMegakernelThreads /
-            sharedBlockState.numThreadsPerInvocation);
-
+#ifdef LIMIT_ACTIVE_THREADS
+        sharedBlockState.activeThreads 
+#else
+        consts::numMegakernelThreads
+#endif
+           / sharedBlockState.numThreadsPerInvocation
+#ifdef FETCH_MULTI_INVOCATIONS
+             * sharedBlockState.numInvocationsPerThread);
+#else
+            );
+#endif
     Node &cur_node = sorted_nodes_[node_idx];
 
     uint32_t prev_remaining = cur_node.numRemaining.fetch_sub(num_finished,
@@ -252,7 +327,20 @@ static inline __attribute__((always_inline)) void megakernelImpl()
             DeviceTracing::Log(
                 mwGPU::DeviceEvent::blockStart,
                 func_id, invocation_offset, sharedBlockState.nodeIdx);
-            dispatch(func_id, node_data, invocation_offset);
+#ifdef FETCH_MULTI_INVOCATIONS
+            for (size_t i = 0; i < sharedBlockState.numInvocationsPerThread; i++) {
+#endif
+                dispatch(func_id, node_data, invocation_offset);
+#ifdef FETCH_MULTI_INVOCATIONS
+                invocation_offset += 
+#ifdef LIMIT_ACTIVE_THREADS
+                    consts::numMegakernelThreads
+#else
+                    sharedBlockState.activeThreads 
+#endif
+                    / sharedBlockState.numThreadsPerInvocation;
+            }
+#endif
         }
 
         taskgraph->finishWork();
