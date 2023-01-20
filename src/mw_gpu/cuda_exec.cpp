@@ -241,7 +241,7 @@ __attribute__((constructor)) static void setCudaHeapSize()
 {
     // FIXME size limit for device side malloc:
     REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
-                                8ul*1024ul*1024ul*1024ul));
+                                4ul*1024ul*1024ul*1024ul));
 }
 
 using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
