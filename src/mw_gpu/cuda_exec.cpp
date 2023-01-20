@@ -195,7 +195,7 @@ public:
     }
 
     // cannot really overlap the data transfer overhead
-    // fall back to the original copy plan
+    // fall back to the original plan, copying all logs at the end
     // inline void transferLogToCPU()
     // {
     //     REQ_CUDA(cudaMemcpyAsync(readback_, device_tracing_, sizeof(DeviceTracing),

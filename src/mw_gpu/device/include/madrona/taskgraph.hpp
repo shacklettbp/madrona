@@ -12,6 +12,10 @@
 #include <cuda/barrier>
 #include <cuda/std/tuple>
 
+#define LIMIT_ACTIVE_THREADS
+// #define FETCH_MULTI_INVOCATIONS
+// #define LIMIT_ACTIVE_BLOCKS
+
 namespace madrona {
 
 class TaskGraph;
@@ -158,7 +162,9 @@ private:
     uint32_t num_nodes_;
     NodeData *node_datas_;
     std::atomic_uint32_t cur_node_idx_;
+#ifdef LIMIT_ACTIVE_BLOCKS
     std::atomic_uint32_t block_sm_offsets_[consts::numSMs];
+#endif
     cuda::barrier<cuda::thread_scope_device> init_barrier_;
 
 friend class Builder;

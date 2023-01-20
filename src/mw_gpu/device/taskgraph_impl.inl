@@ -5,10 +5,6 @@
 #include <madrona/mw_gpu/tracing.hpp>
 #include <madrona/mw_gpu/megakernel_consts.hpp>
 
-#define LIMIT_ACTIVE_THREADS
-// #define LIMIT_ACTIVE_BLOCKS
-// #define FETCH_MULTI_INVOCATIONS
-
 namespace madrona {
 
 namespace mwGPU {
