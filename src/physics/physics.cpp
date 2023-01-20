@@ -378,22 +378,32 @@ static inline void handleContact(Context &ctx,
                                  Contact contact,
                                  float *lambdas)
 {
-    Position *x1_ptr = &ctx.getUnsafe<Position>(contact.ref);
-    Rotation *q1_ptr = &ctx.getUnsafe<Rotation>(contact.ref);
-    SubstepPrevState prev1 = ctx.getUnsafe<SubstepPrevState>(contact.ref);
-    PreSolvePositional presolve_pos1 =
-        ctx.getUnsafe<PreSolvePositional>(contact.ref);
-    ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(contact.ref);
-    ResponseType resp_type1 = ctx.getUnsafe<ResponseType>(contact.ref);
-    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
+    Position *x1_ptr = &ctx.getDirect<Position>(Cols::Position, contact.ref);
+    Position *x2_ptr = &ctx.getDirect<Position>(Cols::Position, contact.alt);
 
-    Position *x2_ptr = &ctx.getUnsafe<Position>(contact.alt);
-    Rotation *q2_ptr = &ctx.getUnsafe<Rotation>(contact.alt);
-    SubstepPrevState prev2 = ctx.getUnsafe<SubstepPrevState>(contact.alt);
-    PreSolvePositional presolve_pos2 =
-        ctx.getUnsafe<PreSolvePositional>(contact.alt);
-    ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
-    ResponseType resp_type2 = ctx.getUnsafe<ResponseType>(contact.alt);
+    Rotation *q1_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, contact.ref);
+    Rotation *q2_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, contact.alt);
+
+    SubstepPrevState prev1 = ctx.getDirect<SubstepPrevState>(
+        Cols::SubstepPrevState, contact.ref);
+    SubstepPrevState prev2 = ctx.getDirect<SubstepPrevState>(
+        Cols::SubstepPrevState, contact.alt);
+
+    PreSolvePositional presolve_pos1 = ctx.getDirect<PreSolvePositional>(
+        Cols::PreSolvePositional, contact.ref);
+    PreSolvePositional presolve_pos2 = ctx.getDirect<PreSolvePositional>(
+        Cols::PreSolvePositional, contact.alt);
+
+    ObjectID obj_id1 = ctx.getDirect<ObjectID>(
+        Cols::ObjectID, contact.ref);
+    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.alt);
+
+    ResponseType resp_type1 = ctx.getDirect<ResponseType>(
+        Cols::ResponseType, contact.ref);
+    ResponseType resp_type2 = ctx.getDirect<ResponseType>(
+        Cols::ResponseType, contact.alt);
+
+    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
     Vector3 x1 = *x1_ptr;
@@ -457,18 +467,21 @@ static inline void handleContact(Context &ctx,
 inline void handleJointConstraint(Context &ctx,
                                   JointConstraint joint)
 {
-    Vector3 *x1_ptr = &ctx.getUnsafe<Position>(joint.e1);
-    Vector3 *x2_ptr = &ctx.getUnsafe<Position>(joint.e2);
-    Quat *q1_ptr = &ctx.getUnsafe<Rotation>(joint.e1);
-    Quat *q2_ptr = &ctx.getUnsafe<Rotation>(joint.e2);
+    Vector3 *x1_ptr = &ctx.getDirect<Position>(Cols::Position, joint.e1);
+    Vector3 *x2_ptr = &ctx.getDirect<Position>(Cols::Position, joint.e2);
+    Quat *q1_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, joint.e1);
+    Quat *q2_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, joint.e2);
     Vector3 x1 = *x1_ptr;
     Vector3 x2 = *x2_ptr;
     Quat q1 = *q1_ptr;
     Quat q2 = *q2_ptr;
-    ResponseType resp_type1 = ctx.getUnsafe<ResponseType>(joint.e1);
-    ResponseType resp_type2 = ctx.getUnsafe<ResponseType>(joint.e2);
-    ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(joint.e1);
-    ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(joint.e2);
+    ResponseType resp_type1 = ctx.getDirect<ResponseType>(
+        Cols::ResponseType, joint.e1);
+    ResponseType resp_type2 = ctx.getDirect<ResponseType>(
+        Cols::ResponseType, joint.e2);
+    ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, joint.e1);
+    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, joint.e2);
+
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
@@ -680,22 +693,26 @@ static inline void updateVelocityFromContact(Context &ctx,
                                              float h,
                                              float restitution_threshold)
 {
-    Velocity *v1_out = &ctx.getUnsafe<Velocity>(contact.ref);
-    Quat q1 = ctx.getUnsafe<Rotation>(contact.ref);
-    PreSolvePositional presolve_pos1 =
-        ctx.getUnsafe<PreSolvePositional>(contact.ref);
-    PreSolveVelocity presolve_vel1 =
-        ctx.getUnsafe<PreSolveVelocity>(contact.ref);
-    ObjectID obj_id1 = ctx.getUnsafe<ObjectID>(contact.ref);
-    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
+    Velocity *v1_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.ref);
+    Velocity *v2_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.alt);
 
-    Velocity *v2_out = &ctx.getUnsafe<Velocity>(contact.alt);
-    Quat q2 = ctx.getUnsafe<Rotation>(contact.alt);
-    PreSolvePositional presolve_pos2 =
-        ctx.getUnsafe<PreSolvePositional>(contact.alt);
+    Quat q1 = ctx.getDirect<Rotation>(Cols::Rotation, contact.ref);
+    Quat q2 = ctx.getDirect<Rotation>(Cols::Rotation, contact.alt);
+
+    PreSolvePositional presolve_pos1 = ctx.getDirect<PreSolvePositional>(
+        Cols::PreSolvePositional, contact.ref);
+    PreSolvePositional presolve_pos2 =  ctx.getDirect<PreSolvePositional>(
+        Cols::PreSolvePositional, contact.alt);
+
+    PreSolveVelocity presolve_vel1 =
+        ctx.getDirect<PreSolveVelocity>(Cols::PreSolveVelocity, contact.ref);
     PreSolveVelocity presolve_vel2 =
-        ctx.getUnsafe<PreSolveVelocity>(contact.alt);
-    ObjectID obj_id2 = ctx.getUnsafe<ObjectID>(contact.alt);
+        ctx.getDirect<PreSolveVelocity>(Cols::PreSolveVelocity, contact.alt);
+
+    ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.ref);
+    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.alt);
+
+    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
     auto [v1, omega1] = *v1_out;

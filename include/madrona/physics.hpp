@@ -194,8 +194,8 @@ struct Contact {
 struct CollisionEventTemporary : Archetype<CollisionEvent> {};
 
 struct JointConstraint {
-    Entity e1;
-    Entity e2;
+    Loc e1;
+    Loc e2;
     math::Vector3 r1;
     math::Vector3 r2;
     math::Quat axes1;
@@ -419,6 +419,8 @@ struct Cols {
     static constexpr inline CountT ExternalForce = 11;
     static constexpr inline CountT ExternalTorque = 12;
     static constexpr inline CountT LeafID = 13;
+
+    static constexpr inline CountT CandidateCollision = 2;
 };
 
 }

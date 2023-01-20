@@ -816,22 +816,31 @@ inline void findOverlappingEntry(
 {
     BVH &bvh = ctx.getSingleton<BVH>();
 
+    // FIXME: should have a flag for passing this
+    // directly into the system
+    Loc a_loc = ctx.getLoc(e);
+    bool a_is_static = 
+        ctx.getDirect<ResponseType>(Cols::ResponseType, a_loc) ==
+        ResponseType::Static;
+
     bvh.findOverlapsForLeaf(leaf_id, [&](Entity overlapping_entity) {
         if (e.id < overlapping_entity.id) {
+            Loc b_loc = ctx.getLoc(overlapping_entity);
+
             // FIXME: Change this so static objects are kept in a separate BVH
             // and this check can be removed.
-            if (ctx.getUnsafe<ResponseType>(e) == ResponseType::Static &&
-                ctx.getUnsafe<ResponseType>(overlapping_entity) ==
+            if (a_is_static &&
+                ctx.getDirect<ResponseType>(Cols::ResponseType, b_loc) ==
                     ResponseType::Static) {
                 return;
             }
 
             Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
-            CandidateCollision &candidate = ctx.getUnsafe<
-                CandidateCollision>(candidate_loc);
+            CandidateCollision &candidate = ctx.getDirect<
+                CandidateCollision>(Cols::CandidateCollision, candidate_loc);
 
-            candidate.a = ctx.getLoc(e);
-            candidate.b = ctx.getLoc(overlapping_entity);
+            candidate.a = a_loc;
+            candidate.b = b_loc;
         }
     });
 }
