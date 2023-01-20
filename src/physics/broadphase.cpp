@@ -830,8 +830,8 @@ inline void findOverlappingEntry(
             CandidateCollision &candidate = ctx.getUnsafe<
                 CandidateCollision>(candidate_loc);
 
-            candidate.a = e;
-            candidate.b = overlapping_entity;
+            candidate.a = ctx.getLoc(e);
+            candidate.b = ctx.getLoc(overlapping_entity);
         }
     });
 }

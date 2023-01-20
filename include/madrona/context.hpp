@@ -32,6 +32,8 @@ public:
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype();
 
+    inline Loc getLoc(Entity e) const;
+
     template <typename ArchetypeT, typename... Args>
     inline Entity makeEntity(Transaction &txn, Args && ...args);
 
@@ -60,6 +62,9 @@ public:
     // FIXME: remove
     template <typename ArchetypeT, typename ComponentT>
     ComponentT & getComponent(Entity e);
+
+    template <typename ComponentT>
+    ComponentT & getDirect(int32_t column_idx, Loc loc);
 
     template <typename SingletonT>
     SingletonT & getSingleton();

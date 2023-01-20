@@ -176,15 +176,15 @@ struct CollisionEvent {
 };
 
 struct CandidateCollision {
-    Entity a;
-    Entity b;
+    Loc a;
+    Loc b;
 };
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
 
 struct Contact {
-    Entity ref;
-    Entity alt;
+    Loc ref;
+    Loc alt;
     math::Vector4 points[4];
     int32_t numPoints;
     math::Vector3 normal;
@@ -404,6 +404,21 @@ struct RigidBodyPhysicsSystem {
 
     static TaskGraph::NodeID setupCleanupTasks(TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> deps);
+};
+
+struct Cols {
+    static constexpr inline CountT Position = 2;
+    static constexpr inline CountT Rotation = 3;
+    static constexpr inline CountT Scale = 4;
+    static constexpr inline CountT Velocity = 5;
+    static constexpr inline CountT ObjectID = 6;
+    static constexpr inline CountT ResponseType = 7;
+    static constexpr inline CountT SubstepPrevState = 8;
+    static constexpr inline CountT PreSolvePositional = 9;
+    static constexpr inline CountT PreSolveVelocity = 10;
+    static constexpr inline CountT ExternalForce = 11;
+    static constexpr inline CountT ExternalTorque = 12;
+    static constexpr inline CountT LeafID = 13;
 };
 
 }

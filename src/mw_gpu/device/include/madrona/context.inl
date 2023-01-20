@@ -36,6 +36,11 @@ void Context::destroyEntityNow(Entity e)
     return mwGPU::getStateManager()->destroyEntityNow(e);
 }
 
+Loc Context::getLoc(Entity e) const
+{
+    return mwGPU::getStateManager()->getLoc(e);
+}
+
 template <typename ComponentT>
 ComponentT & Context::getUnsafe(Entity e)
 {
@@ -58,6 +63,12 @@ template <typename ComponentT>
 ResultRef<ComponentT> Context::get(Loc l)
 {
     return mwGPU::getStateManager()->get<ComponentT>(l);
+}
+
+template <typename ComponentT>
+ComponentT & Context::getDirect(int32_t column_idx, Loc l)
+{
+    return mwGPU::getStateManager()->getDirect<ComponentT>(column_idx, l);
 }
 
 template <typename SingletonT>

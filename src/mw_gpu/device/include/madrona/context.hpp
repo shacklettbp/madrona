@@ -27,6 +27,8 @@ public:
 
     inline void destroyEntityNow(Entity e);
 
+    inline Loc getLoc(Entity e) const;
+
     template <typename ComponentT>
     ComponentT & getUnsafe(Entity e);
 
@@ -38,6 +40,9 @@ public:
 
     template <typename ComponentT>
     ResultRef<ComponentT> get(Loc loc);
+
+    template <typename ComponentT>
+    ComponentT & getDirect(int32_t column_idx, Loc loc);
 
     template <typename SingletonT>
     SingletonT & getSingleton();

@@ -133,6 +133,8 @@ public:
 
     void clearTemporaries(uint32_t archetype_id);
 
+    inline Loc getLoc(Entity e) const;
+
     template <typename ComponentT>
     ComponentT & getUnsafe(Entity e);
 
@@ -144,6 +146,9 @@ public:
 
     template <typename ComponentT>
     inline ResultRef<ComponentT> get(Loc loc);
+
+    template <typename ComponentT>
+    inline ComponentT & getDirect(int32_t column_idx, Loc loc);
 
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * getArchetypeComponent();

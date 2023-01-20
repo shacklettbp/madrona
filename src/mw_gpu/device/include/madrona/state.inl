@@ -222,7 +222,12 @@ void StateManager::clearTemporaries()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     clearTemporaries(archetype_id);
+}
 
+inline Loc StateManager::getLoc(Entity e) const
+{
+    const EntityStore::EntitySlot &slot = entity_store_.entities[e.id];
+    return slot.loc;
 }
 
 template <typename ComponentT>
@@ -275,6 +280,13 @@ ResultRef<ComponentT> StateManager::get(Loc loc)
 
     return ResultRef<ComponentT>(
         ((ComponentT *)(tbl.columns[*col_idx])) + loc.row);
+}
+
+template <typename ComponentT>
+ComponentT & StateManager::getDirect(int32_t column_idx, Loc loc)
+{
+    return ((ComponentT *)getArchetypeColumn(
+        loc.archetype, column_idx))[loc.row];
 }
 
 template <typename ArchetypeT, typename ComponentT>

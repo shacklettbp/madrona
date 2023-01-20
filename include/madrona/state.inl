@@ -289,6 +289,19 @@ ComponentT & StateManager::getUnsafe(
     return col[loc.row];
 }
 
+template <typename ComponentT>
+inline ComponentT & StateManager::getDirect(MADRONA_MW_COND(uint32_t world_id,)
+                                            CountT col_idx,
+                                            Loc loc)
+{
+    ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
+
+    auto col = archetype.tblStorage.column<ComponentT>(
+        MADRONA_MW_COND(world_id,) col_idx);
+
+    return col[loc.row];
+}
+
 template <typename ArchetypeT>
 ArchetypeRef<ArchetypeT> StateManager::archetype(
     MADRONA_MW_COND(uint32_t world_id))

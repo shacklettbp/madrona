@@ -571,8 +571,26 @@ inline void handleJointConstraint(Context &ctx,
     *q2_ptr = q2;
 }
 
+extern "C" {
+extern std::atomic_uint64_t narrowphasePrepClocks;
+extern std::atomic_uint64_t narrowphaseBodyClocks;
+}
+
 inline void solvePositions(Context &ctx, SolverData &solver)
 {
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x == 0 && ctx.worldID().idx == 0) {
+#if 0
+        printf("%lu %lu\n",
+               narrowphasePrepClocks.load(std::memory_order_relaxed),
+               narrowphaseBodyClocks.load(std::memory_order_relaxed));
+#endif
+
+        narrowphasePrepClocks.store(0, std::memory_order_relaxed);
+        narrowphaseBodyClocks.store(0, std::memory_order_relaxed);
+    }
+#endif
+
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
     CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);

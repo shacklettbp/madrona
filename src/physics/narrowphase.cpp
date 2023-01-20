@@ -5,11 +5,9 @@
 #include "physics_impl.hpp"
 
 // Uncomment this to unconditionally disable GPU narrowphase version
-#if 0
 #undef MADRONA_GPU_MODE
 #undef MADRONA_GPU_COND
 #define MADRONA_GPU_COND(...)
-#endif
 
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/cu_utils.hpp>
@@ -996,7 +994,7 @@ static inline void addManifoldToSolver(
     MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
     SolverData &solver_data,
     Manifold manifold,
-    Entity a_entity, Entity b_entity)
+    Loc a_loc, Loc b_loc)
 {
 #ifdef MADRONA_GPU_MODE
     if (mwgpu_lane_id != 0) {
@@ -1006,8 +1004,8 @@ static inline void addManifoldToSolver(
 
     addContactsToSolver(
         solver_data, {{
-        manifold.aIsReference ? a_entity : b_entity,
-        manifold.aIsReference ? b_entity : a_entity,
+        manifold.aIsReference ? a_loc : b_loc,
+        manifold.aIsReference ? b_loc : a_loc,
         {
             Vector4::fromVector3(manifold.contactPoints[0],
                                  manifold.penetrationDepths[0]),
@@ -1023,6 +1021,15 @@ static inline void addManifoldToSolver(
         {},
     }});
 }
+
+extern "C" {
+std::atomic_uint64_t narrowphasePrepClocks = 0;
+std::atomic_uint64_t narrowphaseBodyClocks = 0;
+}
+
+#ifdef MADRONA_GPU_MODE
+//#define COUNT_GPU_CLOCKS
+#endif
 
 #ifdef MADRONA_GPU_MODE
 namespace gpuImpl {
@@ -1070,13 +1077,16 @@ static inline void runNarrowphase(
     Vector3 *tmp_vertices = tmp_vertices_buffer;
 #endif
 
-    Entity a_entity = candidate_collision.a;
-    Entity b_entity = candidate_collision.b;
+#ifdef COUNT_GPU_CLOCKS
+    uint64_t prep_start = clock64();
+#endif
+    Loc a_loc = candidate_collision.a;
+    Loc b_loc = candidate_collision.b;
 
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
-    ObjectID a_obj = ctx.getUnsafe<ObjectID>(a_entity);
-    ObjectID b_obj = ctx.getUnsafe<ObjectID>(b_entity);
+    ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
+    ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
 
     const CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
     const CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
@@ -1086,18 +1096,18 @@ static inline void runNarrowphase(
 
     // Swap a & b to be properly ordered based on object type
     if (raw_type_a > raw_type_b) {
-        std::swap(a_entity, b_entity);
+        std::swap(a_loc, b_loc);
         std::swap(a_obj, b_obj);
         std::swap(a_prim, b_prim);
         std::swap(raw_type_a, raw_type_b);
     }
 
-    Vector3 a_pos = ctx.getUnsafe<Position>(a_entity);
-    Vector3 b_pos = ctx.getUnsafe<Position>(b_entity);
-    Quat a_rot = ctx.getUnsafe<Rotation>(a_entity);
-    Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-    Diag3x3 a_scale(ctx.getUnsafe<Scale>(a_entity));
-    Diag3x3 b_scale(ctx.getUnsafe<Scale>(b_entity));
+    Vector3 a_pos = ctx.getDirect<Position>(Cols::Position, a_loc);
+    Vector3 b_pos = ctx.getDirect<Position>(Cols::Position, b_loc);
+    Quat a_rot = ctx.getDirect<Rotation>(Cols::Rotation, a_loc);
+    Quat b_rot = ctx.getDirect<Rotation>(Cols::Rotation, b_loc);
+    Diag3x3 a_scale(ctx.getDirect<Scale>(Cols::Scale, a_loc));
+    Diag3x3 b_scale(ctx.getDirect<Scale>(Cols::Scale, b_loc));
 
     {
         AABB a_obj_aabb = obj_mgr.aabbs[a_obj.idx];
@@ -1105,11 +1115,23 @@ static inline void runNarrowphase(
 
         AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
         AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+        
+#ifdef COUNT_GPU_CLOCKS
+        uint64_t prep_end = clock64();
+        if (mwgpu_lane_id == 0) {
+            narrowphasePrepClocks.fetch_add(prep_end - prep_start,
+                                            std::memory_order_relaxed);
+        }
+#endif
 
         if (!a_world_aabb.overlaps(b_world_aabb)) {
             return;
         }
     }
+
+#ifdef COUNT_GPU_CLOCKS
+    uint64_t body_start = clock64();
+#endif
 
     SolverData &solver = ctx.getSingleton<SolverData>();
 
@@ -1131,8 +1153,8 @@ static inline void runNarrowphase(
 
             addContactsToSolver(
                 solver, {{
-                    a_entity,
-                    b_entity,
+                    a_loc,
+                    b_loc,
                     { 
                         makeVector4(a_pos + mid, dist / 2.f),
                         {}, {}, {}
@@ -1172,7 +1194,7 @@ static inline void runNarrowphase(
 
         if (manifold.numContactPoints > 0) {
             addManifoldToSolver(MADRONA_GPU_COND(mwgpu_lane_id,)
-                                solver, manifold, a_entity, b_entity);
+                                solver, manifold, a_loc, b_loc);
         }
     } break;
     case NarrowphaseTest::SphereHull: {
@@ -1207,8 +1229,8 @@ static inline void runNarrowphase(
 
             addContactsToSolver(
                 solver, {{
-                    b_entity,
-                    a_entity,
+                    b_loc,
+                    a_loc,
                     {
                         makeVector4(contact_point, penetration),
                         {}, {}, {}
@@ -1254,11 +1276,20 @@ static inline void runNarrowphase(
 
         if (manifold.numContactPoints > 0) {
             addManifoldToSolver(MADRONA_GPU_COND(mwgpu_lane_id,)
-                solver, manifold, a_entity, b_entity);
+                solver, manifold, a_loc, b_loc);
         }
     } break;
     default: __builtin_unreachable();
     }
+
+#ifdef COUNT_GPU_CLOCKS
+    uint64_t body_end = clock64();
+
+    if (mwgpu_lane_id == 0) {
+        narrowphaseBodyClocks.fetch_add(body_end - body_start,
+                                        std::memory_order_relaxed);
+    }
+#endif
 }
 
 inline void runNarrowphaseSystem(

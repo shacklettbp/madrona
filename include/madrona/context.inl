@@ -28,6 +28,10 @@ ArchetypeRef<ArchetypeT> Context::archetype()
         MADRONA_MW_COND(cur_world_id_));
 }
 
+Loc Context::getLoc(Entity e) const
+{
+    return state_mgr_->getLoc(e);
+}
 
 template <typename ArchetypeT, typename... Args>
 Entity Context::makeEntity(Transaction &txn, Args && ...args)
@@ -77,6 +81,12 @@ ComponentT & Context::getUnsafe(Entity e)
     return getUnsafe<ComponentT>(e.id);
 }
 
+template <typename ComponentT>
+ComponentT & Context::getDirect(int32_t column_idx, Loc loc)
+{
+    return state_mgr_->getDirect<ComponentT>(
+        MADRONA_MW_COND(cur_world_id_,) column_idx, loc);
+}
 
 template <typename SingletonT>
 SingletonT & Context::getSingleton()

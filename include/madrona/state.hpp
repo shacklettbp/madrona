@@ -183,6 +183,11 @@ public:
     inline ComponentT & getUnsafe(MADRONA_MW_COND(uint32_t world_id,)
                                   Loc loc);
 
+    template <typename ComponentT>
+    inline ComponentT & getDirect(MADRONA_MW_COND(uint32_t world_id,)
+                                  CountT col_idx,
+                                  Loc loc);
+
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype(
         MADRONA_MW_COND(uint32_t world_id));
