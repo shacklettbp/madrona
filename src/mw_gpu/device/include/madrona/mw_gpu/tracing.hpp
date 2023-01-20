@@ -24,7 +24,11 @@ enum class DeviceEvent : uint32_t {
 class DeviceTracing {
 private:
     // todo: have a smaller value by enabling log transfering between steps
-    static constexpr inline uint64_t maxLogSize = 40000000;
+    // actually, for 8k worlds, even a single step might generate over 16 MB log data
+    // instead of trying to collect all logs
+    // it might be better to clean the data we can get
+    // for this 10M logs, ~300MB GPU memory is needed
+    static constexpr inline uint64_t maxLogSize = 10000000;
 
     struct DeviceLog {
         DeviceEvent event;

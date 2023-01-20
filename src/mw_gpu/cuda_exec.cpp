@@ -189,25 +189,44 @@ class DeviceTracingManager {
 public:
     inline DeviceTracingManager(void *dev_ptr)
         : device_tracing_((DeviceTracing *)dev_ptr)
-    {}
+    {
+        readback_ = (DeviceTracing *)
+            ::madrona::cu::allocReadback(sizeof(DeviceTracing));
+    }
+
+    // cannot really overlap the data transfer overhead
+    // fall back to the original copy plan
+    // inline void transferLogToCPU()
+    // {
+    //     REQ_CUDA(cudaMemcpyAsync(readback_, device_tracing_, sizeof(DeviceTracing),
+    //                         cudaMemcpyDeviceToHost));
+    //     device_logs_cpu_.insert(device_logs_cpu_.end(), readback_->device_logs_, readback_->device_logs_ + readback_->getIndex());
+    // }
 
     inline ~DeviceTracingManager()
     {
-        auto readback = (DeviceTracing *)
-            ::madrona::cu::allocReadback(sizeof(DeviceTracing));
+        // for (size_t i = 0; i < steps_; i++) {
+        //     device_logs_cpu_.insert(device_logs_cpu_.end(), (readback_ + i)->device_logs_, (readback_ + i)->device_logs_ + (readback_ + i)->getIndex());
+        // }
+        // ::madrona::WriteToFile<DeviceTracing::DeviceLog>(
+        //     device_logs_cpu_.data(), device_logs_cpu_.size(),
+        //     "/tmp/", "_madrona_device_tracing");
 
-        REQ_CUDA(cudaMemcpy(readback, device_tracing_, sizeof(DeviceTracing),
+        REQ_CUDA(cudaMemcpy(readback_, device_tracing_, sizeof(DeviceTracing),
                             cudaMemcpyDeviceToHost));
 
         ::madrona::WriteToFile<DeviceTracing::DeviceLog>(
-            readback->device_logs_,
-            readback->getIndex(), "/tmp/", "_madrona_device_tracing");
+            readback_->device_logs_,
+            readback_->getIndex(), "/tmp/", "_madrona_device_tracing");
 
-        ::madrona::cu::deallocCPU(readback);
+        ::madrona::cu::deallocCPU(readback_);
     }
 
 private:
     DeviceTracing *device_tracing_;
+    DeviceTracing *readback_;
+    // size_t steps_;
+    // std::vector<DeviceTracing::DeviceLog> device_logs_cpu_;
 };
 #endif
 
@@ -1485,6 +1504,7 @@ MADRONA_EXPORT void MWCudaExecutor::run()
     REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
     HostEventLogging(HostEvent::megaKernelEnd);
+    // impl_->engineState.deviceTracing->transferLogToCPU();
 
     if (impl_->engineState.batchRenderer.has_value()) {
         char *hack = getenv("MADRONA_RENDER_NOOP");
