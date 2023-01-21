@@ -7,7 +7,7 @@
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/cu_utils.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
-#define COUNT_GPU_CLOCKS
+//#define COUNT_GPU_CLOCKS
 #endif
 
 #ifdef COUNT_GPU_CLOCKS
