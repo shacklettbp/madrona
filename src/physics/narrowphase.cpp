@@ -1604,7 +1604,7 @@ static inline void runNarrowphase(
     }
 
 #ifdef MADRONA_GPU_MODE
-    uint32_t active_mask = __ballot_sync(mwGPU::allActive, lane_active);
+    const uint32_t active_mask = __ballot_sync(mwGPU::allActive, lane_active);
 
     if (active_mask == 0) {
         return;
@@ -1617,63 +1617,65 @@ static inline void runNarrowphase(
 
 #ifdef MADRONA_GPU_MODE
     NarrowphaseResult thread_result;
-    const int32_t num_active_lanes = 32;
-    for (int32_t i = 0; i < num_active_lanes; i++) {
-        const bool is_leader = i == mwgpu_lane_id;
 
-        const bool leader_active =
-            __shfl_sync(mwGPU::allActive, lane_active, i);
-
-        if (!leader_active) {
+#if 0
+    active_mask = __brev(active_mask);
+    int32_t leader_idx = __clz(active_mask);
+    active_mask <<= (leader_idx + 1);
+    do {
+#endif
+#pragma unroll
+    for (int32_t leader_idx = 0; leader_idx < 32; leader_idx++) {
+        if (!__shfl_sync(mwGPU::allActive, lane_active, leader_idx)) {
             continue;
         }
 
         auto warp_test_type = (NarrowphaseTest)__shfl_sync(
-            mwGPU::allActive, (uint32_t)test_type, i);
+            mwGPU::allActive, (uint32_t)test_type, leader_idx);
 
         Vector3 warp_a_pos {
-            __shfl_sync(mwGPU::allActive, a_pos.x, i),
-            __shfl_sync(mwGPU::allActive, a_pos.y, i),
-            __shfl_sync(mwGPU::allActive, a_pos.z, i),
+            __shfl_sync(mwGPU::allActive, a_pos.x, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_pos.y, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_pos.z, leader_idx),
         };
 
         Vector3 warp_b_pos {
-            __shfl_sync(mwGPU::allActive, b_pos.x, i),
-            __shfl_sync(mwGPU::allActive, b_pos.y, i),
-            __shfl_sync(mwGPU::allActive, b_pos.z, i),
+            __shfl_sync(mwGPU::allActive, b_pos.x, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_pos.y, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_pos.z, leader_idx),
         };
 
         Quat warp_a_rot {
-            __shfl_sync(mwGPU::allActive, a_rot.w, i),
-            __shfl_sync(mwGPU::allActive, a_rot.x, i),
-            __shfl_sync(mwGPU::allActive, a_rot.y, i),
-            __shfl_sync(mwGPU::allActive, a_rot.z, i),
+            __shfl_sync(mwGPU::allActive, a_rot.w, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_rot.x, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_rot.y, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_rot.z, leader_idx),
         };
 
         Quat warp_b_rot {
-            __shfl_sync(mwGPU::allActive, b_rot.w, i),
-            __shfl_sync(mwGPU::allActive, b_rot.x, i),
-            __shfl_sync(mwGPU::allActive, b_rot.y, i),
-            __shfl_sync(mwGPU::allActive, b_rot.z, i),
+            __shfl_sync(mwGPU::allActive, b_rot.w, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_rot.x, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_rot.y, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_rot.z, leader_idx),
         };
 
         Diag3x3 warp_a_scale {
-            __shfl_sync(mwGPU::allActive, a_scale.d0, i),
-            __shfl_sync(mwGPU::allActive, a_scale.d1, i),
-            __shfl_sync(mwGPU::allActive, a_scale.d2, i),
+            __shfl_sync(mwGPU::allActive, a_scale.d0, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_scale.d1, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_scale.d2, leader_idx),
         };
 
         Diag3x3 warp_b_scale {
-            __shfl_sync(mwGPU::allActive, b_scale.d0, i),
-            __shfl_sync(mwGPU::allActive, b_scale.d1, i),
-            __shfl_sync(mwGPU::allActive, b_scale.d2, i),
+            __shfl_sync(mwGPU::allActive, b_scale.d0, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_scale.d1, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_scale.d2, leader_idx),
         };
 
         auto warp_a_prim = (CollisionPrimitive *)__shfl_sync(mwGPU::allActive,
-            (uint64_t)a_prim, i);
+            (uint64_t)a_prim, leader_idx);
 
         auto warp_b_prim = (CollisionPrimitive *)__shfl_sync(mwGPU::allActive,
-            (uint64_t)b_prim, i);
+            (uint64_t)b_prim, leader_idx);
 
         NarrowphaseResult warp_result = narrowphaseDispatch(
             mwgpu_lane_id,
@@ -1685,9 +1687,16 @@ static inline void runNarrowphase(
             max_num_tmp_vertices, max_num_tmp_faces,
             smem_vertices_buffer, smem_faces_buffer);
 
-        if (is_leader) {
+        if (mwgpu_lane_id == leader_idx) {
             thread_result = warp_result;
         }
+
+#if 0
+        uint32_t num_inactive = __clz(active_mask);
+        leader_idx += num_inactive + 1;
+        active_mask <<= (num_inactive + 1);
+    } while (leader_idx < 32);
+#endif
     }
 
     __syncwarp(mwGPU::allActive);
