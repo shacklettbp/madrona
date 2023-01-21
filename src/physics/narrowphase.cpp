@@ -1520,8 +1520,15 @@ static inline void runNarrowphase(
     constexpr int32_t max_num_tmp_vertices =
         gpuImpl::maxNumVertices;
 
+#if 0
     Plane tmp_faces_buffer[max_num_tmp_faces];
     Vector3 tmp_vertices_buffer[max_num_tmp_vertices];
+#endif
+
+    Plane *tmp_faces_buffer = 
+        (Plane *)ctx.tmpAlloc(sizeof(Plane) * max_num_tmp_faces);
+    Vector3 *tmp_vertices_buffer = 
+        (Vector3 *)ctx.tmpAlloc(sizeof(Vector3) * max_num_tmp_vertices);
 
     Plane * smem_faces_buffer;
     Vector3 * smem_vertices_buffer;
@@ -1673,6 +1680,8 @@ static inline void runNarrowphase(
             thread_result = warp_result;
         }
     }
+
+    __syncwarp(mwGPU::allActive);
 
     SolverData &solver = ctx.getSingleton<SolverData>();
 
