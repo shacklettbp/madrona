@@ -82,8 +82,8 @@ private:
 #define PROF_END(name)
 #endif
 
-#if 0
 // Unconditionally disable GPU narrowphase version
+#if 0
 #undef MADRONA_GPU_MODE
 #undef MADRONA_GPU_COND
 #define MADRONA_GPU_COND(...)
@@ -887,6 +887,10 @@ static Manifold createFaceContact(SATResult::Face sat_result,
                                   const PolygonData *a_face_hedges,
                                   const PolygonData *b_face_hedges,
                                   void *tmp_buf1, void *tmp_buf2,
+#ifdef MADRONA_GPU_MODE
+                                  Vector3 a_pos, Quat a_rot, Diag3x3 a_scale,
+                                  Vector3 b_pos, Quat b_rot, Diag3x3 b_scale,
+#endif
                                   Vector3 world_offset, Quat to_world_frame)
 {
     const Vector3 *ref_vertices;
@@ -896,6 +900,11 @@ static Manifold createFaceContact(SATResult::Face sat_result,
     const PolygonData *ref_face_hedges;
     const PolygonData *other_face_hedges;
 
+#ifdef MADRONA_GPU_MODE
+    Mat3x4 ref_txfm;
+    Mat3x4 other_txfm;
+#endif
+
     if (sat_result.aIsRef) {
         ref_vertices = a_vertices;
         other_vertices = b_vertices;
@@ -903,6 +912,10 @@ static Manifold createFaceContact(SATResult::Face sat_result,
         other_hedges = b_hedges;
         ref_face_hedges = a_face_hedges;
         other_face_hedges = b_face_hedges;
+#ifdef MADRONA_GPU_MODE
+        ref_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
+        other_txfm = Mat3x4::fromTRS(b_pos, b_rot, b_scale);
+#endif
     } else {
         ref_vertices = b_vertices;
         other_vertices = a_vertices;
@@ -910,6 +923,10 @@ static Manifold createFaceContact(SATResult::Face sat_result,
         other_hedges = a_hedges;
         ref_face_hedges = b_face_hedges;
         other_face_hedges = a_face_hedges;
+#ifdef MADRONA_GPU_MODE
+        ref_txfm = Mat3x4::fromTRS(b_pos, b_rot, b_scale);
+        other_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
+#endif
     }
 
     // Collect incident vertices: FIXME should have face indices
@@ -924,6 +941,9 @@ static Manifold createFaceContact(SATResult::Face sat_result,
             hedge_idx = cur_hedge.next;
 
             Vector3 cur_point = other_vertices[cur_hedge.rootVertex];
+#ifdef MADRONA_GPU_MODE
+            cur_point = other_txfm.txfmPoint(cur_point);
+#endif
 
             incident_vertices_tmp[num_incident_vertices++] = cur_point;
         } while (hedge_idx != start_hedge_idx);
@@ -956,6 +976,9 @@ static Manifold createFaceContact(SATResult::Face sat_result,
             Vector3 next_point = ref_vertices[cur_hedge->rootVertex];
 
             Vector3 edge = next_point - cur_point;
+#ifdef MADRONA_GPU_MODE
+            edge = ref_txfm.txfmDir(edge);
+#endif
             Vector3 plane_normal = cross(edge, ref_plane.normal);
 
             float d = dot(plane_normal, cur_point);
@@ -1002,6 +1025,9 @@ static Manifold createFacePlaneContact(SATResult::Face sat_result,
                                        const PolygonData *face_hedge_roots,
                                        Vector3 *contacts_tmp,
                                        float *penetration_depths_tmp,
+#ifdef MADRONA_GPU_MODE
+                                       Vector3 pos, Quat rot, Diag3x3 scale,
+#endif
                                        Vector3 world_offset,
                                        Quat to_world_frame)
 {
@@ -1012,10 +1038,18 @@ static Manifold createFacePlaneContact(SATResult::Face sat_result,
         CountT hedge_idx = face_hedge_roots[sat_result.incidentFaceIdx];
         CountT start_hedge_idx = hedge_idx;
 
+#ifdef MADRONA_GPU_MODE
+        Mat3x4 hull_txfm = Mat3x4::fromTRS(pos, rot, scale);
+#endif
+
         do {
             const auto &cur_hedge = hedges[hedge_idx];
             hedge_idx = cur_hedge.next;
             Vector3 vertex = vertices[cur_hedge.rootVertex];
+
+#ifdef MADRONA_GPU_MODE
+            vertex = hull_txfm.txfmPoint(vertex);
+#endif
 
             if (float d = getDistanceFromPlane(plane, vertex); d < 0.0f) {
                 // Project the point onto the reference plane
@@ -1116,6 +1150,10 @@ static Manifold createEdgeContact(SATResult::Edge edge_sat,
                                   const Vector3 *b_vertices,
                                   const HalfEdge *a_hedges,
                                   const HalfEdge *b_hedges,
+#ifdef MADRONA_GPU_MODE
+                                  Vector3 a_pos, Quat a_rot, Diag3x3 a_scale,
+                                  Vector3 b_pos, Quat b_rot, Diag3x3 b_scale,
+#endif
                                   Vector3 world_offset,
                                   Quat to_world_frame)
 {
@@ -1123,6 +1161,13 @@ static Manifold createEdgeContact(SATResult::Edge edge_sat,
                                   a_hedges[edge_sat.edgeIdxA]);
     Segment segB = getEdgeSegment(b_vertices, b_hedges,
                                   b_hedges[edge_sat.edgeIdxB]);
+
+#ifdef MADRONA_GPU_MODE
+    segA.p1 = a_rot.rotateVec(a_scale * segA.p1) + a_pos;
+    segA.p2 = a_rot.rotateVec(a_scale * segA.p2) + a_pos;
+    segB.p1 = b_rot.rotateVec(b_scale * segB.p1) + b_pos;
+    segB.p2 = b_rot.rotateVec(b_scale * segB.p2) + b_pos;
+#endif
 
     return createEdgeContact(segA, segB,
                              edge_sat.normal, edge_sat.separation,
@@ -1203,23 +1248,10 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
     const CollisionPrimitive *a_prim, const CollisionPrimitive *b_prim,
     CountT max_num_tmp_vertices,
     CountT max_num_tmp_faces,
-#ifdef MADRONA_GPU_MODE
-    Vector3 *smem_tmp_vertices,
-    Plane *smem_tmp_faces,
-    Vector3 *thread_vertex_buffer)
-#else
-    Vector3 *tmp_vertices,
-    Plane *tmp_faces)
-#endif
+    Vector3 *txfm_vertex_buffer,
+    Plane *txfm_face_buffer)
 {
     PROF_START(switch_body_ctr, narrowphaseSwitchClocks);
-#ifdef MADRONA_GPU_MODE
-    Plane *txfm_face_buffer = smem_tmp_faces;
-    Vector3 *txfm_vertex_buffer = smem_tmp_vertices;
-#else
-    Plane *txfm_face_buffer = tmp_faces;
-    Vector3 *txfm_vertex_buffer = tmp_vertices;
-#endif
 
     switch (test_type) {
     case NarrowphaseTest::SphereSphere: {
@@ -1282,54 +1314,16 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
         const SATResult sat = doSAT(MADRONA_GPU_COND(mwgpu_lane_id,)
             a_hull_state, b_hull_state);
 
-#ifdef MADRONA_GPU_MODE
-        if (sat.type == SATResult::Type::None) {
-            return NarrowphaseResult {
-                sat,
-                nullptr, nullptr,
-                nullptr, nullptr,
-                nullptr, nullptr,
-            };
-        } else {
-            Vector3 *a_thread_verts = thread_vertex_buffer;
-            const int32_t a_num_verts = a_hull_state.numVertices;
-            Vector3 *b_thread_verts = a_thread_verts + a_num_verts;
-            const int32_t b_num_verts = b_hull_state.numVertices;
-
-            for (int32_t offset = 0; offset < a_num_verts + b_num_verts;
-                 offset += 32) {
-                int32_t idx = offset + mwgpu_lane_id;
-                Vector3 *dst = nullptr;
-                const Vector3 *src;
-                if (idx < a_num_verts) {
-                    dst = &a_thread_verts[idx];
-                    src = &a_hull_state.vertices[idx];
-                } else if (int32_t b_idx = idx - a_num_verts;
-                           b_idx < b_num_verts) {
-                    dst = &b_thread_verts[b_idx];
-                    src = &b_hull_state.vertices[b_idx];
-                }
-
-                if (dst != nullptr) {
-                    *dst = *src;
-                }
-            }
-
-            return NarrowphaseResult {
-                sat,
-                a_thread_verts, b_thread_verts,
-                a_hull_state.halfEdges, b_hull_state.halfEdges,
-                a_hull_state.faceEdgeIndices, b_hull_state.faceEdgeIndices,
-            };
-        }
-#else
         return NarrowphaseResult {
             sat,
+#ifdef MADRONA_GPU_MODE
+            a_he_mesh.mVertices, b_he_mesh.mVertices,
+#else
             a_hull_state.vertices, b_hull_state.vertices,
+#endif
             a_hull_state.halfEdges, b_hull_state.halfEdges,
             a_hull_state.faceEdgeIndices, b_hull_state.faceEdgeIndices,
         };
-#endif
     } break;
     case NarrowphaseTest::SphereHull: {
 #if 0
@@ -1414,38 +1408,16 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
         const SATResult sat = doSATPlane(
             MADRONA_GPU_COND(mwgpu_lane_id,) plane, a_hull_state);
 
-#ifdef MADRONA_GPU_MODE
-        if (sat.type == SATResult::Type::None) {
-            return NarrowphaseResult {
-                sat,
-                nullptr, nullptr,
-                nullptr, nullptr,
-                nullptr, nullptr,
-            };
-        } else {
-            const int32_t a_num_verts = a_hull_state.numVertices;
-            for (int32_t offset = 0; offset < a_num_verts; offset += 32) {
-                int32_t idx = offset + mwgpu_lane_id;
-                if (idx < a_num_verts) {
-                    thread_vertex_buffer[idx] = a_hull_state.vertices[idx];
-                }
-            }
-
-            return NarrowphaseResult {
-                sat,
-                thread_vertex_buffer, nullptr,
-                a_hull_state.halfEdges, nullptr,
-                a_hull_state.faceEdgeIndices, nullptr,
-            };
-        }
-#else
         return NarrowphaseResult {
             sat,
+#ifdef MADRONA_GPU_MODE
+            a_he_mesh.mVertices, nullptr,
+#else
             a_hull_state.vertices, nullptr,
+#endif
             a_hull_state.halfEdges, nullptr,
             a_hull_state.faceEdgeIndices, nullptr,
         };
-#endif
     } break;
     default: __builtin_unreachable();
     }
@@ -1455,6 +1427,10 @@ static MADRONA_ALWAYS_INLINE inline void generateContacts(
     SolverData &solver,
     NarrowphaseResult narrowphase_result,
     Loc a_loc, Loc b_loc,
+#ifdef MADRONA_GPU_MODE
+    Vector3 a_pos, Quat a_rot, Diag3x3 a_scale,
+    Vector3 b_pos, Quat b_rot, Diag3x3 b_scale,
+#endif
     void *thread_tmp_storage_a, void *thread_tmp_storage_b)
 {
     Manifold manifold;
@@ -1471,6 +1447,9 @@ static MADRONA_ALWAYS_INLINE inline void generateContacts(
             narrowphase_result.aFaceHedgeRoots,
             (Vector3 *)thread_tmp_storage_a,
             (float *)thread_tmp_storage_b,
+#ifdef MADRONA_GPU_MODE
+            a_pos, a_rot, a_scale,
+#endif
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
     } break;
@@ -1485,16 +1464,25 @@ static MADRONA_ALWAYS_INLINE inline void generateContacts(
             narrowphase_result.aFaceHedgeRoots,
             narrowphase_result.bFaceHedgeRoots,
             thread_tmp_storage_a, thread_tmp_storage_b,
+#ifdef MADRONA_GPU_MODE
+            a_pos, a_rot, a_scale,
+            b_pos, b_rot, b_scale,
+#endif
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
     } break;
     case SATResult::Type::Edge: {
         // Create edge contact
-        manifold = createEdgeContact(narrowphase_result.sat.edge,
+        manifold = createEdgeContact(
+            narrowphase_result.sat.edge,
             narrowphase_result.aVertices,
             narrowphase_result.bVertices,
             narrowphase_result.aHalfEdges,
             narrowphase_result.bHalfEdges,
+#ifdef MADRONA_GPU_MODE
+            a_pos, a_rot, a_scale,
+            b_pos, b_rot, b_scale,
+#endif
             { 0, 0, 0 }, { 1, 0, 0, 0 });
     } break;
     default: __builtin_unreachable();
@@ -1520,15 +1508,7 @@ static inline void runNarrowphase(
     constexpr int32_t max_num_tmp_vertices =
         gpuImpl::maxNumVertices;
 
-#if 0
     Plane tmp_faces_buffer[max_num_tmp_faces];
-    Vector3 tmp_vertices_buffer[max_num_tmp_vertices];
-#endif
-
-    Plane *tmp_faces_buffer = 
-        (Plane *)ctx.tmpAlloc(sizeof(Plane) * max_num_tmp_faces);
-    Vector3 *tmp_vertices_buffer = 
-        (Vector3 *)ctx.tmpAlloc(sizeof(Vector3) * max_num_tmp_vertices);
 
     Plane * smem_faces_buffer;
     Vector3 * smem_vertices_buffer;
@@ -1662,9 +1642,6 @@ static inline void runNarrowphase(
         auto warp_b_prim = (CollisionPrimitive *)__shfl_sync(mwGPU::allActive,
             (uint64_t)b_prim, i);
 
-        auto thread_tmp_verts = (Vector3 *)__shfl_sync(mwGPU::allActive,
-            (uint64_t)&tmp_vertices_buffer[0], i);
-
         NarrowphaseResult warp_result = narrowphaseDispatch(
             mwgpu_lane_id,
             warp_test_type,
@@ -1673,8 +1650,7 @@ static inline void runNarrowphase(
             warp_a_scale, warp_b_scale,
             warp_a_prim, warp_b_prim,
             max_num_tmp_vertices, max_num_tmp_faces,
-            smem_vertices_buffer, smem_faces_buffer,
-            thread_tmp_verts);
+            smem_vertices_buffer, smem_faces_buffer);
 
         if (is_leader) {
             thread_result = warp_result;
@@ -1687,6 +1663,8 @@ static inline void runNarrowphase(
 
     if (lane_active) {
         generateContacts(solver, thread_result, a_loc, b_loc,
+                         a_pos, a_rot, a_scale,
+                         b_pos, b_rot, b_scale,
                          tmp_faces_buffer,
                          tmp_faces_buffer + max_num_tmp_faces / 2);
     }
