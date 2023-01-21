@@ -25,6 +25,7 @@ std::atomic_uint64_t narrowphaseSATContactClocks = 0;
 std::atomic_uint64_t narrowphaseSATPlaneContactClocks = 0;
 std::atomic_uint64_t narrowphaseSaveContactsClocks = 0;
 std::atomic_uint64_t narrowphaseTxfmHullCtrs = 0;
+std::atomic_uint64_t narrowphaseSATFinishClocks = 0;
 }
 #endif
 
@@ -698,18 +699,20 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
     if (faceQueryA.separation > 0.0f) {
         // There is a separating axis - no collision
-        return SATResult {
-            .type = SATResult::Type::None,
-        };
+        SATResult result;
+        result.type = SATResult::Type::None;
+
+        return result;
     }
 
     FaceQuery faceQueryB =
         queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) b, a);
     if (faceQueryB.separation > 0.0f) {
         // There is a separating axis - no collision
-        return SATResult {
-            .type = SATResult::Type::None,
-        };
+        SATResult result;
+        result.type = SATResult::Type::None;
+
+        return result;
     }
 
     PROF_END(sat_face_ctr);
@@ -719,9 +722,10 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         queryEdgeDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
     if (edgeQuery.separation > 0.0f) {
         // There is a separating axis - no collision
-        return SATResult {
-            .type = SATResult::Type::None,
-        };
+        SATResult result;
+        result.type = SATResult::Type::None;
+
+        return result;
     }
 
     PROF_END(sat_edge_ctr);
@@ -743,26 +747,28 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         CountT incident_face_idx = findIncidentFace(
             MADRONA_GPU_COND(mwgpu_lane_id,) incident_hull, ref_plane.normal);
 
-        return SATResult {
-            .type = SATResult::Type::Face,
-            .face = SATResult::Face {
-                .refPlane = ref_plane,
-                .refFaceIdx = int32_t(ref_face_idx),
-                .incidentFaceIdx = int32_t(incident_face_idx),
-                .aIsRef = a_is_ref,
-            },
+        SATResult result;
+        result.type = SATResult::Type::Face,
+        result.face = SATResult::Face {
+            ref_plane,
+            int32_t(ref_face_idx),
+            int32_t(incident_face_idx),
+            a_is_ref,
         };
+
+        return result;
     }
     else {
-        return SATResult {
-            .type = SATResult::Type::Edge,
-            .edge = SATResult::Edge {
-                .normal = edgeQuery.normal,
-                .separation = edgeQuery.separation,
-                .edgeIdxA = edgeQuery.edgeIdxA,
-                .edgeIdxB = edgeQuery.edgeIdxB,
-            },
+        SATResult result;
+        result.type = SATResult::Type::Edge;
+        result.edge = SATResult::Edge {
+            edgeQuery.normal,
+            edgeQuery.separation,
+            edgeQuery.edgeIdxA,
+            edgeQuery.edgeIdxB,
         };
+ 
+        return result;
     }
 }
 
@@ -775,9 +781,10 @@ SATResult doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
         MADRONA_GPU_COND(mwgpu_lane_id,) plane, h);
 
     if (separation > 0.0f) {
-        return SATResult {
-            .type = SATResult::Type::None,
-        };
+        SATResult result;
+        result.type = SATResult::Type::None;
+
+        return result;
     }
 
     PROF_START(sat_finish_ctr, narrowphaseSATFinishClocks);
@@ -786,17 +793,15 @@ SATResult doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
     CountT incident_face_idx = findIncidentFace(
         MADRONA_GPU_COND(mwgpu_lane_id,) h, plane.normal);
 
-    return SATResult {
-        .type = SATResult::Type::Plane,
-        .face = {
-            .refPlane = plane,
-            .incidentFaceIdx = int32_t(incident_face_idx),
-        },
-    };
+    SATResult result;
+    result.type = SATResult::Type::Plane;
+    result.face.refPlane = plane;
+    result.face.incidentFaceIdx = int32_t(incident_face_idx);
+
+    return result;
 }
 
 static Manifold buildFaceContactManifold(
-    MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     Vector3 contact_normal,
     Vector3 *contacts,
     float *penetration_depths,
@@ -805,13 +810,6 @@ static Manifold buildFaceContactManifold(
     Vector3 world_offset,
     Quat to_world_frame)
 {
-#ifdef MADRONA_GPU_MODE
-    if (mwgpu_lane_id != 0) {
-        // FIXME: there is some warp-level parallelism below
-        return Manifold {};
-    }
-#endif
-
     Manifold manifold;
     manifold.aIsReference = a_is_ref;
     if (num_contacts <= 4) {
@@ -1281,17 +1279,17 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
 
         PROF_END(txfm_hull_ctr);
 
-        SATResult sat = doSAT(MADRONA_GPU_COND(mwgpu_lane_id,)
+        const SATResult sat = doSAT(MADRONA_GPU_COND(mwgpu_lane_id,)
             a_hull_state, b_hull_state);
 
 #ifdef MADRONA_GPU_MODE
-        if (sat.type == SATResult::None) {
+        if (sat.type == SATResult::Type::None) {
             return NarrowphaseResult {
                 sat,
                 nullptr, nullptr,
                 nullptr, nullptr,
                 nullptr, nullptr,
-            }
+            };
         } else {
             Vector3 *a_thread_verts = thread_vertex_buffer;
             const int32_t a_num_verts = a_hull_state.numVertices;
@@ -1322,7 +1320,7 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
                 a_thread_verts, b_thread_verts,
                 a_hull_state.halfEdges, b_hull_state.halfEdges,
                 a_hull_state.faceEdgeIndices, b_hull_state.faceEdgeIndices,
-            }
+            };
         }
 #else
         return NarrowphaseResult {
@@ -1389,7 +1387,8 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
         PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
 
         HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
-            a_he_mesh, a_pos, a_rot, a_scale, tmp_vertices, tmp_faces);
+            a_he_mesh, a_pos, a_rot, a_scale,
+            txfm_vertex_buffer, txfm_face_buffer);
 
         MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
 
@@ -1412,11 +1411,11 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
             dot(plane_normal, b_pos),
         };
 
-        SATResult sat = doSATPlane(
+        const SATResult sat = doSATPlane(
             MADRONA_GPU_COND(mwgpu_lane_id,) plane, a_hull_state);
 
 #ifdef MADRONA_GPU_MODE
-        if (sat.type = SATResult::Type::None) {
+        if (sat.type == SATResult::Type::None) {
             return NarrowphaseResult {
                 sat,
                 nullptr, nullptr,
@@ -1427,7 +1426,7 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
             const int32_t a_num_verts = a_hull_state.numVertices;
             for (int32_t offset = 0; offset < a_num_verts; offset += 32) {
                 int32_t idx = offset + mwgpu_lane_id;
-                if (idx < num_verts) {
+                if (idx < a_num_verts) {
                     thread_vertex_buffer[idx] = a_hull_state.vertices[idx];
                 }
             }
@@ -1524,15 +1523,16 @@ static inline void runNarrowphase(
     Plane tmp_faces_buffer[max_num_tmp_faces];
     Vector3 tmp_vertices_buffer[max_num_tmp_vertices];
 
-    Plane *smem_faces_buffer;
-    Vector3 *smem_vertices_buffer;
+    Plane * smem_faces_buffer;
+    Vector3 * smem_vertices_buffer;
     {
         auto smem_buf = (char *)mwGPU::SharedMemStorage::buffer;
         char *warp_smem_base = smem_buf + 
             mwGPU::SharedMemStorage::numSMemBytesPerWarp * mwgpu_warp_id;
 
         smem_faces_buffer = (Plane *)warp_smem_base;
-        smem_vertices_buffer = (Vector3 *)(tmp_faces + gpuImpl::maxNumPlanes);
+        smem_vertices_buffer =
+            (Vector3 *)(smem_faces_buffer + gpuImpl::maxNumPlanes);
     }
 #else
     constexpr int32_t max_num_tmp_faces = 512;
@@ -1554,8 +1554,8 @@ static inline void runNarrowphase(
     ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
     ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
 
-    const CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
-    const CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
+    CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
+    CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
 
     uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
     uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
@@ -1568,12 +1568,12 @@ static inline void runNarrowphase(
         std::swap(raw_type_a, raw_type_b);
     }
 
-    Vector3 a_pos = ctx.getDirect<Position>(Cols::Position, a_loc);
-    Vector3 b_pos = ctx.getDirect<Position>(Cols::Position, b_loc);
-    Quat a_rot = ctx.getDirect<Rotation>(Cols::Rotation, a_loc);
-    Quat b_rot = ctx.getDirect<Rotation>(Cols::Rotation, b_loc);
-    Diag3x3 a_scale(ctx.getDirect<Scale>(Cols::Scale, a_loc));
-    Diag3x3 b_scale(ctx.getDirect<Scale>(Cols::Scale, b_loc));
+    const Vector3 a_pos = ctx.getDirect<Position>(Cols::Position, a_loc);
+    const Vector3 b_pos = ctx.getDirect<Position>(Cols::Position, b_loc);
+    const Quat a_rot = ctx.getDirect<Rotation>(Cols::Rotation, a_loc);
+    const Quat b_rot = ctx.getDirect<Rotation>(Cols::Rotation, b_loc);
+    const Diag3x3 a_scale(ctx.getDirect<Scale>(Cols::Scale, a_loc));
+    const Diag3x3 b_scale(ctx.getDirect<Scale>(Cols::Scale, b_loc));
 
     {
         AABB a_obj_aabb = obj_mgr.aabbs[a_obj.idx];
@@ -1591,11 +1591,96 @@ static inline void runNarrowphase(
         }
     }
 
-    NarrowphaseTest test_type {raw_type_a | raw_type_b};
+    const NarrowphaseTest test_type {raw_type_a | raw_type_b};
 
     PROF_END(prep_ctr);
 
 #ifdef MADRONA_GPU_MODE
+    NarrowphaseResult thread_result;
+#pragma unroll(1)
+    for (int32_t i = 0; i < 32; i++) {
+        const bool is_leader = i == mwgpu_lane_id;
+
+        const bool leader_active =
+            __shfl_sync(mwGPU::allActive, lane_active, i);
+
+        if (!leader_active) {
+            continue;
+        }
+
+        auto warp_test_type = (NarrowphaseTest)__shfl_sync(
+            mwGPU::allActive, (uint32_t)test_type, i);
+
+        Vector3 warp_a_pos {
+            __shfl_sync(mwGPU::allActive, a_pos.x, i),
+            __shfl_sync(mwGPU::allActive, a_pos.y, i),
+            __shfl_sync(mwGPU::allActive, a_pos.z, i),
+        };
+
+        Vector3 warp_b_pos {
+            __shfl_sync(mwGPU::allActive, b_pos.x, i),
+            __shfl_sync(mwGPU::allActive, b_pos.y, i),
+            __shfl_sync(mwGPU::allActive, b_pos.z, i),
+        };
+
+        Quat warp_a_rot {
+            __shfl_sync(mwGPU::allActive, a_rot.w, i),
+            __shfl_sync(mwGPU::allActive, a_rot.x, i),
+            __shfl_sync(mwGPU::allActive, a_rot.y, i),
+            __shfl_sync(mwGPU::allActive, a_rot.z, i),
+        };
+
+        Quat warp_b_rot {
+            __shfl_sync(mwGPU::allActive, b_rot.w, i),
+            __shfl_sync(mwGPU::allActive, b_rot.x, i),
+            __shfl_sync(mwGPU::allActive, b_rot.y, i),
+            __shfl_sync(mwGPU::allActive, b_rot.z, i),
+        };
+
+        Diag3x3 warp_a_scale {
+            __shfl_sync(mwGPU::allActive, a_scale.d0, i),
+            __shfl_sync(mwGPU::allActive, a_scale.d1, i),
+            __shfl_sync(mwGPU::allActive, a_scale.d2, i),
+        };
+
+        Diag3x3 warp_b_scale {
+            __shfl_sync(mwGPU::allActive, b_scale.d0, i),
+            __shfl_sync(mwGPU::allActive, b_scale.d1, i),
+            __shfl_sync(mwGPU::allActive, b_scale.d2, i),
+        };
+
+        auto warp_a_prim = (CollisionPrimitive *)__shfl_sync(mwGPU::allActive,
+            (uint64_t)a_prim, i);
+
+        auto warp_b_prim = (CollisionPrimitive *)__shfl_sync(mwGPU::allActive,
+            (uint64_t)b_prim, i);
+
+        auto thread_tmp_verts = (Vector3 *)__shfl_sync(mwGPU::allActive,
+            (uint64_t)&tmp_vertices_buffer[0], i);
+
+        NarrowphaseResult warp_result = narrowphaseDispatch(
+            mwgpu_lane_id,
+            warp_test_type,
+            warp_a_pos, warp_b_pos,
+            warp_a_rot, warp_b_rot,
+            warp_a_scale, warp_b_scale,
+            warp_a_prim, warp_b_prim,
+            max_num_tmp_vertices, max_num_tmp_faces,
+            smem_vertices_buffer, smem_faces_buffer,
+            thread_tmp_verts);
+
+        if (is_leader) {
+            thread_result = warp_result;
+        }
+    }
+
+    SolverData &solver = ctx.getSingleton<SolverData>();
+
+    if (lane_active) {
+        generateContacts(solver, thread_result, a_loc, b_loc,
+                         tmp_faces_buffer,
+                         tmp_faces_buffer + max_num_tmp_faces / 2);
+    }
 #else
     NarrowphaseResult result = narrowphaseDispatch(
         test_type,
@@ -1638,7 +1723,7 @@ inline void runNarrowphaseSystem(
 
     WorldID world_id = world_ids[candidate_idx];
     if (world_id.idx == -1) {
-        continue;
+        lane_active = false;
     }
 
     Context ctx = TaskGraph::makeContext<Context>(world_id);
