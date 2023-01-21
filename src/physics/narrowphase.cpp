@@ -134,7 +134,6 @@ struct Manifold {
     float penetrationDepths[4];
     int32_t numContactPoints;
     math::Vector3 normal;
-    bool aIsReference;
 };
 
 static HullState makeHullState(
@@ -669,25 +668,11 @@ struct SATResult {
         Edge,
     };
 
-    struct Face {
-        Plane refPlane;
-        int32_t refFaceIdx;
-        int32_t incidentFaceIdx;
-        bool aIsRef;
-    };
-
-    struct Edge {
-        math::Vector3 normal;
-        float separation;
-        int32_t edgeIdxA;
-        int32_t edgeIdxB;
-    };
-
     Type type;
-    union {
-        Face face;
-        Edge edge;
-    };
+    Vector3 normal;
+    float planeDOrSeparation;
+    uint32_t refFaceIdxOrEdgeIdxA;
+    uint32_t incidentFaceIdxOrEdgeIdxB;
 };
 
 static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
@@ -749,25 +734,25 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
 
         SATResult result;
         result.type = SATResult::Type::Face,
-        result.face = SATResult::Face {
-            ref_plane,
-            int32_t(ref_face_idx),
-            int32_t(incident_face_idx),
-            a_is_ref,
-        };
+        result.normal = ref_plane.normal;
+        result.planeDOrSeparation = ref_plane.d;
+        uint32_t mask;
+        if (a_is_ref) {
+            mask = 0_u32;
+        } else {
+            mask = 1_u32 << 31_u32;
+        }
+        result.refFaceIdxOrEdgeIdxA = uint32_t(ref_face_idx) | mask;
+        result.incidentFaceIdxOrEdgeIdxB = uint32_t(incident_face_idx);
 
         return result;
-    }
-    else {
+    } else {
         SATResult result;
         result.type = SATResult::Type::Edge;
-        result.edge = SATResult::Edge {
-            edgeQuery.normal,
-            edgeQuery.separation,
-            edgeQuery.edgeIdxA,
-            edgeQuery.edgeIdxB,
-        };
- 
+        result.normal = edgeQuery.normal;
+        result.planeDOrSeparation = edgeQuery.separation;
+        result.refFaceIdxOrEdgeIdxA = edgeQuery.edgeIdxA;
+        result.incidentFaceIdxOrEdgeIdxB = edgeQuery.edgeIdxB;
         return result;
     }
 }
@@ -795,8 +780,9 @@ SATResult doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
 
     SATResult result;
     result.type = SATResult::Type::Plane;
-    result.face.refPlane = plane;
-    result.face.incidentFaceIdx = int32_t(incident_face_idx);
+    result.normal = plane.normal;
+    result.planeDOrSeparation = plane.d;
+    result.incidentFaceIdxOrEdgeIdxB = uint32_t(incident_face_idx);
 
     return result;
 }
@@ -806,12 +792,10 @@ static Manifold buildFaceContactManifold(
     Vector3 *contacts,
     float *penetration_depths,
     CountT num_contacts,
-    bool a_is_ref,
     Vector3 world_offset,
     Quat to_world_frame)
 {
     Manifold manifold;
-    manifold.aIsReference = a_is_ref;
     if (num_contacts <= 4) {
         manifold.numContactPoints = num_contacts;
         for (CountT i = 0; i < num_contacts; i++) {
@@ -879,61 +863,27 @@ static Manifold buildFaceContactManifold(
     return manifold;
 }
 
-static Manifold createFaceContact(SATResult::Face sat_result,
-                                  const Vector3 *a_vertices,
-                                  const Vector3 *b_vertices,
-                                  const HalfEdge *a_hedges,
-                                  const HalfEdge *b_hedges,
-                                  const PolygonData *a_face_hedges,
-                                  const PolygonData *b_face_hedges,
+static inline MADRONA_ALWAYS_INLINE Manifold createFaceContact(
+                                  Plane ref_plane,
+                                  int32_t ref_face_idx,
+                                  int32_t incident_face_idx,
+                                  const Vector3 *ref_vertices,
+                                  const Vector3 *other_vertices,
+                                  const HalfEdge *ref_hedges,
+                                  const HalfEdge *other_hedges,
+                                  const PolygonData *ref_face_hedges,
+                                  const PolygonData *other_face_hedges,
                                   void *tmp_buf1, void *tmp_buf2,
 #ifdef MADRONA_GPU_MODE
-                                  Vector3 a_pos, Quat a_rot, Diag3x3 a_scale,
-                                  Vector3 b_pos, Quat b_rot, Diag3x3 b_scale,
+                                  Mat3x4 ref_txfm, Mat3x4 other_txfm,
 #endif
                                   Vector3 world_offset, Quat to_world_frame)
 {
-    const Vector3 *ref_vertices;
-    const Vector3 *other_vertices;
-    const HalfEdge *ref_hedges;
-    const HalfEdge *other_hedges;
-    const PolygonData *ref_face_hedges;
-    const PolygonData *other_face_hedges;
-
-#ifdef MADRONA_GPU_MODE
-    Mat3x4 ref_txfm;
-    Mat3x4 other_txfm;
-#endif
-
-    if (sat_result.aIsRef) {
-        ref_vertices = a_vertices;
-        other_vertices = b_vertices;
-        ref_hedges = a_hedges;
-        other_hedges = b_hedges;
-        ref_face_hedges = a_face_hedges;
-        other_face_hedges = b_face_hedges;
-#ifdef MADRONA_GPU_MODE
-        ref_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
-        other_txfm = Mat3x4::fromTRS(b_pos, b_rot, b_scale);
-#endif
-    } else {
-        ref_vertices = b_vertices;
-        other_vertices = a_vertices;
-        ref_hedges = b_hedges;
-        other_hedges = a_hedges;
-        ref_face_hedges = b_face_hedges;
-        other_face_hedges = a_face_hedges;
-#ifdef MADRONA_GPU_MODE
-        ref_txfm = Mat3x4::fromTRS(b_pos, b_rot, b_scale);
-        other_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
-#endif
-    }
-
     // Collect incident vertices: FIXME should have face indices
     Vector3 *incident_vertices_tmp = (Vector3 *)tmp_buf1;
     CountT num_incident_vertices = 0;
     {
-        CountT hedge_idx = other_face_hedges[sat_result.incidentFaceIdx];
+        CountT hedge_idx = other_face_hedges[incident_face_idx];
         CountT start_hedge_idx = hedge_idx;
 
         do {
@@ -960,25 +910,27 @@ static Manifold createFaceContact(SATResult::Face sat_result,
     // side planes, or store max face size in each mesh. The worst case
     // buffer sizes here is just the sum of the max face sizes - 1
 
-    Plane ref_plane = sat_result.refPlane;
     // FIXME, this code assumes that clipping_input & clipping_dst have space
     // to write incident_vertices + num_planes new vertices
     // Loop over side planes
     {
-        CountT hedge_idx = ref_face_hedges[sat_result.refFaceIdx];
+        CountT hedge_idx = ref_face_hedges[ref_face_idx];
         CountT start_hedge_idx = hedge_idx;
 
         auto *cur_hedge = &ref_hedges[hedge_idx];
         Vector3 cur_point = ref_vertices[cur_hedge->rootVertex];
+#ifdef MADRONA_GPU_MODE
+        cur_point = ref_txfm.txfmPoint(cur_point);
+#endif
         do {
             hedge_idx = cur_hedge->next;
             cur_hedge = &ref_hedges[hedge_idx];
             Vector3 next_point = ref_vertices[cur_hedge->rootVertex];
+#ifdef MADRONA_GPU_MODE
+            next_point = ref_txfm.txfmPoint(next_point);
+#endif
 
             Vector3 edge = next_point - cur_point;
-#ifdef MADRONA_GPU_MODE
-            edge = ref_txfm.txfmDir(edge);
-#endif
             Vector3 plane_normal = cross(edge, ref_plane.normal);
 
             float d = dot(plane_normal, cur_point);
@@ -1015,32 +967,28 @@ static Manifold createFaceContact(SATResult::Face sat_result,
     }
 
     return buildFaceContactManifold(ref_plane.normal, clipping_input,
-        penetration_depths, num_below_plane, sat_result.aIsRef, world_offset,
-        to_world_frame);
+        penetration_depths, num_below_plane,
+        world_offset, to_world_frame);
 }
 
-static Manifold createFacePlaneContact(SATResult::Face sat_result,
+static Manifold createFacePlaneContact(Plane plane,
+                                       int32_t incident_face_idx,
                                        const Vector3 *vertices,
                                        const HalfEdge *hedges,
                                        const PolygonData *face_hedge_roots,
                                        Vector3 *contacts_tmp,
                                        float *penetration_depths_tmp,
 #ifdef MADRONA_GPU_MODE
-                                       Vector3 pos, Quat rot, Diag3x3 scale,
+                                       Mat3x4 hull_txfm,
 #endif
                                        Vector3 world_offset,
                                        Quat to_world_frame)
 {
-    Plane plane = sat_result.refPlane;
     // Collect incident vertices: FIXME should have face indices
     CountT num_incident_vertices = 0;
     {
-        CountT hedge_idx = face_hedge_roots[sat_result.incidentFaceIdx];
+        CountT hedge_idx = face_hedge_roots[incident_face_idx];
         CountT start_hedge_idx = hedge_idx;
-
-#ifdef MADRONA_GPU_MODE
-        Mat3x4 hull_txfm = Mat3x4::fromTRS(pos, rot, scale);
-#endif
 
         do {
             const auto &cur_hedge = hedges[hedge_idx];
@@ -1065,7 +1013,6 @@ static Manifold createFacePlaneContact(SATResult::Face sat_result,
 
     return buildFaceContactManifold(plane.normal, contacts_tmp,
         penetration_depths_tmp, num_incident_vertices,
-        false /* Plane is always reference, always b */,
         world_offset, to_world_frame);
 }
 
@@ -1138,14 +1085,13 @@ static Manifold createEdgeContact(Segment segA,
     manifold.numContactPoints = 1;
     manifold.normal = to_world_frame.rotateVec(normal);
 
-    // Normal always points away from object A (enforced in edgeDistance) &
-    // contact points are on A.
-    manifold.aIsReference = true;
-
     return manifold;
 }
 
-static Manifold createEdgeContact(SATResult::Edge edge_sat,
+static Manifold createEdgeContact(Vector3 normal,
+                                  float separation,
+                                  int32_t edge_idx_a,
+                                  int32_t edge_idx_b,
                                   const Vector3 *a_vertices,
                                   const Vector3 *b_vertices,
                                   const HalfEdge *a_hedges,
@@ -1158,9 +1104,9 @@ static Manifold createEdgeContact(SATResult::Edge edge_sat,
                                   Quat to_world_frame)
 {
     Segment segA = getEdgeSegment(a_vertices, a_hedges,
-                                  a_hedges[edge_sat.edgeIdxA]);
+                                  a_hedges[edge_idx_a]);
     Segment segB = getEdgeSegment(b_vertices, b_hedges,
-                                  b_hedges[edge_sat.edgeIdxB]);
+                                  b_hedges[edge_idx_b]);
 
 #ifdef MADRONA_GPU_MODE
     segA.p1 = a_rot.rotateVec(a_scale * segA.p1) + a_pos;
@@ -1170,7 +1116,7 @@ static Manifold createEdgeContact(SATResult::Edge edge_sat,
 #endif
 
     return createEdgeContact(segA, segB,
-                             edge_sat.normal, edge_sat.separation,
+                             normal, separation,
                              world_offset, to_world_frame);
 }
 
@@ -1191,14 +1137,14 @@ static inline void addContactsToSolver(
 static inline void addManifoldToSolver(
     SolverData &solver_data,
     Manifold manifold,
-    Loc a_loc, Loc b_loc)
+    Loc ref_loc, Loc other_loc)
 {
     PROF_START(save_contacts_ctr, narrowphaseSaveContactsClocks);
 
     addContactsToSolver(
         solver_data, {{
-        manifold.aIsReference ? a_loc : b_loc,
-        manifold.aIsReference ? b_loc : a_loc,
+        ref_loc,
+        other_loc,
         {
             Vector4::fromVector3(manifold.contactPoints[0],
                                  manifold.penetrationDepths[0]),
@@ -1434,47 +1380,126 @@ static MADRONA_ALWAYS_INLINE inline void generateContacts(
     void *thread_tmp_storage_a, void *thread_tmp_storage_b)
 {
     Manifold manifold;
+    Loc ref_loc;
+    Loc other_loc;
+
     switch (narrowphase_result.sat.type) {
     case SATResult::Type::None: {
         return;
     } break;
     case SATResult::Type::Plane: {
+        // Plane is always b, always reference
+        ref_loc = b_loc;
+        other_loc = a_loc;
+
+#ifdef MADRONA_GPU_MODE
+        Mat3x4 hull_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
+#endif
+
+        Plane plane {
+            narrowphase_result.sat.normal,
+            narrowphase_result.sat.planeDOrSeparation,
+        };
+
         // Create plane contact
         manifold = createFacePlaneContact(
-            narrowphase_result.sat.face,
+            plane,
+            int32_t(narrowphase_result.sat.incidentFaceIdxOrEdgeIdxB),
             narrowphase_result.aVertices,
             narrowphase_result.aHalfEdges,
             narrowphase_result.aFaceHedgeRoots,
             (Vector3 *)thread_tmp_storage_a,
             (float *)thread_tmp_storage_b,
 #ifdef MADRONA_GPU_MODE
-            a_pos, a_rot, a_scale,
+            hull_txfm,
 #endif
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
     } break;
     case SATResult::Type::Face: {
+        const Vector3 *ref_vertices;
+        const Vector3 *other_vertices;
+        const HalfEdge *ref_hedges;
+        const HalfEdge *other_hedges;
+        const PolygonData *ref_face_hedges;
+        const PolygonData *other_face_hedges;
+
+#ifdef MADRONA_GPU_MODE
+        Mat3x4 ref_txfm;
+        Mat3x4 other_txfm;
+#endif
+
+        uint32_t ref_face_idx_and_ref_mask = 
+            narrowphase_result.sat.refFaceIdxOrEdgeIdxA;
+        uint32_t incident_face_idx =
+            narrowphase_result.sat.incidentFaceIdxOrEdgeIdxB;
+
+        uint32_t ref_face_idx = ref_face_idx_and_ref_mask & 0x7FFF'FFFF;
+        bool a_is_ref = ref_face_idx == ref_face_idx_and_ref_mask;
+
+        if (a_is_ref) {
+            ref_loc = a_loc;
+            other_loc = b_loc;
+            ref_vertices = narrowphase_result.aVertices;
+            other_vertices = narrowphase_result.bVertices;
+            ref_hedges = narrowphase_result.aHalfEdges;
+            other_hedges = narrowphase_result.bHalfEdges;
+            ref_face_hedges = narrowphase_result.aFaceHedgeRoots;
+            other_face_hedges = narrowphase_result.bFaceHedgeRoots;
+#ifdef MADRONA_GPU_MODE
+            ref_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
+            other_txfm = Mat3x4::fromTRS(b_pos, b_rot, b_scale);
+#endif
+        } else {
+            ref_loc = b_loc;
+            other_loc = a_loc;
+            ref_vertices = narrowphase_result.bVertices;
+            other_vertices = narrowphase_result.aVertices;
+            ref_hedges = narrowphase_result.bHalfEdges;
+            other_hedges = narrowphase_result.aHalfEdges;
+            ref_face_hedges = narrowphase_result.bFaceHedgeRoots;
+            other_face_hedges = narrowphase_result.aFaceHedgeRoots;
+#ifdef MADRONA_GPU_MODE
+            ref_txfm = Mat3x4::fromTRS(b_pos, b_rot, b_scale);
+            other_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
+#endif
+        }
+
+        Plane ref_plane {
+            narrowphase_result.sat.normal,
+            narrowphase_result.sat.planeDOrSeparation,
+        };
+
         // Create face contact
         manifold = createFaceContact(
-            narrowphase_result.sat.face,
-            narrowphase_result.aVertices,
-            narrowphase_result.bVertices,
-            narrowphase_result.aHalfEdges,
-            narrowphase_result.bHalfEdges,
-            narrowphase_result.aFaceHedgeRoots,
-            narrowphase_result.bFaceHedgeRoots,
+            ref_plane,
+            int32_t(ref_face_idx),
+            int32_t(incident_face_idx),
+            ref_vertices,
+            other_vertices,
+            ref_hedges,
+            other_hedges,
+            ref_face_hedges,
+            other_face_hedges,
             thread_tmp_storage_a, thread_tmp_storage_b,
 #ifdef MADRONA_GPU_MODE
-            a_pos, a_rot, a_scale,
-            b_pos, b_rot, b_scale,
+            ref_txfm,
+            other_txfm,
 #endif
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
     } break;
     case SATResult::Type::Edge: {
+        // A is always reference
+        ref_loc = a_loc;
+        other_loc = b_loc;
+
         // Create edge contact
         manifold = createEdgeContact(
-            narrowphase_result.sat.edge,
+            narrowphase_result.sat.normal,
+            narrowphase_result.sat.planeDOrSeparation,
+            int32_t(narrowphase_result.sat.refFaceIdxOrEdgeIdxA),
+            int32_t(narrowphase_result.sat.incidentFaceIdxOrEdgeIdxB),
             narrowphase_result.aVertices,
             narrowphase_result.bVertices,
             narrowphase_result.aHalfEdges,
@@ -1489,7 +1514,7 @@ static MADRONA_ALWAYS_INLINE inline void generateContacts(
     }
 
     if (manifold.numContactPoints > 0) {
-        addManifoldToSolver(solver, manifold, a_loc, b_loc);
+        addManifoldToSolver(solver, manifold, ref_loc, other_loc);
     }
 }
 
@@ -1578,14 +1603,22 @@ static inline void runNarrowphase(
         }
     }
 
+#ifdef MADRONA_GPU_MODE
+    uint32_t active_mask = __ballot_sync(mwGPU::allActive, lane_active);
+
+    if (active_mask == 0) {
+        return;
+    }
+#endif
+
     const NarrowphaseTest test_type {raw_type_a | raw_type_b};
 
     PROF_END(prep_ctr);
 
 #ifdef MADRONA_GPU_MODE
     NarrowphaseResult thread_result;
-#pragma unroll(1)
-    for (int32_t i = 0; i < 32; i++) {
+    const int32_t num_active_lanes = 32;
+    for (int32_t i = 0; i < num_active_lanes; i++) {
         const bool is_leader = i == mwgpu_lane_id;
 
         const bool leader_active =
