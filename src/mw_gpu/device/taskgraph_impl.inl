@@ -101,14 +101,13 @@ void TaskGraph::updateBlockState()
 {
     uint32_t node_idx = cur_node_idx_.load(std::memory_order_acquire);
     if (node_idx == num_nodes_) {
+        sharedBlockState.nodeIdx = node_idx;
         return;
     }
 
-    printf("Updating block state %u %u\n",
-          node_idx, sharedBlockState.nodeIdx);
-
     if (node_idx == sharedBlockState.nodeIdx) {
         sharedBlockState.initOffset = -1;
+        return;
     }
 
     Node &cur_node = sorted_nodes_[node_idx];
@@ -160,8 +159,6 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
         total_num_invocations = sharedBlockState.totalNumInvocations;
         num_threads_per_invocation = sharedBlockState.numThreadsPerInvocation;
         if (num_threads_per_invocation > 32) {
-            printf("Big kernel\n");
-
             if (thread_idx == 0) {
                 sharedBlockState.initOffset = cur_node->curOffset.fetch_add(
                     consts::numMegakernelThreads / num_threads_per_invocation,
@@ -195,15 +192,15 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
         }
         __syncthreads();
 
-        int32_t block_init_offset = sharedBlockState.initOffset;
-        if (block_init_offset == -1) {
-            return WorkerState::Loop;
-        }
-
         node_idx = sharedBlockState.nodeIdx;
 
         if (node_idx == num_nodes_) {
             return WorkerState::Exit;
+        }
+
+        int32_t block_init_offset = sharedBlockState.initOffset;
+        if (block_init_offset == -1) {
+            return WorkerState::Loop;
         }
 
         cur_node = &sorted_nodes_[node_idx];
@@ -301,7 +298,6 @@ void TaskGraph::finishWork(bool lane_executed)
             }
 
             cur_node_idx_.store(next_node_idx, std::memory_order_release);
-            printf("Queued %d\n", next_node_idx);
             break;
         }
     }
