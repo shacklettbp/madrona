@@ -12,7 +12,7 @@
 #include <cuda/barrier>
 #include <cuda/std/tuple>
 
-#define LIMIT_ACTIVE_THREADS
+//#define LIMIT_ACTIVE_THREADS
 // #define LIMIT_ACTIVE_BLOCKS
 // #define FETCH_MULTI_INVOCATIONS
 
