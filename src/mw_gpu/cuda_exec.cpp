@@ -1440,6 +1440,7 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
     REQ_CUDA(cudaGetDeviceProperties(&dev_prop, state_cfg.gpuID));
 
     int num_sms = dev_prop.multiProcessorCount;
+    num_sms = 1;
     uint32_t num_megakernel_blocks = num_sms * consts::numMegakernelBlocksPerSM;
 
     auto strm = cu::makeStream();

@@ -17,7 +17,7 @@ set(MADRONA_MW_GPU_COMPILE_FLAGS
     -default-device
     -rdc=true
     -use_fast_math
-    --maxrregcount=256
+    --maxrregcount=255
     -DMADRONA_GPU_MODE=1
 )
 

@@ -138,7 +138,7 @@ public:
                         uint32_t *run_func_id,
                         int32_t *run_offset);
 
-    void finishWork();
+    void finishWork(bool lane_executed);
 
     static inline WorldBase * getWorld(int32_t world_idx);
 
@@ -155,7 +155,7 @@ private:
     TaskGraph(Node *nodes, uint32_t num_nodes,
               NodeData *node_datas);
 
-    inline void setBlockState();
+    inline void updateBlockState();
     inline uint32_t computeNumInvocations(Node &node);
 
     Node *sorted_nodes_;
