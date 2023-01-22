@@ -150,41 +150,7 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
     int32_t num_threads_per_invocation;
     int32_t base_offset;
 
-    if (sharedBlockState.initOffset == -1) {
-        node_idx = -1;
-    } else {
-        node_idx = sharedBlockState.nodeIdx;
-        cur_node = &sorted_nodes_[node_idx];
-
-        total_num_invocations = sharedBlockState.totalNumInvocations;
-        num_threads_per_invocation = sharedBlockState.numThreadsPerInvocation;
-        if (num_threads_per_invocation > 32) {
-            if (thread_idx == 0) {
-                sharedBlockState.initOffset = cur_node->curOffset.fetch_add(
-                    consts::numMegakernelThreads / num_threads_per_invocation,
-                    std::memory_order_relaxed);
-            }
-
-            __syncthreads();
-            base_offset = sharedBlockState.initOffset;
-
-            if (base_offset >= total_num_invocations) {
-                node_idx = -1;
-            }
-        } else {
-            if (lane_idx == 0) {
-                base_offset = cur_node->curOffset.fetch_add(
-                    32 / num_threads_per_invocation, std::memory_order_relaxed);
-            }
-            base_offset = __shfl_sync(mwGPU::allActive, base_offset, 0);
-
-            if (base_offset >= total_num_invocations) {
-                node_idx = -1;
-            }
-        }
-    }
-
-    if (node_idx == -1) {
+    auto blockGetNextNode = [&]() {
         __syncthreads();
 
         if (thread_idx == 0) {
@@ -209,6 +175,51 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
         total_num_invocations = sharedBlockState.totalNumInvocations;
         base_offset = block_init_offset +
             (warp_idx * 32) / num_threads_per_invocation;
+
+        return WorkerState::Run;
+    };
+
+    if (sharedBlockState.initOffset == -1) {
+        WorkerState ctrl = blockGetNextNode();
+        if (ctrl != WorkerState::Run) {
+            return ctrl;
+        }
+    } else {
+        node_idx = sharedBlockState.nodeIdx;
+        cur_node = &sorted_nodes_[node_idx];
+
+        total_num_invocations = sharedBlockState.totalNumInvocations;
+        num_threads_per_invocation = sharedBlockState.numThreadsPerInvocation;
+        if (num_threads_per_invocation > 32) {
+            if (thread_idx == 0) {
+                sharedBlockState.initOffset = cur_node->curOffset.fetch_add(
+                    consts::numMegakernelThreads / num_threads_per_invocation,
+                    std::memory_order_relaxed);
+            }
+
+            __syncthreads();
+            base_offset = sharedBlockState.initOffset;
+
+            if (base_offset >= total_num_invocations) {
+                WorkerState ctrl = blockGetNextNode();
+                if (ctrl != WorkerState::Run) {
+                    return ctrl;
+                }
+            }
+        } else {
+            if (lane_idx == 0) {
+                base_offset = cur_node->curOffset.fetch_add(
+                    32 / num_threads_per_invocation, std::memory_order_relaxed);
+            }
+            base_offset = __shfl_sync(mwGPU::allActive, base_offset, 0);
+
+            if (base_offset >= total_num_invocations) {
+                WorkerState ctrl = blockGetNextNode();
+                if (ctrl != WorkerState::Run) {
+                    return ctrl;
+                }
+            }
+        }
     }
 
     if (base_offset >= total_num_invocations) {

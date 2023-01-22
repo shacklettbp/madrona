@@ -772,13 +772,6 @@ static __attribute__((always_inline)) inline void dispatch(
     std::string fake_megakernel_cpp_path =
         std::string(MADRONA_MW_GPU_DEVICE_SRC_DIR) + "/megakernel.cpp";
 
-    {
-        std::ofstream megakernel_dump_file(fake_megakernel_cpp_path,
-                                           std::ios::binary);
-        megakernel_dump_file.write(megakernel.c_str(),
-                                   megakernel.size());
-    }
-
     auto compiled_megakernel = cu::jitCompileCPPSrc(megakernel.c_str(),
         fake_megakernel_cpp_path.c_str(), compile_flags, num_compile_flags,
         fast_compile_flags, num_fast_compile_flags,
