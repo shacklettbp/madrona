@@ -25,6 +25,7 @@ std::atomic_uint64_t narrowphaseSATContactClocks = 0;
 std::atomic_uint64_t narrowphaseSATPlaneContactClocks = 0;
 std::atomic_uint64_t narrowphaseSaveContactsClocks = 0;
 std::atomic_uint64_t narrowphaseTxfmHullCtrs = 0;
+std::atomic_uint64_t narrowphaseSATFinishClocks = 0;
 }
 #endif
 
@@ -45,9 +46,7 @@ public:
         cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
                                   cuda::thread_scope_thread);
         auto end = timestamp();
-        if (threadIdx.x % 32 == 0) {
-            counter_->fetch_add(end - start_, std::memory_order_relaxed);
-        }
+        counter_->fetch_add(end - start_, std::memory_order_relaxed);
         counter_ = nullptr;
     }
 
@@ -83,10 +82,12 @@ private:
 #define PROF_END(name)
 #endif
 
-// Uncomment this to unconditionally disable GPU narrowphase version
+// Unconditionally disable GPU narrowphase version
+#if 0
 #undef MADRONA_GPU_MODE
 #undef MADRONA_GPU_COND
 #define MADRONA_GPU_COND(...)
+#endif
 
 namespace madrona::phys::narrowphase {
 
@@ -105,7 +106,8 @@ enum class NarrowphaseTest : uint32_t {
 
 struct FaceQuery {
     float separation;
-    int32_t faceIdx;
+    CountT faceIdx;
+    Plane plane;
 };
 
 struct EdgeQuery {
@@ -132,7 +134,6 @@ struct Manifold {
     float penetrationDepths[4];
     int32_t numContactPoints;
     math::Vector3 normal;
-    bool aIsReference;
 };
 
 static HullState makeHullState(
@@ -352,7 +353,8 @@ static FaceQuery queryFaceDirections(
     MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     const HullState &a, const HullState &b)
 {
-    int max_dist_face = -1;
+    Plane max_face_plane;
+    CountT max_dist_face = -1;
     float max_dist = -FLT_MAX;
 
     CountT num_a_faces = (CountT)a.numFaces;
@@ -364,15 +366,15 @@ static FaceQuery queryFaceDirections(
         if (face_dist > max_dist) {
             max_dist = face_dist;
             max_dist_face = face_idx;
+            max_face_plane = plane;
 
             if (max_dist > 0) {
                 break;
             }
         }
     }
-    assert(max_dist_face != -1);
 
-    return { max_dist, max_dist_face };
+    return { max_dist, max_dist_face, max_face_plane };
 }
 
 static bool isMinkowskiFace(
@@ -401,12 +403,14 @@ static inline std::pair<Vector3, Vector3> getEdgeNormals(
 }
 
 static inline Segment getEdgeSegment(
-        const HullState &h, const HalfEdge &h_edge)
+    const Vector3 *vertices,
+    const HalfEdge *hedges,
+    HalfEdge start)
 {
-    Vector3 a = h.vertices[h_edge.rootVertex];
+    Vector3 a = vertices[start.rootVertex];
     
     // FIXME: probably should put both vertex indices inline in the half edge
-    Vector3 b = h.vertices[h.halfEdges[h_edge.next].rootVertex];
+    Vector3 b = vertices[hedges[start.next].rootVertex];
 
     return { a, b };
 }
@@ -430,8 +434,8 @@ static inline EdgeTestResult edgeDistance(
         const HullState &a, const HullState &b,
         const HalfEdge &edgeA, const HalfEdge &edgeB)
 {
-    Segment segment_a = getEdgeSegment(a, edgeA);
-    Segment segment_b = getEdgeSegment(b, edgeB);
+    Segment segment_a = getEdgeSegment(a.vertices, a.halfEdges, edgeA);
+    Segment segment_b = getEdgeSegment(b.vertices, b.halfEdges, edgeB);
 
     Vector3 dir_a = segment_a.p2 - segment_a.p1;
     Vector3 dir_b = segment_b.p2 - segment_b.p1;
@@ -656,25 +660,142 @@ static inline CountT clipPolygon(Vector3 *dst_vertices,
     return num_new_vertices;
 }
 
+struct SATResult {
+    enum class Type : uint32_t {
+        None,
+        Plane,
+        Face,
+        Edge,
+    };
+
+    Type type;
+    Vector3 normal;
+    float planeDOrSeparation;
+    uint32_t refFaceIdxOrEdgeIdxA;
+    uint32_t incidentFaceIdxOrEdgeIdxB;
+};
+
+static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
+                              const HullState &a, const HullState &b)
+{
+    PROF_START(sat_face_ctr, narrowphaseSATFaceClocks);
+
+    FaceQuery faceQueryA =
+        queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
+    if (faceQueryA.separation > 0.0f) {
+        // There is a separating axis - no collision
+        SATResult result;
+        result.type = SATResult::Type::None;
+
+        return result;
+    }
+
+    FaceQuery faceQueryB =
+        queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) b, a);
+    if (faceQueryB.separation > 0.0f) {
+        // There is a separating axis - no collision
+        SATResult result;
+        result.type = SATResult::Type::None;
+
+        return result;
+    }
+
+    PROF_END(sat_face_ctr);
+    PROF_START(sat_edge_ctr, narrowphaseSATEdgeClocks);
+
+    EdgeQuery edgeQuery =
+        queryEdgeDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
+    if (edgeQuery.separation > 0.0f) {
+        // There is a separating axis - no collision
+        SATResult result;
+        result.type = SATResult::Type::None;
+
+        return result;
+    }
+
+    PROF_END(sat_edge_ctr);
+
+    PROF_START(sat_finish_ctr, narrowphaseSATFinishClocks);
+
+    bool bIsFaceContactA = faceQueryA.separation > edgeQuery.separation;
+    bool bIsFaceContactB = faceQueryB.separation > edgeQuery.separation;
+
+    if (bIsFaceContactA || bIsFaceContactB) {
+        bool a_is_ref = faceQueryA.separation >= faceQueryB.separation;
+
+        Plane ref_plane = a_is_ref ? faceQueryA.plane : faceQueryB.plane;
+        CountT ref_face_idx =
+            a_is_ref ? faceQueryA.faceIdx : faceQueryB.faceIdx;
+        const HullState &incident_hull = a_is_ref ? b : a;
+
+        // Find incident face
+        CountT incident_face_idx = findIncidentFace(
+            MADRONA_GPU_COND(mwgpu_lane_id,) incident_hull, ref_plane.normal);
+
+        SATResult result;
+        result.type = SATResult::Type::Face,
+        result.normal = ref_plane.normal;
+        result.planeDOrSeparation = ref_plane.d;
+        uint32_t mask;
+        if (a_is_ref) {
+            mask = 0_u32;
+        } else {
+            mask = 1_u32 << 31_u32;
+        }
+        result.refFaceIdxOrEdgeIdxA = uint32_t(ref_face_idx) | mask;
+        result.incidentFaceIdxOrEdgeIdxB = uint32_t(incident_face_idx);
+
+        return result;
+    } else {
+        SATResult result;
+        result.type = SATResult::Type::Edge;
+        result.normal = edgeQuery.normal;
+        result.planeDOrSeparation = edgeQuery.separation;
+        result.refFaceIdxOrEdgeIdxA = edgeQuery.edgeIdxA;
+        result.incidentFaceIdxOrEdgeIdxB = edgeQuery.edgeIdxB;
+        return result;
+    }
+}
+
+SATResult doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
+                     const Plane &plane, const HullState &h)
+{
+    PROF_START(sat_plane_ctr, narrowphaseSATPlaneClocks);
+
+    float separation = getHullDistanceFromPlane(
+        MADRONA_GPU_COND(mwgpu_lane_id,) plane, h);
+
+    if (separation > 0.0f) {
+        SATResult result;
+        result.type = SATResult::Type::None;
+
+        return result;
+    }
+
+    PROF_START(sat_finish_ctr, narrowphaseSATFinishClocks);
+
+    // Find incident face
+    CountT incident_face_idx = findIncidentFace(
+        MADRONA_GPU_COND(mwgpu_lane_id,) h, plane.normal);
+
+    SATResult result;
+    result.type = SATResult::Type::Plane;
+    result.normal = plane.normal;
+    result.planeDOrSeparation = plane.d;
+    result.incidentFaceIdxOrEdgeIdxB = uint32_t(incident_face_idx);
+
+    return result;
+}
+
 static Manifold buildFaceContactManifold(
-    MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     Vector3 contact_normal,
     Vector3 *contacts,
     float *penetration_depths,
     CountT num_contacts,
-    bool a_is_ref,
     Vector3 world_offset,
     Quat to_world_frame)
 {
-#ifdef MADRONA_GPU_MODE
-    if (mwgpu_lane_id != 0) {
-        // FIXME: there is some warp-level parallelism below
-        return Manifold {};
-    }
-#endif
-
     Manifold manifold;
-    manifold.aIsReference = a_is_ref;
     if (num_contacts <= 4) {
         manifold.numContactPoints = num_contacts;
         for (CountT i = 0; i < num_contacts; i++) {
@@ -742,57 +863,46 @@ static Manifold buildFaceContactManifold(
     return manifold;
 }
 
-static Manifold createFaceContact(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
-                                  FaceQuery faceQueryA, const HullState &a,
-                                  FaceQuery faceQueryB, const HullState &b,
-                                  void *a_tmp_buf, void *b_tmp_buf,
+static inline MADRONA_ALWAYS_INLINE Manifold createFaceContact(
+                                  Plane ref_plane,
+                                  int32_t ref_face_idx,
+                                  int32_t incident_face_idx,
+                                  const Vector3 *ref_vertices,
+                                  const Vector3 *other_vertices,
+                                  const HalfEdge *ref_hedges,
+                                  const HalfEdge *other_hedges,
+                                  const PolygonData *ref_face_hedges,
+                                  const PolygonData *other_face_hedges,
+                                  void *tmp_buf1, void *tmp_buf2,
+#ifdef MADRONA_GPU_MODE
+                                  Mat3x4 ref_txfm, Mat3x4 other_txfm,
+#endif
                                   Vector3 world_offset, Quat to_world_frame)
 {
-    // Determine minimizing face
-    bool a_is_ref = faceQueryA.separation > faceQueryB.separation;
-    const FaceQuery &minimizing_query = a_is_ref ? faceQueryA : faceQueryB;
-
-    const HullState &ref_hull = a_is_ref ? a : b;
-    const HullState &other_hull = a_is_ref ? b : a;
-
-    auto ref_tmp_buf = (Vector3 *)(a_is_ref ? a_tmp_buf : b_tmp_buf);
-    auto other_tmp_buf = (Vector3 *)(a_is_ref ? b_tmp_buf : a_tmp_buf);
-
-    CountT ref_face_idx = minimizing_query.faceIdx;
-    Plane ref_plane = ref_hull.facePlanes[ref_face_idx];
-
-    // Find incident face
-    CountT incident_face_idx = findIncidentFace(
-        MADRONA_GPU_COND(mwgpu_lane_id,) other_hull, ref_plane.normal);
-
-#ifdef MADRONA_GPU_MODE
-    // FIXME, there is warp level parallelism available in clipping,
-    // contact point filtering etc
-    if (mwgpu_lane_id != 0) {
-        return Manifold {};
-    }
-#endif
-
     // Collect incident vertices: FIXME should have face indices
+    Vector3 *incident_vertices_tmp = (Vector3 *)tmp_buf1;
     CountT num_incident_vertices = 0;
     {
-        CountT hedge_idx = other_hull.faceEdgeIndices[incident_face_idx];
+        CountT hedge_idx = other_face_hedges[incident_face_idx];
         CountT start_hedge_idx = hedge_idx;
 
         do {
-            const auto &cur_hedge = other_hull.halfEdges[hedge_idx];
+            const auto &cur_hedge = other_hedges[hedge_idx];
             hedge_idx = cur_hedge.next;
 
-            Vector3 cur_point = other_hull.vertices[cur_hedge.rootVertex];
+            Vector3 cur_point = other_vertices[cur_hedge.rootVertex];
+#ifdef MADRONA_GPU_MODE
+            cur_point = other_txfm.txfmPoint(cur_point);
+#endif
 
-            other_tmp_buf[num_incident_vertices++] = cur_point;
+            incident_vertices_tmp[num_incident_vertices++] = cur_point;
         } while (hedge_idx != start_hedge_idx);
     }
 
-    Vector3 *clipping_input = other_tmp_buf;
+    Vector3 *clipping_input = incident_vertices_tmp;
     CountT num_clipped_vertices = num_incident_vertices;
 
-    Vector3 *clipping_dst = ref_tmp_buf;
+    Vector3 *clipping_dst = (Vector3 *)tmp_buf2;
 
     // max output vertices is num_incident_vertices + num planes
     // but we don't know num planes ahead of time without iterating
@@ -802,18 +912,23 @@ static Manifold createFaceContact(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
 
     // FIXME, this code assumes that clipping_input & clipping_dst have space
     // to write incident_vertices + num_planes new vertices
-
     // Loop over side planes
     {
-        CountT hedge_idx = ref_hull.faceEdgeIndices[ref_face_idx];
+        CountT hedge_idx = ref_face_hedges[ref_face_idx];
         CountT start_hedge_idx = hedge_idx;
 
-        auto *cur_hedge = &ref_hull.halfEdges[hedge_idx];
-        Vector3 cur_point = ref_hull.vertices[cur_hedge->rootVertex];
+        auto *cur_hedge = &ref_hedges[hedge_idx];
+        Vector3 cur_point = ref_vertices[cur_hedge->rootVertex];
+#ifdef MADRONA_GPU_MODE
+        cur_point = ref_txfm.txfmPoint(cur_point);
+#endif
         do {
             hedge_idx = cur_hedge->next;
-            cur_hedge = &ref_hull.halfEdges[hedge_idx];
-            Vector3 next_point = ref_hull.vertices[cur_hedge->rootVertex];
+            cur_hedge = &ref_hedges[hedge_idx];
+            Vector3 next_point = ref_vertices[cur_hedge->rootVertex];
+#ifdef MADRONA_GPU_MODE
+            next_point = ref_txfm.txfmPoint(next_point);
+#endif
 
             Vector3 edge = next_point - cur_point;
             Vector3 plane_normal = cross(edge, ref_plane.normal);
@@ -826,8 +941,8 @@ static Manifold createFaceContact(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
                 d,
             };
 
-            num_clipped_vertices = clipPolygon(
-                clipping_dst, side_plane, clipping_input, num_clipped_vertices);
+            num_clipped_vertices = clipPolygon(clipping_dst, side_plane,
+                clipping_input, num_clipped_vertices);
 
             std::swap(clipping_dst, clipping_input);
         } while (hedge_idx != start_hedge_idx);
@@ -842,7 +957,8 @@ static Manifold createFaceContact(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     for (CountT i = 0; i < num_clipped_vertices; ++i) {
         Vector3 vertex = clipping_input[i];
         if (float d = getDistanceFromPlane(ref_plane, vertex); d < 0.0f) {
-            // Project the point onto the reference plane (d guaranteed to be negative)
+            // Project the point onto the reference plane
+            // (d guaranteed to be negative)
             clipping_input[num_below_plane] = vertex - d * ref_plane.normal;
             penetration_depths[num_below_plane] = -d;
 
@@ -850,41 +966,38 @@ static Manifold createFaceContact(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         }
     }
 
-    return buildFaceContactManifold(MADRONA_GPU_COND(mwgpu_lane_id,)
-                                    ref_plane.normal, clipping_input,
-                                    penetration_depths, num_below_plane,
-                                    a_is_ref, world_offset, to_world_frame);
+    return buildFaceContactManifold(ref_plane.normal, clipping_input,
+        penetration_depths, num_below_plane,
+        world_offset, to_world_frame);
 }
 
-static Manifold createFaceContactPlane(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
-                                       const HullState &h,
-                                       Plane plane,
+static Manifold createFacePlaneContact(Plane plane,
+                                       int32_t incident_face_idx,
+                                       const Vector3 *vertices,
+                                       const HalfEdge *hedges,
+                                       const PolygonData *face_hedge_roots,
                                        Vector3 *contacts_tmp,
                                        float *penetration_depths_tmp,
+#ifdef MADRONA_GPU_MODE
+                                       Mat3x4 hull_txfm,
+#endif
                                        Vector3 world_offset,
                                        Quat to_world_frame)
 {
-    // Find incident face
-    CountT incident_face_idx =
-        findIncidentFace(MADRONA_GPU_COND(mwgpu_lane_id,) h, plane.normal);
-
-#ifdef MADRONA_GPU_MODE
-    // FIXME, there is warp level parallelism available below
-    if (mwgpu_lane_id != 0) {
-        return Manifold {};
-    }
-#endif
-
     // Collect incident vertices: FIXME should have face indices
     CountT num_incident_vertices = 0;
     {
-        CountT hedge_idx = h.faceEdgeIndices[incident_face_idx];
+        CountT hedge_idx = face_hedge_roots[incident_face_idx];
         CountT start_hedge_idx = hedge_idx;
 
         do {
-            const auto &cur_hedge = h.halfEdges[hedge_idx];
+            const auto &cur_hedge = hedges[hedge_idx];
             hedge_idx = cur_hedge.next;
-            Vector3 vertex = h.vertices[cur_hedge.rootVertex];
+            Vector3 vertex = vertices[cur_hedge.rootVertex];
+
+#ifdef MADRONA_GPU_MODE
+            vertex = hull_txfm.txfmPoint(vertex);
+#endif
 
             if (float d = getDistanceFromPlane(plane, vertex); d < 0.0f) {
                 // Project the point onto the reference plane
@@ -898,12 +1011,11 @@ static Manifold createFaceContactPlane(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
         } while (hedge_idx != start_hedge_idx);
     }
 
-    return buildFaceContactManifold(MADRONA_GPU_COND(mwgpu_lane_id,)
-        plane.normal, contacts_tmp,
+    return buildFaceContactManifold(plane.normal, contacts_tmp,
         penetration_depths_tmp, num_incident_vertices,
-        false /* Plane is always reference, always b */,
         world_offset, to_world_frame);
 }
+
 
 static Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2)
 {
@@ -938,15 +1050,13 @@ static Segment shortestSegmentBetween(const Segment &seg1, const Segment &seg2)
     return { seg1.p1 + s * v1, seg2.p1 + t * v2 };
 }
 
-static Manifold createEdgeContact(const EdgeQuery &query,
-                                  const HullState &a,
-                                  const HullState &b,
+static Manifold createEdgeContact(Segment segA,
+                                  Segment segB,
+                                  Vector3 normal,
+                                  float separation,
                                   Vector3 world_offset,
                                   Quat to_world_frame)
 {
-    Segment segA = getEdgeSegment(a, a.halfEdges[query.edgeIdxA]);
-    Segment segB = getEdgeSegment(b, b.halfEdges[query.edgeIdxB]);
-
 #if 0
     Segment s = shortestSegmentBetween(segA, segB);
     Vector3 contact = 0.5f * (s.p1 + s.p2);
@@ -971,96 +1081,43 @@ static Manifold createEdgeContact(const EdgeQuery &query,
     Manifold manifold;
     manifold.contactPoints[0] = 
         to_world_frame.rotateVec(contact) + world_offset,
-    manifold.penetrationDepths[0] = -query.separation;
+    manifold.penetrationDepths[0] = -separation;
     manifold.numContactPoints = 1;
-    manifold.normal = to_world_frame.rotateVec(query.normal);
-
-    // Normal always points away from object A (enforced in edgeDistance) &
-    // contact points are on A.
-    manifold.aIsReference = true;
+    manifold.normal = to_world_frame.rotateVec(normal);
 
     return manifold;
 }
 
-Manifold doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
-               const HullState &a, const HullState &b,
-               void *a_tmp_buf, void *b_tmp_buf,
-               Vector3 world_offset, Quat to_world_frame)
+static Manifold createEdgeContact(Vector3 normal,
+                                  float separation,
+                                  int32_t edge_idx_a,
+                                  int32_t edge_idx_b,
+                                  const Vector3 *a_vertices,
+                                  const Vector3 *b_vertices,
+                                  const HalfEdge *a_hedges,
+                                  const HalfEdge *b_hedges,
+#ifdef MADRONA_GPU_MODE
+                                  Vector3 a_pos, Quat a_rot, Diag3x3 a_scale,
+                                  Vector3 b_pos, Quat b_rot, Diag3x3 b_scale,
+#endif
+                                  Vector3 world_offset,
+                                  Quat to_world_frame)
 {
-    Manifold manifold;
-    manifold.numContactPoints = 0;
+    Segment segA = getEdgeSegment(a_vertices, a_hedges,
+                                  a_hedges[edge_idx_a]);
+    Segment segB = getEdgeSegment(b_vertices, b_hedges,
+                                  b_hedges[edge_idx_b]);
 
-    PROF_START(sat_face_ctr, narrowphaseSATFaceClocks);
+#ifdef MADRONA_GPU_MODE
+    segA.p1 = a_rot.rotateVec(a_scale * segA.p1) + a_pos;
+    segA.p2 = a_rot.rotateVec(a_scale * segA.p2) + a_pos;
+    segB.p1 = b_rot.rotateVec(b_scale * segB.p1) + b_pos;
+    segB.p2 = b_rot.rotateVec(b_scale * segB.p2) + b_pos;
+#endif
 
-    FaceQuery faceQueryA =
-        queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
-    if (faceQueryA.separation > 0.0f) {
-        // There is a separating axis - no collision
-        return manifold;
-    }
-
-    FaceQuery faceQueryB =
-        queryFaceDirections(MADRONA_GPU_COND(mwgpu_lane_id,) b, a);
-    if (faceQueryB.separation > 0.0f) {
-        // There is a separating axis - no collision
-        return manifold;
-    }
-
-    PROF_END(sat_face_ctr);
-    PROF_START(sat_edge_ctr, narrowphaseSATEdgeClocks);
-
-    EdgeQuery edgeQuery =
-        queryEdgeDirections(MADRONA_GPU_COND(mwgpu_lane_id,) a, b);
-    if (edgeQuery.separation > 0.0f) {
-        // There is a separating axis - no collision
-        return manifold;
-    }
-
-    PROF_END(sat_edge_ctr);
-
-    bool bIsFaceContactA = faceQueryA.separation > edgeQuery.separation;
-    bool bIsFaceContactB = faceQueryB.separation > edgeQuery.separation;
-
-    PROF_START(sat_contact, narrowphaseSATContactClocks);
-    if (bIsFaceContactA || bIsFaceContactB) {
-        // Create face contact
-        manifold = createFaceContact(MADRONA_GPU_COND(mwgpu_lane_id,)
-                                     faceQueryA, a, faceQueryB, b,
-                                     a_tmp_buf, b_tmp_buf,
-                                     world_offset, to_world_frame);
-    }
-    else {
-        // Create edge contact
-        manifold = createEdgeContact(edgeQuery, a, b,
-                                     world_offset, to_world_frame);
-    }
-
-    return manifold;
-}
-
-Manifold doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
-                    const Plane &plane, const HullState &h,
-                    void *tmp_buffer1, void *tmp_buffer2,
-                    Vector3 world_offset, Quat to_world_frame)
-{
-    Manifold manifold;
-    manifold.numContactPoints = 0;
-
-    PROF_START(sat_plane_ctr, narrowphaseSATPlaneClocks);
-
-    float separation = getHullDistanceFromPlane(
-        MADRONA_GPU_COND(mwgpu_lane_id,) plane, h);
-
-    if (separation > 0.0f) {
-        return manifold;
-    }
-
-    PROF_END(sat_plane_ctr);
-
-    PROF_START(sat_contact_ctr, narrowphaseSATPlaneContactClocks);
-    return createFaceContactPlane(MADRONA_GPU_COND(mwgpu_lane_id,) h, plane,
-                                  (Vector3 *)tmp_buffer1, (float *)tmp_buffer2,
-                                  world_offset, to_world_frame);
+    return createEdgeContact(segA, segB,
+                             normal, separation,
+                             world_offset, to_world_frame);
 }
 
 static inline void addContactsToSolver(
@@ -1078,23 +1135,16 @@ static inline void addContactsToSolver(
 }
 
 static inline void addManifoldToSolver(
-    MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
     SolverData &solver_data,
     Manifold manifold,
-    Loc a_loc, Loc b_loc)
+    Loc ref_loc, Loc other_loc)
 {
     PROF_START(save_contacts_ctr, narrowphaseSaveContactsClocks);
 
-#ifdef MADRONA_GPU_MODE
-    if (mwgpu_lane_id != 0) {
-        return;
-    }
-#endif
-
     addContactsToSolver(
         solver_data, {{
-        manifold.aIsReference ? a_loc : b_loc,
-        manifold.aIsReference ? b_loc : a_loc,
+        ref_loc,
+        other_loc,
         {
             Vector4::fromVector3(manifold.contactPoints[0],
                                  manifold.penetrationDepths[0]),
@@ -1125,96 +1175,34 @@ inline constexpr int32_t maxNumVertices = numVertexFloats / 3;
 }
 #endif
 
-static inline void runNarrowphase(
-    Context &ctx,
-    const CandidateCollision &candidate_collision)
+struct NarrowphaseResult {
+    SATResult sat;
+    const Vector3 * aVertices;
+    const Vector3 * bVertices;
+    const HalfEdge * aHalfEdges;
+    const HalfEdge * bHalfEdges;
+    const PolygonData * aFaceHedgeRoots;
+    const PolygonData * bFaceHedgeRoots;
+};
+
+static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
+    MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
+    NarrowphaseTest test_type,
+    Vector3 a_pos, Vector3 b_pos,
+    Quat a_rot, Quat b_rot,
+    Diag3x3 a_scale, Diag3x3 b_scale,
+    const CollisionPrimitive *a_prim, const CollisionPrimitive *b_prim,
+    CountT max_num_tmp_vertices,
+    CountT max_num_tmp_faces,
+    Vector3 *txfm_vertex_buffer,
+    Plane *txfm_face_buffer)
 {
-    PROF_START(setup_ctr, narrowphaseSetupClocks);
-
-#ifdef MADRONA_GPU_MODE
-    const int32_t mwgpu_warp_id = threadIdx.x / 32;
-    const int32_t mwgpu_lane_id = threadIdx.x % 32;
-
-    Plane *tmp_faces;
-    Vector3 *tmp_vertices;
-    constexpr int32_t max_num_tmp_faces = gpuImpl::maxNumPlanes;
-    constexpr int32_t max_num_tmp_vertices =
-        gpuImpl::maxNumVertices;
-    {
-        auto smem_buf = (char *)mwGPU::SharedMemStorage::buffer;
-        char *warp_smem_base = smem_buf + 
-            mwGPU::SharedMemStorage::numSMemBytesPerWarp * mwgpu_warp_id;
-
-        tmp_faces = (Plane *)warp_smem_base;
-        tmp_vertices = (Vector3 *)(tmp_faces + gpuImpl::maxNumPlanes);
-    }
-#else
-    constexpr int32_t max_num_tmp_faces = 512;
-    constexpr int32_t max_num_tmp_vertices = 512;
-
-    Plane tmp_faces_buffer[max_num_tmp_faces];
-    Vector3 tmp_vertices_buffer[max_num_tmp_vertices];
-
-    Plane *tmp_faces = tmp_faces_buffer;
-    Vector3 *tmp_vertices = tmp_vertices_buffer;
-#endif
-
-    PROF_END(setup_ctr);
-
-    PROF_START(prep_ctr, narrowphasePrepClocks);
-
-    Loc a_loc = candidate_collision.a;
-    Loc b_loc = candidate_collision.b;
-
-    const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
-
-    ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
-    ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
-
-    const CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
-    const CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
-
-    uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
-    uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
-
-    // Swap a & b to be properly ordered based on object type
-    if (raw_type_a > raw_type_b) {
-        std::swap(a_loc, b_loc);
-        std::swap(a_obj, b_obj);
-        std::swap(a_prim, b_prim);
-        std::swap(raw_type_a, raw_type_b);
-    }
-
-    Vector3 a_pos = ctx.getDirect<Position>(Cols::Position, a_loc);
-    Vector3 b_pos = ctx.getDirect<Position>(Cols::Position, b_loc);
-    Quat a_rot = ctx.getDirect<Rotation>(Cols::Rotation, a_loc);
-    Quat b_rot = ctx.getDirect<Rotation>(Cols::Rotation, b_loc);
-    Diag3x3 a_scale(ctx.getDirect<Scale>(Cols::Scale, a_loc));
-    Diag3x3 b_scale(ctx.getDirect<Scale>(Cols::Scale, b_loc));
-
-    {
-        AABB a_obj_aabb = obj_mgr.aabbs[a_obj.idx];
-        AABB b_obj_aabb = obj_mgr.aabbs[b_obj.idx];
-
-        AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
-        AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
-        
-        if (!a_world_aabb.overlaps(b_world_aabb)) {
-            return;
-        }
-    }
-
-    SolverData &solver = ctx.getSingleton<SolverData>();
-
-    NarrowphaseTest test_type {raw_type_a | raw_type_b};
-
-    PROF_END(prep_ctr);
-
-    PROF_START(switch_body, narrowphaseSwitchClocks);
+    PROF_START(switch_body_ctr, narrowphaseSwitchClocks);
 
     switch (test_type) {
     case NarrowphaseTest::SphereSphere: {
         assert(false);
+#if 0
         float a_radius = a_prim->sphere.radius;
         float b_radius = b_prim->sphere.radius;
 
@@ -1239,6 +1227,7 @@ static inline void runNarrowphase(
                     {},
                 }});
         }
+#endif
     } break;
     case NarrowphaseTest::HullHull: {
         // Get half edge mesh for hull A and hull B
@@ -1254,27 +1243,33 @@ static inline void runNarrowphase(
         PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
 
         HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
-            a_he_mesh, a_pos, a_rot, a_scale, tmp_vertices, tmp_faces);
+            a_he_mesh, a_pos, a_rot, a_scale, txfm_vertex_buffer,
+            txfm_face_buffer);
 
-        tmp_vertices += a_hull_state.numVertices;
-        tmp_faces += a_hull_state.numFaces;
+        txfm_vertex_buffer += a_hull_state.numVertices;
+        txfm_face_buffer += a_hull_state.numFaces;
 
         HullState b_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
-            b_he_mesh, b_pos, b_rot, b_scale, tmp_vertices, tmp_faces);
+            b_he_mesh, b_pos, b_rot, b_scale, txfm_vertex_buffer,
+            txfm_face_buffer);
 
         MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
 
         PROF_END(txfm_hull_ctr);
 
-        Manifold manifold = doSAT(MADRONA_GPU_COND(mwgpu_lane_id,)
-            a_hull_state, b_hull_state,
-            (void *)a_hull_state.facePlanes, (void *)b_hull_state.facePlanes, // FIXME: if these aren't transformed we can't pass as temporaries!!
-            {0, 0, 0}, {1, 0, 0, 0});
+        const SATResult sat = doSAT(MADRONA_GPU_COND(mwgpu_lane_id,)
+            a_hull_state, b_hull_state);
 
-        if (manifold.numContactPoints > 0) {
-            addManifoldToSolver(MADRONA_GPU_COND(mwgpu_lane_id,)
-                                solver, manifold, a_loc, b_loc);
-        }
+        return NarrowphaseResult {
+            sat,
+#ifdef MADRONA_GPU_MODE
+            a_he_mesh.mVertices, b_he_mesh.mVertices,
+#else
+            a_hull_state.vertices, b_hull_state.vertices,
+#endif
+            a_hull_state.halfEdges, b_hull_state.halfEdges,
+            a_hull_state.faceEdgeIndices, b_hull_state.faceEdgeIndices,
+        };
     } break;
     case NarrowphaseTest::SphereHull: {
 #if 0
@@ -1294,6 +1289,7 @@ static inline void runNarrowphase(
     } break;
     case NarrowphaseTest::SpherePlane: {
         assert(false);
+#if 0
         auto sphere = a_prim->sphere;
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
@@ -1319,6 +1315,7 @@ static inline void runNarrowphase(
                     {},
                 }});
         }
+#endif
     } break;
     case NarrowphaseTest::HullPlane: {
         // Get half edge mesh for entity a (the hull)
@@ -1330,7 +1327,8 @@ static inline void runNarrowphase(
         PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
 
         HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
-            a_he_mesh, a_pos, a_rot, a_scale, tmp_vertices, tmp_faces);
+            a_he_mesh, a_pos, a_rot, a_scale,
+            txfm_vertex_buffer, txfm_face_buffer);
 
         MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
 
@@ -1353,17 +1351,381 @@ static inline void runNarrowphase(
             dot(plane_normal, b_pos),
         };
 
-        Manifold manifold = doSATPlane(MADRONA_GPU_COND(mwgpu_lane_id,)
-            plane, a_hull_state, tmp_faces, tmp_faces + a_hull_state.numFaces,
-            {0, 0, 0}, {1, 0, 0, 0});
+        const SATResult sat = doSATPlane(
+            MADRONA_GPU_COND(mwgpu_lane_id,) plane, a_hull_state);
 
-        if (manifold.numContactPoints > 0) {
-            addManifoldToSolver(MADRONA_GPU_COND(mwgpu_lane_id,)
-                solver, manifold, a_loc, b_loc);
-        }
+        return NarrowphaseResult {
+            sat,
+#ifdef MADRONA_GPU_MODE
+            a_he_mesh.mVertices, nullptr,
+#else
+            a_hull_state.vertices, nullptr,
+#endif
+            a_hull_state.halfEdges, nullptr,
+            a_hull_state.faceEdgeIndices, nullptr,
+        };
     } break;
     default: __builtin_unreachable();
     }
+}
+
+static MADRONA_ALWAYS_INLINE inline void generateContacts(
+    SolverData &solver,
+    NarrowphaseResult narrowphase_result,
+    Loc a_loc, Loc b_loc,
+#ifdef MADRONA_GPU_MODE
+    Vector3 a_pos, Quat a_rot, Diag3x3 a_scale,
+    Vector3 b_pos, Quat b_rot, Diag3x3 b_scale,
+#endif
+    void *thread_tmp_storage_a, void *thread_tmp_storage_b)
+{
+    Manifold manifold;
+    Loc ref_loc;
+    Loc other_loc;
+
+    switch (narrowphase_result.sat.type) {
+    case SATResult::Type::None: {
+        return;
+    } break;
+    case SATResult::Type::Plane: {
+        // Plane is always b, always reference
+        ref_loc = b_loc;
+        other_loc = a_loc;
+
+#ifdef MADRONA_GPU_MODE
+        Mat3x4 hull_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
+#endif
+
+        Plane plane {
+            narrowphase_result.sat.normal,
+            narrowphase_result.sat.planeDOrSeparation,
+        };
+
+        // Create plane contact
+        manifold = createFacePlaneContact(
+            plane,
+            int32_t(narrowphase_result.sat.incidentFaceIdxOrEdgeIdxB),
+            narrowphase_result.aVertices,
+            narrowphase_result.aHalfEdges,
+            narrowphase_result.aFaceHedgeRoots,
+            (Vector3 *)thread_tmp_storage_a,
+            (float *)thread_tmp_storage_b,
+#ifdef MADRONA_GPU_MODE
+            hull_txfm,
+#endif
+            { 0, 0, 0, },
+            { 1, 0, 0, 0 });
+    } break;
+    case SATResult::Type::Face: {
+        const Vector3 *ref_vertices;
+        const Vector3 *other_vertices;
+        const HalfEdge *ref_hedges;
+        const HalfEdge *other_hedges;
+        const PolygonData *ref_face_hedges;
+        const PolygonData *other_face_hedges;
+
+#ifdef MADRONA_GPU_MODE
+        Mat3x4 ref_txfm;
+        Mat3x4 other_txfm;
+#endif
+
+        uint32_t ref_face_idx_and_ref_mask = 
+            narrowphase_result.sat.refFaceIdxOrEdgeIdxA;
+        uint32_t incident_face_idx =
+            narrowphase_result.sat.incidentFaceIdxOrEdgeIdxB;
+
+        uint32_t ref_face_idx = ref_face_idx_and_ref_mask & 0x7FFF'FFFF;
+        bool a_is_ref = ref_face_idx == ref_face_idx_and_ref_mask;
+
+        if (a_is_ref) {
+            ref_loc = a_loc;
+            other_loc = b_loc;
+            ref_vertices = narrowphase_result.aVertices;
+            other_vertices = narrowphase_result.bVertices;
+            ref_hedges = narrowphase_result.aHalfEdges;
+            other_hedges = narrowphase_result.bHalfEdges;
+            ref_face_hedges = narrowphase_result.aFaceHedgeRoots;
+            other_face_hedges = narrowphase_result.bFaceHedgeRoots;
+#ifdef MADRONA_GPU_MODE
+            ref_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
+            other_txfm = Mat3x4::fromTRS(b_pos, b_rot, b_scale);
+#endif
+        } else {
+            ref_loc = b_loc;
+            other_loc = a_loc;
+            ref_vertices = narrowphase_result.bVertices;
+            other_vertices = narrowphase_result.aVertices;
+            ref_hedges = narrowphase_result.bHalfEdges;
+            other_hedges = narrowphase_result.aHalfEdges;
+            ref_face_hedges = narrowphase_result.bFaceHedgeRoots;
+            other_face_hedges = narrowphase_result.aFaceHedgeRoots;
+#ifdef MADRONA_GPU_MODE
+            ref_txfm = Mat3x4::fromTRS(b_pos, b_rot, b_scale);
+            other_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
+#endif
+        }
+
+        Plane ref_plane {
+            narrowphase_result.sat.normal,
+            narrowphase_result.sat.planeDOrSeparation,
+        };
+
+        // Create face contact
+        manifold = createFaceContact(
+            ref_plane,
+            int32_t(ref_face_idx),
+            int32_t(incident_face_idx),
+            ref_vertices,
+            other_vertices,
+            ref_hedges,
+            other_hedges,
+            ref_face_hedges,
+            other_face_hedges,
+            thread_tmp_storage_a, thread_tmp_storage_b,
+#ifdef MADRONA_GPU_MODE
+            ref_txfm,
+            other_txfm,
+#endif
+            { 0, 0, 0, },
+            { 1, 0, 0, 0 });
+    } break;
+    case SATResult::Type::Edge: {
+        // A is always reference
+        ref_loc = a_loc;
+        other_loc = b_loc;
+
+        // Create edge contact
+        manifold = createEdgeContact(
+            narrowphase_result.sat.normal,
+            narrowphase_result.sat.planeDOrSeparation,
+            int32_t(narrowphase_result.sat.refFaceIdxOrEdgeIdxA),
+            int32_t(narrowphase_result.sat.incidentFaceIdxOrEdgeIdxB),
+            narrowphase_result.aVertices,
+            narrowphase_result.bVertices,
+            narrowphase_result.aHalfEdges,
+            narrowphase_result.bHalfEdges,
+#ifdef MADRONA_GPU_MODE
+            a_pos, a_rot, a_scale,
+            b_pos, b_rot, b_scale,
+#endif
+            { 0, 0, 0 }, { 1, 0, 0, 0 });
+    } break;
+    default: __builtin_unreachable();
+    }
+
+    if (manifold.numContactPoints > 0) {
+        addManifoldToSolver(solver, manifold, ref_loc, other_loc);
+    }
+}
+
+static inline void runNarrowphase(
+    Context &ctx,
+    const CandidateCollision &candidate_collision
+    MADRONA_GPU_COND(,
+        const int32_t mwgpu_warp_id,
+        const int32_t mwgpu_lane_id,
+        bool lane_active))
+{
+    PROF_START(setup_ctr, narrowphaseSetupClocks);
+
+#ifdef MADRONA_GPU_MODE
+    constexpr int32_t max_num_tmp_faces = gpuImpl::maxNumPlanes;
+    constexpr int32_t max_num_tmp_vertices =
+        gpuImpl::maxNumVertices;
+
+    Plane tmp_faces_buffer[max_num_tmp_faces];
+
+    Plane * smem_faces_buffer;
+    Vector3 * smem_vertices_buffer;
+    {
+        auto smem_buf = (char *)mwGPU::SharedMemStorage::buffer;
+        char *warp_smem_base = smem_buf + 
+            mwGPU::SharedMemStorage::numSMemBytesPerWarp * mwgpu_warp_id;
+
+        smem_faces_buffer = (Plane *)warp_smem_base;
+        smem_vertices_buffer =
+            (Vector3 *)(smem_faces_buffer + gpuImpl::maxNumPlanes);
+    }
+#else
+    constexpr int32_t max_num_tmp_faces = 512;
+    constexpr int32_t max_num_tmp_vertices = 512;
+
+    Plane tmp_faces_buffer[max_num_tmp_faces];
+    Vector3 tmp_vertices_buffer[max_num_tmp_vertices];
+#endif
+
+    PROF_END(setup_ctr);
+
+    PROF_START(prep_ctr, narrowphasePrepClocks);
+
+    Loc a_loc = candidate_collision.a;
+    Loc b_loc = candidate_collision.b;
+
+    const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+
+    ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
+    ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
+
+    CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
+    CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
+
+    uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
+    uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
+
+    // Swap a & b to be properly ordered based on object type
+    if (raw_type_a > raw_type_b) {
+        std::swap(a_loc, b_loc);
+        std::swap(a_obj, b_obj);
+        std::swap(a_prim, b_prim);
+        std::swap(raw_type_a, raw_type_b);
+    }
+
+    const Vector3 a_pos = ctx.getDirect<Position>(Cols::Position, a_loc);
+    const Vector3 b_pos = ctx.getDirect<Position>(Cols::Position, b_loc);
+    const Quat a_rot = ctx.getDirect<Rotation>(Cols::Rotation, a_loc);
+    const Quat b_rot = ctx.getDirect<Rotation>(Cols::Rotation, b_loc);
+    const Diag3x3 a_scale(ctx.getDirect<Scale>(Cols::Scale, a_loc));
+    const Diag3x3 b_scale(ctx.getDirect<Scale>(Cols::Scale, b_loc));
+
+    {
+        AABB a_obj_aabb = obj_mgr.aabbs[a_obj.idx];
+        AABB b_obj_aabb = obj_mgr.aabbs[b_obj.idx];
+
+        AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
+        AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
+        
+        if (!a_world_aabb.overlaps(b_world_aabb)) {
+#ifdef MADRONA_GPU_MODE
+            lane_active = false;
+#else
+            return;
+#endif
+        }
+    }
+
+#ifdef MADRONA_GPU_MODE
+    const uint32_t active_mask = __ballot_sync(mwGPU::allActive, lane_active);
+
+    if (active_mask == 0) {
+        return;
+    }
+#endif
+
+    const NarrowphaseTest test_type {raw_type_a | raw_type_b};
+
+    PROF_END(prep_ctr);
+
+#ifdef MADRONA_GPU_MODE
+    NarrowphaseResult thread_result;
+
+#if 0
+    active_mask = __brev(active_mask);
+    int32_t leader_idx = __clz(active_mask);
+    active_mask <<= (leader_idx + 1);
+    do {
+#endif
+#pragma unroll
+    for (int32_t leader_idx = 0; leader_idx < 32; leader_idx++) {
+        if (!__shfl_sync(mwGPU::allActive, lane_active, leader_idx)) {
+            continue;
+        }
+
+        auto warp_test_type = (NarrowphaseTest)__shfl_sync(
+            mwGPU::allActive, (uint32_t)test_type, leader_idx);
+
+        Vector3 warp_a_pos {
+            __shfl_sync(mwGPU::allActive, a_pos.x, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_pos.y, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_pos.z, leader_idx),
+        };
+
+        Vector3 warp_b_pos {
+            __shfl_sync(mwGPU::allActive, b_pos.x, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_pos.y, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_pos.z, leader_idx),
+        };
+
+        Quat warp_a_rot {
+            __shfl_sync(mwGPU::allActive, a_rot.w, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_rot.x, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_rot.y, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_rot.z, leader_idx),
+        };
+
+        Quat warp_b_rot {
+            __shfl_sync(mwGPU::allActive, b_rot.w, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_rot.x, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_rot.y, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_rot.z, leader_idx),
+        };
+
+        Diag3x3 warp_a_scale {
+            __shfl_sync(mwGPU::allActive, a_scale.d0, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_scale.d1, leader_idx),
+            __shfl_sync(mwGPU::allActive, a_scale.d2, leader_idx),
+        };
+
+        Diag3x3 warp_b_scale {
+            __shfl_sync(mwGPU::allActive, b_scale.d0, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_scale.d1, leader_idx),
+            __shfl_sync(mwGPU::allActive, b_scale.d2, leader_idx),
+        };
+
+        auto warp_a_prim = (CollisionPrimitive *)__shfl_sync(mwGPU::allActive,
+            (uint64_t)a_prim, leader_idx);
+
+        auto warp_b_prim = (CollisionPrimitive *)__shfl_sync(mwGPU::allActive,
+            (uint64_t)b_prim, leader_idx);
+
+        NarrowphaseResult warp_result = narrowphaseDispatch(
+            mwgpu_lane_id,
+            warp_test_type,
+            warp_a_pos, warp_b_pos,
+            warp_a_rot, warp_b_rot,
+            warp_a_scale, warp_b_scale,
+            warp_a_prim, warp_b_prim,
+            max_num_tmp_vertices, max_num_tmp_faces,
+            smem_vertices_buffer, smem_faces_buffer);
+
+        if (mwgpu_lane_id == leader_idx) {
+            thread_result = warp_result;
+        }
+
+#if 0
+        uint32_t num_inactive = __clz(active_mask);
+        leader_idx += num_inactive + 1;
+        active_mask <<= (num_inactive + 1);
+    } while (leader_idx < 32);
+#endif
+    }
+
+    __syncwarp(mwGPU::allActive);
+
+    SolverData &solver = ctx.getSingleton<SolverData>();
+
+    if (lane_active) {
+        generateContacts(solver, thread_result, a_loc, b_loc,
+                         a_pos, a_rot, a_scale,
+                         b_pos, b_rot, b_scale,
+                         tmp_faces_buffer,
+                         tmp_faces_buffer + max_num_tmp_faces / 2);
+    }
+#else
+    NarrowphaseResult result = narrowphaseDispatch(
+        test_type,
+        a_pos, b_pos,
+        a_rot, b_rot,
+        a_scale, b_scale,
+        a_prim, b_prim,
+        max_num_tmp_vertices, max_num_tmp_faces,
+        tmp_vertices_buffer, tmp_faces_buffer);
+
+    SolverData &solver = ctx.getSingleton<SolverData>();
+
+    generateContacts(solver, result, a_loc, b_loc,
+                     tmp_faces_buffer,
+                     tmp_faces_buffer + max_num_tmp_faces / 2);
+#endif
 }
 
 inline void runNarrowphaseSystem(
@@ -1379,18 +1741,26 @@ inline void runNarrowphaseSystem(
 {
     PROF_START(all_ctr, narrowphaseAllClocks);
 #ifdef MADRONA_GPU_MODE
-    for (int32_t i = 0; i < num_candidates; i++) {
-        PROF_START(world_get_ctr, narrowphaseFetchWorldClocks);
-        WorldID world_id = world_ids[i];
-        if (world_id.idx == -1) {
-            continue;
-        }
+    const int32_t mwgpu_warp_id = threadIdx.x / 32;
+    const int32_t mwgpu_lane_id = threadIdx.x % 32;
 
-        Context ctx = TaskGraph::makeContext<Context>(world_id);
-        PROF_END(world_get_ctr);
+    PROF_START(world_get_ctr, narrowphaseFetchWorldClocks);
 
-        runNarrowphase(ctx, candidate_collisions[i]);
+    const int32_t candidate_idx = min(mwgpu_lane_id, num_candidates - 1);
+
+    bool lane_active = candidate_idx == mwgpu_lane_id;
+
+    WorldID world_id = world_ids[candidate_idx];
+    if (world_id.idx == -1) {
+        lane_active = false;
     }
+
+    Context ctx = TaskGraph::makeContext<Context>(world_id);
+    PROF_END(world_get_ctr);
+
+    runNarrowphase(ctx, candidate_collisions[candidate_idx],
+                   mwgpu_warp_id, mwgpu_lane_id, lane_active);
+    
 #else
     runNarrowphase(ctx, candidate_collision);
 #endif
@@ -1402,7 +1772,7 @@ TaskGraph::NodeID setupTasks(
 {
 #ifdef MADRONA_GPU_MODE
     auto narrowphase = builder.addToGraph<CustomParallelForNode<Context,
-        runNarrowphaseSystem, 32, 8, CandidateCollision>>(deps);
+        runNarrowphaseSystem, 32, 32, CandidateCollision>>(deps);
 #else
     auto narrowphase = builder.addToGraph<ParallelForNode<Context,
         runNarrowphaseSystem, CandidateCollision>>(deps);
