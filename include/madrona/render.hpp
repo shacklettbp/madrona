@@ -49,6 +49,7 @@ struct RendererInterface {
     AccelStructRangeInfo *numInstances;
     uint64_t *blases;
     PackedViewData **packedViews;
+    uint32_t *numInstancesReadback;
 };
 
 struct RendererInit {

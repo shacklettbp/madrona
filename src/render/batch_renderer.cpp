@@ -718,6 +718,8 @@ RendererInterface BatchRenderer::getInterface() const
         (uint64_t *)impl_->assetMgr.blasAddrsBuffer.enginePointer();
     renderer_iface.packedViews =  (PackedViewData **)
         impl_->viewDataAddrsBuffer.enginePointer();
+    renderer_iface.numInstancesReadback =
+        impl_->tlases.countReadback;
 
     return renderer_iface;
 }

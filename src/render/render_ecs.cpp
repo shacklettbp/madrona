@@ -15,6 +15,9 @@ struct RendererState {
     uint64_t *blases;
     PackedViewData *packedViews;
     Vector3 worldOffset;
+#ifdef MADRONA_GPU_MODE
+    uint32_t *count_readback;
+#endif
 };
 
 void RenderingSystem::registerTypes(ECSRegistry &registry)
@@ -83,6 +86,19 @@ inline void updateViewData(Context &ctx,
     renderer_view.posAndTanFOV.w = view_settings.tanFOV;
 }
 
+#ifdef MADRONA_GPU_MODE
+
+inline void readbackCount(Context &ctx,
+                          RendererState &renderer_state)
+{
+    if (ctx.worldID().idx == 0) {
+        *renderer_state.count_readback = renderer_state.numInstances->primitiveCount;
+        renderer_state.numInstances->primitiveCount = 0;
+    }
+}
+
+#endif
+
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
@@ -99,7 +115,16 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
         Rotation,
         ViewSettings>>({instance_setup});
 
+#ifdef MADRONA_GPU_MODE
+    auto readback_count = builder.addToGraph<ParallelForNode<Context,
+        readbackCount,
+        RendererState>>({viewdata_update});
+
+    return readback_count;
+#else
     return viewdata_update;
+#endif
+
 }
 
 void RenderingSystem::init(Context &ctx, const RendererInit &renderer_init)
@@ -114,6 +139,9 @@ void RenderingSystem::init(Context &ctx, const RendererInit &renderer_init)
         renderer_init.iface.blases,
         renderer_init.iface.packedViews[world_idx],
         renderer_init.worldOffset,
+#ifdef MADRONA_GPU_MODE
+        renderer_init.iface.numInstancesReadback,
+#endif
     };
 }
 

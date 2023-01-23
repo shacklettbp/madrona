@@ -641,7 +641,7 @@ TLASData TLASData::setup(const DeviceState &dev,
     VkDeviceAddress cur_as_scratch_addr = as_storage_addr + num_bytes_per_as;
 
     uint64_t initial_instance_storage_bytes =
-        num_worlds * max_num_instances * sizeof(AccelStructInstance);
+        max_num_instances * sizeof(AccelStructInstance);
 
     EngineToRendererBuffer instance_storage = cuda_mode ?
         EngineToRendererBuffer(CudaMode {},
@@ -681,6 +681,7 @@ TLASData TLASData::setup(const DeviceState &dev,
     std::optional<DedicatedBuffer> dev_inst_count;
     VkDeviceAddress dev_inst_count_addr = 0;
     std::optional<CudaImportedBuffer> dev_inst_count_cuda;
+    uint32_t *count_readback = nullptr;
     if (cuda_mode) {
         dev_inst_count.emplace(
             mem.makeDedicatedBuffer(
@@ -694,6 +695,9 @@ TLASData TLASData::setup(const DeviceState &dev,
 
         cudaMemset(dev_inst_count_cuda->getDevicePointer(),
                    0, sizeof(AccelStructRangeInfo));
+
+        cudaHostAlloc((void **)&count_readback,
+                      sizeof(uint32_t), cudaHostAllocMapped);
     } else {
         host_instance_count = (AccelStructRangeInfo *)malloc(sizeof(
             AccelStructRangeInfo));
@@ -712,6 +716,7 @@ TLASData TLASData::setup(const DeviceState &dev,
         std::move(dev_inst_count),
         dev_inst_count_addr,
         std::move(dev_inst_count_cuda),
+        count_readback,
         cuda_mode,
     };
 }
@@ -720,16 +725,12 @@ void TLASData::build(const DeviceState &dev,
                      VkCommandBuffer build_cmd)
 {
     if (cudaMode) {
-        VkAccelerationStructureBuildRangeInfoKHR range_info_host;
-        auto range_info_ptr = &range_info_host;
-        auto res = cudaMemcpy(range_info_ptr,
-                devInstanceCountCUDA->getDevicePointer(),
-                sizeof(VkAccelerationStructureBuildRangeInfoKHR),
-                cudaMemcpyDeviceToHost);
-        assert(res == cudaSuccess);
+        VkAccelerationStructureBuildRangeInfoKHR range_info {};
+        range_info.primitiveCount = *countReadback;
+
+        auto range_info_ptr = &range_info;
         dev.dt.cmdBuildAccelerationStructuresKHR(build_cmd, 1,
-            &buildInfo,
-            &range_info_ptr);
+            &buildInfo, &range_info_ptr);
     } else {
         dev.dt.cmdBuildAccelerationStructuresKHR(build_cmd, 1,
                                                  &buildInfo,

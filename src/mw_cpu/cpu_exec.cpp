@@ -109,6 +109,7 @@ void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs)
     if (renderer_.has_value()) {
         char *hack = getenv("MADRONA_RENDER_NOOP");
         if (hack && hack[0] == '1') {
+            renderer_->getInterface().numInstances->primitiveCount = 0;
             return;
         }
         renderer_->render();

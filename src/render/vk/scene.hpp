@@ -97,6 +97,7 @@ struct TLASData {
     std::optional<DedicatedBuffer> devInstanceCount;
     VkDeviceAddress devInstanceCountVkAddr;
     std::optional<CudaImportedBuffer> devInstanceCountCUDA;
+    uint32_t *countReadback;
     bool cudaMode;
 
     static TLASData setup(const DeviceState &dev,
