@@ -74,7 +74,18 @@ public:
                            [[maybe_unused]] uint32_t node_id)
     {
 #ifdef MADRONA_TRACING
-        DeviceTracing::get().LogImpl(event, func_id, num_invocations, node_id);
+        DeviceTracing::get().LogImpl(event, func_id, num_invocations, node_id, threadIdx.x == 0);
+#endif
+    }
+
+    static inline void Log([[maybe_unused]] DeviceEvent event,
+                           [[maybe_unused]] uint32_t func_id,
+                           [[maybe_unused]] uint32_t num_invocations,
+                           [[maybe_unused]] uint32_t node_id,
+                           [[maybe_unused]] bool is_leader)
+    {
+#ifdef MADRONA_TRACING
+        DeviceTracing::get().LogImpl(event, func_id, num_invocations, node_id, is_leader);
 #endif
     }
 
@@ -88,9 +99,9 @@ private:
     }
 
     inline void LogImpl(DeviceEvent event, uint32_t func_id,
-                        uint32_t num_invocations, uint32_t node_id)
+                        uint32_t num_invocations, uint32_t node_id, bool is_leader)
     {
-        if (threadIdx.x == 0)
+        if (is_leader)
         {
             uint32_t sm_id;
             asm("mov.u32 %0, %smid;"

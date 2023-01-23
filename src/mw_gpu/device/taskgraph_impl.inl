@@ -149,6 +149,7 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
     int32_t total_num_invocations;
     int32_t num_threads_per_invocation;
     int32_t base_offset;
+    bool run_new_node = false;
 
     auto blockGetNextNode = [&]() {
         __syncthreads();
@@ -176,6 +177,7 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
         base_offset = block_init_offset +
             (warp_idx * 32) / num_threads_per_invocation;
 
+        run_new_node = true;
         return WorkerState::Run;
     };
 
@@ -237,6 +239,11 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
     *run_func_id = sharedBlockState.funcID;
     *run_offset = thread_offset;
 
+    if (num_threads_per_invocation <= 32 && run_new_node) { 
+        mwGPU::DeviceTracing::Log(
+            mwGPU::DeviceEvent::blockStart,
+            sharedBlockState.funcID, sharedBlockState.initOffset, sharedBlockState.nodeIdx);
+    }
     return WorkerState::Run;
 }
 
@@ -253,12 +260,18 @@ void TaskGraph::finishWork(bool lane_executed)
         num_finished_threads = consts::numMegakernelThreads;
 
         is_leader = threadIdx.x == 0;
+        mwGPU::DeviceTracing::Log(
+            mwGPU::DeviceEvent::blockWait,
+            sharedBlockState.funcID, sharedBlockState.initOffset, sharedBlockState.nodeIdx);
     } else {
         __syncwarp(mwGPU::allActive);
         num_finished_threads =
             __popc(__ballot_sync(mwGPU::allActive, lane_executed));
 
         is_leader = threadIdx.x % 32 == 0;
+        mwGPU::DeviceTracing::Log(
+            mwGPU::DeviceEvent::blockWait,
+            sharedBlockState.funcID, sharedBlockState.initOffset, sharedBlockState.nodeIdx, is_leader);
     }
 
     if (!is_leader) {
@@ -270,10 +283,6 @@ void TaskGraph::finishWork(bool lane_executed)
 
     uint32_t node_idx = sharedBlockState.nodeIdx;
 
-    mwGPU::DeviceTracing::Log(
-        mwGPU::DeviceEvent::blockWait,
-        sharedBlockState.funcID, sharedBlockState.initOffset, node_idx);
-
     Node &cur_node = sorted_nodes_[node_idx];
 
     uint32_t prev_remaining = cur_node.numRemaining.fetch_sub(num_finished,
@@ -283,7 +292,7 @@ void TaskGraph::finishWork(bool lane_executed)
 
         mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::nodeFinish,
             sharedBlockState.funcID, sharedBlockState.totalNumInvocations,
-            node_idx);
+            node_idx, is_leader);
 
         uint32_t next_node_idx = node_idx + 1;
 
@@ -305,7 +314,7 @@ void TaskGraph::finishWork(bool lane_executed)
                     std::memory_order_relaxed);
 
                 mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::nodeStart,
-                    next_node.funcID, new_num_invocations, next_node_idx);
+                    next_node.funcID, new_num_invocations, next_node_idx, is_leader);
             }
 
             cur_node_idx_.store(next_node_idx, std::memory_order_release);
@@ -348,11 +357,12 @@ static inline __attribute__((always_inline)) void megakernelImpl()
 
         bool lane_executed;
         if (worker_state == TaskGraph::WorkerState::Run) {
-            DeviceTracing::Log(
-                mwGPU::DeviceEvent::blockStart,
-                func_id, invocation_offset, sharedBlockState.nodeIdx);
+            if (sharedBlockState.numThreadsPerInvocation > 32) {
+                mwGPU::DeviceTracing::Log(
+                    mwGPU::DeviceEvent::blockStart,
+                    sharedBlockState.funcID, sharedBlockState.initOffset, sharedBlockState.nodeIdx);
+            }           
             dispatch(func_id, node_data, invocation_offset);
-
             lane_executed = true;
         } else {
             lane_executed = false;
