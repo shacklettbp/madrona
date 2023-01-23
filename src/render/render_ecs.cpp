@@ -11,11 +11,10 @@ namespace render {
 
 struct RendererState {
     AccelStructInstance *tlasInstanceBuffer;
-    uint32_t *instanceCountExport;
+    AccelStructRangeInfo *numInstances;
     uint64_t *blases;
     PackedViewData *packedViews;
     Vector3 worldOffset;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t instanceCount;
 };
 
 void RenderingSystem::registerTypes(ECSRegistry &registry)
@@ -31,8 +30,11 @@ inline void instanceAccelStructSetup(Context &ctx,
                                      const ObjectID &obj_id)
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
-    uint32_t inst_idx =
-        renderer_state.instanceCount.fetch_add(1, std::memory_order_relaxed);
+
+    std::atomic_ref<uint32_t> count_atomic(
+        renderer_state.numInstances->primitiveCount);
+
+    uint32_t inst_idx = count_atomic.fetch_add(1, std::memory_order_relaxed);
 
     AccelStructInstance &as_inst = renderer_state.tlasInstanceBuffer[inst_idx];
 
@@ -58,16 +60,6 @@ inline void instanceAccelStructSetup(Context &ctx,
     as_inst.instanceShaderBindingTableRecordOffset = 0;
     as_inst.flags = 0;
     as_inst.accelerationStructureReference = renderer_state.blases[obj_id.idx];
-}
-
-inline void updateRendererCounts(Context &,
-                                 RendererState &renderer)
-{
-    uint32_t inst_count =
-        renderer.instanceCount.load(std::memory_order_relaxed);
-    renderer.instanceCount.store(0, std::memory_order_relaxed);
-
-    *renderer.instanceCountExport = inst_count;
 }
 
 inline void updateViewData(Context &ctx,
@@ -107,11 +99,7 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
         Rotation,
         ViewSettings>>({instance_setup});
 
-    auto update_count = builder.addToGraph<ParallelForNode<Context,
-        updateRendererCounts,
-        RendererState>>({viewdata_update});
-
-    return update_count;
+    return viewdata_update;
 }
 
 void RenderingSystem::init(Context &ctx, const RendererInit &renderer_init)
@@ -121,12 +109,11 @@ void RenderingSystem::init(Context &ctx, const RendererInit &renderer_init)
     int32_t world_idx = ctx.worldID().idx;
 
     new (&renderer_state) RendererState {
-        renderer_init.iface.tlasInstancePtrs[world_idx],
-        &renderer_init.iface.tlasInstanceCounts[world_idx],
+        renderer_init.iface.tlasInstancesBase,
+        renderer_init.iface.numInstances,
         renderer_init.iface.blases,
         renderer_init.iface.packedViews[world_idx],
         renderer_init.worldOffset,
-        0,
     };
 }
 

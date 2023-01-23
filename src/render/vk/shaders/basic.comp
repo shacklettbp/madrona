@@ -110,8 +110,7 @@ layout (set = 0, binding = 0, scalar) readonly buffer Views {
     ViewData viewDataBuffer[];
 };
 
-layout (set = 0, binding = 1)
-    uniform accelerationStructureEXT tlases[];
+layout (set = 0, binding = 1) uniform accelerationStructureEXT tlas;
 
 layout (set = 0, binding = 2, scalar) readonly buffer ObjectDataBuffer {
     ObjectData objectDataBuffer[];
@@ -279,7 +278,7 @@ bool traceShadeRay(rayQueryEXT ray_query, in uint32_t world_idx,
                    in vec3 ray_origin, in vec3 ray_dir,
                    uint32_t visibility_mask)
 {
-    rayQueryInitializeEXT(ray_query, tlases[world_idx],
+    rayQueryInitializeEXT(ray_query, tlas,
         gl_RayFlagsCullBackFacingTrianglesEXT,
         visibility_mask, ray_origin, 0.f, ray_dir, LARGE_DISTANCE);
 
