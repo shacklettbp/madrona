@@ -720,13 +720,16 @@ void TLASData::build(const DeviceState &dev,
                      VkCommandBuffer build_cmd)
 {
     if (cudaMode) {
-        uint32_t indirect_stride =
-            sizeof(VkAccelerationStructureBuildRangeInfoKHR);
-
-        uint32_t *max_ptr = &maxNumInstances;
-        dev.dt.cmdBuildAccelerationStructuresIndirectKHR(
-            build_cmd, 1, &buildInfo, &devInstanceCountVkAddr,
-            &indirect_stride, &max_ptr);
+        VkAccelerationStructureBuildRangeInfoKHR range_info_host;
+        auto range_info_ptr = &range_info_host;
+        auto res = cudaMemcpy(range_info_ptr,
+                devInstanceCountCUDA->getDevicePointer(),
+                sizeof(VkAccelerationStructureBuildRangeInfoKHR),
+                cudaMemcpyDeviceToHost);
+        assert(res == cudaSuccess);
+        dev.dt.cmdBuildAccelerationStructuresKHR(build_cmd, 1,
+            &buildInfo,
+            &range_info_ptr);
     } else {
         dev.dt.cmdBuildAccelerationStructuresKHR(build_cmd, 1,
                                                  &buildInfo,

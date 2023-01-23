@@ -514,20 +514,7 @@ void BatchRenderer::Impl::render()
         launchHeight,
         fb.numViews);
 
-    VkMemoryBarrier instance_count_barrier;
     if (tlases.cudaMode) {
-        instance_count_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        instance_count_barrier.pNext = nullptr;
-        instance_count_barrier.srcAccessMask =
-            VK_ACCESS_SHADER_READ_BIT;
-        instance_count_barrier.dstAccessMask =
-            VK_ACCESS_TRANSFER_WRITE_BIT;
-
-        dev.dt.cmdPipelineBarrier(renderCmd,
-            VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
-            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1,
-            &instance_count_barrier, 0, nullptr, 0, nullptr);
-
         dev.dt.cmdFillBuffer(
             renderCmd, tlases.devInstanceCount->buf.buffer,
             0, sizeof(uint32_t), 0);
