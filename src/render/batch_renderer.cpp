@@ -140,9 +140,7 @@ static ShaderState makeShaderState(const DeviceState &dev,
 
     PipelineShaders shader(dev,
         { std::string(shader_name) },
-        { 
-            BindingOverride { 0, 1, nullptr, cfg.numWorlds, 0 }, // TLAS
-        },
+        {},
         Span<const string>(shader_defines.data(),
                            (CountT)shader_defines.size()),
         STRINGIFY(SHADER_DIR));
@@ -257,7 +255,6 @@ static FramebufferState makeFramebuffer(const DeviceState &dev,
 }
 
 static DescriptorState makeDescriptors(const DeviceState &dev,
-                                       const BatchRenderer::Config &cfg,
                                        const ShaderState &shader_state,
                                        const FramebufferState &fb,
                                        const AssetManager &asset_mgr,
@@ -277,17 +274,12 @@ static DescriptorState makeDescriptors(const DeviceState &dev,
     DescHelper::storage(desc_updates[0],
                        rt_set, &view_data_info, 0);
 
-    HeapArray<VkAccelerationStructureKHR> view_tlas_hdls(cfg.numWorlds);
-    memcpy(view_tlas_hdls.data(),
-           tlas_data.hdls.data(),
-           cfg.numWorlds * sizeof(VkAccelerationStructureKHR));
-
     VkWriteDescriptorSetAccelerationStructureKHR as_update;
     DescHelper::accelStructs(desc_updates[1],
                              as_update,
                              rt_set, 
-                             view_tlas_hdls.data(),
-                             cfg.numWorlds,
+                             &tlas_data.tlas,
+                             1,
                              1);
 
     VkDescriptorBufferInfo obj_data_info;
@@ -400,7 +392,7 @@ BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
               renderFence, 
           }, cfg.inputMode == InputMode::CPU ? -1 : cfg.gpuID,
           mem, cfg.numWorlds, cfg.maxInstancesPerWorld)),
-      descriptors(makeDescriptors(dev, cfg, shaderState, fb, assetMgr,
+      descriptors(makeDescriptors(dev, shaderState, fb, assetMgr,
                                   viewDataBuffer.rendererBuffer(), tlases)),
       launchWidth(utils::divideRoundUp(fb.renderWidth,
                                        VulkanConfig::localWorkgroupX)),
@@ -501,7 +493,7 @@ void BatchRenderer::Impl::render()
         VK_ACCESS_SHADER_READ_BIT,
         VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR);
 
-    tlases.build(dev, tlases.instanceCounts, renderCmd);
+    tlases.build(dev, renderCmd);
 
     VkMemoryBarrier tlas_barrier;
     tlas_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -521,6 +513,12 @@ void BatchRenderer::Impl::render()
         launchWidth,
         launchHeight,
         fb.numViews);
+
+    if (tlases.cudaMode) {
+        dev.dt.cmdFillBuffer(
+            renderCmd, tlases.devInstanceCount->buf.buffer,
+            0, sizeof(uint32_t), 0);
+    }
 
     if (presentState.has_value()) {
         VkBufferImageCopy cpy_to_present {
@@ -679,6 +677,10 @@ void BatchRenderer::Impl::render()
     waitForFenceInfinitely(dev, renderFence);
     resetFence(dev, renderFence);
     HostEventLogging(HostEvent::renderEnd);
+
+    if (!tlases.cudaMode) {
+        tlases.hostInstanceCount->primitiveCount = 0;
+    }
 }
 
 BatchRenderer::BatchRenderer(const Config &cfg)
@@ -698,14 +700,28 @@ CountT BatchRenderer::loadObjects(Span<const imp::SourceObject> objs)
 
 RendererInterface BatchRenderer::getInterface() const
 {
-    return RendererInterface {
-        (AccelStructInstance **)
-            impl_->tlases.instanceAddrsBuffer.enginePointer(),
-        impl_->tlases.instanceCounts,
-        (uint64_t *)impl_->assetMgr.blasAddrsBuffer.enginePointer(),
-        (PackedViewData **)
-            impl_->viewDataAddrsBuffer.enginePointer(),
-    };
+    RendererInterface renderer_iface;
+
+    renderer_iface.tlasInstancesBase =
+        (AccelStructInstance *)impl_->tlases.instanceStorage.enginePointer();
+
+    if (impl_->tlases.cudaMode) {
+        renderer_iface.numInstances =
+            (AccelStructRangeInfo *)impl_->tlases.devInstanceCountCUDA->
+                getDevicePointer();
+    } else {
+        renderer_iface.numInstances =
+            impl_->tlases.hostInstanceCount;
+    }
+
+    renderer_iface.blases = 
+        (uint64_t *)impl_->assetMgr.blasAddrsBuffer.enginePointer();
+    renderer_iface.packedViews =  (PackedViewData **)
+        impl_->viewDataAddrsBuffer.enginePointer();
+    renderer_iface.numInstancesReadback =
+        impl_->tlases.countReadback;
+
+    return renderer_iface;
 }
 
 uint8_t * BatchRenderer::rgbPtr() const

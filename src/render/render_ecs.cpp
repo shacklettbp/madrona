@@ -11,10 +11,13 @@ namespace render {
 
 struct RendererState {
     AccelStructInstance *tlasInstanceBuffer;
-    uint32_t *instanceCountExport;
+    AccelStructRangeInfo *numInstances;
     uint64_t *blases;
     PackedViewData *packedViews;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t instanceCount;
+    Vector3 worldOffset;
+#ifdef MADRONA_GPU_MODE
+    uint32_t *count_readback;
+#endif
 };
 
 void RenderingSystem::registerTypes(ECSRegistry &registry)
@@ -30,12 +33,15 @@ inline void instanceAccelStructSetup(Context &ctx,
                                      const ObjectID &obj_id)
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
-    uint32_t inst_idx =
-        renderer_state.instanceCount.fetch_add(1, std::memory_order_relaxed);
+
+    std::atomic_ref<uint32_t> count_atomic(
+        renderer_state.numInstances->primitiveCount);
+
+    uint32_t inst_idx = count_atomic.fetch_add(1, std::memory_order_relaxed);
 
     AccelStructInstance &as_inst = renderer_state.tlasInstanceBuffer[inst_idx];
 
-    Mat3x4 o2w = Mat3x4::fromTRS(pos, rot, scale);
+    Mat3x4 o2w = Mat3x4::fromTRS(pos + renderer_state.worldOffset, rot, scale);
 
     as_inst.transform.matrix[0][0] = o2w.cols[0].x;
     as_inst.transform.matrix[0][1] = o2w.cols[1].x;
@@ -59,16 +65,6 @@ inline void instanceAccelStructSetup(Context &ctx,
     as_inst.accelerationStructureReference = renderer_state.blases[obj_id.idx];
 }
 
-inline void updateRendererCounts(Context &,
-                                 RendererState &renderer)
-{
-    uint32_t inst_count =
-        renderer.instanceCount.load(std::memory_order_relaxed);
-    renderer.instanceCount.store(0, std::memory_order_relaxed);
-
-    *renderer.instanceCountExport = inst_count;
-}
-
 inline void updateViewData(Context &ctx,
                            const Position &pos,
                            const Rotation &rot,
@@ -78,7 +74,8 @@ inline void updateViewData(Context &ctx,
 
     int32_t view_idx = view_settings.viewID.idx;
 
-    auto camera_pos = pos + view_settings.cameraOffset;
+    auto camera_pos =
+        pos + view_settings.cameraOffset + renderer_state.worldOffset;
 
     PackedViewData &renderer_view = renderer_state.packedViews[view_idx];
 
@@ -88,6 +85,19 @@ inline void updateViewData(Context &ctx,
     renderer_view.posAndTanFOV.z = camera_pos.z;
     renderer_view.posAndTanFOV.w = view_settings.tanFOV;
 }
+
+#ifdef MADRONA_GPU_MODE
+
+inline void readbackCount(Context &ctx,
+                          RendererState &renderer_state)
+{
+    if (ctx.worldID().idx == 0) {
+        *renderer_state.count_readback = renderer_state.numInstances->primitiveCount;
+        renderer_state.numInstances->primitiveCount = 0;
+    }
+}
+
+#endif
 
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
@@ -105,22 +115,33 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
         Rotation,
         ViewSettings>>({instance_setup});
 
-    auto update_count = builder.addToGraph<ParallelForNode<Context,
-        updateRendererCounts,
+#ifdef MADRONA_GPU_MODE
+    auto readback_count = builder.addToGraph<ParallelForNode<Context,
+        readbackCount,
         RendererState>>({viewdata_update});
 
-    return update_count;
+    return readback_count;
+#else
+    return viewdata_update;
+#endif
+
 }
 
 void RenderingSystem::init(Context &ctx, const RendererInit &renderer_init)
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
+
+    int32_t world_idx = ctx.worldID().idx;
+
     new (&renderer_state) RendererState {
-        renderer_init.iface.tlasInstancePtrs[ctx.worldID().idx],
-        &renderer_init.iface.tlasInstanceCounts[ctx.worldID().idx],
+        renderer_init.iface.tlasInstancesBase,
+        renderer_init.iface.numInstances,
         renderer_init.iface.blases,
-        renderer_init.iface.packedViews[ctx.worldID().idx],
-        0,
+        renderer_init.iface.packedViews[world_idx],
+        renderer_init.worldOffset,
+#ifdef MADRONA_GPU_MODE
+        renderer_init.iface.numInstancesReadback,
+#endif
     };
 }
 

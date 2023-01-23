@@ -674,7 +674,7 @@ static inline bool traceRayIntoConvexPolyhedron(
     float tlast = t_max;
 
     // Intersect segment against each plane
-    CountT num_faces = convex_mesh.getPolygonCount();
+    CountT num_faces = convex_mesh.mPolygonCount;
 
     // Our face normals point outside. RTCD uses plane normals pointing inside
     // the polyhedron, so signs are flipped relative to the book
@@ -682,8 +682,7 @@ static inline bool traceRayIntoConvexPolyhedron(
     Vector3 closest_normal = Vector3::zero(); 
 
     for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
-        Plane plane =
-            convex_mesh.getPlane(PolygonID(face_idx), convex_mesh.vertices());
+        Plane plane = convex_mesh.mFacePlanes[face_idx];
 
         float denom = dot(plane.normal, ray_d);
         float neg_dist = plane.d - dot(plane.normal, ray_o);

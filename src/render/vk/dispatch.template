@@ -92,6 +92,7 @@ device:
     - vkGetAccelerationStructureDeviceAddressKHR
     - vkGetBufferDeviceAddress
     - vkCmdBuildAccelerationStructuresKHR
+    - vkCmdBuildAccelerationStructuresIndirectKHR
     - vkDestroyAccelerationStructureKHR
     - vkGetDeviceAccelerationStructureCompatibilityKHR
     - vkCmdCopyAccelerationStructureKHR

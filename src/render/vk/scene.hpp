@@ -87,16 +87,17 @@ struct AssetManager {
 struct TLASData {
     DedicatedBuffer accelStructStorage;
     EngineToRendererBuffer instanceStorage;
-    HostToEngineBuffer instanceAddrsBuffer;
 
-    HeapArray<VkAccelerationStructureKHR> hdls;
-    HeapArray<uint32_t> maxInstances;
-    HeapArray<VkAccelerationStructureGeometryKHR> geometryInfos;
-    HeapArray<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos;
-    HeapArray<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
-    HeapArray<VkAccelerationStructureBuildRangeInfoKHR *> rangeInfoPtrs;
+    VkAccelerationStructureKHR tlas;
+    uint32_t maxNumInstances;
+    VkAccelerationStructureGeometryKHR *geometryInfo;
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo;
 
-    uint32_t *instanceCounts;
+    AccelStructRangeInfo *hostInstanceCount;
+    std::optional<DedicatedBuffer> devInstanceCount;
+    VkDeviceAddress devInstanceCountVkAddr;
+    std::optional<CudaImportedBuffer> devInstanceCountCUDA;
+    uint32_t *countReadback;
     bool cudaMode;
 
     static TLASData setup(const DeviceState &dev,
@@ -107,7 +108,6 @@ struct TLASData {
                           uint32_t max_num_instances);
 
     void build(const DeviceState &dev,
-               const uint32_t *num_instances_per_world,
                VkCommandBuffer build_cmd);
 
     void destroy(const DeviceState &dev);

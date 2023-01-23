@@ -18,10 +18,21 @@ TaskGraphExecutor<ContextT, WorldT, ConfigT, InitTs...>::TaskGraphExecutor(
 
     auto renderer_iface = getRendererInterface();
 
+    render::WorldGrid render_grid(cfg.numWorlds, 220.f);
+
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
+        auto renderer_init = Optional<render::RendererInit>::none();
+
+        if (renderer_iface.has_value()) {
+            renderer_init = render::RendererInit {
+                *renderer_iface,
+                render_grid.getOffset(i),
+            };
+        }
+
         std::array<void *, sizeof...(InitTs)> init_ptrs {
             (void *)&user_init_ptrs[i] ...,
-            renderer_iface.has_value() ? (void *)&(*renderer_iface) : nullptr,
+            renderer_iface.has_value() ? (void *)&(*renderer_init) : nullptr,
         };
 
         // FIXME: this is super ugly because WorkerInit

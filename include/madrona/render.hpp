@@ -36,15 +36,25 @@ struct PackedViewData {
     math::Vector4 posAndTanFOV;
 };
 
+// FIXME this is a copy of VkAccelerationStructureBuildRangeInfoKHR
+struct AccelStructRangeInfo {
+    uint32_t primitiveCount;
+    uint32_t primitiveOffset;
+    uint32_t firstVertex;
+    uint32_t transformOffset;
+};
+
 struct RendererInterface {
-    AccelStructInstance **tlasInstancePtrs;
-    uint32_t *tlasInstanceCounts;
+    AccelStructInstance *tlasInstancesBase;
+    AccelStructRangeInfo *numInstances;
     uint64_t *blases;
     PackedViewData **packedViews;
+    uint32_t *numInstancesReadback;
 };
 
 struct RendererInit {
     RendererInterface iface;
+    math::Vector3 worldOffset;
 };
 
 struct RenderingSystem {
