@@ -45,6 +45,7 @@ struct RendererInterface {
 
 struct RendererInit {
     RendererInterface iface;
+    math::Vector3 worldOffset;
 };
 
 struct RenderingSystem {

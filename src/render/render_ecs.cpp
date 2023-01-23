@@ -14,6 +14,7 @@ struct RendererState {
     uint32_t *instanceCountExport;
     uint64_t *blases;
     PackedViewData *packedViews;
+    Vector3 worldOffset;
     alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t instanceCount;
 };
 
@@ -35,7 +36,7 @@ inline void instanceAccelStructSetup(Context &ctx,
 
     AccelStructInstance &as_inst = renderer_state.tlasInstanceBuffer[inst_idx];
 
-    Mat3x4 o2w = Mat3x4::fromTRS(pos, rot, scale);
+    Mat3x4 o2w = Mat3x4::fromTRS(pos + renderer_state.worldOffset, rot, scale);
 
     as_inst.transform.matrix[0][0] = o2w.cols[0].x;
     as_inst.transform.matrix[0][1] = o2w.cols[1].x;
@@ -78,7 +79,8 @@ inline void updateViewData(Context &ctx,
 
     int32_t view_idx = view_settings.viewID.idx;
 
-    auto camera_pos = pos + view_settings.cameraOffset;
+    auto camera_pos =
+        pos + view_settings.cameraOffset + renderer_state.worldOffset;
 
     PackedViewData &renderer_view = renderer_state.packedViews[view_idx];
 
@@ -115,11 +117,15 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 void RenderingSystem::init(Context &ctx, const RendererInit &renderer_init)
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
+
+    int32_t world_idx = ctx.worldID().idx;
+
     new (&renderer_state) RendererState {
-        renderer_init.iface.tlasInstancePtrs[ctx.worldID().idx],
-        &renderer_init.iface.tlasInstanceCounts[ctx.worldID().idx],
+        renderer_init.iface.tlasInstancePtrs[world_idx],
+        &renderer_init.iface.tlasInstanceCounts[world_idx],
         renderer_init.iface.blases,
-        renderer_init.iface.packedViews[ctx.worldID().idx],
+        renderer_init.iface.packedViews[world_idx],
+        renderer_init.worldOffset,
         0,
     };
 }

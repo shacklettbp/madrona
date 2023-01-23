@@ -1152,10 +1152,15 @@ static GPUEngineState initEngineAndUserState(
 
         renderer_init_buffer = cu::allocStaging(
                 sizeof(render::RendererInit) * (uint64_t)num_worlds);
+
+        render::WorldGrid render_grid(num_worlds, 220.f);
         
         for (CountT i = 0; i < (CountT)num_worlds; i++) {
-            ((render::RendererInit *)renderer_init_buffer)[i].iface =
+            auto &renderer_init =
+                ((render::RendererInit *)renderer_init_buffer)[i];
+            renderer_init.iface =
                 batch_renderer->getInterface();
+            renderer_init.worldOffset = render_grid.getOffset(i);
         }
     }
 
