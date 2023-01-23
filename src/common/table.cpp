@@ -19,22 +19,25 @@ inline constexpr uint32_t maxRowsPerTable = 1u << 28u;
 Table::Table(const TypeInfo *component_types, CountT num_components,
              CountT init_num_rows)
     : num_rows_(init_num_rows),
-      columns_()
+      num_allocated_rows_(std::max(uint32_t(init_num_rows), 1_u32)),
+      num_components_(num_components),
+      columns_(),
+      bytes_per_column_()
 {
     for (int i = 0; i < (int)num_components; i++) {
         const TypeInfo &type = component_types[i];
 
+#if 0
         // 3rd argument is offsetting the start from the page aligned boundary
         // to avoid everything mapping to the same cache sets. Should revisit -
         // maybe add a random offset for each Table as well?
         columns_.emplace_back(type.numBytes, type.alignment,
             MADRONA_CACHE_LINE * (i + 1), ICfg::maxRowsPerTable);
-    }
+#endif
 
-    if (num_rows_ > 0) {
-        for (VirtualStore &col : columns_) {
-            col.expand(num_rows_);
-        }
+        uint32_t column_bytes_per_row = type.numBytes;
+        columns_[i] = malloc(column_bytes_per_row * num_allocated_rows_);
+        bytes_per_column_[i] = column_bytes_per_row;
     }
 }
 
@@ -42,8 +45,16 @@ uint32_t Table::addRow()
 {
     uint32_t idx = num_rows_++;
 
-    for (VirtualStore &col : columns_) {
-        col.expand(num_rows_);
+    if (idx >= num_allocated_rows_) {
+        uint32_t new_num_rows =
+            std::max(std::max(10_u32, uint32_t(num_allocated_rows_ * 2)), idx);
+
+        for (int i = 0; i < (int)num_components_; i++) {
+            columns_[i] = realloc(columns_[i],
+                uint64_t(new_num_rows) * uint64_t(bytes_per_column_[i]));
+        }
+
+        num_allocated_rows_ = new_num_rows;
     }
 
     return idx;
@@ -59,27 +70,19 @@ bool Table::removeRow(uint32_t row)
         copyRow(to_idx, from_idx);
     }
 
-    for (VirtualStore &col : columns_) {
-        col.shrink(num_rows_);
-    }
-
     return need_move;
 }
 
 void Table::copyRow(uint32_t dst, uint32_t src)
 {
-    for (VirtualStore &col : columns_) {
-        memcpy(col[dst], col[src], col.numBytesPerItem());
+    for (int i = 0; i < (int)num_components_; i++) {
+        memcpy(getValue(i, dst), getValue(i, src), bytes_per_column_[i]);
     }
 }
 
 void Table::clear()
 {
     num_rows_ = 0;
-
-    for (VirtualStore &col : columns_) {
-        col.shrink(num_rows_);
-    }
 }
 
 }

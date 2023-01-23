@@ -46,7 +46,10 @@ public:
 
 private:
     uint32_t num_rows_;
-    InlineArray<VirtualStore, maxColumns> columns_;
+    uint32_t num_allocated_rows_;
+    uint32_t num_components_;
+    InlineArray<void *, maxColumns> columns_;
+    InlineArray<uint32_t, maxColumns> bytes_per_column_;
 };
 
 }

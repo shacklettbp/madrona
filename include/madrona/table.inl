@@ -9,24 +9,24 @@ namespace madrona {
 
 void * Table::getValue(uint32_t column_idx, uint32_t row)
 {
-    VirtualStore &col = columns_[column_idx];
-    return col[row];
+    return (char *)columns_[column_idx] +
+        uint64_t(row) * uint64_t(bytes_per_column_[column_idx]);
 }
 
 const void * Table::getValue(uint32_t column_idx, uint32_t row) const
 {
-    const VirtualStore &col = columns_[column_idx];
-    return col[row];
+    return (char *)columns_[column_idx] +
+        uint64_t(row) * uint64_t(bytes_per_column_[column_idx]);
 }
 
 void * Table::data(uint32_t col_idx)
 {
-    return columns_[col_idx].data();
+    return columns_[col_idx];
 }
 
 const void * Table::data(uint32_t col_idx) const
 {
-    return columns_[col_idx].data();
+    return columns_[col_idx];
 }
 
 }
