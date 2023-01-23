@@ -127,6 +127,8 @@ def serialized_analysis(step_log):
         k: (v[0], v[1], round(v[2] / total_exec_time, 3))
         for k, v in sorted_duration.items()
     }
+    print("Total execution time of the mega kernel: {:.4f}ms".format(
+        total_exec_time / 1000000))
     # print("execution time percentage for each node", normailized)
 
     top10_nodes = {
@@ -152,7 +154,7 @@ def serialized_analysis(step_log):
     # print("execution time for each func",
     #       {k: [v[0], v[1] * total_exec_time]
     #        for k, v in sorted_func.items()})
-    print("execution time percentage for each func", sorted_func)
+    # print("execution time percentage for each func", sorted_func)
 
     return top10_nodes
 
@@ -167,8 +169,10 @@ def block_analysis(step_log):
     }
 
     for sm in step_log["SMs"]:
-        for (offset, nodeID, blockID), [start,
-                                        end] in step_log["SMs"][sm].items():
+        for (offset, nodeID,
+             blockID), time_stamps in step_log["SMs"][sm].items():
+            start = time_stamps[0]
+            end = max(time_stamps[1:])
             # confirm clock does proceed within an SM
             assert end > start
             assert start > step_log["sm_base_avg"][sm]
@@ -235,7 +239,6 @@ def block_analysis(step_log):
         sm_idle.append(gap)
 
     sm_active = sorted([1 - i / step_log["final_timestamp"] for i in sm_idle])
-    # print(sm_active)
     print(
         "For each SM on average, {:.3f}% of the time there is at least one block is running on"
         .format(sum(sm_active) / len(sm_active) * 100))
@@ -251,8 +254,10 @@ COLORS = [
 
 def plot_events(step_log, nodes, blocks, file_name):
     num_sm = len(blocks)
-    num_block_per_sm = 4
-    num_pixel_per_sm = (num_block_per_sm + 1) * 2
+    num_block_per_sm = 1
+    num_pixel_per_block = 2
+    sm_interval_pixel = 2
+    num_pixel_per_sm = num_block_per_sm * num_pixel_per_block + sm_interval_pixel
     x_limit = 4000
     y_blank = 100
     y_limit = num_sm * num_pixel_per_sm + y_blank
@@ -282,36 +287,37 @@ def plot_events(step_log, nodes, blocks, file_name):
             for e in events:
 
                 # to measure the gap between block events of node 150, function 28, narrowphase
-                if e[2] == 150:
-                    if bb not in narrow_gap:
-                        narrow_gap[bb] = [(e[0], e[1])]
-                    else:
-                        narrow_gap[bb].append((e[0], e[1]))
+                # if e[2] == 150:
+                #     if bb not in narrow_gap:
+                #         narrow_gap[bb] = [(e[0], e[1])]
+                #     else:
+                #         narrow_gap[bb].append((e[0], e[1]))
 
                 bar_color = colors[step_log["mapping"][
                     e[2]]] if step_log["mapping"][e[2]] in colors else "black"
                 draw.line((cast_coor(e[0]), y, cast_coor(e[1]), y),
                           fill=bar_color,
-                          width=2)
+                          width=num_pixel_per_block)
                 # lighten the first pixel to indicate starting
                 draw.line(
-                    (cast_coor(e[0]), y, cast_coor(e[0]), y + 1),
+                    (cast_coor(e[0]), y, cast_coor(
+                        e[0]), y + num_pixel_per_block - 1),
                     fill=tuple(
                         (i + 255) // 2 for i in ImageColor.getrgb(bar_color)))
-            y += 2
+            y += sm_interval_pixel
 
-    idle_rate = []
-    for _, v in narrow_gap.items():
-        idle_time = 0
-        last_end = v[0][1]
-        for s, e in v[1:]:
-            assert s > last_end
-            idle_time += s - last_end
-            last_end = e
-        idle_rate.append(idle_time / (v[-1][1] - v[0][0]))
-    print(
-        "For {:.3f}% of the running time of node 150 (func id 28, narrowphase), blocks are not doing real tasks"
-        .format(sum(idle_rate) / len(idle_rate) * 100))
+    # idle_rate = []
+    # for _, v in narrow_gap.items():
+    #     idle_time = 0
+    #     last_end = v[0][1]
+    #     for s, e in v[1:]:
+    #         assert s > last_end
+    #         idle_time += s - last_end
+    #         last_end = e
+    #     idle_rate.append(idle_time / (v[-1][1] - v[0][0]))
+    # print(
+    #     "For {:.3f}% of the running time of node 150 (func id 28, narrowphase), blocks are not doing real tasks"
+    #     .format(sum(idle_rate) / len(idle_rate) * 100))
 
     # mark the start and the end of major nodes
     for n, v in nodes.items():
