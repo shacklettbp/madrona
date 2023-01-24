@@ -188,45 +188,55 @@ private:
 class DeviceTracingManager {
 public:
     inline DeviceTracingManager(void *dev_ptr)
-        : device_tracing_((DeviceTracing *)dev_ptr)
+        : device_tracing_((DeviceTracing *)dev_ptr), steps_(0)
     {
         readback_ = (DeviceTracing *)
-            ::madrona::cu::allocReadback(sizeof(DeviceTracing));
+            ::madrona::cu::allocReadback(sizeof(DeviceTracing) * max_log_steps_);
     }
 
-    // cannot really overlap the data transfer overhead
-    // fall back to the original plan, copying all logs at the end
-    // inline void transferLogToCPU()
-    // {
-    //     REQ_CUDA(cudaMemcpyAsync(readback_, device_tracing_, sizeof(DeviceTracing),
-    //                         cudaMemcpyDeviceToHost));
-    //     device_logs_cpu_.insert(device_logs_cpu_.end(), readback_->device_logs_, readback_->device_logs_ + readback_->getIndex());
-    // }
+    // async memcpy on the critical path, low overhead but can still impact the overall running time
+    inline void transferLogToCPU()
+    {
+        if (steps_ < max_log_steps_) {
+            REQ_CUDA(cudaMemcpyAsync(readback_ + steps_, device_tracing_, sizeof(DeviceTracing),
+                                        cudaMemcpyDeviceToHost));
+            steps_ += 1;
+        }
+        // can also process data on the data paths to save memory
+        // device_logs_cpu_.insert(device_logs_cpu_.end(), readback_->device_logs_, readback_->device_logs_ + readback_->getIndex());
+    }
 
     inline ~DeviceTracingManager()
     {
-        // for (size_t i = 0; i < steps_; i++) {
-        //     device_logs_cpu_.insert(device_logs_cpu_.end(), (readback_ + i)->device_logs_, (readback_ + i)->device_logs_ + (readback_ + i)->getIndex());
-        // }
-        // ::madrona::WriteToFile<DeviceTracing::DeviceLog>(
-        //     device_logs_cpu_.data(), device_logs_cpu_.size(),
-        //     "/tmp/", "_madrona_device_tracing");
-
-        REQ_CUDA(cudaMemcpy(readback_, device_tracing_, sizeof(DeviceTracing),
-                            cudaMemcpyDeviceToHost));
-
+        size_t num_logs = 0;
+        for (size_t i = 0; i < steps_; i++) {
+            auto log_index = (readback_ + i)->getIndex();
+            num_logs += log_index > 0 ? log_index : 0;
+        }
+        device_logs_cpu_ = new DeviceTracing::DeviceLog[num_logs];
+        
+        num_logs = 0;
+        for (size_t i = 0; i < steps_; i++) {
+            auto log_index = (readback_ + i)->getIndex();
+            if (log_index <= 0) continue;
+            std::memcpy(device_logs_cpu_ + num_logs, (readback_ + i)->device_logs_, log_index * sizeof(DeviceTracing::DeviceLog));
+            num_logs += log_index;
+        }
         ::madrona::WriteToFile<DeviceTracing::DeviceLog>(
-            readback_->device_logs_,
-            readback_->getIndex(), "/tmp/", "_madrona_device_tracing");
+            device_logs_cpu_, num_logs,
+            "/tmp/", "_madrona_device_tracing");
 
         ::madrona::cu::deallocCPU(readback_);
+        delete[] device_logs_cpu_;
     }
 
 private:
     DeviceTracing *device_tracing_;
     DeviceTracing *readback_;
-    // size_t steps_;
-    // std::vector<DeviceTracing::DeviceLog> device_logs_cpu_;
+    // at most first 100 steps will be recorded for saving memory
+    const static size_t max_log_steps_ = 100;
+    size_t steps_;
+    DeviceTracing::DeviceLog* device_logs_cpu_;
 };
 #endif
 
@@ -1509,7 +1519,9 @@ MADRONA_EXPORT void MWCudaExecutor::run()
     REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
     HostEventLogging(HostEvent::megaKernelEnd);
-    // impl_->engineState.deviceTracing->transferLogToCPU();
+#ifdef MADRONA_TRACING
+    impl_->engineState.deviceTracing->transferLogToCPU();
+#endif
 
     if (impl_->engineState.batchRenderer.has_value()) {
         char *hack = getenv("MADRONA_RENDER_NOOP");

@@ -23,12 +23,9 @@ enum class DeviceEvent : uint32_t {
 
 class DeviceTracing {
 private:
-    // todo: have a smaller value by enabling log transfering between steps
-    // actually, for 8k worlds, even a single step might generate over 16 MB log data
-    // instead of trying to collect all logs
-    // it might be better to clean the data we can get
-    // for this 10M logs, ~300MB GPU memory is needed
-    static constexpr inline uint64_t maxLogSize = 10000000;
+    // collect 1M events for a single step, if overflow this step will be dropped
+    // for hide & seek with 16384 worlds, roughly half million events will be generated
+    static constexpr inline uint64_t maxLogSize = 1000000;
 
     struct DeviceLog {
         DeviceEvent event;
@@ -40,7 +37,7 @@ private:
         uint64_t cycleCount;
     };
 
-    std::atomic_uint32_t cur_index_;
+    std::atomic_int32_t cur_index_;
     DeviceLog device_logs_[maxLogSize];
 
 public:
@@ -49,14 +46,9 @@ public:
           device_logs_ {}
     {}
 
-    inline uint32_t getIndex()
+    inline int32_t getIndex()
     {
         return cur_index_.load(std::memory_order_relaxed);
-    }
-
-    inline void resetIndex()
-    {
-        cur_index_.store(0, std::memory_order_release);
     }
 
 #ifdef MADRONA_GPU_MODE
@@ -67,6 +59,13 @@ public:
         return *(DeviceTracing *)mwGPU::GPUImplConsts::get().deviceTracingAddr;
     }
 #endif
+
+    static inline void resetIndex()
+    {
+#ifdef MADRONA_TRACING
+        DeviceTracing::get().resetIndex_();
+#endif
+    }
 
     static inline void Log([[maybe_unused]] DeviceEvent event,
                            [[maybe_unused]] uint32_t func_id,
@@ -98,21 +97,27 @@ private:
         return timestamp;
     }
 
+    inline void resetIndex_()
+    {
+        cur_index_.store(0, std::memory_order_release);
+    }
+
+
     inline void LogImpl(DeviceEvent event, uint32_t func_id,
                         uint32_t num_invocations, uint32_t node_id, bool is_leader)
     {
-        if (is_leader)
-        {
-            uint32_t sm_id;
-            asm("mov.u32 %0, %smid;"
-                : "=r"(sm_id));
-            uint32_t log_index = cur_index_.fetch_add(1, std::memory_order_relaxed);
-            if (log_index >= maxLogSize)
-            {
-                log_index = 0;
-                resetIndex();
+        if (is_leader) {
+            if (getIndex() >= 0) {
+                uint32_t sm_id;
+                asm("mov.u32 %0, %smid;"
+                    : "=r"(sm_id));
+                uint32_t log_index = cur_index_.fetch_add(1, std::memory_order_relaxed);
+                if (log_index >= maxLogSize) {
+                    cur_index_.store(-1, std::memory_order_release);
+                } else{
+                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, globalTimer()};
+                }
             }
-            device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, globalTimer()};
         }
     }
 #endif
