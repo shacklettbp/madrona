@@ -6,6 +6,7 @@ import pandas as pd
 
 LOG_STEPS = {}
 NUM_HIGHLIGHT_NODES = 10
+HIDE_SEEK = True
 
 
 def parse_device_logs(events):
@@ -223,7 +224,7 @@ def plot_events(step_log, nodes_map, blocks, file_name):
     num_pixel_per_sm = num_block_per_sm * num_pixel_per_block + sm_interval_pixel
     y_blank = 100
     y_limit = num_sm * num_pixel_per_sm + y_blank
-    x_limit = y_limit * 3
+    x_limit = y_limit * 2
 
     top_nodes = sorted([
         i[0] for i in sorted(nodes_map.items(),
@@ -232,10 +233,30 @@ def plot_events(step_log, nodes_map, blocks, file_name):
     ])
 
     colors = {}
-    for n in top_nodes:
-        func = nodes_map[n]["funcID"]
-        if func not in colors and len(colors) < len(COLORS):
-            colors[func] = COLORS[len(colors)]
+    if HIDE_SEEK:
+        colors = {
+            # narrowphase
+            28: (38, 77, 155),
+            # solvers
+            20: (94, 129, 197),
+            22: (133, 162, 220),
+            24: (63, 100, 172),
+            26: (181, 201, 240),
+            # broadphase
+            30: (199, 31, 102),
+            34: (230, 96, 152),
+            36: (248, 181, 209),
+            # observations
+            52: (135, 213, 34),
+            50: (179, 240, 100),
+            #
+            54: (233, 165, 37),
+        }
+    else:
+        for n in top_nodes:
+            func = nodes_map[n]["funcID"]
+            if func not in colors and len(colors) < len(COLORS):
+                colors[func] = COLORS[len(colors)]
     print("Color mapping for functions:", colors)
 
     img = Image.new("RGB", (x_limit, y_limit), "white")
@@ -254,32 +275,33 @@ def plot_events(step_log, nodes_map, blocks, file_name):
             for e in events:
                 bar_color = colors[nodes_map[e[2]]["funcID"]] if nodes_map[
                     e[2]]["funcID"] in colors else "black"
+                bar_color = ImageColor.getrgb(bar_color) if isinstance(
+                    bar_color, str) else bar_color
                 draw.line((cast_coor(e[0]), y, cast_coor(e[1]), y),
                           fill=bar_color,
                           width=num_pixel_per_block)
                 # lighten the first pixel to indicate starting
-                draw.line(
-                    (cast_coor(e[0]), y, cast_coor(
-                        e[0]), y + num_pixel_per_block - 1),
-                    fill=tuple(
-                        (i + 255) // 2 for i in ImageColor.getrgb(bar_color)))
+                draw.line((cast_coor(e[0]), y, cast_coor(
+                    e[0]), y + num_pixel_per_block - 1),
+                          fill=tuple((i + 255) // 2 for i in bar_color))
             y += sm_interval_pixel
 
-    # mark the start and the end of major nodes_map
-    y_shift = 0.9
-    for n in top_nodes:
-        # for n, v in nodes_map.items():
-        left, right = cast_coor(nodes_map[n]["start"]), cast_coor(
-            nodes_map[n]["end"])
-        draw.line((left, 0, left, y_limit), fill="red", width=1)
-        draw.line((right, 0, right, y_limit), fill="green", width=1)
-        draw.text((left, y_limit - y_blank * y_shift),
-                  " f: {}\n t: {:.3f}ms\n {:.1f}%".format(
-                      nodes_map[n]["funcID"],
-                      (nodes_map[n]["duration"]) / 1000000,
-                      nodes_map[n]["percentage"]),
-                  fill=(0, 0, 0))
-        y_shift = 1.3 - y_shift
+    if not HIDE_SEEK:
+        # mark the start and the end of major nodes_map
+        y_shift = 0.9
+        for n in top_nodes:
+            # for n, v in nodes_map.items():
+            left, right = cast_coor(nodes_map[n]["start"]), cast_coor(
+                nodes_map[n]["end"])
+            draw.line((left, 0, left, y_limit), fill="red", width=1)
+            draw.line((right, 0, right, y_limit), fill="green", width=1)
+            draw.text((left, y_limit - y_blank * y_shift),
+                      " f: {}\n t: {:.3f}ms\n {:.1f}%".format(
+                          nodes_map[n]["funcID"],
+                          (nodes_map[n]["duration"]) / 1000000,
+                          nodes_map[n]["percentage"]),
+                      fill=(0, 0, 0))
+            y_shift = 1.3 - y_shift
 
     img.save(file_name)
 
