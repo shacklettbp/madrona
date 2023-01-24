@@ -57,8 +57,10 @@ void TaskGraph::init()
     int block_idx = blockIdx.x;
 
     if (block_idx == 0) {
+        // reset the pointer for each run
+        mwGPU::DeviceTracing::resetIndex();
         // special calibration indicating the beginning of the kernel
-        mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration, 1, 0, 0);
+        mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration, 0, 0, 0);
 
         Node &first_node = sorted_nodes_[0];
 
@@ -85,9 +87,6 @@ void TaskGraph::init()
         sharedBlockState.nodeIdx = -1;
         sharedBlockState.initOffset = -1;
     }
-
-    // todo: no longer needed for global timer
-    mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration, 0, 0, 0);
 
 #ifdef LIMIT_ACTIVE_BLOCKS
     uint32_t sm_id;
