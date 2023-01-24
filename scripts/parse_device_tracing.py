@@ -1,6 +1,8 @@
 import os
 import sys
+
 from PIL import Image, ImageDraw, ImageColor
+import pandas as pd
 
 LOG_STEPS = {}
 NUM_HIGHLIGHT_NODES = 10
@@ -84,64 +86,37 @@ def parse_device_logs(events):
         "At the end, complete traces for {} steps are generated".format(STEP))
 
 
-def serialized_analysis(step_log):
+def serialized_analysis(step_log, nodes_map):
 
     def calibrate(timestamp, reference):
         return timestamp[2] - reference
 
-    node_exec_duration = {}
-    for i in range(max(step_log["events"])):
+    for i in range(max(step_log["events"]) + 1):
         # skipped nodes
         if i not in step_log["events"]:
             continue
-        node_exec_duration[i] = (
-            *step_log["mapping"][i],
-            calibrate(step_log["events"][i][2], step_log["start_timestamp"]) -
-            calibrate(step_log["events"][i][1], step_log["start_timestamp"]))
-
-    sorted_duration = dict(
-        sorted(node_exec_duration.items(), key=lambda item: item[1][2]))
-
-    total_exec_time = sum(v[2] for v in sorted_duration.values())
-    normailized = {
-        k: (v[0], v[1], round(v[2] / total_exec_time, 3))
-        for k, v in sorted_duration.items()
-    }
-    print("Total execution time of the mega kernel: {:.4f}ms".format(
-        total_exec_time / 1000000))
-    # print("execution time percentage for each node", normailized)
-
-    top_nodes = {
-        i: (normailized[i][-1],
+        nodes_map[i] = {
+            "nodeID":
+            i,
+            "funcID":
+            step_log["mapping"][i][0],
+            "invocations":
+            step_log["mapping"][i][1],
+            "start":
             calibrate(step_log["events"][i][1], step_log["start_timestamp"]),
-            calibrate(step_log["events"][i][2], step_log["start_timestamp"]))
-        for i in list(normailized.keys())[:-(NUM_HIGHLIGHT_NODES + 1):-1]
-    }
+            "end":
+            calibrate(step_log["events"][i][2], step_log["start_timestamp"]),
+            "SM utilization": []
+        }
+        nodes_map[i]["duration"] = nodes_map[i]["end"] - nodes_map[i]["start"]
 
-    print("Top {} nodes amounts {:.3f}% of execution time".format(
-        NUM_HIGHLIGHT_NODES,
-        sum([i[-1] for i in list(normailized.values())
-             ][-(NUM_HIGHLIGHT_NODES + 1)::]) * 100))
-
-    func_percentage = {}
-    for k, v in normailized.items():
-        if v[0] not in func_percentage:
-            func_percentage[v[0]] = [{k: v[1]}, v[2]]
-        else:
-            assert k not in func_percentage[v[0]][0]
-            func_percentage[v[0]][0][k] = v[1]
-            func_percentage[v[0]][1] += v[2]
-    sorted_func = dict(
-        sorted(func_percentage.items(), key=lambda item: item[1][1]))
-    # print("execution time for each func",
-    #       {k: [v[0], v[1] * total_exec_time]
-    #        for k, v in sorted_func.items()})
-    # print("execution time percentage for each func", sorted_func)
-
-    return top_nodes
+    total_exec_time = sum(v["duration"] for v in nodes_map.values())
+    for i in nodes_map:
+        nodes_map[i][
+            "percentage"] = nodes_map[i]["duration"] / total_exec_time * 100
 
 
-def block_analysis(step_log):
+def block_analysis(step_log, nodes_map):
     sm_execution = {k: [] for k in step_log["SMs"].keys()}
     block_exec_time = {
         "blocks": {k: {}
@@ -151,8 +126,7 @@ def block_analysis(step_log):
     }
 
     for sm in step_log["SMs"]:
-        for (offset, nodeID,
-             blockID), time_stamps in step_log["SMs"][sm].items():
+        for (_, nodeID, blockID), time_stamps in step_log["SMs"][sm].items():
             start = time_stamps[0]
             end = max(time_stamps[1:])
             # confirm clock does proceed within an SM
@@ -184,7 +158,6 @@ def block_analysis(step_log):
             for k, v in block_exec_time["nodes"][sm].items()
         }
 
-    sm_idle = []
     for s in sm_execution:
         intervals = []
         for start, end in sm_execution[s]:
@@ -205,17 +178,33 @@ def block_analysis(step_log):
                     break
             else:
                 intervals.insert(p, (start, end))
-        gap = 0
-        last_end = 0
-        for start, end in intervals:
-            gap += start - last_end
-            last_end = end
-        sm_idle.append(gap)
 
-    sm_active = sorted([1 - i / step_log["final_timestamp"] for i in sm_idle])
+        i_pointer = 0
+        for k, v in nodes_map.items():
+            occupied_time = 0
+            while i_pointer < len(intervals):
+                i_start, i_end = intervals[i_pointer]
+                if v["end"] < i_start:
+                    break
+                elif v["start"] <= i_start and v["end"] >= i_end:
+                    occupied_time += i_end - i_start
+                    i_pointer += 1
+                    continue
+                else:
+                    assert (False and "no intersections")
+            nodes_map[k]["SM utilization"].append(occupied_time /
+                                                  nodes_map[k]["duration"])
+
+    for i in nodes_map:
+        assert (len(nodes_map[i]["SM utilization"]) == len(sm_execution))
+        nodes_map[i]["SM utilization"] = sum(
+            nodes_map[i]["SM utilization"]) / len(sm_execution)
+
     print(
         "For each SM on average, {:.3f}% of the time there is at least one block is running on"
-        .format(sum(sm_active) / len(sm_active) * 100))
+        .format(
+            sum(v["SM utilization"] * v["percentage"]
+                for v in nodes_map.values())))
 
     return block_exec_time
 
@@ -226,7 +215,7 @@ COLORS = [
 ]
 
 
-def plot_events(step_log, nodes, blocks, file_name):
+def plot_events(step_log, nodes_map, blocks, file_name):
     num_sm = len(blocks)
     num_block_per_sm = 1
     num_pixel_per_block = 2
@@ -236,9 +225,15 @@ def plot_events(step_log, nodes, blocks, file_name):
     y_limit = num_sm * num_pixel_per_sm + y_blank
     x_limit = y_limit * 3
 
+    top_nodes = sorted([
+        i[0] for i in sorted(nodes_map.items(),
+                             key=lambda item: item[1]["duration"])
+        [len(nodes_map) - NUM_HIGHLIGHT_NODES:]
+    ])
+
     colors = {}
-    for n in nodes:
-        func = step_log["mapping"][n]
+    for n in top_nodes:
+        func = nodes_map[n]["funcID"]
         if func not in colors and len(colors) < len(COLORS):
             colors[func] = COLORS[len(colors)]
     print("Color mapping for functions:", colors)
@@ -250,8 +245,6 @@ def plot_events(step_log, nodes, blocks, file_name):
         assert (timestamp <= step_log["final_timestamp"])
         return int(timestamp / step_log["final_timestamp"] * limit)
 
-    narrow_gap = {}
-
     for s, b in blocks.items():
         y = s * num_pixel_per_sm
         for bb, events in b.items():
@@ -259,8 +252,8 @@ def plot_events(step_log, nodes, blocks, file_name):
                       fill="grey",
                       width=1)
             for e in events:
-                bar_color = colors[step_log["mapping"][
-                    e[2]]] if step_log["mapping"][e[2]] in colors else "black"
+                bar_color = colors[nodes_map[e[2]]["funcID"]] if nodes_map[
+                    e[2]]["funcID"] in colors else "black"
                 draw.line((cast_coor(e[0]), y, cast_coor(e[1]), y),
                           fill=bar_color,
                           width=num_pixel_per_block)
@@ -272,33 +265,43 @@ def plot_events(step_log, nodes, blocks, file_name):
                         (i + 255) // 2 for i in ImageColor.getrgb(bar_color)))
             y += sm_interval_pixel
 
-    # mark the start and the end of major nodes
+    # mark the start and the end of major nodes_map
     y_shift = 0.9
-    for n, v in nodes.items():
-        left, right = cast_coor(v[1]), cast_coor(v[2])
+    for n in top_nodes:
+        # for n, v in nodes_map.items():
+        left, right = cast_coor(nodes_map[n]["start"]), cast_coor(
+            nodes_map[n]["end"])
         draw.line((left, 0, left, y_limit), fill="red", width=1)
         draw.line((right, 0, right, y_limit), fill="green", width=1)
-        draw.text(
-            (left, y_limit - y_blank * y_shift),
-            " f: {}\n t: {:.3f}ms\n {:.1f}%".format(step_log["mapping"][n],
-                                                    (v[2] - v[1]) / 1000000,
-                                                    v[0] * 100),
-            fill=(0, 0, 0))
+        draw.text((left, y_limit - y_blank * y_shift),
+                  " f: {}\n t: {:.3f}ms\n {:.1f}%".format(
+                      nodes_map[n]["funcID"],
+                      (nodes_map[n]["duration"]) / 1000000,
+                      nodes_map[n]["percentage"]),
+                  fill=(0, 0, 0))
         y_shift = 1.3 - y_shift
 
     img.save(file_name)
 
 
-def step_analysis(step, file_name):
+def step_analysis(step, file_name, tabular_data):
     step_log = LOG_STEPS[step]
-
     # manually add the nodeStart event for node 0
     step_log["events"][0][1] = (0, 0, step_log["start_timestamp"])
 
-    node_exec_time = serialized_analysis(step_log)
+    nodes_map = {}
+    serialized_analysis(step_log, nodes_map)
 
-    block_exec_time = block_analysis(step_log)
-    plot_events(step_log, node_exec_time, block_exec_time["blocks"], file_name)
+    block_exec_time = block_analysis(step_log, nodes_map)
+    plot_events(step_log, nodes_map, block_exec_time["blocks"], file_name)
+
+    for n in nodes_map:
+        tabular_data = pd.concat([
+            tabular_data,
+            pd.DataFrame({k: [v]
+                          for k, v in nodes_map[n].items()})
+        ])
+    return tabular_data
 
 
 if __name__ == "__main__":
@@ -335,7 +338,23 @@ if __name__ == "__main__":
         os.mkdir(dir_path)
     # todo: limit
     assert start_from < len(LOG_STEPS)
-    for s in range(start_from, min(start_from + steps, len(LOG_STEPS))):
-        step_analysis(s, dir_path + "/step{}.png".format(s))
+    end_at = min(start_from + steps, len(LOG_STEPS))
 
-    # todo: aggregated analysis
+    tabular_data = [
+        pd.DataFrame({
+            "nodeID": [],
+            "funcID": [],
+            "duration": [],
+            "invocations": [],
+            "percentage": [],
+            "SM utilization": []
+        }) for _ in range(start_from, end_at)
+    ]
+
+    with pd.ExcelWriter(dir_path + "/metrics.xlsx") as writer:
+        for s in range(start_from, end_at):
+            step_analysis(s, dir_path + "/step{}.png".format(s),
+                          tabular_data[s - start_from]).to_excel(
+                              writer,
+                              sheet_name="step{}".format(s),
+                              index=False)
