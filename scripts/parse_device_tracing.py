@@ -220,10 +220,10 @@ COLORS = [
 def plot_events(step_log, nodes_map, blocks, file_name):
     num_sm = len(blocks)
     num_block_per_sm = 1
-    num_pixel_per_block = 10
-    sm_interval_pixel = num_pixel_per_block
+    num_pixel_per_block = 12
+    sm_interval_pixel = num_pixel_per_block // 2
     num_pixel_per_sm = num_block_per_sm * num_pixel_per_block + sm_interval_pixel
-    y_blank = num_pixel_per_block * 50
+    y_blank = num_pixel_per_block * 40
     y_limit = num_sm * num_pixel_per_sm + y_blank
     x_limit = y_limit * 2
     print(x_limit, y_limit)
@@ -238,21 +238,21 @@ def plot_events(step_log, nodes_map, blocks, file_name):
     if HIDE_SEEK:
         colors = {
             # narrowphase
-            28: (38, 77, 155),
+            28: (0, 76, 153),
             # solvers
-            20: (94, 129, 197),
-            22: (133, 162, 220),
-            24: (63, 100, 172),
-            26: (181, 201, 240),
+            20: (0, 102, 204),
+            22: (0, 128, 255),
+            24: (102, 178, 255),
+            26: (178, 216, 255),
             # broadphase
             30: (199, 31, 102),
             34: (230, 96, 152),
             36: (248, 181, 209),
             # observations
-            52: (135, 213, 34),
-            50: (179, 240, 100),
+            50: (139, 235, 219),
+            52: (90, 184, 168),
             #
-            54: (233, 165, 37),
+            54: (148, 112, 206)
         }
     else:
         for n in top_nodes:
@@ -286,7 +286,8 @@ def plot_events(step_log, nodes_map, blocks, file_name):
                 draw.line((cast_coor(
                     e[0]), y - num_pixel_per_block // 2 + 1, cast_coor(e[0]),
                            y + num_pixel_per_block - num_pixel_per_block // 2),
-                          fill=tuple((i + 255) // 2 for i in bar_color))
+                          fill=tuple((i + 255) // 2 for i in bar_color),
+                          width=num_pixel_per_block // 3)
             y += sm_interval_pixel
 
     if not HIDE_SEEK:
