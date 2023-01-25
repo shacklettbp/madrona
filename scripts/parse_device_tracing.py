@@ -109,12 +109,13 @@ def serialized_analysis(step_log, nodes_map):
             calibrate(step_log["events"][i][2], step_log["start_timestamp"]),
             "SM utilization": []
         }
-        nodes_map[i]["duration"] = nodes_map[i]["end"] - nodes_map[i]["start"]
-
-    total_exec_time = sum(v["duration"] for v in nodes_map.values())
-    for i in nodes_map:
         nodes_map[i][
-            "percentage"] = nodes_map[i]["duration"] / total_exec_time * 100
+            "duration (ns)"] = nodes_map[i]["end"] - nodes_map[i]["start"]
+
+    total_exec_time = sum(v["duration (ns)"] for v in nodes_map.values())
+    for i in nodes_map:
+        nodes_map[i]["percentage (%)"] = nodes_map[i][
+            "duration (ns)"] / total_exec_time * 100
 
 
 def block_analysis(step_log, nodes_map):
@@ -193,8 +194,8 @@ def block_analysis(step_log, nodes_map):
                     continue
                 else:
                     assert (False and "no intersections")
-            nodes_map[k]["SM utilization"].append(occupied_time /
-                                                  nodes_map[k]["duration"])
+            nodes_map[k]["SM utilization"].append(
+                occupied_time / nodes_map[k]["duration (ns)"])
 
     for i in nodes_map:
         assert (len(nodes_map[i]["SM utilization"]) == len(sm_execution))
@@ -204,7 +205,7 @@ def block_analysis(step_log, nodes_map):
     print(
         "For each SM on average, {:.3f}% of the time there is at least one block is running on"
         .format(
-            sum(v["SM utilization"] * v["percentage"]
+            sum(v["SM utilization"] * v["percentage (%)"]
                 for v in nodes_map.values())))
 
     return block_exec_time
@@ -219,16 +220,17 @@ COLORS = [
 def plot_events(step_log, nodes_map, blocks, file_name):
     num_sm = len(blocks)
     num_block_per_sm = 1
-    num_pixel_per_block = 2
-    sm_interval_pixel = 2
+    num_pixel_per_block = 10
+    sm_interval_pixel = num_pixel_per_block
     num_pixel_per_sm = num_block_per_sm * num_pixel_per_block + sm_interval_pixel
-    y_blank = 100
+    y_blank = num_pixel_per_block * 50
     y_limit = num_sm * num_pixel_per_sm + y_blank
     x_limit = y_limit * 2
+    print(x_limit, y_limit)
 
     top_nodes = sorted([
         i[0] for i in sorted(nodes_map.items(),
-                             key=lambda item: item[1]["duration"])
+                             key=lambda item: item[1]["duration (ns)"])
         [len(nodes_map) - NUM_HIGHLIGHT_NODES:]
     ])
 
@@ -269,9 +271,9 @@ def plot_events(step_log, nodes_map, blocks, file_name):
     for s, b in blocks.items():
         y = s * num_pixel_per_sm
         for bb, events in b.items():
-            draw.line((cast_coor(step_log["final_cycles"][bb]), y, x_limit, y),
-                      fill="grey",
-                      width=1)
+            # draw.line((cast_coor(step_log["final_cycles"][bb]), y, x_limit, y),
+            #           fill="grey",
+            #           width=1)
             for e in events:
                 bar_color = colors[nodes_map[e[2]]["funcID"]] if nodes_map[
                     e[2]]["funcID"] in colors else "black"
@@ -281,8 +283,9 @@ def plot_events(step_log, nodes_map, blocks, file_name):
                           fill=bar_color,
                           width=num_pixel_per_block)
                 # lighten the first pixel to indicate starting
-                draw.line((cast_coor(e[0]), y, cast_coor(
-                    e[0]), y + num_pixel_per_block - 1),
+                draw.line((cast_coor(
+                    e[0]), y - num_pixel_per_block // 2 + 1, cast_coor(e[0]),
+                           y + num_pixel_per_block - num_pixel_per_block // 2),
                           fill=tuple((i + 255) // 2 for i in bar_color))
             y += sm_interval_pixel
 
@@ -298,8 +301,8 @@ def plot_events(step_log, nodes_map, blocks, file_name):
             draw.text((left, y_limit - y_blank * y_shift),
                       " f: {}\n t: {:.3f}ms\n {:.1f}%".format(
                           nodes_map[n]["funcID"],
-                          (nodes_map[n]["duration"]) / 1000000,
-                          nodes_map[n]["percentage"]),
+                          (nodes_map[n]["duration (ns)"]) / 1000000,
+                          nodes_map[n]["percentage (%)"]),
                       fill=(0, 0, 0))
             y_shift = 1.3 - y_shift
 
@@ -366,9 +369,9 @@ if __name__ == "__main__":
         pd.DataFrame({
             "nodeID": [],
             "funcID": [],
-            "duration": [],
+            "duration (ns)": [],
             "invocations": [],
-            "percentage": [],
+            "percentage (%)": [],
             "SM utilization": []
         }) for _ in range(start_from, end_at)
     ]
