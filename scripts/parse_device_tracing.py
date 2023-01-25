@@ -249,7 +249,7 @@ def plot_events(step_log, nodes_map, blocks, file_name):
             20: (0, 102, 204),
             22: (0, 128, 255),
             24: (102, 178, 255),
-            26: (102, 200, 255),
+            26: (178, 216, 255),
             # broadphase
             30: (199, 31, 102),
             34: (230, 96, 152),
@@ -323,9 +323,7 @@ def plot_events(step_log, nodes_map, blocks, file_name):
             if y_low <= y_high:
                 pass
             else:
-                draw.line((p, y_low, p, y_high),
-                          fill=tuple((i + 255) // 2 for i in bar_color),
-                          width=1)
+                draw.line((p, y_low, p, y_high), fill=(211, 211, 211), width=1)
 
     if not HIDE_SEEK:
         # mark the start and the end of major nodes_map
