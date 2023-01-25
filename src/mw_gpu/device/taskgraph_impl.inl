@@ -238,11 +238,6 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
     *run_func_id = sharedBlockState.funcID;
     *run_offset = thread_offset;
 
-    if (num_threads_per_invocation <= 32 && run_new_node) { 
-        mwGPU::DeviceTracing::Log(
-            mwGPU::DeviceEvent::blockStart,
-            sharedBlockState.funcID, sharedBlockState.initOffset, sharedBlockState.nodeIdx);
-    }
     return WorkerState::Run;
 }
 
@@ -259,18 +254,12 @@ void TaskGraph::finishWork(bool lane_executed)
         num_finished_threads = consts::numMegakernelThreads;
 
         is_leader = threadIdx.x == 0;
-        mwGPU::DeviceTracing::Log(
-            mwGPU::DeviceEvent::blockWait,
-            sharedBlockState.funcID, sharedBlockState.initOffset, sharedBlockState.nodeIdx);
     } else {
         __syncwarp(mwGPU::allActive);
         num_finished_threads =
             __popc(__ballot_sync(mwGPU::allActive, lane_executed));
 
         is_leader = threadIdx.x % 32 == 0;
-        mwGPU::DeviceTracing::Log(
-            mwGPU::DeviceEvent::blockWait,
-            sharedBlockState.funcID, sharedBlockState.initOffset, sharedBlockState.nodeIdx, is_leader);
     }
 
     if (!is_leader) {
@@ -356,12 +345,15 @@ static inline __attribute__((always_inline)) void megakernelImpl()
 
         bool lane_executed;
         if (worker_state == TaskGraph::WorkerState::Run) {
-            if (sharedBlockState.numThreadsPerInvocation > 32) {
-                mwGPU::DeviceTracing::Log(
-                    mwGPU::DeviceEvent::blockStart,
-                    sharedBlockState.funcID, sharedBlockState.initOffset, sharedBlockState.nodeIdx);
-            }           
+            mwGPU::DeviceTracing::Log(
+                mwGPU::DeviceEvent::blockStart,
+                sharedBlockState.funcID, invocation_offset, sharedBlockState.nodeIdx, threadIdx.x % 32 == 0);
+
             dispatch(func_id, node_data, invocation_offset);
+
+            mwGPU::DeviceTracing::Log(
+                mwGPU::DeviceEvent::blockWait,
+                sharedBlockState.funcID, invocation_offset, sharedBlockState.nodeIdx, threadIdx.x % 32 == 0);
             lane_executed = true;
         } else {
             lane_executed = false;

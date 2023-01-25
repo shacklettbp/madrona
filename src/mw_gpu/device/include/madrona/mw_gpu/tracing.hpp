@@ -32,6 +32,7 @@ private:
         uint32_t funcID;
         uint32_t numInvocations;
         uint32_t nodeID;
+        uint64_t warpID;
         uint32_t blockID;
         uint32_t smID;
         uint64_t cycleCount;
@@ -115,7 +116,8 @@ private:
                 if (log_index >= maxLogSize) {
                     cur_index_.store(-1, std::memory_order_release);
                 } else{
-                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, globalTimer()};
+                    uint64_t warp_id = threadIdx.x / 32;
+                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, warp_id, blockIdx.x, sm_id, globalTimer()};
                 }
             }
         }
