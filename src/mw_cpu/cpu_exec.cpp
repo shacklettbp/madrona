@@ -183,7 +183,7 @@ void ThreadPoolExecutor::workerThread(CountT worker_id)
                 worker_wakeup_.store(0, std::memory_order_relaxed);
             }
 
-            assert(job_idx < num_jobs_ + 100);
+            assert(job_idx < 0xFFFF'FFFF);
 
             if (job_idx >= num_jobs_) {
                 break;
