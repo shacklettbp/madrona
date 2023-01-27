@@ -7,6 +7,7 @@
  */
 
 #include <cassert>
+#include <madrona/utils.hpp>
 
 namespace madrona {
 
@@ -88,7 +89,7 @@ auto AllocContext::with(A &alloc, Fn &&fn, Args &&...args) ->
 
 void * DefaultAlloc::alloc(size_t num_bytes)
 {
-    return std::aligned_alloc(64, num_bytes);
+    return std::aligned_alloc(64, utils::roundUpPow2(num_bytes, 64));
 }
 
 void DefaultAlloc::dealloc(void *ptr)
