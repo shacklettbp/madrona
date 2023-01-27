@@ -948,10 +948,8 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
 
     if (opt_mode == CompileConfig::OptMode::Debug) {
         linker_flags.push_back("-g");
-        linker_flags.push_back("-O0");
     } else {
         linker_flags.push_back("-lineinfo");
-        linker_flags.push_back("-O4");
         linker_flags.push_back("-lto");
     }
 

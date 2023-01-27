@@ -1,3 +1,18 @@
+add_library(madrona_mw_cpu STATIC
+    ${MADRONA_INC_DIR}/mw_cpu.hpp ${MADRONA_INC_DIR}/mw_cpu.inl cpu_exec.cpp
+)
+
+target_link_libraries(madrona_mw_cpu
+    PUBLIC
+        madrona_mw_core
+    PRIVATE
+        madrona_batch_render
+)
+
+if (NOT CUDAToolkit_FOUND)
+    return()
+endif()
+
 add_library(madrona_mw_gpu STATIC
     cpp_compile.hpp cpp_compile.cpp
     ${MADRONA_INC_DIR}/mw_gpu.hpp cuda_exec.cpp)
