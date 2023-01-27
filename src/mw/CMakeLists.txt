@@ -1,3 +1,11 @@
+add_library(madrona_mw_render STATIC
+    renderer_interop.cpp
+)
+
+target_link_libraries(madrona_mw_render PUBLIC
+    madrona_mw_core
+)
+
 add_library(madrona_mw_cpu STATIC
     ${MADRONA_INC_DIR}/mw_cpu.hpp ${MADRONA_INC_DIR}/mw_cpu.inl cpu_exec.cpp
 )
@@ -6,6 +14,7 @@ target_link_libraries(madrona_mw_cpu
     PUBLIC
         madrona_mw_core
     PRIVATE
+        madrona_mw_render
         madrona_batch_render
 )
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <madrona/render.hpp>
+#include <madrona/mw_render.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/heap_array.hpp>
 

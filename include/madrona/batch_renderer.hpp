@@ -1,7 +1,7 @@
 #pragma once
 
 #include <madrona/types.hpp>
-#include <madrona/render.hpp>
+#include <madrona/mw_render.hpp>
 #include <madrona/importer.hpp>
 #include <memory>
 

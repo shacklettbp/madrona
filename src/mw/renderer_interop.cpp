@@ -1,5 +1,5 @@
 #include <atomic>
-#include <madrona/render.hpp>
+#include <madrona/mw_render.hpp>
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
 

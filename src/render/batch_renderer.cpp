@@ -1,5 +1,4 @@
 #include <madrona/batch_renderer.hpp>
-#include <madrona/render.hpp>
 
 #include <madrona/math.hpp>
 #include <madrona/dyn_array.hpp>
