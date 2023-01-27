@@ -714,8 +714,11 @@ static __attribute__((always_inline)) inline void dispatch(
         }
     };
 
+    // Need to save bytecode until nvJitLinkComplete is called,
+    // unlike old driver API
+    DynArray<HeapArray<char>> source_bytecodes(num_sources);
     printf("Compiling GPU engine code:\n");
-    for (int i = 0; i < (int)num_sources; i++) {
+    for (int64_t i = 0; i < num_sources; i++) {
         printf("%s\n", sources[i]);
         auto [ptx, bytecode] = cu::jitCompileCPPFile(sources[i],
             compile_flags, num_compile_flags,
@@ -724,6 +727,8 @@ static __attribute__((always_inline)) inline void dispatch(
 
         processPTXSymbols(std::string_view(ptx.data(), ptx.size()));
         addToLinker(bytecode, sources[i]);
+
+        source_bytecodes.emplace_back(std::move(bytecode));
     }
 
     megakernel_prefix += R"__(
@@ -968,7 +973,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
             cout << flag << "\n";
         }
 
-        cout << flush;
+        cout << endl;
     }
 
     GPUKernels gpu_kernels;
