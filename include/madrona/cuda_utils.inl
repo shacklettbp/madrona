@@ -90,5 +90,13 @@ void checkNVRTC(nvrtcResult res, const char *file,
     }
 }
 
+void checknvJitLink(nvJitLinkResult res, const char *file,
+                    int line, const char *funcname) noexcept
+{
+    if (res != NVJITLINK_SUCCESS) {
+        nvJitLinkError(res, file, line, funcname);
+    }
+}
+
 }
 }

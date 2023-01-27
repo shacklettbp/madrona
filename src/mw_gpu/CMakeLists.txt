@@ -2,22 +2,22 @@ add_library(madrona_mw_gpu STATIC
     cpp_compile.hpp cpp_compile.cpp
     ${MADRONA_INC_DIR}/mw_gpu.hpp cuda_exec.cpp)
 
-
 target_link_libraries(madrona_mw_gpu
     PUBLIC
         madrona_hdrs madrona_cuda
     PRIVATE
         madrona_mw_core madrona_batch_render
-        CUDA::nvrtc CUDA::cuda_driver)
+        CUDA::nvrtc CUDA::cuda_driver
+        ${CUDA_NVJITLINK_LIBRARY} ${CUDA_PTXCOMPILER_LIBRARY}
+)
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")
 
 set(MADRONA_MW_GPU_COMPILE_FLAGS
-    -std=c++17
+    -std=c++20
     -default-device
     -rdc=true
     -use_fast_math
-    --maxrregcount=255
     -DMADRONA_GPU_MODE=1
 )
 

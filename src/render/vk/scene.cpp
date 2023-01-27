@@ -16,14 +16,14 @@ namespace vk {
 BLASData::BLASData(const DeviceState &d, vector<BLAS> &&as,
                    LocalBuffer &&buf)
     : dev(&d),
-      accelStructs(move(as)),
-      storage(move(buf))
+      accelStructs(std::move(as)),
+      storage(std::move(buf))
 {}
 
 BLASData::BLASData(BLASData &&o)
     : dev(o.dev),
-      accelStructs(move(o.accelStructs)),
-      storage(move(o.storage))
+      accelStructs(std::move(o.accelStructs)),
+      storage(std::move(o.storage))
 {}
 
 static void freeBLASes(const DeviceState &dev, const vector<BLAS> &blases)
@@ -39,8 +39,8 @@ BLASData &BLASData::operator=(BLASData &&o)
     freeBLASes(*dev, accelStructs);
 
     dev = o.dev;
-    accelStructs = move(o.accelStructs);
-    storage = move(o.storage);
+    accelStructs = std::move(o.accelStructs);
+    storage = std::move(o.storage);
 
     return *this;
 }
@@ -233,8 +233,8 @@ static optional<BLASBuildResults> makeBLASes(
         build_infos.size(), build_infos.data(), range_info_ptrs.data());
 
     return BLASBuildResults {
-        BLASData(dev, move(accel_structs), move(accel_mem)),
-        move(scratch_mem),
+        BLASData(dev, std::move(accel_structs), std::move(accel_mem)),
+        std::move(scratch_mem),
         {},
         total_accel_bytes,
         true,

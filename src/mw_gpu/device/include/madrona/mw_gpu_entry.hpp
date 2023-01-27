@@ -40,7 +40,9 @@ template <typename ContextT, typename WorldDataT, typename ConfigT,
           typename... InitTs>
 __launch_bounds__(madrona::consts::numMegakernelThreads,
                   madrona::consts::numMegakernelBlocksPerSM)
-__global__ void initWorlds(int32_t num_worlds, InitTs * ...inits)
+__global__ void initWorlds(int32_t num_worlds,
+                           const ConfigT *cfg,
+                           InitTs * ...inits)
 {
     int32_t world_idx = threadIdx.x + blockDim.x * blockIdx.x;
 
@@ -54,7 +56,7 @@ __global__ void initWorlds(int32_t num_worlds, InitTs * ...inits)
         world_idx,
     });
 
-    new (world) WorldDataT(ctx, inits[world_idx] ...);
+    new (world) WorldDataT(ctx, *cfg, inits[world_idx] ...);
 }
 
 template <typename ContextT, typename WorldDataT, typename ConfigT,

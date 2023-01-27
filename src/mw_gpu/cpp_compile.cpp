@@ -21,7 +21,7 @@ CompileOutput jitCompileCPPSrc(const char *src,
                                uint32_t num_opt_compile_flags,
                                const char **fast_compile_flags,
                                uint32_t num_fast_compile_flags,
-                               bool nvvm_out)
+                               bool ltoir_out)
 {
     auto print_compile_log = [](nvrtcProgram prog) {
         // Retrieve log output
@@ -36,15 +36,15 @@ CompileOutput jitCompileCPPSrc(const char *src,
 
     };
 
-    auto getNVVM = [](nvrtcProgram prog) {
-        size_t num_nvvm_bytes;
-        REQ_NVRTC(nvrtcGetNVVMSize(prog, &num_nvvm_bytes));
+    auto getLTOIR = [](nvrtcProgram prog) {
+        size_t num_ltoir_bytes;
+        REQ_NVRTC(nvrtcGetLTOIRSize(prog, &num_ltoir_bytes));
 
-        HeapArray<char> nvvm_data(num_nvvm_bytes);
+        HeapArray<char> ltoir_data(num_ltoir_bytes);
 
-        REQ_NVRTC(nvrtcGetNVVM(prog, nvvm_data.data()));
+        REQ_NVRTC(nvrtcGetLTOIR(prog, ltoir_data.data()));
 
-        return nvvm_data;
+        return ltoir_data;
     };
 
     auto getPTX = [](nvrtcProgram prog) {
@@ -100,8 +100,8 @@ CompileOutput jitCompileCPPSrc(const char *src,
         ERR_NVRTC(res);
     }
 
-    HeapArray<char> ptx = nvvm_out ? ltoGetPTX() : getPTX(prog);
-    HeapArray<char> result = nvvm_out ? getNVVM(prog) : getCUBIN(prog);
+    HeapArray<char> ptx = ltoir_out ? ltoGetPTX() : getPTX(prog);
+    HeapArray<char> result = ltoir_out ? getLTOIR(prog) : getCUBIN(prog);
 
     REQ_NVRTC(nvrtcDestroyProgram(&prog));
 
@@ -116,7 +116,7 @@ CompileOutput jitCompileCPPFile(const char *src_path,
                                   uint32_t num_opt_compile_flags,
                                   const char **fast_compile_flags,
                                   uint32_t num_fast_compile_flags,
-                                  bool nvvm_out)
+                                  bool ltoir_out)
 {
     using namespace std;
 
@@ -131,7 +131,7 @@ CompileOutput jitCompileCPPFile(const char *src_path,
 
     return jitCompileCPPSrc(src.data(), src_path,
         opt_compile_flags, num_opt_compile_flags,
-        fast_compile_flags, num_fast_compile_flags, nvvm_out);
+        fast_compile_flags, num_fast_compile_flags, ltoir_out);
 }
 
 }

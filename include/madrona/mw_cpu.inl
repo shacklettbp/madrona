@@ -72,7 +72,7 @@ WorldContext(const WorkerInit &worker_init,
              const ConfigT &user_cfg,
              const InitTs & ...world_inits)
     : ctx(&worldData, worker_init),
-      worldData(ctx, world_inits...),
+      worldData(ctx, user_cfg, world_inits...),
       taskgraph([this, &user_cfg]() {
           TaskGraph::Builder builder(ctx);
           WorldT::setupTasks(builder, user_cfg);
