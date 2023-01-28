@@ -1,7 +1,28 @@
 #include <madrona/mw_cpu.hpp>
 #include "../core/worker_init.hpp"
 
+#include "render/batch_renderer.hpp"
+
 namespace madrona {
+
+struct ThreadPoolExecutor::Impl {
+    HeapArray<std::thread> workers;
+    alignas(MADRONA_CACHE_LINE) std::atomic_int32_t workerWakeup;
+    alignas(MADRONA_CACHE_LINE) std::atomic_int32_t mainWakeup;
+    ThreadPoolExecutor::Job *currentJobs;
+    uint32_t numJobs;
+    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t nextJob;
+    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t numFinished;
+    StateManager stateMgr;
+    HeapArray<StateCache> stateCaches;
+    HeapArray<void *> exportPtrs;
+    Optional<render::BatchRenderer> renderer;
+
+    static Impl * make(const ThreadPoolExecutor::Config &cfg);
+    ~Impl();
+    void run(Job *jobs, CountT num_jobs);
+    void workerThread(CountT worker_id);
+};
 
 static CountT getNumCores()
 {
@@ -40,7 +61,7 @@ static inline void pinThread(CountT worker_id)
 static Optional<render::BatchRenderer> makeRenderer(
     const ThreadPoolExecutor::Config &cfg)
 {
-    if (cfg.cameraMode == ThreadPoolExecutor::CameraMode::None) {
+    if (cfg.cameraMode == render::CameraMode::None) {
         return Optional<render::BatchRenderer>::none();
     }
 
@@ -52,117 +73,138 @@ static Optional<render::BatchRenderer> makeRenderer(
         .maxViewsPerWorld = cfg.maxViewsPerWorld,
         .maxInstancesPerWorld = cfg.maxInstancesPerWorld,
         .maxObjects = cfg.maxObjects,
-        .cameraMode =
-            cfg.cameraMode == ThreadPoolExecutor::CameraMode::Perspective ?
-                render::BatchRenderer::CameraMode::Perspective :
-                render::BatchRenderer::CameraMode::Lidar,
+        .cameraMode = cfg.cameraMode,
         .inputMode = render::BatchRenderer::InputMode::CPU,
     });
 }
 
-ThreadPoolExecutor::ThreadPoolExecutor(const Config &cfg)
-    : workers_(cfg.numWorkers == 0 ? getNumCores() : cfg.numWorkers),
-      worker_wakeup_(0),
-      main_wakeup_(0),
-      current_jobs_(nullptr),
-      num_jobs_(0),
-      next_job_(0),
-      num_finished_(0),
-      state_mgr_(cfg.numWorlds),
-      state_caches_(cfg.numWorlds),
-      export_ptrs_(cfg.numExportedBuffers),
-      renderer_(makeRenderer(cfg))
+ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
+    const ThreadPoolExecutor::Config &cfg)
 {
+    Impl *impl = new Impl {
+        .workers = HeapArray<std::thread>(
+            cfg.numWorkers == 0 ? getNumCores() : cfg.numWorkers),
+        .workerWakeup = 0,
+        .mainWakeup = 0,
+        .currentJobs = nullptr,
+        .numJobs = 0,
+        .nextJob = 0,
+        .numFinished = 0,
+        .stateMgr = StateManager(cfg.numWorlds),
+        .stateCaches = HeapArray<StateCache>(cfg.numWorlds),
+        .exportPtrs = HeapArray<void *>(cfg.numExportedBuffers),
+        .renderer = makeRenderer(cfg),
+    };
+
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
-        new (&state_caches_[i]) StateCache();
+        impl->stateCaches.emplace(i);
     }
 
-    for (CountT i = 0; i < workers_.size(); i++) {
-        new (&workers_[i]) std::thread([this, i]() {
-            workerThread(i);
-        });
+    for (CountT i = 0; i < impl->workers.size(); i++) {
+        impl->workers.emplace(i, [](Impl *impl, CountT i) {
+            impl->workerThread(i);
+        }, impl, i);
+    }
+
+    return impl;
+}
+
+ThreadPoolExecutor::ThreadPoolExecutor(const Config &cfg)
+    : impl_(Impl::make(cfg))
+{}
+
+ThreadPoolExecutor::Impl::~Impl()
+{
+    workerWakeup.store(-1, std::memory_order_release);
+    workerWakeup.notify_all();
+
+    for (CountT i = 0; i < workers.size(); i++) {
+        workers[i].join();
     }
 }
 
-ThreadPoolExecutor::~ThreadPoolExecutor()
-{
-    worker_wakeup_.store(-1, std::memory_order_release);
-    worker_wakeup_.notify_all();
+ThreadPoolExecutor::~ThreadPoolExecutor() = default;
 
-    for (CountT i = 0; i < workers_.size(); i++) {
-        workers_[i].join();
+void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
+{
+    currentJobs = jobs;
+    numJobs = uint32_t(num_jobs);
+    nextJob.store(0, std::memory_order_relaxed);
+    numFinished.store(0, std::memory_order_relaxed);
+    workerWakeup.store(1, std::memory_order_release);
+    workerWakeup.notify_all();
+
+    mainWakeup.wait(0, std::memory_order_acquire);
+    mainWakeup.store(0, std::memory_order_relaxed);
+
+    if (renderer.has_value()) {
+        renderer->render();
     }
 }
 
 void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs)
 {
-    current_jobs_ = jobs;
-    num_jobs_ = uint32_t(num_jobs);
-    next_job_.store(0, std::memory_order_relaxed);
-    num_finished_.store(0, std::memory_order_relaxed);
-    worker_wakeup_.store(1, std::memory_order_release);
-    worker_wakeup_.notify_all();
-
-    main_wakeup_.wait(0, std::memory_order_acquire);
-    main_wakeup_.store(0, std::memory_order_relaxed);
-
-    if (renderer_.has_value()) {
-        renderer_->render();
-    }
+    impl_->run(jobs, num_jobs);
 }
 
 CountT ThreadPoolExecutor::loadObjects(Span<const imp::SourceObject> objs)
 {
-    return renderer_->loadObjects(objs);
+    return impl_->renderer->loadObjects(objs);
 }
 
 uint8_t * ThreadPoolExecutor::rgbObservations() const
 {
-    return renderer_->rgbPtr();
+    return impl_->renderer->rgbPtr();
 }
 
 float * ThreadPoolExecutor::depthObservations() const
 {
-    return renderer_->depthPtr();
+    return impl_->renderer->depthPtr();
 }
 
 void * ThreadPoolExecutor::getExported(CountT slot) const
 {
-    return export_ptrs_[slot];
+    return impl_->exportPtrs[slot];
 }
 
-void ThreadPoolExecutor::ctxInit(void (*init_fn)(void *, const WorkerInit &),
-                                 void *init_data, CountT world_idx)
+void ThreadPoolExecutor::initializeContexts(
+    Context & (*init_fn)(void *, const WorkerInit &, CountT),
+    void *init_data, CountT num_worlds)
 {
-    WorkerInit worker_init {
-        &state_mgr_,
-        &state_caches_[world_idx],
-        uint32_t(world_idx),
-    };
+    render::WorldGrid render_grid(num_worlds, 220.f /* FIXME */);
 
-    init_fn(init_data, worker_init);
+    for (CountT world_idx = 0; world_idx < num_worlds; world_idx++) {
+        WorkerInit worker_init {
+            &impl_->stateMgr,
+            &impl_->stateCaches[world_idx],
+            uint32_t(world_idx),
+        };
 
+        Context &ctx = init_fn(init_data, worker_init, world_idx);
+
+        if (impl_->renderer.has_value()) {
+            render::RendererInit renderer_init {
+                impl_->renderer->getInterface(),
+                render_grid.getOffset(world_idx),
+            };
+
+            render::RendererState::init(ctx, renderer_init);
+        }
+    }
 }
 
 ECSRegistry ThreadPoolExecutor::getECSRegistry()
 {
-    return ECSRegistry(&state_mgr_, export_ptrs_.data());
+    return ECSRegistry(&impl_->stateMgr, impl_->exportPtrs.data());
 }
 
-Optional<render::RendererInterface> ThreadPoolExecutor::getRendererInterface()
-{
-    return renderer_.has_value() ?
-        renderer_->getInterface() :
-        Optional<render::RendererInterface>::none();
-}
-
-void ThreadPoolExecutor::workerThread(CountT worker_id)
+void ThreadPoolExecutor::Impl::workerThread(CountT worker_id)
 {
     pinThread(worker_id);
 
     while (true) {
-        worker_wakeup_.wait(0, std::memory_order_relaxed);
-        int32_t ctrl = worker_wakeup_.load(std::memory_order_acquire);
+        workerWakeup.wait(0, std::memory_order_relaxed);
+        int32_t ctrl = workerWakeup.load(std::memory_order_acquire);
 
         if (ctrl == 0) {
             continue;
@@ -172,28 +214,28 @@ void ThreadPoolExecutor::workerThread(CountT worker_id)
 
         while (true) {
             uint32_t job_idx =
-                next_job_.fetch_add(1, std::memory_order_relaxed);
+                nextJob.fetch_add(1, std::memory_order_relaxed);
 
-            if (job_idx == num_jobs_) {
-                worker_wakeup_.store(0, std::memory_order_relaxed);
+            if (job_idx == numJobs) {
+                workerWakeup.store(0, std::memory_order_relaxed);
             }
 
             assert(job_idx < 0xFFFF'FFFF);
 
-            if (job_idx >= num_jobs_) {
+            if (job_idx >= numJobs) {
                 break;
             }
 
-            current_jobs_[job_idx].fn(current_jobs_[job_idx].data);
+            currentJobs[job_idx].fn(currentJobs[job_idx].data);
 
             // This has to be acq_rel so the finishing thread has seen
             // all the other threads' effects
             uint32_t prev_finished =
-                num_finished_.fetch_add(1, std::memory_order_acq_rel);
+                numFinished.fetch_add(1, std::memory_order_acq_rel);
 
-            if (prev_finished == num_jobs_ - 1) {
-                main_wakeup_.store(1, std::memory_order_release);
-                main_wakeup_.notify_one();
+            if (prev_finished == numJobs - 1) {
+                mainWakeup.store(1, std::memory_order_release);
+                mainWakeup.notify_one();
             }
         }
     }

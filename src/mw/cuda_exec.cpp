@@ -16,10 +16,10 @@
 
 #include <madrona/mw_gpu.hpp>
 #include <madrona/dyn_array.hpp>
-#include <madrona/batch_renderer.hpp>
 #include <madrona/cuda_utils.hpp>
 #include <madrona/tracing.hpp>
 
+#include "render/batch_renderer.hpp"
 #include "cpp_compile.hpp"
 
 // Wrap GPU headers in the mwGPU namespace. This is a weird situation where
@@ -1176,7 +1176,7 @@ static GPUEngineState initEngineAndUserState(
     void *user_cfg_host_ptr,
     uint32_t num_user_cfg_bytes,
     uint32_t num_exported,
-    StateConfig::CameraMode camera_mode,
+    render::CameraMode camera_mode,
     uint32_t render_width,
     uint32_t render_height,
     const GPUKernels &gpu_kernels,
@@ -1188,7 +1188,7 @@ static GPUEngineState initEngineAndUserState(
     auto batch_renderer = Optional<render::BatchRenderer>::none();
 
     void *renderer_init_buffer = nullptr;
-    if (camera_mode != StateConfig::CameraMode::None) {
+    if (camera_mode != render::CameraMode::None) {
         assert(render_width != 0 && render_height != 0);
 
         batch_renderer.emplace(render::BatchRenderer::Config {
@@ -1199,9 +1199,7 @@ static GPUEngineState initEngineAndUserState(
             .maxViewsPerWorld = max_views_per_world,
             .maxInstancesPerWorld = max_instances_per_world,
             .maxObjects = 1000,
-            .cameraMode = camera_mode == StateConfig::CameraMode::Perspective ?
-                render::BatchRenderer::CameraMode::Perspective :
-                render::BatchRenderer::CameraMode::Lidar,
+            .cameraMode = camera_mode,
             .inputMode = render::BatchRenderer::InputMode::CUDA,
         });
 
@@ -1294,13 +1292,10 @@ static GPUEngineState initEngineAndUserState(
 
     auto init_tasks_args = makeKernelArgBuffer(user_cfg_gpu_buffer);
 
-    // FIXME: this assumes an ordering of the init args
-    auto init_worlds_args = batch_renderer.has_value() ?
-        makeKernelArgBuffer(num_worlds,
-                            user_cfg_gpu_buffer,
-                            init_tmp_buffer,
-                            renderer_init_buffer) :
-        makeKernelArgBuffer(num_worlds, init_tmp_buffer);
+    auto init_worlds_args = makeKernelArgBuffer(num_worlds,
+        renderer_init_buffer,
+        user_cfg_gpu_buffer,
+        init_tmp_buffer);
 
     auto no_args = makeKernelArgBuffer();
 

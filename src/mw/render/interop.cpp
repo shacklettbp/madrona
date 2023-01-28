@@ -1,30 +1,12 @@
+#include "interop.hpp"
+
 #include <atomic>
-#include <madrona/mw_render.hpp>
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
 
-namespace madrona {
+namespace madrona::render {
 using namespace base;
 using namespace math;
-
-namespace render {
-
-struct RendererState {
-    AccelStructInstance *tlasInstanceBuffer;
-    AccelStructRangeInfo *numInstances;
-    uint64_t *blases;
-    PackedViewData *packedViews;
-    Vector3 worldOffset;
-#ifdef MADRONA_GPU_MODE
-    uint32_t *count_readback;
-#endif
-};
-
-void RenderingSystem::registerTypes(ECSRegistry &registry)
-{
-    registry.registerComponent<ViewSettings>();
-    registry.registerSingleton<RendererState>();
-}
 
 inline void instanceAccelStructSetup(Context &ctx,
                                      const Position &pos,
@@ -99,6 +81,12 @@ inline void readbackCount(Context &ctx,
 
 #endif
 
+void RenderingSystem::registerTypes(ECSRegistry &registry)
+{
+    registry.registerComponent<ViewSettings>();
+    registry.registerSingleton<RendererState>();
+}
+
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
@@ -124,25 +112,6 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 #else
     return viewdata_update;
 #endif
-
-}
-
-void RenderingSystem::init(Context &ctx, const RendererInit &renderer_init)
-{
-    RendererState &renderer_state = ctx.getSingleton<RendererState>();
-
-    int32_t world_idx = ctx.worldID().idx;
-
-    new (&renderer_state) RendererState {
-        renderer_init.iface.tlasInstancesBase,
-        renderer_init.iface.numInstances,
-        renderer_init.iface.blases,
-        renderer_init.iface.packedViews[world_idx],
-        renderer_init.worldOffset,
-#ifdef MADRONA_GPU_MODE
-        renderer_init.iface.numInstancesReadback,
-#endif
-    };
 }
 
 ViewSettings RenderingSystem::setupView(Context &, float vfov_degrees,
@@ -158,5 +127,22 @@ ViewSettings RenderingSystem::setupView(Context &, float vfov_degrees,
     };
 }
 
+void RendererState::init(Context &ctx, const RendererInit &renderer_init)
+{
+    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    int32_t world_idx = ctx.worldID().idx;
+
+    new (&renderer_state) RendererState {
+        renderer_init.iface.tlasInstancesBase,
+        renderer_init.iface.numInstances,
+        renderer_init.iface.blases,
+        renderer_init.iface.packedViews[world_idx],
+        renderer_init.worldOffset,
+#ifdef MADRONA_GPU_MODE
+        renderer_init.iface.numInstancesReadback,
+#endif
+    };
+
 }
+
 }

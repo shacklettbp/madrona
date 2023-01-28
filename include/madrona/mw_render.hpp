@@ -6,17 +6,10 @@
 namespace madrona {
 namespace render {
 
-struct AccelStructTransform {
-    float matrix[3][4];
-};
-
-struct AccelStructInstance {
-    AccelStructTransform transform;
-    uint32_t instanceCustomIndex:24;
-    uint32_t mask:8;
-    uint32_t instanceShaderBindingTableRecordOffset:24;
-    uint32_t flags:8;
-    uint64_t accelerationStructureReference;
+enum class CameraMode : uint32_t {
+    Perspective,
+    Lidar,
+    None,
 };
 
 struct ViewID {
@@ -29,41 +22,11 @@ struct ViewSettings {
     ViewID viewID;
 };
 
-// FIXME this is a copy of the PackedCamera / ViewData
-// struct in render/vk/shaders/shader_common.h
-struct PackedViewData {
-    math::Quat rotation;
-    math::Vector4 posAndTanFOV;
-};
-
-// FIXME this is a copy of VkAccelerationStructureBuildRangeInfoKHR
-struct AccelStructRangeInfo {
-    uint32_t primitiveCount;
-    uint32_t primitiveOffset;
-    uint32_t firstVertex;
-    uint32_t transformOffset;
-};
-
-struct RendererInterface {
-    AccelStructInstance *tlasInstancesBase;
-    AccelStructRangeInfo *numInstances;
-    uint64_t *blases;
-    PackedViewData **packedViews;
-    uint32_t *numInstancesReadback;
-};
-
-struct RendererInit {
-    RendererInterface iface;
-    math::Vector3 worldOffset;
-};
-
 struct RenderingSystem {
     static void registerTypes(ECSRegistry &registry);
 
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
                                         Span<const TaskGraph::NodeID> deps);
-
-    static void init(Context &ctx, const RendererInit &init);
 
     static ViewSettings setupView(Context &ctx, float vfov_degrees,
                                   math::Vector3 camera_offset,

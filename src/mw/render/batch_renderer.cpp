@@ -1,4 +1,5 @@
-#include <madrona/batch_renderer.hpp>
+#include "batch_renderer.hpp"
+#include "scene.hpp"
 
 #include <madrona/math.hpp>
 #include <madrona/dyn_array.hpp>
@@ -7,7 +8,6 @@
 #include "vk/core.hpp"
 #include "vk/cuda_interop.hpp"
 #include "vk/memory.hpp"
-#include "vk/scene.hpp"
 #include "vk/utils.hpp"
 #include "vk/descriptors.hpp"
 #include "vk/present.hpp"
@@ -127,9 +127,9 @@ static ShaderState makeShaderState(const DeviceState &dev,
         shader_defines.emplace_back("VALIDATE");
     }
 
-    if (cfg.cameraMode == BatchRenderer::CameraMode::Lidar) {
+    if (cfg.cameraMode == render::CameraMode::Lidar) {
         shader_defines.emplace_back("LIDAR");
-    } else if (cfg.cameraMode == BatchRenderer::CameraMode::Perspective) {
+    } else if (cfg.cameraMode == render::CameraMode::Perspective) {
         shader_defines.emplace_back("PERSPECTIVE");
     }
 

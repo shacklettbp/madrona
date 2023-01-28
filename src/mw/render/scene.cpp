@@ -1,7 +1,8 @@
 #include "scene.hpp"
-#include "core.hpp"
-#include "shader.hpp"
-#include "utils.hpp"
+
+#include "vk/core.hpp"
+#include "vk/shader.hpp"
+#include "vk/utils.hpp"
 
 using namespace std;
 
