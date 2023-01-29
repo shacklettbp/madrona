@@ -34,7 +34,9 @@ namespace madrona
 #ifdef MADRONA_X64
         return __builtin_ia32_rdtsc();
 #else
-        STATIC_UNIMPLEMENTED();
+        uint64_t val;
+        asm volatile("mrs %0, cntvct_el0" : "=r" (val));
+        return val;
 #endif
     }
 

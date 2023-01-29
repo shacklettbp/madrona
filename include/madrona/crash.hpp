@@ -30,7 +30,4 @@ struct CrashInfo {
     MADRONA_COMPILER_FUNCTION_NAME, fmt ##__VA_ARGS__ )
 #endif
 
-#define STATIC_UNIMPLEMENTED() \
-    do { static_assert(false, "Unimplemented"); } while (false)
-
 }

@@ -16,12 +16,21 @@ target_include_directories(madrona_batch_render PRIVATE
 )
 
 target_link_libraries(madrona_batch_render PRIVATE
-    CUDA::cudart
-    madrona_render_vk
     madrona_common
 )
 
-target_compile_definitions(madrona_batch_render
-    PRIVATE
+if (TARGET madrona_render_vk)
+    target_link_libraries(madrona_batch_render PRIVATE
+        madrona_render_vk
+    )
+
+    target_compile_definitions(madrona_batch_render PRIVATE
         "-DSHADER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../render/vk/shaders/"
-)
+    )
+endif ()
+
+if (TARGET madrona_cuda)
+    target_link_libraries(madrona_batch_render PRIVATE
+        CUDA::cudart
+    )
+endif ()

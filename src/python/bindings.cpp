@@ -122,8 +122,10 @@ NB_MODULE(madrona_python, m) {
             };
         });
 
-    nb::class_<ExternalSync>(m, "ExternalSync")
-        .def("wait", &ExternalSync::wait);
+#ifdef MADRONA_CUDA_SUPPORT
+    nb::class_<CudaSync>(m, "CudaSync")
+        .def("wait", &CudaSync::wait);
+#endif
 }
 
 }

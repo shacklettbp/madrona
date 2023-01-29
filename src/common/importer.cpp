@@ -7,17 +7,35 @@
 #include <charconv>
 
 #include <meshoptimizer.h>
+#include <fast_float/fast_float.h>
 
 namespace madrona {
 namespace imp {
 
 using namespace math;
 
+static inline fast_float::from_chars_result fromCharsFloat(
+    const char *first,
+    const char *last,
+    float &value,
+    fast_float::chars_format fmt = fast_float::chars_format::general)
+{
+    return fast_float::from_chars(first, last, value, fmt);
+}
+
+static inline std::from_chars_result fromCharsU32(
+    const char *first,
+    const char *last,
+    uint32_t &value,
+    int base = 10)
+{
+    return std::from_chars(first, last, value, base);
+}
+
 static bool loadOBJ(const char *path, ImportedObject &imported)
 {
-    using namespace std;
-
-    ifstream file(path);
+    using std::string_view;
+    std::ifstream file(path);
 
     struct ObjIDX {
         uint32_t posIdx;
@@ -36,7 +54,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         }
 
         float x;
-        auto res = from_chars(start, end, x);
+        auto res = fromCharsFloat(start, end, x);
 
         if (res.ptr == start) {
             FATAL("Failed to read x");
@@ -49,7 +67,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         }
 
         float y;
-        res = from_chars(start, end, y);
+        res = fromCharsFloat(start, end, y);
 
         if (res.ptr == start) {
             FATAL("Failed to read y");
@@ -67,7 +85,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         }
 
         float x;
-        auto res = from_chars(start, end, x);
+        auto res = fromCharsFloat(start, end, x);
 
         if (res.ptr == start) {
             FATAL("Failed to read x");
@@ -80,7 +98,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         }
 
         float y;
-        res = from_chars(start, end, y);
+        res = fromCharsFloat(start, end, y);
 
         if (res.ptr == start) {
             FATAL("Failed to read y");
@@ -93,7 +111,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         }
 
         float z;
-        res = from_chars(start, end, z);
+        res = fromCharsFloat(start, end, z);
 
         if (res.ptr == start) {
             FATAL("Failed to read z");
@@ -105,7 +123,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
     auto readIdxTriple = [](const char *start, const char *end,
                             ObjIDX *idx_triple) {
         uint32_t pos_idx;
-        auto res = from_chars(start, end, pos_idx);
+        auto res = fromCharsU32(start, end, pos_idx);
 
         if (res.ptr == start) {
             FATAL("Failed to read position idx: %s", start);
@@ -130,7 +148,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         if (start[0] == '/') {
             uv_idx = 0;
         } else {
-            res = from_chars(start, end, uv_idx);
+            res = fromCharsU32(start, end, uv_idx);
 
             if (res.ptr == start) {
                 FATAL("Failed to read UV idx");
@@ -152,7 +170,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         start += 1;
 
         uint32_t normal_idx;
-        res = from_chars(start, end, normal_idx);
+        res = fromCharsU32(start, end, normal_idx);
 
         if (res.ptr == start) {
             FATAL("Failed to read normal idx");
@@ -335,7 +353,7 @@ static bool loadOBJ(const char *path, ImportedObject &imported)
         return true;
     };
 
-    string line;
+    std::string line;
     while (getline(file, line)) {
         if (line[0] == '#') continue;
 

@@ -152,7 +152,12 @@ void VirtualRegion::decommit(uint64_t start_chunk, uint64_t num_chunks)
 #if defined(__linux__) or defined(__APPLE__)
     // FIXME MADV_FREE instead
     int res = madvise(base_ + (start_chunk << chunk_shift_),
-                      num_chunks << chunk_shift_, MADV_REMOVE);
+                      num_chunks << chunk_shift_, 
+#ifdef MADRONA_LINUX
+                      MADV_REMOVE);
+#elif defined(MADRONA_MACOS)
+                      MADV_FREE);
+#endif
 
 
     if (res != 0) {

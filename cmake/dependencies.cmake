@@ -5,10 +5,10 @@ find_package(Threads REQUIRED)
 if (${MADRONA_REQUIRE_CUDA})
     set(CUDA_REQUIRED_ARG REQUIRED)
 else()
-    set(CUDA_REQUIRED_ARG)
+    set(CUDA_REQUIRED_ARG QUIET)
 endif()
 
-find_package(CUDAToolkit REQUIRED)
+find_package(CUDAToolkit ${CUDA_REQUIRED_ARG})
 find_library(CUDA_NVJITLINK_LIBRARY nvJitLink_static
     PATHS
         ${CUDAToolkit_LIBRARY_DIR}

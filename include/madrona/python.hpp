@@ -5,20 +5,25 @@
 #include <madrona/optional.hpp>
 
 #include <array>
+
+#ifdef MADRONA_CUDA_SUPPORT
 #include <cuda_runtime.h>
+#endif
 
 namespace madrona {
 namespace py {
 
-class ExternalSync {
+#ifdef MADRONA_CUDA_SUPPORT
+class CudaSync {
 public:
-    MADRONA_IMPORT ExternalSync(cudaExternalSemaphore_t sema);
+    MADRONA_IMPORT CudaSync(cudaExternalSemaphore_t sema);
 
     MADRONA_IMPORT void wait(uint64_t strm);
 
 private:
     cudaExternalSemaphore_t sema_;
 };
+#endif
 
 class Tensor {
 public:

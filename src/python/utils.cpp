@@ -1,5 +1,8 @@
 #include <madrona/python.hpp>
+
+#ifdef MADRONA_CUDA_SUPPORT
 #include <madrona/cuda_utils.hpp>
+#endif
 
 #include <cassert>
 #include <cstring>
@@ -7,11 +10,12 @@
 namespace madrona {
 namespace py {
 
-MADRONA_EXPORT ExternalSync::ExternalSync(cudaExternalSemaphore_t sema)
+#ifdef MADRONA_CUDA_SUPPORT
+MADRONA_EXPORT CudaSync::CudaSync(cudaExternalSemaphore_t sema)
     : sema_(sema)
 {}
 
-MADRONA_EXPORT void ExternalSync::wait(uint64_t strm)
+MADRONA_EXPORT void CudaSync::wait(uint64_t strm)
 {
     // Get the current CUDA stream from pytorch and force it to wait
     // on an external semaphore to finish
@@ -19,6 +23,7 @@ MADRONA_EXPORT void ExternalSync::wait(uint64_t strm)
     cudaExternalSemaphoreWaitParams params {};
     REQ_CUDA(cudaWaitExternalSemaphoresAsync(&sema_, &params, 1, cuda_strm));
 }
+#endif
 
 MADRONA_EXPORT Tensor::Tensor(void *dev_ptr, ElementType type,
                               Span<const int64_t> dimensions,

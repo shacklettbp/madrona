@@ -4,11 +4,18 @@ add_library(madrona_python_utils STATIC
 )
 
 target_link_libraries(madrona_python_utils
-    PUBLIC
-        CUDA::cudart
     PRIVATE
-        madrona_common madrona_cuda 
+        madrona_common
 )
+
+if (TARGET madrona_cuda)
+    target_link_libraries(madrona_python_utils
+        PUBLIC
+            CUDA::cudart
+        PRIVATE
+            madrona_cuda
+    )
+endif ()
 
 function(madrona_python_module module_name)
     nanobind_add_module(${module_name} NB_STATIC

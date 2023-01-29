@@ -19,3 +19,6 @@
 [submodule "external/cub"]
 	path = external/cub
 	url = https://github.com/shacklettbp/cub.git
+[submodule "external/fast_float"]
+	path = external/fast_float
+	url = https://github.com/fastfloat/fast_float.git
