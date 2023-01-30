@@ -10,7 +10,10 @@
 #include <madrona/macros.hpp>
 
 #include <atomic>
+
+#ifndef MADRONA_GPU_MODE
 #include <version>
+#endif
 
 #if defined(__has_feature)
 #if __has_feature(thread_sanitizer)
@@ -52,11 +55,14 @@ using AtomicI64 = std::atomic_int64_t;
 using AtomicFloat = std::atomic<float>;
 static_assert(AtomicFloat::is_always_lock_free);
 
+#if defined(__cpp_lib_atomic_ref) or defined(MADRONA_GPU_MODE)
+#define MADRONA_STD_ATOMIC_REF
+#endif
 template <typename T>
 class AtomicRef {
 public:
     AtomicRef(T &ref)
-#ifndef __cpp_lib_atomic_ref
+#ifndef MADRONA_STD_ATOMIC_REF
         : addr_(&ref)
 #else
         : ref_(ref)
@@ -66,7 +72,7 @@ public:
     template <sync::memory_order order>
     inline T load() const
     {
-#ifndef __cpp_lib_atomic_ref
+#ifndef MADRONA_STD_ATOMIC_REF
         return __builtin_bit_cast(T,
             __atomic_load_n((ValueT *)addr_, OrderMap<order>::builtin));
 #else
@@ -77,7 +83,7 @@ public:
     template <sync::memory_order order>
     inline void store(T v) const
     {
-#ifndef __cpp_lib_atomic_ref
+#ifndef MADRONA_STD_ATOMIC_REF
         __atomic_store_n((ValueT *)addr_, __builtin_bit_cast(ValueT, v),
                         OrderMap<order>::builtin);
 #else
@@ -89,7 +95,7 @@ public:
               sync::memory_order failure_order>
     inline bool compare_exchange_weak(T &expected, T desired)
     {
-#ifndef __cpp_lib_atomic_ref
+#ifndef MADRONA_STD_ATOMIC_REF
         return __atomic_compare_exchange_n(
             (ValueT *)addr_, (ValueT *)&expected,
             __builtin_bit_cast(ValueT, desired), true,
@@ -104,7 +110,7 @@ public:
     template <sync::memory_order order>
     inline T fetch_add(T v) requires std::is_integral_v<T>
     {
-#ifndef __cpp_lib_atomic_ref
+#ifndef MADRONA_STD_ATOMIC_REF
         return __atomic_fetch_add(addr_, v, OrderMap<order>::builtin);
 #else
         return ref_.fetch_add(v, order);
@@ -114,7 +120,7 @@ public:
     template <sync::memory_order order>
     inline T fetch_sub(T v) requires std::is_integral_v<T>
     {
-#ifndef __cpp_lib_atomic_ref
+#ifndef MADRONA_STD_ATOMIC_REF
         return __atomic_fetch_sub(addr_, v, OrderMap<order>::builtin);
 #else
         return ref_.fetch_sub(v, order);
@@ -125,7 +131,7 @@ private:
     static_assert(sizeof(T) == 4 || sizeof(T) == 8);
     static_assert(std::is_trivially_copyable_v<T>);
 
-#ifndef __cpp_lib_atomic_ref
+#ifndef MADRONA_STD_ATOMIC_REF
     template <size_t t_size> struct ValueType;
     template <> struct ValueType<8> {
         using type = uint64_t;
@@ -162,6 +168,7 @@ private:
     static_assert(decltype(ref_)::is_always_lock_free);
 #endif
 };
+#undef MADRONA_STD_ATOMIC_REF
 
 using AtomicI32Ref = AtomicRef<int32_t>;
 using AtomicU32Ref = AtomicRef<uint32_t>;
