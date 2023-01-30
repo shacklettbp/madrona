@@ -222,7 +222,7 @@ PhysicsLoader::LoadedHull PhysicsLoader::loadHullFromDisk(
         total_polylist_space += imp_mesh.faceCounts[face_idx] + 1;
     }
 
-    geometry::FastPolygonList poly_list;
+    geometry::FastPolygonList poly_list {};
     poly_list.allocate(total_polylist_space);
 
     CountT cur_idx_offset = 0;

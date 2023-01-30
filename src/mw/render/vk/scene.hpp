@@ -3,7 +3,7 @@
 #include <madrona/mw_render.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/heap_array.hpp>
-#include "interop.hpp"
+#include "../interop.hpp"
 
 #include "vk/core.hpp"
 #include "vk/memory.hpp"
