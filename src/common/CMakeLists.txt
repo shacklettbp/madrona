@@ -6,7 +6,7 @@ target_include_directories(madrona_hdrs INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include
 )
 target_link_libraries(madrona_hdrs INTERFACE
-    madrona_sys_defns)
+    madrona_sys_defns madrona_libcxx)
 
 if (FRONTEND_GCC)
     target_compile_options(madrona_hdrs INTERFACE
