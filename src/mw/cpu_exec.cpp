@@ -3,6 +3,10 @@
 
 #include "render/batch_renderer.hpp"
 
+#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
+#include <unistd.h>
+#endif
+
 namespace madrona {
 
 struct ThreadPoolExecutor::Impl {
@@ -35,8 +39,9 @@ static CountT getNumCores()
     return os_num_threads;
 }
 
-static inline void pinThread(CountT worker_id)
+static inline void pinThread([[maybe_unused]] CountT worker_id)
 {
+#ifdef MADRONA_LINUX
     cpu_set_t cpuset;
     pthread_getaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
 
@@ -56,6 +61,7 @@ static inline void pinThread(CountT worker_id)
     if (res != 0) {
         FATAL("Failed to set thread affinity to %d", worker_id);
     }
+#endif
 }
 
 static Optional<render::BatchRenderer> makeRenderer(

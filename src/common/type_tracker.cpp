@@ -23,7 +23,7 @@ struct IDInfo {
 };
 
 struct TrackerImpl {
-    utils::SpinLock typeLock;
+    SpinLock typeLock;
     DynArray<IDInfo, InitAlloc> ids;
 };
 

@@ -413,18 +413,15 @@ static inline MADRONA_ALWAYS_INLINE float atomicMinF(float *addr, float value)
     }
 
     return old;
-#elif defined(MADRONA_GCC) or defined(MADRONA_CLANG)
-    float old = __builtin_bit_cast(float,
-        __atomic_load_n((uint32_t *)addr, __ATOMIC_RELAXED));
-
-    while (old > value && !__atomic_compare_exchange_n(
-        (uint32_t *)addr, (uint32_t *)&old,
-        __builtin_bit_cast(uint32_t, value), true,
-        __ATOMIC_RELAXED, __ATOMIC_RELAXED));
-
-    return old;
 #else
-    STATIC_UNIMPLEMENTED();
+    AtomicFloatRef a(*addr);
+    float old = a.load<sync::relaxed>();
+
+    while (old > value &&
+           !a.compare_exchange_weak<sync::relaxed, sync::relaxed>(old, value))
+    {}
+           
+    return old;
 #endif
 }
 
@@ -444,14 +441,13 @@ static inline MADRONA_ALWAYS_INLINE float atomicMaxF(float *addr, float value)
 
     return old;
 #else
-    float old = __builtin_bit_cast(float,
-        __atomic_load_n((uint32_t *)addr, __ATOMIC_RELAXED));
+    AtomicFloatRef a(*addr);
+    float old = a.load<sync::relaxed>();
 
-    while (old < value && !__atomic_compare_exchange_n(
-        (uint32_t *)addr, (uint32_t *)&old,
-        __builtin_bit_cast(uint32_t, value), true,
-        __ATOMIC_RELAXED, __ATOMIC_RELAXED));
-
+    while (old < value &&
+           !a.compare_exchange_weak<sync::relaxed, sync::relaxed>(old, value))
+    {}
+           
     return old;
 #endif
 }
@@ -467,49 +463,21 @@ void BVH::refitLeaf(LeafID leaf_id, const AABB &leaf_aabb)
 
     {
         auto nonAtomicMinF = [](float *ptr, float v) {
-#ifdef MADRONA_GPU_MODE
-            cuda::atomic_ref<float> a(*ptr);
-            float old = a.load(std::memory_order_relaxed);
+            AtomicFloatRef a(*ptr);
+            float old = a.load<sync::relaxed>();
             if (v < old) {
-                a.store(v, std::memory_order_relaxed);
+                a.store<sync::relaxed>(v);
             }
             return old;
-#elif defined(MADRONA_GCC) or defined(MADRONA_CLANG)
-            float old = __builtin_bit_cast(float, 
-                __atomic_load_n((uint32_t *)ptr, __ATOMIC_RELAXED));
-
-            if (v < old) {
-                __atomic_store_n((uint32_t *)ptr,
-                    __builtin_bit_cast(uint32_t, v), __ATOMIC_RELAXED);
-            }
-
-            return old;
-#else
-            STATIC_UNIMPLEMENTED();
-#endif
         };
 
         auto nonAtomicMaxF = [](float *ptr, float v) {
-#ifdef MADRONA_GPU_MODE
-            cuda::atomic_ref<float> a(*ptr);
-            float old = a.load(std::memory_order_relaxed);
+            AtomicFloatRef a(*ptr);
+            float old = a.load<sync::relaxed>();
             if (v > old) {
-                a.store(v, std::memory_order_relaxed);
+                a.store<sync::relaxed>(v);
             }
             return old;
-#elif defined(MADRONA_GCC) or defined(MADRONA_CLANG)
-            float old = __builtin_bit_cast(float, 
-                __atomic_load_n((uint32_t *)ptr, __ATOMIC_RELAXED));
-
-            if (v > old) {
-                __atomic_store_n((uint32_t *)ptr,
-                    __builtin_bit_cast(uint32_t, v), __ATOMIC_RELAXED);
-            }
-
-            return old;
-#else
-            STATIC_UNIMPLEMENTED();
-#endif
         };
 
         float x_min_prev = 

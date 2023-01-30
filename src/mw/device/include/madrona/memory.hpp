@@ -97,7 +97,7 @@ public:
 
 private:
     HostChannel *channel_;
-    utils::SpinLock device_lock_;
+    SpinLock device_lock_;
 
     uint64_t host_page_size_;
     uint64_t alloc_granularity_;
@@ -143,7 +143,7 @@ private:
     void *base_;
     std::atomic_uint64_t offset_;
     uint64_t num_mapped_bytes_;
-    utils::SpinLock grow_lock_;
+    SpinLock grow_lock_;
 };
 
 }

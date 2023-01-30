@@ -1,9 +1,11 @@
-add_library(madrona_python_utils STATIC
+add_library(madrona_python_utils SHARED
      utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona/python.hpp
 )
 
 target_link_libraries(madrona_python_utils
+    PUBLIC
+        madrona_hdrs
     PRIVATE
         madrona_common
 )
@@ -18,13 +20,12 @@ if (TARGET madrona_cuda)
 endif ()
 
 function(madrona_python_module module_name)
-    nanobind_add_module(${module_name} NB_STATIC
+    nanobind_add_module(${module_name} NB_SHARED
         ${ARGN}
     )
 
-    target_link_libraries(${module_name}
-        PRIVATE
-            madrona_python_utils madrona_hdrs
+    target_link_libraries(${module_name} PRIVATE
+        madrona_python_utils
     )
      
     set_target_properties(madrona_python PROPERTIES EXCLUDE_FROM_ALL FALSE)

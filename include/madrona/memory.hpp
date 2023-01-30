@@ -79,7 +79,7 @@ private:
     VirtualRegion region_;
     uint64_t mapped_chunks_;
     alignas(MADRONA_CACHE_LINE) std::atomic<FreeHead> free_head_;
-    utils::SpinLock expand_lock_;
+    SpinLock expand_lock_;
 };
 
 // Virtual Adapter

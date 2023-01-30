@@ -27,7 +27,7 @@ struct Table {
 
     std::atomic_int32_t numRows;
     int32_t mappedRows;
-    utils::SpinLock growLock;
+    SpinLock growLock;
      
     static inline constexpr uint32_t maxRowsPerTable = 1_u32 << 30;
 };

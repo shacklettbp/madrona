@@ -6,6 +6,10 @@
 
 #include <array>
 
+#ifndef MADRONA_PYTHON_VISIBILITY
+#define MADRONA_PYTHON_VISIBILITY MADRONA_IMPORT
+#endif
+
 #ifdef MADRONA_CUDA_SUPPORT
 #include <cuda_runtime.h>
 #endif
@@ -14,7 +18,7 @@ namespace madrona {
 namespace py {
 
 #ifdef MADRONA_CUDA_SUPPORT
-class CudaSync {
+class MADRONA_PYTHON_VISIBILITY CudaSync {
 public:
     MADRONA_IMPORT CudaSync(cudaExternalSemaphore_t sema);
 
@@ -25,7 +29,7 @@ private:
 };
 #endif
 
-class Tensor {
+class MADRONA_PYTHON_VISIBILITY Tensor {
 public:
     enum class ElementType {
         UInt8,
@@ -37,9 +41,9 @@ public:
         Float32,
     };
 
-    MADRONA_IMPORT Tensor(void *dev_ptr, ElementType type,
-                          Span<const int64_t> dimensions,
-                          Optional<int> gpu_id);
+    Tensor(void *dev_ptr, ElementType type,
+           Span<const int64_t> dimensions,
+           Optional<int> gpu_id);
     
     inline void * devicePtr() const { return dev_ptr_; }
     inline ElementType type() const { return type_; }

@@ -36,7 +36,7 @@ private:
         static inline uint32_t id = unassignedTypeID;
     };
 
-    static inline utils::SpinLock register_lock_ {};
+    static inline SpinLock register_lock_ {};
 
 };
 

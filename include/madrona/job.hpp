@@ -153,7 +153,7 @@ private:
     struct SchedulerState {
         uint32_t numWaiting;
         uint32_t numSleepingWorkers;
-        utils::SpinLock lock;
+        SpinLock lock;
     };
 
     template <typename ContextT, typename ContainerT>

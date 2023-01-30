@@ -1,4 +1,4 @@
-#include "batch_renderer.hpp"
+#include "../batch_renderer.hpp"
 #include "scene.hpp"
 
 #include <madrona/math.hpp>

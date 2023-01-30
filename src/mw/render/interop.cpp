@@ -1,6 +1,5 @@
 #include "interop.hpp"
 
-#include <atomic>
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
 
@@ -16,10 +15,10 @@ inline void instanceAccelStructSetup(Context &ctx,
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
 
-    std::atomic_ref<uint32_t> count_atomic(
+    AtomicU32Ref count_atomic(
         renderer_state.numInstances->primitiveCount);
 
-    uint32_t inst_idx = count_atomic.fetch_add(1, std::memory_order_relaxed);
+    uint32_t inst_idx = count_atomic.fetch_add<sync::relaxed>(1);
 
     AccelStructInstance &as_inst = renderer_state.tlasInstanceBuffer[inst_idx];
 
