@@ -33,8 +33,6 @@ elseif (MADRONA_ANDROID)
 endif ()
 
 add_subdirectory(meshoptimizer EXCLUDE_FROM_ALL)
-target_link_libraries(meshoptimizer PRIVATE
-    madrona_libcxx)
 set_property(TARGET meshoptimizer PROPERTY
     POSITION_INDEPENDENT_CODE TRUE)
 
