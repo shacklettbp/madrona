@@ -86,12 +86,13 @@ public:
     {}
 
     constexpr ~Optional()
+        requires (std::is_trivially_destructible_v<T>) = default;
+
+    constexpr ~Optional()
         requires (!std::is_trivially_destructible_v<T>)
     {
         destruct();
     }
-
-    constexpr ~Optional() = default;
 
     constexpr Optional<T> & operator=(const Optional<T> &o)
         requires (std::is_trivially_copy_assignable_v<T> &&
