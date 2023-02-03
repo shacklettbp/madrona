@@ -1,16 +1,35 @@
 #include "../batch_renderer.hpp"
 
+#include <Metal/Metal.hpp>
+
 namespace madrona {
 namespace render {
 
 struct BatchRenderer::Impl {
+    MTL::Device *dev;
+
+    static inline Impl * make(const Config &cfg);
+    inline ~Impl();
 };
 
-BatchRenderer::BatchRenderer(const Config &cfg)
-    : impl_(nullptr)
+BatchRenderer::Impl * BatchRenderer::Impl::make(
+    const Config &cfg)
 {
-    (void)cfg;
-    FATAL("Unimplemented");
+    MTL::Device *dev = MTL::CreateSystemDefaultDevice();
+
+    return new Impl {
+        .dev = dev,
+    };
+}
+
+BatchRenderer::Impl::~Impl()
+{
+    dev->release();
+}
+
+BatchRenderer::BatchRenderer(const Config &cfg)
+    : impl_(Impl::make(cfg))
+{
 }
 
 BatchRenderer::BatchRenderer(BatchRenderer &&o) = default;
