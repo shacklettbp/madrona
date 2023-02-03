@@ -56,10 +56,10 @@ public:
         requires (std::is_copy_constructible_v<T> &&
                   !std::is_trivially_copy_constructible_v<T>)
     {
-        this->initialized = o.initialized;
+        this->initialized_ = o.initialized_;
 
-        if (this->initialized) {
-            std::construct_at(&this->value, o.value);
+        if (this->initialized_) {
+            std::construct_at(&this->value_, o.value_);
         } 
     }
 
@@ -70,15 +70,18 @@ public:
         requires (std::is_move_constructible_v<T> &&
                   !std::is_trivially_move_constructible_v<T>)
     {
-        this->initialized = o.initialized;
+        this->initialized_ = o.initialized_;
 
-        if (this->initialized) {
-            std::construct_at(&this->value, std::forward<T>(o.value));
+        if (this->initialized_) {
+            std::construct_at(&this->value_, std::forward<T>(o.value_));
         } 
     }
 
-    constexpr Optional(T &&o)
-        : value_(std::move(o)),
+    template <typename U = T>
+    constexpr explicit(!std::is_convertible_v<U&&, T>) Optional(U &&o)
+        requires(std::is_constructible_v<T, U&&> &&
+                 !std::is_same_v<std::remove_cvref_t<U>, Optional<T>>)
+        : value_(std::forward<U>(o)),
           initialized_(true)
     {}
 
@@ -144,12 +147,18 @@ public:
         return *this;
     }
 
-    constexpr Optional<T> & operator=(T &&o)
+    template <typename U = T>
+    constexpr Optional<T> & operator=(U &&o)
+        requires(!std::is_same_v<std::remove_cvref_t<U>, Optional<T>> &&
+                 std::is_constructible_v<T, U> &&
+                 std::is_assignable_v<T&, U> &&
+                 (!std::is_scalar_v<T> ||
+                  !std::is_same_v<std::decay_t<U>, T>))
     {
         if (this->initialized_) {
-            this->value_ = std::forward<T>(o);
+            this->value_ = std::forward<U>(o);
         } else {
-            std::construct_at(&this->value_, std::forward<T>(o));
+            std::construct_at(&this->value_, std::forward<U>(o));
             this->initialized_ = true;
         }
         
@@ -158,17 +167,34 @@ public:
 
     constexpr bool has_value() const { return initialized_; }
 
-    constexpr T & operator*() { return value_; }
-    constexpr const T & operator*() const { return value_; }
+    constexpr const T & operator*() const & { return value_; }
+    constexpr T & operator*() & { return value_; }
+    constexpr const T && operator*() const &&
+    { 
+        return std::forward<T>(value_);
+    }
 
-    constexpr T * operator->() { return &value_; }
+    constexpr T && operator*() && {
+        return std::forward<T>(value_);
+    }
+
     constexpr const T * operator->() const { return &value_; }
+    constexpr T * operator->() { return &value_; }
 
 private:
     Optional() 
         : empty_(),
           initialized_(false)
-    {}
+    {
+        static_assert(std::is_trivially_copy_constructible_v<Optional<T>> ==
+            std::is_trivially_copy_constructible_v<T>);
+
+        static_assert(std::is_trivially_move_constructible_v<Optional<T>> ==
+            std::is_trivially_move_constructible_v<T>);
+
+        static_assert(std::is_trivially_destructible_v<Optional<T>> ==
+            std::is_trivially_destructible_v<T>);
+    }
 
     template <typename... Args>
     constexpr Optional(std::in_place_t, Args && ...args)
@@ -191,15 +217,6 @@ private:
         T value_;
     };
     bool initialized_;
-
-    static_assert(std::is_trivially_copy_constructible_v<Optional<T>> ==
-        std::is_trivially_copy_constructible_v<T>);
-
-    static_assert(std::is_trivially_move_constructible_v<Optional<T>> ==
-        std::is_trivially_move_constructible_v<T>);
-
-    static_assert(std::is_trivially_destructible_v<Optional<T>> ==
-        std::is_trivially_destructible_v<T>);
 };
 
 }
