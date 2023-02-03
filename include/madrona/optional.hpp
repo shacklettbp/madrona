@@ -38,256 +38,168 @@ public:
         new (ptr) Optional<T>(std::in_place, std::forward<Args>(args)...);
     }
 
-    template <typename U = T,
-              typename std::enable_if_t<std::is_copy_constructible_v<U> &&
-                  std::is_same_v<U, T>, bool> = false>
-    constexpr Optional(const U &v)
-        : storage_(v)
-    {}
-
-    template <typename U = T,
-              typename std::enable_if_t<std::is_move_constructible_v<U> &&
-                  std::is_same_v<U, T>, bool> = false>
-    constexpr Optional(U &&v)
-        : storage_(std::forward<U>(v))
-    {}
-
-    template <typename U = T,
-              typename std::enable_if_t<std::is_copy_constructible_v<U> &&
-                  !std::is_same_v<U, T>, bool> = false>
-    explicit constexpr Optional(const U &v)
-        : storage_(v)
-    {}
-
-    template <typename U = T,
-              typename std::enable_if_t<std::is_move_constructible_v<U> &&
-                  !std::is_same_v<U, T>, bool> = false>
-    explicit constexpr Optional(U &&v)
-        : storage_(std::forward<U>(v))
-    {}
-
-    Optional(const Optional &) = default;
-    Optional(Optional &&) = default;
-
-    Optional & operator=(const Optional &) = default;
-    Optional & operator=(Optional &&) = default;
-
-    ~Optional() = default;
-
     template <typename... Args>
     T & emplace(Args && ...args)
     {
-        storage_.destruct();
+        destruct();
 
-        new (&storage_.value) T(std::forward<Args>(args)...);
-        storage_.initialized = true;
+        std::construct_at(&value_, std::forward<Args>(args)...);
+        initialized_ = true;
 
-        return storage_.value;
+        return value_;
     }
 
-    constexpr bool has_value() const { return storage_.initialized; }
+    constexpr Optional(const Optional<T> &o)
+        requires (std::is_trivially_copy_constructible_v<T>) = default;
 
-    constexpr T * operator->() { return &storage_.value; }
-    constexpr const T * operator->() const { return &storage_.value; }
-
-    constexpr T & operator*() & { return storage_.value; }
-    constexpr const T & operator*() const & { return storage_.value; }
-
-    constexpr T && operator*() && { return std::move(storage_.value); }
-    constexpr const T && operator*() const &&
+    constexpr Optional(const Optional<T> &o)
+        requires (std::is_copy_constructible_v<T> &&
+                  !std::is_trivially_copy_constructible_v<T>)
     {
-        return std::move(storage_.value);
+        this->initialized = o.initialized;
+
+        if (this->initialized) {
+            std::construct_at(&this->value, o.value);
+        } 
     }
 
-    constexpr void reset()
+    constexpr Optional(Optional<T> &&o)
+        requires (std::is_trivially_move_constructible_v<T>) = default;
+
+    constexpr Optional(Optional<T> &&o)
+        requires (std::is_move_constructible_v<T> &&
+                  !std::is_trivially_move_constructible_v<T>)
     {
-        storage_.destruct();
-        storage_.initialized = false;
+        this->initialized = o.initialized;
+
+        if (this->initialized) {
+            std::construct_at(&this->value, std::forward<T>(o.value));
+        } 
     }
+
+    constexpr Optional(T &&o)
+        : value_(std::move(o)),
+          initialized_(true)
+    {}
+
+    constexpr ~Optional()
+        requires (!std::is_trivially_destructible_v<T>)
+    {
+        destruct();
+    }
+
+    constexpr ~Optional() = default;
+
+    constexpr Optional<T> & operator=(const Optional<T> &o)
+        requires (std::is_trivially_copy_assignable_v<T> &&
+                  std::is_trivially_copy_constructible_v<T> &&
+                  std::is_trivially_destructible_v<T>) = default;
+
+    constexpr Optional<T> & operator=(const Optional<T> &o)
+        requires (std::is_copy_assignable_v<T> &&
+                  std::is_copy_constructible_v<T> && !(
+                      std::is_trivially_copy_assignable_v<T> &&
+                      std::is_trivially_copy_constructible_v<T> &&
+                      std::is_trivially_destructible_v<T>))
+    {
+        if (this->initialized_) {
+            if (o.initialized_) {
+                this->value_ = o.value_;
+            } else {
+                this->destruct();
+                this->initialized_ = false;
+            }
+        } else if (o.initialized_) {
+            std::construct_at(&this->value_, o.value_);
+            this->initialized_ = true;
+        }
+        
+        return *this;
+    }
+
+    constexpr Optional<T> & operator=(Optional<T> &&o)
+        requires (std::is_trivially_move_assignable_v<T> &&
+                  std::is_trivially_move_constructible_v<T> &&
+                  std::is_trivially_destructible_v<T>) = default;
+
+    constexpr Optional<T> & operator=(Optional<T> &&o)
+        requires (std::is_move_assignable_v<T> &&
+                  std::is_move_constructible_v<T> && !(
+                      std::is_trivially_move_assignable_v<T> &&
+                      std::is_trivially_move_constructible_v<T> &&
+                      std::is_trivially_destructible_v<T>))
+    {
+        if (this->initialized_) {
+            if (o.initialized_) {
+                this->value_ = std::forward<T>(o.value_);
+            } else {
+                this->destruct();
+                this->initialized_ = false;
+            }
+        } else if (o.initialized) {
+            std::construct_at(&this->value_, std::forward<T>(o.value_));
+            this->initialized_ = true;
+        }
+        
+        return *this;
+    }
+
+    constexpr Optional<T> & operator=(T &&o)
+    {
+        if (this->initialized_) {
+            this->value_ = std::forward<T>(o);
+        } else {
+            std::construct_at(&this->value_, std::forward<T>(o));
+            this->initialized_ = true;
+        }
+        
+        return *this;
+    }
+
+    constexpr bool has_value() const { return initialized_; }
+
+    constexpr T & operator*() { return value_; }
+    constexpr const T & operator*() const { return value_; }
+
+    constexpr T * operator->() { return &value_; }
+    constexpr const T * operator->() const { return &value_; }
 
 private:
-    constexpr Optional()
-        : storage_()
+    Optional() 
+        : empty_(),
+          initialized_(false)
     {}
 
     template <typename... Args>
     constexpr Optional(std::in_place_t, Args && ...args)
-        : storage_(std::forward<Args>(args)...)
+        : value_(std::forward<Args>(args)...),
+          initialized_(true)
     {}
 
-    struct empty_type {};
-
-    template <typename U, bool trivial =
-        std::is_trivially_destructible_v<U>>
-    struct StorageImpl;
-
-    template <typename U>
-    struct StorageImpl<U, true> {
-        union {
-            empty_type empty;
-            T value;
-        };
-
-        bool initialized;
-
-        constexpr StorageImpl()
-            : empty(),
-              initialized(false)
-        {}
-
-        template <typename... Args>
-        constexpr StorageImpl(Args&& ...args)
-            : value(std::forward<Args>(args)...),
-              initialized(true)
-        {}
-
-        constexpr void destruct() {}
-
-        ~StorageImpl() = default;
-    };
-
-    template <typename U>
-    struct StorageImpl<U, false> {
-        union {
-            empty_type empty;
-            T value;
-        };
-
-        bool initialized;
-
-        constexpr StorageImpl()
-            : empty(),
-              initialized(false)
-        {}
-
-        template <typename... Args>
-        constexpr StorageImpl(Args&& ...args)
-            : value(std::forward<Args>(args)...),
-              initialized(true)
-        {}
-
-        constexpr void destruct() {
-            if (initialized) {
-                value.~T();
+    void destruct()
+    {
+        if constexpr (!std::is_trivially_destructible_v<T>) {
+            if (initialized_) {
+                value_.~T();
             }
         }
+    }
 
-#if __cplusplus >= 202002L
-        constexpr 
-#endif
-        ~StorageImpl() {
-            destruct();
-        }
+    struct Empty {};
+    union {
+        Empty empty_;
+        T value_;
     };
+    bool initialized_;
 
-    template <typename U, bool trivial =
-        std::is_trivially_copy_constructible_v<U> ||
-        !std::is_copy_constructible_v<U>>
-    struct CopyConstruct : StorageImpl<U> {
-        using StorageImpl<U>::StorageImpl;
-    };
+    static_assert(std::is_trivially_copy_constructible_v<Optional<T>> ==
+        std::is_trivially_copy_constructible_v<T>);
 
-    template <typename U, bool trivial =
-        std::is_trivially_move_constructible_v<U> ||
-        !std::is_move_constructible_v<U>>
-    struct MoveConstruct : CopyConstruct<U> {
-        using CopyConstruct<U>::CopyConstruct;
-    };
+    static_assert(std::is_trivially_move_constructible_v<Optional<T>> ==
+        std::is_trivially_move_constructible_v<T>);
 
-    template <typename U, bool trivial =
-        (std::is_trivially_destructible_v<U> &&
-         std::is_trivially_copy_constructible_v<U> &&
-         std::is_trivially_copy_assignable_v<U>) ||
-        !std::is_copy_assignable_v<U>>
-    struct CopyAssign : MoveConstruct<U> {
-        using MoveConstruct<U>::MoveConstruct;
-    };
-
-    template <typename U, bool trivial =
-        (std::is_trivially_destructible_v<U> &&
-         std::is_trivially_move_constructible_v<U> &&
-         std::is_trivially_move_assignable_v<U>) ||
-        !std::is_move_assignable_v<U>>
-    struct MoveAssign : CopyAssign<U> {
-        using CopyAssign<U>::CopyAssign;
-    };
-
-    template <typename U> struct CopyConstruct<U, false> : StorageImpl<U> {
-        using StorageImpl<U>::StorageImpl;
-    
-        constexpr CopyConstruct(const CopyConstruct &o)
-        {
-            this->initialized = o.initialized;
-    
-            if (this->initialized) {
-                std::construct_at(&this->value, o.value);
-            }
-        }
-    };
-
-    template <typename U> struct MoveConstruct<U, false> : CopyConstruct<U> {
-        using CopyConstruct<U>::CopyConstruct;
-    
-        constexpr MoveConstruct(MoveConstruct &&o)
-        {
-            this->initialized = o.initialized;
-
-            if (this->initialized) {
-                std::construct_at(&this->value, std::move(o.value));
-                o.initialized = false;
-            } 
-        }
-    };
-
-    template <typename U> struct CopyAssign<U, false> : MoveConstruct<U> {
-        using MoveConstruct<U>::MoveConstruct;
-    
-        constexpr CopyAssign & operator=(const CopyAssign &o) 
-        {
-            if (this->initialized) {
-                if (o.initialized) {
-                    this->value = o.value;
-                } else {
-                    this->destruct();
-                    this->initialized = false;
-                }
-            } else if (o.initialized) {
-                std::construct_at(&this->value, o.value);
-                this->initialized = true;
-            }
-    
-            return *this;
-        }
-    };
-
-    template<typename U> struct MoveAssign<U, false> : CopyAssign<U> {
-        using CopyAssign<U>::CopyAssign;
-
-        MoveAssign & operator=(const MoveAssign &) = default;
-    
-        constexpr MoveAssign & operator=(MoveAssign &&o)
-        {
-            if (this->initialized) {
-                if (o.initialized) {
-                    this->value = std::move(o.value);
-                    o.initialized = false;
-                } else {
-                    this->destruct();
-                    this->initialized = false;
-                }
-            } else if (o.initialized) {
-                std::construct_at(&this->value, std::move(o.value));
-                o.initialized = false;
-                this->initialized = true;
-            }
-    
-            return *this;
-        }
-    };
-    
-    using Storage = MoveAssign<T>;
-    Storage storage_;
+    static_assert(std::is_trivially_destructible_v<Optional<T>> ==
+        std::is_trivially_destructible_v<T>);
 };
-
 
 }

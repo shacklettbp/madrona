@@ -23,10 +23,10 @@ static bool enableValidation()
     return validate_env  && validate_env[0] == '1';
 }
 
-static bool forcePresent()
+static bool debugPresent()
 {
-    char *force_present = getenv("MADRONA_RENDER_FORCE_PRESENT");
-    return force_present && force_present[0] == '1';
+    char *debug_present = getenv("MADRONA_RENDER_DEBUG_PRESENT");
+    return debug_present && debug_present[0] == '1';
 }
 
 struct ImplInit {
@@ -316,7 +316,7 @@ static DescriptorState makeDescriptors(const DeviceState &dev,
 static ImplInit setupImplInit(const BatchRenderer::Config &cfg)
 {
     bool validate = enableValidation();
-    bool present = forcePresent();
+    bool present = debugPresent();
 
     PFN_vkGetInstanceProcAddr get_instance = nullptr;
 
