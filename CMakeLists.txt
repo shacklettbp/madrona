@@ -3,7 +3,7 @@ cmake_policy(VERSION 3.18)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake_init)
 
-project(MadronaEngine LANGUAGES C CXX)
+project(madrona LANGUAGES C CXX)
 
 include(setup)
 include(dependencies)
