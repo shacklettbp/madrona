@@ -43,7 +43,7 @@ public:
     {
         destruct();
 
-        std::construct_at(&value_, std::forward<Args>(args)...);
+        this->construct(std::forward<Args>(args)...);
         initialized_ = true;
 
         return value_;
@@ -113,7 +113,7 @@ public:
                 this->initialized_ = false;
             }
         } else if (o.initialized_) {
-            std::construct_at(&this->value_, o.value_);
+            this->construct(o.value_);
             this->initialized_ = true;
         }
         
@@ -140,7 +140,7 @@ public:
                 this->initialized_ = false;
             }
         } else if (o.initialized) {
-            std::construct_at(&this->value_, std::forward<T>(o.value_));
+            this->construct(std::forward<T>(o.value_));
             this->initialized_ = true;
         }
         
@@ -158,7 +158,7 @@ public:
         if (this->initialized_) {
             this->value_ = std::forward<U>(o);
         } else {
-            std::construct_at(&this->value_, std::forward<U>(o));
+            this->construct(std::forward<U>(o));
             this->initialized_ = true;
         }
         
@@ -200,7 +200,16 @@ private:
     constexpr Optional(std::in_place_t, Args && ...args)
         : value_(std::forward<Args>(args)...),
           initialized_(true)
-    {}
+    {
+        static_assert(std::is_trivially_copy_constructible_v<Optional<T>> ==
+            std::is_trivially_copy_constructible_v<T>);
+
+        static_assert(std::is_trivially_move_constructible_v<Optional<T>> ==
+            std::is_trivially_move_constructible_v<T>);
+
+        static_assert(std::is_trivially_destructible_v<Optional<T>> ==
+            std::is_trivially_destructible_v<T>);
+    }
 
     void destruct()
     {
@@ -209,6 +218,16 @@ private:
                 value_.~T();
             }
         }
+    }
+
+    template <typename... Args>
+    constexpr void construct(Args && ...args)
+    {
+#ifdef MADRONA_GPU_MODE
+        new (&value_) T(std::forward<Args>(args)...);
+#else
+        std::construct_at(&value_, std::forward<Args>(args)...);
+#endif
     }
 
     struct Empty {};
