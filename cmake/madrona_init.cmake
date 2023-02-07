@@ -20,3 +20,5 @@ endif()
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${MADRONA_DIR}/cmake")
 
 include(build_type)
+
+include("${MADRONA_DIR}/external/madrona-toolchain/cmake/setup_toolchain.cmake")
