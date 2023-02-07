@@ -26,6 +26,7 @@ function(madrona_python_module module_name)
 
     target_link_libraries(${module_name} PRIVATE
         madrona_python_utils
+        madrona_libcxx_except_static
     )
      
     set_target_properties(madrona_python PROPERTIES EXCLUDE_FROM_ALL FALSE)
@@ -53,5 +54,8 @@ foreach(lib IN LISTS nanobind_lib_target)
     string(FIND ${lib} "nanobind" pos)
     if (NOT ${pos} EQUAL -1)
         target_compile_options(${lib} PRIVATE "-Wno-everything")
+        target_link_libraries(${lib} PUBLIC
+            madrona_libcxx_except_static
+        )
     endif ()
 endforeach()

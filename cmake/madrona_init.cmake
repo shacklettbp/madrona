@@ -21,4 +21,6 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${MADRONA_DIR}/cmake")
 
 include(build_type)
 
-include("${MADRONA_DIR}/external/madrona-toolchain/cmake/setup_toolchain.cmake")
+if (NOT PROJECT_IS_TOP_LEVEL)
+    include("${MADRONA_DIR}/external/madrona-toolchain/cmake/set_toolchain.cmake")
+endif()

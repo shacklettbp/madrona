@@ -1,3 +1,5 @@
+link_libraries(madrona_libcxx) # FIXME hack
+
 add_subdirectory(external/glslang EXCLUDE_FROM_ALL)
 
 target_include_directories(glslang SYSTEM

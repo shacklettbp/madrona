@@ -74,6 +74,7 @@ endif()
 target_link_libraries(madrona_common
     PUBLIC 
         madrona_hdrs
+        madrona_libcxx
 )
 
 set_property(TARGET madrona_common PROPERTY

@@ -9,6 +9,7 @@ unset(CMAKE_CXX_VISIBILITY_PRESET)
 #target_include_directories(spirv_reflect
 #    INTERFACE SPIRV-Reflect)
 #
+add_subdirectory(madrona-toolchain)
 add_subdirectory(madrona-deps)
 include(madrona-deps/cmake/sys-detect.cmake)
 set(MADRONA_LINUX ${MADRONA_LINUX} PARENT_SCOPE)
