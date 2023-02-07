@@ -22,3 +22,6 @@
 [submodule "external/fast_float"]
 	path = external/fast_float
 	url = https://github.com/fastfloat/fast_float.git
+[submodule "external/madrona-toolchain"]
+	path = external/madrona-toolchain
+	url = https://github.com/shacklettbp/madrona-toolchain.git
