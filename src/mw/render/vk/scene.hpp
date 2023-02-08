@@ -1,17 +1,16 @@
 #pragma once
 
-#include <madrona/render.hpp>
+#include <madrona/mw_render.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/heap_array.hpp>
+#include "../interop.hpp"
 
-#include "core.hpp"
-#include "memory.hpp"
-#include "cuda_interop.hpp"
-#include "engine_interop.hpp"
+#include "vk/core.hpp"
+#include "vk/memory.hpp"
+#include "vk/cuda_interop.hpp"
+#include "vk/engine_interop.hpp"
 
-namespace madrona {
-namespace render {
-namespace vk {
+namespace madrona::render::vk {
 
 struct Mesh {
     uint32_t vertexOffset;
@@ -113,6 +112,4 @@ struct TLASData {
     void destroy(const DeviceState &dev);
 };
 
-}
-}
 }

@@ -93,7 +93,7 @@ struct EntityStore {
     uint32_t numSlotGrowBytes;
     uint32_t numIdxGrowBytes;
 
-    utils::SpinLock growLock {};
+    SpinLock growLock {};
 };
 
 class StateManager {
@@ -232,7 +232,7 @@ private:
 
     uint32_t archetype_component_offset_ = 0;
     uint32_t query_data_offset_ = 0;
-    utils::SpinLock query_data_lock_ {};
+    SpinLock query_data_lock_ {};
     FixedInlineArray<Optional<TypeInfo>, max_components_> components_ {};
     std::array<uint32_t, max_archetype_components_ * max_archetypes_>
         archetype_components_ {};

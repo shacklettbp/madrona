@@ -1,11 +1,9 @@
 #pragma once
 
-#include <madrona/math.hpp>
-#include <madrona/taskgraph.hpp>
+#include <madrona/mw_render.hpp>
 
-namespace madrona {
-namespace render {
-
+namespace madrona::render {
+ 
 struct AccelStructTransform {
     float matrix[3][4];
 };
@@ -17,16 +15,6 @@ struct AccelStructInstance {
     uint32_t instanceShaderBindingTableRecordOffset:24;
     uint32_t flags:8;
     uint64_t accelerationStructureReference;
-};
-
-struct ViewID {
-    int32_t idx;
-};
-
-struct ViewSettings {
-    float tanFOV;
-    math::Vector3 cameraOffset;
-    ViewID viewID;
 };
 
 // FIXME this is a copy of the PackedCamera / ViewData
@@ -57,18 +45,18 @@ struct RendererInit {
     math::Vector3 worldOffset;
 };
 
-struct RenderingSystem {
-    static void registerTypes(ECSRegistry &registry);
+struct RendererState {
+    AccelStructInstance *tlasInstanceBuffer;
+    AccelStructRangeInfo *numInstances;
+    uint64_t *blases;
+    PackedViewData *packedViews;
+    math::Vector3 worldOffset;
+#ifdef MADRONA_GPU_MODE
+    uint32_t *count_readback;
+#endif
 
-    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                                        Span<const TaskGraph::NodeID> deps);
-
-    static void init(Context &ctx, const RendererInit &init);
-
-    static ViewSettings setupView(Context &ctx, float vfov_degrees,
-                                  math::Vector3 camera_offset,
-                                  ViewID view_id);
+    static void init(Context &ctx,
+                     const RendererInit &init);
 };
 
-}
 }

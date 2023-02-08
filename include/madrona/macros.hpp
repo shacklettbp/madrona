@@ -71,3 +71,6 @@
 #define MADRONA_IMPORT __attribute__ ((visibility ("default")))
 #define MADRONA_EXPORT __attribute__ ((visibility ("default")))
 #endif
+
+#define STATIC_UNIMPLEMENTED() \
+    static_assert(false, "Unimplemented")

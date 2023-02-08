@@ -6,6 +6,8 @@
 #include <madrona/mw_gpu/megakernel_consts.hpp>
 #include <madrona/mw_gpu/cu_utils.hpp>
 
+#include "../render/interop.hpp"
+
 namespace madrona {
 
 namespace mwGPU {
@@ -94,6 +96,15 @@ void TaskGraph::init()
         : "=r"(sm_id));
     sharedBlockState.blockSMOffset = block_sm_offsets_[sm_id].fetch_add(1, std::memory_order_relaxed);
 #endif
+}
+
+void TaskGraph::setupRenderer(Context &ctx, const void *renderer_inits,
+                              int32_t world_idx)
+{
+    const render::RendererInit &renderer_init =
+        ((const render::RendererInit *)renderer_inits)[world_idx];
+
+    render::RendererState::init(ctx, renderer_init);
 }
 
 void TaskGraph::updateBlockState()

@@ -9,8 +9,7 @@ namespace madrona {
 namespace mwGPU {
 namespace entryKernels {
 
-template <typename ContextT, typename WorldDataT, typename ConfigT,
-          typename... InitTs>
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 __launch_bounds__(madrona::consts::numMegakernelThreads,
                   madrona::consts::numMegakernelBlocksPerSM)
 __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
@@ -33,14 +32,16 @@ __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
     new (state_mgr) StateManager(0);
 
     ECSRegistry ecs_registry(*state_mgr, exported_columns);
-    WorldDataT::registerTypes(ecs_registry, *(ConfigT *)cfg);
+    WorldT::registerTypes(ecs_registry, *(ConfigT *)cfg);
 }
 
-template <typename ContextT, typename WorldDataT, typename ConfigT,
-          typename... InitTs>
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 __launch_bounds__(madrona::consts::numMegakernelThreads,
                   madrona::consts::numMegakernelBlocksPerSM)
-__global__ void initWorlds(int32_t num_worlds, InitTs * ...inits)
+__global__ void initWorlds(int32_t num_worlds,
+                           const void *renderer_inits,
+                           const ConfigT *cfg,
+                           const InitT *user_inits)
 {
     int32_t world_idx = threadIdx.x + blockDim.x * blockIdx.x;
 
@@ -54,17 +55,20 @@ __global__ void initWorlds(int32_t num_worlds, InitTs * ...inits)
         world_idx,
     });
 
-    new (world) WorldDataT(ctx, inits[world_idx] ...);
+    if (renderer_inits != nullptr) {
+        TaskGraph::setupRenderer(ctx, renderer_inits, world_idx);
+    }
+
+    new (world) WorldT(ctx, *cfg, user_inits[world_idx]);
 }
 
-template <typename ContextT, typename WorldDataT, typename ConfigT,
-          typename... InitTs>
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 __launch_bounds__(madrona::consts::numMegakernelThreads,
                   madrona::consts::numMegakernelBlocksPerSM)
 __global__ void initTasks(void *cfg)
 {
     TaskGraph::Builder builder(1024, 1024 * 2, 1024 * 5);
-    WorldDataT::setupTasks(builder, *(ConfigT *)cfg);
+    WorldT::setupTasks(builder, *(ConfigT *)cfg);
 
     builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
 }
@@ -74,12 +78,11 @@ __global__ void initTasks(void *cfg)
 template <auto init_ecs, auto init_worlds, auto init_tasks>
 struct MWGPUEntryInstantiate {};
 
-template <typename ContextT, typename WorldDataT, typename ConfigT,
-          typename... InitTs>
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 struct alignas(16) MWGPUEntry : MWGPUEntryInstantiate<
-    entryKernels::initECS<ContextT, WorldDataT, ConfigT, InitTs...>,
-    entryKernels::initWorlds<ContextT, WorldDataT, ConfigT, InitTs...>,
-    entryKernels::initTasks<ContextT, WorldDataT, ConfigT, InitTs...>>
+    entryKernels::initECS<ContextT, WorldT, ConfigT, InitT>,
+    entryKernels::initWorlds<ContextT, WorldT, ConfigT, InitT>,
+    entryKernels::initTasks<ContextT, WorldT, ConfigT, InitT>>
 {};
 
 }
@@ -88,6 +91,6 @@ struct alignas(16) MWGPUEntry : MWGPUEntryInstantiate<
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates
 // the entryKernels::* __global__ entry points. static_assert with a trivially
 // true check leaves no side effects in the scope where this macro is called.
-#define MADRONA_BUILD_MWGPU_ENTRY(ContextT, WorldT, ConfigT, ...) \
+#define MADRONA_BUILD_MWGPU_ENTRY(ContextT, WorldT, ConfigT, InitT) \
     static_assert(alignof(::madrona::mwGPU::MWGPUEntry<ContextT, WorldT, \
-        ConfigT, __VA_ARGS__>) == 16);
+        ConfigT, InitT>) == 16);

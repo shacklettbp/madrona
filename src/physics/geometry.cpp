@@ -1,6 +1,5 @@
 #ifndef MADRONA_GPU_MODE
 #include <cstdlib>
-#include <memory.h>
 #include <map>
 #endif
 

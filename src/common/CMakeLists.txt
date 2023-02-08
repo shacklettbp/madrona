@@ -20,8 +20,18 @@ endif ()
 
 if (FRONTEND_GCC OR FRONTEND_CLANG)
     target_compile_options(madrona_hdrs INTERFACE
-        -pedantic -Wall -Wextra -march=x86-64-v3
+        -pedantic -Wall -Wextra
     )
+
+    if (MADRONA_X64)
+        target_compile_options(madrona_hdrs INTERFACE
+            -march=x86-64-v3
+        )
+    elseif (MADRONA_ARM)
+        target_compile_options(madrona_hdrs INTERFACE
+            -mcpu=apple-m1
+        )
+    endif()
 endif()
 
 add_library(madrona_common STATIC
@@ -78,22 +88,25 @@ add_library(madrona_importer STATIC
 target_link_libraries(madrona_importer PRIVATE
     madrona_common
     meshoptimizer
+    fast_float
 )
 
-add_library(madrona_cuda STATIC
-    ${MADRONA_INC_DIR}/cuda_utils.hpp ${MADRONA_INC_DIR}/cuda_utils.inl
-        cuda_utils.cpp
-)
-
-target_compile_definitions(madrona_cuda
-    PUBLIC
-        MADRONA_CUDA_SUPPORT=1
-)
-
-target_link_libraries(madrona_cuda
-    PUBLIC
-        CUDA::cudart
-    PRIVATE
-        CUDA::cuda_driver CUDA::nvrtc
-        madrona_common
-)
+if (CUDAToolkit_FOUND)
+    add_library(madrona_cuda STATIC
+        ${MADRONA_INC_DIR}/cuda_utils.hpp ${MADRONA_INC_DIR}/cuda_utils.inl
+            cuda_utils.cpp
+    )
+    
+    target_compile_definitions(madrona_cuda
+        PUBLIC
+            MADRONA_CUDA_SUPPORT=1
+    )
+    
+    target_link_libraries(madrona_cuda
+        PUBLIC
+            CUDA::cudart
+        PRIVATE
+            CUDA::cuda_driver CUDA::nvrtc
+            madrona_common
+    )
+endif ()

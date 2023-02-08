@@ -65,7 +65,7 @@ struct ThreadblockData {
 static __shared__ ThreadblockData tbData;
 
 struct WaitQueue {
-    utils::SpinLock lock;
+    SpinLock lock;
     uint32_t numWaiting;
     Job waitingJobs[consts::jobsPerWaitQueue];
 };

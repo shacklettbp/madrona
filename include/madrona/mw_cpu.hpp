@@ -1,18 +1,13 @@
 #pragma once
 
 #include <madrona/taskgraph.hpp>
-#include <madrona/batch_renderer.hpp>
+#include <madrona/mw_render.hpp>
+#include <madrona/importer.hpp>
 
 namespace madrona {
 
 class ThreadPoolExecutor {
 public:
-    enum class CameraMode : uint32_t {
-        Perspective,
-        Lidar,
-        None,
-    };
-
     struct Config {
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
@@ -21,7 +16,7 @@ public:
         uint32_t renderHeight;
         uint32_t maxObjects;
         uint32_t numExportedBuffers;
-        CameraMode cameraMode;
+        render::CameraMode cameraMode;
         int32_t renderGPUID;
         uint32_t numWorkers = 0;
     };
@@ -43,37 +38,22 @@ public:
     void * getExported(CountT slot) const;
 
 protected:
-    void ctxInit(void (*init_fn)(void *, const WorkerInit &),
-                 void *init_data, CountT world_idx);
+    void initializeContexts(
+        Context & (*init_fn)(void *, const WorkerInit &, CountT),
+        void *init_data, CountT num_worlds);
 
     ECSRegistry getECSRegistry();
-
-    Optional<render::RendererInterface> getRendererInterface();
-
 private:
-    void workerThread(CountT worker_id);
-
-    HeapArray<std::thread> workers_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_int32_t worker_wakeup_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_int32_t main_wakeup_;
-    Job *current_jobs_;
-    uint32_t num_jobs_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t next_job_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_finished_;
-    StateManager state_mgr_;
-    HeapArray<StateCache> state_caches_;
-    HeapArray<void *> export_ptrs_;
-    Optional<render::BatchRenderer> renderer_;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
-template <typename ContextT, typename WorldT, typename ConfigT,
-          typename... InitTs>
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 class TaskGraphExecutor : private ThreadPoolExecutor {
 public:
-    template <typename... Args>
     TaskGraphExecutor(const Config &cfg,
                       const ConfigT &user_cfg,
-                      const Args * ... user_init_ptrs);
+                      const InitT *user_inits);
 
     inline void run();
 
@@ -83,20 +63,18 @@ public:
     using ThreadPoolExecutor::depthObservations;
 
 private:
-    struct WorldContext {
+    struct RunData {
         ContextT ctx;
-        WorldT worldData;
         TaskGraph taskgraph;
 
-        inline WorldContext(const WorkerInit &worker_init,
-                            const ConfigT &user_cfg,
-                            const InitTs & ...world_inits);
-                            
+        inline RunData(WorldT *world_data, const ConfigT &cfg,
+                       const WorkerInit &worker_init);
     };
 
     static inline void stepWorld(void *data_raw);
 
-    HeapArray<WorldContext> world_contexts_;
+    HeapArray<RunData> run_datas_;
+    HeapArray<WorldT> world_datas_;
     HeapArray<Job> jobs_;
 };
 

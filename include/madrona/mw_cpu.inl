@@ -2,91 +2,68 @@
 
 namespace madrona {
 
-template <typename ContextT, typename WorldT, typename ConfigT,
-          typename... InitTs>
-template <typename... Args>
-TaskGraphExecutor<ContextT, WorldT, ConfigT, InitTs...>::TaskGraphExecutor(
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
+TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::TaskGraphExecutor(
         const Config &cfg,
         const ConfigT &user_cfg,
-        const Args * ...user_init_ptrs)
+        const InitT *user_inits)
     : ThreadPoolExecutor(cfg),
-      world_contexts_(cfg.numWorlds),
+      run_datas_(cfg.numWorlds),
+      world_datas_(cfg.numWorlds),
       jobs_(cfg.numWorlds)
 {
     auto ecs_reg = getECSRegistry();
     WorldT::registerTypes(ecs_reg, user_cfg);
 
-    auto renderer_iface = getRendererInterface();
+    auto ctx_init_cb = [&](const WorkerInit &worker_init,
+                           CountT world_idx) -> Context & {
+        WorldT *world_data_ptr = &world_datas_[world_idx];
 
-    render::WorldGrid render_grid(cfg.numWorlds, 220.f);
+        auto *run_data = new (&run_datas_[world_idx]) RunData(
+            world_data_ptr, user_cfg, worker_init);
+        return run_data->ctx;
+    };
+
+    using CBPtrT = decltype(&ctx_init_cb);
+    initializeContexts([](void *ptr_raw,
+                          const WorkerInit &worker_init,
+                          CountT world_idx) -> Context & {
+        return (*(CBPtrT)ptr_raw)(worker_init, world_idx);
+    }, &ctx_init_cb, cfg.numWorlds);
 
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
-        auto renderer_init = Optional<render::RendererInit>::none();
+        world_datas_.emplace(i, run_datas_[i].ctx, user_cfg, user_inits[i]);
 
-        if (renderer_iface.has_value()) {
-            renderer_init = render::RendererInit {
-                *renderer_iface,
-                render_grid.getOffset(i),
-            };
-        }
-
-        std::array<void *, sizeof...(InitTs)> init_ptrs {
-            (void *)&user_init_ptrs[i] ...,
-            renderer_iface.has_value() ? (void *)&(*renderer_init) : nullptr,
-        };
-
-        // FIXME: this is super ugly because WorkerInit
-        // isn't available at the header level
-        auto cb = [&](const WorkerInit &worker_init) {
-            std::apply([&](auto ...ptrs) {
-                new (&world_contexts_[i]) WorldContext(
-                    worker_init, user_cfg, *(InitTs *)ptrs ...);
-            }, init_ptrs);
-        };
-
-        using CBPtrT = decltype(&cb);
-
-        auto wrapper = [](void *ptr_raw, const WorkerInit &worker_init) {
-            (*(CBPtrT)ptr_raw)(worker_init);
-        };
-
-        ctxInit(wrapper, &cb, i);
         jobs_[i].fn = [](void *ptr) {
             stepWorld(ptr);
         };
-        jobs_[i].data = &world_contexts_[i];
+        jobs_[i].data = &run_datas_[i];
     }
 }
 
-template <typename ContextT, typename WorldT, typename ConfigT,
-          typename... InitTs>
-void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitTs...>::run()
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
+void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::run()
 {
     ThreadPoolExecutor::run(jobs_.data(), jobs_.size());
 }
 
-template <typename ContextT, typename WorldT, typename ConfigT,
-          typename... InitTs>
-TaskGraphExecutor<ContextT, WorldT, ConfigT, InitTs...>::WorldContext::
-WorldContext(const WorkerInit &worker_init,
-             const ConfigT &user_cfg,
-             const InitTs & ...world_inits)
-    : ctx(&worldData, worker_init),
-      worldData(ctx, world_inits...),
-      taskgraph([this, &user_cfg]() {
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
+void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::stepWorld(
+    void *data_raw)
+{
+    auto run_data = (RunData *)data_raw;
+    run_data->taskgraph.run(&run_data->ctx);
+}
+
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
+TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::RunData::RunData(
+        WorldT *world_data, const ConfigT &cfg, const WorkerInit &init)
+    : ctx(world_data, init),
+      taskgraph([this, &cfg]() {
           TaskGraph::Builder builder(ctx);
-          WorldT::setupTasks(builder, user_cfg);
+          WorldT::setupTasks(builder, cfg);
           return builder.build();
       }())
 {}
-
-template <typename ContextT, typename WorldT, typename ConfigT,
-          typename... InitTs>
-void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitTs...>::stepWorld(
-    void *data_raw)
-{
-    auto world_ctx = (WorldContext *)data_raw;
-    world_ctx->taskgraph.run(&world_ctx->ctx);
-}
 
 }

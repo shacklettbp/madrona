@@ -45,7 +45,7 @@ private:
                        int32_t num_args);
 
     Channel *channel_;
-    utils::SpinLock device_lock_;
+    SpinLock device_lock_;
 friend HostPrintCPU;
 };
 

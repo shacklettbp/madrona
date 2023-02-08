@@ -230,7 +230,7 @@ static vector<ReflectedSetInfo> getReflectionInfo(const vector<uint32_t> &spv,
             });
         }
 
-        sets.emplace_back(move(set_info));
+        sets.emplace_back(std::move(set_info));
     }
 
     spvReflectDestroyShaderModule(&rfl_mod);
@@ -360,7 +360,7 @@ PipelineShaders::PipelineShaders(
             binding_info.pImmutableSamplers = nullptr;
         }
 
-        binding_infos.emplace_back(move(set_binding_info));
+        binding_infos.emplace_back(std::move(set_binding_info));
         binding_flags.emplace_back(binding_infos.back().size());
     }
 

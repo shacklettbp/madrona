@@ -1,3 +1,4 @@
+#define MADRONA_PYTHON_VISIBILITY MADRONA_EXPORT
 #include <madrona/python.hpp>
 
 #if defined(MADRONA_CLANG) || defined(MADRONA_GCC)
@@ -122,8 +123,10 @@ NB_MODULE(madrona_python, m) {
             };
         });
 
-    nb::class_<ExternalSync>(m, "ExternalSync")
-        .def("wait", &ExternalSync::wait);
+#ifdef MADRONA_CUDA_SUPPORT
+    nb::class_<CudaSync>(m, "CudaSync")
+        .def("wait", &CudaSync::wait);
+#endif
 }
 
 }

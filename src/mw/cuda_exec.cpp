@@ -16,10 +16,10 @@
 
 #include <madrona/mw_gpu.hpp>
 #include <madrona/dyn_array.hpp>
-#include <madrona/batch_renderer.hpp>
 #include <madrona/cuda_utils.hpp>
 #include <madrona/tracing.hpp>
 
+#include "render/batch_renderer.hpp"
 #include "cpp_compile.hpp"
 
 // Wrap GPU headers in the mwGPU namespace. This is a weird situation where
@@ -485,15 +485,13 @@ static void checkAndLoadMegakernelCache(
 }
 
 static GPUCompileResults compileCode(
-    const char **sources, uint32_t num_sources,
-    const char **compile_flags, uint32_t num_compile_flags,
-    const char **fast_compile_flags, uint32_t num_fast_compile_flags,
-    CompileConfig::OptMode opt_mode, CompileConfig::Executor exec_mode,
-    bool verbose_compile)
+    const char **sources, int64_t num_sources,
+    const char **compile_flags, int64_t num_compile_flags,
+    const char **fast_compile_flags, int64_t num_fast_compile_flags,
+    const char **linker_flags , int64_t num_linker_flags,
+    CompileConfig::OptMode opt_mode,
+    CompileConfig::Executor exec_mode, bool verbose_compile)
 {
-    static std::array<char, 1024 * 1024> linker_info_log;
-    static std::array<char, 1024 * 1024> linker_error_log;
-
     auto kernel_cache = Optional<MegakernelCache>::none();
     auto cache_write_path = Optional<std::string>::none();
     checkAndLoadMegakernelCache(kernel_cache, cache_write_path);
@@ -510,73 +508,41 @@ static GPUCompileResults compileCode(
         };
     }
 
-    DynArray<CUjit_option> linker_options {
-        CU_JIT_INFO_LOG_BUFFER,
-        CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
-        CU_JIT_ERROR_LOG_BUFFER,
-        CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
-        CU_JIT_LOG_VERBOSE,
+    nvJitLinkHandle linker;
+    REQ_NVJITLINK(nvJitLinkCreate(
+        &linker, num_linker_flags, linker_flags));
+
+    auto printLinkerLogs = [&linker](FILE *out) {
+        size_t info_log_size, err_log_size;
+        REQ_NVJITLINK(
+            nvJitLinkGetInfoLogSize(linker, &info_log_size));
+        REQ_NVJITLINK(
+            nvJitLinkGetErrorLogSize(linker, &err_log_size));
+
+        if (info_log_size > 0) {
+            HeapArray<char> info_log(info_log_size);
+            REQ_NVJITLINK(nvJitLinkGetInfoLog(linker, info_log.data()));
+
+            fprintf(out, "%s\n", info_log.data());
+        }
+
+        if (err_log_size > 0) {
+            HeapArray<char> err_log(err_log_size);
+            REQ_NVJITLINK(nvJitLinkGetErrorLog(linker, err_log.data()));
+
+            fprintf(out, "%s\n", err_log.data());
+        }
     };
 
-    DynArray<void *> linker_option_values {
-        (void *)linker_info_log.data(),
-        (void *)linker_info_log.size(),
-        (void *)linker_error_log.data(),
-        (void *)linker_error_log.size(),
-        (void *)1, /* Verbose */
-    };
-
-    CUjitInputType linker_input_type;
-    if (opt_mode == CompileConfig::OptMode::LTO) {
-        linker_options.push_back(CU_JIT_LTO);
-        linker_option_values.push_back((void *)1);
-        linker_options.push_back(CU_JIT_FTZ);
-        linker_option_values.push_back((void *)1);
-        linker_options.push_back(CU_JIT_PREC_DIV);
-        linker_option_values.push_back((void *)0);
-        linker_options.push_back(CU_JIT_PREC_SQRT);
-        linker_option_values.push_back((void *)0);
-        linker_options.push_back(CU_JIT_FMA);
-        linker_option_values.push_back((void *)1);
-        linker_options.push_back(CU_JIT_OPTIMIZE_UNUSED_DEVICE_VARIABLES);
-        linker_option_values.push_back((void *)1);
-
-        linker_input_type = CU_JIT_INPUT_NVVM;
-    } else {
-        linker_input_type = CU_JIT_INPUT_CUBIN;
-    }
-
-    if (opt_mode == CompileConfig::OptMode::Debug) {
-        linker_options.push_back(CU_JIT_GENERATE_DEBUG_INFO);
-        linker_option_values.push_back((void *)1);
-        linker_options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
-        linker_option_values.push_back((void *)0);
-    } else {
-        linker_options.push_back(CU_JIT_GENERATE_LINE_INFO);
-        linker_option_values.push_back((void *)1);
-        linker_options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
-        linker_option_values.push_back((void *)4);
-    }
-
-    CUlinkState linker;
-    REQ_CU(cuLinkCreate(linker_options.size(), linker_options.data(),
-                        linker_option_values.data(), &linker));
-
-    auto checkLinker = [&linker_option_values](CUresult res) {
-        if (res != CUDA_SUCCESS) {
+    auto checkLinker = [&printLinkerLogs](nvJitLinkResult res) {
+        if (res != NVJITLINK_SUCCESS) {
             fprintf(stderr, "CUDA linking Failed!\n");
 
-            if ((uintptr_t)linker_option_values[1] > 0) {
-                fprintf(stderr, "%s\n", linker_info_log.data());
-            }
-
-            if ((uintptr_t)linker_option_values[3] > 0) {
-                fprintf(stderr, "%s\n", linker_error_log.data());
-            }
+            printLinkerLogs(stderr);
 
             fprintf(stderr, "\n");
 
-            ERR_CU(res);
+            ERR_NVJITLINK(res);
         }
     };
 
@@ -588,9 +554,16 @@ static GPUCompileResults compileCode(
                               0, nullptr, nullptr));
 #endif
 
+    nvJitLinkInputType linker_input_type;
+    if (opt_mode == CompileConfig::OptMode::LTO) {
+        linker_input_type = NVJITLINK_INPUT_LTOIR;
+    } else {
+        linker_input_type = NVJITLINK_INPUT_CUBIN;
+    }
+
     auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
-        checkLinker(cuLinkAddData(linker, linker_input_type,
-            (char *)cubin.data(), cubin.size(), name, 0, nullptr, nullptr));
+        checkLinker(nvJitLinkAddData(linker, linker_input_type,
+            (char *)cubin.data(), cubin.size(), name));
     };
 
     std::string megakernel_job_prefix = R"__(#include "megakernel_job_impl.inl"
@@ -741,8 +714,11 @@ static __attribute__((always_inline)) inline void dispatch(
         }
     };
 
+    // Need to save bytecode until nvJitLinkComplete is called,
+    // unlike old driver API
+    DynArray<HeapArray<char>> source_bytecodes(num_sources);
     printf("Compiling GPU engine code:\n");
-    for (int i = 0; i < (int)num_sources; i++) {
+    for (int64_t i = 0; i < num_sources; i++) {
         printf("%s\n", sources[i]);
         auto [ptx, bytecode] = cu::jitCompileCPPFile(sources[i],
             compile_flags, num_compile_flags,
@@ -751,6 +727,8 @@ static __attribute__((always_inline)) inline void dispatch(
 
         processPTXSymbols(std::string_view(ptx.data(), ptx.size()));
         addToLinker(bytecode, sources[i]);
+
+        source_bytecodes.emplace_back(std::move(bytecode));
     }
 
     megakernel_prefix += R"__(
@@ -789,9 +767,12 @@ static __attribute__((always_inline)) inline void dispatch(
 
     addToLinker(compiled_megakernel.outputBinary, "megakernel.cpp");
 
-    void *linked_cubin;
+    checkLinker(nvJitLinkComplete(linker));
+
     size_t cubin_size;
-    checkLinker(cuLinkComplete(linker, &linked_cubin, &cubin_size));
+    REQ_NVJITLINK(nvJitLinkGetLinkedCubinSize(linker, &cubin_size));
+    HeapArray<char> linked_cubin(cubin_size);
+    REQ_NVJITLINK(nvJitLinkGetLinkedCubin(linker, linked_cubin.data()));
 
     if (cache_write_path.has_value()) {
         std::ofstream cache_file(*cache_write_path, std::ios::binary);
@@ -801,19 +782,20 @@ static __attribute__((always_inline)) inline void dispatch(
         while (size_t(cache_file.tellp()) % 4 != 0) {
             cache_file.put(0);
         }
-        cache_file.write((char *)linked_cubin, cubin_size);
+        cache_file.write(linked_cubin.data(), linked_cubin.size());
 
         cache_file.close();
     }
 
-    if (verbose_compile && (uintptr_t)linker_option_values[1] > 0) {
-        printf("CUDA linking info:\n%s\n", linker_info_log.data());
+    if (verbose_compile) {
+        printf("CUDA linking info:\n");
+        printLinkerLogs(stdout);
     }
 
     CUmodule mod;
-    REQ_CU(cuModuleLoadData(&mod, linked_cubin));
+    REQ_CU(cuModuleLoadData(&mod, linked_cubin.data()));
 
-    REQ_CU(cuLinkDestroy(linker));
+    REQ_NVJITLINK(nvJitLinkDestroy(&linker));
 
     if (init_ecs_name.size() == 0 ||
         init_worlds_name.size() == 0 ||
@@ -871,30 +853,60 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
            sizeof(const char *) * cfg.userSources.size());
 
     // Build architecture string for this GPU
-    string arch_str = "sm_" + to_string(cuda_arch.first) +
+    string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
         to_string(cuda_arch.second);
 
     std::string threadblock_count_define =
         std::string("-DMADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS=(") +
         std::to_string(num_megakernel_blocks) + ")";
 
-    DynArray<const char *> fast_compile_flags {
+    int64_t max_registers;
+    switch (consts::numMegakernelBlocksPerSM) {
+    case 1: {
+        max_registers = 255;
+    } break;
+    case 2: {
+        max_registers = 128;
+    } break;
+    case 3: {
+        max_registers = 80;
+    } break;
+    case 4: {
+        max_registers = 64;
+    } break;
+    case 5: {
+        max_registers = 48;
+    } break;
+    case 6: {
+        max_registers = 40;
+    } break;
+    default: {
+        FATAL("Unsupported number of blocks per SM");
+    } break;
+    }
+
+    std::string regcount_str = std::to_string(max_registers);
+
+    DynArray<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
-        "-arch", arch_str.c_str(),
+        "-arch", gpu_arch_str.c_str(),
         threadblock_count_define.c_str(),
+        "-maxrregcount", regcount_str.c_str(),
 #ifdef MADRONA_TRACING
         "-DMADRONA_TRACING=1",
 #endif
     };
 
     for (const char *user_flag : cfg.userCompileFlags) {
-        fast_compile_flags.push_back(user_flag);
+        common_compile_flags.push_back(user_flag);
     }
 
-    DynArray<const char *> compile_flags(fast_compile_flags.size());
-    for (const char *flag : fast_compile_flags) {
-        compile_flags.push_back(flag);
+    DynArray<const char *> fast_compile_flags(common_compile_flags.size());
+    for (const char *flag : common_compile_flags) {
+        fast_compile_flags.push_back(flag);
     }
+
+    DynArray<const char *> compile_flags = std::move(common_compile_flags);
 
     // No way to disable optimizations in nvrtc besides enabling debug mode
     fast_compile_flags.push_back("-G");
@@ -918,23 +930,56 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         compile_flags.push_back("-DMADRONA_MWGPU_TASKGRAPH=1");
     }
 
+    std::string linker_arch_str =
+        std::string("-arch=") + gpu_arch_str;
+
+    std::string linker_regcount_str =
+        std::string("-maxrregcount=") + regcount_str;
+
+    DynArray<const char *> linker_flags {
+        linker_arch_str.c_str(),
+        linker_regcount_str.c_str(),
+        "-ftz=1",
+        "-prec-div=0",
+        "-prec-sqrt=0",
+        "-fma=1",
+        "-optimize-unused-variables",
+    };
+
+    if (opt_mode == CompileConfig::OptMode::Debug) {
+        linker_flags.push_back("-g");
+    } else {
+        linker_flags.push_back("-lineinfo");
+        linker_flags.push_back("-lto");
+    }
+
     char *verbose_compile_env = getenv("MADRONA_MWGPU_VERBOSE_COMPILE");
     bool verbose_compile = verbose_compile_env && verbose_compile_env[0] == '1';
 
     if (verbose_compile) {
-        for (const char *src : all_cpp_files) {
-            cout << src << endl;
+        linker_flags.push_back("-verbose");
+    }
+
+    if (verbose_compile) {
+        cout << "Compiler Flags:\n";
+        for (const char *flag : compile_flags) {
+            cout << flag << "\n";
         }
 
-        for (const char *flag : compile_flags) {
-            cout << flag << endl;
+        cout << "\nLinker Flags:\n";
+        for (const char *flag : linker_flags) {
+            cout << flag << "\n";
         }
+
+        cout << endl;
     }
 
     GPUKernels gpu_kernels;
-    auto compile_results =  compileCode(all_cpp_files.data(),
-        all_cpp_files.size(), compile_flags.data(), compile_flags.size(),
+    auto compile_results = compileCode(
+        all_cpp_files.data(), all_cpp_files.size(),
+        compile_flags.data(), compile_flags.size(),
         fast_compile_flags.data(), fast_compile_flags.size(),
+        linker_flags.data(), linker_flags.size(),
         opt_mode, cfg.execMode, verbose_compile);
 
     gpu_kernels.mod = compile_results.mod;
@@ -1131,7 +1176,7 @@ static GPUEngineState initEngineAndUserState(
     void *user_cfg_host_ptr,
     uint32_t num_user_cfg_bytes,
     uint32_t num_exported,
-    StateConfig::CameraMode camera_mode,
+    render::CameraMode camera_mode,
     uint32_t render_width,
     uint32_t render_height,
     const GPUKernels &gpu_kernels,
@@ -1143,7 +1188,7 @@ static GPUEngineState initEngineAndUserState(
     auto batch_renderer = Optional<render::BatchRenderer>::none();
 
     void *renderer_init_buffer = nullptr;
-    if (camera_mode != StateConfig::CameraMode::None) {
+    if (camera_mode != render::CameraMode::None) {
         assert(render_width != 0 && render_height != 0);
 
         batch_renderer.emplace(render::BatchRenderer::Config {
@@ -1154,9 +1199,7 @@ static GPUEngineState initEngineAndUserState(
             .maxViewsPerWorld = max_views_per_world,
             .maxInstancesPerWorld = max_instances_per_world,
             .maxObjects = 1000,
-            .cameraMode = camera_mode == StateConfig::CameraMode::Perspective ?
-                render::BatchRenderer::CameraMode::Perspective :
-                render::BatchRenderer::CameraMode::Lidar,
+            .cameraMode = camera_mode,
             .inputMode = render::BatchRenderer::InputMode::CUDA,
         });
 
@@ -1249,12 +1292,10 @@ static GPUEngineState initEngineAndUserState(
 
     auto init_tasks_args = makeKernelArgBuffer(user_cfg_gpu_buffer);
 
-    // FIXME: this assumes an ordering of the init args
-    auto init_worlds_args = batch_renderer.has_value() ?
-        makeKernelArgBuffer(num_worlds,
-                            init_tmp_buffer,
-                            renderer_init_buffer) :
-        makeKernelArgBuffer(num_worlds, init_tmp_buffer);
+    auto init_worlds_args = makeKernelArgBuffer(num_worlds,
+        renderer_init_buffer,
+        user_cfg_gpu_buffer,
+        init_tmp_buffer);
 
     auto no_args = makeKernelArgBuffer();
 
@@ -1405,8 +1446,7 @@ static CUgraphExec makeJobSysRunGraph(CUfunction queue_run_kernel,
         &queue_node, 1, &kernel_node_params));
 
     CUgraphExec run_graph_exec;
-    REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph,
-                              nullptr,  nullptr, 0));
+    REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph, 0));
 
     REQ_CU(cuGraphDestroy(run_graph));
 
@@ -1438,8 +1478,7 @@ static CUgraphExec makeTaskGraphRunGraph(CUfunction megakernel,
         nullptr, 0, &kernel_node_params));
 
     CUgraphExec run_graph_exec;
-    REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph,
-                               nullptr, nullptr, 0));
+    REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph, 0));
 
     REQ_CU(cuGraphDestroy(run_graph));
 

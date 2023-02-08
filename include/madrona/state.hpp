@@ -67,7 +67,7 @@ private:
     struct LockedMapStore {
         VirtualStore store;
         CountT numIDs;
-        utils::SpinLock expandLock;
+        SpinLock expandLock;
 
         inline T & operator[](int32_t idx);
         inline const T & operator[](int32_t idx) const;
@@ -293,7 +293,7 @@ private:
     struct QueryState {
         QueryState();
 
-        utils::SpinLock lock;
+        SpinLock lock;
         VirtualArray<uint32_t> queryData;
     };
 
@@ -358,7 +358,7 @@ private:
 
 #ifdef MADRONA_MW_MODE
     uint32_t num_worlds_;
-    utils::SpinLock register_lock_;
+    SpinLock register_lock_;
 #endif
 
     static constexpr uint32_t user_component_offset_ =

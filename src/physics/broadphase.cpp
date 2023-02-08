@@ -414,13 +414,13 @@ static inline MADRONA_ALWAYS_INLINE float atomicMinF(float *addr, float value)
 
     return old;
 #else
-    std::atomic_ref<float> a(*addr);
+    AtomicFloatRef a(*addr);
+    float old = a.load<sync::relaxed>();
 
-    float old = a.load(std::memory_order_relaxed);
-
-    while (old > value && !a.compare_exchange_weak(old, value,
-        std::memory_order_relaxed, std::memory_order_relaxed)) {}
-
+    while (old > value &&
+           !a.compare_exchange_weak<sync::relaxed, sync::relaxed>(old, value))
+    {}
+           
     return old;
 #endif
 }
@@ -441,13 +441,13 @@ static inline MADRONA_ALWAYS_INLINE float atomicMaxF(float *addr, float value)
 
     return old;
 #else
-    std::atomic_ref<float> a(*addr);
+    AtomicFloatRef a(*addr);
+    float old = a.load<sync::relaxed>();
 
-    float old = a.load(std::memory_order_relaxed);
-
-    while (old < value && !a.compare_exchange_weak(old, value,
-        std::memory_order_relaxed, std::memory_order_relaxed)) {}
-
+    while (old < value &&
+           !a.compare_exchange_weak<sync::relaxed, sync::relaxed>(old, value))
+    {}
+           
     return old;
 #endif
 }
@@ -461,27 +461,21 @@ void BVH::refitLeaf(LeafID leaf_id, const AABB &leaf_aabb)
 
     Node &leaf_node = nodes_[node_idx];
 
-#ifdef MADRONA_GPU_MODE
-    using AtomicFloatRef = cuda::atomic_ref<float>;
-#else
-    using AtomicFloatRef = std::atomic_ref<float>;
-#endif
-
     {
         auto nonAtomicMinF = [](float *ptr, float v) {
             AtomicFloatRef a(*ptr);
-            float old = a.load(std::memory_order_relaxed);
+            float old = a.load<sync::relaxed>();
             if (v < old) {
-                a.store(v, std::memory_order_relaxed);
+                a.store<sync::relaxed>(v);
             }
             return old;
         };
 
         auto nonAtomicMaxF = [](float *ptr, float v) {
             AtomicFloatRef a(*ptr);
-            float old = a.load(std::memory_order_relaxed);
+            float old = a.load<sync::relaxed>();
             if (v > old) {
-                a.store(v, std::memory_order_relaxed);
+                a.store<sync::relaxed>(v);
             }
             return old;
         };

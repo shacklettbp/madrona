@@ -145,6 +145,9 @@ public:
     template <typename ContextT>
     static ContextT makeContext(WorldID world_id);
 
+    static void setupRenderer(Context &ctx, const void *renderer_inits,
+                              int32_t world_idx);
+
     template <typename NodeT>
     NodeT & getNodeData(TypedDataID<NodeT> data_id);
 

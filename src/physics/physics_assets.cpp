@@ -1,9 +1,19 @@
 #include <madrona/physics_assets.hpp>
-#include <madrona/cuda_utils.hpp>
 #include <madrona/importer.hpp>
+
+#ifdef MADRONA_CUDA_SUPPORT
+#include <madrona/cuda_utils.hpp>
+#endif
 
 namespace madrona {
 namespace phys {
+
+#ifndef MADRONA_CUDA_SUPPORT
+[[noreturn]] static void noCUDA()
+{
+    FATAL("PhysicsLoader: Not built with CUDA support");
+}
+#endif
 
 struct PhysicsLoader::Impl {
     RigidBodyMetadata *metadatas;
@@ -94,6 +104,9 @@ struct PhysicsLoader::Impl {
             };
         } break;
         case StorageType::CUDA: {
+#ifndef MADRONA_CUDA_SUPPORT
+            noCUDA();
+#else
             metadata_ptr =
                 (RigidBodyMetadata *)cu::allocGPU(num_metadata_bytes);
             aabb_ptr = (math::AABB *)cu::allocGPU(num_aabb_bytes);
@@ -121,6 +134,7 @@ struct PhysicsLoader::Impl {
 
             REQ_CUDA(cudaMemcpy(mgr, &local, sizeof(ObjectManager),
                                 cudaMemcpyHostToDevice));
+#endif
         } break;
         default: __builtin_unreachable();
         }
@@ -169,6 +183,9 @@ PhysicsLoader::~PhysicsLoader()
         free(impl_->vertices);
     } break;
     case StorageType::CUDA: {
+#ifndef MADRONA_CUDA_SUPPORT
+        noCUDA();
+#else
         cu::deallocGPU(impl_->mgr);
         cu::deallocGPU(impl_->primitives);
         cu::deallocGPU(impl_->aabbs);
@@ -178,6 +195,7 @@ PhysicsLoader::~PhysicsLoader()
         cu::deallocGPU(impl_->edgeDatas);
         cu::deallocGPU(impl_->halfEdges);
         cu::deallocGPU(impl_->vertices);
+#endif
     } break;
     }
 }
@@ -204,7 +222,7 @@ PhysicsLoader::LoadedHull PhysicsLoader::loadHullFromDisk(
         total_polylist_space += imp_mesh.faceCounts[face_idx] + 1;
     }
 
-    geometry::FastPolygonList poly_list;
+    geometry::FastPolygonList poly_list {};
     poly_list.allocate(total_polylist_space);
 
     CountT cur_idx_offset = 0;
@@ -307,6 +325,9 @@ CountT PhysicsLoader::loadObjects(
         memcpy(prims_dst, primitives, num_prim_bytes);
     } break;
     case StorageType::CUDA: {
+#ifndef MADRONA_CUDA_SUPPORT
+        noCUDA();
+#else
         for (int i = 0; i < num_objs; ++i) {
             if (primitives[i].type == CollisionPrimitive::Type::Hull) {
                 auto &hEdgeMesh = primitives[i].hull.halfEdgeMesh;
@@ -359,6 +380,7 @@ CountT PhysicsLoader::loadObjects(
                    cudaMemcpyHostToDevice);
         cudaMemcpy(prims_dst, primitives, num_prim_bytes,
                    cudaMemcpyHostToDevice);
+#endif
     } break;
     default: __builtin_unreachable();
     }

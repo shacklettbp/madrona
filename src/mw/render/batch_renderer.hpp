@@ -1,7 +1,9 @@
 #pragma once
 
+#include "interop.hpp"
+
 #include <madrona/types.hpp>
-#include <madrona/render.hpp>
+#include <madrona/mw_render.hpp>
 #include <madrona/importer.hpp>
 #include <memory>
 
@@ -60,11 +62,6 @@ private:
 
 class BatchRenderer {
 public:
-    enum class CameraMode : uint32_t {
-        Perspective,
-        Lidar,
-    };
-
     enum class InputMode : uint32_t {
         CPU,
         CUDA,
