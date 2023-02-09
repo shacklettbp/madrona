@@ -1,4 +1,3 @@
-#define MADRONA_PYTHON_VISIBILITY MADRONA_EXPORT
 #include <madrona/python.hpp>
 
 #if defined(MADRONA_CLANG) || defined(MADRONA_GCC)

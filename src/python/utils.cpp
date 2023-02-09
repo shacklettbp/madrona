@@ -1,3 +1,4 @@
+#define MADRONA_PYTHON_VISIBILITY MADRONA_EXPORT
 #include <madrona/python.hpp>
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -6,9 +7,9 @@
 
 #include <cassert>
 #include <cstring>
+#include <typeindex>
 
-namespace madrona {
-namespace py {
+namespace madrona::py {
 
 #ifdef MADRONA_CUDA_SUPPORT
 MADRONA_EXPORT CudaSync::CudaSync(cudaExternalSemaphore_t sema)
@@ -23,6 +24,10 @@ MADRONA_EXPORT void CudaSync::wait(uint64_t strm)
     cudaExternalSemaphoreWaitParams params {};
     REQ_CUDA(cudaWaitExternalSemaphoresAsync(&sema_, &params, 1, cuda_strm));
 }
+
+#ifdef MADRONA_LINUX
+MADRONA_EXPORT void CudaSync::key_() {}
+#endif
 #endif
 
 MADRONA_EXPORT Tensor::Tensor(void *dev_ptr, ElementType type,
@@ -39,5 +44,8 @@ MADRONA_EXPORT Tensor::Tensor(void *dev_ptr, ElementType type,
            num_dimensions_ * sizeof(int64_t));
 }
 
-}
+#ifdef MADRONA_LINUX
+MADRONA_EXPORT void Tensor::key_() {}
+#endif
+
 }

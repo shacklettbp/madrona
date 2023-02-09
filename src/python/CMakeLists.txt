@@ -7,7 +7,7 @@ target_link_libraries(madrona_python_utils
     PUBLIC
         madrona_hdrs
     PRIVATE
-        madrona_common
+        madrona_libcxx_except_static
 )
 
 if (TARGET madrona_cuda)
@@ -54,7 +54,7 @@ foreach(lib IN LISTS nanobind_lib_target)
     string(FIND ${lib} "nanobind" pos)
     if (NOT ${pos} EQUAL -1)
         target_compile_options(${lib} PRIVATE "-Wno-everything")
-        target_link_libraries(${lib} PUBLIC
+        target_link_libraries(${lib} PRIVATE
             madrona_libcxx_except_static
         )
     endif ()

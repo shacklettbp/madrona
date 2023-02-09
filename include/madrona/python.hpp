@@ -18,18 +18,24 @@ namespace madrona {
 namespace py {
 
 #ifdef MADRONA_CUDA_SUPPORT
-class MADRONA_PYTHON_VISIBILITY CudaSync {
+class MADRONA_PYTHON_VISIBILITY CudaSync final {
 public:
-    MADRONA_IMPORT CudaSync(cudaExternalSemaphore_t sema);
-
-    MADRONA_IMPORT void wait(uint64_t strm);
+    CudaSync(cudaExternalSemaphore_t sema);
+    void wait(uint64_t strm);
 
 private:
+#ifdef MADRONA_LINUX
+    // These classes have to be virtual on linux so a unique typeinfo
+    // is emitted. Otherwise every user of this class gets a weak symbol
+    // reference and nanobind can't map the types correctly
+    virtual void key_();
+#endif
+
     cudaExternalSemaphore_t sema_;
 };
 #endif
 
-class MADRONA_PYTHON_VISIBILITY Tensor {
+class MADRONA_PYTHON_VISIBILITY Tensor final {
 public:
     enum class ElementType {
         UInt8,
@@ -54,6 +60,10 @@ public:
 
     static inline constexpr int64_t maxDimensions = 16;
 private:
+#ifdef MADRONA_LINUX
+    virtual void key_();
+#endif
+
     void *dev_ptr_;
     ElementType type_;
     int gpu_id_;

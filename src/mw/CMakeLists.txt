@@ -26,7 +26,7 @@ target_link_libraries(madrona_mw_gpu
     PRIVATE
         madrona_mw_core madrona_batch_render
         CUDA::nvrtc CUDA::cuda_driver
-        ${CUDA_NVJITLINK_LIBRARY} ${CUDA_PTXCOMPILER_LIBRARY}
+        ${CUDA_NVJITLINK_LIBRARY}
 )
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")

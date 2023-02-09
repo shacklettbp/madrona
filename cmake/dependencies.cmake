@@ -9,13 +9,7 @@ else()
 endif()
 
 find_package(CUDAToolkit ${CUDA_REQUIRED_ARG})
-find_library(CUDA_NVJITLINK_LIBRARY nvJitLink_static
-    PATHS
-        ${CUDAToolkit_LIBRARY_DIR}
-    ${CUDA_REQUIRED_ARG}
-)
-
-find_library(CUDA_PTXCOMPILER_LIBRARY nvptxcompiler_static
+find_library(CUDA_NVJITLINK_LIBRARY nvJitLink
     PATHS
         ${CUDAToolkit_LIBRARY_DIR}
     ${CUDA_REQUIRED_ARG}

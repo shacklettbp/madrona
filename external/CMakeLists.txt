@@ -36,6 +36,8 @@ endif ()
 add_subdirectory(meshoptimizer EXCLUDE_FROM_ALL)
 set_property(TARGET meshoptimizer PROPERTY
     POSITION_INDEPENDENT_CODE TRUE)
+target_link_libraries(meshoptimizer PRIVATE
+    madrona_libcxx)
 
 add_subdirectory(fast_float EXCLUDE_FROM_ALL)
 

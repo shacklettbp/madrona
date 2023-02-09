@@ -25,6 +25,14 @@
 #error "Unsupported compiler"
 #endif
 
+#if defined(__WIN32__) or defined(_WIN32) or defined(WIN32)
+#define MADRONA_WINDOWS (1)
+#elif defined(__APPLE__)
+#define MADRONA_APPLE (1)
+#elif defined(__linux)
+#define MADRONA_LINUX (1)
+#endif
+
 #define MADRONA_STRINGIFY_HELPER(m) #m
 #define MADRONA_STRINGIFY(m) MADRONA_STRINGIFY_HELPER(m)
 
