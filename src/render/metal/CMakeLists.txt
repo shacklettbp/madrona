@@ -5,6 +5,7 @@ add_library(madrona_render_metal_cpp_impl STATIC
 target_link_libraries(madrona_render_metal_cpp_impl PRIVATE
     madrona_metal_cpp
     madrona_metal_libs
+    madrona_libcxx
 )
 
 add_library(madrona_render_metal STATIC
@@ -16,4 +17,5 @@ target_link_libraries(madrona_render_metal
         madrona_metal_cpp
     PRIVATE
         madrona_render_metal_cpp_impl
+        madrona_common
 )
