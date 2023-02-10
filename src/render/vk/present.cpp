@@ -16,7 +16,7 @@ namespace vk {
 static inline int checkSDL(int res, const char *msg)
 {
     if (res < 0) {
-        FATAL(msg, SDL_GetError());
+        FATAL("%s: %s\n", msg, SDL_GetError());
     }
 
     return res;
@@ -26,7 +26,7 @@ template <typename T>
 static inline T *checkSDLPointer(T *ptr, const char *msg)
 {
     if (ptr == nullptr) {
-        FATAL(msg, SDL_GetError());
+        FATAL("%s: %s\n", msg, SDL_GetError());
     }
 
     return ptr;
