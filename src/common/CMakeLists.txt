@@ -107,7 +107,7 @@ if (CUDAToolkit_FOUND)
         PUBLIC
             CUDA::cudart
         PRIVATE
-            CUDA::cuda_driver CUDA::nvrtc
+            CUDA::cuda_driver
             madrona_common
     )
 endif ()

@@ -12,12 +12,13 @@ target_link_libraries(madrona_mw_cpu
         madrona_batch_render
 )
 
-if (NOT CUDAToolkit_FOUND OR CudaToolkit_VERSION_MAJOR LESS 12)
+if (NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION_MAJOR LESS 12)
     return()
 endif()
 
 add_library(madrona_mw_gpu STATIC
     cpp_compile.hpp cpp_compile.cpp
+    cuda_compile_helpers.hpp cuda_compile_helpers.inl cuda_compile_helpers.cpp
     ${MADRONA_INC_DIR}/mw_gpu.hpp cuda_exec.cpp)
 
 target_link_libraries(madrona_mw_gpu

@@ -7,6 +7,8 @@
  */
 #pragma once
 
+#include "cuda_compile_helpers.hpp"
+
 #include <madrona/heap_array.hpp>
 
 namespace madrona {
