@@ -12,7 +12,7 @@ target_link_libraries(madrona_mw_cpu
         madrona_batch_render
 )
 
-if (NOT CUDAToolkit_FOUND)
+if (NOT CUDAToolkit_FOUND OR CudaToolkit_VERSION_MAJOR LESS 12)
     return()
 endif()
 

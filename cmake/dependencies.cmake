@@ -8,7 +8,7 @@ else()
     set(CUDA_REQUIRED_ARG QUIET)
 endif()
 
-find_package(CUDAToolkit 12 ${CUDA_REQUIRED_ARG})
+find_package(CUDAToolkit ${CUDA_REQUIRED_ARG})
 find_library(CUDA_NVJITLINK_LIBRARY nvJitLink
     PATHS
         ${CUDAToolkit_LIBRARY_DIR}
