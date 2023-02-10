@@ -30,33 +30,61 @@ struct ThreadPoolExecutor::Impl {
 
 static CountT getNumCores()
 {
+#if defined(MADRONA_MACOS)
     int os_num_threads = sysconf(_SC_NPROCESSORS_ONLN);
 
-    if (os_num_threads == -1) {
+    if (os_num_threads <= 0) {
         FATAL("Failed to get number of concurrent threads");
     }
 
     return os_num_threads;
+#elif defined(MADRONA_LINUX)
+    cpu_set_t cpuset;
+    pthread_getaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+    CountT num_active_threads = CPU_COUNT(&cpuset);
+    if (num_active_threads <= 0) {
+        FATAL("Failed to get number of concurrent threads");
+    }
+
+    return num_active_threads;
+#else
+    STATIC_UNIMPLEMENTED();
+#endif
+
 }
 
 static inline void pinThread([[maybe_unused]] CountT worker_id)
 {
 #ifdef MADRONA_LINUX
-    cpu_set_t cpuset;
-    pthread_getaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+    cpu_set_t cpu_set;
+    pthread_getaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set);
 
-    const int max_threads = CPU_COUNT(&cpuset);
-
-    CPU_ZERO(&cpuset);
+    const int max_threads = CPU_COUNT(&cpu_set);
 
     if (worker_id > max_threads) [[unlikely]] {
         FATAL("Tried setting thread affinity to %d when %d is max",
               worker_id, max_threads);
     }
 
-    CPU_SET(worker_id, &cpuset);
+    cpu_set_t worker_set;
+    CPU_ZERO(&worker_set);
+    
+    // This is needed in case there was already cpu masking via
+    // a different call to setaffinity or via cgroup (SLURM)
+    for (CountT thread_idx = 0, available_threads = 0;
+         thread_idx < (CountT)CPU_SETSIZE; thread_idx++) {
+        if (CPU_ISSET(thread_idx, &cpu_set)) {
+            if ((available_threads++) == worker_id) {
+                CPU_SET(thread_idx, &worker_set);
 
-    int res = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+                break;
+            }
+        }
+    }
+
+    int res = pthread_setaffinity_np(pthread_self(),
+                                     sizeof(worker_set),
+                                     &worker_set);
 
     if (res != 0) {
         FATAL("Failed to set thread affinity to %d", worker_id);
