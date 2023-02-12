@@ -166,6 +166,11 @@ public:
         return *this;
     }
 
+    void reset()
+    {
+        destruct();
+    }
+
     constexpr bool has_value() const { return initialized_; }
 
     constexpr const T & operator*() const & { return value_; }

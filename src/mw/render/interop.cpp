@@ -89,6 +89,7 @@ void RenderingSystem::registerTypes(ECSRegistry &registry)
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
+#if defined(MADRONA_GPU_MODE) or defined(MADRONA_LINUX) or defined(MADRONA_WINDOWS)
     auto instance_setup = builder.addToGraph<ParallelForNode<Context,
         instanceAccelStructSetup,
         Position,
@@ -111,6 +112,10 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 #else
     return viewdata_update;
 #endif
+#elif defined(MADRONA_MACOS)
+    (void)builder;
+    return deps[0]; // FIXME
+#endif
 }
 
 ViewSettings RenderingSystem::setupView(Context &, float vfov_degrees,
@@ -128,7 +133,9 @@ ViewSettings RenderingSystem::setupView(Context &, float vfov_degrees,
 
 void RendererState::init(Context &ctx, const RendererInit &renderer_init)
 {
+#if defined(MADRONA_GPU_MODE) or defined(MADRONA_WINDOWS) or defined(MADRONA_LINUX)
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
+
     int32_t world_idx = ctx.worldID().idx;
 
     new (&renderer_state) RendererState {
@@ -141,6 +148,7 @@ void RendererState::init(Context &ctx, const RendererInit &renderer_init)
         renderer_init.iface.numInstancesReadback,
 #endif
     };
+#endif
 
 }
 
