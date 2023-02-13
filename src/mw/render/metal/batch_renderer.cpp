@@ -3,12 +3,14 @@
 #include <madrona/optional.hpp>
 
 #include <Metal/Metal.hpp>
+#include <QuartzCore/QuartzCore.hpp>
 
 #include "metal/nscpp/NSEvent.hpp"
 #include "metal/nscpp/NSWindow.hpp"
 #include "metal/nscpp/NSApplication.hpp"
 #include "metal/nscpp/NSRunningApplication.hpp"
 
+#include <fstream>
 #include <thread>
 
 namespace madrona::render {
@@ -17,6 +19,11 @@ struct BatchRenderer::Impl {
     struct AppDelegate : public NS::ApplicationDelegate {
         BatchRenderer::Impl *renderer;
         NS::Window *window;
+        CA::MetalLayer *layer;
+        MTL::RenderPassDescriptor *presentPass;
+        MTL::RenderPassColorAttachmentDescriptor *presentAttachment;
+        MTL::RenderPipelineState *presentPipeline;
+        MTL::Buffer *fullscreenTri;
 
         inline AppDelegate(BatchRenderer::Impl *impl);
         virtual void applicationWillFinishLaunching(
@@ -30,6 +37,9 @@ struct BatchRenderer::Impl {
     Config cfg;
     NS::AutoreleasePool *appPool;
     MTL::Device *dev;
+    MTL::CommandQueue *cmdQueue;
+    MTL::RenderPassDescriptor *renderPass;
+    MTL::Texture *renderTarget;
     Optional<AppDelegate> appDelegate;
 
     static inline Impl * make(const Config &cfg);
@@ -125,6 +135,8 @@ void BatchRenderer::Impl::AppDelegate::applicationDidFinishLaunching(
         },
     };
 
+    auto tmp_pool = NS::AutoreleasePool::alloc()->init();
+
     window = NS::Window::alloc()->init(
         window_frame,
         NS::WindowStyleMaskResizable |
@@ -134,7 +146,71 @@ void BatchRenderer::Impl::AppDelegate::applicationDidFinishLaunching(
         false);
 
     window->setTitle(nsStrUTF8("Madrona Batch Renderer"));
+
+    layer = CA::MetalLayer::layer();
+    layer->setDevice(renderer->dev);
+    layer->setPixelFormat(MTL::PixelFormatBGRA8Unorm_sRGB);
+
+    NS::View *view = window->contentView();
+    view->setWantsLayer(true);
+    view->setLayer(layer);
+
     window->makeKeyAndOrderFront(nullptr);
+
+    presentPass = MTL::RenderPassDescriptor::renderPassDescriptor()->retain();
+    presentAttachment = presentPass->colorAttachments()->object(0);
+    presentAttachment->setLoadAction(MTL::LoadActionDontCare);
+    presentAttachment->setStoreAction(MTL::StoreActionStore);
+
+    uint16_t fullscreen_tri_stage_indices[3] = {0, 1, 2};
+    auto fullscreen_tri_staging = renderer->dev->newBuffer(
+        fullscreen_tri_stage_indices,
+        sizeof(uint16_t) * 3, MTL::ResourceStorageModeShared);
+
+    fullscreenTri = renderer->dev->newBuffer(sizeof(uint16_t) * 3,
+        MTL::ResourceStorageModePrivate |
+        MTL::ResourceHazardTrackingModeUntracked);
+
+    auto copy_cmd =
+        renderer->cmdQueue->commandBufferWithUnretainedReferences();
+    auto copy_enc = copy_cmd->blitCommandEncoder();
+    copy_enc->copyFromBuffer(fullscreen_tri_staging, 0, fullscreenTri, 0,
+                             sizeof(uint16_t) * 3);
+    copy_enc->endEncoding();
+    copy_cmd->commit();
+    copy_cmd->waitUntilCompleted();
+    fullscreen_tri_staging->release();
+
+    NS::Error *mtl_err = nullptr;
+
+    auto present_shader_url = NS::URL::fileURLWithPath(
+        nsStrUTF8(MADRONA_BATCHRENDERER_MTL_SHADER_DIR "/present.metallib"));
+
+    MTL::Library *present_lib = renderer->dev->newLibrary(
+        present_shader_url, &mtl_err)->autorelease();
+
+    if (!present_lib) {
+        FATAL("%s\n", mtl_err->localizedDescription()->utf8String());
+    }
+
+    MTL::Function *vert_fn =
+        present_lib->newFunction(nsStrUTF8("vertMain"))->autorelease();
+    MTL::Function *frag_fn =
+        present_lib->newFunction(nsStrUTF8("fragMain"))->autorelease();
+
+    auto *pipeline_desc =
+        MTL::RenderPipelineDescriptor::alloc()->init()->autorelease();
+    pipeline_desc->setVertexFunction(vert_fn);
+    pipeline_desc->setFragmentFunction(frag_fn);
+    pipeline_desc->colorAttachments()->object(0)->setPixelFormat(
+        MTL::PixelFormatBGRA8Unorm_sRGB);
+
+    presentPipeline = renderer->dev->newRenderPipelineState(pipeline_desc, &mtl_err);
+    if (!presentPipeline) {
+        FATAL("%s\n", mtl_err->localizedDescription()->utf8String());
+    }
+
+    tmp_pool->release();
 
     auto app = (NS::Application *)notif->object();
     app->activateIgnoringOtherApps(true);
@@ -157,17 +233,47 @@ static bool debugPresent()
 BatchRenderer::Impl * BatchRenderer::Impl::make(
     const Config &cfg)
 {
+    bool need_present = debugPresent();
+
     auto pool = NS::AutoreleasePool::alloc()->init();
-    MTL::Device *dev = MTL::CreateSystemDefaultDevice();
+    MTL::Device *dev = MTL::CreateSystemDefaultDevice()->autorelease();
+    MTL::CommandQueue *cmd_queue = dev->newCommandQueue()->autorelease();
+
+    auto *target_desc =
+        MTL::TextureDescriptor::alloc()->init();
+    target_desc->setTextureType(MTL::TextureType2D);
+    target_desc->setWidth((NS::UInteger)cfg.renderWidth);
+    target_desc->setHeight((NS::UInteger)cfg.renderHeight);
+    target_desc->setPixelFormat(MTL::PixelFormatBGRA8Unorm_sRGB);
+    target_desc->setStorageMode(MTL::StorageModePrivate);
+
+    MTL::TextureUsage target_usage = MTL::TextureUsageRenderTarget;
+    if (need_present) {
+        target_usage |= MTL::TextureUsageShaderRead;
+    }
+    target_desc->setUsage(target_usage);
+
+    MTL::Texture *render_target = dev->newTexture(target_desc)->autorelease();
+
+    target_desc->release();
+
+    auto *render_pass = MTL::RenderPassDescriptor::renderPassDescriptor();
+    MTL::RenderPassColorAttachmentDescriptor *attachment =
+        render_pass->colorAttachments()->object(0);
+    attachment->setClearColor(MTL::ClearColor { 1, 0, 0, 1 });
+    attachment->setLoadAction(MTL::LoadActionClear);
+    attachment->setStoreAction(MTL::StoreActionStore);
+    attachment->setTexture(render_target);
 
     auto *impl = new Impl {
         .cfg = cfg,
         .appPool = pool,
         .dev = dev,
+        .cmdQueue = cmd_queue,
+        .renderPass = render_pass,
+        .renderTarget = render_target,
         .appDelegate = Optional<AppDelegate>::none(),
     };
-
-    bool need_present = debugPresent();
 
     if (need_present) {
         impl->appDelegate.emplace(impl);
@@ -206,11 +312,12 @@ static inline void pumpCocoaEvents(NS::Application *app)
 BatchRenderer::Impl::~Impl()
 {
     if (appDelegate.has_value()) {
+        appDelegate->presentPipeline->release();
+        appDelegate->presentPass->release();
         appDelegate->window->close();
         pumpCocoaEvents(NS::app());
     }
 
-    dev->release();
     appPool->release();
 }
 
@@ -220,9 +327,32 @@ void BatchRenderer::Impl::render()
         pumpCocoaEvents(NS::app());
     }
 
-    auto frame_pool = NS::AutoreleasePool::alloc()->init();
+    MTL::CommandBuffer *cmd = cmdQueue->commandBufferWithUnretainedReferences();
+    auto enc = cmd->renderCommandEncoder(renderPass);
+    enc->endEncoding();
+    cmd->commit();
 
-    frame_pool->release();
+    if (appDelegate.has_value()) {
+        auto drawable_pool = NS::AutoreleasePool::alloc()->init();
+
+        MTL::CommandBuffer *present_cmd = cmdQueue->commandBuffer();
+        auto *drawable = appDelegate->layer->nextDrawable();
+
+        appDelegate->presentAttachment->setTexture(drawable->texture());
+        auto present_enc =
+            present_cmd->renderCommandEncoder(appDelegate->presentPass);
+        present_enc->setRenderPipelineState(appDelegate->presentPipeline);
+        // FIXME: replace with argument buffer?
+        present_enc->setFragmentTexture(renderTarget, 0);
+        present_enc->drawIndexedPrimitives(
+            MTL::PrimitiveTypeTriangle, 3, MTL::IndexTypeUInt16,
+            appDelegate->fullscreenTri, 0);
+        present_enc->endEncoding();
+        present_cmd->presentDrawable(drawable);
+        present_cmd->commit();
+
+        drawable_pool->release();
+    }
 }
 
 BatchRenderer::BatchRenderer(const Config &cfg)

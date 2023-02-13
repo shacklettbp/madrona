@@ -150,6 +150,9 @@ _APPKIT_PRIVATE_DEF_SEL( initWithFrame_,
 _APPKIT_PRIVATE_DEF_SEL( initWithTitle_,
 						"initWithTitle:" );
 
+_APPKIT_PRIVATE_DEF_SEL( contentView,
+                        "contentView");
+
 _APPKIT_PRIVATE_DEF_SEL( setContentView_,
 						"setContentView:" );
 
@@ -173,6 +176,12 @@ _APPKIT_PRIVATE_DEF_SEL( windows,
 
 _APPKIT_PRIVATE_DEF_SEL( distantPast,
 						"distantPast" );
+
+_APPKIT_PRIVATE_DEF_SEL( setWantsLayer_,
+						"setWantsLayer:" );
+
+_APPKIT_PRIVATE_DEF_SEL( setLayer_,
+						"setLayer:" );
 
 }
 

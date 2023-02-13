@@ -31,9 +31,37 @@ elseif (TARGET madrona_render_metal)
         batch_renderer.hpp metal/batch_renderer.cpp
     )
 
+    function(compile_metal_shader SHADER_SRC_FILE OUTPUT_DIR TGT_NAME)
+        cmake_path(GET SHADER_SRC_FILE FILENAME SHADER_SRC_FILENAME)
+        cmake_path(GET SHADER_SRC_FILE STEM SHADER_SRC_FILE_STEM)
+
+        set(MTLLIB_OUT "${OUTPUT_DIR}/${SHADER_SRC_FILE_STEM}.metallib")
+
+        add_custom_command(
+            OUTPUT "${MTLLIB_OUT}"
+            DEPENDS "${SHADER_SRC_FILE}"
+            COMMAND xcrun -sdk macosx metal -frecord-sources=flat "${SHADER_SRC_FILE}" -o "${MTLLIB_OUT}"
+        )
+
+        add_custom_target(${TGT_NAME} DEPENDS "${MTLLIB_OUT}")
+    endfunction()
+
+    set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/metal/shaders")
+    set(SHADER_BIN_DIR "${CMAKE_BINARY_DIR}/shaders/metal/madrona/")
+    file(MAKE_DIRECTORY "${SHADER_BIN_DIR}")
+
+    compile_metal_shader("${SHADER_SRC_DIR}/present.metal" "${SHADER_BIN_DIR}" 
+        madrona_batch_render_present_shader)
+
+    target_compile_definitions(madrona_batch_render PRIVATE
+        "MADRONA_BATCHRENDERER_MTL_SHADER_DIR=\"${SHADER_BIN_DIR}\""
+    )
+
     target_link_libraries(madrona_batch_render PRIVATE
         madrona_render_metal
     )
+
+    add_dependencies(madrona_batch_render madrona_batch_render_present_shader)
 endif()
 
 target_include_directories(madrona_batch_render PRIVATE
