@@ -23,11 +23,11 @@ if (FRONTEND_GCC OR FRONTEND_CLANG)
         -pedantic -Wall -Wextra
     )
 
-    if (MADRONA_X64)
+    if (MADRONA_X64 AND MADRONA_LINUX)
         target_compile_options(madrona_hdrs INTERFACE
             -march=x86-64-v3
         )
-    elseif (MADRONA_ARM)
+    elseif (MADRONA_ARM AND MADRONA_MACOS)
         target_compile_options(madrona_hdrs INTERFACE
             -mcpu=apple-m1
         )
