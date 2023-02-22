@@ -17,7 +17,9 @@ struct ViewID {
 };
 
 struct ViewSettings {
-    float tanFOV;
+    float xScale;
+    float yScale;
+    float zNear;
     math::Vector3 cameraOffset;
     ViewID viewID;
 };
@@ -28,7 +30,12 @@ struct RenderingSystem {
     static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
                                         Span<const TaskGraph::NodeID> deps);
 
-    static ViewSettings setupView(Context &ctx, float vfov_degrees,
+    static void reset(Context &ctx);
+
+    static ViewSettings setupView(Context &ctx,
+                                  float vfov_degrees,
+                                  float aspect_ratio,
+                                  float z_near,
                                   math::Vector3 camera_offset,
                                   ViewID view_id);
 };

@@ -7,14 +7,15 @@ namespace madrona::render {
 using namespace base;
 using namespace math;
 
-inline void instanceAccelStructSetup(Context &ctx,
-                                     const Position &pos,
-                                     const Rotation &rot,
-                                     const Scale &scale,
-                                     const ObjectID &obj_id)
+inline void instanceTransformSetup(Context &ctx,
+                                   const Position &pos,
+                                   const Rotation &rot,
+                                   const Scale &scale,
+                                   const ObjectID &obj_id)
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
 
+#if defined(MADRONA_BATCHRENDER_RT)
     AtomicU32Ref count_atomic(
         renderer_state.numInstances->primitiveCount);
 
@@ -44,6 +45,18 @@ inline void instanceAccelStructSetup(Context &ctx,
     as_inst.instanceShaderBindingTableRecordOffset = 0;
     as_inst.flags = 0;
     as_inst.accelerationStructureReference = renderer_state.blases[obj_id.idx];
+#else
+    AtomicU32Ref inst_count_atomic(*renderer_state.numInstances);
+    uint32_t inst_idx = inst_count_atomic.fetch_add<sync::relaxed>(1);
+
+    renderer_state.instanceData[inst_idx] = InstanceData {
+        pos,
+        rot,
+        scale,
+        obj_id.idx,
+        ctx.worldID().idx,
+    };
+#endif
 }
 
 inline void updateViewData(Context &ctx,
@@ -52,9 +65,9 @@ inline void updateViewData(Context &ctx,
                            const ViewSettings &view_settings)
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
-
     int32_t view_idx = view_settings.viewID.idx;
 
+#if defined(MADRONA_BATCHRENDER_RT)
     auto camera_pos =
         pos + view_settings.cameraOffset + renderer_state.worldOffset;
 
@@ -64,7 +77,16 @@ inline void updateViewData(Context &ctx,
     renderer_view.posAndTanFOV.x = camera_pos.x;
     renderer_view.posAndTanFOV.y = camera_pos.y;
     renderer_view.posAndTanFOV.z = camera_pos.z;
-    renderer_view.posAndTanFOV.w = view_settings.tanFOV;
+    renderer_view.posAndTanFOV.w = view_settings.yScale;
+#elif defined(MADRONA_BATCHRENDER_METAL)
+    Vector3 camera_pos = pos + view_settings.cameraOffset;
+
+    renderer_state.viewTransforms[view_idx] =
+        Mat4x4::makePerspectiveViewMat(camera_pos, rot,
+                                       view_settings.xScale,
+                                       view_settings.yScale,
+                                       view_settings.zNear);
+#endif
 }
 
 #ifdef MADRONA_GPU_MODE
@@ -89,9 +111,8 @@ void RenderingSystem::registerTypes(ECSRegistry &registry)
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
-#if defined(MADRONA_GPU_MODE) or defined(MADRONA_LINUX) or defined(MADRONA_WINDOWS)
     auto instance_setup = builder.addToGraph<ParallelForNode<Context,
-        instanceAccelStructSetup,
+        instanceTransformSetup,
         Position,
         Rotation,
         Scale,
@@ -112,20 +133,41 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 #else
     return viewdata_update;
 #endif
-#elif defined(MADRONA_MACOS)
-    (void)builder;
-    return deps[0]; // FIXME
+}
+
+void RenderingSystem::reset([[maybe_unused]] Context &ctx)
+{
+#ifdef MADRONA_BATCHRENDER_METAL
+    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    *renderer_state.numViews = 0;
 #endif
 }
 
-ViewSettings RenderingSystem::setupView(Context &, float vfov_degrees,
+ViewSettings RenderingSystem::setupView([[maybe_unused]] Context &ctx,
+                                        float vfov_degrees,
+                                        float aspect_ratio,
+                                        float z_near,
                                         math::Vector3 camera_offset,
                                         ViewID view_id)
 {
-    float tan_fov = tanf(helpers::toRadians(vfov_degrees / 2.f));
+    float fov_scale = 
+#ifdef MADRONA_BATCHRENDER_METAL
+        1.f / 
+#endif
+            tanf(helpers::toRadians(vfov_degrees * 0.5f));
+
+#ifdef MADRONA_BATCHRENDER_METAL
+    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    (*renderer_state.numViews) += 1;
+#endif
+
+    float x_scale = fov_scale / aspect_ratio;
+    float y_scale = -fov_scale;
 
     return ViewSettings {
-        tan_fov,
+        x_scale,
+        y_scale,
+        z_near,
         camera_offset,
         view_id,
     };
@@ -133,11 +175,10 @@ ViewSettings RenderingSystem::setupView(Context &, float vfov_degrees,
 
 void RendererState::init(Context &ctx, const RendererInit &renderer_init)
 {
-#if defined(MADRONA_GPU_MODE) or defined(MADRONA_WINDOWS) or defined(MADRONA_LINUX)
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
-
     int32_t world_idx = ctx.worldID().idx;
 
+#if defined(MADRONA_BATCHRENDER_RT)
     new (&renderer_state) RendererState {
         renderer_init.iface.tlasInstancesBase,
         renderer_init.iface.numInstances,
@@ -147,6 +188,13 @@ void RendererState::init(Context &ctx, const RendererInit &renderer_init)
 #ifdef MADRONA_GPU_MODE
         renderer_init.iface.numInstancesReadback,
 #endif
+    };
+#elif defined (MADRONA_BATCHRENDER_METAL)
+    new (&renderer_state) RendererState {
+        renderer_init.iface.viewTransforms[world_idx],
+        &renderer_init.iface.numViews[world_idx],
+        renderer_init.iface.instanceData,
+        renderer_init.iface.numInstances,
     };
 #endif
 

@@ -2,6 +2,12 @@
 
 #include <madrona/mw_render.hpp>
 
+#if defined(MADRONA_LINUX) or defined(MADRONA_WINDOWS) or defined(MADRONA_GPU_MODE)
+#define MADRONA_BATCHRENDER_RT (1)
+#elif defined(MADRONA_MACOS)
+#define MADRONA_BATCHRENDER_METAL (1)
+#endif
+
 namespace madrona::render {
  
 struct AccelStructTransform {
@@ -32,12 +38,29 @@ struct AccelStructRangeInfo {
     uint32_t transformOffset;
 };
 
+#ifdef MADRONA_BATCHRENDER_METAL
+struct InstanceData {
+    math::Vector3 position;
+    math::Quat rotation;
+    math::Diag3x3 scale;
+    int32_t objectID;
+    int32_t worldID;
+};
+#endif
+
 struct RendererInterface {
+#if defined(MADRONA_BATCHRENDER_RT)
     AccelStructInstance *tlasInstancesBase;
     AccelStructRangeInfo *numInstances;
     uint64_t *blases;
     PackedViewData **packedViews;
     uint32_t *numInstancesReadback;
+#elif defined(MADRONA_BATCHRENDER_METAL)
+    math::Mat4x4 **viewTransforms;
+    uint32_t *numViews;
+    InstanceData *instanceData;
+    uint32_t *numInstances;
+#endif
 };
 
 struct RendererInit {
@@ -46,6 +69,7 @@ struct RendererInit {
 };
 
 struct RendererState {
+#if defined(MADRONA_BATCHRENDER_RT)
     AccelStructInstance *tlasInstanceBuffer;
     AccelStructRangeInfo *numInstances;
     uint64_t *blases;
@@ -53,6 +77,12 @@ struct RendererState {
     math::Vector3 worldOffset;
 #ifdef MADRONA_GPU_MODE
     uint32_t *count_readback;
+#endif
+#elif defined(MADRONA_BATCHRENDER_METAL)
+    math::Mat4x4 *viewTransforms;
+    uint32_t *numViews;
+    InstanceData *instanceData;
+    uint32_t *numInstances;
 #endif
 
     static void init(Context &ctx,

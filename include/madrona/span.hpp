@@ -27,6 +27,12 @@ public:
         : ptr_(u.data()), n_(u.size())
     {}
 
+    template <CountT N>
+    Span(T (&arr)[N])
+        : ptr_(arr),
+          n_(N)
+    {}
+
     // GCC correctly warns that the below constructor is dangerous, but it's
     // convenient as long as the Span doesn't outlive the current expression
 #if MADRONA_GCC

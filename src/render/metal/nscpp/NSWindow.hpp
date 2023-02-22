@@ -69,6 +69,7 @@ namespace NS
 			void				setContentView( const View* pContentView );
 			void				makeKeyAndOrderFront( const Object* pSender );
 			void				setTitle( const String* pTitle );
+            CGFloat             backingScaleFactor();
 
 			void				close();
 	};
@@ -104,6 +105,11 @@ _NS_INLINE void NS::Window::makeKeyAndOrderFront( const Object* pSender )
 _NS_INLINE void NS::Window::setTitle( const String* pTitle )
 {
 	Object::sendMessage< void >( this, _APPKIT_PRIVATE_SEL( setTitle_), pTitle );
+}
+
+_NS_INLINE CGFloat NS::Window::backingScaleFactor()
+{
+	return Object::sendMessage<CGFloat>(this, _APPKIT_PRIVATE_SEL(backingScaleFactor));
 }
 
 _NS_INLINE void NS::Window::close()

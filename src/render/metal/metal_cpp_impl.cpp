@@ -9,3 +9,5 @@
 #include "nscpp/NSWindow.hpp"
 #include "nscpp/NSApplication.hpp"
 #include "nscpp/NSRunningApplication.hpp"
+#include "nscpp/CALayer.hpp"
+#include "nscpp/NSScreen.hpp"

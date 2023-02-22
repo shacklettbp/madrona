@@ -20,11 +20,11 @@ v2f vertex vertMain(uint16_t idx [[vertex_id]])
 }
 
 half4 fragment fragMain(v2f in [[stage_in]],
-                        texture2d<float> texture [[texture(0)]])
+                        texture2d_array<float> texture [[texture(0)]])
 {
     float2 uv = in.position.xy / 2.f + 1.f;
 
-    float4 color = texture.sample(fsSampler, uv);
+    float4 color = texture.sample(fsSampler, uv, 0);
 
     return half4(color);
 }

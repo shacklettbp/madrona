@@ -981,6 +981,48 @@ struct Mat3x4 {
     }
 };
 
+struct Mat4x4 {
+    Vector4 cols[4];
+
+    static inline Mat4x4 makePerspectiveViewMat(Vector3 cam_pos,
+                                                Quat cam_rot,
+                                                float x_screen_scale,
+                                                float y_screen_scale,
+                                                float z_near)
+    {
+        Mat3x3 rot = Mat3x3::fromQuat(cam_rot.inv());
+        Vector3 t = rot * cam_pos;
+
+        return Mat4x4 {{
+            { 
+                x_screen_scale * rot.cols[0].x,
+                y_screen_scale * rot.cols[0].y,
+                0,
+                z_near * rot.cols[0].z,
+            },
+            { 
+                x_screen_scale * rot.cols[1].x,
+                x_screen_scale * rot.cols[1].y,
+                0,
+                z_near * rot.cols[1].z,
+            },
+            {
+                x_screen_scale * rot.cols[2].x,
+                x_screen_scale * rot.cols[2].y,
+                0,
+                z_near * rot.cols[2].z,
+            },
+            {
+                t.x,
+                t.y,
+                t.z,
+                1.f,
+            },
+        }};
+
+    }
+};
+
 struct AABB {
     Vector3 pMin;
     Vector3 pMax;

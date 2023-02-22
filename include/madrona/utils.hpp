@@ -7,10 +7,10 @@
  */
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <type_traits>
 #include <madrona/crash.hpp>
+#include <madrona/span.hpp>
 
 namespace madrona {
 
@@ -113,6 +113,22 @@ constexpr inline uint32_t int32Hash(uint32_t x)
     x *= 0x846ca68bu;
     x ^= x >> 16u;
     return x;
+}
+
+inline int64_t computeBufferOffsets(const Span<const int64_t> chunk_sizes,
+                                    Span<int64_t> out_offsets,
+                                    int64_t pow2_alignment)
+{
+    int64_t num_total_bytes = chunk_sizes[0];
+
+    for (int64_t i = 1; i < chunk_sizes.size(); i++) {
+        int64_t cur_offset = roundUpPow2(num_total_bytes, pow2_alignment);
+        out_offsets[i - 1] = cur_offset;
+
+        num_total_bytes = cur_offset + chunk_sizes[i];
+    }
+
+    return roundUpPow2(num_total_bytes, pow2_alignment);
 }
 
 template <typename> struct PackDelegator;

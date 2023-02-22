@@ -70,6 +70,7 @@ _APPKIT_PRIVATE_DEF_CLS( NSView );
 _APPKIT_PRIVATE_DEF_CLS( NSWindow );
 _APPKIT_PRIVATE_DEF_CLS( NSMenu );
 _APPKIT_PRIVATE_DEF_CLS( NSMenuItem );
+_APPKIT_PRIVATE_DEF_CLS( NSScreen );
 
 } // Class
 
@@ -171,6 +172,9 @@ _APPKIT_PRIVATE_DEF_SEL( setSubmenu_,
 _APPKIT_PRIVATE_DEF_SEL( setTitle_,
 						"setTitle:" );
 
+_APPKIT_PRIVATE_DEF_SEL( backingScaleFactor,
+						"backingScaleFactor" );
+
 _APPKIT_PRIVATE_DEF_SEL( windows,
 						"windows" );
 
@@ -182,6 +186,9 @@ _APPKIT_PRIVATE_DEF_SEL( setWantsLayer_,
 
 _APPKIT_PRIVATE_DEF_SEL( setLayer_,
 						"setLayer:" );
+
+_APPKIT_PRIVATE_DEF_SEL( mainScreen,
+						"mainScreen" );
 
 }
 
