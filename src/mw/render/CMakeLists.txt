@@ -42,7 +42,7 @@ elseif (TARGET madrona_render_metal)
             add_custom_command(
                 OUTPUT "${MTLLIB_OUT}"
                 DEPENDS "${SHADER_SRC_FILE}"
-                COMMAND xcrun -sdk macosx metal -frecord-sources=flat "${SHADER_SRC_FILE}" -o "${MTLLIB_OUT}"
+                COMMAND xcrun -sdk macosx metal -gline-tables-only -frecord-sources=flat "${SHADER_SRC_FILE}" -o "${MTLLIB_OUT}"
             )
 
             list(APPEND MTLLIBS

@@ -216,4 +216,8 @@ private:
     AtomicI32 lock_ { false };
 };
 
+struct alignas(MADRONA_CACHE_LINE) CacheAlignedU32 {
+    uint32_t v;
+};
+
 }

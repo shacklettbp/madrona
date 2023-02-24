@@ -48,19 +48,17 @@ struct BatchRenderer::Impl {
     MTL::ComputePipelineState *multiviewSetupPipeline;
     MTL::RenderPipelineState *drawPipeline;
     MTL::IndirectCommandBuffer *drawICB;
-    int32_t maxDraws;
-    MTL::Fence *icbResetFence;
+    MTL::Fence *icbSetupFence;
     MTL::Fence *drawFence;
-    MTL::Heap *engineInteropDataHeap;
-    MTL::Buffer *engineInteropDataBuffer;
-    MTL::Heap *renderTmpDataHeap;
-    MTL::Buffer *renderTmpDataBuffer;
+    MTL::Buffer *engineInteropBuffer;
+    MTL::Buffer *renderDataBuffer;
     InstanceData *instanceDataBase;
     HeapArray<math::Mat4x4 *> viewTransformPointers;
     uint32_t *numViewsBase;
-    uint32_t numInstancesCounter;
+    int32_t renderDataDrawCountOffset;
     AssetManager assetMgr;
     DynArray<Assets> assets;
+    CacheAlignedU32 numInstancesCounter;
     Optional<AppDelegate> appDelegate;
 
     static inline Impl * make(const Config &cfg);
@@ -362,8 +360,6 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         MTL::MutabilityImmutable);
     multiview_setup_pipeline_desc->buffers()->object(1)->setMutability(
         MTL::MutabilityImmutable);
-    multiview_setup_pipeline_desc->buffers()->object(2)->setMutability(
-        MTL::MutabilityImmutable);
 
     MTL::ComputePipelineState *multiview_setup_pipeline =
         dev->newComputePipelineState(multiview_setup_pipeline_desc,
@@ -400,8 +396,6 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         MTL::MutabilityImmutable);
     draw_pipeline_desc->fragmentBuffers()->object(1)->setMutability(
         MTL::MutabilityImmutable);
-    draw_pipeline_desc->fragmentBuffers()->object(2)->setMutability(
-        MTL::MutabilityImmutable);
 
     MTL::RenderPipelineState *draw_pipeline = dev->newRenderPipelineState(
         draw_pipeline_desc, &pipeline_err);
@@ -421,86 +415,66 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         draw_icb_desc, max_draws, MTL::ResourceStorageModePrivate |
         MTL::ResourceHazardTrackingModeUntracked);
 
-    int64_t engine_buffer_offsets[3];
+    int64_t engine_interop_offsets[2];
     int64_t num_engine_interop_bytes = utils::computeBufferOffsets({
-            sizeof(EngineDataArgs),
             (int64_t)sizeof(InstanceData) * max_instances,
             (int64_t)sizeof(math::Mat4x4) * max_views,
             (int64_t)sizeof(uint32_t) * num_worlds,
-        }, engine_buffer_offsets, consts::mtlBufferAlignment);
+        }, engine_interop_offsets, consts::mtlBufferAlignment);
      
-    MTL::HeapDescriptor *engine_interop_heap_desc =
-        MTL::HeapDescriptor::alloc()->init()->autorelease();
-    engine_interop_heap_desc->setType(MTL::HeapTypePlacement);
-    engine_interop_heap_desc->setStorageMode(MTL::StorageModeShared);
-    engine_interop_heap_desc->setHazardTrackingMode(
-        MTL::HazardTrackingModeUntracked);
-    engine_interop_heap_desc->setSize(num_engine_interop_bytes);
+    MTL::Buffer *engine_interop_buf = dev->newBuffer(
+        num_engine_interop_bytes, MTL::ResourceStorageModeShared |
+        MTL::ResourceHazardTrackingModeUntracked);
 
-    MTL::Heap *engine_interop_heap = dev->newHeap(engine_interop_heap_desc);
-    MTL::Buffer *engine_interop_buffer = engine_interop_heap->newBuffer(
-        num_engine_interop_bytes, MTL::ResourceStorageModeShared, 0);
-    auto engine_interop_base_ptr = (char *)engine_interop_buffer->contents();
-    {
-        uint64_t engine_interop_gpu_addr = engine_interop_buffer->gpuAddress();
-
-        // FIXME: better to have this argument
-        // buffer (but not the storage) combined with RenderDataArgs
-        auto *engine_data_args = (EngineDataArgs *)engine_interop_base_ptr;
-        engine_data_args->instances =
-            engine_interop_gpu_addr + engine_buffer_offsets[0];
-        engine_data_args->viewTransforms =
-            engine_interop_gpu_addr + engine_buffer_offsets[1];
-        engine_data_args->numViews =
-            engine_interop_gpu_addr + engine_buffer_offsets[2];
-    }
-
-    int64_t render_buffer_offsets[2];
-    int64_t num_render_tmp_bytes = utils::computeBufferOffsets({
-            sizeof(RenderDataArgs),
+    int64_t render_data_offsets[2];
+    int64_t num_render_data_bytes = utils::computeBufferOffsets({
+            sizeof(RenderArgBuffer),
             (int64_t)sizeof(DrawInstanceData) * max_draws,
-            (int64_t)sizeof(uint32_t),
-        }, render_buffer_offsets, consts::mtlBufferAlignment);
+            (int64_t)sizeof(MTL::IndirectCommandBufferExecutionRange),
+        }, render_data_offsets, consts::mtlBufferAlignment);
 
-    MTL::HeapDescriptor *render_tmp_heap_desc =
-        MTL::HeapDescriptor::alloc()->init()->autorelease();
-    render_tmp_heap_desc->setType(MTL::HeapTypePlacement);
-    render_tmp_heap_desc->setStorageMode(MTL::StorageModePrivate);
-    render_tmp_heap_desc->setHazardTrackingMode(
-        MTL::HazardTrackingModeUntracked);
-    render_tmp_heap_desc->setSize(num_render_tmp_bytes);
-
-    MTL::Heap *render_tmp_heap = dev->newHeap(render_tmp_heap_desc);
-    MTL::Buffer *render_tmp_buffer = render_tmp_heap->newBuffer(
-        num_render_tmp_bytes, MTL::ResourceStorageModePrivate, 0);
+    MTL::Buffer *render_data_buf = dev->newBuffer(
+        num_render_data_bytes, MTL::ResourceStorageModePrivate |
+        MTL::ResourceHazardTrackingModeUntracked);
 
     {
-        MTL::Buffer *render_args_staging_buffer = dev->newBuffer(
-            sizeof(RenderDataArgs),
+        uint64_t render_argbuffer_gpu_addr = render_data_buf->gpuAddress();
+        uint64_t engine_interop_gpu_addr = engine_interop_buf->gpuAddress();
+        printf("Hi %p\n", (void *)engine_interop_gpu_addr);
+
+        MTL::Buffer *render_argbuffer_staging_buf = dev->newBuffer(
+            sizeof(RenderArgBuffer),
             MTL::ResourceStorageModeShared |
             MTL::ResourceHazardTrackingModeUntracked |
             MTL::ResourceCPUCacheModeWriteCombined)->autorelease();
 
-        auto *render_args_staging =
-            (RenderDataArgs *)render_args_staging_buffer->contents();
+        auto *render_argbuffer_staging =
+            (RenderArgBuffer *)render_argbuffer_staging_buf->contents();
 
-        uint64_t render_tmp_gpu_addr = render_tmp_buffer->gpuAddress();
-        render_args_staging->drawICB = draw_icb->gpuResourceID();
-        render_args_staging->drawInstances =
-            render_tmp_gpu_addr + render_buffer_offsets[0];
-        render_args_staging->numDraws =
-            render_tmp_gpu_addr + render_buffer_offsets[1];
-        render_args_staging->numMaxViewsPerWorld = cfg.maxViewsPerWorld;
+        render_argbuffer_staging->drawICB = draw_icb->gpuResourceID();
+        render_argbuffer_staging->drawInstances =
+            render_argbuffer_gpu_addr + render_data_offsets[0];
+        render_argbuffer_staging->numDraws =
+            render_argbuffer_gpu_addr + render_data_offsets[1] + 4;
 
-        MTL::CommandBuffer *copy_cmd =
+        render_argbuffer_staging->engineInstances = engine_interop_gpu_addr;
+        render_argbuffer_staging->viewTransforms =
+            engine_interop_gpu_addr + engine_interop_offsets[0];
+        render_argbuffer_staging->numViews =
+            engine_interop_gpu_addr + engine_interop_offsets[1];
+
+        render_argbuffer_staging->numMaxViewsPerWorld = cfg.maxViewsPerWorld;
+
+        MTL::CommandBuffer *render_args_setup_cmd =
             cmd_queue->commandBufferWithUnretainedReferences();
-        MTL::BlitCommandEncoder *copy_enc = copy_cmd->blitCommandEncoder();
-        copy_enc->copyFromBuffer(render_args_staging_buffer, 0,
-                                 render_tmp_buffer, 0,
-                                 sizeof(RenderDataArgs));
-        copy_enc->endEncoding();
-        copy_cmd->commit();
-        copy_cmd->waitUntilCompleted();
+        MTL::BlitCommandEncoder *blit_enc =
+            render_args_setup_cmd->blitCommandEncoder();
+        // Setup argbuffer
+        blit_enc->copyFromBuffer(render_argbuffer_staging_buf, 0,
+            render_data_buf, 0, sizeof(RenderArgBuffer));
+        blit_enc->endEncoding();
+        render_args_setup_cmd->commit();
+        render_args_setup_cmd->waitUntilCompleted();
     }
 
     init_pool->release();
@@ -509,12 +483,13 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
     multiview_setup_pipeline->autorelease();
     draw_pipeline->autorelease();
     draw_icb->autorelease();
-    engine_interop_heap->autorelease();
-    render_tmp_buffer->autorelease();
+    engine_interop_buf->autorelease();
+    render_data_buf->autorelease();
 
+    char *engine_interop_base_ptr = (char *)engine_interop_buf->contents();
     HeapArray<math::Mat4x4 *> view_txfm_ptrs(cfg.numWorlds);
-    math::Mat4x4 *base_view_txfm =
-        (math::Mat4x4 *)(engine_interop_base_ptr + engine_buffer_offsets[1]);
+    math::Mat4x4 *base_view_txfm = (math::Mat4x4 *)(
+        engine_interop_base_ptr + engine_interop_offsets[0]);
     for (int32_t i = 0; i < (int32_t)cfg.numWorlds; i++) {
         view_txfm_ptrs[i] = base_view_txfm + i * cfg.maxViewsPerWorld;
     }
@@ -533,21 +508,18 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         .multiviewSetupPipeline = multiview_setup_pipeline,
         .drawPipeline = draw_pipeline,
         .drawICB = draw_icb,
-        .maxDraws = int32_t(max_draws),
-        .icbResetFence = dev->newFence()->autorelease(),
+        .icbSetupFence = dev->newFence()->autorelease(),
         .drawFence = dev->newFence()->autorelease(),
-        .engineInteropDataHeap = engine_interop_heap,
-        .engineInteropDataBuffer = engine_interop_buffer,
-        .renderTmpDataHeap = render_tmp_heap,
-        .renderTmpDataBuffer = render_tmp_buffer,
-        .instanceDataBase = (InstanceData *)(
-            engine_interop_base_ptr + engine_buffer_offsets[0]),
+        .engineInteropBuffer = engine_interop_buf,
+        .renderDataBuffer = render_data_buf,
+        .instanceDataBase = (InstanceData *)(engine_interop_base_ptr),
         .viewTransformPointers = std::move(view_txfm_ptrs),
         .numViewsBase = (uint32_t *)(
-            engine_interop_base_ptr + engine_buffer_offsets[2]),
-        .numInstancesCounter = 0,
+            engine_interop_base_ptr + engine_interop_offsets[1]),
+        .renderDataDrawCountOffset = int32_t(render_data_offsets[1]),
         .assetMgr = asset_mgr,
         .assets = DynArray<Assets>(1),
+        .numInstancesCounter = { 0 },
         .appDelegate = Optional<AppDelegate>::none(),
     };
 
@@ -610,29 +582,32 @@ void BatchRenderer::Impl::render()
     if (appDelegate.has_value()) {
         pumpCocoaEvents(NS::app());
     }
+    
+    printf("%u\n", numViewsBase[0]);
 
     MTL::CommandBuffer *cmd =
         cmdQueue->commandBufferWithUnretainedReferences();
 
-    uint32_t num_instances = numInstancesCounter;
-    numInstancesCounter = 0;
+    uint32_t num_instances = numInstancesCounter.v;
+    numInstancesCounter.v = 0;
 
-    auto icb_clear_enc = cmd->blitCommandEncoder();
-    icb_clear_enc->resetCommandsInBuffer(drawICB,
-        {0, NS::UInteger(maxDraws)});
-    icb_clear_enc->updateFence(icbResetFence);
-    icb_clear_enc->endEncoding();
+    auto icb_setup_enc = cmd->blitCommandEncoder();
+    icb_setup_enc->fillBuffer(renderDataBuffer,
+        {NS::UInteger(renderDataDrawCountOffset) + 4, 4}, 0);
+    icb_setup_enc->updateFence(icbSetupFence);
+    icb_setup_enc->endEncoding();
 
     auto multiview_setup_enc = cmd->computeCommandEncoder();
-    multiview_setup_enc->waitForFence(icbResetFence);
+    multiview_setup_enc->waitForFence(icbSetupFence);
     multiview_setup_enc->setComputePipelineState(multiviewSetupPipeline);
-    multiview_setup_enc->setBuffer(assets[0].buffer, 0, 0);
-    multiview_setup_enc->setBuffer(renderTmpDataBuffer, 0, 1);
-    multiview_setup_enc->setBuffer(engineInteropDataBuffer, 0, 2);
+    multiview_setup_enc->setBuffer(renderDataBuffer, 0, 0);
+    multiview_setup_enc->setBuffer(assets[0].buffer, 0, 1);
     multiview_setup_enc->setThreadgroupMemoryLength(16, 0);
     multiview_setup_enc->useHeap(assets[0].heap);
-    multiview_setup_enc->useHeap(renderTmpDataHeap);
-    multiview_setup_enc->useHeap(engineInteropDataHeap);
+    multiview_setup_enc->useResource(engineInteropBuffer,
+                                     MTL::ResourceUsageRead);
+    multiview_setup_enc->useResource(drawICB,
+                                     MTL::ResourceUsageWrite);
 
     multiview_setup_enc->dispatchThreadgroups(
         {num_instances, 1, 1},
@@ -644,18 +619,13 @@ void BatchRenderer::Impl::render()
     auto draw_enc = cmd->renderCommandEncoder(drawPass);
     draw_enc->waitForFence(drawFence, MTL::RenderStageVertex);
     draw_enc->setRenderPipelineState(drawPipeline);
-    draw_enc->setVertexBuffer(assets[0].buffer, 0, 0);
-    draw_enc->setVertexBuffer(renderTmpDataBuffer, 0, 1);
+    draw_enc->setVertexBuffer(renderDataBuffer, 0, 0);
+    draw_enc->setVertexBuffer(assets[0].buffer, 0, 1);
     draw_enc->useHeap(assets[0].heap);
-    draw_enc->useHeap(renderTmpDataHeap);
-    draw_enc->useResource(drawColorTarget, MTL::ResourceUsageWrite,
-                          MTL::RenderStageFragment);
-    draw_enc->useResource(drawDepthTarget, MTL::ResourceUsageWrite,
-                          MTL::RenderStageFragment);
 
-    // FIXME: switch to indirect range
-    draw_enc->executeCommandsInBuffer(drawICB,
-        { 0, NS::UInteger(maxDraws) });
+    draw_enc->executeCommandsInBuffer(drawICB, renderDataBuffer,
+                                      renderDataDrawCountOffset);
+
 
     if (appDelegate.has_value()) {
         draw_enc->updateFence(appDelegate->presentFence,
@@ -721,7 +691,7 @@ RendererInterface BatchRenderer::getInterface() const
         impl_->viewTransformPointers.data(),
         impl_->numViewsBase,
         impl_->instanceDataBase,
-        &impl_->numInstancesCounter,
+        &impl_->numInstancesCounter.v,
     };
 }
 

@@ -74,15 +74,15 @@ void computeTransforms(float3 t,
 
 [[max_total_threads_per_threadgroup(consts::threadsPerInstance)]]
 kernel void setupMultiview(
-    constant AssetDataArgs &asset_args [[buffer(0)]], 
-    constant RenderDataArgs &render_args [[buffer(1)]],
-    constant EngineDataArgs &engine_args [[buffer(2)]],
+    constant RenderArgBuffer &render_args [[buffer(0)]],
+    constant AssetsArgBuffer &asset_args [[buffer(1)]], 
     threadgroup int32_t *group_draw_idx [[threadgroup(0)]],
     uint group_idx [[threadgroup_position_in_grid]],
     uint group_thread_offset [[thread_index_in_threadgroup]])
 {
     uint instance_idx = group_idx;
-    constant InstanceData &instance_data = engine_args.instances[instance_idx];
+    constant InstanceData &instance_data =
+        render_args.engineInstances[instance_idx];
     float4x4 o2w;
     float3x3 o2w_normal;
     computeTransforms(instance_data.position,
@@ -93,7 +93,7 @@ kernel void setupMultiview(
     uint32_t obj_idx = instance_data.objectID;
     uint32_t world_idx = instance_data.worldID;
 
-    int32_t num_views = engine_args.numViews[world_idx];
+    int32_t num_views = render_args.numViews[world_idx];
 
     constant ObjectData &obj_data = asset_args.objects[obj_idx];
     int32_t num_draws = num_views * obj_data.numMeshes;
@@ -118,7 +118,7 @@ kernel void setupMultiview(
 
         int32_t view_layer_idx =
             world_idx * render_args.numMaxViewsPerWorld + view_idx;
-        float4x4 view_txfm = engine_args.viewTransforms[view_layer_idx];
+        float4x4 view_txfm = render_args.viewTransforms[view_layer_idx];
         float4x4 object_to_screen = view_txfm * o2w;
 
         float3x3 view_txfm_vec {
@@ -152,6 +152,7 @@ kernel void setupMultiview(
                 1,
                 mesh_data.vertexOffset,
                 draw_idx);
+            
         }
     }
 }
@@ -201,8 +202,8 @@ Vertex unpackVertex(PackedVertex packed)
 
 v2f vertex vertMain(uint vert_idx [[vertex_id]],
                     uint instance_idx [[instance_id]],
-                    constant AssetDataArgs &asset_args [[buffer(0)]],
-                    constant RenderDataArgs &render_args [[buffer(1)]])
+                    constant RenderArgBuffer &render_args [[buffer(0)]],
+                    constant AssetsArgBuffer &asset_args [[buffer(1)]])
 {
     PackedVertex packed_vertex = asset_args.vertices[vert_idx];
     Vertex vert = unpackVertex(packed_vertex);
@@ -242,7 +243,7 @@ using RasterizerData = metal::mesh<v2f,
 void objectMain(object_data ObjectToMeshPayload &payload [[payload]],
                 mesh_grid_properties mesh_grid_props,
                 constant WorldDataArgs &world_args [[buffer(0)]],
-                constant AssetDataArgs &asset_args [[buffer(1)]], 
+                constant AssetsArgBuffer &asset_args [[buffer(1)]], 
                 uint2 thread_idx [[thread_position_in_grid]])
 {
     uint32_t instance_idx = thread_idx.x;
@@ -290,7 +291,7 @@ void objectMain(object_data ObjectToMeshPayload &payload [[payload]],
   max_total_threads_per_threadgroup(consts::threadsPerMeshlet)]]
 void meshMain(RasterizerData raster_out,
               object_data ObjectToMeshPayload &payload [[payload]],
-              constant AssetDataArgs &asset_args [[buffer(1)]])
+              constant AssetsArgBuffer &asset_args [[buffer(1)]])
 {
 }
 #endif

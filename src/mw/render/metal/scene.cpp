@@ -157,7 +157,7 @@ StagedAssets AssetManager::stageSourceAssets(
     const AssetMetadata &metadata,
     Span<const imp::SourceObject> src_objs)
 {
-    static_assert(sizeof(AssetDataArgs) < consts::mtlBufferAlignment);
+    static_assert(sizeof(AssetsArgBuffer) < consts::mtlBufferAlignment);
     int64_t total_bytes = consts::mtlBufferAlignment;
 
     total_bytes += metadata.numAssetBytes;
@@ -187,9 +187,9 @@ Assets AssetManager::load(MTL::Device *dev,
 
     uint64_t buffer_base_addr =
         asset_buffer->gpuAddress() + consts::mtlBufferAlignment;
-    AssetDataArgs *staged_argbuffer =
-        (AssetDataArgs *)(staged.stagingBuffer->contents());
-    *staged_argbuffer = AssetDataArgs {
+    AssetsArgBuffer *staged_argbuffer =
+        (AssetsArgBuffer *)(staged.stagingBuffer->contents());
+    *staged_argbuffer = AssetsArgBuffer {
         .vertices = buffer_base_addr + metadata.verticesOffset,
         .indices = buffer_base_addr + metadata.indicesOffset,
         .meshes = buffer_base_addr + metadata.meshesOffset,

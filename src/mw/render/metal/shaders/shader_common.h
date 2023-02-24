@@ -54,9 +54,9 @@ struct ObjectData {
 };
 
 struct InstanceData {
-    float3 position;
-    float4 rotation;
-    float3 scale;
+    packed_float3 position;
+    packed_float4 rotation;
+    packed_float3 scale;
     int32_t objectID;
     int32_t worldID;
 };
@@ -67,23 +67,20 @@ struct DrawInstanceData {
     int32_t viewIdx;
 };
 
-struct AssetDataArgs {
+struct AssetsArgBuffer {
     MADRONA_METAL_CONST_PTR(PackedVertex) vertices;
     MADRONA_METAL_CONST_PTR(uint32_t) indices;
     MADRONA_METAL_CONST_PTR(MeshData) meshes;
     MADRONA_METAL_CONST_PTR(ObjectData) objects;
 };
 
-struct EngineDataArgs {
-    MADRONA_METAL_CONST_PTR(InstanceData) instances;
-    MADRONA_METAL_CONST_PTR(float4x4) viewTransforms;
-    MADRONA_METAL_CONST_PTR(uint32_t) numViews;
-};
-
-struct RenderDataArgs {
+struct RenderArgBuffer {
     command_buffer drawICB;
     MADRONA_METAL_DEV_PTR(DrawInstanceData) drawInstances;
     MADRONA_METAL_DEV_PTR(atomic_int) numDraws;
+    MADRONA_METAL_CONST_PTR(InstanceData) engineInstances;
+    MADRONA_METAL_CONST_PTR(float4x4) viewTransforms;
+    MADRONA_METAL_CONST_PTR(uint32_t) numViews;
     uint32_t numMaxViewsPerWorld;
 };
 
