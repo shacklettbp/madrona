@@ -35,9 +35,9 @@ private:
         uint32_t warpID;
         uint32_t blockID;
         uint32_t smID;
-        uint64_t cycleCount;
         // to align with memory address and future use
         uint32_t padding;
+        uint64_t cycleCount;
     };
 
     std::atomic_int32_t cur_index_;
@@ -119,7 +119,7 @@ private:
                     // mark the current set of traces to be corrupted
                     cur_index_.store(-1, std::memory_order_release);
                 } else{
-                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, threadIdx.x / 32, blockIdx.x, sm_id, globalTimer(), log_index};
+                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, threadIdx.x / 32, blockIdx.x, sm_id, log_index, globalTimer()};
                 }
             }
         }
