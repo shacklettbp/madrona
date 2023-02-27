@@ -32,9 +32,12 @@ private:
         uint32_t funcID;
         uint32_t numInvocations;
         uint32_t nodeID;
+        uint32_t warpID;
         uint32_t blockID;
         uint32_t smID;
         uint64_t cycleCount;
+        // to align with memory address and future use
+        uint32_t padding;
     };
 
     std::atomic_int32_t cur_index_;
@@ -113,9 +116,10 @@ private:
                     : "=r"(sm_id));
                 uint32_t log_index = cur_index_.fetch_add(1, std::memory_order_relaxed);
                 if (log_index >= maxLogSize) {
+                    // mark the current set of traces to be corrupted
                     cur_index_.store(-1, std::memory_order_release);
                 } else{
-                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, globalTimer()};
+                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, threadIdx.x / 32, blockIdx.x, sm_id, globalTimer(), log_index};
                 }
             }
         }
