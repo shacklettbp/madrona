@@ -62,7 +62,8 @@ void TaskGraph::init()
         // reset the pointer for each run
         mwGPU::DeviceTracing::resetIndex();
         // special calibration indicating the beginning of the kernel
-        mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration, 0, 0, 0);
+        mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration,
+                                    madrona::consts::numMegakernelThreads / 32, madrona::consts::numMegakernelBlocksPerSM, num_SMs_);
 
         Node &first_node = sorted_nodes_[0];
 

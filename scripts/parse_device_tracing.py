@@ -1,19 +1,20 @@
 import os
 import sys
 
-from PIL import Image, ImageDraw, ImageColor
 import pandas as pd
+from PIL import Image, ImageDraw
+
+HIDE_SEEK = True
+NUM_HIGHLIGHT_NODES = 10
 
 LOG_STEPS = {}
-NUM_HIGHLIGHT_NODES = 10
-HIDE_SEEK = True
 
 
 def parse_device_logs(events):
     global LOG_STEPS
     STEP = -1
 
-    def new_step():
+    def new_step(num_warps, num_blocks, num_sms):
         nonlocal STEP
         STEP += 1
         LOG_STEPS[STEP] = {
@@ -22,7 +23,10 @@ def parse_device_logs(events):
             "mapping": {},
             "final_cycles": {},
             "start_timestamp": 0xFFFFFFFFFFFFFFFF,
-            "final_timestamp": 0
+            "final_timestamp": 0,
+            "num_warps": num_warps,
+            "num_blocks": num_blocks,
+            "num_sms": num_sms
         }
 
     for i in range(0, len(events), 40):
@@ -32,17 +36,21 @@ def parse_device_logs(events):
         funcID = int.from_bytes(array[4:8], byteorder='little')
         numInvocations = int.from_bytes(array[8:12], byteorder='little')
         nodeID = int.from_bytes(array[12:16], byteorder='little')
-        warpID = int.from_bytes(array[16:24], byteorder='little')
-        blockID = int.from_bytes(array[24:28], byteorder='little')
-        smID = int.from_bytes(array[28:32], byteorder='little')
-        cycleCount = int.from_bytes(array[32:40], byteorder='little')
+        warpID = int.from_bytes(array[16:20], byteorder='little')
+        blockID = int.from_bytes(array[20:24], byteorder='little')
+        smID = int.from_bytes(array[24:28], byteorder='little')
+        cycleCount = int.from_bytes(array[28:36], byteorder='little')
+        logIndex = int.from_bytes(array[36:40], byteorder='little')
 
         # to make a unique block id
-        blockID += warpID * 82
+        # blockID += warpID * 82
+        if STEP != -1:
+            # to make a unique warp id
+            warpID += blockID * LOG_STEPS[STEP]["num_warps"]
 
         if event == 0:
             # beginning of a megakernel
-            new_step()
+            new_step(funcID, numInvocations, nodeID)
             LOG_STEPS[STEP]["start_timestamp"] = cycleCount
 
         elif event in [1, 2]:
@@ -54,33 +62,33 @@ def parse_device_logs(events):
 
             if nodeID not in LOG_STEPS[STEP]["events"]:
                 LOG_STEPS[STEP]["events"][nodeID] = {
-                    event: (smID, blockID, cycleCount)
+                    event: (smID, warpID, cycleCount)
                 }
             else:
                 assert event not in LOG_STEPS[STEP]["events"][nodeID]
-                LOG_STEPS[STEP]["events"][nodeID][event] = (smID, blockID,
+                LOG_STEPS[STEP]["events"][nodeID][event] = (smID, warpID,
                                                             cycleCount)
 
         elif event in [3, 4]:
             if smID not in LOG_STEPS[STEP]["SMs"]:
                 assert event == 3
                 LOG_STEPS[STEP]["SMs"][smID] = {
-                    (numInvocations, nodeID, blockID): [cycleCount]
+                    (numInvocations, nodeID, warpID): [cycleCount]
                 }
             else:
                 if (numInvocations, nodeID,
-                        blockID) in LOG_STEPS[STEP]["SMs"][smID]:
+                        warpID) in LOG_STEPS[STEP]["SMs"][smID]:
                     assert event == 4
                     LOG_STEPS[STEP]["SMs"][smID][(numInvocations, nodeID,
-                                                  blockID)].append(cycleCount)
+                                                  warpID)].append(cycleCount)
                 else:
                     assert event == 3
                     LOG_STEPS[STEP]["SMs"][smID][(numInvocations, nodeID,
-                                                  blockID)] = [cycleCount]
+                                                  warpID)] = [cycleCount]
 
         elif event == 5:
-            assert blockID not in LOG_STEPS[STEP]["final_cycles"]
-            LOG_STEPS[STEP]["final_cycles"][blockID] = cycleCount
+            assert warpID not in LOG_STEPS[STEP]["final_cycles"]
+            LOG_STEPS[STEP]["final_cycles"][warpID] = cycleCount
             LOG_STEPS[STEP]["final_timestamp"] = max(
                 LOG_STEPS[STEP]["final_timestamp"], cycleCount)
         else:
@@ -133,7 +141,7 @@ def block_analysis(step_log, nodes_map):
     }
 
     for sm in step_log["SMs"]:
-        for (_, nodeID, blockID), time_stamps in step_log["SMs"][sm].items():
+        for (_, nodeID, warpID), time_stamps in step_log["SMs"][sm].items():
             assert (len(time_stamps) == 2)
             start = time_stamps[0]
             end = max(time_stamps[1:])
@@ -146,16 +154,16 @@ def block_analysis(step_log, nodes_map):
             ]
             sm_execution[sm].append((start, end))
 
-            if blockID not in block_exec_time["blocks"][sm]:
-                block_exec_time["blocks"][sm][blockID] = [(start, end, nodeID)]
+            if warpID not in block_exec_time["blocks"][sm]:
+                block_exec_time["blocks"][sm][warpID] = [(start, end, nodeID)]
             else:
-                assert start > block_exec_time["blocks"][sm][blockID][-1][1]
-                block_exec_time["blocks"][sm][blockID].append(
+                assert start > block_exec_time["blocks"][sm][warpID][-1][1]
+                block_exec_time["blocks"][sm][warpID].append(
                     (start, end, nodeID))
 
             if nodeID not in block_exec_time["nodes"][sm]:
                 block_exec_time["nodes"][sm][nodeID] = []
-            block_exec_time["nodes"][sm][nodeID].append((start, end, blockID))
+            block_exec_time["nodes"][sm][nodeID].append((start, end, warpID))
 
         block_exec_time["blocks"][sm] = {
             k: sorted(v)
@@ -224,13 +232,15 @@ COLORS = [
 
 
 def plot_events(step_log, nodes_map, blocks, file_name):
-    num_sm = len(blocks)
-    num_block_per_sm = 8
-    num_pixel_per_block = 2
-    sm_interval_pixel = num_pixel_per_block * 3
-    num_pixel_per_sm = num_block_per_sm * num_pixel_per_block + sm_interval_pixel
-    y_blank = num_pixel_per_block * num_block_per_sm * 10
-    y_limit = num_sm * num_pixel_per_sm + y_blank
+    num_sms = step_log["num_sms"]
+    # num_block_per_sm = step_log["num_blocks"]
+    num_warp_per_sm = step_log["num_warps"] * step_log["num_blocks"]
+    # num_block_per_sm = 8
+    num_pixel_per_warp = 2
+    sm_interval_pixel = num_pixel_per_warp * 3
+    num_pixel_per_sm = num_warp_per_sm * num_pixel_per_warp + sm_interval_pixel
+    y_blank = num_pixel_per_warp * num_warp_per_sm * 10
+    y_limit = num_sms * num_pixel_per_sm + y_blank
     x_limit = y_limit * 2
     print(x_limit, y_limit)
 
@@ -283,6 +293,8 @@ def plot_events(step_log, nodes_map, blocks, file_name):
         color_span[(left, right)] = colors[nodes_map[n]["funcID"]]
     sorted_color_span = sorted(color_span.keys())
 
+    num_stamps = active_warps = 0
+
     for s, b in blocks.items():
         y = (s + 1) * num_pixel_per_sm
         vertical_pixels = {}
@@ -301,6 +313,9 @@ def plot_events(step_log, nodes_map, blocks, file_name):
 
         n_pointer = 0
         for p in sorted(vertical_pixels):
+            num_stamps += num_warp_per_sm
+            active_warps += vertical_pixels[p]
+
             while n_pointer < len(color_span):
                 left, right = sorted_color_span[n_pointer]
                 if p > right:
@@ -314,16 +329,19 @@ def plot_events(step_log, nodes_map, blocks, file_name):
                 break
             else:
                 bar_color = (0, 0, 0)
-            assert vertical_pixels[p] <= num_block_per_sm
-            draw.line((p, y, p, y - vertical_pixels[p] * num_pixel_per_block),
+            assert vertical_pixels[p] <= num_warp_per_sm
+            draw.line((p, y, p, y - vertical_pixels[p] * num_pixel_per_warp),
                       fill=bar_color,
                       width=1)
-            y_low = y - vertical_pixels[p] * num_pixel_per_block - 1
-            y_high = y - num_block_per_sm * num_pixel_per_block
+            y_low = y - vertical_pixels[p] * num_pixel_per_warp - 1
+            y_high = y - num_warp_per_sm * num_pixel_per_warp
             if y_low <= y_high:
                 pass
             else:
                 draw.line((p, y_low, p, y_high), fill=(211, 211, 211), width=1)
+
+    print("Percentage of active warps is {:.2f}%".format(active_warps /
+                                                         num_stamps * 100))
 
     if not HIDE_SEEK:
         # mark the start and the end of major nodes_map
