@@ -48,12 +48,13 @@ struct BatchRenderer::Impl {
     MTL::ComputePipelineState *multiviewSetupPipeline;
     MTL::RenderPipelineState *drawPipeline;
     MTL::IndirectCommandBuffer *drawICB;
+    MTL::DepthStencilState *drawDepthTest;
     MTL::Fence *icbSetupFence;
     MTL::Fence *drawFence;
     MTL::Buffer *engineInteropBuffer;
     MTL::Buffer *renderDataBuffer;
     InstanceData *instanceDataBase;
-    HeapArray<math::Mat4x4 *> viewTransformPointers;
+    HeapArray<PerspectiveCameraData *> viewCamPointers;
     uint32_t *numViewsBase;
     int32_t renderDataDrawCountOffset;
     AssetManager assetMgr;
@@ -193,24 +194,23 @@ void BatchRenderer::Impl::AppDelegate::applicationDidFinishLaunching(
     presentAttachment->setLoadAction(MTL::LoadActionDontCare);
     presentAttachment->setStoreAction(MTL::StoreActionStore);
 
-    uint16_t fullscreen_tri_stage_indices[3] = {0, 1, 2};
+    // Need to be rounded to 4 bytes on macos
+    uint16_t fullscreen_tri_stage_indices[4] = {0, 1, 2, 0xFFFF};
 
     fullscreenTri = renderer->dev->newBuffer(
-        fullscreen_tri_stage_indices,
-        sizeof(uint16_t) * 3,
-        MTL::ResourceStorageModeManaged |
+        sizeof(uint16_t) * 4,
+        MTL::ResourceStorageModePrivate |
         MTL::ResourceHazardTrackingModeUntracked);
 
     auto fullscreen_tri_staging = renderer->dev->newBuffer(
         fullscreen_tri_stage_indices,
-        sizeof(uint16_t) * 3, MTL::ResourceStorageModeShared);
-
+        sizeof(uint16_t) * 4, MTL::ResourceStorageModeShared);
 
     auto copy_cmd =
         renderer->cmdQueue->commandBufferWithUnretainedReferences();
     auto copy_enc = copy_cmd->blitCommandEncoder();
     copy_enc->copyFromBuffer(fullscreen_tri_staging, 0, fullscreenTri, 0,
-                             sizeof(uint16_t) * 3);
+                             sizeof(uint16_t) * 4);
     copy_enc->endEncoding();
     copy_cmd->commit();
     copy_cmd->waitUntilCompleted();
@@ -321,6 +321,9 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
     depth_target_desc->release();
 
     auto *render_pass = MTL::RenderPassDescriptor::renderPassDescriptor();
+    render_pass->setRenderTargetWidth(cfg.renderWidth);
+    render_pass->setRenderTargetHeight(cfg.renderHeight);
+    render_pass->setRenderTargetArrayLength(max_views);
     MTL::RenderPassColorAttachmentDescriptor *color_attachment =
         render_pass->colorAttachments()->object(0);
     color_attachment->setClearColor(MTL::ClearColor { 0, 0, 0, 1 });
@@ -390,8 +393,6 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         MTL::MutabilityImmutable);
     draw_pipeline_desc->vertexBuffers()->object(1)->setMutability(
         MTL::MutabilityImmutable);
-    draw_pipeline_desc->vertexBuffers()->object(2)->setMutability(
-        MTL::MutabilityImmutable);
     draw_pipeline_desc->fragmentBuffers()->object(0)->setMutability(
         MTL::MutabilityImmutable);
     draw_pipeline_desc->fragmentBuffers()->object(1)->setMutability(
@@ -415,10 +416,19 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         draw_icb_desc, max_draws, MTL::ResourceStorageModePrivate |
         MTL::ResourceHazardTrackingModeUntracked);
 
+    auto *draw_depth_test_desc =
+        MTL::DepthStencilDescriptor::alloc()->init()->autorelease();
+    draw_depth_test_desc->setDepthWriteEnabled(true);
+    draw_depth_test_desc->setDepthCompareFunction(
+        MTL::CompareFunctionGreaterEqual);
+
+    MTL::DepthStencilState *draw_depth_test =
+        dev->newDepthStencilState(draw_depth_test_desc);
+
     int64_t engine_interop_offsets[2];
     int64_t num_engine_interop_bytes = utils::computeBufferOffsets({
             (int64_t)sizeof(InstanceData) * max_instances,
-            (int64_t)sizeof(math::Mat4x4) * max_views,
+            (int64_t)sizeof(PerspectiveCameraData) * max_views,
             (int64_t)sizeof(uint32_t) * num_worlds,
         }, engine_interop_offsets, consts::mtlBufferAlignment);
      
@@ -440,7 +450,6 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
     {
         uint64_t render_argbuffer_gpu_addr = render_data_buf->gpuAddress();
         uint64_t engine_interop_gpu_addr = engine_interop_buf->gpuAddress();
-        printf("Hi %p\n", (void *)engine_interop_gpu_addr);
 
         MTL::Buffer *render_argbuffer_staging_buf = dev->newBuffer(
             sizeof(RenderArgBuffer),
@@ -458,7 +467,7 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
             render_argbuffer_gpu_addr + render_data_offsets[1] + 4;
 
         render_argbuffer_staging->engineInstances = engine_interop_gpu_addr;
-        render_argbuffer_staging->viewTransforms =
+        render_argbuffer_staging->views =
             engine_interop_gpu_addr + engine_interop_offsets[0];
         render_argbuffer_staging->numViews =
             engine_interop_gpu_addr + engine_interop_offsets[1];
@@ -483,15 +492,16 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
     multiview_setup_pipeline->autorelease();
     draw_pipeline->autorelease();
     draw_icb->autorelease();
+    draw_depth_test->autorelease();
     engine_interop_buf->autorelease();
     render_data_buf->autorelease();
 
     char *engine_interop_base_ptr = (char *)engine_interop_buf->contents();
-    HeapArray<math::Mat4x4 *> view_txfm_ptrs(cfg.numWorlds);
-    math::Mat4x4 *base_view_txfm = (math::Mat4x4 *)(
+    HeapArray<PerspectiveCameraData *> view_cam_ptrs(cfg.numWorlds);
+    PerspectiveCameraData *base_cam_ptr = (PerspectiveCameraData *)(
         engine_interop_base_ptr + engine_interop_offsets[0]);
     for (int32_t i = 0; i < (int32_t)cfg.numWorlds; i++) {
-        view_txfm_ptrs[i] = base_view_txfm + i * cfg.maxViewsPerWorld;
+        view_cam_ptrs[i] = base_cam_ptr + i * cfg.maxViewsPerWorld;
     }
 
     AssetManager asset_mgr(dev);
@@ -508,12 +518,13 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         .multiviewSetupPipeline = multiview_setup_pipeline,
         .drawPipeline = draw_pipeline,
         .drawICB = draw_icb,
+        .drawDepthTest = draw_depth_test,
         .icbSetupFence = dev->newFence()->autorelease(),
         .drawFence = dev->newFence()->autorelease(),
         .engineInteropBuffer = engine_interop_buf,
         .renderDataBuffer = render_data_buf,
         .instanceDataBase = (InstanceData *)(engine_interop_base_ptr),
-        .viewTransformPointers = std::move(view_txfm_ptrs),
+        .viewCamPointers = std::move(view_cam_ptrs),
         .numViewsBase = (uint32_t *)(
             engine_interop_base_ptr + engine_interop_offsets[1]),
         .renderDataDrawCountOffset = int32_t(render_data_offsets[1]),
@@ -536,6 +547,7 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
 
         // Need to autorelease these here so they the top level pool releases
         // them, not the event handler pool in app->run()
+        impl->appDelegate->fullscreenTri->autorelease();
         impl->appDelegate->presentFence->autorelease();
         impl->appDelegate->presentPipeline->autorelease();
         impl->appDelegate->presentPass->autorelease();
@@ -583,8 +595,6 @@ void BatchRenderer::Impl::render()
         pumpCocoaEvents(NS::app());
     }
     
-    printf("%u\n", numViewsBase[0]);
-
     MTL::CommandBuffer *cmd =
         cmdQueue->commandBufferWithUnretainedReferences();
 
@@ -618,10 +628,12 @@ void BatchRenderer::Impl::render()
 
     auto draw_enc = cmd->renderCommandEncoder(drawPass);
     draw_enc->waitForFence(drawFence, MTL::RenderStageVertex);
+    draw_enc->setDepthStencilState(drawDepthTest);
     draw_enc->setRenderPipelineState(drawPipeline);
+    draw_enc->setCullMode(MTL::CullModeFront);
     draw_enc->setVertexBuffer(renderDataBuffer, 0, 0);
     draw_enc->setVertexBuffer(assets[0].buffer, 0, 1);
-    draw_enc->useHeap(assets[0].heap);
+    draw_enc->useHeap(assets[0].heap, MTL::RenderStageVertex);
 
     draw_enc->executeCommandsInBuffer(drawICB, renderDataBuffer,
                                       renderDataDrawCountOffset);
@@ -648,8 +660,6 @@ void BatchRenderer::Impl::render()
         present_enc->setFragmentTexture(drawColorTarget, 0);
         present_enc->waitForFence(appDelegate->presentFence,
                                   MTL::RenderStageFragment);
-        present_enc->useResource(drawColorTarget, MTL::ResourceUsageRead,
-                                 MTL::RenderStageFragment);
         present_enc->drawIndexedPrimitives(
             MTL::PrimitiveTypeTriangle, 3, MTL::IndexTypeUInt16,
             appDelegate->fullscreenTri, 0);
@@ -688,7 +698,7 @@ CountT BatchRenderer::loadObjects(Span<const imp::SourceObject> objs)
 RendererInterface BatchRenderer::getInterface() const
 {
     return {
-        impl_->viewTransformPointers.data(),
+        impl_->viewCamPointers.data(),
         impl_->numViewsBase,
         impl_->instanceDataBase,
         &impl_->numInstancesCounter.v,

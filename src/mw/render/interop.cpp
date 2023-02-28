@@ -81,11 +81,14 @@ inline void updateViewData(Context &ctx,
 #elif defined(MADRONA_BATCHRENDER_METAL)
     Vector3 camera_pos = pos + view_settings.cameraOffset;
 
-    renderer_state.viewTransforms[view_idx] =
-        Mat4x4::makePerspectiveViewMat(camera_pos, rot,
-                                       view_settings.xScale,
-                                       view_settings.yScale,
-                                       view_settings.zNear);
+    renderer_state.views[view_idx] = PerspectiveCameraData {
+        camera_pos,
+        rot.inv(),
+        view_settings.xScale,
+        view_settings.yScale,
+        view_settings.zNear,
+        {},
+    };
 #endif
 }
 
@@ -162,7 +165,7 @@ ViewSettings RenderingSystem::setupView([[maybe_unused]] Context &ctx,
 #endif
 
     float x_scale = fov_scale / aspect_ratio;
-    float y_scale = -fov_scale;
+    float y_scale = fov_scale;
 
     return ViewSettings {
         x_scale,
@@ -191,7 +194,7 @@ void RendererState::init(Context &ctx, const RendererInit &renderer_init)
     };
 #elif defined (MADRONA_BATCHRENDER_METAL)
     new (&renderer_state) RendererState {
-        renderer_init.iface.viewTransforms[world_idx],
+        renderer_init.iface.views[world_idx],
         &renderer_init.iface.numViews[world_idx],
         renderer_init.iface.instanceData,
         renderer_init.iface.numInstances,

@@ -53,7 +53,7 @@ struct ObjectData {
     int32_t numMeshes;
 };
 
-struct InstanceData {
+struct alignas(16) InstanceData {
     packed_float3 position;
     packed_float4 rotation;
     packed_float3 scale;
@@ -61,10 +61,20 @@ struct InstanceData {
     int32_t worldID;
 };
 
-struct DrawInstanceData {
+struct alignas(16) PerspectiveCameraData {
+    packed_float3 position;
+    packed_float4 rotation;
+    float xScale;
+    float yScale;
+    float zNear;
+    uint32_t pad[2];
+};
+
+struct alignas(16) DrawInstanceData {
     float4x4 objectToScreen;
-    float3x3 objectNormalToScreen;
+    float3x3 objectNormalToView;
     int32_t viewIdx;
+    int32_t pad[3];
 };
 
 struct AssetsArgBuffer {
@@ -79,7 +89,7 @@ struct RenderArgBuffer {
     MADRONA_METAL_DEV_PTR(DrawInstanceData) drawInstances;
     MADRONA_METAL_DEV_PTR(atomic_int) numDraws;
     MADRONA_METAL_CONST_PTR(InstanceData) engineInstances;
-    MADRONA_METAL_CONST_PTR(float4x4) viewTransforms;
+    MADRONA_METAL_CONST_PTR(PerspectiveCameraData) views;
     MADRONA_METAL_CONST_PTR(uint32_t) numViews;
     uint32_t numMaxViewsPerWorld;
 };

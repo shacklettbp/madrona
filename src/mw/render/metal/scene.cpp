@@ -47,8 +47,8 @@ Optional<AssetMetadata> AssetManager::prepareSourceAssets(
                 FATAL("Render mesh missing uvs");
             }
 
-            num_total_vertices = mesh.numVertices;
-            num_total_indices = mesh.numFaces * 3;
+            num_total_vertices += mesh.numVertices;
+            num_total_indices += mesh.numFaces * 3;
         }
     }
 
@@ -127,7 +127,7 @@ void AssetManager::packSourceAssets(
                     encodeNormalTangent(normal, tangent_sign);
 
                 vertex_ptr[vertex_offset++] = PackedVertex {
-                    Vector4 { 
+                    Vector4 {
                         pos.x,
                         pos.y,
                         pos.z,
@@ -147,8 +147,6 @@ void AssetManager::packSourceAssets(
 
             index_offset += num_mesh_indices;
         }
-
-        mesh_offset += obj.meshes.size();
     }
 }
 
@@ -187,6 +185,7 @@ Assets AssetManager::load(MTL::Device *dev,
 
     uint64_t buffer_base_addr =
         asset_buffer->gpuAddress() + consts::mtlBufferAlignment;
+
     AssetsArgBuffer *staged_argbuffer =
         (AssetsArgBuffer *)(staged.stagingBuffer->contents());
     *staged_argbuffer = AssetsArgBuffer {
@@ -206,6 +205,8 @@ Assets AssetManager::load(MTL::Device *dev,
     copy_enc->endEncoding();
     copy_cmd->commit();
     copy_cmd->waitUntilCompleted();
+
+    staged.stagingBuffer->release();
 
     return Assets {
         .heap = asset_heap,

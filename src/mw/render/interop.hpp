@@ -39,13 +39,23 @@ struct AccelStructRangeInfo {
 };
 
 #ifdef MADRONA_BATCHRENDER_METAL
-struct InstanceData {
+struct alignas(16) InstanceData {
     math::Vector3 position;
     math::Quat rotation;
     math::Diag3x3 scale;
     int32_t objectID;
     int32_t worldID;
 };
+
+struct alignas(16) PerspectiveCameraData {
+    math::Vector3 position;
+    math::Quat rotation;
+    float xScale;
+    float yScale;
+    float zNear;
+    uint32_t pad[2];
+};
+
 #endif
 
 struct RendererInterface {
@@ -56,7 +66,7 @@ struct RendererInterface {
     PackedViewData **packedViews;
     uint32_t *numInstancesReadback;
 #elif defined(MADRONA_BATCHRENDER_METAL)
-    math::Mat4x4 **viewTransforms;
+    PerspectiveCameraData **views;
     uint32_t *numViews;
     InstanceData *instanceData;
     uint32_t *numInstances;
@@ -79,7 +89,7 @@ struct RendererState {
     uint32_t *count_readback;
 #endif
 #elif defined(MADRONA_BATCHRENDER_METAL)
-    math::Mat4x4 *viewTransforms;
+    PerspectiveCameraData *views;
     uint32_t *numViews;
     InstanceData *instanceData;
     uint32_t *numInstances;
