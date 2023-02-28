@@ -71,10 +71,14 @@ struct alignas(16) PerspectiveCameraData {
 };
 
 struct alignas(16) DrawInstanceData {
-    float4x4 objectToScreen;
-    float3x3 objectNormalToView;
+    packed_float4 packed[5];
+    float3x3 toViewRot;
+    float3 toViewTranslation;
+    float3 objScale;
     int32_t viewIdx;
-    int32_t pad[3];
+    float projXScale;
+    float projYScale;
+    float projZNear;
 };
 
 struct AssetsArgBuffer {
