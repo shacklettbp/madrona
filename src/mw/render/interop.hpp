@@ -70,9 +70,9 @@ struct RendererInterface {
     uint32_t *numViews;
     InstanceData *instanceData;
     uint32_t *numInstances;
+#endif
     int32_t renderWidth;
     int32_t renderHeight;
-#endif
 };
 
 struct RendererInit {
