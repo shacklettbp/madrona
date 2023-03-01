@@ -27,7 +27,6 @@ struct BatchRenderer::Impl {
         MTL::RenderPassColorAttachmentDescriptor *presentAttachment;
         MTL::RenderPipelineState *presentPipeline;
         MTL::Buffer *fullscreenTri;
-        MTL::Fence *presentFence;
 
         inline AppDelegate(BatchRenderer::Impl *impl);
         virtual void applicationWillFinishLaunching(
@@ -50,13 +49,17 @@ struct BatchRenderer::Impl {
     MTL::IndirectCommandBuffer *drawICB;
     MTL::DepthStencilState *drawDepthTest;
     MTL::Fence *icbSetupFence;
-    MTL::Fence *drawFence;
+    MTL::Fence *viewSetupFence;
+    MTL::Fence *drawFinishedFence;
     MTL::Buffer *engineInteropBuffer;
     MTL::Buffer *renderDataBuffer;
     InstanceData *instanceDataBase;
     HeapArray<PerspectiveCameraData *> viewCamPointers;
     uint32_t *numViewsBase;
     int32_t renderDataDrawCountOffset;
+    MTL::Heap *outHeap;
+    MTL::Buffer *rgbOutBuffer;
+    MTL::Buffer *depthOutBuffer;
     AssetManager assetMgr;
     DynArray<Assets> assets;
     CacheAlignedU32 numInstancesCounter;
@@ -244,8 +247,6 @@ void BatchRenderer::Impl::AppDelegate::applicationDidFinishLaunching(
     if (!presentPipeline) {
         FATAL("%s\n", mtl_err->localizedDescription()->utf8String());
     }
-
-    presentFence = renderer->dev->newFence();
 
     tmp_pool->release();
 
@@ -486,6 +487,18 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         render_args_setup_cmd->waitUntilCompleted();
     }
 
+    uint64_t num_pixels = uint64_t(max_views) * uint64_t(cfg.renderWidth) *
+        uint64_t(cfg.renderHeight);
+    MTL::Buffer *rgb_out_buffer = dev->newBuffer(NS::UInteger(
+         num_pixels * sizeof(uint8_t) * 4),
+        MTL::ResourceStorageModeShared |
+            MTL::ResourceHazardTrackingModeUntracked);
+
+    MTL::Buffer *depth_out_buffer = dev->newBuffer(NS::UInteger(
+            num_pixels * sizeof(float)),
+        MTL::ResourceStorageModeShared |
+            MTL::ResourceHazardTrackingModeUntracked);
+
     init_pool->release();
 
     // Autorelease in the outer pool
@@ -495,6 +508,8 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
     draw_depth_test->autorelease();
     engine_interop_buf->autorelease();
     render_data_buf->autorelease();
+    rgb_out_buffer->autorelease();
+    depth_out_buffer->autorelease();
 
     char *engine_interop_base_ptr = (char *)engine_interop_buf->contents();
     HeapArray<PerspectiveCameraData *> view_cam_ptrs(cfg.numWorlds);
@@ -520,7 +535,8 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         .drawICB = draw_icb,
         .drawDepthTest = draw_depth_test,
         .icbSetupFence = dev->newFence()->autorelease(),
-        .drawFence = dev->newFence()->autorelease(),
+        .viewSetupFence = dev->newFence()->autorelease(),
+        .drawFinishedFence = dev->newFence()->autorelease(),
         .engineInteropBuffer = engine_interop_buf,
         .renderDataBuffer = render_data_buf,
         .instanceDataBase = (InstanceData *)(engine_interop_base_ptr),
@@ -528,6 +544,8 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         .numViewsBase = (uint32_t *)(
             engine_interop_base_ptr + engine_interop_offsets[1]),
         .renderDataDrawCountOffset = int32_t(render_data_offsets[1]),
+        .rgbOutBuffer = rgb_out_buffer,
+        .depthOutBuffer = depth_out_buffer,
         .assetMgr = asset_mgr,
         .assets = DynArray<Assets>(1),
         .numInstancesCounter = { 0 },
@@ -548,7 +566,6 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         // Need to autorelease these here so they the top level pool releases
         // them, not the event handler pool in app->run()
         impl->appDelegate->fullscreenTri->autorelease();
-        impl->appDelegate->presentFence->autorelease();
         impl->appDelegate->presentPipeline->autorelease();
         impl->appDelegate->presentPass->autorelease();
     }
@@ -623,11 +640,11 @@ void BatchRenderer::Impl::render()
         {num_instances, 1, 1},
         {shader::consts::threadsPerInstance, 1, 1});
 
-    multiview_setup_enc->updateFence(drawFence);
+    multiview_setup_enc->updateFence(viewSetupFence);
     multiview_setup_enc->endEncoding();
 
     auto draw_enc = cmd->renderCommandEncoder(drawPass);
-    draw_enc->waitForFence(drawFence, MTL::RenderStageVertex);
+    draw_enc->waitForFence(viewSetupFence, MTL::RenderStageVertex);
     draw_enc->setDepthStencilState(drawDepthTest);
     draw_enc->setRenderPipelineState(drawPipeline);
     draw_enc->setCullMode(MTL::CullModeFront);
@@ -637,14 +654,21 @@ void BatchRenderer::Impl::render()
 
     draw_enc->executeCommandsInBuffer(drawICB, renderDataBuffer,
                                       renderDataDrawCountOffset);
-
-
-    if (appDelegate.has_value()) {
-        draw_enc->updateFence(appDelegate->presentFence,
-                              MTL::RenderStageFragment);
-    }
+    draw_enc->updateFence(
+        drawFinishedFence, MTL::RenderStageFragment);
 
     draw_enc->endEncoding();
+
+    auto copy_out_enc = cmd->blitCommandEncoder();
+    copy_out_enc->waitForFence(drawFinishedFence);
+    copy_out_enc->copyFromTexture(drawColorTarget, 0, 0,
+        MTL::Origin(0, 0, 0), MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
+        rgbOutBuffer, 0, sizeof(uint8_t) * 4 * cfg.renderWidth, 0);
+    copy_out_enc->copyFromTexture(drawDepthTarget, 0, 0,
+        MTL::Origin(0, 0, 0), MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
+        depthOutBuffer, 0, sizeof(float) * cfg.renderWidth, 0);
+    copy_out_enc->endEncoding();
+
     cmd->commit();
 
     if (appDelegate.has_value()) {
@@ -658,8 +682,8 @@ void BatchRenderer::Impl::render()
             present_cmd->renderCommandEncoder(appDelegate->presentPass);
         present_enc->setRenderPipelineState(appDelegate->presentPipeline);
         present_enc->setFragmentTexture(drawColorTarget, 0);
-        present_enc->waitForFence(appDelegate->presentFence,
-                                  MTL::RenderStageFragment);
+        present_enc->waitForFence(
+            drawFinishedFence, MTL::RenderStageFragment);
         present_enc->drawIndexedPrimitives(
             MTL::PrimitiveTypeTriangle, 3, MTL::IndexTypeUInt16,
             appDelegate->fullscreenTri, 0);
@@ -709,12 +733,12 @@ RendererInterface BatchRenderer::getInterface() const
 
 uint8_t * BatchRenderer::rgbPtr() const
 {
-    return nullptr;
+    return (uint8_t *)impl_->rgbOutBuffer->contents();
 }
 
 float * BatchRenderer::depthPtr() const
 {
-    return nullptr;
+    return (float *)impl_->depthOutBuffer->contents();
 }
 
 void BatchRenderer::render()
