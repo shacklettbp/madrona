@@ -186,10 +186,9 @@ void JobManager::relinquishProxyJobID(int thread_idx, JobID job_id)
 
 bool JobManager::shouldSplitJob(RunQueue *queue) const
 {
-    uint32_t cur_tail = queue->tail.load(std::memory_order_relaxed);
-    uint32_t cur_correction =
-        queue->correction.load(std::memory_order_relaxed);
-    uint32_t cur_head = queue->head.load(std::memory_order_relaxed);
+    uint32_t cur_tail = queue->tail.load_relaxed();
+    uint32_t cur_correction = queue->correction.load_relaxed();
+    uint32_t cur_head = queue->head.load_relaxed();
 
     return isQueueEmpty(cur_head, cur_correction, cur_tail);
 }

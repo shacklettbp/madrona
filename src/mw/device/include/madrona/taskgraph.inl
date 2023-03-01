@@ -159,7 +159,7 @@ CustomParallelForNode()
       query_ref_([]() {
           auto query = mwGPU::getStateManager()->query<ComponentTs...>();
           QueryRef *query_ref = query.getSharedRef();
-          query_ref->numReferences.fetch_add(1, std::memory_order_relaxed);
+          query_ref->numReferences.fetch_add_relaxed(1);
 
           return query_ref;
       }())

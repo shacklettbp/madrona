@@ -19,7 +19,7 @@ inline void instanceTransformSetup(Context &ctx,
     AtomicU32Ref count_atomic(
         renderer_state.numInstances->primitiveCount);
 
-    uint32_t inst_idx = count_atomic.fetch_add<sync::relaxed>(1);
+    uint32_t inst_idx = count_atomic.fetch_add_relaxed(1);
 
     AccelStructInstance &as_inst = renderer_state.tlasInstanceBuffer[inst_idx];
 
@@ -47,7 +47,7 @@ inline void instanceTransformSetup(Context &ctx,
     as_inst.accelerationStructureReference = renderer_state.blases[obj_id.idx];
 #else
     AtomicU32Ref inst_count_atomic(*renderer_state.numInstances);
-    uint32_t inst_idx = inst_count_atomic.fetch_add<sync::relaxed>(1);
+    uint32_t inst_idx = inst_count_atomic.fetch_add_relaxed(1);
 
     renderer_state.instanceData[inst_idx] = InstanceData {
         pos,
@@ -81,11 +81,14 @@ inline void updateViewData(Context &ctx,
 #elif defined(MADRONA_BATCHRENDER_METAL)
     Vector3 camera_pos = pos + view_settings.cameraOffset;
 
-    renderer_state.viewTransforms[view_idx] =
-        Mat4x4::makePerspectiveViewMat(camera_pos, rot,
-                                       view_settings.xScale,
-                                       view_settings.yScale,
-                                       view_settings.zNear);
+    renderer_state.views[view_idx] = PerspectiveCameraData {
+        camera_pos,
+        rot.inv(),
+        view_settings.xScale,
+        view_settings.yScale,
+        view_settings.zNear,
+        {},
+    };
 #endif
 }
 
@@ -143,26 +146,30 @@ void RenderingSystem::reset([[maybe_unused]] Context &ctx)
 #endif
 }
 
-ViewSettings RenderingSystem::setupView([[maybe_unused]] Context &ctx,
+ViewSettings RenderingSystem::setupView(Context &ctx,
                                         float vfov_degrees,
-                                        float aspect_ratio,
                                         float z_near,
                                         math::Vector3 camera_offset,
                                         ViewID view_id)
 {
+    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+
     float fov_scale = 
-#ifdef MADRONA_BATCHRENDER_METAL
+#ifndef MADRONA_BATCHRENDER_RT
         1.f / 
 #endif
             tanf(helpers::toRadians(vfov_degrees * 0.5f));
 
 #ifdef MADRONA_BATCHRENDER_METAL
-    RendererState &renderer_state = ctx.getSingleton<RendererState>();
     (*renderer_state.numViews) += 1;
 #endif
 
-    float x_scale = fov_scale / aspect_ratio;
-    float y_scale = -fov_scale;
+    float x_scale = fov_scale / renderer_state.aspectRatio;
+    float y_scale =
+#ifndef MADRONA_BATCHRENDER_METAL
+        -
+#endif
+        fov_scale;
 
     return ViewSettings {
         x_scale,
@@ -188,16 +195,18 @@ void RendererState::init(Context &ctx, const RendererInit &renderer_init)
 #ifdef MADRONA_GPU_MODE
         renderer_init.iface.numInstancesReadback,
 #endif
-    };
 #elif defined (MADRONA_BATCHRENDER_METAL)
     new (&renderer_state) RendererState {
-        renderer_init.iface.viewTransforms[world_idx],
+        renderer_init.iface.views[world_idx],
         &renderer_init.iface.numViews[world_idx],
         renderer_init.iface.instanceData,
         renderer_init.iface.numInstances,
-    };
 #endif
-
+        renderer_init.iface.renderWidth,
+        renderer_init.iface.renderHeight,
+        float(renderer_init.iface.renderWidth) /
+            float(renderer_init.iface.renderHeight),
+    };
 }
 
 }

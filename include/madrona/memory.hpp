@@ -58,7 +58,7 @@ public:
     static constexpr uint64_t chunkShift() { return chunk_shift_; }
 
 private:
-    struct alignas(std::atomic_uint64_t) FreeHead {
+    struct alignas(AtomicU64) FreeHead {
         uint32_t gen;
         uint32_t head;
     };
@@ -78,7 +78,7 @@ private:
 
     VirtualRegion region_;
     uint64_t mapped_chunks_;
-    alignas(MADRONA_CACHE_LINE) std::atomic<FreeHead> free_head_;
+    alignas(MADRONA_CACHE_LINE) Atomic<FreeHead> free_head_;
     SpinLock expand_lock_;
 };
 

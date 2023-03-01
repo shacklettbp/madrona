@@ -294,15 +294,24 @@ bool traceShadeRay(rayQueryEXT ray_query, in uint32_t world_idx,
         gl_RayQueryCommittedIntersectionNoneEXT;
 }
 
+float toSRGB(float v)
+{
+    if (v <= 0.00031308f) {
+        return 12.92f * v;
+    } else {
+        return 1.055f * pow(v, (1.f / 2.4f)) - 0.055f;
+    }
+}
+
 void setOutput(uint32_t rgb_offset, uint32_t depth_offset,
                vec3 rgb, float depth)
 {
     rgbOut[rgb_offset] =
-        uint8_t(round(255.f * min(rgb.x, 1.f)));
+        uint8_t(round(255.f * toSRGB(min(rgb.x, 1.f))));
     rgbOut[rgb_offset + 1] =
-        uint8_t(round(255.f * min(rgb.y, 1.f)));
+        uint8_t(round(255.f * toSRGB(min(rgb.y, 1.f))));
     rgbOut[rgb_offset + 2] =
-        uint8_t(round(255.f * min(rgb.z, 1.f)));
+        uint8_t(round(255.f * toSRGB(min(rgb.z, 1.f))));
     rgbOut[rgb_offset + 3] = uint8_t(255);
 
     depthOut[depth_offset] = depth;

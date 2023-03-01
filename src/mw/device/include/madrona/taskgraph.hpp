@@ -43,9 +43,9 @@ private:
         uint32_t numChildren;
         uint32_t numThreadsPerInvocation;
 
-        std::atomic_uint32_t curOffset;
-        std::atomic_uint32_t numRemaining;
-        std::atomic_uint32_t totalNumInvocations;
+        AtomicU32 curOffset;
+        AtomicU32 numRemaining;
+        AtomicU32 totalNumInvocations;
     };
 
 public:
@@ -164,9 +164,9 @@ private:
     Node *sorted_nodes_;
     uint32_t num_nodes_;
     NodeData *node_datas_;
-    std::atomic_uint32_t cur_node_idx_;
+    AtomicU32 cur_node_idx_;
 #ifdef LIMIT_ACTIVE_BLOCKS
-    std::atomic_uint32_t block_sm_offsets_[MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS];
+    AtomicU32 block_sm_offsets_[MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS];
 #endif
     cuda::barrier<cuda::thread_scope_device> init_barrier_;
 

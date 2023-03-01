@@ -34,7 +34,6 @@ struct RenderingSystem {
 
     static ViewSettings setupView(Context &ctx,
                                   float vfov_degrees,
-                                  float aspect_ratio,
                                   float z_near,
                                   math::Vector3 camera_offset,
                                   ViewID view_id);

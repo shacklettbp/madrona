@@ -354,7 +354,7 @@ private:
     LeafTransform  *leaf_transforms_;
     uint32_t *leaf_parents_;
     int32_t *sorted_leaves_;
-    std::atomic<int32_t> num_leaves_;
+    AtomicI32 num_leaves_;
     int32_t num_allocated_leaves_;
     float leaf_velocity_expansion_;
     float leaf_accel_expansion_;

@@ -26,7 +26,7 @@ uint32_t ChunkAllocator::allocChunk(Cache &cache)
         return chunk_idx;
     }
 
-    FreeHead cur_head = free_head_.load(std::memory_order_acquire);
+    FreeHead cur_head = free_head_.load_acquire();
     FreeHead new_head;
     Chunk *node;
 
@@ -38,9 +38,8 @@ uint32_t ChunkAllocator::allocChunk(Cache &cache)
         new_head.gen = cur_head.gen + 1;
         node = (Node *)ChunkAllocator::chunkPtr(cur_head.head);
         new_head.head = node->next;
-    } while (!free_head_.compare_exchange_weak(
-        cur_head, new_head, std::memory_order_release,
-        std::memory_order_acquire));
+    } while (!free_head_.compare_exchange_weak<sync::release, sync::acquire>(
+        cur_head, new_head));
 
     return cur_head.head;
 }
@@ -53,7 +52,7 @@ void ChunkAllocator::freeChunk(Cache &cache, uint32_t chunk_idx)
         return;
     }
 
-    FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
+    FreeHead cur_head = free_head_.load_relaxed();
     FreeHead new_head;
     new_head.head = chunk_idx;
     Node &new_node = *(Node *)ChunkAllocator::chunkPtr(chunk_idx);
@@ -61,9 +60,8 @@ void ChunkAllocator::freeChunk(Cache &cache, uint32_t chunk_idx)
     do {
         new_head.gen = cur_head.gen + 1;
         new_node.next = cur_head.head;
-    } while (!free_head_.compare_exchange_weak(
-        cur_head, new_head, std::memory_order_release,
-        std::memory_order_relaxed));
+    } while (!free_head_.compare_exchange_weak<sync::release, sync::relaxed>(
+        cur_head, new_head));
 }
 
 }

@@ -14,7 +14,7 @@ public:
     using EntryFn = void (*)(SystemBase *, void *, uint32_t);
 
     SystemBase(EntryFn entry_fn);
-    std::atomic_uint32_t numInvocations; 
+    AtomicU32 numInvocations; 
 private:
     EntryFn entry_fn_;
 friend class TaskGraph;

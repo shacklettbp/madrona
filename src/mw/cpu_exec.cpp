@@ -11,12 +11,12 @@ namespace madrona {
 
 struct ThreadPoolExecutor::Impl {
     HeapArray<std::thread> workers;
-    alignas(MADRONA_CACHE_LINE) std::atomic_int32_t workerWakeup;
-    alignas(MADRONA_CACHE_LINE) std::atomic_int32_t mainWakeup;
+    alignas(MADRONA_CACHE_LINE) AtomicI32 workerWakeup;
+    alignas(MADRONA_CACHE_LINE) AtomicI32 mainWakeup;
     ThreadPoolExecutor::Job *currentJobs;
     uint32_t numJobs;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t nextJob;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t numFinished;
+    alignas(MADRONA_CACHE_LINE) AtomicU32 nextJob;
+    alignas(MADRONA_CACHE_LINE) AtomicU32 numFinished;
     StateManager stateMgr;
     HeapArray<StateCache> stateCaches;
     HeapArray<void *> exportPtrs;
@@ -149,7 +149,7 @@ ThreadPoolExecutor::ThreadPoolExecutor(const Config &cfg)
 
 ThreadPoolExecutor::Impl::~Impl()
 {
-    workerWakeup.store(-1, std::memory_order_release);
+    workerWakeup.store_release(-1);
     workerWakeup.notify_all();
 
     for (CountT i = 0; i < workers.size(); i++) {
@@ -163,13 +163,13 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
 {
     currentJobs = jobs;
     numJobs = uint32_t(num_jobs);
-    nextJob.store(0, std::memory_order_relaxed);
-    numFinished.store(0, std::memory_order_relaxed);
-    workerWakeup.store(1, std::memory_order_release);
+    nextJob.store_relaxed(0);
+    numFinished.store_relaxed(0);
+    workerWakeup.store_release(1);
     workerWakeup.notify_all();
 
-    mainWakeup.wait(0, std::memory_order_acquire);
-    mainWakeup.store(0, std::memory_order_relaxed);
+    mainWakeup.wait<sync::acquire>(0);
+    mainWakeup.store_relaxed(0);
 
     if (renderer.has_value()) {
         renderer->render();
@@ -237,8 +237,8 @@ void ThreadPoolExecutor::Impl::workerThread(CountT worker_id)
     pinThread(worker_id);
 
     while (true) {
-        workerWakeup.wait(0, std::memory_order_relaxed);
-        int32_t ctrl = workerWakeup.load(std::memory_order_acquire);
+        workerWakeup.wait<sync::relaxed>(0);
+        int32_t ctrl = workerWakeup.load_acquire();
 
         if (ctrl == 0) {
             continue;
@@ -247,11 +247,10 @@ void ThreadPoolExecutor::Impl::workerThread(CountT worker_id)
         }
 
         while (true) {
-            uint32_t job_idx =
-                nextJob.fetch_add(1, std::memory_order_relaxed);
+            uint32_t job_idx = nextJob.fetch_add_relaxed(1);
 
             if (job_idx == numJobs) {
-                workerWakeup.store(0, std::memory_order_relaxed);
+                workerWakeup.store_relaxed(0);
             }
 
             assert(job_idx < 0xFFFF'FFFF);
@@ -265,10 +264,10 @@ void ThreadPoolExecutor::Impl::workerThread(CountT worker_id)
             // This has to be acq_rel so the finishing thread has seen
             // all the other threads' effects
             uint32_t prev_finished =
-                numFinished.fetch_add(1, std::memory_order_acq_rel);
+                numFinished.fetch_add_acq_rel(1);
 
             if (prev_finished == numJobs - 1) {
-                mainWakeup.store(1, std::memory_order_release);
+                mainWakeup.store_release(1);
                 mainWakeup.notify_one();
             }
         }

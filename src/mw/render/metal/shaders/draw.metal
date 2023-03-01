@@ -5,17 +5,66 @@ using namespace metal;
 
 struct v2f {
     float4 position [[position]];
+    float3 viewPos;
     float3 normal;
     float2 uv;
     uint viewIdx [[render_target_array_index]];
 };
 
-void computeTransforms(float3 t,
-                       float4 r,
-                       float3 s,
-                       thread float4x4 &o2w_position,
-                       thread float3x3 &o2w_normal)
+struct alignas(16) Quat {
+    float w;
+    float x;
+    float y;
+    float z;
+
+    friend inline Quat operator*(Quat a, Quat b)
+    {
+        return Quat {
+            (a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z),
+            (a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y),
+            (a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x),
+            (a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w),
+        };
+    }
+
+    inline float3 rotateVec(float3 v) const
+    {
+        float3 pure {x, y, z};
+        float scalar = w;
+
+        float3 pure_x_v = cross(pure, v);
+        float3 pure_x_pure_x_v = cross(pure, pure_x_v);
+        
+        return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
+    }
+
+};
+
+void computeTransform(float3 obj_t,
+                      float4 obj_r_raw,
+                      float3 cam_t,
+                      float4 cam_r_inv_raw,
+                      thread float3x3 &to_view_rot,
+                      thread float3 &to_view_translation)
 {
+    Quat cam_r_inv = {
+        cam_r_inv_raw.x,
+        cam_r_inv_raw.y,
+        cam_r_inv_raw.z,
+        cam_r_inv_raw.w,
+    };
+
+    to_view_translation = cam_r_inv.rotateVec(obj_t - cam_t);
+
+    Quat obj_r { 
+        obj_r_raw.x,
+        obj_r_raw.y,
+        obj_r_raw.z,
+        obj_r_raw.w,
+    };
+
+    Quat r = cam_r_inv * obj_r;
+
     float x2 = r.x * r.x;
     float y2 = r.y * r.y;
     float z2 = r.z * r.z;
@@ -26,50 +75,40 @@ void computeTransforms(float3 t,
     float wy = r.w * r.y;
     float wz = r.w * r.z;
 
-    float3 ds = 2.f * s;
-
-    o2w_position = float4x4 {
-        float4 { 
-            s.x - ds.x * (y2 + z2),
-            ds.x * (xy + wz),
-            ds.x * (xz - wy),
-            0.f,
-        },
-        float4 {
-            ds.y * (xy - wz),
-            s.y - ds.y * (x2 + z2),
-            ds.y * (yz + wx),
-            0.f,
-        },
-        float4 {
-            ds.z * (xz + wy),
-            ds.z * (yz - wx),
-            s.z - ds.z * (x2 + y2),
-            0.f,
-        },
-        float4(t, 1.f),
-    };
-
-    float3 s_inv = 1.f / s;
-    float3 ds_inv = 2.f * s_inv;
-
-    o2w_normal = float3x3 {
-        float3 {
-            s_inv.x - ds_inv.x * (y2 + z2),
-            ds_inv.y * (xy + wz),
-            ds_inv.z * (xz - wy),
+    to_view_rot = float3x3 {
+        float3 { 
+            1.f - 2.f * (y2 + z2),
+            2.f * (xy + wz),
+            2.f * (xz - wy),
         },
         float3 {
-            ds_inv.x * (xy - wz),
-            s_inv.y - ds_inv.y * (x2 + z2),
-            ds_inv.z * (yz + wx),
+            2.f * (xy - wz),
+            1.f - 2.f * (x2 + z2),
+            2.f * (yz + wx),
         },
         float3 {
-            ds_inv.x * (xz + wy),
-            ds_inv.y * (yz - wx),
-            s_inv.z - ds_inv.z * (x2 + y2),
+            2.f * (xz + wy),
+            2.f * (yz - wx),
+            1.f - 2.f * (x2 + y2),
         },
     };
+}
+
+DrawInstanceData packDrawInstanceData(float3x3 to_view_rot,
+                                      float3 to_view_translation,
+                                      float3 obj_scale,
+                                      uint view_idx,
+                                      float proj_x_scale,
+                                      float proj_y_scale,
+                                      float proj_z_near)
+{
+    return DrawInstanceData {{
+        float4(to_view_rot[0].xyz, to_view_rot[1].x),
+        float4(to_view_rot[1].yz, to_view_rot[2].xy),
+        float4(to_view_rot[2].z, to_view_translation.xyz),
+        float4(obj_scale.xyz, as_type<float>(view_idx)),
+        float4(proj_x_scale, proj_y_scale, proj_z_near, 0),
+    }};
 }
 
 [[max_total_threads_per_threadgroup(consts::threadsPerInstance)]]
@@ -81,14 +120,8 @@ kernel void setupMultiview(
     uint group_thread_offset [[thread_index_in_threadgroup]])
 {
     uint instance_idx = group_idx;
-    constant InstanceData &instance_data =
-        render_args.engineInstances[instance_idx];
-    float4x4 o2w;
-    float3x3 o2w_normal;
-    computeTransforms(instance_data.position,
-                      instance_data.rotation,
-                      instance_data.scale,
-                      o2w, o2w_normal);
+
+    InstanceData instance_data = render_args.engineInstances[instance_idx];
 
     uint32_t obj_idx = instance_data.objectID;
     uint32_t world_idx = instance_data.worldID;
@@ -110,49 +143,50 @@ kernel void setupMultiview(
 
     for (int32_t i = 0; i < num_views; i += consts::threadsPerInstance) {
         int32_t view_idx = group_thread_offset + i;
-        if (view_idx < num_views) {
-            continue;
+        if (view_idx >= num_views) {
+            break;
         }
-
-        int32_t draw_offset = base_draw_offset + view_idx * obj_data.numMeshes;
 
         int32_t view_layer_idx =
             world_idx * render_args.numMaxViewsPerWorld + view_idx;
-        float4x4 view_txfm = render_args.viewTransforms[view_layer_idx];
-        float4x4 object_to_screen = view_txfm * o2w;
 
-        float3x3 view_txfm_vec {
-            float3(view_txfm[0]),
-            float3(view_txfm[1]),
-            float3(view_txfm[2]),
-        };
-        float3x3 object_normal_to_screen =
-            view_txfm_vec * o2w_normal;
+        PerspectiveCameraData cam_data = render_args.views[view_layer_idx];
+
+        float3x3 to_view_rot;
+        float3 to_view_translation;
+        computeTransform(instance_data.position,
+                         instance_data.rotation,
+                         cam_data.position,
+                         cam_data.rotation,
+                         to_view_rot, to_view_translation);
+
+        int32_t draw_offset = base_draw_offset + view_idx * obj_data.numMeshes;
 
         // TODO: split transform calc and instance output and save transforms in shared mem
 
         for (int32_t mesh_idx = 0; mesh_idx < obj_data.numMeshes; mesh_idx++) {
             int32_t draw_idx = draw_offset + mesh_idx;
 
-            render_args.drawInstances[draw_idx] = DrawInstanceData {
-                object_to_screen,
-                object_normal_to_screen,
-                view_layer_idx,
-            };
+            render_args.drawInstances[draw_idx] = packDrawInstanceData(
+                to_view_rot, to_view_translation, instance_data.scale,
+                view_layer_idx, cam_data.xScale, cam_data.yScale,
+                cam_data.zNear);
 
             render_command draw_cmd(render_args.drawICB, draw_idx);
 
             constant MeshData &mesh_data =
                 asset_args.meshes[obj_data.meshOffset + mesh_idx];
+            
+            constant uint *mesh_indices =
+                asset_args.indices + mesh_data.indexOffset;
 
             draw_cmd.draw_indexed_primitives(
                 primitive_type::triangle,
                 mesh_data.numIndices,
-                asset_args.indices + mesh_data.indexOffset,
+                mesh_indices,
                 1,
                 mesh_data.vertexOffset,
                 draw_idx);
-            
         }
     }
 }
@@ -200,6 +234,26 @@ Vertex unpackVertex(PackedVertex packed)
     return vert;
 }
 
+void unpackDrawInstanceData(DrawInstanceData data,
+                            thread float3x3 &to_view_rot,
+                            thread float3 &to_view_translation,
+                            thread float3 &obj_scale,
+                            thread uint &view_idx,
+                            thread float2 &proj_scale,
+                            thread float &z_near)
+{
+    to_view_rot = float3x3 {
+        data.packed[0].xyz,
+        float3(data.packed[0].w, data.packed[1].xy),
+        float3(data.packed[1].zw, data.packed[2].x),
+    };
+    to_view_translation = data.packed[2].yzw;
+    obj_scale = data.packed[3].xyz;
+    view_idx = as_type<int32_t>(data.packed[3].w);
+    proj_scale = data.packed[4].xy;
+    z_near = data.packed[4].z;
+}
+
 v2f vertex vertMain(uint vert_idx [[vertex_id]],
                     uint instance_idx [[instance_id]],
                     constant RenderArgBuffer &render_args [[buffer(0)]],
@@ -210,19 +264,37 @@ v2f vertex vertMain(uint vert_idx [[vertex_id]],
 
     DrawInstanceData draw_instance = render_args.drawInstances[instance_idx];
 
+    float3x3 to_view_rot;
+    float3 to_view_translation;
+    float3 obj_scale;
+    uint view_idx;
+    float2 proj_scale;
+    float z_near;
+    unpackDrawInstanceData(draw_instance, to_view_rot, to_view_translation,
+                           obj_scale, view_idx, proj_scale, z_near);
+
+    float3 view_pos =
+        to_view_rot * (obj_scale * vert.position) + to_view_translation;
+    float4 clip_pos {
+        proj_scale.x * view_pos.x,
+        proj_scale.y * view_pos.z,
+        z_near,
+        view_pos.y,
+    };
+
     v2f o;
-    o.position = draw_instance.objectToScreen * float4(vert.position, 1.f);
-    o.normal = normalize(draw_instance.objectNormalToScreen * vert.normal);
+    o.position = clip_pos;
+    o.viewPos = view_pos;
+    o.normal = normalize(to_view_rot * (vert.normal / obj_scale));
     o.uv = vert.uv;
-    o.viewIdx = draw_instance.viewIdx;
+    o.viewIdx = view_idx;
 
     return o;
 }
 
 half4 fragment fragMain(v2f in [[stage_in]])
 {
-    float hit_angle = max(in.normal.z, 0.f);
-
+    float hit_angle = max(dot(normalize(in.normal), normalize(-in.viewPos)), 0.f);
     return half4(half3(hit_angle), 1.0);
 }
 

@@ -51,6 +51,7 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
             num_threads_per_invocation,
             0,
             0,
+            0,
         },
         parent_node.has_value() ? parent_node->id : -1,
         offset,

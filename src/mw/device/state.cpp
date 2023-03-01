@@ -10,6 +10,17 @@
 
 namespace madrona {
 
+Table::Table()
+    : columns(),
+      columnSizes(),
+      columnMappedBytes(),
+      maxColumnSize(),
+      numColumns(),
+      numRows(0),
+      mappedRows(0),
+      growLock()
+{}
+
 static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
 {
     using namespace mwGPU;
@@ -146,7 +157,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
                                              IntegerMapPair *lookup_input)
     : componentOffset(offset),
       numUserComponents(num_user_components),
-      tbl {},
+      tbl(),
       columnLookup(lookup_input, num_columns),
       needsSort(false)
 {
@@ -156,7 +167,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
     HostAllocator *alloc = getHostAllocator();
 
     tbl.numColumns = num_columns;
-    tbl.numRows.store(0, std::memory_order_relaxed);
+    tbl.numRows.store_relaxed(0);
 
     int32_t min_mapped_rows = Table::maxRowsPerTable;
 
@@ -301,7 +312,7 @@ void StateManager::makeQuery(const uint32_t *components,
 static inline int32_t getEntitySlot(EntityStore &entity_store)
 {
     int32_t available_idx =
-        entity_store.availableOffset.fetch_add(1, std::memory_order_relaxed);
+        entity_store.availableOffset.fetch_add_relaxed(1);
 
     if (available_idx < entity_store.numMappedEntities) [[likely]] {
         return entity_store.availableEntities[available_idx];
@@ -351,7 +362,7 @@ Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
     archetype.needsSort = true;
     Table &tbl = archetype.tbl;
 
-    int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
+    int32_t row = tbl.numRows.fetch_add_relaxed(1);
 
     if (row >= tbl.mappedRows) {
         growTable(tbl, row);
@@ -390,7 +401,7 @@ Loc StateManager::makeTemporary(WorldID world_id,
 {
     Table &tbl = archetypes_[archetype_id]->tbl;
 
-    int32_t row = tbl.numRows.fetch_add(1, std::memory_order_relaxed);
+    int32_t row = tbl.numRows.fetch_add_relaxed(1);
 
     if (row >= tbl.mappedRows) {
         growTable(tbl, row);
@@ -422,7 +433,7 @@ void StateManager::destroyEntityNow(Entity e)
     world_column[loc.row] = WorldID { -1 };
 
     int32_t deleted_offset =
-        entity_store_.deletedOffset.fetch_add(1, std::memory_order_relaxed);
+        entity_store_.deletedOffset.fetch_add_relaxed(1);
 
     entity_store_.deletedEntities[deleted_offset] = e.id;
 }
@@ -430,35 +441,30 @@ void StateManager::destroyEntityNow(Entity e)
 void StateManager::clearTemporaries(uint32_t archetype_id)
 {
     Table &tbl = archetypes_[archetype_id]->tbl;
-    tbl.numRows = 0;
+    tbl.numRows.store_relaxed(0);
 }
 
 void StateManager::resizeArchetype(uint32_t archetype_id, int32_t num_rows)
 {
-    archetypes_[archetype_id]->tbl.numRows.store(
-        num_rows, std::memory_order_relaxed);
+    archetypes_[archetype_id]->tbl.numRows.store_relaxed(num_rows);
 }
 
 int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const
 {
-    return archetypes_[archetype_id]->tbl.numRows.load(
-        std::memory_order_relaxed);
+    return archetypes_[archetype_id]->tbl.numRows.load_relaxed();
 }
 
 std::pair<int32_t, int32_t> StateManager::fetchRecyclableEntities()
 {
-    int32_t num_deleted =
-        entity_store_.deletedOffset.load(std::memory_order_relaxed);
+    int32_t num_deleted = entity_store_.deletedOffset.load_relaxed();
 
-    int32_t available_end =
-        entity_store_.availableOffset.load(std::memory_order_relaxed);
+    int32_t available_end = entity_store_.availableOffset.load_relaxed();
 
     int32_t recycle_base = available_end - num_deleted;
 
     if (num_deleted > 0) {
-        entity_store_.deletedOffset.store(0, std::memory_order_relaxed);
-        entity_store_.availableOffset.store(recycle_base,
-                                            std::memory_order_relaxed);
+        entity_store_.deletedOffset.store_relaxed(0);
+        entity_store_.availableOffset.store_relaxed(recycle_base);
     }
 
     return {
@@ -473,128 +479,5 @@ void StateManager::recycleEntities(int32_t thread_offset,
     entity_store_.availableEntities[recycle_base + thread_offset] =
         entity_store_.deletedEntities[thread_offset];
 }
-
-#if 0
-void StateManager::sortArchetypeBlock(uint32_t archetype_id,
-                                        int32_t column_idx,
-                                        int32_t invocation_idx)
-{
-    using BlockRadixSortT = cub::BlockRadixSort<uint32_t, 
-                                                consts::numMegakernelThreads,
-                                                numElementsPerSortThread,
-                                                int32_t>;
-
-    using TempStorageT = typename BlockRadixSortT::TempStorage;
-
-    static_assert(sizeof(TempStorageT) <=
-                  mwGPU::SharedMemStorage::numSMemBytes);
-
-    auto &archetype = *archetypes_[archetype_id];
-
-    int32_t num_rows = archetype.tbl.numRows.load(std::memory_order_relaxed);
-
-    uint32_t keys[numElementsPerSortThread];
-    int32_t vals[numElementsPerSortThread];
-
-    uint32_t *col = (uint32_t *)archetype.tbl.columns[column_idx];
-
-#pragma unroll
-    for (int32_t i = 0; i < numElementsPerSortThread; i++) {
-        // Each threadblock is responsible for loading numMegakernelThreads * 2
-        // sequential items. Stride these accesses for warp coalescing
-        // FIXME: There's an issue here with the indexing since the count
-        // from prior threadblocks isn't accounted for
-        int32_t row_idx = invocation_idx + i * consts::numMegakernelThreads;
-
-        if (row_idx < num_rows) {
-            keys[i] = col[row_idx];
-            vals[i] = row_idx;
-        } else {
-            keys[i] = 0xFFFF'FFFF;
-            vals[i] = -1;
-        }
-    }
-
-    auto *sort_smem = (TempStorageT *)mwGPU::SharedMemStorage::buffer;
-
-    BlockRadixSortT(*sort_smem).SortBlockedToStriped(keys, vals);
-
-    auto *raw_smem = (char *)mwGPU::SharedMemStorage::buffer;
-
-    // FIXME: can directly use keys to populate worldID column
-
-    {
-        Entity *entities = (Entity *)archetype.tbl.columns[0];
-        Entity *entities_smem = (Entity *)raw_smem;
-
-        for (int32_t i = 0; i < numElementsPerSortThread; i++) {
-            int32_t orig_idx = vals[i];
-            int32_t new_idx =
-                invocation_idx + i * consts::numMegakernelThreads;
-
-            bool valid = orig_idx != -1;
-
-            __syncthreads();
-
-            if (valid) {
-                entities_smem[new_idx] = entities[new_idx];
-            }
-
-            __syncthreads();
-
-            if (valid) {
-                Entity e = entities_smem[orig_idx];
-                entities[new_idx] = e;
-                entity_store_.entities[e.id].loc.row = new_idx;
-            }
-        }
-    }
-
-    {
-        WorldID *world_ids = (WorldID *)archetype.tbl.columns[1];
-
-        for (int32_t i = 0; i < numElementsPerSortThread; i++) {
-            int32_t new_idx =
-                invocation_idx + i * consts::numMegakernelThreads;
-            
-            if (vals[i] != -1) {
-                world_ids[new_idx].idx = keys[i];
-            }
-        }
-    }
-
-    for (int32_t col_idx = 2; col_idx < archetype.tbl.numColumns; col_idx++) {
-        uint32_t elem_bytes = archetype.tbl.columnSizes[col_idx];
-        char *col_base = (char *)archetype.tbl.columns[col_idx];
-
-        assert(elem_bytes * consts::numMegakernelThreads < 
-               mwGPU::SharedMemStorage::numSMemBytes);
-
-#pragma unroll
-        for (int32_t i = 0; i < numElementsPerSortThread; i++) {
-            int32_t orig_idx = vals[i];
-            int32_t new_idx = invocation_idx + i * consts::numMegakernelThreads;
-
-            bool valid = orig_idx != -1;
-
-            __syncthreads();
-
-            if (valid) {
-                memcpy(raw_smem + int64_t(elem_bytes) * int64_t(new_idx),
-                       col_base + int64_t(elem_bytes) * int64_t(new_idx),
-                       elem_bytes);
-            } 
-
-            __syncthreads();
-
-            if (valid) {
-                memcpy(col_base + int64_t(elem_bytes) * int64_t(new_idx),
-                       raw_smem + int64_t(elem_bytes) * int64_t(orig_idx),
-                       elem_bytes);
-            }
-        }
-    }
-}
-#endif
 
 }

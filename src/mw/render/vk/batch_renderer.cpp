@@ -363,7 +363,7 @@ BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
           Optional<PresentationState>::none()),
       rgbPresentIntermediate(presentState.has_value() ?
           mem.makeConversionImage(cfg.renderWidth, cfg.renderHeight,
-                                  VK_FORMAT_R8G8B8A8_UNORM) :
+                                  VK_FORMAT_R8G8B8A8_SRGB) :
           Optional<LocalImage>::none()),
       renderQueue(makeQueue(dev, dev.gfxQF, 0)),
       renderFence(makeFence(dev, false)),
@@ -719,6 +719,9 @@ RendererInterface BatchRenderer::getInterface() const
         impl_->viewDataAddrsBuffer.enginePointer();
     renderer_iface.numInstancesReadback =
         impl_->tlases.countReadback;
+
+    renderer_iface.renderWidth = impl_->fb.renderWidth;
+    renderer_iface.renderHeight = impl_->fb.renderHeight;
 
     return renderer_iface;
 }

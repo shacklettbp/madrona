@@ -81,8 +81,8 @@ struct EntityStore {
         uint32_t gen;
     };
 
-    std::atomic_int32_t availableOffset = 0;
-    std::atomic_int32_t deletedOffset = 0;
+    AtomicI32 availableOffset = 0;
+    AtomicI32 deletedOffset = 0;
 
     EntitySlot *entities;
     int32_t *availableEntities;

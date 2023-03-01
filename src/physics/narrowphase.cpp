@@ -13,19 +13,19 @@
 #ifdef COUNT_GPU_CLOCKS
 #define MADRONA_COUNT_CLOCKS
 extern "C" {
-std::atomic_uint64_t narrowphaseAllClocks = 0;
-std::atomic_uint64_t narrowphaseFetchWorldClocks = 0;
-std::atomic_uint64_t narrowphaseSetupClocks = 0;
-std::atomic_uint64_t narrowphasePrepClocks = 0;
-std::atomic_uint64_t narrowphaseSwitchClocks = 0;
-std::atomic_uint64_t narrowphaseSATFaceClocks = 0;
-std::atomic_uint64_t narrowphaseSATEdgeClocks = 0;
-std::atomic_uint64_t narrowphaseSATPlaneClocks = 0;
-std::atomic_uint64_t narrowphaseSATContactClocks = 0;
-std::atomic_uint64_t narrowphaseSATPlaneContactClocks = 0;
-std::atomic_uint64_t narrowphaseSaveContactsClocks = 0;
-std::atomic_uint64_t narrowphaseTxfmHullCtrs = 0;
-std::atomic_uint64_t narrowphaseSATFinishClocks = 0;
+AtomicU64 narrowphaseAllClocks = 0;
+AtomicU64 narrowphaseFetchWorldClocks = 0;
+AtomicU64 narrowphaseSetupClocks = 0;
+AtomicU64 narrowphasePrepClocks = 0;
+AtomicU64 narrowphaseSwitchClocks = 0;
+AtomicU64 narrowphaseSATFaceClocks = 0;
+AtomicU64 narrowphaseSATEdgeClocks = 0;
+AtomicU64 narrowphaseSATPlaneClocks = 0;
+AtomicU64 narrowphaseSATContactClocks = 0;
+AtomicU64 narrowphaseSATPlaneContactClocks = 0;
+AtomicU64 narrowphaseSaveContactsClocks = 0;
+AtomicU64 narrowphaseTxfmHullCtrs = 0;
+AtomicU64 narrowphaseSATFinishClocks = 0;
 }
 #endif
 
@@ -33,7 +33,7 @@ std::atomic_uint64_t narrowphaseSATFinishClocks = 0;
 
 class ClockHelper {
 public:
-    inline ClockHelper(std::atomic_uint64_t &counter)
+    inline ClockHelper(AtomicU64 &counter)
         : counter_(&counter)
     {
         cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
@@ -46,7 +46,7 @@ public:
         cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
                                   cuda::thread_scope_thread);
         auto end = timestamp();
-        counter_->fetch_add(end - start_, std::memory_order_relaxed);
+        counter_->fetch_add_relaxed(end - start_);
         counter_ = nullptr;
     }
 
@@ -66,7 +66,7 @@ private:
         return v;
     }
 
-    std::atomic_uint64_t *counter_;
+    AtomicU64 *counter_;
     uint64_t start_;
 };
 
@@ -1124,8 +1124,8 @@ static inline void addContactsToSolver(
     SolverData &solver_data,
     Span<const Contact> added_contacts)
 {
-    int32_t contact_idx = solver_data.numContacts.fetch_add(
-        added_contacts.size(), std::memory_order_relaxed);
+    int32_t contact_idx = solver_data.numContacts.fetch_add_relaxed(
+        added_contacts.size());
 
     assert(contact_idx < solver_data.maxContacts);
     

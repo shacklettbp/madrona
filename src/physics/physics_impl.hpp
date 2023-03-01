@@ -6,10 +6,10 @@ namespace madrona::phys {
 
 struct SolverData {
     Contact *contacts;
-    std::atomic<CountT> numContacts;
+    AtomicCount numContacts;
 
     JointConstraint *jointConstraints;
-    std::atomic<CountT> numJointConstraints;
+    AtomicCount numJointConstraints;
 
     CountT maxContacts;
     float deltaT;

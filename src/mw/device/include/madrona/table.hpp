@@ -15,6 +15,8 @@ struct TypeInfo {
 };
 
 struct Table {
+    Table();
+
     static constexpr uint32_t maxColumns = 128;
 
     std::array<void *, maxColumns> columns;
@@ -25,7 +27,7 @@ struct Table {
     uint32_t maxColumnSize;
     int32_t numColumns;
 
-    std::atomic_int32_t numRows;
+    AtomicI32 numRows;
     int32_t mappedRows;
     SpinLock growLock;
      

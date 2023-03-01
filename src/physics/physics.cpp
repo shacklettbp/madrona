@@ -31,8 +31,8 @@ inline void collectConstraintsSystem(Context &ctx,
                                      JointConstraint &constraint)
 {
     auto &solver = ctx.getSingleton<SolverData>();
-    solver.jointConstraints[solver.numJointConstraints.fetch_add(1,
-        std::memory_order_relaxed)] = constraint;
+    solver.jointConstraints[
+        solver.numJointConstraints.fetch_add_relaxed(1)] = constraint;
 }
 
 namespace solver {
@@ -588,7 +588,7 @@ inline void solvePositions(Context &ctx, SolverData &solver)
 {
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
-    CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
+    CountT num_contacts = solver.numContacts.load_relaxed();
 
     //printf("Solver # contacts: %d\n", num_contacts);
 
@@ -597,15 +597,14 @@ inline void solvePositions(Context &ctx, SolverData &solver)
         handleContact(ctx, obj_mgr, contact, solver.contacts[i].lambdaN);
     }
 
-    CountT num_joint_constraints =
-        solver.numJointConstraints.load(std::memory_order_relaxed);
+    CountT num_joint_constraints = solver.numJointConstraints.load_relaxed();
 
     for (CountT i = 0; i < num_joint_constraints; i++) {
         JointConstraint joint_constraint = solver.jointConstraints[i];
         handleJointConstraint(ctx, joint_constraint);
     }
 
-    solver.numJointConstraints.store(0, std::memory_order_relaxed);
+    solver.numJointConstraints.store_relaxed(0);
 }
 
 inline void setVelocities(Context &ctx,
@@ -812,7 +811,7 @@ inline void solveVelocities(Context &ctx, SolverData &solver)
 {
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
-    CountT num_contacts = solver.numContacts.load(std::memory_order_relaxed);
+    CountT num_contacts = solver.numContacts.load_relaxed();
 
     for (CountT i = 0; i < num_contacts; i++) {
         const Contact &contact = solver.contacts[i];
@@ -820,7 +819,7 @@ inline void solveVelocities(Context &ctx, SolverData &solver)
                                   solver.restitutionThreshold);
     }
 
-    solver.numContacts.store(0, std::memory_order_relaxed);
+    solver.numContacts.store_relaxed(0);
 }
 
 }
@@ -902,18 +901,18 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
 
 #ifdef COUNT_GPU_CLOCKS
 extern "C" {
-extern std::atomic_uint64_t narrowphaseAllClocks;
-extern std::atomic_uint64_t narrowphaseFetchWorldClocks;
-extern std::atomic_uint64_t narrowphaseSetupClocks;
-extern std::atomic_uint64_t narrowphasePrepClocks;
-extern std::atomic_uint64_t narrowphaseSwitchClocks;
-extern std::atomic_uint64_t narrowphaseSATFaceClocks;
-extern std::atomic_uint64_t narrowphaseSATEdgeClocks;
-extern std::atomic_uint64_t narrowphaseSATPlaneClocks;
-extern std::atomic_uint64_t narrowphaseSATContactClocks;
-extern std::atomic_uint64_t narrowphaseSATPlaneContactClocks;
-extern std::atomic_uint64_t narrowphaseSaveContactsClocks;
-extern std::atomic_uint64_t narrowphaseTxfmHullCtrs;
+extern AtomicU64 narrowphaseAllClocks;
+extern AtomicU64 narrowphaseFetchWorldClocks;
+extern AtomicU64 narrowphaseSetupClocks;
+extern AtomicU64 narrowphasePrepClocks;
+extern AtomicU64 narrowphaseSwitchClocks;
+extern AtomicU64 narrowphaseSATFaceClocks;
+extern AtomicU64 narrowphaseSATEdgeClocks;
+extern AtomicU64 narrowphaseSATPlaneClocks;
+extern AtomicU64 narrowphaseSATContactClocks;
+extern AtomicU64 narrowphaseSATPlaneContactClocks;
+extern AtomicU64 narrowphaseSaveContactsClocks;
+extern AtomicU64 narrowphaseTxfmHullCtrs;
 }
 
 inline void reportNarrowphaseClocks(Engine &ctx,
@@ -925,32 +924,32 @@ inline void reportNarrowphaseClocks(Engine &ctx,
 
     if (threadIdx.x == 0 && ctx.worldID().idx == 0) {
         printf("[%lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu]\n",
-                narrowphaseAllClocks.load(std::memory_order_relaxed),
-                narrowphaseFetchWorldClocks.load(std::memory_order_relaxed),
-                narrowphaseSetupClocks.load(std::memory_order_relaxed),
-                narrowphasePrepClocks.load(std::memory_order_relaxed),
-                narrowphaseSwitchClocks.load(std::memory_order_relaxed),
-                narrowphaseSATFaceClocks.load(std::memory_order_relaxed),
-                narrowphaseSATEdgeClocks.load(std::memory_order_relaxed),
-                narrowphaseSATPlaneClocks.load(std::memory_order_relaxed),
-                narrowphaseSATContactClocks.load(std::memory_order_relaxed),
-                narrowphaseSATPlaneContactClocks.load(std::memory_order_relaxed),
-                narrowphaseSaveContactsClocks.load(std::memory_order_relaxed),
-                narrowphaseTxfmHullCtrs.load(std::memory_order_relaxed)
+                narrowphaseAllClocks.load<sync::relaxed>(),
+                narrowphaseFetchWorldClocks.load<sync::relaxed>(),
+                narrowphaseSetupClocks.load<sync::relaxed>(),
+                narrowphasePrepClocks.load<sync::relaxed>(),
+                narrowphaseSwitchClocks.load<sync::relaxed>(),
+                narrowphaseSATFaceClocks.load<sync::relaxed>(),
+                narrowphaseSATEdgeClocks.load<sync::relaxed>(),
+                narrowphaseSATPlaneClocks.load<sync::relaxed>(),
+                narrowphaseSATContactClocks.load<sync::relaxed>(),
+                narrowphaseSATPlaneContactClocks.load<sync::relaxed>(),
+                narrowphaseSaveContactsClocks.load<sync::relaxed>(),
+                narrowphaseTxfmHullCtrs.load<sync::relaxed>()
                );
 
-        narrowphaseAllClocks.store(0, std::memory_order_relaxed);
-        narrowphaseFetchWorldClocks.store(0, std::memory_order_relaxed);
-        narrowphaseSetupClocks.store(0, std::memory_order_relaxed),
-        narrowphasePrepClocks.store(0, std::memory_order_relaxed);
-        narrowphaseSwitchClocks.store(0, std::memory_order_relaxed);
-        narrowphaseSATFaceClocks.store(0, std::memory_order_relaxed);
-        narrowphaseSATEdgeClocks.store(0, std::memory_order_relaxed);
-        narrowphaseSATPlaneClocks.store(0, std::memory_order_relaxed);
-        narrowphaseSATContactClocks.store(0, std::memory_order_relaxed);
-        narrowphaseSATPlaneContactClocks.store(0, std::memory_order_relaxed);
-        narrowphaseSaveContactsClocks.store(0, std::memory_order_relaxed);
-        narrowphaseTxfmHullCtrs.store(0, std::memory_order_relaxed);
+        narrowphaseAllClocks.store<sync::relaxed>(0);
+        narrowphaseFetchWorldClocks.store<sync::relaxed>(0);
+        narrowphaseSetupClocks.store<sync::relaxed>(0),
+        narrowphasePrepClocks.store<sync::relaxed>(0);
+        narrowphaseSwitchClocks.store<sync::relaxed>(0);
+        narrowphaseSATFaceClocks.store<sync::relaxed>(0);
+        narrowphaseSATEdgeClocks.store<sync::relaxed>(0);
+        narrowphaseSATPlaneClocks.store<sync::relaxed>(0);
+        narrowphaseSATContactClocks.store<sync::relaxed>(0);
+        narrowphaseSATPlaneContactClocks.store<sync::relaxed>(0);
+        narrowphaseSaveContactsClocks.store<sync::relaxed>(0);
+        narrowphaseTxfmHullCtrs.store<sync::relaxed>(0);
     }
 }
 #endif
