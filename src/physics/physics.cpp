@@ -274,37 +274,18 @@ void applyAngularUpdate(
     q2 = (q2 - q2_update * q2).normalize();
 }
 
-static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
+static MADRONA_ALWAYS_INLINE inline float handleContactConstraint(
     Vector3 &x1, Vector3 &x2,
     Quat &q1, Quat &q2,
-    SubstepPrevState prev1, SubstepPrevState prev2,
     float inv_m1, float inv_m2,
     Vector3 inv_I1, Vector3 inv_I2,
     Vector3 r1, Vector3 r2,
-    Vector3 n_world,
-    float avg_mu_s,
-    float &lambda_n,
-    float &lambda_t)
+    Vector3 p1, Vector3 p2,
+    Vector3 p1_hat, Vector3 p2_hat,
+    Vector3 n_world, float d,
+    float avg_mu_s)
 {
-    Vector3 p1 = q1.rotateVec(r1) + x1;
-    Vector3 p2 = q2.rotateVec(r2) + x2;
-
-    float d = dot(p1 - p2, n_world);
-
-    if (d <= 0) {
-        return;
-    }
-
-    Vector3 x1_prev = prev1.prevPosition;
-    Quat q1_prev = prev1.prevRotation;
-
-    Vector3 x2_prev = prev2.prevPosition;
-    Quat q2_prev = prev2.prevRotation;
-
-    Vector3 p1_hat = q1_prev.rotateVec(r1) + x1_prev;
-    Vector3 p2_hat = q2_prev.rotateVec(r2) + x2_prev;
-
-    lambda_n = applyPositionalUpdate(
+    float lambda_n = applyPositionalUpdate(
         x1, x2,
         q1, q2,
         r1, r2,
@@ -332,7 +313,7 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
         Vector3 friction_rot_axis_local2 =
             multDiag(inv_I2, friction_torque_axis_local2);
 
-        lambda_t = computePositionalLambda(
+        float lambda_t = computePositionalLambda(
             friction_torque_axis_local1, friction_torque_axis_local2,
             friction_rot_axis_local1, friction_rot_axis_local2,
             inv_m1, inv_m2,
@@ -349,9 +330,21 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
                 t_world, lambda_t);
         }
     }
+
+    return lambda_n;
 }
 
-static inline MADRONA_ALWAYS_INLINE std::pair<Vector3, Vector3>
+struct LocalContact {
+    Vector3 r1;
+    Vector3 r2;
+};
+
+struct TmpGlobalContact {
+    Vector3 p1;
+    Vector3 p2;
+};
+
+static inline MADRONA_ALWAYS_INLINE LocalContact
 getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
                       const PreSolvePositional &presolve_pos2,
                       const Contact &contact,
@@ -376,7 +369,7 @@ getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
 static inline void handleContact(Context &ctx,
                                  ObjectManager &obj_mgr,
                                  Contact contact,
-                                 float *lambdas)
+                                 float *lambda_n_out)
 {
     Position *x1_ptr = &ctx.getDirect<Position>(Cols::Position, contact.ref);
     Position *x2_ptr = &ctx.getDirect<Position>(Cols::Position, contact.alt);
@@ -433,29 +426,58 @@ static inline void handleContact(Context &ctx,
 
     float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
 
+    LocalContact local_contacts[4]; 
+    TmpGlobalContact cur_global_contacts[4];
+
+    CountT num_active_contacts = 0;
+    float max_dist = 0;
+
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        auto [r1, r2] =
+        local_contacts[i] =
             getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
 
-        float lambda_n = 0.f;
-        float lambda_t = 0.f;
+        Vector3 p1 = q1.rotateVec(local_contacts[i].r1) + x1;
+        Vector3 p2 = q2.rotateVec(local_contacts[i].r2) + x2;
 
-        handleContactConstraint(x1, x2,
-                                q1, q2,
-                                prev1, prev2,
-                                inv_m1, inv_m2,
-                                inv_I1, inv_I2,
-                                r1, r2,
-                                contact.normal,
-                                avg_mu_s,
-                                lambda_n,
-                                lambda_t);
+        float d = dot(p1 - p2, n_world);
 
-        lambdas[i] = lambda_n;
+        if (d <= 0) {
+            continue;
+        }
+
+        cur_global_contacts[i] = {
+            p1,
+            p2,
+            d,
+        };
     }
+
+    if (num_active_contacts == 0) {
+        *lambda_n_out = 0;
+        return;
+    }
+
+    Vector3 p1 = q1.rotateVec(avg_local1) + x1;
+    Vector3 p2 = q2.rotateVec(avg_local2) + x2;
+
+    Vector3 p1_hat =
+        prev1.prevRotation.rotateVec(avg_local1) + prev1.prevPosition;
+    Vector3 p2_hat =
+        prev2.prevRotation.rotateVec(avg_local2) + prev2.prevPosition;
+
+    *lambda_n_out = handleContactConstraint(
+        x1, x2,
+        q1, q2,
+        inv_m1, inv_m2,
+        inv_I1, inv_I2,
+        avg_local1, avg_local2,
+        p1, p2,
+        p1_hat, p2_hat,
+        contact.normal, d,
+        avg_mu_s);
 
     *x1_ptr = x1;
     *x2_ptr = x2;
@@ -594,7 +616,7 @@ inline void solvePositions(Context &ctx, SolverData &solver)
 
     for (CountT i = 0; i < num_contacts; i++) {
         Contact contact = solver.contacts[i];
-        handleContact(ctx, obj_mgr, contact, solver.contacts[i].lambdaN);
+        handleContact(ctx, obj_mgr, contact, &solver.contacts[i].lambdaN);
     }
 
     CountT num_joint_constraints = solver.numJointConstraints.load_relaxed();

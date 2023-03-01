@@ -1157,7 +1157,7 @@ static inline void addManifoldToSolver(
         },
         manifold.numContactPoints,
         manifold.normal,
-        {},
+        0.f,
     }});
 }
 
