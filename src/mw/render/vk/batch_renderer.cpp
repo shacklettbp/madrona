@@ -363,7 +363,7 @@ BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
           Optional<PresentationState>::none()),
       rgbPresentIntermediate(presentState.has_value() ?
           mem.makeConversionImage(cfg.renderWidth, cfg.renderHeight,
-                                  VK_FORMAT_R8G8B8A8_UNORM) :
+                                  VK_FORMAT_R8G8B8A8_SRGB) :
           Optional<LocalImage>::none()),
       renderQueue(makeQueue(dev, dev.gfxQF, 0)),
       renderFence(makeFence(dev, false)),
