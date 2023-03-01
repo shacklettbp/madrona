@@ -75,7 +75,7 @@ void * OSAlloc::getChunk(Cache &cache)
     };
 
     while (true) {
-        FreeHead cur_head = free_head_.load(std::memory_order_acquire);
+        FreeHead cur_head = free_head_.load_acquire();
         FreeHead new_head;
 
         Block *cur_block = nullptr;
@@ -86,15 +86,15 @@ void * OSAlloc::getChunk(Cache &cache)
             cur_block = getBlock(cur_head.head);
             new_head.gen = cur_head.gen + 1;
             new_head.head = readNext(cur_block);
-        } while (!free_head_.compare_exchange_weak(cur_head, new_head,
-            std::memory_order_release, std::memory_order_acquire));
+        } while (!free_head_.compare_exchange_weak<
+            sync::release, sync::acquire>(cur_head, new_head));
 
         if (cur_block != nullptr) {
             return cur_block;
         } 
 
         std::lock_guard lock(expand_lock_);
-        cur_head = free_head_.load(std::memory_order_relaxed);
+        cur_head = free_head_.load_relaxed();
         if (cur_head.head != ~0_u32) {
             continue;
         }
@@ -116,13 +116,13 @@ void * OSAlloc::getChunk(Cache &cache)
         }
         Block *last_block = getBlock(num_new_blocks - 1 + remaining_base_idx);
 
-        cur_head = free_head_.load(std::memory_order_relaxed);
+        cur_head = free_head_.load_relaxed();
         new_head.head = remaining_base_idx;
         do {
             new_head.gen = cur_head.gen + 1;
             last_block->nextFree = cur_head.head;
-        } while (!free_head_.compare_exchange_weak(cur_head, new_head,
-            std::memory_order_release, std::memory_order_relaxed));
+        } while (!free_head_.compare_exchange_weak<
+            sync::release, sync::relaxed>(cur_head, new_head));
 
         return new_block;
     }
@@ -148,15 +148,15 @@ void OSAlloc::freeChunk(Cache &cache, void *ptr)
         cache.cache_head_ = cur_block->nextFree;
         cache.num_cache_blocks_ = num_return;
 
-        FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
+        FreeHead cur_head = free_head_.load_relaxed();
         FreeHead new_head;
         new_head.head = free_block_idx;
 
         do {
             new_head.gen = cur_head.gen + 1;
             cur_block->nextFree = cur_head.head;
-        } while (!free_head_.compare_exchange_weak(cur_head, new_head,
-            std::memory_order_release, std::memory_order_relaxed));
+        } while (!free_head_.compare_exchange_weak<
+            sync::release, sync::relaxed>(cur_head, new_head));
     }
 }
 

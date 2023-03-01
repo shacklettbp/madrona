@@ -35,7 +35,7 @@ private:
         char buffer[max_bytes];
         FmtType args[max_args];
         int32_t numArgs;
-        cuda::std::atomic_int32_t signal;
+        cuda::atomic<int32_t, cuda::thread_scope_system> signal;
     };
 
     static void logSubmit(const char *str, void **ptrs, FmtType *types,

@@ -111,14 +111,14 @@ public:
         struct Arena {
             // Doubles as next pointer in freelist or
             // count of num bytes freed before being put on freelist
-            std::atomic_uint32_t metadata;
+            AtomicU32 metadata;
         };
     
         struct SharedState {
             void *memoryBase;
             void *jobMemory;
             Arena *arenas;
-            std::atomic_uint32_t freeHead;
+            AtomicU32 freeHead;
         };
     
         static constexpr size_t maxJobSize = 1024;
@@ -142,11 +142,11 @@ public:
     };
 
     struct RunQueue {
-        std::atomic_uint32_t head;
-        std::atomic_uint32_t correction;
-        std::atomic_uint32_t auth;
-        char pad[MADRONA_CACHE_LINE - sizeof(std::atomic_uint32_t) * 3];
-        std::atomic_uint32_t tail;
+        AtomicU32 head;
+        AtomicU32 correction;
+        AtomicU32 auth;
+        char pad[MADRONA_CACHE_LINE - sizeof(AtomicU32) * 3];
+        AtomicU32 tail;
     };
 
 private:
@@ -264,7 +264,7 @@ private:
     uint32_t num_compute_workers_;
 
     std::counting_semaphore<> io_sema_;
-    alignas(MADRONA_CACHE_LINE) std::atomic_uint32_t num_high_;
+    alignas(MADRONA_CACHE_LINE) AtomicU32 num_high_;
 };
 
 }

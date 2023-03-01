@@ -43,7 +43,7 @@ public:
             V val;
             FreeNode freeNode;
         };
-        std::atomic_uint32_t gen;
+        AtomicU32 gen;
     };
 
     IDMap(CountT init_capacity);
@@ -62,7 +62,7 @@ public:
     {
         const Node &node = store_[k.id];
 
-        if (node.gen.load(std::memory_order_relaxed) != k.gen) {
+        if (node.gen.load_relaxed() != k.gen) {
             return V::none();
         }
 
@@ -72,13 +72,13 @@ public:
     inline bool present(K k) const
     {
         const Node &node = store_[k.id];
-        return node.gen.load(std::memory_order_relaxed) == k.gen;
+        return node.gen.load_relaxed() == k.gen;
     }
 
     inline V & getRef(K k)
     {
         Node &node = store_[k.id];
-        assert(node.gen.load(std::memory_order_relaxed) == k.gen);
+        assert(node.gen.load_relaxed() == k.gen);
 
         return node.val;
     }
@@ -86,7 +86,7 @@ public:
     inline const V & getRef(K k) const
     {
         const Node &node = store_[k.id];
-        assert(node.gen.load(std::memory_order_relaxed) == k.gen);
+        assert(node.gen.load_relaxed() == k.gen);
 
         return node.val;
     }
@@ -123,15 +123,13 @@ private:
    
     static_assert(sizeof(FreeNode) <= sizeof(V));
 
-    struct alignas(std::atomic_uint64_t) FreeHead {
+    struct alignas(AtomicU64) FreeHead {
         uint32_t gen;
         int32_t head;
     };
 
     [[no_unique_address]] Store store_;
-    alignas(MADRONA_CACHE_LINE) std::atomic<FreeHead> free_head_;
-
-    static_assert(decltype(free_head_)::is_always_lock_free);
+    alignas(MADRONA_CACHE_LINE) Atomic<FreeHead> free_head_;
 
     static constexpr CountT ids_per_cache_ = 64;
     static constexpr int32_t sentinel_ = 0xFFFF'FFFF_i32;

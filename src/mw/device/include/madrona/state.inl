@@ -138,7 +138,7 @@ Query<ComponentTs...> StateManager::query()
 
     QueryRef *ref = &Query<ComponentTs...>::ref_;
 
-    if (ref->numReferences.load(std::memory_order_acquire) == 0) {
+    if (ref->numReferences.load_acquire() == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
     }
 
@@ -159,10 +159,9 @@ void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
 
         Table &tbl = archetypes_[archetype_idx]->tbl;
 
-        bool early_out =
-            fn(tbl.numRows.load(std::memory_order_relaxed),
-               (WorldID *)(tbl.columns[1]),
-               tbl.columns[query_values[Indices]] ...);
+        bool early_out = fn(tbl.numRows.load_relaxed(),
+            (WorldID *)(tbl.columns[1]),
+            tbl.columns[query_values[Indices]] ...);
         if (early_out) {
             return;
         }
@@ -193,7 +192,7 @@ uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)
 
         Table &tbl = archetypes_[archetype_idx]->tbl;
 
-        total_rows += tbl.numRows.load(std::memory_order_relaxed);
+        total_rows += tbl.numRows.load_relaxed();
 
         query_values += 1 + num_components;
     }

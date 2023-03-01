@@ -50,7 +50,7 @@ class JobManager {
 public:
     uint32_t numOutstandingInvocations;
 
-    std::atomic<JobID> freeTrackerHead;
+    AtomicU32<JobID> freeTrackerHead;
 
     bool startBlockIter(RunnableJob *out_job);
     void finishBlockIter();

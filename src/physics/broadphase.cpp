@@ -41,8 +41,7 @@ CountT BVH::numInternalNodes(CountT num_leaves) const
 
 void BVH::rebuild()
 {
-    int32_t num_internal_nodes =
-        numInternalNodes(num_leaves_.load(std::memory_order_relaxed));
+    int32_t num_internal_nodes = numInternalNodes(num_leaves_.load_relaxed());
     num_nodes_ = num_internal_nodes;
     assert(num_nodes_ <= num_allocated_nodes_);
 
@@ -58,7 +57,7 @@ void BVH::rebuild()
         sentinel_,
         sentinel_,
         0,
-        int32_t(num_leaves_),
+        int32_t(num_leaves_.load_relaxed()),
     };
 
     int32_t cur_node_offset = 0;

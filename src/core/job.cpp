@@ -24,10 +24,7 @@
 #elif defined(MADRONA_ARM)
 #endif
 
-using std::atomic_uint32_t;
-using std::atomic_bool;
 using std::atomic_thread_fence;
-using std::memory_order;
 
 namespace madrona {
 namespace {
@@ -127,14 +124,14 @@ void printGlobalLog()
 struct alignas(MADRONA_CACHE_LINE) WorkerState {
     uint32_t numIdleLoops;
     uint32_t numConsecutiveSchedulerCalls;
-    atomic_uint32_t logHead; // Only modified by scheduler
+    AtomicU32 logHead; // Only modified by scheduler
     uint32_t logTailCache; // Scheduler's last read tail value
     // logTail below is only modified by worker thread.
     // Still has to be atomic for memory ordering guarantees (worker 
     // releases updates to log tail to guarantee the log entries themselves are
     // visible after an acquire fence by the scheduler
-    alignas(MADRONA_CACHE_LINE) atomic_uint32_t logTail; 
-    alignas(MADRONA_CACHE_LINE) atomic_uint32_t wakeUp;
+    alignas(MADRONA_CACHE_LINE) AtomicU32 logTail; 
+    alignas(MADRONA_CACHE_LINE) AtomicU32 wakeUp;
 };
 
 // Plan:
@@ -228,7 +225,7 @@ inline void workerYield()
 
 inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
 {
-    uint32_t cur_head = shared.freeHead.load(memory_order::acquire);
+    uint32_t cur_head = shared.freeHead.load_acquire();
     uint32_t new_head, arena_idx;
     do {
         if (cur_head == consts::jobAllocSentinel) {
@@ -236,16 +233,15 @@ inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
         }
 
         arena_idx = cur_head & 0xFFFF;
-        new_head = shared.arenas[arena_idx].metadata.load(
-            memory_order::relaxed);
+        new_head = shared.arenas[arena_idx].metadata.load_relaxed();
 
         // Update the tag
         new_head += ((uint32_t)1u << (uint32_t)16);
-    } while (!shared.freeHead.compare_exchange_weak(cur_head, new_head,
-        memory_order::release, memory_order::acquire));
+    } while (!shared.freeHead.compare_exchange_weak<
+        sync::release, sync::acquire>(cur_head, new_head));
 
     // Arena metadata field is reused for counting used bytes, need to 0 out
-    shared.arenas[arena_idx].metadata.store(0, memory_order::release);
+    shared.arenas[arena_idx].metadata.store_release(0);
 
     return arena_idx;
 }
@@ -253,14 +249,14 @@ inline uint32_t acquireArena(JobManager::Alloc::SharedState &shared)
 inline void releaseArena(JobManager::Alloc::SharedState &shared,
                                 uint32_t arena_idx)
 {
-    uint32_t cur_head = shared.freeHead.load(memory_order::relaxed);
+    uint32_t cur_head = shared.freeHead.load_relaxed();
     uint32_t new_head;
 
     do {
         new_head = (cur_head & 0xFFFF0000) + ((uint32_t)1u << (uint32_t)16) + arena_idx;
-        shared.arenas[arena_idx].metadata.store(cur_head, memory_order::relaxed);
-    } while (!shared.freeHead.compare_exchange_weak(cur_head, new_head,
-        memory_order::release, memory_order::relaxed));
+        shared.arenas[arena_idx].metadata.store(cur_head, sync::relaxed);
+    } while (!shared.freeHead.compare_exchange_weak<
+        sync::release, sync::relaxed>(cur_head, new_head));
 }
 
 void disableThreadSignals()
@@ -346,23 +342,23 @@ void setThreadAffinity(int thread_idx)
 // be spinning, waiting to see that numRemaining is 0, when the ThreadPoolInit
 // struct is freed
 struct ThreadPoolInit {
-    std::atomic_int numRemaining;
-    std::atomic_int numAcked;
+    AtomicI32 numRemaining;
+    AtomicI32 numAcked;
 
     inline void workerWait()
     {
-        numRemaining.fetch_sub(1, memory_order::release);
+        numRemaining.fetch_sub_release(1);
 
-        while (numRemaining.load(memory_order::acquire) != 0) {
+        while (numRemaining.load_acquire() != 0) {
             workerYield();
         }
 
-        numAcked.fetch_add(1, memory_order::release);
+        numAcked.fetch_add_release(1);
     }
 
     inline void mainWait(int num_threads)
     {
-        while (numAcked.load(memory_order::acquire) != num_threads) {
+        while (numAcked.load_acquire() != num_threads) {
             workerYield();
         }
     }
@@ -456,13 +452,13 @@ inline uint32_t addToRunQueueImpl(JobManager::RunQueue *run_queue,
                                   Fn &&add_cb)
 {
     // No one modifies queue_tail besides this thread
-    uint32_t cur_tail = run_queue->tail.load(memory_order::relaxed);
+    uint32_t cur_tail = run_queue->tail.load_relaxed();
     Job *job_array = getRunnableJobs(run_queue);
 
     uint32_t num_added = add_cb(job_array, cur_tail);
 
     cur_tail += num_added;
-    run_queue->tail.store(cur_tail, memory_order::release);
+    run_queue->tail.store_release(cur_tail);
 
     return num_added;
 }
@@ -470,15 +466,15 @@ inline uint32_t addToRunQueueImpl(JobManager::RunQueue *run_queue,
 inline void addToLog(WorkerState &worker_state, LogEntry *worker_log,
                      const LogEntry &entry)
 {
-    uint32_t cur_tail = worker_state.logTail.load(memory_order::relaxed);
+    uint32_t cur_tail = worker_state.logTail.load_relaxed();
     uint32_t new_idx = cur_tail & consts::logIndexMask;
 
     worker_log[new_idx] = entry;
 
     uint32_t new_tail = cur_tail + 1;
-    worker_state.logTail.store(new_tail, memory_order::release);
+    worker_state.logTail.store_release(new_tail);
 
-    uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
+    uint32_t log_head = worker_state.logHead.load_relaxed();
     if (new_tail - log_head >= consts::logSizePerThread) [[unlikely]] {
         for (uint32_t i = log_head; i != new_tail; i++) {
             LogEntry &debug_entry = worker_log[i & consts::logIndexMask];
@@ -526,8 +522,9 @@ void * JobManager::Alloc::alloc(SharedState &shared,
         // used in the arena to the arena's metadata value. Once all jobs in
         // the arena have been freed these values will cancel out and the
         // metadata value will be zero.
-        uint32_t post_metadata = shared.arenas[cur_arena_].metadata.fetch_add(
-            arena_used_bytes_, memory_order::acq_rel);
+        uint32_t post_metadata =
+            shared.arenas[cur_arena_].metadata.fetch_add_acq_rel(
+                arena_used_bytes_);
         post_metadata += arena_used_bytes_;
 
         // Edge case, if post_metadata == 0, we can skip getting a new arena
@@ -568,8 +565,7 @@ void JobManager::Alloc::dealloc(SharedState &shared,
 
     Arena &arena = shared.arenas[arena_idx];
 
-    uint32_t post_metadata = arena.metadata.fetch_sub(num_bytes,
-                                                      memory_order::acq_rel);
+    uint32_t post_metadata = arena.metadata.fetch_sub_acq_rel(num_bytes);
     post_metadata -= num_bytes;
 
     if (post_metadata == 0) {
@@ -842,7 +838,7 @@ JobManager::JobManager(const Init &init)
     struct StartWrapper {
         void (*func)(Context *, void *);
         void *data;
-        atomic_uint32_t remainingLaunches;
+        AtomicU32 remainingLaunches;
     } start_wrapper {
         init.startFn,
         init.startFnData,
@@ -864,7 +860,7 @@ JobManager::JobManager(const Init &init)
         start.func(ctx, start.data);
 
         uint32_t job_id = ptr->id.id;
-        start.remainingLaunches.fetch_sub(1, memory_order::release);
+        start.remainingLaunches.fetch_sub_release(1);
 
         ctx->job_mgr_->markInvocationsFinished(ctx->worker_idx_, nullptr,
                                                job_id, 1);
@@ -968,7 +964,7 @@ JobManager::JobManager(const Init &init)
     // Need to ensure start job has run at this point.
     // Otherwise, the start function data can be freed / go out of scope
     // before the job actually runs.
-    while (start_wrapper.remainingLaunches.load(memory_order::acquire) != 0) {
+    while (start_wrapper.remainingLaunches.load_acquire() != 0) {
         workerYield();
     }
 }
@@ -1022,7 +1018,7 @@ JobID JobManager::queueJob(int thread_idx,
     job_data->id = id;
 
     if (isRunnable(tracker_map, job_data)) {
-        atomic_thread_fence(memory_order::acquire);
+        atomic_thread_fence(sync::acquire);
 #ifdef TSAN_ENABLED
         {
             const JobID *dependencies = getJobDependencies(job_data);
@@ -1091,7 +1087,7 @@ void JobManager::addToRunQueue(int thread_idx,
     uint32_t num_added = addToRunQueueImpl(queue, std::forward<Fn>(add_cb));
 
     if (prio == JobPriority::High) {
-        num_high_.fetch_add(num_added, memory_order::relaxed);
+        num_high_.fetch_add_relaxed(num_added);
     }
     if (prio == JobPriority::IO) {
         io_sema_.release(num_added);
@@ -1137,10 +1133,10 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
         queue_tail = getQueueTail(getQueueHead(io_base_, thread_idx));
     }
 
-    atomic_uint32_t &tail = queue_tail->tail;
+    AtomicU32 &tail = queue_tail->tail;
 
     // No one modifies queue_tail besides this thread
-    uint32_t cur_tail = tail.load(memory_order::relaxed); 
+    uint32_t cur_tail = tail.load(sync::relaxed); 
     uint32_t wrapped_idx = (cur_tail & consts::jobQueueIndexMask);
 
     Job *job_array = getRunnableJobs(queue_tail);
@@ -1155,18 +1151,18 @@ JobID JobManager::queueJobs(int thread_idx, const Job *jobs, uint32_t num_jobs,
     }
 
     cur_tail += num_jobs;
-    tail.store(cur_tail, memory_order::relaxed);
+    tail.store(cur_tail, sync::relaxed);
 
     if (prio == JobPriority::High) {
-        num_high_.fetch_add(num_jobs, memory_order::relaxed);
+        num_high_.fetch_add(num_jobs, sync::relaxed);
     }
     if (prio == JobPriority::IO) {
         io_sema_.release(num_jobs);
     }
 
-    num_outstanding_.fetch_add(num_jobs, memory_order::relaxed);
+    num_outstanding_.fetch_add(num_jobs, sync::relaxed);
 
-    atomic_thread_fence(memory_order::release);
+    atomic_thread_fence(sync::release);
 
     return JobID(0);
 }
@@ -1234,8 +1230,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 
     for (int64_t i = 0, n = threads_.size(); i < n; i++) { 
         WorkerState &worker_state = getWorkerState(worker_base_, i);
-        worker_state.logTailCache =
-            worker_state.logTail.load(memory_order::relaxed);
+        worker_state.logTailCache = worker_state.logTail.load_relaxed();
         TSAN_ACQUIRE(&worker_state.logTail);
     }
 
@@ -1243,7 +1238,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
     // to ensure that when isRunnable is called outside the scheduler, the
     // job skipping the waitlist is synchronized-with the thread that finished
     // the dependencies.
-    atomic_thread_fence(memory_order::acq_rel);
+    atomic_thread_fence(sync::acq_rel);
 
     // First, we read all the logs.
     for (int64_t i = 0, n = threads_.size(); i != n; i++) {
@@ -1253,7 +1248,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         LogEntry *log = getWorkerLog(log_base_, worker_idx);
 
         uint32_t log_tail = worker_state.logTailCache;
-        uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
+        uint32_t log_head = worker_state.logHead.load_relaxed();
 
         for (; log_head != log_tail; log_head++) {
             LogEntry &entry = log[log_head & consts::logIndexMask];
@@ -1271,7 +1266,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
             }
         }
 
-        worker_state.logHead.store(log_head, memory_order::relaxed);
+        worker_state.logHead.store(log_head, sync::relaxed);
     }
 
     // Move all now runnable jobs to the scheduler's global run queue
@@ -1279,7 +1274,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
     RunQueue *sched_run = getRunQueue(normal_base_, thread_idx);
 
     Job *sched_run_jobs = getRunnableJobs(sched_run);
-    uint32_t cur_run_tail = sched_run->tail.load(memory_order::relaxed);
+    uint32_t cur_run_tail = sched_run->tail.load_relaxed();
     int64_t num_new_invocations = 0;
     int64_t compaction_offset = 0;
 
@@ -1312,11 +1307,11 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
     scheduler_.numWaiting = compaction_offset;
 
     if (num_new_invocations == 0) {
-        uint32_t sched_run_auth = sched_run->auth.load(memory_order::relaxed);
+        uint32_t sched_run_auth = sched_run->auth.load_relaxed();
 
         if (sched_run_auth == cur_run_tail) {
             if (scheduling_worker.numConsecutiveSchedulerCalls > 1) {
-                if (scheduling_worker.wakeUp.load(memory_order::relaxed) != 0) {
+                if (scheduling_worker.wakeUp.load_relaxed() != 0) {
                     scheduler_.numSleepingWorkers++;
                 }
 
@@ -1326,13 +1321,13 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
                         WorkerState &worker_state =
                             getWorkerState(worker_base_, i);
                         worker_state.wakeUp.store(~0_u32,
-                                                  memory_order::relaxed);
+                                                  sync::relaxed);
                         worker_state.wakeUp.notify_one();
                     }
                     return WorkerControl::Exit;
                 } else {
                     getWorkerState(worker_base_, thread_idx)
-                        .wakeUp.store(0, memory_order::relaxed);
+                        .wakeUp.store(0, sync::relaxed);
                     return WorkerControl::Sleep;
                 }
             } else {
@@ -1343,7 +1338,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
         }
     }
     
-    sched_run->tail.store(cur_run_tail, memory_order::release);
+    sched_run->tail.store_release(cur_run_tail);
 
     // Wake up compute workers based on # of jobs
     int64_t num_compute_workers = num_compute_workers_;
@@ -1352,9 +1347,8 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
     for (int64_t i = 0; num_wakeup > 0 && i < num_compute_workers; i++) {
         WorkerState &worker_state = getWorkerState(worker_base_, i);
 
-        if (worker_state.wakeUp.load(memory_order::relaxed) == 0) {
-            worker_state.wakeUp.store((uint32_t)thread_idx + 1,
-                                      memory_order::relaxed);
+        if (worker_state.wakeUp.load_relaxed() == 0) {
+            worker_state.wakeUp.store_relaxed((uint32_t)thread_idx + 1);
             worker_state.wakeUp.notify_one();
 
             num_wakeup--;
@@ -1367,29 +1361,29 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
 
 uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
 {
-    atomic_uint32_t &head = job_queue->head;
-    atomic_uint32_t &correction = job_queue->correction;
-    atomic_uint32_t &auth = job_queue->auth;
-    atomic_uint32_t &tail = job_queue->tail;
+    AtomicU32 &head = job_queue->head;
+    AtomicU32 &correction = job_queue->correction;
+    AtomicU32 &auth = job_queue->auth;
+    AtomicU32 &tail = job_queue->tail;
 
-    uint32_t cur_tail = tail.load(memory_order::relaxed);
-    uint32_t cur_correction = correction.load(memory_order::relaxed);
-    uint32_t cur_head = head.load(memory_order::relaxed);
+    uint32_t cur_tail = tail.load_relaxed();
+    uint32_t cur_correction = correction.load_relaxed();
+    uint32_t cur_head = head.load_relaxed();
 
     if (isQueueEmpty(cur_head, cur_correction, cur_tail)) {
         return consts::jobQueueSentinel;
     }
 
-    atomic_thread_fence(memory_order::acquire);
+    atomic_thread_fence(sync::acquire);
     TSAN_ACQUIRE(&tail);
     TSAN_ACQUIRE(&correction);
     TSAN_ACQUIRE(&head);
 
-    cur_head = head.fetch_add(1, memory_order::relaxed);
-    cur_tail = tail.load(memory_order::acquire);
+    cur_head = head.fetch_add_relaxed(1);
+    cur_tail = tail.load_acquire();
 
     if (isQueueEmpty(cur_head, cur_correction, cur_tail)) [[unlikely]] {
-        correction.fetch_add(1, memory_order::release);
+        correction.fetch_add_release(1);
         return consts::jobQueueSentinel;
     }
 
@@ -1400,7 +1394,7 @@ uint32_t JobManager::dequeueJobIndex(RunQueue *job_queue)
     // the item this thread was planning on dequeuing, so this thread picks
     // up the later item. If tail is re-read after the fetch add below,
     // everything would appear consistent.
-    return auth.fetch_add(1, memory_order::acq_rel);
+    return auth.fetch_add_acq_rel(1);
 }
 
 JobManager::WorkerControl JobManager::tryScheduling(
@@ -1421,8 +1415,8 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     WorkerControl sched_ctrl = WorkerControl::LoopIdle;
 
     WorkerState &worker_state = getWorkerState(worker_base_, thread_idx);
-    uint32_t cur_tail = worker_state.logTail.load(memory_order::relaxed);
-    uint32_t log_head = worker_state.logHead.load(memory_order::relaxed);
+    uint32_t cur_tail = worker_state.logTail.load_relaxed();
+    uint32_t log_head = worker_state.logHead.load_relaxed();
     // Determine if log capacity is too high (and we should try scheduling).
     if (cur_tail - log_head > consts::logSizeMaxSafeCapacity) {
         return tryScheduling(WorkerControl::LoopBusy, thread_idx, next_job);
@@ -1470,7 +1464,7 @@ JobManager::WorkerControl JobManager::getNextJob(void *const queue_base,
     // detect and crash with a fatal error (rather than silently
     // dropping or reading corrupted jobs).
     
-    uint32_t post_read_tail = queue->tail.load(memory_order::acquire);
+    uint32_t post_read_tail = queue->tail.load_acquire();
     
     if (post_read_tail - job_idx > consts::runQueueSizePerThread) [[unlikely]] {
         // Note, this is not ideal because it doesn't detect the source
@@ -1591,12 +1585,12 @@ void JobManager::workerThread(
 
     while (true) {
         WorkerControl worker_ctrl = WorkerControl::LoopIdle;
-        if (num_high_.load(memory_order::relaxed) > 0) {
+        if (num_high_.load_relaxed() > 0) {
             worker_ctrl = getNextJob(high_base_, thread_idx, thread_idx,
                                      false, &cur_job);
 
             if (worker_ctrl == WorkerControl::Run) {
-                num_high_.fetch_sub(1, memory_order::relaxed);
+                num_high_.fetch_sub_relaxed(1);
             }
         } 
 
@@ -1614,9 +1608,8 @@ void JobManager::workerThread(
         } else if (worker_ctrl == WorkerControl::LoopBusy) {
             continue;
         } else if (worker_ctrl == WorkerControl::Sleep) [[unlikely]] {
-            worker_state.wakeUp.wait(0, memory_order::relaxed);
-            uint32_t wakeup_idx =
-                worker_state.wakeUp.load(memory_order::relaxed);
+            worker_state.wakeUp.wait<sync::relaxed>(0);
+            uint32_t wakeup_idx = worker_state.wakeUp.load_relaxed();
             if (wakeup_idx == ~0_u32) [[unlikely]] {
                 break;
             }

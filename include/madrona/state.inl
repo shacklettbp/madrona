@@ -336,7 +336,7 @@ Query<ComponentTs...> StateManager::query()
 
     QueryRef *ref = &Query<ComponentTs...>::ref_;
 
-    if (ref->numReferences.load(std::memory_order_acquire) == 0) {
+    if (ref->numReferences.load_acquire() == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
     }
 

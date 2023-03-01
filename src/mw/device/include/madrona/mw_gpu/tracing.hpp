@@ -37,7 +37,7 @@ private:
         uint64_t cycleCount;
     };
 
-    std::atomic_int32_t cur_index_;
+    AtomicI32 cur_index_;
     DeviceLog device_logs_[maxLogSize];
 
 public:
@@ -48,7 +48,7 @@ public:
 
     inline int32_t getIndex()
     {
-        return cur_index_.load(std::memory_order_relaxed);
+        return cur_index_.load_relaxed();
     }
 
 #ifdef MADRONA_GPU_MODE
@@ -99,7 +99,7 @@ private:
 
     inline void resetIndex_()
     {
-        cur_index_.store(0, std::memory_order_release);
+        cur_index_.store_release(0);
     }
 
 
@@ -111,9 +111,9 @@ private:
                 uint32_t sm_id;
                 asm("mov.u32 %0, %smid;"
                     : "=r"(sm_id));
-                uint32_t log_index = cur_index_.fetch_add(1, std::memory_order_relaxed);
+                uint32_t log_index = cur_index_.fetch_add_relaxed(1);
                 if (log_index >= maxLogSize) {
-                    cur_index_.store(-1, std::memory_order_release);
+                    cur_index_.store_release(-1);
                 } else{
                     device_logs_[log_index] = {event, func_id, num_invocations, node_id, blockIdx.x, sm_id, globalTimer()};
                 }

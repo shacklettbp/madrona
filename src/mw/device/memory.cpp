@@ -78,8 +78,7 @@ TmpAllocator::TmpAllocator()
 void * TmpAllocator::alloc(uint64_t num_bytes)
 {
     num_bytes = utils::roundUpPow2(num_bytes, 256);
-    uint64_t alloc_offset = offset_.fetch_add(num_bytes,
-        std::memory_order_relaxed);
+    uint64_t alloc_offset = offset_.fetch_add_relaxed(num_bytes);
 
     uint64_t required_bytes = alloc_offset + num_bytes;
 

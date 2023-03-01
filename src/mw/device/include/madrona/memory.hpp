@@ -67,8 +67,8 @@ struct HostChannel {
         Map map;
     };
 
-    cuda::std::atomic_uint32_t ready;
-    cuda::std::atomic_uint32_t finished;
+    cuda::atomic<uint32_t, cuda::thread_scope_system> ready;
+    cuda::atomic<uint32_t, cuda::thread_scope_system> finished;
 };
 
 struct HostAllocInit {
@@ -130,7 +130,7 @@ public:
 
     inline void reset()
     {
-        offset_.store(0, std::memory_order_relaxed);
+        offset_.store_relaxed(0);
     }
 
     static inline TmpAllocator & get()
@@ -141,7 +141,7 @@ public:
 
 private:
     void *base_;
-    std::atomic_uint64_t offset_;
+    AtomicU64 offset_;
     uint64_t num_mapped_bytes_;
     SpinLock grow_lock_;
 };

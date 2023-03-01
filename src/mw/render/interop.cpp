@@ -19,7 +19,7 @@ inline void instanceTransformSetup(Context &ctx,
     AtomicU32Ref count_atomic(
         renderer_state.numInstances->primitiveCount);
 
-    uint32_t inst_idx = count_atomic.fetch_add<sync::relaxed>(1);
+    uint32_t inst_idx = count_atomic.fetch_add_relaxed(1);
 
     AccelStructInstance &as_inst = renderer_state.tlasInstanceBuffer[inst_idx];
 
@@ -47,7 +47,7 @@ inline void instanceTransformSetup(Context &ctx,
     as_inst.accelerationStructureReference = renderer_state.blases[obj_id.idx];
 #else
     AtomicU32Ref inst_count_atomic(*renderer_state.numInstances);
-    uint32_t inst_idx = inst_count_atomic.fetch_add<sync::relaxed>(1);
+    uint32_t inst_idx = inst_count_atomic.fetch_add_relaxed(1);
 
     renderer_state.instanceData[inst_idx] = InstanceData {
         pos,

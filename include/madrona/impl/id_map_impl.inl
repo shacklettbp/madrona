@@ -37,7 +37,7 @@ IDMap<K, V, StoreT>::IDMap(CountT init_capacity)
             CountT idx = base_idx + i;
             Node &cur = store_[idx];
 
-            cur.gen.store(0, std::memory_order_relaxed);
+            cur.gen.store_relaxed(0);
             cur.freeNode.subNext = int32_t(idx + 1);
 
             if (i == 0) {
@@ -52,16 +52,16 @@ IDMap<K, V, StoreT>::IDMap(CountT init_capacity)
         }
 
         Node &last = store_[base_idx + ids_per_cache_ - 1];
-        last.gen.store(0, std::memory_order_relaxed);
+        last.gen.store_relaxed(0);
         last.freeNode.subNext = sentinel_;
         last.freeNode.globalNext = 1;
     }
 
     if (init_capacity > 0) {
-        free_head_.store(FreeHead {
+        free_head_.store_release(FreeHead {
             .gen = 0,
             .head = 0,
-        }, std::memory_order_release);
+        });
     }
 }
 
@@ -87,12 +87,12 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
                 .subNext = node.freeNode.subNext,
                 .globalNext = num_contiguous - 1,
             };
-            next_node.gen.store(0, std::memory_order_relaxed);
+            next_node.gen.store_relaxed(0);
             *head = next_free;
         }
 
         return K {
-            .gen = node.gen.load(std::memory_order_relaxed),
+            .gen = node.gen.load_relaxed(),
             .id = new_id,
         };
     };
@@ -110,7 +110,7 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
     }
 
     // No free IDs, refill the cache from the global free list
-    FreeHead cur_head = free_head_.load(std::memory_order_acquire);
+    FreeHead cur_head = free_head_.load_acquire();
     FreeHead new_head;
 
     Node *cur_head_node;
@@ -140,9 +140,8 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
         new_head.gen = cur_head.gen + 1;
         cur_head_node = &store_[cur_head.head];
         new_head.head = getGlobalNext(cur_head_node);
-    } while (!free_head_.compare_exchange_weak(
-        cur_head, new_head, std::memory_order_release,
-        std::memory_order_acquire));
+    } while (!free_head_.template compare_exchange_weak<
+        sync::release, sync::acquire>(cur_head, new_head));
 
     int32_t free_ids = cur_head.head;
 
@@ -162,7 +161,7 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
     int32_t first_id = int32_t(block_start);
 
     Node &assigned_node = store_[first_id];
-    assigned_node.gen.store(0, std::memory_order_relaxed);
+    assigned_node.gen.store_relaxed(0);
 
     int32_t free_start = block_start + 1;
 
@@ -173,7 +172,7 @@ K IDMap<K, V, StoreT>::acquireID(Cache &cache)
         // to handle contiguous free elements
         .globalNext = ids_per_cache_ - 1,
     },
-    next_free_node.gen.store(0, std::memory_order_relaxed);
+    next_free_node.gen.store_relaxed(0);
 
     cache.free_head_ = free_start;
     cache.num_free_ids_ = ids_per_cache_ - 1;
@@ -190,8 +189,7 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, int32_t id)
 {
     Node &release_node = store_[id];
     // Avoid atomic RMW, only 1 writer
-    release_node.gen.store(
-        release_node.gen.load(std::memory_order_relaxed) + 1);
+    release_node.gen.store_relaxed(release_node.gen.load_relaxed() + 1);
     release_node.freeNode.globalNext = 1;
 
     if (cache.num_free_ids_ < ids_per_cache_) {
@@ -210,7 +208,7 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, int32_t id)
 
     // If overflow cache is too big return it to the global free list
     if (CountT(cache.num_overflow_ids_) == ids_per_cache_) {
-        FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
+        FreeHead cur_head = free_head_.load_relaxed();
         FreeHead new_head;
         new_head.head = cache.overflow_head_;
         Node &new_node = store_[cache.overflow_head_];
@@ -218,9 +216,8 @@ void IDMap<K, V, StoreT>::releaseID(Cache &cache, int32_t id)
         do {
             new_head.gen = cur_head.gen + 1;
             new_node.freeNode.globalNext = cur_head.head;
-        } while (!free_head_.compare_exchange_weak(
-            cur_head, new_head, std::memory_order_release,
-            std::memory_order_relaxed));
+        } while (!free_head_.template compare_exchange_weak<
+            sync::release, sync::relaxed>(cur_head, new_head));
 
         cache.overflow_head_ = sentinel_;
         cache.num_overflow_ids_ = 0;
@@ -242,7 +239,7 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
         int32_t next_idx = keys[idx + 1].id;
 
         Node &node = store_[cur_idx];
-        node.gen.store(node.gen.load(std::memory_order_relaxed) + 1);
+        node.gen.store_relaxed(node.gen.load_relaxed() + 1);
         node.freeNode.subNext = next_idx;
         node.freeNode.globalNext = 1;
     };
@@ -266,7 +263,7 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
         }
 
         Node &last_node = store_[keys[base_idx + ids_per_cache_ - 1].id];
-        last_node.gen.store(last_node.gen.load(std::memory_order_relaxed) + 1);
+        last_node.gen.store_relaxed(last_node.gen.load_relaxed() + 1);
         last_node.freeNode.subNext = sentinel_;
         last_node.freeNode.globalNext = 1;
 
@@ -285,7 +282,7 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
         }
 
         Node &tail_node = store_[keys[num_keys - 1].id];
-        tail_node.gen.store(tail_node.gen.load(std::memory_order_relaxed) + 1);
+        tail_node.gen.store_relaxed(tail_node.gen.load_relaxed() + 1);
         tail_node.freeNode.globalNext = 1;
         tail_node.freeNode.subNext = cache.overflow_head_;
 
@@ -323,16 +320,15 @@ void IDMap<K, V, StoreT>::bulkRelease(Cache &cache, K *keys,
 
     int32_t new_global_head = keys[0].id;
 
-    FreeHead cur_head = free_head_.load(std::memory_order_relaxed);
+    FreeHead cur_head = free_head_.load_relaxed();
     FreeHead new_head;
     new_head.head = new_global_head;
 
     do {
         new_head.gen = cur_head.gen + 1;
         global_tail_node->freeNode.globalNext = cur_head.head;
-    } while (!free_head_.compare_exchange_weak(
-        cur_head, new_head, std::memory_order_release,
-        std::memory_order_relaxed));
+    } while (!free_head_.template compare_exchange_weak<
+        sync::release, sync::relaxed>(cur_head, new_head));
 }
 
 }

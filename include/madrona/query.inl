@@ -21,7 +21,7 @@ Query<ComponentTs...>::Query(bool initialized)
     : initialized_(initialized)
 {
     if (initialized) {
-        ref_.numReferences.fetch_add(1, std::memory_order_release);
+        ref_.numReferences.fetch_add_release(1);
     }
 }
 
@@ -36,7 +36,7 @@ template <typename... ComponentTs>
 Query<ComponentTs...>::~Query()
 {
     if (initialized_) {
-        ref_.numReferences.fetch_sub(1, std::memory_order_release);
+        ref_.numReferences.fetch_sub_release(1);
     }
 }
 
@@ -44,7 +44,7 @@ template <typename... ComponentTs>
 Query<ComponentTs...> & Query<ComponentTs...>::operator=(Query &&o)
 {
     if (initialized_) {
-        ref_.numReferences.fetch_sub(1, std::memory_order_release);
+        ref_.numReferences.fetch_sub_release(1);
     }
 
     initialized_ = o.initialized_;

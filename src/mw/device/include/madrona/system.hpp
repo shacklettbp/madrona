@@ -10,7 +10,7 @@ namespace madrona {
 
 struct SharedSystemState {
     SystemBase **systems;
-    std::atomic_uint32_t numInvocations; 
+    AtomicU32 numInvocations; 
     uint32_t sysID;
 };
 

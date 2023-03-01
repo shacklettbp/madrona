@@ -17,7 +17,7 @@ struct PoolState {
 
     VkDescriptorPool pool;
     uint32_t numUsed;
-    std::atomic_uint32_t numActive;
+    AtomicU32 numActive;
 };
 
 struct DescriptorSet {
@@ -33,7 +33,7 @@ struct DescriptorSet {
     ~DescriptorSet()
     {
         if (hdl == VK_NULL_HANDLE) return;
-        pool->numActive--;
+        pool->numActive.fetch_sub_relaxed(1);
     };
 
     VkDescriptorSet hdl;

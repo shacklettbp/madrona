@@ -8,6 +8,7 @@
 #pragma once
 
 #include <madrona/macros.hpp>
+#include <madrona/types.hpp>
 
 #include <atomic>
 
@@ -48,12 +49,143 @@ inline constexpr memory_order acq_rel = std::memory_order_acq_rel;
 inline constexpr memory_order seq_cst = std::memory_order_seq_cst;
 }
 
-using AtomicU32 = std::atomic_uint32_t;
-using AtomicI32 = std::atomic_int32_t;
-using AtomicU64 = std::atomic_uint64_t;
-using AtomicI64 = std::atomic_int64_t;
-using AtomicFloat = std::atomic<float>;
-static_assert(AtomicFloat::is_always_lock_free);
+template <typename T>
+class Atomic {
+public:
+    constexpr Atomic(T v)
+        : impl_(v)
+    {
+        static_assert(decltype(impl_)::is_always_lock_free);
+    }
+
+    template <sync::memory_order order>
+    inline T load() const
+    {
+        return impl_.load(order);
+    }
+
+    inline T load_relaxed() const
+    {
+        return impl_.load(sync::relaxed);
+    }
+
+    inline T load_acquire() const
+    {
+        return impl_.load(sync::acquire);
+    }
+
+    template <sync::memory_order order>
+    inline void store(T v)
+    {
+        impl_.store(v, order);
+    }
+
+    inline void store_relaxed(T v)
+    {
+        impl_.store(v, sync::relaxed);
+    }
+
+    inline void store_release(T v)
+    {
+        impl_.store(v, sync::release);
+    }
+
+    template <sync::memory_order order>
+    inline T exchange(T v)
+    {
+        return impl_.exchange(v, order);
+    }
+
+    template <sync::memory_order success_order,
+              sync::memory_order failure_order>
+    inline bool compare_exchange_weak(T &expected, T desired)
+    {
+        return impl_.compare_exchange_weak(expected, desired,
+                                           success_order, failure_order);
+    }
+
+    template <sync::memory_order order>
+    T fetch_add(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_add(v, order);
+    }
+
+    inline T fetch_add_relaxed(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_add(v, sync::relaxed);
+    }
+
+    inline T fetch_add_acquire(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_add(v, sync::acquire);
+    }
+
+    inline T fetch_add_release(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_add(v, sync::release);
+    }
+
+    inline T fetch_add_acq_rel(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_add(v, sync::acq_rel);
+    }
+
+    template <sync::memory_order order>
+    T fetch_sub(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_sub(v, order);
+    }
+
+    inline T fetch_sub_relaxed(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_sub(v, sync::relaxed);
+    }
+
+    inline T fetch_sub_acquire(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_sub(v, sync::acquire);
+    }
+
+    inline T fetch_sub_release(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_sub(v, sync::release);
+    }
+
+    inline T fetch_sub_acq_rel(T v) requires (std::is_integral_v<T>)
+    {
+        return impl_.fetch_sub(v, sync::acq_rel);
+    }
+
+    template <sync::memory_order order>
+    inline void wait(T v)
+    {
+        return impl_.wait(v, order);
+    }
+
+    inline void notify_one()
+    {
+        return impl_.notify_one();
+    }
+
+    inline void notify_all()
+    {
+        return impl_.notify_all();
+    }
+
+private:
+#ifdef MADRONA_GPU_MODE
+    cuda::atomic<T, cuda::thread_scope_device> impl_;
+#else
+    std::atomic<T> impl_;
+#endif
+};
+
+using AtomicU32 = Atomic<uint32_t>;
+using AtomicI32 = Atomic<int32_t>;
+using AtomicU64 = Atomic<uint64_t>;
+using AtomicI64 = Atomic<int64_t>;
+using AtomicFloat = Atomic<float>;
+using AtomicCount = Atomic<CountT>;
 
 #if defined(__cpp_lib_atomic_ref) or defined(MADRONA_GPU_MODE)
 #define MADRONA_STD_ATOMIC_REF
@@ -115,6 +247,11 @@ public:
 #else
         return ref_.fetch_add(v, order);
 #endif
+    }
+
+    inline T fetch_add_relaxed(T v) requires std::is_integral_v<T>
+    {
+        return fetch_add<sync::relaxed>(v);
     }
 
     template <sync::memory_order order>
@@ -184,18 +321,18 @@ class
 public:
     void lock()
     {
-        while (lock_.exchange(1, sync::acquire) == 1) {
-            while (lock_.load(sync::relaxed) == 1) {}
+        while (lock_.exchange<sync::acquire>(1) == 1) {
+            while (lock_.load_relaxed() == 1) {}
         }
     }
 
     // Test and test-and-set
     bool tryLock()
     {
-        int32_t is_locked = lock_.load(sync::relaxed);
+        int32_t is_locked = lock_.load_relaxed();
         if (is_locked == 1) return false;
 
-        int32_t prev_locked = lock_.exchange(1, sync::relaxed);
+        int32_t prev_locked = lock_.exchange<sync::relaxed>(1);
 
         if (prev_locked) {
             return false;
@@ -209,7 +346,7 @@ public:
 
     void unlock()
     {
-        lock_.store(0, sync::release);
+        lock_.store_release(0);
     }
 
 private:

@@ -68,17 +68,15 @@ void TaskGraph::init()
 
         uint32_t new_num_invocations = computeNumInvocations(first_node);
         assert(new_num_invocations != 0);
-        first_node.curOffset.store(0, std::memory_order_relaxed);
-        first_node.numRemaining.store(new_num_invocations,
-                                    std::memory_order_relaxed);
-        first_node.totalNumInvocations.store(new_num_invocations,
-            std::memory_order_relaxed);
+        first_node.curOffset.store_relaxed(0);
+        first_node.numRemaining.store_relaxed(new_num_invocations);
+        first_node.totalNumInvocations.store_relaxed(new_num_invocations);
 
-        cur_node_idx_.store(0, std::memory_order_release);
+        cur_node_idx_.store_release(0);
 
 #ifdef LIMIT_ACTIVE_BLOCKS
         for (size_t i = 0; i < num_SMs_; i++) {
-            block_sm_offsets_[i].store(0, std::memory_order_relaxed);
+            block_sm_offsets_[i].store_relaxed(0);
         }
 #endif
     }
@@ -94,7 +92,8 @@ void TaskGraph::init()
     uint32_t sm_id;
     asm("mov.u32 %0, %smid;"
         : "=r"(sm_id));
-    sharedBlockState.blockSMOffset = block_sm_offsets_[sm_id].fetch_add(1, std::memory_order_relaxed);
+    sharedBlockState.blockSMOffset =
+        block_sm_offsets_[sm_id].fetch_add_relaxed(1);
 #endif
 }
 
@@ -109,7 +108,7 @@ void TaskGraph::setupRenderer(Context &ctx, const void *renderer_inits,
 
 void TaskGraph::updateBlockState()
 {
-    uint32_t node_idx = cur_node_idx_.load(std::memory_order_acquire);
+    uint32_t node_idx = cur_node_idx_.load_acquire();
     if (node_idx == num_nodes_) {
         sharedBlockState.nodeIdx = node_idx;
         return;
@@ -123,7 +122,7 @@ void TaskGraph::updateBlockState()
     Node &cur_node = sorted_nodes_[node_idx];
 
     uint32_t total_invocations =
-        cur_node.totalNumInvocations.load(std::memory_order_relaxed);
+        cur_node.totalNumInvocations.load_relaxed();
 
     uint32_t num_threads_per_invocation = cur_node.numThreadsPerInvocation;
 
@@ -131,9 +130,8 @@ void TaskGraph::updateBlockState()
     sharedBlockState.totalNumInvocations = total_invocations;
     sharedBlockState.funcID = cur_node.funcID;
     sharedBlockState.numThreadsPerInvocation = num_threads_per_invocation;
-    sharedBlockState.initOffset = cur_node.curOffset.fetch_add(
-        consts::numMegakernelThreads / num_threads_per_invocation,
-            std::memory_order_relaxed);
+    sharedBlockState.initOffset = cur_node.curOffset.fetch_add_relaxed(
+        consts::numMegakernelThreads / num_threads_per_invocation);
 }
 
 uint32_t TaskGraph::computeNumInvocations(Node &node)
@@ -204,9 +202,9 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
         num_threads_per_invocation = sharedBlockState.numThreadsPerInvocation;
         if (num_threads_per_invocation > 32) {
             if (thread_idx == 0) {
-                sharedBlockState.initOffset = cur_node->curOffset.fetch_add(
-                    consts::numMegakernelThreads / num_threads_per_invocation,
-                    std::memory_order_relaxed);
+                sharedBlockState.initOffset =
+                    cur_node->curOffset.fetch_add_relaxed(
+                    consts::numMegakernelThreads / num_threads_per_invocation);
             }
 
             __syncthreads();
@@ -220,8 +218,8 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
             }
         } else {
             if (lane_idx == 0) {
-                base_offset = cur_node->curOffset.fetch_add(
-                    32 / num_threads_per_invocation, std::memory_order_relaxed);
+                base_offset = cur_node->curOffset.fetch_add_relaxed(
+                    32 / num_threads_per_invocation);
             }
             base_offset = __shfl_sync(mwGPU::allActive, base_offset, 0);
 
@@ -295,11 +293,10 @@ void TaskGraph::finishWork(bool lane_executed)
 
     Node &cur_node = sorted_nodes_[node_idx];
 
-    uint32_t prev_remaining = cur_node.numRemaining.fetch_sub(num_finished,
-        std::memory_order_acq_rel);
+    uint32_t prev_remaining =
+        cur_node.numRemaining.fetch_sub_acq_rel(num_finished);
 
     if (prev_remaining == num_finished) {
-
         mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::nodeFinish,
             sharedBlockState.funcID, sharedBlockState.totalNumInvocations,
             node_idx, is_leader);
@@ -317,17 +314,16 @@ void TaskGraph::finishWork(bool lane_executed)
                 }
 
                 Node &next_node = sorted_nodes_[next_node_idx];
-                next_node.curOffset.store(0, std::memory_order_relaxed);
-                next_node.numRemaining.store(new_num_invocations,
-                                            std::memory_order_relaxed);
-                next_node.totalNumInvocations.store(new_num_invocations,
-                    std::memory_order_relaxed);
+                next_node.curOffset.store_relaxed(0);
+                next_node.numRemaining.store_relaxed(new_num_invocations);
+                next_node.totalNumInvocations.store_relaxed(
+                    new_num_invocations);
 
                 mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::nodeStart,
                     next_node.funcID, new_num_invocations, next_node_idx, is_leader);
             }
 
-            cur_node_idx_.store(next_node_idx, std::memory_order_release);
+            cur_node_idx_.store_release(next_node_idx);
             break;
         }
     }

@@ -42,7 +42,7 @@ namespace broadphase {
 
 LeafID BVH::reserveLeaf(Entity e, CollisionPrimitive *prim)
 {
-    int32_t leaf_idx = num_leaves_.fetch_add(1, std::memory_order_relaxed);
+    int32_t leaf_idx = num_leaves_.fetch_add_relaxed(1);
     assert(leaf_idx < num_allocated_leaves_);
 
     leaf_entities_[leaf_idx] = e;
@@ -112,7 +112,7 @@ void BVH::rebuildOnUpdate()
 
 void BVH::clearLeaves()
 {
-    num_leaves_.store(0, std::memory_order_relaxed);
+    num_leaves_.store_relaxed(0);
 }
 
 bool BVH::Node::isLeaf(CountT child) const

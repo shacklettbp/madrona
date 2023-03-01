@@ -24,12 +24,12 @@ DescriptorManager::~DescriptorManager()
 {
     for (PoolState &pool_state : free_pools_) {
         dev.dt.destroyDescriptorPool(dev.hdl, pool_state.pool, nullptr);
-        assert(pool_state.numActive == 0);
+        assert(pool_state.numActive.load_relaxed() == 0);
     }
 
     for (PoolState &pool_state : used_pools_) {
         dev.dt.destroyDescriptorPool(dev.hdl, pool_state.pool, nullptr);
-        assert(pool_state.numActive == 0);
+        assert(pool_state.numActive.load_relaxed() == 0);
         assert(pool_state.numUsed == VulkanConfig::descriptor_pool_size);
     }
 }
@@ -44,7 +44,7 @@ DescriptorSet DescriptorManager::makeSet()
         auto iter = used_pools_.begin();
         while (iter != used_pools_.end()) {
             auto next_iter = next(iter);
-            if (iter->numActive == 0) {
+            if (iter->numActive.load_relaxed() == 0) {
                 iter->numUsed = 0;
                 REQ_VK(dev.dt.resetDescriptorPool(dev.hdl, iter->pool, 0));
                 free_pools_.splice(free_pools_.end(), used_pools_, iter);
@@ -62,7 +62,7 @@ DescriptorSet DescriptorManager::makeSet()
     VkDescriptorSet desc_set = makeDescriptorSet(dev, cur_pool.pool, layout_);
 
     cur_pool.numUsed++;
-    cur_pool.numActive++;
+    cur_pool.numActive.fetch_add_relaxed(1);
 
     if (cur_pool.numUsed == VulkanConfig::descriptor_pool_size) {
         used_pools_.splice(used_pools_.end(), free_pools_,
