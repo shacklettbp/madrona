@@ -720,6 +720,9 @@ RendererInterface BatchRenderer::getInterface() const
     renderer_iface.numInstancesReadback =
         impl_->tlases.countReadback;
 
+    renderer_iface.renderWidth = impl_->cfg.renderWidth;
+    renderer_iface.renderHeight = impl_->cfg.renderHeight;
+
     return renderer_iface;
 }
 

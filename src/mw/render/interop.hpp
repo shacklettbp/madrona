@@ -70,6 +70,8 @@ struct RendererInterface {
     uint32_t *numViews;
     InstanceData *instanceData;
     uint32_t *numInstances;
+    int32_t renderWidth;
+    int32_t renderHeight;
 #endif
 };
 
@@ -94,6 +96,9 @@ struct RendererState {
     InstanceData *instanceData;
     uint32_t *numInstances;
 #endif
+    int32_t renderWidth;
+    int32_t renderHeight;
+    float aspectRatio;
 
     static void init(Context &ctx,
                      const RendererInit &init);

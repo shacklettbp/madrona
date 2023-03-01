@@ -702,6 +702,8 @@ RendererInterface BatchRenderer::getInterface() const
         impl_->numViewsBase,
         impl_->instanceDataBase,
         &impl_->numInstancesCounter.v,
+        int32_t(impl_->cfg.renderWidth),
+        int32_t(impl_->cfg.renderHeight),
     };
 }
 

@@ -146,26 +146,26 @@ void RenderingSystem::reset([[maybe_unused]] Context &ctx)
 #endif
 }
 
-ViewSettings RenderingSystem::setupView([[maybe_unused]] Context &ctx,
+ViewSettings RenderingSystem::setupView(Context &ctx,
                                         float vfov_degrees,
-                                        float aspect_ratio,
                                         float z_near,
                                         math::Vector3 camera_offset,
                                         ViewID view_id)
 {
+    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+
     float fov_scale = 
-#ifdef MADRONA_BATCHRENDER_METAL
+#ifndef MADRONA_BATCHRENDER_RT
         1.f / 
 #endif
             tanf(helpers::toRadians(vfov_degrees * 0.5f));
 
 #ifdef MADRONA_BATCHRENDER_METAL
-    RendererState &renderer_state = ctx.getSingleton<RendererState>();
     (*renderer_state.numViews) += 1;
 #endif
 
-    float x_scale = fov_scale / aspect_ratio;
-    float y_scale = 
+    float x_scale = fov_scale / renderer_state.aspectRatio;
+    float y_scale =
 #ifndef MADRONA_BATCHRENDER_METAL
         -
 #endif
@@ -195,16 +195,18 @@ void RendererState::init(Context &ctx, const RendererInit &renderer_init)
 #ifdef MADRONA_GPU_MODE
         renderer_init.iface.numInstancesReadback,
 #endif
-    };
 #elif defined (MADRONA_BATCHRENDER_METAL)
     new (&renderer_state) RendererState {
         renderer_init.iface.views[world_idx],
         &renderer_init.iface.numViews[world_idx],
         renderer_init.iface.instanceData,
         renderer_init.iface.numInstances,
-    };
 #endif
-
+        renderer_init.iface.renderWidth,
+        renderer_init.iface.renderHeight,
+        float(renderer_init.iface.renderWidth) /
+            float(renderer_init.iface.renderHeight),
+    };
 }
 
 }

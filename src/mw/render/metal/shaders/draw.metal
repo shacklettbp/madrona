@@ -294,9 +294,7 @@ v2f vertex vertMain(uint vert_idx [[vertex_id]],
 
 half4 fragment fragMain(v2f in [[stage_in]])
 {
-    //float hit_angle = max(dot(normalize(in.normal), to_frag), 0.f);
-    float hit_angle = abs(dot(normalize(in.normal), normalize(in.viewPos)));
-
+    float hit_angle = max(dot(normalize(in.normal), normalize(-in.viewPos)), 0.f);
     return half4(half3(hit_angle), 1.0);
 }
 
