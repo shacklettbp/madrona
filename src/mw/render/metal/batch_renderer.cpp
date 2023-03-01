@@ -612,6 +612,8 @@ void BatchRenderer::Impl::render()
         pumpCocoaEvents(NS::app());
     }
     
+    auto frame_render_pool = NS::AutoreleasePool::alloc()->init();
+
     MTL::CommandBuffer *cmd =
         cmdQueue->commandBufferWithUnretainedReferences();
 
@@ -672,8 +674,6 @@ void BatchRenderer::Impl::render()
     cmd->commit();
 
     if (appDelegate.has_value()) {
-        auto drawable_pool = NS::AutoreleasePool::alloc()->init();
-
         MTL::CommandBuffer *present_cmd = cmdQueue->commandBuffer();
         auto *drawable = appDelegate->layer->nextDrawable();
 
@@ -690,9 +690,9 @@ void BatchRenderer::Impl::render()
         present_enc->endEncoding();
         present_cmd->presentDrawable(drawable);
         present_cmd->commit();
-
-        drawable_pool->release();
     }
+
+    frame_render_pool->release();
 }
 
 CountT BatchRenderer::Impl::loadObjects(Span<const imp::SourceObject> objs)
