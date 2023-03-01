@@ -692,6 +692,7 @@ void BatchRenderer::Impl::render()
         present_cmd->commit();
     }
 
+    cmd->waitUntilCompleted();
     frame_render_pool->release();
 }
 
