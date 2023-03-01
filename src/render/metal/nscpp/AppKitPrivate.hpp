@@ -71,6 +71,7 @@ _APPKIT_PRIVATE_DEF_CLS( NSWindow );
 _APPKIT_PRIVATE_DEF_CLS( NSMenu );
 _APPKIT_PRIVATE_DEF_CLS( NSMenuItem );
 _APPKIT_PRIVATE_DEF_CLS( NSScreen );
+_APPKIT_PRIVATE_DEF_CLS( NSThread );
 
 } // Class
 
@@ -189,6 +190,9 @@ _APPKIT_PRIVATE_DEF_SEL( setLayer_,
 
 _APPKIT_PRIVATE_DEF_SEL( mainScreen,
 						"mainScreen" );
+
+_APPKIT_PRIVATE_DEF_SEL( detachNewThreadSelector_toTarget_withObject_,
+						"detachNewThreadSelector:toTarget:withObject:" );
 
 }
 

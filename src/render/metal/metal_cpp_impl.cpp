@@ -11,3 +11,4 @@
 #include "nscpp/NSRunningApplication.hpp"
 #include "nscpp/CALayer.hpp"
 #include "nscpp/NSScreen.hpp"
+#include "nscpp/NSThread.hpp"

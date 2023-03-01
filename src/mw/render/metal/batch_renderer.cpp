@@ -12,6 +12,7 @@
 #include "metal/nscpp/NSRunningApplication.hpp"
 #include "metal/nscpp/CALayer.hpp"
 #include "metal/nscpp/NSScreen.hpp"
+#include "metal/nscpp/NSThread.hpp"
 
 #include <thread>
 
@@ -85,6 +86,52 @@ static inline void stopEventLoop(NS::Application *app)
         CGPoint {0, 0}, 0, 0, 0, nullptr, 0, 0, 0);
     app->postEvent(event, true);
     app->stop(nullptr);
+}
+
+struct ObjCMemberFunction {
+    const char *name;
+    const char *signature;
+    IMP callback;
+};
+
+static Class makeObjCClass(
+    Class parent, const char *name, 
+    Span<const ObjCMemberFunction> mem_funcs,
+    Span<SEL> out_selectors)
+{
+    Class objc_type = objc_allocateClassPair(parent, name, 0);
+
+    for (CountT i = 0; i < mem_funcs.size(); i++) {
+        const auto &mem_func = mem_funcs[i];
+
+        SEL sel = sel_registerName(mem_func.name);
+        class_addMethod(objc_type, sel, mem_func.callback, mem_func.signature);
+        out_selectors[i] = sel;
+    }
+
+    return objc_type;
+}
+
+struct ObjCAllocHelper : NS::Object {
+    static inline NS::Object * make(Class type)
+    {
+        auto ptr = NS::Object::alloc<ObjCAllocHelper>(type);
+        return ptr->init<NS::Object>();
+    }
+};
+
+void setupCocoaMultiThreading()
+{
+    void (*noop_cb)(NS::Object *, SEL, void *) = 
+        [](NS::Object *obj, SEL, void *) { obj->release(); };
+
+    SEL helper_noop;
+    Class nsthread_init_helper = makeObjCClass(
+        (Class)NS::Private::Class::s_kNSObject, "MadronaNSThreadInitHelper",
+        {{ "noop", "v@:@", (IMP)noop_cb }}, { &helper_noop, 1 });
+
+    NS::Object *init_helper = ObjCAllocHelper::make(nsthread_init_helper);
+    NS::Thread::detachNewThreadSelector(helper_noop, init_helper, nullptr);
 }
 
 BatchRenderer::Impl::AppDelegate::AppDelegate(Impl *impl)
@@ -281,6 +328,9 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
     const int64_t max_draws = max_instances * max_views_per_world;
 
     auto pool = NS::AutoreleasePool::alloc()->init();
+
+    setupCocoaMultiThreading();
+
     MTL::Device *dev = MTL::CreateSystemDefaultDevice()->autorelease();
     MTL::CommandQueue *cmd_queue = dev->newCommandQueue()->autorelease();
 
