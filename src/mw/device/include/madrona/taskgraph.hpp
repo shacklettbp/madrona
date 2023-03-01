@@ -165,9 +165,8 @@ private:
     uint32_t num_nodes_;
     NodeData *node_datas_;
     std::atomic_uint32_t cur_node_idx_;
-    static uint32_t const num_SMs_ = MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS / consts::numMegakernelBlocksPerSM;
 #ifdef LIMIT_ACTIVE_BLOCKS
-    std::atomic_uint32_t block_sm_offsets_[num_SMs_];
+    std::atomic_uint32_t block_sm_offsets_[MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS];
 #endif
     cuda::barrier<cuda::thread_scope_device> init_barrier_;
 

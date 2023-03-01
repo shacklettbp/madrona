@@ -11,6 +11,9 @@
 #include <fstream>
 #include <string>
 #include <filesystem>
+#include <sstream>
+#include <tuple>
+#include <map>
 
 #include <cuda/atomic>
 
@@ -275,10 +278,12 @@ struct GPUCompileResults {
 
 struct GPUKernels {
     CUmodule mod;
+    std::map<std::tuple<uint32_t, uint32_t, uint32_t>, CUmodule> mods;
     CUfunction computeGPUImplConsts;
     CUfunction initECS;
     CUfunction initWorlds;
     CUfunction initTasks;
+    std::map<std::tuple<uint32_t, uint32_t, uint32_t>, CUfunction> megakernels;
     CUfunction megakernel;
     CUfunction queueUserInit;
     CUfunction queueUserRun;
@@ -812,8 +817,7 @@ static __attribute__((always_inline)) inline void dispatch(
 }
 
 static GPUKernels buildKernels(const CompileConfig &cfg,
-                               uint32_t num_megakernel_blocks,
-                               std::pair<int, int> cuda_arch)
+                               uint32_t num_sms, std::pair<int, int> cuda_arch)
 {
     CompileConfig::OptMode opt_mode = cfg.optMode;
     
@@ -856,42 +860,14 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
         to_string(cuda_arch.second);
 
-    std::string threadblock_count_define =
-        std::string("-DMADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS=(") +
-        std::to_string(num_megakernel_blocks) + ")";
-
-    int64_t max_registers;
-    switch (consts::numMegakernelBlocksPerSM) {
-    case 1: {
-        max_registers = 255;
-    } break;
-    case 2: {
-        max_registers = 128;
-    } break;
-    case 3: {
-        max_registers = 80;
-    } break;
-    case 4: {
-        max_registers = 64;
-    } break;
-    case 5: {
-        max_registers = 48;
-    } break;
-    case 6: {
-        max_registers = 40;
-    } break;
-    default: {
-        FATAL("Unsupported number of blocks per SM");
-    } break;
-    }
-
-    std::string regcount_str = std::to_string(max_registers);
+    std::string num_sms_define =
+        std::string("-DMADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS=(") +
+        std::to_string(num_sms) + ")";
 
     DynArray<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-arch", gpu_arch_str.c_str(),
-        threadblock_count_define.c_str(),
-        "-maxrregcount", regcount_str.c_str(),
+        num_sms_define.c_str(),
 #ifdef MADRONA_TRACING
         "-DMADRONA_TRACING=1",
 #endif
@@ -933,12 +909,8 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     std::string linker_arch_str =
         std::string("-arch=") + gpu_arch_str;
 
-    std::string linker_regcount_str =
-        std::string("-maxrregcount=") + regcount_str;
-
     DynArray<const char *> linker_flags {
         linker_arch_str.c_str(),
-        linker_regcount_str.c_str(),
         "-ftz=1",
         "-prec-div=0",
         "-prec-sqrt=0",
@@ -975,33 +947,83 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     }
 
     GPUKernels gpu_kernels;
-    auto compile_results = compileCode(
-        all_cpp_files.data(), all_cpp_files.size(),
-        compile_flags.data(), compile_flags.size(),
-        fast_compile_flags.data(), fast_compile_flags.size(),
-        linker_flags.data(), linker_flags.size(),
-        opt_mode, cfg.execMode, verbose_compile);
 
-    gpu_kernels.mod = compile_results.mod;
+    // todo: iterate other dimensions
+    uint32_t numMegakernelBlocksPerSM = 1;
+    uint32_t numMegakernelThreads = consts::numMegakernelThreads;
+    while (numMegakernelBlocksPerSM * numMegakernelThreads <= 1536) {
+        uint32_t max_registers = 65536 / numMegakernelThreads / numMegakernelBlocksPerSM;
+        // align to multiple of 8
+        max_registers -= max_registers % 8;
+        max_registers = max_registers > 255 ? 255 : max_registers;
+        std::string regcount_str = std::to_string(max_registers);
+        std::string linker_regcount_str =
+            std::string("-maxrregcount=") + regcount_str;
 
-    REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
-        gpu_kernels.mod, "madronaMWGPUComputeConstants"));
-    REQ_CU(cuModuleGetFunction(&gpu_kernels.megakernel, gpu_kernels.mod,
-                               "madronaMWGPUMegakernel"));
+        std::string num_block_per_sm_define =
+            std::string("-DMADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM=(") +
+            std::to_string(1) + ")";
+        std::string num_thread_per_block_define =
+            std::string("-DMADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK=(") +
+            std::to_string(numMegakernelThreads) + ")";
 
-    if (cfg.execMode == CompileConfig::Executor::JobSystem) {
-        REQ_CU(cuModuleGetFunction(&gpu_kernels.initECS, gpu_kernels.mod,
-                                   "madronaMWGPUInitialize"));
-        getUserEntries(cfg.entryName, gpu_kernels.mod, compile_flags.data(),
-            compile_flags.size(), &gpu_kernels.queueUserInit,
-            &gpu_kernels.queueUserRun);
-    } else if (cfg.execMode == CompileConfig::Executor::TaskGraph) {
-        REQ_CU(cuModuleGetFunction(&gpu_kernels.initECS, gpu_kernels.mod,
-                                   compile_results.initECSName.c_str()));
-        REQ_CU(cuModuleGetFunction(&gpu_kernels.initWorlds, gpu_kernels.mod,
-                                   compile_results.initWorldsName.c_str()));
-        REQ_CU(cuModuleGetFunction(&gpu_kernels.initTasks, gpu_kernels.mod,
-                                   compile_results.initTasksName.c_str()));
+        DynArray<const char *> common_dynamic_compile_flags {
+            "-maxrregcount", regcount_str.c_str(),
+            num_block_per_sm_define.c_str(),
+            num_thread_per_block_define.c_str(),
+        };
+
+        for (const char *user_flag : common_dynamic_compile_flags) {
+            compile_flags.push_back(user_flag);
+            fast_compile_flags.push_back(user_flag);
+        }
+        linker_flags.push_back(linker_regcount_str.c_str());
+
+        auto compile_results = compileCode(
+            all_cpp_files.data(), all_cpp_files.size(),
+            compile_flags.data(), compile_flags.size(),
+            fast_compile_flags.data(), fast_compile_flags.size(),
+            linker_flags.data(), linker_flags.size(),
+            opt_mode, cfg.execMode, verbose_compile);
+
+
+        std::tuple<uint32_t, uint32_t, uint32_t> megakernel_dims =
+            std::make_tuple(numMegakernelThreads, numMegakernelBlocksPerSM, num_sms);
+        gpu_kernels.mods[megakernel_dims] = compile_results.mod;
+        gpu_kernels.megakernels[megakernel_dims];
+        REQ_CU(cuModuleGetFunction(&gpu_kernels.megakernels[megakernel_dims],
+                                    gpu_kernels.mods[megakernel_dims], "madronaMWGPUMegakernel"));
+
+        if ((numMegakernelBlocksPerSM == consts::numMegakernelBlocksPerSM ) &&
+            (numMegakernelThreads == consts::numMegakernelThreads)) {
+            // default module and all init kernels
+            gpu_kernels.mod = gpu_kernels.mods[megakernel_dims];
+
+            REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
+                gpu_kernels.mod, "madronaMWGPUComputeConstants"));
+
+            if (cfg.execMode == CompileConfig::Executor::JobSystem) {
+                REQ_CU(cuModuleGetFunction(&gpu_kernels.initECS, gpu_kernels.mod,
+                                        "madronaMWGPUInitialize"));
+                getUserEntries(cfg.entryName, gpu_kernels.mod, compile_flags.data(),
+                    compile_flags.size(), &gpu_kernels.queueUserInit,
+                    &gpu_kernels.queueUserRun);
+            } else if (cfg.execMode == CompileConfig::Executor::TaskGraph) {
+                REQ_CU(cuModuleGetFunction(&gpu_kernels.initECS, gpu_kernels.mod,
+                                        compile_results.initECSName.c_str()));
+                REQ_CU(cuModuleGetFunction(&gpu_kernels.initWorlds, gpu_kernels.mod,
+                                        compile_results.initWorldsName.c_str()));
+                REQ_CU(cuModuleGetFunction(&gpu_kernels.initTasks, gpu_kernels.mod,
+                                        compile_results.initTasksName.c_str()));
+            }
+        }
+
+        for (int i = 0; i < common_dynamic_compile_flags.size(); ++i) {
+            compile_flags.pop_back();
+            fast_compile_flags.pop_back();
+        }
+        linker_flags.pop_back();
+        numMegakernelBlocksPerSM += 1;
     }
 
     return gpu_kernels;
@@ -1349,11 +1371,12 @@ static GPUEngineState initEngineAndUserState(
 
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
-    REQ_CU(cuModuleGetGlobal(&job_sys_consts_addr, &job_sys_consts_size,
-                             gpu_kernels.mod, "madronaMWGPUConsts"));
-
-    REQ_CU(cuMemcpyHtoD(job_sys_consts_addr, gpu_consts_readback,
-                        job_sys_consts_size));
+    for (const auto &mod : gpu_kernels.mods) {
+        REQ_CU(cuModuleGetGlobal(&job_sys_consts_addr, &job_sys_consts_size,
+                                 mod.second, "madronaMWGPUConsts"));
+        REQ_CU(cuMemcpyHtoD(job_sys_consts_addr, gpu_consts_readback,
+                            job_sys_consts_size));
+    }
 
     if (exec_mode == CompileConfig::Executor::JobSystem) {
         launchKernel(gpu_kernels.initWorlds, 1, consts::numMegakernelThreads,
@@ -1453,19 +1476,43 @@ static CUgraphExec makeJobSysRunGraph(CUfunction queue_run_kernel,
     return run_graph_exec;
 }
 
-static CUgraphExec makeTaskGraphRunGraph(CUfunction megakernel,
-                                         uint32_t num_megakernel_blocks)
+std::vector<std::string> splitString(std::string input_string) {
+    std::vector<std::string> output_vector;
+    std::stringstream ss(input_string);
+    std::string item;
+    while (getline(ss, item, ',')) {
+        output_vector.push_back(item);
+    }
+    return output_vector;
+}
+
+static CUgraphExec makeTaskGraphRunGraph(std::map<std::tuple<uint32_t, uint32_t, uint32_t>, CUfunction> megakernels)
 {
     auto no_args = makeKernelArgBuffer();
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
 
+    auto dims = megakernels.begin()->first;
+    auto megakernel = megakernels.begin()->second;
+
+    auto *get_config_dims = getenv("MADRONA_MWGPU_CONFIG_DIMS");
+    auto *get_profile_config_file = getenv("MADRONA_MWGPU_PROFILE_CONFIG_FILE");
+    if (get_config_dims != nullptr) {
+        auto config_dims = std::string(get_config_dims);
+        auto split = splitString(config_dims);
+        dims = std::make_tuple(std::stoi(split[0]), std::stoi(split[1]), std::stoi(split[2]));
+        megakernel = megakernels[dims];
+        printf("Using config dims %d %d %d\n", std::get<0>(dims), std::get<1>(dims), std::get<2>(dims));
+    } else if (get_profile_config_file != nullptr) {
+        auto profile_config_file = std::string(get_profile_config_file);
+    }
+
     CUDA_KERNEL_NODE_PARAMS kernel_node_params {
         .func = megakernel,
-        .gridDimX = num_megakernel_blocks,
+        .gridDimX = 1 * std::get<2>(dims),
         .gridDimY = 1,
         .gridDimZ = 1,
-        .blockDimX = consts::numMegakernelThreads,
+        .blockDimX = std::get<0>(dims),
         .blockDimY = 1,
         .blockDimZ = 1,
         .sharedMemBytes = 0,
@@ -1493,12 +1540,9 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
     cudaDeviceProp dev_prop;
     REQ_CUDA(cudaGetDeviceProperties(&dev_prop, state_cfg.gpuID));
 
-    int num_sms = dev_prop.multiProcessorCount;
-    uint32_t num_megakernel_blocks = num_sms * consts::numMegakernelBlocksPerSM;
-
     auto strm = cu::makeStream();
 
-    GPUKernels gpu_kernels = buildKernels(compile_cfg, num_megakernel_blocks,
+    GPUKernels gpu_kernels = buildKernels(compile_cfg, dev_prop.multiProcessorCount,
                                           {dev_prop.major, dev_prop.minor});
 
     GPUEngineState eng_state = initEngineAndUserState(
@@ -1516,8 +1560,7 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
             makeJobSysRunGraph(gpu_kernels.queueUserRun,
                                gpu_kernels.megakernel,
                                state_cfg.numWorlds) :
-            makeTaskGraphRunGraph(gpu_kernels.megakernel,
-                                  num_megakernel_blocks);
+            makeTaskGraphRunGraph(gpu_kernels.megakernels);
 
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,

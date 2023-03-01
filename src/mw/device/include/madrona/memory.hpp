@@ -117,7 +117,7 @@ namespace SharedMemStorage {
     // random places using their own smem allocations
     inline constexpr uint64_t numSMemBytes = 15040;
     inline constexpr uint64_t numSMemBytesPerWarp =
-        numSMemBytes / (consts::numMegakernelThreads / 32);
+        numSMemBytes / (MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK / 32);
     extern __shared__ Chunk buffer[
         numSMemBytes / sizeof(Chunk)];
 };

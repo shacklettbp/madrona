@@ -29,7 +29,7 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
     Span<const TaskGraph::NodeID> dependencies,
     Optional<NodeID> parent_node)
 {
-    assert(consts::numMegakernelThreads % num_threads_per_invocation == 0);
+    assert(MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK % num_threads_per_invocation == 0);
 
     uint32_t offset = num_dependencies_;
     uint32_t num_deps = dependencies.size();

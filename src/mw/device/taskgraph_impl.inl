@@ -31,7 +31,7 @@ TaskGraph::TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
       num_nodes_(num_nodes),
       node_datas_(node_datas),
       cur_node_idx_(num_nodes),
-      init_barrier_(MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS)
+      init_barrier_(MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS * MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM)
 {}
 
 TaskGraph::~TaskGraph()
@@ -63,7 +63,9 @@ void TaskGraph::init()
         mwGPU::DeviceTracing::resetIndex();
         // special calibration indicating the beginning of the kernel
         mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration,
-                                    madrona::consts::numMegakernelThreads / 32, madrona::consts::numMegakernelBlocksPerSM, num_SMs_);
+                                    MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK / 32,
+                                    MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM,
+                                    MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS);
 
         Node &first_node = sorted_nodes_[0];
 
@@ -78,7 +80,7 @@ void TaskGraph::init()
         cur_node_idx_.store(0, std::memory_order_release);
 
 #ifdef LIMIT_ACTIVE_BLOCKS
-        for (size_t i = 0; i < num_SMs_; i++) {
+        for (size_t i = 0; i < MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS; i++) {
             block_sm_offsets_[i].store(0, std::memory_order_relaxed);
         }
 #endif
@@ -133,7 +135,7 @@ void TaskGraph::updateBlockState()
     sharedBlockState.funcID = cur_node.funcID;
     sharedBlockState.numThreadsPerInvocation = num_threads_per_invocation;
     sharedBlockState.initOffset = cur_node.curOffset.fetch_add(
-        consts::numMegakernelThreads / num_threads_per_invocation,
+        MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK / num_threads_per_invocation,
             std::memory_order_relaxed);
 }
 
@@ -206,7 +208,7 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
         if (num_threads_per_invocation > 32) {
             if (thread_idx == 0) {
                 sharedBlockState.initOffset = cur_node->curOffset.fetch_add(
-                    consts::numMegakernelThreads / num_threads_per_invocation,
+                    MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK / num_threads_per_invocation,
                     std::memory_order_relaxed);
             }
 
@@ -263,7 +265,7 @@ void TaskGraph::finishWork(bool lane_executed)
     if (num_threads_per_invocation > 32) {
         __syncthreads();
 
-        num_finished_threads = consts::numMegakernelThreads;
+        num_finished_threads = MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK;
 
         is_leader = threadIdx.x == 0;
     } else {
@@ -445,8 +447,8 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
 }
 
 extern "C" __global__ void
-__launch_bounds__(madrona::consts::numMegakernelThreads,
-                  madrona::consts::numMegakernelBlocksPerSM)
+__launch_bounds__(MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK,
+                  MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM)
 madronaMWGPUMegakernel()
 {
     madrona::mwGPU::megakernelImpl();
