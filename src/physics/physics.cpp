@@ -212,12 +212,9 @@ static MADRONA_ALWAYS_INLINE inline float applyPositionalUpdate(
     Vector3 r1, Vector3 r2,
     float inv_m1, float inv_m2,
     Vector3 inv_I1, Vector3 inv_I2,
-    Vector3 n_world,
+    Vector3 n_world, Vector3 n_local1, Vector3 n_local2, 
     float c, float alpha_tilde)
 {
-    Vector3 n_local1 = q1.inv().rotateVec(n_world);
-    Vector3 n_local2 = q2.inv().rotateVec(n_world);
-
     Vector3 torque_axis_local1 = cross(r1, n_local1);
     Vector3 torque_axis_local2 = cross(r2, n_local2);
 
@@ -282,8 +279,8 @@ static MADRONA_ALWAYS_INLINE inline float handleContactConstraint(
     Vector3 r1, Vector3 r2,
     Vector3 p1, Vector3 p2,
     Vector3 p1_hat, Vector3 p2_hat,
-    Vector3 n_world, float d,
-    float avg_mu_s)
+    Vector3 n_world, Vector3 n_local1, Vector3 n_local2, 
+    float d, float avg_mu_s)
 {
     float lambda_n = applyPositionalUpdate(
         x1, x2,
@@ -291,7 +288,7 @@ static MADRONA_ALWAYS_INLINE inline float handleContactConstraint(
         r1, r2,
         inv_m1, inv_m2,
         inv_I1, inv_I2,
-        n_world,
+        n_world, n_local1, n_local2,
         d, 0);
 
     Vector3 delta_p = (p1 - p1_hat) - (p2 - p2_hat);
@@ -334,7 +331,7 @@ static MADRONA_ALWAYS_INLINE inline float handleContactConstraint(
     return lambda_n;
 }
 
-struct LocalContact {
+struct LocalContactPair {
     Vector3 r1;
     Vector3 r2;
 };
@@ -344,11 +341,11 @@ struct TmpGlobalContact {
     Vector3 p2;
 };
 
-static inline MADRONA_ALWAYS_INLINE LocalContact
-getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
-                      const PreSolvePositional &presolve_pos2,
-                      const Contact &contact,
-                      CountT point_idx)
+static inline MADRONA_ALWAYS_INLINE LocalContactPair getLocalSpaceContacts(
+    const PreSolvePositional &presolve_pos1,
+    const PreSolvePositional &presolve_pos2,
+    const Contact &contact,
+    CountT point_idx)
 {
     Vector3 contact1 = contact.points[point_idx].xyz();
     float penetration_depth = contact.points[point_idx].w;
@@ -421,26 +418,35 @@ static inline void handleContact(Context &ctx,
         inv_I2 = Vector3::zero();
     }
 
-    float mu_s1 = metadata1.muS;
-    float mu_s2 = metadata2.muS;
+    const float mu_s1 = metadata1.muS;
+    const float mu_s2 = metadata2.muS;
 
-    float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
+    const float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
 
-    LocalContact local_contacts[4]; 
+    Vector3 n_world = contact.normal;
+    Vector3 n_local1 = q1.inv().rotateVec(n_world);
+    Vector3 n_local2 = q2.inv().rotateVec(n_world);
+
     TmpGlobalContact cur_global_contacts[4];
 
     CountT num_active_contacts = 0;
-    float max_dist = 0;
+    float sep_distance = 0;
 
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        local_contacts[i] =
+        auto [r1, r2] =
             getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
 
-        Vector3 p1 = q1.rotateVec(local_contacts[i].r1) + x1;
-        Vector3 p2 = q2.rotateVec(local_contacts[i].r2) + x2;
+        Vector3 torque_axis_local1 = cross(r1, n_local1);
+        Vector3 torque_axis_local2 = cross(r2, n_local2);
+
+        Vector3 rot_axis_local1 = multDiag(inv_I1, torque_axis_local1);
+        Vector3 rot_axis_local2 = multDiag(inv_I2, torque_axis_local2);
+
+        Vector3 p1 = q1.rotateVec(r1) + x1;
+        Vector3 p2 = q2.rotateVec(r2) + x2;
 
         float d = dot(p1 - p2, n_world);
 
@@ -476,8 +482,8 @@ static inline void handleContact(Context &ctx,
         avg_local1, avg_local2,
         p1, p2,
         p1_hat, p2_hat,
-        contact.normal, d,
-        avg_mu_s);
+        n_world, n_local1, n_local2,
+        sep_distance, avg_mu_s);
 
     *x1_ptr = x1;
     *x2_ptr = x2;
