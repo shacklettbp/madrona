@@ -661,7 +661,7 @@ void BatchRenderer::Impl::render()
     if (appDelegate.has_value()) {
         pumpCocoaEvents(NS::app());
     }
-    
+
     auto frame_render_pool = NS::AutoreleasePool::alloc()->init();
 
     MTL::CommandBuffer *cmd =
@@ -713,12 +713,26 @@ void BatchRenderer::Impl::render()
 
     auto copy_out_enc = cmd->blitCommandEncoder();
     copy_out_enc->waitForFence(drawFinishedFence);
-    copy_out_enc->copyFromTexture(drawColorTarget, 0, 0,
-        MTL::Origin(0, 0, 0), MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
-        rgbOutBuffer, 0, sizeof(uint8_t) * 4 * cfg.renderWidth, 0);
-    copy_out_enc->copyFromTexture(drawDepthTarget, 0, 0,
-        MTL::Origin(0, 0, 0), MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
-        depthOutBuffer, 0, sizeof(float) * cfg.renderWidth, 0);
+    for (CountT world_idx = 0; world_idx < cfg.numWorlds; world_idx++) {
+        CountT num_world_views = numViewsBase[world_idx];
+        for (CountT world_view_idx = 0; world_view_idx < num_world_views;
+             world_view_idx++) {
+            CountT view_idx = world_idx * cfg.maxViewsPerWorld + world_view_idx;
+
+            copy_out_enc->copyFromTexture(drawColorTarget, view_idx, 0,
+                MTL::Origin(0, 0, 0),
+                MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
+                rgbOutBuffer, view_idx * cfg.renderWidth *
+                    cfg.renderHeight * sizeof(uint8_t) * 4,
+                sizeof(uint8_t) * 4 * cfg.renderWidth, 0);
+            copy_out_enc->copyFromTexture(drawDepthTarget, view_idx, 0,
+                MTL::Origin(0, 0, 0),
+                MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
+                depthOutBuffer, view_idx * cfg.renderWidth *
+                    cfg.renderHeight * sizeof(float),
+                sizeof(float) * cfg.renderWidth, 0);
+        }
+    }
     copy_out_enc->endEncoding();
 
     cmd->commit();
