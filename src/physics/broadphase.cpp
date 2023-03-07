@@ -280,63 +280,154 @@ void BVH::rebuild()
     }
 
 #if 0
-    // validate tree AABBs
-    int32_t num_leaves = num_leaves_.load(std::memory_order_relaxed);
-    for (int32_t i = 0; i < num_leaves; i++) {
-        const AABB &leaf_aabb = leaf_aabbs_[i];
-        uint32_t leaf_parent = leaf_parents_[i];
+    {
+        // validate tree bottom up
+        int32_t num_leaves = num_leaves_.load_relaxed();
+        for (int32_t i = 0; i < num_leaves; i++) {
+            const AABB &leaf_aabb = leaf_aabbs_[i];
+            uint32_t leaf_parent = leaf_parents_[i];
 
-        int32_t node_idx = int32_t(leaf_parent >> 2_u32);
-        int32_t sub_idx = int32_t(leaf_parent & 3);
+            int32_t node_idx = int32_t(leaf_parent >> 2_u32);
+            int32_t sub_idx = int32_t(leaf_parent & 3);
 
-        Node *node = &nodes_[node_idx];
-        while (true) {
-            auto invalid = [&]() {
-                printf("%d %d %d\n\t(%f %f %f) (%f %f %f)\n\t(%f %f %f) (%f %f %f)\n",
-                       i, node_idx, sub_idx, leaf_aabb.pMin.x, leaf_aabb.pMin.y, leaf_aabb.pMin.z,
-                       leaf_aabb.pMax.x, leaf_aabb.pMax.y, leaf_aabb.pMax.z,
-                       node->minX[sub_idx], node->minY[sub_idx], node->minZ[sub_idx],
-                       node->maxX[sub_idx], node->maxY[sub_idx], node->maxZ[sub_idx]);
-                assert(false);
-            };
+            Node *node = &nodes_[node_idx];
+            while (true) {
+                auto invalid = [&]() {
+                    printf("%d %d %d\n\t(%f %f %f) (%f %f %f)\n\t(%f %f %f) (%f %f %f)\n",
+                           i, node_idx, sub_idx, leaf_aabb.pMin.x, leaf_aabb.pMin.y, leaf_aabb.pMin.z,
+                           leaf_aabb.pMax.x, leaf_aabb.pMax.y, leaf_aabb.pMax.z,
+                           node->minX[sub_idx], node->minY[sub_idx], node->minZ[sub_idx],
+                           node->maxX[sub_idx], node->maxY[sub_idx], node->maxZ[sub_idx]);
+                    assert(false);
+                };
 
-            if (leaf_aabb.pMin.x < node->minX[sub_idx]) {
-                invalid();
-            }
-            if (leaf_aabb.pMin.y < node->minY[sub_idx]) {
-                invalid();
-            }
-            if (leaf_aabb.pMin.z < node->minZ[sub_idx]) {
-                invalid();
-            }
+                if (leaf_aabb.pMin.x < node->minX[sub_idx]) {
+                    invalid();
+                }
+                if (leaf_aabb.pMin.y < node->minY[sub_idx]) {
+                    invalid();
+                }
+                if (leaf_aabb.pMin.z < node->minZ[sub_idx]) {
+                    invalid();
+                }
 
-            if (leaf_aabb.pMax.x > node->maxX[sub_idx]) {
-                invalid();
-            }
-            if (leaf_aabb.pMax.y > node->maxY[sub_idx]) {
-                invalid();
-            }
-            if (leaf_aabb.pMax.z > node->maxZ[sub_idx]) {
-                invalid();
-            }
+                if (leaf_aabb.pMax.x > node->maxX[sub_idx]) {
+                    invalid();
+                }
+                if (leaf_aabb.pMax.y > node->maxY[sub_idx]) {
+                    invalid();
+                }
+                if (leaf_aabb.pMax.z > node->maxZ[sub_idx]) {
+                    invalid();
+                }
 
-            int child_idx = node_idx;
-            node_idx = node->parentID;
-            if (node_idx == sentinel_) {
-                break;
-            }
-
-            node = &nodes_[node_idx];
-
-            int child_offset = -1;
-            for (int j = 0; j < 4; j++) {
-                if (node->children[j] == child_idx) {
-                    child_offset = j;
+                int child_idx = node_idx;
+                node_idx = node->parentID;
+                if (node_idx == sentinel_) {
                     break;
                 }
-            }
-            sub_idx = child_offset;
+
+                node = &nodes_[node_idx];
+
+                int child_offset = -1;
+                for (int j = 0; j < 4; j++) {
+                    if (node->children[j] == child_idx) {
+                        child_offset = j;
+                        break;
+                    }
+                }
+                sub_idx = child_offset;
+            };
+        }
+    }
+
+    // Validate top down
+    {
+        int32_t stack[128];
+        AABB aabb_stack[128];
+        stack[0] = 0;
+        aabb_stack[0] = {
+            -FLT_MAX,
+            -FLT_MAX,
+            -FLT_MAX,
+            FLT_MAX,
+            FLT_MAX,
+            FLT_MAX,
         };
+        CountT stack_size = 1;
+
+        while (stack_size > 0) { 
+            int32_t stack_idx = --stack_size;
+            int32_t node_idx = stack[stack_idx];
+            madrona::math::AABB parent_aabb = aabb_stack[stack_idx];
+
+            const Node &node = nodes_[node_idx];
+            for (int i = 0; i < 4; i++) {
+                if (!node.hasChild(i)) {
+                    continue; // Technically this could be break?
+                }
+
+                AABB child_aabb {
+                    /* .pMin = */ {
+                        node.minX[i],
+                        node.minY[i],
+                        node.minZ[i],
+                    },
+                    /* .pMax = */ {
+                        node.maxX[i],
+                        node.maxY[i],
+                        node.maxZ[i],
+                    },
+                };
+
+                auto invalid = [&]() {
+                    printf("Invalid top down %d %d (%f %f %f) (%f %f %f) (%f %f %f) (%f %f %f)\n",
+                           node_idx, i,
+                           parent_aabb.pMin.x, parent_aabb.pMin.y, parent_aabb.pMin.z,
+                           parent_aabb.pMax.x, parent_aabb.pMax.y, parent_aabb.pMax.z,
+                           child_aabb.pMin.x, child_aabb.pMin.y, child_aabb.pMin.z,
+                           child_aabb.pMax.x, child_aabb.pMax.y, child_aabb.pMax.z);
+                    assert(false);
+                };
+
+                if (child_aabb.pMin.x < parent_aabb.pMin.x) {
+                    invalid();
+                }
+
+                if (child_aabb.pMin.y < parent_aabb.pMin.y) {
+                    invalid();
+                }
+
+                if (child_aabb.pMin.z < parent_aabb.pMin.z) {
+                    invalid();
+                }
+
+                if (child_aabb.pMax.x > parent_aabb.pMax.x) {
+                    invalid();
+                }
+
+                if (child_aabb.pMax.y > parent_aabb.pMax.y) {
+                    invalid();
+                }
+
+                if (child_aabb.pMax.z > parent_aabb.pMax.z) {
+                    invalid();
+                }
+
+                if (node.isLeaf(i)) {
+                    int32_t leaf_idx = node.leafIDX(i);
+                    if (leaf_idx >= num_leaves_.load_relaxed()) {
+                        printf("Out of bounds leaf %u %u %u\n",
+                               i, leaf_idx, num_leaves_.load_relaxed());
+                        assert(false);
+                    }
+                } else {
+                    stack[stack_size] = node.children[i];
+                    aabb_stack[stack_size] = child_aabb;
+                    stack_size += 1;
+                }
+            }
+        }
     }
 #endif
 }
