@@ -27,6 +27,10 @@ struct SolverData {
 
 namespace broadphase {
 
+TaskGraph::NodeID setupBVHTasks(
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> deps);
+
 TaskGraph::NodeID setupPreIntegrationTasks(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps);

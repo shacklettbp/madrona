@@ -954,15 +954,23 @@ inline void reportNarrowphaseClocks(Engine &ctx,
 }
 #endif
 
-TaskGraph::NodeID RigidBodyPhysicsSystem::setupTasks(
-    TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps,
+TaskGraph::NodeID RigidBodyPhysicsSystem::setupBroadphaseTasks(
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> deps)
+{
+    return broadphase::setupBVHTasks(builder, deps);
+}
+
+TaskGraph::NodeID RigidBodyPhysicsSystem::setupSubstepTasks(
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> deps,
     CountT num_substeps)
 {
-    auto collect_constraints = builder.addToGraph<ParallelForNode<Context,
-        collectConstraintsSystem, JointConstraint>>(deps);
-
     auto broadphase_pre =
         broadphase::setupPreIntegrationTasks(builder, deps);
+
+    auto collect_constraints = builder.addToGraph<ParallelForNode<Context,
+        collectConstraintsSystem, JointConstraint>>(deps);
 
     auto cur_node = broadphase_pre;
     for (CountT i = 0; i < num_substeps; i++) {
