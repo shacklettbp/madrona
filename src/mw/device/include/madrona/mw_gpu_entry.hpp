@@ -5,6 +5,8 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #include <madrona/mw_gpu/tracing.hpp>
 
+#include "../../../render/interop.hpp"
+
 namespace madrona {
 namespace mwGPU {
 namespace entryKernels {
@@ -56,7 +58,11 @@ __global__ void initWorlds(int32_t num_worlds,
     });
 
     if (renderer_inits != nullptr) {
-        TaskGraph::setupRenderer(ctx, renderer_inits, world_idx);
+        // TaskGraph::setupRenderer(ctx, renderer_inits, world_idx);
+        const render::RendererInit &renderer_init =
+            ((const render::RendererInit *)renderer_inits)[world_idx];
+
+        render::RendererState::init(ctx, renderer_init);
     }
 
     new (world) WorldT(ctx, *cfg, user_inits[world_idx]);

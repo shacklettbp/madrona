@@ -26,19 +26,6 @@ static inline __attribute__((always_inline)) void dispatch(
 
 }
 
-TaskGraph::TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
-    : sorted_nodes_(nodes),
-      num_nodes_(num_nodes),
-      node_datas_(node_datas),
-      cur_node_idx_(num_nodes),
-      init_barrier_(MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS * MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM)
-{}
-
-TaskGraph::~TaskGraph()
-{
-    rawDealloc(sorted_nodes_);
-}
-
 struct TaskGraph::BlockState {
     int32_t nodeIdx;
     uint32_t totalNumInvocations;
@@ -49,7 +36,7 @@ struct TaskGraph::BlockState {
 
 static __shared__ TaskGraph::BlockState sharedBlockState;
 
-void TaskGraph::init()
+void inline TaskGraph::init()
 {
     int thread_idx = threadIdx.x;
     if (thread_idx != 0) {
@@ -63,9 +50,9 @@ void TaskGraph::init()
         mwGPU::DeviceTracing::resetIndex();
         // special calibration indicating the beginning of the kernel
         mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration,
-                                    MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK / 32,
-                                    MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM,
-                                    MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS);
+                                    blockDim.x * blockDim.y * blockDim.z / 32,
+                                    gridDim.y,
+                                    gridDim.x);
 
         Node &first_node = sorted_nodes_[0];
 
@@ -77,14 +64,25 @@ void TaskGraph::init()
 
         cur_node_idx_.store_release(0);
 
-#ifdef LIMIT_ACTIVE_BLOCKS
-        for (size_t i = 0; i < MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS; i++) {
-            block_sm_offsets_[i].store_relaxed(0);
-        }
-#endif
+// #ifdef LIMIT_ACTIVE_BLOCKS
+//         for (size_t i = 0; i < MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS; i++) {
+//             block_sm_offsets_[i].store_relaxed(0);
+//         }
+// #endif
     }
 
-    init_barrier_.arrive_and_wait();
+    // init_barrier.arrive_and_wait();
+    auto count = completed_blocks_.fetch_add_relaxed(1);
+    if (count == gridDim.y * gridDim.x - 1) {
+        synced_.store_relaxed(1);
+    }
+    while (synced_.load_relaxed() == 0) {
+        __nanosleep(0);
+    }
+    count = completed_blocks_.fetch_sub_relaxed(1);
+    if (count == 1) {
+        synced_.store_relaxed(0);
+    }
 
     if (thread_idx == 0) {
         sharedBlockState.nodeIdx = -1;
@@ -100,16 +98,8 @@ void TaskGraph::init()
 #endif
 }
 
-void TaskGraph::setupRenderer(Context &ctx, const void *renderer_inits,
-                              int32_t world_idx)
-{
-    const render::RendererInit &renderer_init =
-        ((const render::RendererInit *)renderer_inits)[world_idx];
 
-    render::RendererState::init(ctx, renderer_init);
-}
-
-void TaskGraph::updateBlockState()
+void inline TaskGraph::updateBlockState()
 {
     uint32_t node_idx = cur_node_idx_.load_acquire();
     if (node_idx == num_nodes_) {
@@ -134,10 +124,10 @@ void TaskGraph::updateBlockState()
     sharedBlockState.funcID = cur_node.funcID;
     sharedBlockState.numThreadsPerInvocation = num_threads_per_invocation;
     sharedBlockState.initOffset = cur_node.curOffset.fetch_add_relaxed(
-        MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK / num_threads_per_invocation);
+        blockDim.x * blockDim.y * blockDim.z / num_threads_per_invocation);
 }
 
-uint32_t TaskGraph::computeNumInvocations(Node &node)
+uint32_t inline TaskGraph::computeNumInvocations(Node &node)
 {
     if (node.fixedCount == 0) {
         auto data_ptr = (NodeBase *)node_datas_[node.dataIDX].userData;
@@ -147,7 +137,7 @@ uint32_t TaskGraph::computeNumInvocations(Node &node)
     }
 }
 
-TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
+TaskGraph::WorkerState inline TaskGraph::getWork(NodeBase **node_data,
                                           uint32_t *run_func_id,
                                           int32_t *run_offset)
 {
@@ -207,7 +197,7 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
             if (thread_idx == 0) {
                 sharedBlockState.initOffset =
                     cur_node->curOffset.fetch_add_relaxed(
-                    MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK / num_threads_per_invocation);
+                    blockDim.x * blockDim.y * blockDim.z / num_threads_per_invocation);
             }
 
             __syncthreads();
@@ -253,7 +243,7 @@ TaskGraph::WorkerState TaskGraph::getWork(NodeBase **node_data,
     return WorkerState::Run;
 }
 
-void TaskGraph::finishWork(bool lane_executed)
+void inline TaskGraph::finishWork(bool lane_executed)
 {
     uint32_t num_finished_threads;
     bool is_leader;
@@ -263,7 +253,7 @@ void TaskGraph::finishWork(bool lane_executed)
     if (num_threads_per_invocation > 32) {
         __syncthreads();
 
-        num_finished_threads = MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK;
+        num_finished_threads = blockDim.x * blockDim.y * blockDim.z;
 
         is_leader = threadIdx.x == 0;
     } else {
@@ -374,78 +364,4 @@ static inline __attribute__((always_inline)) void megakernelImpl()
 }
 
 }
-}
-
-extern "C" __global__ void madronaMWGPUComputeConstants(
-    uint32_t num_worlds,
-    uint32_t num_world_data_bytes,
-    uint32_t world_data_alignment,
-    madrona::mwGPU::GPUImplConsts *out_constants,
-    size_t *job_system_buffer_size)
-{
-    using namespace madrona;
-    using namespace madrona::mwGPU;
-
-    uint64_t total_bytes = sizeof(TaskGraph);
-
-    uint64_t state_mgr_offset = utils::roundUp(total_bytes,
-        (uint64_t)alignof(StateManager));
-
-    total_bytes = state_mgr_offset + sizeof(StateManager);
-
-    uint64_t world_data_offset =
-        utils::roundUp(total_bytes, (uint64_t)world_data_alignment);
-
-    uint64_t total_world_bytes =
-        (uint64_t)num_world_data_bytes * (uint64_t)num_worlds;
-
-    total_bytes = world_data_offset + total_world_bytes;
-
-    uint64_t host_allocator_offset =
-        utils::roundUp(total_bytes, (uint64_t)alignof(mwGPU::HostAllocator));
-
-    total_bytes = host_allocator_offset + sizeof(mwGPU::HostAllocator);
-
-    uint64_t host_print_offset =
-        utils::roundUp(total_bytes, (uint64_t)alignof(mwGPU::HostPrint));
-
-    total_bytes = host_print_offset + sizeof(mwGPU::HostPrint);
-
-    uint64_t tmp_allocator_offset =
-        utils::roundUp(total_bytes, (uint64_t)alignof(TmpAllocator));
-
-    total_bytes = tmp_allocator_offset + sizeof(TmpAllocator);
-
-    uint64_t device_tracing_offset = utils::roundUp(
-        total_bytes, (uint64_t)alignof(mwGPU::DeviceTracing));
-
-    total_bytes = device_tracing_offset + sizeof(mwGPU::DeviceTracing);
-
-    *out_constants = GPUImplConsts {
-        /*.jobSystemAddr = */                  (void *)0ul,
-        /* .taskGraph = */                     (void *)0ul,
-        /* .stateManagerAddr = */              (void *)state_mgr_offset,
-        /* .worldDataAddr =  */                (void *)world_data_offset,
-        /* .hostAllocatorAddr = */             (void *)host_allocator_offset,
-        /* .hostPrintAddr = */                 (void *)host_print_offset,
-        /* .tmpAllocatorAddr */                (void *)tmp_allocator_offset,
-        /* .deviceTracingAddr = */             (void *)device_tracing_offset,
-        /* .numWorldDataBytes = */             num_world_data_bytes,
-        /* .numWorlds = */                     num_worlds,
-        /* .jobGridsOffset = */                (uint32_t)0,
-        /* .jobListOffset = */                 (uint32_t)0,
-        /* .maxJobsPerGrid = */                0,
-        /* .sharedJobTrackerOffset = */        (uint32_t)0,
-        /* .userJobTrackerOffset = */          (uint32_t)0,
-    };
-
-    *job_system_buffer_size = total_bytes;
-}
-
-extern "C" __global__ void
-__launch_bounds__(MADRONA_MWGPU_NUM_MEGAKERNEL_THREADS_PER_BLOCK,
-                  MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM)
-madronaMWGPUMegakernel()
-{
-    madrona::mwGPU::megakernelImpl();
 }

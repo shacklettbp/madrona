@@ -17,6 +17,8 @@ def parse_device_logs(events):
     def new_step(num_warps, num_blocks, num_sms):
         nonlocal STEP
         STEP += 1
+        print("spec for step {}, num_warps: {}, num_blocks: {}, num_sms: {}".
+              format(STEP, num_warps, num_blocks, num_sms))
         LOG_STEPS[STEP] = {
             "events": {},
             "SMs": {},

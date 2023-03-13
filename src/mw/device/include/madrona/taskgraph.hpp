@@ -130,7 +130,12 @@ public:
     };
 
     TaskGraph(const TaskGraph &) = delete;
-    ~TaskGraph();
+    // ~TaskGraph();
+    ~TaskGraph()
+    {
+        rawDealloc(sorted_nodes_);
+    }
+
 
     void init();
 
@@ -145,8 +150,8 @@ public:
     template <typename ContextT>
     static ContextT makeContext(WorldID world_id);
 
-    static void setupRenderer(Context &ctx, const void *renderer_inits,
-                              int32_t world_idx);
+    // static void setupRenderer(Context &ctx, const void *renderer_inits,
+    //                           int32_t world_idx);
 
     template <typename NodeT>
     NodeT & getNodeData(TypedDataID<NodeT> data_id);
@@ -155,8 +160,15 @@ public:
 private:
     template <typename ContextT, bool> struct WorldTypeExtract;
 
-    TaskGraph(Node *nodes, uint32_t num_nodes,
-              NodeData *node_datas);
+    // TaskGraph(Node *nodes, uint32_t num_nodes,
+    //           NodeData *node_datas);
+    TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
+        : sorted_nodes_(nodes),
+        num_nodes_(num_nodes),
+        node_datas_(node_datas),
+        cur_node_idx_(num_nodes)
+        // init_barrier_(MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS * MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM)
+    {}
 
     inline void updateBlockState();
     inline uint32_t computeNumInvocations(Node &node);
@@ -165,10 +177,12 @@ private:
     uint32_t num_nodes_;
     NodeData *node_datas_;
     AtomicU32 cur_node_idx_;
-#ifdef LIMIT_ACTIVE_BLOCKS
-    AtomicU32 block_sm_offsets_[MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS];
-#endif
-    cuda::barrier<cuda::thread_scope_device> init_barrier_;
+// #ifdef LIMIT_ACTIVE_BLOCKS
+//     AtomicU32 block_sm_offsets_[MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS];
+// #endif
+    // cuda::barrier<cuda::thread_scope_device> init_barrier_;
+    AtomicU32 completed_blocks_{0};
+    AtomicU32 synced_{0};
 
 friend class Builder;
 };

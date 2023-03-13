@@ -1163,15 +1163,9 @@ static inline void addManifoldToSolver(
 
 #ifdef MADRONA_GPU_MODE
 namespace gpuImpl {
-inline constexpr int32_t numSMemFloats =
-    mwGPU::SharedMemStorage::numSMemBytesPerWarp / sizeof(float);
-
 // FIXME: do something actually intelligent here
 inline constexpr int32_t maxNumPlanes = 40;
 inline constexpr int32_t numPlaneFloats = maxNumPlanes * 4;
-inline constexpr int32_t numVertexFloats =
-    numSMemFloats - numPlaneFloats;
-inline constexpr int32_t maxNumVertices = numVertexFloats / 3;
 }
 #endif
 
@@ -1529,9 +1523,14 @@ static inline void runNarrowphase(
     PROF_START(setup_ctr, narrowphaseSetupClocks);
 
 #ifdef MADRONA_GPU_MODE
+    uint64_t numSMemBytesPerWarp =
+        mwGPU::SharedMemStorage::numSMemBytes / (blockDim.x * blockDim.y * blockDim.z / 32);
+    int32_t numSMemFloats = numSMemBytesPerWarp / sizeof(float);
+    int32_t numVertexFloats = numSMemFloats - gpuImpl::numPlaneFloats;
+    int32_t maxNumVertices = numVertexFloats / 3;
+
     constexpr int32_t max_num_tmp_faces = gpuImpl::maxNumPlanes;
-    constexpr int32_t max_num_tmp_vertices =
-        gpuImpl::maxNumVertices;
+    int32_t max_num_tmp_vertices = maxNumVertices;
 
     Plane tmp_faces_buffer[max_num_tmp_faces];
 
@@ -1539,8 +1538,7 @@ static inline void runNarrowphase(
     Vector3 * smem_vertices_buffer;
     {
         auto smem_buf = (char *)mwGPU::SharedMemStorage::buffer;
-        char *warp_smem_base = smem_buf + 
-            mwGPU::SharedMemStorage::numSMemBytesPerWarp * mwgpu_warp_id;
+        char *warp_smem_base = smem_buf + numSMemBytesPerWarp * mwgpu_warp_id;
 
         smem_faces_buffer = (Plane *)warp_smem_base;
         smem_vertices_buffer =
