@@ -46,7 +46,7 @@ static inline Vector3 multDiag(Vector3 diag, Vector3 v)
     };
 }
 
-[[maybe_unused]] static inline std::tuple<float, float, float> computeEnergy(
+[[maybe_unused]] static inline Vector3 computeEnergy(
     float inv_m, Vector3 inv_I, Vector3 v, Vector3 omega, Quat q)
 {
     if (inv_m == 0.f || inv_I.x == 0.f || inv_I.y == 0.f || inv_I.z == 0.f) {
@@ -283,8 +283,8 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
     Vector3 r1, Vector3 r2,
     Vector3 n_world,
     float avg_mu_s,
-    float &lambda_n,
-    float &lambda_t)
+    float *lambda_n_out,
+    float *lambda_t_out)
 {
     Vector3 p1 = q1.rotateVec(r1) + x1;
     Vector3 p2 = q2.rotateVec(r2) + x2;
@@ -295,6 +295,16 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
         return;
     }
 
+    float lambda_n = applyPositionalUpdate(
+        x1, x2,
+        q1, q2,
+        r1, r2,
+        inv_m1, inv_m2,
+        inv_I1, inv_I2,
+        n_world,
+        d, 0);
+    *lambda_n_out = lambda_n;
+     
     Vector3 x1_prev = prev1.prevPosition;
     Quat q1_prev = prev1.prevRotation;
 
@@ -304,14 +314,10 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
     Vector3 p1_hat = q1_prev.rotateVec(r1) + x1_prev;
     Vector3 p2_hat = q2_prev.rotateVec(r2) + x2_prev;
 
-    lambda_n = applyPositionalUpdate(
-        x1, x2,
-        q1, q2,
-        r1, r2,
-        inv_m1, inv_m2,
-        inv_I1, inv_I2,
-        n_world,
-        d, 0);
+    // Update p1 and p2 so static friction covers any drift
+    // as a result of the positional correction along the normal
+    p1 = q1.rotateVec(r1) + x1;
+    p2 = q2.rotateVec(r2) + x2;
 
     Vector3 delta_p = (p1 - p1_hat) - (p2 - p2_hat);
     Vector3 delta_p_t = delta_p - dot(delta_p, n_world) * n_world;
@@ -332,15 +338,16 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
         Vector3 friction_rot_axis_local2 =
             multDiag(inv_I2, friction_torque_axis_local2);
 
-        lambda_t = computePositionalLambda(
+        float lambda_t = computePositionalLambda(
             friction_torque_axis_local1, friction_torque_axis_local2,
             friction_rot_axis_local1, friction_rot_axis_local2,
             inv_m1, inv_m2,
             tangential_magnitude, 0);
-
         float lambda_threshold = lambda_n * avg_mu_s;
 
         if (lambda_t > lambda_threshold) {
+            *lambda_t_out = lambda_t;
+            
             applyPositionalUpdate(
                 x1, x2,
                 q1, q2,
@@ -451,8 +458,8 @@ static inline void handleContact(Context &ctx,
                                 r1, r2,
                                 contact.normal,
                                 avg_mu_s,
-                                lambda_n,
-                                lambda_t);
+                                &lambda_n,
+                                &lambda_t);
 
         lambdas[i] = lambda_n;
     }
@@ -698,11 +705,92 @@ static inline void applyVelocityUpdate(
     omega2 -= q2.rotateVec(omega2_update_local);
 }
 
-static inline void updateVelocityFromContact(Context &ctx,
-                                             ObjectManager &obj_mgr,
-                                             Contact contact,
-                                             float h,
-                                             float restitution_threshold)
+static inline void applyFrictionFromContact(Context &ctx,
+                                            ObjectManager &obj_mgr,
+                                            Contact contact,
+                                            float h)
+{
+    Velocity *v1_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.ref);
+    Velocity *v2_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.alt);
+
+    Quat q1 = ctx.getDirect<Rotation>(Cols::Rotation, contact.ref);
+    Quat q2 = ctx.getDirect<Rotation>(Cols::Rotation, contact.alt);
+
+    PreSolvePositional presolve_pos1 = ctx.getDirect<PreSolvePositional>(
+        Cols::PreSolvePositional, contact.ref);
+    PreSolvePositional presolve_pos2 =  ctx.getDirect<PreSolvePositional>(
+        Cols::PreSolvePositional, contact.alt);
+
+    ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.ref);
+    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.alt);
+
+    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
+    RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
+
+    float inv_m1 = metadata1.invMass;
+    float inv_m2 = metadata2.invMass;
+    Vector3 inv_I1 = metadata1.invInertiaTensor;
+    Vector3 inv_I2 = metadata2.invInertiaTensor;
+    float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
+
+    auto [v1, omega1] = *v1_out;
+    auto [v2, omega2] = *v2_out;
+
+#pragma unroll
+    for (CountT i = 0; i < 4; i++) {
+        if (i >= contact.numPoints) continue;
+
+        auto [r1, r2] =
+            getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
+
+        Vector3 r1_world = q1.rotateVec(r1);
+        Vector3 r2_world = q2.rotateVec(r2);
+
+        Vector3 v = computeRelativeVelocity(
+            v1, v2, omega1, omega2, r1_world, r2_world);
+
+        Vector3 n = contact.normal;
+
+        // h * mu_d * |f_n| in paper
+        float dynamic_friction_magnitude =
+            mu_d * fabsf(contact.lambdaN[i]) / h;
+
+        float vn = dot(n, v);
+        Vector3 vt = v - n * vn;
+
+        float vt_len = vt.length();
+
+        if (vt_len != 0 && dynamic_friction_magnitude != 0.f) {
+            float corrected_magnitude =
+                -fminf(dynamic_friction_magnitude, vt_len);
+
+            Vector3 delta_world = vt / vt_len;
+
+            Vector3 delta_local1 = q1.inv().rotateVec(delta_world);
+            Vector3 delta_local2 = q2.inv().rotateVec(delta_world);
+
+            Vector3 friction_torque_axis_local1 = cross(r1, delta_local1);
+            Vector3 friction_torque_axis_local2 = cross(r2, delta_local2);
+
+            applyVelocityUpdate(
+                v1, v2,
+                omega1, omega2,
+                q1, q2,
+                friction_torque_axis_local1, friction_torque_axis_local2,
+                inv_m1, inv_m2,
+                inv_I1, inv_I2,
+                delta_world, corrected_magnitude);
+        }
+    }
+
+    *v1_out = Velocity { v1, omega1 };
+    *v2_out = Velocity { v2, omega2 };
+}
+
+static inline void applyRestitutionFromContact(Context &ctx,
+                                               ObjectManager &obj_mgr,
+                                               Contact contact,
+                                               float restitution_threshold)
 {
     Velocity *v1_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.ref);
     Velocity *v2_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.alt);
@@ -733,22 +821,14 @@ static inline void updateVelocityFromContact(Context &ctx,
     float inv_m2 = metadata2.invMass;
     Vector3 inv_I1 = metadata1.invInertiaTensor;
     Vector3 inv_I2 = metadata2.invInertiaTensor;
-    float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
 
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
         if (i >= contact.numPoints) continue;
 
-        // FIXME: If this contact point wasn't actually processed just skip it
-        if (contact.lambdaN[i] == 0.f) continue;
-
-        // FIXME: reconsider separate lambdas?
-        // h * mu_d * |f_n| in paper
-        float dynamic_friction_magnitude =
-            mu_d * fabsf(contact.lambdaN[i]) / h;
-
         auto [r1, r2] =
             getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
+
         Vector3 r1_world = q1.rotateVec(r1);
         Vector3 r2_world = q2.rotateVec(r2);
 
@@ -756,35 +836,11 @@ static inline void updateVelocityFromContact(Context &ctx,
             v1, v2, omega1, omega2, r1_world, r2_world);
 
         Vector3 n = contact.normal;
-        Vector3 n_local1 = q1.inv().rotateVec(n);
-        Vector3 n_local2 = q2.inv().rotateVec(n);
 
         float vn = dot(n, v);
-        Vector3 vt = v - n * vn;
 
-        float vt_len = vt.length();
-
-        if (vt_len != 0 && dynamic_friction_magnitude != 0.f) {
-            float corrected_magnitude =
-                -fminf(dynamic_friction_magnitude, vt_len);
-
-            Vector3 delta_world = vt / vt_len;
-
-            Vector3 delta_local1 = q1.inv().rotateVec(delta_world);
-            Vector3 delta_local2 = q2.inv().rotateVec(delta_world);
-
-            Vector3 friction_torque_axis_local1 = cross(r1, delta_local1);
-            Vector3 friction_torque_axis_local2 = cross(r2, delta_local2);
-
-            applyVelocityUpdate(
-                v1, v2,
-                omega1, omega2,
-                q1, q2,
-                friction_torque_axis_local1, friction_torque_axis_local2,
-                inv_m1, inv_m2,
-                inv_I1, inv_I2,
-                delta_world, corrected_magnitude);
-        }
+        Vector3 restitution_torque_axis_local1 = cross(r1, q1.inv().rotateVec(n));
+        Vector3 restitution_torque_axis_local2 = cross(r2, q2.inv().rotateVec(n));
 
         Vector3 r1_presolve = presolve_pos1.q.rotateVec(r1);
         Vector3 r2_presolve = presolve_pos2.q.rotateVec(r2);
@@ -800,10 +856,8 @@ static inline void updateVelocityFromContact(Context &ctx,
         if (fabsf(vn_bar) <= restitution_threshold) {
             e = 0.f;
         }
-        float restitution_magnitude = fminf(-e * vn_bar, 0) - vn;
 
-        Vector3 restitution_torque_axis_local1 = cross(r1, n_local1);
-        Vector3 restitution_torque_axis_local2 = cross(r2, n_local2);
+        float restitution_magnitude = fminf(-e * vn_bar, 0) - vn;
 
         applyVelocityUpdate(
             v1, v2,
@@ -825,10 +879,17 @@ inline void solveVelocities(Context &ctx, SolverData &solver)
 
     CountT num_contacts = solver.numContacts.load_relaxed();
 
+    for (CountT j = 0; j < 2; j++) {
+        for (CountT i = 0; i < num_contacts; i++) {
+            const Contact &contact = solver.contacts[i];
+            applyRestitutionFromContact(ctx, obj_mgr, contact,
+                                        solver.restitutionThreshold);
+        }
+    }
+
     for (CountT i = 0; i < num_contacts; i++) {
         const Contact &contact = solver.contacts[i];
-        updateVelocityFromContact(ctx, obj_mgr, contact, solver.h,
-                                  solver.restitutionThreshold);
+        applyFrictionFromContact(ctx, obj_mgr, contact, solver.h);
     }
 
     solver.numContacts.store_relaxed(0);
