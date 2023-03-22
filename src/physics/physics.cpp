@@ -502,43 +502,20 @@ inline void handleJointConstraint(Context &ctx,
         inv_I2 = Vector3::zero();
     }
 
-    Vector3 basis_axis_fwd = { 0, 0, 1 };
-    Vector3 basis_axis_right = { 1, 0, 0 };
-
-    Vector3 a1_bar = joint.axes1.rotateVec(basis_axis_fwd);
-    Vector3 b1_bar = joint.axes1.rotateVec(basis_axis_right);
-    Vector3 a2_bar = joint.axes2.rotateVec(basis_axis_fwd);
-    Vector3 b2_bar = joint.axes2.rotateVec(basis_axis_right);
+    Vector3 a1_bar = joint.axes1.rotateVec(math::fwd);
+    Vector3 b1_bar = joint.axes1.rotateVec(math::right);
+    Vector3 a2_bar = joint.axes2.rotateVec(math::fwd);
+    Vector3 b2_bar = joint.axes2.rotateVec(math::right);
 
     Vector3 a1 = q1.rotateVec(a1_bar);
-    Vector3 b1 = q1.rotateVec(b1_bar);
     Vector3 a2 = q2.rotateVec(a2_bar);
-    Vector3 b2 = q2.rotateVec(b2_bar);
-
-    Vector3 r1_world = q1.rotateVec(joint.r1) + x1;
-    Vector3 r2_world = q2.rotateVec(joint.r2) + x2;
-    Vector3 delta_r = r1_world - r2_world;
-    float cur_separation = delta_r.length();
-
-    Vector3 pos_correction_dir;
-    if (cur_separation == 0.f) {
-        pos_correction_dir = a1;
-    } else {
-        pos_correction_dir = delta_r / cur_separation;
-    }
-
-    applyPositionalUpdate(
-        x1, x2,
-        q2, q2,
-        joint.r1, joint.r2,
-        inv_m1, inv_m2,
-        inv_I1, inv_I2,
-        pos_correction_dir, cur_separation - joint.separation, 0);
 
     Vector3 delta_q_a = cross(a1, a2);
     float delta_q_a_magnitude = delta_q_a.length();
-
-    Quat update_q1, update_q2;
+    
+    // FIXME: is it possible to combine angular updates? Regardless,
+    // this double-axis joint constraint should really just be a
+    // quaternion-difference constraint.
 
     if (delta_q_a_magnitude > 0) {
         delta_q_a /= delta_q_a_magnitude;
@@ -550,14 +527,12 @@ inline void handleJointConstraint(Context &ctx,
             inv_I1, inv_I2,
             delta_q_a_local1, delta_q_a_local2,
             delta_q_a_magnitude, 0);
-
-        update_q1 = a_update_q1;
-        update_q2 = a_update_q2;
-    } else {
-        update_q1 = Quat { 1, 0, 0, 0 };
-        update_q2 = Quat { 1, 0, 0, 0 };
+        
+        applyAngularUpdate(q1, q2, a_update_q1, a_update_q2);
     }
 
+    Vector3 b1 = q1.rotateVec(b1_bar);
+    Vector3 b2 = q2.rotateVec(b2_bar);
     Vector3 delta_q_b = cross(b1, b2);
     float delta_q_b_magnitude = delta_q_b.length();
 
@@ -572,11 +547,48 @@ inline void handleJointConstraint(Context &ctx,
             delta_q_b_local1, delta_q_b_local2,
             delta_q_b_magnitude, 0);
 
-        update_q1 *= b_update_q1;
-        update_q2 *= b_update_q2;
+        applyAngularUpdate(q1, q2, b_update_q1, b_update_q2);
     }
 
-    applyAngularUpdate(q1, q2, update_q1, update_q2);
+    Vector3 r1_world = q1.rotateVec(joint.r1) + x1;
+    Vector3 r2_world = q2.rotateVec(joint.r2) + x2;
+
+    Vector3 delta_r = r2_world - r1_world;
+
+    // Update constraint axes
+    a1 = q1.rotateVec(a1_bar);
+    b1 = q1.rotateVec(b1_bar);
+    Vector3 c1 = cross(a1, b1);
+
+    // This implements a fixed distance qlong the a1 axis and no distance
+    // along the other axes
+
+    Vector3 pos_correction = Vector3::zero();
+    {
+        // Unlike paper, subtract from pos_correction because
+        // applyPositionalUpdate applies the negative magnitude to object 1
+        float a_separation = dot(delta_r, a1);
+        pos_correction -= (a_separation - joint.separation) * a1;
+
+        float b_separation = dot(delta_r, b1);
+        pos_correction -= b_separation * b1;
+
+        float c_separation = dot(delta_r, c1);
+        pos_correction -= c_separation * c1;
+    }
+
+    float pos_correction_magnitude = pos_correction.length();
+    if (pos_correction_magnitude > 0.f) {
+        pos_correction /= pos_correction_magnitude;
+    }
+
+    applyPositionalUpdate(
+        x1, x2,
+        q1, q2,
+        joint.r1, joint.r2,
+        inv_m1, inv_m2,
+        inv_I1, inv_I2,
+        pos_correction, pos_correction_magnitude, 0);
 
     *x1_ptr = x1;
     *x2_ptr = x2;
@@ -969,11 +981,12 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupSubstepTasks(
     auto broadphase_pre =
         broadphase::setupPreIntegrationTasks(builder, deps);
 
-    auto collect_constraints = builder.addToGraph<ParallelForNode<Context,
-        collectConstraintsSystem, JointConstraint>>(deps);
-
     auto cur_node = broadphase_pre;
     for (CountT i = 0; i < num_substeps; i++) {
+        // FIXME, Should only need to collect these once per frame
+        auto collect_constraints = builder.addToGraph<ParallelForNode<Context,
+            collectConstraintsSystem, JointConstraint>>({cur_node});
+
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
             ResponseType, ExternalForce, ExternalTorque,
