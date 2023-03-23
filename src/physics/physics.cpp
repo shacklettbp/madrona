@@ -607,15 +607,6 @@ inline void solvePositions(Context &ctx, SolverData &solver)
 {
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
-    CountT num_joint_constraints = solver.numJointConstraints.load_relaxed();
-
-    for (CountT i = 0; i < num_joint_constraints; i++) {
-        JointConstraint joint_constraint = solver.jointConstraints[i];
-        handleJointConstraint(ctx, joint_constraint);
-    }
-
-    solver.numJointConstraints.store_relaxed(0);
-
     CountT num_contacts = solver.numContacts.load_relaxed();
 
     //printf("Solver # contacts: %d\n", num_contacts);
@@ -624,6 +615,15 @@ inline void solvePositions(Context &ctx, SolverData &solver)
         Contact contact = solver.contacts[i];
         handleContact(ctx, obj_mgr, contact, solver.contacts[i].lambdaN);
     }
+
+    CountT num_joint_constraints = solver.numJointConstraints.load_relaxed();
+
+    for (CountT i = 0; i < num_joint_constraints; i++) {
+        JointConstraint joint_constraint = solver.jointConstraints[i];
+        handleJointConstraint(ctx, joint_constraint);
+    }
+
+    solver.numJointConstraints.store_relaxed(0);
 }
 
 inline void setVelocities(Context &ctx,
