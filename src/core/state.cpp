@@ -14,7 +14,11 @@
 #include <mutex>
 #include <string_view>
 
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include <madrona/impl/id_map_impl.inl>
+
 
 namespace madrona {
 
@@ -128,6 +132,7 @@ StateManager::StateManager(CountT num_worlds)
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
+      export_jobs_(0),
       tmp_allocators_(num_worlds),
       num_worlds_(num_worlds),
       register_lock_()
@@ -447,12 +452,110 @@ void * StateManager::exportColumn(uint32_t archetype_id, uint32_t component_id)
 
 #ifdef MADRONA_MW_MODE
     if (archetype.tblStorage.maxNumPerWorld == 0) {
-        FATAL("Can't export non fixed size columns in multi-world mode");
+#ifdef __linux__
+        constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
+#elif defined(__APPLE__)
+        constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON;
+#endif
+
+        uint32_t num_bytes_per_row = component_infos_[component_id]->numBytes;
+        uint64_t map_size = 1'000'000'000 * num_bytes_per_row;
+
+        void *export_buffer = mmap(nullptr, map_size, PROT_NONE,
+            mmap_init_flags, -1, 0);
+
+        if (export_buffer == MAP_FAILED) [[unlikely]] {
+            FATAL("Failed to mmap export buffer");
+        }
+
+        export_jobs_.push_back(ExportJob {
+            .archetypeIdx = archetype_id,
+            .columnIdx = col_idx,
+            .numBytesPerRow = num_bytes_per_row,
+            .numMappedBytes = 0,
+            .exportBuffer = export_buffer,
+        });
+
+        return export_buffer;
     } else {
         return archetype.tblStorage.fixed.tbl.data(col_idx);
     }
 #else
     return archetype.tblStorage.tbl.data(col_idx);
+#endif
+}
+
+void StateManager::copyInExportedColumns()
+{
+#ifdef MADRONA_MW_MODE
+    for (ExportJob &export_job : export_jobs_) {
+        auto &archetype = *archetype_stores_[export_job.archetypeIdx];
+
+        CountT cumulative_copied_rows = 0;
+        for (Table &tbl : archetype.tblStorage.tbls) {
+            CountT num_rows = archetype.tblStorage.tbls[0].numRows();
+
+            if (num_rows == 0) {
+                continue;
+            }
+
+            CountT tbl_start = cumulative_copied_rows;
+            cumulative_copied_rows += num_rows;
+
+            memcpy(tbl.data(export_job.columnIdx),
+                   (char *)export_job.exportBuffer +
+                       tbl_start * export_job.numBytesPerRow,
+                   export_job.numBytesPerRow * num_rows);
+        }
+    }
+#endif
+}
+
+void StateManager::copyOutExportedColumns()
+{
+#ifdef MADRONA_MW_MODE
+    for (ExportJob &export_job : export_jobs_) {
+        auto &archetype = *archetype_stores_[export_job.archetypeIdx];
+
+        CountT cumulative_copied_rows = 0;
+        for (Table &tbl : archetype.tblStorage.tbls) {
+            CountT num_rows = archetype.tblStorage.tbls[0].numRows();
+
+            if (num_rows == 0) {
+                continue;
+            }
+
+            CountT tbl_start = cumulative_copied_rows;
+            cumulative_copied_rows += num_rows;
+
+            CountT num_mapped_bytes = export_job.numMappedBytes;
+
+            if (cumulative_copied_rows >=
+                    num_mapped_bytes / export_job.numBytesPerRow) {
+                CountT new_num_mapped_bytes = std::max(num_mapped_bytes * 2,
+                    (CountT)utils::roundUpPow2(cumulative_copied_rows,
+                                       sysconf(_SC_PAGESIZE)));
+
+                void *res = mmap(
+                    (char *)export_job.exportBuffer + num_mapped_bytes,
+                    new_num_mapped_bytes - num_mapped_bytes,
+                    PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+
+                if (res == MAP_FAILED) {
+                    FATAL("Failed to mmap export buffer");
+                }
+
+                num_mapped_bytes = new_num_mapped_bytes;
+                export_job.numMappedBytes = num_mapped_bytes;
+            }
+
+            memcpy((char *)export_job.exportBuffer +
+                       tbl_start * export_job.numBytesPerRow,
+                   tbl.data(export_job.columnIdx),
+                   export_job.numBytesPerRow * num_rows);
+        }
+    }
 #endif
 }
 

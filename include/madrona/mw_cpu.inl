@@ -39,6 +39,8 @@ TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::TaskGraphExecutor(
         };
         jobs_[i].data = &run_datas_[i];
     }
+
+    initExport();
 }
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>

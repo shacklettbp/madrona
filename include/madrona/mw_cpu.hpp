@@ -43,6 +43,8 @@ protected:
         void *init_data, CountT num_worlds);
 
     ECSRegistry getECSRegistry();
+
+    void initExport();
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

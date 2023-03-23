@@ -156,6 +156,9 @@ public:
     template <typename SingletonT>
     SingletonT * exportSingleton();
 
+    void copyInExportedColumns();
+    void copyOutExportedColumns();
+
     template <typename SingletonT>
     SingletonT & getSingleton(MADRONA_MW_COND(uint32_t world_id));
 
@@ -234,7 +237,7 @@ public:
 
     void * tmpAlloc(MADRONA_MW_COND(uint32_t world_id,) uint64_t num_bytes);
     void resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id));
-     
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
@@ -297,6 +300,17 @@ private:
         VirtualArray<uint32_t> queryData;
     };
 
+#ifdef MADRONA_MW_MODE
+    struct ExportJob {
+        uint32_t archetypeIdx;
+        uint32_t columnIdx;
+        uint32_t numBytesPerRow;
+        uint32_t numMappedBytes;
+
+        void *exportBuffer;
+    };
+#endif
+
     template <typename... ComponentTs, typename Fn, uint32_t... Indices>
     void iterateArchetypesImpl(MADRONA_MW_COND(uint32_t world_id,) 
                                const Query<ComponentTs...> &query, Fn &&fn,
@@ -320,6 +334,10 @@ private:
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;
+
+#ifdef MADRONA_MW_MODE
+    DynArray<ExportJob> export_jobs_;
+#endif
 
     // FIXME: TmpAllocator doesn't belong here should be per CPU worker
     struct TmpAllocator {
