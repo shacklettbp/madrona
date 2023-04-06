@@ -12,6 +12,7 @@
 #include "metal/nscpp/NSRunningApplication.hpp"
 #include "metal/nscpp/CALayer.hpp"
 #include "metal/nscpp/NSScreen.hpp"
+#include "metal/nscpp/NSThread.hpp"
 
 #include <thread>
 
@@ -85,6 +86,52 @@ static inline void stopEventLoop(NS::Application *app)
         CGPoint {0, 0}, 0, 0, 0, nullptr, 0, 0, 0);
     app->postEvent(event, true);
     app->stop(nullptr);
+}
+
+struct ObjCMemberFunction {
+    const char *name;
+    const char *signature;
+    IMP callback;
+};
+
+static Class makeObjCClass(
+    Class parent, const char *name, 
+    Span<const ObjCMemberFunction> mem_funcs,
+    Span<SEL> out_selectors)
+{
+    Class objc_type = objc_allocateClassPair(parent, name, 0);
+
+    for (CountT i = 0; i < mem_funcs.size(); i++) {
+        const auto &mem_func = mem_funcs[i];
+
+        SEL sel = sel_registerName(mem_func.name);
+        class_addMethod(objc_type, sel, mem_func.callback, mem_func.signature);
+        out_selectors[i] = sel;
+    }
+
+    return objc_type;
+}
+
+struct ObjCAllocHelper : NS::Object {
+    static inline NS::Object * make(Class type)
+    {
+        auto ptr = NS::Object::alloc<ObjCAllocHelper>(type);
+        return ptr->init<NS::Object>();
+    }
+};
+
+void setupCocoaMultiThreading()
+{
+    void (*noop_cb)(NS::Object *, SEL, void *) = 
+        [](NS::Object *obj, SEL, void *) { obj->release(); };
+
+    SEL helper_noop;
+    Class nsthread_init_helper = makeObjCClass(
+        (Class)NS::Private::Class::s_kNSObject, "MadronaNSThreadInitHelper",
+        {{ "noop", "v@:@", (IMP)noop_cb }}, { &helper_noop, 1 });
+
+    NS::Object *init_helper = ObjCAllocHelper::make(nsthread_init_helper);
+    NS::Thread::detachNewThreadSelector(helper_noop, init_helper, nullptr);
 }
 
 BatchRenderer::Impl::AppDelegate::AppDelegate(Impl *impl)
@@ -281,6 +328,9 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
     const int64_t max_draws = max_instances * max_views_per_world;
 
     auto pool = NS::AutoreleasePool::alloc()->init();
+
+    setupCocoaMultiThreading();
+
     MTL::Device *dev = MTL::CreateSystemDefaultDevice()->autorelease();
     MTL::CommandQueue *cmd_queue = dev->newCommandQueue()->autorelease();
 
@@ -611,7 +661,9 @@ void BatchRenderer::Impl::render()
     if (appDelegate.has_value()) {
         pumpCocoaEvents(NS::app());
     }
-    
+
+    auto frame_render_pool = NS::AutoreleasePool::alloc()->init();
+
     MTL::CommandBuffer *cmd =
         cmdQueue->commandBufferWithUnretainedReferences();
 
@@ -661,19 +713,31 @@ void BatchRenderer::Impl::render()
 
     auto copy_out_enc = cmd->blitCommandEncoder();
     copy_out_enc->waitForFence(drawFinishedFence);
-    copy_out_enc->copyFromTexture(drawColorTarget, 0, 0,
-        MTL::Origin(0, 0, 0), MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
-        rgbOutBuffer, 0, sizeof(uint8_t) * 4 * cfg.renderWidth, 0);
-    copy_out_enc->copyFromTexture(drawDepthTarget, 0, 0,
-        MTL::Origin(0, 0, 0), MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
-        depthOutBuffer, 0, sizeof(float) * cfg.renderWidth, 0);
+    for (CountT world_idx = 0; world_idx < cfg.numWorlds; world_idx++) {
+        CountT num_world_views = numViewsBase[world_idx];
+        for (CountT world_view_idx = 0; world_view_idx < num_world_views;
+             world_view_idx++) {
+            CountT view_idx = world_idx * cfg.maxViewsPerWorld + world_view_idx;
+
+            copy_out_enc->copyFromTexture(drawColorTarget, view_idx, 0,
+                MTL::Origin(0, 0, 0),
+                MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
+                rgbOutBuffer, view_idx * cfg.renderWidth *
+                    cfg.renderHeight * sizeof(uint8_t) * 4,
+                sizeof(uint8_t) * 4 * cfg.renderWidth, 0);
+            copy_out_enc->copyFromTexture(drawDepthTarget, view_idx, 0,
+                MTL::Origin(0, 0, 0),
+                MTL::Size(cfg.renderWidth, cfg.renderHeight, 1),
+                depthOutBuffer, view_idx * cfg.renderWidth *
+                    cfg.renderHeight * sizeof(float),
+                sizeof(float) * cfg.renderWidth, 0);
+        }
+    }
     copy_out_enc->endEncoding();
 
     cmd->commit();
 
     if (appDelegate.has_value()) {
-        auto drawable_pool = NS::AutoreleasePool::alloc()->init();
-
         MTL::CommandBuffer *present_cmd = cmdQueue->commandBuffer();
         auto *drawable = appDelegate->layer->nextDrawable();
 
@@ -690,9 +754,10 @@ void BatchRenderer::Impl::render()
         present_enc->endEncoding();
         present_cmd->presentDrawable(drawable);
         present_cmd->commit();
-
-        drawable_pool->release();
     }
+
+    cmd->waitUntilCompleted();
+    frame_render_pool->release();
 }
 
 CountT BatchRenderer::Impl::loadObjects(Span<const imp::SourceObject> objs)

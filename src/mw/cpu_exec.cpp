@@ -161,6 +161,8 @@ ThreadPoolExecutor::~ThreadPoolExecutor() = default;
 
 void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
 {
+    stateMgr.copyInExportedColumns();
+
     currentJobs = jobs;
     numJobs = uint32_t(num_jobs);
     nextJob.store_relaxed(0);
@@ -170,6 +172,8 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
 
     mainWakeup.wait<sync::acquire>(0);
     mainWakeup.store_relaxed(0);
+
+    stateMgr.copyOutExportedColumns();
 
     if (renderer.has_value()) {
         renderer->render();
@@ -230,6 +234,11 @@ void ThreadPoolExecutor::initializeContexts(
 ECSRegistry ThreadPoolExecutor::getECSRegistry()
 {
     return ECSRegistry(&impl_->stateMgr, impl_->exportPtrs.data());
+}
+
+void ThreadPoolExecutor::initExport()
+{
+    impl_->stateMgr.copyOutExportedColumns();
 }
 
 void ThreadPoolExecutor::Impl::workerThread(CountT worker_id)

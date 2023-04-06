@@ -154,7 +154,7 @@ ViewSettings RenderingSystem::setupView(Context &ctx,
 {
     RendererState &renderer_state = ctx.getSingleton<RendererState>();
 
-    float fov_scale = 
+    float fov_scale =
 #ifndef MADRONA_BATCHRENDER_RT
         1.f / 
 #endif

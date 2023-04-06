@@ -398,9 +398,15 @@ struct RigidBodyPhysicsSystem {
                                              base::ObjectID obj_id);
 
     static void registerTypes(ECSRegistry &registry);
-    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                                        Span<const TaskGraph::NodeID> deps,
-                                        CountT num_substeps);
+
+    static TaskGraph::NodeID setupBroadphaseTasks(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> deps);
+
+    static TaskGraph::NodeID setupSubstepTasks(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> deps,
+        CountT num_substeps);
 
     static TaskGraph::NodeID setupCleanupTasks(TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> deps);
