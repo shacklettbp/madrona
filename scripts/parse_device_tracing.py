@@ -41,18 +41,19 @@ def parse_device_logs(events):
         warpID = int.from_bytes(array[16:20], byteorder='little')
         blockID = int.from_bytes(array[20:24], byteorder='little')
         smID = int.from_bytes(array[24:28], byteorder='little')
-        cycleCount = int.from_bytes(array[28:36], byteorder='little')
-        logIndex = int.from_bytes(array[36:40], byteorder='little')
+        logIndex = int.from_bytes(array[28:32], byteorder='little')
+        cycleCount = int.from_bytes(array[32:40], byteorder='little')
 
-        # to make a unique block id
-        # blockID += warpID * 82
         if STEP != -1:
             # to make a unique warp id
             warpID += blockID * LOG_STEPS[STEP]["num_warps"]
 
+        # print("event: {}, funcID: {}, numInvocations: {}, nodeID: {}, warpID: {}, blockID: {}, smID: {}, cycleCount: {}, logIndex: {}".format(event, funcID, numInvocations, nodeID, warpID, blockID, smID, cycleCount, logIndex))
         if event == 0:
-            # beginning of a megakernel
-            new_step(funcID, numInvocations, nodeID)
+            # for calibration event, we log kernel config instead of node
+            new_step(num_warps=funcID,
+                     num_blocks=numInvocations,
+                     num_sms=nodeID)
             LOG_STEPS[STEP]["start_timestamp"] = cycleCount
 
         elif event in [1, 2]:
@@ -98,8 +99,7 @@ def parse_device_logs(events):
 
     # drop the last step which might be corrupted
     # del LOG_STEPS[STEP]
-    print(
-        "At the end, complete traces for {} steps are generated".format(STEP))
+    print("At the end, complete traces for {} steps are generated".format(STEP))
 
 
 def serialized_analysis(step_log, nodes_map):
@@ -113,15 +113,17 @@ def serialized_analysis(step_log, nodes_map):
             continue
         nodes_map[i] = {
             "nodeID":
-            i,
+                i,
             "funcID":
-            step_log["mapping"][i][0],
+                step_log["mapping"][i][0],
             "invocations":
-            step_log["mapping"][i][1],
+                step_log["mapping"][i][1],
             "start":
-            calibrate(step_log["events"][i][1], step_log["start_timestamp"]),
+                calibrate(step_log["events"][i][1],
+                          step_log["start_timestamp"]),
             "end":
-            calibrate(step_log["events"][i][2], step_log["start_timestamp"]),
+                calibrate(step_log["events"][i][2],
+                          step_log["start_timestamp"]),
             "SM utilization": []
         }
         nodes_map[i][
@@ -136,10 +138,8 @@ def serialized_analysis(step_log, nodes_map):
 def block_analysis(step_log, nodes_map):
     sm_execution = {k: [] for k in step_log["SMs"].keys()}
     block_exec_time = {
-        "blocks": {k: {}
-                   for k in step_log["SMs"].keys()},  # horizontal
-        "nodes": {k: {}
-                  for k in step_log["SMs"].keys()},  # vertical
+        "blocks": {k: {} for k in step_log["SMs"].keys()},  # horizontal
+        "nodes": {k: {} for k in step_log["SMs"].keys()},  # vertical
     }
 
     for sm in step_log["SMs"]:
@@ -151,9 +151,7 @@ def block_analysis(step_log, nodes_map):
             assert end >= start
             assert start > step_log["start_timestamp"]
 
-            start, end = [
-                i - step_log["start_timestamp"] for i in [start, end]
-            ]
+            start, end = [i - step_log["start_timestamp"] for i in [start, end]]
             sm_execution[sm].append((start, end))
 
             if warpID not in block_exec_time["blocks"][sm]:
@@ -168,12 +166,10 @@ def block_analysis(step_log, nodes_map):
             block_exec_time["nodes"][sm][nodeID].append((start, end, warpID))
 
         block_exec_time["blocks"][sm] = {
-            k: sorted(v)
-            for k, v in block_exec_time["blocks"][sm].items()
+            k: sorted(v) for k, v in block_exec_time["blocks"][sm].items()
         }
         block_exec_time["nodes"][sm] = {
-            k: sorted(v)
-            for k, v in block_exec_time["nodes"][sm].items()
+            k: sorted(v) for k, v in block_exec_time["nodes"][sm].items()
         }
 
     for s in sm_execution:
@@ -210,8 +206,8 @@ def block_analysis(step_log, nodes_map):
                     continue
                 else:
                     assert (False and "no intersections")
-            nodes_map[k]["SM utilization"].append(
-                occupied_time / nodes_map[k]["duration (ns)"])
+            nodes_map[k]["SM utilization"].append(occupied_time /
+                                                  nodes_map[k]["duration (ns)"])
 
     for i in nodes_map:
         assert (len(nodes_map[i]["SM utilization"]) == len(sm_execution))
@@ -234,6 +230,7 @@ COLORS = [
 
 
 def plot_events(step_log, nodes_map, blocks, file_name):
+    # todo: here we have an assumption that each SM has the same number of blocks, which are expected to be true
     num_sms = step_log["num_sms"]
     # num_block_per_sm = step_log["num_blocks"]
     num_warp_per_sm = step_log["num_warps"] * step_log["num_blocks"]
@@ -244,7 +241,7 @@ def plot_events(step_log, nodes_map, blocks, file_name):
     y_blank = num_pixel_per_warp * num_warp_per_sm * 10
     y_limit = num_sms * num_pixel_per_sm + y_blank
     x_limit = y_limit * 2
-    print(x_limit, y_limit)
+    print("the figure size will be {}x{}".format(x_limit, y_limit))
 
     top_nodes = sorted([
         i[0] for i in sorted(nodes_map.items(),
@@ -367,8 +364,6 @@ def plot_events(step_log, nodes_map, blocks, file_name):
 
 def step_analysis(step, file_name, tabular_data):
     step_log = LOG_STEPS[step]
-    # manually add the nodeStart event for node 0
-    step_log["events"][0][1] = (0, 0, step_log["start_timestamp"])
 
     nodes_map = {}
     serialized_analysis(step_log, nodes_map)
@@ -379,8 +374,7 @@ def step_analysis(step, file_name, tabular_data):
     for n in nodes_map:
         tabular_data = pd.concat([
             tabular_data,
-            pd.DataFrame({k: [v]
-                          for k, v in nodes_map[n].items()})
+            pd.DataFrame({k: [v] for k, v in nodes_map[n].items()})
         ])
     return tabular_data
 
@@ -399,6 +393,7 @@ if __name__ == "__main__":
         parse_device_logs(events)
 
     # default value
+    # todo: make it as parameters
     steps = 5
     start_from = 10
     if len(sys.argv) >= 3:
