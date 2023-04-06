@@ -137,10 +137,11 @@ public:
     }
 
 
-    void init();
+    void init(int start_node_idx = 0, int end_node_idx = -1);
 
     WorkerState getWork(NodeBase **node_data,
                         uint32_t *run_func_id,
+                        uint32_t *run_node_id,
                         int32_t *run_offset);
 
     void finishWork(bool lane_executed);
@@ -175,6 +176,7 @@ private:
 
     Node *sorted_nodes_;
     uint32_t num_nodes_;
+    uint32_t end_node_idx_;
     NodeData *node_datas_;
     AtomicU32 cur_node_idx_;
 // #ifdef LIMIT_ACTIVE_BLOCKS

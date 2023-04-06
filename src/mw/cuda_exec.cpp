@@ -22,6 +22,9 @@
 #include <madrona/cuda_utils.hpp>
 #include <madrona/tracing.hpp>
 
+#include <madrona/json.hpp>
+using json = nlohmann::json;
+
 #include "render/batch_renderer.hpp"
 #include "cpp_compile.hpp"
 
@@ -637,12 +640,14 @@ static __attribute__((always_inline)) inline void dispatch(
     std::string init_worlds_name;
     std::string init_tasks_name;
 
+    // for non-primary kernel functions
     std::string megakernel_prefix_sub = megakernel_prefix;
+    std::string megakernel_body_sub = megakernel_body;
 
     uint32_t cur_func_id = 0;
     auto processPTXSymbols = [
             &init_ecs_name, &init_worlds_name, &init_tasks_name,
-            &megakernel_prefix, &megakernel_prefix_sub, &megakernel_body, &cur_func_id,
+            &megakernel_prefix, &megakernel_prefix_sub, &megakernel_body, &megakernel_body_sub, &cur_func_id,
             entry_prefix, entry_postfix,
             entry_params, entry_args, id_prefix](std::string_view ptx) {
 
@@ -692,9 +697,23 @@ static __attribute__((always_inline)) inline void dispatch(
             megakernel_prefix += "void "sv;
             megakernel_prefix += mangled_fn;
             megakernel_prefix += entry_params;
+
+            auto id_str = std::to_string(cur_func_id);
+
+            // hardcoding for narrow phase to exclude redundant code body, didn't see performance improvement
+            // if (id_str != "28") {
             megakernel_prefix_sub += "void "sv;
             megakernel_prefix_sub += mangled_fn;
             megakernel_prefix_sub += entry_params;
+
+            megakernel_body_sub += "        case ";
+            megakernel_body_sub += id_str;
+            megakernel_body_sub += ": {\n";
+            megakernel_body_sub += "            ";
+            megakernel_body_sub += mangled_fn;
+            megakernel_body_sub += entry_args;
+            megakernel_body_sub += "        } break;\n";
+            // }
 
             SizeT postfix_start = mangled_fn.find(entry_postfix);
             assert(postfix_start != mangled_fn.npos);
@@ -703,7 +722,6 @@ static __attribute__((always_inline)) inline void dispatch(
             auto common = mangled_fn.substr(id_common_start,
                                             postfix_start - id_common_start);
             
-            auto id_str = std::to_string(cur_func_id);
 
             megakernel_prefix += "uint32_t ";
             megakernel_prefix += id_prefix;
@@ -752,9 +770,9 @@ static __attribute__((always_inline)) inline void dispatch(
 
 
     std::map<std::tuple<uint32_t, uint32_t, uint32_t>, std::string> megakernel_bodies;
-    bool main_flag = true;
     for (auto [num_threads, num_blocks, num_sms] : megakernel_dims) {
-        std::string megakernel_body_copy = megakernel_body;
+        bool main_flag = num_blocks == consts::numMegakernelBlocksPerSM;
+        std::string megakernel_body_copy = main_flag ? megakernel_body : megakernel_body_sub;
 
         megakernel_body_copy += R"__(        default:
             __builtin_unreachable();
@@ -769,14 +787,13 @@ static __attribute__((always_inline)) inline void dispatch(
         megakernel_body_copy += "extern \"C\" __global__ void\n";
         megakernel_body_copy += "__launch_bounds__(";
         megakernel_body_copy += std::to_string(num_threads) + ", " + std::to_string(num_blocks) + ")\n";
-        megakernel_body_copy += "madronaMWGPUMegakernel_" +  std::to_string(num_threads) + "_" + std::to_string(num_blocks) + "_" + std::to_string(num_sms) + "()\n";
+        megakernel_body_copy += "madronaMWGPUMegakernel_" +  std::to_string(num_threads) + "_" + std::to_string(num_blocks) + "_" + std::to_string(num_sms) + "(int start_node_idx, int end_node_idx)\n";
         megakernel_body_copy += R"__({
-    madrona::mwGPU::megakernelImpl();
+    madrona::mwGPU::megakernelImpl(start_node_idx, end_node_idx);
 }
 )__";
         if (main_flag) {
             megakernel_body_copy = megakernel_prefix + megakernel_body_copy;
-            main_flag = false;
         } else {    
             megakernel_body_copy = megakernel_prefix_sub + megakernel_body_copy;
         }
@@ -1014,6 +1031,14 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         //     megakernel_dims.push_back(std::make_tuple(j, i, num_sms));
         // }
         megakernel_dims.push_back(std::make_tuple(consts::numMegakernelThreads, i, num_sms));
+        
+        // skip extra compilation if unnecessary
+        // auto *get_config_dims = getenv("MADRONA_MWGPU_CONFIG_DIMS");
+        // auto *get_profile_config_file = getenv("MADRONA_MWGPU_PROFILE_CONFIG_FILE");
+        // if (get_config_dims == nullptr && get_profile_config_file == nullptr) {
+        //     // no need to compile multiple megakernels if we're not using other configurations
+        //     break;
+        // }
     }
 
     auto compile_results = compileCode(
@@ -1515,39 +1540,95 @@ static CUgraphExec makeTaskGraphRunGraph(std::map<std::tuple<uint32_t, uint32_t,
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
 
-    auto dims = megakernels.begin()->first;
-    auto megakernel = megakernels.begin()->second;
+    auto dims_default = megakernels.begin()->first;
+    auto megakernel_default = megakernels.begin()->second;
 
     auto *get_config_dims = getenv("MADRONA_MWGPU_CONFIG_DIMS");
     auto *get_profile_config_file = getenv("MADRONA_MWGPU_PROFILE_CONFIG_FILE");
+    
     if (get_config_dims != nullptr) {
         auto config_dims = std::string(get_config_dims);
         auto split = splitString(config_dims);
-        dims = std::make_tuple(std::stoi(split[0]), std::stoi(split[1]), std::stoi(split[2]));
-        megakernel = megakernels[dims];
-    } else if (get_profile_config_file != nullptr) {
-        // todo
-        auto profile_config_file = std::string(get_profile_config_file);
+        dims_default = std::make_tuple(std::stoi(split[0]), std::stoi(split[1]), std::stoi(split[2]));
+        megakernel_default = megakernels[dims_default];
     }
 
-    printf("Using config dims %d %d %d\n", std::get<0>(dims), std::get<1>(dims), std::get<2>(dims));
+    std::map<int32_t, std::tuple<uint32_t, uint32_t, uint32_t>> node_configs;
 
+    if (get_profile_config_file != nullptr) {
+        // todo, sort config by node ids
+        // todo, for now we only have number of blocks in the json file, it is to be defined clearly
+        std::string xx = std::string(get_profile_config_file);
+        std::ifstream profile_config_file(xx);
+        json node_configs_json = json::parse(profile_config_file);
+        for (json::iterator it = node_configs_json.begin(); it != node_configs_json.end(); ++it) {
+            auto config_dims = std::make_tuple(std::get<0>(dims_default), it.value().get<int>(), std::get<2>(dims_default));
+            node_configs[std::stoi(it.key())] = config_dims;
+            printf("for node %d, Using config dims %d %d %d\n", std::stoi(it.key()), std::get<0>(config_dims), std::get<1>(config_dims), std::get<2>(config_dims));
+        }
+    } else {
+        node_configs[-1] = dims_default;
+    }
+
+    printf("Using %d %d %d as the default config dim\n", std::get<0>(dims_default), std::get<1>(dims_default), std::get<2>(dims_default));
+
+    int startNode = 0;
+    int endNode = node_configs.begin()->first;
+
+    void* kernelParams[] = {&startNode, &endNode};
     CUDA_KERNEL_NODE_PARAMS kernel_node_params {
-        .func = megakernel,
-        .gridDimX = std::get<2>(dims),
-        .gridDimY = std::get<1>(dims),
+        .func = megakernel_default,
+        .gridDimX = std::get<2>(dims_default), // number of SMs
+        .gridDimY = std::get<1>(dims_default), // number of blocks per SM
         .gridDimZ = 1,
-        .blockDimX = std::get<0>(dims),
+        .blockDimX = std::get<0>(dims_default), // number of threads per block
         .blockDimY = 1,
         .blockDimZ = 1,
         .sharedMemBytes = 0,
-        .kernelParams = nullptr,
+        .kernelParams = kernelParams,
         .extra = no_args.data(),
     };
 
+    std::vector<CUgraphNode> megakernel_nodes;
     CUgraphNode megakernel_node;
     REQ_CU(cuGraphAddKernelNode(&megakernel_node, run_graph,
         nullptr, 0, &kernel_node_params));
+    megakernel_nodes.push_back(megakernel_node);
+
+    int cuda_graph_node_index = 1;
+
+    auto add_megakernel_node = [&](auto func, auto gridDimY) {
+        kernel_node_params.func = func;
+        kernel_node_params.gridDimY = gridDimY;
+        CUgraphNode megakernel_node_;
+        REQ_CU(cuGraphAddKernelNode(&megakernel_node_, run_graph, &megakernel_nodes[cuda_graph_node_index - 1], 1, &kernel_node_params));
+        megakernel_nodes.push_back(megakernel_node_);
+        cuda_graph_node_index++;
+    };
+
+    for (const auto& kv: node_configs) {
+        if (endNode == -1) {
+            break;
+        }
+        if (endNode < kv.first) {
+            startNode = endNode;
+            endNode = kv.first;
+            add_megakernel_node(megakernel_default, std::get<1>(dims_default));
+        }
+
+        startNode = kv.first;
+        endNode = kv.first + 1;
+        auto dims = kv.second;
+        auto megakernel = megakernels[dims];
+        add_megakernel_node(megakernel, std::get<1>(dims));
+    }
+
+    if (endNode != -1) {
+        startNode = endNode;
+        endNode = -1;
+        add_megakernel_node(megakernel_default, std::get<1>(dims_default));
+    }
+ 
 
     CUgraphExec run_graph_exec;
     REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph, 0));

@@ -119,7 +119,7 @@ private:
                     // mark the current set of traces to be corrupted
                     cur_index_.store_release(-1);
                 } else{
-                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, threadIdx.x / 32, blockIdx.x, sm_id, log_index, globalTimer()};
+                    device_logs_[log_index] = {event, func_id, num_invocations, node_id, threadIdx.x / 32, blockIdx.x + blockIdx.y * gridDim.x, sm_id, log_index, globalTimer()};
                 }
             }
         }
