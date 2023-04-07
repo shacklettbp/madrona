@@ -19,6 +19,7 @@
 
 #include <madrona/impl/id_map_impl.inl>
 
+#include <madrona/math.hpp>
 
 namespace madrona {
 
@@ -493,13 +494,14 @@ void StateManager::copyInExportedColumns()
 
         CountT cumulative_copied_rows = 0;
         for (Table &tbl : archetype.tblStorage.tbls) {
-            CountT num_rows = archetype.tblStorage.tbls[0].numRows();
+            CountT num_rows = tbl.numRows();
 
             if (num_rows == 0) {
                 continue;
             }
 
             CountT tbl_start = cumulative_copied_rows;
+
             cumulative_copied_rows += num_rows;
 
             memcpy(tbl.data(export_job.columnIdx),
@@ -519,7 +521,7 @@ void StateManager::copyOutExportedColumns()
 
         CountT cumulative_copied_rows = 0;
         for (Table &tbl : archetype.tblStorage.tbls) {
-            CountT num_rows = archetype.tblStorage.tbls[0].numRows();
+            CountT num_rows = tbl.numRows();
 
             if (num_rows == 0) {
                 continue;
