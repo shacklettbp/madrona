@@ -101,8 +101,8 @@ inline void substepRigidBodies(Context &ctx,
 
         presolve_pos.x = x;
         presolve_pos.q = q;
-        presolve_vel.v = v;
-        presolve_vel.omega = omega;
+        presolve_vel.v = Vector3::zero();
+        presolve_vel.omega = Vector3::zero();
 
         return;
     }
@@ -724,6 +724,11 @@ static inline void applyFrictionFromContact(Context &ctx,
     ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.ref);
     ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.alt);
 
+    ResponseType resp_type1 = ctx.getDirect<ResponseType>(
+        Cols::ResponseType, contact.ref);
+    ResponseType resp_type2 = ctx.getDirect<ResponseType>(
+        Cols::ResponseType, contact.alt);
+
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
@@ -731,6 +736,17 @@ static inline void applyFrictionFromContact(Context &ctx,
     float inv_m2 = metadata2.invMass;
     Vector3 inv_I1 = metadata1.invInertiaTensor;
     Vector3 inv_I2 = metadata2.invInertiaTensor;
+
+    if (resp_type1 == ResponseType::Static) {
+        inv_m1 = 0.f;
+        inv_I1 = Vector3::zero();
+    }
+
+    if (resp_type2 == ResponseType::Static) {
+        inv_m2 = 0.f;
+        inv_I2 = Vector3::zero();
+    }
+
     float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
 
     auto [v1, omega1] = *v1_out;
@@ -811,6 +827,11 @@ static inline void applyRestitutionFromContact(Context &ctx,
     ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.ref);
     ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.alt);
 
+    ResponseType resp_type1 = ctx.getDirect<ResponseType>(
+        Cols::ResponseType, contact.ref);
+    ResponseType resp_type2 = ctx.getDirect<ResponseType>(
+        Cols::ResponseType, contact.alt);
+
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
@@ -821,6 +842,16 @@ static inline void applyRestitutionFromContact(Context &ctx,
     float inv_m2 = metadata2.invMass;
     Vector3 inv_I1 = metadata1.invInertiaTensor;
     Vector3 inv_I2 = metadata2.invInertiaTensor;
+
+    if (resp_type1 == ResponseType::Static) {
+        inv_m1 = 0.f;
+        inv_I1 = Vector3::zero();
+    }
+
+    if (resp_type2 == ResponseType::Static) {
+        inv_m2 = 0.f;
+        inv_I2 = Vector3::zero();
+    }
 
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
