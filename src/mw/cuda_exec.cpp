@@ -1595,8 +1595,8 @@ static CUgraphExec makeTaskGraphRunGraph(std::map<std::tuple<uint32_t, uint32_t,
         nullptr, 0, &kernel_node_params));
     megakernel_nodes.push_back(megakernel_node);
 
+    // todo: more sophisticated way to optimize the number of nodes in cuda graph
     int cuda_graph_node_index = 1;
-
     auto add_megakernel_node = [&](auto func, auto gridDimY) {
         kernel_node_params.func = func;
         kernel_node_params.gridDimY = gridDimY;
