@@ -20,7 +20,8 @@ struct TaskGraph::BlockState {
 
 static __shared__ TaskGraph::BlockState sharedBlockState;
 
-void TaskGraph::init(int start_node_idx, int end_node_idx)
+void TaskGraph::init(int32_t start_node_idx, int32_t end_node_idx,
+                     int32_t num_blocks_per_sm)
 {
     int thread_idx = threadIdx.x;
     if (thread_idx != 0) {
@@ -35,8 +36,8 @@ void TaskGraph::init(int start_node_idx, int end_node_idx)
         // special calibration indicating the beginning of the kernel
         mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration,
                                   blockDim.x / 32, // # warps
-                                  gridDim.y, // # blocks
-                                  gridDim.x); // # SMs
+                                  num_blocks_per_sm, // # blocks
+                                  MADRONA_MWGPU_NUM_SMS); // # SMs
 
         end_node_idx_ = end_node_idx == -1 ? num_nodes_ : end_node_idx;
 
@@ -63,24 +64,14 @@ void TaskGraph::init(int start_node_idx, int end_node_idx)
         cur_node_idx_.store_release(start_node_idx);
 
 // #ifdef LIMIT_ACTIVE_BLOCKS
-//         for (size_t i = 0; i < MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS; i++) {
+//         for (size_t i = 0; i < MADRONA_MWGPU_NUM_SMS; i++) {
 //             block_sm_offsets_[i].store_relaxed(0);
 //         }
 // #endif
     }
 
-    // init_barrier.arrive_and_wait();
-    auto count = completed_blocks_.fetch_add_relaxed(1);
-    if (count == gridDim.y * gridDim.x - 1) {
-        synced_.store_relaxed(1);
-    }
-    while (synced_.load_relaxed() == 0) {
-        __nanosleep(0);
-    }
-    count = completed_blocks_.fetch_sub_relaxed(1);
-    if (count == 1) {
-        synced_.store_relaxed(0);
-    }
+    auto &init_barrier = init_barriers_[num_blocks_per_sm - 1];
+    init_barrier.arrive_and_wait();
 
     if (thread_idx == 0) {
         sharedBlockState.nodeIdx = 0xffffffff;

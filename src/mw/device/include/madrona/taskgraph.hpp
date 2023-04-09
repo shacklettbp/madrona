@@ -2,8 +2,8 @@
 
 #include <madrona/span.hpp>
 #include <madrona/query.hpp>
-
 #include <madrona/state.hpp>
+#include <madrona/inline_array.hpp>
 
 #include "mw_gpu/const.hpp"
 #include "mw_gpu/worker_init.hpp"
@@ -137,12 +137,13 @@ public:
     }
 
 
-    void init(int start_node_idx = 0, int end_node_idx = -1);
+    void init(int32_t start_node_idx, int32_t end_node_idx,
+              int32_t num_blocks_per_sm);
 
     WorkerState getWork(NodeBase **node_data,
-                               uint32_t *run_func_id,
-                               uint32_t *run_node_id,
-                               int32_t *run_offset);
+                        uint32_t *run_func_id,
+                        uint32_t *run_node_id,
+                        int32_t *run_offset);
 
     void finishWork(bool lane_executed);
 
@@ -161,15 +162,18 @@ public:
 private:
     template <typename ContextT, bool> struct WorldTypeExtract;
 
-    // TaskGraph(Node *nodes, uint32_t num_nodes,
-    //           NodeData *node_datas);
-    TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
+    TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas,
+              int32_t num_sms)
         : sorted_nodes_(nodes),
         num_nodes_(num_nodes),
         node_datas_(node_datas),
         cur_node_idx_(num_nodes)
-        // init_barrier_(MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS * MADRONA_MWGPU_NUM_MEGAKERNEL_BLOCKS_PER_SM)
-    {}
+    {
+        for (int32_t i = 1; i <= consts::maxMegakernelBlocksPerSM; i++) {
+            cuda::barrier::init(&init_barriers_[i],
+                                i * MADRONA_MWGPU_NUM_SMS);
+        }
+    }
 
     inline void updateBlockState();
     inline uint32_t computeNumInvocations(Node &node);
@@ -182,9 +186,8 @@ private:
 // #ifdef LIMIT_ACTIVE_BLOCKS
 //     AtomicU32 block_sm_offsets_[MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS];
 // #endif
-    // cuda::barrier<cuda::thread_scope_device> init_barrier_;
-    AtomicU32 completed_blocks_{0};
-    AtomicU32 synced_{0};
+    FixedInlineArray<cuda::barrier<cuda::thread_scope_device>,
+                     consts::maxMegakernelBlocksPerSM>> init_barriers_;
 
 friend class Builder;
 };

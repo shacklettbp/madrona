@@ -23,11 +23,11 @@ static inline __attribute__((always_inline)) void dispatch(
 #endif
 
 static inline __attribute__((always_inline)) void megakernelImpl(
-    int start_node_idx, int end_node_idx)
+    int32_t start_node_idx, int32_t end_node_idx, int32_t num_blocks_per_sm)
 {
     {
         TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
-        taskgraph->init(start_node_idx, end_node_idx);
+        taskgraph->init(start_node_idx, end_node_idx, num_blocks_per_sm);
     }
 
     __syncthreads();

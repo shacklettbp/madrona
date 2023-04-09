@@ -492,7 +492,8 @@ static void checkAndLoadMegakernelCache(
     });
 }
 
-static std::string getMegakernelConfigSuffixStr(const MegakernelConfig &cfg)
+static std::string getMegakernelConfigSuffixStr(
+    const MegakernelConfig &megakernel_cfg)
 {
     return std::to_string(megakernel_cfg.numThreads) + "_" +
         std::to_string(megakernel_cfg.numBlocksPerSM) + "_" +
@@ -801,7 +802,10 @@ static __attribute__((always_inline)) inline void dispatch(
             "(int32_t start_node_idx, int32_t end_node_idx)\n";
 
         megakernel_postfix += R"__({
-    madrona::mwGPU::megakernelImpl(start_node_idx, end_node_idx);
+    madrona::mwGPU::megakernelImpl(start_node_idx, end_node_idx,)__";
+        megakernel_postfix += megakernel_cfg.numBlocksPerSM;
+
+        megakernel_postfix += R"__();
 }
 )__";
 
@@ -894,6 +898,7 @@ static __attribute__((always_inline)) inline void dispatch(
 
 static GPUKernels buildKernels(const CompileConfig &cfg,
                                Span<const MegakernelConfig> megakernel_cfgs,
+                               int32_t num_sms,
                                std::pair<int, int> cuda_arch)
 {
     CompileConfig::OptMode opt_mode = cfg.optMode;
@@ -937,9 +942,12 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
         to_string(cuda_arch.second);
 
+    string num_sms_str = "-DMADRONA_MWGPU_NUM_SMS=" + to_string(num_sms);
+
     DynArray<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-arch", gpu_arch_str.c_str(),
+        num_sms_str.c_str(),
 #ifdef MADRONA_TRACING
         "-DMADRONA_TRACING=1",
 #endif
@@ -1758,7 +1766,7 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
     }
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
-                                          {dev_prop.major, dev_prop.minor});
+        num_sms, {dev_prop.major, dev_prop.minor});
 
     GPUEngineState eng_state = initEngineAndUserState(
         (int)state_cfg.gpuID, state_cfg.numWorlds,
