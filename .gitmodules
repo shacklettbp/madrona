@@ -25,3 +25,6 @@
 [submodule "external/madrona-toolchain"]
 	path = external/madrona-toolchain
 	url = https://github.com/shacklettbp/madrona-toolchain.git
+[submodule "external/simdjson"]
+	path = external/simdjson
+	url = git@github.com:simdjson/simdjson.git

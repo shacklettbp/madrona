@@ -910,13 +910,13 @@ inline void solveVelocities(Context &ctx, SolverData &solver)
 
     CountT num_contacts = solver.numContacts.load_relaxed();
 
-    for (CountT j = 0; j < 2; j++) {
+    //for (CountT j = 0; j < 2; j++) {
         for (CountT i = 0; i < num_contacts; i++) {
             const Contact &contact = solver.contacts[i];
             applyRestitutionFromContact(ctx, obj_mgr, contact,
                                         solver.restitutionThreshold);
         }
-    }
+    //}
 
     for (CountT i = 0; i < num_contacts; i++) {
         const Contact &contact = solver.contacts[i];

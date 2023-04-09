@@ -41,6 +41,16 @@ target_link_libraries(meshoptimizer PRIVATE
 
 add_subdirectory(fast_float EXCLUDE_FROM_ALL)
 
+set(BUILD_SHARED_LIBS_ORIG ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+add_subdirectory(simdjson EXCLUDE_FROM_ALL)
+set_property(TARGET simdjson PROPERTY
+    POSITION_INDEPENDENT_CODE TRUE)
+target_link_libraries(simdjson PRIVATE
+    madrona_libcxx)
+
+set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_ORIG})
+
 if (MADRONA_ENABLE_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     add_subdirectory(googletest EXCLUDE_FROM_ALL)

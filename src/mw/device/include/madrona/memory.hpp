@@ -118,6 +118,11 @@ namespace SharedMemStorage {
     inline constexpr uint64_t numSMemBytes = 15040;
     extern __shared__ Chunk buffer[
         numSMemBytes / sizeof(Chunk)];
+
+    inline uint64_t numBytesPerWarp()
+    {
+        return numSMemBytes / (blockDim.x / 32);
+    }
 };
 
 class TmpAllocator {

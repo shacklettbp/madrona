@@ -1523,9 +1523,7 @@ static inline void runNarrowphase(
     PROF_START(setup_ctr, narrowphaseSetupClocks);
 
 #ifdef MADRONA_GPU_MODE
-    uint64_t numSMemBytesPerWarp =
-        mwGPU::SharedMemStorage::numSMemBytes / (blockDim.x * blockDim.y * blockDim.z / 32);
-    int32_t numSMemFloats = numSMemBytesPerWarp / sizeof(float);
+    int32_t numSMemFloats = mwGPU::SharedMemStorage::numBytesPerWarp / sizeof(float);
     int32_t numVertexFloats = numSMemFloats - gpuImpl::numPlaneFloats;
     int32_t maxNumVertices = numVertexFloats / 3;
 

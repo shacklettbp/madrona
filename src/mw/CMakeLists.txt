@@ -25,7 +25,7 @@ target_link_libraries(madrona_mw_gpu
     PUBLIC
         madrona_hdrs madrona_cuda
     PRIVATE
-        madrona_mw_core madrona_batch_render
+        madrona_mw_core madrona_batch_render madrona_json
         CUDA::nvrtc CUDA::cuda_driver
         ${CUDA_NVJITLINK_LIBRARY}
 )
@@ -52,7 +52,8 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${DEVICE_SRC_DIR}/memory.cpp
     ${DEVICE_SRC_DIR}/state.cpp
     ${DEVICE_SRC_DIR}/crash.cpp
-    ${DEVICE_SRC_DIR}/const.cpp
+    ${DEVICE_SRC_DIR}/consts.cpp
+    ${DEVICE_SRC_DIR}/taskgraph.cpp
     ${DEVICE_SRC_DIR}/taskgraph_utils.cpp
     ${DEVICE_SRC_DIR}/sort_archetype.cpp
     ${DEVICE_SRC_DIR}/host_print.cpp

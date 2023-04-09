@@ -10,22 +10,6 @@
 
 namespace madrona {
 
-namespace mwGPU {
-
-#ifdef MADRONA_CLANG
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wundefined-internal"
-#endif
-static inline __attribute__((always_inline)) void dispatch(
-        uint32_t func_id,
-        NodeBase *node_data,
-        uint32_t invocation_offset);
-#ifdef MADRONA_CLANG
-#pragma clang diagnostic pop
-#endif
-
-}
-
 struct TaskGraph::BlockState {
     uint32_t nodeIdx;
     uint32_t totalNumInvocations;
@@ -36,24 +20,25 @@ struct TaskGraph::BlockState {
 
 static __shared__ TaskGraph::BlockState sharedBlockState;
 
-void inline TaskGraph::init(int start_node_idx, int end_node_idx)
+void TaskGraph::init(int start_node_idx, int end_node_idx)
 {
     int thread_idx = threadIdx.x;
     if (thread_idx != 0) {
         return;
     }
 
-    if (blockIdx.x == 0 && blockIdx.y == 0) {
+    if (blockIdx.x == 0) {
         // reset the pointer for each run
-        if (start_node_idx == 0)
+        if (start_node_idx == 0) {
             mwGPU::DeviceTracing::resetIndex(); 
+        }
         // special calibration indicating the beginning of the kernel
         mwGPU::DeviceTracing::Log(mwGPU::DeviceEvent::calibration,
-                                    blockDim.x * blockDim.y * blockDim.z / 32, // # warps
-                                    gridDim.y, // # blocks
-                                    gridDim.x); // # SMs
+                                  blockDim.x / 32, // # warps
+                                  gridDim.y, // # blocks
+                                  gridDim.x); // # SMs
 
-        end_node_idx_ =  end_node_idx < 0 ? num_nodes_ : min(end_node_idx, num_nodes_);
+        end_node_idx_ = end_node_idx == -1 ? num_nodes_ : end_node_idx;
 
         while (start_node_idx < end_node_idx_) {
             if (computeNumInvocations(sorted_nodes_[start_node_idx]) == 0) {
@@ -112,7 +97,7 @@ void inline TaskGraph::init(int start_node_idx, int end_node_idx)
 }
 
 
-void inline TaskGraph::updateBlockState()
+void TaskGraph::updateBlockState()
 {
     uint32_t node_idx = cur_node_idx_.load_acquire();
     if (node_idx == end_node_idx_) {
@@ -137,10 +122,10 @@ void inline TaskGraph::updateBlockState()
     sharedBlockState.funcID = cur_node.funcID;
     sharedBlockState.numThreadsPerInvocation = num_threads_per_invocation;
     sharedBlockState.initOffset = cur_node.curOffset.fetch_add_relaxed(
-        blockDim.x * blockDim.y * blockDim.z / num_threads_per_invocation);
+        blockDim.x / num_threads_per_invocation);
 }
 
-uint32_t inline TaskGraph::computeNumInvocations(Node &node)
+uint32_t TaskGraph::computeNumInvocations(Node &node)
 {
     if (node.fixedCount == 0) {
         auto data_ptr = (NodeBase *)node_datas_[node.dataIDX].userData;
@@ -150,10 +135,11 @@ uint32_t inline TaskGraph::computeNumInvocations(Node &node)
     }
 }
 
-TaskGraph::WorkerState inline TaskGraph::getWork(NodeBase **node_data,
-                                          uint32_t *run_func_id,
-                                          uint32_t *run_node_id,
-                                          int32_t *run_offset)
+TaskGraph::WorkerState TaskGraph::getWork(
+    NodeBase **node_data,
+    uint32_t *run_func_id,
+    uint32_t *run_node_id,
+    int32_t *run_offset)
 {
     const int thread_idx = threadIdx.x;
     int32_t warp_idx = thread_idx / 32;
@@ -211,7 +197,7 @@ TaskGraph::WorkerState inline TaskGraph::getWork(NodeBase **node_data,
             if (thread_idx == 0) {
                 sharedBlockState.initOffset =
                     cur_node->curOffset.fetch_add_relaxed(
-                    blockDim.x * blockDim.y * blockDim.z / num_threads_per_invocation);
+                    blockDim.x / num_threads_per_invocation);
             }
 
             __syncthreads();
@@ -252,13 +238,13 @@ TaskGraph::WorkerState inline TaskGraph::getWork(NodeBase **node_data,
     *node_data = (NodeBase *)
         node_datas_[sorted_nodes_[sharedBlockState.nodeIdx].dataIDX].userData;
     *run_func_id = sharedBlockState.funcID;
-    *run_node_id = sharedBlockState.nodeIdx;
+    *run_node_id = node_idx;
     *run_offset = thread_offset;
 
     return WorkerState::Run;
 }
 
-void inline TaskGraph::finishWork(bool lane_executed)
+void TaskGraph::finishWork(bool lane_executed)
 {
     uint32_t num_finished_threads;
     bool is_leader;
@@ -268,7 +254,7 @@ void inline TaskGraph::finishWork(bool lane_executed)
     if (num_threads_per_invocation > 32) {
         __syncthreads();
 
-        num_finished_threads = blockDim.x * blockDim.y * blockDim.z;
+        num_finished_threads = blockDim.x;
 
         is_leader = threadIdx.x == 0;
     } else {
@@ -326,66 +312,4 @@ void inline TaskGraph::finishWork(bool lane_executed)
     }
 }
 
-namespace mwGPU {
-
-static inline __attribute__((always_inline)) void megakernelImpl(int start_node_idx, int end_node_idx)
-{
-    {
-        TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
-        taskgraph->init(start_node_idx, end_node_idx);
-    }
-
-    __syncthreads();
-
-    while (true) {
-        TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
-
-        NodeBase *node_data;
-        uint32_t func_id;
-        uint32_t node_id;
-        int32_t invocation_offset;
-        TaskGraph::WorkerState worker_state = taskgraph->getWork(
-            &node_data, &func_id, &node_id, &invocation_offset);
-
-        /*
-            todo: sharedBlockState.nodeIdx != node_id for megakernels with # blocks > 1
-            this is super weird since they are essentially the same and the getWork function is an inline function
-            can it have anything to do with any sort of compiler optimization?
-            seems didn't affect the correctness as the value in shared memory is correct within other functions
-            but really need to figure out why
-        */
-        
-        if (worker_state == TaskGraph::WorkerState::Exit) {
-            DeviceTracing::Log(
-                mwGPU::DeviceEvent::blockExit,
-                func_id, invocation_offset, node_id);
-            break;
-        }
-
-        if (worker_state == TaskGraph::WorkerState::Loop) {
-            __nanosleep(0);
-            continue;
-        }
-
-        bool lane_executed;
-        if (worker_state == TaskGraph::WorkerState::Run) {
-            mwGPU::DeviceTracing::Log(
-                mwGPU::DeviceEvent::blockStart,
-                func_id, invocation_offset, node_id, threadIdx.x % 32 == 0);
-
-            dispatch(func_id, node_data, invocation_offset);
-
-            mwGPU::DeviceTracing::Log(
-                mwGPU::DeviceEvent::blockWait,
-                func_id, invocation_offset, node_id, threadIdx.x % 32 == 0);
-            lane_executed = true;
-        } else {
-            lane_executed = false;
-        }
-
-        taskgraph->finishWork(lane_executed);
-    }
-}
-
-}
 }

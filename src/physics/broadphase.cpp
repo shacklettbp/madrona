@@ -647,6 +647,7 @@ void BVH::updateTree()
         force_rebuild_ = false;
         rebuild();
     }
+    //rebuild();
 }
 
 Entity BVH::traceRay(Vector3 o,

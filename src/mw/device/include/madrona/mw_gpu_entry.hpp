@@ -12,8 +12,7 @@ namespace mwGPU {
 namespace entryKernels {
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
-__launch_bounds__(madrona::consts::numMegakernelThreads,
-                  madrona::consts::numMegakernelBlocksPerSM)
+__launch_bounds__(madrona::consts::numMegakernelThreads, 1)
 __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
                         void **exported_columns, void *cfg)
 {
@@ -38,8 +37,7 @@ __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
 }
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
-__launch_bounds__(madrona::consts::numMegakernelThreads,
-                  madrona::consts::numMegakernelBlocksPerSM)
+__launch_bounds__(madrona::consts::numMegakernelThreads, 1)
 __global__ void initWorlds(int32_t num_worlds,
                            const void *renderer_inits,
                            const ConfigT *cfg,
@@ -69,8 +67,7 @@ __global__ void initWorlds(int32_t num_worlds,
 }
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
-__launch_bounds__(madrona::consts::numMegakernelThreads,
-                  madrona::consts::numMegakernelBlocksPerSM)
+__launch_bounds__(madrona::consts::numMegakernelThreads, 1)
 __global__ void initTasks(void *cfg)
 {
     TaskGraph::Builder builder(1024, 1024 * 2, 1024 * 5);

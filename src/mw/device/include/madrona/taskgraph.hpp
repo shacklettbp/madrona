@@ -140,9 +140,9 @@ public:
     void init(int start_node_idx = 0, int end_node_idx = -1);
 
     WorkerState getWork(NodeBase **node_data,
-                        uint32_t *run_func_id,
-                        uint32_t *run_node_id,
-                        int32_t *run_offset);
+                               uint32_t *run_func_id,
+                               uint32_t *run_node_id,
+                               int32_t *run_offset);
 
     void finishWork(bool lane_executed);
 
