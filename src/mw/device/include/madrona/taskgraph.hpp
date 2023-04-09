@@ -162,16 +162,14 @@ public:
 private:
     template <typename ContextT, bool> struct WorldTypeExtract;
 
-    TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas,
-              int32_t num_sms)
+    TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
         : sorted_nodes_(nodes),
         num_nodes_(num_nodes),
         node_datas_(node_datas),
         cur_node_idx_(num_nodes)
     {
         for (int32_t i = 1; i <= consts::maxMegakernelBlocksPerSM; i++) {
-            cuda::barrier::init(&init_barriers_[i],
-                                i * MADRONA_MWGPU_NUM_SMS);
+            init_barriers_.emplace(i, i * MADRONA_MWGPU_NUM_SMS);
         }
     }
 
@@ -187,7 +185,7 @@ private:
 //     AtomicU32 block_sm_offsets_[MADRONA_MWGPU_NUM_MEGAKERNEL_NUM_SMS];
 // #endif
     FixedInlineArray<cuda::barrier<cuda::thread_scope_device>,
-                     consts::maxMegakernelBlocksPerSM>> init_barriers_;
+                     consts::maxMegakernelBlocksPerSM> init_barriers_;
 
 friend class Builder;
 };

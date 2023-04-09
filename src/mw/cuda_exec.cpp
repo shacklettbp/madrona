@@ -714,11 +714,6 @@ static __attribute__((always_inline)) inline void dispatch(
             auto common = mangled_fn.substr(id_common_start,
                                             postfix_start - id_common_start);
             
-            megakernel_prefix += "uint32_t ";
-            megakernel_prefix += id_prefix;
-            megakernel_prefix += common;
-            megakernel_prefix += "2idE;\n";
-
             megakernel_func_ids += "uint32_t ";
             megakernel_func_ids += id_prefix;
             megakernel_func_ids += common;
@@ -767,6 +762,7 @@ static __attribute__((always_inline)) inline void dispatch(
 
 }
 }
+
 )__";
 
     HeapArray<const char *> compile_flags_ext(num_compile_flags + 2);
@@ -784,8 +780,8 @@ static __attribute__((always_inline)) inline void dispatch(
     compile_flags_ext[num_compile_flags] = "-maxrregcount";
     compile_flags_ext[num_compile_flags + 1] = nullptr;
 
-    fast_compile_flags_ext[num_compile_flags] = "-maxrregcount";
-    fast_compile_flags_ext[num_compile_flags + 1] = nullptr;
+    fast_compile_flags_ext[num_fast_compile_flags] = "-maxrregcount";
+    fast_compile_flags_ext[num_fast_compile_flags + 1] = nullptr;
 
     for (int64_t i = 0; i < num_megakernel_cfgs; i++) {
         const MegakernelConfig &megakernel_cfg = megakernel_cfgs[i];
@@ -802,8 +798,8 @@ static __attribute__((always_inline)) inline void dispatch(
             "(int32_t start_node_idx, int32_t end_node_idx)\n";
 
         megakernel_postfix += R"__({
-    madrona::mwGPU::megakernelImpl(start_node_idx, end_node_idx,)__";
-        megakernel_postfix += megakernel_cfg.numBlocksPerSM;
+    madrona::mwGPU::megakernelImpl(start_node_idx, end_node_idx, )__";
+        megakernel_postfix += std::to_string(megakernel_cfg.numBlocksPerSM);
 
         megakernel_postfix += R"__();
 }
@@ -816,7 +812,7 @@ static __attribute__((always_inline)) inline void dispatch(
             specialized_megakernel += megakernel_func_ids;
         }
 
-        printf("Compiling megakernel:\n%s\n", specialized_megakernel.c_str());
+        //printf("Compiling megakernel:\n%s\n", specialized_megakernel.c_str());
 
         std::string megakernel_file = "megakernel_" + megakernel_cfg_suffix +
             ".cpp";
@@ -831,7 +827,7 @@ static __attribute__((always_inline)) inline void dispatch(
         std::string regcount_str = std::to_string(max_registers);
 
         compile_flags_ext[num_compile_flags + 1] = regcount_str.c_str();
-        fast_compile_flags_ext[num_compile_flags + 1] = regcount_str.c_str();
+        fast_compile_flags_ext[num_fast_compile_flags + 1] = regcount_str.c_str();
 
         auto compiled_megakernel = cu::jitCompileCPPSrc(
             specialized_megakernel.c_str(),

@@ -1523,12 +1523,14 @@ static inline void runNarrowphase(
     PROF_START(setup_ctr, narrowphaseSetupClocks);
 
 #ifdef MADRONA_GPU_MODE
-    int32_t numSMemFloats = mwGPU::SharedMemStorage::numBytesPerWarp / sizeof(float);
-    int32_t numVertexFloats = numSMemFloats - gpuImpl::numPlaneFloats;
-    int32_t maxNumVertices = numVertexFloats / 3;
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    const int32_t num_smem_floats = num_smem_bytes_per_warp / sizeof(float);
+    int32_t num_vertex_floats = num_smem_floats - gpuImpl::numPlaneFloats;
+    int32_t max_num_vertices = num_vertex_floats / 3;
 
     constexpr int32_t max_num_tmp_faces = gpuImpl::maxNumPlanes;
-    int32_t max_num_tmp_vertices = maxNumVertices;
+    int32_t max_num_tmp_vertices = max_num_vertices;
 
     Plane tmp_faces_buffer[max_num_tmp_faces];
 
@@ -1536,7 +1538,8 @@ static inline void runNarrowphase(
     Vector3 * smem_vertices_buffer;
     {
         auto smem_buf = (char *)mwGPU::SharedMemStorage::buffer;
-        char *warp_smem_base = smem_buf + numSMemBytesPerWarp * mwgpu_warp_id;
+        char *warp_smem_base =
+            smem_buf + num_smem_bytes_per_warp * mwgpu_warp_id;
 
         smem_faces_buffer = (Plane *)warp_smem_base;
         smem_vertices_buffer =
