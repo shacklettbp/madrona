@@ -20,6 +20,22 @@ struct TaskGraph::BlockState {
 
 static __shared__ TaskGraph::BlockState sharedBlockState;
 
+TaskGraph::TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
+    : sorted_nodes_(nodes),
+      num_nodes_(num_nodes),
+      node_datas_(node_datas),
+      cur_node_idx_(num_nodes)
+{
+    for (int32_t i = 1; i <= consts::maxMegakernelBlocksPerSM; i++) {
+        init_barriers_.emplace(i - 1, i * MADRONA_MWGPU_NUM_SMS);
+    }
+}
+
+TaskGraph::~TaskGraph()
+{
+    rawDealloc(sorted_nodes_);
+}
+
 void TaskGraph::init(int32_t start_node_idx, int32_t end_node_idx,
                      int32_t num_blocks_per_sm)
 {
@@ -87,6 +103,14 @@ void TaskGraph::init(int32_t start_node_idx, int32_t end_node_idx,
 // #endif
 }
 
+void TaskGraph::setupRenderer(Context &ctx, const void *renderer_inits,
+                              int32_t world_idx)
+{
+    const render::RendererInit &renderer_init =
+        ((const render::RendererInit *)renderer_inits)[world_idx];
+
+    render::RendererState::init(ctx, renderer_init);
+}
 
 void TaskGraph::updateBlockState()
 {

@@ -56,11 +56,7 @@ __global__ void initWorlds(int32_t num_worlds,
     });
 
     if (renderer_inits != nullptr) {
-        // TaskGraph::setupRenderer(ctx, renderer_inits, world_idx);
-        const render::RendererInit &renderer_init =
-            ((const render::RendererInit *)renderer_inits)[world_idx];
-
-        render::RendererState::init(ctx, renderer_init);
+        TaskGraph::setupRenderer(ctx, renderer_inits, world_idx);
     }
 
     new (world) WorldT(ctx, *cfg, user_inits[world_idx]);

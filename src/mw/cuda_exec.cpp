@@ -1409,7 +1409,7 @@ static GPUEngineState initEngineAndUserState(
     CUdeviceptr job_sys_consts_addr;
     size_t job_sys_consts_size;
     REQ_CU(cuModuleGetGlobal(&job_sys_consts_addr, &job_sys_consts_size,
-                                gpu_kernels.mod, "madronaMWGPUConsts"));
+                             gpu_kernels.mod, "madronaMWGPUConsts"));
     REQ_CU(cuMemcpyHtoD(job_sys_consts_addr, gpu_consts_readback,
                         job_sys_consts_size));
 
@@ -1511,7 +1511,7 @@ static CUgraphExec makeJobSysRunGraph(CUfunction queue_run_kernel,
     return run_graph_exec;
 }
 
-static MegakernelConfig processOverrideExecConfig(const char *override_str)
+static MegakernelConfig processExecConfigOverride(const char *override_str)
 {
     auto err = []() {
         FATAL("MADRONA_MWGPU_CONFIG_OVERRIDE format invalid");
@@ -1641,7 +1641,7 @@ static CUgraphExec makeTaskGraphRunGraph(
 
     if (config_override_env != nullptr) {
         MegakernelConfig override_cfg =
-            processOverrideExecConfig(config_override_env);
+            processExecConfigOverride(config_override_env);
 
         default_megakernel_idx = findMatchingMegakernelConfig(
             megakernel_cfgs, num_megakernels, override_cfg);

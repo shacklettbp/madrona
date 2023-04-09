@@ -130,12 +130,8 @@ public:
     };
 
     TaskGraph(const TaskGraph &) = delete;
-    // ~TaskGraph();
-    ~TaskGraph()
-    {
-        rawDealloc(sorted_nodes_);
-    }
 
+    ~TaskGraph();
 
     void init(int32_t start_node_idx, int32_t end_node_idx,
               int32_t num_blocks_per_sm);
@@ -152,8 +148,8 @@ public:
     template <typename ContextT>
     static ContextT makeContext(WorldID world_id);
 
-    // static void setupRenderer(Context &ctx, const void *renderer_inits,
-    //                           int32_t world_idx);
+    static void setupRenderer(Context &ctx, const void *renderer_inits,
+                              int32_t world_idx);
 
     template <typename NodeT>
     NodeT & getNodeData(TypedDataID<NodeT> data_id);
@@ -162,16 +158,7 @@ public:
 private:
     template <typename ContextT, bool> struct WorldTypeExtract;
 
-    TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
-        : sorted_nodes_(nodes),
-        num_nodes_(num_nodes),
-        node_datas_(node_datas),
-        cur_node_idx_(num_nodes)
-    {
-        for (int32_t i = 1; i <= consts::maxMegakernelBlocksPerSM; i++) {
-            init_barriers_.emplace(i - 1, i * MADRONA_MWGPU_NUM_SMS);
-        }
-    }
+    TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas);
 
     inline void updateBlockState();
     inline uint32_t computeNumInvocations(Node &node);
