@@ -535,8 +535,9 @@ void StateManager::copyOutExportedColumns()
             if (cumulative_copied_rows >=
                     num_mapped_bytes / export_job.numBytesPerRow) {
                 CountT new_num_mapped_bytes = std::max(num_mapped_bytes * 2,
-                    (CountT)utils::roundUpPow2(cumulative_copied_rows,
-                                       sysconf(_SC_PAGESIZE)));
+                    (CountT)utils::roundUpPow2(
+                        cumulative_copied_rows * export_job.numBytesPerRow,
+                        sysconf(_SC_PAGESIZE)));
 
                 void *res = mmap(
                     (char *)export_job.exportBuffer + num_mapped_bytes,
