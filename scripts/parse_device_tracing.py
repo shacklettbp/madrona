@@ -1,17 +1,14 @@
 import os
 import sys
-
+import argparse
 import pandas as pd
 from PIL import Image, ImageDraw
 
 HIDE_SEEK = True
-NUM_HIGHLIGHT_NODES = 10
-
-LOG_STEPS = {}
 
 
 def parse_device_logs(events):
-    global LOG_STEPS
+    LOG_STEPS = {}
     STEP = -1
 
     def new_step(num_warps, num_blocks, num_sms):
@@ -100,6 +97,13 @@ def parse_device_logs(events):
     # drop the last step which might be corrupted
     # del LOG_STEPS[STEP]
     print("At the end, complete traces for {} steps are generated".format(STEP))
+
+    for s in LOG_STEPS:
+        LOG_STEPS[s]["final_timestamp"] -= LOG_STEPS[s]["start_timestamp"]
+        for b in LOG_STEPS[s]["final_cycles"]:
+            LOG_STEPS[s]["final_cycles"][b] -= LOG_STEPS[s]["start_timestamp"]
+
+    return LOG_STEPS
 
 
 def serialized_analysis(step_log, nodes_map):
@@ -229,7 +233,7 @@ COLORS = [
 ]
 
 
-def plot_events(step_log, nodes_map, blocks, file_name):
+def plot_events(step_log, nodes_map, blocks, file_name, args):
     # todo: here we have an assumption that each SM has the same number of blocks, which are expected to be true
     num_sms = step_log["num_sms"]
     # num_block_per_sm = step_log["num_blocks"]
@@ -240,13 +244,13 @@ def plot_events(step_log, nodes_map, blocks, file_name):
     num_pixel_per_sm = num_warp_per_sm * num_pixel_per_warp + sm_interval_pixel
     y_blank = num_pixel_per_warp * num_warp_per_sm * 10
     y_limit = num_sms * num_pixel_per_sm + y_blank
-    x_limit = y_limit * 2
+    x_limit = y_limit * args.aspect_ratio
     print("the figure size will be {}x{}".format(x_limit, y_limit))
 
     top_nodes = sorted([
         i[0] for i in sorted(nodes_map.items(),
                              key=lambda item: item[1]["duration (ns)"])
-        [len(nodes_map) - NUM_HIGHLIGHT_NODES:]
+        [len(nodes_map) - args.num_highlight_nodes:]
     ])
 
     colors = {}
@@ -281,7 +285,10 @@ def plot_events(step_log, nodes_map, blocks, file_name):
 
     def cast_coor(timestamp, limit=x_limit):
         assert (timestamp <= step_log["final_timestamp"])
-        return int(timestamp / step_log["final_timestamp"] * limit)
+        if args.fixed_scale:
+            return int(timestamp / args.tpp)
+        else:
+            return int(timestamp / step_log["final_timestamp"] * limit)
 
     color_span = {}
     for n in nodes_map:
@@ -362,14 +369,12 @@ def plot_events(step_log, nodes_map, blocks, file_name):
     img.save(file_name)
 
 
-def step_analysis(step, file_name, tabular_data):
-    step_log = LOG_STEPS[step]
-
+def step_analysis(step_log, file_name, tabular_data, args=None):
     nodes_map = {}
     serialized_analysis(step_log, nodes_map)
 
     block_exec_time = block_analysis(step_log, nodes_map)
-    plot_events(step_log, nodes_map, block_exec_time["blocks"], file_name)
+    plot_events(step_log, nodes_map, block_exec_time["blocks"], file_name, args)
 
     for n in nodes_map:
         tabular_data = pd.concat([
@@ -380,35 +385,36 @@ def step_analysis(step, file_name, tabular_data):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 5:
-        print(
-            "python parse_device_tracing.py [log_name] [# stps, default 1] [start from, default 10] [# highlight nodes, default 10]"
-        )
-        exit()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--trace_file", type=str, required=True)
+    parser.add_argument("--start_step",
+                        type=int,
+                        default=10,
+                        help="analysis start from which step")
+    parser.add_argument("--num_steps",
+                        type=int,
+                        default=5,
+                        help="number of steps to be analyzed")
+    parser.add_argument("--num_highlight_nodes", type=int, default=10)
+    parser.add_argument("--aspect_ratio", type=float, default=2)
+    parser.add_argument("--fixed_scale", action="store_true")
+    parser.add_argument("--tpp",
+                        type=int,
+                        default=8000,
+                        help="time(ns) per pixel")
 
-    with open(sys.argv[1], 'rb') as f:
+    args = parser.parse_args()
+
+    with open(args.trace_file, 'rb') as f:
         events = bytearray(f.read())
         assert len(events) % 40 == 0
         print("{} events were logged in total".format(len(events) // 40))
-        parse_device_logs(events)
+        LOG_STEPS = parse_device_logs(events)
 
-    # default value
-    # todo: make it as parameters
-    steps = 5
-    start_from = 10
-    if len(sys.argv) >= 3:
-        steps = int(sys.argv[2])
-    if len(sys.argv) >= 4:
-        start_from = int(sys.argv[3])
-    if len(sys.argv) >= 5:
-        NUM_HIGHLIGHT_NODES = int(sys.argv[4])
+    steps = args.num_steps
+    start_from = args.start_step
 
-    for s in LOG_STEPS:
-        LOG_STEPS[s]["final_timestamp"] -= LOG_STEPS[s]["start_timestamp"]
-        for b in LOG_STEPS[s]["final_cycles"]:
-            LOG_STEPS[s]["final_cycles"][b] -= LOG_STEPS[s]["start_timestamp"]
-
-    dir_path = sys.argv[1] + "_megakernel_events"
+    dir_path = args.trace_file + "_megakernel_events"
     isExist = os.path.exists(dir_path)
     if not isExist:
         os.mkdir(dir_path)
@@ -429,8 +435,8 @@ if __name__ == "__main__":
 
     with pd.ExcelWriter(dir_path + "/metrics.xlsx") as writer:
         for s in range(start_from, end_at):
-            step_analysis(s, dir_path + "/step{}.png".format(s),
-                          tabular_data[s - start_from]).to_excel(
-                              writer,
-                              sheet_name="step{}".format(s),
-                              index=False)
+            step_analysis(LOG_STEPS[s], dir_path + "/step{}.png".format(s),
+                          tabular_data[s - start_from],
+                          args).to_excel(writer,
+                                         sheet_name="step{}".format(s),
+                                         index=False)

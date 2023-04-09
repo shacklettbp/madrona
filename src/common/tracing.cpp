@@ -14,7 +14,15 @@ void WriteToFile(void *data, size_t num_bytes,
                  const std::string &file_path,
                  const std::string &name)
 {
-    std::string file_name = file_path + std::to_string(getpid()) + name + ".bin";
+    std::string file_name = file_path;
+
+    auto *get_trace_name = getenv("MADRONA_MWGPU_TRACE_NAME");
+    if (get_trace_name != nullptr) {
+        file_name += std::string(get_trace_name) + name + ".bin";
+    } else {
+        file_name += std::to_string(getpid()) + name + ".bin";
+    }
+
     std::ofstream myFile(file_name, std::ios::out | std::ios::binary);
     myFile.write((char *)data, num_bytes);
     myFile.close();
