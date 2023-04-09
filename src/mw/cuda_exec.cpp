@@ -1692,18 +1692,16 @@ static CUgraphExec makeTaskGraphRunGraph(
     while (cur_node_idx < node_megakernels.size()) {
         int64_t cur_megakernel_idx = node_megakernels[cur_node_idx];
 
-        int64_t end_node_idx;
-        for (end_node_idx = cur_megakernel_idx + 1;
-             end_node_idx < node_megakernels.size() &&
-                 node_megakernels[end_node_idx] == cur_megakernel_idx;
-             end_node_idx++) {}
+        int64_t switch_node_idx;
+        for (switch_node_idx = cur_node_idx + 1;
+             switch_node_idx < node_megakernels.size() &&
+                 node_megakernels[switch_node_idx] == cur_megakernel_idx;
+             switch_node_idx++) {}
 
         // FIXME: this use of -1 is hacky. The profiling code should
         // just write the total number of nodes into the json file.
-        if (end_node_idx == node_megakernels.size()) {
-            end_node_idx = -1;
-        }
-
+        int64_t end_node_idx = switch_node_idx == node_megakernels.size() ?
+            -1 : switch_node_idx;
 
         CUgraphNode *deps = nullptr;
         unsigned int num_deps = 0;
@@ -1717,6 +1715,8 @@ static CUgraphExec makeTaskGraphRunGraph(
 
         addMegakernelNode(cur_megakernel_idx, deps, num_deps,
                           megakernel_args.data());
+
+        cur_node_idx = switch_node_idx;
     }
 
     CUgraphExec run_graph_exec;

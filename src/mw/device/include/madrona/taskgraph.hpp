@@ -169,7 +169,7 @@ private:
         cur_node_idx_(num_nodes)
     {
         for (int32_t i = 1; i <= consts::maxMegakernelBlocksPerSM; i++) {
-            init_barriers_.emplace(i, i * MADRONA_MWGPU_NUM_SMS);
+            init_barriers_.emplace(i - 1, i * MADRONA_MWGPU_NUM_SMS);
         }
     }
 
