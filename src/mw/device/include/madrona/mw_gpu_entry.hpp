@@ -5,8 +5,6 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #include <madrona/mw_gpu/tracing.hpp>
 
-#include "../../../render/interop.hpp"
-
 namespace madrona {
 namespace mwGPU {
 namespace entryKernels {
