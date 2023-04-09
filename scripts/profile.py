@@ -15,7 +15,7 @@ def profile_madrona(path_to_lib,
                     block_config=range(1, 6),
                     cache="/tmp/madcache"):
     for config in block_config:
-        profile_command = "MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_CONFIG_DIMS={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} MADRONA_RENDER_NOOP=1 PYTHONPATH={lib} python {benchmark} 16384 20 1 0".format(
+        profile_command = "MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_EXEC_CONFIG_OVERRIDE={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} PYTHONPATH={lib} python {benchmark} 16384 20 1 0".format(
             thread=NUM_THREADS_PER_BLOCK,
             block=config,
             sm=NUM_SMS,
