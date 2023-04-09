@@ -374,7 +374,8 @@ def step_analysis(step_log, file_name, tabular_data, args=None):
     serialized_analysis(step_log, nodes_map)
 
     block_exec_time = block_analysis(step_log, nodes_map)
-    plot_events(step_log, nodes_map, block_exec_time["blocks"], file_name, args)
+    if args is not None:
+        plot_events(step_log, nodes_map, block_exec_time["blocks"], file_name, args)
 
     for n in nodes_map:
         tabular_data = pd.concat([

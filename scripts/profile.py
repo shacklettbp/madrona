@@ -12,7 +12,7 @@ DIR_PATH = "/tmp/profile_blocks__megakernel_events"
 
 def profile_madrona(path_to_lib,
                     path_to_bench,
-                    block_config=range(1, 6),
+                    block_config=range(1, 7),
                     cache="/tmp/madcache"):
     for config in block_config:
         profile_command = "MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_EXEC_CONFIG_OVERRIDE={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} PYTHONPATH={lib} python {benchmark} 16384 20 1 0".format(
@@ -25,7 +25,7 @@ def profile_madrona(path_to_lib,
         subprocess.run(profile_command, shell=True, text=True)
 
 
-def parse_traces(block_config=range(1, 6)):
+def parse_traces(block_config=range(1, 7)):
     from parse_device_tracing import parse_device_logs, step_analysis
 
     tabular_data = [
@@ -60,7 +60,7 @@ def parse_traces(block_config=range(1, 6)):
                           tabular_data[i - 1]).to_excel(writer, index=False)
 
 
-def generate_json(block_config=range(1, 6)):
+def generate_json(block_config=range(1, 7)):
     tabular_data = [
         pd.read_excel(DIR_PATH + "/block_{}_metrics.xlsx".format(i))
         for i in block_config
