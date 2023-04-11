@@ -705,71 +705,35 @@ static inline void applyVelocityUpdate(
     omega2 -= q2.rotateVec(omega2_update_local);
 }
 
-static inline void applyFrictionFromContact(Context &ctx,
-                                            ObjectManager &obj_mgr,
-                                            Contact contact,
-                                            float h)
+static inline void applyFrictionVelocityUpdate(
+    Vector3 &v1, Vector3 &v2,
+    Vector3 &omega1, Vector3 &omega2,
+    Quat q1, Quat q2,
+    float inv_m1, float inv_m2,
+    Vector3 inv_I1, Vector3 inv_I2,
+    Vector3 n,
+    float mu_d, float h,
+    Vector3 r1_locals[4], Vector3 r2_locals[4],
+    Vector3 r1_worlds[4], Vector3 r2_worlds[4],
+    float lambdas[4],
+    CountT num_contacts)
 {
-    Velocity *v1_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.ref);
-    Velocity *v2_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.alt);
-
-    Quat q1 = ctx.getDirect<Rotation>(Cols::Rotation, contact.ref);
-    Quat q2 = ctx.getDirect<Rotation>(Cols::Rotation, contact.alt);
-
-    PreSolvePositional presolve_pos1 = ctx.getDirect<PreSolvePositional>(
-        Cols::PreSolvePositional, contact.ref);
-    PreSolvePositional presolve_pos2 =  ctx.getDirect<PreSolvePositional>(
-        Cols::PreSolvePositional, contact.alt);
-
-    ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.ref);
-    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.alt);
-
-    ResponseType resp_type1 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, contact.ref);
-    ResponseType resp_type2 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, contact.alt);
-
-    RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
-    RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
-
-    float inv_m1 = metadata1.invMass;
-    float inv_m2 = metadata2.invMass;
-    Vector3 inv_I1 = metadata1.invInertiaTensor;
-    Vector3 inv_I2 = metadata2.invInertiaTensor;
-
-    if (resp_type1 == ResponseType::Static) {
-        inv_m1 = 0.f;
-        inv_I1 = Vector3::zero();
-    }
-
-    if (resp_type2 == ResponseType::Static) {
-        inv_m2 = 0.f;
-        inv_I2 = Vector3::zero();
-    }
-
-    float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
-
-    auto [v1, omega1] = *v1_out;
-    auto [v2, omega2] = *v2_out;
-
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
-        if (i >= contact.numPoints) continue;
+        if (i >= num_contacts) continue;
 
-        auto [r1, r2] =
-            getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
+        Vector3 r1_local = r1_locals[i];
+        Vector3 r2_local = r2_locals[i];
 
-        Vector3 r1_world = q1.rotateVec(r1);
-        Vector3 r2_world = q2.rotateVec(r2);
+        Vector3 r1_world = r1_worlds[i];
+        Vector3 r2_world = r2_worlds[i];
 
         Vector3 v = computeRelativeVelocity(
             v1, v2, omega1, omega2, r1_world, r2_world);
 
-        Vector3 n = contact.normal;
-
         // h * mu_d * |f_n| in paper
         float dynamic_friction_magnitude =
-            mu_d * fabsf(contact.lambdaN[i]) / h;
+            mu_d * fabsf(lambdas[i]) / h;
 
         float vn = dot(n, v);
         Vector3 vt = v - n * vn;
@@ -782,11 +746,13 @@ static inline void applyFrictionFromContact(Context &ctx,
 
             Vector3 delta_world = vt / vt_len;
 
-            Vector3 delta_local1 = q1.inv().rotateVec(delta_world);
-            Vector3 delta_local2 = q2.inv().rotateVec(delta_world);
+            Vector3 delta1_local = q1.inv().rotateVec(delta_world);
+            Vector3 delta2_local = q2.inv().rotateVec(delta_world);
 
-            Vector3 friction_torque_axis_local1 = cross(r1, delta_local1);
-            Vector3 friction_torque_axis_local2 = cross(r2, delta_local2);
+            Vector3 friction_torque_axis_local1 =
+                cross(r1_local, delta1_local);
+            Vector3 friction_torque_axis_local2 =
+                cross(r2_local, delta2_local);
 
             applyVelocityUpdate(
                 v1, v2,
@@ -798,15 +764,65 @@ static inline void applyFrictionFromContact(Context &ctx,
                 delta_world, corrected_magnitude);
         }
     }
-
-    *v1_out = Velocity { v1, omega1 };
-    *v2_out = Velocity { v2, omega2 };
 }
 
-static inline void applyRestitutionFromContact(Context &ctx,
-                                               ObjectManager &obj_mgr,
-                                               Contact contact,
-                                               float restitution_threshold)
+static inline void applyRestitutionVelocityUpdate(
+    Vector3 &v1, Vector3 &v2,
+    Vector3 &omega1, Vector3 &omega2,
+    Quat q1, Quat q2,
+    float inv_m1, float inv_m2,
+    Vector3 inv_I1, Vector3 inv_I2,
+    Vector3 n,
+    float restitution_threshold,
+    Vector3 r1_worlds[4],
+    Vector3 r2_worlds[4],
+    Vector3 restitution_torques1_local[4],
+    Vector3 restitution_torques2_local[4],
+    float vn_bars[4],
+    CountT num_contacts)
+{
+#pragma unroll
+    for (CountT i = 0; i < 4; i++) {
+        if (i >= num_contacts) continue;
+
+        Vector3 r1_world = r1_worlds[i];
+        Vector3 r2_world = r2_worlds[i];
+
+        Vector3 v = computeRelativeVelocity(
+            v1, v2, omega1, omega2, r1_world, r2_world);
+
+        float vn = dot(n, v);
+
+        float vn_bar = vn_bars[i];
+
+        float e = 0.3f; // FIXME
+        if (fabsf(vn_bar) <= restitution_threshold) {
+            e = 0.f;
+        }
+
+        float restitution_magnitude = fminf(-e * vn_bar, 0) - vn;
+
+        Vector3 restitution_torque_axis_local1 =
+            restitution_torques1_local[i];
+        Vector3 restitution_torque_axis_local2 =
+            restitution_torques2_local[i];
+
+        applyVelocityUpdate(
+            v1, v2,
+            omega1, omega2,
+            q1, q2,
+            restitution_torque_axis_local1, restitution_torque_axis_local2,
+            inv_m1, inv_m2,
+            inv_I1, inv_I2,
+            n, restitution_magnitude);
+    }
+}
+
+static inline void solveVelocitiesForContact(Context &ctx,
+                                             ObjectManager &obj_mgr,
+                                             Contact contact,
+                                             float h,
+                                             float restitution_threshold)
 {
     Velocity *v1_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.ref);
     Velocity *v2_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.alt);
@@ -853,26 +869,26 @@ static inline void applyRestitutionFromContact(Context &ctx,
         inv_I2 = Vector3::zero();
     }
 
+    float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
+
+    Vector3 r1_locals[4];
+    Vector3 r2_locals[4];
+    Vector3 r1_worlds[4];
+    Vector3 r2_worlds[4];
+    Vector3 restitution_torque1_locals[4];
+    Vector3 restitution_torque2_locals[4];
+
+    float vn_bars[4];
+
 #pragma unroll
     for (CountT i = 0; i < 4; i++) {
-        if (i >= contact.numPoints) continue;
+        if (i >= contact.numPoints) {
+            continue;
+        }
 
-        auto [r1, r2] =
-            getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
-
-        Vector3 r1_world = q1.rotateVec(r1);
-        Vector3 r2_world = q2.rotateVec(r2);
-
-        Vector3 v = computeRelativeVelocity(
-            v1, v2, omega1, omega2, r1_world, r2_world);
-
-        Vector3 n = contact.normal;
-
-        float vn = dot(n, v);
-
-        Vector3 restitution_torque_axis_local1 = cross(r1, q1.inv().rotateVec(n));
-        Vector3 restitution_torque_axis_local2 = cross(r2, q2.inv().rotateVec(n));
-
+        auto [r1, r2] = getLocalSpaceContacts(
+            presolve_pos1, presolve_pos2, contact, i);
+    
         Vector3 r1_presolve = presolve_pos1.q.rotateVec(r1);
         Vector3 r2_presolve = presolve_pos2.q.rotateVec(r2);
 
@@ -881,24 +897,52 @@ static inline void applyRestitutionFromContact(Context &ctx,
             presolve_vel1.omega, presolve_vel2.omega,
             r1_presolve, r2_presolve); // FIXME r1_world or presolve?
 
-        float vn_bar = dot(n, v_bar);
+        float vn_bar = dot(contact.normal, v_bar);
 
-        float e = 0.3f; // FIXME
-        if (fabsf(vn_bar) <= restitution_threshold) {
-            e = 0.f;
-        }
+        Vector3 r1_world = q1.rotateVec(r1);
+        Vector3 r2_world = q2.rotateVec(r2);
 
-        float restitution_magnitude = fminf(-e * vn_bar, 0) - vn;
+        Vector3 restitution_torque_axis_local1 =
+            cross(r1, q1.inv().rotateVec(contact.normal));
+        Vector3 restitution_torque_axis_local2 =
+            cross(r2, q2.inv().rotateVec(contact.normal));
 
-        applyVelocityUpdate(
+        r1_locals[i] = r1;
+        r2_locals[i] = r2;
+        r1_worlds[i] = r1_world;
+        r2_worlds[i] = r2_world;
+        restitution_torque1_locals[i] = restitution_torque_axis_local1;
+        restitution_torque2_locals[i] = restitution_torque_axis_local2;
+
+        vn_bars[i] = vn_bar;
+    }
+
+    for (CountT restitution_iters = 0; restitution_iters < 2;
+         restitution_iters++) {
+        applyRestitutionVelocityUpdate(
             v1, v2,
             omega1, omega2,
             q1, q2,
-            restitution_torque_axis_local1, restitution_torque_axis_local2,
             inv_m1, inv_m2,
             inv_I1, inv_I2,
-            n, restitution_magnitude);
+            contact.normal,
+            restitution_threshold,
+            r1_worlds, r2_worlds,
+            restitution_torque1_locals, restitution_torque2_locals,
+            vn_bars, contact.numPoints);
     }
+
+    applyFrictionVelocityUpdate(
+        v1, v2,
+        omega1, omega2,
+        q1, q2,
+        inv_m1, inv_m2,
+        inv_I1, inv_I2,
+        contact.normal,
+        mu_d, h,
+        r1_locals, r2_locals,
+        r1_worlds, r2_worlds,
+        contact.lambdaN, contact.numPoints);
 
     *v1_out = Velocity { v1, omega1 };
     *v2_out = Velocity { v2, omega2 };
@@ -910,17 +954,10 @@ inline void solveVelocities(Context &ctx, SolverData &solver)
 
     CountT num_contacts = solver.numContacts.load_relaxed();
 
-    //for (CountT j = 0; j < 2; j++) {
-        for (CountT i = 0; i < num_contacts; i++) {
-            const Contact &contact = solver.contacts[i];
-            applyRestitutionFromContact(ctx, obj_mgr, contact,
-                                        solver.restitutionThreshold);
-        }
-    //}
-
     for (CountT i = 0; i < num_contacts; i++) {
         const Contact &contact = solver.contacts[i];
-        applyFrictionFromContact(ctx, obj_mgr, contact, solver.h);
+        solveVelocitiesForContact(ctx, obj_mgr, contact, solver.h,
+                                  solver.restitutionThreshold);
     }
 
     solver.numContacts.store_relaxed(0);
