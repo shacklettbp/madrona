@@ -147,4 +147,45 @@ void BVH::Node::clearChild(CountT child)
 
 }
 
+JointConstraint JointConstraint::setupFixed(
+    Entity e1, Entity e2,
+    math::Quat attach_rot1, math::Quat attach_rot2,
+    math::Vector3 r1, math::Vector3 r2,
+    float separation)
+{
+    return JointConstraint {
+        .e1 = e1,
+        .e2 = e2,
+        .type = JointConstraint::Type::Fixed,
+        .fixed = {
+            .attachRot1 = attach_rot1,
+            .attachRot2 = attach_rot2,
+            .separation = separation,
+        },
+        .r1 = r1,
+        .r2 = r2,
+    };
+}
+
+JointConstraint JointConstraint::setupHinge(
+    Entity e1, Entity e2,
+    math::Vector3 a1_local, math::Vector3 a2_local,
+    math::Vector3 b1_local, math::Vector3 b2_local,
+    math::Vector3 r1, math::Vector3 r2)
+{
+    return JointConstraint {
+        .e1 = e1,
+        .e2 = e2,
+        .type = JointConstraint::Type::Hinge,
+        .hinge = {
+            .a1Local = a1_local,
+            .a2Local = a2_local,
+            .b1Local = b1_local,
+            .b2Local = b2_local,
+        },
+        .r1 = r1,
+        .r2 = r2,
+    };
+}
+
 }

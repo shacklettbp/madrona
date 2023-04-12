@@ -471,23 +471,85 @@ static inline void handleContact(Context &ctx,
     *q2_ptr = q2;
 }
 
+static void applyJointOrientationConstraint(
+    Quat &q1, Quat &q2,
+    Quat attach_q1, Quat attach_q2,
+    Vector3 inv_I1, Vector3 inv_I2)
+{
+    Quat orientation1 = (q1 * attach_q1).normalize();
+    Quat orientation2 = (q2 * attach_q2).normalize();
+
+    Quat diff = orientation1 * orientation2.inv();
+
+    Vector3 delta_q =
+        2.f * math::Vector3 { diff.x, diff.y, diff.z };
+    float delta_q_magnitude = delta_q.length();
+
+    if (delta_q_magnitude > 0) {
+        delta_q /= delta_q_magnitude;
+        Vector3 delta_q_local1 = q1.inv().rotateVec(delta_q);
+        Vector3 delta_q_local2 = q2.inv().rotateVec(delta_q);
+
+        auto [update_q1, update_q2] = computeAngularUpdate(
+            q1, q2,
+            inv_I1, inv_I2,
+            delta_q_local1, delta_q_local2,
+            delta_q_magnitude, 0);
+
+        applyAngularUpdate(q1, q2, update_q1, update_q2);
+    }
+}
+
+static void applyJointAxisConstraint(
+    Quat &q1, Quat &q2,
+    Vector3 axis1_local, Vector3 axis2_local,
+    Vector3 inv_I1, Vector3 inv_I2)
+{
+    Vector3 axis1 = q1.rotateVec(axis1_local);
+    Vector3 axis2 = q2.rotateVec(axis2_local);
+
+    printf("(%f %f %f) (%f %f %f)\n",
+        axis1.x, axis1.y, axis1.z,
+        axis2.x, axis2.y, axis2.z);
+
+    Vector3 delta_q = cross(axis1, axis2);
+    float delta_q_magnitude = delta_q.length();
+    
+    if (delta_q_magnitude > 0) {
+        delta_q /= delta_q_magnitude;
+        Vector3 delta_q_local1 = q1.inv().rotateVec(delta_q);
+        Vector3 delta_q_local2 = q2.inv().rotateVec(delta_q);
+
+        auto [update_q1, update_q2] = computeAngularUpdate(
+            q1, q2,
+            inv_I1, inv_I2,
+            delta_q_local1, delta_q_local2,
+            delta_q_magnitude, 0);
+        
+        applyAngularUpdate(q1, q2, update_q1, update_q2);
+    }
+}
+
 inline void handleJointConstraint(Context &ctx,
                                   JointConstraint joint)
 {
-    Vector3 *x1_ptr = &ctx.getDirect<Position>(Cols::Position, joint.e1);
-    Vector3 *x2_ptr = &ctx.getDirect<Position>(Cols::Position, joint.e2);
-    Quat *q1_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, joint.e1);
-    Quat *q2_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, joint.e2);
+    Loc l1 = ctx.getLoc(joint.e1);
+    Loc l2 = ctx.getLoc(joint.e2);
+
+    Vector3 *x1_ptr = &ctx.getDirect<Position>(Cols::Position, l1);
+    Vector3 *x2_ptr = &ctx.getDirect<Position>(Cols::Position, l2);
+    Quat *q1_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, l1);
+    Quat *q2_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, l2);
     Vector3 x1 = *x1_ptr;
     Vector3 x2 = *x2_ptr;
     Quat q1 = *q1_ptr;
     Quat q2 = *q2_ptr;
     ResponseType resp_type1 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, joint.e1);
+        Cols::ResponseType, l1);
     ResponseType resp_type2 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, joint.e2);
-    ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, joint.e1);
-    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, joint.e2);
+        Cols::ResponseType, l2);
+    ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, l1);
+    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, l2);
 
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
@@ -509,93 +571,71 @@ inline void handleJointConstraint(Context &ctx,
         inv_I2 = Vector3::zero();
     }
 
-    Vector3 a1_bar = joint.axes1.rotateVec(math::fwd);
-    Vector3 b1_bar = joint.axes1.rotateVec(math::right);
-    Vector3 a2_bar = joint.axes2.rotateVec(math::fwd);
-    Vector3 b2_bar = joint.axes2.rotateVec(math::right);
+    Vector3 pos_correction;
+    switch (joint.type) {
+    case JointConstraint::Type::Fixed: {
+        JointConstraint::Fixed fixed_data = joint.fixed;
 
-    Vector3 a1 = q1.rotateVec(a1_bar);
-    Vector3 a2 = q2.rotateVec(a2_bar);
-
-    Vector3 delta_q_a = cross(a1, a2);
-    float delta_q_a_magnitude = delta_q_a.length();
-    
-    // FIXME: is it possible to combine angular updates? Regardless,
-    // this double-axis joint constraint should really just be a
-    // quaternion-difference constraint.
-
-    if (delta_q_a_magnitude > 0) {
-        delta_q_a /= delta_q_a_magnitude;
-        Vector3 delta_q_a_local1 = q1.inv().rotateVec(delta_q_a);
-        Vector3 delta_q_a_local2 = q2.inv().rotateVec(delta_q_a);
-
-        auto [a_update_q1, a_update_q2] = computeAngularUpdate(
+        applyJointOrientationConstraint(
             q1, q2,
-            inv_I1, inv_I2,
-            delta_q_a_local1, delta_q_a_local2,
-            delta_q_a_magnitude, 0);
-        
-        applyAngularUpdate(q1, q2, a_update_q1, a_update_q2);
-    }
+            fixed_data.attachRot1, fixed_data.attachRot2,
+            inv_I1, inv_I2);
 
-    Vector3 b1 = q1.rotateVec(b1_bar);
-    Vector3 b2 = q2.rotateVec(b2_bar);
-    Vector3 delta_q_b = cross(b1, b2);
-    float delta_q_b_magnitude = delta_q_b.length();
+        Vector3 r1_world = q1.rotateVec(joint.r1) + x1;
+        Vector3 r2_world = q2.rotateVec(joint.r2) + x2;
 
-    if (delta_q_b_magnitude > 0) {
-        delta_q_b /= delta_q_b_magnitude;
-        Vector3 delta_q_b_local1 = q1.inv().rotateVec(delta_q_b);
-        Vector3 delta_q_b_local2 = q2.inv().rotateVec(delta_q_b);
+        Vector3 delta_r = r2_world - r1_world;
 
-        auto [b_update_q1, b_update_q2] = computeAngularUpdate(
-            q1, q2,
-            inv_I1, inv_I2,
-            delta_q_b_local1, delta_q_b_local2,
-            delta_q_b_magnitude, 0);
+        Quat axes_rot = (q1 * fixed_data.attachRot1).normalize();
 
-        applyAngularUpdate(q1, q2, b_update_q1, b_update_q2);
-    }
+        Vector3 a1 = axes_rot.rotateVec(math::fwd);
+        Vector3 b1 = axes_rot.rotateVec(math::right);
+        Vector3 c1 = cross(a1, b1);
 
-    Vector3 r1_world = q1.rotateVec(joint.r1) + x1;
-    Vector3 r2_world = q2.rotateVec(joint.r2) + x2;
+        // This implements a fixed distance qlong the a1 axis and no distance
+        // along the other axes
 
-    Vector3 delta_r = r2_world - r1_world;
+        pos_correction = Vector3::zero();
+        {
+            // Unlike paper, subtract from pos_correction because
+            // applyPositionalUpdate applies the negative magnitude to object 1
+            float a_separation = dot(delta_r, a1);
+            pos_correction -= (a_separation - fixed_data.separation) * a1;
 
-    // Update constraint axes
-    a1 = q1.rotateVec(a1_bar);
-    b1 = q1.rotateVec(b1_bar);
-    Vector3 c1 = cross(a1, b1);
+            float b_separation = dot(delta_r, b1);
+            pos_correction -= b_separation * b1;
 
-    // This implements a fixed distance qlong the a1 axis and no distance
-    // along the other axes
+            float c_separation = dot(delta_r, c1);
+            pos_correction -= c_separation * c1;
+        }
+    } break;
+    case JointConstraint::Type::Hinge: {
+        JointConstraint::Hinge hinge_data = joint.hinge;
 
-    Vector3 pos_correction = Vector3::zero();
-    {
-        // Unlike paper, subtract from pos_correction because
-        // applyPositionalUpdate applies the negative magnitude to object 1
-        float a_separation = dot(delta_r, a1);
-        pos_correction -= (a_separation - joint.separation) * a1;
+        applyJointAxisConstraint(q1, q2,
+                                 hinge_data.a1Local, hinge_data.a2Local,
+                                 inv_I1, inv_I2);
 
-        float b_separation = dot(delta_r, b1);
-        pos_correction -= b_separation * b1;
+        Vector3 r1_world = q1.rotateVec(joint.r1) + x1;
+        Vector3 r2_world = q2.rotateVec(joint.r2) + x2;
 
-        float c_separation = dot(delta_r, c1);
-        pos_correction -= c_separation * c1;
+        pos_correction = r2_world - r1_world;
+    } break;
+    default: __builtin_unreachable();
     }
 
     float pos_correction_magnitude = pos_correction.length();
     if (pos_correction_magnitude > 0.f) {
         pos_correction /= pos_correction_magnitude;
-    }
 
-    applyPositionalUpdate(
-        x1, x2,
-        q1, q2,
-        joint.r1, joint.r2,
-        inv_m1, inv_m2,
-        inv_I1, inv_I2,
-        pos_correction, pos_correction_magnitude, 0);
+        applyPositionalUpdate(
+            x1, x2,
+            q1, q2,
+            joint.r1, joint.r2,
+            inv_m1, inv_m2,
+            inv_I1, inv_I2,
+            pos_correction, pos_correction_magnitude, 0);
+    }
 
     *x1_ptr = x1;
     *x2_ptr = x2;

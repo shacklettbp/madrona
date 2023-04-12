@@ -194,13 +194,47 @@ struct Contact {
 struct CollisionEventTemporary : Archetype<CollisionEvent> {};
 
 struct JointConstraint {
-    Loc e1;
-    Loc e2;
+    enum class Type {
+        Fixed,
+        Hinge
+    };
+
+    struct Fixed {
+        math::Quat attachRot1;
+        math::Quat attachRot2;
+        float separation;
+    };
+
+    struct Hinge {
+        math::Vector3 a1Local;
+        math::Vector3 a2Local;
+        math::Vector3 b1Local;
+        math::Vector3 b2Local;
+    };
+
+    Entity e1;
+    Entity e2;
+    Type type;
+
+    union {
+        Fixed fixed;
+        Hinge hinge;
+    };
+
     math::Vector3 r1;
     math::Vector3 r2;
-    math::Quat axes1;
-    math::Quat axes2;
-    float separation;
+
+    static inline JointConstraint setupFixed(
+        Entity e1, Entity e2,
+        math::Quat attach_rot1, math::Quat attach_rot2,
+        math::Vector3 r1, math::Vector3 r2,
+        float separation);
+
+    static inline JointConstraint setupHinge(
+        Entity e1, Entity e2,
+        math::Vector3 a1_local, math::Vector3 a2_local,
+        math::Vector3 b1_local, math::Vector3 b2_local,
+        math::Vector3 r1, math::Vector3 r2);
 };
 
 struct ConstraintData : Archetype<JointConstraint> {};
