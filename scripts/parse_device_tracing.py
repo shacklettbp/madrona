@@ -5,6 +5,7 @@ import pandas as pd
 from PIL import Image, ImageDraw
 
 HIDE_SEEK = True
+MAX_BLOCKS_PER_SM = 6
 
 
 def parse_device_logs(events):
@@ -14,18 +15,17 @@ def parse_device_logs(events):
     def new_step(num_warps, num_blocks, num_sms):
         nonlocal STEP
         STEP += 1
-        print("spec for step {}, num_warps: {}, num_blocks: {}, num_sms: {}".
-              format(STEP, num_warps, num_blocks, num_sms))
         LOG_STEPS[STEP] = {
             "events": {},
             "SMs": {},
             "mapping": {},
-            "final_cycles": {},
+            # "final_cycles": {},
             "start_timestamp": 0xFFFFFFFFFFFFFFFF,
             "final_timestamp": 0,
             "num_warps": num_warps,
             "num_blocks": num_blocks,
-            "num_sms": num_sms
+            "num_sms": num_sms,
+            "configs": {}
         }
 
     for i in range(0, len(events), 40):
@@ -48,10 +48,16 @@ def parse_device_logs(events):
         # print("event: {}, funcID: {}, numInvocations: {}, nodeID: {}, warpID: {}, blockID: {}, smID: {}, cycleCount: {}, logIndex: {}".format(event, funcID, numInvocations, nodeID, warpID, blockID, smID, cycleCount, logIndex))
         if event == 0:
             # for calibration event, we log kernel config instead of node
-            new_step(num_warps=funcID,
-                     num_blocks=numInvocations,
-                     num_sms=nodeID)
-            LOG_STEPS[STEP]["start_timestamp"] = cycleCount
+            # when logIndex == 0, it is the first node of the whole step
+            if logIndex == 0:
+                new_step(num_warps=funcID,
+                         num_blocks=numInvocations,
+                         num_sms=nodeID)
+                LOG_STEPS[STEP]["start_timestamp"] = cycleCount
+            else:
+                assert LOG_STEPS[STEP]["num_warps"] == funcID and LOG_STEPS[
+                    STEP]["num_sms"] == nodeID
+                LOG_STEPS[STEP]["num_blocks"] = numInvocations
 
         elif event in [1, 2]:
             if nodeID not in LOG_STEPS[STEP]["mapping"]:
@@ -68,6 +74,10 @@ def parse_device_logs(events):
                 assert event not in LOG_STEPS[STEP]["events"][nodeID]
                 LOG_STEPS[STEP]["events"][nodeID][event] = (smID, warpID,
                                                             cycleCount)
+            if nodeID not in LOG_STEPS[STEP]["configs"]:
+                LOG_STEPS[STEP]["configs"][nodeID] = {
+                    "num_blocks": LOG_STEPS[STEP]["num_blocks"]
+                }
 
         elif event in [3, 4]:
             if smID not in LOG_STEPS[STEP]["SMs"]:
@@ -87,8 +97,8 @@ def parse_device_logs(events):
                                                   warpID)] = [cycleCount]
 
         elif event == 5:
-            assert warpID not in LOG_STEPS[STEP]["final_cycles"]
-            LOG_STEPS[STEP]["final_cycles"][warpID] = cycleCount
+            # assert warpID not in LOG_STEPS[STEP]["final_cycles"]
+            # LOG_STEPS[STEP]["final_cycles"][warpID] = cycleCount
             LOG_STEPS[STEP]["final_timestamp"] = max(
                 LOG_STEPS[STEP]["final_timestamp"], cycleCount)
         else:
@@ -100,8 +110,8 @@ def parse_device_logs(events):
 
     for s in LOG_STEPS:
         LOG_STEPS[s]["final_timestamp"] -= LOG_STEPS[s]["start_timestamp"]
-        for b in LOG_STEPS[s]["final_cycles"]:
-            LOG_STEPS[s]["final_cycles"][b] -= LOG_STEPS[s]["start_timestamp"]
+        # for b in LOG_STEPS[s]["final_cycles"]:
+        #     LOG_STEPS[s]["final_cycles"][b] -= LOG_STEPS[s]["start_timestamp"]
 
     return LOG_STEPS
 
@@ -237,7 +247,7 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
     # todo: here we have an assumption that each SM has the same number of blocks, which are expected to be true
     num_sms = step_log["num_sms"]
     # num_block_per_sm = step_log["num_blocks"]
-    num_warp_per_sm = step_log["num_warps"] * step_log["num_blocks"]
+    num_warp_per_sm = step_log["num_warps"] * MAX_BLOCKS_PER_SM
     # num_block_per_sm = 8
     num_pixel_per_warp = 2
     sm_interval_pixel = num_pixel_per_warp * 3
@@ -312,9 +322,11 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
                 end = cast_coor(e[1])
                 for i in range(start, end + 1):
                     if i not in vertical_pixels:
-                        vertical_pixels[i] = 1
+                        vertical_pixels[i] = 1 * MAX_BLOCKS_PER_SM / step_log[
+                            "configs"][e[2]]["num_blocks"]
                     else:
-                        vertical_pixels[i] += 1
+                        vertical_pixels[i] += 1 * MAX_BLOCKS_PER_SM / step_log[
+                            "configs"][e[2]]["num_blocks"]
                 last_end_pixel = end
 
         n_pointer = 0
@@ -336,10 +348,11 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
             else:
                 bar_color = (0, 0, 0)
             assert vertical_pixels[p] <= num_warp_per_sm
-            draw.line((p, y, p, y - vertical_pixels[p] * num_pixel_per_warp),
-                      fill=bar_color,
-                      width=1)
-            y_low = y - vertical_pixels[p] * num_pixel_per_warp - 1
+            draw.line(
+                (p, y, p, y - int(vertical_pixels[p] * num_pixel_per_warp)),
+                fill=bar_color,
+                width=1)
+            y_low = y - int(vertical_pixels[p] * num_pixel_per_warp) - 1
             y_high = y - num_warp_per_sm * num_pixel_per_warp
             if y_low <= y_high:
                 pass

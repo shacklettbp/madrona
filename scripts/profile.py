@@ -8,6 +8,8 @@ NUM_THREADS_PER_BLOCK = 256
 NUM_SMS = 82
 BASE_STEP = 10
 DIR_PATH = "/tmp/profile_blocks__megakernel_events"
+# only take action when the change of config for certain node can contribute to at least 0.1% overall acceleration
+THRESHOLD = 1000
 
 
 def profile_madrona(path_to_lib,
@@ -79,7 +81,7 @@ def generate_json(block_config=range(1, 7)):
         min_duration = tabular_data[base_config]['duration (ns)'][i]
         for b in block_config:
             if min_duration - tabular_data[b]['duration (ns)'][
-                    i] > base_duration / 1000:
+                    i] > base_duration / THRESHOLD:
                 duration_deduction += min_duration - tabular_data[b][
                     'duration (ns)'][i]
                 min_duration = tabular_data[b]['duration (ns)'][i]
