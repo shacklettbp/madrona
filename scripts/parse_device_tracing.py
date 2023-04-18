@@ -5,6 +5,7 @@ import pandas as pd
 from PIL import Image, ImageDraw
 
 HIDE_SEEK = True
+SPLIT_LINES = True
 MAX_BLOCKS_PER_SM = 6
 
 
@@ -249,10 +250,10 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
     # num_block_per_sm = step_log["num_blocks"]
     num_warp_per_sm = step_log["num_warps"] * MAX_BLOCKS_PER_SM
     # num_block_per_sm = 8
-    num_pixel_per_warp = 2
+    num_pixel_per_warp = 1
     sm_interval_pixel = num_pixel_per_warp * 3
     num_pixel_per_sm = num_warp_per_sm * num_pixel_per_warp + sm_interval_pixel
-    y_blank = num_pixel_per_warp * num_warp_per_sm * 10
+    y_blank = num_pixel_per_warp * num_warp_per_sm * (num_sms // 8)
     y_limit = num_sms * num_pixel_per_sm + y_blank
     x_limit = y_limit * args.aspect_ratio
     print("the figure size will be {}x{}".format(x_limit, y_limit))
@@ -277,11 +278,12 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
             30: (199, 31, 102),
             34: (230, 96, 152),
             36: (248, 181, 209),
-            # observations
-            50: (139, 235, 219),
-            52: (90, 184, 168),
-            #
-            54: (148, 112, 206)
+            # Collect Observations System
+            52: (139, 235, 219),
+            # Compute Visibility System
+            54: (90, 184, 168),
+            # LIDAR System
+            56: (148, 112, 206)
         }
     else:
         for n in top_nodes:
@@ -311,15 +313,23 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
 
     num_stamps = active_warps = 0
 
-    for s, b in blocks.items():
-        y = (s + 1) * num_pixel_per_sm
+    for sm, b in blocks.items():
+        node_pixels_sm = {}
+        y = (sm + 1) * num_pixel_per_sm
         vertical_pixels = {}
-        for bb, events in b.items():
+        for warp, events in b.items():
             # to avoid duplication
             last_end_pixel = -1
             for e in events:
                 start = max(last_end_pixel + 1, cast_coor(e[0]))
                 end = cast_coor(e[1])
+                if e[2] not in node_pixels_sm:
+                    node_pixels_sm[e[2]] = [start, end]
+                else:
+                    node_pixels_sm[e[2]] = [
+                        min(node_pixels_sm[e[2]][0], start),
+                        max(node_pixels_sm[e[2]][1], end)
+                    ]
                 for i in range(start, end + 1):
                     if i not in vertical_pixels:
                         vertical_pixels[i] = 1 * MAX_BLOCKS_PER_SM / step_log[
@@ -330,34 +340,54 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
                 last_end_pixel = end
 
         n_pointer = 0
-        for p in sorted(vertical_pixels):
-            num_stamps += num_warp_per_sm
-            active_warps += vertical_pixels[p]
+        for node_start, node_end in sorted(node_pixels_sm.values()):
+            for p in range(node_start, node_end + 1):
+                if p not in vertical_pixels:
+                    vertical_pixels[p] = 0
+                num_stamps += num_warp_per_sm
+                active_warps += vertical_pixels[p]
 
-            while n_pointer < len(color_span):
-                left, right = sorted_color_span[n_pointer]
-                if p > right:
-                    n_pointer += 1
-                    continue
-                elif p < left:
-                    bar_color = (0, 0, 0)
+                while n_pointer < len(color_span):
+                    left, right = sorted_color_span[n_pointer]
+                    if p > right:
+                        n_pointer += 1
+                        continue
+                    elif p < left:
+                        bar_color = (0, 0, 0)
+                        break
+                    else:
+                        bar_color = color_span[(left, right)]
                     break
                 else:
-                    bar_color = color_span[(left, right)]
-                break
-            else:
-                bar_color = (0, 0, 0)
-            assert vertical_pixels[p] <= num_warp_per_sm
-            draw.line(
-                (p, y, p, y - int(vertical_pixels[p] * num_pixel_per_warp)),
-                fill=bar_color,
-                width=1)
-            y_low = y - int(vertical_pixels[p] * num_pixel_per_warp) - 1
-            y_high = y - num_warp_per_sm * num_pixel_per_warp
-            if y_low <= y_high:
-                pass
-            else:
-                draw.line((p, y_low, p, y_high), fill=(211, 211, 211), width=1)
+                    bar_color = (0, 0, 0)
+                assert vertical_pixels[p] <= num_warp_per_sm
+                # if vertical_pixels[p] != 0:
+                draw.line(
+                    (p, y, p, y - int(vertical_pixels[p] * num_pixel_per_warp)),
+                    fill=bar_color,
+                    width=1 if vertical_pixels[p] != 0 else 0)
+                y_low = y - int(vertical_pixels[p] * num_pixel_per_warp)
+                y_low -= 1 if vertical_pixels[p] != 0 else 0
+                y_high = y - num_warp_per_sm * num_pixel_per_warp
+                if y_low <= y_high:
+                    pass
+                else:
+                    draw.line((p, y_low, p, y_high),
+                              fill=(211, 211, 211),
+                              width=1)
+
+    if SPLIT_LINES:
+        # indicate the start of each splitted kernel
+        nodes = sorted(nodes_map.keys())
+        last_node = nodes[0]
+        for n in nodes[1:]:
+            if step_log["configs"][n]["num_blocks"] != step_log["configs"][
+                    last_node]["num_blocks"]:
+                node_start = cast_coor(nodes_map[n]["start"])
+                draw.line((node_start, 0, node_start, y_limit - y_blank / 2),
+                        fill="plum",
+                        width=2)
+            last_node = n
 
     print("Percentage of active warps is {:.2f}%".format(active_warps /
                                                          num_stamps * 100))
