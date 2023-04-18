@@ -5,7 +5,7 @@ import pandas as pd
 from PIL import Image, ImageDraw
 
 HIDE_SEEK = True
-SPLIT_LINES = True
+SPLIT_LINES = False
 MAX_BLOCKS_PER_SM = 6
 
 
