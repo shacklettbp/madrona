@@ -8,32 +8,6 @@ namespace madrona::phys {
 
 namespace geometry {
 
-// TODO: Should probably wrap this with proper RAII (eh?) - not supposed to be an API
-struct FastPolygonList {
-    uint32_t maxIndices;
-    uint32_t *buffer;
-    uint32_t size;
-    uint32_t edgeCount;
-    uint32_t polygonCount;
-
-    FastPolygonList &operator=(const FastPolygonList &other);
-
-    void allocate(uint32_t maxIdx);
-
-    void free();
-
-    // Creation
-    void addPolygon(Span<const uint32_t> vertex_indices);
-
-    // Iteration helper functions
-    inline uint32_t *begin() { return &buffer[1]; }
-    inline uint32_t *next(uint32_t *iterator) { return iterator + iterator[-1] + 1; }
-    inline uint32_t *end() { return buffer + size + 1; }
-    inline uint32_t getPolygonVertexCount(uint32_t *iterator) { return iterator[-1]; }
-    inline uint32_t getIteratorIndex(uint32_t *iterator) { return iterator - buffer; }
-    inline uint32_t *getIteratorFromIteratorIndex(uint32_t index) { return &buffer[index]; }
-};
-
 // Ok this is quite confusing right now but polygon data is data for each polygon
 // This could maybe in the future be a struct or something but for now is just an int
 // indexing to a half edge which is part of the polygon
@@ -75,10 +49,12 @@ struct Segment {
 // over all the faces and edges of the mesh. That's it
 class HalfEdgeMesh {
 public:
-    // Accept different formats
     void construct(
-            FastPolygonList &polygons,
-            uint32_t vertexCount, const math::Vector3 *vertices);
+        const math::Vector3 *vertices,
+        CountT num_vertices, 
+        const uint32_t *indices,
+        const uint32_t *face_counts,
+        CountT num_faces);
 
     // Normalized
     math::Vector3 getFaceNormal(PolygonID polygon,

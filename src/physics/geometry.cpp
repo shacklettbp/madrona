@@ -10,91 +10,56 @@ namespace madrona::phys::geometry {
 
 using namespace math;
 
-// Physics geometry representation
-FastPolygonList &FastPolygonList::operator=(const FastPolygonList &other) {
-    allocate(other.maxIndices);
-    this->size = other.size;
-    this->edgeCount = other.edgeCount;
-    this->polygonCount = other.polygonCount;
-
-    memcpy(buffer, other.buffer, sizeof(uint32_t) * maxIndices);
-
-    return *this;
-}
-
-void FastPolygonList::allocate(uint32_t maxIdx) {
-    maxIndices = maxIdx;
-    buffer = (uint32_t *)malloc(sizeof(uint32_t) * maxIndices);
-    size = 0;
-}
-
-void FastPolygonList::free() {
-    ::free(buffer);
-}
-
-// Creation
-void FastPolygonList::addPolygon(Span<const uint32_t> indices)
-{
-    uint32_t index_count = indices.size();
-
-    buffer[size] = index_count;
-
-    memcpy(buffer + size + 1, indices.data(), sizeof(uint32_t) * index_count);
-
-    size += index_count + 1;
-
-    polygonCount += 1;
-
-    // Should be the amount of half edges there are
-    edgeCount += index_count;
-}
-
 void HalfEdgeMesh::construct(
-        FastPolygonList &polygons,
-        uint32_t vertexCount, const math::Vector3 *vertices) {
+        const math::Vector3 *vert_positions,
+        CountT num_vertices, 
+        const uint32_t *indices,
+        const uint32_t *face_counts,
+        CountT num_faces)
+{
 #ifndef MADRONA_GPU_MODE
     static HalfEdge dummy = {};
 
-    // Allocate all temporary things
-    struct Temporary {
-        PolygonData *polygons;
-        Plane *facePlanes;
-        EdgeData *edges;
-        HalfEdge *halfEdges;
+    mHalfEdgeCount = 0;
+    mPolygonCount = num_faces;
 
-        // Counters are just for sanity purposes
-        uint32_t polygonCount;
-        uint32_t edgeCount;
-        uint32_t halfEdgeCount;
-    };
+    for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
+        mHalfEdgeCount += face_counts[face_idx];
+    }
 
-    Temporary tmp = {};
+    assert(mHalfEdgeCount % 2 == 0);
 
+    mEdgeCount = mHalfEdgeCount / 2;
+    mVertexCount = num_vertices;
+    
     // We already know how many polygons there are
-    tmp.polygons = (PolygonData *)malloc(sizeof(PolygonData) * polygons.polygonCount);
-    tmp.facePlanes = (Plane *)malloc(sizeof(Plane ) * polygons.polygonCount);
-    tmp.halfEdges = (HalfEdge *)malloc(sizeof(HalfEdge) * polygons.edgeCount);
-    // This will be excessive allocation but it's temporary so not big deal
-    tmp.edges = (EdgeData *)malloc(sizeof(EdgeData) * polygons.edgeCount);
+    mPolygons = (PolygonData *)malloc(sizeof(PolygonData) * num_faces);
+    mFacePlanes = (Plane *)malloc(sizeof(Plane) * num_faces);
+    mEdges = (EdgeData *)malloc(sizeof(EdgeData) * mEdgeCount);
+    mHalfEdges = (HalfEdge *)malloc(sizeof(HalfEdge) * mHalfEdgeCount);
+    mVertices = (math::Vector3 *)malloc(sizeof(math::Vector3) * mVertexCount);
+
+    memcpy(mVertices, vert_positions, sizeof(math::Vector3) * mVertexCount);
 
     // FIXME: std::map??
     std::map<std::pair<VertexID, VertexID>, HalfEdgeID> vtxPairToHalfEdge;
 
     // Proceed with construction
-    for (uint32_t poly_idx = 0, *polygon = polygons.begin();
-            polygon != polygons.end();
-            polygon = polygons.next(polygon), ++poly_idx) {
-        PolygonData *newPolygon = &tmp.polygons[tmp.polygonCount++];
+    const uint32_t *cur_face_indices = indices;
+    uint32_t num_initialized_hedges = 0;
+    uint32_t num_initialized_edges = 0;
+    for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
+        PolygonData *newPolygon = &mPolygons[face_idx];
 
-        CountT vtx_count = polygons.getPolygonVertexCount(polygon);
+        CountT vtx_count = face_counts[face_idx];
 
         HalfEdge *prev = &dummy;
-        uint32_t firstPolygonHalfEdgeIdx = tmp.halfEdgeCount;
+        uint32_t firstPolygonHalfEdgeIdx = num_initialized_hedges;
 
         // Create a half edge for each of these
         for (CountT v_idx = 0; v_idx < vtx_count; ++v_idx) {
-            VertexID a = polygon[v_idx];
-            VertexID b = polygon[(v_idx + 1) % vtx_count];
+            VertexID a = cur_face_indices[v_idx];
+            VertexID b = cur_face_indices[((v_idx + 1) % vtx_count)];
 
             std::pair<VertexID, VertexID> edge = {a, b};
 
@@ -106,10 +71,10 @@ void HalfEdgeMesh::construct(
             }
             else {
                 // We can allocate a new half edge
-                uint32_t hedge_idx = tmp.halfEdgeCount++;
-                HalfEdge *new_half_edge = &tmp.halfEdges[hedge_idx];
+                uint32_t hedge_idx = num_initialized_hedges++;
+                HalfEdge *new_half_edge = &mHalfEdges[hedge_idx];
                 new_half_edge->rootVertex = a;
-                new_half_edge->polygon = poly_idx;
+                new_half_edge->polygon = face_idx;
 
                 // Only set this if the twin was allocated
                 std::pair<VertexID, VertexID> twin_edge = {b, a};
@@ -117,10 +82,10 @@ void HalfEdgeMesh::construct(
                         twin != vtxPairToHalfEdge.end()) {
                     // The twin was allocated!
                     new_half_edge->twin = twin->second;
-                    tmp.halfEdges[twin->second].twin = hedge_idx;
+                    mHalfEdges[twin->second].twin = hedge_idx;
 
                     // Only call allocate a new "edge" if the twin was already allocated
-                    EdgeData *new_edge = &tmp.edges[tmp.edgeCount++];
+                    EdgeData *new_edge = &mEdges[num_initialized_edges++];
                     *new_edge = twin->second;
 
                     // assert(new_half_edge->polygon != tmp.halfEdges[new_half_edge->twin].polygon);
@@ -139,10 +104,10 @@ void HalfEdgeMesh::construct(
         prev->next = firstPolygonHalfEdgeIdx;
 
         math::Vector3 face_points[3];
-        auto *h_edge = &tmp.halfEdges[*newPolygon];
+        auto *h_edge = &mHalfEdges[*newPolygon];
         for (CountT i = 0; i < 3; ++i) {
-            face_points[i] = vertices[h_edge->rootVertex];
-            h_edge = &tmp.halfEdges[h_edge->next];
+            face_points[i] = vert_positions[h_edge->rootVertex];
+            h_edge = &mHalfEdges[h_edge->next];
         }
 
         math::Vector3 a = face_points[1] - face_points[0];
@@ -150,46 +115,13 @@ void HalfEdgeMesh::construct(
 
         Vector3 n = math::cross(a, b).normalize();
 
-        tmp.facePlanes[poly_idx] = Plane {
+        mFacePlanes[face_idx] = Plane {
             n,
             dot(n, face_points[0]),
         };
+
+        cur_face_indices += vtx_count;
     }
-
-
-    // Copy all these to permanent storage in member pointers
-#if 0
-    mVertices = flAllocv<math::Vector3>(vertexCount);
-    memcpy(mVertices, vertices, sizeof(math::Vector3) * vertexCount);
-    mVertexCount = vertexCount;
-
-    mTransformedVertices = flAllocv<math::Vector3>(vertexCount);
-#endif
-
-    mPolygons = (PolygonData *)malloc(sizeof(PolygonData) * tmp.polygonCount);
-    memcpy(mPolygons, tmp.polygons, sizeof(PolygonData) * tmp.polygonCount);
-    mPolygonCount = tmp.polygonCount;
-
-    mFacePlanes = (geometry::Plane *)malloc(
-        sizeof(geometry::Plane) * tmp.polygonCount);
-    memcpy(mFacePlanes, tmp.facePlanes, sizeof(geometry::Plane) * tmp.polygonCount);
-
-    mEdges = (EdgeData *)malloc(sizeof(EdgeData) * tmp.edgeCount);
-    memcpy(mEdges, tmp.edges, sizeof(EdgeData) * tmp.edgeCount);
-    mEdgeCount = tmp.edgeCount;
-
-    mHalfEdges = (HalfEdge *)malloc(sizeof(HalfEdge) * tmp.halfEdgeCount);
-    memcpy(mHalfEdges, tmp.halfEdges, sizeof(HalfEdge) * tmp.halfEdgeCount);
-    mHalfEdgeCount = tmp.halfEdgeCount;
-
-    mVertices = (math::Vector3 *)malloc(sizeof(math::Vector3) * vertexCount);
-    memcpy(mVertices, vertices, sizeof(math::Vector3) * vertexCount);
-    mVertexCount = vertexCount;
-
-    free(tmp.polygons);
-    free(tmp.facePlanes);
-    free(tmp.halfEdges);
-    free(tmp.edges);
 #endif
 }
 

@@ -202,7 +202,7 @@ PhysicsLoader::~PhysicsLoader()
 
 PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 
-PhysicsLoader::LoadedHull PhysicsLoader::loadHullFromDisk(
+HeapArray<PhysicsLoader::LoadedHull> PhysicsLoader::importConvexDecompFromDisk(
     const char *obj_path)
 {
     auto imp_obj = imp::ImportedObject::importObject(obj_path);
@@ -210,47 +210,30 @@ PhysicsLoader::LoadedHull PhysicsLoader::loadHullFromDisk(
         FATAL("Failed to load collision mesh from %s", obj_path);
     }
 
-    assert(imp_obj->meshes.size() == 1);
-    const imp::SourceMesh &imp_mesh = imp_obj->meshes[0];
+    CountT num_meshes = imp_obj->meshes.size();
+    HeapArray<LoadedHull> loaded_hulls(num_meshes);
 
-    CountT total_polylist_space = 0;
+    for (CountT mesh_idx = 0; mesh_idx < num_meshes; mesh_idx++) {
+        const imp::SourceMesh &imp_mesh = imp_obj->meshes[mesh_idx];
 
-    // FIXME: should get rid of this FastPolygonList class and combine
-    // with ImportedObject or something
-    for (CountT face_idx = 0; face_idx < imp_mesh.numFaces;
-         face_idx++) {
-        total_polylist_space += imp_mesh.faceCounts[face_idx] + 1;
+        math::AABB aabb = math::AABB::point(imp_mesh.positions[0]);
+        for (CountT vert_idx = 1; vert_idx < (CountT)imp_mesh.numVertices;
+             vert_idx++) {
+            aabb.expand(imp_mesh.positions[vert_idx]);
+        }
+
+        geometry::HalfEdgeMesh he_mesh;
+        he_mesh.construct(imp_mesh.positions, imp_mesh.numVertices,
+                          imp_mesh.indices, imp_mesh.faceCounts,
+                          imp_mesh.numFaces);
+
+        loaded_hulls.insert(mesh_idx, {
+            aabb,
+            he_mesh,
+        });
     }
 
-    geometry::FastPolygonList poly_list {};
-    poly_list.allocate(total_polylist_space);
-
-    CountT cur_idx_offset = 0;
-    for (CountT face_idx = 0; face_idx < imp_mesh.numFaces;
-         face_idx++) {
-        CountT num_face_indices = imp_mesh.faceCounts[face_idx];
-
-        poly_list.addPolygon(Span<const uint32_t>(
-            imp_mesh.indices + cur_idx_offset, num_face_indices));
-        
-        cur_idx_offset += imp_mesh.faceCounts[face_idx];
-    }
-
-    geometry::HalfEdgeMesh he_mesh;
-    he_mesh.construct(poly_list, imp_mesh.numVertices, imp_mesh.positions);
-    poly_list.free();
-
-    math::AABB aabb = math::AABB::point(imp_mesh.positions[0]);
-
-    for (CountT vert_idx = 1; vert_idx < (CountT)imp_mesh.numVertices;
-         vert_idx++) {
-        aabb.expand(imp_mesh.positions[vert_idx]);
-    }
-
-    return LoadedHull {
-        aabb,
-        he_mesh,
-    };
+    return loaded_hulls;
 }
 
 CountT PhysicsLoader::loadObjects(

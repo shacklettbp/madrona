@@ -93,13 +93,6 @@ public:
         return span;
     }
 
-    RefT insert(CountT i, T v)
-    {
-        new (&ptr_[i]) T(std::move(v));
-
-        return ptr_[i];
-    }
-
     RefT insert(CountT i, T &&v)
     {
         new (&ptr_[i]) T(std::move(v));

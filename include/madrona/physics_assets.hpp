@@ -21,12 +21,12 @@ public:
         geometry::HalfEdgeMesh collisionMesh;
     };
 
-    LoadedHull loadHullFromDisk(const char *obj_path);
+    HeapArray<LoadedHull> importConvexDecompFromDisk(const char *obj_path);
 
     CountT loadObjects(const RigidBodyMetadata *metadatas,
-                        const math::AABB *aabbs,
-                        const CollisionPrimitive *primitives,
-                        CountT num_objs);
+                       const math::AABB *aabbs,
+                       const CollisionPrimitive *primitives,
+                       CountT num_objs);
 
 
     ObjectManager & getObjectManager();
