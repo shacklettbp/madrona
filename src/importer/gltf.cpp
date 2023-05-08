@@ -1,14 +1,7 @@
 #include "gltf.hpp"
 
-#include <glm/glm.hpp>
-#include <glm/gtc/type_ptr.hpp>
-#include <glm/gtx/transform.hpp>
-#include <glm/gtx/string_cast.hpp>
-
-#include <fstream>
 #include <iostream>
 #include <type_traits>
-#include <unordered_set>
 
 #include <madrona/crash.hpp>
 

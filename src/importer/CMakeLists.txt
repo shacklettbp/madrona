@@ -12,6 +12,7 @@ target_link_libraries(madrona_json
 add_library(madrona_importer STATIC
     ${MADRONA_INC_DIR}/importer.hpp importer.cpp
     #gltf.hpp gltf.cpp
+    obj.hpp obj.cpp
 )
 
 target_link_libraries(madrona_importer PRIVATE

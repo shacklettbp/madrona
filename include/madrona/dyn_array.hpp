@@ -130,6 +130,13 @@ public:
         n_ = new_size;
     }
 
+    void reserve(CountT new_capacity)
+    {
+        if (new_capacity > capacity_) {
+            expand(new_capacity);
+        }
+    }
+
     RefT insert(CountT i, T v)
     {
         new (&ptr_[i]) T(std::move(v));

@@ -26,6 +26,7 @@ struct SourceMesh {
     const uint32_t *faceCounts;
     uint32_t numVertices;
     uint32_t numFaces;
+    uint32_t materialIDX;
 };
 
 struct SourceObject {
@@ -41,8 +42,21 @@ struct ImportedObject {
     DynArray<DynArray<uint32_t>> faceCountArrays;
 
     DynArray<SourceMesh> meshes;
+};
 
-    static Optional<ImportedObject> importObject(const char *path);
+struct ImportedMaterial {};
+
+struct ImportedInstance {
+    math::Mat3x4 txfm;
+    uint32_t objIDX;
+};
+
+struct ImportedAssets {
+    DynArray<ImportedObject> objects;
+    DynArray<ImportedMaterial> materials;
+    DynArray<ImportedInstance> instances;
+
+    static Optional<ImportedAssets> importFromDisk(const char *path);
 };
 
 }

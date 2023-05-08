@@ -205,16 +205,22 @@ PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 HeapArray<PhysicsLoader::LoadedHull> PhysicsLoader::importConvexDecompFromDisk(
     const char *obj_path)
 {
-    auto imp_obj = imp::ImportedObject::importObject(obj_path);
-    if (!imp_obj.has_value()) {
+    auto imp_assets = imp::ImportedAssets::importFromDisk(obj_path);
+    if (!imp_assets.has_value()) {
         FATAL("Failed to load collision mesh from %s", obj_path);
     }
 
-    CountT num_meshes = imp_obj->meshes.size();
+    if (imp_assets->objects.size() != 1) {
+        FATAL("Collision mesh source file should only have 1 object");
+    }
+
+    const auto &imp_obj = imp_assets->objects[0];
+
+    CountT num_meshes = imp_obj.meshes.size();
     HeapArray<LoadedHull> loaded_hulls(num_meshes);
 
     for (CountT mesh_idx = 0; mesh_idx < num_meshes; mesh_idx++) {
-        const imp::SourceMesh &imp_mesh = imp_obj->meshes[mesh_idx];
+        const imp::SourceMesh &imp_mesh = imp_obj.meshes[mesh_idx];
 
         math::AABB aabb = math::AABB::point(imp_mesh.positions[0]);
         for (CountT vert_idx = 1; vert_idx < (CountT)imp_mesh.numVertices;

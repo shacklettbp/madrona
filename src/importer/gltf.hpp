@@ -1,6 +1,8 @@
 #pragma once
 
-#include <glm/glm.hpp>
+#include <madrona/math.hpp>
+#include <madrona/importer.hpp>
+
 #include <simdjson.h>
 
 #include <cstdint>
@@ -8,8 +10,6 @@
 #include <filesystem>
 #include <string_view>
 #include <vector>
-
-#include <madrona/importer.hpp>
 
 namespace GPURearrange {
 
