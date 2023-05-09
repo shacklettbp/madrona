@@ -205,7 +205,7 @@ PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 HeapArray<PhysicsLoader::LoadedHull> PhysicsLoader::importConvexDecompFromDisk(
     const char *obj_path)
 {
-    auto imp_assets = imp::ImportedAssets::importFromDisk(obj_path);
+    auto imp_assets = imp::ImportedAssets::importFromDisk({obj_path});
     if (!imp_assets.has_value()) {
         FATAL("Failed to load collision mesh from %s", obj_path);
     }
@@ -214,24 +214,24 @@ HeapArray<PhysicsLoader::LoadedHull> PhysicsLoader::importConvexDecompFromDisk(
         FATAL("Collision mesh source file should only have 1 object");
     }
 
-    const auto &imp_obj = imp_assets->objects[0];
+    const auto &src_obj = imp_assets->objects[0];
 
-    CountT num_meshes = imp_obj.meshes.size();
+    CountT num_meshes = src_obj.meshes.size();
     HeapArray<LoadedHull> loaded_hulls(num_meshes);
 
     for (CountT mesh_idx = 0; mesh_idx < num_meshes; mesh_idx++) {
-        const imp::SourceMesh &imp_mesh = imp_obj.meshes[mesh_idx];
+        const imp::SourceMesh &src_mesh = src_obj.meshes[mesh_idx];
 
-        math::AABB aabb = math::AABB::point(imp_mesh.positions[0]);
-        for (CountT vert_idx = 1; vert_idx < (CountT)imp_mesh.numVertices;
+        math::AABB aabb = math::AABB::point(src_mesh.positions[0]);
+        for (CountT vert_idx = 1; vert_idx < (CountT)src_mesh.numVertices;
              vert_idx++) {
-            aabb.expand(imp_mesh.positions[vert_idx]);
+            aabb.expand(src_mesh.positions[vert_idx]);
         }
 
         geometry::HalfEdgeMesh he_mesh;
-        he_mesh.construct(imp_mesh.positions, imp_mesh.numVertices,
-                          imp_mesh.indices, imp_mesh.faceCounts,
-                          imp_mesh.numFaces);
+        he_mesh.construct(src_mesh.positions, src_mesh.numVertices,
+                          src_mesh.indices, src_mesh.faceCounts,
+                          src_mesh.numFaces);
 
         loaded_hulls.insert(mesh_idx, {
             aabb,

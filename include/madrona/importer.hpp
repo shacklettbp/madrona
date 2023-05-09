@@ -33,30 +33,31 @@ struct SourceObject {
     Span<const SourceMesh> meshes;
 };
 
-struct ImportedObject {
-    DynArray<DynArray<math::Vector3>> positionArrays;
-    DynArray<DynArray<math::Vector3>> normalArrays;
-    DynArray<DynArray<math::Vector4>> tangentAndSignArrays;
-    DynArray<DynArray<math::Vector2>> uvArrays;
-    DynArray<DynArray<uint32_t>> indexArrays;
-    DynArray<DynArray<uint32_t>> faceCountArrays;
+struct SourceMaterial {};
 
-    DynArray<SourceMesh> meshes;
-};
-
-struct ImportedMaterial {};
-
-struct ImportedInstance {
+struct SourceInstance {
     math::Mat3x4 txfm;
     uint32_t objIDX;
 };
 
 struct ImportedAssets {
-    DynArray<ImportedObject> objects;
-    DynArray<ImportedMaterial> materials;
-    DynArray<ImportedInstance> instances;
+    struct GeometryData {
+        DynArray<DynArray<math::Vector3>> positionArrays;
+        DynArray<DynArray<math::Vector3>> normalArrays;
+        DynArray<DynArray<math::Vector4>> tangentAndSignArrays;
+        DynArray<DynArray<math::Vector2>> uvArrays;
+        DynArray<DynArray<uint32_t>> indexArrays;
+        DynArray<DynArray<uint32_t>> faceCountArrays;
+        DynArray<DynArray<SourceMesh>> meshArrays;
+    } geoData;
 
-    static Optional<ImportedAssets> importFromDisk(const char *path);
+    DynArray<SourceObject> objects;
+    DynArray<SourceMaterial> materials;
+    DynArray<SourceInstance> instances;
+
+    static Optional<ImportedAssets> importFromDisk(
+        Span<const char * const> asset_paths,
+        Span<char> err_buf = { nullptr, 0 });
 };
 
 }

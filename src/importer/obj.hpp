@@ -4,6 +4,7 @@
 
 namespace madrona::imp {
 
-bool loadOBJFile(const char *path, ImportedAssets &imported_assets);
+bool loadOBJFile(const char *path, ImportedAssets &imported_assets,
+                 Span<char> err_buf);
 
 }

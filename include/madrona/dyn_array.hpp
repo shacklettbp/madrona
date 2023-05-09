@@ -28,7 +28,7 @@ class DynArray {
 public:
     using RefT = std::add_lvalue_reference_t<T>;
 
-    DynArray(CountT init_capacity, A alloc = DefaultAlloc())
+    explicit DynArray(CountT init_capacity, A alloc = DefaultAlloc())
         : alloc_(std::move(alloc)),
           ptr_(init_capacity > 0 ?
                    (T *)alloc_.alloc(init_capacity * sizeof(T)) :

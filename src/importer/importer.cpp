@@ -13,27 +13,44 @@ namespace madrona::imp {
 
 using namespace math;
 
-Optional<ImportedAssets> ImportedAssets::importFromDisk(const char *path)
+Optional<ImportedAssets> ImportedAssets::importFromDisk(
+    Span<const char * const> paths, Span<char> err_buf)
 {
     ImportedAssets imported {
-        .objects = DynArray<ImportedObject>(1),
-        .materials = DynArray<ImportedMaterial>(0),
-        .instances = DynArray<ImportedInstance>(0),
+        .geoData = GeometryData {
+            .positionArrays { 0 },
+            .normalArrays { 0 },
+            .tangentAndSignArrays { 0 },
+            .uvArrays { 0 },
+            .indexArrays { 0 },
+            .faceCountArrays { 0 },
+            .meshArrays { 0 },
+        },
+        .objects { 0 },
+        .materials { 0 },
+        .instances { 0 },
     };
 
-    std::string_view path_view(path);
-
-    auto extension_pos = path_view.rfind('.');
-    if (extension_pos == path_view.npos) {
-        return Optional<ImportedAssets>::none();
-    }
-    auto extension = path_view.substr(extension_pos + 1);
 
     bool load_success = false;
-    if (extension == "obj") {
-        load_success = loadOBJFile(path, imported);
-    } else if (extension == "gltf" || extension == "glb") {
-        //load_success = loadGLTFFile(path, imported);
+    for (const char *path : paths) {
+        std::string_view path_view(path);
+
+        auto extension_pos = path_view.rfind('.');
+        if (extension_pos == path_view.npos) {
+            return Optional<ImportedAssets>::none();
+        }
+        auto extension = path_view.substr(extension_pos + 1);
+
+        if (extension == "obj") {
+            load_success = loadOBJFile(path, imported, err_buf);
+        } else if (extension == "gltf" || extension == "glb") {
+            //load_success = loadGLTFFile(path, imported);
+        }
+
+        if (!load_success) {
+            break;
+        }
     }
 
     if (!load_success) {
