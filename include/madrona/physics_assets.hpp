@@ -1,6 +1,7 @@
 #pragma once
 
 #include <madrona/physics.hpp>
+#include <madrona/importer.hpp>
 
 namespace madrona {
 namespace phys {
@@ -16,12 +17,18 @@ public:
     ~PhysicsLoader();
     PhysicsLoader(PhysicsLoader &&o);
 
-    struct LoadedHull {
-        math::AABB aabb;
-        geometry::HalfEdgeMesh collisionMesh;
+    struct ConvexDecompositions {
+        HeapArray<math::Vector3> vertices;
+        HeapArray<geometry::HalfEdgeMesh> collisionMeshes;
+        HeapArray<RigidBodyMassData> massDatas;
+        HeapArray<math::AABB> aabbs;
     };
 
-    HeapArray<LoadedHull> importConvexDecompFromDisk(const char *obj_path);
+    ConvexDecompositions processConvexDecompositions(
+        const imp::SourceObject *src_objects,
+        const float *inv_masses, 
+        CountT num_objects,
+        bool merge_coplanar_faces);
 
     CountT loadObjects(const RigidBodyMetadata *metadatas,
                        const math::AABB *aabbs,

@@ -202,19 +202,23 @@ PhysicsLoader::~PhysicsLoader()
 
 PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 
-HeapArray<PhysicsLoader::LoadedHull> PhysicsLoader::importConvexDecompFromDisk(
-    const char *obj_path)
+PhysicsLoader::ConvexDecompositions PhysicsLoader::processConvexDecompositions(
+    const imp::SourceObject *src_objs,
+    const float *inv_masses,
+    CountT num_objects,
+    bool merge_coplanar_faces)
 {
-    auto imp_assets = imp::ImportedAssets::importFromDisk({obj_path});
-    if (!imp_assets.has_value()) {
-        FATAL("Failed to load collision mesh from %s", obj_path);
+    CountT total_num_vertices = 0;
+
+    for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {
+        const imp::SourceObject &src_obj = src_objs[obj_idx];
+
+        for (const auto &mesh : src_obj.meshes) {
+            total_num_vertices += mesh.numVertices;
+        }
     }
 
-    if (imp_assets->objects.size() != 1) {
-        FATAL("Collision mesh source file should only have 1 object");
-    }
-
-    const auto &src_obj = imp_assets->objects[0];
+    HeapArray<math::Vector3> all_verts(total_num_vertices);
 
     CountT num_meshes = src_obj.meshes.size();
     HeapArray<LoadedHull> loaded_hulls(num_meshes);

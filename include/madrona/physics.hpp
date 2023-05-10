@@ -44,7 +44,6 @@ struct Segment {
     math::Vector3 p2;
 };
 
-
 // For our purposes, we just need to be able to easily iterate
 // over all the faces and edges of the mesh. That's it
 class HalfEdgeMesh {
@@ -216,11 +215,19 @@ struct JointConstraint {
 struct ConstraintData : Archetype<JointConstraint> {};
 
 // Per object state
-struct RigidBodyMetadata {
-    math::Vector3 invInertiaTensor;
+struct RigidBodyMassData {
     float invMass;
+    math::Vector3 invInertiaTensor;
+};
+
+struct RigidBodyFrictionData {
     float muS;
     float muD;
+};
+
+struct RigidBodyMetadata {
+    RigidBodyMassData mass;
+    RigidBodyFrictionData friction;
 };
 
 struct CollisionPrimitive {
