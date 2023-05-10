@@ -1608,6 +1608,8 @@ GLTFLoader::GLTFLoader(Span<char> err_buf)
     : impl_(new Impl(err_buf))
 {}
 
+GLTFLoader::~GLTFLoader() {}
+
 bool GLTFLoader::load(const char *path, 
                       ImportedAssets &imported_assets)
 {

@@ -31,6 +31,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         .instances { 0 },
     };
 
+    auto obj_loader = Optional<OBJLoader>::none();
     auto gltf_loader = Optional<GLTFLoader>::none();
 
     bool load_success = false;
@@ -44,7 +45,11 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         auto extension = path_view.substr(extension_pos + 1);
 
         if (extension == "obj") {
-            load_success = loadOBJFile(path, imported, err_buf);
+            if (!obj_loader.has_value()) {
+                obj_loader.emplace(err_buf);
+            }
+
+            load_success = obj_loader->load(path, imported);
         } else if (extension == "gltf" || extension == "glb") {
             if (!gltf_loader.has_value()) {
                 gltf_loader.emplace(err_buf);

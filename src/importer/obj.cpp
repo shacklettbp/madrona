@@ -21,7 +21,9 @@ struct ObjIDX {
     uint32_t uvIdx;
 };
 
-struct LoaderHelper {
+}
+
+struct OBJLoader::Impl {
     DynArray<SourceMesh> objMeshes;
 
     // These buffers are iteratively filled while parsing the OBJ
@@ -39,23 +41,212 @@ struct LoaderHelper {
     DynArray<uint32_t> vertexRemap;
 
     // Extra data for error reporting
-    const char *filePath;
     Span<char> errBuf;
+    const char *filePath;
     const char *curSrcLine;
     int64_t curSrcLineIdx;
 
-    LoaderHelper(const char *file_path, Span<char> err_buf,
-                 CountT reserve_elems);
+    Impl(Span<char> err_buf);
 
     void setLine(const char *src_line, int64_t line_idx);
 
     void recordError(const char *fmt_string, ...) const;
 
     bool commitMesh(ImportedAssets &out_assets);
+
+    bool load(const char *path, ImportedAssets &imported_assets);
+
+    static constexpr inline CountT reserve_elems = 128;
 };
 
-LoaderHelper::LoaderHelper(const char *file_path, Span<char> err_buf,
-                           CountT reserve_elems)
+using LoaderData = OBJLoader::Impl;
+
+namespace {
+
+inline fast_float::from_chars_result fromCharsFloat(
+    const char *first,
+    const char *last,
+    float &value,
+    fast_float::chars_format fmt = fast_float::chars_format::general)
+{
+    return fast_float::from_chars(first, last, value, fmt);
+}
+
+inline std::from_chars_result fromCharsU32(
+    const char *first,
+    const char *last,
+    uint32_t &value,
+    int base = 10)
+{
+    return std::from_chars(first, last, value, base);
+}
+
+inline bool parseVec2(std::string_view str,
+                      math::Vector2 *out,
+                      const LoaderData &loader)
+{
+    const char *start = str.begin();
+    const char *end = str.end();
+
+    while (*start == ' ' && start < end) {
+        start += 1;
+    }
+
+    float x;
+    auto res = fromCharsFloat(start, end, x);
+
+    if (res.ptr == start) {
+        loader.recordError("Failed to read x component.");
+        return false;
+    }
+
+    start = res.ptr;
+
+    while (*start == ' ' && start < end) {
+        start += 1;
+    }
+
+    float y;
+    res = fromCharsFloat(start, end, y);
+
+    if (res.ptr == start) {
+        loader.recordError("Failed to read y component.");
+        return false;
+    }
+
+    *out = math::Vector2 { x, y };
+    return true;
+};
+
+
+inline bool parseVec3(std::string_view str,
+                      math::Vector3 *out,
+                      const LoaderData &loader)
+{
+    const char *start = str.begin();
+    const char *end = str.end();
+
+    while (*start == ' ' && start < end) {
+        start += 1;
+    }
+
+    float x;
+    auto res = fromCharsFloat(start, end, x);
+
+    if (res.ptr == start) {
+        loader.recordError("Failed to read x component.");
+        return false;
+    }
+
+    start = res.ptr;
+
+    while (*start == ' ' && start < end) {
+        start += 1;
+    }
+
+    float y;
+    res = fromCharsFloat(start, end, y);
+
+    if (res.ptr == start) {
+        loader.recordError("Failed to read y component.");
+        return false;
+    }
+
+    start = res.ptr;
+
+    while (*start == ' ' && start < end) {
+        start += 1;
+    }
+
+    float z;
+    res = fromCharsFloat(start, end, z);
+
+    if (res.ptr == start) {
+        loader.recordError("Failed to read z component.");
+        return false;
+    }
+
+    *out = math::Vector3 { x, y, z };
+    return true;
+};
+
+inline bool parseIdxTriple(const char *start, const char *end,
+                           ObjIDX *idx_triple, const char **next,
+                           const LoaderData &loader)
+{
+    uint32_t pos_idx;
+    auto res = fromCharsU32(start, end, pos_idx);
+
+    if (res.ptr == start) {
+        loader.recordError("Failed to read position idx: %s.", start);
+        return false;
+    }
+
+    start = res.ptr;
+
+    if (start == end || start[0] != '/') {
+        *idx_triple = {
+            .posIdx = pos_idx,
+            .normalIdx = 0,
+            .uvIdx = 0,
+        };
+
+        *next = start;
+        return true;
+    }
+
+    start += 1;
+
+    uint32_t uv_idx;
+
+    if (start[0] == '/') {
+        uv_idx = 0;
+    } else {
+        res = fromCharsU32(start, end, uv_idx);
+
+        if (res.ptr == start) {
+            loader.recordError("Failed to read UV idx.");
+            return false;
+        }
+
+        start = res.ptr;
+    }
+
+    if (start == end || start[0] != '/') {
+        *idx_triple = {
+            .posIdx = pos_idx,
+            .normalIdx = 0,
+            .uvIdx = uv_idx,
+        };
+
+        *next = start;
+        return true;
+    }
+
+    start += 1;
+
+    uint32_t normal_idx;
+    res = fromCharsU32(start, end, normal_idx);
+
+    if (res.ptr == start) {
+        loader.recordError("Failed to read normal idx");
+        return false;
+    }
+
+    *idx_triple = {
+        .posIdx = pos_idx,
+        .normalIdx = normal_idx,
+        .uvIdx = uv_idx,
+    };
+
+    *next = res.ptr;
+
+    return true;
+};
+
+}
+
+OBJLoader::Impl::Impl(Span<char> err_buf)
     : objMeshes(1),
       curPositions(reserve_elems),
       curNormals(reserve_elems),
@@ -67,19 +258,19 @@ LoaderHelper::LoaderHelper(const char *file_path, Span<char> err_buf,
       unindexedUVs(reserve_elems),
       fakeIndices(reserve_elems),
       vertexRemap(reserve_elems),
-      filePath(file_path),
       errBuf(err_buf),
+      filePath(nullptr),
       curSrcLine(nullptr),
       curSrcLineIdx(-1)
 {}
 
-void LoaderHelper::setLine(const char *src_line, int64_t line_idx)
+void OBJLoader::Impl::setLine(const char *src_line, int64_t line_idx)
 {
     curSrcLine = src_line;
     curSrcLineIdx = line_idx;
 }
 
-void LoaderHelper::recordError(const char *fmt_string, ...) const
+void OBJLoader::Impl::recordError(const char *fmt_string, ...) const
 {
     if (errBuf.data() == nullptr) {
         return;
@@ -106,7 +297,7 @@ void LoaderHelper::recordError(const char *fmt_string, ...) const
     }
 }
 
-bool LoaderHelper::commitMesh(ImportedAssets &out_assets)
+bool OBJLoader::Impl::commitMesh(ImportedAssets &out_assets)
 {
     if (curIndices.size() == 0) {
         if (curPositions.size() > 0 || curNormals.size() > 0 ||
@@ -284,216 +475,27 @@ bool LoaderHelper::commitMesh(ImportedAssets &out_assets)
     return true;
 }
 
-inline fast_float::from_chars_result fromCharsFloat(
-    const char *first,
-    const char *last,
-    float &value,
-    fast_float::chars_format fmt = fast_float::chars_format::general)
-{
-    return fast_float::from_chars(first, last, value, fmt);
-}
-
-inline std::from_chars_result fromCharsU32(
-    const char *first,
-    const char *last,
-    uint32_t &value,
-    int base = 10)
-{
-    return std::from_chars(first, last, value, base);
-}
-
-inline bool parseVec2(std::string_view str,
-                      math::Vector2 *out,
-                      const LoaderHelper &loader)
-{
-    const char *start = str.begin();
-    const char *end = str.end();
-
-    while (*start == ' ' && start < end) {
-        start += 1;
-    }
-
-    float x;
-    auto res = fromCharsFloat(start, end, x);
-
-    if (res.ptr == start) {
-        loader.recordError("Failed to read x component.");
-        return false;
-    }
-
-    start = res.ptr;
-
-    while (*start == ' ' && start < end) {
-        start += 1;
-    }
-
-    float y;
-    res = fromCharsFloat(start, end, y);
-
-    if (res.ptr == start) {
-        loader.recordError("Failed to read y component.");
-        return false;
-    }
-
-    *out = math::Vector2 { x, y };
-    return true;
-};
-
-
-inline bool parseVec3(std::string_view str,
-                      math::Vector3 *out,
-                      const LoaderHelper &loader)
-{
-    const char *start = str.begin();
-    const char *end = str.end();
-
-    while (*start == ' ' && start < end) {
-        start += 1;
-    }
-
-    float x;
-    auto res = fromCharsFloat(start, end, x);
-
-    if (res.ptr == start) {
-        loader.recordError("Failed to read x component.");
-        return false;
-    }
-
-    start = res.ptr;
-
-    while (*start == ' ' && start < end) {
-        start += 1;
-    }
-
-    float y;
-    res = fromCharsFloat(start, end, y);
-
-    if (res.ptr == start) {
-        loader.recordError("Failed to read y component.");
-        return false;
-    }
-
-    start = res.ptr;
-
-    while (*start == ' ' && start < end) {
-        start += 1;
-    }
-
-    float z;
-    res = fromCharsFloat(start, end, z);
-
-    if (res.ptr == start) {
-        loader.recordError("Failed to read z component.");
-        return false;
-    }
-
-    *out = math::Vector3 { x, y, z };
-    return true;
-};
-
-inline bool parseIdxTriple(const char *start, const char *end,
-                           ObjIDX *idx_triple, const char **next,
-                           const LoaderHelper &loader)
-{
-    uint32_t pos_idx;
-    auto res = fromCharsU32(start, end, pos_idx);
-
-    if (res.ptr == start) {
-        loader.recordError("Failed to read position idx: %s.", start);
-        return false;
-    }
-
-    start = res.ptr;
-
-    if (start == end || start[0] != '/') {
-        *idx_triple = {
-            .posIdx = pos_idx,
-            .normalIdx = 0,
-            .uvIdx = 0,
-        };
-
-        *next = start;
-        return true;
-    }
-
-    start += 1;
-
-    uint32_t uv_idx;
-
-    if (start[0] == '/') {
-        uv_idx = 0;
-    } else {
-        res = fromCharsU32(start, end, uv_idx);
-
-        if (res.ptr == start) {
-            loader.recordError("Failed to read UV idx.");
-            return false;
-        }
-
-        start = res.ptr;
-    }
-
-    if (start == end || start[0] != '/') {
-        *idx_triple = {
-            .posIdx = pos_idx,
-            .normalIdx = 0,
-            .uvIdx = uv_idx,
-        };
-
-        *next = start;
-        return true;
-    }
-
-    start += 1;
-
-    uint32_t normal_idx;
-    res = fromCharsU32(start, end, normal_idx);
-
-    if (res.ptr == start) {
-        loader.recordError("Failed to read normal idx");
-        return false;
-    }
-
-    *idx_triple = {
-        .posIdx = pos_idx,
-        .normalIdx = normal_idx,
-        .uvIdx = uv_idx,
-    };
-
-    *next = res.ptr;
-
-    return true;
-};
-
-}
-
-bool loadOBJFile(const char *path, ImportedAssets &imported_assets,
-                 Span<char> err_buf)
+bool OBJLoader::Impl::load(const char *path, ImportedAssets &imported_assets)
 {
     using std::string_view;
 
+    filePath = path;
+
     std::ifstream file(path);
     if (!file.is_open() || !file.good()) {
-        if (err_buf.data() != nullptr) {
-            snprintf(err_buf.data(), err_buf.size(),
-                     "Could not open %s", path);
-        }
+        recordError("Could not open.");
         return false;
     }
 
-    constexpr CountT reserve_elems = 128;
-
-    LoaderHelper loader_data(path, err_buf, reserve_elems);
-    
     std::string line;
     int64_t line_idx = 0;
     while (getline(file, line)) {
-        loader_data.setLine(line.c_str(), line_idx);
+        setLine(line.c_str(), line_idx);
 
         if (line[0] == '#') continue;
 
         if (line[0] == 'o') {
-            bool valid = loader_data.commitMesh(imported_assets);
+            bool valid = commitMesh(imported_assets);
             if (!valid) {
                 return false;
             }
@@ -505,24 +507,24 @@ bool loadOBJFile(const char *path, ImportedAssets &imported_assets,
             if (line[1] == ' ') {
                 math::Vector3 pos;
                 bool valid = parseVec3(string_view(line).substr(1), &pos,
-                                       loader_data);
+                                       *this);
                 if (!valid) return false;
 
-                loader_data.curPositions.push_back(pos);
+                curPositions.push_back(pos);
             } else if (line[1] == 'n') {
                 math::Vector3 normal;
                 bool valid = parseVec3(string_view(line).substr(2), &normal,
-                                       loader_data);
+                                       *this);
                 if (!valid) return false;
 
-                loader_data.curNormals.push_back(normal);
+                curNormals.push_back(normal);
             } else if (line[1] == 't') {
                 math::Vector2 uv;
                 bool valid = parseVec2(string_view(line).substr(2), &uv,
-                                       loader_data);
+                                       *this);
                 if (!valid) return false;
 
-                loader_data.curUVs.push_back(uv);
+                curUVs.push_back(uv);
             }
         }
 
@@ -543,39 +545,50 @@ bool loadOBJFile(const char *path, ImportedAssets &imported_assets,
                 ObjIDX idx;
                 const char *next;
                 bool valid = parseIdxTriple(start, end, &idx, &next,
-                                            loader_data);
+                                            *this);
                 if (!valid) return false;
 
                 start = next;
 
-                loader_data.curIndices.push_back(idx);
+                curIndices.push_back(idx);
 
                 face_count++;
             }
 
             if (face_count == 0) {
-                loader_data.recordError("Face with no indices.");
+                recordError("Face with no indices.");
                 return false;
             } 
 
-            loader_data.curFaceCounts.push_back(face_count);
+            curFaceCounts.push_back(face_count);
         }
         
         line_idx++;
     }
 
-    if (!loader_data.commitMesh(imported_assets)) {
+    if (!commitMesh(imported_assets)) {
         return false;
     }
 
     imported_assets.objects.push_back({
-        .meshes = loader_data.objMeshes,
+        .meshes = objMeshes,
     });
 
     imported_assets.geoData.meshArrays.emplace_back(
-        std::move(loader_data.objMeshes));
+        std::move(objMeshes));
 
     return true;
+}
+
+OBJLoader::OBJLoader(Span<char> err_buf)
+    : impl_(new Impl(err_buf))
+{}
+
+OBJLoader::~OBJLoader() {}
+
+bool OBJLoader::load(const char *path, ImportedAssets &imported_assets)
+{
+    return impl_->load(path, imported_assets);
 }
 
 }
