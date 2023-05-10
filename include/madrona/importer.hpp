@@ -10,13 +10,6 @@
 namespace madrona {
 namespace imp {
 
-struct SourceVertex {
-    math::Vector3 position;
-    math::Vector3 normal;
-    math::Vector4 tangentAndSign;
-    math::Vector2 uv;
-};
-
 struct SourceMesh {
     const math::Vector3 *positions;
     const math::Vector3 *normals;
@@ -36,7 +29,9 @@ struct SourceObject {
 struct SourceMaterial {};
 
 struct SourceInstance {
-    math::Mat3x4 txfm;
+    math::Vector3 translation;
+    math::Quat rotation;
+    math::Diag3x3 scale;
     uint32_t objIDX;
 };
 

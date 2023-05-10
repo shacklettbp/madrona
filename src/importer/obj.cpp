@@ -89,7 +89,7 @@ void LoaderHelper::recordError(const char *fmt_string, ...) const
 
     if (curSrcLine == nullptr) {
         prefix_chars_written = snprintf(errBuf.data(), errBuf.size(),
-            "Invalid OBJ File %s:", filePath);
+            "Invalid OBJ File %s: ", filePath);
     } else {
         prefix_chars_written = snprintf(errBuf.data(), errBuf.size(),
             "Invalid OBJ File %s, line %" PRIi64 "\n%s\n", filePath,

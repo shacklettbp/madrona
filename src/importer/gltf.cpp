@@ -1,34 +1,48 @@
 #include "gltf.hpp"
 
-#include <iostream>
+#include <madrona/crash.hpp>
+#include <madrona/json.hpp>
+#include <madrona/math.hpp>
+#include <madrona/optional.hpp>
+
+#include <cstdint>
+#include <optional>
+#include <filesystem>
+#include <string_view>
+#include <vector>
+#include <fstream>
 #include <type_traits>
 
-#include <madrona/crash.hpp>
+using std::string;
+using std::string_view;
+using std::is_same_v;
+using std::conditional_t;
+using std::is_const_v;
+using namespace simdjson;
 
-using namespace std;
-using namespace madrona;
+namespace madrona::imp {
 
-namespace GPURearrange {
+namespace {
 
 template <typename T>
-class StridedSpan {
+class GLTFStridedSpan {
 public:
-    using RawPtrType = std::conditional_t<std::is_const_v<T>,
-                                          const uint8_t *,
-                                          uint8_t *>; 
+    using RawPtrType = conditional_t<is_const_v<T>,
+                                     const uint8_t *,
+                                     uint8_t *>; 
 
-    StridedSpan(RawPtrType data, size_t num_elems, size_t byte_stride)
+    GLTFStridedSpan(RawPtrType data, size_t num_elems, size_t byte_stride)
         : raw_data_(data),
           num_elems_(num_elems),
           byte_stride_(byte_stride)
     {}
 
-    constexpr const T& operator[](size_t idx) const noexcept
+    constexpr const T& operator[](size_t idx) const
     {
         return *fromRaw(raw_data_ + idx * byte_stride_);
     }
 
-    constexpr T& operator[](size_t idx) noexcept
+    constexpr T& operator[](size_t idx)
     {
         return *fromRaw(raw_data_ + idx * byte_stride_);
     }
@@ -36,7 +50,7 @@ public:
     T *data() { return fromRaw(raw_data_); }
     const T *data() const { return fromRaw(raw_data_); }
 
-    constexpr size_t size() const noexcept { return num_elems_; }
+    constexpr size_t size() const { return num_elems_; }
 
     template <typename U>
     class IterBase {
@@ -192,6 +206,7 @@ private:
     friend class IterBase<T>;
 };
 
+
 struct GLBHeader {
     uint32_t magic;
     uint32_t version;
@@ -203,31 +218,189 @@ struct ChunkHeader {
     uint32_t chunkType;
 };
 
-template <typename T>
-T jsonReadVec(const simdjson::dom::array &arr)
-{
-    T v;
-    float *data = glm::value_ptr(v);
-    int offset = 0;
-    for (auto comp : arr) {
-        data[offset] = comp.get_double().value_unsafe();
-        offset++;
+struct GLTFBuffer {
+    const uint8_t *dataPtr;
+    std::string_view filePath;
+};
 
-        if (offset >= T::length()) break;
+struct GLTFBufferView {
+    uint32_t bufferIdx;
+    uint32_t offset;
+    uint32_t stride;
+    uint32_t numBytes;
+};
+
+enum class GLTFComponentType {
+    UINT32,
+    UINT16,
+    FLOAT
+};
+
+struct GLTFAccessor {
+    uint32_t viewIdx;
+    uint32_t offset;
+    uint32_t numElems;
+    GLTFComponentType type;
+};
+    
+enum class GLTFImageType {
+    UNKNOWN,
+    JPEG,
+    PNG,
+    BASIS,
+    EXTERNAL
+};
+
+struct GLTFImage {
+    GLTFImageType type;
+    union {
+        std::string_view filePath;
+        uint32_t viewIdx;
+    };
+};
+
+struct GLTFTexture {
+    uint32_t sourceIdx;
+    uint32_t samplerIdx;
+};
+
+struct GLTFMaterial {
+    std::string name;
+    uint32_t baseColorIdx;
+    uint32_t metallicRoughnessIdx;
+    uint32_t specularIdx;
+    uint32_t normalIdx;
+    uint32_t emittanceIdx;
+    uint32_t transmissionIdx;
+    uint32_t clearcoatIdx;
+    uint32_t clearcoatNormalIdx;
+    uint32_t anisoIdx;
+    math::Vector4 baseColor;
+    float transmissionFactor;
+    math::Vector3 baseSpecular;
+    float specularFactor;
+    float metallic;
+    float roughness;
+    float ior;
+    float clearcoat;
+    float clearcoatRoughness;
+    math::Vector3 attenuationColor;
+    float attenuationDistance;
+    float anisoScale;
+    math::Vector3 anisoDir;
+    math::Vector3 baseEmittance;
+    bool thinwalled;
+};
+
+struct GLTFPrimitive {
+    uint32_t positionIdx;
+    Optional<uint32_t> normalIdx;
+    Optional<uint32_t> uvIdx;
+    Optional<uint32_t> colorIdx;
+    uint32_t indicesIdx;
+    uint32_t materialIdx;
+};
+
+struct GLTFMesh {
+    std::string name;
+    uint32_t primOffset;
+    uint32_t numPrims;
+};
+
+struct GLTFNode {
+    uint32_t childOffset;
+    uint32_t numChildren;
+    uint32_t meshIdx;
+    math::Mat3x4 transform;
+};
+
+}
+
+struct GLTFLoader::Impl {
+    Span<char> errBuf;
+    ondemand::parser jsonParser;
+
+    const char *curFileName;
+    std::filesystem::path sceneDirectory;
+
+    // Scene data filled when loading a GLTF file
+    std::string sceneName;
+    DynArray<uint8_t> internalData;
+    DynArray<GLTFBuffer> buffers;
+    DynArray<GLTFBufferView> bufferViews;
+    DynArray<GLTFAccessor> accessors;
+    DynArray<GLTFImage> images;
+    DynArray<GLTFTexture> textures;
+    DynArray<GLTFMaterial> materials;
+    DynArray<GLTFPrimitive> prims;
+    DynArray<GLTFMesh> meshes;
+    DynArray<uint32_t> childNodes;
+    DynArray<GLTFNode> nodes;
+    DynArray<int32_t> rootNodes;
+
+    Impl(Span<char> err_buf);
+    void recordError(const char *fmt, ...) const;
+    void recordJSONError(error_code err) const;
+};
+
+using LoaderData = GLTFLoader::Impl;
+
+template <typename T, CountT num_components>
+static bool jsonReadVecImpl(const LoaderData &loader,
+                            ondemand::array arr,
+                            T &out)
+{
+    CountT component_idx = 0;
+    for (auto comp : arr) {
+        auto v = comp.get_double();
+        if (v.error()) {
+            loader.recordJSONError(v.error());
+            return false;
+        }
+
+        if (component_idx < num_components) {
+            out[component_idx] = float(v.value_unsafe());
+        }
+
+        component_idx++;
     }
 
-    return v;
+    if (component_idx != num_components) {
+        loader.recordError(
+            "Incorrect number of components when parsing Vector");
+        return false;
+    }
+
+    return true;
 }
-    
+
+template <typename T>
+static bool jsonReadVec(const LoaderData &loader,
+                        ondemand::array arr,
+                        T &out)
+{
+    if constexpr (is_same_v<T, math::Vector4>) {
+        return jsonReadVecImpl<T, 4>(loader, arr, out);
+    } else if constexpr (is_same_v<T, math::Vector3>) {
+        return jsonReadVecImpl<T, 3>(loader, arr, out);
+    } else if constexpr (is_same_v<T, math::Vector2>) {
+        return jsonReadVecImpl<T, 2>(loader, arr, out);
+    }
+}
+
 template <typename T, typename U>
-T jsonGetOr(const simdjson::simdjson_result<U> &e, T default_val)
+static bool jsonGetOr(const LoaderData &loader,
+                      simdjson::simdjson_result<U> e,
+                      T default_val,
+                      T &out)
 {
     using ReadType = conditional_t<
         is_same_v<T, float>, double, conditional_t<
         is_same_v<T, uint32_t>, uint64_t, conditional_t<
-        is_same_v<T, glm::vec3>, simdjson::dom::array, conditional_t<
-        is_same_v<T, glm::vec4>, simdjson::dom::array, void
-    >>>>;
+        is_same_v<T, math::Vector2>, ondemand::array, conditional_t<
+        is_same_v<T, math::Vector3>, ondemand::array, conditional_t<
+        is_same_v<T, math::Vector4>, ondemand::array, void
+    >>>>>;
 
     static_assert(!is_same_v<ReadType, void>);
 
@@ -235,28 +408,42 @@ T jsonGetOr(const simdjson::simdjson_result<U> &e, T default_val)
     auto err = e.get(tmp);
 
     if (!err) {
-        if constexpr (is_same_v<ReadType, simdjson::dom::array>) {
-            return jsonReadVec<T>(tmp);
+        if constexpr (is_same_v<ReadType, ondemand::array>) {
+            return jsonReadVec<T>(loader, tmp, out);
         } else {
-            return T(tmp);
+            out = T(tmp);
+            return true;
         }
+    } else if (err == simdjson::NO_SUCH_FIELD) {
+        out = default_val;
+        return true;
     } else {
-        return default_val;
+        loader.recordJSONError(err);
+        return false;
     }
 }
 
-static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
+static bool gltfLoad(const char *gltf_filename,
+                     LoaderData &loader)
 {
-    GLTFScene scene;
-    scene.sceneName = gltf_path.stem();
-    scene.sceneDirectory = gltf_path.parent_path();
+    loader.curFileName = gltf_filename;
+    std::filesystem::path gltf_path(gltf_filename);
+
+    loader.sceneName = gltf_path.stem();
+    loader.sceneDirectory = gltf_path.parent_path();
 
     auto suffix = gltf_path.extension();
     bool binary = suffix == ".glb";
 
+    ondemand::document json_doc;
     if (binary) {
-        ifstream binary_file(string(gltf_path),
-                                  ios::in | ios::binary);
+        std::ifstream binary_file(string(gltf_path),
+                                  std::ios::in | std::ios::binary);
+
+        if (!binary_file.is_open() || !binary_file.good()) {
+            loader.recordError("Could not open.");
+            return false;
+        }
 
         GLBHeader glb_header;
         binary_file.read(reinterpret_cast<char *>(&glb_header),
@@ -268,17 +455,16 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
         binary_file.read(reinterpret_cast<char *>(&json_header),
                          sizeof(ChunkHeader));
 
-        vector<uint8_t> json_buffer(json_header.chunkLength +
-                                         simdjson::SIMDJSON_PADDING);
+        padded_string json_buffer(json_header.chunkLength);
 
         binary_file.read(reinterpret_cast<char *>(json_buffer.data()),
                          json_header.chunkLength);
 
-        auto err = scene.jsonParser.parse(
-            json_buffer.data(), json_header.chunkLength, false).get(scene.root);
+        auto err = loader.jsonParser.iterate(json_buffer).get(json_doc);
 
         if (err) {
-            FATAL("GLB loading failed");
+            loader.recordJSONError(err);
+            return false;
         }
 
         if (json_header.chunkLength < total_length) {
@@ -286,59 +472,116 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
             binary_file.read(reinterpret_cast<char *>(&bin_header),
                              sizeof(ChunkHeader));
 
-            assert(bin_header.chunkType == 0x004E4942);
+            if (bin_header.chunkType != 0x004E4942) {
+                loader.recordError("Invalid bin chunk.");
+                return false;
+            }
 
-            scene.internalData.resize(bin_header.chunkLength);
+            loader.internalData.resize(bin_header.chunkLength,
+                                       [](uint8_t *) {});
 
             binary_file.read(
-                reinterpret_cast<char *>(scene.internalData.data()),
+                reinterpret_cast<char *>(loader.internalData.data()),
                 bin_header.chunkLength);
         }
     } else {
-        auto err = scene.jsonParser.load(string(gltf_path)).get(scene.root);
+        auto json_data = padded_string::load(gltf_filename);
+
+        if (json_data.error()) {
+            loader.recordError("Could not open");
+            return false;
+        }
+
+        auto err = loader.jsonParser.iterate(json_data).get(json_doc);
         if (err) {
-            FATAL("GLB loading failed");
+            loader.recordJSONError(err);
+            return false;
         }
     }
 
-    for (const auto &buffer : scene.root["buffers"].get_array().value_unsafe()) {
+    auto buffers = json_doc["buffers"].get_array();
+
+    if (buffers.error()) {
+        loader.recordJSONError(buffers.error());
+        return false;
+    }
+
+    for (auto buffer : buffers.value_unsafe()) {
         string_view uri {};
         const uint8_t *data_ptr = nullptr;
 
-        auto uri_elem = buffer.at_key("uri");
-        if (uri_elem.error() != simdjson::NO_SUCH_FIELD) {
-            uri = uri_elem.get_string().value_unsafe();
+        auto uri_elem = buffer["uri"].get_string();
+        if (!uri_elem.error()) {
+            uri = uri_elem.value_unsafe();
         } else {
-            data_ptr = scene.internalData.data();
+            data_ptr = loader.internalData.data();
         }
-        scene.buffers.push_back(GLTFBuffer {
+        loader.buffers.push_back(GLTFBuffer {
             data_ptr,
             uri,
         });
     }
 
     //cout << "Buffers" << endl;
+    
+    auto buffer_views = json_doc["bufferViews"].get_array();
 
-    for (const auto &view : scene.root["bufferViews"].get_array().value_unsafe()) {
-        uint64_t stride_res;
-        auto stride_error = view["byteStride"].get(stride_res);
-        if (stride_error) {
-            stride_res = 0;
+    if (buffer_views.error()) {
+        loader.recordJSONError(buffer_views.error());
+        return false;
+    }
+
+    for (auto view : buffer_views.value_unsafe()) {
+        auto buffer = view["buffer"].get_uint64();
+        if (buffer.error()) {
+            loader.recordJSONError(buffer.error());
+            return false;
         }
-        scene.bufferViews.push_back(GLTFBufferView {
-            static_cast<uint32_t>(view["buffer"].get_uint64().value_unsafe()),
-            static_cast<uint32_t>(view["byteOffset"].get_uint64().value_unsafe()),
-            static_cast<uint32_t>(stride_res),
-            static_cast<uint32_t>(view["byteLength"].get_uint64().value_unsafe()),
+
+        auto byte_offset = view["byteOffset"].get_uint64();
+        if (byte_offset.error()) {
+            loader.recordJSONError(byte_offset.error());
+            return false;
+        }
+
+        uint64_t stride;
+        auto stride_err = view["byteStride"].get(stride);
+        if (stride_err) {
+            stride = 0;
+        }
+
+        auto byte_len = view["byteLength"].get_uint64();
+        if (byte_len.error()) {
+            loader.recordJSONError(byte_len.error());
+            return false;
+        }
+
+        loader.bufferViews.push_back(GLTFBufferView {
+            static_cast<uint32_t>(buffer.value_unsafe()),
+            static_cast<uint32_t>(byte_offset.value_unsafe()),
+            static_cast<uint32_t>(stride),
+            static_cast<uint32_t>(byte_len.value_unsafe()),
         });
     }
 
     //cout << "bufferViews" << endl;
 
-    for (const auto &accessor : scene.root["accessors"].get_array().value_unsafe()) {
+    auto accessors = json_doc["accessors"].get_array();
+    if (accessors.error()) {
+        loader.recordJSONError(accessors.error());
+        return false;
+    }
+
+    for (auto accessor : accessors.value_unsafe()) {
         GLTFComponentType type;
-        uint64_t component_type =
-            accessor["componentType"].get_uint64().value_unsafe();
+        uint64_t component_type;
+        auto component_type_err =
+            accessor["componentType"].get(component_type);
+        if (component_type_err) {
+            loader.recordJSONError(component_type_err);
+            return false;
+        }
+
         if (component_type == 5126) {
             type = GLTFComponentType::FLOAT;
         } else if (component_type == 5125) {
@@ -346,9 +589,15 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
         } else if (component_type == 5123) {
             type = GLTFComponentType::UINT16;
         } else {
-            cerr << "GLTF loading '" << gltf_path
-                      << "' failed: unknown component type" << endl;
-            abort();
+            loader.recordError("Unknown component type %" PRIu64,
+                               component_type);
+            return false;
+        }
+        
+        auto buffer_view_idx = accessor["bufferView"].get_uint64();
+        if (buffer_view_idx.error()) {
+            loader.recordJSONError(buffer_view_idx.error());
+            return false;
         }
 
         uint64_t byte_offset;
@@ -357,19 +606,26 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
             byte_offset = 0;
         }
 
-        scene.accessors.push_back(GLTFAccessor {
-            static_cast<uint32_t>(accessor["bufferView"].get_uint64().value_unsafe()),
+        auto accessor_count = accessor["count"].get_uint64();
+        if (accessor_count.error()) {
+            loader.recordJSONError(accessor_count.error());
+            return false;
+        }
+
+        loader.accessors.push_back(GLTFAccessor {
+            static_cast<uint32_t>(buffer_view_idx.value_unsafe()),
             static_cast<uint32_t>(byte_offset),
-            static_cast<uint32_t>(accessor["count"].get_uint64().value_unsafe()),
+            static_cast<uint32_t>(accessor_count.value_unsafe()),
             type,
         });
     }
 
     //cout << "accessors" << endl;
+    
+    auto images = json_doc["images"].get_array();
 
-    auto images_elem = scene.root.at_key("images");
-    if (images_elem.error() != simdjson::NO_SUCH_FIELD) {
-        for (const auto &json_image : images_elem.get_array().value_unsafe()) {
+    if (!images.error()) {
+        for (auto json_image : images.value_unsafe()) {
             GLTFImage img {};
             string_view uri {};
             auto uri_err = json_image["uri"].get(uri);
@@ -377,8 +633,13 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
                 img.type = GLTFImageType::EXTERNAL;
                 img.filePath = uri;
             } else {
-                uint64_t view_idx = json_image["bufferView"].get_uint64().value_unsafe();
-                string_view mime = json_image["mimeType"].get_string().value_unsafe();
+                string_view mime;
+                auto mime_err = json_image["mimeType"].get(mime);
+                if (mime_err) {
+                    loader.recordJSONError(mime_err);
+                    return false;
+                }
+
                 if (mime == "image/jpeg") {
                     img.type = GLTFImageType::JPEG;
                 } else if (mime == "image/png") {
@@ -389,18 +650,19 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
                     img.type = GLTFImageType::UNKNOWN;
                 }
 
-                img.viewIdx = view_idx;
+                auto view_idx = json_image["bufferView"].get_uint64();
+                img.viewIdx = view_idx.value_unsafe();
             }
 
-            scene.images.push_back(img);
+            loader.images.push_back(img);
         }
     }
 
     //cout << "images" << endl;
 
-    auto textures_elem = scene.root.at_key("textures");
-    if (textures_elem.error() != simdjson::NO_SUCH_FIELD) {
-        for (const auto &texture : textures_elem.get_array().value_unsafe()) {
+    auto textures = json_doc["textures"].get_array();
+    if (!textures.error()) {
+        for (auto texture : textures.value_unsafe()) {
             uint64_t source_idx;
             auto src_err = texture["source"].get(source_idx);
             if (src_err) {
@@ -408,10 +670,8 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
                     texture["extensions"]["GOOGLE_texture_basis"]["source"]
                         .get(source_idx);
                 if (ext_err) {
-                    cerr << "GLTF loading '" << gltf_path
-                              << "' failed: texture without source"
-                              << endl;
-                    abort();
+                    loader.recordError("Texture without source");
+                    return false;
                 }
             }
 
@@ -421,7 +681,7 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
                 sampler_idx = 0;
             }
 
-            scene.textures.push_back(GLTFTexture {
+            loader.textures.push_back(GLTFTexture {
                 static_cast<uint32_t>(source_idx),
                 static_cast<uint32_t>(sampler_idx),
             });
@@ -430,204 +690,299 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
 
     //cout << "textures" << endl;
 
-    for (const auto &material : scene.root["materials"].get_array().value_unsafe()) {
-        uint32_t tex_missing = scene.textures.size();
-        const auto &exts = material["extensions"];
+    auto materials = json_doc["materials"].get_array();
 
-        const auto &pbr = material["pbrMetallicRoughness"];
-        uint32_t base_color_idx = jsonGetOr(
-            pbr["baseColorTexture"]["index"], tex_missing);
+    if (!materials.error()) {
+        for (auto material : materials.value_unsafe()) {
+            const uint32_t tex_missing = loader.textures.size();
+            auto exts = material["extensions"];
 
-        uint32_t metallic_roughness_idx = jsonGetOr(
-            pbr["metallicRoughnessTexture"]["index"], tex_missing);
+            auto pbr = material["pbrMetallicRoughness"];
+            uint32_t base_color_idx;
+            bool mat_err = jsonGetOr(
+                loader, pbr["baseColorTexture"]["index"],
+                tex_missing, base_color_idx);
+            if (mat_err) return false;
 
-        uint32_t bc_coord =
-            jsonGetOr(pbr["baseColorTexture"]["texCoord"], 0u);
+            uint32_t metallic_roughness_idx;
+            mat_err = jsonGetOr(
+                loader, pbr["metallicRoughnessTexture"]["index"],
+                tex_missing, metallic_roughness_idx);
+            if (mat_err) return false;
 
+            uint32_t bc_coord;
+            mat_err = jsonGetOr(
+                loader, pbr["baseColorTexture"]["texCoord"],
+                0u, bc_coord);
+            if (mat_err) return false;
 
-        uint32_t mr_coord = 
-            jsonGetOr(pbr["metallicRoughnessTexture"]["texCoord"], 0u);
+            uint32_t mr_coord;
+            mat_err = jsonGetOr(
+                loader, pbr["metallicRoughnessTexture"]["texCoord"],
+                0u, mr_coord);
+            if (mat_err) return false;
 
-        if (bc_coord != 0 || mr_coord != 0) {
-            cerr << "Multiple UVs not supported" << endl;
-            abort();
+            if (bc_coord != 0 || mr_coord != 0) {
+                loader.recordError("Multiple UVs not supported.");
+                return false;
+            }
+
+            math::Vector4 base_color;
+            mat_err = jsonGetOr(loader, pbr["baseColorFactor"],
+                math::Vector4::one(), base_color);
+            if (mat_err) return false;
+
+            float metallic;
+            mat_err = jsonGetOr(loader, pbr["metallicFactor"], 1.f, metallic);
+            if (mat_err) return false;
+
+            float roughness;
+            mat_err =
+                jsonGetOr(loader, pbr["roughnessFactor"], 1.f, roughness);
+            if (mat_err) return false;
+
+            auto transmission_ext =
+                exts["KHR_materials_transmission"];
+
+            uint32_t transmission_idx;
+            mat_err = jsonGetOr(
+                loader, transmission_ext["transmissionTexture"]["index"],
+                tex_missing, transmission_idx);
+            if (mat_err) return false;
+
+            float transmission_factor;
+            mat_err = jsonGetOr(loader, transmission_ext["transmissionFactor"],
+                                0.f, transmission_factor);
+            if (mat_err) return false;
+
+            auto specular_ext = exts["KHR_materials_specular"];
+
+            math::Vector3 base_specular;
+            mat_err = jsonGetOr(loader, specular_ext["specularColorFactor"],
+                                math::Vector3::one(), base_specular);
+            if (mat_err) return false;
+
+            float specular_factor;
+            mat_err = jsonGetOr(loader, specular_ext["specularFactor"],
+                                1.f, specular_factor);
+            if (mat_err) return false;
+
+            uint32_t spec_idx;
+            mat_err = jsonGetOr(
+                loader, specular_ext["specularTexture"]["index"],
+                tex_missing, spec_idx);
+            if (mat_err) return false;
+
+            uint32_t spec_color_idx;
+            mat_err = jsonGetOr(
+                loader, specular_ext["specularColorTexture"]["index"],
+                tex_missing, spec_color_idx);
+            if (mat_err) return false;
+
+            if (spec_idx != spec_color_idx) {
+                loader.recordError(
+                    "Specular textures must be packed together");
+                return false;
+            }
+
+            float ior;
+            mat_err = jsonGetOr(
+                loader, exts["KHR_materials_ior"]["ior"], 1.5f, ior);
+            if (mat_err) return false;
+
+            auto clearcoat_ext = exts["KHR_materials_clearcoat"];
+
+            float clearcoat;
+            mat_err = jsonGetOr(
+                loader, clearcoat_ext["clearcoatFactor"], 0.f, clearcoat);
+            if (mat_err) return false;
+
+            float clearcoat_roughness;
+            mat_err = jsonGetOr(
+                loader, clearcoat_ext["clearcoatRoughnessFactor"],
+                0.f, clearcoat_roughness);
+            if (mat_err) return false;
+
+            uint32_t clearcoat_idx;
+            mat_err = jsonGetOr(
+                loader, clearcoat_ext["clearcoatTexture"]["index"],
+                tex_missing, clearcoat_idx);
+            if (mat_err) return false;
+
+            uint32_t clearcoat_roughness_idx;
+            mat_err = jsonGetOr(
+                loader, clearcoat_ext["clearcoatRoughnessTexture"]["index"],
+                tex_missing, clearcoat_roughness_idx);
+            if (mat_err) return false;
+
+            uint32_t clearcoat_normal_idx;
+            mat_err = jsonGetOr(
+                loader, clearcoat_ext["clearcoatNormalTexture"]["index"],
+                tex_missing, clearcoat_normal_idx);
+            if (mat_err) return false;
+
+            if (clearcoat_idx != clearcoat_roughness_idx) {
+                loader.recordError(
+                    "Clearcoat textures must be packed together");
+                return false;
+            }
+
+            auto volume_ext = exts["KHR_materials_volume"];
+
+            float thickness;
+            mat_err = jsonGetOr(
+                loader, volume_ext["thicknessFactor"], 0.f, thickness);
+            if (mat_err) return false;
+
+            bool thinwalled = thickness == 0.f;
+
+            float attenuation_distance;
+            mat_err = jsonGetOr(
+                loader, volume_ext["attenuationDistance"],
+                INFINITY, attenuation_distance);
+            if (mat_err) return false;
+
+            math::Vector3 attenuation_color;
+            mat_err = jsonGetOr(
+                loader, volume_ext["attenuationColor"],
+                math::Vector3::one(), attenuation_color);
+            if (mat_err) return false;
+
+            auto aniso_ext = exts["KHR_materials_anisotropy"];
+
+            float aniso_scale;
+            mat_err = jsonGetOr(
+                loader, aniso_ext["anisotropy"], 0.f, aniso_scale);
+            if (mat_err) return false;
+
+            math::Vector3 aniso_dir;
+            mat_err = jsonGetOr(loader, aniso_ext["anisotropyDirection"],
+                                math::Vector3 {1, 0, 0}, aniso_dir);
+            if (mat_err) return false;
+
+            uint32_t aniso_idx;
+            mat_err = jsonGetOr(loader, aniso_ext["anisotropyTexture"],
+                                tex_missing, aniso_idx);
+            if (mat_err) return false;
+
+            uint32_t aniso_rot_idx;
+            mat_err = jsonGetOr(
+                loader, aniso_ext["anisotropyDirectionTexture"],
+                tex_missing, aniso_rot_idx);
+            if (mat_err) return false;
+
+            if (aniso_idx != aniso_rot_idx) {
+                loader.recordError(
+                    "Anisotropy textures must be packed together");
+                return false;
+            }
+
+            uint32_t normal_idx;
+            mat_err = jsonGetOr(
+                loader, material["normalTexture"]["index"],
+                tex_missing, normal_idx);
+            if (mat_err) return false;
+
+            math::Vector3 base_emittance;
+            mat_err = jsonGetOr(
+                loader, material["emissiveFactor"],
+                math::Vector3::zero(), base_emittance);
+            if (mat_err) return false;
+
+            uint32_t emissive_idx;
+            mat_err = jsonGetOr(
+                loader, material["emissiveTexture"]["index"],
+                tex_missing, emissive_idx);
+            if (mat_err) return false;
+
+            string_view material_name_view;
+            string material_name;
+            auto name_err = material["name"].get(material_name_view);
+            if (name_err) {
+                material_name = std::to_string(loader.materials.size());
+            } else {
+                material_name = material_name_view;
+            }
+
+            loader.materials.push_back(GLTFMaterial {
+                std::move(material_name),
+                base_color_idx,
+                metallic_roughness_idx,
+                spec_idx,
+                normal_idx,
+                emissive_idx,
+                transmission_idx,
+                clearcoat_idx,
+                clearcoat_normal_idx,
+                aniso_idx,
+                base_color,
+                transmission_factor,
+                base_specular,
+                specular_factor,
+                metallic,
+                roughness,
+                ior,
+                clearcoat,
+                clearcoat_roughness,
+                attenuation_color,
+                attenuation_distance,
+                aniso_scale,
+                aniso_dir,
+                base_emittance,
+                thinwalled,
+            });
         }
-
-        glm::vec4 base_color =
-            jsonGetOr(pbr["baseColorFactor"], glm::vec4(1.f));
-        simdjson::dom::array base_color_json;
-
-        float metallic = jsonGetOr(pbr["metallicFactor"], 1.f);
-
-        float roughness = jsonGetOr(pbr["roughnessFactor"], 1.f);
-
-        auto transmission_ext =
-            exts["KHR_materials_transmission"];
-
-        uint32_t transmission_idx = jsonGetOr(
-            transmission_ext["transmissionTexture"]["index"], tex_missing);
-
-        float transmission_factor =
-            jsonGetOr(transmission_ext["transmissionFactor"], 0.f);
-
-        auto specular_ext = exts["KHR_materials_specular"];
-
-        glm::vec3 base_specular = 
-            jsonGetOr(specular_ext["specularColorFactor"], glm::vec3(1.f));
-
-        float specular_factor =
-            jsonGetOr(specular_ext["specularFactor"], 1.f);
-
-        uint32_t spec_idx = jsonGetOr(
-            specular_ext["specularTexture"]["index"], tex_missing);
-
-        uint32_t spec_color_idx = jsonGetOr(
-            specular_ext["specularColorTexture"]["index"], tex_missing);
-
-        if (spec_idx != spec_color_idx) {
-            cerr << "Specular textures must be packed together" << endl;
-            abort();
-        }
-
-        float ior = jsonGetOr(
-            exts["KHR_materials_ior"]["ior"], 1.5f);
-
-        auto clearcoat_ext = exts["KHR_materials_clearcoat"];
-
-        float clearcoat = jsonGetOr(
-            clearcoat_ext["clearcoatFactor"], 0.f);
-
-        float clearcoat_roughness = jsonGetOr(
-            clearcoat_ext["clearcoatRoughnessFactor"], 0.f);
-
-        uint32_t clearcoat_idx = jsonGetOr(
-            clearcoat_ext["clearcoatTexture"]["index"], tex_missing);
-
-        uint32_t clearcoat_roughness_idx = jsonGetOr(
-            clearcoat_ext["clearcoatRoughnessTexture"]["index"],
-            tex_missing);
-
-        uint32_t clearcoat_normal_idx = jsonGetOr(
-            clearcoat_ext["clearcoatNormalTexture"]["index"], tex_missing);
-
-        if (clearcoat_idx != clearcoat_roughness_idx) {
-            cerr << "Clearcoat textures must be packed together" << endl;
-            abort();
-        }
-
-        auto volume_ext = exts["KHR_materials_volume"];
-
-        float thickness = jsonGetOr(
-            volume_ext["thicknessFactor"], 0.f);
-        bool thinwalled = thickness == 0.f;
-
-        float attenuation_distance = jsonGetOr(
-            volume_ext["attenuationDistance"], INFINITY);
-        glm::vec3 attenuation_color = jsonGetOr(
-            volume_ext["attenuationColor"], glm::vec3(1.f));
-
-        auto aniso_ext = exts["KHR_materials_anisotropy"];
-
-        float aniso_scale = jsonGetOr(
-            aniso_ext["anisotropy"], 0.f);
-        glm::vec3 aniso_dir = jsonGetOr(
-            aniso_ext["anisotropyDirection"], glm::vec3(1.f, 0.f, 0.f));
-
-        uint32_t aniso_idx = jsonGetOr(
-            aniso_ext["anisotropyTexture"], tex_missing);
-
-        uint32_t aniso_rot_idx = jsonGetOr(
-            aniso_ext["anisotropyDirectionTexture"], tex_missing);
-
-        if (aniso_idx != aniso_rot_idx) {
-            cerr << "Anisotropy textures must be packed together" << endl;
-            abort();
-        }
-
-        uint32_t normal_idx = jsonGetOr(
-            material["normalTexture"]["index"], tex_missing);
-
-        glm::vec3 base_emittance = jsonGetOr(
-            material["emissiveFactor"], glm::vec3(0.f));
-
-        uint32_t emissive_idx = jsonGetOr(
-            material["emissiveTexture"]["index"], tex_missing);
-
-        string_view material_name_view;
-        string material_name;
-        auto name_err = material["name"].get(material_name_view);
-        if (name_err) {
-            material_name = to_string(scene.materials.size());
-        } else {
-            material_name = material_name_view;
-        }
-
-        scene.materials.push_back(GLTFMaterial {
-            move(material_name),
-            base_color_idx,
-            metallic_roughness_idx,
-            spec_idx,
-            normal_idx,
-            emissive_idx,
-            transmission_idx,
-            clearcoat_idx,
-            clearcoat_normal_idx,
-            aniso_idx,
-            base_color,
-            transmission_factor,
-            base_specular,
-            specular_factor,
-            metallic,
-            roughness,
-            ior,
-            clearcoat,
-            clearcoat_roughness,
-            attenuation_color,
-            attenuation_distance,
-            aniso_scale,
-            aniso_dir,
-            base_emittance,
-            thinwalled,
-        });
     }
 
     //cout << "materials" << endl;
+    
+    auto meshes = json_doc["meshes"].get_array();
+    if (meshes.error()) {
+        loader.recordJSONError(meshes.error());
+        return false;
+    }
 
-    for (const auto &mesh : scene.root["meshes"].get_array().value_unsafe()) {
-        simdjson::dom::array gltf_prims =
-            mesh["primitives"].get_array().value_unsafe();
-        vector<GLTFPrimitive> prims;
+    for (auto mesh : meshes.value_unsafe()) {
+        auto gltf_prims = mesh["primitives"].get_array();
 
-        for (const simdjson::dom::element &prim : gltf_prims) {
-            simdjson::dom::element attrs = prim["attributes"].value_unsafe();
+        if (gltf_prims.error()) {
+            loader.recordJSONError(gltf_prims.error());
+            return false;
+        }
 
-            optional<uint32_t> position_idx;
-            optional<uint32_t> normal_idx;
-            optional<uint32_t> uv_idx;
-            optional<uint32_t> color_idx;
+        uint32_t prim_offset = loader.prims.size();
+        uint32_t num_prims = 0;
+        for (auto prim : gltf_prims.value_unsafe()) {
+            auto attrs = prim["attributes"];
 
-            uint64_t position_res;
-            auto position_error = attrs["POSITION"].get(position_res);
-            if (!position_error) {
-                position_idx = position_res;
+            auto normal_idx = Optional<uint32_t>::none();
+            auto uv_idx = Optional<uint32_t>::none();
+            auto color_idx = Optional<uint32_t>::none();
+
+            auto position_res = attrs["POSITION"].get_uint64();
+            if (position_res.error()) {
+                loader.recordJSONError(position_res.error());
+                return false;
             }
+
+            uint32_t position_idx = position_res.value_unsafe();
 
             uint64_t normal_res;
             auto normal_error = attrs["NORMAL"].get(normal_res);
             if (!normal_error) {
-                normal_idx = normal_res;
+                normal_idx = uint32_t(normal_res);
             }
 
             uint64_t uv_res;
             auto uv_error = attrs["TEXCOORD_0"].get(uv_res);
             if (!uv_error) {
-                uv_idx = uv_res;
+                uv_idx = uint32_t(uv_res);
             }
 
             uint64_t color_res;
             auto color_error = attrs["COLOR_0"].get(color_res);
             if (!color_error) {
-                color_idx = color_res;
+                color_idx = uint32_t(color_res);
             }
             
             uint64_t material_idx;
@@ -642,7 +997,7 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
                 indices_idx = ~0u;
             }
 
-            prims.push_back({
+            loader.prims.push_back({
                 position_idx,
                 normal_idx,
                 uv_idx,
@@ -650,133 +1005,265 @@ static GLTFScene gltfLoad(filesystem::path gltf_path) noexcept
                 uint32_t(indices_idx),
                 uint32_t(material_idx),
             });
+
+            num_prims++;
         }
 
         string_view mesh_name_view;
         string mesh_name;
         auto name_err = mesh["name"].get(mesh_name_view);
         if (name_err) {
-            mesh_name = to_string(scene.meshes.size());
+            mesh_name = std::to_string(loader.meshes.size());
         } else {
             mesh_name = mesh_name_view;
         }
 
-        scene.meshes.push_back(GLTFMesh {
-            move(mesh_name),
-            move(prims),
+        loader.meshes.push_back(GLTFMesh {
+            std::move(mesh_name),
+            prim_offset,
+            num_prims,
         });
     }
 
     //cout << "meshes" << endl;
+    
+    auto nodes = json_doc["nodes"].get_array();
+    if (nodes.error()) {
+        loader.recordJSONError(nodes.error());
+        return false;
+    }
 
-    for (const auto &node : scene.root["nodes"].get_array().value_unsafe()) {
-        vector<uint32_t> children;
-        simdjson::dom::array json_children;
-        auto children_error = node["children"].get(json_children);
+    for (auto node : nodes.value_unsafe()) {
+        uint32_t child_node_offset = loader.childNodes.size();
+        uint32_t num_children = 0;
 
-        if (!children_error) {
-            for (auto child : json_children) {
-                children.push_back(child.get_uint64().value_unsafe());
+        auto json_children = node["children"].get_array();
+
+        if (!json_children.error()) {
+            for (auto child : json_children.value_unsafe()) {
+                auto child_idx = child.get_uint64();
+                if (child_idx.error()) {
+                    loader.recordJSONError(child_idx.error());
+                    return false;
+                }
+
+                loader.childNodes.push_back(
+                    uint32_t(child_idx.value_unsafe()));
+
+                num_children++;
             }
         }
 
         uint64_t mesh_idx;
         auto mesh_error = node["mesh"].get(mesh_idx);
         if (mesh_error) {
-            mesh_idx = scene.meshes.size();
+            mesh_idx = loader.meshes.size();
         }
 
-        glm::mat4 txfm(1.f);
+        math::Mat3x4 txfm = math::Mat3x4::identity();
 
-        simdjson::dom::array matrix;
-        auto matrix_error = node["matrix"].get(matrix);
-        if (!matrix_error) {
-            float *txfm_data = glm::value_ptr(txfm);
+        auto matrix = node["matrix"].get_array();
+        if (!matrix.error()) {
+            CountT cur_col = 0;
+            CountT cur_row = 0;
             for (auto mat_elem : matrix) {
-                *txfm_data = mat_elem.get_double().value_unsafe();
-                txfm_data++;
+                if (cur_col == 4) {
+                    loader.recordError("Invalid matrix transform");
+                }
+
+                auto v_res = mat_elem.get_double();
+                if (v_res.error()) {
+                    loader.recordJSONError(v_res.error());
+                    return false;
+                }
+
+                float v = float(v_res.value_unsafe());
+
+                if (cur_row < 3) {
+                    txfm.cols[cur_col][cur_row] = v;
+                } else {
+                    if (cur_col < 3) {
+                        if (v != 0) {
+                            loader.recordError("Invalid matrix transform");
+                            return false;
+                        }
+                    } else {
+                        if (v != 1) {
+                            loader.recordError("Invalid matrix transform");
+                            return false;
+                        }
+                    }
+                }
+
+                cur_row++;
+
+                if (cur_row == 4) {
+                    cur_col++;
+                    cur_row = 0;
+                }
             }
         } else {
-            glm::mat4 translation(1.f);
-            simdjson::dom::array translate_raw;
-            auto translate_error = node["translation"].get(translate_raw);
-            if (!translate_error) {
-                glm::vec3 translate_vec;
-                float *translate_ptr = glm::value_ptr(translate_vec);
-                for (auto vec_elem : translate_raw) {
-                    *translate_ptr = vec_elem.get_double().value_unsafe();
-                    translate_ptr++;
+            auto translation = math::Vector3::zero();
+
+            auto translation_arr = node["translation"].get_array();
+            if (!translation_arr.error()) {
+                CountT component_idx = 0;
+                for (auto vec_elem : translation_arr.value_unsafe()) {
+                    auto v = vec_elem.get_double();
+
+                    if (v.error()) {
+                        loader.recordJSONError(v.error());
+                        return false;
+                    }
+
+                    if (component_idx < 3) {
+                        translation[component_idx] = v.value_unsafe();
+                    }
+
+                    component_idx++;
                 }
-                translation = glm::translate(translate_vec);
+
+                if (component_idx != 3) {
+                    loader.recordError(
+                        "Node translation with wrong number of components");
+                    return false;
+                }
             }
 
-            glm::mat4 rotation(1.f);
-            simdjson::dom::array quat_raw;
-            auto quat_error = node["rotation"].get(quat_raw);
-            if (!quat_error) {
-                glm::quat quat_vec;
-                float *quat_ptr = glm::value_ptr(quat_vec);
-                for (auto vec_elem : quat_raw) {
-                    *quat_ptr = vec_elem.get_double().value_unsafe();
-                    quat_ptr++;
+            math::Quat rotation { 1, 0, 0, 0 };
+            auto quat_arr = node["rotation"].get_array();
+            if (!quat_arr.error()) {
+                CountT component_idx = 0;
+                for (auto vec_elem : quat_arr.value_unsafe()) {
+                    auto v = vec_elem.get_double();
+
+                    if (v.error()) {
+                        loader.recordJSONError(v.error());
+                        return false;
+                    }
+
+                    float f = v.value_unsafe();
+
+                    if (component_idx == 0) {
+                        rotation.x = f;
+                    } else if (component_idx == 1) {
+                        rotation.y = f;
+                    } else if (component_idx == 2) {
+                        rotation.z = f;
+                    } else if (component_idx == 3) {
+                        rotation.w = f;
+                    }
+
+                    component_idx++;
                 }
-                rotation = glm::mat4_cast(quat_vec);
+
+                if (component_idx != 4) {
+                    loader.recordError(
+                        "Node rotation with wrong number of components");
+                    return false;
+                }
             }
 
-            glm::mat4 scale(1.f);
-            simdjson::dom::array scale_raw;
-            auto scale_error = node["scale"].get(scale_raw);
-            if (!scale_error) {
-                glm::vec3 scale_vec;
-                float *scale_ptr = glm::value_ptr(scale_vec);
-                for (auto vec_elem : scale_raw) {
-                    *scale_ptr = vec_elem.get_double().value_unsafe();
-                    scale_ptr++;
+
+            math::Diag3x3 scale { 1, 1, 1 };
+            auto scale_arr = node["scale"].get_array();
+            if (!scale_arr.error()) {
+                CountT component_idx = 0;
+                for (auto vec_elem : scale_arr.value_unsafe()) {
+                    auto v = vec_elem.get_double();
+
+                    if (v.error()) {
+                        loader.recordJSONError(v.error());
+                        return false;
+                    }
+
+                    float f = v.value_unsafe();
+
+                    if (component_idx == 0) {
+                        scale.d0 = f;
+                    } else if (component_idx == 1) {
+                        scale.d1 = f;
+                    } else if (component_idx == 2) {
+                        scale.d2 = f;
+                    }
+
+                    component_idx++;
                 }
-                scale = glm::scale(scale_vec);
+
+                if (component_idx != 3) {
+                    loader.recordError(
+                        "Node scale with wrong number of components");
+                    return false;
+                }
             }
 
-            txfm = translation * rotation * scale;
+            txfm = math::Mat3x4::fromTRS(translation, rotation, scale);
         }
 
-        scene.nodes.push_back(GLTFNode {
-            move(children), static_cast<uint32_t>(mesh_idx), txfm});
+        loader.nodes.push_back(GLTFNode {
+            child_node_offset,
+            num_children,
+            static_cast<uint32_t>(mesh_idx),
+            txfm,
+        });
     }
 
     //cout << "nodes" << endl;
 
-    simdjson::dom::array scenes = scene.root["scenes"].get_array().value_unsafe();
-    if (scenes.size() > 1) {
-        cerr << "GLTF loading '" << gltf_path
-                  << "' failed: Multiscene files not supported"
-                  << endl;
-        abort();
+    auto scenes = json_doc["scenes"].get_array();
+    if (scenes.error()) {
+        loader.recordJSONError(scenes.error());
+        return false;
     }
 
-    for (auto node_idx : scenes.at(0)["nodes"].get_array().value_unsafe()) {
-        scene.rootNodes.push_back(node_idx.get_uint64().value_unsafe());
+    CountT scene_idx = 0;
+    for (auto scene : scenes.value_unsafe()) {
+        if (scene_idx != 0) {
+            loader.recordError("Multiscene files not supported");
+            return false;
+        }
+
+        auto scene_nodes = scene["nodes"].get_array();
+        if (scene_nodes.error()) {
+            loader.recordJSONError(scene_nodes.error());
+            return false;
+        }
+
+        for (auto node : scene_nodes.value_unsafe()) {
+            auto node_idx = node.get_uint64();
+
+            if (node_idx.error()) {
+                loader.recordJSONError(node_idx.error());
+                return false;
+            }
+
+            loader.rootNodes.push_back(node_idx.value_unsafe());
+        }
+
+        scene_idx++;
     }
 
-    return scene;
+    return true;
 }
 
 template <typename T>
-static StridedSpan<T> getGLTFBufferView(const GLTFScene &scene,
-                                        uint32_t view_idx,
-                                        uint32_t start_offset = 0,
-                                        uint32_t num_elems = 0)
+static Optional<GLTFStridedSpan<T>> getGLTFBufferView(
+    const LoaderData &loader,
+    uint32_t view_idx,
+    uint32_t start_offset = 0,
+    uint32_t num_elems = 0)
 {
-    const GLTFBufferView &view = scene.bufferViews[view_idx];
-    const GLTFBuffer &buffer = scene.buffers[view.bufferIdx];
+    const GLTFBufferView &view = loader.bufferViews[view_idx];
+    const GLTFBuffer &buffer = loader.buffers[view.bufferIdx];
 
     if (buffer.dataPtr == nullptr) {
-        cerr << "GLTF loading failed: external references not supported"
-             << endl;
+        loader.recordError(
+            "GLTF loading failed: external references not supported");
+        return Optional<GLTFStridedSpan<T>>::none();
     }
 
     size_t total_offset = start_offset + view.offset;
     const uint8_t *start_ptr = buffer.dataPtr + total_offset;
-    ;
 
     uint32_t stride = view.stride;
     if (stride == 0) {
@@ -787,19 +1274,373 @@ static StridedSpan<T> getGLTFBufferView(const GLTFScene &scene,
         num_elems = view.numBytes / stride;
     }
 
-    return StridedSpan<T>(start_ptr, num_elems, stride);
+    return GLTFStridedSpan<T>(start_ptr, num_elems, stride);
 }
 
 template <typename T>
-static StridedSpan<T> getGLTFAccessorView(const GLTFScene &scene,
-                                          uint32_t accessor_idx)
+static Optional<GLTFStridedSpan<T>> getGLTFAccessorView(
+    const LoaderData &loader,
+    uint32_t accessor_idx)
 {
-    const GLTFAccessor &accessor = scene.accessors[accessor_idx];
+    const GLTFAccessor &accessor = loader.accessors[accessor_idx];
 
-    return getGLTFBufferView<T>(scene, accessor.viewIdx, accessor.offset,
+    return getGLTFBufferView<T>(loader, accessor.viewIdx, accessor.offset,
                                 accessor.numElems);
 }
 
+// GLTF Mesh = Madrona Object, Primitive = Madrona Mesh
+static bool gltfParseMesh(
+    const LoaderData &loader, 
+    ImportedAssets &imported,
+    CountT mesh_idx)
+{
+    const GLTFMesh &gltf_mesh = loader.meshes[mesh_idx];
+
+    DynArray<SourceMesh> meshes(1);
+    for (CountT prim_offset = 0; prim_offset < (CountT)gltf_mesh.numPrims;
+         prim_offset++) {
+        CountT prim_idx = prim_offset + gltf_mesh.primOffset;
+        const GLTFPrimitive &prim = loader.prims[prim_idx];
+
+        auto position_accessor = getGLTFAccessorView<const math::Vector3>(
+            loader, prim.positionIdx);
+
+        if (!position_accessor.has_value()) {
+            return false;
+        }
+
+        auto normal_accessor =
+            Optional<GLTFStridedSpan<const math::Vector3>>::none();
+
+        if (prim.normalIdx.has_value()) {
+            normal_accessor = getGLTFAccessorView<const math::Vector3>(
+                loader, *prim.normalIdx);
+
+            if (!normal_accessor.has_value()) {
+                return false;
+            }
+        }
+
+        auto uv_accessor =
+            Optional<GLTFStridedSpan<const math::Vector2>>::none();
+
+        if (prim.uvIdx.has_value()) {
+            uv_accessor = getGLTFAccessorView<const math::Vector2>(
+                loader, *prim.uvIdx);
+
+            if (!uv_accessor.has_value()) {
+                return false;
+            }
+        }
+
+        uint32_t max_idx = 0;
+
+        DynArray<uint32_t> indices(0);
+        if (prim.indicesIdx != ~0u) {
+            auto index_type = loader.accessors[prim.indicesIdx].type;
+
+            if (index_type == GLTFComponentType::UINT32) {
+                auto idx_accessor = getGLTFAccessorView<const uint32_t>(
+                    loader, prim.indicesIdx);
+                if (!idx_accessor.has_value()) {
+                    return false;
+                }
+
+                indices.reserve(idx_accessor->size());
+
+                for (uint32_t idx : *idx_accessor) {
+                    if (idx > max_idx) {
+                        max_idx = idx;
+                    }
+
+                    indices.push_back(idx);
+                }
+            } else if (index_type == GLTFComponentType::UINT16) {
+                auto idx_accessor = getGLTFAccessorView<const uint16_t>(
+                    loader, prim.indicesIdx);
+                if (!idx_accessor.has_value()) {
+                    return false;
+                }
+
+                indices.reserve(idx_accessor->size());
+
+                for (uint16_t idx : *idx_accessor) {
+                    if (idx > max_idx) {
+                        max_idx = idx;
+                    }
+
+                    indices.push_back(idx);
+                }
+            } else {
+                loader.recordError(
+                    "GLTF loading failed: unsupported index type");
+                return false;
+            }
+        } else {
+            indices.reserve(position_accessor->size());
+
+            for (CountT i = 0; i < (CountT)position_accessor->size(); i++) {
+                indices.push_back(uint32_t(i));
+            }
+
+            max_idx = position_accessor->size() - 1;
+        }
+
+        uint32_t num_vertices = max_idx + 1;
+
+        DynArray<math::Vector3> positions(num_vertices);
+        auto normals = Optional<DynArray<math::Vector3>>::none();
+        auto uvs = Optional<DynArray<math::Vector2>>::none();
+
+        if (normal_accessor.has_value()) {
+            if (normal_accessor->size() != position_accessor->size()) {
+                loader.recordError("Fewer normals than positions in mesh %d",
+                                   mesh_idx);
+                return false;
+            }
+            normals.emplace(num_vertices);
+        }
+
+        if (uv_accessor.has_value()) {
+            if (uv_accessor->size() != position_accessor->size()) {
+                loader.recordError("Fewer UVs than positions in mesh %d",
+                                   mesh_idx);
+                return false;
+            }
+            uvs.emplace(num_vertices);
+        }
+
+        for (uint32_t vert_idx = 0; vert_idx < num_vertices; vert_idx++) {
+            math::Vector3 pos = (*position_accessor)[vert_idx];
+            if (isnan(pos.x) || isinf(pos.x)) {
+                pos.x = 0;
+            }
+
+            if (isnan(pos.y) || isinf(pos.y)) {
+                pos.y = 0;
+            }
+
+            if (isnan(pos.z) || isinf(pos.z)) {
+                pos.z = 0;
+            }
+            positions.push_back(pos);
+
+            if (normal_accessor.has_value()) {
+                math::Vector3 normal = (*normal_accessor)[vert_idx];
+
+                if (isnan(normal.x) || isinf(normal.x)) {
+                    normal.x = 0;
+                }
+
+                if (isnan(normal.y) || isinf(normal.y)) {
+                    normal.y = 0;
+                }
+
+                if (isnan(normal.z) || isinf(normal.z)) {
+                    normal.z = 0;
+                }
+
+                normals->push_back(normal);
+            }
+
+            if (uv_accessor.has_value()) {
+                math::Vector2 uv = (*uv_accessor)[vert_idx];
+
+                if (isnan(uv.x) || isinf(uv.x)) {
+                    uv.x = 0;
+                }
+
+                if (isnan(uv.y) || isinf(uv.y)) {
+                    uv.y = 0;
+                }
+
+                uvs->push_back(uv);
+            }
+        }
+
+        const math::Vector3 *position_ptr = positions.data();
+        imported.geoData.positionArrays.emplace_back(std::move(positions));
+
+        const math::Vector3 *normal_ptr = nullptr;
+        if (normals.has_value()) {
+            normal_ptr = normals->data();
+            imported.geoData.normalArrays.emplace_back(std::move(*normals));
+        }
+
+        const math::Vector2 *uv_ptr = nullptr;
+        if (uvs.has_value()) {
+            uv_ptr = uvs->data();
+            imported.geoData.uvArrays.emplace_back(std::move(*uvs));
+        }
+
+        const uint32_t *idx_ptr = indices.data();
+        imported.geoData.indexArrays.emplace_back(std::move(indices));
+
+        meshes.push_back(SourceMesh {
+            .positions = position_ptr,
+            .normals = normal_ptr,
+            .tangentAndSigns = nullptr,
+            .uvs = uv_ptr,
+            .indices = idx_ptr,
+            .faceCounts = nullptr,
+            .numVertices = num_vertices,
+        });
+    }
+
+    imported.objects.push_back({
+        .meshes = Span(meshes.data(), meshes.size()),
+    });
+
+    imported.geoData.meshArrays.emplace_back(std::move(meshes));
+
+    return true;
+}
+
+static bool gltfParseInstances(const LoaderData &loader,
+                               ImportedAssets &imported)
+{
+    DynArray<std::pair<uint32_t, math::Mat3x4>> node_stack(
+        loader.rootNodes.size());
+    for (uint32_t root_node : loader.rootNodes) {
+        node_stack.emplace_back(root_node, math::Mat3x4::identity());
+    }
+
+    while (node_stack.size() != 0) {
+        auto [node_idx, parent_txfm] = node_stack.back();
+        node_stack.pop_back();
+
+        const GLTFNode &cur_node = loader.nodes[node_idx];
+        math::Mat3x4 cur_txfm = parent_txfm.compose(cur_node.transform);
+
+        for (uint32_t child_offset = 0; child_offset < cur_node.numChildren;
+             child_offset++) {
+            uint32_t child_idx = child_offset + cur_node.childOffset;
+            uint32_t child_node_idx = loader.childNodes[child_idx];
+
+            node_stack.emplace_back(child_node_idx, cur_txfm);
+        }
+
+        math::Vector3 translation;
+        math::Quat rotation;
+        math::Diag3x3 scale;
+
+        cur_txfm.decompose(&translation, &rotation, &scale);
+
+        if (cur_node.meshIdx < loader.meshes.size()) {
+            imported.instances.push_back(SourceInstance {
+                translation,
+                rotation,
+                scale,
+                cur_node.meshIdx,
+            });
+        }
+    }
+
+    return true;
+}
+
+static bool gltfImportAssets(LoaderData &loader,
+                             ImportedAssets &imported)
+{
+    for (CountT mesh_idx = 0; mesh_idx < loader.meshes.size();
+         mesh_idx++) {
+        bool mesh_valid = gltfParseMesh(loader, imported, mesh_idx);
+        if (!mesh_valid) {
+            return false;
+        }
+    }
+
+    return gltfParseInstances(loader, imported);
+}
+
+GLTFLoader::Impl::Impl(Span<char> err_buf)
+    : errBuf(err_buf),
+      jsonParser(),
+      curFileName(nullptr),
+      sceneDirectory(),
+      sceneName(),
+      internalData(0),
+      buffers(0),
+      bufferViews(0),
+      accessors(0),
+      images(0),
+      textures(0),
+      materials(0),
+      prims(0),
+      meshes(0),
+      childNodes(0),
+      nodes(0),
+      rootNodes(0)
+{}
+
+void GLTFLoader::Impl::recordError(const char *fmt, ...) const
+{
+    if (errBuf.data() == nullptr) {
+        return;
+    }
+
+    int prefix_chars_written = snprintf(errBuf.data(), errBuf.size(),
+        "Invalid GLTF File %s: ", curFileName);
+
+    if (prefix_chars_written < errBuf.size()) {
+        va_list args;
+        va_start(args, fmt);
+
+        size_t remaining = errBuf.size() - prefix_chars_written;
+
+        vsnprintf(errBuf.data() + prefix_chars_written, remaining,
+                  fmt, args);
+    }
+}
+
+void GLTFLoader::Impl::recordJSONError(error_code err) const
+{
+    if (errBuf.data() == nullptr) {
+        return;
+    }
+
+    snprintf(errBuf.data(), errBuf.size(),
+        "Invalid GLTF File %s\nJSON Error: %s", curFileName,
+        error_message(err));
+}
+
+GLTFLoader::GLTFLoader(Span<char> err_buf)
+    : impl_(new Impl(err_buf))
+{}
+
+bool GLTFLoader::load(const char *path, 
+                      ImportedAssets &imported_assets)
+{
+    bool json_parsed = gltfLoad(path, *impl_);
+    if (!json_parsed) {
+        return false;
+    }
+
+    bool import_success = gltfImportAssets(*impl_, imported_assets);
+    if (!import_success) {
+        return false;
+    }
+
+    // Clear tmp buffers
+    impl_->internalData.clear();
+    impl_->buffers.clear();
+    impl_->bufferViews.clear();
+    impl_->accessors.clear();
+    impl_->images.clear();
+    impl_->textures.clear();
+    impl_->materials.clear();
+    impl_->prims.clear();
+    impl_->meshes.clear();
+    impl_->childNodes.clear();
+    impl_->nodes.clear();
+    impl_->rootNodes.clear();
+
+    return true;
+}
+
+}
+
+// Old code from rlpbr
 #if 0
 static inline void dumpGLTFTexture(const GLTFScene &scene,
                                    const GLTFImage &img,
@@ -940,10 +1781,10 @@ static vector<Mesh<VertexType>> gltfParseMesh(
         vector<VertexType> vertices;
         vector<uint32_t> indices;
 
-        optional<StridedSpan<const glm::vec3>> position_accessor;
-        optional<StridedSpan<const glm::vec3>> normal_accessor;
-        optional<StridedSpan<const glm::vec2>> uv_accessor;
-        optional<StridedSpan<const glm::u8vec3>> color_accessor;
+        optional<GLTFStridedSpan<const glm::vec3>> position_accessor;
+        optional<GLTFStridedSpan<const glm::vec3>> normal_accessor;
+        optional<GLTFStridedSpan<const glm::vec2>> uv_accessor;
+        optional<GLTFStridedSpan<const glm::u8vec3>> color_accessor;
 
         constexpr bool has_position = HasPosition<VertexType>::value;
         constexpr bool has_normal = HasNormal<VertexType>::value;
@@ -1154,7 +1995,7 @@ static std::vector<InstanceProperties> gltfParseInstances(
             }
 
             instances.push_back({
-                to_string(instances.size()),
+                std::to_string(instances.size()),
                 cur_node.meshIdx,
                 move(instance_materials),
                 position,
@@ -1171,7 +2012,7 @@ static std::vector<InstanceProperties> gltfParseInstances(
 
 template <typename VertexType, typename MaterialType>
 SceneDescription<VertexType, MaterialType> parseGLTF(
-    filesystem::path scene_path, const glm::mat4 &base_txfm,
+    std::filesystem::path scene_path, const glm::mat4 &base_txfm,
     const TextureCallback &texture_cb)
 {
     auto raw_scene = gltfLoad(scene_path);
@@ -1205,190 +2046,9 @@ SceneDescription<VertexType, MaterialType> parseGLTF(
     };
 }
 
-#endif
-
-struct ParsedMesh {
-    vector<imp::SourceVertex> vertices;
-    vector<uint32_t> indices;
-};
-
-static vector<ParsedMesh> gltfParseMesh(
-    const GLTFScene &scene, size_t mesh_idx)
-{
-    const GLTFMesh &gltf_mesh = scene.meshes[mesh_idx];
-
-    vector<ParsedMesh> meshes;
-
-    for (const GLTFPrimitive &prim : gltf_mesh.primitives) {
-        vector<imp::SourceVertex> vertices;
-        vector<uint32_t> indices;
-
-        optional<StridedSpan<const math::Vector3>> position_accessor;
-        optional<StridedSpan<const math::Vector3>> normal_accessor;
-        optional<StridedSpan<const math::Vector2>> uv_accessor;
-
-        position_accessor = getGLTFAccessorView<const math::Vector3>(
-            scene, prim.positionIdx.value());
-        
-
-        if (prim.normalIdx.has_value()) {
-            normal_accessor = getGLTFAccessorView<const math::Vector3>(
-                scene, prim.normalIdx.value());
-        }
-
-        if (prim.uvIdx.has_value()) {
-            uv_accessor = getGLTFAccessorView<const math::Vector2>(scene,
-                prim.uvIdx.value());
-        }
-
-        uint32_t max_idx = 0;
-
-        if (prim.indicesIdx != ~0u) {
-            auto index_type = scene.accessors[prim.indicesIdx].type;
-
-            if (index_type == GLTFComponentType::UINT32) {
-                auto idx_accessor =
-                    getGLTFAccessorView<const uint32_t>(scene, prim.indicesIdx);
-                indices.reserve(idx_accessor.size());
-
-                for (uint32_t idx : idx_accessor) {
-                    if (idx > max_idx) {
-                        max_idx = idx;
-                    }
-
-                    indices.push_back(idx);
-                }
-            } else if (index_type == GLTFComponentType::UINT16) {
-                auto idx_accessor =
-                    getGLTFAccessorView<const uint16_t>(scene, prim.indicesIdx);
-                indices.reserve(idx_accessor.size());
-
-                for (uint16_t idx : idx_accessor) {
-                    if (idx > max_idx) {
-                        max_idx = idx;
-                    }
-
-                    indices.push_back(idx);
-                }
-            } else {
-                cerr << "GLTF loading failed: unsupported index type"
-                          << endl;
-                abort();
-            }
-        } else {
-            indices.reserve(position_accessor->size());
-
-            for (int i = 0; i < (int)position_accessor->size(); i++) {
-                indices.push_back(i);
-            }
-
-            max_idx = position_accessor->size() - 1;
-        }
-
-        max_idx = min(uint32_t(position_accessor->size()), max_idx);
-
-        vertices.reserve(max_idx + 1);
-        for (uint32_t vert_idx = 0; vert_idx <= max_idx; vert_idx++) {
-            imp::SourceVertex vert {};
-
-            vert.position = (*position_accessor)[vert_idx];
-            if (isnan(vert.position.x) || isinf(vert.position.x)) {
-                vert.position.x = 0;
-            }
-
-            if (isnan(vert.position.y) || isinf(vert.position.y)) {
-                vert.position.y = 0;
-            }
-
-            if (isnan(vert.position.z) || isinf(vert.position.z)) {
-                vert.position.z = 0;
-            }
-            
-
-            if (normal_accessor.has_value()) {
-                vert.normal = (*normal_accessor)[vert_idx];
-            }
-
-            if (isnan(vert.normal.x) || isinf(vert.normal.x)) {
-                vert.normal.x = 0;
-            }
-
-            if (isnan(vert.normal.y) || isinf(vert.normal.y)) {
-                vert.normal.y = 0;
-            }
-
-            if (isnan(vert.normal.z) || isinf(vert.normal.z)) {
-                vert.normal.z = 0;
-            }
-            
-
-            if (uv_accessor.has_value()) {
-                vert.uv = (*uv_accessor)[vert_idx];
-            }
-
-            if (isnan(vert.uv.x) || isinf(vert.uv.x)) {
-                vert.uv.x = 0;
-            }
-
-            if (isnan(vert.uv.y) || isinf(vert.uv.y)) {
-                vert.uv.y = 0;
-            }
-            
-            vertices.push_back(vert);
-        }
-
-        ParsedMesh mesh {
-            move(vertices),
-            move(indices),
-        };
-
-        meshes.emplace_back(move(mesh));
-    }
-
-    return meshes;
-}
-
-struct InstanceProperties {
-    uint32_t objectIndex;
-    glm::mat4 txfm;
-    glm::mat3 normalTxfm;
-};
-
-static std::vector<InstanceProperties> gltfParseInstances(
-    const GLTFScene &scene,
-    const glm::mat4 &coordinate_txfm)
-{
-    vector<pair<uint32_t, glm::mat4>> node_stack;
-    for (uint32_t root_node : scene.rootNodes) {
-        node_stack.emplace_back(root_node, coordinate_txfm);
-    }
-
-    vector<InstanceProperties> instances;
-    while (!node_stack.empty()) {
-        auto [node_idx, parent_txfm] = node_stack.back();
-        node_stack.pop_back();
-
-        const GLTFNode &cur_node = scene.nodes[node_idx];
-        glm::mat4 cur_txfm = parent_txfm * cur_node.transform;
-
-        for (const uint32_t child_idx : cur_node.children) {
-            node_stack.emplace_back(child_idx, cur_txfm);
-        }
-
-        if (cur_node.meshIdx < scene.meshes.size()) {
-            instances.push_back({
-                cur_node.meshIdx,
-                cur_txfm,
-                glm::transpose(glm::inverse(glm::mat3(cur_txfm))),
-            });
-        }
-    }
-
-    return instances;
-}
-
-MergedSourceObject loadAndParseGLTF(std::filesystem::path gltf_path,
-                                  const madrona::math::Mat3x4 &base_txfm_raw)
+static MergedSourceObject loadAndParseGLTF(
+    std::filesystem::path gltf_path,
+    const madrona::math::Mat3x4 &base_txfm_raw)
 {
     GLTFScene raw_scene = gltfLoad(gltf_path);
 
@@ -1474,4 +2134,5 @@ MergedSourceObject loadAndParseGLTF(std::filesystem::path gltf_path,
     return merged;
 }
 
-}
+
+#endif

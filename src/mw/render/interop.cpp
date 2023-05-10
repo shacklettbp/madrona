@@ -158,7 +158,7 @@ ViewSettings RenderingSystem::setupView(Context &ctx,
 #ifndef MADRONA_BATCHRENDER_RT
         1.f / 
 #endif
-            tanf(helpers::toRadians(vfov_degrees * 0.5f));
+            tanf(toRadians(vfov_degrees * 0.5f));
 
 #ifdef MADRONA_BATCHRENDER_METAL
     (*renderer_state.numViews) += 1;

@@ -31,13 +31,13 @@ TEST(Quaternions, Math)
         expectQuat(q1, { 1, 0, 0, 0 });
     }
 
-    auto q2 = Quat::angleAxis(helpers::toRadians(45), {0, 1, 0});
+    auto q2 = Quat::angleAxis(toRadians(45), {0, 1, 0});
     {
         SCOPED_TRACE("");
         expectQuat(q2, { 0.9238795, 0, 0.3826834, 0 });
     }
 
-    auto q3 = Quat::angleAxis(helpers::toRadians(45), {1, 0, 0});
+    auto q3 = Quat::angleAxis(toRadians(45), {1, 0, 0});
     {
         SCOPED_TRACE("");
         expectQuat(q3, { 0.9238795, 0.3826834, 0, 0 });

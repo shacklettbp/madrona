@@ -7,7 +7,7 @@
 #include <meshoptimizer.h>
 
 #include "obj.hpp"
-//#include "gltf.hpp"
+#include "gltf.hpp"
 
 namespace madrona::imp {
 
@@ -31,6 +31,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         .instances { 0 },
     };
 
+    auto gltf_loader = Optional<GLTFLoader>::none();
 
     bool load_success = false;
     for (const char *path : paths) {
@@ -45,7 +46,11 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         if (extension == "obj") {
             load_success = loadOBJFile(path, imported, err_buf);
         } else if (extension == "gltf" || extension == "glb") {
-            //load_success = loadGLTFFile(path, imported);
+            if (!gltf_loader.has_value()) {
+                gltf_loader.emplace(err_buf);
+            }
+
+            load_success = gltf_loader->load(path, imported);
         }
 
         if (!load_success) {
