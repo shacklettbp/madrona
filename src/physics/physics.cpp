@@ -1019,8 +1019,9 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
     // expansion factor is 2 * delta_t to give room
     // for acceleration within the timestep
     constexpr float max_inst_accel = 100.f;
-    new (&bvh) broadphase::BVH(max_dynamic_objects, 2.f * delta_t,
-                               max_inst_accel * delta_t * delta_t);
+    new (&bvh) broadphase::BVH(
+        obj_mgr, max_dynamic_objects, 2.f * delta_t,
+        max_inst_accel * delta_t * delta_t);
 
     SolverData &solver = ctx.getSingleton<SolverData>();
     new (&solver) SolverData(max_contacts_per_world, 

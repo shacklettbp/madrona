@@ -866,6 +866,7 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
 
         if (hit_prim) {
             hit_leaf = true;
+            t_max = *hit_t;
         }
     }
 
