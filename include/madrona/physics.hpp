@@ -153,6 +153,8 @@ struct CollisionEvent {
 struct CandidateCollision {
     Loc a;
     Loc b;
+    uint32_t aPrim;
+    uint32_t bPrim;
 };
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
@@ -230,6 +232,11 @@ struct RigidBodyMetadata {
     RigidBodyFrictionData friction;
 };
 
+struct RigidBodyPrimitives {
+    uint32_t primOffset;
+    uint32_t primCount;
+};
+
 struct CollisionPrimitive {
     enum class Type : uint32_t {
         Sphere = 1 << 0,
@@ -256,9 +263,13 @@ struct CollisionPrimitive {
 };
 
 struct ObjectManager {
+    math::AABB *primitiveAABBs;
+    CollisionPrimitive *collisionPrimitives;
+
+    math::AABB *rigidBodyAABBs;
+    uint32_t *rigidBodyPrimitiveOffsets;
+    uint32_t *rigidBodyPrimitiveCounts;
     RigidBodyMetadata *metadata;
-    math::AABB *aabbs;
-    CollisionPrimitive *primitives;
 
     // Half Edge Mesh Buffers
     geometry::PolygonData *polygonDatas;
@@ -284,7 +295,9 @@ struct LeafID {
 
 class BVH {
 public:
-    BVH(CountT max_leaves, float leaf_velocity_expansion,
+    BVH(const ObjectManager *obj_mgr,
+        CountT max_leaves,
+        float leaf_velocity_expansion,
         float leaf_accel_expansion);
 
     inline LeafID reserveLeaf(Entity e, CollisionPrimitive *prim);
@@ -366,7 +379,8 @@ private:
     CountT num_nodes_;
     const CountT num_allocated_nodes_;
     Entity *leaf_entities_;
-    CollisionPrimitive **leaf_primitives_;
+    const ObjectManager *obj_mgr_;
+    base::ObjectID *leaf_obj_ids_;
     math::AABB *leaf_aabbs_; // FIXME: remove this, it's duplicated data
     LeafTransform  *leaf_transforms_;
     uint32_t *leaf_parents_;

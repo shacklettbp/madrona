@@ -40,13 +40,13 @@ void HalfEdgeMesh::iteratePolygonIndices(PolygonID poly,
 
 namespace broadphase {
 
-LeafID BVH::reserveLeaf(Entity e, CollisionPrimitive *prim)
+LeafID BVH::reserveLeaf(Entity e, ObjectID obj_id)
 {
     int32_t leaf_idx = num_leaves_.fetch_add_relaxed(1);
     assert(leaf_idx < num_allocated_leaves_);
 
     leaf_entities_[leaf_idx] = e;
-    leaf_primitives_[leaf_idx] = prim;
+    leaf_obj_ids_[leaf_idx] = prim;
 
     return LeafID {
         leaf_idx,

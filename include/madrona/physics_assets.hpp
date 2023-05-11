@@ -20,8 +20,11 @@ public:
     struct ConvexDecompositions {
         HeapArray<math::Vector3> vertices;
         HeapArray<geometry::HalfEdgeMesh> collisionMeshes;
+        HeapArray<math::AABB> meshAABBs;
+
+        HeapArray<RigidBodyPrimitives> primOffsets;
         HeapArray<RigidBodyMassData> massDatas;
-        HeapArray<math::AABB> aabbs;
+        HeapArray<math::AABB> objectAABBs;
     };
 
     ConvexDecompositions processConvexDecompositions(

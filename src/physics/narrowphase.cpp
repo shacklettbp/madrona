@@ -1565,8 +1565,15 @@ static inline void runNarrowphase(
     ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
     ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
 
-    CollisionPrimitive *a_prim = &obj_mgr.primitives[a_obj.idx];
-    CollisionPrimitive *b_prim = &obj_mgr.primitives[b_obj.idx];
+    const uint32_t a_prim_offset =
+        obj_mgr.rigidBodyPrimitiveOffsets[a_obj.idx];
+    const uint32_t b_prim_offset  =
+        obj_mgr.rigidBodyPrimitiveOffsets[b_obj.idx];
+
+    const CollisionPrimitive *a_prim = &obj_mgr.collisionPrimitives[
+        a_prim_offset + candidate_collision.aPrim];
+    const CollisionPrimitive *b_prim = &obj_mgr.collisionPrimitives[
+        b_prim_offset + candidate_collision.bPrim];
 
     uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
     uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
@@ -1587,8 +1594,8 @@ static inline void runNarrowphase(
     const Diag3x3 b_scale(ctx.getDirect<Scale>(Cols::Scale, b_loc));
 
     {
-        AABB a_obj_aabb = obj_mgr.aabbs[a_obj.idx];
-        AABB b_obj_aabb = obj_mgr.aabbs[b_obj.idx];
+        AABB a_obj_aabb = obj_mgr.primitiveAABBs[a_obj.idx];
+        AABB b_obj_aabb = obj_mgr.primitiveAABBs[b_obj.idx];
 
         AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
         AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);

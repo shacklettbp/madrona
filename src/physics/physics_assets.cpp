@@ -208,6 +208,10 @@ PhysicsLoader::ConvexDecompositions PhysicsLoader::processConvexDecompositions(
     CountT num_objects,
     bool merge_coplanar_faces)
 {
+    if (merge_coplanar_faces) {
+
+    }
+
     CountT total_num_vertices = 0;
 
     for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {

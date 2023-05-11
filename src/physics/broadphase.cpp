@@ -8,7 +8,8 @@ namespace madrona::phys::broadphase {
 using namespace base;
 using namespace math;
 
-BVH::BVH(CountT max_leaves,
+BVH::BVH(const ObjectManager *obj_mgr,
+         CountT max_leaves,
          float leaf_velocity_expansion,
          float leaf_accel_expansion)
     : nodes_((Node *)rawAlloc(sizeof(Node) *
@@ -16,8 +17,9 @@ BVH::BVH(CountT max_leaves,
       num_nodes_(0),
       num_allocated_nodes_(numInternalNodes(max_leaves)),
       leaf_entities_((Entity *)rawAlloc(sizeof(Entity) * max_leaves)),
-      leaf_primitives_((CollisionPrimitive **)
-                       rawAlloc(sizeof(CollisionPrimitive *) * max_leaves)),
+      obj_mgr_(obj_mgr), // FIXME, get rid of this
+      leaf_obj_ids_((ObjectID *)
+                       rawAlloc(sizeof(ObjectID) * max_leaves)),
       leaf_aabbs_((AABB *)rawAlloc(sizeof(AABB) * max_leaves)),
       leaf_transforms_(
           (LeafTransform *)rawAlloc(sizeof(LeafTransform) * max_leaves)),
@@ -817,7 +819,7 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
                            float *hit_t,
                            math::Vector3 *hit_normal)
 {
-    CollisionPrimitive *prim = leaf_primitives_[leaf_idx];
+    ObjectID obj_id = leaf_obj_ids_[leaf_idx];
     LeafTransform leaf_txfm = leaf_transforms_[leaf_idx];
 
     Quat rot_to_local = leaf_txfm.rot.inv();
@@ -834,20 +836,37 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
 
     Vector3 obj_hit_normal;
 
-    bool hit_leaf;
-    switch (prim->type) {
-    case CollisionPrimitive::Type::Hull: {
-        hit_leaf = traceRayIntoConvexPolyhedron(prim->hull.halfEdgeMesh,
-            obj_ray_o, obj_ray_d, t_min, t_max, hit_t, &obj_hit_normal);
-    } break;
-    case CollisionPrimitive::Type::Plane: {
-        hit_leaf = traceRayIntoPlane(
-            obj_ray_o, obj_ray_d, t_min, t_max, hit_t, &obj_hit_normal);
-    } break;
-    case CollisionPrimitive::Type::Sphere: {
-        assert(false);
-    } break;
-    default: __builtin_unreachable();
+    CountT prim_offset = obj_mgr_->rigidBodyPrimitiveOffsets[obj_id.idx];
+    CountT num_prims = obj_mgr_->rigidBodyPrimitiveCounts[obj_id.idx];
+
+    bool hit_leaf = false;
+    for (CountT i = 0; i < (CountT)num_prims; i++) {
+        CountT prim_idx = prim_offset + i;
+
+        AABB prim_aabb = obj_mgr_->primitiveAABBs[prim_idx];
+
+        bool hit_prim;
+
+        const CollisionPrimitive *prim =
+            &obj_mgr_->collisionPrimitives[prim_idx];
+        switch (prim->type) {
+        case CollisionPrimitive::Type::Hull: {
+            hit_prim = traceRayIntoConvexPolyhedron(prim->hull.halfEdgeMesh,
+                obj_ray_o, obj_ray_d, t_min, t_max, hit_t, &obj_hit_normal);
+        } break;
+        case CollisionPrimitive::Type::Plane: {
+            hit_prim = traceRayIntoPlane(
+                obj_ray_o, obj_ray_d, t_min, t_max, hit_t, &obj_hit_normal);
+        } break;
+        case CollisionPrimitive::Type::Sphere: {
+            assert(false);
+        } break;
+        default: __builtin_unreachable();
+        }
+
+        if (hit_prim) {
+            hit_leaf = true;
+        }
     }
 
     *hit_normal = leaf_txfm.rot.rotateVec(obj_hit_normal);
