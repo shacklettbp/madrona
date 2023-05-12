@@ -175,6 +175,8 @@ struct Diag3x3 {
 
     static inline Diag3x3 fromVec(Vector3 v);
 
+    static constexpr inline Diag3x3 uniform(float scale = 1.f);
+
     inline Diag3x3 & operator*=(Diag3x3 o);
     inline Diag3x3 & operator*=(float o);
 

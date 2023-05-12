@@ -22,7 +22,8 @@ public:
         HeapArray<geometry::HalfEdgeMesh> collisionMeshes;
         HeapArray<math::AABB> meshAABBs;
 
-        HeapArray<RigidBodyPrimitives> primOffsets;
+        HeapArray<uint32_t> primOffsets;
+        HeapArray<uint32_t> primCounts;
         HeapArray<RigidBodyMassData> massDatas;
         HeapArray<math::AABB> objectAABBs;
     };

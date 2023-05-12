@@ -15,7 +15,8 @@ struct GLTFLoader {
 
     std::unique_ptr<Impl> impl_;
 
-    bool load(const char *path, ImportedAssets &imported_assets);
+    bool load(const char *path, ImportedAssets &imported_assets,
+              bool merge_and_flatten);
 };
 
 }

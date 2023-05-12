@@ -14,7 +14,8 @@ namespace madrona::imp {
 using namespace math;
 
 Optional<ImportedAssets> ImportedAssets::importFromDisk(
-    Span<const char * const> paths, Span<char> err_buf)
+    Span<const char * const> paths, Span<char> err_buf,
+    bool one_object_per_asset)
 {
     ImportedAssets imported {
         .geoData = GeometryData {
@@ -55,7 +56,8 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
                 gltf_loader.emplace(err_buf);
             }
 
-            load_success = gltf_loader->load(path, imported);
+            load_success = gltf_loader->load(path, imported,
+                                             one_object_per_asset);
         }
 
         if (!load_success) {
@@ -68,7 +70,6 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
     }
 
     return imported;
-
 }
 
 }

@@ -52,7 +52,8 @@ struct ImportedAssets {
 
     static Optional<ImportedAssets> importFromDisk(
         Span<const char * const> asset_paths,
-        Span<char> err_buf = { nullptr, 0 });
+        Span<char> err_buf = { nullptr, 0 },
+        bool one_object_per_asset = false);
 };
 
 }

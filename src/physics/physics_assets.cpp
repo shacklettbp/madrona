@@ -5,8 +5,10 @@
 #include <madrona/cuda_utils.hpp>
 #endif
 
-namespace madrona {
-namespace phys {
+#include <unordered_map>
+
+namespace madrona::phys {
+using namespace geometry;
 
 #ifndef MADRONA_CUDA_SUPPORT
 [[noreturn]] static void noCUDA()
@@ -21,10 +23,10 @@ struct PhysicsLoader::Impl {
     CollisionPrimitive *primitives;
 
     // For half edge meshes
-    geometry::PolygonData *polygonDatas;
-    geometry::Plane *facePlanes;
-    geometry::EdgeData *edgeDatas;
-    geometry::HalfEdge *halfEdges;
+    PolygonData *polygonDatas;
+    Plane *facePlanes;
+    EdgeData *edgeDatas;
+    HalfEdge *halfEdges;
     math::Vector3 *vertices;
 
     CountT polygonCount;
@@ -57,24 +59,24 @@ struct PhysicsLoader::Impl {
             sizeof(math::Vector3) * max_objects * max_vertices_per_object; 
 
         size_t num_polygon_bytes =
-            sizeof(geometry::PolygonData) * max_objects * max_polygons_per_object; 
+            sizeof(PolygonData) * max_objects * max_polygons_per_object; 
 
         size_t num_face_plane_bytes =
-            sizeof(geometry::Plane) * max_objects * max_polygons_per_object; 
+            sizeof(Plane) * max_objects * max_polygons_per_object; 
 
         size_t num_edges_bytes =
-            sizeof(geometry::EdgeData) * max_objects * max_edges_per_object; 
+            sizeof(EdgeData) * max_objects * max_edges_per_object; 
 
         size_t num_half_edges_bytes =
-            sizeof(geometry::HalfEdge) * max_objects * max_half_edges_per_object; 
+            sizeof(HalfEdge) * max_objects * max_half_edges_per_object; 
 
         RigidBodyMetadata *metadata_ptr;
         math::AABB *aabb_ptr;
         CollisionPrimitive *primitives;
-        geometry::PolygonData *polygonDatas_ptr;
-        geometry::Plane *facePlanes_ptr;
-        geometry::EdgeData *edgeDatas_ptr;
-        geometry::HalfEdge *halfEdges_ptr;
+        PolygonData *polygonDatas_ptr;
+        Plane *facePlanes_ptr;
+        EdgeData *edgeDatas_ptr;
+        HalfEdge *halfEdges_ptr;
         math::Vector3 *vertices_ptr;
 
         ObjectManager *mgr;
@@ -86,10 +88,10 @@ struct PhysicsLoader::Impl {
             aabb_ptr = (math::AABB *)malloc(num_aabb_bytes);
             primitives = (CollisionPrimitive *)malloc(num_primitive_bytes);
 
-            polygonDatas_ptr = (geometry::PolygonData *)malloc(num_polygon_bytes);
-            facePlanes_ptr = (geometry::Plane *)malloc(num_face_plane_bytes);
-            edgeDatas_ptr = (geometry::EdgeData *)malloc(num_edges_bytes);
-            halfEdges_ptr = (geometry::HalfEdge *)malloc(num_half_edges_bytes);
+            polygonDatas_ptr = (PolygonData *)malloc(num_polygon_bytes);
+            facePlanes_ptr = (Plane *)malloc(num_face_plane_bytes);
+            edgeDatas_ptr = (EdgeData *)malloc(num_edges_bytes);
+            halfEdges_ptr = (HalfEdge *)malloc(num_half_edges_bytes);
             vertices_ptr = (math::Vector3 *)malloc(num_vertices_bytes);
 
             mgr = new ObjectManager {
@@ -113,10 +115,10 @@ struct PhysicsLoader::Impl {
             primitives =
                 (CollisionPrimitive *)cu::allocGPU(num_primitive_bytes);
 
-            polygonDatas_ptr = (geometry::PolygonData *)cu::allocGPU(num_polygon_bytes);
-            facePlanes_ptr = (geometry::Plane *)cu::allocGPU(num_face_plane_bytes);
-            edgeDatas_ptr = (geometry::EdgeData *)cu::allocGPU(num_edges_bytes);
-            halfEdges_ptr = (geometry::HalfEdge *)cu::allocGPU(num_half_edges_bytes);
+            polygonDatas_ptr = (PolygonData *)cu::allocGPU(num_polygon_bytes);
+            facePlanes_ptr = (Plane *)cu::allocGPU(num_face_plane_bytes);
+            edgeDatas_ptr = (EdgeData *)cu::allocGPU(num_edges_bytes);
+            halfEdges_ptr = (HalfEdge *)cu::allocGPU(num_half_edges_bytes);
             vertices_ptr = (math::Vector3 *)cu::allocGPU(num_vertices_bytes);
 
             mgr = (ObjectManager *)cu::allocGPU(sizeof(ObjectManager));
@@ -202,16 +204,327 @@ PhysicsLoader::~PhysicsLoader()
 
 PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 
+// FIXME: better allocation strategy
+static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
+{
+    free(mesh.halfEdges);
+    free(mesh.faceBaseHalfEdges);
+    free(mesh.facePlanes);
+    free(mesh.vertices);
+}
+
+static inline HalfEdgeMesh buildHalfEdgeMesh(
+    const math::Vector3 *vert_positions,
+    CountT num_vertices, 
+    const uint32_t *indices,
+    const uint32_t *face_counts,
+    CountT num_faces)
+{
+    using namespace madrona::math;
+
+    uint32_t num_hedges = 0;
+    for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
+        num_hedges += face_counts[face_idx];
+    }
+
+    assert(num_hedges % 2 == 0);
+
+    // We already know how many polygons there are
+    auto face_base_hedges =
+        (uint32_t *)malloc(sizeof(uint32_t) * num_faces);
+    auto hedges = (HalfEdge *)malloc(sizeof(HalfEdge) * num_hedges);
+    auto face_planes = (Plane *)malloc(sizeof(Plane) * num_faces);
+    auto positions =
+        (math::Vector3 *)malloc(sizeof(math::Vector3) * num_vertices);
+    memcpy(positions, vert_positions, sizeof(math::Vector3) * num_vertices);
+
+    std::unordered_map<uint64_t, uint32_t> edge_to_hedge;
+
+    auto makeEdgeID = [](uint32_t a_idx, uint32_t b_idx) {
+        return ((uint64_t)a_idx << 32) | (uint64_t)b_idx;
+    };
+
+    CountT num_assigned_hedges = 0;
+    const uint32_t *cur_face_indices = indices;
+    for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
+        CountT num_face_vertices = face_counts[face_idx];
+        for (CountT vert_offset = 0; vert_offset < num_face_vertices;
+             vert_offset++) {
+            uint32_t a_idx = cur_face_indices[vert_offset];
+            uint32_t b_idx = cur_face_indices[
+                (vert_offset + 1) % num_face_vertices];
+
+            uint64_t cur_edge_id = makeEdgeID(a_idx, b_idx);
+
+            auto cur_edge_lookup = edge_to_hedge.find(cur_edge_id);
+            if (cur_edge_lookup == edge_to_hedge.end()) {
+                uint32_t cur_hedge_id = num_assigned_hedges;
+                uint32_t twin_hedge_id = num_assigned_hedges + 1;
+
+                num_assigned_hedges += 2;
+
+                uint64_t twin_edge_id = makeEdgeID(b_idx, a_idx);
+
+                auto [new_edge_iter, inserted] =
+                    edge_to_hedge.emplace(cur_edge_id, cur_hedge_id);
+                assert(inserted);
+
+                auto [_, inserted] =
+                    edge_to_hedge.emplace(twin_edge_id, twin_hedge_id)
+                assert(inserted);
+
+                cur_edge_lookup = new_edge_iter;
+            }
+
+            uint32_t hedge_idx = edge_lookup->second;
+            if (vert_offset == 0) {
+                face_base_hedges[face_idx] = hedge_idx;
+            }
+
+            uint32_t c_idx = cur_face_indices[
+                (vert_offset + 2) % num_face_vertices];
+
+            auto next_edge_id = makeEdgeID(b_idx, c_idx);
+            auto next_edge_lookup = edge_to_hedge.find(next_edge_id);
+
+            // If next doesn't exist yet, we can assume it will be the next
+            // allocated half edge
+            uint32_t next_hedge_idx == edge_to_hedge.end() ?
+                num_assigned_hedges ? next_edge_lookup->second;
+
+            hedges[hedge_idx] = HalfEdge {
+                .next = next_hedge_idx,
+                .rootVertex = a_idx,
+                .face = face_idx,
+            };
+        }
+
+        Vector3 base_pos = positions[cur_face_indices[0]];
+        Vector3 e01 = positions[cur_face_indices[1]] - base_pos;
+        Vector3 e02 = positions[cur_face_indices[2]] - base_pos;
+
+        Vector3 n = math::cross(e01, e02).normalize();
+
+        face_planes[face_idx] = Plane {
+            n,
+            dot(n, base_pos),
+        };
+
+        cur_face_indices += num_face_vertices;
+    }
+
+    assert(num_assigned_hedges == num_hedges);
+
+    return HalfEdgeMesh {
+        hedges,
+        face_base_hedges,
+        face_planes,
+        positions,
+        num_hedges,
+        num_faces,
+        num_vertices,
+    };
+}
+
+static inline HalfEdgeMesh mergeCoplanarFaces(
+    const HalfEdgeMesh &src_mesh)
+{
+    using namespace geometry;
+    using namespace math;
+
+    auto new_hedges = (HalfEdge *)malloc(
+        sizeof(HalfEdge) * (src_mesh.numHalfEdges));
+
+    auto new_face_base_hedges = (uint32_t *)malloc(
+        sizeof(uint32_t) * src_mesh.numHalfEdges);
+
+    auto new_faceplanes = (Plane *)malloc(
+        sizeof(Plane) * src_mesh.numHalfEdges);
+
+    auto new_vertices = (Vector3 *)malloc(
+        sizeof(Vector3) * src_mesh.numVertices);
+
+    memcpy(new_vertices, src_mesh.vertices,
+           src_mesh.numVertices * sizeof(Vector3));
+
+    HeapArray<bool> hedges_visited(src_mesh.numHalfEdges);
+    HeapArray<bool> faces_merged(src_mesh.numFaces);
+    memset(hedges_visited.data(), 0, sizeof(bool) * hedges_visited.size());
+    memset(faces_merged.data(), 0, sizeof(bool) * faces_merged.size());
+
+    constexpr float tolerance = 1e-5;
+
+    CountT num_new_hedges = 0;
+    CountT num_new_faces = 0;
+
+    for (uint32_t orig_face_idx = 0; orig_face_idx < src_mesh.numFaces;
+         orig_face_idx++) {
+        if (faces_merged[orig_face_idx]) {
+            continue;
+        }
+
+        uint32_t new_face_idx = num_new_faces++;
+        Plane face_plane = src_mesh.facePlanes[orig_face_idx];
+        new_faceplanes[new_face_idx] = face_plane;
+
+        uint32_t face_start_hedge = faceBaseHalfEdges[orig_face_idx];
+
+        uint32_t orig_hedge_idx = face_start_hedge;
+        bool root_assigned = false;
+        do {
+            uint32_t orig_twin_hedge_idx = src_mesh.twinIDX(cur_hedge_idx);
+
+            const HalfEdge &orig_cur_hedge =
+                src_mesh.halfEdges[orig_hedge_idx];
+            const HalfEdge &orig_twin_hedge =
+                src_mesh.halfEdges[orig_twin_hedge_idx];
+
+            Vector3 cur_normal =
+                src_mesh.facePlanes[orig_cur_hedge.face].normal;
+            Vector3 twin_normal =
+                src_mesh.facePlanes[orig_twin_hedge.face].normal;
+
+            if (dot(cur_normal, twin_normal) >= 1.f - tolerance) {
+
+                uint32_t twin_prev_idx = twin_hedge_idx;
+                while (hedges_copy[twin_prev_idx].next != twin_hedge_idx) {
+                    twin_prev_idx = hedges_copy[twin_prev_idx].next;
+                }
+
+                continue;
+            }
+
+            uint32_t new_cur_hedge_idx = num_new_hedges;
+            uint32_t new_twin_hedge_idx = num_new_hedges + 1;
+            num_new_hedges += 2;
+
+            new_hedges[new_cur_hedge_idx] = HalfEdge {
+                .rootVertex = orig_cur_hedge.rootVertex,
+            };
+
+            new_hedges[new_twin_hedge_idx] = HalfEdge {
+                .rootVertex = orig_twin_hedge.rootVertex,
+            };
+
+            orig_hedge_idx = orig_cur_hedge.next;
+        } while (orig_hedge_idx != face_start_hedge);
+    }
+
+    struct HedgeStackElem {
+        uint32_t curIDX;
+        uint32_t prevIDX;
+    };
+
+    DynArray<HedgeStackElem> hedge_stack(1);
+    hedge_stack.push_back({0, 0);
+    
+    while (hedge_stack.size() != 0) {
+        auto [cur_hedge_idx, prev_hedge_idx] = hedge_stack.back();
+        hedge_stack.pop_back();
+
+        if (hedges_visited[cur_hedge_idx]) {
+            continue;
+        }
+
+        uint32_t twin_hedge_idx = src_mesh.twinIDX(cur_hedge_idx);
+        assert(!hedges_visited[twin_hedge_idx]);
+
+        hedges_visited[cur_hedge_idx] = true;
+        hedges_visited[twin_hedge_idx] = true;
+
+        const HalfEdge &twin_hedge = src_mesh.halfEdges[twin_hedge_idx];
+
+        Vector3 cur_normal = src_mesh.facePlanes[cur_hedge.face].normal;
+        Vector3 twin_normal = src_mesh.facePlanes[twin_hedge.face].normal;
+
+        if (dot(cur_normal, twin_normal) < 1.f - tolerance) {
+            uint32_t new_cur_idx = num_new_hedges;
+            uint32_t new_twin_idx = num_new_hedges + 1;
+            num_new_hedges += 2;
+
+            new_hedges[new_cur_idx] = {
+                .next = 0,
+                .rootVertex = cur_hedge.rootVertex,
+                .face = cur_hedge.face,
+            };
+            new_hedges[new_twin_idx] = twin_hedge;
+
+            old_to_new[cur_hedge_idx] = new_cur_idx;
+            old_to_new[twin_hedge_idx] = new_twin_idx;
+
+            new_to_old[new_cur_idx] = new_cur_idx;
+            new_to_old[twin_hedge_idx] = new_twin_idx;
+        } else {
+            hedge_remap[cur_hedge_idx] = twin_hedge.next | 0x8000'0000;
+            hedge_remap[twin_hedge_idx] = cur_hedge.next | 0x8000'0000;
+
+            faces_merged[twin_hedge.face] = true;
+        }
+
+        hedge_stack.push_back(cur_hedge.next);
+        hedge_stack.push_back(twin_hedge.next);
+    }
+
+    while (hedge_stack.size() != 0) {
+        uint32_t base_hedge_idx = hedge_stack.back();
+        hedge_stack.pop_back();
+        HalfEdge &base_hedge = new_hedges[base_hedge_idx];
+
+        if (hedges_visited[base_hedge_idx]) {
+            continue;
+        }
+
+        uint32_t cur_hedge_idx = base_hedge.next;
+        HalfEdge &cur_hedge = new_hedges[cur_hedge_idx];
+
+        uint32_t twin_hedge_idx = cur_hedge.twin;
+        HalfEdge &twin_hedge = new_hedges[twin_hedge_idx];
+
+        Vector3 cur_normal = src_mesh.facePlanes[cur_hedge.polygon].normal;
+        Vector3 twin_normal = src_mesh.facePlanes[twin_hedge.polygon].normal;
+
+        if (dot(cur_normal, twin_normal) < 1.f - tolerance) {
+            hedges_visited[base_hedge_idx] = true;
+
+            hedge_stack.push_back(cur_hedge_idx);
+            hedge_stack.push_back(twin_hedge_idx);
+            continue;
+        }
+
+        new_num_faces--;
+
+        uint32_t twin_prev_idx = twin_hedge_idx;
+        while (hedges_copy[twin_prev_idx].next != twin_hedge_idx) {
+            twin_prev_idx = hedges_copy[twin_prev_idx].next;
+        }
+
+        base_hedge.next = cur_hedge.next;
+        hedges_copy[twin_prev_idx].next = twin_hedge.next;
+
+        cur_hedge.next = 0xFFFF'FFFF;
+        cur_hedge.twin = 0xFFFF'FFFF;
+        twin_hedge.next = 0xFFFF'FFFF;
+        twin_hedge.twin = 0xFFFF'FFFF;
+
+        // Update faces
+        uint32_t next_idx = base_hedge.next;
+        while (next_idx != base_hedge_idx) {
+            hedges_copy[next_idx].polygon = base_hedge.polygon;
+        }
+    }
+
+    assert(new_num_faces > 0);
+
+    // FIXME:
+    return src_mesh;
+}
+
 PhysicsLoader::ConvexDecompositions PhysicsLoader::processConvexDecompositions(
     const imp::SourceObject *src_objs,
     const float *inv_masses,
     CountT num_objects,
     bool merge_coplanar_faces)
 {
-    if (merge_coplanar_faces) {
-
-    }
-
     CountT total_num_vertices = 0;
 
     for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {
@@ -236,15 +549,19 @@ PhysicsLoader::ConvexDecompositions PhysicsLoader::processConvexDecompositions(
             aabb.expand(src_mesh.positions[vert_idx]);
         }
 
-        geometry::HalfEdgeMesh he_mesh;
-        he_mesh.construct(src_mesh.positions, src_mesh.numVertices,
-                          src_mesh.indices, src_mesh.faceCounts,
-                          src_mesh.numFaces);
+        HalfEdgeMesh he_mesh = buildHalfEdgeMesh(src_mesh.positions, 
+            src_mesh.numVertices, src_mesh.indices, src_mesh.faceCounts,
+            src_mesh.numFaces);
 
-        loaded_hulls.insert(mesh_idx, {
-            aabb,
-            he_mesh,
-        });
+        if (merge_coplanar_faces) {
+            HalfEdgeMesh merged_mesh = mergeCoplanarFaces(he_mesh);
+
+        } else {
+            loaded_hulls.insert(mesh_idx, {
+                aabb,
+                he_mesh,
+            });
+        }
     }
 
     return loaded_hulls;
@@ -282,13 +599,13 @@ CountT PhysicsLoader::loadObjects(
                 memcpy(
                     impl_->polygonDatas + impl_->polygonCount,
                     hEdgeMesh.mPolygons,
-                    sizeof(geometry::PolygonData) * hEdgeMesh.mPolygonCount);
+                    sizeof(PolygonData) * hEdgeMesh.mPolygonCount);
                 hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
 
                 memcpy(
                     impl_->facePlanes + impl_->polygonCount,
                     hEdgeMesh.mFacePlanes,
-                    sizeof(geometry::Plane) * hEdgeMesh.mPolygonCount);
+                    sizeof(Plane) * hEdgeMesh.mPolygonCount);
                 hEdgeMesh.mFacePlanes =
                     impl_->facePlanes + impl_->polygonCount;
 
@@ -297,14 +614,14 @@ CountT PhysicsLoader::loadObjects(
                 memcpy(
                     impl_->edgeDatas + impl_->edgeCount,
                     hEdgeMesh.mEdges,
-                    sizeof(geometry::EdgeData) * hEdgeMesh.mEdgeCount);
+                    sizeof(EdgeData) * hEdgeMesh.mEdgeCount);
                 hEdgeMesh.mEdges = impl_->edgeDatas + impl_->edgeCount;
                 impl_->edgeCount += hEdgeMesh.mEdgeCount;
 
                 memcpy(
                     impl_->halfEdges + impl_->halfEdgeCount,
                     hEdgeMesh.mHalfEdges,
-                    sizeof(geometry::HalfEdge) * hEdgeMesh.mHalfEdgeCount);
+                    sizeof(HalfEdge) * hEdgeMesh.mHalfEdgeCount);
                 hEdgeMesh.mHalfEdges = impl_->halfEdges + impl_->halfEdgeCount;
                 impl_->halfEdgeCount += hEdgeMesh.mHalfEdgeCount;
 
@@ -332,14 +649,14 @@ CountT PhysicsLoader::loadObjects(
                 cudaMemcpy(
                     impl_->polygonDatas + impl_->polygonCount,
                     hEdgeMesh.mPolygons,
-                    sizeof(geometry::PolygonData) * hEdgeMesh.mPolygonCount,
+                    sizeof(PolygonData) * hEdgeMesh.mPolygonCount,
                     cudaMemcpyHostToDevice);
                 hEdgeMesh.mPolygons = impl_->polygonDatas + impl_->polygonCount;
 
                 cudaMemcpy(
                     impl_->facePlanes + impl_->polygonCount,
                     hEdgeMesh.mFacePlanes,
-                    sizeof(geometry::Plane) * hEdgeMesh.mPolygonCount,
+                    sizeof(Plane) * hEdgeMesh.mPolygonCount,
                     cudaMemcpyHostToDevice);
                 hEdgeMesh.mFacePlanes =
                     impl_->facePlanes + impl_->polygonCount;
@@ -348,7 +665,7 @@ CountT PhysicsLoader::loadObjects(
                 cudaMemcpy(
                     impl_->edgeDatas + impl_->edgeCount,
                     hEdgeMesh.mEdges,
-                    sizeof(geometry::EdgeData) * hEdgeMesh.mEdgeCount,
+                    sizeof(EdgeData) * hEdgeMesh.mEdgeCount,
                     cudaMemcpyHostToDevice);
                 hEdgeMesh.mEdges = impl_->edgeDatas + impl_->edgeCount;
                 impl_->edgeCount += hEdgeMesh.mEdgeCount;
@@ -356,7 +673,7 @@ CountT PhysicsLoader::loadObjects(
                 cudaMemcpy(
                     impl_->halfEdges + impl_->halfEdgeCount,
                     hEdgeMesh.mHalfEdges,
-                    sizeof(geometry::HalfEdge) * hEdgeMesh.mHalfEdgeCount,
+                    sizeof(HalfEdge) * hEdgeMesh.mHalfEdgeCount,
                     cudaMemcpyHostToDevice);
                 hEdgeMesh.mHalfEdges = impl_->halfEdges + impl_->halfEdgeCount;
                 impl_->halfEdgeCount += hEdgeMesh.mHalfEdgeCount;
@@ -392,6 +709,5 @@ ObjectManager & PhysicsLoader::getObjectManager()
     return *impl_->mgr;
 }
 
-}
 }
 

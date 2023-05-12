@@ -4,36 +4,37 @@ namespace madrona::phys {
 
 namespace geometry {
 
-uint32_t HalfEdgeMesh::getVertexCount() const
-{
-    return mVertexCount;
-}
-
-const math::Vector3 &HalfEdgeMesh::vertex(uint32_t id) const
-{
-    return mVertices[id];
-}
-
-const math::Vector3 * HalfEdgeMesh::vertices() const
-{
-    return mVertices;
-}
-
-
 template <typename Fn>
-void HalfEdgeMesh::iteratePolygonIndices(PolygonID poly,
-                                         Fn &&fn)
+void HalfEdgeMesh::iterateFaceIndices(uint32_t face, Fn &&fn) const
 {
-    // Half edge of the polygon
-    uint32_t hEdge = mPolygons[poly];
-    uint32_t start = hEdge;
+    uint32_t hedge_idx = faceBaseHalfEdges[face];
+    uint32_t start = hedge_idx;
 
-    fn(halfEdge(hEdge).rootVertex);
+    do {
+        const HalfEdge &hedge = halfEdges[hedgeIdx];
+        fn(hedge.rootVertex);
 
-    while (halfEdge(hEdge).next != start) {
-        fn(halfEdge(halfEdge(hEdge).next).rootVertex);
-        hEdge = halfEdge(hEdge).next;
+        hedge_idx = hedge.next;
+    } while (hedge_idx != start);
+}
+
+uint32_t HalfEdgeMesh::twinIDX(uint32_t half_edge_id)
+{
+    if (half_edges_id & 1 == 1) {
+        return half_edge_id & 0xFFFF'FFFE;
+    } else {
+        return half_edge_id | 1;
     }
+}
+
+uint32_t HalfEdgeMesh::numEdges()
+{
+    return numHalfEdges / 2;
+}
+
+uint32_t HalfEdgeMesh::edgeToHalfEdge(uint32_t edge_id)
+{
+    return edge_id * 2;
 }
 
 }

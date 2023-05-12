@@ -1290,9 +1290,9 @@ static Optional<GLTFStridedSpan<T>> getGLTFAccessorView(
 
 // GLTF Mesh = Madrona Object, Primitive = Madrona Mesh
 static bool gltfParseMesh(
+    CountT mesh_idx,
     const LoaderData &loader, 
-    ImportedAssets &imported,
-    CountT mesh_idx)
+    ImportedAssets &imported)
 {
     const GLTFMesh &gltf_mesh = loader.meshes[mesh_idx];
 
@@ -1497,7 +1497,8 @@ static bool gltfParseMesh(
 }
 
 static bool gltfParseInstances(const LoaderData &loader,
-                               ImportedAssets &imported)
+                               ImportedAssets &imported,
+                               CountT base_obj_idx)
 {
     DynArray<std::pair<uint32_t, math::Mat3x4>> node_stack(
         loader.rootNodes.size());
@@ -1531,7 +1532,7 @@ static bool gltfParseInstances(const LoaderData &loader,
                 translation,
                 rotation,
                 scale,
-                cur_node.meshIdx,
+                base_obj_idx + cur_node.meshIdx,
             });
         }
     }
@@ -1540,17 +1541,113 @@ static bool gltfParseInstances(const LoaderData &loader,
 }
 
 static bool gltfImportAssets(LoaderData &loader,
-                             ImportedAssets &imported)
+                             ImportedAssets &imported,
+                             bool merge_and_flatten)
 {
+    CountT new_mesh_arrays_start = imported.geoData.meshArrays.size();
+    CountT new_vert_arrays_start = imported.geoData.positionArrays.size();
+    CountT new_normal_arrays_start = imported.geoData.normalArrays.size();
+    CountT new_objects_start = imported.objects.size();
+    CountT new_instances_start = imported.instances.size();
+
     for (CountT mesh_idx = 0; mesh_idx < loader.meshes.size();
          mesh_idx++) {
-        bool mesh_valid = gltfParseMesh(loader, imported, mesh_idx);
+        bool mesh_valid = gltfParseMesh(mesh_idx, loader, imported);
         if (!mesh_valid) {
             return false;
         }
     }
 
-    return gltfParseInstances(loader, imported);
+    bool instances_valid =
+        gltfParseInstances(loader, imported, new_objects_start);
+
+    if (!instances_valid) {
+        return false;
+    }
+
+    if (!merge_and_flatten) {
+        return true;
+    }
+
+    CountT total_new_vertices = 0;
+    CountT total_new_meshes = 0;
+    for (CountT inst_idx = new_instances_start;
+         inst_idx < imported.instances.size(); inst_idx++) {
+        const SourceInstance &inst = imported.instances[inst_idx];
+        const SourceObject &src_obj = imported.objects[src_inst.objIDX];
+        for (const SourceMesh &src_mesh : src_obj.meshes) {
+            total_new_vertices += src_mesh.numVertices;
+        }
+
+        total_new_meshes += src_obj.meshes.size();
+    }
+
+    DynArray<SourceMesh> merged_meshes(total_new_meshes);
+    DynArray<math::Vector3> new_positions_arr(total_new_vertices);
+    DynArray<math::Vector3> new_normals_arr(total_new_vertices);
+
+    for (CountT inst_idx = new_instances_start;
+         inst_idx < imported.instances.size(); inst_idx++) {
+        const SourceInstance &inst = imported.instances[inst_idx];
+        const SourceObject &src_obj = imported.objects[inst.objIDX];
+
+        const math::Vector3 *new_mesh_positions_ptr =
+            new_positions_arr.data() + new_positions_arr.size();
+        const math::Vector3 *new_mesh_normals_ptr =
+            new_normals_arr.data() + new_normals_arr.size();
+
+        for (const SourceMesh &src_mesh : src_obj.meshes) {
+            for (CountT i = 0; i < src_mesh.numVertices; i++) {
+                math::Vector3 orig_pos = src_mesh.positions[i];
+                math::Vector3 orig_normal = src_mesh.normals[i];
+
+                math::Vector3 new_pos =
+                    inst.rotation.rotateVec(inst.scale * orig_pos) +
+                    inst.translation;
+
+                math::Vector3 new_normal =
+                    inst.rotation.rotateVec(inst.scale.inv() * orig_normal);
+
+                new_positions_arr.push_back(new_pos);
+                new_normals_arr.push_back(new_pos);
+            }
+
+            merged_meshes.push_back(SourceMesh {
+                .positions = new_mesh_positions_ptr,
+                .normals = new_mesh_normals_ptr,
+                .tangentAndSigns = src_mesh.tangentAndSigns,
+                .uvs = src_mesh.uvs,
+                .indices = src_mesh.indices,
+                .faceCounts = src_mesh.faceCounts,
+                .numVertices = src_mesh.numVertices,
+                .numFaces = src_mesh.numFaces,
+                .materialIDX = src_mesh.materialIDX,
+            });
+        }
+    }
+
+    imported.geoData.meshArrays.resize(new_mesh_arrays_start);
+    imported.geoData.positionArrays.resize(new_vert_arrays_start);
+    imported.geoData.normalArrays.resize(new_normal_arrays_start);
+    imported.objects.resize(new_objects_start);
+    imported.instances.resize(new_instances_start);
+
+    imported.objects.push_back({
+        .meshes = Span<SourceMesh>(merged_meshes.data(), merged_meshes.size()),
+    });
+    
+    imported.instances.push_back({
+        .translation = math::Vector3::zero(),
+        .rotation = Quat { 1, 0, 0, 0 },
+        .scale = Diag3x3::uniform(1.f),
+        .objIdx = new_objects_start,
+    });
+
+    imported.geoData.meshArrays.emplace_back(std::move(merged_meshes));
+    imported.geoData.positionArrays.emplace_back(std::move(new_positions_arr));
+    imported.geoData.normalArrays.emplace_back(std::move(new_normals_arr));
+
+    return true;
 }
 
 GLTFLoader::Impl::Impl(Span<char> err_buf)
@@ -1611,14 +1708,16 @@ GLTFLoader::GLTFLoader(Span<char> err_buf)
 GLTFLoader::~GLTFLoader() {}
 
 bool GLTFLoader::load(const char *path, 
-                      ImportedAssets &imported_assets)
+                      ImportedAssets &imported_assets,
+                      bool merge_and_flatten)
 {
     bool json_parsed = gltfLoad(path, *impl_);
     if (!json_parsed) {
         return false;
     }
 
-    bool import_success = gltfImportAssets(*impl_, imported_assets);
+    bool import_success = gltfImportAssets(*impl_, imported_assets,
+                                           merge_and_flatten);
     if (!import_success) {
         return false;
     }

@@ -8,30 +8,10 @@ namespace madrona::phys {
 
 namespace geometry {
 
-// Ok this is quite confusing right now but polygon data is data for each polygon
-// This could maybe in the future be a struct or something but for now is just an int
-// indexing to a half edge which is part of the polygon
-using PolygonData = uint32_t;
-
-// PolygonID is an int indexing into the list of PolygonDatas
-// In order to get the half edge of a polygon given PolygonID,
-// you would index into the list of Polygons with the PolygonID,
-// then use the half edge index stored in PolygonData to access
-// the corresponding half edge
-using PolygonID = uint32_t;
-using EdgeData = uint32_t;
-using HalfEdgeID = uint32_t;
-
-// This is an index into the mVertices array
-using VertexID = uint32_t;
-
 struct HalfEdge {
-    // Don't really need anything else for our purposes
-    HalfEdgeID next;
-    HalfEdgeID twin;
-    VertexID rootVertex;
-    // Face (iterator in the polygon structure - for now into the fast polygon list)
-    PolygonID polygon;
+    uint32_t next;
+    uint32_t rootVertex;
+    uint32_t face;
 };
 
 struct Plane {
@@ -44,42 +24,15 @@ struct Segment {
     math::Vector3 p2;
 };
 
-// For our purposes, we just need to be able to easily iterate
-// over all the faces and edges of the mesh. That's it
-class HalfEdgeMesh {
-public:
-    void construct(
-        const math::Vector3 *vertices,
-        CountT num_vertices, 
-        const uint32_t *indices,
-        const uint32_t *face_counts,
-        CountT num_faces);
-
-    // Normalized
-    math::Vector3 getFaceNormal(PolygonID polygon,
-                                const math::Vector3 *vertices) const;
-
-    // Normalized normal
-    Plane getPlane(PolygonID polygon, const math::Vector3 *vertices) const;
-
+struct HalfEdgeMesh {
     template <typename Fn>
-    void iteratePolygonIndices(PolygonID poly, Fn &&fn);
+    inline void iterateFaceIndices(uint32_t face, Fn &&fn) const;
 
-    // Get ordered vertices of a polygon (face)
-    uint32_t getPolygonVertices(
-            const PolygonID &polygon,
-            math::Vector3 *outVertices,
-            const math::Vector3 *vertices) const;
+    inline uint32_t twinIDX(uint32_t half_edge_id) const;
 
-    void getPolygonVertices(math::Vector3 *outVertices, const PolygonID &polygon, const math::Vector3 *vertices) const;
+    inline uint32_t numEdges() const;
 
-
-    // Can be used one after the other
-    uint32_t getPolygonVertexCount(const PolygonID &polygon) const;
-    void getPolygonSidePlanes(Plane *planes, const PolygonID &polygon, const math::Vector3 *vertices) const;
-
-    // Normalized normals
-    std::pair<math::Vector3, math::Vector3> getEdgeNormals(const HalfEdge &hEdge, math::Vector3 *vertices) const;
+    inline uint32_t edgeToHalfEdge(uint32_t edge_id) const;
 
     // Normalized direction
     math::Vector3 getEdgeDirection(const EdgeData &edge, const math::Vector3 *vertices) const;
@@ -92,32 +45,14 @@ public:
     math::Vector3 getEdgeOrigin(const EdgeData &edge, math::Vector3 *vertices) const;
     math::Vector3 getEdgeOrigin(const HalfEdge &edge, math::Vector3 *vertices) const;
 
-public:
-    inline uint32_t getVertexCount() const;
-    inline const math::Vector3 & vertex(uint32_t id) const;
-    inline const math::Vector3 * vertices() const;
+    HalfEdge *halfEdges;
+    uint32_t *faceBaseHalfEdges;
+    Plane *facePlanes;
+    math::Vector3 *vertices;
 
-    uint32_t getPolygonCount() const;
-    const PolygonData &polygon(uint32_t id) const;
-
-    uint32_t getEdgeCount() const;
-    const EdgeData &edge(uint32_t id) const;
-
-    const HalfEdge &halfEdge(HalfEdgeID id) const;
-
-public:
-    // For now, just array of indices which point into the half edge array
-    PolygonData *mPolygons;
-    Plane *mFacePlanes;
-    EdgeData    *mEdges;
-    // Where all the half edges are stored
-    HalfEdge    *mHalfEdges;
-    math::Vector3   *mVertices;
-
-    uint32_t mHalfEdgeCount;
-    uint32_t mPolygonCount;
-    uint32_t mEdgeCount;
-    uint32_t mVertexCount;
+    uint32_t numHalfEdges;
+    uint32_t numFaces;
+    uint32_t numVertices;
 };
 
 }

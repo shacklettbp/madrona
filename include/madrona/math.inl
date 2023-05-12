@@ -762,6 +762,15 @@ Diag3x3 Diag3x3::fromVec(Vector3 v)
     };
 }
 
+Diag3x3 Diag3x3::uniform(float scale = 1.f)
+{
+    return Diag3x3 {
+        scale,
+        scale,
+        scale,
+    };
+}
+
 Diag3x3 & Diag3x3::operator*=(Diag3x3 o)
 {
     d0 *= o.d0;
