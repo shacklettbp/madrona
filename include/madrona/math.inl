@@ -816,6 +816,33 @@ Vector3 operator*(Diag3x3 d, Vector3 v)
     };
 }
 
+
+Mat3x3::Transpose Mat3x3::transpose() const
+{
+    return Transpose { this };
+}
+
+Vector3 Mat3x3::Transpose::operator[](CountT i) const
+{
+    return Vector3 {
+        cols[0][i],
+        cols[1][i],
+        cols[2][i],
+    };
+}
+
+float Mat3x3::determinant() const
+{
+    Vector3 c0 = cols[0];
+    Vector3 c1 = cols[0];
+    Vector3 c2 = cols[0];
+
+    return c0.x * (c1.y * c2.z - c2.y * c1.z) -
+           c0.y * (c1.x * c2.z - c2.x * c1.z) +
+           c0.z * (c1.x * c2.y - c2.x * c2.y);
+
+}
+
 Mat3x3 Mat3x3::fromQuat(Quat r)
 {
     float x2 = r.x * r.x;
@@ -890,17 +917,35 @@ Vector3 Mat3x3::operator[](CountT i) const
     return cols[i];
 }
 
-Vector3 Mat3x3::operator*(Vector3 v)
+Mat3x3 & Mat3x3::operator+=(const Mat3x3 &o);
+{
+    cols[0] += o[0];
+    cols[1] += o[1];
+    cols[2] += o[2];
+
+    return *this;
+}
+
+Mat3x3 & Mat3x3::operator-=(const Mat3x3 &o);
+{
+    cols[0] -= o[0];
+    cols[1] -= o[1];
+    cols[2] -= o[2];
+    
+    return *this;
+}
+
+Vector3 Mat3x3::operator*(Vector3 v) const
 {
     return cols[0] * v.x + cols[1] * v.y + cols[2] * v.z;
 }
 
-Mat3x3 Mat3x3::operator*(const Mat3x3 &o)
+Mat3x3 Mat3x3::operator*(const Mat3x3 &o) const;
 {
     return Mat3x3 {
-        *this * o.cols[0],
-        *this * o.cols[1],
-        *this * o.cols[2],
+        *this * o[0],
+        *this * o[1],
+        *this * o[2],
     };
 }
 
@@ -909,21 +954,63 @@ Mat3x3 & Mat3x3::operator*=(const Mat3x3 &o)
     return *this = (*this * o);
 }
 
+Mat3x3 Mat3x3::operator*(const Mat3x3::Transpose &t) const
+{
+    return Mat3x3 {
+        *this * t[0],
+        *this * t[1],
+        *this * t[2],
+    };
+}
+
+Mat3x3 operator+(Mat3x3 a, const Mat3x3 &b)
+{
+    return (a += b);
+}
+
+Mat3x3 operator-(Mat3x3 a, const Mat3x3 &b)
+{
+    return (a -= b);
+}
+
 Mat3x3 operator*(const Mat3x3 &m, Diag3x3 d)
 {
     return Mat3x3 {{
-        m.cols[0] * d.d0,
-        m.cols[1] * d.d1,
-        m.cols[2] * d.d2,
+        m[0] * d.d0,
+        m[1] * d.d1,
+        m[2] * d.d2,
     }};
 }
 
 Mat3x3 operator*(Diag3x3 d, const Mat3x3 &m)
 {
     return Mat3x3 {{
-        { d * m.cols[0] },
-        { d * m.cols[1] },
-        { d * m.cols[2] },
+        { d * m[0] },
+        { d * m[1] },
+        { d * m[2] },
+    }};
+}
+
+Mat3x3 operator*(float s, const Mat3x3 &m)
+{
+    return Mat3x3 {{
+        s * m[0],
+        s * m[1],
+        s * m[2],
+    }};
+}
+
+Mat3x3 operator*(const Mat3x3 &m, float s)
+{
+    return s * m;
+}
+
+Mat3x3 operator/(const Mat3x3 &m, float s)
+{
+    return Mat3x3 {{
+        m[0] / s,
+        m[1] / s,
+        m[2] / s,
     }};
 }
 

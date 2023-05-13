@@ -17,9 +17,8 @@ public:
     ~PhysicsLoader();
     PhysicsLoader(PhysicsLoader &&o);
 
-    struct ConvexDecompositions {
-        HeapArray<math::Vector3> vertices;
-        HeapArray<geometry::HalfEdgeMesh> collisionMeshes;
+    struct ImportedCollisionMeshes {
+        HeapArray<geometry::HalfEdgeMesh> halfEdgeMeshes;
         HeapArray<math::AABB> meshAABBs;
 
         HeapArray<uint32_t> primOffsets;
@@ -28,7 +27,7 @@ public:
         HeapArray<math::AABB> objectAABBs;
     };
 
-    ConvexDecompositions processConvexDecompositions(
+    ImportedCollisionMeshes importCollisionMeshes(
         const imp::SourceObject *src_objects,
         const float *inv_masses, 
         CountT num_objects,

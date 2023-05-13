@@ -187,7 +187,16 @@ struct Diag3x3 {
 };
 
 struct Mat3x3 {
+    struct Transpose {
+        const Mat3x3 *src;
+
+        inline Vector3 operator[](CountT i) const;
+    };
+
     Vector3 cols[3];
+
+    inline float determinant() const;
+    inline Transpose transpose() const;
 
     static inline Mat3x3 fromQuat(Quat r);
     static inline Mat3x3 fromRS(Quat r, Diag3x3 s);
@@ -195,12 +204,25 @@ struct Mat3x3 {
     inline Vector3 & operator[](CountT i);
     inline Vector3 operator[](CountT i) const;
 
-    inline Vector3 operator*(Vector3 v);
+    inline Mat3x3 & operator+=(const Mat3x3 &o);
+    inline Mat3x3 & operator-=(const Mat3x3 &o);
+
+    inline Vector3 operator*(Vector3 v) const;
     inline Mat3x3 operator*(const Mat3x3 &o);
     inline Mat3x3 & operator*=(const Mat3x3 &o);
 
+    inline Mat3x3 operator*(const Mat3x3::Transpose &t) const;
+
+    friend inline Mat3x3 operator+(Mat3x3 a, const Mat3x3 &b);
+    friend inline Mat3x3 operator-(Mat3x3 a, const Mat3x3 &b);
+
     friend inline Mat3x3 operator*(const Mat3x3 &m, Diag3x3 d);
     friend inline Mat3x3 operator*(Diag3x3 d, const Mat3x3 &m);
+
+    friend inline Mat3x3 operator*(float s, const Mat3x3 &m);
+    friend inline Mat3x3 operator*(const Mat3x3 &m, float s);
+
+    friend inline Mat3x3 operator/(const Mat3x3 &m, float s);
 };
 
 struct Mat3x4 {

@@ -220,11 +220,19 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
     const uint32_t *face_counts,
     CountT num_faces)
 {
+    auto numFaceVerts = [face_counts](CountT face_idx) {
+        if (face_counts == nullptr) {
+            return 3;
+        } else {
+            return face_counts[face_idx];
+        }
+    };
+
     using namespace madrona::math;
 
     uint32_t num_hedges = 0;
     for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
-        num_hedges += face_counts[face_idx];
+        num_hedges += numFaceVerts(face_idx);
     }
 
     assert(num_hedges % 2 == 0);
@@ -247,7 +255,7 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
     CountT num_assigned_hedges = 0;
     const uint32_t *cur_face_indices = indices;
     for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
-        CountT num_face_vertices = face_counts[face_idx];
+        CountT num_face_vertices = numFaceVerts(face_idx);
         for (CountT vert_offset = 0; vert_offset < num_face_vertices;
              vert_offset++) {
             uint32_t a_idx = cur_face_indices[vert_offset];
@@ -455,52 +463,176 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
     };
 }
 
-PhysicsLoader::ConvexDecompositions PhysicsLoader::processConvexDecompositions(
+namespace {
+struct MassProperties {
+    math::Vector3 inertiaTensor;
+    math::Vector3 centerOfMass;
+    math::Quat toDiagonal;
+};
+}
+
+// http://number-none.com/blow/inertia/
+static inline MassProperties computeMassProperties(const SourceObject &src_obj)
+{
+    using namespace math;
+    const Mat3x3 C_canonical {{
+        { 1.f / 60.f, 1.f / 120.f, 1.f / 120.f },
+        { 1.f / 120.f, 1.f / 60.f, 1.f / 120.f },
+        { 1.f / 120.f, 1.f / 120.f, 1.f / 60.f },
+    }};
+    constexpr float density = 1.f;
+
+    Mat3x3 C_total {{
+        Vector3::zero(),
+        Vector3::zero(),
+        Vector3::zero(),
+    }};
+
+    float m_total = 0;
+    Vector3 x_total = Vector3::zero();
+
+    auto processTet = [&](const Vector3 *positions, uint32_t a_idx, 
+                          uint32_t b_idx, uint32_t c_idx) {
+        // Reference point is (0, 0, 0) so tet edges are just the vertex
+        // positions
+        Vector3 e1 = positions[a_idx];
+        Vector3 e2 = positions[b_idx];
+        Vector3 e3 = positions[c_idx];
+
+        // Covariance matrix
+        Mat3x3 A {{ e1, e2, e3 }};
+        float det_A = A.determinant();
+        Mat3x3 C = det_A * A * C_canonical * A.transpose();
+
+        // Mass
+        float volume = 1.f / 6.f * det_A;
+        float m = volume * density;
+
+        float x = 0.25f * e1 + 0.25f * e2 + 0.25f * e3;
+
+        // Accumulate tetrahedron properties
+        float old_m_total = m_total;
+        m_total += m;
+        x_total = (x * m + x_total * old_m_total) / m_total;
+
+        C_total += C;
+    };
+
+    for (const SourceMesh &src_mesh : src_obj.meshes) {
+        const uint32_t *cur_indices = src_mesh.indices;
+        for (CountT face_idx = 0; face_idx < (CountT)src_mesh.numFaces;
+             face_idx++) {
+            CountT num_face_vertices = src_mesh.faceCounts ?
+                src_mesh.faceCounts[face_idx] : 3;
+
+            for (CountT i = 1; i < num_face_vertices - 1; i++) {
+                processTet(src_mesh.positions, cur_indices[0],
+                           cur_indices[i], cur_indices[i + 1]);
+            }
+
+            cur_indices += num_face_vertices;
+        }
+    }
+
+    auto translateCovariance = [](const Mat3x3 &C,
+                                  Vector3 x, // COM
+                                  float m,
+                                  Vector3 delta_x) {
+        term1 = delta_x * x_transpose
+        term2 = x * delta_x_transpose
+        term3 = delta_x * delta_x_transpose
+        return C + m * (term1 + term2 + term3)
+    };
+
+    // Move accumulated covariance matrix to center of mass
+    C_total = translateCovariance(C_total, x_total, m_total, -x_total);
+
+    float tr_C = C_total[0][0] + C_total[1][1] + C_total[2][2];
+    const Mat3x3 tr_C_diag {{
+        Vector3 { tr_C, 0, 0 },
+        Vector3 { 0, tr_C, 0 },
+        Vector3 { 0, 0, tr_C },
+    }};
+
+    // Compute inertia tensor and rescale to mass == 1
+    Mat3x3 inertia_tensor = (tr_C_diag - C_total) / m_total;
+
+    return MassProperties {
+    };
+}
+
+PhysicsLoader::ImportedCollisionMeshes PhysicsLoader::importCollisionMeshes(
     const imp::SourceObject *src_objs,
     const float *inv_masses,
     CountT num_objects,
     bool merge_coplanar_faces)
 {
-    CountT total_num_vertices = 0;
+    using namespace math;
 
+    HeapArray<uint32_t> prim_offsets(num_objs);
+    HeapArray<uint32_t> prim_counts(num_objs);
+    HeapArray<AABB> obj_aabbs(num_objs);
+    HeapArray<RigidBodyMassData> mass_datas(num_objs);
+
+    CountT total_num_meshes = 0;
     for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {
         const imp::SourceObject &src_obj = src_objs[obj_idx];
+        CountT cur_num_meshes = src_obj.meshes.size();
 
-        for (const auto &mesh : src_obj.meshes) {
-            total_num_vertices += mesh.numVertices;
-        }
+        prim_offsets[obj_idx] = total_num_meshes;
+        prim_counts[obj_idx] = cur_num_meshes;
+        total_num_meshes += cur_num_meshes;
     }
 
-    HeapArray<math::Vector3> all_verts(total_num_vertices);
+    HeapArray<geometry::HalfEdgeMesh> he_meshes(total_num_meshes);
+    HeapArray<AABB> mesh_aabbs(total_num_meshes);
 
-    CountT num_meshes = src_obj.meshes.size();
-    HeapArray<LoadedHull> loaded_hulls(num_meshes);
+    CountT cur_mesh_offset = 0;
+    for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {
+        const imp::SourceObject &src_obj = src_objs[obj_idx];
+        MassProperties mass_props = computeMassProperties(src_obj);
 
-    for (CountT mesh_idx = 0; mesh_idx < num_meshes; mesh_idx++) {
-        const imp::SourceMesh &src_mesh = src_obj.meshes[mesh_idx];
+        auto obj_aabb = AABB::invalid();
+        for (const SourceMesh &src_mesh : src_obj.meshes) {
+            HalfEdgeMesh he_mesh = buildHalfEdgeMesh(src_mesh.positions, 
+                src_mesh.numVertices, src_mesh.indices, src_mesh.faceCounts,
+                src_mesh.numFaces);
 
-        math::AABB aabb = math::AABB::point(src_mesh.positions[0]);
-        for (CountT vert_idx = 1; vert_idx < (CountT)src_mesh.numVertices;
-             vert_idx++) {
-            aabb.expand(src_mesh.positions[vert_idx]);
+            AABB mesh_aabb = AABB::point(src_mesh.positions[0]);
+            for (CountT vert_idx = 1; vert_idx < (CountT)src_mesh.numVertices;
+                 vert_idx++) {
+                mesh_aabb.expand(src_mesh.positions[vert_idx]);
+            }
+
+            obj_aabb = AABB::merge(obj_aabb, mesh_aabb);
+
+            if (merge_coplanar_faces) {
+                HalfEdgeMesh merged_mesh = mergeCoplanarFaces(he_mesh);
+                freeHalfEdgeMesh(he_mesh);
+                he_mesh = merged_mesh;
+            }
+
+
+            for (CountT i = 0; i < 3; i++) {
+                obj_inertia_tensor.cols[i] += mesh_inertia_tensor.cols[i];
+            }
+
+            CountT out_mesh_idx = cur_mesh_offset++;
+
+            he_meshes[out_mesh_idx] = he_mesh;
+            mesh_aabbs[out_mesh_idx] = mesh_aabb;
         }
 
-        HalfEdgeMesh he_mesh = buildHalfEdgeMesh(src_mesh.positions, 
-            src_mesh.numVertices, src_mesh.indices, src_mesh.faceCounts,
-            src_mesh.numFaces);
-
-        if (merge_coplanar_faces) {
-            HalfEdgeMesh merged_mesh = mergeCoplanarFaces(he_mesh);
-
-        } else {
-            loaded_hulls.insert(mesh_idx, {
-                aabb,
-                he_mesh,
-            });
-        }
+        obj_aabbs[obj_idx] = obj_aabb;
     }
 
-    return loaded_hulls;
+    return ImportedCollisionMeshes {
+        .halfEdgeMeshes = std::move(he_meshes),
+        .meshAABBs = std::move(mesh_aabbs),
+        .primOffsets = std::move(prim_offsets),
+        .primCounts = std::move(prim_counts),
+        .massDatas = std::move(mass_datas),
+    };
 }
 
 CountT PhysicsLoader::loadObjects(
