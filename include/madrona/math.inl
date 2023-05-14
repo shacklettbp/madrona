@@ -6,6 +6,14 @@ inline constexpr float toRadians(float degrees)
     return mult * degrees;
 }
 
+// https://en.wikipedia.org/wiki/Fast_inverse_square_root
+inline constexpr float rsqrtApprox(float x)
+{
+    using std::bit_cast;
+
+    const float y = bit_cast<float>(0x5F1FFFF9 - (bit_cast<uint32_t>(x) >> 1));
+	return y * (0.703952253f * (2.38924456f - x * y * y));
+}
 
 float Vector2::dot(const Vector2 &o) const
 {
@@ -434,6 +442,14 @@ Vector3 cross(Vector3 a, Vector3 b)
     return a.cross(b);
 }
 
+Mat3x3 outerProduct(Vector3 a, Vector3 b)
+{
+    return Mat3x3 {{
+        a * b.x,
+        a * b.y,
+        a * b.z,
+    }};
+}
 
 Vector3 normalize(Vector3 v)
 {

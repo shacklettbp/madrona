@@ -27,23 +27,9 @@ struct Segment {
 struct HalfEdgeMesh {
     template <typename Fn>
     inline void iterateFaceIndices(uint32_t face, Fn &&fn) const;
-
     inline uint32_t twinIDX(uint32_t half_edge_id) const;
-
     inline uint32_t numEdges() const;
-
     inline uint32_t edgeToHalfEdge(uint32_t edge_id) const;
-
-    // Normalized direction
-    math::Vector3 getEdgeDirection(const EdgeData &edge, const math::Vector3 *vertices) const;
-
-    Segment getEdgeSegment(const EdgeData &edge, math::Vector3 *vertices) const;
-
-    // Normalized direction
-    math::Vector3 getEdgeDirection(const HalfEdge &edge, math::Vector3 *vertices) const;
-
-    math::Vector3 getEdgeOrigin(const EdgeData &edge, math::Vector3 *vertices) const;
-    math::Vector3 getEdgeOrigin(const HalfEdge &edge, math::Vector3 *vertices) const;
 
     HalfEdge *halfEdges;
     uint32_t *faceBaseHalfEdges;
@@ -155,6 +141,8 @@ struct ConstraintData : Archetype<JointConstraint> {};
 struct RigidBodyMassData {
     float invMass;
     math::Vector3 invInertiaTensor;
+    math::Vector3 toCenterOfMass;
+    math::Quat toMassFrame;
 };
 
 struct RigidBodyFrictionData {

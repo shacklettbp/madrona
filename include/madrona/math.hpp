@@ -16,11 +16,19 @@
 
 namespace madrona::math {
 
+struct Vector2;
+struct Vector3;
+struct Vector4;
+struct Quat;
+struct Mat3x3;
+struct Mat3x4;
+
 constexpr inline float pi {3.14159265358979323846264338327950288f};
 constexpr inline float pi_d2 {pi / 2.f};
 constexpr inline float pi_m2 {pi * 2.f};
 
 inline constexpr float toRadians(float degrees);
+inline constexpr float rsqrtApprox(float v);
 
 struct Vector2 {
     float x;
@@ -116,6 +124,7 @@ struct Vector3 {
 
 inline float dot(Vector3 a, Vector3 b);
 inline Vector3 cross(Vector3 a, Vector3 b);
+inline Mat3x3 outerProduct(Vector3 a, Vector3 b);
 inline Vector3 normalize(Vector3 v);
 
 struct Vector4 {
