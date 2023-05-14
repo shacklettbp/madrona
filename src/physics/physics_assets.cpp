@@ -20,23 +20,23 @@ using namespace math;
 
 struct PhysicsLoader::Impl {
     RigidBodyMetadata *metadatas;
-    AABB *aabbs;
+    AABB *objAABBs;
     CollisionPrimitive *primitives;
+    AABB *primAABBs;
 
     // For half edge meshes
-    PolygonData *polygonDatas;
-    Plane *facePlanes;
-    EdgeData *edgeDatas;
     HalfEdge *halfEdges;
-    Vector3 *vertices;
+    uint32_t *faceBaseHalfEdges;
+    Plane *facePlanes;
+    math::Vector3 *vertices;
 
-    CountT polygonCount;
-    CountT edgeCount;
-    CountT halfEdgeCount;
-    CountT vertexCount;
+    CountT curHalfEdgeOffset;
+    CountT curHEFaceOffset;
+    CountT curHEVertOffset;
+    CountT curPrimOffset;
+    CountT curObjOffset;
 
     ObjectManager *mgr;
-    CountT curLoadedObjs;
     CountT maxObjs;
     StorageType storageType;
 
@@ -156,7 +156,7 @@ struct PhysicsLoader::Impl {
             .halfEdgeCount = 0,
             .vertexCount = 0,
             .mgr = mgr,
-            .curLoadedObjs = 0,
+            .curObjOffset = 0,
             .maxObjs = max_objects,
             .storageType = storage_type,
         };
@@ -205,7 +205,17 @@ PhysicsLoader::~PhysicsLoader()
 
 PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 
-// FIXME: better allocation strategy
+ImportedRigidBodies::~ImportedRigidBodies()
+{
+    // FIXME: change halfEdgeMesh data ownership
+    for (CollisionPrimitive &prim : collisionPrimitives) {
+        if (prim.type == CollisionPrimitive::Type::Hull) {
+            freeHalfEdgeMesh(prim.hull.halfEdgeMesh);
+        }
+    }
+}
+
+// FIXME: better allocation / ownership strategy
 static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
 {
     free(mesh.halfEdges);
@@ -708,80 +718,139 @@ static inline RigidBodyMassData toMassData(const MassProperties &mass_props, flo
     };
 }
 
-PhysicsLoader::ImportedCollisionMeshes PhysicsLoader::importCollisionMeshes(
-    const imp::SourceObject *src_objs,
-    const float *inv_masses,
+static void setupSpherePrimitive(const SourceCollisionPrimitive &src_prim,
+                                 CollisionPrimitive *out_prim,
+                                 AABB *out_aabb)
+{
+    out_prim->sphere = src_prim.sphere;
+
+    const float r = src_prim.sphere.radius;
+
+    *out_aabb = AABB {
+        .pMin = { -r, -r, -r },
+        },
+        .pMax = { r, r, r },
+    };
+}
+
+static void setupPlanePrimitive(const SourceCollisionPrimitive &src_prim,
+                                CollisionPrimitive *out_prim,
+                                AABB *out_aabb)
+{
+    out_prim->plane = CollisionPrimitive::Plane {};
+    
+    *out_aabb = AABB {
+        .pMin = { -FLT_MAX, -FLT_MAX, -FLT_MAX },
+        .pMax = { FLT_MAX, FLT_MAX, 0 },
+    };
+}
+
+static void setupHullPrimitive(const SourceCollisionPrimitive &src_prim,
+                               CollisionPrimitive *out_prim,
+                               AABB *out_aabb)
+{
+    const imp::SourceMesh *src_mesh = src_prim.hull.mesh;
+
+    HalfEdgeMesh he_mesh = buildHalfEdgeMesh(src_mesh->positions, 
+        src_mesh->numVertices, src_mesh->indices, src_mesh->faceCounts,
+        src_mesh->numFaces);
+
+    if (merge_coplanar_faces) {
+        HalfEdgeMesh merged_mesh = mergeCoplanarFaces(he_mesh);
+        // FIXME: better allocation strategy
+        freeHalfEdgeMesh(he_mesh);
+        he_mesh = merged_mesh;
+    }
+
+    AABB mesh_aabb = AABB::point(src_mesh.positions[0]);
+    for (CountT vert_idx = 1; vert_idx < (CountT)src_mesh.numVertices;
+         vert_idx++) {
+        mesh_aabb.expand(src_mesh.positions[vert_idx]);
+    }
+
+    out_prim->hull.halfEdgeMesh = he_mesh;
+    *out_aabb = mesh_aabb;
+}
+
+PhysicsLoader::ImportedRigidBodies PhysicsLoader::importRigidBodyData(
+    const SourceCollisionObject *collision_objs,
     CountT num_objects,
     bool merge_coplanar_faces)
 {
     using namespace math;
+    using SourceCollisionPrimitive::Type;
 
     HeapArray<uint32_t> prim_offsets(num_objs);
     HeapArray<uint32_t> prim_counts(num_objs);
     HeapArray<AABB> obj_aabbs(num_objs);
-    HeapArray<RigidBodyMassData> mass_datas(num_objs);
+    HeapArray<RigidBodyMetadata> metadatas(num_objs);
 
-    CountT total_num_meshes = 0;
+    CountT total_num_prims = 0;
     for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {
-        const imp::SourceObject &src_obj = src_objs[obj_idx];
-        CountT cur_num_meshes = src_obj.meshes.size();
+        const SourceCollisionObject &collision_obj = collision_objs[obj_idx];
+        CountT cur_num_prims = collision_obj.prims.size();
 
-        prim_offsets[obj_idx] = total_num_meshes;
-        prim_counts[obj_idx] = cur_num_meshes;
-        total_num_meshes += cur_num_meshes;
+        prim_offsets[obj_idx] = total_num_prims;
+        prim_counts[obj_idx] = cur_num_prims;
+        total_num_prims += cur_num_prims;
+
+        metadatas[obj_idx].friction = collision_objs[obj_idx].friction;
     }
 
-    HeapArray<geometry::HalfEdgeMesh> he_meshes(total_num_meshes);
-    HeapArray<AABB> mesh_aabbs(total_num_meshes);
+    HeapArray<CollisionPrimitive> collision_prims(total_num_prims);
+    HeapArray<AABB> prim_aabbs(total_num_meshes);
 
-    CountT cur_mesh_offset = 0;
+    CountT cur_prim_offset = 0;
     for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {
-        const imp::SourceObject &src_obj = src_objs[obj_idx];
+        const SourceCollisionObject &collision_obj = collision_objs[obj_idx];
 
         auto obj_aabb = AABB::invalid();
-        for (const SourceMesh &src_mesh : src_obj.meshes) {
-            HalfEdgeMesh he_mesh = buildHalfEdgeMesh(src_mesh.positions, 
-                src_mesh.numVertices, src_mesh.indices, src_mesh.faceCounts,
-                src_mesh.numFaces);
+        for (const SourceCollisionPrimitive &src_prim : collision_obj.prims) {
+            CountT out_prim_idx = cur_prim_offset++;
+            CollisionPrimitive *out_prim = &collision_prims[out_prim_idx];
+            out_prim->type = src_prim.type;
+            AABB prim_aabb;
 
-            AABB mesh_aabb = AABB::point(src_mesh.positions[0]);
-            for (CountT vert_idx = 1; vert_idx < (CountT)src_mesh.numVertices;
-                 vert_idx++) {
-                mesh_aabb.expand(src_mesh.positions[vert_idx]);
+            switch (src_prim.type) {
+            case Type::Sphere: {
+                setupSpherePrimitive(src_prim, out_prim, &prim_aabb);
+            } break;
+            case Type::Plane: {
+                setupPlanePrimitive(src_prim, out_prim, &prim_aabb);
+            } break;
+            case Type::Hull: {
+                setupHullPrimitive(src_prim, out_prim, &prim_aabb);
+            } break;
             }
 
-            obj_aabb = AABB::merge(obj_aabb, mesh_aabb);
-
-            if (merge_coplanar_faces) {
-                HalfEdgeMesh merged_mesh = mergeCoplanarFaces(he_mesh);
-                freeHalfEdgeMesh(he_mesh);
-                he_mesh = merged_mesh;
-            }
-
-            CountT out_mesh_idx = cur_mesh_offset++;
-            he_meshes[out_mesh_idx] = he_mesh;
-            mesh_aabbs[out_mesh_idx] = mesh_aabb;
+            prim_aabbs[out_prim_idx] = prim_aabb;
+            obj_aabb = AABB::merge(obj_aabb, prim_aabb);
         }
 
         obj_aabbs[obj_idx] = obj_aabb;
 
         MassProperties mass_props = computeMassProperties(src_obj);
-        mass_data[obj_idx] = toMassData(mass_props, inv_masses[obj_idx]);
+        metadatas[obj_idx].mass = toMassData(mass_props, inv_masses[obj_idx]);
     }
 
     return ImportedCollisionMeshes {
         .halfEdgeMeshes = std::move(he_meshes),
-        .meshAABBs = std::move(mesh_aabbs),
+        .primitiveAABBs = std::move(mesh_aabbs),
         .primOffsets = std::move(prim_offsets),
         .primCounts = std::move(prim_counts),
-        .massDatas = std::move(mass_datas),
+        .metadatas = std::move(mass_datas),
+        .objectAABBs = std::move(obj_aabbs),
     };
 }
 
 CountT PhysicsLoader::loadObjects(
+    const CollisionPrimitive *primitives,
+    const math::AABB *primitive_aabbs,
+    const uint32_t *prim_offsets,
+    const uint32_t *prim_counts,
     const RigidBodyMetadata *metadatas,
-    const AABB *aabbs,
-    const CollisionPrimitive *primitives_original,
+    const math::AABB *obj_aabbs,
+    CountT total_num_primitives,
     CountT num_objs)
 {
     CountT cur_offset = impl_->curLoadedObjs;

@@ -186,8 +186,8 @@ struct CollisionPrimitive {
 };
 
 struct ObjectManager {
-    math::AABB *primitiveAABBs;
     CollisionPrimitive *collisionPrimitives;
+    math::AABB *primitiveAABBs;
 
     math::AABB *rigidBodyAABBs;
     uint32_t *rigidBodyPrimitiveOffsets;
