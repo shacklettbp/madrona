@@ -622,6 +622,22 @@ static inline MassProperties computeMassProperties(
         float det_A = A.determinant();
         Mat3x3 C = det_A * A * C_canonical * A.transpose();
 
+        printf("A:\n"
+               "%f %f %f\n"
+               "%f %f %f\n"
+               "%f %f %f\n",
+               A[0].x,
+               A[1].x,
+               A[2].x,
+               A[0].y,
+               A[1].y,
+               A[2].y,
+               A[0].z,
+               A[1].z,
+               A[2].z);
+
+        printf("%f\n", det_A);
+
         // Mass
         float volume = 1.f / 6.f * det_A;
         float m = volume * density;
@@ -679,10 +695,36 @@ static inline MassProperties computeMassProperties(
 
     // Compute inertia tensor and rescale to mass == 1
     Mat3x3 inertia_tensor = (tr_C_diag - C_total) / m_total;
+    printf("Inertia Tensor:\n"
+           "%f %f %f\n"
+           "%f %f %f\n"
+           "%f %f %f\n"
+           "COM: (%f %f %f) mass: %f\n", 
+           inertia_tensor[0].x,
+           inertia_tensor[1].x,
+           inertia_tensor[2].x,
+           inertia_tensor[0].y,
+           inertia_tensor[1].y,
+           inertia_tensor[2].y,
+           inertia_tensor[0].z,
+           inertia_tensor[1].z,
+           inertia_tensor[2].z,
+           x_total.x,
+           x_total.y,
+           x_total.z,
+           m_total
+           );
 
     Diag3x3 diag_inertia;
     Quat rot_to_diag;
     diagonalizeInertiaTensor(inertia_tensor, &diag_inertia, &rot_to_diag);
+
+    printf("Diag Inertia tensor: (%f %f %f) rot: (%f %f %f %f)\n",
+           diag_inertia.d0, diag_inertia.d1, diag_inertia.d2,
+           rot_to_diag.w,
+           rot_to_diag.x,
+           rot_to_diag.y,
+           rot_to_diag.z);
 
     return MassProperties {
         diag_inertia,
