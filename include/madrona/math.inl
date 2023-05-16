@@ -871,8 +871,8 @@ Vector3 Mat3x3::Transpose::operator[](CountT i) const
 float Mat3x3::determinant() const
 {
     Vector3 c0 = cols[0];
-    Vector3 c1 = cols[0];
-    Vector3 c2 = cols[0];
+    Vector3 c1 = cols[1];
+    Vector3 c2 = cols[2];
 
     return c0.x * (c1.y * c2.z - c2.y * c1.z) -
            c0.y * (c1.x * c2.z - c2.x * c1.z) +

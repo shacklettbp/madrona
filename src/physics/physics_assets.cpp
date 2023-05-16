@@ -622,22 +622,6 @@ static inline MassProperties computeMassProperties(
         float det_A = A.determinant();
         Mat3x3 C = det_A * A * C_canonical * A.transpose();
 
-        printf("A:\n"
-               "%f %f %f\n"
-               "%f %f %f\n"
-               "%f %f %f\n",
-               A[0].x,
-               A[1].x,
-               A[2].x,
-               A[0].y,
-               A[1].y,
-               A[2].y,
-               A[0].z,
-               A[1].z,
-               A[2].z);
-
-        printf("%f\n", det_A);
-
         // Mass
         float volume = 1.f / 6.f * det_A;
         float m = volume * density;
