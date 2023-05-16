@@ -142,7 +142,7 @@ struct RigidBodyMassData {
     float invMass;
     math::Vector3 invInertiaTensor;
     math::Vector3 toCenterOfMass;
-    math::Quat toMassFrame;
+    math::Quat toInteriaFrame;
 };
 
 struct RigidBodyFrictionData {
@@ -207,7 +207,7 @@ public:
         float leaf_velocity_expansion,
         float leaf_accel_expansion);
 
-    inline LeafID reserveLeaf(Entity e, CollisionPrimitive *prim);
+    inline LeafID reserveLeaf(Entity e, base::ObjectID obj_id);
     inline math::AABB getLeafAABB(LeafID leaf_id) const;
 
     template <typename Fn>

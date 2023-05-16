@@ -22,15 +22,15 @@ public:
         : ptr_(ptr), n_(num_elems)
     {}
 
-    template <typename U>
-    Span(const U &u)
-        : ptr_(u.data()), n_(u.size())
-    {}
-
     template <CountT N>
     Span(T (&arr)[N])
         : ptr_(arr),
           n_(N)
+    {}
+
+    template <typename U>
+    Span(const U &u)
+        : ptr_(u.data()), n_(u.size())
     {}
 
     // GCC correctly warns that the below constructor is dangerous, but it's

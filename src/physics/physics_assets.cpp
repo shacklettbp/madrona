@@ -10,6 +10,9 @@
 namespace madrona::phys {
 using namespace geometry;
 using namespace math;
+using SourceCollisionPrimitive = PhysicsLoader::SourceCollisionPrimitive;
+using SourceCollisionObject = PhysicsLoader::SourceCollisionObject;
+using ImportedRigidBodies = PhysicsLoader::ImportedRigidBodies;
 
 #ifndef MADRONA_CUDA_SUPPORT
 [[noreturn]] static void noCUDA()
@@ -68,14 +71,14 @@ struct PhysicsLoader::Impl {
         ObjectManager *mgr;
 
         switch (storage_type) {
-        case StorageType::CPU: {
-            primitives_ptr = (CollisionPrimitive *)malloc(
-                num_collision_primitive_bytes);
+            case StorageType::CPU: {
+                primitives_ptr = (CollisionPrimitive *)malloc(
+                    num_collision_prim_bytes);
 
-            prim_aabb_ptr = (AABB *)malloc(
-                num_collision_aabb_bytes);
+                prim_aabb_ptr = (AABB *)malloc(
+                    num_collision_aabb_bytes);
 
-            obj_aabb_ptr = (AABB *)malloc(num_obj_aabb_bytes);
+                obj_aabb_ptr = (AABB *)malloc(num_obj_aabb_bytes);
 
             offsets_ptr = (uint32_t *)malloc(num_offset_bytes);
             counts_ptr = (uint32_t *)malloc(num_count_bytes);
@@ -97,7 +100,7 @@ struct PhysicsLoader::Impl {
             noCUDA();
 #else
             primitives_ptr = (CollisionPrimitive *)cu::allocGPU(
-                num_collision_primitive_bytes);
+                num_collision_prim_bytes);
 
             prim_aabb_ptr = (AABB *)cu::allocGPU(
                 num_collision_aabb_bytes);
@@ -135,9 +138,9 @@ struct PhysicsLoader::Impl {
             .rigidBodyPrimitiveOffsets = offsets_ptr,
             .rigidBodyPrimitiveCounts = counts_ptr,
             .metadatas = metadata_ptr,
-            .mgr = mgr,
             .curPrimOffset = 0,
             .curObjOffset = 0,
+            .mgr = mgr,
             .maxPrims = max_objects * max_prims_per_object,
             .maxObjs = max_objects,
             .storageType = storage_type,
@@ -182,16 +185,6 @@ PhysicsLoader::~PhysicsLoader()
 
 PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 
-ImportedRigidBodies::~ImportedRigidBodies()
-{
-    // FIXME: change halfEdgeMesh data ownership
-    for (CollisionPrimitive &prim : collisionPrimitives) {
-        if (prim.type == CollisionPrimitive::Type::Hull) {
-            freeHalfEdgeMesh(prim.hull.halfEdgeMesh);
-        }
-    }
-}
-
 // FIXME: better allocation / ownership strategy
 static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
 {
@@ -199,6 +192,16 @@ static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
     free(mesh.faceBaseHalfEdges);
     free(mesh.facePlanes);
     free(mesh.vertices);
+}
+
+PhysicsLoader::ImportedRigidBodies::~ImportedRigidBodies()
+{
+    // FIXME: change halfEdgeMesh data ownership
+    for (CollisionPrimitive &prim : collisionPrimitives) {
+        if (prim.type == CollisionPrimitive::Type::Hull) {
+            freeHalfEdgeMesh(prim.hull.halfEdgeMesh);
+        }
+    }
 }
 
 static inline HalfEdgeMesh buildHalfEdgeMesh(
@@ -210,7 +213,7 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
 {
     auto numFaceVerts = [face_counts](CountT face_idx) {
         if (face_counts == nullptr) {
-            return 3;
+            return 3_u32;
         } else {
             return face_counts[face_idx];
         }
@@ -261,18 +264,18 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
 
                 uint64_t twin_edge_id = makeEdgeID(b_idx, a_idx);
 
-                auto [new_edge_iter, inserted] =
+                auto [new_edge_iter, cur_inserted] =
                     edge_to_hedge.emplace(cur_edge_id, cur_hedge_id);
-                assert(inserted);
+                assert(cur_inserted);
 
-                auto [_, inserted] =
-                    edge_to_hedge.emplace(twin_edge_id, twin_hedge_id)
-                assert(inserted);
+                auto [new_twin_iter, twin_inserted] =
+                    edge_to_hedge.emplace(twin_edge_id, twin_hedge_id);
+                assert(twin_inserted);
 
                 cur_edge_lookup = new_edge_iter;
             }
 
-            uint32_t hedge_idx = edge_lookup->second;
+            uint32_t hedge_idx = cur_edge_lookup->second;
             if (vert_offset == 0) {
                 face_base_hedges[face_idx] = hedge_idx;
             }
@@ -285,13 +288,13 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
 
             // If next doesn't exist yet, we can assume it will be the next
             // allocated half edge
-            uint32_t next_hedge_idx == edge_to_hedge.end() ?
-                num_assigned_hedges ? next_edge_lookup->second;
+            uint32_t next_hedge_idx = next_edge_lookup == edge_to_hedge.end() ?
+                num_assigned_hedges : next_edge_lookup->second;
 
             hedges[hedge_idx] = HalfEdge {
                 .next = next_hedge_idx,
                 .rootVertex = a_idx,
-                .face = face_idx,
+                .face = uint32_t(face_idx),
             };
         }
 
@@ -312,13 +315,13 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
     assert(num_assigned_hedges == num_hedges);
 
     return HalfEdgeMesh {
-        hedges,
-        face_base_hedges,
-        face_planes,
-        positions,
-        num_hedges,
-        num_faces,
-        num_vertices,
+        .halfEdges = hedges,
+        .faceBaseHalfEdges = face_base_hedges,
+        .facePlanes = face_planes,
+        .vertices = positions,
+        .numHalfEdges = uint32_t(num_hedges),
+        .numFaces = uint32_t(num_faces),
+        .numVertices = uint32_t(num_vertices),
     };
 }
 
@@ -371,7 +374,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         Plane face_plane = src_mesh.facePlanes[orig_face_idx];
         new_faceplanes[new_face_idx] = face_plane;
 
-        uint32_t face_start_hedge = faceBaseHalfEdges[orig_face_idx];
+        uint32_t face_start_hedge = src_mesh.faceBaseHalfEdges[orig_face_idx];
 
         // To avoid special casing, initial prev is set to the ID
         // of the next half edge to be assigned. The correct next will be
@@ -445,9 +448,9 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         .faceBaseHalfEdges = new_face_base_hedges,
         .facePlanes = new_faceplanes,
         .vertices = new_vertices,
-        .numHalfEdges = num_new_hedges,
-        .numFaces = num_new_faces,
-        .numVertices = num_vertices,
+        .numHalfEdges = uint32_t(num_new_hedges),
+        .numFaces = uint32_t(num_new_faces),
+        .numVertices = src_mesh.numVertices,
     };
 }
 
@@ -475,7 +478,7 @@ static Quat approxGivensQuaternion(const Mat3x3 &m)
 
     float a11 = m[0][0], a12 = m[1][0], a22 = m[1][1];
 
-    float ch = 2.f * (a11 - a12);
+    float ch = 2.f * (a11 - a22);
     float sh = a12;
 
     float sh2 = sh * sh;
@@ -502,7 +505,6 @@ static Mat3x3 jacobiIterConjugation(const Mat3x3 &m, float ch, float sh)
     float q12 = (-2.f * sh * ch) / q_scale;
     float q21 = (2.f * sh * ch) / q_scale;
     float q22 = (ch2 - sh2) / q_scale;
-    float q33 = 1.f;
 
     // Output = Q^T * m * Q. Given above values for Q, direct solution to
     // compute output (given 0s for other terms) computed using SymPy
@@ -518,17 +520,17 @@ static Mat3x3 jacobiIterConjugation(const Mat3x3 &m, float ch, float sh)
     float m12q12_m22q22 = m12 * q12 + m22 * q22;
     
     return Mat3x3 {{
-        Vec3 {
-            q11 * m11q11_m21q21 + q21 * m12q11_m22q22,
+        Vector3 {
+            q11 * m11q11_m21q21 + q21 * m12q11_m22q21,
             q11 * m11q12_m21q22 + q21 * m12q12_m22q22,
             m31 * q11 + m32 * q21,
         },
-        Vec3 {
-            q12 * m11q11_m21q21 + q22 * m12q11_m22q22,
+        Vector3 {
+            q12 * m11q11_m21q21 + q22 * m12q11_m22q21,
             q12 * m11q12_m21q22 + q22 * m12q12_m22q22,
             m31 * q12 + m32 * q22,
         },
-        Vec3 {
+        Vector3 {
             m13 * q11 + m23 * q21,
             m13 * q12 + m23 * q22,
             m33,
@@ -587,7 +589,8 @@ static void diagonalizeInertiaTensor(const Mat3x3 &m,
 }
 
 // http://number-none.com/blow/inertia/
-static inline MassProperties computeMassProperties(const SourceObject &src_obj)
+static inline MassProperties computeMassProperties(
+    const SourceCollisionObject &src_obj)
 {
     using namespace math;
     const Mat3x3 C_canonical {{
@@ -623,7 +626,7 @@ static inline MassProperties computeMassProperties(const SourceObject &src_obj)
         float volume = 1.f / 6.f * det_A;
         float m = volume * density;
 
-        float x = 0.25f * e1 + 0.25f * e2 + 0.25f * e3;
+        Vector3 x = 0.25f * e1 + 0.25f * e2 + 0.25f * e3;
 
         // Accumulate tetrahedron properties
         float old_m_total = m_total;
@@ -633,7 +636,12 @@ static inline MassProperties computeMassProperties(const SourceObject &src_obj)
         C_total += C;
     };
 
-    for (const SourceMesh &src_mesh : src_obj.meshes) {
+    for (const SourceCollisionPrimitive &prim : src_obj.prims) {
+        // FIXME allow some kind of override of inertia tensor
+        if (prim.type != CollisionPrimitive::Type::Hull) continue;
+
+        const imp::SourceMesh &src_mesh = *prim.hull.mesh;
+
         const uint32_t *cur_indices = src_mesh.indices;
         for (CountT face_idx = 0; face_idx < (CountT)src_mesh.numFaces;
              face_idx++) {
@@ -656,7 +664,7 @@ static inline MassProperties computeMassProperties(const SourceObject &src_obj)
         Mat3x3 term1 = outerProduct(delta_x, x);
         Mat3x3 term2 = outerProduct(x, delta_x); 
         Mat3x3 term3 = outerProduct(delta_x, delta_x);
-        return C + m * (term1 + term2 + term3):
+        return C + m * (term1 + term2 + term3);
     };
 
     // Move accumulated covariance matrix to center of mass
@@ -674,7 +682,7 @@ static inline MassProperties computeMassProperties(const SourceObject &src_obj)
 
     Diag3x3 diag_inertia;
     Quat rot_to_diag;
-    diagonalizeInertiaTensor(inertia_tensor, &diag_inertia, &to_mass);
+    diagonalizeInertiaTensor(inertia_tensor, &diag_inertia, &rot_to_diag);
 
     return MassProperties {
         diag_inertia,
@@ -683,13 +691,18 @@ static inline MassProperties computeMassProperties(const SourceObject &src_obj)
     };
 }
 
-static inline RigidBodyMassData toMassData(const MassProperties &mass_props, float inv_m)
+static inline RigidBodyMassData toMassData(const MassProperties &mass_props,
+                                           float inv_m)
 {
     Diag3x3 inv_inertia = inv_m / mass_props.inertiaTensor;
 
     return {
         .invMass = inv_m,
-        .invInertiaTensor = inv_inertia,
+        .invInertiaTensor = Vector3 { // FIXME
+            inv_inertia.d0,
+            inv_inertia.d1,
+            inv_inertia.d2,
+        },
         .toCenterOfMass = mass_props.centerOfMass,
         .toInteriaFrame = mass_props.toDiagonal,
     };
@@ -705,12 +718,11 @@ static void setupSpherePrimitive(const SourceCollisionPrimitive &src_prim,
 
     *out_aabb = AABB {
         .pMin = { -r, -r, -r },
-        },
         .pMax = { r, r, r },
     };
 }
 
-static void setupPlanePrimitive(const SourceCollisionPrimitive &src_prim,
+static void setupPlanePrimitive(const SourceCollisionPrimitive &,
                                 CollisionPrimitive *out_prim,
                                 AABB *out_aabb)
 {
@@ -727,7 +739,8 @@ static void setupHullPrimitive(const SourceCollisionPrimitive &src_prim,
                                AABB *out_aabb,
                                CountT *total_num_halfedges,
                                CountT *total_num_faces,
-                               CountT *total_num_vertices)
+                               CountT *total_num_vertices,
+                               bool merge_coplanar_faces)
 {
     const imp::SourceMesh *src_mesh = src_prim.hull.mesh;
 
@@ -742,10 +755,10 @@ static void setupHullPrimitive(const SourceCollisionPrimitive &src_prim,
         he_mesh = merged_mesh;
     }
 
-    AABB mesh_aabb = AABB::point(src_mesh.positions[0]);
-    for (CountT vert_idx = 1; vert_idx < (CountT)src_mesh.numVertices;
+    AABB mesh_aabb = AABB::point(src_mesh->positions[0]);
+    for (CountT vert_idx = 1; vert_idx < (CountT)src_mesh->numVertices;
          vert_idx++) {
-        mesh_aabb.expand(src_mesh.positions[vert_idx]);
+        mesh_aabb.expand(src_mesh->positions[vert_idx]);
     }
 
     out_prim->hull.halfEdgeMesh = he_mesh;
@@ -762,12 +775,12 @@ PhysicsLoader::ImportedRigidBodies PhysicsLoader::importRigidBodyData(
     bool merge_coplanar_faces)
 {
     using namespace math;
-    using CollisionPrimitive::Type;
+    using Type = CollisionPrimitive::Type;
 
-    HeapArray<uint32_t> prim_offsets(num_objs);
-    HeapArray<uint32_t> prim_counts(num_objs);
-    HeapArray<AABB> obj_aabbs(num_objs);
-    HeapArray<RigidBodyMetadata> metadatas(num_objs);
+    HeapArray<uint32_t> prim_offsets(num_objects);
+    HeapArray<uint32_t> prim_counts(num_objects);
+    HeapArray<AABB> obj_aabbs(num_objects);
+    HeapArray<RigidBodyMetadata> metadatas(num_objects);
 
     CountT total_num_prims = 0;
     for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {
@@ -782,7 +795,7 @@ PhysicsLoader::ImportedRigidBodies PhysicsLoader::importRigidBodyData(
     }
 
     HeapArray<CollisionPrimitive> collision_prims(total_num_prims);
-    HeapArray<AABB> prim_aabbs(total_num_meshes);
+    HeapArray<AABB> prim_aabbs(total_num_prims);
 
     CountT cur_prim_offset = 0;
     CountT total_num_halfedges = 0;
@@ -808,7 +821,7 @@ PhysicsLoader::ImportedRigidBodies PhysicsLoader::importRigidBodyData(
             case Type::Hull: {
                 setupHullPrimitive(src_prim, out_prim, &prim_aabb,
                     &total_num_halfedges, &total_num_faces,
-                    &total_num_vertices);
+                    &total_num_vertices, merge_coplanar_faces);
             } break;
             }
 
@@ -818,19 +831,19 @@ PhysicsLoader::ImportedRigidBodies PhysicsLoader::importRigidBodyData(
 
         obj_aabbs[obj_idx] = obj_aabb;
 
-        MassProperties mass_props = computeMassProperties(src_obj);
-        metadatas[obj_idx].mass = toMassData(mass_props, inv_masses[obj_idx]);
+        MassProperties mass_props = computeMassProperties(collision_obj);
+        metadatas[obj_idx].mass =
+            toMassData(mass_props, collision_obj.invMass);
     }
 
     // Combine half edge data into linear arrays
     ImportedRigidBodies::MergedHullData hull_data {
         .halfEdges = HeapArray<HalfEdge>(total_num_halfedges),
         .faceBaseHEs = HeapArray<uint32_t>(total_num_faces),
-        .facePlanes = HeapArray<uint32_t>(total_num_faces),
+        .facePlanes = HeapArray<Plane>(total_num_faces),
         .positions = HeapArray<Vector3>(total_num_vertices),
     };
 
-    const CountT total_num_prims = cur_prim_offset;
     CountT cur_halfedge_offset = 0;
     CountT cur_face_offset = 0;
     CountT cur_vert_offset = 0;
@@ -867,12 +880,12 @@ PhysicsLoader::ImportedRigidBodies PhysicsLoader::importRigidBodyData(
         he_mesh.vertices = pos_out;
     }
 
-    return ImportedCollisionMeshes {
+    return ImportedRigidBodies {
         .hullData = std::move(hull_data),
-        .primitiveAABBs = std::move(mesh_aabbs),
+        .primitiveAABBs = std::move(prim_aabbs),
         .primOffsets = std::move(prim_offsets),
         .primCounts = std::move(prim_counts),
-        .metadatas = std::move(mass_datas),
+        .metadatas = std::move(metadatas),
         .objectAABBs = std::move(obj_aabbs),
     };
 }
@@ -897,7 +910,7 @@ CountT PhysicsLoader::loadObjects(
     CountT cur_obj_offset = impl_->curObjOffset;
     impl_->curObjOffset += num_objs;
     CountT cur_prim_offset = impl_->curPrimOffset;
-    impl_->curPrimOffset += total_num_prims;
+    impl_->curPrimOffset += total_num_primitives;
     assert(impl_->curObjOffset <= impl_->maxObjs);
     assert(impl_->curPrimOffset <= impl_->maxPrims);
 
@@ -906,13 +919,13 @@ CountT PhysicsLoader::loadObjects(
 
     AABB *obj_aabbs_dst = &impl_->objAABBs[cur_obj_offset];
     uint32_t *offsets_dst = &impl_->rigidBodyPrimitiveOffsets[cur_obj_offset];
-    uint32_t *counts_dst = &impl_->rigidBodyPrimitiveCount[cur_obj_offset];
+    uint32_t *counts_dst = &impl_->rigidBodyPrimitiveCounts[cur_obj_offset];
     RigidBodyMetadata *metadatas_dst = &impl_->metadatas[cur_obj_offset];
 
     // FIXME: redo all this, leaks memory, slow, etc. Very non optimal on the
     // CPU.
 
-    uint32_t *offsets_tmp = malloc(sizeof(uint32_t) * num_objs);
+    uint32_t *offsets_tmp = (uint32_t *)malloc(sizeof(uint32_t) * num_objs);
     for (CountT i = 0; i < num_objs; i++) {
         offsets_tmp[i] = prim_offsets[i] + cur_prim_offset;
     }
@@ -924,10 +937,10 @@ CountT PhysicsLoader::loadObjects(
     switch (impl_->storageType) {
     case StorageType::CPU: {
         memcpy(prim_aabbs_dst, primitive_aabbs,
-               sizeof(AABB) * total_num_prims);
+               sizeof(AABB) * total_num_primitives);
 
         memcpy(obj_aabbs_dst, obj_aabbs,
-               sizeof(AABB) * num_obs);
+               sizeof(AABB) * num_objs);
         memcpy(offsets_dst, offsets_tmp,
                sizeof(uint32_t) * num_objs);
         memcpy(counts_dst, prim_counts,
@@ -936,13 +949,13 @@ CountT PhysicsLoader::loadObjects(
                sizeof(RigidBodyMetadata) * num_objs);
 
         hull_halfedges =
-            malloc(sizeof(HalfEdge) * total_num_hull_halfedges);
+            (HalfEdge *)malloc(sizeof(HalfEdge) * total_num_hull_halfedges);
         hull_face_base_halfedges =
-            malloc(sizeof(uint32_t) * total_num_hull_faces);
+            (uint32_t *)malloc(sizeof(uint32_t) * total_num_hull_faces);
         hull_face_planes =
-            malloc(sizeof(Plane) * total_num_hull_faces);
+            (Plane *)malloc(sizeof(Plane) * total_num_hull_faces);
         hull_verts =
-            malloc(sizeof(Vector3) * total_num_hull_verts);
+            (Vector3 *)malloc(sizeof(Vector3) * total_num_hull_verts);
 
         memcpy(hull_halfedges, hull_halfedges_in,
                sizeof(HalfEdge) * total_num_hull_halfedges);
@@ -953,13 +966,13 @@ CountT PhysicsLoader::loadObjects(
         memcpy(hull_verts, hull_verts_in,
                sizeof(Vector3) * total_num_hull_verts);
     } break;
-    case StorageType::GPU: {
+    case StorageType::CUDA: {
         cudaMemcpy(prim_aabbs_dst, primitive_aabbs,
-                   sizeof(AABB) * total_num_prims,
+                   sizeof(AABB) * total_num_primitives,
                    cudaMemcpyHostToDevice);
 
         cudaMemcpy(obj_aabbs_dst, obj_aabbs,
-                   sizeof(AABB) * num_obs,
+                   sizeof(AABB) * num_objs,
                    cudaMemcpyHostToDevice);
         cudaMemcpy(offsets_dst, offsets_tmp,
                    sizeof(uint32_t) * num_objs,
@@ -971,14 +984,14 @@ CountT PhysicsLoader::loadObjects(
                    sizeof(RigidBodyMetadata) * num_objs,
                    cudaMemcpyHostToDevice);
 
-        hull_halfedges =
-            cu::allocGPU(sizeof(HalfEdge) * total_num_hull_halfedges);
-        hull_face_base_halfedges =
-            cu::allocGPU(sizeof(uint32_t) * total_num_hull_faces);
-        hull_face_planes =
-            cu::allocGPU(sizeof(Plane) * total_num_hull_faces);
-        hull_verts =
-            cu::allocGPU(sizeof(Vector3) * total_num_hull_verts);
+        hull_halfedges = (HalfEdge *)cu::allocGPU(
+            sizeof(HalfEdge) * total_num_hull_halfedges);
+        hull_face_base_halfedges = (uint32_t *)cu::allocGPU(
+            sizeof(uint32_t) * total_num_hull_faces);
+        hull_face_planes = (Plane *)cu::allocGPU(
+            sizeof(Plane) * total_num_hull_faces);
+        hull_verts = (Vector3 *)cu::allocGPU(
+            sizeof(Vector3) * total_num_hull_verts);
 
         cudaMemcpy(hull_halfedges, hull_halfedges_in,
                    sizeof(HalfEdge) * total_num_hull_halfedges,
@@ -996,9 +1009,9 @@ CountT PhysicsLoader::loadObjects(
     }
 
     auto primitives_tmp = (CollisionPrimitive *)malloc(
-        sizeof(CollisionPrimitive) * total_num_prims);
+        sizeof(CollisionPrimitive) * total_num_primitives);
     memcpy(primitives_tmp, primitives_in,
-           sizeof(CollisionPrimitive) * total_num_prims);
+           sizeof(CollisionPrimitive) * total_num_primitives);
 
     for (CountT i = 0; i < total_num_primitives; i++) {
         CollisionPrimitive &cur_primitive = primitives_tmp[i];
@@ -1020,11 +1033,11 @@ CountT PhysicsLoader::loadObjects(
     switch (impl_->storageType) {
     case StorageType::CPU: {
         memcpy(prims_dst, primitives_tmp,
-               sizeof(CollisionPrimitive) * total_num_prims);
+               sizeof(CollisionPrimitive) * total_num_primitives);
     } break;
-    case StorageType::GPU: {
+    case StorageType::CUDA: {
         cudaMemcpy(prims_dst, primitives_tmp,
-            sizeof(CollisionPrimitive) * total_num_prims,
+            sizeof(CollisionPrimitive) * total_num_primitives,
             cudaMemcpyHostToDevice);
     } break;
     }
@@ -1041,4 +1054,3 @@ ObjectManager & PhysicsLoader::getObjectManager()
 }
 
 }
-

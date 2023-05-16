@@ -761,7 +761,7 @@ static inline bool traceRayIntoConvexPolyhedron(
     float tlast = t_max;
 
     // Intersect segment against each plane
-    CountT num_faces = convex_mesh.mPolygonCount;
+    const CountT num_faces = convex_mesh.numFaces;
 
     // Our face normals point outside. RTCD uses plane normals pointing inside
     // the polyhedron, so signs are flipped relative to the book
@@ -769,7 +769,7 @@ static inline bool traceRayIntoConvexPolyhedron(
     Vector3 closest_normal = Vector3::zero(); 
 
     for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
-        Plane plane = convex_mesh.mFacePlanes[face_idx];
+        Plane plane = convex_mesh.facePlanes[face_idx];
 
         float denom = dot(plane.normal, ray_d);
         float neg_dist = plane.d - dot(plane.normal, ray_o);
@@ -834,6 +834,8 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
     obj_ray_d.y /= leaf_txfm.scale.d1;
     obj_ray_d.z /= leaf_txfm.scale.d2;
 
+    auto inv_obj_ray_d = Diag3x3::fromVec(1.f / obj_ray_d);
+
     Vector3 obj_hit_normal;
 
     CountT prim_offset = obj_mgr_->rigidBodyPrimitiveOffsets[obj_id.idx];
@@ -844,6 +846,9 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
         CountT prim_idx = prim_offset + i;
 
         AABB prim_aabb = obj_mgr_->primitiveAABBs[prim_idx];
+        if (!prim_aabb.rayIntersects(obj_ray_o, inv_obj_ray_d, 0.f, t_max)) {
+            continue;
+        }
 
         bool hit_prim;
 
@@ -886,7 +891,7 @@ inline void updateLeafPositionsEntry(
 {
     BVH &bvh = ctx.getSingleton<BVH>();
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
-    AABB obj_aabb = obj_mgr.objAABBs[obj_id.idx];
+    AABB obj_aabb = obj_mgr.rigidBodyAABBs[obj_id.idx];
 
     bvh.updateLeafPosition(leaf_id, pos, rot, scale, vel.linear, obj_aabb);
 }

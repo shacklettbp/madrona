@@ -31,13 +31,14 @@ public:
           n_(n)
     {}
 
-    // Take ownership of the memory range defined by span. Must be a full
-    // range allocated by alloc
-    inline explicit HeapArray(Span<T> span, A alloc = A())
-        : alloc_(std::move(alloc)),
-          ptr_(span.data()),
-          n_(span.size())
-    {}
+    template <typename U = T,
+              typename std::enable_if_t<std::is_copy_constructible_v<U> &&
+                                        std::is_same_v<U, T>, bool> = false>
+    HeapArray(std::initializer_list<T> init, A alloc = DefaultAlloc())
+        : HeapArray(init.size(), std::move(alloc))
+    {
+        memcpy(ptr_, std::data(init), init.size() * sizeof(T));
+    }
 
     HeapArray(const HeapArray &) = delete;
 

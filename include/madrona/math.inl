@@ -778,7 +778,7 @@ Diag3x3 Diag3x3::fromVec(Vector3 v)
     };
 }
 
-Diag3x3 Diag3x3::uniform(float scale = 1.f)
+constexpr Diag3x3 Diag3x3::uniform(float scale)
 {
     return Diag3x3 {
         scale,
@@ -805,6 +805,15 @@ Diag3x3 & Diag3x3::operator*=(float o)
     return *this;
 }
 
+Diag3x3 & Diag3x3::operator/=(float o)
+{
+    d0 /= o;
+    d1 /= o;
+    d2 /= o;
+
+    return *this;
+}
+
 Diag3x3 operator*(Diag3x3 a, Diag3x3 b)
 {
     a *= b;
@@ -820,6 +829,18 @@ Diag3x3 operator*(Diag3x3 a, float b)
 Diag3x3 operator*(float a, Diag3x3 b)
 {
     b *= a;
+    return b;
+}
+
+Diag3x3 operator/(Diag3x3 a, float b)
+{
+    a /= b;
+    return a;
+}
+
+Diag3x3 operator/(float a, Diag3x3 b)
+{
+    b /= a;
     return b;
 }
 
@@ -841,9 +862,9 @@ Mat3x3::Transpose Mat3x3::transpose() const
 Vector3 Mat3x3::Transpose::operator[](CountT i) const
 {
     return Vector3 {
-        cols[0][i],
-        cols[1][i],
-        cols[2][i],
+        src->cols[0][i],
+        src->cols[1][i],
+        src->cols[2][i],
     };
 }
 
@@ -933,7 +954,7 @@ Vector3 Mat3x3::operator[](CountT i) const
     return cols[i];
 }
 
-Mat3x3 & Mat3x3::operator+=(const Mat3x3 &o);
+Mat3x3 & Mat3x3::operator+=(const Mat3x3 &o)
 {
     cols[0] += o[0];
     cols[1] += o[1];
@@ -942,7 +963,7 @@ Mat3x3 & Mat3x3::operator+=(const Mat3x3 &o);
     return *this;
 }
 
-Mat3x3 & Mat3x3::operator-=(const Mat3x3 &o);
+Mat3x3 & Mat3x3::operator-=(const Mat3x3 &o)
 {
     cols[0] -= o[0];
     cols[1] -= o[1];
@@ -956,7 +977,7 @@ Vector3 Mat3x3::operator*(Vector3 v) const
     return cols[0] * v.x + cols[1] * v.y + cols[2] * v.z;
 }
 
-Mat3x3 Mat3x3::operator*(const Mat3x3 &o) const;
+Mat3x3 Mat3x3::operator*(const Mat3x3 &o) const
 {
     return Mat3x3 {
         *this * o[0],

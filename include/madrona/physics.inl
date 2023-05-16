@@ -11,28 +11,28 @@ void HalfEdgeMesh::iterateFaceIndices(uint32_t face, Fn &&fn) const
     uint32_t start = hedge_idx;
 
     do {
-        const HalfEdge &hedge = halfEdges[hedgeIdx];
+        const HalfEdge &hedge = halfEdges[hedge_idx];
         fn(hedge.rootVertex);
 
         hedge_idx = hedge.next;
     } while (hedge_idx != start);
 }
 
-uint32_t HalfEdgeMesh::twinIDX(uint32_t half_edge_id)
+uint32_t HalfEdgeMesh::twinIDX(uint32_t half_edge_id) const
 {
-    if (half_edges_id & 1 == 1) {
+    if ((half_edge_id & 1) == 1) {
         return half_edge_id & 0xFFFF'FFFE;
     } else {
         return half_edge_id | 1;
     }
 }
 
-uint32_t HalfEdgeMesh::numEdges()
+uint32_t HalfEdgeMesh::numEdges() const
 {
     return numHalfEdges / 2;
 }
 
-uint32_t HalfEdgeMesh::edgeToHalfEdge(uint32_t edge_id)
+uint32_t HalfEdgeMesh::edgeToHalfEdge(uint32_t edge_id) const
 {
     return edge_id * 2;
 }
@@ -41,13 +41,13 @@ uint32_t HalfEdgeMesh::edgeToHalfEdge(uint32_t edge_id)
 
 namespace broadphase {
 
-LeafID BVH::reserveLeaf(Entity e, ObjectID obj_id)
+LeafID BVH::reserveLeaf(Entity e, base::ObjectID obj_id)
 {
     int32_t leaf_idx = num_leaves_.fetch_add_relaxed(1);
     assert(leaf_idx < num_allocated_leaves_);
 
     leaf_entities_[leaf_idx] = e;
-    leaf_obj_ids_[leaf_idx] = prim;
+    leaf_obj_ids_[leaf_idx] = obj_id;
 
     return LeafID {
         leaf_idx,

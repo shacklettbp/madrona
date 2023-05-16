@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cfloat>
 #include <cstdio>
+#include <bit>
 
 #include <madrona/types.hpp>
 
@@ -188,11 +189,15 @@ struct Diag3x3 {
 
     inline Diag3x3 & operator*=(Diag3x3 o);
     inline Diag3x3 & operator*=(float o);
+    inline Diag3x3 & operator/=(float o);
 
     friend inline Diag3x3 operator*(Diag3x3 a, Diag3x3 b);
     friend inline Diag3x3 operator*(Diag3x3 a, float b);
     friend inline Diag3x3 operator*(float a, Diag3x3 b);
     friend inline Vector3 operator*(Diag3x3 d, Vector3 v);
+
+    friend inline Diag3x3 operator/(Diag3x3 a, float b);
+    friend inline Diag3x3 operator/(float a, Diag3x3 b);
 };
 
 struct Mat3x3 {
@@ -217,7 +222,7 @@ struct Mat3x3 {
     inline Mat3x3 & operator-=(const Mat3x3 &o);
 
     inline Vector3 operator*(Vector3 v) const;
-    inline Mat3x3 operator*(const Mat3x3 &o);
+    inline Mat3x3 operator*(const Mat3x3 &o) const;
     inline Mat3x3 & operator*=(const Mat3x3 &o);
 
     inline Mat3x3 operator*(const Mat3x3::Transpose &t) const;

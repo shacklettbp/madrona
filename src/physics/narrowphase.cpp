@@ -118,14 +118,7 @@ struct EdgeQuery {
 };
 
 struct HullState {
-    const Vector3 *vertices;
-    const Plane *facePlanes;
-    const HalfEdge *halfEdges;
-    const EdgeData *edgeIndices; // FIXME: optimize HE mesh
-    const PolygonData *faceEdgeIndices;
-    int32_t numVertices;
-    int32_t numFaces;
-    int32_t numEdges;
+    HalfEdgeMesh mesh;
     Vector3 center;
 };
 
@@ -138,14 +131,7 @@ struct Manifold {
 
 static HullState makeHullState(
     MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
-    const math::Vector3 *obj_vertices,
-    const Plane *obj_planes,
-    const HalfEdge *half_edges,
-    const EdgeData *edge_indices,
-    const PolygonData *face_edge_indices,
-    CountT num_vertices,
-    CountT num_faces,
-    CountT num_edges,
+    const geometry::HalfEdgeMesh &mesh,
     Vector3 translation,
     Quat rotation,
     Diag3x3 scale,
@@ -153,16 +139,10 @@ static HullState makeHullState(
     Plane *dst_planes)
 {
     if (dst_vertices == nullptr) {
+        // Don't transform the mesh
         return HullState {
-            obj_vertices,
-            obj_planes,
-            half_edges,
-            edge_indices,
-            face_edge_indices,
-            (int32_t)num_vertices,
-            (int32_t)num_faces,
-            (int32_t)num_edges,
-            translation,
+            mesh,
+            Vector3::zero(),
         };
     }
 
@@ -178,14 +158,16 @@ static HullState makeHullState(
     constexpr CountT elems_per_iter = 1;
 #endif
 
+    const CountT num_vertices = mesh.numVertices;
     for (CountT i = start_offset; i < num_vertices; i += elems_per_iter) {
-        dst_vertices[i] = vertex_txfm * obj_vertices[i] + translation;
+        dst_vertices[i] = vertex_txfm * mesh.vertices[i] + translation;
     }
 
     // FIXME: could significantly optimize this with a uniform scale
     // version
+    const CountT num_faces = mesh.numFaces;
     for (CountT i = start_offset; i < num_faces; i += elems_per_iter) {
-        Plane obj_plane = obj_planes[i];
+        Plane obj_plane = mesh.facePlanes[i];
         Vector3 plane_origin =
             vertex_txfm * (obj_plane.normal * obj_plane.d) + translation;
 
@@ -198,40 +180,21 @@ static HullState makeHullState(
         };
     }
 
+    HalfEdgeMesh new_mesh {
+        .halfEdges = mesh.halfEdges,
+        .faceBaseHalfEdges = mesh.faceBaseHalfEdges,
+        .facePlanes = dst_planes,
+        .vertices = dst_vertices,
+        .numHalfEdges = mesh.numHalfEdges,
+        .numFaces = uint32_t(num_faces),
+        .numVertices = uint32_t(num_vertices),
+    };
+
     return HullState {
-        dst_vertices,
-        dst_planes,
-        half_edges,
-        edge_indices,
-        face_edge_indices,
-        (int32_t)num_vertices,
-        (int32_t)num_faces,
-        (int32_t)num_edges,
+        new_mesh,
         translation,
     };
-}
 
-static HullState makeHullState(
-    MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
-    const geometry::HalfEdgeMesh &he_mesh,
-    Vector3 translation,
-    Quat rotation,
-    Diag3x3 scale,
-    math::Vector3 *dst_vertices,
-    Plane *dst_planes)
-{
-    return makeHullState(
-        MADRONA_GPU_COND(mwgpu_lane_id,)
-        he_mesh.mVertices,
-        he_mesh.mFacePlanes,
-        he_mesh.mHalfEdges,
-        he_mesh.mEdges,
-        he_mesh.mPolygons,
-        he_mesh.mVertexCount,
-        he_mesh.mPolygonCount,
-        he_mesh.mEdgeCount,
-        translation, rotation, scale,
-        dst_vertices, dst_planes);
 }
 
 // Returns the signed distance
@@ -319,11 +282,11 @@ static float getHullDistanceFromPlane(
     float min_dot_n = FLT_MAX;
 
     auto computeVertexDotN = [&h, &plane](CountT vert_idx) {
-        Vector3 vertex = h.vertices[vert_idx];
+        Vector3 vertex = h.mesh.vertices[vert_idx];
         return plane.normal.dot(vertex);
     };
 
-    const CountT num_verts = (CountT)h.numVertices;
+    const CountT num_verts = (CountT)h.mesh.numVertices;
     for (int32_t offset = 0; offset < num_verts; offset += elems_per_iter) {
 #ifdef MADRONA_GPU_MODE
         int32_t vert_idx = offset + mwgpu_lane_id;
@@ -357,9 +320,9 @@ static FaceQuery queryFaceDirections(
     CountT max_dist_face = -1;
     float max_dist = -FLT_MAX;
 
-    CountT num_a_faces = (CountT)a.numFaces;
+    const CountT num_a_faces = (CountT)a.mesh.numFaces;
     for (CountT face_idx = 0; face_idx < num_a_faces; face_idx++) {
-        Plane plane = a.facePlanes[face_idx];
+        Plane plane = a.mesh.facePlanes[face_idx];
         float face_dist = getHullDistanceFromPlane(
             MADRONA_GPU_COND(mwgpu_lane_id,) plane, b);
 
@@ -393,19 +356,17 @@ static bool isMinkowskiFace(
 }
 
 static inline std::pair<Vector3, Vector3> getEdgeNormals(
-        const HullState &h, const HalfEdge &h_edge)
+        const HalfEdgeMesh &mesh, HalfEdge cur_hedge, HalfEdge twin_hedge)
 {
-    Vector3 normal1 = h.facePlanes[h_edge.polygon].normal;
-    CountT twin_poly = h.halfEdges[h_edge.twin].polygon;
-    Vector3 normal2 = h.facePlanes[twin_poly].normal;
+    Vector3 normal1 = mesh.facePlanes[cur_hedge.face].normal;
+    Vector3 normal2 = mesh.facePlanes[twin_hedge.face].normal;
 
     return { normal1, normal2 };
 }
 
-static inline Segment getEdgeSegment(
-    const Vector3 *vertices,
-    const HalfEdge *hedges,
-    HalfEdge start)
+static inline Segment getEdgeSegment(const Vector3 *vertices,
+                                     const HalfEdge *hedges,
+                                     HalfEdge start)
 {
     Vector3 a = vertices[start.rootVertex];
     
@@ -416,11 +377,14 @@ static inline Segment getEdgeSegment(
 }
 
 static inline bool buildsMinkowskiFace(
-        const HullState &a, const HullState &b,
-        const HalfEdge &edgeA, const HalfEdge &edgeB)
+        const HalfEdgeMesh &a_mesh, const HalfEdgeMesh &b_mesh,
+        HalfEdge cur_hedge_a, HalfEdge twin_hedge_a,
+        HalfEdge cur_hedge_b, HalfEdge twin_hedge_b)
 {
-    auto [aNormal1, aNormal2] = getEdgeNormals(a, edgeA);
-    auto [bNormal1, bNormal2] = getEdgeNormals(b, edgeB);
+    auto [aNormal1, aNormal2] =
+        getEdgeNormals(a_mesh, cur_hedge_a, twin_hedge_a);
+    auto [bNormal1, bNormal2] =
+        getEdgeNormals(b_mesh, cur_hedge_b, twin_hedge_b);
 
     return isMinkowskiFace(aNormal1, aNormal2, -bNormal1, -bNormal2);
 }
@@ -432,10 +396,12 @@ struct EdgeTestResult {
 
 static inline EdgeTestResult edgeDistance(
         const HullState &a, const HullState &b,
-        const HalfEdge &edgeA, const HalfEdge &edgeB)
+        HalfEdge hedge_a, HalfEdge hedge_b)
 {
-    Segment segment_a = getEdgeSegment(a.vertices, a.halfEdges, edgeA);
-    Segment segment_b = getEdgeSegment(b.vertices, b.halfEdges, edgeB);
+    Segment segment_a =
+        getEdgeSegment(a.mesh.vertices, a.mesh.halfEdges, hedge_a);
+    Segment segment_b =
+        getEdgeSegment(b.mesh.vertices, b.mesh.halfEdges, hedge_b);
 
     Vector3 dir_a = segment_a.p2 - segment_a.p1;
     Vector3 dir_b = segment_b.p2 - segment_b.p1;
@@ -480,10 +446,16 @@ static EdgeQuery queryEdgeDirections(
     int edgeBMaxDistance = 0;
     float maxDistance = -FLT_MAX;
 
-    auto testEdgeSeparation = [&a, &b](const HalfEdge &hedge_a,
-                                       const HalfEdge &hedge_b) {
-        if (buildsMinkowskiFace(a, b, hedge_a, hedge_b)) {
-            return edgeDistance(a, b, hedge_a, hedge_b);
+    auto testEdgeSeparation = [&a, &b](uint32_t hedge_idx_a,
+                                       uint32_t hedge_idx_b) {
+        HalfEdge cur_hedge_a = a.mesh.halfEdges[hedge_idx_a];
+        HalfEdge twin_hedge_a = a.mesh.halfEdges[a.mesh.twinIDX(hedge_idx_a)];
+        HalfEdge cur_hedge_b = b.mesh.halfEdges[hedge_idx_b];
+        HalfEdge twin_hedge_b = b.mesh.halfEdges[b.mesh.twinIDX(hedge_idx_b)];
+
+        if (buildsMinkowskiFace(a.mesh, b.mesh, cur_hedge_a, twin_hedge_a,
+                                cur_hedge_b, twin_hedge_b)) {
+            return edgeDistance(a, b, cur_hedge_a, cur_hedge_b);
         } else {
             EdgeTestResult result;
             result.separation = -FLT_MAX;
@@ -491,9 +463,10 @@ static EdgeQuery queryEdgeDirections(
         }
     };
 
+    const CountT a_num_edges = a.mesh.numEdges();
+    const CountT b_num_edges = b.mesh.numEdges();
+
 #ifdef MADRONA_GPU_MODE
-    const int32_t a_num_edges = a.numEdges;
-    const int32_t b_num_edges = b.numEdges;
     const int32_t num_edge_tests = a_num_edges * b_num_edges;
     for (int32_t edge_offset_linear = 0; edge_offset_linear < num_edge_tests;
          edge_offset_linear += 32) {
@@ -510,13 +483,10 @@ static EdgeQuery queryEdgeDirections(
         if (edge_idx_linear >= num_edge_tests ) {
             edge_cmp.separation = -FLT_MAX;
         } else {
-            he_a_idx = a.edgeIndices[edge_idx_a];// FIXME
-            he_b_idx = b.edgeIndices[edge_idx_b];// FIXME
+            he_a_idx = a.mesh.edgeToHalfEdge(edge_idx_a);
+            he_b_idx = b.mesh.edgeToHalfEdge(edge_idx_b);
 
-            const HalfEdge &hedge_a = a.halfEdges[he_a_idx]; 
-            const HalfEdge &hedge_b = b.halfEdges[he_b_idx]; 
-
-            edge_cmp = testEdgeSeparation(hedge_a, hedge_b);
+            edge_cmp = testEdgeSeparation(he_a_idx, he_b_idx);
         }
 
         if (edge_cmp.separation > maxDistance) {
@@ -545,21 +515,18 @@ static EdgeQuery queryEdgeDirections(
         edgeBMaxDistance, max_lane_idx);
 
 #else
-    for (CountT edgeIdxA = 0; edgeIdxA < (CountT)a.numEdges; ++edgeIdxA) {
-        int32_t he_a_idx = a.edgeIndices[edgeIdxA];
-        const HalfEdge &hedge_a = a.halfEdges[he_a_idx]; // FIXME
+    for (CountT edge_idx_a = 0; edge_idx_a < a_num_edges; edge_idx_a++) {
+        int32_t he_idx_a = a.mesh.edgeToHalfEdge(edge_idx_a);
+        for (CountT edge_idx_b = 0; edge_idx_b < b_num_edges; edge_idx_b++) {
+            int32_t he_idx_b = b.mesh.edgeToHalfEdge(edge_idx_b);
 
-        for (CountT edgeIdxB = 0; edgeIdxB < (CountT)b.numEdges; ++edgeIdxB) {
-            int32_t he_b_idx = b.edgeIndices[edgeIdxB];
-            const HalfEdge &hedge_b = b.halfEdges[he_b_idx]; // FIXME
-
-            EdgeTestResult edge_cmp = testEdgeSeparation(hedge_a, hedge_b);
+            EdgeTestResult edge_cmp = testEdgeSeparation(he_idx_a, he_idx_b);
 
             if (edge_cmp.separation > maxDistance) {
                 maxDistance = edge_cmp.separation;
                 normal = edge_cmp.normal;
-                edgeAMaxDistance = he_a_idx;
-                edgeBMaxDistance = he_b_idx;
+                edgeAMaxDistance = he_idx_a;
+                edgeBMaxDistance = he_idx_b;
 
                 if (maxDistance > 0) {
                     // FIXME: this goto probably kills autovectorization
@@ -585,14 +552,14 @@ static CountT findIncidentFace(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
 #endif
 
     auto computeFaceDotRef = [&h, ref_normal](CountT face_idx) {
-        Plane face_plane = h.facePlanes[face_idx];
+        Plane face_plane = h.mesh.facePlanes[face_idx];
         return dot(face_plane.normal, ref_normal);
     };
 
     float min_dot = FLT_MAX;
     CountT minimizing_face = -1;
 
-    const CountT num_faces = (CountT)h.numFaces;
+    const CountT num_faces = (CountT)h.mesh.numFaces;
     for (CountT offset = 0; offset < num_faces; offset += elems_per_iter) {
 #ifdef MADRONA_GPU_MODE
         const CountT face_idx = offset + mwgpu_lane_id;
@@ -871,8 +838,8 @@ static inline MADRONA_ALWAYS_INLINE Manifold createFaceContact(
                                   const Vector3 *other_vertices,
                                   const HalfEdge *ref_hedges,
                                   const HalfEdge *other_hedges,
-                                  const PolygonData *ref_face_hedges,
-                                  const PolygonData *other_face_hedges,
+                                  const uint32_t *ref_face_hedges,
+                                  const uint32_t *other_face_hedges,
                                   void *tmp_buf1, void *tmp_buf2,
 #ifdef MADRONA_GPU_MODE
                                   Mat3x4 ref_txfm, Mat3x4 other_txfm,
@@ -975,7 +942,7 @@ static Manifold createFacePlaneContact(Plane plane,
                                        int32_t incident_face_idx,
                                        const Vector3 *vertices,
                                        const HalfEdge *hedges,
-                                       const PolygonData *face_hedge_roots,
+                                       const uint32_t *face_hedge_roots,
                                        Vector3 *contacts_tmp,
                                        float *penetration_depths_tmp,
 #ifdef MADRONA_GPU_MODE
@@ -1090,8 +1057,8 @@ static Manifold createEdgeContact(Segment segA,
 
 static Manifold createEdgeContact(Vector3 normal,
                                   float separation,
-                                  int32_t edge_idx_a,
-                                  int32_t edge_idx_b,
+                                  int32_t hedge_idx_a,
+                                  int32_t hedge_idx_b,
                                   const Vector3 *a_vertices,
                                   const Vector3 *b_vertices,
                                   const HalfEdge *a_hedges,
@@ -1104,9 +1071,9 @@ static Manifold createEdgeContact(Vector3 normal,
                                   Quat to_world_frame)
 {
     Segment segA = getEdgeSegment(a_vertices, a_hedges,
-                                  a_hedges[edge_idx_a]);
+                                  a_hedges[hedge_idx_a]);
     Segment segB = getEdgeSegment(b_vertices, b_hedges,
-                                  b_hedges[edge_idx_b]);
+                                  b_hedges[hedge_idx_b]);
 
 #ifdef MADRONA_GPU_MODE
     segA.p1 = a_rot.rotateVec(a_scale * segA.p1) + a_pos;
@@ -1175,8 +1142,8 @@ struct NarrowphaseResult {
     const Vector3 * bVertices;
     const HalfEdge * aHalfEdges;
     const HalfEdge * bHalfEdges;
-    const PolygonData * aFaceHedgeRoots;
-    const PolygonData * bFaceHedgeRoots;
+    const uint32_t * aFaceHedgeRoots;
+    const uint32_t * bFaceHedgeRoots;
 };
 
 static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
@@ -1228,10 +1195,10 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
         const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
 
-        assert(a_he_mesh.mPolygonCount + b_he_mesh.mPolygonCount < 
+        assert(a_he_mesh.numFaces + b_he_mesh.numFaces < 
                max_num_tmp_faces);
 
-        assert(a_he_mesh.mVertexCount + b_he_mesh.mVertexCount < 
+        assert(a_he_mesh.numVertices + b_he_mesh.numVertices < 
                max_num_tmp_vertices);
 
         PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
@@ -1240,8 +1207,8 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
             a_he_mesh, a_pos, a_rot, a_scale, txfm_vertex_buffer,
             txfm_face_buffer);
 
-        txfm_vertex_buffer += a_hull_state.numVertices;
-        txfm_face_buffer += a_hull_state.numFaces;
+        txfm_vertex_buffer += a_hull_state.mesh.numVertices;
+        txfm_face_buffer += a_hull_state.mesh.numFaces;
 
         HullState b_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
             b_he_mesh, b_pos, b_rot, b_scale, txfm_vertex_buffer,
@@ -1259,10 +1226,11 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
 #ifdef MADRONA_GPU_MODE
             a_he_mesh.mVertices, b_he_mesh.mVertices,
 #else
-            a_hull_state.vertices, b_hull_state.vertices,
+            a_hull_state.mesh.vertices, b_hull_state.mesh.vertices,
 #endif
-            a_hull_state.halfEdges, b_hull_state.halfEdges,
-            a_hull_state.faceEdgeIndices, b_hull_state.faceEdgeIndices,
+            a_hull_state.mesh.halfEdges, b_hull_state.mesh.halfEdges,
+            a_hull_state.mesh.faceBaseHalfEdges,
+            b_hull_state.mesh.faceBaseHalfEdges,
         };
     } break;
     case NarrowphaseTest::SphereHull: {
@@ -1315,8 +1283,8 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
         // Get half edge mesh for entity a (the hull)
         const auto &a_he_mesh = a_prim->hull.halfEdgeMesh;
 
-        assert(a_he_mesh.mPolygonCount < max_num_tmp_faces);
-        assert(a_he_mesh.mVertexCount <  max_num_tmp_vertices);
+        assert(a_he_mesh.numFaces < max_num_tmp_faces);
+        assert(a_he_mesh.numVertices <  max_num_tmp_vertices);
 
         PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
 
@@ -1353,10 +1321,10 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
 #ifdef MADRONA_GPU_MODE
             a_he_mesh.mVertices, nullptr,
 #else
-            a_hull_state.vertices, nullptr,
+            a_hull_state.mesh.vertices, nullptr,
 #endif
-            a_hull_state.halfEdges, nullptr,
-            a_hull_state.faceEdgeIndices, nullptr,
+            a_hull_state.mesh.halfEdges, nullptr,
+            a_hull_state.mesh.faceBaseHalfEdges, nullptr,
         };
     } break;
     default: __builtin_unreachable();
@@ -1415,8 +1383,8 @@ static MADRONA_ALWAYS_INLINE inline void generateContacts(
         const Vector3 *other_vertices;
         const HalfEdge *ref_hedges;
         const HalfEdge *other_hedges;
-        const PolygonData *ref_face_hedges;
-        const PolygonData *other_face_hedges;
+        const uint32_t *ref_face_hedges;
+        const uint32_t *other_face_hedges;
 
 #ifdef MADRONA_GPU_MODE
         Mat3x4 ref_txfm;

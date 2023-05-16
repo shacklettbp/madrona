@@ -27,7 +27,7 @@ add_library(madrona_physics_assets STATIC
 )
 
 target_link_libraries(madrona_physics_assets PRIVATE
-    madrona_common madrona_importer
+    madrona_common
 )
 
 if (TARGET madrona_cuda)

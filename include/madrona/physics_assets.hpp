@@ -23,12 +23,12 @@ public:
             CollisionPrimitive::Sphere sphere;
             Hull hull;
         };
-        float invMass;
-        RigidBodyFrictionData friction;
     };
 
     struct SourceCollisionObject {
-        Span<SourceCollisionPrimitive> prims;
+        Span<const SourceCollisionPrimitive> prims;
+        float invMass;
+        RigidBodyFrictionData friction;
     };
 
     struct ImportedRigidBodies {

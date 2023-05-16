@@ -1532,7 +1532,7 @@ static bool gltfParseInstances(const LoaderData &loader,
                 translation,
                 rotation,
                 scale,
-                base_obj_idx + cur_node.meshIdx,
+                uint32_t(base_obj_idx + cur_node.meshIdx),
             });
         }
     }
@@ -1574,7 +1574,7 @@ static bool gltfImportAssets(LoaderData &loader,
     for (CountT inst_idx = new_instances_start;
          inst_idx < imported.instances.size(); inst_idx++) {
         const SourceInstance &inst = imported.instances[inst_idx];
-        const SourceObject &src_obj = imported.objects[src_inst.objIDX];
+        const SourceObject &src_obj = imported.objects[inst.objIDX];
         for (const SourceMesh &src_mesh : src_obj.meshes) {
             total_new_vertices += src_mesh.numVertices;
         }
@@ -1609,7 +1609,7 @@ static bool gltfImportAssets(LoaderData &loader,
                     inst.rotation.rotateVec(inst.scale.inv() * orig_normal);
 
                 new_positions_arr.push_back(new_pos);
-                new_normals_arr.push_back(new_pos);
+                new_normals_arr.push_back(new_normal);
             }
 
             merged_meshes.push_back(SourceMesh {
@@ -1626,21 +1626,25 @@ static bool gltfImportAssets(LoaderData &loader,
         }
     }
 
-    imported.geoData.meshArrays.resize(new_mesh_arrays_start);
-    imported.geoData.positionArrays.resize(new_vert_arrays_start);
-    imported.geoData.normalArrays.resize(new_normal_arrays_start);
-    imported.objects.resize(new_objects_start);
-    imported.instances.resize(new_instances_start);
+    imported.geoData.meshArrays.resize(new_mesh_arrays_start, [](auto *) {});
+    imported.geoData.positionArrays.resize(new_vert_arrays_start,
+                                           [](auto *) {});
+    imported.geoData.normalArrays.resize(new_normal_arrays_start,
+                                         [](auto *) {});
+    imported.objects.resize(new_objects_start,
+                            [](auto *) {});
+    imported.instances.resize(new_instances_start,
+                              [](auto *) {});
 
     imported.objects.push_back({
         .meshes = Span<SourceMesh>(merged_meshes.data(), merged_meshes.size()),
     });
     
-    imported.instances.push_back({
+    imported.instances.push_back(SourceInstance {
         .translation = math::Vector3::zero(),
-        .rotation = Quat { 1, 0, 0, 0 },
-        .scale = Diag3x3::uniform(1.f),
-        .objIdx = new_objects_start,
+        .rotation = math::Quat { 1, 0, 0, 0 },
+        .scale = math::Diag3x3::uniform(1.f),
+        .objIDX = uint32_t(new_objects_start),
     });
 
     imported.geoData.meshArrays.emplace_back(std::move(merged_meshes));

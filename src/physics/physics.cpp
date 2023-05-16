@@ -114,8 +114,8 @@ inline void substepRigidBodies(Context &ctx,
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
     const RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
 
-    float inv_m = metadata.invMass;
-    Vector3 inv_I = metadata.invInertiaTensor;
+    float inv_m = metadata.mass.invMass;
+    Vector3 inv_I = metadata.mass.invInertiaTensor;
 
     float h = solver.h;
 
@@ -419,11 +419,11 @@ static inline void handleContact(Context &ctx,
     Quat q1 = *q1_ptr;
     Quat q2 = *q2_ptr;
 
-    float inv_m1 = metadata1.invMass;
-    float inv_m2 = metadata2.invMass;
+    float inv_m1 = metadata1.mass.invMass;
+    float inv_m2 = metadata2.mass.invMass;
 
-    Vector3 inv_I1 = metadata1.invInertiaTensor;
-    Vector3 inv_I2 = metadata2.invInertiaTensor;
+    Vector3 inv_I1 = metadata1.mass.invInertiaTensor;
+    Vector3 inv_I2 = metadata2.mass.invInertiaTensor;
 
     if (resp_type1 == ResponseType::Static) {
         inv_m1 = 0.f;
@@ -435,8 +435,8 @@ static inline void handleContact(Context &ctx,
         inv_I2 = Vector3::zero();
     }
 
-    float mu_s1 = metadata1.muS;
-    float mu_s2 = metadata2.muS;
+    float mu_s1 = metadata1.friction.muS;
+    float mu_s2 = metadata2.friction.muS;
 
     float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
 
@@ -555,16 +555,16 @@ inline void handleJointConstraint(Context &ctx,
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
-    float inv_m1 = metadata1.invMass;
-    Vector3 inv_I1 = metadata1.invInertiaTensor;
+    float inv_m1 = metadata1.mass.invMass;
+    Vector3 inv_I1 = metadata1.mass.invInertiaTensor;
 
     if (resp_type1 == ResponseType::Static) {
         inv_m1 = 0.f;
         inv_I1 = Vector3::zero();
     }
 
-    float inv_m2 = metadata2.invMass;
-    Vector3 inv_I2 = metadata2.invInertiaTensor;
+    float inv_m2 = metadata2.mass.invMass;
+    Vector3 inv_I2 = metadata2.mass.invInertiaTensor;
 
     if (resp_type2 == ResponseType::Static) {
         inv_m2 = 0.f;
@@ -894,10 +894,10 @@ static inline void solveVelocitiesForContact(Context &ctx,
     auto [v1, omega1] = *v1_out;
     auto [v2, omega2] = *v2_out;
 
-    float inv_m1 = metadata1.invMass;
-    float inv_m2 = metadata2.invMass;
-    Vector3 inv_I1 = metadata1.invInertiaTensor;
-    Vector3 inv_I2 = metadata2.invInertiaTensor;
+    float inv_m1 = metadata1.mass.invMass;
+    float inv_m2 = metadata2.mass.invMass;
+    Vector3 inv_I1 = metadata1.mass.invInertiaTensor;
+    Vector3 inv_I2 = metadata2.mass.invInertiaTensor;
 
     if (resp_type1 == ResponseType::Static) {
         inv_m1 = 0.f;
@@ -909,7 +909,7 @@ static inline void solveVelocitiesForContact(Context &ctx,
         inv_I2 = Vector3::zero();
     }
 
-    float mu_d = 0.5f * (metadata1.muD + metadata2.muD);
+    float mu_d = 0.5f * (metadata1.friction.muD + metadata2.friction.muD);
 
     Vector3 r1_locals[4];
     Vector3 r2_locals[4];
@@ -1043,10 +1043,7 @@ broadphase::LeafID RigidBodyPhysicsSystem::registerEntity(Context &ctx,
                                                           Entity e,
                                                           ObjectID obj_id)
 {
-    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
-    CollisionPrimitive *prim = &obj_mgr.primitives[obj_id.idx];
-
-    return ctx.getSingleton<broadphase::BVH>().reserveLeaf(e, prim);
+    return ctx.getSingleton<broadphase::BVH>().reserveLeaf(e, obj_id);
 }
 
 void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
