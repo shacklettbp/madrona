@@ -155,11 +155,6 @@ struct RigidBodyMetadata {
     RigidBodyFrictionData friction;
 };
 
-struct RigidBodyPrimitives {
-    uint32_t primOffset;
-    uint32_t primCount;
-};
-
 struct CollisionPrimitive {
     enum class Type : uint32_t {
         Sphere = 1 << 0,
@@ -193,17 +188,6 @@ struct ObjectManager {
     uint32_t *rigidBodyPrimitiveOffsets;
     uint32_t *rigidBodyPrimitiveCounts;
     RigidBodyMetadata *metadata;
-
-    // Half Edge Mesh Buffers
-    geometry::PolygonData *polygonDatas;
-
-    // everywhere needs all 4 components besides finding
-    // the minimizing face
-    geometry::Plane *facePlanes;
-
-    geometry::EdgeData *edgeDatas;
-    geometry::HalfEdge *halfEdges;
-    math::Vector3 *vertices;
 };
 
 struct ObjectData {

@@ -886,7 +886,7 @@ inline void updateLeafPositionsEntry(
 {
     BVH &bvh = ctx.getSingleton<BVH>();
     ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
-    AABB obj_aabb = obj_mgr.aabbs[obj_id.idx];
+    AABB obj_aabb = obj_mgr.objAABBs[obj_id.idx];
 
     bvh.updateLeafPosition(leaf_id, pos, rot, scale, vel.linear, obj_aabb);
 }
@@ -919,6 +919,7 @@ inline void findOverlappingEntry(
     LeafID leaf_id)
 {
     BVH &bvh = ctx.getSingleton<BVH>();
+    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
     // FIXME: should have a flag for passing this
     // directly into the system
@@ -926,6 +927,10 @@ inline void findOverlappingEntry(
     bool a_is_static = 
         ctx.getDirect<ResponseType>(Cols::ResponseType, a_loc) ==
         ResponseType::Static;
+
+    ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
+
+    CountT a_num_prims = obj_mgr.rigidBodyPrimitiveCounts[a_obj.idx];
 
     bvh.findOverlapsForLeaf(leaf_id, [&](Entity overlapping_entity) {
         if (e.id < overlapping_entity.id) {
@@ -939,12 +944,36 @@ inline void findOverlappingEntry(
                 return;
             }
 
-            Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
-            CandidateCollision &candidate = ctx.getDirect<
-                CandidateCollision>(Cols::CandidateCollision, candidate_loc);
+            // We don't expand the primitive AABBs by movement (only object
+            // AABBs) so we just unconditionally emit narrowphase checks
+            // between each pair of primitives in the entity. Narrowphase
+            // will check transformed AABBs.
+            
+            ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
+            CountT b_num_prims =
+                obj_mgr.rigidBodyPrimitiveCounts[b_obj.idx];
 
-            candidate.a = a_loc;
-            candidate.b = b_loc;
+            // FIXME: would be nice to be able to make N temporaries all at
+            // once
+            
+            CountT total_narrowphase_checks = a_num_prims * b_num_prims;
+
+            for (CountT prim_check_idx = 0;
+                 prim_check_idx < total_narrowphase_checks;
+                 prim_check_idx++) {
+                CountT a_prim_idx = prim_check_idx / b_num_prims;
+                CountT b_prim_idx = prim_check_idx % b_num_prims;
+
+                Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
+                CandidateCollision &candidate =
+                    ctx.getDirect<CandidateCollision>(
+                        Cols::CandidateCollision, candidate_loc);
+
+                candidate.a = a_loc;
+                candidate.b = b_loc;
+                candidate.aPrim = a_prim_idx;
+                candidate.bPrim = b_prim_idx;
+            }
         }
     });
 }
