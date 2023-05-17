@@ -224,6 +224,7 @@ struct Mat3x3 {
     inline Vector3 operator*(Vector3 v) const;
     inline Mat3x3 operator*(const Mat3x3 &o) const;
     inline Mat3x3 & operator*=(const Mat3x3 &o);
+    inline Mat3x3 & operator*=(float s);
 
     inline Mat3x3 operator*(const Mat3x3::Transpose &t) const;
 

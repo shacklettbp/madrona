@@ -991,6 +991,15 @@ Mat3x3 & Mat3x3::operator*=(const Mat3x3 &o)
     return *this = (*this * o);
 }
 
+Mat3x3 & Mat3x3::operator*=(float s)
+{
+    cols[0] *= s;
+    cols[1] *= s;
+    cols[2] *= s;
+
+    return *this;
+}
+
 Mat3x3 Mat3x3::operator*(const Mat3x3::Transpose &t) const
 {
     return Mat3x3 {

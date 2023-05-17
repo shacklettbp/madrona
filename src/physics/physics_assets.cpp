@@ -638,7 +638,31 @@ static inline MassProperties computeMassProperties(
 
     for (const SourceCollisionPrimitive &prim : src_obj.prims) {
         // FIXME allow some kind of override of inertia tensor
-        if (prim.type != CollisionPrimitive::Type::Hull) continue;
+        if (prim.type == CollisionPrimitive::Type::Sphere) {
+            // FIXME: need to allow offset for primitives
+            m_total += 1.f;
+
+            float r = prim.sphere.radius;
+
+            // Note that we need the sphere's covariance matrix,
+            // not the inertia tensor (hence 1/2 standard formulas)
+            float v = 1.f / 5.f * r * r;
+            C_total += Mat3x3 {{
+                Vector3 { v, 0.f, 0.f },
+                Vector3 { 0.f, v, 0.f },
+                Vector3 { 0.f, 0.f, v },
+            }};
+            continue;
+        } else if (prim.type == CollisionPrimitive::Type::Plane) {
+            // Plane has infinite mass / inertia. The rest of the
+            // object must as well
+
+            return MassProperties {
+                Diag3x3::uniform(INFINITY),
+                Vector3::zero(),
+                Quat { 1, 0, 0, 0 },
+            };
+        }
 
         const imp::SourceMesh &src_mesh = *prim.hull.mesh;
 
@@ -677,8 +701,13 @@ static inline MassProperties computeMassProperties(
         Vector3 { 0, 0, tr_C },
     }};
 
-    // Compute inertia tensor and rescale to mass == 1
-    Mat3x3 inertia_tensor = (tr_C_diag - C_total) / m_total;
+    // Compute inertia tensor 
+    Mat3x3 inertia_tensor = tr_C_diag - C_total;
+
+    // Rescale total mass of inertia tensor (unless infinity)
+    float inv_mass = 1.f / m_total;
+    inertia_tensor *= inv_mass;
+
     printf("Inertia Tensor:\n"
            "%f %f %f\n"
            "%f %f %f\n"
@@ -703,7 +732,7 @@ static inline MassProperties computeMassProperties(
     Quat rot_to_diag;
     diagonalizeInertiaTensor(inertia_tensor, &diag_inertia, &rot_to_diag);
 
-    printf("Diag Inertia tensor: (%f %f %f) rot: (%f %f %f %f)\n",
+    printf("Diag Inertia tensor: (%f %f %f) rot: (%f %f %f %f)\n\n",
            diag_inertia.d0, diag_inertia.d1, diag_inertia.d2,
            rot_to_diag.w,
            rot_to_diag.x,
