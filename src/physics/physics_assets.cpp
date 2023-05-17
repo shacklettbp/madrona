@@ -609,13 +609,12 @@ static inline MassProperties computeMassProperties(
     float m_total = 0;
     Vector3 x_total = Vector3::zero();
 
-    auto processTet = [&](const Vector3 *positions, uint32_t a_idx, 
-                          uint32_t b_idx, uint32_t c_idx) {
+    auto processTet = [&](Vector3 v1, Vector3 v2, Vector3 v3) {
         // Reference point is (0, 0, 0) so tet edges are just the vertex
         // positions
-        Vector3 e1 = positions[a_idx];
-        Vector3 e2 = positions[b_idx];
-        Vector3 e3 = positions[c_idx];
+        Vector3 e1 = v1;
+        Vector3 e2 = v2;
+        Vector3 e3 = v3;
 
         // Covariance matrix
         Mat3x3 A {{ e1, e2, e3 }};
@@ -637,7 +636,6 @@ static inline MassProperties computeMassProperties(
     };
 
     for (const SourceCollisionPrimitive &prim : src_obj.prims) {
-        // FIXME allow some kind of override of inertia tensor
         if (prim.type == CollisionPrimitive::Type::Sphere) {
             // FIXME: need to allow offset for primitives
             m_total += 1.f;
@@ -664,6 +662,8 @@ static inline MassProperties computeMassProperties(
             };
         }
 
+        // Hull primitive
+ 
         const imp::SourceMesh &src_mesh = *prim.hull.mesh;
 
         const uint32_t *cur_indices = src_mesh.indices;
@@ -672,9 +672,16 @@ static inline MassProperties computeMassProperties(
             CountT num_face_vertices = src_mesh.faceCounts ?
                 src_mesh.faceCounts[face_idx] : 3;
 
+            uint32_t idx1 = cur_indices[0];
+            Vector3 v1 = src_mesh.positions[idx1];
             for (CountT i = 1; i < num_face_vertices - 1; i++) {
-                processTet(src_mesh.positions, cur_indices[0],
-                           cur_indices[i], cur_indices[i + 1]);
+                uint32_t idx2 = cur_indices[i];
+                Vector3 v2 = src_mesh.positions[idx2];
+
+                uint32_t idx3 = cur_indices[i + 1];
+                Vector3 v3 = src_mesh.positions[idx3];
+
+                processTet(v1, v2, v3);
             }
 
             cur_indices += num_face_vertices;
@@ -1022,6 +1029,9 @@ CountT PhysicsLoader::loadObjects(
                sizeof(Vector3) * total_num_hull_verts);
     } break;
     case StorageType::CUDA: {
+#ifndef MADRONA_CUDA_SUPPORT
+        noCUDA();
+#else
         cudaMemcpy(prim_aabbs_dst, primitive_aabbs,
                    sizeof(AABB) * total_num_primitives,
                    cudaMemcpyHostToDevice);
@@ -1060,6 +1070,7 @@ CountT PhysicsLoader::loadObjects(
         cudaMemcpy(hull_verts, hull_verts_in,
                    sizeof(Vector3) * total_num_hull_verts,
                    cudaMemcpyHostToDevice);
+#endif
     }
     }
 
@@ -1091,9 +1102,11 @@ CountT PhysicsLoader::loadObjects(
                sizeof(CollisionPrimitive) * total_num_primitives);
     } break;
     case StorageType::CUDA: {
+#ifdef MADRONA_CUDA_SUPPORT
         cudaMemcpy(prims_dst, primitives_tmp,
             sizeof(CollisionPrimitive) * total_num_primitives,
             cudaMemcpyHostToDevice);
+#endif
     } break;
     }
 

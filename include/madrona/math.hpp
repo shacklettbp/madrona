@@ -205,6 +205,8 @@ struct Mat3x3 {
         const Mat3x3 *src;
 
         inline Vector3 operator[](CountT i) const;
+
+        friend inline Vector3 operator*(Transpose t, Vector3 v);
     };
 
     Vector3 cols[3];
@@ -226,13 +228,14 @@ struct Mat3x3 {
     inline Mat3x3 & operator*=(const Mat3x3 &o);
     inline Mat3x3 & operator*=(float s);
 
-    inline Mat3x3 operator*(const Mat3x3::Transpose &t) const;
-
     friend inline Mat3x3 operator+(Mat3x3 a, const Mat3x3 &b);
     friend inline Mat3x3 operator-(Mat3x3 a, const Mat3x3 &b);
 
     friend inline Mat3x3 operator*(const Mat3x3 &m, Diag3x3 d);
     friend inline Mat3x3 operator*(Diag3x3 d, const Mat3x3 &m);
+
+    friend inline Mat3x3 operator*(Mat3x3 a, Mat3x3::Transpose b);
+    friend inline Mat3x3 operator*(Mat3x3::Transpose a, Mat3x3 b);
 
     friend inline Mat3x3 operator*(float s, const Mat3x3 &m);
     friend inline Mat3x3 operator*(const Mat3x3 &m, float s);

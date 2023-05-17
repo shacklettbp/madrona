@@ -868,6 +868,15 @@ Vector3 Mat3x3::Transpose::operator[](CountT i) const
     };
 }
 
+Vector3 operator*(Mat3x3::Transpose t, Vector3 v)
+{
+    return Vector3 {
+        dot(t.src->cols[0], v),
+        dot(t.src->cols[1], v),
+        dot(t.src->cols[2], v),
+    };
+}
+
 float Mat3x3::determinant() const
 {
     Vector3 c0 = cols[0];
@@ -876,8 +885,7 @@ float Mat3x3::determinant() const
 
     return c0.x * (c1.y * c2.z - c2.y * c1.z) -
            c0.y * (c1.x * c2.z - c2.x * c1.z) +
-           c0.z * (c1.x * c2.y - c2.x * c2.y);
-
+           c0.z * (c1.x * c2.y - c2.x * c1.y);
 }
 
 Mat3x3 Mat3x3::fromQuat(Quat r)
@@ -1000,15 +1008,6 @@ Mat3x3 & Mat3x3::operator*=(float s)
     return *this;
 }
 
-Mat3x3 Mat3x3::operator*(const Mat3x3::Transpose &t) const
-{
-    return Mat3x3 {
-        *this * t[0],
-        *this * t[1],
-        *this * t[2],
-    };
-}
-
 Mat3x3 operator+(Mat3x3 a, const Mat3x3 &b)
 {
     return (a += b);
@@ -1035,6 +1034,24 @@ Mat3x3 operator*(Diag3x3 d, const Mat3x3 &m)
         { d * m[1] },
         { d * m[2] },
     }};
+}
+
+Mat3x3 operator*(Mat3x3 a, Mat3x3::Transpose b)
+{
+    return Mat3x3 {
+        a * b[0],
+        a * b[1],
+        a * b[2],
+    };
+}
+
+Mat3x3 operator*(Mat3x3::Transpose a, Mat3x3 b)
+{
+    return Mat3x3 {
+        a * b[0],
+        a * b[1],
+        a * b[2],
+    };
 }
 
 Mat3x3 operator*(float s, const Mat3x3 &m)
