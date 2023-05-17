@@ -243,6 +243,29 @@ struct Mat3x3 {
     friend inline Mat3x3 operator/(const Mat3x3 &m, float s);
 };
 
+struct Symmetric3x3 {
+    Vector3 diag;
+    Vector3 off;
+
+    static inline Symmetric3x3 AAT(Mat3x3 A);
+    static inline Symmetric3x3 AXAT(Mat3x3 A, Symmetric3x3 X);
+    static inline Symmetric3x3 vvT(Vector3 v);
+
+    inline Vector3 operator[](CountT i) const;
+
+    inline Symmetric3x3 & operator+=(const Symmetric3x3 &o);
+    inline Symmetric3x3 & operator-=(const Symmetric3x3 &o);
+    inline Symmetric3x3 & operator*=(const Symmetric3x3 &o);
+    inline Symmetric3x3 & operator*=(float s);
+
+    friend inline Symmetric3x3 operator+(Symmetric3x3 a, Symmetric3x3 b);
+    friend inline Symmetric3x3 operator-(Symmetric3x3 a, Symmetric3x3 b);
+
+    friend inline Symmetric3x3 operator*(Symmetric3x3 a, Symmetric3x3 b);
+    friend inline Symmetric3x3 operator*(Symmetric3x3 a, float b);
+    friend inline Symmetric3x3 operator*(float a, Symmetric3x3 b);
+};
+
 struct Mat3x4 {
     Vector3 cols[4];
 

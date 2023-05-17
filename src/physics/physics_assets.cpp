@@ -469,14 +469,14 @@ struct MassProperties {
 // McAdams et al 2011
 
 // McAdams Algorithm 2:
-static Quat approxGivensQuaternion(const Mat3x3 &m)
+static Quat approxGivensQuaternion(Symmetric3x3 m)
 {
 
     constexpr float gamma = 5.82842712474619f;
     constexpr float c_star = 0.9238795325112867f;
     constexpr float s_star = 0.3826834323650898f;
 
-    float a11 = m[0][0], a12 = m[1][0], a22 = m[1][1];
+    float a11 = m.diag[0], a12 = m.off[0], a22 = m.diag[1];
 
     float ch = 2.f * (a11 - a22);
     float sh = a12;
@@ -495,7 +495,7 @@ static Quat approxGivensQuaternion(const Mat3x3 &m)
 
 // Equation 12: approxGivensQuaternion returns an unscaled quaternion,
 // need to rescale
-static Mat3x3 jacobiIterConjugation(const Mat3x3 &m, float ch, float sh)
+static Symmetric3x3 jacobiIterConjugation(Symmetric3x3 m, float ch, float sh)
 {
     float ch2 = ch * ch;
     float sh2 = sh * sh;
@@ -509,49 +509,50 @@ static Mat3x3 jacobiIterConjugation(const Mat3x3 &m, float ch, float sh)
     // Output = Q^T * m * Q. Given above values for Q, direct solution to
     // compute output (given 0s for other terms) computed using SymPy
 
-    auto [m11, m21, m31] = m[0];
-    auto [m12, m22, m32] = m[1];
-    auto [m13, m23, m33] = m[2];
+    auto [m11, m22, m33] = m.diag;
+    auto [m12, m13, m23] = m.off;
 
-    float m11q11_m21q21 = m11 * q11 + m21 * q21;
-    float m11q12_m21q22 = m11 * q12 + m21 * q22;
+    float m11q11_m12q21 = m11 * q11 + m12 * q21;
+    float m11q12_m12q22 = m11 * q12 + m12 * q22;
 
     float m12q11_m22q21 = m12 * q11 + m22 * q21;
     float m12q12_m22q22 = m12 * q12 + m22 * q22;
-    
-    return Mat3x3 {{
-        Vector3 {
-            q11 * m11q11_m21q21 + q21 * m12q11_m22q21,
-            q11 * m11q12_m21q22 + q21 * m12q12_m22q22,
-            m31 * q11 + m32 * q21,
-        },
-        Vector3 {
-            q12 * m11q11_m21q21 + q22 * m12q11_m22q21,
-            q12 * m11q12_m21q22 + q22 * m12q12_m22q22,
-            m31 * q12 + m32 * q22,
-        },
-        Vector3 {
-            m13 * q11 + m23 * q21,
-            m13 * q12 + m23 * q22,
+
+    return Symmetric3x3 {
+        .diag = {
+            q11 * m11q11_m12q21 + q21 * m12q11_m22q21,
+            q12 * m11q12_m12q22 + q22 * m12q12_m22q22,
             m33,
         },
-    }};
+        .off = {
+            q12 * m11q11_m12q21 + q22 * m12q11_m22q21,
+            m13 * q11 + m23 * q21,
+            m13 * q12 + m23 * q22,
+        },
+    };
 }
 
 // Inertia tensor is symmetric positive semi definite, so we only need to
 // perform the symmetric eigenanalysis part of the algorithm.
-static void diagonalizeInertiaTensor(const Mat3x3 &m,
+//
+// Jacobi order: (p, q) = (1, 2), (1, 3), (2, 3), (1, 2)
+static void diagonalizeInertiaTensor(const Symmetric3x3 &m,
                                      Diag3x3 *out_diag,
                                      Quat *out_rot)
 {
     using namespace math;
 
-    constexpr CountT num_jacobi_iters = 8; // Double the number in the paper
+    constexpr CountT num_jacobi_iters = 16;
 
-    Mat3x3 cur_mat = m;
+    Symmetric3x3 cur_mat = m;
     Quat accumulated_rot { 1, 0, 0, 0 };
     for (CountT i = 0; i < num_jacobi_iters; i++) {
-        Quat cur_rot = approxGivensQuaternion(m);
+        Quat cur_rot = approxGivensQuaternion(cur_mat);
+        printf("%f %f %f %f\n",
+               cur_rot.w,
+               cur_rot.x,
+               cur_rot.y,
+               cur_rot.z);
 
         cur_mat = jacobiIterConjugation(cur_mat, cur_rot.w, cur_rot.z);
 
@@ -564,25 +565,24 @@ static void diagonalizeInertiaTensor(const Mat3x3 &m,
     {
         Mat3x3 q = Mat3x3::fromQuat(final_rot);
 
-        auto [m11, m21, m31] = m[0];
-        auto [m12, m22, m32] = m[1];
-        auto [m13, m23, m33] = m[2];
+        auto [m11, m22, m33] = m.diag;
+        auto [m12, m13, m23] = m.off;
 
         auto [q11, q21, q31] = q[0];
         auto [q12, q22, q32] = q[1];
         auto [q13, q23, q33] = q[2];
 
         out_diag->d0 = q11 * (m11 * q11 + m12 * q21 + m13 * q31) +
-                       q21 * (m21 * q11 + m22 * q21 + m23 * q31) +
-                       q31 * (m31 * q11 + m32 * q21 + m33 * q31);
+                       q21 * (m12 * q11 + m22 * q21 + m23 * q31) +
+                       q31 * (m13 * q11 + m23 * q21 + m33 * q31);
 
         out_diag->d1 = q12 * (m11 * q12 + m12 * q22 + m13 * q32) +
-                       q22 * (m21 * q12 + m22 * q22 + m23 * q32) +
-                       q32 * (m31 * q12 + m32 * q22 + m33 * q32);
+                       q22 * (m12 * q12 + m22 * q22 + m23 * q32) +
+                       q32 * (m13 * q12 + m23 * q22 + m33 * q32);
         
         out_diag->d2 = q13 * (m11 * q13 + m12 * q23 + m13 * q33) +
-                       q23 * (m21 * q13 + m22 * q23 + m23 * q33) +
-                       q33 * (m31 * q13 + m32 * q23 + m33 * q33);
+                       q23 * (m12 * q13 + m22 * q23 + m23 * q33) +
+                       q33 * (m13 * q13 + m23 * q23 + m33 * q33);
     }
 
     *out_rot = accumulated_rot;
@@ -593,18 +593,16 @@ static inline MassProperties computeMassProperties(
     const SourceCollisionObject &src_obj)
 {
     using namespace math;
-    const Mat3x3 C_canonical {{
-        { 1.f / 60.f, 1.f / 120.f, 1.f / 120.f },
-        { 1.f / 120.f, 1.f / 60.f, 1.f / 120.f },
-        { 1.f / 120.f, 1.f / 120.f, 1.f / 60.f },
-    }};
+    const Symmetric3x3 C_canonical {
+        .diag = Vector3 { 1.f / 60.f, 1.f / 60.f, 1.f / 60.f },
+        .off = Vector3 { 1.f / 120.f, 1.f / 120.f, 1.f / 120.f },
+    };
     constexpr float density = 1.f;
 
-    Mat3x3 C_total {{
-        Vector3::zero(),
-        Vector3::zero(),
-        Vector3::zero(),
-    }};
+    Symmetric3x3 C_total {
+        .diag = Vector3::zero(),
+        .off = Vector3::zero(),
+    };
 
     float m_total = 0;
     Vector3 x_total = Vector3::zero();
@@ -619,7 +617,7 @@ static inline MassProperties computeMassProperties(
         // Covariance matrix
         Mat3x3 A {{ e1, e2, e3 }};
         float det_A = A.determinant();
-        Mat3x3 C = det_A * A * C_canonical * A.transpose();
+        Symmetric3x3 C = det_A * Symmetric3x3::AXAT(A, C_canonical);
 
         // Mass
         float volume = 1.f / 6.f * det_A;
@@ -645,11 +643,10 @@ static inline MassProperties computeMassProperties(
             // Note that we need the sphere's covariance matrix,
             // not the inertia tensor (hence 1/2 standard formulas)
             float v = 1.f / 5.f * r * r;
-            C_total += Mat3x3 {{
-                Vector3 { v, 0.f, 0.f },
-                Vector3 { 0.f, v, 0.f },
-                Vector3 { 0.f, 0.f, v },
-            }};
+            C_total += Symmetric3x3 {
+                .diag = Vector3 { v, v, v },
+                .off = Vector3::zero(),
+            };
             continue;
         } else if (prim.type == CollisionPrimitive::Type::Plane) {
             // Plane has infinite mass / inertia. The rest of the
@@ -688,28 +685,38 @@ static inline MassProperties computeMassProperties(
         }
     }
 
-    auto translateCovariance = [](const Mat3x3 &C,
+    auto translateCovariance = [](const Symmetric3x3 &C,
                                   Vector3 x, // COM
                                   float m,
                                   Vector3 delta_x) {
-        Mat3x3 term1 = outerProduct(delta_x, x);
-        Mat3x3 term2 = outerProduct(x, delta_x); 
-        Mat3x3 term3 = outerProduct(delta_x, delta_x);
-        return C + m * (term1 + term2 + term3);
-    };
+        Symmetric3x3 delta_xxT_plus_xdeltaxT {
+            .diag = 2.f * Vector3 {
+                x.x * delta_x.x,
+                x.y * delta_x.y,
+                x.z * delta_x.z,
+            },
+            .off = Vector3 {
+                x.x * delta_x.y + x.y * delta_x.x,
+                x.x * delta_x.z + x.z * delta_x.x,
+                x.y * delta_x.z + x.z * delta_x.y,
+            },
+        };
 
+        Symmetric3x3 delta_xdelta_xT = Symmetric3x3::vvT(delta_x);
+        return C + m * (delta_xxT_plus_xdeltaxT + delta_xdelta_xT);
+    };
+    
     // Move accumulated covariance matrix to center of mass
     C_total = translateCovariance(C_total, x_total, m_total, -x_total);
 
     float tr_C = C_total[0][0] + C_total[1][1] + C_total[2][2];
-    const Mat3x3 tr_C_diag {{
-        Vector3 { tr_C, 0, 0 },
-        Vector3 { 0, tr_C, 0 },
-        Vector3 { 0, 0, tr_C },
-    }};
+    const Symmetric3x3 tr_C_diag {
+        .diag = Vector3 { tr_C, tr_C, tr_C },
+        .off = Vector3::zero(),
+    };
 
     // Compute inertia tensor 
-    Mat3x3 inertia_tensor = tr_C_diag - C_total;
+    Symmetric3x3 inertia_tensor = tr_C_diag - C_total;
 
     // Rescale total mass of inertia tensor (unless infinity)
     float inv_mass = 1.f / m_total;

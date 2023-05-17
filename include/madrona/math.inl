@@ -1077,6 +1077,158 @@ Mat3x3 operator/(const Mat3x3 &m, float s)
     }};
 }
 
+Symmetric3x3 Symmetric3x3::AAT(Mat3x3 A)
+{
+    auto [a11, a21, a31] = A[0];
+    auto [a12, a22, a32] = A[1];
+    auto [a13, a23, a33] = A[2];
+
+    return Symmetric3x3 {
+        .diag = {
+            a11 * a11 + a12 * a12 + a13 * a13,
+            a21 * a21 + a22 * a22 + a23 * a23,
+            a31 * a31 + a32 * a32 + a33 * a33,
+        },
+        .off = { 
+            a11 * a21 + a12 * a22 + a13 * a23,
+            a11 * a31 + a12 * a32 + a13 * a33,
+            a21 * a31 + a22 * a32 + a23 * a33,
+        },
+    };
+}
+
+Symmetric3x3 Symmetric3x3::AXAT(Mat3x3 A, Symmetric3x3 X)
+{
+    auto [a11, a21, a31] = A[0];
+    auto [a12, a22, a32] = A[1];
+    auto [a13, a23, a33] = A[2];
+
+    auto [x11, x22, x33] = X.diag;
+    auto [x12, x13, x23] = X.off;
+
+    float a11x11_a12x12_a13x13 = a11 * x11 + a12 * x12 + a13 * x13;
+    float a11x12_a12x22_a13x23 = a11 * x12 + a12 * x22 + a13 * x23;
+    float a11x13_a12x23_a13x33 = a11 * x13 + a12 * x23 + a13 * x33;
+
+    float a21x11_a22x12_a23x13 = a21 * x11 + a22 * x12 + a23 * x13;
+    float a21x12_a22x22_a23x23 = a21 * x12 + a22 * x22 + a23 * x23;
+    float a21x13_a22x23_a23x33 = a21 * x13 + a22 * x23 + a23 * x33;
+
+    return Symmetric3x3 {
+        .diag = {
+            a11 * a11x11_a12x12_a13x13 + a12 * a11x12_a12x22_a13x23 +
+                a13 * a11x13_a12x23_a13x33,
+            a21 * a21x11_a22x12_a23x13 + a22 * a21x12_a22x22_a23x23 +
+                a23 * a21x13_a22x23_a23x33,
+            a31 * (a31 * x11 + a32 * x12 + a33 * x13) +
+                a32 * (a31 * x12 + a32 * x22 + a33 * x23) +
+                a33 * (a31 * x13 + a32 * x23 + a33 * x33),
+        },
+        .off = {
+            a21 * a11x11_a12x12_a13x13 + a22 * a11x12_a12x22_a13x23 +
+                a23 * a11x13_a12x23_a13x33,
+            a31 * a11x11_a12x12_a13x13 + a32 * a11x12_a12x22_a13x23 +
+                a33 * a11x13_a12x23_a13x33,
+            a31 * a21x11_a22x12_a23x13 + a32 * a21x12_a22x22_a23x23 +
+                a33 * a21x13_a22x23_a23x33,
+        },
+    };
+}
+
+Symmetric3x3 Symmetric3x3::vvT(Vector3 v)
+{
+    return Symmetric3x3 {
+        .diag = { v.x * v.x, v.y * v.y, v.z * v.z },
+        .off = { v.x * v.y, v.x * v.z, v.y * v.z },
+    };
+}
+
+Vector3 Symmetric3x3::operator[](CountT i) const
+{
+    switch (i) {
+    case 0:
+        return { diag[0], off[0], off[1] };
+    case 1:
+        return { off[0], diag[1], off[2] };
+    case 2:
+        return { off[1], off[2], diag[2] };
+    default: __builtin_unreachable();
+    }
+}
+
+Symmetric3x3 & Symmetric3x3::operator+=(const Symmetric3x3 &o)
+{
+    diag += o.diag;
+    off += o.off;
+
+    return *this;
+}
+
+Symmetric3x3 & Symmetric3x3::operator-=(const Symmetric3x3 &o)
+{
+    diag -= o.diag;
+    off -= o.off;
+
+    return *this;
+}
+
+Symmetric3x3 & Symmetric3x3::operator*=(const Symmetric3x3 &o)
+{
+    return *this = (*this * o);
+}
+
+Symmetric3x3 & Symmetric3x3::operator*=(float s)
+{
+    diag *= s;
+    off *= s;
+    return *this;
+}
+
+Symmetric3x3 operator+(Symmetric3x3 a, Symmetric3x3 b)
+{
+    a += b;
+    return a;
+}
+
+Symmetric3x3 operator-(Symmetric3x3 a, Symmetric3x3 b)
+{
+    a -= b;
+    return a;
+}
+
+Symmetric3x3 operator*(Symmetric3x3 a, Symmetric3x3 b)
+{
+    auto [a11, a22, a33] = a.diag;
+    auto [a12, a13, a23] = a.off;
+    auto [b11, b22, b33] = b.diag;
+    auto [b12, b13, b23] = a.off;
+
+    return Symmetric3x3 { 
+        .diag = {
+            a11 * b11 + a12 * b12 + a13 * b13,
+            a12 * b12 + a22 * b22 + a23 * b23,
+            a13 * b13 + a23 * b23 + a33 * b33,
+        },
+        .off = {
+            a11 * b12 + a12 * b22 + a13 * b23,
+            a11 * b13 + a12 * b23 + a13 * b33,
+            a12 * b13 + a22 * b23 + a23 * b33,
+        },
+    };
+}
+
+Symmetric3x3 operator*(Symmetric3x3 a, float b)
+{
+    a *= b;
+    return a;
+}
+
+Symmetric3x3 operator*(float a, Symmetric3x3 b)
+{
+    b *= a;
+    return b;
+}
+
 Vector3 Mat3x4::txfmPoint(Vector3 p) const
 {
     return cols[0] * p.x + cols[1] * p.y + cols[2] * p.z + cols[3];
