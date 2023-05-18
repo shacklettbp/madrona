@@ -469,7 +469,7 @@ struct MassProperties {
 // McAdams et al 2011
 
 // McAdams Algorithm 2:
-static Quat approxGivensQuaternion(Symmetric3x3 m)
+static std::pair<float, float> approxGivensQuaternion(Symmetric3x3 m)
 {
 
     constexpr float gamma = 5.82842712474619f;
@@ -482,15 +482,23 @@ static Quat approxGivensQuaternion(Symmetric3x3 m)
     float sh = a12;
 
     float sh2 = sh * sh;
+
+    // This isn't in the paper, but basically want to make sure the quaternion
+    // performs an identity rotation for already diagonal matrices
+    if (sh2 < 1e-20f) {
+        return { 1.f, 0.f };
+    }
+
     float ch2 = ch * ch;
 
     bool b = (gamma * sh2) < ch2;
 
     float omega = rsqrtApprox(ch2 + sh2);
-    ch = b ? omega * ch : c_star;
-    sh = b ? omega * sh : s_star;
 
-    return Quat { ch, 0, 0, sh };
+    ch = b ? (omega * ch) : c_star;
+    sh = b ? (omega * sh) : s_star;
+
+    return { ch, sh };
 }
 
 // Equation 12: approxGivensQuaternion returns an unscaled quaternion,
@@ -535,28 +543,52 @@ static Symmetric3x3 jacobiIterConjugation(Symmetric3x3 m, float ch, float sh)
 // Inertia tensor is symmetric positive semi definite, so we only need to
 // perform the symmetric eigenanalysis part of the algorithm.
 //
-// Jacobi order: (p, q) = (1, 2), (1, 3), (2, 3), (1, 2)
+// Jacobi order: (p, q) = (1, 2), (1, 3), (2, 3), (1, 2), (1, 3) ...
+// Pairs: (1, 2) = (a11, a22, a12); (1, 3) = (a11, a33, a13);
+//        (2, 3) = (a22, a33, a23)
 static void diagonalizeInertiaTensor(const Symmetric3x3 &m,
                                      Diag3x3 *out_diag,
                                      Quat *out_rot)
 {
     using namespace math;
 
-    constexpr CountT num_jacobi_iters = 16;
+    constexpr CountT num_jacobi_iters = 8;
 
     Symmetric3x3 cur_mat = m;
     Quat accumulated_rot { 1, 0, 0, 0 };
     for (CountT i = 0; i < num_jacobi_iters; i++) {
-        Quat cur_rot = approxGivensQuaternion(cur_mat);
-        printf("%f %f %f %f\n",
-               cur_rot.w,
-               cur_rot.x,
-               cur_rot.y,
-               cur_rot.z);
+        printf("Cur:\n"
+               "%f %f %f\n"
+               "%f %f %f\n"
+               "%f %f %f\n",
+               cur_mat[0].x, cur_mat[1].x, cur_mat[2].x,
+               cur_mat[0].y, cur_mat[1].y, cur_mat[2].y,
+               cur_mat[0].z, cur_mat[1].z, cur_mat[2].z);
 
-        cur_mat = jacobiIterConjugation(cur_mat, cur_rot.w, cur_rot.z);
+        auto [ch1, sh1] = approxGivensQuaternion(cur_mat);
+        cur_mat = jacobiIterConjugation(cur_mat, ch1, sh1);
 
-        accumulated_rot = cur_rot * accumulated_rot;
+        // Rearrange matrix so unrotated elements are in upper left corner
+        std::swap(cur_mat.diag[1], cur_mat.diag[2]);
+        std::swap(cur_mat.off[0], cur_mat.off[1]);
+
+        auto [ch2, sh2] = approxGivensQuaternion(cur_mat);
+        cur_mat = jacobiIterConjugation(cur_mat, ch2, sh2);
+
+        std::swap(cur_mat.diag[0], cur_mat.diag[2]);
+        std::swap(cur_mat.off[0], cur_mat.off[2]);
+
+        auto [ch3, sh3] = approxGivensQuaternion(cur_mat);
+        cur_mat = jacobiIterConjugation(cur_mat, ch3, sh3);
+
+        cur_mat = Symmetric3x3 {
+            .diag = { cur_mat.diag[2], cur_mat.diag[0], cur_mat.diag[1]  },
+            .off = { cur_mat.off[1], cur_mat.off[2], cur_mat.off[0] },
+        };
+
+        // This could be optimized
+        accumulated_rot = Quat { ch1, 0, 0, sh1 } * Quat { ch2, 0, sh2, 0 } *
+            Quat { ch3, sh3, 0, 0 } * accumulated_rot;
     }
 
     Quat final_rot = accumulated_rot.normalize();
@@ -585,7 +617,7 @@ static void diagonalizeInertiaTensor(const Symmetric3x3 &m,
                        q33 * (m13 * q13 + m23 * q23 + m33 * q33);
     }
 
-    *out_rot = accumulated_rot;
+    *out_rot = final_rot;
 }
 
 // http://number-none.com/blow/inertia/
