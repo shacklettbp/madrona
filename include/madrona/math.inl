@@ -840,8 +840,11 @@ Diag3x3 operator/(Diag3x3 a, float b)
 
 Diag3x3 operator/(float a, Diag3x3 b)
 {
-    b /= a;
-    return b;
+    return {
+        a / b.d0,
+        a / b.d1,
+        a / b.d2,
+    };
 }
 
 Vector3 operator*(Diag3x3 d, Vector3 v)

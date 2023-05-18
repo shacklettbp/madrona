@@ -508,10 +508,6 @@ static void applyJointAxisConstraint(
     Vector3 axis1 = q1.rotateVec(axis1_local);
     Vector3 axis2 = q2.rotateVec(axis2_local);
 
-    printf("(%f %f %f) (%f %f %f)\n",
-        axis1.x, axis1.y, axis1.z,
-        axis2.x, axis2.y, axis2.z);
-
     Vector3 delta_q = cross(axis1, axis2);
     float delta_q_magnitude = delta_q.length();
     
