@@ -194,16 +194,6 @@ static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
     free(mesh.vertices);
 }
 
-PhysicsLoader::ImportedRigidBodies::~ImportedRigidBodies()
-{
-    // FIXME: change halfEdgeMesh data ownership
-    for (CollisionPrimitive &prim : collisionPrimitives) {
-        if (prim.type == CollisionPrimitive::Type::Hull) {
-            freeHalfEdgeMesh(prim.hull.halfEdgeMesh);
-        }
-    }
-}
-
 static inline HalfEdgeMesh buildHalfEdgeMesh(
     const Vector3 *vert_positions,
     CountT num_vertices, 
@@ -557,6 +547,7 @@ static void diagonalizeInertiaTensor(const Symmetric3x3 &m,
     Symmetric3x3 cur_mat = m;
     Quat accumulated_rot { 1, 0, 0, 0 };
     for (CountT i = 0; i < num_jacobi_iters; i++) {
+#if 0
         printf("Cur:\n"
                "%f %f %f\n"
                "%f %f %f\n"
@@ -564,6 +555,7 @@ static void diagonalizeInertiaTensor(const Symmetric3x3 &m,
                cur_mat[0].x, cur_mat[1].x, cur_mat[2].x,
                cur_mat[0].y, cur_mat[1].y, cur_mat[2].y,
                cur_mat[0].z, cur_mat[1].z, cur_mat[2].z);
+#endif
 
         auto [ch1, sh1] = approxGivensQuaternion(cur_mat);
         cur_mat = jacobiIterConjugation(cur_mat, ch1, sh1);
@@ -983,6 +975,7 @@ PhysicsLoader::ImportedRigidBodies PhysicsLoader::importRigidBodyData(
 
     return ImportedRigidBodies {
         .hullData = std::move(hull_data),
+        .collisionPrimitives =  std::move(collision_prims),
         .primitiveAABBs = std::move(prim_aabbs),
         .primOffsets = std::move(prim_offsets),
         .primCounts = std::move(prim_counts),

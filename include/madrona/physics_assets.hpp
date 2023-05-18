@@ -32,8 +32,6 @@ public:
     };
 
     struct ImportedRigidBodies {
-        ~ImportedRigidBodies();
-
         struct MergedHullData {
             HeapArray<geometry::HalfEdge> halfEdges;
             HeapArray<uint32_t> faceBaseHEs;

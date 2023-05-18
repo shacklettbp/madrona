@@ -247,8 +247,11 @@ struct Symmetric3x3 {
     Vector3 diag;
     Vector3 off;
 
+    // Computes A * A^T
     static inline Symmetric3x3 AAT(Mat3x3 A);
+    // Computes A * X * A^T
     static inline Symmetric3x3 AXAT(Mat3x3 A, Symmetric3x3 X);
+    // Computes v * v^T
     static inline Symmetric3x3 vvT(Vector3 v);
 
     inline Vector3 operator[](CountT i) const;
