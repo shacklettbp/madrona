@@ -328,10 +328,10 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         sizeof(HalfEdge) * (src_mesh.numHalfEdges));
 
     auto new_face_base_hedges = (uint32_t *)malloc(
-        sizeof(uint32_t) * src_mesh.numHalfEdges);
+        sizeof(uint32_t) * src_mesh.numFaces);
 
     auto new_faceplanes = (Plane *)malloc(
-        sizeof(Plane) * src_mesh.numHalfEdges);
+        sizeof(Plane) * src_mesh.numFaces);
 
     auto new_vertices = (Vector3 *)malloc(
         sizeof(Vector3) * src_mesh.numVertices);
@@ -373,11 +373,9 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         uint32_t cur_hedge_idx = face_start_hedge;
         uint32_t new_face_root = sentinel;
         do {
-            // If we wind up back at the same half edge twice, there is a
-            // problem. This ensures that following the same next pointer twice
-            // will trigger an assert
+            // Should only loop when the face is complete. At that point,
+            // the loop will exit.
             next_remap[cur_hedge_idx] = sentinel;
-            assert(cur_hedge_idx != sentinel);
 
             uint32_t twin_hedge_idx = src_mesh.twinIDX(cur_hedge_idx);
 
@@ -418,8 +416,13 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             new_hedges[prev_new_hedge_idx].next = new_hedge_idx;
 
             cur_hedge_idx = next_remap[cur_hedge.next];
+            // This asserts that the only time we've looped is when the 
+            // current face is complete
+            assert(cur_hedge_idx != sentinel ||
+                   cur_hedge.next == face_start_hedge);
+
             prev_new_hedge_idx = new_hedge_idx;
-        } while (cur_hedge_idx != face_start_hedge);
+        } while (cur_hedge_idx != sentinel);
 
         // Set final next link in loop
         new_hedges[prev_new_hedge_idx].next = new_face_root;
@@ -428,10 +431,12 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
 
     assert(num_new_faces > 0);
 
-    // FIXME: the above code has two issues:
+    // FIXME: the above code has multiple issues:
     // 1) It can orphan vertices. These shuold be filtered out in a final pass
     // 2) There is some tolerance in the normal, which means face vertices may
     // not actually form a perfect plane. Worth trying to correct errors?
+    // 3) Due to the normal tolerance, could theoretically get non-convex faces
+    // as a result of merging. Probably should at least add a check for this.
 
     return HalfEdgeMesh {
         .halfEdges = new_hedges,
