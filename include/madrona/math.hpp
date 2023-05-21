@@ -10,8 +10,6 @@
 #include <cstdint>
 #include <cmath>
 #include <cfloat>
-#include <cstdio>
-#include <bit>
 
 #include <madrona/types.hpp>
 

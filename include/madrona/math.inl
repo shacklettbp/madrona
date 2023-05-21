@@ -1,3 +1,7 @@
+#ifndef MADRONA_GPU_MODE
+#include <bit>
+#endif
+
 namespace madrona::math {
 
 inline constexpr float toRadians(float degrees)
@@ -9,10 +13,14 @@ inline constexpr float toRadians(float degrees)
 // https://en.wikipedia.org/wiki/Fast_inverse_square_root
 inline constexpr float rsqrtApprox(float x)
 {
+#ifdef MADRONA_GPU_MODE
+    const float y = __uint_as_float(0x5F1FFFF9 - (__float_as_uint(x) >> 1));
+	return y * (0.703952253f * (2.38924456f - x * y * y));
+#else
     using std::bit_cast;
-
     const float y = bit_cast<float>(0x5F1FFFF9 - (bit_cast<uint32_t>(x) >> 1));
 	return y * (0.703952253f * (2.38924456f - x * y * y));
+#endif
 }
 
 float Vector2::dot(const Vector2 &o) const

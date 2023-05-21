@@ -1224,7 +1224,7 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
         return NarrowphaseResult {
             sat,
 #ifdef MADRONA_GPU_MODE
-            a_he_mesh.mVertices, b_he_mesh.mVertices,
+            a_he_mesh.vertices, b_he_mesh.vertices,
 #else
             a_hull_state.mesh.vertices, b_hull_state.mesh.vertices,
 #endif
@@ -1319,7 +1319,7 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
         return NarrowphaseResult {
             sat,
 #ifdef MADRONA_GPU_MODE
-            a_he_mesh.mVertices, nullptr,
+            a_he_mesh.vertices, nullptr,
 #else
             a_hull_state.mesh.vertices, nullptr,
 #endif
