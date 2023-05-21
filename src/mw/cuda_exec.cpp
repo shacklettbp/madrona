@@ -249,7 +249,7 @@ private:
 
 namespace madrona {
 
-__attribute__((constructor)) static void setCudaHeapSize()
+static void setCudaHeapSize()
 {
     // FIXME size limit for device side malloc:
     REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
@@ -1733,6 +1733,7 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
         const StateConfig &state_cfg, const CompileConfig &compile_cfg)
     : impl_(nullptr)
 {
+    setCudaHeapSize();
     REQ_CUDA(cudaSetDevice(state_cfg.gpuID));
     cudaDeviceProp dev_prop;
     REQ_CUDA(cudaGetDeviceProperties(&dev_prop, state_cfg.gpuID));

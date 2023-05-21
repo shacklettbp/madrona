@@ -366,10 +366,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
 
         uint32_t face_start_hedge = src_mesh.faceBaseHalfEdges[orig_face_idx];
 
-        // To avoid special casing, initial prev is set to the ID
-        // of the next half edge to be assigned. The correct next will be
-        // written after the loop completes.
-        uint32_t prev_new_hedge_idx = num_new_hedges;
+        uint32_t prev_new_hedge_idx = sentinel;
         uint32_t cur_hedge_idx = face_start_hedge;
         uint32_t new_face_root = sentinel;
         do {
@@ -413,7 +410,9 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
                 .face = new_face_idx,
             };
 
-            new_hedges[prev_new_hedge_idx].next = new_hedge_idx;
+            if (prev_new_hedge_idx != sentinel) {
+                new_hedges[prev_new_hedge_idx].next = new_hedge_idx;
+            }
 
             cur_hedge_idx = next_remap[cur_hedge.next];
             // This asserts that the only time we've looped is when the 
