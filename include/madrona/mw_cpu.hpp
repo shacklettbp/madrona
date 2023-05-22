@@ -64,6 +64,8 @@ public:
     using ThreadPoolExecutor::rgbObservations;
     using ThreadPoolExecutor::depthObservations;
 
+    inline WorldT & getWorldData(CountT world_idx);
+
 private:
     struct RunData {
         ContextT ctx;

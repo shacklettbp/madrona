@@ -50,6 +50,13 @@ void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::run()
 }
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
+WorldT & TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::getWorldData(
+    CountT world_idx)
+{
+    return world_datas_[world_idx];
+}
+
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::stepWorld(
     void *data_raw)
 {
