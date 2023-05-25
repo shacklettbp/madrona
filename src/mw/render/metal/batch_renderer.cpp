@@ -57,6 +57,7 @@ struct BatchRenderer::Impl {
     InstanceData *instanceDataBase;
     HeapArray<PerspectiveCameraData *> viewCamPointers;
     uint32_t *numViewsBase;
+    int32_t renderDataArgBufferOffset;
     int32_t renderDataDrawCountOffset;
     MTL::Heap *outHeap;
     MTL::Buffer *rgbOutBuffer;
@@ -414,6 +415,8 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         MTL::MutabilityImmutable);
     multiview_setup_pipeline_desc->buffers()->object(1)->setMutability(
         MTL::MutabilityImmutable);
+    multiview_setup_pipeline_desc->buffers()->object(2)->setMutability(
+        MTL::MutabilityImmutable);
 
     MTL::ComputePipelineState *multiview_setup_pipeline =
         dev->newComputePipelineState(multiview_setup_pipeline_desc,
@@ -466,6 +469,7 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
     MTL::IndirectCommandBuffer *draw_icb = dev->newIndirectCommandBuffer(
         draw_icb_desc, max_draws, MTL::ResourceStorageModePrivate |
         MTL::ResourceHazardTrackingModeUntracked);
+    assert(draw_icb);
 
     auto *draw_depth_test_desc =
         MTL::DepthStencilDescriptor::alloc()->init()->autorelease();
@@ -487,8 +491,9 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         num_engine_interop_bytes, MTL::ResourceStorageModeShared |
         MTL::ResourceHazardTrackingModeUntracked);
 
-    int64_t render_data_offsets[2];
+    int64_t render_data_offsets[3];
     int64_t num_render_data_bytes = utils::computeBufferOffsets({
+            sizeof(DrawICBArgBuffer),
             sizeof(RenderArgBuffer),
             (int64_t)sizeof(DrawInstanceData) * max_draws,
             (int64_t)sizeof(MTL::IndirectCommandBufferExecutionRange),
@@ -502,20 +507,30 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         uint64_t render_argbuffer_gpu_addr = render_data_buf->gpuAddress();
         uint64_t engine_interop_gpu_addr = engine_interop_buf->gpuAddress();
 
-        MTL::Buffer *render_argbuffer_staging_buf = dev->newBuffer(
-            sizeof(RenderArgBuffer),
+        uint64_t num_staging_bytes =
+            render_data_offsets[0] + sizeof(RenderArgBuffer);
+
+        MTL::Buffer *render_argbuffers_staging = dev->newBuffer(
+            num_staging_bytes,
             MTL::ResourceStorageModeShared |
             MTL::ResourceHazardTrackingModeUntracked |
             MTL::ResourceCPUCacheModeWriteCombined)->autorelease();
 
-        auto *render_argbuffer_staging =
-            (RenderArgBuffer *)render_argbuffer_staging_buf->contents();
+        auto *staging_argbuffers_base = 
+            (char *)render_argbuffers_staging->contents();
 
-        render_argbuffer_staging->drawICB = draw_icb->gpuResourceID();
+        auto *icb_argbuffer_staging = (DrawICBArgBuffer *)(
+            staging_argbuffers_base);
+
+        icb_argbuffer_staging->hdl = draw_icb->gpuResourceID();
+
+        auto *render_argbuffer_staging = (RenderArgBuffer *)(
+                staging_argbuffers_base + render_data_offsets[0]);
+
         render_argbuffer_staging->drawInstances =
-            render_argbuffer_gpu_addr + render_data_offsets[0];
+            render_argbuffer_gpu_addr + render_data_offsets[1];
         render_argbuffer_staging->numDraws =
-            render_argbuffer_gpu_addr + render_data_offsets[1] + 4;
+            render_argbuffer_gpu_addr + render_data_offsets[2] + 4;
 
         render_argbuffer_staging->engineInstances = engine_interop_gpu_addr;
         render_argbuffer_staging->views =
@@ -530,8 +545,8 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         MTL::BlitCommandEncoder *blit_enc =
             render_args_setup_cmd->blitCommandEncoder();
         // Setup argbuffer
-        blit_enc->copyFromBuffer(render_argbuffer_staging_buf, 0,
-            render_data_buf, 0, sizeof(RenderArgBuffer));
+        blit_enc->copyFromBuffer(render_argbuffers_staging, 0,
+            render_data_buf, 0, num_staging_bytes);
         blit_enc->endEncoding();
         render_args_setup_cmd->commit();
         render_args_setup_cmd->waitUntilCompleted();
@@ -593,7 +608,8 @@ BatchRenderer::Impl * BatchRenderer::Impl::make(
         .viewCamPointers = std::move(view_cam_ptrs),
         .numViewsBase = (uint32_t *)(
             engine_interop_base_ptr + engine_interop_offsets[1]),
-        .renderDataDrawCountOffset = int32_t(render_data_offsets[1]),
+        .renderDataArgBufferOffset = int32_t(render_data_offsets[0]),
+        .renderDataDrawCountOffset = int32_t(render_data_offsets[2]),
         .rgbOutBuffer = rgb_out_buffer,
         .depthOutBuffer = depth_out_buffer,
         .assetMgr = asset_mgr,
@@ -680,7 +696,9 @@ void BatchRenderer::Impl::render()
     multiview_setup_enc->waitForFence(icbSetupFence);
     multiview_setup_enc->setComputePipelineState(multiviewSetupPipeline);
     multiview_setup_enc->setBuffer(renderDataBuffer, 0, 0);
-    multiview_setup_enc->setBuffer(assets[0].buffer, 0, 1);
+    multiview_setup_enc->setBuffer(renderDataBuffer,
+                                   renderDataArgBufferOffset, 1);
+    multiview_setup_enc->setBuffer(assets[0].buffer, 0, 2);
     multiview_setup_enc->setThreadgroupMemoryLength(16, 0);
     multiview_setup_enc->useHeap(assets[0].heap);
     multiview_setup_enc->useResource(engineInteropBuffer,
@@ -700,7 +718,8 @@ void BatchRenderer::Impl::render()
     draw_enc->setDepthStencilState(drawDepthTest);
     draw_enc->setRenderPipelineState(drawPipeline);
     draw_enc->setCullMode(MTL::CullModeFront);
-    draw_enc->setVertexBuffer(renderDataBuffer, 0, 0);
+    draw_enc->setVertexBuffer(renderDataBuffer,
+                              renderDataArgBufferOffset, 0);
     draw_enc->setVertexBuffer(assets[0].buffer, 0, 1);
     draw_enc->useHeap(assets[0].heap, MTL::RenderStageVertex);
 

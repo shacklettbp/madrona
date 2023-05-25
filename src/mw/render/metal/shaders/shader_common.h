@@ -88,8 +88,11 @@ struct AssetsArgBuffer {
     MADRONA_METAL_CONST_PTR(ObjectData) objects;
 };
 
+struct DrawICBArgBuffer {
+    command_buffer hdl;
+};
+
 struct RenderArgBuffer {
-    command_buffer drawICB;
     MADRONA_METAL_DEV_PTR(DrawInstanceData) drawInstances;
     MADRONA_METAL_DEV_PTR(atomic_int) numDraws;
     MADRONA_METAL_CONST_PTR(InstanceData) engineInstances;

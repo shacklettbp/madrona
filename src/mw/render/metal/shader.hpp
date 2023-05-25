@@ -27,6 +27,7 @@ using MeshData = shader::MeshData;
 using ObjectData = shader::ObjectData;
 using DrawInstanceData = shader::DrawInstanceData;
 using AssetsArgBuffer = shader::AssetsArgBuffer;
+using DrawICBArgBuffer = shader::DrawICBArgBuffer;
 using RenderArgBuffer = shader::RenderArgBuffer;
 
 }

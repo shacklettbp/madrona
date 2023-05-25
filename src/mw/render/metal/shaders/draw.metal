@@ -113,8 +113,9 @@ DrawInstanceData packDrawInstanceData(float3x3 to_view_rot,
 
 [[max_total_threads_per_threadgroup(consts::threadsPerInstance)]]
 kernel void setupMultiview(
-    constant RenderArgBuffer &render_args [[buffer(0)]],
-    constant AssetsArgBuffer &asset_args [[buffer(1)]], 
+    constant DrawICBArgBuffer &draw_icb [[buffer(0)]],
+    constant RenderArgBuffer &render_args [[buffer(1)]],
+    constant AssetsArgBuffer &asset_args [[buffer(2)]],
     threadgroup int32_t *group_draw_idx [[threadgroup(0)]],
     uint group_idx [[threadgroup_position_in_grid]],
     uint group_thread_offset [[thread_index_in_threadgroup]])
@@ -172,7 +173,7 @@ kernel void setupMultiview(
                 view_layer_idx, cam_data.xScale, cam_data.yScale,
                 cam_data.zNear);
 
-            render_command draw_cmd(render_args.drawICB, draw_idx);
+            render_command draw_cmd(draw_icb.hdl, draw_idx);
 
             constant MeshData &mesh_data =
                 asset_args.meshes[obj_data.meshOffset + mesh_idx];
