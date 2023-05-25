@@ -5,7 +5,7 @@
 #pragma GCC diagnostic ignored "-Weverything"
 #endif
 #include <nanobind/nanobind.h>
-#include <nanobind/tensor.h>
+#include <nanobind/ndarray.h>
 #if defined(MADRONA_CLANG) || defined(MADRONA_GCC)
 #pragma GCC diagnostic pop
 #endif
@@ -77,7 +77,7 @@ static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
 
 NB_MODULE(madrona_python, m) {
     nb::class_<Tensor>(m, "Tensor")
-        .def("__init__", ([](Tensor *dst, nb::tensor<> torch_tensor) {
+        .def("__init__", ([](Tensor *dst, nb::ndarray<> torch_tensor) {
             Optional<int> gpu_id = Optional<int>::none();
             if (torch_tensor.device_type() == nb::device::cuda::value) {
                 gpu_id = torch_tensor.device_id();
@@ -108,7 +108,7 @@ NB_MODULE(madrona_python, m) {
         .def("to_torch", [](const Tensor &tensor) {
             nb::dlpack::dtype type = toDLPackType(tensor.type());
 
-            return nb::tensor<nb::pytorch, void> {
+            return nb::ndarray<nb::pytorch, void> {
                 tensor.devicePtr(),
                 (size_t)tensor.numDims(),
                 (const size_t *)tensor.dims(),
