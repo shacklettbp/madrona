@@ -318,6 +318,7 @@ struct GLTFNode {
 
 struct GLTFLoader::Impl {
     Span<char> errBuf;
+    DynArray<char> jsonBuf;
     ondemand::parser jsonParser;
 
     const char *curFileName;
@@ -355,7 +356,7 @@ static bool jsonReadVecImpl(const LoaderData &loader,
         auto v = comp.get_double();
         if (v.error()) {
             loader.recordJSONError(v.error());
-            return false;
+            return true;
         }
 
         if (component_idx < num_components) {
@@ -368,10 +369,10 @@ static bool jsonReadVecImpl(const LoaderData &loader,
     if (component_idx != num_components) {
         loader.recordError(
             "Incorrect number of components when parsing Vector");
-        return false;
+        return true;
     }
 
-    return true;
+    return false;
 }
 
 template <typename T>
@@ -412,14 +413,14 @@ static bool jsonGetOr(const LoaderData &loader,
             return jsonReadVec<T>(loader, tmp, out);
         } else {
             out = T(tmp);
-            return true;
+            return false;
         }
     } else if (err == simdjson::NO_SUCH_FIELD) {
         out = default_val;
-        return true;
+        return false;
     } else {
         loader.recordJSONError(err);
-        return false;
+        return true;
     }
 }
 
@@ -455,12 +456,14 @@ static bool gltfLoad(const char *gltf_filename,
         binary_file.read(reinterpret_cast<char *>(&json_header),
                          sizeof(ChunkHeader));
 
-        padded_string json_buffer(json_header.chunkLength);
+        loader.jsonBuf.resize(json_header.chunkLength + SIMDJSON_PADDING,
+                              [](auto *) {});
 
-        binary_file.read(reinterpret_cast<char *>(json_buffer.data()),
+        binary_file.read(reinterpret_cast<char *>(loader.jsonBuf.data()),
                          json_header.chunkLength);
 
-        auto err = loader.jsonParser.iterate(json_buffer).get(json_doc);
+        auto err = loader.jsonParser.iterate(loader.jsonBuf.data(),
+            json_header.chunkLength, loader.jsonBuf.size()).get(json_doc);
 
         if (err) {
             loader.recordJSONError(err);
@@ -689,14 +692,14 @@ static bool gltfLoad(const char *gltf_filename,
     }
 
     //cout << "textures" << endl;
+    
+    printf("materials\n");
 
     auto materials = json_doc["materials"].get_array();
 
     if (!materials.error()) {
         for (auto material : materials.value_unsafe()) {
             const uint32_t tex_missing = loader.textures.size();
-            auto exts = material["extensions"];
-
             auto pbr = material["pbrMetallicRoughness"];
             uint32_t base_color_idx;
             bool mat_err = jsonGetOr(
@@ -741,6 +744,7 @@ static bool gltfLoad(const char *gltf_filename,
                 jsonGetOr(loader, pbr["roughnessFactor"], 1.f, roughness);
             if (mat_err) return false;
 
+            auto exts = material["extensions"];
             auto transmission_ext =
                 exts["KHR_materials_transmission"];
 
@@ -935,6 +939,8 @@ static bool gltfLoad(const char *gltf_filename,
     }
 
     //cout << "materials" << endl;
+    
+    printf("meshes\n");
     
     auto meshes = json_doc["meshes"].get_array();
     if (meshes.error()) {
@@ -1385,6 +1391,11 @@ static bool gltfParseMesh(
 
             max_idx = position_accessor->size() - 1;
         }
+        uint32_t num_faces = indices.size() / 3;
+        if (num_faces * 3 != indices.size()) {
+            loader.recordError("Non-triangular GLTF not supported");
+            return false;
+        }
 
         uint32_t num_vertices = max_idx + 1;
 
@@ -1484,6 +1495,8 @@ static bool gltfParseMesh(
             .indices = idx_ptr,
             .faceCounts = nullptr,
             .numVertices = num_vertices,
+            .numFaces = num_faces,
+            .materialIDX = 0, // FIXME
         });
     }
 
@@ -1570,6 +1583,8 @@ static bool gltfImportAssets(LoaderData &loader,
     }
 
     CountT total_new_vertices = 0;
+    CountT total_new_normals = 0;
+    CountT total_new_tangents = 0;
     CountT total_new_meshes = 0;
     for (CountT inst_idx = new_instances_start;
          inst_idx < imported.instances.size(); inst_idx++) {
@@ -1577,6 +1592,14 @@ static bool gltfImportAssets(LoaderData &loader,
         const SourceObject &src_obj = imported.objects[inst.objIDX];
         for (const SourceMesh &src_mesh : src_obj.meshes) {
             total_new_vertices += src_mesh.numVertices;
+
+            if (src_mesh.normals) {
+                total_new_normals += src_mesh.numVertices;
+            }
+
+            if (src_mesh.tangentAndSigns) {
+                total_new_tangents += src_mesh.numVertices;
+            }
         }
 
         total_new_meshes += src_obj.meshes.size();
@@ -1584,7 +1607,8 @@ static bool gltfImportAssets(LoaderData &loader,
 
     DynArray<SourceMesh> merged_meshes(total_new_meshes);
     DynArray<math::Vector3> new_positions_arr(total_new_vertices);
-    DynArray<math::Vector3> new_normals_arr(total_new_vertices);
+    DynArray<math::Vector3> new_normals_arr(total_new_normals);
+    DynArray<math::Vector4> new_tangentsigns_arr(total_new_tangents);
 
     for (CountT inst_idx = new_instances_start;
          inst_idx < imported.instances.size(); inst_idx++) {
@@ -1596,26 +1620,44 @@ static bool gltfImportAssets(LoaderData &loader,
         const math::Vector3 *new_mesh_normals_ptr =
             new_normals_arr.data() + new_normals_arr.size();
 
+        const math::Vector4 *new_mesh_tangents_ptr =
+            new_tangentsigns_arr.data() + new_tangentsigns_arr.size();
+
         for (const SourceMesh &src_mesh : src_obj.meshes) {
             for (CountT i = 0; i < src_mesh.numVertices; i++) {
                 math::Vector3 orig_pos = src_mesh.positions[i];
-                math::Vector3 orig_normal = src_mesh.normals[i];
 
                 math::Vector3 new_pos =
                     inst.rotation.rotateVec(inst.scale * orig_pos) +
                     inst.translation;
-
-                math::Vector3 new_normal =
-                    inst.rotation.rotateVec(inst.scale.inv() * orig_normal);
-
                 new_positions_arr.push_back(new_pos);
-                new_normals_arr.push_back(new_normal);
+
+                if (src_mesh.normals) {
+                    math::Vector3 orig_normal = src_mesh.normals[i];
+                    math::Vector3 new_normal =
+                        inst.rotation.rotateVec(inst.scale.inv() * orig_normal);
+                    new_normals_arr.push_back(new_normal);
+                }
+
+                if (src_mesh.tangentAndSigns) {
+                    math::Vector3 orig_tangent = src_mesh.tangentAndSigns[i].xyz();
+                    math::Vector3 new_tangent = inst.rotation.rotateVec(
+                        inst.scale * orig_tangent) + inst.translation;
+                    new_tangentsigns_arr.push_back(math::Vector4 {
+                        new_tangent.x,
+                        new_tangent.y,
+                        new_tangent.z,
+                        src_mesh.tangentAndSigns[i].w,
+                    });
+                }
             }
 
             merged_meshes.push_back(SourceMesh {
                 .positions = new_mesh_positions_ptr,
-                .normals = new_mesh_normals_ptr,
-                .tangentAndSigns = src_mesh.tangentAndSigns,
+                .normals = src_mesh.normals ?
+                    new_mesh_normals_ptr : nullptr,
+                .tangentAndSigns = src_mesh.tangentAndSigns ?
+                    new_mesh_tangents_ptr : nullptr,
                 .uvs = src_mesh.uvs,
                 .indices = src_mesh.indices,
                 .faceCounts = src_mesh.faceCounts,
@@ -1656,6 +1698,7 @@ static bool gltfImportAssets(LoaderData &loader,
 
 GLTFLoader::Impl::Impl(Span<char> err_buf)
     : errBuf(err_buf),
+      jsonBuf(0),
       jsonParser(),
       curFileName(nullptr),
       sceneDirectory(),

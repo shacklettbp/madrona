@@ -49,6 +49,10 @@ set_property(TARGET simdjson PROPERTY
 target_link_libraries(simdjson PRIVATE
     madrona_libcxx)
 
+if (MADRONA_X64)
+    target_compile_options(simdjson PRIVATE -march=haswell)
+endif()
+
 set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_ORIG})
 
 if (MADRONA_ENABLE_TESTS)

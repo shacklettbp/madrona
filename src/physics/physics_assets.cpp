@@ -341,10 +341,23 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
 
     HeapArray<uint32_t> new_hedge_idxs(src_mesh.numHalfEdges);
     HeapArray<uint32_t> next_remap(src_mesh.numHalfEdges);
+    HeapArray<bool> hedge_processed(src_mesh.numHalfEdges);
     for (CountT i = 0; i < new_hedge_idxs.size(); i++) {
-        new_hedge_idxs[i] = 0xFFFF'FFFF;
+        new_hedge_idxs[i] = sentinel;
         next_remap[i] = i;
+        hedge_processed[i] = false;
     }
+
+    auto remapNext = [&next_remap](uint32_t next) {
+        while (true) {
+            uint32_t prev_next = next;
+            next = next_remap[next];
+
+            if (next == prev_next) {
+                return next;
+            }
+        }
+    };
 
     HeapArray<bool> faces_merged(src_mesh.numFaces);
     for (CountT i = 0; i < faces_merged.size(); i++) {
@@ -369,10 +382,14 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         uint32_t prev_new_hedge_idx = sentinel;
         uint32_t cur_hedge_idx = face_start_hedge;
         uint32_t new_face_root = sentinel;
+
+        printf("Start: %u %u, %u\n", orig_face_idx, new_face_idx,
+               face_start_hedge);
         do {
+            printf("  H: %u\n", cur_hedge_idx);
             // Should only loop when the face is complete. At that point,
             // the loop will exit.
-            next_remap[cur_hedge_idx] = sentinel;
+            hedge_processed[cur_hedge_idx] = true;
 
             uint32_t twin_hedge_idx = src_mesh.twinIDX(cur_hedge_idx);
 
@@ -386,9 +403,24 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
 
             if (dot(cur_normal, twin_normal) >= 1.f - tolerance) {
                 faces_merged[twin_hedge.face] = true;
-                next_remap[twin_hedge_idx] = cur_hedge.next;
+
+                uint32_t cur_next = remapNext(cur_hedge.next);
+                uint32_t twin_next = remapNext(twin_hedge.next);
+
+                printf("  R: %u > %u\n", cur_hedge_idx, twin_next);
+                printf("  R: %u > %u\n", twin_hedge_idx, cur_next);
+
+                next_remap[twin_hedge_idx] = cur_next;
+                next_remap[cur_hedge_idx] = twin_next;
                 
-                cur_hedge_idx = twin_hedge.next;
+                if (twin_next == cur_hedge_idx) {
+                    printf("    B => %u\n\n", cur_next);
+                    cur_hedge_idx = cur_next;
+                } else {
+                    printf("    => %u\n\n", twin_next);
+                    cur_hedge_idx = twin_next;
+                }
+
                 continue;
             }
 
@@ -397,6 +429,10 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
                 new_hedge_idx = num_new_hedges;
                 new_hedge_idxs[cur_hedge_idx] = new_hedge_idx;
                 new_hedge_idxs[twin_hedge_idx] = new_hedge_idx + 1;
+
+                printf("  A: %u > %u & %u > %u\n",
+                       cur_hedge_idx, new_hedge_idx, twin_hedge_idx,
+                       new_hedge_idx + 1);
                 num_new_hedges += 2;
             }
 
@@ -414,14 +450,16 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
                 new_hedges[prev_new_hedge_idx].next = new_hedge_idx;
             }
 
-            cur_hedge_idx = next_remap[cur_hedge.next];
+            cur_hedge_idx = remapNext(cur_hedge.next);
+
+            printf("  n: %u > %u\n\n", cur_hedge.next, cur_hedge_idx);
             // This asserts that the only time we've looped is when the 
             // current face is complete
-            assert(cur_hedge_idx != sentinel ||
-                   cur_hedge.next == face_start_hedge);
+            //assert(!hedge_processed[cur_hedge_idx] ||
+            //       cur_hedge_idx == face_start_hedge);
 
             prev_new_hedge_idx = new_hedge_idx;
-        } while (cur_hedge_idx != sentinel);
+        } while (!hedge_processed[cur_hedge_idx]);
 
         // Set final next link in loop
         new_hedges[prev_new_hedge_idx].next = new_face_root;
