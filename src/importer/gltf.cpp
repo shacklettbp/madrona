@@ -669,12 +669,18 @@ static bool gltfLoad(const char *gltf_filename,
             uint64_t source_idx;
             auto src_err = texture["source"].get(source_idx);
             if (src_err) {
-                auto ext_err =
+                auto google_ext_err =
                     texture["extensions"]["GOOGLE_texture_basis"]["source"]
                         .get(source_idx);
-                if (ext_err) {
-                    loader.recordError("Texture without source");
-                    return false;
+                if (google_ext_err) {
+                    auto khr_ext_err =
+                        texture["extensions"]["KHR_texture_basisu"]["source"]
+                            .get(source_idx);
+
+                    if (khr_ext_err) {
+                        loader.recordError("Texture without source");
+                        return false;
+                    }
                 }
             }
 
@@ -693,8 +699,6 @@ static bool gltfLoad(const char *gltf_filename,
 
     //cout << "textures" << endl;
     
-    printf("materials\n");
-
     auto materials = json_doc["materials"].get_array();
 
     if (!materials.error()) {
@@ -939,8 +943,6 @@ static bool gltfLoad(const char *gltf_filename,
     }
 
     //cout << "materials" << endl;
-    
-    printf("meshes\n");
     
     auto meshes = json_doc["meshes"].get_array();
     if (meshes.error()) {
