@@ -1530,18 +1530,24 @@ static inline void runNarrowphase(
 
     const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
 
-    ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
-    ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
+    uint32_t a_prim_idx, b_prim_idx;
+    {
+        ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
+        ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
+    
+        const uint32_t a_prim_offset =
+            obj_mgr.rigidBodyPrimitiveOffsets[a_obj.idx];
+        const uint32_t b_prim_offset  =
+            obj_mgr.rigidBodyPrimitiveOffsets[b_obj.idx];
+    
+        a_prim_idx = a_prim_offset + candidate_collision.aPrim;
+        b_prim_idx = b_prim_offset + candidate_collision.bPrim;
+    }
 
-    const uint32_t a_prim_offset =
-        obj_mgr.rigidBodyPrimitiveOffsets[a_obj.idx];
-    const uint32_t b_prim_offset  =
-        obj_mgr.rigidBodyPrimitiveOffsets[b_obj.idx];
-
-    const CollisionPrimitive *a_prim = &obj_mgr.collisionPrimitives[
-        a_prim_offset + candidate_collision.aPrim];
-    const CollisionPrimitive *b_prim = &obj_mgr.collisionPrimitives[
-        b_prim_offset + candidate_collision.bPrim];
+    const CollisionPrimitive *a_prim =
+        &obj_mgr.collisionPrimitives[a_prim_idx];
+    const CollisionPrimitive *b_prim =
+        &obj_mgr.collisionPrimitives[b_prim_idx];
 
     uint32_t raw_type_a = static_cast<uint32_t>(a_prim->type);
     uint32_t raw_type_b = static_cast<uint32_t>(b_prim->type);
@@ -1549,8 +1555,8 @@ static inline void runNarrowphase(
     // Swap a & b to be properly ordered based on object type
     if (raw_type_a > raw_type_b) {
         std::swap(a_loc, b_loc);
-        std::swap(a_obj, b_obj);
         std::swap(a_prim, b_prim);
+        std::swap(a_prim_idx, b_prim_idx);
         std::swap(raw_type_a, raw_type_b);
     }
 
@@ -1562,12 +1568,12 @@ static inline void runNarrowphase(
     const Diag3x3 b_scale(ctx.getDirect<Scale>(Cols::Scale, b_loc));
 
     {
-        AABB a_obj_aabb = obj_mgr.primitiveAABBs[a_obj.idx];
-        AABB b_obj_aabb = obj_mgr.primitiveAABBs[b_obj.idx];
+        AABB a_obj_aabb = obj_mgr.primitiveAABBs[a_prim_idx];
+        AABB b_obj_aabb = obj_mgr.primitiveAABBs[b_prim_idx];
 
         AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
         AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
-        
+
         if (!a_world_aabb.overlaps(b_world_aabb)) {
 #ifdef MADRONA_GPU_MODE
             lane_active = false;
