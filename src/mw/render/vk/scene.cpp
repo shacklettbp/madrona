@@ -304,10 +304,6 @@ Optional<AssetMetadata> AssetManager::prepareMetadata(
                 FATAL("Render mesh isn't triangular");
             }
 
-            if (mesh.normals == nullptr) {
-                FATAL("Render mesh missing normals");
-            }
-
             total_bytes += mesh.numVertices * sizeof(shader::PackedVertex);
             total_bytes += mesh.numFaces * 3 * sizeof(uint32_t);
         }
@@ -374,11 +370,53 @@ void AssetManager::packAssets(void *dst_buffer,
             dst_mesh.numVertices = uint32_t(num_vertices);
             obj_meshdata[mesh_idx].vertexOffset = uint32_t(cur_vertex_offset);
 
+            // Compute new normals
+            auto new_normals = Optional<HeapArray<Vector3>>::none();
+            if (!src_mesh.normals) {
+                new_normals.emplace(num_vertices);
+
+                for (int64_t vert_idx = 0; vert_idx < num_vertices;
+                     vert_idx++) {
+                    (*new_normals)[vert_idx] = Vector3::zero();
+                }
+
+                for (CountT face_idx = 0; face_idx < (CountT)src_mesh.numFaces;
+                     face_idx++) {
+                    CountT base_idx = face_idx * 3;
+                    uint32_t i0 = src_mesh.indices[base_idx];
+                    uint32_t i1 = src_mesh.indices[base_idx + 1];
+                    uint32_t i2 = src_mesh.indices[base_idx + 2];
+
+                    Vector3 v0 = src_mesh.positions[i0];
+                    Vector3 v1 = src_mesh.positions[i1];
+                    Vector3 v2 = src_mesh.positions[i2];
+
+                    Vector3 e0 = v1 - v0;
+                    Vector3 e1 = v2 - v0;
+
+                    Vector3 face_normal = cross(e0, e1);
+                    float face_len = face_normal.length();
+                    assert(face_len != 0);
+                    face_normal /= face_len;
+
+                    (*new_normals)[i0] += face_normal;
+                    (*new_normals)[i1] += face_normal;
+                    (*new_normals)[i2] += face_normal;
+                }
+
+                for (int64_t vert_idx = 0; vert_idx < num_vertices;
+                     vert_idx++) {
+                    (*new_normals)[vert_idx] =
+                        normalize((*new_normals)[vert_idx]);
+                }
+            }
+
             for (int64_t vert_idx = 0; vert_idx < num_vertices; vert_idx++) {
                 math::Vector3 pos = src_mesh.positions[vert_idx];
-                math::Vector3 normal = src_mesh.normals[vert_idx];
-                math::Vector2 uv = 
-                    src_mesh.uvs ? src_mesh.uvs[vert_idx] : Vector2 { 0, 0 };
+                math::Vector3 normal = src_mesh.normals ?
+                    src_mesh.normals[vert_idx] : (*new_normals)[vert_idx];
+                math::Vector2 uv = src_mesh.uvs ?
+                    src_mesh.uvs[vert_idx] : Vector2 { 0, 0 };
 
                 // FIXME:
                 math::Vector4 tangent_sign;
