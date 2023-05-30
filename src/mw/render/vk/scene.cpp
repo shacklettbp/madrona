@@ -308,10 +308,6 @@ Optional<AssetMetadata> AssetManager::prepareMetadata(
                 FATAL("Render mesh missing normals");
             }
 
-            if (mesh.uvs == nullptr) {
-                FATAL("Render mesh missing uvs");
-            }
-
             total_bytes += mesh.numVertices * sizeof(shader::PackedVertex);
             total_bytes += mesh.numFaces * 3 * sizeof(uint32_t);
         }
@@ -381,7 +377,8 @@ void AssetManager::packAssets(void *dst_buffer,
             for (int64_t vert_idx = 0; vert_idx < num_vertices; vert_idx++) {
                 math::Vector3 pos = src_mesh.positions[vert_idx];
                 math::Vector3 normal = src_mesh.normals[vert_idx];
-                math::Vector2 uv = src_mesh.uvs[vert_idx];
+                math::Vector2 uv = 
+                    src_mesh.uvs ? src_mesh.uvs[vert_idx] : Vector2 { 0, 0 };
 
                 // FIXME:
                 math::Vector4 tangent_sign;
