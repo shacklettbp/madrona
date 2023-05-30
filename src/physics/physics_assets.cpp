@@ -353,15 +353,17 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             uint32_t prev_next = next;
             next = next_remap[next];
 
+            //printf("     %u => %u\n", prev_next, next);
+
             if (next == prev_next) {
                 return next;
             }
         }
     };
 
-    HeapArray<bool> faces_merged(src_mesh.numFaces);
-    for (CountT i = 0; i < faces_merged.size(); i++) {
-        faces_merged[i] = false;
+    HeapArray<uint32_t> faces_remap(src_mesh.numFaces);
+    for (CountT i = 0; i < faces_remap.size(); i++) {
+        faces_remap[i] = (uint32_t)i;
     }
 
     CountT num_new_hedges = 0;
@@ -369,7 +371,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
 
     for (uint32_t orig_face_idx = 0; orig_face_idx < src_mesh.numFaces;
          orig_face_idx++) {
-        if (faces_merged[orig_face_idx]) {
+        if (faces_remap[orig_face_idx] != orig_face_idx) {
             continue;
         }
 
@@ -389,9 +391,12 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             printf("  H: %u\n", cur_hedge_idx);
             // Should only loop when the face is complete. At that point,
             // the loop will exit.
+            assert(!hedge_processed[cur_hedge_idx]);
             hedge_processed[cur_hedge_idx] = true;
 
             uint32_t twin_hedge_idx = src_mesh.twinIDX(cur_hedge_idx);
+            assert(twin_hedge_idx != 453);
+            assert(cur_hedge_idx != 452);
 
             const HalfEdge &cur_hedge = src_mesh.halfEdges[cur_hedge_idx];
             const HalfEdge &twin_hedge = src_mesh.halfEdges[twin_hedge_idx];
@@ -399,26 +404,52 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             Vector3 cur_normal =
                 src_mesh.facePlanes[cur_hedge.face].normal;
             Vector3 twin_normal =
-                src_mesh.facePlanes[twin_hedge.face].normal;
+                src_mesh.facePlanes[faces_remap[twin_hedge.face]].normal;
 
             if (dot(cur_normal, twin_normal) >= 1.f - tolerance) {
-                faces_merged[twin_hedge.face] = true;
+                printf("  Merging %u w/ %u via %u, %u\n",
+                       cur_hedge.face, faces_remap[twin_hedge.face],
+                       cur_hedge_idx, twin_hedge_idx);
 
-                uint32_t cur_next = remapNext(cur_hedge.next);
-                uint32_t twin_next = remapNext(twin_hedge.next);
+                assert(!hedge_processed[twin_hedge_idx]);
+                hedge_processed[twin_hedge_idx] = true; // Only necessary for debug
+
+                assert(faces_remap[twin_hedge.face] == twin_hedge.face);
+                faces_remap[twin_hedge.face] = orig_face_idx;
+
+                uint32_t cur_next = cur_hedge.next;
+                uint32_t twin_next = twin_hedge.next;
+
+                // If the starting hedge is getting deleted,
+                // set the start to where the loop should now end:
+                // the twin's next
+                if (cur_hedge_idx == face_start_hedge) {
+                    face_start_hedge = twin_next;
+                }
 
                 printf("  R: %u > %u\n", cur_hedge_idx, twin_next);
                 printf("  R: %u > %u\n", twin_hedge_idx, cur_next);
 
+                uint32_t default_next = remapNext(twin_next);
+
                 next_remap[twin_hedge_idx] = cur_next;
                 next_remap[cur_hedge_idx] = twin_next;
+
+                printf("  N: %u\n", default_next);
                 
-                if (twin_next == cur_hedge_idx) {
-                    printf("    B => %u\n\n", cur_next);
-                    cur_hedge_idx = cur_next;
+                if (default_next != cur_hedge_idx) {
+                    printf("    => %u %u\n\n", twin_next, default_next);
+                    cur_hedge_idx = default_next;
                 } else {
-                    printf("    => %u\n\n", twin_next);
-                    cur_hedge_idx = twin_next;
+                    // Annoying edge case where iterating around a entirely
+                    // orphaned vertex will never escape the loop around the
+                    // vertex
+                    assert(false);
+                    printf("    B => %u %u %u %u\n\n",
+                           cur_next, next_remap[cur_next],
+                           next_remap[next_remap[cur_next]],
+                           hedge_processed[cur_next]);
+                    cur_hedge_idx = remapNext(cur_next);
                 }
 
                 continue;
@@ -455,11 +486,23 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             printf("  n: %u > %u\n\n", cur_hedge.next, cur_hedge_idx);
             // This asserts that the only time we've looped is when the 
             // current face is complete
-            //assert(!hedge_processed[cur_hedge_idx] ||
-            //       cur_hedge_idx == face_start_hedge);
+            assert(!hedge_processed[cur_hedge_idx] ||
+                   cur_hedge_idx == face_start_hedge);
 
             prev_new_hedge_idx = new_hedge_idx;
         } while (!hedge_processed[cur_hedge_idx]);
+
+
+        { // Debug:
+            for (uint32_t i = 0; i < src_mesh.numHalfEdges; i++) {
+                HalfEdge &cur_hedge = src_mesh.halfEdges[i];
+                uint32_t face_idx = faces_remap[cur_hedge.face];
+
+                if (face_idx == orig_face_idx) {
+                    assert(hedge_processed[i]);
+                }
+            }
+        }
 
         // Set final next link in loop
         new_hedges[prev_new_hedge_idx].next = new_face_root;
