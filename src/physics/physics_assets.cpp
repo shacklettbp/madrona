@@ -195,10 +195,11 @@ static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
 }
 
 static inline HalfEdgeMesh buildHalfEdgeMesh(
-    const Vector3 *vert_positions,
+    const Vector3 *positions,
     CountT num_vertices, 
     const uint32_t *indices,
     const uint32_t *face_counts,
+    const Plane *face_planes,
     CountT num_faces)
 {
     auto numFaceVerts = [face_counts](CountT face_idx) {
@@ -219,13 +220,15 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
     assert(num_hedges % 2 == 0);
 
     // We already know how many polygons there are
-    auto face_base_hedges =
+    auto face_base_hedges_out =
         (uint32_t *)malloc(sizeof(uint32_t) * num_faces);
-    auto hedges = (HalfEdge *)malloc(sizeof(HalfEdge) * num_hedges);
-    auto face_planes = (Plane *)malloc(sizeof(Plane) * num_faces);
-    auto positions =
+    auto hedges_out = (HalfEdge *)malloc(sizeof(HalfEdge) * num_hedges);
+    auto face_planes_out = (Plane *)malloc(sizeof(Plane) * num_faces);
+    auto positions_out =
         (Vector3 *)malloc(sizeof(Vector3) * num_vertices);
-    memcpy(positions, vert_positions, sizeof(Vector3) * num_vertices);
+
+    memcpy(face_planes_out, face_planes, sizeof(Plane) * num_faces);
+    memcpy(positions_out, positions, sizeof(Vector3) * num_vertices);
 
     std::unordered_map<uint64_t, uint32_t> edge_to_hedge;
 
@@ -267,7 +270,7 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
 
             uint32_t hedge_idx = cur_edge_lookup->second;
             if (vert_offset == 0) {
-                face_base_hedges[face_idx] = hedge_idx;
+                face_base_hedges_out[face_idx] = hedge_idx;
             }
 
             uint32_t c_idx = cur_face_indices[
@@ -281,23 +284,12 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
             uint32_t next_hedge_idx = next_edge_lookup == edge_to_hedge.end() ?
                 num_assigned_hedges : next_edge_lookup->second;
 
-            hedges[hedge_idx] = HalfEdge {
+            hedges_out[hedge_idx] = HalfEdge {
                 .next = next_hedge_idx,
                 .rootVertex = a_idx,
                 .face = uint32_t(face_idx),
             };
         }
-
-        Vector3 base_pos = positions[cur_face_indices[0]];
-        Vector3 e01 = positions[cur_face_indices[1]] - base_pos;
-        Vector3 e02 = positions[cur_face_indices[2]] - base_pos;
-
-        Vector3 n = cross(e01, e02).normalize();
-
-        face_planes[face_idx] = Plane {
-            n,
-            dot(n, base_pos),
-        };
 
         cur_face_indices += num_face_vertices;
     }
@@ -305,10 +297,10 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
     assert(num_assigned_hedges == num_hedges);
 
     return HalfEdgeMesh {
-        .halfEdges = hedges,
-        .faceBaseHalfEdges = face_base_hedges,
-        .facePlanes = face_planes,
-        .vertices = positions,
+        .halfEdges = hedges_out,
+        .faceBaseHalfEdges = face_base_hedges_out,
+        .facePlanes = face_planes_out,
+        .vertices = positions_out,
         .numHalfEdges = uint32_t(num_hedges),
         .numFaces = uint32_t(num_faces),
         .numVertices = uint32_t(num_vertices),
@@ -324,6 +316,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
     using namespace math;
 
     DynArray<uint32_t> new_facecounts(src_mesh.numFaces);
+    DynArray<Plane> new_faceplanes(src_mesh.numFaces);
     DynArray<uint32_t> new_indices(src_mesh.numHalfEdges * 2);
 
     HeapArray<uint32_t> face_remap(src_mesh.numFaces);
@@ -345,7 +338,6 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         if (face_remap[orig_face_idx] != orig_face_idx) {
             continue;
         }
-
 
         traversal_stack.push_back(src_mesh.faceBaseHalfEdges[orig_face_idx]);
 
@@ -394,6 +386,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         }
 
         new_facecounts.push_back(num_face_indices);
+        new_faceplanes.push_back(src_mesh.facePlanes[orig_face_idx]);
 
         assert(tmp_edgepairs.size() != new_edgepair_start);
 
@@ -414,6 +407,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
 
             new_indices.push_back(new_idx);
         }
+
         assert(next_idx == new_indices[
             new_indices.size() - num_face_indices]);
     }
@@ -426,7 +420,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
     // as a result of merging. Probably should at least add a check for this.
 
     return buildHalfEdgeMesh(src_mesh.vertices, src_mesh.numVertices,
-        new_indices.data(), new_facecounts.data(),
+        new_indices.data(), new_facecounts.data(), new_faceplanes.data(),
         new_facecounts.size());
 }
 
@@ -823,9 +817,29 @@ static void setupHullPrimitive(const SourceCollisionPrimitive &src_prim,
 {
     const imp::SourceMesh *src_mesh = src_prim.hull.mesh;
 
+    HeapArray<Plane> hull_face_planes(src_mesh->numFaces);
+
+    // FIXME: For non-triangular meshes just using two edges may not give
+    // a particularly accurate face normal. Should do some kind of plane fit
+    const uint32_t *cur_face_indices = src_mesh->indices;
+    for (CountT face_idx = 0; face_idx < hull_face_planes.size(); face_idx++) {
+        Vector3 base_pos = src_mesh->positions[cur_face_indices[0]];
+        Vector3 e01 = src_mesh->positions[cur_face_indices[1]] - base_pos;
+        Vector3 e02 = src_mesh->positions[cur_face_indices[2]] - base_pos;
+        Vector3 n = cross(e01, e02).normalize();
+
+        hull_face_planes[face_idx] = Plane {
+            n,
+            dot(n, base_pos),
+        };
+
+        cur_face_indices += src_mesh->faceCounts ?
+            src_mesh->faceCounts[face_idx] : 3;
+    }
+
     HalfEdgeMesh he_mesh = buildHalfEdgeMesh(src_mesh->positions, 
         src_mesh->numVertices, src_mesh->indices, src_mesh->faceCounts,
-        src_mesh->numFaces);
+        hull_face_planes.data(), src_mesh->numFaces);
 
     if (merge_coplanar_faces) {
         HalfEdgeMesh merged_mesh = mergeCoplanarFaces(he_mesh);
