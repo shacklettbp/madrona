@@ -138,14 +138,6 @@ static HullState makeHullState(
     math::Vector3 *dst_vertices,
     Plane *dst_planes)
 {
-    if (dst_vertices == nullptr) {
-        // Don't transform the mesh
-        return HullState {
-            mesh,
-            Vector3::zero(),
-        };
-    }
-
     Mat3x3 unscaled_rot = Mat3x3::fromQuat(rotation);
     Mat3x3 vertex_txfm = unscaled_rot * scale;
     Mat3x3 normal_txfm = unscaled_rot * scale.inv();
@@ -186,6 +178,11 @@ static HullState makeHullState(
             txfmed_normal,
             new_d,
         };
+
+        // Center should be behind each face plane (otherwise face normals
+        // are probably facing the wrong way) - this is too tight a loop
+        // to have this assert running all the time though
+        //assert(center.dot(txfmed_normal) - new_d < 0.0f);
     }
 
     HalfEdgeMesh new_mesh {
