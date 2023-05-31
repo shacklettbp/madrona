@@ -158,10 +158,18 @@ static HullState makeHullState(
     constexpr CountT elems_per_iter = 1;
 #endif
 
+    // FIXME: get rid of this center computation - store the offset from
+    // COM in each CollisionPrimitive and translate it
+    Vector3 center = Vector3::zero();
+
     const CountT num_vertices = mesh.numVertices;
     for (CountT i = start_offset; i < num_vertices; i += elems_per_iter) {
-        dst_vertices[i] = vertex_txfm * mesh.vertices[i] + translation;
+        Vector3 world_pos = vertex_txfm * mesh.vertices[i] + translation;
+        dst_vertices[i] = world_pos;
+        center += world_pos;
     }
+
+    center /= num_vertices;
 
     // FIXME: could significantly optimize this with a uniform scale
     // version
@@ -192,7 +200,7 @@ static HullState makeHullState(
 
     return HullState {
         new_mesh,
-        translation,
+        center,
     };
 
 }

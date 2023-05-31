@@ -645,8 +645,6 @@ inline void solvePositions(Context &ctx, SolverData &solver)
 
     CountT num_contacts = solver.numContacts.load_relaxed();
 
-    //printf("Solver # contacts: %d\n", num_contacts);
-
     for (CountT i = 0; i < num_contacts; i++) {
         Contact contact = solver.contacts[i];
         handleContact(ctx, obj_mgr, contact, solver.contacts[i].lambdaN);
