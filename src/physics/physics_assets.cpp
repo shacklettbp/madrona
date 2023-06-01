@@ -329,6 +329,11 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         face_remap[i] = (uint32_t)i;
     }
 
+    HeapArray<uint32_t> face_starts(src_mesh.numFaces);
+    for (CountT i = 0; i < face_starts.size(); i++) {
+        face_starts[i] = src_mesh.faceBaseHalfEdges[i];
+    }
+
     auto remapHedge = [&hedge_remap](uint32_t hedge_idx) {
         while (true) {
             uint32_t remapped = hedge_remap[hedge_idx];
@@ -371,6 +376,9 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             hedge_remap[twin_hedge_idx] = cur_hedge.next;
 
             face_remap[twin_face] = cur_face;
+        } else {
+            face_starts[cur_face] = cur_hedge_idx;
+            face_starts[twin_face] = twin_hedge_idx;
         }
     }
 
@@ -381,8 +389,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             continue;
         }
 
-        uint32_t hedge_start =
-            remapHedge(src_mesh.faceBaseHalfEdges[orig_face_idx]);
+        uint32_t hedge_start = face_starts[orig_face_idx];
         uint32_t cur_hedge_idx = hedge_start;
 
         CountT num_face_indices = 0;
@@ -390,7 +397,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             const HalfEdge &cur_hedge = src_mesh.halfEdges[cur_hedge_idx];
             new_indices.push_back(cur_hedge.rootVertex);
 
-            cur_hedge_idx = cur_hedge.next;
+            cur_hedge_idx = remapHedge(cur_hedge.next);
             num_face_indices++;
         } while (cur_hedge_idx != hedge_start);
 
