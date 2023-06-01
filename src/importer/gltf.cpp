@@ -233,6 +233,9 @@ struct GLTFBufferView {
 enum class GLTFComponentType {
     UINT32,
     UINT16,
+    INT16,
+    UINT8,
+    INT8,
     FLOAT
 };
 
@@ -585,18 +588,32 @@ static bool gltfLoad(const char *gltf_filename,
             return false;
         }
 
-        if (component_type == 5126) {
+        switch (component_type) {
+        case 5126: {
             type = GLTFComponentType::FLOAT;
-        } else if (component_type == 5125) {
+        } break;
+        case 5125: {
             type = GLTFComponentType::UINT32;
-        } else if (component_type == 5123) {
+        } break;
+        case 5123: {
             type = GLTFComponentType::UINT16;
-        } else {
+        } break;
+        case 5122: {
+            type = GLTFComponentType::INT16;
+        } break;
+        case 5121: {
+            type = GLTFComponentType::UINT8;
+        } break;
+        case 5120: {
+            type = GLTFComponentType::INT8;
+        } break;
+        default: {
             loader.recordError("Unknown component type %" PRIu64,
                                component_type);
             return false;
+        } break;
         }
-        
+
         auto buffer_view_idx = accessor["bufferView"].get_uint64();
         if (buffer_view_idx.error()) {
             loader.recordJSONError(buffer_view_idx.error());

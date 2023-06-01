@@ -189,6 +189,9 @@ struct Diag3x3 {
     inline Diag3x3 & operator*=(float o);
     inline Diag3x3 & operator/=(float o);
 
+    inline float & operator[](CountT i);
+    inline float operator[](CountT i) const;
+
     friend inline Diag3x3 operator*(Diag3x3 a, Diag3x3 b);
     friend inline Diag3x3 operator*(Diag3x3 a, float b);
     friend inline Diag3x3 operator*(float a, Diag3x3 b);

@@ -822,6 +822,26 @@ Diag3x3 & Diag3x3::operator/=(float o)
     return *this;
 }
 
+float & Diag3x3::operator[](CountT i)
+{
+    switch (i) {
+        default:
+        case 0: return d0;
+        case 1: return d1;
+        case 2: return d2;
+    }
+}
+
+float Diag3x3::operator[](CountT i) const
+{
+    switch (i) {
+        default:
+        case 0: return d0;
+        case 1: return d1;
+        case 2: return d2;
+    }
+}
+
 Diag3x3 operator*(Diag3x3 a, Diag3x3 b)
 {
     a *= b;

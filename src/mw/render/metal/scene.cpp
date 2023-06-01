@@ -39,14 +39,6 @@ Optional<AssetMetadata> AssetManager::prepareSourceAssets(
                 FATAL("Render mesh isn't triangular");
             }
 
-            if (mesh.normals == nullptr) {
-                FATAL("Render mesh missing normals");
-            }
-
-            if (mesh.uvs == nullptr) {
-                FATAL("Render mesh missing uvs");
-            }
-
             num_total_vertices += mesh.numVertices;
             num_total_indices += mesh.numFaces * 3;
         }
@@ -104,9 +96,51 @@ void AssetManager::packSourceAssets(
                 .numIndices = (int32_t)num_mesh_indices,
             };
 
+            // Compute new normals
+            auto new_normals = Optional<HeapArray<Vector3>>::none();
+            if (!mesh.normals) {
+                new_normals.emplace(num_mesh_verts);
+
+                for (int64_t vert_idx = 0; vert_idx < num_mesh_verts;
+                     vert_idx++) {
+                    (*new_normals)[vert_idx] = Vector3::zero();
+                }
+
+                for (CountT face_idx = 0; face_idx < (CountT)mesh.numFaces;
+                     face_idx++) {
+                    CountT base_idx = face_idx * 3;
+                    uint32_t i0 = mesh.indices[base_idx];
+                    uint32_t i1 = mesh.indices[base_idx + 1];
+                    uint32_t i2 = mesh.indices[base_idx + 2];
+
+                    Vector3 v0 = mesh.positions[i0];
+                    Vector3 v1 = mesh.positions[i1];
+                    Vector3 v2 = mesh.positions[i2];
+
+                    Vector3 e0 = v1 - v0;
+                    Vector3 e1 = v2 - v0;
+
+                    Vector3 face_normal = cross(e0, e1);
+                    float face_len = face_normal.length();
+                    assert(face_len != 0);
+                    face_normal /= face_len;
+
+                    (*new_normals)[i0] += face_normal;
+                    (*new_normals)[i1] += face_normal;
+                    (*new_normals)[i2] += face_normal;
+                }
+
+                for (int64_t vert_idx = 0; vert_idx < num_mesh_verts;
+                     vert_idx++) {
+                    (*new_normals)[vert_idx] =
+                        normalize((*new_normals)[vert_idx]);
+                }
+            }
+
             for (int32_t i = 0; i < num_mesh_verts; i++) {
                 Vector3 pos = mesh.positions[i];
-                Vector3 normal = mesh.normals[i];
+                Vector3 normal = mesh.normals ?
+                    mesh.normals[i] : (*new_normals)[i];
                 Vector4 tangent_sign;
                 // FIXME: use mikktspace at import time
                 if (mesh.tangentAndSigns != nullptr) {
@@ -121,7 +155,7 @@ void AssetManager::packSourceAssets(
                         1.f,
                     };
                 }
-                Vector2 uv = mesh.uvs[i];
+                Vector2 uv = mesh.uvs ? mesh.uvs[i] : Vector2 { 0, 0 };
 
                 Vector3 encoded_normal_tangent =
                     encodeNormalTangent(normal, tangent_sign);
