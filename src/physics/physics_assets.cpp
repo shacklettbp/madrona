@@ -311,26 +311,67 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
     const HalfEdgeMesh &src_mesh)
 {
     constexpr float tolerance = 1e-5;
-    constexpr uint32_t sentinel = 0xFFFF'FFFF;
 
     using namespace geometry;
     using namespace math;
 
     DynArray<uint32_t> new_facecounts(src_mesh.numFaces);
     DynArray<Plane> new_faceplanes(src_mesh.numFaces);
-    DynArray<uint32_t> new_indices(src_mesh.numHalfEdges * 2);
+    DynArray<uint32_t> new_indices(src_mesh.numHalfEdges);
+
+    HeapArray<uint32_t> hedge_remap(src_mesh.numHalfEdges);
+    for (CountT i = 0; i < hedge_remap.size(); i++) {
+        hedge_remap[i] = (uint32_t)i;
+    }
 
     HeapArray<uint32_t> face_remap(src_mesh.numFaces);
     for (CountT i = 0; i < face_remap.size(); i++) {
         face_remap[i] = (uint32_t)i;
     }
 
-    DynArray<uint32_t> tmp_edgepairs(src_mesh.numHalfEdges * 2);
-    DynArray<uint32_t> traversal_stack(src_mesh.numHalfEdges);
+    auto remapHedge = [&hedge_remap](uint32_t hedge_idx) {
+        while (true) {
+            uint32_t remapped = hedge_remap[hedge_idx];
+            if (remapped == hedge_idx) {
+                return hedge_idx;
+            }
 
-    HeapArray<bool> hedge_visited(src_mesh.numHalfEdges);
-    for (CountT i = 0; i < hedge_visited.size(); i++) {
-        hedge_visited[i] = false;
+            hedge_idx = remapped;
+        }
+    };
+
+    auto remapFace = [&face_remap](uint32_t face_idx) {
+        while (true) {
+            uint32_t remapped = face_remap[face_idx];
+            if (remapped == face_idx) {
+                return face_idx;
+            }
+
+            face_idx = remapped;
+        }
+    };
+
+    const uint32_t orig_num_edges = src_mesh.numEdges();
+    for (uint32_t orig_edge_idx = 0; orig_edge_idx < orig_num_edges;
+         orig_edge_idx++) {
+        uint32_t cur_hedge_idx = src_mesh.edgeToHalfEdge(orig_edge_idx);
+        uint32_t twin_hedge_idx = src_mesh.twinIDX(cur_hedge_idx);
+
+        const HalfEdge &cur_hedge = src_mesh.halfEdges[cur_hedge_idx];
+        const HalfEdge &twin_hedge = src_mesh.halfEdges[twin_hedge_idx];
+
+        uint32_t cur_face = remapFace(cur_hedge.face);
+        uint32_t twin_face = remapFace(twin_hedge.face);
+
+        Vector3 cur_normal = src_mesh.facePlanes[cur_face].normal;
+        Vector3 twin_normal = src_mesh.facePlanes[twin_face].normal;
+
+        if (dot(cur_normal, twin_normal) >= 1.f - tolerance) {
+            hedge_remap[cur_hedge_idx] = twin_hedge.next;
+            hedge_remap[twin_hedge_idx] = cur_hedge.next;
+
+            face_remap[twin_face] = cur_face;
+        }
     }
 
     for (uint32_t orig_face_idx = 0; orig_face_idx < src_mesh.numFaces;
@@ -340,81 +381,21 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             continue;
         }
 
-        traversal_stack.push_back(src_mesh.faceBaseHalfEdges[orig_face_idx]);
+        uint32_t hedge_start =
+            remapHedge(src_mesh.faceBaseHalfEdges[orig_face_idx]);
+        uint32_t cur_hedge_idx = hedge_start;
 
         CountT num_face_indices = 0;
-
-        Vector3 cur_normal = src_mesh.facePlanes[orig_face_idx].normal;
-
-        while (traversal_stack.size() > 0) {
-            uint32_t cur_hedge_idx = traversal_stack.back();
-            traversal_stack.pop_back();
-
-            if (hedge_visited[cur_hedge_idx]) continue;
-
-            hedge_visited[cur_hedge_idx] = true;
-
-            uint32_t twin_hedge_idx = src_mesh.twinIDX(cur_hedge_idx);
-
+        do {
             const HalfEdge &cur_hedge = src_mesh.halfEdges[cur_hedge_idx];
-            traversal_stack.push_back(cur_hedge.next);
+            new_indices.push_back(cur_hedge.rootVertex);
 
-            const HalfEdge &twin_hedge = src_mesh.halfEdges[twin_hedge_idx];
-
-            assert(face_remap[cur_hedge.face] == orig_face_idx);
-
-            Vector3 twin_normal =
-                src_mesh.facePlanes[face_remap[twin_hedge.face]].normal;
-
-            if (dot(cur_normal, twin_normal) >= 1.f - tolerance &&
-                    !hedge_visited[twin_hedge_idx]) {
-                hedge_visited[twin_hedge_idx] = true;
-
-                assert(face_remap[twin_hedge.face] == twin_hedge.face ||
-                       face_remap[twin_hedge.face] == orig_face_idx);
-                face_remap[twin_hedge.face] = orig_face_idx;
-
-                traversal_stack.push_back(twin_hedge.next);
-            } else {
-                const HalfEdge &next_hedge = src_mesh.halfEdges[cur_hedge.next];
-
-                tmp_edgepairs.push_back(cur_hedge.rootVertex);
-                tmp_edgepairs.push_back(next_hedge.rootVertex);
-
-                num_face_indices += 1;
-            }
-        }
+            cur_hedge_idx = cur_hedge.next;
+            num_face_indices++;
+        } while (cur_hedge_idx != hedge_start);
 
         new_facecounts.push_back(num_face_indices);
         new_faceplanes.push_back(src_mesh.facePlanes[orig_face_idx]);
-
-        assert(tmp_edgepairs.size() != 0);
-
-        CountT next_idx = tmp_edgepairs[0];
-        for (CountT i = 0; i < num_face_indices; i++) {
-            CountT matching_edgepair_idx;
-            for (matching_edgepair_idx = 0;
-                 matching_edgepair_idx < tmp_edgepairs.size();
-                 matching_edgepair_idx += 2) {
-                if (tmp_edgepairs[matching_edgepair_idx] == next_idx) {
-                    break;
-                }
-            }
-            assert(matching_edgepair_idx != tmp_edgepairs.size());
-
-            CountT new_idx = tmp_edgepairs[matching_edgepair_idx];
-            next_idx = tmp_edgepairs[matching_edgepair_idx + 1];
-
-            tmp_edgepairs[matching_edgepair_idx] = sentinel;
-            tmp_edgepairs[matching_edgepair_idx + 1] = sentinel;
-
-            new_indices.push_back(new_idx);
-        }
-
-        assert(next_idx == new_indices[
-            new_indices.size() - num_face_indices]);
-
-        tmp_edgepairs.clear();
     }
 
     // FIXME: the above code has multiple issues:

@@ -1410,6 +1410,7 @@ static bool gltfParseMesh(
 
             max_idx = position_accessor->size() - 1;
         }
+
         uint32_t num_faces = indices.size() / 3;
         if (num_faces * 3 != indices.size()) {
             loader.recordError("Non-triangular GLTF not supported");
