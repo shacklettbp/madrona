@@ -311,6 +311,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
     const HalfEdgeMesh &src_mesh)
 {
     constexpr float tolerance = 1e-5;
+    constexpr uint32_t sentinel = 0xFFFF'FFFF;
 
     using namespace geometry;
     using namespace math;
@@ -342,7 +343,6 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         traversal_stack.push_back(src_mesh.faceBaseHalfEdges[orig_face_idx]);
 
         CountT num_face_indices = 0;
-        CountT new_edgepair_start = tmp_edgepairs.size();
 
         Vector3 cur_normal = src_mesh.facePlanes[orig_face_idx].normal;
 
@@ -388,12 +388,12 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         new_facecounts.push_back(num_face_indices);
         new_faceplanes.push_back(src_mesh.facePlanes[orig_face_idx]);
 
-        assert(tmp_edgepairs.size() != new_edgepair_start);
+        assert(tmp_edgepairs.size() != 0);
 
-        CountT next_idx = tmp_edgepairs[new_edgepair_start];
+        CountT next_idx = tmp_edgepairs[0];
         for (CountT i = 0; i < num_face_indices; i++) {
             CountT matching_edgepair_idx;
-            for (matching_edgepair_idx = new_edgepair_start;
+            for (matching_edgepair_idx = 0;
                  matching_edgepair_idx < tmp_edgepairs.size();
                  matching_edgepair_idx += 2) {
                 if (tmp_edgepairs[matching_edgepair_idx] == next_idx) {
@@ -405,11 +405,16 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             CountT new_idx = tmp_edgepairs[matching_edgepair_idx];
             next_idx = tmp_edgepairs[matching_edgepair_idx + 1];
 
+            tmp_edgepairs[matching_edgepair_idx] = sentinel;
+            tmp_edgepairs[matching_edgepair_idx + 1] = sentinel;
+
             new_indices.push_back(new_idx);
         }
 
         assert(next_idx == new_indices[
             new_indices.size() - num_face_indices]);
+
+        tmp_edgepairs.clear();
     }
 
     // FIXME: the above code has multiple issues:
