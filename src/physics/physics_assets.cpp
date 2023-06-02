@@ -311,6 +311,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
     const HalfEdgeMesh &src_mesh)
 {
     constexpr float tolerance = 1e-5;
+    constexpr uint32_t sentinel = 0xFFFF'FFFF;
 
     using namespace geometry;
     using namespace math;
@@ -331,7 +332,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
 
     HeapArray<uint32_t> face_starts(src_mesh.numFaces);
     for (CountT i = 0; i < face_starts.size(); i++) {
-        face_starts[i] = src_mesh.faceBaseHalfEdges[i];
+        face_starts[i] = sentinel;
     }
 
     auto remapHedge = [&hedge_remap](uint32_t hedge_idx) {
@@ -376,9 +377,20 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             hedge_remap[twin_hedge_idx] = cur_hedge.next;
 
             face_remap[twin_face] = cur_face;
-        } else {
+        }
+    }
+
+    for (uint32_t cur_hedge_idx = 0; cur_hedge_idx < src_mesh.numHalfEdges;
+         cur_hedge_idx++) {
+        if (hedge_remap[cur_hedge_idx] != cur_hedge_idx) {
+            continue;
+        }
+
+        const HalfEdge &cur_hedge = src_mesh.halfEdges[cur_hedge_idx];
+        uint32_t cur_face = remapFace(cur_hedge.face);
+
+        if (face_starts[cur_face] == sentinel) {
             face_starts[cur_face] = cur_hedge_idx;
-            face_starts[twin_face] = twin_hedge_idx;
         }
     }
 
@@ -389,8 +401,9 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             continue;
         }
 
-        uint32_t hedge_start = face_starts[orig_face_idx];
-        uint32_t cur_hedge_idx = hedge_start;
+        uint32_t start_hedge = face_starts[orig_face_idx];
+        assert(start_hedge != sentinel);
+        uint32_t cur_hedge_idx = start_hedge;
 
         CountT num_face_indices = 0;
         do {
@@ -399,7 +412,7 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
 
             cur_hedge_idx = remapHedge(cur_hedge.next);
             num_face_indices++;
-        } while (cur_hedge_idx != hedge_start);
+        } while (cur_hedge_idx != start_hedge);
 
         new_facecounts.push_back(num_face_indices);
         new_faceplanes.push_back(src_mesh.facePlanes[orig_face_idx]);
