@@ -21,6 +21,47 @@ using ImportedRigidBodies = PhysicsLoader::ImportedRigidBodies;
 }
 #endif
 
+namespace {
+
+struct HalfEdgeEditMesh {
+    struct HalfEdges {
+        uint32_t *next;
+        uint32_t *prev;
+        uint32_t *twin;
+
+        uint32_t *vert;
+        uint32_t *face;
+    } hedges;
+
+    struct Faces {
+        Plane *plane;
+        uint32_t *hedge;
+        uint32_t *next;
+        uint32_t *prev;
+    } faces;
+
+    struct Vertices {
+        Vector3 *pos;
+        uint32_t *next;
+        uint32_t *prev;
+    } verts;
+
+    uint32_t numHedges;
+    uint32_t numFaces;
+    uint32_t numVerts;
+
+    uint32_t hedgeFreeHead;
+    uint32_t faceFreeHead;
+    uint32_t vertFreeHead;
+};
+
+struct HullBuildData {
+    HalfEdgeEditMesh mesh;
+    uint32_t *conflictLists;
+};
+
+}
+
 struct PhysicsLoader::Impl {
     CollisionPrimitive *primitives;
     AABB *primAABBs;
@@ -185,6 +226,258 @@ PhysicsLoader::~PhysicsLoader()
 
 PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 
+static uint32_t addMeshHedge(HalfEdgeEditMesh &mesh)
+{
+    uint32_t hedge = mesh.hedgeFreeHead;
+    assert(hedge != 0);
+    mesh.hedgeFreeHead = mesh.hedges.next[hedge];
+
+    uint32_t prev_prev = mesh.hedges.prev[0];
+    mesh.hedges.prev[0] = hedge;
+    mesh.hedges.next[prev_prev] = hedge;
+    
+    mesh.hedges.next[hedge] = 0;
+    mesh.hedges.prev[hedge] = prev_prev;
+
+    return hedge;
+}
+
+static uint32_t addMeshFace(HalfEdgeEditMesh &mesh)
+{
+    uint32_t face = mesh.faceFreeHead;
+    assert(face != 0);
+    mesh.faceFreeHead = mesh.faces.next[face];
+
+    uint32_t prev_prev = mesh.faces.prev[0];
+    mesh.faces.prev[0] = face;
+    mesh.faces.next[prev_prev] = face;
+    
+    mesh.faces.next[face] = 0;
+    mesh.faces.prev[face] = prev_prev;
+
+    return face;
+}
+
+static uint32_t allocMeshVert(HalfEdgeEditMesh &mesh)
+{
+    uint32_t vert = mesh.vertFreeHead;
+    assert(vert != 0);
+    mesh.vertFreeHead = mesh.verts.next[vert];
+
+    return vert;
+}
+
+static void freeMeshVert(HalfEdgeEditMesh &mesh, uint32_t vert)
+{
+    uint32_t old_head = mesh.vertFreeHead;
+    mesh.vertFreeHead = vert;
+    mesh.verts.next[vert] = old_head;
+}
+
+static uint32_t addMeshVert(HalfEdgeEditMesh &mesh)
+{
+    uint32_t vert = allocMeshVert(mesh);
+
+    uint32_t prev_prev = mesh.verts.prev[0];
+    mesh.verts.prev[0] = vert;
+    mesh.verts.next[prev_prev] = vert;
+    
+    mesh.verts.next[vert] = 0;
+    mesh.verts.prev[vert] = prev_prev;
+
+    return vert;
+}
+
+static void removeMeshVert(HalfEdgeEditMesh &mesh, uint32_t vert)
+{
+    uint32_t next = mesh.verts.next[vert];
+    uint32_t prev = mesh.verts.prev[vert];
+
+    mesh.verts.next[prev] = next;
+    mesh.verts.prev[next] = prev;
+
+    freeMeshVert(vert);
+}
+
+static uint32_t addConflictVert(HullBuildData &hull_data,
+                                uint32_t face,
+                                Vector3 pos)
+{
+    auto &mesh = hull_data.mesh;
+    uint32_t vert = allocMeshVert(mesh);
+
+    uint32_t next = hull_data.conflictLists[face];
+
+    hull_data.conflictLists[face] = vert;
+    mesh.verts.next[vert] = next;
+    mesh.verts.prev[vert] = 0;
+
+    if (next != 0) {
+        mesh.verts.prev[next] = vert;
+    }
+
+    return vert;
+}
+
+static void removeConflictVert(HullBuildData &hull_data,
+                               uint32_t face,
+                               uint32_t vert)
+{
+    auto &mesh = hull_data.mesh;
+
+    uint32_t next = mesh.verts.next[vert];
+    uint32_t prev = mesh.verts.prev[vert];
+
+    if (prev == 0) {
+        hull_data.conflictLists[face] = next;
+    } else {
+        mesh.verts.next[prev] = next;
+    }
+
+    if (next != 0) {
+        mesh.verts.prev[next] = prev;
+    }
+}
+
+static bool initHullBuild(Span<Vector3> verts, HullBuildData *out)
+{
+    const CountT N = verts.size();
+    if (N < 4) {
+        return false;
+    }
+
+    // + 1 for fake starting point for linked lists
+    const CountT max_num_verts = N + 1;
+    // Num edges = 3N - 6. Doubled for half edges, doubled for horizon
+    const CountT max_num_hedges = 4 * (3 * num_vertices - 6) + 1;
+    // Num edges = 2N - 4. Doubled for horizon
+    const CountT max_num_faces = 2 * (2 * num_vertices - 4) + 1;
+
+    const std::array buffer_sizes {{
+        sizeof(uint32_t) * max_num_hedges, // hedges.next
+        sizeof(uint32_t) * max_num_hedges, // hedges.prev
+        sizeof(uint32_t) * max_num_hedges, // hedges.twin
+        sizeof(uint32_t) * max_num_hedges, // hedges.vert
+        sizeof(uint32_t) * max_num_hedges, // hedges.face
+        sizeof(Plane) * max_num_faces,     // faces.plane
+        sizeof(uint32_t) * max_num_faces,  // faces.hedge
+        sizeof(uint32_t) * max_num_faces,  // faces.next
+        sizeof(uint32_t) * max_num_faces,  // faces.prev
+        sizeof(Vector3) * max_num_verts,   // verts.pos
+        sizeof(uint32_t) * max_num_verts,  // verts.next
+        sizeof(uint32_t) * max_num_verts,  // verts.prev 
+        sizeof(uint32_t) * max_num_faces,  // conflictLists
+    }};
+
+    constexpr CountT sub_buffer_alignment = 128;
+
+    int64_t buffer_offsets[buffer_sizes.size() - 1];
+    int64_t total_bytes = utils::computeBufferOffsets(
+        buffer_sizes, buffer_offsets, sub_buffer_alignment);
+
+    char *buf_base = (char *)malloc(total_bytes);
+
+    HalfEdgeEditMesh mesh {
+        .hedges = {
+            (uint32_t *)buf_base,
+            (uint32_t *)(buf_base + buffer_offsets[0],
+            (uint32_t *)(buf_base + buffer_offsets[1],
+            (uint32_t *)(buf_base + buffer_offsets[2],
+            (uint32_t *)(buf_base + buffer_offsets[3],
+        },
+        .faces = {
+            (Plane *)(buf_base + buffer_offsets[4],
+            (uint32_t *)(buf_base + buffer_offsets[5],
+            (uint32_t *)(buf_base + buffer_offsets[6],
+            (uint32_t *)(buf_base + buffer_offsets[7],
+        },
+        .verts = {
+            (Vector3 *)(buf_base + buffer_offsets[8],
+            (uint32_t *)(buf_base + buffer_offsets[9],
+            (uint32_t *)(buf_base + buffer_offsets[10],
+        },
+        .numHedges = 0,
+        .numFaces = 0,
+        .numVerts = 0,
+        .hedgeFreeHead = 1,
+        .faceFreeHead = 1,
+        .vertFreeHead = 1,
+    };
+
+    // Setup free lists
+    for (CountT i = 1; i < max_num_hedges - 1; i++) {
+        mesh.hedges.next[i] = uint32_t(i + 1);
+    }
+    mesh.hedges.next[max_num_hedges - 1] = 0;
+
+    for (CountT i = 1; i < max_num_faces - 1; i++) {
+        mesh.faces.next[i] = uint32_t(i + 1);
+    }
+    mesh.faces.next[max_num_faces - 1] = 0;
+
+    for (CountT i = 1; i < max_num_verts - 1; i++) {
+        mesh.verts.next[i] = uint32_t(i + 1);
+    }
+    mesh.verts.next[max_num_verts - 1] = 0;
+    
+    // Elem 0 is fake head / tail to avoid special cases
+    mesh.hedges.next[0] = 0;
+    mesh.hedges.prev[0] = 0;
+
+    mesh.faces.next[0] = 0;
+    mesh.faces.prev[0] = 0;
+
+    mesh.verts.next[0] = 0;
+    mesh.verts.prev[0] = 0;
+
+    uint32_t *conflict_lists = (uint32_t *)(buf_base + buffer_offsets[11]);
+    for (CountT i = 0; i < max_num_faces; i++) {
+        conflict_lists[i] = 0;
+    }
+
+    // Choose the initial 4 points for the hull
+    uint32_t init_tet[4];
+    init_tet[0] = 0;
+    init_tet[1] = 1;
+    init_tet[2] = 2;
+    init_tet[3] = 3;
+
+    while (true) {
+        Vector3 v0 = verts[init_tet[0]];
+        Vector3 v1 = verts[init_tet[1]];
+        Vector3 v2 = verts[init_tet[2]];
+        Vector3 v3 = verts[init_tet[3]];
+
+        Vector3 e1 = v1 - v0;
+        Vector3 e2 = v2 - v0;
+        Vector3 e3 = v3 - v0;
+
+        Mat3x3 vol_mat {{ e1, e2, e3 }};
+        float det = vol_mat.determinant();
+
+        if (det > 0.f) {
+            break;
+        }
+    }
+
+    uint32_t v0 = addMeshVert(verts[init_tet[0]]);
+    uint32_t v1 = addMeshVert(verts[init_tet[1]]);
+    uint32_t v2 = addMeshVert(verts[init_tet[2]]);
+    uint32_t v3 = addMeshVert(verts[init_tet[3]]);
+
+    *out = HullBuildData {
+        .mesh = mesh,
+        .conflictLists = conflict_lists,
+    };
+
+    return true;
+}
+
+static void freeBuildData(HullBuildData &hull_data)
+{
+    free(hull_data.hedges.next);
+}
+
 // FIXME: better allocation / ownership strategy
 static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
 {
@@ -193,6 +486,33 @@ static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
     free(mesh.facePlanes);
     free(mesh.vertices);
 }
+
+// RTCD 12.4.2
+static Plane computeNewellPlane(Span<const Vector3> v)
+{
+    Vector3 centroid { 0, 0, 0 };
+    Vector3 n { 0, 0, 0 };
+
+    // Compute normal as being proportional to projected areas of polygon
+    // onto the yz, xz, and xy planes. Also compute centroid as
+    // representative point on the plane
+    for (CountT i = v.size() - 1, j = 0; j < v.size(); i = j, j++) {
+        Vector3 vi = v[i];
+        Vector3 vj = v[j];
+        n.x += (vi.y - vj.y) * (vi.z + vj.z); // projection on yz
+        n.y += (vi.z - vj.z) * (vi.x + vj.x); // projection on xz
+        n.z += (vi.x - vj.x) * (vi.y + vj.y); // projection on xy
+
+        centroid += vj;
+    }
+
+    n = normalize(n);
+    return Plane {
+        .normal = n,
+        .d = dot(centroid, n),
+    };
+}
+
 
 static inline HalfEdgeMesh buildHalfEdgeMesh(
     const Vector3 *positions,
@@ -335,6 +655,29 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         face_starts[i] = sentinel;
     }
 
+    HeapArray<Plane> face_planes(src_mesh.numFaces);
+    for (CountT i = 0; i < face_planes.size(); i++) {
+        face_planes[i] = src_mesh.facePlanes[i];
+    }
+
+    HeapArray<uint32_t> debug_face_counts(src_mesh.numFaces);
+    uint32_t debug_total_unmerged_indices = 0;
+    for (CountT i = 0; i < debug_face_counts.size(); i++) {
+        uint32_t start_hedge = src_mesh.faceBaseHalfEdges[i];
+        uint32_t cur_hedge_idx = start_hedge;
+
+        debug_face_counts[i] = 0;
+        do {
+            const HalfEdge &cur_hedge = src_mesh.halfEdges[cur_hedge_idx];
+
+            debug_face_counts[i] += 1;
+            debug_total_unmerged_indices += 1;
+
+            cur_hedge_idx = cur_hedge.next;
+        } while (cur_hedge_idx != start_hedge);
+    }
+    assert(debug_total_unmerged_indices == src_mesh.numHalfEdges);
+
     auto remapHedge = [&hedge_remap](uint32_t hedge_idx) {
         while (true) {
             uint32_t remapped = hedge_remap[hedge_idx];
@@ -357,6 +700,12 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         }
     };
 
+    DynArray<Vector3> tmp_face_vertices(src_mesh.numVertices);
+
+    uint32_t orig_num_indices = src_mesh.numHalfEdges;
+    assert(orig_num_indices % 2 == 0);
+
+    uint32_t num_new_faces = src_mesh.numFaces;
     const uint32_t orig_num_edges = src_mesh.numEdges();
     for (uint32_t orig_edge_idx = 0; orig_edge_idx < orig_num_edges;
          orig_edge_idx++) {
@@ -377,8 +726,23 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             hedge_remap[twin_hedge_idx] = cur_hedge.next;
 
             face_remap[twin_face] = cur_face;
+
+            { // debug
+                orig_num_indices -= 2;
+
+                debug_face_counts[cur_face]--;
+                debug_face_counts[twin_face]--;
+
+                if (twin_face != cur_face) {
+                    num_new_faces--;
+
+                    debug_face_counts[cur_face] += debug_face_counts[twin_face];
+                }
+            }
         }
     }
+
+    assert(orig_num_indices % 2 == 0);
 
     for (uint32_t cur_hedge_idx = 0; cur_hedge_idx < src_mesh.numHalfEdges;
          cur_hedge_idx++) {
@@ -394,12 +758,15 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
         }
     }
 
+    uint32_t num_debug_faces = 0;
     for (uint32_t orig_face_idx = 0; orig_face_idx < src_mesh.numFaces;
          orig_face_idx++) {
         // Face merged
         if (face_remap[orig_face_idx] != orig_face_idx) {
             continue;
         }
+
+        num_debug_faces++;
 
         uint32_t start_hedge = face_starts[orig_face_idx];
         assert(start_hedge != sentinel);
@@ -414,9 +781,39 @@ static inline HalfEdgeMesh mergeCoplanarFaces(
             num_face_indices++;
         } while (cur_hedge_idx != start_hedge);
 
+        if (num_face_indices != debug_face_counts[orig_face_idx]) {
+            printf("F: %u\n", orig_face_idx);
+            printf(" T:\n");
+            do {
+                const HalfEdge &cur_hedge = src_mesh.halfEdges[cur_hedge_idx];
+                printf("  %u\n", cur_hedge_idx);
+
+                cur_hedge_idx = remapHedge(cur_hedge.next);
+            } while (cur_hedge_idx != start_hedge);
+
+            printf(" A:\n");
+            for (uint32_t hedge_idx = 0; hedge_idx < src_mesh.numHalfEdges;
+                 hedge_idx++) {
+                const HalfEdge &cur_hedge = src_mesh.halfEdges[hedge_idx];
+
+                if (hedge_remap[hedge_idx] != hedge_idx) {
+                    continue;
+                }
+
+                uint32_t face = remapFace(cur_hedge.face);
+                if (face == orig_face_idx) {
+                    printf("  %u\n", hedge_idx);
+                }
+            }
+            assert(false);
+        }
+
         new_facecounts.push_back(num_face_indices);
         new_faceplanes.push_back(src_mesh.facePlanes[orig_face_idx]);
     }
+    assert(num_new_faces == num_debug_faces);
+    assert(new_indices.size() == orig_num_indices);
+    assert(new_indices.size() % 2 == 0);
 
     // FIXME: the above code has multiple issues:
     // 1) It can orphan vertices. These shuold be filtered out in a final pass
