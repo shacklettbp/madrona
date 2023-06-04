@@ -14,14 +14,14 @@ public:
     };
 
     struct SourceCollisionPrimitive {
-        struct Hull {
+        struct HullInput {
             const imp::SourceMesh *mesh;
         };
 
         CollisionPrimitive::Type type;
         union {
             CollisionPrimitive::Sphere sphere;
-            Hull hull;
+            HullInput hullInput;
         };
     };
 
@@ -54,10 +54,10 @@ public:
     ~PhysicsLoader();
     PhysicsLoader(PhysicsLoader &&o);
 
-    ImportedRigidBodies importRigidBodyData(
+    Optional<ImportedRigidBodies> importRigidBodyData(
         const SourceCollisionObject *collision_objs,
         CountT num_objects,
-        bool merge_coplanar_faces = false);
+        bool build_hulls = true);
 
     CountT loadObjects(const RigidBodyMetadata *metadatas,
                        const math::AABB *obj_aabbs,
