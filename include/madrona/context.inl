@@ -28,34 +28,19 @@ ArchetypeRef<ArchetypeT> Context::archetype()
         MADRONA_MW_COND(cur_world_id_));
 }
 
-Loc Context::getLoc(Entity e) const
+Loc Context::loc(Entity e) const
 {
     return state_mgr_->getLoc(e);
 }
 
-template <typename ArchetypeT, typename... Args>
-Entity Context::makeEntity(Transaction &txn, Args && ...args)
-{
-    return state_mgr_->makeEntity<ArchetypeT>(
-        MADRONA_MW_COND(cur_world_id_,) txn, *state_cache_,
-        std::forward<Args>(args)...);
-}
-
-template <typename ArchetypeT, typename... Args>
-Entity Context::makeEntityNow(Args && ...args)
+template <typename ArchetypeT>
+Entity Context::makeEntity()
 {
     return state_mgr_->makeEntityNow<ArchetypeT>(
-        MADRONA_MW_COND(cur_world_id_,) *state_cache_,
-        std::forward<Args>(args)...);
+        MADRONA_MW_COND(cur_world_id_,) *state_cache_);
 }
 
-void Context::destroyEntity(Transaction &txn, Entity e)
-{
-    state_mgr_->destroyEntity(MADRONA_MW_COND(cur_world_id_,)
-                              txn, *state_cache_, e);
-}
-
-void Context::destroyEntityNow(Entity e)
+void Context::destroyEntity(Entity e)
 {
     state_mgr_->destroyEntityNow(MADRONA_MW_COND(cur_world_id_,)
                                  *state_cache_, e);
@@ -69,16 +54,24 @@ Loc Context::makeTemporary()
 }
 
 template <typename ComponentT>
-ResultRef<ComponentT> Context::get(Entity e)
+ComponentT & Context::get(Entity e)
 {
-    return state_mgr_->get<ComponentT>(
-        MADRONA_MW_COND(cur_world_id_,) e);
+    return state_mgr_->getUnsafe<ComponentT>(
+        MADRONA_MW_COND(cur_world_id_,) e.id);
 }
 
 template <typename ComponentT>
-ComponentT & Context::getUnsafe(Entity e)
+ComponentT & Context::get(Loc l)
 {
-    return getUnsafe<ComponentT>(e.id);
+    return state_mgr_->getUnsafe<ComponentT>(
+        MADRONA_MW_COND(cur_world_id_,) l);
+}
+
+template <typename ComponentT>
+ResultRef<ComponentT> Context::getSafe(Entity e)
+{
+    return state_mgr_->get<ComponentT>(
+        MADRONA_MW_COND(cur_world_id_,) e);
 }
 
 template <typename ComponentT>
@@ -89,22 +82,9 @@ ComponentT & Context::getDirect(int32_t column_idx, Loc loc)
 }
 
 template <typename SingletonT>
-SingletonT & Context::getSingleton()
+SingletonT & Context::singleton()
 {
     return state_mgr_->getSingleton<SingletonT>(MADRONA_MW_COND(cur_world_id_));
-}
-
-template <typename ComponentT>
-ComponentT & Context::getUnsafe(int32_t e_id)
-{
-    return state_mgr_->getUnsafe<ComponentT>(
-        MADRONA_MW_COND(cur_world_id_,) e_id);
-}
-
-template <typename ComponentT>
-ComponentT & Context::getUnsafe(Loc l)
-{
-    return state_mgr_->getUnsafe<ComponentT>(MADRONA_MW_COND(cur_world_id_,) l);
 }
 
 template <typename ArchetypeT>

@@ -30,7 +30,7 @@ SolverData::SolverData(CountT max_contacts_per_step,
 inline void collectConstraintsSystem(Context &ctx,
                                      JointConstraint &constraint)
 {
-    auto &solver = ctx.getSingleton<SolverData>();
+    auto &solver = ctx.singleton<SolverData>();
     solver.jointConstraints[
         solver.numJointConstraints.fetch_add_relaxed(1)] = constraint;
 }
@@ -110,8 +110,8 @@ inline void substepRigidBodies(Context &ctx,
     prev_state.prevPosition = x;
     prev_state.prevRotation = q;
 
-    const auto &solver = ctx.getSingleton<SolverData>();
-    const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    const auto &solver = ctx.singleton<SolverData>();
+    const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     const RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
 
     float inv_m = metadata.mass.invMass;
@@ -529,8 +529,8 @@ static void applyJointAxisConstraint(
 inline void handleJointConstraint(Context &ctx,
                                   JointConstraint joint)
 {
-    Loc l1 = ctx.getLoc(joint.e1);
-    Loc l2 = ctx.getLoc(joint.e2);
+    Loc l1 = ctx.loc(joint.e1);
+    Loc l2 = ctx.loc(joint.e2);
 
     Vector3 *x1_ptr = &ctx.getDirect<Position>(Cols::Position, l1);
     Vector3 *x2_ptr = &ctx.getDirect<Position>(Cols::Position, l2);
@@ -547,7 +547,7 @@ inline void handleJointConstraint(Context &ctx,
     ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, l1);
     ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, l2);
 
-    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
 
@@ -641,7 +641,7 @@ inline void handleJointConstraint(Context &ctx,
 
 inline void solvePositions(Context &ctx, SolverData &solver)
 {
-    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
     CountT num_contacts = solver.numContacts.load_relaxed();
 
@@ -666,7 +666,7 @@ inline void setVelocities(Context &ctx,
                           const SubstepPrevState &prev_state,
                           Velocity &vel)
 {
-    const auto &solver = ctx.getSingleton<SolverData>();
+    const auto &solver = ctx.singleton<SolverData>();
     float h = solver.h;
 
     Vector3 x = pos;
@@ -984,7 +984,7 @@ static inline void solveVelocitiesForContact(Context &ctx,
 
 inline void solveVelocities(Context &ctx, SolverData &solver)
 {
-    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
     CountT num_contacts = solver.numContacts.load_relaxed();
 
@@ -1008,7 +1008,7 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
                                   CountT max_contacts_per_world,
                                   CountT max_joint_constraints_per_world)
 {
-    broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
+    broadphase::BVH &bvh = ctx.singleton<broadphase::BVH>();
 
     // expansion factor is 2 * delta_t to give room
     // for acceleration within the timestep
@@ -1017,18 +1017,18 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
         obj_mgr, max_dynamic_objects, 2.f * delta_t,
         max_inst_accel * delta_t * delta_t);
 
-    SolverData &solver = ctx.getSingleton<SolverData>();
+    SolverData &solver = ctx.singleton<SolverData>();
     new (&solver) SolverData(max_contacts_per_world, 
                              max_joint_constraints_per_world,
                              delta_t, num_substeps, gravity);
 
-    ObjectData &objs = ctx.getSingleton<ObjectData>();
+    ObjectData &objs = ctx.singleton<ObjectData>();
     new (&objs) ObjectData { obj_mgr };
 }
 
 void RigidBodyPhysicsSystem::reset(Context &ctx)
 {
-    broadphase::BVH &bvh = ctx.getSingleton<broadphase::BVH>();
+    broadphase::BVH &bvh = ctx.singleton<broadphase::BVH>();
     bvh.rebuildOnUpdate();
     bvh.clearLeaves();
 }
@@ -1037,7 +1037,7 @@ broadphase::LeafID RigidBodyPhysicsSystem::registerEntity(Context &ctx,
                                                           Entity e,
                                                           ObjectID obj_id)
 {
-    return ctx.getSingleton<broadphase::BVH>().reserveLeaf(e, obj_id);
+    return ctx.singleton<broadphase::BVH>().reserveLeaf(e, obj_id);
 }
 
 void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)

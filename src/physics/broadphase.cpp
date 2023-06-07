@@ -889,8 +889,8 @@ inline void updateLeafPositionsEntry(
     const ObjectID &obj_id,
     const Velocity &vel)
 {
-    BVH &bvh = ctx.getSingleton<BVH>();
-    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    BVH &bvh = ctx.singleton<BVH>();
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     AABB obj_aabb = obj_mgr.rigidBodyAABBs[obj_id.idx];
 
     bvh.updateLeafPosition(leaf_id, pos, rot, scale, vel.linear, obj_aabb);
@@ -902,7 +902,7 @@ inline void expandLeavesEntry(
     const LeafID &leaf_id,
     const Velocity &vel)
 {
-    BVH &bvh = ctx.getSingleton<BVH>();
+    BVH &bvh = ctx.singleton<BVH>();
     AABB expanded = bvh.expandLeaf(leaf_id, vel.linear);
     bvh.refitLeaf(leaf_id, expanded);
 }
@@ -914,7 +914,7 @@ inline void updateBVHEntry(Context &, BVH &bvh)
 
 inline void refitEntry(Context &ctx, LeafID leaf_id)
 {
-    BVH &bvh = ctx.getSingleton<BVH>();
+    BVH &bvh = ctx.singleton<BVH>();
     bvh.refitLeaf(leaf_id, bvh.getLeafAABB(leaf_id));
 }
 
@@ -923,12 +923,12 @@ inline void findOverlappingEntry(
     const Entity &e,
     LeafID leaf_id)
 {
-    BVH &bvh = ctx.getSingleton<BVH>();
-    ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    BVH &bvh = ctx.singleton<BVH>();
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
     // FIXME: should have a flag for passing this
     // directly into the system
-    Loc a_loc = ctx.getLoc(e);
+    Loc a_loc = ctx.loc(e);
     bool a_is_static = 
         ctx.getDirect<ResponseType>(Cols::ResponseType, a_loc) ==
         ResponseType::Static;
@@ -939,7 +939,7 @@ inline void findOverlappingEntry(
 
     bvh.findOverlapsForLeaf(leaf_id, [&](Entity overlapping_entity) {
         if (e.id < overlapping_entity.id) {
-            Loc b_loc = ctx.getLoc(overlapping_entity);
+            Loc b_loc = ctx.loc(overlapping_entity);
 
             // FIXME: Change this so static objects are kept in a separate BVH
             // and this check can be removed.

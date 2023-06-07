@@ -13,7 +13,7 @@ inline void instanceTransformSetup(Context &ctx,
                                    const Scale &scale,
                                    const ObjectID &obj_id)
 {
-    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    RendererState &renderer_state = ctx.singleton<RendererState>();
 
 #if defined(MADRONA_BATCHRENDER_RT)
     AtomicU32Ref count_atomic(
@@ -64,7 +64,7 @@ inline void updateViewData(Context &ctx,
                            const Rotation &rot,
                            const ViewSettings &view_settings)
 {
-    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    RendererState &renderer_state = ctx.singleton<RendererState>();
     int32_t view_idx = view_settings.viewID.idx;
 
 #if defined(MADRONA_BATCHRENDER_RT)
@@ -141,7 +141,7 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 void RenderingSystem::reset([[maybe_unused]] Context &ctx)
 {
 #ifdef MADRONA_BATCHRENDER_METAL
-    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    RendererState &renderer_state = ctx.singleton<RendererState>();
     *renderer_state.numViews = 0;
 #endif
 }
@@ -152,7 +152,7 @@ ViewSettings RenderingSystem::setupView(Context &ctx,
                                         math::Vector3 camera_offset,
                                         ViewID view_id)
 {
-    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    RendererState &renderer_state = ctx.singleton<RendererState>();
 
     float fov_scale =
 #ifndef MADRONA_BATCHRENDER_RT
@@ -182,7 +182,7 @@ ViewSettings RenderingSystem::setupView(Context &ctx,
 
 void RendererState::init(Context &ctx, const RendererInit &renderer_init)
 {
-    RendererState &renderer_state = ctx.getSingleton<RendererState>();
+    RendererState &renderer_state = ctx.singleton<RendererState>();
     int32_t world_idx = ctx.worldID().idx;
 
 #if defined(MADRONA_BATCHRENDER_RT)

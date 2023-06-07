@@ -32,42 +32,30 @@ public:
     template <typename ArchetypeT>
     inline ArchetypeRef<ArchetypeT> archetype();
 
-    inline Loc getLoc(Entity e) const;
+    inline Loc loc(Entity e) const;
 
-    template <typename ArchetypeT, typename... Args>
-    inline Entity makeEntity(Transaction &txn, Args && ...args);
+    template <typename ArchetypeT>
+    inline Entity makeEntity();
 
-    template <typename ArchetypeT, typename... Args>
-    inline Entity makeEntityNow(Args && ...args);
-
-    inline void destroyEntity(Transaction &txn, Entity e);
-
-    inline void destroyEntityNow(Entity e);
+    inline void destroyEntity(Entity e);
 
     template <typename ArchetypeT>
     inline Loc makeTemporary();
 
     template <typename ComponentT>
-    inline ResultRef<ComponentT> get(Entity e);
+    inline ComponentT & get(Entity e);
 
     template <typename ComponentT>
-    inline ComponentT & getUnsafe(Entity e);
+    inline ComponentT & get(Loc l);
 
     template <typename ComponentT>
-    inline ComponentT & getUnsafe(int32_t e_id);
-
-    template <typename ComponentT>
-    inline ComponentT & getUnsafe(Loc l);
-
-    // FIXME: remove
-    template <typename ArchetypeT, typename ComponentT>
-    ComponentT & getComponent(Entity e);
+    inline ResultRef<ComponentT> getSafe(Entity e);
 
     template <typename ComponentT>
     ComponentT & getDirect(int32_t column_idx, Loc loc);
 
     template <typename SingletonT>
-    SingletonT & getSingleton();
+    SingletonT & singleton();
 
     template <typename ArchetypeT>
     inline void clearArchetype();

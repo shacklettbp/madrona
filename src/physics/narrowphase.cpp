@@ -1533,7 +1533,7 @@ static inline void runNarrowphase(
     Loc a_loc = candidate_collision.a;
     Loc b_loc = candidate_collision.b;
 
-    const ObjectManager &obj_mgr = *ctx.getSingleton<ObjectData>().mgr;
+    const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
     uint32_t a_prim_idx, b_prim_idx;
     {
@@ -1686,7 +1686,7 @@ static inline void runNarrowphase(
 
     __syncwarp(mwGPU::allActive);
 
-    SolverData &solver = ctx.getSingleton<SolverData>();
+    SolverData &solver = ctx.singleton<SolverData>();
 
     if (lane_active) {
         generateContacts(solver, thread_result, a_loc, b_loc,
@@ -1705,7 +1705,7 @@ static inline void runNarrowphase(
         max_num_tmp_vertices, max_num_tmp_faces,
         tmp_vertices_buffer, tmp_faces_buffer);
 
-    SolverData &solver = ctx.getSingleton<SolverData>();
+    SolverData &solver = ctx.singleton<SolverData>();
 
     generateContacts(solver, result, a_loc, b_loc,
                      tmp_faces_buffer,
