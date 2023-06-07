@@ -477,20 +477,20 @@ static HullBuildData allocBuildData(const CountT N)
     };
 
     // Setup free lists
-    for (CountT i = 1; i < max_num_hedges - 1; i++) {
+    for (CountT i = 1; i < max_num_hedges; i++) {
         mesh.hedges[i].next = uint32_t(i + 1);
     }
-    mesh.hedges[max_num_hedges - 1].next = 0;
+    mesh.hedges[max_num_hedges].next = 0;
 
-    for (CountT i = 1; i < max_num_faces - 1; i++) {
+    for (CountT i = 1; i < max_num_faces; i++) {
         mesh.faces[i].next = uint32_t(i + 1);
     }
-    mesh.faces[max_num_faces - 1].next = 0;
+    mesh.faces[max_num_faces].next = 0;
 
-    for (CountT i = 1; i < max_num_verts - 1; i++) {
+    for (CountT i = 1; i < max_num_verts; i++) {
         mesh.verts[i].next = uint32_t(i + 1);
     }
-    mesh.verts[max_num_verts - 1].next = 0;
+    mesh.verts[max_num_verts].next = 0;
     
     // Elem 0 is fake head / tail to avoid special cases
     mesh.hedges[0].next = 0;
