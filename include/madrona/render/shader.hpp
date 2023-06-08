@@ -63,18 +63,20 @@ struct MTLShader {
 
 class ShaderCompiler {
 public:
-    ShaderCompiler();
-    ~ShaderCompiler();
+    MADRONA_IMPORT ShaderCompiler();
+    MADRONA_IMPORT ~ShaderCompiler();
 
-    SPIRVShader compileHLSLFileToSPV(
+    MADRONA_IMPORT SPIRVShader compileHLSLFileToSPV(
         const char *path,
         Span<const char *const> include_dirs,
         Span<const char *const> defines);
 
-    MTLShader compileHLSLFileToMTL(
+#ifdef MADRONA_APPLE
+    MADRONA_IMPORT MTLShader compileHLSLFileToMTL(
         const char *path,
         Span<const char *const> include_dirs,
         Span<const char *const> defines);
+#endif
 
 private:
     struct Impl;

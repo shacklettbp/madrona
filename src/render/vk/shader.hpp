@@ -16,9 +16,9 @@ namespace render {
 namespace vk {
 
 namespace shader {
-using vec4 = madrona::math::Vector4;
-using vec3 = madrona::math::Vector3;
-using vec2 = madrona::math::Vector2;
+using float4 = madrona::math::Vector4;
+using float3 = madrona::math::Vector3;
+using float2 = madrona::math::Vector2;
 #include "shaders/shader_common.h"
 }
 

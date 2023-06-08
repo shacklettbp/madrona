@@ -63,7 +63,7 @@ static void checkDXC(HRESULT res, const char *msg, const char *file,
     ::madrona::render::checkDXC((expr), msg, __FILE__, __LINE__,\
                                 MADRONA_COMPILER_FUNCTION_NAME)
 
-ShaderCompiler::ShaderCompiler()
+MADRONA_EXPORT ShaderCompiler::ShaderCompiler()
     : impl_([]() {
         CComPtr<IDxcUtils> dxc_utils;
         REQ_DXC(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils)),
@@ -79,6 +79,8 @@ ShaderCompiler::ShaderCompiler()
         });
     }())
 {}
+
+MADRONA_EXPORT ShaderCompiler::~ShaderCompiler() = default;
 
 static void inline checkSPVReflect(SpvReflectResult res,
     const char *file, int line, const char *funcname)
@@ -205,7 +207,7 @@ static HeapArray<uint32_t> hlslToSPV(
         dxc_args.push_back(wdefines.back().data());
     }
 
-    DynArray<HeapArray<wchar_t>> wincs(include_dirs.size());
+    DynArray<HeapArray<wchar_t>> wincs(include_dirs.size() + 1);
 
     for (CountT i = 0; i < include_dirs.size(); i++) {
         wincs.emplace_back(toWide(include_dirs[i]));
@@ -379,7 +381,7 @@ static refl::SPIRV buildSPIRVReflectionData(
     };
 }
 
-SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
+MADRONA_EXPORT SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
    const char *path,
    Span<const char *const> include_dirs,
    Span<const char *const> defines)
@@ -398,5 +400,24 @@ SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
         .bytecode = std::move(spv_bytecode),
     };
 }
+
+#ifdef MADRONA_APPLE
+MADRONA_EXPORT MTLShader ShaderCompiler::compileHLSLFileToSPV(
+   const char *path,
+   Span<const char *const> include_dirs,
+   Span<const char *const> defines)
+{
+    CComPtr<IDxcBlobEncoding> src_blob =
+        loadFileToDxcBlob(impl_->dxcUtils, path);
+
+    (void)src_blob;
+    (void)include_dirs;
+    (void)defines;
+
+    return MTLShader {
+        .bytecode = HeapArray<char>(0),
+    };
+}
+#endif
 
 }

@@ -137,10 +137,10 @@ static ShaderState makeShaderState(const DeviceState &dev,
 
     HeapArray<const char *> shader_defines_c(shader_defines.size());
     for (CountT i = 0; i < shader_defines_c.size(); i++) {
-        shader_defines[i] = shader_defines[i].c_str();
+        shader_defines_c[i] = shader_defines[i].c_str();
     }
 
-    const char *shader_name = "basic.comp";
+    const char *shader_name = "basic.hlsl";
 
     ShaderCompiler compiler;
     SPIRVShader spirv = compiler.compileHLSLFileToSPV(

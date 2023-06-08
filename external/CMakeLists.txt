@@ -70,3 +70,5 @@ add_library(spv_reflect STATIC
 target_include_directories(spv_reflect PUBLIC
     SPIRV-Reflect/
 )
+set_target_properties(spv_reflect PROPERTIES CXX_VISIBILITY_PRESET hidden)
+set_target_properties(spv_reflect PROPERTIES VISIBILITY_INLINES_HIDDEN ON)

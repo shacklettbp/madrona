@@ -9,28 +9,28 @@
 #define LOCAL_WORKGROUP_Z (1)
 
 struct Vertex {
-    vec3 position;
-    vec3 normal;
-    vec4 tangentAndSign;
-    vec2 uv;
+    float3 position;
+    float3 normal;
+    float4 tangentAndSign;
+    float2 uv;
 };
 
 struct PackedVertex {
-    vec4 data[2];
+    float4 data[2];
 };
 
 struct Camera {
-    vec3 origin;
-    vec3 view;
-    vec3 up;
-    vec3 right;
+    float3 origin;
+    float3 view;
+    float3 up;
+    float3 right;
     float rightScale;
     float upScale;
 };
 
 struct PackedCamera {
-    vec4 rotation;
-    vec4 posAndTanFOV;
+    float4 rotation;
+    float4 posAndTanFOV;
 };
 
 struct RTPushConstant {
