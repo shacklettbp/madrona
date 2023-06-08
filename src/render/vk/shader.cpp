@@ -127,65 +127,6 @@ struct ReflectedSetInfo {
     uint32_t maxBindingID;
 };
 
-static vector<ReflectedSetInfo> getReflectionInfo(const vector<uint32_t> &spv,
-                                                  VkShaderStageFlagBits stage)
-{
-    SpvReflectShaderModule rfl_mod;
-    REQ_RFL(spvReflectCreateShaderModule(spv.size() * sizeof(uint32_t),
-                                         spv.data(), &rfl_mod));
-
-    uint32_t num_sets = 0;
-    REQ_RFL(spvReflectEnumerateDescriptorSets(&rfl_mod, &num_sets, nullptr));
-
-    if (num_sets == 0) {
-        return {};
-    }
-
-    HeapArray<SpvReflectDescriptorSet *> desc_sets(num_sets);
-    REQ_RFL(spvReflectEnumerateDescriptorSets(&rfl_mod, &num_sets,
-                                              desc_sets.data()));
-
-    vector<ReflectedSetInfo> sets;
-
-    for (int set_idx = 0; set_idx < (int)num_sets; set_idx++) {
-        SpvReflectDescriptorSet &rfl_set = *(desc_sets[set_idx]);
-        ReflectedSetInfo set_info;
-        set_info.id = rfl_set.set;
-        set_info.bindings.reserve(rfl_set.binding_count);
-
-        set_info.maxBindingID = 0;
-
-        for (int binding_idx = 0; binding_idx < (int)rfl_set.binding_count;
-             binding_idx++) {
-            const SpvReflectDescriptorBinding &rfl_binding =
-                *(rfl_set.bindings[binding_idx]);
-
-            uint32_t num_descriptors = 1;
-            for (int dim_idx = 0; dim_idx < (int)rfl_binding.array.dims_count;
-                 dim_idx++) {
-                num_descriptors *= rfl_binding.array.dims[dim_idx];
-            }
-
-            if (rfl_binding.binding > set_info.maxBindingID) {
-                set_info.maxBindingID = rfl_binding.binding;
-            }
-
-            set_info.bindings.push_back({
-                rfl_binding.binding,
-                (VkDescriptorType)rfl_binding.descriptor_type,
-                num_descriptors,
-                stage,
-            });
-        }
-
-        sets.emplace_back(std::move(set_info));
-    }
-
-    spvReflectDestroyShaderModule(&rfl_mod);
-
-    return sets;
-}
-
 static void mergeReflectedSet(ReflectedSetInfo &dst,
                               const ReflectedSetInfo &src)
 {

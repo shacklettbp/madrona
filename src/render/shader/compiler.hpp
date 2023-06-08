@@ -5,20 +5,55 @@
 #include <madrona/heap_array.hpp>
 
 #include <string>
-#include <vector>
 
 namespace madrona::render {
 
-enum class ShaderStage {
-    Vertex,
-    Fragment,
-    Compute,
-    Mesh,
-    Amplification,
+namespace refl {
+
+enum class Stage : uint32_t {
+    Vertex = 1 << 0,
+    Fragment = 1 << 1,
+    Compute = 1 << 2,
+    Mesh = 1 << 3,
+    Amplification = 1 << 4,
 };
+
+struct EntryPoint {
+    std::string name;
+    Stage stage;
+};
+
+enum class BindingType {
+    None,
+    Sampler,
+    Texture,
+    UniformBuffer,
+    StorageBuffer,
+};
+
+struct Binding {
+    uint32_t id;
+    BindingType type;
+    uint32_t numResources;
+    uint32_t stageUsage;
+};
+
+struct DescriptorSet {
+    uint32_t bindingOffset;
+    uint32_t numBindings;
+};
+
+struct SPIRV {
+    HeapArray<EntryPoint> entryPoints;
+    HeapArray<Binding> bindings;
+    HeapArray<DescriptorSet> descriptorSets;
+};
+
+}
 
 struct SPIRVShader {
     HeapArray<uint32_t> bytecode;
+    refl::SPIRV reflectionInfo;
 };
 
 struct MTLShader {
@@ -32,15 +67,11 @@ public:
 
     SPIRVShader compileHLSLFileToSPV(
         const char *path,
-        const char *entry_point,
-        ShaderStage stage,
         Span<const char *> include_dirs,
         Span<const char *> defines);
 
     MTLShader compileHLSLFileToMTL(
         const char *path,
-        const char *entry_point,
-        ShaderStage stage,
         Span<const char *> include_dirs,
         Span<const char *> defines);
 
