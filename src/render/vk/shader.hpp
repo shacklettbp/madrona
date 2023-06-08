@@ -50,8 +50,6 @@ public:
     PipelineShaders(PipelineShaders &&) = default;
     ~PipelineShaders();
 
-    static void initCompiler();
-
     inline VkShaderModule getShader(uint32_t idx) const
     {
         return shaders_[idx];

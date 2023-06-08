@@ -1,19 +1,3 @@
-link_libraries(madrona_libcxx) # FIXME hack
-
-add_subdirectory(external/glslang EXCLUDE_FROM_ALL)
-
-target_include_directories(glslang SYSTEM
-    INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glslang/glslang/Public>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glslang/StandAlone>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/glslang/SPIRV>
-)
-
-add_library(spirv_reflect STATIC
-    external/SPIRV-Reflect/spirv_reflect.h external/SPIRV-Reflect/spirv_reflect.c)
-target_include_directories(spirv_reflect
-    INTERFACE external/SPIRV-Reflect)
-
 # Build vulkan dispatch table
 get_directory_property(DIR_DEFINES DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMPILE_DEFINITIONS )
 set(DEFINE_STR "")
@@ -38,7 +22,7 @@ add_custom_command(
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_vk_dispatch.py
 )
 
-add_custom_target( generate_vk_dispatch DEPENDS
+add_custom_target(generate_vk_dispatch DEPENDS
     dispatch/dispatch_device_impl.hpp dispatch/dispatch_device_impl.cpp
     dispatch/dispatch_instance_impl.hpp dispatch/dispatch_instance_impl.cpp
 )
@@ -72,12 +56,9 @@ target_link_libraries(madrona_render_vk
         madrona_vk_hdrs
     PRIVATE
         CUDA::cudart
-        glslang
-        spirv_reflect
-        SPIRV
-        glslang-default-resource-limits
         madrona_common
         madrona_sdl2
+        madrona_render_shader
 )
 
 add_dependencies(madrona_render_vk generate_vk_dispatch)

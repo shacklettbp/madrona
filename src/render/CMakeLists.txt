@@ -1,3 +1,5 @@
+add_subdirectory(shader)
+
 if (MADRONA_LINUX OR MADRONA_WINDOWS OR MADRONA_ANDROID)
     add_subdirectory(vk)
 elseif (MADRONA_MACOS OR MADRONA_IOS)

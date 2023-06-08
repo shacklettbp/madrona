@@ -1,13 +1,6 @@
 #include "shader.hpp"
 #include "utils.hpp"
 
-#include <ShaderLang.h>
-#include <GlslangToSpv.h>
-#include <DirStackFileIncluder.h>
-#include <ResourceLimits.h>
-
-#include <spirv_reflect.h>
-
 #include <algorithm>
 #include <iostream>
 #include <fstream>
@@ -16,52 +9,7 @@
 
 using namespace std;
 
-namespace madrona {
-namespace render {
-namespace vk {
-
-static void inline checkReflect(SpvReflectResult res, const char *msg)
-{
-    if (res == SPV_REFLECT_RESULT_SUCCESS) return;
-
-    const char *err_str = nullptr;
-
-#define ERR_CASE(val)              \
-    case SPV_REFLECT_RESULT_##val: \
-        err_str = #val;              \
-        break
-
-    switch (res) {
-        ERR_CASE(NOT_READY);
-        ERR_CASE(ERROR_PARSE_FAILED);
-        ERR_CASE(ERROR_ALLOC_FAILED);
-        ERR_CASE(ERROR_RANGE_EXCEEDED);
-        ERR_CASE(ERROR_NULL_POINTER);
-        ERR_CASE(ERROR_INTERNAL_ERROR);
-        ERR_CASE(ERROR_COUNT_MISMATCH);
-        ERR_CASE(ERROR_ELEMENT_NOT_FOUND);
-        ERR_CASE(ERROR_SPIRV_INVALID_CODE_SIZE);
-        ERR_CASE(ERROR_SPIRV_INVALID_MAGIC_NUMBER);
-        ERR_CASE(ERROR_SPIRV_UNEXPECTED_EOF);
-        ERR_CASE(ERROR_SPIRV_INVALID_ID_REFERENCE);
-        ERR_CASE(ERROR_SPIRV_SET_NUMBER_OVERFLOW);
-        ERR_CASE(ERROR_SPIRV_INVALID_STORAGE_CLASS);
-        ERR_CASE(ERROR_SPIRV_RECURSION);
-        ERR_CASE(ERROR_SPIRV_INVALID_INSTRUCTION);
-        ERR_CASE(ERROR_SPIRV_UNEXPECTED_BLOCK_DATA);
-        ERR_CASE(ERROR_SPIRV_INVALID_BLOCK_MEMBER_REFERENCE);
-        ERR_CASE(ERROR_SPIRV_INVALID_ENTRY_POINT);
-        ERR_CASE(ERROR_SPIRV_INVALID_EXECUTION_MODE);
-        default:
-            err_str = "Unknown SPIRV-Reflect error";
-            break;
-    }
-#undef ERR_CASE
-
-    FATAL("%s: %s\n", msg, err_str);
-}
-
-#define REQ_RFL(expr) checkReflect((expr), LOC_APPEND(#expr))
+namespace madrona::render::vk {
 
 static VkShaderStageFlagBits getStage(string_view name)
 {
@@ -433,11 +381,6 @@ PipelineShaders::~PipelineShaders()
     }
 }
 
-void PipelineShaders::initCompiler()
-{
-    glslang::InitializeProcess();
-}
-
 VkDescriptorPool PipelineShaders::makePool(uint32_t set_id,
                                           uint32_t max_sets) const
 {
@@ -467,6 +410,4 @@ VkDescriptorPool PipelineShaders::makePool(uint32_t set_id,
     return pool;
 }
 
-}
-}
 }
