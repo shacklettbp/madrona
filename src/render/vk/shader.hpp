@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include <madrona/render/shader.hpp>
+
 namespace madrona {
 namespace render {
 namespace vk {
@@ -42,10 +44,8 @@ struct BindingOverride {
 class PipelineShaders {
 public:
     PipelineShaders(const DeviceState &dev,
-                    Span<const std::string> shader_paths,
-                    Span<const BindingOverride> binding_overrides,
-                    Span<const std::string> defines,
-                    const char *shader_dir);
+                    const SPIRVShader &shader,
+                    Span<const BindingOverride> binding_overrides);
     PipelineShaders(const PipelineShaders &) = delete;
     PipelineShaders(PipelineShaders &&) = default;
     ~PipelineShaders();

@@ -1,5 +1,6 @@
 add_library(madrona_mw_render STATIC
     interop.hpp interop.cpp
+    ${MADRONA_INC_DIR}/render/mw.hpp
 )
 
 target_link_libraries(madrona_mw_render PUBLIC

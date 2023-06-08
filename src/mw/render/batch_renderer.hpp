@@ -3,7 +3,7 @@
 #include "interop.hpp"
 
 #include <madrona/types.hpp>
-#include <madrona/mw_render.hpp>
+#include <madrona/render/mw.hpp>
 #include <madrona/importer.hpp>
 #include <memory>
 

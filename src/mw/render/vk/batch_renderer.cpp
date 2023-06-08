@@ -5,6 +5,8 @@
 #include <madrona/dyn_array.hpp>
 #include <madrona/tracing.hpp>
 
+#include <filesystem>
+
 #include "vk/core.hpp"
 #include "vk/cuda_interop.hpp"
 #include "vk/memory.hpp"
@@ -133,16 +135,19 @@ static ShaderState makeShaderState(const DeviceState &dev,
         shader_defines.emplace_back("PERSPECTIVE");
     }
 
+    HeapArray<const char *> shader_defines_c(shader_defines.size());
+    for (CountT i = 0; i < shader_defines_c.size(); i++) {
+        shader_defines[i] = shader_defines[i].c_str();
+    }
+
     const char *shader_name = "basic.comp";
 
-    PipelineShaders::initCompiler();
+    ShaderCompiler compiler;
+    SPIRVShader spirv = compiler.compileHLSLFileToSPV(
+        (std::filesystem::path(STRINGIFY(SHADER_DIR)) / shader_name).c_str(),
+        {}, shader_defines_c);
 
-    PipelineShaders shader(dev,
-        { std::string(shader_name) },
-        {},
-        Span<const string>(shader_defines.data(),
-                           (CountT)shader_defines.size()),
-        STRINGIFY(SHADER_DIR));
+    PipelineShaders shader(dev, spirv, {});
 
     return ShaderState {
         std::move(shader),

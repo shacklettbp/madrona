@@ -11,241 +11,91 @@ using namespace std;
 
 namespace madrona::render::vk {
 
-static VkShaderStageFlagBits getStage(string_view name)
-{
-    string_view suffix = name.substr(name.rfind('.') + 1);
-
-    if (suffix == "vert") {
-        return VK_SHADER_STAGE_VERTEX_BIT;
-    } else if (suffix == "frag") {
-        return VK_SHADER_STAGE_FRAGMENT_BIT;
-    } else if (suffix == "comp") {
-        return VK_SHADER_STAGE_COMPUTE_BIT;
-    } else {
-        FATAL("Invalid shader stage");
-    }
-}
-
-static vector<uint32_t> compileToSPV(const HeapArray<char> &src,
-                                     VkShaderStageFlagBits vk_stage,
-                                     const string &name,
-                                     const string &shader_dir,
-                                     const string &full_path,
-                                     Span<const string> defines)
-{
-    EShLanguage stage;
-    switch (vk_stage) {
-        case VK_SHADER_STAGE_VERTEX_BIT: {
-            stage = EShLangVertex;
-        } break;
-        case VK_SHADER_STAGE_FRAGMENT_BIT: {
-            stage = EShLangFragment;
-        } break;
-        case VK_SHADER_STAGE_COMPUTE_BIT: {
-            stage = EShLangCompute;
-        } break;
-        default: {
-            FATAL("Unknown mapping from vulkan stage to glslang");
-        }
-    }
-
-    glslang::TShader shader(stage);
-
-    const char *src_ptr = src.data();
-    int num_src_bytes = src.size();
-
-    const char *debug_path = full_path.c_str();
-
-    shader.setStringsWithLengthsAndNames(&src_ptr, &num_src_bytes,
-                                         &debug_path, 1);
-
-    string preamble = "";
-    for (const string &def : defines) {
-        preamble += "#define " + def + "\n";
-    }
-    shader.setPreamble(preamble.c_str());
-
-    int vk_semantic_version = 100;
-    glslang::EshTargetClientVersion vk_client_version =
-        glslang::EShTargetVulkan_1_2;
-    glslang::EShTargetLanguageVersion spv_version = glslang::EShTargetSpv_1_5;
-
-    shader.setEnvInput(glslang::EShSourceGlsl, stage, glslang::EShClientVulkan,
-                       vk_semantic_version);
-    shader.setEnvClient(glslang::EShClientVulkan, vk_client_version);
-    shader.setEnvTarget(glslang::EShTargetSpv, spv_version);
-
-    // EshMsgDebugInfo is necessary in order to output
-    // the main source file OpSource for some reason??
-    EShMessages desired_msgs =
-        (EShMessages)(EShMsgSpvRules | EShMsgVulkanRules | EShMsgDebugInfo);
-
-    const TBuiltInResource *resource_limits = GetDefaultResources();
-
-    DirStackFileIncluder preprocess_includer;
-    preprocess_includer.pushExternalLocalDirectory(shader_dir);
-
-    auto handleError = [&](const char *prefix) {
-        FATAL("%s for shader: %s\n%s\n%s\n", prefix, name.c_str(),
-              shader.getInfoLog(),
-              shader.getInfoDebugLog());
-    };
-
-    if (!shader.parse(resource_limits, 110, false, desired_msgs,
-                      preprocess_includer)) {
-        handleError("Parsing failed");
-    }
-
-    glslang::TProgram prog;
-    prog.addShader(&shader);
-
-    if (!prog.link(desired_msgs)) {
-        handleError("Linking failed");
-    }
-
-    vector<uint32_t> spv;
-    spv::SpvBuildLogger spv_log;
-    glslang::SpvOptions spv_opts;
-    spv_opts.generateDebugInfo = true;
-
-    glslang::GlslangToSpv(*prog.getIntermediate(stage), spv, &spv_log,
-                          &spv_opts);
-
-    return spv;
-}
-
-struct ReflectedSetInfo {
-    struct BindingInfo {
-        uint32_t id;
-        VkDescriptorType type;
-        uint32_t numDescriptors;
-        VkShaderStageFlags stageUsage;
-    };
-
-    uint32_t id;
-    vector<BindingInfo> bindings;
-    uint32_t maxBindingID;
-};
-
-static void mergeReflectedSet(ReflectedSetInfo &dst,
-                              const ReflectedSetInfo &src)
-{
-    for (const auto &new_binding : src.bindings) {
-        bool match_found = false;
-        for (auto &existing_binding : dst.bindings) {
-            if (new_binding.id == existing_binding.id) {
-                match_found = true;
-                existing_binding.stageUsage |= new_binding.stageUsage;
-                if (existing_binding.type != new_binding.type ||
-                    existing_binding.numDescriptors !=
-                        new_binding.numDescriptors) {
-                    cerr << "Mismatched binding " << existing_binding.id
-                         << " in set " << dst.id << endl;
-                }
-            }
-        }
-
-        if (!match_found) {
-            dst.bindings.push_back(new_binding);
-        }
-    }
-}
-
 PipelineShaders::PipelineShaders(
-    const DeviceState &d,
-    Span<const string> shader_names,
-    Span<const BindingOverride> binding_overrides,
-    Span<const string> defines,
-    const char *shader_dir)
+        const DeviceState &d,
+        const SPIRVShader &shader,
+        Span<const BindingOverride> binding_overrides)
     : dev(d),
       shaders_(),
       layouts_(),
       base_pool_sizes_()
 {
-    vector<ReflectedSetInfo> reflected_sets;
+    VkShaderModuleCreateInfo shader_info;
+    shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    shader_info.pNext = nullptr;
+    shader_info.flags = 0;
+    shader_info.codeSize = shader.bytecode.size() * sizeof(uint32_t);
+    shader_info.pCode = shader.bytecode.data();
 
-    for (const auto &shader_name : shader_names) {
-        const string full_path = string(shader_dir) + shader_name;
+    VkShaderModule shader_module;
+    REQ_VK(dev.dt.createShaderModule(dev.hdl, &shader_info, nullptr,
+                                     &shader_module));
 
-        ifstream shader_file(full_path, ios::binary | ios::ate);
+    shaders_.push_back(shader_module);
 
-        streampos fend = shader_file.tellg();
-        shader_file.seekg(0, ios::beg);
-        streampos fbegin = shader_file.tellg();
-        size_t file_size = fend - fbegin;
+    const refl::SPIRV &refl_info = shader.reflectionInfo;
 
-        if (file_size == 0) {
-            FATAL("Empty shader file at %s", full_path.c_str());
-        }
+    layouts_.resize(refl_info.descriptorSets.size());
+    base_pool_sizes_.resize(refl_info.descriptorSets.size());
 
-        HeapArray<char> shader_src(file_size);
-        shader_file.read(shader_src.data(), file_size);
-
-        VkShaderStageFlagBits stage = getStage(shader_name);
-
-        vector<uint32_t> spv =
-            compileToSPV(shader_src, stage, shader_name, shader_dir,
-                         full_path, defines);
-
-        VkShaderModuleCreateInfo shader_info;
-        shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        shader_info.pNext = nullptr;
-        shader_info.flags = 0;
-        shader_info.codeSize = spv.size() * sizeof(uint32_t);
-        shader_info.pCode = spv.data();
-
-        VkShaderModule shader_module;
-        REQ_VK(dev.dt.createShaderModule(dev.hdl, &shader_info, nullptr,
-                                         &shader_module));
-
-        shaders_.push_back(shader_module);
-
-        vector<ReflectedSetInfo> shader_sets = getReflectionInfo(spv, stage);
-
-        for (const ReflectedSetInfo &shader_set : shader_sets) {
-            bool match_found = false;
-            for (ReflectedSetInfo &prior_set : reflected_sets) {
-                if (prior_set.id == shader_set.id) {
-                    match_found = true;
-                    mergeReflectedSet(prior_set, shader_set);
-                    break;
-                }
-            }
-            if (!match_found) {
-                reflected_sets.push_back(shader_set);
-            }
-        }
-    }
-
-    uint32_t max_set_id = 0;
-    for (const auto &desc_set : reflected_sets) {
-        if (desc_set.id > max_set_id) {
-            max_set_id = desc_set.id;
-        }
-    }
-
-    layouts_.resize(max_set_id + 1);
-    base_pool_sizes_.resize(max_set_id + 1);
-
-    vector<HeapArray<VkDescriptorSetLayoutBinding>> binding_infos;
-    binding_infos.reserve(reflected_sets.size());
+    vector<vector<VkDescriptorSetLayoutBinding>> binding_infos;
+    binding_infos.reserve(refl_info.descriptorSets.size());
 
     vector<vector<VkDescriptorBindingFlags>> binding_flags;
-    binding_flags.reserve(reflected_sets.size());
+    binding_flags.reserve(refl_info.descriptorSets.size());
 
-    for (const auto &desc_set : reflected_sets) {
-        HeapArray<VkDescriptorSetLayoutBinding> set_binding_info(
-            desc_set.bindings.size());
+    for (const auto &desc_set : refl_info.descriptorSets) {
+        vector<VkDescriptorSetLayoutBinding> set_binding_info;
+        set_binding_info.reserve(desc_set.numBindings);
 
-        for (int binding_idx = 0; binding_idx < (int)set_binding_info.size();
-             binding_idx++) {
-            const auto &rfl_binding = desc_set.bindings[binding_idx];
+        for (CountT binding_idx = 0;
+             binding_idx < (CountT)desc_set.numBindings; binding_idx++) {
+            const auto &rfl_binding =
+                refl_info.bindings[desc_set.bindingOffset + binding_idx];
             auto &binding_info = set_binding_info[binding_idx];
 
+            if (rfl_binding.type == refl::BindingType::None) {
+                continue;
+            }
+
             binding_info.binding = rfl_binding.id;
-            binding_info.descriptorType = rfl_binding.type;
-            binding_info.descriptorCount = rfl_binding.numDescriptors;
-            binding_info.stageFlags = rfl_binding.stageUsage;
+
+            VkDescriptorType desc_type;
+            switch (rfl_binding.type) {
+                case refl::BindingType::Sampler: {
+                    desc_type = VK_DESCRIPTOR_TYPE_SAMPLER;
+                } break;
+                case refl::BindingType::Texture: {
+                    desc_type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                } break;
+                case refl::BindingType::UniformBuffer: {
+                    desc_type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                } break;
+                case refl::BindingType::StorageBuffer: {
+                    desc_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                } break;
+                case refl::BindingType::AccelerationStructure: {
+                    desc_type =
+                        VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+                } break;
+                default: {
+                    FATAL("Unsupported binding type");
+                } break;
+            }
+
+            binding_info.descriptorType = desc_type;
+            binding_info.descriptorCount = rfl_binding.numResources;
+            binding_info.stageFlags = 0;
+            if ((rfl_binding.stageUsage & uint32_t(refl::Stage::Vertex))) {
+                binding_info.stageFlags |= VK_SHADER_STAGE_VERTEX_BIT;
+            }
+            if ((rfl_binding.stageUsage & uint32_t(refl::Stage::Fragment))) {
+                binding_info.stageFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+            }
+            if ((rfl_binding.stageUsage & uint32_t(refl::Stage::Compute))) {
+                binding_info.stageFlags |= VK_SHADER_STAGE_COMPUTE_BIT;
+            }
+
             binding_info.pImmutableSamplers = nullptr;
         }
 
@@ -278,8 +128,7 @@ PipelineShaders::PipelineShaders(
     }
 
     for (int set_id = 0; set_id < (int)binding_infos.size(); set_id++) {
-        const HeapArray<VkDescriptorSetLayoutBinding> &set_binding_info =
-            binding_infos[set_id];
+        const auto &set_binding_info = binding_infos[set_id];
 
         VkDescriptorSetLayoutBindingFlagsCreateInfo flag_info;
         flag_info.sType =

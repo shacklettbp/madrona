@@ -1,6 +1,6 @@
 #pragma once
 
-#include <madrona/mw_render.hpp>
+#include <madrona/render/mw.hpp>
 
 #if defined(MADRONA_LINUX) or defined(MADRONA_WINDOWS) or defined(MADRONA_GPU_MODE)
 #define MADRONA_BATCHRENDER_RT (1)

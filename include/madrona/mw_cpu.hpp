@@ -1,7 +1,7 @@
 #pragma once
 
 #include <madrona/taskgraph.hpp>
-#include <madrona/mw_render.hpp>
+#include <madrona/render/mw.hpp>
 #include <madrona/importer.hpp>
 
 namespace madrona {

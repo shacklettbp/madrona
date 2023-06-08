@@ -29,6 +29,7 @@ enum class BindingType {
     Texture,
     UniformBuffer,
     StorageBuffer,
+    AccelerationStructure,
 };
 
 struct Binding {
@@ -67,13 +68,13 @@ public:
 
     SPIRVShader compileHLSLFileToSPV(
         const char *path,
-        Span<const char *> include_dirs,
-        Span<const char *> defines);
+        Span<const char *const> include_dirs,
+        Span<const char *const> defines);
 
     MTLShader compileHLSLFileToMTL(
         const char *path,
-        Span<const char *> include_dirs,
-        Span<const char *> defines);
+        Span<const char *const> include_dirs,
+        Span<const char *const> defines);
 
 private:
     struct Impl;

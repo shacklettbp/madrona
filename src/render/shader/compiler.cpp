@@ -1,4 +1,4 @@
-#include "compiler.hpp"
+#include <madrona/render/shader.hpp>
 
 #include <madrona/macros.hpp>
 
@@ -154,8 +154,8 @@ static HeapArray<uint32_t> hlslToSPV(
     LPVOID src_shader_buffer,
     SIZE_T src_shader_len,
     IDxcCompiler3 *dxc_compiler,
-    Span<const char *> include_dirs,
-    Span<const char *> defines)
+    Span<const char *const> include_dirs,
+    Span<const char *const> defines)
 {
 #if 0
 #define TYPE_STR(type_str) (type_str L"_6_7")
@@ -277,6 +277,8 @@ static refl::BindingType convertSPVReflectBindingType(
             return BindingType::UniformBuffer;
         case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
             return BindingType::StorageBuffer;
+        case SPV_REFLECT_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
+            return BindingType::AccelerationStructure;
         default:
             FATAL("Unsupported SPIRV descriptor type");
     }
@@ -379,8 +381,8 @@ static refl::SPIRV buildSPIRVReflectionData(
 
 SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
    const char *path,
-   Span<const char *> include_dirs,
-   Span<const char *> defines)
+   Span<const char *const> include_dirs,
+   Span<const char *const> defines)
 {
     CComPtr<IDxcBlobEncoding> src_blob =
         loadFileToDxcBlob(impl_->dxcUtils, path);

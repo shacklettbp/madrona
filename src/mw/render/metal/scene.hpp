@@ -5,7 +5,7 @@
 
 #include <madrona/heap_array.hpp>
 #include <madrona/importer.hpp>
-#include <madrona/mw_render.hpp>
+#include <madrona/render/mw.hpp>
 
 #include <Metal/Metal.hpp>
 

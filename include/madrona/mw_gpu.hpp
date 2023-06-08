@@ -13,7 +13,7 @@
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 #include <madrona/importer.hpp>
-#include <madrona/mw_render.hpp>
+#include <madrona/render/mw.hpp>
 
 namespace madrona {
 
