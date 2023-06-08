@@ -1326,6 +1326,7 @@ static bool setupHullPrimitive(const SourceCollisionPrimitive &src_prim,
     if (!build_hull) {
         // Just assume the input geometry is a convex hull with coplanar faces
         // merged
+
         HeapArray<Plane> hull_face_planes(src_mesh->numFaces);
 
         const uint32_t *cur_face_indices = src_mesh->indices;
@@ -1334,8 +1335,12 @@ static bool setupHullPrimitive(const SourceCollisionPrimitive &src_prim,
             uint32_t num_face_indices =
                 src_mesh->faceCounts ? src_mesh->faceCounts[face_idx] : 3;
 
-            hull_face_planes[face_idx] = computeNewellPlane(src_mesh->positions, 
+            Plane face_plane = computeNewellPlane(src_mesh->positions, 
                 Span(cur_face_indices, num_face_indices));
+
+            hull_face_planes[face_idx] = face_plane;
+
+            cur_face_indices += num_face_indices;
         }
 
         final_he_mesh = buildHalfEdgeMesh(src_mesh->positions, 
