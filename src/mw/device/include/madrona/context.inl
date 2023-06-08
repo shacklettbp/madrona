@@ -18,7 +18,7 @@ Context::Context(WorldBase *world_data, const WorkerInit &init)
 {}
 
 template <typename ArchetypeT>
-Entity Context::makeEntityNow()
+Entity Context::makeEntity()
 {
     StateManager *state_mgr = mwGPU::getStateManager();
     return state_mgr->makeEntityNow<ArchetypeT>(world_id_);
@@ -31,36 +31,36 @@ Loc Context::makeTemporary()
     return state_mgr->makeTemporary<ArchetypeT>(world_id_);
 }
 
-void Context::destroyEntityNow(Entity e)
+void Context::destroyEntity(Entity e)
 {
     return mwGPU::getStateManager()->destroyEntityNow(e);
 }
 
-Loc Context::getLoc(Entity e) const
+Loc Context::loc(Entity e) const
 {
     return mwGPU::getStateManager()->getLoc(e);
 }
 
 template <typename ComponentT>
-ComponentT & Context::getUnsafe(Entity e)
+ComponentT & Context::get(Entity e)
 {
     return mwGPU::getStateManager()->getUnsafe<ComponentT>(e);
 }
 
 template <typename ComponentT>
-ComponentT & Context::getUnsafe(Loc l)
+ComponentT & Context::get(Loc l)
 {
     return mwGPU::getStateManager()->getUnsafe<ComponentT>(l);
 }
 
 template <typename ComponentT>
-ResultRef<ComponentT> Context::get(Entity e)
+ResultRef<ComponentT> Context::getSafe(Entity e)
 {
     return mwGPU::getStateManager()->get<ComponentT>(e);
 }
 
 template <typename ComponentT>
-ResultRef<ComponentT> Context::get(Loc l)
+ResultRef<ComponentT> Context::getSafe(Loc l)
 {
     return mwGPU::getStateManager()->get<ComponentT>(l);
 }
@@ -72,7 +72,7 @@ ComponentT & Context::getDirect(int32_t column_idx, Loc l)
 }
 
 template <typename SingletonT>
-SingletonT & Context::getSingleton()
+SingletonT & Context::singleton()
 {
     return mwGPU::getStateManager()->getSingleton<SingletonT>(world_id_);
 }

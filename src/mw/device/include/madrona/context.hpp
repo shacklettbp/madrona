@@ -20,32 +20,32 @@ public:
     inline Context(WorldBase *world_data, const WorkerInit &init);
 
     template <typename ArchetypeT>
-    Entity makeEntityNow();
+    Entity makeEntity();
 
     template <typename ArchetypeT>
     Loc makeTemporary();
 
-    inline void destroyEntityNow(Entity e);
+    inline void destroyEntity(Entity e);
 
-    inline Loc getLoc(Entity e) const;
-
-    template <typename ComponentT>
-    ComponentT & getUnsafe(Entity e);
+    inline Loc loc(Entity e) const;
 
     template <typename ComponentT>
-    ComponentT & getUnsafe(Loc loc);
+    ComponentT & get(Entity e);
 
     template <typename ComponentT>
-    ResultRef<ComponentT> get(Entity e);
+    ComponentT & get(Loc loc);
 
     template <typename ComponentT>
-    ResultRef<ComponentT> get(Loc loc);
+    ResultRef<ComponentT> getSafe(Entity e);
+
+    template <typename ComponentT>
+    ResultRef<ComponentT> getSafe(Loc loc);
 
     template <typename ComponentT>
     ComponentT & getDirect(int32_t column_idx, Loc loc);
 
     template <typename SingletonT>
-    SingletonT & getSingleton();
+    SingletonT & singleton();
 
 #if 0
     template <typename Fn, typename... DepTs>
