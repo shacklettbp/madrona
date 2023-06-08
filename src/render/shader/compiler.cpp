@@ -1,9 +1,10 @@
 #include "compiler.hpp"
-#include "utils.hpp"
 
 #include <madrona/macros.hpp>
 
+#include <cstdlib>
 #include <memory>
+#include <codecvt>
 
 // On clang on linux and mac need to either compile with -fms-exceptions
 // define __EMULATE_UUID. The latter seems simpler and matches GCC
@@ -14,13 +15,14 @@
 #undef __EMULATE_UUID
 
 #include <madrona/heap_array.hpp>
+#include <madrona/dyn_array.hpp>
 
 namespace madrona::render {
 
 struct ShaderCompiler::Impl {
     CComPtr<IDxcUtils> dxcUtils;
     CComPtr<IDxcCompiler3> dxcCompiler;
-}
+};
 
 static void checkDXC(HRESULT res, const char *msg, const char *file,
                      int line, const char *funcname)
@@ -70,26 +72,45 @@ ShaderCompiler::ShaderCompiler()
                 "Failed to initialize DxcCompiler");
 
         return std::unique_ptr<ShaderCompiler::Impl>(new ShaderCompiler::Impl {
-            move(dxc_utils),
-            move(dxc_compiler),
+            std::move(dxc_utils),
+            std::move(dxc_compiler),
         });
     }())
 {}
 
-static HeapArray<uint32_t> hlslToSPV(
+static HeapArray<wchar_t> toWide(const char *str)
+{
+    HeapArray<wchar_t> out(strlen(str) + 1);
+    size_t num_conv = mbstowcs(out.data(), str, out.size());
+    if ((CountT)num_conv != out.size() - 1) {
+        FATAL("Wide character conversion failed");
+    }
+
+    return out;
+}
+
+static CComPtr<IDxcBlobEncoding> loadFileToDxcBlob(
     IDxcUtils *dxc_utils,
+    const char *shader_path)
+{
+    HeapArray<wchar_t> lshader_path = toWide(shader_path);
+
+    uint32_t src_cp = CP_UTF8;
+    CComPtr<IDxcBlobEncoding> blob;
+    REQ_DXC(dxc_utils->LoadFile(lshader_path.data(), &src_cp, &blob),
+            "Failed to load shader file");
+
+    return blob;
+}
+
+static HeapArray<uint32_t> hlslToSPV(
+    LPVOID src_shader_buffer,
+    SIZE_T src_shader_len,
     IDxcCompiler3 *dxc_compiler,
-    const char *shader_path,
-    const char *entry_point,
-    ShaderStage stage,
     Span<const char *> include_dirs,
     Span<const char *> defines)
 {
-    const uint32_t src_cp = CP_UTF8;
-    CComPtr<IDxcBlobEncoding> src_blob;
-    REQ_DXC(dxc_utils->CreateBlobFromFile(shader_path, &src_cp, &src_blob),
-            "Failed to load shader source blob");
-
+#if 0
 #define TYPE_STR(type_str) (type_str L"_6_7")
     LPCWSTR dxc_type;
     switch (stage) {
@@ -112,8 +133,9 @@ static HeapArray<uint32_t> hlslToSPV(
             FATAL("Shader compilation: Unsupported shader stage type");
     }
 #undef TYPE_STR
+#endif
 
-    static constexpr array fixed_args = {
+    DynArray<LPCWSTR> dxc_args {
         DXC_ARG_WARNINGS_ARE_ERRORS,
         DXC_ARG_DEBUG,
         DXC_ARG_PACK_MATRIX_COLUMN_MAJOR,
@@ -122,48 +144,31 @@ static HeapArray<uint32_t> hlslToSPV(
         L"-fspv-reflect",
     };
 
-    // FIXME
-    wstring_convert<codecvt_utf8<wchar_t>> wconv;
-    wstring wentry = wconv.from_bytes(entry);
+    //dxc_args.push_bacj(L"-E");
+    //dxc_args.push_back(wentry.c_str());
 
-    HeapArray<LPCWSTR> dxc_args(
-        4 + fixed_args.size() + 2 * num_defines + 2 * num_includes);
+    //setDXCArg(L"-T");
+    //setDXCArg(dxc_type);
 
-    int arg_offset = 0;
-    auto setDXCArg = [&dxc_args](LPCWSTR arg) {
-        dxc_args[arg_offset++] = arg;
-    };
+    DynArray<HeapArray<wchar_t>> wdefines(defines.size());
 
-    setDXCArg(L"-E");
-    setDXCArg(wentry.c_str());
-    setDXCArg(L"-T");
-    setDXCArg(dxc_type);
-
-    for (int i = 0; i < fixed_args.size(); i++) {
-        setDXCArg(fixed_args[i]);
+    for (CountT i = 0; i < defines.size(); i++) {
+        wdefines.emplace_back(toWide(defines[i]));
+        dxc_args.push_back(L"-D");
+        dxc_args.push_back(wdefines.back().data());
     }
 
-    vector<wstring> wdefines;
-    wdefines.reserve(num_defines);
+    DynArray<HeapArray<wchar_t>> wincs(include_dirs.size());
 
-    for (int i = 0; i < num_defines; i++) {
-        wdefines.emplace_back(wconv.from_bytes(defines[i]));
-        setDXCArg(L"-D");
-        setDXCArg(wdefines.back().c_str());
-    }
-
-    vector<wstring> wincs;
-    wincs.reserve(include_dirs.size());
-
-    for (int i = 0; i < num_includes; i++) {
-        wincs.emplace_back(wconv.from_bytes(include_dirs[i]));
-        setDXCArg(L"-I");
-        setDXCArg(wincs.back().c_str());
+    for (CountT i = 0; i < include_dirs.size(); i++) {
+        wincs.emplace_back(toWide(include_dirs[i]));
+        dxc_args.push_back(L"-I");
+        dxc_args.push_back(wincs.back().data());
     }
 
     DxcBuffer src_info;
-    src_info.Ptr = src_blob->GetBufferPointer();
-    src_info.Size = src_blob->GetBufferSize();
+    src_info.Ptr = src_shader_buffer;
+    src_info.Size = src_shader_len;
     src_info.Encoding = 0;
 
     CComPtr<IDxcResult> compile_result;
@@ -195,6 +200,23 @@ static HeapArray<uint32_t> hlslToSPV(
     return spv;
 }
 
-SPIRVShader compile
+SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
+   const char *path,
+   const char *entry_point,
+   ShaderStage stage,
+   Span<const char *> include_dirs,
+   Span<const char *> defines)
+{
+    CComPtr<IDxcBlobEncoding> src_blob =
+        loadFileToDxcBlob(impl_->dxcUtils, path);
+
+    auto spv_bytecode = hlslToSPV(src_blob->GetBufferPointer(),
+        src_blob->GetBufferSize(),
+        impl_->dxcCompiler, include_dirs, defines);
+
+    return SPIRVShader {
+        .bytecode = std::move(spv_bytecode),
+    };
+}
 
 }

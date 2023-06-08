@@ -1,10 +1,8 @@
 #pragma once
 
-#include <vulkan/vulkan_core.h>
-#include "core.hpp"
-
 #include <madrona/math.hpp>
 #include <madrona/span.hpp>
+#include <madrona/heap_array.hpp>
 
 #include <string>
 #include <vector>
@@ -23,7 +21,7 @@ struct SPIRVShader {
     HeapArray<uint32_t> bytecode;
 };
 
-struct MTLLibShader {
+struct MTLShader {
     HeapArray<char> bytecode;
 };
 
@@ -39,7 +37,7 @@ public:
         Span<const char *> include_dirs,
         Span<const char *> defines);
 
-    MTLLibShader compileHLSLFileToMTL(
+    MTLShader compileHLSLFileToMTL(
         const char *path,
         const char *entry_point,
         ShaderStage stage,

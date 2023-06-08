@@ -63,3 +63,10 @@ endif ()
 if (Python_FOUND)
     add_subdirectory(nanobind EXCLUDE_FROM_ALL)
 endif ()
+
+add_library(spv_reflect STATIC
+    SPIRV-Reflect/spirv_reflect.cpp SPIRV-Reflect/spirv_reflect.h
+)
+target_include_directories(spv_reflect PUBLIC
+    SPIRV-Reflect/
+)
