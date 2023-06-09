@@ -83,11 +83,9 @@ private:
 #endif
 
 // Unconditionally disable GPU narrowphase version
-#if 0
 #undef MADRONA_GPU_MODE
 #undef MADRONA_GPU_COND
 #define MADRONA_GPU_COND(...)
-#endif
 
 namespace madrona::phys::narrowphase {
 
