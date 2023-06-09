@@ -23,6 +23,7 @@ namespace madrona::render {
 
 struct ShaderCompiler::Impl {
     CComPtr<IDxcUtils> dxcUtils;
+    CComPtr<IDxcIncludeHandler> dxcIncludeHandler;
     CComPtr<IDxcCompiler3> dxcCompiler;
 };
 
@@ -69,12 +70,17 @@ MADRONA_EXPORT ShaderCompiler::ShaderCompiler()
         REQ_DXC(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils)),
                 "Failed to initialize DxcUtils");
 
+        CComPtr<IDxcIncludeHandler> dxc_inc_handler;
+        REQ_DXC(dxc_utils->CreateDefaultIncludeHandler(&dxc_inc_handler),
+                "Failed to initialize DxcIncludeHandler");
+
         CComPtr<IDxcCompiler3> dxc_compiler;
         REQ_DXC(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler)),
                 "Failed to initialize DxcCompiler");
 
         return std::unique_ptr<ShaderCompiler::Impl>(new ShaderCompiler::Impl {
             std::move(dxc_utils),
+            std::move(dxc_inc_handler),
             std::move(dxc_compiler),
         });
     }())
@@ -155,9 +161,11 @@ static CComPtr<IDxcBlobEncoding> loadFileToDxcBlob(
 static HeapArray<uint32_t> hlslToSPV(
     LPVOID src_shader_buffer,
     SIZE_T src_shader_len,
+    const char *shader_path,
     IDxcCompiler3 *dxc_compiler,
+    IDxcIncludeHandler *include_handler,
     Span<const char *const> include_dirs,
-    Span<const char *const> defines)
+    Span<const ShaderCompiler::MacroDefn> macro_defns)
 {
 #if 0
 #define TYPE_STR(type_str) (type_str L"_6_7")
@@ -184,13 +192,18 @@ static HeapArray<uint32_t> hlslToSPV(
 #undef TYPE_STR
 #endif
 
+    HeapArray<wchar_t> lshader_path = toWide(shader_path);
+
     DynArray<LPCWSTR> dxc_args {
+        lshader_path.data(),
         DXC_ARG_WARNINGS_ARE_ERRORS,
         DXC_ARG_DEBUG,
         DXC_ARG_PACK_MATRIX_COLUMN_MAJOR,
         L"-spirv",
         L"-fspv-target-env=vulkan1.3",
-        L"-fspv-reflect",
+        //L"-fspv-reflect",
+        L"-T",
+        L"lib_6_6",
     };
 
     //dxc_args.push_bacj(L"-E");
@@ -199,15 +212,23 @@ static HeapArray<uint32_t> hlslToSPV(
     //setDXCArg(L"-T");
     //setDXCArg(dxc_type);
 
-    DynArray<HeapArray<wchar_t>> wdefines(defines.size());
+    DynArray<HeapArray<wchar_t>> wdefines(macro_defns.size());
 
-    for (CountT i = 0; i < defines.size(); i++) {
-        wdefines.emplace_back(toWide(defines[i]));
+    for (const ShaderCompiler::MacroDefn &defn : macro_defns) {
+        std::string combined;
+
+        if (defn.value == nullptr) {
+            combined = defn.name;
+        } else {
+            combined = std::string(defn.name) + "=" + defn.value;
+        }
+
+        wdefines.emplace_back(toWide(combined.c_str()));
         dxc_args.push_back(L"-D");
         dxc_args.push_back(wdefines.back().data());
     }
 
-    DynArray<HeapArray<wchar_t>> wincs(include_dirs.size() + 1);
+    DynArray<HeapArray<wchar_t>> wincs(include_dirs.size());
 
     for (CountT i = 0; i < include_dirs.size(); i++) {
         wincs.emplace_back(toWide(include_dirs[i]));
@@ -223,21 +244,23 @@ static HeapArray<uint32_t> hlslToSPV(
     CComPtr<IDxcResult> compile_result;
     REQ_DXC(dxc_compiler->Compile(&src_info, dxc_args.data(),
                                   (uint32_t)dxc_args.size(),
-                                  nullptr,
+                                  include_handler,
                                   IID_PPV_ARGS(&compile_result)),
             "Failed to compile shader");
 
     CComPtr<IDxcBlobUtf8> compile_errors;
-    compile_result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&compile_errors),
-                              nullptr);
+    REQ_DXC(compile_result->GetOutput(
+            DXC_OUT_ERRORS, IID_PPV_ARGS(&compile_errors), nullptr),
+        "Failed to get DXC errors");
 
     if (compile_errors && compile_errors->GetStringLength() > 0) {
         FATAL("Compilation failed: %s", compile_errors->GetBufferPointer());
     }
 
     CComPtr<IDxcBlob> dxc_spv;
-    compile_result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&dxc_spv),
-                              nullptr);
+    REQ_DXC(compile_result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&dxc_spv),
+            nullptr),
+        "Failed to get SPIRV object from DXC");
 
     uint32_t num_shader_bytes = dxc_spv->GetBufferSize();
     assert(num_shader_bytes % 4 == 0);
@@ -302,10 +325,10 @@ static refl::SPIRV buildSPIRVReflectionData(
         const auto &spv_rfl_entry = rfl_mod.entry_points[i];
 
         Stage stage = convertSPVReflectStage(spv_rfl_entry.shader_stage);
-        entry_points[i] = EntryPoint {
+        entry_points.emplace(i, EntryPoint {
             .name = spv_rfl_entry.name,
             .stage = stage,
-        };
+        });
 
         for (uint32_t j = 0; j < spv_rfl_entry.descriptor_set_count; j++) {
             const SpvReflectDescriptorSet &spv_desc_set =
@@ -384,20 +407,21 @@ static refl::SPIRV buildSPIRVReflectionData(
 MADRONA_EXPORT SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
    const char *path,
    Span<const char *const> include_dirs,
-   Span<const char *const> defines)
+   Span<const MacroDefn> macro_defns)
 {
     CComPtr<IDxcBlobEncoding> src_blob =
         loadFileToDxcBlob(impl_->dxcUtils, path);
 
     auto spv_bytecode = hlslToSPV(src_blob->GetBufferPointer(),
-        src_blob->GetBufferSize(),
-        impl_->dxcCompiler, include_dirs, defines);
+        src_blob->GetBufferSize(), path, impl_->dxcCompiler,
+        impl_->dxcIncludeHandler, include_dirs, macro_defns);
 
     refl::SPIRV refl = buildSPIRVReflectionData(spv_bytecode.data(),
         spv_bytecode.size() * sizeof(uint32_t));
 
     return SPIRVShader {
         .bytecode = std::move(spv_bytecode),
+        .reflectionInfo = std::move(refl),
     };
 }
 
@@ -405,14 +429,14 @@ MADRONA_EXPORT SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
 MADRONA_EXPORT MTLShader ShaderCompiler::compileHLSLFileToSPV(
    const char *path,
    Span<const char *const> include_dirs,
-   Span<const char *const> defines)
+   Span<const MacroDefn> macro_defns)
 {
     CComPtr<IDxcBlobEncoding> src_blob =
         loadFileToDxcBlob(impl_->dxcUtils, path);
 
     (void)src_blob;
     (void)include_dirs;
-    (void)defines;
+    (void)macr_defns;
 
     return MTLShader {
         .bytecode = HeapArray<char>(0),

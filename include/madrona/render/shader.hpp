@@ -66,16 +66,21 @@ public:
     MADRONA_IMPORT ShaderCompiler();
     MADRONA_IMPORT ~ShaderCompiler();
 
+    struct MacroDefn {
+        const char *name;
+        const char *value;
+    };
+
     MADRONA_IMPORT SPIRVShader compileHLSLFileToSPV(
         const char *path,
         Span<const char *const> include_dirs,
-        Span<const char *const> defines);
+        Span<const MacroDefn> macro_defns);
 
 #ifdef MADRONA_APPLE
     MADRONA_IMPORT MTLShader compileHLSLFileToMTL(
         const char *path,
         Span<const char *const> include_dirs,
-        Span<const char *const> defines);
+        Span<const MacroDefn> macro_defns);
 #endif
 
 private:

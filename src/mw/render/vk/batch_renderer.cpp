@@ -105,14 +105,16 @@ static ShaderState makeShaderState(const DeviceState &dev,
                                    const ImplInit &init)
 {
     using namespace std;
-    std::vector<string> shader_defines(0);
-    shader_defines.emplace_back(
-        string("RES_X (") + to_string(cfg.renderWidth) + "u)");
-    shader_defines.emplace_back(
-        string("RES_Y (") + to_string(cfg.renderHeight) + "u)");
+    DynArray<pair<string, Optional<string>>> shader_defines(0);
 
-    shader_defines.emplace_back(string("MAX_VIEWS_PER_WORLD (") +
-                                to_string(cfg.maxViewsPerWorld) + "u)");
+    shader_defines.emplace_back("RES_X", 
+        string("(") + to_string(cfg.renderWidth) + "u)");
+
+    shader_defines.emplace_back("RES_Y",
+        string("(") + to_string(cfg.renderHeight) + "u)");
+
+    shader_defines.emplace_back("MAX_VIEWS_PER_WORLD",
+        string("(") + to_string(cfg.maxViewsPerWorld) + "u)");
 
     uint32_t num_workgroups_x = divideRoundUp(cfg.renderWidth,
                                               VulkanConfig::localWorkgroupX);
@@ -120,24 +122,29 @@ static ShaderState makeShaderState(const DeviceState &dev,
     uint32_t num_workgroups_y = divideRoundUp(cfg.renderHeight,
                                               VulkanConfig::localWorkgroupY);
 
-    shader_defines.emplace_back(
-        string("NUM_WORKGROUPS_X (") + to_string(num_workgroups_x) + "u)");
-    shader_defines.emplace_back(
-        string("NUM_WORKGROUPS_Y (") + to_string(num_workgroups_y) + "u)");
+    shader_defines.emplace_back("NUM_WORKGROUPS_X",
+        string("(") + to_string(num_workgroups_x) + "u)");
+
+    shader_defines.emplace_back("NUM_WORKGROUPS_Y",
+        string("(") + to_string(num_workgroups_y) + "u)");
 
     if (init.validationEnabled) {
-        shader_defines.emplace_back("VALIDATE");
+        shader_defines.emplace_back("VALIDATE", Optional<string>::none());
     }
 
     if (cfg.cameraMode == render::CameraMode::Lidar) {
-        shader_defines.emplace_back("LIDAR");
+        shader_defines.emplace_back("LIDAR", Optional<string>::none());
     } else if (cfg.cameraMode == render::CameraMode::Perspective) {
-        shader_defines.emplace_back("PERSPECTIVE");
+        shader_defines.emplace_back("PERSPECTIVE", Optional<string>::none());
     }
 
-    HeapArray<const char *> shader_defines_c(shader_defines.size());
-    for (CountT i = 0; i < shader_defines_c.size(); i++) {
-        shader_defines_c[i] = shader_defines[i].c_str();
+    HeapArray<ShaderCompiler::MacroDefn> shader_macro_defns(
+        shader_defines.size());
+    for (CountT i = 0; i < shader_macro_defns.size(); i++) {
+        const auto &defn = shader_defines[i];
+        shader_macro_defns[i].name = defn.first.c_str();
+        shader_macro_defns[i].value = defn.second.has_value() ?
+            defn.second->c_str() : nullptr;
     }
 
     const char *shader_name = "basic.hlsl";
@@ -145,7 +152,7 @@ static ShaderState makeShaderState(const DeviceState &dev,
     ShaderCompiler compiler;
     SPIRVShader spirv = compiler.compileHLSLFileToSPV(
         (std::filesystem::path(STRINGIFY(SHADER_DIR)) / shader_name).c_str(),
-        {}, shader_defines_c);
+        {}, shader_macro_defns);
 
     PipelineShaders shader(dev, spirv, {});
 
@@ -206,7 +213,7 @@ static PipelineState makePipelineState(const DeviceState &dev,
         VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT,
         VK_SHADER_STAGE_COMPUTE_BIT,
         shaders.rt.getShader(0),
-        "main",
+        "render",
         nullptr,
     };
     compute_infos[0].layout = rt_layout;

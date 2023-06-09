@@ -8,23 +8,21 @@ struct Triangle {
 };
 
 [[vk::push_constant]]
-cbuffer PushConstant {
-    RTPushConstant push_const;
-};
+RTPushConstant push_const;
 
 [[vk::binding(0, 0)]]
 StructuredBuffer<ViewData> viewDataBuffer;
 
-[[vk::binding(0, 1)]]
+[[vk::binding(1, 0)]]
 RaytracingAccelerationStructure tlas;
 
-[[vk::binding(0, 2)]]
+[[vk::binding(2, 0)]]
 StructuredBuffer<ObjectData> objectDataBuffer;
 
-[[vk::binding(0, 3)]]
-RWStructuredBuffer<uint8_t> rgbOut;
+[[vk::binding(3, 0)]]
+RWStructuredBuffer<uint32_t> rgbOut;
 
-[[vk::binding(0, 4)]]
+[[vk::binding(4, 0)]]
 RWStructuredBuffer<float> depthOut;
 
 Camera unpackCamera(PackedCamera packed)
@@ -43,7 +41,8 @@ Camera unpackCamera(PackedCamera packed)
     float right_scale = aspect * pos_fov.w;
     float up_scale = pos_fov.w;
 
-    return Camera(origin, view, up, right, right_scale, up_scale);
+    Camera cam = {origin, view, up, right, right_scale, up_scale};
+    return cam;
 }
 
 void unpackViewData(in uint32_t view_idx, out Camera cam,
@@ -63,7 +62,7 @@ Vertex unpackVertex(uint64_t vertex_buffer, uint32_t idx)
     float4 a = packed.data[0];
     float4 b = packed.data[1];
 
-    u32float3 packed_normal_tangent = uint3(
+    uint3 packed_normal_tangent = uint3(
         asuint(a.w), asuint(b.x), asuint(b.y));
 
     float3 normal;
@@ -93,12 +92,15 @@ Triangle fetchTriangle(uint64_t geo_addr,
     MeshData meshdata = vk::RawBufferLoad<MeshData>(
         geo_addr + mesh_offset * sizeof(MeshData), 8);
     uint32_t index_offset = meshdata.indexOffset + tri_offset * 3;
-    u32float3 indices = fetchTriangleIndices(geo_addr, index_offset);
+    uint3 indices = fetchTriangleIndices(geo_addr, index_offset);
 
-    return Triangle(
+    Triangle tri = {
         unpackVertex(geo_addr, meshdata.vertexOffset + indices.x),
         unpackVertex(geo_addr, meshdata.vertexOffset + indices.y),
-        unpackVertex(geo_addr, meshdata.vertexOffset + indices.z));
+        unpackVertex(geo_addr, meshdata.vertexOffset + indices.z),
+    };
+
+    return tri;
 }
 
 #define INTERPOLATE_ATTR(a, b, c, barys) \
@@ -125,13 +127,13 @@ float2 interpolateUV(float2 a, float2 b, float2 c, float2 barys)
     return INTERPOLATE_ATTR(a, b, c, barys);
 }
 
-void computeCameraRay(in Camera camera, in u32float2 idx,
+void computeCameraRay(in Camera camera, in uint2 idx,
                       out float3 ray_origin, out float3 ray_dir)
 {
     ray_origin = camera.origin;
 
 #ifdef PERSPECTIVE
-    float2 raster = float2(idx.x, idx.y) + float2(0.5f);
+    float2 raster = float2(idx.x, idx.y) + 0.5f;
 
     float2 screen = float2((2.f * raster.x) / RES_X - 1,
                        (2.f * raster.y) / RES_Y - 1);
@@ -168,26 +170,41 @@ void computeCameraRay(in Camera camera, in u32float2 idx,
 #endif
 }
 
-bool traceShadeRay(rayQueryEXT ray_query, in uint32_t world_idx,
-                   in float3 ray_origin, in float3 ray_dir,
-                   uint32_t visibility_mask)
+bool traceShadeRay(in uint32_t world_idx, in float3 ray_origin,
+    in float3 ray_dir, in uint32_t visibility_mask,
+    out float2 barys, out uint32_t tri_idx, out uint32_t geo_idx,
+    out uint32_t obj_idx, out uint32_t material_idx,
+    out float3x4 o2w, out float3x4 w2o)
 {
-    rayQueryInitializeEXT(ray_query, tlas,
-        gl_RayFlagsCullBackFacingTrianglesEXT,
-        visibility_mask, ray_origin, 0.f, ray_dir, 220);
+    RayDesc ray = {ray_origin, 0.f, ray_dir, FLT_MAX};
 
-    while (rayQueryProceedEXT(ray_query)) {
-        if (rayQueryGetIntersectionTypeEXT(ray_query, false) ==
-            gl_RayQueryCandidateIntersectionTriangleEXT) {
+    RayQuery<RAY_FLAG_FORCE_OPAQUE |
+             RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES |
+             RAY_FLAG_CULL_BACK_FACING_TRIANGLES> q;
 
-            rayQueryConfirmIntersectionEXT(ray_query);
-        }
+    q.TraceRayInline(tlas, 0, visibility_mask, ray);
+    q.Proceed();
+
+    if (q.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
+        barys = 0.f;
+        tri_idx = 0;
+        geo_idx = 0;
+        obj_idx = 0;
+        material_idx = 0;
+        o2w = 0.f;
+        w2o = 0.f;
+        return false;
     }
 
-    subgroupBarrier();
+    barys = q.CommittedTriangleBarycentrics();
+    tri_idx = q.CommittedPrimitiveIndex();
+    geo_idx = q.CommittedGeometryIndex();
+    obj_idx = q.CommittedInstanceID();
+    material_idx = q.CommittedInstanceContributionToHitGroupIndex();
+    o2w = q.CommittedObjectToWorld3x4();
+    w2o = q.CommittedWorldToObject3x4();
 
-    return rayQueryGetIntersectionTypeEXT(ray_query, true) !=
-        gl_RayQueryCommittedIntersectionNoneEXT;
+    return true;
 }
 
 float toSRGB(float v)
@@ -202,50 +219,20 @@ float toSRGB(float v)
 void setOutput(uint32_t rgb_offset, uint32_t depth_offset,
                float3 rgb, float depth)
 {
-    rgbOut[rgb_offset] =
-        uint8_t(round(255.f * toSRGB(min(rgb.x, 1.f))));
-    rgbOut[rgb_offset + 1] =
-        uint8_t(round(255.f * toSRGB(min(rgb.y, 1.f))));
-    rgbOut[rgb_offset + 2] =
-        uint8_t(round(255.f * toSRGB(min(rgb.z, 1.f))));
-    rgbOut[rgb_offset + 3] = uint8_t(255);
+    uint r = round(255.f * toSRGB(min(rgb.x, 1.f)));
+    uint g = round(255.f * toSRGB(min(rgb.y, 1.f)));
+    uint b = round(255.f * toSRGB(min(rgb.z, 1.f)));
+    uint a = 255;
 
+    rgbOut[rgb_offset] = a | b << 8 | g << 16 | r << 24;
     depthOut[depth_offset] = depth;
 }
 
-void getHitParams(in rayQueryEXT ray_query, out float2 barys,
-                  out uint32_t tri_idx, out uint32_t geo_idx,
-                  out uint32_t obj_idx, out uint32_t material_idx,
-                  out mat4x3 o2w, out mat4x3 w2o)
-{
-    barys = rayQueryGetIntersectionBarycentricsEXT(ray_query, true);
-
-    tri_idx =
-        uint32_t(rayQueryGetIntersectionPrimitiveIndexEXT(ray_query, true));
-
-    geo_idx = 
-        uint32_t(rayQueryGetIntersectionGeometryIndexEXT(ray_query, true));
-
-    obj_idx = uint32_t(
-        rayQueryGetIntersectionInstanceCustomIndexEXT(ray_query, true));
-
-    material_idx = uint32_t(
-        rayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetEXT(
-            ray_query, true));
-
-    o2w = rayQueryGetIntersectionObjectToWorldEXT(ray_query, true);
-    w2o = rayQueryGetIntersectionWorldToObjectEXT(ray_query, true);
-}
-
 // Entry point
-
-layout (local_size_x = LOCAL_WORKGROUP_X,
-        local_size_y = LOCAL_WORKGROUP_Y,
-        local_size_z = LOCAL_WORKGROUP_Z) in;
-void main()
+[numThreads(LOCAL_WORKGROUP_X, LOCAL_WORKGROUP_Y, LOCAL_WORKGROUP_Z)]
+[shader("compute")]
+void render(uint3 idx : SV_DispatchThreadID)
 {
-    u32float3 idx = gl_GlobalInvocationID.xyz;
-
     bool oob = idx.x >= RES_X || idx.y >= RES_Y;
     idx.x = min(idx.x, RES_X - 1);
     idx.y = min(idx.y, RES_Y - 1);
@@ -255,7 +242,7 @@ void main()
 
     uint32_t pixel_linear_idx =
         batch_idx * RES_Y * RES_X + idx.y * RES_X + idx.x;
-    uint32_t rgb_out_offset = 4 * pixel_linear_idx;
+    uint32_t rgb_out_offset = pixel_linear_idx;
     uint32_t depth_out_offset = pixel_linear_idx;
 
     Camera cam;
@@ -265,20 +252,16 @@ void main()
     float3 ray_origin, ray_dir;
     computeCameraRay(cam, idx.xy, ray_origin, ray_dir);
 
-    rayQueryEXT primary_query;
-    bool primary_hit = traceShadeRay(primary_query, world_id,
-                                     ray_origin, ray_dir, 1);
+    float2 hit_barys;
+    uint32_t tri_idx, geo_idx, obj_idx, material_idx;
+    float3x4 o2w, w2o;
+    bool primary_hit = traceShadeRay(world_id, ray_origin, ray_dir, 1,
+        hit_barys, tri_idx, geo_idx, obj_idx, material_idx, o2w, w2o);
 
     if (!primary_hit) {
         setOutput(rgb_out_offset, depth_out_offset, float3(0, 0, 0), 0);
         return;
     }
-
-    float2 hit_barys;
-    uint32_t tri_idx, geo_idx, obj_idx, material_idx;
-    mat4x3 o2w, w2o;
-    getHitParams(primary_query, hit_barys, tri_idx,
-                 geo_idx, obj_idx, material_idx, o2w, w2o);
     
     ObjectData object_data = objectDataBuffer[obj_idx];
 
@@ -301,7 +284,7 @@ void main()
 
     float depth = distance(world_position, cam.origin);
 
-    float3 rgb = float3(hit_angle);
+    float3 rgb = hit_angle;
 
     if (!oob) {
         setOutput(rgb_out_offset, depth_out_offset, rgb, depth);

@@ -10,13 +10,13 @@ float3 offsetRayOrigin(float3 o, float3 geo_normal)
 #define FLOAT_SCALE (1.0f / 65536.0f)
 #define INT_SCALE (256.0f)
 
-    i32float3 int_offset = i32float3(geo_normal.x * INT_SCALE,
+    int3 int_offset = int3(geo_normal.x * INT_SCALE,
         geo_normal.y * INT_SCALE, geo_normal.z * INT_SCALE);
 
     float3 o_integer = float3(
-        asFloat(asInt(o.x) + ((o.x < 0) ? -int_offset.x : int_offset.x)),
-        asFloat(asInt(o.y) + ((o.y < 0) ? -int_offset.y : int_offset.y)),
-        asFloat(asInt(o.z) + ((o.z < 0) ? -int_offset.z : int_offset.z)));
+        asfloat(asint(o.x) + ((o.x < 0) ? -int_offset.x : int_offset.x)),
+        asfloat(asint(o.y) + ((o.y < 0) ? -int_offset.y : int_offset.y)),
+        asfloat(asint(o.z) + ((o.z < 0) ? -int_offset.z : int_offset.z)));
 
     return float3(
         abs(o.x) < GLOBAL_ORIGIN ?
@@ -47,7 +47,7 @@ float3 concentricHemisphere(float2 uv)
     float2 c = 2.f * uv - 1.f;
     float2 d;
     if (c.x == 0.f && c.y == 0.f) {
-        d = float2(0.f);
+        d = float2(0.f, 0.f);
     } else {
         float phi, r;
         if (abs(c.x) > abs(c.y))
@@ -86,7 +86,7 @@ float2 dirToLatLong(float3 dir)
 {
     float3 n = normalize(dir);
     
-    return float2(atan(n.x, -n.z) * (M_1_PI / 2.f) + 0.5f, acos(n.y) * M_1_PI);
+    return float2(atan2(n.x, -n.z) * (M_1_PI / 2.f) + 0.5f, acos(n.y) * M_1_PI);
 }
 
 // For the two equal area functions below to correctly map between eachother
@@ -97,7 +97,7 @@ float2 dirToLatLong(float3 dir)
 // purple for example.
 float signPreserveZero(float v)
 {
-    int32_t i = asInt(v);
+    int32_t i = asint(v);
 
     return (i < 0) ? -1.0 : 1.0;
 }
@@ -133,7 +133,7 @@ float3 octSphereMap(float2 u)
 float2 invOctSphereMap(float3 dir)
 {
     float r = sqrt(1.f - abs(dir.z));
-    float phi = atan(abs(dir.y), abs(dir.x));
+    float phi = atan2(abs(dir.y), abs(dir.x));
 
     float2 uv;
     uv.y = r * phi * M_2_PI;
@@ -162,7 +162,7 @@ float3 octahedralVectorDecode(float2 f)
 
 float2 unpackHalf2x16(uint32_t x)
 {
-    return float2(f16tof32(u >> 16), f16tof32(u));
+    return float2(f16tof32(x >> 16), f16tof32(x));
 }
 
 float2 unpackSnorm2x16(uint32_t x)
@@ -173,7 +173,7 @@ float2 unpackSnorm2x16(uint32_t x)
     return unpacked;
 }
 
-void decodeNormalTangent(in u32float3 packed, out float3 normal,
+void decodeNormalTangent(in uint3 packed, out float3 normal,
                          out float4 tangentAndSign)
 {
     float2 ab = unpackHalf2x16(packed.x);
@@ -188,19 +188,25 @@ void decodeNormalTangent(in u32float3 packed, out float3 normal,
     tangentAndSign = float4(tangent, sign);
 }
 
-float3 transformPosition(mat4x3 o2w, float3 p)
+float3 transformPosition(float3x4 o2w, float3 p)
 {
-    return o2w[0] * p.x + o2w[1] * p.y + o2w[2] * p.z + o2w[3];
+    return float3(dot(o2w[0].xyz, p) + o2w[0].w,
+                  dot(o2w[1].xyz, p) + o2w[1].w,
+                  dot(o2w[2].xyz, p) + o2w[2].w);
 }
 
-float3 transformVector(mat4x3 o2w, float3 v)
+float3 transformVector(float3x4 o2w, float3 v)
 {
-    return o2w[0] * v.x + o2w[1] * v.y + o2w[2] * v.z;
+    return float3(dot(o2w[0].xyz, v),
+                  dot(o2w[1].xyz, v),
+                  dot(o2w[2].xyz, v));
 }
 
-float3 transformNormal(mat4x3 w2o, float3 n)
+float3 transformNormal(float3x4  w2o, float3 n)
 {
-    return float3(dot(w2o[0], n), dot(w2o[1], n), dot(w2o[2], n));
+    return float3(dot(w2o._m00_m10_m20, n),
+                  dot(w2o._m01_m11_m21, n),
+                  dot(w2o._m02_m12_m22, n));
 }
 
 float3 sampleSphereUniform(float2 uv)

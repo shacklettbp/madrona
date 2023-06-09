@@ -97,6 +97,8 @@ PipelineShaders::PipelineShaders(
             }
 
             binding_info.pImmutableSamplers = nullptr;
+
+            set_binding_info.push_back(binding_info);
         }
 
         binding_infos.emplace_back(std::move(set_binding_info));

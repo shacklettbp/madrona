@@ -178,7 +178,7 @@ static InstanceInitializer initInstance(
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     app_info.pApplicationName = "madrona";
     app_info.pEngineName = "madrona";
-    app_info.apiVersion = VK_API_VERSION_1_2;
+    app_info.apiVersion = VK_API_VERSION_1_3;
 
     vector<const char *> layers;
     DynArray<const char *> extensions(extra_exts.size());
