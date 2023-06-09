@@ -21,18 +21,20 @@ public:
     uint32_t computeQF;
     uint32_t transferQF;
 
-    uint32_t numGraphicsQueues;
-    uint32_t numComputeQueues;
-    uint32_t numTransferQueues;
-
     const VkPhysicalDevice phy;
     const VkDevice hdl;
     const DeviceDispatch dt;
 
+    uint32_t numGraphicsQueues;
+    uint32_t numComputeQueues;
+    uint32_t numTransferQueues;
+    bool rtAvailable;
+
     DeviceState(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
                 uint32_t num_gfx_queues, uint32_t num_compute_queues,
-                uint32_t num_transfer_queues, VkPhysicalDevice phy_dev,
-                VkDevice dev, DeviceDispatch &&dispatch_table);
+                uint32_t num_transfer_queues, bool rt_available,
+                VkPhysicalDevice phy_dev, VkDevice dev,
+                DeviceDispatch &&dispatch_table);
     ~DeviceState();
 
     DeviceState(const DeviceState &) = delete;

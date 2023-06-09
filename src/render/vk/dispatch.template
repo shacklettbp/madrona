@@ -60,8 +60,6 @@ device:
 - vkCmdBindPipeline
 - vkCmdDispatch
 - vkCmdPushConstants
-- vkGetMemoryFdKHR
-- vkGetSemaphoreFdKHR
 - vkCreateRenderPass
 - vkCreateFramebuffer
 - vkCmdDraw
@@ -81,13 +79,13 @@ device:
 - vkCmdResetQueryPool
 - vkDestroyDevice
 - vkCmdPipelineBarrier2
-- need_present:
+- support_present:
     - vkCreateSwapchainKHR
     - vkDestroySwapchainKHR
     - vkGetSwapchainImagesKHR
     - vkAcquireNextImageKHR
     - vkQueuePresentKHR
-- need_rt:
+- support_rt:
     - vkCreateAccelerationStructureKHR
     - vkGetAccelerationStructureBuildSizesKHR
     - vkGetAccelerationStructureDeviceAddressKHR
@@ -100,9 +98,13 @@ device:
     - vkCmdCopyMemoryToAccelerationStructureKHR
     - vkCmdCopyAccelerationStructureToMemoryKHR
     - vkCmdWriteAccelerationStructuresPropertiesKHR
+- support_mem_export:
+    - vkGetMemoryFdKHR
+    - vkGetSemaphoreFdKHR
 
 instance:
 - vkEnumeratePhysicalDevices
+- vkEnumerateDeviceExtensionProperties
 - vkGetPhysicalDeviceFeatures2
 - vkGetPhysicalDeviceProperties
 - vkGetPhysicalDeviceProperties2
@@ -112,7 +114,7 @@ instance:
 - vkGetInstanceProcAddr
 - vkCreateDevice
 - vkDestroyInstance
-- need_present:
+- support_present:
     - vkDestroySurfaceKHR
     - vkGetPhysicalDeviceSurfaceCapabilitiesKHR
     - vkGetPhysicalDeviceSurfaceFormatsKHR

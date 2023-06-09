@@ -25,17 +25,19 @@ namespace vk {
 DeviceState::DeviceState(
         uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
         uint32_t num_gfx_queues, uint32_t num_compute_queues,
-        uint32_t num_transfer_queues, VkPhysicalDevice phy_dev,
-        VkDevice dev, DeviceDispatch &&dispatch_table)
+        uint32_t num_transfer_queues, bool rt_available,
+        VkPhysicalDevice phy_dev, VkDevice dev,
+        DeviceDispatch &&dispatch_table)
     : gfxQF(gfx_qf),
       computeQF(compute_qf),
       transferQF(transfer_qf),
+      phy(phy_dev),
+      hdl(dev),
+      dt(std::move(dispatch_table)),
       numGraphicsQueues(num_gfx_queues), 
       numComputeQueues(num_compute_queues),
       numTransferQueues(num_transfer_queues),
-      phy(phy_dev),
-      hdl(dev),
-      dt(std::move(dispatch_table))
+      rtAvailable(rt_available)
 {}
 
 DeviceState::~DeviceState()
@@ -374,17 +376,53 @@ DeviceState InstanceState::makeDevice(
     uint32_t desired_transfer_queues,
     Optional<VkSurfaceKHR> present_surface) const
 {
-    vector<const char *> extensions {
-        VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-        VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
-        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-        VK_KHR_RAY_QUERY_EXTENSION_NAME,
-        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+    VkPhysicalDevice phy = findPhysicalDevice(uuid);
+
+    DynArray<const char *> extensions {
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
         VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME,
         VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
-        VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
     };
+
+    uint32_t num_supported_extensions;
+    REQ_VK(dt.enumerateDeviceExtensionProperties(phy, nullptr,
+        &num_supported_extensions, nullptr));
+
+    HeapArray<VkExtensionProperties> supported_extensions(
+        num_supported_extensions);
+    REQ_VK(dt.enumerateDeviceExtensionProperties(phy, nullptr,
+        &num_supported_extensions, supported_extensions.data()));
+
+    bool supports_rt = true;
+    {
+        bool accel_struct_ext_available = false;
+        bool ray_query_ext_available = false;
+        for (const VkExtensionProperties &ext : supported_extensions) {
+            if (!strcmp(ext.extensionName,
+                    VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
+                accel_struct_ext_available = true;
+            } else if (!strcmp(ext.extensionName,
+                    VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
+                ray_query_ext_available = true;
+            }
+        }
+
+        supports_rt = accel_struct_ext_available && ray_query_ext_available;
+    }
+
+    if (supports_rt) {
+        extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+        extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+        extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    }
+
+#if defined(MADRONA_LINUX) && defined(MADRONA_CUDA_SUPPORT)
+    extensions.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+    extensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+    bool supports_mem_export = true;
+#else
+    bool supports_mem_export = false;
+#endif
 
     auto present_check = [&](VkPhysicalDevice phy,
                              uint32_t qf_idx) {
@@ -406,8 +444,6 @@ DeviceState InstanceState::makeDevice(
     if (debug_ != VK_NULL_HANDLE) {
         extensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
     }
-
-    VkPhysicalDevice phy = findPhysicalDevice(uuid);
 
     VkPhysicalDeviceFeatures2 feats;
     feats.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -450,7 +486,6 @@ DeviceState InstanceState::makeDevice(
                    !(qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
                    present_check(phy, i)) {
             compute_queue_family = i;
-            ;
         } else if (!gfx_queue_family &&
                    (qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
             gfx_queue_family = i;
@@ -584,10 +619,12 @@ DeviceState InstanceState::makeDevice(
                        num_gfx_queues,
                        num_compute_queues,
                        num_transfer_queues,
+                       supports_rt,
                        phy,
                        dev,
                        DeviceDispatch(dev, get_dev_addr,
-                                      present_surface.has_value(), true));
+                                      present_surface.has_value(),
+                                      supports_rt, supports_mem_export));
 }
 
 }

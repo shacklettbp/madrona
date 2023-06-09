@@ -55,7 +55,7 @@ target_link_libraries(madrona_render_vk
     PUBLIC
         madrona_vk_hdrs
     PRIVATE
-        CUDA::cudart
+        madrona_cuda
         madrona_common
         madrona_sdl2
         madrona_render_shader

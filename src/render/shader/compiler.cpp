@@ -222,8 +222,9 @@ static HeapArray<uint32_t> hlslToSPV(
         L"-spirv",
         L"-fspv-target-env=vulkan1.3",
         //L"-fspv-reflect",
-        L"-T",
-        L"lib_6_6",
+        L"-T", L"lib_6_7",
+        L"-HV", L"2021",
+        L"-enable-16bit-types",
     };
 
     //dxc_args.push_bacj(L"-E");

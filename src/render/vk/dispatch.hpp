@@ -17,7 +17,7 @@ struct DeviceDispatch {
 #include "dispatch_device_impl.hpp"
 
     DeviceDispatch(VkDevice dev, PFN_vkGetDeviceProcAddr get_dev_addr,
-                   bool need_present, bool need_rt);
+                   bool need_present, bool need_rt, bool support_mem_export);
 };
 
 }
