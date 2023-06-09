@@ -224,7 +224,7 @@ void setOutput(uint32_t rgb_offset, uint32_t depth_offset,
     uint b = round(255.f * toSRGB(min(rgb.z, 1.f)));
     uint a = 255;
 
-    rgbOut[rgb_offset] = a | b << 8 | g << 16 | r << 24;
+    rgbOut[rgb_offset] = r | g << 8 | b << 16 | a << 24;
     depthOut[depth_offset] = depth;
 }
 

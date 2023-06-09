@@ -80,6 +80,7 @@ device:
 - vkGetQueryPoolResults
 - vkCmdResetQueryPool
 - vkDestroyDevice
+- vkCmdPipelineBarrier2
 - need_present:
     - vkCreateSwapchainKHR
     - vkDestroySwapchainKHR

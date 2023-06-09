@@ -21,6 +21,26 @@
 
 namespace madrona::render {
 
+// DXC is broken on exit (hangs). Hack to stop the shared lib from unloading
+// at program termination.
+// https://github.com/microsoft/DirectXShaderCompiler/issues/5119
+#if defined(MADRONA_LINUX) or defined(MADRONA_APPLE)
+static __attribute__((constructor)) void dxcNoFreeHack()
+{
+    void *lib = dlopen("libdxcompiler."
+#ifdef MADRONA_LINUX
+                          "so"
+#endif
+
+#ifdef MADRONA_APPLE
+                          "dylib"
+#endif
+                       , RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
+    assert(lib != nullptr);
+    dlclose(lib);
+}
+#endif
+
 struct ShaderCompiler::Impl {
     CComPtr<IDxcUtils> dxcUtils;
     CComPtr<IDxcIncludeHandler> dxcIncludeHandler;

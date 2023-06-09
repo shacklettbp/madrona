@@ -527,17 +527,18 @@ DeviceState InstanceState::makeDevice(
     atomic_float_features.shaderSharedFloat32Atomics = true;
     atomic_float_features.shaderSharedFloat32AtomicAdd = true;
 
-    VkPhysicalDeviceSubgroupSizeControlFeaturesEXT subgroup_size_features {};
-    subgroup_size_features.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT;
-    subgroup_size_features.pNext = &atomic_float_features;
-    subgroup_size_features.computeFullSubgroups = true;
-    subgroup_size_features.subgroupSizeControl = true;
+    VkPhysicalDeviceVulkan13Features vk13_features {};
+    vk13_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    vk13_features.pNext = &atomic_float_features;
+    vk13_features.synchronization2 = true;
+    vk13_features.computeFullSubgroups = true;
+    vk13_features.subgroupSizeControl = true;
 
     VkPhysicalDeviceVulkan12Features vk12_features {};
     vk12_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vk12_features.pNext = &subgroup_size_features;
+    vk12_features.pNext = &vk13_features;
     vk12_features.bufferDeviceAddress = true;
     vk12_features.descriptorIndexing = true;
     vk12_features.descriptorBindingPartiallyBound = true;
