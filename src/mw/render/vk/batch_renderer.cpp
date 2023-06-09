@@ -246,11 +246,13 @@ static FramebufferState makeFramebuffer(const DeviceState &dev,
     uint64_t num_rgb_bytes = num_pixels * 4 * sizeof(uint8_t);
     uint64_t num_depth_bytes = num_pixels * sizeof(float);
 
-    DedicatedBuffer rgb_buf = mem.makeDedicatedBuffer(num_rgb_bytes);
+    DedicatedBuffer rgb_buf =
+        mem.makeDedicatedBuffer(num_rgb_bytes, false, true);
     CudaImportedBuffer rgb_buf_cuda(dev, cfg.gpuID, rgb_buf.mem,
                                     num_rgb_bytes);
 
-    DedicatedBuffer depth_buf = mem.makeDedicatedBuffer(num_depth_bytes);
+    DedicatedBuffer depth_buf =
+        mem.makeDedicatedBuffer(num_depth_bytes, false, true);
     CudaImportedBuffer depth_buf_cuda(dev, cfg.gpuID, depth_buf.mem,
                                     num_depth_bytes);
 

@@ -658,7 +658,7 @@ TLASData TLASData::setup(const DeviceState &dev,
     if (cuda_mode) {
         dev_inst_count.emplace(
             mem.makeDedicatedBuffer(
-                sizeof(VkAccelerationStructureBuildRangeInfoKHR), true));
+                sizeof(VkAccelerationStructureBuildRangeInfoKHR), true, true));
 
         dev_inst_count_addr = getDevAddr(dev, dev_inst_count->buf.buffer);
 

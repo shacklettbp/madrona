@@ -648,15 +648,54 @@ optional<LocalBuffer> MemoryAllocator::makeIndirectBuffer(
 }
 
 DedicatedBuffer MemoryAllocator::makeDedicatedBuffer(
-    VkDeviceSize num_bytes, bool dev_addr)
+    VkDeviceSize num_bytes, bool dev_addr, bool support_export)
 {
     auto usage = BufferFlags::dedicatedUsage;
     if (dev_addr) {
         usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     }
 
-    auto [buffer, reqs] =
-        makeUnboundBuffer(dev, num_bytes, usage);
+    VkExternalMemoryBufferCreateInfo buffer_ext_info;
+    VkExternalMemoryBufferCreateInfo *buffer_ext_info_ptr;
+    if (support_export) {
+        buffer_ext_info.sType =
+            VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+        buffer_ext_info.pNext = nullptr;
+        buffer_ext_info.handleTypes =
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+        buffer_ext_info_ptr = &buffer_ext_info;
+    } else {
+        buffer_ext_info_ptr = nullptr;
+    }
+
+    VkBufferCreateInfo buffer_info;
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.pNext = buffer_ext_info_ptr;
+    buffer_info.flags = 0;
+    buffer_info.size = num_bytes;
+    buffer_info.usage = usage;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    buffer_info.pQueueFamilyIndices = nullptr;
+    buffer_info.queueFamilyIndexCount = 0;
+
+    VkBuffer buffer;
+    REQ_VK(dev.dt.createBuffer(dev.hdl, &buffer_info, nullptr, &buffer));
+
+    VkMemoryRequirements reqs;
+    dev.dt.getBufferMemoryRequirements(dev.hdl, buffer, &reqs);
+
+    VkExportMemoryAllocateInfo export_info;
+    VkExportMemoryAllocateInfo *export_info_ptr;
+    if (support_export) {
+        export_info.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+        export_info.pNext = nullptr;
+        export_info.handleTypes =
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        export_info_ptr = &export_info;
+    } else {
+        export_info_ptr = nullptr;
+    }
 
     VkMemoryDedicatedAllocateInfo dedicated;
     dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
@@ -672,13 +711,13 @@ DedicatedBuffer MemoryAllocator::makeDedicatedBuffer(
     VkMemoryAllocateFlagsInfo flag_info;
     if (dev_addr) {
         flag_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-        flag_info.pNext = nullptr;
+        flag_info.pNext = export_info_ptr;
         flag_info.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
         flag_info.deviceMask = 0;
 
         dedicated.pNext = &flag_info;
     } else {
-        dedicated.pNext = nullptr;
+        dedicated.pNext = export_info_ptr;
     }
 
     VkDeviceMemory memory;

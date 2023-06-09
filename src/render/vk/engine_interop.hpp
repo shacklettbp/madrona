@@ -66,7 +66,7 @@ struct HostToEngineBufferCUDA {
                                   uint64_t num_bytes,
                                   int cuda_gpu_id)
         : staging(mem.makeStagingBuffer(num_bytes)),
-          devBuffer(mem.makeDedicatedBuffer(num_bytes)),
+          devBuffer(mem.makeDedicatedBuffer(num_bytes, false, true)),
           cudaImported(dev, cuda_gpu_id, devBuffer.mem, num_bytes)
     {}
 };
@@ -145,7 +145,7 @@ struct EngineToRendererBufferCUDA {
 
     inline EngineToRendererBufferCUDA(const DeviceState &dev,
             MemoryAllocator &mem, uint64_t num_bytes, int cuda_gpu_id)
-        : devBuffer(mem.makeDedicatedBuffer(num_bytes, true)),
+        : devBuffer(mem.makeDedicatedBuffer(num_bytes, true, true)),
           cudaImported(dev, cuda_gpu_id, devBuffer.mem, num_bytes)
     {}
 };

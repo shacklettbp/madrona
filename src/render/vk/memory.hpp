@@ -168,8 +168,8 @@ public:
     std::optional<LocalBuffer> makeLocalBuffer(VkDeviceSize num_bytes,
                                                bool dev_addr = false);
 
-    DedicatedBuffer makeDedicatedBuffer(
-        VkDeviceSize num_bytes, bool dev_addr = false);
+    DedicatedBuffer makeDedicatedBuffer(VkDeviceSize num_bytes,
+        bool dev_addr = false, bool support_export = false);
 
     inline VkFormat getTextureFormat(TextureFormat fmt) const;
     inline VkFormat getColorAttachmentFormat() const;

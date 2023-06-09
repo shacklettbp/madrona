@@ -278,6 +278,15 @@ void render(uint3 idx : SV_DispatchThreadID)
                                             hit_barys);
 
     float3 hit_world_normal = transformNormal(w2o, hit_obj_normal);
+    if (idx.x == 800 && idx.y == 500) {
+        printf("(%f %f %f) => (%f %f %f)\n",
+            hit_world_normal.x,
+            hit_world_normal.y,
+            hit_world_normal.z,
+            hit_obj_normal.x,
+            hit_obj_normal.y,
+            hit_obj_normal.z);
+    }
 
     float hit_angle = 
         max(dot(normalize(hit_world_normal), normalize(-ray_dir)), 0.f);
