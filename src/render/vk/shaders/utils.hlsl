@@ -162,7 +162,7 @@ float3 octahedralVectorDecode(float2 f)
 
 float2 unpackHalf2x16(uint32_t x)
 {
-    return float2(f16tof32(x >> 16), f16tof32(x));
+    return float2(f16tof32(x), f16tof32(x >> 16));
 }
 
 float2 unpackSnorm2x16(uint32_t x)

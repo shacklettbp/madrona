@@ -25,6 +25,8 @@ RWStructuredBuffer<uint32_t> rgbOut;
 [[vk::binding(4, 0)]]
 RWStructuredBuffer<float> depthOut;
 
+//static bool debug_print;
+
 Camera unpackCamera(PackedCamera packed)
 {
     float aspect = float(RES_X) / float(RES_Y);
@@ -56,11 +58,9 @@ void unpackViewData(in uint32_t view_idx, out Camera cam,
 
 Vertex unpackVertex(uint64_t vertex_buffer, uint32_t idx)
 {
-    PackedVertex packed = vk::RawBufferLoad<PackedVertex>(vertex_buffer +
-         sizeof(PackedVertex) * idx, 16);
-
-    float4 a = packed.data[0];
-    float4 b = packed.data[1];
+    uint64_t data0_addr = vertex_buffer + sizeof(PackedVertex) * idx;
+    float4 a = vk::RawBufferLoad<float4>(data0_addr, 16);
+    float4 b = vk::RawBufferLoad<float4>(data0_addr + 16, 16);
 
     uint3 packed_normal_tangent = uint3(
         asuint(a.w), asuint(b.x), asuint(b.y));
@@ -89,8 +89,9 @@ Triangle fetchTriangle(uint64_t geo_addr,
                        uint32_t mesh_offset,
                        uint32_t tri_offset)
 {
-    MeshData meshdata = vk::RawBufferLoad<MeshData>(
-        geo_addr + mesh_offset * sizeof(MeshData), 8);
+    uint2 meshdata_raw = vk::RawBufferLoad<uint2>(
+        geo_addr + mesh_offset * sizeof(uint2), 8);
+    MeshData meshdata = { meshdata_raw.x, meshdata_raw.y };
     uint32_t index_offset = meshdata.indexOffset + tri_offset * 3;
     uint3 indices = fetchTriangleIndices(geo_addr, index_offset);
 
@@ -233,6 +234,10 @@ void setOutput(uint32_t rgb_offset, uint32_t depth_offset,
 [shader("compute")]
 void render(uint3 idx : SV_DispatchThreadID)
 {
+    //if (idx.x == 800 && idx.y == 800 && idx.z == 0) {
+    //    debug_print = true;
+    //}
+
     bool oob = idx.x >= RES_X || idx.y >= RES_Y;
     idx.x = min(idx.x, RES_X - 1);
     idx.y = min(idx.y, RES_Y - 1);
@@ -262,7 +267,7 @@ void render(uint3 idx : SV_DispatchThreadID)
         setOutput(rgb_out_offset, depth_out_offset, float3(0, 0, 0), 0);
         return;
     }
-    
+
     ObjectData object_data = objectDataBuffer[obj_idx];
 
     Triangle hit_tri = fetchTriangle(object_data.geoAddr, geo_idx, tri_idx);
@@ -278,15 +283,6 @@ void render(uint3 idx : SV_DispatchThreadID)
                                             hit_barys);
 
     float3 hit_world_normal = transformNormal(w2o, hit_obj_normal);
-    if (idx.x == 800 && idx.y == 500) {
-        printf("(%f %f %f) => (%f %f %f)\n",
-            hit_world_normal.x,
-            hit_world_normal.y,
-            hit_world_normal.z,
-            hit_obj_normal.x,
-            hit_obj_normal.y,
-            hit_obj_normal.z);
-    }
 
     float hit_angle = 
         max(dot(normalize(hit_world_normal), normalize(-ray_dir)), 0.f);
