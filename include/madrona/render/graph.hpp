@@ -1,10 +1,15 @@
 #pragma once
 
-#include <madrona/render/
+#include <madrona/render/gpu.hpp>
+#include <madrona/span.hpp>
+#include <madrona/stack_alloc.hpp>
 
 namespace madrona::render {
 
-class RenderGraph;
+enum class TaskType {
+    Compute,
+    Raster,
+};
 
 struct TaskResource {
     enum class Type {
@@ -18,35 +23,40 @@ struct TaskResource {
     };
 };
 
-struct TaskArguments {
-    Span<TaskResource> args;
-};
-
 class RenderGraphBuilder {
 public:
     RenderGraphBuilder(StackAlloc &alloc);
 
     template <typename Fn>
-    inline void addTask(Fn &&fn, TaskArguments args);
+    inline void addTask(Fn &&fn,
+        TaskType type,
+        Span<TaskResource> read_resources,
+        Span<TaskResource> write_resources);
 
-    RenderGraph build(GPUDevice &gpu);
+    RenderGraph build(GPU &gpu);
 private:
     struct TaskDesc {
         void (*fn)(void *data, GPU &);
         void *data;
         CountT numDataBytes;
 
+        TaskType type;
+
+        TaskResource *readResources;
+        TaskResource *writeResources;
+
         TaskDesc *next;
     };
-
     StackAlloc *alloc_;
+    StackAlloc::Frame alloc_start_;
+    TaskDesc *task_list_head_;
+    TaskDesc *task_list_tail_;
+    TaskDesc empty_;
+
 };
 
 class RenderGraph {
 public:
-        void (*fn)();
-        void *data;
-    };
 
 private:
     template <typename Fn>
