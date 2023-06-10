@@ -1,11 +1,28 @@
 namespace madrona::render {
 
+TaskResource * RenderGraphBuilder::addTex2D(Texture2DDesc desc)
+{
+    auto *resource = alloc_->alloc<TaskResource>();
+    resource->type = TaskResource::Type::Texture2D;
+    resource->tex2D = desc;
+
+    return resource;
+}
+
+TaskResource * RenderGraphBuilder::addBuffer()
+{
+    auto *resource = alloc_->alloc<TaskResource>();
+    resource->type = TaskResource::Type::Buffer;
+
+    return resource;
+}
+
 template <typename Fn>
 void RenderGraphBuilder::addTask(
         Fn &&fn,
         TaskType type,
-        Span<TaskResource> read_resources,
-        Span<TaskResource> write_resources)
+        Span<TaskResource *> read_resources,
+        Span<TaskResource *> write_resources)
 {
     auto *fn_ptr = &RenderGraph::taskEntry<Fn>;
 
@@ -15,13 +32,13 @@ void RenderGraphBuilder::addTask(
     CountT num_data_bytes = sizeof(Fn);
 
     CountT num_read_resource_bytes =
-        sizeof(TaskResource) * read_resources.size();
+        sizeof(TaskResource *) * read_resources.size();
     CountT num_write_resource_bytes =
-        sizeof(TaskResource) * write_resources.size();
-    auto *read_resources_dst = (TaskResource *)alloc_->alloc(
-        num_read_resource_bytes, alignof(TaskResource));
-    auto *write_resources_dst = (TaskResource *)alloc_->alloc(
-        num_write_resource_bytes, alignof(TaskResource));
+        sizeof(TaskResource *) * write_resources.size();
+    auto *read_resources_dst = (TaskResource **)alloc_->alloc(
+        num_read_resource_bytes, alignof(TaskResource *));
+    auto *write_resources_dst = (TaskResource **)alloc_->alloc(
+        num_write_resource_bytes, alignof(TaskResource *));
 
     memcpy(read_resources_dst, read_resources.data(), num_read_resource_bytes);
     memcpy(write_resources_dst, write_resources.data(),

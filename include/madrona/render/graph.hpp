@@ -27,11 +27,14 @@ class RenderGraphBuilder {
 public:
     RenderGraphBuilder(StackAlloc &alloc);
 
+    inline TaskResource * addTex2D(Texture2DDesc desc);
+    inline TaskResource * addBuffer();
+
     template <typename Fn>
     inline void addTask(Fn &&fn,
         TaskType type,
-        Span<TaskResource> read_resources,
-        Span<TaskResource> write_resources);
+        Span<TaskResource *> read_resources,
+        Span<TaskResource *> write_resources);
 
     RenderGraph build(GPU &gpu);
 private:
@@ -42,11 +45,12 @@ private:
 
         TaskType type;
 
-        TaskResource *readResources;
-        TaskResource *writeResources;
+        TaskResource **readResources;
+        TaskResource **writeResources;
 
         TaskDesc *next;
     };
+
     StackAlloc *alloc_;
     StackAlloc::Frame alloc_start_;
     TaskDesc *task_list_head_;
