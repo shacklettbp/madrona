@@ -55,12 +55,16 @@ constexpr inline uint64_t roundUpPow2(uint64_t offset, uint64_t alignment)
     return (offset + alignment - 1) & -alignment;
 }
 
-inline void *alignPtr(void *ptr, uintptr_t alignment)
+inline uintptr_t alignPtrOffset(void *ptr, uintptr_t alignment)
 {
     uintptr_t base = (uintptr_t)ptr;
     uintptr_t aligned = roundUpPow2(base, alignment);
-    uintptr_t offset = aligned - base;
-    return (char *)ptr + offset;
+    return aligned - base;
+}
+
+inline void *alignPtr(void *ptr, uintptr_t alignment)
+{
+    return (char *)ptr + alignPtrOffset(ptr, alignment);
 }
 
 constexpr inline bool isPower2(uint64_t v)

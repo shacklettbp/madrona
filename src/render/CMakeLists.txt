@@ -5,3 +5,5 @@ if (MADRONA_LINUX OR MADRONA_WINDOWS OR MADRONA_ANDROID)
 elseif (MADRONA_MACOS OR MADRONA_IOS)
     add_subdirectory(metal)
 endif ()
+
+add_subdirectory(core)

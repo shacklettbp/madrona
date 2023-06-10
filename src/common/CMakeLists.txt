@@ -36,6 +36,8 @@ endif()
 
 add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/memory.hpp ${MADRONA_INC_DIR}/memory.inl memory.cpp
+    ${MADRONA_INC_DIR}/stack_alloc.hpp ${MADRONA_INC_DIR}/stack_alloc.inl
+        stack_alloc.cpp
     ${MADRONA_INC_DIR}/heap_array.hpp
     ${MADRONA_INC_DIR}/span.hpp
     ${MADRONA_INC_DIR}/utils.hpp
