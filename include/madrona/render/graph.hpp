@@ -1,33 +1,57 @@
 #pragma once
 
+#include <madrona/render/
+
 namespace madrona::render {
 
 class RenderGraph;
 
-struct RenderTask {
+struct TaskResource {
+    enum class Type {
+        Buffer,
+        Texture2D,
+    } type;
+
+    union {
+        Texture2DDesc tex2D;
+        BufferDesc buffer;
+    };
+};
+
+struct TaskArguments {
+    Span<TaskResource> args;
 };
 
 class RenderGraphBuilder {
 public:
-    RenderGraphBuilder();
+    RenderGraphBuilder(StackAlloc &alloc);
 
     template <typename Fn>
-    inline void addTask(Fn &&fn);
+    inline void addTask(Fn &&fn, TaskArguments args);
 
     RenderGraph build(GPUDevice &gpu);
 private:
-    DynArray<TaskDefn> task_defns_;
+    struct TaskDesc {
+        void (*fn)(void *data, GPU &);
+        void *data;
+        CountT numDataBytes;
+
+        TaskDesc *next;
+    };
+
+    StackAlloc *alloc_;
 };
 
 class RenderGraph {
 public:
-    struct TaskDefn {
         void (*fn)();
         void *data;
     };
 
-
 private:
+    template <typename Fn>
+    static void taskEntry(void *data, GPU &);
+
     struct Task {
     };
 

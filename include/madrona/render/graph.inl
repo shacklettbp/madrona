@@ -1,8 +1,9 @@
 namespace madrona::render {
 
 template <typename Fn>
-void RenderGraphBuilder::RenderGraphBuilder::addTask(Fn &&fn)
+void RenderGraphBuilder::addTask(Fn &&fn, TaskArguments args)
 {
+    CountT num_data_bytes = sizeof(Fn);
 }
 
 }

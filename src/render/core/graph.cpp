@@ -1,7 +1,8 @@
 namespace madrona::render {
 
-RenderGraph::Builder::Builder()
-    : task_defns_()
+RenderGraphBuilder::RenderGraphBuilder(StackAlloc &alloc)
+    : alloc_(&alloc),
+      task_defns_()
 {}
 
 }
