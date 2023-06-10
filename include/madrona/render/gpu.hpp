@@ -28,10 +28,15 @@ struct BufferDesc {
     int32_t numBytes;
 };
 
+class CommandBuffer {
+};
+
 class GPU {
 public:
     TextureHandle makeTex2D(int32_t width, int32_t height, TexFormat fmt);
     BufferHandle makeBuffer(int32_t num_bytes);
+
+    void setupBarrierCallback();
 
     void submit(const RenderGraph &graph);
 

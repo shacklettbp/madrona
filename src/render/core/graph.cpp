@@ -13,6 +13,12 @@ RenderGraphBuilder::RenderGraphBuilder(StackAlloc &alloc)
 
 RenderGraph RenderGraphBuilder::build(GPU &gpu)
 {
+    TaskDesc *cur = task_list_head_->next;
+    assert(cur != nullptr);
+    CountT num_tasks = 0;
+    while (cur != nullptr) {
+    }
+
     alloc_->pop(alloc_start_);
     return RenderGraph();
 }

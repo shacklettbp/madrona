@@ -39,7 +39,7 @@ public:
     RenderGraph build(GPU &gpu);
 private:
     struct TaskDesc {
-        void (*fn)(void *data, GPU &);
+        void (*fn)(void *, GPU &);
         void *data;
         CountT numDataBytes;
 
@@ -64,10 +64,14 @@ public:
 
 private:
     template <typename Fn>
-    static void taskEntry(void *data, GPU &);
+    static void taskEntry(void *data, GPU &gpu);
 
     struct Task {
+        void (*fn)(void *, GPU &);
+        void *data;
     };
+
+    HeapArray<Task> tasks_;
 
 friend class RenderGraphBuilder;
 };
