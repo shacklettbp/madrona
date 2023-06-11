@@ -11,25 +11,37 @@ struct RenderGraphBuilder::LogicalResource {
         BufferDesc buffer;
     };
 
-    bool isLive;
+    bool writeHazard;
 
     LogicalResource *next;
 };
 
+struct RenderGraphBuilder::BarrierTaskArgs {
+};
+
 struct RenderGraphBuilder::TaskDesc {
-    void (*fn)(void *, GPU &);
+    enum class Type {
+        Raster,
+        Compute,
+        Copy,
+        Barrier,
+    } type;
+
+    union {
+        RasterTaskArgs raster;
+        ComputeTaskArgs compute;
+        CopyTaskArgs copy;
+        BarrierTaskArgs barrier;
+    };
+
+    void (*fn)(void *, GPU &, CommandBuffer cmd_buf);
     void *data;
     CountT numDataBytes;
-
-    TaskType type;
-
-    Span<TaskResource> readResources;
-    Span<TaskResource> writeResources;
 
     TaskDesc *next;
 };
 
-LogicalResource * RenderGraphBuilder::addTex2D(Texture2DDesc desc)
+TaskResource RenderGraphBuilder::addTex2D(Texture2DDesc desc)
 {
     auto *resource = addResource();
     resource->type = LogicalResource::Type::Texture2D;
@@ -38,56 +50,100 @@ LogicalResource * RenderGraphBuilder::addTex2D(Texture2DDesc desc)
     return TaskResource { resource } ;
 }
 
-LogicalResource * RenderGraphBuilder::addBuffer(CountT num_bytes)
+TaskResource RenderGraphBuilder::addBuffer(BufferDesc desc)
 {
     auto *resource = addResource();
     resource->type = LogicalResource::Type::Buffer;
+    resource->buffer = desc;
 
     return TaskResource { resource };
 }
 
 template <typename Fn>
-void RenderGraphBuilder::addTask(
-        Fn &&fn,
-        TaskType type,
-        Span<TaskResource> read_resources,
-        Span<TaskResource> write_resources)
+void RenderGraphBuilder::addRasterTask(Fn &&fn, RasterTaskArgs args)
+{
+    TaskDesc *task = addTaskCommon(std::forward<Fn>(fn));
+
+    task->type = TaskDesc::Type::Raster;
+    task->raster = RasterTaskArgs {
+        .vert = {
+            .read = stashResourceHandles(args.vert.read),
+        },
+        .frag = {
+            .read = stashResourceHandles(args.frag.read),
+        },
+        .attachments = {
+            .readwrite = stashResourceHandles(args.attachments.readwrite),
+            .write = stashResourceHandles(args.attachments.clear),
+            .clear = stashResourceHandles(args.attachments.clear),
+        },
+    };
+}
+
+template <typename Fn>
+void RenderGraphBuilder::addComputeTask(Fn &&fn, ComputeTaskArgs args)
+{
+    TaskDesc *task = addTaskCommon(std::forward<Fn>(fn));
+
+    task->type = TaskDesc::Type::Compute;
+    task->compute = ComputeTaskArgs {
+        .read = stashResourceHandles(args.read),
+        .write = stashResourceHandles(args.write),
+        .readwrite = stashResourceHandles(args.readwrite),
+        .forceAsync = args.forceAsync,
+    };
+}
+
+template <typename Fn>
+void RenderGraphBuilder::addCopyTask(Fn &&fn, CopyTaskArgs args)
+{
+    TaskDesc *task = addTaskCommon(std::forward<Fn>(fn));
+
+    task->type = TaskDesc::Type::Copy;
+    task->copy = CopyTaskArgs {
+        .read = stashResourceHandles(args.read),
+        .write = stashResourceHandles(args.write),
+        .forceDMA = args.forceDMA,
+    };
+}
+
+template <typename Fn>
+RenderGraphBuilder::TaskDesc * RenderGraphBuilder::addTaskCommon(Fn &&fn)
 {
     auto *fn_ptr = &RenderGraph::taskEntry<Fn>;
 
     auto *closure_store = alloc_->alloc<Fn>();
     *closure_store = fn;
 
-    CountT num_data_bytes = sizeof(Fn);
-
-    auto *read_resources_dst =
-        alloc_->allocN<TaskResource>(read_resources.size());
-    auto *write_resources_dst =
-        alloc_->allocN<TaskResource>(write_resources.size());
-
-    utils::copyN<TaskResource>(read_resources_dst, read_resources.data(),
-                               read_resources.size());
-    utils::copyN<TaskResource>(write_resources_dst, write_resources.data(),
-                               write_resources.size());
-
     TaskDesc *new_task = alloc_->alloc<TaskDesc>();
     new_task->fn = fn_ptr;
     new_task->data = closure_store;
-    new_task->numDataBytes = (uint32_t)num_data_bytes;
-    new_task->type = type;
-    new_task->readResources = Span(read_resources_dst, read_resources.size());
-    new_task->writeResources =
-        Span(write_resources_dst, write_resources.size());
+    new_task->numDataBytes = sizeof(Fn);
 
     new_task->next = nullptr;
     task_list_tail_->next = new_task;
     task_list_tail_ = new_task;
+
+    return new_task;
 }
 
-LogicalResource * RenderGraphBuilder::addResource()
+Span<TaskResource> RenderGraphBuilder::stashResourceHandles(
+    Span<const TaskResource> resources)
+{
+    if (resources.size() == 0) {
+        return { nullptr, 0 };
+    }
+
+    auto *dst = alloc_->allocN<TaskResource>(resources.size());
+    utils::copyN<TaskResource>(dst, resources.data(), resources.size());
+
+    return { dst, resources.size() };
+}
+
+RenderGraphBuilder::LogicalResource * RenderGraphBuilder::addResource()
 {
     auto *resource = alloc_->alloc<LogicalResource>();
-    resource->isLive = false;
+    resource->writeHazard = false;
 
     resource->next = nullptr;
     rsrc_list_tail_->next = resource;
@@ -96,16 +152,17 @@ LogicalResource * RenderGraphBuilder::addResource()
     return resource;
 }
 
-LogicalResource * RenderGraphBuilder::getResource(TaskResource hdl)
+RenderGraphBuilder::LogicalResource * RenderGraphBuilder::getResource(
+    TaskResource hdl)
 {
     return (LogicalResource *)(hdl.hdl);
 }
 
 template <typename Fn>
-void RenderGraph::taskEntry(void *data, GPU &gpu)
+void RenderGraph::taskEntry(void *data, GPU &gpu, CommandBuffer cmd_buf)
 {
     auto &closure = *(Fn *)data;
-    closure(gpu);
+    closure(gpu, cmd_buf);
 }
 
 }

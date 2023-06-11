@@ -1,6 +1,7 @@
 #pragma once
 
 #include <madrona/types.hpp>
+#include <madrona/render/platform.hpp>
 
 namespace madrona::render {
 
@@ -29,18 +30,24 @@ struct BufferDesc {
 };
 
 class CommandBuffer {
+    platform::CommandBuffer hdl;
 };
 
 class GPU {
 public:
+    GPU();
+
     TextureHandle makeTex2D(int32_t width, int32_t height, TexFormat fmt);
     BufferHandle makeBuffer(int32_t num_bytes);
 
-    void setupBarrierCallback();
+    void debugFullBarrier(CommandBuffer cmd);
 
     void submit(const RenderGraph &graph);
 
+    platform::GPU & platform();
+
 private:
+    platform::GPU gpu;
 };
 
 }
