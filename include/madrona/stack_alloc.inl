@@ -45,4 +45,10 @@ T * StackAlloc::alloc()
     return (T *)alloc(sizeof(T), alignof(T));
 }
 
+template <typename T>
+T * StackAlloc::allocN(CountT num_elems)
+{
+    return (T *)alloc(sizeof(T) * num_elems, alignof(T));
+}
+
 }

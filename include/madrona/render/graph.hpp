@@ -7,71 +7,74 @@
 namespace madrona::render {
 
 enum class TaskType {
+    Graphics,
     Compute,
-    Raster,
+    Copy,
 };
 
 struct TaskResource {
-    enum class Type {
-        Buffer,
-        Texture2D,
-    } type;
+    void *hdl;
+};
 
-    union {
-        Texture2DDesc tex2D;
-        BufferDesc buffer;
-    };
+struct TaskArgs {
+    Span<TaskResource> readonly = {};
+    Span<TaskResource> readwrite = {};
+    Span<TaskResource> writeonly = {};
+    Span<TaskResource> fbAttachments = {};
 };
 
 class RenderGraphBuilder {
+private:
+    struct LogicalResource;
+    struct TaskDesc;
+
 public:
+    struct TaskResource {
+        LogicalResource *rsrc;
+    };
+
     RenderGraphBuilder(StackAlloc &alloc);
 
-    inline TaskResource * addTex2D(Texture2DDesc desc);
-    inline TaskResource * addBuffer();
+    inline TaskResource addTex2D(Texture2DDesc desc);
+    inline TaskResource addBuffer(CountT num_bytes);
 
     template <typename Fn>
-    inline void addTask(Fn &&fn,
-        TaskType type,
-        Span<TaskResource *> read_resources,
-        Span<TaskResource *> write_resources);
+    inline void addTask(Fn &&fn, TaskType type, TaskArgs args);
 
     RenderGraph build(GPU &gpu);
+
 private:
-    struct TaskDesc {
-        void (*fn)(void *, GPU &);
-        void *data;
-        CountT numDataBytes;
-
-        TaskType type;
-
-        TaskResource **readResources;
-        TaskResource **writeResources;
-
-        TaskDesc *next;
-    };
+    inline LogicalResource * addResource();
+    inline LogicalResource * getResource(TaskResource hdl);
 
     StackAlloc *alloc_;
     StackAlloc::Frame alloc_start_;
     TaskDesc *task_list_head_;
     TaskDesc *task_list_tail_;
-    TaskDesc empty_;
-
+    LogicalResource *rsrc_list_head_;
+    LogicalResource *rsrc_list_tail_;
+    TaskDesc fake_task_;
+    LogicalResource fake_rsrc_;
 };
 
 class RenderGraph {
 public:
+    ~RenderGraph();
 
 private:
+    struct Task;
+    RenderGraph(void *data_buffer,
+                Span<const Task> tasks,
+                Span<TextureHandle> textures,
+                Span<BufferHandle> buffers);
+
     template <typename Fn>
-    static void taskEntry(void *data, GPU &gpu);
+    static void taskEntry(void *data, GPU &gpu, CommandBuffer &cmd_buf);
 
-    struct Task {
-        void (*fn)(void *, GPU &);
-        void *data;
-    };
-
-    HeapArray<Task> tasks_;
+    void *data_buffer_;
+    Span<Task> tasks_;
+    Span<TextureHandle> textures_;
+    Span<BufferHandle> buffers_;
 
 friend class RenderGraphBuilder;
 };

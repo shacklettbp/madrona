@@ -23,6 +23,9 @@ public:
     template <typename T>
     T * alloc();
 
+    template <typename T>
+    T * allocN(CountT num_elems);
+
 private:
     struct ChunkMetadata {
         ChunkMetadata *next;

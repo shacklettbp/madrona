@@ -135,6 +135,20 @@ inline int64_t computeBufferOffsets(const Span<const int64_t> chunk_sizes,
     return roundUpPow2(num_total_bytes, pow2_alignment);
 }
 
+template <typename T>
+inline void copyN(std::type_identity_t<T> *dst,
+                  const std::type_identity_t<T> *src,
+                  CountT num_elems)
+{
+    memcpy(dst, src, sizeof(T) * num_elems);
+}
+
+template <typename T>
+inline void zeroN(std::type_identity_t<T> *ptr, CountT num_elems)
+{
+    memset(ptr, 0, num_elems * sizeof(T));
+}
+
 template <typename> struct PackDelegator;
 template <template <typename...> typename T, typename ...Args>
 struct PackDelegator<T<Args...>> {
