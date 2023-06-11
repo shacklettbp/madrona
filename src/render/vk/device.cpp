@@ -1,5 +1,7 @@
 #include <madrona/render/vk/device.hpp>
 
+#include <utility>
+
 namespace madrona::render::vk {
 
 Device::Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
@@ -18,6 +20,21 @@ Device::Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
       numTransferQueues(num_transfer_queues),
       rtAvailable(rt_available)
 {}
+
+Device::Device(Device &&o)
+    : hdl(o.hdl),
+      dt(std::move(o.dt)),
+      phy(o.phy),
+      gfxQF(o.gfxQF),
+      computeQF(o.computeQF),
+      transferQF(o.transferQF),
+      numGraphicsQueues(o.numGraphicsQueues), 
+      numComputeQueues(o.numComputeQueues),
+      numTransferQueues(o.numTransferQueues),
+      rtAvailable(o.rtAvailable)
+{
+    o.hdl = VK_NULL_HANDLE;
+}
 
 Device::~Device()
 {

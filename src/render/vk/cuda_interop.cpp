@@ -97,9 +97,9 @@ CudaImportedBuffer::~CudaImportedBuffer()
     close(ext_fd_);
 }
 
-DeviceUUID getUUIDFromGPUID(int gpu_id)
+DeviceID getVkUUIDFromCudaID(int gpu_id)
 {
-    DeviceUUID uuid;
+    DeviceID vk_id;
 
     int device_count;
     cudaError_t res = cudaGetDeviceCount(&device_count);
@@ -119,10 +119,10 @@ DeviceUUID getUUIDFromGPUID(int gpu_id)
         FATAL("%d corresponds to a prohibited device\n", gpu_id);
     }
 
-    memcpy(uuid.data(), &props.uuid,
-           sizeof(DeviceUUID::value_type) * uuid.size());
+    memcpy(vk_id.data(), &props.uuid,
+           sizeof(DeviceID::value_type) * vk_id.size());
 
-    return uuid;
+    return vk_id;
 }
 
 }

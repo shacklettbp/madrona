@@ -36,6 +36,10 @@ struct Backend::Init {
     InitializationDispatch dt;
     bool validationEnabled;
     void *loaderHandle;
+
+    static inline Backend::Init init(PFN_vkGetInstanceProcAddr get_inst_addr,
+                                     bool want_validation,
+                                     Span<const char *const> extra_exts);
 };
 
 static InitializationDispatch fetchInitDispatchTable(
@@ -110,7 +114,7 @@ static bool checkValidationAvailable(const InitializationDispatch &dt)
     }
 }
 
-static Backend::Init initInstance(
+Backend::Init Backend::Init::init(
     PFN_vkGetInstanceProcAddr get_inst_addr,
     bool want_validation,
     Span<const char *const> extra_exts)
@@ -259,17 +263,17 @@ static VkDebugUtilsMessengerEXT makeDebugCallback(VkInstance hdl,
     return messenger;
 }
 
-Backend::Backend(PFN_vkGetInstanceProcAddr get_inst_addr,
-                             bool enable_validation,
-                             bool need_present,
-                             Span<const char *const> extra_exts)
-    : Backend(initInstance(get_inst_addr, enable_validation, extra_exts),
-                    need_present)
+Backend::Backend(void (*vk_entry_fn)(),
+                 bool enable_validation,
+                 bool headless,
+                 Span<const char *const> extra_exts)
+    : Backend(Backend::Init::init((PFN_vkGetInstanceProcAddr)vk_entry_fn,
+        enable_validation, extra_exts), headless)
 {}
 
-Backend::Backend(Init init, bool need_present)
+Backend::Backend(Init init, bool headless)
     : hdl(init.hdl),
-      dt(hdl, init.dt.getInstanceAddr, need_present),
+      dt(hdl, init.dt.getInstanceAddr, !headless),
       debug_(init.validationEnabled ?
                 makeDebugCallback(hdl, init.dt.getInstanceAddr) :
                 VK_NULL_HANDLE),
@@ -288,16 +292,19 @@ Backend::Backend(Backend &&o)
 
 Backend::~Backend()
 {
-    if (hdl != VK_NULL_HANDLE) {
-        if (debug_ != VK_NULL_HANDLE) {
-            auto destroy_messenger =
-                reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-                    dt.getInstanceProcAddr(hdl,
-                                           "vkDestroyDebugUtilsMessengerEXT"));
-            destroy_messenger(hdl, debug_, nullptr);
-        }
-        dt.destroyInstance(hdl, nullptr);
+    if (hdl == VK_NULL_HANDLE) {
+        return;
     }
+
+    if (debug_ != VK_NULL_HANDLE) {
+        auto destroy_messenger =
+            reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
+                dt.getInstanceProcAddr(hdl,
+                                       "vkDestroyDebugUtilsMessengerEXT"));
+        destroy_messenger(hdl, debug_, nullptr);
+    }
+    dt.destroyInstance(hdl, nullptr);
+    
     if (loader_handle_ != nullptr) {
         dlclose(loader_handle_);
     }
@@ -325,7 +332,7 @@ VkPhysicalDevice Backend::findPhysicalDevice(
     for (uint32_t idx = 0; idx < phys.size(); idx++) {
         VkPhysicalDevice phy = phys[idx];
         VkPhysicalDeviceIDProperties vk_id_props {};
-        vk_id_id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+        vk_id_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
 
         VkPhysicalDeviceProperties2 props {};
         props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
@@ -343,18 +350,19 @@ VkPhysicalDevice Backend::findPhysicalDevice(
 
 Device Backend::initDevice(
     const DeviceID &gpu_id,
-    uint32_t desired_gfx_queues,
-    uint32_t desired_compute_queues,
-    uint32_t desired_transfer_queues,
-    Optional<VkSurfaceKHR> present_surface) const
+    Optional<VkSurfaceKHR> present_surface)
 {
-    VkPhysicalDevice phy = findPhysicalDevice(dev_id);
+    // FIXME:
+    const uint32_t desired_gfx_queues = 2;
+    const uint32_t desired_compute_queues = 2;
+    const uint32_t desired_transfer_queues = 2;
+
+    VkPhysicalDevice phy = findPhysicalDevice(gpu_id);
 
     DynArray<const char *> extensions {
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
         VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME,
         VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
-        VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME,
     };
 
     uint32_t num_supported_extensions;
@@ -557,6 +565,7 @@ Device Backend::initDevice(
     vk12_features.shaderFloat16 = true;
     vk12_features.shaderInt8 = true;
     vk12_features.storageBuffer8BitAccess = true;
+    vk12_features.shaderOutputLayer = true;
 
     VkPhysicalDeviceVulkan11Features vk11_features {};
     vk11_features.sType =

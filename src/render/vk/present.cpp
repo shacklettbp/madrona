@@ -35,12 +35,12 @@ static inline T *checkSDLPointer(T *ptr, const char *msg)
 #define REQ_SDL(expr) checkSDL((expr), #expr)
 #define NONNULL_SDL(expr) checkSDLPointer((expr), #expr)
 
-PFN_vkGetInstanceProcAddr PresentationState::init()
+void (*PresentationState::init())()
 {
     REQ_SDL(SDL_Init(SDL_INIT_VIDEO));
     REQ_SDL(SDL_Vulkan_LoadLibrary(nullptr));
 
-    return (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
+    return (void (*)())SDL_Vulkan_GetVkGetInstanceProcAddr();
 }
 
 void PresentationState::cleanup()
@@ -82,28 +82,28 @@ HeapArray<const char *> PresentationState::getInstanceExtensions(
     return extensions;
 }
 
-VkSurfaceKHR PresentationState::makeSurface(const InstanceState &inst,
+VkSurfaceKHR PresentationState::makeSurface(const Backend &backend,
                                             const Window &window)
 {
     VkSurfaceKHR surface;
     if (!SDL_Vulkan_CreateSurface((SDL_Window *)window.hdl,
-                                  inst.hdl, &surface)) {
+                                  backend.hdl, &surface)) {
         FATAL("Failed to create vulkan window surface");
     }
 
     return surface;
 }
 
-static VkSurfaceFormatKHR selectSwapchainFormat(const InstanceState &inst,
+static VkSurfaceFormatKHR selectSwapchainFormat(const Backend &backend,
                                                 VkPhysicalDevice phy,
                                                 VkSurfaceKHR surface)
 {
     uint32_t num_formats;
-    REQ_VK(inst.dt.getPhysicalDeviceSurfaceFormatsKHR(
+    REQ_VK(backend.dt.getPhysicalDeviceSurfaceFormatsKHR(
             phy, surface, &num_formats, nullptr));
 
     HeapArray<VkSurfaceFormatKHR> formats(num_formats);
-    REQ_VK(inst.dt.getPhysicalDeviceSurfaceFormatsKHR(
+    REQ_VK(backend.dt.getPhysicalDeviceSurfaceFormatsKHR(
             phy, surface, &num_formats, formats.data()));
 
     if (num_formats == 0) {
@@ -121,17 +121,17 @@ static VkSurfaceFormatKHR selectSwapchainFormat(const InstanceState &inst,
     return formats[0];
 }
 
-static VkPresentModeKHR selectSwapchainMode(const InstanceState &inst,
+static VkPresentModeKHR selectSwapchainMode(const Backend &backend,
                                             VkPhysicalDevice phy,
                                             VkSurfaceKHR surface,
                                             bool need_immediate)
 {
     uint32_t num_modes;
-    REQ_VK(inst.dt.getPhysicalDeviceSurfacePresentModesKHR(
+    REQ_VK(backend.dt.getPhysicalDeviceSurfacePresentModesKHR(
             phy, surface, &num_modes, nullptr));
 
     HeapArray<VkPresentModeKHR> modes(num_modes);
-    REQ_VK(inst.dt.getPhysicalDeviceSurfacePresentModesKHR(
+    REQ_VK(backend.dt.getPhysicalDeviceSurfacePresentModesKHR(
             phy, surface, &num_modes, modes.data()));
 
     for (VkPresentModeKHR mode : modes) {
@@ -149,7 +149,7 @@ static VkPresentModeKHR selectSwapchainMode(const InstanceState &inst,
     }
 }
 
-static Swapchain makeSwapchain(const InstanceState &inst,
+static Swapchain makeSwapchain(const Backend &backend,
                                const Device &dev,
                                void *window_hdl,
                                VkSurfaceKHR surface,
@@ -162,19 +162,19 @@ static Swapchain makeSwapchain(const InstanceState &inst,
     // Need to include this call despite the platform specific check
     // earlier (pre surface creation), or validation layers complain
     VkBool32 surface_supported;
-    REQ_VK(inst.dt.getPhysicalDeviceSurfaceSupportKHR(
+    REQ_VK(backend.dt.getPhysicalDeviceSurfaceSupportKHR(
             dev.phy, qf_idx, surface, &surface_supported));
 
     if (surface_supported == VK_FALSE) {
         FATAL("SDL surface doesn't support presentation");
     }
 
-    VkSurfaceFormatKHR format = selectSwapchainFormat(inst, dev.phy, surface);
-    VkPresentModeKHR mode = selectSwapchainMode(inst, dev.phy, surface,
+    VkSurfaceFormatKHR format = selectSwapchainFormat(backend, dev.phy, surface);
+    VkPresentModeKHR mode = selectSwapchainMode(backend, dev.phy, surface,
                                                 need_immediate);
 
     VkSurfaceCapabilitiesKHR caps;
-    REQ_VK(inst.dt.getPhysicalDeviceSurfaceCapabilitiesKHR(
+    REQ_VK(backend.dt.getPhysicalDeviceSurfaceCapabilitiesKHR(
             dev.phy, surface, &caps));
 
     VkExtent2D swapchain_size = caps.currentExtent;
@@ -243,18 +243,18 @@ static HeapArray<VkImage> getSwapchainImages(const Device &dev,
     return swapchain_images;
 }
 
-PresentationState::PresentationState(const InstanceState &inst,
+PresentationState::PresentationState(const Backend &backend,
                                      const Device &dev,
                                      Window &&window,
                                      VkSurfaceKHR surface,
                                      uint32_t qf_idx,
                                      uint32_t num_frames_inflight,
                                      bool need_immediate)
-    : inst_(&inst),
+    : backend_(&backend),
       dev_(&dev),
       window_(std::move(window)),
       surface_(surface),
-      swapchain_(makeSwapchain(inst, dev, window_.hdl, surface_,
+      swapchain_(makeSwapchain(backend, dev, window_.hdl, surface_,
                                qf_idx, num_frames_inflight,
                                need_immediate)),
       swapchain_imgs_(getSwapchainImages(dev, swapchain_.hdl))
@@ -263,7 +263,7 @@ PresentationState::PresentationState(const InstanceState &inst,
 PresentationState::~PresentationState()
 {
     dev_->dt.destroySwapchainKHR(dev_->hdl, swapchain_.hdl, nullptr);
-    inst_->dt.destroySurfaceKHR(inst_->hdl, surface_, nullptr);
+    backend_->dt.destroySurfaceKHR(backend_->hdl, surface_, nullptr);
     SDL_DestroyWindow((SDL_Window *)window_.hdl);
 }
 

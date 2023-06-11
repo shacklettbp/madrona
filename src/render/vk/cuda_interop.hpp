@@ -3,11 +3,9 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include <madrona/render/vk/device.hpp>
+#include <madrona/render/vk/backend.hpp>
 
-namespace madrona {
-namespace render {
-namespace vk {
+namespace madrona::render::vk {
 
 class CudaImportedBuffer {
 public:
@@ -29,8 +27,6 @@ private:
     void *dev_ptr_;
 };
 
-DeviceUUID getUUIDFromGPUID(int gpu_id);
+DeviceID getVkUUIDFromCudaID(int gpu_id);
 
-}
-}
 }

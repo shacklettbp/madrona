@@ -8,9 +8,9 @@ using CommandBuffer = VkCommandBuffer;
 
 class Device {
 public:
-    const VkDevice hdl;
-    const DeviceDispatch dt;
-    const VkPhysicalDevice phy;
+    VkDevice hdl;
+    DeviceDispatch dt;
+    VkPhysicalDevice phy;
 
     uint32_t gfxQF;
     uint32_t computeQF;
@@ -26,10 +26,12 @@ public:
            uint32_t num_transfer_queues, bool rt_available,
            VkPhysicalDevice phy_dev, VkDevice dev,
            DeviceDispatch &&dispatch_table);
+
+    Device(const Device &) = delete;
+    Device(Device &&o);
+
     ~Device();
     
-    Device(const Device &) = delete;
-    Device(Device &&) = default;
 };
 
 }

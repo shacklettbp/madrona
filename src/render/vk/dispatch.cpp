@@ -1,6 +1,8 @@
 #include <madrona/render/vk/dispatch.hpp>
 #include <madrona/crash.hpp>
 
+#include <string>
+
 namespace madrona {
 namespace render {
 namespace vk {

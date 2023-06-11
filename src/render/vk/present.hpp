@@ -22,17 +22,17 @@ struct Window {
 
 class PresentationState {
 public:
-    static PFN_vkGetInstanceProcAddr init();
+    static void (*init())();
     static void cleanup();
 
     static Window makeWindow(uint32_t width, uint32_t height);
     static HeapArray<const char *> getInstanceExtensions(
         const Window &window);
 
-    static VkSurfaceKHR makeSurface(const InstanceState &inst,
+    static VkSurfaceKHR makeSurface(const Backend &backend,
                                     const Window &window);
 
-    PresentationState(const InstanceState &inst,
+    PresentationState(const Backend &backend,
                       const Device &dev,
                       Window &&window,
                       VkSurfaceKHR surface,
@@ -58,7 +58,7 @@ public:
                  const VkSemaphore *wait_semas);
 
 private:
-    const InstanceState *inst_;
+    const Backend *backend_;
     const Device *dev_;
     Window window_;
     VkSurfaceKHR surface_;

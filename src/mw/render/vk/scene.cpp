@@ -1,7 +1,7 @@
 #include "scene.hpp"
 #include "asset_utils.hpp"
 
-#include "vk/shader.hpp"
+#include "vk/pipeline_shaders.hpp"
 #include "vk/utils.hpp"
 
 using namespace std;

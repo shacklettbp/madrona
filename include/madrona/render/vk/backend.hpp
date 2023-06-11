@@ -1,7 +1,9 @@
 #pragma once
 
+#include <madrona/optional.hpp>
+#include <madrona/span.hpp>
+
 #include <madrona/render/vk/device.hpp>
-#include <madrona/render/vk/shader.hpp>
 
 namespace madrona::render::vk {
 
@@ -13,26 +15,26 @@ public:
             bool enable_validation,
             bool headless,
             Span<const char *const> extra_vk_exts = {});
-    ~Backend();
 
     Backend(const Backend &) = delete;
     Backend(Backend &&);
+    ~Backend();
 
     Device initDevice(const DeviceID &gpu_id,
         Optional<VkSurfaceKHR> present_surface =
             Optional<VkSurfaceKHR>::none());
 
-    const VkInstance hdl;
-    const InstanceDispatch dt;
+    VkInstance hdl;
+    InstanceDispatch dt;
 
 private:
     struct Init;
-    Backend(Init init, bool headless);
+    inline Backend(Init init, bool headless);
 
     const VkDebugUtilsMessengerEXT debug_;
     void *loader_handle_;
 
-    VkPhysicalDevice findPhysicalDevice(const DeviceUUID &uuid) const;
+    VkPhysicalDevice findPhysicalDevice(const DeviceID &id) const;
 };
 
 }

@@ -1,4 +1,4 @@
-#include <madrona/render/shader.hpp>
+#include <madrona/render/shader_compiler.hpp>
 
 #include <madrona/macros.hpp>
 
@@ -286,11 +286,11 @@ static HeapArray<uint32_t> hlslToSPV(
     uint32_t num_shader_bytes = dxc_spv->GetBufferSize();
     assert(num_shader_bytes % 4 == 0);
 
-    HeapArray<uint32_t> spv(num_shader_bytes / 4);
-    memcpy(spv.data(), dxc_spv->GetBufferPointer(),
+    HeapArray<uint32_t> bytecode(num_shader_bytes / 4);
+    memcpy(bytecode.data(), dxc_spv->GetBufferPointer(),
            num_shader_bytes);
 
-    return spv;
+    return bytecode;
 }
 
 static refl::Stage convertSPVReflectStage(
@@ -419,9 +419,9 @@ static refl::SPIRV buildSPIRVReflectionData(
     spvReflectDestroyShaderModule(&rfl_mod);
 
     return SPIRV {
-        .entryPoints = std::move(entry_points),
-        .bindings = std::move(bindings_out),
-        .descriptorSets = std::move(desc_sets_out),
+        { std::move(entry_points) },
+        std::move(bindings_out),
+        std::move(desc_sets_out),
     };
 }
 

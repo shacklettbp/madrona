@@ -1,11 +1,11 @@
 #pragma once
 
-#include <madrona/render/shader.hpp>
+#include <madrona/render/reflection.hpp>
 
 namespace madrona::render {
 
 struct SPIRVShader {
-    HeapArray<char> bytecode;
+    HeapArray<uint32_t> bytecode;
     refl::SPIRV reflectionInfo;
 };
 

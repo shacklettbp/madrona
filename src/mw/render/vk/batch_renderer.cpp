@@ -332,7 +332,7 @@ static ImplInit setupImplInit(const BatchRenderer::Config &cfg)
     bool validate = enableValidation();
     bool present = debugPresent();
 
-    PFN_vkGetInstanceProcAddr get_instance = nullptr;
+    void (*get_instance)() = nullptr;
 
     auto present_window = Optional<Window>::none();
     if (present) {
@@ -342,9 +342,9 @@ static ImplInit setupImplInit(const BatchRenderer::Config &cfg)
     }
 
     Backend backend(get_instance, validate,
-          present_window.has_value(), present_window.has_value() ? 
+          !present_window.has_value(), present_window.has_value() ? 
               PresentationState::getInstanceExtensions(*present_window) :
-              HeapArray<const char *>(0));
+              Span<const char *const>(nullptr, 0));
 
     auto present_surface = Optional<VkSurfaceKHR>::none();
     if (present) {
@@ -366,8 +366,8 @@ BatchRenderer::Impl::Impl(const Config &cfg)
 
 BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
     : backend(std::move(init.backend)),
-      dev(backend.makeDevice(getUUIDFromGPUID(cfg.gpuID), 1, 2, 1,
-                          init.presentSurface)),
+      dev(backend.initDevice(getVkUUIDFromCudaID(cfg.gpuID),
+                             init.presentSurface)),
       mem(dev, backend),
       presentState(init.presentWindow.has_value() ?
           Optional<PresentationState>::make(backend, dev,
