@@ -7,7 +7,7 @@
 namespace madrona::render {
 
 struct ParamBlock {
-    platform::ParamBlock hdl;
+    backend::ParamBlock hdl;
 };
 
 class Shader {
@@ -20,7 +20,7 @@ public:
     inline void destroy(GPU &gpu);
 
 private:
-    platform::Shader hdl_;
+    backend::Shader hdl_;
 };
 
 }

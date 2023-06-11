@@ -1,7 +1,6 @@
 #include "scene.hpp"
 #include "asset_utils.hpp"
 
-#include "vk/core.hpp"
 #include "vk/shader.hpp"
 #include "vk/utils.hpp"
 
@@ -15,7 +14,7 @@ using namespace imp;
 namespace render {
 namespace vk {
 
-BLASData::BLASData(const DeviceState &d, vector<BLAS> &&as,
+BLASData::BLASData(const Device &d, vector<BLAS> &&as,
                    LocalBuffer &&buf)
     : dev(&d),
       accelStructs(std::move(as)),
@@ -28,7 +27,7 @@ BLASData::BLASData(BLASData &&o)
       storage(std::move(o.storage))
 {}
 
-static void freeBLASes(const DeviceState &dev, const vector<BLAS> &blases)
+static void freeBLASes(const Device &dev, const vector<BLAS> &blases)
 {
     for (const auto &blas : blases) {
         dev.dt.destroyAccelerationStructureKHR(dev.hdl, blas.hdl,
@@ -61,7 +60,7 @@ struct BLASBuildResults {
 };
 
 static optional<BLASBuildResults> makeBLASes(
-    const DeviceState &dev,
+    const Device &dev,
     MemoryAllocator &alloc, 
     const AssetMetadata &asset_metadata,
     VkDeviceAddress geo_base,
@@ -243,7 +242,7 @@ static optional<BLASBuildResults> makeBLASes(
     };
 }
 
-AssetManager::AssetManager(const DeviceState &dev,
+AssetManager::AssetManager(const Device &dev,
                            MemoryAllocator &mem,
                            int cuda_gpu_id,
                            int64_t max_objects)
@@ -476,7 +475,7 @@ void AssetManager::packAssets(void *dst_buffer,
     }
 }
 
-Assets AssetManager::load(const DeviceState &dev,
+Assets AssetManager::load(const Device &dev,
                           MemoryAllocator &mem,
                           const GPURunUtil &gpu_run,
                           const AssetMetadata &metadata,
@@ -551,7 +550,7 @@ Assets AssetManager::load(const DeviceState &dev,
     };
 }
 
-TLASData TLASData::setup(const DeviceState &dev,
+TLASData TLASData::setup(const Device &dev,
                          const GPURunUtil &gpu_run,
                          int cuda_gpu_id,
                          MemoryAllocator &mem,
@@ -694,7 +693,7 @@ TLASData TLASData::setup(const DeviceState &dev,
     };
 }
 
-void TLASData::build(const DeviceState &dev,
+void TLASData::build(const Device &dev,
                      VkCommandBuffer build_cmd)
 {
     if (cudaMode) {
@@ -711,7 +710,7 @@ void TLASData::build(const DeviceState &dev,
     }
 }
 
-void TLASData::destroy(const DeviceState &dev)
+void TLASData::destroy(const Device &dev)
 {
      dev.dt.destroyAccelerationStructureKHR(dev.hdl, tlas, nullptr);
  
@@ -729,7 +728,7 @@ void TLASData::destroy(const DeviceState &dev)
 }
 
 #if 0
-void TLAS::build(const DeviceState &dev,
+void TLAS::build(const Device &dev,
                  MemoryAllocator &alloc,
                  VkDeviceAddress instance_buffer_addr,
                  uint32_t num_instances,

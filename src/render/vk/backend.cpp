@@ -1,6 +1,5 @@
-#include "core.hpp"
+#include <madrona/render/vk/backend.hpp>
 
-#include <vulkan/vulkan_core.h>
 #include <madrona/utils.hpp>
 #include <madrona/heap_array.hpp>
 #include <madrona/dyn_array.hpp>
@@ -18,34 +17,7 @@
 
 using namespace std;
 
-namespace madrona {
-namespace render {
-namespace vk {
-
-DeviceState::DeviceState(
-        uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
-        uint32_t num_gfx_queues, uint32_t num_compute_queues,
-        uint32_t num_transfer_queues, bool rt_available,
-        VkPhysicalDevice phy_dev, VkDevice dev,
-        DeviceDispatch &&dispatch_table)
-    : gfxQF(gfx_qf),
-      computeQF(compute_qf),
-      transferQF(transfer_qf),
-      phy(phy_dev),
-      hdl(dev),
-      dt(std::move(dispatch_table)),
-      numGraphicsQueues(num_gfx_queues), 
-      numComputeQueues(num_compute_queues),
-      numTransferQueues(num_transfer_queues),
-      rtAvailable(rt_available)
-{}
-
-DeviceState::~DeviceState()
-{
-    if (hdl != VK_NULL_HANDLE) {
-        dt.destroyDevice(hdl, nullptr);
-    }
-}
+namespace madrona::render::vk {
 
 struct InitializationDispatch {
     PFN_vkGetInstanceProcAddr
@@ -59,7 +31,7 @@ struct InitializationDispatch {
     PFN_vkCreateInstance createInstance;
 };
 
-struct InstanceInitializer {
+struct Backend::Init {
     VkInstance hdl;
     InitializationDispatch dt;
     bool validationEnabled;
@@ -138,7 +110,7 @@ static bool checkValidationAvailable(const InitializationDispatch &dt)
     }
 }
 
-static InstanceInitializer initInstance(
+static Backend::Init initInstance(
     PFN_vkGetInstanceProcAddr get_inst_addr,
     bool want_validation,
     Span<const char *const> extra_exts)
@@ -287,15 +259,15 @@ static VkDebugUtilsMessengerEXT makeDebugCallback(VkInstance hdl,
     return messenger;
 }
 
-InstanceState::InstanceState(PFN_vkGetInstanceProcAddr get_inst_addr,
+Backend::Backend(PFN_vkGetInstanceProcAddr get_inst_addr,
                              bool enable_validation,
                              bool need_present,
                              Span<const char *const> extra_exts)
-    : InstanceState(initInstance(get_inst_addr, enable_validation, extra_exts),
+    : Backend(initInstance(get_inst_addr, enable_validation, extra_exts),
                     need_present)
 {}
 
-InstanceState::InstanceState(InstanceInitializer init, bool need_present)
+Backend::Backend(Init init, bool need_present)
     : hdl(init.hdl),
       dt(hdl, init.dt.getInstanceAddr, need_present),
       debug_(init.validationEnabled ?
@@ -304,7 +276,7 @@ InstanceState::InstanceState(InstanceInitializer init, bool need_present)
       loader_handle_(init.loaderHandle)
 {}
 
-InstanceState::InstanceState(InstanceState &&o)
+Backend::Backend(Backend &&o)
     : hdl(o.hdl),
       dt(std::move(o.dt)),
       debug_(std::move(o.debug_)),
@@ -314,7 +286,7 @@ InstanceState::InstanceState(InstanceState &&o)
     o.loader_handle_ = nullptr;
 }
 
-InstanceState::~InstanceState()
+Backend::~Backend()
 {
     if (hdl != VK_NULL_HANDLE) {
         if (debug_ != VK_NULL_HANDLE) {
@@ -341,8 +313,8 @@ static void fillQueueInfo(VkDeviceQueueCreateInfo &info,
     info.pQueuePriorities = priorities.data();
 }
 
-VkPhysicalDevice InstanceState::findPhysicalDevice(
-    const DeviceUUID &uuid) const
+VkPhysicalDevice Backend::findPhysicalDevice(
+    const DeviceID &dev_id) const
 {
     uint32_t num_gpus;
     REQ_VK(dt.enumeratePhysicalDevices(hdl, &num_gpus, nullptr));
@@ -352,16 +324,16 @@ VkPhysicalDevice InstanceState::findPhysicalDevice(
 
     for (uint32_t idx = 0; idx < phys.size(); idx++) {
         VkPhysicalDevice phy = phys[idx];
-        VkPhysicalDeviceIDProperties dev_id {};
-        dev_id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+        VkPhysicalDeviceIDProperties vk_id_props {};
+        vk_id_id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
 
         VkPhysicalDeviceProperties2 props {};
         props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-        props.pNext = &dev_id;
+        props.pNext = &vk_id_props;
         dt.getPhysicalDeviceProperties2(phy, &props);
 
-        if (!memcmp(uuid.data(), dev_id.deviceUUID,
-                    sizeof(DeviceUUID::value_type) * uuid.size())) {
+        if (!memcmp(dev_id.data(), vk_id_props.deviceUUID,
+                    sizeof(DeviceID::value_type) * dev_id.size())) {
             return phy;
         }
     }
@@ -369,14 +341,14 @@ VkPhysicalDevice InstanceState::findPhysicalDevice(
     FATAL("Cannot find matching vulkan UUID for GPU");
 }
 
-DeviceState InstanceState::makeDevice(
-    const DeviceUUID &uuid,
+Device Backend::initDevice(
+    const DeviceID &gpu_id,
     uint32_t desired_gfx_queues,
     uint32_t desired_compute_queues,
     uint32_t desired_transfer_queues,
     Optional<VkSurfaceKHR> present_surface) const
 {
-    VkPhysicalDevice phy = findPhysicalDevice(uuid);
+    VkPhysicalDevice phy = findPhysicalDevice(dev_id);
 
     DynArray<const char *> extensions {
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
@@ -614,20 +586,18 @@ DeviceState InstanceState::makeDevice(
         abort();
     }
 
-    return DeviceState(*gfx_queue_family,
-                       *compute_queue_family,
-                       *transfer_queue_family,
-                       num_gfx_queues,
-                       num_compute_queues,
-                       num_transfer_queues,
-                       supports_rt,
-                       phy,
-                       dev,
-                       DeviceDispatch(dev, get_dev_addr,
-                                      present_surface.has_value(),
-                                      supports_rt, supports_mem_export));
+    return Device(*gfx_queue_family,
+                  *compute_queue_family,
+                  *transfer_queue_family,
+                  num_gfx_queues,
+                  num_compute_queues,
+                  num_transfer_queues,
+                  supports_rt,
+                  phy,
+                  dev,
+                  DeviceDispatch(dev, get_dev_addr,
+                                 present_surface.has_value(),
+                                 supports_rt, supports_mem_export));
 }
 
-}
-}
 }

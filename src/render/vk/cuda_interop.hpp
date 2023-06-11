@@ -3,7 +3,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include "core.hpp"
+#include <madrona/render/vk/device.hpp>
 
 namespace madrona {
 namespace render {
@@ -11,7 +11,7 @@ namespace vk {
 
 class CudaImportedBuffer {
 public:
-    CudaImportedBuffer(const DeviceState &dev,
+    CudaImportedBuffer(const Device &dev,
                        int cuda_id,
                        VkDeviceMemory mem,
                        uint64_t num_bytes,

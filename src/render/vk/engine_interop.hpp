@@ -61,7 +61,7 @@ struct HostToEngineBufferCUDA {
     DedicatedBuffer devBuffer;
     CudaImportedBuffer cudaImported;
 
-    inline HostToEngineBufferCUDA(const DeviceState &dev,
+    inline HostToEngineBufferCUDA(const Device &dev,
                                   MemoryAllocator &mem,
                                   uint64_t num_bytes,
                                   int cuda_gpu_id)
@@ -121,7 +121,7 @@ struct HostToEngineBuffer : public EngineModeVariant<
         return isCuda;
     }
 
-    inline void toEngine(const DeviceState &dev, VkCommandBuffer cmd,
+    inline void toEngine(const Device &dev, VkCommandBuffer cmd,
                          uint32_t offset, uint32_t num_bytes)
     {
         if (isCuda) {
@@ -143,7 +143,7 @@ struct EngineToRendererBufferCUDA {
     DedicatedBuffer devBuffer;
     CudaImportedBuffer cudaImported;
 
-    inline EngineToRendererBufferCUDA(const DeviceState &dev,
+    inline EngineToRendererBufferCUDA(const Device &dev,
             MemoryAllocator &mem, uint64_t num_bytes, int cuda_gpu_id)
         : devBuffer(mem.makeDedicatedBuffer(num_bytes, true, true)),
           cudaImported(dev, cuda_gpu_id, devBuffer.mem, num_bytes)
@@ -181,7 +181,7 @@ struct EngineToRendererBuffer : public EngineModeVariant<
     }
 
     // FIXME: this API isn't great, it stops batching pipeline barriers
-    inline void toRenderer(const DeviceState &dev, VkCommandBuffer cmd,
+    inline void toRenderer(const Device &dev, VkCommandBuffer cmd,
                            VkAccessFlagBits pipeline_access,
                            VkPipelineStageFlagBits pipeline_stage)
     {

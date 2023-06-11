@@ -3,9 +3,10 @@
 #include <madrona/render/mw.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/heap_array.hpp>
+#include <madrona/render/vk/device.hpp>
+
 #include "../interop.hpp"
 
-#include "vk/core.hpp"
 #include "vk/memory.hpp"
 #include "vk/cuda_interop.hpp"
 #include "vk/engine_interop.hpp"
@@ -38,7 +39,7 @@ struct BLAS {
 
 struct BLASData {
 public:
-    BLASData(const DeviceState &dev, std::vector<BLAS> &&as,
+    BLASData(const Device &dev, std::vector<BLAS> &&as,
              LocalBuffer &&buf);
     BLASData(const BLASData &) = delete;
     BLASData(BLASData &&o);
@@ -47,7 +48,7 @@ public:
     BLASData &operator=(const BLASData &) = delete;
     BLASData &operator=(BLASData &&o);
 
-    const DeviceState *dev;
+    const Device *dev;
     std::vector<BLAS> accelStructs;
     LocalBuffer storage;
 };
@@ -67,7 +68,7 @@ struct AssetManager {
     int64_t freeObjectOffset;
     const int64_t maxObjects;
 
-    AssetManager(const DeviceState &dev, MemoryAllocator &mem,
+    AssetManager(const Device &dev, MemoryAllocator &mem,
                  int cuda_gpu_id, int64_t max_objects);
 
     Optional<AssetMetadata> prepareMetadata(
@@ -76,7 +77,7 @@ struct AssetManager {
                     AssetMetadata &prepared,
                     Span<const imp::SourceObject> src_objects);
 
-    Assets load(const DeviceState &dev,
+    Assets load(const Device &dev,
                 MemoryAllocator &mem,
                 const GPURunUtil &gpu_run,
                 const AssetMetadata &metadata,
@@ -99,17 +100,17 @@ struct TLASData {
     uint32_t *countReadback;
     bool cudaMode;
 
-    static TLASData setup(const DeviceState &dev,
+    static TLASData setup(const Device &dev,
                           const GPURunUtil &gpu_run,
                           int cuda_gpu_id,
                           MemoryAllocator &mem,
                           int64_t num_worlds,
                           uint32_t max_num_instances);
 
-    void build(const DeviceState &dev,
+    void build(const Device &dev,
                VkCommandBuffer build_cmd);
 
-    void destroy(const DeviceState &dev);
+    void destroy(const Device &dev);
 };
 
 }

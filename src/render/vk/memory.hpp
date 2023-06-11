@@ -3,8 +3,9 @@
 #include <atomic>
 #include <utility>
 
+#include <madrona/render/vk/backend.hpp>
+
 #include "utils.hpp"
-#include "core.hpp"
 
 namespace madrona {
 namespace render {
@@ -42,9 +43,9 @@ public:
     HostBuffer & operator=(const HostBuffer &) = delete;
     HostBuffer & operator=(HostBuffer &&);
 
-    void flush(const DeviceState &dev);
-    void invalidate(const DeviceState &dev);
-    void flush(const DeviceState &dev,
+    void flush(const Device &dev);
+    void invalidate(const Device &dev);
+    void flush(const Device &dev,
                VkDeviceSize offset,
                VkDeviceSize num_bytes);
 
@@ -156,7 +157,7 @@ uint32_t getTexelBytes(TextureFormat fmt);
 
 class MemoryAllocator {
 public:
-    MemoryAllocator(const DeviceState &dev, const InstanceState &inst);
+    MemoryAllocator(const Device &dev, const Backend &backend);
     MemoryAllocator(const MemoryAllocator &) = delete;
     MemoryAllocator(MemoryAllocator &&) = default;
 
@@ -221,7 +222,7 @@ private:
                                   VkImageUsageFlags usage,
                                   uint32_t type_idx);
 
-    const DeviceState &dev;
+    const Device &dev;
     Alignments alignments_;
     VkBufferUsageFlags local_buffer_usage_flags_;
     std::array<VkFormat, size_t(TextureFormat::COUNT)> texture_formats_;

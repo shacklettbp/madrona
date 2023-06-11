@@ -1,10 +1,10 @@
 #pragma once
 
 #include <vulkan/vulkan_core.h>
-#include "core.hpp"
 
 #include <madrona/math.hpp>
 #include <madrona/span.hpp>
+#include <madrona/render/vk/device.hpp>
 
 #include <string>
 #include <vector>
@@ -43,7 +43,7 @@ struct BindingOverride {
 
 class PipelineShaders {
 public:
-    PipelineShaders(const DeviceState &dev,
+    PipelineShaders(const Device &dev,
                     const SPIRVShader &shader,
                     Span<const BindingOverride> binding_overrides);
     PipelineShaders(const PipelineShaders &) = delete;
@@ -63,7 +63,7 @@ public:
     VkDescriptorPool makePool(uint32_t set_id, uint32_t max_sets) const;
 
 private:
-    const DeviceState &dev;
+    const Device &dev;
     std::vector<VkShaderModule> shaders_;
     std::vector<VkDescriptorSetLayout> layouts_;
     std::vector<std::vector<VkDescriptorPoolSize>> base_pool_sizes_;

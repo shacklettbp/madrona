@@ -94,7 +94,7 @@ void AllocDeleter<host_mapped>::operator()(VkBuffer buffer) const
 {
     if (mem_ == VK_NULL_HANDLE) return;
 
-    const DeviceState &dev = alloc_->dev;
+    const Device &dev = alloc_->dev;
 
     if constexpr (host_mapped) {
         dev.dt.unmapMemory(dev.hdl, mem_);
@@ -109,7 +109,7 @@ void AllocDeleter<false>::operator()(VkImage image) const
 {
     if (mem_ == VK_NULL_HANDLE) return;
 
-    const DeviceState &dev = alloc_->dev;
+    const Device &dev = alloc_->dev;
 
     dev.dt.destroyImage(dev.hdl, image, nullptr);
 
@@ -164,17 +164,17 @@ HostBuffer::~HostBuffer()
     deleter_(buffer);
 }
 
-void HostBuffer::flush(const DeviceState &dev)
+void HostBuffer::flush(const Device &dev)
 {
     dev.dt.flushMappedMemoryRanges(dev.hdl, 1, &mem_range_);
 }
 
-void HostBuffer::invalidate(const DeviceState &dev)
+void HostBuffer::invalidate(const Device &dev)
 {
     dev.dt.invalidateMappedMemoryRanges(dev.hdl, 1, &mem_range_);
 }
 
-void HostBuffer::flush(const DeviceState &dev,
+void HostBuffer::flush(const Device &dev,
                        VkDeviceSize offset,
                        VkDeviceSize num_bytes)
 {
@@ -245,7 +245,7 @@ LocalImage::~LocalImage()
     deleter_(image);
 }
 
-static VkFormatProperties2 getFormatProperties(const InstanceState &inst,
+static VkFormatProperties2 getFormatProperties(const Backend &backend,
                                                VkPhysicalDevice phy,
                                                VkFormat fmt)
 {
@@ -253,18 +253,18 @@ static VkFormatProperties2 getFormatProperties(const InstanceState &inst,
     props.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
     props.pNext = nullptr;
 
-    inst.dt.getPhysicalDeviceFormatProperties2(phy, fmt, &props);
+    backend.dt.getPhysicalDeviceFormatProperties2(phy, fmt, &props);
     return props;
 }
 
 template <size_t N>
 static VkFormat chooseFormat(VkPhysicalDevice phy,
-                             const InstanceState &inst,
+                             const Backend &backend,
                              VkFormatFeatureFlags required_features,
                              const array<VkFormat, N> &desired_formats)
 {
     for (auto fmt : desired_formats) {
-        VkFormatProperties2 props = getFormatProperties(inst, phy, fmt);
+        VkFormatProperties2 props = getFormatProperties(backend, phy, fmt);
         if ((props.formatProperties.optimalTilingFeatures &
              required_features) == required_features) {
             return fmt;
@@ -277,7 +277,7 @@ static VkFormat chooseFormat(VkPhysicalDevice phy,
 }
 
 static pair<VkBuffer, VkMemoryRequirements> makeUnboundBuffer(
-    const DeviceState &dev,
+    const Device &dev,
     VkDeviceSize num_bytes,
     VkBufferUsageFlags usage)
 {
@@ -301,7 +301,7 @@ static pair<VkBuffer, VkMemoryRequirements> makeUnboundBuffer(
 }
 
 template <int dims>
-static VkImage makeImage(const DeviceState &dev,
+static VkImage makeImage(const Device &dev,
                          uint32_t width,
                          uint32_t height,
                          uint32_t depth,
@@ -362,7 +362,7 @@ uint32_t findMemoryTypeIndex(uint32_t allowed_type_bits,
     FATAL("Failed to find desired memory type");
 }
 
-static VkMemoryRequirements getImageMemReqs(const DeviceState &dev,
+static VkMemoryRequirements getImageMemReqs(const Device &dev,
                                             VkImage img)
 {
     VkMemoryRequirements reqs;
@@ -371,8 +371,8 @@ static VkMemoryRequirements getImageMemReqs(const DeviceState &dev,
     return reqs;
 }
 
-static MemoryTypeIndices findTypeIndices(const DeviceState &dev,
-    const InstanceState &inst,
+static MemoryTypeIndices findTypeIndices(const Device &dev,
+    const Backend &backend,
     const array<VkFormat, size_t(TextureFormat::COUNT)> &tex_formats)
 {
     auto get_generic_buffer_reqs = [&](VkBufferUsageFlags usage_flags) {
@@ -400,7 +400,7 @@ static MemoryTypeIndices findTypeIndices(const DeviceState &dev,
     dev_mem_props.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
     dev_mem_props.pNext = nullptr;
-    inst.dt.getPhysicalDeviceMemoryProperties2(dev.phy, &dev_mem_props);
+    backend.dt.getPhysicalDeviceMemoryProperties2(dev.phy, &dev_mem_props);
 
     VkMemoryRequirements host_generic_reqs =
         get_generic_buffer_reqs(BufferFlags::hostUsage);
@@ -441,12 +441,12 @@ static MemoryTypeIndices findTypeIndices(const DeviceState &dev,
     };
 }
 
-static Alignments getMemoryAlignments(const InstanceState &inst,
+static Alignments getMemoryAlignments(const Backend &backend,
                                       VkPhysicalDevice phy)
 {
     VkPhysicalDeviceProperties2 props {};
     props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    inst.dt.getPhysicalDeviceProperties2(phy, &props);
+    backend.dt.getPhysicalDeviceProperties2(phy, &props);
 
     return Alignments {
         props.properties.limits.minUniformBufferOffsetAlignment,
@@ -471,14 +471,14 @@ uint32_t getTexelBytes(TextureFormat fmt)
 }
 
 static array<VkFormat, size_t(TextureFormat::COUNT)> chooseTextureFormats(
-    const DeviceState &dev, const InstanceState &inst)
+    const Device &dev, const Backend &backend)
 {
     array<VkFormat, size_t(TextureFormat::COUNT)> fmts;
 
     auto setFormat = [&](TextureFormat fmt,
                          const auto &candidates) {
         fmts[static_cast<uint32_t>(fmt)] =
-            chooseFormat(dev.phy, inst, ImageFlags::textureReqs,
+            chooseFormat(dev.phy, backend, ImageFlags::textureReqs,
                          candidates);
     };
 
@@ -523,17 +523,17 @@ static array<VkFormat, size_t(TextureFormat::COUNT)> chooseTextureFormats(
     return fmts;
 }
 
-MemoryAllocator::MemoryAllocator(const DeviceState &d,
-                                 const InstanceState &inst)
+MemoryAllocator::MemoryAllocator(const Device &d,
+                                 const Backend &backend)
     : dev(d),
-      alignments_(getMemoryAlignments(inst, dev.phy)),
+      alignments_(getMemoryAlignments(backend, dev.phy)),
       local_buffer_usage_flags_(BufferFlags::localUsage),
-      texture_formats_(chooseTextureFormats(dev, inst)),
-      type_indices_(findTypeIndices(dev, inst, texture_formats_)),
-      color_attach_fmt_(chooseFormat(dev.phy, inst,
+      texture_formats_(chooseTextureFormats(dev, backend)),
+      type_indices_(findTypeIndices(dev, backend, texture_formats_)),
+      color_attach_fmt_(chooseFormat(dev.phy, backend,
                                      ImageFlags::colorAttachmentReqs,
                                      array {VK_FORMAT_R8G8B8A8_SRGB})),
-      depth_attach_fmt_(chooseFormat(dev.phy, inst,
+      depth_attach_fmt_(chooseFormat(dev.phy, backend,
                                      ImageFlags::depthAttachmentReqs,
                                      array {VK_FORMAT_D32_SFLOAT,
                                             VK_FORMAT_D32_SFLOAT_S8_UINT}))

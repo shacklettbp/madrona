@@ -2,10 +2,12 @@
 
 namespace madrona::render::metal {
 
-struct GPU {};
+struct Device {};
 struct CommandBuffer {};
 
 struct ParamBlock {};
 struct Shader {};
+
+struct Backend {};
 
 }

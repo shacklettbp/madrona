@@ -10,7 +10,7 @@ QueueState::QueueState(VkQueue queue_hdl, bool shared)
       mutex_()
 {}
 
-void QueueState::submit(const DeviceState &dev,
+void QueueState::submit(const Device &dev,
                         uint32_t submit_count,
                         const VkSubmitInfo *pSubmits,
                         VkFence fence) const
@@ -26,7 +26,7 @@ void QueueState::submit(const DeviceState &dev,
     }
 } 
 
-void QueueState::bindSubmit(const DeviceState &dev,
+void QueueState::bindSubmit(const Device &dev,
                             uint32_t submit_count,
                             const VkBindSparseInfo *pSubmits,
                             VkFence fence) const
@@ -42,7 +42,7 @@ void QueueState::bindSubmit(const DeviceState &dev,
     }
 }
 
-bool QueueState::presentSubmit(const DeviceState &dev,
+bool QueueState::presentSubmit(const Device &dev,
                                const VkPresentInfoKHR *present_info) const
 {
     if (shared_) {
@@ -59,7 +59,7 @@ bool QueueState::presentSubmit(const DeviceState &dev,
     return true;
 }
 
-VkDeviceAddress getDevAddr(const DeviceState &dev, VkBuffer buf)
+VkDeviceAddress getDevAddr(const Device &dev, VkBuffer buf)
 {
     VkBufferDeviceAddressInfoKHR addr_info;
     addr_info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR;
@@ -68,7 +68,7 @@ VkDeviceAddress getDevAddr(const DeviceState &dev, VkBuffer buf)
     return dev.dt.getBufferDeviceAddress(dev.hdl, &addr_info);
 }
 
-VkCommandPool makeCmdPool(const DeviceState &dev, uint32_t qf_idx)
+VkCommandPool makeCmdPool(const Device &dev, uint32_t qf_idx)
 {
     VkCommandPoolCreateInfo pool_info = {};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -79,7 +79,7 @@ VkCommandPool makeCmdPool(const DeviceState &dev, uint32_t qf_idx)
     return pool;
 }
 
-VkCommandBuffer makeCmdBuffer(const DeviceState &dev,
+VkCommandBuffer makeCmdBuffer(const Device &dev,
                               VkCommandPool pool,
                               VkCommandBufferLevel level)
 {
@@ -96,7 +96,7 @@ VkCommandBuffer makeCmdBuffer(const DeviceState &dev,
     return cmd;
 }
 
-VkQueue makeQueue(const DeviceState &dev, uint32_t qf_idx, uint32_t queue_idx)
+VkQueue makeQueue(const Device &dev, uint32_t qf_idx, uint32_t queue_idx)
 {
     VkDeviceQueueInfo2 queue_info;
     queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
@@ -111,7 +111,7 @@ VkQueue makeQueue(const DeviceState &dev, uint32_t qf_idx, uint32_t queue_idx)
     return queue;
 }
 
-VkSemaphore makeBinarySemaphore(const DeviceState &dev)
+VkSemaphore makeBinarySemaphore(const Device &dev)
 {
     VkSemaphoreCreateInfo sema_info;
     sema_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -124,7 +124,7 @@ VkSemaphore makeBinarySemaphore(const DeviceState &dev)
     return sema;
 }
 
-VkSemaphore makeBinaryExternalSemaphore(const DeviceState &dev)
+VkSemaphore makeBinaryExternalSemaphore(const Device &dev)
 {
     VkExportSemaphoreCreateInfo export_info;
     export_info.sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO;
@@ -142,7 +142,7 @@ VkSemaphore makeBinaryExternalSemaphore(const DeviceState &dev)
     return sema;
 }
 
-VkFence makeFence(const DeviceState &dev, bool pre_signal)
+VkFence makeFence(const Device &dev, bool pre_signal)
 {
     VkFenceCreateInfo fence_info;
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -159,7 +159,7 @@ VkFence makeFence(const DeviceState &dev, bool pre_signal)
     return fence;
 }
 
-void waitForFenceInfinitely(const DeviceState &dev, VkFence fence)
+void waitForFenceInfinitely(const Device &dev, VkFence fence)
 {
     VkResult res;
     while ((res = dev.dt.waitForFences(dev.hdl, 1, &fence, VK_TRUE, ~0ull)) !=
@@ -170,12 +170,12 @@ void waitForFenceInfinitely(const DeviceState &dev, VkFence fence)
     }
 }
 
-void resetFence(const DeviceState &dev, VkFence fence)
+void resetFence(const Device &dev, VkFence fence)
 {
     dev.dt.resetFences(dev.hdl, 1, &fence);
 }
 
-VkDescriptorSet makeDescriptorSet(const DeviceState &dev,
+VkDescriptorSet makeDescriptorSet(const Device &dev,
                                   VkDescriptorPool pool,
                                   VkDescriptorSetLayout layout)
 {

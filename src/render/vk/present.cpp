@@ -150,7 +150,7 @@ static VkPresentModeKHR selectSwapchainMode(const InstanceState &inst,
 }
 
 static Swapchain makeSwapchain(const InstanceState &inst,
-                               const DeviceState &dev,
+                               const Device &dev,
                                void *window_hdl,
                                VkSurfaceKHR surface,
                                uint32_t qf_idx,
@@ -229,7 +229,7 @@ static Swapchain makeSwapchain(const InstanceState &inst,
     };
 }
 
-static HeapArray<VkImage> getSwapchainImages(const DeviceState &dev,
+static HeapArray<VkImage> getSwapchainImages(const Device &dev,
                                              VkSwapchainKHR swapchain)
 {
     uint32_t num_images;
@@ -244,7 +244,7 @@ static HeapArray<VkImage> getSwapchainImages(const DeviceState &dev,
 }
 
 PresentationState::PresentationState(const InstanceState &inst,
-                                     const DeviceState &dev,
+                                     const Device &dev,
                                      Window &&window,
                                      VkSurfaceKHR surface,
                                      uint32_t qf_idx,
@@ -284,7 +284,7 @@ void PresentationState::processInputs()
     (void)num_events;
 }
 
-void PresentationState::forceTransition(const DeviceState &dev,
+void PresentationState::forceTransition(const Device &dev,
     const GPURunUtil &gpu_run)
 {
     HeapArray<VkImageMemoryBarrier> barriers(swapchain_imgs_.size());
@@ -314,7 +314,7 @@ void PresentationState::forceTransition(const DeviceState &dev,
     gpu_run.submit(dev);
 }
 
-uint32_t PresentationState::acquireNext(const DeviceState &dev,
+uint32_t PresentationState::acquireNext(const Device &dev,
                                         VkSemaphore signal_sema)
 {
     uint32_t swapchain_idx;
@@ -336,7 +336,7 @@ uint32_t PresentationState::numSwapchainImages() const
     return swapchain_imgs_.size();
 }
 
-void PresentationState::present(const DeviceState &dev, uint32_t swapchain_idx,
+void PresentationState::present(const Device &dev, uint32_t swapchain_idx,
                                 VkQueue present_queue,
                                 uint32_t num_wait_semas,
                                 const VkSemaphore *wait_semas)

@@ -9,14 +9,14 @@ namespace madrona {
 namespace render {
 namespace vk {
 
-void GPURunUtil::begin(const DeviceState &dev) const
+void GPURunUtil::begin(const Device &dev) const
 {
     VkCommandBufferBeginInfo begin_info {};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     REQ_VK(dev.dt.beginCommandBuffer(cmd, &begin_info));
 }
 
-void GPURunUtil::submit(const DeviceState &dev) const
+void GPURunUtil::submit(const Device &dev) const
 {
     REQ_VK(dev.dt.endCommandBuffer(cmd));
 
@@ -35,7 +35,7 @@ void GPURunUtil::submit(const DeviceState &dev) const
     resetFence(dev, fence);
 }
 
-int exportBinarySemaphore(const DeviceState &dev, VkSemaphore semaphore)
+int exportBinarySemaphore(const Device &dev, VkSemaphore semaphore)
 {
     VkSemaphoreGetFdInfoKHR fd_info;
     fd_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
@@ -49,7 +49,7 @@ int exportBinarySemaphore(const DeviceState &dev, VkSemaphore semaphore)
     return fd;
 }
 
-VkSampler makeImmutableSampler(const DeviceState &dev,
+VkSampler makeImmutableSampler(const Device &dev,
                                VkSamplerAddressMode address_mode)
 {
     VkSampler sampler;

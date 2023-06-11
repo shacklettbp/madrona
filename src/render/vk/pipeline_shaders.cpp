@@ -12,7 +12,7 @@ using namespace std;
 namespace madrona::render::vk {
 
 PipelineShaders::PipelineShaders(
-        const DeviceState &d,
+        const Device &d,
         const SPIRVShader &shader,
         Span<const BindingOverride> binding_overrides)
     : dev(d),

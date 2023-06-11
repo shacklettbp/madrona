@@ -9,7 +9,7 @@ namespace madrona {
 namespace render {
 namespace vk {
 
-DescriptorManager::DescriptorManager(const DeviceState &d,
+DescriptorManager::DescriptorManager(const Device &d,
                                      const PipelineShaders &shader,
                                      uint32_t set_id)
     : dev(d),
@@ -72,7 +72,7 @@ DescriptorSet DescriptorManager::makeSet()
     return DescriptorSet(desc_set, &cur_pool);
 }
 
-FixedDescriptorPool::FixedDescriptorPool(const DeviceState &d,
+FixedDescriptorPool::FixedDescriptorPool(const Device &d,
                                          const PipelineShaders &shader,
                                          uint32_t set_id,
                                          uint32_t pool_size)

@@ -4,10 +4,10 @@
 #include <madrona/math.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/tracing.hpp>
+#include <madrona/render/vk/backend.hpp>
 
 #include <filesystem>
 
-#include "vk/core.hpp"
 #include "vk/cuda_interop.hpp"
 #include "vk/memory.hpp"
 #include "vk/utils.hpp"
@@ -33,7 +33,7 @@ static bool debugPresent()
 
 struct ImplInit {
     bool validationEnabled;
-    InstanceState inst;
+    Backend backend;
     Optional<Window> presentWindow;
     Optional<VkSurfaceKHR> presentSurface;
 };
@@ -68,8 +68,8 @@ struct DescriptorState {
 };
 
 struct BatchRenderer::Impl {
-    InstanceState inst;
-    DeviceState dev;
+    Backend backend;
+    Device dev;
     MemoryAllocator mem;
     Optional<PresentationState> presentState;
     Optional<LocalImage> rgbPresentIntermediate;
@@ -100,7 +100,7 @@ struct BatchRenderer::Impl {
     inline void render();
 };
 
-static ShaderState makeShaderState(const DeviceState &dev,
+static ShaderState makeShaderState(const Device &dev,
                                    const BatchRenderer::Config &cfg,
                                    const ImplInit &init)
 {
@@ -161,7 +161,7 @@ static ShaderState makeShaderState(const DeviceState &dev,
     };
 }
 
-static PipelineState makePipelineState(const DeviceState &dev,
+static PipelineState makePipelineState(const Device &dev,
                                        const ShaderState &shaders)
 {
     // Pipeline cache (unsaved)
@@ -233,7 +233,7 @@ static PipelineState makePipelineState(const DeviceState &dev,
     };
 }
 
-static FramebufferState makeFramebuffer(const DeviceState &dev,
+static FramebufferState makeFramebuffer(const Device &dev,
                                         MemoryAllocator &mem,
                                         const BatchRenderer::Config &cfg)
 {
@@ -267,7 +267,7 @@ static FramebufferState makeFramebuffer(const DeviceState &dev,
     };
 }
 
-static DescriptorState makeDescriptors(const DeviceState &dev,
+static DescriptorState makeDescriptors(const Device &dev,
                                        const ShaderState &shader_state,
                                        const FramebufferState &fb,
                                        const AssetManager &asset_mgr,
@@ -341,7 +341,7 @@ static ImplInit setupImplInit(const BatchRenderer::Config &cfg)
             PresentationState::makeWindow(cfg.renderWidth, cfg.renderHeight);
     }
 
-    InstanceState inst(get_instance, validate,
+    Backend backend(get_instance, validate,
           present_window.has_value(), present_window.has_value() ? 
               PresentationState::getInstanceExtensions(*present_window) :
               HeapArray<const char *>(0));
@@ -349,12 +349,12 @@ static ImplInit setupImplInit(const BatchRenderer::Config &cfg)
     auto present_surface = Optional<VkSurfaceKHR>::none();
     if (present) {
         present_surface =
-            PresentationState::makeSurface(inst, *present_window);
+            PresentationState::makeSurface(backend, *present_window);
     }
 
     return {
         validate,
-        std::move(inst),
+        std::move(backend),
         present_window,
         present_surface,
     };
@@ -365,12 +365,12 @@ BatchRenderer::Impl::Impl(const Config &cfg)
 {}
 
 BatchRenderer::Impl::Impl(const Config &cfg, ImplInit &&init)
-    : inst(std::move(init.inst)),
-      dev(inst.makeDevice(getUUIDFromGPUID(cfg.gpuID), 1, 2, 1,
+    : backend(std::move(init.backend)),
+      dev(backend.makeDevice(getUUIDFromGPUID(cfg.gpuID), 1, 2, 1,
                           init.presentSurface)),
-      mem(dev, inst),
+      mem(dev, backend),
       presentState(init.presentWindow.has_value() ?
-          Optional<PresentationState>::make(inst, dev,
+          Optional<PresentationState>::make(backend, dev,
                             std::move(*init.presentWindow),
                             std::move(*init.presentSurface),
                             dev.gfxQF, 1, true) :

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "core.hpp"
-#include "utils.hpp"
-
 #include <madrona/math.hpp>
 #include <madrona/heap_array.hpp>
+#include <madrona/render/vk/backend.hpp>
+
+#include "utils.hpp"
 
 namespace madrona {
 namespace render {
@@ -33,7 +33,7 @@ public:
                                     const Window &window);
 
     PresentationState(const InstanceState &inst,
-                      const DeviceState &dev,
+                      const Device &dev,
                       Window &&window,
                       VkSurfaceKHR surface,
                       uint32_t qf_idx,
@@ -43,23 +43,23 @@ public:
 
     void processInputs();
 
-    void forceTransition(const DeviceState &dev,
+    void forceTransition(const Device &dev,
                          const GPURunUtil &gpu_run);
 
-    uint32_t acquireNext(const DeviceState &dev,
+    uint32_t acquireNext(const Device &dev,
                          VkSemaphore signal_sema);
 
     VkImage getImage(uint32_t idx) const;
     uint32_t numSwapchainImages() const;
 
-    void present(const DeviceState &dev, uint32_t swapchain_idx,
+    void present(const Device &dev, uint32_t swapchain_idx,
                  VkQueue present_queue,
                  uint32_t num_wait_semas,
                  const VkSemaphore *wait_semas);
 
 private:
     const InstanceState *inst_;
-    const DeviceState *dev_;
+    const Device *dev_;
     Window window_;
     VkSurfaceKHR surface_;
     Swapchain swapchain_;

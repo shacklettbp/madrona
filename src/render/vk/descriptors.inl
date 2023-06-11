@@ -4,7 +4,7 @@ namespace madrona {
 namespace render {
 namespace vk {
 
-void DescHelper::update(const DeviceState &dev,
+void DescHelper::update(const Device &dev,
                         const VkWriteDescriptorSet *updates,
                         uint32_t num_desc_updates)
 {

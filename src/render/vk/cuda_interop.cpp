@@ -57,7 +57,7 @@ static void *mapExternal(cudaExternalMemory_t ext_mem, uint64_t num_bytes)
     return dev_ptr;
 }
 
-CudaImportedBuffer::CudaImportedBuffer(const DeviceState &dev,
+CudaImportedBuffer::CudaImportedBuffer(const Device &dev,
                                        int cuda_id,
                                        VkDeviceMemory mem,
                                        uint64_t num_bytes,

@@ -1,6 +1,5 @@
-#include "dispatch.hpp"
-#include <iostream>
-#include <cstdlib>
+#include <madrona/render/vk/dispatch.hpp>
+#include <madrona/crash.hpp>
 
 namespace madrona {
 namespace render {
@@ -10,8 +9,7 @@ static inline PFN_vkVoidFunction checkPtr(PFN_vkVoidFunction ptr,
                                           const std::string &name)
 {
     if (!ptr) {
-        std::cerr << name << " failed to load" << std::endl;
-        exit(EXIT_FAILURE);
+        FATAL("Failed to load vulkan function: %s\n", name.c_str());
     }
 
     return ptr;

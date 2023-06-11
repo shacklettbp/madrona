@@ -6,7 +6,7 @@
 
 #include <madrona/crash.hpp>
 
-#include "core.hpp"
+#include <madrona/render/vk/device.hpp>
 #include "pipeline_shaders.hpp"
 
 namespace madrona {
@@ -17,17 +17,17 @@ class QueueState {
 public:
     inline QueueState(VkQueue queue_hdl, bool shared);
 
-    inline void submit(const DeviceState &dev,
+    inline void submit(const Device &dev,
                        uint32_t submit_count,
                        const VkSubmitInfo *pSubmits,
                        VkFence fence) const;
 
-    inline void bindSubmit(const DeviceState &dev,
+    inline void bindSubmit(const Device &dev,
                            uint32_t submit_count,
                            const VkBindSparseInfo *pSubmits,
                            VkFence fence) const;
 
-    inline bool presentSubmit(const DeviceState &dev,
+    inline bool presentSubmit(const Device &dev,
                               const VkPresentInfoKHR *present_info) const;
 
 private:
@@ -42,37 +42,37 @@ struct GPURunUtil {
     VkQueue queue;
     VkFence fence;
 
-    void begin(const DeviceState &dev) const;
-    void submit(const DeviceState &dev) const;
+    void begin(const Device &dev) const;
+    void submit(const Device &dev) const;
 };
 
-inline VkDeviceAddress getDevAddr(const DeviceState &dev, VkBuffer buf);
+inline VkDeviceAddress getDevAddr(const Device &dev, VkBuffer buf);
 
-inline VkCommandPool makeCmdPool(const DeviceState &dev, uint32_t qf_idx);
+inline VkCommandPool makeCmdPool(const Device &dev, uint32_t qf_idx);
 
 inline VkCommandBuffer makeCmdBuffer(
-    const DeviceState &dev,
+    const Device &dev,
     VkCommandPool pool,
     VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 
-inline VkQueue makeQueue(const DeviceState &dev,
+inline VkQueue makeQueue(const Device &dev,
                          uint32_t qf_idx,
                          uint32_t queue_idx);
-inline VkSemaphore makeBinarySemaphore(const DeviceState &dev);
+inline VkSemaphore makeBinarySemaphore(const Device &dev);
 
-inline VkSemaphore makeBinaryExternalSemaphore(const DeviceState &dev);
-int exportBinarySemaphore(const DeviceState &dev, VkSemaphore semaphore);
+inline VkSemaphore makeBinaryExternalSemaphore(const Device &dev);
+int exportBinarySemaphore(const Device &dev, VkSemaphore semaphore);
 
-inline VkFence makeFence(const DeviceState &dev, bool pre_signal = false);
+inline VkFence makeFence(const Device &dev, bool pre_signal = false);
 
-VkSampler makeImmutableSampler(const DeviceState &dev,
+VkSampler makeImmutableSampler(const Device &dev,
                                VkSamplerAddressMode mode);
 
-inline void waitForFenceInfinitely(const DeviceState &dev, VkFence fence);
+inline void waitForFenceInfinitely(const Device &dev, VkFence fence);
 
-inline void resetFence(const DeviceState &dev, VkFence fence);
+inline void resetFence(const Device &dev, VkFence fence);
 
-inline VkDescriptorSet makeDescriptorSet(const DeviceState &dev,
+inline VkDescriptorSet makeDescriptorSet(const Device &dev,
                                          VkDescriptorPool pool,
                                          VkDescriptorSetLayout layout);
 

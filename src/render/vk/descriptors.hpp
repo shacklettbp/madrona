@@ -3,8 +3,9 @@
 #include <atomic>
 #include <list>
 
+#include <madrona/render/vk/device.hpp>
+
 #include "config.hpp"
-#include "core.hpp"
 #include "utils.hpp"
 #include "pipeline_shaders.hpp"
 
@@ -42,7 +43,7 @@ struct DescriptorSet {
 
 class DescriptorManager {
 public:
-    DescriptorManager(const DeviceState &dev,
+    DescriptorManager(const Device &dev,
                       const PipelineShaders &shader,
                       uint32_t set_id);
 
@@ -54,7 +55,7 @@ public:
     DescriptorSet makeSet();
 
 private:
-    const DeviceState &dev;
+    const Device &dev;
     const PipelineShaders &shader_;
     uint32_t set_id_;
     VkDescriptorSetLayout layout_;
@@ -65,7 +66,7 @@ private:
 
 class FixedDescriptorPool {
 public:
-    FixedDescriptorPool(const DeviceState &dev,
+    FixedDescriptorPool(const Device &dev,
                         const PipelineShaders &shader,
                         uint32_t set_id,
                         uint32_t pool_size);
@@ -78,7 +79,7 @@ public:
     VkDescriptorSet makeSet();
 
 private:
-    const DeviceState &dev;
+    const Device &dev;
     VkDescriptorSetLayout layout_;
     VkDescriptorPool pool_;
 };
@@ -117,7 +118,7 @@ public:
         uint32_t binding,
         uint32_t arr_offset = 0);
 
-    static inline void update(const DeviceState &dev,
+    static inline void update(const Device &dev,
                               const VkWriteDescriptorSet *updates,
                               uint32_t num_desc_updates);
 };
