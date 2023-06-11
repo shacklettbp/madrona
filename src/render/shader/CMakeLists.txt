@@ -1,5 +1,5 @@
 add_library(madrona_render_shader SHARED
-    ${MADRONA_INC_DIR}/render/shader.hpp compiler.cpp
+    ${MADRONA_INC_DIR}/render/shader_compiler.hpp compiler.cpp
 )
 
 target_link_libraries(madrona_render_shader PRIVATE

@@ -2,9 +2,7 @@
 
 #include <vulkan/vulkan.h>
 
-namespace madrona {
-namespace render {
-namespace vk {
+namespace madrona::render::vk {
 
 struct InstanceDispatch {
 #include "dispatch_instance_impl.hpp"
@@ -20,6 +18,4 @@ struct DeviceDispatch {
                    bool need_present, bool need_rt, bool support_mem_export);
 };
 
-}
-}
 }

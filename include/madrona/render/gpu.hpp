@@ -6,6 +6,7 @@
 namespace madrona::render {
 
 class RenderGraph; 
+class GPU; 
 
 struct ResourceHandle {
     uint32_t id;
@@ -31,18 +32,6 @@ struct BufferDesc {
 
 struct CommandBuffer {
     platform::CommandBuffer hdl;
-};
-
-struct ParamBlock {
-    platform::ParamBlock hdl;
-};
-
-class Shader {
-public:
-    Shader(platform::Shader &&hdl);
-
-private:
-    platform::Shader hdl_;
 };
 
 class GPU {

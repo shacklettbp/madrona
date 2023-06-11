@@ -7,7 +7,7 @@
 #include <madrona/crash.hpp>
 
 #include "core.hpp"
-#include "shader.hpp"
+#include "pipeline_shaders.hpp"
 
 namespace madrona {
 namespace render {

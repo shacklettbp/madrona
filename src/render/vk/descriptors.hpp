@@ -6,7 +6,7 @@
 #include "config.hpp"
 #include "core.hpp"
 #include "utils.hpp"
-#include "shader.hpp"
+#include "pipeline_shaders.hpp"
 
 namespace madrona {
 namespace render {

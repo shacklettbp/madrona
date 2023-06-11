@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include <madrona/render/shader.hpp>
+#include <madrona/render/shader_compiler.hpp>
 
 namespace madrona {
 namespace render {

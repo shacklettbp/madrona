@@ -28,12 +28,12 @@ add_custom_target(generate_vk_dispatch DEPENDS
 )
 
 add_library(madrona_render_vk STATIC
+    ${MADRONA_INC_DIR}/render/vk/core.hpp core.cpp
+    ${MADRONA_INC_DIR}/render/vk/dispatch.hpp dispatch.cpp
     config.hpp
-    core.hpp core.cpp
     cuda_interop.hpp cuda_interop.cpp
     descriptors.hpp descriptors.cpp descriptors.inl
-    dispatch.hpp dispatch.cpp
-    shader.hpp shader.cpp
+    pipeline_shaders.hpp pipeline_shaders.cpp
     utils.hpp utils.cpp utils.inl
     memory.hpp memory.cpp memory.inl
     present.hpp present.cpp
