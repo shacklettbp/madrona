@@ -9,9 +9,7 @@
 
 #include "dispatch.hpp"
 
-namespace madrona {
-namespace render {
-namespace vk {
+namespace madrona::render::vk {
 
 using DeviceUUID = std::array<uint8_t, VK_UUID_SIZE>;
 
@@ -73,6 +71,4 @@ private:
     VkPhysicalDevice findPhysicalDevice(const DeviceUUID &uuid) const;
 };
 
-}
-}
 }

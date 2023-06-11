@@ -1,14 +1,26 @@
+#include <madrona/optional.hpp>
+
 namespace madrona::render {
 
 struct RenderGraphBuilder::LogicalResource {
     enum class Type {
-        Buffer,
         Texture2D,
+        Buffer,
     } type;
 
+    struct Texture {
+        Texture2DDesc desc;
+        TextureHandle allocatedHandle;
+    };
+
+    struct Buffer {
+        BufferDesc desc;
+        BufferHandle allocatedHandle;
+    };
+
     union {
-        Texture2DDesc tex2D;
-        BufferDesc buffer;
+        Texture tex2D;
+        Buffer buffer;
     };
 
     bool writeHazard;
@@ -34,9 +46,12 @@ struct RenderGraphBuilder::TaskDesc {
         BarrierTaskArgs barrier;
     };
 
+    Optional<ParamBlock> paramBlock;
+
     void (*fn)(void *, GPU &, CommandBuffer cmd_buf);
     void *data;
     CountT numDataBytes;
+    CountT dataAlignment;
 
     TaskDesc *next;
 };
@@ -119,6 +134,7 @@ RenderGraphBuilder::TaskDesc * RenderGraphBuilder::addTaskCommon(Fn &&fn)
     new_task->fn = fn_ptr;
     new_task->data = closure_store;
     new_task->numDataBytes = sizeof(Fn);
+    new_task->dataAlignment = alignof(Fn);
 
     new_task->next = nullptr;
     task_list_tail_->next = new_task;

@@ -60,7 +60,7 @@ public:
     template <typename Fn>
     inline void addCopyTask(Fn &&fn, CopyTaskArgs args);
 
-    RenderGraph build(GPU &gpu);
+    RenderGraph build(GPU &gpu, CountT num_inflight);
 
 private:
     inline LogicalResource * addResource();
@@ -75,7 +75,7 @@ private:
     inline bool checkHazards(Span<const TaskResource> resources);
     inline void markHazards(TaskDesc *task);
     inline void markHazards(Span<const TaskResource> resources);
-    inline void addBarrier(TaskDesc *prev, TaskDesc *next);
+    inline TaskDesc * addBarrier(TaskDesc *prev, TaskDesc *next);
 
     StackAlloc *alloc_;
     StackAlloc::Frame alloc_start_;
@@ -93,16 +93,16 @@ private:
     struct Task;
     RenderGraph(void *data_buffer,
                 Span<const Task> tasks,
-                Span<TextureHandle> textures,
-                Span<BufferHandle> buffers);
+                Span<const TextureHandle> textures,
+                Span<const BufferHandle> buffers);
 
     template <typename Fn>
     static void taskEntry(void *data, GPU &gpu, CommandBuffer cmd_buf);
 
     void *data_buffer_;
-    Span<Task> tasks_;
-    Span<TextureHandle> textures_;
-    Span<BufferHandle> buffers_;
+    Span<const Task> tasks_;
+    Span<const TextureHandle> textures_;
+    Span<const BufferHandle> buffers_;
 
 friend class RenderGraphBuilder;
 };

@@ -29,8 +29,20 @@ struct BufferDesc {
     int32_t numBytes;
 };
 
-class CommandBuffer {
+struct CommandBuffer {
     platform::CommandBuffer hdl;
+};
+
+struct ParamBlock {
+    platform::ParamBlock hdl;
+};
+
+class Shader {
+public:
+    Shader(platform::Shader &&hdl);
+
+private:
+    platform::Shader hdl_;
 };
 
 class GPU {
@@ -40,14 +52,19 @@ public:
     TextureHandle makeTex2D(int32_t width, int32_t height, TexFormat fmt);
     BufferHandle makeBuffer(int32_t num_bytes);
 
+    void destroyTex2D(TextureHandle hdl);
+    void destroyBuffer(BufferHandle hdl);
+
     void debugFullBarrier(CommandBuffer cmd);
 
     void submit(const RenderGraph &graph);
 
-    platform::GPU & platform();
+    inline platform::GPU & platform();
 
 private:
-    platform::GPU gpu;
+    platform::GPU hdl_;
 };
 
 }
+
+#include "gpu.inl"
