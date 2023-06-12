@@ -6,16 +6,21 @@
 
 namespace madrona::render {
 
-struct ParamBlock {
-    backend::ParamBlock hdl;
+struct RasterParamBlock {
+    backend::RasterParamBlock hdl;
+};
+
+struct ComputeParamBlock {
+    backend::ComputeParamBlock hdl;
 };
 
 class Shader {
 public:
-    inline Shader(GPU &gpu, Span<char> bytecode,
+    inline Shader(GPU &gpu, void *ir, CountT num_ir_bytes,
                   const refl::ShaderInfo &reflection_info);
 
-    inline ParamBlock makeParamBlock(CountT block_idx);
+    inline RasterParamBlock makeRasterParamBlock(CountT block_idx);
+    inline ComputeParamBlock makeComputeParamBlock(CountT block_idx);
 
     inline void destroy(GPU &gpu);
 

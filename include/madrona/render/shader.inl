@@ -1,13 +1,18 @@
 namespace madrona::render {
 
-Shader::Shader(GPU &gpu, Span<char> bytecode,
+Shader::Shader(GPU &gpu, void *ir, CountT num_ir_bytes,
                const refl::ShaderInfo &reflection_info)
-    : hdl_(gpu, bytecode, reflection_info)
+    : hdl_(gpu.backendDevice(), ir, num_ir_bytes, reflection_info)
 {}
 
-ParamBlock Shader::makeParamBlock(CountT block_idx)
+RasterParamBlock Shader::makeRasterParamBlock(CountT block_idx)
 {
-    return hdl_.makeParamBlock(block_idx);
+    return hdl_.makeRasterParamBlock(block_idx);
+}
+
+ComputeParamBlock Shader::makeComputeParamBlock(CountT block_idx)
+{
+    return hdl_.makeComputeParamBlock(block_idx);
 }
 
 void Shader::destroy(GPU &gpu)
