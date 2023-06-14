@@ -125,7 +125,7 @@ void RenderGraphBuilder::addCopyTask(Fn &&fn, CopyTaskArgs args)
 template <typename Fn>
 RenderGraphBuilder::TaskDesc * RenderGraphBuilder::addTaskCommon(Fn &&fn)
 {
-    auto *fn_ptr = &RenderGraph::taskEntry<Fn>;
+    auto *fn_ptr = &RenderGraph::rasterTaskEntry<Fn>;
 
     auto *closure_store = alloc_->alloc<Fn>();
     *closure_store = fn;

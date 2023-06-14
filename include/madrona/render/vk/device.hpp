@@ -4,8 +4,6 @@
 
 namespace madrona::render::vk {
 
-using CommandBuffer = VkCommandBuffer;
-
 class Device {
 public:
     VkDevice hdl;

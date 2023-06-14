@@ -20,12 +20,12 @@ using ParamBlock = VkDescriptorSet;
 using RasterParamBlock = ParamBlock;
 using ComputeParamBlock = ParamBlock;
 
-struct ParamBlockDesc {
-    using TypeCountArray =
-        std::array<int32_t, (uint32_t)refl::NumBindingTypes>;
+using DescriptorTypeCounts =
+    std::array<int32_t, (uint32_t)refl::NumBindingTypes>;
 
+struct ParamBlockDesc {
     VkDescriptorSetLayout layout;
-    TypeCountArray typeCounts;
+    DescriptorTypeCounts typeCounts;
 };
 
 struct ParamBlockStore {
@@ -40,17 +40,10 @@ public:
 
     inline void addParamBlock(const ParamBlockDesc &desc, CountT num_blocks);
 
-    inline RasterParamBlock makeRasterParamBlock(CountT block_idx);
-    inline ComputeParamBlock makeComputeParamBlock(CountT block_idx);
-
     ParamBlockStore build(ParamBlock *blocks_out);
 
 private:
-    ParamBlockDesc::TypeCountArray type_counts_;
-
-    ParamBlock makeParamBlock(const ParamBlockDesc &desc);
-
-    VkDescriptorPool pool_;
+    DescriptorTypeCounts type_counts_;
 };
 
 class Shader {
@@ -68,7 +61,8 @@ private:
                   const refl::SPIRV &refl_info);
 
     VkShaderModule shader_;
-    HeapArray<ParamBlockDesc> set_descs_;
+    HeapArray<VkDescriptorSetLayout> set_layouts_;
+    HeapArray<DescriptorTypeCounts> set_type_counts_;
 };
 
 }

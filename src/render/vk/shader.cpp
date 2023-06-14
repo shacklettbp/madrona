@@ -10,10 +10,23 @@ using namespace std;
 
 namespace madrona::render::vk {
 
-ParamBlockBuilder::ParamBlockAllocator()
+ParamBlockBuilder::ParamBlockBuilder()
     : type_counts_()
 {
     utils::zeroN<int32_t>(type_counts_.data(), type_counts_.size());
+}
+
+void ParamBlockAllocator::addParamBlock(const ParamBlockDesc &desc,
+                                        CountT num_blocks)
+{
+    for (CountT i = 0; i < desc.typeCounts.size(); i++) {
+        type_counts_[i] += desc.typeCounts[i] * num_blocks;
+    }
+}
+
+ParamBlockStore ParamBlockBuilder::build(ParamBlock *blocks_out)
+{
+
 }
 
 Shader::Shader(Device &dev, StackAlloc &tmp_alloc,
@@ -26,7 +39,9 @@ Shader::Shader(Device &dev, StackAlloc &tmp_alloc,
 Shader::Shader(Device &dev, StackAlloc &tmp_alloc,
                void *ir, CountT num_ir_bytes,
                const refl::SPIRV &refl_info)
-    : set_descs_(refl_info.descriptorSets.size())
+    : shader_(),
+      set_layouts_(refl_info.descriptorSets.size()),
+      set_type_counts_(refl_info.descriptorSets.size())
 {
     VkShaderModuleCreateInfo shader_info;
     shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -126,10 +141,9 @@ Shader::Shader(Device &dev, StackAlloc &tmp_alloc,
         VkDescriptorSetLayout layout;
         REQ_VK(dev.dt.createDescriptorSetLayout(dev.hdl, &layout_info, nullptr,
                                                 &layout));
-        set_descs_[set_id] = {
-            layout,
-            std::move(type_counts),
-        };
+
+        set_layouts_[set_id] = layout;
+        set_type_counts_[set_id] = type_counts;
 
         tmp_alloc.pop(alloc_frame);
     }
