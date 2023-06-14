@@ -31,7 +31,7 @@ add_library(madrona_render_vk STATIC
     ${MADRONA_INC_DIR}/render/vk/backend.hpp backend.cpp
     ${MADRONA_INC_DIR}/render/vk/device.hpp device.cpp
     ${MADRONA_INC_DIR}/render/vk/dispatch.hpp dispatch.cpp
-    ${MADRONA_INC_DIR}/render/vk/shader.hpp shader.cpp
+    #${MADRONA_INC_DIR}/render/vk/shader.hpp shader.cpp
     config.hpp
     cuda_interop.hpp cuda_interop.cpp
     descriptors.hpp descriptors.cpp descriptors.inl
