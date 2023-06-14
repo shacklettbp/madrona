@@ -551,7 +551,7 @@ Assets AssetManager::load(const Device &dev,
 }
 
 TLASData TLASData::setup(const Device &dev,
-                         const GPURunUtil &gpu_run,
+                         const GPURunUtil &,
                          int cuda_gpu_id,
                          MemoryAllocator &mem,
                          int64_t num_worlds,
