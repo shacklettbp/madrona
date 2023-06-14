@@ -6,4 +6,4 @@ elseif (MADRONA_MACOS OR MADRONA_IOS)
     add_subdirectory(metal)
 endif ()
 
-add_subdirectory(core)
+#add_subdirectory(core)
