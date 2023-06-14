@@ -89,6 +89,8 @@ class RenderGraph {
 public:
     ~RenderGraph();
 
+    void submit(GPU &gpu);
+
 private:
     struct Task;
     RenderGraph(void *data_buffer,
@@ -97,7 +99,16 @@ private:
                 Span<const BufferHandle> buffers);
 
     template <typename Fn>
-    static void taskEntry(void *data, GPU &gpu, CommandBuffer cmd_buf);
+    static void rasterTaskEntry(void *data, GPU &gpu,
+                                RasterCmdList cmd_list);
+
+    template <typename Fn>
+    static void computeTaskEntry(void *data, GPU &gpu,
+                                 ComputeCmdList cmd_list);
+
+    template <typename Fn>
+    static void copyTaskEntry(void *data, GPU &gpu,
+                              CopyCmdList cmd_list);
 
     void *data_buffer_;
     Span<const Task> tasks_;

@@ -175,10 +175,19 @@ RenderGraphBuilder::LogicalResource * RenderGraphBuilder::getResource(
 }
 
 template <typename Fn>
-void RenderGraph::taskEntry(void *data, GPU &gpu, CommandBuffer cmd_buf)
+void RenderGraph::rasterTaskEntry(void *data, GPU &gpu,
+                                  RasterCommandList cmd_list)
 {
     auto &closure = *(Fn *)data;
-    closure(gpu, cmd_buf);
+    closure(gpu, cmd_list);
+}
+
+template <typename Fn>
+void RenderGraph::computeTaskEntry(void *data, GPU &gpu,
+                                   ComputeCmdList cmd_list)
+{
+    auto &closure = *(Fn *)data;
+    closure(gpu, cmd_list);
 }
 
 }

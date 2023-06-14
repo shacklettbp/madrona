@@ -3,6 +3,8 @@
 #include <madrona/types.hpp>
 #include <madrona/render/backend.hpp>
 
+#include <madrona/render/shader.hpp>
+
 namespace madrona::render {
 
 class RenderGraph; 
@@ -30,8 +32,27 @@ struct BufferDesc {
     int32_t numBytes;
 };
 
-struct CommandBuffer {
-    backend::CommandBuffer hdl;
+class RasterCmdList {
+public:
+    inline void setParamBlock(GPU &gpu, ParamBlock param_block);
+    void debugFullBarrier(GPU &gpu);
+
+
+    inline backend::RasterCmdList & hdl();
+
+private:
+    backend::RasterCmdList hdl_;
+};
+
+class ComputeCmdList {
+public:
+    inline void setParamBlock(GPU &gpu, ParamBlock param_block);
+    void debugFullBarrier(GPU &gpu);
+
+    inline backend::ComputeCmdList & hdl();
+
+private:
+    backend::ComputeCmdList hdl_;
 };
 
 class GPU {
@@ -45,11 +66,7 @@ public:
     void destroyTex2D(TextureHandle hdl);
     void destroyBuffer(BufferHandle hdl);
 
-    void debugFullBarrier(CommandBuffer cmd);
-
-    void submit(const RenderGraph &graph);
-
-    inline backend::Device & backendDevice();
+    inline backend::Device & hdl();
 
 private:
     backend::Device dev_;

@@ -18,13 +18,14 @@ struct EntryPoint {
     Stage stage;
 };
 
-enum class BindingType {
-    None,
-    Sampler,
-    Texture,
-    UniformBuffer,
-    StorageBuffer,
-    AccelerationStructure,
+enum class BindingType : uint32_t {
+    None = 0,
+    Sampler = 1,
+    Texture = 2,
+    UniformBuffer = 3,
+    StorageBuffer = 4,
+    AccelerationStructure = 5,
+    NumBindingTypes = AccelerationStructure,
 };
 
 struct Binding {

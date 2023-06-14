@@ -363,6 +363,7 @@ Device Backend::initDevice(
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
         VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME,
         VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
+        VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
     };
 
     uint32_t num_supported_extensions;

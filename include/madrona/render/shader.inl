@@ -1,8 +1,9 @@
 namespace madrona::render {
 
-Shader::Shader(GPU &gpu, void *ir, CountT num_ir_bytes,
+Shader::Shader(GPU &gpu, StackAlloc &tmp_alloc,
+               void *ir, CountT num_ir_bytes,
                const refl::ShaderInfo &reflection_info)
-    : hdl_(gpu.backendDevice(), ir, num_ir_bytes, reflection_info)
+    : hdl_(gpu.backendDevice(), tmp_alloc, ir, num_ir_bytes, reflection_info)
 {}
 
 RasterParamBlock Shader::makeRasterParamBlock(CountT block_idx)

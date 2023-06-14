@@ -14,9 +14,17 @@ struct ComputeParamBlock {
     backend::ComputeParamBlock hdl;
 };
 
+class ParamBlockAllocator {
+public:
+
+private:
+    backend::ParamBlockAllocator alloc_;
+};
+
 class Shader {
 public:
-    inline Shader(GPU &gpu, void *ir, CountT num_ir_bytes,
+    inline Shader(GPU &gpu, StackAlloc &tmp_alloc,
+                  void *ir, CountT num_ir_bytes,
                   const refl::ShaderInfo &reflection_info);
 
     inline RasterParamBlock makeRasterParamBlock(CountT block_idx);
