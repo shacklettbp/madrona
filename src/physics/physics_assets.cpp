@@ -82,9 +82,9 @@ struct PhysicsLoader::Impl {
     ObjectManager *mgr;
     CountT maxPrims;
     CountT maxObjs;
-    StorageType storageType;
+    ExecMode execMode;
 
-    static Impl * init(StorageType storage_type, CountT max_objects)
+    static Impl * init(ExecMode exec_mode, CountT max_objects)
     {
         constexpr CountT max_prims_per_object = 20;
 
@@ -116,8 +116,8 @@ struct PhysicsLoader::Impl {
 
         ObjectManager *mgr;
 
-        switch (storage_type) {
-            case StorageType::CPU: {
+        switch (exec_mode) {
+            case ExecMode::CPU: {
                 primitives_ptr = (CollisionPrimitive *)malloc(
                     num_collision_prim_bytes);
 
@@ -141,7 +141,7 @@ struct PhysicsLoader::Impl {
                 metadata_ptr,
             };
         } break;
-        case StorageType::CUDA: {
+        case ExecMode::CUDA: {
 #ifndef MADRONA_CUDA_SUPPORT
             noCUDA();
 #else
@@ -189,13 +189,13 @@ struct PhysicsLoader::Impl {
             .mgr = mgr,
             .maxPrims = max_objects * max_prims_per_object,
             .maxObjs = max_objects,
-            .storageType = storage_type,
+            .execMode = exec_mode,
         };
     }
 };
 
-PhysicsLoader::PhysicsLoader(StorageType storage_type, CountT max_objects)
-    : impl_(Impl::init(storage_type, max_objects))
+PhysicsLoader::PhysicsLoader(ExecMode exec_mode, CountT max_objects)
+    : impl_(Impl::init(exec_mode, max_objects))
 {}
 
 PhysicsLoader::~PhysicsLoader()
@@ -204,8 +204,8 @@ PhysicsLoader::~PhysicsLoader()
         return;
     }
 
-    switch (impl_->storageType) {
-    case StorageType::CPU: {
+    switch (impl_->execMode) {
+    case ExecMode::CPU: {
         delete impl_->mgr;
         free(impl_->primitives);
         free(impl_->primAABBs);
@@ -214,7 +214,7 @@ PhysicsLoader::~PhysicsLoader()
         free(impl_->rigidBodyPrimitiveCounts);
         free(impl_->metadatas);
     } break;
-    case StorageType::CUDA: {
+    case ExecMode::CUDA: {
 #ifndef MADRONA_CUDA_SUPPORT
         noCUDA();
 #else
@@ -1548,8 +1548,8 @@ CountT PhysicsLoader::loadObjects(
     uint32_t *hull_face_base_halfedges;
     Plane *hull_face_planes;
     Vector3 *hull_verts;
-    switch (impl_->storageType) {
-    case StorageType::CPU: {
+    switch (impl_->execMode) {
+    case ExecMode::CPU: {
         memcpy(prim_aabbs_dst, primitive_aabbs,
                sizeof(AABB) * total_num_primitives);
 
@@ -1580,7 +1580,7 @@ CountT PhysicsLoader::loadObjects(
         memcpy(hull_verts, hull_verts_in,
                sizeof(Vector3) * total_num_hull_verts);
     } break;
-    case StorageType::CUDA: {
+    case ExecMode::CUDA: {
 #ifndef MADRONA_CUDA_SUPPORT
         noCUDA();
 #else
@@ -1648,12 +1648,12 @@ CountT PhysicsLoader::loadObjects(
         he_mesh.vertices = hull_verts + vert_offset;
     }
 
-    switch (impl_->storageType) {
-    case StorageType::CPU: {
+    switch (impl_->execMode) {
+    case ExecMode::CPU: {
         memcpy(prims_dst, primitives_tmp,
                sizeof(CollisionPrimitive) * total_num_primitives);
     } break;
-    case StorageType::CUDA: {
+    case ExecMode::CUDA: {
 #ifdef MADRONA_CUDA_SUPPORT
         cudaMemcpy(prims_dst, primitives_tmp,
             sizeof(CollisionPrimitive) * total_num_primitives,

@@ -21,7 +21,6 @@
 #include <madrona/tracing.hpp>
 #include <madrona/json.hpp>
 
-#include "render/batch_renderer.hpp"
 #include "cpp_compile.hpp"
 
 // Wrap GPU headers in the mwGPU namespace. This is a weird situation where
@@ -302,7 +301,6 @@ struct MegakernelCache {
 };
 
 struct GPUEngineState {
-    Optional<render::BatchRenderer> batchRenderer;
     void *stateBuffer;
 
     std::thread allocatorThread;
@@ -1225,9 +1223,7 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
 }
 
 static GPUEngineState initEngineAndUserState(
-    int gpu_id,
     uint32_t num_worlds,
-    uint32_t max_views_per_world,
     uint32_t num_world_data_bytes,
     uint32_t world_data_alignment,
     void *world_init_ptr,
@@ -1235,47 +1231,10 @@ static GPUEngineState initEngineAndUserState(
     void *user_cfg_host_ptr,
     uint32_t num_user_cfg_bytes,
     uint32_t num_exported,
-    render::CameraMode camera_mode,
-    uint32_t render_width,
-    uint32_t render_height,
     const GPUKernels &gpu_kernels,
     CompileConfig::Executor exec_mode,
     cudaStream_t strm)
 {
-    constexpr int64_t max_instances_per_world = 128;
-
-    auto batch_renderer = Optional<render::BatchRenderer>::none();
-
-    void *renderer_init_buffer = nullptr;
-    if (camera_mode != render::CameraMode::None) {
-        assert(render_width != 0 && render_height != 0);
-
-        batch_renderer.emplace(render::BatchRenderer::Config {
-            .gpuID = gpu_id,
-            .renderWidth = render_width,
-            .renderHeight = render_height,
-            .numWorlds = num_worlds,
-            .maxViewsPerWorld = max_views_per_world,
-            .maxInstancesPerWorld = max_instances_per_world,
-            .maxObjects = 1000,
-            .cameraMode = camera_mode,
-            .inputMode = render::BatchRenderer::InputMode::CUDA,
-        });
-
-        renderer_init_buffer = cu::allocStaging(
-                sizeof(render::RendererInit) * (uint64_t)num_worlds);
-
-        render::WorldGrid render_grid(num_worlds, 220.f);
-        
-        for (CountT i = 0; i < (CountT)num_worlds; i++) {
-            auto &renderer_init =
-                ((render::RendererInit *)renderer_init_buffer)[i];
-            renderer_init.iface =
-                batch_renderer->getInterface();
-            renderer_init.worldOffset = render_grid.getOffset(i);
-        }
-    }
-
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
                                uint32_t num_threads,
                                HeapArray<void *> &args) {
@@ -1352,7 +1311,6 @@ static GPUEngineState initEngineAndUserState(
     auto init_tasks_args = makeKernelArgBuffer(user_cfg_gpu_buffer);
 
     auto init_worlds_args = makeKernelArgBuffer(num_worlds,
-        renderer_init_buffer,
         user_cfg_gpu_buffer,
         init_tmp_buffer);
 
@@ -1441,10 +1399,6 @@ static GPUEngineState initEngineAndUserState(
     cu::deallocGPU(user_cfg_gpu_buffer);
     cu::deallocGPU(init_tmp_buffer);
 
-    if (renderer_init_buffer != nullptr) {
-        cu::deallocCPU(renderer_init_buffer);
-    }
-
     HeapArray<void *> exported_cols(num_exported);
     memcpy(exported_cols.data(), exported_readback,
            sizeof(void *) * (uint64_t)num_exported);
@@ -1452,7 +1406,6 @@ static GPUEngineState initEngineAndUserState(
     cu::deallocCPU(exported_readback);
 
     return GPUEngineState {
-        std::move(batch_renderer),
         gpu_state_buffer,
         std::move(allocator_thread),
         allocator_channel,
@@ -1768,13 +1721,10 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
         num_sms, {dev_prop.major, dev_prop.minor});
 
     GPUEngineState eng_state = initEngineAndUserState(
-        (int)state_cfg.gpuID, state_cfg.numWorlds,
-        state_cfg.maxViewsPerWorld,
-        state_cfg.numWorldDataBytes, state_cfg.worldDataAlignment,
-        state_cfg.worldInitPtr, state_cfg.numWorldInitBytes,
-        state_cfg.userConfigPtr, state_cfg.numUserConfigBytes,
-        state_cfg.numExportedBuffers,
-        state_cfg.cameraMode, state_cfg.renderWidth, state_cfg.renderHeight,
+        state_cfg.numWorlds, state_cfg.numWorldDataBytes,
+        state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
+        state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
+        state_cfg.numUserConfigBytes, state_cfg.numExportedBuffers,
         gpu_kernels, compile_cfg.execMode, strm);
 
     auto run_graph =
@@ -1828,30 +1778,6 @@ MADRONA_EXPORT void MWCudaExecutor::run()
 #ifdef MADRONA_TRACING
     impl_->engineState.deviceTracing->transferLogToCPU();
 #endif
-
-    if (impl_->engineState.batchRenderer.has_value()) {
-        char *hack = getenv("MADRONA_RENDER_NOOP");
-        if (hack && hack[0] == '1') {
-            return;
-        }
-        impl_->engineState.batchRenderer->render();
-    }
-}
-
-MADRONA_EXPORT CountT MWCudaExecutor::loadObjects(
-    Span<const imp::SourceObject> objs)
-{
-    return impl_->engineState.batchRenderer->loadObjects(objs);
-}
-
-MADRONA_EXPORT uint8_t * MWCudaExecutor::rgbObservations() const
-{
-    return impl_->engineState.batchRenderer->rgbPtr();
-}
-
-MADRONA_EXPORT float * MWCudaExecutor::depthObservations() const
-{
-    return impl_->engineState.batchRenderer->depthPtr();
 }
 
 MADRONA_EXPORT void * MWCudaExecutor::getExported(CountT slot) const

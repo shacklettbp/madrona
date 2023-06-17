@@ -6,8 +6,9 @@ template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::TaskGraphExecutor(
         const Config &cfg,
         const ConfigT &user_cfg,
-        const InitT *user_inits)
-    : ThreadPoolExecutor(cfg),
+        const InitT *user_inits,
+        const render::RendererBridge *renderer_bridge)
+    : ThreadPoolExecutor(cfg, renderer_bridge),
       run_datas_(cfg.numWorlds),
       world_datas_(cfg.numWorlds),
       jobs_(cfg.numWorlds)

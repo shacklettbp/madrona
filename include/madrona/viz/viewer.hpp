@@ -1,16 +1,14 @@
 #pragma once
 
-#include "interop.hpp"
-
 #include <madrona/types.hpp>
 #include <madrona/render/mw.hpp>
 #include <madrona/importer.hpp>
+#include <madrona/exec_mode.hpp>
 #include <memory>
 
-namespace madrona {
-namespace render {
+namespace madrona::viz {
 
-class BatchRenderer {
+class Viewer {
 public:
     struct Config {
         int gpuID;
@@ -19,29 +17,23 @@ public:
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;
-        uint32_t maxObjects;
-        CameraMode cameraMode;
         ExecMode execMode;
     };
 
-    BatchRenderer(const Config &cfg);
-    BatchRenderer(BatchRenderer &&o);
+    Viewer(const Config &cfg);
+    Viewer(Viewer &&o);
 
-    ~BatchRenderer();
+    ~Viewer();
 
     CountT loadObjects(Span<const imp::SourceObject> objs);
 
-    RendererInterface getInterface() const;
+    const render::RendererBridge * rendererBridge() const;
 
-    uint8_t * rgbPtr() const;
-    float * depthPtr() const;
-
-    void render();
+    void loop();
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 
-}
 }

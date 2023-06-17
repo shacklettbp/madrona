@@ -64,6 +64,7 @@ device:
 - vkCreateFramebuffer
 - vkCmdDraw
 - vkCmdDrawIndexed
+- vkCmdDrawIndexedIndirectCount
 - vkCmdBeginRenderPass
 - vkCmdEndRenderPass
 - vkCmdBindIndexBuffer
@@ -78,7 +79,6 @@ device:
 - vkGetQueryPoolResults
 - vkCmdResetQueryPool
 - vkDestroyDevice
-- vkCmdPipelineBarrier2
 - support_present:
     - vkCreateSwapchainKHR
     - vkDestroySwapchainKHR

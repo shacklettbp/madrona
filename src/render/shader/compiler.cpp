@@ -220,7 +220,7 @@ static HeapArray<uint32_t> hlslToSPV(
         DXC_ARG_DEBUG,
         DXC_ARG_PACK_MATRIX_COLUMN_MAJOR,
         L"-spirv",
-        L"-fspv-target-env=vulkan1.3",
+        L"-fspv-target-env=vulkan1.2",
         //L"-fspv-reflect",
         L"-T", L"lib_6_7",
         L"-HV", L"2021",

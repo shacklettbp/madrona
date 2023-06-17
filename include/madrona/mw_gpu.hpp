@@ -25,12 +25,8 @@ struct StateConfig {
     uint32_t numWorldDataBytes;
     uint32_t worldDataAlignment;
     uint32_t numWorlds;
-    uint32_t maxViewsPerWorld;
     uint32_t numExportedBuffers;
     uint32_t gpuID;
-    render::CameraMode cameraMode;
-    uint32_t renderWidth;
-    uint32_t renderHeight;
 };
 
 struct CompileConfig {
@@ -61,12 +57,7 @@ public:
 
     MADRONA_IMPORT ~MWCudaExecutor();
 
-    MADRONA_IMPORT CountT loadObjects(Span<const imp::SourceObject> objs);
-
     MADRONA_IMPORT void run();
-
-    MADRONA_IMPORT uint8_t * rgbObservations() const;
-    MADRONA_IMPORT float * depthObservations() const;
 
     MADRONA_IMPORT void * getExported(CountT slot) const;
 

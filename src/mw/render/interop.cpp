@@ -45,7 +45,7 @@ inline void instanceTransformSetup(Context &ctx,
     as_inst.instanceShaderBindingTableRecordOffset = 0;
     as_inst.flags = 0;
     as_inst.accelerationStructureReference = renderer_state.blases[obj_id.idx];
-#else
+#elif defined(MADRONA_BATCHRENDER_METAL)
     AtomicU32Ref inst_count_atomic(*renderer_state.numInstances);
     uint32_t inst_idx = inst_count_atomic.fetch_add_relaxed(1);
 
@@ -55,6 +55,17 @@ inline void instanceTransformSetup(Context &ctx,
         scale,
         obj_id.idx,
         ctx.worldID().idx,
+    };
+#elif defined(MADRONA_VIZ)
+    AtomicU32Ref inst_count_atomic(*renderer_state.numInstances);
+    uint32_t inst_idx = inst_count_atomic.fetch_add_relaxed(1);
+
+    renderer_state.instances[inst_idx] = InstanceData {
+        pos,
+        rot,
+        scale,
+        obj_id.idx,
+        0,
     };
 #endif
 }
@@ -78,7 +89,7 @@ inline void updateViewData(Context &ctx,
     renderer_view.posAndTanFOV.y = camera_pos.y;
     renderer_view.posAndTanFOV.z = camera_pos.z;
     renderer_view.posAndTanFOV.w = view_settings.yScale;
-#elif defined(MADRONA_BATCHRENDER_METAL)
+#else
     Vector3 camera_pos = pos + view_settings.cameraOffset;
 
     renderer_state.views[view_idx] = PerspectiveCameraData {
@@ -144,6 +155,13 @@ void RenderingSystem::reset([[maybe_unused]] Context &ctx)
     RendererState &renderer_state = ctx.singleton<RendererState>();
     *renderer_state.numViews = 0;
 #endif
+
+#ifdef MADRONA_VIZ
+    RendererState &renderer_state = ctx.singleton<RendererState>();
+
+    *renderer_state.numInstances = 0;
+    *renderer_state.numViews = 0;
+#endif
 }
 
 ViewSettings RenderingSystem::setupView(Context &ctx,
@@ -160,13 +178,13 @@ ViewSettings RenderingSystem::setupView(Context &ctx,
 #endif
             tanf(toRadians(vfov_degrees * 0.5f));
 
-#ifdef MADRONA_BATCHRENDER_METAL
+#if defined(MADRONA_BATCHRENDER_METAL) || defined(MADRONA_VIZ)
     (*renderer_state.numViews) += 1;
 #endif
 
     float x_scale = fov_scale / renderer_state.aspectRatio;
     float y_scale =
-#ifndef MADRONA_BATCHRENDER_METAL
+#ifdef MADRONA_BATCHRENDER_RT
         -
 #endif
         fov_scale;
@@ -180,32 +198,37 @@ ViewSettings RenderingSystem::setupView(Context &ctx,
     };
 }
 
-void RendererState::init(Context &ctx, const RendererInit &renderer_init)
+void RendererState::init(Context &ctx, const RendererBridge &bridge)
 {
     RendererState &renderer_state = ctx.singleton<RendererState>();
     int32_t world_idx = ctx.worldID().idx;
 
-#if defined(MADRONA_BATCHRENDER_RT)
     new (&renderer_state) RendererState {
-        renderer_init.iface.tlasInstancesBase,
-        renderer_init.iface.numInstances,
-        renderer_init.iface.blases,
-        renderer_init.iface.packedViews[world_idx],
-        renderer_init.worldOffset,
+#if defined(MADRONA_BATCHRENDER_RT)
+        bridge.iface.tlasInstancesBase,
+        bridge.iface.numInstances,
+        bridge.iface.blases,
+        bridge.iface.packedViews[world_idx],
+        bridge.worldOffset,
 #ifdef MADRONA_GPU_MODE
-        renderer_init.iface.numInstancesReadback,
+        bridge.iface.numInstancesReadback,
 #endif
 #elif defined (MADRONA_BATCHRENDER_METAL)
-    new (&renderer_state) RendererState {
-        renderer_init.iface.views[world_idx],
-        &renderer_init.iface.numViews[world_idx],
-        renderer_init.iface.instanceData,
-        renderer_init.iface.numInstances,
+        bridge.iface.views[world_idx],
+        &bridge.iface.numViews[world_idx],
+        bridge.iface.instanceData,
+        bridge.iface.numInstances,
 #endif
-        renderer_init.iface.renderWidth,
-        renderer_init.iface.renderHeight,
-        float(renderer_init.iface.renderWidth) /
-            float(renderer_init.iface.renderHeight),
+#ifdef MADRONA_VIZ
+        bridge.iface.views[world_idx],
+        &bridge.iface.numViews[world_idx],
+        bridge.iface.instances[world_idx],
+        &bridge.iface.numInstances[world_idx],
+#endif
+        bridge.iface.renderWidth,
+        bridge.iface.renderHeight,
+        float(bridge.iface.renderWidth) /
+            float(bridge.iface.renderHeight),
     };
 }
 

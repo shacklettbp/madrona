@@ -3,16 +3,13 @@
 #include <madrona/physics.hpp>
 #include <madrona/importer.hpp>
 
+#include <madrona/exec_mode.hpp>
+
 namespace madrona {
 namespace phys {
 
 class PhysicsLoader {
 public:
-    enum class StorageType {
-        CPU,
-        CUDA,
-    };
-
     struct SourceCollisionPrimitive {
         struct HullInput {
             const imp::SourceMesh *mesh;
@@ -50,7 +47,7 @@ public:
         HeapArray<math::AABB> objectAABBs;
     };
 
-    PhysicsLoader(StorageType storage_type, CountT max_objects);
+    PhysicsLoader(ExecMode exec_mode, CountT max_objects);
     ~PhysicsLoader();
     PhysicsLoader(PhysicsLoader &&o);
 

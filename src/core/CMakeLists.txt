@@ -1,5 +1,6 @@
 set(MADRONA_CORE_SRCS
     ${MADRONA_INC_DIR}/fwd.hpp
+    ${MADRONA_INC_DIR}/exec_mode.hpp
     #${MADRONA_INC_DIR}/job.hpp ${MADRONA_INC_DIR}/job.inl job.cpp
     ${MADRONA_INC_DIR}/state.hpp ${MADRONA_INC_DIR}/state.inl state.cpp
     ${MADRONA_INC_DIR}/context.hpp ${MADRONA_INC_DIR}/context.inl context.cpp

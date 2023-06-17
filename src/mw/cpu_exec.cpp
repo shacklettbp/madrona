@@ -1,7 +1,7 @@
 #include <madrona/mw_cpu.hpp>
 #include "../core/worker_init.hpp"
 
-#include "render/batch_renderer.hpp"
+#include "render/interop.hpp"
 
 #if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
 #include <unistd.h>
@@ -20,9 +20,10 @@ struct ThreadPoolExecutor::Impl {
     StateManager stateMgr;
     HeapArray<StateCache> stateCaches;
     HeapArray<void *> exportPtrs;
-    Optional<render::BatchRenderer> renderer;
+    const render::RendererBridge *rendererBridge;
 
-    static Impl * make(const ThreadPoolExecutor::Config &cfg);
+    static Impl * make(const ThreadPoolExecutor::Config &cfg,
+                       const render::RendererBridge *renderer_bridge);
     ~Impl();
     void run(Job *jobs, CountT num_jobs);
     void workerThread(CountT worker_id);
@@ -92,28 +93,9 @@ static inline void pinThread([[maybe_unused]] CountT worker_id)
 #endif
 }
 
-static Optional<render::BatchRenderer> makeRenderer(
-    const ThreadPoolExecutor::Config &cfg)
-{
-    if (cfg.cameraMode == render::CameraMode::None) {
-        return Optional<render::BatchRenderer>::none();
-    }
-
-    return Optional<render::BatchRenderer>::make(render::BatchRenderer::Config {
-        .gpuID = cfg.renderGPUID,
-        .renderWidth = cfg.renderWidth,
-        .renderHeight = cfg.renderHeight,
-        .numWorlds = cfg.numWorlds,
-        .maxViewsPerWorld = cfg.maxViewsPerWorld,
-        .maxInstancesPerWorld = cfg.maxInstancesPerWorld,
-        .maxObjects = cfg.maxObjects,
-        .cameraMode = cfg.cameraMode,
-        .inputMode = render::BatchRenderer::InputMode::CPU,
-    });
-}
-
 ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
-    const ThreadPoolExecutor::Config &cfg)
+    const ThreadPoolExecutor::Config &cfg,
+    const render::RendererBridge *renderer_bridge)
 {
     Impl *impl = new Impl {
         .workers = HeapArray<std::thread>(
@@ -127,7 +109,7 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
         .stateMgr = StateManager(cfg.numWorlds),
         .stateCaches = HeapArray<StateCache>(cfg.numWorlds),
         .exportPtrs = HeapArray<void *>(cfg.numExportedBuffers),
-        .renderer = makeRenderer(cfg),
+        .rendererBridge = renderer_bridge,
     };
 
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
@@ -143,8 +125,10 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
     return impl;
 }
 
-ThreadPoolExecutor::ThreadPoolExecutor(const Config &cfg)
-    : impl_(Impl::make(cfg))
+ThreadPoolExecutor::ThreadPoolExecutor(
+        const Config &cfg,
+        const render::RendererBridge *renderer_bridge)
+    : impl_(Impl::make(cfg, renderer_bridge))
 {}
 
 ThreadPoolExecutor::Impl::~Impl()
@@ -174,30 +158,11 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
     mainWakeup.store_relaxed(0);
 
     stateMgr.copyOutExportedColumns();
-
-    if (renderer.has_value()) {
-        renderer->render();
-    }
 }
 
 void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs)
 {
     impl_->run(jobs, num_jobs);
-}
-
-CountT ThreadPoolExecutor::loadObjects(Span<const imp::SourceObject> objs)
-{
-    return impl_->renderer->loadObjects(objs);
-}
-
-uint8_t * ThreadPoolExecutor::rgbObservations() const
-{
-    return impl_->renderer->rgbPtr();
-}
-
-float * ThreadPoolExecutor::depthObservations() const
-{
-    return impl_->renderer->depthPtr();
 }
 
 void * ThreadPoolExecutor::getExported(CountT slot) const
@@ -209,8 +174,6 @@ void ThreadPoolExecutor::initializeContexts(
     Context & (*init_fn)(void *, const WorkerInit &, CountT),
     void *init_data, CountT num_worlds)
 {
-    render::WorldGrid render_grid(num_worlds, 220.f /* FIXME */);
-
     for (CountT world_idx = 0; world_idx < num_worlds; world_idx++) {
         WorkerInit worker_init {
             &impl_->stateMgr,
@@ -220,13 +183,8 @@ void ThreadPoolExecutor::initializeContexts(
 
         Context &ctx = init_fn(init_data, worker_init, world_idx);
 
-        if (impl_->renderer.has_value()) {
-            render::RendererInit renderer_init {
-                impl_->renderer->getInterface(),
-                render_grid.getOffset(world_idx),
-            };
-
-            render::RendererState::init(ctx, renderer_init);
+        if (impl_->rendererBridge != nullptr) {
+            render::RendererState::init(ctx, *impl_->rendererBridge);
         }
     }
 }

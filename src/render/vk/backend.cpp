@@ -156,7 +156,7 @@ Backend::Init Backend::Init::init(
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     app_info.pApplicationName = "madrona";
     app_info.pEngineName = "madrona";
-    app_info.apiVersion = VK_API_VERSION_1_3;
+    app_info.apiVersion = VK_API_VERSION_1_2;
 
     vector<const char *> layers;
     DynArray<const char *> extensions(extra_exts.size());
@@ -363,7 +363,6 @@ Device Backend::initDevice(
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
         VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME,
         VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
-        VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME,
     };
 
     uint32_t num_supported_extensions;
@@ -544,6 +543,20 @@ Device Backend::initDevice(
     atomic_float_features.shaderSharedFloat32Atomics = true;
     atomic_float_features.shaderSharedFloat32AtomicAdd = true;
 
+    VkPhysicalDeviceSubgroupSizeControlFeatures subgroup_features {};
+    subgroup_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES;
+    subgroup_features.pNext = &atomic_float_features;
+    subgroup_features.computeFullSubgroups = true;
+    subgroup_features.subgroupSizeControl = true;
+
+    VkPhysicalDeviceDynamicRenderingFeatures dyn_render_features {};
+    dyn_render_features.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    dyn_render_features.pNext = &subgroup_features;
+    dyn_render_features.dynamicRendering = true;
+
+#if 0
     VkPhysicalDeviceVulkan13Features vk13_features {};
     vk13_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
@@ -551,11 +564,12 @@ Device Backend::initDevice(
     vk13_features.synchronization2 = true;
     vk13_features.computeFullSubgroups = true;
     vk13_features.subgroupSizeControl = true;
+#endif
 
     VkPhysicalDeviceVulkan12Features vk12_features {};
     vk12_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vk12_features.pNext = &vk13_features;
+    vk12_features.pNext = &dyn_render_features;
     vk12_features.bufferDeviceAddress = true;
     vk12_features.descriptorIndexing = true;
     vk12_features.descriptorBindingPartiallyBound = true;

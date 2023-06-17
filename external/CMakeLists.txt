@@ -68,7 +68,15 @@ add_library(spv_reflect STATIC
     SPIRV-Reflect/spirv_reflect.cpp SPIRV-Reflect/spirv_reflect.h
 )
 target_include_directories(spv_reflect PUBLIC
-    SPIRV-Reflect/
+    ${CMAKE_CURRENT_SOURCE_DIR}/SPIRV-Reflect/
 )
 set_target_properties(spv_reflect PROPERTIES CXX_VISIBILITY_PRESET hidden)
 set_target_properties(spv_reflect PROPERTIES VISIBILITY_INLINES_HIDDEN ON)
+
+add_library(imgui INTERFACE)
+target_include_directories(imgui INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/imgui
+)
+
+set(GLFW_LIBRARY_TYPE "SHARED")
+add_subdirectory(glfw)

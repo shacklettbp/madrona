@@ -103,15 +103,6 @@ void TaskGraph::init(int32_t start_node_idx, int32_t end_node_idx,
 // #endif
 }
 
-void TaskGraph::setupRenderer(Context &ctx, const void *renderer_inits,
-                              int32_t world_idx)
-{
-    const render::RendererInit &renderer_init =
-        ((const render::RendererInit *)renderer_inits)[world_idx];
-
-    render::RendererState::init(ctx, renderer_init);
-}
-
 void TaskGraph::updateBlockState()
 {
     uint32_t node_idx = cur_node_idx_.load_acquire();

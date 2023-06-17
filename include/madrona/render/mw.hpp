@@ -24,6 +24,15 @@ struct ViewSettings {
     ViewID viewID;
 };
 
+// FIXME: In the current design, the renderer is created before the
+// ECS and the below struct provides the pointers necessary for the ECS
+// to copy its data into the renderer. In a perfect world, it would be nice
+// if the renderer could use the ECS and the below RenderingSystem could
+// interface directly with the rendering APIs. You could then imagine a
+// different RenderingSystem for each possible renderer implement
+// (batch, viewer, etc)
+struct RendererBridge;
+
 struct RenderingSystem {
     static void registerTypes(ECSRegistry &registry);
 

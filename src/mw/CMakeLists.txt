@@ -9,7 +9,6 @@ target_link_libraries(madrona_mw_cpu
         madrona_mw_core
     PRIVATE
         madrona_mw_render
-        madrona_batch_render
 )
 
 if (NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION_MAJOR LESS 12)
@@ -25,7 +24,7 @@ target_link_libraries(madrona_mw_gpu
     PUBLIC
         madrona_hdrs madrona_cuda
     PRIVATE
-        madrona_mw_core madrona_batch_render madrona_json
+        madrona_mw_core madrona_json
         CUDA::nvrtc CUDA::cuda_driver
         ${CUDA_NVJITLINK_LIBRARY}
 )

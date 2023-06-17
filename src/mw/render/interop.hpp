@@ -8,6 +8,10 @@
 #define MADRONA_BATCHRENDER_METAL (1)
 #endif
 
+#undef MADRONA_BATCHRENDER_RT
+#undef MADRONA_BATCHRENDER_METAL
+#define MADRONA_VIZ (1)
+
 namespace madrona::render {
  
 struct AccelStructTransform {
@@ -58,6 +62,27 @@ struct alignas(16) PerspectiveCameraData {
 
 #endif
 
+#ifdef MADRONA_VIZ
+
+struct alignas(16) PerspectiveCameraData {
+    math::Vector3 position;
+    math::Quat rotation;
+    float xScale;
+    float yScale;
+    float zNear;
+    uint32_t pad[2];
+};
+
+struct alignas(16) InstanceData {
+    math::Vector3 position;
+    math::Quat rotation;
+    math::Diag3x3 scale;
+    int32_t objectID;
+    uint32_t pad;
+};
+
+#endif
+
 struct RendererInterface {
 #if defined(MADRONA_BATCHRENDER_RT)
     AccelStructInstance *tlasInstancesBase;
@@ -70,14 +95,18 @@ struct RendererInterface {
     uint32_t *numViews;
     InstanceData *instanceData;
     uint32_t *numInstances;
+#elif defined(MADRONA_VIZ)
+    PerspectiveCameraData **views;
+    uint32_t *numViews;
+    InstanceData **instances;
+    uint32_t *numInstances;
 #endif
     int32_t renderWidth;
     int32_t renderHeight;
 };
 
-struct RendererInit {
+struct RendererBridge {
     RendererInterface iface;
-    math::Vector3 worldOffset;
 };
 
 struct RendererState {
@@ -96,12 +125,18 @@ struct RendererState {
     InstanceData *instanceData;
     uint32_t *numInstances;
 #endif
+#ifdef MADRONA_VIZ
+    PerspectiveCameraData *views;
+    uint32_t *numViews;
+    InstanceData *instances;
+    uint32_t *numInstances;
+#endif
     int32_t renderWidth;
     int32_t renderHeight;
     float aspectRatio;
 
     static void init(Context &ctx,
-                     const RendererInit &init);
+                     const RendererBridge &bridge);
 };
 
 }

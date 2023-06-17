@@ -1,4 +1,5 @@
 #include <madrona/python.hpp>
+#include <madrona/exec_mode.hpp>
 
 #if defined(MADRONA_CLANG) || defined(MADRONA_GCC)
 #pragma GCC diagnostic push
@@ -76,6 +77,11 @@ static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
 }
 
 NB_MODULE(madrona_python, m) {
+      nb::enum_<ExecMode>(m, "ExecMode")
+        .value("CPU", ExecMode::CPU)
+        .value("CUDA", ExecMode::CUDA)
+        .export_values();
+
     nb::class_<Tensor>(m, "Tensor")
         .def("__init__", ([](Tensor *dst, nb::ndarray<> torch_tensor) {
             Optional<int> gpu_id = Optional<int>::none();

@@ -10,14 +10,7 @@ class ThreadPoolExecutor {
 public:
     struct Config {
         uint32_t numWorlds;
-        uint32_t maxViewsPerWorld;
-        uint32_t maxInstancesPerWorld;
-        uint32_t renderWidth;
-        uint32_t renderHeight;
-        uint32_t maxObjects;
         uint32_t numExportedBuffers;
-        render::CameraMode cameraMode;
-        int32_t renderGPUID;
         uint32_t numWorkers = 0;
     };
 
@@ -26,14 +19,13 @@ public:
         void *data;
     };
 
-    ThreadPoolExecutor(const Config &cfg);
+    ThreadPoolExecutor(
+        const Config &cfg,
+        const render::RendererBridge *renderer_bridge = nullptr);
     ~ThreadPoolExecutor();
     void run(Job *jobs, CountT num_jobs);
 
     CountT loadObjects(Span<const imp::SourceObject> objs);
-
-    uint8_t * rgbObservations() const;
-    float * depthObservations() const;
 
     void * getExported(CountT slot) const;
 
@@ -53,16 +45,15 @@ private:
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 class TaskGraphExecutor : private ThreadPoolExecutor {
 public:
-    TaskGraphExecutor(const Config &cfg,
-                      const ConfigT &user_cfg,
-                      const InitT *user_inits);
+    TaskGraphExecutor(
+        const Config &cfg,
+        const ConfigT &user_cfg,
+        const InitT *user_inits,
+        const render::RendererBridge *renderer_bridge = nullptr);
 
     inline void run();
 
-    using ThreadPoolExecutor::loadObjects;
     using ThreadPoolExecutor::getExported;
-    using ThreadPoolExecutor::rgbObservations;
-    using ThreadPoolExecutor::depthObservations;
 
     inline WorldT & getWorldData(CountT world_idx);
 
