@@ -107,7 +107,7 @@ static VkSurfaceFormatKHR selectSwapchainFormat(const Backend &backend,
     REQ_VK(backend.dt.getPhysicalDeviceSurfaceFormatsKHR(
             phy, surface, &num_formats, nullptr));
 
-    DynArray<VkSurfaceFormatKHR> formats(num_formats);
+    HeapArray<VkSurfaceFormatKHR> formats(num_formats);
     REQ_VK(backend.dt.getPhysicalDeviceSurfaceFormatsKHR(
             phy, surface, &num_formats, formats.data()));
 
@@ -135,7 +135,7 @@ static VkPresentModeKHR selectSwapchainMode(const Backend &backend,
     REQ_VK(backend.dt.getPhysicalDeviceSurfacePresentModesKHR(
             phy, surface, &num_modes, nullptr));
 
-    DynArray<VkPresentModeKHR> modes(num_modes);
+    HeapArray<VkPresentModeKHR> modes(num_modes);
     REQ_VK(backend.dt.getPhysicalDeviceSurfacePresentModesKHR(
             phy, surface, &num_modes, modes.data()));
 
@@ -221,14 +221,14 @@ static Swapchain makeSwapchain(const Backend &backend,
     };
 }
 
-static DynArray<VkImage> getSwapchainImages(const Device &dev,
+static HeapArray<VkImage> getSwapchainImages(const Device &dev,
                                             VkSwapchainKHR swapchain)
 {
     uint32_t num_images;
     REQ_VK(dev.dt.getSwapchainImagesKHR(dev.hdl, swapchain, &num_images,
                                         nullptr));
 
-    DynArray<VkImage> swapchain_images(num_images);
+    HeapArray<VkImage> swapchain_images(num_images);
     REQ_VK(dev.dt.getSwapchainImagesKHR(dev.hdl, swapchain, &num_images,
                                         swapchain_images.data()));
 
@@ -796,7 +796,7 @@ static Backend initializeBackend()
         enable_validation = true;
     }
 
-    return Backend((void (*)())get_inst_addr, enable_validation, true,
+    return Backend((void (*)())get_inst_addr, enable_validation, false,
                    PresentationState::getInstanceExtensions());
 }
 

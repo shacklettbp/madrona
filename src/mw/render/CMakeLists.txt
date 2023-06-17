@@ -7,8 +7,6 @@ target_link_libraries(madrona_mw_render PUBLIC
     madrona_mw_core
 )
 
-return()
-
 if (TARGET madrona_render_vk)
     add_library(madrona_batch_render STATIC
         batch_renderer.hpp

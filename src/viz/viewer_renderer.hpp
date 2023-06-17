@@ -61,7 +61,7 @@ public:
 
 private:
     Swapchain swapchain_;
-    DynArray<VkImage> swapchain_imgs_;
+    HeapArray<VkImage> swapchain_imgs_;
 };
 
 template <size_t N>
