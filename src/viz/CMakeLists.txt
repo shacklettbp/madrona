@@ -44,7 +44,7 @@ target_link_libraries(madrona_viewer PRIVATE
 
 if (TARGET madrona_cuda)
     target_link_libraries(madrona_viewer PRIVATE
-        madrona_cuda
+        madrona_cuda madrona_render_vk_cuda
     )
 endif()
 

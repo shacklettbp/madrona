@@ -70,5 +70,5 @@ if (TARGET madrona_cuda)
     )
 
     target_link_libraries(madrona_render_vk_cuda PRIVATE
-        madrona_render_vk madrona_cuda)
+        madrona_render_vk madrona_cuda madrona_common)
 endif()
