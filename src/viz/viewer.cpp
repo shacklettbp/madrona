@@ -308,13 +308,15 @@ Viewer::Viewer(const Config &cfg)
 Viewer::Viewer(Viewer &&o) = default;
 Viewer::~Viewer() = default;
 
-void Viewer::loop()
+void Viewer::loop(void (*step_fn)(void *), void *data)
 {
     auto window = impl_->renderer.window.platformWindow;
 
     float frame_duration = InternalConfig::secondsPerFrame;
     while (!glfwWindowShouldClose(window)) {
         auto start_time = chrono::steady_clock::now();
+
+        step_fn(data);
 
         impl_->startFrame();
 

@@ -29,11 +29,16 @@ public:
 
     const render::RendererBridge * rendererBridge() const;
 
-    void loop();
+    template <typename StepFn>
+    void loop(StepFn &&step_fn);
 
 private:
+    void loop(void (*step_fn)(void *), void *data);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 
 }
+
+#include "viewer.inl"

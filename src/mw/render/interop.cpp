@@ -7,6 +7,12 @@ namespace madrona::render {
 using namespace base;
 using namespace math;
 
+inline void clearInstanceCount(Context &,
+                               const RendererState &renderer_state)
+{
+    *(renderer_state.numInstances) = 0;
+}
+
 inline void instanceTransformSetup(Context &ctx,
                                    const Position &pos,
                                    const Rotation &rot,
@@ -125,12 +131,20 @@ void RenderingSystem::registerTypes(ECSRegistry &registry)
 TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
+    // FIXME: It feels like we should have persistent slots for renderer
+    // state rather than needing to continually reset the instance count
+    // and recreate the buffer. However, this might be hard to handle with
+    // double buffering
+    auto instance_clear = builder.addToGraph<ParallelForNode<Context,
+        clearInstanceCount,
+        RendererState>>(deps);
+
     auto instance_setup = builder.addToGraph<ParallelForNode<Context,
         instanceTransformSetup,
         Position,
         Rotation,
         Scale,
-        ObjectID>>(deps);
+        ObjectID>>({instance_clear});
 
     auto viewdata_update = builder.addToGraph<ParallelForNode<Context,
         updateViewData,
@@ -151,15 +165,8 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 
 void RenderingSystem::reset([[maybe_unused]] Context &ctx)
 {
-#ifdef MADRONA_BATCHRENDER_METAL
+#if defined(MADRONA_BATCHRENDER_METAL) || defined(MADRONA_VIZ)
     RendererState &renderer_state = ctx.singleton<RendererState>();
-    *renderer_state.numViews = 0;
-#endif
-
-#ifdef MADRONA_VIZ
-    RendererState &renderer_state = ctx.singleton<RendererState>();
-
-    *renderer_state.numInstances = 0;
     *renderer_state.numViews = 0;
 #endif
 }
