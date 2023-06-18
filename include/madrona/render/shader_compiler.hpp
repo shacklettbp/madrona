@@ -23,10 +23,18 @@ public:
         const char *value;
     };
 
+    struct EntryConfig {
+        const char *func;
+        ShaderStage stage;
+    };
+
+    // If entry is default / not provided, SPIRVShader will
+    // have multiple entry points.
     MADRONA_IMPORT SPIRVShader compileHLSLFileToSPV(
         const char *path,
         Span<const char *const> include_dirs,
-        Span<const MacroDefn> macro_defns);
+        Span<const MacroDefn> macro_defns,
+        EntryConfig entry = { nullptr, ShaderStage {}});
 
 #ifdef MADRONA_APPLE
     MADRONA_IMPORT MTLShader compileHLSLFileToMTL(

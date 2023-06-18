@@ -75,7 +75,7 @@ static GLFWwindow *makeGLFWwindow(uint32_t width, uint32_t height)
 {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+    glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
 
 #if 0
     auto monitor = glfwGetPrimaryMonitor();
@@ -432,38 +432,8 @@ static VkRenderPass makeRenderPass(const Device &dev,
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass_desc;
 
-    array<VkSubpassDependency, 3> pre_deps {{
-        {
-            VK_SUBPASS_EXTERNAL,
-            0,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            0,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            0,
-        },
-        {
-            VK_SUBPASS_EXTERNAL,
-            0,
-            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-            0,
-            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            0,
-        },
-        {
-            0,
-            VK_SUBPASS_EXTERNAL,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            0,
-        },
-    }};
-
-    render_pass_info.dependencyCount = pre_deps.size();
-    render_pass_info.pDependencies = pre_deps.data();
+    render_pass_info.dependencyCount = 0;
+    render_pass_info.pDependencies = nullptr;
 
     VkRenderPass render_pass;
     REQ_VK(dev.dt.createRenderPass(dev.hdl, &render_pass_info, nullptr,
@@ -472,25 +442,27 @@ static VkRenderPass makeRenderPass(const Device &dev,
     return render_pass;
 }
 
-static PipelineShaders makeDrawShader(const Device &dev,
-                                      VkSampler repeat_sampler,
-                                      VkSampler clamp_sampler)
+static std::array<PipelineShaders, 2> makeDrawShaders(
+    const Device &dev, VkSampler repeat_sampler, VkSampler clamp_sampler)
 {
     (void)repeat_sampler;
     (void)clamp_sampler;
-
-    vector<string> shader_defines;
 
     std::filesystem::path shader_dir =
         std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
         "shaders";
 
+    auto shader_path = (shader_dir / "viewer_draw.hlsl");
+
     ShaderCompiler compiler;
-    SPIRVShader spirv = compiler.compileHLSLFileToSPV(
-        (shader_dir / "viewer_draw.hlsl").c_str(), {}, {});
+    SPIRVShader vert_spirv = compiler.compileHLSLFileToSPV(
+        shader_path.c_str(), {}, {},
+        { "vert", ShaderStage::Vertex });
 
+    SPIRVShader frag_spirv = compiler.compileHLSLFileToSPV(
+        shader_path.c_str(), {}, {},
+        { "frag", ShaderStage::Fragment });
 
-    return PipelineShaders(dev, spirv, {
 #if 0
             {0, 2, repeat_sampler, 1, 0},
             {0, 3, clamp_sampler, 1, 0},
@@ -499,20 +471,23 @@ static PipelineShaders makeDrawShader(const Device &dev,
                     VulkanConfig::textures_per_material,
              VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT},
 #endif
-        });
+
+    return {
+        PipelineShaders(dev, vert_spirv, {}),
+        PipelineShaders(dev, frag_spirv, {}),
+    };
 }
 
 static PipelineShaders makeCullShader(const Device &dev)
 {
-    vector<string> shader_defines;
-
     std::filesystem::path shader_dir =
         std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
     SPIRVShader spirv = compiler.compileHLSLFileToSPV(
-        (shader_dir / "viewer_cull.hlsl").c_str(), {}, {});
+        (shader_dir / "viewer_cull.hlsl").c_str(), {}, {},
+        { "instanceCull", ShaderStage::Compute });
 
     return PipelineShaders(dev, spirv, {});
 }
@@ -536,8 +511,8 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
                                     VkSampler clamp_sampler,
                                     uint32_t num_frames)
 {
-    PipelineShaders shader =
-        makeDrawShader(dev, repeat_sampler, clamp_sampler);
+    auto [vert_shader, frag_shader] =
+        makeDrawShaders(dev, repeat_sampler, clamp_sampler);
 
     // Disable auto vertex assembly
     VkPipelineVertexInputStateCreateInfo vert_info;
@@ -638,8 +613,8 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     // Layout configuration
 
     array<VkDescriptorSetLayout, 2> draw_desc_layouts {{
-        shader.getLayout(0),
-        shader.getLayout(1),
+        vert_shader.getLayout(0),
+        vert_shader.getLayout(1),
     }};
 
     VkPipelineLayoutCreateInfo gfx_layout_info;
@@ -662,7 +637,7 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
             nullptr,
             0,
             VK_SHADER_STAGE_VERTEX_BIT,
-            shader.getShader(0),
+            vert_shader.getShader(0),
             "vert",
             nullptr,
         },
@@ -671,7 +646,7 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
             nullptr,
             0,
             VK_SHADER_STAGE_FRAGMENT_BIT,
-            shader.getShader(0),
+            frag_shader.getShader(0),
             "frag",
             nullptr,
         },
@@ -702,10 +677,14 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     REQ_VK(dev.dt.createGraphicsPipelines(dev.hdl, pipeline_cache, 1,
                                           &gfx_info, nullptr, &draw_pipeline));
 
-    FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
+    FixedDescriptorPool desc_pool(dev, vert_shader, 0, num_frames);
+
+    HeapArray<PipelineShaders> shaders(2);
+    shaders.emplace(0, std::move(vert_shader));
+    shaders.emplace(1, std::move(frag_shader));
 
     return {
-        std::move(shader),
+        std::move(shaders),
         draw_layout,
         { draw_pipeline },
         std::move(desc_pool),
@@ -776,8 +755,11 @@ static Pipeline<1> makeCullPipeline(const Device &dev,
 
     FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
 
+    HeapArray<PipelineShaders> shaders(1);
+    shaders.emplace(0, std::move(shader));
+
     return Pipeline<1> {
-        std::move(shader),
+        std::move(shaders),
         cull_layout,
         pipelines,
         std::move(desc_pool),
@@ -888,37 +870,37 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 6> desc_updates;
+    std::array<VkWriteDescriptorSet, 5> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
     view_info.offset = 0;
     view_info.range = buffer_sizes[0];
 
-    DescHelper::uniform(desc_updates[0], cull_set, &view_info, 0);
-    DescHelper::uniform(desc_updates[1], draw_set, &view_info, 0);
+    //DescHelper::uniform(desc_updates[0], cull_set, &view_info, 0);
+    DescHelper::uniform(desc_updates[0], draw_set, &view_info, 0);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = render_input.buffer;
     instance_info.offset = buffer_offsets[1];
     instance_info.range = buffer_sizes[2];
 
-    DescHelper::storage(desc_updates[2], cull_set, &instance_info, 1);
-    DescHelper::storage(desc_updates[3], draw_set, &instance_info, 1);
+    DescHelper::storage(desc_updates[1], cull_set, &instance_info, 1);
+    DescHelper::storage(desc_updates[2], draw_set, &instance_info, 1);
 
     VkDescriptorBufferInfo drawcount_info;
     drawcount_info.buffer = render_input.buffer;
     drawcount_info.offset = buffer_offsets[0];
     drawcount_info.range = buffer_sizes[1];
 
-    DescHelper::uniform(desc_updates[4], cull_set, &drawcount_info, 2);
+    DescHelper::storage(desc_updates[3], cull_set, &drawcount_info, 2);
 
     VkDescriptorBufferInfo draw_info;
     draw_info.buffer = render_input.buffer;
     draw_info.offset = buffer_offsets[2];
     draw_info.range = buffer_sizes[3];
 
-    DescHelper::storage(desc_updates[5], cull_set, &draw_info, 3);
+    DescHelper::storage(desc_updates[4], cull_set, &draw_info, 3);
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
@@ -1014,30 +996,8 @@ static VkRenderPass makeImGuiRenderPass(const Device &dev,
     render_pass_info.pAttachments = attachment_descs.data();
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass_desc;
-
-    array<VkSubpassDependency, 2> pre_deps {{
-        {
-            VK_SUBPASS_EXTERNAL,
-            0,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            0,
-        },
-        {
-            0,
-            VK_SUBPASS_EXTERNAL,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_ACCESS_TRANSFER_READ_BIT,
-            0,
-        },
-    }};
-
-    render_pass_info.dependencyCount = pre_deps.size();
-    render_pass_info.pDependencies = pre_deps.data();
+    render_pass_info.dependencyCount = 0;
+    render_pass_info.pDependencies = nullptr;
 
     VkRenderPass render_pass;
     REQ_VK(dev.dt.createRenderPass(dev.hdl, &render_pass_info, nullptr,
@@ -1264,8 +1224,8 @@ Renderer::Renderer(uint32_t gpu_id,
       object_draw_(makeDrawPipeline(dev, pipeline_cache_, render_pass_,
                                     repeat_sampler_, clamp_sampler_,
                                     InternalConfig::numFrames)),
-      asset_desc_pool_cull_(dev, instance_cull_.shader, 1, 1),
-      asset_desc_pool_draw_(dev, object_draw_.shader, 1, 1),
+      asset_desc_pool_cull_(dev, instance_cull_.shaders[0], 1, 1),
+      asset_desc_pool_draw_(dev, object_draw_.shaders[0], 1, 1),
       asset_set_cull_(asset_desc_pool_cull_.makeSet()),
       asset_set_draw_(asset_desc_pool_draw_.makeSet()),
       load_cmd_pool_(makeCmdPool(dev, dev.gfxQF)),
@@ -1448,7 +1408,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
     GPURunUtil gpu_run {
         load_cmd_pool_,
         load_cmd_,
-        transfer_queue_,
+        render_queue_, // FIXME
         load_fence_
     };
 
@@ -1590,82 +1550,100 @@ void Renderer::render(const ViewerCam &cam,
                          1, &view_copy);
 
 
-    uint32_t num_instances =
-        engine_interop_.bridge.iface.numInstances[world_idx];
-
-    VkDeviceSize world_instance_byte_offset = sizeof(PackedInstanceData) *
-        world_idx * engine_interop_.maxInstancesPerWorld;
-
-    VkBufferCopy instance_copy = {
-        .srcOffset = world_instance_byte_offset,
-        .dstOffset = frame.instanceOffset,
-        .size = sizeof(PackedInstanceData) * num_instances,
-    };
-
-    dev.dt.cmdCopyBuffer(draw_cmd, engine_interop_.renderInputStaging.buffer,
-                         frame.renderInput.buffer,
-                         1, &instance_copy);
-
     dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
                          frame.drawCountOffset, sizeof(uint32_t), 0);
 
-    VkMemoryBarrier copy_barrier {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-    };
+    uint32_t num_instances =
+        engine_interop_.bridge.iface.numInstances[world_idx];
 
-    dev.dt.cmdPipelineBarrier(draw_cmd,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
-        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-        0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
+    if (num_instances > 0) {
+        VkDeviceSize world_instance_byte_offset = sizeof(PackedInstanceData) *
+            world_idx * engine_interop_.maxInstancesPerWorld;
 
-    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                           instance_cull_.hdls[0]);
+        VkBufferCopy instance_copy = {
+            .srcOffset = world_instance_byte_offset,
+            .dstOffset = frame.instanceOffset,
+            .size = sizeof(PackedInstanceData) * num_instances,
+        };
 
-    std::array cull_descriptors {
-        frame.cullShaderSet,
-        asset_set_cull_,
-    };
+        dev.dt.cmdCopyBuffer(draw_cmd,
+                             engine_interop_.renderInputStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &instance_copy);
 
-    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                 instance_cull_.layout, 0,
-                                 cull_descriptors.size(),
-                                 cull_descriptors.data(),
-                                 0, nullptr);
+        VkMemoryBarrier copy_barrier {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        };
 
-    CullPushConst cull_push_const {
-        num_instances,
-    };
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
 
-    dev.dt.cmdPushConstants(draw_cmd, instance_cull_.layout,
-                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                            sizeof(CullPushConst), &cull_push_const);
+        dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                               instance_cull_.hdls[0]);
 
-    uint32_t num_workgroups = utils::divideRoundUp(num_instances, 32_u32);
-    dev.dt.cmdDispatch(draw_cmd, num_workgroups, 1, 1);
+        std::array cull_descriptors {
+            frame.cullShaderSet,
+            asset_set_cull_,
+        };
 
-    VkMemoryBarrier cull_draw_barrier {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-        .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
-    };
+        dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                     instance_cull_.layout, 0,
+                                     cull_descriptors.size(),
+                                     cull_descriptors.data(),
+                                     0, nullptr);
 
-    dev.dt.cmdPipelineBarrier(draw_cmd,
-                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                              VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-                              0, 1, &cull_draw_barrier, 0, nullptr,
-                              0, nullptr);
+        CullPushConst cull_push_const {
+            num_instances,
+        };
+
+        dev.dt.cmdPushConstants(draw_cmd, instance_cull_.layout,
+                                VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                sizeof(CullPushConst), &cull_push_const);
+
+        uint32_t num_workgroups = utils::divideRoundUp(num_instances, 32_u32);
+        dev.dt.cmdDispatch(draw_cmd, num_workgroups, 1, 1);
+
+        VkMemoryBarrier cull_draw_barrier {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                  VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                                  0, 1, &cull_draw_barrier, 0, nullptr,
+                                  0, nullptr);
+    } else {
+        VkMemoryBarrier copy_barrier {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask =
+                VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+                VK_ACCESS_UNIFORM_READ_BIT,
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
+    }
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                            object_draw_.hdls[0]);
 
     std::array draw_descriptors {
         frame.drawShaderSet,
-        asset_set_cull_,
+        asset_set_draw_,
     };
 
     dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1743,7 +1721,7 @@ void Renderer::render(const ViewerCam &cam,
 
     VkImage swapchain_img = present_.getImage(swapchain_idx);
 
-    array<VkImageMemoryBarrier, 1> blit_prepare {{
+    array<VkImageMemoryBarrier, 2> blit_prepare {{
         {
             VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             nullptr,
@@ -1758,11 +1736,27 @@ void Renderer::render(const ViewerCam &cam,
                 VK_IMAGE_ASPECT_COLOR_BIT,
                 0, 1, 0, 1
             },
+        },
+        {
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            frame.fb.colorAttachment.image,
+            {
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                0, 1, 0, 1
+            },
         }
     }};
 
     dev.dt.cmdPipelineBarrier(draw_cmd,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT |
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT,
         0,
         0, nullptr, 0, nullptr,

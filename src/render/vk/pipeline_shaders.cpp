@@ -86,13 +86,13 @@ PipelineShaders::PipelineShaders(
             binding_info.descriptorType = desc_type;
             binding_info.descriptorCount = rfl_binding.numResources;
             binding_info.stageFlags = 0;
-            if ((rfl_binding.stageUsage & uint32_t(refl::Stage::Vertex))) {
+            if ((rfl_binding.stageUsage & uint32_t(ShaderStage::Vertex))) {
                 binding_info.stageFlags |= VK_SHADER_STAGE_VERTEX_BIT;
             }
-            if ((rfl_binding.stageUsage & uint32_t(refl::Stage::Fragment))) {
+            if ((rfl_binding.stageUsage & uint32_t(ShaderStage::Fragment))) {
                 binding_info.stageFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
             }
-            if ((rfl_binding.stageUsage & uint32_t(refl::Stage::Compute))) {
+            if ((rfl_binding.stageUsage & uint32_t(ShaderStage::Compute))) {
                 binding_info.stageFlags |= VK_SHADER_STAGE_COMPUTE_BIT;
             }
 

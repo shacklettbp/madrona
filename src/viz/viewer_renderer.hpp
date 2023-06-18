@@ -66,7 +66,7 @@ private:
 
 template <size_t N>
 struct Pipeline {
-    render::vk::PipelineShaders shader;
+    HeapArray<render::vk::PipelineShaders> shaders;
     VkPipelineLayout layout;
     std::array<VkPipeline, N> hdls;
     render::vk::FixedDescriptorPool descPool;
@@ -192,7 +192,7 @@ private:
     EngineInterop engine_interop_;
 
     uint32_t cur_frame_;
-    DynArray<Frame> frames_;
+    HeapArray<Frame> frames_;
     DynArray<AssetData> loaded_assets_;
 };
 

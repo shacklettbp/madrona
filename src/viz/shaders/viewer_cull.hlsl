@@ -13,9 +13,7 @@ cbuffer ViewData {
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 
 [[vk::binding(2, 0)]]
-cbuffer counts {
-    uint32_t drawCount;
-};
+RWStructuredBuffer<uint32_t> drawCount;
 
 [[vk::binding(3, 0)]]
 RWStructuredBuffer<DrawCmd> drawCommandBuffer;
@@ -34,13 +32,13 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     const float4 d1 = packed.data[1];
     const float4 d2 = packed.data[2];
 
-    EngineInstanceData out;
-    out.position = d0.xyz;
-    out.rotation = float4(d1.xyz, d0.w);
-    out.scale = float3(d1.w, d2.xy);
-    out.objectID = asint(d2.z);
+    EngineInstanceData o;
+    o.position = d0.xyz;
+    o.rotation = float4(d1.xyz, d0.w);
+    o.scale = float3(d1.w, d2.xy);
+    o.objectID = asint(d2.z);
 
-    return out;
+    return o;
 }
 
 // No actual culling performed yet
@@ -59,7 +57,7 @@ void instanceCull(uint3 idx : SV_DispatchThreadID)
     ObjectData obj = objectDataBuffer[instance_data.objectID];
 
     uint draw_offset;
-    InterlockedAdd(drawCount, obj.numMeshes, draw_offset);
+    InterlockedAdd(drawCount[0], obj.numMeshes, draw_offset);
 
     for (int32_t i = 0; i < obj.numMeshes; i++) {
         MeshData mesh = meshDataBuffer[obj.meshOffset + i];

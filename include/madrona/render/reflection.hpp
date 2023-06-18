@@ -3,9 +3,9 @@
 #include <madrona/heap_array.hpp>
 #include <string>
 
-namespace madrona::render::refl {
+namespace madrona::render {
 
-enum class Stage : uint32_t {
+enum class ShaderStage : uint32_t {
     Vertex = 1 << 0,
     Fragment = 1 << 1,
     Compute = 1 << 2,
@@ -13,9 +13,11 @@ enum class Stage : uint32_t {
     Amplification = 1 << 4,
 };
 
+namespace refl {
+
 struct EntryPoint {
     std::string name;
-    Stage stage;
+    ShaderStage stage;
 };
 
 enum class BindingType : uint32_t {
@@ -48,5 +50,7 @@ struct SPIRV : ShaderInfo {
     HeapArray<Binding> bindings;
     HeapArray<DescriptorSet> descriptorSets;
 };
+
+}
 
 }

@@ -6,7 +6,7 @@ DrawPushConst push_const;
 
 [[vk::binding(0, 0)]]
 cbuffer ViewData {
-    PackedViewData viewData;
+    PackedViewData viewDataBuffer;
 };
 
 [[vk::binding(1, 0)]]
@@ -17,14 +17,7 @@ StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 [[vk::binding(0, 1)]]
 StructuredBuffer<PackedVertex> vertexDataBuffer;
 
-struct VSOut {
-    float4 clipPos : SV_POSITION;
-    [[vk::location(0)]] float3 viewPos : TEXCOORD0;
-    [[vk::location(1)]] float3 normal : TEXCOORD1;
-    [[vk::location(2)]] float2 uv : TEXCOORD2;
-};
-
-struct PSIn {
+struct V2F {
     [[vk::location(0)]] float3 viewPos : TEXCOORD0;
     [[vk::location(1)]] float3 normal : TEXCOORD1;
     [[vk::location(2)]] float2 uv : TEXCOORD2;
@@ -57,8 +50,8 @@ PerspectiveCameraData unpackViewData(PackedViewData packed)
     const float4 d2 = packed.data[2];
 
     PerspectiveCameraData cam;
-    cam.position = d0.xyz;
-    cam.rotation = float4(d1.xyz, d0.w);
+    cam.pos = d0.xyz;
+    cam.rot = float4(d1.xyz, d0.w);
     cam.xScale = d1.w;
     cam.yScale = d2.x;
     cam.zNear = d2.y;
@@ -93,13 +86,13 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     const float4 d1 = packed.data[1];
     const float4 d2 = packed.data[2];
 
-    EngineInstanceData out;
-    out.position = d0.xyz;
-    out.rotation = float4(d1.xyz, d0.w);
-    out.scale = float3(d1.w, d2.xy);
-    out.objectID = asint(d2.z);
+    EngineInstanceData o;
+    o.position = d0.xyz;
+    o.rotation = float4(d1.xyz, d0.w);
+    o.scale = float3(d1.w, d2.xy);
+    o.objectID = asint(d2.z);
 
-    return out;
+    return o;
 }
  
 void computeTransform(float3 obj_t,
@@ -140,13 +133,13 @@ void computeTransform(float3 obj_t,
 }
 
 [shader("vertex")]
-VSOut vert(uint vid : SV_VertexID, uint instance_id : SV_InstanceID)
+float4 vert(in uint vid : SV_VertexID,
+            in uint instance_id : SV_InstanceID,
+            out V2F v2f) : SV_Position
 {
-    PackedVertex packed_vert = vertexData[vid];
-    Vertex vert = unpackVertex(packed_vert);
+    Vertex vert = unpackVertex(vertexDataBuffer[vid]);
 
-    PerspectiveCameraData view_data = 
-        unpackViewData(viewDataBuffer[push_const.viewIdx]);
+    PerspectiveCameraData view_data = unpackViewData(viewDataBuffer);
 
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
@@ -154,33 +147,32 @@ VSOut vert(uint vid : SV_VertexID, uint instance_id : SV_InstanceID)
     float3x3 to_view_rot;
     float3 to_view_translation;
     computeTransform(instance_data.position, instance_data.rotation,
-                     view_data.position, view_data.rotation,
+                     view_data.pos, view_data.rot,
                      to_view_rot, to_view_translation);
 
-    float3 view_pos = to_view_rot * (obj_scale * vert.position) +
+    float3 view_pos = mul(to_view_rot, (instance_data.scale * vert.position)) +
         to_view_translation;
     float4 clip_pos = float4(
-        draw_data.projScale.x * view_pos.x,
-        draw_data.projScale.y * view_pos.z,
-        draw_data.projZNear,
+        view_data.xScale * view_pos.x,
+        view_data.yScale * view_pos.z,
+        view_data.zNear,
         view_pos.y);
 
-    VSOut out;
-    out.clipPos = clip_pos;
-    out.viewPos = view_pos;
-    out.normal = normalize(to_view_rot * (vert.normal / obj_scale));
-    out.uv = vert.uv;
+    v2f.viewPos = view_pos;
+    v2f.normal = normalize(
+        mul(to_view_rot, (vert.normal / instance_data.scale)));
+    v2f.uv = vert.uv;
 
-    return out;
+    return clip_pos;
 }
 
 [shader("pixel")]
-float4 frag(PSIn in) : SV_TARGET
+float4 frag(in V2F v2f) : SV_TARGET0
 {
-    float hit_angle = max(dot(normalize(in.normal),
-                              normalize(-in.viewPos)), 0.f);
+    float hit_angle = max(dot(normalize(v2f.normal),
+                              normalize(-v2f.viewPos)), 0.f);
 
-    return float4(float4(hit_angle), 1.0);
+    return float4(float3(hit_angle, hit_angle, hit_angle), 1.0);
 }
 
 #if 0

@@ -1,6 +1,7 @@
 #include <madrona/render/shader_compiler.hpp>
 
 #include <madrona/macros.hpp>
+#include <madrona/optional.hpp>
 
 #include <cstdlib>
 #include <memory>
@@ -185,32 +186,36 @@ static HeapArray<uint32_t> hlslToSPV(
     IDxcCompiler3 *dxc_compiler,
     IDxcIncludeHandler *include_handler,
     Span<const char *const> include_dirs,
-    Span<const ShaderCompiler::MacroDefn> macro_defns)
+    Span<const ShaderCompiler::MacroDefn> macro_defns,
+    const char *entry_func,
+    ShaderStage entry_stage)
 {
-#if 0
 #define TYPE_STR(type_str) (type_str L"_6_7")
-    LPCWSTR dxc_type;
-    switch (stage) {
-        case ShaderStage::Vertex:
-            dxc_type = TYPE_STR(L"vs");
-            break;
-        case ShaderStage::Fragment:
-            dxc_type = TYPE_STR(L"ps");
-            break;
-        case ShaderStage::Compute:
-            dxc_type = TYPE_STR(L"cs");
-            break;
-        case ShaderStage::Mesh:
-            dxc_type = TYPE_STR(L"ms");
-            break;
-        case ShaderStage::Amplification:
-            dxc_type = TYPE_STR(L"as");
-            break;
-        default:
-            FATAL("Shader compilation: Unsupported shader stage type");
+    LPCWSTR stage_type_str;
+    if (entry_func == nullptr) {
+        stage_type_str = TYPE_STR(L"lib");
+    } else {
+        switch (entry_stage) {
+            case ShaderStage::Vertex:
+                stage_type_str = TYPE_STR(L"vs");
+                break;
+            case ShaderStage::Fragment:
+                stage_type_str = TYPE_STR(L"ps");
+                break;
+            case ShaderStage::Compute:
+                stage_type_str = TYPE_STR(L"cs");
+                break;
+            case ShaderStage::Mesh:
+                stage_type_str = TYPE_STR(L"ms");
+                break;
+            case ShaderStage::Amplification:
+                stage_type_str = TYPE_STR(L"as");
+                break;
+            default:
+                FATAL("Shader compilation: Unsupported shader stage type");
+        }
     }
 #undef TYPE_STR
-#endif
 
     HeapArray<wchar_t> lshader_path = toWide(shader_path);
 
@@ -222,16 +227,17 @@ static HeapArray<uint32_t> hlslToSPV(
         L"-spirv",
         L"-fspv-target-env=vulkan1.2",
         //L"-fspv-reflect",
-        L"-T", L"lib_6_7",
+        L"-T", stage_type_str,
         L"-HV", L"2021",
         L"-enable-16bit-types",
     };
 
-    //dxc_args.push_bacj(L"-E");
-    //dxc_args.push_back(wentry.c_str());
-
-    //setDXCArg(L"-T");
-    //setDXCArg(dxc_type);
+    Optional<HeapArray<wchar_t>> wentry = Optional<HeapArray<wchar_t>>::none();
+    if (entry_func != nullptr) {
+        wentry.emplace(toWide(entry_func));
+        dxc_args.push_back(L"-E");
+        dxc_args.push_back(wentry->data());
+    }
 
     DynArray<HeapArray<wchar_t>> wdefines(macro_defns.size());
 
@@ -293,17 +299,22 @@ static HeapArray<uint32_t> hlslToSPV(
     return bytecode;
 }
 
-static refl::Stage convertSPVReflectStage(
+static ShaderStage convertSPVReflectStage(
     SpvReflectShaderStageFlagBits stage)
 {
     using namespace refl;
 
     switch (stage) {
-        case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT: return Stage::Vertex;
-        case SPV_REFLECT_SHADER_STAGE_FRAGMENT_BIT: return Stage::Fragment;
-        case SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT: return Stage::Compute;
-        case SPV_REFLECT_SHADER_STAGE_TASK_BIT_EXT: return Stage::Amplification;
-        case SPV_REFLECT_SHADER_STAGE_MESH_BIT_EXT: return Stage::Mesh;
+        case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT:
+            return ShaderStage::Vertex;
+        case SPV_REFLECT_SHADER_STAGE_FRAGMENT_BIT:
+            return ShaderStage::Fragment;
+        case SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT:
+            return ShaderStage::Compute;
+        case SPV_REFLECT_SHADER_STAGE_TASK_BIT_EXT:
+            return ShaderStage::Amplification;
+        case SPV_REFLECT_SHADER_STAGE_MESH_BIT_EXT:
+            return ShaderStage::Mesh;
         default:
             FATAL("Unsupported SPIRV shader stage");
     }
@@ -345,7 +356,7 @@ static refl::SPIRV buildSPIRVReflectionData(
     for (CountT i = 0; i < entry_points.size(); i++) {
         const auto &spv_rfl_entry = rfl_mod.entry_points[i];
 
-        Stage stage = convertSPVReflectStage(spv_rfl_entry.shader_stage);
+        ShaderStage stage = convertSPVReflectStage(spv_rfl_entry.shader_stage);
         entry_points.emplace(i, EntryPoint {
             .name = spv_rfl_entry.name,
             .stage = stage,
@@ -428,14 +439,16 @@ static refl::SPIRV buildSPIRVReflectionData(
 MADRONA_EXPORT SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
    const char *path,
    Span<const char *const> include_dirs,
-   Span<const MacroDefn> macro_defns)
+   Span<const MacroDefn> macro_defns,
+   EntryConfig entry)
 {
     CComPtr<IDxcBlobEncoding> src_blob =
         loadFileToDxcBlob(impl_->dxcUtils, path);
 
     auto spv_bytecode = hlslToSPV(src_blob->GetBufferPointer(),
         src_blob->GetBufferSize(), path, impl_->dxcCompiler,
-        impl_->dxcIncludeHandler, include_dirs, macro_defns);
+        impl_->dxcIncludeHandler, include_dirs, macro_defns,
+        entry.func, entry.stage);
 
     refl::SPIRV refl = buildSPIRVReflectionData(spv_bytecode.data(),
         spv_bytecode.size() * sizeof(uint32_t));

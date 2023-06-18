@@ -363,6 +363,7 @@ Device Backend::initDevice(
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
         VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME,
         VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
+        VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
     };
 
     uint32_t num_supported_extensions;
@@ -574,6 +575,7 @@ Device Backend::initDevice(
     vk12_features.descriptorIndexing = true;
     vk12_features.descriptorBindingPartiallyBound = true;
     vk12_features.descriptorBindingUpdateUnusedWhilePending = true;
+    vk12_features.drawIndirectCount = true;
     vk12_features.runtimeDescriptorArray = true;
     vk12_features.shaderStorageBufferArrayNonUniformIndexing = true;
     vk12_features.shaderSampledImageArrayNonUniformIndexing = true;
