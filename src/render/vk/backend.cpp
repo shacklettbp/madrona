@@ -1,5 +1,6 @@
 #include <madrona/render/vk/backend.hpp>
 
+#include <madrona/macros.hpp>
 #include <madrona/utils.hpp>
 #include <madrona/heap_array.hpp>
 #include <madrona/dyn_array.hpp>
@@ -213,6 +214,11 @@ Backend::Init Backend::Init::init(
     inst_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     inst_info.pNext = &val_features;
     inst_info.pApplicationInfo = &app_info;
+
+#if defined(MADRONA_MACOS) or defined(MADRONA_IOS)
+    inst_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
 
     if (layers.size() > 0) {
         inst_info.enabledLayerCount = layers.size();
@@ -502,6 +508,9 @@ Device Backend::initDevice(
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
         VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
         VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
+#if defined(MADRONA_MACOS) || defined(MADRONA_IOS)
+        "VK_KHR_portability_subset"
+#endif
     };
 
     uint32_t num_supported_extensions;
@@ -549,7 +558,9 @@ Device Backend::initDevice(
     }
 
     if (debug_ != VK_NULL_HANDLE) {
+#if !defined(MADRONA_MACOS) && !defined(MADRONA_IOS)
         extensions.push_back(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME);
+#endif
     }
 
     VkPhysicalDeviceFeatures2 feats;
@@ -694,7 +705,7 @@ Device Backend::initDevice(
     requested_features.features.samplerAnisotropy = true;
     requested_features.features.shaderInt16 = true;
     requested_features.features.shaderInt64 = true;
-    requested_features.features.wideLines = true;
+    requested_features.features.wideLines = false;
     requested_features.features.fillModeNonSolid = true;
 
     dev_create_info.pNext = &requested_features;
