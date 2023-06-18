@@ -19,6 +19,8 @@ using namespace std;
 
 namespace madrona::render::vk {
 
+namespace {
+
 struct InitializationDispatch {
     PFN_vkGetInstanceProcAddr
         getInstanceAddr;
@@ -30,6 +32,17 @@ struct InitializationDispatch {
         enumerateInstanceLayerProperties;
     PFN_vkCreateInstance createInstance;
 };
+
+struct QueueFamilyChoices {
+    uint32_t gfxQF;
+    uint32_t numGFXQueues;
+    uint32_t computeQF;
+    uint32_t numComputeQueues;
+    uint32_t transferQF;
+    uint32_t numTransferQueues;
+};
+
+}
 
 struct Backend::Init {
     VkInstance hdl;
@@ -348,6 +361,106 @@ VkPhysicalDevice Backend::findPhysicalDevice(
     FATAL("Cannot find matching vulkan UUID for GPU");
 }
 
+static QueueFamilyChoices chooseQueueFamilies(
+    VkQueueFamilyProperties2 *queue_families,
+    const uint32_t num_queue_families,
+    VkPhysicalDevice phy,
+    PFN_vkGetPhysicalDeviceSurfaceSupportKHR surface_support_fn,
+    const Optional<VkSurfaceKHR> &present_surface)
+{
+    auto present_check = [&](uint32_t qf_idx) {
+        if (!present_surface.has_value()) {
+            return true;
+        }
+
+        VkBool32 supported;
+        REQ_VK(surface_support_fn(phy, qf_idx, *present_surface, &supported));
+
+        return supported == VK_TRUE;
+    };
+
+    constexpr uint32_t qf_sentinel = 0xFFFF'FFFF;
+
+    QueueFamilyChoices res {
+        .gfxQF = qf_sentinel,
+        .numGFXQueues = 0,
+        .computeQF = qf_sentinel,
+        .numComputeQueues = 0,
+        .transferQF = qf_sentinel,
+        .numTransferQueues = 0,
+    };
+
+    // Currently only finds dedicated transfer, compute, and gfx queues
+    // FIXME implement more flexiblity in queue choices
+    // FIXME: allow choosing graphics or compute present support
+
+    // Pick graphics family that can present with largest number of queues
+    for (uint32_t i = 0; i < num_queue_families; i++) {
+        const auto &qf_prop = queue_families[i].queueFamilyProperties;
+
+        if ((qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) && present_check(i)) {
+            if (qf_prop.queueCount > res.numGFXQueues) {
+                res.gfxQF = i;
+                res.numGFXQueues = qf_prop.queueCount;
+            }
+        }
+    }
+
+    bool dedicated_compute_found = false;
+    for (uint32_t i = 0; i < num_queue_families; i++) {
+        if (i == res.gfxQF) {
+            continue;
+        }
+
+        const auto &qf_prop = queue_families[i].queueFamilyProperties;
+
+        if (!(qf_prop.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
+            continue;
+        }
+
+        bool is_dedicated = !(qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT);
+        if ((is_dedicated && !dedicated_compute_found) ||
+                (is_dedicated == dedicated_compute_found &&
+                 qf_prop.queueCount > res.numComputeQueues)) {
+            res.computeQF = i;
+            res.numComputeQueues = qf_prop.queueCount;
+        } 
+        dedicated_compute_found |= is_dedicated;
+    }
+
+    bool dedicated_transfer_found = false;
+    for (uint32_t i = 0; i < num_queue_families; i++) {
+        if (i == res.gfxQF || i == res.computeQF) {
+            continue;
+        }
+
+        const auto &qf_prop = queue_families[i].queueFamilyProperties;
+
+        if (!(qf_prop.queueFlags & VK_QUEUE_TRANSFER_BIT)) {
+            continue;
+        }
+
+        bool is_dedicated = !(qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+            !(qf_prop.queueFlags & VK_QUEUE_COMPUTE_BIT);
+
+        if ((is_dedicated && !dedicated_transfer_found) ||
+                (is_dedicated == dedicated_transfer_found &&
+                 qf_prop.queueCount > res.numTransferQueues)) {
+            res.transferQF = i;
+            res.numTransferQueues = qf_prop.queueCount;
+        } 
+        dedicated_transfer_found |= is_dedicated;
+    }
+
+    if (res.gfxQF == qf_sentinel ||
+            res.computeQF == qf_sentinel ||
+            res.transferQF == qf_sentinel) {
+        FATAL("GPU does not support required separate queues");
+    }
+
+    return res;
+}
+
 Device Backend::initDevice(
     CountT gpu_idx,
     Optional<VkSurfaceKHR> present_surface)
@@ -387,7 +500,6 @@ Device Backend::initDevice(
 
     DynArray<const char *> extensions {
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
-        VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME,
         VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
         VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
     };
@@ -432,19 +544,6 @@ Device Backend::initDevice(
     bool supports_mem_export = false;
 #endif
 
-    auto present_check = [&](VkPhysicalDevice phy,
-                             uint32_t qf_idx) {
-        if (!present_surface.has_value()) {
-            return true;
-        }
-
-        VkBool32 supported;
-        REQ_VK(dt.getPhysicalDeviceSurfaceSupportKHR(phy, qf_idx,
-            *present_surface, &supported));
-
-        return supported == VK_TRUE;
-    };
-
     if (present_surface.has_value()) {
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
@@ -475,49 +574,16 @@ Device Backend::initDevice(
     dt.getPhysicalDeviceQueueFamilyProperties2(phy, &num_queue_families,
                                                queue_family_props.data());
 
-    // Currently only finds dedicated transfer, compute, and gfx queues
-    // FIXME implement more flexiblity in queue choices
-    optional<uint32_t> compute_queue_family;
-    optional<uint32_t> gfx_queue_family;
-    optional<uint32_t> transfer_queue_family;
-    for (uint32_t i = 0; i < num_queue_families; i++) {
-        const auto &qf = queue_family_props[i];
-        auto &qf_prop = qf.queueFamilyProperties;
-
-        if (!transfer_queue_family &&
-            (qf_prop.queueFlags & VK_QUEUE_TRANSFER_BIT) &&
-            !(qf_prop.queueFlags & VK_QUEUE_COMPUTE_BIT) &&
-            !(qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
-            transfer_queue_family = i;
-        } else if (!compute_queue_family &&
-                   (qf_prop.queueFlags & VK_QUEUE_COMPUTE_BIT) &&
-                   !(qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
-                   present_check(phy, i)) {
-            compute_queue_family = i;
-        } else if (!gfx_queue_family &&
-                   (qf_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
-            gfx_queue_family = i;
-        }
-
-        if (transfer_queue_family && compute_queue_family &&
-            gfx_queue_family) {
-            break;
-        }
-    }
-
-    if (!compute_queue_family || !gfx_queue_family || !transfer_queue_family) {
-        FATAL("GPU does not support required separate queues");
-    }
+    QueueFamilyChoices qf_choices = chooseQueueFamilies(
+        queue_family_props.data(), num_queue_families,
+        phy, dt.getPhysicalDeviceSurfaceSupportKHR, present_surface);
 
     const uint32_t num_gfx_queues =
-        min(desired_gfx_queues, queue_family_props[*gfx_queue_family]
-                                    .queueFamilyProperties.queueCount);
+        min(desired_gfx_queues, qf_choices.numGFXQueues);
     const uint32_t num_compute_queues =
-        min(desired_compute_queues, queue_family_props[*compute_queue_family]
-                                        .queueFamilyProperties.queueCount);
+        min(desired_compute_queues, qf_choices.numComputeQueues);
     const uint32_t num_transfer_queues =
-        min(desired_transfer_queues, queue_family_props[*transfer_queue_family]
-                                         .queueFamilyProperties.queueCount);
+        min(desired_transfer_queues, qf_choices.numTransferQueues);
 
     array<VkDeviceQueueCreateInfo, 3> queue_infos {};
     vector<float> gfx_pris(num_gfx_queues, VulkanConfig::gfx_priority);
@@ -525,9 +591,9 @@ Device Backend::initDevice(
                                VulkanConfig::compute_priority);
     vector<float> transfer_pris(num_transfer_queues,
                                 VulkanConfig::transfer_priority);
-    fillQueueInfo(queue_infos[0], *gfx_queue_family, gfx_pris);
-    fillQueueInfo(queue_infos[1], *compute_queue_family, compute_pris);
-    fillQueueInfo(queue_infos[2], *transfer_queue_family, transfer_pris);
+    fillQueueInfo(queue_infos[0], qf_choices.gfxQF, gfx_pris);
+    fillQueueInfo(queue_infos[1], qf_choices.computeQF, compute_pris);
+    fillQueueInfo(queue_infos[2], qf_choices.transferQF, transfer_pris);
 
     VkDeviceCreateInfo dev_create_info {};
     dev_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -557,16 +623,21 @@ Device Backend::initDevice(
     robustness_features.pNext = &rq_features;
     robustness_features.nullDescriptor = true;
 
+#if 0
     VkPhysicalDeviceLineRasterizationFeaturesEXT line_features {};
     line_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_EXT;
     line_features.pNext = &robustness_features;
     line_features.smoothLines = true;
+#endif
 
     VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomic_float_features {};
     atomic_float_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+#if 0
     atomic_float_features.pNext = &line_features;
+#endif
+    atomic_float_features.pNext = &robustness_features;
     atomic_float_features.shaderSharedFloat32Atomics = true;
     atomic_float_features.shaderSharedFloat32AtomicAdd = true;
 
@@ -638,9 +709,9 @@ Device Backend::initDevice(
         abort();
     }
 
-    return Device(*gfx_queue_family,
-                  *compute_queue_family,
-                  *transfer_queue_family,
+    return Device(qf_choices.gfxQF,
+                  qf_choices.computeQF,
+                  qf_choices.transferQF,
                   num_gfx_queues,
                   num_compute_queues,
                   num_transfer_queues,

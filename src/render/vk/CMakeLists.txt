@@ -57,7 +57,8 @@ add_dependencies(madrona_render_vk generate_vk_dispatch)
 
 if (MADRONA_MACOS)
     target_link_libraries(madrona_render_vk PUBLIC
-        madrona_moltenvk)
+        madrona_moltenvk
+    )
 else()
     target_link_libraries(madrona_render_vk PUBLIC
         madrona_vk_hdrs

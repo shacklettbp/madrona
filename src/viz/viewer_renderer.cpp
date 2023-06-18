@@ -11,6 +11,10 @@
 
 #include <filesystem>
 
+#ifdef MADRONA_MACOS
+#include <dlfcn.h>
+#endif
+
 #ifdef MADRONA_CUDA_SUPPORT
 #include "vk/cuda_interop.hpp"
 #endif
@@ -59,6 +63,12 @@ struct ImGUIVkLookupData {
 
 PFN_vkGetInstanceProcAddr PresentationState::init()
 {
+#ifdef MADRONA_MACOS
+    auto inst_addr = (PFN_vkGetInstanceProcAddr)dlsym(
+        RTLD_DEFAULT, "vkGetInstanceProcAddr");
+    glfwInitVulkanLoader(inst_addr);
+#endif
+
     if (!glfwInit()) {
         FATAL("Failed to initialize GLFW");
     }
