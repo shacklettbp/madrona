@@ -33,12 +33,10 @@ add_library(madrona_render_vk STATIC
     ${MADRONA_INC_DIR}/render/vk/dispatch.hpp dispatch.cpp
     #${MADRONA_INC_DIR}/render/vk/shader.hpp shader.cpp
     config.hpp
-    cuda_interop.hpp cuda_interop.cpp
     descriptors.hpp descriptors.cpp descriptors.inl
     pipeline_shaders.hpp pipeline_shaders.cpp
     utils.hpp utils.cpp utils.inl
     memory.hpp memory.cpp memory.inl
-    present.hpp present.cpp
 )
 
 target_compile_definitions(madrona_render_vk
@@ -49,18 +47,28 @@ target_compile_definitions(madrona_render_vk
 target_include_directories(madrona_render_vk
     PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/dispatch"
-    PRIVATE
-        $<TARGET_PROPERTY:madrona_sdl2,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
-target_link_libraries(madrona_render_vk
-    PUBLIC
-        madrona_vk_hdrs
-    PRIVATE
-        madrona_cuda
-        madrona_common
-        madrona_sdl2
-        madrona_render_shader
+target_link_libraries(madrona_render_vk PRIVATE
+    madrona_common
 )
 
 add_dependencies(madrona_render_vk generate_vk_dispatch)
+
+if (MADRONA_MACOS)
+    target_link_libraries(madrona_render_vk PUBLIC
+        madrona_moltenvk)
+else()
+    target_link_libraries(madrona_render_vk PUBLIC
+        madrona_vk_hdrs
+    )
+endif()
+
+if (TARGET madrona_cuda)
+    add_library(madrona_render_vk_cuda STATIC
+        cuda_interop.hpp cuda_interop.cpp
+    )
+
+    target_link_libraries(madrona_render_vk_cuda PRIVATE
+        madrona_render_vk madrona_cuda)
+endif()

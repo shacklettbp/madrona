@@ -7,17 +7,24 @@ target_link_libraries(madrona_mw_render PUBLIC
     madrona_mw_core
 )
 
-if (TARGET madrona_render_vk)
+if (TARGET madrona_render_vk AND TARGET madrona_render_cuda)
     add_library(madrona_batch_render STATIC
         batch_renderer.hpp
         vk/batch_renderer.cpp
         vk/scene.hpp vk/scene.cpp
+        vk/present.hpp vk/present.cpp
     )
     
     target_link_libraries(madrona_batch_render PRIVATE
         madrona_render_vk
+        madrona_render_vk_cuda
+        madrona_sdl2
+        madrona_render_shader_compiler
     )
     
+    target_include_directories(madrona_batch_render PRIVATE
+        $<TARGET_PROPERTY:madrona_sdl2,INTERFACE_INCLUDE_DIRECTORIES>)
+
     target_compile_definitions(madrona_batch_render PRIVATE
         "-DSHADER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../render/vk/shaders/"
     )

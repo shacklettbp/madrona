@@ -80,3 +80,9 @@ target_include_directories(imgui INTERFACE
 
 set(GLFW_LIBRARY_TYPE "SHARED")
 add_subdirectory(glfw)
+
+if (APPLE)
+    add_library(madrona_moltenvk SHARED IMPORTED GLOBAL)
+    set_target_properties(madrona_moltenvk PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/dylib/macOS/libMoltenVK.dylib")
+    target_include_directories(madrona_moltenvk INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/include/")
+endif()

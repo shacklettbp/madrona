@@ -349,7 +349,34 @@ VkPhysicalDevice Backend::findPhysicalDevice(
 }
 
 Device Backend::initDevice(
+    CountT gpu_idx,
+    Optional<VkSurfaceKHR> present_surface)
+{
+    uint32_t num_gpus;
+    REQ_VK(dt.enumeratePhysicalDevices(hdl, &num_gpus, nullptr));
+
+    HeapArray<VkPhysicalDevice> phys(num_gpus);
+    REQ_VK(dt.enumeratePhysicalDevices(hdl, &num_gpus, phys.data()));
+
+    if (gpu_idx >= num_gpus) {
+        FATAL("Requested GPU %u, only %u GPUs detected by Vulkan",
+              (uint32_t)gpu_idx, num_gpus);
+    }
+
+    return initDevice(phys[gpu_idx], present_surface);
+}
+
+Device Backend::initDevice(
     const DeviceID &gpu_id,
+    Optional<VkSurfaceKHR> present_surface)
+{
+    VkPhysicalDevice phy = findPhysicalDevice(gpu_id);
+
+    return initDevice(phy, present_surface);
+}
+
+Device Backend::initDevice(
+    VkPhysicalDevice phy,
     Optional<VkSurfaceKHR> present_surface)
 {
     // FIXME:
@@ -357,7 +384,6 @@ Device Backend::initDevice(
     const uint32_t desired_compute_queues = 2;
     const uint32_t desired_transfer_queues = 2;
 
-    VkPhysicalDevice phy = findPhysicalDevice(gpu_id);
 
     DynArray<const char *> extensions {
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,

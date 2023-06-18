@@ -20,6 +20,9 @@ public:
     Backend(Backend &&);
     ~Backend();
 
+    Device initDevice(CountT gpu_idx, Optional<VkSurfaceKHR> present_surface =
+        Optional<VkSurfaceKHR>::none());
+
     Device initDevice(const DeviceID &gpu_id,
         Optional<VkSurfaceKHR> present_surface =
             Optional<VkSurfaceKHR>::none());
@@ -28,6 +31,9 @@ public:
     InstanceDispatch dt;
 
 private:
+    Device initDevice(VkPhysicalDevice phy, 
+                      Optional<VkSurfaceKHR> present_surface);
+
     struct Init;
     inline Backend(Init init, bool headless);
 

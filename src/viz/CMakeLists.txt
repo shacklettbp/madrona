@@ -20,6 +20,12 @@ target_link_libraries(imgui_impl PRIVATE
     madrona_libcxx
 )
 
+if (MADRONA_MACOS)
+    target_link_libraries(imgui_impl PRIVATE
+        madrona_moltenvk
+    )
+endif()
+
 add_library(madrona_viewer STATIC
     viewer.cpp
     viewer_renderer.hpp viewer_renderer.cpp
@@ -27,6 +33,7 @@ add_library(madrona_viewer STATIC
 
 target_link_libraries(madrona_viewer PRIVATE
     madrona_render_vk
+    madrona_render_shader_compiler
     madrona_common
     madrona_mw_core
     madrona_importer

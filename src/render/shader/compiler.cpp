@@ -460,7 +460,7 @@ MADRONA_EXPORT SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
 }
 
 #ifdef MADRONA_APPLE
-MADRONA_EXPORT MTLShader ShaderCompiler::compileHLSLFileToSPV(
+MADRONA_EXPORT MTLShader ShaderCompiler::compileHLSLFileToMTL(
    const char *path,
    Span<const char *const> include_dirs,
    Span<const MacroDefn> macro_defns)
@@ -470,7 +470,7 @@ MADRONA_EXPORT MTLShader ShaderCompiler::compileHLSLFileToSPV(
 
     (void)src_blob;
     (void)include_dirs;
-    (void)macr_defns;
+    (void)macro_defns;
 
     return MTLShader {
         .bytecode = HeapArray<char>(0),

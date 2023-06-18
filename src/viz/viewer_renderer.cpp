@@ -1201,7 +1201,13 @@ Renderer::Renderer(uint32_t gpu_id,
                    uint32_t max_instances_per_world)
     : backend(initializeBackend()),
       window(makeWindow(backend, img_width, img_height)),
-      dev(backend.initDevice(getVkUUIDFromCudaID(gpu_id), window.surface)),
+      dev(backend.initDevice(
+#ifdef MADRONA_CUDA_SUPPORT
+          getVkUUIDFromCudaID(gpu_id),
+#else
+          gpu_id,
+#endif
+          window.surface)),
       alloc(dev, backend),
       render_queue_(makeGFXQueue(dev, 0)),
       transfer_queue_(makeTransferQueue(dev, 0)),
