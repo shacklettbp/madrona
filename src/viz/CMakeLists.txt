@@ -18,13 +18,8 @@ target_link_libraries(imgui_impl PRIVATE
     imgui
     glfw
     madrona_libcxx
+    madrona_vk_hdrs
 )
-
-if (MADRONA_MACOS)
-    target_link_libraries(imgui_impl PRIVATE
-        madrona_moltenvk
-    )
-endif()
 
 add_library(madrona_viewer STATIC
     viewer.cpp

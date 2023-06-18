@@ -49,7 +49,7 @@ set_property(TARGET simdjson PROPERTY
 target_link_libraries(simdjson PRIVATE
     madrona_libcxx)
 
-if (MADRONA_X64)
+if (MADRONA_X64 AND NOT MADRONA_MACOS)
     target_compile_options(simdjson PRIVATE -march=haswell)
 endif()
 
@@ -80,9 +80,3 @@ target_include_directories(imgui INTERFACE
 
 set(GLFW_LIBRARY_TYPE "SHARED")
 add_subdirectory(glfw)
-
-if (APPLE)
-    add_library(madrona_moltenvk SHARED IMPORTED GLOBAL)
-    set_target_properties(madrona_moltenvk PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/dylib/macOS/libMoltenVK.dylib")
-    target_include_directories(madrona_moltenvk INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/MoltenVK/include/")
-endif()

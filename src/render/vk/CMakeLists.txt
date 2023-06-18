@@ -49,19 +49,18 @@ target_include_directories(madrona_render_vk
         "${CMAKE_CURRENT_BINARY_DIR}/dispatch"
 )
 
-target_link_libraries(madrona_render_vk PRIVATE
-    madrona_common
+target_link_libraries(madrona_render_vk
+    PUBLIC
+        madrona_vk_hdrs
+    PRIVATE
+        madrona_common
 )
 
 add_dependencies(madrona_render_vk generate_vk_dispatch)
 
-if (MADRONA_MACOS)
-    target_link_libraries(madrona_render_vk PUBLIC
+if (MADRONA_MACOS OR MADRONA_IOS)
+    target_link_libraries(madrona_render_vk PRIVATE
         madrona_moltenvk
-    )
-else()
-    target_link_libraries(madrona_render_vk PUBLIC
-        madrona_vk_hdrs
     )
 endif()
 
