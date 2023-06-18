@@ -50,6 +50,13 @@ inline constexpr uint32_t initMaxMatIndices = 100000;
 
 }
 
+struct ImGUIVkLookupData {
+    PFN_vkGetDeviceProcAddr getDevAddr;
+    VkDevice dev;
+    PFN_vkGetInstanceProcAddr getInstAddr;
+    VkInstance inst;
+};
+
 PFN_vkGetInstanceProcAddr PresentationState::init()
 {
     if (!glfwInit()) {
@@ -262,6 +269,11 @@ PresentationState::PresentationState(const Backend &backend,
                                need_immediate)),
       swapchain_imgs_(getSwapchainImages(dev, swapchain_.hdl))
 {
+}
+
+void PresentationState::destroy(const Device &dev)
+{
+    dev.dt.destroySwapchainKHR(dev.hdl, swapchain_.hdl, nullptr);
 }
 
 void PresentationState::forceTransition(const Device &dev,
@@ -1006,13 +1018,6 @@ static VkRenderPass makeImGuiRenderPass(const Device &dev,
     return render_pass;
 }
 
-struct ImGUIVkLookupData {
-    PFN_vkGetDeviceProcAddr getDevAddr;
-    VkDevice dev;
-    PFN_vkGetInstanceProcAddr getInstAddr;
-    VkInstance inst;
-};
-
 static PFN_vkVoidFunction imguiVKLookup(const char *fname,
                                         void *user_data)
 {
@@ -1031,11 +1036,11 @@ static PFN_vkVoidFunction imguiVKLookup(const char *fname,
     return addr;
 }
 
-static VkRenderPass imguiInit(GLFWwindow *window, const Device &dev,
-                              const Backend &backend, VkQueue ui_queue,
-                              VkPipelineCache pipeline_cache,
-                              VkFormat color_fmt,
-                              VkFormat depth_fmt)
+static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
+                                  const Backend &backend, VkQueue ui_queue,
+                                  VkPipelineCache pipeline_cache,
+                                  VkFormat color_fmt,
+                                  VkFormat depth_fmt)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -1129,7 +1134,10 @@ static VkRenderPass imguiInit(GLFWwindow *window, const Device &dev,
     dev.dt.destroyFence(dev.hdl, tmp_fence, nullptr);
     dev.dt.destroyCommandPool(dev.hdl, tmp_pool, nullptr);
 
-    return imgui_renderpass;
+    return {
+        desc_pool,
+        imgui_renderpass,
+    };
 }
 
 static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
@@ -1215,7 +1223,7 @@ Renderer::Renderer(uint32_t gpu_id,
           makeImmutableSampler(dev, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)),
       render_pass_(makeRenderPass(dev, alloc.getColorAttachmentFormat(),
                                   alloc.getDepthAttachmentFormat())),
-      gui_render_pass_(imguiInit(window.platformWindow, dev, backend,
+      imgui_render_state_(imguiInit(window.platformWindow, dev, backend,
                                  render_queue_, pipeline_cache_,
                                  alloc.getColorAttachmentFormat(),
                                  alloc.getDepthAttachmentFormat())),
@@ -1247,6 +1255,51 @@ Renderer::Renderer(uint32_t gpu_id,
                   &frames_[i]);
     }
 
+}
+
+Renderer::~Renderer()
+{
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+
+    loaded_assets_.clear();
+
+    for (Frame &f : frames_) {
+        dev.dt.destroySemaphore(dev.hdl, f.swapchainReady, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, f.renderFinished, nullptr);
+
+        dev.dt.destroyFence(dev.hdl, f.cpuFinished, nullptr);
+        dev.dt.destroyCommandPool(dev.hdl, f.cmdPool, nullptr);
+
+        dev.dt.destroyFramebuffer(dev.hdl, f.fb.hdl, nullptr);
+        dev.dt.destroyImageView(dev.hdl, f.fb.colorView, nullptr);
+        dev.dt.destroyImageView(dev.hdl, f.fb.depthView, nullptr);
+    }
+
+    dev.dt.destroyFence(dev.hdl, load_fence_, nullptr);
+    dev.dt.destroyCommandPool(dev.hdl, load_cmd_pool_, nullptr);
+
+    dev.dt.destroyPipeline(dev.hdl, object_draw_.hdls[0], nullptr);
+    dev.dt.destroyPipelineLayout(dev.hdl, object_draw_.layout, nullptr);
+
+    dev.dt.destroyPipeline(dev.hdl, instance_cull_.hdls[0], nullptr);
+    dev.dt.destroyPipelineLayout(dev.hdl, instance_cull_.layout, nullptr);
+
+    dev.dt.destroyRenderPass(dev.hdl, imgui_render_state_.renderPass, nullptr);
+    dev.dt.destroyDescriptorPool(
+        dev.hdl, imgui_render_state_.descPool, nullptr);
+
+    dev.dt.destroyRenderPass(dev.hdl, render_pass_, nullptr);
+
+    dev.dt.destroySampler(dev.hdl, clamp_sampler_, nullptr);
+    dev.dt.destroySampler(dev.hdl, repeat_sampler_, nullptr);
+
+    dev.dt.destroyPipelineCache(dev.hdl, pipeline_cache_, nullptr);
+
+    present_.destroy(dev);
+
+    backend.dt.destroySurfaceKHR(backend.hdl, window.surface, nullptr);
+    glfwDestroyWindow(window.platformWindow);
 }
 
 CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
@@ -1711,7 +1764,7 @@ void Renderer::render(const ViewerCam &cam,
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 
-    render_pass_info.renderPass = gui_render_pass_;
+    render_pass_info.renderPass = imgui_render_state_.renderPass;
     dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
                               VK_SUBPASS_CONTENTS_INLINE);
 

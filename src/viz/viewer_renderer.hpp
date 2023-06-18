@@ -44,6 +44,8 @@ public:
                       uint32_t num_frames_inflight,
                       bool need_immediate);
 
+    void destroy(const render::vk::Device &dev);
+
     void forceTransition(const render::vk::Device &dev,
                          const render::vk::QueueState &present_queue,
                          uint32_t qf_idx);
@@ -124,6 +126,11 @@ struct EngineInterop {
     uint32_t maxInstancesPerWorld;
 };
 
+struct ImGuiRenderState {
+    VkDescriptorPool descPool;
+    VkRenderPass renderPass;
+};
+
 class Renderer {
 public:
     struct FrameConfig {
@@ -138,6 +145,7 @@ public:
              uint32_t max_views_per_world,
              uint32_t max_instances_per_world);
     Renderer(const Renderer &) = delete;
+    ~Renderer();
 
     CountT loadObjects(Span<const imp::SourceObject> objs);
 
@@ -176,7 +184,7 @@ private:
     VkSampler repeat_sampler_;
     VkSampler clamp_sampler_;
     VkRenderPass render_pass_;
-    VkRenderPass gui_render_pass_;
+    ImGuiRenderState imgui_render_state_;
     Pipeline<1> instance_cull_;
     Pipeline<1> object_draw_;
 

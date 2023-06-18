@@ -61,7 +61,9 @@ device:
 - vkCmdDispatch
 - vkCmdPushConstants
 - vkCreateRenderPass
+- vkDestroyRenderPass
 - vkCreateFramebuffer
+- vkDestroyFramebuffer
 - vkCmdDraw
 - vkCmdDrawIndexed
 - vkCmdDrawIndexedIndirectCount
