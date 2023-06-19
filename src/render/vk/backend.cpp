@@ -628,13 +628,13 @@ Device Backend::initDevice(
     rq_features.pNext = &accel_features;
     rq_features.rayQuery = true;
 
+#if 0
     VkPhysicalDeviceRobustness2FeaturesEXT robustness_features {};
     robustness_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
     robustness_features.pNext = &rq_features;
     robustness_features.nullDescriptor = true;
 
-#if 0
     VkPhysicalDeviceLineRasterizationFeaturesEXT line_features {};
     line_features.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_EXT;
@@ -648,7 +648,11 @@ Device Backend::initDevice(
 #if 0
     atomic_float_features.pNext = &line_features;
 #endif
-    atomic_float_features.pNext = &robustness_features;
+    if (supports_rt) {
+        atomic_float_features.pNext = &rq_features;
+    } else {
+        atomic_float_features.pNext = nullptr;
+    }
     atomic_float_features.shaderSharedFloat32Atomics = true;
     atomic_float_features.shaderSharedFloat32AtomicAdd = true;
 
@@ -683,9 +687,9 @@ Device Backend::initDevice(
     vk12_features.descriptorIndexing = true;
     vk12_features.descriptorBindingPartiallyBound = true;
     vk12_features.descriptorBindingUpdateUnusedWhilePending = true;
-    vk12_features.drawIndirectCount = true;
+    vk12_features.drawIndirectCount = false; // No MoltenVK support :(
     vk12_features.runtimeDescriptorArray = true;
-    vk12_features.shaderStorageBufferArrayNonUniformIndexing = true;
+    vk12_features.shaderStorageBufferArrayNonUniformIndexing = false;
     vk12_features.shaderSampledImageArrayNonUniformIndexing = true;
     vk12_features.shaderFloat16 = true;
     vk12_features.shaderInt8 = true;

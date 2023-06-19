@@ -94,6 +94,11 @@ static GLFWwindow *makeGLFWwindow(uint32_t width, uint32_t height)
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
 
+#ifdef MADRONA_MACOS
+    width = utils::divideRoundUp(width, 2_u32);
+    height = utils::divideRoundUp(height, 2_u32);
+#endif
+
 #if 0
     auto monitor = glfwGetPrimaryMonitor();
     auto mode = glfwGetVideoMode(monitor);
@@ -1222,10 +1227,7 @@ Renderer::Renderer(uint32_t gpu_id,
       render_queue_(makeGFXQueue(dev, 0)),
       transfer_queue_(makeTransferQueue(dev, 0)),
       compute_queue_(makeComputeQueue(dev, 0)),
-      render_transfer_queue_(makeGFXQueue(dev, 1)),
-      compute_transfer_queue_(makeComputeQueue(dev, 1)),
       transfer_wrapper_(transfer_queue_, false),
-      render_transfer_wrapper_(render_transfer_queue_, false),
       present_wrapper_(render_queue_, false),
       fb_width_(img_width),
       fb_height_(img_height),
