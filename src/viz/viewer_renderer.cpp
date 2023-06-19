@@ -1770,13 +1770,11 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
                               VK_SUBPASS_CONTENTS_INLINE);
 
-    dev.dt.cmdDrawIndexedIndirectCount(draw_cmd,
-                                       frame.renderInput.buffer,
-                                       frame.drawCmdOffset,
-                                       frame.renderInput.buffer,
-                                       frame.drawCountOffset,
-                                       frame.maxDraws,
-                                       sizeof(DrawCmd));
+    dev.dt.cmdDrawIndexedIndirect(draw_cmd,
+                                  frame.renderInput.buffer,
+                                  frame.drawCmdOffset,
+                                  num_instances,
+                                  sizeof(DrawCmd));
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 

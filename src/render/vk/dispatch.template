@@ -66,6 +66,7 @@ device:
 - vkDestroyFramebuffer
 - vkCmdDraw
 - vkCmdDrawIndexed
+- vkCmdDrawIndexedIndirect
 - vkCmdDrawIndexedIndirectCount
 - vkCmdBeginRenderPass
 - vkCmdEndRenderPass

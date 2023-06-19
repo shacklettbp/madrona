@@ -705,8 +705,9 @@ Device Backend::initDevice(
     requested_features.features.samplerAnisotropy = true;
     requested_features.features.shaderInt16 = true;
     requested_features.features.shaderInt64 = true;
-    requested_features.features.wideLines = false;
+    requested_features.features.wideLines = false; // No MoltenVK support :(
     requested_features.features.fillModeNonSolid = true;
+    requested_features.features.multiDrawIndirect = true;
 
     dev_create_info.pNext = &requested_features;
 
