@@ -1063,10 +1063,25 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
     auto font_path = std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
         "font.ttf";
 
-    io.Fonts->AddFontFromFileTTF(font_path.c_str(), 26);
+    float scale_factor;
+
+    {
+        float x_scale, y_scale;
+        glfwGetWindowContentScale(window, &x_scale, &y_scale);
+        assert(x_scale == y_scale);
+
+        scale_factor = x_scale;
+    }
+
+    float scaled_font_size = 13.f * scale_factor;
+    float rounded_font_size = ceilf(scaled_font_size);
+
+    io.Fonts->AddFontFromFileTTF(font_path.c_str(), rounded_font_size);
 
     auto &style = ImGui::GetStyle();
-    style.ScaleAllSizes(2.f);
+    style.ScaleAllSizes(scale_factor);
+    // Better to scale font size directly, otherwise font is blurry
+    io.FontGlobalScale = scaled_font_size / rounded_font_size;
 
     ImGui_ImplGlfw_InitForVulkan(window, true);
 
