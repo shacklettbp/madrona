@@ -26,10 +26,10 @@ struct V2F {
 float4 composeQuats(float4 a, float4 b)
 {
     return float4(
-        (a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z),
-        (a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y),
-        (a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x),
-        (a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w));
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z);
 }
 
 float3 rotateVec(float4 q, float3 v)
@@ -94,19 +94,10 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
 
     return o;
 }
- 
-void computeTransform(float3 obj_t,
-                      float4 obj_r,
-                      float3 cam_t,
-                      float4 cam_r_inv,
-                      out float3x3 to_view_rot,
-                      out float3 to_view_translation)
+
+#if 0
+float3x3 toMat(float4 r)
 {
-    to_view_translation = rotateVec(cam_r_inv, obj_t - cam_t);
-
-    float4 r = composeQuats(cam_r_inv, obj_r);
-    r = normalize(r);
-
     float x2 = r.x * r.x;
     float y2 = r.y * r.y;
     float z2 = r.z * r.z;
@@ -117,7 +108,7 @@ void computeTransform(float3 obj_t,
     float wy = r.w * r.y;
     float wz = r.w * r.z;
 
-    to_view_rot = float3x3(
+    return float3x3(
         float3(
             1.f - 2.f * (y2 + z2),
             2.f * (xy - wz),
@@ -130,6 +121,18 @@ void computeTransform(float3 obj_t,
             2.f * (xz - wy),
             2.f * (yz + wx),
             1.f - 2.f * (x2 + y2)));
+}
+#endif
+
+void computeCompositeTransform(float3 obj_t,
+                               float4 obj_r,
+                               float3 cam_t,
+                               float4 cam_r_inv,
+                               out float3 to_view_translation,
+                               out float4 to_view_rotation)
+{
+    to_view_translation = rotateVec(cam_r_inv, obj_t - cam_t);
+    to_view_rotation = normalize(composeQuats(cam_r_inv, obj_r));
 }
 
 [shader("vertex")]
@@ -144,14 +147,16 @@ float4 vert(in uint vid : SV_VertexID,
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
 
-    float3x3 to_view_rot;
     float3 to_view_translation;
-    computeTransform(instance_data.position, instance_data.rotation,
-                     view_data.pos, view_data.rot,
-                     to_view_rot, to_view_translation);
+    float4 to_view_rotation;
+    computeCompositeTransform(instance_data.position, instance_data.rotation,
+        view_data.pos, view_data.rot,
+        to_view_translation, to_view_rotation);
 
-    float3 view_pos = mul(to_view_rot, (instance_data.scale * vert.position)) +
-        to_view_translation;
+    float3 view_pos =
+        rotateVec(to_view_rotation, instance_data.scale * vert.position) +
+            to_view_translation;
+
     float4 clip_pos = float4(
         view_data.xScale * view_pos.x,
         view_data.yScale * view_pos.z,
@@ -160,7 +165,7 @@ float4 vert(in uint vid : SV_VertexID,
 
     v2f.viewPos = view_pos;
     v2f.normal = normalize(
-        mul(to_view_rot, (vert.normal / instance_data.scale)));
+        rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
     v2f.uv = vert.uv;
 
     return clip_pos;
