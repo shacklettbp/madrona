@@ -1073,15 +1073,12 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
         scale_factor = x_scale;
     }
 
-    float scaled_font_size = 13.f * scale_factor;
-    float rounded_font_size = ceilf(scaled_font_size);
+    float scaled_font_size = 16.f * scale_factor;
 
-    io.Fonts->AddFontFromFileTTF(font_path.c_str(), rounded_font_size);
+    io.Fonts->AddFontFromFileTTF(font_path.c_str(), scaled_font_size);
 
     auto &style = ImGui::GetStyle();
     style.ScaleAllSizes(scale_factor);
-    // Better to scale font size directly, otherwise font is blurry
-    io.FontGlobalScale = scaled_font_size / rounded_font_size;
 
     ImGui_ImplGlfw_InitForVulkan(window, true);
 
