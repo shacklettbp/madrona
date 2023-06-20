@@ -5,9 +5,7 @@
 CullPushConst push_const;
 
 [[vk::binding(0, 0)]]
-cbuffer ViewData {
-    PackedViewData viewData;
-};
+StructuredBuffer<PackedViewData> viewDataBuffer;
 
 [[vk::binding(1, 0)]]
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;

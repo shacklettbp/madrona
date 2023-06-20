@@ -907,7 +907,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     view_info.range = buffer_sizes[0];
 
     //DescHelper::uniform(desc_updates[0], cull_set, &view_info, 0);
-    DescHelper::uniform(desc_updates[0], draw_set, &view_info, 0);
+    DescHelper::storage(desc_updates[0], draw_set, &view_info, 0);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = render_input.buffer;

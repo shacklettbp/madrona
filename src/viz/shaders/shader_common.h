@@ -6,7 +6,7 @@ struct CullPushConst {
 };
 
 struct DrawPushConst {
-    uint32_t unused;
+    uint32_t viewIdx;
 };
 
 struct Vertex {

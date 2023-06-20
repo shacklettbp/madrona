@@ -163,6 +163,8 @@ void Viewer::Impl::startFrame()
 static void renderCFGUI(Renderer::FrameConfig &cfg,
                         ViewerCam &cam)
 {
+    (void)cfg;
+
     ImGui::Begin("Render Settings");
 
     ImGui::TextUnformatted("Camera");
@@ -209,6 +211,7 @@ static void renderCFGUI(Renderer::FrameConfig &cfg,
 
     ImGui::PopStyleVar();
 
+#if 0
     auto ortho_size = ImGui::CalcTextSize(" Orthographic ");
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign,
                         ImVec2(0.5f, 0.f));
@@ -228,6 +231,7 @@ static void renderCFGUI(Renderer::FrameConfig &cfg,
     ImGui::PopStyleVar();
 
     ImGui::TextUnformatted("Projection");
+#endif
 
     float digit_width = ImGui::CalcTextSize("0").x;
     ImGui::SetNextItemWidth(digit_width * 6);
@@ -237,15 +241,6 @@ static void renderCFGUI(Renderer::FrameConfig &cfg,
         ImGui::DragFloat("View Size", &cam.orthoHeight,
                           0.5f, 0.f, 100.f, "%0.1f");
     }
-
-    ImGui::NewLine();
-    ImGui::TextUnformatted("General");
-    ImGui::Separator();
-
-    ImGui::SetNextItemWidth(digit_width * 6);
-    ImGui::DragFloat("Line Width", &cfg.lineWidth, 0.1f, 1.f, 10.f,
-                     "%0.1f");
-    ImGui::Checkbox("Edges always visible", &cfg.linesNoDepthTest);
 
     ImGui::End();
 }

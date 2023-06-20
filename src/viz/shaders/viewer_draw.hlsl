@@ -5,9 +5,7 @@
 DrawPushConst push_const;
 
 [[vk::binding(0, 0)]]
-cbuffer ViewData {
-    PackedViewData viewDataBuffer;
-};
+StructuredBuffer<PackedViewData> viewDataBuffer;
 
 [[vk::binding(1, 0)]]
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
@@ -142,7 +140,8 @@ float4 vert(in uint vid : SV_VertexID,
 {
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
 
-    PerspectiveCameraData view_data = unpackViewData(viewDataBuffer);
+    PerspectiveCameraData view_data =
+        unpackViewData(viewDataBuffer[push_const.viewIdx]);
 
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
