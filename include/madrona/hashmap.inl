@@ -43,7 +43,7 @@ bool StaticIntegerMap<maxN>::exists(uint32_t key) const
     uint32_t idx = StaticMapHelper::map(key, keys_[shift_idx_],
                                         keys_[constant_idx_]);
 
-    if (idx >= maxN || idx == shift_idx_ || idx == constant_idx_) return false;
+    if (idx < 2) return false;
 
     return key == keys_[idx];
 }
@@ -62,7 +62,7 @@ Optional<uint32_t> StaticIntegerMap<maxN>::lookup(uint32_t key) const
     uint32_t idx = StaticMapHelper::map(key, keys_[shift_idx_],
                                         keys_[constant_idx_]);
 
-    if (idx >= maxN || key != keys_[idx] || idx == shift_idx_ || idx == constant_idx_) {
+    if (idx < 2 || key != keys_[idx]) {
         return Optional<uint32_t>::none();
     }
 

@@ -97,7 +97,7 @@ void StaticMapHelper::buildMap(uint32_t *key_storage, uint32_t *value_storage,
 
     // Given the hash function, actually save the table
     // First, erase the table
-    for (uint32_t i = 0; i < storage_size; i++) {
+    for (uint32_t i = 0; i < capacity; i++) {
         key_storage[i] = invalidKey;
     }
 

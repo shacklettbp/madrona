@@ -752,18 +752,20 @@ static Pipeline<1> makeCullPipeline(const Device &dev,
                                        &cull_layout));
 
     std::array<VkComputePipelineCreateInfo, 1> compute_infos;
+#if 0
     VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size;
     subgroup_size.sType =
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
     subgroup_size.pNext = nullptr;
     subgroup_size.requiredSubgroupSize = 32;
+#endif
 
     compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     compute_infos[0].pNext = nullptr;
     compute_infos[0].flags = 0;
     compute_infos[0].stage = {
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        &subgroup_size,
+        nullptr, //&subgroup_size,
         VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT,
         VK_SHADER_STAGE_COMPUTE_BIT,
         shader.getShader(0),

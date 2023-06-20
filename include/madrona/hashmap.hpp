@@ -46,8 +46,8 @@ public:
 
 private:
     // End of first cache line
-    static constexpr uint32_t shift_idx_ = 14;
-    static constexpr uint32_t constant_idx_ = 15;
+    static constexpr uint32_t shift_idx_ = 0;
+    static constexpr uint32_t constant_idx_ = 1;
 
     alignas(64) std::array<uint32_t, maxN> keys_;
     alignas(64) std::array<uint32_t, maxN> values_;
