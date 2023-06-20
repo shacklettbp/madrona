@@ -52,11 +52,12 @@ PipelineShaders::PipelineShaders(
              binding_idx < (CountT)desc_set.numBindings; binding_idx++) {
             const auto &rfl_binding =
                 refl_info.bindings[desc_set.bindingOffset + binding_idx];
-            auto &binding_info = set_binding_info[binding_idx];
 
             if (rfl_binding.type == refl::BindingType::None) {
                 continue;
             }
+
+            VkDescriptorSetLayoutBinding binding_info;
 
             binding_info.binding = rfl_binding.id;
 
