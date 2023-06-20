@@ -80,10 +80,6 @@ void StaticMapHelper::buildMap(uint32_t *key_storage, uint32_t *value_storage,
     capacity = std::max(capacity, 16u);
     assert(capacity <= storage_size);
 
-    for (int i = 0; i < (int)capacity; i++) {
-        key_storage[i] = invalidKey;
-    }
-
     // This shift is used in map(), multiplicative hashing
     // so w - m where w = 32 and capacity = 2 ** m
     uint32_t capacity_shift = 32u - utils::int32Log2(capacity);
@@ -100,6 +96,11 @@ void StaticMapHelper::buildMap(uint32_t *key_storage, uint32_t *value_storage,
     }
 
     // Given the hash function, actually save the table
+    // First, erase the table
+    for (uint32_t i = 0; i < storage_size; i++) {
+        key_storage[i] = invalidKey;
+    }
+
     for (int i = 0; i < (int)num_inputs; i++) {
         const IntegerMapPair &input = inputs[i];
         uint32_t idx = map(input.key, capacity_shift, multiplier);
