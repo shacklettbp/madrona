@@ -879,15 +879,13 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet draw_set,
                       Frame *dst)
 {
-    (void)max_views;
-
     auto fb = makeFramebuffer(dev, alloc, fb_width, fb_height, render_pass);
 
     VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
 
     int64_t buffer_offsets[3];
     int64_t buffer_sizes[4] = {
-        (int64_t)sizeof(PackedViewData),
+        (int64_t)sizeof(PackedViewData) * (max_views + 1),
         (int64_t)sizeof(uint32_t),
         (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
@@ -943,6 +941,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         std::move(view_staging),
         std::move(render_input),
         0,
+        sizeof(PackedViewData),
         uint32_t(buffer_offsets[2]),
         uint32_t(buffer_offsets[0]),
         uint32_t(buffer_offsets[1]),
@@ -1215,6 +1214,7 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
     return EngineInterop {
         std::move(staging),
         RendererBridge { iface },
+        uint32_t(buffer_offsets[0]),
         max_views_per_world,
         max_instances_per_world,
     };
@@ -1603,11 +1603,8 @@ static void packView(const Device &dev,
 }
 
 void Renderer::render(const ViewerCam &cam,
-                      const FrameConfig &cfg,
-                      CountT world_idx)
+                      const FrameConfig &cfg)
 {
-    (void)cfg;
-
     Frame &frame = frames_[cur_frame_];
     uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
 
@@ -1624,7 +1621,7 @@ void Renderer::render(const ViewerCam &cam,
     packView(dev, frame.viewStaging, cam, fb_width_, fb_height_);
     VkBufferCopy view_copy {
         .srcOffset = 0,
-        .dstOffset = frame.viewOffset,
+        .dstOffset = frame.cameraViewOffset,
         .size = sizeof(PackedViewData)
     };
 
@@ -1636,12 +1633,27 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
                          frame.drawCountOffset, sizeof(uint32_t), 0);
 
+    uint32_t num_sim_views =
+        engine_interop_.bridge.iface.numViews[cfg.worldIDX];
+    if (num_sim_views > 0) {
+        VkBufferCopy view_data_copy {
+            .srcOffset = engine_interop_.viewBaseOffset,
+            .dstOffset = frame.simViewOffset,
+            .size = sizeof(PackedViewData) * num_sim_views,
+        };
+
+        dev.dt.cmdCopyBuffer(draw_cmd,
+                             engine_interop_.renderInputStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &view_data_copy);
+    }
+
     uint32_t num_instances =
-        engine_interop_.bridge.iface.numInstances[world_idx];
+        engine_interop_.bridge.iface.numInstances[cfg.worldIDX];
 
     if (num_instances > 0) {
         VkDeviceSize world_instance_byte_offset = sizeof(PackedInstanceData) *
-            world_idx * engine_interop_.maxInstancesPerWorld;
+            cfg.worldIDX * engine_interop_.maxInstancesPerWorld;
 
         VkBufferCopy instance_copy = {
             .srcOffset = world_instance_byte_offset,
@@ -1736,7 +1748,7 @@ void Renderer::render(const ViewerCam &cam,
                                  0, nullptr);
 
     DrawPushConst draw_const {
-        0, // FIXME
+        (uint32_t)cfg.viewIDX,
     };
 
     dev.dt.cmdPushConstants(draw_cmd, object_draw_.layout,

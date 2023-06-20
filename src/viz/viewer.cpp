@@ -32,7 +32,7 @@ struct Viewer::Impl {
     ViewerCam cam;
     Renderer::FrameConfig frameCfg;
     Renderer renderer;
-    uint32_t curWorldIDX;
+    uint32_t maxNumAgents;
 
     Impl(const Viewer::Config &cfg);
 
@@ -161,11 +161,18 @@ void Viewer::Impl::startFrame()
 }
 
 static void renderCFGUI(Renderer::FrameConfig &cfg,
-                        ViewerCam &cam)
+                        ViewerCam &cam,
+                        uint32_t num_agents)
 {
     (void)cfg;
 
     ImGui::Begin("Render Settings");
+
+    ImGui::TextUnformatted("Agent Controls");
+    ImGui::Separator();
+
+    int agent_id = 0;
+    ImGui::DragInt("Agent ID", &agent_id, 1, 0, num_agents);
 
     ImGui::TextUnformatted("Camera");
     ImGui::Separator();
@@ -276,24 +283,29 @@ static ViewerCam initDefaultCam()
 
 Viewer::Impl::Impl(const Config &cfg)
     : cam(initDefaultCam()),
-      frameCfg {},
+      frameCfg {
+          .worldIDX = 0,
+          .viewIDX = 0,
+      },
       renderer(cfg.gpuID,
                cfg.renderWidth,
                cfg.renderHeight,
                cfg.numWorlds,
                cfg.maxViewsPerWorld,
                cfg.maxInstancesPerWorld),
-      curWorldIDX(0)
+      maxNumAgents(cfg.maxViewsPerWorld)
 {}
 
 void Viewer::Impl::render(float frame_duration)
 {
-    renderCFGUI(frameCfg, cam);
+    // FIXME: pass actual active agents, not max
+    renderCFGUI(frameCfg, cam, maxNumAgents);
+
     fpsCounterUI(frame_duration);
 
     ImGui::Render();
 
-    renderer.render(cam, frameCfg, curWorldIDX);
+    renderer.render(cam, frameCfg);
 }
 
 Viewer::Viewer(const Config &cfg)

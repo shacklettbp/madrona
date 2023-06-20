@@ -92,7 +92,8 @@ struct Frame {
 
     render::vk::HostBuffer viewStaging;
     render::vk::LocalBuffer renderInput;
-    uint32_t viewOffset;
+    uint32_t cameraViewOffset;
+    uint32_t simViewOffset;
     uint32_t drawCmdOffset;
     uint32_t drawCountOffset;
     uint32_t instanceOffset;
@@ -122,6 +123,7 @@ struct AssetData {
 struct EngineInterop {
     render::vk::HostBuffer renderInputStaging;
     render::RendererBridge bridge;
+    uint32_t viewBaseOffset;
     uint32_t maxViewsPerWorld;
     uint32_t maxInstancesPerWorld;
 };
@@ -134,8 +136,8 @@ struct ImGuiRenderState {
 class Renderer {
 public:
     struct FrameConfig {
-        float lineWidth = 2.f;
-        bool linesNoDepthTest = false;
+        uint32_t worldIDX;
+        uint32_t viewIDX;
     };
 
     Renderer(uint32_t gpu_id,
@@ -152,8 +154,7 @@ public:
     void waitUntilFrameReady();
     void startFrame();
     void render(const ViewerCam &cam,
-                const FrameConfig &cfg,
-                CountT world_idx);
+                const FrameConfig &cfg);
 
     void waitForIdle();
 
