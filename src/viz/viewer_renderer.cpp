@@ -2006,7 +2006,7 @@ void Renderer::render(const ViewerCam &cam,
 
     dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
                          frame.renderInput.buffer,
-                         1, &view_copy);
+                         1, &light_copy);
 
     dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
                          frame.drawCountOffset, sizeof(uint32_t), 0);
