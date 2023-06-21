@@ -192,9 +192,17 @@ static void cfgUI(Renderer::FrameConfig &cfg,
         int world_idx = cfg.worldIDX;
         float worldbox_width =
             ImGui::CalcTextSize(" ").x * (max(numDigits(num_worlds) + 2, 7_i32));
+        if (num_worlds == 1) {
+            ImGui::BeginDisabled();
+        }
         ImGui::PushItemWidth(worldbox_width);
         ImGui::DragInt("Current World ID", &world_idx, 1.f, 0, num_worlds - 1);
         ImGui::PopItemWidth();
+
+        if (num_worlds == 1) {
+            ImGui::EndDisabled();
+        }
+
         cfg.worldIDX = world_idx;
     }
 
@@ -242,6 +250,9 @@ static void cfgUI(Renderer::FrameConfig &cfg,
     ImGui::TextUnformatted("Free Camera Config");
     ImGui::Separator();
 
+    if (cfg.viewIDX != 0) {
+        ImGui::BeginDisabled();
+    }
     auto side_size = ImGui::CalcTextSize(" Bottom " );
     side_size.y *= 1.4f;
     ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign,
@@ -312,6 +323,10 @@ static void cfgUI(Renderer::FrameConfig &cfg,
     } else {
         ImGui::DragFloat("View Size", &cam.orthoHeight,
                           0.5f, 0.f, 100.f, "%0.1f");
+    }
+
+    if (cfg.viewIDX != 0) {
+        ImGui::EndDisabled();
     }
 
     ImGui::End();

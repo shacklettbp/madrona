@@ -80,6 +80,8 @@ elseif (TARGET madrona_render_metal)
     )
 
     add_dependencies(madrona_batch_render madrona_batch_render_metal_shaders)
+else()
+    return()
 endif()
 
 target_include_directories(madrona_batch_render PRIVATE
