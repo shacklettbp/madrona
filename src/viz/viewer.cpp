@@ -33,6 +33,7 @@ struct Viewer::Impl {
     ViewerCam cam;
     Renderer::FrameConfig frameCfg;
     Renderer renderer;
+    uint32_t numWorlds;
     uint32_t maxNumAgents;
 
     Impl(const Viewer::Config &cfg);
@@ -162,7 +163,7 @@ void Viewer::Impl::startFrame()
 }
 
 // https://lemire.me/blog/2021/06/03/computing-the-number-of-digits-of-an-integer-even-faster/
-static int numDigits(uint32_t x)
+static int32_t numDigits(uint32_t x)
 {
   static uint64_t table[] = {
       4294967296,  8589934582,  8589934582,  8589934582,  12884901788,
@@ -177,14 +178,28 @@ static int numDigits(uint32_t x)
   return (x + table[idx]) >> 32;
 }
 
-static void renderCFGUI(Renderer::FrameConfig &cfg,
-                        ViewerCam &cam,
-                        CountT num_agents)
+static void cfgUI(Renderer::FrameConfig &cfg,
+                  ViewerCam &cam,
+                  CountT num_agents,
+                  CountT num_worlds)
 {
-    (void)cfg;
-
     ImGui::Begin("Controls");
 
+    ImGui::TextUnformatted("Simulation Settings");
+    ImGui::Separator();
+
+    {
+        int world_idx = cfg.worldIDX;
+        float worldbox_width =
+            ImGui::CalcTextSize(" ").x * (max(numDigits(num_worlds) + 2, 7_i32));
+        ImGui::PushItemWidth(worldbox_width);
+        ImGui::DragInt("Current World ID", &world_idx, 1.f, 0, num_worlds - 1);
+        ImGui::PopItemWidth();
+        cfg.worldIDX = world_idx;
+    }
+
+    ImGui::TextUnformatted("View Settings");
+    ImGui::Separator();
     {
         StackAlloc str_alloc;
         const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
@@ -222,7 +237,9 @@ static void renderCFGUI(Renderer::FrameConfig &cfg,
         cfg.viewIDX = cam_idx;
     }
 
-    ImGui::TextUnformatted("Camera Settings");
+    ImGui::Spacing();
+
+    ImGui::TextUnformatted("Free Camera Config");
     ImGui::Separator();
 
     auto side_size = ImGui::CalcTextSize(" Bottom " );
@@ -341,13 +358,14 @@ Viewer::Impl::Impl(const Config &cfg)
                cfg.numWorlds,
                cfg.maxViewsPerWorld,
                cfg.maxInstancesPerWorld),
+      numWorlds(cfg.numWorlds),
       maxNumAgents(cfg.maxViewsPerWorld)
 {}
 
 void Viewer::Impl::render(float frame_duration)
 {
     // FIXME: pass actual active agents, not max
-    renderCFGUI(frameCfg, cam, maxNumAgents);
+    cfgUI(frameCfg, cam, maxNumAgents, numWorlds);
 
     fpsCounterUI(frame_duration);
 
