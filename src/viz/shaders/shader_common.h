@@ -70,7 +70,7 @@ struct DrawCmd {
     uint32_t firstInstance;
 };
 
-struct DrawMaterialBuffer {
+struct DrawMaterialData {
     int32_t materialIdx;
 };
 

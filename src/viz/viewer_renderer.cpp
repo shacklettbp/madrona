@@ -44,7 +44,7 @@ using ObjectData = shader::ObjectData;
 using DrawPushConst = shader::DrawPushConst;
 using CullPushConst = shader::CullPushConst;
 using DrawCmd = shader::DrawCmd;
-using DrawMaterialBuffer = shader::DrawMaterialBuffer;
+using DrawMaterialData = shader::DrawMaterialData;
 using PackedInstanceData = shader::PackedInstanceData;
 using PackedViewData = shader::PackedViewData;
 
@@ -889,7 +889,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         (int64_t)sizeof(uint32_t),
         (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
-        (int64_t)sizeof(DrawMaterialBuffer) * max_instances * 10
+        (int64_t)sizeof(DrawMaterialData) * max_instances * 10,
     };
     int64_t num_render_input_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
@@ -898,7 +898,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 6> desc_updates;
+    std::array<VkWriteDescriptorSet, 7> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -931,12 +931,12 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     DescHelper::storage(desc_updates[4], cull_set, &draw_info, 3);
 
     VkDescriptorBufferInfo draw_mat_info;
-    draw_info.buffer = render_input.buffer;
-    draw_info.offset = buffer_offsets[3];
-    draw_info.range = buffer_sizes[4];
+    draw_mat_info.buffer = render_input.buffer;
+    draw_mat_info.offset = buffer_offsets[3];
+    draw_mat_info.range = buffer_sizes[4];
 
     DescHelper::storage(desc_updates[5], cull_set, &draw_mat_info, 4);
-    DescHelper::storage(desc_updates[5], draw_set, &draw_mat_info, 2);
+    DescHelper::storage(desc_updates[6], draw_set, &draw_mat_info, 2);
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
@@ -1556,9 +1556,9 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs, Span<const 
     DescHelper::storage(desc_updates[2], asset_set_draw_, &vert_info, 0);
 
     VkDescriptorBufferInfo mat_info;
-    vert_info.buffer = asset_buffer.buffer;
-    vert_info.offset = buffer_offsets[3];
-    vert_info.range = buffer_sizes[4];
+    mat_info.buffer = asset_buffer.buffer;
+    mat_info.offset = buffer_offsets[3];
+    mat_info.range = buffer_sizes[4];
 
     DescHelper::storage(desc_updates[3], asset_set_draw_, &mat_info, 1);
 

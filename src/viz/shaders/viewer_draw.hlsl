@@ -11,7 +11,7 @@ StructuredBuffer<PackedViewData> viewDataBuffer;
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 
 [[vk::binding(2, 0)]]
-StructuredBuffer<DrawMaterialBuffer> drawMaterialBuffer;
+StructuredBuffer<DrawMaterialData> drawMaterialBuffer;
 
 // Asset descriptor bindings
 
@@ -146,7 +146,7 @@ float4 vert(in uint vid : SV_VertexID,
             out V2F v2f) : SV_Position
 {
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
-    DrawMaterialBuffer mat = drawMaterialBuffer[instance_id];
+    DrawMaterialData mat = drawMaterialBuffer[instance_id];
     float4 color = materialBuffer[mat.materialIdx].color;
 
     PerspectiveCameraData view_data =
