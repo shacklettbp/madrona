@@ -1641,8 +1641,12 @@ void Renderer::render(const ViewerCam &cam,
     uint32_t num_sim_views =
         engine_interop_.bridge.iface.numViews[cfg.worldIDX];
     if (num_sim_views > 0) {
+        VkDeviceSize world_view_byte_offset = engine_interop_.viewBaseOffset +
+            cfg.worldIDX * engine_interop_.maxViewsPerWorld *
+            sizeof(PackedViewData);
+
         VkBufferCopy view_data_copy {
-            .srcOffset = engine_interop_.viewBaseOffset,
+            .srcOffset = world_view_byte_offset,
             .dstOffset = frame.simViewOffset,
             .size = sizeof(PackedViewData) * num_sim_views,
         };
