@@ -1,4 +1,5 @@
 #include <madrona/viz/viewer.hpp>
+#include <madrona/stack_alloc.hpp>
 
 #include "viewer_renderer.hpp"
 
@@ -160,27 +161,68 @@ void Viewer::Impl::startFrame()
     ImGui::NewFrame();
 }
 
+// https://lemire.me/blog/2021/06/03/computing-the-number-of-digits-of-an-integer-even-faster/
+static int numDigits(uint32_t x)
+{
+  static uint64_t table[] = {
+      4294967296,  8589934582,  8589934582,  8589934582,  12884901788,
+      12884901788, 12884901788, 17179868184, 17179868184, 17179868184,
+      21474826480, 21474826480, 21474826480, 21474826480, 25769703776,
+      25769703776, 25769703776, 30063771072, 30063771072, 30063771072,
+      34349738368, 34349738368, 34349738368, 34349738368, 38554705664,
+      38554705664, 38554705664, 41949672960, 41949672960, 41949672960,
+      42949672960, 42949672960};
+
+  uint32_t idx = 31 - __builtin_clz(x | 1);
+  return (x + table[idx]) >> 32;
+}
+
 static void renderCFGUI(Renderer::FrameConfig &cfg,
                         ViewerCam &cam,
-                        uint32_t num_agents)
+                        CountT num_agents)
 {
     (void)cfg;
 
     ImGui::Begin("Controls");
 
     {
-        const char *agent_id_opts[] = {
-            "None",
-            "0",
-        };
+        StackAlloc str_alloc;
+        const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
+        cam_opts[0] = "Free Camera";
 
-        int selected_id_opt = cfg.viewIDX;
-        if (ImGui::Combo("Control Agent:", &selected_id_opt, agent_id_opts, 2)) {
-            cfg.viewIDX = selected_id_opt;
+        ImVec2 combo_size = ImGui::CalcTextSize(" Free Camera ");
+
+        for (CountT i = 0; i < num_agents; i++) {
+            const char *agent_prefix = "Agent ";
+
+            CountT num_bytes = strlen(agent_prefix) + numDigits(i) + 1;
+            cam_opts[i + 1] = str_alloc.allocN<char>(num_bytes);
+            snprintf((char *)cam_opts[i + 1], num_bytes, "%s%u",
+                     agent_prefix, (uint32_t)i);
         }
+
+        CountT cam_idx = cfg.viewIDX;
+        ImGui::PushItemWidth(combo_size.x * 1.25f);
+        if (ImGui::BeginCombo("Current View", cam_opts[cam_idx])) {
+            for (CountT i = 0; i < num_agents + 1; i++) {
+                const bool is_selected = (cam_idx == i);
+                if (ImGui::Selectable(cam_opts[i], is_selected)) {
+                    cam_idx = i;
+                }
+
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+
+            ImGui::EndCombo();
+        }
+        ImGui::PopItemWidth();
+
+        cfg.viewIDX = cam_idx;
     }
 
-    ImGui::TextUnformatted("Free Camera");
+    ImGui::TextUnformatted("Camera Settings");
     ImGui::Separator();
 
     auto side_size = ImGui::CalcTextSize(" Bottom " );
