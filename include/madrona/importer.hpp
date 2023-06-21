@@ -26,7 +26,9 @@ struct SourceObject {
     Span<const SourceMesh> meshes;
 };
 
-struct SourceMaterial {};
+struct SourceMaterial {
+    math::Vector4 color;
+};
 
 struct SourceInstance {
     math::Vector3 translation;

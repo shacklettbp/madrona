@@ -10,15 +10,22 @@ StructuredBuffer<PackedViewData> viewDataBuffer;
 [[vk::binding(1, 0)]]
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 
+[[vk::binding(2, 0)]]
+StructuredBuffer<DrawMaterialBuffer> drawMaterialBuffer;
+
 // Asset descriptor bindings
 
 [[vk::binding(0, 1)]]
 StructuredBuffer<PackedVertex> vertexDataBuffer;
 
+[[vk::binding(1, 1)]]
+StructuredBuffer<MaterialData> materialBuffer;
+
 struct V2F {
     [[vk::location(0)]] float3 viewPos : TEXCOORD0;
     [[vk::location(1)]] float3 normal : TEXCOORD1;
     [[vk::location(2)]] float2 uv : TEXCOORD2;
+    [[vk::location(3)]] float4 color : TEXCOORD3;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -139,6 +146,8 @@ float4 vert(in uint vid : SV_VertexID,
             out V2F v2f) : SV_Position
 {
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
+    DrawMaterialBuffer mat = drawMaterialBuffer[instance_id];
+    float4 color = materialBuffer[mat.materialIdx].color;
 
     PerspectiveCameraData view_data =
         unpackViewData(viewDataBuffer[push_const.viewIdx]);
@@ -166,6 +175,7 @@ float4 vert(in uint vid : SV_VertexID,
     v2f.normal = normalize(
         rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
     v2f.uv = vert.uv;
+    v2f.color = color;
 
     return clip_pos;
 }
@@ -176,7 +186,7 @@ float4 frag(in V2F v2f) : SV_TARGET0
     float hit_angle = max(dot(normalize(v2f.normal),
                               normalize(-v2f.viewPos)), 0.f);
 
-    return float4(float3(hit_angle, hit_angle, hit_angle), 1.0);
+    return v2f.color * float4(float3(hit_angle, hit_angle, hit_angle), 1.0);
 }
 
 #if 0

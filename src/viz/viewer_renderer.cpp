@@ -39,10 +39,12 @@ using float2 = madrona::math::Vector2;
 using Vertex = shader::Vertex;
 using PackedVertex = shader::PackedVertex;
 using MeshData = shader::MeshData;
+using MaterialData = shader::MaterialData;
 using ObjectData = shader::ObjectData;
 using DrawPushConst = shader::DrawPushConst;
 using CullPushConst = shader::CullPushConst;
 using DrawCmd = shader::DrawCmd;
+using DrawMaterialBuffer = shader::DrawMaterialBuffer;
 using PackedInstanceData = shader::PackedInstanceData;
 using PackedViewData = shader::PackedViewData;
 
@@ -883,12 +885,13 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
 
-    int64_t buffer_offsets[3];
-    int64_t buffer_sizes[4] = {
+    int64_t buffer_offsets[4];
+    int64_t buffer_sizes[5] = {
         (int64_t)sizeof(PackedViewData) * (max_views + 1),
         (int64_t)sizeof(uint32_t),
         (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
+        (int64_t)sizeof(DrawMaterialBuffer) * max_instances * 10
     };
     int64_t num_render_input_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
@@ -897,7 +900,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 5> desc_updates;
+    std::array<VkWriteDescriptorSet, 6> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -928,6 +931,14 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     draw_info.range = buffer_sizes[3];
 
     DescHelper::storage(desc_updates[4], cull_set, &draw_info, 3);
+
+    VkDescriptorBufferInfo draw_mat_info;
+    draw_info.buffer = render_input.buffer;
+    draw_info.offset = buffer_offsets[3];
+    draw_info.range = buffer_sizes[4];
+
+    DescHelper::storage(desc_updates[5], cull_set, &draw_mat_info, 4);
+    DescHelper::storage(desc_updates[5], draw_set, &draw_mat_info, 2);
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
@@ -1337,7 +1348,7 @@ Renderer::~Renderer()
     glfwDestroyWindow(window.platformWindow);
 }
 
-CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
+CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs, Span<const imp::SourceMaterial> src_mats)
 {
     using namespace imp;
     using namespace math;
@@ -1363,12 +1374,13 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
 
     int64_t num_total_objs = src_objs.size();
 
-    int64_t buffer_offsets[3];
-    int64_t buffer_sizes[4] = {
+    int64_t buffer_offsets[4];
+    int64_t buffer_sizes[5] = {
         (int64_t)sizeof(ObjectData) * num_total_objs,
         (int64_t)sizeof(MeshData) * num_total_meshes,
         (int64_t)sizeof(PackedVertex) * num_total_vertices,
         (int64_t)sizeof(uint32_t) * num_total_indices,
+        (int64_t)sizeof(MaterialData) * src_mats.size()
     };
     int64_t num_asset_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
@@ -1382,6 +1394,8 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
         (PackedVertex *)(staging_ptr + buffer_offsets[1]);
     uint32_t *indices_ptr =
         (uint32_t *)(staging_ptr + buffer_offsets[2]);
+    MaterialData *materials_ptr =
+        (MaterialData *)(staging_ptr + buffer_offsets[3]);
 
     int32_t mesh_offset = 0;
     int32_t vertex_offset = 0;
@@ -1401,6 +1415,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
                 .numVertices = num_mesh_verts,
                 .indexOffset = index_offset,
                 .numIndices = num_mesh_indices,
+                .materialIndex = (int32_t)mesh.materialIDX
             };
 
             // Compute new normals
@@ -1490,6 +1505,11 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
         }
     }
 
+    uint32_t mat_idx = 0;
+    for (const SourceMaterial &mat : src_mats) {
+        materials_ptr[mat_idx++].color = mat.color;
+    }
+
     staging.flush(dev);
 
     LocalBuffer asset_buffer = *alloc.makeLocalBuffer(num_asset_bytes);
@@ -1514,7 +1534,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
 
     gpu_run.submit(dev);
 
-    std::array<VkWriteDescriptorSet, 3> desc_updates;
+    std::array<VkWriteDescriptorSet, 4> desc_updates;
 
     VkDescriptorBufferInfo obj_info;
     obj_info.buffer = asset_buffer.buffer;
@@ -1536,6 +1556,13 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs)
     vert_info.range = buffer_sizes[2];
 
     DescHelper::storage(desc_updates[2], asset_set_draw_, &vert_info, 0);
+
+    VkDescriptorBufferInfo mat_info;
+    vert_info.buffer = asset_buffer.buffer;
+    vert_info.offset = buffer_offsets[3];
+    vert_info.range = buffer_sizes[4];
+
+    DescHelper::storage(desc_updates[3], asset_set_draw_, &mat_info, 1);
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 

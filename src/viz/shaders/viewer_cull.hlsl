@@ -16,6 +16,9 @@ RWStructuredBuffer<uint32_t> drawCount;
 [[vk::binding(3, 0)]]
 RWStructuredBuffer<DrawCmd> drawCommandBuffer;
 
+[[vk::binding(4, 0)]]
+RWStructuredBuffer<DrawMaterialBuffer> drawMaterialBuffer;
+
 // Asset descriptor bindings
 
 [[vk::binding(0, 1)]]
@@ -67,6 +70,10 @@ void instanceCull(uint3 idx : SV_DispatchThreadID)
         draw_cmd.vertexOffset = mesh.vertexOffset;
         draw_cmd.firstInstance = instance_id;
 
+        DrawMaterialBuffer draw_mat;
+        draw_mat.materialIdx = mesh.materialIndex;
+
         drawCommandBuffer[draw_offset + i] = draw_cmd;
+        drawMaterialBuffer[draw_offset + i] = draw_mat;
     }
 }

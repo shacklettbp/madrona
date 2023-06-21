@@ -25,6 +25,13 @@ struct MeshData {
     int32_t numVertices;
     int32_t indexOffset;
     int32_t numIndices;
+    int32_t materialIndex;
+    int32_t pad[3];
+};
+
+struct MaterialData {
+    // For now, just a color
+    float4 color;
 };
 
 struct ObjectData {
@@ -61,6 +68,10 @@ struct DrawCmd {
     uint32_t firstIndex;
     int32_t vertexOffset;
     uint32_t firstInstance;
+};
+
+struct DrawMaterialBuffer {
+    int32_t materialIdx;
 };
 
 #if 0
