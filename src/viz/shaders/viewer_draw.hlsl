@@ -13,6 +13,9 @@ StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 [[vk::binding(2, 0)]]
 StructuredBuffer<DrawMaterialData> drawMaterialBuffer;
 
+[[vk::binding(3, 0)]]
+StructuredBuffer<DirectionalLight> lightBuffer;
+
 // Asset descriptor bindings
 
 [[vk::binding(0, 1)]]
@@ -186,7 +189,9 @@ float4 frag(in V2F v2f) : SV_TARGET0
     float hit_angle = max(dot(normalize(v2f.normal),
                               normalize(-v2f.viewPos)), 0.f);
 
-    return v2f.color * float4(float3(hit_angle, hit_angle, hit_angle), 1.0);
+    float cos = dot(normalize(lightBuffer[0].lightDir.xyz), v2f.normal) + 1.0f;
+
+    return cos * v2f.color * float4(float3(hit_angle, hit_angle, hit_angle), 1.0);
 }
 
 #if 0

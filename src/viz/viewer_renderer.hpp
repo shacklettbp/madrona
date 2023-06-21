@@ -11,8 +11,12 @@
 
 #include "../mw/render/interop.hpp"
 
+#include <madrona/viz/viewer.hpp>
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+
+#include "shader.hpp"
 
 namespace madrona::viz {
 
@@ -82,8 +86,15 @@ struct Framebuffer {
     VkFramebuffer hdl;
 };
 
+struct ShadowFramebuffer {
+    render::vk::LocalImage depthAttachment;
+    VkImageView depthView;
+    VkFramebuffer hdl;
+};
+
 struct Frame {
     Framebuffer fb;
+    ShadowFramebuffer shadowFB;
     VkCommandPool cmdPool;
     VkCommandBuffer drawCmd;
     VkFence cpuFinished;
@@ -91,12 +102,15 @@ struct Frame {
     VkSemaphore swapchainReady;
 
     render::vk::HostBuffer viewStaging;
+    render::vk::HostBuffer lightStaging;
+    // render::vk::HostBuffer shadowViewStaging;
     render::vk::LocalBuffer renderInput;
     uint32_t cameraViewOffset;
     uint32_t simViewOffset;
     uint32_t drawCmdOffset;
     uint32_t drawCountOffset;
     uint32_t instanceOffset;
+    uint32_t lightOffset;
     uint32_t maxDraws;
 
     VkDescriptorSet cullShaderSet;
@@ -151,6 +165,8 @@ public:
 
     CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats);
 
+    void configureLighting(Span<const LightConfig> lights);
+
     void waitUntilFrameReady();
     void startFrame();
     void render(const ViewerCam &cam,
@@ -182,9 +198,11 @@ private:
     VkSampler repeat_sampler_;
     VkSampler clamp_sampler_;
     VkRenderPass render_pass_;
+    VkRenderPass shadow_pass_;
     ImGuiRenderState imgui_render_state_;
     Pipeline<1> instance_cull_;
     Pipeline<1> object_draw_;
+    Pipeline<1> object_shadow_draw_;
 
     render::vk::FixedDescriptorPool asset_desc_pool_cull_;
     render::vk::FixedDescriptorPool asset_desc_pool_draw_;
@@ -196,6 +214,8 @@ private:
     VkFence load_fence_;
 
     EngineInterop engine_interop_;
+
+    HeapArray<shader::DirectionalLight> lights_;
 
     uint32_t cur_frame_;
     HeapArray<Frame> frames_;

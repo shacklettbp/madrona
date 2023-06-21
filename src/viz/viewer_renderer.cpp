@@ -19,22 +19,14 @@
 #include "vk/cuda_interop.hpp"
 #endif
 
+#include "shader.hpp"
+
 using namespace std;
 
 using namespace madrona::render;
 using namespace madrona::render::vk;
 
 namespace madrona::viz {
-
-namespace shader {
-
-using float4x4 = madrona::math::Mat4x4;
-using float4 = madrona::math::Vector4;
-using float3 = madrona::math::Vector3;
-using float2 = madrona::math::Vector2;
-#include "shaders/shader_common.h"
-
-}
 
 using Vertex = shader::Vertex;
 using PackedVertex = shader::PackedVertex;
@@ -47,12 +39,16 @@ using DrawCmd = shader::DrawCmd;
 using DrawMaterialData = shader::DrawMaterialData;
 using PackedInstanceData = shader::PackedInstanceData;
 using PackedViewData = shader::PackedViewData;
+using ShadowViewData = shader::ShadowViewData;
+using DirectionalLight = shader::DirectionalLight;
 
 namespace InternalConfig {
 
 inline constexpr uint32_t numFrames = 2;
 inline constexpr uint32_t initMaxTransforms = 100000;
 inline constexpr uint32_t initMaxMatIndices = 100000;
+inline constexpr uint32_t shadowMapSize = 4096;
+inline constexpr uint32_t maxLights = 10;
 
 }
 
@@ -471,6 +467,48 @@ static VkRenderPass makeRenderPass(const Device &dev,
     return render_pass;
 }
 
+static VkRenderPass makeShadowRenderPass(const Device &dev,
+                                         VkFormat depth_fmt)
+{
+    vector<VkAttachmentDescription> attachment_descs;
+    vector<VkAttachmentReference> attachment_refs;
+
+    attachment_descs.push_back(
+        {0, depth_fmt, VK_SAMPLE_COUNT_1_BIT,
+         VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+         VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+         VK_IMAGE_LAYOUT_UNDEFINED,
+         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL});
+
+    attachment_refs.push_back(
+        {static_cast<uint32_t>(attachment_refs.size()),
+         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL});
+
+    VkSubpassDescription subpass_desc {};
+    subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass_desc.colorAttachmentCount = 0;
+    subpass_desc.pDepthStencilAttachment = &attachment_refs.back();
+
+    VkRenderPassCreateInfo render_pass_info;
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    render_pass_info.pNext = nullptr;
+    render_pass_info.flags = 0;
+    render_pass_info.attachmentCount =
+        static_cast<uint32_t>(attachment_descs.size());
+    render_pass_info.pAttachments = attachment_descs.data();
+    render_pass_info.subpassCount = 1;
+    render_pass_info.pSubpasses = &subpass_desc;
+
+    render_pass_info.dependencyCount = 0;
+    render_pass_info.pDependencies = nullptr;
+
+    VkRenderPass render_pass;
+    REQ_VK(dev.dt.createRenderPass(dev.hdl, &render_pass_info, nullptr,
+                                   &render_pass));
+
+    return render_pass;
+}
+
 static PipelineShaders makeDrawShaders(
     const Device &dev, VkSampler repeat_sampler, VkSampler clamp_sampler)
 {
@@ -482,6 +520,45 @@ static PipelineShaders makeDrawShaders(
         "shaders";
 
     auto shader_path = (shader_dir / "viewer_draw.hlsl");
+
+    ShaderCompiler compiler;
+    SPIRVShader vert_spirv = compiler.compileHLSLFileToSPV(
+        shader_path.c_str(), {}, {},
+        { "vert", ShaderStage::Vertex });
+
+    SPIRVShader frag_spirv = compiler.compileHLSLFileToSPV(
+        shader_path.c_str(), {}, {},
+        { "frag", ShaderStage::Fragment });
+
+#if 0
+            {0, 2, repeat_sampler, 1, 0},
+            {0, 3, clamp_sampler, 1, 0},
+            {1, 1, VK_NULL_HANDLE,
+                VulkanConfig::max_materials *
+                    VulkanConfig::textures_per_material,
+             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT},
+#endif
+
+    std::array<SPIRVShader, 2> shaders {
+        std::move(vert_spirv),
+        std::move(frag_spirv),
+    };
+
+    StackAlloc tmp_alloc;
+    return PipelineShaders(dev, tmp_alloc, shaders, {});
+}
+
+static PipelineShaders makeShadowDrawShaders(
+    const Device &dev, VkSampler repeat_sampler, VkSampler clamp_sampler)
+{
+    (void)repeat_sampler;
+    (void)clamp_sampler;
+
+    std::filesystem::path shader_dir =
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "shaders";
+
+    auto shader_path = (shader_dir / "viewer_shadow_draw.hlsl");
 
     ShaderCompiler compiler;
     SPIRVShader vert_spirv = compiler.compileHLSLFileToSPV(
@@ -625,6 +702,176 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     blend_info.attachmentCount =
         static_cast<uint32_t>(blend_attachments.size());
     blend_info.pAttachments = blend_attachments.data();
+
+    // Dynamic
+    array dyn_enable {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+    };
+
+    VkPipelineDynamicStateCreateInfo dyn_info {};
+    dyn_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dyn_info.dynamicStateCount = dyn_enable.size();
+    dyn_info.pDynamicStates = dyn_enable.data();
+
+    // Push constant
+    VkPushConstantRange push_const {
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(DrawPushConst),
+    };
+
+    // Layout configuration
+
+    array<VkDescriptorSetLayout, 2> draw_desc_layouts {{
+        shaders.getLayout(0),
+        shaders.getLayout(1),
+    }};
+
+    VkPipelineLayoutCreateInfo gfx_layout_info;
+    gfx_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    gfx_layout_info.pNext = nullptr;
+    gfx_layout_info.flags = 0;
+    gfx_layout_info.setLayoutCount =
+        static_cast<uint32_t>(draw_desc_layouts.size());
+    gfx_layout_info.pSetLayouts = draw_desc_layouts.data();
+    gfx_layout_info.pushConstantRangeCount = 1;
+    gfx_layout_info.pPushConstantRanges = &push_const;
+
+    VkPipelineLayout draw_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &gfx_layout_info, nullptr,
+                                       &draw_layout));
+
+    array<VkPipelineShaderStageCreateInfo, 2> gfx_stages {{
+        {
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            nullptr,
+            0,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            shaders.getShader(0),
+            "vert",
+            nullptr,
+        },
+        {
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            nullptr,
+            0,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            shaders.getShader(1),
+            "frag",
+            nullptr,
+        },
+    }};
+
+    VkGraphicsPipelineCreateInfo gfx_info;
+    gfx_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    gfx_info.pNext = nullptr;
+    gfx_info.flags = 0;
+    gfx_info.stageCount = gfx_stages.size();
+    gfx_info.pStages = gfx_stages.data();
+    gfx_info.pVertexInputState = &vert_info;
+    gfx_info.pInputAssemblyState = &input_assembly_info;
+    gfx_info.pTessellationState = nullptr;
+    gfx_info.pViewportState = &viewport_info;
+    gfx_info.pRasterizationState = &raster_info;
+    gfx_info.pMultisampleState = &multisample_info;
+    gfx_info.pDepthStencilState = &depth_info;
+    gfx_info.pColorBlendState = &blend_info;
+    gfx_info.pDynamicState = &dyn_info;
+    gfx_info.layout = draw_layout;
+    gfx_info.renderPass = render_pass;
+    gfx_info.subpass = 0;
+    gfx_info.basePipelineHandle = VK_NULL_HANDLE;
+    gfx_info.basePipelineIndex = -1;
+
+    VkPipeline draw_pipeline;
+    REQ_VK(dev.dt.createGraphicsPipelines(dev.hdl, pipeline_cache, 1,
+                                          &gfx_info, nullptr, &draw_pipeline));
+
+    FixedDescriptorPool desc_pool(dev, shaders, 0, num_frames);
+
+    return {
+        std::move(shaders),
+        draw_layout,
+        { draw_pipeline },
+        std::move(desc_pool),
+    };
+}
+
+static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
+                                    VkPipelineCache pipeline_cache,
+                                    VkRenderPass render_pass,
+                                    VkSampler repeat_sampler,
+                                    VkSampler clamp_sampler,
+                                    uint32_t num_frames)
+{
+    auto shaders =
+        makeShadowDrawShaders(dev, repeat_sampler, clamp_sampler);
+
+    // Disable auto vertex assembly
+    VkPipelineVertexInputStateCreateInfo vert_info;
+    vert_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vert_info.pNext = nullptr;
+    vert_info.flags = 0;
+    vert_info.vertexBindingDescriptionCount = 0;
+    vert_info.pVertexBindingDescriptions = nullptr;
+    vert_info.vertexAttributeDescriptionCount = 0;
+    vert_info.pVertexAttributeDescriptions = nullptr;
+
+    // Assembly (standard tri indices)
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_info {};
+    input_assembly_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    input_assembly_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    input_assembly_info.primitiveRestartEnable = VK_FALSE;
+
+    // Viewport (fully dynamic)
+    VkPipelineViewportStateCreateInfo viewport_info {};
+    viewport_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_info.viewportCount = 1;
+    viewport_info.pViewports = nullptr;
+    viewport_info.scissorCount = 1;
+    viewport_info.pScissors = nullptr;
+
+    // Multisample
+    VkPipelineMultisampleStateCreateInfo multisample_info {};
+    multisample_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisample_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisample_info.sampleShadingEnable = VK_FALSE;
+    multisample_info.alphaToCoverageEnable = VK_FALSE;
+    multisample_info.alphaToOneEnable = VK_FALSE;
+
+    // Rasterization
+    VkPipelineRasterizationStateCreateInfo raster_info {};
+    raster_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    raster_info.depthClampEnable = VK_FALSE;
+    raster_info.rasterizerDiscardEnable = VK_FALSE;
+    raster_info.polygonMode = VK_POLYGON_MODE_FILL;
+    raster_info.cullMode = VK_CULL_MODE_BACK_BIT;
+    raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    raster_info.depthBiasEnable = VK_FALSE;
+    raster_info.lineWidth = 1.0f;
+
+    // Depth/Stencil
+    VkPipelineDepthStencilStateCreateInfo depth_info {};
+    depth_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depth_info.depthTestEnable = VK_TRUE;
+    depth_info.depthWriteEnable = VK_TRUE;
+    depth_info.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+    depth_info.depthBoundsTestEnable = VK_FALSE;
+    depth_info.stencilTestEnable = VK_FALSE;
+    depth_info.back.compareOp = VK_COMPARE_OP_ALWAYS;
+
+    VkPipelineColorBlendStateCreateInfo blend_info {};
+    blend_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend_info.logicOpEnable = VK_FALSE;
+    blend_info.attachmentCount = 0;
 
     // Dynamic
     array dyn_enable {
@@ -871,34 +1118,89 @@ static Framebuffer makeFramebuffer(const Device &dev,
     };
 }
 
+static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
+                                   MemoryAllocator &alloc,
+                                   uint32_t fb_width,
+                                   uint32_t fb_height,
+                                   VkRenderPass render_pass)
+{
+    auto depth = alloc.makeDepthAttachment(fb_width, fb_height);
+
+    VkImageViewCreateInfo view_info {};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+    view_info_sr.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    view_info_sr.baseMipLevel = 0;
+    view_info_sr.levelCount = 1;
+    view_info_sr.baseArrayLayer = 0;
+    view_info_sr.layerCount = 1;
+
+    view_info.image = depth.image;
+    view_info.format = alloc.getDepthAttachmentFormat();
+
+    VkImageView depth_view;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &depth_view));
+
+
+    array attachment_views {
+        depth_view,
+    };
+
+    VkFramebufferCreateInfo fb_info;
+    fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fb_info.pNext = nullptr;
+    fb_info.flags = 0;
+    fb_info.renderPass = render_pass;
+    fb_info.attachmentCount = static_cast<uint32_t>(attachment_views.size());
+    fb_info.pAttachments = attachment_views.data();
+    fb_info.width = fb_width;
+    fb_info.height = fb_height;
+    fb_info.layers = 1;
+
+    VkFramebuffer hdl;
+    REQ_VK(dev.dt.createFramebuffer(dev.hdl, &fb_info, nullptr, &hdl));
+
+    return ShadowFramebuffer {
+        std::move(depth),
+        depth_view,
+        hdl,
+    };
+}
+
 static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       uint32_t fb_width, uint32_t fb_height,
                       uint32_t max_views, uint32_t max_instances,
                       VkRenderPass render_pass,
+                      VkRenderPass shadow_pass,
                       VkDescriptorSet cull_set,
                       VkDescriptorSet draw_set,
                       Frame *dst)
 {
     auto fb = makeFramebuffer(dev, alloc, fb_width, fb_height, render_pass);
+    auto shadow_fb = makeShadowFramebuffer(dev, alloc, InternalConfig::shadowMapSize, InternalConfig::shadowMapSize, shadow_pass);
 
     VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
 
-    int64_t buffer_offsets[4];
-    int64_t buffer_sizes[5] = {
+    int64_t buffer_offsets[5];
+    int64_t buffer_sizes[6] = {
         (int64_t)sizeof(PackedViewData) * (max_views + 1),
         (int64_t)sizeof(uint32_t),
         (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
         (int64_t)sizeof(DrawMaterialData) * max_instances * 10,
+        (int64_t)sizeof(DirectionalLight) * InternalConfig::maxLights
     };
     int64_t num_render_input_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
 
     HostBuffer view_staging = alloc.makeStagingBuffer(sizeof(PackedViewData));
+    HostBuffer light_staging = alloc.makeStagingBuffer(sizeof(DirectionalLight) * InternalConfig::maxLights);
+    // HostBuffer shadow_staging = alloc.makeStagingBuffer(sizeof(ShadowViewData));
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 7> desc_updates;
+    std::array<VkWriteDescriptorSet, 8> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -938,22 +1240,34 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     DescHelper::storage(desc_updates[5], cull_set, &draw_mat_info, 4);
     DescHelper::storage(desc_updates[6], draw_set, &draw_mat_info, 2);
 
+#if 1
+    VkDescriptorBufferInfo light_data_info;
+    light_data_info.buffer = render_input.buffer;
+    light_data_info.offset = buffer_offsets[4];
+    light_data_info.range = buffer_sizes[5];
+
+    DescHelper::storage(desc_updates[7], draw_set, &light_data_info, 3);
+#endif
+
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
     new (dst) Frame {
         std::move(fb),
+        std::move(shadow_fb),
         cmd_pool,
         makeCmdBuffer(dev, cmd_pool),
         makeFence(dev, true),
         makeBinarySemaphore(dev),
         makeBinarySemaphore(dev),
         std::move(view_staging),
+        std::move(light_staging),
         std::move(render_input),
         0,
         sizeof(PackedViewData),
         uint32_t(buffer_offsets[2]),
         uint32_t(buffer_offsets[0]),
         uint32_t(buffer_offsets[1]),
+        (uint32_t)buffer_offsets[4],
         max_instances * 10,
         cull_set,
         draw_set,
@@ -1266,6 +1580,7 @@ Renderer::Renderer(uint32_t gpu_id,
           makeImmutableSampler(dev, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)),
       render_pass_(makeRenderPass(dev, alloc.getColorAttachmentFormat(),
                                   alloc.getDepthAttachmentFormat())),
+      shadow_pass_(makeShadowRenderPass(dev, alloc.getDepthAttachmentFormat())),
       imgui_render_state_(imguiInit(window.platformWindow, dev, backend,
                                  render_queue_, pipeline_cache_,
                                  alloc.getColorAttachmentFormat(),
@@ -1273,6 +1588,9 @@ Renderer::Renderer(uint32_t gpu_id,
       instance_cull_(makeCullPipeline(dev, pipeline_cache_,
                                       InternalConfig::numFrames)),
       object_draw_(makeDrawPipeline(dev, pipeline_cache_, render_pass_,
+                                    repeat_sampler_, clamp_sampler_,
+                                    InternalConfig::numFrames)),
+      object_shadow_draw_(makeShadowDrawPipeline(dev, pipeline_cache_, shadow_pass_,
                                     repeat_sampler_, clamp_sampler_,
                                     InternalConfig::numFrames)),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
@@ -1286,6 +1604,7 @@ Renderer::Renderer(uint32_t gpu_id,
           alloc, num_worlds,
           max_views_per_world, max_instances_per_world,
           fb_width_, fb_height_)),
+      lights_(InternalConfig::maxLights),
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
       loaded_assets_(0)
@@ -1294,11 +1613,11 @@ Renderer::Renderer(uint32_t gpu_id,
         makeFrame(dev, alloc, fb_width_, fb_height_,
                   max_views_per_world, max_instances_per_world,
                   render_pass_,
+                  shadow_pass_,
                   instance_cull_.descPool.makeSet(),
                   object_draw_.descPool.makeSet(),
                   &frames_[i]);
     }
-
 }
 
 Renderer::~Renderer()
@@ -1574,6 +1893,16 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs, Span<const 
     return 0;
 }
 
+void Renderer::configureLighting(Span<const LightConfig> lights)
+{
+    for (int i = 0; i < lights.size(); ++i) {
+        lights_.insert(i, DirectionalLight{ 
+            math::Vector4{lights[i].dir.x, lights[i].dir.y, lights[i].dir.z, 1.0f }, 
+            math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f}
+        });
+    }
+}
+
 void Renderer::waitUntilFrameReady()
 {
     Frame &frame = frames_[cur_frame_];
@@ -1632,6 +1961,15 @@ static void packView(const Device &dev,
     view_staging_buffer.flush(dev);
 }
 
+static void packLighting(const Device &dev,
+                         HostBuffer &light_staging_buffer,
+                         const HeapArray<DirectionalLight> &lights)
+{
+    DirectionalLight *staging = (DirectionalLight *)light_staging_buffer.ptr;
+    memcpy(staging, lights.data(), sizeof(DirectionalLight) * InternalConfig::maxLights);
+    light_staging_buffer.flush(dev);
+}
+
 void Renderer::render(const ViewerCam &cam,
                       const FrameConfig &cfg)
 {
@@ -1659,6 +1997,16 @@ void Renderer::render(const ViewerCam &cam,
                          frame.renderInput.buffer,
                          1, &view_copy);
 
+    packLighting(dev, frame.lightStaging, lights_);
+    VkBufferCopy light_copy {
+        .srcOffset = 0,
+        .dstOffset = frame.lightOffset,
+        .size = sizeof(DirectionalLight) * InternalConfig::maxLights
+    };
+
+    dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
+                         frame.renderInput.buffer,
+                         1, &view_copy);
 
     dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
                          frame.drawCountOffset, sizeof(uint32_t), 0);

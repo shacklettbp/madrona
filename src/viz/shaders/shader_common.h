@@ -54,6 +54,15 @@ struct PackedViewData {
     float4 data[3];
 };
 
+struct ShadowViewData {
+    float4x4 viewProjectionMatrix;
+};
+
+struct DirectionalLight {
+    float4 lightDir;
+    float4 color;
+};
+
 struct PerspectiveCameraData {
     float3 pos;
     float4 rot;

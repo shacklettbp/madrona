@@ -8,6 +8,14 @@
 
 namespace madrona::viz {
 
+struct LightConfig {
+    bool isDirectional;
+
+    // Used for direction or position depending on value of isDirectional
+    math::Vector3 dir;
+    math::Vector3 color;
+};
+
 class Viewer {
 public:
     struct Config {
@@ -51,6 +59,8 @@ public:
     ~Viewer();
 
     CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats);
+
+    void configureLighting(Span<const LightConfig> lights);
 
     const render::RendererBridge * rendererBridge() const;
 

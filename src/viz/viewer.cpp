@@ -52,6 +52,11 @@ CountT Viewer::loadObjects(Span<const imp::SourceObject> objs, Span<const imp::S
     return impl_->renderer.loadObjects(objs, mats);
 }
 
+void Viewer::configureLighting(Span<const LightConfig> lights)
+{
+    impl_->renderer.configureLighting(lights);
+}
+
 const render::RendererBridge * Viewer::rendererBridge() const
 {
     return &impl_->renderer.getBridgeRef();
