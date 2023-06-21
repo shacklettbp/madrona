@@ -4,12 +4,13 @@
 
 #include <madrona/math.hpp>
 #include <madrona/span.hpp>
+#include <madrona/stack_alloc.hpp>
 #include <madrona/render/vk/device.hpp>
+#include <madrona/render/shader_compiler.hpp>
+
 
 #include <string>
 #include <vector>
-
-#include <madrona/render/shader_compiler.hpp>
 
 #include "shader.hpp"
 
@@ -39,7 +40,8 @@ struct BindingOverride {
 class PipelineShaders {
 public:
     PipelineShaders(const Device &dev,
-                    const SPIRVShader &shader,
+                    StackAlloc &tmp_alloc,
+                    Span<const SPIRVShader> shaders,
                     Span<const BindingOverride> binding_overrides);
     PipelineShaders(const PipelineShaders &) = delete;
     PipelineShaders(PipelineShaders &&) = default;

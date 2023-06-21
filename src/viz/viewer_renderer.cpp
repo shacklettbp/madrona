@@ -469,7 +469,7 @@ static VkRenderPass makeRenderPass(const Device &dev,
     return render_pass;
 }
 
-static std::array<PipelineShaders, 2> makeDrawShaders(
+static PipelineShaders makeDrawShaders(
     const Device &dev, VkSampler repeat_sampler, VkSampler clamp_sampler)
 {
     (void)repeat_sampler;
@@ -499,10 +499,13 @@ static std::array<PipelineShaders, 2> makeDrawShaders(
              VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT},
 #endif
 
-    return {
-        PipelineShaders(dev, vert_spirv, {}),
-        PipelineShaders(dev, frag_spirv, {}),
+    std::array<SPIRVShader, 2> shaders {
+        std::move(vert_spirv),
+        std::move(frag_spirv),
     };
+
+    StackAlloc tmp_alloc;
+    return PipelineShaders(dev, tmp_alloc, shaders, {});
 }
 
 static PipelineShaders makeCullShader(const Device &dev)
@@ -516,7 +519,9 @@ static PipelineShaders makeCullShader(const Device &dev)
         (shader_dir / "viewer_cull.hlsl").c_str(), {}, {},
         { "instanceCull", ShaderStage::Compute });
 
-    return PipelineShaders(dev, spirv, {});
+    StackAlloc tmp_alloc;
+    return PipelineShaders(dev, tmp_alloc,
+                           Span<const SPIRVShader>(&spirv, 1), {});
 }
 
 static VkPipelineCache getPipelineCache(const Device &dev)
@@ -538,7 +543,7 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
                                     VkSampler clamp_sampler,
                                     uint32_t num_frames)
 {
-    auto [vert_shader, frag_shader] =
+    auto shaders =
         makeDrawShaders(dev, repeat_sampler, clamp_sampler);
 
     // Disable auto vertex assembly
@@ -640,8 +645,8 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     // Layout configuration
 
     array<VkDescriptorSetLayout, 2> draw_desc_layouts {{
-        vert_shader.getLayout(0),
-        vert_shader.getLayout(1),
+        shaders.getLayout(0),
+        shaders.getLayout(1),
     }};
 
     VkPipelineLayoutCreateInfo gfx_layout_info;
@@ -664,7 +669,7 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
             nullptr,
             0,
             VK_SHADER_STAGE_VERTEX_BIT,
-            vert_shader.getShader(0),
+            shaders.getShader(0),
             "vert",
             nullptr,
         },
@@ -673,7 +678,7 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
             nullptr,
             0,
             VK_SHADER_STAGE_FRAGMENT_BIT,
-            frag_shader.getShader(0),
+            shaders.getShader(1),
             "frag",
             nullptr,
         },
@@ -704,11 +709,7 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     REQ_VK(dev.dt.createGraphicsPipelines(dev.hdl, pipeline_cache, 1,
                                           &gfx_info, nullptr, &draw_pipeline));
 
-    FixedDescriptorPool desc_pool(dev, vert_shader, 0, num_frames);
-
-    HeapArray<PipelineShaders> shaders(2);
-    shaders.emplace(0, std::move(vert_shader));
-    shaders.emplace(1, std::move(frag_shader));
+    FixedDescriptorPool desc_pool(dev, shaders, 0, num_frames);
 
     return {
         std::move(shaders),
@@ -784,11 +785,8 @@ static Pipeline<1> makeCullPipeline(const Device &dev,
 
     FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
 
-    HeapArray<PipelineShaders> shaders(1);
-    shaders.emplace(0, std::move(shader));
-
     return Pipeline<1> {
-        std::move(shaders),
+        std::move(shader),
         cull_layout,
         pipelines,
         std::move(desc_pool),
@@ -1266,8 +1264,8 @@ Renderer::Renderer(uint32_t gpu_id,
       object_draw_(makeDrawPipeline(dev, pipeline_cache_, render_pass_,
                                     repeat_sampler_, clamp_sampler_,
                                     InternalConfig::numFrames)),
-      asset_desc_pool_cull_(dev, instance_cull_.shaders[0], 1, 1),
-      asset_desc_pool_draw_(dev, object_draw_.shaders[0], 1, 1),
+      asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
+      asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
       asset_set_cull_(asset_desc_pool_cull_.makeSet()),
       asset_set_draw_(asset_desc_pool_draw_.makeSet()),
       load_cmd_pool_(makeCmdPool(dev, dev.gfxQF)),

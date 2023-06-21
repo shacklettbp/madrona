@@ -38,6 +38,7 @@ struct Binding {
 };
 
 struct DescriptorSet {
+    uint32_t id;
     uint32_t bindingOffset;
     uint32_t numBindings;
 };

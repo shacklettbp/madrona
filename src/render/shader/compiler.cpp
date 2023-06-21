@@ -407,15 +407,28 @@ static refl::SPIRV buildSPIRVReflectionData(
         total_num_bindings += binding_arr.size();
     }
 
+    CountT num_sets = 0;
+    for (const auto &bindings : tmp_desc_sets) {
+        if (bindings.size() > 0) {
+            num_sets += 1;
+        }
+    }
+
     HeapArray<Binding> bindings_out(total_num_bindings);
-    HeapArray<DescriptorSet> desc_sets_out(tmp_desc_sets.size());
+    HeapArray<DescriptorSet> desc_sets_out(num_sets);
+
     CountT cur_binding_offset = 0;
-
-    for (CountT i = 0; i < desc_sets_out.size(); i++) {
+    CountT cur_set_offset = 0;
+    for (CountT i = 0; i < tmp_desc_sets.size(); i++) {
         const auto &tmp_bindings = tmp_desc_sets[i];
-        assert(tmp_bindings.size() != 0);
 
-        desc_sets_out[i] = DescriptorSet {
+        // This descriptor set isn't actually used
+        if (tmp_bindings.size() == 0) {
+            continue;
+        }
+
+        desc_sets_out[cur_set_offset++] = DescriptorSet {
+            .id = uint32_t(i),
             .bindingOffset = uint32_t(cur_binding_offset),
             .numBindings = uint32_t(tmp_bindings.size()),
         };
