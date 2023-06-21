@@ -166,15 +166,21 @@ static void renderCFGUI(Renderer::FrameConfig &cfg,
 {
     (void)cfg;
 
-    ImGui::Begin("Render Settings");
+    ImGui::Begin("Controls");
 
-    ImGui::TextUnformatted("Agent Controls");
-    ImGui::Separator();
+    {
+        const char *agent_id_opts[] = {
+            "None",
+            "0",
+        };
 
-    int agent_id = 0;
-    ImGui::DragInt("Agent ID", &agent_id, 1, 0, num_agents);
+        int selected_id_opt = cfg.viewIDX;
+        if (ImGui::Combo("Control Agent:", &selected_id_opt, agent_id_opts, 2)) {
+            cfg.viewIDX = selected_id_opt;
+        }
+    }
 
-    ImGui::TextUnformatted("Camera");
+    ImGui::TextUnformatted("Free Camera");
     ImGui::Separator();
 
     auto side_size = ImGui::CalcTextSize(" Bottom " );

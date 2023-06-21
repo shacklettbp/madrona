@@ -1169,7 +1169,9 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
 static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
                                         uint32_t num_worlds,
                                         uint32_t max_views_per_world,
-                                        uint32_t max_instances_per_world)
+                                        uint32_t max_instances_per_world,
+                                        uint32_t render_width,
+                                        uint32_t render_height)
 {
     int64_t buffer_offsets[3];
     int64_t buffer_sizes[4] = {
@@ -1209,6 +1211,8 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
         .numViews = (uint32_t *)(staging_base + buffer_offsets[1]),
         .instances = world_instances,
         .numInstances = (uint32_t *)(staging_base + buffer_offsets[2]),
+        .renderWidth = (int32_t)render_width,
+        .renderHeight = (int32_t)render_height,
     };
 
     return EngineInterop {
@@ -1271,7 +1275,8 @@ Renderer::Renderer(uint32_t gpu_id,
       load_fence_(makeFence(dev)),
       engine_interop_(setupEngineInterop(
           alloc, num_worlds,
-          max_views_per_world, max_instances_per_world)),
+          max_views_per_world, max_instances_per_world,
+          fb_width_, fb_height_)),
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
       loaded_assets_(0)

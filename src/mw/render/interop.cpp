@@ -191,7 +191,7 @@ ViewSettings RenderingSystem::setupView(Context &ctx,
 
     float x_scale = fov_scale / renderer_state.aspectRatio;
     float y_scale =
-#ifdef MADRONA_BATCHRENDER_RT
+#ifndef MADRONA_BATCHRENDER_METAL
         -
 #endif
         fov_scale;
