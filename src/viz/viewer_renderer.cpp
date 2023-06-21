@@ -2058,7 +2058,8 @@ void Renderer::render(const ViewerCam &cam,
         dev.dt.cmdPipelineBarrier(draw_cmd,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
-                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
 
         dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -2111,7 +2112,8 @@ void Renderer::render(const ViewerCam &cam,
         dev.dt.cmdPipelineBarrier(draw_cmd,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
-                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
     }
 
