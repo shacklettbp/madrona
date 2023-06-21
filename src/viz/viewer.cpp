@@ -35,11 +35,16 @@ struct Viewer::Impl {
     Renderer renderer;
     uint32_t numWorlds;
     uint32_t maxNumAgents;
+    int32_t simTickRate;
 
     Impl(const Viewer::Config &cfg);
 
-    void startFrame();
-    void render(float frame_duration);
+    inline void startFrame();
+    inline void render(float frame_duration);
+
+    inline void loop(
+        void (*input_fn)(void *, CountT, CountT, const UserInput &),
+        void *input_data, void (*step_fn)(void *), void *step_data);
 };
 
 CountT Viewer::loadObjects(Span<const imp::SourceObject> objs)
@@ -181,7 +186,8 @@ static int32_t numDigits(uint32_t x)
 static void cfgUI(Renderer::FrameConfig &cfg,
                   ViewerCam &cam,
                   CountT num_agents,
-                  CountT num_worlds)
+                  CountT num_worlds,
+                  int32_t *tick_rate)
 {
     ImGui::Begin("Controls");
 
@@ -196,7 +202,8 @@ static void cfgUI(Renderer::FrameConfig &cfg,
             ImGui::BeginDisabled();
         }
         ImGui::PushItemWidth(worldbox_width);
-        ImGui::DragInt("Current World ID", &world_idx, 1.f, 0, num_worlds - 1);
+        ImGui::DragInt("Current World ID", &world_idx, 1.f, 0, num_worlds - 1,
+                       "%d", ImGuiSliderFlags_AlwaysClamp);
         ImGui::PopItemWidth();
 
         if (num_worlds == 1) {
@@ -205,6 +212,13 @@ static void cfgUI(Renderer::FrameConfig &cfg,
 
         cfg.worldIDX = world_idx;
     }
+
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 7);
+    ImGui::DragInt("Tick Rate (Hz)", (int *)tick_rate, 5.f, 1, 1000);
+    if (*tick_rate < 1) {
+        *tick_rate = 1;
+    }
+    ImGui::PopItemWidth();
 
     ImGui::TextUnformatted("View Settings");
     ImGui::Separator();
@@ -374,19 +388,84 @@ Viewer::Impl::Impl(const Config &cfg)
                cfg.maxViewsPerWorld,
                cfg.maxInstancesPerWorld),
       numWorlds(cfg.numWorlds),
-      maxNumAgents(cfg.maxViewsPerWorld)
+      maxNumAgents(cfg.maxViewsPerWorld),
+      simTickRate(cfg.defaultSimTickRate)
 {}
 
 void Viewer::Impl::render(float frame_duration)
 {
     // FIXME: pass actual active agents, not max
-    cfgUI(frameCfg, cam, maxNumAgents, numWorlds);
+    cfgUI(frameCfg, cam, maxNumAgents, numWorlds, &simTickRate);
 
     fpsCounterUI(frame_duration);
 
     ImGui::Render();
 
     renderer.render(cam, frameCfg);
+}
+
+Viewer::UserInput::UserInput(bool *keys_state)
+    : keys_state_(keys_state)
+{}
+
+void Viewer::Impl::loop(
+    void (*input_fn)(void *, CountT, CountT, const UserInput &),
+    void *input_data, void (*step_fn)(void *), void *step_data)
+{
+    GLFWwindow *window = renderer.window.platformWindow;
+
+    std::array<bool, (uint32_t)KeyboardKey::NumKeys> key_state;
+
+    float frame_duration = InternalConfig::secondsPerFrame;
+    auto last_sim_tick_time = chrono::steady_clock::now();
+    while (!glfwWindowShouldClose(window)) {
+        if (frameCfg.viewIDX != 0) {
+            key_state[(uint32_t)KeyboardKey::W] =
+                (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::A] =
+                (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::S] =
+                (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::D] =
+                (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::Q] =
+                (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::E] =
+                (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::R] =
+                (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::X] =
+                (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::Z] =
+                (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::C] =
+                (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
+
+            UserInput user_input(key_state.data());
+            input_fn(input_data, frameCfg.worldIDX,
+                     frameCfg.viewIDX - 1, user_input);
+        } else {
+            handleCamera(window, cam);
+        }
+
+        auto cur_frame_start_time = chrono::steady_clock::now();
+
+        auto sim_delta_t = chrono::duration<float>(1.f / (float)simTickRate);
+
+        if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
+            step_fn(step_data);
+
+            last_sim_tick_time = cur_frame_start_time;
+        }
+
+        startFrame();
+
+        render(frame_duration);
+
+        frame_duration = throttleFPS(cur_frame_start_time);
+    }
+
+    renderer.waitForIdle();
 }
 
 Viewer::Viewer(const Config &cfg)
@@ -396,25 +475,10 @@ Viewer::Viewer(const Config &cfg)
 Viewer::Viewer(Viewer &&o) = default;
 Viewer::~Viewer() = default;
 
-void Viewer::loop(void (*step_fn)(void *), void *data)
+void Viewer::loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
+                  void *input_data, void (*step_fn)(void *), void *step_data)
 {
-    auto window = impl_->renderer.window.platformWindow;
-
-    float frame_duration = InternalConfig::secondsPerFrame;
-    while (!glfwWindowShouldClose(window)) {
-        auto start_time = chrono::steady_clock::now();
-
-        step_fn(data);
-
-        impl_->startFrame();
-
-        handleCamera(window, impl_->cam);
-        impl_->render(frame_duration);
-
-        frame_duration = throttleFPS(start_time);
-    }
-
-    impl_->renderer.waitForIdle();
+    impl_->loop(input_fn, input_data, step_fn, step_data);
 }
 
 }

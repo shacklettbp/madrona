@@ -22,6 +22,8 @@ public:
     ThreadPoolExecutor(
         const Config &cfg,
         const render::RendererBridge *renderer_bridge = nullptr);
+    ThreadPoolExecutor(ThreadPoolExecutor &&o);
+
     ~ThreadPoolExecutor();
     void run(Job *jobs, CountT num_jobs);
 

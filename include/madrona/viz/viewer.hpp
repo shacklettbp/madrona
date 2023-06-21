@@ -17,7 +17,32 @@ public:
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;
+        uint32_t defaultSimTickRate;
         ExecMode execMode;
+    };
+
+    enum class KeyboardKey : uint32_t {
+        W,
+        A,
+        S,
+        D,
+        Q,
+        E,
+        R,
+        X,
+        Z,
+        C,
+        NumKeys = C + 1,
+    };
+
+    class UserInput {
+    public:
+        inline UserInput(bool *keys_state);
+
+        inline bool keyPressed(KeyboardKey key) const;
+
+    private:
+        bool *keys_state_;
     };
 
     Viewer(const Config &cfg);
@@ -29,11 +54,12 @@ public:
 
     const render::RendererBridge * rendererBridge() const;
 
-    template <typename StepFn>
-    void loop(StepFn &&step_fn);
+    template <typename InputFn, typename StepFn>
+    void loop(InputFn &&input_fn, StepFn &&step_fn);
 
 private:
-    void loop(void (*step_fn)(void *), void *data);
+    void loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
+              void *input_data, void (*step_fn)(void *), void *step_data);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -131,6 +131,8 @@ ThreadPoolExecutor::ThreadPoolExecutor(
     : impl_(Impl::make(cfg, renderer_bridge))
 {}
 
+ThreadPoolExecutor::ThreadPoolExecutor(ThreadPoolExecutor &&o) = default;
+
 ThreadPoolExecutor::Impl::~Impl()
 {
     workerWakeup.store_release(-1);
