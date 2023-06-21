@@ -149,7 +149,7 @@ public:
     Renderer(const Renderer &) = delete;
     ~Renderer();
 
-    CountT loadObjects(Span<const imp::SourceObject> objs);
+    CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats);
 
     void waitUntilFrameReady();
     void startFrame();

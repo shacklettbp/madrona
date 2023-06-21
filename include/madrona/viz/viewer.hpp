@@ -50,7 +50,7 @@ public:
 
     ~Viewer();
 
-    CountT loadObjects(Span<const imp::SourceObject> objs);
+    CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats);
 
     const render::RendererBridge * rendererBridge() const;
 

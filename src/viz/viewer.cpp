@@ -47,9 +47,9 @@ struct Viewer::Impl {
         void *input_data, void (*step_fn)(void *), void *step_data);
 };
 
-CountT Viewer::loadObjects(Span<const imp::SourceObject> objs)
+CountT Viewer::loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats)
 {
-    return impl_->renderer.loadObjects(objs);
+    return impl_->renderer.loadObjects(objs, mats);
 }
 
 const render::RendererBridge * Viewer::rendererBridge() const
