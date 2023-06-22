@@ -2187,7 +2187,7 @@ static void packLighting(const Device &dev,
     light_staging_buffer.flush(dev);
 }
 
-static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd)
+static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, const ViewerCam &cam)
 {
     { // Transition for compute
         array<VkImageMemoryBarrier, 3> compute_prepare {{
@@ -2247,6 +2247,13 @@ static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeli
     }
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
+
+    DeferredLightingPushConst push_const = {
+        math::Vector4{ cam.view.x, cam.view.y, cam.view.z, 0.0f },
+        math::Vector4{ cam.position.x, cam.position.y, cam.position.z, 0.0f }
+    };
+
+    dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DeferredLightingPushConst), &push_const);
 
     dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
             pipeline.layout, 0, 1, &frame.lightingSet, 0, nullptr);
@@ -2533,7 +2540,7 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdEndRenderPass(draw_cmd);
 
     { // Issue deferred lighting pass - separate function - this is becoming crazy
-        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd);
+        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam);
     }
 
     render_pass_info.framebuffer = frame.imguiFBO.hdl;

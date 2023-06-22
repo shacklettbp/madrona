@@ -6,9 +6,8 @@ struct CullPushConst {
 };
 
 struct DeferredLightingPushConst {
-    uint32_t extentx;
-    uint32_t extenty;
-    uint32_t extentz;
+    float4 viewDir;
+    float4 viewPos;
 };
 
 struct DrawPushConst {
