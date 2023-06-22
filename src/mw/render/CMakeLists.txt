@@ -1,10 +1,18 @@
 add_library(madrona_mw_render STATIC
-    interop.hpp interop.cpp
-    ${MADRONA_INC_DIR}/render/mw.hpp
+    ${MADRONA_INC_DIR}/render/mw/components.hpp components.cpp
 )
 
 target_link_libraries(madrona_mw_render PUBLIC
     madrona_mw_core
+)
+
+add_library(madrona_mw_render_system STATIC
+    ${MADRONA_INC_DIR}/render/mw/batch_renderer_system.hpp
+    batch_renderer_system.cpp
+)
+
+target_link_libraries(madrona_mw_render_system PUBLIC
+    madrona_mw_render
 )
 
 if (TARGET madrona_render_vk AND TARGET madrona_cuda)
@@ -15,7 +23,7 @@ if (TARGET madrona_render_vk AND TARGET madrona_cuda)
         vk/present.hpp vk/present.cpp
     )
     
-    target_link_libraries(madrona_batch_render PRIVATE
+    target_link_libraries(madrona_batch_renderer PRIVATE
         madrona_render_vk
         madrona_render_vk_cuda
         madrona_sdl2
@@ -35,7 +43,7 @@ if (TARGET madrona_render_vk AND TARGET madrona_cuda)
         )
     endif ()
 elseif (TARGET madrona_render_metal)
-    add_library(madrona_batch_render STATIC
+    add_library(madrona_batch_renderer STATIC
         metal/scene.hpp metal/scene.cpp
         batch_renderer.hpp metal/batch_renderer.cpp
     )

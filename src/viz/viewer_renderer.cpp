@@ -1529,7 +1529,7 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
         world_views[i] = view_base + i * max_views_per_world;
     }
 
-    RendererInterface iface {
+    ViewerECSBridge bridge {
         .views = world_views,
         .numViews = (uint32_t *)(staging_base + buffer_offsets[1]),
         .instances = world_instances,
@@ -1540,7 +1540,7 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
 
     return EngineInterop {
         std::move(staging),
-        RendererBridge { iface },
+        bridge,
         uint32_t(buffer_offsets[0]),
         max_views_per_world,
         max_instances_per_world,
@@ -2315,7 +2315,7 @@ void Renderer::waitForIdle()
     dev.dt.deviceWaitIdle(dev.hdl);
 }
 
-const render::RendererBridge & Renderer::getBridgeRef() const
+const ViewerECSBridge & Renderer::getBridgeRef() const
 {
     return engine_interop_.bridge;
 }

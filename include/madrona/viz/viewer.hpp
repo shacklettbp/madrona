@@ -62,7 +62,7 @@ public:
 
     void configureLighting(Span<const LightConfig> lights);
 
-    const render::RendererBridge * rendererBridge() const;
+    const ViewerECSBridge * rendererBridge() const;
 
     template <typename InputFn, typename StepFn>
     void loop(InputFn &&input_fn, StepFn &&step_fn);

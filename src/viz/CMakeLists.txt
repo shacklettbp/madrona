@@ -22,7 +22,8 @@ target_link_libraries(imgui_impl PRIVATE
 )
 
 add_library(madrona_viewer STATIC
-    viewer.cpp
+    ${MADRONA_INC_DIR}/viz/viewer.hpp viewer.cpp
+    ${MADRONA_INC_DIR}/viz/system.hpp viewer_system.cpp
     viewer_renderer.hpp viewer_renderer.cpp
 )
 

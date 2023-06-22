@@ -19,9 +19,7 @@ public:
         void *data;
     };
 
-    ThreadPoolExecutor(
-        const Config &cfg,
-        const render::RendererBridge *renderer_bridge = nullptr);
+    ThreadPoolExecutor(const Config &cfg);
     ThreadPoolExecutor(ThreadPoolExecutor &&o);
 
     ~ThreadPoolExecutor();
@@ -50,8 +48,7 @@ public:
     TaskGraphExecutor(
         const Config &cfg,
         const ConfigT &user_cfg,
-        const InitT *user_inits,
-        const render::RendererBridge *renderer_bridge = nullptr);
+        const InitT *user_inits);
 
     inline void run();
 

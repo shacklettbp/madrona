@@ -9,7 +9,7 @@
 #include "vk/descriptors.hpp"
 #include "vk/utils.hpp"
 
-#include "../mw/render/interop.hpp"
+#include "interop.hpp"
 
 #include <madrona/viz/viewer.hpp>
 
@@ -174,7 +174,7 @@ public:
 
     void waitForIdle();
 
-    const render::RendererBridge & getBridgeRef() const;
+    const ViewerECSBridge & getBridgeRef() const;
 
     render::vk::Backend backend;
     Window window;

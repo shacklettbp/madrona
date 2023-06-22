@@ -20,10 +20,8 @@ struct ThreadPoolExecutor::Impl {
     StateManager stateMgr;
     HeapArray<StateCache> stateCaches;
     HeapArray<void *> exportPtrs;
-    const render::RendererBridge *rendererBridge;
 
-    static Impl * make(const ThreadPoolExecutor::Config &cfg,
-                       const render::RendererBridge *renderer_bridge);
+    static Impl * make(const ThreadPoolExecutor::Config &cfg);
     ~Impl();
     void run(Job *jobs, CountT num_jobs);
     void workerThread(CountT worker_id);
@@ -94,8 +92,7 @@ static inline void pinThread([[maybe_unused]] CountT worker_id)
 }
 
 ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
-    const ThreadPoolExecutor::Config &cfg,
-    const render::RendererBridge *renderer_bridge)
+    const ThreadPoolExecutor::Config &cfg)
 {
     Impl *impl = new Impl {
         .workers = HeapArray<std::thread>(
@@ -109,7 +106,6 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
         .stateMgr = StateManager(cfg.numWorlds),
         .stateCaches = HeapArray<StateCache>(cfg.numWorlds),
         .exportPtrs = HeapArray<void *>(cfg.numExportedBuffers),
-        .rendererBridge = renderer_bridge,
     };
 
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
@@ -125,10 +121,8 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
     return impl;
 }
 
-ThreadPoolExecutor::ThreadPoolExecutor(
-        const Config &cfg,
-        const render::RendererBridge *renderer_bridge)
-    : impl_(Impl::make(cfg, renderer_bridge))
+ThreadPoolExecutor::ThreadPoolExecutor(const Config &cfg)
+    : impl_(Impl::make(cfg))
 {}
 
 ThreadPoolExecutor::ThreadPoolExecutor(ThreadPoolExecutor &&o) = default;
@@ -183,11 +177,7 @@ void ThreadPoolExecutor::initializeContexts(
             uint32_t(world_idx),
         };
 
-        Context &ctx = init_fn(init_data, worker_init, world_idx);
-
-        if (impl_->rendererBridge != nullptr) {
-            render::RendererState::init(ctx, *impl_->rendererBridge);
-        }
+        init_fn(init_data, worker_init, world_idx);
     }
 }
 
