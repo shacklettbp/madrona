@@ -230,6 +230,7 @@ static HeapArray<uint32_t> hlslToSPV(
         L"-T", stage_type_str,
         L"-HV", L"2021",
         L"-enable-16bit-types",
+        L"-fspv-preserve-bindings"
     };
 
     Optional<HeapArray<wchar_t>> wentry = Optional<HeapArray<wchar_t>>::none();

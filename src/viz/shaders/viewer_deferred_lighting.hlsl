@@ -27,6 +27,11 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         uint2 targetPixel = uint2(idx.x, idx.y);
 
         float4 color = gbufferAlbedo[targetPixel];
-        gbufferAlbedo[targetPixel] = color / 2.f;
+        float4 normal = gbufferNormal[targetPixel];
+        float4 position = gbufferPosition[targetPixel];
+
+        float4 lightDir = lights[0].lightDir;
+
+        gbufferAlbedo[targetPixel] = color + normal + position + lightDir;
     }
 }
