@@ -78,7 +78,9 @@ static void handleCamera(GLFWwindow *window, ViewerCam &cam)
     };
 
 
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_2) == GLFW_PRESS) {
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_2) == GLFW_PRESS ||
+            glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
         math::Vector2 mouse_cur = cursorPosition();
@@ -114,6 +116,8 @@ static void handleCamera(GLFWwindow *window, ViewerCam &cam)
 
         cam.mousePrev = mouse_cur;
     } else {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+
         if (keyPressed(GLFW_KEY_W)) {
             translate += cam.up;
         }
@@ -131,10 +135,6 @@ static void handleCamera(GLFWwindow *window, ViewerCam &cam)
         }
 
         cam.mousePrev = cursorPosition();
-    }
-
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_2) == GLFW_RELEASE) {
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
 
     cam.position += translate * InternalConfig::cameraMoveSpeed *
