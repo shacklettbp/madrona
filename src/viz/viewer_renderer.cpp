@@ -35,6 +35,7 @@ using MaterialData = shader::MaterialData;
 using ObjectData = shader::ObjectData;
 using DrawPushConst = shader::DrawPushConst;
 using CullPushConst = shader::CullPushConst;
+using DeferredLightingPushConst = shader::DeferredLightingPushConst;
 using DrawCmd = shader::DrawCmd;
 using DrawMaterialData = shader::DrawMaterialData;
 using PackedInstanceData = shader::PackedInstanceData;
@@ -49,6 +50,7 @@ inline constexpr uint32_t initMaxTransforms = 100000;
 inline constexpr uint32_t initMaxMatIndices = 100000;
 inline constexpr uint32_t shadowMapSize = 4096;
 inline constexpr uint32_t maxLights = 10;
+inline constexpr VkFormat gbufferFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
 }
 
@@ -414,6 +416,8 @@ static VkQueue makeTransferQueue(const Device &dev, uint32_t idx)
 
 static VkRenderPass makeRenderPass(const Device &dev,
                                    VkFormat color_fmt,
+                                   VkFormat normal_fmt,
+                                   VkFormat position_fmt,
                                    VkFormat depth_fmt)
 {
     vector<VkAttachmentDescription> attachment_descs;
@@ -426,9 +430,20 @@ static VkRenderPass makeRenderPass(const Device &dev,
          VK_IMAGE_LAYOUT_UNDEFINED,
          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
 
-    attachment_refs.push_back(
-        {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
-    
+    attachment_descs.push_back(
+        {0, normal_fmt, VK_SAMPLE_COUNT_1_BIT,
+         VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+         VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+         VK_IMAGE_LAYOUT_UNDEFINED,
+         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+
+    attachment_descs.push_back(
+        {0, position_fmt, VK_SAMPLE_COUNT_1_BIT,
+         VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+         VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+         VK_IMAGE_LAYOUT_UNDEFINED,
+         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+
     attachment_descs.push_back(
         {0, depth_fmt, VK_SAMPLE_COUNT_1_BIT,
          VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -436,9 +451,15 @@ static VkRenderPass makeRenderPass(const Device &dev,
          VK_IMAGE_LAYOUT_UNDEFINED,
          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL});
 
+    
     attachment_refs.push_back(
-        {static_cast<uint32_t>(attachment_refs.size()),
-         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL});
+        {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+    attachment_refs.push_back(
+        {1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+    attachment_refs.push_back(
+        {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+    attachment_refs.push_back(
+        {3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL});
 
     VkSubpassDescription subpass_desc {};
     subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -597,6 +618,22 @@ static PipelineShaders makeCullShader(const Device &dev)
     SPIRVShader spirv = compiler.compileHLSLFileToSPV(
         (shader_dir / "viewer_cull.hlsl").c_str(), {}, {},
         { "instanceCull", ShaderStage::Compute });
+
+    StackAlloc tmp_alloc;
+    return PipelineShaders(dev, tmp_alloc,
+                           Span<const SPIRVShader>(&spirv, 1), {});
+}
+
+static PipelineShaders makeDeferredLightingShader(const Device &dev)
+{
+    std::filesystem::path shader_dir =
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "shaders";
+
+    ShaderCompiler compiler;
+    SPIRVShader spirv = compiler.compileHLSLFileToSPV(
+        (shader_dir / "viewer_deferred_lighting.hlsl").c_str(), {}, {},
+        { "lighting", ShaderStage::Compute });
 
     StackAlloc tmp_alloc;
     return PipelineShaders(dev, tmp_alloc,
@@ -968,6 +1005,81 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     };
 }
 
+static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
+                                    VkPipelineCache pipeline_cache,
+                                    CountT num_frames)
+{
+    PipelineShaders shader = makeDeferredLightingShader(dev);
+
+    // Push constant
+    VkPushConstantRange push_const {
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        0,
+        sizeof(DeferredLightingPushConst),
+    };
+
+    // Layout configuration
+    std::array desc_layouts {
+        shader.getLayout(0),
+        shader.getLayout(1),
+        shader.getLayout(2),
+    };
+
+    VkPipelineLayoutCreateInfo lighting_layout_info;
+    lighting_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    lighting_layout_info.pNext = nullptr;
+    lighting_layout_info.flags = 0;
+    lighting_layout_info.setLayoutCount =
+        static_cast<uint32_t>(desc_layouts.size());
+    lighting_layout_info.pSetLayouts = desc_layouts.data();
+    lighting_layout_info.pushConstantRangeCount = 1;
+    lighting_layout_info.pPushConstantRanges = &push_const;
+
+    VkPipelineLayout lighting_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &lighting_layout_info, nullptr,
+                                       &lighting_layout));
+
+    std::array<VkComputePipelineCreateInfo, 1> compute_infos;
+#if 0
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size;
+    subgroup_size.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
+    subgroup_size.pNext = nullptr;
+    subgroup_size.requiredSubgroupSize = 32;
+#endif
+
+    compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    compute_infos[0].pNext = nullptr;
+    compute_infos[0].flags = 0;
+    compute_infos[0].stage = {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr, //&subgroup_size,
+        VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT,
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        shader.getShader(0),
+        "lighting",
+        nullptr,
+    };
+    compute_infos[0].layout = lighting_layout;
+    compute_infos[0].basePipelineHandle = VK_NULL_HANDLE;
+    compute_infos[0].basePipelineIndex = -1;
+
+    std::array<VkPipeline, compute_infos.size()> pipelines;
+    REQ_VK(dev.dt.createComputePipelines(dev.hdl, pipeline_cache,
+                                         compute_infos.size(),
+                                         compute_infos.data(), nullptr,
+                                         pipelines.data()));
+
+    FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
+
+    return Pipeline<1> {
+        std::move(shader),
+        lighting_layout,
+        pipelines,
+        std::move(desc_pool),
+    };
+}
+
 static Pipeline<1> makeCullPipeline(const Device &dev,
                                     VkPipelineCache pipeline_cache,
                                     CountT num_frames)
@@ -1064,7 +1176,9 @@ static Framebuffer makeFramebuffer(const Device &dev,
                                    uint32_t fb_height,
                                    VkRenderPass render_pass)
 {
-    auto color = alloc.makeColorAttachment(fb_width, fb_height);
+    auto albedo = alloc.makeColorAttachment(fb_width, fb_height);
+    auto normal = alloc.makeColorAttachment(fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
+    auto position = alloc.makeColorAttachment(fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
     auto depth = alloc.makeDepthAttachment(fb_width, fb_height);
 
     VkImageViewCreateInfo view_info {};
@@ -1077,11 +1191,23 @@ static Framebuffer makeFramebuffer(const Device &dev,
     view_info_sr.baseArrayLayer = 0;
     view_info_sr.layerCount = 1;
 
-    view_info.image = color.image;
+    view_info.image = albedo.image;
     view_info.format = alloc.getColorAttachmentFormat();
 
-    VkImageView color_view;
-    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &color_view));
+    VkImageView albedo_view;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &albedo_view));
+
+    view_info.image = normal.image;
+    view_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+    VkImageView normal_view;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &normal_view));
+
+    view_info.image = position.image;
+    view_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+
+    VkImageView position_view;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &position_view));
 
     view_info.image = depth.image;
     view_info.format = alloc.getDepthAttachmentFormat();
@@ -1091,7 +1217,9 @@ static Framebuffer makeFramebuffer(const Device &dev,
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &depth_view));
 
     array attachment_views {
-        color_view,
+        albedo_view,
+        normal_view,
+        position_view,
         depth_view,
     };
 
@@ -1110,9 +1238,13 @@ static Framebuffer makeFramebuffer(const Device &dev,
     REQ_VK(dev.dt.createFramebuffer(dev.hdl, &fb_info, nullptr, &hdl));
 
     return Framebuffer {
-        std::move(color),
+        std::move(albedo),
+        std::move(normal),
+        std::move(position),
         std::move(depth),
-        color_view,
+        albedo_view,
+        normal_view,
+        position_view,
         depth_view,
         hdl,
     };
@@ -1274,7 +1406,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     };
 }
 
-static array<VkClearValue, 2> makeClearValues()
+static array<VkClearValue, 4> makeClearValues()
 {
     VkClearValue color_clear;
     color_clear.color = {{0.f, 0.f, 0.f, 1.f}};
@@ -1283,6 +1415,8 @@ static array<VkClearValue, 2> makeClearValues()
     depth_clear.depthStencil = {0.f, 0};
 
     return {
+        color_clear,
+        color_clear,
         color_clear,
         depth_clear,
     };
@@ -1297,10 +1431,32 @@ static VkRenderPass makeImGuiRenderPass(const Device &dev,
                                         VkFormat color_fmt,
                                         VkFormat depth_fmt)
 {
-    array<VkAttachmentDescription, 2> attachment_descs {{
+    array<VkAttachmentDescription, 4> attachment_descs {{
         {
             0,
             color_fmt,
+            VK_SAMPLE_COUNT_1_BIT,
+            VK_ATTACHMENT_LOAD_OP_LOAD,
+            VK_ATTACHMENT_STORE_OP_STORE,
+            VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        },
+        {
+            0,
+            InternalConfig::gbufferFormat,
+            VK_SAMPLE_COUNT_1_BIT,
+            VK_ATTACHMENT_LOAD_OP_LOAD,
+            VK_ATTACHMENT_STORE_OP_STORE,
+            VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        },
+        {
+            0,
+            InternalConfig::gbufferFormat,
             VK_SAMPLE_COUNT_1_BIT,
             VK_ATTACHMENT_LOAD_OP_LOAD,
             VK_ATTACHMENT_STORE_OP_STORE,
@@ -1328,7 +1484,7 @@ static VkRenderPass makeImGuiRenderPass(const Device &dev,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         },
         {
-            1,
+            3,
             VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         },
     }};
@@ -1579,6 +1735,7 @@ Renderer::Renderer(uint32_t gpu_id,
       clamp_sampler_(
           makeImmutableSampler(dev, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)),
       render_pass_(makeRenderPass(dev, alloc.getColorAttachmentFormat(),
+                                  InternalConfig::gbufferFormat, InternalConfig::gbufferFormat,
                                   alloc.getDepthAttachmentFormat())),
       shadow_pass_(makeShadowRenderPass(dev, alloc.getDepthAttachmentFormat())),
       imgui_render_state_(imguiInit(window.platformWindow, dev, backend,
@@ -1586,6 +1743,8 @@ Renderer::Renderer(uint32_t gpu_id,
                                  alloc.getColorAttachmentFormat(),
                                  alloc.getDepthAttachmentFormat())),
       instance_cull_(makeCullPipeline(dev, pipeline_cache_,
+                                      InternalConfig::numFrames)),
+      deferred_lighting_(makeDeferredLightingPipeline(dev, pipeline_cache_,
                                       InternalConfig::numFrames)),
       object_draw_(makeDrawPipeline(dev, pipeline_cache_, render_pass_,
                                     repeat_sampler_, clamp_sampler_,

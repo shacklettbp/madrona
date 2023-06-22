@@ -809,10 +809,15 @@ optional<VkDeviceMemory> MemoryAllocator::alloc(VkDeviceSize num_bytes)
 }
 
 LocalImage MemoryAllocator::makeColorAttachment(uint32_t width,
-                                                uint32_t height)
+                                                uint32_t height,
+                                                VkFormat format)
 {
+    if (format == VK_FORMAT_MAX_ENUM) {
+        format = color_attach_fmt_;
+    }
+
     return makeDedicatedImage(width, height, 1,
-                              color_attach_fmt_,
+                              format,
                               ImageFlags::colorAttachmentUsage,
                               type_indices_.local);
 }

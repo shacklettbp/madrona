@@ -5,6 +5,12 @@ struct CullPushConst {
     uint32_t numInstances;
 };
 
+struct DeferredLightingPushConst {
+    uint32_t extentx;
+    uint32_t extenty;
+    uint32_t extentz;
+};
+
 struct DrawPushConst {
     uint32_t viewIdx;
 };

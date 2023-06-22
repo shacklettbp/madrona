@@ -80,8 +80,12 @@ struct Pipeline {
 
 struct Framebuffer {
     render::vk::LocalImage colorAttachment;
+    render::vk::LocalImage normalAttachment;
+    render::vk::LocalImage positionAttachment;
     render::vk::LocalImage depthAttachment;
     VkImageView colorView;
+    VkImageView normalView;
+    VkImageView positionView;
     VkImageView depthView;
     VkFramebuffer hdl;
 };
@@ -95,6 +99,7 @@ struct ShadowFramebuffer {
 struct Frame {
     Framebuffer fb;
     ShadowFramebuffer shadowFB;
+
     VkCommandPool cmdPool;
     VkCommandBuffer drawCmd;
     VkFence cpuFinished;
@@ -115,6 +120,7 @@ struct Frame {
 
     VkDescriptorSet cullShaderSet;
     VkDescriptorSet drawShaderSet;
+    VkDescriptorSet lightingSet;
 };
 
 struct ViewerCam {
@@ -192,7 +198,7 @@ private:
 
     uint32_t fb_width_;
     uint32_t fb_height_;
-    std::array<VkClearValue, 2> fb_clear_;
+    std::array<VkClearValue, 4> fb_clear_;
     PresentationState present_;
     VkPipelineCache pipeline_cache_;
     VkSampler repeat_sampler_;
@@ -203,6 +209,9 @@ private:
     Pipeline<1> instance_cull_;
     Pipeline<1> object_draw_;
     Pipeline<1> object_shadow_draw_;
+    Pipeline<1> deferred_lighting_;
+
+    // Pipeline<1> ao_pass_;
 
     render::vk::FixedDescriptorPool asset_desc_pool_cull_;
     render::vk::FixedDescriptorPool asset_desc_pool_draw_;

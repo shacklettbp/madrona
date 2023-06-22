@@ -103,7 +103,7 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     return o;
 }
 
-#if 0
+#if 1
 float3x3 toMat(float4 r)
 {
     float x2 = r.x * r.x;
@@ -175,23 +175,37 @@ float4 vert(in uint vid : SV_VertexID,
         view_pos.y);
 
     v2f.viewPos = view_pos;
-    v2f.normal = normalize(
-        rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
+    v2f.normal = normalize(mul(toMat(instance_data.rotation), vert.normal));
+    // v2f.normal = normalize(
+        // rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
     v2f.uv = vert.uv;
     v2f.color = color;
 
     return clip_pos;
 }
 
+struct PixelOutput {
+    float4 color : SV_Target0;
+    float4 normal : SV_Target1;
+    float4 position : SV_Target2;
+};
+
 [shader("pixel")]
-float4 frag(in V2F v2f) : SV_TARGET0
+PixelOutput frag(in V2F v2f)
 {
     float hit_angle = max(dot(normalize(v2f.normal),
                               normalize(-v2f.viewPos)), 0.f);
 
-    float s = dot(normalize(lightBuffer[0].lightDir.xyz), normalize(v2f.normal)) + 1.0f;
+    float s = max(dot(normalize(-lightBuffer[0].lightDir.xyz), normalize(v2f.normal)), 0.0);
 
-    return s * v2f.color * float4(float3(hit_angle, hit_angle, hit_angle), 1.0);
+    PixelOutput output;
+    output.color = s * v2f.color;
+    output.normal = float4(v2f.normal, 1.f);
+    output.position = float4(0.f, 0.f, 0.f, 0.f);
+
+    return output;
+
+    // return s * v2f.color * float4(float3(hit_angle, hit_angle, hit_angle), 1.0);
 }
 
 #if 0

@@ -194,7 +194,7 @@ public:
     VkDeviceSize alignUniformBufferOffset(VkDeviceSize offset) const;
     VkDeviceSize alignStorageBufferOffset(VkDeviceSize offset) const;
 
-    LocalImage makeColorAttachment(uint32_t width, uint32_t height);
+    LocalImage makeColorAttachment(uint32_t width, uint32_t height, VkFormat format = VK_FORMAT_MAX_ENUM);
     LocalImage makeDepthAttachment(uint32_t width, uint32_t height);
 
     LocalImage makeConversionImage(uint32_t width, uint32_t height,
