@@ -26,7 +26,8 @@ enum class BindingType : uint32_t {
     Texture = 2,
     UniformBuffer = 3,
     StorageBuffer = 4,
-    AccelerationStructure = 5,
+    StorageImage = 5,
+    AccelerationStructure = 6,
     NumBindingTypes = AccelerationStructure,
 };
 

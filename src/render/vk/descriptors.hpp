@@ -109,6 +109,11 @@ public:
                                const VkDescriptorBufferInfo *buf,
                                uint32_t binding);
 
+    static inline void storageImage(VkWriteDescriptorSet &update,
+                                    VkDescriptorSet desc_set,
+                                    const VkDescriptorImageInfo *img,
+                                    uint32_t binding);
+
     static inline void accelStructs(
         VkWriteDescriptorSet &update,
         VkWriteDescriptorSetAccelerationStructureKHR &as_update,

@@ -13,9 +13,6 @@ StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 [[vk::binding(2, 0)]]
 StructuredBuffer<DrawMaterialData> drawMaterialBuffer;
 
-[[vk::binding(3, 0)]]
-StructuredBuffer<DirectionalLight> lightBuffer;
-
 // Asset descriptor bindings
 
 [[vk::binding(0, 1)]]
@@ -25,10 +22,8 @@ StructuredBuffer<PackedVertex> vertexDataBuffer;
 StructuredBuffer<MaterialData> materialBuffer;
 
 struct V2F {
-    [[vk::location(0)]] float3 viewPos : TEXCOORD0;
-    [[vk::location(1)]] float3 normal : TEXCOORD1;
-    [[vk::location(2)]] float2 uv : TEXCOORD2;
-    [[vk::location(3)]] float4 color : TEXCOORD3;
+    [[vk::location(0)]] float3 normal : TEXCOORD1;
+    [[vk::location(1)]] float4 color : TEXCOORD3;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -174,11 +169,11 @@ float4 vert(in uint vid : SV_VertexID,
         view_data.zNear,
         view_pos.y);
 
-    v2f.viewPos = view_pos;
+    // v2f.viewPos = view_pos;
     v2f.normal = normalize(mul(toMat(instance_data.rotation), vert.normal));
     // v2f.normal = normalize(
         // rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
-    v2f.uv = vert.uv;
+    // v2f.uv = vert.uv;
     v2f.color = color;
 
     return clip_pos;
@@ -193,13 +188,14 @@ struct PixelOutput {
 [shader("pixel")]
 PixelOutput frag(in V2F v2f)
 {
+#if 0
     float hit_angle = max(dot(normalize(v2f.normal),
                               normalize(-v2f.viewPos)), 0.f);
-
     float s = max(dot(normalize(-lightBuffer[0].lightDir.xyz), normalize(v2f.normal)), 0.0);
+#endif
 
     PixelOutput output;
-    output.color = s * v2f.color;
+    output.color = v2f.color;
     output.normal = float4(v2f.normal, 1.f);
     output.position = float4(0.f, 0.f, 0.f, 0.f);
 

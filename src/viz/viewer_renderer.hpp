@@ -98,6 +98,8 @@ struct ShadowFramebuffer {
 
 struct Frame {
     Framebuffer fb;
+    Framebuffer imguiFBO;
+
     ShadowFramebuffer shadowFB;
 
     VkCommandPool cmdPool;
@@ -199,6 +201,7 @@ private:
     uint32_t fb_width_;
     uint32_t fb_height_;
     std::array<VkClearValue, 4> fb_clear_;
+    std::array<VkClearValue, 2> fb_imgui_clear_;
     PresentationState present_;
     VkPipelineCache pipeline_cache_;
     VkSampler repeat_sampler_;
@@ -208,7 +211,7 @@ private:
     ImGuiRenderState imgui_render_state_;
     Pipeline<1> instance_cull_;
     Pipeline<1> object_draw_;
-    Pipeline<1> object_shadow_draw_;
+    // Pipeline<1> object_shadow_draw_;
     Pipeline<1> deferred_lighting_;
 
     // Pipeline<1> ao_pass_;

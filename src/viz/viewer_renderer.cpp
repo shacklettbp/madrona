@@ -485,6 +485,8 @@ static VkRenderPass makeRenderPass(const Device &dev,
     REQ_VK(dev.dt.createRenderPass(dev.hdl, &render_pass_info, nullptr,
                                    &render_pass));
 
+    printf("Draw render pass: %p\n", (void*)render_pass);
+
     return render_pass;
 }
 
@@ -728,8 +730,10 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-    array<VkPipelineColorBlendAttachmentState, 1> blend_attachments {{
+    array<VkPipelineColorBlendAttachmentState, 3> blend_attachments {{
         blend_attach,
+        blend_attach,
+        blend_attach
     }};
 
     VkPipelineColorBlendStateCreateInfo blend_info {};
@@ -1005,80 +1009,6 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     };
 }
 
-static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
-                                    VkPipelineCache pipeline_cache,
-                                    CountT num_frames)
-{
-    PipelineShaders shader = makeDeferredLightingShader(dev);
-
-    // Push constant
-    VkPushConstantRange push_const {
-        VK_SHADER_STAGE_COMPUTE_BIT,
-        0,
-        sizeof(DeferredLightingPushConst),
-    };
-
-    // Layout configuration
-    std::array desc_layouts {
-        shader.getLayout(0),
-        shader.getLayout(1),
-        shader.getLayout(2),
-    };
-
-    VkPipelineLayoutCreateInfo lighting_layout_info;
-    lighting_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    lighting_layout_info.pNext = nullptr;
-    lighting_layout_info.flags = 0;
-    lighting_layout_info.setLayoutCount =
-        static_cast<uint32_t>(desc_layouts.size());
-    lighting_layout_info.pSetLayouts = desc_layouts.data();
-    lighting_layout_info.pushConstantRangeCount = 1;
-    lighting_layout_info.pPushConstantRanges = &push_const;
-
-    VkPipelineLayout lighting_layout;
-    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &lighting_layout_info, nullptr,
-                                       &lighting_layout));
-
-    std::array<VkComputePipelineCreateInfo, 1> compute_infos;
-#if 0
-    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size;
-    subgroup_size.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
-    subgroup_size.pNext = nullptr;
-    subgroup_size.requiredSubgroupSize = 32;
-#endif
-
-    compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    compute_infos[0].pNext = nullptr;
-    compute_infos[0].flags = 0;
-    compute_infos[0].stage = {
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        nullptr, //&subgroup_size,
-        VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT,
-        VK_SHADER_STAGE_COMPUTE_BIT,
-        shader.getShader(0),
-        "lighting",
-        nullptr,
-    };
-    compute_infos[0].layout = lighting_layout;
-    compute_infos[0].basePipelineHandle = VK_NULL_HANDLE;
-    compute_infos[0].basePipelineIndex = -1;
-
-    std::array<VkPipeline, compute_infos.size()> pipelines;
-    REQ_VK(dev.dt.createComputePipelines(dev.hdl, pipeline_cache,
-                                         compute_infos.size(),
-                                         compute_infos.data(), nullptr,
-                                         pipelines.data()));
-
-    FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
-
-    return Pipeline<1> {
-        std::move(shader),
-        lighting_layout,
-        pipelines,
-        std::move(desc_pool),
-    };
-}
 
 static Pipeline<1> makeCullPipeline(const Device &dev,
                                     VkPipelineCache pipeline_cache,
@@ -1154,6 +1084,79 @@ static Pipeline<1> makeCullPipeline(const Device &dev,
     };
 }
 
+static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
+                                    VkPipelineCache pipeline_cache,
+                                    CountT num_frames)
+{
+    PipelineShaders shader = makeDeferredLightingShader(dev);
+
+    // Push constant
+    VkPushConstantRange push_const {
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        0,
+        sizeof(DeferredLightingPushConst),
+    };
+
+    // Layout configuration
+    std::array desc_layouts {
+        shader.getLayout(0),
+    };
+
+    VkPipelineLayoutCreateInfo lighting_layout_info;
+    lighting_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    lighting_layout_info.pNext = nullptr;
+    lighting_layout_info.flags = 0;
+    lighting_layout_info.setLayoutCount =
+        static_cast<uint32_t>(desc_layouts.size());
+    lighting_layout_info.pSetLayouts = desc_layouts.data();
+    lighting_layout_info.pushConstantRangeCount = 1;
+    lighting_layout_info.pPushConstantRanges = &push_const;
+
+    VkPipelineLayout lighting_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &lighting_layout_info, nullptr,
+                                       &lighting_layout));
+
+    std::array<VkComputePipelineCreateInfo, 1> compute_infos;
+#if 0
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size;
+    subgroup_size.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
+    subgroup_size.pNext = nullptr;
+    subgroup_size.requiredSubgroupSize = 32;
+#endif
+
+    compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    compute_infos[0].pNext = nullptr;
+    compute_infos[0].flags = 0;
+    compute_infos[0].stage = {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr, //&subgroup_size,
+        VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT,
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        shader.getShader(0),
+        "lighting",
+        nullptr,
+    };
+    compute_infos[0].layout = lighting_layout;
+    compute_infos[0].basePipelineHandle = VK_NULL_HANDLE;
+    compute_infos[0].basePipelineIndex = -1;
+
+    std::array<VkPipeline, compute_infos.size()> pipelines;
+    REQ_VK(dev.dt.createComputePipelines(dev.hdl, pipeline_cache,
+                                         compute_infos.size(),
+                                         compute_infos.data(), nullptr,
+                                         pipelines.data()));
+
+    FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
+
+    return Pipeline<1> {
+        std::move(shader),
+        lighting_layout,
+        pipelines,
+        std::move(desc_pool),
+    };
+}
+
 static Backend initializeBackend()
 {
     auto get_inst_addr = PresentationState::init();
@@ -1170,11 +1173,12 @@ static Backend initializeBackend()
                    PresentationState::getInstanceExtensions());
 }
 
-static Framebuffer makeFramebuffer(const Device &dev,
+static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
                                    MemoryAllocator &alloc,
                                    uint32_t fb_width,
                                    uint32_t fb_height,
-                                   VkRenderPass render_pass)
+                                   VkRenderPass render_pass,
+                                   VkRenderPass imgui_render_pass)
 {
     auto albedo = alloc.makeColorAttachment(fb_width, fb_height);
     auto normal = alloc.makeColorAttachment(fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
@@ -1237,17 +1241,49 @@ static Framebuffer makeFramebuffer(const Device &dev,
     VkFramebuffer hdl;
     REQ_VK(dev.dt.createFramebuffer(dev.hdl, &fb_info, nullptr, &hdl));
 
-    return Framebuffer {
-        std::move(albedo),
-        std::move(normal),
-        std::move(position),
-        std::move(depth),
+    array imgui_attachment_views {
         albedo_view,
-        normal_view,
-        position_view,
         depth_view,
-        hdl,
     };
+
+    VkFramebufferCreateInfo imgui_fb_info;
+    imgui_fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    imgui_fb_info.pNext = nullptr;
+    imgui_fb_info.flags = 0;
+    imgui_fb_info.renderPass = imgui_render_pass;
+    imgui_fb_info.attachmentCount = 2;
+    imgui_fb_info.pAttachments = imgui_attachment_views.data();
+    imgui_fb_info.width = fb_width;
+    imgui_fb_info.height = fb_height;
+    imgui_fb_info.layers = 1;
+
+    VkFramebuffer imgui_hdl;
+    REQ_VK(dev.dt.createFramebuffer(dev.hdl, &imgui_fb_info, nullptr, &imgui_hdl));
+
+    return std::make_pair(
+        Framebuffer {
+            std::move(albedo),
+            std::move(normal),
+            std::move(position),
+            std::move(depth),
+            albedo_view,
+            normal_view,
+            position_view,
+            depth_view,
+            hdl 
+        },
+        Framebuffer {
+            std::move(albedo),
+            std::move(normal),
+            std::move(position),
+            std::move(depth),
+            albedo_view,
+            normal_view,
+            position_view,
+            depth_view,
+            imgui_hdl 
+        }
+    );
 }
 
 static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
@@ -1304,12 +1340,14 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       uint32_t fb_width, uint32_t fb_height,
                       uint32_t max_views, uint32_t max_instances,
                       VkRenderPass render_pass,
+                      VkRenderPass imgui_render_pass,
                       VkRenderPass shadow_pass,
                       VkDescriptorSet cull_set,
                       VkDescriptorSet draw_set,
+                      VkDescriptorSet lighting_set,
                       Frame *dst)
 {
-    auto fb = makeFramebuffer(dev, alloc, fb_width, fb_height, render_pass);
+    auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
     auto shadow_fb = makeShadowFramebuffer(dev, alloc, InternalConfig::shadowMapSize, InternalConfig::shadowMapSize, shadow_pass);
 
     VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
@@ -1332,7 +1370,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 8> desc_updates;
+    std::array<VkWriteDescriptorSet, 11> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -1372,19 +1410,39 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     DescHelper::storage(desc_updates[5], cull_set, &draw_mat_info, 4);
     DescHelper::storage(desc_updates[6], draw_set, &draw_mat_info, 2);
 
-#if 1
+    VkDescriptorImageInfo gbuffer_albedo_info;
+    gbuffer_albedo_info.imageView = fb.colorView;
+    gbuffer_albedo_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    gbuffer_albedo_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::storageImage(desc_updates[7], lighting_set, &gbuffer_albedo_info, 0);
+
+    VkDescriptorImageInfo gbuffer_normal_info;
+    gbuffer_normal_info.imageView = fb.normalView;
+    gbuffer_normal_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    gbuffer_normal_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::storageImage(desc_updates[8], lighting_set, &gbuffer_normal_info, 1);
+
+    VkDescriptorImageInfo gbuffer_position_info;
+    gbuffer_position_info.imageView = fb.positionView;
+    gbuffer_position_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    gbuffer_position_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::storageImage(desc_updates[9], lighting_set, &gbuffer_position_info, 2);
+
     VkDescriptorBufferInfo light_data_info;
     light_data_info.buffer = render_input.buffer;
     light_data_info.offset = buffer_offsets[4];
     light_data_info.range = buffer_sizes[5];
 
-    DescHelper::storage(desc_updates[7], draw_set, &light_data_info, 3);
-#endif
+    DescHelper::storage(desc_updates[10], lighting_set, &light_data_info, 3);
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
     new (dst) Frame {
         std::move(fb),
+        std::move(imgui_fb),
         std::move(shadow_fb),
         cmd_pool,
         makeCmdBuffer(dev, cmd_pool),
@@ -1403,6 +1461,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         max_instances * 10,
         cull_set,
         draw_set,
+        lighting_set,
     };
 }
 
@@ -1422,6 +1481,20 @@ static array<VkClearValue, 4> makeClearValues()
     };
 }
 
+static array<VkClearValue, 2> makeImguiClearValues()
+{
+    VkClearValue color_clear;
+    color_clear.color = {{0.f, 0.f, 0.f, 1.f}};
+
+    VkClearValue depth_clear;
+    depth_clear.depthStencil = {0.f, 0};
+
+    return {
+        color_clear,
+        depth_clear,
+    };
+}
+
 static void imguiVkCheck(VkResult res)
 {
     REQ_VK(res);
@@ -1431,32 +1504,10 @@ static VkRenderPass makeImGuiRenderPass(const Device &dev,
                                         VkFormat color_fmt,
                                         VkFormat depth_fmt)
 {
-    array<VkAttachmentDescription, 4> attachment_descs {{
+    array<VkAttachmentDescription, 2> attachment_descs {{
         {
             0,
             color_fmt,
-            VK_SAMPLE_COUNT_1_BIT,
-            VK_ATTACHMENT_LOAD_OP_LOAD,
-            VK_ATTACHMENT_STORE_OP_STORE,
-            VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        },
-        {
-            0,
-            InternalConfig::gbufferFormat,
-            VK_SAMPLE_COUNT_1_BIT,
-            VK_ATTACHMENT_LOAD_OP_LOAD,
-            VK_ATTACHMENT_STORE_OP_STORE,
-            VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        },
-        {
-            0,
-            InternalConfig::gbufferFormat,
             VK_SAMPLE_COUNT_1_BIT,
             VK_ATTACHMENT_LOAD_OP_LOAD,
             VK_ATTACHMENT_STORE_OP_STORE,
@@ -1484,7 +1535,7 @@ static VkRenderPass makeImGuiRenderPass(const Device &dev,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         },
         {
-            3,
+            1,
             VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         },
     }};
@@ -1509,6 +1560,8 @@ static VkRenderPass makeImGuiRenderPass(const Device &dev,
     VkRenderPass render_pass;
     REQ_VK(dev.dt.createRenderPass(dev.hdl, &render_pass_info, nullptr,
                                    &render_pass));
+
+    printf("Imgui render pass: %p\n", (void*)render_pass);
 
     return render_pass;
 }
@@ -1727,6 +1780,7 @@ Renderer::Renderer(uint32_t gpu_id,
       fb_width_(img_width),
       fb_height_(img_height),
       fb_clear_(makeClearValues()),
+      fb_imgui_clear_(makeImguiClearValues()),
       present_(backend, dev, window,
                InternalConfig::numFrames, true),
       pipeline_cache_(getPipelineCache(dev)),
@@ -1744,14 +1798,16 @@ Renderer::Renderer(uint32_t gpu_id,
                                  alloc.getDepthAttachmentFormat())),
       instance_cull_(makeCullPipeline(dev, pipeline_cache_,
                                       InternalConfig::numFrames)),
-      deferred_lighting_(makeDeferredLightingPipeline(dev, pipeline_cache_,
-                                      InternalConfig::numFrames)),
       object_draw_(makeDrawPipeline(dev, pipeline_cache_, render_pass_,
                                     repeat_sampler_, clamp_sampler_,
                                     InternalConfig::numFrames)),
+#if 0
       object_shadow_draw_(makeShadowDrawPipeline(dev, pipeline_cache_, shadow_pass_,
                                     repeat_sampler_, clamp_sampler_,
                                     InternalConfig::numFrames)),
+#endif
+      deferred_lighting_(makeDeferredLightingPipeline(dev, pipeline_cache_,
+                                      InternalConfig::numFrames)),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
       asset_set_cull_(asset_desc_pool_cull_.makeSet()),
@@ -1772,9 +1828,11 @@ Renderer::Renderer(uint32_t gpu_id,
         makeFrame(dev, alloc, fb_width_, fb_height_,
                   max_views_per_world, max_instances_per_world,
                   render_pass_,
+                  imgui_render_state_.renderPass,
                   shadow_pass_,
                   instance_cull_.descPool.makeSet(),
                   object_draw_.descPool.makeSet(),
+                  deferred_lighting_.descPool.makeSet(),
                   &frames_[i]);
     }
 }
@@ -2347,6 +2405,7 @@ void Renderer::render(const ViewerCam &cam,
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 
+    render_pass_info.framebuffer = frame.imguiFBO.hdl;
     render_pass_info.renderPass = imgui_render_state_.renderPass;
     dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
                               VK_SUBPASS_CONTENTS_INLINE);

@@ -65,6 +65,23 @@ void DescHelper::storage(VkWriteDescriptorSet &update,
     buffer(update, desc_set, buf, binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
 }
 
+void DescHelper::storageImage(VkWriteDescriptorSet &update,
+                              VkDescriptorSet desc_set,
+                              const VkDescriptorImageInfo *img,
+                              uint32_t binding)
+{
+    update.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    update.pNext = nullptr;
+    update.dstSet = desc_set;
+    update.dstBinding = binding;
+    update.dstArrayElement = 0;
+    update.descriptorCount = 1;
+    update.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    update.pImageInfo = img;
+    update.pBufferInfo = nullptr;
+    update.pTexelBufferView = nullptr;
+}
+
 void DescHelper::accelStructs(
     VkWriteDescriptorSet &update,
     VkWriteDescriptorSetAccelerationStructureKHR &as_update,

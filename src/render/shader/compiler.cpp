@@ -334,6 +334,8 @@ static refl::BindingType convertSPVReflectBindingType(
             return BindingType::UniformBuffer;
         case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
             return BindingType::StorageBuffer;
+        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+            return BindingType::StorageImage;
         case SPV_REFLECT_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
             return BindingType::AccelerationStructure;
         default:

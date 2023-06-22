@@ -28,6 +28,9 @@ static VkDescriptorType bindingTypeToDescriptorType(
         case refl::BindingType::StorageBuffer: {
             desc_type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         } break;
+        case refl::BindingType::StorageImage: {
+            desc_type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        } break;
         case refl::BindingType::AccelerationStructure: {
             desc_type =
                 VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
