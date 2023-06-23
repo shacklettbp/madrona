@@ -68,17 +68,6 @@ inline void instanceTransformSetup(Context &ctx,
         obj_id.idx,
         ctx.worldID().idx,
     };
-#elif defined(MADRONA_VIZ)
-    AtomicU32Ref inst_count_atomic(*renderer_state.numInstances);
-    uint32_t inst_idx = inst_count_atomic.fetch_add_relaxed(1);
-
-    renderer_state.instances[inst_idx] = InstanceData {
-        pos,
-        rot,
-        scale,
-        obj_id.idx,
-        0,
-    };
 #endif
 }
 
