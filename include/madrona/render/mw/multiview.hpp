@@ -1,7 +1,7 @@
 #pragma once
 
 #include <madrona/math.hpp>
-#include <madrona/state.hpp>
+#include <madrona/context.hpp>
 
 namespace madrona::render {
 
@@ -17,6 +17,13 @@ struct ViewSettings {
     ViewID viewID;
 };
 
-void registerMultiViewTypes(ECSRegistry &registry);
+struct MultiView {
+    static void registerTypes(ECSRegistry &registry);
+
+    static ViewSettings setupView(float vfov_degrees,
+                                  float z_near,
+                                  math::Vector3 camera_offset,
+                                  ViewID view_id);
+};
 
 }

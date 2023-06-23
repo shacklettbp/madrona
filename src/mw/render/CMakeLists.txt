@@ -1,8 +1,8 @@
-add_library(madrona_mw_render STATIC
-    ${MADRONA_INC_DIR}/render/mw/components.hpp components.cpp
+add_library(madrona_mw_multiview STATIC
+    ${MADRONA_INC_DIR}/render/mw/multiview.hpp multiview.cpp
 )
 
-target_link_libraries(madrona_mw_render PUBLIC
+target_link_libraries(madrona_mw_multiview PUBLIC
     madrona_mw_core
 )
 
@@ -12,7 +12,7 @@ add_library(madrona_mw_render_system STATIC
 )
 
 target_link_libraries(madrona_mw_render_system PUBLIC
-    madrona_mw_render
+    madrona_mw_multiview
 )
 
 if (TARGET madrona_render_vk AND TARGET madrona_cuda)
@@ -97,5 +97,5 @@ target_include_directories(madrona_batch_render PRIVATE
 )
     
 target_link_libraries(madrona_batch_render PRIVATE
-    madrona_common
+    madrona_common madrona_mw_multiview
 )
