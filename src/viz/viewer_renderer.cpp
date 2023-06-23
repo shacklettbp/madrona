@@ -1536,7 +1536,7 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
         .numInstances = (uint32_t *)(staging_base + buffer_offsets[2]),
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
-        .recordMode = false,
+        .episodeDone = nullptr,
     };
 
     return EngineInterop {

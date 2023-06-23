@@ -15,6 +15,9 @@ struct ViewerSystemState {
     float aspectRatio;
 };
 
+struct RecordSystemState {
+    bool *episodeDone;
+};
 
 inline void clearInstanceCount(Context &,
                                const ViewerSystemState &sys_state)
@@ -80,6 +83,9 @@ void VizRenderingSystem::registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<VizCamera>();
     registry.registerSingleton<ViewerSystemState>();
+
+    // Technically this singleton is only used in record mode
+    registry.registerSingleton<RecordSystemState>();
 }
 
 TaskGraph::NodeID VizRenderingSystem::setupTasks(
@@ -137,6 +143,13 @@ void VizRenderingSystem::init(Context &ctx,
     system_state.numInstances = &bridge->numInstances[world_idx];
     system_state.aspectRatio = 
         (float)bridge->renderWidth / (float)bridge->renderHeight;
+
+    auto &record_state = ctx.singleton<RecordSystemState>();
+    if (bridge->episodeDone != nullptr) {
+        record_state.episodeDone = &bridge->episodeDone[world_idx];
+    } else {
+        record_state.episodeDone = nullptr;
+    }
 }
 
 VizCamera VizRenderingSystem::setupView(
@@ -166,6 +179,10 @@ VizCamera VizRenderingSystem::setupView(
 
 void VizRenderingSystem::markEpisode(Context &ctx)
 {
+    auto &record_state = ctx.singleton<RecordSystemState>();
+    if (record_state.episodeDone != nullptr) {
+        *record_state.episodeDone = true;
+    }
 }
 
 }

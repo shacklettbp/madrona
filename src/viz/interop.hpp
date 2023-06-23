@@ -26,7 +26,7 @@ struct VizECSBridge {
     uint32_t *numInstances;
     int32_t renderWidth;
     int32_t renderHeight;
-    bool recordMode;
+    bool *episodeDone;
 };
 
 }
