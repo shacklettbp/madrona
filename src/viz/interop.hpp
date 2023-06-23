@@ -19,7 +19,7 @@ struct alignas(16) InstanceData {
     uint32_t pad;
 };
 
-struct ViewerECSBridge {
+struct VizECSBridge {
     PerspectiveCameraData **views;
     uint32_t *numViews;
     InstanceData **instances;

@@ -1,18 +1,10 @@
-add_library(madrona_mw_multiview STATIC
-    ${MADRONA_INC_DIR}/render/mw/multiview.hpp multiview.cpp
-)
-
-target_link_libraries(madrona_mw_multiview PUBLIC
-    madrona_mw_core
-)
-
-add_library(madrona_mw_render_system STATIC
-    ${MADRONA_INC_DIR}/render/mw/batch_renderer_system.hpp
+add_library(madrona_mw_render STATIC
+    ${MADRONA_INC_DIR}/render/mw.hpp
     batch_renderer_system.cpp
 )
 
-target_link_libraries(madrona_mw_render_system PUBLIC
-    madrona_mw_multiview
+target_link_libraries(madrona_mw_render PUBLIC
+    madrona_mw_core
 )
 
 if (TARGET madrona_render_vk AND TARGET madrona_cuda)
@@ -23,7 +15,7 @@ if (TARGET madrona_render_vk AND TARGET madrona_cuda)
         vk/present.hpp vk/present.cpp
     )
     
-    target_link_libraries(madrona_batch_renderer PRIVATE
+    target_link_libraries(madrona_batch_render PRIVATE
         madrona_render_vk
         madrona_render_vk_cuda
         madrona_sdl2
@@ -97,5 +89,5 @@ target_include_directories(madrona_batch_render PRIVATE
 )
     
 target_link_libraries(madrona_batch_render PRIVATE
-    madrona_common madrona_mw_multiview
+    madrona_common madrona_mw_render
 )

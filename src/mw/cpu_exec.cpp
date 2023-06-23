@@ -1,8 +1,6 @@
 #include <madrona/mw_cpu.hpp>
 #include "../core/worker_init.hpp"
 
-#include "render/interop.hpp"
-
 #if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
 #include <unistd.h>
 #endif

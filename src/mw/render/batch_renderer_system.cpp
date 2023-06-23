@@ -159,7 +159,7 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 
 void RenderingSystem::reset([[maybe_unused]] Context &ctx)
 {
-#if defined(MADRONA_BATCHRENDER_METAL) || defined(MADRONA_VIZ)
+#if defined(MADRONA_BATCHRENDER_METAL)
     RendererState &renderer_state = ctx.singleton<RendererState>();
     *renderer_state.numViews = 0;
 #endif

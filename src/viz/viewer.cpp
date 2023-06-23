@@ -57,7 +57,7 @@ void Viewer::configureLighting(Span<const LightConfig> lights)
     impl_->renderer.configureLighting(lights);
 }
 
-const ViewerECSBridge * Viewer::rendererBridge() const
+const VizECSBridge * Viewer::rendererBridge() const
 {
     return &impl_->renderer.getBridgeRef();
 }

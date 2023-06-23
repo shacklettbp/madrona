@@ -21,9 +21,17 @@ target_link_libraries(imgui_impl PRIVATE
     madrona_vk_hdrs
 )
 
+add_library(madrona_viz_system STATIC
+    ${MADRONA_INC_DIR}/viz/system.hpp viewer_system.cpp
+    interop.hpp
+)
+
+target_link_libraries(madrona_viz_system PRIVATE
+    madrona_mw_core
+)
+
 add_library(madrona_viewer STATIC
     ${MADRONA_INC_DIR}/viz/viewer.hpp viewer.cpp
-    ${MADRONA_INC_DIR}/viz/system.hpp viewer_system.cpp
     viewer_renderer.hpp viewer_renderer.cpp
 )
 
@@ -33,6 +41,7 @@ target_link_libraries(madrona_viewer PRIVATE
     madrona_common
     madrona_mw_core
     madrona_importer
+    madrona_viz_system
     imgui
     imgui_impl
     glfw

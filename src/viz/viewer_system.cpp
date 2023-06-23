@@ -17,7 +17,7 @@ struct ViewerSystemState {
 
 
 inline void clearInstanceCount(Context &,
-                               const ViewerRenderingSystem &sys_state)
+                               const ViewerSystemState &sys_state)
 {
     *(sys_state.numInstances) = 0;
 }
@@ -28,7 +28,7 @@ inline void instanceTransformSetup(Context &ctx,
                                    const Scale &scale,
                                    const ObjectID &obj_id)
 {
-    ViewerSystemState &sys_state = ctx.singleton<ViewerSystemState>();
+    auto &sys_state = ctx.singleton<ViewerSystemState>();
 
     AtomicU32Ref inst_count_atomic(*sys_state.numInstances);
     uint32_t inst_idx = inst_count_atomic.fetch_add_relaxed(1);
@@ -42,12 +42,47 @@ inline void instanceTransformSetup(Context &ctx,
     };
 }
 
-void ViewerRenderingSystem::registerTypes(ECSRegistry &registry)
+
+inline void updateViewData(Context &ctx,
+                           const Position &pos,
+                           const Rotation &rot,
+                           const VizCamera &viz_cam)
 {
+    auto &sys_state = ctx.singleton<ViewerSystemState>();
+    int32_t view_idx = viz_cam.viewIDX;
+
+    Vector3 camera_pos = pos + viz_cam.cameraOffset;
+
+    sys_state.views[view_idx] = PerspectiveCameraData {
+        camera_pos,
+        rot.inv(),
+        viz_cam.xScale,
+        viz_cam.yScale,
+        viz_cam.zNear,
+        {},
+    };
+}
+
+#ifdef MADRONA_GPU_MODE
+
+inline void readbackCount(Context &ctx,
+                          RendererState &renderer_state)
+{
+    if (ctx.worldID().idx == 0) {
+        *renderer_state.count_readback = renderer_state.numInstances->primitiveCount;
+        renderer_state.numInstances->primitiveCount = 0;
+    }
+}
+
+#endif
+
+void VizRenderingSystem::registerTypes(ECSRegistry &registry)
+{
+    registry.registerComponent<VizCamera>();
     registry.registerSingleton<ViewerSystemState>();
 }
 
-TaskGraph::NodeID ViewerRenderingSystem::setupTasks(
+TaskGraph::NodeID VizRenderingSystem::setupTasks(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
@@ -57,7 +92,7 @@ TaskGraph::NodeID ViewerRenderingSystem::setupTasks(
     // double buffering
     auto instance_clear = builder.addToGraph<ParallelForNode<Context,
         clearInstanceCount,
-        RendererState>>(deps);
+        ViewerSystemState>>(deps);
 
     auto instance_setup = builder.addToGraph<ParallelForNode<Context,
         instanceTransformSetup,
@@ -70,24 +105,27 @@ TaskGraph::NodeID ViewerRenderingSystem::setupTasks(
         updateViewData,
         Position,
         Rotation,
-        ViewSettings>>({instance_setup});
+        VizCamera>>({instance_setup});
 
 #ifdef MADRONA_GPU_MODE
     auto readback_count = builder.addToGraph<ParallelForNode<Context,
         readbackCount,
-        RendererState>>({viewdata_update});
+        ViewerSystemState>>({viewdata_update});
 
     return readback_count;
 #else
     return viewdata_update;
+#endif
 }
 
-void ViewerRenderingSystem::reset(Context &ctx)
+void VizRenderingSystem::reset(Context &ctx)
 {
+    auto &system_state = ctx.singleton<ViewerSystemState>();
+    *system_state.numViews = 0;
 }
 
-void ViewerRenderingSystem::init(Context &ctx,
-                                 const ViewerECSBridge *bridge)
+void VizRenderingSystem::init(Context &ctx,
+                              const VizECSBridge *bridge)
 {
     auto &system_state = ctx.singleton<ViewerSystemState>();
 
@@ -101,6 +139,29 @@ void ViewerRenderingSystem::init(Context &ctx,
         (float)bridge->renderWidth / (float)bridge->renderHeight;
 }
 
+VizCamera VizRenderingSystem::setupView(
+    Context &ctx,
+    float vfov_degrees,
+    float z_near,
+    math::Vector3 camera_offset,
+    int32_t view_idx)
+{
+    auto &sys_state = ctx.singleton<ViewerSystemState>();
 
+    float fov_scale = tanf(toRadians(vfov_degrees * 0.5f));
+
+    (*sys_state.numViews) += 1;
+
+    float x_scale = fov_scale / sys_state.aspectRatio;
+    float y_scale = -fov_scale;
+
+    return VizCamera {
+        x_scale,
+        y_scale,
+        z_near,
+        camera_offset,
+        view_idx,
+    };
+}
 
 }
