@@ -31,6 +31,8 @@ struct VizRenderingSystem {
                                float z_near,
                                math::Vector3 camera_offset,
                                int32_t view_idx);
+
+    static void markEpisode(Context &ctx);
 };
 
 }

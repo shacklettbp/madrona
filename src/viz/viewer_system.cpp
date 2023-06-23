@@ -164,4 +164,8 @@ VizCamera VizRenderingSystem::setupView(
     };
 }
 
+void VizRenderingSystem::markEpisode(Context &ctx)
+{
+}
+
 }
