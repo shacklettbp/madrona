@@ -13,6 +13,7 @@ public:
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;
+        uint32_t totalStepBufferSize;
         ExecMode execMode;
     };
 
@@ -21,6 +22,8 @@ public:
     ~Recorder();
 
     const VizECSBridge * rendererBridge() const;
+
+    void record();
 
 private:
     struct Impl;
