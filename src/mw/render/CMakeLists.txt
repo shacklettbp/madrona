@@ -35,7 +35,7 @@ if (TARGET madrona_render_vk AND TARGET madrona_cuda)
         )
     endif ()
 elseif (TARGET madrona_render_metal)
-    add_library(madrona_batch_renderer STATIC
+    add_library(madrona_batch_render STATIC
         metal/scene.hpp metal/scene.cpp
         batch_renderer.hpp metal/batch_renderer.cpp
     )

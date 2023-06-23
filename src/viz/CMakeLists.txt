@@ -30,6 +30,14 @@ target_link_libraries(madrona_viz_system PRIVATE
     madrona_mw_core
 )
 
+add_library(madrona_viz_recorder STATIC
+    ${MADRONA_INC_DIR}/viz/recorder.hpp recorder.cpp
+)
+
+target_link_libraries(madrona_viz_recorder PRIVATE
+    madrona_viz_system
+)
+
 add_library(madrona_viewer STATIC
     ${MADRONA_INC_DIR}/viz/viewer.hpp viewer.cpp
     viewer_renderer.hpp viewer_renderer.cpp
