@@ -21,6 +21,8 @@
 
 #include "shader.hpp"
 
+#include <fstream>
+
 using namespace std;
 
 using namespace madrona::render;
@@ -1345,6 +1347,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet cull_set,
                       VkDescriptorSet draw_set,
                       VkDescriptorSet lighting_set,
+                      Sky &sky,
                       Frame *dst)
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
@@ -1352,25 +1355,26 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
 
-    int64_t buffer_offsets[5];
-    int64_t buffer_sizes[6] = {
+    int64_t buffer_offsets[6];
+    int64_t buffer_sizes[7] = {
         (int64_t)sizeof(PackedViewData) * (max_views + 1),
         (int64_t)sizeof(uint32_t),
         (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
         (int64_t)sizeof(DrawMaterialData) * max_instances * 10,
-        (int64_t)sizeof(DirectionalLight) * InternalConfig::maxLights
+        (int64_t)sizeof(DirectionalLight) * InternalConfig::maxLights,
+        (int64_t)sizeof(ShadowViewData)
     };
     int64_t num_render_input_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
 
     HostBuffer view_staging = alloc.makeStagingBuffer(sizeof(PackedViewData));
     HostBuffer light_staging = alloc.makeStagingBuffer(sizeof(DirectionalLight) * InternalConfig::maxLights);
-    // HostBuffer shadow_staging = alloc.makeStagingBuffer(sizeof(ShadowViewData));
+    HostBuffer shadow_staging = alloc.makeStagingBuffer(sizeof(ShadowViewData));
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 11> desc_updates;
+    std::array<VkWriteDescriptorSet, 16> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -1438,6 +1442,41 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::storage(desc_updates[10], lighting_set, &light_data_info, 3);
 
+    VkDescriptorImageInfo transmittance_info;
+    transmittance_info.imageView = sky.transmittanceView;
+    transmittance_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    transmittance_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::storageImage(desc_updates[11], lighting_set, &transmittance_info, 4);
+
+    VkDescriptorImageInfo irradiance_info;
+    irradiance_info.imageView = sky.irradianceView;
+    irradiance_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    irradiance_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::storageImage(desc_updates[12], lighting_set, &irradiance_info, 5);
+
+    VkDescriptorImageInfo mie_info;
+    mie_info.imageView = sky.mieView;
+    mie_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    mie_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::storageImage(desc_updates[13], lighting_set, &mie_info, 6);
+
+    VkDescriptorImageInfo scattering_info;
+    scattering_info.imageView = sky.scatteringView;
+    scattering_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    scattering_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::storageImage(desc_updates[14], lighting_set, &scattering_info, 7);
+
+    VkDescriptorBufferInfo shadow_view_info;
+    shadow_view_info.buffer = render_input.buffer;
+    shadow_view_info.offset = buffer_offsets[5];
+    shadow_view_info.range = buffer_sizes[6];
+
+    DescHelper::storage(desc_updates[15], draw_set, &shadow_view_info, 3);
+
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
     new (dst) Frame {
@@ -1451,6 +1490,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         makeBinarySemaphore(dev),
         std::move(view_staging),
         std::move(light_staging),
+        std::move(shadow_staging),
         std::move(render_input),
         0,
         sizeof(PackedViewData),
@@ -1458,6 +1498,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         uint32_t(buffer_offsets[0]),
         uint32_t(buffer_offsets[1]),
         (uint32_t)buffer_offsets[4],
+        (uint32_t)buffer_offsets[5],
         max_instances * 10,
         cull_set,
         draw_set,
@@ -1477,6 +1518,16 @@ static array<VkClearValue, 4> makeClearValues()
         color_clear,
         color_clear,
         color_clear,
+        depth_clear,
+    };
+}
+
+static array<VkClearValue, 1> makeShadowClearValues()
+{
+    VkClearValue depth_clear;
+    depth_clear.depthStencil = {0.f, 0};
+
+    return {
         depth_clear,
     };
 }
@@ -1756,6 +1807,332 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
     };
 }
 
+static size_t fileLength(std::fstream &f)
+{
+    f.seekg(0, f.end);
+    size_t size = f.tellg();
+    f.seekg(0, f.beg);
+
+    return size;
+}
+
+inline constexpr size_t TRANSMITTANCE_WIDTH = 256;
+inline constexpr size_t TRANSMITTANCE_HEIGHT = 64;
+inline constexpr size_t SCATTERING_TEXTURE_R_SIZE = 32;
+inline constexpr size_t SCATTERING_TEXTURE_MU_SIZE = 128;
+inline constexpr size_t SCATTERING_TEXTURE_MU_S_SIZE = 32;
+inline constexpr size_t SCATTERING_TEXTURE_NU_SIZE = 8;
+inline constexpr size_t SCATTERING_TEXTURE_WIDTH =
+    SCATTERING_TEXTURE_NU_SIZE * SCATTERING_TEXTURE_MU_S_SIZE;
+inline constexpr size_t SCATTERING_TEXTURE_HEIGHT = SCATTERING_TEXTURE_MU_SIZE;
+inline constexpr size_t SCATTERING_TEXTURE_DEPTH = SCATTERING_TEXTURE_R_SIZE;
+inline constexpr size_t IRRADIANCE_TEXTURE_WIDTH = 64;
+inline constexpr size_t IRRADIANCE_TEXTURE_HEIGHT = 16;
+
+static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
+{
+    std::filesystem::path shader_dir =
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "sky";
+
+    auto [transmittance, transmittance_reqs] = alloc.makeTexture2D(
+        TRANSMITTANCE_WIDTH, TRANSMITTANCE_HEIGHT, 1, VK_FORMAT_R32G32B32A32_SFLOAT);
+    auto [irradiance, irradiance_reqs] = alloc.makeTexture2D(
+        IRRADIANCE_TEXTURE_WIDTH, IRRADIANCE_TEXTURE_HEIGHT, 1, VK_FORMAT_R32G32B32A32_SFLOAT);
+    auto [mie, mie_reqs] = alloc.makeTexture3D(
+        SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
+    auto [scattering, scattering_reqs] = alloc.makeTexture3D(
+        SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
+
+    HostBuffer irradiance_hb_staging = alloc.makeStagingBuffer(irradiance_reqs.size);
+    HostBuffer mie_hb_staging = alloc.makeStagingBuffer(mie_reqs.size);
+    HostBuffer scattering_hb_staging = alloc.makeStagingBuffer(scattering_reqs.size);
+    HostBuffer transmittance_hb_staging = alloc.makeStagingBuffer(transmittance_reqs.size);
+
+    std::fstream irradiance_stream(shader_dir / "irradiance.cache", std::fstream::binary | std::fstream::in);
+    size_t irradiance_size = fileLength(irradiance_stream);
+    irradiance_stream.read((char *)irradiance_hb_staging.ptr, irradiance_size);
+    irradiance_hb_staging.flush(dev);
+
+    std::fstream mie_stream(shader_dir / "mie.cache", std::fstream::binary | std::fstream::in);
+    size_t mie_size = fileLength(mie_stream);
+    mie_stream.read((char *)mie_hb_staging.ptr, mie_size);
+    mie_hb_staging.flush(dev);
+
+    std::fstream scattering_stream(shader_dir / "scattering.cache", std::fstream::binary | std::fstream::in);
+    size_t scattering_size = fileLength(scattering_stream);
+    scattering_stream.read((char *)scattering_hb_staging.ptr, scattering_size);
+    scattering_hb_staging.flush(dev);
+
+    std::fstream transmittance_stream(shader_dir / "transmittance.cache", std::fstream::binary | std::fstream::in);
+    size_t transmittance_size = fileLength(transmittance_stream);
+    transmittance_stream.read((char *)transmittance_hb_staging.ptr, transmittance_size);
+    transmittance_hb_staging.flush(dev);
+
+    assert(transmittance_size == transmittance_reqs.size && irradiance_size == irradiance_reqs.size &&
+           scattering_size == scattering_reqs.size && mie_size == mie_reqs.size);
+
+    std::optional<VkDeviceMemory> transmittance_backing = alloc.alloc(transmittance_reqs.size);
+    std::optional<VkDeviceMemory> irradiance_backing = alloc.alloc(irradiance_reqs.size);
+    std::optional<VkDeviceMemory> scattering_backing = alloc.alloc(scattering_reqs.size);
+    std::optional<VkDeviceMemory> mie_backing = alloc.alloc(mie_reqs.size);
+
+    assert(transmittance_backing.has_value() && irradiance_backing.has_value() &&
+        scattering_backing.has_value() && mie_backing.has_value());
+
+    dev.dt.bindImageMemory(dev.hdl, transmittance.image, transmittance_backing.value(), 0);
+    dev.dt.bindImageMemory(dev.hdl, irradiance.image, irradiance_backing.value(), 0);
+    dev.dt.bindImageMemory(dev.hdl, scattering.image, scattering_backing.value(), 0);
+    dev.dt.bindImageMemory(dev.hdl, mie.image, mie_backing.value(), 0);
+
+    VkCommandPool tmp_pool = makeCmdPool(dev, dev.gfxQF);
+    VkCommandBuffer cmdbuf = makeCmdBuffer(dev, tmp_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+
+    VkCommandBufferBeginInfo begin_info = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        nullptr,
+        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        nullptr
+    };
+
+    dev.dt.beginCommandBuffer(cmdbuf, &begin_info);
+    {
+        array<VkImageMemoryBarrier, 4> copy_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                0,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                transmittance.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                0,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                irradiance.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                0,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                mie.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                0,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                scattering.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(cmdbuf,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                copy_prepare.size(), copy_prepare.data());
+
+        VkBufferImageCopy copy = {};
+        copy.bufferOffset = 0;
+        copy.bufferRowLength = 0;
+        copy.bufferImageHeight = 0;
+        copy.imageExtent.width = TRANSMITTANCE_WIDTH;
+        copy.imageExtent.height = TRANSMITTANCE_HEIGHT;
+        copy.imageExtent.depth = 1;
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.mipLevel = 0;
+        copy.imageSubresource.baseArrayLayer = 0;
+        copy.imageSubresource.layerCount = 1;
+
+        dev.dt.cmdCopyBufferToImage(cmdbuf, transmittance_hb_staging.buffer,
+            transmittance.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        copy.imageExtent.width = IRRADIANCE_TEXTURE_WIDTH;
+        copy.imageExtent.height = IRRADIANCE_TEXTURE_HEIGHT;
+        dev.dt.cmdCopyBufferToImage(cmdbuf, irradiance_hb_staging.buffer,
+            irradiance.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        copy.imageExtent.width = SCATTERING_TEXTURE_WIDTH; 
+        copy.imageExtent.height = SCATTERING_TEXTURE_HEIGHT;
+        copy.imageExtent.depth = SCATTERING_TEXTURE_DEPTH;
+        dev.dt.cmdCopyBufferToImage(cmdbuf, mie_hb_staging.buffer,
+            mie.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        dev.dt.cmdCopyBufferToImage(cmdbuf, scattering_hb_staging.buffer,
+            scattering.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        array<VkImageMemoryBarrier, 4> finish_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                transmittance.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                irradiance.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                mie.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                scattering.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(cmdbuf,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                finish_prepare.size(), finish_prepare.data());
+    }
+    dev.dt.endCommandBuffer(cmdbuf);
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmdbuf;
+    submit_info.signalSemaphoreCount = 0;
+    submit_info.waitSemaphoreCount = 0;
+
+    dev.dt.queueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE);
+
+    dev.dt.deviceWaitIdle(dev.hdl);
+    dev.dt.freeCommandBuffers(dev.hdl, tmp_pool, 1, &cmdbuf);
+    dev.dt.destroyCommandPool(dev.hdl, tmp_pool, nullptr);
+
+    VkImageViewCreateInfo view_info {};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+    view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info_sr.baseMipLevel = 0;
+    view_info_sr.levelCount = 1;
+    view_info_sr.baseArrayLayer = 0;
+    view_info_sr.layerCount = 1;
+
+    VkImageView transmittance_view;
+    view_info.image = transmittance.image;
+    view_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &transmittance_view));
+
+    VkImageView irradiance_view;
+    view_info.image = irradiance.image;
+    view_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &irradiance_view));
+
+    VkImageView mie_view;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
+    view_info.image = mie.image;
+    view_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &mie_view));
+
+    VkImageView scattering_view;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
+    view_info.image = scattering.image;
+    view_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &scattering_view));
+
+    return Sky{
+        std::move(transmittance),
+        std::move(scattering),
+        std::move(mie),
+        std::move(irradiance),
+        transmittance_view,
+        scattering_view,
+        mie_view,
+        irradiance_view,
+        transmittance_backing.value(),
+        scattering_backing.value(),
+        mie_backing.value(),
+        irradiance_backing.value(),
+        math::Vector3{ -0.4f, -0.4f, -1.0f },
+        math::Vector3{2.0f, 2.0f, 2.0f},
+        math::Vector3{0.0046750340586467079f, 0.99998907220740285f, 0.0f},
+        20.0f
+    };
+}
+
 Renderer::Renderer(uint32_t gpu_id,
                    uint32_t img_width,
                    uint32_t img_height,
@@ -1780,6 +2157,7 @@ Renderer::Renderer(uint32_t gpu_id,
       fb_width_(img_width),
       fb_height_(img_height),
       fb_clear_(makeClearValues()),
+      fb_shadow_clear_(makeShadowClearValues()),
       fb_imgui_clear_(makeImguiClearValues()),
       present_(backend, dev, window,
                InternalConfig::numFrames, true),
@@ -1801,11 +2179,9 @@ Renderer::Renderer(uint32_t gpu_id,
       object_draw_(makeDrawPipeline(dev, pipeline_cache_, render_pass_,
                                     repeat_sampler_, clamp_sampler_,
                                     InternalConfig::numFrames)),
-#if 0
       object_shadow_draw_(makeShadowDrawPipeline(dev, pipeline_cache_, shadow_pass_,
                                     repeat_sampler_, clamp_sampler_,
                                     InternalConfig::numFrames)),
-#endif
       deferred_lighting_(makeDeferredLightingPipeline(dev, pipeline_cache_,
                                       InternalConfig::numFrames)),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
@@ -1822,7 +2198,8 @@ Renderer::Renderer(uint32_t gpu_id,
       lights_(InternalConfig::maxLights),
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
-      loaded_assets_(0)
+      loaded_assets_(0),
+      sky_(loadSky(dev, alloc, render_queue_))
 {
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
@@ -1833,6 +2210,7 @@ Renderer::Renderer(uint32_t gpu_id,
                   instance_cull_.descPool.makeSet(),
                   object_draw_.descPool.makeSet(),
                   deferred_lighting_.descPool.makeSet(),
+                  sky_,
                   &frames_[i]);
     }
 }
@@ -2178,6 +2556,134 @@ static void packView(const Device &dev,
     view_staging_buffer.flush(dev);
 }
 
+math::Mat4x4 lookAt(
+    math::Vector3 eye,
+    math::Vector3 center,
+    math::Vector3 up)
+{
+    math::Vector3 f = math::Vector3((center - eye).normalize());
+    math::Vector3 s = math::Vector3((cross(f, up).normalize()));
+    math::Vector3 u = math::Vector3(cross(s, f).normalize());
+
+    math::Mat4x4 m = math::Mat4x4{};
+    m.cols[0][0] = s.x;
+    m.cols[1][0] = s.y;
+    m.cols[2][0] = s.z;
+    m.cols[0][1] = u.x;
+    m.cols[1][1] = u.y;
+    m.cols[2][1] = u.z;
+    m.cols[0][2] =-f.x;
+    m.cols[1][2] =-f.y;
+    m.cols[2][2] =-f.z;
+    m.cols[3][0] =-dot(s, eye);
+    m.cols[3][1] =-dot(u, eye);
+    m.cols[3][2] = dot(f, eye);
+    m.cols[3][3] = 1.0f;
+    return m;
+}
+
+static void packShadowView(const Device &dev,
+                     HostBuffer &staging,
+                     const ViewerCam &cam,
+                     math::Vector3 light_dir,
+                     float aspect,
+                     float far,
+                     float near)
+{
+    ShadowViewData *data = (ShadowViewData *)staging.ptr;
+
+    // World space positions / directions required to update the shadow matrix
+    math::Vector3 ws_position = cam.position;
+    math::Vector3 ws_direction = normalize(cam.view);
+    math::Vector3 ws_up = math::Vector3{0.0f, 0.0f, 1.0f};
+    math::Vector3 ws_light_dir = normalize(light_dir);
+
+#if 1
+    std::swap(ws_position.y, ws_position.z);
+    std::swap(ws_direction.y, ws_direction.z);
+    std::swap(ws_up.y, ws_up.z);
+    std::swap(ws_light_dir.y, ws_light_dir.z);
+#endif
+
+    math::Mat4x4 view = lookAt(math::Vector3{}, ws_light_dir, ws_up);
+
+    float far_width, near_width, far_height, near_height;
+
+    far_width = 2.0f * far * tan(cam.fov);
+    near_width = 2.0f * near * tan(cam.fov);
+    far_height = far_width / aspect;
+    near_height = near_width / aspect;
+
+    math::Vector3 center_near = ws_position + ws_direction * near;
+    math::Vector3 center_far = ws_position + ws_direction * far;
+    math::Vector3 right_view_ax = normalize(cross(ws_direction, ws_up));
+    math::Vector3 up_view_ax = -normalize(cross(ws_direction, right_view_ax));
+
+    float far_width_half = far_width / 2.0f;
+    float near_width_half = near_width / 2.0f;
+    float far_height_half = far_height / 2.0f;
+    float near_height_half = near_height / 2.0f;
+
+    // f = far, n = near, l = left, r = right, t = top, b = bottom
+    enum OrthoCorner : int32_t {
+        flt, flb,
+        frt, frb,
+        nlt, nlb,
+        nrt, nrb
+    };    
+
+    math::Vector4 ls_corners[8];
+
+    // Light space
+    ls_corners[flt] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * far - right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
+    ls_corners[flb] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * far - right_view_ax * far_width_half - up_view_ax * far_height_half, 1.0f));
+    ls_corners[frt] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * far + right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
+    ls_corners[frb] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * far + right_view_ax * far_width_half - up_view_ax * far_height_half, 1.0f));
+    ls_corners[nlt] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * near - right_view_ax * near_width_half + up_view_ax * near_height_half, 1.0f));
+    ls_corners[nlb] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * near - right_view_ax * near_width_half - up_view_ax * near_height_half, 1.0f));
+    ls_corners[nrt] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * near + right_view_ax * near_width_half + up_view_ax * near_height_half, 1.0f));
+    ls_corners[nrb] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * near + right_view_ax * near_width_half - up_view_ax * near_height_half, 1.0f));
+
+    float x_min, x_max, y_min, y_max, z_min, z_max;
+
+    x_min = x_max = ls_corners[0].x;
+    y_min = y_max = ls_corners[0].y;
+    z_min = z_max = ls_corners[0].z;
+
+    for (uint32_t i = 1; i < 8; ++i) {
+        if (x_min > ls_corners[i].x) x_min = ls_corners[i].x;
+        if (x_max < ls_corners[i].x) x_max = ls_corners[i].x;
+
+        if (y_min > ls_corners[i].y) y_min = ls_corners[i].y;
+        if (y_max < ls_corners[i].y) y_max = ls_corners[i].y;
+
+        if (z_min > ls_corners[i].z) z_min = ls_corners[i].z;
+        if (z_max < ls_corners[i].z) z_max = ls_corners[i].z;
+    }
+    
+    z_min = z_min - (z_max - z_min);
+
+#if 1
+    // Y is up
+    math::Mat4x4 projection = math::Mat4x4{{
+            { 2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f},
+            {0.0f,                    2.0f / (y_max - y_min), 0.0f,                   0.0f},
+            {0.0f,                    0.0f,                   2.0f / (z_max - z_min), 0.0f },
+            {-(x_max + x_min) / (x_max - x_min), -(y_max + y_min) / (y_max - y_min), -(z_max + z_min) / (z_max - z_min), 1.0f}}};
+#else
+    // Z is up
+    math::Mat4x4 projection = math::Mat4x4{{
+            { 2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f},
+            {0.0f,                    2.0f / (z_max - z_min), 0.0f,                   0.0f},
+            {0.0f,                    0.0f,                   2.0f / (y_max - y_min), 0.0f },
+            {-(x_max + x_min) / (x_max - x_min), -(z_max + z_min) / (z_max - z_min), -(y_max + z_min) / (y_max - z_min), 1.0f}}};
+#endif
+
+    data->viewProjectionMatrix = projection.compose(view);
+
+    staging.flush(dev);
+}
+
 static void packLighting(const Device &dev,
                          HostBuffer &light_staging_buffer,
                          const HeapArray<DirectionalLight> &lights)
@@ -2359,6 +2865,21 @@ void Renderer::render(const ViewerCam &cam,
                          frame.renderInput.buffer,
                          1, &light_copy);
 
+#if 1
+    packShadowView(dev, frame.shadowViewStaging, cam, 
+        lights_[0].lightDir.xyz(), (float)fb_height_ / (float)fb_width_, 1.0f, 40.0f);
+
+    VkBufferCopy shadow_copy {
+        .srcOffset = 0,
+        .dstOffset = frame.shadowOffset,
+        .size = sizeof(ShadowViewData)
+    };
+
+    dev.dt.cmdCopyBuffer(draw_cmd, frame.shadowViewStaging.buffer,
+                         frame.renderInput.buffer,
+                         1, &shadow_copy);
+#endif
+
     dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
                          frame.drawCountOffset, sizeof(uint32_t), 0);
 
@@ -2466,6 +2987,79 @@ void Renderer::render(const ViewerCam &cam,
                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
+    }
+
+
+    {
+        dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                object_shadow_draw_.hdls[0]);
+
+        std::array draw_descriptors {
+            frame.drawShaderSet,
+            asset_set_draw_,
+        };
+
+        dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                object_shadow_draw_.layout, 0,
+                draw_descriptors.size(),
+                draw_descriptors.data(),
+                0, nullptr);
+
+        DrawPushConst draw_const {
+            (uint32_t)cfg.viewIDX,
+        };
+
+        dev.dt.cmdPushConstants(draw_cmd, object_shadow_draw_.layout,
+                VK_SHADER_STAGE_VERTEX_BIT |
+                VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                sizeof(DrawPushConst), &draw_const);
+
+        dev.dt.cmdBindIndexBuffer(draw_cmd, loaded_assets_[0].buf.buffer,
+                loaded_assets_[0].idxBufferOffset,
+                VK_INDEX_TYPE_UINT32);
+
+        VkViewport viewport {
+            0,
+                0,
+                (float)InternalConfig::shadowMapSize,
+                (float)InternalConfig::shadowMapSize,
+                0.f,
+                1.f,
+        };
+
+        dev.dt.cmdSetViewport(draw_cmd, 0, 1, &viewport);
+
+        VkRect2D scissor {
+            { 0, 0 },
+                { InternalConfig::shadowMapSize, InternalConfig::shadowMapSize },
+        };
+
+        dev.dt.cmdSetScissor(draw_cmd, 0, 1, &scissor);
+
+        VkRenderPassBeginInfo render_pass_info;
+        render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_info.pNext = nullptr;
+        render_pass_info.renderPass = shadow_pass_;
+        render_pass_info.framebuffer = frame.shadowFB.hdl;
+        render_pass_info.clearValueCount = fb_shadow_clear_.size();
+        render_pass_info.pClearValues = fb_shadow_clear_.data();
+        render_pass_info.renderArea.offset = {
+            0, 0,
+        };
+        render_pass_info.renderArea.extent = {
+            InternalConfig::shadowMapSize, InternalConfig::shadowMapSize,
+        };
+
+        dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
+                VK_SUBPASS_CONTENTS_INLINE);
+
+        dev.dt.cmdDrawIndexedIndirect(draw_cmd,
+                frame.renderInput.buffer,
+                frame.drawCmdOffset,
+                num_instances,
+                sizeof(DrawCmd));
+
+        dev.dt.cmdEndRenderPass(draw_cmd);
     }
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,

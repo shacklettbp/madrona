@@ -110,7 +110,7 @@ struct Frame {
 
     render::vk::HostBuffer viewStaging;
     render::vk::HostBuffer lightStaging;
-    // render::vk::HostBuffer shadowViewStaging;
+    render::vk::HostBuffer shadowViewStaging;
     render::vk::LocalBuffer renderInput;
     uint32_t cameraViewOffset;
     uint32_t simViewOffset;
@@ -118,6 +118,7 @@ struct Frame {
     uint32_t drawCountOffset;
     uint32_t instanceOffset;
     uint32_t lightOffset;
+    uint32_t shadowOffset;
     uint32_t maxDraws;
 
     VkDescriptorSet cullShaderSet;
@@ -153,6 +154,28 @@ struct EngineInterop {
 struct ImGuiRenderState {
     VkDescriptorPool descPool;
     VkRenderPass renderPass;
+};
+
+struct Sky {
+    render::vk::LocalTexture transmittance;
+    render::vk::LocalTexture scattering;
+    render::vk::LocalTexture singleMieScattering;
+    render::vk::LocalTexture irradiance;
+
+    VkImageView transmittanceView;
+    VkImageView scatteringView;
+    VkImageView mieView;
+    VkImageView irradianceView;
+
+    VkDeviceMemory transmittanceBacking;
+    VkDeviceMemory scatteringBacking;
+    VkDeviceMemory mieBacking;
+    VkDeviceMemory irradianceBacking;
+
+    math::Vector3 sunDirection;
+    math::Vector3 white;
+    math::Vector3 sunSize;
+    float exposure;
 };
 
 class Renderer {
@@ -201,6 +224,7 @@ private:
     uint32_t fb_width_;
     uint32_t fb_height_;
     std::array<VkClearValue, 4> fb_clear_;
+    std::array<VkClearValue, 1> fb_shadow_clear_;
     std::array<VkClearValue, 2> fb_imgui_clear_;
     PresentationState present_;
     VkPipelineCache pipeline_cache_;
@@ -211,7 +235,7 @@ private:
     ImGuiRenderState imgui_render_state_;
     Pipeline<1> instance_cull_;
     Pipeline<1> object_draw_;
-    // Pipeline<1> object_shadow_draw_;
+    Pipeline<1> object_shadow_draw_;
     Pipeline<1> deferred_lighting_;
 
     // Pipeline<1> ao_pass_;
@@ -232,6 +256,8 @@ private:
     uint32_t cur_frame_;
     HeapArray<Frame> frames_;
     DynArray<AssetData> loaded_assets_;
+
+    Sky sky_;
 };
 
 }

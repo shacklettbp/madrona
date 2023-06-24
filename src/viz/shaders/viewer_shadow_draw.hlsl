@@ -25,7 +25,7 @@ StructuredBuffer<PackedVertex> vertexDataBuffer;
 StructuredBuffer<MaterialData> materialBuffer;
 
 struct V2F {
-    [[vk::location(0)]] float depth : TEXCOORD0;
+    // [[vk::location(0)]] float depth : TEXCOORD0;
 };
 
 Vertex unpackVertex(PackedVertex packed)
@@ -105,9 +105,13 @@ float4 vert(in uint vid : SV_VertexID,
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
 
-    float4 clip_pos = mul(shadow_matrix, float4(
+    float dummy = 0.000001f * float(drawMaterialBuffer[0].materialIdx + viewDataBuffer[0].data[0].w) + materialBuffer[0].color.w;
+
+    float4 world_space_pos = float4(
         instance_data.position + mul(toMat(instance_data.rotation), (instance_data.scale * vert.position)), 
-        1.f));
+        1.f + dummy);
+
+    float4 clip_pos = mul(shadow_matrix, world_space_pos.xzyw);
 
     return clip_pos;
 }

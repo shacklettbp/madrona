@@ -222,6 +222,14 @@ private:
                                   VkImageUsageFlags usage,
                                   uint32_t type_idx);
 
+    LocalImage makeDedicatedImage(uint32_t width,
+                                  uint32_t height,
+                                  uint32_t depth,
+                                  uint32_t mip_levels,
+                                  VkFormat format,
+                                  VkImageUsageFlags usage,
+                                  uint32_t type_idx);
+
     const Device &dev;
     Alignments alignments_;
     VkBufferUsageFlags local_buffer_usage_flags_;

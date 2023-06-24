@@ -18,6 +18,21 @@ RWTexture2D<float4> gbufferPosition;
 [[vk::binding(3, 0)]]
 StructuredBuffer<DirectionalLight> lights;
 
+[[vk::binding(4, 0)]]
+RWTexture2D<float4> transmittance;
+
+[[vk::binding(5, 0)]]
+RWTexture2D<float4> irradiance;
+
+[[vk::binding(6, 0)]]
+RWTexture3D<float4> mie;
+
+[[vk::binding(7, 0)]]
+RWTexture3D<float4> scattering;
+
+[[vk::binding(8, 0)]]
+SamplerState linearSampler;
+
 [numThreads(32, 32, 1)]
 [shader("compute")]
 void lighting(uint3 idx : SV_DispatchThreadID)
@@ -32,6 +47,11 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         float4 color = gbufferAlbedo[targetPixel];
         float4 normal = gbufferNormal[targetPixel];
         float4 position = gbufferPosition[targetPixel];
+
+        float4 trans = transmittance[uint2(0.f, 0.f)];
+        float4 irr = irradiance[uint2(0.f, 0.f)];
+        float4 mieSa = mie[uint3(0.f, 0.f, 0.f)];
+        float4 scat = scattering[uint3(0.f, 0.f, 0.f)];
 
         normal.xyz = normalize(normal.xyz);
 
@@ -49,6 +69,6 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
         color.xyz += specular * lights[0].color.xyz;
 
-        gbufferAlbedo[targetPixel] = color;
+        gbufferAlbedo[targetPixel] = color + (trans + irr + mieSa + scat) * 0.00001f;
     }
 }

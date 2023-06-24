@@ -13,6 +13,9 @@ StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 [[vk::binding(2, 0)]]
 StructuredBuffer<DrawMaterialData> drawMaterialBuffer;
 
+[[vk::binding(3, 0)]]
+StructuredBuffer<ShadowViewData> shadowViewDataBuffer;
+
 // Asset descriptor bindings
 
 [[vk::binding(0, 1)]]
@@ -25,6 +28,7 @@ struct V2F {
     [[vk::location(0)]] float3 normal : TEXCOORD0;
     [[vk::location(1)]] float3 position : TEXCOORD1;
     [[vk::location(2)]] float4 color : TEXCOORD2;
+    [[vk::location(3)]] float dummy : TEXCOORD3;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -177,6 +181,7 @@ float4 vert(in uint vid : SV_VertexID,
     // v2f.uv = vert.uv;
     v2f.color = color;
     v2f.position = instance_data.scale * mul(toMat(instance_data.rotation), vert.position.xyz) + instance_data.position;
+    v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
 
     return clip_pos;
 }
@@ -199,7 +204,7 @@ PixelOutput frag(in V2F v2f)
     PixelOutput output;
     output.color = v2f.color;
     output.normal = float4(v2f.normal, 1.f);
-    output.position = float4(v2f.position, 1.f);
+    output.position = float4(v2f.position, v2f.dummy);
 
     return output;
 

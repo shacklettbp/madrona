@@ -514,6 +514,26 @@ Vector4 Vector4::fromVector3(Vector3 v, float w)
     };
 }
 
+Vector4 Vector4::operator*(float s) const
+{
+    return Vector4 {
+        x * s,
+        y * s,
+        z * s,
+        w * s
+    };
+}
+
+inline Vector4 Vector4::operator+(const Vector4 &o) const
+{
+    return Vector4 {
+        x + o.x,
+        y + o.y,
+        z + o.z,
+        w + o.w
+    };
+}
+
 constexpr Vector4 Vector4::zero()
 {
     return Vector4 {
@@ -1361,6 +1381,32 @@ constexpr Mat3x4 Mat3x4::identity()
         { 0, 1, 0 },
         { 0, 0, 1 },
         { 0, 0, 0 },
+    }};
+}
+
+
+Vector4 Mat4x4::txfmPoint(Vector4 p) const
+{
+    return cols[0] * p.x + cols[1] * p.y + cols[2] * p.z + cols[3] * p.w;
+}
+
+Mat4x4 Mat4x4::compose(const Mat4x4 &o) const
+{
+    return Mat4x4 {
+        txfmPoint(o.cols[0]),
+        txfmPoint(o.cols[1]),
+        txfmPoint(o.cols[2]),
+        txfmPoint(o.cols[3]),
+    };
+}
+
+constexpr Mat4x4 Mat4x4::identity()
+{
+    return Mat4x4 {{
+        { 1, 0, 0, 0 },
+        { 0, 1, 0, 0 },
+        { 0, 0, 1, 0 },
+        { 0, 0, 0, 1 },
     }};
 }
 

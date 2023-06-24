@@ -139,6 +139,9 @@ struct Vector4 {
 
     static inline Vector4 fromVector3(Vector3 v, float w);
 
+    inline Vector4 operator*(float a) const;
+    inline Vector4 operator+(const Vector4 &) const;
+
     static constexpr inline Vector4 zero();
     static constexpr inline Vector4 one();
 };
@@ -291,7 +294,16 @@ struct Mat3x4 {
 
 struct Mat4x4 {
     Vector4 cols[4];
+
+    inline Vector4 txfmPoint(Vector4 p) const;
+    inline Vector4 txfmDir(Vector4 p) const;
+
+    inline Mat4x4 compose(const Mat4x4 &o) const;
+
+    static constexpr inline Mat4x4 identity();
 };
+
+Mat4x4 transpose(const Mat4x4 &m);
 
 struct AABB {
     Vector3 pMin;

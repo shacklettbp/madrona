@@ -63,7 +63,7 @@ static constexpr VkFormatFeatureFlags textureReqs =
     VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
 
 static constexpr VkImageUsageFlags textureUsage =
-    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 
 static constexpr VkImageUsageFlags colorAttachmentUsage =
     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
@@ -850,6 +850,36 @@ LocalImage MemoryAllocator::makeDedicatedImage(uint32_t width,
                                                uint32_t type_idx)
 {
     auto img = makeImage<2>(dev, width, height, 1, mip_levels, format, usage);
+    auto reqs = getImageMemReqs(dev, img);
+
+    VkMemoryDedicatedAllocateInfo dedicated;
+    dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+    dedicated.pNext = nullptr;
+    dedicated.image = img;
+    dedicated.buffer = VK_NULL_HANDLE;
+    VkMemoryAllocateInfo alloc;
+    alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc.pNext = &dedicated;
+    alloc.allocationSize = reqs.size;
+    alloc.memoryTypeIndex = type_idx;
+
+    VkDeviceMemory memory;
+    REQ_VK(dev.dt.allocateMemory(dev.hdl, &alloc, nullptr, &memory));
+    REQ_VK(dev.dt.bindImageMemory(dev.hdl, img, memory, 0));
+
+    return LocalImage(width, height, mip_levels, img,
+                      AllocDeleter<false>(memory, *this));
+}
+
+LocalImage MemoryAllocator::makeDedicatedImage(uint32_t width,
+                                               uint32_t height,
+                                               uint32_t depth,
+                                               uint32_t mip_levels,
+                                               VkFormat format,
+                                               VkImageUsageFlags usage,
+                                               uint32_t type_idx)
+{
+    auto img = makeImage<3>(dev, width, height, depth, mip_levels, format, usage);
     auto reqs = getImageMemReqs(dev, img);
 
     VkMemoryDedicatedAllocateInfo dedicated;
