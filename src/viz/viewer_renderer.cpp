@@ -1883,8 +1883,10 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
     transmittance_stream.read((char *)transmittance_hb_staging.ptr, transmittance_size);
     transmittance_hb_staging.flush(dev);
 
+#if 0
     assert(transmittance_size == transmittance_reqs.size && irradiance_size == irradiance_reqs.size &&
            scattering_size == scattering_reqs.size && mie_size == mie_reqs.size);
+#endif
 
     std::optional<VkDeviceMemory> transmittance_backing = alloc.alloc(transmittance_reqs.size);
     std::optional<VkDeviceMemory> irradiance_backing = alloc.alloc(irradiance_reqs.size);
@@ -1981,6 +1983,7 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
                 0, nullptr, 0, nullptr,
                 copy_prepare.size(), copy_prepare.data());
 
+#if 0
         VkBufferImageCopy copy = {};
         copy.bufferOffset = 0;
         copy.bufferRowLength = 0;
@@ -2009,6 +2012,8 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 
         dev.dt.cmdCopyBufferToImage(cmdbuf, scattering_hb_staging.buffer,
             scattering.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+#endif
 
         array<VkImageMemoryBarrier, 4> finish_prepare {{
             {
