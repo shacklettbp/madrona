@@ -1802,18 +1802,19 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
         world_views[i] = view_base + i * max_views_per_world;
     }
 
-    RendererInterface iface {
+    VizECSBridge bridge {
         .views = world_views,
         .numViews = (uint32_t *)(staging_base + buffer_offsets[1]),
         .instances = world_instances,
         .numInstances = (uint32_t *)(staging_base + buffer_offsets[2]),
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
+        .episodeDone = nullptr,
     };
 
     return EngineInterop {
         std::move(staging),
-        RendererBridge { iface },
+        bridge,
         uint32_t(buffer_offsets[0]),
         max_views_per_world,
         max_instances_per_world,
@@ -2898,7 +2899,7 @@ void Renderer::render(const ViewerCam &cam,
                          frame.drawCountOffset, sizeof(uint32_t), 0);
 
     uint32_t num_sim_views =
-        engine_interop_.bridge.iface.numViews[cfg.worldIDX];
+        engine_interop_.bridge.numViews[cfg.worldIDX];
     if (num_sim_views > 0) {
         VkDeviceSize world_view_byte_offset = engine_interop_.viewBaseOffset +
             cfg.worldIDX * engine_interop_.maxViewsPerWorld *
@@ -2917,7 +2918,7 @@ void Renderer::render(const ViewerCam &cam,
     }
 
     uint32_t num_instances =
-        engine_interop_.bridge.iface.numInstances[cfg.worldIDX];
+        engine_interop_.bridge.numInstances[cfg.worldIDX];
 
     if (num_instances > 0) {
         VkDeviceSize world_instance_byte_offset = sizeof(PackedInstanceData) *
@@ -3304,7 +3305,7 @@ void Renderer::waitForIdle()
     dev.dt.deviceWaitIdle(dev.hdl);
 }
 
-const render::RendererBridge & Renderer::getBridgeRef() const
+const VizECSBridge & Renderer::getBridgeRef() const
 {
     return engine_interop_.bridge;
 }

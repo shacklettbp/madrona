@@ -7,8 +7,6 @@ add_library(madrona_mw_cpu STATIC
 target_link_libraries(madrona_mw_cpu
     PUBLIC
         madrona_mw_core
-    PRIVATE
-        madrona_mw_render
 )
 
 if (NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION_MAJOR LESS 12)

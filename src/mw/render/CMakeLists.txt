@@ -1,6 +1,6 @@
 add_library(madrona_mw_render STATIC
-    interop.hpp interop.cpp
     ${MADRONA_INC_DIR}/render/mw.hpp
+    batch_renderer_system.cpp
 )
 
 target_link_libraries(madrona_mw_render PUBLIC
@@ -89,5 +89,5 @@ target_include_directories(madrona_batch_render PRIVATE
 )
     
 target_link_libraries(madrona_batch_render PRIVATE
-    madrona_common
+    madrona_common madrona_mw_render
 )

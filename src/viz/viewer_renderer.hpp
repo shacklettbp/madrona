@@ -9,7 +9,7 @@
 #include "vk/descriptors.hpp"
 #include "vk/utils.hpp"
 
-#include "../mw/render/interop.hpp"
+#include "interop.hpp"
 
 #include <madrona/viz/viewer.hpp>
 
@@ -145,7 +145,7 @@ struct AssetData {
 
 struct EngineInterop {
     render::vk::HostBuffer renderInputStaging;
-    render::RendererBridge bridge;
+    viz::VizECSBridge bridge;
     uint32_t viewBaseOffset;
     uint32_t maxViewsPerWorld;
     uint32_t maxInstancesPerWorld;
@@ -205,7 +205,7 @@ public:
 
     void waitForIdle();
 
-    const render::RendererBridge & getBridgeRef() const;
+    const VizECSBridge & getBridgeRef() const;
 
     render::vk::Backend backend;
     Window window;

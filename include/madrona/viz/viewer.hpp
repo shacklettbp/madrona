@@ -6,6 +6,8 @@
 #include <madrona/exec_mode.hpp>
 #include <memory>
 
+#include <madrona/viz/system.hpp>
+
 namespace madrona::viz {
 
 struct LightConfig {
@@ -62,7 +64,7 @@ public:
 
     void configureLighting(Span<const LightConfig> lights);
 
-    const render::RendererBridge * rendererBridge() const;
+    const VizECSBridge * rendererBridge() const;
 
     template <typename InputFn, typename StepFn>
     void loop(InputFn &&input_fn, StepFn &&step_fn);

@@ -3,6 +3,12 @@
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
 
+#if defined(MADRONA_LINUX) or defined(MADRONA_WINDOWS) or defined(MADRONA_GPU_MODE)
+#define MADRONA_BATCHRENDER_RT (1)
+#elif defined(MADRONA_MACOS)
+#define MADRONA_BATCHRENDER_METAL (1)
+#endif
+
 namespace madrona::render {
 using namespace base;
 using namespace math;
@@ -62,17 +68,6 @@ inline void instanceTransformSetup(Context &ctx,
         obj_id.idx,
         ctx.worldID().idx,
     };
-#elif defined(MADRONA_VIZ)
-    AtomicU32Ref inst_count_atomic(*renderer_state.numInstances);
-    uint32_t inst_idx = inst_count_atomic.fetch_add_relaxed(1);
-
-    renderer_state.instances[inst_idx] = InstanceData {
-        pos,
-        rot,
-        scale,
-        obj_id.idx,
-        0,
-    };
 #endif
 }
 
@@ -124,7 +119,6 @@ inline void readbackCount(Context &ctx,
 
 void RenderingSystem::registerTypes(ECSRegistry &registry)
 {
-    registry.registerComponent<ViewSettings>();
     registry.registerSingleton<RendererState>();
 }
 
@@ -165,7 +159,7 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 
 void RenderingSystem::reset([[maybe_unused]] Context &ctx)
 {
-#if defined(MADRONA_BATCHRENDER_METAL) || defined(MADRONA_VIZ)
+#if defined(MADRONA_BATCHRENDER_METAL)
     RendererState &renderer_state = ctx.singleton<RendererState>();
     *renderer_state.numViews = 0;
 #endif
@@ -225,12 +219,6 @@ void RendererState::init(Context &ctx, const RendererBridge &bridge)
         &bridge.iface.numViews[world_idx],
         bridge.iface.instanceData,
         bridge.iface.numInstances,
-#endif
-#ifdef MADRONA_VIZ
-        bridge.iface.views[world_idx],
-        &bridge.iface.numViews[world_idx],
-        bridge.iface.instances[world_idx],
-        &bridge.iface.numInstances[world_idx],
 #endif
         bridge.iface.renderWidth,
         bridge.iface.renderHeight,
