@@ -21,7 +21,7 @@ public:
     Recorder(Recorder &&o);
     ~Recorder();
 
-    const VizECSBridge * rendererBridge() const;
+    const VizECSBridge * bridge() const;
 
     void record();
 
