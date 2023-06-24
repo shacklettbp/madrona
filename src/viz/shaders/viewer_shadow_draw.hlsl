@@ -105,7 +105,7 @@ float4 vert(in uint vid : SV_VertexID,
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
 
-    float dummy = 0.000001f * float(drawMaterialBuffer[0].materialIdx + viewDataBuffer[0].data[0].w) + materialBuffer[0].color.w;
+    float dummy = 0.00000000001f * float(drawMaterialBuffer[0].materialIdx + viewDataBuffer[0].data[0].w) + materialBuffer[0].color.w;
 
     float4 world_space_pos = float4(
         instance_data.position + mul(toMat(instance_data.rotation), (instance_data.scale * vert.position)), 

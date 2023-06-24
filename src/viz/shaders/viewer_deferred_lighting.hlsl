@@ -18,6 +18,7 @@ RWTexture2D<float4> gbufferPosition;
 [[vk::binding(3, 0)]]
 StructuredBuffer<DirectionalLight> lights;
 
+// Atmosphere
 [[vk::binding(4, 0)]]
 RWTexture2D<float4> transmittance;
 
@@ -30,8 +31,34 @@ RWTexture3D<float4> mie;
 [[vk::binding(7, 0)]]
 RWTexture3D<float4> scattering;
 
+// Shadows
 [[vk::binding(8, 0)]]
+Texture2D<float> shadowMap;
+
+[[vk::binding(9, 0)]]
+StructuredBuffer<ShadowViewData> shadowViewDataBuffer;
+
+// Sampler
+[[vk::binding(10, 0)]]
 SamplerState linearSampler;
+
+float shadowFactor(float3 world_pos)
+{
+    float4 world_pos_v4 = float4(world_pos.x, world_pos.z, world_pos.y, 1.f);
+
+    // Light space position
+    float4 ls_pos = mul(shadowViewDataBuffer[0].viewProjectionMatrix, world_pos_v4);
+    ls_pos.xyz /= ls_pos.w;
+
+    float2 uv = ls_pos.xy * 0.5 + float2(0.5, 0.5);
+
+    float map_depth = shadowMap.SampleLevel(linearSampler, uv, 0);
+
+    if (map_depth > ls_pos.z)
+        return 0.1f; // In shadow
+    else
+        return 1.0f;
+}
 
 [numThreads(32, 32, 1)]
 [shader("compute")]
@@ -55,6 +82,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
         normal.xyz = normalize(normal.xyz);
 
+        float shadow_factor = shadowFactor(position.xyz);
+
         float4 light_dir = lights[0].lightDir;
         light_dir.xyz = normalize(light_dir.xyz);
 
@@ -68,6 +97,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         specular = pow(specular, 15.0);
 
         color.xyz += specular * lights[0].color.xyz;
+
+        color *= shadow_factor;
 
         gbufferAlbedo[targetPixel] = color + (trans + irr + mieSa + scat) * 0.00001f;
     }

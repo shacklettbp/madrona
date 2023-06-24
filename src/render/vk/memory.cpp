@@ -74,7 +74,8 @@ static constexpr VkFormatFeatureFlags colorAttachmentReqs =
 
 static constexpr VkImageUsageFlags depthAttachmentUsage =
     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-    VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+    VK_IMAGE_USAGE_SAMPLED_BIT;
 
 static constexpr VkFormatFeatureFlags depthAttachmentReqs =
     VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |

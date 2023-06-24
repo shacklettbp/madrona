@@ -628,7 +628,7 @@ static PipelineShaders makeCullShader(const Device &dev)
                            Span<const SPIRVShader>(&spirv, 1), {});
 }
 
-static PipelineShaders makeDeferredLightingShader(const Device &dev)
+static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler clamp_sampler)
 {
     std::filesystem::path shader_dir =
         std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
@@ -640,8 +640,11 @@ static PipelineShaders makeDeferredLightingShader(const Device &dev)
         { "lighting", ShaderStage::Compute });
 
     StackAlloc tmp_alloc;
-    return PipelineShaders(dev, tmp_alloc,
-                           Span<const SPIRVShader>(&spirv, 1), {});
+    return PipelineShaders(
+        dev, tmp_alloc,
+        Span<const SPIRVShader>(&spirv, 1), 
+        Span<const BindingOverride>({BindingOverride{
+            0, 10, clamp_sampler, 1, 0 }}));
 }
 
 static VkPipelineCache getPipelineCache(const Device &dev)
@@ -894,7 +897,7 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     raster_info.depthClampEnable = VK_FALSE;
     raster_info.rasterizerDiscardEnable = VK_FALSE;
     raster_info.polygonMode = VK_POLYGON_MODE_FILL;
-    raster_info.cullMode = VK_CULL_MODE_BACK_BIT;
+    raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
     raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster_info.depthBiasEnable = VK_FALSE;
     raster_info.lineWidth = 1.0f;
@@ -1088,9 +1091,10 @@ static Pipeline<1> makeCullPipeline(const Device &dev,
 
 static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
                                     VkPipelineCache pipeline_cache,
+                                    VkSampler clamp_sampler,
                                     CountT num_frames)
 {
-    PipelineShaders shader = makeDeferredLightingShader(dev);
+    PipelineShaders shader = makeDeferredLightingShader(dev, clamp_sampler);
 
     // Push constant
     VkPushConstantRange push_const {
@@ -1374,7 +1378,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 16> desc_updates;
+    std::array<VkWriteDescriptorSet, 18> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -1476,6 +1480,15 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     shadow_view_info.range = buffer_sizes[6];
 
     DescHelper::storage(desc_updates[15], draw_set, &shadow_view_info, 3);
+    DescHelper::storage(desc_updates[16], lighting_set, &shadow_view_info, 9);
+
+    VkDescriptorImageInfo shadow_map_info;
+    shadow_map_info.imageView = shadow_fb.depthView;
+    shadow_map_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    shadow_map_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::textures(desc_updates[17], lighting_set, &shadow_map_info, 1, 8, 0);
+
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
@@ -2183,6 +2196,7 @@ Renderer::Renderer(uint32_t gpu_id,
                                     repeat_sampler_, clamp_sampler_,
                                     InternalConfig::numFrames)),
       deferred_lighting_(makeDeferredLightingPipeline(dev, pipeline_cache_,
+                                      clamp_sampler_,
                                       InternalConfig::numFrames)),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
@@ -3060,6 +3074,31 @@ void Renderer::render(const ViewerCam &cam,
                 sizeof(DrawCmd));
 
         dev.dt.cmdEndRenderPass(draw_cmd);
+
+        array<VkImageMemoryBarrier, 1> finish_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.shadowFB.depthAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_DEPTH_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                finish_prepare.size(), finish_prepare.data());
     }
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
