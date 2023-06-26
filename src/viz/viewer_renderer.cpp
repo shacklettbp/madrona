@@ -44,6 +44,8 @@ using PackedInstanceData = shader::PackedInstanceData;
 using PackedViewData = shader::PackedViewData;
 using ShadowViewData = shader::ShadowViewData;
 using DirectionalLight = shader::DirectionalLight;
+using SkyData = shader::SkyData;
+using DensityLayer = shader::DensityLayer;
 
 namespace InternalConfig {
 
@@ -1359,15 +1361,16 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
 
-    int64_t buffer_offsets[6];
-    int64_t buffer_sizes[7] = {
+    int64_t buffer_offsets[7];
+    int64_t buffer_sizes[8] = {
         (int64_t)sizeof(PackedViewData) * (max_views + 1),
         (int64_t)sizeof(uint32_t),
         (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
         (int64_t)sizeof(DrawMaterialData) * max_instances * 10,
         (int64_t)sizeof(DirectionalLight) * InternalConfig::maxLights,
-        (int64_t)sizeof(ShadowViewData)
+        (int64_t)sizeof(ShadowViewData),
+        (int64_t)sizeof(SkyData)
     };
     int64_t num_render_input_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
@@ -1375,10 +1378,11 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     HostBuffer view_staging = alloc.makeStagingBuffer(sizeof(PackedViewData));
     HostBuffer light_staging = alloc.makeStagingBuffer(sizeof(DirectionalLight) * InternalConfig::maxLights);
     HostBuffer shadow_staging = alloc.makeStagingBuffer(sizeof(ShadowViewData));
+    HostBuffer sky_staging = alloc.makeStagingBuffer(sizeof(SkyData));
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 18> desc_updates;
+    std::array<VkWriteDescriptorSet, 19> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -1448,31 +1452,31 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkDescriptorImageInfo transmittance_info;
     transmittance_info.imageView = sky.transmittanceView;
-    transmittance_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     transmittance_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[11], lighting_set, &transmittance_info, 4);
+    DescHelper::textures(desc_updates[11], lighting_set, &transmittance_info, 1, 4, 0);
 
     VkDescriptorImageInfo irradiance_info;
     irradiance_info.imageView = sky.irradianceView;
-    irradiance_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    irradiance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     irradiance_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[12], lighting_set, &irradiance_info, 5);
+    DescHelper::textures(desc_updates[12], lighting_set, &irradiance_info, 1, 5, 0);
 
     VkDescriptorImageInfo mie_info;
     mie_info.imageView = sky.mieView;
-    mie_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    mie_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     mie_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[13], lighting_set, &mie_info, 6);
+    DescHelper::textures(desc_updates[13], lighting_set, &mie_info, 1, 6, 0);
 
     VkDescriptorImageInfo scattering_info;
     scattering_info.imageView = sky.scatteringView;
-    scattering_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[14], lighting_set, &scattering_info, 7);
+    DescHelper::textures(desc_updates[14], lighting_set, &scattering_info, 1, 7, 0);
 
     VkDescriptorBufferInfo shadow_view_info;
     shadow_view_info.buffer = render_input.buffer;
@@ -1489,6 +1493,12 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::textures(desc_updates[17], lighting_set, &shadow_map_info, 1, 8, 0);
 
+    VkDescriptorBufferInfo sky_info;
+    sky_info.buffer = render_input.buffer;
+    sky_info.offset = buffer_offsets[6];
+    sky_info.range = buffer_sizes[7];
+
+    DescHelper::storage(desc_updates[18], lighting_set, &sky_info, 11);
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
@@ -1504,6 +1514,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         std::move(view_staging),
         std::move(light_staging),
         std::move(shadow_staging),
+        std::move(sky_staging),
         std::move(render_input),
         0,
         sizeof(PackedViewData),
@@ -1512,6 +1523,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         uint32_t(buffer_offsets[1]),
         (uint32_t)buffer_offsets[4],
         (uint32_t)buffer_offsets[5],
+        (uint32_t)buffer_offsets[6],
         max_instances * 10,
         cull_set,
         draw_set,
@@ -1522,7 +1534,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 static array<VkClearValue, 4> makeClearValues()
 {
     VkClearValue color_clear;
-    color_clear.color = {{0.f, 0.f, 0.f, 1.f}};
+    color_clear.color = {{0.f, 0.f, 0.f, 0.f}};
 
     VkClearValue depth_clear;
     depth_clear.depthStencil = {0.f, 0};
@@ -1883,7 +1895,7 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
     transmittance_stream.read((char *)transmittance_hb_staging.ptr, transmittance_size);
     transmittance_hb_staging.flush(dev);
 
-#if 0
+#if 1
     assert(transmittance_size == transmittance_reqs.size && irradiance_size == irradiance_reqs.size &&
            scattering_size == scattering_reqs.size && mie_size == mie_reqs.size);
 #endif
@@ -1983,7 +1995,7 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
                 0, nullptr, 0, nullptr,
                 copy_prepare.size(), copy_prepare.data());
 
-#if 0
+#if 1
         VkBufferImageCopy copy = {};
         copy.bufferOffset = 0;
         copy.bufferRowLength = 0;
@@ -2022,7 +2034,7 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
                 VK_ACCESS_MEMORY_WRITE_BIT,
                 VK_ACCESS_SHADER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 VK_QUEUE_FAMILY_IGNORED,
                 VK_QUEUE_FAMILY_IGNORED,
                 transmittance.image,
@@ -2037,7 +2049,7 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
                 VK_ACCESS_MEMORY_WRITE_BIT,
                 VK_ACCESS_SHADER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 VK_QUEUE_FAMILY_IGNORED,
                 VK_QUEUE_FAMILY_IGNORED,
                 irradiance.image,
@@ -2052,7 +2064,7 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
                 VK_ACCESS_MEMORY_WRITE_BIT,
                 VK_ACCESS_SHADER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 VK_QUEUE_FAMILY_IGNORED,
                 VK_QUEUE_FAMILY_IGNORED,
                 mie.image,
@@ -2067,7 +2079,7 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
                 VK_ACCESS_MEMORY_WRITE_BIT,
                 VK_ACCESS_SHADER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 VK_QUEUE_FAMILY_IGNORED,
                 VK_QUEUE_FAMILY_IGNORED,
                 scattering.image,
@@ -2576,6 +2588,7 @@ static void packView(const Device &dev,
     view_staging_buffer.flush(dev);
 }
 
+// From GLM
 math::Mat4x4 lookAt(
     math::Vector3 eye,
     math::Vector3 center,
@@ -2600,6 +2613,38 @@ math::Mat4x4 lookAt(
     m.cols[3][2] = dot(f, eye);
     m.cols[3][3] = 1.0f;
     return m;
+}
+
+math::Mat3x3 getCameraToWorldMatrix(math::Vector3 eye,
+    math::Vector3 center,
+    math::Vector3 up)
+{
+    math::Vector3 f = math::Vector3((center - eye).normalize());
+    math::Vector3 s = math::Vector3((cross(f, up).normalize()));
+    math::Vector3 u = math::Vector3(cross(s, f).normalize());
+
+    printf("Right %f %f %f\n", s.x, s.y, s.z);
+    printf("Up %f %f %f\n", u.x, u.y, u.z);
+    printf("Forward %f %f %f\n", f.x, f.y, f.z);
+
+    return math::Mat3x3{
+        {s, u, f}
+    };
+}
+
+// From Brendan Galea
+math::Mat4x4 perspective(float fovy, float aspect, float near, float far)
+{
+    math::Mat4x4 projection = {};
+
+    const float tanHalfFovy = tan(math::toRadians(fovy) / 2.f);
+    projection.cols[0][0] = 1.f / (aspect * tanHalfFovy);
+    projection.cols[1][1] = 1.f / (tanHalfFovy);
+    projection.cols[2][2] = far / (far - near);
+    projection.cols[2][3] = 1.f;
+    projection.cols[3][2] = -(far * near) / (far - near);   
+
+    return projection;
 }
 
 static void packShadowView(const Device &dev,
@@ -2629,8 +2674,8 @@ static void packShadowView(const Device &dev,
 
     float far_width, near_width, far_height, near_height;
 
-    far_width = 2.0f * far * tan(cam.fov);
-    near_width = 2.0f * near * tan(cam.fov);
+    far_width = 2.0f * far * tan(math::toRadians(cam.fov) / 2.0f);
+    near_width = 2.0f * near * tan(math::toRadians(cam.fov) / 2.0f);
     far_height = far_width / aspect;
     near_height = near_width / aspect;
 
@@ -2683,23 +2728,79 @@ static void packShadowView(const Device &dev,
     
     z_min = z_min - (z_max - z_min);
 
-#if 1
     // Y is up
     math::Mat4x4 projection = math::Mat4x4{{
             { 2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f},
             {0.0f,                    2.0f / (y_max - y_min), 0.0f,                   0.0f},
-            {0.0f,                    0.0f,                   2.0f / (z_max - z_min), 0.0f },
-            {-(x_max + x_min) / (x_max - x_min), -(y_max + y_min) / (y_max - y_min), -(z_max + z_min) / (z_max - z_min), 1.0f}}};
-#else
-    // Z is up
-    math::Mat4x4 projection = math::Mat4x4{{
-            { 2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f},
-            {0.0f,                    2.0f / (z_max - z_min), 0.0f,                   0.0f},
-            {0.0f,                    0.0f,                   2.0f / (y_max - y_min), 0.0f },
-            {-(x_max + x_min) / (x_max - x_min), -(z_max + z_min) / (z_max - z_min), -(y_max + z_min) / (y_max - z_min), 1.0f}}};
-#endif
+            {0.0f,                    0.0f,                   1.0f / (z_max - z_min), 0.0f },
+            {-(x_max + x_min) / (x_max - x_min), -(y_max + y_min) / (y_max - y_min), -(z_min) / (z_max - z_min), 1.0f}}};
 
     data->viewProjectionMatrix = projection.compose(view);
+    data->cameraViewProjectionMatrix = perspective(cam.fov, aspect, 1.0f, 1000.0f).
+        compose(lookAt(ws_position, ws_position + ws_direction, math::Vector3{0.0f, 1.0f, 0.0f}));
+
+    {
+        math::Vector3 f = math::Vector3((ws_direction).normalize());
+        math::Vector3 s = math::Vector3((cross(f, math::Vector3{0.0f, 1.0f, 0.0f}).normalize()));
+        math::Vector3 u = math::Vector3(cross(s, f).normalize());
+
+        data->cameraRight = {s.x, s.y, s.z, 1.0f};
+        data->cameraUp = {u.x, u.y, u.z, 1.0f};
+        data->cameraForward = {f.x, f.y, f.z, 1.0f};
+    }
+
+    staging.flush(dev);
+}
+
+static void packSky( const Device &dev,
+                     HostBuffer &staging)
+{
+    SkyData *data = (SkyData *)staging.ptr;
+
+    /* 
+       Based on the values of Eric Bruneton's atmosphere model.
+       We aren't going to calculate these manually come on (at least not yet)
+    */
+
+    /* 
+       These are the irradiance values at the top of the Earth's atmosphere
+       for the wavelengths 680nm (red), 550nm (green) and 440nm (blue) 
+       respectively. These are in W/m2
+       */
+    data->solarIrradiance = math::Vector4{1.474f, 1.8504f, 1.91198f, 0.0f};
+    // Angular radius of the Sun (radians)
+    data->solarAngularRadius = 0.004675f;
+    data->bottomRadius = 6360.0f / 2.0f;
+    data->topRadius = 6420.0f / 2.0f;
+
+    data->rayleighDensity.layers[0] =
+        DensityLayer { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, {} };
+    data->rayleighDensity.layers[1] =
+        DensityLayer { 0.0f, 1.0f, -0.125f, 0.0f, 0.0f, {} };
+    data->rayleighScatteringCoef =
+        math::Vector4{0.005802f, 0.013558f, 0.033100f, 0.0f};
+
+    data->mieDensity.layers[0] =
+        DensityLayer { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, {} };
+    data->mieDensity.layers[1] =
+        DensityLayer { 0.0f, 1.0f, -0.833333f, 0.0f, 0.0f, {} };
+    data->mieScatteringCoef = math::Vector4{0.003996f, 0.003996f, 0.003996f, 0.0f};
+    data->mieExtinctionCoef = math::Vector4{0.004440f, 0.004440f, 0.004440f, 0.0f};
+
+    data->miePhaseFunctionG = 0.8f;
+
+    data->absorptionDensity.layers[0] =
+        DensityLayer { 25.000000f, 0.000000f, 0.000000f, 0.066667f, -0.666667f, {} };
+    data->absorptionDensity.layers[1] =
+        DensityLayer { 0.000000f, 0.000000f, 0.000000f, -0.066667f, 2.666667f, {} };
+    data->absorptionExtinctionCoef =
+        math::Vector4{0.000650f, 0.001881f, 0.000085f, 0.0f};
+    data->groundAlbedo = math::Vector4{0.050000f, 0.050000f, 0.050000f, 0.0f};
+    data->muSunMin = -0.207912f;
+    data->wPlanetCenter =
+      math::Vector4{0.0f, -data->bottomRadius, 0.0f, 0.0f};
+    data->sunSize = math::Vector4{
+            0.0046750340586467079f, 0.99998907220740285f, 0.0f, 0.0f};
 
     staging.flush(dev);
 }
@@ -2776,8 +2877,11 @@ static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeli
 
     DeferredLightingPushConst push_const = {
         math::Vector4{ cam.view.x, cam.view.y, cam.view.z, 0.0f },
-        math::Vector4{ cam.position.x, cam.position.y, cam.position.z, 0.0f }
+        math::Vector4{ cam.position.x, cam.position.y, cam.position.z, 0.0f },
+        math::toRadians(cam.fov), 20.0f, 50.0f, {}
     };
+
+    printf("%f %f %f\n", push_const.viewDir.x, push_const.viewDir.y, push_const.viewDir.z);
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DeferredLightingPushConst), &push_const);
 
@@ -2887,7 +2991,7 @@ void Renderer::render(const ViewerCam &cam,
 
 #if 1
     packShadowView(dev, frame.shadowViewStaging, cam, 
-        lights_[0].lightDir.xyz(), (float)fb_height_ / (float)fb_width_, 1.0f, 40.0f);
+        lights_[0].lightDir.xyz(), (float)fb_height_ / (float)fb_width_, 1.0f, 50.0f);
 
     VkBufferCopy shadow_copy {
         .srcOffset = 0,
@@ -2899,6 +3003,18 @@ void Renderer::render(const ViewerCam &cam,
                          frame.renderInput.buffer,
                          1, &shadow_copy);
 #endif
+
+    packSky(dev, frame.skyStaging);
+
+    VkBufferCopy sky_copy {
+        .srcOffset = 0,
+        .dstOffset = frame.skyOffset,
+        .size = sizeof(SkyData)
+    };
+
+    dev.dt.cmdCopyBuffer(draw_cmd, frame.skyStaging.buffer,
+                         frame.renderInput.buffer,
+                         1, &sky_copy);
 
     dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
                          frame.drawCountOffset, sizeof(uint32_t), 0);

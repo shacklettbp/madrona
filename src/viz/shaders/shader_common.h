@@ -8,6 +8,47 @@ struct CullPushConst {
 struct DeferredLightingPushConst {
     float4 viewDir;
     float4 viewPos;
+    float fovy;
+    float exposure;
+    float fade_dist;
+
+    float pad[1];
+};
+
+struct DensityLayer {
+    float width;
+    float expTerm;
+    float expScale;
+    float linTerm;
+    float constTerm;
+
+    float pad[3];
+};
+
+struct DensityProfile {
+    DensityLayer layers[2];
+};
+
+struct SkyData {
+    float4 solarIrradiance;
+    float4 rayleighScatteringCoef;
+    float4 mieScatteringCoef;
+    float4 mieExtinctionCoef;
+    float4 absorptionExtinctionCoef;
+    float4 groundAlbedo;
+    float4 wPlanetCenter;
+    float4 sunSize;
+
+    DensityProfile rayleighDensity;
+    DensityProfile absorptionDensity;
+    DensityProfile mieDensity;
+
+    float solarAngularRadius;
+    float bottomRadius;
+    float topRadius;
+    float miePhaseFunctionG;
+    float muSunMin;
+    float pad[3];
 };
 
 struct DrawPushConst {
@@ -61,6 +102,11 @@ struct PackedViewData {
 
 struct ShadowViewData {
     float4x4 viewProjectionMatrix;
+    float4x4 cameraViewProjectionMatrix;
+
+    float4 cameraRight;
+    float4 cameraUp;
+    float4 cameraForward;
 };
 
 struct DirectionalLight {

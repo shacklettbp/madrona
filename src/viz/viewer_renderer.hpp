@@ -111,6 +111,7 @@ struct Frame {
     render::vk::HostBuffer viewStaging;
     render::vk::HostBuffer lightStaging;
     render::vk::HostBuffer shadowViewStaging;
+    render::vk::HostBuffer skyStaging;
     render::vk::LocalBuffer renderInput;
     uint32_t cameraViewOffset;
     uint32_t simViewOffset;
@@ -119,6 +120,7 @@ struct Frame {
     uint32_t instanceOffset;
     uint32_t lightOffset;
     uint32_t shadowOffset;
+    uint32_t skyOffset;
     uint32_t maxDraws;
 
     VkDescriptorSet cullShaderSet;
