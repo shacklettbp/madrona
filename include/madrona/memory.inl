@@ -11,6 +11,28 @@
 
 namespace madrona {
 
+void * rawAllocAligned(size_t num_bytes, size_t alignment)
+{
+#if defined(_LIBCPP_VERSION)
+    return std::aligned_alloc(alignment, num_bytes);
+#elif defined(MADRONA_MSVC)
+    return _aligned_malloc(num_bytes, alignment);
+#else
+    STATIC_UNIMPLEMENTED();
+#endif
+}
+
+void rawDeallocAligned(void *ptr)
+{
+#if defined(_LIBCPP_VERSION)
+    free(ptr);
+#elif defined(MADRONA_MSVC)
+    _aligned_free(ptr);
+#else
+    STATIC_UNIMPLEMENTED();
+#endif
+}
+
 PolyAlloc::PolyAlloc(void *state,
                      void *(*alloc_ptr)(void *, size_t),
                      void (*dealloc_ptr)(void *, void *))
@@ -89,13 +111,13 @@ auto AllocContext::with(A &alloc, Fn &&fn, Args &&...args) ->
 
 void * DefaultAlloc::alloc(size_t num_bytes)
 {
-    return std::aligned_alloc(MADRONA_CACHE_LINE,
-        utils::roundUpPow2(num_bytes, MADRONA_CACHE_LINE));
+    return rawAllocAligned(utils::roundUpPow2(num_bytes, MADRONA_CACHE_LINE),
+        MADRONA_CACHE_LINE);
 }
 
 void DefaultAlloc::dealloc(void *ptr)
 {
-    free(ptr);
+    rawDeallocAligned(ptr);
 }
 
 }

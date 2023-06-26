@@ -6,6 +6,7 @@
 #include <madrona/optional.hpp>
 
 #include <cstdint>
+#include <cstdarg>
 #include <optional>
 #include <filesystem>
 #include <string_view>
@@ -433,7 +434,7 @@ static bool gltfLoad(const char *gltf_filename,
     loader.curFileName = gltf_filename;
     std::filesystem::path gltf_path(gltf_filename);
 
-    loader.sceneName = gltf_path.stem();
+    loader.sceneName = std::move(gltf_path.stem().string());
     loader.sceneDirectory = gltf_path.parent_path();
 
     auto suffix = gltf_path.extension();
@@ -441,7 +442,7 @@ static bool gltfLoad(const char *gltf_filename,
 
     ondemand::document json_doc;
     if (binary) {
-        std::ifstream binary_file(string(gltf_path),
+        std::ifstream binary_file(gltf_path.string(),
                                   std::ios::in | std::ios::binary);
 
         if (!binary_file.is_open() || !binary_file.good()) {
@@ -1521,7 +1522,7 @@ static bool gltfParseMesh(
     }
 
     imported.objects.push_back({
-        .meshes = Span(meshes.data(), meshes.size()),
+        .meshes = { meshes.data(), meshes.size() },
     });
 
     imported.geoData.meshArrays.emplace_back(std::move(meshes));
@@ -1699,7 +1700,8 @@ static bool gltfImportAssets(LoaderData &loader,
                               [](auto *) {});
 
     imported.objects.push_back({
-        .meshes = Span<SourceMesh>(merged_meshes.data(), merged_meshes.size()),
+        .meshes = Span<const SourceMesh>(
+            merged_meshes.data(), merged_meshes.size()),
     });
     
     imported.instances.push_back(SourceInstance {

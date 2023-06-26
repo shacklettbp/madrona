@@ -13,6 +13,11 @@ if (NOT CUDAToolkit_FOUND OR CUDAToolkit_VERSION_MAJOR LESS 12)
     return()
 endif()
 
+# libcu++ headers currently fail to compile under MSVC
+if (FRONTEND_MSVC)
+    return()
+endif()
+
 add_library(madrona_mw_gpu STATIC
     cpp_compile.hpp cpp_compile.cpp
     cuda_compile_helpers.hpp cuda_compile_helpers.inl cuda_compile_helpers.cpp

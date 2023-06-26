@@ -1,6 +1,11 @@
 #include <madrona/tracing.hpp>
 
+#ifdef MADRONA_WINDOWS
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
+
 #include <fstream>
 
 #include <cassert>
@@ -20,7 +25,15 @@ void WriteToFile(void *data, size_t num_bytes,
     if (get_trace_name != nullptr) {
         file_name += std::string(get_trace_name) + name + ".bin";
     } else {
-        file_name += std::to_string(getpid()) + name + ".bin";
+        uint32_t pid =
+#ifdef MADRONA_WINDOWS
+            GetCurrentProcessId()
+#else
+            getpid()
+#endif
+            ;
+
+        file_name += std::to_string(pid) + name + ".bin";
     }
 
     std::ofstream myFile(file_name, std::ios::out | std::ios::binary);

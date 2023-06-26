@@ -73,7 +73,7 @@ static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
     }
 
     std::cerr << "Tensor: Invalid tensor dtype" << std::endl;
-    abort();
+    exit(1);
 }
 
 NB_MODULE(madrona_python, m) {
@@ -108,7 +108,7 @@ NB_MODULE(madrona_python, m) {
 
             new (dst) Tensor(torch_tensor.data(),
                                 fromDLPackType(torch_tensor.dtype()),
-                                Span(dims.data(), torch_tensor.ndim()),
+                                { dims.data(), (CountT)torch_tensor.ndim() },
                                 gpu_id);
         }))
         .def("to_torch", [](const Tensor &tensor) {

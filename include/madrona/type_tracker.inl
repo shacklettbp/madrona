@@ -31,12 +31,14 @@ template <typename T>
 uint32_t TypeTracker::trackType(uint32_t *ptr)
 {
     return TypeTracker::trackByName(ptr,
-#ifdef MADRONA_MSVC
-        __FUNCDNAME__
-#else
+#if defined (__clang__) || defined(__GNUC__)
         __PRETTY_FUNCTION__
+#elif defined(_MSC_VER)
+        __FUNCSIG__
+#else
+        ""
 #endif
-        );
+    );
 }
 
 }

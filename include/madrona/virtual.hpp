@@ -11,27 +11,33 @@
 #include <cstddef>
 #include <type_traits>
 
+#include <madrona/types.hpp>
+#include <madrona/utils.hpp>
+
 namespace madrona {
 
 class VirtualRegion {
 public:
     VirtualRegion(uint64_t max_bytes, uint64_t chunk_shift,
-                  uint64_t alignment, uint64_t init_chunks);
+                  uint64_t alignment, uint64_t init_chunks = 0);
+    VirtualRegion(const VirtualRegion &) = delete;
+    VirtualRegion(VirtualRegion &&o);
+
     ~VirtualRegion();
 
-    VirtualRegion(const VirtualRegion &) = delete;
 
-    inline void *ptr() const { return base_; }
-    void commit(uint64_t start_chunk, uint64_t num_chunks);
-    void decommit(uint64_t start_chunk, uint64_t num_chunks);
+    inline void *ptr() const { return aligned_; }
+    void commitChunks(uint64_t start_chunk, uint64_t num_chunks);
+    void decommitChunks(uint64_t start_chunk, uint64_t num_chunks);
 
-    inline uint64_t chunkSize() const { return 1 << chunk_shift_; }
+    inline uint64_t chunkSize() const { return 1_u64 << chunk_shift_; }
 
 private:
     struct Init;
     inline VirtualRegion(Init init);
 
-    char *const base_;
+    char * base_;
+    char * aligned_;
     uint64_t chunk_shift_;
     uint64_t total_size_;
 };

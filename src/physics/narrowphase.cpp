@@ -217,7 +217,7 @@ inline math::Vector3 planeIntersection(const geometry::Plane &plane, const math:
 
 #ifdef MADRONA_GPU_MODE
 
-static inline MADRONA_ALWAYS_INLINE std::pair<float, int32_t> 
+MADRONA_ALWAYS_INLINE static inline std::pair<float, int32_t> 
 warpFloatMaxAndIdx(float val, int32_t idx)
 {
 #pragma unroll
@@ -236,7 +236,7 @@ warpFloatMaxAndIdx(float val, int32_t idx)
     return { val, idx };
 }
 
-static inline MADRONA_ALWAYS_INLINE std::pair<float, int32_t>
+MADRONA_ALWAYS_INLINE static inline std::pair<float, int32_t>
 warpFloatMinAndIdx(float val, int32_t idx)
 {
 #pragma unroll
@@ -255,7 +255,7 @@ warpFloatMinAndIdx(float val, int32_t idx)
     return { val, idx };
 }
 
-static inline MADRONA_ALWAYS_INLINE float warpFloatMin(float val)
+MADRONA_ALWAYS_INLINE static inline  float warpFloatMin(float val)
 {
 #pragma unroll
     for (int32_t w = 16; w >= 1; w /= 2) {
@@ -833,7 +833,7 @@ static Manifold buildFaceContactManifold(
     return manifold;
 }
 
-static inline MADRONA_ALWAYS_INLINE Manifold createFaceContact(
+MADRONA_ALWAYS_INLINE static inline Manifold createFaceContact(
                                   Plane ref_plane,
                                   int32_t ref_face_idx,
                                   int32_t incident_face_idx,
@@ -1149,7 +1149,7 @@ struct NarrowphaseResult {
     const uint32_t * bFaceHedgeRoots;
 };
 
-static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
+MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
     MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
     NarrowphaseTest test_type,
     Vector3 a_pos, Vector3 b_pos,
@@ -1166,6 +1166,7 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
     switch (test_type) {
     case NarrowphaseTest::SphereSphere: {
         assert(false);
+        MADRONA_UNREACHABLE();
 #if 0
         float a_radius = a_prim->sphere.radius;
         float b_radius = b_prim->sphere.radius;
@@ -1247,13 +1248,16 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
             buildCollisionMesh(b_he_mesh, b_pos, b_rot, b_scale);
 #endif
         assert(false);
+        MADRONA_UNREACHABLE();
     } break;
     case NarrowphaseTest::PlanePlane: {
         // Planes must be static, this should never be called
         assert(false);
+        MADRONA_UNREACHABLE();
     } break;
     case NarrowphaseTest::SpherePlane: {
         assert(false);
+        MADRONA_UNREACHABLE();
 #if 0
         auto sphere = a_prim->sphere;
 
@@ -1330,11 +1334,11 @@ static MADRONA_ALWAYS_INLINE inline NarrowphaseResult narrowphaseDispatch(
             a_hull_state.mesh.faceBaseHalfEdges, nullptr,
         };
     } break;
-    default: __builtin_unreachable();
+    default: MADRONA_UNREACHABLE();
     }
 }
 
-static MADRONA_ALWAYS_INLINE inline void generateContacts(
+MADRONA_ALWAYS_INLINE static inline void generateContacts(
     SolverData &solver,
     NarrowphaseResult narrowphase_result,
     Loc a_loc, Loc b_loc,
@@ -1475,7 +1479,7 @@ static MADRONA_ALWAYS_INLINE inline void generateContacts(
 #endif
             { 0, 0, 0 }, { 1, 0, 0, 0 });
     } break;
-    default: __builtin_unreachable();
+    default: MADRONA_UNREACHABLE();
     }
 
     if (manifold.numContactPoints > 0) {

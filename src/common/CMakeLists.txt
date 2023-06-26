@@ -32,6 +32,17 @@ if (FRONTEND_GCC OR FRONTEND_CLANG)
             -mcpu=apple-m1
         )
     endif()
+elseif (FRONTEND_MSVC)
+    # FIXME: some of these options (/permissive-, /Zc:__cplusplus,
+    # /Zc:preprocessor) should just be applied globally to the toolcahin
+    target_compile_options(madrona_hdrs INTERFACE
+        /Zc:__cplusplus
+        /Zc:preprocessor
+        /permissive-
+        /W4
+        /wd4324 # Struct padded for alignas ... yeah that's the point
+        /wd4244 /wd4267 # Should reenable these
+    )
 endif()
 
 add_library(madrona_common STATIC
