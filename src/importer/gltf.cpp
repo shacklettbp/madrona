@@ -434,7 +434,7 @@ static bool gltfLoad(const char *gltf_filename,
     loader.curFileName = gltf_filename;
     std::filesystem::path gltf_path(gltf_filename);
 
-    loader.sceneName = std::move(gltf_path.stem().string());
+    loader.sceneName = gltf_path.stem().string();
     loader.sceneDirectory = gltf_path.parent_path();
 
     auto suffix = gltf_path.extension();
