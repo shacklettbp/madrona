@@ -99,12 +99,13 @@ void * OSAlloc::getChunk(Cache &cache)
             continue;
         }
 
-        region_.commit(mapped_chunks_, 1);
+        region_.commitChunks(mapped_chunks_, 1);
         Block *new_mem = (Block *)(
             (char *)region_.ptr() + (mapped_chunks_ << consts::virtual_map_shift));
 
         Block *new_block = new_mem;
-        uint32_t remaining_base_idx = new_block - (Block *)region_.ptr() + 1;
+        uint32_t remaining_base_idx =
+            uint32_t(new_block - (Block *)region_.ptr() + 1);
 
         constexpr int64_t num_new_blocks =
             (1_u64 << consts::virtual_map_shift) / chunk_size_ - 1;

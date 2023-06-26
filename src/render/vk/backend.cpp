@@ -8,13 +8,17 @@
 #include "config.hpp"
 #include "utils.hpp"
 
-#include <csignal>
 #include <cstring>
 #include <iostream>
 #include <optional>
 #include <vector>
 
+#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
 #include <dlfcn.h>
+#include <csignal>
+#elif defined(MADRONA_WINDOWS)
+#include <windows.h>
+#endif
 
 using namespace std;
 
@@ -63,8 +67,7 @@ static InitializationDispatch fetchInitDispatchTable(
         auto ptr = get_inst_addr(nullptr, name);
 
         if (!ptr) {
-            cerr << "Failed to load "<< name << " for vulkan initialization." << endl;
-            abort();
+            FATAL("Failed to load %s for vulkan initialization.", name);
         }
 
         return ptr;
@@ -123,7 +126,7 @@ static bool checkValidationAvailable(const InitializationDispatch &dt)
     if (have_validation_layer && have_debug_ext) {
         return true;
     } else {
-        cerr << "Validation layers unavailable" << endl;
+        fprintf(stderr, "Validation layers unavailable\n");
         return false;
     }
 }
@@ -135,25 +138,24 @@ Backend::Init Backend::Init::init(
 {
     void *libvk = nullptr;
     if (get_inst_addr == VK_NULL_HANDLE) {
+#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
         libvk = dlopen("libvulkan.so", RTLD_LAZY | RTLD_LOCAL);
         if (!libvk) {
-            cerr << "Couldn't find libvulkan.so" << endl;
-            abort();
+            FATAL("Couldn't find libvulkan.so");
         }
 
         get_inst_addr = (PFN_vkGetInstanceProcAddr)dlsym(libvk,
             "vkGetInstanceProcAddr");
         if (get_inst_addr == nullptr) {
-            cerr << "Couldn't find get inst_addr" << endl;
-            abort();
+            FATAL("Couldn't find get inst_addr");
         }
 
         get_inst_addr = (PFN_vkGetInstanceProcAddr)get_inst_addr(
             VK_NULL_HANDLE, "vkGetInstanceProcAddr");
         if (get_inst_addr == VK_NULL_HANDLE) {
-            cerr << "Refetching vkGetInstanceProcAddr after dlsym failed" << endl;
-            abort();
+            FATAL("Refetching vkGetInstanceProcAddr after dlsym failed");
         }
+#endif
     } 
 
     InitializationDispatch dt = fetchInitDispatchTable(get_inst_addr);
@@ -162,8 +164,7 @@ Backend::Init Backend::Init::init(
     REQ_VK(dt.enumerateInstanceVersion(&inst_version));
     if (VK_API_VERSION_MAJOR(inst_version) == 1 &&
         VK_API_VERSION_MINOR(inst_version) < 2) {
-        cerr << "At least Vulkan 1.2 required" << endl;
-        abort();
+        FATAL("At least Vulkan 1.2 required");
     }
 
     VkApplicationInfo app_info {};
@@ -247,11 +248,15 @@ validationDebug(VkDebugUtilsMessageSeverityFlagBitsEXT,
                 const VkDebugUtilsMessengerCallbackDataEXT *data,
                 void *)
 {
-    cerr << data->pMessage << endl;
+    fprintf(stderr, "%s\n", data->pMessage);
 
+#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
     signal(SIGTRAP, SIG_IGN);
     raise(SIGTRAP);
     signal(SIGTRAP, SIG_DFL);
+#elif defined(MADRONA_WINDOWS)
+    DebugBreak();
+#endif
 
     return VK_FALSE;
 }
@@ -325,7 +330,9 @@ Backend::~Backend()
     dt.destroyInstance(hdl, nullptr);
     
     if (loader_handle_ != nullptr) {
+#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
         dlclose(loader_handle_);
+#endif
     }
 }
 
@@ -721,8 +728,7 @@ Device Backend::initDevice(
     PFN_vkGetDeviceProcAddr get_dev_addr = 
         (PFN_vkGetDeviceProcAddr)dt.getInstanceProcAddr(hdl, "vkGetDeviceProcAddr");
     if (get_dev_addr == VK_NULL_HANDLE) {
-        cerr << "Failed to load vkGetDeviceProcAddr" << endl;
-        abort();
+        FATAL("Failed to load vkGetDeviceProcAddr");
     }
 
     return Device(qf_choices.gfxQF,

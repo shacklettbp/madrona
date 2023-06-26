@@ -9,7 +9,12 @@ unset(CMAKE_CXX_VISIBILITY_PRESET)
 #target_include_directories(spirv_reflect
 #    INTERFACE SPIRV-Reflect)
 #
-add_subdirectory(madrona-toolchain)
+if (NOT WIN32) #FIX
+    add_subdirectory(madrona-toolchain)
+else()
+    add_library(madrona_libcxx INTERFACE)
+endif()
+
 add_subdirectory(madrona-deps)
 include(madrona-deps/cmake/sys-detect.cmake)
 set(MADRONA_LINUX ${MADRONA_LINUX} PARENT_SCOPE)
@@ -36,8 +41,11 @@ endif ()
 add_subdirectory(meshoptimizer EXCLUDE_FROM_ALL)
 set_property(TARGET meshoptimizer PROPERTY
     POSITION_INDEPENDENT_CODE TRUE)
-target_link_libraries(meshoptimizer PRIVATE
-    madrona_libcxx)
+
+if (NOT WIN32) #FIX
+    target_link_libraries(meshoptimizer PRIVATE
+        madrona_libcxx)
+endif()
 
 add_subdirectory(fast_float EXCLUDE_FROM_ALL)
 
@@ -46,8 +54,11 @@ set(BUILD_SHARED_LIBS OFF)
 add_subdirectory(simdjson EXCLUDE_FROM_ALL)
 set_property(TARGET simdjson PROPERTY
     POSITION_INDEPENDENT_CODE TRUE)
-target_link_libraries(simdjson PRIVATE
-    madrona_libcxx)
+
+if (NOT WIN32) #FIX
+    target_link_libraries(simdjson PRIVATE
+        madrona_libcxx)
+endif()
 
 if (MADRONA_X64 AND NOT MADRONA_MACOS)
     target_compile_options(simdjson PRIVATE -march=haswell)

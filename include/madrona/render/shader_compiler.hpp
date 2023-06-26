@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include <madrona/render/reflection.hpp>
 
 namespace madrona::render {

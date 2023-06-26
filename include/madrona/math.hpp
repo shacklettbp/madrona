@@ -12,6 +12,7 @@
 #include <cfloat>
 
 #include <madrona/types.hpp>
+#include <madrona/macros.hpp>
 
 namespace madrona::math {
 

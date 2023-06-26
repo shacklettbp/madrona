@@ -7,7 +7,7 @@ target_link_libraries(madrona_mw_render PUBLIC
     madrona_mw_core
 )
 
-if (TARGET madrona_render_vk AND TARGET madrona_cuda)
+if (TARGET madrona_render_vk AND TARGET madrona_cuda AND TARGET madrona_sdl2)
     add_library(madrona_batch_render STATIC
         batch_renderer.hpp
         vk/batch_renderer.cpp

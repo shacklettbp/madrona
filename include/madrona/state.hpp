@@ -18,6 +18,7 @@
 #include <madrona/hashmap.hpp>
 #include <madrona/sync.hpp>
 #include <madrona/impl/id_map.hpp>
+#include <madrona/virtual.hpp>
 
 namespace madrona {
 
@@ -305,9 +306,10 @@ private:
         uint32_t archetypeIdx;
         uint32_t columnIdx;
         uint32_t numBytesPerRow;
-        uint32_t numMappedBytes;
 
-        void *exportBuffer;
+        uint32_t numMappedChunks;
+
+        VirtualRegion mem;
     };
 #endif
 

@@ -33,6 +33,9 @@ inline void rawDealloc(void *ptr)
     free(ptr);
 }
 
+inline void * rawAllocAligned(size_t num_bytes, size_t alignment);
+inline void rawDeallocAligned(void *ptr);
+
 class OSAlloc {
     struct Block;
 public:

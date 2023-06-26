@@ -6,6 +6,10 @@
 
 #include <madrona/macros.hpp>
 
+#ifdef MADRONA_MSVC
+#include <intrin.h>
+#endif
+
 namespace madrona
 {
     enum class HostEvent : uint32_t
@@ -31,12 +35,18 @@ namespace madrona
     // may replace this with chrono or clock_gettime for better portability
     inline uint64_t GetTimeStamp()
     {
-#ifdef MADRONA_X64
-        return __builtin_ia32_rdtsc();
+#if defined(MADRONA_X64)
+#if defined(MADRONA_MSVC)
+        return __rdtsc();
 #else
+        return __builtin_ia32_rdtsc();
+#endif
+#elif defined(MADRONA_ARM)
         uint64_t val;
         asm volatile("mrs %0, cntvct_el0" : "=r" (val));
         return val;
+#else
+        STATIC_UNIMPLEMENTED();
 #endif
     }
 

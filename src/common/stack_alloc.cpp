@@ -1,4 +1,5 @@
 #include <madrona/stack_alloc.hpp>
+#include <madrona/memory.hpp>
 #include <cassert>
 
 namespace madrona {
@@ -17,7 +18,7 @@ StackAlloc::~StackAlloc()
     auto *metadata = (ChunkMetadata *)first_chunk_;
     while (metadata != nullptr) {
         auto *next = metadata->next;
-        free(metadata);
+        rawDeallocAligned(metadata);
         metadata = next;
     }
 }
@@ -33,7 +34,7 @@ void StackAlloc::pop(Frame frame)
     ChunkMetadata *free_chunk = metadata->next;
     while (free_chunk != nullptr) {
         ChunkMetadata *next = free_chunk->next;
-        free(free_chunk);
+        rawDeallocAligned(free_chunk);
         free_chunk = next;
     }
 
@@ -51,7 +52,7 @@ void StackAlloc::pop(Frame frame)
 char * StackAlloc::newChunk(CountT chunk_size)
 {
     // FIXME: replace malloc here
-    void *new_chunk = aligned_alloc(chunk_size, chunk_size);
+    void *new_chunk = rawAllocAligned(chunk_size, chunk_size);
 
     auto *metadata = (ChunkMetadata *)new_chunk;
     metadata->next = nullptr;

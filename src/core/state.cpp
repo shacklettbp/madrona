@@ -14,8 +14,10 @@
 #include <mutex>
 #include <string_view>
 
+#ifndef MADRONA_WINDOWS
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 
 #include <madrona/impl/id_map_impl.inl>
 
@@ -81,7 +83,7 @@ StateCache::StateCache()
 {}
 
 StateManager::TmpAllocator::TmpAllocator()
-    : cur_block_((Block *)std::aligned_alloc(256, sizeof(Block)))
+    : cur_block_((Block *)rawAllocAligned(sizeof(Block), 256))
 {
     cur_block_->metadata.next = nullptr;
     cur_block_->metadata.offset = 0;
@@ -100,7 +102,7 @@ void * StateManager::TmpAllocator::alloc(uint64_t num_bytes)
 
     CountT cur_offset = cur_block_->metadata.offset;
     if (num_bytes > numFreeBlockBytes - cur_offset) {
-        Block *new_block = (Block *)std::aligned_alloc(256, sizeof(Block));
+        Block *new_block = (Block *)rawAllocAligned(sizeof(Block), 256);
         new_block->metadata.next = cur_block_;
         cur_block_ = new_block;
         cur_offset = 0;
@@ -118,7 +120,7 @@ void StateManager::TmpAllocator::reset()
     Block *cur_block = cur_block_;
     Block *next_block;
     while ((next_block = cur_block->metadata.next) != nullptr) {
-        free(cur_block);
+        rawDeallocAligned(cur_block);
         cur_block = next_block;
     }
 
@@ -287,7 +289,8 @@ void StateManager::makeQuery(const ComponentID *components,
         assert(query_state_.queryData.size() + tmp_query_indices.size() <
                ICfg::maxQueryOffsets);
 
-        query_state_.queryData.resize(cur_offset + tmp_query_indices.size(), [](auto) {});
+        query_state_.queryData.resize(
+            cur_offset + (uint32_t)tmp_query_indices.size(), [](auto) {});
         memcpy(&query_state_.queryData[cur_offset], tmp_query_indices.data(),
                sizeof(uint32_t) * tmp_query_indices.size());
     };
@@ -453,28 +456,19 @@ void * StateManager::exportColumn(uint32_t archetype_id, uint32_t component_id)
 
 #ifdef MADRONA_MW_MODE
     if (archetype.tblStorage.maxNumPerWorld == 0) {
-#ifdef __linux__
-        constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
-#elif defined(__APPLE__)
-        constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON;
-#endif
 
         uint32_t num_bytes_per_row = component_infos_[component_id]->numBytes;
         uint64_t map_size = 1'000'000'000 * num_bytes_per_row;
 
-        void *export_buffer = mmap(nullptr, map_size, PROT_NONE,
-            mmap_init_flags, -1, 0);
-
-        if (export_buffer == MAP_FAILED) [[unlikely]] {
-            FATAL("Failed to mmap export buffer");
-        }
+        VirtualRegion mem(map_size, 0, 1);
+        void *export_buffer = mem.ptr();
 
         export_jobs_.push_back(ExportJob {
             .archetypeIdx = archetype_id,
             .columnIdx = col_idx,
             .numBytesPerRow = num_bytes_per_row,
-            .numMappedBytes = 0,
-            .exportBuffer = export_buffer,
+            .numMappedChunks = 0,
+            .mem = std::move(mem),
         });
 
         return export_buffer;
@@ -505,7 +499,7 @@ void StateManager::copyInExportedColumns()
             cumulative_copied_rows += num_rows;
 
             memcpy(tbl.data(export_job.columnIdx),
-                   (char *)export_job.exportBuffer +
+                   (char *)export_job.mem.ptr() +
                        tbl_start * export_job.numBytesPerRow,
                    export_job.numBytesPerRow * num_rows);
         }
@@ -530,30 +524,26 @@ void StateManager::copyOutExportedColumns()
             CountT tbl_start = cumulative_copied_rows;
             cumulative_copied_rows += num_rows;
 
-            CountT num_mapped_bytes = export_job.numMappedBytes;
+            uint64_t num_mapped_chunks = export_job.numMappedChunks;
+            uint64_t num_mapped_bytes =
+                 num_mapped_chunks * export_job.mem.chunkSize();
 
-            if (cumulative_copied_rows >=
-                    num_mapped_bytes / export_job.numBytesPerRow) {
-                CountT new_num_mapped_bytes = std::max(num_mapped_bytes * 2,
-                    (CountT)utils::roundUpPow2(
-                        cumulative_copied_rows * export_job.numBytesPerRow,
-                        sysconf(_SC_PAGESIZE)));
+            uint64_t num_needed_bytes = (uint64_t)cumulative_copied_rows *
+                (uint64_t)export_job.numBytesPerRow;
 
-                void *res = mmap(
-                    (char *)export_job.exportBuffer + num_mapped_bytes,
-                    new_num_mapped_bytes - num_mapped_bytes,
-                    PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+            if (num_needed_bytes > num_mapped_bytes) {
+                uint64_t new_num_mapped_bytes =
+                    std::max(num_mapped_bytes * 2, num_needed_bytes);
 
-                if (res == MAP_FAILED) {
-                    FATAL("Failed to mmap export buffer");
-                }
+                uint64_t new_num_chunks = utils::divideRoundUp(
+                    new_num_mapped_bytes, export_job.mem.chunkSize());
 
-                num_mapped_bytes = new_num_mapped_bytes;
-                export_job.numMappedBytes = num_mapped_bytes;
+                export_job.mem.commitChunks(num_mapped_chunks,
+                    new_num_chunks - num_mapped_chunks);
+                export_job.numMappedChunks = new_num_chunks;
             }
 
-            memcpy((char *)export_job.exportBuffer +
+            memcpy((char *)export_job.mem.ptr() +
                        tbl_start * export_job.numBytesPerRow,
                    tbl.data(export_job.columnIdx),
                    export_job.numBytesPerRow * num_rows);
