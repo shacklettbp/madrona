@@ -8,6 +8,7 @@
 #pragma once
 
 #include <madrona/types.hpp>
+#include <madrona/macros.hpp>
 
 #include <array>
 #include <cstdint>
@@ -28,6 +29,14 @@ public:
           n_(N)
     {}
 
+    template <typename U, CountT N>
+    Span(const std::array<U, N> &arr)
+            requires(std::is_same_v<std::remove_cv_t<T>,
+                                    std::remove_cv_t<U>>)
+        : ptr_(arr.data()),
+          n_(N)
+    {}
+
     template <typename U>
     Span(const U &u)
         : ptr_(u.data()), n_(u.size())
@@ -39,7 +48,8 @@ public:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winit-list-lifetime"
 #endif
-    Span(std::initializer_list<T> init)
+    Span(std::initializer_list<std::remove_cv_t<T>> init MADRONA_LFBOUND)
+            requires(std::is_const_v<T>)
         : ptr_(init.begin()), n_(init.size())
     {}
 #ifdef MADRONA_GCC

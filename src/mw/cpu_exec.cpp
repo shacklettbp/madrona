@@ -3,6 +3,8 @@
 
 #if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
 #include <unistd.h>
+#elif defined(MADRONA_WINDOWS)
+#include <windows.h>
 #endif
 
 namespace madrona {
@@ -44,10 +46,13 @@ static CountT getNumCores()
     }
 
     return num_active_threads;
+#elif defined(MADRONA_WINDOWS)
+    SYSTEM_INFO sys_info;
+    GetSystemInfo(&sys_info);
+    return sys_info.dwNumberOfProcessors;
 #else
     STATIC_UNIMPLEMENTED();
 #endif
-
 }
 
 static inline void pinThread([[maybe_unused]] CountT worker_id)

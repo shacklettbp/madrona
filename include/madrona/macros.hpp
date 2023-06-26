@@ -7,14 +7,6 @@
  */
 #pragma once
 
-#if defined(__x86_64__)
-#define MADRONA_X64 (1)
-#elif defined (__arm64__)
-#define MADRONA_ARM (1)
-#elif !defined (MADRONA_GPU_MODE)
-#error "Unsupported architecture"
-#endif
-
 #if defined(_MSC_VER)
 #define MADRONA_MSVC (1)
 #elif defined(__clang__)
@@ -23,6 +15,14 @@
 #define MADRONA_GCC (1)
 #elif !defined(MADRONA_GPU_MODE)
 #error "Unsupported compiler"
+#endif
+
+#if defined(__x86_64__) || defined(_M_X64)
+#define MADRONA_X64 (1)
+#elif defined (__arm64__) || defined(_M_ARM64)
+#define MADRONA_ARM (1)
+#elif !defined (MADRONA_GPU_MODE)
+#error "Unsupported architecture"
 #endif
 
 #if defined(__WIN32__) or defined(_WIN32) or defined(WIN32)
@@ -79,6 +79,21 @@
 #define MADRONA_IMPORT __attribute__ ((visibility ("default")))
 #define MADRONA_EXPORT __attribute__ ((visibility ("default")))
 #endif
+
+#if defined(MADRONA_MSVC)
+#define MADRONA_UNREACHABLE() __assume(0)
+#else
+#define MADRONA_UNREACHABLE() __builtin_unreachable()
+#endif
+
+#if defined(MADRONA_MSVC)
+#define MADRONA_LFBOUND [[msvc::lifetimebound]]
+#elif defined(MADRONA_CLANG)
+#define MADRONA_LFBOUND [[clang::lifetimebound]]
+#else
+#define MADRONA_LFBOUND
+#endif
+
 
 #define STATIC_UNIMPLEMENTED() \
     static_assert(false, "Unimplemented")

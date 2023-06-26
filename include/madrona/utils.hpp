@@ -7,16 +7,16 @@
  */
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <type_traits>
 #include <madrona/crash.hpp>
 #include <madrona/span.hpp>
+#include <madrona/macros.hpp>
 
-namespace madrona {
+namespace madrona::utils {
 
-namespace utils {
-
-#ifdef MADRONA_GPU_MODE
+#if defined(MADRONA_GPU_MODE)
 
 inline int __builtin_clz(int v)
 {
@@ -31,6 +31,26 @@ inline int __builtin_clzl(long int v)
 inline int __builtin_clzll(long long int v)
 {
     return __clzll(v);
+}
+
+#elif defined(MADRONA_MSVC)
+
+MADRONA_ALWAYS_INLINE constexpr inline int __builtin_clz(int v)
+{
+    using U = std::make_unsigned_t<int>;
+    return sizeof(U) * 8 - std::bit_width(U(v));
+}
+
+MADRONA_ALWAYS_INLINE constexpr inline int __builtin_clzl(long int v)
+{
+    using U = std::make_unsigned_t<long int>;
+    return sizeof(U) * 8 - std::bit_width(U(v));
+}
+
+MADRONA_ALWAYS_INLINE constexpr inline int __builtin_clzll(long long int v)
+{
+    using U = std::make_unsigned_t<long long int>;
+    return sizeof(U) * 8 - std::bit_width(U(v));
 }
 
 #endif
@@ -52,7 +72,14 @@ constexpr inline T roundUp(T offset, T alignment)
 // alignment must be power of 2
 constexpr inline uint64_t roundUpPow2(uint64_t offset, uint64_t alignment)
 {
+#ifdef MADRONA_MSVC
+#pragma warning(push)
+#pragma warning(disable : 4146)
+#endif
     return (offset + alignment - 1) & -alignment;
+#ifdef MADRONA_MSVC
+#pragma warning(pop)
+#endif
 }
 
 inline uintptr_t alignPtrOffset(void *ptr, uintptr_t alignment)
@@ -79,7 +106,7 @@ constexpr inline bool isPower2(uint32_t v)
 
 constexpr inline uint32_t int32NextPow2(uint32_t v)
 {
-    return v == 1 ? 1 : (1u << (32u - __builtin_clz(v - 1)));
+    return v == 1 ? 1 : (1u << (32u - __builtin_clz((int32_t)v - 1)));
 }
 
 constexpr inline uint64_t int64NextPow2(uint64_t v)
@@ -89,10 +116,10 @@ constexpr inline uint64_t int64NextPow2(uint64_t v)
 #else
     int clz = 0;
 #endif
-    if constexpr (std::is_same_v<uint64_t, unsigned long>) {
-        clz = __builtin_clzl(v - 1);
-    } else if constexpr (std::is_same_v<uint64_t, unsigned long long>) {
-        clz = __builtin_clzll(v - 1);
+    if constexpr (std::is_same_v<int64_t, long>) {
+        clz = __builtin_clzl((long)v - 1);
+    } else if constexpr (std::is_same_v<int64_t, long long>) {
+        clz = __builtin_clzll((long long)v - 1);
     }
 
     return v == 1 ? 1 : (1u << (64u - clz));
@@ -100,12 +127,14 @@ constexpr inline uint64_t int64NextPow2(uint64_t v)
 
 constexpr inline uint32_t int32Log2(uint32_t v)
 {
-    return sizeof(unsigned int) * 8 - __builtin_clz(v) - 1;
+    static_assert(std::is_same_v<int32_t, int>);
+
+    return sizeof(unsigned int) * 8 - __builtin_clz((int)v) - 1;
 }
 
 constexpr inline uint64_t int64Log2(uint64_t v)
 {
-    return sizeof(unsigned long long) * 8 - __builtin_clzll(v) - 1;
+    return sizeof(unsigned long long) * 8 - __builtin_clzll((long long)v) - 1;
 }
 
 // https://github.com/skeeto/hash-prospector
@@ -180,5 +209,4 @@ struct FirstArgTypeExtractor<ReturnT (ClassT::*)(FirstT, ArgsT...) const> {
     using type = FirstT;
 };
 
-}
 }

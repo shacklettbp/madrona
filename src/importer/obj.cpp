@@ -1,8 +1,10 @@
 #include "obj.hpp"
 
+#include <cstdarg>
 #include <charconv>
 #include <fast_float/fast_float.h>
 #include <fstream>
+#include <string>
 #include <inttypes.h>
 
 #include <meshoptimizer.h>
@@ -85,8 +87,8 @@ inline bool parseVec2(std::string_view str,
                       math::Vector2 *out,
                       const LoaderData &loader)
 {
-    const char *start = str.begin();
-    const char *end = str.end();
+    const char *start = str.data();
+    const char *end = start + str.size();
 
     while (*start == ' ' && start < end) {
         start += 1;
@@ -123,8 +125,8 @@ inline bool parseVec3(std::string_view str,
                       math::Vector3 *out,
                       const LoaderData &loader)
 {
-    const char *start = str.begin();
-    const char *end = str.end();
+    const char *start = str.data();
+    const char *end = start + str.size();
 
     while (*start == ' ' && start < end) {
         start += 1;
@@ -489,7 +491,7 @@ bool OBJLoader::Impl::load(const char *path, ImportedAssets &imported_assets)
 
     std::string line;
     int64_t line_idx = 0;
-    while (getline(file, line)) {
+    while (std::getline(file, line)) {
         setLine(line.c_str(), line_idx);
 
         if (line[0] == '#') continue;
@@ -571,7 +573,7 @@ bool OBJLoader::Impl::load(const char *path, ImportedAssets &imported_assets)
     }
 
     imported_assets.objects.push_back({
-        .meshes = objMeshes,
+        .meshes = { objMeshes.data(), objMeshes.size() },
     });
 
     imported_assets.geoData.meshArrays.emplace_back(

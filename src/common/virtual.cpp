@@ -12,14 +12,36 @@
 #if defined(__linux__) or defined(__APPLE__)
 #include <sys/mman.h>
 #include <unistd.h>
+#elif defined(_WIN32)
+#include <windows.h>
 #endif
 
 #include <algorithm>
+#include <cassert>
 
 namespace madrona {
 
+static void getVirtualMemProperties(uint32_t *page_size,
+                                    uint32_t *alloc_granularity)
+{
+#if defined(__linux__) or defined(__APPLE__)
+        uint32_t size = sysconf(_SC_PAGESIZE);
+        *page_size = size;
+        *alloc_granularity = size;
+#elif defined(_WIN32)
+        SYSTEM_INFO sys_info;
+        GetSystemInfo(&sys_info);
+
+        *page_size = sys_info.dwPageSize;
+        *alloc_granularity = sys_info.dwAllocationGranularity;
+#else
+        STATIC_UNIMPLEMENTED();
+#endif
+}
+
 struct VirtualRegion::Init {
     char *const base;
+    char *const aligned;
     uint64_t chunkShift;
     uint64_t totalSize;
     uint64_t initChunks;
@@ -27,17 +49,11 @@ struct VirtualRegion::Init {
     static inline Init make(uint64_t max_bytes, uint64_t chunk_shift,
                             uint64_t alignment, uint64_t init_chunks)
     {
-        uint32_t page_size =
-#if defined(__linux__) or defined(__APPLE__)
-            sysconf(_SC_PAGESIZE);
-#elif _WIN32
-            STATIC_UNIMPLEMENTED();
-#else
-            STATIC_UNIMPLEMENTED();
-#endif
+        uint32_t page_size, alloc_granularity;
+        getVirtualMemProperties(&page_size, &alloc_granularity);
     
         if (chunk_shift == 0) {
-            chunk_shift = utils::int32Log2(page_size);
+            chunk_shift = (uint64_t)utils::int32Log2(page_size);
         }
     
         uint64_t chunk_size = 1ull << chunk_shift;
@@ -52,8 +68,8 @@ struct VirtualRegion::Init {
             alignment = chunk_size;
         }
     
-        // mmap guarantees at least alignment to page boundaries already
-        if (alignment <= page_size) {
+        // Region is guaranteed at least aligned to alloc granularity
+        if (alignment <= alloc_granularity) {
             alignment = 1;
         }
     
@@ -62,43 +78,45 @@ struct VirtualRegion::Init {
         }
     
         uint64_t max_chunks = utils::divideRoundUp(max_bytes, chunk_size);
-    
-#if defined(__linux__) or defined(__APPLE__)
         uint64_t overalign_size = (max_chunks << chunk_shift) + alignment - 1;
     
+#if defined(__linux__) or defined(__APPLE__)
 #ifdef __linux__
         constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON | MAP_NORESERVE;
 #elif defined(__APPLE__)
         constexpr int mmap_init_flags = MAP_PRIVATE | MAP_ANON;
 #endif
     
-        void *base_attempt =
+        void *base =
             mmap(nullptr, overalign_size, PROT_NONE, mmap_init_flags, -1, 0);
     
-        if (base_attempt == MAP_FAILED) [[unlikely]] {
-            FATAL("Failed to allocate %lu bytes of virtual address space\n",
+        if (base == MAP_FAILED) [[unlikely]] {
+            FATAL("Failed to allocate %lu bytes of virtual address space",
                   overalign_size);
         }
-    
-        char *base = (char *)utils::roundUp((uintptr_t)base_attempt, (uintptr_t)alignment);
-        uint64_t extra_amount = base - (char *)base_attempt;
-    
-        if (extra_amount > 0) {
-            munmap(base_attempt, extra_amount);
-        }
-    
-        uint64_t total_size = overalign_size - extra_amount;
-    
 #elif _WIN32
-        STATIC_UNIMPLEMENTED();
+        void *base = VirtualAlloc(nullptr, overalign_size, MEM_RESERVE,
+                                  PAGE_NOACCESS);
+
+        if (base == nullptr) [[unlikely]] {
+            FATAL("Failed to allocate %lu bytes of virtual address space",
+                  overalign_size);
+        }
 #else
         STATIC_UNIMPLEMENTED();
 #endif
+        uintptr_t aligned_base = utils::roundUp((uintptr_t)base,
+                                                (uintptr_t)alignment);
+        uint64_t extra_amount = aligned_base - (uintptr_t)base;
+        assert(extra_amount <= alignment);
+
+        void *aligned = (char *)base + extra_amount;
 
         return Init {
-            .base = base,
+            .base = (char *)base,
+            .aligned = (char *)aligned,
             .chunkShift = chunk_shift,
-            .totalSize = total_size,
+            .totalSize = overalign_size,
             .initChunks = init_chunks,
         };
     }
@@ -111,63 +129,85 @@ VirtualRegion::VirtualRegion(uint64_t max_bytes, uint64_t chunk_shift,
 
 VirtualRegion::VirtualRegion(Init init)
     : base_(init.base),
+      aligned_(init.aligned),
       chunk_shift_(init.chunkShift),
       total_size_(init.totalSize)
 {
     if (init.initChunks > 0) {
-        commit(0, init.initChunks);
+        commitChunks(0, init.initChunks);
     }
+}
+
+VirtualRegion::VirtualRegion(VirtualRegion &&o)
+    : base_(o.base_),
+      aligned_(o.aligned_),
+      chunk_shift_(o.chunk_shift_),
+      total_size_(o.total_size_)
+{
+    o.base_ = nullptr;
 }
 
 VirtualRegion::~VirtualRegion()
 {
+    if (base_ == nullptr) {
+        return;
+    }
+
 #if defined(__linux__) or defined(__APPLE__)
     munmap(base_, total_size_);
 #elif defined(_WIN32)
-    STATIC_UNIMPLEMENTED();
+    VirtualFree(base_, 0, MEM_RELEASE);
 #else
     STATIC_UNIMPLEMENTED();
 #endif
 }
 
-void VirtualRegion::commit(uint64_t start_chunk, uint64_t num_chunks)
+void VirtualRegion::commitChunks(uint64_t start_chunk, uint64_t num_chunks)
 {
-#if defined(__linux__) or defined(__APPLE__)
-    void *res = mmap(base_ + (start_chunk << chunk_shift_),
-        num_chunks << chunk_shift_, PROT_READ | PROT_WRITE,
-        MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+    void *start = base_ + (start_chunk << chunk_shift_);
+    uint64_t num_bytes = num_chunks << chunk_shift_;
 
-    if (res == MAP_FAILED) {
+#if defined(__linux__) or defined(__APPLE__)
+    void *res = mmap(start, num_bytes, PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+    bool fail = res == MAP_FAILED;
+#elif defined(_WIN32)
+    void *res = VirtualAlloc(start, num_bytes, MEM_COMMIT, PAGE_READWRITE);
+    bool fail = res == nullptr;
+#else
+    STATIC_UNIMPLEMENTED();
+#endif
+
+    if (fail) [[unlikely]] {
         FATAL("Failed to commit %lu chunks for VirtualRegion", num_chunks);
     }
-#elif defined(_WIN32)
-    STATIC_UNIMPLEMENTED();
-#else
-    STATIC_UNIMPLEMENTED();
-#endif
 }
 
-void VirtualRegion::decommit(uint64_t start_chunk, uint64_t num_chunks)
+void VirtualRegion::decommitChunks(uint64_t start_chunk, uint64_t num_chunks)
 {
+    void *start = base_ + (start_chunk << chunk_shift_);
+    uint64_t num_bytes = num_chunks << chunk_shift_;
+
 #if defined(__linux__) or defined(__APPLE__)
     // FIXME MADV_FREE instead
-    int res = madvise(base_ + (start_chunk << chunk_shift_),
-                      num_chunks << chunk_shift_, 
+    int res = madvise(start, num_bytes,
 #ifdef MADRONA_LINUX
                       MADV_REMOVE);
 #elif defined(MADRONA_MACOS)
                       MADV_FREE);
 #endif
+    bool fail = res != 0;
 
-
-    if (res != 0) {
-        FATAL("Failed to decommit %lu chunks for VirtualRegion", num_chunks);
-    }
 #elif defined(_WIN32)
-    STATIC_UNIMPLEMENTED();
+    int res = VirtualFree(start, num_bytes, MEM_DECOMMIT);
+    bool fail = res == 0;
 #else
     STATIC_UNIMPLEMENTED();
 #endif
+
+    if (fail) {
+        FATAL("Failed to decommit %lu chunks for VirtualRegion", num_chunks);
+    }
 }
 
 static uint64_t computeChunkShift(uint32_t bytes_per_item)
@@ -213,7 +253,7 @@ static uint32_t computeCommittedItems(uint32_t committed_chunks,
 void VirtualStore::expand(uint32_t num_items)
 {
     if (num_items > committed_items_) {
-        region_.commit(committed_chunks_, 1);
+        region_.commitChunks(committed_chunks_, 1);
         committed_chunks_++;
 
         committed_items_ = computeCommittedItems(committed_chunks_,
@@ -227,7 +267,7 @@ void VirtualStore::shrink(uint32_t num_items)
 
     if (num_excess * bytes_per_item_ > region_.chunkSize()) {
         committed_chunks_--;
-        region_.decommit(committed_chunks_, 1);
+        region_.decommitChunks(committed_chunks_, 1);
 
         committed_items_ = computeCommittedItems(committed_chunks_,
             bytes_per_item_, start_offset_, region_); 

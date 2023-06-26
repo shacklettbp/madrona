@@ -40,14 +40,14 @@ static TrackerImpl & getSingletonImpl()
 static std::string_view extractTypeName(const char *compiler_name)
 {
     static const char compiler_prefix[] =
-#ifdef MADRONA_MSVC
-        STATIC_UNIMPLEMENTED();
-#elif defined(MADRONA_CLANG)
+#if defined(__clang__)
         "static uint32_t madrona::TypeTracker::trackType(uint32_t *) [T = "
-#elif defined(MADRONA_GCC)
+#elif defined(__GNUC__)
         "static uint32_t madrona::TypeTracker::trackType(uint32_t*) [with T = "
-#else
-        STATIC_UNIMPLEMENTED();
+#elif defined(_MSC_VER)
+        "static uint32_t madrona::TypeTracker::trackType<"
+#else 
+        STATIC_UNIMPLEMENTED()
 #endif
         ;
 
@@ -56,14 +56,14 @@ static std::string_view extractTypeName(const char *compiler_name)
     std::string_view type_name(compiler_name);
 
     size_t end_pos =
-#ifdef MADRONA_MSVC
-        STATIC_UNIMPLEMENTED();
-#elif defined(MADRONA_CLANG)
+#if defined(__clang__)
         type_name.find_last_of(']')
-#elif defined(MADRONA_GCC)
+#elif defined(__GNUC__)
         type_name.find_last_of(';')
-#else
-        STATIC_UNIMPLEMENTED();
+#elif defined(_MSC_VER)
+        type_name.find_last_of('>')
+#else 
+        STATIC_UNIMPLEMENTED()
 #endif
         ;
 

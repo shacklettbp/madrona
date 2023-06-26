@@ -712,7 +712,7 @@ THE SOFTWARE.
             (b.z + c.y) * mult,
             biggest_val,
         };
-    default: __builtin_unreachable();
+    default: MADRONA_UNREACHABLE();
     }
 }
 
@@ -1203,7 +1203,7 @@ Vector3 Symmetric3x3::operator[](CountT i) const
         return { off[0], diag[1], off[2] };
     case 2:
         return { off[1], off[2], diag[2] };
-    default: __builtin_unreachable();
+    default: MADRONA_UNREACHABLE();
     }
 }
 

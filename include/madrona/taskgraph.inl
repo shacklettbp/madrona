@@ -7,7 +7,7 @@ TaskGraph::TypedDataID<NodeT> TaskGraph::Builder::constructNodeData(
     Args && ...args)
 {
     static_assert(sizeof(NodeT) <= maxNodeDataBytes);
-    static_assert(alignof(NodeT) <= maxNodeDataBytes);
+    static_assert(alignof(NodeT) <= maxNodeDataAlign);
 
     CountT data_idx = node_datas_.uninit_back();
     new (&node_datas_[data_idx]) NodeT(std::forward<Args>(args)...);

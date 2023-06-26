@@ -178,7 +178,7 @@ float computePositionalLambda(
     return -c / (w1 + w2 + alpha_tilde);
 }
 
-static MADRONA_ALWAYS_INLINE inline void applyPositionalUpdate(
+MADRONA_ALWAYS_INLINE static inline void applyPositionalUpdate(
     Vector3 &x1, Vector3 &x2,
     Quat &q1, Quat &q2,
     Vector3 rot_axis_local1, Vector3 rot_axis_local2,
@@ -206,7 +206,7 @@ static MADRONA_ALWAYS_INLINE inline void applyPositionalUpdate(
     q2 = q2.normalize();
 }
 
-static MADRONA_ALWAYS_INLINE inline float applyPositionalUpdate(
+MADRONA_ALWAYS_INLINE static inline float applyPositionalUpdate(
     Vector3 &x1, Vector3 &x2,
     Quat &q1, Quat &q2,
     Vector3 r1, Vector3 r2,
@@ -240,7 +240,7 @@ static MADRONA_ALWAYS_INLINE inline float applyPositionalUpdate(
     return lambda;
 }
 
-static MADRONA_ALWAYS_INLINE inline
+MADRONA_ALWAYS_INLINE static inline
 std::pair<Quat, Quat> computeAngularUpdate(
     Quat q1, Quat q2,
     Vector3 inv_I1, Vector3 inv_I2,
@@ -274,7 +274,7 @@ void applyAngularUpdate(
     q2 = (q2 - q2_update * q2).normalize();
 }
 
-static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
+MADRONA_ALWAYS_INLINE static inline void handleContactConstraint(
     Vector3 &x1, Vector3 &x2,
     Quat &q1, Quat &q2,
     SubstepPrevState prev1, SubstepPrevState prev2,
@@ -358,7 +358,7 @@ static MADRONA_ALWAYS_INLINE inline void handleContactConstraint(
     }
 }
 
-static inline MADRONA_ALWAYS_INLINE std::pair<Vector3, Vector3>
+MADRONA_ALWAYS_INLINE static inline std::pair<Vector3, Vector3>
 getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
                       const PreSolvePositional &presolve_pos2,
                       const Contact &contact,
@@ -617,7 +617,7 @@ inline void handleJointConstraint(Context &ctx,
 
         pos_correction = r2_world - r1_world;
     } break;
-    default: __builtin_unreachable();
+    default: MADRONA_UNREACHABLE();
     }
 
     float pos_correction_magnitude = pos_correction.length();

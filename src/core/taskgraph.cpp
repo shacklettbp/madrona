@@ -1,8 +1,6 @@
 #include <madrona/taskgraph.hpp>
 #include <madrona/crash.hpp>
-
-#include <sched.h>
-#include <unistd.h>
+#include <madrona/macros.hpp>
 
 #include "worker_init.hpp"
 

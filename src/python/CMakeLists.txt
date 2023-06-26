@@ -6,9 +6,14 @@ add_library(madrona_python_utils SHARED
 target_link_libraries(madrona_python_utils
     PUBLIC
         madrona_hdrs
-    PRIVATE
-        madrona_libcxx_except_static
 )
+
+if (NOT WIN32) #FIX
+    target_link_libraries(madrona_python_utils
+        PRIVATE
+            madrona_libcxx_except_static
+    )
+endif()
 
 if (TARGET madrona_cuda)
     target_link_libraries(madrona_python_utils
@@ -26,8 +31,13 @@ function(madrona_python_module module_name)
 
     target_link_libraries(${module_name} PRIVATE
         madrona_python_utils
-        madrona_libcxx_except_static
     )
+
+    if (NOT WIN32) #FIX
+        target_link_libraries(${module_name} PRIVATE
+            madrona_libcxx_except_static
+        )
+    endif()
      
     set_target_properties(madrona_python PROPERTIES EXCLUDE_FROM_ALL FALSE)
 endfunction()
@@ -53,9 +63,14 @@ get_target_property(nanobind_lib_target madrona_python LINK_LIBRARIES)
 foreach(lib IN LISTS nanobind_lib_target)
     string(FIND ${lib} "nanobind" pos)
     if (NOT ${pos} EQUAL -1)
-        target_compile_options(${lib} PRIVATE "-Wno-everything")
-        target_link_libraries(${lib} PRIVATE
-            madrona_libcxx_except_static
-        )
+        if (NOT FRONTEND_MSVC)
+            target_compile_options(${lib} PRIVATE "-Wno-everything")
+        endif()
+
+        if (NOT WIN32) #FIX
+            target_link_libraries(${lib} PRIVATE
+                madrona_libcxx_except_static
+            )
+        endif()
     endif ()
 endforeach()

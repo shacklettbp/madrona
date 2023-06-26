@@ -493,7 +493,7 @@ AABB BVH::expandLeaf(LeafID leaf_id,
     return expanded_aabb;
 }
 
-static inline MADRONA_ALWAYS_INLINE float atomicMinF(float *addr, float value)
+MADRONA_ALWAYS_INLINE static inline float atomicMinF(float *addr, float value)
 {
 #ifdef MADRONA_GPU_MODE
     float old;
@@ -517,7 +517,7 @@ static inline MADRONA_ALWAYS_INLINE float atomicMinF(float *addr, float value)
 #endif
 }
 
-static inline MADRONA_ALWAYS_INLINE float atomicMaxF(float *addr, float value)
+MADRONA_ALWAYS_INLINE static inline float atomicMaxF(float *addr, float value)
 {
 #ifdef MADRONA_GPU_MODE
     float old;
@@ -866,7 +866,7 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
         case CollisionPrimitive::Type::Sphere: {
             assert(false);
         } break;
-        default: __builtin_unreachable();
+        default: MADRONA_UNREACHABLE();
         }
 
         if (hit_prim) {

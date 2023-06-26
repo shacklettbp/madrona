@@ -174,7 +174,7 @@ struct PhysicsLoader::Impl {
                                 cudaMemcpyHostToDevice));
 #endif
         } break;
-        default: __builtin_unreachable();
+        default: MADRONA_UNREACHABLE();
         }
 
         return new Impl {

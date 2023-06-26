@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <utility>
+#include <optional>
 
 #include <madrona/render/vk/backend.hpp>
 

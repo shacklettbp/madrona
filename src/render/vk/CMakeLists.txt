@@ -1,22 +1,34 @@
 # Build vulkan dispatch table
 get_directory_property(DIR_DEFINES DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} COMPILE_DEFINITIONS )
 set(DEFINE_STR "")
+if (FRONTEND_MSVC)
+    set(DEFINE_PREFIX "/D")
+else()
+    set(DEFINE_PREFIX "-D")
+endif()
 foreach (f ${DIR_DEFINES})
-    list(APPEND DEFINE_STR "-D${f}")
+    list(APPEND DEFINE_STR "${DEFINE_PREFIX}${f}")
 endforeach()
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/dispatch")
 
+if (FRONTEND_MSVC)
+    set(CXX_PREPROCESSOR_CMD
+        ${CMAKE_CXX_COMPILER} /P /EP /C /X ${DEFINE_STR} "${CMAKE_CURRENT_SOURCE_DIR}/dispatch.template" /Fidispatch/dispatch.template)
+else()
+    set(CXX_PREPROCESSOR_CMD
+        ${CMAKE_CXX_COMPILER} -x c -E -P -nostdinc ${DEFINE_STR} "${CMAKE_CURRENT_SOURCE_DIR}/dispatch.template" -o dispatch/dispatch.template)
+endif()
+
 add_custom_command(
     OUTPUT dispatch/dispatch.template
-    COMMAND ${CMAKE_CXX_COMPILER} -x c -E -P -nostdinc ${DEFINE_STR} "${CMAKE_CURRENT_SOURCE_DIR}/dispatch.template" -o dispatch/dispatch.template
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/dispatch.template
+    COMMAND ${CXX_PREPROCESSOR_CMD} DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/dispatch.template
 )
 
 add_custom_command(
     OUTPUT dispatch/dispatch_device_impl.hpp dispatch/dispatch_device_impl.cpp
            dispatch/dispatch_instance_impl.hpp dispatch/dispatch_instance_impl.cpp
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_vk_dispatch.py
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_vk_dispatch.py
             ${CMAKE_CURRENT_BINARY_DIR}/dispatch/dispatch.template dispatch
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/dispatch/dispatch.template
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_vk_dispatch.py
