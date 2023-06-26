@@ -2660,7 +2660,7 @@ static void packShadowView(const Device &dev,
     // World space positions / directions required to update the shadow matrix
     math::Vector3 ws_position = cam.position;
     math::Vector3 ws_direction = normalize(cam.view);
-    math::Vector3 ws_up = math::Vector3{0.0f, 0.0f, 1.0f};
+    math::Vector3 ws_up = math::Vector3{0.000000001f, 0.000000001f, 1.0f};
     math::Vector3 ws_light_dir = normalize(light_dir);
 
 #if 1
@@ -2674,10 +2674,17 @@ static void packShadowView(const Device &dev,
 
     float far_width, near_width, far_height, near_height;
 
+    far_height = 2.0f * far * tan(math::toRadians(cam.fov) / 2.0f);
+    near_height = 2.0f * near * tan(math::toRadians(cam.fov) / 2.0f);
+    far_width = far_height * aspect;
+    near_width = near_height * aspect;
+
+#if 0
     far_width = 2.0f * far * tan(math::toRadians(cam.fov) / 2.0f);
     near_width = 2.0f * near * tan(math::toRadians(cam.fov) / 2.0f);
     far_height = far_width / aspect;
     near_height = near_width / aspect;
+#endif
 
     math::Vector3 center_near = ws_position + ws_direction * near;
     math::Vector3 center_far = ws_position + ws_direction * far;
@@ -2737,11 +2744,11 @@ static void packShadowView(const Device &dev,
 
     data->viewProjectionMatrix = projection.compose(view);
     data->cameraViewProjectionMatrix = perspective(cam.fov, aspect, 1.0f, 1000.0f).
-        compose(lookAt(ws_position, ws_position + ws_direction, math::Vector3{0.0f, 1.0f, 0.0f}));
+        compose(lookAt(ws_position, ws_position + ws_direction, ws_up));
 
     {
         math::Vector3 f = math::Vector3((ws_direction).normalize());
-        math::Vector3 s = math::Vector3((cross(f, math::Vector3{0.0f, 1.0f, 0.0f}).normalize()));
+        math::Vector3 s = math::Vector3((cross(f, ws_up).normalize()));
         math::Vector3 u = math::Vector3(cross(s, f).normalize());
 
         data->cameraRight = {s.x, s.y, s.z, 1.0f};
@@ -2991,7 +2998,7 @@ void Renderer::render(const ViewerCam &cam,
 
 #if 1
     packShadowView(dev, frame.shadowViewStaging, cam, 
-        lights_[0].lightDir.xyz(), (float)fb_height_ / (float)fb_width_, 1.0f, 50.0f);
+        lights_[0].lightDir.xyz(), (float)fb_width_ / (float)fb_height_, 1.0f, 50.0f);
 
     VkBufferCopy shadow_copy {
         .srcOffset = 0,
