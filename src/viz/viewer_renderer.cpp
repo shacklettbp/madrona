@@ -2649,6 +2649,9 @@ math::Mat4x4 perspective(float fovy, float aspect, float near, float far)
 
 static void packShadowView(const Device &dev,
                      HostBuffer &staging,
+                     HostBuffer &view_staging,
+                     PackedViewData *sim_staging_ptr,
+                     uint32_t view_idx,
                      const ViewerCam &cam,
                      math::Vector3 light_dir,
                      float aspect,
@@ -2657,9 +2660,26 @@ static void packShadowView(const Device &dev,
 {
     ShadowViewData *data = (ShadowViewData *)staging.ptr;
 
+    PackedViewData *viewData = (PackedViewData *)view_staging.ptr;
+    if (view_idx != 0)
+    {
+        viewData = &sim_staging_ptr[view_idx - 1];
+    }
+
+    math::Vector3 cam_position = { viewData->data[0].x, viewData->data[0].y, viewData->data[0].z };
+    math::Quat rotation;
+    rotation.w = viewData->data[0].w;
+    rotation.x = viewData->data[1].x;
+    rotation.y = viewData->data[1].y;
+    rotation.z = viewData->data[1].z;
+
+    rotation = rotation.inv();
+
+    math::Vector3 cam_view = rotation.rotateVec(math::Vector3{0.0f, 1.0f, 0.0f});
+
     // World space positions / directions required to update the shadow matrix
-    math::Vector3 ws_position = cam.position;
-    math::Vector3 ws_direction = normalize(cam.view);
+    math::Vector3 ws_position = cam_position;
+    math::Vector3 ws_direction = normalize(cam_view);
     math::Vector3 ws_up = math::Vector3{0.000000001f, 0.000000001f, 1.0f};
     math::Vector3 ws_light_dir = normalize(light_dir);
 
@@ -2669,6 +2689,8 @@ static void packShadowView(const Device &dev,
     std::swap(ws_up.y, ws_up.z);
     std::swap(ws_light_dir.y, ws_light_dir.z);
 #endif
+
+    printf("Packing view position: %f %f %f\n", ws_position.x, ws_position.y, ws_position.z);
 
     math::Mat4x4 view = lookAt(math::Vector3{}, ws_light_dir, ws_up);
 
@@ -2997,18 +3019,36 @@ void Renderer::render(const ViewerCam &cam,
                          1, &light_copy);
 
 #if 1
-    packShadowView(dev, frame.shadowViewStaging, cam, 
-        lights_[0].lightDir.xyz(), (float)fb_width_ / (float)fb_height_, 1.0f, 50.0f);
+    {
+        PackedViewData *sim_start = nullptr;
 
-    VkBufferCopy shadow_copy {
-        .srcOffset = 0,
-        .dstOffset = frame.shadowOffset,
-        .size = sizeof(ShadowViewData)
-    };
+        uint32_t num_sim_views =
+            engine_interop_.bridge.numViews[cfg.worldIDX];
+        if (num_sim_views > 0) 
+        {
+            VkDeviceSize world_view_byte_offset = engine_interop_.viewBaseOffset +
+                cfg.worldIDX * engine_interop_.maxViewsPerWorld *
+                sizeof(PackedViewData);
 
-    dev.dt.cmdCopyBuffer(draw_cmd, frame.shadowViewStaging.buffer,
-                         frame.renderInput.buffer,
-                         1, &shadow_copy);
+            sim_start = (PackedViewData *)((char *)
+                engine_interop_.renderInputStaging.ptr + world_view_byte_offset);
+        }
+
+        packShadowView(dev, frame.shadowViewStaging, frame.viewStaging, 
+                sim_start,
+                cfg.viewIDX, cam,
+                lights_[0].lightDir.xyz(), (float)fb_width_ / (float)fb_height_, 1.0f, 50.0f);
+
+        VkBufferCopy shadow_copy {
+            .srcOffset = 0,
+                .dstOffset = frame.shadowOffset,
+                .size = sizeof(ShadowViewData)
+        };
+
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.shadowViewStaging.buffer,
+                frame.renderInput.buffer,
+                1, &shadow_copy);
+    }
 #endif
 
     packSky(dev, frame.skyStaging);
