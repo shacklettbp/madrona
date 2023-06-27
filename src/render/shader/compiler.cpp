@@ -2,10 +2,22 @@
 
 #include <madrona/macros.hpp>
 #include <madrona/optional.hpp>
+#include <madrona/heap_array.hpp>
+#include <madrona/dyn_array.hpp>
+
+#include <spirv_reflect.h>
 
 #include <cstdlib>
 #include <memory>
 #include <codecvt>
+
+#if defined(MADRONA_WINDOWS)
+// Cannot include dxc/dxcapi.h without first including windows.h
+#include <windows.h>
+
+// DXC doesn't define this on windows for some reason
+#define DXC_FAILED(hr) FAILED(hr)
+#endif
 
 // On clang on linux and mac need to either compile with -fms-exceptions
 // define __EMULATE_UUID. The latter seems simpler and matches GCC
@@ -14,11 +26,6 @@
 #endif
 #include <dxc/dxcapi.h>
 #undef __EMULATE_UUID
-
-#include <spirv_reflect.h>
-
-#include <madrona/heap_array.hpp>
-#include <madrona/dyn_array.hpp>
 
 namespace madrona::render {
 
