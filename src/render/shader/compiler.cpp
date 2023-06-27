@@ -42,10 +42,46 @@ static __attribute__((constructor)) void dxcNoFreeHack()
 }
 #endif
 
+// Minimal class to avoid need to depend on ATL in windows
+// Note that that so far we don't need to call AddRef because DXC returns the
+// pointers with the reference count incremented.
+template <typename T>
+class COMUnique {
+public:
+    COMUnique()
+        : p_(nullptr)
+    {
+        static_assert(std::is_standard_layout_v<COMUnique<T>>);
+    }
+
+    ~COMUnique()
+    {
+        if (p_ != nullptr) {
+            static_cast<IUnknown *>(p_)->Release();
+        }
+    }
+
+    COMUnique(const COMUnique<T> &) = delete;
+    COMUnique(COMUnique &&o)
+        : p_(o.p_)
+    {
+        o.p_ = nullptr;
+    }
+
+    T & operator*() { return *p_; }
+    T * operator->() { return p_; }
+    T ** operator&() { return &p_; }
+
+    operator T *() { return p_; }
+
+private:
+    T *p_;
+};
+
 struct ShaderCompiler::Impl {
-    CComPtr<IDxcUtils> dxcUtils;
-    CComPtr<IDxcIncludeHandler> dxcIncludeHandler;
-    CComPtr<IDxcCompiler3> dxcCompiler;
+    COMUnique<IDxcUtils> dxcUtils;
+    COMUnique<IDxcIncludeHandler> dxcIncludeHandler;
+    COMUnique<IDxcCompiler3> dxcCompiler;
 };
 
 static void checkDXC(HRESULT res, const char *msg, const char *file,
@@ -87,15 +123,15 @@ static void checkDXC(HRESULT res, const char *msg, const char *file,
 
 MADRONA_EXPORT ShaderCompiler::ShaderCompiler()
     : impl_([]() {
-        CComPtr<IDxcUtils> dxc_utils;
+        COMUnique<IDxcUtils> dxc_utils;
         REQ_DXC(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils)),
                 "Failed to initialize DxcUtils");
 
-        CComPtr<IDxcIncludeHandler> dxc_inc_handler;
+        COMUnique<IDxcIncludeHandler> dxc_inc_handler;
         REQ_DXC(dxc_utils->CreateDefaultIncludeHandler(&dxc_inc_handler),
                 "Failed to initialize DxcIncludeHandler");
 
-        CComPtr<IDxcCompiler3> dxc_compiler;
+        COMUnique<IDxcCompiler3> dxc_compiler;
         REQ_DXC(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler)),
                 "Failed to initialize DxcCompiler");
 
@@ -165,14 +201,14 @@ static HeapArray<wchar_t> toWide(const char *str)
     return out;
 }
 
-static CComPtr<IDxcBlobEncoding> loadFileToDxcBlob(
+static COMUnique<IDxcBlobEncoding> loadFileToDxcBlob(
     IDxcUtils *dxc_utils,
     const char *shader_path)
 {
     HeapArray<wchar_t> lshader_path = toWide(shader_path);
 
     uint32_t src_cp = CP_UTF8;
-    CComPtr<IDxcBlobEncoding> blob;
+    COMUnique<IDxcBlobEncoding> blob;
     REQ_DXC(dxc_utils->LoadFile(lshader_path.data(), &src_cp, &blob),
             "Failed to load shader file");
 
@@ -269,14 +305,14 @@ static HeapArray<uint32_t> hlslToSPV(
     src_info.Size = src_shader_len;
     src_info.Encoding = 0;
 
-    CComPtr<IDxcResult> compile_result;
+    COMUnique<IDxcResult> compile_result;
     REQ_DXC(dxc_compiler->Compile(&src_info, dxc_args.data(),
                                   (uint32_t)dxc_args.size(),
                                   include_handler,
                                   IID_PPV_ARGS(&compile_result)),
             "Failed to compile shader");
 
-    CComPtr<IDxcBlobUtf8> compile_errors;
+    COMUnique<IDxcBlobUtf8> compile_errors;
     REQ_DXC(compile_result->GetOutput(
             DXC_OUT_ERRORS, IID_PPV_ARGS(&compile_errors), nullptr),
         "Failed to get DXC errors");
@@ -285,7 +321,7 @@ static HeapArray<uint32_t> hlslToSPV(
         FATAL("Compilation failed: %s", compile_errors->GetBufferPointer());
     }
 
-    CComPtr<IDxcBlob> dxc_spv;
+    COMUnique<IDxcBlob> dxc_spv;
     REQ_DXC(compile_result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&dxc_spv),
             nullptr),
         "Failed to get SPIRV object from DXC");
@@ -458,7 +494,7 @@ MADRONA_EXPORT SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
    Span<const MacroDefn> macro_defns,
    EntryConfig entry)
 {
-    CComPtr<IDxcBlobEncoding> src_blob =
+    COMUnique<IDxcBlobEncoding> src_blob =
         loadFileToDxcBlob(impl_->dxcUtils, path);
 
     auto spv_bytecode = hlslToSPV(src_blob->GetBufferPointer(),
@@ -481,7 +517,7 @@ MADRONA_EXPORT MTLShader ShaderCompiler::compileHLSLFileToMTL(
    Span<const char *const> include_dirs,
    Span<const MacroDefn> macro_defns)
 {
-    CComPtr<IDxcBlobEncoding> src_blob =
+    COMUnique<IDxcBlobEncoding> src_blob =
         loadFileToDxcBlob(impl_->dxcUtils, path);
 
     (void)src_blob;
