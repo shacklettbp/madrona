@@ -204,7 +204,11 @@ Backend::Init Backend::Init::init(
             val_enabled.push_back(VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT);
         } else {
             val_enabled.push_back(VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT);
+#if defined(MADRONA_WINDOWS)
+            SetEnvironmentVariable("DEBUG_PRINTF_TO_STDOUT", "1");
+#else
             setenv("DEBUG_PRINTF_TO_STDOUT", "1", 1);
+#endif
         }
 
         val_features.enabledValidationFeatureCount = val_enabled.size();
