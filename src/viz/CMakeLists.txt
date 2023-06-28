@@ -55,7 +55,7 @@ target_link_libraries(madrona_viewer PRIVATE
     glfw
 )
 
-if (TARGET madrona_cuda)
+if (TARGET madrona_render_vk_cuda)
     target_link_libraries(madrona_viewer PRIVATE
         madrona_cuda madrona_render_vk_cuda
     )

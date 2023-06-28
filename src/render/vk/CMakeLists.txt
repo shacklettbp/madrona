@@ -76,7 +76,7 @@ if (MADRONA_MACOS OR MADRONA_IOS)
     )
 endif()
 
-if (TARGET madrona_cuda)
+if (TARGET madrona_cuda AND NOT MADRONA_WINDOWS)
     add_library(madrona_render_vk_cuda STATIC
         cuda_interop.hpp cuda_interop.cpp
     )

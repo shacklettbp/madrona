@@ -14,10 +14,9 @@
 #include <madrona/span.hpp>
 #include <madrona/macros.hpp>
 
-namespace madrona::utils {
-
+// FIXME: Ultimately it would be better to just change all uses of these
+// functions to std::bit_width
 #if defined(MADRONA_GPU_MODE)
-
 inline int __builtin_clz(int v)
 {
     return __clz(v);
@@ -54,6 +53,8 @@ MADRONA_ALWAYS_INLINE constexpr inline int __builtin_clzll(long long int v)
 }
 
 #endif
+
+namespace madrona::utils {
 
 template <typename T>
 constexpr inline T divideRoundUp(T a, T b)
