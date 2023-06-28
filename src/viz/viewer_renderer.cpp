@@ -55,6 +55,7 @@ inline constexpr uint32_t initMaxMatIndices = 100000;
 inline constexpr uint32_t shadowMapSize = 4096;
 inline constexpr uint32_t maxLights = 10;
 inline constexpr VkFormat gbufferFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+inline constexpr VkFormat skyFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
 
 }
 
@@ -143,7 +144,7 @@ static VkSurfaceFormatKHR selectSwapchainFormat(const Backend &backend,
 
     // FIXME
     for (VkSurfaceFormatKHR format : formats) {
-        if (format.format == VK_FORMAT_B8G8R8A8_UNORM &&
+        if (format.format == VK_FORMAT_B8G8R8A8_SRGB &&
             format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return format;
         }
@@ -1205,6 +1206,7 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
 
     view_info.image = albedo.image;
     view_info.format = alloc.getColorAttachmentFormat();
+    // view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
 
     VkImageView albedo_view;
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &albedo_view));
@@ -1862,13 +1864,13 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
         "sky";
 
     auto [transmittance, transmittance_reqs] = alloc.makeTexture2D(
-        TRANSMITTANCE_WIDTH, TRANSMITTANCE_HEIGHT, 1, VK_FORMAT_R32G32B32A32_SFLOAT);
+        TRANSMITTANCE_WIDTH, TRANSMITTANCE_HEIGHT, 1, InternalConfig::skyFormat);
     auto [irradiance, irradiance_reqs] = alloc.makeTexture2D(
-        IRRADIANCE_TEXTURE_WIDTH, IRRADIANCE_TEXTURE_HEIGHT, 1, VK_FORMAT_R32G32B32A32_SFLOAT);
+        IRRADIANCE_TEXTURE_WIDTH, IRRADIANCE_TEXTURE_HEIGHT, 1, InternalConfig::skyFormat);
     auto [mie, mie_reqs] = alloc.makeTexture3D(
-        SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
+        SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH, 1, InternalConfig::skyFormat);
     auto [scattering, scattering_reqs] = alloc.makeTexture3D(
-        SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
+        SCATTERING_TEXTURE_WIDTH, SCATTERING_TEXTURE_HEIGHT, SCATTERING_TEXTURE_DEPTH, 1, InternalConfig::skyFormat);
 
     HostBuffer irradiance_hb_staging = alloc.makeStagingBuffer(irradiance_reqs.size);
     HostBuffer mie_hb_staging = alloc.makeStagingBuffer(mie_reqs.size);
@@ -2124,24 +2126,24 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 
     VkImageView transmittance_view;
     view_info.image = transmittance.image;
-    view_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    view_info.format = InternalConfig::skyFormat;
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &transmittance_view));
 
     VkImageView irradiance_view;
     view_info.image = irradiance.image;
-    view_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    view_info.format = InternalConfig::skyFormat;
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &irradiance_view));
 
     VkImageView mie_view;
     view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
     view_info.image = mie.image;
-    view_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    view_info.format = InternalConfig::skyFormat;
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &mie_view));
 
     VkImageView scattering_view;
     view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
     view_info.image = scattering.image;
-    view_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    view_info.format = InternalConfig::skyFormat;
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &scattering_view));
 
     return Sky{

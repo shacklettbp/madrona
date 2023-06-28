@@ -282,35 +282,12 @@ void lighting(uint3 idx : SV_DispatchThreadID)
             exp(-radiance / float3(2.0f, 2.0f, 2.0f) * pushConst.exposure);
 
         float3 diff = one - expValue;
-        float3 gamma = float3(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2);
-
-        float3 out_color = pow(diff, gamma);
+        
+        float3 out_color = diff;
 
         gbufferAlbedo[targetPixel] = float4(out_color, 
             0.0000001f * shadowMap.SampleLevel(linearSampler, float2(0.0f, 0.0f), 0).x +
             0.0000001f * mieLUT.SampleLevel(linearSampler, float3(0.0f, 0.0f, 0.0f), 0).x);
 
-#if 0
-        // Calculate color
-        float shadow_factor = shadowFactor(position.xyz, normal.xyz, targetPixel / float2(targetDim), targetDim);
-
-        float3 light_contrib = float3(0, 0, 0);
-
-        float diffuse = clamp(dot(-light_dir.xyz, normal.xyz), 0, 1);
-        light_contrib += diffuse * lights[0].color.xyz;
-
-        float3 reflected_light = reflect(light_dir.xyz, normal.xyz);
-        float3 eye_vector = pushConst.viewPos.xyz - position.xyz;
-
-        float specular = clamp(dot(reflected_light, normalize(eye_vector)), 0, 1);
-        specular = pow(specular, 15.0);
-
-        light_contrib += specular * lights[0].color.xyz;
-        light_contrib *= shadow_factor;
-
-        color.xyz += light_contrib;
-
-        gbufferAlbedo[targetPixel] = color + (trans + irr + mieSa + scat) * 0.00001f;
-#endif
     }
 }

@@ -268,6 +268,7 @@ static VkFormat chooseFormat(VkPhysicalDevice phy,
         VkFormatProperties2 props = getFormatProperties(backend, phy, fmt);
         if ((props.formatProperties.optimalTilingFeatures &
              required_features) == required_features) {
+            printf("%d\n", (int)fmt);
             return fmt;
         }
 
@@ -538,7 +539,8 @@ MemoryAllocator::MemoryAllocator(const Device &d,
                                      ImageFlags::depthAttachmentReqs,
                                      array {VK_FORMAT_D32_SFLOAT,
                                             VK_FORMAT_D32_SFLOAT_S8_UINT}))
-{}
+{
+}
 
 HostBuffer MemoryAllocator::makeHostBuffer(VkDeviceSize num_bytes,
                                            bool dev_addr)
