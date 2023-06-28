@@ -1,5 +1,6 @@
 #include <madrona/viz/viewer.hpp>
 #include <madrona/stack_alloc.hpp>
+#include <madrona/utils.hpp>
 
 #include "viewer_renderer.hpp"
 

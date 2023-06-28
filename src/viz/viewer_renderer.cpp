@@ -547,7 +547,7 @@ static PipelineShaders makeDrawShaders(
         std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
         "shaders";
 
-    auto shader_path = (shader_dir / "viewer_draw.hlsl");
+    auto shader_path = (shader_dir / "viewer_draw.hlsl").string();
 
     ShaderCompiler compiler;
     SPIRVShader vert_spirv = compiler.compileHLSLFileToSPV(
@@ -586,7 +586,7 @@ static PipelineShaders makeShadowDrawShaders(
         std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
         "shaders";
 
-    auto shader_path = (shader_dir / "viewer_shadow_draw.hlsl");
+    auto shader_path = (shader_dir / "viewer_shadow_draw.hlsl").string();
 
     ShaderCompiler compiler;
     SPIRVShader vert_spirv = compiler.compileHLSLFileToSPV(
@@ -623,8 +623,8 @@ static PipelineShaders makeCullShader(const Device &dev)
 
     ShaderCompiler compiler;
     SPIRVShader spirv = compiler.compileHLSLFileToSPV(
-        (shader_dir / "viewer_cull.hlsl").c_str(), {}, {},
-        { "instanceCull", ShaderStage::Compute });
+        (shader_dir / "viewer_cull.hlsl").string().c_str(), {},
+        {}, { "instanceCull", ShaderStage::Compute });
 
     StackAlloc tmp_alloc;
     return PipelineShaders(dev, tmp_alloc,
@@ -639,8 +639,8 @@ static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler c
 
     ShaderCompiler compiler;
     SPIRVShader spirv = compiler.compileHLSLFileToSPV(
-        (shader_dir / "viewer_deferred_lighting.hlsl").c_str(), {}, {},
-        { "lighting", ShaderStage::Compute });
+        (shader_dir / "viewer_deferred_lighting.hlsl").string().c_str(), {},
+        {}, { "lighting", ShaderStage::Compute });
 
     StackAlloc tmp_alloc;
     return PipelineShaders(
@@ -1684,7 +1684,7 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
     }
 
     float scaled_font_size = 16.f * scale_factor;
-    io.Fonts->AddFontFromFileTTF(font_path.c_str(), scaled_font_size);
+    io.Fonts->AddFontFromFileTTF(font_path.string().c_str(), scaled_font_size);
 
     auto &style = ImGui::GetStyle();
     style.ScaleAllSizes(scale_factor);

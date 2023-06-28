@@ -259,7 +259,9 @@ validationDebug(VkDebugUtilsMessageSeverityFlagBitsEXT,
     raise(SIGTRAP);
     signal(SIGTRAP, SIG_DFL);
 #elif defined(MADRONA_WINDOWS)
-    DebugBreak();
+    if (IsDebuggerPresent()) {
+        DebugBreak();
+    }
 #endif
 
     return VK_FALSE;
