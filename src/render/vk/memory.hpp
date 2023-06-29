@@ -162,8 +162,10 @@ public:
     MemoryAllocator(const MemoryAllocator &) = delete;
     MemoryAllocator(MemoryAllocator &&) = default;
 
-    HostBuffer makeStagingBuffer(VkDeviceSize num_bytes);
-    HostBuffer makeParamBuffer(VkDeviceSize num_bytes);
+    HostBuffer makeStagingBuffer(VkDeviceSize num_bytes,
+                                 bool dev_addr = false);
+    HostBuffer makeParamBuffer(VkDeviceSize num_bytes,
+                               bool dev_addr = false);
     HostBuffer makeHostBuffer(VkDeviceSize num_bytes, bool dev_addr = false);
 
     std::optional<LocalBuffer> makeIndirectBuffer(VkDeviceSize num_bytes);
@@ -174,8 +176,6 @@ public:
         bool dev_addr = false, bool support_export = false);
 
     inline VkFormat getTextureFormat(TextureFormat fmt) const;
-    inline VkFormat getColorAttachmentFormat() const;
-    inline VkFormat getDepthAttachmentFormat() const;
 
     std::pair<LocalTexture, TextureRequirements>
     makeTexture1D(uint32_t width, uint32_t mip_levels, VkFormat fmt);
@@ -195,11 +195,13 @@ public:
     VkDeviceSize alignUniformBufferOffset(VkDeviceSize offset) const;
     VkDeviceSize alignStorageBufferOffset(VkDeviceSize offset) const;
 
-    LocalImage makeColorAttachment(uint32_t width, uint32_t height, VkFormat format = VK_FORMAT_MAX_ENUM);
-    LocalImage makeDepthAttachment(uint32_t width, uint32_t height);
+    LocalImage makeColorAttachment(
+        uint32_t width, uint32_t height, VkFormat format);
+    LocalImage makeDepthAttachment(
+        uint32_t width, uint32_t height, VkFormat format);
 
-    LocalImage makeConversionImage(uint32_t width, uint32_t height,
-                                   VkFormat fmt);
+    LocalImage makeConversionImage(
+        uint32_t width, uint32_t height, VkFormat fmt);
 
 private:
     HostBuffer makeHostBuffer(VkDeviceSize num_bytes,
@@ -236,8 +238,6 @@ private:
     VkBufferUsageFlags local_buffer_usage_flags_;
     std::array<VkFormat, size_t(TextureFormat::COUNT)> texture_formats_;
     MemoryTypeIndices type_indices_;
-    VkFormat color_attach_fmt_;
-    VkFormat depth_attach_fmt_;
 
     template <bool>
     friend class AllocDeleter;

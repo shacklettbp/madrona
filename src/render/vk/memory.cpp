@@ -269,7 +269,6 @@ static VkFormat chooseFormat(VkPhysicalDevice phy,
         VkFormatProperties2 props = getFormatProperties(backend, phy, fmt);
         if ((props.formatProperties.optimalTilingFeatures &
              required_features) == required_features) {
-            printf("%d\n", (int)fmt);
             return fmt;
         }
 
@@ -417,6 +416,10 @@ static MemoryTypeIndices findTypeIndices(const Device &dev,
     VkMemoryRequirements buffer_local_reqs =
         get_generic_buffer_reqs(BufferFlags::localUsage);
 
+    // FIXME: This isn't a complete check for the local memory type,
+    // specifically color attachment usages are missing, tex_bits doesn't
+    // account for it
+
     uint32_t tex_bits = ~0u;
 
     for (int i = 0; i < (int)tex_formats.size() - 1; i++) {
@@ -532,14 +535,7 @@ MemoryAllocator::MemoryAllocator(const Device &d,
       alignments_(getMemoryAlignments(backend, dev.phy)),
       local_buffer_usage_flags_(BufferFlags::localUsage),
       texture_formats_(chooseTextureFormats(dev, backend)),
-      type_indices_(findTypeIndices(dev, backend, texture_formats_)),
-      color_attach_fmt_(chooseFormat(dev.phy, backend,
-                                     ImageFlags::colorAttachmentReqs,
-                                     array {VK_FORMAT_R8G8B8A8_SRGB})),
-      depth_attach_fmt_(chooseFormat(dev.phy, backend,
-                                     ImageFlags::depthAttachmentReqs,
-                                     array {VK_FORMAT_D32_SFLOAT,
-                                            VK_FORMAT_D32_SFLOAT_S8_UINT}))
+      type_indices_(findTypeIndices(dev, backend, texture_formats_))
 {
 }
 
@@ -589,16 +585,19 @@ HostBuffer MemoryAllocator::makeHostBuffer(VkDeviceSize num_bytes,
                       AllocDeleter<true>(memory, *this));
 }
 
-HostBuffer MemoryAllocator::makeStagingBuffer(VkDeviceSize num_bytes)
+HostBuffer MemoryAllocator::makeStagingBuffer(VkDeviceSize num_bytes,
+                                              bool dev_addr)
 {
-    return makeHostBuffer(num_bytes, BufferFlags::stageUsage);
+    return makeHostBuffer(num_bytes, BufferFlags::stageUsage, dev_addr);
 }
 
-HostBuffer MemoryAllocator::makeParamBuffer(VkDeviceSize num_bytes)
+HostBuffer MemoryAllocator::makeParamBuffer(VkDeviceSize num_bytes,
+                                            bool dev_addr)
 {
     return makeHostBuffer(num_bytes, BufferFlags::commonUsage |
                                          BufferFlags::shaderUsage |
-                                         BufferFlags::paramUsage);
+                                         BufferFlags::paramUsage,
+                                         dev_addr);
 }
 
 optional<LocalBuffer> MemoryAllocator::makeLocalBuffer(
@@ -816,10 +815,6 @@ LocalImage MemoryAllocator::makeColorAttachment(uint32_t width,
                                                 uint32_t height,
                                                 VkFormat format)
 {
-    if (format == VK_FORMAT_MAX_ENUM) {
-        format = color_attach_fmt_;
-    }
-
     return makeDedicatedImage(width, height, 1,
                               format,
                               ImageFlags::colorAttachmentUsage,
@@ -827,10 +822,11 @@ LocalImage MemoryAllocator::makeColorAttachment(uint32_t width,
 }
 
 LocalImage MemoryAllocator::makeDepthAttachment(uint32_t width,
-                                                uint32_t height)
+                                                uint32_t height,
+                                                VkFormat format)
 {
     return makeDedicatedImage(width, height, 1,
-                              depth_attach_fmt_,
+                              format,
                               ImageFlags::depthAttachmentUsage,
                               type_indices_.local);
 }

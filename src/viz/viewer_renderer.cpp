@@ -57,6 +57,7 @@ inline constexpr uint32_t maxLights = 10;
 inline constexpr VkFormat gbufferFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 inline constexpr VkFormat skyFormatHighp = VK_FORMAT_R32G32B32A32_SFLOAT;
 inline constexpr VkFormat skyFormatHalfp = VK_FORMAT_R16G16B16A16_SFLOAT;
+inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 
 }
 
@@ -1190,10 +1191,14 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
                                    VkRenderPass render_pass,
                                    VkRenderPass imgui_render_pass)
 {
-    auto albedo = alloc.makeColorAttachment(fb_width, fb_height, VK_FORMAT_R8G8B8A8_UNORM);
-    auto normal = alloc.makeColorAttachment(fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
-    auto position = alloc.makeColorAttachment(fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
-    auto depth = alloc.makeDepthAttachment(fb_width, fb_height);
+    auto albedo = alloc.makeColorAttachment(
+        fb_width, fb_height, VK_FORMAT_R8G8B8A8_UNORM);
+    auto normal = alloc.makeColorAttachment(
+        fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
+    auto position = alloc.makeColorAttachment(
+        fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
+    auto depth = alloc.makeDepthAttachment(
+        fb_width, fb_height, InternalConfig::depthFormat);
 
     VkImageViewCreateInfo view_info {};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1206,7 +1211,6 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
     view_info_sr.layerCount = 1;
 
     view_info.image = albedo.image;
-    // view_info.format = alloc.getColorAttachmentFormat();
     view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
 
     VkImageView albedo_view;
@@ -1225,7 +1229,7 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &position_view));
 
     view_info.image = depth.image;
-    view_info.format = alloc.getDepthAttachmentFormat();
+    view_info.format = InternalConfig::depthFormat;
     view_info_sr.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 
     VkImageView depth_view;
@@ -1303,7 +1307,8 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
                                    uint32_t fb_height,
                                    VkRenderPass render_pass)
 {
-    auto depth = alloc.makeDepthAttachment(fb_width, fb_height);
+    auto depth = alloc.makeDepthAttachment(
+        fb_width, fb_height, InternalConfig::depthFormat);
 
     VkImageViewCreateInfo view_info {};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1316,7 +1321,7 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
     view_info_sr.layerCount = 1;
 
     view_info.image = depth.image;
-    view_info.format = alloc.getDepthAttachmentFormat();
+    view_info.format = InternalConfig::depthFormat;
 
     VkImageView depth_view;
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &depth_view));
@@ -2200,15 +2205,14 @@ Renderer::Renderer(uint32_t gpu_id,
           makeImmutableSampler(dev, VK_SAMPLER_ADDRESS_MODE_REPEAT)),
       clamp_sampler_(
           makeImmutableSampler(dev, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)),
-      render_pass_(makeRenderPass(dev, /*alloc.getColorAttachmentFormat()*/ VK_FORMAT_R8G8B8A8_UNORM,
+      render_pass_(makeRenderPass(dev, VK_FORMAT_R8G8B8A8_UNORM,
                                   InternalConfig::gbufferFormat, InternalConfig::gbufferFormat,
-                                  alloc.getDepthAttachmentFormat())),
-      shadow_pass_(makeShadowRenderPass(dev, alloc.getDepthAttachmentFormat())),
+                                  InternalConfig::depthFormat)),
+      shadow_pass_(makeShadowRenderPass(dev, InternalConfig::depthFormat)),
       imgui_render_state_(imguiInit(window.platformWindow, dev, backend,
                                  render_queue_, pipeline_cache_,
-                                 //alloc.getColorAttachmentFormat(),
                                  VK_FORMAT_R8G8B8A8_UNORM,
-                                 alloc.getDepthAttachmentFormat())),
+                                 InternalConfig::depthFormat)),
       instance_cull_(makeCullPipeline(dev, pipeline_cache_,
                                       InternalConfig::numFrames)),
       object_draw_(makeDrawPipeline(dev, pipeline_cache_, render_pass_,
