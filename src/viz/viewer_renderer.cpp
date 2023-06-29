@@ -492,8 +492,6 @@ static VkRenderPass makeRenderPass(const Device &dev,
     REQ_VK(dev.dt.createRenderPass(dev.hdl, &render_pass_info, nullptr,
                                    &render_pass));
 
-    printf("Draw render pass: %p\n", (void*)render_pass);
-
     return render_pass;
 }
 
@@ -1645,8 +1643,6 @@ static VkRenderPass makeImGuiRenderPass(const Device &dev,
     REQ_VK(dev.dt.createRenderPass(dev.hdl, &render_pass_info, nullptr,
                                    &render_pass));
 
-    printf("Imgui render pass: %p\n", (void*)render_pass);
-
     return render_pass;
 }
 
@@ -2631,10 +2627,6 @@ math::Mat3x3 getCameraToWorldMatrix(math::Vector3 eye,
     math::Vector3 s = math::Vector3((cross(f, up).normalize()));
     math::Vector3 u = math::Vector3(cross(s, f).normalize());
 
-    printf("Right %f %f %f\n", s.x, s.y, s.z);
-    printf("Up %f %f %f\n", u.x, u.y, u.z);
-    printf("Forward %f %f %f\n", f.x, f.y, f.z);
-
     return math::Mat3x3{
         {s, u, f}
     };
@@ -2697,8 +2689,6 @@ static void packShadowView(const Device &dev,
     std::swap(ws_up.y, ws_up.z);
     std::swap(ws_light_dir.y, ws_light_dir.z);
 #endif
-
-    printf("Packing view position: %f %f %f\n", ws_position.x, ws_position.y, ws_position.z);
 
     math::Mat4x4 view = lookAt(math::Vector3{}, ws_light_dir, ws_up);
 
@@ -2917,8 +2907,6 @@ static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeli
         math::Vector4{ cam.position.x, cam.position.y, cam.position.z, 0.0f },
         math::toRadians(cam.fov), 20.0f, 50.0f, {}
     };
-
-    printf("%f %f %f\n", push_const.viewDir.x, push_const.viewDir.y, push_const.viewDir.z);
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DeferredLightingPushConst), &push_const);
 
