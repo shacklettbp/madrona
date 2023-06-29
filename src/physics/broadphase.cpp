@@ -875,9 +875,13 @@ bool BVH::traceRayIntoLeaf(int32_t leaf_idx,
         }
     }
 
-    *hit_normal = leaf_txfm.rot.rotateVec(obj_hit_normal);
+    if (hit_leaf) {
+        *hit_normal = leaf_txfm.rot.rotateVec(obj_hit_normal);
 
-    return hit_leaf;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 inline void updateLeafPositionsEntry(
