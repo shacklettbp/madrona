@@ -8,6 +8,7 @@
 
 #include "obj.hpp"
 #include "gltf.hpp"
+#include "usd.hpp"
 
 namespace madrona::imp {
 
@@ -34,6 +35,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
     auto obj_loader = Optional<OBJLoader>::none();
     auto gltf_loader = Optional<GLTFLoader>::none();
+    auto usd_loader = Optional<USDLoader>::none();
 
     bool load_success = false;
     for (const char *path : paths) {
@@ -58,6 +60,14 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
             load_success = gltf_loader->load(path, imported,
                                              one_object_per_asset);
+        } else if (extension == "usda" || extension == "usdc" ||
+                   extension == "usdz") {
+            if (!usd_loader.has_value()) {
+                usd_loader.emplace(err_buf);
+            }
+
+            load_success = usd_loader->load(path, imported,
+                                            one_object_per_asset);
         }
 
         if (!load_success) {

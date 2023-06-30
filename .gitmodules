@@ -31,3 +31,6 @@
 [submodule "external/glfw"]
 	path = external/glfw
 	url = https://github.com/glfw/glfw.git
+[submodule "external/tinyusdz"]
+	path = external/tinyusdz
+	url = https://github.com/syoyo/tinyusdz.git
