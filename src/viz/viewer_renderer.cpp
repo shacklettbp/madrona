@@ -2266,9 +2266,39 @@ Renderer::~Renderer()
         dev.dt.destroyCommandPool(dev.hdl, f.cmdPool, nullptr);
 
         dev.dt.destroyFramebuffer(dev.hdl, f.fb.hdl, nullptr);
+        dev.dt.destroyFramebuffer(dev.hdl, f.imguiFBO.hdl, nullptr);
+        dev.dt.destroyFramebuffer(dev.hdl, f.shadowFB.hdl, nullptr);
+
         dev.dt.destroyImageView(dev.hdl, f.fb.colorView, nullptr);
+        dev.dt.destroyImageView(dev.hdl, f.fb.normalView, nullptr);
+        dev.dt.destroyImageView(dev.hdl, f.fb.positionView, nullptr);
         dev.dt.destroyImageView(dev.hdl, f.fb.depthView, nullptr);
+
+#if 0
+        dev.dt.destroyImage(dev.hdl, f.fb.colorAttachment.image, nullptr);
+        dev.dt.destroyImage(dev.hdl, f.fb.normalAttachment.image, nullptr);
+        dev.dt.destroyImage(dev.hdl, f.fb.positionAttachment.image, nullptr);
+        dev.dt.destroyImage(dev.hdl, f.fb.depthAttachment.image, nullptr);
+        dev.dt.destroyImage(dev.hdl, f.shadowFB.depthAttachment.image, nullptr);
+#endif
+
+        dev.dt.destroyImageView(dev.hdl, f.shadowFB.depthView, nullptr);
     }
+
+    dev.dt.destroyImageView(dev.hdl, sky_.transmittanceView, nullptr);
+    dev.dt.destroyImageView(dev.hdl, sky_.irradianceView, nullptr);
+    dev.dt.destroyImageView(dev.hdl, sky_.mieView, nullptr);
+    dev.dt.destroyImageView(dev.hdl, sky_.scatteringView, nullptr);
+
+    dev.dt.freeMemory(dev.hdl, sky_.transmittanceBacking, nullptr);
+    dev.dt.freeMemory(dev.hdl, sky_.irradianceBacking, nullptr);
+    dev.dt.freeMemory(dev.hdl, sky_.mieBacking, nullptr);
+    dev.dt.freeMemory(dev.hdl, sky_.scatteringBacking, nullptr);
+
+    dev.dt.destroyImage(dev.hdl, sky_.transmittance.image, nullptr);
+    dev.dt.destroyImage(dev.hdl, sky_.irradiance.image, nullptr);
+    dev.dt.destroyImage(dev.hdl, sky_.singleMieScattering.image, nullptr);
+    dev.dt.destroyImage(dev.hdl, sky_.scattering.image, nullptr);
 
     dev.dt.destroyFence(dev.hdl, load_fence_, nullptr);
     dev.dt.destroyCommandPool(dev.hdl, load_cmd_pool_, nullptr);
@@ -2279,11 +2309,18 @@ Renderer::~Renderer()
     dev.dt.destroyPipeline(dev.hdl, instance_cull_.hdls[0], nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, instance_cull_.layout, nullptr);
 
+    dev.dt.destroyPipeline(dev.hdl, object_shadow_draw_.hdls[0], nullptr);
+    dev.dt.destroyPipelineLayout(dev.hdl, object_shadow_draw_.layout, nullptr);
+
+    dev.dt.destroyPipeline(dev.hdl, deferred_lighting_.hdls[0], nullptr);
+    dev.dt.destroyPipelineLayout(dev.hdl, deferred_lighting_.layout, nullptr);
+
     dev.dt.destroyRenderPass(dev.hdl, imgui_render_state_.renderPass, nullptr);
     dev.dt.destroyDescriptorPool(
         dev.hdl, imgui_render_state_.descPool, nullptr);
 
     dev.dt.destroyRenderPass(dev.hdl, render_pass_, nullptr);
+    dev.dt.destroyRenderPass(dev.hdl, shadow_pass_, nullptr);
 
     dev.dt.destroySampler(dev.hdl, clamp_sampler_, nullptr);
     dev.dt.destroySampler(dev.hdl, repeat_sampler_, nullptr);
