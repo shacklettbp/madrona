@@ -48,8 +48,8 @@ inline math::Vector3 encodeNormalTangent(const math::Vector3 &normal,
 
     auto packHalf2x16 = [](const Vector2 &v) {
 #if defined(MADRONA_MSVC)
-        uint16_t x_half = f16tof32(v.x);
-        uint16_t y_half = f16tof32(v.y);
+        uint16_t x_half = f32tof16(v.x);
+        uint16_t y_half = f32tof16(v.y);
 #else
 #if defined(MADRONA_GCC)
         _Float16 x_half, y_half;
