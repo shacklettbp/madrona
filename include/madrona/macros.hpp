@@ -9,6 +9,9 @@
 
 #if defined(_MSC_VER)
 #define MADRONA_MSVC (1)
+#if defined(__clang__)
+#define MADRONA_CLANG_CL (1)
+#endif
 #elif defined(__clang__)
 #define MADRONA_CLANG (1)
 #elif defined(__GNUC__)
@@ -65,11 +68,19 @@
 #endif
 
 #if defined(MADRONA_MSVC)
-#define MADRONA_ALWAYS_INLINE [[msvc::forceinline]]
+
 #define MADRONA_NO_INLINE __declspec(noinline)
+#if defined(MADRONA_CLANG_CL)
+#define MADRONA_ALWAYS_INLINE __attribute__((always_inline))
+#else
+#define MADRONA_ALWAYS_INLINE [[msvc::forceinline]]
+#endif
+
 #elif defined(MADRONA_CLANG) || defined(MADRONA_GCC) || defined(MADRONA_GPU_MODE)
+
 #define MADRONA_ALWAYS_INLINE __attribute__((always_inline))
 #define MADRONA_NO_INLINE __attribute__((noinline))
+
 #endif
 
 #if defined _WIN32 || defined __CYGWIN__
@@ -86,14 +97,13 @@
 #define MADRONA_UNREACHABLE() __builtin_unreachable()
 #endif
 
-#if defined(MADRONA_MSVC)
-#define MADRONA_LFBOUND [[msvc::lifetimebound]]
-#elif defined(MADRONA_CLANG)
+#if defined(MADRONA_CLANG) || defined(MADRONA_CLANG_CL)
 #define MADRONA_LFBOUND [[clang::lifetimebound]]
+#elif defined(MADRONA_MSVC)
+#define MADRONA_LFBOUND [[msvc::lifetimebound]]
 #else
 #define MADRONA_LFBOUND
 #endif
-
 
 #define STATIC_UNIMPLEMENTED() \
     static_assert(false, "Unimplemented")

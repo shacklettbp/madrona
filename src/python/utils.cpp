@@ -1,4 +1,3 @@
-#define MADRONA_PYTHON_VISIBILITY MADRONA_EXPORT
 #include <madrona/python.hpp>
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -12,11 +11,11 @@
 namespace madrona::py {
 
 #ifdef MADRONA_CUDA_SUPPORT
-MADRONA_EXPORT CudaSync::CudaSync(cudaExternalSemaphore_t sema)
+CudaSync::CudaSync(cudaExternalSemaphore_t sema)
     : sema_(sema)
 {}
 
-MADRONA_EXPORT void CudaSync::wait(uint64_t strm)
+void CudaSync::wait(uint64_t strm)
 {
     // Get the current CUDA stream from pytorch and force it to wait
     // on an external semaphore to finish
@@ -26,11 +25,11 @@ MADRONA_EXPORT void CudaSync::wait(uint64_t strm)
 }
 
 #ifdef MADRONA_LINUX
-MADRONA_EXPORT void CudaSync::key_() {}
+void CudaSync::key_() {}
 #endif
 #endif
 
-MADRONA_EXPORT Tensor::Tensor(void *dev_ptr, ElementType type,
+Tensor::Tensor(void *dev_ptr, ElementType type,
                               Span<const int64_t> dimensions,
                               Optional<int> gpu_id)
     : dev_ptr_(dev_ptr),
@@ -45,7 +44,7 @@ MADRONA_EXPORT Tensor::Tensor(void *dev_ptr, ElementType type,
 }
 
 #ifdef MADRONA_LINUX
-MADRONA_EXPORT void Tensor::key_() {}
+void Tensor::key_() {}
 #endif
 
 }

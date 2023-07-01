@@ -46,14 +46,6 @@ madrona_python_module(madrona_python
     bindings.cpp
 )
 
-if (FRONTEND_GCC OR FRONTEND_CLANG)
-    set_source_files_properties(bindings.cpp PROPERTIES COMPILE_OPTIONS
-        "-frtti;-fexceptions")
-elseif (FRONTEND_MSVC)
-    set_source_files_properties(bindings.cpp PROPERTIES COMPILE_OPTIONS
-        "/GR+")
-endif ()
-
 # HACK: remove the warnings from the nanobind library. Because of
 # how the nanobind cmake setup works, the nanobind library target isn't
 # declared until the first call to nanobind_add_module, so all project

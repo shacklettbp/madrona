@@ -1,7 +1,13 @@
 #pragma once
+#ifdef madrona_render_shader_compiler_EXPORTS
+#define MADRONA_SHADER_COMPILER_EXPORT MADRONA_EXPORT
+#else
+#define MADRONA_SHADER_COMPILER_EXPORT MADRONA_IMPORT
+#endif
 
 #include <memory>
 
+#include <madrona/macros.hpp>
 #include <madrona/render/reflection.hpp>
 
 namespace madrona::render {
@@ -17,8 +23,8 @@ struct MTLShader {
 
 class ShaderCompiler {
 public:
-    MADRONA_IMPORT ShaderCompiler();
-    MADRONA_IMPORT ~ShaderCompiler();
+    MADRONA_SHADER_COMPILER_EXPORT ShaderCompiler();
+    MADRONA_SHADER_COMPILER_EXPORT ~ShaderCompiler();
 
     struct MacroDefn {
         const char *name;
@@ -32,14 +38,14 @@ public:
 
     // If entry is default / not provided, SPIRVShader will
     // have multiple entry points.
-    MADRONA_IMPORT SPIRVShader compileHLSLFileToSPV(
+    MADRONA_SHADER_COMPILER_EXPORT SPIRVShader compileHLSLFileToSPV(
         const char *path,
         Span<const char *const> include_dirs,
         Span<const MacroDefn> macro_defns,
         EntryConfig entry = { nullptr, ShaderStage {}});
 
 #ifdef MADRONA_APPLE
-    MADRONA_IMPORT MTLShader compileHLSLFileToMTL(
+    MADRONA_SHADER_COMPILER_EXPORT MTLShader compileHLSLFileToMTL(
         const char *path,
         Span<const char *const> include_dirs,
         Span<const MacroDefn> macro_defns);

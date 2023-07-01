@@ -128,7 +128,7 @@ static void checkDXC(HRESULT res, const char *msg, const char *file,
     ::madrona::render::checkDXC((expr), msg, __FILE__, __LINE__,\
                                 MADRONA_COMPILER_FUNCTION_NAME)
 
-MADRONA_EXPORT ShaderCompiler::ShaderCompiler()
+ShaderCompiler::ShaderCompiler()
     : impl_([]() {
         COMUnique<IDxcUtils> dxc_utils;
         REQ_DXC(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils)),
@@ -150,7 +150,7 @@ MADRONA_EXPORT ShaderCompiler::ShaderCompiler()
     }())
 {}
 
-MADRONA_EXPORT ShaderCompiler::~ShaderCompiler() = default;
+ShaderCompiler::~ShaderCompiler() = default;
 
 static void inline checkSPVReflect(SpvReflectResult res,
     const char *file, int line, const char *funcname)
@@ -495,7 +495,7 @@ static refl::SPIRV buildSPIRVReflectionData(
     };
 }
 
-MADRONA_EXPORT SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
+SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
    const char *path,
    Span<const char *const> include_dirs,
    Span<const MacroDefn> macro_defns,
@@ -519,7 +519,7 @@ MADRONA_EXPORT SPIRVShader ShaderCompiler::compileHLSLFileToSPV(
 }
 
 #ifdef MADRONA_APPLE
-MADRONA_EXPORT MTLShader ShaderCompiler::compileHLSLFileToMTL(
+MTLShader ShaderCompiler::compileHLSLFileToMTL(
    const char *path,
    Span<const char *const> include_dirs,
    Span<const MacroDefn> macro_defns)

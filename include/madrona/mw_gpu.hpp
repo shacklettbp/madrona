@@ -6,6 +6,11 @@
  * https://opensource.org/licenses/MIT.
  */
 #pragma once
+#ifdef mw_gpu_EXPORTS
+#define MADRONA_MWGPU_EXPORT MADRONA_EXPORT
+#else
+#define MADRONA_MWGPU_EXPORT MADRONA_IMPORT
+#endif
 
 #include <cstdint>
 #include <memory>
@@ -50,16 +55,16 @@ struct CompileConfig {
 
 class MWCudaExecutor {
 public:
-    MADRONA_IMPORT MWCudaExecutor(const StateConfig &state_cfg,
-                                  const CompileConfig &compile_cfg);
+    MADRONA_MWGPU_EXPORT MWCudaExecutor(const StateConfig &state_cfg,
+                                        const CompileConfig &compile_cfg);
 
-    MADRONA_IMPORT MWCudaExecutor(MWCudaExecutor &&o);
+    MADRONA_MWGPU_EXPORT MWCudaExecutor(MWCudaExecutor &&o);
 
-    MADRONA_IMPORT ~MWCudaExecutor();
+    MADRONA_MWGPU_EXPORT ~MWCudaExecutor();
 
-    MADRONA_IMPORT void run();
+    MADRONA_MWGPU_EXPORT void run();
 
-    MADRONA_IMPORT void * getExported(CountT slot) const;
+    MADRONA_MWGPU_EXPORT void * getExported(CountT slot) const;
 
 private:
     struct Impl;

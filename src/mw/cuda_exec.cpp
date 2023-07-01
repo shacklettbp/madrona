@@ -1682,7 +1682,7 @@ static CUgraphExec makeTaskGraphRunGraph(
     return run_graph_exec;
 }
 
-MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
+MWCudaExecutor::MWCudaExecutor(
         const StateConfig &state_cfg, const CompileConfig &compile_cfg)
     : impl_(nullptr)
 {
@@ -1746,10 +1746,10 @@ MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(
     std::cout << "Initialization finished" << std::endl;
 }
 
-MADRONA_EXPORT MWCudaExecutor::MWCudaExecutor(MWCudaExecutor &&o)
+MWCudaExecutor::MWCudaExecutor(MWCudaExecutor &&o)
     = default;
 
-MADRONA_EXPORT MWCudaExecutor::~MWCudaExecutor()
+MWCudaExecutor::~MWCudaExecutor()
 {
     if (!impl_) return;
 
@@ -1769,7 +1769,7 @@ MADRONA_EXPORT MWCudaExecutor::~MWCudaExecutor()
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
 }
 
-MADRONA_EXPORT void MWCudaExecutor::run()
+void MWCudaExecutor::run()
 {
     HostEventLogging(HostEvent::megaKernelStart);
     REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
@@ -1780,7 +1780,7 @@ MADRONA_EXPORT void MWCudaExecutor::run()
 #endif
 }
 
-MADRONA_EXPORT void * MWCudaExecutor::getExported(CountT slot) const
+void * MWCudaExecutor::getExported(CountT slot) const
 {
     return impl_->engineState.exportedColumns[slot];
 }

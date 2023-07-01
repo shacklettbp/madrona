@@ -1,14 +1,15 @@
 #pragma once
+#ifdef madrona_python_utils_EXPORTS 
+#define MADRONA_PYTHON_EXPORT MADRONA_EXPORT
+#else
+#define MADRONA_PYTHON_EXPORT MADRONA_IMPORT
+#endif
 
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 #include <madrona/optional.hpp>
 
 #include <array>
-
-#ifndef MADRONA_PYTHON_VISIBILITY
-#define MADRONA_PYTHON_VISIBILITY MADRONA_IMPORT
-#endif
 
 #ifdef MADRONA_CUDA_SUPPORT
 #include <cuda_runtime.h>
@@ -18,7 +19,7 @@ namespace madrona {
 namespace py {
 
 #ifdef MADRONA_CUDA_SUPPORT
-class MADRONA_PYTHON_VISIBILITY CudaSync final {
+class MADRONA_PYTHON_EXPORT CudaSync final {
 public:
     CudaSync(cudaExternalSemaphore_t sema);
     void wait(uint64_t strm);
@@ -35,7 +36,7 @@ private:
 };
 #endif
 
-class MADRONA_PYTHON_VISIBILITY Tensor final {
+class MADRONA_PYTHON_EXPORT Tensor final {
 public:
     enum class ElementType {
         UInt8,
