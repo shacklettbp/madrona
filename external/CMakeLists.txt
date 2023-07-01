@@ -91,3 +91,39 @@ target_include_directories(imgui INTERFACE
 
 set(GLFW_LIBRARY_TYPE "SHARED")
 add_subdirectory(glfw)
+
+set(TINYUSDZ_PRODUCTION_BUILD ON)
+set(TINYUSDZ_CXX_MP_FLAG OFF CACHE BOOL "")
+add_subdirectory(tinyusdz)
+
+add_library(madrona_tinyusdz INTERFACE)
+
+if (WIN32) 
+    # FIXME: revisit this stuff next release of tinyusdz
+    # With MSFT STL, tinyusdz tries to use std::expected which is only
+    # supported in C++23
+    target_compile_definitions(tinyusdz_object PUBLIC
+        nsel_CONFIG_SELECT_EXPECTED=1
+    )
+
+    if (FRONTEND_CLANG_CL)
+        target_compile_options(tinyusdz_object PRIVATE
+            -w # tinyusdz adds -Werror on clang (independent of clang vs clang-cl)
+        )
+    endif()
+endif()
+
+target_include_directories(madrona_tinyusdz INTERFACE SYSTEM
+    tinyusdz/src
+)
+target_link_libraries(madrona_tinyusdz INTERFACE
+    tinyusdz::tinyusdz_static
+)
+
+if (WIN32)
+    # See above, issue persists in files including tinyusdz headers
+    target_compile_definitions(madrona_tinyusdz INTERFACE
+        nsel_CONFIG_SELECT_EXPECTED=1
+        nsel_CONFIG_NO_EXCEPTIONS_SEH=0
+    )
+endif()

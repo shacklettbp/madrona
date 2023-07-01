@@ -1,4 +1,10 @@
+#undef min
+#undef max
+#include <tinyusdz.hh>
+
 #include "usd.hpp"
+
+#include <string>
 
 namespace madrona::imp {
 
@@ -24,9 +30,30 @@ USDLoader::~USDLoader() = default;
 bool USDLoader::load(const char *path, ImportedAssets &imported_assets,
                      bool merge_and_flatten)
 {
-    (void)path;
-    (void)imported_assets;
-    (void)merge_and_flatten;
+    tinyusdz::Stage stage;
+    std::string warn, err;
+
+    bool ret = tinyusdz::LoadUSDFromFile(path, &stage, &warn, &err, {
+        .load_assets = false,
+        .do_composition = true,
+        .load_sublayers = true,
+        .load_references = true,
+        .load_payloads = true,
+    });
+
+    if (warn.size()) {
+        printf("USD Loader Warning: %s\n", warn.c_str());
+    }
+
+    if (!ret) {
+        if (!err.empty()) {
+            printf("USD Loader Error: %s\n", err.c_str());
+        }
+
+        return false;
+    }
+
+    printf("USD File: %s\n", stage.ExportToString().c_str());
 
     return false;
 }

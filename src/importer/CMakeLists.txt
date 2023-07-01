@@ -21,4 +21,5 @@ target_link_libraries(madrona_importer PRIVATE
     madrona_json
     meshoptimizer
     fast_float
+    madrona_tinyusdz
 )
