@@ -14,7 +14,7 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/dispatch")
 
 if (FRONTEND_MSVC)
     set(CXX_PREPROCESSOR_CMD
-        ${CMAKE_CXX_COMPILER} /TP /P /EP /C /X ${DEFINE_STR} "${CMAKE_CURRENT_SOURCE_DIR}/dispatch.template" /Fidispatch/dispatch.template)
+        ${CMAKE_CXX_COMPILER} /nologo /TP /P /EP /C /X ${DEFINE_STR} "${CMAKE_CURRENT_SOURCE_DIR}/dispatch.template" /Fidispatch/dispatch.template)
 else()
     set(CXX_PREPROCESSOR_CMD
         ${CMAKE_CXX_COMPILER} -x c -E -P -nostdinc ${DEFINE_STR} "${CMAKE_CURRENT_SOURCE_DIR}/dispatch.template" -o dispatch/dispatch.template)

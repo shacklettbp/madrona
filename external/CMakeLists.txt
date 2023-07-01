@@ -94,21 +94,33 @@ add_subdirectory(glfw)
 
 set(TINYUSDZ_PRODUCTION_BUILD ON)
 set(TINYUSDZ_CXX_MP_FLAG OFF CACHE BOOL "")
+set(TINYUSDZ_WITH_AUDIO OFF CACHE BOOL "")
+set(TINYUSDZ_WITH_TIFF OFF CACHE BOOL "")
+set(TINYUSDZ_WITH_EXR OFF CACHE BOOL "")
+set(TINYUSDZ_WITH_COLORIO OFF CACHE BOOL "")
+set(TINYUSDZ_WITH_PXR_COMPAT_API OFF CACHE BOOL "")
 add_subdirectory(tinyusdz)
 
 add_library(madrona_tinyusdz INTERFACE)
 
-if (WIN32) 
+if (FRONTEND_MSVC) 
     # FIXME: revisit this stuff next release of tinyusdz
     # With MSFT STL, tinyusdz tries to use std::expected which is only
     # supported in C++23
     target_compile_definitions(tinyusdz_object PUBLIC
         nsel_CONFIG_SELECT_EXPECTED=1
+        nsel_CONFIG_NO_EXCEPTIONS_SEH=0
     )
 
     if (FRONTEND_CLANG_CL)
         target_compile_options(tinyusdz_object PRIVATE
             -w # tinyusdz adds -Werror on clang (independent of clang vs clang-cl)
+        )
+    else()
+        set_source_files_properties(tinyusdz/src/external/staticstruct.cc 
+            TARGET_DIRECTORY tinyusdz_object
+            PROPERTIES COMPILE_OPTIONS
+                /FIstring
         )
     endif()
 endif()
