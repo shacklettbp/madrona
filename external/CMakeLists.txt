@@ -113,6 +113,12 @@ if (WIN32)
     endif()
 endif()
 
+if (NOT WIN32) #FIX
+    target_link_libraries(tinyusdz_object PRIVATE
+        madrona_libcxx
+    )
+endif()
+
 target_include_directories(madrona_tinyusdz INTERFACE SYSTEM
     tinyusdz/src
 )
