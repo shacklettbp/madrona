@@ -210,10 +210,12 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
         mul(view, float4(float3(1.0f, 1.0f, 1.0f), 1.0f));
 #endif
 
+#if 0
     // shadowViewDataBuffer[idx.x].viewProjectionMatrix[0] = mul(view, float4(1.0f, 1.0f, 1.0f, 1.0f));
     // shadowViewDataBuffer[idx.x].viewProjectionMatrix[0][0] = float(idx.x);
     shadowViewDataBuffer[idx.x].viewProjectionMatrix = view;
-    shadowViewDataBuffer[idx.x].cameraViewProjectionMatrix[0][0] = view[0].w + view[1].w + view[2].w + view[3].w;
+    shadowViewDataBuffer[idx.x].cameraViewProjectionMatrix[0] = mul(view, float4(1.0f, 0.0f, 0.0f, 0.0f));
+#endif
 
     float x_min, x_max, y_min, y_max, z_min, z_max;
 
@@ -241,7 +243,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
             float4(0.0f,                    0.0f,                   1.0f / (z_max - z_min), 0.0f ),
             float4(-(x_max + x_min) / (x_max - x_min), -(y_max + y_min) / (y_max - y_min), -(z_min) / (z_max - z_min), 1.0f));
 
-    // shadowViewDataBuffer[viewIdx].viewProjectionMatrix = mul(projection, view);
+    shadowViewDataBuffer[idx.x].viewProjectionMatrix = mul(projection, view);
 
 #if 0
     shadowViewDataBuffer[viewIdx].cameraViewProjectionMatrix = perspective(cam.fov, aspect, 1.0f, 1000.0f).
