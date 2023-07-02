@@ -110,9 +110,11 @@ struct Frame {
 
     render::vk::HostBuffer viewStaging;
     render::vk::HostBuffer lightStaging;
-    render::vk::HostBuffer shadowViewStaging;
+    // Don't need a shadow view staging because that will be done on the GPU.
     render::vk::HostBuffer skyStaging;
     render::vk::LocalBuffer renderInput;
+    int64_t renderInputSize;
+
     uint32_t cameraViewOffset;
     uint32_t simViewOffset;
     uint32_t drawCmdOffset;
@@ -126,6 +128,7 @@ struct Frame {
     VkDescriptorSet cullShaderSet;
     VkDescriptorSet drawShaderSet;
     VkDescriptorSet lightingSet;
+    VkDescriptorSet shadowGenSet;
 };
 
 struct ViewerCam {
@@ -239,6 +242,7 @@ private:
     Pipeline<1> object_draw_;
     Pipeline<1> object_shadow_draw_;
     Pipeline<1> deferred_lighting_;
+    Pipeline<1> shadow_gen_;
 
     // Pipeline<1> ao_pass_;
 

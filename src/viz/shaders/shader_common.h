@@ -11,8 +11,7 @@ struct DeferredLightingPushConst {
     float fovy;
     float exposure;
     float fade_dist;
-
-    float pad[1];
+    uint32_t viewIdx;
 };
 
 struct DensityLayer {
@@ -53,6 +52,11 @@ struct SkyData {
 
 struct DrawPushConst {
     uint32_t viewIdx;
+};
+
+struct ShadowGenPushConst {
+    uint32_t viewIdx;
+    uint32_t numViews;
 };
 
 struct Vertex {

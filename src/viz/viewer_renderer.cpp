@@ -631,6 +631,25 @@ static PipelineShaders makeCullShader(const Device &dev)
                            Span<const SPIRVShader>(&spirv, 1), {});
 }
 
+static PipelineShaders makeShadowGenShader(const Device &dev, VkSampler clamp_sampler)
+{
+    (void)clamp_sampler;
+    std::filesystem::path shader_dir =
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "shaders";
+
+    ShaderCompiler compiler;
+    SPIRVShader spirv = compiler.compileHLSLFileToSPV(
+        (shader_dir / "shadow_gen.hlsl").string().c_str(), {},
+        {}, { "shadowGen", ShaderStage::Compute });
+
+    StackAlloc tmp_alloc;
+    return PipelineShaders(
+        dev, tmp_alloc,
+        Span<const SPIRVShader>(&spirv, 1), 
+        {});
+}
+
 static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler clamp_sampler)
 {
     std::filesystem::path shader_dir =
@@ -1092,6 +1111,80 @@ static Pipeline<1> makeCullPipeline(const Device &dev,
     };
 }
 
+static Pipeline<1> makeShadowGenPipeline(const Device &dev,
+                                    VkPipelineCache pipeline_cache,
+                                    VkSampler clamp_sampler,
+                                    CountT num_frames)
+{
+    PipelineShaders shader = makeShadowGenShader(dev, clamp_sampler);
+
+    // Push constant
+    VkPushConstantRange push_const {
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        0,
+        sizeof(shader::ShadowGenPushConst),
+    };
+
+    // Layout configuration
+    std::array desc_layouts {
+        shader.getLayout(0),
+    };
+
+    VkPipelineLayoutCreateInfo lighting_layout_info;
+    lighting_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    lighting_layout_info.pNext = nullptr;
+    lighting_layout_info.flags = 0;
+    lighting_layout_info.setLayoutCount =
+        static_cast<uint32_t>(desc_layouts.size());
+    lighting_layout_info.pSetLayouts = desc_layouts.data();
+    lighting_layout_info.pushConstantRangeCount = 1;
+    lighting_layout_info.pPushConstantRanges = &push_const;
+
+    VkPipelineLayout lighting_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &lighting_layout_info, nullptr,
+                                       &lighting_layout));
+
+    std::array<VkComputePipelineCreateInfo, 1> compute_infos;
+#if 0
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size;
+    subgroup_size.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
+    subgroup_size.pNext = nullptr;
+    subgroup_size.requiredSubgroupSize = 32;
+#endif
+
+    compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    compute_infos[0].pNext = nullptr;
+    compute_infos[0].flags = 0;
+    compute_infos[0].stage = {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr, //&subgroup_size,
+        VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT,
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        shader.getShader(0),
+        "shadowGen",
+        nullptr,
+    };
+    compute_infos[0].layout = lighting_layout;
+    compute_infos[0].basePipelineHandle = VK_NULL_HANDLE;
+    compute_infos[0].basePipelineIndex = -1;
+
+    std::array<VkPipeline, compute_infos.size()> pipelines;
+    REQ_VK(dev.dt.createComputePipelines(dev.hdl, pipeline_cache,
+                                         compute_infos.size(),
+                                         compute_infos.data(), nullptr,
+                                         pipelines.data()));
+
+    FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
+
+    return Pipeline<1> {
+        std::move(shader),
+        lighting_layout,
+        pipelines,
+        std::move(desc_pool),
+    };
+}
+
 static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
                                     VkPipelineCache pipeline_cache,
                                     VkSampler clamp_sampler,
@@ -1359,6 +1452,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet cull_set,
                       VkDescriptorSet draw_set,
                       VkDescriptorSet lighting_set,
+                      VkDescriptorSet shadow_gen_set,
                       Sky &sky,
                       Frame *dst)
 {
@@ -1375,20 +1469,21 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
         (int64_t)sizeof(DrawMaterialData) * max_instances * 10,
         (int64_t)sizeof(DirectionalLight) * InternalConfig::maxLights,
-        (int64_t)sizeof(ShadowViewData),
+        (int64_t)sizeof(ShadowViewData) * (max_views + 1),
         (int64_t)sizeof(SkyData)
     };
+
     int64_t num_render_input_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
 
     HostBuffer view_staging = alloc.makeStagingBuffer(sizeof(PackedViewData));
     HostBuffer light_staging = alloc.makeStagingBuffer(sizeof(DirectionalLight) * InternalConfig::maxLights);
-    HostBuffer shadow_staging = alloc.makeStagingBuffer(sizeof(ShadowViewData));
+    // HostBuffer shadow_staging = alloc.makeStagingBuffer(sizeof(ShadowViewData));
     HostBuffer sky_staging = alloc.makeStagingBuffer(sizeof(SkyData));
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 19> desc_updates;
+    std::array<VkWriteDescriptorSet, 22> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -1397,6 +1492,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     //DescHelper::uniform(desc_updates[0], cull_set, &view_info, 0);
     DescHelper::storage(desc_updates[0], draw_set, &view_info, 0);
+    DescHelper::storage(desc_updates[20], shadow_gen_set, &view_info, 1);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = render_input.buffer;
@@ -1455,6 +1551,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     light_data_info.range = buffer_sizes[5];
 
     DescHelper::storage(desc_updates[10], lighting_set, &light_data_info, 3);
+    DescHelper::storage(desc_updates[21], shadow_gen_set, &light_data_info, 2);
 
     VkDescriptorImageInfo transmittance_info;
     transmittance_info.imageView = sky.transmittanceView;
@@ -1491,6 +1588,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::storage(desc_updates[15], draw_set, &shadow_view_info, 3);
     DescHelper::storage(desc_updates[16], lighting_set, &shadow_view_info, 9);
+    DescHelper::storage(desc_updates[19], shadow_gen_set, &shadow_view_info, 0);
 
     VkDescriptorImageInfo shadow_map_info;
     shadow_map_info.imageView = shadow_fb.depthView;
@@ -1506,6 +1604,10 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::storage(desc_updates[18], lighting_set, &sky_info, 11);
 
+
+
+
+
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
     new (dst) Frame {
@@ -1519,9 +1621,9 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         makeBinarySemaphore(dev),
         std::move(view_staging),
         std::move(light_staging),
-        std::move(shadow_staging),
         std::move(sky_staging),
         std::move(render_input),
+        num_render_input_bytes,
         0,
         sizeof(PackedViewData),
         uint32_t(buffer_offsets[2]),
@@ -1534,6 +1636,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         cull_set,
         draw_set,
         lighting_set,
+        shadow_gen_set,
     };
 }
 
@@ -2220,6 +2323,7 @@ Renderer::Renderer(uint32_t gpu_id,
       deferred_lighting_(makeDeferredLightingPipeline(dev, pipeline_cache_,
                                       clamp_sampler_,
                                       InternalConfig::numFrames)),
+      shadow_gen_(makeShadowGenPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames)),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
       asset_set_cull_(asset_desc_pool_cull_.makeSet()),
@@ -2246,6 +2350,7 @@ Renderer::Renderer(uint32_t gpu_id,
                   instance_cull_.descPool.makeSet(),
                   object_draw_.descPool.makeSet(),
                   deferred_lighting_.descPool.makeSet(),
+                  shadow_gen_.descPool.makeSet(),
                   sky_,
                   &frames_[i]);
     }
@@ -2878,7 +2983,56 @@ static void packLighting(const Device &dev,
     light_staging_buffer.flush(dev);
 }
 
-static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, const ViewerCam &cam)
+static void issueShadowGen(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, uint32_t view_idx, uint32_t max_views, uint32_t num_views)
+{
+    {
+        VkBufferMemoryBarrier compute_prepare = {
+            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
+            VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
+            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+            frame.renderInput.buffer,
+            0, 
+            (VkDeviceSize)frame.renderInputSize
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
+                0, 0, nullptr, 1, &compute_prepare, 0, nullptr);
+    }
+
+
+    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
+
+    shader::ShadowGenPushConst push_const = { view_idx, num_views };
+
+    dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shader::ShadowGenPushConst), &push_const);
+
+    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline.layout, 0, 1, &frame.shadowGenSet, 0, nullptr);
+
+    uint32_t num_workgroups_x = utils::divideRoundUp(max_views+1, 32_u32);
+    dev.dt.cmdDispatch(draw_cmd, num_workgroups_x, 1, 1);
+
+
+    {
+        VkBufferMemoryBarrier compute_prepare = {
+            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
+            VK_ACCESS_MEMORY_WRITE_BIT,
+            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+            frame.renderInput.buffer,
+            0, 
+            (VkDeviceSize)frame.renderInputSize
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                0, 0, nullptr, 1, &compute_prepare, 0, nullptr);
+    }
+}
+
+static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, const ViewerCam &cam, uint32_t view_idx)
 {
     { // Transition for compute
         array<VkImageMemoryBarrier, 3> compute_prepare {{
@@ -2942,7 +3096,7 @@ static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeli
     DeferredLightingPushConst push_const = {
         math::Vector4{ cam.view.x, cam.view.y, cam.view.z, 0.0f },
         math::Vector4{ cam.position.x, cam.position.y, cam.position.z, 0.0f },
-        math::toRadians(cam.fov), 20.0f, 50.0f, {}
+        math::toRadians(cam.fov), 20.0f, 50.0f, view_idx
     };
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DeferredLightingPushConst), &push_const);
@@ -3051,7 +3205,7 @@ void Renderer::render(const ViewerCam &cam,
                          frame.renderInput.buffer,
                          1, &light_copy);
 
-#if 1
+#if 0
     {
         PackedViewData *sim_start = nullptr;
 
@@ -3082,6 +3236,7 @@ void Renderer::render(const ViewerCam &cam,
                 frame.renderInput.buffer,
                 1, &shadow_copy);
     }
+#else
 #endif
 
     packSky(dev, frame.skyStaging);
@@ -3117,6 +3272,8 @@ void Renderer::render(const ViewerCam &cam,
                              frame.renderInput.buffer,
                              1, &view_data_copy);
     }
+
+    issueShadowGen(dev, frame, shadow_gen_, draw_cmd, cfg.viewIDX, engine_interop_.maxViewsPerWorld, *engine_interop_.bridge.numViews);
 
     uint32_t num_instances =
         engine_interop_.bridge.numInstances[cfg.worldIDX];
@@ -3206,7 +3363,8 @@ void Renderer::render(const ViewerCam &cam,
     }
 
 
-    {
+
+    { // Shadow pass
         dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                 object_shadow_draw_.hdls[0]);
 
@@ -3375,7 +3533,7 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdEndRenderPass(draw_cmd);
 
     { // Issue deferred lighting pass - separate function - this is becoming crazy
-        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam);
+        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, cfg.viewIDX);
     }
 
     render_pass_info.framebuffer = frame.imguiFBO.hdl;
