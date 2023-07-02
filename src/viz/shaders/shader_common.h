@@ -55,6 +55,11 @@ struct DrawPushConst {
     uint32_t viewIdx;
 };
 
+struct ShadowGenPushConst {
+    uint32_t viewIdx;
+    uint32_t numViews;
+};
+
 struct Vertex {
     float3 position;
     float3 normal;
