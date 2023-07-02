@@ -13,7 +13,8 @@ public:
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;
-        uint32_t totalStepBufferSize;
+        uint32_t maxEpisodes;
+        uint32_t maxStepsPerEpisode;
         ExecMode execMode;
     };
 
