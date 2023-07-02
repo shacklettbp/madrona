@@ -11,8 +11,7 @@ struct DeferredLightingPushConst {
     float fovy;
     float exposure;
     float fade_dist;
-
-    float pad[1];
+    uint32_t viewIdx;
 };
 
 struct DensityLayer {

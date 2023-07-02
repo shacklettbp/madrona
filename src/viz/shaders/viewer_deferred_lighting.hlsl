@@ -57,7 +57,7 @@ float shadowFactor(float3 world_pos, float3 world_normal)
     float4 world_pos_v4 = float4(world_pos.xyz, 1.f);
 
     // Light space position
-    float4 ls_pos = mul(shadowViewDataBuffer[0].viewProjectionMatrix, world_pos_v4);
+    float4 ls_pos = mul(shadowViewDataBuffer[pushConst.viewIdx].viewProjectionMatrix, world_pos_v4);
     ls_pos.xyz /= ls_pos.w;
 
     float2 uv = ls_pos.xy * 0.5 + float2(0.5, 0.5);
@@ -218,9 +218,9 @@ float3 getOutgoingRay(float2 target_pixel, float2 target_dim)
     float2 screen = float2((2.0f * raster.x) / target_dim.x - 1.0f,
                            (2.0f * raster.y) / target_dim.y - 1.0f);
 
-    float3 cam_right = shadowViewDataBuffer[0].cameraRight.xyz;
-    float3 cam_up = shadowViewDataBuffer[0].cameraUp.xyz;
-    float3 cam_forward = shadowViewDataBuffer[0].cameraForward.xyz;
+    float3 cam_right = shadowViewDataBuffer[pushConst.viewIdx].cameraRight.xyz;
+    float3 cam_up = shadowViewDataBuffer[pushConst.viewIdx].cameraUp.xyz;
+    float3 cam_forward = shadowViewDataBuffer[pushConst.viewIdx].cameraForward.xyz;
 
     float3 dir = -screen.x * cam_right * right_scale - screen.y * cam_up * up_scale + cam_forward;
 

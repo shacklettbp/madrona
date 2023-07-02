@@ -2997,7 +2997,7 @@ static void issueShadowGen(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline,
             (VkDeviceSize)frame.renderInputSize
         };
 
-        dev.dt.cmdPipelineBarrier(draw_cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
+        dev.dt.cmdPipelineBarrier(draw_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
                 0, 0, nullptr, 1, &compute_prepare, 0, nullptr);
     }
 
@@ -3032,7 +3032,7 @@ static void issueShadowGen(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline,
     }
 }
 
-static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, const ViewerCam &cam)
+static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, const ViewerCam &cam, uint32_t view_idx)
 {
     { // Transition for compute
         array<VkImageMemoryBarrier, 3> compute_prepare {{
@@ -3096,7 +3096,7 @@ static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeli
     DeferredLightingPushConst push_const = {
         math::Vector4{ cam.view.x, cam.view.y, cam.view.z, 0.0f },
         math::Vector4{ cam.position.x, cam.position.y, cam.position.z, 0.0f },
-        math::toRadians(cam.fov), 20.0f, 50.0f, {}
+        math::toRadians(cam.fov), 20.0f, 50.0f, view_idx
     };
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DeferredLightingPushConst), &push_const);
@@ -3273,6 +3273,8 @@ void Renderer::render(const ViewerCam &cam,
                              1, &view_data_copy);
     }
 
+    issueShadowGen(dev, frame, shadow_gen_, draw_cmd, cfg.viewIDX, engine_interop_.maxViewsPerWorld, *engine_interop_.bridge.numViews);
+
     uint32_t num_instances =
         engine_interop_.bridge.numInstances[cfg.worldIDX];
 
@@ -3360,8 +3362,6 @@ void Renderer::render(const ViewerCam &cam,
             0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
     }
 
-
-    issueShadowGen(dev, frame, shadow_gen_, draw_cmd, cfg.viewIDX, engine_interop_.maxViewsPerWorld, *engine_interop_.bridge.numViews);
 
 
     { // Shadow pass
@@ -3533,7 +3533,7 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdEndRenderPass(draw_cmd);
 
     { // Issue deferred lighting pass - separate function - this is becoming crazy
-        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam);
+        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, cfg.viewIDX);
     }
 
     render_pass_info.framebuffer = frame.imguiFBO.hdl;

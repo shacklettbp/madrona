@@ -100,7 +100,7 @@ float4 vert(in uint vid : SV_VertexID,
     DrawMaterialData mat = drawMaterialBuffer[instance_id];
     float4 color = materialBuffer[mat.materialIdx].color;
 
-    float4x4 shadow_matrix = shadowViewDataBuffer[0].viewProjectionMatrix;
+    float4x4 shadow_matrix = shadowViewDataBuffer[push_const.viewIdx].viewProjectionMatrix;
 
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
