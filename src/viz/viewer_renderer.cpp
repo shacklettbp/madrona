@@ -2408,6 +2408,9 @@ Renderer::~Renderer()
     dev.dt.destroyFence(dev.hdl, load_fence_, nullptr);
     dev.dt.destroyCommandPool(dev.hdl, load_cmd_pool_, nullptr);
 
+    dev.dt.destroyPipeline(dev.hdl, shadow_gen_.hdls[0], nullptr);
+    dev.dt.destroyPipelineLayout(dev.hdl, shadow_gen_.layout, nullptr);
+
     dev.dt.destroyPipeline(dev.hdl, object_draw_.hdls[0], nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, object_draw_.layout, nullptr);
 
