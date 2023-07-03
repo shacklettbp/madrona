@@ -439,12 +439,12 @@ static inline EdgeTestResult edgeDistance(
         normal.x,
         normal.y,
         normal.z,
+        segment_a.p1.x,
+        segment_a.p1.y,
+        segment_a.p1.z,
         segment_b.p1.x,
         segment_b.p1.y,
-        segment_b.p1.z,
-        segment_b.p2.x,
-        segment_b.p2.y,
-        segment_b.p2.z
+        segment_b.p1.z
       );
 
     return {
