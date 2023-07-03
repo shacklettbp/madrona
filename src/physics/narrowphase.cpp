@@ -319,7 +319,7 @@ static FaceQuery queryFaceDirections(
     MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     const HullState &a, const HullState &b)
 {
-    Plane max_face_plane;
+    Plane max_face_plane {};
     CountT max_dist_face = -1;
     float max_dist = -FLT_MAX;
 
@@ -434,6 +434,19 @@ static inline EdgeTestResult edgeDistance(
 
     float separation = normal.dot(segment_b.p1 - segment_a.p1);
 
+    printf("%f (%f %f %f) (%f %f %f) (%f %f %f)",
+        separation,
+        normal.x,
+        normal.y,
+        normal.z,
+        segment_b.p1.x,
+        segment_b.p1.y,
+        segment_b.p1.z,
+        segment_b.p2.x,
+        segment_b.p2.y,
+        segment_b.p2.z
+      );
+
     return {
         normal,
         separation,
@@ -444,7 +457,7 @@ static EdgeQuery queryEdgeDirections(
     MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     const HullState &a, const HullState &b)
 {
-    Vector3 normal;
+    Vector3 normal {};
     int edgeAMaxDistance = 0;
     int edgeBMaxDistance = 0;
     float maxDistance = -FLT_MAX;
@@ -458,7 +471,13 @@ static EdgeQuery queryEdgeDirections(
 
         if (buildsMinkowskiFace(a.mesh, b.mesh, cur_hedge_a, twin_hedge_a,
                                 cur_hedge_b, twin_hedge_b)) {
-            return edgeDistance(a, b, cur_hedge_a, cur_hedge_b);
+            auto res = edgeDistance(a, b, cur_hedge_a, cur_hedge_b);
+
+            if (res.separation < 0.f) {
+                printf(": %u %u\n", hedge_idx_a, hedge_idx_b);
+            }
+
+            return res;
         } else {
             EdgeTestResult result;
             result.separation = -FLT_MAX;
@@ -689,6 +708,11 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
 
     bool bIsFaceContactA = faceQueryA.separation > edgeQuery.separation;
     bool bIsFaceContactB = faceQueryB.separation > edgeQuery.separation;
+
+    printf("%f %f %f\n",
+        faceQueryA.separation,
+        faceQueryB.separation,
+        edgeQuery.separation);
 
     if (bIsFaceContactA || bIsFaceContactB) {
         bool a_is_ref = faceQueryA.separation >= faceQueryB.separation;
