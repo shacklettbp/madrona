@@ -134,13 +134,8 @@ static HullState makeHullState(
     Quat rotation,
     Diag3x3 scale,
     math::Vector3 *dst_vertices,
-    Plane *dst_planes,
-    bool debug = false)
+    Plane *dst_planes)
 {
-    if (debug) {
-        printf("d\n");
-    }
-
     Mat3x3 unscaled_rot = Mat3x3::fromQuat(rotation);
     Mat3x3 vertex_txfm = unscaled_rot * scale;
     Mat3x3 normal_txfm = unscaled_rot * scale.inv();
@@ -1239,7 +1234,7 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
 
         HullState a_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
             a_he_mesh, a_pos, a_rot, a_scale, txfm_vertex_buffer,
-            txfm_face_buffer, true);
+            txfm_face_buffer);
 
         txfm_vertex_buffer += a_hull_state.mesh.numVertices;
         txfm_face_buffer += a_hull_state.mesh.numFaces;
