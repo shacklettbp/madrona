@@ -711,6 +711,10 @@ Entity BVH::traceRay(Vector3 o,
         }
     }
     
+    if (closest_hit_entity == Entity::none()) {
+        return Entity::none();
+    }
+
     *out_hit_t = t_max;
     *out_hit_normal = closest_hit_normal;
     return closest_hit_entity;
