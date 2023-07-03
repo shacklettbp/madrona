@@ -382,16 +382,22 @@ static Plane computeNewellPlaneImpl(Fn &&iter_verts)
     Vector3 centroid { 0, 0, 0 };
     Vector3 n { 0, 0, 0 };
 
+    CountT num_verts = 0;
     // Compute normal as being proportional to projected areas of polygon
     // onto the yz, xz, and xy planes. Also compute centroid as
     // representative point on the plane
-    iter_verts([&centroid, &n](Vector3 vi, Vector3 vj) {
+    iter_verts([&centroid, &n, &num_verts](Vector3 vi, Vector3 vj) {
         n.x += (vi.y - vj.y) * (vi.z + vj.z); // projection on yz
         n.y += (vi.z - vj.z) * (vi.x + vj.x); // projection on xz
         n.z += (vi.x - vj.x) * (vi.y + vj.y); // projection on xy
 
         centroid += vj;
+        num_verts += 1;
     });
+
+    assert(num_verts != 0);
+
+    centroid /= num_verts;
 
     n = normalize(n);
     return Plane {
