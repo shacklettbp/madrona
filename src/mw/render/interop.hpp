@@ -1,6 +1,6 @@
 #pragma once
 
-#include <madrona/render/mw/batch_renderer_system.hpp>
+#include <madrona/render/mw.hpp>
 
 #if defined(MADRONA_LINUX) or defined(MADRONA_WINDOWS) or defined(MADRONA_GPU_MODE)
 #define MADRONA_BATCHRENDER_RT (1)
@@ -58,7 +58,7 @@ struct alignas(16) PerspectiveCameraData {
 
 #endif
 
-struct RendererInterface {
+struct BatchRendererECSBridge {
 #if defined(MADRONA_BATCHRENDER_RT)
     AccelStructInstance *tlasInstancesBase;
     AccelStructRangeInfo *numInstances;
@@ -75,11 +75,7 @@ struct RendererInterface {
     int32_t renderHeight;
 };
 
-struct RendererBridge {
-    RendererInterface iface;
-};
-
-struct RendererState {
+struct BatchRendererState {
 #if defined(MADRONA_BATCHRENDER_RT)
     AccelStructInstance *tlasInstanceBuffer;
     AccelStructRangeInfo *numInstances;
@@ -104,9 +100,6 @@ struct RendererState {
     int32_t renderWidth;
     int32_t renderHeight;
     float aspectRatio;
-
-    static void init(Context &ctx,
-                     const RendererBridge &bridge);
 };
 
 }

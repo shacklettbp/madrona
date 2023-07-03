@@ -14,7 +14,7 @@ using namespace base;
 using namespace math;
 
 inline void clearInstanceCount(Context &,
-                               const RendererState &renderer_state)
+                               const BatchRendererState &renderer_state)
 {
     *(renderer_state.numInstances) = 0;
 }
@@ -25,7 +25,7 @@ inline void instanceTransformSetup(Context &ctx,
                                    const Scale &scale,
                                    const ObjectID &obj_id)
 {
-    RendererState &renderer_state = ctx.singleton<RendererState>();
+    BatchRendererState &renderer_state = ctx.singleton<BatchRendererState>();
 
 #if defined(MADRONA_BATCHRENDER_RT)
     AtomicU32Ref count_atomic(
@@ -74,10 +74,10 @@ inline void instanceTransformSetup(Context &ctx,
 inline void updateViewData(Context &ctx,
                            const Position &pos,
                            const Rotation &rot,
-                           const ViewSettings &view_settings)
+                           const BatchRenderCamera &view_settings)
 {
-    RendererState &renderer_state = ctx.singleton<RendererState>();
-    int32_t view_idx = view_settings.viewID.idx;
+    BatchRendererState &renderer_state = ctx.singleton<BatchRendererState>();
+    int32_t view_idx = view_settings.viewIDX;
 
 #if defined(MADRONA_BATCHRENDER_RT)
     auto camera_pos =
@@ -107,7 +107,7 @@ inline void updateViewData(Context &ctx,
 #ifdef MADRONA_GPU_MODE
 
 inline void readbackCount(Context &ctx,
-                          RendererState &renderer_state)
+                          BatchRendererState &renderer_state)
 {
     if (ctx.worldID().idx == 0) {
         *renderer_state.count_readback = renderer_state.numInstances->primitiveCount;
@@ -117,12 +117,13 @@ inline void readbackCount(Context &ctx,
 
 #endif
 
-void RenderingSystem::registerTypes(ECSRegistry &registry)
+void BatchRenderingSystem::registerTypes(ECSRegistry &registry)
 {
-    registry.registerSingleton<RendererState>();
+    registry.registerComponent<BatchRenderCamera>();
+    registry.registerSingleton<BatchRendererState>();
 }
 
-TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
+TaskGraph::NodeID BatchRenderingSystem::setupTasks(TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> deps)
 {
     // FIXME: It feels like we should have persistent slots for renderer
@@ -131,7 +132,7 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
     // double buffering
     auto instance_clear = builder.addToGraph<ParallelForNode<Context,
         clearInstanceCount,
-        RendererState>>(deps);
+        BatchRendererState>>(deps);
 
     auto instance_setup = builder.addToGraph<ParallelForNode<Context,
         instanceTransformSetup,
@@ -144,12 +145,12 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
         updateViewData,
         Position,
         Rotation,
-        ViewSettings>>({instance_setup});
+        BatchRenderCamera>>({instance_setup});
 
 #ifdef MADRONA_GPU_MODE
     auto readback_count = builder.addToGraph<ParallelForNode<Context,
         readbackCount,
-        RendererState>>({viewdata_update});
+        BatchRendererState>>({viewdata_update});
 
     return readback_count;
 #else
@@ -157,21 +158,21 @@ TaskGraph::NodeID RenderingSystem::setupTasks(TaskGraph::Builder &builder,
 #endif
 }
 
-void RenderingSystem::reset([[maybe_unused]] Context &ctx)
+void BatchRenderingSystem::reset([[maybe_unused]] Context &ctx)
 {
 #if defined(MADRONA_BATCHRENDER_METAL)
-    RendererState &renderer_state = ctx.singleton<RendererState>();
+    BatchRendererState &renderer_state = ctx.singleton<BatchRendererState>();
     *renderer_state.numViews = 0;
 #endif
 }
 
-ViewSettings RenderingSystem::setupView(Context &ctx,
+BatchRenderCamera BatchRenderingSystem::setupView(Context &ctx,
                                         float vfov_degrees,
                                         float z_near,
                                         math::Vector3 camera_offset,
-                                        ViewID view_id)
+                                        int32_t view_idx)
 {
-    RendererState &renderer_state = ctx.singleton<RendererState>();
+    BatchRendererState &renderer_state = ctx.singleton<BatchRendererState>();
 
     float fov_scale =
 #ifndef MADRONA_BATCHRENDER_RT
@@ -190,21 +191,22 @@ ViewSettings RenderingSystem::setupView(Context &ctx,
 #endif
         fov_scale;
 
-    return ViewSettings {
+    return BatchRenderCamera {
         x_scale,
         y_scale,
         z_near,
         camera_offset,
-        view_id,
+        view_idx,
     };
 }
 
-void RendererState::init(Context &ctx, const RendererBridge &bridge)
+void BatchRenderingSystem::init(
+    Context &ctx, const BatchRendererECSBridge *bridge)
 {
-    RendererState &renderer_state = ctx.singleton<RendererState>();
+    BatchRendererState &renderer_state = ctx.singleton<BatchRendererState>();
     int32_t world_idx = ctx.worldID().idx;
 
-    new (&renderer_state) RendererState {
+    new (&renderer_state) BatchRendererState {
 #if defined(MADRONA_BATCHRENDER_RT)
         bridge.iface.tlasInstancesBase,
         bridge.iface.numInstances,
@@ -215,15 +217,15 @@ void RendererState::init(Context &ctx, const RendererBridge &bridge)
         bridge.iface.numInstancesReadback,
 #endif
 #elif defined (MADRONA_BATCHRENDER_METAL)
-        bridge.iface.views[world_idx],
-        &bridge.iface.numViews[world_idx],
-        bridge.iface.instanceData,
-        bridge.iface.numInstances,
+        bridge->views[world_idx],
+        &bridge->numViews[world_idx],
+        bridge->instanceData,
+        bridge->numInstances,
 #endif
-        bridge.iface.renderWidth,
-        bridge.iface.renderHeight,
-        float(bridge.iface.renderWidth) /
-            float(bridge.iface.renderHeight),
+        bridge->renderWidth,
+        bridge->renderHeight,
+        float(bridge->renderWidth) /
+            float(bridge->renderHeight),
     };
 }
 

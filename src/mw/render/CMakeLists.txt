@@ -1,13 +1,14 @@
 add_library(madrona_mw_render STATIC
     ${MADRONA_INC_DIR}/render/mw.hpp
-    batch_renderer_system.cpp
+    interop.hpp batch_renderer_system.cpp
 )
 
 target_link_libraries(madrona_mw_render PUBLIC
     madrona_mw_core
 )
 
-if (TARGET madrona_render_vk AND TARGET madrona_cuda AND TARGET madrona_sdl2)
+if (TARGET madrona_render_vk AND
+        TARGET madrona_cuda AND TARGET madrona_sdl2)
     add_library(madrona_batch_render STATIC
         batch_renderer.hpp
         vk/batch_renderer.cpp
