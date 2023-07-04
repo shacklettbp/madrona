@@ -48,9 +48,102 @@ SamplerState linearSampler;
 [[vk::binding(11, 0)]]
 StructuredBuffer<SkyData> skyBuffer;
 
+[[vk::binding(12, 0)]]
+Texture3D<float4> shadowOffsetsLUT;
+
 #include "lighting.h"
 
 #define SHADOW_PCF_PIXEL_TOLERANCE 3
+
+#define  SHADOW_OFFSET_OUTER  32
+#define  SHADOW_OFFSET_FILTER_SIZE  4
+#define SHADOW_MAP_RANDOM_RADIUS 5
+
+
+float shadowFactorRandomSample(float3 world_pos, uint2 target_pixel)
+{
+    uint2 shadow_map_dim;
+    shadowMap.GetDimensions(shadow_map_dim.x, shadow_map_dim.y);
+
+
+    float4 world_pos_v4 = float4(world_pos.xyz, 1.f);
+
+    // Light space position
+    float4 ls_pos = mul(shadowViewDataBuffer[pushConst.viewIdx].viewProjectionMatrix, world_pos_v4);
+    ls_pos.xyz /= ls_pos.w;
+
+    float2 uv = ls_pos.xy * 0.5 + float2(0.5, 0.5);
+
+
+
+    uint2 sample_slice = //mod(target_pixel, uint2(SHADOW_OFFSET_OUTER, SHADOW_OFFSET_OUTER));
+        uint2(target_pixel.x % SHADOW_OFFSET_OUTER, target_pixel.y % SHADOW_OFFSET_OUTER);
+    uint3 offset_coord = float3(0, sample_slice);
+
+
+    float total = 0.0;
+
+    float texel_width = 1.0 / (float)shadow_map_dim.x;
+    float texel_height = 1.0 / (float)shadow_map_dim.y;
+    float2 texel_size = float2(texel_width, texel_height);
+
+    
+
+    for (int i = 0; i < 4; ++i) {
+        offset_coord.x = i;
+        float4 offsets = shadowOffsetsLUT[offset_coord] * (float)SHADOW_MAP_RANDOM_RADIUS;
+
+        float2 sample_uv = uv + offsets.xy * texel_size;
+
+        float map_depth = shadowMap.SampleLevel(linearSampler, sample_uv, 0);
+        if (map_depth < ls_pos.z) {
+           total += 1.0;
+        } else {
+           total += 0.0;
+        }
+
+        sample_uv = uv + offsets.zw * texel_size;
+        map_depth = shadowMap.SampleLevel(linearSampler, sample_uv, 0);
+        if (map_depth < ls_pos.z) {
+           total += 1.0;
+        } else {
+           total += 0.0;
+        }
+    }
+
+    float shadow_factor = total / 8.0;
+
+    // If the shadow factor lies in between in/out of shadow, need to do more random sampling.
+    if (shadow_factor != 0.0 && shadow_factor != 1.0) {
+        int num_samples = int(SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE / 2);
+        
+        for (int i = 4; i < num_samples; ++i) {
+            offset_coord.x = i;
+            float4 offsets = shadowOffsetsLUT[offset_coord] * (float)SHADOW_MAP_RANDOM_RADIUS;
+
+            float2 sample_uv = uv + offsets.xy * texel_size;
+
+            float map_depth = shadowMap.SampleLevel(linearSampler, sample_uv, 0);
+            if (map_depth < ls_pos.z) {
+                total += 1.0;
+            } else {
+                total += 0.0;
+            }
+
+            sample_uv = uv + offsets.zw * texel_size;
+            map_depth = shadowMap.SampleLevel(linearSampler, sample_uv, 0);
+            if (map_depth < ls_pos.z) {
+                total += 1.0;
+            } else {
+                total += 0.0;
+            }
+        }
+
+        shadow_factor = total / float(num_samples * 2);
+    }
+
+    return shadow_factor;
+}
 
 float shadowFactor(float3 world_pos, float3 world_normal)
 {
@@ -147,7 +240,7 @@ float3 directionalRadianceBRDF(
 }
 
 // Assume Y-UP for parameters
-float3 accumulateSunRadianceBRDF(in GBufferData gbuffer, float roughness, float metal, float r, float muSun)
+float3 accumulateSunRadianceBRDF(in GBufferData gbuffer, float roughness, float metal, float r, float muSun, uint2 target_pixel)
 { 
     float3 ret = float3(0.0, 0.0, 0.0);
 
@@ -161,13 +254,14 @@ float3 accumulateSunRadianceBRDF(in GBufferData gbuffer, float roughness, float 
                 skyBuffer[0], transmittanceLUT, r, muSun),
                 normalize(-lights[0].lightDir.xzy));
 
-    float shadow_factor = shadowFactor(gbuffer.wPosition, gbuffer.wNormal);
+    // float shadow_factor = shadowFactor(gbuffer.wPosition, gbuffer.wNormal);
+    float shadow_factor = shadowFactorRandomSample(gbuffer.wPosition, target_pixel);
 
     return ret * shadow_factor;
 }
 
 // Assume Y-UP for parameters
-float4 getPointRadianceBRDF(float roughness, float metal, in GBufferData gbuffer) 
+float4 getPointRadianceBRDF(float roughness, float metal, in GBufferData gbuffer, uint2 target_pixel) 
 {
     float3 skyIrradiance, sunIrradiance, pointRadiance;
     { // Calculate sun and sky irradiance which will contribute to the final BRDF
@@ -185,7 +279,7 @@ float4 getPointRadianceBRDF(float roughness, float metal, in GBufferData gbuffer
             (1.0 + dot(normal, p) / r) * 0.5;
 
         float3 accumulatedRadiance = accumulateSunRadianceBRDF(
-                gbuffer, roughness, metal, r, muSun);
+                gbuffer, roughness, metal, r, muSun, target_pixel);
 
         pointRadiance = accumulatedRadiance + gbuffer.albedo.rgb * (1.0 / M_PI) * skyIrradiance;
     }
@@ -256,7 +350,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         gbuffer_data.wCameraPos = pushConst.viewPos.xzy;
 
         // Radiance at the rasterized pixel
-        float4 point_radiance = getPointRadianceBRDF(0.4, 0.2, gbuffer_data);
+        float4 point_radiance = getPointRadianceBRDF(0.4, 0.2, gbuffer_data, targetPixel);
 
         float3 sun_direction = normalize(-lights[0].lightDir.xzy);
 

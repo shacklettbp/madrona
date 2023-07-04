@@ -22,6 +22,9 @@
 #include "shader.hpp"
 
 #include <fstream>
+#include <random>
+
+#include <signal.h>
 
 using namespace std;
 
@@ -52,7 +55,7 @@ namespace InternalConfig {
 inline constexpr uint32_t numFrames = 2;
 inline constexpr uint32_t initMaxTransforms = 100000;
 inline constexpr uint32_t initMaxMatIndices = 100000;
-inline constexpr uint32_t shadowMapSize = 4096;
+inline constexpr uint32_t shadowMapSize = 4096*2;
 inline constexpr uint32_t maxLights = 10;
 inline constexpr VkFormat gbufferFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 inline constexpr VkFormat skyFormatHighp = VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -1454,6 +1457,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet lighting_set,
                       VkDescriptorSet shadow_gen_set,
                       Sky &sky,
+                      ShadowOffsets &shadow_offsets,
                       Frame *dst)
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
@@ -1483,7 +1487,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 22> desc_updates;
+    std::array<VkWriteDescriptorSet, 23> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -1603,6 +1607,13 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     sky_info.range = buffer_sizes[7];
 
     DescHelper::storage(desc_updates[18], lighting_set, &sky_info, 11);
+
+    VkDescriptorImageInfo shadow_offsets_info;
+    shadow_offsets_info.imageView = shadow_offsets.view;
+    shadow_offsets_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    shadow_offsets_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::textures(desc_updates[22], lighting_set, &shadow_offsets_info, 1, 12, 0);
 
 
 
@@ -1961,6 +1972,174 @@ inline constexpr size_t SCATTERING_TEXTURE_HEIGHT = SCATTERING_TEXTURE_MU_SIZE;
 inline constexpr size_t SCATTERING_TEXTURE_DEPTH = SCATTERING_TEXTURE_R_SIZE;
 inline constexpr size_t IRRADIANCE_TEXTURE_WIDTH = 64;
 inline constexpr size_t IRRADIANCE_TEXTURE_HEIGHT = 16;
+inline constexpr size_t SHADOW_OFFSET_OUTER = 32;
+inline constexpr size_t SHADOW_OFFSET_FILTER_SIZE = 4;
+
+static ShadowOffsets loadShadowOffsets(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
+{
+    uint32_t num_offsets = SHADOW_OFFSET_OUTER * SHADOW_OFFSET_OUTER * (SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE);
+
+    auto [offsets_tex, offsets_reqs] = alloc.makeTexture3D(
+        SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE / 2, 
+        SHADOW_OFFSET_OUTER, SHADOW_OFFSET_OUTER, 
+        1, VK_FORMAT_R32G32B32A32_SFLOAT);
+
+    HostBuffer offsets_hb_staging = alloc.makeStagingBuffer(offsets_reqs.size);
+
+    math::Vector2 *offsets = (math::Vector2 *)offsets_hb_staging.ptr;
+
+    std::random_device rd;
+    std::mt19937 eng(rd());
+
+    std::uniform_real_distribution<float> distr(-0.5f, 0.5f);
+
+    uint32_t pixel_idx = 0;
+    for (int y = 0; y < (int)SHADOW_OFFSET_OUTER; ++y) {
+        for (int x = 0; x < (int)SHADOW_OFFSET_OUTER; ++x) {
+            for (int v = (int)SHADOW_OFFSET_FILTER_SIZE-1; v >= 0; v--) {
+                for (int u = 0; u < (int)SHADOW_OFFSET_FILTER_SIZE; ++u) {
+                    float r0 = distr(eng);
+                    float r1 = distr(eng);
+
+                    float v0 = ((float)u + 0.5f + r0) / (float)SHADOW_OFFSET_FILTER_SIZE;
+                    float v1 = ((float)v + 0.5f + r1) / (float)SHADOW_OFFSET_FILTER_SIZE;
+
+                    assert(pixel_idx < num_offsets);
+
+                    offsets[pixel_idx].x = std::sqrtf(v1) * std::cosf(2.f * M_PI * v0);
+                    offsets[pixel_idx].y = std::sqrtf(v1) * std::sinf(2.f * M_PI * v0);
+
+                    pixel_idx++;
+                }
+            }
+        }
+    }
+
+    offsets_hb_staging.flush(dev);
+
+    std::optional<VkDeviceMemory> offsets_backing = alloc.alloc(offsets_reqs.size);
+    assert(offsets_backing.has_value());
+
+    dev.dt.bindImageMemory(dev.hdl, offsets_tex.image, offsets_backing.value(), 0);
+
+    VkCommandPool tmp_pool = makeCmdPool(dev, dev.gfxQF);
+    VkCommandBuffer cmdbuf = makeCmdBuffer(dev, tmp_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+
+    VkCommandBufferBeginInfo begin_info = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        nullptr,
+        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        nullptr
+    };
+
+    dev.dt.beginCommandBuffer(cmdbuf, &begin_info);
+    {
+        array<VkImageMemoryBarrier, 1> copy_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                0,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                offsets_tex.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(cmdbuf,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                copy_prepare.size(), copy_prepare.data());
+
+#if 1
+        VkBufferImageCopy copy = {};
+        copy.bufferOffset = 0;
+        copy.bufferRowLength = 0;
+        copy.bufferImageHeight = 0;
+        copy.imageExtent.width = SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE / 2;
+        copy.imageExtent.height = SHADOW_OFFSET_OUTER;
+        copy.imageExtent.depth = SHADOW_OFFSET_OUTER;
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.mipLevel = 0;
+        copy.imageSubresource.baseArrayLayer = 0;
+        copy.imageSubresource.layerCount = 1;
+
+        dev.dt.cmdCopyBufferToImage(cmdbuf, offsets_hb_staging.buffer,
+            offsets_tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+#endif
+
+        array<VkImageMemoryBarrier, 1> finish_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                offsets_tex.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(cmdbuf,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                finish_prepare.size(), finish_prepare.data());
+    }
+    dev.dt.endCommandBuffer(cmdbuf);
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmdbuf;
+    submit_info.signalSemaphoreCount = 0;
+    submit_info.waitSemaphoreCount = 0;
+
+    dev.dt.queueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE);
+
+    dev.dt.deviceWaitIdle(dev.hdl);
+    dev.dt.freeCommandBuffers(dev.hdl, tmp_pool, 1, &cmdbuf);
+    dev.dt.destroyCommandPool(dev.hdl, tmp_pool, nullptr);
+
+    VkImageViewCreateInfo view_info {};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
+    VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+    view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info_sr.baseMipLevel = 0;
+    view_info_sr.levelCount = 1;
+    view_info_sr.baseArrayLayer = 0;
+    view_info_sr.layerCount = 1;
+
+    VkImageView offsets_view;
+    view_info.image = offsets_tex.image;
+    view_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &offsets_view));
+
+    return {
+        std::move(offsets_tex),
+        offsets_view,
+        offsets_backing.value(),
+        SHADOW_OFFSET_OUTER,
+        SHADOW_OFFSET_FILTER_SIZE
+    };
+}
 
 static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 {
@@ -2339,7 +2518,8 @@ Renderer::Renderer(uint32_t gpu_id,
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
       loaded_assets_(0),
-      sky_(loadSky(dev, alloc, render_queue_))
+      sky_(loadSky(dev, alloc, render_queue_)),
+      shadow_offsets_(loadShadowOffsets(dev, alloc, render_queue_))
 {
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
@@ -2352,6 +2532,7 @@ Renderer::Renderer(uint32_t gpu_id,
                   deferred_lighting_.descPool.makeSet(),
                   shadow_gen_.descPool.makeSet(),
                   sky_,
+                  shadow_offsets_,
                   &frames_[i]);
     }
 }
@@ -2394,16 +2575,19 @@ Renderer::~Renderer()
     dev.dt.destroyImageView(dev.hdl, sky_.irradianceView, nullptr);
     dev.dt.destroyImageView(dev.hdl, sky_.mieView, nullptr);
     dev.dt.destroyImageView(dev.hdl, sky_.scatteringView, nullptr);
+    dev.dt.destroyImageView(dev.hdl, shadow_offsets_.view, nullptr);
 
     dev.dt.freeMemory(dev.hdl, sky_.transmittanceBacking, nullptr);
     dev.dt.freeMemory(dev.hdl, sky_.irradianceBacking, nullptr);
     dev.dt.freeMemory(dev.hdl, sky_.mieBacking, nullptr);
     dev.dt.freeMemory(dev.hdl, sky_.scatteringBacking, nullptr);
+    dev.dt.freeMemory(dev.hdl, shadow_offsets_.backing, nullptr);
 
     dev.dt.destroyImage(dev.hdl, sky_.transmittance.image, nullptr);
     dev.dt.destroyImage(dev.hdl, sky_.irradiance.image, nullptr);
     dev.dt.destroyImage(dev.hdl, sky_.singleMieScattering.image, nullptr);
     dev.dt.destroyImage(dev.hdl, sky_.scattering.image, nullptr);
+    dev.dt.destroyImage(dev.hdl, shadow_offsets_.offsets.image, nullptr);
 
     dev.dt.destroyFence(dev.hdl, load_fence_, nullptr);
     dev.dt.destroyCommandPool(dev.hdl, load_cmd_pool_, nullptr);
@@ -2793,138 +2977,6 @@ math::Mat4x4 perspective(float fovy, float aspect, float near, float far)
     return projection;
 }
 
-static void packShadowView(const Device &dev,
-                     HostBuffer &staging,
-                     HostBuffer &view_staging,
-                     PackedViewData *sim_staging_ptr,
-                     uint32_t view_idx,
-                     const ViewerCam &cam,
-                     math::Vector3 light_dir,
-                     float aspect,
-                     float far,
-                     float near)
-{
-    ShadowViewData *data = (ShadowViewData *)staging.ptr;
-
-    PackedViewData *viewData = (PackedViewData *)view_staging.ptr;
-    if (view_idx != 0)
-    {
-        viewData = &sim_staging_ptr[view_idx - 1];
-    }
-
-    math::Vector3 cam_position = { viewData->data[0].x, viewData->data[0].y, viewData->data[0].z };
-    math::Quat rotation;
-    rotation.w = viewData->data[0].w;
-    rotation.x = viewData->data[1].x;
-    rotation.y = viewData->data[1].y;
-    rotation.z = viewData->data[1].z;
-
-    rotation = rotation.inv();
-
-    math::Vector3 cam_view = rotation.rotateVec(math::Vector3{0.0f, 1.0f, 0.0f});
-
-    // World space positions / directions required to update the shadow matrix
-    math::Vector3 ws_position = cam_position;
-    math::Vector3 ws_direction = normalize(cam_view);
-    math::Vector3 ws_up = math::Vector3{0.000000001f, 0.000000001f, 1.0f};
-    math::Vector3 ws_light_dir = normalize(light_dir);
-
-#if 1
-    std::swap(ws_position.y, ws_position.z);
-    std::swap(ws_direction.y, ws_direction.z);
-    std::swap(ws_up.y, ws_up.z);
-    std::swap(ws_light_dir.y, ws_light_dir.z);
-#endif
-
-    math::Mat4x4 view = lookAt(math::Vector3{}, ws_light_dir, ws_up);
-
-    float far_width, near_width, far_height, near_height;
-
-    far_height = 2.0f * far * tan(math::toRadians(cam.fov) / 2.0f);
-    near_height = 2.0f * near * tan(math::toRadians(cam.fov) / 2.0f);
-    far_width = far_height * aspect;
-    near_width = near_height * aspect;
-
-#if 0
-    far_width = 2.0f * far * tan(math::toRadians(cam.fov) / 2.0f);
-    near_width = 2.0f * near * tan(math::toRadians(cam.fov) / 2.0f);
-    far_height = far_width / aspect;
-    near_height = near_width / aspect;
-#endif
-
-    math::Vector3 center_near = ws_position + ws_direction * near;
-    math::Vector3 center_far = ws_position + ws_direction * far;
-    math::Vector3 right_view_ax = normalize(cross(ws_direction, ws_up));
-    math::Vector3 up_view_ax = -normalize(cross(ws_direction, right_view_ax));
-
-    float far_width_half = far_width / 2.0f;
-    float near_width_half = near_width / 2.0f;
-    float far_height_half = far_height / 2.0f;
-    float near_height_half = near_height / 2.0f;
-
-    // f = far, n = near, l = left, r = right, t = top, b = bottom
-    enum OrthoCorner : int32_t {
-        flt, flb,
-        frt, frb,
-        nlt, nlb,
-        nrt, nrb
-    };    
-
-    math::Vector4 ls_corners[8];
-
-    // Light space
-    ls_corners[flt] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * far - right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
-    ls_corners[flb] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * far - right_view_ax * far_width_half - up_view_ax * far_height_half, 1.0f));
-    ls_corners[frt] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * far + right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
-    ls_corners[frb] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * far + right_view_ax * far_width_half - up_view_ax * far_height_half, 1.0f));
-    ls_corners[nlt] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * near - right_view_ax * near_width_half + up_view_ax * near_height_half, 1.0f));
-    ls_corners[nlb] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * near - right_view_ax * near_width_half - up_view_ax * near_height_half, 1.0f));
-    ls_corners[nrt] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * near + right_view_ax * near_width_half + up_view_ax * near_height_half, 1.0f));
-    ls_corners[nrb] = view.txfmPoint(math::Vector4::fromVector3(ws_position + ws_direction * near + right_view_ax * near_width_half - up_view_ax * near_height_half, 1.0f));
-
-    float x_min, x_max, y_min, y_max, z_min, z_max;
-
-    x_min = x_max = ls_corners[0].x;
-    y_min = y_max = ls_corners[0].y;
-    z_min = z_max = ls_corners[0].z;
-
-    for (uint32_t i = 1; i < 8; ++i) {
-        if (x_min > ls_corners[i].x) x_min = ls_corners[i].x;
-        if (x_max < ls_corners[i].x) x_max = ls_corners[i].x;
-
-        if (y_min > ls_corners[i].y) y_min = ls_corners[i].y;
-        if (y_max < ls_corners[i].y) y_max = ls_corners[i].y;
-
-        if (z_min > ls_corners[i].z) z_min = ls_corners[i].z;
-        if (z_max < ls_corners[i].z) z_max = ls_corners[i].z;
-    }
-    
-    z_min = z_min - (z_max - z_min);
-
-    // Y is up
-    math::Mat4x4 projection = math::Mat4x4{{
-            { 2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f},
-            {0.0f,                    2.0f / (y_max - y_min), 0.0f,                   0.0f},
-            {0.0f,                    0.0f,                   1.0f / (z_max - z_min), 0.0f },
-            {-(x_max + x_min) / (x_max - x_min), -(y_max + y_min) / (y_max - y_min), -(z_min) / (z_max - z_min), 1.0f}}};
-
-    data->viewProjectionMatrix = projection.compose(view);
-    data->cameraViewProjectionMatrix = perspective(cam.fov, aspect, 1.0f, 1000.0f).
-        compose(lookAt(ws_position, ws_position + ws_direction, ws_up));
-
-    {
-        math::Vector3 f = math::Vector3((ws_direction).normalize());
-        math::Vector3 s = math::Vector3((cross(f, ws_up).normalize()));
-        math::Vector3 u = math::Vector3(cross(s, f).normalize());
-
-        data->cameraRight = {s.x, s.y, s.z, 1.0f};
-        data->cameraUp = {u.x, u.y, u.z, 1.0f};
-        data->cameraForward = {f.x, f.y, f.z, 1.0f};
-    }
-
-    staging.flush(dev);
-}
-
 static void packSky( const Device &dev,
                      HostBuffer &staging)
 {
@@ -2989,6 +3041,8 @@ static void packLighting(const Device &dev,
 
 static void issueShadowGen(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, uint32_t view_idx, uint32_t max_views, uint32_t num_views)
 {
+    // raise(SIGTRAP);
+
     {
         VkBufferMemoryBarrier compute_prepare = {
             VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -3208,40 +3262,6 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
                          frame.renderInput.buffer,
                          1, &light_copy);
-
-#if 0
-    {
-        PackedViewData *sim_start = nullptr;
-
-        uint32_t num_sim_views =
-            engine_interop_.bridge.numViews[cfg.worldIDX];
-        if (num_sim_views > 0) 
-        {
-            VkDeviceSize world_view_byte_offset = engine_interop_.viewBaseOffset +
-                cfg.worldIDX * engine_interop_.maxViewsPerWorld *
-                sizeof(PackedViewData);
-
-            sim_start = (PackedViewData *)((char *)
-                engine_interop_.renderInputStaging.ptr + world_view_byte_offset);
-        }
-
-        packShadowView(dev, frame.shadowViewStaging, frame.viewStaging, 
-                sim_start,
-                cfg.viewIDX, cam,
-                lights_[0].lightDir.xyz(), (float)fb_width_ / (float)fb_height_, 1.0f, 50.0f);
-
-        VkBufferCopy shadow_copy {
-            .srcOffset = 0,
-                .dstOffset = frame.shadowOffset,
-                .size = sizeof(ShadowViewData)
-        };
-
-        dev.dt.cmdCopyBuffer(draw_cmd, frame.shadowViewStaging.buffer,
-                frame.renderInput.buffer,
-                1, &shadow_copy);
-    }
-#else
-#endif
 
     packSky(dev, frame.skyStaging);
 

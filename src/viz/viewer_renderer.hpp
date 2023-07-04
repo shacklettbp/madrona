@@ -161,6 +161,16 @@ struct ImGuiRenderState {
     VkRenderPass renderPass;
 };
 
+struct ShadowOffsets
+{
+    render::vk::LocalTexture offsets;
+    VkImageView view;
+    VkDeviceMemory backing;
+
+    uint32_t outerDimension;
+    uint32_t filterSize;
+};
+
 struct Sky {
     render::vk::LocalTexture transmittance;
     render::vk::LocalTexture scattering;
@@ -264,6 +274,7 @@ private:
     DynArray<AssetData> loaded_assets_;
 
     Sky sky_;
+    ShadowOffsets shadow_offsets_;
 };
 
 }
