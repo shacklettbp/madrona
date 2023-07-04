@@ -16,7 +16,9 @@ using namespace math;
 inline void clearInstanceCount(Context &,
                                const BatchRendererState &renderer_state)
 {
+#ifdef MADRONA_BATCHRENDER_METAL
     *(renderer_state.numInstances) = 0;
+#endif
 }
 
 inline void instanceTransformSetup(Context &ctx,
@@ -35,7 +37,7 @@ inline void instanceTransformSetup(Context &ctx,
 
     AccelStructInstance &as_inst = renderer_state.tlasInstanceBuffer[inst_idx];
 
-    Mat3x4 o2w = Mat3x4::fromTRS(pos + renderer_state.worldOffset, rot, scale);
+    Mat3x4 o2w = Mat3x4::fromTRS(pos, rot, scale);
 
     as_inst.transform.matrix[0][0] = o2w.cols[0].x;
     as_inst.transform.matrix[0][1] = o2w.cols[1].x;
@@ -81,7 +83,7 @@ inline void updateViewData(Context &ctx,
 
 #if defined(MADRONA_BATCHRENDER_RT)
     auto camera_pos =
-        pos + view_settings.cameraOffset + renderer_state.worldOffset;
+        pos + view_settings.cameraOffset;
 
     PackedViewData &renderer_view = renderer_state.packedViews[view_idx];
 
@@ -180,7 +182,7 @@ BatchRenderCamera BatchRenderingSystem::setupView(Context &ctx,
 #endif
             tanf(toRadians(vfov_degrees * 0.5f));
 
-#if defined(MADRONA_BATCHRENDER_METAL) || defined(MADRONA_VIZ)
+#if defined(MADRONA_BATCHRENDER_METAL)
     (*renderer_state.numViews) += 1;
 #endif
 
@@ -208,13 +210,12 @@ void BatchRenderingSystem::init(
 
     new (&renderer_state) BatchRendererState {
 #if defined(MADRONA_BATCHRENDER_RT)
-        bridge.iface.tlasInstancesBase,
-        bridge.iface.numInstances,
-        bridge.iface.blases,
-        bridge.iface.packedViews[world_idx],
-        bridge.worldOffset,
+        bridge->tlasInstancesBase,
+        bridge->numInstances,
+        bridge->blases,
+        bridge->packedViews[world_idx],
 #ifdef MADRONA_GPU_MODE
-        bridge.iface.numInstancesReadback,
+        bridge->numInstancesReadback,
 #endif
 #elif defined (MADRONA_BATCHRENDER_METAL)
         bridge->views[world_idx],

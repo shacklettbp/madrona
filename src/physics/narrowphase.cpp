@@ -444,7 +444,7 @@ static EdgeQuery queryEdgeDirections(
     MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     const HullState &a, const HullState &b)
 {
-    Vector3 normal;
+    Vector3 normal {};
     int edgeAMaxDistance = 0;
     int edgeBMaxDistance = 0;
     float maxDistance = -FLT_MAX;

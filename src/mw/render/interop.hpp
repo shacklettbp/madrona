@@ -81,7 +81,6 @@ struct BatchRendererState {
     AccelStructRangeInfo *numInstances;
     uint64_t *blases;
     PackedViewData *packedViews;
-    math::Vector3 worldOffset;
 #ifdef MADRONA_GPU_MODE
     uint32_t *count_readback;
 #endif
@@ -89,12 +88,6 @@ struct BatchRendererState {
     PerspectiveCameraData *views;
     uint32_t *numViews;
     InstanceData *instanceData;
-    uint32_t *numInstances;
-#endif
-#ifdef MADRONA_VIZ
-    PerspectiveCameraData *views;
-    uint32_t *numViews;
-    InstanceData *instances;
     uint32_t *numInstances;
 #endif
     int32_t renderWidth;
