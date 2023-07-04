@@ -42,7 +42,19 @@ public:
         X,
         Z,
         C,
-        NumKeys = C + 1,
+        G,
+        L,
+        K1,
+        K2,
+        K3,
+        K4,
+        K5,
+        K6,
+        K7,
+        K8,
+        K9,
+        K0,
+        NumKeys = K0 + 1,
     };
 
     class UserInput {
