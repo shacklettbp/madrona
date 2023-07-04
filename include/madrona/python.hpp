@@ -45,7 +45,7 @@ public:
         : v_(v)
     {}
 
-    inline ExecMode v() const
+    inline operator ExecMode() const
     {
         return v_;
     }
