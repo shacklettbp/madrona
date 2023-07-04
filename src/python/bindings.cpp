@@ -77,10 +77,13 @@ static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
 }
 
 NB_MODULE(madrona_python, m) {
-      nb::enum_<ExecMode>(m, "ExecMode")
-        .value("CPU", ExecMode::CPU)
-        .value("CUDA", ExecMode::CUDA)
-        .export_values();
+      nb::class_<madrona::py::PyExecMode>(m, "ExecMode")
+        .def_prop_ro_static("CPU", [](nb::handle) {
+            return madrona::py::PyExecMode(madrona::ExecMode::CPU);
+        })
+        .def_prop_ro_static("CUDA", [](nb::handle) {
+            return madrona::py::PyExecMode(madrona::ExecMode::CUDA);
+        });
 
     nb::class_<Tensor>(m, "Tensor")
         .def("__init__", ([](Tensor *dst, nb::ndarray<> torch_tensor) {

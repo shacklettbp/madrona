@@ -8,6 +8,7 @@
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 #include <madrona/optional.hpp>
+#include <madrona/exec_mode.hpp>
 
 #include <array>
 
@@ -35,6 +36,27 @@ private:
     cudaExternalSemaphore_t sema_;
 };
 #endif
+
+// Need to wrap the actual enum class because macos
+// RTTI for enum classes isn't consistent across libraries
+class MADRONA_PYTHON_EXPORT PyExecMode final {
+public:
+    inline PyExecMode(ExecMode v)
+        : v_(v)
+    {}
+
+    inline ExecMode v() const
+    {
+        return v_;
+    }
+
+private:
+#ifdef MADRONA_LINUX
+    virtual void key_();
+#endif
+
+    ExecMode v_;
+};
 
 class MADRONA_PYTHON_EXPORT Tensor final {
 public:

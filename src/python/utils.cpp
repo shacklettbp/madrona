@@ -29,6 +29,10 @@ void CudaSync::key_() {}
 #endif
 #endif
 
+#ifdef MADRONA_LINUX
+void PyExecMode::key_() {}
+#endif
+
 Tensor::Tensor(void *dev_ptr, ElementType type,
                               Span<const int64_t> dimensions,
                               Optional<int> gpu_id)
