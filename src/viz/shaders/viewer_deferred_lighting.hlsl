@@ -282,12 +282,10 @@ void lighting(uint3 idx : SV_DispatchThreadID)
             exp(-radiance / float3(2.0f, 2.0f, 2.0f) * pushConst.exposure);
 
         float3 diff = one - expValue;
-        
         float3 out_color = diff;
 
         gbufferAlbedo[targetPixel] = float4(out_color, 
             0.0000001f * shadowMap.SampleLevel(linearSampler, float2(0.0f, 0.0f), 0).x +
             0.0000001f * mieLUT.SampleLevel(linearSampler, float3(0.0f, 0.0f, 0.0f), 0).x);
-
     }
 }

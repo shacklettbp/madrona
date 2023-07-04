@@ -177,12 +177,16 @@ float4 vert(in uint vid : SV_VertexID,
         view_pos.y);
 
     // v2f.viewPos = view_pos;
-    v2f.normal = normalize(mul(toMat(instance_data.rotation), vert.normal));
-    // v2f.normal = normalize(
-        // rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
+#if 0
+    v2f.normal = normalize(
+        rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
+#endif
+    v2f.normal = normalize(
+        rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
     // v2f.uv = vert.uv;
     v2f.color = color;
-    v2f.position = instance_data.scale * mul(toMat(instance_data.rotation), vert.position.xyz) + instance_data.position;
+    v2f.position = rotateVec(instance_data.rotation,
+                             instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
 
     return clip_pos;
