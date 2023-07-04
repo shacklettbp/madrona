@@ -126,7 +126,7 @@ if (FRONTEND_MSVC)
 endif()
 
 if (NOT WIN32) #FIX
-    target_link_libraries(tinyusdz_object PRIVATE
+    target_link_libraries(tinyusdz_object
         madrona_libcxx
     )
 endif()
