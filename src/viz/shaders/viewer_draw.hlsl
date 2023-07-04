@@ -11,7 +11,7 @@ StructuredBuffer<PackedViewData> viewDataBuffer;
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 
 [[vk::binding(2, 0)]]
-StructuredBuffer<DrawMaterialData> drawMaterialBuffer;
+StructuredBuffer<DrawData> drawDataBuffer;
 
 [[vk::binding(3, 0)]]
 StructuredBuffer<ShadowViewData> shadowViewDataBuffer;
@@ -145,12 +145,14 @@ void computeCompositeTransform(float3 obj_t,
 
 [shader("vertex")]
 float4 vert(in uint vid : SV_VertexID,
-            in uint instance_id : SV_InstanceID,
+            in uint draw_id : SV_InstanceID,
             out V2F v2f) : SV_Position
 {
+    DrawData draw_data = drawDataBuffer[draw_id];
+
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
-    DrawMaterialData mat = drawMaterialBuffer[instance_id];
-    float4 color = materialBuffer[mat.materialIdx].color;
+    float4 color = materialBuffer[draw_data.materialID].color;
+    uint instance_id = draw_data.instanceID;
 
     PerspectiveCameraData view_data =
         unpackViewData(viewDataBuffer[push_const.viewIdx]);

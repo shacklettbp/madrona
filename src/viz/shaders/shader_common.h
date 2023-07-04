@@ -134,8 +134,9 @@ struct DrawCmd {
     uint32_t firstInstance;
 };
 
-struct DrawMaterialData {
-    int32_t materialIdx;
+struct DrawData {
+    int32_t instanceID;
+    int32_t materialID;
 };
 
 #if 0

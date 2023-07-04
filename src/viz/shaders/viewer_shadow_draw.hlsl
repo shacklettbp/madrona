@@ -11,7 +11,7 @@ StructuredBuffer<PackedViewData> viewDataBuffer;
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 
 [[vk::binding(2, 0)]]
-StructuredBuffer<DrawMaterialData> drawMaterialBuffer;
+StructuredBuffer<DrawData> drawDataBuffer;
 
 [[vk::binding(3, 0)]]
 StructuredBuffer<ShadowViewData> shadowViewDataBuffer;
@@ -93,19 +93,20 @@ float3x3 toMat(float4 r)
 
 [shader("vertex")]
 float4 vert(in uint vid : SV_VertexID,
-            in uint instance_id : SV_InstanceID,
+            in uint draw_id : SV_InstanceID,
             out V2F v2f) : SV_Position
 {
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
-    DrawMaterialData mat = drawMaterialBuffer[instance_id];
-    float4 color = materialBuffer[mat.materialIdx].color;
+    DrawData draw_data = drawDataBuffer[draw_id];
+    float4 color = materialBuffer[draw_data.materialID].color;
+    uint instance_id = draw_data.instanceID;
 
     float4x4 shadow_matrix = shadowViewDataBuffer[push_const.viewIdx].viewProjectionMatrix;
 
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
 
-    float dummy = 0.00000000001f * float(drawMaterialBuffer[0].materialIdx + viewDataBuffer[0].data[0].w) + materialBuffer[0].color.w;
+    float dummy = 0.00000000001f * float(drawDataBuffer[0].materialID + viewDataBuffer[0].data[0].w) + materialBuffer[0].color.w;
 
     float4 world_space_pos = float4(
         instance_data.position + mul(toMat(instance_data.rotation), (instance_data.scale * vert.position)), 

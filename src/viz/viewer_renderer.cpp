@@ -39,7 +39,7 @@ using DrawPushConst = shader::DrawPushConst;
 using CullPushConst = shader::CullPushConst;
 using DeferredLightingPushConst = shader::DeferredLightingPushConst;
 using DrawCmd = shader::DrawCmd;
-using DrawMaterialData = shader::DrawMaterialData;
+using DrawData = shader::DrawData;
 using PackedInstanceData = shader::PackedInstanceData;
 using PackedViewData = shader::PackedViewData;
 using ShadowViewData = shader::ShadowViewData;
@@ -1467,7 +1467,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         (int64_t)sizeof(uint32_t),
         (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
-        (int64_t)sizeof(DrawMaterialData) * max_instances * 10,
+        (int64_t)sizeof(DrawData) * max_instances * 10,
         (int64_t)sizeof(DirectionalLight) * InternalConfig::maxLights,
         (int64_t)sizeof(ShadowViewData) * (max_views + 1),
         (int64_t)sizeof(SkyData)
@@ -1516,13 +1516,13 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::storage(desc_updates[4], cull_set, &draw_info, 3);
 
-    VkDescriptorBufferInfo draw_mat_info;
-    draw_mat_info.buffer = render_input.buffer;
-    draw_mat_info.offset = buffer_offsets[3];
-    draw_mat_info.range = buffer_sizes[4];
+    VkDescriptorBufferInfo draw_data_info;
+    draw_data_info.buffer = render_input.buffer;
+    draw_data_info.offset = buffer_offsets[3];
+    draw_data_info.range = buffer_sizes[4];
 
-    DescHelper::storage(desc_updates[5], cull_set, &draw_mat_info, 4);
-    DescHelper::storage(desc_updates[6], draw_set, &draw_mat_info, 2);
+    DescHelper::storage(desc_updates[5], cull_set, &draw_data_info, 4);
+    DescHelper::storage(desc_updates[6], draw_set, &draw_data_info, 2);
 
     VkDescriptorImageInfo gbuffer_albedo_info;
     gbuffer_albedo_info.imageView = fb.colorView;
@@ -2441,7 +2441,8 @@ Renderer::~Renderer()
     glfwDestroyWindow(window.platformWindow);
 }
 
-CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs, Span<const imp::SourceMaterial> src_mats)
+CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
+                             Span<const imp::SourceMaterial> src_mats)
 {
     using namespace imp;
     using namespace math;
@@ -3339,12 +3340,15 @@ void Renderer::render(const ViewerCam &cam,
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+            .dstAccessMask = 
+                VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+                VK_ACCESS_SHADER_READ_BIT,
         };
 
         dev.dt.cmdPipelineBarrier(draw_cmd,
                                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                  VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+                                  VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                                    VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
                                   0, 1, &cull_draw_barrier, 0, nullptr,
                                   0, nullptr);
     } else {
