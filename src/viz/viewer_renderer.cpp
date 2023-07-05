@@ -1636,6 +1636,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     shadow_offsets_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::textures(desc_updates[22], lighting_set, &shadow_offsets_info, 1, 12, 0);
+    // DescHelper::storageImage(desc_updates[22], lighting_set, &shadow_offsets_info, 12);
 
 
 

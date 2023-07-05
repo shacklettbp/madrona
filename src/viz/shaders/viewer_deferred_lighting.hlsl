@@ -59,11 +59,19 @@ Texture3D<float4> shadowOffsetsLUT;
 #define  SHADOW_OFFSET_FILTER_SIZE  8
 #define SHADOW_MAP_RANDOM_RADIUS 5
 
+float4 get_offset_at(uint3 offset_coord, uint3 offset_dim)
+{
+    float3 uv = (float3(offset_coord) + float3(0.5, 0.5, 0.5)) / float3(offset_dim);
+    return shadowOffsetsLUT.SampleLevel(linearSampler, uv, 0);
+}
 
 float shadowFactorRandomSample(float3 world_pos, uint2 target_pixel)
 {
     uint2 shadow_map_dim;
     shadowMap.GetDimensions(shadow_map_dim.x, shadow_map_dim.y);
+
+    uint3 shadow_offset_dim;
+    shadowOffsetsLUT.GetDimensions(shadow_offset_dim.x, shadow_offset_dim.y, shadow_offset_dim.z);
 
 
     float4 world_pos_v4 = float4(world_pos.xyz, 1.f);
@@ -92,7 +100,8 @@ float shadowFactorRandomSample(float3 world_pos, uint2 target_pixel)
 
     for (int i = 0; i < 4; ++i) {
         offset_coord.x = i;
-        float4 offsets = shadowOffsetsLUT[offset_coord] * (float)SHADOW_MAP_RANDOM_RADIUS;
+        float4 offsets = /*shadowOffsetsLUT[offset_coord]*/
+           get_offset_at(offset_coord, shadow_offset_dim) * (float)SHADOW_MAP_RANDOM_RADIUS;
 
         float2 sample_uv = uv + offsets.xy * texel_size;
 
@@ -120,7 +129,9 @@ float shadowFactorRandomSample(float3 world_pos, uint2 target_pixel)
         
         for (int i = 4; i < num_samples; ++i) {
             offset_coord.x = i;
-            float4 offsets = shadowOffsetsLUT[offset_coord] * (float)SHADOW_MAP_RANDOM_RADIUS;
+            // float4 offsets = shadowOffsetsLUT[offset_coord] * (float)SHADOW_MAP_RANDOM_RADIUS;
+            float4 offsets = /*shadowOffsetsLUT[offset_coord]*/
+               get_offset_at(offset_coord, shadow_offset_dim) * (float)SHADOW_MAP_RANDOM_RADIUS;
 
             float2 sample_uv = uv + offsets.xy * texel_size;
 
