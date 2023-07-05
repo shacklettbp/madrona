@@ -26,6 +26,7 @@
 
 #include <signal.h>
 
+#define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
@@ -2029,8 +2030,8 @@ static ShadowOffsets loadShadowOffsets(const vk::Device &dev, MemoryAllocator &a
 
                     assert(pixel_idx < num_offsets);
 
-                    offsets[pixel_idx].x = std::sqrtf(v1) * std::cosf(2.f * M_PI * v0);
-                    offsets[pixel_idx].y = std::sqrtf(v1) * std::sinf(2.f * M_PI * v0);
+                    offsets[pixel_idx].x = std::sqrtf(v1) * std::cosf(math::pi_m2 * v0);
+                    offsets[pixel_idx].y = std::sqrtf(v1) * std::sinf(math::pi_m2 * v0);
 
                     pixel_idx++;
                 }
