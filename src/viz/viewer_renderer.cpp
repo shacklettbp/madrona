@@ -1973,7 +1973,7 @@ inline constexpr size_t SCATTERING_TEXTURE_DEPTH = SCATTERING_TEXTURE_R_SIZE;
 inline constexpr size_t IRRADIANCE_TEXTURE_WIDTH = 64;
 inline constexpr size_t IRRADIANCE_TEXTURE_HEIGHT = 16;
 inline constexpr size_t SHADOW_OFFSET_OUTER = 32;
-inline constexpr size_t SHADOW_OFFSET_FILTER_SIZE = 4;
+inline constexpr size_t SHADOW_OFFSET_FILTER_SIZE = 8;
 
 static ShadowOffsets loadShadowOffsets(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 {
