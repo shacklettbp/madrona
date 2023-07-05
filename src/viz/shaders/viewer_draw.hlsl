@@ -17,18 +17,26 @@ StructuredBuffer<DrawData> drawDataBuffer;
 StructuredBuffer<ShadowViewData> shadowViewDataBuffer;
 
 // Asset descriptor bindings
-
 [[vk::binding(0, 1)]]
 StructuredBuffer<PackedVertex> vertexDataBuffer;
 
 [[vk::binding(1, 1)]]
 StructuredBuffer<MaterialData> materialBuffer;
 
+// Texture descriptor bindings
+[[vk::binding(0, 2)]]
+Texture2D<float4> materialTexturesArray[4];
+
+[[vk::binding(1, 2)]]
+SamplerState linearSampler;
+
 struct V2F {
     [[vk::location(0)]] float3 normal : TEXCOORD0;
     [[vk::location(1)]] float3 position : TEXCOORD1;
     [[vk::location(2)]] float4 color : TEXCOORD2;
     [[vk::location(3)]] float dummy : TEXCOORD3;
+    [[vk::location(4)]] float2 uv : TEXCOORD4;
+    [[vk::location(5)]] int texIdx : TEXCOORD5;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -183,11 +191,12 @@ float4 vert(in uint vid : SV_VertexID,
 #endif
     v2f.normal = normalize(
         rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
-    // v2f.uv = vert.uv;
+    v2f.uv = vert.uv;
     v2f.color = color;
     v2f.position = rotateVec(instance_data.rotation,
                              instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
+    v2f.texIdx = materialBuffer[draw_data.materialID].textureIdx;
 
     return clip_pos;
 }
@@ -201,20 +210,16 @@ struct PixelOutput {
 [shader("pixel")]
 PixelOutput frag(in V2F v2f)
 {
-#if 0
-    float hit_angle = max(dot(normalize(v2f.normal),
-                              normalize(-v2f.viewPos)), 0.f);
-    float s = max(dot(normalize(-lightBuffer[0].lightDir.xyz), normalize(v2f.normal)), 0.0);
-#endif
-
     PixelOutput output;
     output.color = v2f.color;
     output.normal = float4(v2f.normal, 1.f);
     output.position = float4(v2f.position, v2f.dummy);
 
-    return output;
+    if (v2f.texIdx != -1) {
+        output.color *= materialTexturesArray[v2f.texIdx].SampleLevel(linearSampler, v2f.uv, 0);
+    }
 
-    // return s * v2f.color * float4(float3(hit_angle, hit_angle, hit_angle), 1.0);
+    return output;
 }
 
 #if 0

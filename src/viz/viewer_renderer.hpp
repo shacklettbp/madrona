@@ -97,14 +97,14 @@ struct ShadowFramebuffer {
 };
 
 struct MaterialTexture {
-    MaterialTexture(render::vk::LocalImage &&src_image,
+    MaterialTexture(render::vk::LocalTexture &&src_image,
                     VkImageView src_view,
                     VkDeviceMemory src_backing)
         : image(std::move(src_image)), view(src_view), backing(src_backing)
     {
     }
 
-    render::vk::LocalImage image;
+    render::vk::LocalTexture image;
     VkImageView view;
     VkDeviceMemory backing;
 };
@@ -272,8 +272,11 @@ private:
 
     render::vk::FixedDescriptorPool asset_desc_pool_cull_;
     render::vk::FixedDescriptorPool asset_desc_pool_draw_;
+    render::vk::FixedDescriptorPool asset_desc_pool_mat_tx_;
+
     VkDescriptorSet asset_set_cull_;
     VkDescriptorSet asset_set_draw_;
+    VkDescriptorSet asset_set_mat_tex_;
 
     VkCommandPool load_cmd_pool_;
     VkCommandBuffer load_cmd_;
@@ -290,7 +293,7 @@ private:
     Sky sky_;
     ShadowOffsets shadow_offsets_;
 
-    std::vector<MaterialTexture> material_textures_;
+    DynArray<MaterialTexture> material_textures_;
 };
 
 }

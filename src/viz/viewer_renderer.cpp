@@ -579,7 +579,10 @@ static PipelineShaders makeDrawShaders(
     };
 
     StackAlloc tmp_alloc;
-    return PipelineShaders(dev, tmp_alloc, shaders, {});
+    return PipelineShaders(dev, tmp_alloc, shaders,
+        Span<const BindingOverride>({
+            {BindingOverride{ 2, 0, VK_NULL_HANDLE, 100, 0 }},
+            {BindingOverride{ 2, 1, repeat_sampler, 1, 0 }}}));
 }
 
 static PipelineShaders makeShadowDrawShaders(
@@ -797,9 +800,10 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
 
     // Layout configuration
 
-    array<VkDescriptorSetLayout, 2> draw_desc_layouts {{
+    array<VkDescriptorSetLayout, 3> draw_desc_layouts {{
         shaders.getLayout(0),
         shaders.getLayout(1),
+        shaders.getLayout(2),
     }};
 
     VkPipelineLayoutCreateInfo gfx_layout_info;
@@ -2509,8 +2513,10 @@ Renderer::Renderer(uint32_t gpu_id,
       shadow_gen_(makeShadowGenPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames)),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
+      asset_desc_pool_mat_tx_(dev, object_draw_.shaders, 2, 1),
       asset_set_cull_(asset_desc_pool_cull_.makeSet()),
       asset_set_draw_(asset_desc_pool_draw_.makeSet()),
+      asset_set_mat_tex_(asset_desc_pool_mat_tx_.makeSet()),
       load_cmd_pool_(makeCmdPool(dev, dev.gfxQF)),
       load_cmd_(makeCmdBuffer(dev, load_cmd_pool_)),
       load_fence_(makeFence(dev)),
@@ -2523,7 +2529,8 @@ Renderer::Renderer(uint32_t gpu_id,
       frames_(InternalConfig::numFrames),
       loaded_assets_(0),
       sky_(loadSky(dev, alloc, render_queue_)),
-      shadow_offsets_(loadShadowOffsets(dev, alloc, render_queue_))
+      shadow_offsets_(loadShadowOffsets(dev, alloc, render_queue_)),
+      material_textures_(0)
 {
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
@@ -2573,6 +2580,12 @@ Renderer::~Renderer()
 #endif
 
         dev.dt.destroyImageView(dev.hdl, f.shadowFB.depthView, nullptr);
+    }
+
+    for (auto &tx : material_textures_) {
+        dev.dt.destroyImageView(dev.hdl, tx.view, nullptr);
+        dev.dt.destroyImage(dev.hdl, tx.image.image, nullptr);
+        dev.dt.freeMemory(dev.hdl, tx.backing, nullptr);
     }
 
     dev.dt.destroyImageView(dev.hdl, sky_.transmittanceView, nullptr);
@@ -2629,7 +2642,7 @@ Renderer::~Renderer()
     glfwDestroyWindow(window.platformWindow);
 }
 
-static std::vector<MaterialTexture> 
+static DynArray<MaterialTexture> 
 loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
              Span<const imp::SourceTexture> textures)
 {
@@ -2654,13 +2667,12 @@ loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
         const char *filename = tx.path;
         int width, height, components;
         void *pixels = stbi_load(filename, &width, &height, &components, STBI_rgb_alpha);
-        assert(components == 4);
 
         auto [texture, texture_reqs] = alloc.makeTexture2D(
                 width, height, 1, VK_FORMAT_R8G8B8A8_UNORM);
 
         HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
-        memcpy(texture_hb_staging.ptr, pixels, width * height * components * sizeof(char));
+        memcpy(texture_hb_staging.ptr, pixels, width * height * 4 * sizeof(char));
         texture_hb_staging.flush(dev);
         stbi_image_free(pixels);
 
@@ -2697,9 +2709,9 @@ loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
         copy.bufferOffset = 0;
         copy.bufferRowLength = 0;
         copy.bufferImageHeight = 0;
-        copy.imageExtent.width = SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE / 2;
-        copy.imageExtent.height = SHADOW_OFFSET_OUTER;
-        copy.imageExtent.depth = SHADOW_OFFSET_OUTER;
+        copy.imageExtent.width = width;
+        copy.imageExtent.height = height;
+        copy.imageExtent.depth = 1;
         copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         copy.imageSubresource.mipLevel = 0;
         copy.imageSubresource.baseArrayLayer = 0;
@@ -2734,7 +2746,7 @@ loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
 
         VkImageViewCreateInfo view_info {};
         view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
         VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
         view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         view_info_sr.baseMipLevel = 0;
@@ -2766,6 +2778,8 @@ loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
     dev.dt.deviceWaitIdle(dev.hdl);
     dev.dt.freeCommandBuffers(dev.hdl, tmp_pool, 1, &cmdbuf);
     dev.dt.destroyCommandPool(dev.hdl, tmp_pool, nullptr);
+
+    return dst_textures;
 }
 
 CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
@@ -2957,7 +2971,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
 
     gpu_run.submit(dev);
 
-    std::array<VkWriteDescriptorSet, 4> desc_updates;
+    std::array<VkWriteDescriptorSet, 5> desc_updates;
 
     VkDescriptorBufferInfo obj_info;
     obj_info.buffer = asset_buffer.buffer;
@@ -2986,6 +3000,19 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     mat_info.range = buffer_sizes[4];
 
     DescHelper::storage(desc_updates[3], asset_set_draw_, &mat_info, 1);
+
+    material_textures_ = loadTextures(dev, alloc, render_queue_, textures);
+
+    DynArray<VkDescriptorImageInfo> tx_infos(material_textures_.size()+1);
+    for (auto &tx : material_textures_) {
+        tx_infos.push_back({
+                VK_NULL_HANDLE,
+                tx.view,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                });
+    }
+
+    DescHelper::textures(desc_updates[4], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
@@ -3639,6 +3666,7 @@ void Renderer::render(const ViewerCam &cam,
     std::array draw_descriptors {
         frame.drawShaderSet,
         asset_set_draw_,
+        asset_set_mat_tex_
     };
 
     dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
