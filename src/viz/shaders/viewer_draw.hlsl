@@ -25,7 +25,7 @@ StructuredBuffer<MaterialData> materialBuffer;
 
 // Texture descriptor bindings
 [[vk::binding(0, 2)]]
-Texture2D<float4> materialTexturesArray[4];
+Texture2D<float4> materialTexturesArray[];
 
 [[vk::binding(1, 2)]]
 SamplerState linearSampler;
