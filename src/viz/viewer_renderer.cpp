@@ -26,6 +26,9 @@
 
 #include <signal.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 using namespace std;
 
 using namespace madrona::render;
@@ -922,7 +925,8 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     raster_info.depthClampEnable = VK_FALSE;
     raster_info.rasterizerDiscardEnable = VK_FALSE;
     raster_info.polygonMode = VK_POLYGON_MODE_FILL;
-    raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
+    // raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
+    raster_info.cullMode = VK_CULL_MODE_NONE;
     raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster_info.depthBiasEnable = VK_FALSE;
     raster_info.lineWidth = 1.0f;
@@ -2625,8 +2629,148 @@ Renderer::~Renderer()
     glfwDestroyWindow(window.platformWindow);
 }
 
+static std::vector<MaterialTexture> 
+loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
+             Span<const imp::SourceTexture> textures)
+{
+    std::vector<HostBuffer> host_buffers;
+    std::vector<MaterialTexture> dst_textures;
+
+    VkCommandPool tmp_pool = makeCmdPool(dev, dev.gfxQF);
+
+    VkCommandBuffer cmdbuf = makeCmdBuffer(dev, tmp_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+
+    VkCommandBufferBeginInfo begin_info = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        nullptr,
+        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        nullptr
+    };
+
+    dev.dt.beginCommandBuffer(cmdbuf, &begin_info);
+
+    for (const imp::SourceTexture &tx : textures)
+    {
+        const char *filename = tx.path;
+        int width, height, components;
+        void *pixels = stbi_load(filename, &width, &height, &components, STBI_rgb_alpha);
+        assert(components == 4);
+
+        auto [texture, texture_reqs] = alloc.makeTexture2D(
+                width, height, 1, VK_FORMAT_R8G8B8A8_UNORM);
+
+        HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
+        memcpy(texture_hb_staging.ptr, pixels, width * height * components * sizeof(char));
+        texture_hb_staging.flush(dev);
+        stbi_image_free(pixels);
+
+        std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
+
+        assert(texture_backing.has_value());
+
+        dev.dt.bindImageMemory(dev.hdl, texture.image, texture_backing.value(), 0);
+
+        VkImageMemoryBarrier copy_prepare {
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            0,
+            VK_ACCESS_MEMORY_WRITE_BIT,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            texture.image,
+            {
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                0, 1, 0, 1
+            },
+        };
+
+        dev.dt.cmdPipelineBarrier(cmdbuf,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0, nullptr, 0, nullptr,
+            1, &copy_prepare);
+
+        VkBufferImageCopy copy = {};
+        copy.bufferOffset = 0;
+        copy.bufferRowLength = 0;
+        copy.bufferImageHeight = 0;
+        copy.imageExtent.width = SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE / 2;
+        copy.imageExtent.height = SHADOW_OFFSET_OUTER;
+        copy.imageExtent.depth = SHADOW_OFFSET_OUTER;
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.mipLevel = 0;
+        copy.imageSubresource.baseArrayLayer = 0;
+        copy.imageSubresource.layerCount = 1;
+
+        dev.dt.cmdCopyBufferToImage(cmdbuf, texture_hb_staging.buffer,
+            texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        VkImageMemoryBarrier finish_prepare {
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_MEMORY_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            texture.image,
+            {
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                0, 1, 0, 1
+            },
+        };
+        
+
+        dev.dt.cmdPipelineBarrier(cmdbuf,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0,
+            0, nullptr, 0, nullptr,
+            1, &finish_prepare);
+
+        VkImageViewCreateInfo view_info {};
+        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
+        VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+        view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_info_sr.baseMipLevel = 0;
+        view_info_sr.levelCount = 1;
+        view_info_sr.baseArrayLayer = 0;
+        view_info_sr.layerCount = 1;
+
+        VkImageView view;
+        view_info.image = texture.image;
+        view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+        REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
+
+        host_buffers.push_back(std::move(texture_hb_staging));
+
+        dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
+    }
+
+    dev.dt.endCommandBuffer(cmdbuf);
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmdbuf;
+    submit_info.signalSemaphoreCount = 0;
+    submit_info.waitSemaphoreCount = 0;
+
+    dev.dt.queueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE);
+
+    dev.dt.deviceWaitIdle(dev.hdl);
+    dev.dt.freeCommandBuffers(dev.hdl, tmp_pool, 1, &cmdbuf);
+    dev.dt.destroyCommandPool(dev.hdl, tmp_pool, nullptr);
+}
+
 CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
-                             Span<const imp::SourceMaterial> src_mats)
+                             Span<const imp::SourceMaterial> src_mats,
+                             Span<const imp::SourceTexture> textures)
 {
     using namespace imp;
     using namespace math;
@@ -2785,7 +2929,8 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
 
     uint32_t mat_idx = 0;
     for (const SourceMaterial &mat : src_mats) {
-        materials_ptr[mat_idx++].color = mat.color;
+        materials_ptr[mat_idx].color = mat.color;
+        materials_ptr[mat_idx++].textureIdx = mat.textureIdx;
     }
 
     staging.flush(dev);

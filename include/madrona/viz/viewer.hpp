@@ -72,7 +72,8 @@ public:
 
     ~Viewer();
 
-    CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats);
+    CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats,
+                       Span<const imp::SourceTexture> textures);
 
     void configureLighting(Span<const LightConfig> lights);
 

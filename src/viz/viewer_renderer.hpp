@@ -96,6 +96,19 @@ struct ShadowFramebuffer {
     VkFramebuffer hdl;
 };
 
+struct MaterialTexture {
+    MaterialTexture(render::vk::LocalImage &&src_image,
+                    VkImageView src_view,
+                    VkDeviceMemory src_backing)
+        : image(std::move(src_image)), view(src_view), backing(src_backing)
+    {
+    }
+
+    render::vk::LocalImage image;
+    VkImageView view;
+    VkDeviceMemory backing;
+};
+
 struct Frame {
     Framebuffer fb;
     Framebuffer imguiFBO;
@@ -209,7 +222,8 @@ public:
     Renderer(const Renderer &) = delete;
     ~Renderer();
 
-    CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats);
+    CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats,
+                       Span<const imp::SourceTexture> textures);
 
     void configureLighting(Span<const LightConfig> lights);
 
@@ -275,6 +289,8 @@ private:
 
     Sky sky_;
     ShadowOffsets shadow_offsets_;
+
+    std::vector<MaterialTexture> material_textures_;
 };
 
 }

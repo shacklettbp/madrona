@@ -71,6 +71,7 @@ float shadowFactorRandomSample(float3 world_pos, uint2 target_pixel)
     // Light space position
     float4 ls_pos = mul(shadowViewDataBuffer[pushConst.viewIdx].viewProjectionMatrix, world_pos_v4);
     ls_pos.xyz /= ls_pos.w;
+    ls_pos.z += 0.001f;
 
     float2 uv = ls_pos.xy * 0.5 + float2(0.5, 0.5);
 

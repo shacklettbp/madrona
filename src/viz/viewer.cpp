@@ -48,9 +48,10 @@ struct Viewer::Impl {
         void *input_data, void (*step_fn)(void *), void *step_data);
 };
 
-CountT Viewer::loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats)
+CountT Viewer::loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats,
+                           Span<const imp::SourceTexture> textures)
 {
-    return impl_->renderer.loadObjects(objs, mats);
+    return impl_->renderer.loadObjects(objs, mats, textures);
 }
 
 void Viewer::configureLighting(Span<const LightConfig> lights)

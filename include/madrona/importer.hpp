@@ -26,8 +26,17 @@ struct SourceObject {
     Span<const SourceMesh> meshes;
 };
 
+struct SourceTexture {
+    const char *path;
+};
+
 struct SourceMaterial {
     math::Vector4 color;
+
+    // If this is -1, no texture will be applied. Otherwise,
+    // the color gets multipled by color of the texture read in
+    // at the UVs of the pixel.
+    int32_t textureIdx;
 };
 
 struct SourceInstance {

@@ -82,6 +82,10 @@ struct MeshData {
 struct MaterialData {
     // For now, just a color
     float4 color;
+
+    int32_t textureIdx;
+
+    int32_t pad[3];
 };
 
 struct ObjectData {
