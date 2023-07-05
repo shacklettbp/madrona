@@ -2633,8 +2633,8 @@ static std::vector<MaterialTexture>
 loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
              Span<const imp::SourceTexture> textures)
 {
-    std::vector<HostBuffer> host_buffers;
-    std::vector<MaterialTexture> dst_textures;
+    DynArray<HostBuffer> host_buffers(0);
+    DynArray<MaterialTexture> dst_textures(0);
 
     VkCommandPool tmp_pool = makeCmdPool(dev, dev.gfxQF);
 
