@@ -437,9 +437,6 @@ bool OBJLoader::Impl::commitMesh(ImportedAssets &out_assets)
         face_counts_copy.push_back(c);
     }
 
-    curPositions.clear();
-    curNormals.clear();
-    curUVs.clear();
     curIndices.clear();
     curFaceCounts.clear();
     unindexedPositions.clear();
@@ -481,6 +478,13 @@ bool OBJLoader::Impl::load(const char *path, ImportedAssets &imported_assets)
 {
     using std::string_view;
 
+    // These arrays aren't cleared incrementally because OBJs are indexed
+    // from the start of the file. Only clear them here, at the start to make
+    // sure all indices correctly start at 1.
+    curPositions.clear();
+    curNormals.clear();
+    curUVs.clear();
+
     filePath = path;
 
     std::ifstream file(path);
@@ -490,9 +494,9 @@ bool OBJLoader::Impl::load(const char *path, ImportedAssets &imported_assets)
     }
 
     std::string line;
-    int64_t line_idx = 0;
+    int64_t line_idx = 1;
     while (std::getline(file, line)) {
-        setLine(line.c_str(), line_idx);
+        setLine(line.c_str(), line_idx++);
 
         if (line[0] == '#') continue;
 
@@ -564,8 +568,6 @@ bool OBJLoader::Impl::load(const char *path, ImportedAssets &imported_assets)
 
             curFaceCounts.push_back(face_count);
         }
-        
-        line_idx++;
     }
 
     if (!commitMesh(imported_assets)) {
