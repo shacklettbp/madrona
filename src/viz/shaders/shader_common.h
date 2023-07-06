@@ -85,7 +85,10 @@ struct MaterialData {
 
     int32_t textureIdx;
 
-    int32_t pad[3];
+    float roughness;
+    float metalness;
+
+    int32_t pad[1];
 };
 
 struct ObjectData {

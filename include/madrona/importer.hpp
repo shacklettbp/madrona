@@ -37,6 +37,9 @@ struct SourceMaterial {
     // the color gets multipled by color of the texture read in
     // at the UVs of the pixel.
     int32_t textureIdx;
+
+    float roughness;
+    float metalness;
 };
 
 struct SourceInstance {

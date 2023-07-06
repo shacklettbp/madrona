@@ -365,8 +365,11 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         gbuffer_data.albedo = color.rgb;
         gbuffer_data.wCameraPos = pushConst.viewPos.xzy;
 
+        float roughness = color.a;
+        float metalness = position.a;
+
         // Radiance at the rasterized pixel
-        float4 point_radiance = getPointRadianceBRDF(0.4, 0.2, gbuffer_data, targetPixel);
+        float4 point_radiance = getPointRadianceBRDF(roughness, metalness, gbuffer_data, targetPixel);
 
         float3 sun_direction = normalize(-lights[0].lightDir.xzy);
 
