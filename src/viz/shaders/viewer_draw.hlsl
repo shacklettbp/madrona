@@ -218,8 +218,8 @@ PixelOutput frag(in V2F v2f)
     output.color = v2f.color;
     output.color.a = v2f.roughness;
     output.normal = float4(normalize(v2f.normal), 1.f);
-    output.position = float4(v2f.position, v2f.dummy);
-    output.position.a = v2f.metalness;
+    output.position = float4(v2f.position, v2f.dummy * 0.0000001f);
+    output.position.a += v2f.metalness;
 
     // output.color.rgb = v2f.normal.xyz;
 

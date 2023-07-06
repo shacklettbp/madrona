@@ -83,6 +83,10 @@ float shadowFactorRandomSample(float3 world_pos, uint2 target_pixel)
 
     float2 uv = ls_pos.xy * 0.5 + float2(0.5, 0.5);
 
+    if (uv.x > 1.0 || uv.x < 0.0 || uv.y > 1.0 || uv.y < 0.0 ||
+        ls_pos.z > 1.0 || ls_pos.z < -1.0)
+        return 1.0;
+
 
 
     uint2 sample_slice = //mod(target_pixel, uint2(SHADOW_OFFSET_OUTER, SHADOW_OFFSET_OUTER));
