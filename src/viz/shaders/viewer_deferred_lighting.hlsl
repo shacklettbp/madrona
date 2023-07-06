@@ -337,6 +337,24 @@ float3 getOutgoingRay(float2 target_pixel, float2 target_dim)
     return normalize(dir);
 }
 
+float toSRGB(float v)
+{
+    if (v <= 0.00031308f) {
+        return 12.92f * v;
+    } else {
+        return 1.055f*pow(v,(1.f / 2.4f)) - 0.055f;
+    }
+}
+
+float4 toSRGB(float4 v)
+{
+    return float4(
+        toSRGB(v.x),
+        toSRGB(v.y),
+        toSRGB(v.z),
+        v.w);
+}
+
 [numThreads(32, 32, 1)]
 [shader("compute")]
 void lighting(uint3 idx : SV_DispatchThreadID)
@@ -397,8 +415,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         float3 diff = one - expValue;
         float3 out_color = diff;
 
-        gbufferAlbedo[targetPixel] = float4(out_color, 1.0f+
+        gbufferAlbedo[targetPixel] = toSRGB(float4(out_color, 1.0f+
             0.0000001f * shadowMap.SampleLevel(linearSampler, float2(0.0f, 0.0f), 0).x +
-            0.0000001f * mieLUT.SampleLevel(linearSampler, float3(0.0f, 0.0f, 0.0f), 0).x);
+            0.0000001f * mieLUT.SampleLevel(linearSampler, float3(0.0f, 0.0f, 0.0f), 0).x));
     }
 }

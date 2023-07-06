@@ -18,7 +18,7 @@ namespace InternalConfig {
 inline constexpr float cameraMoveSpeed = 5.f;
 inline constexpr float mouseSpeed = 2e-4f;
 
-inline constexpr auto nsPerFrame = chrono::nanoseconds(8333333);
+inline constexpr auto nsPerFrame = chrono::nanoseconds(33333333);
 inline constexpr auto nsPerFrameLongWait =
     chrono::nanoseconds(7000000);
 inline constexpr float secondsPerFrame =
@@ -141,6 +141,32 @@ static void handleCamera(GLFWwindow *window, ViewerCam &cam)
 
     cam.position += translate * InternalConfig::cameraMoveSpeed *
         InternalConfig::secondsPerFrame;
+
+    if (getenv("FIXED_CAM")) {
+        cam.position = math::Vector3 { 31.381439, 0.000723, 27.192654 };
+        cam.view = normalize(math::Vector3 { -0.698140, 0.f, -0.715958 });
+        cam.up = normalize(math::Vector3 { -0.715956, 0.f, 0.698143 });
+        cam.right = math::Vector3 { 0.f, 1.f, 0.f };
+        cam.fov = 45.f;
+    } else {
+        printf("\n\n");
+        printf("cam.position = math::Vector3 { %f, %f, %f };\n",
+            cam.position.x,
+            cam.position.y,
+            cam.position.z);
+        printf("cam.view = math::Vector3 { %f, %f, %f };\n",
+            cam.view.x,
+            cam.view.y,
+            cam.view.z);
+        printf("cam.up = math::Vector3 { %f, %f, %f };\n",
+            cam.up.x,
+            cam.up.y,
+            cam.up.z);
+        printf("cam.right = math::Vector3 { %f, %f, %f };\n",
+            cam.right.x,
+            cam.right.y,
+            cam.right.z);
+    }
 }
 
 static float throttleFPS(chrono::time_point<chrono::steady_clock> start) {
