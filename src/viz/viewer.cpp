@@ -18,7 +18,7 @@ namespace InternalConfig {
 inline constexpr float cameraMoveSpeed = 5.f;
 inline constexpr float mouseSpeed = 2e-4f;
 
-inline constexpr auto nsPerFrame = chrono::nanoseconds(33333333);
+inline constexpr auto nsPerFrame = chrono::nanoseconds(33333333 / 4);
 inline constexpr auto nsPerFrameLongWait =
     chrono::nanoseconds(7000000);
 inline constexpr float secondsPerFrame =
@@ -170,6 +170,8 @@ static void handleCamera(GLFWwindow *window, ViewerCam &cam)
 }
 
 static float throttleFPS(chrono::time_point<chrono::steady_clock> start) {
+    if (getenv("NO_THROTTLE")) return 1.f / 120.f;
+
     using namespace chrono;
     using namespace chrono_literals;
     
@@ -504,7 +506,7 @@ void Viewer::Impl::loop(
 
         auto sim_delta_t = chrono::duration<float>(1.f / (float)simTickRate);
 
-        if (true && cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
+        if (true || cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
             if (frameCfg.viewIDX != 0) {
                 UserInput user_input(key_state.data());
                 input_fn(input_data, frameCfg.worldIDX,

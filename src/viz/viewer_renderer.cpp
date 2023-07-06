@@ -3072,10 +3072,10 @@ void Renderer::waitUntilFrameReady()
     REQ_VK(dev.dt.waitForFences(dev.hdl, 1, &frame.cpuFinished, VK_TRUE,
                                 UINT64_MAX));
 
-    if (getenv("DUMP") && png_no_ > 0) {
+    if (getenv("DUMP") && png_no_ > 0 && png_no_ % 4 == 0) {
         void *pixels = frame.fb.colorStaging.ptr;
 
-        std::string dst_file = std::string("dump/frame") + std::to_string(png_no_ - 5) + std::string(".bmp");
+        std::string dst_file = std::string("dump/frame") + std::to_string(png_no_ / 4) + std::string(".bmp");
         int ret = stbi_write_bmp(dst_file.c_str(), frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 4,
             pixels);
 

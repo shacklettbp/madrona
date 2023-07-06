@@ -193,7 +193,7 @@ float4 vert(in uint vid : SV_VertexID,
 #endif
     v2f.normal = normalize(
         rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
-    v2f.uv = vert.uv;
+    v2f.uv = float2(vert.uv.x, 1.f - vert.uv.y);
     v2f.color = color;
     v2f.position = rotateVec(instance_data.rotation,
                              instance_data.scale * vert.position) + instance_data.position;
