@@ -3070,10 +3070,10 @@ void Renderer::waitUntilFrameReady()
     REQ_VK(dev.dt.waitForFences(dev.hdl, 1, &frame.cpuFinished, VK_TRUE,
                                 UINT64_MAX));
 
-    if (png_no_ > 5) {
+    if (getenv("DUMP") && png_no_ > 0) {
         void *pixels = frame.fb.colorStaging.ptr;
 
-        std::string dst_file = std::string("frame") + std::to_string(png_no_ - 5) + std::string(".bmp");
+        std::string dst_file = std::string("dump/frame") + std::to_string(png_no_ - 5) + std::string(".bmp");
         int ret = stbi_write_bmp(dst_file.c_str(), frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 4,
             pixels);
 
@@ -3532,6 +3532,13 @@ void Renderer::render(const ViewerCam &cam,
                              frame.renderInput.buffer,
                              1, &instance_copy);
 
+        dev.dt.cmdFillBuffer(draw_cmd,
+                             frame.renderInput.buffer,
+                             frame.drawCmdOffset,
+                             sizeof(VkDrawIndexedIndirectCommand) * num_instances * 10,
+                             0);
+
+
         VkMemoryBarrier copy_barrier {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .pNext = nullptr,
@@ -3672,7 +3679,7 @@ void Renderer::render(const ViewerCam &cam,
         dev.dt.cmdDrawIndexedIndirect(draw_cmd,
                 frame.renderInput.buffer,
                 frame.drawCmdOffset,
-                num_instances,
+                num_instances * 10,
                 sizeof(DrawCmd));
 
         dev.dt.cmdEndRenderPass(draw_cmd);
@@ -3770,7 +3777,7 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdDrawIndexedIndirect(draw_cmd,
                                   frame.renderInput.buffer,
                                   frame.drawCmdOffset,
-                                  num_instances,
+                                  num_instances * 10,
                                   sizeof(DrawCmd));
 
     dev.dt.cmdEndRenderPass(draw_cmd);
