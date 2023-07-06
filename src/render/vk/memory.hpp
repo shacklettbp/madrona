@@ -101,12 +101,15 @@ public:
     uint32_t mipLevels;
     VkImage image;
 
+    VkDeviceSize byteSize;
+
 private:
     LocalImage(uint32_t width,
                uint32_t height,
                uint32_t mip_levels,
                VkImage image,
-               AllocDeleter<false> deleter);
+               AllocDeleter<false> deleter,
+               VkDeviceSize byte_size = 0);
 
     AllocDeleter<false> deleter_;
     friend class MemoryAllocator;

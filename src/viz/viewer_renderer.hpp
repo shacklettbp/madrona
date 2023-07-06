@@ -83,11 +83,14 @@ struct Framebuffer {
     render::vk::LocalImage normalAttachment;
     render::vk::LocalImage positionAttachment;
     render::vk::LocalImage depthAttachment;
+
     VkImageView colorView;
     VkImageView normalView;
     VkImageView positionView;
     VkImageView depthView;
     VkFramebuffer hdl;
+
+    render::vk::HostBuffer colorStaging;
 };
 
 struct ShadowFramebuffer {
@@ -294,6 +297,8 @@ private:
     ShadowOffsets shadow_offsets_;
 
     DynArray<MaterialTexture> material_textures_;
+
+    uint64_t png_no_;
 };
 
 }

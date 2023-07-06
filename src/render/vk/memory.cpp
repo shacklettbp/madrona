@@ -224,11 +224,13 @@ LocalImage::LocalImage(uint32_t w,
                        uint32_t h,
                        uint32_t mip_levels,
                        VkImage img,
-                       AllocDeleter<false> deleter)
+                       AllocDeleter<false> deleter,
+                       VkDeviceSize byte_size)
     : width(w),
       height(h),
       mipLevels(mip_levels),
       image(img),
+      byteSize(byte_size),
       deleter_(deleter)
 {}
 
@@ -868,7 +870,7 @@ LocalImage MemoryAllocator::makeDedicatedImage(uint32_t width,
     REQ_VK(dev.dt.bindImageMemory(dev.hdl, img, memory, 0));
 
     return LocalImage(width, height, mip_levels, img,
-                      AllocDeleter<false>(memory, *this));
+                      AllocDeleter<false>(memory, *this), reqs.size);
 }
 
 LocalImage MemoryAllocator::makeDedicatedImage(uint32_t width,
