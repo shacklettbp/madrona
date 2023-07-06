@@ -37,6 +37,8 @@ struct V2F {
     [[vk::location(3)]] float dummy : TEXCOORD3;
     [[vk::location(4)]] float2 uv : TEXCOORD4;
     [[vk::location(5)]] int texIdx : TEXCOORD5;
+    [[vk::location(6)]] float roughness : TEXCOORD6;
+    [[vk::location(7)]] float metalness : TEXCOORD7;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -197,6 +199,8 @@ float4 vert(in uint vid : SV_VertexID,
                              instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
     v2f.texIdx = materialBuffer[draw_data.materialID].textureIdx;
+    v2f.roughness = materialBuffer[draw_data.materialID].roughness;
+    v2f.metalness = materialBuffer[draw_data.materialID].metalness;
 
     return clip_pos;
 }
@@ -212,8 +216,12 @@ PixelOutput frag(in V2F v2f)
 {
     PixelOutput output;
     output.color = v2f.color;
-    output.normal = float4(v2f.normal, 1.f);
+    output.color.a = v2f.roughness;
+    output.normal = float4(normalize(v2f.normal), 1.f);
     output.position = float4(v2f.position, v2f.dummy);
+    output.position.a = v2f.metalness;
+
+    // output.color.rgb = v2f.normal.xyz;
 
     if (v2f.texIdx != -1) {
         output.color *= materialTexturesArray[v2f.texIdx].SampleLevel(linearSampler, v2f.uv, 0);

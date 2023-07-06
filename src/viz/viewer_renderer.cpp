@@ -2684,7 +2684,7 @@ loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
         void *pixels = stbi_load(filename, &width, &height, &components, STBI_rgb_alpha);
 
         auto [texture, texture_reqs] = alloc.makeTexture2D(
-                width, height, 1, VK_FORMAT_R8G8B8A8_UNORM);
+                width, height, 1, VK_FORMAT_R8G8B8A8_SRGB);
 
         HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
         memcpy(texture_hb_staging.ptr, pixels, width * height * 4 * sizeof(char));
@@ -2771,7 +2771,7 @@ loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
 
         VkImageView view;
         view_info.image = texture.image;
-        view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+        view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
         REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
 
         host_buffers.push_back(std::move(texture_hb_staging));
@@ -2959,6 +2959,8 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     uint32_t mat_idx = 0;
     for (const SourceMaterial &mat : src_mats) {
         materials_ptr[mat_idx].color = mat.color;
+        materials_ptr[mat_idx].roughness = mat.roughness;
+        materials_ptr[mat_idx].metalness = mat.metalness;
         materials_ptr[mat_idx++].textureIdx = mat.textureIdx;
     }
 
