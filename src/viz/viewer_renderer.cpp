@@ -3073,9 +3073,9 @@ void Renderer::waitUntilFrameReady()
     if (png_no_ > 5) {
         void *pixels = frame.fb.colorStaging.ptr;
 
-        std::string dst_file = std::string("frame") + std::to_string(png_no_ - 5) + std::string(".png");
-        int ret = stbi_write_png(dst_file.c_str(), frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 4,
-            pixels, sizeof(char) * 4 * frame.fb.colorAttachment.width);
+        std::string dst_file = std::string("frame") + std::to_string(png_no_ - 5) + std::string(".bmp");
+        int ret = stbi_write_bmp(dst_file.c_str(), frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 4,
+            pixels);
 
         if (ret) {
             printf("Wrote %s\n", dst_file.c_str());
