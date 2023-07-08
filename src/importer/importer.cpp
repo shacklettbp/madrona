@@ -8,7 +8,10 @@
 
 #include "obj.hpp"
 #include "gltf.hpp"
+
+#ifdef MADRONA_USD_SUPPORT
 #include "usd.hpp"
+#endif
 
 namespace madrona::imp {
 
@@ -35,7 +38,9 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
     auto obj_loader = Optional<OBJLoader>::none();
     auto gltf_loader = Optional<GLTFLoader>::none();
+#ifdef MADRONA_USD_SUPPORT
     auto usd_loader = Optional<USDLoader>::none();
+#endif
 
     bool load_success = false;
     for (const char *path : paths) {
@@ -64,12 +69,18 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
                    extension == "usda" ||
                    extension == "usdc" ||
                    extension == "usdz") {
+#ifdef MADRONA_USD_SUPPORT
             if (!usd_loader.has_value()) {
                 usd_loader.emplace(err_buf);
             }
 
             load_success = usd_loader->load(path, imported,
                                             one_object_per_asset);
+#else
+            load_success = false;
+            snprintf(err_buf.data(), err_buf.size(),
+                     "Madrona not compiled with USD support");
+#endif
         }
 
         if (!load_success) {
