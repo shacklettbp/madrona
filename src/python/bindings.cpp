@@ -1,22 +1,10 @@
-#include <madrona/python.hpp>
-#include <madrona/exec_mode.hpp>
-
-#if defined(MADRONA_CLANG) || defined(MADRONA_GCC)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Weverything"
-#endif
-#include <nanobind/nanobind.h>
-#include <nanobind/ndarray.h>
-#if defined(MADRONA_CLANG) || defined(MADRONA_GCC)
-#pragma GCC diagnostic pop
-#endif
+#include <madrona/py/bindings.hpp>
 
 #include <iostream>
 
 namespace nb = nanobind;
 
-namespace madrona {
-namespace py {
+namespace madrona::py {
 
 static nb::dlpack::dtype toDLPackType(Tensor::ElementType type)
 {
@@ -76,7 +64,10 @@ static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
     exit(1);
 }
 
-NB_MODULE(madrona_python, m) {
+void setupMadronaSubmodule(nb::module_ parent_mod)
+{
+    auto m = parent_mod.def_submodule("madrona");
+
       nb::class_<madrona::py::PyExecMode>(m, "ExecMode")
         .def_prop_ro_static("CPU", [](nb::handle) {
             return madrona::py::PyExecMode(madrona::ExecMode::CPU);
@@ -137,5 +128,4 @@ NB_MODULE(madrona_python, m) {
 #endif
 }
 
-}
 }

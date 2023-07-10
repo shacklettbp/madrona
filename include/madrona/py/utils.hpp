@@ -1,10 +1,4 @@
 #pragma once
-#ifdef madrona_python_utils_EXPORTS 
-#define MADRONA_PYTHON_EXPORT MADRONA_EXPORT
-#else
-#define MADRONA_PYTHON_EXPORT MADRONA_IMPORT
-#endif
-
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 #include <madrona/optional.hpp>
@@ -12,15 +6,17 @@
 
 #include <array>
 
+// All the below classes are virtual because nanobind
+// uses RTTI to match types across modules which only works with virtual types
+
 #ifdef MADRONA_CUDA_SUPPORT
 #include <cuda_runtime.h>
 #endif
 
-namespace madrona {
-namespace py {
+namespace madrona::py {
 
 #ifdef MADRONA_CUDA_SUPPORT
-class MADRONA_PYTHON_EXPORT CudaSync final {
+class CudaSync final {
 public:
     CudaSync(cudaExternalSemaphore_t sema);
     void wait(uint64_t strm);
@@ -39,7 +35,7 @@ private:
 
 // Need to wrap the actual enum class because macos
 // RTTI for enum classes isn't consistent across libraries
-class MADRONA_PYTHON_EXPORT PyExecMode final {
+class PyExecMode final {
 public:
     inline PyExecMode(ExecMode v)
         : v_(v)
@@ -58,7 +54,7 @@ private:
     ExecMode v_;
 };
 
-class MADRONA_PYTHON_EXPORT Tensor final {
+class Tensor final {
 public:
     enum class ElementType {
         UInt8,
@@ -95,5 +91,4 @@ private:
     std::array<int64_t, maxDimensions> dimensions_;
 };
 
-}
 }
