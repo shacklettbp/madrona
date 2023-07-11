@@ -89,6 +89,9 @@ def _merge_toml_and_cfg_settings(toml, config_settings):
     except KeyError:
         cfg = {}
 
+    if config_settings == None:
+        config_settings = {}
+
     for k, v in config_settings.items():
         parts = k.split('.')
 
@@ -120,8 +123,8 @@ def _build_redir_py(toml, config_settings):
     ext_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
 
     for pkg, pkg_cfg in pkgs.items():
-        pkg_init_path = (Path(pkg_cfg['path']).resolve() / '__init__.py').as_posix()
-        redir += f"    '{pkg}': '{pkg_init_path}',\n"
+        pkg_init_path = Path(pkg_cfg['path']).resolve() / '__init__.py'
+        redir += f"    '{pkg}': r'{pkg_init_path}',\n"
 
         try:
             exts = pkg_cfg['extensions']
@@ -137,8 +140,8 @@ def _build_redir_py(toml, config_settings):
         ext_out_dir = Path(ext_out_dir).resolve()
 
         for ext in exts:
-            ext_path = (ext_out_dir / f"{ext}{ext_suffix}").as_posix()
-            redir += f"    '{pkg}.{ext}': '{ext_path}',\n"
+            ext_path = ext_out_dir / f"{ext}{ext_suffix}"
+            redir += f"    '{pkg}.{ext}': r'{ext_path}',\n"
     
     redir += "})\n"
 
