@@ -121,7 +121,7 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
                     nb::device::cpu::value,
                 tensor.isOnGPU() ? tensor.gpuID() : 0,
             };
-        });
+        }, nb::rv_policy::automatic_reference);
 
 #ifdef MADRONA_CUDA_SUPPORT
     nb::class_<CudaSync>(m, "CudaSync")
