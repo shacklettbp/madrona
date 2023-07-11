@@ -27,6 +27,7 @@ static nb::dlpack::dtype toDLPackType(Tensor::ElementType type)
             };
         case Tensor::ElementType::Float32:
             return nb::dtype<float>();
+        default: MADRONA_UNREACHABLE();
     }
 }
 
