@@ -1,2 +1,3 @@
 /build
 /build-debug
+/py/__pycache__
