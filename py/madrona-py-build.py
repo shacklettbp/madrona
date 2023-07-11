@@ -6,6 +6,7 @@ import time
 import io
 import stat
 import base64
+import copy
 import importlib.machinery
 from pathlib import Path
 from email.message import Message as EmailMessage
@@ -83,13 +84,27 @@ def _build_redir_pth(name):
     return f"import _{name}_redir".encode('utf-8')
 
 def _merge_toml_and_cfg_settings(toml, config_settings):
-    return toml
+    try:
+        cfg = copy.deepcopy(toml['tool']['madrona'])
+    except KeyError:
+        cfg = {}
+
+    for k, v in config_settings.items():
+        parts = k.split('.')
+
+        sub_cfg = cfg
+        for p in parts[:-1]:
+            sub_cfg = sub_cfg[p]
+
+        sub_cfg[parts[-1]] = v
+
+    return cfg
 
 def _build_redir_py(toml, config_settings):
     cfg = _merge_toml_and_cfg_settings(toml, config_settings)
 
     try:
-        pkgs = cfg['tool']['madrona']['packages']
+        pkgs = cfg['packages']
 
         if len(pkgs) == 0:
             raise KeyError()
@@ -105,7 +120,7 @@ def _build_redir_py(toml, config_settings):
     ext_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
 
     for pkg, pkg_cfg in pkgs.items():
-        pkg_init_path = Path(pkg_cfg['path']).resolve() / '__init__.py'
+        pkg_init_path = (Path(pkg_cfg['path']).resolve() / '__init__.py').as_posix()
         redir += f"    '{pkg}': '{pkg_init_path}',\n"
 
         try:
@@ -122,7 +137,7 @@ def _build_redir_py(toml, config_settings):
         ext_out_dir = Path(ext_out_dir).resolve()
 
         for ext in exts:
-            ext_path = ext_out_dir / f"{ext}{ext_suffix}"
+            ext_path = (ext_out_dir / f"{ext}{ext_suffix}").as_posix()
             redir += f"    '{pkg}.{ext}': '{ext_path}',\n"
     
     redir += "})\n"
@@ -144,8 +159,6 @@ def prepare_metadata_for_build_editable(metadata_directory, config_settings):
 
 def build_editable(wheel_directory, config_settings=None,
                    metadata_directory=None):
-    print(wheel_directory, config_settings, metadata_directory)
-
     name, version, toml = _read_toml()
 
     versioned_name = f"{name}-{version}"
