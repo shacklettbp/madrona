@@ -102,7 +102,7 @@ float shadowFactorVSM(float3 world_pos, uint2 target_pixel)
     // Light space position
     float4 ls_pos = mul(shadowViewDataBuffer[pushConst.viewIdx].viewProjectionMatrix, world_pos_v4);
     ls_pos.xyz /= ls_pos.w;
-    // ls_pos.z += 0.0005f;
+    ls_pos.z += 0.0005f;
 
     /* UV to use when sampling in the shadow map. */
     float2 uv = ls_pos.xy * 0.5 + float2(0.5, 0.5);
@@ -123,7 +123,7 @@ float shadowFactorVSM(float3 world_pos, uint2 target_pixel)
 
             // Chebychev's inequality
             float p = (ls_pos.z > moment.x);
-            float sigma = max(moment.y - moment.x * moment.x, 0.0000001);
+            float sigma = max(moment.y - moment.x * moment.x, 0.0);
 
             float dist_from_mean = (ls_pos.z - moment.x);
 
