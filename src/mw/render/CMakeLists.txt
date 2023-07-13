@@ -29,12 +29,6 @@ if (TARGET madrona_render_vk AND
     target_compile_definitions(madrona_batch_render PRIVATE
         "-DSHADER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../render/vk/shaders/"
     )
-    
-    if (CUDAToolkit_FOUND)
-        target_link_libraries(madrona_batch_render PRIVATE
-            CUDA::cudart
-        )
-    endif ()
 elseif (TARGET madrona_render_metal)
     add_library(madrona_batch_render STATIC
         metal/scene.hpp metal/scene.cpp

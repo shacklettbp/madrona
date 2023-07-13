@@ -118,4 +118,29 @@ if (CUDAToolkit_FOUND)
             CUDA::cuda_driver
             madrona_common
     )
+
+    if (WIN32)
+        get_property(MULTI_CFG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+        if (MULTI_CFG)
+            set(LIB_OUT_DIR "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/$<CONFIG>")
+        else()
+            set(LIB_OUT_DIR "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+        endif()
+
+        file(GLOB CUDA_LIB_SRC "${CUDAToolkit_BIN_DIR}/cudart*.dll")
+        cmake_path(GET CUDA_LIB_SRC FILENAME CUDA_LIB_NAME)
+
+        set(CUDA_LIB_COPY "${LIB_OUT_DIR}/${CUDA_LIB_NAME}")
+        add_custom_command(
+            OUTPUT "${CUDA_LIB_COPY}"
+            DEPENDS "${CUDA_LIB_SRC}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CUDA_LIB_SRC}" "${CUDA_LIB_COPY}"
+        )
+        add_custom_target(cuda_lib_copy
+            DEPENDS "${CUDA_LIB_COPY}"
+        )
+
+        add_dependencies(madrona_cuda cuda_lib_copy)
+    endif()
 endif ()
