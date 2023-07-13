@@ -195,8 +195,6 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
         if (z_max < ls_corners[i].z) z_max = ls_corners[i].z;
     }
     
-    z_min = z_min - (z_max - z_min);
-
     // Y is up
     float4x4 projection = transpose(float4x4(
         float4( 2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f),

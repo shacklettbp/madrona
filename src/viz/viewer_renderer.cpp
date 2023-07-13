@@ -59,12 +59,13 @@ namespace InternalConfig {
 inline constexpr uint32_t numFrames = 2;
 inline constexpr uint32_t initMaxTransforms = 100000;
 inline constexpr uint32_t initMaxMatIndices = 100000;
-inline constexpr uint32_t shadowMapSize = 4096*2;
+inline constexpr uint32_t shadowMapSize = 4096;
 inline constexpr uint32_t maxLights = 10;
 inline constexpr uint32_t maxTextures = 100;
 inline constexpr VkFormat gbufferFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 inline constexpr VkFormat skyFormatHighp = VK_FORMAT_R32G32B32A32_SFLOAT;
 inline constexpr VkFormat skyFormatHalfp = VK_FORMAT_R16G16B16A16_SFLOAT;
+inline constexpr VkFormat varianceFormat = VK_FORMAT_R32G32_SFLOAT;
 inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 
 }
@@ -504,10 +505,18 @@ static VkRenderPass makeRenderPass(const Device &dev,
 }
 
 static VkRenderPass makeShadowRenderPass(const Device &dev,
+                                         VkFormat variance_fmt,
                                          VkFormat depth_fmt)
 {
     vector<VkAttachmentDescription> attachment_descs;
     vector<VkAttachmentReference> attachment_refs;
+
+    attachment_descs.push_back(
+        {0, variance_fmt, VK_SAMPLE_COUNT_1_BIT,
+         VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE,
+         VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE,
+         VK_IMAGE_LAYOUT_UNDEFINED,
+         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
 
     attachment_descs.push_back(
         {0, depth_fmt, VK_SAMPLE_COUNT_1_BIT,
@@ -518,11 +527,16 @@ static VkRenderPass makeShadowRenderPass(const Device &dev,
 
     attachment_refs.push_back(
         {static_cast<uint32_t>(attachment_refs.size()),
+         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+
+    attachment_refs.push_back(
+        {static_cast<uint32_t>(attachment_refs.size()),
          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL});
 
     VkSubpassDescription subpass_desc {};
     subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass_desc.colorAttachmentCount = 0;
+    subpass_desc.colorAttachmentCount = 1;
+    subpass_desc.pColorAttachments = &attachment_refs.front();
     subpass_desc.pDepthStencilAttachment = &attachment_refs.back();
 
     VkRenderPassCreateInfo render_pass_info;
@@ -691,6 +705,25 @@ static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler c
         Span<const SPIRVShader>(&spirv, 1), 
         Span<const BindingOverride>({BindingOverride{
             0, 10, clamp_sampler, 1, 0 }}));
+}
+
+static PipelineShaders makeBlurShader(const Device &dev, VkSampler clamp_sampler)
+{
+    (void)clamp_sampler;
+    std::filesystem::path shader_dir =
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "shaders";
+
+    ShaderCompiler compiler;
+    SPIRVShader spirv = compiler.compileHLSLFileToSPV(
+        (shader_dir / "blur.hlsl").string().c_str(), {},
+        {}, { "blur", ShaderStage::Compute });
+
+    StackAlloc tmp_alloc;
+    return PipelineShaders(
+        dev, tmp_alloc,
+        Span<const SPIRVShader>(&spirv, 1), 
+        {});
 }
 
 static VkPipelineCache getPipelineCache(const Device &dev)
@@ -944,8 +977,8 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     raster_info.depthClampEnable = VK_FALSE;
     raster_info.rasterizerDiscardEnable = VK_FALSE;
     raster_info.polygonMode = VK_POLYGON_MODE_FILL;
-    // raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
-    raster_info.cullMode = VK_CULL_MODE_NONE;
+    raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
+    // raster_info.cullMode = VK_CULL_MODE_NONE;
     raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster_info.depthBiasEnable = VK_FALSE;
     raster_info.lineWidth = 1.0f;
@@ -960,12 +993,25 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     depth_info.depthBoundsTestEnable = VK_FALSE;
     depth_info.stencilTestEnable = VK_FALSE;
     depth_info.back.compareOp = VK_COMPARE_OP_ALWAYS;
+    depth_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
+
+    // Blend
+    VkPipelineColorBlendAttachmentState blend_attach {};
+    blend_attach.blendEnable = VK_FALSE;
+    blend_attach.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT;
+
+    array<VkPipelineColorBlendAttachmentState, 1> blend_attachments {{
+        blend_attach,
+    }};
 
     VkPipelineColorBlendStateCreateInfo blend_info {};
     blend_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     blend_info.logicOpEnable = VK_FALSE;
-    blend_info.attachmentCount = 0;
+    blend_info.attachmentCount =
+        static_cast<uint32_t>(blend_attachments.size());
+    blend_info.pAttachments = blend_attachments.data();
 
     // Dynamic
     array dyn_enable {
@@ -1285,6 +1331,80 @@ static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
     };
 }
 
+static Pipeline<1> makeBlurPipeline(const Device &dev,
+                                    VkPipelineCache pipeline_cache,
+                                    VkSampler clamp_sampler,
+                                    CountT num_frames)
+{
+    PipelineShaders shader = makeBlurShader(dev, clamp_sampler);
+
+    // Push constant
+    VkPushConstantRange push_const {
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        0,
+        sizeof(shader::BlurPushConst),
+    };
+
+    // Layout configuration
+    std::array desc_layouts {
+        shader.getLayout(0),
+    };
+
+    VkPipelineLayoutCreateInfo blur_layout_info;
+    blur_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    blur_layout_info.pNext = nullptr;
+    blur_layout_info.flags = 0;
+    blur_layout_info.setLayoutCount =
+        static_cast<uint32_t>(desc_layouts.size());
+    blur_layout_info.pSetLayouts = desc_layouts.data();
+    blur_layout_info.pushConstantRangeCount = 1;
+    blur_layout_info.pPushConstantRanges = &push_const;
+
+    VkPipelineLayout blur_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &blur_layout_info, nullptr,
+                                       &blur_layout));
+
+    std::array<VkComputePipelineCreateInfo, 1> compute_infos;
+#if 0
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size;
+    subgroup_size.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
+    subgroup_size.pNext = nullptr;
+    subgroup_size.requiredSubgroupSize = 32;
+#endif
+
+    compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    compute_infos[0].pNext = nullptr;
+    compute_infos[0].flags = 0;
+    compute_infos[0].stage = {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr, //&subgroup_size,
+        VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT,
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        shader.getShader(0),
+        "blur",
+        nullptr,
+    };
+    compute_infos[0].layout = blur_layout;
+    compute_infos[0].basePipelineHandle = VK_NULL_HANDLE;
+    compute_infos[0].basePipelineIndex = -1;
+
+    std::array<VkPipeline, compute_infos.size()> pipelines;
+    REQ_VK(dev.dt.createComputePipelines(dev.hdl, pipeline_cache,
+                                         compute_infos.size(),
+                                         compute_infos.data(), nullptr,
+                                         pipelines.data()));
+
+    FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
+
+    return Pipeline<1> {
+        std::move(shader),
+        blur_layout,
+        pipelines,
+        std::move(desc_pool),
+    };
+}
+
 static Backend initializeBackend()
 {
     auto get_inst_addr = PresentationState::init();
@@ -1424,6 +1544,10 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
                                    uint32_t fb_height,
                                    VkRenderPass render_pass)
 {
+    auto color = alloc.makeColorAttachment(fb_width, fb_height,
+        InternalConfig::varianceFormat);
+    auto intermediate = alloc.makeColorAttachment(fb_width, fb_height,
+        InternalConfig::varianceFormat);
     auto depth = alloc.makeDepthAttachment(
         fb_width, fb_height, InternalConfig::depthFormat);
 
@@ -1443,9 +1567,22 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
     VkImageView depth_view;
     REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &depth_view));
 
+    view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.image = color.image;
+    view_info.format = InternalConfig::varianceFormat;
+
+    VkImageView color_view;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &color_view));
+
+    view_info.image = intermediate.image;
+    view_info.format = InternalConfig::varianceFormat;
+
+    VkImageView intermediate_view;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &intermediate_view));
 
     array attachment_views {
-        depth_view,
+        color_view,
+        depth_view
     };
 
     VkFramebufferCreateInfo fb_info;
@@ -1463,7 +1600,11 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
     REQ_VK(dev.dt.createFramebuffer(dev.hdl, &fb_info, nullptr, &hdl));
 
     return ShadowFramebuffer {
+        std::move(color),
+        std::move(intermediate),
         std::move(depth),
+        color_view,
+        intermediate_view,
         depth_view,
         hdl,
     };
@@ -1479,6 +1620,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet draw_set,
                       VkDescriptorSet lighting_set,
                       VkDescriptorSet shadow_gen_set,
+                      VkDescriptorSet shadow_blur_set,
                       Sky &sky,
                       ShadowOffsets &shadow_offsets,
                       Frame *dst)
@@ -1510,7 +1652,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 23> desc_updates;
+    std::array<VkWriteDescriptorSet, 24> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -1618,7 +1760,8 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     DescHelper::storage(desc_updates[19], shadow_gen_set, &shadow_view_info, 0);
 
     VkDescriptorImageInfo shadow_map_info;
-    shadow_map_info.imageView = shadow_fb.depthView;
+    shadow_map_info.imageView = shadow_fb.varianceView;
+    // shadow_map_info.imageView = shadow_fb.depthView;
     shadow_map_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     shadow_map_info.sampler = VK_NULL_HANDLE;
 
@@ -1631,6 +1774,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::storage(desc_updates[18], lighting_set, &sky_info, 11);
 
+#if 0
     VkDescriptorImageInfo shadow_offsets_info;
     shadow_offsets_info.imageView = shadow_offsets.view;
     shadow_offsets_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1638,8 +1782,21 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::textures(desc_updates[22], lighting_set, &shadow_offsets_info, 1, 12, 0);
     // DescHelper::storageImage(desc_updates[22], lighting_set, &shadow_offsets_info, 12);
+#endif
 
+    VkDescriptorImageInfo blur_input_info;
+    blur_input_info.imageView = shadow_fb.varianceView;
+    blur_input_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    blur_input_info.sampler = VK_NULL_HANDLE;
 
+    DescHelper::storageImage(desc_updates[22], shadow_blur_set, &blur_input_info, 0);
+
+    VkDescriptorImageInfo blur_intermediate_info;
+    blur_intermediate_info.imageView = shadow_fb.intermediateView;
+    blur_intermediate_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    blur_intermediate_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::storageImage(desc_updates[23], shadow_blur_set, &blur_intermediate_info, 1);
 
 
 
@@ -1672,6 +1829,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         draw_set,
         lighting_set,
         shadow_gen_set,
+        shadow_blur_set,
     };
 }
 
@@ -1691,9 +1849,12 @@ static array<VkClearValue, 4> makeClearValues()
     };
 }
 
-static array<VkClearValue, 1> makeShadowClearValues()
+static array<VkClearValue, 2> makeShadowClearValues()
 {
-    VkClearValue depth_clear;
+    VkClearValue color_clear = {};
+    color_clear.color = {{0.f, 0.f, 0.f, 0.f}};
+
+    VkClearValue depth_clear = {};
     depth_clear.depthStencil = {0.f, 0};
 
     return {
@@ -2510,7 +2671,7 @@ Renderer::Renderer(uint32_t gpu_id,
       render_pass_(makeRenderPass(dev, VK_FORMAT_R8G8B8A8_UNORM,
                                   InternalConfig::gbufferFormat, InternalConfig::gbufferFormat,
                                   InternalConfig::depthFormat)),
-      shadow_pass_(makeShadowRenderPass(dev, InternalConfig::depthFormat)),
+      shadow_pass_(makeShadowRenderPass(dev, InternalConfig::varianceFormat, InternalConfig::depthFormat)),
       imgui_render_state_(imguiInit(window.platformWindow, dev, backend,
                                  render_queue_, pipeline_cache_,
                                  VK_FORMAT_R8G8B8A8_UNORM,
@@ -2527,6 +2688,7 @@ Renderer::Renderer(uint32_t gpu_id,
                                       clamp_sampler_,
                                       InternalConfig::numFrames)),
       shadow_gen_(makeShadowGenPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames)),
+      blur_(makeBlurPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames)),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
       asset_desc_pool_mat_tx_(dev, object_draw_.shaders, 2, 1),
@@ -2558,6 +2720,7 @@ Renderer::Renderer(uint32_t gpu_id,
                   object_draw_.descPool.makeSet(),
                   deferred_lighting_.descPool.makeSet(),
                   shadow_gen_.descPool.makeSet(),
+                  blur_.descPool.makeSet(),
                   sky_,
                   shadow_offsets_,
                   &frames_[i]);
@@ -2595,6 +2758,7 @@ Renderer::~Renderer()
         dev.dt.destroyImage(dev.hdl, f.shadowFB.depthAttachment.image, nullptr);
 #endif
 
+        dev.dt.destroyImageView(dev.hdl, f.shadowFB.varianceView, nullptr);
         dev.dt.destroyImageView(dev.hdl, f.shadowFB.depthView, nullptr);
     }
 
@@ -3280,6 +3444,161 @@ static void issueShadowGen(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline,
     }
 }
 
+static void issueShadowBlurPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd)
+{
+    { // Transition for compute
+        array<VkImageMemoryBarrier, 2> compute_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.shadowFB.varianceAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_NONE,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.shadowFB.intermediate.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                compute_prepare.size(), compute_prepare.data());
+    }
+
+    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
+
+    shader::BlurPushConst push_const;
+    push_const.isVertical = 0;
+
+    dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push_const), &push_const);
+
+    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline.layout, 0, 1, &frame.shadowBlurSet, 0, nullptr);
+
+    uint32_t num_workgroups_x = utils::divideRoundUp(InternalConfig::shadowMapSize, 32_u32);
+    uint32_t num_workgroups_y = utils::divideRoundUp(InternalConfig::shadowMapSize, 32_u32);
+
+    dev.dt.cmdDispatch(draw_cmd, num_workgroups_x, num_workgroups_y, 1);
+
+    { // Transition for compute
+        array<VkImageMemoryBarrier, 2> compute_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.shadowFB.varianceAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.shadowFB.intermediate.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                compute_prepare.size(), compute_prepare.data());
+    }
+
+    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
+
+    push_const.isVertical = 1;
+
+    dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push_const), &push_const);
+
+    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline.layout, 0, 1, &frame.shadowBlurSet, 0, nullptr);
+
+    dev.dt.cmdDispatch(draw_cmd, num_workgroups_x, num_workgroups_y, 1);
+
+    { // Transition for compute
+        array<VkImageMemoryBarrier, 2> compute_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.shadowFB.varianceAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.shadowFB.intermediate.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            },
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                compute_prepare.size(), compute_prepare.data());
+    }
+}
+
 static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, const ViewerCam &cam, uint32_t view_idx)
 {
     { // Transition for compute
@@ -3652,6 +3971,9 @@ void Renderer::render(const ViewerCam &cam,
 
         dev.dt.cmdEndRenderPass(draw_cmd);
 
+        issueShadowBlurPass(dev, frame, blur_, draw_cmd);
+
+#if 1
         array<VkImageMemoryBarrier, 1> finish_prepare {{
             {
                 VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -3676,6 +3998,7 @@ void Renderer::render(const ViewerCam &cam,
                 0,
                 0, nullptr, 0, nullptr,
                 finish_prepare.size(), finish_prepare.data());
+#endif
     }
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,

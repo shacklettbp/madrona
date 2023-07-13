@@ -91,7 +91,12 @@ struct Framebuffer {
 };
 
 struct ShadowFramebuffer {
+    render::vk::LocalImage varianceAttachment;
+    render::vk::LocalImage intermediate;
     render::vk::LocalImage depthAttachment;
+
+    VkImageView varianceView;
+    VkImageView intermediateView;
     VkImageView depthView;
     VkFramebuffer hdl;
 };
@@ -142,6 +147,7 @@ struct Frame {
     VkDescriptorSet drawShaderSet;
     VkDescriptorSet lightingSet;
     VkDescriptorSet shadowGenSet;
+    VkDescriptorSet shadowBlurSet;
 };
 
 struct ViewerCam {
@@ -174,8 +180,7 @@ struct ImGuiRenderState {
     VkRenderPass renderPass;
 };
 
-struct ShadowOffsets
-{
+struct ShadowOffsets {
     render::vk::LocalTexture offsets;
     VkImageView view;
     VkDeviceMemory backing;
@@ -253,7 +258,7 @@ private:
     uint32_t fb_width_;
     uint32_t fb_height_;
     std::array<VkClearValue, 4> fb_clear_;
-    std::array<VkClearValue, 1> fb_shadow_clear_;
+    std::array<VkClearValue, 2> fb_shadow_clear_;
     std::array<VkClearValue, 2> fb_imgui_clear_;
     PresentationState present_;
     VkPipelineCache pipeline_cache_;
@@ -262,13 +267,13 @@ private:
     VkRenderPass render_pass_;
     VkRenderPass shadow_pass_;
     ImGuiRenderState imgui_render_state_;
+
     Pipeline<1> instance_cull_;
     Pipeline<1> object_draw_;
     Pipeline<1> object_shadow_draw_;
     Pipeline<1> deferred_lighting_;
     Pipeline<1> shadow_gen_;
-
-    // Pipeline<1> ao_pass_;
+    Pipeline<1> blur_;
 
     render::vk::FixedDescriptorPool asset_desc_pool_cull_;
     render::vk::FixedDescriptorPool asset_desc_pool_draw_;

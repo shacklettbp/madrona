@@ -1,6 +1,11 @@
 #ifndef MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 #define MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 
+struct BlurPushConst {
+    /* Vertical blur happens first. */
+    uint32_t isVertical;
+};
+
 struct CullPushConst {
     uint32_t numInstances;
 };

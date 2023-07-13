@@ -34,7 +34,7 @@ Texture3D<float4> scatteringLUT;
 
 // Shadows
 [[vk::binding(8, 0)]]
-Texture2D<float> shadowMap;
+Texture2D<float2> shadowMap;
 
 // Assume stuff is Y-UP from here
 [[vk::binding(9, 0)]]
@@ -48,8 +48,10 @@ SamplerState linearSampler;
 [[vk::binding(11, 0)]]
 StructuredBuffer<SkyData> skyBuffer;
 
+#if 0
 [[vk::binding(12, 0)]]
 Texture3D<float4> shadowOffsetsLUT;
+#endif
 
 #include "lighting.h"
 
@@ -59,12 +61,87 @@ Texture3D<float4> shadowOffsetsLUT;
 #define  SHADOW_OFFSET_FILTER_SIZE  8
 #define SHADOW_MAP_RANDOM_RADIUS 5
 
+#if 0
 float4 get_offset_at(uint3 offset_coord, uint3 offset_dim)
 {
     float3 uv = (float3(offset_coord) + float3(0.5, 0.5, 0.5)) / float3(offset_dim);
     return shadowOffsetsLUT.SampleLevel(linearSampler, uv, 0);
 }
+#endif
 
+#if 0
+float chebyshev(float2 moments, float t) 
+{
+    // float p = (t > moments.x);   
+    float p = 1.0 - step(t, moments.x);
+
+    float variance = moments.y - (moments.x*moments.x);   
+
+    variance = max(variance, 0.00001);   
+
+    float d = t - moments.x;   
+    float p_max = variance / (variance + d*d);   
+    return max(p, p_max); 
+} 
+#endif
+#
+float linear_step(float low, float high, float v) {
+    return clamp((v - low) / (high - low), 0, 1);
+}
+
+#if 1
+float shadowFactorVSM(float3 world_pos, uint2 target_pixel)
+{
+    uint2 shadow_map_dim;
+    shadowMap.GetDimensions(shadow_map_dim.x, shadow_map_dim.y);
+
+    float2 texel_size = float2(1.f, 1.f) / float2(shadow_map_dim);
+
+    float4 world_pos_v4 = float4(world_pos.xyz, 1.f);
+
+    // Light space position
+    float4 ls_pos = mul(shadowViewDataBuffer[pushConst.viewIdx].viewProjectionMatrix, world_pos_v4);
+    ls_pos.xyz /= ls_pos.w;
+    // ls_pos.z += 0.0005f;
+
+    /* UV to use when sampling in the shadow map. */
+    float2 uv = ls_pos.xy * 0.5 + float2(0.5, 0.5);
+
+    if (uv.x > 1.0 || uv.x < 0.0 || uv.y > 1.0 || uv.y < 0.0 ||
+        ls_pos.z > 1.0 || ls_pos.z < -1.0)
+        return 1.0;
+
+    float2 moment = shadowMap.SampleLevel(linearSampler, uv, 0);
+
+    float occlusion = 0.0f;
+
+    float pcf_count = 1;
+
+    for (int x = int(-pcf_count); x <= int(pcf_count); ++x) {
+        for (int y = int(-pcf_count); y <= int(pcf_count); ++y) {
+            float2 moment = shadowMap.SampleLevel(linearSampler, uv + float2(x, y) * texel_size, 0).rg;
+
+            // Chebychev's inequality
+            float p = (ls_pos.z > moment.x);
+            float sigma = max(moment.y - moment.x * moment.x, 0.0000001);
+
+            float dist_from_mean = (ls_pos.z - moment.x);
+
+            float pmax = linear_step(0.9, 1.0, sigma / (sigma + dist_from_mean * dist_from_mean));
+
+            float occ = min(1.0f, max(pmax, p));
+
+            occlusion += occ;
+        }
+    }
+
+    occlusion /= (pcf_count * 2.0f + 1.0f) * (pcf_count * 2.0f + 1.0f);
+
+    return occlusion;
+}
+#endif
+
+#if 0
 float shadowFactorRandomSample(float3 world_pos, uint2 target_pixel)
 {
     uint2 shadow_map_dim;
@@ -160,8 +237,10 @@ float shadowFactorRandomSample(float3 world_pos, uint2 target_pixel)
 
     return shadow_factor;
 }
+#endif
 
-float shadowFactor(float3 world_pos, float3 world_normal)
+#if 0
+float shadowFactor(float3 world_pos)
 {
     float4 world_pos_v4 = float4(world_pos.xyz, 1.f);
 
@@ -177,7 +256,15 @@ float shadowFactor(float3 world_pos, float3 world_normal)
     uint2 shadow_map_dim;
     shadowMap.GetDimensions(shadow_map_dim.x, shadow_map_dim.y);
 
+    
+    float map_depth = shadowMap.SampleLevel(linearSampler, uv, 0);
+    float shadow = (ls_pos.z < map_depth ? 1.0 : 0.0);
+    // float shadow = ls_pos.z - map_depth;
+    // float shadow = ls_pos.z;
+    // float shadow = ls_pos.z - map_depth;
 
+
+#if 0
     float shadow = 0.0;
     float2 texel_size = 1.0 / float2(shadow_map_dim);
     for(int x = -extent; x <= extent; ++x) {
@@ -187,9 +274,11 @@ float shadowFactor(float3 world_pos, float3 world_normal)
         }    
     }
     shadow /= float((extent * 2 + 1) * (extent * 2 + 1));
+#endif
 
     return shadow;
 }
+#endif
 
 // Assume that position and normal are in Y-up coordinate system TODO: Change to Z-UP
 struct GBufferData {
@@ -270,8 +359,9 @@ float3 accumulateSunRadianceBRDF(in GBufferData gbuffer, float roughness, float 
                 skyBuffer[0], transmittanceLUT, r, muSun),
                 normalize(-lights[0].lightDir.xzy));
 
-    // float shadow_factor = shadowFactor(gbuffer.wPosition, gbuffer.wNormal);
-    float shadow_factor = shadowFactorRandomSample(gbuffer.wPosition, target_pixel);
+    // float shadow_factor = shadowFactor(gbuffer.wPosition);
+    // float shadow_factor = shadowFactorRandomSample(gbuffer.wPosition, target_pixel);
+    float shadow_factor = shadowFactorVSM(gbuffer.wPosition, target_pixel);
 
     return ret * shadow_factor;
 }
