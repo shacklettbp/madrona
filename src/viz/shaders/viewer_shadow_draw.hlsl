@@ -24,9 +24,11 @@ StructuredBuffer<PackedVertex> vertexDataBuffer;
 [[vk::binding(1, 1)]]
 StructuredBuffer<MaterialData> materialBuffer;
 
+#if 0
 struct V2F {
-    // [[vk::location(0)]] float depth : TEXCOORD0;
+    [[vk::location(0)]] float depth : TEXCOORD0;
 };
+#endif
 
 Vertex unpackVertex(PackedVertex packed)
 {
@@ -93,8 +95,7 @@ float3x3 toMat(float4 r)
 
 [shader("vertex")]
 float4 vert(in uint vid : SV_VertexID,
-            in uint draw_id : SV_InstanceID,
-            out V2F v2f) : SV_Position
+            in uint draw_id : SV_InstanceID) : SV_Position
 {
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
     DrawData draw_data = drawDataBuffer[draw_id];
@@ -118,6 +119,13 @@ float4 vert(in uint vid : SV_VertexID,
 }
 
 [shader("pixel")]
-void frag(in V2F v2f)
+float2 frag(in float4 position : SV_Position) : SV_Target0
 {
+    float depth = position.z;
+
+    float dx = ddx(depth);
+    float dy = ddy(depth);
+    float sigma = depth * depth + 0.25 * (dx * dx + dy * dy);
+
+    return float2(depth, sigma);
 }
