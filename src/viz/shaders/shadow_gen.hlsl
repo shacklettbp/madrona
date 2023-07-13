@@ -125,6 +125,8 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     ws_up = ws_up.xzy;
     ws_light_dir = ws_light_dir.xzy;
 #endif
+#
+    ws_position -= ws_direction;
 
     float4x4 view = lookAt(float3(0.0f, 0.0f, 0.0f), ws_light_dir, ws_up);
 
