@@ -123,7 +123,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     // Construct orthonormal basis
     float3 light_fwd = normalize(lights[0].lightDir.xyz);
     float3 light_right = (light_fwd.z < 0.9999f) ?
-        normalize(cross(float3(0.f, 0.f, 1.f), light_fwd)) :
+        normalize(cross(light_fwd, float3(0.f, 0.f, 1.f) )) :
         float3(1.f, 0.f, 0.f);
     float3 light_up = cross(light_right, light_fwd);
 
