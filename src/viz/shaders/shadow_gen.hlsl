@@ -45,29 +45,20 @@ PerspectiveCameraData unpackViewData(PackedViewData packed)
     return cam;
 }
 
-/* From GLM. */
 float4x4 lookAt(float3 eye, float3 center, float3 up)
 {
     float3 f = normalize(center - eye);
     float3 s = normalize(cross(f, up));
-    float3 u = normalize(cross(s, f));
+    float3 u = normalize(cross(f, s));
 
-    float4x4 m = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-    m[0][0] = s.x;
-    m[1][0] = s.y;
-    m[2][0] = s.z;
-    m[0][1] = u.x;
-    m[1][1] = u.y;
-    m[2][1] = u.z;
-    m[0][2] =f.x;
-    m[1][2] =f.y;
-    m[2][2] =f.z;
-    m[3][0] =-dot(s, eye);
-    m[3][1] =-dot(u, eye);
-    m[3][2] = dot(f, eye);
-    m[3][3] = 1.0f;
-    return transpose(m);
+    return float4x4(
+        float4(s.x, s.y, s.z, 0.0),
+        float4(u.x, u.y, u.z, 0.0),
+        float4(f.x, f.y, f.z, 0.0),
+        float4(0,   0,   0,   1)
+    );
 }
+
 
 [numThreads(32, 1, 1)]
 [shader("compute")]
@@ -90,6 +81,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     float3 ws_direction = normalize(cam_view);
     float3 ws_up = float3(0.000000001f, 0.000000001f, 1.0f);
     float3 ws_light_dir = normalize(lights[0].lightDir.xyz);
+    ws_light_dir.xy *= -1;
 
     // ws_position -= ws_direction;
 
@@ -161,17 +153,33 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
         if (z_max < ls_corners[i].z) z_max = ls_corners[i].z;
     }
 
-    {
-        float tmp = z_max;
-        z_max = z_min;
-        z_min = tmp;
+    if (1) {
+        float tmp = y_max;
+        y_max = y_min;
+        y_min = tmp;
     }
-
+    
+#if 0
     float4x4 projection = transpose(float4x4(
         float4(2.0f / (x_max - x_min), 0.0f,                    0.0f,                   0.0f),
         float4(0.0f,                    2.0f / (y_max - y_min), 0.0f,                   0.0f),
-        float4(0.0f,                    0.0f,                   1.0f / (z_max - z_min), 0.0f ),
+        float4(0.0f,                    0.0f,                   -1.0f / (z_max - z_min), 0.0f ),
         float4(-(x_max + x_min) / (x_max - x_min), -(y_max + y_min) / (y_max - y_min), -(z_min) / (z_max - z_min), 1.0f)));
+#endif
+
+#if 0
+    float4x4 projection = transpose(float4x4(
+        float4(2.0f / (x_max - x_min),             0.0f,                       0.0f,                        0.0f),
+        float4(0.0f,                               0.0f,                       1.0f / (y_max - y_min),      0.0f),
+        float4(0.0f,                               2.0f / (z_max - z_min),     0.0f,                        0.0f),
+        float4(-(x_max + x_min) / (x_max - x_min), -(z_max+z_min) / (z_max - z_min), -(y_min) / (y_max - y_min),  1.0f)));
+#endif
+
+    float4x4 projection =(float4x4(
+        float4(2.0f / (x_max - x_min),             0.0f,                       0.0f,                        -(x_max + x_min) / (x_max - x_min)),
+        float4(0.0f,                               0.0f,                      -2.0f / (z_max - z_min),      (z_max+z_min) / (z_max - z_min)),
+        float4(0.0f,                               1.0f / (y_max - y_min),     0.0f,                        -(y_min) / (y_max - y_min)),
+        float4(0.0f,                               0.0f,                       0.0f,                        1.0f)));
 
     shadowViewDataBuffer[idx.x].viewProjectionMatrix = mul(projection, view);
 
