@@ -704,7 +704,7 @@ static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler c
         dev, tmp_alloc,
         Span<const SPIRVShader>(&spirv, 1), 
         Span<const BindingOverride>({BindingOverride{
-            0, 10, clamp_sampler, 1, 0 }}));
+            0, 9, clamp_sampler, 1, 0 }}));
 }
 
 static PipelineShaders makeBlurShader(const Device &dev, VkSampler clamp_sampler)
@@ -977,8 +977,8 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     raster_info.depthClampEnable = VK_FALSE;
     raster_info.rasterizerDiscardEnable = VK_FALSE;
     raster_info.polygonMode = VK_POLYGON_MODE_FILL;
-    // raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
-    raster_info.cullMode = VK_CULL_MODE_BACK_BIT;
+    raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
+    // raster_info.cullMode = VK_CULL_MODE_BACK_BIT;
     raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster_info.depthBiasEnable = VK_FALSE;
     raster_info.lineWidth = 1.0f;
@@ -1652,7 +1652,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 24> desc_updates;
+    std::array<VkWriteDescriptorSet, 23> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -1661,7 +1661,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     //DescHelper::uniform(desc_updates[0], cull_set, &view_info, 0);
     DescHelper::storage(desc_updates[0], draw_set, &view_info, 0);
-    DescHelper::storage(desc_updates[20], shadow_gen_set, &view_info, 1);
+    DescHelper::storage(desc_updates[19], shadow_gen_set, &view_info, 1);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = render_input.buffer;
@@ -1720,7 +1720,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     light_data_info.range = buffer_sizes[5];
 
     DescHelper::storage(desc_updates[10], lighting_set, &light_data_info, 3);
-    DescHelper::storage(desc_updates[21], shadow_gen_set, &light_data_info, 2);
+    DescHelper::storage(desc_updates[20], shadow_gen_set, &light_data_info, 2);
 
     VkDescriptorImageInfo transmittance_info;
     transmittance_info.imageView = sky.transmittanceView;
@@ -1736,28 +1736,21 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::textures(desc_updates[12], lighting_set, &irradiance_info, 1, 5, 0);
 
-    VkDescriptorImageInfo mie_info;
-    mie_info.imageView = sky.mieView;
-    mie_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    mie_info.sampler = VK_NULL_HANDLE;
-
-    DescHelper::textures(desc_updates[13], lighting_set, &mie_info, 1, 6, 0);
-
     VkDescriptorImageInfo scattering_info;
     scattering_info.imageView = sky.scatteringView;
     scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::textures(desc_updates[14], lighting_set, &scattering_info, 1, 7, 0);
+    DescHelper::textures(desc_updates[13], lighting_set, &scattering_info, 1, 6, 0);
 
     VkDescriptorBufferInfo shadow_view_info;
     shadow_view_info.buffer = render_input.buffer;
     shadow_view_info.offset = buffer_offsets[5];
     shadow_view_info.range = buffer_sizes[6];
 
-    DescHelper::storage(desc_updates[15], draw_set, &shadow_view_info, 3);
-    DescHelper::storage(desc_updates[16], lighting_set, &shadow_view_info, 9);
-    DescHelper::storage(desc_updates[19], shadow_gen_set, &shadow_view_info, 0);
+    DescHelper::storage(desc_updates[14], draw_set, &shadow_view_info, 3);
+    DescHelper::storage(desc_updates[15], lighting_set, &shadow_view_info, 8);
+    DescHelper::storage(desc_updates[18], shadow_gen_set, &shadow_view_info, 0);
 
     VkDescriptorImageInfo shadow_map_info;
     shadow_map_info.imageView = shadow_fb.varianceView;
@@ -1765,14 +1758,14 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     shadow_map_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     shadow_map_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::textures(desc_updates[17], lighting_set, &shadow_map_info, 1, 8, 0);
+    DescHelper::textures(desc_updates[16], lighting_set, &shadow_map_info, 1, 7, 0);
 
     VkDescriptorBufferInfo sky_info;
     sky_info.buffer = render_input.buffer;
     sky_info.offset = buffer_offsets[6];
     sky_info.range = buffer_sizes[7];
 
-    DescHelper::storage(desc_updates[18], lighting_set, &sky_info, 11);
+    DescHelper::storage(desc_updates[17], lighting_set, &sky_info, 10);
 
 #if 0
     VkDescriptorImageInfo shadow_offsets_info;
@@ -1789,14 +1782,14 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     blur_input_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     blur_input_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[22], shadow_blur_set, &blur_input_info, 0);
+    DescHelper::storageImage(desc_updates[21], shadow_blur_set, &blur_input_info, 0);
 
     VkDescriptorImageInfo blur_intermediate_info;
     blur_intermediate_info.imageView = shadow_fb.intermediateView;
     blur_intermediate_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     blur_intermediate_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[23], shadow_blur_set, &blur_intermediate_info, 1);
+    DescHelper::storageImage(desc_updates[22], shadow_blur_set, &blur_intermediate_info, 1);
 
 
 
@@ -3377,7 +3370,7 @@ static void packSky( const Device &dev,
     data->groundAlbedo = math::Vector4{0.050000f, 0.050000f, 0.050000f, 0.0f};
     data->muSunMin = -0.207912f;
     data->wPlanetCenter =
-      math::Vector4{0.0f, -data->bottomRadius, 0.0f, 0.0f};
+      math::Vector4{0.0f, 0.0f, -data->bottomRadius, 0.0f};
     data->sunSize = math::Vector4{
             0.0046750340586467079f, 0.99998907220740285f, 0.0f, 0.0f};
 
