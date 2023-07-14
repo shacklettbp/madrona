@@ -127,6 +127,9 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
         float3(1.f, 0.f, 0.f);
     float3 light_up = cross(light_right, light_fwd);
 
+    // Note that we use the basis vectors as the *rows* of the to_light
+    // transform matrix, because we want the inverse of the light to world
+    // matrix (which is just the transpose for rotation matrices).
     float3x3 to_light = float3x3(
         light_right.x, light_right.y, light_right.z,
         light_fwd.x,   light_fwd.y, light_fwd.z,
