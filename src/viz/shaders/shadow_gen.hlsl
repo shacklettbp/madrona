@@ -113,48 +113,40 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
 
     PerspectiveCameraData unpackedView = unpackViewData(viewData);
 
-    float3 cam_position = unpackedView.pos;
-    float4 rotation = invQuat(unpackedView.rot);
+    float3 cam_pos = unpackedView.pos;
+    float4 cam_rot = invQuat(unpackedView.rot);
 
-    float3 cam_view = rotateVec(rotation, float3(0.0f, 1.0f, 0.0f));
+    float3 cam_fwd = rotateVec(cam_rot, float3(0.0f, 1.0f, 0.0f));
+    float3 cam_up = rotateVec(cam_rot, float3(0.0f, 0.0f, 1.0f));
+    float3 cam_right = rotateVec(cam_rot, float3(1.0f, 0.0f, 0.0f));
 
-    float3 ws_position = cam_position;
-    float3 ws_direction = normalize(cam_view);
-    float3 ws_up = float3(0.000000001f, 0.000000001f, 1.0f);
-    float3 ws_light_dir = normalize(lights[0].lightDir.xyz);
-    // ws_light_dir.xy *= -1;
+    // Construct orthonormal basis
+    float3 light_fwd = normalize(lights[0].lightDir.xyz);
+    float3 light_right = (light_fwd.z < 0.9999f) ?
+        normalize(cross(float3(0.f, 0.f, 1.f), light_fwd)) :
+        float3(1.f, 0.f, 0.f);
+    float3 light_up = cross(light_right, light_fwd);
 
-    // ws_position -= ws_direction;
-
-    // float4x4 view = lookAt(ws_light_dir, ws_up);
-
-    // float4 view_quat = toQuat(float3(0, 1, 0), ws_light_dir);
-    float4 view_quat = toQuat(ws_light_dir, float3(0, 1, 0));
+    float3x3 to_light = float3x3(
+        light_right.x, light_right.y, light_right.z,
+        light_fwd.x,   light_fwd.y, light_fwd.z,
+        light_up.x, light_up.y, light_up.z
+    );
 
     float far_width, near_width, far_height, near_height;
-
 
     float tan_half_fov = -1.0f / unpackedView.yScale;
     float aspect = -unpackedView.yScale / unpackedView.xScale;
     float near = 1.0f;
     float far = 50.0f;
 
-
-
     far_height = 2.0f * far * tan_half_fov;
     near_height = 2.0f * near * tan_half_fov;
     far_width = far_height * aspect;
     near_width = near_height * aspect;
 
-
-
-
-    float3 center_near = ws_position + ws_direction * near;
-    float3 center_far = ws_position + ws_direction * far;
-    float3 right_view_ax = normalize(cross(ws_direction, ws_up));
-    float3 up_view_ax = -normalize(cross(ws_direction, right_view_ax));
-
-
+    float3 center_near = cam_pos + cam_fwd * near;
+    float3 center_far = cam_pos + cam_fwd * far;
 
     float far_width_half = far_width / 2.0f;
     float near_width_half = near_width / 2.0f;
@@ -172,7 +164,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     float3 ls_corners[8];
 
 #if 0
-    ls_corners[flt] = mul(view, float4(ws_position + ws_direction * far - right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
+    ls_corners[flt] = mul(view, float4(cam_pos + ws_direction * far - right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
     ls_corners[flb] = mul(view, float4(ws_position + ws_direction * far - right_view_ax * far_width_half - up_view_ax * far_height_half, 1.0f));
     ls_corners[frt] = mul(view, float4(ws_position + ws_direction * far + right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
     ls_corners[frb] = mul(view, float4(ws_position + ws_direction * far + right_view_ax * far_width_half - up_view_ax * far_height_half, 1.0f));
@@ -181,14 +173,15 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     ls_corners[nrt] = mul(view, float4(ws_position + ws_direction * near + right_view_ax * near_width_half + up_view_ax * near_height_half, 1.0f));
     ls_corners[nrb] = mul(view, float4(ws_position + ws_direction * near + right_view_ax * near_width_half - up_view_ax * near_height_half, 1.0f));
 #endif
-    ls_corners[flt] = rotateVec(view_quat, ws_position + ws_direction * far - right_view_ax * far_width_half + up_view_ax * far_height_half);
-    ls_corners[flb] = rotateVec(view_quat, ws_position + ws_direction * far - right_view_ax * far_width_half - up_view_ax * far_height_half);
-    ls_corners[frt] = rotateVec(view_quat, ws_position + ws_direction * far + right_view_ax * far_width_half + up_view_ax * far_height_half);
-    ls_corners[frb] = rotateVec(view_quat, ws_position + ws_direction * far + right_view_ax * far_width_half - up_view_ax * far_height_half);
-    ls_corners[nlt] = rotateVec(view_quat, ws_position + ws_direction * near - right_view_ax * near_width_half + up_view_ax * near_height_half);
-    ls_corners[nlb] = rotateVec(view_quat, ws_position + ws_direction * near - right_view_ax * near_width_half - up_view_ax * near_height_half);
-    ls_corners[nrt] = rotateVec(view_quat, ws_position + ws_direction * near + right_view_ax * near_width_half + up_view_ax * near_height_half);
-    ls_corners[nrb] = rotateVec(view_quat, ws_position + ws_direction * near + right_view_ax * near_width_half - up_view_ax * near_height_half);
+
+    ls_corners[flt] = mul(to_light, center_far - cam_right * far_width_half + cam_up * far_height_half);
+    ls_corners[flb] = mul(to_light, center_far - cam_right * far_width_half - cam_up * far_height_half);
+    ls_corners[frt] = mul(to_light, center_far + cam_right * far_width_half + cam_up * far_height_half);
+    ls_corners[frb] = mul(to_light, center_far + cam_right * far_width_half - cam_up * far_height_half);
+    ls_corners[nlt] = mul(to_light, center_near - cam_right * near_width_half + cam_up * near_height_half);
+    ls_corners[nlb] = mul(to_light, center_near - cam_right * near_width_half - cam_up * near_height_half);
+    ls_corners[nrt] = mul(to_light, center_near + cam_right * near_width_half + cam_up * near_height_half);
+    ls_corners[nrb] = mul(to_light, center_near + cam_right * near_width_half - cam_up * near_height_half);
 
     float x_min, x_max, y_min, y_max, z_min, z_max;
 
@@ -220,15 +213,18 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
         float4(0.0f,                               1.0f / (y_max - y_min),     0.0f,                        -(y_min) / (y_max - y_min)),
         float4(0.0f,                               0.0f,                       0.0f,                        1.0f)));
 
-    shadowViewDataBuffer[idx.x].viewProjectionMatrix = mul(projection, toMat(view_quat));
+    shadowViewDataBuffer[idx.x].viewProjectionMatrix = mul(
+        projection, float4x4(
+            float4(to_light[0].xyz, 0.f),
+            float4(to_light[1].xyz, 0.f),
+            float4(to_light[2].xyz, 0.f),
+            float4(0.f, 0.f, 0.f, 1.f)
+        )
+    );
 
     {
-        float3 f = normalize(ws_direction);
-        float3 s = normalize(cross(f, ws_up));
-        float3 u = normalize(cross(f, s));
-
-        shadowViewDataBuffer[idx.x].cameraRight = float4(s.x, s.y, s.z, 1.0f);
-        shadowViewDataBuffer[idx.x].cameraUp = -float4(u.x, u.y, u.z, 1.0f);
-        shadowViewDataBuffer[idx.x].cameraForward = float4(f.x, f.y, f.z, 1.0f);
+        shadowViewDataBuffer[idx.x].cameraRight = float4(cam_right, 1.f);
+        shadowViewDataBuffer[idx.x].cameraUp = float4(cam_up, 1.f);
+        shadowViewDataBuffer[idx.x].cameraForward = float4(cam_fwd, 1.f);
     }
 }
