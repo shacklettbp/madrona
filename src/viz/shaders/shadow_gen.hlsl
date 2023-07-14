@@ -45,7 +45,7 @@ PerspectiveCameraData unpackViewData(PackedViewData packed)
     return cam;
 }
 
-// From GLM
+/* From GLM. */
 float4x4 lookAt(float3 eye, float3 center, float3 up)
 {
     float3 f = normalize(center - eye);
@@ -69,39 +69,11 @@ float4x4 lookAt(float3 eye, float3 center, float3 up)
     return transpose(m);
 }
 
-float3x3 getCameraToWorldMatrix(float3 eye,
-    float3 center,
-    float3 up)
-{
-    float3 f = normalize(center - eye);
-    float3 s = normalize(cross(f, up));
-    float3 u = normalize(cross(s, f));
-
-    return float3x3(
-        s, u, f
-    );
-}
-
-// From Brendan Galea
-float4x4 perspective(float fovy, float aspect, float near, float far)
-{
-    float4x4 projection;
-
-    const float tanHalfFovy = tan(radians(fovy) / 2.f);
-    projection[0][0] = 1.f / (aspect * tanHalfFovy);
-    projection[1][1] = 1.f / (tanHalfFovy);
-    projection[2][2] = far / (far - near);
-    projection[2][3] = 1.f;
-    projection[3][2] = -(far * near) / (far - near);   
-
-    return projection;
-}
-
 [numThreads(32, 1, 1)]
 [shader("compute")]
 void shadowGen(uint3 idx : SV_DispatchThreadID)
 {
-    // Assume that the sun is from lights[0]
+    /* Assume that the sun is from lights[0] */
     if (idx.x >= pushConst.numViews+1)
         return;
 
@@ -119,13 +91,6 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     float3 ws_up = float3(0.000000001f, 0.000000001f, 1.0f);
     float3 ws_light_dir = normalize(lights[0].lightDir.xyz);
 
-#if 1
-    ws_position = ws_position.xzy;
-    ws_direction = ws_direction.xzy;
-    ws_up = ws_up.xzy;
-    ws_light_dir = ws_light_dir.xzy;
-#endif
-#
     ws_position -= ws_direction;
 
     float4x4 view = lookAt(float3(0.0f, 0.0f, 0.0f), ws_light_dir, ws_up);
@@ -170,7 +135,6 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
 
     float4 ls_corners[8];
 
-    // Light space
     ls_corners[flt] = mul(view, float4(ws_position + ws_direction * far - right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
     ls_corners[flb] = mul(view, float4(ws_position + ws_direction * far - right_view_ax * far_width_half - up_view_ax * far_height_half, 1.0f));
     ls_corners[frt] = mul(view, float4(ws_position + ws_direction * far + right_view_ax * far_width_half + up_view_ax * far_height_half, 1.0f));
@@ -197,9 +161,8 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
         if (z_max < ls_corners[i].z) z_max = ls_corners[i].z;
     }
     
-    // Y is up
     float4x4 projection = transpose(float4x4(
-        float4( 2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f),
+        float4(2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f),
         float4(0.0f,                    2.0f / (y_max - y_min), 0.0f,                   0.0f),
         float4(0.0f,                    0.0f,                   1.0f / (z_max - z_min), 0.0f ),
         float4(-(x_max + x_min) / (x_max - x_min), -(y_max + y_min) / (y_max - y_min), -(z_min) / (z_max - z_min), 1.0f)));

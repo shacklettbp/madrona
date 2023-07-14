@@ -113,7 +113,7 @@ float4 vert(in uint vid : SV_VertexID,
         instance_data.position + mul(toMat(instance_data.rotation), (instance_data.scale * vert.position)), 
         1.f + dummy);
 
-    float4 clip_pos = mul(shadow_matrix, world_space_pos.xzyw);
+    float4 clip_pos = mul(shadow_matrix, world_space_pos);
 
     return clip_pos;
 }
