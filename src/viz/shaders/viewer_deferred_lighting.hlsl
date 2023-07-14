@@ -75,7 +75,7 @@ float shadowFactorVSM(float3 world_pos, uint2 target_pixel)
 
     /* Only deal with points which are within the shadow map. */
     if (uv.x > 1.0 || uv.x < 0.0 || uv.y > 1.0 || uv.y < 0.0 ||
-        ls_pos.z > 1.0 || ls_pos.z < -1.0)
+        ls_pos.z > 1.0 || ls_pos.z < 0.0)
         return 1.0;
 
     float2 moment = shadowMap.SampleLevel(linearSampler, uv, 0);

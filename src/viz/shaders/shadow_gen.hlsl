@@ -59,9 +59,9 @@ float4x4 lookAt(float3 eye, float3 center, float3 up)
     m[0][1] = u.x;
     m[1][1] = u.y;
     m[2][1] = u.z;
-    m[0][2] =-f.x;
-    m[1][2] =-f.y;
-    m[2][2] =-f.z;
+    m[0][2] =f.x;
+    m[1][2] =f.y;
+    m[2][2] =f.z;
     m[3][0] =-dot(s, eye);
     m[3][1] =-dot(u, eye);
     m[3][2] = dot(f, eye);
@@ -91,7 +91,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     float3 ws_up = float3(0.000000001f, 0.000000001f, 1.0f);
     float3 ws_light_dir = normalize(lights[0].lightDir.xyz);
 
-    ws_position -= ws_direction;
+    // ws_position -= ws_direction;
 
     float4x4 view = lookAt(float3(0.0f, 0.0f, 0.0f), ws_light_dir, ws_up);
 
@@ -160,9 +160,15 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
         if (z_min > ls_corners[i].z) z_min = ls_corners[i].z;
         if (z_max < ls_corners[i].z) z_max = ls_corners[i].z;
     }
-    
+
+    {
+        float tmp = z_max;
+        z_max = z_min;
+        z_min = tmp;
+    }
+
     float4x4 projection = transpose(float4x4(
-        float4(2.0f / (x_max - x_min), 0.0f,                   0.0f,                   0.0f),
+        float4(2.0f / (x_max - x_min), 0.0f,                    0.0f,                   0.0f),
         float4(0.0f,                    2.0f / (y_max - y_min), 0.0f,                   0.0f),
         float4(0.0f,                    0.0f,                   1.0f / (z_max - z_min), 0.0f ),
         float4(-(x_max + x_min) / (x_max - x_min), -(y_max + y_min) / (y_max - y_min), -(z_min) / (z_max - z_min), 1.0f)));

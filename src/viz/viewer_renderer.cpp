@@ -978,7 +978,6 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     raster_info.rasterizerDiscardEnable = VK_FALSE;
     raster_info.polygonMode = VK_POLYGON_MODE_FILL;
     raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
-    // raster_info.cullMode = VK_CULL_MODE_BACK_BIT;
     raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster_info.depthBiasEnable = VK_FALSE;
     raster_info.lineWidth = 1.0f;
