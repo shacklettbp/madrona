@@ -123,8 +123,7 @@ def _build_redir_py(toml, config_settings):
     ext_suffix = importlib.machinery.EXTENSION_SUFFIXES[0]
 
     for pkg, pkg_cfg in pkgs.items():
-        pkg_init_path = Path(pkg_cfg['path']).resolve() / '__init__.py'
-        redir += f"    '{pkg}': r'{pkg_init_path}',\n"
+        ext_only = pkg_cfg.get('ext-only', False)
 
         try:
             exts = pkg_cfg['extensions']
@@ -133,15 +132,22 @@ def _build_redir_py(toml, config_settings):
 
         try:
             ext_out_dir = pkg_cfg['ext-out-dir']
+            ext_out_dir = Path(ext_out_dir).resolve()
+
         except KeyError:
-            if len(exts) > 0:
+            if len(exts) > 0 or ext_only:
                 raise RuntimeError(f"Package '{pkg}' has extensions but [tool.madrona.packages.{pkg}.ext-out-dir] is not defined for editable install")
 
-        ext_out_dir = Path(ext_out_dir).resolve()
+        if ext_only:
+            ext_path = ext_out_dir / f"{pkg}{ext_suffix}"
+            redir += f"    '{pkg}': r'{ext_path}',\n"
+        else:
+            pkg_init_path = Path(pkg_cfg['path']).resolve() / '__init__.py'
+            redir += f"    '{pkg}': r'{pkg_init_path}',\n"
 
-        for ext in exts:
-            ext_path = ext_out_dir / f"{ext}{ext_suffix}"
-            redir += f"    '{pkg}.{ext}': r'{ext_path}',\n"
+            for ext in exts:
+                ext_path = ext_out_dir / f"{ext}{ext_suffix}"
+                redir += f"    '{pkg}.{ext}': r'{ext_path}',\n"
     
     redir += "})\n"
 
