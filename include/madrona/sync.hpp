@@ -213,13 +213,26 @@ public:
     }
 
     template <sync::memory_order order>
-    inline void store(T v) const
+    inline void store(T v)
     {
 #ifndef MADRONA_STD_ATOMIC_REF
         __atomic_store_n((ValueT *)addr_, __builtin_bit_cast(ValueT, v),
                         OrderMap<order>::builtin);
 #else
-        return ref_.store(v, order);
+        ref_.store(v, order);
+#endif
+    }
+
+    template <sync::memory_order order>
+    inline T exchange(T v)
+    {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __atomic_exchange_n(
+            (ValueT *)addr_,
+            __builtin_bit_cast(ValueT, v),
+            OrderMap<order>::builtin);
+#else
+        return ref_.exchange(v, order);
 #endif
     }
 
