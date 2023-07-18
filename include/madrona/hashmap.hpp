@@ -45,7 +45,6 @@ public:
     constexpr static uint32_t numFree();
 
 private:
-    // End of first cache line
     static constexpr uint32_t shift_idx_ = 0;
     static constexpr uint32_t constant_idx_ = 1;
 

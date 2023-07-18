@@ -7,7 +7,10 @@
  */
 #pragma once
 
+#ifdef MADRONA_MSVC
 #include <bit>
+#endif
+
 #include <cstdint>
 #include <type_traits>
 #include <madrona/crash.hpp>

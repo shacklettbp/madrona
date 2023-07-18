@@ -37,7 +37,6 @@ __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 __launch_bounds__(madrona::consts::numMegakernelThreads, 1)
 __global__ void initWorlds(int32_t num_worlds,
-                           const void *renderer_inits,
                            const ConfigT *cfg,
                            const InitT *user_inits)
 {
@@ -52,10 +51,6 @@ __global__ void initWorlds(int32_t num_worlds,
     ContextT ctx = TaskGraph::makeContext<ContextT>(WorldID {
         world_idx,
     });
-
-    if (renderer_inits != nullptr) {
-        TaskGraph::setupRenderer(ctx, renderer_inits, world_idx);
-    }
 
     new (world) WorldT(ctx, *cfg, user_inits[world_idx]);
 }

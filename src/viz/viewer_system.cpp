@@ -1,5 +1,6 @@
 #include <madrona/viz/system.hpp>
 #include <madrona/components.hpp>
+#include <madrona/context.hpp>
 
 #include "interop.hpp"
 
@@ -13,6 +14,9 @@ struct ViewerSystemState {
     InstanceData *instances;
     uint32_t *numInstances;
     float aspectRatio;
+#ifdef MADRONA_GPU_MODE
+    uint32_t instanceCountReadback;
+#endif
 };
 
 struct RecordSystemState {
@@ -69,11 +73,11 @@ inline void updateViewData(Context &ctx,
 #ifdef MADRONA_GPU_MODE
 
 inline void readbackCount(Context &ctx,
-                          RendererState &renderer_state)
+                          ViewerSystemState &viewer_state)
 {
     if (ctx.worldID().idx == 0) {
-        *renderer_state.count_readback = renderer_state.numInstances->primitiveCount;
-        renderer_state.numInstances->primitiveCount = 0;
+        viewer_state.instanceCountReadback = *viewer_state.numInstances;
+        *viewer_state.numInstances = 0;
     }
 }
 
