@@ -158,7 +158,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
     : componentOffset(offset),
       numUserComponents(num_user_components),
       tbl(),
-      columnLookup(lookup_input, num_columns),
+      columnLookup(lookup_input, num_user_components),
       needsSort(false)
 {
     using namespace mwGPU;
@@ -216,18 +216,6 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
     // Add world ID column as second column of every table
     *type_ptr = *components_[1];
     type_ptr++;
-
-    *lookup_input_ptr = {
-        TypeTracker::typeID<Entity>(),
-        0,
-    };
-    lookup_input_ptr++;
-
-    *lookup_input_ptr = {
-        TypeTracker::typeID<WorldID>(),
-        1,
-    };
-    lookup_input_ptr++;
 
     for (int i = 0; i < (int)num_user_components; i++) {
         ComponentID component_id = components[i];
