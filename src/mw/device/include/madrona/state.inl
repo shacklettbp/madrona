@@ -309,7 +309,13 @@ int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
                                               uint32_t component_id)
 {
     auto &archetype = *archetypes_[archetype_id];
-    return *archetype.columnLookup.lookup(component_id);
+    if (component_id == 0) {
+        return 0; // Entity
+    } else if (component_id == 1) {
+        return 1; // WorldID
+    } else {
+        return *archetype.columnLookup.lookup(component_id);
+    }
 }
 
 void * StateManager::getArchetypeColumn(uint32_t archetype_id,
