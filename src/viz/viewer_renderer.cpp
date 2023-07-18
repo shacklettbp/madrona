@@ -2753,6 +2753,8 @@ Renderer::~Renderer()
 
         dev.dt.destroyImageView(dev.hdl, f.shadowFB.varianceView, nullptr);
         dev.dt.destroyImageView(dev.hdl, f.shadowFB.depthView, nullptr);
+
+        dev.dt.destroyImageView(dev.hdl, f.shadowFB.intermediateView, nullptr);
     }
 
     for (auto &tx : material_textures_) {
@@ -2796,6 +2798,9 @@ Renderer::~Renderer()
 
     dev.dt.destroyPipeline(dev.hdl, deferred_lighting_.hdls[0], nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, deferred_lighting_.layout, nullptr);
+
+    dev.dt.destroyPipeline(dev.hdl, blur_.hdls[0], nullptr);
+    dev.dt.destroyPipelineLayout(dev.hdl, blur_.layout, nullptr);
 
     dev.dt.destroyRenderPass(dev.hdl, imgui_render_state_.renderPass, nullptr);
     dev.dt.destroyDescriptorPool(
@@ -3146,13 +3151,15 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
 
     gpu_run.submit(dev);
 
-    std::array<VkWriteDescriptorSet, 5> desc_updates;
+    // std::array<VkWriteDescriptorSet, 5> desc_updates;
+    DynArray<VkWriteDescriptorSet> desc_updates(4 + (material_textures_.size() > 0 ? 1 : 0));
 
     VkDescriptorBufferInfo obj_info;
     obj_info.buffer = asset_buffer.buffer;
     obj_info.offset = 0;
     obj_info.range = buffer_sizes[0];
 
+    desc_updates.push_back({});
     DescHelper::storage(desc_updates[0], asset_set_cull_, &obj_info, 0);
 
     VkDescriptorBufferInfo mesh_info;
@@ -3160,6 +3167,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     mesh_info.offset = buffer_offsets[0];
     mesh_info.range = buffer_sizes[1];
 
+    desc_updates.push_back({});
     DescHelper::storage(desc_updates[1], asset_set_cull_, &mesh_info, 1);
 
     VkDescriptorBufferInfo vert_info;
@@ -3167,6 +3175,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     vert_info.offset = buffer_offsets[1];
     vert_info.range = buffer_sizes[2];
 
+    desc_updates.push_back({});
     DescHelper::storage(desc_updates[2], asset_set_draw_, &vert_info, 0);
 
     VkDescriptorBufferInfo mat_info;
@@ -3174,6 +3183,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     mat_info.offset = buffer_offsets[3];
     mat_info.range = buffer_sizes[4];
 
+    desc_updates.push_back({});
     DescHelper::storage(desc_updates[3], asset_set_draw_, &mat_info, 1);
 
     material_textures_ = loadTextures(dev, alloc, render_queue_, textures);
@@ -3187,7 +3197,11 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
                 });
     }
 
-    DescHelper::textures(desc_updates[4], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
+    if (material_textures_.size())
+    {
+        desc_updates.push_back({});
+        DescHelper::textures(desc_updates[4], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
+    }
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
