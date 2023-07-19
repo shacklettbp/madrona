@@ -14,20 +14,13 @@ struct ViewerSystemState {
     InstanceData *instances;
     uint32_t *numInstances;
     float aspectRatio;
-#ifdef MADRONA_GPU_MODE
-    uint32_t instanceCountReadback;
-#endif
+    uint32_t numInstancesInternal;
+    uint32_t numViewsInternal;
 };
 
 struct RecordSystemState {
     bool *episodeDone;
 };
-
-inline void clearInstanceCount(Context &,
-                               const ViewerSystemState &sys_state)
-{
-    *(sys_state.numInstances) = 0;
-}
 
 inline void instanceTransformSetup(Context &ctx,
                                    const Position &pos,
@@ -37,7 +30,7 @@ inline void instanceTransformSetup(Context &ctx,
 {
     auto &sys_state = ctx.singleton<ViewerSystemState>();
 
-    AtomicU32Ref inst_count_atomic(*sys_state.numInstances);
+    AtomicU32Ref inst_count_atomic(sys_state.numInstancesInternal);
     uint32_t inst_idx = inst_count_atomic.fetch_add_relaxed(1);
 
     sys_state.instances[inst_idx] = InstanceData {
@@ -70,18 +63,14 @@ inline void updateViewData(Context &ctx,
     };
 }
 
-#ifdef MADRONA_GPU_MODE
-
-inline void readbackCount(Context &ctx,
-                          ViewerSystemState &viewer_state)
+inline void exportCounts(Context &,
+                         ViewerSystemState &viewer_state)
 {
-    if (ctx.worldID().idx == 0) {
-        viewer_state.instanceCountReadback = *viewer_state.numInstances;
-        *viewer_state.numInstances = 0;
-    }
-}
+    *viewer_state.numInstances = viewer_state.numInstancesInternal;
+    *viewer_state.numViews = viewer_state.numViewsInternal;
 
-#endif
+    viewer_state.numInstancesInternal = 0;
+}
 
 void VizRenderingSystem::registerTypes(ECSRegistry &registry)
 {
@@ -100,38 +89,33 @@ TaskGraph::NodeID VizRenderingSystem::setupTasks(
     // state rather than needing to continually reset the instance count
     // and recreate the buffer. However, this might be hard to handle with
     // double buffering
-    auto instance_clear = builder.addToGraph<ParallelForNode<Context,
-        clearInstanceCount,
-        ViewerSystemState>>(deps);
-
     auto instance_setup = builder.addToGraph<ParallelForNode<Context,
         instanceTransformSetup,
-        Position,
-        Rotation,
-        Scale,
-        ObjectID>>({instance_clear});
+            Position,
+            Rotation,
+            Scale,
+            ObjectID
+        >>(deps);
 
     auto viewdata_update = builder.addToGraph<ParallelForNode<Context,
         updateViewData,
-        Position,
-        Rotation,
-        VizCamera>>({instance_setup});
+            Position,
+            Rotation,
+            VizCamera
+        >>({instance_setup});
 
-#ifdef MADRONA_GPU_MODE
-    auto readback_count = builder.addToGraph<ParallelForNode<Context,
-        readbackCount,
-        ViewerSystemState>>({viewdata_update});
+    auto export_counts = builder.addToGraph<ParallelForNode<Context,
+        exportCounts,
+            ViewerSystemState
+        >>({viewdata_update});
 
-    return readback_count;
-#else
-    return viewdata_update;
-#endif
+    return export_counts;
 }
 
 void VizRenderingSystem::reset(Context &ctx)
 {
     auto &system_state = ctx.singleton<ViewerSystemState>();
-    *system_state.numViews = 0;
+    system_state.numViewsInternal = 0;
 }
 
 void VizRenderingSystem::init(Context &ctx,
@@ -154,6 +138,9 @@ void VizRenderingSystem::init(Context &ctx,
     } else {
         record_state.episodeDone = nullptr;
     }
+
+    system_state.numInstancesInternal = 0;
+    system_state.numViewsInternal = 0;
 }
 
 VizCamera VizRenderingSystem::setupView(
@@ -167,7 +154,7 @@ VizCamera VizRenderingSystem::setupView(
 
     float fov_scale = tanf(toRadians(vfov_degrees * 0.5f));
 
-    (*sys_state.numViews) += 1;
+    sys_state.numViewsInternal += 1;
 
     float x_scale = fov_scale / sys_state.aspectRatio;
     float y_scale = -fov_scale;

@@ -62,7 +62,7 @@ void Viewer::configureLighting(Span<const LightConfig> lights)
 
 const VizECSBridge * Viewer::rendererBridge() const
 {
-    return &impl_->renderer.getBridgeRef();
+    return impl_->renderer.getBridgePtr();
 }
 
 static void handleCamera(GLFWwindow *window, ViewerCam &cam)

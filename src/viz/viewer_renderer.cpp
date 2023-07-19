@@ -15,6 +15,10 @@
 #include <dlfcn.h>
 #endif
 
+#ifdef MADRONA_CUDA_SUPPORT
+#include <madrona/cuda_utils.hpp>
+#endif
+
 #include "shader.hpp"
 
 #include <fstream>
@@ -2079,18 +2083,16 @@ static EngineInterop setupEngineInterop(Device &dev,
                                         uint32_t render_width,
                                         uint32_t render_height)
 {
-    int64_t buffer_offsets[3];
-    int64_t buffer_sizes[4] = {
+    int64_t render_input_buffer_offsets[1];
+    int64_t render_input_buffer_sizes[2] = {
         (int64_t)sizeof(shader::PackedInstanceData) *
             num_worlds * max_instances_per_world,
         (int64_t)sizeof(shader::PackedViewData) *
             num_worlds * max_views_per_world,
-        (int64_t)sizeof(uint32_t) * num_worlds,
-        (int64_t)sizeof(uint32_t) * num_worlds,
     };
 
     int64_t num_render_input_bytes = utils::computeBufferOffsets(
-        buffer_sizes, buffer_offsets, 256);
+        render_input_buffer_sizes, render_input_buffer_offsets, 256);
 
     auto render_input_cpu = Optional<render::vk::HostBuffer>::none();
 #ifdef MADRONA_CUDA_SUPPORT
@@ -2126,28 +2128,95 @@ static EngineInterop setupEngineInterop(Device &dev,
         (InstanceData *)render_input_base;
 
     PerspectiveCameraData *view_base = 
-        (PerspectiveCameraData *)(render_input_base + buffer_offsets[0]);
+        (PerspectiveCameraData *)(render_input_base + render_input_buffer_offsets[0]);
 
-    InstanceData **world_instances = (InstanceData **)malloc(
-        sizeof(InstanceData *) * num_worlds);
+    InstanceData **world_instances_setup;
+    PerspectiveCameraData **world_views_setup;
 
-    PerspectiveCameraData **world_views = (PerspectiveCameraData **)malloc(
-        sizeof(PerspectiveCameraData *) * num_worlds);
+#ifdef MADRONA_CUDA_SUPPORT
+    auto setup_alloc = gpu_input ? cu::allocStaging : malloc;
+#else
+    auto setup_alloc = malloc;
+#endif
+
+    uint64_t num_world_inst_setup_bytes =
+        sizeof(InstanceData *) * num_worlds;
+    uint64_t num_world_view_setup_bytes =
+        sizeof(PerspectiveCameraData *) * num_worlds;
+   
+    world_instances_setup = (InstanceData **)setup_alloc(
+        num_world_inst_setup_bytes);
+    
+    world_views_setup = (PerspectiveCameraData **)setup_alloc(
+        num_world_view_setup_bytes);
 
     for (CountT i = 0; i < (CountT)num_worlds; i++) {
-        world_instances[i] = instance_base + i * max_instances_per_world;
-        world_views[i] = view_base + i * max_views_per_world;
+        world_instances_setup[i] = instance_base + i * max_instances_per_world;
+        world_views_setup[i] = view_base + i * max_views_per_world;
+    }
+
+    InstanceData **world_instances;
+    PerspectiveCameraData **world_views;
+
+    if (!gpu_input) {
+        world_instances = world_instances_setup;
+        world_views = world_views_setup;
+    } else {
+#ifdef MADRONA_CUDA_SUPPORT
+        world_instances = (InstanceData **)cu::allocGPU(
+            num_world_inst_setup_bytes);
+        world_views = (PerspectiveCameraData **)cu::allocGPU(
+            num_world_view_setup_bytes);
+
+        cudaMemcpy(world_instances, world_instances_setup,
+            num_world_inst_setup_bytes, cudaMemcpyHostToDevice);
+        cudaMemcpy(world_views, world_views_setup,
+            num_world_view_setup_bytes, cudaMemcpyHostToDevice);
+#else
+        world_instances = nullptr;
+        world_views = nullptr;
+#endif
+    }
+
+    uint32_t *num_views, *num_instances;
+
+    if (!gpu_input) {
+        uint32_t *counts = (uint32_t *)malloc(
+            sizeof(uint32_t) * 2 * num_worlds);
+
+        num_views = counts;
+        num_instances = counts + num_worlds;
+    } else {
+#ifdef MADRONA_CUDA_SUPPORT
+        uint32_t *counts = (uint32_t *)cu::allocReadback(
+            sizeof(uint32_t) * 2 * num_worlds);
+
+        num_views = counts;
+        num_instances = counts + num_worlds;
+#else
+        num_views = nullptr;
+        num_instances = nullptr;
+#endif
     }
 
     VizECSBridge bridge {
         .views = world_views,
-        .numViews = (uint32_t *)(render_input_base + buffer_offsets[1]),
+        .numViews = num_views,
         .instances = world_instances,
-        .numInstances = (uint32_t *)(render_input_base + buffer_offsets[2]),
+        .numInstances = num_instances,
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
         .episodeDone = nullptr,
     };
+
+    const VizECSBridge *gpu_bridge;
+    if (!gpu_input) {
+        gpu_bridge = nullptr;
+    } else {
+        gpu_bridge = (const VizECSBridge *)cu::allocGPU(sizeof(VizECSBridge));
+        cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
+                   cudaMemcpyHostToDevice);
+    }
 
     return EngineInterop {
         std::move(render_input_cpu),
@@ -2157,7 +2226,8 @@ static EngineInterop setupEngineInterop(Device &dev,
 #endif
         render_input_hdl,
         bridge,
-        uint32_t(buffer_offsets[0]),
+        gpu_bridge,
+        uint32_t(render_input_buffer_offsets[0]),
         max_views_per_world,
         max_instances_per_world,
     };
@@ -4226,9 +4296,10 @@ void Renderer::waitForIdle()
     dev.dt.deviceWaitIdle(dev.hdl);
 }
 
-const VizECSBridge & Renderer::getBridgeRef() const
+const VizECSBridge * Renderer::getBridgePtr() const
 {
-    return engine_interop_.bridge;
+    return engine_interop_.gpuBridge ?
+        engine_interop_.gpuBridge : &engine_interop_.bridge;
 }
 
 }

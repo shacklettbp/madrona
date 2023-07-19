@@ -179,6 +179,7 @@ struct EngineInterop {
 #endif
     VkBuffer renderInputHdl;
     viz::VizECSBridge bridge;
+    const viz::VizECSBridge *gpuBridge;
     uint32_t viewBaseOffset;
     uint32_t maxViewsPerWorld;
     uint32_t maxInstancesPerWorld;
@@ -250,7 +251,7 @@ public:
 
     void waitForIdle();
 
-    const VizECSBridge & getBridgeRef() const;
+    const VizECSBridge * getBridgePtr() const;
 
     render::vk::Backend backend;
     Window window;

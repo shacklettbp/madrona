@@ -83,4 +83,8 @@ if (TARGET madrona_cuda AND NOT MADRONA_WINDOWS)
 
     target_link_libraries(madrona_render_vk_cuda PRIVATE
         madrona_render_vk madrona_cuda madrona_common)
+
+    target_link_libraries(madrona_render_vk PRIVATE
+        madrona_cuda
+    )
 endif()
