@@ -16,6 +16,10 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#ifdef MADRONA_CUDA_SUPPORT
+#include "vk/cuda_interop.hpp"
+#endif
+
 #include "shader.hpp"
 
 namespace madrona::viz {
@@ -168,7 +172,12 @@ struct AssetData {
 };
 
 struct EngineInterop {
-    render::vk::HostBuffer renderInputStaging;
+    Optional<render::vk::HostBuffer> renderInputCPU;
+#ifdef MADRONA_CUDA_SUPPORT
+    Optional<render::vk::DedicatedBuffer> renderInputGPU;
+    Optional<render::vk::CudaImportedBuffer> renderInputCUDA;
+#endif
+    VkBuffer renderInputHdl;
     viz::VizECSBridge bridge;
     uint32_t viewBaseOffset;
     uint32_t maxViewsPerWorld;
@@ -223,11 +232,13 @@ public:
              uint32_t img_height,
              uint32_t num_worlds,
              uint32_t max_views_per_world,
-             uint32_t max_instances_per_world);
+             uint32_t max_instances_per_world,
+             bool gpu_input);
     Renderer(const Renderer &) = delete;
     ~Renderer();
 
-    CountT loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats,
+    CountT loadObjects(Span<const imp::SourceObject> objs,
+                       Span<const imp::SourceMaterial> mats,
                        Span<const imp::SourceTexture> textures);
 
     void configureLighting(Span<const LightConfig> lights);

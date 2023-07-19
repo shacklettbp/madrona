@@ -45,71 +45,15 @@ PerspectiveCameraData unpackViewData(PackedViewData packed)
     return cam;
 }
 
-#if 0
-float4x4 lookAt(float3 dir, float3 up)
-{
-    float3 f = normalize(dir);
-    float3 s = normalize(cross(f, up));
-    float3 u = normalize(cross(f, s));
-
-    return float4x4(
-        float4(s.x, s.y, s.z, 0.0),
-        float4(u.x, u.y, u.z, 0.0),
-        float4(f.x, f.y, f.z, 0.0),
-        float4(0,   0,   0,   1)
-    );
-}
-#endif
-
-float4 toQuat(float3 from, float3 to)
-{
-    float3 a = cross(from, to);
-
-    float4 q;
-
-    q.xyz = a;
-    q.w = sqrt(dot(from, from) * dot(to, to)) + dot(from, to);
-
-    return normalize(q);
-}
-
-float4x4 toMat(float4 r)
-{
-    float x2 = r.x * r.x;
-    float y2 = r.y * r.y;
-    float z2 = r.z * r.z;
-    float xz = r.x * r.z;
-    float xy = r.x * r.y;
-    float yz = r.y * r.z;
-    float wx = r.w * r.x;
-    float wy = r.w * r.y;
-    float wz = r.w * r.z;
-
-    return float4x4(
-        float4(
-            1.f - 2.f * (y2 + z2),
-            2.f * (xy - wz),
-            2.f * (xz + wy), 0.0),
-        float4(
-            2.f * (xy + wz),
-            1.f - 2.f * (x2 + z2),
-            2.f * (yz - wx), 0.0),
-        float4(
-            2.f * (xz - wy),
-            2.f * (yz + wx),
-            1.f - 2.f * (x2 + y2), 0.0),
-        float4(0, 0, 0, 1));
-}
-
 [numThreads(32, 1, 1)]
 [shader("compute")]
 void shadowGen(uint3 idx : SV_DispatchThreadID)
 {
     /* Assume that the sun is from lights[0] */
-    if (idx.x >= pushConst.numViews+1)
+    if (idx.x != 0)
         return;
 
-    PackedViewData viewData = viewDataBuffer[idx.x];
+    PackedViewData viewData = viewDataBuffer[pushConst.viewIdx];
 
     PerspectiveCameraData unpackedView = unpackViewData(viewData);
 
@@ -216,7 +160,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
         float4(0.0f,                               1.0f / (y_max - y_min),     0.0f,                        -(y_min) / (y_max - y_min)),
         float4(0.0f,                               0.0f,                       0.0f,                        1.0f)));
 
-    shadowViewDataBuffer[idx.x].viewProjectionMatrix = mul(
+    shadowViewDataBuffer[pushConst.viewIdx].viewProjectionMatrix = mul(
         projection, float4x4(
             float4(to_light[0].xyz, 0.f),
             float4(to_light[1].xyz, 0.f),
@@ -226,8 +170,8 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     );
 
     {
-        shadowViewDataBuffer[idx.x].cameraRight = float4(cam_right, 1.f);
-        shadowViewDataBuffer[idx.x].cameraUp = float4(cam_up, 1.f);
-        shadowViewDataBuffer[idx.x].cameraForward = float4(cam_fwd, 1.f);
+        shadowViewDataBuffer[pushConst.viewIdx].cameraRight = float4(cam_right, 1.f);
+        shadowViewDataBuffer[pushConst.viewIdx].cameraUp = float4(cam_up, 1.f);
+        shadowViewDataBuffer[pushConst.viewIdx].cameraForward = float4(cam_fwd, 1.f);
     }
 }

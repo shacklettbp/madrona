@@ -15,10 +15,6 @@
 #include <dlfcn.h>
 #endif
 
-#ifdef MADRONA_CUDA_SUPPORT
-#include "vk/cuda_interop.hpp"
-#endif
-
 #include "shader.hpp"
 
 #include <fstream>
@@ -28,7 +24,10 @@
 
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
 #include "stb_image.h"
+#pragma clang diagnostic pop
 
 using namespace std;
 
@@ -2070,7 +2069,10 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
     };
 }
 
-static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
+static EngineInterop setupEngineInterop(Device &dev,
+                                        MemoryAllocator &alloc,
+                                        bool gpu_input,
+                                        uint32_t gpu_id,
                                         uint32_t num_worlds,
                                         uint32_t max_views_per_world,
                                         uint32_t max_instances_per_world,
@@ -2087,17 +2089,44 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
         (int64_t)sizeof(uint32_t) * num_worlds,
     };
 
-    int64_t num_staging_bytes = utils::computeBufferOffsets(
+    int64_t num_render_input_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
 
-    HostBuffer staging = alloc.makeStagingBuffer(num_staging_bytes);
-    char *staging_base = (char *)staging.ptr;
+    auto render_input_cpu = Optional<render::vk::HostBuffer>::none();
+#ifdef MADRONA_CUDA_SUPPORT
+    auto render_input_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto render_input_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+#endif
+
+    VkBuffer render_input_hdl;
+    char *render_input_base;
+    if (!gpu_input) {
+        render_input_cpu = alloc.makeStagingBuffer(num_render_input_bytes);
+        render_input_hdl = render_input_cpu->buffer;
+        render_input_base = (char *)render_input_cpu->ptr;
+    } else {
+#ifdef MADRONA_CUDA_SUPPORT
+        render_input_gpu = alloc.makeDedicatedBuffer(
+            num_render_input_bytes, false, true);
+
+        render_input_cuda.emplace(dev, gpu_id, render_input_gpu->mem,
+                                  num_render_input_bytes);
+
+        render_input_hdl = render_input_gpu->buf.buffer;
+        render_input_base = (char *)render_input_cuda->getDevicePointer();
+#else
+        (void)dev;
+        (void)gpu_id;
+        render_input_hdl = VK_NULL_HANDLE;
+        render_input_base = nullptr;
+#endif
+    }
 
     InstanceData *instance_base =
-        (InstanceData *)staging_base;
+        (InstanceData *)render_input_base;
 
     PerspectiveCameraData *view_base = 
-        (PerspectiveCameraData *)(staging_base + buffer_offsets[0]);
+        (PerspectiveCameraData *)(render_input_base + buffer_offsets[0]);
 
     InstanceData **world_instances = (InstanceData **)malloc(
         sizeof(InstanceData *) * num_worlds);
@@ -2112,16 +2141,21 @@ static EngineInterop setupEngineInterop(MemoryAllocator &alloc,
 
     VizECSBridge bridge {
         .views = world_views,
-        .numViews = (uint32_t *)(staging_base + buffer_offsets[1]),
+        .numViews = (uint32_t *)(render_input_base + buffer_offsets[1]),
         .instances = world_instances,
-        .numInstances = (uint32_t *)(staging_base + buffer_offsets[2]),
+        .numInstances = (uint32_t *)(render_input_base + buffer_offsets[2]),
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
         .episodeDone = nullptr,
     };
 
     return EngineInterop {
-        std::move(staging),
+        std::move(render_input_cpu),
+#ifdef MADRONA_CUDA_SUPPORT
+        std::move(render_input_gpu),
+        std::move(render_input_cuda),
+#endif
+        render_input_hdl,
         bridge,
         uint32_t(buffer_offsets[0]),
         max_views_per_world,
@@ -2633,7 +2667,8 @@ Renderer::Renderer(uint32_t gpu_id,
                    uint32_t img_height,
                    uint32_t num_worlds,
                    uint32_t max_views_per_world,
-                   uint32_t max_instances_per_world)
+                   uint32_t max_instances_per_world,
+                   bool gpu_input)
     : backend(initializeBackend()),
       window(makeWindow(backend, img_width, img_height)),
       dev(backend.initDevice(
@@ -2692,7 +2727,7 @@ Renderer::Renderer(uint32_t gpu_id,
       load_cmd_(makeCmdBuffer(dev, load_cmd_pool_)),
       load_fence_(makeFence(dev)),
       engine_interop_(setupEngineInterop(
-          alloc, num_worlds,
+          dev, alloc, gpu_input, gpu_id, num_worlds,
           max_views_per_world, max_instances_per_world,
           fb_width_, fb_height_)),
       lights_(InternalConfig::maxLights),
@@ -3310,34 +3345,6 @@ math::Mat4x4 lookAt(
     return m;
 }
 
-math::Mat3x3 getCameraToWorldMatrix(math::Vector3 eye,
-    math::Vector3 center,
-    math::Vector3 up)
-{
-    math::Vector3 f = math::Vector3((center - eye).normalize());
-    math::Vector3 s = math::Vector3((cross(f, up).normalize()));
-    math::Vector3 u = math::Vector3(cross(s, f).normalize());
-
-    return math::Mat3x3{
-        {s, u, f}
-    };
-}
-
-// From Brendan Galea
-math::Mat4x4 perspective(float fovy, float aspect, float near, float far)
-{
-    math::Mat4x4 projection = {};
-
-    const float tanHalfFovy = tan(math::toRadians(fovy) / 2.f);
-    projection.cols[0][0] = 1.f / (aspect * tanHalfFovy);
-    projection.cols[1][1] = 1.f / (tanHalfFovy);
-    projection.cols[2][2] = far / (far - near);
-    projection.cols[2][3] = 1.f;
-    projection.cols[3][2] = -(far * near) / (far - near);   
-
-    return projection;
-}
-
 static void packSky( const Device &dev,
                      HostBuffer &staging)
 {
@@ -3400,10 +3407,13 @@ static void packLighting(const Device &dev,
     light_staging_buffer.flush(dev);
 }
 
-static void issueShadowGen(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, uint32_t view_idx, uint32_t max_views, uint32_t num_views)
+static void issueShadowGen(Device &dev,
+                           Frame &frame,
+                           Pipeline<1> &pipeline,
+                           VkCommandBuffer draw_cmd,
+                           uint32_t view_idx,
+                           uint32_t max_views)
 {
-    // raise(SIGTRAP);
-
     {
         VkBufferMemoryBarrier compute_prepare = {
             VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -3423,14 +3433,18 @@ static void issueShadowGen(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline,
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
 
-    shader::ShadowGenPushConst push_const = { view_idx, num_views };
+    shader::ShadowGenPushConst push_const = { view_idx };
 
-    dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shader::ShadowGenPushConst), &push_const);
+    dev.dt.cmdPushConstants(draw_cmd,
+                            pipeline.layout,
+                            VK_SHADER_STAGE_COMPUTE_BIT,
+                            0, sizeof(shader::ShadowGenPushConst),
+                            &push_const);
 
     dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
             pipeline.layout, 0, 1, &frame.shadowGenSet, 0, nullptr);
 
-    uint32_t num_workgroups_x = utils::divideRoundUp(max_views+1, 32_u32);
+    uint32_t num_workgroups_x = utils::divideRoundUp(max_views, 32_u32);
     dev.dt.cmdDispatch(draw_cmd, num_workgroups_x, 1, 1);
 
 
@@ -3747,8 +3761,10 @@ void Renderer::render(const ViewerCam &cam,
     Frame &frame = frames_[cur_frame_];
     uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
 
-    // Need to flush engine input state
-    engine_interop_.renderInputStaging.flush(dev);
+    if (engine_interop_.renderInputCPU.has_value()) {
+        // Need to flush engine input state before copy
+        engine_interop_.renderInputCPU->flush(dev);
+    }
 
     REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.cmdPool, 0));
     VkCommandBuffer draw_cmd = frame.drawCmd;
@@ -3794,26 +3810,24 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
                          frame.drawCountOffset, sizeof(uint32_t), 0);
 
-    uint32_t num_sim_views =
-        engine_interop_.bridge.numViews[cfg.worldIDX];
-    if (num_sim_views > 0) {
-        VkDeviceSize world_view_byte_offset = engine_interop_.viewBaseOffset +
-            cfg.worldIDX * engine_interop_.maxViewsPerWorld *
-            sizeof(PackedViewData);
+    VkDeviceSize world_view_byte_offset = engine_interop_.viewBaseOffset +
+        cfg.worldIDX * engine_interop_.maxViewsPerWorld *
+        sizeof(PackedViewData);
 
-        VkBufferCopy view_data_copy {
-            .srcOffset = world_view_byte_offset,
-            .dstOffset = frame.simViewOffset,
-            .size = sizeof(PackedViewData) * num_sim_views,
-        };
+    VkBufferCopy view_data_copy {
+        .srcOffset = world_view_byte_offset,
+        .dstOffset = frame.simViewOffset,
+        .size = sizeof(PackedViewData) * engine_interop_.maxViewsPerWorld,
+    };
 
-        dev.dt.cmdCopyBuffer(draw_cmd,
-                             engine_interop_.renderInputStaging.buffer,
-                             frame.renderInput.buffer,
-                             1, &view_data_copy);
-    }
+    dev.dt.cmdCopyBuffer(draw_cmd,
+                         engine_interop_.renderInputHdl,
+                         frame.renderInput.buffer,
+                         1, &view_data_copy);
+    
 
-    issueShadowGen(dev, frame, shadow_gen_, draw_cmd, cfg.viewIDX, engine_interop_.maxViewsPerWorld, *engine_interop_.bridge.numViews);
+    issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
+                   cfg.viewIDX, engine_interop_.maxViewsPerWorld);
 
     uint32_t num_instances =
         engine_interop_.bridge.numInstances[cfg.worldIDX];
@@ -3829,7 +3843,7 @@ void Renderer::render(const ViewerCam &cam,
         };
 
         dev.dt.cmdCopyBuffer(draw_cmd,
-                             engine_interop_.renderInputStaging.buffer,
+                             engine_interop_.renderInputHdl,
                              frame.renderInput.buffer,
                              1, &instance_copy);
 

@@ -48,7 +48,8 @@ struct Viewer::Impl {
         void *input_data, void (*step_fn)(void *), void *step_data);
 };
 
-CountT Viewer::loadObjects(Span<const imp::SourceObject> objs, Span<const imp::SourceMaterial> mats,
+CountT Viewer::loadObjects(Span<const imp::SourceObject> objs,
+                           Span<const imp::SourceMaterial> mats,
                            Span<const imp::SourceTexture> textures)
 {
     return impl_->renderer.loadObjects(objs, mats, textures);
@@ -393,7 +394,8 @@ Viewer::Impl::Impl(const Config &cfg)
                cfg.renderHeight,
                cfg.numWorlds,
                cfg.maxViewsPerWorld,
-               cfg.maxInstancesPerWorld),
+               cfg.maxInstancesPerWorld,
+               cfg.execMode == ExecMode::CUDA),
       numWorlds(cfg.numWorlds),
       maxNumAgents(cfg.maxViewsPerWorld),
       simTickRate(cfg.defaultSimTickRate)
