@@ -70,6 +70,12 @@ target_link_libraries(madrona_render_vk
 
 add_dependencies(madrona_render_vk generate_vk_dispatch)
 
+if (MADRONA_LINUX)
+    target_link_libraries(madrona_render_vk PRIVATE
+        ${CMAKE_DL_LIBS}
+    )
+endif()
+
 if (MADRONA_MACOS OR MADRONA_IOS)
     target_link_libraries(madrona_render_vk PRIVATE
         madrona_moltenvk
