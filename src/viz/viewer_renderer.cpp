@@ -2213,9 +2213,11 @@ static EngineInterop setupEngineInterop(Device &dev,
     if (!gpu_input) {
         gpu_bridge = nullptr;
     } else {
+#ifdef MADRONA_CUDA_SUPPORT
         gpu_bridge = (const VizECSBridge *)cu::allocGPU(sizeof(VizECSBridge));
         cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
                    cudaMemcpyHostToDevice);
+#endif
     }
 
     return EngineInterop {

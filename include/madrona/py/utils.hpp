@@ -56,6 +56,8 @@ private:
 
 class Tensor final {
 public:
+    static inline constexpr int64_t maxDimensions = 16;
+
     enum class ElementType {
         UInt8,
         Int8,
@@ -64,6 +66,30 @@ public:
         Int64,
         Float16,
         Float32,
+    };
+
+    class Printer {
+    public:
+        Printer(const Printer &) = delete;
+        Printer(Printer &&o);
+        ~Printer();
+
+        void print() const;
+
+    private:
+        inline Printer(void *dev_ptr,
+                       void *print_ptr,
+                       ElementType type,
+                       int64_t num_items,
+                       int64_t num_bytes_per_item);
+
+        void *dev_ptr_;
+        void *print_ptr_;
+        ElementType type_;
+        int64_t num_items_;
+        int64_t num_bytes_per_item_;
+
+    friend class Tensor;
     };
 
     Tensor(void *dev_ptr, ElementType type,
@@ -76,8 +102,9 @@ public:
     inline int gpuID() const { return gpu_id_; }
     inline int64_t numDims() const { return num_dimensions_; }
     inline const int64_t *dims() const { return dimensions_.data(); }
+    int64_t numBytesPerItem() const;
 
-    static inline constexpr int64_t maxDimensions = 16;
+    Printer makePrinter() const;
 private:
 #ifdef MADRONA_LINUX
     virtual void key_();
