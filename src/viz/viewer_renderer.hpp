@@ -308,7 +308,6 @@ private:
     DynArray<AssetData> loaded_assets_;
 
     Sky sky_;
-    ShadowOffsets shadow_offsets_;
 
     DynArray<MaterialTexture> material_textures_;
 };

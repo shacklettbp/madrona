@@ -1625,7 +1625,6 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet shadow_gen_set,
                       VkDescriptorSet shadow_blur_set,
                       Sky &sky,
-                      ShadowOffsets &shadow_offsets,
                       Frame *dst)
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
@@ -1769,16 +1768,6 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     sky_info.range = buffer_sizes[7];
 
     DescHelper::storage(desc_updates[17], lighting_set, &sky_info, 10);
-
-#if 0
-    VkDescriptorImageInfo shadow_offsets_info;
-    shadow_offsets_info.imageView = shadow_offsets.view;
-    shadow_offsets_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    shadow_offsets_info.sampler = VK_NULL_HANDLE;
-
-    DescHelper::textures(desc_updates[22], lighting_set, &shadow_offsets_info, 1, 12, 0);
-    // DescHelper::storageImage(desc_updates[22], lighting_set, &shadow_offsets_info, 12);
-#endif
 
     VkDescriptorImageInfo blur_input_info;
     blur_input_info.imageView = shadow_fb.varianceView;
@@ -2217,6 +2206,8 @@ static EngineInterop setupEngineInterop(Device &dev,
         gpu_bridge = (const VizECSBridge *)cu::allocGPU(sizeof(VizECSBridge));
         cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
                    cudaMemcpyHostToDevice);
+#else
+        gpu_bridge = nullptr;
 #endif
     }
 
@@ -2258,172 +2249,6 @@ inline constexpr size_t IRRADIANCE_TEXTURE_WIDTH = 64;
 inline constexpr size_t IRRADIANCE_TEXTURE_HEIGHT = 16;
 inline constexpr size_t SHADOW_OFFSET_OUTER = 32;
 inline constexpr size_t SHADOW_OFFSET_FILTER_SIZE = 8;
-
-static ShadowOffsets loadShadowOffsets(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
-{
-    uint32_t num_offsets = SHADOW_OFFSET_OUTER * SHADOW_OFFSET_OUTER * (SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE);
-
-    auto [offsets_tex, offsets_reqs] = alloc.makeTexture3D(
-        SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE / 2, 
-        SHADOW_OFFSET_OUTER, SHADOW_OFFSET_OUTER, 
-        1, VK_FORMAT_R32G32B32A32_SFLOAT);
-
-    HostBuffer offsets_hb_staging = alloc.makeStagingBuffer(offsets_reqs.size);
-
-    math::Vector2 *offsets = (math::Vector2 *)offsets_hb_staging.ptr;
-
-    std::random_device rd;
-    std::mt19937 eng(rd());
-
-    std::uniform_real_distribution<float> distr(-0.5f, 0.5f);
-
-    uint32_t pixel_idx = 0;
-    for (int y = 0; y < (int)SHADOW_OFFSET_OUTER; ++y) {
-        for (int x = 0; x < (int)SHADOW_OFFSET_OUTER; ++x) {
-            for (int v = (int)SHADOW_OFFSET_FILTER_SIZE-1; v >= 0; v--) {
-                for (int u = 0; u < (int)SHADOW_OFFSET_FILTER_SIZE; ++u) {
-                    float r0 = distr(eng);
-                    float r1 = distr(eng);
-
-                    float v0 = ((float)u + 0.5f + r0) / (float)SHADOW_OFFSET_FILTER_SIZE;
-                    float v1 = ((float)v + 0.5f + r1) / (float)SHADOW_OFFSET_FILTER_SIZE;
-
-                    assert(pixel_idx < num_offsets);
-
-                    offsets[pixel_idx].x = std::sqrtf(v1) * std::cosf(math::pi_m2 * v0);
-                    offsets[pixel_idx].y = std::sqrtf(v1) * std::sinf(math::pi_m2 * v0);
-
-                    pixel_idx++;
-                }
-            }
-        }
-    }
-
-    offsets_hb_staging.flush(dev);
-
-    std::optional<VkDeviceMemory> offsets_backing = alloc.alloc(offsets_reqs.size);
-    assert(offsets_backing.has_value());
-
-    dev.dt.bindImageMemory(dev.hdl, offsets_tex.image, offsets_backing.value(), 0);
-
-    VkCommandPool tmp_pool = makeCmdPool(dev, dev.gfxQF);
-    VkCommandBuffer cmdbuf = makeCmdBuffer(dev, tmp_pool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-
-    VkCommandBufferBeginInfo begin_info = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        nullptr,
-        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        nullptr
-    };
-
-    dev.dt.beginCommandBuffer(cmdbuf, &begin_info);
-    {
-        array<VkImageMemoryBarrier, 1> copy_prepare {{
-            {
-                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                nullptr,
-                0,
-                VK_ACCESS_MEMORY_WRITE_BIT,
-                VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_QUEUE_FAMILY_IGNORED,
-                VK_QUEUE_FAMILY_IGNORED,
-                offsets_tex.image,
-                {
-                    VK_IMAGE_ASPECT_COLOR_BIT,
-                    0, 1, 0, 1
-                },
-            }
-        }};
-
-        dev.dt.cmdPipelineBarrier(cmdbuf,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                0,
-                0, nullptr, 0, nullptr,
-                copy_prepare.size(), copy_prepare.data());
-
-#if 1
-        VkBufferImageCopy copy = {};
-        copy.bufferOffset = 0;
-        copy.bufferRowLength = 0;
-        copy.bufferImageHeight = 0;
-        copy.imageExtent.width = SHADOW_OFFSET_FILTER_SIZE * SHADOW_OFFSET_FILTER_SIZE / 2;
-        copy.imageExtent.height = SHADOW_OFFSET_OUTER;
-        copy.imageExtent.depth = SHADOW_OFFSET_OUTER;
-        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copy.imageSubresource.mipLevel = 0;
-        copy.imageSubresource.baseArrayLayer = 0;
-        copy.imageSubresource.layerCount = 1;
-
-        dev.dt.cmdCopyBufferToImage(cmdbuf, offsets_hb_staging.buffer,
-            offsets_tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-
-#endif
-
-        array<VkImageMemoryBarrier, 1> finish_prepare {{
-            {
-                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT,
-                VK_ACCESS_SHADER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_QUEUE_FAMILY_IGNORED,
-                VK_QUEUE_FAMILY_IGNORED,
-                offsets_tex.image,
-                {
-                    VK_IMAGE_ASPECT_COLOR_BIT,
-                    0, 1, 0, 1
-                },
-            }
-        }};
-
-        dev.dt.cmdPipelineBarrier(cmdbuf,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                0,
-                0, nullptr, 0, nullptr,
-                finish_prepare.size(), finish_prepare.data());
-    }
-    dev.dt.endCommandBuffer(cmdbuf);
-
-    VkSubmitInfo submit_info = {};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &cmdbuf;
-    submit_info.signalSemaphoreCount = 0;
-    submit_info.waitSemaphoreCount = 0;
-
-    dev.dt.queueSubmit(queue, 1, &submit_info, VK_NULL_HANDLE);
-
-    dev.dt.deviceWaitIdle(dev.hdl);
-    dev.dt.freeCommandBuffers(dev.hdl, tmp_pool, 1, &cmdbuf);
-    dev.dt.destroyCommandPool(dev.hdl, tmp_pool, nullptr);
-
-    VkImageViewCreateInfo view_info {};
-    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
-    VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
-    view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    view_info_sr.baseMipLevel = 0;
-    view_info_sr.levelCount = 1;
-    view_info_sr.baseArrayLayer = 0;
-    view_info_sr.layerCount = 1;
-
-    VkImageView offsets_view;
-    view_info.image = offsets_tex.image;
-    view_info.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &offsets_view));
-
-    return {
-        std::move(offsets_tex),
-        offsets_view,
-        offsets_backing.value(),
-        SHADOW_OFFSET_OUTER,
-        SHADOW_OFFSET_FILTER_SIZE
-    };
-}
 
 static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 {
@@ -2807,7 +2632,6 @@ Renderer::Renderer(uint32_t gpu_id,
       frames_(InternalConfig::numFrames),
       loaded_assets_(0),
       sky_(loadSky(dev, alloc, render_queue_)),
-      shadow_offsets_(loadShadowOffsets(dev, alloc, render_queue_)),
       material_textures_(0)
 {
     for (int i = 0; i < (int)frames_.size(); i++) {
@@ -2822,7 +2646,6 @@ Renderer::Renderer(uint32_t gpu_id,
                   shadow_gen_.descPool.makeSet(),
                   blur_.descPool.makeSet(),
                   sky_,
-                  shadow_offsets_,
                   &frames_[i]);
     }
 }
@@ -2874,19 +2697,16 @@ Renderer::~Renderer()
     dev.dt.destroyImageView(dev.hdl, sky_.irradianceView, nullptr);
     dev.dt.destroyImageView(dev.hdl, sky_.mieView, nullptr);
     dev.dt.destroyImageView(dev.hdl, sky_.scatteringView, nullptr);
-    dev.dt.destroyImageView(dev.hdl, shadow_offsets_.view, nullptr);
 
     dev.dt.freeMemory(dev.hdl, sky_.transmittanceBacking, nullptr);
     dev.dt.freeMemory(dev.hdl, sky_.irradianceBacking, nullptr);
     dev.dt.freeMemory(dev.hdl, sky_.mieBacking, nullptr);
     dev.dt.freeMemory(dev.hdl, sky_.scatteringBacking, nullptr);
-    dev.dt.freeMemory(dev.hdl, shadow_offsets_.backing, nullptr);
 
     dev.dt.destroyImage(dev.hdl, sky_.transmittance.image, nullptr);
     dev.dt.destroyImage(dev.hdl, sky_.irradiance.image, nullptr);
     dev.dt.destroyImage(dev.hdl, sky_.singleMieScattering.image, nullptr);
     dev.dt.destroyImage(dev.hdl, sky_.scattering.image, nullptr);
-    dev.dt.destroyImage(dev.hdl, shadow_offsets_.offsets.image, nullptr);
 
     dev.dt.destroyFence(dev.hdl, load_fence_, nullptr);
     dev.dt.destroyCommandPool(dev.hdl, load_cmd_pool_, nullptr);

@@ -1490,22 +1490,22 @@ static bool gltfParseMesh(
             }
         }
 
-        const math::Vector3 *position_ptr = positions.data();
+        math::Vector3 *position_ptr = positions.data();
         imported.geoData.positionArrays.emplace_back(std::move(positions));
 
-        const math::Vector3 *normal_ptr = nullptr;
+        math::Vector3 *normal_ptr = nullptr;
         if (normals.has_value()) {
             normal_ptr = normals->data();
             imported.geoData.normalArrays.emplace_back(std::move(*normals));
         }
 
-        const math::Vector2 *uv_ptr = nullptr;
+        math::Vector2 *uv_ptr = nullptr;
         if (uvs.has_value()) {
             uv_ptr = uvs->data();
             imported.geoData.uvArrays.emplace_back(std::move(*uvs));
         }
 
-        const uint32_t *idx_ptr = indices.data();
+        uint32_t *idx_ptr = indices.data();
         imported.geoData.indexArrays.emplace_back(std::move(indices));
 
         meshes.push_back(SourceMesh {
@@ -1636,12 +1636,12 @@ static bool gltfImportAssets(LoaderData &loader,
         const SourceInstance &inst = imported.instances[inst_idx];
         const SourceObject &src_obj = imported.objects[inst.objIDX];
 
-        const math::Vector3 *new_mesh_positions_ptr =
+        math::Vector3 *new_mesh_positions_ptr =
             new_positions_arr.data() + new_positions_arr.size();
-        const math::Vector3 *new_mesh_normals_ptr =
+        math::Vector3 *new_mesh_normals_ptr =
             new_normals_arr.data() + new_normals_arr.size();
 
-        const math::Vector4 *new_mesh_tangents_ptr =
+        math::Vector4 *new_mesh_tangents_ptr =
             new_tangentsigns_arr.data() + new_tangentsigns_arr.size();
 
         for (const SourceMesh &src_mesh : src_obj.meshes) {
@@ -1700,7 +1700,7 @@ static bool gltfImportAssets(LoaderData &loader,
                               [](auto *) {});
 
     imported.objects.push_back({
-        .meshes = Span<const SourceMesh>(
+        .meshes = Span<SourceMesh>(
             merged_meshes.data(), merged_meshes.size()),
     });
     

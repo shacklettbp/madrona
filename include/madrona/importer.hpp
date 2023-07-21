@@ -11,19 +11,19 @@ namespace madrona {
 namespace imp {
 
 struct SourceMesh {
-    const math::Vector3 *positions;
-    const math::Vector3 *normals;
-    const math::Vector4 *tangentAndSigns;
-    const math::Vector2 *uvs;
-    const uint32_t *indices;
-    const uint32_t *faceCounts;
+    math::Vector3 *positions;
+    math::Vector3 *normals;
+    math::Vector4 *tangentAndSigns;
+    math::Vector2 *uvs;
+    uint32_t *indices;
+    uint32_t *faceCounts;
     uint32_t numVertices;
     uint32_t numFaces;
     uint32_t materialIDX;
 };
 
 struct SourceObject {
-    Span<const SourceMesh> meshes;
+    Span<SourceMesh> meshes;
 };
 
 struct SourceTexture {
