@@ -61,6 +61,8 @@ void Tensor::Printer::print() const
         cudaMemcpy(print_ptr_, dev_ptr_,
                    num_items_ * num_bytes_per_item_,
                    cudaMemcpyDeviceToHost);
+#else
+        (void)num_bytes_per_item_;
 #endif
         print_ptr = print_ptr_;
     }
@@ -113,14 +115,16 @@ Tensor::Printer Tensor::makePrinter() const
         num_items *= dimensions_[i];
     }
     int64_t bytes_per_item = numBytesPerItem();
-    int64_t num_bytes = bytes_per_item * num_items;
 
     void *print_ptr;
     if (!isOnGPU()) {
         print_ptr = nullptr;
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
+        int64_t num_bytes = bytes_per_item * num_items;
         print_ptr = cu::allocReadback(num_bytes);
+#else
+        print_ptr = nullptr;
 #endif
     }
 
