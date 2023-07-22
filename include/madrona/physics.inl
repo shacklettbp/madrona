@@ -190,58 +190,18 @@ JointConstraint JointConstraint::setupHinge(
 }
 
 template <typename Fn>
-void RigidBodyPhysicsSystem::findOverlappingEntities(Context &ctx,
-                                                     math::AABB aabb,
-                                                     Fn &&fn)
+void RigidBodyPhysicsSystem::findEntitiesWithinAABB(Context &ctx,
+                                                    math::AABB aabb,
+                                                    Fn &&fn)
 {
     using namespace madrona::base;
     using namespace madrona::math;
 
     auto &bvh = ctx.singleton<broadphase::BVH>();
-    const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
     bvh.findOverlaps(aabb, [&](Entity e) {
-        ObjectID e_obj_id = ctx.get<ObjectID>(e);
-        Position e_pos = ctx.get<Position>(e);
-        Rotation e_rot = ctx.get<Rotation>(e);
-        Scale e_scale = ctx.get<Scale>(e);
-
-        uint32_t num_prims = obj_mgr.rigidBodyPrimitiveCounts[e_obj_id.idx];
-        uint32_t prim_offset = obj_mgr.rigidBodyPrimitiveOffsets[e_obj_id.idx];
-
-        bool overlap = false;
-        for (uint32_t i = 0; i < num_prims; i++) {
-            uint32_t prim_idx = prim_offset + i;
-
-            const CollisionPrimitive &prim = obj_mgr.collisionPrimitives[prim_idx];
-            if (prim.type != CollisionPrimitive::Type::Hull) {
-                continue;
-            }
-
-            AABB prim_aabb = obj_mgr.primitiveAABBs[prim_idx];
-            AABB txfmed_aabb = prim_aabb.applyTRS(e_pos, e_rot, e_scale);
-
-            if (!txfmed_aabb.overlaps(aabb)) {
-                continue;
-            }
-            
-            const Vector3 *vertices = prim.hull.halfEdgeMesh.vertices;
-            int32_t num_verts = (int32_t)prim.hull.halfEdgeMesh.numVertices;
-
-            for (int32_t vert_idx = 0; vert_idx < num_verts; vert_idx++) {
-                Vector3 v = e_rot.rotateVec(e_scale * vertices[vert_idx]) + e_pos;
-
-                if (aabb.contains(AABB::point(v))) {
-                    overlap = true;
-                    break;
-                }
-            }
-
-            if (overlap) {
-                break;
-            }
-        }
-
+        bool overlap = RigidBodyPhysicsSystem::checkEntityAABBOverlap(
+            ctx, aabb, e);
         if (overlap) {
             fn(e);
         }

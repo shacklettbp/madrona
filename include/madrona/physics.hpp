@@ -336,9 +336,13 @@ struct RigidBodyPhysicsSystem {
                                              base::ObjectID obj_id);
 
     template <typename Fn>
-    static void findOverlappingEntities(Context &ctx,
-                                        math::AABB aabb,
-                                        Fn &&fn);
+    static void findEntitiesWithinAABB(Context &ctx,
+                                       math::AABB aabb,
+                                       Fn &&fn);
+
+    static bool checkEntityAABBOverlap(Context &ctx,
+                                       math::AABB aabb,
+                                       Entity e);
 
     static void registerTypes(ECSRegistry &registry);
 

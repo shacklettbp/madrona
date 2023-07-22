@@ -1040,6 +1040,102 @@ broadphase::LeafID RigidBodyPhysicsSystem::registerEntity(Context &ctx,
     return ctx.singleton<broadphase::BVH>().reserveLeaf(e, obj_id);
 }
 
+bool RigidBodyPhysicsSystem::checkEntityAABBOverlap(
+    Context &ctx, math::AABB aabb, Entity e)
+{
+    const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+
+    ObjectID e_obj_id = ctx.get<ObjectID>(e);
+    Position e_pos = ctx.get<Position>(e);
+    Rotation e_rot = ctx.get<Rotation>(e);
+    Scale e_scale = ctx.get<Scale>(e);
+
+    uint32_t num_prims = obj_mgr.rigidBodyPrimitiveCounts[e_obj_id.idx];
+    uint32_t base_prim_offset = obj_mgr.rigidBodyPrimitiveOffsets[e_obj_id.idx];
+
+    bool overlap = false;
+    for (uint32_t prim_offset = 0; prim_offset < num_prims; prim_offset++) {
+        uint32_t prim_idx = base_prim_offset + prim_offset;
+
+        const CollisionPrimitive &prim = obj_mgr.collisionPrimitives[prim_idx];
+        if (prim.type != CollisionPrimitive::Type::Hull) {
+            continue;
+        }
+
+        AABB prim_aabb = obj_mgr.primitiveAABBs[prim_idx];
+        AABB txfmed_aabb = prim_aabb.applyTRS(e_pos, e_rot, e_scale);
+
+        if (!txfmed_aabb.overlaps(aabb)) {
+            continue;
+        }
+        
+        const Vector3 *vertices = prim.hull.halfEdgeMesh.vertices;
+        CountT num_verts = (CountT)prim.hull.halfEdgeMesh.numVertices;
+
+        const std::array axes {
+            right,
+            fwd,
+            up,
+        };
+
+        std::array<float, 3> min_hull_projs {
+            FLT_MAX,
+            FLT_MAX,
+            FLT_MAX,
+        };
+        std::array<float, 3> max_hull_projs {
+            -FLT_MAX,
+            -FLT_MAX,
+            -FLT_MAX,
+        };
+
+        for (CountT vert_idx = 0; vert_idx < num_verts; vert_idx++) {
+            Vector3 v =
+                e_rot.rotateVec(e_scale * vertices[vert_idx]) + e_pos;
+
+#pragma unroll
+            for (CountT i = 0; i < 3; i++) {
+                Vector3 axis = axes[i];
+
+                float proj = dot(v, axis);
+                if (proj < min_hull_projs[i]) {
+                    min_hull_projs[i] = proj;
+                }
+
+                if (proj > max_hull_projs[i]) {
+                    max_hull_projs[i] = proj;
+                }
+            }
+        }
+
+        bool axes_overlap = true;
+
+#pragma unroll
+        for (CountT i = 0; i < 3; i++) {
+            float min_aabb_proj = aabb.pMin[i];
+            float max_aabb_proj = aabb.pMax[i];
+
+            float min_hull_proj = min_hull_projs[i];
+            float max_hull_proj = max_hull_projs[i];
+
+            bool proj_overlap = max_hull_proj > min_aabb_proj && 
+                max_aabb_proj > min_hull_proj;
+
+            if (!proj_overlap) {
+                axes_overlap = false;
+            }
+        }
+
+        if (axes_overlap) {
+            overlap = true;
+            break;
+        }
+    }
+
+    return overlap;
+}
+
+
 void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<broadphase::LeafID>();
