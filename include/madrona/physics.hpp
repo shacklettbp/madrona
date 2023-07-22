@@ -335,6 +335,11 @@ struct RigidBodyPhysicsSystem {
                                              Entity e,
                                              base::ObjectID obj_id);
 
+    template <typename Fn>
+    static void findOverlappingEntities(Context &ctx,
+                                        math::AABB aabb,
+                                        Fn &&fn);
+
     static void registerTypes(ECSRegistry &registry);
 
     static TaskGraph::NodeID setupBroadphaseTasks(
