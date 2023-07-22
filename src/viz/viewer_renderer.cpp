@@ -3739,6 +3739,12 @@ void Renderer::render(const ViewerCam &cam,
                              frame.renderInput.buffer,
                              1, &instance_copy);
 
+        dev.dt.cmdFillBuffer(draw_cmd,
+            frame.renderInput.buffer,
+            frame.drawCmdOffset,
+            sizeof(VkDrawIndexedIndirectCommand) * num_instances * 10,
+            0);
+
         VkMemoryBarrier copy_barrier {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .pNext = nullptr,
@@ -3879,7 +3885,7 @@ void Renderer::render(const ViewerCam &cam,
         dev.dt.cmdDrawIndexedIndirect(draw_cmd,
                 frame.renderInput.buffer,
                 frame.drawCmdOffset,
-                num_instances,
+                num_instances * 10,
                 sizeof(DrawCmd));
 
         dev.dt.cmdEndRenderPass(draw_cmd);
@@ -3981,7 +3987,7 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdDrawIndexedIndirect(draw_cmd,
                                   frame.renderInput.buffer,
                                   frame.drawCmdOffset,
-                                  num_instances,
+                                  num_instances * 10,
                                   sizeof(DrawCmd));
 
     dev.dt.cmdEndRenderPass(draw_cmd);
