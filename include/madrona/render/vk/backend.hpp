@@ -20,6 +20,22 @@ public:
     Backend(Backend &&);
     ~Backend();
 
+    class LoaderLib {
+    public:
+        LoaderLib(void *lib, const char *env_str);
+        LoaderLib(const LoaderLib &) = delete;
+        LoaderLib(LoaderLib &&o);
+        ~LoaderLib();
+
+        void (*getEntryFn() const)();
+
+    private:
+        void *lib_;
+        const char *env_str_;
+    };
+
+    static LoaderLib loadLoaderLib();
+
     Device initDevice(CountT gpu_idx, Optional<VkSurfaceKHR> present_surface =
         Optional<VkSurfaceKHR>::none());
 
@@ -38,7 +54,6 @@ private:
     inline Backend(Init init, bool headless);
 
     const VkDebugUtilsMessengerEXT debug_;
-    void *loader_handle_;
 
     VkPhysicalDevice findPhysicalDevice(const DeviceID &id) const;
 };

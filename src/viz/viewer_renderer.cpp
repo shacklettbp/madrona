@@ -80,20 +80,21 @@ struct ImGUIVkLookupData {
     VkInstance inst;
 };
 
-PFN_vkGetInstanceProcAddr PresentationState::init()
+Backend::LoaderLib PresentationState::init()
 {
 #ifdef MADRONA_MACOS
-    auto inst_addr = (PFN_vkGetInstanceProcAddr)dlsym(
-        RTLD_DEFAULT, "vkGetInstanceProcAddr");
-    glfwInitVulkanLoader(inst_addr);
+    Backend::LoaderLib loader_lib = Backend::loadLoaderLib();
+
+    glfwInitVulkanLoader((PFN_vkGetInstanceProcAddr)loader_lib.getEntryFn());
+#else
+    Backend::LoaderLib loader_lib(nullptr, nullptr);
 #endif
 
     if (!glfwInit()) {
         FATAL("Failed to initialize GLFW");
     }
 
-    return (PFN_vkGetInstanceProcAddr)glfwGetInstanceProcAddress(
-        VK_NULL_HANDLE, "vkGetInstanceProcAddr");
+    return loader_lib;
 }
 
 vector<const char *> PresentationState::getInstanceExtensions()
@@ -1410,7 +1411,8 @@ static Pipeline<1> makeBlurPipeline(const Device &dev,
 
 static Backend initializeBackend()
 {
-    auto get_inst_addr = PresentationState::init();
+    auto get_inst_addr = glfwGetInstanceProcAddress(
+        VK_NULL_HANDLE, "vkGetInstanceProcAddr");
 
     bool enable_validation;
     char *validate_env = getenv("MADRONA_RENDER_VALIDATE");
@@ -2566,7 +2568,8 @@ Renderer::Renderer(uint32_t gpu_id,
                    uint32_t max_views_per_world,
                    uint32_t max_instances_per_world,
                    bool gpu_input)
-    : backend(initializeBackend()),
+    : loader_lib_(PresentationState::init()),
+      backend(initializeBackend()),
       window(makeWindow(backend, img_width, img_height)),
       dev(backend.initDevice(
 #ifdef MADRONA_CUDA_SUPPORT

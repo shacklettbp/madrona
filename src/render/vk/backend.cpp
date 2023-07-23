@@ -16,6 +16,7 @@
 #if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
 #include <dlfcn.h>
 #include <csignal>
+#include <filesystem>
 #elif defined(MADRONA_WINDOWS)
 #include <windows.h>
 #endif
@@ -53,7 +54,6 @@ struct Backend::Init {
     VkInstance hdl;
     InitializationDispatch dt;
     bool validationEnabled;
-    void *loaderHandle;
 
     static inline Backend::Init init(PFN_vkGetInstanceProcAddr get_inst_addr,
                                      bool want_validation,
@@ -136,28 +136,6 @@ Backend::Init Backend::Init::init(
     bool want_validation,
     Span<const char *const> extra_exts)
 {
-    void *libvk = nullptr;
-    if (get_inst_addr == VK_NULL_HANDLE) {
-#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
-        libvk = dlopen("libvulkan.so", RTLD_LAZY | RTLD_LOCAL);
-        if (!libvk) {
-            FATAL("Couldn't find libvulkan.so");
-        }
-
-        get_inst_addr = (PFN_vkGetInstanceProcAddr)dlsym(libvk,
-            "vkGetInstanceProcAddr");
-        if (get_inst_addr == nullptr) {
-            FATAL("Couldn't find get inst_addr");
-        }
-
-        get_inst_addr = (PFN_vkGetInstanceProcAddr)get_inst_addr(
-            VK_NULL_HANDLE, "vkGetInstanceProcAddr");
-        if (get_inst_addr == VK_NULL_HANDLE) {
-            FATAL("Refetching vkGetInstanceProcAddr after dlsym failed");
-        }
-#endif
-    } 
-
     InitializationDispatch dt = fetchInitDispatchTable(get_inst_addr);
 
     uint32_t inst_version;
@@ -242,7 +220,6 @@ Backend::Init Backend::Init::init(
         inst,
         dt,
         enable_validation,
-        libvk,
     };
 }
 
@@ -306,18 +283,15 @@ Backend::Backend(Init init, bool headless)
       dt(hdl, init.dt.getInstanceAddr, !headless),
       debug_(init.validationEnabled ?
                 makeDebugCallback(hdl, init.dt.getInstanceAddr) :
-                VK_NULL_HANDLE),
-      loader_handle_(init.loaderHandle)
+                VK_NULL_HANDLE)
 {}
 
 Backend::Backend(Backend &&o)
     : hdl(o.hdl),
       dt(std::move(o.dt)),
-      debug_(std::move(o.debug_)),
-      loader_handle_(o.loader_handle_)
+      debug_(std::move(o.debug_))
 {
     o.hdl = VK_NULL_HANDLE;
-    o.loader_handle_ = nullptr;
 }
 
 Backend::~Backend()
@@ -334,12 +308,92 @@ Backend::~Backend()
         destroy_messenger(hdl, debug_, nullptr);
     }
     dt.destroyInstance(hdl, nullptr);
-    
-    if (loader_handle_ != nullptr) {
-#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
-        dlclose(loader_handle_);
-#endif
+}
+
+Backend::LoaderLib::LoaderLib(void *lib, const char *env_str)
+    : lib_(lib),
+      env_str_(env_str)
+{}
+
+Backend::LoaderLib::LoaderLib(LoaderLib &&o)
+    : lib_(o.lib_),
+      env_str_(o.env_str_)
+{
+    o.lib_ = nullptr;
+}
+
+Backend::LoaderLib::~LoaderLib()
+{
+    if (!lib_) {
+        return;
     }
+
+    free((void *)env_str_);
+
+#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
+    dlclose(lib_);
+#endif
+}
+
+void (*Backend::LoaderLib::getEntryFn() const)()
+{
+#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
+    auto get_inst_addr = (PFN_vkGetInstanceProcAddr)dlsym(lib_,
+        "vkGetInstanceProcAddr");
+    if (get_inst_addr == nullptr) {
+        FATAL("Couldn't find vkGetInstanceProcAddr");
+    }
+    
+    get_inst_addr = (PFN_vkGetInstanceProcAddr)get_inst_addr(
+        VK_NULL_HANDLE, "vkGetInstanceProcAddr");
+    if (get_inst_addr == VK_NULL_HANDLE) {
+        FATAL("Refetching vkGetInstanceProcAddr after dlsym failed");
+    }
+
+    return (void (*)())get_inst_addr;
+#else
+    return nullptr;
+#endif
+}
+
+Backend::LoaderLib Backend::loadLoaderLib()
+{
+#if defined(MADRONA_LINUX)
+    void *lib = dlopen("libvulkan.so", RTLD_LAZY | RTLD_LOCAL);
+    if (!lib) {
+        FATAL("Couldn't find libvulkan.so");
+    }
+
+    return LoaderLib(lib, nullptr);
+#elif defined(MADRONA_MACOS)
+    void *lib = dlopen("libvulkan.1.dylib", RTLD_LAZY | RTLD_LOCAL);
+    if (lib) {
+        return LoaderLib(lib, nullptr);
+    }
+
+    Dl_info dl_info;
+    if (!dladdr((void *)fetchInitDispatchTable, &dl_info)) {
+        FATAL("Couldn't find path to libvulkan.1.dylib");
+    }
+
+    auto vk_dir = 
+        std::filesystem::path(dl_info.dli_fname).parent_path() / "vk";
+    auto libvk_path = vk_dir / "libvulkan.1.dylib";
+    auto icd_path = vk_dir / "MoltenVK_icd.json";
+
+    const char *icd_env = strdup(icd_path.c_str());
+    setenv("VK_ICD_FILENAMES", icd_env, 0);
+
+    lib = dlopen(libvk_path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+
+    if (!lib) {
+        FATAL("Couldn't load libvulkan.1.dylib");
+    }
+
+    return LoaderLib(lib, icd_env);
+#else
+    return LoaderLib(nullptr, nullptr);
+#endif
 }
 
 static void fillQueueInfo(VkDeviceQueueCreateInfo &info,

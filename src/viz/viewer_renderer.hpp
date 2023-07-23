@@ -40,7 +40,7 @@ struct Window {
 
 class PresentationState {
 public:
-    static PFN_vkGetInstanceProcAddr init();
+    static render::vk::Backend::LoaderLib init();
     static std::vector<const char *> getInstanceExtensions();
     static VkSurfaceFormatKHR selectSwapchainFormat(const render::vk::Backend &backend,
                                                     VkPhysicalDevice phy,
@@ -253,6 +253,10 @@ public:
 
     const VizECSBridge * getBridgePtr() const;
 
+private:
+    render::vk::Backend::LoaderLib loader_lib_;
+
+public:
     render::vk::Backend backend;
     Window window;
     render::vk::Device dev;
