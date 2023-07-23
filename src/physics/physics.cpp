@@ -37,6 +37,16 @@ inline void collectConstraintsSystem(Context &ctx,
 
 namespace solver {
 
+static inline bool hasNaN(Vector3 v)
+{
+    return isnan(v.x) || isnan(v.y) || isnan(v.z);
+}
+
+static inline bool hasNaN(Quat q)
+{
+    return isnan(q.w) || isnan(q.x) || isnan(q.y) || isnan(q.z);
+}
+
 static inline Vector3 multDiag(Vector3 diag, Vector3 v)
 {
     return Vector3 {
@@ -157,6 +167,25 @@ inline void substepRigidBodies(Context &ctx,
     presolve_pos.q = q;
     presolve_vel.v = v;
     presolve_vel.omega = omega;
+}
+
+[[maybe_unused]] inline void checkSubstep(Context &,
+                                          Entity,
+                                          const Position &pos,
+                                          const Rotation &rot,
+                                          const Velocity &vel,
+                                          const ObjectID &,
+                                          const ResponseType &,
+                                          const ExternalForce &,
+                                          const ExternalTorque &,
+                                          const SubstepPrevState &,
+                                          const PreSolvePositional &,
+                                          const PreSolveVelocity &)
+{
+    assert(!hasNaN(pos));
+    assert(!hasNaN(rot));
+    assert(!hasNaN(vel.linear));
+    assert(!hasNaN(vel.angular));
 }
 
 static inline float generalizedInverseMass(Vector3 torque_axis,
@@ -674,7 +703,7 @@ inline void setVelocities(Context &ctx,
 
     Vector3 x_prev = prev_state.prevPosition;
     Quat q_prev = prev_state.prevRotation;
-
+    
     // when cur and prev rotation are equal there should be 0 angular velocity
     // Unfortunately, this computation introduces a small amount of FP error
     // and in some rotations the object winds up with a small delta_q, so
@@ -1264,6 +1293,14 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupSubstepTasks(
             solver::solveVelocities, SolverData>>({vel_set});
 
         cur_node = builder.addToGraph<ResetTmpAllocNode>({solve_vel});
+
+#if 0
+        cur_node = builder.addToGraph<ParallelForNode<Context,
+            solver::checkSubstep, Entity, Position, Rotation, Velocity,
+            ObjectID, ResponseType, ExternalForce, ExternalTorque,
+            solver::SubstepPrevState, solver::PreSolvePositional,
+            solver::PreSolveVelocity>>({cur_node});
+#endif
     }
 
     auto clear_candidates = builder.addToGraph<

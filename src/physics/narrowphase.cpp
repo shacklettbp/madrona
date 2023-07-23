@@ -773,54 +773,84 @@ static Manifold buildFaceContactManifold(
             manifold.penetrationDepths[i] = penetration_depths[i];
         }
     } else {
+        // Going to select contact manifold comprised of points
+        // A B C and Q following Gregorious presentation.
+
+        // Select point A as first point in contact list
         manifold.numContactPoints = 4;
         manifold.contactPoints[0] = contacts[0];
         manifold.penetrationDepths[0] = penetration_depths[0];
-        Vector3 point0 = manifold.contactPoints[0];
 
-        // Find furthest contact
-        float largestD2 = 0.0f;
-        int largestD2ContactPointIdx = 0;
-        for (CountT i = 1; i < num_contacts; ++i) {
+        // Find point B furthest from point A
+        float max_dist_sq = 0.f;
+        for (CountT i = 1; i < num_contacts; i++) {
             Vector3 cur_contact = contacts[i];
-            float d2 = point0.distance2(cur_contact);
-            if (d2 > largestD2) {
-                largestD2 = d2;
+            float dist_sq = manifold.contactPoints[0].distance2(cur_contact);
+            if (dist_sq > max_dist_sq) {
+                max_dist_sq = dist_sq;
+
                 manifold.contactPoints[1] = cur_contact;
                 manifold.penetrationDepths[1] = penetration_depths[i];
-                largestD2ContactPointIdx = i;
             }
         }
 
-        contacts[largestD2ContactPointIdx] = manifold.contactPoints[0];
+        math::Vector3 ba =
+            manifold.contactPoints[1] - manifold.contactPoints[0];
 
-        math::Vector3 diff0 = manifold.contactPoints[1] - point0;
-
-        // Find point which maximized area of triangle
-        float largestArea = 0.0f;
-        int largestAreaContactPointIdx = 0;
-        for (CountT i = 1; i < num_contacts; ++i) {
+        // Find point C which maximizes area of triangle ABC
+        float max_tri_area = 0.0f;
+        bool max_tri_sign = 0.f;
+        for (CountT i = 1; i < num_contacts; i++) {
             Vector3 cur_contact = contacts[i];
-            math::Vector3 diff1 = cur_contact - point0;
-            float area = contact_normal.dot(diff0.cross(diff1));
-            if (area > largestArea) {
+            math::Vector3 bc = cur_contact - manifold.contactPoints[1];
+            float signed_area = contact_normal.dot(cross(ba, bc));
+            float area = copysignf(signed_area, 1.f);
+
+            if (area > max_tri_area) {
+                max_tri_area = area;
+                max_tri_sign = copysignf(1.f, signed_area);
+
                 manifold.contactPoints[2] = cur_contact;
                 manifold.penetrationDepths[2] = penetration_depths[i];
-                largestAreaContactPointIdx = i;
             }
         }
 
-        contacts[largestAreaContactPointIdx] = manifold.contactPoints[0];
+        // If we ultimately selected a triangle ABC with clockwise winding,
+        // flip around edge BA to make the triangle counterclockwise, so the
+        // next part only needs to search for negative area.
+        if (max_tri_sign == -1.f) {
+            ba = -ba;
+            std::swap(manifold.contactPoints[0], manifold.contactPoints[1]);
+        }
 
-        for (CountT i = 1; i < num_contacts; ++i) {
+        // Select point Q that adds the most area to ABC
+        // Need to check ABQ (BA x AQ), BCQ (CB x QC), and CAQ (AC x QA)
+
+        Vector3 cb = manifold.contactPoints[2] - manifold.contactPoints[1];
+        Vector3 ac = manifold.contactPoints[0] - manifold.contactPoints[2];
+
+        float most_neg_area = 0.f;
+        for (CountT i = 1; i < num_contacts; i++) {
             Vector3 cur_contact = contacts[i];
-            math::Vector3 diff1 = cur_contact - point0;
-            float area = contact_normal.dot(diff0.cross(diff1));
-            if (area < largestArea) {
+
+            Vector3 aq = manifold.contactPoints[0] - cur_contact;
+            Vector3 qc = cur_contact - manifold.contactPoints[2];
+
+            float abq_area = contact_normal.dot(cross(ba, aq));
+            float bcq_area = contact_normal.dot(cross(cb, qc));
+            float caq_area = contact_normal.dot(cross(aq, ac));
+
+            float q_min_area = fminf(abq_area, fminf(bcq_area, caq_area));
+            if (q_min_area < most_neg_area) {
+                most_neg_area = q_min_area;
+
                 manifold.contactPoints[3] = cur_contact;
                 manifold.penetrationDepths[3] = penetration_depths[i];
             }
         }
+
+        assert(max_dist_sq != 0.f && max_tri_area != 0.f &&
+               most_neg_area != 0.f);
     }
 
     for (CountT i = 0; i < (CountT)manifold.numContactPoints; i++) {
