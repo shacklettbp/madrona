@@ -54,7 +54,8 @@ public:
         K8,
         K9,
         K0,
-        NumKeys = K0 + 1,
+        Shift,
+        NumKeys,
     };
 
     class UserInput {

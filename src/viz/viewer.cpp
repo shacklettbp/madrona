@@ -472,6 +472,8 @@ void Viewer::Impl::loop(
                 (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K9] |=
                 (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::Shift] |=
+                (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
         } else {
             handleCamera(window, cam);
         }
