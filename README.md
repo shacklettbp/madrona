@@ -1,18 +1,18 @@
 Madrona: A GPU-Accelerated Game Engine for Batch Simulation
 ===========================================================
 
-Madrona is a prototype game engine for building high-throughput GPU-accelerated _batch simulators_ that simulate thousands of virtual worlds concurrently. By leveraging parallelism between and within worlds, simulators built on Madrona are able to execute at millions of frames per second, enabling high performance sample generation for training agents using reinforcement learning, or other tasks requiring a high performance simulator in the loop.
-
-Madrona leverages the Entity Component System (ECS) architecture to provide users with high-performance interfaces for implementing custom logic and state that the engine can automatically map to parallel batch execution on the GPU. Additionally, Madrona includes functionality to directly export ECS state as PyTorch tensors, for extremely efficient interoperation with learning frameworks.
+Madrona is a prototype game engine for building high-throughput GPU-accelerated _batch simulators_ that simulate thousands of virtual worlds concurrently. By leveraging parallelism between and within worlds, simulators built on Madrona are able to execute at millions of frames per second, enabling high performance sample generation for training agents using reinforcement learning, or other tasks requiring a high performance simulator in the loop. At its core, Madrona is built around the Entity Component System (ECS) architecture, which the engine uses to provide high-performance C++ interfaces for implementing custom logic and state that the engine can can automatically map to parallel batch execution on the GPU.
 
 **Features**:
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
 * CPU Backend for debugging & visualization. Simulators can execute on GPU or CPU with no code changes!
+* Export ECS Simulation State as PyTorch tensors for efficient interop with learning code.
 * (Optional) XPBD rigid body physics for basic 3D collision & contact support.
 * (Optional) Simple 3D renderer for visualizing agent behaviors or debugging.
 
-For more background and technical details, please read our paper, [_An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation_](), published in Transactions on Graphics / SIGGRAPH 2023.
+For more background and technical details, please read our paper: [_An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation_](), published in Transactions on Graphics / SIGGRAPH 2023.
 
+**Disclaimer**: The Madrona engine is an early-stage research codebase. While we hope to attract interested users / collaborators with this release, there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
 
 Dependencies
 ------------
@@ -71,7 +71,7 @@ Refer to the simulator's github page for further context / instructions on how t
 Windows users should clone the repository as above, and then open the root of the cloned repo in Visual Studio and build with the integrated CMake support. 
 By default, Visual Studio has a build directory like `out/build/Release-x64`, depending on your build configuration. This requires changing the `pip install` command above to tell python where the C++ python extensions are located:
 ```
-pip install -e . -Cpackages.madrona_3d_example.ext_out_dir=out/build/Release-x64
+pip install -e . -Cpackages.madrona_3d_example.ext-out-dir=out/build/Release-x64
 ```
 
 Code Organization
@@ -80,14 +80,14 @@ As mentioned above, we recommend starting with the [Madrona3DExample project](ht
 
 Nevertheless, the following files provide good starting points to start diving into the Madrona codebase:
 
-The Context class includes the core ECS API entry points for the engine (creating entities, getting components, etc): [`include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/context.hpp#L17). Note that the linked file is the header for the CPU backend. The GPU implementation of the same interface lives in [src/mw/device/include/madrona/context.hpp](https://github.com/shacklettbp/madrona/blob/main/src/mw/device/include/madrona/context.hpp). Although many of the headers in `include/madrona` are shared between the CPU and GPU backends, the GPU backend prioritizes files in `src/mw/device/include` in order to use GPU specific implementations. This distinction should not be relevant for most users of the engine, as the public interfaces of both backends match.
+The Context class includes the core ECS API entry points for the engine (creating entities, getting components, etc): [`include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/context.hpp#L17). Note that the linked file is the header for the CPU backend. The GPU implementation of the same interface lives in [`src/mw/device/include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/src/mw/device/include/madrona/context.hpp). Although many of the headers in `include/madrona` are shared between the CPU and GPU backends, the GPU backend prioritizes files in `src/mw/device/include` in order to use GPU specific implementations. This distinction should not be relevant for most users of the engine, as the public interfaces of both backends match.
 
 The TaskGraph class: [`include/madrona/taskgraph.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/taskgraph.hpp) includes the interface for building the taskgraph that will be executed to step the simulation across all worlds.
 
 The ECSRegistry class: [`include/madrona/registry.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/registry.hpp) is where user code registers all the ECS Components and Archetypes that will be used during the simulation. Note that Madrona requires all the used archetypes to be declared up front -- unlike other ECS engines adding and removing components dynamically from entities is not currently supported.
 
-The MWCudaExecutor class: [include/madrona/mw\_gpu.hpp](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is the entry point for the GPU backend.
-The TaskGraphExecutor class: [include/madrona/mw\_cpu.hpp](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is entry point for the CPU backend.
+The MWCudaExecutor class: [`include/madrona/mw_gpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is the entry point for the GPU backend.
+The TaskGraphExecutor class: [`include/madrona/mw_cpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is entry point for the CPU backend.
 
 Citation
 --------
