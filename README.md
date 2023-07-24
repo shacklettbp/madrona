@@ -86,7 +86,7 @@ The TaskGraph class: [`include/madrona/taskgraph.hpp`](https://github.com/shackl
 
 The ECSRegistry class: [`include/madrona/registry.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/registry.hpp) is where user code registers all the ECS Components and Archetypes that will be used during the simulation. Note that Madrona requires all the used archetypes to be declared up front -- unlike other ECS engines adding and removing components dynamically from entities is not currently supported.
 
-The MWCudaExecutor class: [`include/madrona/mw_gpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is the entry point for the GPU backend.
+The MWCudaExecutor class: [`include/madrona/mw_gpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is the entry point for the GPU backend.\\
 The TaskGraphExecutor class: [`include/madrona/mw_cpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is entry point for the CPU backend.
 
 Citation
