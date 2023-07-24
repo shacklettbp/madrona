@@ -1,7 +1,7 @@
 Madrona: A GPU-Accelerated Game Engine for Batch Simulation
 ===========================================================
 
-Madrona is a prototype game engine for building high-throughput GPU-accelerated _batch simulators_ that simulate thousands of virtual worlds concurrently. By leveraging parallelism between and within worlds, simulators built on Madrona are able to execute at millions of frames per second, enabling high performance sample generation for training agents using reinforcement learning, or other tasks requiring a high performance simulator in the loop. At its core, Madrona is built around the Entity Component System (ECS) architecture, which the engine uses to provide high-performance C++ interfaces for implementing custom logic and state that the engine can can automatically map to parallel batch execution on the GPU.
+Madrona is a prototype game engine for building high-throughput GPU-accelerated _batch simulators_ that simulate thousands of virtual worlds concurrently. By leveraging parallelism between and within worlds, simulators built on Madrona are able to execute on the GPU at millions of frames per second, enabling high performance sample generation for training agents using reinforcement learning, or other tasks requiring a high performance simulator in the loop. At its core, Madrona is built around the Entity Component System (ECS) architecture, which the engine uses to provide high-performance C++ interfaces for implementing custom logic and state that the engine can can automatically map to parallel batch execution on the GPU.
 
 **Features**:
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
@@ -48,8 +48,8 @@ For more ML-focused users interested in training agents at high speed, check out
 If you're interested in building a new simulator on top of Madrona, we recommend forking one of the above projects and adding your own functionality, or forking the [Madrona GridWorld repo](https://github.com/shacklettbp/madrona_gridworld) for an example with very little existing logic to get in your way. Basing your work on one of these repositories will ensure that the CMake build system and python bindings are setup correctly.
 
 **Building:**
-Instructions on building and testing the Madrona3DExample simulator are included below for Linux and MacOS. 
 
+Instructions on building and testing the Madrona3DExample simulator are included below for Linux and MacOS:
 ```bash
 git clone --recursive https://github.com/shacklettbp/madrona_3d_example.git
 cd madrona_3d_example
@@ -60,7 +60,7 @@ cmake ..
 make -j # Num Cores To Build With
 ```
 
-You can then view the environment by running.
+You can then view the environment by running:
 ```bash
 ./build/viewer
 ```
