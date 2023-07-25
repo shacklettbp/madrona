@@ -1261,20 +1261,8 @@ static GPUEngineState initEngineAndUserState(
     auto exported_readback = (void **)cu::allocReadback(
         sizeof(void *) * num_exported);
 
-    CUdeviceptr allocator_channel_devptr;
-    REQ_CU(cuMemAllocManaged(&allocator_channel_devptr,
-                             sizeof(HostChannel), CU_MEM_ATTACH_GLOBAL));
-    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel_devptr, sizeof(HostChannel),
-                       CU_MEM_ADVISE_SET_READ_MOSTLY, 0));
-    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel_devptr, sizeof(HostChannel),
-                       CU_MEM_ADVISE_SET_ACCESSED_BY, CU_DEVICE_CPU));
-
     CUdevice cu_gpu;
     REQ_CU(cuCtxGetDevice(&cu_gpu));
-    REQ_CU(cuMemAdvise(allocator_channel_devptr, sizeof(HostChannel),
-                       CU_MEM_ADVISE_SET_ACCESSED_BY, cu_gpu));
-
-    HostChannel *allocator_channel = (HostChannel *)allocator_channel_devptr;
 
     size_t cu_va_alloc_granularity;
     {
@@ -1285,6 +1273,56 @@ static GPUEngineState initEngineAndUserState(
         REQ_CU(cuMemGetAllocationGranularity(&cu_va_alloc_granularity,
             &default_prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
     }
+
+#if 0
+    REQ_CU(cuMemAllocManaged(&allocator_channel_devptr,
+                             sizeof(HostChannel), CU_MEM_ATTACH_GLOBAL));
+    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel_devptr, sizeof(HostChannel),
+                       CU_MEM_ADVISE_SET_READ_MOSTLY, 0));
+    REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel_devptr, sizeof(HostChannel),
+                       CU_MEM_ADVISE_SET_ACCESSED_BY, CU_DEVICE_CPU));
+    REQ_CU(cuMemAdvise(allocator_channel_devptr, sizeof(HostChannel),
+                       CU_MEM_ADVISE_SET_ACCESSED_BY, cu_gpu));
+
+#endif
+
+    CUdeviceptr allocator_channel_devptr;
+    {
+        size_t num_host_channel_bytes =
+            utils::roundUp(sizeof(HostChannel), cu_va_alloc_granularity);
+
+        REQ_CU(cuMemAddressReserve(&allocator_channel_devptr,
+                                   num_host_channel_bytes,
+                                   0, (CUdeviceptr)0, 0));
+
+        CUmemAllocationProp alloc_prop {};
+        alloc_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+        alloc_prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        alloc_prop.location.id = cu_gpu;
+
+        CUmemGenericAllocationHandle mem;
+        REQ_CU(cuMemCreate(&mem, num_host_channel_bytes, &alloc_prop, 0));
+
+        REQ_CU(cuMemMap(allocator_channel_devptr, num_host_channel_bytes,
+                        0, mem, 0));
+        REQ_CU(cuMemRelease(mem));
+
+        CUmemAccessDesc gpu_access_ctrl;
+        gpu_access_ctrl.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+        gpu_access_ctrl.location.id = cu_gpu;
+        gpu_access_ctrl.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+        REQ_CU(cuMemSetAccess(allocator_channel_devptr, num_host_channel_bytes,
+                              &gpu_access_ctrl, 1));
+
+        CUmemAccessDesc cpu_access_ctrl;
+        cpu_access_ctrl.location.type = CU_MEM_LOCATION_TYPE_HOST;
+        cpu_access_ctrl.location.id = 0;
+        cpu_access_ctrl.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+        REQ_CU(cuMemSetAccess(allocator_channel_devptr, num_host_channel_bytes,
+                              &cpu_access_ctrl, 1));
+    }
+
+    HostChannel *allocator_channel = (HostChannel *)allocator_channel_devptr;
 
     HostAllocInit alloc_init {
         (uint64_t)sysconf(_SC_PAGESIZE),
