@@ -991,9 +991,9 @@ inline void findOverlappingEntry(
     });
 }
 
-TaskGraph::NodeID setupBVHTasks(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> deps)
+TaskGraphNodeID setupBVHTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
 {
     auto update_leaves =
         builder.addToGraph<ParallelForNode<Context, updateLeafPositionsEntry,
@@ -1015,9 +1015,9 @@ TaskGraph::NodeID setupBVHTasks(
     return refit;
 }
 
-TaskGraph::NodeID setupPreIntegrationTasks(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> deps)
+TaskGraphNodeID setupPreIntegrationTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
 {
     auto find_overlapping = builder.addToGraph<ParallelForNode<Context,
         broadphase::findOverlappingEntry, Entity, LeafID>>(deps);
@@ -1025,9 +1025,9 @@ TaskGraph::NodeID setupPreIntegrationTasks(
     return find_overlapping;
 }
 
-TaskGraph::NodeID setupPostIntegrationTasks(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> deps)
+TaskGraphNodeID setupPostIntegrationTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
 {
 #if 0
     auto expand_leaves = builder.addToGraph<ParallelForNode<Context,

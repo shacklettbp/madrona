@@ -83,6 +83,57 @@ inline void * Context::tmpAlloc(uint64_t num_bytes)
 }
 
 #if 0
+
+class Context {
+    template <typename Fn, typename... DepTs>
+    inline JobID submit(Fn &&fn, bool is_child = true,
+                        DepTs && ...dependencies);
+
+    template <typename Fn, typename... DepTs>
+    inline JobID submitN(Fn &&fn, uint32_t num_invocations,
+        bool is_child = true, DepTs && ...dependencies);
+
+    template <typename... ColTypes, typename Fn, typename... DepTs>
+    inline JobID parallelFor(const Query<ColTypes...> &query, Fn &&fn,
+        bool is_child = true, DepTs && ... dependencies);
+
+#if 0
+    template <typename ContextT, typename Fn, typename... DepTs>
+    inline JobID submitImpl(Fn &&fn, bool is_child,
+                            DepTs && ... dependencies);
+
+    template <typename ContextT, typename Fn, typename... DepTs>
+    inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
+                             DepTs && ... dependencies);
+
+    template <typename ContextT, typename... ComponentTs,
+              typename Fn, typename... DepTs>
+    inline JobID parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
+                                 bool is_child, DepTs && ... dependencies);
+#endif
+
+    void markJobFinished();
+
+    inline JobID currentJobID() const { return job_id_; }
+
+    inline StateManager & state();
+
+    WaveInfo computeWaveInfo();
+
+    JobID waveSetupNewJob(uint32_t func_id, bool link_parent,
+                          uint32_t num_invocations, uint32_t bytes_per_job,
+                          void **thread_data_store);
+
+    JobContainerBase * allocJob(uint32_t bytes_per_job, WaveInfo wave_info);
+
+    inline void stageChildJob(uint32_t func_id, uint32_t num_combined_jobs,
+                              uint32_t bytes_per_job, void *containers);
+
+    JobID job_id_;
+
+    uint32_t lane_id_;
+}
+
 namespace mwGPU {
 
 // This function is executed at the thread-block granularity.

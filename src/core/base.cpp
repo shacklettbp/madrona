@@ -1,5 +1,6 @@
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
+#include <madrona/registry.hpp>
 
 namespace madrona {
 using namespace math;

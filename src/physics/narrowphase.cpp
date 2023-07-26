@@ -1783,9 +1783,9 @@ inline void runNarrowphaseSystem(
 #endif
 }
 
-TaskGraph::NodeID setupTasks(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> deps)
+TaskGraphNodeID setupTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
 {
 #ifdef MADRONA_GPU_MODE
     auto narrowphase = builder.addToGraph<CustomParallelForNode<Context,

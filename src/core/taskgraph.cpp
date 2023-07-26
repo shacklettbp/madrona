@@ -1,31 +1,36 @@
 #include <madrona/taskgraph.hpp>
 #include <madrona/crash.hpp>
 #include <madrona/macros.hpp>
+#include <madrona/taskgraph_builder.hpp>
 
 #include "worker_init.hpp"
 
 namespace madrona {
 
-TaskGraph::Builder::Builder(Context &ctx)
-    : ctx_(&ctx),
+TaskGraphBuilder::TaskGraphBuilder(const WorkerInit &init)
+    : state_mgr_(init.stateMgr),
+      state_cache_(init.stateCache),
+#ifdef MADRONA_MW_MODE
+      world_id_(init.worldID),
+#endif
       staged_(0),
       node_datas_(0),
       all_dependencies_(0)
 {}
 
-TaskGraph::NodeID TaskGraph::Builder::registerNode(
+TaskGraphNodeID TaskGraphBuilder::registerNode(
     uint32_t data_idx,
-    void (*fn)(NodeBase *, Context *),
-    Span<const NodeID> dependencies,
-    Optional<NodeID> parent_node)
+    void (*fn)(NodeBase *, Context *, TaskGraph *),
+    Span<const TaskGraphNodeID> dependencies,
+    Optional<TaskGraphNodeID> parent_node)
 {
     CountT dependency_offset = all_dependencies_.size();
 
-    for (NodeID node_id : dependencies) {
+    for (TaskGraphNodeID node_id : dependencies) {
         all_dependencies_.push_back(node_id);
     }
 
-    staged_.push_back({
+    staged_.push_back(StagedNode {
         .node = {
             .fn = fn,
             .dataIDX = data_idx,
@@ -36,22 +41,22 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
         .numDependencies = uint32_t(dependencies.size()),
     });
 
-    return NodeID {
+    return TaskGraphNodeID {
         uint32_t(staged_.size() - 1),
     };
 }
 
-TaskGraph TaskGraph::Builder::build()
+TaskGraph TaskGraphBuilder::build()
 {
     assert(staged_[0].numDependencies == 0);
 
-    HeapArray<Node> sorted_nodes(staged_.size());
+    HeapArray<TaskGraph::Node> sorted_nodes(staged_.size());
     HeapArray<bool> queued(staged_.size());
     HeapArray<int32_t> num_children(staged_.size());
 
     int32_t sorted_idx = 0;
-    auto enqueueInSorted = [&](const Node &node) {
-        new (&sorted_nodes[sorted_idx++]) Node(node);
+    auto enqueueInSorted = [&](const TaskGraph::Node &node) {
+        new (&sorted_nodes[sorted_idx++]) TaskGraph::Node(node);
     };
 
     enqueueInSorted(staged_[0].node);
@@ -99,30 +104,45 @@ TaskGraph TaskGraph::Builder::build()
         }
     }
 
-    HeapArray<NodeData> data_cpy(node_datas_.size());
+    HeapArray<TaskGraph::NodeData> data_cpy(node_datas_.size());
     memcpy(data_cpy.data(), node_datas_.data(),
-           node_datas_.size() * sizeof(NodeData));
+           node_datas_.size() * sizeof(TaskGraph::NodeData));
 
-    return TaskGraph(std::move(sorted_nodes), std::move(data_cpy));
+    return TaskGraph(state_mgr_, state_cache_, MADRONA_MW_COND(world_id_,)
+        std::move(sorted_nodes), std::move(data_cpy));
 }
 
-TaskGraph::TaskGraph(HeapArray<Node> &&sorted_nodes,
+TaskGraph::TaskGraph(StateManager *state_mgr,
+                     StateCache *state_cache,
+                     MADRONA_MW_COND(uint32_t world_id,) 
+                     HeapArray<Node> &&sorted_nodes,
                      HeapArray<NodeData> &&node_datas)
-    : sorted_nodes_(std::move(sorted_nodes)),
+    : state_mgr_(state_mgr),
+      state_cache_(state_cache),
+#ifdef MADRONA_MW_MODE
+      cur_world_id_(world_id),
+#endif
+      sorted_nodes_(std::move(sorted_nodes)),
       node_datas_(std::move(node_datas))
 {}
 
 void TaskGraph::run(Context *ctx)
 {
     for (const Node &node : sorted_nodes_) {
-        node.fn((NodeBase *)(&node_datas_[node.dataIDX].userData[0]), ctx);
+        node.fn((NodeBase *)(&node_datas_[node.dataIDX].userData[0]),
+                ctx, this);
     }
 }
 
-TaskGraph::NodeID ResetTmpAllocNode::addToGraph(
-    Context &,
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> dependencies)
+void TaskGraph::resetTmpAlloc()
+{
+    state_mgr_->resetTmpAlloc(MADRONA_MW_COND(cur_world_id_));
+}
+
+TaskGraphNodeID ResetTmpAllocNode::addToGraph(
+    StateManager &,
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> dependencies)
 {
     return builder.addDefaultNode<ResetTmpAllocNode>(dependencies);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2022 Brennan Shacklett and contributors
+ * Copyright 2021-2023 Brennan Shacklett and contributors
  *
  * Use of this source code is governed by an MIT-style
  * license that can be found in the LICENSE file or at
@@ -105,33 +105,6 @@ private:
     EntityStore::Cache entity_cache_;
 
 friend class StateManager;
-};
-
-class ECSRegistry {
-public:
-    ECSRegistry(StateManager *state_mgr, void **export_ptrs);
-
-    template <typename ComponentT>
-    void registerComponent();
-
-    template <typename ArchetypeT>
-    void registerArchetype();
-
-    template <typename ArchetypeT>
-    void registerFixedSizeArchetype(CountT max_num_entities);
-
-    template <typename SingletonT>
-    void registerSingleton();
-
-    template <typename ArchetypeT, typename ComponentT>
-    void exportColumn(int32_t slot);
-
-    template <typename SingletonT>
-    void exportSingleton(int32_t slot);
-
-private:
-    StateManager *state_mgr_;
-    void **export_ptrs_;
 };
 
 class StateManager {

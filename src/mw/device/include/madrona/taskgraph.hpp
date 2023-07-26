@@ -174,6 +174,10 @@ private:
 friend class Builder;
 };
 
+// FIXME: Compat with new CPU naming scheme
+using TaskGraphNodeID = TaskGraph::NodeID;
+using TaskGraphBuilder = TaskGraph::Builder;
+
 template <typename ContextT, auto Fn,
           int32_t threads_per_invocation,
           int32_t items_per_invocation,

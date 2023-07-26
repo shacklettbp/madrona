@@ -81,9 +81,9 @@ void VizRenderingSystem::registerTypes(ECSRegistry &registry)
     registry.registerSingleton<RecordSystemState>();
 }
 
-TaskGraph::NodeID VizRenderingSystem::setupTasks(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> deps)
+TaskGraphNodeID VizRenderingSystem::setupTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
 {
     // FIXME: It feels like we should have persistent slots for renderer
     // state rather than needing to continually reset the instance count

@@ -125,8 +125,8 @@ void BatchRenderingSystem::registerTypes(ECSRegistry &registry)
     registry.registerSingleton<BatchRendererState>();
 }
 
-TaskGraph::NodeID BatchRenderingSystem::setupTasks(TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> deps)
+TaskGraphNodeID BatchRenderingSystem::setupTasks(TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
 {
     // FIXME: It feels like we should have persistent slots for renderer
     // state rather than needing to continually reset the instance count

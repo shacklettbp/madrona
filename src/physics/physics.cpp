@@ -1252,16 +1252,16 @@ inline void reportNarrowphaseClocks(Engine &ctx,
 }
 #endif
 
-TaskGraph::NodeID RigidBodyPhysicsSystem::setupBroadphaseTasks(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> deps)
+TaskGraphNodeID RigidBodyPhysicsSystem::setupBroadphaseTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
 {
     return broadphase::setupBVHTasks(builder, deps);
 }
 
-TaskGraph::NodeID RigidBodyPhysicsSystem::setupSubstepTasks(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> deps,
+TaskGraphNodeID RigidBodyPhysicsSystem::setupSubstepTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps,
     CountT num_substeps)
 {
     auto broadphase_pre =
@@ -1319,8 +1319,8 @@ TaskGraph::NodeID RigidBodyPhysicsSystem::setupSubstepTasks(
     return physics_done;
 }
 
-TaskGraph::NodeID RigidBodyPhysicsSystem::setupCleanupTasks(
-    TaskGraph::Builder &builder, Span<const TaskGraph::NodeID> deps)
+TaskGraphNodeID RigidBodyPhysicsSystem::setupCleanupTasks(
+    TaskGraphBuilder &builder, Span<const TaskGraphNodeID> deps)
 {
     return builder.addToGraph<ClearTmpNode<CollisionEventTemporary>>(deps);
 }

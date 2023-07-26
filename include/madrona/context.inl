@@ -9,35 +9,18 @@
 
 namespace madrona {
 
-template <typename ComponentT>
-void Context::registerComponent()
-{
-    state_mgr_->registerComponent<ComponentT>();
-}
-
-template <typename ArchetypeT>
-void Context::registerArchetype()
-{
-    state_mgr_->registerArchetype<ArchetypeT>();
-}
-
-template <typename ArchetypeT>
-ArchetypeRef<ArchetypeT> Context::archetype()
-{
-    return state_mgr_->archetype<ArchetypeT>(
-        MADRONA_MW_COND(cur_world_id_));
-}
-
-Loc Context::loc(Entity e) const
-{
-    return state_mgr_->getLoc(e);
-}
-
 template <typename ArchetypeT>
 Entity Context::makeEntity()
 {
     return state_mgr_->makeEntityNow<ArchetypeT>(
         MADRONA_MW_COND(cur_world_id_,) *state_cache_);
+}
+
+template <typename ArchetypeT>
+Loc Context::makeTemporary()
+{
+    return state_mgr_->makeTemporary<ArchetypeT>(
+        MADRONA_MW_COND(cur_world_id_));
 }
 
 void Context::destroyEntity(Entity e)
@@ -46,11 +29,9 @@ void Context::destroyEntity(Entity e)
                                  *state_cache_, e);
 }
 
-template <typename ArchetypeT>
-Loc Context::makeTemporary()
+Loc Context::loc(Entity e) const
 {
-    return state_mgr_->makeTemporary<ArchetypeT>(
-        MADRONA_MW_COND(cur_world_id_));
+    return state_mgr_->getLoc(e);
 }
 
 template <typename ComponentT>
@@ -87,6 +68,109 @@ SingletonT & Context::singleton()
     return state_mgr_->getSingleton<SingletonT>(MADRONA_MW_COND(cur_world_id_));
 }
 
+void * Context::tmpAlloc(uint64_t num_bytes)
+{
+    return state_mgr_->tmpAlloc(MADRONA_MW_COND(cur_world_id_,) num_bytes);
+}
+
+#ifdef MADRONA_USE_JOB_SYSTEM
+JobID Context::currentJobID() const
+{
+    return cur_job_id_;
+}
+#endif
+
+#ifdef MADRONA_MW_MODE
+WorldID Context::worldID() const
+{
+    return WorldID { (int32_t)cur_world_id_ };
+}
+#endif
+
+#if 0
+
+class Context {
+    AllocContext mem;
+
+    template <typename ArchetypeT>
+    inline ArchetypeRef<ArchetypeT> archetype();
+
+    template <typename ArchetypeT>
+    inline void clearArchetype();
+
+    template <typename ArchetypeT>
+    inline void clearTemporaries();
+
+    template <typename... ComponentTs>
+    inline Query<ComponentTs...> query();
+
+    template <typename... ComponentTs, typename Fn>
+    inline void forEach(const Query<ComponentTs...> &query, Fn &&fn);
+
+    template <typename... ComponentTs>
+    inline uint32_t numMatches(const Query<ComponentTs...> &query);
+
+    // Jobs
+    template <typename Fn, typename... DepTs>
+    inline JobID submit(Fn &&fn, bool is_child = true,
+                        DepTs && ... dependencies);
+
+    template <typename Fn, typename... DepTs>
+    inline JobID submitN(Fn &&fn, uint32_t num_invocations,
+                         bool is_child = true,
+                         DepTs && ... dependencies);
+
+    // FIXME: currently this function requires that the query reference
+    // is valid at least until the returned job is completed.
+    template <typename... ComponentTs, typename Fn, typename... DepTs>
+    inline JobID parallelFor(const Query<ComponentTs...> &query, Fn &&fn,
+                             bool is_child = true,
+                             DepTs && ... dependencies);
+
+    template <typename Fn, typename... DepTs>
+    inline JobID ioRead(const char *path, Fn &&fn, bool is_child = true,
+                        DepTs && ... dependencies);
+
+#ifdef MADRONA_USE_JOB_SYSTEM
+    inline JobID currentJobID() const;
+#endif
+
+    template <typename ContextT, typename Fn, typename... DepTs>
+    inline JobID submitImpl(Fn &&fn, bool is_child, DepTs && ... dependencies);
+
+    template <typename ContextT, typename Fn, typename... DepTs>
+    inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, bool is_child,
+                             DepTs && ... dependencies);
+
+    template <typename ContextT, typename... ComponentTs, typename Fn,
+              typename... DepTs>
+    inline JobID parallelForImpl(const Query<ComponentTs...> &query, Fn &&fn,
+                                 bool is_child, DepTs && ... dependencies);
+
+private:
+    template <typename ContextT, typename Fn, typename... DepTs>
+    inline JobID submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
+                             DepTs && ... dependencies);
+
+#ifdef MADRONA_USE_JOB_SYSTEM
+    JobManager * const job_mgr_;
+    StateManager * const state_mgr_;
+    StateCache * const state_cache_;
+    IOManager * const io_mgr_;
+    const int worker_idx_;
+    JobID cur_job_id_;
+#endif
+
+friend class JobManager;
+};
+
+template <typename ArchetypeT>
+ArchetypeRef<ArchetypeT> Context::archetype()
+{
+    return state_mgr_->archetype<ArchetypeT>(
+        MADRONA_MW_COND(cur_world_id_));
+}
+
 template <typename ArchetypeT>
 void Context::clearArchetype()
 {
@@ -97,8 +181,6 @@ void Context::clearArchetype()
 template <typename ArchetypeT>
 void Context::clearTemporaries()
 {
-    state_mgr_->clear<ArchetypeT>(MADRONA_MW_COND(cur_world_id_,)
-                                  *state_cache_, true);
 }
 
 template <typename... ComponentTs>
@@ -149,7 +231,7 @@ JobID Context::parallelFor(const Query<ComponentTs...> &query, Fn &&fn,
                                     std::forward<Deps>(dependencies)...);
 }
 
-#if 0
+
 template <typename Fn, typename... Deps>
 inline JobID Context::ioRead(const char *path, Fn &&fn,
                              bool is_child, Deps && ... dependencies)
@@ -265,31 +347,6 @@ JobID Context::submitNImpl(Fn &&fn, uint32_t num_invocations, JobID parent_id,
         std::forward<Fn>(fn), num_invocations, parent_id,
         MADRONA_MW_COND(cur_world_id_, ) JobPriority::Normal,
         std::forward<Deps>(dependencies)...);
-}
-#endif
-
-void * Context::tmpAlloc(uint64_t num_bytes)
-{
-    return state_mgr_->tmpAlloc(MADRONA_MW_COND(cur_world_id_,) num_bytes);
-}
-
-
-void Context::resetTmpAlloc()
-{
-    return state_mgr_->resetTmpAlloc(MADRONA_MW_COND(cur_world_id_));
-}
-
-#ifdef MADRONA_USE_JOB_SYSTEM
-JobID Context::currentJobID() const
-{
-    return cur_job_id_;
-}
-#endif
-
-#ifdef MADRONA_MW_MODE
-WorldID Context::worldID() const
-{
-    return WorldID { (int32_t)cur_world_id_ };
 }
 #endif
 

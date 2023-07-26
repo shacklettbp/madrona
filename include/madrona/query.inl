@@ -27,7 +27,7 @@ Query<ComponentTs...>::Query(bool initialized)
 
 template <typename... ComponentTs>
 Query<ComponentTs...>::Query(Query &&o)
-    : initialized_(o.initialized)
+    : initialized_(o.initialized_)
 {
     o.initialized_ = false;
 }

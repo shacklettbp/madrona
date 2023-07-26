@@ -11,24 +11,12 @@
 
 namespace madrona {
 
+// Subclass this type with the CRTP:
+// class MyContext : public CustomContext<MyContext, MyPerWorldState> {}
 template <typename ContextT, typename DataT>
 class CustomContext : public Context {
 public:
     inline CustomContext(DataT *world_data, const WorkerInit &worker_init);
-
-    template <typename Fn, typename... Deps>
-    inline JobID submit(Fn &&fn, bool is_child = true,
-                        Deps && ... dependencies);
-
-    template <typename Fn, typename... Deps>
-    inline JobID submitN(Fn &&fn, uint32_t num_invocations,
-                         bool is_child = true,
-                         Deps && ... dependencies);
-
-    template <typename... ComponentTs, typename Fn, typename... Deps>
-    inline JobID parallelFor(const Query<ComponentTs...> &query, Fn &&fn,
-                             bool is_child = true,
-                             Deps && ... dependencies);
 
     inline DataT & data() const { return *static_cast<DataT *>(data_); }
 

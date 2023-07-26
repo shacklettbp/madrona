@@ -1,16 +1,28 @@
+/*
+ * Copyright 2021-2023 Brennan Shacklett and contributors
+ *
+ * Use of this source code is governed by an MIT-style
+ * license that can be found in the LICENSE file or at
+ * https://opensource.org/licenses/MIT.
+ */
 #pragma once
 
 #include <madrona/taskgraph.hpp>
 #include <madrona/render/mw.hpp>
 #include <madrona/importer.hpp>
+#include <madrona/registry.hpp>
 
 namespace madrona {
 
+// Base class for TaskGraphExecutor below, don't use directly
 class ThreadPoolExecutor {
 public:
     struct Config {
+        // Batch size for the backend
         uint32_t numWorlds;
+        // Number of exported ECS components
         uint32_t numExportedBuffers;
+        // Number of worker threads
         uint32_t numWorkers = 0;
     };
 
@@ -25,8 +37,8 @@ public:
     ~ThreadPoolExecutor();
     void run(Job *jobs, CountT num_jobs);
 
-    CountT loadObjects(Span<const imp::SourceObject> objs);
-
+    // Get the base pointer of the component data exported with
+    // ECSRegister::exportColumn
     void * getExported(CountT slot) const;
 
 protected:
@@ -42,6 +54,22 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// The TaskGraphExecutor class is the entry point for the CPU backend.
+// Use as follows:
+//   using MyCPUBackend = TaskGraphExecutor<
+//       MyContextSubclass, MyPerWorldState, MyConfig, MyPerWorldInit>;
+//
+//   MyCPUBackend backend({
+//      .numWorlds = 1024,
+//      .numExportedBuffers = 5, // Make sure this is set correctly!
+//      .numWorkers = 0, // (Autodetect number of CPU cores)
+//   }, MyConfig {}, my_world_inits);
+//
+//   backend.run(); // Take one step
+//
+// The above code will initialize the simulation state with 
+// 1024 copies of the MyPerWorldState class, passing MyConfig and the 
+// appropriate my_world_inits reference to the MyPerWorldState constructor
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 class TaskGraphExecutor : private ThreadPoolExecutor {
 public:
@@ -50,10 +78,14 @@ public:
         const ConfigT &user_cfg,
         const InitT *user_inits);
 
+    // Run one invocation of the task graph across all worlds (one step)
     inline void run();
 
+    // Get the base pointer of the component data exported with
+    // ECSRegister::exportColumn
     using ThreadPoolExecutor::getExported;
 
+    // Get a reference to the per world data class
     inline WorldT & getWorldData(CountT world_idx);
 
 private:

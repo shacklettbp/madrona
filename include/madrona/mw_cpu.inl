@@ -68,8 +68,8 @@ template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::RunData::RunData(
         WorldT *world_data, const ConfigT &cfg, const WorkerInit &init)
     : ctx(world_data, init),
-      taskgraph([this, &cfg]() {
-          TaskGraph::Builder builder(ctx);
+      taskgraph([&cfg, &init]() {
+          TaskGraphBuilder builder(init);
           WorldT::setupTasks(builder, cfg);
           return builder.build();
       }())

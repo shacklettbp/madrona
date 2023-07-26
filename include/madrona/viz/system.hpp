@@ -1,6 +1,6 @@
 #pragma once
 
-#include <madrona/taskgraph.hpp>
+#include <madrona/taskgraph_builder.hpp>
 #include <madrona/math.hpp>
 
 namespace madrona::viz {
@@ -18,8 +18,9 @@ struct VizECSBridge;
 struct VizRenderingSystem {
     static void registerTypes(ECSRegistry &registry);
 
-    static TaskGraph::NodeID setupTasks(TaskGraph::Builder &builder,
-                                        Span<const TaskGraph::NodeID> deps);
+    static TaskGraphNodeID setupTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
 
     static void reset(Context &ctx);
 

@@ -14,43 +14,6 @@
 
 namespace madrona {
 
-template <typename ComponentT>
-void ECSRegistry::registerComponent()
-{
-    state_mgr_->registerComponent<ComponentT>();
-}
-
-template <typename ArchetypeT>
-void ECSRegistry::registerArchetype()
-{
-    state_mgr_->registerArchetype<ArchetypeT>();
-}
-
-template <typename ArchetypeT>
-void ECSRegistry::registerFixedSizeArchetype(CountT max_num_entities)
-{
-    assert(max_num_entities > 0);
-    state_mgr_->registerArchetype<ArchetypeT>(max_num_entities);
-}
-
-template <typename SingletonT>
-void ECSRegistry::registerSingleton()
-{
-    state_mgr_->registerSingleton<SingletonT>();
-}
-
-template <typename ArchetypeT, typename ComponentT>
-void ECSRegistry::exportColumn(int32_t slot)
-{
-    export_ptrs_[slot] = state_mgr_->exportColumn<ArchetypeT, ComponentT>();
-}
-
-template <typename SingletonT>
-void ECSRegistry::exportSingleton(int32_t slot)
-{
-    export_ptrs_[slot] = state_mgr_->exportSingleton<SingletonT>();
-}
-
 template <typename T>
 T & EntityStore::LockedMapStore<T>::operator[](int32_t idx)
 {

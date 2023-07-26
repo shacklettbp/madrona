@@ -6,6 +6,7 @@
  * https://opensource.org/licenses/MIT.
  */
 #include <madrona/state.hpp>
+#include <madrona/registry.hpp>
 #include <madrona/utils.hpp>
 #include <madrona/dyn_array.hpp>
 

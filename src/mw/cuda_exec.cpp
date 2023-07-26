@@ -267,6 +267,11 @@ static constexpr uint32_t numEntryQueueThreads = 512;
 
 using GPUImplConsts = mwGPU::madrona::mwGPU::GPUImplConsts;
 
+enum class ExecutorMode {
+    JobSystem,
+    TaskGraph,
+};
+
 struct GPUCompileResults {
     CUmodule mod;
     std::string initECSName;
@@ -506,7 +511,7 @@ static GPUCompileResults compileCode(
     const MegakernelConfig *megakernel_cfgs,
     int64_t num_megakernel_cfgs,
     CompileConfig::OptMode opt_mode,
-    CompileConfig::Executor exec_mode, bool verbose_compile)
+    ExecutorMode exec_mode, bool verbose_compile)
 {
     auto kernel_cache = Optional<MegakernelCache>::none();
     auto cache_write_path = Optional<std::string>::none();
@@ -627,7 +632,7 @@ static __attribute__((always_inline)) inline void dispatch(
     std::string_view entry_params;
     std::string_view entry_args;
     std::string_view id_prefix;
-    if (exec_mode == CompileConfig::Executor::JobSystem) {
+    if (exec_mode == ExecutorMode::JobSystem) {
         megakernel_prefix = megakernel_job_prefix;
         megakernel_body = megakernel_job_body;
         entry_prefix = ".weak .func _ZN7madrona5mwGPU8jobEntry";
@@ -635,7 +640,7 @@ static __attribute__((always_inline)) inline void dispatch(
         entry_params = "(madrona::JobContainerBase *, uint32_t *, uint32_t *, uint32_t, uint32_t);\n";
         entry_args = "(data, data_indices, invocation_offsets, num_launches, grid);\n";
         id_prefix = "_ZN7madrona5mwGPU13JobFuncIDBase";
-    } else if (exec_mode == CompileConfig::Executor::TaskGraph) {
+    } else if (exec_mode == ExecutorMode::TaskGraph) {
         megakernel_prefix = megakernel_taskgraph_prefix;
         megakernel_body = megakernel_taskgraph_body;
         entry_prefix = ".weak .func _ZN7madrona5mwGPU9userEntry";
@@ -892,6 +897,7 @@ static __attribute__((always_inline)) inline void dispatch(
 
 static GPUKernels buildKernels(const CompileConfig &cfg,
                                Span<const MegakernelConfig> megakernel_cfgs,
+                               ExecutorMode exec_mode,
                                int32_t num_sms,
                                std::pair<int, int> cuda_arch)
 {
@@ -915,10 +921,10 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
 
     uint32_t num_exec_srcs = 0;
     const char **exec_srcs = nullptr;
-    if (cfg.execMode == CompileConfig::Executor::JobSystem) {
+    if (exec_mode == ExecutorMode::JobSystem) {
         num_exec_srcs = job_sys_cpp_files.size();
         exec_srcs = job_sys_cpp_files.data();
-    } else if (cfg.execMode == CompileConfig::Executor::TaskGraph) {
+    } else if (exec_mode == ExecutorMode::TaskGraph) {
         num_exec_srcs = task_graph_cpp_files.size();
         exec_srcs = task_graph_cpp_files.data();
     }
@@ -974,9 +980,9 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         compile_flags.push_back("-DMADRONA_MWGPU_LTO_MODE=1");
     }
 
-    if (cfg.execMode == CompileConfig::Executor::JobSystem) {
+    if (exec_mode == ExecutorMode::JobSystem) {
         compile_flags.push_back("-DMARONA_MWGPU_JOB_SYSTEM=1");
-    } else if (cfg.execMode == CompileConfig::Executor::TaskGraph) {
+    } else if (exec_mode == ExecutorMode::TaskGraph) {
         compile_flags.push_back("-DMADRONA_MWGPU_TASKGRAPH=1");
     }
 
@@ -1026,7 +1032,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         fast_compile_flags.data(), fast_compile_flags.size(),
         linker_flags.data(), linker_flags.size(),
         megakernel_cfgs.data(), megakernel_cfgs.size(),
-        opt_mode, cfg.execMode, verbose_compile);
+        opt_mode, exec_mode, verbose_compile);
 
     HeapArray<CUfunction> megakernel_fns(megakernel_cfgs.size());
     for (int64_t i = 0; i < megakernel_cfgs.size(); i++) {
@@ -1046,13 +1052,14 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
         gpu_kernels.mod, "madronaMWGPUComputeConstants"));
 
-    if (cfg.execMode == CompileConfig::Executor::JobSystem) {
+    if (exec_mode == ExecutorMode::JobSystem) {
         REQ_CU(cuModuleGetFunction(&gpu_kernels.initECS, gpu_kernels.mod,
                                    "madronaMWGPUInitialize"));
-        getUserEntries(cfg.entryName, gpu_kernels.mod, compile_flags.data(),
+        // FIXME: getUserEntries is broken
+        getUserEntries("", gpu_kernels.mod, compile_flags.data(),
             compile_flags.size(), &gpu_kernels.queueUserInit,
             &gpu_kernels.queueUserRun);
-    } else if (cfg.execMode == CompileConfig::Executor::TaskGraph) {
+    } else if (exec_mode == ExecutorMode::TaskGraph) {
         REQ_CU(cuModuleGetFunction(&gpu_kernels.initECS, gpu_kernels.mod,
                                    compile_results.initECSName.c_str()));
         REQ_CU(cuModuleGetFunction(&gpu_kernels.initWorlds, gpu_kernels.mod,
@@ -1232,7 +1239,7 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_user_cfg_bytes,
     uint32_t num_exported,
     const GPUKernels &gpu_kernels,
-    CompileConfig::Executor exec_mode,
+    ExecutorMode exec_mode,
     cudaStream_t strm)
 {
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
@@ -1371,7 +1378,7 @@ static GPUEngineState initEngineAndUserState(
     REQ_CU(cuMemcpyHtoD(job_sys_consts_addr, gpu_consts_readback,
                         job_sys_consts_size));
 
-    if (exec_mode == CompileConfig::Executor::JobSystem) {
+    if (exec_mode == ExecutorMode::JobSystem) {
         launchKernel(gpu_kernels.initWorlds, 1, consts::numMegakernelThreads,
                      no_args);
     
@@ -1383,7 +1390,7 @@ static GPUEngineState initEngineAndUserState(
 
         launchKernel(gpu_kernels.megakernels[0], 1,
                      consts::numMegakernelThreads, no_args);
-    } else if (exec_mode == CompileConfig::Executor::TaskGraph) {
+    } else if (exec_mode == ExecutorMode::TaskGraph) {
         launchKernel(gpu_kernels.initECS, 1, 1, init_ecs_args);
 
         uint32_t num_init_blocks =
@@ -1686,6 +1693,8 @@ MWCudaExecutor::MWCudaExecutor(
         const StateConfig &state_cfg, const CompileConfig &compile_cfg)
     : impl_(nullptr)
 {
+    const ExecutorMode exec_mode = ExecutorMode::TaskGraph;
+
     setCudaHeapSize();
     REQ_CUDA(cudaSetDevice(state_cfg.gpuID));
     cudaDeviceProp dev_prop;
@@ -1718,17 +1727,17 @@ MWCudaExecutor::MWCudaExecutor(
     }
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
-        num_sms, {dev_prop.major, dev_prop.minor});
+        exec_mode, num_sms, {dev_prop.major, dev_prop.minor});
 
     GPUEngineState eng_state = initEngineAndUserState(
         state_cfg.numWorlds, state_cfg.numWorldDataBytes,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
         state_cfg.numUserConfigBytes, state_cfg.numExportedBuffers,
-        gpu_kernels, compile_cfg.execMode, strm);
+        gpu_kernels, exec_mode, strm);
 
     auto run_graph =
-        compile_cfg.execMode == CompileConfig::Executor::JobSystem ?
+        exec_mode == ExecutorMode::JobSystem ?
             makeJobSysRunGraph(gpu_kernels.queueUserRun,
                                gpu_kernels.megakernels[0],
                                state_cfg.numWorlds) :

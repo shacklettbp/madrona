@@ -2,7 +2,7 @@
 #include <madrona/math.hpp>
 #include <madrona/components.hpp>
 #include <madrona/span.hpp>
-#include <madrona/taskgraph.hpp>
+#include <madrona/taskgraph_builder.hpp>
 
 namespace madrona::phys {
 
@@ -346,17 +346,18 @@ struct RigidBodyPhysicsSystem {
 
     static void registerTypes(ECSRegistry &registry);
 
-    static TaskGraph::NodeID setupBroadphaseTasks(
-        TaskGraph::Builder &builder,
-        Span<const TaskGraph::NodeID> deps);
+    static TaskGraphNodeID setupBroadphaseTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
 
-    static TaskGraph::NodeID setupSubstepTasks(
-        TaskGraph::Builder &builder,
-        Span<const TaskGraph::NodeID> deps,
+    static TaskGraphNodeID setupSubstepTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps,
         CountT num_substeps);
 
-    static TaskGraph::NodeID setupCleanupTasks(TaskGraph::Builder &builder,
-        Span<const TaskGraph::NodeID> deps);
+    static TaskGraphNodeID setupCleanupTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
 };
 
 struct Cols {

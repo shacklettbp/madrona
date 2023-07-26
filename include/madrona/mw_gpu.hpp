@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2022 Brennan Shacklett and contributors
+ * Copyright 2021-2023 Brennan Shacklett and contributors
  *
  * Use of this source code is governed by an MIT-style
  * license that can be found in the LICENSE file or at
@@ -23,14 +23,30 @@
 namespace madrona {
 
 struct StateConfig {
+    // worldInitPtr must be a pointer to numWorlds structs that are each
+    // numWorldInitBytes in size. This must be a CPU pointer,
+    // MWCudaExecutor will copy it to the GPU automatically.
+    // These are equivalent to the MyPerWorldInit type referred to in
+    // the mw_cpu.hpp documentation.
     void *worldInitPtr;
     uint32_t numWorldInitBytes;
+
+    // CPU pointer to your application's config data. Equivalent to
+    // MyConfig type in TaskGraphExecutor
     void *userConfigPtr;
     uint32_t numUserConfigBytes;
-    uint32_t numWorldDataBytes;
+
+    // size and alignment of the per world global data type for the application
+    uint32_t numWorldDataBytes; 
     uint32_t worldDataAlignment;
+
+    // Batch size for the backend
     uint32_t numWorlds;
+
+    // Number of exported ECS components
     uint32_t numExportedBuffers;
+
+    // The CUDA GPU id that MWCudaExecutor will use
     uint32_t gpuID;
 };
 
@@ -41,16 +57,19 @@ struct CompileConfig {
         Debug,
     };
 
-    enum class Executor {
-        JobSystem,
-        TaskGraph,
-    };
-
-    const char *entryName;
+    // List of all the source files for your application that need to be
+    // compiled on the GPU for the simulator to work correctly. These
+    // will be combined with the core Madrona files and compiled by the
+    // MWCudaExecutor constructor.
     Span<const char * const> userSources;
+    // Any special flags (include directories, defines, etc) that need to be
+    // passed to your source files
     Span<const char * const> userCompileFlags;
+
+    // Explicitly set the GPU compilation mode. Recommend leaving as
+    // OptMode::LTO, and using the MADRONA_MWGPU_FORCE_DEBUG=1 environment
+    // variable to drop down to debug compilation when needed.
     OptMode optMode = OptMode::LTO;
-    Executor execMode = Executor::TaskGraph;
 };
 
 class MWCudaExecutor {
@@ -62,8 +81,12 @@ public:
 
     MADRONA_MWGPU_EXPORT ~MWCudaExecutor();
 
+    // Run one invocation of the task graph across all worlds (one step)
+    // Only returns after synchronization with the GPU is complete (not async)
     MADRONA_MWGPU_EXPORT void run();
 
+    // Get the base pointer of the component data exported with
+    // ECSRegister::exportColumn. Note that this will be a GPU pointer.
     MADRONA_MWGPU_EXPORT void * getExported(CountT slot) const;
 
 private:

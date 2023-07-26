@@ -19,7 +19,7 @@ Dependencies
 
 **Supported Platforms**
 * Linux, Ubuntu 18.04 or newer
-    * Other distros with recent kernel / GLIBC versions will also work
+    * Other distros with equivalent or newer kernel / GLIBC versions will also work
 * MacOS 13.x Ventura (or newer)
     * Requires full Xcode 14 install (not just Xcode Command Line Tools)
     * Currently no testing / support for Intel Macs
@@ -31,8 +31,9 @@ Dependencies
 * Python 3.9 (or newer)
 
 **GPU-Backend Dependencies**
-* CUDA 12.1 or newer (+ appropriate NVIDIA drivers)
 * Volta or newer NVIDIA GPU
+* CUDA 12.1 or newer (+ appropriate NVIDIA drivers)
+* **Linux** (CUDA on Windows lacks certain unified memory features that Madrona requires)
 
 These dependencies are needed for the GPU backend. If they're not present, Madrona's GPU backend will be disabled, but you can still use the CPU backend.
 
@@ -80,14 +81,14 @@ As mentioned above, we recommend starting with the [Madrona3DExample project](ht
 
 Nevertheless, the following files provide good starting points to start diving into the Madrona codebase:
 
-The Context class includes the core ECS API entry points for the engine (creating entities, getting components, etc): [`include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/context.hpp#L17). Note that the linked file is the header for the CPU backend. The GPU implementation of the same interface lives in [`src/mw/device/include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/src/mw/device/include/madrona/context.hpp). Although many of the headers in `include/madrona` are shared between the CPU and GPU backends, the GPU backend prioritizes files in `src/mw/device/include` in order to use GPU specific implementations. This distinction should not be relevant for most users of the engine, as the public interfaces of both backends match.
+The `Context` class: [`include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/context.hpp#L17) includes the core ECS API entry points for the engine (creating entities, getting components, etc): . Note that the linked file is the header for the CPU backend. The GPU implementation of the same interface lives in [`src/mw/device/include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/src/mw/device/include/madrona/context.hpp). Although many of the headers in `include/madrona` are shared between the CPU and GPU backends, the GPU backend prioritizes files in `src/mw/device/include` in order to use GPU specific implementations. This distinction should not be relevant for most users of the engine, as the public interfaces of both backends match.
 
-The TaskGraph class: [`include/madrona/taskgraph.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/taskgraph.hpp) includes the interface for building the taskgraph that will be executed to step the simulation across all worlds.
+The `ECSRegistry` class: [`include/madrona/registry.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/registry.hpp) is where user code registers all the ECS Components and Archetypes that will be used during the simulation. Note that Madrona requires all the used archetypes to be declared up front -- unlike other ECS engines adding and removing components dynamically from entities is not currently supported.
 
-The ECSRegistry class: [`include/madrona/registry.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/registry.hpp) is where user code registers all the ECS Components and Archetypes that will be used during the simulation. Note that Madrona requires all the used archetypes to be declared up front -- unlike other ECS engines adding and removing components dynamically from entities is not currently supported.
+The `TaskGraph` class: [`include/madrona/taskgraph.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/taskgraph.hpp) includes the interface for building the taskgraph that will be executed to step the simulation across all worlds.
 
-The MWCudaExecutor class: [`include/madrona/mw_gpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is the entry point for the GPU backend.  
-The TaskGraphExecutor class: [`include/madrona/mw_cpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is the entry point for the CPU backend.
+The `MWCudaExecutor` class: [`include/madrona/mw_gpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is the entry point for the GPU backend.  
+The `TaskGraphExecutor` class: [`include/madrona/mw_cpu.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/mw_gpu.hpp) is the entry point for the CPU backend.
 
 Citation
 --------
