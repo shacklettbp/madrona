@@ -14,8 +14,6 @@ class StateCache;
 class StateManager;
 class ECSRegistry;
 class Context;
-class TaskGraph;
-class TaskGraphBuilder;
 struct WorkerInit;
 
 }
