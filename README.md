@@ -10,7 +10,7 @@ Madrona is a prototype game engine for building high-throughput GPU-accelerated 
 * (Optional) XPBD rigid body physics for basic 3D collision & contact support.
 * (Optional) Simple 3D renderer for visualizing agent behaviors or debugging.
 
-For more background and technical details, please read our paper: [_An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation_](), published in Transactions on Graphics / SIGGRAPH 2023.
+For more background and technical details, please read our paper: [_An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation_](https://madrona-engine.github.io/shacklett_siggraph23.pdf), published in Transactions on Graphics / SIGGRAPH 2023.
 
 **Disclaimer**: The Madrona engine is an early-stage research codebase. While we hope to attract interested users / collaborators with this release, there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
 
