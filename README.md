@@ -1,4 +1,4 @@
-Madrona: \\A GPU-Accelerated Game Engine for Batch Simulation
+Madrona:<br>A GPU-Accelerated Game Engine for Batch Simulation
 ===========================================================
 
 Madrona is a prototype game engine for building high-throughput GPU-accelerated _batch simulators_ that execute thousands of virtual worlds concurrently. By leveraging parallelism between and within worlds, simulators built on Madrona are able to execute on the GPU at millions of frames per second, enabling high performance sample generation for training agents using reinforcement learning, or other tasks requiring a high performance simulator in the loop. At its core, Madrona is built around the Entity Component System (ECS) architecture, which the engine uses to provide high-performance C++ interfaces for implementing custom logic and state that the engine can can automatically map to parallel batch execution on the GPU.
