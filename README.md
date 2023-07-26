@@ -1,9 +1,9 @@
 Madrona:<br>A GPU-Accelerated Game Engine for Batch Simulation
 ===========================================================
 
-Madrona is a prototype game engine for creating high-throughput, GPU-accelerated _batch simulators_: simulators that efficiently run thousands of virtual environment instances efficiently on a single GPU or CPU. By sharing game state data structures across environments and leveraging both inter- and intra-envrionment parallelism, simulators built using Madrona can achieve throughputs of tens of millions of aggregate world simulation steps per second on a single GPU.  This capability is useful for rapid AI agent training (e.g., via reinforcement learning), or for any task that requires high-performance world simulator "in-the-loop".
+Madrona is a prototype game engine for creating high-throughput, GPU-accelerated _batch simulators_: simulators that efficiently run thousands of virtual environment instances efficiently on a single GPU or CPU. Simulators built using Madrona can realize throughputs of tens of millions of world simulation steps per second in aggregate on a single GPU. This capability is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
 
-Madrona is built around the [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. It exposes high-performance C++ interfaces for games to implement custom logic and state that Madrona automatically maps to parallel batch execution on the GPU. Implementing a new game in Madrona will require the author to think in terms of implicitly data-parallel ECS concepts, but does not require knowledge of GPU programming or GPU performance optimization. 
+Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. __At this time Madrona exposes interfaces for games to implement custom logic and state in C++.__ Madrona automatically maps this logic to parallel batch execution on the GPU. Implementing a new game (or a new learning environment) in Madrona will require the author to express game logic using data-parallel ECS concepts, but it does not require a developer to have knowledge of GPU programming or GPU performance optimization. 
 
 **Features**:
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
@@ -18,20 +18,20 @@ Madrona is built around the [Entity Component System](https://github.com/SanderM
 
 For more background and technical details, please read our paper: [_An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation_](https://madrona-engine.github.io/shacklett_siggraph23.pdf), published in Transactions on Graphics / SIGGRAPH 2023.
 
-This Shacklett et al. paper focuses on the design and implementation of Madrona. For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Martens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
+For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Martens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
 
 # Example Simulators Created Using Madrona
 
 * [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example)
   * A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
 * [Overcooked AI](xxx)
-  * A port of the popular Overcooked AI environment used for multi-agent learning research.
+  * The Overcooked AI environment used for multi-agent learning research. Check out this repo to a CoLab notebook that allows you to train overcooked agents that demonstrate optimal play in under a minute.
 * [Hide And Seek](xxx)
-  * A port of OpenAI's "hide and seek" environment from the paper [Emergent Tool Use from Mult-Agent Autocurricula](https://openai.com/research/emergent-tool-use)
+  * A port of OpenAI's "hide and seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use).
 * [Hanabi](xxx)
   * The card game.
-* [Cartpole]
-  * A simple hello world environment.
+* [Cartpole](xxx)
+  * The canonical RL training environment.
 
 Dependencies
 ------------
