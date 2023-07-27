@@ -54,7 +54,7 @@ Dependencies
 * CUDA 12.1 or newer (+ appropriate NVIDIA drivers)
 * **Linux** (CUDA on Windows lacks certain unified memory features that Madrona requires)
 
-These dependencies are needed for the GPU backend. If they are not present, Madrona's GPU backend will be disabled, but you can still use the CPU backend.
+  These dependencies are needed for the GPU backend. If they are not present, Madrona's GPU backend will be disabled, but you can still use the CPU backend.
 
 Getting Started
 ---------------
