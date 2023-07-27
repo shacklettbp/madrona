@@ -37,6 +37,7 @@ struct Viewer::Impl {
     uint32_t numWorlds;
     uint32_t maxNumAgents;
     int32_t simTickRate;
+    bool shouldExit;
 
     Impl(const Viewer::Config &cfg);
 
@@ -398,7 +399,8 @@ Viewer::Impl::Impl(const Config &cfg)
                cfg.execMode == ExecMode::CUDA),
       numWorlds(cfg.numWorlds),
       maxNumAgents(cfg.maxViewsPerWorld),
-      simTickRate(cfg.defaultSimTickRate)
+      simTickRate(cfg.defaultSimTickRate),
+      shouldExit(false)
 {}
 
 void Viewer::Impl::render(float frame_duration)
@@ -428,7 +430,7 @@ void Viewer::Impl::loop(
 
     float frame_duration = InternalConfig::secondsPerFrame;
     auto last_sim_tick_time = chrono::steady_clock::now();
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window) && !shouldExit) {
         if (frameCfg.viewIDX != 0) {
             key_state[(uint32_t)KeyboardKey::W] |=
                 (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
@@ -516,6 +518,11 @@ void Viewer::loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
                   void *input_data, void (*step_fn)(void *), void *step_data)
 {
     impl_->loop(input_fn, input_data, step_fn, step_data);
+}
+
+void Viewer::stopLoop()
+{
+    impl_->shouldExit = true;
 }
 
 }
