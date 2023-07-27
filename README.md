@@ -67,7 +67,7 @@ For ML-focused users interested in training agents at high speed, we recommend y
 
 If you're interested in authoring a new simulator on top of Madrona, we recommend forking one of the above projects and adding your own functionality, or forking the [Madrona GridWorld repo](https://github.com/shacklettbp/madrona_gridworld) as an example with very little existing logic to get in your way. Basing your work on one of these repositories will ensure that the CMake build system and python bindings are setup correctly.
 
-**Building:**
+### Building: ###
 
 Instructions on building and testing the [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example) simulator are included below for Linux and MacOS:
 ```bash
