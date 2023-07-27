@@ -1,9 +1,9 @@
 Madrona:<br>A GPU-Accelerated Game Engine for Batch Simulation
 ===========================================================
 
-Madrona is a prototype game engine for creating high-throughput, GPU-accelerated _batch simulators_: simulators that efficiently run thousands of virtual environment instances efficiently on a single GPU or CPU. Simulators built using Madrona can realize throughputs of tens of millions of world simulation steps per second in aggregate on a single GPU. This capability is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
+Madrona is a prototype game engine for creating high-throughput, GPU-accelerated _batch simulators_: simulators that run thousands of virtual environment instances, and generate millions of aggregate simulation steps per second, on a single GPU. This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
 
-Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. __At this time Madrona exposes interfaces for games to implement custom logic and state in C++.__ Madrona automatically maps this logic to parallel batch execution on the GPU. Implementing a new game (or a new learning environment) in Madrona will require the author to express game logic using data-parallel ECS concepts, but it does not require a developer to have knowledge of GPU programming or GPU performance optimization. 
+Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. __At this time Madrona exposes interfaces for games to implement custom logic and state in C++,  and Madrona automatically maps this code to parallel batch execution on the GPU. Implementing a new game (or a new learning environment) in Madrona requires knowledge of data-parallel ECS concepts, but it does not require knowledge of GPU programming or GPU performance optimization. 
 
 **Features**:
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
