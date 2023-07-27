@@ -20,7 +20,7 @@ For more background and technical details, please read our paper: [_An Extensibl
 
 For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Martens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
 
-# Example Simulators Created Using Madrona
+# Example Madrona-Based Simulators
 
 * [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example)
   * A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
