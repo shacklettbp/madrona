@@ -85,7 +85,7 @@ You can then view the environment by running:
 ./build/viewer
 ```
 
-Please refer to the Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example)simulator's github page for further context / instructions on how to train agents.
+Please refer to the [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example) simulator's github page for further context / instructions on how to train agents.
 
 **Windows Instructions**:
 Windows users should clone the repository as above, and then open the root of the cloned repo in Visual Studio and build with the integrated CMake support. 
