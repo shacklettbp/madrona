@@ -1,18 +1,18 @@
 Madrona:<br>A GPU-Accelerated Game Engine for Batch Simulation
 ===========================================================
 
-Madrona is a prototype game engine for creating high-throughput, GPU-accelerated _batch simulators_: simulators that run thousands of virtual environment instances, and generate millions of aggregate simulation steps per second, on a single GPU. This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
+Madrona is a prototype game engine for creating high-throughput, GPU-accelerated batch simulators: simulators that run thousands of virtual environment instances, and generate *millions of aggregate simulation steps per second, on a single GPU.* This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
 
-Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. __At this time Madrona exposes interfaces for games to implement custom logic and state in C++,  and Madrona automatically maps this code to parallel batch execution on the GPU. Implementing a new game (or a new learning environment) in Madrona requires knowledge of data-parallel ECS concepts, but it does not require knowledge of GPU programming or GPU performance optimization. 
+Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. At this time Madrona provides APIs for games to specify custom game play logic and state in C++, and Madrona automatically maps this code to parallel batch execution on the GPU. Implementing a new game (or a new learning environment) in Madrona requires knowledge of data-parallel ECS concepts, but it does not require expert knowledge of GPU programming or GPU performance optimization. 
 
 **Features**:
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
 * CPU backend for debugging and visualization. Simulators can execute on GPU or CPU with no code changes.
-* Export ECS simulation state as PyTorch tensors for efficient interopability with learning code.
+* Export ECS simulation state as PyTorch tensors for efficient interoperability with learning code.
 * (Optional) XPBD rigid body physics for basic 3D collision and contact support.
 * (Optional) Simple 3D renderer for visualizing agent behaviors and debugging.
 
-**Disclaimer**: The Madrona engine is a research code base. While we hope to attract interested users / collaborators with this release, there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
+**Disclaimer**: The Madrona engine is a research code base. We hope to attract interested users / collaborators with this release, however there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
 
 # Technical Paper
 
