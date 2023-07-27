@@ -47,7 +47,7 @@ StructuredBuffer<SkyData> skyBuffer;
 
 #include "lighting.h"
 
-#define SHADOW_BIAS 0.0005f
+#define SHADOW_BIAS 0.002f
 
 float linear_step(float low, float high, float v) {
     return clamp((v - low) / (high - low), 0, 1);
