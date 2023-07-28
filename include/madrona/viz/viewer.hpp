@@ -28,6 +28,7 @@ public:
         uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;
         uint32_t defaultSimTickRate;
+        float cameraMoveSpeed;
         ExecMode execMode;
     };
 

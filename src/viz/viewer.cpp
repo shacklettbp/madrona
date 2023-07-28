@@ -15,7 +15,6 @@ using namespace std;
 namespace madrona::viz {
 
 namespace InternalConfig {
-inline constexpr float cameraMoveSpeed = 5.f;
 inline constexpr float mouseSpeed = 2e-4f;
 
 inline constexpr auto nsPerFrame = chrono::nanoseconds(8333333);
@@ -37,6 +36,7 @@ struct Viewer::Impl {
     uint32_t numWorlds;
     uint32_t maxNumAgents;
     int32_t simTickRate;
+    float cameraMoveSpeed;
     bool shouldExit;
 
     Impl(const Viewer::Config &cfg);
@@ -66,7 +66,9 @@ const VizECSBridge * Viewer::rendererBridge() const
     return impl_->renderer.getBridgePtr();
 }
 
-static void handleCamera(GLFWwindow *window, ViewerCam &cam)
+static void handleCamera(GLFWwindow *window,
+                         ViewerCam &cam,
+                         float cam_move_speed)
 {
     auto keyPressed = [&](uint32_t key) {
         return glfwGetKey(window, key) == GLFW_PRESS;
@@ -141,7 +143,7 @@ static void handleCamera(GLFWwindow *window, ViewerCam &cam)
         cam.mousePrev = cursorPosition();
     }
 
-    cam.position += translate * InternalConfig::cameraMoveSpeed *
+    cam.position += translate * cam_move_speed *
         InternalConfig::secondsPerFrame;
 }
 
@@ -400,6 +402,7 @@ Viewer::Impl::Impl(const Config &cfg)
       numWorlds(cfg.numWorlds),
       maxNumAgents(cfg.maxViewsPerWorld),
       simTickRate(cfg.defaultSimTickRate),
+      cameraMoveSpeed(cfg.cameraMoveSpeed),
       shouldExit(false)
 {}
 
@@ -484,7 +487,7 @@ void Viewer::Impl::loop(
             key_state[(uint32_t)KeyboardKey::Shift] |=
                 (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
         } else {
-            handleCamera(window, cam);
+            handleCamera(window, cam, cameraMoveSpeed);
         }
 
         auto cur_frame_start_time = chrono::steady_clock::now();
