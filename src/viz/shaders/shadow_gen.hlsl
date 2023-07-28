@@ -85,7 +85,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     float tan_half_fov = -1.0f / unpackedView.yScale;
     float aspect = -unpackedView.yScale / unpackedView.xScale;
     float near = 1.0f;
-    float far = 50.0f;
+    float far = 40.0f;
 
     far_height = 2.0f * far * tan_half_fov;
     near_height = 2.0f * near * tan_half_fov;

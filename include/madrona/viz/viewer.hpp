@@ -88,6 +88,8 @@ public:
     int32_t getRenderedWorldID();
     int32_t getRenderedViewID();
 
+    void stopLoop();
+
 private:
     void loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
               void *input_data, void (*step_fn)(void *), void *step_data, void (*ui_fn)(void*), void* ui_data);

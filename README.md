@@ -1,18 +1,18 @@
 Madrona:<br>A GPU-Accelerated Game Engine for Batch Simulation
 ===========================================================
 
-Madrona is a prototype game engine for creating high-throughput, GPU-accelerated _batch simulators_: simulators that efficiently run thousands of virtual environment instances efficiently on a single GPU or CPU. Simulators built using Madrona can realize throughputs of tens of millions of world simulation steps per second in aggregate on a single GPU. This capability is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
+Madrona is a prototype game engine for creating high-throughput, GPU-accelerated batch simulators: simulators that run thousands of virtual environment instances, and generate *millions of aggregate simulation steps per second, on a single GPU.* This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
 
-Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. __At this time Madrona exposes interfaces for games to implement custom logic and state in C++.__ Madrona automatically maps this logic to parallel batch execution on the GPU. Implementing a new game (or a new learning environment) in Madrona will require the author to express game logic using data-parallel ECS concepts, but it does not require a developer to have knowledge of GPU programming or GPU performance optimization. 
+Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. At this time Madrona provides APIs for games to specify custom game play logic and state in C++, and Madrona automatically maps this code to parallel batch execution on the GPU. Implementing a new game (or a new learning environment) in Madrona requires knowledge of data-parallel ECS concepts, but it does not require expert knowledge of GPU programming or GPU performance optimization. 
 
-**Features**:
+### Features: ###
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
 * CPU backend for debugging and visualization. Simulators can execute on GPU or CPU with no code changes.
-* Export ECS simulation state as PyTorch tensors for efficient interopability with learning code.
+* Export ECS simulation state as PyTorch tensors for efficient interoperability with learning code.
 * (Optional) XPBD rigid body physics for basic 3D collision and contact support.
 * (Optional) Simple 3D renderer for visualizing agent behaviors and debugging.
 
-**Disclaimer**: The Madrona engine is a research code base. While we hope to attract interested users / collaborators with this release, there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
+**Disclaimer**: The Madrona engine is a research code base. We hope to attract interested users / collaborators with this release, however there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
 
 # Technical Paper
 
@@ -20,7 +20,7 @@ For more background and technical details, please read our paper: [_An Extensibl
 
 For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Martens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
 
-# Example Simulators Created Using Madrona
+# Example Madrona-Based Simulators
 
 * [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example)
   * A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
@@ -54,7 +54,7 @@ Dependencies
 * CUDA 12.1 or newer (+ appropriate NVIDIA drivers)
 * **Linux** (CUDA on Windows lacks certain unified memory features that Madrona requires)
 
-These dependencies are needed for the GPU backend. If they are not present, Madrona's GPU backend will be disabled, but you can still use the CPU backend.
+  These dependencies are needed for the GPU backend. If they are not present, Madrona's GPU backend will be disabled, but you can still use the CPU backend.
 
 Getting Started
 ---------------
@@ -67,7 +67,7 @@ For ML-focused users interested in training agents at high speed, we recommend y
 
 If you're interested in authoring a new simulator on top of Madrona, we recommend forking one of the above projects and adding your own functionality, or forking the [Madrona GridWorld repo](https://github.com/shacklettbp/madrona_gridworld) as an example with very little existing logic to get in your way. Basing your work on one of these repositories will ensure that the CMake build system and python bindings are setup correctly.
 
-**Building:**
+### Building: ###
 
 Instructions on building and testing the [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example) simulator are included below for Linux and MacOS:
 ```bash
@@ -85,7 +85,7 @@ You can then view the environment by running:
 ./build/viewer
 ```
 
-Please refer to the Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example)simulator's github page for further context / instructions on how to train agents.
+Please refer to the [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example) simulator's github page for further context / instructions on how to train agents.
 
 **Windows Instructions**:
 Windows users should clone the repository as above, and then open the root of the cloned repo in Visual Studio and build with the integrated CMake support. 
