@@ -46,7 +46,7 @@ struct Viewer::Impl {
 
     inline void loop(
         void (*input_fn)(void *, CountT, CountT, const UserInput &),
-        void *input_data, void (*step_fn)(void *), void *step_data);
+        void *input_data, void (*step_fn)(void *), void *step_data, void (*ui_fn)(void*), void* ui_data);
 };
 
 CountT Viewer::loadObjects(Span<const imp::SourceObject> objs,
@@ -421,7 +421,7 @@ Viewer::UserInput::UserInput(bool *keys_state)
 
 void Viewer::Impl::loop(
     void (*input_fn)(void *, CountT, CountT, const UserInput &),
-    void *input_data, void (*step_fn)(void *), void *step_data)
+    void *input_data, void (*step_fn)(void *), void *step_data, void (*ui_fn)(void*), void* ui_data)
 {
     GLFWwindow *window = renderer.window.platformWindow;
 
@@ -456,6 +456,12 @@ void Viewer::Impl::loop(
                 (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::L] |=
                 (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::Space] |=
+                (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::T] |=
+                (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::F] |=
+                (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K1] |=
                 (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K2] |=
@@ -499,6 +505,7 @@ void Viewer::Impl::loop(
 
         startFrame();
 
+        ui_fn(ui_data);
         render(frame_duration);
 
         frame_duration = throttleFPS(cur_frame_start_time);
@@ -515,9 +522,17 @@ Viewer::Viewer(Viewer &&o) = default;
 Viewer::~Viewer() = default;
 
 void Viewer::loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
-                  void *input_data, void (*step_fn)(void *), void *step_data)
+                  void *input_data, void (*step_fn)(void *), void *step_data, void (*ui_fn)(void*), void* ui_data)
 {
-    impl_->loop(input_fn, input_data, step_fn, step_data);
+    impl_->loop(input_fn, input_data, step_fn, step_data, ui_fn, ui_data);
+}
+
+int32_t Viewer::getRenderedWorldID() {
+    return impl_->frameCfg.worldIDX;
+}
+
+int32_t Viewer::getRenderedViewID() {
+    return impl_->frameCfg.viewIDX;
 }
 
 void Viewer::stopLoop()
