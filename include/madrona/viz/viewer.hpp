@@ -44,6 +44,8 @@ public:
         C,
         G,
         L,
+        T,
+        F,
         K1,
         K2,
         K3,
@@ -55,6 +57,7 @@ public:
         K9,
         K0,
         Shift,
+        Space,
         NumKeys,
     };
 
@@ -80,12 +83,14 @@ public:
 
     const VizECSBridge * rendererBridge() const;
 
-    template <typename InputFn, typename StepFn>
-    void loop(InputFn &&input_fn, StepFn &&step_fn);
+    template <typename InputFn, typename StepFn, typename UIFn>
+    void loop(InputFn &&input_fn, StepFn &&step_fn, UIFn &&ui_fn);
+    int32_t getRenderedWorldID();
+    int32_t getRenderedViewID();
 
 private:
     void loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
-              void *input_data, void (*step_fn)(void *), void *step_data);
+              void *input_data, void (*step_fn)(void *), void *step_data, void (*ui_fn)(void*), void* ui_data);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
