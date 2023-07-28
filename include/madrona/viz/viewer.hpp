@@ -85,14 +85,17 @@ public:
 
     template <typename InputFn, typename StepFn, typename UIFn>
     void loop(InputFn &&input_fn, StepFn &&step_fn, UIFn &&ui_fn);
+
     int32_t getRenderedWorldID();
+
     int32_t getRenderedViewID();
 
     void stopLoop();
 
 private:
     void loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
-              void *input_data, void (*step_fn)(void *), void *step_data, void (*ui_fn)(void*), void* ui_data);
+              void *input_data, void (*step_fn)(void *), void *step_data, 
+              void (*ui_fn)(void*), void* ui_data);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
