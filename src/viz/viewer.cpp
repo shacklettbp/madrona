@@ -46,7 +46,8 @@ struct Viewer::Impl {
 
     inline void loop(
         void (*input_fn)(void *, CountT, CountT, const UserInput &),
-        void *input_data, void (*step_fn)(void *), void *step_data, void (*ui_fn)(void*), void* ui_data);
+        void *input_data, void (*step_fn)(void *), void *step_data,
+        void (*ui_fn)(void *), void *ui_data);
 };
 
 CountT Viewer::loadObjects(Span<const imp::SourceObject> objs,
@@ -425,7 +426,7 @@ Viewer::UserInput::UserInput(bool *keys_state)
 void Viewer::Impl::loop(
     void (*input_fn)(void *, CountT, CountT, const UserInput &),
     void *input_data, void (*step_fn)(void *), void *step_data,
-    void (*ui_fn)(void*), void* ui_data)
+    void (*ui_fn)(void *), void *ui_data)
 {
     GLFWwindow *window = renderer.window.platformWindow;
 
@@ -527,17 +528,17 @@ Viewer::~Viewer() = default;
 
 void Viewer::loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
                   void *input_data, void (*step_fn)(void *), void *step_data,
-                  void (*ui_fn)(void*), void* ui_data)
+                  void (*ui_fn)(void *), void *ui_data)
 {
     impl_->loop(input_fn, input_data, step_fn, step_data, ui_fn, ui_data);
 }
 
-int32_t Viewer::getRenderedWorldID() {
-    return impl_->frameCfg.worldIDX;
+CountT Viewer::getRenderedWorldID() {
+    return (CountT)impl_->frameCfg.worldIDX;
 }
 
-int32_t Viewer::getRenderedViewID() {
-    return impl_->frameCfg.viewIDX;
+CountT Viewer::getRenderedViewID() {
+    return (CountT)impl_->frameCfg.viewIDX;
 }
 
 void Viewer::stopLoop()
