@@ -3177,7 +3177,7 @@ static void packView(const Device &dev,
     PackedViewData *staging = (PackedViewData *)view_staging_buffer.ptr;
 
     math::Quat rotation =
-        math::Quat::fromBasis(cam.right, cam.view, cam.up).inv();
+        math::Quat::fromBasis(cam.right, cam.fwd, cam.up).inv();
 
     float fov_scale = 1.f / tanf(math::toRadians(cam.fov * 0.5f));
     float aspect = float(fb_width) / float(fb_height);
@@ -3577,7 +3577,7 @@ static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeli
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
 
     DeferredLightingPushConst push_const = {
-        math::Vector4{ cam.view.x, cam.view.y, cam.view.z, 0.0f },
+        math::Vector4{ cam.fwd.x, cam.fwd.y, cam.fwd.z, 0.0f },
         math::Vector4{ cam.position.x, cam.position.y, cam.position.z, 0.0f },
         math::toRadians(cam.fov), 20.0f, 50.0f, view_idx
     };

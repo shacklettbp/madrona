@@ -156,7 +156,7 @@ struct Frame {
 
 struct ViewerCam {
     math::Vector3 position;
-    math::Vector3 view;
+    math::Vector3 fwd;
     math::Vector3 up;
     math::Vector3 right;
 

@@ -101,11 +101,11 @@ static void handleCamera(GLFWwindow *window,
         auto rotation = (around_up * around_right).normalize();
 
         cam.up = rotation.rotateVec(cam.up);
-        cam.view = rotation.rotateVec(cam.view);
+        cam.fwd = rotation.rotateVec(cam.fwd);
         cam.right = rotation.rotateVec(cam.right);
 
         if (keyPressed(GLFW_KEY_W)) {
-            translate += cam.view;
+            translate += cam.fwd;
         }
 
         if (keyPressed(GLFW_KEY_A)) {
@@ -113,7 +113,7 @@ static void handleCamera(GLFWwindow *window,
         }
 
         if (keyPressed(GLFW_KEY_S)) {
-            translate -= cam.view;
+            translate -= cam.fwd;
         }
 
         if (keyPressed(GLFW_KEY_D)) {
@@ -285,36 +285,36 @@ static void cfgUI(Renderer::FrameConfig &cfg,
 
     if (ImGui::Button("Top", side_size)) {
         cam.position = 10.f * math::up;
-        cam.view = -math::up;
+        cam.fwd = -math::up;
         cam.up = -math::fwd;
-        cam.right = cross(cam.view, cam.up);
+        cam.right = cross(cam.fwd, cam.up);
     }
 
     ImGui::SameLine();
 
     if (ImGui::Button("Left", side_size)) {
         cam.position = -10.f * math::right;
-        cam.view = math::right;
+        cam.fwd = math::right;
         cam.up = math::up;
-        cam.right = cross(cam.view, cam.up);
+        cam.right = cross(cam.fwd, cam.up);
     }
 
     ImGui::SameLine();
 
     if (ImGui::Button("Right", side_size)) {
         cam.position = 10.f * math::right;
-        cam.view = -math::right;
+        cam.fwd = -math::right;
         cam.up = math::up;
-        cam.right = cross(cam.view, cam.up);
+        cam.right = cross(cam.fwd, cam.up);
     }
 
     ImGui::SameLine();
 
     if (ImGui::Button("Bottom", side_size)) {
         cam.position = -10.f * math::up;
-        cam.view = math::up;
+        cam.fwd = math::up;
         cam.up = math::fwd;
-        cam.right = cross(cam.view, cam.up);
+        cam.right = cross(cam.fwd, cam.up);
     }
 
     ImGui::PopStyleVar();
@@ -375,19 +375,19 @@ static void fpsCounterUI(float frame_duration)
     ImGui::End();
 }
 
-static ViewerCam initDefaultCam()
+static ViewerCam initCam(math::Vector3 pos, math::Quat rot)
 {
-    ViewerCam default_cam;
-    default_cam.position = math::Vector3 { 0, 0, 10 };
-    default_cam.view = math::Vector3 { 0, 0, -1 };
-    default_cam.up = math::Vector3 { 0, 1, 0 };
-    default_cam.right = cross(default_cam.view, default_cam.up);
+    ViewerCam cam;
+    cam.position = pos;
+    cam.fwd = normalize(rot.rotateVec(math::fwd));
+    cam.up = normalize(rot.rotateVec(math::up));
+    cam.right = normalize(cross(cam.fwd, cam.up));
 
-    return default_cam;
+    return cam;
 }
 
 Viewer::Impl::Impl(const Config &cfg)
-    : cam(initDefaultCam()),
+    : cam(initCam(cfg.cameraPosition, cfg.cameraRotation)),
       frameCfg {
           .worldIDX = 0,
           .viewIDX = 0,

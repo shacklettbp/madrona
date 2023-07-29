@@ -29,6 +29,8 @@ public:
         uint32_t maxInstancesPerWorld;
         uint32_t defaultSimTickRate;
         float cameraMoveSpeed;
+        math::Vector3 cameraPosition;
+        math::Quat cameraRotation;
         ExecMode execMode;
     };
 
