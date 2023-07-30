@@ -264,11 +264,8 @@ public:
 
 private:
     VkQueue render_queue_;
-    VkQueue transfer_queue_;
-    VkQueue compute_queue_;
 
     // Fixme remove
-    render::vk::QueueState transfer_wrapper_;
     render::vk::QueueState present_wrapper_;
 
     uint32_t fb_width_;

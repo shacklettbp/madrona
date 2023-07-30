@@ -416,24 +416,6 @@ static VkQueue makeGFXQueue(const Device &dev, uint32_t idx)
     return makeQueue(dev, dev.gfxQF, idx);
 }
 
-static VkQueue makeComputeQueue(const Device &dev, uint32_t idx)
-{
-    if (idx >= dev.numComputeQueues) {
-        FATAL("Not enough compute queues");
-    }
-
-    return makeQueue(dev, dev.computeQF, idx);
-}
-
-static VkQueue makeTransferQueue(const Device &dev, uint32_t idx)
-{
-    if (idx >= dev.numTransferQueues) {
-        FATAL("Not enough transfer queues");
-    }
-
-    return makeQueue(dev, dev.transferQF, idx);
-}
-
 static VkRenderPass makeRenderPass(const Device &dev,
                                    VkFormat color_fmt,
                                    VkFormat normal_fmt,
@@ -2580,9 +2562,6 @@ Renderer::Renderer(uint32_t gpu_id,
           window.surface)),
       alloc(dev, backend),
       render_queue_(makeGFXQueue(dev, 0)),
-      transfer_queue_(makeTransferQueue(dev, 0)),
-      compute_queue_(makeComputeQueue(dev, 0)),
-      transfer_wrapper_(transfer_queue_, false),
       present_wrapper_(render_queue_, false),
       fb_width_(img_width),
       fb_height_(img_height),

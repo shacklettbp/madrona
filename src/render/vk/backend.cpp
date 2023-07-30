@@ -525,10 +525,8 @@ static QueueFamilyChoices chooseQueueFamilies(
         dedicated_transfer_found |= is_dedicated;
     }
 
-    if (res.gfxQF == qf_sentinel ||
-            res.computeQF == qf_sentinel ||
-            res.transferQF == qf_sentinel) {
-        FATAL("GPU does not support required separate queues");
+    if (res.gfxQF == qf_sentinel) {
+        FATAL("Could not find graphics queue family");
     }
 
     return res;
@@ -669,13 +667,24 @@ Device Backend::initDevice(
                                VulkanConfig::compute_priority);
     vector<float> transfer_pris(num_transfer_queues,
                                 VulkanConfig::transfer_priority);
-    fillQueueInfo(queue_infos[0], qf_choices.gfxQF, gfx_pris);
-    fillQueueInfo(queue_infos[1], qf_choices.computeQF, compute_pris);
-    fillQueueInfo(queue_infos[2], qf_choices.transferQF, transfer_pris);
+
+    uint32_t num_qf_allocated = 0;
+    fillQueueInfo(queue_infos[num_qf_allocated++],
+                  qf_choices.gfxQF, gfx_pris);
+
+    if (qf_choices.numComputeQueues > 0) {
+        fillQueueInfo(queue_infos[num_qf_allocated++],
+                      qf_choices.computeQF, compute_pris);
+    }
+
+    if (qf_choices.numTransferQueues > 0) {
+        fillQueueInfo(queue_infos[num_qf_allocated++],
+                      qf_choices.transferQF, transfer_pris);
+    }
 
     VkDeviceCreateInfo dev_create_info {};
     dev_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    dev_create_info.queueCreateInfoCount = 3;
+    dev_create_info.queueCreateInfoCount = num_qf_allocated;
     dev_create_info.pQueueCreateInfos = queue_infos.data();
     dev_create_info.enabledExtensionCount =
         static_cast<uint32_t>(extensions.size());
