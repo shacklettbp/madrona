@@ -10,16 +10,6 @@
 namespace madrona::phys {
 using namespace geometry;
 using namespace math;
-using SourceCollisionPrimitive = PhysicsLoader::SourceCollisionPrimitive;
-using SourceCollisionObject = PhysicsLoader::SourceCollisionObject;
-using ImportedRigidBodies = PhysicsLoader::ImportedRigidBodies;
-
-#ifndef MADRONA_CUDA_SUPPORT
-[[noreturn]] static void noCUDA()
-{
-    FATAL("PhysicsLoader: Not built with CUDA support");
-}
-#endif
 
 namespace {
 
@@ -65,171 +55,15 @@ struct HullBuildData {
     uint32_t *faceConflictLists;
 };
 
-}
-
-struct PhysicsLoader::Impl {
+struct ProcessedRigidBody {
+    math::AABB *primAABBs;
     CollisionPrimitive *primitives;
-    AABB *primAABBs;
+    CountT numPrimitives;
 
-    AABB *objAABBs;
-    uint32_t *rigidBodyPrimitiveOffsets;
-    uint32_t *rigidBodyPrimitiveCounts;
-    RigidBodyMetadata *metadatas;
-
-    CountT curPrimOffset;
-    CountT curObjOffset;
-
-    ObjectManager *mgr;
-    CountT maxPrims;
-    CountT maxObjs;
-    ExecMode execMode;
-
-    static Impl * init(ExecMode exec_mode, CountT max_objects)
-    {
-        constexpr CountT max_prims_per_object = 20;
-
-        size_t num_collision_prim_bytes =
-            sizeof(CollisionPrimitive) * max_objects * max_prims_per_object; 
-
-        size_t num_collision_aabb_bytes =
-            sizeof(AABB) * max_objects * max_prims_per_object; 
-
-        size_t num_obj_aabb_bytes =
-            sizeof(AABB) * max_objects;
-
-        size_t num_offset_bytes =
-            sizeof(uint32_t) * max_objects;
-
-        size_t num_count_bytes =
-            sizeof(uint32_t) * max_objects;
-
-        size_t num_metadata_bytes =
-            sizeof(RigidBodyMetadata) * max_objects;
-
-        CollisionPrimitive *primitives_ptr;
-        AABB *prim_aabb_ptr;
-
-        AABB *obj_aabb_ptr;
-        uint32_t *offsets_ptr;
-        uint32_t *counts_ptr;
-        RigidBodyMetadata *metadata_ptr;
-
-        ObjectManager *mgr;
-
-        switch (exec_mode) {
-            case ExecMode::CPU: {
-                primitives_ptr = (CollisionPrimitive *)malloc(
-                    num_collision_prim_bytes);
-
-                prim_aabb_ptr = (AABB *)malloc(
-                    num_collision_aabb_bytes);
-
-                obj_aabb_ptr = (AABB *)malloc(num_obj_aabb_bytes);
-
-            offsets_ptr = (uint32_t *)malloc(num_offset_bytes);
-            counts_ptr = (uint32_t *)malloc(num_count_bytes);
-
-            metadata_ptr =
-                (RigidBodyMetadata *)malloc(num_metadata_bytes);
-
-            mgr = new ObjectManager {
-                primitives_ptr,
-                prim_aabb_ptr,
-                obj_aabb_ptr,
-                offsets_ptr,
-                counts_ptr,
-                metadata_ptr,
-            };
-        } break;
-        case ExecMode::CUDA: {
-#ifndef MADRONA_CUDA_SUPPORT
-            noCUDA();
-#else
-            primitives_ptr = (CollisionPrimitive *)cu::allocGPU(
-                num_collision_prim_bytes);
-
-            prim_aabb_ptr = (AABB *)cu::allocGPU(
-                num_collision_aabb_bytes);
-
-            obj_aabb_ptr = (AABB *)cu::allocGPU(num_obj_aabb_bytes);
-
-            offsets_ptr = (uint32_t *)cu::allocGPU(num_offset_bytes);
-            counts_ptr = (uint32_t *)cu::allocGPU(num_count_bytes);
-
-            metadata_ptr =
-                (RigidBodyMetadata *)cu::allocGPU(num_metadata_bytes);
-
-            mgr = (ObjectManager *)cu::allocGPU(sizeof(ObjectManager));
-
-            ObjectManager local {
-                primitives_ptr,
-                prim_aabb_ptr,
-                obj_aabb_ptr,
-                offsets_ptr,
-                counts_ptr,
-                metadata_ptr,
-            };
-
-            REQ_CUDA(cudaMemcpy(mgr, &local, sizeof(ObjectManager),
-                                cudaMemcpyHostToDevice));
-#endif
-        } break;
-        default: MADRONA_UNREACHABLE();
-        }
-
-        return new Impl {
-            .primitives = primitives_ptr,
-            .primAABBs = prim_aabb_ptr,
-            .objAABBs = obj_aabb_ptr,
-            .rigidBodyPrimitiveOffsets = offsets_ptr,
-            .rigidBodyPrimitiveCounts = counts_ptr,
-            .metadatas = metadata_ptr,
-            .curPrimOffset = 0,
-            .curObjOffset = 0,
-            .mgr = mgr,
-            .maxPrims = max_objects * max_prims_per_object,
-            .maxObjs = max_objects,
-            .execMode = exec_mode,
-        };
-    }
+    RigidBodyMetadata metadata;
 };
 
-PhysicsLoader::PhysicsLoader(ExecMode exec_mode, CountT max_objects)
-    : impl_(Impl::init(exec_mode, max_objects))
-{}
-
-PhysicsLoader::~PhysicsLoader()
-{
-    if (impl_ == nullptr) {
-        return;
-    }
-
-    switch (impl_->execMode) {
-    case ExecMode::CPU: {
-        delete impl_->mgr;
-        free(impl_->primitives);
-        free(impl_->primAABBs);
-        free(impl_->objAABBs);
-        free(impl_->rigidBodyPrimitiveOffsets);
-        free(impl_->rigidBodyPrimitiveCounts);
-        free(impl_->metadatas);
-    } break;
-    case ExecMode::CUDA: {
-#ifndef MADRONA_CUDA_SUPPORT
-        noCUDA();
-#else
-        cu::deallocGPU(impl_->primitives);
-        cu::deallocGPU(impl_->primAABBs);
-        cu::deallocGPU(impl_->objAABBs);
-        cu::deallocGPU(impl_->rigidBodyPrimitiveOffsets);
-        cu::deallocGPU(impl_->rigidBodyPrimitiveCounts);
-        cu::deallocGPU(impl_->metadatas);
-#endif
-    } break;
-    }
 }
-
-PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 
 static uint32_t allocMeshHedge(EditMesh &mesh)
 {
@@ -1383,13 +1217,102 @@ static bool setupHullPrimitive(const SourceCollisionPrimitive &src_prim,
     return true;
 }
 
-Optional<PhysicsLoader::ImportedRigidBodies> PhysicsLoader::importRigidBodyData(
+static bool processConvexHulls(
+    Span<const imp::SourceMesh> in_meshes,
+    bool rebuild_hulls,
+    geometry::HalfEdgeMesh *out_meshes)
+{
+    for (CountT hull_idx = 0; hull_idx < in_meshes.size(); hull_idx) {
+        const imp::SourceMesh &mesh = in_meshes[hull_idx];
+        bool success = buildHalfEdgeMesh(mesh, &out_mesh[hull_idx]);
+
+        if (!success) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+static bool processRigidBodies(
+    const geometry::HalfEdgeMesh *convex_hull,
     const SourceCollisionObject *collision_objs,
     CountT num_objects,
-    bool build_hulls)
+    ProcessedRigidBody *out_processed_objs,
+    math::AABB *out_aabbs)
+{
+}
+
+static void * packRigidBodies(
+    const geometry::HalfEdgeMesh *convex_hulls,
+    CountT num_hulls,
+    const ProcessedRigidBody *rigid_bodies,
+    CountT num_rigid_bodies,
+    StackAlloc &tmp_alloc,
+    PackedRigidBodyAssets *out_assets,
+    CountT *out_num_bytes)
+{
+}
+
+void * AssetProcessing::processRigidBodies(
+    Span<const imp::SourceMesh> convex_hulls_meshes,
+    Span<const SourceCollisionObject> collision_objs,
+    StackAlloc &tmp_alloc,
+    RigidBodyAssets *out_assets,
+    CountT *out_num_bytes)
 {
     using namespace math;
     using Type = CollisionPrimitive::Type;
+
+    struct HullOffsets {
+        uint32_t halfEdgeOffset;
+        uint32_t faceOffset;
+        uint32_t vertOffset;
+    };
+
+    CountT total_num_halfedges = 0;
+    CountT total_num_faces = 0;
+    CountT total_num_vertices = 0;
+
+    auto alloc_frame = tmp_alloc.frame();
+    HullOffsets *hull_offsets =
+        tmp_alloc.allocN<HalfEdgeMeshOffsets>(num_hulls);
+
+    for (CountT hull_idx = 0; hull_idx < num_hulls; hull_idx++) {
+        const geometry::HalfEdgeMesh &hull_mesh = convex_hulls[hull_idx];
+
+        hull_offsets[hull_idx] = {
+            .halfEdgeOffset = total_num_halfedges,
+            .faceOffset = total_num_faces,
+            .vertOffset = total_num_vertices,
+        };
+
+        total_num_halfedges += hull_mesh.numHalfEdges;
+        total_num_faces += hull_mesh.numFaces;
+        total_num_vertices += hull_mesh.numVertices;
+    }
+
+    CountT total_num_prims = 0;
+    CountT cur_prim_offset = 0;
+    for (CountT obj_idx = 0; obj_idx < num_objects; obj_idx++) {
+        const SourceCollisionObject &collision_obj = collision_objs[obj_idx];
+        CountT cur_num_prims = collision_obj.prims.size();
+        total_num_prims += cur_num_prims;
+    }
+
+    auto buffer_sizes = std::to_array<int64_t>({
+        (int64_t)sizeof(CollisionPrimitive) * total_num_primitives,
+        (int64_t)sizeof(AABB) * total_num_primitives,
+        (int64_t)sizeof(RigidBodyMetadata) * num_objects, // metadatas
+        (int64_t)sizeof(AABB) * num_objs, // obj_aabbs
+        (int64_t)sizeof(uint32_t) * num_objects, // prim_offsets
+        (int64_t)sizeof(uint32_t) * num_objects, // prim_counts
+    });+=
+
+    std::array<int64_t, buffer_sizes.size() - 1> buffer_offsets;
+
+    int64_t num_buffer_bytes = utils::computeBufferOffsets(
+        buffer_sizes, buffer_offsets, 64);
 
     HeapArray<uint32_t> prim_offsets(num_objects);
     HeapArray<uint32_t> prim_counts(num_objects);
@@ -1508,175 +1431,6 @@ Optional<PhysicsLoader::ImportedRigidBodies> PhysicsLoader::importRigidBodyData(
         .metadatas = std::move(metadatas),
         .objectAABBs = std::move(obj_aabbs),
     };
-}
-
-CountT PhysicsLoader::loadObjects(
-    const RigidBodyMetadata *metadatas,
-    const math::AABB *obj_aabbs,
-    const uint32_t *prim_offsets,
-    const uint32_t *prim_counts,
-    CountT num_objs,
-    const CollisionPrimitive *primitives_in,
-    const math::AABB *primitive_aabbs,
-    CountT total_num_primitives,
-    const geometry::HalfEdge *hull_halfedges_in,
-    CountT total_num_hull_halfedges,
-    const uint32_t *hull_face_base_halfedges_in,
-    const geometry::Plane *hull_face_planes_in,
-    CountT total_num_hull_faces,
-    const math::Vector3 *hull_verts_in,
-    CountT total_num_hull_verts)
-{
-    CountT cur_obj_offset = impl_->curObjOffset;
-    impl_->curObjOffset += num_objs;
-    CountT cur_prim_offset = impl_->curPrimOffset;
-    impl_->curPrimOffset += total_num_primitives;
-    assert(impl_->curObjOffset <= impl_->maxObjs);
-    assert(impl_->curPrimOffset <= impl_->maxPrims);
-
-    CollisionPrimitive *prims_dst = &impl_->primitives[cur_prim_offset];
-    AABB *prim_aabbs_dst = &impl_->primAABBs[cur_prim_offset];
-
-    AABB *obj_aabbs_dst = &impl_->objAABBs[cur_obj_offset];
-    uint32_t *offsets_dst = &impl_->rigidBodyPrimitiveOffsets[cur_obj_offset];
-    uint32_t *counts_dst = &impl_->rigidBodyPrimitiveCounts[cur_obj_offset];
-    RigidBodyMetadata *metadatas_dst = &impl_->metadatas[cur_obj_offset];
-
-    // FIXME: redo all this, leaks memory, slow, etc. Very non optimal on the
-    // CPU.
-
-    uint32_t *offsets_tmp = (uint32_t *)malloc(sizeof(uint32_t) * num_objs);
-    for (CountT i = 0; i < num_objs; i++) {
-        offsets_tmp[i] = prim_offsets[i] + cur_prim_offset;
-    }
-
-    HalfEdge *hull_halfedges;
-    uint32_t *hull_face_base_halfedges;
-    Plane *hull_face_planes;
-    Vector3 *hull_verts;
-    switch (impl_->execMode) {
-    case ExecMode::CPU: {
-        memcpy(prim_aabbs_dst, primitive_aabbs,
-               sizeof(AABB) * total_num_primitives);
-
-        memcpy(obj_aabbs_dst, obj_aabbs,
-               sizeof(AABB) * num_objs);
-        memcpy(offsets_dst, offsets_tmp,
-               sizeof(uint32_t) * num_objs);
-        memcpy(counts_dst, prim_counts,
-               sizeof(uint32_t) * num_objs);
-        memcpy(metadatas_dst, metadatas,
-               sizeof(RigidBodyMetadata) * num_objs);
-
-        hull_halfedges =
-            (HalfEdge *)malloc(sizeof(HalfEdge) * total_num_hull_halfedges);
-        hull_face_base_halfedges =
-            (uint32_t *)malloc(sizeof(uint32_t) * total_num_hull_faces);
-        hull_face_planes =
-            (Plane *)malloc(sizeof(Plane) * total_num_hull_faces);
-        hull_verts =
-            (Vector3 *)malloc(sizeof(Vector3) * total_num_hull_verts);
-
-        memcpy(hull_halfedges, hull_halfedges_in,
-               sizeof(HalfEdge) * total_num_hull_halfedges);
-        memcpy(hull_face_base_halfedges, hull_face_base_halfedges_in,
-               sizeof(uint32_t) * total_num_hull_faces);
-        memcpy(hull_face_planes, hull_face_planes_in,
-               sizeof(Plane) * total_num_hull_faces);
-        memcpy(hull_verts, hull_verts_in,
-               sizeof(Vector3) * total_num_hull_verts);
-    } break;
-    case ExecMode::CUDA: {
-#ifndef MADRONA_CUDA_SUPPORT
-        noCUDA();
-#else
-        cudaMemcpy(prim_aabbs_dst, primitive_aabbs,
-                   sizeof(AABB) * total_num_primitives,
-                   cudaMemcpyHostToDevice);
-
-        cudaMemcpy(obj_aabbs_dst, obj_aabbs,
-                   sizeof(AABB) * num_objs,
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(offsets_dst, offsets_tmp,
-                   sizeof(uint32_t) * num_objs,
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(counts_dst, prim_counts,
-                   sizeof(uint32_t) * num_objs,
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(metadatas_dst, metadatas,
-                   sizeof(RigidBodyMetadata) * num_objs,
-                   cudaMemcpyHostToDevice);
-
-        hull_halfedges = (HalfEdge *)cu::allocGPU(
-            sizeof(HalfEdge) * total_num_hull_halfedges);
-        hull_face_base_halfedges = (uint32_t *)cu::allocGPU(
-            sizeof(uint32_t) * total_num_hull_faces);
-        hull_face_planes = (Plane *)cu::allocGPU(
-            sizeof(Plane) * total_num_hull_faces);
-        hull_verts = (Vector3 *)cu::allocGPU(
-            sizeof(Vector3) * total_num_hull_verts);
-
-        cudaMemcpy(hull_halfedges, hull_halfedges_in,
-                   sizeof(HalfEdge) * total_num_hull_halfedges,
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(hull_face_base_halfedges, hull_face_base_halfedges_in,
-                   sizeof(uint32_t) * total_num_hull_faces,
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(hull_face_planes, hull_face_planes_in,
-                   sizeof(Plane) * total_num_hull_faces,
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(hull_verts, hull_verts_in,
-                   sizeof(Vector3) * total_num_hull_verts,
-                   cudaMemcpyHostToDevice);
-#endif
-    }
-    }
-
-    auto primitives_tmp = (CollisionPrimitive *)malloc(
-        sizeof(CollisionPrimitive) * total_num_primitives);
-    memcpy(primitives_tmp, primitives_in,
-           sizeof(CollisionPrimitive) * total_num_primitives);
-
-    for (CountT i = 0; i < total_num_primitives; i++) {
-        CollisionPrimitive &cur_primitive = primitives_tmp[i];
-        if (cur_primitive.type != CollisionPrimitive::Type::Hull) continue;
-
-        HalfEdgeMesh &he_mesh = cur_primitive.hull.halfEdgeMesh;
-
-        // FIXME: incoming HalfEdgeMeshes should have offsets or something
-        CountT hedge_offset = he_mesh.halfEdges - hull_halfedges_in;
-        CountT face_offset = he_mesh.facePlanes - hull_face_planes_in;
-        CountT vert_offset = he_mesh.vertices - hull_verts_in;
-
-        he_mesh.halfEdges = hull_halfedges + hedge_offset;
-        he_mesh.faceBaseHalfEdges = hull_face_base_halfedges + face_offset;
-        he_mesh.facePlanes = hull_face_planes + face_offset;
-        he_mesh.vertices = hull_verts + vert_offset;
-    }
-
-    switch (impl_->execMode) {
-    case ExecMode::CPU: {
-        memcpy(prims_dst, primitives_tmp,
-               sizeof(CollisionPrimitive) * total_num_primitives);
-    } break;
-    case ExecMode::CUDA: {
-#ifdef MADRONA_CUDA_SUPPORT
-        cudaMemcpy(prims_dst, primitives_tmp,
-            sizeof(CollisionPrimitive) * total_num_primitives,
-            cudaMemcpyHostToDevice);
-#endif
-    } break;
-    }
-
-    free(primitives_tmp);
-    free(offsets_tmp);
-
-    return cur_obj_offset;
-}
-
-ObjectManager & PhysicsLoader::getObjectManager()
-{
-    return *impl_->mgr;
 }
 
 }
