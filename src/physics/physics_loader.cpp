@@ -258,7 +258,7 @@ CountT PhysicsLoader::loadRigidBodies(const RigidBodyAssets &assets)
         cudaMemcpy(offsets_dst, offsets_tmp,
                    sizeof(uint32_t) * assets.numObjs,
                    cudaMemcpyHostToDevice);
-        cudaMemcpy(counts_dst, assets.primCcounts,
+        cudaMemcpy(counts_dst, assets.primCounts,
                    sizeof(uint32_t) * assets.numObjs,
                    cudaMemcpyHostToDevice);
         cudaMemcpy(metadatas_dst, assets.metadatas,
@@ -274,16 +274,16 @@ CountT PhysicsLoader::loadRigidBodies(const RigidBodyAssets &assets)
         hull_verts = (Vector3 *)cu::allocGPU(
             sizeof(Vector3) * assets.hullData.numVerts);
 
-        cudaMemcpy(hull_halfedges, hull_halfedges_in,
+        cudaMemcpy(hull_halfedges, assets.hullData.halfEdges,
                    sizeof(HalfEdge) * assets.hullData.numHalfEdges,
                    cudaMemcpyHostToDevice);
-        cudaMemcpy(hull_face_base_halfedges, hull_face_base_halfedges_in,
+        cudaMemcpy(hull_face_base_halfedges, assets.hullData.faceBaseHalfEdges,
                    sizeof(uint32_t) * assets.hullData.numFaces,
                    cudaMemcpyHostToDevice);
-        cudaMemcpy(hull_face_planes, hull_face_planes_in,
+        cudaMemcpy(hull_face_planes, assets.hullData.facePlanes,
                    sizeof(Plane) * assets.hullData.numFaces,
                    cudaMemcpyHostToDevice);
-        cudaMemcpy(hull_verts, hull_verts_in,
+        cudaMemcpy(hull_verts, assets.hullData.vertices,
                    sizeof(Vector3) * assets.hullData.numVerts,
                    cudaMemcpyHostToDevice);
 #endif
