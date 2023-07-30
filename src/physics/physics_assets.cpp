@@ -55,12 +55,6 @@ struct HullBuildData {
     uint32_t *faceConflictLists;
 };
 
-struct HullOffset {
-    uint32_t halfEdgeOffset;
-    uint32_t faceOffset;
-    uint32_t vertOffset;
-};
-
 struct MassProperties {
     Diag3x3 inertiaTensor;
     Vector3 centerOfMass;
@@ -284,7 +278,7 @@ static float distToPlane(Plane plane, Vector3 v)
     return v.dot(plane.normal) - plane.d;
 }
 
-static HullBuildData allocBuildData(const CountT N)
+static HullBuildData allocBuildData(StackAlloc &tmp_alloc, const CountT N)
 {
     // + 1 for fake starting point for linked lists
     const CountT max_num_verts = N + 1;
@@ -306,7 +300,8 @@ static HullBuildData allocBuildData(const CountT N)
     int64_t total_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, sub_buffer_alignment);
 
-    char *buf_base = (char *)malloc(total_bytes);
+    char *buf_base =
+        (char *)tmp_alloc.alloc(total_bytes, sub_buffer_alignment);
 
     EditMesh mesh {
         .hedges = (EditMesh::HEdge *)(buf_base),
@@ -497,18 +492,15 @@ static bool initHullTetrahedron(EditMesh &mesh,
     return true;
 }
 
-static void freeBuildData(HullBuildData &hull_data)
-{
-    free(hull_data.mesh.hedges);
-}
-
-static bool initHullBuild(Span<const Vector3> verts, HullBuildData *out)
+static bool initHullBuild(Span<const Vector3> verts,
+                          StackAlloc &tmp_alloc,
+                          HullBuildData *out)
 {
     if (verts.size() < 4) {
         return false;
     }
 
-    *out = allocBuildData(verts.size());
+    *out = allocBuildData(tmp_alloc, verts.size());
     EditMesh &mesh = out->mesh;
 
     float epsilon = computePlaneEpsilon(verts);
@@ -519,7 +511,6 @@ static bool initHullBuild(Span<const Vector3> verts, HullBuildData *out)
     bool tet_success = initHullTetrahedron(mesh, verts, epsilon, tet_face_ids,
                                            tet_face_planes);
     if (!tet_success) {
-        freeBuildData(*out);
         return false;
     }
 
@@ -562,20 +553,16 @@ static void quickhullBuild(HullBuildData &build_data)
     (void)removeConflictVert;
 }
 
-static HalfEdgeMesh editMeshToRuntimeMesh(EditMesh &edit_mesh)
+static HalfEdgeMesh editMeshToRuntimeMesh(StackAlloc &tmp_alloc,
+                                          EditMesh &edit_mesh)
 {
-    uint32_t *hedge_remap = (uint32_t *)malloc(
-        sizeof(uint32_t) * edit_mesh.numHedges);
+    uint32_t *hedge_remap = tmp_alloc.allocN<uint32_t>(edit_mesh.numHedges);
+    uint32_t *face_remap = tmp_alloc.allocN<uint32_t>(edit_mesh.numFaces);
+    uint32_t *vert_remap = tmp_alloc.allocN<uint32_t>(edit_mesh.numVerts);
 
     for (CountT i = 0; i < edit_mesh.numHedges; i++) {
         hedge_remap[i] = 0xFFFF'FFFF;
     }
-
-    uint32_t *face_remap = (uint32_t *)malloc(
-        sizeof(uint32_t) * edit_mesh.numFaces);
-
-    uint32_t *vert_remap = (uint32_t *)malloc(
-        sizeof(uint32_t) * edit_mesh.numVerts);
 
     CountT num_new_hedges = 0;
     for (uint32_t orig_eid = edit_mesh.hedges[0].next;
@@ -605,13 +592,10 @@ static HalfEdgeMesh editMeshToRuntimeMesh(EditMesh &edit_mesh)
         face_remap[orig_fid] = num_new_faces++;
     }
 
-    auto hedges_out = (HalfEdge *)malloc(sizeof(HalfEdge) * num_new_hedges);
-    auto face_base_hedges_out =
-        (uint32_t *)malloc(sizeof(uint32_t) * num_new_faces);
-    auto face_planes_out = (Plane *)malloc(
-        sizeof(Plane) * num_new_faces);
-    auto positions_out =
-        (Vector3 *)malloc(sizeof(Vector3) * num_new_verts);
+    auto hedges_out = tmp_alloc.allocN<HalfEdge>(num_new_hedges);
+    auto face_base_hedges_out = tmp_alloc.allocN<uint32_t>(num_new_faces);
+    auto face_planes_out = tmp_alloc.allocN<Plane>(num_new_faces);
+    auto positions_out = tmp_alloc.allocN<Vector3>(num_new_verts);
 
     for (uint32_t orig_eid = edit_mesh.hedges[0].next;
          orig_eid != 0; orig_eid = edit_mesh.hedges[orig_eid].next) {
@@ -651,50 +635,32 @@ static HalfEdgeMesh editMeshToRuntimeMesh(EditMesh &edit_mesh)
     };
 }
 
-// FIXME: better allocation / ownership strategy
-static void freeHalfEdgeMesh(HalfEdgeMesh &mesh)
-{
-    free(mesh.halfEdges);
-    free(mesh.faceBaseHalfEdges);
-    free(mesh.facePlanes);
-    free(mesh.vertices);
-}
-
 static inline HalfEdgeMesh buildHalfEdgeMesh(
-    const Vector3 *positions,
-    CountT num_vertices, 
-    const uint32_t *indices,
-    const uint32_t *face_counts,
-    const Plane *face_planes,
-    CountT num_faces)
+    StackAlloc &tmp_alloc,
+    const imp::SourceMesh &src_mesh)
 {
-    auto numFaceVerts = [face_counts](CountT face_idx) {
-        if (face_counts == nullptr) {
+    auto numFaceVerts = [&src_mesh](CountT face_idx) {
+        if (src_mesh.faceCounts == nullptr) {
             return 3_u32;
         } else {
-            return face_counts[face_idx];
+            return src_mesh.faceCounts[face_idx];
         }
     };
 
     using namespace madrona::math;
 
     uint32_t num_hedges = 0;
-    for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
+    for (CountT face_idx = 0; face_idx < (CountT)src_mesh.numFaces;
+         face_idx++) {
         num_hedges += numFaceVerts(face_idx);
     }
 
     assert(num_hedges % 2 == 0);
 
     // We already know how many polygons there are
-    auto face_base_hedges_out =
-        (uint32_t *)malloc(sizeof(uint32_t) * num_faces);
-    auto hedges_out = (HalfEdge *)malloc(sizeof(HalfEdge) * num_hedges);
-    auto face_planes_out = (Plane *)malloc(sizeof(Plane) * num_faces);
-    auto positions_out =
-        (Vector3 *)malloc(sizeof(Vector3) * num_vertices);
-
-    memcpy(face_planes_out, face_planes, sizeof(Plane) * num_faces);
-    memcpy(positions_out, positions, sizeof(Vector3) * num_vertices);
+    auto hedges_out = tmp_alloc.allocN<HalfEdge>(num_hedges);
+    auto face_base_hedges_out = tmp_alloc.allocN<uint32_t>(src_mesh.numFaces);
+    auto face_planes_out = tmp_alloc.allocN<Plane>(src_mesh.numFaces);
 
     std::unordered_map<uint64_t, uint32_t> edge_to_hedge;
 
@@ -703,9 +669,16 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
     };
 
     CountT num_assigned_hedges = 0;
-    const uint32_t *cur_face_indices = indices;
-    for (CountT face_idx = 0; face_idx < num_faces; face_idx++) {
+    const uint32_t *cur_face_indices = src_mesh.indices;
+    for (CountT face_idx = 0; face_idx < (CountT)src_mesh.numFaces;
+         face_idx++) {
         CountT num_face_vertices = numFaceVerts(face_idx);
+
+        Plane face_plane = computeNewellPlane(src_mesh.positions,
+            Span(cur_face_indices, num_face_vertices));
+
+        face_planes_out[face_idx] = face_plane;
+
         for (CountT vert_offset = 0; vert_offset < num_face_vertices;
              vert_offset++) {
             uint32_t a_idx = cur_face_indices[vert_offset];
@@ -766,44 +739,27 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
         .halfEdges = hedges_out,
         .faceBaseHalfEdges = face_base_hedges_out,
         .facePlanes = face_planes_out,
-        .vertices = positions_out,
+        .vertices = src_mesh.positions,
         .numHalfEdges = uint32_t(num_hedges),
-        .numFaces = uint32_t(num_faces),
-        .numVertices = uint32_t(num_vertices),
+        .numFaces = src_mesh.numFaces,
+        .numVertices = src_mesh.numVertices,
     };
 }
 
 static bool processConvexHull(const imp::SourceMesh &src_mesh,
                               bool build_hull,
+                              StackAlloc &tmp_alloc,
                               HalfEdgeMesh *out_mesh)
 {
     if (!build_hull) {
         // Just assume the input geometry is a convex hull with coplanar faces
         // merged
-
-        HeapArray<Plane> hull_face_planes(src_mesh.numFaces);
-
-        const uint32_t *cur_face_indices = src_mesh.indices;
-        for (CountT face_idx = 0; face_idx < hull_face_planes.size();
-             face_idx++) {
-            uint32_t num_face_indices =
-                src_mesh.faceCounts ? src_mesh.faceCounts[face_idx] : 3;
-
-            Plane face_plane = computeNewellPlane(src_mesh.positions, 
-                Span(cur_face_indices, num_face_indices));
-
-            hull_face_planes[face_idx] = face_plane;
-
-            cur_face_indices += num_face_indices;
-        }
-
-        *out_mesh = buildHalfEdgeMesh(src_mesh.positions, 
-            src_mesh.numVertices, src_mesh.indices, src_mesh.faceCounts,
-            hull_face_planes.data(), src_mesh.numFaces);
+        *out_mesh = buildHalfEdgeMesh(tmp_alloc, src_mesh);
     } else {
         HullBuildData hull_data;
         bool valid_input = initHullBuild(
-            Span(src_mesh.positions, src_mesh.numVertices), &hull_data);
+            Span(src_mesh.positions, src_mesh.numVertices), tmp_alloc,
+            &hull_data);
 
         if (!valid_input) {
             return false;
@@ -811,8 +767,7 @@ static bool processConvexHull(const imp::SourceMesh &src_mesh,
 
         quickhullBuild(hull_data);
 
-        *out_mesh = editMeshToRuntimeMesh(hull_data.mesh);
-        freeBuildData(hull_data);
+        *out_mesh = editMeshToRuntimeMesh(tmp_alloc, hull_data.mesh);
     }
 
     return true;
@@ -821,12 +776,13 @@ static bool processConvexHull(const imp::SourceMesh &src_mesh,
 static bool processConvexHulls(
     Span<const imp::SourceMesh> in_meshes,
     bool build_convex_hulls,
+    StackAlloc &tmp_alloc,
     HalfEdgeMesh *out_meshes)
 {
     for (CountT hull_idx = 0; hull_idx < in_meshes.size(); hull_idx++) {
         const imp::SourceMesh &mesh = in_meshes[hull_idx];
         bool success = processConvexHull(
-            mesh, build_convex_hulls, &out_meshes[hull_idx]);
+            mesh, build_convex_hulls, tmp_alloc, &out_meshes[hull_idx]);
 
         if (!success) {
             return false;
@@ -1235,39 +1191,24 @@ static void setupPlanePrimitive(const SourceCollisionPrimitive &,
 }
 
 static void setupHullPrimitive(const SourceCollisionPrimitive &src_prim,
-                               const RigidBodyAssets::HullData &hull_data,
                                const HalfEdgeMesh *hull_meshes,
-                               const HullOffset *hull_offsets,
                                CollisionPrimitive *out_prim,
                                AABB *out_aabb)
 {
-    HullOffset hull_offset = hull_offsets[src_prim.hullInput.hullIDX];
     const HalfEdgeMesh &hull_mesh = hull_meshes[src_prim.hullInput.hullIDX];
-
-    out_prim->hull.halfEdgeMesh = HalfEdgeMesh {
-        .halfEdges = hull_data.halfEdges + hull_offset.halfEdgeOffset,
-        .faceBaseHalfEdges =
-            hull_data.faceBaseHalfEdges + hull_offset.faceOffset,
-        .facePlanes =
-            hull_data.facePlanes + hull_offset.faceOffset,
-        .vertices = hull_data.vertices + hull_offset.vertOffset,
-        .numHalfEdges = hull_mesh.numHalfEdges,
-        .numFaces = hull_mesh.numFaces,
-        .numVertices = hull_mesh.numVertices,
-    };
 
     AABB mesh_aabb = AABB::point(hull_mesh.vertices[0]);
     for (CountT vert_idx = 1; vert_idx < (CountT)hull_mesh.numVertices;
          vert_idx++) {
         mesh_aabb.expand(hull_mesh.vertices[vert_idx]);
     }
+
+    out_prim->hull.halfEdgeMesh = hull_mesh;
     *out_aabb = mesh_aabb;
 }
 
 static void setupRigidBodyAABBsAndPrimitives(
-    const RigidBodyAssets::HullData &hull_data,
     HalfEdgeMesh *hull_meshes,
-    HullOffset *hull_offsets,
     Span<const SourceCollisionObject> collision_objs,
     CollisionPrimitive *out_prims,
     AABB *out_prim_aabbs,
@@ -1303,8 +1244,8 @@ static void setupRigidBodyAABBsAndPrimitives(
                 setupPlanePrimitive(src_prim, out_prim, &prim_aabb);
             } break;
             case Type::Hull: {
-                setupHullPrimitive(src_prim, hull_data, hull_meshes,
-                    hull_offsets, out_prim, &prim_aabb);
+                setupHullPrimitive(src_prim, hull_meshes,
+                    out_prim, &prim_aabb);
             } break;
             }
 
@@ -1328,17 +1269,21 @@ void * RigidBodyAssets::processRigidBodyAssets(
     RigidBodyAssets *out_assets,
     CountT *out_num_bytes)
 {
-    auto alloc_frame = tmp_alloc.push();
+    auto tmp_frame = tmp_alloc.push();
 
     geometry::HalfEdgeMesh *built_hulls =
         tmp_alloc.allocN<geometry::HalfEdgeMesh>(convex_hull_meshes.size());
 
+    auto hull_build_frame = tmp_alloc.push();
+
     bool hull_success = processConvexHulls(convex_hull_meshes,
                                            build_convex_hulls,
+                                           tmp_alloc,
                                            built_hulls);
 
     if (!hull_success) {
-        tmp_alloc.pop(alloc_frame);
+        tmp_alloc.pop(hull_build_frame);
+        tmp_alloc.pop(tmp_frame);
         return nullptr;
     }
 
@@ -1349,21 +1294,12 @@ void * RigidBodyAssets::processRigidBodyAssets(
         total_num_prims += cur_num_prims;
     }
 
-    HullOffset *hull_offsets =
-        tmp_alloc.allocN<HullOffset>(convex_hull_meshes.size());
-
     CountT total_num_halfedges = 0;
     CountT total_num_faces = 0;
     CountT total_num_verts = 0;
     for (CountT hull_idx = 0; hull_idx < convex_hull_meshes.size();
          hull_idx++) {
         const HalfEdgeMesh &hull_mesh = built_hulls[hull_idx];
-
-        hull_offsets[hull_idx] = {
-            .halfEdgeOffset = (uint32_t)total_num_halfedges,
-            .faceOffset = (uint32_t)total_num_faces,
-            .vertOffset = (uint32_t)total_num_verts,
-        };
 
         total_num_halfedges += hull_mesh.numHalfEdges;
         total_num_faces += hull_mesh.numFaces;
@@ -1418,7 +1354,7 @@ void * RigidBodyAssets::processRigidBodyAssets(
     CountT cur_vert_offset = 0;
     for (CountT hull_idx = 0; hull_idx < convex_hull_meshes.size();
          hull_idx++) {
-        HalfEdgeMesh &he_mesh = built_hulls[hull_idx];
+        HalfEdgeMesh &hull_mesh = built_hulls[hull_idx];
 
         HalfEdge *he_out = &assets.hullData.halfEdges[cur_halfedge_offset];
         uint32_t *face_bases_out =
@@ -1426,23 +1362,28 @@ void * RigidBodyAssets::processRigidBodyAssets(
         Plane *face_planes_out = &assets.hullData.facePlanes[cur_face_offset];
         Vector3 *verts_out = &assets.hullData.vertices[cur_vert_offset];
 
-        memcpy(he_out, he_mesh.halfEdges,
-               sizeof(HalfEdge) * he_mesh.numHalfEdges);
-        memcpy(face_bases_out, he_mesh.faceBaseHalfEdges,
-               sizeof(uint32_t) * he_mesh.numFaces);
-        memcpy(face_planes_out, he_mesh.facePlanes,
-               sizeof(Plane) * he_mesh.numFaces);
-        memcpy(verts_out, he_mesh.vertices,
-               sizeof(Vector3) * he_mesh.numVertices);
+        memcpy(he_out, hull_mesh.halfEdges,
+               sizeof(HalfEdge) * hull_mesh.numHalfEdges);
+        memcpy(face_bases_out, hull_mesh.faceBaseHalfEdges,
+               sizeof(uint32_t) * hull_mesh.numFaces);
+        memcpy(face_planes_out, hull_mesh.facePlanes,
+               sizeof(Plane) * hull_mesh.numFaces);
+        memcpy(verts_out, hull_mesh.vertices,
+               sizeof(Vector3) * hull_mesh.numVertices);
 
-        cur_halfedge_offset += he_mesh.numHalfEdges;
-        cur_face_offset += he_mesh.numFaces;
-        cur_vert_offset += he_mesh.numVertices;
+        hull_mesh.halfEdges = he_out;
+        hull_mesh.faceBaseHalfEdges = face_bases_out;
+        hull_mesh.facePlanes = face_planes_out;
+        hull_mesh.vertices = verts_out;
+
+        cur_halfedge_offset += hull_mesh.numHalfEdges;
+        cur_face_offset += hull_mesh.numFaces;
+        cur_vert_offset += hull_mesh.numVertices;
     }
 
-    setupRigidBodyAABBsAndPrimitives(assets.hullData,
-                                     built_hulls,
-                                     hull_offsets,
+    tmp_alloc.pop(hull_build_frame);
+
+    setupRigidBodyAABBsAndPrimitives(built_hulls,
                                      collision_objs,
                                      assets.primitives,
                                      assets.primitiveAABBs,
@@ -1453,13 +1394,7 @@ void * RigidBodyAssets::processRigidBodyAssets(
     computeRigidBodiesMetadata(
         built_hulls, collision_objs, assets.metadatas);
 
-    for (CountT hull_idx = 0; hull_idx < convex_hull_meshes.size();
-         hull_idx++) {
-        // FIXME this should be some kind of tmp allocation. See other FIXMEs
-        freeHalfEdgeMesh(built_hulls[hull_idx]); 
-    }
-
-    tmp_alloc.pop(alloc_frame);
+    tmp_alloc.pop(tmp_frame);
 
     *out_assets = assets;
     *out_num_bytes = num_buffer_bytes;
