@@ -34,9 +34,11 @@ add_library(madrona_physics_loader STATIC
     ${INC_DIR}/physics_loader.hpp physics_loader.cpp
 )
 
-target_link_libraries(madrona_physics_loader PRIVATE
-    madrona_common
-    madrona_physics_assets
+target_link_libraries(madrona_physics_loader
+    PRIVATE
+        madrona_common
+    PUBLIC
+        madrona_physics_assets
 )
 
 if (TARGET madrona_cuda)

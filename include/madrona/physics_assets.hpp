@@ -1,6 +1,8 @@
 #pragma once
 
 #include <madrona/physics.hpp>
+#include <madrona/importer.hpp>
+#include <madrona/stack_alloc.hpp>
 
 namespace madrona::phys {
 
@@ -24,10 +26,10 @@ struct SourceCollisionObject {
 
 struct RigidBodyAssets {
     struct HullData {
-        const geometry::HalfEdge *halfEdges;
-        const uint32_t *faceBaseHalfEdges;
-        const geometry::Plane *facePlanes;
-        const math::Vector3 *vertices;
+        geometry::HalfEdge *halfEdges;
+        uint32_t *faceBaseHalfEdges;
+        geometry::Plane *facePlanes;
+        math::Vector3 *vertices;
 
         uint32_t numHalfEdges;
         uint32_t numFaces;
@@ -35,25 +37,26 @@ struct RigidBodyAssets {
     } hullData;
 
     // Per Primitive Data
-    const CollisionPrimitive *primitives;
-    const math::AABB *primitiveAABBs;
+    CollisionPrimitive *primitives;
+    math::AABB *primitiveAABBs;
 
     // Per Object Data
-    const RigidBodyMetadata *metadatas;
-    const math::AABB *objAABBs;
-    const uint32_t *primOffsets;
-    const uint32_t *primCounts;
+    RigidBodyMetadata *metadatas;
+    math::AABB *objAABBs;
+    uint32_t *primOffsets;
+    uint32_t *primCounts;
 
     uint32_t numConvexHulls;
     uint32_t totalNumPrimitives;
     uint32_t numObjs;
 
-    static void * processRigidBodies(
+    static void * processRigidBodyAssets(
         Span<const imp::SourceMesh> convex_hull_meshes,
-        Span<const SourceCollisionPrimitive> collision_objs,
-        bool rebuild_hulls,
+        Span<const SourceCollisionObject> collision_objs,
+        bool build_convex_hulls,
         StackAlloc &tmp_alloc,
-        RigidBodyAssets *out_assets);
+        RigidBodyAssets *out_assets,
+        CountT *out_num_bytes);
 };
 
 }

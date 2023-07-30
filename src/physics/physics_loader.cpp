@@ -1,4 +1,4 @@
-#include <madrona/physics_assets.hpp>
+#include <madrona/physics_loader.hpp>
 #include <madrona/importer.hpp>
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -185,9 +185,9 @@ PhysicsLoader::PhysicsLoader(PhysicsLoader &&o) = default;
 CountT PhysicsLoader::loadRigidBodies(const RigidBodyAssets &assets)
 {
     CountT cur_obj_offset = impl_->curObjOffset;
-    impl_->curObjOffset += num_objs;
+    impl_->curObjOffset += assets.numObjs;
     CountT cur_prim_offset = impl_->curPrimOffset;
-    impl_->curPrimOffset += total_num_primitives;
+    impl_->curPrimOffset += assets.totalNumPrimitives;
     assert(impl_->curObjOffset <= impl_->maxObjs);
     assert(impl_->curPrimOffset <= impl_->maxPrims);
 
@@ -204,7 +204,7 @@ CountT PhysicsLoader::loadRigidBodies(const RigidBodyAssets &assets)
 
     uint32_t *offsets_tmp = (uint32_t *)malloc(
         sizeof(uint32_t) * assets.numObjs);
-    for (CountT i = 0; i < num_objs; i++) {
+    for (CountT i = 0; i < (CountT)assets.numObjs; i++) {
         offsets_tmp[i] = assets.primOffsets[i] + cur_prim_offset;
     }
 
@@ -218,73 +218,73 @@ CountT PhysicsLoader::loadRigidBodies(const RigidBodyAssets &assets)
                sizeof(AABB) * assets.totalNumPrimitives);
 
         memcpy(obj_aabbs_dst, assets.objAABBs,
-               sizeof(AABB) * num_objs);
+               sizeof(AABB) * assets.numObjs);
         memcpy(offsets_dst, offsets_tmp,
                sizeof(uint32_t) * assets.numObjs);
         memcpy(counts_dst, assets.primCounts,
                sizeof(uint32_t) * assets.numObjs);
-        memcpy(metadatas_dst, metadatas,
+        memcpy(metadatas_dst, assets.metadatas,
                sizeof(RigidBodyMetadata) * assets.numObjs);
 
-        hull_halfedges =
-            (HalfEdge *)malloc(sizeof(HalfEdge) * assets.hulls.numHalfEdges);
-        hull_face_base_halfedges =
-            (uint32_t *)malloc(sizeof(uint32_t) * assets.hull.numFaces);
-        hull_face_planes =
-            (Plane *)malloc(sizeof(Plane) * assets.hulls.numFaces);
-        hull_verts =
-            (Vector3 *)malloc(sizeof(Vector3) * assets.hulls.numVerts);
+        hull_halfedges = (HalfEdge *)malloc(
+            sizeof(HalfEdge) * assets.hullData.numHalfEdges);
+        hull_face_base_halfedges = (uint32_t *)malloc(
+            sizeof(uint32_t) * assets.hullData.numFaces);
+        hull_face_planes = (Plane *)malloc(
+            sizeof(Plane) * assets.hullData.numFaces);
+        hull_verts = (Vector3 *)malloc(
+            sizeof(Vector3) * assets.hullData.numVerts);
 
-        memcpy(hull_halfedges, hull_halfedges_in,
-               sizeof(HalfEdge) * assets.hulls.numHalfEdges);
-        memcpy(hull_face_base_halfedges, hull_face_base_halfedges_in,
-               sizeof(uint32_t) * assets.hulls.numFaces);
-        memcpy(hull_face_planes, hull_face_planes_in,
-               sizeof(Plane) * assets.hulls.numFaces);
-        memcpy(hull_verts, hull_verts_in,
-               sizeof(Vector3) * assets.hulls.numVerts);
+        memcpy(hull_halfedges, assets.hullData.halfEdges,
+               sizeof(HalfEdge) * assets.hullData.numHalfEdges);
+        memcpy(hull_face_base_halfedges, assets.hullData.faceBaseHalfEdges,
+               sizeof(uint32_t) * assets.hullData.numFaces);
+        memcpy(hull_face_planes, assets.hullData.facePlanes,
+               sizeof(Plane) * assets.hullData.numFaces);
+        memcpy(hull_verts, assets.hullData.vertices,
+               sizeof(Vector3) * assets.hullData.numVerts);
     } break;
     case ExecMode::CUDA: {
 #ifndef MADRONA_CUDA_SUPPORT
         noCUDA();
 #else
-        cudaMemcpy(prim_aabbs_dst, primitive_aabbs,
+        cudaMemcpy(prim_aabbs_dst, assets.primitiveAABBs,
                    sizeof(AABB) * assets.totalNumPrimitives,
                    cudaMemcpyHostToDevice);
 
-        cudaMemcpy(obj_aabbs_dst, obj_aabbs,
+        cudaMemcpy(obj_aabbs_dst, assets.objAABBs,
                    sizeof(AABB) * assets.numObjs,
                    cudaMemcpyHostToDevice);
         cudaMemcpy(offsets_dst, offsets_tmp,
                    sizeof(uint32_t) * assets.numObjs,
                    cudaMemcpyHostToDevice);
-        cudaMemcpy(counts_dst, prim_counts,
+        cudaMemcpy(counts_dst, assets.primCcounts,
                    sizeof(uint32_t) * assets.numObjs,
                    cudaMemcpyHostToDevice);
-        cudaMemcpy(metadatas_dst, metadatas,
+        cudaMemcpy(metadatas_dst, assets.metadatas,
                    sizeof(RigidBodyMetadata) * assets.numObjs,
                    cudaMemcpyHostToDevice);
 
         hull_halfedges = (HalfEdge *)cu::allocGPU(
-            sizeof(HalfEdge) * assets.hulls.numHalfEdges);
+            sizeof(HalfEdge) * assets.hullData.numHalfEdges);
         hull_face_base_halfedges = (uint32_t *)cu::allocGPU(
-            sizeof(uint32_t) * assets.hulls.numFaces);
+            sizeof(uint32_t) * assets.hullData.numFaces);
         hull_face_planes = (Plane *)cu::allocGPU(
-            sizeof(Plane) * assets.hulls.numFaces);
+            sizeof(Plane) * assets.hullData.numFaces);
         hull_verts = (Vector3 *)cu::allocGPU(
-            sizeof(Vector3) * assets.hulls.numVerts);
+            sizeof(Vector3) * assets.hullData.numVerts);
 
         cudaMemcpy(hull_halfedges, hull_halfedges_in,
-                   sizeof(HalfEdge) * assets.hulls.numHalfEdges,
+                   sizeof(HalfEdge) * assets.hullData.numHalfEdges,
                    cudaMemcpyHostToDevice);
         cudaMemcpy(hull_face_base_halfedges, hull_face_base_halfedges_in,
-                   sizeof(uint32_t) * assets.hulls.numFaces,
+                   sizeof(uint32_t) * assets.hullData.numFaces,
                    cudaMemcpyHostToDevice);
         cudaMemcpy(hull_face_planes, hull_face_planes_in,
-                   sizeof(Plane) * assets.hulls.numFaces,
+                   sizeof(Plane) * assets.hullData.numFaces,
                    cudaMemcpyHostToDevice);
         cudaMemcpy(hull_verts, hull_verts_in,
-                   sizeof(Vector3) * assets.hulls.numVerts,
+                   sizeof(Vector3) * assets.hullData.numVerts,
                    cudaMemcpyHostToDevice);
 #endif
     }
@@ -292,7 +292,7 @@ CountT PhysicsLoader::loadRigidBodies(const RigidBodyAssets &assets)
 
     auto primitives_tmp = (CollisionPrimitive *)malloc(
         sizeof(CollisionPrimitive) * assets.totalNumPrimitives);
-    memcpy(primitives_tmp, primitives_in,
+    memcpy(primitives_tmp, assets.primitives,
            sizeof(CollisionPrimitive) * assets.totalNumPrimitives);
 
     for (CountT i = 0; i < (CountT)assets.totalNumPrimitives; i++) {
@@ -302,9 +302,10 @@ CountT PhysicsLoader::loadRigidBodies(const RigidBodyAssets &assets)
         HalfEdgeMesh &he_mesh = cur_primitive.hull.halfEdgeMesh;
 
         // FIXME: incoming HalfEdgeMeshes should have offsets or something
-        CountT hedge_offset = he_mesh.halfEdges - hull_halfedges_in;
-        CountT face_offset = he_mesh.facePlanes - hull_face_planes_in;
-        CountT vert_offset = he_mesh.vertices - hull_verts_in;
+        CountT hedge_offset = he_mesh.halfEdges - assets.hullData.halfEdges;
+        CountT face_offset =
+            he_mesh.facePlanes - assets.hullData.facePlanes;
+        CountT vert_offset = he_mesh.vertices - assets.hullData.vertices;
 
         he_mesh.halfEdges = hull_halfedges + hedge_offset;
         he_mesh.faceBaseHalfEdges = hull_face_base_halfedges + face_offset;
