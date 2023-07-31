@@ -1,5 +1,5 @@
-Madrona:<br>A GPU-Accelerated Game Engine for Batch Simulation
-===========================================================
+![Madrona logo](logo.png) Madrona:<br>A GPU-Accelerated Game Engine for Batch Simulation
+========================================================================================
 
 Madrona is a prototype game engine for creating high-throughput, GPU-accelerated batch simulators: simulators that run thousands of virtual environment instances, and generate *millions of aggregate simulation steps per second, on a single GPU.* This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
 
@@ -26,8 +26,8 @@ For general background and tutorials on ECS programming abstractions and the mot
   * A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
 * [Overcooked AI](xxx)
   * The Overcooked AI environment used for multi-agent learning research. Check out this repo to a CoLab notebook that allows you to train overcooked agents that demonstrate optimal play in under a minute.
-* [Hide And Seek](xxx)
-  * A port of OpenAI's "hide and seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use).
+* [Hide and Seek](https://github.com/shacklettbp/gpu_hideseek)
+  * A reimplementation of OpenAI's "Hide and Seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use).
 * [Hanabi](xxx)
   * The card game.
 * [Cartpole](xxx)
