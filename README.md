@@ -30,7 +30,7 @@ For general background and tutorials on ECS programming abstractions and the mot
 * [Hide and Seek](https://github.com/shacklettbp/gpu_hideseek)
   * A reimplementation of OpenAI's "Hide and Seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use).
 * [Hanabi](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/hanabi_env#hanabi-environment)
-  * A Madrona version of the Hanabi card game based on Deepmind's [Hanabi Learning Environment](https://www.deepmind.com/publications/the-hanabi-challenge-a-new-frontier-for-ai-research)
+  * A Madrona version of the Hanabi card game based on Deepmind's [Hanabi Learning Environment](https://www.deepmind.com/publications/the-hanabi-challenge-a-new-frontier-for-ai-research).
 * [Cartpole](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/cartpole_env#cartpole-environment)
   * The canonical RL training environment.
 
