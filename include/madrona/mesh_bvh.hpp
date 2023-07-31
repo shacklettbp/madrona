@@ -44,6 +44,52 @@ struct MeshBVH {
         uint32_t material[numTrisPerLeaf];
     };
 
+    // Helper struct for Ray-Triangle intersection
+    // following Woop et al 2013
+    struct TriIntersectTxfm {
+        int32_t kx;
+        int32_t ky;
+        int32_t kz;
+        float Sx;
+        float Sy;
+        float Sz;
+    };
+
+    template <typename Fn>
+    void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
+
+    inline bool traceRay(math::Vector3 o,
+                         math::Vector3 d,
+                         float *out_hit_t,
+                         math::Vector3 *out_hit_normal,
+                         float t_max = float(FLT_MAX)) const;
+
+    inline bool traceRayIntoLeaf(
+        int32_t leaf_idx,
+        TriIntersectTxfm tri_isect_txfm,
+        math::Vector3 ray_o,
+        float t_max,
+        float *out_hit_t,
+        math::Vector3 *out_hit_normal) const;
+
+    inline bool rayTriangleIntersection(
+        math::Vector3 tri_a, math::Vector3 tri_b, math::Vector3 tri_c,
+        int32_t kx, int32_t ky, int32_t kz,
+        float Sx, float Sy, float Sz,
+        math::Vector3 org,
+        float t_max,
+        float *out_hit_t,
+        math::Vector3 *out_hit_normal) const;
+
+    inline bool fetchLeafTriangle(CountT leaf_idx,
+                                  CountT offset,
+                                  math::Vector3 *a,
+                                  math::Vector3 *b,
+                                  math::Vector3 *c) const;
+
+    inline TriIntersectTxfm computeTriIntersectTxfm(
+        math::Vector3 d, math::Diag3x3 inv_d) const;
+
     Node *nodes;
     LeafGeometry *leafGeos;
     LeafMaterial *leafMats;
