@@ -25,13 +25,13 @@ For general background and tutorials on ECS programming abstractions and the mot
 
 * [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example)
   * A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
-* [Overcooked AI](xxx)
-  * The Overcooked AI environment used for multi-agent learning research. Check out this repo to a CoLab notebook that allows you to train overcooked agents that demonstrate optimal play in under a minute.
+* [Overcooked AI](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/overcooked_env#overcooked-environment)
+  * The Overcooked AI environment used for multi-agent learning research. Check out this repo to a CoLab notebook that allows you to train overcooked agents that demonstrate optimal play in 2 minutes.
 * [Hide and Seek](https://github.com/shacklettbp/gpu_hideseek)
   * A reimplementation of OpenAI's "Hide and Seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use).
-* [Hanabi](xxx)
+* [Hanabi](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/hanabi_env#hanabi-environment)
   * The card game.
-* [Cartpole](xxx)
+* [Cartpole](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/cartpole_env#cartpole-environment)
   * The canonical RL training environment.
 
 Dependencies
