@@ -17,6 +17,7 @@ struct SourceMesh {
     math::Vector2 *uvs;
     uint32_t *indices;
     uint32_t *faceCounts;
+    uint32_t *faceMaterials;
     uint32_t numVertices;
     uint32_t numFaces;
     uint32_t materialIDX;

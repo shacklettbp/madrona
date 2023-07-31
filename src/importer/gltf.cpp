@@ -1515,6 +1515,7 @@ static bool gltfParseMesh(
             .uvs = uv_ptr,
             .indices = idx_ptr,
             .faceCounts = nullptr,
+            .faceMaterials = nullptr,
             .numVertices = num_vertices,
             .numFaces = num_faces,
             .materialIDX = 0, // FIXME

@@ -44,11 +44,11 @@ struct MeshBVH {
         uint32_t material[numTrisPerLeaf];
     };
 
-    math::Vector3 *vertices;
-
     Node *nodes;
-    LeafGeo *leafGeos;
-    LeafMaterial *leafMaterials;
+    LeafGeometry *leafGeos;
+    LeafMaterial *leafMats;
+
+    math::Vector3 *vertices;
 
     uint32_t numNodes;
     uint32_t numLeaves;
@@ -56,3 +56,5 @@ struct MeshBVH {
 };
 
 }
+
+#include "mesh_bvh.inl"

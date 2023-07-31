@@ -3,6 +3,7 @@
 #include <madrona/physics.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/stack_alloc.hpp>
+#include <madrona/mesh_bvh.hpp>
 
 namespace madrona::phys {
 
@@ -56,6 +57,14 @@ struct RigidBodyAssets {
         bool build_convex_hulls,
         StackAlloc &tmp_alloc,
         RigidBodyAssets *out_assets,
+        CountT *out_num_bytes);
+};
+
+struct MeshBVHBuilder {
+    static void * build(
+        Span<imp::SourceMesh> src_meshes,
+        StackAlloc &tmp_alloc,
+        MeshBVH *out_bvh,
         CountT *out_num_bytes);
 };
 

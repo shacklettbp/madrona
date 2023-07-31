@@ -452,6 +452,7 @@ bool OBJLoader::Impl::commitMesh(ImportedAssets &out_assets)
         .uvs = new_uvs.data(),
         .indices = new_indices.data(),
         .faceCounts = fully_triangular ? nullptr : face_counts_copy.data(),
+        .faceMaterials = nullptr,
         .numVertices = uint32_t(new_positions.size()),
         .numFaces = uint32_t(face_counts_copy.size()),
         .materialIDX = 0xFFFF'FFFF,
