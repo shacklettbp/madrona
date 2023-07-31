@@ -236,7 +236,7 @@ bool MeshBVH::rayTriangleIntersection(
 #endif
 
     // fallback  to testing against edges using double precision
-    if (U == 0.0f || V == 0.0f || W == 0.0f) {
+    if (U == 0.0f || V == 0.0f || W == 0.0f) [[unlikely]] {
         double CxBy = (double)Cx * (double)By;
         double CyBx = (double)Cy * (double)Bx;
         U = (float)(CxBy - CyBx);
