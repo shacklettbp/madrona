@@ -1,5 +1,5 @@
 <h1>
-<img align="left" src="logo.png" width=75> Madrona:<br><large>A GPU-Accelerated Game Engine for Batch Simulation</large>
+<img src="logo.png" width=800><br>A GPU-Accelerated Game Engine for Batch Simulation
 </h1>
 
 Madrona is a prototype game engine for creating high-throughput, GPU-accelerated batch simulators: simulators that run thousands of virtual environment instances, and generate *millions of aggregate simulation steps per second, on a single GPU.* This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
