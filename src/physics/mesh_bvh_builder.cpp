@@ -5,7 +5,7 @@ namespace madrona::phys {
 
 using namespace madrona::math;
 
-void * MeshBVHBuilder::build(Span<imp::SourceMesh> src_meshes,
+void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
                              StackAlloc &tmp_alloc,
                              MeshBVH *out_bvh,
                              CountT *out_num_bytes)
@@ -82,7 +82,7 @@ void * MeshBVHBuilder::build(Span<imp::SourceMesh> src_meshes,
     // FIXME: Neither of these bounds are tight, because the current
     // BVH build code has a problem where leaves / nodes aren't guaranteed
     // to be tightly packed.
-    int32_t max_num_leaves = 2 * total_num_tris / MeshBVH::numTrisPerLeaf;
+    int32_t max_num_leaves = total_num_tris;
     int32_t max_num_nodes = std::max(utils::divideRoundUp(max_num_leaves - 1,
         MeshBVH::nodeWidth - 1), int32_t(1)) + max_num_leaves;
 
@@ -157,8 +157,7 @@ void * MeshBVHBuilder::build(Span<imp::SourceMesh> src_meshes,
             return split([](Vector3 v) {
                 return v.x;
             });
-        } else if (center_diff.y > center_diff.x &&
-                   center_diff.y > center_diff.z) {
+        } else if (center_diff.y > center_diff.z) {
             return split([](Vector3 v) {
                 return v.y;
             });
@@ -217,9 +216,6 @@ void * MeshBVHBuilder::build(Span<imp::SourceMesh> src_meshes,
             int32_t third_split =
                 midpoint_split(entry.offset + second_split, num_h2);
 
-            int32_t tris_per_child =
-                utils::divideRoundUp(entry.numTris, MeshBVH::numTrisPerLeaf);
-
             int32_t subdiv_starts[MeshBVH::nodeWidth];
             int32_t subdiv_counts[MeshBVH::nodeWidth];
 
@@ -235,88 +231,70 @@ void * MeshBVHBuilder::build(Span<imp::SourceMesh> src_meshes,
             subdiv_starts[3] = entry.offset + num_h1 + third_split;
             subdiv_counts[3] = num_h2 - third_split;
 
-            if (tris_per_child >
-                    MeshBVH::nodeWidth * MeshBVH::numTrisPerLeaf) {
+            bool has_non_leaf_children = false;
+            // Process children in reverse order to preserve left-right
+            // depth first ordering after popping off stack
+            for (int32_t i = MeshBVH::nodeWidth - 1; i >= 0; i--) {
+                int32_t node_tri_start = subdiv_starts[i];
+                int32_t node_tri_count = subdiv_counts[i];
+
+                if (node_tri_count == 0) {
+                    continue;
+                }
+
+                if (node_tri_count > MeshBVH::numTrisPerLeaf) {
+                    stack[stack_size++] = {
+                        -1,
+                        entry.nodeID,
+                        node_tri_start,
+                        node_tri_count,
+                    };
+
+                    has_non_leaf_children = true;
+                    continue;
+                }
+
+                int32_t leaf_idx = cur_leaf_offset++;
+                assert(leaf_idx < max_num_leaves);
+
+                AABB leaf_aabb = AABB::invalid();
+                for (int32_t tri_offset = 0; tri_offset < node_tri_count;
+                     tri_offset++) {
+                    int32_t tri_idx =
+                        tri_reorder[node_tri_start + tri_offset];
+                    leaf_aabb = AABB::merge(leaf_aabb, tri_aabbs[tri_idx]);
+
+                    leaf_geos[leaf_idx].packedIndices[tri_offset] =
+                        combined_tri_indices[tri_idx];
+
+                    leaf_mats[leaf_idx].material[tri_offset] =
+                        combined_tri_mats[tri_idx];
+                }
+
+                for (int32_t tri_offset = node_tri_count;
+                     tri_offset < MeshBVH::numTrisPerLeaf;
+                     tri_offset++) {
+                    leaf_geos[leaf_idx].packedIndices[tri_offset] =
+                        0xFFFF'FFFF'FFFF'FFFF;
+                }
+
+                node.setLeaf(i, leaf_idx);
+
+                node.minX[i] = leaf_aabb.pMin.x;
+                node.minY[i] = leaf_aabb.pMin.y;
+                node.minZ[i] = leaf_aabb.pMin.z;
+                node.maxX[i] = leaf_aabb.pMax.x;
+                node.maxY[i] = leaf_aabb.pMax.y;
+                node.maxZ[i] = leaf_aabb.pMax.z;
+            }
+
+            if (has_non_leaf_children) {
                 // Record the node id in the stack entry for when this entry
                 // is reprocessed
                 entry.nodeID = node_id;
 
-                // Setup stack to recurse into fourths. Put fourths on stack in
-                // reverse order to preserve left-right depth first ordering
-                stack[stack_size++] = {
-                    -1,
-                    entry.nodeID,
-                    subdiv_starts[3],
-                    subdiv_counts[3],
-                };
-
-                stack[stack_size++] = {
-                    -1,
-                    entry.nodeID,
-                    subdiv_starts[2],
-                    subdiv_counts[2],
-                };
-
-                stack[stack_size++] = {
-                    -1,
-                    entry.nodeID,
-                    subdiv_starts[1],
-                    subdiv_counts[1],
-                };
-
-                stack[stack_size++] = {
-                    -1,
-                    entry.nodeID,
-                    subdiv_starts[0],
-                    subdiv_counts[0],
-                };
-
                 // Defer processing this node until children are processed
                 continue;
-            } else {
-                // The children of this node will be leaves
-                for (int i = 0; i < MeshBVH::nodeWidth; i++) {
-                    int32_t leaf_tri_start = subdiv_starts[i];
-                    int32_t leaf_tri_count = subdiv_counts[i];
-                    assert(leaf_tri_count < MeshBVH::numTrisPerLeaf);
-
-                    if (leaf_tri_count == 0) {
-                        continue;
-                    }
-
-                    int32_t leaf_idx = cur_leaf_offset++;
-                    assert(leaf_idx < max_num_leaves);
-
-                    AABB leaf_aabb = AABB::invalid();
-                    for (int32_t tri_offset = 0; tri_offset < leaf_tri_count;
-                         tri_offset++) {
-                        int32_t tri_idx =
-                            tri_reorder[leaf_tri_start + tri_offset];
-                        leaf_aabb = AABB::merge(leaf_aabb, tri_aabbs[tri_idx]);
-
-                        leaf_geos[leaf_idx].packedIndices[tri_offset] =
-                            combined_tri_indices[tri_idx];
-
-                        leaf_mats[leaf_idx].material[tri_offset] =
-                            combined_tri_mats[tri_idx];
-                    }
-
-                    for (int32_t tri_offset = leaf_tri_count;
-                         tri_offset < MeshBVH::numTrisPerLeaf;
-                         tri_offset++) {
-                        leaf_geos[leaf_idx].packedIndices[tri_offset] =
-                            0xFFFF'FFFF'FFFF'FFFF;
-                    }
-
-                    node.setLeaf(i, leaf_idx);
-
-                    node.minX[i] = leaf_aabb.pMin.x;
-                    node.minY[i] = leaf_aabb.pMin.y;
-                    node.minZ[i] = leaf_aabb.pMin.z;
-                    node.maxX[i] = leaf_aabb.pMax.x;
-                    node.maxY[i] = leaf_aabb.pMax.y;
-                    node.maxZ[i] = leaf_aabb.pMax.z;
-                }
             }
         } else {
             // Revisiting this node after having processed children

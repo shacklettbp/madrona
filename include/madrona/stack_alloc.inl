@@ -24,11 +24,17 @@ void * StackAlloc::alloc(CountT num_bytes, CountT alignment)
         (CountT)utils::roundUpPow2(sizeof(ChunkMetadata), (uint32_t)alignment);
     new_offset = alloc_offset + num_bytes;
 
+    // FIXME: it would be good to handle oversized chunks differently,
+    // round up to chunk_size_ multiple and still use leftover bytes?
+    CountT alloc_size;
     if (new_offset > chunk_size_) [[unlikely]] {
-        allocTooLarge();
+        alloc_size = new_offset;
+        new_offset = chunk_size_;
+    } else {
+        alloc_size = chunk_size_;
     }
 
-    char *new_chunk = StackAlloc::newChunk(chunk_size_);
+    char *new_chunk = StackAlloc::newChunk(alloc_size, chunk_size_);
 
     auto *cur_metadata = (ChunkMetadata *)cur_chunk_;
     cur_metadata->next = (ChunkMetadata *)new_chunk;
@@ -36,7 +42,7 @@ void * StackAlloc::alloc(CountT num_bytes, CountT alignment)
     cur_chunk_ = new_chunk;
     chunk_offset_ = new_offset;
 
-    return new_chunk + new_offset;
+    return new_chunk + alloc_offset;
 }
 
 template <typename T>

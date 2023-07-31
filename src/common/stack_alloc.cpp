@@ -5,7 +5,7 @@
 namespace madrona {
 
 StackAlloc::StackAlloc(CountT chunk_size)
-    : first_chunk_(newChunk(chunk_size)),
+    : first_chunk_(StackAlloc::newChunk(chunk_size, chunk_size)),
       cur_chunk_(first_chunk_),
       chunk_offset_(sizeof(ChunkMetadata)),
       chunk_size_((uint32_t)chunk_size)
@@ -49,10 +49,10 @@ void StackAlloc::pop(Frame frame)
     FATAL("StackAlloc cannot satisfy allocation larger than chunk size");
 }
 
-char * StackAlloc::newChunk(CountT chunk_size)
+char * StackAlloc::newChunk(CountT num_bytes, CountT alignment)
 {
     // FIXME: replace malloc here
-    void *new_chunk = rawAllocAligned(chunk_size, chunk_size);
+    void *new_chunk = rawAllocAligned(num_bytes, alignment);
 
     auto *metadata = (ChunkMetadata *)new_chunk;
     metadata->next = nullptr;

@@ -62,7 +62,7 @@ struct RigidBodyAssets {
 
 struct MeshBVHBuilder {
     static void * build(
-        Span<imp::SourceMesh> src_meshes,
+        Span<const imp::SourceMesh> src_meshes,
         StackAlloc &tmp_alloc,
         MeshBVH *out_bvh,
         CountT *out_num_bytes);

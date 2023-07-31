@@ -33,7 +33,7 @@ private:
 
     [[noreturn]] void allocTooLarge();
 
-    static char * newChunk(CountT chunk_size);
+    static char * newChunk(CountT num_bytes, CountT alignment);
 
     char *first_chunk_;
     char *cur_chunk_;
