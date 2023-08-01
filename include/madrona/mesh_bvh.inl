@@ -302,7 +302,7 @@ bool MeshBVH::rayTriangleIntersection(
     *out_hit_t = T * rcpDet;
 
     // FIXME better way to get geo normal?
-    *out_hit_normal = cross(B - A, C - A);
+    *out_hit_normal = normalize(cross(B - A, C - A));
 
     return true;
 }

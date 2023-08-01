@@ -45,17 +45,21 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
 
         for (int32_t i = 0 ; i < (int32_t)src_mesh.numFaces; i++) {
             int32_t base = 3 * i;
-            uint32_t a_idx = src_mesh.indices[base + 0];
-            uint32_t b_idx = src_mesh.indices[base + 1];
-            uint32_t c_idx = src_mesh.indices[base + 2];
+            uint32_t mesh_a_idx = src_mesh.indices[base + 0];
+            uint32_t mesh_b_idx = src_mesh.indices[base + 1];
+            uint32_t mesh_c_idx = src_mesh.indices[base + 2];
 
             {
-                int32_t b_diff = (int32_t)b_idx - (int32_t)a_idx;
-                int32_t c_diff = (int32_t)c_idx - (int32_t)a_idx;
+                uint32_t global_a_idx = mesh_a_idx + cur_vert_offset;
+                uint32_t global_b_idx = mesh_b_idx + cur_vert_offset;
+                uint32_t global_c_idx = mesh_c_idx + cur_vert_offset;
+
+                int32_t b_diff = (int32_t)global_b_idx - (int32_t)global_a_idx;
+                int32_t c_diff = (int32_t)global_c_idx - (int32_t)global_a_idx;
                 assert(abs(b_diff) < 32767 && abs(c_diff) < 32767);
 
                 combined_tri_indices[cur_tri_offset + i] =
-                    (uint64_t(a_idx) << 32) |
+                    (uint64_t(global_a_idx) << 32) |
                     (uint64_t((uint16_t)b_diff) << 16) |
                     uint64_t((uint16_t)c_diff);
             }
@@ -63,9 +67,9 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
                 src_mesh.faceMaterials ? src_mesh.faceMaterials[i] :
                 0xFFFF'FFFF;
 
-            Vector3 a = src_mesh.positions[a_idx];
-            Vector3 b = src_mesh.positions[b_idx];
-            Vector3 c = src_mesh.positions[c_idx];
+            Vector3 a = src_mesh.positions[mesh_a_idx];
+            Vector3 b = src_mesh.positions[mesh_b_idx];
+            Vector3 c = src_mesh.positions[mesh_c_idx];
 
             AABB tri_aabb = AABB::point(a);
             tri_aabb.expand(b);
