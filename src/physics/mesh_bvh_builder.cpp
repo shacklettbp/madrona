@@ -243,9 +243,10 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
                 }
 
                 if (node_tri_count > MeshBVH::numTrisPerLeaf) {
+                    assert(stack_size < 128 - 1);
                     stack[stack_size++] = {
                         -1,
-                        entry.nodeID,
+                        node_id,
                         node_tri_start,
                         node_tri_count,
                     };
