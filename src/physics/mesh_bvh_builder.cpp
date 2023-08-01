@@ -56,8 +56,8 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
 
                 combined_tri_indices[cur_tri_offset + i] =
                     (uint64_t(a_idx) << 32) |
-                    (uint64_t((int16_t)b_diff) << 16) |
-                    uint64_t((int16_t)c_diff);
+                    (uint64_t((uint16_t)b_diff) << 16) |
+                    uint64_t((uint16_t)c_diff);
             }
             combined_tri_mats[cur_tri_offset + i] =
                 src_mesh.faceMaterials ? src_mesh.faceMaterials[i] :
