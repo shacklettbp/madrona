@@ -277,11 +277,19 @@ bool MeshBVH::rayTriangleIntersection(
     }
 
 #else
+#ifdef MADRONA_GPU_MODE
+    uint32_t det_sign_mask =
+        __float_as_uint(det) & 0x8000'0000_u32;
+
+    float xor_T = __uint_as_float(
+        __float_as_uint(T) ^ det_sign_mask);
+#else
     uint32_t det_sign_mask =
         std::bit_cast<uint32_t>(det) & 0x8000'0000_u32;
 
     float xor_T = std::bit_cast<float>(
         std::bit_cast<uint32_t>(T) ^ det_sign_mask);
+#endif
     
     float xor_det = copysignf(det, 1.f);
     if (xor_T < 0.0f || xor_T > t_max * xor_det) {
