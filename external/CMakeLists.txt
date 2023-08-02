@@ -93,8 +93,18 @@ target_include_directories(imgui INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui
 )
 
-set(GLFW_LIBRARY_TYPE "SHARED")
-add_subdirectory(glfw EXCLUDE_FROM_ALL)
+if (MADRONA_LINUX)
+    find_package(X11 QUIET)
+
+    set(INCLUDE_GLFW ${X11_FOUND})
+else ()
+    set(INCLUDE_GLFW ON)
+endif()
+
+if (INCLUDE_GLFW)
+    set(GLFW_LIBRARY_TYPE "SHARED")
+    add_subdirectory(glfw EXCLUDE_FROM_ALL)
+endif ()
 
 if (MADRONA_USD_SUPPORT)
     set(TINYUSDZ_PRODUCTION_BUILD ON)

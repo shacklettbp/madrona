@@ -1,3 +1,7 @@
+if (NOT TARGET glfw)
+    return()
+endif()
+
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/imgui")
 
 add_library(imgui_impl STATIC
