@@ -1,3 +1,20 @@
+add_library(madrona_viz_system STATIC
+    ${MADRONA_INC_DIR}/viz/system.hpp viewer_system.cpp
+    interop.hpp
+)
+
+target_link_libraries(madrona_viz_system PRIVATE
+    madrona_mw_core
+)
+
+add_library(madrona_viz_recorder STATIC
+    ${MADRONA_INC_DIR}/viz/recorder.hpp recorder.cpp
+)
+
+target_link_libraries(madrona_viz_recorder PRIVATE
+    madrona_viz_system
+)
+
 if (NOT TARGET glfw)
     return()
 endif()
@@ -23,23 +40,6 @@ target_link_libraries(imgui_impl PRIVATE
     glfw
     madrona_libcxx
     madrona_vk_hdrs
-)
-
-add_library(madrona_viz_system STATIC
-    ${MADRONA_INC_DIR}/viz/system.hpp viewer_system.cpp
-    interop.hpp
-)
-
-target_link_libraries(madrona_viz_system PRIVATE
-    madrona_mw_core
-)
-
-add_library(madrona_viz_recorder STATIC
-    ${MADRONA_INC_DIR}/viz/recorder.hpp recorder.cpp
-)
-
-target_link_libraries(madrona_viz_recorder PRIVATE
-    madrona_viz_system
 )
 
 add_library(madrona_viewer STATIC
