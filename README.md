@@ -23,8 +23,8 @@ For general background and tutorials on ECS programming abstractions and the mot
 
 # Example Madrona-Based Simulators
 
-### [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example)
-* A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
+### [Madrona Escape Room](https://github.com/shacklettbp/madrona_escape_room)
+* A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and push blocks to advance through a series of rooms.
 
 ### [Overcooked AI](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/overcooked_env#overcooked-environment)
 * A high-throughput Madrona rewrite of the [Overcooked AI environment](https://github.com/HumanCompatibleAI/overcooked_ai), a multi-agent learning environment based on the cooperative video game. Check out this repo for a Colab notebook that allows you to train overcooked agents that demonstrate optimal play in 2 minutes.
@@ -74,10 +74,10 @@ If you're interested in authoring a new simulator on top of Madrona, we recommen
 
 ### Building: ###
 
-Instructions on building and testing the [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example) simulator are included below for Linux and MacOS:
+Instructions on building and testing the [Madrona Escape Room](https://github.com/shacklettbp/madrona_escape_room) simulator are included below for Linux and MacOS:
 ```bash
-git clone --recursive https://github.com/shacklettbp/madrona_3d_example.git
-cd madrona_3d_example
+git clone --recursive https://github.com/shacklettbp/madrona_escape_room.git
+cd madrona_escape_room
 pip install -e . 
 mkdir build
 cd build
@@ -90,21 +90,21 @@ You can then view the environment by running:
 ./build/viewer
 ```
 
-Please refer to the [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example) simulator's github page for further context / instructions on how to train agents.
+Please refer to the [Madrona Escape Room](https://github.com/shacklettbp/madrona_escape_room) simulator's github page for further context / instructions on how to train agents.
 
 **Windows Instructions**:
 Windows users should clone the repository as above, and then open the root of the cloned repo in Visual Studio and build with the integrated CMake support. 
 By default, Visual Studio has a build directory like `out/build/Release-x64`, depending on your build configuration. This requires changing the `pip install` command above to tell python where the C++ python extensions are located:
 ```
-pip install -e . -Cpackages.madrona_3d_example.ext-out-dir=out/build/Release-x64
+pip install -e . -Cpackages.madrona_escape_room.ext-out-dir=out/build/Release-x64
 ```
 
 Code Organization
 -----------------
 
-We recommend starting with the [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example) project for learning how to use Madrona's ECS APIs, as documentation within Madrona itself is still fairly minimal.
+We recommend starting with the [Madrona Escape Room](https://github.com/shacklettbp/madrona_escape_room) project for learning how to use Madrona's ECS APIs, as documentation within Madrona itself is still fairly minimal.
 
-Nevertheless, the following files provide good starting points to start diving into the Madrona codebase:
+Nevertheless, the following files provide good starting points to dive into the Madrona codebase:
 
 The `Context` class: [`include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/include/madrona/context.hpp#L17) includes the core ECS API entry points for the engine (creating entities, getting components, etc): . Note that the linked file is the header for the CPU backend. The GPU implementation of the same interface lives in [`src/mw/device/include/madrona/context.hpp`](https://github.com/shacklettbp/madrona/blob/main/src/mw/device/include/madrona/context.hpp). Although many of the headers in `include/madrona` are shared between the CPU and GPU backends, the GPU backend prioritizes files in `src/mw/device/include` in order to use GPU specific implementations. This distinction should not be relevant for most users of the engine, as the public interfaces of both backends match.
 
