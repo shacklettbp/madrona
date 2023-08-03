@@ -66,7 +66,7 @@ Getting Started
 
 Madrona is intended to be integrated as a library / submodule of simulators built on top of the engine. Therefore, you should start with one of our example simulators, rather than trying to build this repo directly.
 
-As a starting point for learning how to use the engine, we recommend the [Madrona3DExample](https://github.com/shacklettbp/madrona_3d_example) project. This is a simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
+As a starting point for learning how to use the engine, we recommend the [Madrona Escape ROom](https://github.com/shacklettbp/madrona_escape_room) project. This is a simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
 
 For ML-focused users interested in training agents at high speed, we recommend you check out the [Madrona RL Environments repo](https://github.com/bsarkar321/madrona_rl_envs) that contains an Overcooked AI implementation where you can train agents in two minutes using Google Colab, as well as Hanabi and Cartpole implementations.
 
