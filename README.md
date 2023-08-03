@@ -41,7 +41,7 @@ For general background and tutorials on ECS programming abstractions and the mot
 Dependencies
 ------------
 
-**Supported Platforms**
+### Supported Platforms
 * Linux, Ubuntu 18.04 or newer
     * Other distros with equivalent or newer kernel / GLIBC versions will also work
 * MacOS 13.x Ventura (or newer)
@@ -50,11 +50,11 @@ Dependencies
 * Windows 11
     * Requires Visual Studio 16.4 (or newer) with recent Windows SDK
 
-**General Dependencies**
+### General Dependencies
 * CMake 3.24 (or newer)
 * Python 3.9 (or newer)
 
-**GPU-Backend Dependencies**
+### GPU-Backend Dependencies
 * Volta or newer NVIDIA GPU
 * CUDA 12.1 or newer (+ appropriate NVIDIA drivers)
 * **Linux** (CUDA on Windows lacks certain unified memory features that Madrona requires)
