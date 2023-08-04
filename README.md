@@ -8,7 +8,7 @@ Madrona is a prototype game engine for creating high-throughput, GPU-accelerated
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
 * CPU backend for debugging and visualization. Simulators can execute on GPU or CPU with no code changes.
 * Export ECS simulation state as PyTorch tensors for efficient interoperability with learning code.
-* (Optional) XPBD rigid body physics for basic 3D collision and contact support.
+* (Optional) [XPBD rigid body physics](http://mmacklin.com/xpbd.pdf) for basic 3D collision and contact support.
 * (Optional) Simple 3D renderer for visualizing agent behaviors and debugging.
 
 **Disclaimer**: The Madrona engine is a research code base. We hope to attract interested users / collaborators with this release, however there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
@@ -35,7 +35,7 @@ Madrona itself is not an RL environment simulator. It is a game engine / framewo
 * A high-throughput Madrona rewrite of the [Overcooked AI environment](https://github.com/HumanCompatibleAI/overcooked_ai), a multi-agent learning environment based on the cooperative video game. Check out this repo for a Colab notebook that allows you to train overcooked agents that demonstrate optimal play in about two minutes.
 
 ### [Hide and Seek](https://github.com/shacklettbp/gpu_hideseek)
-* A reimplementation of OpenAI's "Hide and Seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use). 
+* A reimplementation of OpenAI's "Hide and Seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use) (Baker 2020). 
 
 ### [Hanabi](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/hanabi_env#hanabi-environment)
   * A Madrona version of the Hanabi card game based on Deepmind's [Hanabi Learning Environment](https://www.deepmind.com/publications/the-hanabi-challenge-a-new-frontier-for-ai-research).
