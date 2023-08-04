@@ -470,7 +470,7 @@ static inline void handleContact(Context &ctx,
     float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
 
 #pragma unroll
-    for (CountT i = 0; i < 4; i++) {
+    for (CountT i = 4 - 1; i >= 0; i--) {
         if (i >= contact.numPoints) continue;
 
         auto [r1, r2] =
