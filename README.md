@@ -4,6 +4,8 @@
 
 [Madrona](https://madrona-engine.github.io) is a prototype game engine for creating high-throughput, GPU-accelerated simulators that run thousands of virtual environment instances, and generate *millions of aggregate simulation steps per second*, on a single GPU. (We like to refer to this as "batch simulation".) This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
 
+Please see the [Madrona engine project page](https://madrona-engine.github.io) for more information, as well as the [Madrona FAQ](https://madrona-engine.github.io#faq).
+
 ### Features: ###
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
 * CPU backend for debugging and visualization. Simulators can execute on GPU or CPU with no code changes.
@@ -12,8 +14,6 @@
 * (Optional) Simple 3D renderer for visualizing agent behaviors and debugging.
 
 **Disclaimer**: The Madrona engine is a research code base. We hope to attract interested users / collaborators with this release, however there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
-
-Please see the [Madrona engine project page](https://madrona-engine.github.io) for more information, as well as the [Madrona FAQ](https://madrona-engine.github.io#faq).
 
 # Technical Paper
 
