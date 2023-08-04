@@ -2,9 +2,7 @@
 <img src="logo.png" width=600><br>A GPU-Accelerated Game Engine for Batch Simulation
 </h1>
 
-Madrona is a prototype game engine for creating high-throughput, GPU-accelerated batch simulators: simulators that run thousands of virtual environment instances, and generate *millions of aggregate simulation steps per second, on a single GPU.* This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
-
-Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-faq) (ECS) architecture. At this time Madrona provides APIs for games to specify custom game play logic and state in C++, and Madrona automatically maps this code to parallel batch execution on the GPU. Implementing a new game (or a new learning environment) in Madrona requires knowledge of data-parallel ECS concepts, but it does not require expert knowledge of GPU programming or GPU performance optimization. 
+Madrona is a prototype game engine for creating high-throughput, GPU-accelerated simulators that run thousands of virtual environment instances, and generate *millions of aggregate simulation steps per second*, on a single GPU. (We like to refer to this as "batch simulation".) This efficiency is useful for high-performance AI agent training (e.g., via reinforcement learning), or for any task that requires a high-performance environment simulator tightly integrated "in-the-loop" of a broader application.
 
 ### Features: ###
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
@@ -15,22 +13,26 @@ Madrona uses an [Entity Component System](https://github.com/SanderMertens/ecs-f
 
 **Disclaimer**: The Madrona engine is a research code base. We hope to attract interested users / collaborators with this release, however there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
 
+Please see the [Madrona engine project page](https://madrona-engine.github.io) for more information, as well as the [Madrona FAQ](https://madrona-engine.github.io#faq).
+
 # Technical Paper
 
-For more background and technical details, please read our paper: [_An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation_](https://madrona-engine.github.io/shacklett_siggraph23.pdf), published in Transactions on Graphics / SIGGRAPH 2023.
+For more background and technical details on Madrona's design, please read our SIGGRAPH 2023 paper: [An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation](https://madrona-engine.github.io/shacklett_siggraph23.pdf). (Shacklett et al. 2023)
 
-For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Martens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
+Madrona uses an Entity Component System (ECS) architecture for defining game state and expressing game logic. For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Martens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
 
 # Example Madrona-Based Simulators
+
+Madrona itself is not an RL environment simulator. It is a game engine / framework that makes it easier for developers (like RL researchers) to implement their own new environment simulators that achieve high performance by running batch simulations on GPUs, and tightly integrating those simulation outputs with learning code. Here are a few environment simulators written in Madrona.  
 
 ### [Madrona Escape Room](https://github.com/shacklettbp/madrona_escape_room)
 * A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and push blocks to advance through a series of rooms.
 
 ### [Overcooked AI](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/overcooked_env#overcooked-environment)
-* A high-throughput Madrona rewrite of the [Overcooked AI environment](https://github.com/HumanCompatibleAI/overcooked_ai), a multi-agent learning environment based on the cooperative video game. Check out this repo for a Colab notebook that allows you to train overcooked agents that demonstrate optimal play in 2 minutes.
+* A high-throughput Madrona rewrite of the [Overcooked AI environment](https://github.com/HumanCompatibleAI/overcooked_ai), a multi-agent learning environment based on the cooperative video game. Check out this repo for a Colab notebook that allows you to train overcooked agents that demonstrate optimal play in about two minutes.
 
 ### [Hide and Seek](https://github.com/shacklettbp/gpu_hideseek)
-* A reimplementation of OpenAI's "Hide and Seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use).
+* A reimplementation of OpenAI's "Hide and Seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use). 
 
 ### [Hanabi](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/hanabi_env#hanabi-environment)
   * A Madrona version of the Hanabi card game based on Deepmind's [Hanabi Learning Environment](https://www.deepmind.com/publications/the-hanabi-challenge-a-new-frontier-for-ai-research).
@@ -59,7 +61,7 @@ Dependencies
 * CUDA 12.1 or newer (+ appropriate NVIDIA drivers)
 * **Linux** (CUDA on Windows lacks certain unified memory features that Madrona requires)
 
-  These dependencies are needed for the GPU backend. If they are not present, Madrona's GPU backend will be disabled, but you can still use the CPU backend.
+These dependencies are needed for the GPU backend. If they are not present, Madrona's GPU backend will be disabled, but you can still use the CPU backend.
 
 Getting Started
 ---------------
@@ -70,7 +72,7 @@ As a starting point for learning how to use the engine, we recommend the [Madron
 
 For ML-focused users interested in training agents at high speed, we recommend you check out the [Madrona RL Environments repo](https://github.com/bsarkar321/madrona_rl_envs) that contains an Overcooked AI implementation where you can train agents in two minutes using Google Colab, as well as Hanabi and Cartpole implementations.
 
-If you're interested in authoring a new simulator on top of Madrona, we recommend forking one of the above projects and adding your own functionality, or forking the [Madrona Simple Example repository](https://github.com/shacklettbp/madrona_simple_example) for a codebase with very little existing logic to get in your way. Basing your work on one of these repositories will ensure that the CMake build system and python bindings are setup correctly.
+If you are interested in authoring a new simulator on top of Madrona, we recommend forking one of the above projects and adding your own functionality, or forking the [Madrona Simple Example repository](https://github.com/shacklettbp/madrona_simple_example) for a code base with very little existing logic to get in your way. Basing your work on one of these repositories will ensure the CMake build system and python bindings are setup correctly.
 
 ### Building: ###
 
