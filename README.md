@@ -17,7 +17,10 @@ Please see the [Madrona engine project page](https://madrona-engine.github.io) f
 
 # Technical Paper
 
-For more background and technical details on Madrona's design, please read our SIGGRAPH 2023 paper: [An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation](https://madrona-engine.github.io/shacklett_siggraph23.pdf). (Shacklett et al. 2023)
+For more background and technical details on Madrona's design, please read our SIGGRAPH 2023 paper:
+
+[An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation](https://madrona-engine.github.io/shacklett_siggraph23.pdf).
+Shacklett et al. 2023
 
 Madrona uses an Entity Component System (ECS) architecture for defining game state and expressing game logic. For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Martens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
 
