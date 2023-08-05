@@ -1091,6 +1091,7 @@ static inline MassProperties computeMassProperties(
     float inv_mass = 1.f / m_total;
     inertia_tensor *= inv_mass;
 
+#if 0
     printf("Inertia Tensor:\n"
            "%f %f %f\n"
            "%f %f %f\n"
@@ -1110,17 +1111,20 @@ static inline MassProperties computeMassProperties(
            x_total.z,
            m_total
            );
+#endif
 
     Diag3x3 diag_inertia;
     Quat rot_to_diag;
     diagonalizeInertiaTensor(inertia_tensor, &diag_inertia, &rot_to_diag);
 
+#if 0
     printf("Diag Inertia tensor: (%f %f %f) rot: (%f %f %f %f)\n\n",
            diag_inertia.d0, diag_inertia.d1, diag_inertia.d2,
            rot_to_diag.w,
            rot_to_diag.x,
            rot_to_diag.y,
            rot_to_diag.z);
+#endif
 
     return MassProperties {
         diag_inertia,
