@@ -224,7 +224,8 @@ PixelOutput frag(in V2F v2f)
     // output.color.rgb = v2f.normal.xyz;
 
     if (v2f.texIdx != -1) {
-        output.color *= materialTexturesArray[v2f.texIdx].SampleLevel(linearSampler, v2f.uv, 0);
+        output.color *= materialTexturesArray[v2f.texIdx].SampleLevel(
+            linearSampler, float2(v2f.uv.x, 1.f - v2f.uv.y), 0);
     }
 
     return output;
