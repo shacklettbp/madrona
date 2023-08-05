@@ -92,6 +92,7 @@ struct Framebuffer {
     VkImageView positionView;
     VkImageView depthView;
     VkFramebuffer hdl;
+    render::vk::HostBuffer colorStaging;
 };
 
 struct ShadowFramebuffer {

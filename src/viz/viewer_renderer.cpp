@@ -33,6 +33,10 @@
 #include "stb_image.h"
 #pragma clang diagnostic pop
 
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 using namespace std;
 
 using namespace madrona::render;
@@ -1499,6 +1503,11 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
     VkFramebuffer imgui_hdl;
     REQ_VK(dev.dt.createFramebuffer(dev.hdl, &imgui_fb_info, nullptr, &imgui_hdl));
 
+    render::vk::HostBuffer buffers[2] = {
+        alloc.makeHostBuffer(albedo.width * albedo.height * 4),
+        alloc.makeHostBuffer(albedo.width * albedo.height * 4),
+    };
+
     return std::make_pair(
         Framebuffer {
             std::move(albedo),
@@ -1509,7 +1518,8 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
             normal_view,
             position_view,
             depth_view,
-            hdl 
+            hdl ,
+            std::move(buffers[0]),
         },
         Framebuffer {
             std::move(albedo),
@@ -1520,7 +1530,8 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
             normal_view,
             position_view,
             depth_view,
-            imgui_hdl 
+            imgui_hdl ,
+            std::move(buffers[1]),
         }
     );
 }
@@ -3140,6 +3151,23 @@ void Renderer::waitUntilFrameReady()
     // Wait until frame using this slot has finished
     REQ_VK(dev.dt.waitForFences(dev.hdl, 1, &frame.cpuFinished, VK_TRUE,
                                 UINT64_MAX));
+
+    static int png_no_ = 0;
+    if (getenv("DUMP") && png_no_ > 0 && png_no_ % 4 == 0) {
+        void *pixels = frame.fb.colorStaging.ptr;
+
+        std::string dst_file = std::string("dump/frame") + std::to_string(png_no_ / 4) + std::string(".bmp");
+        int ret = stbi_write_bmp(dst_file.c_str(), frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 4,
+            pixels);
+
+        if (ret) {
+            printf("Wrote %s\n", dst_file.c_str());
+        }
+
+        // int stbi_write_png(char const *filename, int w, int h, int comp, const void *data, int stride_in_bytes);
+    }
+
+    png_no_++;
 }
 
 void Renderer::startFrame()
@@ -3976,6 +4004,48 @@ void Renderer::render(const ViewerCam &cam,
 
     { // Issue deferred lighting pass - separate function - this is becoming crazy
         issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, cfg.viewIDX);
+    }
+
+    {
+        VkBufferImageCopy png_buffer_copy = {};
+        png_buffer_copy.bufferOffset = 0;
+        png_buffer_copy.bufferRowLength = 0;
+        png_buffer_copy.bufferImageHeight = 0;
+        png_buffer_copy.imageExtent.width = frame.fb.colorAttachment.width;
+        png_buffer_copy.imageExtent.height = frame.fb.colorAttachment.height;
+        png_buffer_copy.imageExtent.depth = 1;
+        png_buffer_copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        png_buffer_copy.imageSubresource.mipLevel = 0;
+        png_buffer_copy.imageSubresource.baseArrayLayer = 0;
+        png_buffer_copy.imageSubresource.layerCount = 1;
+
+        dev.dt.cmdCopyImageToBuffer(draw_cmd, frame.fb.colorAttachment.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                frame.fb.colorStaging.buffer, 1, &png_buffer_copy);
+
+        array<VkImageMemoryBarrier, 1> imgui_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                0,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.fb.colorAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                imgui_prepare.size(), imgui_prepare.data());
     }
 
     render_pass_info.framebuffer = frame.imguiFBO.hdl;
