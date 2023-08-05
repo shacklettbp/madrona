@@ -495,6 +495,7 @@ void Viewer::Impl::loop(
 
         auto sim_delta_t = chrono::duration<float>(1.f / (float)simTickRate);
 
+#if 0
         if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
             if (frameCfg.viewIDX != 0) {
                 UserInput user_input(key_state.data());
@@ -507,6 +508,8 @@ void Viewer::Impl::loop(
 
             last_sim_tick_time = cur_frame_start_time;
         }
+#endif
+        step_fn(step_data);
 
         startFrame();
 
