@@ -10,7 +10,7 @@ Please see the [Madrona engine project page](https://madrona-engine.github.io) f
 * Fully GPU-driven batch ECS implementation for high-throughput execution.
 * CPU backend for debugging and visualization. Simulators can execute on GPU or CPU with no code changes.
 * Export ECS simulation state as PyTorch tensors for efficient interoperability with learning code.
-* (Optional) [XPBD rigid body physics](http://mmacklin.com/xpbd.pdf) for basic 3D collision and contact support.
+* (Optional) [XPBD rigid body physics](https://matthias-research.github.io/pages/publications/PBDBodies.pdf) for basic 3D collision and contact support.
 * (Optional) Simple 3D renderer for visualizing agent behaviors and debugging.
 
 **Disclaimer**: The Madrona engine is a research code base. We hope to attract interested users / collaborators with this release, however there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
