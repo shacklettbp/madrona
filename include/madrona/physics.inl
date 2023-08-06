@@ -62,7 +62,7 @@ math::AABB BVH::getLeafAABB(LeafID leaf_id) const
 template <typename Fn>
 void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 {
-    int32_t stack[128];
+    int32_t stack[32];
     stack[0] = 0;
     CountT stack_size = 1;
 

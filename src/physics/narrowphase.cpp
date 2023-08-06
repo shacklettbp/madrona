@@ -1551,8 +1551,8 @@ static inline void runNarrowphase(
             (Vector3 *)(smem_faces_buffer + gpuImpl::maxNumPlanes);
     }
 #else
-    constexpr int32_t max_num_tmp_faces = 2048;
-    constexpr int32_t max_num_tmp_vertices = 2048;
+    constexpr int32_t max_num_tmp_faces = 512;
+    constexpr int32_t max_num_tmp_vertices = 512;
 
     Plane tmp_faces_buffer[max_num_tmp_faces];
     Vector3 tmp_vertices_buffer[max_num_tmp_vertices];

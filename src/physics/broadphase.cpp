@@ -54,7 +54,7 @@ void BVH::rebuild()
         int32_t numObjs;
     };
 
-    StackEntry stack[128];
+    StackEntry stack[64];
     stack[0] = StackEntry {
         sentinel_,
         sentinel_,
@@ -662,7 +662,7 @@ Entity BVH::traceRay(Vector3 o,
 
     Diag3x3 inv_d = Diag3x3::fromVec(d).inv();
 
-    int32_t stack[128];
+    int32_t stack[32];
     stack[0] = 0;
     CountT stack_size = 1;
 
