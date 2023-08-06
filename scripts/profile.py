@@ -5,24 +5,22 @@ import subprocess
 import pandas as pd
 
 NUM_THREADS_PER_BLOCK = 256
-NUM_SMS = 82
+NUM_SMS = 128
 BASE_STEP = 10
 DIR_PATH = "/tmp/profile_blocks__megakernel_events"
 # only take action when the change of config for certain node can contribute to at least 0.1% overall acceleration
 THRESHOLD = 1000
 
 
-def profile_madrona(path_to_lib,
-                    path_to_bench,
+def profile_madrona(path_to_bench,
                     block_config=range(1, 7),
-                    cache="/tmp/madcache"):
+                    cache="build/madcache"):
     for config in block_config:
-        profile_command = "MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_EXEC_CONFIG_OVERRIDE={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} PYTHONPATH={lib} python {benchmark} 16384 20 1 0".format(
+        profile_command = "MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_EXEC_CONFIG_OVERRIDE={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} python {benchmark} 16384 100 0 0 1".format(
             thread=NUM_THREADS_PER_BLOCK,
             block=config,
             sm=NUM_SMS,
             cache=cache,
-            lib=path_to_lib,
             benchmark=path_to_bench)
         subprocess.run(profile_command, shell=True, text=True)
 
@@ -98,11 +96,11 @@ def generate_json(block_config=range(1, 7)):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 2:
         print(
-            "Usage: python profile.py [path_to_python_lib] [path_to_benchmark_script]]"
+            "Usage: python profile.py [path_to_benchmark_script]]"
         )
         sys.exit(1)
-    profile_madrona(sys.argv[1], sys.argv[2])
+    profile_madrona(sys.argv[1])
     parse_traces()
     generate_json()
