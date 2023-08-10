@@ -31,8 +31,8 @@ Madrona itself is not an RL environment simulator. It is a game engine / framewo
 ### [Madrona Escape Room](https://github.com/shacklettbp/madrona_escape_room)
 * A simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and push blocks to advance through a series of rooms.
 
-### [Overcooked AI](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/overcooked_env#overcooked-environment)
-* A high-throughput Madrona rewrite of the [Overcooked AI environment](https://github.com/HumanCompatibleAI/overcooked_ai), a multi-agent learning environment based on the cooperative video game. Check out this repo for a Colab notebook that allows you to train overcooked agents that demonstrate optimal play in about two minutes.
+### [Overcooked-AI](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/overcooked_env#overcooked-environment)
+* A high-throughput Madrona rewrite of the [Overcooked-AI environment](https://github.com/HumanCompatibleAI/overcooked_ai), a multi-agent learning environment based on the cooperative video game. Check out this repo for a Colab notebook that allows you to train overcooked agents that demonstrate optimal play in about two minutes.
 
 ### [Hide and Seek](https://github.com/shacklettbp/gpu_hideseek)
 * A reimplementation of OpenAI's "Hide and Seek" environment from the paper [Emergent Tool Use from Multi-Agent Autocurricula](https://openai.com/research/emergent-tool-use) (Baker 2020). 
@@ -73,7 +73,7 @@ Madrona is intended to be integrated as a library / submodule of simulators buil
 
 As a starting point for learning how to use the engine, we recommend the [Madrona Escape Room](https://github.com/shacklettbp/madrona_escape_room) project. This is a simple 3D environment that demonstrates the use of Madrona's ECS APIs, as well as physics and rendering functionality, via a simple task where agents must learn to press buttons and pull blocks to advance through a series of rooms.
 
-For ML-focused users interested in training agents at high speed, we recommend you check out the [Madrona RL Environments repo](https://github.com/bsarkar321/madrona_rl_envs) that contains an Overcooked AI implementation where you can train agents in two minutes using Google Colab, as well as Hanabi and Cartpole implementations.
+For ML-focused users interested in training agents at high speed, we recommend you check out the [Madrona RL Environments repo](https://github.com/bsarkar321/madrona_rl_envs) that contains an Overcooked-AI implementation where you can train agents in two minutes using Google Colab, as well as Hanabi and Cartpole implementations.
 
 If you are interested in authoring a new simulator on top of Madrona, we recommend forking one of the above projects and adding your own functionality, or forking the [Madrona Simple Example repository](https://github.com/shacklettbp/madrona_simple_example) for a code base with very little existing logic to get in your way. Basing your work on one of these repositories will ensure the CMake build system and python bindings are setup correctly.
 
