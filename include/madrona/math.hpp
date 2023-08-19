@@ -322,6 +322,8 @@ struct AABB {
                                        const Quat &rotation,
                                        const Diag3x3 &scale = {1, 1, 1}) const;
 
+    inline float operator[](CountT i) const;
+
     static inline AABB invalid();
     static inline AABB point(const Vector3 &p);
     static inline AABB merge(const AABB &a, const AABB &b);

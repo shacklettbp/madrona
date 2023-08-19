@@ -91,7 +91,7 @@ bool MeshBVH::traceRay(math::Vector3 o,
 
     Diag3x3 inv_d = Diag3x3::fromVec(d).inv();
 
-    TriIntersectTxfm tri_isect_txfm = computeTriIntersectTxfm(d, inv_d);
+    RayIsectTxfm tri_isect_txfm = computeRayIsectTxfm(o, d, inv_d);
 
     int32_t stack[128];
     stack[0] = 0;
@@ -121,7 +121,32 @@ bool MeshBVH::traceRay(math::Vector3 o,
                 },
             };
 
-            if (child_aabb.rayIntersects(o, inv_d, 0.f, t_max)) {
+            float t_near_x = (child_aabb[tri_isect_txfm.nearX] - 
+                              tri_isect_txfm.oNear.x) *
+                                 tri_isect_txfm.invDirNear.x;
+            float t_near_y = (child_aabb[tri_isect_txfm.nearY] -
+                              tri_isect_txfm.oNear.y) *
+                                 tri_isect_txfm.invDirNear.y;
+            float t_near_z = (child_aabb[tri_isect_txfm.nearZ] -
+                              tri_isect_txfm.oNear.z) *
+                                 tri_isect_txfm.invDirNear.z;
+
+            float t_far_x = (child_aabb[tri_isect_txfm.farX] - 
+                              tri_isect_txfm.oFar.x) *
+                                 tri_isect_txfm.invDirFar.x;
+            float t_far_y = (child_aabb[tri_isect_txfm.farY] -
+                              tri_isect_txfm.oFar.y) *
+                                 tri_isect_txfm.invDirFar.y;
+            float t_far_z = (child_aabb[tri_isect_txfm.farZ] -
+                              tri_isect_txfm.oFar.z) *
+                                 tri_isect_txfm.invDirFar.z;
+
+            float t_near = fmaxf(t_near_x, fmaxf(t_near_y,
+                fmaxf(t_near_z, 0.f)));
+            float t_far = fminf(t_far_x, fminf(t_far_y,
+                fminf(t_far_z, t_max)));
+
+            if (t_near <= t_far) {
                 if (node.isLeaf(i)) {
                     int32_t leaf_idx = node.leafIDX(i);
                     
@@ -152,7 +177,7 @@ bool MeshBVH::traceRay(math::Vector3 o,
 }
 
 bool MeshBVH::traceRayIntoLeaf(int32_t leaf_idx,
-                               TriIntersectTxfm tri_isect_txfm,
+                               RayIsectTxfm tri_isect_txfm,
                                math::Vector3 ray_o,
                                float t_max,
                                float *out_hit_t,
@@ -339,8 +364,8 @@ bool MeshBVH::fetchLeafTriangle(CountT leaf_idx,
     return true;
 }
 
-MeshBVH::TriIntersectTxfm MeshBVH::computeTriIntersectTxfm(
-    math::Vector3 d, math::Diag3x3 inv_d) const
+MeshBVH::RayIsectTxfm MeshBVH::computeRayIsectTxfm(
+    math::Vector3 o, math::Vector3 d, math::Diag3x3 inv_d) const
 {
     // Woop et al 2013
     float abs_x = fabsf(d.x);
@@ -376,13 +401,124 @@ MeshBVH::TriIntersectTxfm MeshBVH::computeTriIntersectTxfm(
     float Sy = d[ky] * inv_d[kz];
     float Sz = inv_d[kz];
 
-    return TriIntersectTxfm {
+    // AABB check precomputations
+    int32_t near_id[3] = { 0, 1, 2 };
+    int32_t far_id[3] = { 3, 4, 5 };
+
+    int32_t near_x = near_id[kx], far_x = far_id[kx];
+    int32_t near_y = near_id[ky], far_y = far_id[ky];
+    int32_t near_z = near_id[kz], far_z = far_id[kz];
+
+    if (inv_d[kx] < 0.f) {
+        std::swap(near_x, far_x);
+    }
+
+    if (inv_d[ky] < 0.f) {
+        std::swap(near_y, far_y);
+    }
+
+    if (inv_d[kz] < 0.f) {
+        std::swap(near_z, far_z);
+    }
+
+    constexpr float p = 1.00000012f;
+    constexpr float m = 0.99999988f;
+
+    auto up = [](float a) {
+        return a > 0.f ? a * p : a * m;
+    };
+
+    auto dn = [](float a) {
+        return a > 0.f ? a * m : a * p;
+    };
+
+    // Positive only
+    auto upPos = [](float a) {
+        return a * p;
+    };
+    auto dnPos = [](float a) {
+        return a * m;
+    };
+
+    constexpr float eps = 2.98023224e-7f;
+
+    math::Vector3 lower = o - rootAABB.pMin;
+    math::Vector3 upper = o - rootAABB.pMax;
+
+    lower.x = dnPos(fabsf(lower.x));
+    lower.y = dnPos(fabsf(lower.y));
+    lower.z = dnPos(fabsf(lower.z));
+
+    upper.x = upPos(fabsf(upper.x));
+    upper.y = upPos(fabsf(upper.y));
+    upper.z = upPos(fabsf(upper.z));
+
+    float max_z = fmaxf(lower[kz], upper[kz]);
+
+    float err_near_x = upPos(lower[kx] + max_z);
+    float err_near_y = upPos(lower[ky] + max_z);
+    float o_near_x = up(o[kx] + upPos(eps * err_near_x));
+    float o_near_y = up(o[ky] + upPos(eps * err_near_y));
+    float o_near_z = o[kz];
+    float err_far_x = upPos(upper[kx] + max_z);
+    float err_far_y = upPos(upper[ky] + max_z);
+    float o_far_x = dn(o[kx] - upPos(eps * err_far_x));
+    float o_far_y = dn(o[ky] - upPos(eps * err_far_y));
+    float o_far_z = o[kz];
+
+    if (inv_d[kx] < 0.0f) {
+        std::swap(o_near_x, o_far_x);
+    }
+
+    if (inv_d[ky] < 0.0f) {
+        std::swap(o_near_y, o_far_y);
+    }
+
+    // Calculate corrected reciprocal direction for near
+    // and far-plane distance calculations. We correct with one additional ulp
+    // to also correctly round the substraction inside the traversal loop. This
+    // works only because the ray is only allowed to hit geometry in front of
+    // it.
+    float rdir_near_x = dnPos(dnPos(inv_d[kx]));
+    float rdir_near_y = dnPos(dnPos(inv_d[ky]));
+    float rdir_near_z = dnPos(dnPos(inv_d[kz]));
+    float rdir_far_x = upPos(upPos(inv_d[kx]));
+    float rdir_far_y = upPos(upPos(inv_d[ky]));
+    float rdir_far_z = upPos(upPos(inv_d[kz]));
+
+    return RayIsectTxfm {
         .kx = kx,
         .ky = ky,
         .kz = kz,
         .Sx = Sx,
         .Sy = Sy,
         .Sz = Sz,
+        .nearX = near_x,
+        .nearY = near_y,
+        .nearZ = near_z,
+        .farX = far_x,
+        .farY = far_y,
+        .farZ = far_z,
+        .oNear = {
+            .x = o_near_x,
+            .y = o_near_y,
+            .z = o_near_z,
+        },
+        .oFar = {
+            .x = o_far_x,
+            .y = o_far_y,
+            .z = o_far_z,
+        },
+        .invDirNear = {
+            .x = rdir_near_x,
+            .y = rdir_near_y,
+            .z = rdir_near_z,
+        },
+        .invDirFar = {
+            .x = rdir_far_x,
+            .y = rdir_far_y,
+            .z = rdir_far_z,
+        },
     };
 }
 

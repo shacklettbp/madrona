@@ -1522,6 +1522,19 @@ AABB AABB::applyTRS(const Vector3 &translation,
      return txfmed;
 }
 
+float AABB::operator[](CountT i) const
+{
+    switch (i) {
+        case 0: return pMin.x;
+        case 1: return pMin.y;
+        case 2: return pMin.z;
+        case 3: return pMax.x;
+        case 4: return pMax.y;
+        case 5: return pMax.z;
+        default: return 0.f;
+    }
+}
+
 AABB AABB::invalid()
 {
     return AABB {

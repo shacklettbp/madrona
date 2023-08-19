@@ -54,6 +54,8 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
                 uint32_t global_b_idx = mesh_b_idx + cur_vert_offset;
                 uint32_t global_c_idx = mesh_c_idx + cur_vert_offset;
 
+                printf("%u %u %u\n", global_a_idx, global_b_idx, global_c_idx);
+
                 int32_t b_diff = (int32_t)global_b_idx - (int32_t)global_a_idx;
                 int32_t c_diff = (int32_t)global_c_idx - (int32_t)global_a_idx;
                 assert(abs(b_diff) < 32767 && abs(c_diff) < 32767);
@@ -75,6 +77,42 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
             tri_aabb.expand(b);
             tri_aabb.expand(c);
 
+            //tri_aabb.pMax = {1000.f, 1000.f, 1000.f};
+            //tri_aabb.pMin = {-1000.f, -1000.f, -1000.f};
+            
+            if (
+                a.x < tri_aabb.pMin.x ||
+                a.y < tri_aabb.pMin.y ||
+                a.z < tri_aabb.pMin.z ||
+                a.x > tri_aabb.pMax.x ||
+                a.y > tri_aabb.pMax.y ||
+                a.z > tri_aabb.pMax.z) {
+                assert(false);
+            }
+
+            if (
+                b.x < tri_aabb.pMin.x ||
+                b.y < tri_aabb.pMin.y ||
+                b.z < tri_aabb.pMin.z ||
+                b.x > tri_aabb.pMax.x ||
+                b.y > tri_aabb.pMax.y ||
+                b.z > tri_aabb.pMax.z) {
+                assert(false);
+            }
+
+            if (
+                c.x < tri_aabb.pMin.x ||
+                c.y < tri_aabb.pMin.y ||
+                c.z < tri_aabb.pMin.z ||
+                c.x > tri_aabb.pMax.x ||
+                c.y > tri_aabb.pMax.y ||
+                c.z > tri_aabb.pMax.z) {
+                assert(false);
+            }
+
+            tri_aabb.pMax += 1e-5f;
+            tri_aabb.pMin -= 1e-5f;
+            
             tri_aabbs[cur_tri_offset + i] = tri_aabb;
             tri_reorder[cur_tri_offset + i] = cur_tri_offset + i;
         }
@@ -272,6 +310,62 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
                     leaf_geos[leaf_idx].packedIndices[tri_offset] =
                         combined_tri_indices[tri_idx];
 
+                    Vector3 a, b, c;
+
+                    uint64_t packed =
+                        leaf_geos[leaf_idx].packedIndices[tri_offset];
+
+                    uint32_t a_idx = uint32_t(packed >> 32);
+                    int16_t b_diff = int16_t((packed >> 16) & 0xFFFF);
+                    int16_t c_diff = int16_t(packed & 0xFFFF);
+                    uint32_t b_idx = uint32_t((int32_t)a_idx + b_diff);
+                    uint32_t c_idx = uint32_t((int32_t)a_idx + c_diff);
+
+                    printf("%f %f %f\n",
+                        combined_verts[0].x,
+                        combined_verts[0].y,
+                        combined_verts[0].z);
+
+                    a = combined_verts[a_idx];
+                    b = combined_verts[b_idx];
+                    c = combined_verts[c_idx];
+
+                    printf("%u: %f %f %f\n",
+                           a_idx,
+                           a.x, a.y, a.z
+                           );
+
+                    if (
+                        a.x < leaf_aabb.pMin.x ||
+                        a.y < leaf_aabb.pMin.y ||
+                        a.z < leaf_aabb.pMin.z ||
+                        a.x > leaf_aabb.pMax.x ||
+                        a.y > leaf_aabb.pMax.y ||
+                        a.z > leaf_aabb.pMax.z) {
+                        assert(false);
+                    }
+
+                    if (
+                        b.x < leaf_aabb.pMin.x ||
+                        b.y < leaf_aabb.pMin.y ||
+                        b.z < leaf_aabb.pMin.z ||
+                        b.x > leaf_aabb.pMax.x ||
+                        b.y > leaf_aabb.pMax.y ||
+                        b.z > leaf_aabb.pMax.z) {
+                        assert(false);
+                    }
+
+                    if (
+                        c.x < leaf_aabb.pMin.x ||
+                        c.y < leaf_aabb.pMin.y ||
+                        c.z < leaf_aabb.pMin.z ||
+                        c.x > leaf_aabb.pMax.x ||
+                        c.y > leaf_aabb.pMax.y ||
+                        c.z > leaf_aabb.pMax.z) {
+                        assert(false);
+                    }
+            
+
                     leaf_mats[leaf_idx].material[tri_offset] =
                         combined_tri_mats[tri_idx];
                 }
@@ -351,35 +445,24 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
         parent.maxZ[child_offset] = combined_aabb.pMax.z;
     }
 
-    AABB root_aabb = AABB::invalid();
-    {
-        const auto &root_node = nodes[0];
-        for (int32_t i = 0; i < MeshBVH::nodeWidth; i++) {
-            if (root_node.children[i] == MeshBVH::sentinel) {
-                continue;
-            }
-
-            Vector3 p_min {
-                root_node.minX[i],
-                root_node.minY[i],
-                root_node.minZ[i],
-            };
-
-            Vector3 p_max {
-                root_node.maxX[i],
-                root_node.maxY[i],
-                root_node.maxZ[i],
-            };
-
-            root_aabb = AABB::merge(root_aabb, AABB {
-                .pMin = p_min,
-                .pMax = p_max,
-            });
-        }
-    }
-
     int32_t num_nodes = cur_node_offset;
     int32_t num_leaves = cur_leaf_offset;
+
+#if 0
+    {
+        DynArray<bool> leaf_visited(num_leaves);
+
+        int64_t check_stack[128];
+        int64_t stack_size = 1;
+        check_stack[0] = 0;
+
+        while (stack_size > 0) {
+            int64_t cur_node_idx = check_stack[--stack_size];
+
+            auto &node = nodes[cur_node_idx];
+        }
+    }
+#endif
 
     auto buffer_sizes = std::to_array<int64_t>({
         (int64_t)sizeof(Node) * num_nodes,
@@ -399,7 +482,6 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
         .leafGeos = (LeafGeometry *)(buffer + buffer_offsets[0]),
         .leafMats = (LeafMaterial *)(buffer + buffer_offsets[1]),
         .vertices = (Vector3 *)(buffer + buffer_offsets[2]),
-        .rootAABB = root_aabb,
         .numNodes = (uint32_t)num_nodes,
         .numLeaves = (uint32_t)num_leaves,
         .numVerts = (uint32_t)total_num_verts,
