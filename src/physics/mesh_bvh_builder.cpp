@@ -317,7 +317,7 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
         AABB combined_aabb = AABB::invalid();
         for (CountT i = 0; i < 4; i++) {
             if (!node.hasChild(i)) {
-                break;
+                continue;
             }
 
             combined_aabb = AABB::merge(combined_aabb, AABB {
