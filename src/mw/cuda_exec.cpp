@@ -257,6 +257,7 @@ static void setCudaHeapSize()
     if (user_heap_size) {
         heap_size = strtol(user_heap_size,nullptr,10);
     }
+
     REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
                                 heap_size));
 }
