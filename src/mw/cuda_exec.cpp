@@ -251,8 +251,14 @@ namespace madrona {
 static void setCudaHeapSize()
 {
     // FIXME size limit for device side malloc:
+    size_t heap_size = 4ul*1024ul*1024ul*1024ul;
+
+    char* user_heap_size = getenv("MADRONA_MWGPU_DEVICE_HEAP_SIZE");
+    if (user_heap_size) {
+        heap_size = strtol(user_heap_size,nullptr,10);
+    }
     REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
-                                4ul*1024ul*1024ul*1024ul));
+                                heap_size));
 }
 
 using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
