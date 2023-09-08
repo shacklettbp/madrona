@@ -255,7 +255,7 @@ static void setCudaHeapSize()
 
     char* user_heap_size = getenv("MADRONA_MWGPU_DEVICE_HEAP_SIZE");
     if (user_heap_size) {
-        heap_size = strtol(user_heap_size,nullptr,10);
+        heap_size = strtoul(user_heap_size,nullptr,10);
     }
 
     REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
