@@ -19,22 +19,27 @@ int coord(int x,int y,int z,int blockX,int blockY,int blockZ)
     return x * blockY * blockZ + y * blockZ + z;
 }
 
-[numThreads(64, 1, 1)]
+#define xDim 64
+#define yDim 1
+#define zDim 1
+
+[numThreads(xDim, yDim, zDim)]
 [shader("compute")]
 void voxelGen(uint3 idx : SV_DispatchThreadID)
 {
-    int xDim = 64;
-    int yDim = 1;
-    int zDim = 1;
-
-    if (idx.x >= pushConst.worldX)
-        return;
 
 	int indexVal = 0;
     float halfBlockSize = pushConst.blockWidth/2;
     float texAtlasStep = 1.0 / pushConst.numBlocks;
 
-    int i = idx.x;
+    int workPerThread = ceil(pushConst.worldX / (float)xDim);
+
+    for(int i2=0;i2<workPerThread;i2++){
+        int i = i2 + idx.x * workPerThread;
+        if(i >= pushConst.worldX){
+            return;
+        }
+
         for (int j = 0; j < pushConst.worldY; j++) {
             for (int k = 0; k < pushConst.worldZ; k++) {
                 uint data = voxels[coord(i,j,k,pushConst.worldX,pushConst.worldY,pushConst.worldZ)];
@@ -492,4 +497,5 @@ void voxelGen(uint3 idx : SV_DispatchThreadID)
                 }
             }
         }
+    }
 }
