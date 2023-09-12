@@ -135,6 +135,11 @@ struct Frame {
     // Don't need a shadow view staging because that will be done on the GPU.
     render::vk::HostBuffer skyStaging;
     render::vk::LocalBuffer renderInput;
+
+    render::vk::LocalBuffer voxelVBO;
+    render::vk::LocalBuffer voxelIndexBuffer;
+    render::vk::LocalBuffer voxelData;
+
     int64_t renderInputSize;
 
     uint32_t cameraViewOffset;
@@ -152,6 +157,9 @@ struct Frame {
     VkDescriptorSet lightingSet;
     VkDescriptorSet shadowGenSet;
     VkDescriptorSet shadowBlurSet;
+
+    VkDescriptorSet voxelGenSet;
+    VkDescriptorSet voxelDrawSet;
 };
 
 struct ViewerCam {
@@ -183,6 +191,9 @@ struct EngineInterop {
     uint32_t viewBaseOffset;
     uint32_t maxViewsPerWorld;
     uint32_t maxInstancesPerWorld;
+
+    Optional<render::vk::HostBuffer> voxelInputCPU;
+    VkBuffer voxelHdl;
 };
 
 struct ImGuiRenderState {
@@ -221,6 +232,7 @@ struct Sky {
     float exposure;
 };
 
+
 class Renderer {
 public:
     struct FrameConfig {
@@ -234,7 +246,8 @@ public:
              uint32_t num_worlds,
              uint32_t max_views_per_world,
              uint32_t max_instances_per_world,
-             bool gpu_input);
+             bool gpu_input,
+             Viewer::VoxelConfig voxel_config);
     Renderer(const Renderer &) = delete;
     ~Renderer();
 
@@ -287,6 +300,8 @@ private:
     Pipeline<1> deferred_lighting_;
     Pipeline<1> shadow_gen_;
     Pipeline<1> blur_;
+    Pipeline<1> voxel_mesh_gen_;
+    Pipeline<1> voxel_draw_;
 
     render::vk::FixedDescriptorPool asset_desc_pool_cull_;
     render::vk::FixedDescriptorPool asset_desc_pool_draw_;
@@ -311,6 +326,7 @@ private:
     Sky sky_;
 
     DynArray<MaterialTexture> material_textures_;
+    Viewer::VoxelConfig voxel_config_;
 };
 
 }

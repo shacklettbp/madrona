@@ -34,6 +34,12 @@ public:
         ExecMode execMode;
     };
 
+    struct VoxelConfig {
+        uint32_t xLength;
+        uint32_t yLength;
+        uint32_t zLength;
+    };
+
     enum class KeyboardKey : uint32_t {
         W,
         A,
@@ -75,6 +81,7 @@ public:
     };
 
     Viewer(const Config &cfg);
+    Viewer(const Config& cfg, const VoxelConfig& vox_cfg);
     Viewer(Viewer &&o);
 
     ~Viewer();
