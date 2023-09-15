@@ -519,16 +519,6 @@ static PipelineShaders makeVoxelDrawShaders(
     SPIRVShader frag_spirv = compiler.compileHLSLFileToSPV(
         shader_path.c_str(), {}, {},
         { "frag", ShaderStage::Fragment });
-
-#if 0
-    {0, 2, repeat_sampler, 1, 0},
-    { 0, 3, clamp_sampler, 1, 0 },
-    { 1, 1, VK_NULL_HANDLE,
-        VulkanConfig::max_materials *
-            VulkanConfig::textures_per_material,
-     VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT },
-#endif
-
         std::array<SPIRVShader, 2> shaders {
         std::move(vert_spirv),
             std::move(frag_spirv),
@@ -2570,8 +2560,6 @@ static EngineInterop setupEngineInterop(Device &dev,
 #endif
     }
 
-
-    //New Stuff
     const uint32_t num_voxels = voxel_config.xLength
         * voxel_config.yLength * voxel_config.zLength;
     const uint32_t staging_size = num_voxels > 0 ? num_voxels * sizeof(int32_t) : 4;
@@ -3032,7 +3020,6 @@ Renderer::Renderer(uint32_t gpu_id,
       material_textures_(0),
       voxel_config_(voxel_config)
 {
-    printf("preframes\n");
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
                   max_views_per_world, max_instances_per_world,
@@ -3050,7 +3037,6 @@ Renderer::Renderer(uint32_t gpu_id,
                   sky_,
                   &frames_[i]);
     }
-    printf("postframes\n");
 }
 
 Renderer::~Renderer()
@@ -3132,13 +3118,11 @@ Renderer::~Renderer()
     dev.dt.destroyPipeline(dev.hdl, blur_.hdls[0], nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, blur_.layout, nullptr);
 
-
-    //New Code
     dev.dt.destroyPipeline(dev.hdl, voxel_mesh_gen_.hdls[0], nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, voxel_mesh_gen_.layout, nullptr);
+
     dev.dt.destroyPipeline(dev.hdl, voxel_draw_.hdls[0], nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, voxel_draw_.layout, nullptr);
-    //end of newcode
 
     dev.dt.destroyRenderPass(dev.hdl, imgui_render_state_.renderPass, nullptr);
     dev.dt.destroyDescriptorPool(
@@ -4427,8 +4411,6 @@ void Renderer::render(const ViewerCam &cam,
                                   num_instances * 10,
                                   sizeof(DrawCmd));
 
-    //Added
-    
     if (num_voxels > 0) {
         dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             voxel_draw_.hdls[0]);
@@ -4456,9 +4438,9 @@ void Renderer::render(const ViewerCam &cam,
         dev.dt.cmdBindIndexBuffer(draw_cmd, frame.voxelIndexBuffer.buffer,
             0,
             VK_INDEX_TYPE_UINT32);
-        dev.dt.cmdDrawIndexed(draw_cmd, static_cast<uint32_t>(num_voxels * 6 * 6), 1, 0, 0, 0);
+        dev.dt.cmdDrawIndexed(draw_cmd, static_cast<uint32_t>(num_voxels * 6 * 6),
+            1, 0, 0, 0);
     }
-    //End of Added
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 
