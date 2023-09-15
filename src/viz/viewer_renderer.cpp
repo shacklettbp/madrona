@@ -467,14 +467,6 @@ static Pipeline<1> makeVoxelMeshGenPipeline(const Device& dev,
         &voxel_gen_layout));
 
     std::array<VkComputePipelineCreateInfo, 1> compute_infos;
-#if 0
-    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size;
-    subgroup_size.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
-    subgroup_size.pNext = nullptr;
-    subgroup_size.requiredSubgroupSize = 32;
-#endif
-
     compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
     compute_infos[0].pNext = nullptr;
     compute_infos[0].flags = 0;
@@ -562,198 +554,13 @@ static PipelineShaders makeVoxelDrawShaders(
             }));
 }
 
-static Pipeline<1> makeVoxelDrawPipeline(const Device& dev,
-    VkPipelineCache pipeline_cache,
-    VkRenderPass render_pass,
-    VkSampler repeat_sampler,
-    VkSampler clamp_sampler,
-    uint32_t num_frames)
-{
-    auto shaders =
-        makeVoxelDrawShaders(dev, repeat_sampler, clamp_sampler);
-
-    // Disable auto vertex assembly
-    VkPipelineVertexInputStateCreateInfo vert_info;
-    vert_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vert_info.pNext = nullptr;
-    vert_info.flags = 0;
-    vert_info.vertexBindingDescriptionCount = 0;
-    vert_info.pVertexBindingDescriptions = nullptr;
-    vert_info.vertexAttributeDescriptionCount = 0;
-    vert_info.pVertexAttributeDescriptions = nullptr;
-
-    // Assembly (standard tri indices)
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_info{};
-    input_assembly_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    input_assembly_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    input_assembly_info.primitiveRestartEnable = VK_FALSE;
-
-    // Viewport (fully dynamic)
-    VkPipelineViewportStateCreateInfo viewport_info{};
-    viewport_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewport_info.viewportCount = 1;
-    viewport_info.pViewports = nullptr;
-    viewport_info.scissorCount = 1;
-    viewport_info.pScissors = nullptr;
-
-    // Multisample
-    VkPipelineMultisampleStateCreateInfo multisample_info{};
-    multisample_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisample_info.sampleShadingEnable = VK_FALSE;
-    multisample_info.alphaToCoverageEnable = VK_FALSE;
-    multisample_info.alphaToOneEnable = VK_FALSE;
-
-    // Rasterization
-    VkPipelineRasterizationStateCreateInfo raster_info{};
-    raster_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    raster_info.depthClampEnable = VK_FALSE;
-    raster_info.rasterizerDiscardEnable = VK_FALSE;
-    raster_info.polygonMode = VK_POLYGON_MODE_FILL;
-    raster_info.cullMode = VK_CULL_MODE_BACK_BIT;
-    raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster_info.depthBiasEnable = VK_FALSE;
-    raster_info.lineWidth = 1.0f;
-
-    // Depth/Stencil
-    VkPipelineDepthStencilStateCreateInfo depth_info{};
-    depth_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depth_info.depthTestEnable = VK_TRUE;
-    depth_info.depthWriteEnable = VK_TRUE;
-    depth_info.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
-    depth_info.depthBoundsTestEnable = VK_FALSE;
-    depth_info.stencilTestEnable = VK_FALSE;
-    depth_info.back.compareOp = VK_COMPARE_OP_ALWAYS;
-
-    // Blend
-    VkPipelineColorBlendAttachmentState blend_attach{};
-    blend_attach.blendEnable = VK_FALSE;
-    blend_attach.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-    array<VkPipelineColorBlendAttachmentState, 3> blend_attachments {{
-            blend_attach,
-                blend_attach,
-                blend_attach
-        }};
-
-    VkPipelineColorBlendStateCreateInfo blend_info{};
-    blend_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blend_info.logicOpEnable = VK_FALSE;
-    blend_info.attachmentCount =
-        static_cast<uint32_t>(blend_attachments.size());
-    blend_info.pAttachments = blend_attachments.data();
-
-    // Dynamic
-    array dyn_enable{
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR,
-    };
-
-    VkPipelineDynamicStateCreateInfo dyn_info{};
-    dyn_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dyn_info.dynamicStateCount = dyn_enable.size();
-    dyn_info.pDynamicStates = dyn_enable.data();
-
-    // Push constant
-    VkPushConstantRange push_const{
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        0,
-        sizeof(DrawPushConst),
-    };
-
-    // Layout configuration
-
-    array<VkDescriptorSetLayout, 2> draw_desc_layouts {{
-            shaders.getLayout(0),
-                shaders.getLayout(1)
-        }};
-
-    VkPipelineLayoutCreateInfo gfx_layout_info;
-    gfx_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    gfx_layout_info.pNext = nullptr;
-    gfx_layout_info.flags = 0;
-    gfx_layout_info.setLayoutCount =
-        static_cast<uint32_t>(draw_desc_layouts.size());
-    gfx_layout_info.pSetLayouts = draw_desc_layouts.data();
-    gfx_layout_info.pushConstantRangeCount = 1;
-    gfx_layout_info.pPushConstantRanges = &push_const;
-
-    VkPipelineLayout draw_layout;
-    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &gfx_layout_info, nullptr,
-        &draw_layout));
-
-    array<VkPipelineShaderStageCreateInfo, 2> gfx_stages {{
-        {
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                nullptr,
-                0,
-                VK_SHADER_STAGE_VERTEX_BIT,
-                shaders.getShader(0),
-                "vert",
-                nullptr,
-        },
-        {
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            nullptr,
-            0,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            shaders.getShader(1),
-            "frag",
-            nullptr,
-        },
-        }};
-
-    VkGraphicsPipelineCreateInfo gfx_info;
-    gfx_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gfx_info.pNext = nullptr;
-    gfx_info.flags = 0;
-    gfx_info.stageCount = gfx_stages.size();
-    gfx_info.pStages = gfx_stages.data();
-    gfx_info.pVertexInputState = &vert_info;
-    gfx_info.pInputAssemblyState = &input_assembly_info;
-    gfx_info.pTessellationState = nullptr;
-    gfx_info.pViewportState = &viewport_info;
-    gfx_info.pRasterizationState = &raster_info;
-    gfx_info.pMultisampleState = &multisample_info;
-    gfx_info.pDepthStencilState = &depth_info;
-    gfx_info.pColorBlendState = &blend_info;
-    gfx_info.pDynamicState = &dyn_info;
-    gfx_info.layout = draw_layout;
-    gfx_info.renderPass = render_pass;
-    gfx_info.subpass = 0;
-    gfx_info.basePipelineHandle = VK_NULL_HANDLE;
-    gfx_info.basePipelineIndex = -1;
-
-    VkPipeline draw_pipeline;
-    REQ_VK(dev.dt.createGraphicsPipelines(dev.hdl, pipeline_cache, 1,
-        &gfx_info, nullptr, &draw_pipeline));
-
-    FixedDescriptorPool desc_pool(dev, shaders, 0, num_frames);
-
-    return {
-        std::move(shaders),
-        draw_layout,
-        { draw_pipeline },
-        std::move(desc_pool),
-    };
-}
-
 static void issueVoxelGen(Device& dev,
     Frame& frame,
     Pipeline<1>& pipeline,
     VkCommandBuffer draw_cmd,
     uint32_t view_idx,
     uint32_t max_views,
-    Viewer::VoxelConfig voxel_config)
+    VoxelConfig voxel_config)
 {
     const uint32_t num_voxels = voxel_config.xLength * voxel_config.yLength * voxel_config.zLength;
 
@@ -767,6 +574,22 @@ static void issueVoxelGen(Device& dev,
             frame.voxelData.buffer,
             0,
             (VkDeviceSize)(num_voxels * sizeof(uint32_t))
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 1, &compute_prepare, 0, nullptr);
+    }
+
+    {
+        VkBufferMemoryBarrier compute_prepare = {
+            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            nullptr,
+           VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
+            VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
+            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+            frame.voxelVBO.buffer,
+            0,
+            (VkDeviceSize)(32 * 4 * 6 * num_voxels)
         };
 
         dev.dt.cmdPipelineBarrier(draw_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -1132,18 +955,12 @@ static VkPipelineCache getPipelineCache(const Device &dev)
     return pipeline_cache;
 }
 
-static Pipeline<1> makeDrawPipeline(const Device &dev,
-                                    VkPipelineCache pipeline_cache,
-                                    VkRenderPass render_pass,
-                                    VkSampler repeat_sampler,
-                                    VkSampler clamp_sampler,
-                                    uint32_t num_frames)
-{
-    auto shaders =
-        makeDrawShaders(dev, repeat_sampler, clamp_sampler);
-
+static void initCommonDrawPipelineInfo(VkPipelineVertexInputStateCreateInfo &vert_info,
+                                       VkPipelineInputAssemblyStateCreateInfo &input_assembly_info,
+                                       VkPipelineViewportStateCreateInfo &viewport_info,
+                                       VkPipelineMultisampleStateCreateInfo &multisample_info,
+                                       VkPipelineRasterizationStateCreateInfo &raster_info) {
     // Disable auto vertex assembly
-    VkPipelineVertexInputStateCreateInfo vert_info;
     vert_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vert_info.pNext = nullptr;
@@ -1154,14 +971,12 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     vert_info.pVertexAttributeDescriptions = nullptr;
 
     // Assembly (standard tri indices)
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_info {};
     input_assembly_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     input_assembly_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     input_assembly_info.primitiveRestartEnable = VK_FALSE;
 
     // Viewport (fully dynamic)
-    VkPipelineViewportStateCreateInfo viewport_info {};
     viewport_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewport_info.viewportCount = 1;
@@ -1170,7 +985,6 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     viewport_info.pScissors = nullptr;
 
     // Multisample
-    VkPipelineMultisampleStateCreateInfo multisample_info {};
     multisample_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisample_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -1179,7 +993,6 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     multisample_info.alphaToOneEnable = VK_FALSE;
 
     // Rasterization
-    VkPipelineRasterizationStateCreateInfo raster_info {};
     raster_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     raster_info.depthClampEnable = VK_FALSE;
@@ -1189,6 +1002,26 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster_info.depthBiasEnable = VK_FALSE;
     raster_info.lineWidth = 1.0f;
+}
+
+static Pipeline<1> makeDrawPipeline(const Device &dev,
+                                    VkPipelineCache pipeline_cache,
+                                    VkRenderPass render_pass,
+                                    VkSampler repeat_sampler,
+                                    VkSampler clamp_sampler,
+                                    uint32_t num_frames)
+{
+    auto shaders =
+        makeDrawShaders(dev, repeat_sampler, clamp_sampler);
+
+    VkPipelineVertexInputStateCreateInfo vert_info {};
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_info {};
+    VkPipelineViewportStateCreateInfo viewport_info {};
+    VkPipelineMultisampleStateCreateInfo multisample_info {};
+    VkPipelineRasterizationStateCreateInfo raster_info {};
+
+    initCommonDrawPipelineInfo(vert_info, input_assembly_info, 
+        viewport_info, multisample_info, raster_info);
 
     // Depth/Stencil
     VkPipelineDepthStencilStateCreateInfo depth_info {};
@@ -1328,54 +1161,14 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     auto shaders =
         makeShadowDrawShaders(dev, repeat_sampler, clamp_sampler);
 
-    // Disable auto vertex assembly
-    VkPipelineVertexInputStateCreateInfo vert_info;
-    vert_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vert_info.pNext = nullptr;
-    vert_info.flags = 0;
-    vert_info.vertexBindingDescriptionCount = 0;
-    vert_info.pVertexBindingDescriptions = nullptr;
-    vert_info.vertexAttributeDescriptionCount = 0;
-    vert_info.pVertexAttributeDescriptions = nullptr;
-
-    // Assembly (standard tri indices)
+    VkPipelineVertexInputStateCreateInfo vert_info {};
     VkPipelineInputAssemblyStateCreateInfo input_assembly_info {};
-    input_assembly_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    input_assembly_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    input_assembly_info.primitiveRestartEnable = VK_FALSE;
-
-    // Viewport (fully dynamic)
     VkPipelineViewportStateCreateInfo viewport_info {};
-    viewport_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewport_info.viewportCount = 1;
-    viewport_info.pViewports = nullptr;
-    viewport_info.scissorCount = 1;
-    viewport_info.pScissors = nullptr;
-
-    // Multisample
     VkPipelineMultisampleStateCreateInfo multisample_info {};
-    multisample_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisample_info.sampleShadingEnable = VK_FALSE;
-    multisample_info.alphaToCoverageEnable = VK_FALSE;
-    multisample_info.alphaToOneEnable = VK_FALSE;
-
-    // Rasterization
     VkPipelineRasterizationStateCreateInfo raster_info {};
-    raster_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    raster_info.depthClampEnable = VK_FALSE;
-    raster_info.rasterizerDiscardEnable = VK_FALSE;
-    raster_info.polygonMode = VK_POLYGON_MODE_FILL;
-    // raster_info.cullMode = VK_CULL_MODE_FRONT_BIT;
-    raster_info.cullMode = VK_CULL_MODE_BACK_BIT;
-    raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster_info.depthBiasEnable = VK_FALSE;
-    raster_info.lineWidth = 1.0f;
+
+    initCommonDrawPipelineInfo(vert_info, input_assembly_info, 
+        viewport_info, multisample_info, raster_info);
 
     // Depth/Stencil
     VkPipelineDepthStencilStateCreateInfo depth_info {};
@@ -1502,6 +1295,151 @@ static Pipeline<1> makeShadowDrawPipeline(const Device &dev,
     };
 }
 
+static Pipeline<1> makeVoxelDrawPipeline(const Device& dev,
+    VkPipelineCache pipeline_cache,
+    VkRenderPass render_pass,
+    VkSampler repeat_sampler,
+    VkSampler clamp_sampler,
+    uint32_t num_frames)
+{
+    auto shaders =
+        makeVoxelDrawShaders(dev, repeat_sampler, clamp_sampler);
+
+    VkPipelineVertexInputStateCreateInfo vert_info{};
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_info{};
+    VkPipelineViewportStateCreateInfo viewport_info{};
+    VkPipelineMultisampleStateCreateInfo multisample_info{};
+    VkPipelineRasterizationStateCreateInfo raster_info{};
+
+    initCommonDrawPipelineInfo(vert_info, input_assembly_info,
+        viewport_info, multisample_info, raster_info);
+
+    // Depth/Stencil
+    VkPipelineDepthStencilStateCreateInfo depth_info{};
+    depth_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depth_info.depthTestEnable = VK_TRUE;
+    depth_info.depthWriteEnable = VK_TRUE;
+    depth_info.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+    depth_info.depthBoundsTestEnable = VK_FALSE;
+    depth_info.stencilTestEnable = VK_FALSE;
+    depth_info.back.compareOp = VK_COMPARE_OP_ALWAYS;
+
+    // Blend
+    VkPipelineColorBlendAttachmentState blend_attach{};
+    blend_attach.blendEnable = VK_FALSE;
+    blend_attach.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    array<VkPipelineColorBlendAttachmentState, 3> blend_attachments {{
+            blend_attach,
+                blend_attach,
+                blend_attach
+        }};
+
+    VkPipelineColorBlendStateCreateInfo blend_info{};
+    blend_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend_info.logicOpEnable = VK_FALSE;
+    blend_info.attachmentCount =
+        static_cast<uint32_t>(blend_attachments.size());
+    blend_info.pAttachments = blend_attachments.data();
+
+    // Dynamic
+    array dyn_enable{
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+    };
+
+    VkPipelineDynamicStateCreateInfo dyn_info{};
+    dyn_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dyn_info.dynamicStateCount = dyn_enable.size();
+    dyn_info.pDynamicStates = dyn_enable.data();
+
+    // Push constant
+    VkPushConstantRange push_const{
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(DrawPushConst),
+    };
+
+    // Layout configuration
+
+    array<VkDescriptorSetLayout, 2> draw_desc_layouts {{
+            shaders.getLayout(0),
+                shaders.getLayout(1)
+        }};
+
+    VkPipelineLayoutCreateInfo gfx_layout_info;
+    gfx_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    gfx_layout_info.pNext = nullptr;
+    gfx_layout_info.flags = 0;
+    gfx_layout_info.setLayoutCount =
+        static_cast<uint32_t>(draw_desc_layouts.size());
+    gfx_layout_info.pSetLayouts = draw_desc_layouts.data();
+    gfx_layout_info.pushConstantRangeCount = 1;
+    gfx_layout_info.pPushConstantRanges = &push_const;
+
+    VkPipelineLayout draw_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &gfx_layout_info, nullptr,
+        &draw_layout));
+
+    array<VkPipelineShaderStageCreateInfo, 2> gfx_stages {{
+        {
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                nullptr,
+                0,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                shaders.getShader(0),
+                "vert",
+                nullptr,
+        },
+        {
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            nullptr,
+            0,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            shaders.getShader(1),
+            "frag",
+            nullptr,
+        },
+        }};
+
+    VkGraphicsPipelineCreateInfo gfx_info;
+    gfx_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    gfx_info.pNext = nullptr;
+    gfx_info.flags = 0;
+    gfx_info.stageCount = gfx_stages.size();
+    gfx_info.pStages = gfx_stages.data();
+    gfx_info.pVertexInputState = &vert_info;
+    gfx_info.pInputAssemblyState = &input_assembly_info;
+    gfx_info.pTessellationState = nullptr;
+    gfx_info.pViewportState = &viewport_info;
+    gfx_info.pRasterizationState = &raster_info;
+    gfx_info.pMultisampleState = &multisample_info;
+    gfx_info.pDepthStencilState = &depth_info;
+    gfx_info.pColorBlendState = &blend_info;
+    gfx_info.pDynamicState = &dyn_info;
+    gfx_info.layout = draw_layout;
+    gfx_info.renderPass = render_pass;
+    gfx_info.subpass = 0;
+    gfx_info.basePipelineHandle = VK_NULL_HANDLE;
+    gfx_info.basePipelineIndex = -1;
+
+    VkPipeline draw_pipeline;
+    REQ_VK(dev.dt.createGraphicsPipelines(dev.hdl, pipeline_cache, 1,
+        &gfx_info, nullptr, &draw_pipeline));
+
+    FixedDescriptorPool desc_pool(dev, shaders, 0, num_frames);
+
+    return {
+        std::move(shaders),
+        draw_layout,
+        { draw_pipeline },
+        std::move(desc_pool),
+    };
+}
 
 static Pipeline<1> makeCullPipeline(const Device &dev,
                                     VkPipelineCache pipeline_cache,
@@ -2008,7 +1946,7 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
 static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       uint32_t fb_width, uint32_t fb_height,
                       uint32_t max_views, uint32_t max_instances,
-                      Viewer::VoxelConfig voxel_config,
+                      VoxelConfig voxel_config,
                       VkRenderPass render_pass,
                       VkRenderPass imgui_render_pass,
                       VkRenderPass shadow_pass,
@@ -2180,44 +2118,44 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
 
     //Voxelizer Changes
+    const int32_t num_voxels = voxel_config.xLength * voxel_config.yLength * voxel_config.zLength;
+    const int32_t voxels_size = num_voxels > 0 ? sizeof(int32_t) * num_voxels : 4;
+    const int32_t vertices_size = num_voxels > 0 ? num_voxels * 32 * 6 * sizeof(float) : 4;
+    const int32_t indices_size = num_voxels > 0 ? num_voxels * 6 * 6 * sizeof(int32_t) : 4;
+
     std::array<VkWriteDescriptorSet, 5> voxel_updates;
 
-    const int32_t numVoxels = voxel_config.xLength * voxel_config.yLength * voxel_config.zLength;
-    int32_t voxelsSize = sizeof(int32_t) * numVoxels;
-    int32_t verticesSize = numVoxels * 32 * 6 * sizeof(float);
-    int32_t indicesSize = numVoxels * 6 * 6 * sizeof(int32_t);
+    LocalBuffer voxel_vbo = *alloc.makeLocalBuffer(vertices_size);
+    LocalBuffer voxel_ibo = *alloc.makeLocalBuffer(indices_size);
+    LocalBuffer voxel_data = *alloc.makeLocalBuffer(voxels_size);
 
-    LocalBuffer voxelVBO = *alloc.makeLocalBuffer(verticesSize);
-    LocalBuffer voxelIndexBuffer = *alloc.makeLocalBuffer(indicesSize);
-    LocalBuffer voxelData = *alloc.makeLocalBuffer(voxelsSize);
+    VkDescriptorBufferInfo voxel_vbo_info;
+    voxel_vbo_info.buffer = voxel_vbo.buffer;
+    voxel_vbo_info.offset = 0;
+    voxel_vbo_info.range = vertices_size;
 
-    VkDescriptorBufferInfo voxelVBO_info;
-    voxelVBO_info.buffer = voxelVBO.buffer;
-    voxelVBO_info.offset = 0;
-    voxelVBO_info.range = verticesSize;
-
-    DescHelper::storage(voxel_updates[0], voxel_gen_set, &voxelVBO_info, 0);
+    DescHelper::storage(voxel_updates[0], voxel_gen_set, &voxel_vbo_info, 0);
 
     VkDescriptorBufferInfo voxelIndexBuffer_info;
-    voxelIndexBuffer_info.buffer = voxelIndexBuffer.buffer;
+    voxelIndexBuffer_info.buffer = voxel_ibo.buffer;
     voxelIndexBuffer_info.offset = 0;
-    voxelIndexBuffer_info.range = indicesSize;
+    voxelIndexBuffer_info.range = indices_size;
 
     DescHelper::storage(voxel_updates[1], voxel_gen_set, &voxelIndexBuffer_info, 1);
 
     VkDescriptorBufferInfo voxel_info;
-    voxel_info.buffer = voxelData.buffer;
+    voxel_info.buffer = voxel_data.buffer;
     voxel_info.offset = 0;
-    voxel_info.range = voxelsSize;
+    voxel_info.range = voxels_size;
 
     DescHelper::storage(voxel_updates[2], voxel_gen_set, &voxel_info, 2);
 
     DescHelper::storage(voxel_updates[3], voxel_draw_set, &view_info, 0);
 
     VkDescriptorBufferInfo vert_info;
-    vert_info.buffer = voxelVBO.buffer;
+    vert_info.buffer = voxel_vbo.buffer;
     vert_info.offset = 0;
-    vert_info.range = verticesSize;
+    vert_info.range = vertices_size;
     DescHelper::storage(voxel_updates[4], voxel_draw_set, &vert_info, 1);
     DescHelper::update(dev, voxel_updates.data(), voxel_updates.size());
     //End Voxelizer Changes
@@ -2238,9 +2176,9 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         std::move(light_staging),
         std::move(sky_staging),
         std::move(render_input),
-        std::move(voxelVBO),
-        std::move(voxelIndexBuffer),
-        std::move(voxelData),
+        std::move(voxel_vbo),
+        std::move(voxel_ibo),
+        std::move(voxel_data),
         num_render_input_bytes,
         0,
         sizeof(PackedViewData),
@@ -2514,7 +2452,7 @@ static EngineInterop setupEngineInterop(Device &dev,
                                         uint32_t max_instances_per_world,
                                         uint32_t render_width,
                                         uint32_t render_height,
-                                        Viewer::VoxelConfig voxel_config)
+                                        VoxelConfig voxel_config)
 {
     int64_t render_input_buffer_offsets[1];
     int64_t render_input_buffer_sizes[2] = {
@@ -2634,8 +2572,10 @@ static EngineInterop setupEngineInterop(Device &dev,
 
 
     //New Stuff
-    auto voxel_cpu = alloc.makeStagingBuffer(voxel_config.xLength
-        * voxel_config.yLength * voxel_config.zLength * sizeof(int32_t));
+    const uint32_t num_voxels = voxel_config.xLength
+        * voxel_config.yLength * voxel_config.zLength;
+    const uint32_t staging_size = num_voxels > 0 ? num_voxels * sizeof(int32_t) : 4;
+    auto voxel_cpu = alloc.makeStagingBuffer(staging_size);
 
     VizECSBridge bridge {
         .views = world_views,
@@ -3018,7 +2958,7 @@ Renderer::Renderer(uint32_t gpu_id,
                    uint32_t max_views_per_world,
                    uint32_t max_instances_per_world,
                    bool gpu_input,
-                   Viewer::VoxelConfig voxel_config)
+                   VoxelConfig voxel_config)
     : loader_lib_(PresentationState::init()),
       backend(initializeBackend()),
       window(makeWindow(backend, img_width, img_height)),
@@ -3111,7 +3051,6 @@ Renderer::Renderer(uint32_t gpu_id,
                   &frames_[i]);
     }
     printf("postframes\n");
-    printf("voxels: %d,%d,%d\n", voxel_config.xLength, voxel_config.yLength, voxel_config.zLength);
 }
 
 Renderer::~Renderer()
@@ -4199,21 +4138,22 @@ void Renderer::render(const ViewerCam &cam,
     issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
                    cfg.viewIDX, engine_interop_.maxViewsPerWorld);
 
-    const int32_t numVoxels = this->voxel_config_.xLength * this->voxel_config_.yLength * this->voxel_config_.zLength;
-    if (numVoxels > 0) {
+    const uint32_t num_voxels = this->voxel_config_.xLength * this->voxel_config_.yLength * this->voxel_config_.zLength;
+
+    if (num_voxels > 0) {
+        dev.dt.cmdFillBuffer(draw_cmd, frame.voxelVBO.buffer,
+            0, sizeof(float) * num_voxels * 6 * 4 * 8, 0);
+
         VkBufferCopy voxel_copy = {
                 .srcOffset = 0,
                 .dstOffset = 0,
-                .size = numVoxels * sizeof(int32_t),
+                .size = num_voxels * sizeof(int32_t),
         };
 
         dev.dt.cmdCopyBuffer(draw_cmd,
             engine_interop_.voxelHdl,
             frame.voxelData.buffer,
             1, &voxel_copy);
-
-        dev.dt.cmdFillBuffer(draw_cmd, frame.voxelVBO.buffer,
-            0, sizeof(float) * numVoxels * 6 * 4 * 8, 0);
 
         issueVoxelGen(dev, frame, voxel_mesh_gen_, draw_cmd, cfg.viewIDX, engine_interop_.maxInstancesPerWorld, voxel_config_);
     }
@@ -4489,7 +4429,7 @@ void Renderer::render(const ViewerCam &cam,
 
     //Added
     
-    if (numVoxels > 0) {
+    if (num_voxels > 0) {
         dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             voxel_draw_.hdls[0]);
 
@@ -4516,7 +4456,7 @@ void Renderer::render(const ViewerCam &cam,
         dev.dt.cmdBindIndexBuffer(draw_cmd, frame.voxelIndexBuffer.buffer,
             0,
             VK_INDEX_TYPE_UINT32);
-        dev.dt.cmdDrawIndexed(draw_cmd, static_cast<uint32_t>(numVoxels * 6 * 6), 1, 0, 0, 0);
+        dev.dt.cmdDrawIndexed(draw_cmd, static_cast<uint32_t>(num_voxels * 6 * 6), 1, 0, 0, 0);
     }
     //End of Added
 

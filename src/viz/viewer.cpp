@@ -41,7 +41,6 @@ struct Viewer::Impl {
     VoxelConfig voxelConfig;
 
     Impl(const Viewer::Config &cfg);
-    Impl(const Viewer::Config& cfg, const Viewer::VoxelConfig& vox_cfg);
 
     inline void startFrame();
     inline void render(float frame_duration);
@@ -389,33 +388,30 @@ static ViewerCam initCam(math::Vector3 pos, math::Quat rot)
     return cam;
 }
 
-Viewer::Impl::Impl(const Config& cfg, const VoxelConfig& vox_cfg)
+Viewer::Impl::Impl(const Config &cfg)
     : cam(initCam(cfg.cameraPosition, cfg.cameraRotation)),
-    frameCfg{
+      frameCfg{
         .worldIDX = 0,
         .viewIDX = 0,
-    },
-    renderer(cfg.gpuID,
-    cfg.renderWidth,
-    cfg.renderHeight,
-    cfg.numWorlds,
-    cfg.maxViewsPerWorld,
-    cfg.maxInstancesPerWorld,
-    cfg.execMode == ExecMode::CUDA,
-    vox_cfg),
-    numWorlds(cfg.numWorlds),
-    maxNumAgents(cfg.maxViewsPerWorld),
-    simTickRate(cfg.defaultSimTickRate),
-    cameraMoveSpeed(cfg.cameraMoveSpeed),
-    shouldExit(false),
-    voxelConfig(vox_cfg)
-{}
-
-Viewer::Impl::Impl(const Config& cfg) : Viewer::Impl::Impl(cfg, {
-          .xLength = 0,
-          .yLength = 0,
-          .zLength = 0
-    })
+      },
+      renderer(cfg.gpuID,
+               cfg.renderWidth,
+               cfg.renderHeight,
+               cfg.numWorlds,
+               cfg.maxViewsPerWorld,
+               cfg.maxInstancesPerWorld,
+               cfg.execMode == ExecMode::CUDA,
+               {cfg.xLength,cfg.yLength,cfg.zLength}),
+      numWorlds(cfg.numWorlds),
+      maxNumAgents(cfg.maxViewsPerWorld),
+      simTickRate(cfg.defaultSimTickRate),
+      cameraMoveSpeed(cfg.cameraMoveSpeed),
+      shouldExit(false),
+      voxelConfig{
+        .xLength = cfg.xLength,
+        .yLength = cfg.yLength,
+        .zLength = cfg.zLength
+      }
 {}
 
 void Viewer::Impl::render(float frame_duration)
@@ -532,10 +528,6 @@ void Viewer::Impl::loop(
 
 Viewer::Viewer(const Config &cfg)
     : impl_(new Impl(cfg))
-{}
-
-Viewer::Viewer(const Config& cfg, const VoxelConfig& voxel_cfg)
-    : impl_(new Impl(cfg,voxel_cfg))
 {}
 
 Viewer::Viewer(Viewer &&o) = default;

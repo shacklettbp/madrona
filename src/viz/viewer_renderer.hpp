@@ -247,7 +247,7 @@ public:
              uint32_t max_views_per_world,
              uint32_t max_instances_per_world,
              bool gpu_input,
-             Viewer::VoxelConfig voxel_config);
+             VoxelConfig voxel_config);
     Renderer(const Renderer &) = delete;
     ~Renderer();
 
@@ -326,7 +326,7 @@ private:
     Sky sky_;
 
     DynArray<MaterialTexture> material_textures_;
-    Viewer::VoxelConfig voxel_config_;
+    VoxelConfig voxel_config_;
 };
 
 }

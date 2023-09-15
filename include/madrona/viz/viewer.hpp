@@ -18,6 +18,12 @@ struct LightConfig {
     math::Vector3 color;
 };
 
+struct VoxelConfig {
+    uint32_t xLength;
+    uint32_t yLength;
+    uint32_t zLength;
+};
+
 class Viewer {
 public:
     struct Config {
@@ -32,12 +38,9 @@ public:
         math::Vector3 cameraPosition;
         math::Quat cameraRotation;
         ExecMode execMode;
-    };
-
-    struct VoxelConfig {
-        uint32_t xLength;
-        uint32_t yLength;
-        uint32_t zLength;
+        uint32_t xLength = 0;
+        uint32_t yLength = 0;
+        uint32_t zLength = 0;
     };
 
     enum class KeyboardKey : uint32_t {
@@ -81,7 +84,6 @@ public:
     };
 
     Viewer(const Config &cfg);
-    Viewer(const Config& cfg, const VoxelConfig& vox_cfg);
     Viewer(Viewer &&o);
 
     ~Viewer();
