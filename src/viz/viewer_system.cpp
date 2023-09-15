@@ -16,7 +16,7 @@ struct ViewerSystemState {
     float aspectRatio;
     uint32_t numInstancesInternal;
     uint32_t numViewsInternal;
-    uint32_t* voxels;
+    uint32_t *voxels;
 };
 
 struct RecordSystemState {
@@ -43,7 +43,7 @@ inline void instanceTransformSetup(Context &ctx,
     };
 }
 
-uint32_t *VizRenderingSystem::getVoxelPtr(Context& ctx) {
+uint32_t *VizRenderingSystem::getVoxelPtr(Context &ctx) {
     auto &sys_state = ctx.singleton<ViewerSystemState>();
     return sys_state.voxels;
 }
