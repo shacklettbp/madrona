@@ -2563,7 +2563,35 @@ static EngineInterop setupEngineInterop(Device &dev,
     const uint32_t num_voxels = voxel_config.xLength
         * voxel_config.yLength * voxel_config.zLength;
     const uint32_t staging_size = num_voxels > 0 ? num_voxels * sizeof(int32_t) : 4;
-    auto voxel_cpu = alloc.makeStagingBuffer(staging_size);
+
+    auto voxel_cpu = Optional<HostBuffer>::none();
+    VkBuffer voxel_buffer_hdl;
+    uint32_t *voxel_buffer_ptr;
+
+#ifdef MADRONA_CUDA_SUPPORT
+    auto voxel_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto voxel_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+#endif
+
+    if (!gpu_input) {
+        voxel_cpu = alloc.makeStagingBuffer(staging_size);
+        voxel_buffer_ptr = num_voxels ? (uint32_t *)voxel_cpu->ptr : nullptr;
+        voxel_buffer_hdl = voxel_cpu->buffer;
+    } else {
+#ifdef MADRONA_CUDA_SUPPORT
+        voxel_gpu = alloc.makeDedicatedBuffer(
+                staging_size, false, true);
+
+        voxel_cuda.emplace(dev, gpu_id, voxel_gpu->mem,
+                                  staging_size);
+
+        voxel_buffer_hdl = voxel_gpu->buf.buffer;
+        voxel_buffer_ptr = num_voxels ?
+                (uint32_t *)voxel_cuda->getDevicePointer() : nullptr;
+#else
+        voxel_buffer_ptr = nullptr;
+#endif
+    }
 
     VizECSBridge bridge {
         .views = world_views,
@@ -2573,7 +2601,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
         .episodeDone = nullptr,
-        .voxels = (uint32_t*) voxel_cpu.ptr
+        .voxels = voxel_buffer_ptr
     };
 
     const VizECSBridge *gpu_bridge;
@@ -2602,7 +2630,11 @@ static EngineInterop setupEngineInterop(Device &dev,
         max_views_per_world,
         max_instances_per_world,
         std::move(voxel_cpu),
-        voxel_cpu.buffer
+#ifdef MADRONA_CUDA_SUPPORT
+        std::move(voxel_gpu),
+        std::move(voxel_cuda),
+#endif
+        voxel_buffer_hdl
     };
 }
 

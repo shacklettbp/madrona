@@ -33,7 +33,7 @@ struct VizRenderingSystem {
                                math::Vector3 camera_offset,
                                int32_t view_idx);
 
-    MADRONA_EXPORT static uint32_t* getVoxelPtr(Context& ctx);
+    static uint32_t *getVoxelPtr(Context& ctx);
 
     static void markEpisode(Context &ctx);
 };

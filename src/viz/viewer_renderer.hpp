@@ -193,6 +193,10 @@ struct EngineInterop {
     uint32_t maxInstancesPerWorld;
 
     Optional<render::vk::HostBuffer> voxelInputCPU;
+#ifdef MADRONA_CUDA_SUPPORT
+    Optional<render::vk::DedicatedBuffer> voxelInputGPU;
+    Optional<render::vk::CudaImportedBuffer> voxelInputCUDA;
+#endif
     VkBuffer voxelHdl;
 };
 
