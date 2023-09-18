@@ -236,7 +236,6 @@ struct Sky {
     float exposure;
 };
 
-
 class Renderer {
 public:
     struct FrameConfig {

@@ -43,7 +43,7 @@ inline void instanceTransformSetup(Context &ctx,
     };
 }
 
-uint32_t *VizRenderingSystem::getVoxelPtr(Context &ctx) {
+uint32_t * VizRenderingSystem::getVoxelPtr(Context &ctx) {
     auto &sys_state = ctx.singleton<ViewerSystemState>();
     return sys_state.voxels;
 }

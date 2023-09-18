@@ -2580,10 +2580,10 @@ static EngineInterop setupEngineInterop(Device &dev,
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
         voxel_gpu = alloc.makeDedicatedBuffer(
-                staging_size, false, true);
+            staging_size, false, true);
 
         voxel_cuda.emplace(dev, gpu_id, voxel_gpu->mem,
-                                  staging_size);
+            staging_size);
 
         voxel_buffer_hdl = voxel_gpu->buf.buffer;
         voxel_buffer_ptr = num_voxels ?
@@ -2601,7 +2601,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
         .episodeDone = nullptr,
-        .voxels = voxel_buffer_ptr
+        .voxels = voxel_buffer_ptr,
     };
 
     const VizECSBridge *gpu_bridge;
@@ -2634,7 +2634,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(voxel_gpu),
         std::move(voxel_cuda),
 #endif
-        voxel_buffer_hdl
+        voxel_buffer_hdl,
     };
 }
 
@@ -3043,7 +3043,7 @@ Renderer::Renderer(uint32_t gpu_id,
       engine_interop_(setupEngineInterop(
           dev, alloc, gpu_input, gpu_id, num_worlds,
           max_views_per_world, max_instances_per_world,
-          fb_width_, fb_height_,voxel_config)),
+          fb_width_, fb_height_, voxel_config)),
       lights_(InternalConfig::maxLights),
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
@@ -3539,7 +3539,6 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
 
     desc_updates.push_back({});
     DescHelper::storage(desc_updates[3], asset_set_draw_, &mat_info, 1);
-
 
     material_textures_ = loadTextures(dev, alloc, render_queue_, textures);
 
