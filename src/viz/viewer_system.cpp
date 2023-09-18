@@ -16,6 +16,7 @@ struct ViewerSystemState {
     float aspectRatio;
     uint32_t numInstancesInternal;
     uint32_t numViewsInternal;
+    uint32_t *voxels;
 };
 
 struct RecordSystemState {
@@ -40,6 +41,11 @@ inline void instanceTransformSetup(Context &ctx,
         obj_id.idx,
         0,
     };
+}
+
+uint32_t * VizRenderingSystem::getVoxelPtr(Context &ctx) {
+    auto &sys_state = ctx.singleton<ViewerSystemState>();
+    return sys_state.voxels;
 }
 
 
@@ -131,6 +137,8 @@ void VizRenderingSystem::init(Context &ctx,
     system_state.numInstances = &bridge->numInstances[world_idx];
     system_state.aspectRatio = 
         (float)bridge->renderWidth / (float)bridge->renderHeight;
+
+    system_state.voxels = bridge->voxels;
 
     auto &record_state = ctx.singleton<RecordSystemState>();
     if (bridge->episodeDone != nullptr) {

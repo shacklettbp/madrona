@@ -38,6 +38,7 @@ struct Viewer::Impl {
     int32_t simTickRate;
     float cameraMoveSpeed;
     bool shouldExit;
+    VoxelConfig voxelConfig;
 
     Impl(const Viewer::Config &cfg);
 
@@ -389,9 +390,9 @@ static ViewerCam initCam(math::Vector3 pos, math::Quat rot)
 
 Viewer::Impl::Impl(const Config &cfg)
     : cam(initCam(cfg.cameraPosition, cfg.cameraRotation)),
-      frameCfg {
-          .worldIDX = 0,
-          .viewIDX = 0,
+      frameCfg{
+         .worldIDX = 0,
+         .viewIDX = 0,
       },
       renderer(cfg.gpuID,
                cfg.renderWidth,
@@ -399,12 +400,18 @@ Viewer::Impl::Impl(const Config &cfg)
                cfg.numWorlds,
                cfg.maxViewsPerWorld,
                cfg.maxInstancesPerWorld,
-               cfg.execMode == ExecMode::CUDA),
+               cfg.execMode == ExecMode::CUDA,
+               {cfg.xLength, cfg.yLength, cfg.zLength}),
       numWorlds(cfg.numWorlds),
       maxNumAgents(cfg.maxViewsPerWorld),
       simTickRate(cfg.defaultSimTickRate),
       cameraMoveSpeed(cfg.cameraMoveSpeed),
-      shouldExit(false)
+      shouldExit(false),
+      voxelConfig {
+         .xLength = cfg.xLength,
+         .yLength = cfg.yLength,
+         .zLength = cfg.zLength,
+      }
 {}
 
 void Viewer::Impl::render(float frame_duration)
