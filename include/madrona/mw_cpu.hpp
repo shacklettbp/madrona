@@ -8,7 +8,7 @@
 #pragma once
 
 #include <madrona/taskgraph.hpp>
-#include <madrona/render/mw.hpp>
+#include <madrona/render/batch_renderer_system.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/registry.hpp>
 

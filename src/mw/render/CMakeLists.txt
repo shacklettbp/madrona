@@ -1,5 +1,5 @@
 add_library(madrona_mw_render STATIC
-    ${MADRONA_INC_DIR}/render/mw.hpp
+    ${MADRONA_INC_DIR}/render/batch_renderer_system.hpp
     interop.hpp batch_renderer_system.cpp
 )
 
@@ -9,6 +9,8 @@ target_link_libraries(madrona_mw_render PUBLIC
 
 if (TARGET madrona_render_vk AND
         TARGET madrona_cuda AND TARGET madrona_sdl2)
+    message(STATUS "WTF is going on please tell me")
+
     add_library(madrona_batch_render STATIC
         batch_renderer.hpp
         vk/batch_renderer.cpp
@@ -28,6 +30,7 @@ if (TARGET madrona_render_vk AND
 
     target_compile_definitions(madrona_batch_render PRIVATE
         "-DSHADER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../render/vk/shaders/"
+        "-DMADRONA_BATCHRENDER_VK_RASTER"
     )
 elseif (TARGET madrona_render_metal)
     add_library(madrona_batch_render STATIC
@@ -78,6 +81,8 @@ elseif (TARGET madrona_render_metal)
 else()
     return()
 endif()
+
+message(STATUS "ARE YOU GONNA PRINT BITCH######################")
 
 target_include_directories(madrona_batch_render PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../render

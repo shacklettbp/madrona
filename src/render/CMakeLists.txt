@@ -1,6 +1,7 @@
 add_subdirectory(shader)
 
 if (MADRONA_LINUX OR MADRONA_WINDOWS OR MADRONA_ANDROID OR MADRONA_MACOS)
+    message(STATUS "GOING INTO RENDER CMAKE LISTS")
     add_subdirectory(vk)
 endif()
 

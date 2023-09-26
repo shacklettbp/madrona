@@ -5,8 +5,6 @@
 #include <madrona/span.hpp>
 #include <madrona/optional.hpp>
 
-#include <string_view>
-
 namespace madrona {
 namespace imp {
 

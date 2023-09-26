@@ -57,6 +57,11 @@ public:
         return layouts_[idx];
     }
 
+    inline uint32_t getLayoutCount() const
+    {
+        return layouts_.size();
+    }
+
     VkDescriptorPool makePool(uint32_t set_id, uint32_t max_sets) const;
 
 private:

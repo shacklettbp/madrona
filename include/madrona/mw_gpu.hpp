@@ -18,7 +18,7 @@
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 #include <madrona/importer.hpp>
-#include <madrona/render/mw.hpp>
+#include <madrona/render/batch_renderer_system.hpp>
 
 namespace madrona {
 

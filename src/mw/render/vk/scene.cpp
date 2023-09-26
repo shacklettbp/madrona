@@ -14,6 +14,7 @@ using namespace imp;
 namespace render {
 namespace vk {
 
+#if 0
 BLASData::BLASData(const Device &d, vector<BLAS> &&as,
                    LocalBuffer &&buf)
     : dev(&d),
@@ -768,5 +769,11 @@ void TLAS::build(const Device &dev,
 
 
 }
+
+
+#endif
+
 }
+}
+
 }

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <madrona/render/mw.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/heap_array.hpp>
 #include <madrona/render/vk/device.hpp>
+#include <madrona/render/batch_renderer_system.hpp>
 
 #include "../interop.hpp"
 

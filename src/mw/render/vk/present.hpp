@@ -4,12 +4,11 @@
 #include <madrona/heap_array.hpp>
 #include <madrona/render/vk/backend.hpp>
 
-#include "utils.hpp"
-
 namespace madrona {
 namespace render {
 namespace vk {
 
+#if 0
 struct Swapchain {
     VkSwapchainKHR hdl;
     uint32_t width;
@@ -65,6 +64,7 @@ private:
     Swapchain swapchain_;
     HeapArray<VkImage> swapchain_imgs_;
 };
+#endif
 
 }
 }

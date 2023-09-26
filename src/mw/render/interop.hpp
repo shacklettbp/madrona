@@ -1,9 +1,10 @@
 #pragma once
 
-#include <madrona/render/mw.hpp>
+#include <madrona/render/batch_renderer_system.hpp>
 
 #if defined(MADRONA_LINUX) or defined(MADRONA_WINDOWS) or defined(MADRONA_GPU_MODE)
-#define MADRONA_BATCHRENDER_RT (1)
+// #define MADRONA_BATCHRENDER_RT (1)
+// #define MADRONA_BATCHRENDER_VK_RASTER (1)
 #elif defined(MADRONA_MACOS)
 #define MADRONA_BATCHRENDER_METAL (1)
 #endif
@@ -38,45 +39,16 @@ struct AccelStructRangeInfo {
     uint32_t transformOffset;
 };
 
-#ifdef MADRONA_BATCHRENDER_METAL
-struct alignas(16) InstanceData {
-    math::Vector3 position;
-    math::Quat rotation;
-    math::Diag3x3 scale;
-    int32_t objectID;
-    int32_t worldID;
-};
-
-struct alignas(16) PerspectiveCameraData {
-    math::Vector3 position;
-    math::Quat rotation;
-    float xScale;
-    float yScale;
-    float zNear;
-    uint32_t pad[2];
-};
+#if defined(MADRONA_BATCHRENDER_METAL) || defined(MADRONA_BATCHRENDER_VK_RASTER)
 
 #endif
-
-struct BatchRendererECSBridge {
-#if defined(MADRONA_BATCHRENDER_RT)
-    AccelStructInstance *tlasInstancesBase;
-    AccelStructRangeInfo *numInstances;
-    uint64_t *blases;
-    PackedViewData **packedViews;
-    uint32_t *numInstancesReadback;
-#elif defined(MADRONA_BATCHRENDER_METAL)
-    PerspectiveCameraData **views;
-    uint32_t *numViews;
-    InstanceData *instanceData;
-    uint32_t *numInstances;
-#endif
-    int32_t renderWidth;
-    int32_t renderHeight;
-};
 
 struct BatchRendererState {
-#if defined(MADRONA_BATCHRENDER_RT)
+#if defined(MADRONA_BATCHRENDER_VK_RASTER)
+    PerspectiveCameraData *views;
+    uint32_t *numViews;
+    InstanceData *instances;
+#elif defined(MADRONA_BATCHRENDER_RT)
     AccelStructInstance *tlasInstanceBuffer;
     AccelStructRangeInfo *numInstances;
     uint64_t *blases;
