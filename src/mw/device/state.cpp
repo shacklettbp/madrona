@@ -41,6 +41,7 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
     }
 
     int32_t min_mapped_rows = Table::maxRowsPerTable;
+
     for (int32_t i = 0; i < tbl.numColumns; i++) {
         void *column_base = tbl.columns[i];
         uint64_t column_bytes_per_row = tbl.columnSizes[i];
@@ -159,6 +160,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
       numUserComponents(num_user_components),
       tbl(),
       columnLookup(lookup_input, num_user_components),
+      sortOffsets(nullptr),
       needsSort(false)
 {
     using namespace mwGPU;
@@ -172,6 +174,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
     int32_t min_mapped_rows = Table::maxRowsPerTable;
 
     uint32_t max_column_size = 0;
+
     for (int i = 0 ; i < (int)num_columns; i++) {
         uint64_t reserve_bytes = (uint64_t)type_infos[i].numBytes *
             (uint64_t)Table::maxRowsPerTable;
@@ -191,6 +194,13 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 
         min_mapped_rows = min(num_mapped_in_column, min_mapped_rows);
     }
+
+    { // Allocate space for the sorting offsets (one offset per world)
+        uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
+        bytes = alloc->roundUpReservation(bytes);
+        sortOffsets = (int32_t *)alloc->allocMemory(bytes);
+    }
+
     tbl.maxColumnSize = max_column_size;
     tbl.mappedRows = min_mapped_rows;
 }

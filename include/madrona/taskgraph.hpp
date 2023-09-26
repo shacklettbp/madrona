@@ -15,12 +15,12 @@ struct NodeBase {};
 
 class TaskGraph {
 private:
-    static inline constexpr uint32_t maxNodeDataBytes = 128;
+    static inline constexpr uint32_t maxNodeDataBytes = 256;
     static inline constexpr uint32_t maxNodeDataAlign = 64;
     struct alignas(maxNodeDataAlign) NodeData {
         char userData[maxNodeDataBytes];
     };
-    static_assert(sizeof(NodeData) == 128);
+    static_assert(sizeof(NodeData) == 256);
 
     struct Node {
         void (*fn)(NodeBase *, Context *, TaskGraph *);

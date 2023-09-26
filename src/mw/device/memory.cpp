@@ -41,6 +41,22 @@ void * HostAllocator::reserveMemory(uint64_t max_bytes,
     return result;
 }
 
+void * HostAllocator::allocMemory(uint64_t num_bytes)
+{
+    device_lock_.lock();
+
+    channel_->op = HostChannel::Op::Alloc;
+    channel_->alloc.numBytes = num_bytes;
+
+    submitRequest(channel_);
+
+    void *result = channel_->alloc.result;
+
+    device_lock_.unlock();
+
+    return result;
+}
+
 void HostAllocator::mapMemory(void *addr, uint64_t num_bytes)
 {
     device_lock_.lock();

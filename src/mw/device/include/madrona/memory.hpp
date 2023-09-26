@@ -47,7 +47,8 @@ struct HostChannel {
     enum class Op {
         Reserve,
         Map,
-        Terminate,
+        Alloc,
+        Terminate
     };
 
     struct Reserve {
@@ -61,10 +62,16 @@ struct HostChannel {
         uint64_t numBytes;
     };
 
+    struct Alloc {
+        uint64_t numBytes;
+        void *result;
+    };
+
     Op op;
     union {
         Reserve reserve;
         Map map;
+        Alloc alloc;
     };
 
     cuda::atomic<uint32_t, cuda::thread_scope_system> ready;
@@ -90,6 +97,7 @@ public:
     HostAllocator(HostAllocInit init);
     
     void * reserveMemory(uint64_t max_bytes, uint64_t init_num_bytes);
+    void * allocMemory(uint64_t num_bytes);
     void mapMemory(void *addr, uint64_t num_bytes);
 
     uint64_t roundUpReservation(uint64_t num_bytes);

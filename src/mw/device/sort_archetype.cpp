@@ -949,12 +949,14 @@ SortArchetypeNodeBase::RearrangeNode::RearrangeNode(ParentNodeT parent,
 SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id,
                                              int32_t col_idx,
                                              uint32_t *keys_col,
-                                             int32_t num_passes)
+                                             int32_t num_passes,
+                                             int32_t *sort_offsets)
     :  NodeBase {},
        archetypeID(archetype_id),
        sortColumnIndex(col_idx),
        keysCol(keys_col),
-       numPasses(num_passes)
+       numPasses(num_passes),
+       sortOffsets(sort_offsets)
 {}
 
 void SortArchetypeNodeBase::sortSetup(int32_t)
@@ -1187,7 +1189,7 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
     RadixSortOnesweepCustom agent(*smem_tmp,
         parent.lookback,
         parent.counters + pass,
-        nullptr,
+        parent.sortOffsets,
         parent.bins + pass * RADIX_DIGITS,
         dstKeys,
         srcKeys,
@@ -1294,6 +1296,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         archetype_id, component_id);
     auto keys_col =  (uint32_t *)state_mgr->getArchetypeColumn(
         archetype_id, sort_column_idx);
+    int32_t *sort_offsets = state_mgr->getArchetypeSortOffsets(archetype_id);
 
     bool world_sort = component_id == TypeTracker::typeID<WorldID>();
 
@@ -1311,7 +1314,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     }
 
     auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
-        archetype_id, sort_column_idx, keys_col, num_passes);
+        archetype_id, sort_column_idx, keys_col, num_passes, sort_offsets);
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<

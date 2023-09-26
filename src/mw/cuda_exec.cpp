@@ -1228,6 +1228,8 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
             if (verbose_host_alloc) {
                 printf("Grew %p\n", ptr);
             }
+        } else if (channel->op == HostChannel::Op::Alloc) {
+            cudaMalloc(&channel->alloc.result, channel->alloc.numBytes);
         } else if (channel->op == HostChannel::Op::Terminate) {
             break;
         }

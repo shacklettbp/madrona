@@ -305,6 +305,20 @@ void * StateManager::getArchetypeComponent(uint32_t archetype_id,
     return archetype.tbl.columns[col_idx];
 }
 
+template <typename ArchetypeT>
+int32_t * StateManager::getArchetypeSortOffsets()
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
+    return getArchetypeSortOffsets(archetype_id);
+}
+
+int32_t * StateManager::getArchetypeSortOffsets(uint32_t archetype_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    return archetype.sortOffsets;
+}
+
 int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
                                               uint32_t component_id)
 {

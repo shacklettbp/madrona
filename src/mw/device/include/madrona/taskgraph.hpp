@@ -30,11 +30,11 @@ struct NodeBase {
 
 class TaskGraph {
 private:
-    static inline constexpr uint32_t maxNodeDataBytes = 128;
+    static inline constexpr uint32_t maxNodeDataBytes = 256;
     struct alignas(maxNodeDataBytes) NodeData {
         char userData[maxNodeDataBytes];
     };
-    static_assert(sizeof(NodeData) == 128);
+    static_assert(sizeof(NodeData) == 256);
 
     struct Node {
         uint32_t dataIDX;
@@ -295,7 +295,8 @@ struct SortArchetypeNodeBase : NodeBase {
     SortArchetypeNodeBase(uint32_t archetype_id,
                           int32_t col_idx,
                           uint32_t *keys_col,
-                          int32_t num_passes);
+                          int32_t num_passes,
+                          int32_t *sort_offsets);
 
     void sortSetup(int32_t);
     void zeroBins(int32_t invocation_idx);
@@ -315,6 +316,7 @@ struct SortArchetypeNodeBase : NodeBase {
     int32_t sortColumnIndex;
     uint32_t *keysCol;
     int32_t numPasses;
+    int32_t *sortOffsets;
 
     TaskGraph::TypedDataID<OnesweepNode> onesweepNodes[4];
     TaskGraph::TypedDataID<RearrangeNode> firstRearrangePassData;

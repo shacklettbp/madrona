@@ -162,6 +162,11 @@ public:
     inline void * getArchetypeColumn(uint32_t archetype_id,
                                      int32_t column_idx);
 
+    template <typename ArchetypeT>
+    int32_t * getArchetypeSortOffsets();
+
+    inline int32_t * getArchetypeSortOffsets(uint32_t archetype_id);
+
     inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
                                                   int32_t column_idx);
 
@@ -227,6 +232,10 @@ private:
         uint32_t numUserComponents;
         Table tbl;
         ColumnMap columnLookup;
+        
+        // The size of this array corresponds to the number of worlds
+        int32_t *sortOffsets;
+
         bool needsSort;
     };
 
