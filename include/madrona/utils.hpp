@@ -7,6 +7,8 @@
  */
 #pragma once
 
+#include <madrona/macros.hpp>
+
 #ifdef MADRONA_MSVC
 #include <bit>
 #endif
