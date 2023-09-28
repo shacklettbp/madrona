@@ -38,7 +38,7 @@ struct PackedInstanceData {
 };
 
 struct DrawCommandInfo {
-    
+
 };
 
 #endif

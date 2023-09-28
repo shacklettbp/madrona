@@ -63,6 +63,11 @@ void Viewer::configureLighting(Span<const LightConfig> lights)
     impl_->renderer.configureLighting(lights);
 }
 
+void Viewer::setupBatchRendererProto()
+{
+    impl_->renderer.setupBatchRendererProto();
+}
+
 const VizECSBridge * Viewer::rendererBridge() const
 {
     return impl_->renderer.getBridgePtr();

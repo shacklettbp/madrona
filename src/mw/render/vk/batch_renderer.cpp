@@ -21,6 +21,28 @@
 namespace madrona {
 namespace render {
 
+namespace shader {
+
+using float4x4 = madrona::math::Mat4x4;
+using float3x3 = madrona::math::Mat3x3;
+using float4 = madrona::math::Vector4;
+using float3 = madrona::math::Vector3;
+using float2 = madrona::math::Vector2;
+using uint = uint32_t;
+// #include "shaders/shader_common.h"
+
+}
+
+namespace consts {
+
+constexpr uint32_t maxDrawsPerLayeredImage = 65536;
+constexpr VkFormat layeredImageFormat = VK_FORMAT_R8G8B8A8_UNORM;
+// For now, we use triple buffering
+constexpr uint32_t numDrawCmdBuffers = 3;
+    
+}
+
+#if 0
 using namespace vk;
 
 template <size_t N>
@@ -41,13 +63,18 @@ static Pipeline<1> makeComputePipeline(const Device &dev,
                                        const char *shader_file,
                                        const char *func_name = "main");
 
-// GPU resources required for batch rendering for each frame in flight.
-struct FrameResources {
-    // There are total_num_views / max_layers_per_image elements in
-    // these vectors.
-    std::vector<LocalImage> layeredImages;
-    std::vector<VkImageView> layeredImageViews;
-};
+static HeapArray<LocalImage> makeLayeredImages(uint32_t max_num_views,
+                                               uint32_t render_width,
+                                               uint32_t render_height,
+                                               const Device &dev,
+                                               MemoryAllocator &alloc);
+
+static HeapArray<VkImageView> makeLayeredImageViews(const HeapArray<LocalImage> &images,
+                                                    const Device &dev);
+
+static HeapArray<LocalBuffer> makeDrawCmdBuffers(uint32_t num_draw_cmd_buffers,
+                                                 const Device &dev,
+                                                 MemoryAllocator &alloc);
 
 struct BatchRenderer::Impl {
     Backend backend;
@@ -61,28 +88,48 @@ struct BatchRenderer::Impl {
     // draw command).
     Pipeline<1> prepareViewsPipeline;
 
-    Impl(uint32_t gpu_id, uint32_t num_frames_in_flight)
-        : backend(makeBackend()),
-          dev(backend.initDevice(gpu_id)),
-          mem(dev, backend),
-          renderQueue(makeGFXQueue(dev, 0)),
-          pipelineCache(getPipelineCache(dev)),
-          prepareViewsPipeline(makeComputePipeline(dev, pipelineCache,
-                                                   0,
-                                                   num_frames_in_flight,
-                                                   "prepare_views.hlsl"))
-    {
-    }
+    uint32_t maxNumViews;
+
+    // There are total_num_views / max_layers_per_image elements in
+    // these vectors.
+    HeapArray<LocalImage> layeredImages;
+    HeapArray<VkImageView> layeredImageViews;
+
+    // Buffered setup for indirect draws
+    uint32_t numDrawCmdBuffers;
+
+    Impl(uint32_t gpu_id, uint32_t num_frames_in_flight, const Config &cfg);
 };
+
+BatchRenderer::Impl::Impl(const Config &cfg)
+    : backend(makeBackend()),
+      dev(backend.initDevice(cfg.gpu_id)),
+      mem(dev, backend),
+      renderQueue(makeGFXQueue(dev, 0)),
+      pipelineCache(getPipelineCache(dev)),
+      prepareViewsPipeline(makeComputePipeline(dev, pipelineCache,
+                                               0, 1,
+                                               "prepare_views.hlsl")),
+      maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
+      layeredImages(makeLayeredImages(maxNumViews,
+                                      cfg.renderWidth, cfg.renderHeight,
+                                      dev, mem)),
+      layeredImageViews(makeLayeredImageViews(layeredImages, dev)),
+      numDrawCmdBuffers(consts::numDrawCmdBuffers),
+{
+}
 
 BatchRenderer BatchRenderer::make(const Config &cfg)
 {
-    return {};
+    return {
+        Impl(cfg)
+    };
 }
 
 BatchRenderer::~BatchRenderer()
 {
 }
+#endif
 
 BatchRendererECSBridge *BatchRenderer::makeECSBridge()
 {
@@ -90,6 +137,7 @@ BatchRendererECSBridge *BatchRenderer::makeECSBridge()
         cu::allocReadback(sizeof(BatchRendererECSBridge));
 }
 
+#if 0
 static VkPipelineCache getPipelineCache(const Device &dev)
 {
     // Pipeline cache (unsaved)
@@ -217,6 +265,73 @@ static Pipeline<1> makeComputePipeline(const Device &dev,
         std::move(desc_pool),
     };
 }
+
+static HeapArray<LocalImage> makeLayeredImages(uint32_t max_num_views,
+                                               uint32_t render_width,
+                                               uint32_t render_height,
+                                               const Device &dev,
+                                               MemoryAllocator &alloc)
+{
+    uint32_t num_images = divideRoundUp(max_num_views,
+                                        dev.maxNumLayersPerImage);
+
+    HeapArray<LocalImage> local_images (num_images);
+
+    for (int i = 0; i < (int)num_images; ++i) {
+        LocalImage img = alloc.makeColorAttachment(render_width, render_height,
+                                                   dev.maxNumLayersPerImage,
+                                                   consts::layeredImageFormat);
+
+        local_images.emplace(i, std::move(img));
+    }
+
+    return local_images;
+}
+
+static HeapArray<VkImageView> makeLayeredImageViews(const HeapArray<LocalImage> &images,
+                                                    const Device &dev)
+{
+    HeapArray<VkImageView> views (images.size());
+
+    VkImageViewCreateInfo view_info {};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = consts::layeredImageFormat;
+    VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+    view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info_sr.baseMipLevel = 0;
+    view_info_sr.levelCount = 1;
+    view_info_sr.baseArrayLayer = 0;
+    view_info_sr.layerCount = 1;
+
+    for (int i = 0; i < (int)images.size(); ++i) {
+        view_info.image = images[i].image;
+
+        VkImageView view;
+        REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
+
+        views.emplace(i, view);
+    }
+
+    return views;
+}
+
+static HeapArray<LocalBuffer> makeDrawCmdBuffers(uint32_t num_draw_cmd_buffers,
+                                                 const Device &dev,
+                                                 MemoryAllocator &alloc)
+{
+    HeapArray<LocalBuffer> buffers (num_draw_cmd_buffers);
+
+    for (int i = 0; i < num_draw_cmd_buffers; ++i) {
+        VkDeviceSize buffer_size = sizeof(shader::DrawCommandInfo) * 
+                                   consts::maxDrawsPerLayeredImage;
+
+        buffers.emplace(i, alloc.makeLocalBuffer(buffer_size));
+    }
+
+    return buffers;
+}
+#endif
 
 }
 }

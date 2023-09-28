@@ -1752,13 +1752,13 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
                                    VkRenderPass imgui_render_pass)
 {
     auto albedo = alloc.makeColorAttachment(
-        fb_width, fb_height, VK_FORMAT_R8G8B8A8_UNORM);
+        fb_width, fb_height, 1, VK_FORMAT_R8G8B8A8_UNORM);
     auto normal = alloc.makeColorAttachment(
-        fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
+        fb_width, fb_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
     auto position = alloc.makeColorAttachment(
-        fb_width, fb_height, VK_FORMAT_R16G16B16A16_SFLOAT);
+        fb_width, fb_height, 1, VK_FORMAT_R16G16B16A16_SFLOAT);
     auto depth = alloc.makeDepthAttachment(
-        fb_width, fb_height, InternalConfig::depthFormat);
+        fb_width, fb_height, 1, InternalConfig::depthFormat);
 
     VkImageViewCreateInfo view_info {};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1867,12 +1867,12 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
                                    uint32_t fb_height,
                                    VkRenderPass render_pass)
 {
-    auto color = alloc.makeColorAttachment(fb_width, fb_height,
+    auto color = alloc.makeColorAttachment(fb_width, fb_height, 1,
         InternalConfig::varianceFormat);
-    auto intermediate = alloc.makeColorAttachment(fb_width, fb_height,
+    auto intermediate = alloc.makeColorAttachment(fb_width, fb_height, 1,
         InternalConfig::varianceFormat);
     auto depth = alloc.makeDepthAttachment(
-        fb_width, fb_height, InternalConfig::depthFormat);
+        fb_width, fb_height, 1, InternalConfig::depthFormat);
 
     VkImageViewCreateInfo view_info {};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -2609,7 +2609,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         gpu_bridge = nullptr;
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
-        gpu_bridge = (const VizECSBridge *)cu::allocGPU(sizeof(VizECSBridge));
+        gpu_bridge = (const VizECSBridge *)cu::allocReadback(sizeof(VizECSBridge));
         cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
                    cudaMemcpyHostToDevice);
 #else
@@ -3050,7 +3050,9 @@ Renderer::Renderer(uint32_t gpu_id,
       loaded_assets_(0),
       sky_(loadSky(dev, alloc, render_queue_)),
       material_textures_(0),
-      voxel_config_(voxel_config)
+      voxel_config_(voxel_config),
+      gpu_id_(gpu_id),
+      num_worlds_(num_worlds)
 {
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
@@ -3577,6 +3579,21 @@ void Renderer::configureLighting(Span<const LightConfig> lights)
             math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f}
         });
     }
+}
+
+void Renderer::setupBatchRendererProto()
+{
+    BatchRendererProto::Config cfg = {
+        .gpuID = gpu_id_,
+        .renderWidth = 128,
+        .renderHeight = 128,
+        .numWorlds = num_worlds_,
+        .maxViewsPerWorld = engine_interop_.maxViewsPerWorld,
+        .maxInstancesPerWorld = engine_interop_.maxInstancesPerWorld,
+        .bridge = const_cast<BatchRendererECSBridge *>(&getBridgePtr()->brBridge)
+    };
+
+    br_proto_ = std::make_unique<BatchRendererProto>(cfg, dev, alloc, pipeline_cache_);
 }
 
 void Renderer::waitUntilFrameReady()

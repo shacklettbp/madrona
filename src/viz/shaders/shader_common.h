@@ -145,17 +145,37 @@ struct PerspectiveCameraData {
     float zNear;
 };
 
+// Make sure that this becomes packed in the future.
+struct PerspectiveCameraDataBR {
+    float4 position;
+    float4 rotation;
+    float xScale;
+    float yScale;
+    float zNear;
+    int viewIDX;
+    int worldIDX;
+};
+
+// Instance data that is needed to render an object
+struct InstanceDataBR {
+    float3 position;
+    float4 rotation;
+    float3 scale;
+    int32_t objectID;
+    int32_t worldID;
+};
+
 struct DrawCmd {
-    uint32_t indexCount;
-    uint32_t instanceCount;
-    uint32_t firstIndex;
-    int32_t vertexOffset;
-    uint32_t firstInstance;
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
 };
 
 struct DrawData {
-    int32_t instanceID;
-    int32_t materialID;
+    int instanceID;
+    int materialID;
 };
 
 #if 0

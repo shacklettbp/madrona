@@ -800,6 +800,11 @@ Device Backend::initDevice(
         FATAL("Failed to load vkGetDeviceProcAddr");
     }
 
+    VkPhysicalDeviceProperties physical_device_properties;
+    dt.getPhysicalDeviceProperties(phy, &physical_device_properties);
+
+    physical_device_properties.limits.maxImageArrayLayers;
+
     return Device(qf_choices.gfxQF,
                   qf_choices.computeQF,
                   qf_choices.transferQF,
@@ -807,6 +812,7 @@ Device Backend::initDevice(
                   num_compute_queues,
                   num_transfer_queues,
                   supports_rt,
+                  physical_device_properties.limits.maxImageArrayLayers,
                   phy,
                   dev,
                   DeviceDispatch(dev, get_dev_addr,

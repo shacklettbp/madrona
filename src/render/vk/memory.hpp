@@ -35,6 +35,14 @@ private:
     MemoryAllocator *alloc_;
 };
 
+class SparseAllocDeleter {
+public:
+    // SparseAllocDeleter(MemoryAllocator &alloc)
+
+private:
+
+};
+
 class HostBuffer {
 public:
     HostBuffer(const HostBuffer &) = delete;
@@ -82,6 +90,24 @@ private:
     LocalBuffer(VkBuffer buf, AllocDeleter<false> deleter);
 
     AllocDeleter<false> deleter_;
+    friend class MemoryAllocator;
+};
+
+class SparseBuffer {
+public:
+    SparseBuffer(const SparseBuffer &) = delete;
+    SparseBuffer(SparseBuffer &&o);
+    ~SparseBuffer();
+
+    SparseBuffer & operator=(const SparseBuffer &) = delete;
+    SparseBuffer & operator=(SparseBuffer &&);
+
+    VkBuffer buffer;
+
+private:
+    SparseBuffer(VkBuffer buf);
+
+    // AllocDeleter<false> deleter_;
     friend class MemoryAllocator;
 };
 
@@ -172,6 +198,9 @@ public:
     std::optional<LocalBuffer> makeLocalBuffer(VkDeviceSize num_bytes,
                                                bool dev_addr = false);
 
+    std::optional<SparseBuffer> makeSparseBuffer(VkDeviceSize num_bytes,
+                                                 bool dev_addr = false);
+
     DedicatedBuffer makeDedicatedBuffer(VkDeviceSize num_bytes,
         bool dev_addr = false, bool support_export = false);
 
@@ -196,9 +225,9 @@ public:
     VkDeviceSize alignStorageBufferOffset(VkDeviceSize offset) const;
 
     LocalImage makeColorAttachment(
-        uint32_t width, uint32_t height, VkFormat format);
+        uint32_t width, uint32_t height, uint32_t layers, VkFormat format);
     LocalImage makeDepthAttachment(
-        uint32_t width, uint32_t height, VkFormat format);
+        uint32_t width, uint32_t height, uint32_t layers, VkFormat format);
 
     LocalImage makeConversionImage(
         uint32_t width, uint32_t height, VkFormat fmt);
@@ -221,6 +250,7 @@ private:
     LocalImage makeDedicatedImage(uint32_t width,
                                   uint32_t height,
                                   uint32_t mip_levels,
+                                  uint32_t layers,
                                   VkFormat format,
                                   VkImageUsageFlags usage,
                                   uint32_t type_idx);
@@ -229,6 +259,7 @@ private:
                                   uint32_t height,
                                   uint32_t depth,
                                   uint32_t mip_levels,
+                                  uint32_t layers,
                                   VkFormat format,
                                   VkImageUsageFlags usage,
                                   uint32_t type_idx);

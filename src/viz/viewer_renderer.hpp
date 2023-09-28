@@ -9,7 +9,7 @@
 #include "vk/descriptors.hpp"
 #include "vk/utils.hpp"
 
-#include "interop.hpp"
+#include <madrona/viz/interop.hpp>
 
 #include <madrona/viz/viewer.hpp>
 
@@ -21,6 +21,8 @@
 #endif
 
 #include "shader.hpp"
+
+#include "batch_proto.hpp"
 
 namespace madrona::viz {
 
@@ -260,6 +262,8 @@ public:
 
     void configureLighting(Span<const LightConfig> lights);
 
+    void setupBatchRendererProto();
+
     void waitUntilFrameReady();
     void startFrame();
     void render(const ViewerCam &cam,
@@ -330,6 +334,11 @@ private:
 
     DynArray<MaterialTexture> material_textures_;
     VoxelConfig voxel_config_;
+
+    // This is just a prototype
+    int gpu_id_;
+    uint32_t num_worlds_;
+    std::unique_ptr<BatchRendererProto> br_proto_;
 };
 
 }

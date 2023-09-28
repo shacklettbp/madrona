@@ -7,6 +7,7 @@ namespace madrona::render::vk {
 Device::Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
                uint32_t num_gfx_queues, uint32_t num_compute_queues,
                uint32_t num_transfer_queues, bool rt_available,
+               uint32_t max_num_layers_per_img,
                VkPhysicalDevice phy_dev, VkDevice dev,
                DeviceDispatch &&dispatch_table)
     : hdl(dev),
@@ -18,7 +19,8 @@ Device::Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
       numGraphicsQueues(num_gfx_queues), 
       numComputeQueues(num_compute_queues),
       numTransferQueues(num_transfer_queues),
-      rtAvailable(rt_available)
+      rtAvailable(rt_available),
+      maxNumLayersPerImage(max_num_layers_per_img)
 {}
 
 Device::Device(Device &&o)

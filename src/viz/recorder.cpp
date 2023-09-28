@@ -1,5 +1,5 @@
 #include <madrona/viz/recorder.hpp>
-#include "interop.hpp"
+#include <madrona/viz/interop.hpp>
 
 #include <madrona/utils.hpp>
 

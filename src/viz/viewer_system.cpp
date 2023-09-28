@@ -2,7 +2,7 @@
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
 
-#include "interop.hpp"
+#include <madrona/viz/interop.hpp>
 
 namespace madrona::viz {
 using namespace base;
