@@ -11,7 +11,15 @@ void ECSRegistry::registerComponent()
 template <typename ArchetypeT>
 void ECSRegistry::registerArchetype()
 {
-    state_mgr_->registerArchetype<ArchetypeT>();
+    state_mgr_->registerArchetype<ArchetypeT>({}, ArchetypeNone);
+}
+
+template <typename ArchetypeT, typename ...ComponentT>
+void ECSRegistry::registerArchetype(ComponentSelector<ComponentT...> selector,
+                                    ArchetypeFlags flags)
+{
+    state_mgr_->registerArchetype<ArchetypeT>(selector.makeGenericSelector(),
+                                              flags);
 }
 
 template <typename SingletonT>

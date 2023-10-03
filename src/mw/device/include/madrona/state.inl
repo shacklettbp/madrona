@@ -13,7 +13,16 @@ void ECSRegistry::registerComponent()
 template <typename ArchetypeT>
 void ECSRegistry::registerArchetype()
 {
-    state_mgr_->registerArchetype<ArchetypeT>();
+    // Just pass an empty selector
+    state_mgr_->registerArchetype<ArchetypeT>({{}, {}}, ArchetypeNone);
+}
+
+template <typename ArchetypeT, typename ...ComponentT>
+void ECSRegistry::registerArchetype(ComponentSelector<ComponentT...> selector,
+                                    ArchetypeFlags flags)
+{
+    state_mgr_->registerArchetype<ArchetypeT>(selector.makeGenericSelector(),
+                                              flags);
 }
 
 template <typename ArchetypeT>
@@ -21,7 +30,7 @@ void ECSRegistry::registerFixedSizeArchetype(CountT max_num_entities)
 {
     // FIXME
     (void)max_num_entities;
-    state_mgr_->registerArchetype<ArchetypeT>();
+    state_mgr_->registerArchetype<ArchetypeT>({}, ArchetypeNone);
 }
 
 template <typename SingletonT>
@@ -88,7 +97,8 @@ struct StateManager::RegistrationHelper<T<ComponentTs...>> {
 };
 
 template <typename ArchetypeT>
-ArchetypeID StateManager::registerArchetype()
+ArchetypeID StateManager::registerArchetype(ComponentSelectorGeneric selector,
+                                            ArchetypeFlags flags)
 {
     uint32_t archetype_id = TypeTracker::registerType<ArchetypeT>(
         &StateManager::num_archetypes_);
@@ -99,6 +109,8 @@ ArchetypeID StateManager::registerArchetype()
         RegistrationHelper<Base>::registerArchetypeComponents();
 
     registerArchetype(archetype_id, archetype_components.data(),
+                      selector,
+                      flags,
                       archetype_components.size());
 
     return ArchetypeID {
@@ -112,7 +124,7 @@ void StateManager::registerSingleton()
     using ArchetypeT = SingletonArchetype<SingletonT>;
 
     registerComponent<SingletonT>();
-    registerArchetype<ArchetypeT>();
+    registerArchetype<ArchetypeT>({{}, {}}, ArchetypeNone);
 
     uint32_t num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
 
@@ -297,6 +309,17 @@ ComponentT * StateManager::getArchetypeComponent()
     return (ComponentT *)getArchetypeComponent(archetype_id, component_id);
 }
 
+template <typename ArchetypeT, typename ComponentT>
+void StateManager::setArchetypeComponent(void *ptr)
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    uint32_t component_id = TypeTracker::typeID<ComponentT>();
+
+    auto &archetype = *archetypes_[archetype_id];
+    uint32_t col_index = getArchetypeColumnIndex(archetype_id, component_id);
+    archetype.tbl.columns[col_index] = ptr;
+}
+
 void * StateManager::getArchetypeComponent(uint32_t archetype_id,
                                            uint32_t component_id)
 {
@@ -332,11 +355,27 @@ int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
     }
 }
 
+template <typename ArchetypeT>
+inline uint32_t StateManager::getArchetypeNumRows()
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    auto &archetype = *archetypes_[archetype_id];
+    return archetype.tbl.numRows.load_relaxed();
+}
+
 void * StateManager::getArchetypeColumn(uint32_t archetype_id,
                                         int32_t column_idx)
 {
     auto &archetype = *archetypes_[archetype_id];
     return archetype.tbl.columns[column_idx];
+}
+
+template <typename ArchetypeT>
+void StateManager::setArchetypeSortOffsets(void *ptr)
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    auto &archetype = *archetypes_[archetype_id];
+    archetype.sortOffsets = (int32_t *)ptr;
 }
 
 uint32_t StateManager::getArchetypeColumnBytesPerRow(uint32_t archetype_id,

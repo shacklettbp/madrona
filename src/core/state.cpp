@@ -383,8 +383,12 @@ void StateManager::registerComponent(uint32_t id,
 }
 
 void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components,
+                                     ComponentSelectorGeneric selector,
+                                     ArchetypeFlags flags,
                                      CountT max_num_entities)
 {
+    (void)flags, (void)selector;
+
     uint32_t offset = archetype_components_.size();
     uint32_t num_user_components = components.size();
 

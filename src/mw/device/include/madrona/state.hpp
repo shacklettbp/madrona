@@ -18,6 +18,7 @@
 #include <madrona/optional.hpp>
 #include <madrona/type_tracker.hpp>
 #include <madrona/memory.hpp>
+#include <madrona/selector.hpp>
 
 #include "mw_gpu/const.hpp"
 
@@ -57,6 +58,10 @@ public:
 
     template <typename ArchetypeT>
     void registerArchetype();
+
+    template <typename ArchetypeT, typename ...ComponentT>
+    void registerArchetype(ComponentSelector<ComponentT...> selector,
+                           ArchetypeFlags flags);
 
     template <typename ArchetypeT>
     void registerFixedSizeArchetype(CountT max_num_entities);
@@ -104,7 +109,8 @@ public:
     ComponentID registerComponent();
 
     template <typename ArchetypeT>
-    ArchetypeID registerArchetype();
+    ArchetypeID registerArchetype(ComponentSelectorGeneric selector,
+                                  ArchetypeFlags flags);
 
     template <typename SingletonT>
     void registerSingleton();
@@ -153,6 +159,9 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * getArchetypeComponent();
 
+    template <typename ArchetypeT, typename ComponentT>
+    void setArchetypeComponent(void *ptr);
+
     inline void * getArchetypeComponent(uint32_t archetype_id,
                                         uint32_t component_id);
 
@@ -167,8 +176,14 @@ public:
 
     inline int32_t * getArchetypeSortOffsets(uint32_t archetype_id);
 
+    template <typename ArchetypeT>
+    inline void setArchetypeSortOffsets(void *ptr);
+
     inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
                                                   int32_t column_idx);
+
+    template <typename ArchetypeT>
+    inline uint32_t getArchetypeNumRows();
 
     inline int32_t getArchetypeNumColumns(uint32_t archetype_id);
     inline uint32_t getArchetypeMaxColumnSize(uint32_t archetype_id);
@@ -211,6 +226,8 @@ private:
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, ComponentID *components,
+                           ComponentSelectorGeneric selector,
+                           ArchetypeFlags flags,
                            uint32_t num_components);
 
     template <typename Fn, int32_t... Indices>
@@ -227,7 +244,9 @@ private:
     struct ArchetypeStore {
         ArchetypeStore(uint32_t offset, uint32_t num_user_components,
                        uint32_t num_columns,
-                       TypeInfo *type_infos, IntegerMapPair *lookup_input);
+                       TypeInfo *type_infos, IntegerMapPair *lookup_input,
+                       ComponentSelectorGeneric selector = { {}, {} },
+                       ArchetypeFlags flags = ArchetypeNone);
         uint32_t componentOffset;
         uint32_t numUserComponents;
         Table tbl;
