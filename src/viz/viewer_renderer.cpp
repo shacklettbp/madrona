@@ -4288,9 +4288,11 @@ void Renderer::render(const ViewerCam &cam,
     Frame &frame = frames_[cur_frame_];
     uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
 
-    if (engine_interop_.renderInputCPU.has_value()) {
+    if (engine_interop_.viewsCPU.has_value()) {
         // Need to flush engine input state before copy
-        engine_interop_.renderInputCPU->flush(dev);
+        engine_interop_.viewsCPU->flush(dev);
+        engine_interop_.instancesCPU->flush(dev);
+        engine_interop_.instanceOffsetsCPU->flush(dev);
     }
 
     if (engine_interop_.voxelInputCPU.has_value()) {

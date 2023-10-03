@@ -136,6 +136,8 @@ struct Frame {
     render::vk::HostBuffer lightStaging;
     // Don't need a shadow view staging because that will be done on the GPU.
     render::vk::HostBuffer skyStaging;
+
+    // Contains everything
     render::vk::LocalBuffer renderInput;
 
     render::vk::LocalBuffer voxelVBO;
