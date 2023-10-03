@@ -29,6 +29,14 @@ public:
     template <typename ArchetypeT>
     void registerArchetype();
 
+    // Use as follows to register an archetype but for which we want to specify
+    // special properties for certain components:
+    // registry.registerComponent<MyArchetype>(
+    //     ComponentSelector<MyComponentA, MyComponentB>(FlagsA, FlagsB);
+    template <typename ArchetypeT, typename ...ComponentT>
+    void registerArchetype(ComponentSelector<ComponentT...> selector,
+                           ArchetypeFlags flags);
+
     // Register a singleton component. Note that you should pass the desired
     // component type to this function, not an archetype (singletons implicitly
     // create an archetype with 1 component).

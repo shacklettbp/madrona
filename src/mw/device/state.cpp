@@ -5,8 +5,10 @@
  * license that can be found in the LICENSE file or at
  * https://opensource.org/licenses/MIT.
  */
+#include "madrona/selector.hpp"
 #include <madrona/state.hpp>
 #include <madrona/mw_gpu/megakernel_consts.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
 
 namespace madrona {
 
@@ -14,6 +16,7 @@ Table::Table()
     : columns(),
       columnSizes(),
       columnMappedBytes(),
+      perComponentFlags(),
       maxColumnSize(),
       numColumns(),
       numRows(0),
@@ -155,7 +158,9 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
                                              uint32_t num_user_components,
                                              uint32_t num_columns,
                                              TypeInfo *type_infos,
-                                             IntegerMapPair *lookup_input)
+                                             IntegerMapPair *lookup_input,
+                                             ComponentSelectorGeneric selector,
+                                             ArchetypeFlags flags)
     : componentOffset(offset),
       numUserComponents(num_user_components),
       tbl(),
@@ -175,6 +180,18 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 
     uint32_t max_column_size = 0;
 
+    uint32_t current_selector = 0;
+
+    for (int i = 0; i < selector.ids.size(); ++i) {
+        // Convert the ID to a column ID
+        assert(columnLookup.exists(selector.ids[i]));
+        uint32_t column_id = *columnLookup.lookup(selector.ids[i]);
+        tbl.perComponentFlags[column_id] = selector.flags[i];
+
+        HostPrint::log("Selected component %d (column %d) to have flag %d\n",
+                       (int)selector.ids[i], (int)column_id, (int)selector.flags[i]);
+    }
+
     for (int i = 0 ; i < (int)num_columns; i++) {
         uint64_t reserve_bytes = (uint64_t)type_infos[i].numBytes *
             (uint64_t)Table::maxRowsPerTable;
@@ -184,7 +201,14 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
             (uint64_t)type_infos[i].numBytes * (uint64_t)num_worlds;
         init_bytes = alloc->roundUpAlloc(init_bytes);
 
-        tbl.columns[i] = alloc->reserveMemory(reserve_bytes, init_bytes);
+        if (tbl.perComponentFlags[i] & ComponentSelectImportPointer) {
+            // We don't perfomr any allocations
+            HostPrint::log("We selected component at column %d to import\n", i);
+        }
+        else {
+            tbl.columns[i] = alloc->reserveMemory(reserve_bytes, init_bytes);
+        }
+
         tbl.columnSizes[i] = type_infos[i].numBytes;
         tbl.columnMappedBytes[i] = init_bytes;
 
@@ -195,7 +219,9 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
         min_mapped_rows = min(num_mapped_in_column, min_mapped_rows);
     }
 
-    { // Allocate space for the sorting offsets (one offset per world)
+    if (flags & ArchetypeImportOffsets) { // Allocate space for the sorting offsets 
+                                          // (one offset per world)
+        HostPrint::log("Importing offsets for archetype!");
         uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
         bytes = alloc->roundUpReservation(bytes);
         sortOffsets = (int32_t *)alloc->allocMemory(bytes);
@@ -206,8 +232,12 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 }
 
 void StateManager::registerArchetype(uint32_t id, ComponentID *components,
+                                     ComponentSelectorGeneric selector,
+                                     ArchetypeFlags flags,
                                      uint32_t num_user_components)
 {
+    (void)flags;
+
     uint32_t offset = archetype_component_offset_;
     archetype_component_offset_ += num_user_components;
 
@@ -243,7 +273,8 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
     archetypes_[id].emplace(offset, num_user_components,
                             num_total_components,
                             type_infos.data(),
-                            lookup_input.data());
+                            lookup_input.data(),
+                            selector);
 }
 
 void StateManager::makeQuery(const uint32_t *components,

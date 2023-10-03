@@ -19,6 +19,7 @@
 #include <madrona/sync.hpp>
 #include <madrona/impl/id_map.hpp>
 #include <madrona/virtual.hpp>
+#include <madrona/selector.hpp>
 
 namespace madrona {
 
@@ -107,6 +108,7 @@ private:
 friend class StateManager;
 };
 
+
 class StateManager {
 public:
 #ifdef MADRONA_MW_MODE
@@ -118,8 +120,12 @@ public:
     template <typename ComponentT>
     ComponentID registerComponent();
 
+    // Just pass {} for the selector if no selector was needed and 0 if no
+    // archetype flags are needed
     template <typename ArchetypeT>
-    ArchetypeID registerArchetype(CountT max_num_entities = 0);
+    ArchetypeID registerArchetype(ComponentSelectorGeneric selector,
+                                  ArchetypeFlags flags,
+                                  CountT max_num_entities = 0);
 
     template <typename SingletonT>
     void registerSingleton();
@@ -297,6 +303,8 @@ private:
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, Span<ComponentID> components,
+                           ComponentSelectorGeneric selector,
+                           ArchetypeFlags flags,
                            CountT max_num_entities);
 
     void * exportColumn(uint32_t archetype_id, uint32_t component_id);
