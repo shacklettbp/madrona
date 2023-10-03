@@ -2803,7 +2803,29 @@ static EngineInterop setupEngineInterop(Device &dev,
     }
 
     return EngineInterop {
-        
+        std::move(views_cpu),
+        std::move(instances_cpu),
+        std::move(offsets_cpu),
+#ifdef MADRONA_CUDA_SUPPORT
+        std::move(views_gpu),
+        std::move(instances_gpu),
+        std::move(offsets_gpu),
+        std::move(views_cuda),
+        std::move(instances_cuda),
+        std::move(offsets_cuda),
+#endif
+        views_hdl,
+        instances_hdl,
+        offsets_hdl,
+        bridge,
+        gpu_bridge,
+        max_views_per_world,
+        max_instances_per_world,
+        std::move(voxel_cpu),
+#ifdef MADRONA_CUDA_SUPPORT
+        std::move(voxel_gpu),
+        std::move(voxel_cuda)
+#endif
     };
 }
 

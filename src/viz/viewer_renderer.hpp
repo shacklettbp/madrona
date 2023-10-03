@@ -203,7 +203,6 @@ struct EngineInterop {
     viz::VizECSBridge bridge;
     const viz::VizECSBridge *gpuBridge;
 
-    uint32_t viewBaseOffset;
     uint32_t maxViewsPerWorld;
     uint32_t maxInstancesPerWorld;
 
