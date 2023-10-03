@@ -2433,6 +2433,7 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
     };
 }
 
+#if 0
 static EngineInterop setupEngineInterop(Device &dev,
                                         MemoryAllocator &alloc,
                                         bool gpu_input,
@@ -2609,7 +2610,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         gpu_bridge = nullptr;
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
-        gpu_bridge = (const VizECSBridge *)cu::allocReadback(sizeof(VizECSBridge));
+        gpu_bridge = (const VizECSBridge *)cu::allocGPU(sizeof(VizECSBridge));
         cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
                    cudaMemcpyHostToDevice);
 #else
@@ -2635,6 +2636,174 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(voxel_cuda),
 #endif
         voxel_buffer_hdl,
+    };
+}
+#endif
+
+static EngineInterop setupEngineInterop(Device &dev,
+                                        MemoryAllocator &alloc,
+                                        bool gpu_input,
+                                        uint32_t gpu_id,
+                                        uint32_t num_worlds,
+                                        uint32_t max_views_per_world,
+                                        uint32_t max_instances_per_world,
+                                        uint32_t render_width,
+                                        uint32_t render_height,
+                                        VoxelConfig voxel_config)
+{
+    auto views_cpu = Optional<render::vk::HostBuffer>::none();
+    auto instances_cpu = Optional<render::vk::HostBuffer>::none();
+    auto offsets_cpu = Optional<render::vk::HostBuffer>::none();
+
+#ifdef MADRONA_CUDA_SUPPORT
+    auto views_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto views_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+    auto instances_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto instances_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+    auto offsets_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto offsets_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+#endif
+
+    VkBuffer views_hdl = VK_NULL_HANDLE;
+    VkBuffer instances_hdl = VK_NULL_HANDLE;
+    VkBuffer offsets_hdl = VK_NULL_HANDLE;
+
+    void *views_base = nullptr;
+    void *instances_base = nullptr;
+    void *offsets_base = nullptr;
+
+
+    { // Create the views buffer
+        uint64_t num_views_bytes = num_worlds * max_views_per_world *
+            (int64_t)sizeof(shader::PackedViewData);
+
+        if (!gpu_input) {
+            views_cpu = alloc.makeStagingBuffer(num_views_bytes);
+            views_hdl = views_cpu->buffer;
+            views_base = views_cpu->ptr;
+        } else {
+#ifdef MADRONA_CUDA_SUPPORT
+            views_gpu = alloc.makeDedicatedBuffer(
+                num_views_bytes, false, true);
+
+            views_cuda.emplace(dev, gpu_id, views_gpu->mem,
+                num_views_bytes);
+
+            views_hdl = views_gpu->buf.buffer;
+            views_base = (char *)views_cuda->getDevicePointer();
+#endif
+        }
+    }
+
+    { // Create the instances buffer
+        uint64_t num_instances_bytes = num_worlds * max_instances_per_world *
+            (int64_t)sizeof(shader::PackedInstanceData);
+
+
+        if (!gpu_input) {
+            instances_cpu = alloc.makeStagingBuffer(num_instances_bytes);
+            instances_hdl = instances_cpu->buffer;
+            instances_base = instances_cpu->ptr;
+        } else {
+#ifdef MADRONA_CUDA_SUPPORT
+            instances_gpu = alloc.makeDedicatedBuffer(
+                num_instances_bytes, false, true);
+
+            instances_cuda.emplace(dev, gpu_id, instances_gpu->mem,
+                num_instances_bytes);
+
+            instances_hdl = instances_gpu->buf.buffer;
+            instances_base = (char *)instances_cuda->getDevicePointer();
+#endif
+        }
+    }
+
+    { // Create the instance offsets buffer
+        uint64_t num_offsets_bytes = num_worlds * sizeof(int32_t);
+
+        if (!gpu_input) {
+            offsets_cpu = alloc.makeStagingBuffer(num_offsets_bytes);
+            offsets_hdl = offsets_cpu->buffer;
+            offsets_base = offsets_cpu->ptr;
+        } else {
+#ifdef MADRONA_CUDA_SUPPORT
+            offsets_gpu = alloc.makeDedicatedBuffer(
+                num_offsets_bytes, false, true);
+
+            offsets_cuda.emplace(dev, gpu_id, offsets_gpu->mem,
+                num_offsets_bytes);
+
+            offsets_hdl = offsets_gpu->buf.buffer;
+            offsets_base = (char *)offsets_cuda->getDevicePointer();
+#endif
+        }
+    }
+
+    const uint32_t num_voxels = voxel_config.xLength
+        * voxel_config.yLength * voxel_config.zLength;
+    const uint32_t staging_size = num_voxels > 0 ? num_voxels * sizeof(int32_t) : 4;
+
+    auto voxel_cpu = Optional<HostBuffer>::none();
+    VkBuffer voxel_buffer_hdl = VK_NULL_HANDLE;
+    uint32_t *voxel_buffer_ptr = nullptr;
+
+#ifdef MADRONA_CUDA_SUPPORT
+    auto voxel_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto voxel_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+#endif
+
+    if (!gpu_input) {
+        voxel_cpu = alloc.makeStagingBuffer(staging_size);
+        voxel_buffer_ptr = num_voxels ? (uint32_t *)voxel_cpu->ptr : nullptr;
+        voxel_buffer_hdl = voxel_cpu->buffer;
+    } else {
+#ifdef MADRONA_CUDA_SUPPORT
+        voxel_gpu = alloc.makeDedicatedBuffer(
+            staging_size, false, true);
+
+        voxel_cuda.emplace(dev, gpu_id, voxel_gpu->mem,
+            staging_size);
+
+        voxel_buffer_hdl = voxel_gpu->buf.buffer;
+        voxel_buffer_ptr = num_voxels ?
+            (uint32_t *)voxel_cuda->getDevicePointer() : nullptr;
+#endif
+    }
+
+    uint32_t *total_num_views_readback = nullptr;
+    if (!gpu_input) {
+        total_num_views_readback = (uint32_t *)malloc(
+            sizeof(uint32_t));
+    } else {
+        total_num_views_readback = (uint32_t *)cu::allocReadback(
+            sizeof(uint32_t));
+    }
+
+    VizECSBridge bridge = {
+        .views = (PerspectiveCameraData *)views_base,
+        .instances = (InstanceData *)instances_base,
+        .instanceOffsets = (int32_t *)offsets_base,
+        .totalNumViews = total_num_views_readback,
+        .renderWidth = (int32_t)render_width,
+        .renderHeight = (int32_t)render_height,
+        .episodeDone = nullptr,
+        .voxels = voxel_buffer_ptr
+    };
+
+    const VizECSBridge *gpu_bridge = nullptr;
+    if (!gpu_input) {
+        gpu_bridge = nullptr;
+    } else {
+#ifdef MADRONA_CUDA_SUPPORT
+        gpu_bridge = (const VizECSBridge *)cu::allocGPU(
+            sizeof(VizECSBridge));
+        cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
+                   cudaMemcpyHostToDevice);
+#endif
+    }
+
+    return EngineInterop {
+        
     };
 }
 
@@ -3589,8 +3758,8 @@ void Renderer::setupBatchRendererProto()
         .renderHeight = 128,
         .numWorlds = num_worlds_,
         .maxViewsPerWorld = engine_interop_.maxViewsPerWorld,
-        .maxInstancesPerWorld = engine_interop_.maxInstancesPerWorld,
-        .bridge = const_cast<BatchRendererECSBridge *>(&getBridgePtr()->brBridge)
+        .maxInstancesPerWorld = engine_interop_.maxInstancesPerWorld
+        // .bridge = const_cast<BatchRendererECSBridge *>(&getBridgePtr()->brBridge)
     };
 
     br_proto_ = std::make_unique<BatchRendererProto>(cfg, dev, alloc, pipeline_cache_);

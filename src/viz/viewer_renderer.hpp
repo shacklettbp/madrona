@@ -182,14 +182,27 @@ struct AssetData {
 };
 
 struct EngineInterop {
-    Optional<render::vk::HostBuffer> renderInputCPU;
+    Optional<render::vk::HostBuffer> viewsCPU;
+    Optional<render::vk::HostBuffer> instancesCPU;
+    Optional<render::vk::HostBuffer> instanceOffsetsCPU;
+
 #ifdef MADRONA_CUDA_SUPPORT
-    Optional<render::vk::DedicatedBuffer> renderInputGPU;
-    Optional<render::vk::CudaImportedBuffer> renderInputCUDA;
+    Optional<render::vk::DedicatedBuffer> viewsGPU;
+    Optional<render::vk::DedicatedBuffer> instancesGPU;
+    Optional<render::vk::DedicatedBuffer> instanceOffsetsGPU;
+
+    Optional<render::vk::CudaImportedBuffer> viewsCUDA;
+    Optional<render::vk::CudaImportedBuffer> instancesCUDA;
+    Optional<render::vk::CudaImportedBuffer> instanceOffsetsCUDA;
 #endif
-    VkBuffer renderInputHdl;
+
+    VkBuffer viewsHdl;
+    VkBuffer instancesHdl;
+    VkBuffer instanceOffsetsHdl;
+
     viz::VizECSBridge bridge;
     const viz::VizECSBridge *gpuBridge;
+
     uint32_t viewBaseOffset;
     uint32_t maxViewsPerWorld;
     uint32_t maxInstancesPerWorld;
@@ -199,6 +212,7 @@ struct EngineInterop {
     Optional<render::vk::DedicatedBuffer> voxelInputGPU;
     Optional<render::vk::CudaImportedBuffer> voxelInputCUDA;
 #endif
+
     VkBuffer voxelHdl;
 };
 

@@ -34,6 +34,12 @@ void BatchRenderingSystem::registerTypes(ECSRegistry &registry,
     registry.registerComponent<BatchRenderCameraEntity>();
 
     registry.registerArchetype<BatchRenderInstance>();
+
+#if 0
+    registry.registerArchetype<BatchRenderInstance>(
+        ComponentSelector<InstanceData>(ComponentSelectImportFromVulkan));
+#endif
+
     registry.registerArchetype<BatchRenderCameraInstance>();
 
     registry.registerSingleton<BatchRenderingSystemState>();
