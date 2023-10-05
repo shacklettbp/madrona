@@ -121,6 +121,8 @@ struct BlockRadixRankMatchEarlyCountsCustom
             return IS_DESCENDING ? RADIX_DIGITS - 1 - bin : bin;
         }
 
+        // ZM: computes the histograms for all 8-bit digits of the radix.
+        // RADIX_DIGITS == 256
         __device__ __forceinline__
         void ComputeHistogramsWarp(UnsignedBits (&keys)[KEYS_PER_THREAD])
         {
@@ -292,6 +294,7 @@ struct BlockRadixRankMatchEarlyCountsCustom
             
             CTA_SYNC();
             int bins[BINS_PER_THREAD];
+            // Compute the prefix sum over histograms for each warp.
             ComputeOffsetsWarpUpsweep(bins);
             bool early_out = callback(bins);
             if (early_out) {
@@ -673,11 +676,13 @@ struct SortArchetypeNodeBase::RadixSortOnesweepCustom {
 
     __device__ __forceinline__ void LoadBinsToOffsetsGlobal(int (&offsets)[BINS_PER_THREAD])
     {
+
+        // ZM BINS_PER_THREAD == 1.
         // global offset - global part
         #pragma unroll
         for (int u = 0; u < BINS_PER_THREAD; ++u)
         {
-            int bin = ThreadBin(u);
+            int bin = ThreadBin(u); // ZM this reduces to the threadIdx.
             if (FULL_BINS || bin < RADIX_DIGITS)
             {
                 s.global_offsets[bin] = d_bins_in[bin] - offsets[u];
@@ -832,13 +837,14 @@ struct SortArchetypeNodeBase::RadixSortOnesweepCustom {
         ScatterValuesGlobal(digits);
     }
         
+    // Added in 4 or fewer nodes, once for each 8 bit digit being radixed.
     __device__ __forceinline__ void Process()
     {
         // load keys
         // if warp1 < warp2, all elements of warp1 occur before those of warp2
         // in the source array
-        UnsignedBits keys[ITEMS_PER_THREAD];
-        LoadKeys(block_idx * TILE_ITEMS, keys);
+        UnsignedBits keys[ITEMS_PER_THREAD]; // ZM: 2, set off of num_elems_per_sort_thread_
+        LoadKeys(block_idx * TILE_ITEMS, keys); // ZM: TILE_ITEMS = 512
 
         // rank keys
         int ranks[ITEMS_PER_THREAD];
@@ -860,6 +866,8 @@ struct SortArchetypeNodeBase::RadixSortOnesweepCustom {
         LoadBinsToOffsetsGlobal(exclusive_digit_prefix);
         LookbackGlobal(bins);
         UpdateBinsGlobal(bins, exclusive_digit_prefix);
+
+        // ZM: Here we should know the offsets and counts.
                 
         // scatter keys in global memory
         CTA_SYNC();
@@ -1189,7 +1197,7 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
     RadixSortOnesweepCustom agent(*smem_tmp,
         parent.lookback,
         parent.counters + pass,
-        parent.sortOffsets,
+        parent.sortOffsets, // used to initialize d_bins_out
         parent.bins + pass * RADIX_DIGITS,
         dstKeys,
         srcKeys,
@@ -1296,6 +1304,9 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         archetype_id, component_id);
     auto keys_col =  (uint32_t *)state_mgr->getArchetypeColumn(
         archetype_id, sort_column_idx);
+
+    // Returns raw pointer to the sort offsets gotten directly off the ECS table for the given archetype.
+    // This is the sortOffsets on the ArchetypeStore. It is the only place getArchetypeSortOffsets is called.
     int32_t *sort_offsets = state_mgr->getArchetypeSortOffsets(archetype_id);
 
     bool world_sort = component_id == TypeTracker::typeID<WorldID>();
@@ -1304,7 +1315,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     // max # of worlds is known
     int32_t num_passes;
     if (world_sort) {
-        int32_t num_worlds = GPUImplConsts::get().numWorlds;
+        int32_t num_worlds = GPUImplConsts::get().numWorlds; // This must vary, else it would be hardcoded during compilation.
         // num_worlds + 1 to leave room for columns with WorldID == -1
         int32_t num_bits = 32 - __clz(num_worlds + 1);
 
@@ -1313,6 +1324,8 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         num_passes = 4;
     }
 
+    // This is the parent node for all the later onesweep nodes.
+    // It's initialized with the sort_offsets pointer from above.
     auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
         archetype_id, sort_column_idx, keys_col, num_passes, sort_offsets);
     auto &sort_node_data = builder.getDataRef(data_id);
@@ -1331,6 +1344,8 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     auto cur_task = builder.addNodeFn<&SortArchetypeNodeBase::binScan>(
         data_id, {compute_histogram}, setup, 0, consts::numMegakernelThreads);
 
+    // ZM: a pass is added for each 8 bits of max required key size. For example, 
+    // with 256 worlds, only one pass is needed to radix all objects based on WorldID.
     for (int32_t i = 0; i < num_passes; i++) {
         auto pass_data = builder.constructNodeData<OnesweepNode>(
             data_id, i, i == num_passes - 1);
@@ -1341,6 +1356,11 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         cur_task = builder.addNodeFn<&OnesweepNode::onesweep>(
             pass_data, {cur_task}, setup, 0, consts::numMegakernelThreads);
     }
+
+    // ZM: At this point, we are resizing the table, so the sort is assumed to have completed.
+    // ZM TODO: Add a simple node that uses the sort to compute the table offsets for different worlds.
+    // Right now, before resize, the sortOffset pointers are still in terms of 32 bit keys, so they
+    // can be used to compute the number of entities in each world.
 
     // FIXME this could be a fixed-size count
     if (world_sort) {

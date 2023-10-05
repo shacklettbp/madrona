@@ -14,7 +14,8 @@ void TaskGraph::iterateQuery(ContextT &ctx,
                              Query<ComponentTs...> &query,
                              Fn &&fn)
 {
-    state_mgr_->iterateEntities(MADRONA_MW_COND(cur_world_id_,) query,
+    // Interesting, this is how you do argument forwarding of a general lambda.
+    state_mgr_->iterateQuery(MADRONA_MW_COND(cur_world_id_,) query,
         [&](auto &...refs) {
             fn(ctx, refs...);
         });

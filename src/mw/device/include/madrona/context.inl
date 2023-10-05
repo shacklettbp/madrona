@@ -82,6 +82,11 @@ inline void * Context::tmpAlloc(uint64_t num_bytes)
     return mwGPU::TmpAllocator::get().alloc(num_bytes);
 }
 
+template <typename ComponentTs..., typename Fn>
+inline void Context::query(Query<ComponentTs...> &query, Fn&& fn) {
+    mwGPU::getStateManager()->iterateQuery(query, fn);
+}
+
 #if 0
 
 class Context {

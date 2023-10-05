@@ -197,7 +197,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 
     { // Allocate space for the sorting offsets (one offset per world)
         uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
-        bytes = alloc->roundUpReservation(bytes);
+        bytes = alloc->roundUpReservation(bytes); // rounds up to a full page size, which for normal page sizes is definitely >= 256 worlds.
         sortOffsets = (int32_t *)alloc->allocMemory(bytes);
     }
 

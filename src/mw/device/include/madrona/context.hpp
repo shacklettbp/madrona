@@ -50,6 +50,9 @@ public:
     inline WorldID worldID() const { return world_id_; }
 
     inline WorldBase & data() const { return *data_; }
+    
+    template <typename... ComponentTs>
+    inline void query(Query<ComponentTs>& query);
 
 protected:
     WorldBase *data_;

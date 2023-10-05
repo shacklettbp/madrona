@@ -221,6 +221,9 @@ private:
                    uint32_t num_components,
                    QueryRef *query_ref);
 
+    template <typename... ComponentTs, typename Fn>
+    void iterateQuery(uint32_t world_id, const Query<ComponentTs...>& query, Fn&& fn);
+
     Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
     Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
 

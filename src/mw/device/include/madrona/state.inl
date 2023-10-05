@@ -138,6 +138,7 @@ Query<ComponentTs...> StateManager::query()
 
     QueryRef *ref = &Query<ComponentTs...>::ref_;
 
+    // ZM Deduplication, GPU side.
     if (ref->numReferences.load_acquire() == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
     }
@@ -178,6 +179,13 @@ void StateManager::iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn)
 
     iterateArchetypesRawImpl(query_ref, std::forward<Fn>(fn),
                              IndicesWrapper());
+}
+
+template<typename Fn>
+void StateManager::iterateQuery(QueryRef* query_ref, Fn&& fn) {
+    // TODO: implement using the offsets from the sort.
+    // Does this also need to take in the WorldID?
+    // How do you get the sortOffsets from here? The QueryRef doesn't contain it. 
 }
 
 uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)

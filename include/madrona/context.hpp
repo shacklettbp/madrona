@@ -85,6 +85,16 @@ public:
     // memory.
     inline void * tmpAlloc(uint64_t num_bytes);
 
+    // Create an ECS query matching the template components.
+    // Pass to iterateQuery to iterate over all entities with the template set of components.
+    template <typename... ComponentTs>
+    inline Query<ComponentTs...> query();
+
+    // Iterate a query over all entities with the template components,
+    // executing the lambda fn for each one.
+    template <typename Fn, typename... ComponentTs>
+    inline void iterateQuery(const Query<ComponentTs...>& query, Fn&& fn);
+
 #ifdef MADRONA_MW_MODE
     // Get the current world's ID: [0, numWorlds - 1]
     inline WorldID worldID() const;

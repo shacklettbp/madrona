@@ -73,6 +73,19 @@ void * Context::tmpAlloc(uint64_t num_bytes)
     return state_mgr_->tmpAlloc(MADRONA_MW_COND(cur_world_id_,) num_bytes);
 }
 
+template <typename... ComponentTs>
+Query<ComponentTs...> Context::query()
+{
+    return state_mgr_->query<ComponentTs...>();
+}
+
+template <typename Fn, typename... ComponentTs>
+inline void Context::iterateQuery(const Query<ComponentTs...>& query, Fn&& fn)
+{
+    state_mgr_->iterateQuery(MADRONA_MW_COND(cur_world_id_, ) query,
+        std::forward<Fn>(fn));
+}
+
 #ifdef MADRONA_USE_JOB_SYSTEM
 JobID Context::currentJobID() const
 {
@@ -192,7 +205,8 @@ Query<ComponentTs...> Context::query()
 template <typename... ComponentTs, typename Fn>
 void Context::forEach(const Query<ComponentTs...> &query, Fn &&fn)
 {
-    state_mgr_->iterateEntities(MADRONA_MW_COND(cur_world_id_,) query,
+    // ZM: previously iterateEntities.
+    state_mgr_->iterateQuery(MADRONA_MW_COND(cur_world_id_,) query,
                                 std::forward<Fn>(fn));
 }
 
