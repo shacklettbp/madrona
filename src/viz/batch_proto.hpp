@@ -13,50 +13,40 @@
 
 namespace madrona::viz {
 
-struct BatchRendererInterop {
-    // For the batch renderer prototype
-    Optional<render::vk::HostBuffer> viewsCPU;
-    Optional<render::vk::HostBuffer> instancesCPU;
-    Optional<render::vk::HostBuffer> instanceOffsetsCPU;
-
-#ifdef MADRONA_CUDA_SUPPORT
-    Optional<render::vk::DedicatedBuffer> viewsGPU;
-    Optional<render::vk::DedicatedBuffer> instancesGPU;
-    Optional<render::vk::DedicatedBuffer> instanceOffsetsGPU;
-
-    Optional<render::vk::CudaImportedBuffer> viewsCUDA;
-    Optional<render::vk::CudaImportedBuffer> instancesCUDA;
-    Optional<render::vk::CudaImportedBuffer> instanceOffsetsCUDA;
-#endif
-};
-
-struct BatchRendererProto {
-    struct Impl;
-    std::unique_ptr<Impl> impl;
-
-    struct Config {
-        int gpuID;
-        uint32_t renderWidth;
-        uint32_t renderHeight;
-        uint32_t numWorlds;
-        uint32_t maxViewsPerWorld;
-        uint32_t maxInstancesPerWorld;
+    struct BatchImportedBuffers {
+        render::vk::LocalBuffer views;
+        render::vk::LocalBuffer instances;
+        render::vk::LocalBuffer instanceOffsets;
     };
 
-    BatchRendererProto(const Config &cfg,
-                       render::vk::Device &dev,
-                       render::vk::MemoryAllocator &mem,
-                       VkPipelineCache pipeline_cache);
+    struct LayeredTarget {
+        render::vk::LocalImage color;
+        render::vk::LocalImage depth;
+    };
 
-    ~BatchRendererProto();
+    struct BatchRendererProto {
+        struct Impl;
+        std::unique_ptr<Impl> impl;
 
-    CountT loadObjects(Span<const imp::SourceObject> objs);
-    // RendererInterface getInterface() const;
+        struct Config {
+            int gpuID;
+            uint32_t renderWidth;
+            uint32_t renderHeight;
+            uint32_t numWorlds;
+            uint32_t maxViewsPerWorld;
+            uint32_t maxInstancesPerWorld;
+        };
 
-    uint8_t *rgbPtr() const;
-    float *depthPtr() const;
+        BatchRendererProto(const Config& cfg,
+            render::vk::Device& dev,
+            render::vk::MemoryAllocator& mem,
+            VkPipelineCache pipeline_cache);
 
-    void render();
-};
+        ~BatchRendererProto();
+
+        void renderViews(VkCommandBuffer buffer);
+
+        BatchImportedBuffers& getImportedBuffers(uint32_t frame_id);
+    };
 
 }
