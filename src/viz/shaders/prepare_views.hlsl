@@ -1,5 +1,5 @@
 #include "shader_common.h"
-#include "utils.hlsl"
+#include "../../render/vk/shaders/utils.hlsl"
 
 [[vk::push_constant]]
 PrepareViewPushConstant pushConst;
@@ -8,13 +8,13 @@ PrepareViewPushConstant pushConst;
 // dispatch a workgroup for each view and have the 32 threads of the workgroup 
 // process each instance data for that view (and perform culling).
 [[vk::binding(0, 0)]]
-StructuredBuffer<PackedPerspectiveCameraData> cameraBuffer;
+StructuredBuffer<PerspectiveCameraDataBR > cameraBuffer;
 
 [[vk::binding(1, 0)]]
-StructuredBuffer<WorldInstanceInfo> worldInstanceInfoBuffer;
+StructuredBuffer<InstanceDataBR> instanceData;
 
 [[vk::binding(2, 0)]]
-StructuredBuffer<PackedInstanceData> instancesBuffer;
+StructuredBuffer<uint32_t> instanceOffsets;
 
 [[vk::binding(0, 1)]]
 RWStructuredBuffer<uint32_t> drawCount;
@@ -33,12 +33,32 @@ StructuredBuffer<ObjectData> objectDataBuffer;
 [[vk::binding(1, 2)]]
 StructuredBuffer<MeshData> meshDataBuffer;
 
+uint getNumInstancesForWorld(uint world_idx)
+{
+    if (world_idx == 0) {
+        return instanceOffsets[0];
+    } else if (world_idx == pushConst.numWorlds - 1) {
+        return pushConst.numWorlds - instanceOffsets[world_idx-1];
+    } else {
+        return instanceOffsets[world_idx] - instanceOffsets[world_idx-1];
+    }
+}
+
+uint getInstanceOffsetsForWorld(uint world_idx)
+{
+    if (world_idx == 0) {
+        return 0;
+    } else {
+        return instanceOffsets[world_idx-1];
+    }
+}
 
 struct SharedData {
     uint viewIdx;
     uint numInstancesPerThread;
-    PackedPerspectiveCameraData packedCamera;
-    WorldInstanceInfo worldInfo;
+    PerspectiveCameraDataBR packedCamera;
+    uint offset;
+    uint numInstancesForWorld;
 };
 
 groupshared SharedData sm;
@@ -49,16 +69,16 @@ void main(uint3 tid       : SV_DispatchThreadID,
           uint3 tid_local : SV_GroupThreadID,
           uint3 gid       : SV_GroupID)
 {
-    if (gid.x > pushCont.numViews)
+    if (gid.x > pushConst.numViews)
         return;
 
-    if (tid_local == 0) {
+    if (tid_local.x == 0) {
         // Each group processes a single view
-        sm.viewIdx = gid.x;
-        sm.packedCamera = cameraBuffer[sharedData.viewIdx];
-        sm.worldInfo = 
-            worldInstanceInfoBuffer[sm.packedCamera.worldIDX];
-        sm.numInstancesPerThread = sharedData.worldInfo.count /
+        sm.viewIdx = gid.x + pushConst.offset;
+        sm.packedCamera = cameraBuffer[sm.viewIdx];
+        sm.offset = getInstanceOffsetsForWorld(sm.packedCamera.worldIDX);
+        sm.numInstancesForWorld = getNumInstancesForWorld(sm.packedCamera.worldIDX);
+        sm.numInstancesPerThread = sm.numInstancesForWorld /
                                            PREPARE_VIEW_WORKGROUP_SIZE;
     }
 
@@ -66,14 +86,14 @@ void main(uint3 tid       : SV_DispatchThreadID,
 
     for (int i = 0; i < sm.numInstancesPerThread; ++i) {
         uint local_idx = i * sm.numInstancesPerThread;
-        if (local_idx > sm.worldInfo.count)
+        if (local_idx > sm.numInstancesForWorld)
             return;
 
-        uint current_instance_idx = sm.worldInfo.offset +
+        uint current_instance_idx = sm.offset +
                                     local_idx;
 
-        PackedInstanceData instance_data = 
-            instancesBuffer[current_instance_idx];
+        InstanceDataBR instance_data = 
+            instanceData[current_instance_idx];
 
         // Don't do culling yet.
 
@@ -95,7 +115,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
 
             DrawData draw_data;
             draw_data.materialID = mesh.materialIndex;
-            draw_data.instanceID = instance_id;
+            draw_data.instanceID =  current_instance_idx;
 
             drawCommandBuffer[draw_id] = draw_cmd;
             drawDataBuffer[draw_id] = draw_data;

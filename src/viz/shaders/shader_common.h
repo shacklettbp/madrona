@@ -1,13 +1,25 @@
 #ifndef MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 #define MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 
+#define PREPARE_VIEW_WORKGROUP_SIZE 32
+
+struct PrepareViewPushConstant {
+    uint numViews;
+    uint offset;
+    uint numWorlds;
+};
+
 struct BlurPushConst {
     /* Vertical blur happens first. */
     uint32_t isVertical;
 };
 
 struct CullPushConst {
+    uint32_t worldIDX;
+    uint32_t numViews;
     uint32_t numInstances;
+    uint32_t numWorlds;
+    uint32_t numThreads;
 };
 
 struct DeferredLightingPushConst {
@@ -163,6 +175,12 @@ struct InstanceDataBR {
     float3 scale;
     int32_t objectID;
     int32_t worldID;
+};
+
+struct DrawDataBR {
+    int instanceID;
+    int materialID;
+    int layer;
 };
 
 struct DrawCmd {

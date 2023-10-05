@@ -1,4 +1,5 @@
 #include "batch_proto.hpp"
+#include "madrona/viz/interop.hpp"
 #include "viewer_renderer.hpp"
 #include "shader.hpp"
 
@@ -24,7 +25,6 @@ inline constexpr uint32_t numDrawCmdBuffers = 3; // Triple buffering
 ////////////////////////////////////////////////////////////////////////////////
 // LAYERED OUTPUT CREATION                                                    //
 ////////////////////////////////////////////////////////////////////////////////
-// 
 // 
 ////////////////////////////////////////////////////////////////////////////////
 // LAYERED OUTPUT CREATION                                                    //
@@ -99,13 +99,14 @@ static vk::PipelineShaders makeShaders(const vk::Device &dev,
                                        const char *func_name = "main")
 {
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR));
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "shaders";
 
     ShaderCompiler compiler;
     SPIRVShader spirv = compiler.compileHLSLFileToSPV(
         (shader_dir / shader_file).string().c_str(), {},
         {}, {func_name, ShaderStage::Compute });
-
+    
     StackAlloc tmp_alloc;
     return vk::PipelineShaders(dev, tmp_alloc,
                                Span<const SPIRVShader>(&spirv, 1), {});
@@ -114,7 +115,7 @@ static vk::PipelineShaders makeShaders(const vk::Device &dev,
 static Pipeline<1> makeComputePipeline(const vk::Device &dev,
                                        VkPipelineCache pipeline_cache,
                                        uint32_t push_constant_size,
-                                       uint32_t num_frames,
+                                       uint32_t num_descriptor_sets,
                                        const char *shader_file,
                                        const char *func_name = "main")
 {
@@ -126,7 +127,7 @@ static Pipeline<1> makeComputePipeline(const vk::Device &dev,
         .size = push_constant_size
     };
 
-    std::vector<VkDescriptorSetLayout> desc_layouts;
+    std::vector<VkDescriptorSetLayout> desc_layouts(shader.getLayoutCount());
     for (uint32_t i = 0; i < shader.getLayoutCount(); ++i) {
         desc_layouts[i] = shader.getLayout(i);
     }
@@ -168,7 +169,7 @@ static Pipeline<1> makeComputePipeline(const vk::Device &dev,
                                          compute_infos.data(), nullptr,
                                          pipelines.data()));
 
-    vk::FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
+    vk::FixedDescriptorPool desc_pool(dev, shader, 0, num_descriptor_sets);
 
     return Pipeline<1> {
         std::move(shader),
@@ -184,15 +185,16 @@ struct BatchFrame {
     VkDescriptorSet viewInstanceSet;
 };
 
-void makeBatchFrame(vk::Device& dev, BatchFrame& frame, render::vk::MemoryAllocator &alloc, uint32_t num_worlds, uint32_t num_instances, uint32_t num_views) {
+void makeBatchFrame(vk::Device& dev, BatchFrame* frame, render::vk::MemoryAllocator &alloc, uint32_t num_worlds, uint32_t num_instances, uint32_t num_views
+    , VkDescriptorSet viewInstanceSet) {
     VkDeviceSize view_size = (num_worlds * num_views) * sizeof(PerspectiveCameraData);
-    vk::LocalBuffer views = *alloc.makeLocalBuffer(view_size);
+    vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
 
     VkDeviceSize instance_size = (num_worlds * num_instances) * sizeof(InstanceData);
-    vk::LocalBuffer instances = *alloc.makeLocalBuffer(instance_size);
+    vk::LocalBuffer instances = alloc.makeLocalBuffer(instance_size).value();
 
     VkDeviceSize instance_offset_size = (num_worlds) * sizeof(uint32_t);
-    vk::LocalBuffer instance_offsets = *alloc.makeLocalBuffer(instance_offset_size);
+    vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
     //Descriptor sets
     std::array<VkWriteDescriptorSet, 3> desc_updates;
@@ -201,35 +203,34 @@ void makeBatchFrame(vk::Device& dev, BatchFrame& frame, render::vk::MemoryAlloca
     view_info.buffer = views.buffer;
     view_info.offset = 0;
     view_info.range = view_size;
-    vk::DescHelper::storage(desc_updates[0], frame.viewInstanceSet, &view_info, 0);
+    vk::DescHelper::storage(desc_updates[0], viewInstanceSet, &view_info, 0);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = instances.buffer;
     instance_info.offset = 0;
     instance_info.range = instance_size;
-    vk::DescHelper::storage(desc_updates[1], frame.viewInstanceSet, &instance_info, 1);
+    vk::DescHelper::storage(desc_updates[1], viewInstanceSet, &instance_info, 1);
 
     VkDescriptorBufferInfo offset_info;
     offset_info.buffer = instance_offsets.buffer;
     offset_info.offset = 0;
     offset_info.range = instance_offset_size;
-    vk::DescHelper::storage(desc_updates[2], frame.viewInstanceSet, &offset_info, 2);
+    vk::DescHelper::storage(desc_updates[2], viewInstanceSet, &offset_info, 2);
 
-
-    frame.buffers.views = std::move(views);
-    frame.buffers.instances = std::move(instances);
-    frame.buffers.instanceOffsets = std::move(instance_offsets);
+    vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
+    new (frame) BatchFrame{
+        {std::move(views),std::move(instances),std::move(instance_offsets)},
+        viewInstanceSet
+    };
 }
 
 struct ViewBatch {
-    VkCommandBuffer cmdBuffer;
-
     //Draw cmds and drawdata
     vk::LocalBuffer drawBuffer;
     VkDescriptorSet drawBufferSet;
 };
 
-void makeViewBatch(vk::Device& dev, ViewBatch& batch, render::vk::MemoryAllocator &alloc) {
+void makeViewBatch(vk::Device& dev, ViewBatch* batch, render::vk::MemoryAllocator &alloc, VkDescriptorSet drawBufferSet) {
     //Make Draw Buffers
 
     int64_t buffer_offsets[1];
@@ -241,27 +242,30 @@ void makeViewBatch(vk::Device& dev, ViewBatch& batch, render::vk::MemoryAllocato
     int64_t num_draw_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
 
-    vk::LocalBuffer draw_buffer = *alloc.makeLocalBuffer(num_draw_bytes);
+    vk::LocalBuffer drawBuffer = alloc.makeLocalBuffer(num_draw_bytes).value();
 
     std::array<VkWriteDescriptorSet, 2> desc_updates;
 
     VkDescriptorBufferInfo draw_cmd_info;
-    draw_cmd_info.buffer = draw_buffer.buffer;
+    draw_cmd_info.buffer = drawBuffer.buffer;
     draw_cmd_info.offset = 0;
     draw_cmd_info.range = buffer_sizes[0];
 
-    vk::DescHelper::storage(desc_updates[0], batch.drawBufferSet, &draw_cmd_info, 0);
+    vk::DescHelper::storage(desc_updates[0], drawBufferSet, &draw_cmd_info, 0);
 
     VkDescriptorBufferInfo draw_data_info;
-    draw_data_info.buffer = draw_buffer.buffer;
-    draw_data_info.offset = buffer_offsets[1];
+    draw_data_info.buffer = drawBuffer.buffer;
+    draw_data_info.offset = buffer_offsets[0];
     draw_data_info.range = buffer_sizes[1];
 
-    vk::DescHelper::storage(desc_updates[1], batch.drawBufferSet, &draw_data_info, 1);
+    vk::DescHelper::storage(desc_updates[1], drawBufferSet, &draw_data_info, 1);
 
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
-    batch.drawBuffer = std::move(draw_buffer);
+    new (batch) ViewBatch{
+        std::move(drawBuffer),
+        drawBufferSet
+    };
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -280,38 +284,44 @@ struct BatchRendererProto::Impl {
     // We use anything from double, triple, or whatever we can buffering to save
     // on memory usage
 
-    vk::SparseBuffer sparseBufferTest;
-
     Pipeline<1> prepareViews;
 
+    //One batch is num_layers views at once
     HeapArray<ViewBatch> viewBatches;
+
+    //One frame is on simulation frame
     HeapArray<BatchFrame> batchFrames;
+
+    VkDescriptorSet assetSet;
 
     // This pipeline prepares the draw commands in the buffered draw cmds buffer
     // Pipeline<1> prepareViews;
 
     Impl(const Config &cfg, vk::Device &dev, vk::MemoryAllocator &mem, 
-         VkPipelineCache);
+         VkPipelineCache cache, VkDescriptorSet asset_set);
 };
 
 BatchRendererProto::Impl::Impl(const Config &cfg,
                                vk::Device &dev,
                                vk::MemoryAllocator &mem,
-                               VkPipelineCache pipeline_cache)
+                               VkPipelineCache pipeline_cache, 
+                               VkDescriptorSet asset_set)
     : dev(dev), mem(mem), pipelineCache(pipeline_cache),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
       targets(makeLayeredTargets(cfg.renderWidth, cfg.renderHeight,
                                  maxNumViews, dev, mem)),
-      sparseBufferTest(mem.makeSparseBuffer(1024*1024).value()),
-      prepareViews(makeComputePipeline(dev, pipelineCache, 0, 1, "prepare_views")),
+      prepareViews(makeComputePipeline(dev, pipelineCache, sizeof(shader::PrepareViewPushConstant), 2+consts::numDrawCmdBuffers, "prepare_views.hlsl")),
       viewBatches(consts::numDrawCmdBuffers),
-      batchFrames(2)
+      batchFrames(2),
+      assetSet(asset_set)
 {
     for (uint32_t i = 0; i < consts::numDrawCmdBuffers; i++) {
-        makeViewBatch(dev, viewBatches[i], mem);
+        makeViewBatch(dev, &viewBatches[i], mem, prepareViews.descPool.makeSet());
     }
+
     for (uint32_t i = 0; i < 2; i++) {
-        makeBatchFrame(dev, batchFrames[i], mem, cfg.numWorlds, cfg.maxInstancesPerWorld, cfg.maxViewsPerWorld);
+        makeBatchFrame(dev, &batchFrames[i], mem, cfg.numWorlds, 
+            cfg.maxInstancesPerWorld, cfg.maxViewsPerWorld, prepareViews.descPool.makeSet());
     }
 }
 
@@ -319,10 +329,9 @@ BatchRendererProto::BatchRendererProto(const Config &cfg,
                                        vk::Device &dev,
                                        vk::MemoryAllocator &mem,
                                        VkPipelineCache pipeline_cache,
-                                       VkDescriptorSet assetDescriptor)
-    : impl(std::make_unique<Impl>(cfg, dev, mem, pipeline_cache))
+                                      VkDescriptorSet asset_set)
+    : impl(std::make_unique<Impl>(cfg, dev, mem, pipeline_cache,asset_set))
 {
-
 }
 
 BatchRendererProto::~BatchRendererProto()
@@ -330,9 +339,8 @@ BatchRendererProto::~BatchRendererProto()
 }
 
 
-void issuePrepareViewsPipeline(vk::Device& dev, Pipeline<1>& prepare_views, BatchFrame& frame, ViewBatch& batch, 
-    VkDescriptorSet& assetSetPrepareView, uint32_t num_views, uint32_t view_start) {
-    VkCommandBuffer& draw_cmd = batch.cmdBuffer;
+void issuePrepareViewsPipeline(vk::Device& dev, VkCommandBuffer& draw_cmd, Pipeline<1>& prepare_views, BatchFrame& frame, ViewBatch& batch,
+    VkDescriptorSet& assetSetPrepareView, uint32_t num_worlds, uint32_t num_views, uint32_t view_start) {
 
     dev.dt.cmdFillBuffer(draw_cmd, batch.drawBuffer.buffer, 0,
         sizeof(shader::DrawCmd) * consts::maxDrawsPerLayeredImage,
@@ -367,15 +375,15 @@ void issuePrepareViewsPipeline(vk::Device& dev, Pipeline<1>& prepare_views, Batc
         view_gen_descriptors.data(),
         0, nullptr);
 
-    PrepareViewPushConstant view_push_const{
-        num_views,
+    shader::PrepareViewPushConstant view_push_const{
+        num_views, view_start, num_worlds
     };
 
     dev.dt.cmdPushConstants(draw_cmd, prepare_views.layout,
         VK_SHADER_STAGE_COMPUTE_BIT, 0,
-        sizeof(PrepareViewPushConstant), &view_push_const);
+        sizeof(shader::PrepareViewPushConstant), &view_push_const);
 
-    uint32_t num_workgroups = utils::divideRoundUp(num_instances, 32_u32);
+    uint32_t num_workgroups = num_views;
     dev.dt.cmdDispatch(draw_cmd, num_workgroups, 1, 1);
 
     VkMemoryBarrier cull_draw_barrier{
@@ -473,8 +481,10 @@ void issueDraws(vk::Device& dev, Pipeline<1>& object_draw_, BatchImportedBuffers
     }*/
 }
 
-void BatchRendererProto::renderViews(VkCommandBuffer draw_cmd) {
+void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd) {
     int buffer_index = 0;
+    issuePrepareViewsPipeline(impl->dev, draw_cmd, impl->prepareViews, impl->batchFrames[0], impl->viewBatches[0],
+        impl->assetSet, 1, 2, 0);
     //printf("%d\n", impl->maxNumViews);
     /*REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.cmdPool, 0));
     VkCommandBuffer draw_cmd = frame.drawCmd;
@@ -487,8 +497,8 @@ void BatchRendererProto::renderViews(VkCommandBuffer draw_cmd) {
     issueDraws(dev, impl->prepareViews, buffers, draw_cmd, command_buffer)*/
 
 }
-BatchImportedBuffers& BatchRendererProto::getImportedBuffers(uint32_t frame_id) {
-    return impl->batchFrames[frame_id];
+BatchImportedBuffers &BatchRendererProto::getImportedBuffers(uint32_t frame_id) {
+    return impl->batchFrames[frame_id].buffers;
 }
 
 }

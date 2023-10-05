@@ -16,8 +16,8 @@ struct PackedPerspectiveCameraData {
     float xScale;
     float yScale;
     float zNear;
-    int viewIDX;
     int worldIDX;
+    int pad;
 };
 
 struct PrepareViewPushConstant {

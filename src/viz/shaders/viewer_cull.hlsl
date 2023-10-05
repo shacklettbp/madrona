@@ -2,11 +2,13 @@
 #include "../../render/vk/shaders/utils.hlsl"
 
 [[vk::push_constant]]
-CullPushConst push_const;
+CullPushConst pushConst;
 
+// Contains the view just for the fly cam
 [[vk::binding(0, 0)]]
 StructuredBuffer<PackedViewData> viewDataBuffer;
 
+// Contains the instances for all the worlds
 [[vk::binding(1, 0)]]
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 
@@ -19,6 +21,9 @@ RWStructuredBuffer<DrawCmd> drawCommandBuffer;
 [[vk::binding(4, 0)]]
 RWStructuredBuffer<DrawData> drawDataBuffer;
 
+[[vk::binding(5, 0)]]
+RWStructuredBuffer<int> instanceOffsets;
+
 // Asset descriptor bindings
 
 [[vk::binding(0, 1)]]
@@ -26,6 +31,26 @@ StructuredBuffer<ObjectData> objectDataBuffer;
 
 [[vk::binding(1, 1)]]
 StructuredBuffer<MeshData> meshDataBuffer;
+
+uint getNumInstancesForWorld(uint world_idx)
+{
+    if (world_idx == 0) {
+        return instanceOffsets[0];
+    } else if (world_idx == pushConst.numWorlds - 1) {
+        return pushConst.numWorlds - instanceOffsets[world_idx-1];
+    } else {
+        return instanceOffsets[world_idx] - instanceOffsets[world_idx-1];
+    }
+}
+
+uint getInstanceOffsetsForWorld(uint world_idx)
+{
+    if (world_idx == 0) {
+        return 0;
+    } else {
+        return instanceOffsets[world_idx-1];
+    }
+}
 
 EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
 {
@@ -42,40 +67,65 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     return o;
 }
 
+struct SharedData {
+    uint numInstances;
+    uint numInstancesPerThread;
+    uint instancesOffset;
+};
+
+groupshared SharedData sm;
+
 // No actual culling performed yet
 [numThreads(32, 1, 1)]
 [shader("compute")]
-void instanceCull(uint3 idx : SV_DispatchThreadID)
+void instanceCull(uint3 tid           : SV_DispatchThreadID,
+                  uint3 tid_local     : SV_GroupThreadID,
+                  uint3 gid           : SV_GroupID)
 {
-    uint32_t instance_id = idx.x;
-    if (instance_id >= push_const.numInstances) {
-        return;
+    if (tid_local.x == 0) {
+        sm.numInstances = getNumInstancesForWorld(pushConst.worldIDX);
+        sm.numInstancesPerThread = (sm.numInstances + pushConst.numThreads-1) /
+                                   pushConst.numThreads;
+        sm.instancesOffset = getInstanceOffsetsForWorld(pushConst.worldIDX);
+        printf("instance offset %d, count %d\n", sm.instancesOffset, sm.numInstances);
     }
 
-    EngineInstanceData instance_data = unpackEngineInstanceData(
-        engineInstanceBuffer[instance_id]);
+    GroupMemoryBarrierWithGroupSync();
 
-    ObjectData obj = objectDataBuffer[instance_data.objectID];
+    for (int i = 0; i < sm.numInstancesPerThread; ++i) {
+        uint local_idx = i * sm.numInstancesPerThread + tid.x;
 
-    uint draw_offset;
-    InterlockedAdd(drawCount[0], obj.numMeshes, draw_offset);
+        if (local_idx > sm.numInstances) {
+            return;
+        }
 
-    for (int32_t i = 0; i < obj.numMeshes; i++) {
-        MeshData mesh = meshDataBuffer[obj.meshOffset + i];
+        uint current_instance_idx = sm.instancesOffset + local_idx;
 
-        uint draw_id = draw_offset + i;
-        DrawCmd draw_cmd;
-        draw_cmd.indexCount = mesh.numIndices;
-        draw_cmd.instanceCount = 1;
-        draw_cmd.firstIndex = mesh.indexOffset;
-        draw_cmd.vertexOffset = mesh.vertexOffset;
-        draw_cmd.firstInstance = draw_id;
+        EngineInstanceData instance_data = unpackEngineInstanceData(
+            engineInstanceBuffer[current_instance_idx]);
 
-        DrawData draw_data;
-        draw_data.materialID = mesh.materialIndex;
-        draw_data.instanceID = instance_id;
+        ObjectData obj = objectDataBuffer[instance_data.objectID];
 
-        drawCommandBuffer[draw_id] = draw_cmd;
-        drawDataBuffer[draw_id] = draw_data;
+        uint draw_offset;
+        InterlockedAdd(drawCount[0], obj.numMeshes, draw_offset);
+
+        for (int32_t i = 0; i < obj.numMeshes; i++) {
+            MeshData mesh = meshDataBuffer[obj.meshOffset + i];
+
+            uint draw_id = draw_offset + i;
+            DrawCmd draw_cmd;
+            draw_cmd.indexCount = mesh.numIndices;
+            draw_cmd.instanceCount = 1;
+            draw_cmd.firstIndex = mesh.indexOffset;
+            draw_cmd.vertexOffset = mesh.vertexOffset;
+            draw_cmd.firstInstance = draw_id;
+
+            DrawData draw_data;
+            draw_data.materialID = mesh.materialIndex;
+            draw_data.instanceID = current_instance_idx;
+
+            drawCommandBuffer[draw_id] = draw_cmd;
+            drawDataBuffer[draw_id] = draw_data;
+        }
     }
 }

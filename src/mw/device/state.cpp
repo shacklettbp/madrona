@@ -62,7 +62,10 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
 
         uint64_t mapped_bytes_diff = new_mapped_bytes - cur_mapped_bytes;
         void *grow_base = (char *)column_base + cur_mapped_bytes;
-        alloc->mapMemory(grow_base, mapped_bytes_diff);
+
+        if (!(tbl.perComponentFlags[i] & ComponentSelectImportPointer)) {
+            alloc->mapMemory(grow_base, mapped_bytes_diff);
+        }
 
         int32_t new_max_rows = new_mapped_bytes / column_bytes_per_row;
         min_mapped_rows = min(new_max_rows, min_mapped_rows);
@@ -180,15 +183,13 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 
     uint32_t max_column_size = 0;
 
-    uint32_t current_selector = 0;
-
     for (int i = 0; i < selector.ids.size(); ++i) {
         // Convert the ID to a column ID
         assert(columnLookup.exists(selector.ids[i]));
         uint32_t column_id = *columnLookup.lookup(selector.ids[i]);
         tbl.perComponentFlags[column_id] = selector.flags[i];
 
-        HostPrint::log("Selected component %d (column %d) to have flag %d\n",
+        HostPrint::log("Selected component {} (column {}) to have flag {}\n",
                        (int)selector.ids[i], (int)column_id, (int)selector.flags[i]);
     }
 
@@ -203,7 +204,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 
         if (tbl.perComponentFlags[i] & ComponentSelectImportPointer) {
             // We don't perfomr any allocations
-            HostPrint::log("We selected component at column %d to import\n", i);
+            HostPrint::log("We selected component at column {} to import\n", i);
         }
         else {
             tbl.columns[i] = alloc->reserveMemory(reserve_bytes, init_bytes);

@@ -19,6 +19,8 @@ struct VizCameraArchetype : public Archetype<
 
 struct ViewerSystemState {
     uint32_t *totalNumViews;
+    uint32_t *totalNumInstances;
+
     uint32_t *voxels;
 
     float aspectRatio;
@@ -78,8 +80,11 @@ inline void exportCounts(Context &ctx,
         auto *state_mgr = mwGPU::getStateManager();
         *viewer_state.totalNumViews = state_mgr->getArchetypeNumRows<
             VizCameraArchetype>();
+        *viewer_state.totalNumInstances = state_mgr->getArchetypeNumRows<
+            RenderableArchetype>();
 #else
-    (void)viewer_state;
+        *viewer_state.totalNumViews = 2;
+        *viewer_state.totalNumInstances = 20;
 #endif
     }
 }
@@ -183,12 +188,7 @@ void VizRenderingSystem::init(Context &ctx,
     int32_t world_idx = ctx.worldID().idx;
 
     system_state.totalNumViews = bridge->totalNumViews;
-#if 0
-    system_state.views = bridge->views[world_idx];
-    system_state.numViews = &bridge->numViews[world_idx];
-    system_state.instances = bridge->instances[world_idx];
-    system_state.numInstances = &bridge->numInstances[world_idx];
-#endif
+    system_state.totalNumInstances = bridge->totalNumInstances;
 
     system_state.aspectRatio = 
         (float)bridge->renderWidth / (float)bridge->renderHeight;

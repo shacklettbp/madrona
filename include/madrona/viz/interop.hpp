@@ -38,6 +38,7 @@ struct VizECSBridge {
     int32_t *instanceOffsets;
 
     uint32_t *totalNumViews;
+    uint32_t *totalNumInstances;
 
     int32_t renderWidth;
     int32_t renderHeight;
