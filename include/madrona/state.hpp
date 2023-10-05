@@ -8,6 +8,7 @@
 #pragma once
 
 #include <madrona/ecs.hpp>
+#include <madrona/ecs_flags.hpp>
 #include <madrona/heap_array.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/span.hpp>
@@ -19,27 +20,10 @@
 #include <madrona/sync.hpp>
 #include <madrona/impl/id_map.hpp>
 #include <madrona/virtual.hpp>
-#include <madrona/selector.hpp>
 
 namespace madrona {
 
 class StateManager;
-
-struct ArchetypeID {
-    uint32_t id;
-
-private:
-    ArchetypeID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
-
-struct ComponentID {
-    uint32_t id;
-
-private:
-    ComponentID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
 
 class Transaction {
 private:
@@ -120,12 +104,11 @@ public:
     template <typename ComponentT>
     ComponentID registerComponent();
 
-    // Just pass {} for the selector if no selector was needed and 0 if no
-    // archetype flags are needed
-    template <typename ArchetypeT>
-    ArchetypeID registerArchetype(ComponentSelectorGeneric selector,
-                                  ArchetypeFlags flags,
-                                  CountT max_num_entities = 0);
+    template <typename ArchetypeT, typename... MetadataComponentTs>
+    ArchetypeID registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities);
 
     template <typename SingletonT>
     void registerSingleton();
@@ -302,10 +285,12 @@ private:
 
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
-    void registerArchetype(uint32_t id, Span<ComponentID> components,
-                           ComponentSelectorGeneric selector,
-                           ArchetypeFlags flags,
-                           CountT max_num_entities);
+    void registerArchetype(uint32_t id,
+                           ArchetypeFlags archetype_flags,
+                           CountT max_num_entities,
+                           CountT num_user_components,
+                           const ComponentID *components,
+                           const ComponentFlags *component_flags);
 
     void * exportColumn(uint32_t archetype_id, uint32_t component_id);
 

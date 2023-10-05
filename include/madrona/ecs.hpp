@@ -43,6 +43,14 @@ struct WorldID {
     int32_t idx;
 };
 
+struct ComponentID {
+    uint32_t id;
+};
+
+struct ArchetypeID {
+    uint32_t id;
+};
+
 // Base class that per-world user data must inherit from
 // In the future may include any per-world data that the engine
 // itself needs. For now, just provides a common base that Context
