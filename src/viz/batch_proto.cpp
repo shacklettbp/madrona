@@ -1,4 +1,5 @@
 #include "batch_proto.hpp"
+#include "madrona/viz/interop.hpp"
 #include "viewer_renderer.hpp"
 #include "shader.hpp"
 
@@ -25,13 +26,20 @@ inline constexpr uint32_t numDrawCmdBuffers = 3; // Triple buffering
 ////////////////////////////////////////////////////////////////////////////////
 // LAYERED OUTPUT CREATION                                                    //
 ////////////////////////////////////////////////////////////////////////////////
-struct ImportedBuffers {
-    vk::LocalBuffer views;
-    vk::LocalBuffer instances;
-    vk::LocalBuffer instanceOffsets;
-};
+static BatchImportedBuffers makeImportedBuffers(uint32_t num_worlds,
+                                                uint32_t max_views_per_world,
+                                                uint32_t max_instances_per_world,
+                                                vk::MemoryAllocator &alloc)
+{
+    uint32_t num_views_bytes = num_worlds * max_views_per_world * sizeof(PerspectiveCameraData);
+    uint32_t num_instances_bytes = num_worlds * max_instances_per_world * sizeof(InstanceData);
 
-
+    return {
+        alloc.makeLocalBuffer(num_views_bytes).value(),
+        alloc.makeLocalBuffer(num_instances_bytes).value(),
+        alloc.makeLocalBuffer(sizeof(int32_t) * num_worlds).value()
+    };
+}
 
 
 
@@ -203,13 +211,7 @@ struct BatchRendererProto::Impl {
 
     uint32_t maxNumViews;
 
-    // Resources used in/for rendering the batch output
-    HeapArray<LayeredTarget> targets;
-    // We use anything from double, triple, or whatever we can buffering to save
-    // on memory usage
-    HeapArray<vk::LocalBuffer> bufferedDrawCmds;
-
-    vk::SparseBuffer sparseBufferTest;
+    HeapArray<BatchImportedBuffers> importedBuffers;
 
     // This pipeline prepares the draw commands in the buffered draw cmds buffer
     // Pipeline<1> prepareViews;
@@ -224,12 +226,15 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
                                VkPipelineCache pipeline_cache)
     : dev(dev), mem(mem), pipelineCache(pipeline_cache),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
-      targets(makeLayeredTargets(cfg.renderWidth, cfg.renderHeight,
-                                 maxNumViews, dev, mem)),
-      bufferedDrawCmds(makeDrawCmdBuffers(consts::numDrawCmdBuffers, dev, mem)),
-      sparseBufferTest(mem.makeSparseBuffer(1024*1024).value())
+      importedBuffers(consts::numDrawCmdBuffers)
       // prepareViews(makeComputePipeline(dev, pipelineCache, 0, 1, "prepare_views"))
 {
+    for (CountT i = 0; i < consts::numDrawCmdBuffers; ++i) {
+        importedBuffers.emplace(i, makeImportedBuffers(cfg.numWorlds, 
+                                                       cfg.maxViewsPerWorld,
+                                                       cfg.maxInstancesPerWorld,
+                                                       mem));
+    }
 }
 
 BatchRendererProto::BatchRendererProto(const Config &cfg,
@@ -238,6 +243,11 @@ BatchRendererProto::BatchRendererProto(const Config &cfg,
                                        VkPipelineCache pipeline_cache)
     : impl(std::make_unique<Impl>(cfg, dev, mem, pipeline_cache))
 {
+}
+
+BatchImportedBuffers &BatchRendererProto::getImportedBuffers(uint32_t frame_id)
+{
+    return impl->importedBuffers[frame_id];
 }
 
 BatchRendererProto::~BatchRendererProto()

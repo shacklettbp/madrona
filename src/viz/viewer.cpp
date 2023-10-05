@@ -63,11 +63,6 @@ void Viewer::configureLighting(Span<const LightConfig> lights)
     impl_->renderer.configureLighting(lights);
 }
 
-void Viewer::setupBatchRendererProto()
-{
-    impl_->renderer.setupBatchRendererProto();
-}
-
 const VizECSBridge * Viewer::rendererBridge() const
 {
     return impl_->renderer.getBridgePtr();
@@ -428,6 +423,9 @@ void Viewer::Impl::render(float frame_duration)
 
     ImGui::Render();
 
+    // Right now, viewIDX HAS to be 0 (during the time we're refactoring the
+    // viewer renderer).
+    frameCfg.viewIDX = 0;
     renderer.render(cam, frameCfg);
 }
 

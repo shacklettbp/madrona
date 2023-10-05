@@ -147,10 +147,12 @@ struct Frame {
     int64_t renderInputSize;
 
     uint32_t cameraViewOffset;
-    uint32_t simViewOffset;
+    // We now store this in a separate buffer
+    // uint32_t simViewOffset;
     uint32_t drawCmdOffset;
     uint32_t drawCountOffset;
-    uint32_t instanceOffset;
+    // We now store this in a separate buffer
+    // uint32_t instanceOffset;
     uint32_t lightOffset;
     uint32_t shadowOffset;
     uint32_t skyOffset;
@@ -276,8 +278,6 @@ public:
                        Span<const imp::SourceTexture> textures);
 
     void configureLighting(Span<const LightConfig> lights);
-
-    void setupBatchRendererProto();
 
     void waitUntilFrameReady();
     void startFrame();

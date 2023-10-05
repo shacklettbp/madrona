@@ -13,21 +13,15 @@
 
 namespace madrona::viz {
 
-struct BatchRendererInterop {
-    // For the batch renderer prototype
-    Optional<render::vk::HostBuffer> viewsCPU;
-    Optional<render::vk::HostBuffer> instancesCPU;
-    Optional<render::vk::HostBuffer> instanceOffsetsCPU;
+struct BatchRenderInfo {
+    uint32_t numViews;
+    uint32_t numInstances;
+};
 
-#ifdef MADRONA_CUDA_SUPPORT
-    Optional<render::vk::DedicatedBuffer> viewsGPU;
-    Optional<render::vk::DedicatedBuffer> instancesGPU;
-    Optional<render::vk::DedicatedBuffer> instanceOffsetsGPU;
-
-    Optional<render::vk::CudaImportedBuffer> viewsCUDA;
-    Optional<render::vk::CudaImportedBuffer> instancesCUDA;
-    Optional<render::vk::CudaImportedBuffer> instanceOffsetsCUDA;
-#endif
+struct BatchImportedBuffers {
+    render::vk::LocalBuffer views;
+    render::vk::LocalBuffer instances;
+    render::vk::LocalBuffer instanceOffsets;
 };
 
 struct BatchRendererProto {
@@ -50,13 +44,10 @@ struct BatchRendererProto {
 
     ~BatchRendererProto();
 
-    CountT loadObjects(Span<const imp::SourceObject> objs);
-    // RendererInterface getInterface() const;
+    void importCudaData(VkCommandBuffer);
+    void renderViews(VkCommandBuffer);
 
-    uint8_t *rgbPtr() const;
-    float *depthPtr() const;
-
-    void render();
+    BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
 };
 
 }

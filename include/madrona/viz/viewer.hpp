@@ -94,9 +94,6 @@ public:
 
     void configureLighting(Span<const LightConfig> lights);
 
-    // Set up the batch renderer prototype
-    void setupBatchRendererProto();
-
     const VizECSBridge * rendererBridge() const;
 
     template <typename InputFn, typename StepFn, typename UIFn>

@@ -39,7 +39,7 @@ public:
     template <typename ...FlagT>
     ComponentSelector(FlagT ...in_flags)
         : ids{TypeTracker::typeID<ComponentT>()...},
-          flags{in_flags...}
+          flags{(ComponentSelectFlags)in_flags...}
     {
     }
 

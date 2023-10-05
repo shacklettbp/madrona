@@ -7,7 +7,11 @@ struct BlurPushConst {
 };
 
 struct CullPushConst {
+    uint32_t worldIDX;
+    uint32_t numViews;
     uint32_t numInstances;
+    uint32_t numWorlds;
+    uint32_t numThreads;
 };
 
 struct DeferredLightingPushConst {

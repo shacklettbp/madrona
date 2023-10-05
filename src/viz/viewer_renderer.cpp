@@ -552,6 +552,8 @@ static void issueVoxelGen(Device& dev,
     uint32_t max_views,
     VoxelConfig voxel_config)
 {
+    (void)view_idx, (void)max_views;
+
     const uint32_t num_voxels = voxel_config.xLength * voxel_config.yLength * voxel_config.zLength;
 
     {
@@ -1948,6 +1950,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet voxel_gen_set,
                       VkDescriptorSet voxel_draw_set,
                       Sky &sky,
+                      BatchImportedBuffers &batch_renderer_buffers,
                       Frame *dst)
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
@@ -1955,11 +1958,12 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
 
-    int64_t buffer_offsets[7];
-    int64_t buffer_sizes[8] = {
-        (int64_t)sizeof(PackedViewData) * (max_views + 1),
+    int64_t buffer_offsets[6];
+    int64_t buffer_sizes[7] = {
+        // We just store the flycam view here
+        (int64_t)sizeof(PackedViewData),
         (int64_t)sizeof(uint32_t),
-        (int64_t)sizeof(PackedInstanceData) * max_instances,
+        // (int64_t)sizeof(PackedInstanceData) * max_instances,
         (int64_t)sizeof(DrawCmd) * max_instances * 10,
         (int64_t)sizeof(DrawData) * max_instances * 10,
         (int64_t)sizeof(DirectionalLight) * InternalConfig::maxLights,
@@ -1977,24 +1981,32 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 23> desc_updates;
+    std::array<VkWriteDescriptorSet, 24> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
     view_info.offset = 0;
     view_info.range = buffer_sizes[0];
 
-    //DescHelper::uniform(desc_updates[0], cull_set, &view_info, 0);
+    // Right now, the view_info isn't used in the cull shader
+    // DescHelper::uniform(desc_updates[23], cull_set, &view_info, 0);
     DescHelper::storage(desc_updates[0], draw_set, &view_info, 0);
     DescHelper::storage(desc_updates[19], shadow_gen_set, &view_info, 1);
 
     VkDescriptorBufferInfo instance_info;
-    instance_info.buffer = render_input.buffer;
-    instance_info.offset = buffer_offsets[1];
-    instance_info.range = buffer_sizes[2];
+    instance_info.buffer = batch_renderer_buffers.instances.buffer;
+    instance_info.offset = 0;
+    instance_info.range = VK_WHOLE_SIZE;
 
     DescHelper::storage(desc_updates[1], cull_set, &instance_info, 1);
     DescHelper::storage(desc_updates[2], draw_set, &instance_info, 1);
+
+    VkDescriptorBufferInfo instance_offset_info;
+    instance_offset_info.buffer = batch_renderer_buffers.instanceOffsets.buffer;
+    instance_offset_info.offset = 0;
+    instance_offset_info.range = VK_WHOLE_SIZE;
+
+    DescHelper::storage(desc_updates[23], cull_set, &instance_offset_info, 5);
 
     VkDescriptorBufferInfo drawcount_info;
     drawcount_info.buffer = render_input.buffer;
@@ -2005,15 +2017,15 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkDescriptorBufferInfo draw_info;
     draw_info.buffer = render_input.buffer;
-    draw_info.offset = buffer_offsets[2];
-    draw_info.range = buffer_sizes[3];
+    draw_info.offset = buffer_offsets[1];
+    draw_info.range = buffer_sizes[2];
 
     DescHelper::storage(desc_updates[4], cull_set, &draw_info, 3);
 
     VkDescriptorBufferInfo draw_data_info;
     draw_data_info.buffer = render_input.buffer;
-    draw_data_info.offset = buffer_offsets[3];
-    draw_data_info.range = buffer_sizes[4];
+    draw_data_info.offset = buffer_offsets[2];
+    draw_data_info.range = buffer_sizes[3];
 
     DescHelper::storage(desc_updates[5], cull_set, &draw_data_info, 4);
     DescHelper::storage(desc_updates[6], draw_set, &draw_data_info, 2);
@@ -2041,8 +2053,8 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkDescriptorBufferInfo light_data_info;
     light_data_info.buffer = render_input.buffer;
-    light_data_info.offset = buffer_offsets[4];
-    light_data_info.range = buffer_sizes[5];
+    light_data_info.offset = buffer_offsets[3];
+    light_data_info.range = buffer_sizes[4];
 
     DescHelper::storage(desc_updates[10], lighting_set, &light_data_info, 3);
     DescHelper::storage(desc_updates[20], shadow_gen_set, &light_data_info, 2);
@@ -2070,8 +2082,8 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkDescriptorBufferInfo shadow_view_info;
     shadow_view_info.buffer = render_input.buffer;
-    shadow_view_info.offset = buffer_offsets[5];
-    shadow_view_info.range = buffer_sizes[6];
+    shadow_view_info.offset = buffer_offsets[4];
+    shadow_view_info.range = buffer_sizes[5];
 
     DescHelper::storage(desc_updates[14], draw_set, &shadow_view_info, 3);
     DescHelper::storage(desc_updates[15], lighting_set, &shadow_view_info, 8);
@@ -2087,8 +2099,8 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     VkDescriptorBufferInfo sky_info;
     sky_info.buffer = render_input.buffer;
-    sky_info.offset = buffer_offsets[6];
-    sky_info.range = buffer_sizes[7];
+    sky_info.offset = buffer_offsets[5];
+    sky_info.range = buffer_sizes[6];
 
     DescHelper::storage(desc_updates[17], lighting_set, &sky_info, 10);
 
@@ -2170,15 +2182,17 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         std::move(voxel_ibo),
         std::move(voxel_data),
         num_render_input_bytes,
+
         0,
-        sizeof(PackedViewData),
-        uint32_t(buffer_offsets[2]),
-        uint32_t(buffer_offsets[0]),
+        // sizeof(PackedViewData),
         uint32_t(buffer_offsets[1]),
+        uint32_t(buffer_offsets[0]),
+        // uint32_t(buffer_offsets[1]),
+        (uint32_t)buffer_offsets[3],
         (uint32_t)buffer_offsets[4],
         (uint32_t)buffer_offsets[5],
-        (uint32_t)buffer_offsets[6],
         max_instances * 10,
+
         cull_set,
         draw_set,
         lighting_set,
@@ -2771,12 +2785,15 @@ static EngineInterop setupEngineInterop(Device &dev,
     }
 
     uint32_t *total_num_views_readback = nullptr;
+    uint32_t *total_num_instances_readback = nullptr;
     if (!gpu_input) {
         total_num_views_readback = (uint32_t *)malloc(
-            sizeof(uint32_t));
+            2*sizeof(uint32_t));
+        total_num_instances_readback = total_num_views_readback + 1;
     } else {
         total_num_views_readback = (uint32_t *)cu::allocReadback(
-            sizeof(uint32_t));
+            2*sizeof(uint32_t));
+        total_num_instances_readback = total_num_views_readback + 1;
     }
 
     VizECSBridge bridge = {
@@ -2784,6 +2801,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         .instances = (InstanceData *)instances_base,
         .instanceOffsets = (int32_t *)offsets_base,
         .totalNumViews = total_num_views_readback,
+        .totalNumInstances = total_num_instances_readback,
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
         .episodeDone = nullptr,
@@ -2824,8 +2842,9 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(voxel_cpu),
 #ifdef MADRONA_CUDA_SUPPORT
         std::move(voxel_gpu),
-        std::move(voxel_cuda)
+        std::move(voxel_cuda),
 #endif
+        voxel_buffer_hdl
     };
 }
 
@@ -3245,6 +3264,18 @@ Renderer::Renderer(uint32_t gpu_id,
       gpu_id_(gpu_id),
       num_worlds_(num_worlds)
 {
+    BatchRendererProto::Config br_cfg = {
+         (int)gpu_id, 
+         img_width,
+         img_height,
+         num_worlds,
+         max_views_per_world,
+         max_instances_per_world 
+    };
+
+    br_proto_ = std::make_unique<BatchRendererProto>(
+        br_cfg, dev, alloc, pipeline_cache_);
+
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
                   max_views_per_world, max_instances_per_world,
@@ -3260,6 +3291,7 @@ Renderer::Renderer(uint32_t gpu_id,
                   voxel_mesh_gen_.descPool.makeSet(),
                   voxel_draw_.descPool.makeSet(),
                   sky_,
+                  br_proto_->getImportedBuffers(i),
                   &frames_[i]);
     }
 }
@@ -3772,21 +3804,6 @@ void Renderer::configureLighting(Span<const LightConfig> lights)
     }
 }
 
-void Renderer::setupBatchRendererProto()
-{
-    BatchRendererProto::Config cfg = {
-        .gpuID = gpu_id_,
-        .renderWidth = 128,
-        .renderHeight = 128,
-        .numWorlds = num_worlds_,
-        .maxViewsPerWorld = engine_interop_.maxViewsPerWorld,
-        .maxInstancesPerWorld = engine_interop_.maxInstancesPerWorld
-        // .bridge = const_cast<BatchRendererECSBridge *>(&getBridgePtr()->brBridge)
-    };
-
-    br_proto_ = std::make_unique<BatchRendererProto>(cfg, dev, alloc, pipeline_cache_);
-}
-
 void Renderer::waitUntilFrameReady()
 {
     Frame &frame = frames_[cur_frame_];
@@ -4282,130 +4299,222 @@ static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeli
     }
 }
 
+static void issueCulling(Device &dev,
+                         VkCommandBuffer draw_cmd,
+                         const Frame &frame,
+                         const Pipeline<1> &instance_cull,
+                         VkDescriptorSet asset_set_cull,
+                         uint32_t world_idx,
+                         uint32_t num_instances,
+                         uint32_t num_views,
+                         uint32_t num_worlds)
+{
+    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                           instance_cull.hdls[0]);
+
+    std::array cull_descriptors {
+        frame.cullShaderSet,
+        asset_set_cull,
+    };
+
+    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                 instance_cull.layout, 0,
+                                 cull_descriptors.size(),
+                                 cull_descriptors.data(),
+                                 0, nullptr);
+
+    uint32_t num_warps = 4;
+
+    CullPushConst cull_push_const {
+        world_idx,
+        num_views,
+        num_instances,
+        num_worlds,
+        num_warps * 32
+    };
+
+    dev.dt.cmdPushConstants(draw_cmd, instance_cull.layout,
+                            VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                            sizeof(CullPushConst), &cull_push_const);
+
+    // Just spawn 4 for now - we don't know how many instances to process
+    dev.dt.cmdDispatch(draw_cmd, num_warps, 1, 1);
+
+    VkMemoryBarrier cull_draw_barrier {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = 
+            VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+            VK_ACCESS_SHADER_READ_BIT,
+    };
+
+    dev.dt.cmdPipelineBarrier(draw_cmd,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                              0, 1, &cull_draw_barrier, 0, nullptr,
+                              0, nullptr);
+}
+
 void Renderer::render(const ViewerCam &cam,
                       const FrameConfig &cfg)
 {
     Frame &frame = frames_[cur_frame_];
     uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
 
-    if (engine_interop_.viewsCPU.has_value()) {
-        // Need to flush engine input state before copy
-        engine_interop_.viewsCPU->flush(dev);
-        engine_interop_.instancesCPU->flush(dev);
-        engine_interop_.instanceOffsetsCPU->flush(dev);
+    { // Flush CPU buffers if we used CPU buffers
+        if (engine_interop_.viewsCPU.has_value()) {
+            // Need to flush engine input state before copy
+            engine_interop_.viewsCPU->flush(dev);
+            engine_interop_.instancesCPU->flush(dev);
+            engine_interop_.instanceOffsetsCPU->flush(dev);
+        }
+
+        if (engine_interop_.voxelInputCPU.has_value()) {
+            // Need to flush engine input state before copy
+            engine_interop_.voxelInputCPU->flush(dev);
+        }
     }
 
-    if (engine_interop_.voxelInputCPU.has_value()) {
-        // Need to flush engine input state before copy
-        engine_interop_.voxelInputCPU->flush(dev);
-    }
-
-    REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.cmdPool, 0));
     VkCommandBuffer draw_cmd = frame.drawCmd;
+    { // Get command buffer for this frame and start it
+        REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.cmdPool, 0));
+        VkCommandBufferBeginInfo begin_info {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        REQ_VK(dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    }
 
-    VkCommandBufferBeginInfo begin_info {};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    REQ_VK(dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    { // Pack the view for the fly camera and copy it to the render input
+        packView(dev, frame.viewStaging, cam, fb_width_, fb_height_);
+        VkBufferCopy view_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.cameraViewOffset,
+            .size = sizeof(PackedViewData)
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.viewStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &view_copy);
+    }
 
-    packView(dev, frame.viewStaging, cam, fb_width_, fb_height_);
-    VkBufferCopy view_copy {
-        .srcOffset = 0,
-        .dstOffset = frame.cameraViewOffset,
-        .size = sizeof(PackedViewData)
-    };
+    { // Pack the lighting data and copy it to the render input
+        packLighting(dev, frame.lightStaging, lights_);
+        VkBufferCopy light_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.lightOffset,
+            .size = sizeof(DirectionalLight) * InternalConfig::maxLights
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &light_copy);
+    }
 
-    dev.dt.cmdCopyBuffer(draw_cmd, frame.viewStaging.buffer,
-                         frame.renderInput.buffer,
-                         1, &view_copy);
+    { // Pack the sky data and copy it to the render input
+        packSky(dev, frame.skyStaging);
+        VkBufferCopy sky_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.skyOffset,
+            .size = sizeof(SkyData)
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.skyStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &sky_copy);
+    }
 
-    packLighting(dev, frame.lightStaging, lights_);
-    VkBufferCopy light_copy {
-        .srcOffset = 0,
-        .dstOffset = frame.lightOffset,
-        .size = sizeof(DirectionalLight) * InternalConfig::maxLights
-    };
+    { // Reset the draw count to zero
+        dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
+                             frame.drawCountOffset, sizeof(uint32_t), 0);
+    }
 
-    dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
-                         frame.renderInput.buffer,
-                         1, &light_copy);
+    BatchImportedBuffers &batch_buffers = br_proto_->getImportedBuffers(cur_frame_);
+    uint32_t cur_num_views = *engine_interop_.bridge.totalNumViews;
+    uint32_t cur_num_instances = *engine_interop_.bridge.totalNumInstances;
 
-    packSky(dev, frame.skyStaging);
+    printf("%d views %d instances\n", cur_num_views, cur_num_instances);
 
-    VkBufferCopy sky_copy {
-        .srcOffset = 0,
-        .dstOffset = frame.skyOffset,
-        .size = sizeof(SkyData)
-    };
+    { // Import the views
+        VkDeviceSize num_views_bytes = *engine_interop_.bridge.totalNumViews *
+            sizeof(PackedViewData);
 
-    dev.dt.cmdCopyBuffer(draw_cmd, frame.skyStaging.buffer,
-                         frame.renderInput.buffer,
-                         1, &sky_copy);
+        VkBufferCopy view_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_views_bytes
+        };
 
-    dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
-                         frame.drawCountOffset, sizeof(uint32_t), 0);
+        dev.dt.cmdCopyBuffer(draw_cmd, engine_interop_.viewsHdl,
+                             batch_buffers.views.buffer,
+                             1, &view_data_copy);
+    }
 
-    VkDeviceSize world_view_byte_offset = engine_interop_.viewBaseOffset +
-        cfg.worldIDX * engine_interop_.maxViewsPerWorld *
-        sizeof(PackedViewData);
+    { // Import the instances
+        VkDeviceSize num_instances_bytes = *engine_interop_.bridge.totalNumInstances *
+            sizeof(PackedInstanceData);
 
-    VkBufferCopy view_data_copy {
-        .srcOffset = world_view_byte_offset,
-        .dstOffset = frame.simViewOffset,
-        .size = sizeof(PackedViewData) * engine_interop_.maxViewsPerWorld,
-    };
+        VkBufferCopy instance_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_instances_bytes
+        };
 
-    dev.dt.cmdCopyBuffer(draw_cmd,
-                         engine_interop_.renderInputHdl,
-                         frame.renderInput.buffer,
-                         1, &view_data_copy);
-    
+        dev.dt.cmdCopyBuffer(draw_cmd, engine_interop_.instancesHdl,
+                             batch_buffers.instances.buffer,
+                             1, &instance_data_copy);
+    }
 
-    issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
-                   cfg.viewIDX, engine_interop_.maxViewsPerWorld);
+    { // Import the offsets for instances
+        VkDeviceSize num_offsets_bytes = num_worlds_ *
+            sizeof(int32_t);
 
-    const uint32_t num_voxels = this->voxel_config_.xLength * this->voxel_config_.yLength * this->voxel_config_.zLength;
+        VkBufferCopy offsets_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_offsets_bytes
+        };
 
-    if (num_voxels > 0) {
-        dev.dt.cmdFillBuffer(draw_cmd, frame.voxelVBO.buffer,
-            0, sizeof(float) * num_voxels * 6 * 4 * 8, 0);
+        dev.dt.cmdCopyBuffer(draw_cmd, engine_interop_.instanceOffsetsHdl,
+                             batch_buffers.instanceOffsets.buffer,
+                             1, &offsets_data_copy);
+    }
 
-        VkBufferCopy voxel_copy = {
+    { // Issue shadow pass
+        issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
+                       cfg.viewIDX, engine_interop_.maxViewsPerWorld);
+    }
+
+    const uint32_t num_voxels = this->voxel_config_.xLength * 
+        this->voxel_config_.yLength *
+        this->voxel_config_.zLength;
+
+    { // Issue the voxel generation compute shader if needed
+        if (num_voxels > 0) {
+            dev.dt.cmdFillBuffer(draw_cmd, frame.voxelVBO.buffer,
+                                 0, sizeof(float) * num_voxels * 6 * 4 * 8, 0);
+
+            VkBufferCopy voxel_copy = {
                 .srcOffset = 0,
                 .dstOffset = 0,
                 .size = num_voxels * sizeof(int32_t),
-        };
+            };
 
-        dev.dt.cmdCopyBuffer(draw_cmd,
-            engine_interop_.voxelHdl,
-            frame.voxelData.buffer,
-            1, &voxel_copy);
+            dev.dt.cmdCopyBuffer(draw_cmd,
+                                 engine_interop_.voxelHdl,
+                                 frame.voxelData.buffer,
+                                 1, &voxel_copy);
 
-        issueVoxelGen(dev, frame, voxel_mesh_gen_, draw_cmd, cfg.viewIDX, engine_interop_.maxInstancesPerWorld, voxel_config_);
+            issueVoxelGen(dev, frame, 
+                          voxel_mesh_gen_, 
+                          draw_cmd,
+                          cfg.viewIDX,
+                          engine_interop_.maxInstancesPerWorld,
+                          voxel_config_);
+        }
     }
 
-    uint32_t num_instances =
-        engine_interop_.bridge.numInstances[cfg.worldIDX];
-
-    if (num_instances > 0) {
-        VkDeviceSize world_instance_byte_offset = sizeof(PackedInstanceData) *
-            cfg.worldIDX * engine_interop_.maxInstancesPerWorld;
-
-        VkBufferCopy instance_copy = {
-            .srcOffset = world_instance_byte_offset,
-            .dstOffset = frame.instanceOffset,
-            .size = sizeof(PackedInstanceData) * num_instances,
-        };
-
-        dev.dt.cmdCopyBuffer(draw_cmd,
-                             engine_interop_.renderInputHdl,
-                             frame.renderInput.buffer,
-                             1, &instance_copy);
-
-        dev.dt.cmdFillBuffer(draw_cmd,
-            frame.renderInput.buffer,
-            frame.drawCmdOffset,
-            sizeof(VkDrawIndexedIndirectCommand) * num_instances * 10,
-            0);
+    { // Generate draw commands from the flycam.
+        uint32_t draw_cmd_bytes = sizeof(VkDrawIndexedIndirectCommand) *
+                                  engine_interop_.maxInstancesPerWorld * 10;
+        dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
+                             frame.drawCmdOffset,
+                             draw_cmd_bytes,
+                             0);
 
         VkMemoryBarrier copy_barrier {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
@@ -4421,65 +4530,11 @@ void Renderer::render(const ViewerCam &cam,
                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
 
-        dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                               instance_cull_.hdls[0]);
-
-        std::array cull_descriptors {
-            frame.cullShaderSet,
-            asset_set_cull_,
-        };
-
-        dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                                     instance_cull_.layout, 0,
-                                     cull_descriptors.size(),
-                                     cull_descriptors.data(),
-                                     0, nullptr);
-
-        CullPushConst cull_push_const {
-            num_instances,
-        };
-
-        dev.dt.cmdPushConstants(draw_cmd, instance_cull_.layout,
-                                VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                                sizeof(CullPushConst), &cull_push_const);
-
-        uint32_t num_workgroups = utils::divideRoundUp(num_instances, 32_u32);
-        dev.dt.cmdDispatch(draw_cmd, num_workgroups, 1, 1);
-
-        VkMemoryBarrier cull_draw_barrier {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = 
-                VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
-                VK_ACCESS_SHADER_READ_BIT,
-        };
-
-        dev.dt.cmdPipelineBarrier(draw_cmd,
-                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                  VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
-                                    VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                                  0, 1, &cull_draw_barrier, 0, nullptr,
-                                  0, nullptr);
-    } else {
-        VkMemoryBarrier copy_barrier {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask =
-                VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
-                VK_ACCESS_UNIFORM_READ_BIT,
-        };
-
-        dev.dt.cmdPipelineBarrier(draw_cmd,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
-                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
+        issueCulling(dev, draw_cmd, frame, instance_cull_,
+                     asset_set_cull_,
+                     0, cur_num_instances, cur_num_views,
+                     num_worlds_);
     }
-
-
 
     { // Shadow pass
         dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -4547,7 +4602,7 @@ void Renderer::render(const ViewerCam &cam,
         dev.dt.cmdDrawIndexedIndirect(draw_cmd,
                 frame.renderInput.buffer,
                 frame.drawCmdOffset,
-                num_instances * 10,
+                engine_interop_.maxInstancesPerWorld * 10,
                 sizeof(DrawCmd));
 
         dev.dt.cmdEndRenderPass(draw_cmd);
@@ -4649,7 +4704,7 @@ void Renderer::render(const ViewerCam &cam,
     dev.dt.cmdDrawIndexedIndirect(draw_cmd,
                                   frame.renderInput.buffer,
                                   frame.drawCmdOffset,
-                                  num_instances * 10,
+                                  engine_interop_.maxInstancesPerWorld * 10,
                                   sizeof(DrawCmd));
 
     if (num_voxels > 0) {
