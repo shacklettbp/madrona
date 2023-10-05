@@ -121,7 +121,24 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
                     nb::device::cpu::value,
                 tensor.isOnGPU() ? tensor.gpuID() : 0,
             };
-        }, nb::rv_policy::automatic_reference);
+        }, nb::rv_policy::automatic_reference)
+        .def("to_jax", [](const Tensor &tensor) {
+            nb::dlpack::dtype type = toDLPackType(tensor.type());
+
+            return nb::ndarray<nb::jax, void> {
+                tensor.devicePtr(),
+                (size_t)tensor.numDims(),
+                (const size_t *)tensor.dims(),
+                nb::handle(),
+                nullptr,
+                type,
+                tensor.isOnGPU() ?
+                    nb::device::cuda::value :
+                    nb::device::cpu::value,
+                tensor.isOnGPU() ? tensor.gpuID() : 0,
+            };
+        }, nb::rv_policy::automatic_reference)
+    ;
 
 #ifdef MADRONA_CUDA_SUPPORT
     nb::class_<CudaSync>(m, "CudaSync")
