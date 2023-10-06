@@ -517,6 +517,8 @@ struct ViewBatch {
     // This descriptor set contains draw information
     VkDescriptorSet drawBufferSetPrepare;
     VkDescriptorSet drawBufferSetDraw;
+
+    uint32_t drawCmdOffset;
 };
 
 static void makeViewBatch(vk::Device& dev,
@@ -570,7 +572,8 @@ static void makeViewBatch(vk::Device& dev,
     new (batch) ViewBatch{
         std::move(drawBuffer),
         draw_buffer_set_prepare,
-        draw_buffer_set_draw
+        draw_buffer_set_draw,
+        (uint32_t)buffer_offsets[0]
     };
 }
 
@@ -712,7 +715,7 @@ static void issueRasterization(vk::Device &dev,
 
         dev.dt.cmdDrawIndexedIndirectCount(draw_cmd, 
                                            view_batch.drawBuffer.buffer,
-                                           sizeof(uint32_t),
+                                           view_batch.drawCmdOffset,
                                            view_batch.drawBuffer.buffer,
                                            0, consts::maxDrawsPerLayeredImage,
                                            sizeof(shader::DrawCmd));

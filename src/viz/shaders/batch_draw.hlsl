@@ -213,7 +213,7 @@ PixelOutput frag(in V2F v2f)
 {
     PixelOutput output;
     output.ids = uint2(v2f.triangleID, v2f.instanceID);
-    // output.color = float4(rnd(v2f.triangleID + v2f.instanceID), 1.0);
+    // output.color = float4(0, 0, 1, 1);
     return output;
 }
 
