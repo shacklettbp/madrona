@@ -8,10 +8,10 @@ PrepareViewPushConstant pushConst;
 // dispatch a workgroup for each view and have the 32 threads of the workgroup 
 // process each instance data for that view (and perform culling).
 [[vk::binding(0, 0)]]
-StructuredBuffer<PerspectiveCameraDataBR > cameraBuffer;
+StructuredBuffer<PackedViewData> cameraBuffer;
 
 [[vk::binding(1, 0)]]
-StructuredBuffer<InstanceDataBR> instanceData;
+StructuredBuffer<PackedInstanceData> instanceData;
 
 [[vk::binding(2, 0)]]
 StructuredBuffer<uint32_t> instanceOffsets;
@@ -23,7 +23,7 @@ RWStructuredBuffer<uint32_t> drawCount;
 RWStructuredBuffer<DrawCmd> drawCommandBuffer;
 
 [[vk::binding(2, 1)]]
-RWStructuredBuffer<DrawData> drawDataBuffer;
+RWStructuredBuffer<DrawDataBR> drawDataBuffer;
 
 // Asset descriptor bindings
 
@@ -36,9 +36,12 @@ StructuredBuffer<MeshData> meshDataBuffer;
 uint getNumInstancesForWorld(uint world_idx)
 {
     if (world_idx == 0) {
+        printf("0: %d\n", instanceOffsets[0]);
         return instanceOffsets[0];
     } else if (world_idx == pushConst.numWorlds - 1) {
-        return pushConst.numWorlds - instanceOffsets[world_idx-1];
+        printf("1: %d - %d = %d\n", pushConst.numWorlds, instanceOffsets[world_idx-1],
+                                    pushConst.numWorlds - instanceOffsets[world_idx-1]);
+        return pushConst.numInstances - instanceOffsets[world_idx-1];
     } else {
         return instanceOffsets[world_idx] - instanceOffsets[world_idx-1];
     }
@@ -53,11 +56,45 @@ uint getInstanceOffsetsForWorld(uint world_idx)
     }
 }
 
+EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
+{
+    const float4 d0 = packed.data[0];
+    const float4 d1 = packed.data[1];
+    const float4 d2 = packed.data[2];
+
+    EngineInstanceData o;
+    o.position = d0.xyz;
+    o.rotation = float4(d1.xyz, d0.w);
+    o.scale = float3(d1.w, d2.xy);
+    o.objectID = asint(d2.z);
+    o.worldID = asint(d2.w);
+
+    return o;
+}
+
+PerspectiveCameraData unpackViewData(PackedViewData packed)
+{
+    const float4 d0 = packed.data[0];
+    const float4 d1 = packed.data[1];
+    const float4 d2 = packed.data[2];
+
+    PerspectiveCameraData cam;
+    cam.pos = d0.xyz;
+    cam.rot = float4(d1.xyz, d0.w);
+    cam.xScale = d1.w;
+    cam.yScale = d2.x;
+    cam.zNear = d2.y;
+    cam.worldID = asint(d2.z);
+    float pad = d2.w;
+
+    return cam;
+}
+
 struct SharedData {
     uint viewIdx;
     uint numInstancesPerThread;
-    PerspectiveCameraDataBR packedCamera;
     uint offset;
+    PerspectiveCameraData camera;
     uint numInstancesForWorld;
 };
 
@@ -75,25 +112,30 @@ void main(uint3 tid       : SV_DispatchThreadID,
     if (tid_local.x == 0) {
         // Each group processes a single view
         sm.viewIdx = gid.x + pushConst.offset;
-        sm.packedCamera = cameraBuffer[sm.viewIdx];
-        sm.offset = getInstanceOffsetsForWorld(sm.packedCamera.worldIDX);
-        sm.numInstancesForWorld = getNumInstancesForWorld(sm.packedCamera.worldIDX);
-        sm.numInstancesPerThread = sm.numInstancesForWorld /
-                                           PREPARE_VIEW_WORKGROUP_SIZE;
+        sm.camera = unpackViewData(cameraBuffer[sm.viewIdx]);
+        sm.offset = getInstanceOffsetsForWorld(sm.camera.worldID);
+        sm.numInstancesForWorld = getNumInstancesForWorld(sm.camera.worldID);
+        sm.numInstancesPerThread = (sm.numInstancesForWorld+32) / 32;
+
+        printf("View %d (world %d) gets %d instances (%d per thread)\n",
+               gid.x,
+               sm.camera.worldID,
+               sm.numInstancesForWorld,
+               sm.numInstancesPerThread);
     }
 
     GroupMemoryBarrierWithGroupSync();
 
     for (int i = 0; i < sm.numInstancesPerThread; ++i) {
-        uint local_idx = i * sm.numInstancesPerThread;
+        uint local_idx = i * sm.numInstancesPerThread + tid_local.x;
         if (local_idx > sm.numInstancesForWorld)
             return;
 
         uint current_instance_idx = sm.offset +
                                     local_idx;
 
-        InstanceDataBR instance_data = 
-            instanceData[current_instance_idx];
+        EngineInstanceData instance_data = 
+            unpackEngineInstanceData(instanceData[current_instance_idx]);
 
         // Don't do culling yet.
 
@@ -113,9 +155,11 @@ void main(uint3 tid       : SV_DispatchThreadID,
             draw_cmd.vertexOffset = mesh.vertexOffset;
             draw_cmd.firstInstance = draw_id;
 
-            DrawData draw_data;
-            draw_data.materialID = mesh.materialIndex;
+            DrawDataBR draw_data;
+            draw_data.viewID = sm.viewIdx;
             draw_data.instanceID =  current_instance_idx;
+            draw_data.layerID = gid.x;
+            draw_data.vertexOffset = draw_cmd.vertexOffset;
 
             drawCommandBuffer[draw_id] = draw_cmd;
             drawDataBuffer[draw_id] = draw_data;

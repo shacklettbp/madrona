@@ -573,6 +573,7 @@ Device Backend::initDevice(
         VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
         VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME,
         VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
+        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
 #if defined(MADRONA_MACOS) || defined(MADRONA_IOS)
         "VK_KHR_portability_subset"
 #endif
@@ -763,7 +764,11 @@ Device Backend::initDevice(
     vk12_features.descriptorIndexing = true;
     vk12_features.descriptorBindingPartiallyBound = true;
     vk12_features.descriptorBindingUpdateUnusedWhilePending = true;
+#if defined(__APPLE__)
     vk12_features.drawIndirectCount = false; // No MoltenVK support :(
+#else
+    vk12_features.drawIndirectCount = true;
+#endif
     vk12_features.runtimeDescriptorArray = true;
     vk12_features.shaderStorageBufferArrayNonUniformIndexing = false;
     vk12_features.shaderSampledImageArrayNonUniformIndexing = true;

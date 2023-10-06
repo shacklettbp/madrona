@@ -104,6 +104,8 @@ device:
 - support_mem_export:
     - vkGetMemoryFdKHR
     - vkGetSemaphoreFdKHR
+- vkCmdBeginRenderingKHR
+- vkCmdEndRenderingKHR
 
 instance:
 - vkEnumeratePhysicalDevices

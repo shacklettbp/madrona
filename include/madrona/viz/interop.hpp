@@ -3,7 +3,7 @@
 namespace madrona::viz {
 
 struct alignas(16) PerspectiveCameraData {
-    math::Vector4 position;
+    math::Vector3 position;
     math::Quat rotation;
     float xScale;
     float yScale;

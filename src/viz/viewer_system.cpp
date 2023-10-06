@@ -61,8 +61,10 @@ inline void viewTransformUpdate(Context &ctx,
     PerspectiveCameraData &cam_data = 
         ctx.get<PerspectiveCameraData>(viz_cam.cameraEntity);
 
-    cam_data.position = Vector4::fromVector3(camera_pos, 1.0f);
+    cam_data.position = camera_pos;
     cam_data.rotation = rot.inv();
+    cam_data.worldIDX = ctx.worldID().idx;
+    *((float *)&cam_data.pad) = 42.0f;
 }
 
 inline void exportCounts(Context &ctx,

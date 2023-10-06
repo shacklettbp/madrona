@@ -9,6 +9,8 @@
 
 #include "vk/descriptors.hpp"
 
+#include "batch_proto.hpp"
+
 #include <filesystem>
 
 #ifdef MADRONA_MACOS
@@ -951,7 +953,8 @@ static void initCommonDrawPipelineInfo(VkPipelineVertexInputStateCreateInfo &ver
                                        VkPipelineInputAssemblyStateCreateInfo &input_assembly_info,
                                        VkPipelineViewportStateCreateInfo &viewport_info,
                                        VkPipelineMultisampleStateCreateInfo &multisample_info,
-                                       VkPipelineRasterizationStateCreateInfo &raster_info) {
+                                       VkPipelineRasterizationStateCreateInfo &raster_info) 
+{
     // Disable auto vertex assembly
     vert_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -3272,11 +3275,12 @@ Renderer::Renderer(uint32_t gpu_id,
          200,
          num_worlds,
          max_views_per_world,
-         max_instances_per_world 
+         max_instances_per_world,
+         (uint32_t)frames_.size()
     };
 
     br_proto_ = std::make_unique<BatchRendererProto>(
-        br_cfg, dev, alloc, pipeline_cache_, asset_set_cull_);
+        br_cfg, dev, alloc, pipeline_cache_, asset_set_cull_, asset_set_draw_);
 
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
@@ -4474,7 +4478,7 @@ void Renderer::render(const ViewerCam &cam,
                              1, &offsets_data_copy);
     }
 
-    br_proto_->renderViews(draw_cmd, {cur_num_views, cur_num_instances, num_worlds_});
+    br_proto_->renderViews(draw_cmd, {cur_num_views, cur_num_instances, num_worlds_}, loaded_assets_);
 
     { // Issue shadow pass
         issueShadowGen(dev, frame, shadow_gen_, draw_cmd,

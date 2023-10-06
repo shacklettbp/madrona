@@ -4,9 +4,10 @@
 #define PREPARE_VIEW_WORKGROUP_SIZE 32
 
 struct PrepareViewPushConstant {
-    uint numViews;
-    uint offset;
-    uint numWorlds;
+    uint32_t numViews;
+    uint32_t offset;
+    uint32_t numWorlds;
+    uint32_t numInstances;
 };
 
 struct BlurPushConst {
@@ -129,6 +130,7 @@ struct EngineInstanceData {
     float4 rotation;
     float3 scale;
     int32_t objectID;
+    int32_t worldID;
 };
 
 struct PackedViewData {
@@ -155,6 +157,7 @@ struct PerspectiveCameraData {
     float xScale;
     float yScale;
     float zNear;
+    int32_t worldID;
 };
 
 // Make sure that this becomes packed in the future.
@@ -178,9 +181,10 @@ struct InstanceDataBR {
 };
 
 struct DrawDataBR {
-    int instanceID;
-    int materialID;
-    int layer;
+    uint instanceID;
+    uint viewID;
+    uint layerID;
+    uint vertexOffset;
 };
 
 struct DrawCmd {

@@ -63,6 +63,7 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     o.rotation = float4(d1.xyz, d0.w);
     o.scale = float3(d1.w, d2.xy);
     o.objectID = asint(d2.z);
+    o.worldID = asint(d2.w);
 
     return o;
 }
@@ -87,7 +88,6 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
         sm.numInstancesPerThread = (sm.numInstances + pushConst.numThreads-1) /
                                    pushConst.numThreads;
         sm.instancesOffset = getInstanceOffsetsForWorld(pushConst.worldIDX);
-        printf("instance offset %d, count %d\n", sm.instancesOffset, sm.numInstances);
     }
 
     GroupMemoryBarrierWithGroupSync();

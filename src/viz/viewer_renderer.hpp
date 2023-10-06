@@ -22,9 +22,9 @@
 
 #include "shader.hpp"
 
-#include "batch_proto.hpp"
-
 namespace madrona::viz {
+
+struct BatchRendererProto;
 
 struct Swapchain {
     VkSwapchainKHR hdl;
