@@ -233,8 +233,9 @@ struct ViewBatch {
 void makeViewBatch(vk::Device& dev, ViewBatch* batch, render::vk::MemoryAllocator &alloc, VkDescriptorSet drawBufferSet) {
     //Make Draw Buffers
 
-    int64_t buffer_offsets[1];
-    int64_t buffer_sizes[2] = {
+    int64_t buffer_offsets[2];
+    int64_t buffer_sizes[3] = {
+        (int64_t)sizeof(uint32_t),
         (int64_t)sizeof(shader::DrawCmd) * consts::maxDrawsPerLayeredImage,
         (int64_t)sizeof(shader::DrawData) * consts::maxDrawsPerLayeredImage
     };
@@ -244,21 +245,28 @@ void makeViewBatch(vk::Device& dev, ViewBatch* batch, render::vk::MemoryAllocato
 
     vk::LocalBuffer drawBuffer = alloc.makeLocalBuffer(num_draw_bytes).value();
 
-    std::array<VkWriteDescriptorSet, 2> desc_updates;
+    std::array<VkWriteDescriptorSet, 3> desc_updates;
+
+    VkDescriptorBufferInfo draw_count_info;
+    draw_count_info.buffer = drawBuffer.buffer;
+    draw_count_info.offset = 0;
+    draw_count_info.range = buffer_sizes[0];
+
+    vk::DescHelper::storage(desc_updates[0], drawBufferSet, &draw_count_info, 0);
 
     VkDescriptorBufferInfo draw_cmd_info;
     draw_cmd_info.buffer = drawBuffer.buffer;
-    draw_cmd_info.offset = 0;
-    draw_cmd_info.range = buffer_sizes[0];
+    draw_cmd_info.offset = buffer_offsets[0];
+    draw_cmd_info.range = buffer_sizes[1];
 
-    vk::DescHelper::storage(desc_updates[0], drawBufferSet, &draw_cmd_info, 0);
+    vk::DescHelper::storage(desc_updates[1], drawBufferSet, &draw_cmd_info, 1);
 
     VkDescriptorBufferInfo draw_data_info;
     draw_data_info.buffer = drawBuffer.buffer;
-    draw_data_info.offset = buffer_offsets[0];
-    draw_data_info.range = buffer_sizes[1];
+    draw_data_info.offset = buffer_offsets[1];
+    draw_data_info.range = buffer_sizes[2];
 
-    vk::DescHelper::storage(desc_updates[1], drawBufferSet, &draw_data_info, 1);
+    vk::DescHelper::storage(desc_updates[2], drawBufferSet, &draw_data_info, 2);
 
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
@@ -336,15 +344,15 @@ BatchRendererProto::BatchRendererProto(const Config &cfg,
 
 BatchRendererProto::~BatchRendererProto()
 {
+    impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->prepareViews.hdls[0], nullptr);
+    impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->prepareViews.layout, nullptr);
 }
 
 
 void issuePrepareViewsPipeline(vk::Device& dev, VkCommandBuffer& draw_cmd, Pipeline<1>& prepare_views, BatchFrame& frame, ViewBatch& batch,
     VkDescriptorSet& assetSetPrepareView, uint32_t num_worlds, uint32_t num_views, uint32_t view_start) {
 
-    dev.dt.cmdFillBuffer(draw_cmd, batch.drawBuffer.buffer, 0,
-        sizeof(shader::DrawCmd) * consts::maxDrawsPerLayeredImage,
-        0);
+    dev.dt.cmdFillBuffer(draw_cmd, batch.drawBuffer.buffer, 0, sizeof(uint32_t), 0);
 
     VkMemoryBarrier copy_barrier{
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
