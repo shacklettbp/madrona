@@ -481,20 +481,25 @@ void issueDraws(vk::Device& dev, Pipeline<1>& object_draw_, BatchImportedBuffers
     }*/
 }
 
-void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd) {
-    int buffer_index = 0;
-    issuePrepareViewsPipeline(impl->dev, draw_cmd, impl->prepareViews, impl->batchFrames[0], impl->viewBatches[0],
-        impl->assetSet, 1, 2, 0);
-    //printf("%d\n", impl->maxNumViews);
-    /*REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.cmdPool, 0));
-    VkCommandBuffer draw_cmd = frame.drawCmd;
+void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd, BatchRenderInfo info) {
+    uint32_t batch_index = 0;
+    uint32_t frame_index = 0;
 
-    VkCommandBufferBeginInfo begin_info{};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    REQ_VK(dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    uint32_t num_views = info.numViews;
+    int offset = 0;
 
-    issuePrepareViewsPipeline(dev, impl->prepareViews, buffers, draw_cmd, command_buffer);
-    issueDraws(dev, impl->prepareViews, buffers, draw_cmd, command_buffer)*/
+    while (num_views > 0) {
+        int batch_size = std::min(impl->dev.maxNumLayersPerImage, num_views);
+        issuePrepareViewsPipeline(impl->dev, draw_cmd, impl->prepareViews, impl->batchFrames[frame_index],
+            impl->viewBatches[batch_index], impl->assetSet, info.numWorlds,
+            batch_size, offset);
+
+        //Finish rest of draws for the frame
+
+        offset += batch_size;
+        num_views -= batch_size;
+        batch_index = ((batch_index + 1) % impl->viewBatches.size());
+    }
 
 }
 BatchImportedBuffers &BatchRendererProto::getImportedBuffers(uint32_t frame_id) {

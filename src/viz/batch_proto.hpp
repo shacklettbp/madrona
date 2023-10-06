@@ -21,6 +21,7 @@ namespace madrona::viz {
 struct BatchRenderInfo {
     uint32_t numViews;
     uint32_t numInstances;
+    uint32_t numWorlds;
 };
 
 struct BatchImportedBuffers {
@@ -51,7 +52,7 @@ struct BatchRendererProto {
         ~BatchRendererProto();
     void importCudaData(VkCommandBuffer);
 
-    void renderViews(VkCommandBuffer& buffer);
+    void renderViews(VkCommandBuffer& draw_cmd, BatchRenderInfo info);
 
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
 };

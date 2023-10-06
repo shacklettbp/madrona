@@ -4474,7 +4474,7 @@ void Renderer::render(const ViewerCam &cam,
                              1, &offsets_data_copy);
     }
 
-    br_proto_->renderViews(draw_cmd);
+    br_proto_->renderViews(draw_cmd, {cur_num_views, cur_num_instances, num_worlds_});
 
     { // Issue shadow pass
         issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
