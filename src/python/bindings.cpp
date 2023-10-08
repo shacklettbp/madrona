@@ -1,6 +1,7 @@
 #include <madrona/py/bindings.hpp>
+#include <madrona/crash.hpp>
 
-#include <iostream>
+#include <nanobind/eval.h>
 
 namespace nb = nanobind;
 
@@ -29,6 +30,93 @@ static nb::dlpack::dtype toDLPackType(Tensor::ElementType type)
             return nb::dtype<float>();
         default: MADRONA_UNREACHABLE();
     }
+}
+
+static auto tensor_to_pytorch(const Tensor &tensor)
+{
+    nb::dlpack::dtype type = toDLPackType(tensor.type());
+
+    return nb::ndarray<nb::pytorch, void> {
+        tensor.devicePtr(),
+        (size_t)tensor.numDims(),
+        (const size_t *)tensor.dims(),
+        nb::handle(),
+        nullptr,
+        type,
+        tensor.isOnGPU() ?
+            nb::device::cuda::value :
+            nb::device::cpu::value,
+        tensor.isOnGPU() ? tensor.gpuID() : 0,
+    };
+}
+
+static auto tensor_to_jax(const Tensor &tensor)
+{
+    nb::dlpack::dtype type = toDLPackType(tensor.type());
+
+    return nb::ndarray<nb::jax, void> {
+        tensor.devicePtr(),
+        (size_t)tensor.numDims(),
+        (const size_t *)tensor.dims(),
+        nb::handle(),
+        nullptr,
+        type,
+        tensor.isOnGPU() ?
+            nb::device::cuda::value :
+            nb::device::cpu::value,
+        tensor.isOnGPU() ? tensor.gpuID() : 0,
+    };
+}
+
+static nb::dict train_interface_to_pytree(const TrainInterface &iface)
+{
+    nb::dict d;
+    
+    Span<const TrainInterface::NamedTensor> src_obs = iface.observations();
+    Span<const TrainInterface::NamedTensor> src_stats = iface.stats();
+
+    nb::dict obs;
+    for (const TrainInterface::NamedTensor &t : src_obs) {
+        obs[t.name] = tensor_to_jax(t.hdl);
+    }
+
+    nb::dict stats;
+    for (const TrainInterface::NamedTensor &t : src_stats) {
+        obs[t.name] = tensor_to_jax(t.hdl);
+    }
+    
+    d["obs"] = obs;
+    d["actions"] = tensor_to_jax(iface.actions());
+    d["rewards"] = tensor_to_jax(iface.rewards());
+    d["dones"] = tensor_to_jax(iface.dones());
+    d["resets"] = tensor_to_jax(iface.resets());
+    d["stats"] = stats;
+    
+    return d;
+}
+
+nb::object XLAInterface::setup(const TrainInterface &iface,
+                               nb::object sim_obj,
+                               void *sim_ptr,
+                               void *fn,
+                               bool xla_gpu)
+{
+    nb::capsule fn_capsule(fn, "xla.__CUSTOM_CALL_TARGET");
+
+    auto sim_encode = nb::bytes((char *)&sim_ptr, sizeof(char *));
+
+    nb::dict scope;
+    scope["sim_obj"] = sim_obj;
+    scope["sim_encode"] = sim_encode;
+    scope["custom_call_capsule"] = fn_capsule;
+    scope["custom_call_platform"] = xla_gpu ? "gpu" : "cpu";
+
+    nb::exec(
+#include "xla_register.py"
+    , scope);
+
+    return nb::make_tuple(
+        train_interface_to_pytree(iface), scope["step_func"]);
 }
 
 static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
@@ -61,8 +149,7 @@ static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
         }
     }
 
-    std::cerr << "Tensor: Invalid tensor dtype" << std::endl;
-    exit(1);
+    FATAL("Tensor: Invalid tensor dtype");
 }
 
 void setupMadronaSubmodule(nb::module_ parent_mod)
@@ -83,18 +170,14 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
             if (torch_tensor.device_type() == nb::device::cuda::value) {
                 gpu_id = torch_tensor.device_id();
             } else if (torch_tensor.device_type() != nb::device::cpu::value) {
-                std::cerr <<
-                    "madrona::Tensor: failed to import unknown tensor type" <<
-                    std::endl;
-                abort();
+                FATAL("madrona::Tensor: failed to import unknown tensor type");
             }
 
             std::array<int64_t, Tensor::maxDimensions> dims;
 
             if (torch_tensor.ndim() > Tensor::maxDimensions) {
-                std::cerr << "Cannot construct Tensor with more than "
-                    << Tensor::maxDimensions << " dimensions" << std::endl;
-                abort();
+                FATAL("Cannot construct Tensor with more than %ld dimensions\n",
+                      Tensor::maxDimensions);
             }
 
             for (size_t i = 0; i < torch_tensor.ndim(); i++) {
@@ -106,44 +189,19 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
                                 { dims.data(), (CountT)torch_tensor.ndim() },
                                 gpu_id);
         }))
-        .def("to_torch", [](const Tensor &tensor) {
-            nb::dlpack::dtype type = toDLPackType(tensor.type());
-
-            return nb::ndarray<nb::pytorch, void> {
-                tensor.devicePtr(),
-                (size_t)tensor.numDims(),
-                (const size_t *)tensor.dims(),
-                nb::handle(),
-                nullptr,
-                type,
-                tensor.isOnGPU() ?
-                    nb::device::cuda::value :
-                    nb::device::cpu::value,
-                tensor.isOnGPU() ? tensor.gpuID() : 0,
-            };
-        }, nb::rv_policy::automatic_reference)
-        .def("to_jax", [](const Tensor &tensor) {
-            nb::dlpack::dtype type = toDLPackType(tensor.type());
-
-            return nb::ndarray<nb::jax, void> {
-                tensor.devicePtr(),
-                (size_t)tensor.numDims(),
-                (const size_t *)tensor.dims(),
-                nb::handle(),
-                nullptr,
-                type,
-                tensor.isOnGPU() ?
-                    nb::device::cuda::value :
-                    nb::device::cpu::value,
-                tensor.isOnGPU() ? tensor.gpuID() : 0,
-            };
-        }, nb::rv_policy::automatic_reference)
+        .def("to_torch", tensor_to_pytorch, nb::rv_policy::automatic_reference)
+        .def("to_jax", tensor_to_jax, nb::rv_policy::automatic_reference)
     ;
 
 #ifdef MADRONA_CUDA_SUPPORT
     nb::class_<CudaSync>(m, "CudaSync")
-        .def("wait", &CudaSync::wait);
+        .def("wait", &CudaSync::wait)
+    ;
 #endif
+
+    nb::class_<TrainInterface>(m, "TrainInterface")
+        .def("to_pytree", train_interface_to_pytree)
+    ;
 }
 
 }

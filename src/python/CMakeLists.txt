@@ -42,10 +42,19 @@ function(madrona_python_add_binding_lib nanobind_lib_name)
     # This is also hacky, nanobind doesn't make it easy to declare
     # a static library of helpers built on nanobind for inclusion
     # into other modules.
-    target_link_libraries(madrona_python_bindings PUBLIC
-        ${nanobind_lib_name}
-        madrona_hdrs
+    target_link_libraries(madrona_python_bindings
+        PUBLIC
+            ${nanobind_lib_name}
+            madrona_hdrs
+        PRIVATE
+            madrona_err
     )
+
+    if (TARGET madrona_cuda)
+        target_link_libraries(madrona_python_bindings PUBLIC
+            madrona_cuda
+        )
+    endif ()
 endfunction()
 
 function(madrona_python_get_nanobind_target module_name out_name)

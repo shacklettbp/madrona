@@ -7,17 +7,16 @@
  */
 #pragma once
 
+#include <madrona/crash.hpp>
 #include <madrona/macros.hpp>
+#include <madrona/span.hpp>
+#include <madrona/template_helpers.hpp>
 
 #ifdef MADRONA_MSVC
 #include <bit>
 #endif
-
 #include <cstdint>
 #include <type_traits>
-#include <madrona/crash.hpp>
-#include <madrona/span.hpp>
-#include <madrona/macros.hpp>
 
 // FIXME: Ultimately it would be better to just change all uses of these
 // functions to std::bit_width
@@ -183,36 +182,5 @@ inline void zeroN(std::type_identity_t<T> *ptr, CountT num_elems)
 {
     memset(ptr, 0, num_elems * sizeof(T));
 }
-
-template <typename> struct PackDelegator;
-template <template <typename...> typename T, typename ...Args>
-struct PackDelegator<T<Args...>> {
-    template <typename Fn>
-    static auto call(Fn &&fn) -> decltype(fn.template operator()<Args...>())
-    {
-        return fn.template operator()<Args...>();
-    }
-};
-
-// Extract the type of the first argument. Not fully fleshed out but works for
-// the needed cases currently.
-template <typename Fn> struct FirstArgTypeExtractor;
-
-template <typename ReturnT, typename FirstT, typename... ArgsT>
-struct FirstArgTypeExtractor<ReturnT(FirstT, ArgsT...)> {
-    using type = FirstT;
-};
-
-template <typename ReturnT, typename ClassT, typename FirstT,
-          typename... ArgsT>
-struct FirstArgTypeExtractor<ReturnT (ClassT::*)(FirstT, ArgsT...)> {
-    using type = FirstT;
-};
-
-template <typename ReturnT, typename ClassT, typename FirstT,
-          typename... ArgsT>
-struct FirstArgTypeExtractor<ReturnT (ClassT::*)(FirstT, ArgsT...) const> {
-    using type = FirstT;
-};
 
 }

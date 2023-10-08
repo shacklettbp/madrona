@@ -50,6 +50,14 @@ elseif (FRONTEND_MSVC)
     endif()
 endif()
 
+add_library(madrona_err STATIC
+    ${MADRONA_INC_DIR}/crash.hpp crash.cpp
+)
+
+target_link_libraries(madrona_err PUBLIC
+    madrona_hdrs
+)
+
 add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/memory.hpp ${MADRONA_INC_DIR}/memory.inl memory.cpp
     ${MADRONA_INC_DIR}/stack_alloc.hpp ${MADRONA_INC_DIR}/stack_alloc.inl
@@ -57,7 +65,6 @@ add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/heap_array.hpp
     ${MADRONA_INC_DIR}/span.hpp
     ${MADRONA_INC_DIR}/utils.hpp
-    ${MADRONA_INC_DIR}/crash.hpp crash.cpp
     ${MADRONA_INC_DIR}/ecs.hpp ${MADRONA_INC_DIR}/ecs.inl
     ${MADRONA_INC_DIR}/type_tracker.hpp ${MADRONA_INC_DIR}/type_tracker.inl
         type_tracker.cpp
@@ -81,9 +88,13 @@ endif()
 if (FRONTEND_GCC OR FRONTEND_CLANG)
     target_compile_options(madrona_common PUBLIC
         -fno-exceptions -fno-rtti)
+    target_compile_options(madrona_err PRIVATE
+        -fno-exceptions -fno-rtti)
 elseif (FRONTEND_MSVC)
     # Disabling exceptions in MSVC seems painful
     target_compile_options(madrona_common PUBLIC
+        /GR-)
+    target_compile_options(madrona_err PRIVATE
         /GR-)
 else ()
     message(FATAL_ERROR "Unsupported compiler frontend")
@@ -93,6 +104,7 @@ target_link_libraries(madrona_common
     PUBLIC 
         madrona_hdrs
         madrona_libcxx
+        madrona_err
 )
 
 set_property(TARGET madrona_common PROPERTY
@@ -116,7 +128,8 @@ if (CUDAToolkit_FOUND)
             CUDA::cudart
         PRIVATE
             CUDA::cuda_driver
-            madrona_common
+            madrona_err
+            madrona_libcxx
     )
 
     if (WIN32)
