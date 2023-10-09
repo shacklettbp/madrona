@@ -19,6 +19,18 @@ else()
     add_library(madrona_libcxx INTERFACE)
 endif()
 
+add_library(madrona_noexceptrtti INTERFACE)
+if (FRONTEND_GCC OR FRONTEND_CLANG)
+    target_compile_options(madrona_noexceptrtti INTERFACE
+        -fno-exceptions -fno-rtti)
+elseif (FRONTEND_MSVC)
+    target_compile_options(madrona_noexceptrtti INTERFACE
+        /GR-
+    )
+else ()
+    message(FATAL_ERROR "Unsupported compiler frontend")
+endif ()
+
 add_subdirectory(madrona-deps)
 include(madrona-deps/cmake/sys-detect.cmake)
 set(MADRONA_LINUX ${MADRONA_LINUX} PARENT_SCOPE)

@@ -11,7 +11,11 @@ target_link_libraries(madrona_python_utils
 if (NOT WIN32) #FIX
     target_link_libraries(madrona_python_utils
         PRIVATE
-            madrona_libcxx_except_static
+            madrona_libcxx
+    )
+    target_compile_options(madrona_python_utils
+        PRIVATE
+            -fno-exceptions
     )
 endif()
 
@@ -94,7 +98,7 @@ function(madrona_python_disable_nanobind_warnings module_name)
     
     if (NOT WIN32) #FIX
         target_link_libraries(${nanobind_target_name} PRIVATE
-            madrona_libcxx_except_static
+            madrona_libcxx_except
         )
     endif()
 endfunction()
@@ -115,7 +119,7 @@ function(madrona_python_module module_name)
 
     if (NOT WIN32) #FIX
         target_link_libraries(${module_name} PRIVATE
-            madrona_libcxx_except_static
+            madrona_libcxx_except
         )
     endif()
 endfunction()

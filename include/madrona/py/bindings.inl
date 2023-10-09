@@ -24,9 +24,7 @@ auto XLAInterface::buildEntry()
         }
 
         SimT *sim_ptr = nb::inst_ptr<SimT>(sim);
-
         TrainInterface iface = std::invoke(iface_fn, *sim_ptr);
-
         return setup(iface, sim, (void *)sim_ptr, fn, xla_gpu);
     };
 }
