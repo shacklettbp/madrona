@@ -6,7 +6,6 @@
 
 #include "madrona/heap_array.hpp"
 
-#include <array>
 #include <filesystem>
 
 #include "vk/memory.hpp"
@@ -986,7 +985,6 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
     dev.dt.cmdFillBuffer(draw_cmd, batch.drawBuffer.buffer, 0, sizeof(uint32_t), 0);
 
     { // Prepare memory with barrier
-#if 1
         VkMemoryBarrier copy_barrier = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .pNext = nullptr,
@@ -1003,44 +1001,6 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
 
         dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                                prepare_views.hdls[0]);
-#endif
-
-#if 0
-        std::array barriers = {
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame.buffers.views.buffer,
-                0, VK_WHOLE_SIZE
-            },
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame.buffers.instances.buffer,
-                0, VK_WHOLE_SIZE
-            },
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame.buffers.instanceOffsets.buffer,
-                0, VK_WHOLE_SIZE
-            },
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame.buffers.instanceOffsets.buffer,
-                0, VK_WHOLE_SIZE
-            },
-        };
-#endif
     }
 
     { // Dispatch the compute shader

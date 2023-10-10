@@ -3271,8 +3271,8 @@ Renderer::Renderer(uint32_t gpu_id,
 {
     BatchRendererProto::Config br_cfg = {
          (int)gpu_id, 
-         64,
-         64,
+         200,
+         200,
          num_worlds,
          max_views_per_world,
          max_instances_per_world,

@@ -35,10 +35,9 @@ StructuredBuffer<MeshData> meshDataBuffer;
 uint getNumInstancesForWorld(uint world_idx)
 {
     if (world_idx == 0) {
-        // printf("0: %d %d %d\n", instanceOffsets[0], instanceOffsets[1], instanceOffsets[2]);
         return instanceOffsets[0];
     } else if (world_idx == pushConst.numWorlds - 1) {
-        return pushConst.numInstances - instanceOffsets[world_idx-1];
+        return pushConst.numWorlds - instanceOffsets[world_idx-1];
     } else {
         return instanceOffsets[world_idx] - instanceOffsets[world_idx-1];
     }
@@ -89,7 +88,6 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
         sm.numInstancesPerThread = (sm.numInstances + pushConst.numThreads-1) /
                                    pushConst.numThreads;
         sm.instancesOffset = getInstanceOffsetsForWorld(pushConst.worldIDX);
-        // printf("%d\n", sm.numInstances);
     }
 
     GroupMemoryBarrierWithGroupSync();

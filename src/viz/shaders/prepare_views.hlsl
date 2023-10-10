@@ -36,8 +36,11 @@ StructuredBuffer<MeshData> meshDataBuffer;
 uint getNumInstancesForWorld(uint world_idx)
 {
     if (world_idx == 0) {
+        printf("0: %d\n", instanceOffsets[0]);
         return instanceOffsets[0];
     } else if (world_idx == pushConst.numWorlds - 1) {
+        printf("1: %d - %d = %d\n", pushConst.numWorlds, instanceOffsets[world_idx-1],
+                                    pushConst.numWorlds - instanceOffsets[world_idx-1]);
         return pushConst.numInstances - instanceOffsets[world_idx-1];
     } else {
         return instanceOffsets[world_idx] - instanceOffsets[world_idx-1];
@@ -113,6 +116,12 @@ void main(uint3 tid       : SV_DispatchThreadID,
         sm.offset = getInstanceOffsetsForWorld(sm.camera.worldID);
         sm.numInstancesForWorld = getNumInstancesForWorld(sm.camera.worldID);
         sm.numInstancesPerThread = (sm.numInstancesForWorld+32) / 32;
+
+        printf("View %d (world %d) gets %d instances (%d per thread)\n",
+               gid.x,
+               sm.camera.worldID,
+               sm.numInstancesForWorld,
+               sm.numInstancesPerThread);
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -146,11 +155,17 @@ void main(uint3 tid       : SV_DispatchThreadID,
             draw_cmd.vertexOffset = mesh.vertexOffset;
             draw_cmd.firstInstance = draw_id;
 
+            printf("Draw command(%d): indexCount=%d firstIndex=%d vertexOffset=%d firstInstance=%d\n",
+                   draw_id, draw_cmd.indexCount, draw_cmd.firstIndex, draw_cmd.vertexOffset, draw_cmd.firstInstance);
+
             DrawDataBR draw_data;
             draw_data.viewID = sm.viewIdx;
             draw_data.instanceID =  current_instance_idx;
             draw_data.layerID = gid.x;
             draw_data.vertexOffset = draw_cmd.vertexOffset;
+
+            printf("Draw data(%d): viewID=%d instanceID=%d layerID=%d vertexOffset=%d\n",
+                   draw_data.viewID, draw_data.instanceID, draw_data.layerID, draw_data.vertexOffset);
 
             drawCommandBuffer[draw_id] = draw_cmd;
             drawDataBuffer[draw_id] = draw_data;
