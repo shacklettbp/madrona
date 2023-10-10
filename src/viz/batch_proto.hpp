@@ -25,7 +25,12 @@ struct LayeredTarget {
     render::vk::LocalImage depth;
     VkImageView depthView;
 
+    render::vk::LocalImage output;
+    VkImageView outputView;
+
     uint32_t layerCount;
+
+    VkDescriptorSet lightingSet;
 };
 
 struct BatchRenderInfo {
@@ -59,7 +64,8 @@ struct BatchRendererProto {
         render::vk::MemoryAllocator& mem,
         VkPipelineCache pipeline_cache,
         VkDescriptorSet asset_set_compute,
-        VkDescriptorSet asset_set_draw);
+        VkDescriptorSet asset_set_draw,
+        VkDescriptorSet asset_set_texture_mat);
 
     ~BatchRendererProto();
     void importCudaData(VkCommandBuffer);

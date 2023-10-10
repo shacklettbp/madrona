@@ -3280,7 +3280,7 @@ Renderer::Renderer(uint32_t gpu_id,
     };
 
     br_proto_ = std::make_unique<BatchRendererProto>(
-        br_cfg, dev, alloc, pipeline_cache_, asset_set_cull_, asset_set_draw_);
+        br_cfg, dev, alloc, pipeline_cache_, asset_set_cull_, asset_set_draw_, asset_set_mat_tex_);
 
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,

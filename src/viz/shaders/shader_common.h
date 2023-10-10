@@ -10,6 +10,13 @@ struct PrepareViewPushConstant {
     uint32_t numInstances;
 };
 
+struct DeferredLightingPushConstBR {
+    uint32_t numViews;
+    uint32_t offset;
+    uint32_t numWorlds;
+    uint32_t numInstances;
+};
+
 struct BlurPushConst {
     /* Vertical blur happens first. */
     uint32_t isVertical;
