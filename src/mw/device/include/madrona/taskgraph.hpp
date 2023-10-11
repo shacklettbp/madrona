@@ -305,6 +305,7 @@ struct SortArchetypeNodeBase : NodeBase {
     void resizeTable(int32_t);
     void copyKeys(int32_t invocation_idx);
     void computeOffsets(int32_t invocation_idx);
+    void computeCounts(int32_t invocation_idx);
 
     static TaskGraph::NodeID addToGraph(
         TaskGraph::Builder &builder,

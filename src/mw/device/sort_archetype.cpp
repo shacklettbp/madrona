@@ -1198,7 +1198,6 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
     RadixSortOnesweepCustom agent(*smem_tmp,
         parent.lookback,
         parent.counters + pass,
-        // parent.sortOffsets,
         nullptr,
         parent.bins + pass * RADIX_DIGITS,
         dstKeys,
@@ -1244,6 +1243,17 @@ void SortArchetypeNodeBase::computeOffsets(int32_t invocation_idx)
     if (keysCol[invocation_idx] != keysCol[invocation_idx - 1]) {
         sortOffsets[keysCol[invocation_idx - 1]] = invocation_idx;
     }
+}
+
+void SortArchetypeNodeBase::computeCounts(int32_t invocation_idx)
+{
+    // Each invocation -> 1 thread
+    if (invocation_idx == 0) {
+        counts[invocation_idx] = sortOffsets[invocation_idx];
+        return;
+    }
+
+    counts[invocation_idx] = sortOffsets[invocation_idx] - sortOffsets[invocation_idx - 1];
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
@@ -1397,10 +1407,14 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
             data_id, {cur_task}, setup);
     }
 
-    if (sort_offsets) {
-        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeOffsets>(
-                data_id, {cur_task}, setup, 0, 1);
-    }
+    // Compute the sort offsets.
+    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeOffsets>(
+            data_id, {cur_task}, setup, 0, 1);
+
+    // Compute the counts from the sort offsets.
+    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeCounts>(
+        data_id, { cur_task }, setup, GPUImplConsts::get().numWorlds, 1);
+    );
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 

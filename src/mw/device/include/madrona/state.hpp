@@ -224,6 +224,7 @@ private:
         
         // The size of this array corresponds to the number of worlds
         int32_t *sortOffsets;
+        int32_t *counts;
 
         bool needsSort;
     };
