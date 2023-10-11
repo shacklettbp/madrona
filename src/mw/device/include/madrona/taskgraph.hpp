@@ -296,7 +296,8 @@ struct SortArchetypeNodeBase : NodeBase {
                           int32_t col_idx,
                           uint32_t *keys_col,
                           int32_t num_passes,
-                          int32_t *sort_offsets);
+                          int32_t *sort_offsets,
+                          int32_t *counts);
 
     void sortSetup(int32_t);
     void zeroBins(int32_t invocation_idx);
@@ -319,6 +320,7 @@ struct SortArchetypeNodeBase : NodeBase {
     uint32_t *keysCol;
     int32_t numPasses;
     int32_t *sortOffsets;
+    int32_t *counts;
 
     TaskGraph::TypedDataID<OnesweepNode> onesweepNodes[4];
     TaskGraph::TypedDataID<RearrangeNode> firstRearrangePassData;

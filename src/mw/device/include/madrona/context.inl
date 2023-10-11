@@ -82,9 +82,14 @@ inline void * Context::tmpAlloc(uint64_t num_bytes)
     return mwGPU::TmpAllocator::get().alloc(num_bytes);
 }
 
-template <typename ComponentTs..., typename Fn>
-inline void Context::query(Query<ComponentTs...> &query, Fn&& fn) {
-    mwGPU::getStateManager()->iterateQuery(query, fn);
+template <typename... ComponentTs>
+inline Query<ComponentTs...> Context::query() {
+    return mwGPU::getStateManager()->query<ComponentTs...>();
+}
+    
+template <typename... ComponentTs, typename Fn>
+inline void Context::iterateQuery(Query<ComponentTs...> &query, Fn&& fn) {
+    mwGPU::getStateManager()->iterateQuery(world_id_, query.getSharedRef(), fn);
 }
 
 #if 0

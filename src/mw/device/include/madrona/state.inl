@@ -135,7 +135,8 @@ Query<ComponentTs...> StateManager::query()
 
     QueryRef *ref = &Query<ComponentTs...>::ref_;
 
-    // ZM Deduplication, GPU side.
+    // Double block paradigm. Threads check the atomic here, then additionally
+    // then additionally attempt to acquire a SpinLock in StateManager::makeQuery.
     if (ref->numReferences.load_acquire() == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
     }
@@ -144,9 +145,12 @@ Query<ComponentTs...> StateManager::query()
 }
 
 template <typename Fn, int32_t... Indices>
-void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
+void StateManager::iterateArchetypesImpl(QueryRef *query_ref, Fn &&fn,
         std::integer_sequence<int32_t, Indices...>)
 {
+
+    // ZM TODO: modify this function to compute the correct
+    // world offset from sortOffsets and counts.
 
     uint32_t *query_values = &query_data_[query_ref->offset];
     int32_t num_archetypes = query_ref->numMatchingArchetypes;
@@ -169,20 +173,23 @@ void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
 }
 
 template <int32_t num_components, typename Fn>
-void StateManager::iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn)
+void StateManager::iterateArchetypes(QueryRef *query_ref, Fn &&fn)
 {
     using IndicesWrapper =
         std::make_integer_sequence<int32_t, num_components>;
 
-    iterateArchetypesRawImpl(query_ref, std::forward<Fn>(fn),
+    iterateArchetypesImpl(query_ref, std::forward<Fn>(fn),
                              IndicesWrapper());
 }
 
 template<typename Fn>
-void StateManager::iterateQuery(QueryRef* query_ref, Fn&& fn) {
-    // TODO: implement using the offsets from the sort.
-    // Does this also need to take in the WorldID?
-    // How do you get the sortOffsets from here? The QueryRef doesn't contain it. 
+void StateManager::iterateQuery(uint32_t world_id, QueryRef* query_ref, Fn&& fn) {
+    iterateArchetypes(MADRONA_MW_COND(world_id,) query, 
+            [&fn](int num_rows, auto ...ptrs) {
+        for (int i = 0; i < num_rows; i++) {
+            fn(ptrs[i] ...);
+        }
+    });
 }
 
 uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)
@@ -333,6 +340,20 @@ int32_t * StateManager::getArchetypeSortOffsets(uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
     return archetype.sortOffsets;
+}
+
+template <typename ArchetypeT>
+int32_t * StateManager::getArchetypeCounts()
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
+    return getArchetypeCounts(archetype_id);
+}
+
+int32_t * StateManager::getArchetypeCounts(uint32_t archetype_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    return archetype.counts;
 }
 
 int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,

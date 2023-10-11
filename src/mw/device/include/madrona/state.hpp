@@ -132,6 +132,10 @@ public:
     inline int32_t * getArchetypeSortOffsets(uint32_t archetype_id);
 
     template <typename ArchetypeT>
+    int32_t * getArchetypeCounts();
+    inline int32_t * getArchetypeCounts(uint32_t archetype_id);
+
+    template <typename ArchetypeT>
     inline void setArchetypeSortOffsets(void *ptr);
 
     inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
@@ -201,8 +205,8 @@ private:
                    uint32_t num_components,
                    QueryRef *query_ref);
 
-    template <typename... ComponentTs, typename Fn>
-    void iterateQuery(uint32_t world_id, const Query<ComponentTs...>& query, Fn&& fn);
+    template <typename Fn>
+    void iterateQuery(uint32_t world_id, QueryRef* query_ref, Fn&& fn);
 
     Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
     Loc makeTemporary(WorldID world_id, uint32_t archetype_id);

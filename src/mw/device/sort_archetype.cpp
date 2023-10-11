@@ -959,13 +959,15 @@ SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id,
                                              int32_t col_idx,
                                              uint32_t *keys_col,
                                              int32_t num_passes,
-                                             int32_t *sort_offsets)
+                                             int32_t *sort_offsets,
+                                             int32_t *counts)
     :  NodeBase {},
        archetypeID(archetype_id),
        sortColumnIndex(col_idx),
        keysCol(keys_col),
        numPasses(num_passes),
-       sortOffsets(sort_offsets)
+       sortOffsets(sort_offsets),
+       counts(counts)
 {}
 
 void SortArchetypeNodeBase::sortSetup(int32_t)
@@ -1342,6 +1344,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     // Returns raw pointer to the sort offsets gotten directly off the ECS table for the given archetype.
     // This is the sortOffsets on the ArchetypeStore. It is the only place getArchetypeSortOffsets is called.
     int32_t *sort_offsets = state_mgr->getArchetypeSortOffsets(archetype_id);
+    int32_t *counts = state_mgr->getArchetypeCounts(archetype_id);
 
     bool world_sort = component_id == TypeTracker::typeID<WorldID>();
 
@@ -1361,7 +1364,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     // This is the parent node for all the later onesweep nodes.
     // It's initialized with the sort_offsets pointer from above.
     auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
-        archetype_id, sort_column_idx, keys_col, num_passes, sort_offsets);
+        archetype_id, sort_column_idx, keys_col, num_passes, sort_offsets, counts);
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
@@ -1414,7 +1417,6 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     // Compute the counts from the sort offsets.
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeCounts>(
         data_id, { cur_task }, setup, GPUImplConsts::get().numWorlds, 1);
-    );
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 

@@ -53,7 +53,10 @@ public:
     inline WorldBase & data() const { return *data_; }
     
     template <typename... ComponentTs>
-    inline void query(Query<ComponentTs>& query);
+    inline Query<ComponentTs...> query();
+
+    template <typename... ComponentTs, typename Fn>
+    inline void iterateQuery(Query<ComponentTs...> &query, Fn&& fn);
 
 protected:
     WorldBase *data_;

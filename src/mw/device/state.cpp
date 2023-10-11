@@ -226,12 +226,12 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
         uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
         bytes = alloc->roundUpReservation(bytes); // rounds up to a full page size, which for normal page sizes is definitely >= 256 worlds.
         sortOffsets = (int32_t *)alloc->allocMemory(bytes);
-
-        // Allocate space for the counst (one offset per world)
-        uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
-        bytes = alloc->roundUpReservation(bytes); // rounds up to a full page size, which for normal page sizes is definitely >= 256 worlds.
-        counts = (int32_t*)alloc->allocMemory(bytes);
     }
+
+    // Allocate space for the counst (one offset per world)
+    uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
+    bytes = alloc->roundUpReservation(bytes); // rounds up to a full page size, which for normal page sizes is definitely >= 256 worlds.
+    counts = (int32_t*)alloc->allocMemory(bytes);
 
     tbl.maxColumnSize = max_column_size;
 
@@ -298,6 +298,7 @@ void StateManager::makeQuery(const uint32_t *components,
     query_data_lock_.lock();
 
     if (query_ref->numMatchingArchetypes != 0xFFFF'FFFF) {
+        query_data_lock_.unlock();
         return;
     }
 
