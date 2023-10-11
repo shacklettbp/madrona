@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madrona/mw_gpu/host_print.hpp>
 #include <madrona/taskgraph.hpp>
 #include <madrona/mw_gpu/megakernel_consts.hpp>
 
@@ -1197,7 +1198,8 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
     RadixSortOnesweepCustom agent(*smem_tmp,
         parent.lookback,
         parent.counters + pass,
-        parent.sortOffsets, // used to initialize d_bins_out
+        // parent.sortOffsets,
+        nullptr,
         parent.bins + pass * RADIX_DIGITS,
         dstKeys,
         srcKeys,
@@ -1208,6 +1210,16 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
         RADIX_BITS);
 
     agent.Process();
+
+#if 1
+    if (threadIdx.x == 0 && block_idx == 0 && parent.sortOffsets) {
+        HostPrint::log("Sort offsets: {} {} {} {}\n", 
+                       parent.sortOffsets[0],
+                       parent.sortOffsets[1],
+                       parent.sortOffsets[2],
+                       parent.sortOffsets[3]);
+    }
+#endif
 }
 
 void SortArchetypeNodeBase::resizeTable(int32_t)
@@ -1220,6 +1232,18 @@ void SortArchetypeNodeBase::resizeTable(int32_t)
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
 {
     keysCol[invocation_idx] = keysAlt[invocation_idx];
+}
+
+void SortArchetypeNodeBase::computeOffsets(int32_t invocation_idx)
+{
+    // Each invocation -> 1 thread
+    if (invocation_idx == 0) {
+        return;
+    }
+
+    if (keysCol[invocation_idx] != keysCol[invocation_idx - 1]) {
+        sortOffsets[keysCol[invocation_idx - 1]] = invocation_idx;
+    }
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
@@ -1371,6 +1395,11 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     if (num_passes % 2 == 1) {
         cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
             data_id, {cur_task}, setup);
+    }
+
+    if (sort_offsets) {
+        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeOffsets>(
+                data_id, {cur_task}, setup, 0, 1);
     }
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);

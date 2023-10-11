@@ -11,7 +11,18 @@ void ECSRegistry::registerComponent()
 template <typename ArchetypeT>
 void ECSRegistry::registerArchetype()
 {
-    state_mgr_->registerArchetype<ArchetypeT>();
+    state_mgr_->registerArchetype<ArchetypeT>(
+        ComponentMetadataSelector {}, ArchetypeFlags::None, 0);
+}
+
+template <typename ArchetypeT, typename... MetadataComponentTs>
+void ECSRegistry::registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities)
+{
+    state_mgr_->registerArchetype<ArchetypeT>(
+        component_metadatas, archetype_flags, max_num_entities);
 }
 
 template <typename SingletonT>

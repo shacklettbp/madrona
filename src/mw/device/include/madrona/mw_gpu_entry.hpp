@@ -30,7 +30,7 @@ __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
     StateManager *state_mgr = mwGPU::getStateManager();
     new (state_mgr) StateManager(0);
 
-    ECSRegistry ecs_registry(*state_mgr, exported_columns);
+    ECSRegistry ecs_registry(state_mgr, exported_columns);
     WorldT::registerTypes(ecs_registry, *(ConfigT *)cfg);
 }
 

@@ -382,11 +382,16 @@ void StateManager::registerComponent(uint32_t id,
     });
 }
 
-void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components,
-                                     CountT max_num_entities)
+void StateManager::registerArchetype(uint32_t id,
+                                     ArchetypeFlags archetype_flags,
+                                     CountT max_num_entities,
+                                     CountT num_user_components,
+                                     const ComponentID *components,
+                                     const ComponentFlags *component_flags)
 {
+    (void)archetype_flags, (void)component_flags;
+
     uint32_t offset = archetype_components_.size();
-    uint32_t num_user_components = components.size();
 
     uint32_t num_total_components = num_user_components + 1;
 #ifdef MADRONA_MW_MODE
@@ -429,7 +434,7 @@ void StateManager::registerArchetype(uint32_t id, Span<ComponentID> components,
 
     archetype_stores_[id].emplace(ArchetypeStore::Init {
         offset,
-        uint32_t(components.size()),
+        uint32_t(num_user_components),
         id,
         Span(type_infos.data(), num_total_components),
         Span(lookup_input.data(), num_user_components),

@@ -8,6 +8,7 @@
 #pragma once
 
 #include <madrona/ecs.hpp>
+#include <madrona/ecs_flags.hpp>
 #include <madrona/heap_array.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/span.hpp>
@@ -23,22 +24,6 @@
 namespace madrona {
 
 class StateManager;
-
-struct ArchetypeID {
-    uint32_t id;
-
-private:
-    ArchetypeID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
-
-struct ComponentID {
-    uint32_t id;
-
-private:
-    ComponentID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
 
 class Transaction {
 private:
@@ -107,6 +92,7 @@ private:
 friend class StateManager;
 };
 
+
 class StateManager {
 public:
 #ifdef MADRONA_MW_MODE
@@ -118,8 +104,11 @@ public:
     template <typename ComponentT>
     ComponentID registerComponent();
 
-    template <typename ArchetypeT>
-    ArchetypeID registerArchetype(CountT max_num_entities = 0);
+    template <typename ArchetypeT, typename... MetadataComponentTs>
+    ArchetypeID registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities);
 
     template <typename SingletonT>
     void registerSingleton();
@@ -297,8 +286,12 @@ private:
 
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
-    void registerArchetype(uint32_t id, Span<ComponentID> components,
-                           CountT max_num_entities);
+    void registerArchetype(uint32_t id,
+                           ArchetypeFlags archetype_flags,
+                           CountT max_num_entities,
+                           CountT num_user_components,
+                           const ComponentID *components,
+                           const ComponentFlags *component_flags);
 
     void * exportColumn(uint32_t archetype_id, uint32_t component_id);
 

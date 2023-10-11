@@ -11,6 +11,7 @@
 #include <array>
 
 #include <madrona/ecs.hpp>
+#include <madrona/ecs_flags.hpp>
 #include <madrona/hashmap.hpp>
 #include <madrona/inline_array.hpp>
 #include <madrona/sync.hpp>
@@ -31,49 +32,6 @@ static inline StateManager *getStateManager()
     return (StateManager *)GPUImplConsts::get().stateManagerAddr;
 }
 }
-
-struct ComponentID {
-    uint32_t id;
-
-private:
-    ComponentID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
-
-struct ArchetypeID {
-    uint32_t id;
-
-private:
-    ArchetypeID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
-
-class ECSRegistry {
-public:
-    ECSRegistry(StateManager &state_mgr, void **export_ptr);
-
-    template <typename ComponentT>
-    void registerComponent();
-
-    template <typename ArchetypeT>
-    void registerArchetype();
-
-    template <typename ArchetypeT>
-    void registerFixedSizeArchetype(CountT max_num_entities);
-
-    template <typename SingletonT>
-    void registerSingleton();
-
-    template <typename ArchetypeT, typename ComponentT>
-    void exportColumn(int32_t slot);
-
-    template <typename SingletonT>
-    void exportSingleton(int32_t slot);
-
-private:
-    StateManager *state_mgr_;
-    void **export_ptr_;
-};
 
 struct EntityStore {
     struct EntitySlot {
@@ -103,8 +61,11 @@ public:
     template <typename ComponentT>
     ComponentID registerComponent();
 
-    template <typename ArchetypeT>
-    ArchetypeID registerArchetype();
+    template <typename ArchetypeT, typename... MetadataComponentTs>
+    ArchetypeID registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities);
 
     template <typename SingletonT>
     void registerSingleton();
@@ -153,6 +114,9 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * getArchetypeComponent();
 
+    template <typename ArchetypeT, typename ComponentT>
+    void setArchetypeComponent(void *ptr);
+
     inline void * getArchetypeComponent(uint32_t archetype_id,
                                         uint32_t component_id);
 
@@ -167,8 +131,14 @@ public:
 
     inline int32_t * getArchetypeSortOffsets(uint32_t archetype_id);
 
+    template <typename ArchetypeT>
+    inline void setArchetypeSortOffsets(void *ptr);
+
     inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
                                                   int32_t column_idx);
+
+    template <typename ArchetypeT>
+    inline uint32_t getArchetypeNumRows();
 
     inline int32_t getArchetypeNumColumns(uint32_t archetype_id);
     inline uint32_t getArchetypeMaxColumnSize(uint32_t archetype_id);
@@ -188,6 +158,12 @@ public:
 
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
     inline void archetypeClearNeedsSort(uint32_t archetype_id);
+
+    // Included for compatibility with ECSRegistry
+    template <typename ArchetypeT, typename ComponentT>
+    ComponentT * exportColumn();
+    template <typename SingletonT>
+    SingletonT * exportSingleton();
 
 private:
     template <typename SingletonT>
@@ -210,7 +186,11 @@ private:
 
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
-    void registerArchetype(uint32_t id, ComponentID *components,
+    void registerArchetype(uint32_t id, 
+                           ArchetypeFlags archetype_flags,
+                           uint32_t max_num_entities,
+                           ComponentID *components,
+                           ComponentFlags *component_flags,
                            uint32_t num_components);
 
     template <typename Fn, int32_t... Indices>
@@ -228,9 +208,15 @@ private:
     Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
 
     struct ArchetypeStore {
-        ArchetypeStore(uint32_t offset, uint32_t num_user_components,
+        ArchetypeStore(uint32_t offset,
+                       ArchetypeFlags archetype_flags,
+                       uint32_t max_num_entities,
+                       uint32_t num_user_components,
                        uint32_t num_columns,
-                       TypeInfo *type_infos, IntegerMapPair *lookup_input);
+                       TypeInfo *type_infos,
+                       IntegerMapPair *lookup_input,
+                       ComponentFlags *component_flags);
+
         uint32_t componentOffset;
         uint32_t numUserComponents;
         Table tbl;

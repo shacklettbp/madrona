@@ -8,6 +8,7 @@
 #pragma once
 
 #include <madrona/state.hpp>
+#include <madrona/registry.hpp>
 
 #include "mw_gpu/worker_init.hpp"
 

@@ -75,8 +75,11 @@ ComponentID StateManager::registerComponent()
     };
 }
 
-template <typename ArchetypeT>
-ArchetypeID StateManager::registerArchetype(CountT max_num_entities)
+template <typename ArchetypeT, typename... MetadataComponentTs>
+ArchetypeID StateManager::registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities)
 {
 #ifdef MADRONA_MW_MODE
     std::lock_guard lock(register_lock_);
@@ -97,7 +100,9 @@ ArchetypeID StateManager::registerArchetype(CountT max_num_entities)
 
     using Delegator = utils::PackDelegator<Base>;
 
-    auto archetype_components = Delegator::call([]<typename... Args>() {
+    auto [archetype_components, archetype_component_flags] = Delegator::call(
+        [&component_metadata]<typename... Args>()
+    {
         static_assert(std::is_same_v<Base, Archetype<Args...>>);
         uint32_t column_idx = user_component_offset_;
 
@@ -111,25 +116,46 @@ ArchetypeID StateManager::registerArchetype(CountT max_num_entities)
 
         ( registerColumnIndex.template operator()<Args>(), ... );
 
-        std::array archetype_components {
+        std::array components {
             ComponentID { TypeTracker::typeID<Args>() }
             ...
         };
 
-        return archetype_components;
+        std::array<ComponentFlags, components.size()> component_flags;
+        component_flags.fill(ComponentFlags::None);
+
+        int32_t cur_metadata_idx = 0;
+        auto setFlags = [&]<typename ComponentT>() {
+            ComponentFlags cur_flags =
+                component_metadata.flags[cur_metadata_idx++];
+
+            using LookupT = typename ArchetypeRef<ArchetypeT>::
+                template ComponentLookup<ComponentT>;
+
+            uint32_t flag_out_idx =
+                TypeTracker::typeID<LookupT>() - user_component_offset_;
+
+            component_flags[flag_out_idx] = cur_flags;
+        };
+
+        ( setFlags.template operator()<MetadataComponentTs>(), ... );
+
+        return std::make_pair(components, component_flags);
     });
     
     uint32_t id = TypeTracker::typeID<ArchetypeT>();
 
     registerArchetype(id,
-        Span(archetype_components.data(), archetype_components.size()),
-        max_num_entities);
+                      archetype_flags,
+                      max_num_entities,
+                      (CountT)archetype_components.size(),
+                      archetype_components.data(),
+                      archetype_component_flags.data());
 
     return ArchetypeID {
         id,
     };
 }
-
 
 template <typename SingletonT>
 void StateManager::registerSingleton()
@@ -139,12 +165,15 @@ void StateManager::registerSingleton()
     registerComponent<SingletonT>();
 
 #ifdef MADRONA_MW_MODE
-    registerArchetype<ArchetypeT>(1);
+    registerArchetype<ArchetypeT>(
+        ComponentMetadataSelector<> {}, ArchetypeFlags::None,
+        (CountT)num_worlds_);
     for (CountT i = 0; i < (CountT)num_worlds_; i++) {
         makeEntityNow<ArchetypeT>(uint32_t(i), init_state_cache_);
     }
 #else
-    registerArchetype<ArchetypeT>(1);
+    registerArchetype<ArchetypeT>(
+        ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
     makeEntityNow<ArchetypeT>(init_state_cache_);
 #endif
 }

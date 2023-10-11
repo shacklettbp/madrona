@@ -6,6 +6,7 @@
 
 #include <madrona/sync.hpp>
 #include <madrona/types.hpp>
+#include <madrona/ecs_flags.hpp>
 
 namespace madrona {
 
@@ -24,6 +25,8 @@ struct Table {
     // FIXME: move a lot of this metadata out of the core table struct
     std::array<uint32_t, maxColumns> columnSizes;
     std::array<uint64_t, maxColumns> columnMappedBytes;
+    std::array<ComponentFlags, maxColumns> columnFlags;
+
     uint32_t maxColumnSize;
     int32_t numColumns;
 
