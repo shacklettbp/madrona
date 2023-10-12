@@ -41,8 +41,8 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
                                                    uint32_t height,
                                                    uint32_t max_num_views,
                                                    const vk::Device &dev,
-                                                   vk::MemoryAllocator &alloc,
-                                                   vk::FixedDescriptorPool &pool)
+                                                   vk::MemoryAllocator &alloc
+                                                   /*vk::FixedDescriptorPool &pool*/)
 {
     uint32_t num_images = utils::divideRoundUp(max_num_views,
                                                dev.maxNumLayersPerImage);
@@ -63,8 +63,8 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
                                                consts::depthFormat),
             .output = alloc.makeColorAttachment(width,height,
                                                 current_layer_count,
-                                                consts::outputColorFormat),
-            .lightingSet=pool.makeSet()
+                                                consts::outputColorFormat)
+            // .lightingSet=pool.makeSet()
         };
 
         VkImageViewCreateInfo view_info = {
@@ -94,6 +94,7 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
 
         target.layerCount = current_layer_count;
 
+#if 0
         std::array<VkWriteDescriptorSet, 2> desc_updates;
         VkDescriptorImageInfo vis_buffer_info;
         vis_buffer_info.imageView = target.vizBufferView;
@@ -109,6 +110,7 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
 
         vk::DescHelper::storageImage(desc_updates[1], target.lightingSet, &output_info, 1);
         vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
+#endif
 
         local_images.emplace(i, std::move(target));
 
@@ -491,8 +493,8 @@ static void makeBatchFrame(vk::Device& dev,
                            render::vk::MemoryAllocator &alloc,
                            const BatchRendererProto::Config &cfg,
                            VkDescriptorSet viewInstanceSetPrepare,
-                           VkDescriptorSet viewInstanceSetDraw,
-                           vk::FixedDescriptorPool& layerPool)
+                           VkDescriptorSet viewInstanceSetDraw
+                           /*vk::FixedDescriptorPool& layerPool*/)
 {
     VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(PerspectiveCameraData);
     vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
@@ -534,7 +536,7 @@ static void makeBatchFrame(vk::Device& dev,
         viewInstanceSetDraw,
         makeLayeredTargets(cfg.renderWidth, cfg.renderHeight, 
                            cfg.numWorlds * cfg.maxViewsPerWorld,
-                           dev, alloc, layerPool)
+                           dev, alloc/*, layerPool*/)
     };
 }
 
@@ -547,6 +549,7 @@ struct ViewBatch {
     VkDescriptorSet drawBufferSetDraw;
 
     uint32_t drawCmdOffset;
+    uint32_t drawCmdBufferSize;
 };
 
 static void makeViewBatch(vk::Device& dev,
@@ -601,7 +604,8 @@ static void makeViewBatch(vk::Device& dev,
         std::move(drawBuffer),
         draw_buffer_set_prepare,
         draw_buffer_set_draw,
-        (uint32_t)buffer_offsets[0]
+        (uint32_t)buffer_offsets[0],
+        (uint32_t)num_draw_bytes
     };
 }
 
@@ -619,20 +623,25 @@ static void issueRasterization(vk::Device &dev,
                                const DynArray<AssetData> &loaded_assets)
 {
     { // Synchronize with previous stuff
-        VkMemoryBarrier cull_draw_barrier = {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
-                             VK_ACCESS_SHADER_READ_BIT,
+        VkBufferMemoryBarrier barrier = {
+            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+            view_batch.drawBuffer.buffer,
+            view_batch.drawCmdOffset, view_batch.drawCmdBufferSize - view_batch.drawCmdOffset
         };
 
         dev.dt.cmdPipelineBarrier(draw_cmd,
                                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                   VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
-                                  VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-                                  0, 1, &cull_draw_barrier, 0, nullptr,
+                                      VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  0,
+                                  0, nullptr,
+                                  1, &barrier,
                                   0, nullptr);
+
     }
 
     { // Transition image layouts
@@ -883,7 +892,7 @@ struct BatchRendererProto::Impl {
 
     Pipeline<1> prepareViews;
     Pipeline<1> batchDraw;
-    Pipeline<1> lighting;
+    // Pipeline<1> lighting;
 
     //One batch is num_layers views at once
     HeapArray<ViewBatch> viewBatches;
@@ -918,9 +927,9 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
                                        sizeof(shader::PrepareViewPushConstant),
                                        4+consts::numDrawCmdBuffers,
                                        "prepare_views.hlsl")),
-      batchDraw(makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, 4+cfg.numFrames)),
-      lighting(makeComputePipeline(dev, pipeline_cache, sizeof(shader::DeferredLightingPushConstBR),
-                                   cfg.numFrames,"draw_deferred.hlsl","lighting")),
+      batchDraw(makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, consts::numDrawCmdBuffers*cfg.numFrames)),
+      // lighting(makeComputePipeline(dev, pipeline_cache, sizeof(shader::DeferredLightingPushConstBR),
+                                   // consts::numDrawCmdBuffers * cfg.numFrames,"draw_deferred.hlsl","lighting")),
       viewBatches(consts::numDrawCmdBuffers),
       batchFrames(cfg.numFrames),
       assetSetPrepare(asset_set_compute),
@@ -928,6 +937,8 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
       assetSetTextureMat(asset_set_texture_mat),
       renderExtent{ cfg.renderWidth, cfg.renderHeight }
 {
+    printf("Num views total: %d\n", maxNumViews);
+
     for (uint32_t i = 0; i < consts::numDrawCmdBuffers; i++) {
         makeViewBatch(dev, &viewBatches[i], mem, prepareViews.descPool.makeSet(),
                                                  batchDraw.descPool.makeSet());
@@ -936,7 +947,7 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
     for (uint32_t i = 0; i < cfg.numFrames; i++) {
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
                        prepareViews.descPool.makeSet(),
-                       batchDraw.descPool.makeSet(), lighting.descPool);
+                       batchDraw.descPool.makeSet()/*, lighting.descPool*/);
     }
 }
 
@@ -958,8 +969,8 @@ BatchRendererProto::~BatchRendererProto()
     impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->prepareViews.layout, nullptr);
     impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->batchDraw.hdls[0], nullptr);
     impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->batchDraw.layout, nullptr);
-    impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->lighting.hdls[0], nullptr);
-    impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->lighting.layout, nullptr);
+    // impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->lighting.hdls[0], nullptr);
+    // impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->lighting.layout, nullptr);
 
     for(int i=0;i<impl->batchFrames.size();i++){
         for(int i2=0;i2<impl->batchFrames[i].targets.size();i2++){
@@ -980,32 +991,30 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
                                       uint32_t num_worlds,
                                       uint32_t num_instances,
                                       uint32_t num_views,
-                                      uint32_t view_start)
+                                      uint32_t view_start,
+                                      uint32_t num_processed_batches)
 {
     // Fill draw buffer with 0
-    dev.dt.cmdFillBuffer(draw_cmd, batch.drawBuffer.buffer, 0, sizeof(uint32_t), 0);
-
-    { // Prepare memory with barrier
-#if 1
-        VkMemoryBarrier copy_barrier = {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+    if (num_processed_batches >= consts::numDrawCmdBuffers) {
+        VkBufferMemoryBarrier barrier = {
+            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_MEMORY_READ_BIT, VK_ACCESS_MEMORY_WRITE_BIT,
+            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+            batch.drawBuffer.buffer,
+            0, sizeof(uint32_t)
         };
 
         dev.dt.cmdPipelineBarrier(draw_cmd,
+                                  VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
                                   VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
-                                  VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                                  0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
+                                  0, 0, nullptr, 1, &barrier,
+                                  0, nullptr);
+        
+        dev.dt.cmdFillBuffer(draw_cmd, batch.drawBuffer.buffer, 0, sizeof(uint32_t), 0);
+    }
 
-        dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
-                               prepare_views.hdls[0]);
-#endif
-
-#if 0
+    { // Prepare memory with barrier
         std::array barriers = {
             VkBufferMemoryBarrier{
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -1034,13 +1043,40 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
             VkBufferMemoryBarrier{
                 VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
                 nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame.buffers.instanceOffsets.buffer,
-                0, VK_WHOLE_SIZE
-            },
+                batch.drawBuffer.buffer, 0, sizeof(uint32_t)
+            }
         };
-#endif
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                  0, 0, nullptr, barriers.size(), barriers.data(),
+                                  0, nullptr);
+
+        if (num_processed_batches >= consts::numDrawCmdBuffers) {
+            VkBufferMemoryBarrier barrier = {
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_READ_BIT, VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                batch.drawBuffer.buffer,
+                batch.drawCmdOffset, batch.drawCmdBufferSize - batch.drawCmdOffset
+            };
+
+            dev.dt.cmdPipelineBarrier(draw_cmd,
+                                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                      0,
+                                      0, nullptr,
+                                      1, &barrier,
+                                      0, nullptr);
+        }
+
+        dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                               prepare_views.hdls[0]);
     }
 
     { // Dispatch the compute shader
@@ -1094,7 +1130,8 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                                   impl->assetSetPrepare,
                                   info.numWorlds, 
                                   info.numInstances,
-                                  batch_size, offset);
+                                  batch_size, offset,
+                                  target_index);
 
         //Finish rest of draws for the frame
         issueRasterization(impl->dev,
@@ -1107,6 +1144,7 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                            impl->renderExtent,
                            loaded_assets);
 
+#if 0
         issueDeferred(impl->dev,
                       impl->lighting,
                       frame_data.targets[target_index],
@@ -1120,6 +1158,7 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                       info.numWorlds,
                       info.numInstances,
                       batch_size, offset);
+#endif
 
         offset += batch_size;
         num_views -= batch_size;

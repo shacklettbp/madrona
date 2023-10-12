@@ -76,14 +76,16 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     return o;
 }
 
-uint hash(uint x) {
+uint hash(uint x)
+{
     x = ((x >> 16) ^ x) * 0x45d9f3b;
     x = ((x >> 16) ^ x) * 0x45d9f3b;
     x = (x >> 16) ^ x;
     return x;
 }
 
-float4 intToColor(uint inCol){
+float4 intToColor(uint inCol)
+{
     if(inCol==0xffffffff) return float4(1,1,1,1);
 
     float a=((inCol & 0xff000000) >>24);
@@ -96,7 +98,7 @@ float4 intToColor(uint inCol){
 
 [numThreads(1,32,32)]
 [shader("compute")]
-void lighting(uint3 gid : SV_GroupID,uint3 idx : SV_DispatchThreadID)
+void lighting(uint3 gid : SV_GroupID, uint3 idx : SV_DispatchThreadID)
 {
     uint3 target_dim;
     visBuffer.GetDimensions(target_dim.x, target_dim.y, target_dim.z);
@@ -117,7 +119,7 @@ void lighting(uint3 gid : SV_GroupID,uint3 idx : SV_DispatchThreadID)
 
         EngineInstanceData instanceData = unpackEngineInstanceData(engineInstanceBuffer[instanceID]);
         Vertex vert = unpackVertex(vertexDataBuffer[triangleID]);
-        ObjectData obj = objectDataBuffer[instanceData.objectID];
+        // ObjectData obj = objectDataBuffer[instanceData.objectID];
 
         float4 out_color = float4(min(0,abs(vert.normal.x)),0,0,0) + float4(min(0,abs(instanceData.scale.x)),0,0,0)
          + float4(min(0,abs(materialTexturesArray[0].SampleLevel(

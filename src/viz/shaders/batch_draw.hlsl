@@ -29,8 +29,7 @@ StructuredBuffer<PackedVertex> vertexDataBuffer;
 StructuredBuffer<MeshData> meshDataBuffer;
 
 struct V2F {
-    [[vk::location(0)]] uint triangleID : TEXCOORD0;
-    [[vk::location(1)]] uint instanceID : TEXCOORD1;
+    [[vk::location(0)]] uint instanceID : TEXCOORD1;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -180,7 +179,13 @@ float4 vert(in uint vid : SV_VertexID,
         view_data.zNear,
         view_pos.y);
 
-    v2f.triangleID = vid + draw_data.vertexOffset;
+#if 0
+    clip_pos.x += float(min(0, instanceOffsets[0])) +
+                  float(min(0, drawCount[0])) +
+                  float(min(0, drawCommandBuffer[0].vertexOffset)) +
+                  float(min(0, meshDataBuffer[0].vertexOffset))
+#endif
+
     v2f.instanceID = draw_data.instanceID +
                      min(0, instanceOffsets[0]) +
                      min(0, drawCount[0]) +
@@ -209,11 +214,12 @@ float3 rnd(float i)
 }
 
 [shader("pixel")]
-PixelOutput frag(in V2F v2f)
+PixelOutput frag(in V2F v2f,
+                 in uint prim_id : SV_PrimitiveID)
 {
     PixelOutput output;
-    output.ids = uint2(v2f.triangleID, v2f.instanceID);
-    // output.color = float4(0, 0, 1, 1);
+
+    output.ids = uint2(prim_id, v2f.instanceID);
     return output;
 }
 
