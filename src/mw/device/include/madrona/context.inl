@@ -89,7 +89,19 @@ inline Query<ComponentTs...> Context::query() {
     
 template <typename... ComponentTs, typename Fn>
 inline void Context::iterateQuery(Query<ComponentTs...> &query, Fn&& fn) {
-    mwGPU::getStateManager()->iterateQuery(world_id_, query.getSharedRef(), fn);
+    mwGPU::getStateManager()->iterateQuery<sizeof...(ComponentTs)>(world_id_.idx, query.getSharedRef(), 
+    [&](auto ...raw_ptrs){
+            
+            cuda::std::tuple typed_ptrs {
+                (ComponentTs *)raw_ptrs
+                ...
+            };
+
+            std::apply([&](auto ...ptrs) {
+                fn(ptrs[0] ...);
+            }, typed_ptrs);
+
+    });
 }
 
 #if 0
