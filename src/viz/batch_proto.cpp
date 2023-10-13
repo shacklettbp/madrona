@@ -486,6 +486,14 @@ struct BatchFrame {
     VkDescriptorSet viewInstanceSetDraw;
 
     HeapArray<LayeredTarget> targets;
+
+    // Contains a copy of the viz buffer output at a certain layer
+    vk::LocalImage visualizedCopy;
+    VkImageView visualizedCopyView;
+
+    // Contains the processed output from visualizedCopy
+    vk::LocalImage visualizedResult;
+    VkImageView visualizedResultView;
 };
 
 static void makeBatchFrame(vk::Device& dev, 
@@ -529,6 +537,37 @@ static void makeBatchFrame(vk::Device& dev,
     vk::DescHelper::storage(desc_updates[2], viewInstanceSetPrepare, &offset_info, 2);
     vk::DescHelper::storage(desc_updates[5], viewInstanceSetDraw, &offset_info, 2);
 
+    vk::LocalImage visualized_copy_img = alloc.makeColorAttachment(cfg.renderWidth, 
+                                                              cfg.renderHeight,
+                                                              1, consts::outputColorFormat);
+
+    vk::LocalImage visualized_res_img = alloc.makeColorAttachment(cfg.renderWidth, 
+                                                              cfg.renderHeight,
+                                                              1, VK_FORMAT_R8G8B8A8_UNORM);
+
+    VkImageViewCreateInfo viz_view_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = visualized_copy_img.image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = consts::outputColorFormat,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
+    };
+
+    VkImageView viz_copy_view;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &viz_view_info, nullptr, &viz_copy_view));
+
+    viz_view_info.image = visualized_res_img.image;
+    viz_view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+
+    VkImageView viz_res_view;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &viz_view_info, nullptr, &viz_res_view));
+
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
     new (frame) BatchFrame{
         {std::move(views),std::move(instances),std::move(instance_offsets)},
@@ -536,7 +575,11 @@ static void makeBatchFrame(vk::Device& dev,
         viewInstanceSetDraw,
         makeLayeredTargets(cfg.renderWidth, cfg.renderHeight, 
                            cfg.numWorlds * cfg.maxViewsPerWorld,
-                           dev, alloc/*, layerPool*/)
+                           dev, alloc/*, layerPool*/),
+        std::move(visualized_copy_img),
+        viz_copy_view,
+        std::move(visualized_res_img),
+        viz_res_view
     };
 }
 
@@ -660,6 +703,102 @@ static void issueLayoutTransitions(vk::Device &dev,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
             VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+            0, 0, nullptr, 0, nullptr,
+            barriers.size(), barriers.data());   
+}
+
+static void prepareVizBlit(vk::Device &dev, 
+                           VkCommandBuffer draw_cmd,
+                           vk::LocalImage &selected_img,
+                           uint32_t layer_id,
+                           vk::LocalImage &dst)
+{
+    // Transition image layouts
+    std::array barriers = {
+        VkImageMemoryBarrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .image = selected_img.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = layer_id,
+                .layerCount = 1
+            }
+        },
+        VkImageMemoryBarrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .image = dst.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        },
+    };
+
+    dev.dt.cmdPipelineBarrier(draw_cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr,
+            barriers.size(), barriers.data());   
+}
+
+static void prepareVizCompute(vk::Device &dev, 
+                              VkCommandBuffer draw_cmd,
+                              vk::LocalImage &selected_img,
+                              uint32_t layer_id,
+                              vk::LocalImage &dst)
+{
+    // Transition image layouts
+    std::array barriers = {
+        VkImageMemoryBarrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .image = selected_img.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = layer_id,
+                .layerCount = 1
+            }
+        },
+        VkImageMemoryBarrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .image = dst.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        },
+    };
+
+    dev.dt.cmdPipelineBarrier(draw_cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
             0, 0, nullptr, 0, nullptr,
             barriers.size(), barriers.data());   
 }
@@ -878,6 +1017,7 @@ struct BatchRendererProto::Impl {
 
     Pipeline<1> prepareViews;
     Pipeline<1> batchDraw;
+    Pipeline<1> createVisualization;
     // Pipeline<1> lighting;
 
     //One batch is num_layers views at once
@@ -891,6 +1031,8 @@ struct BatchRendererProto::Impl {
     VkDescriptorSet assetSetTextureMat;
 
     VkExtent2D renderExtent;
+
+    uint32_t selectedView;
 
     // This pipeline prepares the draw commands in the buffered draw cmds buffer
     // Pipeline<1> prepareViews;
@@ -914,6 +1056,10 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
                                        4+consts::numDrawCmdBuffers,
                                        "prepare_views.hlsl")),
       batchDraw(makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, consts::numDrawCmdBuffers*cfg.numFrames)),
+      createVisualization(makeComputePipeline(dev, pipelineCache,
+                                              sizeof(uint32_t) * 2,
+                                              cfg.numFrames*consts::numDrawCmdBuffers,
+                                              "visualize_tris.hlsl", "visualize")),
       // lighting(makeComputePipeline(dev, pipeline_cache, sizeof(shader::DeferredLightingPushConstBR),
                                    // consts::numDrawCmdBuffers * cfg.numFrames,"draw_deferred.hlsl","lighting")),
       viewBatches(consts::numDrawCmdBuffers),
@@ -921,7 +1067,8 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
       assetSetPrepare(asset_set_compute),
       assetSetDraw(asset_set_draw),
       assetSetTextureMat(asset_set_texture_mat),
-      renderExtent{ cfg.renderWidth, cfg.renderHeight }
+      renderExtent{ cfg.renderWidth, cfg.renderHeight },
+      selectedView(0)
 {
     printf("Num views total: %d\n", maxNumViews);
 
@@ -1177,6 +1324,60 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
             impl->dev.dt.cmdFillBuffer(draw_cmd, impl->viewBatches[batch].drawBuffer.buffer,
                                        0, sizeof(uint32_t), 0);
         }
+    }
+
+    issueMemoryBarrier(impl->dev, draw_cmd,
+                       VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
+                       VK_ACCESS_TRANSFER_READ_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    { // Blit image from mega images to a visualization image
+        VkImageBlit blit = {
+            .srcSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = impl->selectedView % impl->dev.maxNumLayersPerImage,
+                .layerCount = 1
+            },
+            .srcOffsets = {
+                {}, { (int)impl->renderExtent.width, (int)impl->renderExtent.height, 1 }
+            },
+            .dstSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            },
+            .dstOffsets = {
+                {}, { (int)impl->renderExtent.width, (int)impl->renderExtent.height, 1 }
+            }
+        };
+
+        uint32_t selected_img_index = impl->selectedView / 
+                                      impl->dev.maxNumLayersPerImage;
+        vk::LocalImage &selected_img = 
+            impl->batchFrames[frame_index].targets[selected_img_index].vizBuffer;
+        vk::LocalImage &target_dst =
+            impl->batchFrames[frame_index].visualizedCopy;
+
+        prepareVizBlit(impl->dev,
+                       draw_cmd,
+                       selected_img,
+                       impl->selectedView % impl->dev.maxNumLayersPerImage,
+                       target_dst);
+
+        impl->dev.dt.cmdBlitImage(draw_cmd, 
+                                  selected_img.image,
+                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                  impl->batchFrames[frame_index].visualizedCopy.image,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  1, &blit,
+                                  VK_FILTER_NEAREST);
+    }
+
+    { // Prepare the blitted image and the viz result image for computation
+        
     }
 }
 
