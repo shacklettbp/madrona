@@ -96,7 +96,7 @@ inline void Context::iterateQuery(Query<ComponentTs...> &query, Fn&& fn) {
                 (ComponentTs *)raw_ptrs
                 ...
             };
-
+            
             std::apply([&](auto ...ptrs) {
                 fn(ptrs[offset] ...);
             }, typed_ptrs);

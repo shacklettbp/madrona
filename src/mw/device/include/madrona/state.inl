@@ -197,7 +197,7 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, Fn&& 
     int32_t num_archetypes = query_ref->numMatchingArchetypes;
 
     // TODO: restore
-    printf("num_archteypes %d\n", num_archetypes);
+    //printf("num_archteypes %d\n", num_archetypes);
 
     for (int i = 0; i < num_archetypes; i++) {
         uint32_t archetype_idx = *query_values;
@@ -209,7 +209,7 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, Fn&& 
         int32_t worldArchetypeCount = getArchetypeCounts(archetype_idx)[world_id];
 
         // TODO: restore
-        printf("archetype_idx %d, world_id %d, worldSortOffset = %d, worldCount = %d\n", archetype_idx, world_id, worldSortOffset, worldArchetypeCount);
+        //printf("archetype_idx %d, world_id %d, worldSortOffset = %d, worldCount = %d\n", archetype_idx, world_id, worldSortOffset, worldArchetypeCount);
 
         for (int i = 0; i < worldArchetypeCount; ++i) {
             fn(worldSortOffset + i, tbl.columns[query_values[Indices]] ...);

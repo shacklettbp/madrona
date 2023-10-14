@@ -1242,7 +1242,7 @@ void SortArchetypeNodeBase::computeOffsets(int32_t invocation_idx)
     using namespace mwGPU;
 
         //HostPrint::log("keysCol[{}] = {}\n", invocation_idx, keysCol[invocation_idx]);
-        HostPrint::log("Offset Invocation {}\n", invocation_idx);
+        //HostPrint::log("Offset Invocation {}\n", invocation_idx);
 
     // TODO: restore
     //if (invocation_idx == 0) {
@@ -1273,7 +1273,7 @@ void SortArchetypeNodeBase::computeCounts(int32_t invocation_idx)
 
     counts[invocation_idx] = sortOffsets[invocation_idx] - (invocation_idx == 0 ? 0 : sortOffsets[invocation_idx - 1]);
 
-    HostPrint::log("counts[{}] = {}\n", invocation_idx, counts[invocation_idx]);
+    //HostPrint::log("counts[{}] = {}\n", invocation_idx, counts[invocation_idx]);
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
@@ -1411,11 +1411,6 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         cur_task = builder.addNodeFn<&OnesweepNode::onesweep>(
             pass_data, {cur_task}, setup, 0, consts::numMegakernelThreads);
     }
-
-    // ZM: At this point, we are resizing the table, so the sort is assumed to have completed.
-    // ZM TODO: Add a simple node that uses the sort to compute the table offsets for different worlds.
-    // Right now, before resize, the sortOffset pointers are still in terms of 32 bit keys, so they
-    // can be used to compute the number of entities in each world.
 
     // FIXME this could be a fixed-size count
     if (world_sort) {
