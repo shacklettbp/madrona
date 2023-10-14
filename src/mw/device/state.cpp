@@ -167,6 +167,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
       tbl(),
       columnLookup(lookup_input, num_user_components),
       sortOffsets(nullptr),
+      counts(nullptr),
       needsSort(false)
 {
     using namespace mwGPU;
@@ -228,7 +229,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
         sortOffsets = (int32_t *)alloc->allocMemory(bytes);
     }
 
-    // Allocate space for the counst (one offset per world)
+    // Allocate space for the counts (one count per world)
     uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
     bytes = alloc->roundUpReservation(bytes); // rounds up to a full page size, which for normal page sizes is definitely >= 256 worlds.
     counts = (int32_t*)alloc->allocMemory(bytes);

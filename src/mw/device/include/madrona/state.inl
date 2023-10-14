@@ -192,8 +192,12 @@ template<typename Fn, int32_t... Indices>
 void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, Fn&& fn, 
         std::integer_sequence<int32_t, Indices...>) {
 
+    
     uint32_t *query_values = &query_data_[query_ref->offset];
     int32_t num_archetypes = query_ref->numMatchingArchetypes;
+
+    // TODO: restore
+    printf("num_archteypes %d\n", num_archetypes);
 
     for (int i = 0; i < num_archetypes; i++) {
         uint32_t archetype_idx = *query_values;
@@ -201,16 +205,23 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, Fn&& 
 
         Table &tbl = archetypes_[archetype_idx]->tbl;
 
-        int32_t worldSortOffset = getArchetypeSortOffsets(archetype_idx)[world_id];
-        int32_t worldCount = getArchetypeCounts(archetype_idx)[world_id];
+        int32_t worldSortOffset = world_id == 0 ? 0 : getArchetypeSortOffsets(archetype_idx)[world_id - 1];
+        int32_t worldArchetypeCount = getArchetypeCounts(archetype_idx)[world_id];
 
-        for (int i = 0; i < worldCount; ++i) {
-            fn(tbl.columns[query_values[Indices + ((worldSortOffset + i)
-            * getArchetypeColumnBytesPerRow(archetype_idx, query_values[Indices]) / sizeof(int32_t))]] ...);
+        // TODO: restore
+        printf("archetype_idx %d, world_id %d, worldSortOffset = %d, worldCount = %d\n", archetype_idx, world_id, worldSortOffset, worldArchetypeCount);
+
+        for (int i = 0; i < worldArchetypeCount; ++i) {
+            fn(worldSortOffset + i, tbl.columns[query_values[Indices]] ...);
         }
+
+
 
         query_values += sizeof...(Indices);
     }
+
+    //printf("Iterated all archetypes\n");
+
 }
 
 template<int32_t num_components, typename Fn>

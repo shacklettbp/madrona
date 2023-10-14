@@ -1212,7 +1212,7 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
 
     agent.Process();
 
-#if 1
+#if 0
     if (threadIdx.x == 0 && block_idx == 0 && parent.sortOffsets) {
         HostPrint::log("Sort offsets: {} {} {} {}\n", 
                        parent.sortOffsets[0],
@@ -1227,7 +1227,8 @@ void SortArchetypeNodeBase::resizeTable(int32_t)
 {
     mwGPU::getStateManager()->resizeArchetype(
         archetypeID, bins[(numPasses - 1) * 256 + 255]);
-    numDynamicInvocations = numRows;
+    //numDynamicInvocations = numRows;
+    numDynamicInvocations = bins[(numPasses - 1) * 256 + 255];
 }
 
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
@@ -1237,25 +1238,42 @@ void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
 
 void SortArchetypeNodeBase::computeOffsets(int32_t invocation_idx)
 {
-    // Each invocation -> 1 thread
-    if (invocation_idx == 0) {
-        return;
-    }
+    // TODO: restore, debugging.
+    using namespace mwGPU;
 
-    if (keysCol[invocation_idx] != keysCol[invocation_idx - 1]) {
-        sortOffsets[keysCol[invocation_idx - 1]] = invocation_idx;
+        //HostPrint::log("keysCol[{}] = {}\n", invocation_idx, keysCol[invocation_idx]);
+        HostPrint::log("Offset Invocation {}\n", invocation_idx);
+
+    // TODO: restore
+    //if (invocation_idx == 0) {
+    //    return;
+    //}
+
+    if (keysCol[invocation_idx] != keysCol[invocation_idx + 1]) {
+        sortOffsets[keysCol[invocation_idx]] = invocation_idx + 1;
     }
 }
 
 void SortArchetypeNodeBase::computeCounts(int32_t invocation_idx)
 {
-    // Each invocation -> 1 thread
-    if (invocation_idx == 0) {
-        counts[invocation_idx] = sortOffsets[invocation_idx];
-        return;
-    }
 
-    counts[invocation_idx] = sortOffsets[invocation_idx] - sortOffsets[invocation_idx - 1];
+    using namespace mwGPU;
+
+    //HostPrint::log("sortOffsets[{}] = {}\n", invocation_idx, sortOffsets[invocation_idx]);
+
+    //HostPrint::log("computeCounts sortOffsets[{}] = {}\n", invocation_idx, sortOffsets[invocation_idx]);
+    // Each invocation -> 1 thread
+    //if (invocation_idx == 0) {
+    //    //HostPrint::log("Archetype Switch\n");
+    //    counts[invocation_idx] = sortOffsets[invocation_idx];
+    //    //HostPrint::log("sortOffsets[{}] = {}\n", invocation_idx, sortOffsets[invocation_idx]);
+//
+    //    return;
+    //}
+
+    counts[invocation_idx] = sortOffsets[invocation_idx] - (invocation_idx == 0 ? 0 : sortOffsets[invocation_idx - 1]);
+
+    HostPrint::log("counts[{}] = {}\n", invocation_idx, counts[invocation_idx]);
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
