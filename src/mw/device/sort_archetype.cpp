@@ -1227,8 +1227,8 @@ void SortArchetypeNodeBase::resizeTable(int32_t)
 {
     mwGPU::getStateManager()->resizeArchetype(
         archetypeID, bins[(numPasses - 1) * 256 + 255]);
-    //numDynamicInvocations = numRows;
-    numDynamicInvocations = bins[(numPasses - 1) * 256 + 255];
+    numDynamicInvocations = numRows;
+    //numDynamicInvocations = bins[(numPasses - 1) * 256 + 255];
 }
 
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
