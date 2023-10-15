@@ -6,20 +6,21 @@
 
 namespace madrona::py {
 
-template <auto iface_fn, auto step_fn, auto async_step_fn>
+template <auto iface_fn, auto cpu_step_fn, auto gpu_step_fn>
 auto JAXInterface::buildEntry()
 {
     using SimT =
-        typename utils::ExtractClassFromMemberPtr<decltype(step_fn)>::type;
+        typename utils::ExtractClassFromMemberPtr<decltype(cpu_step_fn)>::type;
 
     return [](nb::object sim, bool xla_gpu) {
         void *fn;
         if (xla_gpu) {
+            assert(gpu_step_fn != nullptr);
             auto fn_wrapper =
-                &JAXInterface::gpuStepFn<SimT, step_fn, async_step_fn>;
+                &JAXInterface::gpuStepFn<SimT, gpu_step_fn>;
             fn = std::bit_cast<void *>(fn_wrapper);
         } else {
-            auto fn_wrapper = &JAXInterface::cpuStepFn<SimT, step_fn>;
+            auto fn_wrapper = &JAXInterface::cpuStepFn<SimT, cpu_step_fn>;
             fn = std::bit_cast<void *>(fn_wrapper);
         }
 
@@ -29,25 +30,21 @@ auto JAXInterface::buildEntry()
     };
 }
 
-template <typename SimT, auto step_fn>
+template <typename SimT, auto cpu_step_fn>
 void JAXInterface::cpuStepFn(void *, void **in)
 {
     SimT *sim = *(SimT **)in[0];
-    std::invoke(step_fn, *sim);
+    // FIXME: currently_broken, need to pass args
+    std::invoke(cpu_step_fn, *sim);
 }
 
 #ifdef MADRONA_CUDA_SUPPORT
-template <typename SimT, auto step_fn, auto async_step_fn>
-void JAXInterface::gpuStepFn(cudaStream_t strm, void **,
+template <typename SimT, auto gpu_step_fn>
+void JAXInterface::gpuStepFn(cudaStream_t strm, void **buffers,
                              const char *opaque, size_t)
 {
     SimT *sim = *(SimT **)opaque;
-    if constexpr (async_step_fn == nullptr) {
-        REQ_CUDA(cudaStreamSynchronize(strm));
-        std::invoke(step_fn, *sim);
-    } else {
-        std::invoke(async_step_fn, *sim);
-    }
+    std::invoke(gpu_step_fn, *sim, strm, buffers);
 }
 #endif
 

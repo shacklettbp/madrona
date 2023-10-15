@@ -71,6 +71,17 @@ static auto tensor_to_jax(const Tensor &tensor)
 static nb::dict train_interface_to_pytree(const TrainInterface &iface)
 {
     nb::dict d;
+
+    d["actions"] = tensor_to_jax(iface.actions());
+    d["resets"] = tensor_to_jax(iface.resets());
+
+    d["rewards"] = tensor_to_jax(iface.rewards());
+    d["dones"] = tensor_to_jax(iface.dones());
+
+    auto policy_assignments = iface.policyAssignments();
+    if (policy_assignments.has_value()) {
+        d["policy_assignments"] = tensor_to_jax(*policy_assignments);
+    }
     
     Span<const TrainInterface::NamedTensor> src_obs = iface.observations();
     Span<const TrainInterface::NamedTensor> src_stats = iface.stats();
@@ -86,16 +97,6 @@ static nb::dict train_interface_to_pytree(const TrainInterface &iface)
     }
     
     d["obs"] = obs;
-    d["actions"] = tensor_to_jax(iface.actions());
-    d["rewards"] = tensor_to_jax(iface.rewards());
-    d["dones"] = tensor_to_jax(iface.dones());
-    d["resets"] = tensor_to_jax(iface.resets());
-
-    auto policy_assignments = iface.policyAssignments();
-    if (policy_assignments.has_value()) {
-        d["policy_assignments"] = tensor_to_jax(*policy_assignments);
-    }
-
     d["stats"] = stats;
     
     return d;
@@ -122,7 +123,7 @@ nb::object JAXInterface::setup(const TrainInterface &iface,
     , scope);
 
     return nb::make_tuple(
-        train_interface_to_pytree(iface), scope["step_func"]);
+        scope["step_func"], train_interface_to_pytree(iface));
 }
 
 static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
