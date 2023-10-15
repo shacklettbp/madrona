@@ -112,9 +112,40 @@ nb::object JAXInterface::setup(const TrainInterface &iface,
 
     auto sim_encode = nb::bytes((char *)&sim_ptr, sizeof(char *));
 
+    auto tensor_to_shape = [](nb::object o) {
+        return o.attr("shape");
+    };
+
+    nb::dict iface_dict = train_interface_to_pytree(iface);
+    nb::dict iface_shapes;
+    iface_shapes["actions"] = tensor_to_shape(iface_dict["actions"]);
+    iface_shapes["resets"] = tensor_to_shape(iface_dict["resets"]);
+    iface_shapes["rewards"] = tensor_to_shape(iface_dict["rewards"]);
+    iface_shapes["dones"] = tensor_to_shape(iface_dict["dones"]);
+
+    if (iface_dict.contains("policy_assignments")) {
+        iface_shapes["policy_assignments"] = tensor_to_shape(
+            iface_dict["policy_assignments"]);
+    }
+
+    nb::dict obs_shapes;
+    for (const auto &k : iface_dict["obs"]) {
+        obs_shapes[k] = tensor_to_shape(iface_dict["obs"][k]);
+    }
+
+    iface_shapes["obs"] = obs_shapes;
+
+    nb::dict stats_shapes;
+    for (const auto &k : iface_dict["stats"]) {
+        stats_shapes[k] = tensor_to_shape(iface_dict["stats"][k]);
+    }
+
+    iface_shapes["stats"] = stats_shapes;
+
     nb::dict scope;
     scope["sim_obj"] = sim_obj;
     scope["sim_encode"] = sim_encode;
+    scope["sim_iface_shapes"] = iface_shapes;
     scope["custom_call_capsule"] = fn_capsule;
     scope["custom_call_platform"] = xla_gpu ? "gpu" : "cpu";
 
@@ -123,7 +154,7 @@ nb::object JAXInterface::setup(const TrainInterface &iface,
     , scope);
 
     return nb::make_tuple(
-        scope["step_func"], train_interface_to_pytree(iface));
+        scope["step_func"], iface_dict);
 }
 
 static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)

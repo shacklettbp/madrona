@@ -54,9 +54,51 @@ mlir.register_lowering(
 )
 
 def step_func(sim_data):
-    flattened_in, treedef = jax.tree_util.tree_flatten(sim_data)
+    flattened_in = []
+
+    flattened_in.append(sim_data['actions'])
+    flattened_in.append(sim_data['resets'])
+    flattened_in.append(sim_data['rewards'])
+    flattened_in.append(sim_data['dones'])
+
+    if 'policy_assignments' in sim_iface_shapes:
+        flattened_in.append(sim_iface_shapes['policy_assignments'])
+
+    for k in sim_iface_shapes['obs'].keys():
+        flattened_in.append(sim_data['obs'][k])
+
+    for k in sim_iface_shapes['stats'].keys():
+        flattened_in.append(sim_data['stats'][k])
+
     flattened_out = _primitive.bind(*flattened_in)
-    return jax.tree_util.tree_unflatten(treedef, flattened_out)
+
+    out = {}
+
+    cur_idx = 0
+
+    def next_out():
+        nonlocal cur_idx
+        o = flattened_out[cur_idx]
+        cur_idx += 1
+        return o
+
+    out['actions'] = next_out()
+    out['resets'] = next_out()
+    out['rewards'] = next_out()
+    out['dones'] = next_out()
+
+    if 'policy_assignments' in sim_iface_shapes:
+        out['policy_assignments'] = next_out()
+
+    out['obs'] = {}
+    for k in sim_iface_shapes['obs'].keys():
+        out['obs'][k] = next_out()
+
+    out['stats'] = {}
+    for k in sim_iface_shapes['stats'].keys():
+        out['stats'][k] = next_out()
+
+    return out
 
 step_func = jax.jit(step_func, donate_argnums=0)
 
