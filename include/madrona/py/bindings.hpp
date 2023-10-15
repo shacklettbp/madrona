@@ -16,7 +16,7 @@ namespace nb = nanobind;
 
 namespace madrona::py {
 
-class XLAInterface {
+class JAXInterface {
 public:
     // Returns a function that registers custom_call_name with XLA
     // to call step_fn (or async_step_fn in GPU mode) and returns

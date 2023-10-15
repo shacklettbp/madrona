@@ -163,6 +163,7 @@ struct TrainInterface::Impl {
     Tensor rewards;
     Tensor dones;
     Tensor resets;
+    Optional<Tensor> policyAssignments;
 
     HeapArray<NamedTensor> stats;
     HeapArray<std::string> nameStrings;
@@ -174,6 +175,7 @@ TrainInterface::TrainInterface(
         Tensor rewards,
         Tensor dones,
         Tensor resets,
+        Optional<Tensor> policy_assignments,
         std::initializer_list<NamedTensor> stats)
     : impl_(new Impl {
         .obs = HeapArray<NamedTensor>(obs.size()),
@@ -181,6 +183,7 @@ TrainInterface::TrainInterface(
         .rewards = rewards,
         .dones = dones,
         .resets = resets,
+        .policyAssignments = policy_assignments,
         .stats = HeapArray<NamedTensor>(stats.size()),
         .nameStrings = HeapArray<std::string>(obs.size() + stats.size()),
     })
@@ -237,6 +240,11 @@ Tensor TrainInterface::dones() const
 Tensor TrainInterface::resets() const
 {
     return impl_->resets;
+}
+
+Optional<Tensor> TrainInterface::policyAssignments() const
+{
+    return impl_->policyAssignments;
 }
 
 Span<const TrainInterface::NamedTensor> TrainInterface::stats() const

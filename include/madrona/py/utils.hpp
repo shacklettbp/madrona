@@ -134,6 +134,7 @@ public:
                    Tensor rewards,
                    Tensor dones,
                    Tensor resets,
+                   Optional<Tensor> policy_assignments,
                    std::initializer_list<NamedTensor> stats = {});
     TrainInterface(TrainInterface &&o);
     ~TrainInterface();
@@ -143,6 +144,7 @@ public:
     Tensor rewards() const;
     Tensor dones() const;
     Tensor resets() const;
+    Optional<Tensor> policyAssignments() const;
     Span<const NamedTensor> stats() const;
 
 private:

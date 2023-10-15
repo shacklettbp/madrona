@@ -7,7 +7,7 @@
 namespace madrona::py {
 
 template <auto iface_fn, auto step_fn, auto async_step_fn>
-auto XLAInterface::buildEntry()
+auto JAXInterface::buildEntry()
 {
     using SimT =
         typename utils::ExtractClassFromMemberPtr<decltype(step_fn)>::type;
@@ -16,10 +16,10 @@ auto XLAInterface::buildEntry()
         void *fn;
         if (xla_gpu) {
             auto fn_wrapper =
-                &XLAInterface::gpuStepFn<SimT, step_fn, async_step_fn>;
+                &JAXInterface::gpuStepFn<SimT, step_fn, async_step_fn>;
             fn = std::bit_cast<void *>(fn_wrapper);
         } else {
-            auto fn_wrapper = &XLAInterface::cpuStepFn<SimT, step_fn>;
+            auto fn_wrapper = &JAXInterface::cpuStepFn<SimT, step_fn>;
             fn = std::bit_cast<void *>(fn_wrapper);
         }
 
@@ -30,7 +30,7 @@ auto XLAInterface::buildEntry()
 }
 
 template <typename SimT, auto step_fn>
-void XLAInterface::cpuStepFn(void *, void **in)
+void JAXInterface::cpuStepFn(void *, void **in)
 {
     SimT *sim = *(SimT **)in[0];
     std::invoke(step_fn, *sim);
@@ -38,11 +38,10 @@ void XLAInterface::cpuStepFn(void *, void **in)
 
 #ifdef MADRONA_CUDA_SUPPORT
 template <typename SimT, auto step_fn, auto async_step_fn>
-void XLAInterface::gpuStepFn(cudaStream_t strm, void **,
+void JAXInterface::gpuStepFn(cudaStream_t strm, void **,
                              const char *opaque, size_t)
 {
     SimT *sim = *(SimT **)opaque;
-
     if constexpr (async_step_fn == nullptr) {
         REQ_CUDA(cudaStreamSynchronize(strm));
         std::invoke(step_fn, *sim);

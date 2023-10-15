@@ -90,18 +90,24 @@ static nb::dict train_interface_to_pytree(const TrainInterface &iface)
     d["rewards"] = tensor_to_jax(iface.rewards());
     d["dones"] = tensor_to_jax(iface.dones());
     d["resets"] = tensor_to_jax(iface.resets());
+
+    auto policy_assignments = iface.policyAssignments();
+    if (policy_assignments.has_value()) {
+        d["policy_assignments"] = tensor_to_jax(*policy_assignments);
+    }
+
     d["stats"] = stats;
     
     return d;
 }
 
-nb::object XLAInterface::setup(const TrainInterface &iface,
+nb::object JAXInterface::setup(const TrainInterface &iface,
                                nb::object sim_obj,
                                void *sim_ptr,
                                void *fn,
                                bool xla_gpu)
 {
-    nb::capsule fn_capsule(fn, "xla.__CUSTOM_CALL_TARGET");
+    nb::capsule fn_capsule(fn, "xla._CUSTOM_CALL_TARGET");
 
     auto sim_encode = nb::bytes((char *)&sim_ptr, sizeof(char *));
 
@@ -112,7 +118,7 @@ nb::object XLAInterface::setup(const TrainInterface &iface,
     scope["custom_call_platform"] = xla_gpu ? "gpu" : "cpu";
 
     nb::exec(
-#include "xla_register.py"
+#include "jax_register.py"
     , scope);
 
     return nb::make_tuple(
@@ -156,7 +162,7 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
 {
     auto m = parent_mod.def_submodule("madrona");
 
-      nb::class_<madrona::py::PyExecMode>(m, "ExecMode")
+    nb::class_<madrona::py::PyExecMode>(m, "ExecMode")
         .def_prop_ro_static("CPU", [](nb::handle) {
             return madrona::py::PyExecMode(madrona::ExecMode::CPU);
         })
@@ -200,7 +206,8 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
 #endif
 
     nb::class_<TrainInterface>(m, "TrainInterface")
-        .def("to_pytree", train_interface_to_pytree)
+        .def("to_pytree", train_interface_to_pytree,
+             nb::rv_policy::automatic_reference)
     ;
 }
 
