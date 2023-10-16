@@ -91,7 +91,8 @@ template <typename... ComponentTs, typename Fn>
 inline void Context::iterateQuery(Query<ComponentTs...> &query, Fn&& fn) {
     mwGPU::getStateManager()->iterateQuery<sizeof...(ComponentTs)>(world_id_.idx, query.getSharedRef(), 
     [&](int32_t offset, auto ...raw_ptrs){
-            
+            // offset is a global offset computed from world offset and a count of 
+            // the current entity within the archetype table.
             cuda::std::tuple typed_ptrs {
                 (ComponentTs *)raw_ptrs
                 ...

@@ -205,7 +205,6 @@ Query<ComponentTs...> Context::query()
 template <typename... ComponentTs, typename Fn>
 void Context::forEach(const Query<ComponentTs...> &query, Fn &&fn)
 {
-    // ZM: previously iterateEntities.
     state_mgr_->iterateQuery(MADRONA_MW_COND(cur_world_id_,) query,
                                 std::forward<Fn>(fn));
 }

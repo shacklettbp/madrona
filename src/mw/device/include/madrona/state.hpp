@@ -136,6 +136,7 @@ public:
 
     template <typename ArchetypeT>
     int32_t * getArchetypeCounts();
+    
     inline int32_t * getArchetypeCounts(uint32_t archetype_id);
 
     template <typename ArchetypeT>

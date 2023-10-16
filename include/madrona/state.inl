@@ -328,7 +328,7 @@ Query<ComponentTs...> StateManager::query()
 
     QueryRef *ref = &Query<ComponentTs...>::ref_;
 
-    // Deduplication: check to see if the query templated on these components has already been created.
+    // If necessary, create the query templated on the passed in ComponentTs.
     if (ref->numReferences.load_acquire() == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
     }
