@@ -16,13 +16,18 @@ auto JAXInterface::buildEntry()
         void *fn;
         if (xla_gpu) {
             assert(gpu_step_fn != nullptr);
+#ifdef MADRONA_CUDA_SUPPORT
             auto fn_wrapper =
                 &JAXInterface::gpuStepFn<SimT, gpu_step_fn>;
             fn = std::bit_cast<void *>(fn_wrapper);
+#else
+            fn = nullptr;
+#endif
         } else {
             auto fn_wrapper = &JAXInterface::cpuStepFn<SimT, cpu_step_fn>;
             fn = std::bit_cast<void *>(fn_wrapper);
         }
+        assert(fn != nullptr);
 
         SimT *sim_ptr = nb::inst_ptr<SimT>(sim);
         TrainInterface iface = std::invoke(iface_fn, *sim_ptr);
