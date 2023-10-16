@@ -1803,6 +1803,11 @@ void MWCudaExecutor::run()
 #endif
 }
 
+void MWCudaExecutor::runAsync(cudaStream_t strm)
+{
+    REQ_CU(cuGraphLaunch(impl_->runGraph, strm));
+}
+
 void * MWCudaExecutor::getExported(CountT slot) const
 {
     return impl_->engineState.exportedColumns[slot];

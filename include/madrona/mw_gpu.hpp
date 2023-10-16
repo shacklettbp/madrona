@@ -20,6 +20,8 @@
 #include <madrona/importer.hpp>
 #include <madrona/render/mw.hpp>
 
+#include <cuda_runtime.h>
+
 namespace madrona {
 
 struct StateConfig {
@@ -84,6 +86,7 @@ public:
     // Run one invocation of the task graph across all worlds (one step)
     // Only returns after synchronization with the GPU is complete (not async)
     MADRONA_MWGPU_EXPORT void run();
+    MADRONA_MWGPU_EXPORT void runAsync(cudaStream_t strm);
 
     // Get the base pointer of the component data exported with
     // ECSRegister::exportColumn. Note that this will be a GPU pointer.

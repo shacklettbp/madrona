@@ -39,6 +39,7 @@ target_link_libraries(imgui_impl PRIVATE
     imgui
     glfw
     madrona_libcxx
+    madrona_noexceptrtti
     madrona_vk_hdrs
 )
 

@@ -19,6 +19,21 @@ else()
     add_library(madrona_libcxx INTERFACE)
 endif()
 
+add_library(madrona_noexceptrtti INTERFACE)
+if (FRONTEND_GCC OR FRONTEND_CLANG)
+    target_compile_options(madrona_noexceptrtti INTERFACE
+        -fno-exceptions -fno-rtti)
+elseif (FRONTEND_MSVC)
+    target_compile_options(madrona_noexceptrtti INTERFACE
+        /GR-
+    )
+else ()
+    message(FATAL_ERROR "Unsupported compiler frontend")
+endif ()
+
+install(TARGETS madrona_noexceptrtti EXPORT madronaExternal)
+install(EXPORT madronaExternal DESTINATION ${CMAKE_INSTALL_PREFIX})
+
 add_subdirectory(madrona-deps)
 include(madrona-deps/cmake/sys-detect.cmake)
 set(MADRONA_LINUX ${MADRONA_LINUX} PARENT_SCOPE)
@@ -48,7 +63,7 @@ set_property(TARGET meshoptimizer PROPERTY
 
 if (NOT WIN32) #FIX
     target_link_libraries(meshoptimizer PRIVATE
-        madrona_libcxx)
+        madrona_libcxx madrona_noexceptrtti)
 endif()
 
 add_subdirectory(fast_float EXCLUDE_FROM_ALL)
@@ -61,7 +76,7 @@ set_property(TARGET simdjson PROPERTY
 
 if (NOT WIN32) #FIX
     target_link_libraries(simdjson PRIVATE
-        madrona_libcxx)
+        madrona_libcxx madrona_noexceptrtti)
 endif()
 
 if (MADRONA_X64 AND NOT MADRONA_MACOS)
@@ -142,7 +157,7 @@ if (MADRONA_USD_SUPPORT)
     
     if (NOT WIN32) #FIX
         target_link_libraries(tinyusdz_object
-            madrona_libcxx
+            madrona_libcxx madrona_noexceptrtti
         )
     endif()
     

@@ -11,7 +11,11 @@ target_link_libraries(madrona_python_utils
 if (NOT WIN32) #FIX
     target_link_libraries(madrona_python_utils
         PRIVATE
-            madrona_libcxx_except_static
+            madrona_libcxx
+    )
+    target_compile_options(madrona_python_utils
+        PRIVATE
+            -fno-exceptions
     )
 endif()
 
@@ -42,10 +46,19 @@ function(madrona_python_add_binding_lib nanobind_lib_name)
     # This is also hacky, nanobind doesn't make it easy to declare
     # a static library of helpers built on nanobind for inclusion
     # into other modules.
-    target_link_libraries(madrona_python_bindings PUBLIC
-        ${nanobind_lib_name}
-        madrona_hdrs
+    target_link_libraries(madrona_python_bindings
+        PUBLIC
+            ${nanobind_lib_name}
+            madrona_hdrs
+        PRIVATE
+            madrona_err
     )
+
+    if (TARGET madrona_cuda)
+        target_link_libraries(madrona_python_bindings PUBLIC
+            madrona_cuda
+        )
+    endif ()
 endfunction()
 
 function(madrona_python_get_nanobind_target module_name out_name)
@@ -85,7 +98,7 @@ function(madrona_python_disable_nanobind_warnings module_name)
     
     if (NOT WIN32) #FIX
         target_link_libraries(${nanobind_target_name} PRIVATE
-            madrona_libcxx_except_static
+            madrona_libcxx_except
         )
     endif()
 endfunction()
@@ -106,7 +119,7 @@ function(madrona_python_module module_name)
 
     if (NOT WIN32) #FIX
         target_link_libraries(${module_name} PRIVATE
-            madrona_libcxx_except_static
+            madrona_libcxx_except
         )
     endif()
 endfunction()
