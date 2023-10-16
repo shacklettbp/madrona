@@ -117,9 +117,14 @@ if (CUDAToolkit_FOUND)
         PRIVATE
             CUDA::cuda_driver
             madrona_err
-            madrona_libcxx_hdrs
             madrona_noexceptrtti
     )
+
+    if (NOT WIN32) # FIXME
+        target_link_libraries(madrona_cuda PRIVATE 
+            madrona_libcxx_hdrs
+        )
+    endif ()
 
     if (WIN32)
         get_property(MULTI_CFG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
