@@ -1263,12 +1263,8 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_
 
     Entity e = entities_staging[invocation_idx];
 
-    // ZM: Should be able to delete this conditional 
-    // after the resizeTables fix.
-    //if (worlds[invocation_idx].idx != -1) {
-    //    dst[invocation_idx] = e;
-    //    state_mgr->remapEntity(e, invocation_idx);
-    //}
+    dst[invocation_idx] = e;
+    state_mgr->remapEntity(e, invocation_idx);
 
     if (invocation_idx == 0) {
         numDynamicInvocations = 0;
