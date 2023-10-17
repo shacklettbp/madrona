@@ -86,7 +86,8 @@ public:
     inline void * tmpAlloc(uint64_t num_bytes);
 
     // Create an ECS query matching the template components.
-    // Pass to iterateQuery to iterate over all entities with the template set of components.
+    // Pass to iterateQuery to iterate over all entities with the
+    // template set of components.
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 

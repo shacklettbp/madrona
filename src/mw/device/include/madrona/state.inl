@@ -180,7 +180,8 @@ void StateManager::iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn)
 }
 
 template<typename Fn, int32_t... Indices>
-void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, Fn&& fn, 
+void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, 
+        Fn&& fn, 
         std::integer_sequence<int32_t, Indices...>) {
 
     
@@ -193,8 +194,10 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, Fn&& 
 
         Table &tbl = archetypes_[archetype_idx]->tbl;
 
-        int32_t worldSortOffset = world_id == 0 ? 0 : getArchetypeSortOffsets(archetype_idx)[world_id - 1];
-        int32_t worldArchetypeCount = getArchetypeCounts(archetype_idx)[world_id];
+        int32_t worldSortOffset = world_id == 0 ? 
+            0 : getArchetypeSortOffsets(archetype_idx)[world_id - 1];
+        int32_t worldArchetypeCount =
+            getArchetypeCounts(archetype_idx)[world_id];
 
         for (int i = 0; i < worldArchetypeCount; ++i) {
             fn(worldSortOffset + i, tbl.columns[query_values[Indices]] ...);
@@ -205,7 +208,8 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, Fn&& 
 }
 
 template<int32_t num_components, typename Fn>
-void StateManager::iterateQuery(uint32_t world_id, QueryRef* query_ref, Fn&& fn) {
+void StateManager::iterateQuery(uint32_t world_id, QueryRef* query_ref,
+    Fn&& fn) {
 
     using IndicesWrapper =
         std::make_integer_sequence<int32_t, num_components>;

@@ -1219,15 +1219,18 @@ void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
 
 void SortArchetypeNodeBase::computeOffsets(int32_t invocation_idx)
 {
-    if (keysCol[invocation_idx] != keysCol[invocation_idx + 1]) {
+    // The last thread writes its offset to make 
+    // deriving the counts easier in the next step.
+    if (invocation_idx == numDynamicInvocations - 1 ||
+        keysCol[invocation_idx] != keysCol[invocation_idx + 1]) {
         sortOffsets[keysCol[invocation_idx]] = invocation_idx + 1;
     }
 }
 
 void SortArchetypeNodeBase::computeCounts(int32_t invocation_idx)
 {
-    counts[invocation_idx] = 
-    sortOffsets[invocation_idx] - (invocation_idx == 0 ? 0 : sortOffsets[invocation_idx - 1]);
+    counts[invocation_idx] = sortOffsets[invocation_idx] - 
+    (invocation_idx == 0 ? 0 : sortOffsets[invocation_idx - 1]);
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
@@ -1260,10 +1263,12 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_
 
     Entity e = entities_staging[invocation_idx];
 
-    if (worlds[invocation_idx].idx != -1) {
-        dst[invocation_idx] = e;
-        state_mgr->remapEntity(e, invocation_idx);
-    }
+    // ZM: Should be able to delete this conditional 
+    // after the resizeTables fix.
+    //if (worlds[invocation_idx].idx != -1) {
+    //    dst[invocation_idx] = e;
+    //    state_mgr->remapEntity(e, invocation_idx);
+    //}
 
     if (invocation_idx == 0) {
         numDynamicInvocations = 0;
@@ -1332,7 +1337,8 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     }
 
     auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
-        archetype_id, sort_column_idx, keys_col, num_passes, sort_offsets, counts);
+        archetype_id, sort_column_idx, keys_col, 
+        num_passes, sort_offsets, counts);
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
