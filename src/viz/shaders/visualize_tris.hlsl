@@ -1,9 +1,6 @@
 #include "shader_common.h"
 #include "../../render/vk/shaders/utils.hlsl"
 
-[[vk::push_constant]]
-PushConstant pushConst;
-
 [[vk::binding(0, 0)]]
 RWTexture2D<uint2> vizBuffer;
 

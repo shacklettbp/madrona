@@ -3,6 +3,14 @@
 
 #define PREPARE_VIEW_WORKGROUP_SIZE 32
 
+// Specified from the top left corner of the screen
+struct TexturedQuadPushConst {
+    float2 startPixels;
+    float2 extentPixels;
+    uint2 targetExtent;
+    uint layerID;
+};
+
 struct PrepareViewPushConstant {
     uint32_t numViews;
     uint32_t offset;
@@ -11,10 +19,9 @@ struct PrepareViewPushConstant {
 };
 
 struct DeferredLightingPushConstBR {
-    uint32_t numViews;
-    uint32_t offset;
-    uint32_t numWorlds;
-    uint32_t numInstances;
+    uint32_t maxLayersPerImage;
+    uint32_t totalNumViews;
+    uint32_t imageIndex;
 };
 
 struct BlurPushConst {

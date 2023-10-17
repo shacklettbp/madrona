@@ -87,7 +87,7 @@ if (TARGET madrona_cuda AND NOT MADRONA_WINDOWS)
         cuda_interop.hpp cuda_interop.cpp
     )
 
-    target_link_libraries(madrona_render_vk_cuda PRIVATE
+    target_link_libraries(madrona_render_vk_cuda PUBLIC
         madrona_render_vk madrona_cuda madrona_common)
 
     target_link_libraries(madrona_render_vk PRIVATE

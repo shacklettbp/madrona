@@ -13,9 +13,6 @@
 #include "vk/utils.hpp"
 #include "vk/descriptors.hpp"
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-
 #include <madrona/cuda_utils.hpp>
 
 namespace madrona {

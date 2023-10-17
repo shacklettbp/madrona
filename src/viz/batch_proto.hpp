@@ -15,7 +15,6 @@
 
 namespace madrona::viz {
 
-
 struct LayeredTarget {
     // Contains a uint for triangle ID and another for instance ID
     render::vk::LocalImage vizBuffer;
@@ -31,6 +30,13 @@ struct LayeredTarget {
     uint32_t layerCount;
 
     VkDescriptorSet lightingSet;
+};
+
+// A texture containing the view we want to visualize in the viewer
+struct DisplayTexture {
+    render::vk::LocalTexture tex;
+    VkDeviceMemory mem;
+    VkImageView view;
 };
 
 struct BatchRenderInfo {
@@ -72,9 +78,13 @@ struct BatchRendererProto {
 
     void renderViews(VkCommandBuffer& draw_cmd,
                      BatchRenderInfo info,
-                     const DynArray<AssetData> &loaded_assets);
+                     const DynArray<AssetData> &loaded_assets,
+                     uint32_t frame_idx,
+                     uint32_t view_idx);
 
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
+    DisplayTexture &getDisplayTexture(uint32_t frame_id);
+    LayeredTarget &getLayeredTarget(uint32_t frame_id);
 };
 
 }

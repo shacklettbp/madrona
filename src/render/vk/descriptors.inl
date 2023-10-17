@@ -68,13 +68,14 @@ void DescHelper::storage(VkWriteDescriptorSet &update,
 void DescHelper::storageImage(VkWriteDescriptorSet &update,
                               VkDescriptorSet desc_set,
                               const VkDescriptorImageInfo *img,
-                              uint32_t binding)
+                              uint32_t binding,
+                              uint32_t arr_offset)
 {
     update.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     update.pNext = nullptr;
     update.dstSet = desc_set;
     update.dstBinding = binding;
-    update.dstArrayElement = 0;
+    update.dstArrayElement = arr_offset;
     update.descriptorCount = 1;
     update.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     update.pImageInfo = img;

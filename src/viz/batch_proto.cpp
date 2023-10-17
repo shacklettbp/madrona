@@ -64,7 +64,6 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
             .output = alloc.makeColorAttachment(width,height,
                                                 current_layer_count,
                                                 consts::outputColorFormat)
-            // .lightingSet=pool.makeSet()
         };
 
         VkImageViewCreateInfo view_info = {
@@ -94,30 +93,45 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
 
         target.layerCount = current_layer_count;
 
-#if 0
-        std::array<VkWriteDescriptorSet, 2> desc_updates;
-        VkDescriptorImageInfo vis_buffer_info;
-        vis_buffer_info.imageView = target.vizBufferView;
-        vis_buffer_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        vis_buffer_info.sampler = VK_NULL_HANDLE;
-
-        vk::DescHelper::storageImage(desc_updates[0], target.lightingSet, &vis_buffer_info, 0);
-
-        VkDescriptorImageInfo output_info;
-        output_info.imageView = target.outputView;
-        output_info.imageLayout =  VK_IMAGE_LAYOUT_GENERAL;
-        output_info.sampler = VK_NULL_HANDLE;
-
-        vk::DescHelper::storageImage(desc_updates[1], target.lightingSet, &output_info, 1);
-        vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
-#endif
-
         local_images.emplace(i, std::move(target));
 
         layer_count -= dev.maxNumLayersPerImage;
     }
 
     return local_images;
+}
+
+static DisplayTexture makeDisplayTexture(uint32_t width,
+                                         uint32_t height,
+                                         const vk::Device &dev,
+                                         vk::MemoryAllocator &alloc)
+{
+    auto [img, reqs] = alloc.makeTexture2D(width, height, 1, VK_FORMAT_R8G8B8A8_UNORM);
+    VkDeviceMemory mem = alloc.alloc(reqs.size).value();
+    dev.dt.bindImageMemory(dev.hdl, img.image, mem, 0);
+
+    VkImageView view;
+
+    VkImageViewCreateInfo view_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
+    };
+
+    view_info.image = img.image;
+    view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
+
+    return {
+        std::move(img),
+        mem, view
+    };
 }
 
 
@@ -411,14 +425,44 @@ static vk::PipelineShaders makeShaders(const vk::Device &dev,
                                Span<const SPIRVShader>(&spirv, 1), {});
 }
 
+static vk::PipelineShaders makeShadersLighting(const vk::Device &dev,
+                                       const char *shader_file,
+                                       const char *func_name = "main")
+{
+    std::filesystem::path shader_dir =
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "shaders";
+
+    ShaderCompiler compiler;
+    SPIRVShader spirv = compiler.compileHLSLFileToSPV(
+        (shader_dir / shader_file).string().c_str(), {},
+        {}, {func_name, ShaderStage::Compute });
+    
+    StackAlloc tmp_alloc;
+    return vk::PipelineShaders(dev, tmp_alloc,
+                               Span<const SPIRVShader>(&spirv, 1), 
+                               Span<const vk::BindingOverride>({
+                                   vk::BindingOverride{
+                                       0, 0, VK_NULL_HANDLE, 
+                                       100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 
+                                   },
+                                   vk::BindingOverride{
+                                       0, 1, VK_NULL_HANDLE,
+                                       100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+                                   }
+                                   }));
+}
+
+template <typename T>
 static Pipeline<1> makeComputePipeline(const vk::Device &dev,
                                        VkPipelineCache pipeline_cache,
                                        uint32_t push_constant_size,
                                        uint32_t num_descriptor_sets,
                                        const char *shader_file,
-                                       const char *func_name = "main")
+                                       const char *func_name = "main",
+                                       T make_shaders_proc = makeShaders)
 {
-    vk::PipelineShaders shader = makeShaders(dev, shader_file, func_name);
+    vk::PipelineShaders shader = make_shaders_proc(dev, shader_file, func_name);
 
     VkPushConstantRange push_const = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -484,24 +528,24 @@ struct BatchFrame {
     // View, instance info, instance data
     VkDescriptorSet viewInstanceSetPrepare;
     VkDescriptorSet viewInstanceSetDraw;
+    VkDescriptorSet viewInstanceSetLighting;
 
     HeapArray<LayeredTarget> targets;
 
-    // Contains a copy of the viz buffer output at a certain layer
-    vk::LocalImage visualizedCopy;
-    VkImageView visualizedCopyView;
+    // Descriptor set which contains all the vizBuffer outputs and
+    // the lighting outputs
+    VkDescriptorSet targetsSetLighting;
 
-    // Contains the processed output from visualizedCopy
-    vk::LocalImage visualizedResult;
-    VkImageView visualizedResultView;
+    DisplayTexture displayTexture;
 };
 
 static void makeBatchFrame(vk::Device& dev, 
                            BatchFrame* frame,
                            render::vk::MemoryAllocator &alloc,
                            const BatchRendererProto::Config &cfg,
-                           VkDescriptorSet viewInstanceSetPrepare,
-                           VkDescriptorSet viewInstanceSetDraw
+                           VkDescriptorSet view_instance_set_prepare,
+                           VkDescriptorSet view_instance_set_draw,
+                           VkDescriptorSet lighting_set
                            /*vk::FixedDescriptorPool& layerPool*/)
 {
     VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(PerspectiveCameraData);
@@ -520,67 +564,66 @@ static void makeBatchFrame(vk::Device& dev,
     view_info.buffer = views.buffer;
     view_info.offset = 0;
     view_info.range = view_size;
-    vk::DescHelper::storage(desc_updates[0], viewInstanceSetPrepare, &view_info, 0);
-    vk::DescHelper::storage(desc_updates[3], viewInstanceSetDraw, &view_info, 0);
+    vk::DescHelper::storage(desc_updates[0], view_instance_set_prepare, &view_info, 0);
+    vk::DescHelper::storage(desc_updates[3], view_instance_set_draw, &view_info, 0);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = instances.buffer;
     instance_info.offset = 0;
     instance_info.range = instance_size;
-    vk::DescHelper::storage(desc_updates[1], viewInstanceSetPrepare, &instance_info, 1);
-    vk::DescHelper::storage(desc_updates[4], viewInstanceSetDraw, &instance_info, 1);
+    vk::DescHelper::storage(desc_updates[1], view_instance_set_prepare, &instance_info, 1);
+    vk::DescHelper::storage(desc_updates[4], view_instance_set_draw, &instance_info, 1);
 
     VkDescriptorBufferInfo offset_info;
     offset_info.buffer = instance_offsets.buffer;
     offset_info.offset = 0;
     offset_info.range = instance_offset_size;
-    vk::DescHelper::storage(desc_updates[2], viewInstanceSetPrepare, &offset_info, 2);
-    vk::DescHelper::storage(desc_updates[5], viewInstanceSetDraw, &offset_info, 2);
-
-    vk::LocalImage visualized_copy_img = alloc.makeColorAttachment(cfg.renderWidth, 
-                                                              cfg.renderHeight,
-                                                              1, consts::outputColorFormat);
-
-    vk::LocalImage visualized_res_img = alloc.makeColorAttachment(cfg.renderWidth, 
-                                                              cfg.renderHeight,
-                                                              1, VK_FORMAT_R8G8B8A8_UNORM);
-
-    VkImageViewCreateInfo viz_view_info = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image = visualized_copy_img.image,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D,
-        .format = consts::outputColorFormat,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1
-        }
-    };
-
-    VkImageView viz_copy_view;
-    REQ_VK(dev.dt.createImageView(dev.hdl, &viz_view_info, nullptr, &viz_copy_view));
-
-    viz_view_info.image = visualized_res_img.image;
-    viz_view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
-
-    VkImageView viz_res_view;
-    REQ_VK(dev.dt.createImageView(dev.hdl, &viz_view_info, nullptr, &viz_res_view));
+    vk::DescHelper::storage(desc_updates[2], view_instance_set_prepare, &offset_info, 2);
+    vk::DescHelper::storage(desc_updates[5], view_instance_set_draw, &offset_info, 2);
 
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
+
     new (frame) BatchFrame{
         {std::move(views),std::move(instances),std::move(instance_offsets)},
-        viewInstanceSetPrepare,
-        viewInstanceSetDraw,
+        view_instance_set_prepare,
+        view_instance_set_draw,
+        view_instance_set_prepare,
         makeLayeredTargets(cfg.renderWidth, cfg.renderHeight, 
                            cfg.numWorlds * cfg.maxViewsPerWorld,
                            dev, alloc/*, layerPool*/),
-        std::move(visualized_copy_img),
-        viz_copy_view,
-        std::move(visualized_res_img),
-        viz_res_view
+        lighting_set,
+        makeDisplayTexture(cfg.renderWidth, cfg.renderHeight, dev, alloc)
     };
+
+    { // Create the descriptor sets with the outputs
+        VkWriteDescriptorSet *lighting_desc_updates = (VkWriteDescriptorSet *)
+            alloca(sizeof(VkWriteDescriptorSet) * frame->targets.size() * 2);
+
+        VkDescriptorImageInfo *infos = (VkDescriptorImageInfo *)
+            alloca(sizeof(VkDescriptorImageInfo) * frame->targets.size() * 2);
+        for (int i = 0; i < frame->targets.size(); ++i) {
+            infos[i*2].imageView = frame->targets[i].vizBufferView;
+            infos[i*2].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            infos[i*2].sampler = VK_NULL_HANDLE;
+
+            vk::DescHelper::storageImage(lighting_desc_updates[i*2],
+                                         lighting_set, 
+                                         &infos[i*2],
+                                         0, i);
+
+            infos[i*2+1].imageView = frame->targets[i].outputView;
+            infos[i*2+1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            infos[i*2+1].sampler = VK_NULL_HANDLE;
+
+            vk::DescHelper::storageImage(lighting_desc_updates[i*2+1], 
+                                         lighting_set, 
+                                         &infos[i*2+1],
+                                         1, i);
+        }
+
+        vk::DescHelper::update(dev, lighting_desc_updates,
+                               frame->targets.size() * 2);
+    }
 }
 
 struct ViewBatch {
@@ -601,7 +644,7 @@ static void makeViewBatch(vk::Device& dev,
                           VkDescriptorSet draw_buffer_set_prepare,
                           VkDescriptorSet draw_buffer_set_draw)
 {
-    //Make Draw Buffers
+    // Make Draw Buffers
 
     int64_t buffer_offsets[2];
     int64_t buffer_sizes[3] = {
@@ -655,15 +698,9 @@ static void makeViewBatch(vk::Device& dev,
 ////////////////////////////////////////////////////////////////////////////////
 // RASTERIZATION AND RENDERING / POST PROCESSING                              //
 ////////////////////////////////////////////////////////////////////////////////
-static void issueLayoutTransitions(vk::Device &dev, 
-                                   Pipeline<1> &draw_pipeline, 
+static void issueRasterLayoutTransitions(vk::Device &dev, 
                                    LayeredTarget &target,
-                                   VkCommandBuffer &draw_cmd,
-                                   ViewBatch &view_batch,
-                                   BatchFrame &batch_frame,
-                                   VkDescriptorSet asset_set,
-                                   VkExtent2D render_extent,
-                                   const DynArray<AssetData> &loaded_assets)
+                                   VkCommandBuffer &draw_cmd)
 {
     // Transition image layouts
     std::array barriers = {
@@ -700,9 +737,55 @@ static void issueLayoutTransitions(vk::Device &dev,
     };
 
     dev.dt.cmdPipelineBarrier(draw_cmd,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
             VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+            0, 0, nullptr, 0, nullptr,
+            barriers.size(), barriers.data());   
+}
+
+static void issueComputeLayoutTransitions(vk::Device &dev, 
+                                   LayeredTarget &target,
+                                   VkCommandBuffer &draw_cmd)
+{
+    // Transition image layouts
+    std::array barriers = {
+        VkImageMemoryBarrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .image = target.vizBuffer.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = target.layerCount
+            }
+        },
+        VkImageMemoryBarrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .image = target.depth.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = target.layerCount
+            }
+        },
+    };
+
+    dev.dt.cmdPipelineBarrier(draw_cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             0, 0, nullptr, 0, nullptr,
             barriers.size(), barriers.data());   
 }
@@ -711,15 +794,15 @@ static void prepareVizBlit(vk::Device &dev,
                            VkCommandBuffer draw_cmd,
                            vk::LocalImage &selected_img,
                            uint32_t layer_id,
-                           vk::LocalImage &dst)
+                           vk::LocalTexture &dst)
 {
     // Transition image layouts
     std::array barriers = {
         VkImageMemoryBarrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
             .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             .image = selected_img.image,
             .subresourceRange = {
@@ -738,57 +821,9 @@ static void prepareVizBlit(vk::Device &dev,
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .image = dst.image,
             .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1
-            }
-        },
-    };
-
-    dev.dt.cmdPipelineBarrier(draw_cmd,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, nullptr, 0, nullptr,
-            barriers.size(), barriers.data());   
-}
-
-static void prepareVizCompute(vk::Device &dev, 
-                              VkCommandBuffer draw_cmd,
-                              vk::LocalImage &selected_img,
-                              uint32_t layer_id,
-                              vk::LocalImage &dst)
-{
-    // Transition image layouts
-    std::array barriers = {
-        VkImageMemoryBarrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            .image = selected_img.image,
-            .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .baseMipLevel = 0,
                 .levelCount = 1,
-                .baseArrayLayer = layer_id,
-                .layerCount = 1
-            }
-        },
-        VkImageMemoryBarrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_NONE,
-            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .image = dst.image,
-            .subresourceRange = {
-                .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
                 .baseArrayLayer = 0,
                 .layerCount = 1
             }
@@ -796,8 +831,7 @@ static void prepareVizCompute(vk::Device &dev,
     };
 
     dev.dt.cmdPipelineBarrier(draw_cmd,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             0, 0, nullptr, 0, nullptr,
             barriers.size(), barriers.data());   
@@ -889,75 +923,32 @@ static void issueRasterization(vk::Device &dev,
 static void issueDeferred(vk::Device &dev,
                           Pipeline<1> &pipeline,
                           LayeredTarget &target,
-                          VkCommandBuffer &draw_cmd,
-                          ViewBatch &view_batch,
+                          VkCommandBuffer draw_cmd,
                           BatchFrame &batch_frame,
                           VkDescriptorSet asset_set,
                           VkDescriptorSet asset_mat_tex_set,
-                          VkExtent2D render_extent,
-                          const DynArray<AssetData> &loaded_assets,
-                          uint32_t num_worlds,
-                          uint32_t num_instances,
                           uint32_t num_views,
-                          uint32_t view_start) {
-    { // Transition for compute
-        std::array<VkImageMemoryBarrier, 2> compute_prepare {{
-            VkImageMemoryBarrier{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-                .image = target.vizBuffer.image,
-                .subresourceRange = {
-                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                        .baseMipLevel = 0,
-                        .levelCount = 1,
-                        .baseArrayLayer = 0,
-                        .layerCount = target.layerCount
-                }
-            },
-            VkImageMemoryBarrier{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-                .image = target.depth.image,
-                .subresourceRange = {
-                        .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
-                        .baseMipLevel = 0,
-                        .levelCount = 1,
-                        .baseArrayLayer = 0,
-                        .layerCount = target.layerCount
-                }
-            },
-        }};
-
-        dev.dt.cmdPipelineBarrier(draw_cmd,
-                                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                  0,
-                                  0, nullptr, 0, nullptr,
-                                  compute_prepare.size(), compute_prepare.data());
-    }
-
+                          uint32_t image_idx) 
+{
+    // The output buffer has been transitioned to general at the start of the frame.
+    // The viz buffers have been transitioned to general before this happens.
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
 
     shader::DeferredLightingPushConstBR push_const = {
-            num_views,
-            view_start,
-            num_views,
-            num_instances
+        dev.maxNumLayersPerImage,
+        num_views,
+        image_idx
     };
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shader::DeferredLightingPushConstBR), &push_const);
 
     std::array draw_descriptors = {
-            target.lightingSet,
-            batch_frame.viewInstanceSetDraw,
+            batch_frame.targetsSetLighting,
+#if 0
+            batch_frame.viewInstanceSetLighting,
             asset_set,
             asset_mat_tex_set
+#endif
     };
 
     dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -966,38 +957,11 @@ static void issueDeferred(vk::Device &dev,
                                  draw_descriptors.data(),
                                  0, nullptr);
 
-    uint32_t num_workgroups_x = target.layerCount;
-    uint32_t num_workgroups_y = utils::divideRoundUp(target.vizBuffer.width, 32_u32);
-    uint32_t num_workgroups_z = utils::divideRoundUp(target.vizBuffer.height, 32_u32);
+    uint32_t num_workgroups_x = utils::divideRoundUp(target.vizBuffer.width, 32_u32);
+    uint32_t num_workgroups_y = utils::divideRoundUp(target.vizBuffer.height, 32_u32);
+    uint32_t num_workgroups_z = target.layerCount;
 
     dev.dt.cmdDispatch(draw_cmd, num_workgroups_x, num_workgroups_y, num_workgroups_z);
-
-    { // Transition for compute
-        std::array<VkImageMemoryBarrier, 1> compute_prepare {{
-            {
-                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-                VK_IMAGE_LAYOUT_GENERAL,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                VK_QUEUE_FAMILY_IGNORED,
-                VK_QUEUE_FAMILY_IGNORED,
-                target.output.image,
-                {
-                    VK_IMAGE_ASPECT_COLOR_BIT,
-                    0, 1, 0, target.layerCount
-                },
-            },
-        }};
-
-        dev.dt.cmdPipelineBarrier(draw_cmd,
-                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                  0,
-                                  0, nullptr, 0, nullptr,
-                                  compute_prepare.size(), compute_prepare.data());
-    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1018,7 +982,7 @@ struct BatchRendererProto::Impl {
     Pipeline<1> prepareViews;
     Pipeline<1> batchDraw;
     Pipeline<1> createVisualization;
-    // Pipeline<1> lighting;
+    Pipeline<1> lighting;
 
     //One batch is num_layers views at once
     HeapArray<ViewBatch> viewBatches;
@@ -1054,14 +1018,14 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
       prepareViews(makeComputePipeline(dev, pipelineCache, 
                                        sizeof(shader::PrepareViewPushConstant),
                                        4+consts::numDrawCmdBuffers,
-                                       "prepare_views.hlsl")),
+                                       "prepare_views.hlsl", "main", makeShaders)),
       batchDraw(makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, consts::numDrawCmdBuffers*cfg.numFrames)),
       createVisualization(makeComputePipeline(dev, pipelineCache,
                                               sizeof(uint32_t) * 2,
                                               cfg.numFrames*consts::numDrawCmdBuffers,
-                                              "visualize_tris.hlsl", "visualize")),
-      // lighting(makeComputePipeline(dev, pipeline_cache, sizeof(shader::DeferredLightingPushConstBR),
-                                   // consts::numDrawCmdBuffers * cfg.numFrames,"draw_deferred.hlsl","lighting")),
+                                              "visualize_tris.hlsl", "visualize", makeShaders)),
+      lighting(makeComputePipeline(dev, pipeline_cache, sizeof(shader::DeferredLightingPushConstBR),
+                                   consts::numDrawCmdBuffers * cfg.numFrames,"draw_deferred.hlsl","lighting", makeShadersLighting)),
       viewBatches(consts::numDrawCmdBuffers),
       batchFrames(cfg.numFrames),
       assetSetPrepare(asset_set_compute),
@@ -1080,7 +1044,10 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
     for (uint32_t i = 0; i < cfg.numFrames; i++) {
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
                        prepareViews.descPool.makeSet(),
-                       batchDraw.descPool.makeSet()/*, lighting.descPool*/);
+                       batchDraw.descPool.makeSet(),
+                       lighting.descPool.makeSet());
+
+        printf("%p %p\n", (void *)batchFrames[i].displayTexture.tex.image, (void *)batchFrames[i].displayTexture.view);
     }
 }
 
@@ -1177,10 +1144,20 @@ static void issueMemoryBarrier(vk::Device &dev,
 
 void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd, 
                                      BatchRenderInfo info,
-                                     const DynArray<AssetData> &loaded_assets) 
+                                     const DynArray<AssetData> &loaded_assets,
+                                     uint32_t frame_idx,
+                                     uint32_t batch_view_idx) 
 { 
+    static int global_frame_id = 0;
+
+    if (global_frame_id < impl->batchFrames.size()) {
+        global_frame_id++;
+    }
+
     // Circles between 0 to number of frames
-    uint32_t frame_index = 0;
+    uint32_t frame_index = frame_idx;
+
+    impl->selectedView = batch_view_idx;
 
     BatchFrame &frame_data = impl->batchFrames[frame_index];
 
@@ -1222,6 +1199,39 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
             impl->dev.dt.cmdFillBuffer(draw_cmd, impl->viewBatches[i].drawBuffer.buffer, 
                                        0, sizeof(uint32_t), 0);
         }
+    }
+
+    { // Transition image layouts for the output images
+        auto &frame = impl->batchFrames[frame_index];
+        DynArray<VkImageMemoryBarrier> barriers(frame.targets.size());
+
+        for (int i = 0; i < (int)frame.targets.size(); ++i) {
+            VkImageMemoryBarrier barrier = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_NONE,
+                .dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = frame.targets[i].output.image,
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = frame.targets[i].layerCount
+                }
+            };
+
+            barriers.emplace_back(barrier);
+        }
+
+        impl->dev.dt.cmdPipelineBarrier(draw_cmd, 
+                                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                        0, 0, nullptr, 0, nullptr, 
+                                        barriers.size(), barriers.data());
     }
 
     uint32_t num_views = info.numViews;
@@ -1286,15 +1296,9 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             int batch_no = batch + iter * consts::numDrawCmdBuffers;
             
-            issueLayoutTransitions(impl->dev,
-                                   impl->batchDraw,
+            issueRasterLayoutTransitions(impl->dev,
                                    frame_data.targets[batch_no],
-                                   draw_cmd,
-                                   impl->viewBatches[batch],
-                                   frame_data,
-                                   impl->assetSetDraw,
-                                   impl->renderExtent,
-                                   loaded_assets);
+                                   draw_cmd);
         }
 
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
@@ -1312,6 +1316,26 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                                loaded_assets);
         }
 
+        for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
+            int batch_no = batch + iter * consts::numDrawCmdBuffers;
+            
+            issueComputeLayoutTransitions(impl->dev,
+                                   frame_data.targets[batch_no],
+                                   draw_cmd);
+        }
+
+        for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
+            int batch_no = batch + iter * consts::numDrawCmdBuffers;
+
+            issueDeferred(impl->dev, impl->lighting, 
+                          frame_data.targets[batch_no],
+                          draw_cmd,
+                          frame_data,
+                          impl->assetSetPrepare,
+                          impl->assetSetTextureMat,
+                          num_views, batch_no);
+        }
+
         issueMemoryBarrier(impl->dev, draw_cmd,
                            VK_ACCESS_SHADER_READ_BIT,
                            VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -1325,12 +1349,6 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                                        0, sizeof(uint32_t), 0);
         }
     }
-
-    issueMemoryBarrier(impl->dev, draw_cmd,
-                       VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
-                       VK_ACCESS_TRANSFER_READ_BIT,
-                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT);
 
     { // Blit image from mega images to a visualization image
         VkImageBlit blit = {
@@ -1357,9 +1375,9 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
         uint32_t selected_img_index = impl->selectedView / 
                                       impl->dev.maxNumLayersPerImage;
         vk::LocalImage &selected_img = 
-            impl->batchFrames[frame_index].targets[selected_img_index].vizBuffer;
-        vk::LocalImage &target_dst =
-            impl->batchFrames[frame_index].visualizedCopy;
+            impl->batchFrames[frame_index].targets[selected_img_index].output;
+        vk::LocalTexture &target_dst =
+            impl->batchFrames[frame_index].displayTexture.tex;
 
         prepareVizBlit(impl->dev,
                        draw_cmd,
@@ -1370,14 +1388,35 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
         impl->dev.dt.cmdBlitImage(draw_cmd, 
                                   selected_img.image,
                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                  impl->batchFrames[frame_index].visualizedCopy.image,
+                                  target_dst.image,
                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                   1, &blit,
                                   VK_FILTER_NEAREST);
-    }
 
-    { // Prepare the blitted image and the viz result image for computation
-        
+#if 1
+        { // Prepare the viz texture for shader sampling
+            VkImageMemoryBarrier barrier = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .image = target_dst.image,
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1
+                }
+            };
+
+            impl->dev.dt.cmdPipelineBarrier(draw_cmd,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+#endif
     }
 }
 
@@ -1386,4 +1425,16 @@ BatchImportedBuffers &BatchRendererProto::getImportedBuffers(uint32_t frame_id)
     return impl->batchFrames[frame_id].buffers;
 }
 
+DisplayTexture &BatchRendererProto::getDisplayTexture(uint32_t frame_id)
+{
+    return impl->batchFrames[frame_id].displayTexture;
 }
+
+LayeredTarget &BatchRendererProto::getLayeredTarget(uint32_t frame_id)
+{
+    return impl->batchFrames[frame_id].targets[0];
+}
+
+}
+
+

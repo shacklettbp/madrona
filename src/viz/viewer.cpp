@@ -36,6 +36,7 @@ struct Viewer::Impl {
     uint32_t numWorlds;
     uint32_t maxNumAgents;
     int32_t simTickRate;
+    int32_t batchView;
     float cameraMoveSpeed;
     bool shouldExit;
     VoxelConfig voxelConfig;
@@ -200,7 +201,8 @@ static void cfgUI(Renderer::FrameConfig &cfg,
                   ViewerCam &cam,
                   CountT num_agents,
                   CountT num_worlds,
-                  int32_t *tick_rate)
+                  int32_t *tick_rate,
+                  int32_t *batch_view)
 {
     ImGui::Begin("Controls");
 
@@ -236,6 +238,8 @@ static void cfgUI(Renderer::FrameConfig &cfg,
     ImGui::TextUnformatted("View Settings");
     ImGui::Separator();
     {
+        ImGui::DragInt("Batch View", (int *)batch_view, 0, 0, 8191);
+
         StackAlloc str_alloc;
         const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
         cam_opts[0] = "Free Camera";
@@ -405,6 +409,7 @@ Viewer::Impl::Impl(const Config &cfg)
       numWorlds(cfg.numWorlds),
       maxNumAgents(cfg.maxViewsPerWorld),
       simTickRate(cfg.defaultSimTickRate),
+      batchView(0),
       cameraMoveSpeed(cfg.cameraMoveSpeed),
       shouldExit(false),
       voxelConfig {
@@ -417,7 +422,7 @@ Viewer::Impl::Impl(const Config &cfg)
 void Viewer::Impl::render(float frame_duration)
 {
     // FIXME: pass actual active agents, not max
-    cfgUI(frameCfg, cam, maxNumAgents, numWorlds, &simTickRate);
+    cfgUI(frameCfg, cam, maxNumAgents, numWorlds, &simTickRate, &batchView);
 
     fpsCounterUI(frame_duration);
 
@@ -426,6 +431,7 @@ void Viewer::Impl::render(float frame_duration)
     // Right now, viewIDX HAS to be 0 (during the time we're refactoring the
     // viewer renderer).
     frameCfg.viewIDX = 0;
+    frameCfg.batchViewIDX = (uint32_t)batchView;
     renderer.render(cam, frameCfg);
 }
 

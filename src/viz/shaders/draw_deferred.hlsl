@@ -6,12 +6,14 @@
 [[vk::push_constant]]
 DeferredLightingPushConstBR pushConst;
 
+// This is an array of all the textures
 [[vk::binding(0, 0)]]
-RWTexture2DArray<uint2> visBuffer;
+RWTexture2DArray<uint2> vizBuffer[];
 
 [[vk::binding(1, 0)]]
-RWTexture2DArray<float4> outputBuffer;
+RWTexture2DArray<float4> outputBuffer[];
 
+#if 0
 // Instances and views
 [[vk::binding(0, 1)]]
 StructuredBuffer<PackedViewData> viewDataBuffer;
@@ -35,8 +37,9 @@ Texture2D<float4> materialTexturesArray[];
 
 [[vk::binding(1, 3)]]
 SamplerState linearSampler;
+#endif
 
-#include "lighting.h"
+// #include "lighting.h"
 
 #define SHADOW_BIAS 0.002f
 
@@ -86,47 +89,54 @@ uint hash(uint x)
 
 float4 intToColor(uint inCol)
 {
-    if(inCol==0xffffffff) return float4(1,1,1,1);
+    if(inCol == 0xffffffff) return float4(1,1,1,1);
 
-    float a=((inCol & 0xff000000) >>24);
-    float r=((inCol & 0xff0000) >> 16);
-    float g=((inCol & 0xff00) >> 8);
-    float b=((inCol & 0xff));
+    float a = ((inCol & 0xff000000) >>24);
+    float r = ((inCol & 0xff0000) >> 16);
+    float g = ((inCol & 0xff00) >> 8);
+    float b = ((inCol & 0xff));
     return float4(r,g,b,255.0)/255.0;
 }
 
 
-[numThreads(1,32,32)]
+// idx.x is the x coordinate of the image
+// idx.y is the y coordinate of the image
+// idx.z is the global view index
+[numThreads(32, 32, 1)]
 [shader("compute")]
-void lighting(uint3 gid : SV_GroupID, uint3 idx : SV_DispatchThreadID)
+void lighting(uint3 idx : SV_DispatchThreadID)
 {
     uint3 target_dim;
-    visBuffer.GetDimensions(target_dim.x, target_dim.y, target_dim.z);
+    vizBuffer[pushConst.imageIndex].GetDimensions(target_dim.x, target_dim.y, target_dim.z);
 
-    if (gid.x > pushConst.numViews)
-            return;
-
-    /*if (idx.y == 224 && idx.z == 224) {
-        printf("Dims, %d,%d,%d,%d,%d,%d,(%d)\n", target_dim.x,target_dim.y,target_dim.z,idx.x,idx.y,idx.z,gid.x);
-    }*/
-
-    if (idx.y < target_dim.x && idx.z < target_dim.y)
-    {
-        uint3 target_pixel = uint3(idx.y, idx.z, gid.x);
-        uint2 ids = visBuffer[target_pixel];
-        uint triangleID = ids.x;
-        uint instanceID = ids.y;
-
-        EngineInstanceData instanceData = unpackEngineInstanceData(engineInstanceBuffer[instanceID]);
-        Vertex vert = unpackVertex(vertexDataBuffer[triangleID]);
-        // ObjectData obj = objectDataBuffer[instanceData.objectID];
-
-        float4 out_color = float4(min(0,abs(vert.normal.x)),0,0,0) + float4(min(0,abs(instanceData.scale.x)),0,0,0)
-         + float4(min(0,abs(materialTexturesArray[0].SampleLevel(
-                       linearSampler, float2(0,0), 0).x)),0,0,0) +
-         intToColor(hash(triangleID));
-        //out_color = out_color * min(0,ids.x) + float4(idx.y/200.0,idx.z/200.0,1,1);
-        //out_color = max(out_color,float4(1,1,1,1));
-        outputBuffer[target_pixel] = out_color;
+    if (idx.x >= target_dim.x || idx.y >= target_dim.y ||
+        idx.z >= pushConst.totalNumViews) {
+        return;
     }
+
+    uint layer_idx = idx.z;
+    uint3 target_pixel = uint3(idx.x, idx.y, layer_idx);
+
+    uint2 ids = vizBuffer[pushConst.imageIndex][target_pixel];
+
+    uint triangle_id = ids.x;
+    uint instance_id = ids.y;
+
+#if 0
+    EngineInstanceData instanceData = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
+    Vertex vert = unpackVertex(vertexDataBuffer[triangle_id]);
+
+    uint zero_dummy = min(asint(viewDataBuffer[0].data[2].w), 0) +
+                      min(asint(instanceData.worldID), 0) +
+                      instanceOffsets[0] +
+                      min(uint(abs(vert.normal.x)), 0) +
+                      min(meshDataBuffer[0].vertexOffset, 0) +
+                      min(0, abs(materialTexturesArray[0].SampleLevel(
+                          linearSampler, float2(0,0), 0).x));
+#endif
+
+    uint h = hash(triangle_id) + hash(instance_id);
+    float4 out_color = intToColor(h);
+
+    outputBuffer[pushConst.imageIndex][target_pixel] = out_color;
 }

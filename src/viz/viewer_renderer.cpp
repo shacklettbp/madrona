@@ -7,6 +7,7 @@
 
 #include "../render/asset_utils.hpp"
 
+#include "shaders/shader_common.h"
 #include "vk/descriptors.hpp"
 
 #include "batch_proto.hpp"
@@ -1658,6 +1659,176 @@ static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
     };
 }
 
+static PipelineShaders makeQuadShader(const Device &dev, VkSampler clamp_sampler)
+{
+    std::filesystem::path shader_dir =
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "shaders";
+
+    ShaderCompiler compiler;
+    SPIRVShader vert_spirv = compiler.compileHLSLFileToSPV(
+        (shader_dir / "textured_quad.hlsl").string().c_str(), {},
+        {}, { "vert", ShaderStage::Vertex });
+
+    SPIRVShader frag_spirv = compiler.compileHLSLFileToSPV(
+        (shader_dir / "textured_quad.hlsl").string().c_str(), {},
+        {}, { "frag", ShaderStage::Fragment });
+
+    std::array<SPIRVShader, 2> shaders {
+        std::move(vert_spirv),
+        std::move(frag_spirv),
+    };
+
+    StackAlloc tmp_alloc;
+    return PipelineShaders(dev, tmp_alloc, shaders,
+        Span<const BindingOverride>({BindingOverride{
+            0, 1, clamp_sampler, 1, 0 }}));
+}
+
+static Pipeline<1> makeQuadPipeline(const Device &dev,
+                                    VkPipelineCache pipeline_cache,
+                                    VkSampler clamp_sampler,
+                                    CountT num_frames,
+                                    VkRenderPass render_pass)
+{
+    PipelineShaders shader = makeQuadShader(dev, clamp_sampler);
+
+    VkPipelineVertexInputStateCreateInfo vert_info {};
+    VkPipelineInputAssemblyStateCreateInfo input_assembly_info {};
+    VkPipelineViewportStateCreateInfo viewport_info {};
+    VkPipelineMultisampleStateCreateInfo multisample_info {};
+    VkPipelineRasterizationStateCreateInfo raster_info {};
+
+    initCommonDrawPipelineInfo(vert_info, input_assembly_info, 
+        viewport_info, multisample_info, raster_info);
+
+    raster_info.cullMode = VK_CULL_MODE_NONE;
+    input_assembly_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+
+    // Depth/Stencil
+    VkPipelineDepthStencilStateCreateInfo depth_info {};
+    depth_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depth_info.depthTestEnable = VK_FALSE;
+    depth_info.depthWriteEnable = VK_FALSE;
+    depth_info.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+    depth_info.depthBoundsTestEnable = VK_FALSE;
+    depth_info.stencilTestEnable = VK_FALSE;
+    depth_info.back.compareOp = VK_COMPARE_OP_ALWAYS;
+
+    // Blend
+    VkPipelineColorBlendAttachmentState blend_attach {};
+    blend_attach.blendEnable = VK_FALSE;
+    blend_attach.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    array<VkPipelineColorBlendAttachmentState, 1> blend_attachments {{
+        blend_attach,
+    }};
+
+    VkPipelineColorBlendStateCreateInfo blend_info {};
+    blend_info.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blend_info.logicOpEnable = VK_FALSE;
+    blend_info.attachmentCount =
+        static_cast<uint32_t>(blend_attachments.size());
+    blend_info.pAttachments = blend_attachments.data();
+
+    // Dynamic
+    array dyn_enable {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+    };
+
+    VkPipelineDynamicStateCreateInfo dyn_info {};
+    dyn_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dyn_info.dynamicStateCount = dyn_enable.size();
+    dyn_info.pDynamicStates = dyn_enable.data();
+
+    // Push constant
+    VkPushConstantRange push_const {
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(shader::TexturedQuadPushConst),
+    };
+
+    // Layout configuration
+
+    array<VkDescriptorSetLayout, 1> draw_desc_layouts {{
+        shader.getLayout(0),
+    }};
+
+    VkPipelineLayoutCreateInfo gfx_layout_info;
+    gfx_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    gfx_layout_info.pNext = nullptr;
+    gfx_layout_info.flags = 0;
+    gfx_layout_info.setLayoutCount =
+        static_cast<uint32_t>(draw_desc_layouts.size());
+    gfx_layout_info.pSetLayouts = draw_desc_layouts.data();
+    gfx_layout_info.pushConstantRangeCount = 1;
+    gfx_layout_info.pPushConstantRanges = &push_const;
+
+    VkPipelineLayout draw_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &gfx_layout_info, nullptr,
+                                       &draw_layout));
+
+    array<VkPipelineShaderStageCreateInfo, 2> gfx_stages {{
+        {
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            nullptr,
+            0,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            shader.getShader(0),
+            "vert",
+            nullptr,
+        },
+        {
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            nullptr,
+            0,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            shader.getShader(1),
+            "frag",
+            nullptr,
+        },
+    }};
+
+    VkGraphicsPipelineCreateInfo gfx_info;
+    gfx_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    gfx_info.pNext = nullptr;
+    gfx_info.flags = 0;
+    gfx_info.stageCount = gfx_stages.size();
+    gfx_info.pStages = gfx_stages.data();
+    gfx_info.pVertexInputState = &vert_info;
+    gfx_info.pInputAssemblyState = &input_assembly_info;
+    gfx_info.pTessellationState = nullptr;
+    gfx_info.pViewportState = &viewport_info;
+    gfx_info.pRasterizationState = &raster_info;
+    gfx_info.pMultisampleState = &multisample_info;
+    gfx_info.pDepthStencilState = &depth_info;
+    gfx_info.pColorBlendState = &blend_info;
+    gfx_info.pDynamicState = &dyn_info;
+    gfx_info.layout = draw_layout;
+    gfx_info.renderPass = render_pass;
+    gfx_info.subpass = 0;
+    gfx_info.basePipelineHandle = VK_NULL_HANDLE;
+    gfx_info.basePipelineIndex = -1;
+
+    VkPipeline draw_pipeline;
+    REQ_VK(dev.dt.createGraphicsPipelines(dev.hdl, pipeline_cache, 1,
+                                          &gfx_info, nullptr, &draw_pipeline));
+
+    FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
+
+    return {
+        std::move(shader),
+        draw_layout,
+        { draw_pipeline },
+        std::move(desc_pool),
+    };
+}
+
 static Pipeline<1> makeBlurPipeline(const Device &dev,
                                     VkPipelineCache pipeline_cache,
                                     VkSampler clamp_sampler,
@@ -1938,6 +2109,32 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
     };
 }
 
+static VkDescriptorSet makeTexturedQuadSet(const Device &dev, VkImageView image_view,
+                                           VkImageView output_view,
+                                           VkDescriptorSet set)
+{
+    VkDescriptorImageInfo to_display_info = {
+        .sampler = VK_NULL_HANDLE,
+        .imageView = image_view,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkDescriptorImageInfo output_info = {
+        .sampler = VK_NULL_HANDLE,
+        .imageView = output_view,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
+    };
+
+    VkWriteDescriptorSet writes[2];
+
+    DescHelper::textures(writes[0], set, &to_display_info, 1, 0);
+    DescHelper::storageImage(writes[1], set, &output_info,    1);
+
+    DescHelper::update(dev, writes, 2);
+
+    return set;
+}
+
 static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       uint32_t fb_width, uint32_t fb_height,
                       uint32_t max_views, uint32_t max_instances,
@@ -1952,8 +2149,11 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet shadow_blur_set,
                       VkDescriptorSet voxel_gen_set,
                       VkDescriptorSet voxel_draw_set,
+                      VkDescriptorSet quad_draw_set,
                       Sky &sky,
                       BatchImportedBuffers &batch_renderer_buffers,
+                      LayeredTarget &batch_target,
+                      DisplayTexture &batch_display_texture,
                       Frame *dst)
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
@@ -1984,7 +2184,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 24> desc_updates;
+    std::array<VkWriteDescriptorSet, 25> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -2039,6 +2239,17 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     gbuffer_albedo_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::storageImage(desc_updates[7], lighting_set, &gbuffer_albedo_info, 0);
+    // DescHelper::storageImage(desc_updates[24], quad_draw_set, &gbuffer_albedo_info, 1);
+
+#if 1
+    VkDescriptorImageInfo br_display_info;
+    br_display_info.imageView = batch_display_texture.view;
+    printf("%p %p\n", (void *)batch_display_texture.tex.image, (void *)batch_display_texture.view);
+    br_display_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    br_display_info.sampler = VK_NULL_HANDLE;
+
+    DescHelper::textures(desc_updates[24], quad_draw_set, &br_display_info, 1, 0);
+#endif
 
     VkDescriptorImageInfo gbuffer_normal_info;
     gbuffer_normal_info.imageView = fb.normalView;
@@ -2202,7 +2413,8 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         shadow_gen_set,
         shadow_blur_set,
         voxel_gen_set,
-        voxel_draw_set
+        voxel_draw_set,
+        quad_draw_set
     };
 }
 
@@ -3245,7 +3457,7 @@ Renderer::Renderer(uint32_t gpu_id,
       voxel_draw_(makeVoxelDrawPipeline(dev, pipeline_cache_, render_pass_,
           repeat_sampler_, clamp_sampler_,
           InternalConfig::numFrames)),
-
+      quad_draw_(makeQuadPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames, imgui_render_state_.renderPass)),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
       asset_desc_pool_mat_tx_(dev, object_draw_.shaders, 2, 1),
@@ -3296,8 +3508,11 @@ Renderer::Renderer(uint32_t gpu_id,
                   blur_.descPool.makeSet(),
                   voxel_mesh_gen_.descPool.makeSet(),
                   voxel_draw_.descPool.makeSet(),
+                  quad_draw_.descPool.makeSet(),
                   sky_,
                   br_proto_->getImportedBuffers(i),
+                  br_proto_->getLayeredTarget(i),
+                  br_proto_->getDisplayTexture(i),
                   &frames_[i]);
     }
 }
@@ -4170,7 +4385,12 @@ static void issueShadowBlurPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipe
     }
 }
 
-static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeline, VkCommandBuffer draw_cmd, const ViewerCam &cam, uint32_t view_idx)
+static void issueLightingPass(vk::Device &dev,
+                              Frame &frame, 
+                              Pipeline<1> &pipeline,
+                              VkCommandBuffer draw_cmd,
+                              const ViewerCam &cam,
+                              uint32_t view_idx)
 {
     { // Transition for compute
         array<VkImageMemoryBarrier, 3> compute_prepare {{
@@ -4303,6 +4523,46 @@ static void issueLightingPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipeli
                 0, nullptr, 0, nullptr,
                 compute_prepare.size(), compute_prepare.data());
     }
+}
+
+static void issueQuadDraw(Device &dev,
+                          VkCommandBuffer draw_cmd,
+                          const Frame &frame,
+                          const Pipeline<1> &quad_draw)
+{
+    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, quad_draw.hdls[0]);
+
+    shader::TexturedQuadPushConst push_const {
+        .startPixels = { 1000, 100 },
+        .extentPixels = { 200, 200 },
+        .targetExtent = { frame.fb.colorAttachment.width, frame.fb.colorAttachment.height }
+    };
+
+    dev.dt.cmdPushConstants(draw_cmd, quad_draw.layout,
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_const), &push_const);
+
+    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        quad_draw.layout, 0, 1, &frame.batchOutputQuadSet, 0, nullptr);
+
+    VkViewport viewport {
+        0,
+        0,
+        (float)frame.fb.colorAttachment.width,
+        (float)frame.fb.colorAttachment.height,
+        0.f,
+        1.f,
+    };
+
+    dev.dt.cmdSetViewport(draw_cmd, 0, 1, &viewport);
+
+    VkRect2D scissor {
+        { 0, 0 },
+        { frame.fb.colorAttachment.width, frame.fb.colorAttachment.height },
+    };
+
+    dev.dt.cmdSetScissor(draw_cmd, 0, 1, &scissor);
+
+    dev.dt.cmdDraw(draw_cmd, 4, 1, 0, 0);
 }
 
 static void issueCulling(Device &dev,
@@ -4478,7 +4738,8 @@ void Renderer::render(const ViewerCam &cam,
                              1, &offsets_data_copy);
     }
 
-    br_proto_->renderViews(draw_cmd, {cur_num_views, cur_num_instances, num_worlds_}, loaded_assets_);
+    br_proto_->renderViews(draw_cmd, {cur_num_views, cur_num_instances, num_worlds_}, 
+                           loaded_assets_, cur_frame_, cfg.batchViewIDX);
 
     { // Issue shadow pass
         issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
@@ -4756,6 +5017,10 @@ void Renderer::render(const ViewerCam &cam,
                               VK_SUBPASS_CONTENTS_INLINE);
 
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), draw_cmd);
+
+    { // Draw the quads
+        issueQuadDraw(dev, draw_cmd, frame, quad_draw_);
+    }
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 

@@ -166,6 +166,9 @@ struct Frame {
 
     VkDescriptorSet voxelGenSet;
     VkDescriptorSet voxelDrawSet;
+
+    // Contains a descriptor set for the sampler state and the final rendered output
+    VkDescriptorSet batchOutputQuadSet;
 };
 
 struct ViewerCam {
@@ -260,6 +263,7 @@ public:
     struct FrameConfig {
         uint32_t worldIDX;
         uint32_t viewIDX;
+        uint32_t batchViewIDX;
     };
 
     Renderer(uint32_t gpu_id,
@@ -324,6 +328,7 @@ private:
     Pipeline<1> blur_;
     Pipeline<1> voxel_mesh_gen_;
     Pipeline<1> voxel_draw_;
+    Pipeline<1> quad_draw_;
 
     render::vk::FixedDescriptorPool asset_desc_pool_cull_;
     render::vk::FixedDescriptorPool asset_desc_pool_draw_;
