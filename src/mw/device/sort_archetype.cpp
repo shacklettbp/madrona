@@ -1382,7 +1382,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
 
     // Compute the world sort offsets.
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldOffsets>(
-            data_id, {cur_task}, setup, 0, 1);
+        data_id, {cur_task}, setup, 0, 1);
 
     // Compute the world counts from the sort offsets.
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
