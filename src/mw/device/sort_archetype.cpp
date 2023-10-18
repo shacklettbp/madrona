@@ -1207,8 +1207,9 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
 
 void SortArchetypeNodeBase::resizeTable(int32_t)
 {
+    numDynamicInvocations = bins[(numPasses - 1) * 256 + 255];
     mwGPU::getStateManager()->resizeArchetype(
-        archetypeID, (numDynamicInvocations = bins[(numPasses - 1) * 256 + 255]));
+        archetypeID, numDynamicInvocations);
     ;
 }
 
@@ -1223,17 +1224,20 @@ void SortArchetypeNodeBase::computeWorldOffsets(int32_t invocation_idx)
         keysCol[invocation_idx - 1] != keysCol[invocation_idx]) {
         worldOffsets[keysCol[invocation_idx]] = invocation_idx;
     }
+    numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
 }
 
 void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
 {
+    numDynamicInvocations = bins[(numPasses - 1) * 256 + 255];
     if (invocation_idx == mwGPU::GPUImplConsts::get().numWorlds - 1) {
-        worldCounts[invocation_idx] = numDynamicInvocations - worldOffsets[invocation_idx];
+        worldCounts[invocation_idx] = 
+            numDynamicInvocations - worldOffsets[invocation_idx];
         return;
     }
 
     worldCounts[invocation_idx] = 
-    worldOffsets[invocation_idx + 1] - worldOffsets[invocation_idx];
+        worldOffsets[invocation_idx + 1] - worldOffsets[invocation_idx];
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
@@ -1376,17 +1380,13 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
             data_id, {cur_task}, setup);
     }
 
-    // Compute the sort offsets.
+    // Compute the world sort offsets.
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldOffsets>(
             data_id, {cur_task}, setup, 0, 1);
 
-    // Compute the counts from the sort offsets.
-    // Note that we add the node by explicitly passing a
-    // non-zero fixed_num_invocations parameter to ensure 
-    // that numDynamicInvocations still contains the total 
-    // number of entities. This is useful for computing counts.
+    // Compute the world counts from the sort offsets.
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
-        data_id, { cur_task }, setup, GPUImplConsts::get().numWorlds, 1);
+        data_id, { cur_task }, setup, 0, 1);
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 
