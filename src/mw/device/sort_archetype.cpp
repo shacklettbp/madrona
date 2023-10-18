@@ -1386,7 +1386,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
 
     // Compute the world counts from the sort offsets.
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
-        data_id, { cur_task }, setup, 0, 1);
+        data_id, {cur_task}, setup, 0, 1);
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 
