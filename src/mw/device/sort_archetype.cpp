@@ -958,8 +958,8 @@ SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id,
        sortColumnIndex(col_idx),
        keysCol(keys_col),
        numPasses(num_passes),
-       sortOffsets(sort_offsets),
-       counts(counts)
+       worldOffsets(sort_offsets),
+       worldCounts(counts)
 {}
 
 void SortArchetypeNodeBase::sortSetup(int32_t)
@@ -1208,8 +1208,8 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
 void SortArchetypeNodeBase::resizeTable(int32_t)
 {
     mwGPU::getStateManager()->resizeArchetype(
-        archetypeID, bins[(numPasses - 1) * 256 + 255]);
-    numDynamicInvocations = bins[(numPasses - 1) * 256 + 255];
+        archetypeID, (numDynamicInvocations = bins[(numPasses - 1) * 256 + 255]));
+    ;
 }
 
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
@@ -1217,20 +1217,23 @@ void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
     keysCol[invocation_idx] = keysAlt[invocation_idx];
 }
 
-void SortArchetypeNodeBase::computeOffsets(int32_t invocation_idx)
+void SortArchetypeNodeBase::computeWorldOffsets(int32_t invocation_idx)
 {
-    // The last thread writes its offset to make 
-    // deriving the counts easier in the next step.
-    if (invocation_idx == numDynamicInvocations - 1 ||
-        keysCol[invocation_idx] != keysCol[invocation_idx + 1]) {
-        sortOffsets[keysCol[invocation_idx]] = invocation_idx + 1;
+    if (invocation_idx == 0 ||
+        keysCol[invocation_idx - 1] != keysCol[invocation_idx]) {
+        worldOffsets[keysCol[invocation_idx]] = invocation_idx;
     }
 }
 
-void SortArchetypeNodeBase::computeCounts(int32_t invocation_idx)
+void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
 {
-    counts[invocation_idx] = sortOffsets[invocation_idx] - 
-    (invocation_idx == 0 ? 0 : sortOffsets[invocation_idx - 1]);
+    if (invocation_idx == mwGPU::GPUImplConsts::get().numWorlds - 1) {
+        worldCounts[invocation_idx] = numDynamicInvocations - worldOffsets[invocation_idx];
+        return;
+    }
+
+    worldCounts[invocation_idx] = 
+    worldOffsets[invocation_idx + 1] - worldOffsets[invocation_idx];
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
@@ -1314,8 +1317,8 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     auto keys_col =  (uint32_t *)state_mgr->getArchetypeColumn(
         archetype_id, sort_column_idx);
 
-    int32_t *sort_offsets = state_mgr->getArchetypeSortOffsets(archetype_id);
-    int32_t *counts = state_mgr->getArchetypeCounts(archetype_id);
+    int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets(archetype_id);
+    int32_t *world_counts = state_mgr->getArchetypeWorldCounts(archetype_id);
 
     bool world_sort = component_id == TypeTracker::typeID<WorldID>();
 
@@ -1334,7 +1337,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
 
     auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
         archetype_id, sort_column_idx, keys_col, 
-        num_passes, sort_offsets, counts);
+        num_passes, world_offsets, world_counts);
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
@@ -1374,11 +1377,15 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     }
 
     // Compute the sort offsets.
-    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeOffsets>(
+    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldOffsets>(
             data_id, {cur_task}, setup, 0, 1);
 
     // Compute the counts from the sort offsets.
-    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeCounts>(
+    // Note that we add the node by explicitly passing a
+    // non-zero fixed_num_invocations parameter to ensure 
+    // that numDynamicInvocations still contains the total 
+    // number of entities. This is useful for computing counts.
+    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
         data_id, { cur_task }, setup, GPUImplConsts::get().numWorlds, 1);
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);

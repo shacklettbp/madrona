@@ -180,9 +180,10 @@ void StateManager::iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn)
 }
 
 template<typename Fn, int32_t... Indices>
-void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref, 
+void StateManager::iterateQueryImpl(int32_t world_id, QueryRef *query_ref, 
         Fn&& fn, 
-        std::integer_sequence<int32_t, Indices...>) {
+        std::integer_sequence<int32_t, Indices...>) 
+{
 
     
     uint32_t *query_values = &query_data_[query_ref->offset];
@@ -194,13 +195,13 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref,
 
         Table &tbl = archetypes_[archetype_idx]->tbl;
 
-        int32_t worldSortOffset = world_id == 0 ? 
-            0 : getArchetypeSortOffsets(archetype_idx)[world_id - 1];
+        int32_t worldOffset = 
+            getArchetypeWorldOffsets(archetype_idx)[world_id];
         int32_t worldArchetypeCount =
-            getArchetypeCounts(archetype_idx)[world_id];
+            getArchetypeWorldCounts(archetype_idx)[world_id];
 
         for (int i = 0; i < worldArchetypeCount; ++i) {
-            fn(worldSortOffset + i, tbl.columns[query_values[Indices]] ...);
+            fn(worldOffset + i, tbl.columns[query_values[Indices]] ...);
         }
 
         query_values += sizeof...(Indices);
@@ -208,8 +209,9 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef* query_ref,
 }
 
 template<int32_t num_components, typename Fn>
-void StateManager::iterateQuery(uint32_t world_id, QueryRef* query_ref,
-    Fn&& fn) {
+void StateManager::iterateQuery(uint32_t world_id, QueryRef *query_ref,
+    Fn&& fn) 
+{
 
     using IndicesWrapper =
         std::make_integer_sequence<int32_t, num_components>;
@@ -356,31 +358,31 @@ void * StateManager::getArchetypeComponent(uint32_t archetype_id,
 }
 
 template <typename ArchetypeT>
-int32_t * StateManager::getArchetypeSortOffsets()
+int32_t * StateManager::getArchetypeWorldOffsets()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
 
-    return getArchetypeSortOffsets(archetype_id);
+    return getArchetypeWorldOffsets(archetype_id);
 }
 
-int32_t * StateManager::getArchetypeSortOffsets(uint32_t archetype_id)
+int32_t * StateManager::getArchetypeWorldOffsets(uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
-    return archetype.sortOffsets;
+    return archetype.worldOffsets;
 }
 
 template <typename ArchetypeT>
-int32_t * StateManager::getArchetypeCounts()
+int32_t * StateManager::getArchetypeWorldCounts()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
 
-    return getArchetypeCounts(archetype_id);
+    return getArchetypeWorldCounts(archetype_id);
 }
 
-int32_t * StateManager::getArchetypeCounts(uint32_t archetype_id)
+int32_t * StateManager::getArchetypeWorldCounts(uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
-    return archetype.counts;
+    return archetype.worldCounts;
 }
 
 int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
@@ -412,11 +414,11 @@ void * StateManager::getArchetypeColumn(uint32_t archetype_id,
 }
 
 template <typename ArchetypeT>
-void StateManager::setArchetypeSortOffsets(void *ptr)
+void StateManager::setArchetypeWorldOffsets(void *ptr)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     auto &archetype = *archetypes_[archetype_id];
-    archetype.sortOffsets = (int32_t *)ptr;
+    archetype.worldOffsets = (int32_t *)ptr;
 }
 
 uint32_t StateManager::getArchetypeColumnBytesPerRow(uint32_t archetype_id,

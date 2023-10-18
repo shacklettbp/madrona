@@ -166,8 +166,8 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
       numUserComponents(num_user_components),
       tbl(),
       columnLookup(lookup_input, num_user_components),
-      sortOffsets(nullptr),
-      counts(nullptr),
+      worldOffsets(nullptr),
+      worldCounts(nullptr),
       needsSort(false)
 {
     using namespace mwGPU;
@@ -226,13 +226,13 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
         // Allocate space for the sorting offsets (one offset per world)
         uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
         bytes = alloc->roundUpReservation(bytes);
-        sortOffsets = (int32_t *)alloc->allocMemory(bytes);
+        worldOffsets = (int32_t *)alloc->allocMemory(bytes);
     }
 
     // Allocate space for the counts (one count per world)
     uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
     bytes = alloc->roundUpReservation(bytes);
-    counts = (int32_t*)alloc->allocMemory(bytes);
+    worldCounts = (int32_t *)alloc->allocMemory(bytes);
 
     tbl.maxColumnSize = max_column_size;
 

@@ -80,7 +80,7 @@ public:
     void iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn);
 
     template <int32_t num_components, typename Fn>
-    void iterateQuery(uint32_t world_id, QueryRef* query_ref, Fn&& fn);
+    void iterateQuery(uint32_t world_id, QueryRef *query_ref, Fn&& fn);
 
     inline uint32_t numMatchingEntities(QueryRef *query_ref);
 
@@ -130,17 +130,17 @@ public:
                                      int32_t column_idx);
 
     template <typename ArchetypeT>
-    int32_t * getArchetypeSortOffsets();
+    int32_t * getArchetypeWorldOffsets();
 
-    inline int32_t * getArchetypeSortOffsets(uint32_t archetype_id);
+    inline int32_t * getArchetypeWorldOffsets(uint32_t archetype_id);
 
     template <typename ArchetypeT>
-    int32_t * getArchetypeCounts();
+    int32_t * getArchetypeWorldCounts();
     
-    inline int32_t * getArchetypeCounts(uint32_t archetype_id);
+    inline int32_t * getArchetypeWorldCounts(uint32_t archetype_id);
 
     template <typename ArchetypeT>
-    inline void setArchetypeSortOffsets(void *ptr);
+    inline void setArchetypeWorldOffsets(void *ptr);
 
     inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
                                                   int32_t column_idx);
@@ -232,8 +232,8 @@ private:
         ColumnMap columnLookup;
         
         // The size of this array corresponds to the number of worlds
-        int32_t *sortOffsets;
-        int32_t *counts;
+        int32_t *worldOffsets;
+        int32_t *worldCounts;
 
         bool needsSort;
     };
