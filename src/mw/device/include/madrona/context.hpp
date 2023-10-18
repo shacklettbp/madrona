@@ -56,7 +56,7 @@ public:
     inline Query<ComponentTs...> query();
 
     template <typename... ComponentTs, typename Fn>
-    inline void iterateQuery(Query<ComponentTs...> &query, Fn&& fn);
+    inline void iterateQuery(Query<ComponentTs...> &query, Fn &&fn);
 
 protected:
     WorldBase *data_;

@@ -80,7 +80,7 @@ Query<ComponentTs...> Context::query()
 }
 
 template <typename Fn, typename... ComponentTs>
-inline void Context::iterateQuery(const Query<ComponentTs...>& query, Fn&& fn)
+inline void Context::iterateQuery(const Query<ComponentTs...> &query, Fn &&fn)
 {
     state_mgr_->iterateQuery(MADRONA_MW_COND(cur_world_id_, ) query,
         std::forward<Fn>(fn));

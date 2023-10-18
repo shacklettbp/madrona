@@ -181,7 +181,7 @@ void StateManager::iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn)
 
 template<typename Fn, int32_t... Indices>
 void StateManager::iterateQueryImpl(int32_t world_id, QueryRef *query_ref, 
-        Fn&& fn, 
+        Fn &&fn, 
         std::integer_sequence<int32_t, Indices...>) 
 {
 
@@ -210,7 +210,7 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef *query_ref,
 
 template<int32_t num_components, typename Fn>
 void StateManager::iterateQuery(uint32_t world_id, QueryRef *query_ref,
-    Fn&& fn) 
+    Fn &&fn) 
 {
 
     using IndicesWrapper =

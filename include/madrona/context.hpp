@@ -94,7 +94,7 @@ public:
     // Iterate a query over all entities with the template components,
     // executing the lambda fn for each one.
     template <typename Fn, typename... ComponentTs>
-    inline void iterateQuery(const Query<ComponentTs...>& query, Fn&& fn);
+    inline void iterateQuery(const Query<ComponentTs...> &query, Fn &&fn);
 
 #ifdef MADRONA_MW_MODE
     // Get the current world's ID: [0, numWorlds - 1]

@@ -80,7 +80,7 @@ public:
     void iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn);
 
     template <int32_t num_components, typename Fn>
-    void iterateQuery(uint32_t world_id, QueryRef *query_ref, Fn&& fn);
+    void iterateQuery(uint32_t world_id, QueryRef *query_ref, Fn &&fn);
 
     inline uint32_t numMatchingEntities(QueryRef *query_ref);
 
