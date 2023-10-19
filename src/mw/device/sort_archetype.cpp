@@ -1205,12 +1205,14 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
     agent.Process();
 }
 
-void SortArchetypeNodeBase::resizeTable(int32_t)
+void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)
 {
-    numDynamicInvocations = bins[(numPasses - 1) * 256 + 255];
-    mwGPU::getStateManager()->resizeArchetype(
-        archetypeID, numDynamicInvocations);
-    ;
+    int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
+    mwGPU::getStateManager()->resizeArchetype(archetypeID, numEntities);
+    
+    if (invocation_idx == 0) {
+        numDynamicInvocations = numEntities;
+    }
 }
 
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
@@ -1224,20 +1226,31 @@ void SortArchetypeNodeBase::computeWorldOffsets(int32_t invocation_idx)
         keysCol[invocation_idx - 1] != keysCol[invocation_idx]) {
         worldOffsets[keysCol[invocation_idx]] = invocation_idx;
     }
-    numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
+    
+    if (invocation_idx == 0) {
+        numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
+    }
 }
 
 void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
 {
-    numDynamicInvocations = bins[(numPasses - 1) * 256 + 255];
+
+    int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
+
+    if (invocation_idx == 0) {
+        numDynamicInvocations = numEntities;
+    }
+
     if (invocation_idx == mwGPU::GPUImplConsts::get().numWorlds - 1) {
         worldCounts[invocation_idx] = 
-            numDynamicInvocations - worldOffsets[invocation_idx];
+            numEntities - worldOffsets[invocation_idx];
         return;
     }
 
     worldCounts[invocation_idx] = 
         worldOffsets[invocation_idx + 1] - worldOffsets[invocation_idx];
+
+
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
