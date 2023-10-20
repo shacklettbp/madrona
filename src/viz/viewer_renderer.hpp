@@ -84,6 +84,15 @@ struct Pipeline {
     render::vk::FixedDescriptorPool descPool;
 };
 
+// If we want to be able to get multiple pools
+template <size_t N>
+struct PipelineMP {
+    render::vk::PipelineShaders shaders;
+    VkPipelineLayout layout;
+    std::array<VkPipeline, N> hdls;
+    DynArray<render::vk::FixedDescriptorPool> descPools;
+};
+
 struct Framebuffer {
     render::vk::LocalImage colorAttachment;
     render::vk::LocalImage normalAttachment;

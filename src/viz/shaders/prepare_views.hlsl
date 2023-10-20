@@ -155,6 +155,5 @@ void main(uint3 tid       : SV_DispatchThreadID,
             drawCommandBuffer[draw_id] = draw_cmd;
             drawDataBuffer[draw_id] = draw_data;
         }
-
     }
 }

@@ -7,8 +7,10 @@
 #include "madrona/heap_array.hpp"
 
 #include <array>
+#include <vector>
 #include <filesystem>
 
+#include "vk/descriptors.hpp"
 #include "vk/memory.hpp"
 #include "vulkan/vulkan_core.h"
 
@@ -23,7 +25,7 @@ inline constexpr uint32_t maxDrawsPerLayeredImage = 65536;
 inline constexpr VkFormat colorFormat = VK_FORMAT_R32G32_UINT;
 inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 inline constexpr VkFormat outputColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
-inline constexpr uint32_t numDrawCmdBuffers = 3; // Triple buffering
+inline constexpr uint32_t numDrawCmdBuffers = 4; // Triple buffering
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -140,29 +142,16 @@ static DisplayTexture makeDisplayTexture(uint32_t width,
 // DRAW COMMAND BUFFER CREATION                                               //
 ////////////////////////////////////////////////////////////////////////////////
 struct DrawCommandPackage {
-    // Contains parameters to an actual vulkan draw command
-    vk::LocalBuffer drawCmds;
-    // Contains information about the object being drawn (instance and material)
-    vk::LocalBuffer drawInfos;
+    // Draw cmds and drawdata
+    vk::LocalBuffer drawBuffer;
+
+    // This descriptor set contains draw information
+    VkDescriptorSet drawBufferSetPrepare;
+    VkDescriptorSet drawBufferSetDraw;
+
+    uint32_t drawCmdOffset;
+    uint32_t drawCmdBufferSize;
 };
-
-static HeapArray<vk::LocalBuffer> makeDrawCmdBuffers(uint32_t num_draw_cmd_buffers,
-                                                    const vk::Device &dev,
-                                                    vk::MemoryAllocator &alloc)
-{
-    (void)dev;
-    HeapArray<vk::LocalBuffer> buffers (num_draw_cmd_buffers);
-
-    for (uint32_t i = 0; i < num_draw_cmd_buffers; ++i) {
-        VkDeviceSize buffer_size = sizeof(shader::DrawCmd) * 
-                                   consts::maxDrawsPerLayeredImage;
-
-        buffers.emplace(i, alloc.makeLocalBuffer(buffer_size).value());
-    }
-
-    return buffers;
-}
-
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -250,10 +239,11 @@ static void initCommonDrawPipelineInfo(VkPipelineVertexInputStateCreateInfo &ver
     raster_info.lineWidth = 1.0f;
 }
 
-static Pipeline<1> makeDrawPipeline(const vk::Device &dev,
+static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
                                     VkPipelineCache pipeline_cache,
                                     VkRenderPass render_pass,
-                                    uint32_t num_frames)
+                                    uint32_t num_frames,
+                                    uint32_t num_pools)
 {
     auto shaders = makeDrawShaders(dev, VK_NULL_HANDLE, VK_NULL_HANDLE);
 
@@ -393,13 +383,17 @@ static Pipeline<1> makeDrawPipeline(const vk::Device &dev,
     REQ_VK(dev.dt.createGraphicsPipelines(dev.hdl, pipeline_cache, 1,
                                           &gfx_info, nullptr, &draw_pipeline));
 
-    vk::FixedDescriptorPool desc_pool(dev, shaders, 0, num_frames);
+    // std::array<vk::FixedDescriptorPool, D> desc_pools;
+    DynArray<vk::FixedDescriptorPool> desc_pools(num_pools);
+    for (int i = 0; i < (int)num_pools; ++i) {
+        desc_pools.emplace_back(dev, shaders, i, num_frames);
+    }
 
     return {
         std::move(shaders),
         draw_layout,
         { draw_pipeline },
-        std::move(desc_pool),
+        std::move(desc_pools)
     };
 }
 
@@ -454,13 +448,14 @@ static vk::PipelineShaders makeShadersLighting(const vk::Device &dev,
 }
 
 template <typename T>
-static Pipeline<1> makeComputePipeline(const vk::Device &dev,
-                                       VkPipelineCache pipeline_cache,
-                                       uint32_t push_constant_size,
-                                       uint32_t num_descriptor_sets,
-                                       const char *shader_file,
-                                       const char *func_name = "main",
-                                       T make_shaders_proc = makeShaders)
+static PipelineMP<1> makeComputePipeline(const vk::Device &dev,
+                                            VkPipelineCache pipeline_cache,
+                                            uint32_t num_pools,
+                                            uint32_t push_constant_size,
+                                            uint32_t num_descriptor_sets,
+                                            const char *shader_file,
+                                            const char *func_name = "main",
+                                            T make_shaders_proc = makeShaders)
 {
     vk::PipelineShaders shader = make_shaders_proc(dev, shader_file, func_name);
 
@@ -512,13 +507,16 @@ static Pipeline<1> makeComputePipeline(const vk::Device &dev,
                                          compute_infos.data(), nullptr,
                                          pipelines.data()));
 
-    vk::FixedDescriptorPool desc_pool(dev, shader, 0, num_descriptor_sets);
+    DynArray<vk::FixedDescriptorPool> desc_pools(num_pools);
+    for (int i = 0; i < (int)num_pools; ++i) {
+        desc_pools.emplace_back(dev, shader, i, num_descriptor_sets);
+    }
 
-    return Pipeline<1> {
+    return PipelineMP<1> {
         std::move(shader),
         layout,
         pipelines,
-        std::move(desc_pool),
+        std::move(desc_pools)
     };
 }
 
@@ -531,6 +529,8 @@ struct BatchFrame {
     VkDescriptorSet viewInstanceSetLighting;
 
     HeapArray<LayeredTarget> targets;
+    // Swapchain of draw packages which get used to feed to the rasterizer
+    HeapArray<DrawCommandPackage> drawPackageSwapchain;
 
     // Descriptor set which contains all the vizBuffer outputs and
     // the lighting outputs
@@ -539,12 +539,70 @@ struct BatchFrame {
     DisplayTexture displayTexture;
 };
 
+static DrawCommandPackage makeDrawCommandPackage(vk::Device& dev,
+                          render::vk::MemoryAllocator &alloc,
+                          PipelineMP<1> &prepare_views,
+                          PipelineMP<1> &draw_views)
+{
+    VkDescriptorSet prepare_set = prepare_views.descPools[1].makeSet();
+    VkDescriptorSet draw_set = draw_views.descPools[1].makeSet();
+
+    // Make Draw Buffers
+    int64_t buffer_offsets[2];
+    int64_t buffer_sizes[3] = {
+        (int64_t)sizeof(uint32_t),
+        (int64_t)sizeof(shader::DrawCmd) * consts::maxDrawsPerLayeredImage,
+        (int64_t)sizeof(shader::DrawDataBR) * consts::maxDrawsPerLayeredImage
+    };
+
+    int64_t num_draw_bytes = utils::computeBufferOffsets(
+        buffer_sizes, buffer_offsets, 256);
+
+    vk::LocalBuffer drawBuffer = alloc.makeLocalBuffer(num_draw_bytes).value();
+
+    std::array<VkWriteDescriptorSet, 6> desc_updates;
+
+    VkDescriptorBufferInfo draw_count_info;
+    draw_count_info.buffer = drawBuffer.buffer;
+    draw_count_info.offset = 0;
+    draw_count_info.range = buffer_sizes[0];
+
+    vk::DescHelper::storage(desc_updates[0], prepare_set, &draw_count_info, 0);
+    vk::DescHelper::storage(desc_updates[3], draw_set, &draw_count_info, 0);
+
+    VkDescriptorBufferInfo draw_cmd_info;
+    draw_cmd_info.buffer = drawBuffer.buffer;
+    draw_cmd_info.offset = buffer_offsets[0];
+    draw_cmd_info.range = buffer_sizes[1];
+
+    vk::DescHelper::storage(desc_updates[1], prepare_set, &draw_cmd_info, 1);
+    vk::DescHelper::storage(desc_updates[4], draw_set, &draw_cmd_info, 1);
+
+    VkDescriptorBufferInfo draw_data_info;
+    draw_data_info.buffer = drawBuffer.buffer;
+    draw_data_info.offset = buffer_offsets[1];
+    draw_data_info.range = buffer_sizes[2];
+
+    vk::DescHelper::storage(desc_updates[2], prepare_set, &draw_data_info, 2);
+    vk::DescHelper::storage(desc_updates[5], draw_set, &draw_data_info, 2);
+
+    vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
+
+    return DrawCommandPackage {
+        std::move(drawBuffer),
+        prepare_set,
+        draw_set,
+        (uint32_t)buffer_offsets[0],
+        (uint32_t)num_draw_bytes
+    };
+}
+
 static void makeBatchFrame(vk::Device& dev, 
                            BatchFrame* frame,
                            render::vk::MemoryAllocator &alloc,
                            const BatchRendererProto::Config &cfg,
-                           VkDescriptorSet view_instance_set_prepare,
-                           VkDescriptorSet view_instance_set_draw,
+                           PipelineMP<1> &prepare_views,
+                           PipelineMP<1> &draw,
                            VkDescriptorSet lighting_set
                            /*vk::FixedDescriptorPool& layerPool*/)
 {
@@ -557,6 +615,9 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
+    VkDescriptorSet prepare_views_set = prepare_views.descPools[0].makeSet();
+    VkDescriptorSet draw_views_set = draw.descPools[0].makeSet();
+
     //Descriptor sets
     std::array<VkWriteDescriptorSet, 6> desc_updates;
 
@@ -564,33 +625,39 @@ static void makeBatchFrame(vk::Device& dev,
     view_info.buffer = views.buffer;
     view_info.offset = 0;
     view_info.range = view_size;
-    vk::DescHelper::storage(desc_updates[0], view_instance_set_prepare, &view_info, 0);
-    vk::DescHelper::storage(desc_updates[3], view_instance_set_draw, &view_info, 0);
+    vk::DescHelper::storage(desc_updates[0], prepare_views_set, &view_info, 0);
+    vk::DescHelper::storage(desc_updates[3], draw_views_set, &view_info, 0);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = instances.buffer;
     instance_info.offset = 0;
     instance_info.range = instance_size;
-    vk::DescHelper::storage(desc_updates[1], view_instance_set_prepare, &instance_info, 1);
-    vk::DescHelper::storage(desc_updates[4], view_instance_set_draw, &instance_info, 1);
+    vk::DescHelper::storage(desc_updates[1], prepare_views_set, &instance_info, 1);
+    vk::DescHelper::storage(desc_updates[4], draw_views_set, &instance_info, 1);
 
     VkDescriptorBufferInfo offset_info;
     offset_info.buffer = instance_offsets.buffer;
     offset_info.offset = 0;
     offset_info.range = instance_offset_size;
-    vk::DescHelper::storage(desc_updates[2], view_instance_set_prepare, &offset_info, 2);
-    vk::DescHelper::storage(desc_updates[5], view_instance_set_draw, &offset_info, 2);
+    vk::DescHelper::storage(desc_updates[2], prepare_views_set, &offset_info, 2);
+    vk::DescHelper::storage(desc_updates[5], draw_views_set, &offset_info, 2);
 
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
+    HeapArray<DrawCommandPackage> draw_packages(consts::numDrawCmdBuffers);
+    for (int i = 0; i < (int)consts::numDrawCmdBuffers; ++i) {
+        draw_packages.emplace(i, makeDrawCommandPackage(dev, alloc, prepare_views, draw));
+    }
+
     new (frame) BatchFrame{
         {std::move(views),std::move(instances),std::move(instance_offsets)},
-        view_instance_set_prepare,
-        view_instance_set_draw,
-        view_instance_set_prepare,
+        prepare_views_set,
+        draw_views_set,
+        prepare_views_set,
         makeLayeredTargets(cfg.renderWidth, cfg.renderHeight, 
                            cfg.numWorlds * cfg.maxViewsPerWorld,
                            dev, alloc/*, layerPool*/),
+        std::move(draw_packages),
         lighting_set,
         makeDisplayTexture(cfg.renderWidth, cfg.renderHeight, dev, alloc)
     };
@@ -624,75 +691,6 @@ static void makeBatchFrame(vk::Device& dev,
         vk::DescHelper::update(dev, lighting_desc_updates,
                                frame->targets.size() * 2);
     }
-}
-
-struct ViewBatch {
-    // Draw cmds and drawdata
-    vk::LocalBuffer drawBuffer;
-
-    // This descriptor set contains draw information
-    VkDescriptorSet drawBufferSetPrepare;
-    VkDescriptorSet drawBufferSetDraw;
-
-    uint32_t drawCmdOffset;
-    uint32_t drawCmdBufferSize;
-};
-
-static void makeViewBatch(vk::Device& dev,
-                          ViewBatch* batch,
-                          render::vk::MemoryAllocator &alloc,
-                          VkDescriptorSet draw_buffer_set_prepare,
-                          VkDescriptorSet draw_buffer_set_draw)
-{
-    // Make Draw Buffers
-
-    int64_t buffer_offsets[2];
-    int64_t buffer_sizes[3] = {
-        (int64_t)sizeof(uint32_t),
-        (int64_t)sizeof(shader::DrawCmd) * consts::maxDrawsPerLayeredImage,
-        (int64_t)sizeof(shader::DrawDataBR) * consts::maxDrawsPerLayeredImage
-    };
-
-    int64_t num_draw_bytes = utils::computeBufferOffsets(
-        buffer_sizes, buffer_offsets, 256);
-
-    vk::LocalBuffer drawBuffer = alloc.makeLocalBuffer(num_draw_bytes).value();
-
-    std::array<VkWriteDescriptorSet, 6> desc_updates;
-
-    VkDescriptorBufferInfo draw_count_info;
-    draw_count_info.buffer = drawBuffer.buffer;
-    draw_count_info.offset = 0;
-    draw_count_info.range = buffer_sizes[0];
-
-    vk::DescHelper::storage(desc_updates[0], draw_buffer_set_prepare, &draw_count_info, 0);
-    vk::DescHelper::storage(desc_updates[3], draw_buffer_set_draw, &draw_count_info, 0);
-
-    VkDescriptorBufferInfo draw_cmd_info;
-    draw_cmd_info.buffer = drawBuffer.buffer;
-    draw_cmd_info.offset = buffer_offsets[0];
-    draw_cmd_info.range = buffer_sizes[1];
-
-    vk::DescHelper::storage(desc_updates[1], draw_buffer_set_prepare, &draw_cmd_info, 1);
-    vk::DescHelper::storage(desc_updates[4], draw_buffer_set_draw, &draw_cmd_info, 1);
-
-    VkDescriptorBufferInfo draw_data_info;
-    draw_data_info.buffer = drawBuffer.buffer;
-    draw_data_info.offset = buffer_offsets[1];
-    draw_data_info.range = buffer_sizes[2];
-
-    vk::DescHelper::storage(desc_updates[2], draw_buffer_set_prepare, &draw_data_info, 2);
-    vk::DescHelper::storage(desc_updates[5], draw_buffer_set_draw, &draw_data_info, 2);
-
-    vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
-
-    new (batch) ViewBatch{
-        std::move(drawBuffer),
-        draw_buffer_set_prepare,
-        draw_buffer_set_draw,
-        (uint32_t)buffer_offsets[0],
-        (uint32_t)num_draw_bytes
-    };
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -838,10 +836,10 @@ static void prepareVizBlit(vk::Device &dev,
 }
 
 static void issueRasterization(vk::Device &dev, 
-                               Pipeline<1> &draw_pipeline, 
+                               PipelineMP<1> &draw_pipeline, 
                                LayeredTarget &target,
                                VkCommandBuffer &draw_cmd,
-                               ViewBatch &view_batch,
+                               DrawCommandPackage &view_batch,
                                BatchFrame &batch_frame,
                                VkDescriptorSet asset_set,
                                VkExtent2D render_extent,
@@ -921,7 +919,7 @@ static void issueRasterization(vk::Device &dev,
 }
 
 static void issueDeferred(vk::Device &dev,
-                          Pipeline<1> &pipeline,
+                          PipelineMP<1> &pipeline,
                           LayeredTarget &target,
                           VkCommandBuffer draw_cmd,
                           BatchFrame &batch_frame,
@@ -979,13 +977,10 @@ struct BatchRendererProto::Impl {
     // We use anything from double, triple, or whatever we can buffering to save
     // on memory usage
 
-    Pipeline<1> prepareViews;
-    Pipeline<1> batchDraw;
-    Pipeline<1> createVisualization;
-    Pipeline<1> lighting;
-
-    //One batch is num_layers views at once
-    HeapArray<ViewBatch> viewBatches;
+    PipelineMP<1> prepareViews;
+    PipelineMP<1> batchDraw;
+    PipelineMP<1> createVisualization;
+    PipelineMP<1> lighting;
 
     //One frame is on simulation frame
     HeapArray<BatchFrame> batchFrames;
@@ -1015,18 +1010,17 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
                                VkDescriptorSet asset_set_texture_mat)
     : dev(dev), mem(mem), pipelineCache(pipeline_cache),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
-      prepareViews(makeComputePipeline(dev, pipelineCache, 
+      prepareViews(makeComputePipeline(dev, pipelineCache, 2,
                                        sizeof(shader::PrepareViewPushConstant),
                                        4+consts::numDrawCmdBuffers,
                                        "prepare_views.hlsl", "main", makeShaders)),
-      batchDraw(makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, consts::numDrawCmdBuffers*cfg.numFrames)),
-      createVisualization(makeComputePipeline(dev, pipelineCache,
+      batchDraw(makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, consts::numDrawCmdBuffers*cfg.numFrames, 2)),
+      createVisualization(makeComputePipeline(dev, pipelineCache, 1,
                                               sizeof(uint32_t) * 2,
                                               cfg.numFrames*consts::numDrawCmdBuffers,
                                               "visualize_tris.hlsl", "visualize", makeShaders)),
-      lighting(makeComputePipeline(dev, pipeline_cache, sizeof(shader::DeferredLightingPushConstBR),
+      lighting(makeComputePipeline(dev, pipeline_cache, 1, sizeof(shader::DeferredLightingPushConstBR),
                                    consts::numDrawCmdBuffers * cfg.numFrames,"draw_deferred.hlsl","lighting", makeShadersLighting)),
-      viewBatches(consts::numDrawCmdBuffers),
       batchFrames(cfg.numFrames),
       assetSetPrepare(asset_set_compute),
       assetSetDraw(asset_set_draw),
@@ -1036,16 +1030,11 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
 {
     printf("Num views total: %d\n", maxNumViews);
 
-    for (uint32_t i = 0; i < consts::numDrawCmdBuffers; i++) {
-        makeViewBatch(dev, &viewBatches[i], mem, prepareViews.descPool.makeSet(),
-                                                 batchDraw.descPool.makeSet());
-    }
-
     for (uint32_t i = 0; i < cfg.numFrames; i++) {
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
-                       prepareViews.descPool.makeSet(),
-                       batchDraw.descPool.makeSet(),
-                       lighting.descPool.makeSet());
+                       prepareViews,
+                       batchDraw,
+                       lighting.descPools[0].makeSet());
 
         printf("%p %p\n", (void *)batchFrames[i].displayTexture.tex.image, (void *)batchFrames[i].displayTexture.view);
     }
@@ -1084,9 +1073,9 @@ BatchRendererProto::~BatchRendererProto()
 
 static void issuePrepareViewsPipeline(vk::Device& dev,
                                       VkCommandBuffer& draw_cmd,
-                                      Pipeline<1>& prepare_views,
+                                      PipelineMP<1>& prepare_views,
                                       BatchFrame& frame,
-                                      ViewBatch& batch,
+                                      DrawCommandPackage& batch,
                                       VkDescriptorSet& assetSetPrepareView,
                                       uint32_t num_worlds,
                                       uint32_t num_instances,
@@ -1196,7 +1185,7 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                                   0, nullptr);
 
         for (int i = 0; i < (int)consts::numDrawCmdBuffers; ++i) {
-            impl->dev.dt.cmdFillBuffer(draw_cmd, impl->viewBatches[i].drawBuffer.buffer, 
+            impl->dev.dt.cmdFillBuffer(draw_cmd, frame_data.drawPackageSwapchain[i].drawBuffer.buffer, 
                                        0, sizeof(uint32_t), 0);
         }
     }
@@ -1277,21 +1266,24 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
             issuePrepareViewsPipeline(impl->dev, draw_cmd, 
                                       impl->prepareViews,
                                       frame_data, 
-                                      impl->viewBatches[batch],
+                                      frame_data.drawPackageSwapchain[batch],
                                       impl->assetSetPrepare,
                                       info.numWorlds, 
                                       info.numInstances,
-                                      batch_infos[batch_no].numViews, batch_infos[batch_no].offset,
+                                      batch_infos[batch_no].numViews,
+                                      batch_infos[batch_no].offset,
                                       batch_no);
         }
 
+#if 1
         issueMemoryBarrier(impl->dev, draw_cmd,
                            VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
-                           VK_ACCESS_SHADER_READ_BIT,
+                           VK_ACCESS_MEMORY_READ_BIT,
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                            VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
                                VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+#endif
 
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             int batch_no = batch + iter * consts::numDrawCmdBuffers;
@@ -1301,6 +1293,31 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                                    draw_cmd);
         }
 
+#if 0
+        VkBufferMemoryBarrier draw_cmd_barriers[consts::numDrawCmdBuffers];
+        for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
+            VkBufferMemoryBarrier barrier = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = frame_data.drawPackageSwapchain[batch].drawBuffer.buffer,
+                .offset = 0,
+                .size = VK_WHOLE_SIZE
+            };
+
+            draw_cmd_barriers[batch] = barrier;
+        }
+
+        impl->dev.dt.cmdPipelineBarrier(draw_cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nullptr, cur_num_batches, draw_cmd_barriers, 0, nullptr);
+#endif
+
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             int batch_no = batch + iter * consts::numDrawCmdBuffers;
 
@@ -1309,7 +1326,7 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                                impl->batchDraw,
                                frame_data.targets[batch_no],
                                draw_cmd,
-                               impl->viewBatches[batch],
+                               frame_data.drawPackageSwapchain[batch],
                                frame_data,
                                impl->assetSetDraw,
                                impl->renderExtent,
@@ -1345,7 +1362,7 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                            VK_PIPELINE_STAGE_TRANSFER_BIT);
 
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
-            impl->dev.dt.cmdFillBuffer(draw_cmd, impl->viewBatches[batch].drawBuffer.buffer,
+            impl->dev.dt.cmdFillBuffer(draw_cmd, frame_data.drawPackageSwapchain[batch].drawBuffer.buffer,
                                        0, sizeof(uint32_t), 0);
         }
     }
