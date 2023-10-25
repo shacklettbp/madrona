@@ -135,6 +135,9 @@ Query<ComponentTs...> StateManager::query()
 
     QueryRef *ref = &Query<ComponentTs...>::ref_;
 
+    // If necessary, create the query templated on the passed in ComponentTs.
+    // Double blocks: threads check the atomic here, then additionally
+    // attempt to acquire a SpinLock in StateManager::makeQuery.
     if (ref->numReferences.load_acquire() == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
     }
@@ -146,7 +149,6 @@ template <typename Fn, int32_t... Indices>
 void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
         std::integer_sequence<int32_t, Indices...>)
 {
-
     uint32_t *query_values = &query_data_[query_ref->offset];
     int32_t num_archetypes = query_ref->numMatchingArchetypes;
 
@@ -175,6 +177,48 @@ void StateManager::iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn)
 
     iterateArchetypesRawImpl(query_ref, std::forward<Fn>(fn),
                              IndicesWrapper());
+}
+
+template<typename Fn, int32_t... Indices>
+void StateManager::iterateQueryImpl(int32_t world_id, QueryRef *query_ref, 
+        Fn &&fn, 
+        std::integer_sequence<int32_t, Indices...>) 
+{
+
+    
+    uint32_t *query_values = &query_data_[query_ref->offset];
+    int32_t num_archetypes = query_ref->numMatchingArchetypes;
+
+    for (int i = 0; i < num_archetypes; i++) {
+        uint32_t archetype_idx = *query_values;
+        query_values += 1;
+
+        Table &tbl = archetypes_[archetype_idx]->tbl;
+
+        int32_t worldOffset = 
+            getArchetypeWorldOffsets(archetype_idx)[world_id];
+        int32_t worldArchetypeCount =
+            getArchetypeWorldCounts(archetype_idx)[world_id];
+
+        for (int i = 0; i < worldArchetypeCount; ++i) {
+            fn(worldOffset + i, tbl.columns[query_values[Indices]] ...);
+        }
+
+        query_values += sizeof...(Indices);
+    }
+}
+
+template<int32_t num_components, typename Fn>
+void StateManager::iterateQuery(uint32_t world_id, QueryRef *query_ref,
+    Fn &&fn) 
+{
+
+    using IndicesWrapper =
+        std::make_integer_sequence<int32_t, num_components>;
+
+    iterateQueryImpl(world_id, query_ref, std::forward<Fn>(fn),
+                             IndicesWrapper());
+
 }
 
 uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)
@@ -314,17 +358,31 @@ void * StateManager::getArchetypeComponent(uint32_t archetype_id,
 }
 
 template <typename ArchetypeT>
-int32_t * StateManager::getArchetypeSortOffsets()
+int32_t * StateManager::getArchetypeWorldOffsets()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
 
-    return getArchetypeSortOffsets(archetype_id);
+    return getArchetypeWorldOffsets(archetype_id);
 }
 
-int32_t * StateManager::getArchetypeSortOffsets(uint32_t archetype_id)
+int32_t * StateManager::getArchetypeWorldOffsets(uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
-    return archetype.sortOffsets;
+    return archetype.worldOffsets;
+}
+
+template <typename ArchetypeT>
+int32_t * StateManager::getArchetypeWorldCounts()
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
+    return getArchetypeWorldCounts(archetype_id);
+}
+
+int32_t * StateManager::getArchetypeWorldCounts(uint32_t archetype_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    return archetype.worldCounts;
 }
 
 int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
@@ -356,11 +414,11 @@ void * StateManager::getArchetypeColumn(uint32_t archetype_id,
 }
 
 template <typename ArchetypeT>
-void StateManager::setArchetypeSortOffsets(void *ptr)
+void StateManager::setArchetypeWorldOffsets(void *ptr)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     auto &archetype = *archetypes_[archetype_id];
-    archetype.sortOffsets = (int32_t *)ptr;
+    archetype.worldOffsets = (int32_t *)ptr;
 }
 
 uint32_t StateManager::getArchetypeColumnBytesPerRow(uint32_t archetype_id,

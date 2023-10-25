@@ -328,6 +328,7 @@ Query<ComponentTs...> StateManager::query()
 
     QueryRef *ref = &Query<ComponentTs...>::ref_;
 
+    // If necessary, create the query templated on the passed in ComponentTs.
     if (ref->numReferences.load_acquire() == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
     }
@@ -376,7 +377,7 @@ void StateManager::iterateArchetypesImpl(MADRONA_MW_COND(uint32_t world_id,)
 }
 
 template <typename... ComponentTs, typename Fn>
-void StateManager::iterateEntities(MADRONA_MW_COND(uint32_t world_id,)
+void StateManager::iterateQuery(MADRONA_MW_COND(uint32_t world_id,)
                                    const Query<ComponentTs...> &query, Fn &&fn)
 {
     iterateArchetypes(MADRONA_MW_COND(world_id,) query, 

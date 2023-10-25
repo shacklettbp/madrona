@@ -166,7 +166,7 @@ public:
                                   const Query<ComponentTs...> &query, Fn &&fn);
 
     template <typename... ComponentTs, typename Fn>
-    inline void iterateEntities(MADRONA_MW_COND(uint32_t world_id,)
+    inline void iterateQuery(MADRONA_MW_COND(uint32_t world_id,)
                                 const Query<ComponentTs...> &query, Fn &&fn);
 
     Transaction makeTransaction();
