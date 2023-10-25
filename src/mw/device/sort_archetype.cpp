@@ -1210,9 +1210,7 @@ void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)
     int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
     mwGPU::getStateManager()->resizeArchetype(archetypeID, numEntities);
     
-    if (invocation_idx == 0) {
-        numDynamicInvocations = numEntities;
-    }
+    numDynamicInvocations = numEntities;
 }
 
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
