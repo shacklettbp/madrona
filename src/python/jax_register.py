@@ -62,7 +62,7 @@ def step_func(sim_data):
     flattened_in.append(sim_data['dones'])
 
     if 'policy_assignments' in sim_iface_shapes:
-        flattened_in.append(sim_iface_shapes['policy_assignments'])
+        flattened_in.append(sim_data['policy_assignments'])
 
     for k in sim_iface_shapes['obs'].keys():
         flattened_in.append(sim_data['obs'][k])
