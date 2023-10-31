@@ -215,11 +215,13 @@ LocalImage::LocalImage(uint32_t w,
                        uint32_t h,
                        uint32_t mip_levels,
                        VkImage img,
+                       VkMemoryRequirements reqs,
                        AllocDeleter<false> deleter)
     : width(w),
       height(h),
       mipLevels(mip_levels),
       image(img),
+      reqs(reqs),
       deleter_(deleter)
 {}
 
@@ -228,6 +230,7 @@ LocalImage::LocalImage(LocalImage &&o)
       height(o.height),
       mipLevels(o.mipLevels),
       image(o.image),
+      reqs(o.reqs),
       deleter_(o.deleter_)
 {
     o.deleter_.clear();
@@ -858,7 +861,7 @@ LocalImage MemoryAllocator::makeDedicatedImage(uint32_t width,
     REQ_VK(dev.dt.allocateMemory(dev.hdl, &alloc, nullptr, &memory));
     REQ_VK(dev.dt.bindImageMemory(dev.hdl, img, memory, 0));
 
-    return LocalImage(width, height, mip_levels, img,
+    return LocalImage(width, height, mip_levels, img, reqs,
                       AllocDeleter<false>(memory, *this));
 }
 
@@ -888,7 +891,7 @@ LocalImage MemoryAllocator::makeDedicatedImage(uint32_t width,
     REQ_VK(dev.dt.allocateMemory(dev.hdl, &alloc, nullptr, &memory));
     REQ_VK(dev.dt.bindImageMemory(dev.hdl, img, memory, 0));
 
-    return LocalImage(width, height, mip_levels, img,
+    return LocalImage(width, height, mip_levels, img, reqs,
                       AllocDeleter<false>(memory, *this));
 }
 

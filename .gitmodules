@@ -34,3 +34,6 @@
 [submodule "external/tinyusdz"]
 	path = external/tinyusdz
 	url = https://github.com/syoyo/tinyusdz.git
+[submodule "external/stb"]
+	path = external/stb
+	url = https://github.com/nothings/stb.git

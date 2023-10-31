@@ -241,6 +241,8 @@ public:
     struct FrameConfig {
         uint32_t worldIDX;
         uint32_t viewIDX;
+        bool requestedScreenshot;
+        const char *screenshotFilePath;
     };
 
     Renderer(uint32_t gpu_id,
@@ -330,6 +332,8 @@ private:
 
     DynArray<MaterialTexture> material_textures_;
     VoxelConfig voxel_config_;
+
+    std::unique_ptr<render::vk::HostBuffer> screenshot_buffer_;
 };
 
 }

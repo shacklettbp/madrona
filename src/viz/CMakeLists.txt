@@ -20,6 +20,7 @@ if (NOT TARGET glfw)
 endif()
 
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/imgui")
+set(STB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/stb")
 
 add_library(imgui_impl STATIC
     ${IMGUI_DIR}/imgui.cpp
@@ -46,6 +47,7 @@ target_link_libraries(imgui_impl PRIVATE
 add_library(madrona_viewer STATIC
     ${MADRONA_INC_DIR}/viz/viewer.hpp viewer.cpp
     viewer_renderer.hpp viewer_renderer.cpp
+    image_util.cpp
 )
 
 target_link_libraries(madrona_viewer PRIVATE
@@ -58,6 +60,10 @@ target_link_libraries(madrona_viewer PRIVATE
     imgui
     imgui_impl
     glfw
+)
+
+target_include_directories(madrona_viewer PRIVATE
+    ${STB_DIR}
 )
 
 if (TARGET madrona_render_vk_cuda)

@@ -204,6 +204,14 @@ static void cfgUI(Renderer::FrameConfig &cfg,
 {
     ImGui::Begin("Controls");
 
+    ImGui::TextUnformatted("Utilities");
+    bool requested_screenshot = ImGui::Button("Take Screenshot");
+    static char output_file_path[256] = "screenshot.bmp";
+    ImGui::InputText("Screenshot Output File (.bmp)", output_file_path, 256);
+
+    cfg.requestedScreenshot = requested_screenshot;
+    cfg.screenshotFilePath = output_file_path;
+
     ImGui::TextUnformatted("Simulation Settings");
     ImGui::Separator();
 
