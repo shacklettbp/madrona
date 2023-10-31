@@ -29,7 +29,8 @@ StructuredBuffer<PackedVertex> vertexDataBuffer;
 StructuredBuffer<MeshData> meshDataBuffer;
 
 struct V2F {
-    [[vk::location(0)]] uint instanceID : TEXCOORD1;
+    [[vk::location(0)]] uint instanceID : TEXCOORD0;
+    [[vk::location(1)]] uint indexOffset : TEXCOORD1;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -192,6 +193,8 @@ float4 vert(in uint vid : SV_VertexID,
                      min(0, drawCommandBuffer[0].vertexOffset) +
                      min(0, int(ceil(meshDataBuffer[0].vertexOffset)));
 
+    v2f.indexOffset = draw_data.indexOffset;
+
     return clip_pos;
 }
 
@@ -219,7 +222,9 @@ PixelOutput frag(in V2F v2f,
 {
     PixelOutput output;
 
-    output.ids = uint2(prim_id, v2f.instanceID);
+    uint index_start = prim_id * 3 + v2f.indexOffset;
+
+    output.ids = uint2(index_start, v2f.instanceID);
     return output;
 }
 

@@ -198,7 +198,7 @@ struct DrawDataBR {
     uint instanceID;
     uint viewID;
     uint layerID;
-    uint vertexOffset;
+    uint indexOffset;
 };
 
 struct DrawCmd {

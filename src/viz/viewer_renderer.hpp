@@ -195,6 +195,9 @@ struct ViewerCam {
 struct AssetData {
     render::vk::LocalBuffer buf;
     uint32_t idxBufferOffset;
+
+    // This is a descriptor set which just contains the buffer
+    VkDescriptorSet indexBufferSet;
 };
 
 struct EngineInterop {
@@ -368,6 +371,9 @@ private:
     int gpu_id_;
     uint32_t num_worlds_;
     std::unique_ptr<BatchRendererProto> br_proto_;
+
+    VkDescriptorSetLayout asset_layout_;
+    VkDescriptorPool asset_pool_;
 };
 
 }

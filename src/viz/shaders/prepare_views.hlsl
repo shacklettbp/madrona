@@ -150,7 +150,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
             draw_data.viewID = sm.viewIdx;
             draw_data.instanceID =  current_instance_idx;
             draw_data.layerID = gid.x;
-            draw_data.vertexOffset = draw_cmd.vertexOffset;
+            draw_data.indexOffset = mesh.indexOffset;
 
             drawCommandBuffer[draw_id] = draw_cmd;
             drawDataBuffer[draw_id] = draw_data;

@@ -13,29 +13,32 @@ RWTexture2DArray<uint2> vizBuffer[];
 [[vk::binding(1, 0)]]
 RWTexture2DArray<float4> outputBuffer[];
 
-#if 0
-// Instances and views
 [[vk::binding(0, 1)]]
+StructuredBuffer<uint> indexBuffer;
+
+#if 1
+// Instances and views
+[[vk::binding(0, 2)]]
 StructuredBuffer<PackedViewData> viewDataBuffer;
 
-[[vk::binding(1, 1)]]
+[[vk::binding(1, 2)]]
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 
-[[vk::binding(2, 1)]]
+[[vk::binding(2, 2)]]
 StructuredBuffer<uint32_t> instanceOffsets;
 
 // Asset descriptor bindings
-[[vk::binding(0, 2)]]
+[[vk::binding(0, 3)]]
 StructuredBuffer<PackedVertex> vertexDataBuffer;
 
-[[vk::binding(1, 2)]]
+[[vk::binding(1, 3)]]
 StructuredBuffer<MeshData> meshDataBuffer;
 
 // Texture descriptor bindings
-[[vk::binding(0, 3)]]
+[[vk::binding(0, 4)]]
 Texture2D<float4> materialTexturesArray[];
 
-[[vk::binding(1, 3)]]
+[[vk::binding(1, 4)]]
 SamplerState linearSampler;
 #endif
 
@@ -98,6 +101,24 @@ float4 intToColor(uint inCol)
     return float4(r,g,b,255.0)/255.0;
 }
 
+struct VertexData {
+    float2 screen_xy;
+    float3 pos;
+    float3 normal;
+    float3 col;
+    float2 uv;
+};
+
+void computeCompositeTransform(float3 obj_t,
+                               float4 obj_r,
+                               float3 cam_t,
+                               float4 cam_r_inv,
+                               out float3 to_view_translation,
+                               out float4 to_view_rotation)
+{
+    to_view_translation = rotateVec(cam_r_inv, obj_t - cam_t);
+    to_view_rotation = normalize(composeQuats(cam_r_inv, obj_r));
+}
 
 // idx.x is the x coordinate of the image
 // idx.y is the y coordinate of the image
@@ -119,8 +140,50 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
     uint2 ids = vizBuffer[pushConst.imageIndex][target_pixel];
 
-    uint triangle_id = ids.x;
+    uint index_start = ids.x;
     uint instance_id = ids.y;
+
+    EngineInstanceData instance_data = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
+
+    // This is the interpolated vertex information at the pixel that the given thread is on
+    VertexData vertices[3];
+
+    VertexData interpolated_data;
+    float3 bc_coords;
+
+    for (int i = 0; i < 3; ++i) {
+        uint vertex_idx = indexBuffer[index_start + i];
+        PackedVertexData packed = vertexDataBuffer[vertex_idx];
+        Vertex vertex = unpackVertex(packed);
+
+        float3 to_view_translation;
+        float4 to_view_rotation;
+        computeCompositeTransform(instance_data.position, instance_data.rotation,
+            view_data.pos, view_data.rot,
+            to_view_translation, to_view_rotation);
+
+        float3 view_pos =
+            rotateVec(to_view_rotation, instance_data.scale * vert.position) +
+                to_view_translation;
+
+        float4 clip_pos = float4(
+            view_data.xScale * view_pos.x,
+            view_data.yScale * view_pos.z,
+            view_data.zNear,
+            view_pos.y);
+        clip_pos /= clip_pos.w;
+
+        vertices[i].screen_xy = clip_pos.xy;
+        vertices[i].pos = view_pos;
+        vertices[i].normal = normalize(rotateVec(to_view_rotation, rotateVec(instance_data.rotation, (vertex.normal/instance_data.scale))));
+        struct VertexData {
+            float2 screen_xy;
+            float3 pos;
+            float3 normal;
+            float3 col;
+            float2 uv;
+        };
+    }
 
 #if 0
     EngineInstanceData instanceData = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
@@ -135,7 +198,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
                           linearSampler, float2(0,0), 0).x));
 #endif
 
-    uint h = hash(triangle_id) + hash(instance_id);
+    uint h = hash(index_start) + hash(instance_id);
     float4 out_color = intToColor(h);
 
     outputBuffer[pushConst.imageIndex][target_pixel] = out_color;

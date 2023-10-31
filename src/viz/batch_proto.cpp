@@ -926,7 +926,8 @@ static void issueDeferred(vk::Device &dev,
                           VkDescriptorSet asset_set,
                           VkDescriptorSet asset_mat_tex_set,
                           uint32_t num_views,
-                          uint32_t image_idx) 
+                          uint32_t image_idx,
+                          VkDescriptorSet index_buffer_set) 
 {
     // The output buffer has been transitioned to general at the start of the frame.
     // The viz buffers have been transitioned to general before this happens.
@@ -942,6 +943,7 @@ static void issueDeferred(vk::Device &dev,
 
     std::array draw_descriptors = {
             batch_frame.targetsSetLighting,
+            index_buffer_set
 #if 0
             batch_frame.viewInstanceSetLighting,
             asset_set,
@@ -1350,7 +1352,8 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                           frame_data,
                           impl->assetSetPrepare,
                           impl->assetSetTextureMat,
-                          num_views, batch_no);
+                          num_views, batch_no,
+                          loaded_assets[0].indexBufferSet);
         }
 
         issueMemoryBarrier(impl->dev, draw_cmd,

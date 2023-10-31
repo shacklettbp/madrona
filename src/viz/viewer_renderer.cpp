@@ -11,6 +11,7 @@
 #include "vk/descriptors.hpp"
 
 #include "batch_proto.hpp"
+#include "vulkan/vulkan_core.h"
 
 #include <filesystem>
 
@@ -3481,6 +3482,37 @@ Renderer::Renderer(uint32_t gpu_id,
       gpu_id_(gpu_id),
       num_worlds_(num_worlds)
 {
+    {
+        VkDescriptorPoolSize pool_sizes[] = {
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 },
+        };
+        VkDescriptorPoolCreateInfo pool_info = {};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        pool_info.maxSets = 10;
+        pool_info.poolSizeCount = 1;
+        pool_info.pPoolSizes = pool_sizes;
+        REQ_VK(dev.dt.createDescriptorPool(dev.hdl,
+            &pool_info, nullptr, &asset_pool_));
+    }
+
+    {
+        VkDescriptorSetLayoutBinding binding = {
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_ALL
+        };
+
+        VkDescriptorSetLayoutCreateInfo info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = 1,
+            .pBindings = &binding
+        };
+
+        dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_layout_);
+    }
+
     BatchRendererProto::Config br_cfg = {
          (int)gpu_id, 
          64,
@@ -3951,8 +3983,19 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
 
     gpu_run.submit(dev);
 
-    // std::array<VkWriteDescriptorSet, 5> desc_updates;
-    DynArray<VkWriteDescriptorSet> desc_updates(4 + (material_textures_.size() > 0 ? 1 : 0));
+    VkDescriptorSet index_buffer_set;
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = asset_pool_,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &asset_layout_
+        };
+
+        dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &index_buffer_set);
+    }
+
+    DynArray<VkWriteDescriptorSet> desc_updates(5 + (material_textures_.size() > 0 ? 1 : 0));
 
     VkDescriptorBufferInfo obj_info;
     obj_info.buffer = asset_buffer.buffer;
@@ -3986,6 +4029,14 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     desc_updates.push_back({});
     DescHelper::storage(desc_updates[3], asset_set_draw_, &mat_info, 1);
 
+    VkDescriptorBufferInfo index_set_info;
+    index_set_info.buffer = asset_buffer.buffer;
+    index_set_info.offset = buffer_offsets[2];
+    index_set_info.range = buffer_offsets[3] - buffer_offsets[2];
+
+    desc_updates.push_back({});
+    DescHelper::storage(desc_updates[4], index_buffer_set, &index_set_info, 0);
+
     material_textures_ = loadTextures(dev, alloc, render_queue_, textures);
 
     DynArray<VkDescriptorImageInfo> tx_infos(material_textures_.size()+1);
@@ -4008,6 +4059,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     AssetData asset_data {
         std::move(asset_buffer),
         (uint32_t)buffer_offsets[2],
+        index_buffer_set
     };
 
     loaded_assets_.emplace_back(std::move(asset_data));
