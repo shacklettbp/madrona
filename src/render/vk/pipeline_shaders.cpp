@@ -63,7 +63,8 @@ PipelineShaders::PipelineShaders(
         const Device &d,
         StackAlloc &tmp_alloc,
         Span<const SPIRVShader> shaders,
-        Span<const BindingOverride> binding_overrides)
+        Span<const BindingOverride> binding_overrides,
+        VkShaderStageFlags extra_stages)
     : dev(d),
       shaders_(),
       layouts_(),
@@ -185,7 +186,7 @@ PipelineShaders::PipelineShaders(
                 binding_info.binding = rfl_binding.id;
                 binding_info.descriptorType = binding_desc_type;
                 binding_info.descriptorCount = rfl_binding.numResources;
-                binding_info.stageFlags = binding_stage_flags;
+                binding_info.stageFlags = binding_stage_flags | extra_stages;
                 binding_info.pImmutableSamplers = nullptr;
             }
         }

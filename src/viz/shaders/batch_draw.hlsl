@@ -180,13 +180,6 @@ float4 vert(in uint vid : SV_VertexID,
         view_data.zNear,
         view_pos.y);
 
-#if 0
-    clip_pos.x += float(min(0, instanceOffsets[0])) +
-                  float(min(0, drawCount[0])) +
-                  float(min(0, drawCommandBuffer[0].vertexOffset)) +
-                  float(min(0, meshDataBuffer[0].vertexOffset))
-#endif
-
     v2f.instanceID = draw_data.instanceID +
                      min(0, instanceOffsets[0]) +
                      min(0, drawCount[0]) +
@@ -198,23 +191,9 @@ float4 vert(in uint vid : SV_VertexID,
     return clip_pos;
 }
 
-#if 0
 struct PixelOutput {
     uint2 ids : SV_Target0;
 };
-#endif
-
-struct PixelOutput {
-    // float4 color : SV_Target0;
-    uint2 ids : SV_Target0;
-};
-
-float3 rnd(float i) 
-{
-	return float3(fmod(4000.*sin(23464.345*i+45.345),1.),
-                  fmod(4000.*cos(23464.345*i+45.345),1.),
-                  fmod(2000.*cos(234.345*i+65.345),0.5));
-}
 
 [shader("pixel")]
 PixelOutput frag(in V2F v2f,
@@ -227,33 +206,3 @@ PixelOutput frag(in V2F v2f,
     output.ids = uint2(index_start, v2f.instanceID);
     return output;
 }
-
-#if 0
-DrawInstanceData unpackDrawInstanceData(PackedDrawInstanceData data)
-{
-    const float4 d0 = data.packed[0];
-    const float4 d1 = data.packed[1];
-    const float4 d2 = data.packed[2];
-    const float4 d3 = data.packed[3];
-    const float4 d4 = data.packed[4];
-
-    DrawInstanceData out;
-
-    float3 rot_col0 = d0.xyz;
-    float3 rot_col1 = float3(d0.w, d1.xy);
-    float3 rot_col2 = float3(d1.zw, d2.x);
-
-    out.toViewRot = float3x3(
-        float3(rot_col0.x, rot_col1.x, rot_col2.x),
-        float3(rot_col0.y, rot_col1.y, rot_col2.y),
-        float3(rot_col0.z, rot_col1.z, rot_col2.z),
-    );
-    out.toViewTranslation = d2.yzw;
-    out.objScale = d3.xyz;
-    out.viewIdx = asint(d3.w);
-    out.projScale = d4.xy;
-    out.projZNear = d4.z;
-
-    return out;
-}
-#endif

@@ -403,7 +403,8 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
 
 static vk::PipelineShaders makeShaders(const vk::Device &dev,
                                        const char *shader_file,
-                                       const char *func_name = "main")
+                                       const char *func_name = "main",
+                                       VkSampler sampler = VK_NULL_HANDLE)
 {
     std::filesystem::path shader_dir =
         std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
@@ -421,7 +422,8 @@ static vk::PipelineShaders makeShaders(const vk::Device &dev,
 
 static vk::PipelineShaders makeShadersLighting(const vk::Device &dev,
                                        const char *shader_file,
-                                       const char *func_name = "main")
+                                       const char *func_name = "main",
+                                       VkSampler repeat_sampler = VK_NULL_HANDLE)
 {
     std::filesystem::path shader_dir =
         std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
@@ -443,6 +445,13 @@ static vk::PipelineShaders makeShadersLighting(const vk::Device &dev,
                                    vk::BindingOverride{
                                        0, 1, VK_NULL_HANDLE,
                                        100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+                                   },
+                                   vk::BindingOverride{
+                                       4, 0, VK_NULL_HANDLE,
+                                       InternalConfig::maxTextures, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+                                   },
+                                   vk::BindingOverride{
+                                       4, 1, repeat_sampler, 1, 0
                                    }
                                    }));
 }
@@ -453,11 +462,12 @@ static PipelineMP<1> makeComputePipeline(const vk::Device &dev,
                                             uint32_t num_pools,
                                             uint32_t push_constant_size,
                                             uint32_t num_descriptor_sets,
+                                            VkSampler repeat_sampler,
                                             const char *shader_file,
                                             const char *func_name = "main",
                                             T make_shaders_proc = makeShaders)
 {
-    vk::PipelineShaders shader = make_shaders_proc(dev, shader_file, func_name);
+    vk::PipelineShaders shader = make_shaders_proc(dev, shader_file, func_name, repeat_sampler);
 
     VkPushConstantRange push_const = {
         .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -943,8 +953,8 @@ static void issueDeferred(vk::Device &dev,
 
     std::array draw_descriptors = {
             batch_frame.targetsSetLighting,
-            index_buffer_set
-#if 0
+            index_buffer_set,
+#if 1
             batch_frame.viewInstanceSetLighting,
             asset_set,
             asset_mat_tex_set
@@ -1000,7 +1010,8 @@ struct BatchRendererProto::Impl {
 
     Impl(const Config &cfg, vk::Device &dev, vk::MemoryAllocator &mem, 
          VkPipelineCache cache, VkDescriptorSet asset_set_comp, 
-         VkDescriptorSet asset_set_draw, VkDescriptorSet asset_set_lighting);
+         VkDescriptorSet asset_set_draw, VkDescriptorSet asset_set_lighting,
+         VkSampler repeat_sampler);
 };
 
 BatchRendererProto::Impl::Impl(const Config &cfg,
@@ -1009,20 +1020,22 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
                                VkPipelineCache pipeline_cache, 
                                VkDescriptorSet asset_set_compute,
                                VkDescriptorSet asset_set_draw,
-                               VkDescriptorSet asset_set_texture_mat)
+                               VkDescriptorSet asset_set_texture_mat,
+                               VkSampler repeat_sampler)
     : dev(dev), mem(mem), pipelineCache(pipeline_cache),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
       prepareViews(makeComputePipeline(dev, pipelineCache, 2,
                                        sizeof(shader::PrepareViewPushConstant),
-                                       4+consts::numDrawCmdBuffers,
+                                       4+consts::numDrawCmdBuffers, repeat_sampler,
                                        "prepare_views.hlsl", "main", makeShaders)),
       batchDraw(makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, consts::numDrawCmdBuffers*cfg.numFrames, 2)),
       createVisualization(makeComputePipeline(dev, pipelineCache, 1,
                                               sizeof(uint32_t) * 2,
-                                              cfg.numFrames*consts::numDrawCmdBuffers,
+                                              cfg.numFrames*consts::numDrawCmdBuffers, repeat_sampler,
                                               "visualize_tris.hlsl", "visualize", makeShaders)),
       lighting(makeComputePipeline(dev, pipeline_cache, 1, sizeof(shader::DeferredLightingPushConstBR),
-                                   consts::numDrawCmdBuffers * cfg.numFrames,"draw_deferred.hlsl","lighting", makeShadersLighting)),
+                                   consts::numDrawCmdBuffers * cfg.numFrames, repeat_sampler, 
+                                   "draw_deferred.hlsl","lighting", makeShadersLighting)),
       batchFrames(cfg.numFrames),
       assetSetPrepare(asset_set_compute),
       assetSetDraw(asset_set_draw),
@@ -1048,9 +1061,10 @@ BatchRendererProto::BatchRendererProto(const Config &cfg,
                                        VkPipelineCache pipeline_cache,
                                        VkDescriptorSet asset_set_compute,
                                        VkDescriptorSet asset_set_draw,
-                                       VkDescriptorSet asset_set_texture_mat)
+                                       VkDescriptorSet asset_set_texture_mat,
+                                       VkSampler sampler)
     : impl(std::make_unique<Impl>(cfg, dev, mem, pipeline_cache, 
-                                  asset_set_compute, asset_set_draw, asset_set_texture_mat))
+                                  asset_set_compute, asset_set_draw, asset_set_texture_mat, sampler))
 {
 }
 

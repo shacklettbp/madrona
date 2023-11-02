@@ -71,7 +71,8 @@ struct BatchRendererProto {
         VkPipelineCache pipeline_cache,
         VkDescriptorSet asset_set_compute,
         VkDescriptorSet asset_set_draw,
-        VkDescriptorSet asset_set_texture_mat);
+        VkDescriptorSet asset_set_texture_mat,
+        VkSampler repeat_sampler);
 
     ~BatchRendererProto();
     void importCudaData(VkCommandBuffer);

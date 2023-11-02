@@ -42,7 +42,8 @@ public:
     PipelineShaders(const Device &dev,
                     StackAlloc &tmp_alloc,
                     Span<const SPIRVShader> shaders,
-                    Span<const BindingOverride> binding_overrides);
+                    Span<const BindingOverride> binding_overrides,
+                    VkShaderStageFlags extra_stages = 0);
     PipelineShaders(const PipelineShaders &) = delete;
     PipelineShaders(PipelineShaders &&) = default;
     ~PipelineShaders();

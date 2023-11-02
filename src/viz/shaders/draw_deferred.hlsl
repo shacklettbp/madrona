@@ -102,12 +102,32 @@ float4 intToColor(uint inCol)
 }
 
 struct VertexData {
-    float2 screen_xy;
+    float4 postMvp;
     float3 pos;
     float3 normal;
     float3 col;
     float2 uv;
 };
+
+float3 rotateVec(float4 q, float3 v)
+{
+    float3 pure = q.xyz;
+    float scalar = q.w;
+    
+    float3 pure_x_v = cross(pure, v);
+    float3 pure_x_pure_x_v = cross(pure, pure_x_v);
+    
+    return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
+}
+
+float4 composeQuats(float4 a, float4 b)
+{
+    return float4(
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z);
+}
 
 void computeCompositeTransform(float3 obj_t,
                                float4 obj_r,
@@ -118,6 +138,54 @@ void computeCompositeTransform(float3 obj_t,
 {
     to_view_translation = rotateVec(cam_r_inv, obj_t - cam_t);
     to_view_rotation = normalize(composeQuats(cam_r_inv, obj_r));
+}
+
+struct BarycentricDeriv
+{
+    float3 m_lambda;
+    float3 m_ddx;
+    float3 m_ddy;
+};
+
+BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNdc, float2 winSize)
+{
+    BarycentricDeriv ret = (BarycentricDeriv)0;
+
+    float3 invW = rcp(float3(pt0.w, pt1.w, pt2.w));
+
+    float2 ndc0 = pt0.xy * invW.x;
+    float2 ndc1 = pt1.xy * invW.y;
+    float2 ndc2 = pt2.xy * invW.z;
+
+    float invDet = rcp(determinant(float2x2(ndc2 - ndc1, ndc0 - ndc1)));
+    ret.m_ddx = float3(ndc1.y - ndc2.y, ndc2.y - ndc0.y, ndc0.y - ndc1.y) * invDet * invW;
+    ret.m_ddy = float3(ndc2.x - ndc1.x, ndc0.x - ndc2.x, ndc1.x - ndc0.x) * invDet * invW;
+    float ddxSum = dot(ret.m_ddx, float3(1,1,1));
+    float ddySum = dot(ret.m_ddy, float3(1,1,1));
+
+    float2 deltaVec = pixelNdc - ndc0;
+    float interpInvW = invW.x + deltaVec.x*ddxSum + deltaVec.y*ddySum;
+    float interpW = rcp(interpInvW);
+
+    ret.m_lambda.x = interpW * (invW[0] + deltaVec.x*ret.m_ddx.x + deltaVec.y*ret.m_ddy.x);
+    ret.m_lambda.y = interpW * (0.0f    + deltaVec.x*ret.m_ddx.y + deltaVec.y*ret.m_ddy.y);
+    ret.m_lambda.z = interpW * (0.0f    + deltaVec.x*ret.m_ddx.z + deltaVec.y*ret.m_ddy.z);
+
+    ret.m_ddx *= (2.0f/winSize.x);
+    ret.m_ddy *= (2.0f/winSize.y);
+    ddxSum    *= (2.0f/winSize.x);
+    ddySum    *= (2.0f/winSize.y);
+
+    ret.m_ddy *= -1.0f;
+    ddySum    *= -1.0f;
+
+    float interpW_ddx = 1.0f / (interpInvW + ddxSum);
+    float interpW_ddy = 1.0f / (interpInvW + ddySum);
+
+    ret.m_ddx = interpW_ddx*(ret.m_lambda*interpInvW + ret.m_ddx) - ret.m_lambda;
+    ret.m_ddy = interpW_ddy*(ret.m_lambda*interpInvW + ret.m_ddy) - ret.m_lambda;  
+
+    return ret;
 }
 
 // idx.x is the x coordinate of the image
@@ -137,6 +205,11 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
     uint layer_idx = idx.z;
     uint3 target_pixel = uint3(idx.x, idx.y, layer_idx);
+
+    float2 target_pixel_clip = (float2(float(target_pixel.x) + 0.5f,
+                                       float(target_pixel.y) + 0.5f) /
+                                            float2(target_dim.x, target_dim.y));
+    target_pixel_clip = target_pixel_clip * 2.0f - float2(1.0f, 1.0f);
 
     uint2 ids = vizBuffer[pushConst.imageIndex][target_pixel];
 
@@ -171,35 +244,31 @@ void lighting(uint3 idx : SV_DispatchThreadID)
             view_data.yScale * view_pos.z,
             view_data.zNear,
             view_pos.y);
-        clip_pos /= clip_pos.w;
 
-        vertices[i].screen_xy = clip_pos.xy;
+        vertices[i].postMvp = clip_pos;
         vertices[i].pos = view_pos;
         vertices[i].normal = normalize(rotateVec(to_view_rotation, rotateVec(instance_data.rotation, (vertex.normal/instance_data.scale))));
-        struct VertexData {
-            float2 screen_xy;
-            float3 pos;
-            float3 normal;
-            float3 col;
-            float2 uv;
-        };
+        vertices[i].uv = vertex.uv;
     }
 
 #if 0
     EngineInstanceData instanceData = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
-    Vertex vert = unpackVertex(vertexDataBuffer[triangle_id]);
+    Vertex vert = unpackVertex(vertexDataBuffer[index_start*3]);
 
+#if 1
     uint zero_dummy = min(asint(viewDataBuffer[0].data[2].w), 0) +
-                      min(asint(instanceData.worldID), 0) +
-                      instanceOffsets[0] +
-                      min(uint(abs(vert.normal.x)), 0) +
+                      min(asint(engineInstanceBuffer[0].data[0].x), 0) +
+                      min(asuint(vertexDataBuffer[0].data[0].x), 0) +
                       min(meshDataBuffer[0].vertexOffset, 0) +
+                      min(indexBuffer[0], 0) +
                       min(0, abs(materialTexturesArray[0].SampleLevel(
-                          linearSampler, float2(0,0), 0).x));
+                          linearSampler, float2(0,0), 0).x)) +
+                      min(instanceOffsets[0], 0);
 #endif
 
-    uint h = hash(index_start) + hash(instance_id);
+    uint h = hash(index_start) + hash(instance_id) + zero_dummy;
     float4 out_color = intToColor(h);
 
     outputBuffer[pushConst.imageIndex][target_pixel] = out_color;
+#endif
 }

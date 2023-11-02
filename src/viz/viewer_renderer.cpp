@@ -61,22 +61,6 @@ using DirectionalLight = shader::DirectionalLight;
 using SkyData = shader::SkyData;
 using DensityLayer = shader::DensityLayer;
 
-namespace InternalConfig {
-
-inline constexpr uint32_t numFrames = 2;
-inline constexpr uint32_t initMaxTransforms = 100000;
-inline constexpr uint32_t initMaxMatIndices = 100000;
-inline constexpr uint32_t shadowMapSize = 4096;
-inline constexpr uint32_t maxLights = 10;
-inline constexpr uint32_t maxTextures = 100;
-inline constexpr VkFormat gbufferFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-inline constexpr VkFormat skyFormatHighp = VK_FORMAT_R32G32B32A32_SFLOAT;
-inline constexpr VkFormat skyFormatHalfp = VK_FORMAT_R16G16B16A16_SFLOAT;
-inline constexpr VkFormat varianceFormat = VK_FORMAT_R32G32_SFLOAT;
-inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
-
-}
-
 struct ImGUIVkLookupData {
     PFN_vkGetDeviceProcAddr getDevAddr;
     VkDevice dev;
@@ -3485,12 +3469,15 @@ Renderer::Renderer(uint32_t gpu_id,
     {
         VkDescriptorPoolSize pool_sizes[] = {
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, InternalConfig::maxTextures },
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 1 }
         };
+
         VkDescriptorPoolCreateInfo pool_info = {};
         pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        pool_info.maxSets = 10;
-        pool_info.poolSizeCount = 1;
+        pool_info.maxSets = 10 + InternalConfig::maxTextures + 1;
+        pool_info.poolSizeCount = 3;
         pool_info.pPoolSizes = pool_sizes;
         REQ_VK(dev.dt.createDescriptorPool(dev.hdl,
             &pool_info, nullptr, &asset_pool_));
@@ -3501,7 +3488,7 @@ Renderer::Renderer(uint32_t gpu_id,
             .binding = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_ALL
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
         };
 
         VkDescriptorSetLayoutCreateInfo info = {
@@ -3511,6 +3498,53 @@ Renderer::Renderer(uint32_t gpu_id,
         };
 
         dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_layout_);
+    }
+
+    {
+        VkDescriptorBindingFlags flags[] = { VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT, 0 };
+
+        VkDescriptorSetLayoutBindingFlagsCreateInfo flag_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            .bindingCount = 2,
+            .pBindingFlags = flags
+        };
+
+        VkDescriptorSetLayoutBinding bindings[] = {
+            {
+                .binding = 0,
+                .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                .descriptorCount = InternalConfig::maxTextures,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+            },
+
+            {
+                .binding = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+                .pImmutableSamplers = &repeat_sampler_
+            }
+        };
+
+        VkDescriptorSetLayoutCreateInfo info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = &flag_info,
+            .bindingCount = 2,
+            .pBindings = bindings
+        };
+
+        dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_tex_layout_);
+    }
+
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = asset_pool_,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &asset_tex_layout_
+        };
+
+        dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &asset_set_tex_compute_);
     }
 
     BatchRendererProto::Config br_cfg = {
@@ -3524,7 +3558,7 @@ Renderer::Renderer(uint32_t gpu_id,
     };
 
     br_proto_ = std::make_unique<BatchRendererProto>(
-        br_cfg, dev, alloc, pipeline_cache_, asset_set_cull_, asset_set_draw_, asset_set_mat_tex_);
+        br_cfg, dev, alloc, pipeline_cache_, asset_set_cull_, asset_set_draw_, asset_set_tex_compute_, repeat_sampler_);
 
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
@@ -3995,7 +4029,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
         dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &index_buffer_set);
     }
 
-    DynArray<VkWriteDescriptorSet> desc_updates(5 + (material_textures_.size() > 0 ? 1 : 0));
+    DynArray<VkWriteDescriptorSet> desc_updates(5 + (material_textures_.size() > 0 ? 2 : 0));
 
     VkDescriptorBufferInfo obj_info;
     obj_info.buffer = asset_buffer.buffer;
@@ -4051,7 +4085,10 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     if (material_textures_.size())
     {
         desc_updates.push_back({});
-        DescHelper::textures(desc_updates[4], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
+        DescHelper::textures(desc_updates[5], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
+
+        desc_updates.push_back({});
+        DescHelper::textures(desc_updates[6], asset_set_tex_compute_, tx_infos.data(), tx_infos.size(), 0);
     }
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());

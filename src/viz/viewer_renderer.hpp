@@ -26,6 +26,22 @@ namespace madrona::viz {
 
 struct BatchRendererProto;
 
+namespace InternalConfig {
+
+inline constexpr uint32_t numFrames = 2;
+inline constexpr uint32_t initMaxTransforms = 100000;
+inline constexpr uint32_t initMaxMatIndices = 100000;
+inline constexpr uint32_t shadowMapSize = 4096;
+inline constexpr uint32_t maxLights = 10;
+inline constexpr uint32_t maxTextures = 100;
+inline constexpr VkFormat gbufferFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+inline constexpr VkFormat skyFormatHighp = VK_FORMAT_R32G32B32A32_SFLOAT;
+inline constexpr VkFormat skyFormatHalfp = VK_FORMAT_R16G16B16A16_SFLOAT;
+inline constexpr VkFormat varianceFormat = VK_FORMAT_R32G32_SFLOAT;
+inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+
+}
+
 struct Swapchain {
     VkSwapchainKHR hdl;
     uint32_t width;
@@ -373,7 +389,9 @@ private:
     std::unique_ptr<BatchRendererProto> br_proto_;
 
     VkDescriptorSetLayout asset_layout_;
+    VkDescriptorSetLayout asset_tex_layout_;
     VkDescriptorPool asset_pool_;
+    VkDescriptorSet asset_set_tex_compute_;
 };
 
 }
