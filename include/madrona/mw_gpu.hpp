@@ -21,6 +21,7 @@
 #include <madrona/render/mw.hpp>
 
 #include <cuda_runtime.h>
+#include <cuda.h>
 
 namespace madrona {
 
@@ -47,9 +48,6 @@ struct StateConfig {
 
     // Number of exported ECS components
     uint32_t numExportedBuffers;
-
-    // The CUDA GPU id that MWCudaExecutor will use
-    uint32_t gpuID;
 };
 
 struct CompileConfig {
@@ -76,8 +74,12 @@ struct CompileConfig {
 
 class MWCudaExecutor {
 public:
+    // Initializes CUDA context, sets current device
+    static CUcontext initCUDA(int gpu_id);
+
     MADRONA_MWGPU_EXPORT MWCudaExecutor(const StateConfig &state_cfg,
-                                        const CompileConfig &compile_cfg);
+                                        const CompileConfig &compile_cfg,
+                                        CUcontext cu_ctx);
 
     MADRONA_MWGPU_EXPORT MWCudaExecutor(MWCudaExecutor &&o);
 

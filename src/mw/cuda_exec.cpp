@@ -37,8 +37,8 @@ namespace madrona::mwGPU {
 
 class HostPrintCPU {
 public:
-    inline HostPrintCPU()
-        : channel_([]() {
+    inline HostPrintCPU(CUdevice cu_gpu)
+        : channel_([cu_gpu]() {
               CUdeviceptr channel_devptr;
               REQ_CU(cuMemAllocManaged(&channel_devptr,
                                        sizeof(HostPrint::Channel),
@@ -51,8 +51,6 @@ public:
                                  sizeof(HostPrint::Channel),
                                  CU_MEM_ADVISE_SET_ACCESSED_BY, CU_DEVICE_CPU));
 
-              CUdevice cu_gpu;
-              REQ_CU(cuCtxGetDevice(&cu_gpu));
               REQ_CU(cuMemAdvise(channel_devptr, sizeof(HostPrint::Channel),
                                  CU_MEM_ADVISE_SET_ACCESSED_BY, cu_gpu));
 
@@ -1175,7 +1173,7 @@ static void mapGPUMemory(CUdevice dev, CUdeviceptr base, uint64_t num_bytes)
 
 }
 
-static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
+static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
 {
     using namespace std::chrono_literals;
     using cuda::std::memory_order_acquire;
@@ -1185,6 +1183,11 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
     char *verbose_host_alloc_env = getenv("MADRONA_MWGPU_VERBOSE_HOSTALLOC");
     bool verbose_host_alloc =
         verbose_host_alloc_env && verbose_host_alloc_env[0] == '1';
+
+    REQ_CU(cuCtxSetCurrent(cu_ctx));
+
+    CUdevice dev;
+    REQ_CU(cuCtxGetDevice(&dev));
 
     while (true) {
         while (channel->ready.load(memory_order_acquire) != 1) {
@@ -1229,7 +1232,9 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUdevice dev)
                 printf("Grew %p\n", ptr);
             }
         } else if (channel->op == HostChannel::Op::Alloc) {
-            cudaMalloc(&channel->alloc.result, channel->alloc.numBytes);
+            CUdeviceptr dev_ptr;
+            REQ_CU(cuMemAlloc(&dev_ptr, channel->alloc.numBytes));
+            channel->alloc.result = (void *)dev_ptr;
 
             if (verbose_host_alloc) {
                 printf("Alloc request received %lu\n",
@@ -1254,6 +1259,8 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_exported,
     const GPUKernels &gpu_kernels,
     ExecutorMode exec_mode,
+    CUdevice cu_gpu,
+    CUcontext cu_ctx,
     cudaStream_t strm)
 {
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
@@ -1290,8 +1297,6 @@ static GPUEngineState initEngineAndUserState(
     REQ_CU(cuMemAdvise((CUdeviceptr)allocator_channel_devptr, sizeof(HostChannel),
                        CU_MEM_ADVISE_SET_ACCESSED_BY, CU_DEVICE_CPU));
 
-    CUdevice cu_gpu;
-    REQ_CU(cuCtxGetDevice(&cu_gpu));
     REQ_CU(cuMemAdvise(allocator_channel_devptr, sizeof(HostChannel),
                        CU_MEM_ADVISE_SET_ACCESSED_BY, cu_gpu));
 
@@ -1314,9 +1319,9 @@ static GPUEngineState initEngineAndUserState(
     };
 
     std::thread allocator_thread(
-        gpuVMAllocatorThread, allocator_channel, cu_gpu);
+        gpuVMAllocatorThread, allocator_channel, cu_ctx);
 
-    auto host_print = std::make_unique<HostPrintCPU>();
+    auto host_print = std::make_unique<HostPrintCPU>(cu_gpu);
 
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
@@ -1703,20 +1708,35 @@ static CUgraphExec makeTaskGraphRunGraph(
     return run_graph_exec;
 }
 
-MWCudaExecutor::MWCudaExecutor(
-        const StateConfig &state_cfg, const CompileConfig &compile_cfg)
+CUcontext MWCudaExecutor::initCUDA(int gpu_id)
+{
+    REQ_CUDA(cudaSetDevice(gpu_id));
+    REQ_CUDA(cudaFree(nullptr));
+    CUdevice cu_dev;
+    REQ_CU(cuDeviceGet(&cu_dev, gpu_id));
+    CUcontext cu_ctx;
+    REQ_CU(cuDevicePrimaryCtxRetain(&cu_ctx, cu_dev));
+    setCudaHeapSize();
+    REQ_CU(cuCtxSetCurrent(cu_ctx));
+
+    return cu_ctx;
+}
+
+MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
+                               const CompileConfig &compile_cfg,
+                               CUcontext cu_ctx)
     : impl_(nullptr)
 {
     const ExecutorMode exec_mode = ExecutorMode::TaskGraph;
 
-    setCudaHeapSize();
-    REQ_CUDA(cudaSetDevice(state_cfg.gpuID));
-    cudaDeviceProp dev_prop;
-    REQ_CUDA(cudaGetDeviceProperties(&dev_prop, state_cfg.gpuID));
-
     auto strm = cu::makeStream();
 
-    int num_sms = dev_prop.multiProcessorCount;
+    CUdevice cu_gpu;
+    REQ_CU(cuCtxGetDevice(&cu_gpu));
+
+    int num_sms;
+    REQ_CU(cuDeviceGetAttribute(
+        &num_sms, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, cu_gpu));
 
     DynArray<MegakernelConfig> megakernel_cfgs(
         consts::maxMegakernelBlocksPerSM);
@@ -1740,15 +1760,21 @@ MWCudaExecutor::MWCudaExecutor(
         // }
     }
 
+    std::pair<int, int> cu_capability;
+    REQ_CU(cuDeviceGetAttribute(&cu_capability.first,
+        CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, cu_gpu));
+    REQ_CU(cuDeviceGetAttribute(&cu_capability.second,
+        CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, cu_gpu));
+
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
-        exec_mode, num_sms, {dev_prop.major, dev_prop.minor});
+        exec_mode, num_sms, cu_capability);
 
     GPUEngineState eng_state = initEngineAndUserState(
         state_cfg.numWorlds, state_cfg.numWorldDataBytes,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
         state_cfg.numUserConfigBytes, state_cfg.numExportedBuffers,
-        gpu_kernels, exec_mode, strm);
+        gpu_kernels, exec_mode, cu_gpu, cu_ctx, strm);
 
     auto run_graph =
         exec_mode == ExecutorMode::JobSystem ?
