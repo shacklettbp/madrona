@@ -62,7 +62,7 @@ target_link_libraries(madrona_viewer PRIVATE
     glfw
 )
 
-target_include_directories(madrona_viewer PRIVATE
+target_include_directories(madrona_viewer SYSTEM PRIVATE
     ${STB_DIR}
 )
 
