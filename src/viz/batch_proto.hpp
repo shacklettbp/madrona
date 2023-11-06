@@ -87,6 +87,7 @@ struct BatchRendererProto {
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
     DisplayTexture &getDisplayTexture(uint32_t frame_id);
     LayeredTarget &getLayeredTarget(uint32_t frame_id);
+    VkDescriptorSet getPBRSet(uint32_t frame_id);
 };
 
 }

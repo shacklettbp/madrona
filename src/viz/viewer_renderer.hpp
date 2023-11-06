@@ -403,6 +403,10 @@ private:
     VkDescriptorPool asset_pool_;
     VkDescriptorSet asset_set_tex_compute_;
     VkDescriptorSet asset_batch_lighting_set_;
+
+    // This descriptor set contains information about the sky
+    VkDescriptorSetLayout sky_data_layout_;
+    VkDescriptorSet sky_data_set_;
 };
 
 }

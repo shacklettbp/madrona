@@ -16,7 +16,6 @@ RWTexture2DArray<float4> outputBuffer[];
 [[vk::binding(0, 1)]]
 StructuredBuffer<uint> indexBuffer;
 
-#if 1
 // Instances and views
 [[vk::binding(0, 2)]]
 StructuredBuffer<PackedViewData> viewDataBuffer;
@@ -43,11 +42,26 @@ Texture2D<float4> materialTexturesArray[];
 
 [[vk::binding(1, 4)]]
 SamplerState linearSampler;
-#endif
 
-// #include "lighting.h"
 
-#define SHADOW_BIAS 0.002f
+// Lighting
+[[vk::binding(0, 5)]]
+StructuredBuffer<DirectionalLight> lights;
+
+[[vk::binding(1, 5)]]
+Texture2D<float4> transmittanceLUT;
+
+[[vk::binding(2, 5)]]
+Texture2D<float4> irradianceLUT;
+
+[[vk::binding(3, 5)]]
+Texture3D<float4> scatteringLUT;
+
+[[vk::binding(4, 5)]]
+StructuredBuffer<SkyData> skyBuffer;
+
+
+#include "lighting.h"
 
 Vertex unpackVertex(PackedVertex packed)
 {
@@ -338,6 +352,170 @@ uint3 unpackVizBufferData(in uint2 data)
     return uint3(primitive_id-1, mesh_id-1, instance_id-1);
 }
 
+struct GBufferData {
+    float3 wPosition;
+    float3 wNormal;
+    float3 albedo;
+    float3 wCameraPos;
+};
+
+/* BRDF calculations. */
+float distributionGGX(float ndoth, float roughness) 
+{
+    float a2 = roughness * roughness;
+    float f = (ndoth * a2 - ndoth) * ndoth + 1.0f;
+    return a2 / (M_PI * f * f);
+}
+
+float smithGGX(float ndotv, float ndotl, float roughness) 
+{
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    float ggx1 = ndotv / (ndotv * (1.0f - k) + k);
+    float ggx2 = ndotl / (ndotl * (1.0f - k) + k);
+    return ggx1 * ggx2;
+}
+
+float3 fresnel(float hdotv, float3 base) 
+{
+    return base + (1.0f - base) * pow(1.0f - clamp(hdotv, 0.0f, 1.0f), 5.0f);
+}
+
+float3 fresnelRoughness(float ndotv, float3 base, float roughness) 
+{
+    float one_minus_rough = 1.0f - roughness;
+    return base + (max(float3(one_minus_rough, one_minus_rough, one_minus_rough), base) - base) *
+        pow(1.0f - ndotv, 5.0f);
+}
+
+/* Gets the BRDF contribution on a pixel which lies on a surface for any generic
+ * incoming radiance value. */
+float3 directionalRadianceBRDF(in GBufferData gbuffer,
+                               in float3 base_reflectivity,
+                               in float roughness,
+                               in float metalness,
+                               in float3 view_direction,
+                               in float3 incoming_radiance,
+                               in float3 light_direction) 
+{
+    float3 view_dir = -view_direction;
+
+    float3 halfway = normalize(light_direction + view_dir);
+
+    float ndotv = max(dot(gbuffer.wNormal.xyz, view_dir), 0.000001f);
+    float ndotl = max(dot(gbuffer.wNormal.xyz, light_direction), 0.000001f);
+    float hdotv = max(dot(halfway, view_dir), 0.000001f);
+    float ndoth = max(dot(gbuffer.wNormal.xyz, halfway), 0.000001f);
+
+    float distribution_term = distributionGGX(ndoth, roughness);
+    float smith_term = smithGGX(ndotv, ndotl, roughness);
+    float3 fresnel_term = fresnel(hdotv, base_reflectivity);
+
+    float3 specular = smith_term * distribution_term * fresnel_term;
+    specular /= 4.0 * ndotv * ndotl;
+
+    float3 kd = float3(1.0, 1.0, 1.0) - fresnel_term;
+
+    kd *= 1.0f - metalness;
+
+    return (kd * gbuffer.albedo.rgb / M_PI + specular) * incoming_radiance * ndotl;
+}
+
+/* Gets the radiance on a pixel which lies on a surface taking into account BRDF as
+ * well as the sky transmittance and radiance incoming from the sun. Also takes into
+ * account shadows using variance shadow maps. */
+float3 accumulateSunRadianceBRDF(in GBufferData gbuffer, 
+                                 in PerspectiveCameraData camera_data,
+                                 float roughness, 
+                                 float metal,
+                                 float r,
+                                 float mu_sun,
+                                 uint2 target_pixel)
+{ 
+    float3 ret = float3(0.0, 0.0, 0.0);
+
+    /* We get the radiance incoming from the sun to this point by taking into account
+     * the transmittance of the sky. */
+    float3 radiance_from_sun = skyBuffer[0].solarIrradiance.xyz * 
+                               getTransmittanceToSun(skyBuffer[0], transmittanceLUT, r, mu_sun);
+
+    ret += directionalRadianceBRDF(gbuffer,
+                                   lerp(float3(0.04, 0.04, 0.04), gbuffer.albedo.rgb, metal),
+                                   roughness,
+                                   metal,
+                                   normalize(gbuffer.wPosition.xyz - camera_data.pos.xyz),
+                                   radiance_from_sun,
+                                   normalize(-lights[0].lightDir.xyz));
+
+    return ret * 1.0;
+}
+
+/* Caculates the radiance which actually arrives to the camera. This will require calling
+ * accumulateSunRadianceBRDF to get the radiance hitting the surface, and then using
+ * getSkyRadianceToPoint to calculate the amount of in/out scatter happening on the ray
+ * from the surface point to the camera. */
+float4 getPointRadianceBRDF(float roughness, float metal, 
+                            in GBufferData gbuffer, in PerspectiveCameraData camera_data,
+                            uint2 target_pixel) 
+{
+    float3 sky_irradiance, sun_irradiance, point_radiance;
+
+    { /* Calculate sun and sky irradiance which will contribute to the final BRDF. */
+        float3 p = gbuffer.wPosition / 1000.0 - skyBuffer[0].wPlanetCenter.xyz;
+        float3 normal = gbuffer.wNormal;
+
+        float3 sun_direction = -normalize(lights[0].lightDir.xyz);
+
+        float3 view_direction = normalize(gbuffer.wPosition - camera_data.pos.xyz);
+
+        float r = length(p);
+        float mu_sun = dot(p, sun_direction) / r;
+
+        sky_irradiance = getIrradiance(skyBuffer[0], irradianceLUT, r, mu_sun) *
+                        (1.0 + dot(normal, p) / r) * 0.5;
+
+        float3 accumulated_radiance = accumulateSunRadianceBRDF(gbuffer, camera_data, roughness, metal, 
+                                                                r, mu_sun, target_pixel);
+
+        point_radiance = accumulated_radiance + gbuffer.albedo.rgb * (1.0 / M_PI) * sky_irradiance;
+    }
+
+    /* How much is scattered towards us. */
+    float3 transmittance;
+    float3 in_scatter = getSkyRadianceToPoint(skyBuffer[0], transmittanceLUT,
+                                              scatteringLUT, scatteringLUT,
+                                              camera_data.pos.xyz / 1000.0 - skyBuffer[0].wPlanetCenter.xyz,
+                                              gbuffer.wPosition / 1000.0 - skyBuffer[0].wPlanetCenter.xyz, 0.0,
+                                              -normalize(lights[0].lightDir.xyz),
+                                              transmittance);
+
+    point_radiance = point_radiance * transmittance + in_scatter;
+
+    return float4(point_radiance, 1.0);
+}
+
+/* Calculates the outgoing camera view ray for a given pixel. */
+float3 getOutgoingRay(float2 target_pixel, float2 target_dim, in PerspectiveCameraData camera)
+{
+    float3 cam_forward = normalize(rotateVec(camera.rot, float3(0, 1, 0)));
+    float3 cam_up = normalize(rotateVec(camera.rot, float3(0, 0, 1)));
+    float3 cam_right = normalize(rotateVec(camera.rot, float3(1, 0, 0)));
+
+    float aspect_ratio = target_dim.x / target_dim.y;
+    float tan_fov = -1.0 / camera.yScale;
+
+    float right_scale = aspect_ratio * tan_fov;
+    float up_scale = tan_fov;
+
+    float2 raster = float2(target_pixel.x + 0.5, target_pixel.y + 0.5);
+    float2 screen = float2((2.0f * raster.x) / target_dim.x - 1.0f,
+                           (2.0f * raster.y) / target_dim.y - 1.0f);
+
+    float3 dir = screen.x * cam_right * right_scale - screen.y * cam_up * up_scale + cam_forward;
+
+    return normalize(dir);
+}
+
 // idx.x is the x coordinate of the image
 // idx.y is the y coordinate of the image
 // idx.z is the global view index
@@ -370,86 +548,134 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     uint mesh_id = unpacked_viz_data.y;
     uint instance_id = unpacked_viz_data.z;
 
-    if (primitive_id == 0xFFFFFFFF && mesh_id == 0xFFFFFFFF && instance_id == 0xFFFFFFFF) {
-        return;
-    }
+    GBufferData gbuffer_data;
+    float roughness;
+    float metalness;
 
-    MeshData mesh_data = meshDataBuffer[mesh_id];
-    MaterialData material_data = materialBuffer[mesh_data.materialIndex];
+    bool was_rasterized = false;
 
-    uint index_start = mesh_data.indexOffset + primitive_id * 3;
     uint view_idx = layer_idx + pushConst.maxLayersPerImage * pushConst.imageIndex;
-
-    EngineInstanceData instance_data = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
     PerspectiveCameraData view_data = unpackViewData(viewDataBuffer[view_idx]);
 
-    // This is the interpolated vertex information at the pixel that the given thread is on
-    VertexData vertices[3];
+    if (primitive_id != 0xFFFFFFFF || mesh_id != 0xFFFFFFFF || instance_id != 0xFFFFFFFF) {
+        was_rasterized = true;
 
-    float3 w_inv;
-    float3 w_values;
+        MeshData mesh_data = meshDataBuffer[mesh_id];
+        MaterialData material_data = materialBuffer[mesh_data.materialIndex];
 
-    for (int i = 0; i < 3; ++i) {
-        uint vertex_idx = indexBuffer[index_start + i];
-        PackedVertex packed = vertexDataBuffer[mesh_data.vertexOffset + vertex_idx];
-        Vertex vert = unpackVertex(packed);
+        uint index_start = mesh_data.indexOffset + primitive_id * 3;
 
-        float3 to_view_translation;
-        float4 to_view_rotation;
-        computeCompositeTransform(instance_data.position, instance_data.rotation,
-            view_data.pos, view_data.rot,
-            to_view_translation, to_view_rotation);
+        EngineInstanceData instance_data = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
 
-        float3 view_pos =
-            rotateVec(to_view_rotation, instance_data.scale * vert.position) +
+        // This is the interpolated vertex information at the pixel that the given thread is on
+        VertexData vertices[3];
+
+        float3 w_inv;
+        float3 w_values;
+
+        for (int i = 0; i < 3; ++i) {
+            uint vertex_idx = indexBuffer[index_start + i];
+            PackedVertex packed = vertexDataBuffer[mesh_data.vertexOffset + vertex_idx];
+            Vertex vert = unpackVertex(packed);
+
+            float3 to_view_translation;
+            float4 to_view_rotation;
+            computeCompositeTransform(instance_data.position, instance_data.rotation,
+                    view_data.pos, view_data.rot,
+                    to_view_translation, to_view_rotation);
+
+            float3 view_pos =
+                rotateVec(to_view_rotation, instance_data.scale * vert.position) +
                 to_view_translation;
 
-        float3 world_pos =
-            rotateVec(instance_data.rotation, instance_data.scale * vert.position) +
+            float3 world_pos =
+                rotateVec(instance_data.rotation, instance_data.scale * vert.position) +
                 instance_data.position;
 
-        float4 clip_pos = float4(
-            view_data.xScale * view_pos.x,
-            -view_data.yScale * view_pos.z,
-            view_data.zNear,
-            view_pos.y);
+            float4 clip_pos = float4(
+                    view_data.xScale * view_pos.x,
+                    -view_data.yScale * view_pos.z,
+                    view_data.zNear,
+                    view_pos.y);
 
-        w_values[i] = clip_pos.w;
-        w_inv[i] = 1.0f / clip_pos.w;
+            w_values[i] = clip_pos.w;
+            w_inv[i] = 1.0f / clip_pos.w;
 
-        vertices[i].postMvp = clip_pos;
-        vertices[i].pos = world_pos;
+            vertices[i].postMvp = clip_pos;
+            vertices[i].pos = world_pos;
 
-        vertices[i].normal = normalize(
-            rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
+            vertices[i].normal = normalize(
+                    rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
 
-        vertices[i].uv = vert.uv;
+            vertices[i].uv = float2(vert.uv.x, 1.0 - vert.uv.y);
+        }
+
+        // Get barrycentric coordinates
+        BarycentricDeriv bc = calcFullBary(vertices[0].postMvp,
+                vertices[1].postMvp,
+                vertices[2].postMvp,
+                target_pixel_clip,
+                float2(target_dim.xy));
+
+        float interpolated_w = 1.0f / dot(w_inv, bc.m_lambda);
+
+        // Get interpolated normal
+        float3 normal = normalize(interpolateVec3(bc, vertices[0].normal, vertices[1].normal, vertices[2].normal));
+
+        // Get interpolated position
+        float3 position = normalize(interpolateVec3(bc, vertices[0].pos, vertices[1].pos, vertices[2].pos));
+
+        // Get interpolated UVs
+        UVInterpolation uv = interpolateUVs(bc, vertices[0].uv, vertices[1].uv, vertices[2].uv);
+
+        float4 color = material_data.color;
+        if (material_data.textureIdx != -1) {
+            color *= materialTexturesArray[material_data.textureIdx].SampleLevel(
+                    linearSampler, uv.interp, 0);
+        }
+
+        gbuffer_data.wPosition = position;
+        gbuffer_data.wNormal = normal;
+        gbuffer_data.albedo = color.rgb;
+        gbuffer_data.wCameraPos = view_data.pos;
+        roughness = material_data.roughness;
+        metalness = material_data.metalness;
     }
 
-    // Get barrycentric coordinates
-    BarycentricDeriv bc = calcFullBary(vertices[0].postMvp,
-                                       vertices[1].postMvp,
-                                       vertices[2].postMvp,
-                                       target_pixel_clip,
-                                       float2(target_dim.xy));
+    const float exposure = 20.0f;
 
-    float interpolated_w = 1.0f / dot(w_inv, bc.m_lambda);
+    // Lighting calculations
+    float3 outgoing_ray = getOutgoingRay(float2(target_pixel.xy), float2(target_dim.xy), view_data);
+    float4 point_radiance = getPointRadianceBRDF(roughness, metalness, gbuffer_data, view_data, target_pixel.xy);
 
-    // Get interpolated normal
-    float3 normal = normalize(interpolateVec3(bc, vertices[0].normal, vertices[1].normal, vertices[2].normal));
-    
-    // Get interpolated position
-    float3 position = normalize(interpolateVec3(bc, vertices[0].pos, vertices[1].pos, vertices[2].pos));
+    float3 sun_direction = normalize(-lights[0].lightDir.xyz);
 
-    // Get interpolated UVs
-    UVInterpolation uv = interpolateUVs(bc, vertices[0].uv, vertices[1].uv, vertices[2].uv);
+    /* Incoming radiance from the sky: */
+    float3 transmittance;
+    float3 radiance = getSkyRadiance(skyBuffer[0], transmittanceLUT,
+                                     scatteringLUT, scatteringLUT,
+                                     (gbuffer_data.wCameraPos / 1000.0 - skyBuffer[0].wPlanetCenter.xyz),
+                                     outgoing_ray, 0.0, sun_direction,
+                                     transmittance);
 
-    float4 color = material_data.color;
-    if (material_data.textureIdx != -1) {
-        color *= materialTexturesArray[material_data.textureIdx].SampleLevel(
-            linearSampler, uv.interp, 0);
+    if (dot(outgoing_ray, sun_direction) >
+            skyBuffer[0].sunSize.y * 0.99999) {
+        radiance = radiance + transmittance * getSolarRadiance(skyBuffer[0]) * 0.06;
     }
+
+    if (was_rasterized) {
+        radiance = point_radiance.xyz;
+    }
+    // float point_alpha = was_rasterized ? 1.0 : 0.0;
+    // radiance = lerp(radiance, point_radiance.xyz, point_alpha);
+
+    /* Tone Mapping. */
+    float3 one = float3(1.0, 1.0, 1.0);
+    float3 exp_value = exp(-radiance / float3(2.0f, 2.0f, 2.0f) * exposure);
+
+    float3 diff = one - exp_value;
+    float3 out_color = diff;
 
     outputBuffer[pushConst.imageIndex][target_pixel] = float4(
-        color.xyz, float(zeroDummy()));
+            out_color.xyz, 1.0 + float(zeroDummy()));
 }

@@ -545,6 +545,7 @@ struct BatchFrame {
     // Descriptor set which contains all the vizBuffer outputs and
     // the lighting outputs
     VkDescriptorSet targetsSetLighting;
+    VkDescriptorSet pbrSet;
 
     DisplayTexture displayTexture;
 };
@@ -613,8 +614,8 @@ static void makeBatchFrame(vk::Device& dev,
                            const BatchRendererProto::Config &cfg,
                            PipelineMP<1> &prepare_views,
                            PipelineMP<1> &draw,
-                           VkDescriptorSet lighting_set
-                           /*vk::FixedDescriptorPool& layerPool*/)
+                           VkDescriptorSet lighting_set,
+                           VkDescriptorSet pbr_set)
 {
     VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(PerspectiveCameraData);
     vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
@@ -669,6 +670,7 @@ static void makeBatchFrame(vk::Device& dev,
                            dev, alloc/*, layerPool*/),
         std::move(draw_packages),
         lighting_set,
+        pbr_set,
         makeDisplayTexture(cfg.renderWidth, cfg.renderHeight, dev, alloc)
     };
 
@@ -937,7 +939,8 @@ static void issueDeferred(vk::Device &dev,
                           VkDescriptorSet asset_mat_tex_set,
                           uint32_t num_views,
                           uint32_t image_idx,
-                          VkDescriptorSet index_buffer_set) 
+                          VkDescriptorSet index_buffer_set,
+                          VkDescriptorSet pbr_set) 
 {
     // The output buffer has been transitioned to general at the start of the frame.
     // The viz buffers have been transitioned to general before this happens.
@@ -954,11 +957,10 @@ static void issueDeferred(vk::Device &dev,
     std::array draw_descriptors = {
             batch_frame.targetsSetLighting,
             index_buffer_set,
-#if 1
             batch_frame.viewInstanceSetLighting,
             asset_set,
-            asset_mat_tex_set
-#endif
+            asset_mat_tex_set,
+            pbr_set
     };
 
     dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1036,7 +1038,7 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
                                               sizeof(uint32_t) * 2,
                                               cfg.numFrames*consts::numDrawCmdBuffers, repeat_sampler,
                                               "visualize_tris.hlsl", "visualize", makeShaders)),
-      lighting(makeComputePipeline(dev, pipeline_cache, 1, sizeof(shader::DeferredLightingPushConstBR),
+      lighting(makeComputePipeline(dev, pipeline_cache, 6, sizeof(shader::DeferredLightingPushConstBR),
                                    consts::numDrawCmdBuffers * cfg.numFrames, repeat_sampler, 
                                    "draw_deferred.hlsl","lighting", makeShadersLighting)),
       batchFrames(cfg.numFrames),
@@ -1053,7 +1055,8 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
                        prepareViews,
                        batchDraw,
-                       lighting.descPools[0].makeSet());
+                       lighting.descPools[0].makeSet(),
+                       lighting.descPools[5].makeSet());
 
         printf("%p %p\n", (void *)batchFrames[i].displayTexture.tex.image, (void *)batchFrames[i].displayTexture.view);
     }
@@ -1372,7 +1375,8 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                           impl->assetSetLighting,
                           impl->assetSetTextureMat,
                           num_views, batch_no,
-                          loaded_assets[0].indexBufferSet);
+                          loaded_assets[0].indexBufferSet,
+                          frame_data.pbrSet);
         }
 
         issueMemoryBarrier(impl->dev, draw_cmd,
@@ -1472,6 +1476,11 @@ DisplayTexture &BatchRendererProto::getDisplayTexture(uint32_t frame_id)
 LayeredTarget &BatchRendererProto::getLayeredTarget(uint32_t frame_id)
 {
     return impl->batchFrames[frame_id].targets[0];
+}
+
+VkDescriptorSet BatchRendererProto::getPBRSet(uint32_t frame_id)
+{
+    return impl->batchFrames[frame_id].pbrSet;
 }
 
 }

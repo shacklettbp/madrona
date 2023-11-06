@@ -2139,6 +2139,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       BatchImportedBuffers &batch_renderer_buffers,
                       LayeredTarget &batch_target,
                       DisplayTexture &batch_display_texture,
+                      VkDescriptorSet br_pbr_set,
                       Frame *dst)
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
@@ -2169,7 +2170,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 25> desc_updates;
+    std::array<VkWriteDescriptorSet, 30> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -2257,6 +2258,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     DescHelper::storage(desc_updates[10], lighting_set, &light_data_info, 3);
     DescHelper::storage(desc_updates[20], shadow_gen_set, &light_data_info, 2);
+    DescHelper::storage(desc_updates[25], br_pbr_set, &light_data_info, 0);
 
     VkDescriptorImageInfo transmittance_info;
     transmittance_info.imageView = sky.transmittanceView;
@@ -2264,6 +2266,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     transmittance_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::textures(desc_updates[11], lighting_set, &transmittance_info, 1, 4, 0);
+    DescHelper::textures(desc_updates[26], br_pbr_set, &transmittance_info, 1, 1);
 
     VkDescriptorImageInfo irradiance_info;
     irradiance_info.imageView = sky.irradianceView;
@@ -2271,6 +2274,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     irradiance_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::textures(desc_updates[12], lighting_set, &irradiance_info, 1, 5, 0);
+    DescHelper::textures(desc_updates[27], br_pbr_set, &irradiance_info, 1, 2);
 
     VkDescriptorImageInfo scattering_info;
     scattering_info.imageView = sky.scatteringView;
@@ -2278,6 +2282,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     scattering_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::textures(desc_updates[13], lighting_set, &scattering_info, 1, 6, 0);
+    DescHelper::textures(desc_updates[28], br_pbr_set, &scattering_info, 1, 3);
 
     VkDescriptorBufferInfo shadow_view_info;
     shadow_view_info.buffer = render_input.buffer;
@@ -2302,6 +2307,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     sky_info.range = buffer_sizes[6];
 
     DescHelper::storage(desc_updates[17], lighting_set, &sky_info, 10);
+    DescHelper::storage(desc_updates[29], br_pbr_set, &sky_info, 4);
 
     VkDescriptorImageInfo blur_input_info;
     blur_input_info.imageView = shadow_fb.varianceView;
@@ -3473,7 +3479,7 @@ Renderer::Renderer(uint32_t gpu_id,
     {
         VkDescriptorPoolSize pool_sizes[] = {
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 20 },
-            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, InternalConfig::maxTextures },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, InternalConfig::maxTextures*2 },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1 }
         };
 
@@ -3617,6 +3623,7 @@ Renderer::Renderer(uint32_t gpu_id,
                   br_proto_->getImportedBuffers(i),
                   br_proto_->getLayeredTarget(i),
                   br_proto_->getDisplayTexture(i),
+                  br_proto_->getPBRSet(i),
                   &frames_[i]);
     }
 }
