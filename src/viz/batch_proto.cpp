@@ -1000,6 +1000,7 @@ struct BatchRendererProto::Impl {
     VkDescriptorSet assetSetPrepare;
     VkDescriptorSet assetSetDraw;
     VkDescriptorSet assetSetTextureMat;
+    VkDescriptorSet assetSetLighting;
 
     VkExtent2D renderExtent;
 
@@ -1010,7 +1011,8 @@ struct BatchRendererProto::Impl {
 
     Impl(const Config &cfg, vk::Device &dev, vk::MemoryAllocator &mem, 
          VkPipelineCache cache, VkDescriptorSet asset_set_comp, 
-         VkDescriptorSet asset_set_draw, VkDescriptorSet asset_set_lighting,
+         VkDescriptorSet asset_set_draw, VkDescriptorSet asset_set_texture_mat,
+         VkDescriptorSet asset_set_lighting,
          VkSampler repeat_sampler);
 };
 
@@ -1021,6 +1023,7 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
                                VkDescriptorSet asset_set_compute,
                                VkDescriptorSet asset_set_draw,
                                VkDescriptorSet asset_set_texture_mat,
+                               VkDescriptorSet asset_set_lighting,
                                VkSampler repeat_sampler)
     : dev(dev), mem(mem), pipelineCache(pipeline_cache),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
@@ -1040,6 +1043,7 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
       assetSetPrepare(asset_set_compute),
       assetSetDraw(asset_set_draw),
       assetSetTextureMat(asset_set_texture_mat),
+      assetSetLighting(asset_set_lighting),
       renderExtent{ cfg.renderWidth, cfg.renderHeight },
       selectedView(0)
 {
@@ -1062,9 +1066,10 @@ BatchRendererProto::BatchRendererProto(const Config &cfg,
                                        VkDescriptorSet asset_set_compute,
                                        VkDescriptorSet asset_set_draw,
                                        VkDescriptorSet asset_set_texture_mat,
+                                       VkDescriptorSet asset_set_lighting,
                                        VkSampler sampler)
     : impl(std::make_unique<Impl>(cfg, dev, mem, pipeline_cache, 
-                                  asset_set_compute, asset_set_draw, asset_set_texture_mat, sampler))
+                                  asset_set_compute, asset_set_draw, asset_set_texture_mat, asset_set_lighting, sampler))
 {
 }
 
@@ -1364,7 +1369,7 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
                           frame_data.targets[batch_no],
                           draw_cmd,
                           frame_data,
-                          impl->assetSetPrepare,
+                          impl->assetSetLighting,
                           impl->assetSetTextureMat,
                           num_views, batch_no,
                           loaded_assets[0].indexBufferSet);

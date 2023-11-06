@@ -30,7 +30,7 @@ StructuredBuffer<MeshData> meshDataBuffer;
 
 struct V2F {
     [[vk::location(0)]] uint instanceID : TEXCOORD0;
-    [[vk::location(1)]] uint indexOffset : TEXCOORD1;
+    [[vk::location(1)]] uint meshID : TEXCOORD3;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -186,7 +186,7 @@ float4 vert(in uint vid : SV_VertexID,
                      min(0, drawCommandBuffer[0].vertexOffset) +
                      min(0, int(ceil(meshDataBuffer[0].vertexOffset)));
 
-    v2f.indexOffset = draw_data.indexOffset;
+    v2f.meshID = draw_data.meshID;
 
     return clip_pos;
 }
@@ -195,14 +195,43 @@ struct PixelOutput {
     uint2 ids : SV_Target0;
 };
 
+// We are basically packing 3 uints into 2. 21 bits per uint except for 22 
+// for the instance ID
+uint2 packVizBufferData(uint primitive_id, uint mesh_id, uint instance_id)
+{
+    primitive_id += 1;
+    mesh_id += 1;
+    instance_id += 1;
+
+    uint d0 = primitive_id << 11;
+    d0 |= 0x7FF & (instance_id >> 11);
+    uint d1 = mesh_id << 11;
+    d1 |= 0x7FF & instance_id;
+    return uint2(d0, d1);
+}
+
+uint3 unpackVizBufferData(in uint2 data)
+{
+    uint primitive_id = data.x >> 11;
+    uint mesh_id = data.y >> 11;
+    uint instance_id = ((data.x & 0x7FF) << 11) | (data.y & 0x7FF);
+
+    return uint3(primitive_id-1, mesh_id-1, instance_id-1);
+}
+
 [shader("pixel")]
 PixelOutput frag(in V2F v2f,
                  in uint prim_id : SV_PrimitiveID)
 {
     PixelOutput output;
 
-    uint index_start = prim_id * 3 + v2f.indexOffset;
+    // IDs needs to hold the following information:
+    // vertex_offset | index_start | instance_id | texture_id
 
-    output.ids = uint2(index_start, v2f.instanceID);
+    // Maximum value of texture_id is 100 (7 bits required)
+    // instance_id will take up 25 bits
+    // vertex_offset and index_start will both be 16 bits each
+    output.ids = packVizBufferData(prim_id, v2f.meshID, v2f.instanceID);
+
     return output;
 }

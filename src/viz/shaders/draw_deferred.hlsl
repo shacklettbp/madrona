@@ -34,6 +34,9 @@ StructuredBuffer<PackedVertex> vertexDataBuffer;
 [[vk::binding(1, 3)]]
 StructuredBuffer<MeshData> meshDataBuffer;
 
+[[vk::binding(2, 3)]]
+StructuredBuffer<MaterialData> materialBuffer;
+
 // Texture descriptor bindings
 [[vk::binding(0, 4)]]
 Texture2D<float4> materialTexturesArray[];
@@ -80,6 +83,22 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     o.objectID = asint(d2.z);
 
     return o;
+}
+
+PerspectiveCameraData unpackViewData(PackedViewData packed)
+{
+    const float4 d0 = packed.data[0];
+    const float4 d1 = packed.data[1];
+    const float4 d2 = packed.data[2];
+
+    PerspectiveCameraData cam;
+    cam.pos = d0.xyz;
+    cam.rot = float4(d1.xyz, d0.w);
+    cam.xScale = d1.w;
+    cam.yScale = d2.x;
+    cam.zNear = d2.y;
+
+    return cam;
 }
 
 uint hash(uint x)
@@ -147,7 +166,7 @@ struct BarycentricDeriv
     float3 m_ddy;
 };
 
-BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNdc, float2 winSize)
+BarycentricDeriv calcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNdc, float2 winSize)
 {
     BarycentricDeriv ret = (BarycentricDeriv)0;
 
@@ -188,6 +207,137 @@ BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNd
     return ret;
 }
 
+float3 interpolateWithDeriv(BarycentricDeriv deriv, float v0, float v1, float v2)
+{
+    float3 mergedV = float3(v0, v1, v2);
+    float3 ret;
+    ret.x = dot(mergedV, deriv.m_lambda);
+    ret.y = dot(mergedV, deriv.m_ddx);
+    ret.z = dot(mergedV, deriv.m_ddy);
+    return ret;
+}
+
+float interpolateFloat(in BarycentricDeriv deriv, in float v0, in float v1, in float v2)
+{
+    float3 mergedV = float3(v0, v1, v2);
+    return dot(mergedV, deriv.m_lambda);
+}
+
+float3 interpolateVec3(in BarycentricDeriv deriv, in float3 v0, in float3 v1, in float3 v2)
+{
+    return v0 * deriv.m_lambda.x +
+           v1 * deriv.m_lambda.y +
+           v2 * deriv.m_lambda.z;
+}
+
+float2 interpolateVec2(in BarycentricDeriv deriv, in float2 v0, in float2 v1, in float2 v2)
+{
+    return v0 * deriv.m_lambda.x +
+           v1 * deriv.m_lambda.y +
+           v2 * deriv.m_lambda.z;
+}
+
+struct UVInterpolation {
+    float2 interp;
+    float2 dx;
+    float2 dy;
+};
+
+UVInterpolation interpolateUVs(
+    BarycentricDeriv deriv,
+    in float2 uv0,
+    in float2 uv1,
+    in float2 uv2)
+{
+    float3 attr0 = float3(uv0.x, uv1.x, uv2.x);
+    float3 attr1 = float3(uv0.y, uv1.y, uv2.y);
+
+    UVInterpolation result;
+
+    result.interp.x = interpolateFloat(deriv, attr0.x, attr0.y, attr0.z);
+    result.interp.y = interpolateFloat(deriv, attr1.x, attr1.y, attr1.z);
+
+    result.dx.x = dot(attr0, deriv.m_ddx);
+    result.dx.y = dot(attr1, deriv.m_ddx);
+    result.dy.x = dot(attr0, deriv.m_ddy);
+    result.dy.y = dot(attr1, deriv.m_ddy);
+    return result;
+}
+
+uint zeroDummy()
+{
+    uint zero_dummy = min(asint(viewDataBuffer[0].data[2].w), 0) +
+                      min(asint(engineInstanceBuffer[0].data[0].x), 0) +
+                      min(asuint(vertexDataBuffer[0].data[0].x), 0) +
+                      min(meshDataBuffer[0].vertexOffset, 0) +
+                      min(indexBuffer[0], 0) +
+                      min(0, abs(materialTexturesArray[0].SampleLevel(
+                          linearSampler, float2(0,0), 0).x)) +
+                      min(instanceOffsets[0], 0);
+
+    return zero_dummy;
+}
+
+float3 toWorldSpace(in EngineInstanceData instance_data,
+                    in Vertex vert)
+{
+    return rotateVec(instance_data.rotation, instance_data.scale * vert.position) +
+           instance_data.position;
+}
+
+float3 toViewSpace(in EngineInstanceData instance_data,
+                   in PerspectiveCameraData view_data,
+                   in Vertex vert)
+{
+    float3 to_view_translation;
+    float4 to_view_rotation;
+    computeCompositeTransform(instance_data.position, instance_data.rotation,
+            view_data.pos, view_data.rot,
+            to_view_translation, to_view_rotation);
+
+    float3 view_pos =
+        rotateVec(to_view_rotation, instance_data.scale * vert.position) +
+        to_view_translation;
+
+    return view_pos;
+}
+
+float4 toNDC(in PerspectiveCameraData view_data,
+             in float3 view_pos)
+{
+    float4 clip_pos = float4(
+        view_data.xScale * view_pos.x,
+        view_data.yScale * view_pos.z,
+        view_data.zNear,
+        view_pos.y);
+
+    return clip_pos;
+}
+
+// We are basically packing 3 uints into 2. 21 bits per uint except for 22 
+// for the instance ID
+uint2 packVizBufferData(uint primitive_id, uint mesh_id, uint instance_id)
+{
+    primitive_id += 1;
+    mesh_id += 1;
+    instance_id += 1;
+
+    uint d0 = primitive_id << 11;
+    d0 |= 0x7FF & (instance_id >> 11);
+    uint d1 = mesh_id << 11;
+    d1 |= 0x7FF & instance_id;
+    return uint2(d0, d1);
+}
+
+uint3 unpackVizBufferData(in uint2 data)
+{
+    uint primitive_id = data.x >> 11;
+    uint mesh_id = data.y >> 11;
+    uint instance_id = ((data.x & 0x7FF) << 11) | (data.y & 0x7FF);
+
+    return uint3(primitive_id-1, mesh_id-1, instance_id-1);
+}
+
 // idx.x is the x coordinate of the image
 // idx.y is the y coordinate of the image
 // idx.z is the global view index
@@ -210,24 +360,39 @@ void lighting(uint3 idx : SV_DispatchThreadID)
                                        float(target_pixel.y) + 0.5f) /
                                             float2(target_dim.x, target_dim.y));
     target_pixel_clip = target_pixel_clip * 2.0f - float2(1.0f, 1.0f);
+    target_pixel_clip.y *= -1.0;
 
-    uint2 ids = vizBuffer[pushConst.imageIndex][target_pixel];
+    uint2 data = vizBuffer[pushConst.imageIndex][target_pixel];
 
-    uint index_start = ids.x;
-    uint instance_id = ids.y;
+    uint3 unpacked_viz_data = unpackVizBufferData(data);
+
+    uint primitive_id = unpacked_viz_data.x;
+    uint mesh_id = unpacked_viz_data.y;
+    uint instance_id = unpacked_viz_data.z;
+
+    if (primitive_id == 0xFFFFFFFF && mesh_id == 0xFFFFFFFF && instance_id == 0xFFFFFFFF) {
+        return;
+    }
+
+    MeshData mesh_data = meshDataBuffer[mesh_id];
+    MaterialData material_data = materialBuffer[mesh_data.materialIndex];
+
+    uint index_start = mesh_data.indexOffset + primitive_id * 3;
+    uint view_idx = layer_idx + pushConst.maxLayersPerImage * pushConst.imageIndex;
 
     EngineInstanceData instance_data = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
+    PerspectiveCameraData view_data = unpackViewData(viewDataBuffer[view_idx]);
 
     // This is the interpolated vertex information at the pixel that the given thread is on
     VertexData vertices[3];
 
-    VertexData interpolated_data;
-    float3 bc_coords;
+    float3 w_inv;
+    float3 w_values;
 
     for (int i = 0; i < 3; ++i) {
         uint vertex_idx = indexBuffer[index_start + i];
-        PackedVertexData packed = vertexDataBuffer[vertex_idx];
-        Vertex vertex = unpackVertex(packed);
+        PackedVertex packed = vertexDataBuffer[mesh_data.vertexOffset + vertex_idx];
+        Vertex vert = unpackVertex(packed);
 
         float3 to_view_translation;
         float4 to_view_rotation;
@@ -239,36 +404,50 @@ void lighting(uint3 idx : SV_DispatchThreadID)
             rotateVec(to_view_rotation, instance_data.scale * vert.position) +
                 to_view_translation;
 
+        float3 world_pos =
+            rotateVec(instance_data.rotation, instance_data.scale * vert.position) +
+                instance_data.position;
+
         float4 clip_pos = float4(
             view_data.xScale * view_pos.x,
             view_data.yScale * view_pos.z,
             view_data.zNear,
             view_pos.y);
 
+        w_values[i] = clip_pos.w;
+        w_inv[i] = 1.0f / clip_pos.w;
+
         vertices[i].postMvp = clip_pos;
-        vertices[i].pos = view_pos;
-        vertices[i].normal = normalize(rotateVec(to_view_rotation, rotateVec(instance_data.rotation, (vertex.normal/instance_data.scale))));
-        vertices[i].uv = vertex.uv;
+        vertices[i].pos = world_pos;
+
+        vertices[i].normal = normalize(
+            rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
+
+        vertices[i].uv = vert.uv;
     }
 
-#if 0
-    EngineInstanceData instanceData = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
-    Vertex vert = unpackVertex(vertexDataBuffer[index_start*3]);
+    // Get barrycentric coordinates
+    BarycentricDeriv bc = calcFullBary(vertices[0].postMvp, 
+                                       vertices[1].postMvp,
+                                       vertices[2].postMvp,
+                                       target_pixel_clip,
+                                       float2(target_dim.xy));
 
-#if 1
-    uint zero_dummy = min(asint(viewDataBuffer[0].data[2].w), 0) +
-                      min(asint(engineInstanceBuffer[0].data[0].x), 0) +
-                      min(asuint(vertexDataBuffer[0].data[0].x), 0) +
-                      min(meshDataBuffer[0].vertexOffset, 0) +
-                      min(indexBuffer[0], 0) +
-                      min(0, abs(materialTexturesArray[0].SampleLevel(
-                          linearSampler, float2(0,0), 0).x)) +
-                      min(instanceOffsets[0], 0);
-#endif
+    // Get interpolated normal
+    float3 normal = normalize(interpolateVec3(bc, vertices[0].normal, vertices[1].normal, vertices[2].normal));
+    
+    // Get interpolated position
+    float3 position = normalize(interpolateVec3(bc, vertices[0].pos, vertices[1].pos, vertices[2].pos));
 
-    uint h = hash(index_start) + hash(instance_id) + zero_dummy;
-    float4 out_color = intToColor(h);
+    // Get interpolated UVs
+    UVInterpolation uv = interpolateUVs(bc, vertices[0].uv, vertices[1].uv, vertices[2].uv);
 
-    outputBuffer[pushConst.imageIndex][target_pixel] = out_color;
-#endif
+    float4 color = material_data.color;
+    if (material_data.textureIdx != -1) {
+        color *= materialTexturesArray[material_data.textureIdx].SampleGrad(
+            linearSampler, uv.interp, uv.dx, uv.dy);
+    }
+
+    outputBuffer[pushConst.imageIndex][target_pixel] = float4(
+        color.xyz, float(zeroDummy()));
 }

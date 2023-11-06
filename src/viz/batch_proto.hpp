@@ -72,6 +72,7 @@ struct BatchRendererProto {
         VkDescriptorSet asset_set_compute,
         VkDescriptorSet asset_set_draw,
         VkDescriptorSet asset_set_texture_mat,
+        VkDescriptorSet asset_set_lighting,
         VkSampler repeat_sampler);
 
     ~BatchRendererProto();

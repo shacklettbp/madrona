@@ -390,8 +390,13 @@ private:
 
     VkDescriptorSetLayout asset_layout_;
     VkDescriptorSetLayout asset_tex_layout_;
+
+    // This contains the vertex data buffer and the mesh data buffer
+    VkDescriptorSetLayout asset_batch_lighting_layout_;
+
     VkDescriptorPool asset_pool_;
     VkDescriptorSet asset_set_tex_compute_;
+    VkDescriptorSet asset_batch_lighting_set_;
 };
 
 }

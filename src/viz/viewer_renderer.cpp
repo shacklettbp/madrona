@@ -3468,7 +3468,7 @@ Renderer::Renderer(uint32_t gpu_id,
 {
     {
         VkDescriptorPoolSize pool_sizes[] = {
-            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 20 },
             { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, InternalConfig::maxTextures },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1 }
         };
@@ -3498,6 +3498,37 @@ Renderer::Renderer(uint32_t gpu_id,
         };
 
         dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_layout_);
+    }
+
+    {
+        VkDescriptorSetLayoutBinding bindings[] = {
+            {
+                .binding = 0,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+            },
+            {
+                .binding = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+            },
+            {
+                .binding = 2,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+            }
+        };
+
+        VkDescriptorSetLayoutCreateInfo info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = 3,
+            .pBindings = bindings
+        };
+
+        dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_batch_lighting_layout_);
     }
 
     {
@@ -3545,6 +3576,9 @@ Renderer::Renderer(uint32_t gpu_id,
         };
 
         dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &asset_set_tex_compute_);
+
+        alloc_info.pSetLayouts = &asset_batch_lighting_layout_;
+        dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &asset_batch_lighting_set_);
     }
 
     BatchRendererProto::Config br_cfg = {
@@ -3558,7 +3592,7 @@ Renderer::Renderer(uint32_t gpu_id,
     };
 
     br_proto_ = std::make_unique<BatchRendererProto>(
-        br_cfg, dev, alloc, pipeline_cache_, asset_set_cull_, asset_set_draw_, asset_set_tex_compute_, repeat_sampler_);
+        br_cfg, dev, alloc, pipeline_cache_, asset_set_cull_, asset_set_draw_, asset_set_tex_compute_, asset_batch_lighting_set_, repeat_sampler_);
 
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
@@ -4029,7 +4063,7 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
         dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &index_buffer_set);
     }
 
-    DynArray<VkWriteDescriptorSet> desc_updates(5 + (material_textures_.size() > 0 ? 2 : 0));
+    DynArray<VkWriteDescriptorSet> desc_updates(8 + (material_textures_.size() > 0 ? 2 : 0));
 
     VkDescriptorBufferInfo obj_info;
     obj_info.buffer = asset_buffer.buffer;
@@ -4071,6 +4105,15 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     desc_updates.push_back({});
     DescHelper::storage(desc_updates[4], index_buffer_set, &index_set_info, 0);
 
+    desc_updates.push_back({});
+    DescHelper::storage(desc_updates[5], asset_batch_lighting_set_, &vert_info, 0);
+
+    desc_updates.push_back({});
+    DescHelper::storage(desc_updates[6], asset_batch_lighting_set_, &mesh_info, 1);
+
+    desc_updates.push_back({});
+    DescHelper::storage(desc_updates[7], asset_batch_lighting_set_, &mat_info, 2);
+
     material_textures_ = loadTextures(dev, alloc, render_queue_, textures);
 
     DynArray<VkDescriptorImageInfo> tx_infos(material_textures_.size()+1);
@@ -4085,10 +4128,10 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     if (material_textures_.size())
     {
         desc_updates.push_back({});
-        DescHelper::textures(desc_updates[5], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
+        DescHelper::textures(desc_updates[8], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
 
         desc_updates.push_back({});
-        DescHelper::textures(desc_updates[6], asset_set_tex_compute_, tx_infos.data(), tx_infos.size(), 0);
+        DescHelper::textures(desc_updates[9], asset_set_tex_compute_, tx_infos.data(), tx_infos.size(), 0);
     }
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
