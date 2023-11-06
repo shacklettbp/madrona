@@ -28,8 +28,14 @@ class Viewer {
 public:
     struct Config {
         int gpuID;
+
+        // This is the rendering width/height of the actual viewer itself
         uint32_t renderWidth;
         uint32_t renderHeight;
+        // This is the rendering width/height of the batch renderer output
+        uint32_t batchWidth;
+        uint32_t batchHeight;
+
         uint32_t numWorlds;
         uint32_t maxViewsPerWorld;
         uint32_t maxInstancesPerWorld;

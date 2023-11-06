@@ -5,6 +5,10 @@
 
 #include <madrona/viz/interop.hpp>
 
+#ifdef MADRONA_GPU_MODE
+#include <madrona/mw_gpu/host_print.hpp>
+#endif
+
 namespace madrona::viz {
 using namespace base;
 using namespace math;
@@ -195,6 +199,10 @@ void VizRenderingSystem::init(Context &ctx,
     system_state.aspectRatio = 
         (float)bridge->renderWidth / (float)bridge->renderHeight;
 
+#ifdef MADRONA_GPU_MODE
+    mwGPU::HostPrint::log("{}\n", system_state.aspectRatio);
+#endif
+
     system_state.voxels = bridge->voxels;
 
     auto &record_state = ctx.singleton<RecordSystemState>();
@@ -226,9 +234,13 @@ void VizRenderingSystem::attachEntityToView(Context &ctx,
 
     auto &state = ctx.singleton<ViewerSystemState>();
 
-    float fov_scale = tanf(toRadians(vfov_degrees * 0.5f));
+    float fov_scale = 1.0f / tanf(toRadians(vfov_degrees * 0.5f));
     float x_scale = fov_scale / state.aspectRatio;
     float y_scale = -fov_scale;
+
+#ifdef MADRONA_GPU_MODE
+    mwGPU::HostPrint::log("{} {} (FOV {})\n", x_scale, y_scale, vfov_degrees);
+#endif
 
     cam_data = PerspectiveCameraData {
         { /* Position */ }, 

@@ -170,7 +170,7 @@ BarycentricDeriv calcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNd
 {
     BarycentricDeriv ret = (BarycentricDeriv)0;
 
-    float3 invW = rcp(float3(pt0.w, pt1.w, pt2.w));
+    float3 invW = 1.0f / (float3(pt0.w, pt1.w, pt2.w));
 
     float2 ndc0 = pt0.xy * invW.x;
     float2 ndc1 = pt1.xy * invW.y;
@@ -410,7 +410,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
         float4 clip_pos = float4(
             view_data.xScale * view_pos.x,
-            view_data.yScale * view_pos.z,
+            -view_data.yScale * view_pos.z,
             view_data.zNear,
             view_pos.y);
 
@@ -427,11 +427,13 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     }
 
     // Get barrycentric coordinates
-    BarycentricDeriv bc = calcFullBary(vertices[0].postMvp, 
+    BarycentricDeriv bc = calcFullBary(vertices[0].postMvp,
                                        vertices[1].postMvp,
                                        vertices[2].postMvp,
                                        target_pixel_clip,
                                        float2(target_dim.xy));
+
+    float interpolated_w = 1.0f / dot(w_inv, bc.m_lambda);
 
     // Get interpolated normal
     float3 normal = normalize(interpolateVec3(bc, vertices[0].normal, vertices[1].normal, vertices[2].normal));
@@ -444,8 +446,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
     float4 color = material_data.color;
     if (material_data.textureIdx != -1) {
-        color *= materialTexturesArray[material_data.textureIdx].SampleGrad(
-            linearSampler, uv.interp, uv.dx, uv.dy);
+        color *= materialTexturesArray[material_data.textureIdx].SampleLevel(
+            linearSampler, uv.interp, 0);
     }
 
     outputBuffer[pushConst.imageIndex][target_pixel] = float4(

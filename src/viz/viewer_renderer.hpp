@@ -297,6 +297,8 @@ public:
     Renderer(uint32_t gpu_id,
              uint32_t img_width,
              uint32_t img_height,
+             uint32_t batch_width,
+             uint32_t batch_height,
              uint32_t num_worlds,
              uint32_t max_views_per_world,
              uint32_t max_instances_per_world,
@@ -337,6 +339,10 @@ private:
 
     uint32_t fb_width_;
     uint32_t fb_height_;
+
+    uint32_t br_width_;
+    uint32_t br_height_;
+
     std::array<VkClearValue, 4> fb_clear_;
     std::array<VkClearValue, 2> fb_shadow_clear_;
     std::array<VkClearValue, 2> fb_imgui_clear_;

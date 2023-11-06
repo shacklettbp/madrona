@@ -401,6 +401,8 @@ Viewer::Impl::Impl(const Config &cfg)
       renderer(cfg.gpuID,
                cfg.renderWidth,
                cfg.renderHeight,
+               cfg.batchWidth,
+               cfg.batchHeight,
                cfg.numWorlds,
                cfg.maxViewsPerWorld,
                cfg.maxInstancesPerWorld,
@@ -430,9 +432,12 @@ void Viewer::Impl::render(float frame_duration)
 
     // Right now, viewIDX HAS to be 0 (during the time we're refactoring the
     // viewer renderer).
-    frameCfg.viewIDX = 0;
+    // frameCfg.viewIDX = 0;
     frameCfg.batchViewIDX = (uint32_t)batchView;
-    renderer.render(cam, frameCfg);
+
+    auto alt_frame_cfg = frameCfg;
+    alt_frame_cfg.viewIDX = 0;
+    renderer.render(cam, alt_frame_cfg);
 }
 
 Viewer::UserInput::UserInput(bool *keys_state)
