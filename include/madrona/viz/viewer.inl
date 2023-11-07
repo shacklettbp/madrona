@@ -5,6 +5,11 @@ bool Viewer::UserInput::keyPressed(KeyboardKey key) const
     return keys_state_[(uint32_t)key];
 }
 
+bool Viewer::UserInput::keyHit(KeyboardKey key) const
+{
+    return press_state_[(uint32_t)key];
+}
+
 template <typename InputFn, typename StepFn, typename UIFn>
 void Viewer::loop(InputFn &&input_fn, StepFn &&step_fn, UIFn &&ui_fn)
 {
