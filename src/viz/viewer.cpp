@@ -470,28 +470,33 @@ void Viewer::Impl::loop(
                     (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::R] |=
                     (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
-            press_state[(uint32_t)KeyboardKey::R] |= (!prev_key_state[(uint32_t)KeyboardKey::R])
-                                                     && (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::R] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::R]) &&
+                    (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::X] |=
                     (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
-            press_state[(uint32_t)KeyboardKey::X] |= (!prev_key_state[(uint32_t)KeyboardKey::X])
-                                                     && (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::X] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::X]) &&
+                    (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::M] |=
                     (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
-            press_state[(uint32_t)KeyboardKey::M] |= (!prev_key_state[(uint32_t)KeyboardKey::M])
-                                                     && (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::M] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::M]) &&
+                    (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Z] |=
                     (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
-            press_state[(uint32_t)KeyboardKey::Z] |= (!prev_key_state[(uint32_t)KeyboardKey::Z])
-                                                     && (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::Z] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::Z]) &&
+                    (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::C] |=
                     (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::G] |=
                     (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::L] |=
                     (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
-            press_state[(uint32_t)KeyboardKey::L] |= (!prev_key_state[(uint32_t)KeyboardKey::L])
-                                                     && (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::L] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::L]) &&
+                    (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Space] |=
                     (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::T] |=
