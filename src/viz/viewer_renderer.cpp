@@ -585,7 +585,7 @@ static void issueVoxelGen(Device& dev,
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
 
-    shader::VoxelGenPushConst push_const = {voxel_config.xLength,voxel_config.yLength,voxel_config.zLength, 0.8, 8 };
+    shader::VoxelGenPushConst push_const = {voxel_config.xLength,voxel_config.yLength,voxel_config.zLength, 0.8, 9 };
 
     dev.dt.cmdPushConstants(draw_cmd,
         pipeline.layout,
