@@ -154,14 +154,15 @@ void StateManager::registerComponent(uint32_t id, uint32_t alignment,
     });
 }
 
-StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
-                                             ArchetypeFlags archetype_flags,
-                                             uint32_t max_num_entities,
-                                             uint32_t num_user_components,
-                                             uint32_t num_columns,
-                                             TypeInfo *type_infos,
-                                             IntegerMapPair *lookup_input,
-                                             ComponentFlags *component_flags)
+StateManager::ArchetypeStore::ArchetypeStore(
+        uint32_t offset,
+        ArchetypeFlags archetype_flags,
+        uint32_t max_num_entities_per_world,
+        uint32_t num_user_components,
+        uint32_t num_columns,
+        TypeInfo *type_infos,
+        IntegerMapPair *lookup_input,
+        ComponentFlags *component_flags)
     : componentOffset(offset),
       numUserComponents(num_user_components),
       tbl(),
@@ -173,6 +174,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
     using namespace mwGPU;
 
     uint32_t num_worlds = GPUImplConsts::get().numWorlds;
+    uint32_t max_num_entities = max_num_entities_per_world * num_worlds;
     HostAllocator *alloc = getHostAllocator();
 
     tbl.numColumns = num_columns;
@@ -245,7 +247,7 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 
 void StateManager::registerArchetype(uint32_t id,
                                      ArchetypeFlags archetype_flags,
-                                     uint32_t max_num_entities,
+                                     uint32_t max_num_entities_per_world,
                                      ComponentID *components,
                                      ComponentFlags *component_flags,
                                      uint32_t num_user_components)
@@ -284,7 +286,7 @@ void StateManager::registerArchetype(uint32_t id,
 
     archetypes_[id].emplace(offset,
                             archetype_flags,
-                            max_num_entities,
+                            max_num_entities_per_world,
                             num_user_components,
                             num_total_components,
                             type_infos.data(),

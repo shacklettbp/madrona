@@ -37,7 +37,7 @@ public:
     void registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities = 0);
+        CountT max_num_entities_per_world = 0);
 
     // Register a singleton component. Note that you should pass the desired
     // component type to this function, not an archetype (singletons implicitly

@@ -79,7 +79,7 @@ template <typename ArchetypeT, typename... MetadataComponentTs>
 ArchetypeID StateManager::registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities)
+        CountT max_num_entities_per_world)
 {
     uint32_t archetype_id = TypeTracker::registerType<ArchetypeT>(
         &StateManager::num_archetypes_);
@@ -92,7 +92,7 @@ ArchetypeID StateManager::registerArchetype(
 
     registerArchetype(archetype_id,
                       archetype_flags,
-                      max_num_entities,
+                      max_num_entities_per_world,
                       archetype_components.data(),
                       component_flags.data(),
                       archetype_components.size());
@@ -111,7 +111,7 @@ void StateManager::registerSingleton()
 
     registerComponent<SingletonT>();
     registerArchetype<ArchetypeT>(
-        ComponentMetadataSelector<> {}, ArchetypeFlags::None, num_worlds);
+        ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
 
     for (uint32_t i = 0; i < num_worlds; i++) {
         makeEntityNow<ArchetypeT>(WorldID { int32_t(i) });

@@ -79,7 +79,7 @@ template <typename ArchetypeT, typename... MetadataComponentTs>
 ArchetypeID StateManager::registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities)
+        CountT max_num_entities_per_world)
 {
 #ifdef MADRONA_MW_MODE
     std::lock_guard lock(register_lock_);
@@ -147,7 +147,7 @@ ArchetypeID StateManager::registerArchetype(
 
     registerArchetype(id,
                       archetype_flags,
-                      max_num_entities,
+                      max_num_entities_per_world,
                       (CountT)archetype_components.size(),
                       archetype_components.data(),
                       archetype_component_flags.data());
@@ -163,17 +163,14 @@ void StateManager::registerSingleton()
     using ArchetypeT = SingletonArchetype<SingletonT>;
 
     registerComponent<SingletonT>();
+    registerArchetype<ArchetypeT>(
+        ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
 
 #ifdef MADRONA_MW_MODE
-    registerArchetype<ArchetypeT>(
-        ComponentMetadataSelector<> {}, ArchetypeFlags::None,
-        (CountT)num_worlds_);
     for (CountT i = 0; i < (CountT)num_worlds_; i++) {
         makeEntityNow<ArchetypeT>(uint32_t(i), init_state_cache_);
     }
 #else
-    registerArchetype<ArchetypeT>(
-        ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
     makeEntityNow<ArchetypeT>(init_state_cache_);
 #endif
 }

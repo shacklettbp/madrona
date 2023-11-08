@@ -19,10 +19,10 @@ template <typename ArchetypeT, typename... MetadataComponentTs>
 void ECSRegistry::registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities)
+        CountT max_num_entities_per_world)
 {
     state_mgr_->registerArchetype<ArchetypeT>(
-        component_metadatas, archetype_flags, max_num_entities);
+        component_metadatas, archetype_flags, max_num_entities_per_world);
 }
 
 template <typename SingletonT>

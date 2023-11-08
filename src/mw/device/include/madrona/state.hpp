@@ -65,7 +65,7 @@ public:
     ArchetypeID registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
         ArchetypeFlags archetype_flags,
-        CountT max_num_entities);
+        CountT max_num_entities_per_world);
 
     template <typename SingletonT>
     void registerSingleton();
@@ -196,7 +196,7 @@ private:
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, 
                            ArchetypeFlags archetype_flags,
-                           uint32_t max_num_entities,
+                           uint32_t max_num_entities_per_world,
                            ComponentID *components,
                            ComponentFlags *component_flags,
                            uint32_t num_components);
