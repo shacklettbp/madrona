@@ -35,15 +35,26 @@ struct VizECSBridge {
     // Allocated from Vulkan, to be imported into Cuda
     PerspectiveCameraData *views;
     InstanceData *instances;
+
     int32_t *instanceOffsets;
 
     uint32_t *totalNumViews;
     uint32_t *totalNumInstances;
 
+    AtomicU32 *totalNumViewsCPUInc;
+    AtomicU32 *totalNumInstancesCPUInc;
+
+    // Keys used for sorting (most significant 32 bits: world ID; 
+    //                        least significant 32 bits: entity ID)
+    uint64_t *instancesWorldIDs;
+    uint64_t *viewsWorldIDs;
+
     int32_t renderWidth;
     int32_t renderHeight;
     bool *episodeDone;
     uint32_t *voxels;
+
+    bool isGPUBackend;
 };
 
 }

@@ -8,6 +8,11 @@ namespace madrona::viz {
 // This will be attached to any entity that wants to be a viewer
 struct VizCamera {
     Entity cameraEntity;
+
+    // 1.0 / tanf(fovy * 0.5)
+    float fovScale;
+    float zNear;
+
     math::Vector3 cameraOffset;
 };
 
@@ -30,12 +35,6 @@ struct VizRenderingSystem {
 
     static void init(Context &ctx,
                      const VizECSBridge *bridge);
-
-    static VizCamera setupView(Context &ctx,
-                               float vfov_degrees,
-                               float z_near,
-                               math::Vector3 camera_offset,
-                               int32_t view_idx);
 
     static uint32_t * getVoxelPtr(Context &ctx);
 

@@ -7,11 +7,13 @@
 
 #include "../render/asset_utils.hpp"
 
+#include "madrona/viz/interop.hpp"
 #include "shaders/shader_common.h"
 #include "vk/descriptors.hpp"
 
 #include "batch_proto.hpp"
 #include "vulkan/vulkan_core.h"
+#include "xss-common-qsort.h"
 
 #include <filesystem>
 
@@ -36,6 +38,8 @@
 #pragma clang diagnostic ignored "-Wunused-function"
 #include "stb_image.h"
 #pragma clang diagnostic pop
+
+#define ENABLE_BATCH_RENDERER
 
 using namespace std;
 
@@ -2823,6 +2827,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         .renderHeight = (int32_t)render_height,
         .episodeDone = nullptr,
         .voxels = voxel_buffer_ptr,
+        .isGPUBackend = gpu_input
     };
 
     const VizECSBridge *gpu_bridge;
@@ -2891,6 +2896,8 @@ static EngineInterop setupEngineInterop(Device &dev,
     void *views_base = nullptr;
     void *instances_base = nullptr;
     void *offsets_base = nullptr;
+    void *world_ids_instances_base = nullptr;
+    void *world_ids_views_base = nullptr;
 
 
     { // Create the views buffer
@@ -2900,7 +2907,12 @@ static EngineInterop setupEngineInterop(Device &dev,
         if (!gpu_input) {
             views_cpu = alloc.makeStagingBuffer(num_views_bytes);
             views_hdl = views_cpu->buffer;
-            views_base = views_cpu->ptr;
+
+            // views_base = views_cpu->ptr;
+            views_base = malloc(sizeof(shader::PackedViewData) * num_worlds * max_views_per_world);
+
+            world_ids_instances_base = malloc(sizeof(uint64_t) * num_worlds * max_instances_per_world);
+            world_ids_views_base = malloc(sizeof(uint64_t) * num_worlds * max_views_per_world);
         } else {
 #ifdef MADRONA_CUDA_SUPPORT
             views_gpu = alloc.makeDedicatedBuffer(
@@ -2919,11 +2931,11 @@ static EngineInterop setupEngineInterop(Device &dev,
         uint64_t num_instances_bytes = num_worlds * max_instances_per_world *
             (int64_t)sizeof(shader::PackedInstanceData);
 
-
         if (!gpu_input) {
             instances_cpu = alloc.makeStagingBuffer(num_instances_bytes);
             instances_hdl = instances_cpu->buffer;
-            instances_base = instances_cpu->ptr;
+            // instances_base = instances_cpu->ptr;
+            instances_base = malloc(sizeof(shader::PackedInstanceData) * num_worlds * max_instances_per_world);
         } else {
 #ifdef MADRONA_CUDA_SUPPORT
             instances_gpu = alloc.makeDedicatedBuffer(
@@ -2992,10 +3004,17 @@ static EngineInterop setupEngineInterop(Device &dev,
 
     uint32_t *total_num_views_readback = nullptr;
     uint32_t *total_num_instances_readback = nullptr;
+
+    AtomicU32 *total_num_views_cpu_inc = nullptr;
+    AtomicU32 *total_num_instances_cpu_inc = nullptr;
+
     if (!gpu_input) {
         total_num_views_readback = (uint32_t *)malloc(
             2*sizeof(uint32_t));
         total_num_instances_readback = total_num_views_readback + 1;
+
+        total_num_views_cpu_inc = (AtomicU32 *)malloc(2 * sizeof(AtomicU32));
+        total_num_instances_cpu_inc = total_num_views_cpu_inc + 1;
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
         total_num_views_readback = (uint32_t *)cu::allocReadback(
@@ -3010,10 +3029,15 @@ static EngineInterop setupEngineInterop(Device &dev,
         .instanceOffsets = (int32_t *)offsets_base,
         .totalNumViews = total_num_views_readback,
         .totalNumInstances = total_num_instances_readback,
+        .totalNumViewsCPUInc = total_num_views_cpu_inc,
+        .totalNumInstancesCPUInc = total_num_instances_cpu_inc,
+        .instancesWorldIDs = (uint64_t *)world_ids_instances_base,
+        .viewsWorldIDs = (uint64_t *)world_ids_views_base,
         .renderWidth = (int32_t)render_width,
         .renderHeight = (int32_t)render_height,
         .episodeDone = nullptr,
-        .voxels = voxel_buffer_ptr
+        .voxels = voxel_buffer_ptr,
+        .isGPUBackend = gpu_input
     };
 
     const VizECSBridge *gpu_bridge = nullptr;
@@ -3026,6 +3050,16 @@ static EngineInterop setupEngineInterop(Device &dev,
         cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
                    cudaMemcpyHostToDevice);
 #endif
+    }
+
+    uint32_t *iota_array_instances = nullptr;
+    uint32_t *iota_array_views = nullptr;
+    uint64_t *sorted_instance_world_ids = nullptr;
+
+    if (!gpu_input) {
+        iota_array_instances = (uint32_t *)malloc(sizeof(uint32_t) * num_worlds * max_instances_per_world);
+        iota_array_views = (uint32_t *)malloc(sizeof(uint32_t) * num_worlds * max_views_per_world);
+        sorted_instance_world_ids = (uint64_t *)malloc(sizeof(uint64_t) * num_worlds * max_instances_per_world);
     }
 
     return EngineInterop {
@@ -3052,7 +3086,10 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(voxel_gpu),
         std::move(voxel_cuda),
 #endif
-        voxel_buffer_hdl
+        voxel_buffer_hdl,
+        iota_array_instances,
+        iota_array_views,
+        sorted_instance_world_ids
     };
 }
 
@@ -3474,7 +3511,8 @@ Renderer::Renderer(uint32_t gpu_id,
       material_textures_(0),
       voxel_config_(voxel_config),
       gpu_id_(gpu_id),
-      num_worlds_(num_worlds)
+      num_worlds_(num_worlds),
+      gpu_input_(gpu_input)
 {
     {
         VkDescriptorPoolSize pool_sizes[] = {
@@ -4308,10 +4346,16 @@ static void packSky( const Device &dev,
 
 static void packLighting(const Device &dev,
                          HostBuffer &light_staging_buffer,
-                         const HeapArray<DirectionalLight> &lights)
+                         const HeapArray<DirectionalLight> &lights,
+                         const Renderer::FrameConfig &cfg)
 {
     DirectionalLight *staging = (DirectionalLight *)light_staging_buffer.ptr;
     memcpy(staging, lights.data(), sizeof(DirectionalLight) * InternalConfig::maxLights);
+
+    if (cfg.overrideLightDir) {
+        staging[0].lightDir = math::Vector4::fromVector3(-cfg.newLightDir, 1.0f);
+    }
+
     light_staging_buffer.flush(dev);
 }
 
@@ -4766,6 +4810,71 @@ static void issueCulling(Device &dev,
                               0, nullptr);
 }
 
+static void sortInstancesAndViewsCPU(EngineInterop *interop)
+{
+    for (uint32_t i = 0; i < *interop->bridge.totalNumInstances; ++i) {
+        interop->iotaArrayInstancesCPU[i] = i;
+    }
+
+    for (uint32_t i = 0; i < *interop->bridge.totalNumViews; ++i) {
+        interop->iotaArrayViewsCPU[i] = i;
+    }
+
+    { // Sort the indices based on worldID/entityID number
+        std::sort(interop->iotaArrayInstancesCPU, 
+                  interop->iotaArrayInstancesCPU + *interop->bridge.totalNumInstances,
+                  [&interop] (uint32_t a, uint32_t b) {
+                      return interop->bridge.instancesWorldIDs[a] < interop->bridge.instancesWorldIDs[b];
+                  });
+
+        std::sort(interop->iotaArrayViewsCPU,
+                  interop->iotaArrayViewsCPU + *interop->bridge.totalNumViews,
+                  [&interop] (uint32_t a, uint32_t b) {
+                      return interop->bridge.viewsWorldIDs[a] < interop->bridge.viewsWorldIDs[b];
+                  });
+    }
+
+    { // Write the sorted array of views and instances
+        for (uint32_t i = 0; i < *interop->bridge.totalNumInstances; ++i) {
+            *((InstanceData *)interop->instancesCPU->ptr + i) = 
+                interop->bridge.instances[interop->iotaArrayInstancesCPU[i]];
+
+            // We also need to have the sorted instance IDs in order to extract the offsets
+            interop->sortedInstanceWorldIDs[i] = 
+                interop->bridge.instancesWorldIDs[interop->iotaArrayInstancesCPU[i]];
+        }
+
+        for (uint32_t i = 0; i < *interop->bridge.totalNumViews; ++i) {
+            *((PerspectiveCameraData *)interop->viewsCPU->ptr + i) = 
+                interop->bridge.views[interop->iotaArrayViewsCPU[i]];
+        }
+    }
+}
+
+static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
+{
+    for (uint32_t i = 0; i < num_worlds; ++i) {
+        *((uint32_t *)interop->instanceOffsetsCPU->ptr + i) = 0;
+    }
+
+    for (uint32_t i = 1; i < *interop->bridge.totalNumInstances+1; ++i) {
+        uint32_t current_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i] >> 32);
+        uint32_t prev_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i-1] >> 32);
+
+        if (current_world_id != prev_world_id) {
+            *((uint32_t *)interop->instanceOffsetsCPU->ptr + prev_world_id) = i;
+        }
+    }
+
+    // Take care of edge care where there are no agents in some worlds
+    for (int32_t i = num_worlds-2; i >= 0; --i) {
+        if (*((uint32_t *)interop->instanceOffsetsCPU->ptr + i) == 0) {
+            *((uint32_t *)interop->instanceOffsetsCPU->ptr + i) = 
+                *((uint32_t *)interop->instanceOffsetsCPU->ptr + i + 1);
+        }
+    }
+}
+
 void Renderer::render(const ViewerCam &cam,
                       const FrameConfig &cfg)
 {
@@ -4774,6 +4883,18 @@ void Renderer::render(const ViewerCam &cam,
 
     { // Flush CPU buffers if we used CPU buffers
         if (engine_interop_.viewsCPU.has_value()) {
+            *engine_interop_.bridge.totalNumViews = engine_interop_.bridge.totalNumViewsCPUInc->load_acquire();
+            *engine_interop_.bridge.totalNumInstances = engine_interop_.bridge.totalNumInstancesCPUInc->load_acquire();
+
+            engine_interop_.bridge.totalNumViewsCPUInc->store_release(0);
+            engine_interop_.bridge.totalNumInstancesCPUInc->store_release(0);
+
+            printf("num views: %d; num instances %d\n", *engine_interop_.bridge.totalNumViews, *engine_interop_.bridge.totalNumInstances);
+
+            // First, need to perform the sorts
+            sortInstancesAndViewsCPU(&engine_interop_);
+            computeInstanceOffsets(&engine_interop_, num_worlds_);
+
             // Need to flush engine input state before copy
             engine_interop_.viewsCPU->flush(dev);
             engine_interop_.instancesCPU->flush(dev);
@@ -4807,7 +4928,7 @@ void Renderer::render(const ViewerCam &cam,
     }
 
     { // Pack the lighting data and copy it to the render input
-        packLighting(dev, frame.lightStaging, lights_);
+        packLighting(dev, frame.lightStaging, lights_, cfg);
         VkBufferCopy light_copy {
             .srcOffset = 0,
             .dstOffset = frame.lightOffset,
@@ -4881,8 +5002,10 @@ void Renderer::render(const ViewerCam &cam,
                              1, &offsets_data_copy);
     }
 
+#ifdef ENABLE_BATCH_RENDERER
     br_proto_->renderViews(draw_cmd, {cur_num_views, cur_num_instances, num_worlds_}, 
                            loaded_assets_, cur_frame_, cfg.batchViewIDX);
+#endif
 
     { // Issue shadow pass
         issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
@@ -5161,9 +5284,11 @@ void Renderer::render(const ViewerCam &cam,
 
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), draw_cmd);
 
+#ifdef ENABLE_BATCH_RENDERER
     { // Draw the quads
         issueQuadDraw(dev, draw_cmd, frame, quad_draw_);
     }
+#endif
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 

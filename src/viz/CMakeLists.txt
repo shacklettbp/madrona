@@ -19,6 +19,7 @@ if (NOT TARGET glfw)
 endif()
 
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/imgui")
+set(X86_SIMD_SORT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/x86-simd-sort/src")
 
 add_library(imgui_impl STATIC
     ${IMGUI_DIR}/imgui.cpp
@@ -69,6 +70,11 @@ target_compile_definitions(madrona_viewer PRIVATE
     "-DVIEWER_DATA_DIR=${CMAKE_CURRENT_SOURCE_DIR}/"
 )
 
+message(LOG "${X64_SIMD_SORT_DIR}")
+
 target_include_directories(madrona_viewer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../render"
+    "${X86_SIMD_SORT_DIR}"
 )
+
+# target_compile_options(madrona_viewer PRIVATE "-mavx512vl" "-mavx512dq")

@@ -248,6 +248,12 @@ struct EngineInterop {
 #endif
 
     VkBuffer voxelHdl;
+
+    uint32_t *iotaArrayInstancesCPU;
+    uint32_t *iotaArrayViewsCPU;
+
+    // We need the sorted instance world IDs in order to compute the instance offsets
+    uint64_t *sortedInstanceWorldIDs;
 };
 
 struct ImGuiRenderState {
@@ -292,6 +298,8 @@ public:
         uint32_t worldIDX;
         uint32_t viewIDX;
         uint32_t batchViewIDX;
+        uint32_t overrideLightDir;
+        math::Vector3 newLightDir;
     };
 
     Renderer(uint32_t gpu_id,
@@ -407,6 +415,11 @@ private:
     // This descriptor set contains information about the sky
     VkDescriptorSetLayout sky_data_layout_;
     VkDescriptorSet sky_data_set_;
+
+    bool gpu_input_;
+
+    // This is only used if we are on the CPU backend
+    uint32_t *iota_array_;
 };
 
 }

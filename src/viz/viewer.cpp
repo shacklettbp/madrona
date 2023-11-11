@@ -2,6 +2,7 @@
 #include <madrona/stack_alloc.hpp>
 #include <madrona/utils.hpp>
 
+#include "madrona/math.hpp"
 #include "viewer_renderer.hpp"
 
 #include <imgui.h>
@@ -44,6 +45,13 @@ struct Viewer::Impl {
     Impl(const Viewer::Config &cfg);
 
     inline void startFrame();
+
+    // This is going to render all the views which were registered
+    // by the ECS
+    inline void renderViews();
+
+    // This is going to render the viewer window itself (and support
+    // the fly camera)
     inline void render(float frame_duration);
 
     inline void loop(
@@ -226,6 +234,28 @@ static void cfgUI(Renderer::FrameConfig &cfg,
         }
 
         cfg.worldIDX = world_idx;
+    }
+
+    {
+        static bool override_sun_dir = false;
+        ImGui::Checkbox("Override Sun Direction", &override_sun_dir);
+
+        cfg.overrideLightDir = override_sun_dir;
+
+        if (override_sun_dir) {
+            static float theta = 0.0f;
+            ImGui::SliderFloat("Theta", &theta, 0.0f, 360.0f);
+
+            static float phi = 0.0f;
+            ImGui::SliderFloat("Phi", &phi, 0.0f, 90.0f);
+
+            float x = std::cos(math::toRadians(theta)) * std::sin(math::toRadians(phi));
+            float y = std::sin(math::toRadians(theta)) * std::sin(math::toRadians(phi));
+            float z = std::cos(math::toRadians(phi));
+
+            math::Vector3 dir = {x, y, z};
+            cfg.newLightDir = dir;
+        }
     }
 
     ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 7);

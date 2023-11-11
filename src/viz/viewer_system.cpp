@@ -22,8 +22,20 @@ struct ViewerSystemState {
     uint32_t *totalNumInstances;
 
     uint32_t *voxels;
-
     float aspectRatio;
+
+    // This is used if on the CPU backend
+    AtomicU32 *totalNumViewsCPU;
+    AtomicU32 *totalNumInstancesCPU;
+
+    // This is used if on the CPU backend
+    InstanceData *instancesCPU;
+    PerspectiveCameraData *viewsCPU;
+
+    // World IDs (keys used in the key-value sorting)
+    // Also only used when on the CPU backend
+    uint64_t *instanceWorldIDsCPU;
+    uint64_t *viewWorldIDsCPU;
 };
 
 struct RecordSystemState {
@@ -31,6 +43,7 @@ struct RecordSystemState {
 };
 
 inline void instanceTransformUpdate(Context &ctx,
+                                    Entity e,
                                     const Position &pos,
                                     const Rotation &rot,
                                     const Scale &scale,
@@ -38,12 +51,31 @@ inline void instanceTransformUpdate(Context &ctx,
                                     const Renderable &renderable)
 {
     // Just update the instance data that is associated with this entity
+#if defined(MADRONA_GPU_MODE)
+    (void)e;
+
     InstanceData &data = ctx.get<InstanceData>(renderable.renderEntity);
+#else
+    (void)renderable;
+
+    // Just update the instance data that is associated with this entity
+    auto &system_state = ctx.singleton<ViewerSystemState>();
+    uint32_t instance_id = system_state.totalNumInstancesCPU->fetch_add<sync::acq_rel>(1);
+
+    // Required for stable sorting on CPU
+    system_state.instanceWorldIDsCPU[instance_id] = 
+        ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
+
+    InstanceData &data = system_state.instancesCPU[instance_id];
+#endif
+
     data.position = pos;
     data.rotation = rot;
     data.scale = scale;
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
+
+    printf(".");
 }
 
 uint32_t * VizRenderingSystem::getVoxelPtr(Context &ctx) {
@@ -52,32 +84,51 @@ uint32_t * VizRenderingSystem::getVoxelPtr(Context &ctx) {
 }
 
 inline void viewTransformUpdate(Context &ctx,
+                                Entity e,
                                 const Position &pos,
                                 const Rotation &rot,
                                 const VizCamera &viz_cam)
 {
     Vector3 camera_pos = pos + viz_cam.cameraOffset;
 
+#if defined(MADRONA_GPU_MODE)
+    (void)e;
+
     PerspectiveCameraData &cam_data = 
         ctx.get<PerspectiveCameraData>(viz_cam.cameraEntity);
+#else
+    auto &system_state = ctx.singleton<ViewerSystemState>();
+    uint32_t view_id = system_state.totalNumViewsCPU->fetch_add<sync::acq_rel>(1);
 
+    // Required for stable sorting on CPU
+    system_state.viewWorldIDsCPU[view_id] = 
+        ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
+
+    PerspectiveCameraData &cam_data = system_state.viewsCPU[view_id];
+#endif
     cam_data.position = camera_pos;
     cam_data.rotation = rot.inv();
     cam_data.worldIDX = ctx.worldID().idx;
     *((float *)&cam_data.pad) = 42.0f;
+
+#if !defined(MADRONA_GPU_MODE)
+    float x_scale = viz_cam.fovScale / system_state.aspectRatio;
+    float y_scale = -viz_cam.fovScale;
+
+    cam_data.xScale = x_scale;
+    cam_data.yScale = y_scale;
+    cam_data.zNear = viz_cam.zNear;
+#endif
+
+    printf("x");
 }
 
 inline void exportCounts(Context &ctx,
                          ViewerSystemState &viewer_state)
 {
-#if 0
-    *viewer_state.numInstances = viewer_state.numInstancesInternal;
-    *viewer_state.numViews = viewer_state.numViewsInternal;
-
-    viewer_state.numInstancesInternal = 0;
-#endif
-
     if (ctx.worldID().idx == 0) {
+        printf("EXPORTING COUNTS\n");
+
 #if defined(MADRONA_GPU_MODE)
         auto *state_mgr = mwGPU::getStateManager();
         *viewer_state.totalNumViews = state_mgr->getArchetypeNumRows<
@@ -85,8 +136,16 @@ inline void exportCounts(Context &ctx,
         *viewer_state.totalNumInstances = state_mgr->getArchetypeNumRows<
             RenderableArchetype>();
 #else
-        *viewer_state.totalNumViews = 2;
-        *viewer_state.totalNumInstances = 20;
+
+#if 0
+        *viewer_state.totalNumViews = viewer_state.totalNumViewsCPU->load_relaxed();
+        *viewer_state.totalNumInstances = viewer_state.totalNumInstancesCPU->load_relaxed();
+
+        // Reset the atomic counters
+        viewer_state.totalNumViewsCPU->store_relaxed(0);
+        viewer_state.totalNumInstancesCPU->store_relaxed(0);
+#endif
+
 #endif
     }
 }
@@ -135,6 +194,7 @@ TaskGraphNodeID VizRenderingSystem::setupTasks(
     // double buffering
     auto instance_setup = builder.addToGraph<ParallelForNode<Context,
         instanceTransformUpdate,
+            Entity,
             Position,
             Rotation,
             Scale,
@@ -144,6 +204,7 @@ TaskGraphNodeID VizRenderingSystem::setupTasks(
 
     auto viewdata_update = builder.addToGraph<ParallelForNode<Context,
         viewTransformUpdate,
+            Entity,
             Position,
             Rotation,
             VizCamera
@@ -189,8 +250,26 @@ void VizRenderingSystem::init(Context &ctx,
 
     int32_t world_idx = ctx.worldID().idx;
 
+    // This is where the renderer will read out the totals
     system_state.totalNumViews = bridge->totalNumViews;
     system_state.totalNumInstances = bridge->totalNumInstances;
+
+#if !defined(MADRONA_GPU_MODE)
+    // This is just an atomic counter (final value will be moved to
+    // the totalNumViews/Instances variables).
+    system_state.totalNumViewsCPU = bridge->totalNumViewsCPUInc;
+    system_state.totalNumInstancesCPU = bridge->totalNumInstancesCPUInc;
+
+    system_state.totalNumViewsCPU->store_release(0);
+    system_state.totalNumInstancesCPU->store_release(0);
+
+    // This is only relevant for the CPU backend
+    system_state.instancesCPU = bridge->instances;
+    system_state.viewsCPU = bridge->views;
+
+    system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
+    system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
+#endif
 
     system_state.aspectRatio = 
         (float)bridge->renderWidth / (float)bridge->renderHeight;
@@ -218,15 +297,16 @@ void VizRenderingSystem::attachEntityToView(Context &ctx,
                                             float z_near,
                                             const math::Vector3 &camera_offset)
 {
+    float fov_scale = 1.0f / tanf(toRadians(vfov_degrees * 0.5f));
+
     Entity camera_entity = ctx.makeEntity<VizCameraArchetype>();
-    ctx.get<VizCamera>(e) = { camera_entity, camera_offset };
+    ctx.get<VizCamera>(e) = { camera_entity, fov_scale, z_near, camera_offset };
 
     PerspectiveCameraData &cam_data = 
         ctx.get<PerspectiveCameraData>(camera_entity);
 
     auto &state = ctx.singleton<ViewerSystemState>();
 
-    float fov_scale = 1.0f / tanf(toRadians(vfov_degrees * 0.5f));
     float x_scale = fov_scale / state.aspectRatio;
     float y_scale = -fov_scale;
 
