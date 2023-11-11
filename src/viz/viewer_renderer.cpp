@@ -4547,6 +4547,7 @@ void Renderer::render(const ViewerCam &cam,
                 prepare.size(), prepare.data());
     }
     else {
+#if 0
         array<VkImageMemoryBarrier, 1> prepare {{
             {
                 VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -4571,6 +4572,7 @@ void Renderer::render(const ViewerCam &cam,
                 0,
                 0, nullptr, 0, nullptr,
                 prepare.size(), prepare.data());
+#endif
     }
 
     render_pass_info.framebuffer = frame.imguiFBO.hdl;
