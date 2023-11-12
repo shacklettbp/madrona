@@ -306,6 +306,8 @@ public:
         uint32_t batchViewIDX;
         uint32_t overrideLightDir;
         math::Vector3 newLightDir;
+        bool requestedScreenshot;
+        const char *screenshotFilePath;
     };
 
     Renderer(uint32_t gpu_id,
@@ -428,6 +430,7 @@ private:
 
     // This is only used if we are on the CPU backend
     uint32_t *iota_array_;
+    std::unique_ptr<render::vk::HostBuffer> screenshot_buffer_;
 };
 
 }

@@ -64,6 +64,7 @@ public:
         L,
         T,
         F,
+        M,
         K1,
         K2,
         K3,
@@ -81,12 +82,14 @@ public:
 
     class UserInput {
     public:
-        inline UserInput(bool *keys_state);
+        inline UserInput(bool *keys_state, bool *press_state);
 
         inline bool keyPressed(KeyboardKey key) const;
+        inline bool keyHit(KeyboardKey key) const;
 
     private:
         bool *keys_state_;
+        bool *press_state_;
     };
 
     Viewer(const Config &cfg);
@@ -112,7 +115,7 @@ public:
 
 private:
     void loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
-              void *input_data, void (*step_fn)(void *), void *step_data, 
+              void *input_data, void (*step_fn)(void *), void *step_data,
               void (*ui_fn)(void *), void *ui_data);
 
     struct Impl;

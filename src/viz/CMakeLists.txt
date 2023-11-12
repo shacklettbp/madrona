@@ -19,7 +19,7 @@ if (NOT TARGET glfw)
 endif()
 
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/imgui")
-set(X86_SIMD_SORT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/x86-simd-sort/src")
+set(STB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/stb")
 
 add_library(imgui_impl STATIC
     ${IMGUI_DIR}/imgui.cpp
@@ -39,6 +39,7 @@ target_link_libraries(imgui_impl PRIVATE
     imgui
     glfw
     madrona_libcxx
+    madrona_noexceptrtti
     madrona_vk_hdrs
 )
 
@@ -48,6 +49,7 @@ add_library(madrona_viewer STATIC
     batch_renderer.hpp batch_renderer.cpp
     #render_context.cpp
     render_common.hpp
+    image_util.cpp
 )
 
 target_link_libraries(madrona_viewer PRIVATE
@@ -60,6 +62,10 @@ target_link_libraries(madrona_viewer PRIVATE
     imgui
     imgui_impl
     glfw
+)
+
+target_include_directories(madrona_viewer SYSTEM PRIVATE
+    ${STB_DIR}
 )
 
 if (TARGET madrona_render_vk_cuda)

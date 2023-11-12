@@ -34,6 +34,6 @@
 [submodule "external/tinyusdz"]
 	path = external/tinyusdz
 	url = https://github.com/syoyo/tinyusdz.git
-[submodule "external/x86-simd-sort"]
-	path = external/x86-simd-sort
-	url = https://github.com/intel/x86-simd-sort.git
+[submodule "external/stb"]
+	path = external/stb
+	url = https://github.com/nothings/stb.git

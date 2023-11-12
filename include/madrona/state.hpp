@@ -8,6 +8,7 @@
 #pragma once
 
 #include <madrona/ecs.hpp>
+#include <madrona/ecs_flags.hpp>
 #include <madrona/heap_array.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/span.hpp>
@@ -24,22 +25,6 @@
 namespace madrona {
 
 class StateManager;
-
-struct ArchetypeID {
-    uint32_t id;
-
-private:
-    ArchetypeID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
-
-struct ComponentID {
-    uint32_t id;
-
-private:
-    ComponentID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
 
 class Transaction {
 private:
@@ -120,12 +105,20 @@ public:
     template <typename ComponentT>
     ComponentID registerComponent();
 
+<<<<<<< HEAD
     // Just pass {} for the selector if no selector was needed and 0 if no
     // archetype flags are needed
     template <typename ArchetypeT>
     ArchetypeID registerArchetype(ComponentSelectorGeneric selector,
                                   ArchetypeFlags flags,
                                   CountT max_num_entities = 0);
+=======
+    template <typename ArchetypeT, typename... MetadataComponentTs>
+    ArchetypeID registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities_per_world);
+>>>>>>> origin/main
 
     template <typename SingletonT>
     void registerSingleton();
@@ -183,7 +176,7 @@ public:
                                   const Query<ComponentTs...> &query, Fn &&fn);
 
     template <typename... ComponentTs, typename Fn>
-    inline void iterateEntities(MADRONA_MW_COND(uint32_t world_id,)
+    inline void iterateQuery(MADRONA_MW_COND(uint32_t world_id,)
                                 const Query<ComponentTs...> &query, Fn &&fn);
 
     Transaction makeTransaction();
@@ -302,10 +295,19 @@ private:
 
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
+<<<<<<< HEAD
     void registerArchetype(uint32_t id, Span<ComponentID> components,
                            ComponentSelectorGeneric selector,
                            ArchetypeFlags flags,
                            CountT max_num_entities);
+=======
+    void registerArchetype(uint32_t id,
+                           ArchetypeFlags archetype_flags,
+                           CountT max_num_entities_per_world,
+                           CountT num_user_components,
+                           const ComponentID *components,
+                           const ComponentFlags *component_flags);
+>>>>>>> origin/main
 
     void * exportColumn(uint32_t archetype_id, uint32_t component_id);
 

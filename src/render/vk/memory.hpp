@@ -7,6 +7,7 @@
 #include <madrona/render/vk/backend.hpp>
 
 #include "utils.hpp"
+#include "vulkan/vulkan_core.h"
 
 namespace madrona {
 namespace render {
@@ -126,12 +127,14 @@ public:
     uint32_t height;
     uint32_t mipLevels;
     VkImage image;
+    VkMemoryRequirements reqs;
 
 private:
     LocalImage(uint32_t width,
                uint32_t height,
                uint32_t mip_levels,
                VkImage image,
+               VkMemoryRequirements reqs,
                AllocDeleter<false> deleter);
 
     AllocDeleter<false> deleter_;

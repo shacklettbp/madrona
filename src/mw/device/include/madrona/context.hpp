@@ -8,6 +8,7 @@
 #pragma once
 
 #include <madrona/state.hpp>
+#include <madrona/registry.hpp>
 
 #include "mw_gpu/worker_init.hpp"
 
@@ -50,6 +51,12 @@ public:
     inline WorldID worldID() const { return world_id_; }
 
     inline WorldBase & data() const { return *data_; }
+    
+    template <typename... ComponentTs>
+    inline Query<ComponentTs...> query();
+
+    template <typename... ComponentTs, typename Fn>
+    inline void iterateQuery(Query<ComponentTs...> &query, Fn &&fn);
 
 protected:
     WorldBase *data_;

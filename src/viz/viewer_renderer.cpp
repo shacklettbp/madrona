@@ -32,12 +32,8 @@
 
 #include <signal.h>
 
-#define STB_IMAGE_STATIC
-#define STB_IMAGE_IMPLEMENTATION
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-#include "stb_image.h"
-#pragma clang diagnostic pop
+#include <stb_image.h>
+#include <stb_image_write.h>
 
 #define ENABLE_BATCH_RENDERER
 
@@ -583,7 +579,7 @@ static void issueVoxelGen(Device& dev,
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
 
-    render::shader::VoxelGenPushConst push_const = {voxel_config.xLength,voxel_config.yLength,voxel_config.zLength, 0.8, 8 };
+    shader::VoxelGenPushConst push_const = {voxel_config.xLength,voxel_config.yLength,voxel_config.zLength, 0.8, 9 };
 
     dev.dt.cmdPushConstants(draw_cmd,
         pipeline.layout,
@@ -3515,7 +3511,8 @@ Renderer::Renderer(uint32_t gpu_id,
       voxel_config_(voxel_config),
       gpu_id_(gpu_id),
       num_worlds_(num_worlds),
-      gpu_input_(gpu_input)
+      gpu_input_(gpu_input),
+      screenshot_buffer_()
 {
     {
         VkDescriptorPoolSize pool_sizes[] = {
@@ -3670,6 +3667,8 @@ Renderer::Renderer(uint32_t gpu_id,
                   br_proto_->getPBRSet(0),
                   &frames_[i]);
     }
+
+    screenshot_buffer_ = std::make_unique<render::vk::HostBuffer>(alloc.makeStagingBuffer(frames_[0].fb.colorAttachment.reqs.size));
 }
 
 Renderer::~Renderer()
@@ -4819,6 +4818,8 @@ static void issueCulling(Device &dev,
 void Renderer::render(const ViewerCam &cam,
                       const FrameConfig &cfg)
 {
+    static uint64_t global_frame_no = 0;
+
     Frame &frame = frames_[cur_frame_];
     uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
 
@@ -5144,6 +5145,101 @@ void Renderer::render(const ViewerCam &cam,
         issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, cfg.viewIDX);
     }
 
+    bool prepare_screenshot = cfg.requestedScreenshot || (getenv("SCREENSHOT_PATH") && global_frame_no == 0);
+
+    if (prepare_screenshot) {
+        array<VkImageMemoryBarrier, 1> prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.fb.colorAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        VkBufferMemoryBarrier buffer_prepare = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = screenshot_buffer_->buffer,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr, 1, &buffer_prepare,
+                prepare.size(), prepare.data());
+
+        VkBufferImageCopy region = {
+            .bufferOffset = 0, .bufferRowLength = 0, .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            },
+            .imageOffset = {},
+            .imageExtent = {frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 1}
+        };
+
+        dev.dt.cmdCopyImageToBuffer(draw_cmd, frame.fb.colorAttachment.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                    screenshot_buffer_->buffer, 1, &region);
+
+        prepare[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        prepare[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        prepare[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        prepare[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                prepare.size(), prepare.data());
+    }
+    else {
+#if 0
+        array<VkImageMemoryBarrier, 1> prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.fb.colorAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                prepare.size(), prepare.data());
+#endif
+    }
+
     render_pass_info.framebuffer = frame.imguiFBO.hdl;
     render_pass_info.renderPass = imgui_render_state_.renderPass;
     dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
@@ -5276,6 +5372,28 @@ void Renderer::render(const ViewerCam &cam,
                      1, &frame.renderFinished);
 
     cur_frame_ = (cur_frame_ + 1) % frames_.size();
+
+    if (prepare_screenshot) {
+        const char *ss_path = cfg.screenshotFilePath;
+
+        if (!cfg.requestedScreenshot) {
+            ss_path = getenv("SCREENSHOT_PATH");
+        }
+
+        dev.dt.deviceWaitIdle(dev.hdl);
+
+        void *pixels = screenshot_buffer_->ptr;
+
+        std::string dst_file = ss_path;
+        int ret = stbi_write_bmp(dst_file.c_str(), frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 4,
+            pixels);
+
+        if (ret) {
+            printf("Wrote %s\n", dst_file.c_str());
+        }
+    }
+
+    global_frame_no++;
 }
 
 void Renderer::renderViews(const FrameConfig &cfg, bool just_do_transition)

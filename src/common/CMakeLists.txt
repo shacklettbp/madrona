@@ -50,6 +50,17 @@ elseif (FRONTEND_MSVC)
     endif()
 endif()
 
+add_library(madrona_err STATIC
+    ${MADRONA_INC_DIR}/crash.hpp crash.cpp
+)
+
+target_link_libraries(madrona_err
+    PUBLIC
+        madrona_hdrs
+    PRIVATE
+        madrona_noexceptrtti
+)
+
 add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/memory.hpp ${MADRONA_INC_DIR}/memory.inl memory.cpp
     ${MADRONA_INC_DIR}/stack_alloc.hpp ${MADRONA_INC_DIR}/stack_alloc.inl
@@ -57,7 +68,6 @@ add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/heap_array.hpp
     ${MADRONA_INC_DIR}/span.hpp
     ${MADRONA_INC_DIR}/utils.hpp
-    ${MADRONA_INC_DIR}/crash.hpp crash.cpp
     ${MADRONA_INC_DIR}/ecs.hpp ${MADRONA_INC_DIR}/ecs.inl
     ${MADRONA_INC_DIR}/type_tracker.hpp ${MADRONA_INC_DIR}/type_tracker.inl
         type_tracker.cpp
@@ -77,22 +87,12 @@ if (MADRONA_ENABLE_TRACING)
     )
 endif()
 
-# Disable exceptions & RTTI
-if (FRONTEND_GCC OR FRONTEND_CLANG)
-    target_compile_options(madrona_common PUBLIC
-        -fno-exceptions -fno-rtti)
-elseif (FRONTEND_MSVC)
-    # Disabling exceptions in MSVC seems painful
-    target_compile_options(madrona_common PUBLIC
-        /GR-)
-else ()
-    message(FATAL_ERROR "Unsupported compiler frontend")
-endif()
-
 target_link_libraries(madrona_common
     PUBLIC 
         madrona_hdrs
         madrona_libcxx
+        madrona_err
+        madrona_noexceptrtti
 )
 
 set_property(TARGET madrona_common PROPERTY
@@ -105,19 +105,26 @@ if (CUDAToolkit_FOUND)
         ${MADRONA_INC_DIR}/cuda_utils.hpp ${MADRONA_INC_DIR}/cuda_utils.inl
             cuda_utils.cpp
     )
-    
+
     target_compile_definitions(madrona_cuda
         PUBLIC
             MADRONA_CUDA_SUPPORT=1
     )
-    
+
     target_link_libraries(madrona_cuda
         PUBLIC
             CUDA::cudart
         PRIVATE
             CUDA::cuda_driver
-            madrona_common
+            madrona_err
+            madrona_noexceptrtti
     )
+
+    if (NOT WIN32) # FIXME
+        target_link_libraries(madrona_cuda PRIVATE 
+            madrona_libcxx_hdrs
+        )
+    endif ()
 
     if (WIN32)
         get_property(MULTI_CFG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)

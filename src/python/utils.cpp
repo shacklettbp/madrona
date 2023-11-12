@@ -1,4 +1,5 @@
 #include <madrona/py/utils.hpp>
+#include <madrona/heap_array.hpp>
 
 #ifdef MADRONA_CUDA_SUPPORT
 #include <madrona/cuda_utils.hpp>
@@ -7,6 +8,7 @@
 #include <cassert>
 #include <cstring>
 #include <cstdio>
+#include <string>
 
 namespace madrona::py {
 
@@ -27,10 +29,6 @@ void CudaSync::wait(uint64_t strm)
 #ifdef MADRONA_LINUX
 void CudaSync::key_() {}
 #endif
-#endif
-
-#ifdef MADRONA_LINUX
-void PyExecMode::key_() {}
 #endif
 
 Tensor::Printer::Printer(Printer &&o)
@@ -108,6 +106,14 @@ Tensor::Tensor(void *dev_ptr, ElementType type,
            num_dimensions_ * sizeof(int64_t));
 }
 
+Tensor::Tensor(const Tensor &o)
+    : dev_ptr_(o.dev_ptr_),
+      type_(o.type_),
+      gpu_id_(o.gpu_id_),
+      num_dimensions_(o.num_dimensions_),
+      dimensions_(o.dimensions_)
+{}
+
 Tensor::Printer Tensor::makePrinter() const
 {
     int64_t num_items = dimensions_[num_dimensions_ - 1];
@@ -151,9 +157,106 @@ int64_t Tensor::numBytesPerItem() const
     }
 }
 
-#ifdef MADRONA_LINUX
-void Tensor::key_() {}
-#endif
+struct TrainInterface::Impl {
+    HeapArray<NamedTensor> obs;
+    Tensor actions;
+    Tensor rewards;
+    Tensor dones;
+    Tensor resets;
+    Optional<Tensor> policyAssignments;
 
+    HeapArray<NamedTensor> stats;
+    HeapArray<std::string> nameStrings;
+};
+
+TrainInterface::TrainInterface(
+        std::initializer_list<NamedTensor> obs,
+        Tensor actions,
+        Tensor rewards,
+        Tensor dones,
+        Tensor resets,
+        Optional<Tensor> policy_assignments,
+        std::initializer_list<NamedTensor> stats)
+    : impl_(new Impl {
+        .obs = HeapArray<NamedTensor>(obs.size()),
+        .actions = actions,
+        .rewards = rewards,
+        .dones = dones,
+        .resets = resets,
+        .policyAssignments = policy_assignments,
+        .stats = HeapArray<NamedTensor>(stats.size()),
+        .nameStrings = HeapArray<std::string>(obs.size() + stats.size()),
+    })
+{
+    const NamedTensor *src_obs = std::data(obs);
+    const NamedTensor *src_stats = std::data(stats);
+
+    CountT cur_str_idx = 0;
+    for (CountT i = 0; i < (CountT)obs.size(); i++) {
+        impl_->nameStrings.emplace(cur_str_idx, src_obs[i].name);
+        impl_->obs.emplace(i, NamedTensor {
+            impl_->nameStrings[cur_str_idx].c_str(),
+            src_obs[i].hdl,
+        });
+
+        cur_str_idx += 1;
+    }
+
+    for (CountT i = 0; i < (CountT)stats.size(); i++) {
+        impl_->nameStrings.emplace(cur_str_idx, src_stats[i].name);
+        impl_->stats.emplace(i, NamedTensor {
+            impl_->nameStrings[cur_str_idx].c_str(),
+            src_stats[i].hdl,
+        });
+
+        cur_str_idx += 1;
+    }
+}
+
+TrainInterface::TrainInterface(TrainInterface &&) = default;
+TrainInterface::~TrainInterface() = default;
+
+Span<const TrainInterface::NamedTensor> TrainInterface::observations() const
+{
+    return Span<const NamedTensor>(
+        impl_->obs.data(), impl_->obs.size());
+}
+
+Tensor TrainInterface::actions() const
+{
+    return impl_->actions;
+}
+
+Tensor TrainInterface::rewards() const
+{
+    return impl_->rewards;
+}
+
+Tensor TrainInterface::dones() const
+{
+    return impl_->dones;
+}
+
+Tensor TrainInterface::resets() const
+{
+    return impl_->resets;
+}
+
+Optional<Tensor> TrainInterface::policyAssignments() const
+{
+    return impl_->policyAssignments;
+}
+
+Span<const TrainInterface::NamedTensor> TrainInterface::stats() const
+{
+    return Span<const NamedTensor>(
+        impl_->stats.data(), impl_->stats.size());
+}
+
+#ifdef MADRONA_LINUX
+void PyExecMode::key_() {}
+void Tensor::key_() {}
+void TrainInterface::key_() {}
+#endif
 
 }

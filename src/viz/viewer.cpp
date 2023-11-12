@@ -161,18 +161,18 @@ static void handleCamera(GLFWwindow *window,
 static float throttleFPS(chrono::time_point<chrono::steady_clock> start) {
     using namespace chrono;
     using namespace chrono_literals;
-    
+
     auto end = steady_clock::now();
     while (end - start <
            InternalConfig::nsPerFrameLongWait) {
         this_thread::sleep_for(1ms);
-    
+
         end = steady_clock::now();
     }
-    
+
     while (end - start < InternalConfig::nsPerFrame) {
         this_thread::yield();
-    
+
         end = steady_clock::now();
     }
 
@@ -213,6 +213,14 @@ static void cfgUI(Renderer::FrameConfig &cfg,
                   int32_t *batch_view)
 {
     ImGui::Begin("Controls");
+
+    ImGui::TextUnformatted("Utilities");
+    bool requested_screenshot = ImGui::Button("Take Screenshot");
+    static char output_file_path[256] = "screenshot.bmp";
+    ImGui::InputText("Screenshot Output File (.bmp)", output_file_path, 256);
+
+    cfg.requestedScreenshot = requested_screenshot;
+    cfg.screenshotFilePath = output_file_path;
 
     ImGui::TextUnformatted("Simulation Settings");
     ImGui::Separator();
@@ -470,8 +478,8 @@ void Viewer::Impl::render(float frame_duration)
     renderer.render(cam, alt_frame_cfg);
 }
 
-Viewer::UserInput::UserInput(bool *keys_state)
-    : keys_state_(keys_state)
+Viewer::UserInput::UserInput(bool *keys_state, bool *press_state)
+    : keys_state_(keys_state), press_state_(press_state)
 {}
 
 void Viewer::Impl::loop(
@@ -482,62 +490,83 @@ void Viewer::Impl::loop(
     GLFWwindow *window = renderer.window.platformWindow;
 
     std::array<bool, (uint32_t)KeyboardKey::NumKeys> key_state;
+    std::array<bool, (uint32_t)KeyboardKey::NumKeys> press_state;
+    std::array<bool, (uint32_t)KeyboardKey::NumKeys> prev_key_state;
     utils::zeroN<bool>(key_state.data(), key_state.size());
+    utils::zeroN<bool>(prev_key_state.data(), prev_key_state.size());
+    utils::zeroN<bool>(press_state.data(), press_state.size());
 
     float frame_duration = InternalConfig::secondsPerFrame;
     auto last_sim_tick_time = chrono::steady_clock::now();
     while (!glfwWindowShouldClose(window) && !shouldExit) {
         if (frameCfg.viewIDX != 0) {
             key_state[(uint32_t)KeyboardKey::W] |=
-                (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::A] |=
-                (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::S] |=
-                (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::D] |=
-                (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Q] |=
-                (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::E] |=
-                (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::R] |=
-                (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::R] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::R]) &&
+                    (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::X] |=
-                (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::X] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::X]) &&
+                    (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
+            key_state[(uint32_t)KeyboardKey::M] |=
+                    (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::M] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::M]) &&
+                    (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Z] |=
-                (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::Z] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::Z]) &&
+                    (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::C] |=
-                (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::G] |=
-                (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::L] |=
-                (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::L] |=
+                    (!prev_key_state[(uint32_t)KeyboardKey::L]) &&
+                    (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Space] |=
-                (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::T] |=
-                (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::F] |=
-                (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K1] |=
-                (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K2] |=
-                (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K3] |=
-                (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K4] |=
-                (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K5] |=
-                (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K6] |=
-                (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K7] |=
-                (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K8] |=
-                (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K9] |=
-                (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Shift] |=
-                (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
+                    (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
         } else {
             handleCamera(window, cam, cameraMoveSpeed);
         }
@@ -548,10 +577,12 @@ void Viewer::Impl::loop(
 
         if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
             if (frameCfg.viewIDX != 0) {
-                UserInput user_input(key_state.data());
+                prev_key_state = key_state;
+                UserInput user_input(key_state.data(),press_state.data());
                 input_fn(input_data, frameCfg.worldIDX,
                          frameCfg.viewIDX - 1, user_input);
                 utils::zeroN<bool>(key_state.data(), key_state.size());
+                utils::zeroN<bool>(press_state.data(), press_state.size());
             }
 
             step_fn(step_data);

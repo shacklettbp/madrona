@@ -11,15 +11,18 @@ void ECSRegistry::registerComponent()
 template <typename ArchetypeT>
 void ECSRegistry::registerArchetype()
 {
-    state_mgr_->registerArchetype<ArchetypeT>({}, ArchetypeNone);
+    state_mgr_->registerArchetype<ArchetypeT>(
+        ComponentMetadataSelector {}, ArchetypeFlags::None, 0);
 }
 
-template <typename ArchetypeT, typename ...ComponentT>
-void ECSRegistry::registerArchetype(ComponentSelector<ComponentT...> selector,
-                                    ArchetypeFlags flags)
+template <typename ArchetypeT, typename... MetadataComponentTs>
+void ECSRegistry::registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities_per_world)
 {
-    state_mgr_->registerArchetype<ArchetypeT>(selector.makeGenericSelector(),
-                                              flags);
+    state_mgr_->registerArchetype<ArchetypeT>(
+        component_metadatas, archetype_flags, max_num_entities_per_world);
 }
 
 template <typename SingletonT>

@@ -5,41 +5,6 @@
 namespace madrona {
 
 template <typename ComponentT>
-void ECSRegistry::registerComponent()
-{
-    state_mgr_->registerComponent<ComponentT>();
-}
-
-template <typename ArchetypeT>
-void ECSRegistry::registerArchetype()
-{
-    // Just pass an empty selector
-    state_mgr_->registerArchetype<ArchetypeT>({{}, {}}, ArchetypeNone);
-}
-
-template <typename ArchetypeT, typename ...ComponentT>
-void ECSRegistry::registerArchetype(ComponentSelector<ComponentT...> selector,
-                                    ArchetypeFlags flags)
-{
-    state_mgr_->registerArchetype<ArchetypeT>(selector.makeGenericSelector(),
-                                              flags);
-}
-
-template <typename ArchetypeT>
-void ECSRegistry::registerFixedSizeArchetype(CountT max_num_entities)
-{
-    // FIXME
-    (void)max_num_entities;
-    state_mgr_->registerArchetype<ArchetypeT>({}, ArchetypeNone);
-}
-
-template <typename SingletonT>
-void ECSRegistry::registerSingleton()
-{
-    state_mgr_->registerSingleton<SingletonT>();
-}
-
-template <typename ComponentT>
 ComponentID StateManager::registerComponent()
 {
     uint32_t id = TypeTracker::registerType<ComponentT>(
@@ -50,19 +15,6 @@ ComponentID StateManager::registerComponent()
     return ComponentID {
         id,
     };
-}
-
-template <typename ArchetypeT, typename ComponentT>
-void ECSRegistry::exportColumn(int32_t slot)
-{
-    export_ptr_[slot] =
-        state_mgr_->getArchetypeComponent<ArchetypeT, ComponentT>();
-}
-
-template <typename SingletonT>
-void ECSRegistry::exportSingleton(int32_t slot)
-{
-    export_ptr_[slot] = state_mgr_->getSingletonColumn<SingletonT>();
 }
 
 template <template <typename...> typename T, typename ...ComponentTs>
@@ -79,8 +31,14 @@ struct StateManager::RegistrationHelper<T<ComponentTs...>> {
         TypeTracker::registerType<LookupT>(idx);
     }
 
-    static std::array<ComponentID, sizeof...(ComponentTs)>
-        registerArchetypeComponents()
+    template <typename... MetadataComponentTs>
+    static std::pair<
+            std::array<ComponentID, sizeof...(ComponentTs)>,
+            std::array<ComponentFlags, sizeof...(ComponentTs)>
+        >
+        registerArchetypeComponents(
+            const ComponentMetadataSelector<MetadataComponentTs...> &
+                component_metadata)
     {
         uint32_t column_idx = user_component_offset_;
 
@@ -91,26 +49,52 @@ struct StateManager::RegistrationHelper<T<ComponentTs...>> {
             ...
         };
 
-        return archetype_components;
-    }
+        std::array<ComponentFlags, sizeof...(ComponentTs)> component_flags;
+        component_flags.fill(ComponentFlags::None);
 
+        int32_t cur_metadata_idx = 0;
+        auto setFlags = [&]<typename ComponentT>() {
+            ComponentFlags cur_flags =
+                component_metadata.flags[cur_metadata_idx++];
+
+            using LookupT = typename ArchetypeRef<ArchetypeT>::
+                template ComponentLookup<ComponentT>;
+
+            uint32_t flag_out_idx =
+                TypeTracker::typeID<LookupT>() - user_component_offset_;
+
+            component_flags[flag_out_idx] = cur_flags;
+        };
+
+        ( setFlags.template operator()<MetadataComponentTs>(), ... );
+
+        return {
+            archetype_components,
+            component_flags,
+        };
+    }
 };
 
-template <typename ArchetypeT>
-ArchetypeID StateManager::registerArchetype(ComponentSelectorGeneric selector,
-                                            ArchetypeFlags flags)
+template <typename ArchetypeT, typename... MetadataComponentTs>
+ArchetypeID StateManager::registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities_per_world)
 {
     uint32_t archetype_id = TypeTracker::registerType<ArchetypeT>(
         &StateManager::num_archetypes_);
 
     using Base = typename ArchetypeT::Base;
 
-    auto archetype_components =
-        RegistrationHelper<Base>::registerArchetypeComponents();
+    auto [archetype_components, component_flags] =
+        RegistrationHelper<Base>::registerArchetypeComponents(
+            component_metadatas);
 
-    registerArchetype(archetype_id, archetype_components.data(),
-                      selector,
-                      flags,
+    registerArchetype(archetype_id,
+                      archetype_flags,
+                      max_num_entities_per_world,
+                      archetype_components.data(),
+                      component_flags.data(),
                       archetype_components.size());
 
     return ArchetypeID {
@@ -121,12 +105,13 @@ ArchetypeID StateManager::registerArchetype(ComponentSelectorGeneric selector,
 template <typename SingletonT>
 void StateManager::registerSingleton()
 {
+    uint32_t num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
+
     using ArchetypeT = SingletonArchetype<SingletonT>;
 
     registerComponent<SingletonT>();
-    registerArchetype<ArchetypeT>({{}, {}}, ArchetypeNone);
-
-    uint32_t num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
+    registerArchetype<ArchetypeT>(
+        ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
 
     for (uint32_t i = 0; i < num_worlds; i++) {
         makeEntityNow<ArchetypeT>(WorldID { int32_t(i) });
@@ -150,6 +135,9 @@ Query<ComponentTs...> StateManager::query()
 
     QueryRef *ref = &Query<ComponentTs...>::ref_;
 
+    // If necessary, create the query templated on the passed in ComponentTs.
+    // Double blocks: threads check the atomic here, then additionally
+    // attempt to acquire a SpinLock in StateManager::makeQuery.
     if (ref->numReferences.load_acquire() == 0) {
         makeQuery(component_ids.data(), component_ids.size(), ref);
     }
@@ -161,7 +149,6 @@ template <typename Fn, int32_t... Indices>
 void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
         std::integer_sequence<int32_t, Indices...>)
 {
-
     uint32_t *query_values = &query_data_[query_ref->offset];
     int32_t num_archetypes = query_ref->numMatchingArchetypes;
 
@@ -190,6 +177,48 @@ void StateManager::iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn)
 
     iterateArchetypesRawImpl(query_ref, std::forward<Fn>(fn),
                              IndicesWrapper());
+}
+
+template<typename Fn, int32_t... Indices>
+void StateManager::iterateQueryImpl(int32_t world_id, QueryRef *query_ref, 
+        Fn &&fn, 
+        std::integer_sequence<int32_t, Indices...>) 
+{
+
+    
+    uint32_t *query_values = &query_data_[query_ref->offset];
+    int32_t num_archetypes = query_ref->numMatchingArchetypes;
+
+    for (int i = 0; i < num_archetypes; i++) {
+        uint32_t archetype_idx = *query_values;
+        query_values += 1;
+
+        Table &tbl = archetypes_[archetype_idx]->tbl;
+
+        int32_t worldOffset = 
+            getArchetypeWorldOffsets(archetype_idx)[world_id];
+        int32_t worldArchetypeCount =
+            getArchetypeWorldCounts(archetype_idx)[world_id];
+
+        for (int i = 0; i < worldArchetypeCount; ++i) {
+            fn(worldOffset + i, tbl.columns[query_values[Indices]] ...);
+        }
+
+        query_values += sizeof...(Indices);
+    }
+}
+
+template<int32_t num_components, typename Fn>
+void StateManager::iterateQuery(uint32_t world_id, QueryRef *query_ref,
+    Fn &&fn) 
+{
+
+    using IndicesWrapper =
+        std::make_integer_sequence<int32_t, num_components>;
+
+    iterateQueryImpl(world_id, query_ref, std::forward<Fn>(fn),
+                             IndicesWrapper());
+
 }
 
 uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)
@@ -329,17 +358,31 @@ void * StateManager::getArchetypeComponent(uint32_t archetype_id,
 }
 
 template <typename ArchetypeT>
-int32_t * StateManager::getArchetypeSortOffsets()
+int32_t * StateManager::getArchetypeWorldOffsets()
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
 
-    return getArchetypeSortOffsets(archetype_id);
+    return getArchetypeWorldOffsets(archetype_id);
 }
 
-int32_t * StateManager::getArchetypeSortOffsets(uint32_t archetype_id)
+int32_t * StateManager::getArchetypeWorldOffsets(uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
-    return archetype.sortOffsets;
+    return archetype.worldOffsets;
+}
+
+template <typename ArchetypeT>
+int32_t * StateManager::getArchetypeWorldCounts()
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+
+    return getArchetypeWorldCounts(archetype_id);
+}
+
+int32_t * StateManager::getArchetypeWorldCounts(uint32_t archetype_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    return archetype.worldCounts;
 }
 
 int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
@@ -371,11 +414,11 @@ void * StateManager::getArchetypeColumn(uint32_t archetype_id,
 }
 
 template <typename ArchetypeT>
-void StateManager::setArchetypeSortOffsets(void *ptr)
+void StateManager::setArchetypeWorldOffsets(void *ptr)
 {
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     auto &archetype = *archetypes_[archetype_id];
-    archetype.sortOffsets = (int32_t *)ptr;
+    archetype.worldOffsets = (int32_t *)ptr;
 }
 
 uint32_t StateManager::getArchetypeColumnBytesPerRow(uint32_t archetype_id,
@@ -423,6 +466,18 @@ bool StateManager::archetypeNeedsSort(uint32_t archetype_id) const
 void StateManager::archetypeClearNeedsSort(uint32_t archetype_id)
 {
     archetypes_[archetype_id]->needsSort = false;
+}
+
+template <typename ArchetypeT, typename ComponentT>
+ComponentT * StateManager::exportColumn()
+{
+    return getArchetypeComponent<ArchetypeT, ComponentT>();
+}
+
+template <typename SingletonT>
+SingletonT * StateManager::exportSingleton()
+{
+    return getSingletonColumn<SingletonT>();
 }
 
 }

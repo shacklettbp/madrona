@@ -7,6 +7,7 @@
  */
 #include "madrona/selector.hpp"
 #include <madrona/state.hpp>
+#include <madrona/registry.hpp>
 #include <madrona/mw_gpu/megakernel_consts.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 
@@ -16,7 +17,7 @@ Table::Table()
     : columns(),
       columnSizes(),
       columnMappedBytes(),
-      perComponentFlags(),
+      columnFlags(),
       maxColumnSize(),
       numColumns(),
       numRows(0),
@@ -78,9 +79,9 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
     tbl.growLock.unlock();
 }
 
-ECSRegistry::ECSRegistry(StateManager &state_mgr, void **export_ptr)
-    : state_mgr_(&state_mgr),
-      export_ptr_(export_ptr)
+ECSRegistry::ECSRegistry(StateManager *state_mgr, void **export_ptr)
+    : state_mgr_(state_mgr),
+      export_ptrs_(export_ptr)
 {}
 
 StateManager::StateManager(uint32_t)
@@ -157,23 +158,27 @@ void StateManager::registerComponent(uint32_t id, uint32_t alignment,
     });
 }
 
-StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
-                                             uint32_t num_user_components,
-                                             uint32_t num_columns,
-                                             TypeInfo *type_infos,
-                                             IntegerMapPair *lookup_input,
-                                             ComponentSelectorGeneric selector,
-                                             ArchetypeFlags flags)
+StateManager::ArchetypeStore::ArchetypeStore(
+        uint32_t offset,
+        ArchetypeFlags archetype_flags,
+        uint32_t max_num_entities_per_world,
+        uint32_t num_user_components,
+        uint32_t num_columns,
+        TypeInfo *type_infos,
+        IntegerMapPair *lookup_input,
+        ComponentFlags *component_flags)
     : componentOffset(offset),
       numUserComponents(num_user_components),
       tbl(),
       columnLookup(lookup_input, num_user_components),
-      sortOffsets(nullptr),
+      worldOffsets(nullptr),
+      worldCounts(nullptr),
       needsSort(false)
 {
     using namespace mwGPU;
 
     uint32_t num_worlds = GPUImplConsts::get().numWorlds;
+    uint32_t max_num_entities = max_num_entities_per_world * num_worlds;
     HostAllocator *alloc = getHostAllocator();
 
     tbl.numColumns = num_columns;
@@ -183,58 +188,72 @@ StateManager::ArchetypeStore::ArchetypeStore(uint32_t offset,
 
     uint32_t max_column_size = 0;
 
-    for (int i = 0; i < selector.ids.size(); ++i) {
-        // Convert the ID to a column ID
-        assert(columnLookup.exists(selector.ids[i]));
-        uint32_t column_id = *columnLookup.lookup(selector.ids[i]);
-        tbl.perComponentFlags[column_id] = selector.flags[i];
-
-        HostPrint::log("Selected component {} (column {}) to have flag {}\n",
-                       (int)selector.ids[i], (int)column_id, (int)selector.flags[i]);
+    tbl.columnFlags[0] = ComponentFlags::None;
+    tbl.columnFlags[1] = ComponentFlags::None;
+    for (int32_t i = 0; i < (int32_t)num_user_components; i++) {
+        tbl.columnFlags[num_columns - num_user_components + i] =
+            component_flags[i];
     }
 
-    for (int i = 0 ; i < (int)num_columns; i++) {
-        uint64_t reserve_bytes = (uint64_t)type_infos[i].numBytes *
-            (uint64_t)Table::maxRowsPerTable;
+    for (int32_t i = 0; i < (int32_t)num_columns; i++) {
+        uint64_t col_row_bytes = type_infos[i].numBytes;
+
+        uint64_t reserve_bytes =
+            col_row_bytes * (uint64_t)Table::maxRowsPerTable;
         reserve_bytes = alloc->roundUpReservation(reserve_bytes);
 
-        uint64_t init_bytes =
-            (uint64_t)type_infos[i].numBytes * (uint64_t)num_worlds;
+        uint64_t init_bytes = col_row_bytes * (uint64_t)num_worlds;
         init_bytes = alloc->roundUpAlloc(init_bytes);
 
-        if (tbl.perComponentFlags[i] & ComponentSelectImportPointer) {
-            // We don't perfomr any allocations
-            HostPrint::log("We selected component at column {} to import\n", i);
-        }
-        else {
-            tbl.columns[i] = alloc->reserveMemory(reserve_bytes, init_bytes);
+        ComponentFlags component_flag = tbl.columnFlags[i];
+        if ((component_flag & ComponentFlags::ImportMemory) !=
+                ComponentFlags::ImportMemory) {
+            if (max_num_entities == 0) {
+                tbl.columns[i] =
+                    alloc->reserveMemory(reserve_bytes, init_bytes);
+            } else {
+                uint64_t alloc_bytes = col_row_bytes * max_num_entities;
+                tbl.columns[i] = alloc->allocMemory(alloc_bytes);
+            }
         }
 
-        tbl.columnSizes[i] = type_infos[i].numBytes;
+        tbl.columnSizes[i] = col_row_bytes;
         tbl.columnMappedBytes[i] = init_bytes;
 
-        max_column_size = std::max(tbl.columnSizes[i], max_column_size);
+        max_column_size = std::max((uint32_t)col_row_bytes, max_column_size);
 
-        int num_mapped_in_column = init_bytes / tbl.columnSizes[i];
+        int32_t num_mapped_in_column = init_bytes / col_row_bytes;
 
         min_mapped_rows = min(num_mapped_in_column, min_mapped_rows);
     }
 
-    if (flags & ArchetypeImportOffsets) { // Allocate space for the sorting offsets 
-                                          // (one offset per world)
-        HostPrint::log("Importing offsets for archetype!");
+    if ((archetype_flags & ArchetypeFlags::ImportOffsets) !=
+            ArchetypeFlags::ImportOffsets) {
+        // Allocate space for the sorting offsets (one offset per world)
         uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
         bytes = alloc->roundUpReservation(bytes);
-        sortOffsets = (int32_t *)alloc->allocMemory(bytes);
+        worldOffsets = (int32_t *)alloc->allocMemory(bytes);
     }
 
+    // Allocate space for the counts (one count per world)
+    uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
+    bytes = alloc->roundUpReservation(bytes);
+    worldCounts = (int32_t *)alloc->allocMemory(bytes);
+
     tbl.maxColumnSize = max_column_size;
-    tbl.mappedRows = min_mapped_rows;
+
+    if (max_num_entities == 0) {
+        tbl.mappedRows = min_mapped_rows;
+    } else {
+        tbl.mappedRows = max_num_entities;
+    }
 }
 
-void StateManager::registerArchetype(uint32_t id, ComponentID *components,
-                                     ComponentSelectorGeneric selector,
-                                     ArchetypeFlags flags,
+void StateManager::registerArchetype(uint32_t id,
+                                     ArchetypeFlags archetype_flags,
+                                     uint32_t max_num_entities_per_world,
+                                     ComponentID *components,
+                                     ComponentFlags *component_flags,
                                      uint32_t num_user_components)
 {
     (void)flags;
@@ -271,11 +290,14 @@ void StateManager::registerArchetype(uint32_t id, ComponentID *components,
         };
     }
 
-    archetypes_[id].emplace(offset, num_user_components,
+    archetypes_[id].emplace(offset,
+                            archetype_flags,
+                            max_num_entities_per_world,
+                            num_user_components,
                             num_total_components,
                             type_infos.data(),
                             lookup_input.data(),
-                            selector);
+                            component_flags);
 }
 
 void StateManager::makeQuery(const uint32_t *components,
@@ -285,6 +307,7 @@ void StateManager::makeQuery(const uint32_t *components,
     query_data_lock_.lock();
 
     if (query_ref->numMatchingArchetypes != 0xFFFF'FFFF) {
+        query_data_lock_.unlock();
         return;
     }
 

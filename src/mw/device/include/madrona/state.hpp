@@ -11,6 +11,7 @@
 #include <array>
 
 #include <madrona/ecs.hpp>
+#include <madrona/ecs_flags.hpp>
 #include <madrona/hashmap.hpp>
 #include <madrona/inline_array.hpp>
 #include <madrona/sync.hpp>
@@ -32,53 +33,6 @@ static inline StateManager *getStateManager()
     return (StateManager *)GPUImplConsts::get().stateManagerAddr;
 }
 }
-
-struct ComponentID {
-    uint32_t id;
-
-private:
-    ComponentID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
-
-struct ArchetypeID {
-    uint32_t id;
-
-private:
-    ArchetypeID(uint32_t i) : id(i) {};
-friend class StateManager;
-};
-
-class ECSRegistry {
-public:
-    ECSRegistry(StateManager &state_mgr, void **export_ptr);
-
-    template <typename ComponentT>
-    void registerComponent();
-
-    template <typename ArchetypeT>
-    void registerArchetype();
-
-    template <typename ArchetypeT, typename ...ComponentT>
-    void registerArchetype(ComponentSelector<ComponentT...> selector,
-                           ArchetypeFlags flags);
-
-    template <typename ArchetypeT>
-    void registerFixedSizeArchetype(CountT max_num_entities);
-
-    template <typename SingletonT>
-    void registerSingleton();
-
-    template <typename ArchetypeT, typename ComponentT>
-    void exportColumn(int32_t slot);
-
-    template <typename SingletonT>
-    void exportSingleton(int32_t slot);
-
-private:
-    StateManager *state_mgr_;
-    void **export_ptr_;
-};
 
 struct EntityStore {
     struct EntitySlot {
@@ -108,9 +62,11 @@ public:
     template <typename ComponentT>
     ComponentID registerComponent();
 
-    template <typename ArchetypeT>
-    ArchetypeID registerArchetype(ComponentSelectorGeneric selector,
-                                  ArchetypeFlags flags);
+    template <typename ArchetypeT, typename... MetadataComponentTs>
+    ArchetypeID registerArchetype(
+        ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
+        ArchetypeFlags archetype_flags,
+        CountT max_num_entities_per_world);
 
     template <typename SingletonT>
     void registerSingleton();
@@ -123,6 +79,9 @@ public:
 
     template <int32_t num_components, typename Fn>
     void iterateArchetypesRaw(QueryRef *query_ref, Fn &&fn);
+
+    template <int32_t num_components, typename Fn>
+    void iterateQuery(uint32_t world_id, QueryRef *query_ref, Fn &&fn);
 
     inline uint32_t numMatchingEntities(QueryRef *query_ref);
 
@@ -172,9 +131,17 @@ public:
                                      int32_t column_idx);
 
     template <typename ArchetypeT>
-    int32_t * getArchetypeSortOffsets();
+    int32_t * getArchetypeWorldOffsets();
 
-    inline int32_t * getArchetypeSortOffsets(uint32_t archetype_id);
+    inline int32_t * getArchetypeWorldOffsets(uint32_t archetype_id);
+
+    template <typename ArchetypeT>
+    int32_t * getArchetypeWorldCounts();
+    
+    inline int32_t * getArchetypeWorldCounts(uint32_t archetype_id);
+
+    template <typename ArchetypeT>
+    inline void setArchetypeWorldOffsets(void *ptr);
 
     template <typename ArchetypeT>
     inline void setArchetypeSortOffsets(void *ptr);
@@ -204,6 +171,12 @@ public:
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
     inline void archetypeClearNeedsSort(uint32_t archetype_id);
 
+    // Included for compatibility with ECSRegistry
+    template <typename ArchetypeT, typename ComponentT>
+    ComponentT * exportColumn();
+    template <typename SingletonT>
+    SingletonT * exportSingleton();
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
@@ -225,13 +198,19 @@ private:
 
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
-    void registerArchetype(uint32_t id, ComponentID *components,
-                           ComponentSelectorGeneric selector,
-                           ArchetypeFlags flags,
+    void registerArchetype(uint32_t id, 
+                           ArchetypeFlags archetype_flags,
+                           uint32_t max_num_entities_per_world,
+                           ComponentID *components,
+                           ComponentFlags *component_flags,
                            uint32_t num_components);
 
     template <typename Fn, int32_t... Indices>
     void iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
+                                  std::integer_sequence<int32_t, Indices...>);
+    
+    template <typename Fn, int32_t... Indices>
+    void iterateQueryImpl(int32_t world_id, QueryRef *query_ref, Fn &&fn,
                                   std::integer_sequence<int32_t, Indices...>);
 
     void makeQuery(const uint32_t *components,
@@ -242,18 +221,23 @@ private:
     Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
 
     struct ArchetypeStore {
-        ArchetypeStore(uint32_t offset, uint32_t num_user_components,
+        ArchetypeStore(uint32_t offset,
+                       ArchetypeFlags archetype_flags,
+                       uint32_t max_num_entities,
+                       uint32_t num_user_components,
                        uint32_t num_columns,
-                       TypeInfo *type_infos, IntegerMapPair *lookup_input,
-                       ComponentSelectorGeneric selector = { {}, {} },
-                       ArchetypeFlags flags = ArchetypeNone);
+                       TypeInfo *type_infos,
+                       IntegerMapPair *lookup_input,
+                       ComponentFlags *component_flags);
+
         uint32_t componentOffset;
         uint32_t numUserComponents;
         Table tbl;
         ColumnMap columnLookup;
         
         // The size of this array corresponds to the number of worlds
-        int32_t *sortOffsets;
+        int32_t *worldOffsets;
+        int32_t *worldCounts;
 
         bool needsSort;
     };

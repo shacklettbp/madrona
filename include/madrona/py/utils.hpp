@@ -3,6 +3,7 @@
 #include <madrona/span.hpp>
 #include <madrona/optional.hpp>
 #include <madrona/exec_mode.hpp>
+#include <madrona/dyn_array.hpp>
 
 #include <array>
 
@@ -10,7 +11,7 @@
 // uses RTTI to match types across modules which only works with virtual types
 
 #ifdef MADRONA_CUDA_SUPPORT
-#include <cuda_runtime.h>
+#include <madrona/cuda_utils.hpp>
 #endif
 
 namespace madrona::py {
@@ -95,6 +96,8 @@ public:
     Tensor(void *dev_ptr, ElementType type,
            Span<const int64_t> dimensions,
            Optional<int> gpu_id);
+
+    Tensor(const Tensor &o);
     
     inline void * devicePtr() const { return dev_ptr_; }
     inline ElementType type() const { return type_; }
@@ -116,6 +119,42 @@ private:
 
     int64_t num_dimensions_;
     std::array<int64_t, maxDimensions> dimensions_;
+};
+
+class TrainInterface {
+public:
+    struct NamedTensor {
+        const char *name;
+        Tensor hdl;
+    };
+
+
+    TrainInterface(std::initializer_list<NamedTensor> obs,
+                   Tensor actions,
+                   Tensor rewards,
+                   Tensor dones,
+                   Tensor resets,
+                   Optional<Tensor> policy_assignments,
+                   std::initializer_list<NamedTensor> stats = {});
+    TrainInterface(TrainInterface &&o);
+    ~TrainInterface();
+
+    Span<const NamedTensor> observations() const;
+    Tensor actions() const;
+    Tensor rewards() const;
+    Tensor dones() const;
+    Tensor resets() const;
+    Optional<Tensor> policyAssignments() const;
+    Span<const NamedTensor> stats() const;
+
+private:
+    struct Impl;
+
+#ifdef MADRONA_LINUX
+    virtual void key_();
+#endif
+
+    std::unique_ptr<Impl> impl_;
 };
 
 }
