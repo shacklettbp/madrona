@@ -1,4 +1,4 @@
-#include "batch_proto.hpp"
+#include "batch_renderer.hpp"
 #include "madrona/utils.hpp"
 #include "madrona/viz/interop.hpp"
 #include "viewer_renderer.hpp"
@@ -12,6 +12,7 @@
 
 #include "vk/descriptors.hpp"
 #include "vk/memory.hpp"
+#include "vk/utils.inl"
 #include "vulkan/vulkan_core.h"
 
 
@@ -548,6 +549,15 @@ struct BatchFrame {
     VkDescriptorSet pbrSet;
 
     DisplayTexture displayTexture;
+
+    VkCommandPool cmdPool;
+    VkCommandBuffer cmdbuf;
+
+    // Waited for by the viewer to render stuff to the window
+    VkSemaphore renderFinished;
+
+    // Waited for at the beginning of each renderViews call
+    VkFence fence;
 };
 
 static DrawCommandPackage makeDrawCommandPackage(vk::Device& dev,
@@ -611,7 +621,7 @@ static DrawCommandPackage makeDrawCommandPackage(vk::Device& dev,
 static void makeBatchFrame(vk::Device& dev, 
                            BatchFrame* frame,
                            render::vk::MemoryAllocator &alloc,
-                           const BatchRendererProto::Config &cfg,
+                           const BatchRenderer::Config &cfg,
                            PipelineMP<1> &prepare_views,
                            PipelineMP<1> &draw,
                            VkDescriptorSet lighting_set,
@@ -660,6 +670,11 @@ static void makeBatchFrame(vk::Device& dev,
         draw_packages.emplace(i, makeDrawCommandPackage(dev, alloc, prepare_views, draw));
     }
 
+    VkCommandPool cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
+    VkCommandBuffer cmdbuf = vk::makeCmdBuffer(dev, cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    VkSemaphore render_finished = vk::makeBinarySemaphore(dev);
+    VkFence fence = vk::makeFence(dev, true);
+
     new (frame) BatchFrame{
         {std::move(views),std::move(instances),std::move(instance_offsets)},
         prepare_views_set,
@@ -671,7 +686,11 @@ static void makeBatchFrame(vk::Device& dev,
         std::move(draw_packages),
         lighting_set,
         pbr_set,
-        makeDisplayTexture(cfg.renderWidth, cfg.renderHeight, dev, alloc)
+        makeDisplayTexture(cfg.renderWidth, cfg.renderHeight, dev, alloc),
+        cmdpool,
+        cmdbuf,
+        render_finished,
+        fence
     };
 
     { // Create the descriptor sets with the outputs
@@ -980,7 +999,7 @@ static void issueDeferred(vk::Device &dev,
 // BATCH RENDERER PROTOTYPE IMPLEMENTATION                                    //
 ////////////////////////////////////////////////////////////////////////////////
 
-struct BatchRendererProto::Impl {
+struct BatchRenderer::Impl {
     vk::Device &dev;
     vk::MemoryAllocator &mem;
     VkPipelineCache pipelineCache;
@@ -1008,6 +1027,10 @@ struct BatchRendererProto::Impl {
 
     uint32_t selectedView;
 
+    uint32_t currentFrame;
+
+    VkQueue renderQueue;
+
     // This pipeline prepares the draw commands in the buffered draw cmds buffer
     // Pipeline<1> prepareViews;
 
@@ -1015,10 +1038,11 @@ struct BatchRendererProto::Impl {
          VkPipelineCache cache, VkDescriptorSet asset_set_comp, 
          VkDescriptorSet asset_set_draw, VkDescriptorSet asset_set_texture_mat,
          VkDescriptorSet asset_set_lighting,
-         VkSampler repeat_sampler);
+         VkSampler repeat_sampler,
+         VkQueue render_queue);
 };
 
-BatchRendererProto::Impl::Impl(const Config &cfg,
+BatchRenderer::Impl::Impl(const Config &cfg,
                                vk::Device &dev,
                                vk::MemoryAllocator &mem,
                                VkPipelineCache pipeline_cache, 
@@ -1026,7 +1050,8 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
                                VkDescriptorSet asset_set_draw,
                                VkDescriptorSet asset_set_texture_mat,
                                VkDescriptorSet asset_set_lighting,
-                               VkSampler repeat_sampler)
+                               VkSampler repeat_sampler,
+                               VkQueue render_queue)
     : dev(dev), mem(mem), pipelineCache(pipeline_cache),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
       prepareViews(makeComputePipeline(dev, pipelineCache, 2,
@@ -1047,10 +1072,10 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
       assetSetTextureMat(asset_set_texture_mat),
       assetSetLighting(asset_set_lighting),
       renderExtent{ cfg.renderWidth, cfg.renderHeight },
-      selectedView(0)
+      selectedView(0),
+      currentFrame(0),
+      renderQueue(render_queue)
 {
-    printf("Num views total: %d\n", maxNumViews);
-
     for (uint32_t i = 0; i < cfg.numFrames; i++) {
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
                        prepareViews,
@@ -1062,7 +1087,7 @@ BatchRendererProto::Impl::Impl(const Config &cfg,
     }
 }
 
-BatchRendererProto::BatchRendererProto(const Config &cfg,
+BatchRenderer::BatchRenderer(const Config &cfg,
                                        vk::Device &dev,
                                        vk::MemoryAllocator &mem,
                                        VkPipelineCache pipeline_cache,
@@ -1070,13 +1095,16 @@ BatchRendererProto::BatchRendererProto(const Config &cfg,
                                        VkDescriptorSet asset_set_draw,
                                        VkDescriptorSet asset_set_texture_mat,
                                        VkDescriptorSet asset_set_lighting,
-                                       VkSampler sampler)
+                                       VkSampler sampler,
+                                       VkQueue render_queue)
     : impl(std::make_unique<Impl>(cfg, dev, mem, pipeline_cache, 
-                                  asset_set_compute, asset_set_draw, asset_set_texture_mat, asset_set_lighting, sampler))
+                                  asset_set_compute, asset_set_draw, 
+                                  asset_set_texture_mat, asset_set_lighting, sampler,
+                                  render_queue))
 {
 }
 
-BatchRendererProto::~BatchRendererProto()
+BatchRenderer::~BatchRenderer()
 {
     impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->prepareViews.hdls[0], nullptr);
     impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->prepareViews.layout, nullptr);
@@ -1155,24 +1183,174 @@ static void issueMemoryBarrier(vk::Device &dev,
                               0, nullptr, 0, nullptr);
 }
 
-void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd, 
-                                     BatchRenderInfo info,
-                                     const DynArray<AssetData> &loaded_assets,
-                                     uint32_t frame_idx,
-                                     uint32_t batch_view_idx) 
-{ 
-    static int global_frame_id = 0;
-
-    if (global_frame_id < impl->batchFrames.size()) {
-        global_frame_id++;
+static void sortInstancesAndViewsCPU(EngineInterop *interop)
+{
+    for (uint32_t i = 0; i < *interop->bridge.totalNumInstances; ++i) {
+        interop->iotaArrayInstancesCPU[i] = i;
     }
 
+    for (uint32_t i = 0; i < *interop->bridge.totalNumViews; ++i) {
+        interop->iotaArrayViewsCPU[i] = i;
+    }
+
+    { // Sort the indices based on worldID/entityID number
+        std::sort(interop->iotaArrayInstancesCPU, 
+                  interop->iotaArrayInstancesCPU + *interop->bridge.totalNumInstances,
+                  [&interop] (uint32_t a, uint32_t b) {
+                      return interop->bridge.instancesWorldIDs[a] < interop->bridge.instancesWorldIDs[b];
+                  });
+
+        std::sort(interop->iotaArrayViewsCPU,
+                  interop->iotaArrayViewsCPU + *interop->bridge.totalNumViews,
+                  [&interop] (uint32_t a, uint32_t b) {
+                      return interop->bridge.viewsWorldIDs[a] < interop->bridge.viewsWorldIDs[b];
+                  });
+    }
+
+    viz::InstanceData *instances = (viz::InstanceData *)interop->instancesCPU->ptr;
+    viz::PerspectiveCameraData *views = (viz::PerspectiveCameraData *)interop->viewsCPU->ptr;
+
+    { // Write the sorted array of views and instances
+        for (uint32_t i = 0; i < *interop->bridge.totalNumInstances; ++i) {
+            instances[i] = interop->bridge.instances[interop->iotaArrayInstancesCPU[i]];
+
+            // We also need to have the sorted instance IDs in order to extract the offsets
+            interop->sortedInstanceWorldIDs[i] = 
+                interop->bridge.instancesWorldIDs[interop->iotaArrayInstancesCPU[i]];
+        }
+
+        for (uint32_t i = 0; i < *interop->bridge.totalNumViews; ++i) {
+            views[i] = interop->bridge.views[interop->iotaArrayViewsCPU[i]];
+        }
+    }
+}
+
+static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
+{
+    uint32_t *instanceOffsets = (uint32_t *)interop->instanceOffsetsCPU->ptr;
+
+    for (uint32_t i = 0; i < num_worlds; ++i) {
+        instanceOffsets[i] = 0;
+    }
+
+    for (uint32_t i = 1; i < *interop->bridge.totalNumInstances+1; ++i) {
+        uint32_t current_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i] >> 32);
+        uint32_t prev_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i-1] >> 32);
+
+        if (current_world_id != prev_world_id) {
+            instanceOffsets[prev_world_id] = i;
+        }
+    }
+
+    // Take care of edge care where there are no agents in some worlds
+    for (int32_t i = num_worlds-2; i >= 0; --i) {
+        if (instanceOffsets[i] == 0) {
+            instanceOffsets[i] = instanceOffsets[i + 1];
+        }
+    }
+
+    if (num_worlds == 1) {
+        instanceOffsets[0] = *interop->bridge.totalNumInstances;
+    }
+}
+
+void BatchRenderer::renderViews(BatchRenderInfo info,
+                                     const DynArray<AssetData> &loaded_assets,
+                                     uint32_t batch_view_idx,
+                                     EngineInterop *interop) 
+{ 
+    printf("\n");
+
     // Circles between 0 to number of frames
-    uint32_t frame_index = frame_idx;
+    uint32_t frame_index = impl->currentFrame;
+
+    { // Flush CPU buffers if we used CPU buffers
+        if (interop->viewsCPU.has_value()) {
+            *interop->bridge.totalNumViews = interop->bridge.totalNumViewsCPUInc->load_acquire();
+            *interop->bridge.totalNumInstances = interop->bridge.totalNumInstancesCPUInc->load_acquire();
+
+            info.numInstances = *interop->bridge.totalNumInstances;
+            info.numViews = *interop->bridge.totalNumViews;
+
+            interop->bridge.totalNumViewsCPUInc->store_release(0);
+            interop->bridge.totalNumInstancesCPUInc->store_release(0);
+
+            // First, need to perform the sorts
+            sortInstancesAndViewsCPU(interop);
+            computeInstanceOffsets(interop, info.numWorlds);
+
+            // Need to flush engine input state before copy
+            interop->viewsCPU->flush(impl->dev);
+            interop->instancesCPU->flush(impl->dev);
+            interop->instanceOffsetsCPU->flush(impl->dev);
+        }
+
+        if (interop->voxelInputCPU.has_value()) {
+            // Need to flush engine input state before copy
+            interop->voxelInputCPU->flush(impl->dev);
+        }
+    }
+
 
     impl->selectedView = batch_view_idx;
-
     BatchFrame &frame_data = impl->batchFrames[frame_index];
+
+    { // Wait for the frame to be ready
+        impl->dev.dt.waitForFences(impl->dev.hdl, 1, &frame_data.fence, VK_TRUE, UINT64_MAX);
+    }
+
+    BatchImportedBuffers &batch_buffers = getImportedBuffers(frame_index);
+
+    // Start the command buffer and stuff
+    VkCommandBuffer draw_cmd = frame_data.cmdbuf;
+    {
+        REQ_VK(impl->dev.dt.resetCommandPool(impl->dev.hdl, frame_data.cmdPool, 0));
+        VkCommandBufferBeginInfo begin_info {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        REQ_VK(impl->dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    }
+
+    { // Import the views
+        VkDeviceSize num_views_bytes = info.numViews *
+            sizeof(shader::PackedViewData);
+
+        VkBufferCopy view_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_views_bytes
+        };
+
+       impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewsHdl,
+                             batch_buffers.views.buffer,
+                             1, &view_data_copy);
+    }
+
+    { // Import the instances
+        VkDeviceSize num_instances_bytes = info.numInstances *
+            sizeof(shader::PackedInstanceData);
+
+        VkBufferCopy instance_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_instances_bytes
+        };
+
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instancesHdl,
+                             batch_buffers.instances.buffer,
+                             1, &instance_data_copy);
+    }
+
+    { // Import the offsets for instances
+        VkDeviceSize num_offsets_bytes = info.numWorlds *
+            sizeof(int32_t);
+
+        VkBufferCopy offsets_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_offsets_bytes
+        };
+
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instanceOffsetsHdl,
+                             batch_buffers.instanceOffsets.buffer,
+                             1, &offsets_data_copy);
+    }
 
     { // Prepare memory written to by ECS with barrier
         std::array barriers = {
@@ -1461,26 +1639,127 @@ void BatchRendererProto::renderViews(VkCommandBuffer& draw_cmd,
         }
 #endif
     }
+
+    // End the command buffer and stuff
+    REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
+
+#if 0
+    VkPipelineStageFlags viewer_wait_flag =
+        VK_PIPELINE_STAGE_TRANSFER_BIT;
+#endif
+
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = nullptr,
+        .pWaitDstStageMask = nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &draw_cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &frame_data.renderFinished
+    };
+
+    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.fence));
+    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.fence));
+
+    impl->currentFrame = (impl->currentFrame + 1) % impl->batchFrames.size();
 }
 
-BatchImportedBuffers &BatchRendererProto::getImportedBuffers(uint32_t frame_id) 
+void BatchRenderer::transitionOutputLayout()
+{
+    // Circles between 0 to number of frames
+    uint32_t frame_index = impl->currentFrame;
+
+    impl->selectedView = 0;
+    BatchFrame &frame_data = impl->batchFrames[frame_index];
+
+    { // Wait for the frame to be ready
+        impl->dev.dt.waitForFences(impl->dev.hdl, 1, &frame_data.fence, VK_TRUE, UINT64_MAX);
+    }
+
+    // Start the command buffer and stuff
+    VkCommandBuffer draw_cmd = frame_data.cmdbuf;
+    {
+        REQ_VK(impl->dev.dt.resetCommandPool(impl->dev.hdl, frame_data.cmdPool, 0));
+        VkCommandBufferBeginInfo begin_info {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        REQ_VK(impl->dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    }
+
+    { // Prepare the viz texture for shader sampling
+        vk::LocalTexture &target_dst =
+            impl->batchFrames[frame_index].displayTexture.tex;
+
+        VkImageMemoryBarrier barrier = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image = target_dst.image,
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        };
+
+        impl->dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    // End the command buffer and stuff
+    REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
+
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = nullptr,
+        .pWaitDstStageMask = nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &draw_cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &frame_data.renderFinished
+    };
+
+    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.fence));
+    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.fence));
+
+    impl->currentFrame = (impl->currentFrame + 1) % impl->batchFrames.size();
+}
+
+BatchImportedBuffers &BatchRenderer::getImportedBuffers(uint32_t frame_id) 
 {
     return impl->batchFrames[frame_id].buffers;
 }
 
-DisplayTexture &BatchRendererProto::getDisplayTexture(uint32_t frame_id)
+DisplayTexture &BatchRenderer::getDisplayTexture(uint32_t frame_id)
 {
     return impl->batchFrames[frame_id].displayTexture;
 }
 
-LayeredTarget &BatchRendererProto::getLayeredTarget(uint32_t frame_id)
+LayeredTarget &BatchRenderer::getLayeredTarget(uint32_t frame_id)
 {
     return impl->batchFrames[frame_id].targets[0];
 }
 
-VkDescriptorSet BatchRendererProto::getPBRSet(uint32_t frame_id)
+VkDescriptorSet BatchRenderer::getPBRSet(uint32_t frame_id)
 {
     return impl->batchFrames[frame_id].pbrSet;
+}
+
+// Get the semaphore that the viewer renderer has to wait on
+VkSemaphore BatchRenderer::getLatestWaitSemaphore()
+{
+    uint32_t last_frame = (impl->currentFrame + impl->batchFrames.size() - 1) %
+        impl->batchFrames.size();
+    return impl->batchFrames[last_frame].renderFinished;
 }
 
 }

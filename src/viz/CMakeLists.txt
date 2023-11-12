@@ -45,7 +45,9 @@ target_link_libraries(imgui_impl PRIVATE
 add_library(madrona_viewer STATIC
     ${MADRONA_INC_DIR}/viz/viewer.hpp viewer.cpp
     viewer_renderer.hpp viewer_renderer.cpp
-    batch_proto.hpp batch_proto.cpp
+    batch_renderer.hpp batch_renderer.cpp
+    #render_context.cpp
+    render_common.hpp
 )
 
 target_link_libraries(madrona_viewer PRIVATE

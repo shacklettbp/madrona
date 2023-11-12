@@ -11,6 +11,7 @@
 #include "vk/cuda_interop.hpp"
 #endif
 
+// #include "render_common.hpp"
 #include "viewer_renderer.hpp"
 
 namespace madrona::viz {
@@ -51,7 +52,7 @@ struct BatchImportedBuffers {
     render::vk::LocalBuffer instanceOffsets;
 };
 
-struct BatchRendererProto {
+struct BatchRenderer {
     struct Impl;
     std::unique_ptr<Impl> impl;
 
@@ -65,7 +66,7 @@ struct BatchRendererProto {
         uint32_t numFrames;
     };
 
-    BatchRendererProto(const Config& cfg,
+    BatchRenderer(const Config& cfg,
         render::vk::Device& dev,
         render::vk::MemoryAllocator& mem,
         VkPipelineCache pipeline_cache,
@@ -73,21 +74,26 @@ struct BatchRendererProto {
         VkDescriptorSet asset_set_draw,
         VkDescriptorSet asset_set_texture_mat,
         VkDescriptorSet asset_set_lighting,
-        VkSampler repeat_sampler);
+        VkSampler repeat_sampler,
+        VkQueue render_queue);
 
-    ~BatchRendererProto();
+    ~BatchRenderer();
     void importCudaData(VkCommandBuffer);
 
-    void renderViews(VkCommandBuffer& draw_cmd,
-                     BatchRenderInfo info,
+    void renderViews(BatchRenderInfo info,
                      const DynArray<AssetData> &loaded_assets,
-                     uint32_t frame_idx,
-                     uint32_t view_idx);
+                     uint32_t view_idx,
+                     EngineInterop *interop);
+
+    void transitionOutputLayout();
 
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
     DisplayTexture &getDisplayTexture(uint32_t frame_id);
     LayeredTarget &getLayeredTarget(uint32_t frame_id);
     VkDescriptorSet getPBRSet(uint32_t frame_id);
+
+    // Get the semaphore that the viewer renderer has to wait on
+    VkSemaphore getLatestWaitSemaphore();
 };
 
 }

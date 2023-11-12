@@ -21,17 +21,6 @@ struct alignas(16) InstanceData {
 };
 
 struct VizECSBridge {
-#if 0
-    PerspectiveCameraData **views;
-    uint32_t *numViews;
-    InstanceData **instances;
-    uint32_t *numInstances;
-    int32_t renderWidth;
-    int32_t renderHeight;
-    bool *episodeDone;
-    uint32_t *voxels;
-#endif
-
     // Allocated from Vulkan, to be imported into Cuda
     PerspectiveCameraData *views;
     InstanceData *instances;

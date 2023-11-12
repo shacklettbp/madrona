@@ -1,6 +1,6 @@
 #pragma once
 
-namespace madrona::viz {
+namespace madrona::render {
 
 namespace shader {
 

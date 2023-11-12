@@ -74,8 +74,6 @@ inline void instanceTransformUpdate(Context &ctx,
     data.scale = scale;
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
-
-    printf(".");
 }
 
 uint32_t * VizRenderingSystem::getVoxelPtr(Context &ctx) {
@@ -119,16 +117,12 @@ inline void viewTransformUpdate(Context &ctx,
     cam_data.yScale = y_scale;
     cam_data.zNear = viz_cam.zNear;
 #endif
-
-    printf("x");
 }
 
 inline void exportCounts(Context &ctx,
                          ViewerSystemState &viewer_state)
 {
     if (ctx.worldID().idx == 0) {
-        printf("EXPORTING COUNTS\n");
-
 #if defined(MADRONA_GPU_MODE)
         auto *state_mgr = mwGPU::getStateManager();
         *viewer_state.totalNumViews = state_mgr->getArchetypeNumRows<
@@ -259,9 +253,6 @@ void VizRenderingSystem::init(Context &ctx,
     // the totalNumViews/Instances variables).
     system_state.totalNumViewsCPU = bridge->totalNumViewsCPUInc;
     system_state.totalNumInstancesCPU = bridge->totalNumInstancesCPUInc;
-
-    system_state.totalNumViewsCPU->store_release(0);
-    system_state.totalNumInstancesCPU->store_release(0);
 
     // This is only relevant for the CPU backend
     system_state.instancesCPU = bridge->instances;

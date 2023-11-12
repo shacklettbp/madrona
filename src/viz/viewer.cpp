@@ -556,12 +556,20 @@ void Viewer::Impl::loop(
 
             step_fn(step_data);
 
+            // Do batch rendering
+            auto alt_frame_cfg = frameCfg;
+            alt_frame_cfg.viewIDX = 0;
+            renderer.renderViews(alt_frame_cfg);
+
             last_sim_tick_time = cur_frame_start_time;
+        } else {
+            renderer.renderViews(frameCfg, true);
         }
 
         startFrame();
 
         ui_fn(ui_data);
+
         render(frame_duration);
 
         frame_duration = throttleFPS(cur_frame_start_time);
