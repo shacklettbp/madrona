@@ -2150,7 +2150,8 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
     auto shadow_fb = makeShadowFramebuffer(dev, alloc, InternalConfig::shadowMapSize, InternalConfig::shadowMapSize, shadow_pass);
 
-    VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
+    VkCommandPool render_viewer_cmd_pool = makeCmdPool(dev, dev.gfxQF);
+    VkCommandPool present_viewer_cmd_pool = makeCmdPool(dev, dev.gfxQF);
 
     int64_t buffer_offsets[6];
     int64_t buffer_sizes[7] = {
@@ -2379,11 +2380,16 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         std::move(fb),
         std::move(imgui_fb),
         std::move(shadow_fb),
-        cmd_pool,
-        makeCmdBuffer(dev, cmd_pool),
+        render_viewer_cmd_pool,
+        makeCmdBuffer(dev, render_viewer_cmd_pool),
+        present_viewer_cmd_pool,
+        makeCmdBuffer(dev, present_viewer_cmd_pool),
+
         makeFence(dev, true),
         makeBinarySemaphore(dev),
         makeBinarySemaphore(dev),
+        makeBinarySemaphore(dev),
+
         std::move(view_staging),
         std::move(light_staging),
         std::move(sky_staging),
@@ -3519,7 +3525,8 @@ Renderer::Renderer(uint32_t gpu_id,
       gpu_id_(gpu_id),
       num_worlds_(num_worlds),
       gpu_input_(gpu_input),
-      screenshot_buffer_()
+      screenshot_buffer_(),
+      global_frame_no_(0)
 {
     {
         VkDescriptorPoolSize pool_sizes[] = {
@@ -3690,7 +3697,8 @@ Renderer::~Renderer()
         dev.dt.destroySemaphore(dev.hdl, f.renderFinished, nullptr);
 
         dev.dt.destroyFence(dev.hdl, f.cpuFinished, nullptr);
-        dev.dt.destroyCommandPool(dev.hdl, f.cmdPool, nullptr);
+        dev.dt.destroyCommandPool(dev.hdl, f.drawCmdPool, nullptr);
+        dev.dt.destroyCommandPool(dev.hdl, f.presentCmdPool, nullptr);
 
         dev.dt.destroyFramebuffer(dev.hdl, f.fb.hdl, nullptr);
         dev.dt.destroyFramebuffer(dev.hdl, f.imguiFBO.hdl, nullptr);
@@ -4822,14 +4830,436 @@ static void issueCulling(Device &dev,
                               0, nullptr);
 }
 
+bool Renderer::renderViewerFrame(const ViewerCam &cam,
+                                 const FrameConfig &cfg)
+{
+    Frame &frame = frames_[cur_frame_];
+
+    VkCommandBuffer draw_cmd = frame.drawCmd;
+    { // Get command buffer for this frame and start it
+        REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.drawCmdPool, 0));
+        VkCommandBufferBeginInfo begin_info {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        REQ_VK(dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    }
+
+    { // Pack the view for the fly camera and copy it to the render input
+        packView(dev, frame.viewStaging, cam, fb_width_, fb_height_);
+        VkBufferCopy view_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.cameraViewOffset,
+            .size = sizeof(PackedViewData)
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.viewStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &view_copy);
+    }
+
+    { // Pack the lighting data and copy it to the render input
+        packLighting(dev, frame.lightStaging, lights_, cfg);
+        VkBufferCopy light_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.lightOffset,
+            .size = sizeof(DirectionalLight) * InternalConfig::maxLights
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &light_copy);
+    }
+
+    { // Pack the sky data and copy it to the render input
+        packSky(dev, frame.skyStaging);
+        VkBufferCopy sky_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.skyOffset,
+            .size = sizeof(SkyData)
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.skyStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &sky_copy);
+    }
+
+    { // Reset the draw count to zero
+        dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
+                             frame.drawCountOffset, sizeof(uint32_t), 0);
+    }
+
+    { // Issue shadow pass
+        issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
+                       cfg.viewIDX, engine_interop_.maxViewsPerWorld);
+    }
+
+    const uint32_t num_voxels = this->voxel_config_.xLength * 
+        this->voxel_config_.yLength *
+        this->voxel_config_.zLength;
+
+    { // Issue the voxel generation compute shader if needed
+        if (num_voxels > 0) {
+            dev.dt.cmdFillBuffer(draw_cmd, frame.voxelVBO.buffer,
+                                 0, sizeof(float) * num_voxels * 6 * 4 * 8, 0);
+
+            VkBufferCopy voxel_copy = {
+                .srcOffset = 0,
+                .dstOffset = 0,
+                .size = num_voxels * sizeof(int32_t),
+            };
+
+            dev.dt.cmdCopyBuffer(draw_cmd,
+                                 engine_interop_.voxelHdl,
+                                 frame.voxelData.buffer,
+                                 1, &voxel_copy);
+
+            issueVoxelGen(dev, frame, 
+                          voxel_mesh_gen_, 
+                          draw_cmd,
+                          cfg.viewIDX,
+                          engine_interop_.maxInstancesPerWorld,
+                          voxel_config_);
+        }
+    }
+
+    uint32_t cur_num_instances = *engine_interop_.bridge.totalNumInstances;
+    uint32_t cur_num_views = *engine_interop_.bridge.totalNumViews;
+
+    { // Generate draw commands from the flycam.
+        uint32_t draw_cmd_bytes = sizeof(VkDrawIndexedIndirectCommand) *
+                                  engine_interop_.maxInstancesPerWorld * 10;
+        dev.dt.cmdFillBuffer(draw_cmd, frame.renderInput.buffer,
+                             frame.drawCmdOffset,
+                             draw_cmd_bytes,
+                             0);
+
+        VkMemoryBarrier copy_barrier {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 1, &copy_barrier, 0, nullptr, 0, nullptr);
+
+        issueCulling(dev, draw_cmd, frame, instance_cull_,
+                     asset_set_cull_,
+                     0, cur_num_instances, cur_num_views,
+                     num_worlds_);
+    }
+
+    { // Shadow pass
+        dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                object_shadow_draw_.hdls[0]);
+
+        std::array draw_descriptors {
+            frame.drawShaderSet,
+            asset_set_draw_,
+        };
+
+        dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                object_shadow_draw_.layout, 0,
+                draw_descriptors.size(),
+                draw_descriptors.data(),
+                0, nullptr);
+
+        DrawPushConst draw_const {
+            (uint32_t)cfg.viewIDX,
+        };
+
+        dev.dt.cmdPushConstants(draw_cmd, object_shadow_draw_.layout,
+                VK_SHADER_STAGE_VERTEX_BIT |
+                VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                sizeof(DrawPushConst), &draw_const);
+
+        dev.dt.cmdBindIndexBuffer(draw_cmd, loaded_assets_[0].buf.buffer,
+                loaded_assets_[0].idxBufferOffset,
+                VK_INDEX_TYPE_UINT32);
+
+        VkViewport viewport {
+            0,
+                0,
+                (float)InternalConfig::shadowMapSize,
+                (float)InternalConfig::shadowMapSize,
+                0.f,
+                1.f,
+        };
+
+        dev.dt.cmdSetViewport(draw_cmd, 0, 1, &viewport);
+
+        VkRect2D scissor {
+            { 0, 0 },
+                { InternalConfig::shadowMapSize, InternalConfig::shadowMapSize },
+        };
+
+        dev.dt.cmdSetScissor(draw_cmd, 0, 1, &scissor);
+
+        VkRenderPassBeginInfo render_pass_info;
+        render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_info.pNext = nullptr;
+        render_pass_info.renderPass = shadow_pass_;
+        render_pass_info.framebuffer = frame.shadowFB.hdl;
+        render_pass_info.clearValueCount = fb_shadow_clear_.size();
+        render_pass_info.pClearValues = fb_shadow_clear_.data();
+        render_pass_info.renderArea.offset = {
+            0, 0,
+        };
+        render_pass_info.renderArea.extent = {
+            InternalConfig::shadowMapSize, InternalConfig::shadowMapSize,
+        };
+
+        dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
+                VK_SUBPASS_CONTENTS_INLINE);
+
+        dev.dt.cmdDrawIndexedIndirect(draw_cmd,
+                frame.renderInput.buffer,
+                frame.drawCmdOffset,
+                engine_interop_.maxInstancesPerWorld * 10,
+                sizeof(DrawCmd));
+
+        dev.dt.cmdEndRenderPass(draw_cmd);
+
+        issueShadowBlurPass(dev, frame, blur_, draw_cmd);
+
+#if 1
+        array<VkImageMemoryBarrier, 1> finish_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.shadowFB.depthAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_DEPTH_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                finish_prepare.size(), finish_prepare.data());
+#endif
+    }
+
+    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                           object_draw_.hdls[0]);
+
+    std::array draw_descriptors {
+        frame.drawShaderSet,
+        asset_set_draw_,
+        asset_set_mat_tex_
+    };
+
+    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                 object_draw_.layout, 0,
+                                 draw_descriptors.size(),
+                                 draw_descriptors.data(),
+                                 0, nullptr);
+
+    DrawPushConst draw_const {
+        (uint32_t)cfg.viewIDX,
+    };
+
+    dev.dt.cmdPushConstants(draw_cmd, object_draw_.layout,
+                            VK_SHADER_STAGE_VERTEX_BIT |
+                            VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                            sizeof(DrawPushConst), &draw_const);
+
+    dev.dt.cmdBindIndexBuffer(draw_cmd, loaded_assets_[0].buf.buffer,
+                              loaded_assets_[0].idxBufferOffset,
+                              VK_INDEX_TYPE_UINT32);
+
+    VkViewport viewport {
+        0,
+        0,
+        (float)fb_width_,
+        (float)fb_height_,
+        0.f,
+        1.f,
+    };
+
+    dev.dt.cmdSetViewport(draw_cmd, 0, 1, &viewport);
+
+    VkRect2D scissor {
+        { 0, 0 },
+        { fb_width_, fb_height_ },
+    };
+
+    dev.dt.cmdSetScissor(draw_cmd, 0, 1, &scissor);
+
+
+    VkRenderPassBeginInfo render_pass_info;
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    render_pass_info.pNext = nullptr;
+    render_pass_info.renderPass = render_pass_;
+    render_pass_info.framebuffer = frame.fb.hdl;
+    render_pass_info.clearValueCount = fb_clear_.size();
+    render_pass_info.pClearValues = fb_clear_.data();
+    render_pass_info.renderArea.offset = {
+        0, 0,
+    };
+    render_pass_info.renderArea.extent = {
+        fb_width_, fb_height_,
+    };
+
+    dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
+                              VK_SUBPASS_CONTENTS_INLINE);
+
+    dev.dt.cmdDrawIndexedIndirect(draw_cmd,
+                                  frame.renderInput.buffer,
+                                  frame.drawCmdOffset,
+                                  engine_interop_.maxInstancesPerWorld * 10,
+                                  sizeof(DrawCmd));
+
+    if (num_voxels > 0) {
+        dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            voxel_draw_.hdls[0]);
+
+        std::array voxel_draw_descriptors {
+            frame.voxelDrawSet,
+                asset_set_mat_tex_
+        };
+
+        dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            voxel_draw_.layout, 0,
+            voxel_draw_descriptors.size(),
+            voxel_draw_descriptors.data(),
+            0, nullptr);
+
+        DrawPushConst voxel_draw_const{
+            (uint32_t)cfg.viewIDX,
+        };
+
+        dev.dt.cmdPushConstants(draw_cmd, voxel_draw_.layout,
+            VK_SHADER_STAGE_VERTEX_BIT |
+            VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+            sizeof(DrawPushConst), &voxel_draw_const);
+
+        dev.dt.cmdBindIndexBuffer(draw_cmd, frame.voxelIndexBuffer.buffer,
+            0,
+            VK_INDEX_TYPE_UINT32);
+        dev.dt.cmdDrawIndexed(draw_cmd, static_cast<uint32_t>(num_voxels * 6 * 6),
+            1, 0, 0, 0);
+    }
+
+    dev.dt.cmdEndRenderPass(draw_cmd);
+
+    { // Issue deferred lighting pass - separate function - this is becoming crazy
+        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, cfg.viewIDX);
+    }
+
+    bool prepare_screenshot = cfg.requestedScreenshot || (getenv("SCREENSHOT_PATH") && global_frame_no_ == 0);
+
+    if (prepare_screenshot) {
+        array<VkImageMemoryBarrier, 1> prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.fb.colorAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        VkBufferMemoryBarrier buffer_prepare = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = screenshot_buffer_->buffer,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr, 1, &buffer_prepare,
+                prepare.size(), prepare.data());
+
+        VkBufferImageCopy region = {
+            .bufferOffset = 0, .bufferRowLength = 0, .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            },
+            .imageOffset = {},
+            .imageExtent = {frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 1}
+        };
+
+        dev.dt.cmdCopyImageToBuffer(draw_cmd, frame.fb.colorAttachment.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                    screenshot_buffer_->buffer, 1, &region);
+
+        prepare[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        prepare[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        prepare[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        prepare[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                prepare.size(), prepare.data());
+    }
+
+    REQ_VK(dev.dt.endCommandBuffer(draw_cmd));
+
+    VkSemaphore waits[] = {
+        br_proto_->getLatestWaitSemaphore()
+    };
+
+    VkPipelineStageFlags wait_flags[] = {
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    };
+
+    VkSubmitInfo gfx_submit {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        nullptr,
+        1,
+        waits,
+        wait_flags,
+        1,
+        &draw_cmd,
+        1,
+        &frame.renderFinished,
+    };
+
+    printf("Why in the world is there an illegal instruction here\n");
+
+    // REQ_VK(dev.dt.queueSubmit(render_queue_, 0, &gfx_submit,
+                              // VK_NULL_HANDLE));
+}
+
 void Renderer::render(const ViewerCam &cam,
                       const FrameConfig &cfg)
 {
-    static uint64_t global_frame_no = 0;
-
     Frame &frame = frames_[cur_frame_];
-    uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
 
+    bool prepare_screenshot = renderViewerFrame(cam, cfg);
+
+#if 0
     VkCommandBuffer draw_cmd = frame.drawCmd;
     { // Get command buffer for this frame and start it
         REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.cmdPool, 0));
@@ -5246,6 +5676,30 @@ void Renderer::render(const ViewerCam &cam,
                 prepare.size(), prepare.data());
 #endif
     }
+#endif
+
+    VkCommandBuffer draw_cmd = frame.presentCmd;
+    { // Get command buffer for this frame and start it
+        REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.presentCmdPool, 0));
+        VkCommandBufferBeginInfo begin_info {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        REQ_VK(dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    }
+
+    VkRenderPassBeginInfo render_pass_info;
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    render_pass_info.pNext = nullptr;
+    render_pass_info.renderPass = render_pass_;
+    render_pass_info.framebuffer = frame.fb.hdl;
+    render_pass_info.clearValueCount = fb_clear_.size();
+    render_pass_info.pClearValues = fb_clear_.data();
+    render_pass_info.renderArea.offset = {
+        0, 0,
+    };
+
+    render_pass_info.renderArea.extent = {
+        fb_width_, fb_height_,
+    };
 
     render_pass_info.framebuffer = frame.imguiFBO.hdl;
     render_pass_info.renderPass = imgui_render_state_.renderPass;
@@ -5262,6 +5716,7 @@ void Renderer::render(const ViewerCam &cam,
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 
+    uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
     VkImage swapchain_img = present_.getImage(swapchain_idx);
 
     array<VkImageMemoryBarrier, 2> blit_prepare {{
@@ -5352,11 +5807,12 @@ void Renderer::render(const ViewerCam &cam,
     REQ_VK(dev.dt.endCommandBuffer(draw_cmd));
 
     VkSemaphore waits[] = {
-        frame.swapchainReady, br_proto_->getLatestWaitSemaphore()
+        frame.swapchainReady, frame.renderFinished
     };
 
     VkPipelineStageFlags wait_flags[] = {
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
+        VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
     };
 
     VkSubmitInfo gfx_submit {
@@ -5368,7 +5824,7 @@ void Renderer::render(const ViewerCam &cam,
         1,
         &draw_cmd,
         1,
-        &frame.renderFinished,
+        &frame.guiRenderFinished,
     };
 
     REQ_VK(dev.dt.resetFences(dev.hdl, 1, &frame.cpuFinished));
@@ -5376,7 +5832,7 @@ void Renderer::render(const ViewerCam &cam,
                               frame.cpuFinished));
 
     present_.present(dev, swapchain_idx, present_wrapper_,
-                     1, &frame.renderFinished);
+                     1, &frame.guiRenderFinished);
 
     cur_frame_ = (cur_frame_ + 1) % frames_.size();
 
@@ -5400,7 +5856,7 @@ void Renderer::render(const ViewerCam &cam,
         }
     }
 
-    global_frame_no++;
+    global_frame_no_++;
 }
 
 void Renderer::renderViews(const FrameConfig &cfg, bool just_do_transition)

@@ -4990,7 +4990,6 @@ void RenderContext::renderViewer(const ViewerInput &input)
     static uint64_t global_frame_no = 0;
 
     Frame &frame = frames_[cur_frame_];
-    uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
 
     VkCommandBuffer draw_cmd = frame.drawCmd;
     { // Get command buffer for this frame and start it
@@ -5411,6 +5410,7 @@ void RenderContext::renderViewer(const ViewerInput &input)
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 
+    uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
     VkImage swapchain_img = present_.getImage(swapchain_idx);
 
     array<VkImageMemoryBarrier, 2> blit_prepare {{

@@ -157,10 +157,15 @@ struct Frame {
 
     ShadowFramebuffer shadowFB;
 
-    VkCommandPool cmdPool;
+    VkCommandPool drawCmdPool;
     VkCommandBuffer drawCmd;
+    VkCommandPool presentCmdPool;
+    VkCommandBuffer presentCmd;
+
     VkFence cpuFinished;
+
     VkSemaphore renderFinished;
+    VkSemaphore guiRenderFinished;
     VkSemaphore swapchainReady;
 
     render::vk::HostBuffer viewStaging;
@@ -334,6 +339,9 @@ public:
     void render(const ViewerCam &cam,
                 const FrameConfig &cfg);
 
+    bool renderViewerFrame(const ViewerCam &cam,
+                           const FrameConfig &cfg);
+
     void renderViews(const FrameConfig &cfg, bool just_do_transition = false);
 
     void waitForIdle();
@@ -431,6 +439,8 @@ private:
     // This is only used if we are on the CPU backend
     uint32_t *iota_array_;
     std::unique_ptr<render::vk::HostBuffer> screenshot_buffer_;
+
+    uint64_t global_frame_no_;
 };
 
 }
