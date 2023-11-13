@@ -1,6 +1,5 @@
 #pragma once
 
-#include <madrona/mw_gpu/host_print.hpp>
 #include <madrona/taskgraph.hpp>
 #include <madrona/mw_gpu/megakernel_consts.hpp>
 
@@ -1203,16 +1202,6 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
         RADIX_BITS);
 
     agent.Process();
-
-#if 1
-    if (threadIdx.x == 0 && block_idx == 0 && parent.sortOffsets) {
-        HostPrint::log("Sort offsets: {} {} {} {}\n", 
-                       parent.sortOffsets[0],
-                       parent.sortOffsets[1],
-                       parent.sortOffsets[2],
-                       parent.sortOffsets[3]);
-    }
-#endif
 }
 
 void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)

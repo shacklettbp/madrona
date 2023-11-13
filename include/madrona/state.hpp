@@ -20,7 +20,6 @@
 #include <madrona/sync.hpp>
 #include <madrona/impl/id_map.hpp>
 #include <madrona/virtual.hpp>
-#include <madrona/selector.hpp>
 
 namespace madrona {
 
@@ -105,20 +104,11 @@ public:
     template <typename ComponentT>
     ComponentID registerComponent();
 
-<<<<<<< HEAD
-    // Just pass {} for the selector if no selector was needed and 0 if no
-    // archetype flags are needed
-    template <typename ArchetypeT>
-    ArchetypeID registerArchetype(ComponentSelectorGeneric selector,
-                                  ArchetypeFlags flags,
-                                  CountT max_num_entities = 0);
-=======
     template <typename ArchetypeT, typename... MetadataComponentTs>
     ArchetypeID registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadata,
         ArchetypeFlags archetype_flags,
         CountT max_num_entities_per_world);
->>>>>>> origin/main
 
     template <typename SingletonT>
     void registerSingleton();
@@ -295,19 +285,12 @@ private:
 
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
-<<<<<<< HEAD
-    void registerArchetype(uint32_t id, Span<ComponentID> components,
-                           ComponentSelectorGeneric selector,
-                           ArchetypeFlags flags,
-                           CountT max_num_entities);
-=======
     void registerArchetype(uint32_t id,
                            ArchetypeFlags archetype_flags,
                            CountT max_num_entities_per_world,
                            CountT num_user_components,
                            const ComponentID *components,
                            const ComponentFlags *component_flags);
->>>>>>> origin/main
 
     void * exportColumn(uint32_t archetype_id, uint32_t component_id);
 

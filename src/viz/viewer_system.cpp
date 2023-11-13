@@ -1,4 +1,3 @@
-#include "madrona/selector.hpp"
 #include <madrona/viz/system.hpp>
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
@@ -152,18 +151,24 @@ void VizRenderingSystem::registerTypes(ECSRegistry &registry,
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
 
+
     // Pointers get set in VizRenderingSystem::init
     registry.registerArchetype<VizCameraArchetype>(
-        ComponentSelector<PerspectiveCameraData>(ComponentSelectImportPointer),
-        ArchetypeImportOffsets);
+        ComponentMetadataSelector<PerspectiveCameraData>(ComponentFlags::ImportMemory),
+        ArchetypeFlags::None,
+        bridge->maxViewsPerworld);
     registry.registerArchetype<RenderableArchetype>(
-        ComponentSelector<InstanceData>(ComponentSelectImportPointer),
-        ArchetypeImportOffsets);
+        ComponentMetadataSelector<InstanceData>(ComponentFlags::ImportMemory),
+        ArchetypeFlags::ImportOffsets,
+        bridge->maxInstancesPerWorld);
+
 
 #if defined(MADRONA_GPU_MODE)
     auto *state_mgr = mwGPU::getStateManager();
-    state_mgr->setArchetypeSortOffsets<RenderableArchetype>(
+
+    state_mgr->setArchetypeWorldOffsets<RenderableArchetype>(
         bridge->instanceOffsets);
+
     state_mgr->setArchetypeComponent<RenderableArchetype, InstanceData>(
         bridge->instances);
     state_mgr->setArchetypeComponent<VizCameraArchetype, PerspectiveCameraData>(

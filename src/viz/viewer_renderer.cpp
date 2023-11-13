@@ -13,7 +13,6 @@
 
 #include "batch_renderer.hpp"
 #include "vulkan/vulkan_core.h"
-#include "xss-common-qsort.h"
 
 #include <filesystem>
 
@@ -579,7 +578,7 @@ static void issueVoxelGen(Device& dev,
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
 
-    shader::VoxelGenPushConst push_const = {voxel_config.xLength,voxel_config.yLength,voxel_config.zLength, 0.8, 9 };
+    render::shader::VoxelGenPushConst push_const = {voxel_config.xLength,voxel_config.yLength,voxel_config.zLength, 0.8, 9 };
 
     dev.dt.cmdPushConstants(draw_cmd,
         pipeline.layout,
@@ -2947,7 +2946,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     }
 
     { // Create the instance offsets buffer
-        uint64_t num_offsets_bytes = num_worlds * sizeof(int32_t);
+        uint64_t num_offsets_bytes = (num_worlds+1) * sizeof(int32_t);
 
         if (!gpu_input) {
             offsets_cpu = alloc.makeStagingBuffer(num_offsets_bytes);
@@ -3036,6 +3035,8 @@ static EngineInterop setupEngineInterop(Device &dev,
         .renderHeight = (int32_t)render_height,
         .episodeDone = nullptr,
         .voxels = voxel_buffer_ptr,
+        .maxViewsPerworld = max_views_per_world,
+        .maxInstancesPerWorld = max_instances_per_world,
         .isGPUBackend = gpu_input
     };
 

@@ -43,6 +43,9 @@ struct VizECSBridge {
     bool *episodeDone;
     uint32_t *voxels;
 
+    uint32_t maxViewsPerworld;
+    uint32_t maxInstancesPerWorld;
+
     bool isGPUBackend;
 };
 

@@ -5,7 +5,6 @@
  * license that can be found in the LICENSE file or at
  * https://opensource.org/licenses/MIT.
  */
-#include "madrona/selector.hpp"
 #include <madrona/state.hpp>
 #include <madrona/registry.hpp>
 #include <madrona/mw_gpu/megakernel_consts.hpp>
@@ -64,9 +63,7 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
         uint64_t mapped_bytes_diff = new_mapped_bytes - cur_mapped_bytes;
         void *grow_base = (char *)column_base + cur_mapped_bytes;
 
-        if (!(tbl.perComponentFlags[i] & ComponentSelectImportPointer)) {
-            alloc->mapMemory(grow_base, mapped_bytes_diff);
-        }
+        alloc->mapMemory(grow_base, mapped_bytes_diff);
 
         int32_t new_max_rows = new_mapped_bytes / column_bytes_per_row;
         min_mapped_rows = min(new_max_rows, min_mapped_rows);
@@ -256,8 +253,6 @@ void StateManager::registerArchetype(uint32_t id,
                                      ComponentFlags *component_flags,
                                      uint32_t num_user_components)
 {
-    (void)flags;
-
     uint32_t offset = archetype_component_offset_;
     archetype_component_offset_ += num_user_components;
 

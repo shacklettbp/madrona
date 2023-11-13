@@ -34,23 +34,16 @@ StructuredBuffer<MeshData> meshDataBuffer;
 
 uint getNumInstancesForWorld(uint world_idx)
 {
-    if (world_idx == 0) {
-        // printf("0: %d %d %d\n", instanceOffsets[0], instanceOffsets[1], instanceOffsets[2]);
-        return instanceOffsets[0];
-    } else if (world_idx == pushConst.numWorlds - 1) {
-        return pushConst.numInstances - instanceOffsets[world_idx-1];
+    if (world_idx == pushConst.numWorlds - 1) {
+        return pushConst.numInstances - instanceOffsets[world_idx];
     } else {
-        return instanceOffsets[world_idx] - instanceOffsets[world_idx-1];
+        return instanceOffsets[world_idx+1] - instanceOffsets[world_idx];
     }
 }
 
 uint getInstanceOffsetsForWorld(uint world_idx)
 {
-    if (world_idx == 0) {
-        return 0;
-    } else {
-        return instanceOffsets[world_idx-1];
-    }
+    return instanceOffsets[world_idx];
 }
 
 EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)

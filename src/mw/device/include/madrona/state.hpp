@@ -19,7 +19,6 @@
 #include <madrona/optional.hpp>
 #include <madrona/type_tracker.hpp>
 #include <madrona/memory.hpp>
-#include <madrona/selector.hpp>
 
 #include "mw_gpu/const.hpp"
 
@@ -142,9 +141,6 @@ public:
 
     template <typename ArchetypeT>
     inline void setArchetypeWorldOffsets(void *ptr);
-
-    template <typename ArchetypeT>
-    inline void setArchetypeSortOffsets(void *ptr);
 
     inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
                                                   int32_t column_idx);
