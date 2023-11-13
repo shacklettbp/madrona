@@ -1082,8 +1082,6 @@ BatchRenderer::Impl::Impl(const Config &cfg,
                        batchDraw,
                        lighting.descPools[0].makeSet(),
                        lighting.descPools[5].makeSet());
-
-        printf("%p %p\n", (void *)batchFrames[i].displayTexture.tex.image, (void *)batchFrames[i].displayTexture.view);
     }
 }
 
@@ -1259,8 +1257,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                      uint32_t batch_view_idx,
                                      EngineInterop *interop) 
 { 
-    printf("\n");
-
     // Circles between 0 to number of frames
     uint32_t frame_index = impl->currentFrame;
 

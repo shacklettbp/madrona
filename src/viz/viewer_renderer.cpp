@@ -74,7 +74,8 @@ Backend::LoaderLib PresentationState::init()
 
     glfwInitVulkanLoader((PFN_vkGetInstanceProcAddr)loader_lib.getEntryFn());
 #else
-    Backend::LoaderLib loader_lib(nullptr, nullptr);
+    // Backend::LoaderLib loader_lib(nullptr, nullptr);
+    Backend::LoaderLib loader_lib = Backend::loadLoaderLib();
 #endif
 
     if (!glfwInit()) {
@@ -88,6 +89,10 @@ vector<const char *> PresentationState::getInstanceExtensions()
 {
     uint32_t count;
     const char **names = glfwGetRequiredInstanceExtensions(&count);
+
+    for (int i = 0; i < count; ++i) {
+        printf("Require instance extension: %s\n", names[i]);
+    }
 
     vector<const char *> exts(count);
     memcpy(exts.data(), names, count * sizeof(const char *));
@@ -1887,10 +1892,11 @@ static Pipeline<1> makeBlurPipeline(const Device &dev,
     };
 }
 
-static Backend initializeBackend()
+static Backend initializeBackend(const Backend::LoaderLib &loader_lib)
 {
-    auto get_inst_addr = glfwGetInstanceProcAddress(
-        VK_NULL_HANDLE, "vkGetInstanceProcAddr");
+    // auto get_inst_addr = glfwGetInstanceProcAddress(
+        // VK_NULL_HANDLE, "vkGetInstanceProcAddr");
+    auto get_inst_addr = loader_lib.getEntryFn();
 
     bool enable_validation;
     char *validate_env = getenv("MADRONA_RENDER_VALIDATE");
@@ -3437,7 +3443,7 @@ Renderer::Renderer(uint32_t gpu_id,
                    bool gpu_input,
                    VoxelConfig voxel_config)
     : loader_lib_(PresentationState::init()),
-      backend(initializeBackend()),
+      backend(initializeBackend(loader_lib_)),
       window(makeWindow(backend, img_width, img_height)),
       dev(backend.initDevice(
 #ifdef MADRONA_CUDA_SUPPORT
