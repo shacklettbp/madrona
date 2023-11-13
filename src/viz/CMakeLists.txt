@@ -48,7 +48,7 @@ add_library(madrona_viewer STATIC
     viewer_renderer.hpp viewer_renderer.cpp
     batch_renderer.hpp batch_renderer.cpp
     #render_context.cpp
-    render_common.hpp
+    # render_common.hpp
     image_util.cpp
 )
 

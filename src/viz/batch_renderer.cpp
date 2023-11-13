@@ -12,6 +12,7 @@
 
 #include "vk/descriptors.hpp"
 #include "vk/memory.hpp"
+#include "vk/utils.hpp"
 #include "vk/utils.inl"
 #include "vulkan/vulkan_core.h"
 
@@ -20,6 +21,12 @@ using namespace madrona::render;
 using madrona::render::vk::checkVk;
 
 namespace madrona::viz {
+
+enum class LatestOperation {
+    None,
+    RenderPrepare,
+    RenderViews,
+};
 
 namespace consts {
 inline constexpr uint32_t maxDrawsPerLayeredImage = 65536;
@@ -550,14 +557,34 @@ struct BatchFrame {
 
     DisplayTexture displayTexture;
 
-    VkCommandPool cmdPool;
-    VkCommandBuffer cmdbuf;
+    VkCommandPool prepareCmdPool;
+    VkCommandBuffer prepareCmdbuf;
+
+    VkCommandPool renderCmdPool;
+    VkCommandBuffer renderCmdbuf;
+
+    // Waited for by the viewer or the batch renderer
+    VkSemaphore prepareFinished;
 
     // Waited for by the viewer to render stuff to the window
     VkSemaphore renderFinished;
 
     // Waited for at the beginning of each renderViews call
-    VkFence fence;
+    VkFence prepareFence;
+    VkFence renderFence;
+
+    // Keep track of which semaphore to wait on
+    LatestOperation latestOp;
+
+    VkFence & getLatestFence()
+    {
+        assert(latestOp != LatestOperation::None);
+        if (latestOp == LatestOperation::RenderPrepare) {
+            return prepareFence;
+        } else {
+            return renderFence;
+        }
+    }
 };
 
 static DrawCommandPackage makeDrawCommandPackage(vk::Device& dev,
@@ -670,10 +697,14 @@ static void makeBatchFrame(vk::Device& dev,
         draw_packages.emplace(i, makeDrawCommandPackage(dev, alloc, prepare_views, draw));
     }
 
-    VkCommandPool cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
-    VkCommandBuffer cmdbuf = vk::makeCmdBuffer(dev, cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    VkCommandPool prepare_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
+    VkCommandPool render_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
+    VkCommandBuffer prepare_cmdbuf = vk::makeCmdBuffer(dev, prepare_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    VkCommandBuffer render_cmdbuf = vk::makeCmdBuffer(dev, render_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    VkSemaphore prepare_finished = vk::makeBinarySemaphore(dev);
     VkSemaphore render_finished = vk::makeBinarySemaphore(dev);
-    VkFence fence = vk::makeFence(dev, true);
+    VkFence prepare_fence = vk::makeFence(dev, true);
+    VkFence render_fence = vk::makeFence(dev, true);
 
     new (frame) BatchFrame{
         {std::move(views),std::move(instances),std::move(instance_offsets)},
@@ -687,10 +718,15 @@ static void makeBatchFrame(vk::Device& dev,
         lighting_set,
         pbr_set,
         makeDisplayTexture(cfg.renderWidth, cfg.renderHeight, dev, alloc),
-        cmdpool,
-        cmdbuf,
+        prepare_cmdpool,
+        prepare_cmdbuf,
+        render_cmdpool,
+        render_cmdbuf,
+        prepare_finished,
         render_finished,
-        fence
+        prepare_fence,
+        render_fence,
+        LatestOperation::None
     };
 
     { // Create the descriptor sets with the outputs
@@ -1252,12 +1288,10 @@ static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
     }
 }
 
-void BatchRenderer::renderViews(BatchRenderInfo info,
-                                     const DynArray<AssetData> &loaded_assets,
-                                     uint32_t batch_view_idx,
-                                     EngineInterop *interop) 
-{ 
-    // Circles between 0 to number of frames
+void BatchRenderer::prepareForRendering(BatchRenderInfo info,
+                                        EngineInterop *interop)
+{
+    // Circles between 0 to number of frames (not anymore, there is only one frame now)
     uint32_t frame_index = impl->currentFrame;
 
     { // Flush CPU buffers if we used CPU buffers
@@ -1288,19 +1322,20 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     }
 
 
-    impl->selectedView = batch_view_idx;
     BatchFrame &frame_data = impl->batchFrames[frame_index];
 
     { // Wait for the frame to be ready
-        impl->dev.dt.waitForFences(impl->dev.hdl, 1, &frame_data.fence, VK_TRUE, UINT64_MAX);
+        impl->dev.dt.waitForFences(impl->dev.hdl, 1, 
+                                   &frame_data.getLatestFence(),
+                                   VK_TRUE, UINT64_MAX);
     }
 
     BatchImportedBuffers &batch_buffers = getImportedBuffers(frame_index);
 
     // Start the command buffer and stuff
-    VkCommandBuffer draw_cmd = frame_data.cmdbuf;
+    VkCommandBuffer draw_cmd = frame_data.prepareCmdbuf;
     {
-        REQ_VK(impl->dev.dt.resetCommandPool(impl->dev.hdl, frame_data.cmdPool, 0));
+        REQ_VK(impl->dev.dt.resetCommandPool(impl->dev.hdl, frame_data.prepareCmdPool, 0));
         VkCommandBufferBeginInfo begin_info {};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         REQ_VK(impl->dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
@@ -1347,6 +1382,133 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                              batch_buffers.instanceOffsets.buffer,
                              1, &offsets_data_copy);
     }
+
+    REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
+
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = nullptr,
+        .pWaitDstStageMask = nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &draw_cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &frame_data.prepareFinished
+    };
+
+    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.prepareFence));
+    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.prepareFence));
+
+    frame_data.latestOp = LatestOperation::RenderPrepare;
+}
+
+void BatchRenderer::renderViews(BatchRenderInfo info,
+                                const DynArray<AssetData> &loaded_assets,
+                                uint32_t batch_view_idx,
+                                EngineInterop *interop) 
+{ 
+    prepareForRendering(info, interop);
+
+    // Circles between 0 to number of frames (not anymore, there is only one frame now)
+    uint32_t frame_index = impl->currentFrame;
+
+#if 0
+    { // Flush CPU buffers if we used CPU buffers
+        if (interop->viewsCPU.has_value()) {
+            *interop->bridge.totalNumViews = interop->bridge.totalNumViewsCPUInc->load_acquire();
+            *interop->bridge.totalNumInstances = interop->bridge.totalNumInstancesCPUInc->load_acquire();
+
+            info.numInstances = *interop->bridge.totalNumInstances;
+            info.numViews = *interop->bridge.totalNumViews;
+
+            interop->bridge.totalNumViewsCPUInc->store_release(0);
+            interop->bridge.totalNumInstancesCPUInc->store_release(0);
+
+            // First, need to perform the sorts
+            sortInstancesAndViewsCPU(interop);
+            computeInstanceOffsets(interop, info.numWorlds);
+
+            // Need to flush engine input state before copy
+            interop->viewsCPU->flush(impl->dev);
+            interop->instancesCPU->flush(impl->dev);
+            interop->instanceOffsetsCPU->flush(impl->dev);
+        }
+
+        if (interop->voxelInputCPU.has_value()) {
+            // Need to flush engine input state before copy
+            interop->voxelInputCPU->flush(impl->dev);
+        }
+    }
+#endif
+
+
+    BatchFrame &frame_data = impl->batchFrames[frame_index];
+
+#if 0
+    { // Wait for the frame to be ready
+        impl->dev.dt.waitForFences(impl->dev.hdl, 1, &frame_data.fence, VK_TRUE, UINT64_MAX);
+    }
+#endif
+
+    BatchImportedBuffers &batch_buffers = getImportedBuffers(frame_index);
+
+    // Start the command buffer and stuff
+    VkCommandBuffer draw_cmd = frame_data.renderCmdbuf;
+    {
+        REQ_VK(impl->dev.dt.resetCommandPool(impl->dev.hdl, frame_data.renderCmdPool, 0));
+        VkCommandBufferBeginInfo begin_info {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        REQ_VK(impl->dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    }
+
+#if 0
+    { // Import the views
+        VkDeviceSize num_views_bytes = info.numViews *
+            sizeof(shader::PackedViewData);
+
+        VkBufferCopy view_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_views_bytes
+        };
+
+       impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewsHdl,
+                             batch_buffers.views.buffer,
+                             1, &view_data_copy);
+    }
+
+    { // Import the instances
+        VkDeviceSize num_instances_bytes = info.numInstances *
+            sizeof(shader::PackedInstanceData);
+
+        VkBufferCopy instance_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_instances_bytes
+        };
+
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instancesHdl,
+                             batch_buffers.instances.buffer,
+                             1, &instance_data_copy);
+    }
+
+    { // Import the offsets for instances
+        VkDeviceSize num_offsets_bytes = info.numWorlds *
+            sizeof(int32_t);
+
+        VkBufferCopy offsets_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_offsets_bytes
+        };
+
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instanceOffsetsHdl,
+                             batch_buffers.instanceOffsets.buffer,
+                             1, &offsets_data_copy);
+    }
+#endif
+
+    ////////////////////////////////////////////////////////////////
+    
+    impl->selectedView = batch_view_idx;
 
     { // Prepare memory written to by ECS with barrier
         std::array barriers = {
@@ -1639,27 +1801,29 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     // End the command buffer and stuff
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
 
-#if 0
-    VkPipelineStageFlags viewer_wait_flag =
+#if 1
+    VkPipelineStageFlags prepare_wait_flag =
         VK_PIPELINE_STAGE_TRANSFER_BIT;
 #endif
 
     VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .pNext = nullptr,
-        .waitSemaphoreCount = 0,
-        .pWaitSemaphores = nullptr,
-        .pWaitDstStageMask = nullptr,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &frame_data.prepareFinished,
+        .pWaitDstStageMask = &prepare_wait_flag,
         .commandBufferCount = 1,
         .pCommandBuffers = &draw_cmd,
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &frame_data.renderFinished
     };
 
-    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.fence));
-    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.fence));
+    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.renderFence));
+    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.renderFence));
 
-    impl->currentFrame = (impl->currentFrame + 1) % impl->batchFrames.size();
+    frame_data.latestOp = LatestOperation::RenderViews;
+
+    // impl->currentFrame = (impl->currentFrame + 1) % impl->batchFrames.size();
 }
 
 void BatchRenderer::transitionOutputLayout()
@@ -1671,13 +1835,13 @@ void BatchRenderer::transitionOutputLayout()
     BatchFrame &frame_data = impl->batchFrames[frame_index];
 
     { // Wait for the frame to be ready
-        impl->dev.dt.waitForFences(impl->dev.hdl, 1, &frame_data.fence, VK_TRUE, UINT64_MAX);
+        impl->dev.dt.waitForFences(impl->dev.hdl, 1, &frame_data.renderFence, VK_TRUE, UINT64_MAX);
     }
 
     // Start the command buffer and stuff
-    VkCommandBuffer draw_cmd = frame_data.cmdbuf;
+    VkCommandBuffer draw_cmd = frame_data.renderCmdbuf;
     {
-        REQ_VK(impl->dev.dt.resetCommandPool(impl->dev.hdl, frame_data.cmdPool, 0));
+        REQ_VK(impl->dev.dt.resetCommandPool(impl->dev.hdl, frame_data.renderCmdPool, 0));
         VkCommandBufferBeginInfo begin_info {};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         REQ_VK(impl->dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
@@ -1724,10 +1888,13 @@ void BatchRenderer::transitionOutputLayout()
         .pSignalSemaphores = &frame_data.renderFinished
     };
 
-    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.fence));
-    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.fence));
+    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.renderFence));
+    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.renderFence));
 
-    impl->currentFrame = (impl->currentFrame + 1) % impl->batchFrames.size();
+    frame_data.latestOp = LatestOperation::RenderViews;
+
+    // We only have one frame now so this is not necessary
+    // impl->currentFrame = (impl->currentFrame + 1) % impl->batchFrames.size();
 }
 
 BatchImportedBuffers &BatchRenderer::getImportedBuffers(uint32_t frame_id) 
@@ -1755,7 +1922,14 @@ VkSemaphore BatchRenderer::getLatestWaitSemaphore()
 {
     uint32_t last_frame = (impl->currentFrame + impl->batchFrames.size() - 1) %
         impl->batchFrames.size();
-    return impl->batchFrames[last_frame].renderFinished;
+
+    assert(impl->batchFrames[last_frame].latestOp != LatestOperation::None);
+
+    if (impl->batchFrames[last_frame].latestOp == LatestOperation::RenderPrepare) {
+        return impl->batchFrames[last_frame].prepareFinished;
+    } else {
+        return impl->batchFrames[last_frame].renderFinished;
+    }
 }
 
 }

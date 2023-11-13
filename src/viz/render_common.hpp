@@ -55,8 +55,8 @@ struct Window {
 
 class PresentationState {
 public:
-    static render::vk::Backend::LoaderLib init();
-    static std::vector<const char *> getInstanceExtensions();
+    static render::vk::Backend::LoaderLib init(bool make_window);
+    static std::vector<const char *> getInstanceExtensions(bool make_window);
     static VkSurfaceFormatKHR selectSwapchainFormat(const render::vk::Backend &backend,
                                                     VkPhysicalDevice phy,
                                                     VkSurfaceKHR surface);
@@ -287,6 +287,14 @@ struct Sky {
     math::Vector3 white;
     math::Vector3 sunSize;
     float exposure;
+};
+
+struct ViewerAppCfg {
+
+};
+
+struct ViewerFrame {
+
 };
     
 }

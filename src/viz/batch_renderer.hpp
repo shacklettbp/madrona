@@ -80,6 +80,9 @@ struct BatchRenderer {
     ~BatchRenderer();
     void importCudaData(VkCommandBuffer);
 
+    void prepareForRendering(BatchRenderInfo info,
+                             EngineInterop *interop);
+
     void renderViews(BatchRenderInfo info,
                      const DynArray<AssetData> &loaded_assets,
                      uint32_t view_idx,
@@ -92,7 +95,9 @@ struct BatchRenderer {
     LayeredTarget &getLayeredTarget(uint32_t frame_id);
     VkDescriptorSet getPBRSet(uint32_t frame_id);
 
-    // Get the semaphore that the viewer renderer has to wait on
+    // Get the semaphore that the viewer renderer has to wait on.
+    // This is either going to be the semaphore from prepareForRendering,
+    // or it's the one from renderViews.
     VkSemaphore getLatestWaitSemaphore();
 };
 
