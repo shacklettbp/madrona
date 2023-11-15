@@ -30,6 +30,10 @@ constexpr inline float pi_m2 {pi * 2.f};
 inline constexpr float toRadians(float degrees);
 inline constexpr float rsqrtApprox(float v);
 
+// Solves a * x^2 + b * x + c = 0. Assumes a is not 0.
+inline bool solveQuadraticUnsafe(
+    float a, float b, float c, float *t1, float *t2);
+
 struct Vector2 {
     float x;
     float y;
