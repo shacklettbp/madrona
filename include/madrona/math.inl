@@ -32,7 +32,7 @@ bool solveQuadraticUnsafe(
     }
     
     float sqrt_det = sqrtf(det);
-    float rcp_2a = 1.f / 2.f * a;
+    float rcp_2a = 1.f / (2.f * a);
     
     *t1 = (-b - sqrt_det) * rcp_2a;
     *t2 = (-b + sqrt_det) * rcp_2a;
