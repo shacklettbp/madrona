@@ -5252,12 +5252,10 @@ bool Renderer::renderViewerFrame(const ViewerCam &cam,
     return prepare_screenshot;
 }
 
-void Renderer::render(const ViewerCam &cam,
-                      const FrameConfig &cfg)
+void Renderer::renderGUIAndPresent(const FrameConfig &cfg,
+                                   bool prepare_screenshot)
 {
     Frame &frame = frames_[cur_frame_];
-
-    bool prepare_screenshot = renderViewerFrame(cam, cfg);
 
     VkCommandBuffer draw_cmd = frame.presentCmd;
     { // Get command buffer for this frame and start it
@@ -5439,6 +5437,13 @@ void Renderer::render(const ViewerCam &cam,
     }
 
     global_frame_no_++;
+}
+
+void Renderer::render(const ViewerCam &cam,
+                      const FrameConfig &cfg)
+{
+    bool prepare_screenshot = renderViewerFrame(cam, cfg);
+    renderGUIAndPresent(cfg, prepare_screenshot);
 }
 
 void Renderer::renderViews(const FrameConfig &cfg, bool just_do_transition)

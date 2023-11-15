@@ -1410,46 +1410,12 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 { 
     prepareForRendering(info, interop);
 
+
+
     // Circles between 0 to number of frames (not anymore, there is only one frame now)
     uint32_t frame_index = impl->currentFrame;
 
-#if 0
-    { // Flush CPU buffers if we used CPU buffers
-        if (interop->viewsCPU.has_value()) {
-            *interop->bridge.totalNumViews = interop->bridge.totalNumViewsCPUInc->load_acquire();
-            *interop->bridge.totalNumInstances = interop->bridge.totalNumInstancesCPUInc->load_acquire();
-
-            info.numInstances = *interop->bridge.totalNumInstances;
-            info.numViews = *interop->bridge.totalNumViews;
-
-            interop->bridge.totalNumViewsCPUInc->store_release(0);
-            interop->bridge.totalNumInstancesCPUInc->store_release(0);
-
-            // First, need to perform the sorts
-            sortInstancesAndViewsCPU(interop);
-            computeInstanceOffsets(interop, info.numWorlds);
-
-            // Need to flush engine input state before copy
-            interop->viewsCPU->flush(impl->dev);
-            interop->instancesCPU->flush(impl->dev);
-            interop->instanceOffsetsCPU->flush(impl->dev);
-        }
-
-        if (interop->voxelInputCPU.has_value()) {
-            // Need to flush engine input state before copy
-            interop->voxelInputCPU->flush(impl->dev);
-        }
-    }
-#endif
-
-
     BatchFrame &frame_data = impl->batchFrames[frame_index];
-
-#if 0
-    { // Wait for the frame to be ready
-        impl->dev.dt.waitForFences(impl->dev.hdl, 1, &frame_data.fence, VK_TRUE, UINT64_MAX);
-    }
-#endif
 
     BatchImportedBuffers &batch_buffers = getImportedBuffers(frame_index);
 
@@ -1461,50 +1427,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         REQ_VK(impl->dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
     }
-
-#if 0
-    { // Import the views
-        VkDeviceSize num_views_bytes = info.numViews *
-            sizeof(shader::PackedViewData);
-
-        VkBufferCopy view_data_copy = {
-            .srcOffset = 0, .dstOffset = 0,
-            .size = num_views_bytes
-        };
-
-       impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewsHdl,
-                             batch_buffers.views.buffer,
-                             1, &view_data_copy);
-    }
-
-    { // Import the instances
-        VkDeviceSize num_instances_bytes = info.numInstances *
-            sizeof(shader::PackedInstanceData);
-
-        VkBufferCopy instance_data_copy = {
-            .srcOffset = 0, .dstOffset = 0,
-            .size = num_instances_bytes
-        };
-
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instancesHdl,
-                             batch_buffers.instances.buffer,
-                             1, &instance_data_copy);
-    }
-
-    { // Import the offsets for instances
-        VkDeviceSize num_offsets_bytes = info.numWorlds *
-            sizeof(int32_t);
-
-        VkBufferCopy offsets_data_copy = {
-            .srcOffset = 0, .dstOffset = 0,
-            .size = num_offsets_bytes
-        };
-
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instanceOffsetsHdl,
-                             batch_buffers.instanceOffsets.buffer,
-                             1, &offsets_data_copy);
-    }
-#endif
 
     ////////////////////////////////////////////////////////////////
     
@@ -1635,7 +1557,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                       batch_no);
         }
 
-#if 1
         issueMemoryBarrier(impl->dev, draw_cmd,
                            VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
                            VK_ACCESS_MEMORY_READ_BIT,
@@ -1643,7 +1564,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                            VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
                                VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-#endif
 
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             int batch_no = batch + iter * consts::numDrawCmdBuffers;
@@ -1652,31 +1572,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                    frame_data.targets[batch_no],
                                    draw_cmd);
         }
-
-#if 0
-        VkBufferMemoryBarrier draw_cmd_barriers[consts::numDrawCmdBuffers];
-        for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
-            VkBufferMemoryBarrier barrier = {
-                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .buffer = frame_data.drawPackageSwapchain[batch].drawBuffer.buffer,
-                .offset = 0,
-                .size = VK_WHOLE_SIZE
-            };
-
-            draw_cmd_barriers[batch] = barrier;
-        }
-
-        impl->dev.dt.cmdPipelineBarrier(draw_cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
-                VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, cur_num_batches, draw_cmd_barriers, 0, nullptr);
-#endif
 
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             int batch_no = batch + iter * consts::numDrawCmdBuffers;
@@ -1772,7 +1667,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                   1, &blit,
                                   VK_FILTER_NEAREST);
 
-#if 1
         { // Prepare the viz texture for shader sampling
             VkImageMemoryBarrier barrier = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1795,16 +1689,13 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                     0, 0, nullptr, 0, nullptr, 1, &barrier);
         }
-#endif
     }
 
     // End the command buffer and stuff
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
 
-#if 1
     VkPipelineStageFlags prepare_wait_flag =
         VK_PIPELINE_STAGE_TRANSFER_BIT;
-#endif
 
     VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -1822,8 +1713,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.renderFence));
 
     frame_data.latestOp = LatestOperation::RenderViews;
-
-    // impl->currentFrame = (impl->currentFrame + 1) % impl->batchFrames.size();
 }
 
 void BatchRenderer::transitionOutputLayout()

@@ -339,10 +339,16 @@ public:
     void render(const ViewerCam &cam,
                 const FrameConfig &cfg);
 
+    // Batch renderer views
+    void renderViews(const FrameConfig &cfg, bool just_do_transition = false);
+
+    // Flycam view
     bool renderViewerFrame(const ViewerCam &cam,
                            const FrameConfig &cfg);
 
-    void renderViews(const FrameConfig &cfg, bool just_do_transition = false);
+    // Render GUI and present
+    void renderGUIAndPresent(const FrameConfig &cfg,
+                             bool prepare_screenshot);
 
     void waitForIdle();
 
