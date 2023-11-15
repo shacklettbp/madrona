@@ -94,7 +94,7 @@ inline float intersectRayZOriginCapsule(
 
     float cylinder_hit_z = ray_o.z + ray_d.z * cylinder_hit_t;
 
-    if (cylinder_hit_z >= 0.f || cylinder_hit_z <= h) {
+    if (cylinder_hit_z >= 0.f && cylinder_hit_z <= h) {
         return cylinder_hit_t;
     }
 
