@@ -10,7 +10,6 @@ inline float intersect2DRayOriginCircle(
     float r2 = r * r;
     float o_len2 = o.length2();
 
-    float cylinder_hit_t;
     if (o_len2 <= r2) {
         // Ray starts inside circle 
         return 0.f;
