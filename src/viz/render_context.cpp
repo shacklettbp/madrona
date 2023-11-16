@@ -1,3 +1,4 @@
+#include <array>
 #include <filesystem>
 #include <madrona/render/vk/backend.hpp>
 #include <madrona/viz/render_context.hpp>
@@ -5,134 +6,48 @@
 #include "render_common.hpp"
 #include "batch_renderer.hpp"
 
+#include "render_context_impl.hpp"
+
+#include "backends/imgui_impl_vulkan.h"
+#include "backends/imgui_impl_glfw.h"
+
+#include <madrona/render/shader_compiler.hpp>
+
+#include "../render/asset_utils.hpp"
+
+#include "shaders/shader_common.h"
+#include "vk/descriptors.hpp"
+
+#include <filesystem>
+
+#ifdef MADRONA_MACOS
+#include <dlfcn.h>
+#endif
+
+#ifdef MADRONA_CUDA_SUPPORT
+#include <madrona/cuda_utils.hpp>
+#endif
+
+#include "shader.hpp"
+
+#include <fstream>
+#include <random>
+
+#include <signal.h>
+
+#include <stb_image.h>
+#include <stb_image_write.h>
+
+#define ENABLE_BATCH_RENDERER
+
 using std::vector;
 using std::min;
 using std::max;
+using std::array;
 
 namespace madrona::render {
 
 using namespace vk;
-
-struct RenderContext::Impl {
-    Impl(const RenderContext::Config &cfg);
-
-    ~Impl();
-
-private:
-    vk::Backend::LoaderLib loader_lib_;
-
-public:
-    vk::Backend backend;
-    Optional<Window> window;
-    vk::Device dev;
-    vk::MemoryAllocator alloc;
-
-private:
-    VkQueue render_queue_;
-
-    // Fixme remove
-    render::vk::QueueState present_wrapper_;
-
-    uint32_t fb_width_;
-    uint32_t fb_height_;
-
-    uint32_t br_width_;
-    uint32_t br_height_;
-
-    std::array<VkClearValue, 4> fb_clear_;
-    std::array<VkClearValue, 2> fb_shadow_clear_;
-    std::array<VkClearValue, 2> fb_imgui_clear_;
-    Optional<PresentationState> present_;
-    VkPipelineCache pipeline_cache_;
-    VkSampler repeat_sampler_;
-    VkSampler clamp_sampler_;
-    VkRenderPass render_pass_;
-    VkRenderPass shadow_pass_;
-    Optional<ImGuiRenderState> imgui_render_state_;
-
-    Pipeline<1> instance_cull_;
-    Pipeline<1> object_draw_;
-    Pipeline<1> object_shadow_draw_;
-    Pipeline<1> deferred_lighting_;
-    Pipeline<1> shadow_gen_;
-    Pipeline<1> blur_;
-    Pipeline<1> voxel_mesh_gen_;
-    Pipeline<1> voxel_draw_;
-    Pipeline<1> quad_draw_;
-
-    render::vk::FixedDescriptorPool asset_desc_pool_cull_;
-    render::vk::FixedDescriptorPool asset_desc_pool_draw_;
-    render::vk::FixedDescriptorPool asset_desc_pool_mat_tx_;
-
-    VkDescriptorSet asset_set_cull_;
-    VkDescriptorSet asset_set_draw_;
-    VkDescriptorSet asset_set_mat_tex_;
-
-    VkCommandPool load_cmd_pool_;
-    VkCommandBuffer load_cmd_;
-    VkFence load_fence_;
-
-    EngineInterop engine_interop_;
-
-    HeapArray<render::shader::DirectionalLight> lights_;
-
-    uint32_t cur_frame_;
-    HeapArray<Frame> frames_;
-    DynArray<AssetData> loaded_assets_;
-
-    Sky sky_;
-
-    DynArray<MaterialTexture> material_textures_;
-    VoxelConfig voxel_config_;
-
-    // This is just a prototype
-    int gpu_id_;
-    uint32_t num_worlds_;
-    std::unique_ptr<BatchRenderer> br_proto_;
-
-    VkDescriptorSetLayout asset_layout_;
-    VkDescriptorSetLayout asset_tex_layout_;
-
-    // This contains the vertex data buffer and the mesh data buffer
-    VkDescriptorSetLayout asset_batch_lighting_layout_;
-
-    VkDescriptorPool asset_pool_;
-    VkDescriptorSet asset_set_tex_compute_;
-    VkDescriptorSet asset_batch_lighting_set_;
-
-    // This descriptor set contains information about the sky
-    VkDescriptorSetLayout sky_data_layout_;
-    VkDescriptorSet sky_data_set_;
-
-    bool gpu_input_;
-
-    // This is only used if we are on the CPU backend
-    uint32_t *iota_array_;
-    std::unique_ptr<render::vk::HostBuffer> screenshot_buffer_;
-};
-
-static Backend initBackend(bool make_window, 
-                           const Backend::LoaderLib &loader_lib)
-{
-    auto get_inst_addr = [make_window, &loader_lib] () {
-        if (make_window) {
-            return glfwGetInstanceProcAddress(VK_NULL_HANDLE, "vkGetInstanceProcAddr");
-        } else {
-            return loader_lib.getEntryFn();
-        }
-    } ();
-
-    bool enable_validation;
-    char *validate_env = getenv("MADRONA_RENDER_VALIDATE");
-    if (!validate_env || validate_env[0] == '0') {
-        enable_validation = false;
-    } else {
-        enable_validation = true;
-    }
-
-    return Backend((void (*)())get_inst_addr, enable_validation, false,
-                   PresentationState::getInstanceExtensions(make_window));
-}
 
 VkSurfaceKHR getWindowSurface(const Backend &backend, GLFWwindow *window)
 {
@@ -404,23 +319,6 @@ static HeapArray<VkImage> getSwapchainImages(const Device &dev,
                                         swapchain_images.data()));
 
     return swapchain_images;
-}
-
-static Window makeWindow(const Backend &backend,
-                         uint32_t window_width,
-                         uint32_t window_height)
-{
-    GLFWwindow *glfw_window =
-        makeGLFWwindow(window_width, window_height);
-
-    VkSurfaceKHR surface = getWindowSurface(backend, glfw_window);
-
-    return Window {
-        .platformWindow = glfw_window,
-        .surface = surface,
-        .width = window_width,
-        .height = window_height,
-    };
 }
 
 PresentationState::PresentationState(const Backend &backend,
@@ -2032,13 +1930,13 @@ static Pipeline<1> makeBlurPipeline(const Device &dev,
 static Backend initializeBackend(const Backend::LoaderLib &loader_lib,
                                  bool make_window)
 {
-    auto get_inst_addr = [make_window] () {
+    auto get_inst_addr = [make_window, &loader_lib] () {
         if (make_window) {
             return glfwGetInstanceProcAddress(VK_NULL_HANDLE, "vkGetInstanceProcAddr");
         } else {
             return loader_lib.getEntryFn();
         }
-    }
+    } ();
 
     bool enable_validation;
     char *validate_env = getenv("MADRONA_RENDER_VALIDATE");
@@ -2049,10 +1947,10 @@ static Backend initializeBackend(const Backend::LoaderLib &loader_lib,
     }
 
     return Backend((void (*)())get_inst_addr, enable_validation, false,
-                   PresentationState::getInstanceExtensions());
+                   PresentationState::getInstanceExtensions(make_window));
 }
 
-static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
+static std::pair<Framebuffer, Optional<Framebuffer>> makeFramebuffers(const Device &dev,
                                    MemoryAllocator &alloc,
                                    uint32_t fb_width,
                                    uint32_t fb_height,
@@ -2129,19 +2027,22 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
         depth_view,
     };
 
-    VkFramebufferCreateInfo imgui_fb_info;
-    imgui_fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    imgui_fb_info.pNext = nullptr;
-    imgui_fb_info.flags = 0;
-    imgui_fb_info.renderPass = imgui_render_pass;
-    imgui_fb_info.attachmentCount = 2;
-    imgui_fb_info.pAttachments = imgui_attachment_views.data();
-    imgui_fb_info.width = fb_width;
-    imgui_fb_info.height = fb_height;
-    imgui_fb_info.layers = 1;
+    VkFramebuffer imgui_hdl = VK_NULL_HANDLE;
 
-    VkFramebuffer imgui_hdl;
-    REQ_VK(dev.dt.createFramebuffer(dev.hdl, &imgui_fb_info, nullptr, &imgui_hdl));
+    if (imgui_render_pass != VK_NULL_HANDLE) {
+        VkFramebufferCreateInfo imgui_fb_info;
+        imgui_fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        imgui_fb_info.pNext = nullptr;
+        imgui_fb_info.flags = 0;
+        imgui_fb_info.renderPass = imgui_render_pass;
+        imgui_fb_info.attachmentCount = 2;
+        imgui_fb_info.pAttachments = imgui_attachment_views.data();
+        imgui_fb_info.width = fb_width;
+        imgui_fb_info.height = fb_height;
+        imgui_fb_info.layers = 1;
+
+        REQ_VK(dev.dt.createFramebuffer(dev.hdl, &imgui_fb_info, nullptr, &imgui_hdl));
+    }
 
     return std::make_pair(
         Framebuffer {
@@ -2155,7 +2056,7 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
             depth_view,
             hdl 
         },
-        Framebuffer {
+        imgui_hdl != VK_NULL_HANDLE ? Framebuffer {
             std::move(albedo),
             std::move(normal),
             std::move(position),
@@ -2165,7 +2066,7 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(const Device &dev,
             position_view,
             depth_view,
             imgui_hdl 
-        }
+        } : Optional<Framebuffer>::none()
     );
 }
 
@@ -2292,16 +2193,13 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
 
-    uint32_t shadow_fb_width = make_window ? InternalConfig::shadowMapSize : 1;
-    uint32_t shadow_fb_height = make_window ? InternalConfig::shadowMapSize : 1;
-
-    auto shadow_fb = makeShadowFramebuffer(
-        dev, alloc, 
-        shadow_fb_width,
-        shadow_fb_height,
+    auto shadow_fb = makeShadowFramebuffer(dev, alloc, 
+        make_window ? InternalConfig::shadowMapSize : 1,
+        make_window ? InternalConfig::shadowMapSize : 1,
         shadow_pass);
 
-    VkCommandPool cmd_pool = makeCmdPool(dev, dev.gfxQF);
+    VkCommandPool render_viewer_cmd_pool = makeCmdPool(dev, dev.gfxQF);
+    VkCommandPool present_viewer_cmd_pool = makeCmdPool(dev, dev.gfxQF);
 
     int64_t buffer_offsets[6];
     int64_t buffer_sizes[7] = {
@@ -2383,15 +2281,15 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     DescHelper::storageImage(desc_updates[7], lighting_set, &gbuffer_albedo_info, 0);
     // DescHelper::storageImage(desc_updates[24], quad_draw_set, &gbuffer_albedo_info, 1);
 
-#if 1
     VkDescriptorImageInfo br_display_info;
-    br_display_info.imageView = batch_display_texture.view;
-    printf("%p %p\n", (void *)batch_display_texture.tex.image, (void *)batch_display_texture.view);
-    br_display_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    br_display_info.sampler = VK_NULL_HANDLE;
+    if (imgui_render_pass != VK_NULL_HANDLE) {
+        br_display_info.imageView = batch_display_texture.view;
+        printf("%p %p\n", (void *)batch_display_texture.tex.image, (void *)batch_display_texture.view);
+        br_display_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        br_display_info.sampler = VK_NULL_HANDLE;
+        DescHelper::textures(desc_updates[29], quad_draw_set, &br_display_info, 1, 0);
+    }
 
-    DescHelper::textures(desc_updates[24], quad_draw_set, &br_display_info, 1, 0);
-#endif
 
     VkDescriptorImageInfo gbuffer_normal_info;
     gbuffer_normal_info.imageView = fb.normalView;
@@ -2463,7 +2361,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     sky_info.range = buffer_sizes[6];
 
     DescHelper::storage(desc_updates[17], lighting_set, &sky_info, 10);
-    DescHelper::storage(desc_updates[29], br_pbr_set, &sky_info, 4);
+    DescHelper::storage(desc_updates[24], br_pbr_set, &sky_info, 4);
 
     VkDescriptorImageInfo blur_input_info;
     blur_input_info.imageView = shadow_fb.varianceView;
@@ -2523,18 +2421,24 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     DescHelper::update(dev, voxel_updates.data(), voxel_updates.size());
     //End Voxelizer Changes
 
-    DescHelper::update(dev, desc_updates.data(), desc_updates.size());
+    DescHelper::update(dev, desc_updates.data(), desc_updates.size() - 
+            (int)(imgui_render_pass == VK_NULL_HANDLE));
 
 
     new (dst) Frame {
         std::move(fb),
         std::move(imgui_fb),
         std::move(shadow_fb),
-        cmd_pool,
-        makeCmdBuffer(dev, cmd_pool),
+        render_viewer_cmd_pool,
+        makeCmdBuffer(dev, render_viewer_cmd_pool),
+        present_viewer_cmd_pool,
+        makeCmdBuffer(dev, present_viewer_cmd_pool),
+
         makeFence(dev, true),
         makeBinarySemaphore(dev),
         makeBinarySemaphore(dev),
+        makeBinarySemaphore(dev),
+
         std::move(view_staging),
         std::move(light_staging),
         std::move(sky_staging),
@@ -2695,16 +2599,12 @@ static PFN_vkVoidFunction imguiVKLookup(const char *fname,
     return addr;
 }
 
-static Optional<ImGuiRenderState> imguiInit(GLFWwindow *window, const Device &dev,
+static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
                                   const Backend &backend, VkQueue ui_queue,
                                   VkPipelineCache pipeline_cache,
                                   VkFormat color_fmt,
                                   VkFormat depth_fmt)
 {
-    if (!window) {
-        return Optional<ImGuiRenderState>::none();
-    }
-
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
@@ -3182,9 +3082,9 @@ static EngineInterop setupEngineInterop(Device &dev,
 #endif
     }
 
-    VizECSBridge bridge = {
-        .views = (PerspectiveCameraData *)views_base,
-        .instances = (InstanceData *)instances_base,
+    viz::VizECSBridge bridge = {
+        .views = (viz::PerspectiveCameraData *)views_base,
+        .instances = (viz::InstanceData *)instances_base,
         .instanceOffsets = (int32_t *)offsets_base,
         .totalNumViews = total_num_views_readback,
         .totalNumInstances = total_num_instances_readback,
@@ -3201,14 +3101,14 @@ static EngineInterop setupEngineInterop(Device &dev,
         .isGPUBackend = gpu_input
     };
 
-    const VizECSBridge *gpu_bridge = nullptr;
+    const viz::VizECSBridge *gpu_bridge = nullptr;
     if (!gpu_input) {
         gpu_bridge = nullptr;
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
-        gpu_bridge = (const VizECSBridge *)cu::allocGPU(
-            sizeof(VizECSBridge));
-        cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
+        gpu_bridge = (const viz::VizECSBridge *)cu::allocGPU(
+            sizeof(viz::VizECSBridge));
+        cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(viz::VizECSBridge),
                    cudaMemcpyHostToDevice);
 #endif
     }
@@ -3588,21 +3488,19 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 }
 
 RenderContext::Impl::Impl(const RenderContext::Config &cfg)
-    : loader_lib_(PresentationState::init(cfg.renderViewer, cfg.renderViewer)),
+    : loader_lib_(PresentationState::init(cfg.renderViewer)),
       backend(initializeBackend(loader_lib_, cfg.renderViewer)),
-      window(makeWindow(backend, img_width, img_height, cfg.renderViewer)),
+      window(makeWindow(backend, cfg.viewerWidth, cfg.viewerHeight, cfg.renderViewer)),
       dev(backend.initDevice(
 #ifdef MADRONA_CUDA_SUPPORT
-          getVkUUIDFromCudaID(gpu_id),
+          getVkUUIDFromCudaID(cfg.gpuID),
 #else
-          gpu_id,
+          cfg.gpuID,
 #endif
-          window.has_value() ? window.surface : VK_NULL_HANDLE)),
+          window.has_value() ? window->surface : VK_NULL_HANDLE)),
       alloc(dev, backend),
       render_queue_(makeGFXQueue(dev, 0)),
       present_wrapper_(render_queue_, false),
-      // Setting the framebuffer width/height to 1 is a temporary hack
-      // to not have to completely reshift how the descriptor sets work
       fb_width_(cfg.renderViewer ? cfg.viewerWidth : 1),
       fb_height_(cfg.renderViewer ? cfg.viewerHeight : 1),
       br_width_(cfg.viewWidth),
@@ -3610,7 +3508,7 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
       fb_clear_(makeClearValues()),
       fb_shadow_clear_(makeShadowClearValues()),
       fb_imgui_clear_(makeImguiClearValues()),
-      present_(cfg.renderViewer ? PresentationState(backend, dev, window,
+      present_(cfg.renderViewer ? PresentationState(backend, dev, *window,
                InternalConfig::numFrames, true) : Optional<PresentationState>::none()),
       pipeline_cache_(getPipelineCache(dev)),
       repeat_sampler_(
@@ -3621,10 +3519,10 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
                                   InternalConfig::gbufferFormat, InternalConfig::gbufferFormat,
                                   InternalConfig::depthFormat)),
       shadow_pass_(makeShadowRenderPass(dev, InternalConfig::varianceFormat, InternalConfig::depthFormat)),
-      imgui_render_state_(imguiInit(cfg.renderViewer ? window.platformWindow : nullptr, dev, backend,
+      imgui_render_state_(cfg.renderViewer ? imguiInit(window->platformWindow, dev, backend,
                                  render_queue_, pipeline_cache_,
                                  VK_FORMAT_R8G8B8A8_UNORM,
-                                 InternalConfig::depthFormat)),
+                                 InternalConfig::depthFormat) : Optional<ImGuiRenderState>::none()),
       instance_cull_(makeCullPipeline(dev, pipeline_cache_,
                                       InternalConfig::numFrames)),
       object_draw_(makeDrawPipeline(dev, pipeline_cache_, render_pass_,
@@ -3643,7 +3541,8 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
       voxel_draw_(makeVoxelDrawPipeline(dev, pipeline_cache_, render_pass_,
           repeat_sampler_, clamp_sampler_,
           InternalConfig::numFrames)),
-      quad_draw_(makeQuadPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames, imgui_render_state_.renderPass)),
+      quad_draw_(cfg.renderViewer ? makeQuadPipeline(dev, pipeline_cache_, clamp_sampler_,
+                  InternalConfig::numFrames, imgui_render_state_->renderPass) : Optional<Pipeline<1>>::none()),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
       asset_desc_pool_mat_tx_(dev, object_draw_.shaders, 2, 1),
@@ -3654,20 +3553,22 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
       load_cmd_(makeCmdBuffer(dev, load_cmd_pool_)),
       load_fence_(makeFence(dev)),
       engine_interop_(setupEngineInterop(
-          dev, alloc, gpu_input, gpu_id, num_worlds,
-          max_views_per_world, max_instances_per_world,
-          br_width_, br_height_, voxel_config)),
+          dev, alloc, cfg.execMode == ExecMode::CUDA, cfg.gpuID, cfg.numWorlds,
+          cfg.maxViewsPerWorld, cfg.maxInstancesPerWorld,
+          br_width_, br_height_, cfg.voxelCfg)),
       lights_(InternalConfig::maxLights),
       cur_frame_(0),
       frames_(InternalConfig::numFrames),
       loaded_assets_(0),
       sky_(loadSky(dev, alloc, render_queue_)),
       material_textures_(0),
-      voxel_config_(voxel_config),
-      gpu_id_(gpu_id),
-      num_worlds_(num_worlds),
-      gpu_input_(gpu_input),
-      screenshot_buffer_()
+      voxel_config_(cfg.voxelCfg),
+      gpu_id_(cfg.gpuID),
+      num_worlds_(cfg.numWorlds),
+      gpu_input_(cfg.execMode == ExecMode::CUDA),
+      screenshot_buffer_(),
+      global_frame_no_(0),
+      imgui_ctx_(cfg.renderViewer ? ImGui::GetCurrentContext() : nullptr)
 {
     {
         VkDescriptorPoolSize pool_sizes[] = {
@@ -3784,16 +3685,13 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
         dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &asset_batch_lighting_set_);
     }
 
-    // For now, we don't support double buffering for the batch renderer.
-    // It honestly likely isn't going to be useful given that after simulation,
-    // we'd want to extract the pixel values immediately for the training.
     BatchRenderer::Config br_cfg = {
-         (int)gpu_id, 
+         (int)cfg.gpuID, 
          br_width_,
          br_height_,
-         num_worlds,
-         max_views_per_world,
-         max_instances_per_world,
+         cfg.numWorlds,
+         cfg.maxViewsPerWorld,
+         cfg.maxInstancesPerWorld,
          // (uint32_t)frames_.size()
          1
     };
@@ -3805,10 +3703,10 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
 
     for (int i = 0; i < (int)frames_.size(); i++) {
         makeFrame(dev, alloc, fb_width_, fb_height_,
-                  max_views_per_world, max_instances_per_world,
-                  voxel_config,
+                  cfg.maxViewsPerWorld, cfg.maxInstancesPerWorld,
+                  cfg.voxelCfg,
                   render_pass_,
-                  imgui_render_state_.renderPass,
+                  imgui_render_state_.has_value() ? imgui_render_state_->renderPass : VK_NULL_HANDLE,
                   shadow_pass_,
                   instance_cull_.descPool.makeSet(),
                   object_draw_.descPool.makeSet(),
@@ -3817,7 +3715,7 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
                   blur_.descPool.makeSet(),
                   voxel_mesh_gen_.descPool.makeSet(),
                   voxel_draw_.descPool.makeSet(),
-                  quad_draw_.descPool.makeSet(),
+                  cfg.renderViewer ? quad_draw_->descPool.makeSet() : VK_NULL_HANDLE,
                   sky_,
                   br_proto_->getImportedBuffers(0),
                   br_proto_->getLayeredTarget(0),
@@ -3827,15 +3725,14 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
                   cfg.renderViewer);
     }
 
-    screenshot_buffer_ = std::make_unique<render::vk::HostBuffer>(alloc.makeStagingBuffer(frames_[0].fb.colorAttachment.reqs.size));
+    screenshot_buffer_ = std::make_unique<render::vk::HostBuffer>(
+        alloc.makeStagingBuffer(frames_[0].fb.colorAttachment.reqs.size));
 }
 
-RenderContext::Impl::~Impl() 
+RenderContext::Impl::~Impl()
 {
-    if (imgui_render_state_.has_value()) {
-        ImGui_ImplVulkan_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-    }
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
 
     loaded_assets_.clear();
 
@@ -3844,24 +3741,21 @@ RenderContext::Impl::~Impl()
         dev.dt.destroySemaphore(dev.hdl, f.renderFinished, nullptr);
 
         dev.dt.destroyFence(dev.hdl, f.cpuFinished, nullptr);
-        dev.dt.destroyCommandPool(dev.hdl, f.cmdPool, nullptr);
+        dev.dt.destroyCommandPool(dev.hdl, f.drawCmdPool, nullptr);
+        dev.dt.destroyCommandPool(dev.hdl, f.presentCmdPool, nullptr);
 
         dev.dt.destroyFramebuffer(dev.hdl, f.fb.hdl, nullptr);
-        dev.dt.destroyFramebuffer(dev.hdl, f.imguiFBO.hdl, nullptr);
+
+        if (f.imguiFBO.has_value()) {
+            dev.dt.destroyFramebuffer(dev.hdl, f.imguiFBO->hdl, nullptr);
+        }
+
         dev.dt.destroyFramebuffer(dev.hdl, f.shadowFB.hdl, nullptr);
 
         dev.dt.destroyImageView(dev.hdl, f.fb.colorView, nullptr);
         dev.dt.destroyImageView(dev.hdl, f.fb.normalView, nullptr);
         dev.dt.destroyImageView(dev.hdl, f.fb.positionView, nullptr);
         dev.dt.destroyImageView(dev.hdl, f.fb.depthView, nullptr);
-
-#if 0
-        dev.dt.destroyImage(dev.hdl, f.fb.colorAttachment.image, nullptr);
-        dev.dt.destroyImage(dev.hdl, f.fb.normalAttachment.image, nullptr);
-        dev.dt.destroyImage(dev.hdl, f.fb.positionAttachment.image, nullptr);
-        dev.dt.destroyImage(dev.hdl, f.fb.depthAttachment.image, nullptr);
-        dev.dt.destroyImage(dev.hdl, f.shadowFB.depthAttachment.image, nullptr);
-#endif
 
         dev.dt.destroyImageView(dev.hdl, f.shadowFB.varianceView, nullptr);
         dev.dt.destroyImageView(dev.hdl, f.shadowFB.depthView, nullptr);
@@ -3917,9 +3811,11 @@ RenderContext::Impl::~Impl()
     dev.dt.destroyPipeline(dev.hdl, voxel_draw_.hdls[0], nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, voxel_draw_.layout, nullptr);
 
-    dev.dt.destroyRenderPass(dev.hdl, imgui_render_state_.renderPass, nullptr);
-    dev.dt.destroyDescriptorPool(
-        dev.hdl, imgui_render_state_.descPool, nullptr);
+    if (imgui_render_state_.has_value()) {
+        dev.dt.destroyRenderPass(dev.hdl, imgui_render_state_->renderPass, nullptr);
+        dev.dt.destroyDescriptorPool(
+                dev.hdl, imgui_render_state_->descPool, nullptr);
+    }
 
     dev.dt.destroyRenderPass(dev.hdl, render_pass_, nullptr);
     dev.dt.destroyRenderPass(dev.hdl, shadow_pass_, nullptr);
@@ -3930,14 +3826,11 @@ RenderContext::Impl::~Impl()
     dev.dt.destroyPipelineCache(dev.hdl, pipeline_cache_, nullptr);
 
     if (present_.has_value()) {
-        present_.destroy(dev);
-        backend.dt.destroySurfaceKHR(backend.hdl, window.surface, nullptr);
-        glfwDestroyWindow(window.platformWindow);
-    }
-}
+        present_->destroy(dev);
 
-RenderContext::~RenderContext()
-{
+        backend.dt.destroySurfaceKHR(backend.hdl, window->surface, nullptr);
+        glfwDestroyWindow(window->platformWindow);
+    }
 }
 
 static DynArray<MaterialTexture> 
@@ -4080,9 +3973,9 @@ loadTextures(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue,
     return dst_textures;
 }
 
-CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
-                             Span<const imp::SourceMaterial> src_mats,
-                             Span<const imp::SourceTexture> textures)
+CountT RenderContext::Impl::loadObjects(Span<const imp::SourceObject> src_objs,
+                                        Span<const imp::SourceMaterial> src_mats,
+                                        Span<const imp::SourceTexture> textures)
 {
     using namespace imp;
     using namespace math;
@@ -4367,37 +4260,33 @@ CountT Renderer::loadObjects(Span<const imp::SourceObject> src_objs,
     return 0;
 }
 
-void RenderContext::configureLighting(Span<const LightConfig> lights)
+void RenderContext::Impl::configureLighting(Span<const LightConfig> lights)
 {
     for (int i = 0; i < lights.size(); ++i) {
-        impl->lights_.insert(i, DirectionalLight{ 
+        lights_.insert(i, DirectionalLight{ 
             math::Vector4{lights[i].dir.x, lights[i].dir.y, lights[i].dir.z, 1.0f }, 
             math::Vector4{lights[i].color.x, lights[i].color.y, lights[i].color.z, 1.0f}
         });
     }
 }
 
-#if 0
-void RenderContext::waitUntilFrameReady()
+void RenderContext::Impl::waitUntilFrameReady()
 {
     Frame &frame = frames_[cur_frame_];
     // Wait until frame using this slot has finished
     REQ_VK(dev.dt.waitForFences(dev.hdl, 1, &frame.cpuFinished, VK_TRUE,
                                 UINT64_MAX));
 }
-#endif
 
-#if 0
-void Renderer::startFrame()
+void RenderContext::Impl::startFrame()
 {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
 }
-#endif
 
 static void packView(const Device &dev,
                      HostBuffer &view_staging_buffer,
-                     const ViewerCam &cam,
+                     const viz::ViewerCam &cam,
                      uint32_t fb_width, uint32_t fb_height)
 {
     PackedViewData *staging = (PackedViewData *)view_staging_buffer.ptr;
@@ -4521,16 +4410,10 @@ static void packSky( const Device &dev,
 
 static void packLighting(const Device &dev,
                          HostBuffer &light_staging_buffer,
-                         const HeapArray<DirectionalLight> &lights,
-                         const Renderer::FrameConfig &cfg)
+                         const HeapArray<DirectionalLight> &lights)
 {
     DirectionalLight *staging = (DirectionalLight *)light_staging_buffer.ptr;
     memcpy(staging, lights.data(), sizeof(DirectionalLight) * InternalConfig::maxLights);
-
-    if (cfg.overrideLightDir) {
-        staging[0].lightDir = math::Vector4::fromVector3(-cfg.newLightDir, 1.0f);
-    }
-
     light_staging_buffer.flush(dev);
 }
 
@@ -4751,7 +4634,7 @@ static void issueLightingPass(vk::Device &dev,
                               Frame &frame, 
                               Pipeline<1> &pipeline,
                               VkCommandBuffer draw_cmd,
-                              const ViewerCam &cam,
+                              const viz::ViewerCam &cam,
                               uint32_t view_idx)
 {
     { // Transition for compute
@@ -4985,15 +4868,26 @@ static void issueCulling(Device &dev,
                               0, nullptr);
 }
 
-void RenderContext::renderViewer(const ViewerInput &input)
+bool RenderContext::Impl::renderViewerFrame(const viz::ViewerInput &input)
 {
-    static uint64_t global_frame_no = 0;
+    viz::ViewerCam cam = {
+        .position = input.position,
+        .fwd = input.forward,
+        .up = input.up,
+        .right = input.right,
+        .perspective = input.usePerspective,
+        .fov = input.fov,
+        .orthoHeight = input.orthoHeight,
+        .mousePrev = input.mousePrev
+    };
+
+    uint32_t view_idx = 0;
 
     Frame &frame = frames_[cur_frame_];
 
     VkCommandBuffer draw_cmd = frame.drawCmd;
     { // Get command buffer for this frame and start it
-        REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.cmdPool, 0));
+        REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.drawCmdPool, 0));
         VkCommandBufferBeginInfo begin_info {};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         REQ_VK(dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
@@ -5012,7 +4906,7 @@ void RenderContext::renderViewer(const ViewerInput &input)
     }
 
     { // Pack the lighting data and copy it to the render input
-        packLighting(dev, frame.lightStaging, lights_, cfg);
+        packLighting(dev, frame.lightStaging, lights_);
         VkBufferCopy light_copy {
             .srcOffset = 0,
             .dstOffset = frame.lightOffset,
@@ -5042,7 +4936,7 @@ void RenderContext::renderViewer(const ViewerInput &input)
 
     { // Issue shadow pass
         issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
-                       cfg.viewIDX, engine_interop_.maxViewsPerWorld);
+                       view_idx, engine_interop_.maxViewsPerWorld);
     }
 
     const uint32_t num_voxels = this->voxel_config_.xLength * 
@@ -5068,7 +4962,7 @@ void RenderContext::renderViewer(const ViewerInput &input)
             issueVoxelGen(dev, frame, 
                           voxel_mesh_gen_, 
                           draw_cmd,
-                          cfg.viewIDX,
+                          view_idx,
                           engine_interop_.maxInstancesPerWorld,
                           voxel_config_);
         }
@@ -5121,7 +5015,7 @@ void RenderContext::renderViewer(const ViewerInput &input)
                 0, nullptr);
 
         DrawPushConst draw_const {
-            (uint32_t)cfg.viewIDX,
+            (uint32_t)view_idx,
         };
 
         dev.dt.cmdPushConstants(draw_cmd, object_shadow_draw_.layout,
@@ -5222,7 +5116,7 @@ void RenderContext::renderViewer(const ViewerInput &input)
                                  0, nullptr);
 
     DrawPushConst draw_const {
-        (uint32_t)cfg.viewIDX,
+        (uint32_t)view_idx,
     };
 
     dev.dt.cmdPushConstants(draw_cmd, object_draw_.layout,
@@ -5292,7 +5186,7 @@ void RenderContext::renderViewer(const ViewerInput &input)
             0, nullptr);
 
         DrawPushConst voxel_draw_const{
-            (uint32_t)cfg.viewIDX,
+            (uint32_t)view_idx,
         };
 
         dev.dt.cmdPushConstants(draw_cmd, voxel_draw_.layout,
@@ -5310,10 +5204,10 @@ void RenderContext::renderViewer(const ViewerInput &input)
     dev.dt.cmdEndRenderPass(draw_cmd);
 
     { // Issue deferred lighting pass - separate function - this is becoming crazy
-        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, cfg.viewIDX);
+        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, view_idx);
     }
 
-    bool prepare_screenshot = cfg.requestedScreenshot || (getenv("SCREENSHOT_PATH") && global_frame_no == 0);
+    bool prepare_screenshot = input.requestedScreenshot || (getenv("SCREENSHOT_PATH") && global_frame_no_ == 0);
 
     if (prepare_screenshot) {
         array<VkImageMemoryBarrier, 1> prepare {{
@@ -5380,23 +5274,74 @@ void RenderContext::renderViewer(const ViewerInput &input)
                 prepare.size(), prepare.data());
     }
 
-    //////////////////////////////////////////////////////////////////////////////
-    //
-    //
-    //
-    //
-    //
-    // VIEWER APP STUFF
-    //
-    //
-    //
-    //
-    //
-    //
-    /////////////////////////////////////////////////////////////////////////////
+    REQ_VK(dev.dt.endCommandBuffer(draw_cmd));
 
-    render_pass_info.framebuffer = frame.imguiFBO.hdl;
-    render_pass_info.renderPass = imgui_render_state_.renderPass;
+    uint32_t wait_count = 1;
+
+    VkSemaphore waits[] = {
+        br_proto_->getLatestWaitSemaphore()
+    };
+
+    VkPipelineStageFlags wait_flags[] = {
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    };
+
+    if (!br_proto_->didRender) {
+        wait_count = 0;
+    } else {
+        br_proto_->didRender = 0;
+    }
+
+    VkSubmitInfo gfx_submit {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        nullptr,
+        wait_count,
+        waits,
+        wait_flags,
+        1,
+        &draw_cmd,
+        1,
+        &frame.renderFinished,
+    };
+
+    REQ_VK(dev.dt.queueSubmit(render_queue_, 1, &gfx_submit,
+                              VK_NULL_HANDLE));
+
+    return prepare_screenshot;
+}
+
+void RenderContext::Impl::renderGUIAndPresent(const viz::ViewerInput &input,
+                                              bool prepare_screenshot)
+{
+    ImGui::SetCurrentContext(imgui_ctx_);
+
+    Frame &frame = frames_[cur_frame_];
+
+    VkCommandBuffer draw_cmd = frame.presentCmd;
+    { // Get command buffer for this frame and start it
+        REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.presentCmdPool, 0));
+        VkCommandBufferBeginInfo begin_info {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        REQ_VK(dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    }
+
+    VkRenderPassBeginInfo render_pass_info;
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    render_pass_info.pNext = nullptr;
+    render_pass_info.renderPass = render_pass_;
+    render_pass_info.framebuffer = frame.fb.hdl;
+    render_pass_info.clearValueCount = fb_clear_.size();
+    render_pass_info.pClearValues = fb_clear_.data();
+    render_pass_info.renderArea.offset = {
+        0, 0,
+    };
+
+    render_pass_info.renderArea.extent = {
+        fb_width_, fb_height_,
+    };
+
+    render_pass_info.framebuffer = frame.imguiFBO->hdl;
+    render_pass_info.renderPass = imgui_render_state_->renderPass;
     dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
                               VK_SUBPASS_CONTENTS_INLINE);
 
@@ -5404,14 +5349,14 @@ void RenderContext::renderViewer(const ViewerInput &input)
 
 #ifdef ENABLE_BATCH_RENDERER
     { // Draw the quads
-        issueQuadDraw(dev, draw_cmd, frame, quad_draw_);
+        issueQuadDraw(dev, draw_cmd, frame, *quad_draw_);
     }
 #endif
 
     dev.dt.cmdEndRenderPass(draw_cmd);
 
-    uint32_t swapchain_idx = present_.acquireNext(dev, frame.swapchainReady);
-    VkImage swapchain_img = present_.getImage(swapchain_idx);
+    uint32_t swapchain_idx = present_->acquireNext(dev, frame.swapchainReady);
+    VkImage swapchain_img = present_->getImage(swapchain_idx);
 
     array<VkImageMemoryBarrier, 2> blit_prepare {{
         {
@@ -5501,11 +5446,13 @@ void RenderContext::renderViewer(const ViewerInput &input)
     REQ_VK(dev.dt.endCommandBuffer(draw_cmd));
 
     VkSemaphore waits[] = {
-        frame.swapchainReady, br_proto_->getLatestWaitSemaphore()
+        frame.swapchainReady, frame.renderFinished
     };
 
     VkPipelineStageFlags wait_flags[] = {
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
+        prepare_screenshot ? VK_PIPELINE_STAGE_TRANSFER_BIT :
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
     };
 
     VkSubmitInfo gfx_submit {
@@ -5517,22 +5464,22 @@ void RenderContext::renderViewer(const ViewerInput &input)
         1,
         &draw_cmd,
         1,
-        &frame.renderFinished,
+        &frame.guiRenderFinished,
     };
 
     REQ_VK(dev.dt.resetFences(dev.hdl, 1, &frame.cpuFinished));
     REQ_VK(dev.dt.queueSubmit(render_queue_, 1, &gfx_submit,
                               frame.cpuFinished));
 
-    present_.present(dev, swapchain_idx, present_wrapper_,
-                     1, &frame.renderFinished);
+    present_->present(dev, swapchain_idx, present_wrapper_,
+                     1, &frame.guiRenderFinished);
 
     cur_frame_ = (cur_frame_ + 1) % frames_.size();
 
     if (prepare_screenshot) {
-        const char *ss_path = cfg.screenshotFilePath;
+        const char *ss_path = input.screenshotFilePath;
 
-        if (!cfg.requestedScreenshot) {
+        if (!input.requestedScreenshot) {
             ss_path = getenv("SCREENSHOT_PATH");
         }
 
@@ -5549,10 +5496,18 @@ void RenderContext::renderViewer(const ViewerInput &input)
         }
     }
 
-    global_frame_no++;
+    global_frame_no_++;
 }
 
-void RenderContext::renderViews(const FrameConfig &cfg, bool just_do_transition)
+void RenderContext::Impl::render(const viz::ViewerInput &input)
+{
+    bool prepare_screenshot = renderViewerFrame(input);
+
+    renderGUIAndPresent(input, prepare_screenshot);
+}
+
+#if 0
+void RenderContext::Impl::renderViews(bool just_do_transition)
 {
     if (just_do_transition) {
         br_proto_->transitionOutputLayout();
@@ -5561,19 +5516,105 @@ void RenderContext::renderViews(const FrameConfig &cfg, bool just_do_transition)
         uint32_t cur_num_views = *engine_interop_.bridge.totalNumViews;
         uint32_t cur_num_instances = *engine_interop_.bridge.totalNumInstances;
         br_proto_->renderViews({cur_num_views, cur_num_instances, num_worlds_},
-                loaded_assets_, cfg.batchViewIDX, &engine_interop_);
+                loaded_assets_, &engine_interop_);
     }
 }
+#endif
 
-void RenderContext::waitForIdle()
+void RenderContext::Impl::waitForIdle()
 {
     dev.dt.deviceWaitIdle(dev.hdl);
 }
 
-const VizECSBridge * RenderContext::getBridgePtr() const
+#if 0
+const viz::VizECSBridge * RenderContext::Impl::getBridgePtr() const
 {
     return engine_interop_.gpuBridge ?
         engine_interop_.gpuBridge : &engine_interop_.bridge;
+}
+#endif
+
+viz::ViewerController RenderContext::makeViewerController(float camera_move_speed,
+                                                          math::Vector3 camera_pos,
+                                                          math::Quat camera_rot)
+{
+    viz::ViewerControllerCfg cfg = {
+        .ctx = this,
+        .cameraMoveSpeed = camera_move_speed,
+        .cameraPosition = camera_pos,
+        .cameraRotation = camera_rot
+    };
+
+    return viz::ViewerController(cfg);
+}
+
+viz::ViewerFrame * RenderContext::renderViewer(const viz::ViewerInput &input)
+{
+    bool prepare_screenshot = impl->renderViewerFrame(input);
+    impl->renderGUIAndPresent(input, prepare_screenshot);
+
+    // Currently unused
+    return nullptr;
+}
+
+void RenderContext::Impl::selectViewerBatchView(uint32_t batch_view)
+{
+    br_proto_->selectVizBatchViewIDX(batch_view);
+}
+
+const viz::VizECSBridge * RenderContext::getBridge()
+{
+    return impl->engine_interop_.gpuBridge ?
+        impl->engine_interop_.gpuBridge : &impl->engine_interop_.bridge;
+}
+
+RenderContext::RenderContext(RenderContext &&) = default;
+
+CountT RenderContext::loadObjects(Span<const imp::SourceObject> objs,
+                                  Span<const imp::SourceMaterial> mats,
+                                  Span<const imp::SourceTexture> textures)
+{
+    return impl->loadObjects(objs, mats, textures);
+}
+
+void RenderContext::configureLighting(Span<const LightConfig> lights)
+{
+    impl->configureLighting(lights);
+}
+
+RenderContext::RenderContext(const Config &cfg)
+    : impl(new RenderContext::Impl(cfg))
+{
+}
+
+RenderContext::~RenderContext() = default;
+
+void RenderContext::prepareRender()
+{
+    uint32_t cur_num_views = *impl->engine_interop_.bridge.totalNumViews;
+    uint32_t cur_num_instances = *impl->engine_interop_.bridge.totalNumInstances;
+
+    BatchRenderInfo info = {
+        .numViews = cur_num_views,
+        .numInstances = cur_num_instances,
+        .numWorlds = impl->num_worlds_
+    };
+
+    impl->br_proto_->prepareForRendering(info, &impl->engine_interop_);
+}
+
+void RenderContext::batchedRender()
+{
+    uint32_t cur_num_views = *impl->engine_interop_.bridge.totalNumViews;
+    uint32_t cur_num_instances = *impl->engine_interop_.bridge.totalNumInstances;
+
+    BatchRenderInfo info = {
+        .numViews = cur_num_views,
+        .numInstances = cur_num_instances,
+        .numWorlds = impl->num_worlds_
+    };
+
+    impl->br_proto_->renderViews(info, impl->loaded_assets_, &impl->engine_interop_);
 }
 
 }

@@ -5448,6 +5448,8 @@ void Renderer::render(const ViewerCam &cam,
 
 void Renderer::renderViews(const FrameConfig &cfg, bool just_do_transition)
 {
+    br_proto_->selectVizBatchViewIDX(cfg.batchViewIDX);
+
     if (just_do_transition) {
         br_proto_->transitionOutputLayout();
     }
@@ -5455,7 +5457,7 @@ void Renderer::renderViews(const FrameConfig &cfg, bool just_do_transition)
         uint32_t cur_num_views = *engine_interop_.bridge.totalNumViews;
         uint32_t cur_num_instances = *engine_interop_.bridge.totalNumInstances;
         br_proto_->renderViews({cur_num_views, cur_num_instances, num_worlds_},
-                loaded_assets_, cfg.batchViewIDX, &engine_interop_);
+                loaded_assets_, &engine_interop_);
     }
 }
 

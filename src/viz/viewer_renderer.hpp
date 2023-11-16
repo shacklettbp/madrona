@@ -22,6 +22,8 @@
 
 #include "shader.hpp"
 
+#include "render_common.hpp"
+
 namespace madrona::render {
 
 struct BatchRenderer;
@@ -207,6 +209,7 @@ struct Frame {
     VkDescriptorSet batchOutputQuadSet;
 };
 
+#if 0
 struct ViewerCam {
     math::Vector3 position;
     math::Vector3 fwd;
@@ -218,6 +221,7 @@ struct ViewerCam {
     float orthoHeight = 5.f;
     math::Vector2 mousePrev {0.f, 0.f};
 };
+#endif
 
 struct AssetData {
     render::vk::LocalBuffer buf;

@@ -5,6 +5,8 @@
 #include <madrona/importer.hpp>
 #include <madrona/exec_mode.hpp>
 #include <madrona/viz/common.hpp>
+#include <madrona/viz/interop.hpp>
+#include <madrona/viz/viewer_controller.hpp>
 
 namespace madrona::render {
 
@@ -35,6 +37,7 @@ struct RenderContext {
     std::unique_ptr<Impl> impl;
 
     RenderContext(const Config &cfg);
+    RenderContext(RenderContext &&);
     ~RenderContext();
 
     // Before anything rendering happens, objects must be loaded,
@@ -45,6 +48,15 @@ struct RenderContext {
 
     void configureLighting(Span<const LightConfig> lights);
 
+    const viz::VizECSBridge * getBridge();
+
+
+
+    // Create the viewer controller
+    viz::ViewerController makeViewerController(float camera_move_speed,
+                                               math::Vector3 camera_pos,
+                                               math::Quat camera_rot);
+
 
 
     // Processes the ECS's output in order to be ready for rendering.
@@ -54,7 +66,7 @@ struct RenderContext {
     void batchedRender();
 
     // Returns output from the flycam rendering
-    ViewerFrame *renderViewer(const ViewerInput &input);
+    viz::ViewerFrame * renderViewer(const viz::ViewerInput &input);
 };
     
 }

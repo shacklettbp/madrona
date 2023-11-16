@@ -14,7 +14,7 @@
 // #include "render_common.hpp"
 #include "viewer_renderer.hpp"
 
-namespace madrona::viz {
+namespace madrona::render {
 
 struct LayeredTarget {
     // Contains a uint for triangle ID and another for instance ID
@@ -56,6 +56,8 @@ struct BatchRenderer {
     struct Impl;
     std::unique_ptr<Impl> impl;
 
+    bool didRender;
+
     struct Config {
         int gpuID;
         uint32_t renderWidth;
@@ -85,10 +87,11 @@ struct BatchRenderer {
 
     void renderViews(BatchRenderInfo info,
                      const DynArray<AssetData> &loaded_assets,
-                     uint32_t view_idx,
                      EngineInterop *interop);
 
     void transitionOutputLayout();
+
+    void submitViewerCopy(VkCommandBuffer draw_cmd);
 
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
     DisplayTexture &getDisplayTexture(uint32_t frame_id);
@@ -99,6 +102,9 @@ struct BatchRenderer {
     // This is either going to be the semaphore from prepareForRendering,
     // or it's the one from renderViews.
     VkSemaphore getLatestWaitSemaphore();
+
+    // Select a view to display to the viewer
+    void selectVizBatchViewIDX(uint32_t batch_view_idx);
 };
 
 }

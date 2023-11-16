@@ -6,6 +6,7 @@
 #include <madrona/render/vk/backend.hpp>
 #include <madrona/render/vk/device.hpp>
 
+#include "madrona/viz/render_context.hpp"
 #include "vk/memory.hpp"
 #include "vk/descriptors.hpp"
 #include "vk/utils.hpp"
@@ -144,14 +145,19 @@ struct MaterialTexture {
 
 struct Frame {
     Framebuffer fb;
-    Framebuffer imguiFBO;
+    Optional<Framebuffer> imguiFBO;
 
     ShadowFramebuffer shadowFB;
 
-    VkCommandPool cmdPool;
+    VkCommandPool drawCmdPool;
     VkCommandBuffer drawCmd;
+    VkCommandPool presentCmdPool;
+    VkCommandBuffer presentCmd;
+
     VkFence cpuFinished;
+
     VkSemaphore renderFinished;
+    VkSemaphore guiRenderFinished;
     VkSemaphore swapchainReady;
 
     render::vk::HostBuffer viewStaging;
@@ -191,18 +197,6 @@ struct Frame {
 
     // Contains a descriptor set for the sampler state and the final rendered output
     VkDescriptorSet batchOutputQuadSet;
-};
-
-struct ViewerCam {
-    math::Vector3 position;
-    math::Vector3 fwd;
-    math::Vector3 up;
-    math::Vector3 right;
-
-    bool perspective = true;
-    float fov = 60.f;
-    float orthoHeight = 5.f;
-    math::Vector2 mousePrev {0.f, 0.f};
 };
 
 struct AssetData {
@@ -288,13 +282,35 @@ struct Sky {
     math::Vector3 sunSize;
     float exposure;
 };
+    
+}
 
-struct ViewerAppCfg {
-
-};
+namespace madrona::viz {
 
 struct ViewerFrame {
 
 };
     
+struct ViewerControllerCfg {
+    render::RenderContext *ctx;
+    int32_t simTickRate;
+
+    // Initial camera position
+    float cameraMoveSpeed;
+    math::Vector3 cameraPosition;
+    math::Quat cameraRotation;
+};
+
+struct ViewerCam {
+    math::Vector3 position;
+    math::Vector3 fwd;
+    math::Vector3 up;
+    math::Vector3 right;
+
+    bool perspective = true;
+    float fov = 60.f;
+    float orthoHeight = 5.f;
+    math::Vector2 mousePrev {0.f, 0.f};
+};
+
 }

@@ -44,11 +44,16 @@ target_link_libraries(imgui_impl PRIVATE
 )
 
 add_library(madrona_viewer STATIC
-    ${MADRONA_INC_DIR}/viz/viewer.hpp viewer.cpp
-    viewer_renderer.hpp viewer_renderer.cpp
+    ${MADRONA_INC_DIR}/viz/viewer_controller.hpp
+    ${MADRONA_INC_DIR}/viz/render_context.hpp
+    ${MADRONA_INC_DIR}/viz/common.hpp
+    # ${MADRONA_INC_DIR}/viz/viewer.hpp viewer.cpp
+    # viewer_renderer.hpp viewer_renderer.cpp
     batch_renderer.hpp batch_renderer.cpp
-    #render_context.cpp
-    # render_common.hpp
+    render_context.cpp
+    render_common.hpp
+    render_context_impl.hpp
+    viewer_controller.cpp
     image_util.cpp
 )
 

@@ -20,12 +20,13 @@
 using namespace madrona::render;
 using madrona::render::vk::checkVk;
 
-namespace madrona::viz {
+namespace madrona::render {
 
 enum class LatestOperation {
     None,
     RenderPrepare,
     RenderViews,
+    Transition,
 };
 
 namespace consts {
@@ -569,6 +570,9 @@ struct BatchFrame {
     // Waited for by the viewer to render stuff to the window
     VkSemaphore renderFinished;
 
+    // Waited for if that latest thing was a transition
+    VkSemaphore layoutTransitionFinished;
+
     // Waited for at the beginning of each renderViews call
     VkFence prepareFence;
     VkFence renderFence;
@@ -578,7 +582,6 @@ struct BatchFrame {
 
     VkFence & getLatestFence()
     {
-        assert(latestOp != LatestOperation::None);
         if (latestOp == LatestOperation::RenderPrepare) {
             return prepareFence;
         } else {
@@ -701,8 +704,11 @@ static void makeBatchFrame(vk::Device& dev,
     VkCommandPool render_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
     VkCommandBuffer prepare_cmdbuf = vk::makeCmdBuffer(dev, prepare_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
     VkCommandBuffer render_cmdbuf = vk::makeCmdBuffer(dev, render_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+
     VkSemaphore prepare_finished = vk::makeBinarySemaphore(dev);
     VkSemaphore render_finished = vk::makeBinarySemaphore(dev);
+    VkSemaphore transition_finished = vk::makeBinarySemaphore(dev);
+
     VkFence prepare_fence = vk::makeFence(dev, true);
     VkFence render_fence = vk::makeFence(dev, true);
 
@@ -724,6 +730,7 @@ static void makeBatchFrame(vk::Device& dev,
         render_cmdbuf,
         prepare_finished,
         render_finished,
+        transition_finished,
         prepare_fence,
         render_fence,
         LatestOperation::None
@@ -1134,8 +1141,11 @@ BatchRenderer::BatchRenderer(const Config &cfg,
     : impl(std::make_unique<Impl>(cfg, dev, mem, pipeline_cache, 
                                   asset_set_compute, asset_set_draw, 
                                   asset_set_texture_mat, asset_set_lighting, sampler,
-                                  render_queue))
+                                  render_queue)),
+      didRender(false)
 {
+    transitionOutputLayout();
+    dev.dt.deviceWaitIdle(dev.hdl);
 }
 
 BatchRenderer::~BatchRenderer()
@@ -1325,9 +1335,11 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
     BatchFrame &frame_data = impl->batchFrames[frame_index];
 
     { // Wait for the frame to be ready
-        impl->dev.dt.waitForFences(impl->dev.hdl, 1, 
-                                   &frame_data.getLatestFence(),
-                                   VK_TRUE, UINT64_MAX);
+        if (frame_data.latestOp != LatestOperation::None) {
+            impl->dev.dt.waitForFences(impl->dev.hdl, 1, 
+                                       &frame_data.getLatestFence(),
+                                       VK_TRUE, UINT64_MAX);
+        }
     }
 
     BatchImportedBuffers &batch_buffers = getImportedBuffers(frame_index);
@@ -1385,12 +1397,19 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
 
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
 
+    VkSemaphore sema_wait = VK_NULL_HANDLE;
+    VkPipelineStageFlags wait_flags = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+    if (didRender) {
+        sema_wait = frame_data.renderFinished;
+    }
+
     VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .pNext = nullptr,
-        .waitSemaphoreCount = 0,
-        .pWaitSemaphores = nullptr,
-        .pWaitDstStageMask = nullptr,
+        .waitSemaphoreCount = (sema_wait != VK_NULL_HANDLE) ? 1u : 0u,
+        .pWaitSemaphores = &sema_wait,
+        .pWaitDstStageMask = &wait_flags,
         .commandBufferCount = 1,
         .pCommandBuffers = &draw_cmd,
         .signalSemaphoreCount = 1,
@@ -1401,16 +1420,15 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
     REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.prepareFence));
 
     frame_data.latestOp = LatestOperation::RenderPrepare;
+
+    didRender = true;
 }
 
 void BatchRenderer::renderViews(BatchRenderInfo info,
                                 const DynArray<AssetData> &loaded_assets,
-                                uint32_t batch_view_idx,
                                 EngineInterop *interop) 
 { 
-    prepareForRendering(info, interop);
-
-
+    // prepareForRendering(info, interop);
 
     // Circles between 0 to number of frames (not anymore, there is only one frame now)
     uint32_t frame_index = impl->currentFrame;
@@ -1429,8 +1447,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     }
 
     ////////////////////////////////////////////////////////////////
-    
-    impl->selectedView = batch_view_idx;
 
     { // Prepare memory written to by ECS with barrier
         std::array barriers = {
@@ -1624,72 +1640,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
         }
     }
 
-    { // Blit image from mega images to a visualization image
-        VkImageBlit blit = {
-            .srcSubresource = {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .mipLevel = 0,
-                .baseArrayLayer = impl->selectedView % impl->dev.maxNumLayersPerImage,
-                .layerCount = 1
-            },
-            .srcOffsets = {
-                {}, { (int)impl->renderExtent.width, (int)impl->renderExtent.height, 1 }
-            },
-            .dstSubresource = {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .mipLevel = 0,
-                .baseArrayLayer = 0,
-                .layerCount = 1
-            },
-            .dstOffsets = {
-                {}, { (int)impl->renderExtent.width, (int)impl->renderExtent.height, 1 }
-            }
-        };
-
-        uint32_t selected_img_index = impl->selectedView / 
-                                      impl->dev.maxNumLayersPerImage;
-        vk::LocalImage &selected_img = 
-            impl->batchFrames[frame_index].targets[selected_img_index].output;
-        vk::LocalTexture &target_dst =
-            impl->batchFrames[frame_index].displayTexture.tex;
-
-        prepareVizBlit(impl->dev,
-                       draw_cmd,
-                       selected_img,
-                       impl->selectedView % impl->dev.maxNumLayersPerImage,
-                       target_dst);
-
-        impl->dev.dt.cmdBlitImage(draw_cmd, 
-                                  selected_img.image,
-                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                  target_dst.image,
-                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                  1, &blit,
-                                  VK_FILTER_NEAREST);
-
-        { // Prepare the viz texture for shader sampling
-            VkImageMemoryBarrier barrier = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .image = target_dst.image,
-                .subresourceRange = {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = 1
-                }
-            };
-
-            impl->dev.dt.cmdPipelineBarrier(draw_cmd,
-                    VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                    0, 0, nullptr, 0, nullptr, 1, &barrier);
-        }
-    }
+    submitViewerCopy(draw_cmd);
 
     // End the command buffer and stuff
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
@@ -1773,17 +1724,11 @@ void BatchRenderer::transitionOutputLayout()
         .pWaitDstStageMask = nullptr,
         .commandBufferCount = 1,
         .pCommandBuffers = &draw_cmd,
-        .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &frame_data.renderFinished
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = nullptr
     };
 
-    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.renderFence));
-    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.renderFence));
-
-    frame_data.latestOp = LatestOperation::RenderViews;
-
-    // We only have one frame now so this is not necessary
-    // impl->currentFrame = (impl->currentFrame + 1) % impl->batchFrames.size();
+    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, VK_NULL_HANDLE));
 }
 
 BatchImportedBuffers &BatchRenderer::getImportedBuffers(uint32_t frame_id) 
@@ -1816,11 +1761,120 @@ VkSemaphore BatchRenderer::getLatestWaitSemaphore()
 
     if (impl->batchFrames[last_frame].latestOp == LatestOperation::RenderPrepare) {
         return impl->batchFrames[last_frame].prepareFinished;
-    } else {
+    } else if (impl->batchFrames[last_frame].latestOp == LatestOperation::RenderViews) {
         return impl->batchFrames[last_frame].renderFinished;
+    } else if (impl->batchFrames[last_frame].latestOp == LatestOperation::Transition) {
+        return impl->batchFrames[last_frame].layoutTransitionFinished;
+    }
+
+    return VK_NULL_HANDLE;
+}
+
+void BatchRenderer::selectVizBatchViewIDX(uint32_t batch_view_idx)
+{
+    impl->selectedView = batch_view_idx;
+}
+
+void BatchRenderer::submitViewerCopy(VkCommandBuffer draw_cmd)
+{
+    uint32_t frame_index = 0;
+
+    { // Blit image from mega images to a visualization image
+        VkImageBlit blit = {
+            .srcSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = impl->selectedView % impl->dev.maxNumLayersPerImage,
+                .layerCount = 1
+            },
+            .srcOffsets = {
+                {}, { (int)impl->renderExtent.width, (int)impl->renderExtent.height, 1 }
+            },
+            .dstSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            },
+            .dstOffsets = {
+                {}, { (int)impl->renderExtent.width, (int)impl->renderExtent.height, 1 }
+            }
+        };
+
+        uint32_t selected_img_index = impl->selectedView / 
+                                      impl->dev.maxNumLayersPerImage;
+        vk::LocalImage &selected_img = 
+            impl->batchFrames[frame_index].targets[selected_img_index].output;
+        vk::LocalTexture &target_dst =
+            impl->batchFrames[frame_index].displayTexture.tex;
+
+        prepareVizBlit(impl->dev,
+                       draw_cmd,
+                       selected_img,
+                       impl->selectedView % impl->dev.maxNumLayersPerImage,
+                       target_dst);
+
+        impl->dev.dt.cmdBlitImage(draw_cmd, 
+                                  selected_img.image,
+                                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                  target_dst.image,
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                  1, &blit,
+                                  VK_FILTER_NEAREST);
+
+        { // Prepare the viz texture for shader sampling
+            VkImageMemoryBarrier barrier = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .image = target_dst.image,
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1
+                }
+            };
+
+            impl->dev.dt.cmdPipelineBarrier(draw_cmd,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+
+#if 0
+        { // Prepare the viz texture for shader sampling
+            VkImageMemoryBarrier barrier = {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+                .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                .image = selected_img.image,
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = impl->selectedView % impl->dev.maxNumLayersPerImage,
+                    .layerCount = 1
+                }
+            };
+
+            impl->dev.dt.cmdPipelineBarrier(draw_cmd,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    0, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+#endif
     }
 }
 
 }
+
+
+
 
 

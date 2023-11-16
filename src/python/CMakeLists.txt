@@ -98,7 +98,8 @@ function(madrona_python_disable_nanobind_warnings module_name)
     
     if (NOT WIN32) #FIX
         target_link_libraries(${nanobind_target_name} PRIVATE
-            madrona_libcxx_except
+            # madrona_libcxx_except
+            madrona_libcxx
         )
     endif()
 endfunction()
@@ -119,7 +120,8 @@ function(madrona_python_module module_name)
 
     if (NOT WIN32) #FIX
         target_link_libraries(${module_name} PRIVATE
-            madrona_libcxx_except
+            # madrona_libcxx_except
+            madrona_libcxx
         )
     endif()
 endfunction()
