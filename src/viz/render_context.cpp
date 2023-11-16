@@ -3739,6 +3739,7 @@ RenderContext::Impl::~Impl()
     for (Frame &f : frames_) {
         dev.dt.destroySemaphore(dev.hdl, f.swapchainReady, nullptr);
         dev.dt.destroySemaphore(dev.hdl, f.renderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, f.guiRenderFinished, nullptr);
 
         dev.dt.destroyFence(dev.hdl, f.cpuFinished, nullptr);
         dev.dt.destroyCommandPool(dev.hdl, f.drawCmdPool, nullptr);
@@ -3810,6 +3811,18 @@ RenderContext::Impl::~Impl()
 
     dev.dt.destroyPipeline(dev.hdl, voxel_draw_.hdls[0], nullptr);
     dev.dt.destroyPipelineLayout(dev.hdl, voxel_draw_.layout, nullptr);
+
+    dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_layout_, nullptr);
+    dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_tex_layout_, nullptr);
+    dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_batch_lighting_layout_, nullptr);
+    dev.dt.destroyDescriptorSetLayout(dev.hdl, sky_data_layout_, nullptr);
+
+    dev.dt.destroyDescriptorPool(dev.hdl, asset_pool_, nullptr);
+
+    if (quad_draw_.has_value()) {
+        dev.dt.destroyPipeline(dev.hdl, quad_draw_->hdls[0], nullptr);
+        dev.dt.destroyPipelineLayout(dev.hdl, quad_draw_->layout, nullptr);
+    }
 
     if (imgui_render_state_.has_value()) {
         dev.dt.destroyRenderPass(dev.hdl, imgui_render_state_->renderPass, nullptr);

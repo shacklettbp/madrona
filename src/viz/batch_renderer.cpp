@@ -1154,10 +1154,27 @@ BatchRenderer::~BatchRenderer()
     impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->prepareViews.layout, nullptr);
     impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->batchDraw.hdls[0], nullptr);
     impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->batchDraw.layout, nullptr);
-    // impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->lighting.hdls[0], nullptr);
-    // impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->lighting.layout, nullptr);
+
+    impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->createVisualization.hdls[0], nullptr);
+    impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->createVisualization.layout, nullptr);
+
+    impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->lighting.hdls[0], nullptr);
+    impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->lighting.layout, nullptr);
+
 
     for(int i=0;i<impl->batchFrames.size();i++){
+        impl->dev.dt.destroyImage(impl->dev.hdl, impl->batchFrames[i].displayTexture.tex.image, nullptr);
+        impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].displayTexture.view, nullptr);
+        impl->dev.dt.freeMemory(impl->dev.hdl, impl->batchFrames[i].displayTexture.mem, nullptr);
+
+        impl->dev.dt.destroyCommandPool(impl->dev.hdl, impl->batchFrames[i].prepareCmdPool, nullptr);
+        impl->dev.dt.destroyCommandPool(impl->dev.hdl, impl->batchFrames[i].renderCmdPool, nullptr);
+        impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].prepareFinished, nullptr);
+        impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].renderFinished, nullptr);
+        impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].layoutTransitionFinished, nullptr);
+        impl->dev.dt.destroyFence(impl->dev.hdl, impl->batchFrames[i].prepareFence, nullptr);
+        impl->dev.dt.destroyFence(impl->dev.hdl, impl->batchFrames[i].renderFence, nullptr);
+
         for(int i2=0;i2<impl->batchFrames[i].targets.size();i2++){
             impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].vizBufferView, nullptr);
             impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].depthView, nullptr);
