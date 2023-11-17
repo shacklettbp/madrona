@@ -11,8 +11,7 @@
 #include "vk/cuda_interop.hpp"
 #endif
 
-// #include "render_common.hpp"
-#include "viewer_renderer.hpp"
+#include "render_common.hpp"
 
 namespace madrona::render {
 

@@ -793,6 +793,7 @@ Device Backend::initDevice(
     requested_features.features.wideLines = false; // No MoltenVK support :(
     requested_features.features.fillModeNonSolid = true;
     requested_features.features.multiDrawIndirect = true;
+    requested_features.features.geometryShader = true;
 
     dev_create_info.pNext = &requested_features;
 

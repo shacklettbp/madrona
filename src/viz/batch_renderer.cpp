@@ -1,7 +1,6 @@
 #include "batch_renderer.hpp"
 #include "madrona/utils.hpp"
 #include "madrona/viz/interop.hpp"
-#include "viewer_renderer.hpp"
 #include "shader.hpp"
 
 #include "madrona/heap_array.hpp"
@@ -657,10 +656,10 @@ static void makeBatchFrame(vk::Device& dev,
                            VkDescriptorSet lighting_set,
                            VkDescriptorSet pbr_set)
 {
-    VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(PerspectiveCameraData);
+    VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(viz::PerspectiveCameraData);
     vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
 
-    VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(InstanceData);
+    VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(viz::InstanceData);
     vk::LocalBuffer instances = alloc.makeLocalBuffer(instance_size).value();
 
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);

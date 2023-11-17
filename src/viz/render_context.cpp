@@ -5362,7 +5362,7 @@ void RenderContext::Impl::renderGUIAndPresent(const viz::ViewerInput &input,
 
 #ifdef ENABLE_BATCH_RENDERER
     { // Draw the quads
-        issueQuadDraw(dev, draw_cmd, frame, *quad_draw_);
+        // issueQuadDraw(dev, draw_cmd, frame, *quad_draw_);
     }
 #endif
 
