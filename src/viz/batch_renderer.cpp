@@ -1289,6 +1289,20 @@ static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
 {
     uint32_t *instanceOffsets = (uint32_t *)interop->instanceOffsetsCPU->ptr;
 
+    for (int i = 0; i < num_worlds; ++i) {
+        instanceOffsets[i] = 0;
+    }
+
+    for (uint32_t i = 1; i < *interop->bridge.totalNumInstances; ++i) {
+        uint32_t current_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i] >> 32);
+        uint32_t prev_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i-1] >> 32);
+
+        if (current_world_id != prev_world_id) {
+            instanceOffsets[current_world_id] = i;
+        }
+    }
+
+#if 0
     for (uint32_t i = 0; i < num_worlds; ++i) {
         instanceOffsets[i] = 0;
     }
@@ -1298,7 +1312,7 @@ static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
         uint32_t prev_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i-1] >> 32);
 
         if (current_world_id != prev_world_id) {
-            instanceOffsets[prev_world_id] = i;
+            instanceOffsets[current_world_id] = i;
         }
     }
 
@@ -1312,6 +1326,7 @@ static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
     if (num_worlds == 1) {
         instanceOffsets[0] = *interop->bridge.totalNumInstances;
     }
+#endif
 }
 
 void BatchRenderer::prepareForRendering(BatchRenderInfo info,

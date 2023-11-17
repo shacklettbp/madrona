@@ -3497,7 +3497,7 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
 #else
           cfg.gpuID,
 #endif
-          window.has_value() ? window->surface : VK_NULL_HANDLE)),
+          window.has_value() ? window->surface : Optional<VkSurfaceKHR>::none())),
       alloc(dev, backend),
       render_queue_(makeGFXQueue(dev, 0)),
       present_wrapper_(render_queue_, false),
@@ -3731,8 +3731,12 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
 
 RenderContext::Impl::~Impl()
 {
-    ImGui_ImplVulkan_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
+    dev.dt.deviceWaitIdle(dev.hdl);
+    
+    if (imgui_render_state_.has_value()) {
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+    }
 
     loaded_assets_.clear();
 
@@ -5362,7 +5366,7 @@ void RenderContext::Impl::renderGUIAndPresent(const viz::ViewerInput &input,
 
 #ifdef ENABLE_BATCH_RENDERER
     { // Draw the quads
-        // issueQuadDraw(dev, draw_cmd, frame, *quad_draw_);
+        issueQuadDraw(dev, draw_cmd, frame, *quad_draw_);
     }
 #endif
 
