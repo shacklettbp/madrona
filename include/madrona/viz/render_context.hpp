@@ -16,6 +16,7 @@ struct RenderContext {
         int gpuID; // Set to 0
 
         // Width and height of the batch renderer output
+        bool enableBatchRenderer;
         uint32_t viewWidth;
         uint32_t viewHeight;
 
@@ -26,7 +27,7 @@ struct RenderContext {
         uint32_t defaultSimTickRate;
         ExecMode execMode;
 
-        bool renderViewer;
+        bool enableViewer;
         uint32_t viewerWidth;
         uint32_t viewerHeight;
 

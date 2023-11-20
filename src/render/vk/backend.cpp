@@ -793,7 +793,13 @@ Device Backend::initDevice(
     requested_features.features.wideLines = false; // No MoltenVK support :(
     requested_features.features.fillModeNonSolid = true;
     requested_features.features.multiDrawIndirect = true;
+
+#if MADRONA_MACOS
+    requested_features.features.geometryShader = false;
+#else
+    // Required for batch renderer (accessing primitive ID)
     requested_features.features.geometryShader = true;
+#endif
 
     dev_create_info.pNext = &requested_features;
 

@@ -3613,9 +3613,9 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 }
 
 RenderContext::Impl::Impl(const RenderContext::Config &cfg)
-    : loader_lib_(PresentationState::init(cfg.renderViewer)),
-      backend(initializeBackend(loader_lib_, cfg.renderViewer)),
-      window(makeWindow(backend, cfg.viewerWidth, cfg.viewerHeight, cfg.renderViewer)),
+    : loader_lib_(PresentationState::init(cfg.enableViewer)),
+      backend(initializeBackend(loader_lib_, cfg.enableViewer)),
+      window(makeWindow(backend, cfg.viewerWidth, cfg.viewerHeight, cfg.enableViewer)),
       dev(backend.initDevice(
 #ifdef MADRONA_CUDA_SUPPORT
           getVkUUIDFromCudaID(cfg.gpuID),
@@ -3626,14 +3626,14 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
       alloc(dev, backend),
       render_queue_(makeGFXQueue(dev, 0)),
       present_wrapper_(render_queue_, false),
-      fb_width_(cfg.renderViewer ? cfg.viewerWidth : 1),
-      fb_height_(cfg.renderViewer ? cfg.viewerHeight : 1),
+      fb_width_(cfg.enableViewer ? cfg.viewerWidth : 1),
+      fb_height_(cfg.enableViewer ? cfg.viewerHeight : 1),
       br_width_(cfg.viewWidth),
       br_height_(cfg.viewHeight),
       fb_clear_(makeClearValues()),
       fb_shadow_clear_(makeShadowClearValues()),
       fb_imgui_clear_(makeImguiClearValues()),
-      present_(cfg.renderViewer ? PresentationState(backend, dev, *window,
+      present_(cfg.enableViewer ? PresentationState(backend, dev, *window,
                InternalConfig::numFrames, true) : Optional<PresentationState>::none()),
       pipeline_cache_(getPipelineCache(dev)),
       repeat_sampler_(
@@ -3644,7 +3644,7 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
                                   InternalConfig::gbufferFormat, InternalConfig::gbufferFormat,
                                   InternalConfig::depthFormat)),
       shadow_pass_(makeShadowRenderPass(dev, InternalConfig::varianceFormat, InternalConfig::depthFormat)),
-      imgui_render_state_(cfg.renderViewer ? imguiInit(window->platformWindow, dev, backend,
+      imgui_render_state_(cfg.enableViewer ? imguiInit(window->platformWindow, dev, backend,
                                  render_queue_, pipeline_cache_,
                                  VK_FORMAT_R8G8B8A8_UNORM,
                                  InternalConfig::depthFormat) : Optional<ImGuiRenderState>::none()),
@@ -3666,9 +3666,9 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
       voxel_draw_(makeVoxelDrawPipeline(dev, pipeline_cache_, render_pass_,
           repeat_sampler_, clamp_sampler_,
           InternalConfig::numFrames)),
-      quad_draw_(cfg.renderViewer ? makeQuadPipeline(dev, pipeline_cache_, clamp_sampler_,
+      quad_draw_(cfg.enableViewer ? makeQuadPipeline(dev, pipeline_cache_, clamp_sampler_,
                   InternalConfig::numFrames, imgui_render_state_->renderPass) : Optional<Pipeline<1>>::none()),
-      grid_draw_(cfg.renderViewer ? makeGridDrawPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames) : Optional<Pipeline<1>>::none()),
+      grid_draw_(cfg.enableViewer ? makeGridDrawPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames) : Optional<Pipeline<1>>::none()),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
       asset_desc_pool_mat_tx_(dev, object_draw_.shaders, 2, 1),
@@ -3694,7 +3694,7 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
       gpu_input_(cfg.execMode == ExecMode::CUDA),
       screenshot_buffer_(),
       global_frame_no_(0),
-      imgui_ctx_(cfg.renderViewer ? ImGui::GetCurrentContext() : nullptr)
+      imgui_ctx_(cfg.enableViewer ? ImGui::GetCurrentContext() : nullptr)
 {
     {
         VkDescriptorPoolSize pool_sizes[] = {
@@ -3813,6 +3813,7 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
 
     BatchRenderer::Config br_cfg = {
          (int)cfg.gpuID, 
+         cfg.enableBatchRenderer,
          br_width_,
          br_height_,
          cfg.numWorlds,
@@ -3841,15 +3842,15 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
                   blur_.descPool.makeSet(),
                   voxel_mesh_gen_.descPool.makeSet(),
                   voxel_draw_.descPool.makeSet(),
-                  cfg.renderViewer ? quad_draw_->descPool.makeSet() : VK_NULL_HANDLE,
-                  cfg.renderViewer ? grid_draw_->descPool.makeSet() : VK_NULL_HANDLE,
+                  cfg.enableViewer ? quad_draw_->descPool.makeSet() : VK_NULL_HANDLE,
+                  cfg.enableViewer ? grid_draw_->descPool.makeSet() : VK_NULL_HANDLE,
                   sky_,
                   br_proto_->getImportedBuffers(0),
                   br_proto_->getLayeredTargets(0),
                   br_proto_->getDisplayTexture(0),
                   br_proto_->getPBRSet(0),
                   &frames_[i],
-                  cfg.renderViewer);
+                  cfg.enableViewer);
     }
 
     screenshot_buffer_ = std::make_unique<render::vk::HostBuffer>(
