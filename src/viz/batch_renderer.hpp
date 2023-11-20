@@ -94,7 +94,7 @@ struct BatchRenderer {
 
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
     DisplayTexture &getDisplayTexture(uint32_t frame_id);
-    LayeredTarget &getLayeredTarget(uint32_t frame_id);
+    HeapArray<LayeredTarget> &getLayeredTargets(uint32_t frame_id);
     VkDescriptorSet getPBRSet(uint32_t frame_id);
 
     // Get the semaphore that the viewer renderer has to wait on.

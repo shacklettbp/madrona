@@ -1772,11 +1772,6 @@ DisplayTexture &BatchRenderer::getDisplayTexture(uint32_t frame_id)
     return impl->batchFrames[frame_id].displayTexture;
 }
 
-LayeredTarget &BatchRenderer::getLayeredTarget(uint32_t frame_id)
-{
-    return impl->batchFrames[frame_id].targets[0];
-}
-
 VkDescriptorSet BatchRenderer::getPBRSet(uint32_t frame_id)
 {
     return impl->batchFrames[frame_id].pbrSet;
@@ -1901,6 +1896,12 @@ void BatchRenderer::submitViewerCopy(VkCommandBuffer draw_cmd)
         }
 #endif
     }
+}
+
+HeapArray<LayeredTarget> &BatchRenderer::getLayeredTargets(uint32_t frame_id)
+{
+    (void)frame_id;
+    return impl->batchFrames[0].targets;
 }
 
 }

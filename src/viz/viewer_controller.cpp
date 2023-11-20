@@ -216,6 +216,11 @@ static void cfgUI(ViewerInput &inp,
                   int32_t *controller_agent,
                   ImGuiContext *imgui_ctx)
 {
+    inp.offsetY -= ImGui::GetIO().MouseWheel * InternalConfig::secondsPerFrame * 120;
+    inp.offsetX -= ImGui::GetIO().MouseWheelH * InternalConfig::secondsPerFrame * 120;
+
+    ViewerType *viewer_type = &inp.viewerType;
+
     ImGui::SetCurrentContext(imgui_ctx);
 
     ImGui::Begin("Controls");
@@ -227,6 +232,34 @@ static void cfgUI(ViewerInput &inp,
 
     inp.requestedScreenshot = requested_screenshot;
     inp.screenshotFilePath = output_file_path;
+
+    const char *viewer_type_ops[] = {
+        "Flycam", "Grid"
+    };
+
+    if (ImGui::BeginCombo("Viewer Type", viewer_type_ops[(int)*viewer_type])) {
+        for (CountT i = 0; i < 2; i++) {
+            const bool is_selected = ((int)*viewer_type == i);
+            if (ImGui::Selectable(viewer_type_ops[i], is_selected)) {
+                *viewer_type = (ViewerType)i;
+            }
+
+            if (is_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+
+        ImGui::EndCombo();
+    }
+
+    static int grid_image_size = 256;
+    ImGui::DragInt("Grid Image Pixel Size", &grid_image_size);
+
+    static int grid_width = 10;
+    ImGui::DragInt("Grid Width", &grid_width);
+
+    inp.gridWidth = grid_width;
+    inp.gridImageSize = grid_image_size;
 
     ImGui::TextUnformatted("Simulation Settings");
     ImGui::Separator();
@@ -431,7 +464,7 @@ static void fpsCounterUI(float frame_duration, ImGuiContext *imgui_ctx)
 
 static ViewerInput initCam(math::Vector3 pos, math::Quat rot)
 {
-    ViewerInput cam;
+    ViewerInput cam = {};
     cam.position = pos;
     cam.forward = normalize(rot.rotateVec(math::fwd));
     cam.up = normalize(rot.rotateVec(math::up));
@@ -460,7 +493,8 @@ void ViewerController::Impl::render(float frame_duration, ViewerInput &inp)
     ImGui::SetCurrentContext(renderCtx->impl->imgui_ctx_);
 
     // FIXME: pass actual active agents, not max
-    cfgUI(inp, maxNumAgents, numWorlds, &simTickRate, &batchView, &controllerAgent, renderCtx->impl->imgui_ctx_);
+    cfgUI(inp, maxNumAgents, numWorlds, &simTickRate, 
+          &batchView, &controllerAgent, renderCtx->impl->imgui_ctx_);
 
     fpsCounterUI(frame_duration, renderCtx->impl->imgui_ctx_);
 
@@ -472,6 +506,10 @@ void ViewerController::Impl::render(float frame_duration, ViewerInput &inp)
     renderCtx->impl->selectViewerBatchView((uint32_t)batchView);
 
 
+    // vizInput.gridImageSize = 256;
+    // vizInput.gridWidth = 10;
+    // vizInput.offsetX = 0;
+    // vizInput.offsetY = 0;
 
     renderCtx->renderViewer(vizInput);
 }

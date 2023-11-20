@@ -3,6 +3,15 @@
 
 #define PREPARE_VIEW_WORKGROUP_SIZE 32
 
+struct GridDrawPushConst {
+    uint numViews;
+    uint gridWidth;
+    uint gridViewSize;
+    uint maxViewsPerImage;
+    float offsetX;
+    float offsetY;
+};
+
 // Specified from the top left corner of the screen
 struct TexturedQuadPushConst {
     float2 startPixels;

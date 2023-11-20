@@ -197,6 +197,8 @@ struct Frame {
 
     // Contains a descriptor set for the sampler state and the final rendered output
     VkDescriptorSet batchOutputQuadSet;
+
+    VkDescriptorSet gridDrawSet;
 };
 
 struct AssetData {

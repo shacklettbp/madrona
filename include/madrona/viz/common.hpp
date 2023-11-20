@@ -4,6 +4,10 @@
 #include <madrona/math.hpp>
 
 namespace madrona::viz {
+
+enum class ViewerType {
+    Flycam, Grid
+};
     
 // Required for rendering the viewer image
 struct ViewerInput {
@@ -24,6 +28,13 @@ struct ViewerInput {
 
     bool requestedScreenshot;
     const char *screenshotFilePath;
+
+    ViewerType viewerType;
+    uint32_t gridWidth;
+    uint32_t gridImageSize;
+    uint32_t numViewsPerImage;
+    float offsetX;
+    float offsetY;
 };
 
 // Passed out after the flycam image has been rendered

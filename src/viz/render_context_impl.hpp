@@ -27,7 +27,8 @@ struct RenderContext::Impl {
 
     void startFrame();
 
-    bool renderViewerFrame(const viz::ViewerInput &input);
+    bool renderFlycamFrame(const viz::ViewerInput &input);
+    bool renderGridFrame(const viz::ViewerInput &input);
 
     void render(const viz::ViewerInput &input);
 
@@ -79,6 +80,8 @@ private:
     Pipeline<1> voxel_mesh_gen_;
     Pipeline<1> voxel_draw_;
     Optional<Pipeline<1>> quad_draw_;
+    // Draw a grid
+    Optional<Pipeline<1>> grid_draw_;
 
     render::vk::FixedDescriptorPool asset_desc_pool_cull_;
     render::vk::FixedDescriptorPool asset_desc_pool_draw_;

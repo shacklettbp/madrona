@@ -17,6 +17,7 @@
 
 #include "shaders/shader_common.h"
 #include "vk/descriptors.hpp"
+#include "vulkan/vulkan_core.h"
 
 #include <filesystem>
 
@@ -943,6 +944,31 @@ static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler c
             0, 9, clamp_sampler, 1, 0 }}));
 }
 
+static vk::PipelineShaders makeGridDrawShader(const vk::Device &dev, VkSampler clamp_sampler)
+{
+    std::filesystem::path shader_dir =
+        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        "shaders";
+
+    ShaderCompiler compiler;
+    SPIRVShader spirv = compiler.compileHLSLFileToSPV(
+        (shader_dir / "grid_draw.hlsl").string().c_str(), {},
+        {}, {"gridDraw", ShaderStage::Compute });
+    
+    StackAlloc tmp_alloc;
+    return vk::PipelineShaders(dev, tmp_alloc,
+                               Span<const SPIRVShader>(&spirv, 1), 
+                               Span<const vk::BindingOverride>({
+                                   vk::BindingOverride{
+                                       0, 1, VK_NULL_HANDLE, 
+                                       100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 
+                                   },
+                                   vk::BindingOverride{
+                                       0, 2, clamp_sampler, 1, 0
+                                   }
+                                   }));
+}
+
 static PipelineShaders makeBlurShader(const Device &dev, VkSampler clamp_sampler)
 {
     (void)clamp_sampler;
@@ -1683,6 +1709,80 @@ static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
     };
 }
 
+static Pipeline<1> makeGridDrawPipeline(const Device &dev,
+                                    VkPipelineCache pipeline_cache,
+                                    VkSampler clamp_sampler,
+                                    CountT num_frames)
+{
+    PipelineShaders shader = makeGridDrawShader(dev, clamp_sampler);
+
+    // Push constant
+    VkPushConstantRange push_const {
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        0,
+        sizeof(render::shader::GridDrawPushConst),
+    };
+
+    // Layout configuration
+    std::array desc_layouts {
+        shader.getLayout(0),
+    };
+
+    VkPipelineLayoutCreateInfo grid_layout_info;
+    grid_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    grid_layout_info.pNext = nullptr;
+    grid_layout_info.flags = 0;
+    grid_layout_info.setLayoutCount =
+        static_cast<uint32_t>(desc_layouts.size());
+    grid_layout_info.pSetLayouts = desc_layouts.data();
+    grid_layout_info.pushConstantRangeCount = 1;
+    grid_layout_info.pPushConstantRanges = &push_const;
+
+    VkPipelineLayout grid_layout;
+    REQ_VK(dev.dt.createPipelineLayout(dev.hdl, &grid_layout_info, nullptr,
+                                       &grid_layout));
+
+    std::array<VkComputePipelineCreateInfo, 1> compute_infos;
+#if 0
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT subgroup_size;
+    subgroup_size.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
+    subgroup_size.pNext = nullptr;
+    subgroup_size.requiredSubgroupSize = 32;
+#endif
+
+    compute_infos[0].sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    compute_infos[0].pNext = nullptr;
+    compute_infos[0].flags = 0;
+    compute_infos[0].stage = {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr, //&subgroup_size,
+        VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT,
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        shader.getShader(0),
+        "gridDraw",
+        nullptr,
+    };
+    compute_infos[0].layout = grid_layout;
+    compute_infos[0].basePipelineHandle = VK_NULL_HANDLE;
+    compute_infos[0].basePipelineIndex = -1;
+
+    std::array<VkPipeline, compute_infos.size()> pipelines;
+    REQ_VK(dev.dt.createComputePipelines(dev.hdl, pipeline_cache,
+                                         compute_infos.size(),
+                                         compute_infos.data(), nullptr,
+                                         pipelines.data()));
+
+    FixedDescriptorPool desc_pool(dev, shader, 0, num_frames);
+
+    return Pipeline<1> {
+        std::move(shader),
+        grid_layout,
+        pipelines,
+        std::move(desc_pool),
+    };
+}
+
 static PipelineShaders makeQuadShader(const Device &dev, VkSampler clamp_sampler)
 {
     std::filesystem::path shader_dir =
@@ -2183,9 +2283,10 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       VkDescriptorSet voxel_gen_set,
                       VkDescriptorSet voxel_draw_set,
                       VkDescriptorSet quad_draw_set,
+                      VkDescriptorSet grid_draw_set,
                       Sky &sky,
                       BatchImportedBuffers &batch_renderer_buffers,
-                      LayeredTarget &batch_target,
+                      HeapArray<LayeredTarget> &batch_targets,
                       DisplayTexture &batch_display_texture,
                       VkDescriptorSet br_pbr_set,
                       Frame *dst,
@@ -2224,7 +2325,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 30> desc_updates;
+    std::array<VkWriteDescriptorSet, 31> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -2279,6 +2380,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     gbuffer_albedo_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::storageImage(desc_updates[7], lighting_set, &gbuffer_albedo_info, 0);
+    DescHelper::storageImage(desc_updates[30], grid_draw_set, &gbuffer_albedo_info, 0);
     // DescHelper::storageImage(desc_updates[24], quad_draw_set, &gbuffer_albedo_info, 1);
 
     VkDescriptorImageInfo br_display_info;
@@ -2425,6 +2527,28 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
             (int)(imgui_render_pass == VK_NULL_HANDLE));
 
 
+    { // Create the descriptor sets with the outputs
+        VkWriteDescriptorSet *lighting_desc_updates = (VkWriteDescriptorSet *)
+            alloca(sizeof(VkWriteDescriptorSet) * batch_targets.size());
+
+        VkDescriptorImageInfo *infos = (VkDescriptorImageInfo *)
+            alloca(sizeof(VkDescriptorImageInfo) * batch_targets.size());
+        for (int i = 0; i < batch_targets.size(); ++i) {
+            infos[i].imageView = batch_targets[i].outputView;
+            infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            infos[i].sampler = VK_NULL_HANDLE;
+
+            vk::DescHelper::textures(lighting_desc_updates[i],
+                                         grid_draw_set, 
+                                         &infos[i],
+                                         1, 1, i);
+        }
+
+        vk::DescHelper::update(dev, lighting_desc_updates,
+                               batch_targets.size());
+    }
+
+
     new (dst) Frame {
         std::move(fb),
         std::move(imgui_fb),
@@ -2465,7 +2589,8 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
         shadow_blur_set,
         voxel_gen_set,
         voxel_draw_set,
-        quad_draw_set
+        quad_draw_set,
+        grid_draw_set
     };
 }
 
@@ -3543,6 +3668,7 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
           InternalConfig::numFrames)),
       quad_draw_(cfg.renderViewer ? makeQuadPipeline(dev, pipeline_cache_, clamp_sampler_,
                   InternalConfig::numFrames, imgui_render_state_->renderPass) : Optional<Pipeline<1>>::none()),
+      grid_draw_(cfg.renderViewer ? makeGridDrawPipeline(dev, pipeline_cache_, clamp_sampler_, InternalConfig::numFrames) : Optional<Pipeline<1>>::none()),
       asset_desc_pool_cull_(dev, instance_cull_.shaders, 1, 1),
       asset_desc_pool_draw_(dev, object_draw_.shaders, 1, 1),
       asset_desc_pool_mat_tx_(dev, object_draw_.shaders, 2, 1),
@@ -3716,9 +3842,10 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
                   voxel_mesh_gen_.descPool.makeSet(),
                   voxel_draw_.descPool.makeSet(),
                   cfg.renderViewer ? quad_draw_->descPool.makeSet() : VK_NULL_HANDLE,
+                  cfg.renderViewer ? grid_draw_->descPool.makeSet() : VK_NULL_HANDLE,
                   sky_,
                   br_proto_->getImportedBuffers(0),
-                  br_proto_->getLayeredTarget(0),
+                  br_proto_->getLayeredTargets(0),
                   br_proto_->getDisplayTexture(0),
                   br_proto_->getPBRSet(0),
                   &frames_[i],
@@ -4647,6 +4774,90 @@ static void issueShadowBlurPass(vk::Device &dev, Frame &frame, Pipeline<1> &pipe
     }
 }
 
+static void issueGridDrawPass(vk::Device &dev,
+                              Frame &frame, 
+                              Pipeline<1> &pipeline,
+                              VkCommandBuffer draw_cmd,
+                              const viz::ViewerInput &inp,
+                              uint32_t view_idx,
+                              uint32_t num_views)
+{
+    {
+        array<VkImageMemoryBarrier, 1> compute_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_NONE,
+                VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.fb.colorAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                compute_prepare.size(), compute_prepare.data());
+    }
+
+    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
+
+    render::shader::GridDrawPushConst push_const = {
+        .numViews = num_views,
+        .gridWidth = inp.gridWidth,
+        .gridViewSize = inp.gridImageSize,
+        .maxViewsPerImage = dev.maxNumLayersPerImage,
+        .offsetX = inp.offsetX,
+        .offsetY = inp.offsetY
+    };
+
+    dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(render::shader::GridDrawPushConst), &push_const);
+
+    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipeline.layout, 0, 1, &frame.gridDrawSet, 0, nullptr);
+
+    uint32_t num_workgroups_x = utils::divideRoundUp(frame.fb.colorAttachment.width, 32_u32);
+    uint32_t num_workgroups_y = utils::divideRoundUp(frame.fb.colorAttachment.height, 32_u32);
+
+    dev.dt.cmdDispatch(draw_cmd, num_workgroups_x, num_workgroups_y, 1);
+
+    {
+        array<VkImageMemoryBarrier, 1> compute_prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.fb.colorAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                compute_prepare.size(), compute_prepare.data());
+    }
+}
+
 static void issueLightingPass(vk::Device &dev,
                               Frame &frame, 
                               Pipeline<1> &pipeline,
@@ -4885,7 +5096,7 @@ static void issueCulling(Device &dev,
                               0, nullptr);
 }
 
-bool RenderContext::Impl::renderViewerFrame(const viz::ViewerInput &input)
+bool RenderContext::Impl::renderFlycamFrame(const viz::ViewerInput &input)
 {
     viz::ViewerCam cam = {
         .position = input.position,
@@ -5327,6 +5538,176 @@ bool RenderContext::Impl::renderViewerFrame(const viz::ViewerInput &input)
     return prepare_screenshot;
 }
 
+bool RenderContext::Impl::renderGridFrame(const viz::ViewerInput &input)
+{
+    viz::ViewerCam cam = {
+        .position = input.position,
+        .fwd = input.forward,
+        .up = input.up,
+        .right = input.right,
+        .perspective = input.usePerspective,
+        .fov = input.fov,
+        .orthoHeight = input.orthoHeight,
+        .mousePrev = input.mousePrev
+    };
+
+    uint32_t view_idx = 0;
+
+    Frame &frame = frames_[cur_frame_];
+
+    VkCommandBuffer draw_cmd = frame.drawCmd;
+    { // Get command buffer for this frame and start it
+        REQ_VK(dev.dt.resetCommandPool(dev.hdl, frame.drawCmdPool, 0));
+        VkCommandBufferBeginInfo begin_info {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        REQ_VK(dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
+    }
+
+    { // Pack the view for the fly camera and copy it to the render input
+        packView(dev, frame.viewStaging, cam, fb_width_, fb_height_);
+        VkBufferCopy view_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.cameraViewOffset,
+            .size = sizeof(PackedViewData)
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.viewStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &view_copy);
+    }
+
+    { // Pack the lighting data and copy it to the render input
+        packLighting(dev, frame.lightStaging, lights_);
+        VkBufferCopy light_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.lightOffset,
+            .size = sizeof(DirectionalLight) * InternalConfig::maxLights
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.lightStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &light_copy);
+    }
+
+    { // Pack the sky data and copy it to the render input
+        packSky(dev, frame.skyStaging);
+        VkBufferCopy sky_copy {
+            .srcOffset = 0,
+            .dstOffset = frame.skyOffset,
+            .size = sizeof(SkyData)
+        };
+        dev.dt.cmdCopyBuffer(draw_cmd, frame.skyStaging.buffer,
+                             frame.renderInput.buffer,
+                             1, &sky_copy);
+    }
+
+    { // Issue grid drawing
+        // issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, view_idx);
+        issueGridDrawPass(dev, frame, *grid_draw_, draw_cmd, input, view_idx,
+                          *engine_interop_.bridge.totalNumViews);
+    }
+
+    bool prepare_screenshot = input.requestedScreenshot || (getenv("SCREENSHOT_PATH") && global_frame_no_ == 0);
+
+    if (prepare_screenshot) {
+        array<VkImageMemoryBarrier, 1> prepare {{
+            {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_IMAGE_LAYOUT_GENERAL,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_QUEUE_FAMILY_IGNORED,
+                VK_QUEUE_FAMILY_IGNORED,
+                frame.fb.colorAttachment.image,
+                {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0, 1, 0, 1
+                },
+            }
+        }};
+
+        VkBufferMemoryBarrier buffer_prepare = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_NONE,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = screenshot_buffer_->buffer,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE
+        };
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr, 1, &buffer_prepare,
+                prepare.size(), prepare.data());
+
+        VkBufferImageCopy region = {
+            .bufferOffset = 0, .bufferRowLength = 0, .bufferImageHeight = 0,
+            .imageSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            },
+            .imageOffset = {},
+            .imageExtent = {frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 1}
+        };
+
+        dev.dt.cmdCopyImageToBuffer(draw_cmd, frame.fb.colorAttachment.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                    screenshot_buffer_->buffer, 1, &region);
+
+        prepare[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        prepare[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        prepare[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        prepare[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        dev.dt.cmdPipelineBarrier(draw_cmd,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0,
+                0, nullptr, 0, nullptr,
+                prepare.size(), prepare.data());
+    }
+
+    REQ_VK(dev.dt.endCommandBuffer(draw_cmd));
+
+    uint32_t wait_count = 1;
+
+    VkSemaphore waits[] = {
+        br_proto_->getLatestWaitSemaphore()
+    };
+
+    VkPipelineStageFlags wait_flags[] = {
+        VK_PIPELINE_STAGE_TRANSFER_BIT
+    };
+
+    if (!br_proto_->didRender) {
+        wait_count = 0;
+    } else {
+        br_proto_->didRender = 0;
+    }
+
+    VkSubmitInfo gfx_submit {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        nullptr,
+        wait_count,
+        waits,
+        wait_flags,
+        1,
+        &draw_cmd,
+        1,
+        &frame.renderFinished,
+    };
+
+    REQ_VK(dev.dt.queueSubmit(render_queue_, 1, &gfx_submit,
+                              VK_NULL_HANDLE));
+
+    return prepare_screenshot;
+}
+
 void RenderContext::Impl::renderGUIAndPresent(const viz::ViewerInput &input,
                                               bool prepare_screenshot)
 {
@@ -5366,7 +5747,7 @@ void RenderContext::Impl::renderGUIAndPresent(const viz::ViewerInput &input,
 
 #ifdef ENABLE_BATCH_RENDERER
     { // Draw the quads
-        issueQuadDraw(dev, draw_cmd, frame, *quad_draw_);
+        // issueQuadDraw(dev, draw_cmd, frame, *quad_draw_);
     }
 #endif
 
@@ -5518,7 +5899,13 @@ void RenderContext::Impl::renderGUIAndPresent(const viz::ViewerInput &input,
 
 void RenderContext::Impl::render(const viz::ViewerInput &input)
 {
-    bool prepare_screenshot = renderViewerFrame(input);
+    bool prepare_screenshot = 0;
+
+    if (input.viewerType == viz::ViewerType::Flycam) {
+        prepare_screenshot = renderFlycamFrame(input);
+    } else if (input.viewerType == viz::ViewerType::Grid) {
+        prepare_screenshot = renderGridFrame(input);
+    }
 
     renderGUIAndPresent(input, prepare_screenshot);
 }
@@ -5567,7 +5954,14 @@ viz::ViewerController RenderContext::makeViewerController(float camera_move_spee
 
 viz::ViewerFrame * RenderContext::renderViewer(const viz::ViewerInput &input)
 {
-    bool prepare_screenshot = impl->renderViewerFrame(input);
+    bool prepare_screenshot = 0;
+
+    if (input.viewerType == viz::ViewerType::Flycam) {
+        prepare_screenshot = impl->renderFlycamFrame(input);
+    } else if (input.viewerType == viz::ViewerType::Grid) {
+        prepare_screenshot = impl->renderGridFrame(input);
+    }
+
     impl->renderGUIAndPresent(input, prepare_screenshot);
 
     // Currently unused
