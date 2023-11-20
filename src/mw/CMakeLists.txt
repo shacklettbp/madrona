@@ -1,5 +1,3 @@
-add_subdirectory(render)
-
 add_library(madrona_mw_cpu STATIC
     ${MADRONA_INC_DIR}/mw_cpu.hpp ${MADRONA_INC_DIR}/mw_cpu.inl cpu_exec.cpp
 )
