@@ -3955,6 +3955,11 @@ RenderContext::Impl::~Impl()
         dev.dt.destroyPipelineLayout(dev.hdl, quad_draw_->layout, nullptr);
     }
 
+    if (grid_draw_.has_value()) {
+        dev.dt.destroyPipeline(dev.hdl, grid_draw_->hdls[0], nullptr);
+        dev.dt.destroyPipelineLayout(dev.hdl, grid_draw_->layout, nullptr);
+    }
+
     if (imgui_render_state_.has_value()) {
         dev.dt.destroyRenderPass(dev.hdl, imgui_render_state_->renderPass, nullptr);
         dev.dt.destroyDescriptorPool(
