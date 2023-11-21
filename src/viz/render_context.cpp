@@ -3606,6 +3606,11 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
         dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &asset_batch_lighting_set_);
     }
 
+#if defined (MADRONA_MACOS)
+    // Batch renderer is not supported on MacOS
+    assert(!cfg.enableBatchRenderer);
+#endif
+
     BatchRenderer::Config br_cfg = {
          (int)cfg.gpuID, 
          cfg.enableBatchRenderer,
@@ -3741,7 +3746,7 @@ RenderContext::Impl::~Impl()
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_layout_, nullptr);
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_tex_layout_, nullptr);
     dev.dt.destroyDescriptorSetLayout(dev.hdl, asset_batch_lighting_layout_, nullptr);
-    dev.dt.destroyDescriptorSetLayout(dev.hdl, sky_data_layout_, nullptr);
+    // dev.dt.destroyDescriptorSetLayout(dev.hdl, sky_data_layout_, nullptr);
 
     dev.dt.destroyDescriptorPool(dev.hdl, asset_pool_, nullptr);
 
