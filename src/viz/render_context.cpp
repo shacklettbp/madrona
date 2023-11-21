@@ -2287,7 +2287,6 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       Sky &sky,
                       BatchImportedBuffers &batch_renderer_buffers,
                       HeapArray<LayeredTarget> &batch_targets,
-                      DisplayTexture &batch_display_texture,
                       VkDescriptorSet br_pbr_set,
                       Frame *dst,
                       bool make_window)
@@ -2325,7 +2324,8 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 31> desc_updates;
+    std::array<VkWriteDescriptorSet, 30> desc_updates;
+    uint32_t desc_counter = 0;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = render_input.buffer;
@@ -2334,120 +2334,121 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     // Right now, the view_info isn't used in the cull shader
     // DescHelper::uniform(desc_updates[23], cull_set, &view_info, 0);
-    DescHelper::storage(desc_updates[0], draw_set, &view_info, 0);
-    DescHelper::storage(desc_updates[19], shadow_gen_set, &view_info, 1);
+    DescHelper::storage(desc_updates[desc_counter++], draw_set, &view_info, 0);
+    DescHelper::storage(desc_updates[desc_counter++], shadow_gen_set, &view_info, 1);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = batch_renderer_buffers.instances.buffer;
     instance_info.offset = 0;
     instance_info.range = VK_WHOLE_SIZE;
 
-    DescHelper::storage(desc_updates[1], cull_set, &instance_info, 1);
-    DescHelper::storage(desc_updates[2], draw_set, &instance_info, 1);
+    DescHelper::storage(desc_updates[desc_counter++], cull_set, &instance_info, 1);
+    DescHelper::storage(desc_updates[desc_counter++], draw_set, &instance_info, 1);
 
     VkDescriptorBufferInfo instance_offset_info;
     instance_offset_info.buffer = batch_renderer_buffers.instanceOffsets.buffer;
     instance_offset_info.offset = 0;
     instance_offset_info.range = VK_WHOLE_SIZE;
 
-    DescHelper::storage(desc_updates[23], cull_set, &instance_offset_info, 5);
+    DescHelper::storage(desc_updates[desc_counter++], cull_set, &instance_offset_info, 5);
 
     VkDescriptorBufferInfo drawcount_info;
     drawcount_info.buffer = render_input.buffer;
     drawcount_info.offset = buffer_offsets[0];
     drawcount_info.range = buffer_sizes[1];
 
-    DescHelper::storage(desc_updates[3], cull_set, &drawcount_info, 2);
+    DescHelper::storage(desc_updates[desc_counter++], cull_set, &drawcount_info, 2);
 
     VkDescriptorBufferInfo draw_info;
     draw_info.buffer = render_input.buffer;
     draw_info.offset = buffer_offsets[1];
     draw_info.range = buffer_sizes[2];
 
-    DescHelper::storage(desc_updates[4], cull_set, &draw_info, 3);
+    DescHelper::storage(desc_updates[desc_counter++], cull_set, &draw_info, 3);
 
     VkDescriptorBufferInfo draw_data_info;
     draw_data_info.buffer = render_input.buffer;
     draw_data_info.offset = buffer_offsets[2];
     draw_data_info.range = buffer_sizes[3];
 
-    DescHelper::storage(desc_updates[5], cull_set, &draw_data_info, 4);
-    DescHelper::storage(desc_updates[6], draw_set, &draw_data_info, 2);
+    DescHelper::storage(desc_updates[desc_counter++], cull_set, &draw_data_info, 4);
+    DescHelper::storage(desc_updates[desc_counter++], draw_set, &draw_data_info, 2);
 
     VkDescriptorImageInfo gbuffer_albedo_info;
     gbuffer_albedo_info.imageView = fb.colorView;
     gbuffer_albedo_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     gbuffer_albedo_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[7], lighting_set, &gbuffer_albedo_info, 0);
-    DescHelper::storageImage(desc_updates[30], grid_draw_set, &gbuffer_albedo_info, 0);
-    // DescHelper::storageImage(desc_updates[24], quad_draw_set, &gbuffer_albedo_info, 1);
-
-    VkDescriptorImageInfo br_display_info;
-    if (imgui_render_pass != VK_NULL_HANDLE) {
-        br_display_info.imageView = batch_display_texture.view;
-        printf("%p %p\n", (void *)batch_display_texture.tex.image, (void *)batch_display_texture.view);
-        br_display_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        br_display_info.sampler = VK_NULL_HANDLE;
-        DescHelper::textures(desc_updates[29], quad_draw_set, &br_display_info, 1, 0);
-    }
-
+    DescHelper::storageImage(desc_updates[desc_counter++], lighting_set, &gbuffer_albedo_info, 0);
+    DescHelper::storageImage(desc_updates[desc_counter++], grid_draw_set, &gbuffer_albedo_info, 0);
 
     VkDescriptorImageInfo gbuffer_normal_info;
     gbuffer_normal_info.imageView = fb.normalView;
     gbuffer_normal_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     gbuffer_normal_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[8], lighting_set, &gbuffer_normal_info, 1);
+    DescHelper::storageImage(desc_updates[desc_counter++], lighting_set, &gbuffer_normal_info, 1);
 
     VkDescriptorImageInfo gbuffer_position_info;
     gbuffer_position_info.imageView = fb.positionView;
     gbuffer_position_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     gbuffer_position_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[9], lighting_set, &gbuffer_position_info, 2);
+    DescHelper::storageImage(desc_updates[desc_counter++], lighting_set, &gbuffer_position_info, 2);
 
     VkDescriptorBufferInfo light_data_info;
     light_data_info.buffer = render_input.buffer;
     light_data_info.offset = buffer_offsets[3];
     light_data_info.range = buffer_sizes[4];
 
-    DescHelper::storage(desc_updates[10], lighting_set, &light_data_info, 3);
-    DescHelper::storage(desc_updates[20], shadow_gen_set, &light_data_info, 2);
-    DescHelper::storage(desc_updates[25], br_pbr_set, &light_data_info, 0);
+    DescHelper::storage(desc_updates[desc_counter++], lighting_set, &light_data_info, 3);
+    DescHelper::storage(desc_updates[desc_counter++], shadow_gen_set, &light_data_info, 2);
+
+    if (br_pbr_set != VK_NULL_HANDLE) {
+        DescHelper::storage(desc_updates[desc_counter++], br_pbr_set, &light_data_info, 0);
+    }
 
     VkDescriptorImageInfo transmittance_info;
     transmittance_info.imageView = sky.transmittanceView;
     transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     transmittance_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::textures(desc_updates[11], lighting_set, &transmittance_info, 1, 4, 0);
-    DescHelper::textures(desc_updates[26], br_pbr_set, &transmittance_info, 1, 1);
+    DescHelper::textures(desc_updates[desc_counter++], lighting_set, &transmittance_info, 1, 4, 0);
+
+    if (br_pbr_set != VK_NULL_HANDLE) {
+        DescHelper::textures(desc_updates[desc_counter++], br_pbr_set, &transmittance_info, 1, 1);
+    }
 
     VkDescriptorImageInfo irradiance_info;
     irradiance_info.imageView = sky.irradianceView;
     irradiance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     irradiance_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::textures(desc_updates[12], lighting_set, &irradiance_info, 1, 5, 0);
-    DescHelper::textures(desc_updates[27], br_pbr_set, &irradiance_info, 1, 2);
+    DescHelper::textures(desc_updates[desc_counter++], lighting_set, &irradiance_info, 1, 5, 0);
+
+    if (br_pbr_set != VK_NULL_HANDLE) {
+        DescHelper::textures(desc_updates[desc_counter++], br_pbr_set, &irradiance_info, 1, 2);
+    }
 
     VkDescriptorImageInfo scattering_info;
     scattering_info.imageView = sky.scatteringView;
     scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::textures(desc_updates[13], lighting_set, &scattering_info, 1, 6, 0);
-    DescHelper::textures(desc_updates[28], br_pbr_set, &scattering_info, 1, 3);
+    DescHelper::textures(desc_updates[desc_counter++], lighting_set, &scattering_info, 1, 6, 0);
+
+    if (br_pbr_set != VK_NULL_HANDLE) {
+        DescHelper::textures(desc_updates[desc_counter++], br_pbr_set, &scattering_info, 1, 3);
+    }
 
     VkDescriptorBufferInfo shadow_view_info;
     shadow_view_info.buffer = render_input.buffer;
     shadow_view_info.offset = buffer_offsets[4];
     shadow_view_info.range = buffer_sizes[5];
 
-    DescHelper::storage(desc_updates[14], draw_set, &shadow_view_info, 3);
-    DescHelper::storage(desc_updates[15], lighting_set, &shadow_view_info, 8);
-    DescHelper::storage(desc_updates[18], shadow_gen_set, &shadow_view_info, 0);
+    DescHelper::storage(desc_updates[desc_counter++], draw_set, &shadow_view_info, 3);
+    DescHelper::storage(desc_updates[desc_counter++], lighting_set, &shadow_view_info, 8);
+    DescHelper::storage(desc_updates[desc_counter++], shadow_gen_set, &shadow_view_info, 0);
 
     VkDescriptorImageInfo shadow_map_info;
     shadow_map_info.imageView = shadow_fb.varianceView;
@@ -2455,29 +2456,32 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     shadow_map_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     shadow_map_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::textures(desc_updates[16], lighting_set, &shadow_map_info, 1, 7, 0);
+    DescHelper::textures(desc_updates[desc_counter++], lighting_set, &shadow_map_info, 1, 7, 0);
 
     VkDescriptorBufferInfo sky_info;
     sky_info.buffer = render_input.buffer;
     sky_info.offset = buffer_offsets[5];
     sky_info.range = buffer_sizes[6];
 
-    DescHelper::storage(desc_updates[17], lighting_set, &sky_info, 10);
-    DescHelper::storage(desc_updates[24], br_pbr_set, &sky_info, 4);
+    DescHelper::storage(desc_updates[desc_counter++], lighting_set, &sky_info, 10);
+
+    if (br_pbr_set != VK_NULL_HANDLE) {
+        DescHelper::storage(desc_updates[desc_counter++], br_pbr_set, &sky_info, 4);
+    }
 
     VkDescriptorImageInfo blur_input_info;
     blur_input_info.imageView = shadow_fb.varianceView;
     blur_input_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     blur_input_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[21], shadow_blur_set, &blur_input_info, 0);
+    DescHelper::storageImage(desc_updates[desc_counter++], shadow_blur_set, &blur_input_info, 0);
 
     VkDescriptorImageInfo blur_intermediate_info;
     blur_intermediate_info.imageView = shadow_fb.intermediateView;
     blur_intermediate_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     blur_intermediate_info.sampler = VK_NULL_HANDLE;
 
-    DescHelper::storageImage(desc_updates[22], shadow_blur_set, &blur_intermediate_info, 1);
+    DescHelper::storageImage(desc_updates[desc_counter++], shadow_blur_set, &blur_intermediate_info, 1);
 
 
     //Voxelizer Changes
@@ -2523,11 +2527,10 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     DescHelper::update(dev, voxel_updates.data(), voxel_updates.size());
     //End Voxelizer Changes
 
-    DescHelper::update(dev, desc_updates.data(), desc_updates.size() - 
-            (int)(imgui_render_pass == VK_NULL_HANDLE));
+    DescHelper::update(dev, desc_updates.data(), desc_counter);
 
 
-    { // Create the descriptor sets with the outputs
+    if (batch_targets.size()) { // Create the descriptor sets with the outputs
         VkWriteDescriptorSet *lighting_desc_updates = (VkWriteDescriptorSet *)
             alloca(sizeof(VkWriteDescriptorSet) * batch_targets.size());
 
@@ -2837,214 +2840,6 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
         imgui_renderpass,
     };
 }
-
-#if 0
-static EngineInterop setupEngineInterop(Device &dev,
-                                        MemoryAllocator &alloc,
-                                        bool gpu_input,
-                                        uint32_t gpu_id,
-                                        uint32_t num_worlds,
-                                        uint32_t max_views_per_world,
-                                        uint32_t max_instances_per_world,
-                                        uint32_t render_width,
-                                        uint32_t render_height,
-                                        VoxelConfig voxel_config)
-{
-    int64_t render_input_buffer_offsets[1];
-    int64_t render_input_buffer_sizes[2] = {
-        (int64_t)sizeof(render::shader::PackedInstanceData) *
-            num_worlds * max_instances_per_world,
-        (int64_t)sizeof(render::shader::PackedViewData) *
-            num_worlds * max_views_per_world,
-    };
-
-    int64_t num_render_input_bytes = utils::computeBufferOffsets(
-        render_input_buffer_sizes, render_input_buffer_offsets, 256);
-
-    auto render_input_cpu = Optional<render::vk::HostBuffer>::none();
-#ifdef MADRONA_CUDA_SUPPORT
-    auto render_input_gpu = Optional<render::vk::DedicatedBuffer>::none();
-    auto render_input_cuda = Optional<render::vk::CudaImportedBuffer>::none();
-#endif
-
-    VkBuffer render_input_hdl;
-    char *render_input_base;
-    if (!gpu_input) {
-        render_input_cpu = alloc.makeStagingBuffer(num_render_input_bytes);
-        render_input_hdl = render_input_cpu->buffer;
-        render_input_base = (char *)render_input_cpu->ptr;
-    } else {
-#ifdef MADRONA_CUDA_SUPPORT
-        render_input_gpu = alloc.makeDedicatedBuffer(
-            num_render_input_bytes, false, true);
-
-        render_input_cuda.emplace(dev, gpu_id, render_input_gpu->mem,
-                                  num_render_input_bytes);
-
-        render_input_hdl = render_input_gpu->buf.buffer;
-        render_input_base = (char *)render_input_cuda->getDevicePointer();
-#else
-        (void)dev;
-        (void)gpu_id;
-        render_input_hdl = VK_NULL_HANDLE;
-        render_input_base = nullptr;
-#endif
-    }
-
-    InstanceData *instance_base =
-        (InstanceData *)render_input_base;
-
-    PerspectiveCameraData *view_base = 
-        (PerspectiveCameraData *)(render_input_base + render_input_buffer_offsets[0]);
-
-    InstanceData **world_instances_setup;
-    PerspectiveCameraData **world_views_setup;
-
-#ifdef MADRONA_CUDA_SUPPORT
-    auto setup_alloc = gpu_input ? cu::allocStaging : malloc;
-#else
-    auto setup_alloc = malloc;
-#endif
-
-    uint64_t num_world_inst_setup_bytes =
-        sizeof(InstanceData *) * num_worlds;
-    uint64_t num_world_view_setup_bytes =
-        sizeof(PerspectiveCameraData *) * num_worlds;
-   
-    world_instances_setup = (InstanceData **)setup_alloc(
-        num_world_inst_setup_bytes);
-    
-    world_views_setup = (PerspectiveCameraData **)setup_alloc(
-        num_world_view_setup_bytes);
-
-    for (CountT i = 0; i < (CountT)num_worlds; i++) {
-        world_instances_setup[i] = instance_base + i * max_instances_per_world;
-        world_views_setup[i] = view_base + i * max_views_per_world;
-    }
-
-    InstanceData **world_instances;
-    PerspectiveCameraData **world_views;
-
-    if (!gpu_input) {
-        world_instances = world_instances_setup;
-        world_views = world_views_setup;
-    } else {
-#ifdef MADRONA_CUDA_SUPPORT
-        world_instances = (InstanceData **)cu::allocGPU(
-            num_world_inst_setup_bytes);
-        world_views = (PerspectiveCameraData **)cu::allocGPU(
-            num_world_view_setup_bytes);
-
-        cudaMemcpy(world_instances, world_instances_setup,
-            num_world_inst_setup_bytes, cudaMemcpyHostToDevice);
-        cudaMemcpy(world_views, world_views_setup,
-            num_world_view_setup_bytes, cudaMemcpyHostToDevice);
-#else
-        world_instances = nullptr;
-        world_views = nullptr;
-#endif
-    }
-
-    uint32_t *num_views, *num_instances;
-
-    if (!gpu_input) {
-        uint32_t *counts = (uint32_t *)malloc(
-            sizeof(uint32_t) * 2 * num_worlds);
-
-        num_views = counts;
-        num_instances = counts + num_worlds;
-    } else {
-#ifdef MADRONA_CUDA_SUPPORT
-        uint32_t *counts = (uint32_t *)cu::allocReadback(
-            sizeof(uint32_t) * 2 * num_worlds);
-
-        num_views = counts;
-        num_instances = counts + num_worlds;
-#else
-        num_views = nullptr;
-        num_instances = nullptr;
-#endif
-    }
-
-    const uint32_t num_voxels = voxel_config.xLength
-        * voxel_config.yLength * voxel_config.zLength;
-    const uint32_t staging_size = num_voxels > 0 ? num_voxels * sizeof(int32_t) : 4;
-
-    auto voxel_cpu = Optional<HostBuffer>::none();
-    VkBuffer voxel_buffer_hdl;
-    uint32_t *voxel_buffer_ptr;
-
-#ifdef MADRONA_CUDA_SUPPORT
-    auto voxel_gpu = Optional<render::vk::DedicatedBuffer>::none();
-    auto voxel_cuda = Optional<render::vk::CudaImportedBuffer>::none();
-#endif
-
-    if (!gpu_input) {
-        voxel_cpu = alloc.makeStagingBuffer(staging_size);
-        voxel_buffer_ptr = num_voxels ? (uint32_t *)voxel_cpu->ptr : nullptr;
-        voxel_buffer_hdl = voxel_cpu->buffer;
-    } else {
-#ifdef MADRONA_CUDA_SUPPORT
-        voxel_gpu = alloc.makeDedicatedBuffer(
-            staging_size, false, true);
-
-        voxel_cuda.emplace(dev, gpu_id, voxel_gpu->mem,
-            staging_size);
-
-        voxel_buffer_hdl = voxel_gpu->buf.buffer;
-        voxel_buffer_ptr = num_voxels ?
-                (uint32_t *)voxel_cuda->getDevicePointer() : nullptr;
-#else
-        voxel_buffer_ptr = nullptr;
-#endif
-    }
-
-    VizECSBridge bridge {
-        .views = world_views,
-        .numViews = num_views,
-        .instances = world_instances,
-        .numInstances = num_instances,
-        .renderWidth = (int32_t)render_width,
-        .renderHeight = (int32_t)render_height,
-        .episodeDone = nullptr,
-        .voxels = voxel_buffer_ptr,
-        .isGPUBackend = gpu_input
-    };
-
-    const VizECSBridge *gpu_bridge;
-    if (!gpu_input) {
-        gpu_bridge = nullptr;
-    } else {
-#ifdef MADRONA_CUDA_SUPPORT
-        gpu_bridge = (const VizECSBridge *)cu::allocGPU(sizeof(VizECSBridge));
-        cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(VizECSBridge),
-                   cudaMemcpyHostToDevice);
-#else
-        gpu_bridge = nullptr;
-#endif
-    }
-
-    return EngineInterop {
-        std::move(render_input_cpu),
-#ifdef MADRONA_CUDA_SUPPORT
-        std::move(render_input_gpu),
-        std::move(render_input_cuda),
-#endif
-        render_input_hdl,
-        bridge,
-        gpu_bridge,
-        uint32_t(render_input_buffer_offsets[0]),
-        max_views_per_world,
-        max_instances_per_world,
-        std::move(voxel_cpu),
-#ifdef MADRONA_CUDA_SUPPORT
-        std::move(voxel_gpu),
-        std::move(voxel_cuda),
-#endif
-        voxel_buffer_hdl,
-    };
-}
-#endif
 
 static EngineInterop setupEngineInterop(Device &dev,
                                         MemoryAllocator &alloc,
@@ -3847,7 +3642,6 @@ RenderContext::Impl::Impl(const RenderContext::Config &cfg)
                   sky_,
                   br_proto_->getImportedBuffers(0),
                   br_proto_->getLayeredTargets(0),
-                  br_proto_->getDisplayTexture(0),
                   br_proto_->getPBRSet(0),
                   &frames_[i],
                   cfg.enableViewer);

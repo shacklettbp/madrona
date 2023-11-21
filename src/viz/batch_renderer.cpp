@@ -555,7 +555,7 @@ struct BatchFrame {
     VkDescriptorSet targetsSetLighting;
     VkDescriptorSet pbrSet;
 
-    DisplayTexture displayTexture;
+    Optional<DisplayTexture> displayTexture;
 
     VkCommandPool prepareCmdPool;
     VkCommandBuffer prepareCmdbuf;
@@ -652,9 +652,10 @@ static void makeBatchFrame(vk::Device& dev,
                            render::vk::MemoryAllocator &alloc,
                            const BatchRenderer::Config &cfg,
                            PipelineMP<1> &prepare_views,
-                           PipelineMP<1> &draw,
+                           Optional<PipelineMP<1>> &draw,
                            VkDescriptorSet lighting_set,
-                           VkDescriptorSet pbr_set)
+                           VkDescriptorSet pbr_set,
+                           bool enable_batch_renderer)
 {
     VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(viz::PerspectiveCameraData);
     vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
@@ -665,9 +666,44 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
-    VkDescriptorSet prepare_views_set = prepare_views.descPools[0].makeSet();
-    VkDescriptorSet draw_views_set = draw.descPools[0].makeSet();
+    VkCommandPool prepare_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
+    VkCommandPool render_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
+    VkCommandBuffer prepare_cmdbuf = vk::makeCmdBuffer(dev, prepare_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
+    VkCommandBuffer render_cmdbuf = vk::makeCmdBuffer(dev, render_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 
+    VkSemaphore prepare_finished = vk::makeBinarySemaphore(dev);
+    VkSemaphore render_finished = vk::makeBinarySemaphore(dev);
+    VkSemaphore transition_finished = vk::makeBinarySemaphore(dev);
+
+    VkFence prepare_fence = vk::makeFence(dev, true);
+    VkFence render_fence = vk::makeFence(dev, true);
+
+    if (!enable_batch_renderer) {
+        new (frame) BatchFrame{
+            { std::move(views), std::move(instances), std::move(instance_offsets) },
+            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+            HeapArray<LayeredTarget>(0),
+            HeapArray<DrawCommandPackage>(0),
+            VK_NULL_HANDLE, VK_NULL_HANDLE,
+            Optional<DisplayTexture>::none(),
+            prepare_cmdpool,
+            prepare_cmdbuf,
+            render_cmdpool,
+            render_cmdbuf,
+            prepare_finished,
+            render_finished,
+            transition_finished,
+            prepare_fence,
+            render_fence,
+            LatestOperation::None
+        };
+
+        return;
+    }
+
+    VkDescriptorSet prepare_views_set = prepare_views.descPools[0].makeSet();
+    VkDescriptorSet draw_views_set = draw->descPools[0].makeSet();
+ 
     //Descriptor sets
     std::array<VkWriteDescriptorSet, 6> desc_updates;
 
@@ -696,23 +732,11 @@ static void makeBatchFrame(vk::Device& dev,
 
     HeapArray<DrawCommandPackage> draw_packages(consts::numDrawCmdBuffers);
     for (int i = 0; i < (int)consts::numDrawCmdBuffers; ++i) {
-        draw_packages.emplace(i, makeDrawCommandPackage(dev, alloc, prepare_views, draw));
+        draw_packages.emplace(i, makeDrawCommandPackage(dev, alloc, prepare_views, *draw));
     }
 
-    VkCommandPool prepare_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
-    VkCommandPool render_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
-    VkCommandBuffer prepare_cmdbuf = vk::makeCmdBuffer(dev, prepare_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-    VkCommandBuffer render_cmdbuf = vk::makeCmdBuffer(dev, render_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
-
-    VkSemaphore prepare_finished = vk::makeBinarySemaphore(dev);
-    VkSemaphore render_finished = vk::makeBinarySemaphore(dev);
-    VkSemaphore transition_finished = vk::makeBinarySemaphore(dev);
-
-    VkFence prepare_fence = vk::makeFence(dev, true);
-    VkFence render_fence = vk::makeFence(dev, true);
-
     new (frame) BatchFrame{
-        {std::move(views),std::move(instances),std::move(instance_offsets)},
+        { std::move(views), std::move(instances), std::move(instance_offsets) },
         prepare_views_set,
         draw_views_set,
         prepare_views_set,
@@ -1052,10 +1076,12 @@ struct BatchRenderer::Impl {
     // We use anything from double, triple, or whatever we can buffering to save
     // on memory usage
 
+    // Required whether we do batch rendering or not
     PipelineMP<1> prepareViews;
-    PipelineMP<1> batchDraw;
-    PipelineMP<1> createVisualization;
-    PipelineMP<1> lighting;
+
+    Optional<PipelineMP<1>> batchDraw;
+    Optional<PipelineMP<1>> createVisualization;
+    Optional<PipelineMP<1>> lighting;
 
     //One frame is on simulation frame
     HeapArray<BatchFrame> batchFrames;
@@ -1096,18 +1122,23 @@ BatchRenderer::Impl::Impl(const Config &cfg,
                                VkQueue render_queue)
     : dev(dev), mem(mem), pipelineCache(pipeline_cache),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
+      // This is required whether we want the batch renderer or not
       prepareViews(makeComputePipeline(dev, pipelineCache, 2,
                                        sizeof(shader::PrepareViewPushConstant),
                                        4+consts::numDrawCmdBuffers, repeat_sampler,
                                        "prepare_views.hlsl", "main", makeShaders)),
-      batchDraw(makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, consts::numDrawCmdBuffers*cfg.numFrames, 2)),
-      createVisualization(makeComputePipeline(dev, pipelineCache, 1,
-                                              sizeof(uint32_t) * 2,
-                                              cfg.numFrames*consts::numDrawCmdBuffers, repeat_sampler,
-                                              "visualize_tris.hlsl", "visualize", makeShaders)),
-      lighting(makeComputePipeline(dev, pipeline_cache, 6, sizeof(shader::DeferredLightingPushConstBR),
-                                   consts::numDrawCmdBuffers * cfg.numFrames, repeat_sampler, 
-                                   "draw_deferred.hlsl","lighting", makeShadersLighting)),
+      batchDraw(cfg.enableBatchRenderer ? 
+              makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, 
+                                 consts::numDrawCmdBuffers*cfg.numFrames, 2) :
+              Optional<PipelineMP<1>>::none()),
+      createVisualization(cfg.enableBatchRenderer ? makeComputePipeline(dev, pipelineCache, 1,
+              sizeof(uint32_t) * 2,
+              cfg.numFrames*consts::numDrawCmdBuffers, repeat_sampler,
+              "visualize_tris.hlsl", "visualize", makeShaders) : Optional<PipelineMP<1>>::none()),
+      lighting(cfg.enableBatchRenderer ? makeComputePipeline(dev, pipeline_cache, 6, 
+              sizeof(shader::DeferredLightingPushConstBR),
+              consts::numDrawCmdBuffers * cfg.numFrames, repeat_sampler, 
+              "draw_deferred.hlsl","lighting", makeShadersLighting) : Optional<PipelineMP<1>>::none()),
       batchFrames(cfg.numFrames),
       assetSetPrepare(asset_set_compute),
       assetSetDraw(asset_set_draw),
@@ -1122,8 +1153,9 @@ BatchRenderer::Impl::Impl(const Config &cfg,
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
                        prepareViews,
                        batchDraw,
-                       lighting.descPools[0].makeSet(),
-                       lighting.descPools[5].makeSet());
+                       cfg.enableBatchRenderer ? lighting->descPools[0].makeSet() : VK_NULL_HANDLE,
+                       cfg.enableBatchRenderer ? lighting->descPools[5].makeSet() : VK_NULL_HANDLE,
+                       cfg.enableBatchRenderer);
     }
 }
 
@@ -1143,7 +1175,10 @@ BatchRenderer::BatchRenderer(const Config &cfg,
                                   render_queue)),
       didRender(false)
 {
-    transitionOutputLayout();
+    if (cfg.enableBatchRenderer) {
+        transitionOutputLayout();
+    }
+
     dev.dt.deviceWaitIdle(dev.hdl);
 }
 
@@ -1151,33 +1186,47 @@ BatchRenderer::~BatchRenderer()
 {
     impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->prepareViews.hdls[0], nullptr);
     impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->prepareViews.layout, nullptr);
-    impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->batchDraw.hdls[0], nullptr);
-    impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->batchDraw.layout, nullptr);
 
-    impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->createVisualization.hdls[0], nullptr);
-    impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->createVisualization.layout, nullptr);
+    // If the batch renderer was enabled
+    if (impl->batchDraw.has_value()) {
+        impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->batchDraw->hdls[0], nullptr);
+        impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->batchDraw->layout, nullptr);
 
-    impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->lighting.hdls[0], nullptr);
-    impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->lighting.layout, nullptr);
+        impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->createVisualization->hdls[0], nullptr);
+        impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->createVisualization->layout, nullptr);
 
+        impl->dev.dt.destroyPipeline(impl->dev.hdl, impl->lighting->hdls[0], nullptr);
+        impl->dev.dt.destroyPipelineLayout(impl->dev.hdl, impl->lighting->layout, nullptr);
 
-    for(int i=0;i<impl->batchFrames.size();i++){
-        impl->dev.dt.destroyImage(impl->dev.hdl, impl->batchFrames[i].displayTexture.tex.image, nullptr);
-        impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].displayTexture.view, nullptr);
-        impl->dev.dt.freeMemory(impl->dev.hdl, impl->batchFrames[i].displayTexture.mem, nullptr);
+        for(int i=0;i<impl->batchFrames.size();i++){
+            impl->dev.dt.destroyImage(impl->dev.hdl, impl->batchFrames[i].displayTexture->tex.image, nullptr);
+            impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].displayTexture->view, nullptr);
+            impl->dev.dt.freeMemory(impl->dev.hdl, impl->batchFrames[i].displayTexture->mem, nullptr);
 
-        impl->dev.dt.destroyCommandPool(impl->dev.hdl, impl->batchFrames[i].prepareCmdPool, nullptr);
-        impl->dev.dt.destroyCommandPool(impl->dev.hdl, impl->batchFrames[i].renderCmdPool, nullptr);
-        impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].prepareFinished, nullptr);
-        impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].renderFinished, nullptr);
-        impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].layoutTransitionFinished, nullptr);
-        impl->dev.dt.destroyFence(impl->dev.hdl, impl->batchFrames[i].prepareFence, nullptr);
-        impl->dev.dt.destroyFence(impl->dev.hdl, impl->batchFrames[i].renderFence, nullptr);
+            impl->dev.dt.destroyCommandPool(impl->dev.hdl, impl->batchFrames[i].prepareCmdPool, nullptr);
+            impl->dev.dt.destroyCommandPool(impl->dev.hdl, impl->batchFrames[i].renderCmdPool, nullptr);
+            impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].prepareFinished, nullptr);
+            impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].renderFinished, nullptr);
+            impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].layoutTransitionFinished, nullptr);
+            impl->dev.dt.destroyFence(impl->dev.hdl, impl->batchFrames[i].prepareFence, nullptr);
+            impl->dev.dt.destroyFence(impl->dev.hdl, impl->batchFrames[i].renderFence, nullptr);
 
-        for(int i2=0;i2<impl->batchFrames[i].targets.size();i2++){
-            impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].vizBufferView, nullptr);
-            impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].depthView, nullptr);
-            impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].outputView, nullptr);
+            for(int i2=0;i2<impl->batchFrames[i].targets.size();i2++){
+                impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].vizBufferView, nullptr);
+                impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].depthView, nullptr);
+                impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].outputView, nullptr);
+            }
+        }
+    }
+    else {
+        for(int i=0;i<impl->batchFrames.size();i++){
+            impl->dev.dt.destroyCommandPool(impl->dev.hdl, impl->batchFrames[i].prepareCmdPool, nullptr);
+            impl->dev.dt.destroyCommandPool(impl->dev.hdl, impl->batchFrames[i].renderCmdPool, nullptr);
+            impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].prepareFinished, nullptr);
+            impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].renderFinished, nullptr);
+            impl->dev.dt.destroySemaphore(impl->dev.hdl, impl->batchFrames[i].layoutTransitionFinished, nullptr);
+            impl->dev.dt.destroyFence(impl->dev.hdl, impl->batchFrames[i].prepareFence, nullptr);
+            impl->dev.dt.destroyFence(impl->dev.hdl, impl->batchFrames[i].renderFence, nullptr);
         }
     }
 }
@@ -1625,7 +1674,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 
             //Finish rest of draws for the frame
             issueRasterization(impl->dev,
-                               impl->batchDraw,
+                               *(impl->batchDraw),
                                frame_data.targets[batch_no],
                                draw_cmd,
                                frame_data.drawPackageSwapchain[batch],
@@ -1646,7 +1695,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             int batch_no = batch + iter * consts::numDrawCmdBuffers;
 
-            issueDeferred(impl->dev, impl->lighting, 
+            issueDeferred(impl->dev, *(impl->lighting), 
                           frame_data.targets[batch_no],
                           draw_cmd,
                           frame_data,
@@ -1705,9 +1754,11 @@ void BatchRenderer::transitionOutputLayout()
     impl->selectedView = 0;
     BatchFrame &frame_data = impl->batchFrames[frame_index];
 
+#if 0
     { // Wait for the frame to be ready
         impl->dev.dt.waitForFences(impl->dev.hdl, 1, &frame_data.renderFence, VK_TRUE, UINT64_MAX);
     }
+#endif
 
     // Start the command buffer and stuff
     VkCommandBuffer draw_cmd = frame_data.renderCmdbuf;
@@ -1720,7 +1771,7 @@ void BatchRenderer::transitionOutputLayout()
 
     { // Prepare the viz texture for shader sampling
         vk::LocalTexture &target_dst =
-            impl->batchFrames[frame_index].displayTexture.tex;
+            impl->batchFrames[frame_index].displayTexture->tex;
 
         VkImageMemoryBarrier barrier = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1769,7 +1820,7 @@ BatchImportedBuffers &BatchRenderer::getImportedBuffers(uint32_t frame_id)
 
 DisplayTexture &BatchRenderer::getDisplayTexture(uint32_t frame_id)
 {
-    return impl->batchFrames[frame_id].displayTexture;
+    return *(impl->batchFrames[frame_id].displayTexture);
 }
 
 VkDescriptorSet BatchRenderer::getPBRSet(uint32_t frame_id)
@@ -1832,7 +1883,7 @@ void BatchRenderer::submitViewerCopy(VkCommandBuffer draw_cmd)
         vk::LocalImage &selected_img = 
             impl->batchFrames[frame_index].targets[selected_img_index].output;
         vk::LocalTexture &target_dst =
-            impl->batchFrames[frame_index].displayTexture.tex;
+            impl->batchFrames[frame_index].displayTexture->tex;
 
         prepareVizBlit(impl->dev,
                        draw_cmd,
