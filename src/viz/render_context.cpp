@@ -2242,32 +2242,6 @@ static ShadowFramebuffer makeShadowFramebuffer(const Device &dev,
     };
 }
 
-static VkDescriptorSet makeTexturedQuadSet(const Device &dev, VkImageView image_view,
-                                           VkImageView output_view,
-                                           VkDescriptorSet set)
-{
-    VkDescriptorImageInfo to_display_info = {
-        .sampler = VK_NULL_HANDLE,
-        .imageView = image_view,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    };
-
-    VkDescriptorImageInfo output_info = {
-        .sampler = VK_NULL_HANDLE,
-        .imageView = output_view,
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL
-    };
-
-    VkWriteDescriptorSet writes[2];
-
-    DescHelper::textures(writes[0], set, &to_display_info, 1, 0);
-    DescHelper::storageImage(writes[1], set, &output_info,    1);
-
-    DescHelper::update(dev, writes, 2);
-
-    return set;
-}
-
 static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                       uint32_t fb_width, uint32_t fb_height,
                       uint32_t max_views, uint32_t max_instances,
@@ -4590,6 +4564,8 @@ static void issueGridDrawPass(vk::Device &dev,
                               uint32_t view_idx,
                               uint32_t num_views)
 {
+    (void)view_idx;
+
     {
         array<VkImageMemoryBarrier, 1> compute_prepare {{
             {
@@ -4804,46 +4780,6 @@ static void issueLightingPass(vk::Device &dev,
                 0, nullptr, 0, nullptr,
                 compute_prepare.size(), compute_prepare.data());
     }
-}
-
-static void issueQuadDraw(Device &dev,
-                          VkCommandBuffer draw_cmd,
-                          const Frame &frame,
-                          const Pipeline<1> &quad_draw)
-{
-    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, quad_draw.hdls[0]);
-
-    render::shader::TexturedQuadPushConst push_const {
-        .startPixels = { 1000, 100 },
-        .extentPixels = { 200, 200 },
-        .targetExtent = { frame.fb.colorAttachment.width, frame.fb.colorAttachment.height }
-    };
-
-    dev.dt.cmdPushConstants(draw_cmd, quad_draw.layout,
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_const), &push_const);
-
-    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        quad_draw.layout, 0, 1, &frame.batchOutputQuadSet, 0, nullptr);
-
-    VkViewport viewport {
-        0,
-        0,
-        (float)frame.fb.colorAttachment.width,
-        (float)frame.fb.colorAttachment.height,
-        0.f,
-        1.f,
-    };
-
-    dev.dt.cmdSetViewport(draw_cmd, 0, 1, &viewport);
-
-    VkRect2D scissor {
-        { 0, 0 },
-        { frame.fb.colorAttachment.width, frame.fb.colorAttachment.height },
-    };
-
-    dev.dt.cmdSetScissor(draw_cmd, 0, 1, &scissor);
-
-    dev.dt.cmdDraw(draw_cmd, 4, 1, 0, 0);
 }
 
 static void issueCulling(Device &dev,
