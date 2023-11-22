@@ -156,6 +156,9 @@ vector<const char *> PresentationState::getInstanceExtensions(bool make_window)
 
         return exts;
     } else {
+        return {};
+
+#if 0
         std::vector<const char *> extensions = 
         {
 #ifndef NDEBUG
@@ -183,6 +186,7 @@ vector<const char *> PresentationState::getInstanceExtensions(bool make_window)
         extensions.push_back("VK_KHR_surface");
 
         return extensions;
+#endif
     }
 }
 
@@ -2046,7 +2050,7 @@ static Backend initializeBackend(const Backend::LoaderLib &loader_lib,
         enable_validation = true;
     }
 
-    return Backend((void (*)())get_inst_addr, enable_validation, false,
+    return Backend((void (*)())get_inst_addr, enable_validation, !make_window,
                    PresentationState::getInstanceExtensions(make_window));
 }
 
