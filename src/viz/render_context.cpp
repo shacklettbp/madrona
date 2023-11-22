@@ -2380,7 +2380,10 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     gbuffer_albedo_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::storageImage(desc_updates[desc_counter++], lighting_set, &gbuffer_albedo_info, 0);
-    DescHelper::storageImage(desc_updates[desc_counter++], grid_draw_set, &gbuffer_albedo_info, 0);
+    
+    if (grid_draw_set != VK_NULL_HANDLE) {
+        DescHelper::storageImage(desc_updates[desc_counter++], grid_draw_set, &gbuffer_albedo_info, 0);
+    }
 
     VkDescriptorImageInfo gbuffer_normal_info;
     gbuffer_normal_info.imageView = fb.normalView;
@@ -2530,7 +2533,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     DescHelper::update(dev, desc_updates.data(), desc_counter);
 
 
-    if (batch_targets.size()) { // Create the descriptor sets with the outputs
+    if (grid_draw_set != VK_NULL_HANDLE && batch_targets.size()) { // Create the descriptor sets with the outputs
         VkWriteDescriptorSet *lighting_desc_updates = (VkWriteDescriptorSet *)
             alloca(sizeof(VkWriteDescriptorSet) * batch_targets.size());
 
