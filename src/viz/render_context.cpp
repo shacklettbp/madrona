@@ -157,36 +157,6 @@ vector<const char *> PresentationState::getInstanceExtensions(bool make_window)
         return exts;
     } else {
         return {};
-
-#if 0
-        std::vector<const char *> extensions = 
-        {
-#ifndef NDEBUG
-            "VK_EXT_debug_utils",
-            "VK_EXT_debug_report",
-#endif
-
-#if __APPLE__
-            "VK_KHR_portability_enumeration"
-#endif
-        };
-
-        const char *ext =
-#if defined(_WIN32)
-            "VK_KHR_win32_surface";
-#elif defined(__ANDROID__)
-        "VK_KHR_android_surface";
-#elif defined(__APPLE__)
-        "VK_EXT_metal_surface";
-#else
-        "VK_KHR_xcb_surface";
-#endif
-
-        extensions.push_back(ext);
-        extensions.push_back("VK_KHR_surface");
-
-        return extensions;
-#endif
     }
 }
 
@@ -2512,11 +2482,9 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
 
     if (grid_draw_set != VK_NULL_HANDLE && batch_targets.size()) { // Create the descriptor sets with the outputs
-        VkWriteDescriptorSet *lighting_desc_updates = (VkWriteDescriptorSet *)
-            alloca(sizeof(VkWriteDescriptorSet) * batch_targets.size());
+        HeapArray<VkWriteDescriptorSet> lighting_desc_updates(batch_targets.size());
+        HeapArray<VkDescriptorImageInfo> infos(batch_targets.size());
 
-        VkDescriptorImageInfo *infos = (VkDescriptorImageInfo *)
-            alloca(sizeof(VkDescriptorImageInfo) * batch_targets.size());
         for (int i = 0; i < batch_targets.size(); ++i) {
             infos[i].imageView = batch_targets[i].outputView;
             infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -2528,7 +2496,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
                                          1, 1, i);
         }
 
-        vk::DescHelper::update(dev, lighting_desc_updates,
+        vk::DescHelper::update(dev, lighting_desc_updates.data(),
                                batch_targets.size());
     }
 

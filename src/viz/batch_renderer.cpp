@@ -762,11 +762,11 @@ static void makeBatchFrame(vk::Device& dev,
     };
 
     { // Create the descriptor sets with the outputs
-        VkWriteDescriptorSet *lighting_desc_updates = (VkWriteDescriptorSet *)
-            alloca(sizeof(VkWriteDescriptorSet) * frame->targets.size() * 2);
+        HeapArray<VkWriteDescriptorSet> lighting_desc_updates(
+            sizeof(VkWriteDescriptorSet) * frame->targets.size() * 2);
+        HeapArray<VkDescriptorImageInfo> infos(
+            sizeof(VkDescriptorImageInfo) * frame->targets.size() * 2);
 
-        VkDescriptorImageInfo *infos = (VkDescriptorImageInfo *)
-            alloca(sizeof(VkDescriptorImageInfo) * frame->targets.size() * 2);
         for (int i = 0; i < frame->targets.size(); ++i) {
             infos[i*2].imageView = frame->targets[i].vizBufferView;
             infos[i*2].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -787,7 +787,7 @@ static void makeBatchFrame(vk::Device& dev,
                                          1, i);
         }
 
-        vk::DescHelper::update(dev, lighting_desc_updates,
+        vk::DescHelper::update(dev, lighting_desc_updates.data(),
                                frame->targets.size() * 2);
     }
 }
@@ -1616,7 +1616,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     };
 
     uint32_t num_batches = utils::divideRoundUp(num_views, impl->dev.maxNumLayersPerImage);
-    BatchInfo *batch_infos = (BatchInfo *)alloca(sizeof(BatchInfo) * num_batches);
+    HeapArray<BatchInfo> batch_infos(num_batches);
 
     { // Populate batch infos
         uint32_t views_left = num_views;
