@@ -106,7 +106,6 @@ inline void viewTransformUpdate(Context &ctx,
     cam_data.position = camera_pos;
     cam_data.rotation = rot.inv();
     cam_data.worldIDX = ctx.worldID().idx;
-    *((float *)&cam_data.pad) = 42.0f;
 
 #if !defined(MADRONA_GPU_MODE)
     float x_scale = viz_cam.fovScale / system_state.aspectRatio;

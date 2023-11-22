@@ -6,8 +6,6 @@
 #include <madrona/mw_gpu/megakernel_consts.hpp>
 #include <madrona/mw_gpu/cu_utils.hpp>
 
-#include "../render/interop.hpp"
-
 namespace madrona::mwGPU {
 
 #ifdef MADRONA_CLANG
