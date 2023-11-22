@@ -47,8 +47,6 @@ add_library(madrona_viewer STATIC
     ${MADRONA_INC_DIR}/viz/viewer_controller.hpp
     ${MADRONA_INC_DIR}/viz/render_context.hpp
     ${MADRONA_INC_DIR}/viz/common.hpp
-    # ${MADRONA_INC_DIR}/viz/viewer.hpp viewer.cpp
-    # viewer_renderer.hpp viewer_renderer.cpp
     batch_renderer.hpp batch_renderer.cpp
     render_context.cpp
     render_common.hpp
@@ -86,5 +84,3 @@ target_compile_definitions(madrona_viewer PRIVATE
 target_include_directories(madrona_viewer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../render"
 )
-
-# target_compile_options(madrona_viewer PRIVATE "-mavx512vl" "-mavx512dq")
