@@ -414,6 +414,8 @@ static vk::PipelineShaders makeShaders(const vk::Device &dev,
                                        const char *func_name = "main",
                                        VkSampler sampler = VK_NULL_HANDLE)
 {
+    (void)sampler;
+
     std::filesystem::path shader_dir =
         std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
         "shaders";
@@ -1244,6 +1246,9 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
                                       uint32_t view_start,
                                       uint32_t num_processed_batches)
 {
+    (void)num_views;
+    (void)num_processed_batches;
+
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                            prepare_views.hdls[0]);
 
@@ -1338,7 +1343,7 @@ static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
 {
     uint32_t *instanceOffsets = (uint32_t *)interop->instanceOffsetsCPU->ptr;
 
-    for (int i = 0; i < num_worlds; ++i) {
+    for (int i = 0; i < (int)num_worlds; ++i) {
         instanceOffsets[i] = 0;
     }
 
@@ -1508,6 +1513,8 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                 const DynArray<AssetData> &loaded_assets,
                                 EngineInterop *interop) 
 { 
+    (void)interop;
+
     // prepareForRendering(info, interop);
 
     // Circles between 0 to number of frames (not anymore, there is only one frame now)
@@ -1515,7 +1522,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
 
     BatchFrame &frame_data = impl->batchFrames[frame_index];
 
-    BatchImportedBuffers &batch_buffers = getImportedBuffers(frame_index);
+    // BatchImportedBuffers &batch_buffers = getImportedBuffers(frame_index);
 
     // Start the command buffer and stuff
     VkCommandBuffer draw_cmd = frame_data.renderCmdbuf;

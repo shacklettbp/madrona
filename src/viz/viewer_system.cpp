@@ -121,6 +121,8 @@ inline void viewTransformUpdate(Context &ctx,
 inline void exportCounts(Context &ctx,
                          ViewerSystemState &viewer_state)
 {
+    (void)viewer_state;
+
     if (ctx.worldID().idx == 0) {
 #if defined(MADRONA_GPU_MODE)
         auto *state_mgr = mwGPU::getStateManager();

@@ -815,8 +815,6 @@ Device Backend::initDevice(
     VkPhysicalDeviceProperties physical_device_properties;
     dt.getPhysicalDeviceProperties(phy, &physical_device_properties);
 
-    physical_device_properties.limits.maxImageArrayLayers;
-
     return Device(qf_choices.gfxQF,
                   qf_choices.computeQF,
                   qf_choices.transferQF,
