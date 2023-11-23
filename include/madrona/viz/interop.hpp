@@ -26,6 +26,7 @@ struct VizECSBridge {
     InstanceData *instances;
 
     int32_t *instanceOffsets;
+    int32_t *viewOffsets;
 
     uint32_t *totalNumViews;
     uint32_t *totalNumInstances;

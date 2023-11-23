@@ -8,10 +8,16 @@ ShadowGenPushConst pushConst;
 RWStructuredBuffer<ShadowViewData> shadowViewDataBuffer;
 
 [[vk::binding(1, 0)]]
-StructuredBuffer<PackedViewData> viewDataBuffer;
+StructuredBuffer<PackedViewData> flycamBuffer;
 
 [[vk::binding(2, 0)]]
 StructuredBuffer<DirectionalLight> lights;
+
+[[vk::binding(3, 0)]]
+StructuredBuffer<PackedViewData> viewDataBuffer;
+
+[[vk::binding(4, 0)]]
+StructuredBuffer<int> viewOffsetsBuffer;
 
 float4 invQuat(float4 rot)
 {
@@ -45,6 +51,16 @@ PerspectiveCameraData unpackViewData(PackedViewData packed)
     return cam;
 }
 
+PerspectiveCameraData getCameraData()
+{
+    if (pushConst.viewIdx == 0) {
+        return unpackViewData(flycamBuffer[0]);
+    } else {
+        int view_idx = (pushConst.viewIdx - 1) + viewOffsetsBuffer[pushConst.worldIdx];
+        return unpackViewData(viewDataBuffer[view_idx]);
+    }
+}
+
 [numThreads(32, 1, 1)]
 [shader("compute")]
 void shadowGen(uint3 idx : SV_DispatchThreadID)
@@ -53,9 +69,7 @@ void shadowGen(uint3 idx : SV_DispatchThreadID)
     if (idx.x != 0)
         return;
 
-    PackedViewData viewData = viewDataBuffer[pushConst.viewIdx];
-
-    PerspectiveCameraData unpackedView = unpackViewData(viewData);
+    PerspectiveCameraData unpackedView = getCameraData();
 
     float3 cam_pos = unpackedView.pos;
     float4 cam_rot = invQuat(unpackedView.rot);

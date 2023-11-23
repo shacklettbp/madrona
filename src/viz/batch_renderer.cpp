@@ -668,6 +668,9 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
+    VkDeviceSize view_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
+    vk::LocalBuffer view_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
+
     VkCommandPool prepare_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
     VkCommandPool render_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
     VkCommandBuffer prepare_cmdbuf = vk::makeCmdBuffer(dev, prepare_cmdpool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
@@ -682,7 +685,7 @@ static void makeBatchFrame(vk::Device& dev,
 
     if (!enable_batch_renderer) {
         new (frame) BatchFrame{
-            { std::move(views), std::move(instances), std::move(instance_offsets) },
+            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, 
             HeapArray<LayeredTarget>(0),
             HeapArray<DrawCommandPackage>(0),
@@ -738,7 +741,7 @@ static void makeBatchFrame(vk::Device& dev,
     }
 
     new (frame) BatchFrame{
-        { std::move(views), std::move(instances), std::move(instance_offsets) },
+        { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
         prepare_views_set,
         draw_views_set,
         prepare_views_set,
@@ -1335,6 +1338,9 @@ static void sortInstancesAndViewsCPU(EngineInterop *interop)
 
         for (uint32_t i = 0; i < *interop->bridge.totalNumViews; ++i) {
             views[i] = interop->bridge.views[interop->iotaArrayViewsCPU[i]];
+
+            interop->sortedViewWorldIDs[i] = 
+                interop->bridge.viewsWorldIDs[interop->iotaArrayViewsCPU[i]];
         }
     }
 }
@@ -1355,32 +1361,24 @@ static void computeInstanceOffsets(EngineInterop *interop, uint32_t num_worlds)
             instanceOffsets[current_world_id] = i;
         }
     }
+}
 
-#if 0
-    for (uint32_t i = 0; i < num_worlds; ++i) {
-        instanceOffsets[i] = 0;
+static void computeViewOffsets(EngineInterop *interop, uint32_t num_worlds)
+{
+    uint32_t *viewOffsets = (uint32_t *)interop->viewOffsetsCPU->ptr;
+
+    for (int i = 0; i < (int)num_worlds; ++i) {
+        viewOffsets[i] = 0;
     }
 
-    for (uint32_t i = 1; i < *interop->bridge.totalNumInstances+1; ++i) {
-        uint32_t current_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i] >> 32);
-        uint32_t prev_world_id = (uint32_t)(interop->sortedInstanceWorldIDs[i-1] >> 32);
+    for (uint32_t i = 1; i < *interop->bridge.totalNumViews; ++i) {
+        uint32_t current_world_id = (uint32_t)(interop->sortedViewWorldIDs[i] >> 32);
+        uint32_t prev_world_id = (uint32_t)(interop->sortedViewWorldIDs[i-1] >> 32);
 
         if (current_world_id != prev_world_id) {
-            instanceOffsets[current_world_id] = i;
+            viewOffsets[current_world_id] = i;
         }
     }
-
-    // Take care of edge care where there are no agents in some worlds
-    for (int32_t i = num_worlds-2; i >= 0; --i) {
-        if (instanceOffsets[i] == 0) {
-            instanceOffsets[i] = instanceOffsets[i + 1];
-        }
-    }
-
-    if (num_worlds == 1) {
-        instanceOffsets[0] = *interop->bridge.totalNumInstances;
-    }
-#endif
 }
 
 void BatchRenderer::prepareForRendering(BatchRenderInfo info,
@@ -1403,9 +1401,11 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
             // First, need to perform the sorts
             sortInstancesAndViewsCPU(interop);
             computeInstanceOffsets(interop, info.numWorlds);
+            computeViewOffsets(interop, info.numWorlds);
 
             // Need to flush engine input state before copy
             interop->viewsCPU->flush(impl->dev);
+            interop->viewOffsetsCPU->flush(impl->dev);
             interop->instancesCPU->flush(impl->dev);
             interop->instanceOffsetsCPU->flush(impl->dev);
         }
@@ -1477,6 +1477,20 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
 
         impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instanceOffsetsHdl,
                              batch_buffers.instanceOffsets.buffer,
+                             1, &offsets_data_copy);
+    }
+
+    { // Import the offsets for views
+        VkDeviceSize num_offsets_bytes = info.numWorlds *
+            sizeof(int32_t);
+
+        VkBufferCopy offsets_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_offsets_bytes
+        };
+
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewOffsetsHdl,
+                             batch_buffers.viewOffsets.buffer,
                              1, &offsets_data_copy);
     }
 

@@ -47,6 +47,8 @@ struct BatchRenderInfo {
 
 struct BatchImportedBuffers {
     render::vk::LocalBuffer views;
+    render::vk::LocalBuffer viewOffsets;
+
     render::vk::LocalBuffer instances;
     render::vk::LocalBuffer instanceOffsets;
 };

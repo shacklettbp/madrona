@@ -2272,7 +2272,7 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
 
     LocalBuffer render_input = *alloc.makeLocalBuffer(num_render_input_bytes);
 
-    std::array<VkWriteDescriptorSet, 30> desc_updates;
+    std::array<VkWriteDescriptorSet, 34> desc_updates;
     uint32_t desc_counter = 0;
 
     VkDescriptorBufferInfo view_info;
@@ -2297,6 +2297,26 @@ static void makeFrame(const Device &dev, MemoryAllocator &alloc,
     instance_offset_info.buffer = batch_renderer_buffers.instanceOffsets.buffer;
     instance_offset_info.offset = 0;
     instance_offset_info.range = VK_WHOLE_SIZE;
+
+
+
+    VkDescriptorBufferInfo batch_view_info;
+    batch_view_info.buffer = batch_renderer_buffers.views.buffer;
+    batch_view_info.offset = 0;
+    batch_view_info.range = VK_WHOLE_SIZE;
+
+    DescHelper::storage(desc_updates[desc_counter++], draw_set, &batch_view_info, 4);
+    DescHelper::storage(desc_updates[desc_counter++], shadow_gen_set, &batch_view_info, 3);
+
+    VkDescriptorBufferInfo batch_view_offset_info;
+    batch_view_offset_info.buffer = batch_renderer_buffers.viewOffsets.buffer;
+    batch_view_offset_info.offset = 0;
+    batch_view_offset_info.range = VK_WHOLE_SIZE;
+
+    DescHelper::storage(desc_updates[desc_counter++], draw_set, &batch_view_offset_info, 5);
+    DescHelper::storage(desc_updates[desc_counter++], shadow_gen_set, &batch_view_offset_info, 4);
+
+
 
     DescHelper::storage(desc_updates[desc_counter++], cull_set, &instance_offset_info, 5);
 
@@ -2802,25 +2822,36 @@ static EngineInterop setupEngineInterop(Device &dev,
                                         VoxelConfig voxel_config)
 {
     auto views_cpu = Optional<render::vk::HostBuffer>::none();
+    auto view_offsets_cpu = Optional<render::vk::HostBuffer>::none();
+
     auto instances_cpu = Optional<render::vk::HostBuffer>::none();
-    auto offsets_cpu = Optional<render::vk::HostBuffer>::none();
+    auto instance_offsets_cpu = Optional<render::vk::HostBuffer>::none();
 
 #ifdef MADRONA_CUDA_SUPPORT
     auto views_gpu = Optional<render::vk::DedicatedBuffer>::none();
     auto views_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+
+    auto view_offsets_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto view_offsets_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+    
     auto instances_gpu = Optional<render::vk::DedicatedBuffer>::none();
     auto instances_cuda = Optional<render::vk::CudaImportedBuffer>::none();
-    auto offsets_gpu = Optional<render::vk::DedicatedBuffer>::none();
-    auto offsets_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+
+    auto instance_offsets_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto instance_offsets_cuda = Optional<render::vk::CudaImportedBuffer>::none();
 #endif
 
     VkBuffer views_hdl = VK_NULL_HANDLE;
+    VkBuffer view_offsets_hdl = VK_NULL_HANDLE;
     VkBuffer instances_hdl = VK_NULL_HANDLE;
-    VkBuffer offsets_hdl = VK_NULL_HANDLE;
+    VkBuffer instance_offsets_hdl = VK_NULL_HANDLE;
 
     void *views_base = nullptr;
+    void *view_offsets_base = nullptr;
+
     void *instances_base = nullptr;
-    void *offsets_base = nullptr;
+    void *instance_offsets_base = nullptr;
+
     void *world_ids_instances_base = nullptr;
     void *world_ids_views_base = nullptr;
 
@@ -2879,19 +2910,40 @@ static EngineInterop setupEngineInterop(Device &dev,
         uint64_t num_offsets_bytes = (num_worlds+1) * sizeof(int32_t);
 
         if (!gpu_input) {
-            offsets_cpu = alloc.makeStagingBuffer(num_offsets_bytes);
-            offsets_hdl = offsets_cpu->buffer;
-            offsets_base = offsets_cpu->ptr;
+            instance_offsets_cpu = alloc.makeStagingBuffer(num_offsets_bytes);
+            instance_offsets_hdl = instance_offsets_cpu->buffer;
+            instance_offsets_base = instance_offsets_cpu->ptr;
         } else {
 #ifdef MADRONA_CUDA_SUPPORT
-            offsets_gpu = alloc.makeDedicatedBuffer(
+            instance_offsets_gpu = alloc.makeDedicatedBuffer(
                 num_offsets_bytes, false, true);
 
-            offsets_cuda.emplace(dev, gpu_id, offsets_gpu->mem,
+            instance_offsets_cuda.emplace(dev, gpu_id, instance_offsets_gpu->mem,
                 num_offsets_bytes);
 
-            offsets_hdl = offsets_gpu->buf.buffer;
-            offsets_base = (char *)offsets_cuda->getDevicePointer();
+            instance_offsets_hdl = instance_offsets_gpu->buf.buffer;
+            instance_offsets_base = (char *)instance_offsets_cuda->getDevicePointer();
+#endif
+        }
+    }
+
+    { // Create the instance offsets buffer
+        uint64_t num_offsets_bytes = (num_worlds+1) * sizeof(int32_t);
+
+        if (!gpu_input) {
+            view_offsets_cpu = alloc.makeStagingBuffer(num_offsets_bytes);
+            view_offsets_hdl = view_offsets_cpu->buffer;
+            view_offsets_base = view_offsets_cpu->ptr;
+        } else {
+#ifdef MADRONA_CUDA_SUPPORT
+            view_offsets_gpu = alloc.makeDedicatedBuffer(
+                num_offsets_bytes, false, true);
+
+            view_offsets_cuda.emplace(dev, gpu_id, view_offsets_gpu->mem,
+                num_offsets_bytes);
+
+            view_offsets_hdl = view_offsets_gpu->buf.buffer;
+            view_offsets_base = (char *)view_offsets_cuda->getDevicePointer();
 #endif
         }
     }
@@ -2954,7 +3006,8 @@ static EngineInterop setupEngineInterop(Device &dev,
     viz::VizECSBridge bridge = {
         .views = (viz::PerspectiveCameraData *)views_base,
         .instances = (viz::InstanceData *)instances_base,
-        .instanceOffsets = (int32_t *)offsets_base,
+        .instanceOffsets = (int32_t *)instance_offsets_base,
+        .viewOffsets = (int32_t *)view_offsets_base,
         .totalNumViews = total_num_views_readback,
         .totalNumInstances = total_num_instances_readback,
         .totalNumViewsCPUInc = total_num_views_cpu_inc,
@@ -2985,28 +3038,37 @@ static EngineInterop setupEngineInterop(Device &dev,
     uint32_t *iota_array_instances = nullptr;
     uint32_t *iota_array_views = nullptr;
     uint64_t *sorted_instance_world_ids = nullptr;
+    uint64_t *sorted_view_world_ids = nullptr;
 
     if (!gpu_input) {
         iota_array_instances = (uint32_t *)malloc(sizeof(uint32_t) * num_worlds * max_instances_per_world);
         iota_array_views = (uint32_t *)malloc(sizeof(uint32_t) * num_worlds * max_views_per_world);
         sorted_instance_world_ids = (uint64_t *)malloc(sizeof(uint64_t) * num_worlds * max_instances_per_world);
+        sorted_view_world_ids = (uint64_t *)malloc(sizeof(uint64_t) * num_worlds * max_views_per_world);
     }
 
     return EngineInterop {
         std::move(views_cpu),
+        std::move(view_offsets_cpu),
         std::move(instances_cpu),
-        std::move(offsets_cpu),
+        std::move(instance_offsets_cpu),
 #ifdef MADRONA_CUDA_SUPPORT
         std::move(views_gpu),
+        std::move(view_offsets_gpu),
+
         std::move(instances_gpu),
-        std::move(offsets_gpu),
+        std::move(instance_offsets_gpu),
+
         std::move(views_cuda),
+        std::move(view_offsets_cuda),
+
         std::move(instances_cuda),
-        std::move(offsets_cuda),
+        std::move(instance_offsets_cuda),
 #endif
         views_hdl,
+        view_offsets_hdl,
         instances_hdl,
-        offsets_hdl,
+        instance_offsets_hdl,
         bridge,
         gpu_bridge,
         max_views_per_world,
@@ -3019,7 +3081,8 @@ static EngineInterop setupEngineInterop(Device &dev,
         voxel_buffer_hdl,
         iota_array_instances,
         iota_array_views,
-        sorted_instance_world_ids
+        sorted_instance_world_ids,
+        sorted_view_world_ids
     };
 }
 
@@ -4320,6 +4383,7 @@ static void issueShadowGen(Device &dev,
                            Pipeline<1> &pipeline,
                            VkCommandBuffer draw_cmd,
                            uint32_t view_idx,
+                           uint32_t world_idx,
                            uint32_t max_views)
 {
     {
@@ -4341,7 +4405,7 @@ static void issueShadowGen(Device &dev,
 
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.hdls[0]);
 
-    render::shader::ShadowGenPushConst push_const = { view_idx };
+    render::shader::ShadowGenPushConst push_const = { view_idx, world_idx };
 
     dev.dt.cmdPushConstants(draw_cmd,
                             pipeline.layout,
@@ -4825,7 +4889,8 @@ bool RenderContext::Impl::renderFlycamFrame(const viz::ViewerInput &input)
         .mousePrev = input.mousePrev
     };
 
-    uint32_t view_idx = 0;
+    uint32_t view_idx = input.viewIdx;
+    uint32_t world_idx = input.worldIdx;
 
     Frame &frame = frames_[cur_frame_];
 
@@ -4880,7 +4945,7 @@ bool RenderContext::Impl::renderFlycamFrame(const viz::ViewerInput &input)
 
     { // Issue shadow pass
         issueShadowGen(dev, frame, shadow_gen_, draw_cmd,
-                       view_idx, engine_interop_.maxViewsPerWorld);
+                       view_idx, world_idx, engine_interop_.maxViewsPerWorld);
     }
 
     const uint32_t num_voxels = this->voxel_config_.xLength * 
@@ -4939,7 +5004,7 @@ bool RenderContext::Impl::renderFlycamFrame(const viz::ViewerInput &input)
 
         issueCulling(dev, draw_cmd, frame, instance_cull_,
                      asset_set_cull_,
-                     0, cur_num_instances, cur_num_views,
+                     world_idx, cur_num_instances, cur_num_views,
                      num_worlds_);
     }
 
@@ -4960,6 +5025,7 @@ bool RenderContext::Impl::renderFlycamFrame(const viz::ViewerInput &input)
 
         DrawPushConst draw_const {
             (uint32_t)view_idx,
+            world_idx
         };
 
         dev.dt.cmdPushConstants(draw_cmd, object_shadow_draw_.layout,
@@ -5061,6 +5127,7 @@ bool RenderContext::Impl::renderFlycamFrame(const viz::ViewerInput &input)
 
     DrawPushConst draw_const {
         (uint32_t)view_idx,
+        world_idx
     };
 
     dev.dt.cmdPushConstants(draw_cmd, object_draw_.layout,
@@ -5131,6 +5198,7 @@ bool RenderContext::Impl::renderFlycamFrame(const viz::ViewerInput &input)
 
         DrawPushConst voxel_draw_const{
             (uint32_t)view_idx,
+            world_idx
         };
 
         dev.dt.cmdPushConstants(draw_cmd, voxel_draw_.layout,

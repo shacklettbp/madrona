@@ -5,7 +5,7 @@
 DrawPushConst push_const;
 
 [[vk::binding(0, 0)]]
-StructuredBuffer<PackedViewData> viewDataBuffer;
+StructuredBuffer<PackedViewData> flycamBuffer;
 
 [[vk::binding(1, 0)]]
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
@@ -15,6 +15,12 @@ StructuredBuffer<DrawData> drawDataBuffer;
 
 [[vk::binding(3, 0)]]
 StructuredBuffer<ShadowViewData> shadowViewDataBuffer;
+
+[[vk::binding(4, 0)]]
+StructuredBuffer<PackedViewData> viewDataBuffer;
+
+[[vk::binding(5, 0)]]
+StructuredBuffer<int> viewOffsetsBuffer;
 
 // Asset descriptor bindings
 
@@ -107,7 +113,9 @@ float4 vert(in uint vid : SV_VertexID,
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
 
-    float dummy = 0.00000000001f * float(drawDataBuffer[0].materialID + viewDataBuffer[0].data[0].w + materialBuffer[0].color.w);
+    float dummy = 0.00000000001f * float(drawDataBuffer[0].materialID + 
+        flycamBuffer[0].data[0].w + materialBuffer[0].color.w +
+        viewDataBuffer[0].data[0].w + float(viewOffsetsBuffer[0]));
 
     float4 world_space_pos = float4(
         instance_data.position + mul(toMat(instance_data.rotation), (instance_data.scale * vert.position)), 

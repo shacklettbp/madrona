@@ -5,7 +5,7 @@
 DrawPushConst push_const;
 
 [[vk::binding(0, 0)]]
-StructuredBuffer<PackedViewData> viewDataBuffer;
+StructuredBuffer<PackedViewData> flycamBuffer;
 
 [[vk::binding(1, 0)]]
 StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
@@ -15,6 +15,12 @@ StructuredBuffer<DrawData> drawDataBuffer;
 
 [[vk::binding(3, 0)]]
 StructuredBuffer<ShadowViewData> shadowViewDataBuffer;
+
+[[vk::binding(4, 0)]]
+StructuredBuffer<PackedViewData> viewDataBuffer;
+
+[[vk::binding(5, 0)]]
+StructuredBuffer<int> viewOffsetsBuffer;
 
 // Asset descriptor bindings
 [[vk::binding(0, 1)]]
@@ -153,6 +159,16 @@ void computeCompositeTransform(float3 obj_t,
     to_view_rotation = normalize(composeQuats(cam_r_inv, obj_r));
 }
 
+PerspectiveCameraData getCameraData()
+{
+    if (push_const.viewIdx == 0) {
+        return unpackViewData(flycamBuffer[0]);
+    } else {
+        int view_idx = (push_const.viewIdx - 1) + viewOffsetsBuffer[push_const.worldIdx];
+        return unpackViewData(viewDataBuffer[view_idx]);
+    }
+}
+
 [shader("vertex")]
 float4 vert(in uint vid : SV_VertexID,
             in uint draw_id : SV_InstanceID,
@@ -164,8 +180,7 @@ float4 vert(in uint vid : SV_VertexID,
     float4 color = materialBuffer[draw_data.materialID].color;
     uint instance_id = draw_data.instanceID;
 
-    PerspectiveCameraData view_data =
-        unpackViewData(viewDataBuffer[push_const.viewIdx]);
+    PerspectiveCameraData view_data = getCameraData();
 
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
@@ -230,33 +245,3 @@ PixelOutput frag(in V2F v2f)
 
     return output;
 }
-
-#if 0
-DrawInstanceData unpackDrawInstanceData(PackedDrawInstanceData data)
-{
-    const float4 d0 = data.packed[0];
-    const float4 d1 = data.packed[1];
-    const float4 d2 = data.packed[2];
-    const float4 d3 = data.packed[3];
-    const float4 d4 = data.packed[4];
-
-    DrawInstanceData out;
-
-    float3 rot_col0 = d0.xyz;
-    float3 rot_col1 = float3(d0.w, d1.xy);
-    float3 rot_col2 = float3(d1.zw, d2.x);
-
-    out.toViewRot = float3x3(
-        float3(rot_col0.x, rot_col1.x, rot_col2.x),
-        float3(rot_col0.y, rot_col1.y, rot_col2.y),
-        float3(rot_col0.z, rot_col1.z, rot_col2.z),
-    );
-    out.toViewTranslation = d2.yzw;
-    out.objScale = d3.xyz;
-    out.viewIdx = asint(d3.w);
-    out.projScale = d4.xy;
-    out.projZNear = d4.z;
-
-    return out;
-}
-#endif

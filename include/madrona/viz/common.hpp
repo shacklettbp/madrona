@@ -13,6 +13,7 @@ enum class ViewerType {
 struct ViewerInput {
     // Which world to render in the flycam
     uint32_t worldIdx;
+    uint32_t viewIdx;
 
     // Camera world position/direction configuration
     math::Vector3 position;

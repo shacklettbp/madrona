@@ -211,20 +211,28 @@ struct AssetData {
 
 struct EngineInterop {
     Optional<render::vk::HostBuffer> viewsCPU;
+    Optional<render::vk::HostBuffer> viewOffsetsCPU;
+
     Optional<render::vk::HostBuffer> instancesCPU;
     Optional<render::vk::HostBuffer> instanceOffsetsCPU;
 
 #ifdef MADRONA_CUDA_SUPPORT
     Optional<render::vk::DedicatedBuffer> viewsGPU;
+    Optional<render::vk::DedicatedBuffer> viewOffsetsGPU;
+
     Optional<render::vk::DedicatedBuffer> instancesGPU;
     Optional<render::vk::DedicatedBuffer> instanceOffsetsGPU;
 
     Optional<render::vk::CudaImportedBuffer> viewsCUDA;
+    Optional<render::vk::CudaImportedBuffer> viewOffsetsCUDA;
+
     Optional<render::vk::CudaImportedBuffer> instancesCUDA;
     Optional<render::vk::CudaImportedBuffer> instanceOffsetsCUDA;
 #endif
 
     VkBuffer viewsHdl;
+    VkBuffer viewOffsetsHdl;
+
     VkBuffer instancesHdl;
     VkBuffer instanceOffsetsHdl;
 
@@ -247,6 +255,7 @@ struct EngineInterop {
 
     // We need the sorted instance world IDs in order to compute the instance offsets
     uint64_t *sortedInstanceWorldIDs;
+    uint64_t *sortedViewWorldIDs;
 };
 
 struct ImGuiRenderState {

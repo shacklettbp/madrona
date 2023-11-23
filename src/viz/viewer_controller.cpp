@@ -495,6 +495,7 @@ void ViewerController::Impl::render(float frame_duration, ViewerInput &inp)
     // FIXME: pass actual active agents, not max
     cfgUI(inp, maxNumAgents, numWorlds, &simTickRate, 
           &batchView, &controllerAgent, renderCtx->impl->imgui_ctx_);
+    vizInput.viewIdx = controllerAgent;
 
     fpsCounterUI(frame_duration, renderCtx->impl->imgui_ctx_);
 

@@ -169,6 +169,8 @@ void VizRenderingSystem::registerTypes(ECSRegistry &registry,
 
     state_mgr->setArchetypeWorldOffsets<RenderableArchetype>(
         bridge->instanceOffsets);
+    state_mgr->setArchetypeWorldOffsets<VizCameraArchetype>(
+        bridge->viewOffsets);
 
     state_mgr->setArchetypeComponent<RenderableArchetype, InstanceData>(
         bridge->instances);
