@@ -866,7 +866,7 @@ struct SortArchetypeNodeBase::RadixSortOnesweepCustom {
         CTA_SYNC();
         ScatterKeysGlobal();
 
-        // scatter values if necessary
+        // scatter values if necessaryRadixSortOnesweepCustom
         GatherScatterValues(ranks);
     }
 
@@ -1163,6 +1163,33 @@ void SortArchetypeNodeBase::binScan(int32_t block_idx)
     }
 }
 
+void SortArchetypeNodeBase::worldCountScan(int32_t block_idx)
+{
+    using namespace sortConsts;
+
+    using BlockScanT = BlockScan<uint32_t, consts::numMegakernelThreads>;
+    using SMemTmpT = typename BlockScanT::TempStorage;
+    auto smem_tmp = (SMemTmpT *)mwGPU::SharedMemStorage::buffer;
+
+    int32_t invocation_idx = 
+        block_idx * consts::numMegakernelThreads + threadIdx.x;
+
+    uint32_t worldCountVals[1];
+    uint32_t worldOffsetVals[1];
+    worldCountVals[0] = worldCounts[invocation_idx];
+    worldOffsetVals[0] = worldOffsets[invocation_idx];
+
+    BlockScanT(*smem_tmp).ExclusiveSum(worldCountVals, worldOffsetVals);
+
+    if (invocation_idx == 0) {
+        //int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
+        
+        // TODO: restore
+        numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
+        //numDynamicInvocations = numEntities;
+    }
+}
+
 void SortArchetypeNodeBase::OnesweepNode::prepareOnesweep(
     int32_t invocation_idx)
 {
@@ -1209,56 +1236,67 @@ void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)
 {
     int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
     mwGPU::getStateManager()->resizeArchetype(archetypeID, numEntities);
-    
-    // Extra thread for offset computation.
-    numDynamicInvocations = numEntities + 1;
+
+    // Set for zeroWorldOffsetsAndCounts
+    numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
 }
+
+void SortArchetypeNodeBase::debugCountsAndOffsets(int32_t invocation_idx)
+{
+    //if (invocation_idx > consts::numMegakernelThreads) {
+    //    mwGPU::HostPrint::log("FINAL {} worldOffsets {} worldCounts {}\n", invocation_idx, worldOffsets[invocation_idx], worldCounts[invocation_idx]);
+    //}
+
+    int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
+    numDynamicInvocations = numEntities;
+}
+
+void SortArchetypeNodeBase::zeroWorldOffsetsAndCounts(int32_t invocation_idx) {
+    // Set for copyKeys and computeWorldCounts
+    int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
+
+    worldOffsets[invocation_idx] = invocation_idx == 0 ? 0 : numEntities;
+    worldCounts[invocation_idx] = numEntities;
+
+    //mwGPU::HostPrint::log("ZERO {} worldOffsets {} worldCounts {}\n", invocation_idx, worldOffsets[invocation_idx], worldCounts[invocation_idx]);
+
+    if (invocation_idx == 0) {
+        numDynamicInvocations = numEntities;
+    }
+}
+
 
 void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
 {
-    // Extra thread was added for world offsets, so shift over by 1.
-    if (invocation_idx > 0) {
-        keysCol[invocation_idx - 1] = keysAlt[invocation_idx - 1];
-    }
+    keysCol[invocation_idx] = keysAlt[invocation_idx];
+    
 }
 
-void SortArchetypeNodeBase::computeWorldOffsets(int32_t invocation_idx)
+void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
 {
-    int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
-
-    int32_t startWorldIdx = (invocation_idx == 0) ?
-        -1 : (int32_t)keysCol[invocation_idx - 1];
-    int32_t endWorldIdx = (invocation_idx == numEntities) ? 
-        mwGPU::GPUImplConsts::get().numWorlds - 1 : keysCol[invocation_idx];
-
-    // No-op for any thread not on a world boundary.
-    for (int i = startWorldIdx + 1; i <= endWorldIdx; ++i) {
-        worldOffsets[i] = invocation_idx;
+    if (invocation_idx > 0 &&
+        keysCol[invocation_idx] != keysCol[invocation_idx - 1]) {
+            worldOffsets[keysCol[invocation_idx]] = invocation_idx;
+            worldCounts[keysCol[invocation_idx - 1]] = invocation_idx;
     }
 
+    // Debugging
+    //if (invocation_idx < mwGPU::GPUImplConsts::get().numWorlds) {
+    //    mwGPU::HostPrint::log("COMPUTE {} worldOffsets {}, worldCounts {}\n", invocation_idx, worldOffsets[invocation_idx], worldCounts[invocation_idx]);
+    //}
 
     if (invocation_idx == 0) {
         numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
     }
 }
 
-void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
-{
+void SortArchetypeNodeBase::correctWorldCounts(int32_t invocation_idx) {
+    worldCounts[invocation_idx] -= worldOffsets[invocation_idx];
 
-    int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
+    //mwGPU::HostPrint::log("CORRECT {} worldOffsets {}, worldCounts {}\n", invocation_idx, worldOffsets[invocation_idx], worldCounts[invocation_idx]);
 
-    if (invocation_idx == 0) {
-        numDynamicInvocations = numEntities;
-    }
-
-    if (invocation_idx == mwGPU::GPUImplConsts::get().numWorlds - 1) {
-        worldCounts[invocation_idx] = 
-            numEntities - worldOffsets[invocation_idx];
-        return;
-    }
-
-    worldCounts[invocation_idx] = 
-        worldOffsets[invocation_idx + 1] - worldOffsets[invocation_idx];
+    numDynamicInvocations = utils::divideRoundUp(
+            mwGPU::GPUImplConsts::get().numWorlds, consts::numMegakernelThreads);
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
@@ -1394,20 +1432,29 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     if (world_sort) {
         cur_task = builder.addNodeFn<&SortArchetypeNodeBase::resizeTable>(
             data_id, {cur_task}, setup);
+
+        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::zeroWorldOffsetsAndCounts>(
+            data_id, {cur_task}, setup);
     }
 
     if (num_passes % 2 == 1) {
         cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
             data_id, {cur_task}, setup);
     }
-
-    // Compute the world sort offsets.
-    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldOffsets>(
-        data_id, {cur_task}, setup, 0, 1);
-
+    
     // Compute the world counts from the sort offsets.
     cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
         data_id, {cur_task}, setup, 0, 1);
+
+    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::correctWorldCounts>(
+        data_id, {cur_task}, setup, 0, 1);
+
+    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::worldCountScan>(
+        data_id, {cur_task}, setup, 0, consts::numMegakernelThreads);
+
+    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::debugCountsAndOffsets>(
+        data_id, {cur_task}, setup, 0, 1);
+
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 
