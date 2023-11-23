@@ -69,5 +69,5 @@ struct RenderContext {
     // Returns output from the flycam rendering
     viz::ViewerFrame * renderViewer(const viz::ViewerInput &input);
 };
-    
+
 }
