@@ -309,7 +309,6 @@ struct SortArchetypeNodeBase : NodeBase {
     void correctWorldCounts(int32_t invocation_idx);
     void zeroWorldOffsetsAndCounts(int32_t invocation_idx);
     void worldCountScan(int32_t invocation_idx);
-    void debugCountsAndOffsets(int32_t invocation_idx);
 
 
     static TaskGraph::NodeID addToGraph(
