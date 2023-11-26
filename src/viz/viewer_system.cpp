@@ -154,28 +154,35 @@ void VizRenderingSystem::registerTypes(ECSRegistry &registry,
 
 
     // Pointers get set in VizRenderingSystem::init
-    registry.registerArchetype<VizCameraArchetype>(
-        ComponentMetadataSelector<PerspectiveCameraData>(ComponentFlags::ImportMemory),
-        ArchetypeFlags::None,
-        bridge->maxViewsPerworld);
-    registry.registerArchetype<RenderableArchetype>(
-        ComponentMetadataSelector<InstanceData>(ComponentFlags::ImportMemory),
-        ArchetypeFlags::ImportOffsets,
-        bridge->maxInstancesPerWorld);
+    if (bridge) {
+        registry.registerArchetype<VizCameraArchetype>(
+            ComponentMetadataSelector<PerspectiveCameraData>(ComponentFlags::ImportMemory),
+            ArchetypeFlags::None,
+            bridge->maxViewsPerworld);
+        registry.registerArchetype<RenderableArchetype>(
+            ComponentMetadataSelector<InstanceData>(ComponentFlags::ImportMemory),
+            ArchetypeFlags::ImportOffsets,
+            bridge->maxInstancesPerWorld);
+    } else {
+        registry.registerArchetype<VizCameraArchetype>();
+        registry.registerArchetype<RenderableArchetype>();
+    }
 
 
 #if defined(MADRONA_GPU_MODE)
-    auto *state_mgr = mwGPU::getStateManager();
+    if (bridge) {
+        auto *state_mgr = mwGPU::getStateManager();
 
-    state_mgr->setArchetypeWorldOffsets<RenderableArchetype>(
-        bridge->instanceOffsets);
-    state_mgr->setArchetypeWorldOffsets<VizCameraArchetype>(
-        bridge->viewOffsets);
+        state_mgr->setArchetypeWorldOffsets<RenderableArchetype>(
+            bridge->instanceOffsets);
+        state_mgr->setArchetypeWorldOffsets<VizCameraArchetype>(
+            bridge->viewOffsets);
 
-    state_mgr->setArchetypeComponent<RenderableArchetype, InstanceData>(
-        bridge->instances);
-    state_mgr->setArchetypeComponent<VizCameraArchetype, PerspectiveCameraData>(
-        bridge->views);
+        state_mgr->setArchetypeComponent<RenderableArchetype, InstanceData>(
+            bridge->instances);
+        state_mgr->setArchetypeComponent<VizCameraArchetype, PerspectiveCameraData>(
+            bridge->views);
+    }
 #else
     (void)bridge;
 #endif
