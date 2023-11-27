@@ -4683,7 +4683,8 @@ static void issueLightingPass(vk::Device &dev,
                               Pipeline<1> &pipeline,
                               VkCommandBuffer draw_cmd,
                               const viz::ViewerCam &cam,
-                              uint32_t view_idx)
+                              uint32_t view_idx,
+                              uint32_t world_idx)
 {
     { // Transition for compute
         array<VkImageMemoryBarrier, 3> compute_prepare {{
@@ -4747,7 +4748,7 @@ static void issueLightingPass(vk::Device &dev,
     DeferredLightingPushConst push_const = {
         math::Vector4{ cam.fwd.x, cam.fwd.y, cam.fwd.z, 0.0f },
         math::Vector4{ cam.position.x, cam.position.y, cam.position.z, 0.0f },
-        math::toRadians(cam.fov), 20.0f, 50.0f, view_idx
+        math::toRadians(cam.fov), 20.0f, 50.0f, view_idx, world_idx
     };
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DeferredLightingPushConst), &push_const);
@@ -5216,7 +5217,7 @@ bool RenderContext::Impl::renderFlycamFrame(const viz::ViewerInput &input)
     dev.dt.cmdEndRenderPass(draw_cmd);
 
     { // Issue deferred lighting pass - separate function - this is becoming crazy
-        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, view_idx);
+        issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, view_idx, world_idx);
     }
 
     bool prepare_screenshot = input.requestedScreenshot || (getenv("SCREENSHOT_PATH") && global_frame_no_ == 0);

@@ -669,7 +669,7 @@ static void makeBatchFrame(vk::Device& dev,
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
     VkDeviceSize view_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
-    vk::LocalBuffer view_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
+    vk::LocalBuffer view_offsets = alloc.makeLocalBuffer(view_offset_size).value();
 
     VkCommandPool prepare_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
     VkCommandPool render_cmdpool = vk::makeCmdPool(dev, dev.gfxQF);
