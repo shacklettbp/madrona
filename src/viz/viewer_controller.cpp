@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
+#include <algorithm>
 
 #include "render_context_impl.hpp"
 
@@ -42,7 +43,6 @@ struct ViewerController::Impl {
     uint32_t numWorlds;
     uint32_t maxNumAgents;
     int32_t simTickRate;
-    int32_t batchView;
     float cameraMoveSpeed;
     bool shouldExit;
 
@@ -212,7 +212,6 @@ static void cfgUI(ViewerInput &inp,
                   CountT num_agents,
                   CountT num_worlds,
                   int32_t *tick_rate,
-                  int32_t *batch_view,
                   int32_t *controller_agent,
                   ImGuiContext *imgui_ctx)
 {
@@ -228,7 +227,10 @@ static void cfgUI(ViewerInput &inp,
     ImGui::TextUnformatted("Utilities");
     bool requested_screenshot = ImGui::Button("Take Screenshot");
     static char output_file_path[256] = "screenshot.bmp";
+
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * (float)(std::max(14, (int)strlen(output_file_path)) + 3));
     ImGui::InputText("Screenshot Output File (.bmp)", output_file_path, 256);
+    ImGui::PopItemWidth();
 
     inp.requestedScreenshot = requested_screenshot;
     inp.screenshotFilePath = output_file_path;
@@ -237,6 +239,7 @@ static void cfgUI(ViewerInput &inp,
         "Flycam", "Grid"
     };
 
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * (float)(strlen(viewer_type_ops[0]) + 3));
     if (ImGui::BeginCombo("Viewer Type", viewer_type_ops[(int)*viewer_type])) {
         for (CountT i = 0; i < 2; i++) {
             const bool is_selected = ((int)*viewer_type == i);
@@ -251,12 +254,19 @@ static void cfgUI(ViewerInput &inp,
 
         ImGui::EndCombo();
     }
+    ImGui::PopItemWidth();
+
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 8.0f);
 
     static int grid_image_size = 256;
-    ImGui::DragInt("Grid Image Pixel Size", &grid_image_size);
+    ImGui::DragInt("Grid Image Pixel Size", &grid_image_size, 
+                   1.0f, 16, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
 
     static int grid_width = 10;
-    ImGui::DragInt("Grid Width", &grid_width);
+    ImGui::DragInt("Grid Width", &grid_width, 
+                   1.0f, 1, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+    ImGui::PopItemWidth();
 
     inp.gridWidth = grid_width;
     inp.gridImageSize = grid_image_size;
@@ -317,8 +327,6 @@ static void cfgUI(ViewerInput &inp,
     ImGui::TextUnformatted("View Settings");
     ImGui::Separator();
     {
-        ImGui::DragInt("Batch View", (int *)batch_view, 0, 0, 8191);
-
         StackAlloc str_alloc;
         const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
         cam_opts[0] = "Free Camera";
@@ -481,7 +489,6 @@ ViewerController::Impl::Impl(ViewerControllerCfg &cfg)
       numWorlds(renderCtx->impl->num_worlds_),
       maxNumAgents(renderCtx->impl->engine_interop_.maxViewsPerWorld),
       simTickRate(cfg.simTickRate),
-      batchView(0),
       cameraMoveSpeed(cfg.cameraMoveSpeed),
       shouldExit(false),
       voxelConfig(renderCtx->impl->voxel_config_)
@@ -494,23 +501,12 @@ void ViewerController::Impl::render(float frame_duration, ViewerInput &inp)
 
     // FIXME: pass actual active agents, not max
     cfgUI(inp, maxNumAgents, numWorlds, &simTickRate, 
-          &batchView, &controllerAgent, renderCtx->impl->imgui_ctx_);
+          &controllerAgent, renderCtx->impl->imgui_ctx_);
     vizInput.viewIdx = controllerAgent;
 
     fpsCounterUI(frame_duration, renderCtx->impl->imgui_ctx_);
 
     ImGui::Render();
-
-    // Right now, viewIDX HAS to be 0 (during the time we're refactoring the
-    // viewer renderer).
-    // frameCfg.viewIDX = 0;
-    renderCtx->impl->selectViewerBatchView((uint32_t)batchView);
-
-
-    // vizInput.gridImageSize = 256;
-    // vizInput.gridWidth = 10;
-    // vizInput.offsetX = 0;
-    // vizInput.offsetY = 0;
 
     renderCtx->renderViewer(vizInput);
 }
