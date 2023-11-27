@@ -538,72 +538,75 @@ void ViewerController::Impl::loop(
     while (!glfwWindowShouldClose(window) && !shouldExit) {
         if (controllerAgent != 0) {
             key_state[(uint32_t)KeyboardKey::W] |=
-                    (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::A] |=
-                    (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::S] |=
-                    (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::D] |=
-                    (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Q] |=
-                    (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::E] |=
-                    (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::R] |=
-                    (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
             press_state[(uint32_t)KeyboardKey::R] |=
-                    (!prev_key_state[(uint32_t)KeyboardKey::R]) &&
-                    (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
+                (!prev_key_state[(uint32_t)KeyboardKey::R]) &&
+                (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::X] |=
-                    (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
             press_state[(uint32_t)KeyboardKey::X] |=
-                    (!prev_key_state[(uint32_t)KeyboardKey::X]) &&
-                    (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
+                (!prev_key_state[(uint32_t)KeyboardKey::X]) &&
+                (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::M] |=
-                    (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
             press_state[(uint32_t)KeyboardKey::M] |=
-                    (!prev_key_state[(uint32_t)KeyboardKey::M]) &&
-                    (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
+                (!prev_key_state[(uint32_t)KeyboardKey::M]) &&
+                (glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Z] |=
-                    (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
             press_state[(uint32_t)KeyboardKey::Z] |=
-                    (!prev_key_state[(uint32_t)KeyboardKey::Z]) &&
-                    (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
+                (!prev_key_state[(uint32_t)KeyboardKey::Z]) &&
+                (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::C] |=
-                    (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::G] |=
-                    (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::L] |=
-                    (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
             press_state[(uint32_t)KeyboardKey::L] |=
-                    (!prev_key_state[(uint32_t)KeyboardKey::L]) &&
-                    (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
+                (!prev_key_state[(uint32_t)KeyboardKey::L]) &&
+                (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Space] |=
-                    (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::T] |=
-                    (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::F] |=
-                    (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K1] |=
-                    (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS);
+            press_state[(uint32_t)KeyboardKey::K1] |=
+                !prev_key_state[(uint32_t)KeyboardKey::K1] &&
+                key_state[(uint32_t)KeyboardKey::K1];
             key_state[(uint32_t)KeyboardKey::K2] |=
-                    (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K3] |=
-                    (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K4] |=
-                    (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K5] |=
-                    (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K6] |=
-                    (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K7] |=
-                    (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K8] |=
-                    (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::K9] |=
-                    (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::Shift] |=
-                    (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
+                (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
         } else {
             handleCamera(window, vizInput, cameraMoveSpeed);
         }

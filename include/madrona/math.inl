@@ -23,6 +23,23 @@ inline constexpr float rsqrtApprox(float x)
 #endif
 }
 
+bool solveQuadraticUnsafe(
+    float a, float b, float c, float *t1, float *t2)
+{
+    float det = b * b - 4.f * a * c;
+    if (det < 0.f) {
+        return false;
+    }
+    
+    float sqrt_det = sqrtf(det);
+    float rcp_2a = 1.f / (2.f * a);
+    
+    *t1 = (-b - sqrt_det) * rcp_2a;
+    *t2 = (-b + sqrt_det) * rcp_2a;
+
+    return true;
+}
+
 float Vector2::dot(const Vector2 &o) const
 {
     return x * o.x + y * o.y;
