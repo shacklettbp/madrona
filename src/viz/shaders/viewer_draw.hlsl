@@ -161,12 +161,22 @@ void computeCompositeTransform(float3 obj_t,
 
 PerspectiveCameraData getCameraData()
 {
+    PerspectiveCameraData camera_data;
+
     if (push_const.viewIdx == 0) {
-        return unpackViewData(flycamBuffer[0]);
+        camera_data = unpackViewData(flycamBuffer[0]);
     } else {
+        PerspectiveCameraData fly_cam = unpackViewData(flycamBuffer[0]);
+
         int view_idx = (push_const.viewIdx - 1) + viewOffsetsBuffer[push_const.worldIdx];
-        return unpackViewData(viewDataBuffer[view_idx]);
+        camera_data = unpackViewData(viewDataBuffer[view_idx]);
+
+        // We want to inherit the aspect ratio from the flycam camera
+        camera_data.xScale = fly_cam.xScale;
+        camera_data.yScale = fly_cam.yScale;
     }
+
+    return camera_data;
 }
 
 [shader("vertex")]
