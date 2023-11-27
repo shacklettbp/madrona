@@ -13,7 +13,7 @@
 #include <optional>
 #include <vector>
 
-#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
+#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
 #include <dlfcn.h>
 #include <csignal>
 #include <filesystem>
@@ -198,7 +198,7 @@ Backend::Init Backend::Init::init(
     inst_info.pNext = &val_features;
     inst_info.pApplicationInfo = &app_info;
 
-#if defined(MADRONA_MACOS) or defined(MADRONA_IOS)
+#if defined(MADRONA_MACOS) || defined(MADRONA_IOS)
     inst_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
 #endif
@@ -231,7 +231,7 @@ validationDebug(VkDebugUtilsMessageSeverityFlagBitsEXT,
 {
     fprintf(stderr, "%s\n", data->pMessage);
 
-#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
+#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
     signal(SIGTRAP, SIG_IGN);
     raise(SIGTRAP);
     signal(SIGTRAP, SIG_DFL);
@@ -330,14 +330,14 @@ Backend::LoaderLib::~LoaderLib()
 
     free((void *)env_str_);
 
-#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
+#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
     dlclose(lib_);
 #endif
 }
 
 void (*Backend::LoaderLib::getEntryFn() const)()
 {
-#if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
+#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
     auto get_inst_addr = (PFN_vkGetInstanceProcAddr)dlsym(lib_,
         "vkGetInstanceProcAddr");
     if (get_inst_addr == nullptr) {
@@ -764,7 +764,7 @@ Device Backend::initDevice(
     vk12_features.descriptorIndexing = true;
     vk12_features.descriptorBindingPartiallyBound = true;
     vk12_features.descriptorBindingUpdateUnusedWhilePending = true;
-#if defined(__APPLE__)
+#ifdef MADRONA_MACOS
     vk12_features.drawIndirectCount = false; // No MoltenVK support :(
 #else
     vk12_features.drawIndirectCount = true;
@@ -794,7 +794,7 @@ Device Backend::initDevice(
     requested_features.features.fillModeNonSolid = true;
     requested_features.features.multiDrawIndirect = true;
 
-#if MADRONA_MACOS
+#ifdef MADRONA_MACOS
     requested_features.features.geometryShader = false;
 #else
     // Required for batch renderer (accessing primitive ID)
