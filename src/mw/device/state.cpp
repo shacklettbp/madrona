@@ -62,7 +62,6 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
 
         uint64_t mapped_bytes_diff = new_mapped_bytes - cur_mapped_bytes;
         void *grow_base = (char *)column_base + cur_mapped_bytes;
-
         alloc->mapMemory(grow_base, mapped_bytes_diff);
 
         int32_t new_max_rows = new_mapped_bytes / column_bytes_per_row;
