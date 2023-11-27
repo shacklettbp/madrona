@@ -1,8 +1,6 @@
 #ifndef MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 #define MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 
-#define PREPARE_VIEW_WORKGROUP_SIZE 32
-
 struct GridDrawPushConst {
     uint numViews;
     uint gridWidth;
