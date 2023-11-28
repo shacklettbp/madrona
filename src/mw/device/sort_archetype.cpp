@@ -1267,7 +1267,7 @@ void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
         
         // World "keysCol[invocation_idx - 1]" has invocation_idx entities
         // total including entities before it and its entities.
-        // For final world with entities, invocation_idx = numEntities
+        // For the final world with entities, invocation_idx = numEntities
         // should write to worldCounts, but our final thread index is
         // numEntities - 1. Thus, we initialize to numEntities so the value
         // of worldCounts is correct (see clearWorldOffsetsAndCounts()).
