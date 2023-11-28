@@ -10,7 +10,6 @@ namespace madrona::render::vk {
 class CudaImportedBuffer {
 public:
     CudaImportedBuffer(const Device &dev,
-                       int cuda_id,
                        VkDeviceMemory mem,
                        uint64_t num_bytes,
                        bool dedicated = true);
@@ -26,7 +25,5 @@ private:
     cudaExternalMemory_t ext_mem_;
     void *dev_ptr_;
 };
-
-DeviceID getVkUUIDFromCudaID(int gpu_id);
 
 }

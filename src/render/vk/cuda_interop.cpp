@@ -8,18 +8,7 @@
 
 using namespace std;
 
-namespace madrona {
-namespace render {
-namespace vk {
-
-static void setActiveDevice(int cuda_id)
-{
-    cudaError_t res = cudaSetDevice(cuda_id);
-
-    if (res != cudaSuccess) {
-        FATAL("CUDA failed to set device");
-    }
-}
+namespace madrona::render::vk {
 
 static cudaExternalMemory_t importBuffer(int buf_fd, uint64_t num_bytes,
                                          bool dedicated)
@@ -58,7 +47,6 @@ static void *mapExternal(cudaExternalMemory_t ext_mem, uint64_t num_bytes)
 }
 
 CudaImportedBuffer::CudaImportedBuffer(const Device &dev,
-                                       int cuda_id,
                                        VkDeviceMemory mem,
                                        uint64_t num_bytes,
                                        bool dedicated)
@@ -66,8 +54,6 @@ CudaImportedBuffer::CudaImportedBuffer(const Device &dev,
       ext_mem_(),
       dev_ptr_()
 {
-    setActiveDevice(cuda_id);
-
     VkMemoryGetFdInfoKHR fd_info;
     fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
     fd_info.pNext = nullptr;
@@ -97,34 +83,4 @@ CudaImportedBuffer::~CudaImportedBuffer()
     close(ext_fd_);
 }
 
-DeviceID getVkUUIDFromCudaID(int gpu_id)
-{
-    DeviceID vk_id;
-
-    int device_count;
-    cudaError_t res = cudaGetDeviceCount(&device_count);
-    if (res != cudaSuccess) {
-        FATAL("CUDA failed to enumerate devices");
-    }
-
-    if (device_count <= gpu_id) {
-        FATAL("%d is not a valid CUDA ID given %d supported device\n",
-              gpu_id, device_count);
-    }
-
-    cudaDeviceProp props;
-    cudaGetDeviceProperties(&props, gpu_id);
-
-    if (props.computeMode == cudaComputeModeProhibited) {
-        FATAL("%d corresponds to a prohibited device\n", gpu_id);
-    }
-
-    memcpy(vk_id.data(), &props.uuid,
-           sizeof(DeviceID::value_type) * vk_id.size());
-
-    return vk_id;
-}
-
-}
-}
 }

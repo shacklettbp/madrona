@@ -197,56 +197,6 @@ static vk::PipelineShaders makeDrawShaders(const vk::Device &dev,
         Span<const vk::BindingOverride>({}));
 }
 
-static void initCommonDrawPipelineInfo(VkPipelineVertexInputStateCreateInfo &vert_info,
-                                       VkPipelineInputAssemblyStateCreateInfo &input_assembly_info,
-                                       VkPipelineViewportStateCreateInfo &viewport_info,
-                                       VkPipelineMultisampleStateCreateInfo &multisample_info,
-                                       VkPipelineRasterizationStateCreateInfo &raster_info) 
-{
-    // Disable auto vertex assembly
-    vert_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vert_info.pNext = nullptr;
-    vert_info.flags = 0;
-    vert_info.vertexBindingDescriptionCount = 0;
-    vert_info.pVertexBindingDescriptions = nullptr;
-    vert_info.vertexAttributeDescriptionCount = 0;
-    vert_info.pVertexAttributeDescriptions = nullptr;
-
-    // Assembly (standard tri indices)
-    input_assembly_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    input_assembly_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    input_assembly_info.primitiveRestartEnable = VK_FALSE;
-
-    // Viewport (fully dynamic)
-    viewport_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewport_info.viewportCount = 1;
-    viewport_info.pViewports = nullptr;
-    viewport_info.scissorCount = 1;
-    viewport_info.pScissors = nullptr;
-
-    // Multisample
-    multisample_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    multisample_info.sampleShadingEnable = VK_FALSE;
-    multisample_info.alphaToCoverageEnable = VK_FALSE;
-    multisample_info.alphaToOneEnable = VK_FALSE;
-
-    // Rasterization
-    raster_info.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    raster_info.depthClampEnable = VK_FALSE;
-    raster_info.rasterizerDiscardEnable = VK_FALSE;
-    raster_info.polygonMode = VK_POLYGON_MODE_FILL;
-    raster_info.cullMode = VK_CULL_MODE_BACK_BIT;
-    raster_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster_info.depthBiasEnable = VK_FALSE;
-    raster_info.lineWidth = 1.0f;
-}
-
 static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
                                     VkPipelineCache pipeline_cache,
                                     VkRenderPass render_pass,

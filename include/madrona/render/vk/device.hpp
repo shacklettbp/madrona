@@ -1,10 +1,11 @@
 #pragma once 
 
+#include <madrona/render/common.hpp>
 #include <madrona/render/vk/dispatch.hpp>
 
 namespace madrona::render::vk {
 
-class Device {
+class Device : public GPUDevice {
 public:
     VkDevice hdl;
     DeviceDispatch dt;
@@ -32,7 +33,6 @@ public:
     Device(Device &&o);
 
     ~Device();
-    
 };
 
 }

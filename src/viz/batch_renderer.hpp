@@ -60,7 +60,6 @@ struct BatchRenderer {
     bool didRender;
 
     struct Config {
-        int gpuID;
         bool enableBatchRenderer;
         uint32_t renderWidth;
         uint32_t renderHeight;

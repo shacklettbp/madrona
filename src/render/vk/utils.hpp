@@ -9,9 +9,7 @@
 #include <madrona/render/vk/device.hpp>
 #include "pipeline_shaders.hpp"
 
-namespace madrona {
-namespace render {
-namespace vk {
+namespace madrona::render::vk {
 
 class QueueState {
 public:
@@ -106,11 +104,9 @@ static inline VkResult checkVk(VkResult res,
 #define STRINGIFY(m) STRINGIFY_HELPER(m)
 
 #define LOC_APPEND(m) m ": " __FILE__ " @ " STRINGIFY(__LINE__)
-#define REQ_VK(expr) checkVk((expr), MADRONA_COMPILER_FUNCTION_NAME, __FILE__, __LINE__, #expr)
-#define CHK_VK(expr) checkVk((expr), MADRONA_COMPILER_FUNCTION_NAME, __FILE__, __LINE__, #expr, false)
+#define REQ_VK(expr) ::madrona::render::vk::checkVk((expr), MADRONA_COMPILER_FUNCTION_NAME, __FILE__, __LINE__, #expr)
+#define CHK_VK(expr) ::madrona::render::vk::checkVk((expr), MADRONA_COMPILER_FUNCTION_NAME, __FILE__, __LINE__, #expr, false)
 
-}
-}
 }
 
 #include "utils.inl"

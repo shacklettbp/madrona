@@ -21,6 +21,10 @@
 #include <windows.h>
 #endif
 
+#ifdef MADRONA_CUDA_SUPPORT
+#include <madrona/cuda_utils.hpp>
+#endif
+
 using namespace std;
 
 namespace madrona::render::vk {
@@ -59,6 +63,81 @@ struct Backend::Init {
                                      bool want_validation,
                                      Span<const char *const> extra_exts);
 };
+
+LoaderLib::LoaderLib(void *lib, void (*entry_fn)(), const char *env_str)
+    : APILib {},
+      lib_(lib),
+      entry_fn_(entry_fn),
+      env_str_(env_str)
+{}
+
+LoaderLib::~LoaderLib()
+{
+    if (!lib_) {
+        return;
+    }
+
+    free((void *)env_str_);
+
+#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
+    dlclose(lib_);
+#endif
+}
+
+LoaderLib * LoaderLib::load()
+{
+    void *lib = nullptr;
+    const char *icd_env = nullptr;
+
+#if defined(MADRONA_LINUX)
+    lib = dlopen("libvulkan.so", RTLD_LAZY | RTLD_LOCAL);
+#elif defined(MADRONA_MACOS)
+    void *lib = dlopen("libvulkan.1.dylib", RTLD_LAZY | RTLD_LOCAL);
+    if (!lib) {
+        Dl_info dl_info;
+        if (!dladdr((void *)&LoaderLib::load, &dl_info)) {
+            FATAL("Couldn't find path to libvulkan.1.dylib");
+        }
+
+        auto vk_dir = 
+            std::filesystem::path(dl_info.dli_fname).parent_path() / "vk";
+        auto libvk_path = vk_dir / "libvulkan.1.dylib";
+        auto icd_path = vk_dir / "MoltenVK_icd.json";
+
+        icd_env = strdup(icd_path.c_str());
+        setenv("VK_ICD_FILENAMES", icd_env, 0);
+
+        lib = dlopen(libvk_path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    }
+#endif
+    if (!lib) {
+        FATAL("Couldn't find vulkan loader");
+    }
+
+    void (*entry_fn)() = nullptr;
+#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
+    auto get_inst_addr = (PFN_vkGetInstanceProcAddr)dlsym(lib,
+        "vkGetInstanceProcAddr");
+    if (get_inst_addr == nullptr) {
+        FATAL("Couldn't find vkGetInstanceProcAddr");
+    }
+    
+    get_inst_addr = (PFN_vkGetInstanceProcAddr)get_inst_addr(
+        VK_NULL_HANDLE, "vkGetInstanceProcAddr");
+    if (get_inst_addr == VK_NULL_HANDLE) {
+        FATAL("Refetching vkGetInstanceProcAddr after dlsym failed");
+    }
+
+    entry_fn = (void (*)())get_inst_addr;
+#endif
+
+    return new LoaderLib(lib, entry_fn, icd_env);
+}
+
+LoaderLib * LoaderLib::external(void (*entry_fn)())
+{
+    return new LoaderLib(nullptr, entry_fn, nullptr);
+}
 
 static InitializationDispatch fetchInitDispatchTable(
     PFN_vkGetInstanceProcAddr get_inst_addr)
@@ -272,22 +351,24 @@ static VkDebugUtilsMessengerEXT makeDebugCallback(VkInstance hdl,
 
 Backend::Backend(void (*vk_entry_fn)(),
                  bool enable_validation,
-                 bool headless,
+                 bool enable_present,
                  Span<const char *const> extra_exts)
     : Backend(Backend::Init::init((PFN_vkGetInstanceProcAddr)vk_entry_fn,
-        enable_validation, extra_exts), headless)
+        enable_validation, extra_exts), enable_present)
 {}
 
-Backend::Backend(Init init, bool headless)
-    : hdl(init.hdl),
-      dt(hdl, init.dt.getInstanceAddr, !headless),
+Backend::Backend(Init init, bool enable_present)
+    : APIBackend {},
+      hdl(init.hdl),
+      dt(hdl, init.dt.getInstanceAddr, enable_present),
       debug_(init.validationEnabled ?
                 makeDebugCallback(hdl, init.dt.getInstanceAddr) :
                 VK_NULL_HANDLE)
 {}
 
 Backend::Backend(Backend &&o)
-    : hdl(o.hdl),
+    : APIBackend {},
+      hdl(o.hdl),
       dt(std::move(o.dt)),
       debug_(std::move(o.debug_))
 {
@@ -308,92 +389,6 @@ Backend::~Backend()
         destroy_messenger(hdl, debug_, nullptr);
     }
     dt.destroyInstance(hdl, nullptr);
-}
-
-Backend::LoaderLib::LoaderLib(void *lib, const char *env_str)
-    : lib_(lib),
-      env_str_(env_str)
-{}
-
-Backend::LoaderLib::LoaderLib(LoaderLib &&o)
-    : lib_(o.lib_),
-      env_str_(o.env_str_)
-{
-    o.lib_ = nullptr;
-}
-
-Backend::LoaderLib::~LoaderLib()
-{
-    if (!lib_) {
-        return;
-    }
-
-    free((void *)env_str_);
-
-#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
-    dlclose(lib_);
-#endif
-}
-
-void (*Backend::LoaderLib::getEntryFn() const)()
-{
-#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
-    auto get_inst_addr = (PFN_vkGetInstanceProcAddr)dlsym(lib_,
-        "vkGetInstanceProcAddr");
-    if (get_inst_addr == nullptr) {
-        FATAL("Couldn't find vkGetInstanceProcAddr");
-    }
-    
-    get_inst_addr = (PFN_vkGetInstanceProcAddr)get_inst_addr(
-        VK_NULL_HANDLE, "vkGetInstanceProcAddr");
-    if (get_inst_addr == VK_NULL_HANDLE) {
-        FATAL("Refetching vkGetInstanceProcAddr after dlsym failed");
-    }
-
-    return (void (*)())get_inst_addr;
-#else
-    return nullptr;
-#endif
-}
-
-Backend::LoaderLib Backend::loadLoaderLib()
-{
-#if defined(MADRONA_LINUX)
-    void *lib = dlopen("libvulkan.so", RTLD_LAZY | RTLD_LOCAL);
-    if (!lib) {
-        FATAL("Couldn't find libvulkan.so");
-    }
-
-    return LoaderLib(lib, nullptr);
-#elif defined(MADRONA_MACOS)
-    void *lib = dlopen("libvulkan.1.dylib", RTLD_LAZY | RTLD_LOCAL);
-    if (lib) {
-        return LoaderLib(lib, nullptr);
-    }
-
-    Dl_info dl_info;
-    if (!dladdr((void *)fetchInitDispatchTable, &dl_info)) {
-        FATAL("Couldn't find path to libvulkan.1.dylib");
-    }
-
-    auto vk_dir = 
-        std::filesystem::path(dl_info.dli_fname).parent_path() / "vk";
-    auto libvk_path = vk_dir / "libvulkan.1.dylib";
-    auto icd_path = vk_dir / "MoltenVK_icd.json";
-
-    const char *icd_env = strdup(icd_path.c_str());
-    setenv("VK_ICD_FILENAMES", icd_env, 0);
-
-    lib = dlopen(libvk_path.c_str(), RTLD_LAZY | RTLD_LOCAL);
-
-    if (!lib) {
-        FATAL("Couldn't load libvulkan.1.dylib");
-    }
-
-    return LoaderLib(lib, icd_env);
-#else
-    return LoaderLib(nullptr, nullptr);
-#endif
 }
 
 static void fillQueueInfo(VkDeviceQueueCreateInfo &info,
@@ -439,17 +434,23 @@ static QueueFamilyChoices chooseQueueFamilies(
     const uint32_t num_queue_families,
     VkPhysicalDevice phy,
     PFN_vkGetPhysicalDeviceSurfaceSupportKHR surface_support_fn,
-    const Optional<VkSurfaceKHR> &present_surface)
+    Span<const VkSurfaceKHR> present_surfaces)
 {
     auto present_check = [&](uint32_t qf_idx) {
-        if (!present_surface.has_value()) {
-            return true;
+        bool supports_present = true;
+
+        for (VkSurfaceKHR surface : present_surfaces) {
+            VkBool32 supported;
+            REQ_VK(surface_support_fn(
+                phy, qf_idx, surface, &supported));
+
+            if (supported == VK_FALSE) {
+                supports_present = false;
+                break;
+            }
         }
 
-        VkBool32 supported;
-        REQ_VK(surface_support_fn(phy, qf_idx, *present_surface, &supported));
-
-        return supported == VK_TRUE;
+        return supports_present;
     };
 
     constexpr uint32_t qf_sentinel = 0xFFFF'FFFF;
@@ -532,10 +533,32 @@ static QueueFamilyChoices chooseQueueFamilies(
     return res;
 }
 
-Device Backend::initDevice(
+Device * Backend::makeDevice(
     CountT gpu_idx,
-    Optional<VkSurfaceKHR> present_surface)
+    Span<const VkSurfaceKHR> present_surfaces)
 {
+#ifdef MADRONA_CUDA_SUPPORT
+    DeviceID vk_id;
+
+    int device_count;
+    REQ_CUDA(cudaGetDeviceCount(&device_count));
+    if ((CountT)device_count <= gpu_idx) {
+        FATAL("%ld is not a valid CUDA ID given %d supported device\n",
+              gpu_idx, device_count);
+    }
+
+    cudaDeviceProp props;
+    REQ_CUDA(cudaGetDeviceProperties(&props, (int)gpu_idx));
+
+    if (props.computeMode == cudaComputeModeProhibited) {
+        FATAL("%ld corresponds to a prohibited device\n", gpu_idx);
+    }
+
+    memcpy(vk_id.data(), &props.uuid,
+           sizeof(DeviceID::value_type) * vk_id.size());
+
+    return makeDevice(vk_id, present_surfaces);
+#else
     uint32_t num_gpus;
     REQ_VK(dt.enumeratePhysicalDevices(hdl, &num_gpus, nullptr));
 
@@ -547,21 +570,22 @@ Device Backend::initDevice(
               (uint32_t)gpu_idx, num_gpus);
     }
 
-    return initDevice(phys[gpu_idx], present_surface);
+    return makeDevice(phys[gpu_idx], present_surfaces);
+#endif
 }
 
-Device Backend::initDevice(
+Device * Backend::makeDevice(
     const DeviceID &gpu_id,
-    Optional<VkSurfaceKHR> present_surface)
+    Span<const VkSurfaceKHR> present_surfaces)
 {
     VkPhysicalDevice phy = findPhysicalDevice(gpu_id);
 
-    return initDevice(phy, present_surface);
+    return makeDevice(phy, present_surfaces);
 }
 
-Device Backend::initDevice(
+Device * Backend::makeDevice(
     VkPhysicalDevice phy,
-    Optional<VkSurfaceKHR> present_surface)
+    Span<const VkSurfaceKHR> present_surfaces)
 {
     // FIXME:
     const uint32_t desired_gfx_queues = 2;
@@ -619,7 +643,7 @@ Device Backend::initDevice(
     bool supports_mem_export = false;
 #endif
 
-    if (present_surface.has_value()) {
+    if (present_surfaces.size() > 0) {
         extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
 
@@ -653,7 +677,7 @@ Device Backend::initDevice(
 
     QueueFamilyChoices qf_choices = chooseQueueFamilies(
         queue_family_props.data(), num_queue_families,
-        phy, dt.getPhysicalDeviceSurfaceSupportKHR, present_surface);
+        phy, dt.getPhysicalDeviceSurfaceSupportKHR, present_surfaces);
 
     const uint32_t num_gfx_queues =
         min(desired_gfx_queues, qf_choices.numGFXQueues);
@@ -815,19 +839,20 @@ Device Backend::initDevice(
     VkPhysicalDeviceProperties physical_device_properties;
     dt.getPhysicalDeviceProperties(phy, &physical_device_properties);
 
-    return Device(qf_choices.gfxQF,
-                  qf_choices.computeQF,
-                  qf_choices.transferQF,
-                  num_gfx_queues,
-                  num_compute_queues,
-                  num_transfer_queues,
-                  supports_rt,
-                  physical_device_properties.limits.maxImageArrayLayers,
-                  phy,
-                  dev,
-                  DeviceDispatch(dev, get_dev_addr,
-                                 present_surface.has_value(),
-                                 supports_rt, supports_mem_export));
+    return new Device(
+        qf_choices.gfxQF,
+        qf_choices.computeQF,
+        qf_choices.transferQF,
+        num_gfx_queues,
+        num_compute_queues,
+        num_transfer_queues,
+        supports_rt,
+        physical_device_properties.limits.maxImageArrayLayers,
+        phy,
+        dev,
+        DeviceDispatch(dev, get_dev_addr,
+                       present_surfaces.size() > 0,
+                       supports_rt, supports_mem_export));
 }
 
 }

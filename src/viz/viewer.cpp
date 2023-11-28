@@ -1,9 +1,13 @@
-#include <madrona/viz/viewer_controller.hpp>
+#include <madrona/viz/viewer.hpp>
 #include <madrona/stack_alloc.hpp>
 #include <madrona/utils.hpp>
+#include <madrona/math.hpp>
 
-#include "madrona/math.hpp"
 #include "render_common.hpp"
+#include "render_ctx.hpp"
+
+#include "viewer_common.hpp"
+#include "viewer_renderer.hpp"
 
 #include <imgui.h>
 
@@ -11,8 +15,6 @@
 #include <cstdlib>
 #include <thread>
 #include <algorithm>
-
-#include "render_context_impl.hpp"
 
 using namespace std;
 
@@ -33,12 +35,9 @@ struct SceneProperties {
     uint32_t totalTriangles; // Post transform
 };
 
-struct ViewerController::Impl {
-    ViewerInput vizInput;
-    render::RenderContext *renderCtx;
-
-    // Agent that is controller by input
-    int32_t controllerAgent;
+struct Viewer::Impl {
+    ViewerRenderer renderer;
+    ViewerControl vizCtrl;
 
     uint32_t numWorlds;
     uint32_t maxNumAgents;
@@ -46,9 +45,9 @@ struct ViewerController::Impl {
     float cameraMoveSpeed;
     bool shouldExit;
 
-    render::VoxelConfig voxelConfig;
-
-    Impl(ViewerControllerCfg &cfg);
+    inline Impl(const render::RenderManager &render_mgr,
+                const Window *window,
+                const Viewer::Config &cfg);
 
     inline void startFrame();
 
@@ -58,7 +57,7 @@ struct ViewerController::Impl {
 
     // This is going to render the viewer window itself (and support
     // the fly camera)
-    inline void render(float frame_duration, ViewerInput &inp);
+    inline void render(float frame_duration);
 
     inline void loop(
         void (*input_fn)(void *, CountT, CountT, const UserInput &),
@@ -66,20 +65,8 @@ struct ViewerController::Impl {
         void (*ui_fn)(void *), void *ui_data);
 };
 
-CountT ViewerController::loadObjects(Span<const imp::SourceObject> objs,
-                           Span<const imp::SourceMaterial> mats,
-                           Span<const imp::SourceTexture> textures)
-{
-    return impl->renderCtx->loadObjects(objs, mats, textures);
-}
-
-void ViewerController::configureLighting(Span<const render::LightConfig> lights)
-{
-    impl->renderCtx->configureLighting(lights);
-}
-
 static void handleCamera(GLFWwindow *window,
-                         ViewerInput &cam,
+                         ViewerCam &cam,
                          float cam_move_speed)
 {
     auto keyPressed = [&](uint32_t key) {
@@ -113,11 +100,11 @@ static void handleCamera(GLFWwindow *window,
         auto rotation = (around_up * around_right).normalize();
 
         cam.up = rotation.rotateVec(cam.up);
-        cam.forward = rotation.rotateVec(cam.forward);
+        cam.fwd = rotation.rotateVec(cam.fwd);
         cam.right = rotation.rotateVec(cam.right);
 
         if (keyPressed(GLFW_KEY_W)) {
-            translate += cam.forward;
+            translate += cam.fwd;
         }
 
         if (keyPressed(GLFW_KEY_A)) {
@@ -125,7 +112,7 @@ static void handleCamera(GLFWwindow *window,
         }
 
         if (keyPressed(GLFW_KEY_S)) {
-            translate -= cam.forward;
+            translate -= cam.fwd;
         }
 
         if (keyPressed(GLFW_KEY_D)) {
@@ -180,15 +167,13 @@ static float throttleFPS(chrono::time_point<chrono::steady_clock> start) {
     return duration<float>(end - start).count();
 }
 
-void ViewerController::Impl::startFrame()
+void Viewer::Impl::startFrame()
 {
-    ImGui::SetCurrentContext(renderCtx->impl->imgui_ctx_);
-
-    renderCtx->impl->waitUntilFrameReady();
+    renderer.waitUntilFrameReady();
 
     glfwPollEvents();
 
-    renderCtx->impl->startFrame();
+    renderer.startFrame();
     ImGui::NewFrame();
 }
 
@@ -208,181 +193,45 @@ static int32_t numDigits(uint32_t x)
   return (x + table[idx]) >> 32;
 }
 
-static void cfgUI(ViewerInput &inp,
-                  CountT num_agents,
-                  CountT num_worlds,
-                  int32_t *tick_rate,
-                  int32_t *controller_agent,
-                  ImGuiContext *imgui_ctx)
+static void flyCamUI(ViewerCam &cam)
 {
-    inp.offsetY -= ImGui::GetIO().MouseWheel * InternalConfig::secondsPerFrame * 120;
-    inp.offsetX -= ImGui::GetIO().MouseWheelH * InternalConfig::secondsPerFrame * 120;
-
-    ViewerType *viewer_type = &inp.viewerType;
-
-    ImGui::SetCurrentContext(imgui_ctx);
-
-    ImGui::Begin("Controls");
-
-    const char *viewer_type_ops[] = {
-        "Visualizer", "Batch Renderer"
-    };
-
-    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * (float)(strlen(viewer_type_ops[1]) + 3));
-    if (ImGui::BeginCombo("Viewer Mode", viewer_type_ops[(int)*viewer_type])) {
-        for (CountT i = 0; i < 2; i++) {
-            const bool is_selected = ((int)*viewer_type == i);
-            if (ImGui::Selectable(viewer_type_ops[i], is_selected)) {
-                *viewer_type = (ViewerType)i;
-            }
-
-            if (is_selected) {
-                ImGui::SetItemDefaultFocus();
-            }
-        }
-
-        ImGui::EndCombo();
-    }
-
-    ImGui::PopItemWidth();
-
-    {
-        StackAlloc str_alloc;
-        const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
-        cam_opts[0] = "Free Camera";
-
-        ImVec2 combo_size = ImGui::CalcTextSize(" Free Camera ");
-
-        for (CountT i = 0; i < num_agents; i++) {
-            const char *agent_prefix = "Agent ";
-
-            CountT num_bytes = strlen(agent_prefix) + numDigits(i) + 1;
-            cam_opts[i + 1] = str_alloc.allocN<char>(num_bytes);
-            snprintf((char *)cam_opts[i + 1], num_bytes, "%s%u",
-                     agent_prefix, (uint32_t)i);
-        }
-
-        CountT cam_idx = *controller_agent;
-        ImGui::PushItemWidth(combo_size.x * 1.25f);
-        if (ImGui::BeginCombo("Input Control", cam_opts[cam_idx])) {
-            for (CountT i = 0; i < num_agents + 1; i++) {
-                const bool is_selected = (cam_idx == i);
-                if (ImGui::Selectable(cam_opts[i], is_selected)) {
-                    cam_idx = i;
-                }
-
-                if (is_selected) {
-                    ImGui::SetItemDefaultFocus();
-                }
-            }
-
-            ImGui::EndCombo();
-        }
-        ImGui::PopItemWidth();
-
-        *controller_agent = cam_idx;
-    }
-
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Simulation Settings");
-    ImGui::Separator();
-
-    {
-        int world_idx = inp.worldIdx;
-        float worldbox_width =
-            ImGui::CalcTextSize(" ").x * (max(numDigits(num_worlds) + 2, 7_i32));
-        if (num_worlds == 1) {
-            ImGui::BeginDisabled();
-        }
-        ImGui::PushItemWidth(worldbox_width);
-        ImGui::DragInt("Current World ID", &world_idx, 1.f, 0, num_worlds - 1,
-                       "%d", ImGuiSliderFlags_AlwaysClamp);
-        ImGui::PopItemWidth();
-
-        if (num_worlds == 1) {
-            ImGui::EndDisabled();
-        }
-
-        inp.worldIdx = world_idx;
-    }
-
-#if 0
-    {
-        static bool override_sun_dir = false;
-        ImGui::Checkbox("Override Sun Direction", &override_sun_dir);
-
-        inp.overrideLightDir = override_sun_dir;
-
-        if (override_sun_dir) {
-            static float theta = 0.0f;
-            ImGui::SliderFloat("Theta", &theta, 0.0f, 360.0f);
-
-            static float phi = 0.0f;
-            ImGui::SliderFloat("Phi", &phi, 0.0f, 90.0f);
-
-            float x = std::cos(math::toRadians(theta)) * std::sin(math::toRadians(phi));
-            float y = std::sin(math::toRadians(theta)) * std::sin(math::toRadians(phi));
-            float z = std::cos(math::toRadians(phi));
-
-            math::Vector3 dir = {x, y, z};
-            cfg.newLightDir = dir;
-        }
-    }
-#endif
-
-    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 7);
-    ImGui::DragInt("Tick Rate (Hz)", (int *)tick_rate, 5.f, 1, 1000);
-    if (*tick_rate < 1) {
-        *tick_rate = 1;
-    }
-    ImGui::PopItemWidth();
-
-    ImGui::Spacing();
-
-    ImGui::TextUnformatted("Free Camera Config");
-    ImGui::Separator();
-
-    if (*controller_agent != 0 || *viewer_type != ViewerType::Flycam) {
-        ImGui::BeginDisabled();
-    }
     auto side_size = ImGui::CalcTextSize(" Bottom " );
     side_size.y *= 1.4f;
     ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign,
                         ImVec2(0.5f, 0.f));
 
     if (ImGui::Button("Top", side_size)) {
-        inp.position = 10.f * math::up;
-        inp.forward = -math::up;
-        inp.up = -math::fwd;
-        inp.right = cross(inp.forward, inp.up);
+        cam.position = 10.f * math::up;
+        cam.fwd = -math::up;
+        cam.up = -math::fwd;
+        cam.right = cross(cam.fwd, cam.up);
     }
 
     ImGui::SameLine();
 
     if (ImGui::Button("Left", side_size)) {
-        inp.position = -10.f * math::right;
-        inp.forward = math::right;
-        inp.up = math::up;
-        inp.right = cross(inp.forward, inp.up);
+        cam.position = -10.f * math::right;
+        cam.fwd = math::right;
+        cam.up = math::up;
+        cam.right = cross(cam.fwd, cam.up);
     }
 
     ImGui::SameLine();
 
     if (ImGui::Button("Right", side_size)) {
-        inp.position = 10.f * math::right;
-        inp.forward = -math::right;
-        inp.up = math::up;
-        inp.right = cross(inp.forward, inp.up);
+        cam.position = 10.f * math::right;
+        cam.fwd = -math::right;
+        cam.up = math::up;
+        cam.right = cross(cam.fwd, cam.up);
     }
 
     ImGui::SameLine();
 
     if (ImGui::Button("Bottom", side_size)) {
-        inp.position = -10.f * math::up;
-        inp.forward = math::up;
-        inp.up = math::fwd;
-        inp.right = cross(inp.forward, inp.up);
+        cam.position = -10.f * math::up;
+        cam.fwd = math::up;
+        cam.up = math::fwd;
+        cam.right = cross(cam.fwd, cam.up);
     }
 
     ImGui::PopStyleVar();
@@ -411,18 +260,154 @@ static void cfgUI(ViewerInput &inp,
 
     float digit_width = ImGui::CalcTextSize("0").x;
     ImGui::SetNextItemWidth(digit_width * 6);
-    if (inp.usePerspective) {
-        ImGui::DragFloat("FOV", &inp.fov, 1.f, 1.f, 179.f, "%.0f");
+    if (cam.perspective) {
+        ImGui::DragFloat("FOV", &cam.fov, 1.f, 1.f, 179.f, "%.0f");
     } else {
-        ImGui::DragFloat("View Size", &inp.orthoHeight,
+        ImGui::DragFloat("View Size", &cam.orthoHeight,
                           0.5f, 0.f, 100.f, "%0.1f");
     }
+}
 
-    if (*controller_agent != 0 || *viewer_type != ViewerType::Flycam) {
+static void cfgUI(ViewerControl &ctrl,
+                  CountT num_agents,
+                  CountT num_worlds,
+                  int32_t *tick_rate)
+{
+    ctrl.batchRenderOffsetY -=
+        ImGui::GetIO().MouseWheel * InternalConfig::secondsPerFrame * 120;
+    ctrl.batchRenderOffsetX -=
+        ImGui::GetIO().MouseWheelH * InternalConfig::secondsPerFrame * 120;
+
+    ImGui::Begin("Controls");
+
+    const char *viewer_type_ops[] = {
+        "Visualizer", "Batch Renderer"
+    };
+
+    ImGui::PushItemWidth(
+        ImGui::CalcTextSize(" ").x * (float)(strlen(viewer_type_ops[1]) + 3));
+    if (ImGui::BeginCombo("Viewer Mode",
+                          viewer_type_ops[(uint32_t)ctrl.viewerType])) {
+        for (uint32_t i = 0; i < 2; i++) {
+            const bool is_selected = (uint32_t)ctrl.viewerType == i;
+            if (ImGui::Selectable(viewer_type_ops[i], is_selected)) {
+                ctrl.viewerType = (ViewerType)i;
+            }
+
+            if (is_selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+
+        ImGui::EndCombo();
+    }
+
+    ImGui::PopItemWidth();
+
+    {
+        StackAlloc str_alloc;
+        const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
+        cam_opts[0] = "Free Camera";
+
+        ImVec2 combo_size = ImGui::CalcTextSize(" Free Camera ");
+
+        for (CountT i = 0; i < num_agents; i++) {
+            const char *agent_prefix = "Agent ";
+
+            CountT num_bytes = strlen(agent_prefix) + numDigits(i) + 1;
+            cam_opts[i + 1] = str_alloc.allocN<char>(num_bytes);
+            snprintf((char *)cam_opts[i + 1], num_bytes, "%s%u",
+                     agent_prefix, (uint32_t)i);
+        }
+
+        ImGui::PushItemWidth(combo_size.x * 1.25f);
+        if (ImGui::BeginCombo("Input Control", cam_opts[ctrl.viewIdx])) {
+            for (CountT i = 0; i < num_agents + 1; i++) {
+                const bool is_selected = ctrl.viewIdx == (uint32_t)i;
+                if (ImGui::Selectable(cam_opts[i], is_selected)) {
+                    ctrl.viewIdx = (uint32_t)i;
+                }
+
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+
+            ImGui::EndCombo();
+        }
+        ImGui::PopItemWidth();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Simulation Settings");
+    ImGui::Separator();
+
+    {
+        int world_idx = ctrl.worldIdx;
+        float worldbox_width =
+            ImGui::CalcTextSize(" ").x * (max(numDigits(num_worlds) + 2, 7_i32));
+        if (num_worlds == 1) {
+            ImGui::BeginDisabled();
+        }
+        ImGui::PushItemWidth(worldbox_width);
+        ImGui::DragInt("Current World ID", &world_idx, 1.f, 0, num_worlds - 1,
+                       "%d", ImGuiSliderFlags_AlwaysClamp);
+        ImGui::PopItemWidth();
+
+        if (num_worlds == 1) {
+            ImGui::EndDisabled();
+        }
+
+        ctrl.worldIdx = world_idx;
+    }
+
+#if 0
+    {
+        static bool override_sun_dir = false;
+        ImGui::Checkbox("Override Sun Direction", &override_sun_dir);
+
+        ctrl.overrideLightDir = override_sun_dir;
+
+        if (override_sun_dir) {
+            static float theta = 0.0f;
+            ImGui::SliderFloat("Theta", &theta, 0.0f, 360.0f);
+
+            static float phi = 0.0f;
+            ImGui::SliderFloat("Phi", &phi, 0.0f, 90.0f);
+
+            float x = std::cos(math::toRadians(theta)) * std::sin(math::toRadians(phi));
+            float y = std::sin(math::toRadians(theta)) * std::sin(math::toRadians(phi));
+            float z = std::cos(math::toRadians(phi));
+
+            math::Vector3 dir = {x, y, z};
+            cfg.newLightDir = dir;
+        }
+    }
+#endif
+
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 7);
+    ImGui::DragInt("Tick Rate (Hz)", (int *)tick_rate, 5.f, 1, 1000);
+    if (*tick_rate < 1) {
+        *tick_rate = 1;
+    }
+    ImGui::PopItemWidth();
+
+    ImGui::Spacing();
+
+    if (ctrl.viewIdx != 0 || ctrl.viewerType != ViewerType::Flycam) {
+        ImGui::BeginDisabled();
+    }
+
+    ImGui::TextUnformatted("Free Camera Config");
+    ImGui::Separator();
+
+    flyCamUI(ctrl.flyCam);
+
+    if (ctrl.viewIdx != 0 || ctrl.viewerType != ViewerType::Flycam) {
         ImGui::EndDisabled();
     }
 
-    if (*viewer_type != ViewerType::Grid) {
+    if (ctrl.viewerType != ViewerType::Grid) {
         ImGui::BeginDisabled();
     }
 
@@ -432,43 +417,37 @@ static void cfgUI(ViewerInput &inp,
 
     ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 8.0f);
 
-    static int grid_image_size = 256;
-    ImGui::DragInt("View Width", &grid_image_size, 
+    int grid_img_size = ctrl.gridImageSize;
+    ImGui::DragInt("View Width", &grid_img_size, 
                    1.0f, 16, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
+    ctrl.gridImageSize = (uint32_t)grid_img_size;
 
-    static int grid_width = 10;
+    int grid_width = ctrl.gridWidth;
     ImGui::DragInt("Grid Width", &grid_width, 
                    1.0f, 1, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
+    ctrl.gridWidth = grid_width;
 
     ImGui::PopItemWidth();
 
-    inp.gridWidth = grid_width;
-    inp.gridImageSize = grid_image_size;
-
-    if (*viewer_type != ViewerType::Grid) {
+    if (ctrl.viewerType != ViewerType::Grid) {
         ImGui::EndDisabled();
     }
 
     ImGui::Spacing();
     ImGui::TextUnformatted("Utilities");
     ImGui::Separator();
-    bool requested_screenshot = ImGui::Button("Take Screenshot");
-    static char output_file_path[256] = "screenshot.bmp";
+    ctrl.requestedScreenshot = ImGui::Button("Take Screenshot");
 
-    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * (float)(std::max(14, (int)strlen(output_file_path)) + 3));
-    ImGui::InputText("Output File (.bmp)", output_file_path, 256);
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * float(
+        std::max(14_u32, (uint32_t)strlen("screenshot.bmp")) + 3));
+    ImGui::InputText("Output File (.bmp)", ctrl.screenshotFilePath, 256);
     ImGui::PopItemWidth();
-
-    inp.requestedScreenshot = requested_screenshot;
-    inp.screenshotFilePath = output_file_path;
 
     ImGui::End();
 }
 
-static void fpsCounterUI(float frame_duration, ImGuiContext *imgui_ctx)
+static void fpsCounterUI(float frame_duration)
 {
-    ImGui::SetCurrentContext(imgui_ctx);
-
     auto viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkSize.x, 0.f),
                             0, ImVec2(1.f, 0.f));
@@ -485,57 +464,67 @@ static void fpsCounterUI(float frame_duration, ImGuiContext *imgui_ctx)
     ImGui::End();
 }
 
-static ViewerInput initCam(math::Vector3 pos, math::Quat rot)
+static ViewerCam initCam(math::Vector3 pos, math::Quat rot)
 {
-    ViewerInput cam = {};
-    cam.position = pos;
-    cam.forward = normalize(rot.rotateVec(math::fwd));
-    cam.up = normalize(rot.rotateVec(math::up));
-    cam.right = normalize(cross(cam.forward, cam.up));
-    cam.worldIdx = 0;
+    math::Vector3 fwd = normalize(rot.rotateVec(math::fwd));
+    math::Vector3 up = normalize(rot.rotateVec(math::up));
+    math::Vector3 right = normalize(cross(fwd, up));
 
-    return cam;
+    return ViewerCam {
+        .position = pos,
+        .fwd = fwd,
+        .up = up,
+        .right = right,
+    };
 }
 
-ViewerController::Impl::Impl(ViewerControllerCfg &cfg)
-    : vizInput(initCam(cfg.cameraPosition, cfg.cameraRotation)),
-      renderCtx(cfg.ctx),
-      controllerAgent(0),
-      numWorlds(renderCtx->impl->num_worlds_),
-      maxNumAgents(renderCtx->impl->engine_interop_.maxViewsPerWorld),
+Viewer::Impl::Impl(
+        const render::RenderManager &render_mgr,
+        const Window *window,
+        const Viewer::Config &cfg)
+    : renderer(render_mgr, window),
+      vizCtrl {
+          .worldIdx = 0,
+          .viewIdx = 0,
+          .flyCam = initCam(cfg.cameraPosition, cfg.cameraRotation),
+          .requestedScreenshot = false,
+          .screenshotFilePath = "screenshot.bmp",
+          .viewerType = ViewerType::Flycam,
+          .gridWidth = 10,
+          .gridImageSize = 256,
+          .batchRenderOffsetX = 0,
+          .batchRenderOffsetY = 0,
+      },
+      numWorlds(cfg.numWorlds),
+      maxNumAgents(
+          render_mgr.renderContext().engine_interop_.maxViewsPerWorld),
       simTickRate(cfg.simTickRate),
       cameraMoveSpeed(cfg.cameraMoveSpeed),
-      shouldExit(false),
-      voxelConfig(renderCtx->impl->voxel_config_)
-{
-}
+      shouldExit(false)
+{}
 
-void ViewerController::Impl::render(float frame_duration, ViewerInput &inp)
+void Viewer::Impl::render(float frame_duration)
 {
-    ImGui::SetCurrentContext(renderCtx->impl->imgui_ctx_);
-
     // FIXME: pass actual active agents, not max
-    cfgUI(inp, maxNumAgents, numWorlds, &simTickRate, 
-          &controllerAgent, renderCtx->impl->imgui_ctx_);
-    vizInput.viewIdx = controllerAgent;
+    cfgUI(vizCtrl, maxNumAgents, numWorlds, &simTickRate);
 
-    fpsCounterUI(frame_duration, renderCtx->impl->imgui_ctx_);
+    fpsCounterUI(frame_duration);
 
     ImGui::Render();
 
-    renderCtx->renderViewer(vizInput);
+    renderer.render(vizCtrl);
 }
 
-ViewerController::UserInput::UserInput(bool *keys_state, bool *press_state)
+Viewer::UserInput::UserInput(bool *keys_state, bool *press_state)
     : keys_state_(keys_state), press_state_(press_state)
 {}
 
-void ViewerController::Impl::loop(
+void Viewer::Impl::loop(
     void (*input_fn)(void *, CountT, CountT, const UserInput &),
     void *input_data, void (*step_fn)(void *), void *step_data,
     void (*ui_fn)(void *), void *ui_data)
 {
-    GLFWwindow *window = renderCtx->impl->window->platformWindow;
+    GLFWwindow *window = renderer.osWindow();
 
     std::array<bool, (uint32_t)KeyboardKey::NumKeys> key_state;
     std::array<bool, (uint32_t)KeyboardKey::NumKeys> press_state;
@@ -547,7 +536,7 @@ void ViewerController::Impl::loop(
     float frame_duration = InternalConfig::secondsPerFrame;
     auto last_sim_tick_time = chrono::steady_clock::now();
     while (!glfwWindowShouldClose(window) && !shouldExit) {
-        if (controllerAgent != 0) {
+        if (vizCtrl.viewIdx != 0) {
             key_state[(uint32_t)KeyboardKey::W] |=
                 (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
             key_state[(uint32_t)KeyboardKey::A] |=
@@ -619,7 +608,7 @@ void ViewerController::Impl::loop(
             key_state[(uint32_t)KeyboardKey::Shift] |=
                 (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
         } else {
-            handleCamera(window, vizInput, cameraMoveSpeed);
+            handleCamera(window, vizCtrl.flyCam, cameraMoveSpeed);
         }
 
         auto cur_frame_start_time = chrono::steady_clock::now();
@@ -629,11 +618,11 @@ void ViewerController::Impl::loop(
         startFrame();
 
         if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
-            if (controllerAgent != 0) {
+            if (vizCtrl.viewIdx != 0) {
                 prev_key_state = key_state;
                 UserInput user_input(key_state.data(),press_state.data());
-                input_fn(input_data, vizInput.worldIdx,
-                         controllerAgent - 1, user_input);
+                input_fn(input_data, vizCtrl.worldIdx,
+                         vizCtrl.viewIdx - 1, user_input);
                 utils::zeroN<bool>(key_state.data(), key_state.size());
                 utils::zeroN<bool>(press_state.data(), press_state.size());
             }
@@ -645,36 +634,45 @@ void ViewerController::Impl::loop(
 
         ui_fn(ui_data);
 
-        render(frame_duration, vizInput);
+        render(frame_duration);
 
         frame_duration = throttleFPS(cur_frame_start_time);
     }
 
-    renderCtx->impl->waitForIdle();
+    renderer.waitForIdle();
 }
 
-ViewerController::ViewerController(ViewerControllerCfg &cfg)
-    : impl(new Impl(cfg))
+Viewer::Viewer(const render::RenderManager &render_mgr,
+               const Window *window,
+               const Config &cfg)
+    : impl_(new Impl(render_mgr, window, cfg))
 {}
 
-ViewerController::ViewerController(ViewerController &&o) = default;
-ViewerController::~ViewerController() = default;
+Viewer::Viewer(Viewer &&o) = default;
+Viewer::~Viewer() = default;
 
-void ViewerController::loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
+CountT Viewer::loadObjects(Span<const imp::SourceObject> objs,
+                           Span<const imp::SourceMaterial> mats,
+                           Span<const imp::SourceTexture> textures)
+{
+    return impl_->renderer.loadObjects(objs, mats, textures);
+}
+
+void Viewer::configureLighting(Span<const render::LightConfig> lights)
+{
+    impl_->renderer.configureLighting(lights);
+}
+
+void Viewer::loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
                   void *input_data, void (*step_fn)(void *), void *step_data,
                   void (*ui_fn)(void *), void *ui_data)
 {
-    impl->loop(input_fn, input_data, step_fn, step_data, ui_fn, ui_data);
+    impl_->loop(input_fn, input_data, step_fn, step_data, ui_fn, ui_data);
 }
 
-void ViewerController::stopLoop()
+void Viewer::stopLoop()
 {
-    impl->shouldExit = true;
-}
-
-void ViewerController::setTickRate(uint32_t tick_rate)
-{
-    impl->simTickRate = tick_rate;
+    impl_->shouldExit = true;
 }
 
 }

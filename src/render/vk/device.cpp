@@ -10,7 +10,8 @@ Device::Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
                uint32_t max_num_layers_per_img,
                VkPhysicalDevice phy_dev, VkDevice dev,
                DeviceDispatch &&dispatch_table)
-    : hdl(dev),
+    : GPUDevice(),
+      hdl(dev),
       dt(std::move(dispatch_table)),
       phy(phy_dev),
       gfxQF(gfx_qf),
@@ -24,7 +25,8 @@ Device::Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
 {}
 
 Device::Device(Device &&o)
-    : hdl(o.hdl),
+    : GPUDevice(),
+      hdl(o.hdl),
       dt(std::move(o.dt)),
       phy(o.phy),
       gfxQF(o.gfxQF),

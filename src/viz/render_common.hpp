@@ -1,20 +1,15 @@
 #pragma once
 
-#include <cstdint>
-#include <vulkan/vulkan.h>
-#include <GLFW/glfw3.h>
 #include <madrona/render/vk/backend.hpp>
 #include <madrona/render/vk/device.hpp>
+#include <madrona/viz/interop.hpp>
+#include <madrona/dyn_array.hpp>
 
-#include "madrona/viz/render_context.hpp"
+#include <cstdint>
+
 #include "vk/memory.hpp"
 #include "vk/descriptors.hpp"
 #include "vk/utils.hpp"
-
-#include <madrona/viz/interop.hpp>
-
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
 
 #ifdef MADRONA_CUDA_SUPPORT
 #include "vk/cuda_interop.hpp"
@@ -39,56 +34,6 @@ inline constexpr VkFormat varianceFormat = VK_FORMAT_R32G32_SFLOAT;
 inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 
 }
-
-struct Swapchain {
-    VkSwapchainKHR hdl;
-    uint32_t width;
-    uint32_t height;
-};
-
-struct Window {
-    GLFWwindow *platformWindow;
-    VkSurfaceKHR surface;
-
-    uint32_t width;
-    uint32_t height;
-};
-
-class PresentationState {
-public:
-    static render::vk::Backend::LoaderLib init(bool make_window);
-    static std::vector<const char *> getInstanceExtensions(bool make_window);
-    static VkSurfaceFormatKHR selectSwapchainFormat(const render::vk::Backend &backend,
-                                                    VkPhysicalDevice phy,
-                                                    VkSurfaceKHR surface);
-
-    PresentationState(const render::vk::Backend &backend,
-                      const render::vk::Device &dev,
-                      const Window &window,
-                      uint32_t num_frames_inflight,
-                      bool need_immediate);
-
-    void destroy(const render::vk::Device &dev);
-
-    void forceTransition(const render::vk::Device &dev,
-                         const render::vk::QueueState &present_queue,
-                         uint32_t qf_idx);
-
-    uint32_t acquireNext(const render::vk::Device &dev,
-                         VkSemaphore signal_sema);
-
-    VkImage getImage(uint32_t idx) const;
-    uint32_t numSwapchainImages() const;
-
-    void present(const render::vk::Device &dev, uint32_t swapchain_idx,
-                 const render::vk::QueueState &present_queue,
-                 uint32_t num_wait_semas,
-                 const VkSemaphore *wait_semas);
-
-private:
-    Swapchain swapchain_;
-    HeapArray<VkImage> swapchain_imgs_;
-};
 
 template <size_t N>
 struct Pipeline {
@@ -141,64 +86,6 @@ struct MaterialTexture {
     render::vk::LocalTexture image;
     VkImageView view;
     VkDeviceMemory backing;
-};
-
-struct Frame {
-    Framebuffer fb;
-    Optional<Framebuffer> imguiFBO;
-
-    ShadowFramebuffer shadowFB;
-
-    VkCommandPool drawCmdPool;
-    VkCommandBuffer drawCmd;
-    VkCommandPool presentCmdPool;
-    VkCommandBuffer presentCmd;
-
-    VkFence cpuFinished;
-
-    VkSemaphore renderFinished;
-    VkSemaphore guiRenderFinished;
-    VkSemaphore swapchainReady;
-
-    render::vk::HostBuffer viewStaging;
-    render::vk::HostBuffer lightStaging;
-    // Don't need a shadow view staging because that will be done on the GPU.
-    render::vk::HostBuffer skyStaging;
-
-    // Contains everything
-    render::vk::LocalBuffer renderInput;
-
-    render::vk::LocalBuffer voxelVBO;
-    render::vk::LocalBuffer voxelIndexBuffer;
-    render::vk::LocalBuffer voxelData;
-
-    int64_t renderInputSize;
-
-    uint32_t cameraViewOffset;
-    // We now store this in a separate buffer
-    // uint32_t simViewOffset;
-    uint32_t drawCmdOffset;
-    uint32_t drawCountOffset;
-    // We now store this in a separate buffer
-    // uint32_t instanceOffset;
-    uint32_t lightOffset;
-    uint32_t shadowOffset;
-    uint32_t skyOffset;
-    uint32_t maxDraws;
-
-    VkDescriptorSet cullShaderSet;
-    VkDescriptorSet drawShaderSet;
-    VkDescriptorSet lightingSet;
-    VkDescriptorSet shadowGenSet;
-    VkDescriptorSet shadowBlurSet;
-
-    VkDescriptorSet voxelGenSet;
-    VkDescriptorSet voxelDrawSet;
-
-    // Contains a descriptor set for the sampler state and the final rendered output
-    VkDescriptorSet batchOutputQuadSet;
-
-    VkDescriptorSet gridDrawSet;
 };
 
 struct AssetData {
@@ -258,11 +145,6 @@ struct EngineInterop {
     uint64_t *sortedViewWorldIDs;
 };
 
-struct ImGuiRenderState {
-    VkDescriptorPool descPool;
-    VkRenderPass renderPass;
-};
-
 struct ShadowOffsets {
     render::vk::LocalTexture offsets;
     VkImageView view;
@@ -293,35 +175,12 @@ struct Sky {
     math::Vector3 sunSize;
     float exposure;
 };
+
+void initCommonDrawPipelineInfo(
+    VkPipelineVertexInputStateCreateInfo &vert_info,
+    VkPipelineInputAssemblyStateCreateInfo &input_assembly_info,
+    VkPipelineViewportStateCreateInfo &viewport_info,
+    VkPipelineMultisampleStateCreateInfo &multisample_info,
+    VkPipelineRasterizationStateCreateInfo &raster_info);
     
-}
-
-namespace madrona::viz {
-
-struct ViewerFrame {
-
-};
-    
-struct ViewerControllerCfg {
-    render::RenderContext *ctx;
-    int32_t simTickRate;
-
-    // Initial camera position
-    float cameraMoveSpeed;
-    math::Vector3 cameraPosition;
-    math::Quat cameraRotation;
-};
-
-struct ViewerCam {
-    math::Vector3 position;
-    math::Vector3 fwd;
-    math::Vector3 up;
-    math::Vector3 right;
-
-    bool perspective = true;
-    float fov = 60.f;
-    float orthoHeight = 5.f;
-    math::Vector2 mousePrev {0.f, 0.f};
-};
-
 }

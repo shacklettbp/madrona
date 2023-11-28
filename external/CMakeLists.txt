@@ -116,6 +116,8 @@ else ()
     set(INCLUDE_GLFW ON)
 endif()
 
+#set(INCLUDE_GLFW OFF)
+
 if (INCLUDE_GLFW)
     set(GLFW_LIBRARY_TYPE "SHARED")
     add_subdirectory(glfw EXCLUDE_FROM_ALL)
