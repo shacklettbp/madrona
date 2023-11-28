@@ -35,11 +35,11 @@ namespace madrona::cu {
     case NVJITLINK_ERROR_NVVM_COMPILE: {
         err_str = "NVVM compilation error";
     } break;
-    case NVJITLINK_ERROR_THREADPOOL: {
-        err_str = "Threadpool error";
-    } break;
     case NVJITLINK_ERROR_INTERNAL: {
         err_str = "Internal error";
+    } break;
+    default: {
+        err_str = "Unknown error";
     } break;
     }
 
