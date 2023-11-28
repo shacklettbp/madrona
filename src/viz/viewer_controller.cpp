@@ -224,23 +224,12 @@ static void cfgUI(ViewerInput &inp,
 
     ImGui::Begin("Controls");
 
-    ImGui::TextUnformatted("Utilities");
-    bool requested_screenshot = ImGui::Button("Take Screenshot");
-    static char output_file_path[256] = "screenshot.bmp";
-
-    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * (float)(std::max(14, (int)strlen(output_file_path)) + 3));
-    ImGui::InputText("Screenshot Output File (.bmp)", output_file_path, 256);
-    ImGui::PopItemWidth();
-
-    inp.requestedScreenshot = requested_screenshot;
-    inp.screenshotFilePath = output_file_path;
-
     const char *viewer_type_ops[] = {
-        "Flycam", "Grid"
+        "Visualizer", "Batch Renderer"
     };
 
-    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * (float)(strlen(viewer_type_ops[0]) + 3));
-    if (ImGui::BeginCombo("Viewer Type", viewer_type_ops[(int)*viewer_type])) {
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * (float)(strlen(viewer_type_ops[1]) + 3));
+    if (ImGui::BeginCombo("Viewer Mode", viewer_type_ops[(int)*viewer_type])) {
         for (CountT i = 0; i < 2; i++) {
             const bool is_selected = ((int)*viewer_type == i);
             if (ImGui::Selectable(viewer_type_ops[i], is_selected)) {
@@ -254,23 +243,48 @@ static void cfgUI(ViewerInput &inp,
 
         ImGui::EndCombo();
     }
-    ImGui::PopItemWidth();
-
-    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 8.0f);
-
-    static int grid_image_size = 256;
-    ImGui::DragInt("Grid Image Pixel Size", &grid_image_size, 
-                   1.0f, 16, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-    static int grid_width = 10;
-    ImGui::DragInt("Grid Width", &grid_width, 
-                   1.0f, 1, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
 
     ImGui::PopItemWidth();
 
-    inp.gridWidth = grid_width;
-    inp.gridImageSize = grid_image_size;
+    {
+        StackAlloc str_alloc;
+        const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
+        cam_opts[0] = "Free Camera";
 
+        ImVec2 combo_size = ImGui::CalcTextSize(" Free Camera ");
+
+        for (CountT i = 0; i < num_agents; i++) {
+            const char *agent_prefix = "Agent ";
+
+            CountT num_bytes = strlen(agent_prefix) + numDigits(i) + 1;
+            cam_opts[i + 1] = str_alloc.allocN<char>(num_bytes);
+            snprintf((char *)cam_opts[i + 1], num_bytes, "%s%u",
+                     agent_prefix, (uint32_t)i);
+        }
+
+        CountT cam_idx = *controller_agent;
+        ImGui::PushItemWidth(combo_size.x * 1.25f);
+        if (ImGui::BeginCombo("Input Control", cam_opts[cam_idx])) {
+            for (CountT i = 0; i < num_agents + 1; i++) {
+                const bool is_selected = (cam_idx == i);
+                if (ImGui::Selectable(cam_opts[i], is_selected)) {
+                    cam_idx = i;
+                }
+
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+
+            ImGui::EndCombo();
+        }
+        ImGui::PopItemWidth();
+
+        *controller_agent = cam_idx;
+    }
+
+
+    ImGui::Spacing();
     ImGui::TextUnformatted("Simulation Settings");
     ImGui::Separator();
 
@@ -324,51 +338,12 @@ static void cfgUI(ViewerInput &inp,
     }
     ImGui::PopItemWidth();
 
-    ImGui::TextUnformatted("View Settings");
-    ImGui::Separator();
-    {
-        StackAlloc str_alloc;
-        const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
-        cam_opts[0] = "Free Camera";
-
-        ImVec2 combo_size = ImGui::CalcTextSize(" Free Camera ");
-
-        for (CountT i = 0; i < num_agents; i++) {
-            const char *agent_prefix = "Agent ";
-
-            CountT num_bytes = strlen(agent_prefix) + numDigits(i) + 1;
-            cam_opts[i + 1] = str_alloc.allocN<char>(num_bytes);
-            snprintf((char *)cam_opts[i + 1], num_bytes, "%s%u",
-                     agent_prefix, (uint32_t)i);
-        }
-
-        CountT cam_idx = *controller_agent;
-        ImGui::PushItemWidth(combo_size.x * 1.25f);
-        if (ImGui::BeginCombo("Current View", cam_opts[cam_idx])) {
-            for (CountT i = 0; i < num_agents + 1; i++) {
-                const bool is_selected = (cam_idx == i);
-                if (ImGui::Selectable(cam_opts[i], is_selected)) {
-                    cam_idx = i;
-                }
-
-                if (is_selected) {
-                    ImGui::SetItemDefaultFocus();
-                }
-            }
-
-            ImGui::EndCombo();
-        }
-        ImGui::PopItemWidth();
-
-        *controller_agent = cam_idx;
-    }
-
     ImGui::Spacing();
 
     ImGui::TextUnformatted("Free Camera Config");
     ImGui::Separator();
 
-    if (*controller_agent != 0) {
+    if (*controller_agent != 0 || *viewer_type != ViewerType::Flycam) {
         ImGui::BeginDisabled();
     }
     auto side_size = ImGui::CalcTextSize(" Bottom " );
@@ -443,9 +418,49 @@ static void cfgUI(ViewerInput &inp,
                           0.5f, 0.f, 100.f, "%0.1f");
     }
 
-    if (*controller_agent != 0) {
+    if (*controller_agent != 0 || *viewer_type != ViewerType::Flycam) {
         ImGui::EndDisabled();
     }
+
+    if (*viewer_type != ViewerType::Grid) {
+        ImGui::BeginDisabled();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Batch Renderer Visualization");
+    ImGui::Separator();
+
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 8.0f);
+
+    static int grid_image_size = 256;
+    ImGui::DragInt("View Width", &grid_image_size, 
+                   1.0f, 16, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+    static int grid_width = 10;
+    ImGui::DragInt("Grid Width", &grid_width, 
+                   1.0f, 1, 1024, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+    ImGui::PopItemWidth();
+
+    inp.gridWidth = grid_width;
+    inp.gridImageSize = grid_image_size;
+
+    if (*viewer_type != ViewerType::Grid) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Utilities");
+    ImGui::Separator();
+    bool requested_screenshot = ImGui::Button("Take Screenshot");
+    static char output_file_path[256] = "screenshot.bmp";
+
+    ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * (float)(std::max(14, (int)strlen(output_file_path)) + 3));
+    ImGui::InputText("Output File (.bmp)", output_file_path, 256);
+    ImGui::PopItemWidth();
+
+    inp.requestedScreenshot = requested_screenshot;
+    inp.screenshotFilePath = output_file_path;
 
     ImGui::End();
 }
