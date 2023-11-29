@@ -281,6 +281,13 @@ struct SortArchetypeNodeBase : NodeBase {
         void onesweep(int32_t invocation_idx);
     };
 
+    struct ScanNode : NodeBase {
+        ScanNode(ParentNodeT parent);
+        ParentNodeT parentNode;
+
+        void scan(int32_t invocation_idx);
+    }
+
     struct RearrangeNode : NodeBase {
         RearrangeNode(ParentNodeT parent, int32_t col_idx);
         TaskGraph::TypedDataID<SortArchetypeNodeBase> parentNode;
