@@ -15,6 +15,8 @@
 
 namespace madrona::render {
 
+struct RenderContext;
+
 struct LayeredTarget {
     // Contains a uint for triangle ID and another for instance ID
     render::vk::LocalImage vizBuffer;
@@ -70,15 +72,7 @@ struct BatchRenderer {
     };
 
     BatchRenderer(const Config& cfg,
-        render::vk::Device& dev,
-        render::vk::MemoryAllocator& mem,
-        VkPipelineCache pipeline_cache,
-        VkDescriptorSet asset_set_compute,
-        VkDescriptorSet asset_set_draw,
-        VkDescriptorSet asset_set_texture_mat,
-        VkDescriptorSet asset_set_lighting,
-        VkSampler repeat_sampler,
-        VkQueue render_queue);
+                  RenderContext &rctx);
 
     ~BatchRenderer();
     void importCudaData(VkCommandBuffer);
@@ -97,7 +91,6 @@ struct BatchRenderer {
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
     DisplayTexture &getDisplayTexture(uint32_t frame_id);
     HeapArray<LayeredTarget> &getLayeredTargets(uint32_t frame_id);
-    VkDescriptorSet getPBRSet(uint32_t frame_id);
 
     // Get the semaphore that the viewer renderer has to wait on.
     // This is either going to be the semaphore from prepareForRendering,

@@ -1,6 +1,7 @@
 #include "batch_renderer.hpp"
 #include "shader.hpp"
 #include "ecs_interop.hpp"
+#include "render_ctx.hpp"
 
 #include <madrona/utils.hpp>
 #include <madrona/heap_array.hpp>
@@ -17,7 +18,6 @@
 
 
 using namespace madrona::render;
-using madrona::render::vk::checkVk;
 
 namespace madrona::render {
 
@@ -667,21 +667,67 @@ static void makeBatchFrame(vk::Device& dev,
     view_info.offset = 0;
     view_info.range = view_size;
     vk::DescHelper::storage(desc_updates[0], prepare_views_set, &view_info, 0);
-    vk::DescHelper::storage(desc_updates[3], draw_views_set, &view_info, 0);
+    vk::DescHelper::storage(desc_updates[1], draw_views_set, &view_info, 0);
 
     VkDescriptorBufferInfo instance_info;
     instance_info.buffer = instances.buffer;
     instance_info.offset = 0;
     instance_info.range = instance_size;
-    vk::DescHelper::storage(desc_updates[1], prepare_views_set, &instance_info, 1);
-    vk::DescHelper::storage(desc_updates[4], draw_views_set, &instance_info, 1);
+    vk::DescHelper::storage(desc_updates[2], prepare_views_set, &instance_info, 1);
+    vk::DescHelper::storage(desc_updates[3], draw_views_set, &instance_info, 1);
 
     VkDescriptorBufferInfo offset_info;
     offset_info.buffer = instance_offsets.buffer;
     offset_info.offset = 0;
     offset_info.range = instance_offset_size;
-    vk::DescHelper::storage(desc_updates[2], prepare_views_set, &offset_info, 2);
+    vk::DescHelper::storage(desc_updates[4], prepare_views_set, &offset_info, 2);
     vk::DescHelper::storage(desc_updates[5], draw_views_set, &offset_info, 2);
+
+    // PBR descriptor sets
+
+#if 0
+    VkDescriptorBufferInfo light_data_info;
+    light_data_info.buffer = render_input.buffer;
+    light_data_info.offset = buffer_offsets[3];
+    light_data_info.range = buffer_sizes[4];
+
+    vk::DescHelper::storage(desc_updates[7],
+                            pbr_set, &light_data_info, 0);
+
+    VkDescriptorImageInfo transmittance_info;
+    transmittance_info.imageView = sky.transmittanceView;
+    transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    transmittance_info.sampler = VK_NULL_HANDLE;
+
+    vk::DescHelper::textures(desc_updates[8],
+                             pbr_set, &transmittance_info, 1, 1);
+
+    VkDescriptorImageInfo irradiance_info;
+    irradiance_info.imageView = sky.irradianceView;
+    irradiance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    irradiance_info.sampler = VK_NULL_HANDLE;
+
+    vk::DescHelper::textures(desc_updates[9],
+                             pbr_set, &irradiance_info, 1, 2);
+
+    VkDescriptorImageInfo scattering_info;
+    scattering_info.imageView = sky.scatteringView;
+    scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    scattering_info.sampler = VK_NULL_HANDLE;
+
+    vk::DescHelper::textures(desc_updates[10],
+                             pbr_set, &scattering_info, 1, 3);
+
+    VkDescriptorBufferInfo sky_info;
+    sky_info.buffer = render_input.buffer;
+    sky_info.offset = buffer_offsets[5];
+    sky_info.range = buffer_sizes[6];
+
+    vk::DescHelper::storage(desc_updates[11],
+                            pbr_set, &sky_info, 4);
+#endif
+
+    // Set descriptors
 
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
@@ -1023,7 +1069,6 @@ static void issueDeferred(vk::Device &dev,
 struct BatchRenderer::Impl {
     vk::Device &dev;
     vk::MemoryAllocator &mem;
-    VkPipelineCache pipelineCache;
 
     uint32_t maxNumViews;
 
@@ -1057,52 +1102,45 @@ struct BatchRenderer::Impl {
     // This pipeline prepares the draw commands in the buffered draw cmds buffer
     // Pipeline<1> prepareViews;
 
-    Impl(const Config &cfg, vk::Device &dev, vk::MemoryAllocator &mem, 
-         VkPipelineCache cache, VkDescriptorSet asset_set_comp, 
-         VkDescriptorSet asset_set_draw, VkDescriptorSet asset_set_texture_mat,
-         VkDescriptorSet asset_set_lighting,
-         VkSampler repeat_sampler,
-         VkQueue render_queue);
+    Impl(const Config &cfg, RenderContext &rctx);
 };
 
 BatchRenderer::Impl::Impl(const Config &cfg,
-                               vk::Device &dev,
-                               vk::MemoryAllocator &mem,
-                               VkPipelineCache pipeline_cache, 
-                               VkDescriptorSet asset_set_compute,
-                               VkDescriptorSet asset_set_draw,
-                               VkDescriptorSet asset_set_texture_mat,
-                               VkDescriptorSet asset_set_lighting,
-                               VkSampler repeat_sampler,
-                               VkQueue render_queue)
-    : dev(dev), mem(mem), pipelineCache(pipeline_cache),
+                          RenderContext &rctx)
+    : dev(rctx.dev),
+      mem(rctx.alloc),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
       // This is required whether we want the batch renderer or not
-      prepareViews(makeComputePipeline(dev, pipelineCache, 2,
-                                       sizeof(shader::PrepareViewPushConstant),
-                                       4+consts::numDrawCmdBuffers, repeat_sampler,
-                                       "prepare_views.hlsl", "main", makeShaders)),
+      prepareViews(makeComputePipeline(dev, rctx.pipelineCache, 2,
+          sizeof(shader::PrepareViewPushConstant),
+          4 + consts::numDrawCmdBuffers, rctx.repeatSampler,
+          "prepare_views.hlsl", "main", makeShaders)),
       batchDraw(cfg.enableBatchRenderer ? 
-              makeDrawPipeline(dev, pipeline_cache, VK_NULL_HANDLE, 
-                                 consts::numDrawCmdBuffers*cfg.numFrames, 2) :
-              Optional<PipelineMP<1>>::none()),
-      createVisualization(cfg.enableBatchRenderer ? makeComputePipeline(dev, pipelineCache, 1,
+          makeDrawPipeline(dev, rctx.pipelineCache, VK_NULL_HANDLE, 
+                           consts::numDrawCmdBuffers * cfg.numFrames, 2) :
+          Optional<PipelineMP<1>>::none()),
+      createVisualization(cfg.enableBatchRenderer ?
+          makeComputePipeline(
+              dev, rctx.pipelineCache, 1,
               sizeof(uint32_t) * 2,
-              cfg.numFrames*consts::numDrawCmdBuffers, repeat_sampler,
-              "visualize_tris.hlsl", "visualize", makeShaders) : Optional<PipelineMP<1>>::none()),
-      lighting(cfg.enableBatchRenderer ? makeComputePipeline(dev, pipeline_cache, 6, 
+              cfg.numFrames * consts::numDrawCmdBuffers, rctx.repeatSampler,
+              "visualize_tris.hlsl", "visualize", makeShaders) :
+          Optional<PipelineMP<1>>::none()),
+      lighting(cfg.enableBatchRenderer ?
+          makeComputePipeline(dev, rctx.pipelineCache, 6, 
               sizeof(shader::DeferredLightingPushConstBR),
-              consts::numDrawCmdBuffers * cfg.numFrames, repeat_sampler, 
-              "draw_deferred.hlsl","lighting", makeShadersLighting) : Optional<PipelineMP<1>>::none()),
+              consts::numDrawCmdBuffers * cfg.numFrames, rctx.repeatSampler, 
+              "draw_deferred.hlsl","lighting", makeShadersLighting) :
+          Optional<PipelineMP<1>>::none()),
       batchFrames(cfg.numFrames),
-      assetSetPrepare(asset_set_compute),
-      assetSetDraw(asset_set_draw),
-      assetSetTextureMat(asset_set_texture_mat),
-      assetSetLighting(asset_set_lighting),
-      renderExtent{ cfg.renderWidth, cfg.renderHeight },
+      assetSetPrepare(rctx.asset_set_cull_),
+      assetSetDraw(rctx.asset_set_draw_),
+      assetSetTextureMat(rctx.asset_set_tex_compute_),
+      assetSetLighting(rctx.asset_batch_lighting_set_),
+      renderExtent { cfg.renderWidth, cfg.renderHeight },
       selectedView(0),
       currentFrame(0),
-      renderQueue(render_queue)
+      renderQueue(rctx.renderQueue)
 {
     for (uint32_t i = 0; i < cfg.numFrames; i++) {
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
@@ -1115,26 +1153,15 @@ BatchRenderer::Impl::Impl(const Config &cfg,
 }
 
 BatchRenderer::BatchRenderer(const Config &cfg,
-                                       vk::Device &dev,
-                                       vk::MemoryAllocator &mem,
-                                       VkPipelineCache pipeline_cache,
-                                       VkDescriptorSet asset_set_compute,
-                                       VkDescriptorSet asset_set_draw,
-                                       VkDescriptorSet asset_set_texture_mat,
-                                       VkDescriptorSet asset_set_lighting,
-                                       VkSampler sampler,
-                                       VkQueue render_queue)
-    : impl(std::make_unique<Impl>(cfg, dev, mem, pipeline_cache, 
-                                  asset_set_compute, asset_set_draw, 
-                                  asset_set_texture_mat, asset_set_lighting, sampler,
-                                  render_queue)),
+                             RenderContext &rctx)
+    : impl(std::make_unique<Impl>(cfg, rctx)),
       didRender(false)
 {
     if (cfg.enableBatchRenderer) {
         transitionOutputLayout();
     }
 
-    dev.dt.deviceWaitIdle(dev.hdl);
+    rctx.waitForIdle(); // FIXME
 }
 
 BatchRenderer::~BatchRenderer()
@@ -1792,11 +1819,6 @@ BatchImportedBuffers &BatchRenderer::getImportedBuffers(uint32_t frame_id)
 DisplayTexture &BatchRenderer::getDisplayTexture(uint32_t frame_id)
 {
     return *(impl->batchFrames[frame_id].displayTexture);
-}
-
-VkDescriptorSet BatchRenderer::getPBRSet(uint32_t frame_id)
-{
-    return impl->batchFrames[frame_id].pbrSet;
 }
 
 // Get the semaphore that the viewer renderer has to wait on

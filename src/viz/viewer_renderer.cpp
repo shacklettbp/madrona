@@ -1496,8 +1496,7 @@ static void makeFrame(Frame *dst,
                       VkDescriptorSet grid_draw_set,
                       Sky &sky,
                       BatchImportedBuffers &batch_renderer_buffers,
-                      HeapArray<LayeredTarget> &batch_targets,
-                      VkDescriptorSet br_pbr_set)
+                      HeapArray<LayeredTarget> &batch_targets)
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
 
@@ -1635,20 +1634,12 @@ static void makeFrame(Frame *dst,
     DescHelper::storage(desc_updates[desc_counter++], lighting_set, &light_data_info, 3);
     DescHelper::storage(desc_updates[desc_counter++], shadow_gen_set, &light_data_info, 2);
 
-    if (br_pbr_set != VK_NULL_HANDLE) {
-        DescHelper::storage(desc_updates[desc_counter++], br_pbr_set, &light_data_info, 0);
-    }
-
     VkDescriptorImageInfo transmittance_info;
     transmittance_info.imageView = sky.transmittanceView;
     transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     transmittance_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::textures(desc_updates[desc_counter++], lighting_set, &transmittance_info, 1, 4, 0);
-
-    if (br_pbr_set != VK_NULL_HANDLE) {
-        DescHelper::textures(desc_updates[desc_counter++], br_pbr_set, &transmittance_info, 1, 1);
-    }
 
     VkDescriptorImageInfo irradiance_info;
     irradiance_info.imageView = sky.irradianceView;
@@ -1657,20 +1648,12 @@ static void makeFrame(Frame *dst,
 
     DescHelper::textures(desc_updates[desc_counter++], lighting_set, &irradiance_info, 1, 5, 0);
 
-    if (br_pbr_set != VK_NULL_HANDLE) {
-        DescHelper::textures(desc_updates[desc_counter++], br_pbr_set, &irradiance_info, 1, 2);
-    }
-
     VkDescriptorImageInfo scattering_info;
     scattering_info.imageView = sky.scatteringView;
     scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
     DescHelper::textures(desc_updates[desc_counter++], lighting_set, &scattering_info, 1, 6, 0);
-
-    if (br_pbr_set != VK_NULL_HANDLE) {
-        DescHelper::textures(desc_updates[desc_counter++], br_pbr_set, &scattering_info, 1, 3);
-    }
 
     VkDescriptorBufferInfo shadow_view_info;
     shadow_view_info.buffer = render_input.buffer;
@@ -1695,10 +1678,6 @@ static void makeFrame(Frame *dst,
     sky_info.range = buffer_sizes[6];
 
     DescHelper::storage(desc_updates[desc_counter++], lighting_set, &sky_info, 10);
-
-    if (br_pbr_set != VK_NULL_HANDLE) {
-        DescHelper::storage(desc_updates[desc_counter++], br_pbr_set, &sky_info, 4);
-    }
 
     VkDescriptorImageInfo blur_input_info;
     blur_input_info.imageView = shadow_fb.varianceView;
@@ -2590,8 +2569,7 @@ static ViewerRendererState initState(RenderContext &rctx,
                   grid_draw.descPool.makeSet(),
                   rctx.sky_,
                   rctx.batchRenderer->getImportedBuffers(0),
-                  rctx.batchRenderer->getLayeredTargets(0),
-                  rctx.batchRenderer->getPBRSet(0));
+                  rctx.batchRenderer->getLayeredTargets(0));
     }
 
     HostBuffer screenshot_buffer = rctx.alloc.makeStagingBuffer(

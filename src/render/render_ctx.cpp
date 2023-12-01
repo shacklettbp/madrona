@@ -1337,10 +1337,7 @@ RenderContext::RenderContext(
          1
     };
 
-    batchRenderer = std::make_unique<BatchRenderer>(
-        br_cfg, dev, alloc, pipelineCache, asset_set_cull_, 
-        asset_set_draw_, asset_set_tex_compute_, asset_batch_lighting_set_, 
-        repeatSampler, renderQueue);
+    batchRenderer = std::make_unique<BatchRenderer>(br_cfg, *this);
 }
 
 RenderContext::~RenderContext()
