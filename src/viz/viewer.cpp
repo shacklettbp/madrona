@@ -439,7 +439,7 @@ static void cfgUI(ViewerControl &ctrl,
     ctrl.requestedScreenshot = ImGui::Button("Take Screenshot");
 
     ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * float(
-        std::max(14_u32, (uint32_t)strlen("screenshot.bmp")) + 3));
+        strlen("Take Screenshot")) + 4.f);
     ImGui::InputText("Output File (.bmp)", ctrl.screenshotFilePath, 256);
     ImGui::PopItemWidth();
 
