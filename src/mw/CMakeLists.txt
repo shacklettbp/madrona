@@ -63,7 +63,7 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/physics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/narrowphase.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/broadphase.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../viz/viewer_system.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../render/ecs_system.cpp
 )
     
 set(JOB_SYS_INTERNAL_SRC_LIST)
