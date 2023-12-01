@@ -155,6 +155,7 @@ void RenderingSystem::registerTypes(ECSRegistry &registry,
 
     // Pointers get set in RenderingSystem::init
     if (bridge) {
+#if defined(MADRONA_GPU_MODE)
         registry.registerArchetype<RenderCameraArchetype>(
             ComponentMetadataSelector<PerspectiveCameraData>(ComponentFlags::ImportMemory),
             ArchetypeFlags::None,
@@ -163,6 +164,10 @@ void RenderingSystem::registerTypes(ECSRegistry &registry,
             ComponentMetadataSelector<InstanceData>(ComponentFlags::ImportMemory),
             ArchetypeFlags::ImportOffsets,
             bridge->maxInstancesPerWorld);
+#else
+        registry.registerArchetype<RenderCameraArchetype>();
+        registry.registerArchetype<RenderableArchetype>();
+#endif
     } else {
         registry.registerArchetype<RenderCameraArchetype>();
         registry.registerArchetype<RenderableArchetype>();
@@ -294,6 +299,7 @@ void RenderingSystem::makeEntityRenderable(Context &ctx,
                                               Entity e)
 {
     Entity render_entity = ctx.makeEntity<RenderableArchetype>();
+
     ctx.get<Renderable>(e).renderEntity = render_entity;
 }
 
