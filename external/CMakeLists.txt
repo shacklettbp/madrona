@@ -104,8 +104,13 @@ set_target_properties(spv_reflect PROPERTIES CXX_VISIBILITY_PRESET hidden)
 set_target_properties(spv_reflect PROPERTIES VISIBILITY_INLINES_HIDDEN ON)
 
 add_library(imgui INTERFACE)
-target_include_directories(imgui INTERFACE
+target_include_directories(imgui SYSTEM INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui
+)
+
+add_library(stb INTERFACE)
+target_include_directories(stb SYSTEM INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stb
 )
 
 if (MADRONA_LINUX)
