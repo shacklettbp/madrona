@@ -10,6 +10,7 @@ struct RenderContext {
     RenderContext(APIBackend *render_backend,
                   GPUDevice *render_dev,
                   const RenderManager::Config &cfg);
+    RenderContext(const RenderContext &) = delete;
     ~RenderContext();
 
     CountT loadObjects(Span<const imp::SourceObject> src_objs,

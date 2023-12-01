@@ -561,6 +561,8 @@ static EngineInterop setupEngineInterop(Device &dev,
                                         uint32_t render_height,
                                         VoxelConfig voxel_config)
 {
+    (void)dev;
+
     auto views_cpu = Optional<render::vk::HostBuffer>::none();
     auto view_offsets_cpu = Optional<render::vk::HostBuffer>::none();
 
@@ -1320,7 +1322,7 @@ RenderContext::RenderContext(
         dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &asset_batch_lighting_set_);
     }
 
-#if defined (MADRONA_MACOS)
+#ifdef MADRONA_MACOS
     // Batch renderer is not supported on MacOS
     assert(!cfg.enableBatchRenderer);
 #endif
@@ -1332,7 +1334,6 @@ RenderContext::RenderContext(
          cfg.numWorlds,
          cfg.maxViewsPerWorld,
          cfg.maxInstancesPerWorld,
-         // (uint32_t)frames_.size()
          1
     };
 
