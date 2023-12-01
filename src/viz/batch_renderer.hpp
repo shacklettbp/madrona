@@ -3,7 +3,6 @@
 #include "vk/memory.hpp"
 #include <memory>
 #include <madrona/importer.hpp>
-#include <madrona/viz/interop.hpp>
 #include <madrona/render/vk/backend.hpp>
 #include <madrona/render/vk/device.hpp>
 
@@ -11,6 +10,7 @@
 #include "vk/cuda_interop.hpp"
 #endif
 
+#include "ecs_interop.hpp"
 #include "render_common.hpp"
 
 namespace madrona::render {

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace madrona::viz {
+namespace madrona::render {
 
 struct alignas(16) PerspectiveCameraData {
     math::Vector3 position;
@@ -20,7 +20,7 @@ struct alignas(16) InstanceData {
     int32_t worldIDX;
 };
 
-struct VizECSBridge {
+struct RenderECSBridge {
     // Allocated from Vulkan, to be imported into Cuda
     PerspectiveCameraData *views;
     InstanceData *instances;

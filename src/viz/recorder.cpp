@@ -10,7 +10,7 @@
 namespace madrona::viz {
 
 struct Recorder::Impl {
-    VizECSBridge bridge;
+    RenderECSBridge bridge;
     bool gpuCopyRequired;
     uint32_t numWorlds;
     uint64_t numInstanceCopyBytes;
@@ -103,7 +103,7 @@ Recorder::Impl * Recorder::Impl::init(const Config &cfg)
         done_readback = nullptr;
     }
 
-    VizECSBridge bridge {
+    RenderECSBridge bridge {
         .views = interop_view_ptrs,
         .numViews = interop_num_views,
         .instances = interop_instance_ptrs,
@@ -117,7 +117,7 @@ Recorder::Impl * Recorder::Impl::init(const Config &cfg)
         sizeof(uint32_t) * cfg.numWorlds);
     utils::zeroN<uint32_t>(cur_episode_lens, cfg.numWorlds);
 
-    VizECSBridge bridge;
+    RenderECSBridge bridge;
     bool gpuCopyRequired;
     uint32_t numWorlds;
     uint64_t numInstanceCopyBytes;
@@ -179,7 +179,7 @@ Recorder::Recorder(const Config &cfg)
 Recorder::Recorder(Recorder &&o) = default;
 Recorder::~Recorder() = default;
 
-const VizECSBridge * Recorder::bridge() const
+const RenderECSBridge * Recorder::bridge() const
 {
     return &impl_->bridge;
 }

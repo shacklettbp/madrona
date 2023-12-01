@@ -2,7 +2,6 @@
 
 #include <madrona/render/vk/backend.hpp>
 #include <madrona/render/vk/device.hpp>
-#include <madrona/viz/interop.hpp>
 #include <madrona/dyn_array.hpp>
 
 #include <cstdint>
@@ -16,6 +15,7 @@
 #endif
 
 #include "shader.hpp"
+#include "ecs_interop.hpp"
 
 namespace madrona::render {
 
@@ -123,8 +123,8 @@ struct EngineInterop {
     VkBuffer instancesHdl;
     VkBuffer instanceOffsetsHdl;
 
-    viz::VizECSBridge bridge;
-    const viz::VizECSBridge *gpuBridge;
+    RenderECSBridge bridge;
+    const RenderECSBridge *gpuBridge;
 
     uint32_t maxViewsPerWorld;
     uint32_t maxInstancesPerWorld;

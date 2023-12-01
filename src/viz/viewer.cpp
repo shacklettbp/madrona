@@ -3,9 +3,6 @@
 #include <madrona/utils.hpp>
 #include <madrona/math.hpp>
 
-#include "render_common.hpp"
-#include "render_ctx.hpp"
-
 #include "viewer_common.hpp"
 #include "viewer_renderer.hpp"
 

@@ -135,7 +135,7 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
-    auto font_path = std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+    auto font_path = std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "font.ttf";
 
     float scale_factor;
@@ -243,7 +243,7 @@ static ImGuiRenderState imguiInit(GLFWwindow *window, const Device &dev,
 static PipelineShaders makeVoxelGenShader(const Device& dev)
 {
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
@@ -329,7 +329,7 @@ static PipelineShaders makeVoxelDrawShaders(
     (void)clamp_sampler;
 
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     auto shader_path = (shader_dir / "voxel_draw.hlsl").string();
@@ -374,7 +374,7 @@ static PipelineShaders makeShadowDrawShaders(
     (void)clamp_sampler;
 
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     auto shader_path = (shader_dir / "viewer_shadow_draw.hlsl").string();
@@ -410,7 +410,7 @@ static PipelineShaders makeShadowGenShader(const Device &dev, VkSampler clamp_sa
 {
     (void)clamp_sampler;
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
@@ -428,7 +428,7 @@ static PipelineShaders makeShadowGenShader(const Device &dev, VkSampler clamp_sa
 static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler clamp_sampler)
 {
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
@@ -447,7 +447,7 @@ static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler c
 static vk::PipelineShaders makeGridDrawShader(const vk::Device &dev, VkSampler clamp_sampler)
 {
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
@@ -473,7 +473,7 @@ static PipelineShaders makeBlurShader(const Device &dev, VkSampler clamp_sampler
 {
     (void)clamp_sampler;
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
@@ -1003,7 +1003,7 @@ static Pipeline<1> makeGridDrawPipeline(const Device &dev,
 static PipelineShaders makeQuadShader(const Device &dev, VkSampler clamp_sampler)
 {
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;

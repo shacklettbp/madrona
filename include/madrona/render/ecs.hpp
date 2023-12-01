@@ -3,10 +3,10 @@
 #include <madrona/taskgraph_builder.hpp>
 #include <madrona/math.hpp>
 
-namespace madrona::viz {
+namespace madrona::render {
 
 // This will be attached to any entity that wants to be a viewer
-struct VizCamera {
+struct RenderCamera {
     Entity cameraEntity;
 
     // 1.0 / tanf(fovy * 0.5)
@@ -21,11 +21,11 @@ struct Renderable {
     Entity renderEntity;
 };
 
-struct VizECSBridge;
+struct RenderECSBridge;
 
-struct VizRenderingSystem {
+struct RenderingSystem {
     static void registerTypes(ECSRegistry &registry,
-                              const VizECSBridge *bridge);
+                              const RenderECSBridge *bridge);
 
     static TaskGraphNodeID setupTasks(
         TaskGraphBuilder &builder,
@@ -34,7 +34,7 @@ struct VizRenderingSystem {
     static void reset(Context &ctx);
 
     static void init(Context &ctx,
-                     const VizECSBridge *bridge);
+                     const RenderECSBridge *bridge);
 
     static uint32_t * getVoxelPtr(Context &ctx);
 

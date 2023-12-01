@@ -2,7 +2,7 @@
 
 #include <madrona/importer.hpp>
 #include <madrona/render/api.hpp>
-#include <madrona/viz/render_mgr.hpp>
+#include <madrona/render/render_mgr.hpp>
 #include <madrona/window.hpp>
 
 #include <memory>

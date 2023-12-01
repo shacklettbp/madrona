@@ -18,7 +18,6 @@
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 #include <madrona/importer.hpp>
-#include <madrona/render/batch_renderer_system.hpp>
 
 #include <cuda_runtime.h>
 #include <cuda.h>

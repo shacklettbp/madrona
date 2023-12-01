@@ -1,10 +1,10 @@
-#include <madrona/viz/render_mgr.hpp>
+#include <madrona/render/render_mgr.hpp>
 
 #include "render_ctx.hpp"
 
 namespace madrona::render {
 
-const viz::VizECSBridge * RenderManager::bridge() const
+const render::RenderECSBridge * RenderManager::bridge() const
 {
     return rctx_->engine_interop_.gpuBridge ?
         rctx_->engine_interop_.gpuBridge : &rctx_->engine_interop_.bridge;

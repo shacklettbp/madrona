@@ -264,7 +264,7 @@ static PipelineShaders makeDrawShaders(
     (void)clamp_sampler;
 
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     auto shader_path = (shader_dir / "viewer_draw.hlsl").string();
@@ -315,7 +315,7 @@ static PipelineShaders makeDrawShaders(
 static PipelineShaders makeCullShader(const Device &dev)
 {
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
@@ -743,9 +743,9 @@ static EngineInterop setupEngineInterop(Device &dev,
 #endif
     }
 
-    viz::VizECSBridge bridge = {
-        .views = (viz::PerspectiveCameraData *)views_base,
-        .instances = (viz::InstanceData *)instances_base,
+    RenderECSBridge bridge = {
+        .views = (PerspectiveCameraData *)views_base,
+        .instances = (InstanceData *)instances_base,
         .instanceOffsets = (int32_t *)instance_offsets_base,
         .viewOffsets = (int32_t *)view_offsets_base,
         .totalNumViews = total_num_views_readback,
@@ -763,14 +763,14 @@ static EngineInterop setupEngineInterop(Device &dev,
         .isGPUBackend = gpu_input
     };
 
-    const viz::VizECSBridge *gpu_bridge = nullptr;
+    const RenderECSBridge *gpu_bridge = nullptr;
     if (!gpu_input) {
         gpu_bridge = nullptr;
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
-        gpu_bridge = (const viz::VizECSBridge *)cu::allocGPU(
-            sizeof(viz::VizECSBridge));
-        cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(viz::VizECSBridge),
+        gpu_bridge = (const RenderECSBridge *)cu::allocGPU(
+            sizeof(RenderECSBridge));
+        cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(RenderECSBridge),
                    cudaMemcpyHostToDevice);
 #endif
     }
@@ -853,7 +853,7 @@ inline constexpr size_t SHADOW_OFFSET_FILTER_SIZE = 8;
 static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 {
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "sky";
 
     auto [transmittance, transmittance_reqs] = alloc.makeTexture2D(

@@ -5,7 +5,7 @@
 #include <madrona/exec_mode.hpp>
 
 #include <madrona/render/common.hpp>
-#include <madrona/viz/interop.hpp>
+#include <madrona/render/ecs.hpp>
 
 #include <memory>
 
@@ -46,7 +46,7 @@ public:
 
     void configureLighting(Span<const LightConfig> lights);
 
-    const viz::VizECSBridge * bridge() const;
+    const RenderECSBridge * bridge() const;
     inline RenderContext & renderContext() const;
 
     // Processes the ECS's output in order to be ready for rendering.

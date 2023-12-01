@@ -1,9 +1,9 @@
 #include "batch_renderer.hpp"
-#include "madrona/utils.hpp"
-#include "madrona/viz/interop.hpp"
 #include "shader.hpp"
+#include "ecs_interop.hpp"
 
-#include "madrona/heap_array.hpp"
+#include <madrona/utils.hpp>
+#include <madrona/heap_array.hpp>
 
 #include <array>
 #include <vector>
@@ -173,7 +173,7 @@ static vk::PipelineShaders makeDrawShaders(const vk::Device &dev,
     (void)clamp_sampler;
 
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     auto shader_path = (shader_dir / "batch_draw.hlsl").string();
@@ -367,7 +367,7 @@ static vk::PipelineShaders makeShaders(const vk::Device &dev,
     (void)sampler;
 
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
@@ -386,7 +386,7 @@ static vk::PipelineShaders makeShadersLighting(const vk::Device &dev,
                                        VkSampler repeat_sampler = VK_NULL_HANDLE)
 {
     std::filesystem::path shader_dir =
-        std::filesystem::path(STRINGIFY(VIEWER_DATA_DIR)) /
+        std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
     ShaderCompiler compiler;
@@ -398,22 +398,22 @@ static vk::PipelineShaders makeShadersLighting(const vk::Device &dev,
     return vk::PipelineShaders(dev, tmp_alloc,
                                Span<const SPIRVShader>(&spirv, 1), 
                                Span<const vk::BindingOverride>({
-                                   vk::BindingOverride{
+                                   vk::BindingOverride {
                                        0, 0, VK_NULL_HANDLE, 
                                        100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 
                                    },
-                                   vk::BindingOverride{
+                                   vk::BindingOverride {
                                        0, 1, VK_NULL_HANDLE,
                                        100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
                                    },
-                                   vk::BindingOverride{
+                                   vk::BindingOverride {
                                        4, 0, VK_NULL_HANDLE,
                                        InternalConfig::maxTextures, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
                                    },
-                                   vk::BindingOverride{
+                                   vk::BindingOverride {
                                        4, 1, repeat_sampler, 1, 0
-                                   }
-                                   }));
+                                   },
+                                }));
 }
 
 template <typename T>
@@ -609,10 +609,10 @@ static void makeBatchFrame(vk::Device& dev,
                            VkDescriptorSet pbr_set,
                            bool enable_batch_renderer)
 {
-    VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(viz::PerspectiveCameraData);
+    VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(PerspectiveCameraData);
     vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
 
-    VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(viz::InstanceData);
+    VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(InstanceData);
     vk::LocalBuffer instances = alloc.makeLocalBuffer(instance_size).value();
 
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
@@ -1274,8 +1274,8 @@ static void sortInstancesAndViewsCPU(EngineInterop *interop)
                   });
     }
 
-    viz::InstanceData *instances = (viz::InstanceData *)interop->instancesCPU->ptr;
-    viz::PerspectiveCameraData *views = (viz::PerspectiveCameraData *)interop->viewsCPU->ptr;
+    InstanceData *instances = (InstanceData *)interop->instancesCPU->ptr;
+    PerspectiveCameraData *views = (PerspectiveCameraData *)interop->viewsCPU->ptr;
 
     { // Write the sorted array of views and instances
         for (uint32_t i = 0; i < *interop->bridge.totalNumInstances; ++i) {

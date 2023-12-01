@@ -1,14 +1,8 @@
 #pragma once
 
-#include <madrona/viz/render_mgr.hpp>
+#include <madrona/render/render_mgr.hpp>
 
 #include "batch_renderer.hpp"
-
-namespace madrona::viz {
-
-struct ViewerInput;
-
-}
 
 namespace madrona::render {
 

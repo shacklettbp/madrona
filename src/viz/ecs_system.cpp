@@ -1,10 +1,10 @@
-#include <madrona/viz/system.hpp>
+#include <madrona/render/ecs.hpp>
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
 
-#include <madrona/viz/interop.hpp>
+#include "ecs_interop.hpp"
 
-namespace madrona::viz {
+namespace madrona::render {
 using namespace base;
 using namespace math;
 
@@ -12,11 +12,11 @@ struct RenderableArchetype : public Archetype<
     InstanceData
 > {};
 
-struct VizCameraArchetype : public Archetype<
+struct RenderCameraArchetype : public Archetype<
     PerspectiveCameraData
 > {};
 
-struct ViewerSystemState {
+struct RenderingSystemState {
     uint32_t *totalNumViews;
     uint32_t *totalNumInstances;
 
@@ -58,7 +58,7 @@ inline void instanceTransformUpdate(Context &ctx,
     (void)renderable;
 
     // Just update the instance data that is associated with this entity
-    auto &system_state = ctx.singleton<ViewerSystemState>();
+    auto &system_state = ctx.singleton<RenderingSystemState>();
     uint32_t instance_id = system_state.totalNumInstancesCPU->fetch_add<sync::acq_rel>(1);
 
     // Required for stable sorting on CPU
@@ -75,8 +75,8 @@ inline void instanceTransformUpdate(Context &ctx,
     data.objectID = obj_id.idx;
 }
 
-uint32_t * VizRenderingSystem::getVoxelPtr(Context &ctx) {
-    auto &sys_state = ctx.singleton<ViewerSystemState>();
+uint32_t * RenderingSystem::getVoxelPtr(Context &ctx) {
+    auto &sys_state = ctx.singleton<RenderingSystemState>();
     return sys_state.voxels;
 }
 
@@ -84,17 +84,17 @@ inline void viewTransformUpdate(Context &ctx,
                                 Entity e,
                                 const Position &pos,
                                 const Rotation &rot,
-                                const VizCamera &viz_cam)
+                                const RenderCamera &cam)
 {
-    Vector3 camera_pos = pos + viz_cam.cameraOffset;
+    Vector3 camera_pos = pos + cam.cameraOffset;
 
 #if defined(MADRONA_GPU_MODE)
     (void)e;
 
     PerspectiveCameraData &cam_data = 
-        ctx.get<PerspectiveCameraData>(viz_cam.cameraEntity);
+        ctx.get<PerspectiveCameraData>(cam.cameraEntity);
 #else
-    auto &system_state = ctx.singleton<ViewerSystemState>();
+    auto &system_state = ctx.singleton<RenderingSystemState>();
     uint32_t view_id = system_state.totalNumViewsCPU->fetch_add<sync::acq_rel>(1);
 
     // Required for stable sorting on CPU
@@ -108,17 +108,17 @@ inline void viewTransformUpdate(Context &ctx,
     cam_data.worldIDX = ctx.worldID().idx;
 
 #if !defined(MADRONA_GPU_MODE)
-    float x_scale = viz_cam.fovScale / system_state.aspectRatio;
-    float y_scale = -viz_cam.fovScale;
+    float x_scale = cam.fovScale / system_state.aspectRatio;
+    float y_scale = -cam.fovScale;
 
     cam_data.xScale = x_scale;
     cam_data.yScale = y_scale;
-    cam_data.zNear = viz_cam.zNear;
+    cam_data.zNear = cam.zNear;
 #endif
 }
 
 inline void exportCounts(Context &ctx,
-                         ViewerSystemState &viewer_state)
+                         RenderingSystemState &viewer_state)
 {
     (void)viewer_state;
 
@@ -126,7 +126,7 @@ inline void exportCounts(Context &ctx,
 #if defined(MADRONA_GPU_MODE)
         auto *state_mgr = mwGPU::getStateManager();
         *viewer_state.totalNumViews = state_mgr->getArchetypeNumRows<
-            VizCameraArchetype>();
+            RenderCameraArchetype>();
         *viewer_state.totalNumInstances = state_mgr->getArchetypeNumRows<
             RenderableArchetype>();
 #else
@@ -144,18 +144,18 @@ inline void exportCounts(Context &ctx,
     }
 }
 
-void VizRenderingSystem::registerTypes(ECSRegistry &registry,
-                                       const VizECSBridge *bridge)
+void RenderingSystem::registerTypes(ECSRegistry &registry,
+                                       const RenderECSBridge *bridge)
 {
-    registry.registerComponent<VizCamera>();
+    registry.registerComponent<RenderCamera>();
     registry.registerComponent<Renderable>();
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
 
 
-    // Pointers get set in VizRenderingSystem::init
+    // Pointers get set in RenderingSystem::init
     if (bridge) {
-        registry.registerArchetype<VizCameraArchetype>(
+        registry.registerArchetype<RenderCameraArchetype>(
             ComponentMetadataSelector<PerspectiveCameraData>(ComponentFlags::ImportMemory),
             ArchetypeFlags::None,
             bridge->maxViewsPerworld);
@@ -164,7 +164,7 @@ void VizRenderingSystem::registerTypes(ECSRegistry &registry,
             ArchetypeFlags::ImportOffsets,
             bridge->maxInstancesPerWorld);
     } else {
-        registry.registerArchetype<VizCameraArchetype>();
+        registry.registerArchetype<RenderCameraArchetype>();
         registry.registerArchetype<RenderableArchetype>();
     }
 
@@ -175,25 +175,25 @@ void VizRenderingSystem::registerTypes(ECSRegistry &registry,
 
         state_mgr->setArchetypeWorldOffsets<RenderableArchetype>(
             bridge->instanceOffsets);
-        state_mgr->setArchetypeWorldOffsets<VizCameraArchetype>(
+        state_mgr->setArchetypeWorldOffsets<RenderCameraArchetype>(
             bridge->viewOffsets);
 
         state_mgr->setArchetypeComponent<RenderableArchetype, InstanceData>(
             bridge->instances);
-        state_mgr->setArchetypeComponent<VizCameraArchetype, PerspectiveCameraData>(
+        state_mgr->setArchetypeComponent<RenderCameraArchetype, PerspectiveCameraData>(
             bridge->views);
     }
 #else
     (void)bridge;
 #endif
 
-    registry.registerSingleton<ViewerSystemState>();
+    registry.registerSingleton<RenderingSystemState>();
 
     // Technically this singleton is only used in record mode
     registry.registerSingleton<RecordSystemState>();
 }
 
-TaskGraphNodeID VizRenderingSystem::setupTasks(
+TaskGraphNodeID RenderingSystem::setupTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps)
 {
@@ -216,12 +216,12 @@ TaskGraphNodeID VizRenderingSystem::setupTasks(
             Entity,
             Position,
             Rotation,
-            VizCamera
+            RenderCamera
         >>({instance_setup});
 
     auto export_counts = builder.addToGraph<ParallelForNode<Context,
         exportCounts,
-            ViewerSystemState
+            RenderingSystemState
         >>({viewdata_update});
 
 #ifdef MADRONA_GPU_MODE
@@ -234,7 +234,7 @@ TaskGraphNodeID VizRenderingSystem::setupTasks(
         builder.addToGraph<ResetTmpAllocNode>({sort_instances});
 
     auto sort_views = 
-        builder.addToGraph<SortArchetypeNode<VizCameraArchetype, WorldID>>(
+        builder.addToGraph<SortArchetypeNode<RenderCameraArchetype, WorldID>>(
             {post_instance_sort_reset_tmp});
 
     auto post_view_sort_reset_tmp =
@@ -246,16 +246,16 @@ TaskGraphNodeID VizRenderingSystem::setupTasks(
     return export_counts;
 }
 
-void VizRenderingSystem::reset(Context &ctx)
+void RenderingSystem::reset(Context &ctx)
 {
     (void)ctx;
     // Nothing to reset
 }
 
-void VizRenderingSystem::init(Context &ctx,
-                              const VizECSBridge *bridge)
+void RenderingSystem::init(Context &ctx,
+                              const RenderECSBridge *bridge)
 {
-    auto &system_state = ctx.singleton<ViewerSystemState>();
+    auto &system_state = ctx.singleton<RenderingSystemState>();
 
     int32_t world_idx = ctx.worldID().idx;
 
@@ -290,14 +290,14 @@ void VizRenderingSystem::init(Context &ctx,
     }
 }
 
-void VizRenderingSystem::makeEntityRenderable(Context &ctx,
+void RenderingSystem::makeEntityRenderable(Context &ctx,
                                               Entity e)
 {
     Entity render_entity = ctx.makeEntity<RenderableArchetype>();
     ctx.get<Renderable>(e).renderEntity = render_entity;
 }
 
-void VizRenderingSystem::attachEntityToView(Context &ctx,
+void RenderingSystem::attachEntityToView(Context &ctx,
                                             Entity e,
                                             float vfov_degrees,
                                             float z_near,
@@ -305,13 +305,13 @@ void VizRenderingSystem::attachEntityToView(Context &ctx,
 {
     float fov_scale = 1.0f / tanf(toRadians(vfov_degrees * 0.5f));
 
-    Entity camera_entity = ctx.makeEntity<VizCameraArchetype>();
-    ctx.get<VizCamera>(e) = { camera_entity, fov_scale, z_near, camera_offset };
+    Entity camera_entity = ctx.makeEntity<RenderCameraArchetype>();
+    ctx.get<RenderCamera>(e) = { camera_entity, fov_scale, z_near, camera_offset };
 
     PerspectiveCameraData &cam_data = 
         ctx.get<PerspectiveCameraData>(camera_entity);
 
-    auto &state = ctx.singleton<ViewerSystemState>();
+    auto &state = ctx.singleton<RenderingSystemState>();
 
     float x_scale = fov_scale / state.aspectRatio;
     float y_scale = -fov_scale;
@@ -326,21 +326,21 @@ void VizRenderingSystem::attachEntityToView(Context &ctx,
     };
 }
 
-void VizRenderingSystem::cleanupViewingEntity(Context &ctx,
-                                              Entity e)
+void RenderingSystem::cleanupViewingEntity(Context &ctx,
+                                           Entity e)
 {
-    Entity view_entity = ctx.get<VizCamera>(e).cameraEntity;
+    Entity view_entity = ctx.get<RenderCamera>(e).cameraEntity;
     ctx.destroyEntity(view_entity);
 }
 
-void VizRenderingSystem::cleanupRenderableEntity(Context &ctx,
-                                                 Entity e)
+void RenderingSystem::cleanupRenderableEntity(Context &ctx,
+                                              Entity e)
 {
     Entity render_entity = ctx.get<Renderable>(e).renderEntity;
     ctx.destroyEntity(render_entity);
 }
 
-void VizRenderingSystem::markEpisode(Context &ctx)
+void RenderingSystem::markEpisode(Context &ctx)
 {
     auto &record_state = ctx.singleton<RecordSystemState>();
     if (record_state.episodeDone != nullptr) {
