@@ -13,18 +13,16 @@ class WindowManager;
 
 class WindowHandle {
 public:
-    inline Window * get();
-    inline ~WindowHandle();
-
-    inline WindowHandle(WindowHandle &&o);
-
-private:
     inline WindowHandle(Window *win, WindowManager *wm);
 
+    inline WindowHandle(WindowHandle &&o);
+    inline ~WindowHandle();
+
+    inline Window * get();
+
+private:
     Window *win_;
     WindowManager *wm_;
-
-    friend class WindowManager;
 };
 
 class WindowManager {
@@ -43,8 +41,6 @@ public:
                             uint32_t width,
                             uint32_t height);
 
-    void destroyWindow(Window *window);
-
     render::APIManager & gpuAPIManager();
 
     render::GPUHandle initGPU(
@@ -53,8 +49,12 @@ public:
 private:
     static inline Config defaultConfig();
 
+    void destroyWindow(Window *window);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    friend class WindowHandle;
 };
 
 }

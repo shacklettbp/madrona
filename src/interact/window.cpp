@@ -94,6 +94,11 @@ WindowManager::WindowManager(const Config &cfg)
 WindowManager::WindowManager(WindowManager &&) = default;
 WindowManager::~WindowManager() = default;
 
+WindowHandle::WindowHandle(Window *win, WindowManager *wm)
+    : win_(win),
+      wm_(wm)
+{}
+
 WindowHandle WindowManager::makeWindow(const char *title,
                                        uint32_t width,
                                        uint32_t height)
