@@ -82,7 +82,8 @@ struct BatchRenderer {
 
     void renderViews(BatchRenderInfo info,
                      const DynArray<AssetData> &loaded_assets,
-                     EngineInterop *interop);
+                     EngineInterop *interop,
+                     RenderContext &rctx);
 
     void transitionOutputLayout();
 

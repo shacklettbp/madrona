@@ -59,7 +59,7 @@ void RenderManager::batchRender()
     };
 
     rctx_->batchRenderer->renderViews(
-        info, rctx_->loaded_assets_, &rctx_->engine_interop_);
+        info, rctx_->loaded_assets_, &rctx_->engine_interop_, *rctx_);
 }
 
 }

@@ -94,9 +94,9 @@ WindowManager::WindowManager(const Config &cfg)
 WindowManager::WindowManager(WindowManager &&) = default;
 WindowManager::~WindowManager() = default;
 
-Window * WindowManager::makeWindow(const char *title,
-                                   uint32_t width,
-                                   uint32_t height)
+WindowHandle WindowManager::makeWindow(const char *title,
+                                       uint32_t width,
+                                       uint32_t height)
 {
     GLFWwindow *glfw_window =
         makeGLFWwindow(title, width, height);
@@ -112,7 +112,7 @@ Window * WindowManager::makeWindow(const char *title,
     render_window->hdl = glfw_window;
     render_window->surface = surface;
 
-    return render_window;
+    return WindowHandle(render_window, *this);
 }
 
 void WindowManager::destroyWindow(Window *window)
@@ -123,6 +123,7 @@ void WindowManager::destroyWindow(Window *window)
         impl_->gpuAPIManager.backend());
     backend.dt.destroySurfaceKHR(
         backend.hdl, render_window->surface, nullptr);
+
     glfwDestroyWindow(render_window->hdl);
 
     delete window;

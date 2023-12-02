@@ -9,6 +9,22 @@ struct Window {
     uint32_t height;
 };
 
+class WindowManager;
+
+class WindowHandle {
+public:
+    inline Window * get();
+    inline ~WindowHandle();
+
+private:
+    inline WindowHandle(Window *win, WindowManager &wm);
+
+    Window *win_;
+    WindowManager &wm_;
+
+    friend class WindowManager;
+};
+
 class WindowManager {
 public:
     struct Config {
@@ -21,9 +37,9 @@ public:
     WindowManager(WindowManager &&);
     ~WindowManager();
 
-    Window * makeWindow(const char *title,
-                        uint32_t width,
-                        uint32_t height);
+    WindowHandle makeWindow(const char *title,
+                            uint32_t width,
+                            uint32_t height);
 
     void destroyWindow(Window *window);
 

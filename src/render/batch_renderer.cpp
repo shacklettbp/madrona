@@ -493,6 +493,12 @@ static PipelineMP<1> makeComputePipeline(const vk::Device &dev,
 struct BatchFrame {
     BatchImportedBuffers buffers;
 
+    render::vk::LocalBuffer lighting;
+    render::vk::HostBuffer lightingStaging;
+
+    render::vk::LocalBuffer skyInput;
+    render::vk::HostBuffer skyInputStaging;
+
     // View, instance info, instance data
     VkDescriptorSet viewInstanceSetPrepare;
     VkDescriptorSet viewInstanceSetDraw;
@@ -607,8 +613,17 @@ static void makeBatchFrame(vk::Device& dev,
                            Optional<PipelineMP<1>> &draw,
                            VkDescriptorSet lighting_set,
                            VkDescriptorSet pbr_set,
-                           bool enable_batch_renderer)
+                           bool enable_batch_renderer,
+                           RenderContext &rctx)
 {
+    VkDeviceSize lights_size = InternalConfig::maxLights * sizeof(render::shader::DirectionalLight);
+    vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
+    vk::HostBuffer lights_staging = alloc.makeStagingBuffer(lights_size);
+
+    VkDeviceSize sky_input_size = sizeof(render::shader::SkyData);
+    vk::LocalBuffer sky_input = alloc.makeLocalBuffer(sky_input_size).value();
+    vk::HostBuffer sky_input_staging = alloc.makeStagingBuffer(sky_input_size);
+
     VkDeviceSize view_size = (cfg.numWorlds * cfg.maxViewsPerWorld) * sizeof(PerspectiveCameraData);
     vk::LocalBuffer views = alloc.makeLocalBuffer(view_size).value();
 
@@ -636,6 +651,8 @@ static void makeBatchFrame(vk::Device& dev,
     if (!enable_batch_renderer) {
         new (frame) BatchFrame{
             { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
+            std::move(lights), std::move(lights_staging),
+            std::move(sky_input), std::move(sky_input_staging),
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, 
             HeapArray<LayeredTarget>(0),
             HeapArray<DrawCommandPackage>(0),
@@ -660,7 +677,7 @@ static void makeBatchFrame(vk::Device& dev,
     VkDescriptorSet draw_views_set = draw->descPools[0].makeSet();
  
     //Descriptor sets
-    std::array<VkWriteDescriptorSet, 6> desc_updates;
+    std::array<VkWriteDescriptorSet, 11> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = views.buffer;
@@ -685,45 +702,45 @@ static void makeBatchFrame(vk::Device& dev,
 
     // PBR descriptor sets
 
-#if 0
+#if 1
     VkDescriptorBufferInfo light_data_info;
-    light_data_info.buffer = render_input.buffer;
-    light_data_info.offset = buffer_offsets[3];
-    light_data_info.range = buffer_sizes[4];
+    light_data_info.buffer = lights.buffer;
+    light_data_info.offset = 0;
+    light_data_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[7],
+    vk::DescHelper::storage(desc_updates[6],
                             pbr_set, &light_data_info, 0);
 
     VkDescriptorImageInfo transmittance_info;
-    transmittance_info.imageView = sky.transmittanceView;
+    transmittance_info.imageView = rctx.sky_.transmittanceView;
     transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     transmittance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[8],
+    vk::DescHelper::textures(desc_updates[7],
                              pbr_set, &transmittance_info, 1, 1);
 
     VkDescriptorImageInfo irradiance_info;
-    irradiance_info.imageView = sky.irradianceView;
+    irradiance_info.imageView = rctx.sky_.irradianceView;
     irradiance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     irradiance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[9],
+    vk::DescHelper::textures(desc_updates[8],
                              pbr_set, &irradiance_info, 1, 2);
 
     VkDescriptorImageInfo scattering_info;
-    scattering_info.imageView = sky.scatteringView;
+    scattering_info.imageView = rctx.sky_.scatteringView;
     scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[10],
+    vk::DescHelper::textures(desc_updates[9],
                              pbr_set, &scattering_info, 1, 3);
 
     VkDescriptorBufferInfo sky_info;
-    sky_info.buffer = render_input.buffer;
-    sky_info.offset = buffer_offsets[5];
-    sky_info.range = buffer_sizes[6];
+    sky_info.buffer = sky_input.buffer;
+    sky_info.offset = 0;
+    sky_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[11],
+    vk::DescHelper::storage(desc_updates[10],
                             pbr_set, &sky_info, 4);
 #endif
 
@@ -738,6 +755,8 @@ static void makeBatchFrame(vk::Device& dev,
 
     new (frame) BatchFrame{
         { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
+        std::move(lights), std::move(lights_staging),
+        std::move(sky_input), std::move(sky_input_staging),
         prepare_views_set,
         draw_views_set,
         prepare_views_set,
@@ -1148,7 +1167,8 @@ BatchRenderer::Impl::Impl(const Config &cfg,
                        batchDraw,
                        cfg.enableBatchRenderer ? lighting->descPools[0].makeSet() : VK_NULL_HANDLE,
                        cfg.enableBatchRenderer ? lighting->descPools[5].makeSet() : VK_NULL_HANDLE,
-                       cfg.enableBatchRenderer);
+                       cfg.enableBatchRenderer,
+                       rctx);
     }
 }
 
@@ -1500,9 +1520,74 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
     didRender = true;
 }
 
+static void packLighting(const vk::Device &dev,
+                         vk::HostBuffer &light_staging_buffer,
+                         const HeapArray<render::shader::DirectionalLight> &lights)
+{
+    render::shader::DirectionalLight *staging = 
+        (render::shader::DirectionalLight *)light_staging_buffer.ptr;
+    memcpy(staging, lights.data(),
+           sizeof(render::shader::DirectionalLight) * InternalConfig::maxLights);
+    light_staging_buffer.flush(dev);
+}
+
+static void packSky( const vk::Device &dev,
+                     vk::HostBuffer &staging)
+{
+    render::shader::SkyData *data = (render::shader::SkyData *)staging.ptr;
+
+    /* 
+       Based on the values of Eric Bruneton's atmosphere model.
+       We aren't going to calculate these manually come on (at least not yet)
+    */
+
+    /* 
+       These are the irradiance values at the top of the Earth's atmosphere
+       for the wavelengths 680nm (red), 550nm (green) and 440nm (blue) 
+       respectively. These are in W/m2
+       */
+    data->solarIrradiance = math::Vector4{1.474f, 1.8504f, 1.91198f, 0.0f};
+    // Angular radius of the Sun (radians)
+    data->solarAngularRadius = 0.004675f;
+    data->bottomRadius = 6360.0f / 2.0f;
+    data->topRadius = 6420.0f / 2.0f;
+
+    data->rayleighDensity.layers[0] =
+        render::shader::DensityLayer { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, {} };
+    data->rayleighDensity.layers[1] =
+        render::shader::DensityLayer { 0.0f, 1.0f, -0.125f, 0.0f, 0.0f, {} };
+    data->rayleighScatteringCoef =
+        math::Vector4{0.005802f, 0.013558f, 0.033100f, 0.0f};
+
+    data->mieDensity.layers[0] =
+        render::shader::DensityLayer { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, {} };
+    data->mieDensity.layers[1] =
+        render::shader::DensityLayer { 0.0f, 1.0f, -0.833333f, 0.0f, 0.0f, {} };
+    data->mieScatteringCoef = math::Vector4{0.003996f, 0.003996f, 0.003996f, 0.0f};
+    data->mieExtinctionCoef = math::Vector4{0.004440f, 0.004440f, 0.004440f, 0.0f};
+
+    data->miePhaseFunctionG = 0.8f;
+
+    data->absorptionDensity.layers[0] =
+        render::shader::DensityLayer { 25.000000f, 0.000000f, 0.000000f, 0.066667f, -0.666667f, {} };
+    data->absorptionDensity.layers[1] =
+        render::shader::DensityLayer { 0.000000f, 0.000000f, 0.000000f, -0.066667f, 2.666667f, {} };
+    data->absorptionExtinctionCoef =
+        math::Vector4{0.000650f, 0.001881f, 0.000085f, 0.0f};
+    data->groundAlbedo = math::Vector4{0.050000f, 0.050000f, 0.050000f, 0.0f};
+    data->muSunMin = -0.207912f;
+    data->wPlanetCenter =
+      math::Vector4{0.0f, 0.0f, -data->bottomRadius, 0.0f};
+    data->sunSize = math::Vector4{
+            0.0046750340586467079f, 0.99998907220740285f, 0.0f, 0.0f};
+
+    staging.flush(dev);
+}
+
 void BatchRenderer::renderViews(BatchRenderInfo info,
                                 const DynArray<AssetData> &loaded_assets,
-                                EngineInterop *interop) 
+                                EngineInterop *interop,
+                                RenderContext &rctx) 
 { 
     (void)interop;
 
@@ -1512,8 +1597,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     uint32_t frame_index = impl->currentFrame;
 
     BatchFrame &frame_data = impl->batchFrames[frame_index];
-
-    // BatchImportedBuffers &batch_buffers = getImportedBuffers(frame_index);
 
     // Start the command buffer and stuff
     VkCommandBuffer draw_cmd = frame_data.renderCmdbuf;
@@ -1525,6 +1608,28 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     }
 
     ////////////////////////////////////////////////////////////////
+
+    { // Import sky and lighting information first
+        packLighting(impl->dev, frame_data.lightingStaging, rctx.lights_);
+        VkBufferCopy light_copy {
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = sizeof(render::shader::DirectionalLight) * InternalConfig::maxLights
+        };
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, frame_data.lightingStaging.buffer,
+                             frame_data.lighting.buffer,
+                             1, &light_copy);
+
+        packSky(impl->dev, frame_data.skyInputStaging);
+        VkBufferCopy sky_copy {
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = sizeof(render::shader::SkyData)
+        };
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, frame_data.skyInputStaging.buffer,
+                             frame_data.skyInput.buffer,
+                             1, &sky_copy);
+    }
 
     { // Prepare memory written to by ECS with barrier
         std::array barriers = {
@@ -1550,6 +1655,22 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
                 frame_data.buffers.instanceOffsets.buffer,
+                0, VK_WHOLE_SIZE
+            },
+            VkBufferMemoryBarrier{
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                frame_data.lighting.buffer,
+                0, VK_WHOLE_SIZE
+            },
+            VkBufferMemoryBarrier{
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                frame_data.skyInput.buffer,
                 0, VK_WHOLE_SIZE
             },
         };
