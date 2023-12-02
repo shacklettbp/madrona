@@ -41,7 +41,6 @@ struct RenderECSBridge {
 
     int32_t renderWidth;
     int32_t renderHeight;
-    bool *episodeDone;
     uint32_t *voxels;
 
     uint32_t maxViewsPerworld;

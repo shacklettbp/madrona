@@ -4,7 +4,7 @@
 
 #include "ecs_interop.hpp"
 
-namespace madrona::render {
+namespace madrona::render::RenderingSystem {
 using namespace base;
 using namespace math;
 
@@ -35,10 +35,6 @@ struct RenderingSystemState {
     // Also only used when on the CPU backend
     uint64_t *instanceWorldIDsCPU;
     uint64_t *viewWorldIDsCPU;
-};
-
-struct RecordSystemState {
-    bool *episodeDone;
 };
 
 inline void instanceTransformUpdate(Context &ctx,
@@ -75,7 +71,8 @@ inline void instanceTransformUpdate(Context &ctx,
     data.objectID = obj_id.idx;
 }
 
-uint32_t * RenderingSystem::getVoxelPtr(Context &ctx) {
+uint32_t * getVoxelPtr(Context &ctx)
+{
     auto &sys_state = ctx.singleton<RenderingSystemState>();
     return sys_state.voxels;
 }
@@ -144,8 +141,8 @@ inline void exportCounts(Context &ctx,
     }
 }
 
-void RenderingSystem::registerTypes(ECSRegistry &registry,
-                                       const RenderECSBridge *bridge)
+void registerTypes(ECSRegistry &registry,
+                   const RenderECSBridge *bridge)
 {
     registry.registerComponent<RenderCamera>();
     registry.registerComponent<Renderable>();
@@ -193,14 +190,10 @@ void RenderingSystem::registerTypes(ECSRegistry &registry,
 #endif
 
     registry.registerSingleton<RenderingSystemState>();
-
-    // Technically this singleton is only used in record mode
-    registry.registerSingleton<RecordSystemState>();
 }
 
-TaskGraphNodeID RenderingSystem::setupTasks(
-    TaskGraphBuilder &builder,
-    Span<const TaskGraphNodeID> deps)
+TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
+                           Span<const TaskGraphNodeID> deps)
 {
     // FIXME: It feels like we should have persistent slots for renderer
     // state rather than needing to continually reset the instance count
@@ -251,18 +244,10 @@ TaskGraphNodeID RenderingSystem::setupTasks(
     return export_counts;
 }
 
-void RenderingSystem::reset(Context &ctx)
-{
-    (void)ctx;
-    // Nothing to reset
-}
-
-void RenderingSystem::init(Context &ctx,
-                              const RenderECSBridge *bridge)
+void init(Context &ctx,
+          const RenderECSBridge *bridge)
 {
     auto &system_state = ctx.singleton<RenderingSystemState>();
-
-    int32_t world_idx = ctx.worldID().idx;
 
     // This is where the renderer will read out the totals
     system_state.totalNumViews = bridge->totalNumViews;
@@ -286,28 +271,21 @@ void RenderingSystem::init(Context &ctx,
         (float)bridge->renderWidth / (float)bridge->renderHeight;
 
     system_state.voxels = bridge->voxels;
-
-    auto &record_state = ctx.singleton<RecordSystemState>();
-    if (bridge->episodeDone != nullptr) {
-        record_state.episodeDone = &bridge->episodeDone[world_idx];
-    } else {
-        record_state.episodeDone = nullptr;
-    }
 }
 
-void RenderingSystem::makeEntityRenderable(Context &ctx,
-                                           Entity e)
+void makeEntityRenderable(Context &ctx,
+                          Entity e)
 {
     Entity render_entity = ctx.makeEntity<RenderableArchetype>();
 
     ctx.get<Renderable>(e).renderEntity = render_entity;
 }
 
-void RenderingSystem::attachEntityToView(Context &ctx,
-                                            Entity e,
-                                            float vfov_degrees,
-                                            float z_near,
-                                            const math::Vector3 &camera_offset)
+void attachEntityToView(Context &ctx,
+                        Entity e,
+                        float vfov_degrees,
+                        float z_near,
+                        const math::Vector3 &camera_offset)
 {
     float fov_scale = 1.0f / tanf(toRadians(vfov_degrees * 0.5f));
 
@@ -332,26 +310,18 @@ void RenderingSystem::attachEntityToView(Context &ctx,
     };
 }
 
-void RenderingSystem::cleanupViewingEntity(Context &ctx,
-                                           Entity e)
+void cleanupViewingEntity(Context &ctx,
+                          Entity e)
 {
     Entity view_entity = ctx.get<RenderCamera>(e).cameraEntity;
     ctx.destroyEntity(view_entity);
 }
 
-void RenderingSystem::cleanupRenderableEntity(Context &ctx,
-                                              Entity e)
+void cleanupRenderableEntity(Context &ctx,
+                             Entity e)
 {
     Entity render_entity = ctx.get<Renderable>(e).renderEntity;
     ctx.destroyEntity(render_entity);
-}
-
-void RenderingSystem::markEpisode(Context &ctx)
-{
-    auto &record_state = ctx.singleton<RecordSystemState>();
-    if (record_state.episodeDone != nullptr) {
-        *record_state.episodeDone = true;
-    }
 }
 
 }
