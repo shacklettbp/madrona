@@ -307,7 +307,7 @@ struct SortArchetypeNodeBase : NodeBase {
     void copyKeys(int32_t invocation_idx);
     void computeWorldCounts(int32_t invocation_idx);
     void correctWorldCounts(int32_t invocation_idx);
-    void zeroWorldOffsetsAndCounts(int32_t invocation_idx);
+    void clearWorldOffsetsAndCounts(int32_t invocation_idx);
     void worldCountScan(int32_t invocation_idx);
 
 
