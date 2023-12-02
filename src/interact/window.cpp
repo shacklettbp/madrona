@@ -112,7 +112,7 @@ WindowHandle WindowManager::makeWindow(const char *title,
     render_window->hdl = glfw_window;
     render_window->surface = surface;
 
-    return WindowHandle(render_window, *this);
+    return WindowHandle(render_window, this);
 }
 
 void WindowManager::destroyWindow(Window *window)

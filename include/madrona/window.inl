@@ -9,14 +9,24 @@ Window * WindowHandle::get()
     return win_;
 }
 
-WindowHandle::WindowHandle(Window *win, WindowManager &wm)
+WindowHandle::WindowHandle(Window *win, WindowManager *wm)
     : win_(win), wm_(wm)
 {
 }
 
 WindowHandle::~WindowHandle()
 {
-    wm_.destroyWindow(win_);
+    if (win_)
+        wm_->destroyWindow(win_);
+}
+
+WindowHandle::WindowHandle(WindowHandle &&o)
+{
+    this->win_ = o.win_;
+    this->wm_ = o.wm_;
+
+    o.win_ = nullptr;
+    o.wm_ = nullptr;
 }
 
 }

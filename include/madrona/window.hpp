@@ -16,11 +16,13 @@ public:
     inline Window * get();
     inline ~WindowHandle();
 
+    inline WindowHandle(WindowHandle &&o);
+
 private:
-    inline WindowHandle(Window *win, WindowManager &wm);
+    inline WindowHandle(Window *win, WindowManager *wm);
 
     Window *win_;
-    WindowManager &wm_;
+    WindowManager *wm_;
 
     friend class WindowManager;
 };
