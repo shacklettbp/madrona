@@ -296,7 +296,7 @@ void RenderingSystem::init(Context &ctx,
 }
 
 void RenderingSystem::makeEntityRenderable(Context &ctx,
-                                              Entity e)
+                                           Entity e)
 {
     Entity render_entity = ctx.makeEntity<RenderableArchetype>();
 
