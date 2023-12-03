@@ -85,11 +85,8 @@ struct BatchRenderer {
     // or it's the one from renderViews.
     VkSemaphore getLatestWaitSemaphore();
 
-#ifdef MADRONA_CUDA_SUPPORT
     const uint8_t * getRGBCUDAPtr() const;
     const float * getDepthCUDAPtr() const;
-#endif
-
 };
 
 }
