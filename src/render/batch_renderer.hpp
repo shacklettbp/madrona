@@ -85,21 +85,13 @@ struct BatchRenderer {
                      EngineInterop *interop,
                      RenderContext &rctx);
 
-    void transitionOutputLayout();
-
-    void submitViewerCopy(VkCommandBuffer draw_cmd);
-
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
-    DisplayTexture &getDisplayTexture(uint32_t frame_id);
     HeapArray<LayeredTarget> &getLayeredTargets(uint32_t frame_id);
 
     // Get the semaphore that the viewer renderer has to wait on.
     // This is either going to be the semaphore from prepareForRendering,
     // or it's the one from renderViews.
     VkSemaphore getLatestWaitSemaphore();
-
-    // Select a view to display to the viewer
-    void selectVizBatchViewIDX(uint32_t batch_view_idx);
 };
 
 }

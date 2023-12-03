@@ -69,8 +69,6 @@ inline void instanceTransformUpdate(Context &ctx,
     data.scale = scale;
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
-
-    printf("%d (%f %f %f)\n", obj_id.idx, pos.x, pos.y, pos.z);
 }
 
 uint32_t * getVoxelPtr(Context &ctx)
