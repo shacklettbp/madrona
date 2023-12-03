@@ -69,6 +69,8 @@ inline void instanceTransformUpdate(Context &ctx,
     data.scale = scale;
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
+
+    printf("%d (%f %f %f)\n", obj_id.idx, pos.x, pos.y, pos.z);
 }
 
 uint32_t * getVoxelPtr(Context &ctx)
@@ -114,32 +116,23 @@ inline void viewTransformUpdate(Context &ctx,
 #endif
 }
 
-inline void exportCounts(Context &ctx,
-                         RenderingSystemState &viewer_state)
+#ifdef MADRONA_GPU_MODE
+inline void exportCountsGPU(Context &ctx,
+                            RenderingSystemState &sys_state)
 {
-    (void)viewer_state;
-
-    if (ctx.worldID().idx == 0) {
-#if defined(MADRONA_GPU_MODE)
-        auto *state_mgr = mwGPU::getStateManager();
-        *viewer_state.totalNumViews = state_mgr->getArchetypeNumRows<
-            RenderCameraArchetype>();
-        *viewer_state.totalNumInstances = state_mgr->getArchetypeNumRows<
-            RenderableArchetype>();
-#else
-
-#if 0
-        *viewer_state.totalNumViews = viewer_state.totalNumViewsCPU->load_relaxed();
-        *viewer_state.totalNumInstances = viewer_state.totalNumInstancesCPU->load_relaxed();
-
-        // Reset the atomic counters
-        viewer_state.totalNumViewsCPU->store_relaxed(0);
-        viewer_state.totalNumInstancesCPU->store_relaxed(0);
-#endif
-
-#endif
+    // FIXME: Add option for global, across worlds, systems
+    if (ctx.worldID().idx != 0) {
+        return;
     }
+
+    auto state_mgr = mwGPU::getStateManager();
+
+    *sys_state.totalNumViews = state_mgr->getArchetypeNumRows<
+        RenderCameraArchetype>();
+    *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
+        RenderableArchetype>();
 }
+#endif
 
 void registerTypes(ECSRegistry &registry,
                    const RenderECSBridge *bridge)
@@ -217,16 +210,11 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             RenderCamera
         >>({instance_setup});
 
-    auto export_counts = builder.addToGraph<ParallelForNode<Context,
-        exportCounts,
-            RenderingSystemState
-        >>({viewdata_update});
-
 #ifdef MADRONA_GPU_MODE
     // Need to sort the instances, as well as the views
     auto sort_instances = 
         builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
-            {export_counts});
+            {viewdata_update});
 
     auto post_instance_sort_reset_tmp =
         builder.addToGraph<ResetTmpAllocNode>({sort_instances});
@@ -238,10 +226,15 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
     auto post_view_sort_reset_tmp =
         builder.addToGraph<ResetTmpAllocNode>({sort_views});
 
-    return post_view_sort_reset_tmp;
-#endif
+    auto export_counts = builder.addToGraph<ParallelForNode<Context,
+        exportCountsGPU,
+            RenderingSystemState
+        >>({post_view_sort_reset_tmp});
 
     return export_counts;
+#else
+    return viewdata_update;
+#endif
 }
 
 void init(Context &ctx,
