@@ -114,6 +114,17 @@ Tensor::Tensor(const Tensor &o)
       dimensions_(o.dimensions_)
 {}
 
+Tensor & Tensor::operator=(const Tensor &o)
+{
+    dev_ptr_ = o.dev_ptr_;
+    type_ = o.type_;
+    gpu_id_ = o.gpu_id_;
+    num_dimensions_ = o.num_dimensions_;
+    dimensions_ = o.dimensions_;
+
+    return *this;
+}
+
 Tensor::Printer Tensor::makePrinter() const
 {
     int64_t num_items = dimensions_[num_dimensions_ - 1];

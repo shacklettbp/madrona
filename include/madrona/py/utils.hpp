@@ -98,6 +98,7 @@ public:
            Optional<int> gpu_id);
 
     Tensor(const Tensor &o);
+    Tensor & operator=(const Tensor &o);
     
     inline void * devicePtr() const { return dev_ptr_; }
     inline ElementType type() const { return type_; }
