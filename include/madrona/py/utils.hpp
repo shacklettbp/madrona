@@ -128,14 +128,13 @@ public:
         Tensor hdl;
     };
 
-
-    TrainInterface(std::initializer_list<NamedTensor> obs,
+    TrainInterface(Span<const NamedTensor> obs,
                    Tensor actions,
                    Tensor rewards,
                    Tensor dones,
                    Tensor resets,
                    Optional<Tensor> policy_assignments,
-                   std::initializer_list<NamedTensor> stats = {});
+                   Span<const NamedTensor> stats = {});
     TrainInterface(TrainInterface &&o);
     ~TrainInterface();
 

@@ -170,13 +170,13 @@ struct TrainInterface::Impl {
 };
 
 TrainInterface::TrainInterface(
-        std::initializer_list<NamedTensor> obs,
+        Span<const NamedTensor> obs,
         Tensor actions,
         Tensor rewards,
         Tensor dones,
         Tensor resets,
         Optional<Tensor> policy_assignments,
-        std::initializer_list<NamedTensor> stats)
+        Span<const NamedTensor> stats)
     : impl_(new Impl {
         .obs = HeapArray<NamedTensor>(obs.size()),
         .actions = actions,
@@ -188,8 +188,8 @@ TrainInterface::TrainInterface(
         .nameStrings = HeapArray<std::string>(obs.size() + stats.size()),
     })
 {
-    const NamedTensor *src_obs = std::data(obs);
-    const NamedTensor *src_stats = std::data(stats);
+    const NamedTensor *src_obs = obs.data();
+    const NamedTensor *src_stats = stats.data();
 
     CountT cur_str_idx = 0;
     for (CountT i = 0; i < (CountT)obs.size(); i++) {
