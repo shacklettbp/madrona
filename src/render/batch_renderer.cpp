@@ -14,10 +14,6 @@
 #include "vk/memory.hpp"
 #include "vk/utils.hpp"
 #include "vk/utils.inl"
-#include "vulkan/vulkan_core.h"
-
-
-using namespace madrona::render;
 
 namespace madrona::render {
 
@@ -71,9 +67,6 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
             .depth = alloc.makeDepthAttachment(width, height,
                                                current_layer_count,
                                                consts::depthFormat),
-            .output = alloc.makeColorAttachment(width,height,
-                                                current_layer_count,
-                                                consts::outputColorFormat)
         };
 
         VkImageViewCreateInfo view_info = {
@@ -91,10 +84,6 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
         view_info.image = target.vizBuffer.image;
         view_info.format = consts::colorFormat;
         REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &target.vizBufferView));
-
-        view_info.image = target.output.image;
-        view_info.format = consts::outputColorFormat;
-        REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &target.outputView));
 
         view_info.image = target.depth.image;
         view_info.format = consts::depthFormat;
@@ -458,11 +447,11 @@ static PipelineMP<1> makeComputePipeline(const vk::Device &dev,
 struct BatchFrame {
     BatchImportedBuffers buffers;
 
-    render::vk::LocalBuffer lighting;
-    render::vk::HostBuffer lightingStaging;
+    vk::LocalBuffer lighting;
+    vk::HostBuffer lightingStaging;
 
-    render::vk::LocalBuffer skyInput;
-    render::vk::HostBuffer skyInputStaging;
+    vk::LocalBuffer skyInput;
+    vk::HostBuffer skyInputStaging;
 
     // View, instance info, instance data
     VkDescriptorSet viewInstanceSetPrepare;
@@ -470,6 +459,14 @@ struct BatchFrame {
     VkDescriptorSet viewInstanceSetLighting;
 
     HeapArray<LayeredTarget> targets;
+    vk::DedicatedBuffer rgbOutput;
+    vk::DedicatedBuffer depthOutput;
+
+#ifdef MADRONA_CUDA_SUPPORT
+    vk::CudaImportedBuffer rgbOutputCUDA;
+    vk::CudaImportedBuffer depthOutputCUDA;
+#endif
+
     // Swapchain of draw packages which get used to feed to the rasterizer
     HeapArray<DrawCommandPackage> drawPackageSwapchain;
 
@@ -612,12 +609,27 @@ static void makeBatchFrame(vk::Device& dev,
     VkFence render_fence = vk::makeFence(dev, true);
 
     if (!enable_batch_renderer) {
+        // FIXME get rid of the need for these fake buffers
+        auto fake_rgb_buf = alloc.makeDedicatedBuffer(1, false, true);
+        auto fake_depth_buf = alloc.makeDedicatedBuffer(1, false, true);
+
+#ifdef MADRONA_CUDA_SUPPORT
+        vk::CudaImportedBuffer fake_rgb_cuda(dev, fake_rgb_buf.mem, 1);
+        vk::CudaImportedBuffer fake_depth_cuda(dev, fake_depth_buf.mem, 1);
+#endif
+
         new (frame) BatchFrame{
             { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
             std::move(lights), std::move(lights_staging),
             std::move(sky_input), std::move(sky_input_staging),
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, 
             HeapArray<LayeredTarget>(0),
+            std::move(fake_rgb_buf),
+            std::move(fake_depth_buf),
+#ifdef MADRONA_CUDA_SUPPORT
+            std::move(fake_rgb_cuda),
+            std::move(fake_depth_cuda),
+#endif
             HeapArray<DrawCommandPackage>(0),
             VK_NULL_HANDLE, VK_NULL_HANDLE,
             prepare_cmdpool,
@@ -664,7 +676,6 @@ static void makeBatchFrame(vk::Device& dev,
 
     // PBR descriptor sets
 
-#if 1
     VkDescriptorBufferInfo light_data_info;
     light_data_info.buffer = lights.buffer;
     light_data_info.offset = 0;
@@ -704,7 +715,6 @@ static void makeBatchFrame(vk::Device& dev,
 
     vk::DescHelper::storage(desc_updates[10],
                             pbr_set, &sky_info, 4);
-#endif
 
     // Set descriptors
 
@@ -715,16 +725,102 @@ static void makeBatchFrame(vk::Device& dev,
         draw_packages.emplace(i, makeDrawCommandPackage(dev, alloc, prepare_views, *draw));
     }
 
+    HeapArray<LayeredTarget> layered_targets = makeLayeredTargets(
+        cfg.renderWidth, cfg.renderHeight, 
+        cfg.numWorlds * cfg.maxViewsPerWorld,
+        dev, alloc);
+
+    uint64_t total_num_pixels = 
+        (uint64_t)cfg.renderWidth * (uint64_t)cfg.renderHeight * 
+        (uint64_t)cfg.numWorlds * (uint64_t)cfg.maxViewsPerWorld;
+
+    uint64_t num_rgb_bytes = total_num_pixels * sizeof(uint8_t) * 4_u64;
+    uint64_t num_depth_bytes = total_num_pixels * sizeof(float);
+
+    vk::DedicatedBuffer rgb_output_buffer = alloc.makeDedicatedBuffer(
+        num_rgb_bytes, false, true);
+
+    vk::DedicatedBuffer depth_output_buffer = alloc.makeDedicatedBuffer(
+        num_depth_bytes, false, true);
+
+#ifdef MADRONA_CUDA_SUPPORT
+    vk::CudaImportedBuffer rgb_output_cuda(
+        dev, rgb_output_buffer.mem, num_rgb_bytes);
+
+    vk::CudaImportedBuffer depth_output_cuda(
+        dev, depth_output_buffer.mem, num_depth_bytes);
+#endif
+
+    {
+        // Update lighting_set to point to the layered vbuffer and 
+        // output buffer
+        HeapArray<VkWriteDescriptorSet> lighting_desc_updates(
+            layered_targets.size() + 2);
+        HeapArray<VkDescriptorImageInfo> vbuffer_infos(
+            layered_targets.size());
+
+        for (CountT i = 0; i < layered_targets.size(); ++i) {
+            vbuffer_infos[i] = {
+                .sampler = VK_NULL_HANDLE,
+                .imageView = layered_targets[i].vizBufferView,
+                .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+            };
+
+            vk::DescHelper::storageImage(lighting_desc_updates[i],
+                                         lighting_set, 
+                                         &vbuffer_infos[i],
+                                         0, i);
+        }
+
+        VkDescriptorBufferInfo rgb_buffer_info {
+            .buffer = rgb_output_buffer.buf.buffer,
+            .offset = 0,
+            .range = VK_WHOLE_SIZE,
+        };
+
+        vk::DescHelper::storage(
+            lighting_desc_updates[lighting_desc_updates.size() - 2], 
+            lighting_set, 
+            &rgb_buffer_info,
+            1);
+
+        VkDescriptorBufferInfo depth_buffer_info {
+            .buffer = depth_output_buffer.buf.buffer,
+            .offset = 0,
+            .range = VK_WHOLE_SIZE,
+        };
+
+        vk::DescHelper::storage(
+            lighting_desc_updates[lighting_desc_updates.size() - 1], 
+            lighting_set, 
+            &depth_buffer_info,
+            2);
+
+        vk::DescHelper::update(dev, lighting_desc_updates.data(),
+                               lighting_desc_updates.size());
+    }
+
     new (frame) BatchFrame{
-        { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
-        std::move(lights), std::move(lights_staging),
-        std::move(sky_input), std::move(sky_input_staging),
+        {
+            std::move(views),
+            std::move(view_offsets),
+            std::move(instances),
+            std::move(instance_offsets),
+        },
+        std::move(lights),
+        std::move(lights_staging),
+        std::move(sky_input),
+        std::move(sky_input_staging),
         prepare_views_set,
         draw_views_set,
         prepare_views_set,
-        makeLayeredTargets(cfg.renderWidth, cfg.renderHeight, 
-                           cfg.numWorlds * cfg.maxViewsPerWorld,
-                           dev, alloc/*, layerPool*/),
+        std::move(layered_targets),
+        std::move(rgb_output_buffer),
+        std::move(depth_output_buffer),
+#ifdef MADRONA_CUDA_SUPPORT
+        std::move(rgb_output_cuda),
+        std::move(depth_output_cuda),
+#endif
         std::move(draw_packages),
         lighting_set,
         pbr_set,
@@ -739,36 +835,6 @@ static void makeBatchFrame(vk::Device& dev,
         render_fence,
         LatestOperation::None
     };
-
-    { // Create the descriptor sets with the outputs
-        HeapArray<VkWriteDescriptorSet> lighting_desc_updates(
-            sizeof(VkWriteDescriptorSet) * frame->targets.size() * 2);
-        HeapArray<VkDescriptorImageInfo> infos(
-            sizeof(VkDescriptorImageInfo) * frame->targets.size() * 2);
-
-        for (int i = 0; i < frame->targets.size(); ++i) {
-            infos[i*2].imageView = frame->targets[i].vizBufferView;
-            infos[i*2].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            infos[i*2].sampler = VK_NULL_HANDLE;
-
-            vk::DescHelper::storageImage(lighting_desc_updates[i*2],
-                                         lighting_set, 
-                                         &infos[i*2],
-                                         0, i);
-
-            infos[i*2+1].imageView = frame->targets[i].outputView;
-            infos[i*2+1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            infos[i*2+1].sampler = VK_NULL_HANDLE;
-
-            vk::DescHelper::storageImage(lighting_desc_updates[i*2+1], 
-                                         lighting_set, 
-                                         &infos[i*2+1],
-                                         1, i);
-        }
-
-        vk::DescHelper::update(dev, lighting_desc_updates.data(),
-                               frame->targets.size() * 2);
-    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -831,7 +897,7 @@ static void issueComputeLayoutTransitions(vk::Device &dev,
             .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
             .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .image = target.vizBuffer.image,
             .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -846,7 +912,7 @@ static void issueComputeLayoutTransitions(vk::Device &dev,
             .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
             .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .image = target.depth.image,
             .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -859,11 +925,11 @@ static void issueComputeLayoutTransitions(vk::Device &dev,
     };
 
     dev.dt.cmdPipelineBarrier(draw_cmd,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
             VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr,
-            barriers.size(), barriers.data());   
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr,
+        barriers.size(), barriers.data());   
 }
 
 static void issueRasterization(vk::Device &dev, 
@@ -951,13 +1017,12 @@ static void issueRasterization(vk::Device &dev,
 
 static void issueDeferred(vk::Device &dev,
                           PipelineMP<1> &pipeline,
-                          LayeredTarget &target,
                           VkCommandBuffer draw_cmd,
                           BatchFrame &batch_frame,
+                          VkExtent2D render_dims,
+                          uint32_t total_num_views,
                           VkDescriptorSet asset_set,
                           VkDescriptorSet asset_mat_tex_set,
-                          uint32_t num_views,
-                          uint32_t image_idx,
                           VkDescriptorSet index_buffer_set,
                           VkDescriptorSet pbr_set) 
 {
@@ -967,19 +1032,19 @@ static void issueDeferred(vk::Device &dev,
 
     shader::DeferredLightingPushConstBR push_const = {
         dev.maxNumLayersPerImage,
-        num_views,
-        image_idx
+        render_dims.width,
+        render_dims.height,
     };
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shader::DeferredLightingPushConstBR), &push_const);
 
     std::array draw_descriptors = {
-            batch_frame.targetsSetLighting,
-            index_buffer_set,
-            batch_frame.viewInstanceSetLighting,
-            asset_set,
-            asset_mat_tex_set,
-            pbr_set
+        batch_frame.targetsSetLighting,
+        index_buffer_set,
+        batch_frame.viewInstanceSetLighting,
+        asset_set,
+        asset_mat_tex_set,
+        pbr_set
     };
 
     dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -988,11 +1053,14 @@ static void issueDeferred(vk::Device &dev,
                                  draw_descriptors.data(),
                                  0, nullptr);
 
-    uint32_t num_workgroups_x = utils::divideRoundUp(target.vizBuffer.width, 32_u32);
-    uint32_t num_workgroups_y = utils::divideRoundUp(target.vizBuffer.height, 32_u32);
-    uint32_t num_workgroups_z = target.layerCount;
+    uint32_t num_workgroups_x = utils::divideRoundUp(
+        render_dims.width, 32_u32);
+    uint32_t num_workgroups_y = utils::divideRoundUp(
+        render_dims.height, 32_u32);
+    uint32_t num_workgroups_z = total_num_views;
 
-    dev.dt.cmdDispatch(draw_cmd, num_workgroups_x, num_workgroups_y, num_workgroups_z);
+    dev.dt.cmdDispatch(
+        draw_cmd, num_workgroups_x, num_workgroups_y, num_workgroups_z);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1120,7 +1188,6 @@ BatchRenderer::~BatchRenderer()
             for(int i2=0;i2<impl->batchFrames[i].targets.size();i2++){
                 impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].vizBufferView, nullptr);
                 impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].depthView, nullptr);
-                impl->dev.dt.destroyImageView(impl->dev.hdl, impl->batchFrames[i].targets[i2].outputView, nullptr);
             }
         }
     }
@@ -1579,49 +1646,17 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
             },
         };
 
-        impl->dev.dt.cmdPipelineBarrier(draw_cmd,
-                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                  0, 0, nullptr, barriers.size(), barriers.data(),
-                                  0, nullptr);
+        impl->dev.dt.cmdPipelineBarrier(
+            draw_cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, barriers.size(), barriers.data(),
+            0, nullptr);
 
         for (int i = 0; i < (int)consts::numDrawCmdBuffers; ++i) {
             impl->dev.dt.cmdFillBuffer(draw_cmd, frame_data.drawPackageSwapchain[i].drawBuffer.buffer, 
                                        0, sizeof(uint32_t), 0);
         }
-    }
-
-    { // Transition image layouts for the output images
-        auto &frame = impl->batchFrames[frame_index];
-        DynArray<VkImageMemoryBarrier> barriers(frame.targets.size());
-
-        for (int i = 0; i < (int)frame.targets.size(); ++i) {
-            VkImageMemoryBarrier barrier = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_NONE,
-                .dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = frame.targets[i].output.image,
-                .subresourceRange = {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = frame.targets[i].layerCount
-                }
-            };
-
-            barriers.emplace_back(barrier);
-        }
-
-        impl->dev.dt.cmdPipelineBarrier(draw_cmd, 
-                                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                        0, 0, nullptr, 0, nullptr, 
-                                        barriers.size(), barriers.data());
     }
 
     uint32_t num_views = info.numViews;
@@ -1656,10 +1691,13 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                        num_batches - iter * consts::numDrawCmdBuffers);
 
         issueMemoryBarrier(impl->dev, draw_cmd,
-                           VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
-                           VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+            VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+                VK_ACCESS_SHADER_READ_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT |
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             int batch_no = batch + iter * consts::numDrawCmdBuffers;
@@ -1715,20 +1753,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                    draw_cmd);
         }
 
-        for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
-            int batch_no = batch + iter * consts::numDrawCmdBuffers;
-
-            issueDeferred(impl->dev, *(impl->lighting), 
-                          frame_data.targets[batch_no],
-                          draw_cmd,
-                          frame_data,
-                          impl->assetSetLighting,
-                          impl->assetSetTextureMat,
-                          num_views, batch_no,
-                          loaded_assets[0].indexBufferSet,
-                          frame_data.pbrSet);
-        }
-
         issueMemoryBarrier(impl->dev, draw_cmd,
                            VK_ACCESS_SHADER_READ_BIT,
                            VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -1737,11 +1761,24 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                            VK_PIPELINE_STAGE_TRANSFER_BIT);
 
+
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             impl->dev.dt.cmdFillBuffer(draw_cmd, frame_data.drawPackageSwapchain[batch].drawBuffer.buffer,
                                        0, sizeof(uint32_t), 0);
         }
     }
+
+    issueDeferred(
+        impl->dev,
+        *(impl->lighting), 
+        draw_cmd,
+        frame_data,
+        impl->renderExtent,
+        num_views,
+        impl->assetSetLighting,
+        impl->assetSetTextureMat,
+        loaded_assets[0].indexBufferSet,
+        frame_data.pbrSet);
 
     // End the command buffer and stuff
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
@@ -1772,6 +1809,16 @@ BatchImportedBuffers &BatchRenderer::getImportedBuffers(uint32_t frame_id)
     return impl->batchFrames[frame_id].buffers;
 }
 
+const vk::LocalBuffer & BatchRenderer::getRGBBuffer() const
+{
+    return impl->batchFrames[0].rgbOutput.buf;
+}
+
+const vk::LocalBuffer & BatchRenderer::getDepthBuffer() const
+{
+    return impl->batchFrames[0].depthOutput.buf;
+}
+
 // Get the semaphore that the viewer renderer has to wait on
 VkSemaphore BatchRenderer::getLatestWaitSemaphore()
 {
@@ -1791,10 +1838,22 @@ VkSemaphore BatchRenderer::getLatestWaitSemaphore()
     return VK_NULL_HANDLE;
 }
 
-HeapArray<LayeredTarget> &BatchRenderer::getLayeredTargets(uint32_t frame_id)
+const uint8_t * BatchRenderer::getRGBCUDAPtr() const
 {
-    (void)frame_id;
-    return impl->batchFrames[0].targets;
+#ifndef MADRONA_CUDA_SUPPORT
+    return nullptr;
+#else
+    return (uint8_t *)impl->batchFrames[0].rgbOutputCUDA.getDevicePointer();
+#endif
+}
+
+const float * BatchRenderer::getDepthCUDAPtr() const
+{
+#ifndef MADRONA_CUDA_SUPPORT
+    return nullptr;
+#else
+    return (float *)impl->batchFrames[0].depthOutputCUDA.getDevicePointer();
+#endif
 }
 
 }

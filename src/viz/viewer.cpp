@@ -426,6 +426,8 @@ static void cfgUI(ViewerControl &ctrl,
 
     ImGui::PopItemWidth();
 
+    ImGui::Checkbox("Render Depth", &ctrl.batchRenderShowDepth);
+
     if (ctrl.viewerType != ViewerType::Grid) {
         ImGui::EndDisabled();
     }

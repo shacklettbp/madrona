@@ -11,7 +11,10 @@ DeferredLightingPushConstBR pushConst;
 RWTexture2DArray<uint2> vizBuffer[];
 
 [[vk::binding(1, 0)]]
-RWTexture2DArray<float4> outputBuffer[];
+RWStructuredBuffer<uint32_t> rgbOutputBuffer;
+
+[[vk::binding(2, 0)]]
+RWStructuredBuffer<float> depthOutputBuffer;
 
 [[vk::binding(0, 1)]]
 StructuredBuffer<uint> indexBuffer;
@@ -516,6 +519,27 @@ float3 getOutgoingRay(float2 target_pixel, float2 target_dim, in PerspectiveCame
     return normalize(dir);
 }
 
+float linearToSRGB(float v)
+{
+    if (v <= 0.00031308f) {
+        return 12.92f * v;
+    } else {
+        return 1.055f*pow(v,(1.f / 2.4f)) - 0.055f;
+    }
+}
+
+uint32_t linearToSRGB8(float3 rgb)
+{
+    float3 srgb = float3(
+        linearToSRGB(rgb.x), 
+        linearToSRGB(rgb.y), 
+        linearToSRGB(rgb.z));
+
+    uint3 quant = (uint3)(255 * clamp(srgb, 0.f, 1.f));
+
+    return quant.r | (quant.g << 8) | (quant.b << 16) | ((uint32_t)255 << 24);
+}
+
 // idx.x is the x coordinate of the image
 // idx.y is the y coordinate of the image
 // idx.z is the global view index
@@ -523,24 +547,24 @@ float3 getOutgoingRay(float2 target_pixel, float2 target_dim, in PerspectiveCame
 [shader("compute")]
 void lighting(uint3 idx : SV_DispatchThreadID)
 {
-    uint3 target_dim;
-    vizBuffer[pushConst.imageIndex].GetDimensions(target_dim.x, target_dim.y, target_dim.z);
+    uint view_idx = idx.z;
 
-    if (idx.x >= target_dim.x || idx.y >= target_dim.y ||
-        idx.z >= pushConst.totalNumViews) {
+    uint target_idx = view_idx / pushConst.maxLayersPerImage;
+    uint target_layer_idx = view_idx % pushConst.maxLayersPerImage;
+
+    if (idx.x >= pushConst.renderWidth || idx.y >= pushConst.renderHeight) {
         return;
     }
 
-    uint layer_idx = idx.z;
-    uint3 target_pixel = uint3(idx.x, idx.y, layer_idx);
+    uint3 vbuffer_pixel = uint3(idx.x, idx.y, target_layer_idx);
 
-    float2 target_pixel_clip = (float2(float(target_pixel.x) + 0.5f,
-                                       float(target_pixel.y) + 0.5f) /
-                                            float2(target_dim.x, target_dim.y));
-    target_pixel_clip = target_pixel_clip * 2.0f - float2(1.0f, 1.0f);
-    target_pixel_clip.y *= -1.0;
+    float2 vbuffer_pixel_clip =
+        float2(float(vbuffer_pixel.x) + 0.5f, float(vbuffer_pixel.y) + 0.5f) /
+        float2(pushConst.renderWidth, pushConst.renderHeight);
+    vbuffer_pixel_clip = vbuffer_pixel_clip * 2.0f - float2(1.0f, 1.0f);
+    vbuffer_pixel_clip.y *= -1.0;
 
-    uint2 data = vizBuffer[pushConst.imageIndex][target_pixel];
+    uint2 data = vizBuffer[target_idx][vbuffer_pixel];
 
     uint3 unpacked_viz_data = unpackVizBufferData(data);
 
@@ -554,7 +578,6 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
     bool was_rasterized = false;
 
-    uint view_idx = layer_idx + pushConst.maxLayersPerImage * pushConst.imageIndex;
     PerspectiveCameraData view_data = unpackViewData(viewDataBuffer[view_idx]);
 
     if (primitive_id != 0xFFFFFFFF || mesh_id != 0xFFFFFFFF || instance_id != 0xFFFFFFFF) {
@@ -614,8 +637,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         BarycentricDeriv bc = calcFullBary(vertices[0].postMvp,
                 vertices[1].postMvp,
                 vertices[2].postMvp,
-                target_pixel_clip,
-                float2(target_dim.xy));
+                vbuffer_pixel_clip,
+                float2(pushConst.renderWidth, pushConst.renderHeight));
 
         float interpolated_w = 1.0f / dot(w_inv, bc.m_lambda);
 
@@ -623,7 +646,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         float3 normal = normalize(interpolateVec3(bc, vertices[0].normal, vertices[1].normal, vertices[2].normal));
 
         // Get interpolated position
-        float3 position = normalize(interpolateVec3(bc, vertices[0].pos, vertices[1].pos, vertices[2].pos));
+        float3 position = interpolateVec3(bc, vertices[0].pos, vertices[1].pos, vertices[2].pos);
 
         // Get interpolated UVs
         UVInterpolation uv = interpolateUVs(bc, vertices[0].uv, vertices[1].uv, vertices[2].uv);
@@ -645,8 +668,11 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     const float exposure = 20.0f;
 
     // Lighting calculations
-    float3 outgoing_ray = getOutgoingRay(float2(target_pixel.xy), float2(target_dim.xy), view_data);
-    float4 point_radiance = getPointRadianceBRDF(roughness, metalness, gbuffer_data, view_data, target_pixel.xy);
+    float3 outgoing_ray = getOutgoingRay(
+        float2(vbuffer_pixel.xy),
+        float2(pushConst.renderWidth, pushConst.renderHeight),
+        view_data);
+    float4 point_radiance = getPointRadianceBRDF(roughness, metalness, gbuffer_data, view_data, vbuffer_pixel.xy);
 
     float3 sun_direction = normalize(-lights[0].lightDir.xyz);
 
@@ -676,6 +702,19 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     float3 diff = one - exp_value;
     float3 out_color = diff;
 
-    outputBuffer[pushConst.imageIndex][target_pixel] = float4(
-            out_color.xyz, 1.0 + float(zeroDummy()));
+    out_color += zeroDummy();
+
+    uint32_t out_pixel_idx =
+        view_idx * pushConst.renderHeight * pushConst.renderWidth +
+        idx.y * pushConst.renderWidth + idx.x;
+
+    rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(out_color); 
+
+    float depth;
+    if (was_rasterized) {
+        depth = length(gbuffer_data.wPosition - gbuffer_data.wCameraPos);
+    } else {
+        depth = 0.f;
+    }
+    depthOutputBuffer[out_pixel_idx] = depth;
 }

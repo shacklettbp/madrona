@@ -3,11 +3,14 @@
 
 struct GridDrawPushConst {
     uint numViews;
+    uint viewWidth;
+    uint viewHeight;
     uint gridWidth;
     uint gridViewSize;
     uint maxViewsPerImage;
     float offsetX;
     float offsetY;
+    uint showDepth;
 };
 
 // Specified from the top left corner of the screen
@@ -27,8 +30,8 @@ struct PrepareViewPushConstant {
 
 struct DeferredLightingPushConstBR {
     uint32_t maxLayersPerImage;
-    uint32_t totalNumViews;
-    uint32_t imageIndex;
+    uint32_t renderWidth;
+    uint32_t renderHeight;
 };
 
 struct BlurPushConst {

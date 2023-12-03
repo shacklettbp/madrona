@@ -7,10 +7,79 @@ GridDrawPushConst pushConst;
 RWTexture2D<float4> gridOutput;
 
 [[vk::binding(1, 0)]]
-Texture2DArray<float4> batchOutputs[];
+StructuredBuffer<uint32_t> batchRenderRGBOut;
 
 [[vk::binding(2, 0)]]
-SamplerState samplerState;
+StructuredBuffer<float> batchRenderDepthOut;
+
+float vizDepth(float v)
+{
+    return log(v + 0.9f) / log(10000.f);
+}
+
+float srgbToLinear(float srgb)
+{
+    if (srgb <= 0.04045f) {
+        return srgb / 12.92f;
+    }
+
+    return pow((srgb + 0.055f) / 1.055f, 2.4f);
+}
+
+float4 rgb8ToFloat(uint r, uint g, uint b)
+{
+    return float4(
+        srgbToLinear((float)r / 255.f),
+        srgbToLinear((float)g / 255.f),
+        srgbToLinear((float)b / 255.f),
+        1.f);
+}
+
+float4 fetchBatchRenderPixel(uint3 pixel_idx)
+{
+    pixel_idx.x = clamp(pixel_idx.x, 0, pushConst.viewWidth - 1);
+    pixel_idx.y = clamp(pixel_idx.y, 0, pushConst.viewHeight - 1);
+
+    uint linear_pixel_idx =
+        pixel_idx.z * pushConst.viewHeight * pushConst.viewWidth +
+        pixel_idx.y * pushConst.viewWidth + pixel_idx.x;
+
+    if (pushConst.showDepth == 1) {
+        float depth = vizDepth(batchRenderDepthOut[linear_pixel_idx]);
+        return float4(float3(depth, depth, depth), 1);
+    } else {
+        uint packed = batchRenderRGBOut[linear_pixel_idx];
+
+        uint r = packed & 0xFF;
+        uint g = (packed >> 8) & 0xFF;
+        uint b = (packed >> 16) & 0xFF;
+
+        return rgb8ToFloat(r, g, b);
+    }
+}
+
+float4 sampleBatchRenderOutput(float2 uv, uint view_idx)
+{
+    float2 coords =
+        uv * float2(pushConst.viewWidth, pushConst.viewHeight);
+
+    float2 base = floor(coords);
+    float2 diff = coords - base;
+    uint2 c00 = (uint2)base;
+    uint2 c01 = c00 + uint2(1, 0);
+    uint2 c10 = c00 + uint2(0, 1);
+    uint2 c11 = c00 + uint2(1, 1);
+
+    float4 p00 = fetchBatchRenderPixel(uint3(c00, view_idx));
+    float4 p01 = fetchBatchRenderPixel(uint3(c01, view_idx));
+    float4 p10 = fetchBatchRenderPixel(uint3(c10, view_idx));
+    float4 p11 = fetchBatchRenderPixel(uint3(c11, view_idx));
+
+    float4 a = p00 + diff.x * (p01 - p00);
+    float4 b = p10 + diff.x * (p11 - p10);
+
+    return a + diff.y * (b - a);
+}
 
 [numThreads(32, 32, 1)]
 [shader("compute")]
@@ -49,10 +118,5 @@ void gridDraw(uint3 idx : SV_DispatchThreadID)
         return;
     }
 
-    uint layered_image_idx = view_idx / pushConst.maxViewsPerImage;
-
-    float4 color = batchOutputs[layered_image_idx].SampleLevel(
-        samplerState, float3(uv_x, uv_y, float(view_idx % pushConst.maxViewsPerImage)), 0);
-
-    gridOutput[idx.xy] = color;
+    gridOutput[idx.xy] = sampleBatchRenderOutput(float2(uv_x, uv_y), view_idx);
 }

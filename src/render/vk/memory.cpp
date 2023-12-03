@@ -1,5 +1,4 @@
 #include "memory.hpp"
-#include <vulkan/vulkan_core.h>
 
 #include "utils.hpp"
 #include "config.hpp"

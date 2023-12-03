@@ -26,19 +26,9 @@ struct LayeredTarget {
     render::vk::LocalImage depth;
     VkImageView depthView;
 
-    render::vk::LocalImage output;
-    VkImageView outputView;
-
     uint32_t layerCount;
 
     VkDescriptorSet lightingSet;
-};
-
-// A texture containing the view we want to visualize in the viewer
-struct DisplayTexture {
-    render::vk::LocalTexture tex;
-    VkDeviceMemory mem;
-    VkImageView view;
 };
 
 struct BatchRenderInfo {
@@ -86,12 +76,20 @@ struct BatchRenderer {
                      RenderContext &rctx);
 
     BatchImportedBuffers &getImportedBuffers(uint32_t frame_id);
-    HeapArray<LayeredTarget> &getLayeredTargets(uint32_t frame_id);
+
+    const vk::LocalBuffer & getRGBBuffer() const;
+    const vk::LocalBuffer & getDepthBuffer() const;
 
     // Get the semaphore that the viewer renderer has to wait on.
     // This is either going to be the semaphore from prepareForRendering,
     // or it's the one from renderViews.
     VkSemaphore getLatestWaitSemaphore();
+
+#ifdef MADRONA_CUDA_SUPPORT
+    const uint8_t * getRGBCUDAPtr() const;
+    const float * getDepthCUDAPtr() const;
+#endif
+
 };
 
 }

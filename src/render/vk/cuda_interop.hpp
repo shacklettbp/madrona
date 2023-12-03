@@ -18,7 +18,7 @@ public:
     CudaImportedBuffer(CudaImportedBuffer &&);
     ~CudaImportedBuffer();
 
-    void *getDevicePointer() const { return dev_ptr_; }
+    inline void *getDevicePointer() const { return dev_ptr_; }
 
 private:
     int ext_fd_;

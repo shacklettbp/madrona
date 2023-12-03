@@ -62,4 +62,15 @@ void RenderManager::batchRender()
         info, rctx_->loaded_assets_, &rctx_->engine_interop_, *rctx_);
 }
 
+
+const uint8_t * RenderManager::batchRendererRGBOut() const
+{
+    return rctx_->batchRenderer->getRGBCUDAPtr();
+}
+
+const float * RenderManager::batchRendererDepthOut() const
+{
+    return rctx_->batchRenderer->getDepthCUDAPtr();
+}
+
 }

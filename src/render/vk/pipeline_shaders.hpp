@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vulkan/vulkan_core.h>
-
 #include <madrona/math.hpp>
 #include <madrona/span.hpp>
 #include <madrona/stack_alloc.hpp>

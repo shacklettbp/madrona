@@ -55,6 +55,9 @@ public:
     // Draw the batched output for all worlds
     void batchRender();
 
+    const uint8_t * batchRendererRGBOut() const;
+    const float * batchRendererDepthOut() const;
+
 private:
     std::unique_ptr<RenderContext> rctx_;
 };

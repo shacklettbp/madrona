@@ -444,7 +444,7 @@ static PipelineShaders makeDeferredLightingShader(const Device &dev, VkSampler c
             0, 9, clamp_sampler, 1, 0 }}));
 }
 
-static vk::PipelineShaders makeGridDrawShader(const vk::Device &dev, VkSampler clamp_sampler)
+static vk::PipelineShaders makeGridDrawShader(const vk::Device &dev)
 {
     std::filesystem::path shader_dir =
         std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
@@ -458,15 +458,7 @@ static vk::PipelineShaders makeGridDrawShader(const vk::Device &dev, VkSampler c
     StackAlloc tmp_alloc;
     return vk::PipelineShaders(dev, tmp_alloc,
                                Span<const SPIRVShader>(&spirv, 1), 
-                               Span<const vk::BindingOverride>({
-                                   vk::BindingOverride{
-                                       0, 1, VK_NULL_HANDLE, 
-                                       100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 
-                                   },
-                                   vk::BindingOverride{
-                                       0, 2, clamp_sampler, 1, 0
-                                   }
-                                   }));
+                               {});
 }
 
 static PipelineShaders makeBlurShader(const Device &dev, VkSampler clamp_sampler)
@@ -928,10 +920,9 @@ static Pipeline<1> makeDeferredLightingPipeline(const Device &dev,
 
 static Pipeline<1> makeGridDrawPipeline(const Device &dev,
                                     VkPipelineCache pipeline_cache,
-                                    VkSampler clamp_sampler,
                                     CountT num_frames)
 {
-    PipelineShaders shader = makeGridDrawShader(dev, clamp_sampler);
+    PipelineShaders shader = makeGridDrawShader(dev);
 
     // Push constant
     VkPushConstantRange push_const {
@@ -1496,7 +1487,8 @@ static void makeFrame(Frame *dst,
                       VkDescriptorSet grid_draw_set,
                       Sky &sky,
                       BatchImportedBuffers &batch_renderer_buffers,
-                      HeapArray<LayeredTarget> &batch_targets)
+                      const LocalBuffer &batch_rgb_out,
+                      const LocalBuffer &batch_depth_out)
 {
     auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
 
@@ -1738,25 +1730,28 @@ static void makeFrame(Frame *dst,
 
     DescHelper::update(dev, desc_updates.data(), desc_counter);
 
-    if (grid_draw_set != VK_NULL_HANDLE && batch_targets.size()) { // Create the descriptor sets with the outputs
-        HeapArray<VkWriteDescriptorSet> lighting_desc_updates(batch_targets.size());
-        HeapArray<VkDescriptorImageInfo> infos(batch_targets.size());
+    if (grid_draw_set != VK_NULL_HANDLE) {
+        // Create the descriptor set with the batch renderer outputs
+        VkDescriptorBufferInfo batch_rgb_info {
+            .buffer = batch_rgb_out.buffer,
+            .offset = 0,
+            .range = VK_WHOLE_SIZE,
+        };
 
-        for (int i = 0; i < batch_targets.size(); ++i) {
-            infos[i].imageView = batch_targets[i].outputView;
-            infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            infos[i].sampler = VK_NULL_HANDLE;
+        VkDescriptorBufferInfo batch_depth_info {
+            .buffer = batch_depth_out.buffer,
+            .offset = 0,
+            .range = VK_WHOLE_SIZE,
+        };
 
-            vk::DescHelper::textures(lighting_desc_updates[i],
-                                         grid_draw_set, 
-                                         &infos[i],
-                                         1, 1, i);
-        }
-
-        vk::DescHelper::update(dev, lighting_desc_updates.data(),
-                               batch_targets.size());
+        std::array<VkWriteDescriptorSet, 2> batch_out_updates;
+        vk::DescHelper::storage(batch_out_updates[0], grid_draw_set,
+                                &batch_rgb_info, 1);
+        vk::DescHelper::storage(batch_out_updates[1], grid_draw_set,
+                                &batch_depth_info, 2);
+        vk::DescHelper::update(
+            dev, batch_out_updates.data(), batch_out_updates.size());
     }
-
 
     new (dst) Frame {
         std::move(fb),
@@ -1911,15 +1906,14 @@ static void packLighting(const Device &dev,
     light_staging_buffer.flush(dev);
 }
 
-static void issueGridDrawPass(vk::Device &dev,
+static void issueGridDrawPass(RenderContext &rctx,
                               Frame &frame, 
                               Pipeline<1> &pipeline,
                               VkCommandBuffer draw_cmd,
-                              const viz::ViewerControl &viz_ctrl,
-                              uint32_t view_idx,
-                              uint32_t num_views)
+                              const viz::ViewerControl &viz_ctrl)
 {
-    (void)view_idx;
+    auto &dev = rctx.dev;
+    uint32_t num_views = *rctx.engine_interop_.bridge.totalNumViews;
 
     {
         array<VkImageMemoryBarrier, 1> compute_prepare {{
@@ -1953,11 +1947,14 @@ static void issueGridDrawPass(vk::Device &dev,
 
     render::shader::GridDrawPushConst push_const = {
         .numViews = num_views,
+        .viewWidth = rctx.br_width_,
+        .viewHeight = rctx.br_height_,
         .gridWidth = viz_ctrl.gridWidth,
         .gridViewSize = viz_ctrl.gridImageSize,
         .maxViewsPerImage = dev.maxNumLayersPerImage,
         .offsetX = viz_ctrl.batchRenderOffsetX,
-        .offsetY = viz_ctrl.batchRenderOffsetY
+        .offsetY = viz_ctrl.batchRenderOffsetY,
+        .showDepth = viz_ctrl.batchRenderShowDepth ? 1_u32 : 0_u32,
     };
 
     dev.dt.cmdPushConstants(draw_cmd, pipeline.layout,
@@ -2544,7 +2541,7 @@ static ViewerRendererState initState(RenderContext &rctx,
         imgui_state.renderPass);
 
     Pipeline<1> grid_draw = makeGridDrawPipeline(dev, rctx.pipelineCache,
-        rctx.clampSampler, InternalConfig::numFrames);
+        InternalConfig::numFrames);
     
     HeapArray<Frame> frames(InternalConfig::numFrames);
 
@@ -2569,7 +2566,8 @@ static ViewerRendererState initState(RenderContext &rctx,
                   grid_draw.descPool.makeSet(),
                   rctx.sky_,
                   rctx.batchRenderer->getImportedBuffers(0),
-                  rctx.batchRenderer->getLayeredTargets(0));
+                  rctx.batchRenderer->getRGBBuffer(),
+                  rctx.batchRenderer->getDepthBuffer());
     }
 
     HostBuffer screenshot_buffer = rctx.alloc.makeStagingBuffer(
@@ -2604,8 +2602,6 @@ static ViewerRendererState initState(RenderContext &rctx,
 
 bool ViewerRendererState::renderGridFrame(const viz::ViewerControl &viz_ctrl)
 {
-    uint32_t view_idx = 0;
-
     Frame &frame = frames[curFrame];
 
     VkCommandBuffer draw_cmd = frame.drawCmd;
@@ -2654,8 +2650,7 @@ bool ViewerRendererState::renderGridFrame(const viz::ViewerControl &viz_ctrl)
 
     { // Issue grid drawing
         // issueLightingPass(dev, frame, deferred_lighting_, draw_cmd, cam, view_idx);
-        issueGridDrawPass(dev, frame, gridDraw, draw_cmd, viz_ctrl,
-            view_idx, *rctx.engine_interop_.bridge.totalNumViews);
+        issueGridDrawPass(rctx, frame, gridDraw, draw_cmd, viz_ctrl);
     }
 
     bool prepare_screenshot = viz_ctrl.requestedScreenshot ||

@@ -37,6 +37,7 @@ struct ViewerControl {
     uint32_t gridImageSize;
     float batchRenderOffsetX;
     float batchRenderOffsetY;
+    bool batchRenderShowDepth;
 };
 
 }
