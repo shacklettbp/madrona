@@ -608,10 +608,19 @@ static void makeBatchFrame(vk::Device& dev,
     VkFence prepare_fence = vk::makeFence(dev, true);
     VkFence render_fence = vk::makeFence(dev, true);
 
+    const bool supports_cuda_export =
+#ifdef MADRONA_CUDA_SUPPORT
+        true;
+#else
+        false;
+#endif
+
     if (!enable_batch_renderer) {
         // FIXME get rid of the need for these fake buffers
-        auto fake_rgb_buf = alloc.makeDedicatedBuffer(1, false, true);
-        auto fake_depth_buf = alloc.makeDedicatedBuffer(1, false, true);
+        auto fake_rgb_buf = alloc.makeDedicatedBuffer(
+            1, false, supports_cuda_export);
+        auto fake_depth_buf = alloc.makeDedicatedBuffer(
+            1, false, supports_cuda_export);
 
 #ifdef MADRONA_CUDA_SUPPORT
         vk::CudaImportedBuffer fake_rgb_cuda(dev, fake_rgb_buf.mem, 1);
@@ -738,10 +747,10 @@ static void makeBatchFrame(vk::Device& dev,
     uint64_t num_depth_bytes = total_num_pixels * sizeof(float);
 
     vk::DedicatedBuffer rgb_output_buffer = alloc.makeDedicatedBuffer(
-        num_rgb_bytes, false, true);
+        num_rgb_bytes, false, supports_cuda_export);
 
     vk::DedicatedBuffer depth_output_buffer = alloc.makeDedicatedBuffer(
-        num_depth_bytes, false, true);
+        num_depth_bytes, false, supports_cuda_export);
 
 #ifdef MADRONA_CUDA_SUPPORT
     vk::CudaImportedBuffer rgb_output_cuda(
