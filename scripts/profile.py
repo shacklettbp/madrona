@@ -3,7 +3,6 @@ import sys
 import json
 import subprocess
 import pandas as pd
-import argparse
 
 NUM_THREADS_PER_BLOCK = 256
 NUM_SMS = 82
@@ -13,23 +12,22 @@ DIR_PATH = "/tmp/profile_blocks__megakernel_events"
 THRESHOLD = 1000
 
 
-def profile_madrona(args,
+def profile_madrona(bench_cmd,
                     block_config=range(1, 7),
                     cache="/tmp/madcache"):
     try:
-        os.remove(cache)
+        #os.remove(cache)
+        pass
     except:
         pass
 
     for config in block_config:
-        profile_command = "MADRONA_MWGPU_ENABLE_PGO=1 MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_EXEC_CONFIG_OVERRIDE={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} python {benchmark} --num-worlds {num_worlds} --num-steps {num_steps}".format(
+        profile_command = "MADRONA_MWGPU_ENABLE_PGO=1 MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_EXEC_CONFIG_OVERRIDE={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} {bench_cmd}".format(
             thread=NUM_THREADS_PER_BLOCK,
             block=config,
             sm=NUM_SMS,
             cache=cache,
-            benchmark=args.benchmark_script,
-            num_worlds=args.num_worlds,
-            num_steps=args.num_steps)
+            bench_cmd=bench_cmd)
         subprocess.run(profile_command, shell=True, text=True)
 
 
@@ -102,13 +100,12 @@ def generate_json(block_config=range(1, 7)):
     with open(DIR_PATH + '/node_blocks.json', 'w') as f:
         json.dump(split_nodes, f)
 
+if len(sys.argv) < 2:
+    print(f"{sys.argv[0]} benchmark command and args", file=sys.stderr)
+    sys.exit(1)
 
-arg_parser = argparse.ArgumentParser()
-arg_parser.add_argument('--num-worlds', type=int, required=True)
-arg_parser.add_argument('--num-steps', type=int, required=True)
-arg_parser.add_argument('--benchmark-script', type=str, required=True)
+bench_cmd = " ".join(sys.argv[1:])
 
-args = arg_parser.parse_args()
-profile_madrona(args)
+profile_madrona(bench_cmd)
 parse_traces()
 generate_json()
