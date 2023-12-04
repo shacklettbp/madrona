@@ -24,7 +24,7 @@ TaskGraph::TaskGraph(Node *nodes, uint32_t num_nodes, NodeData *node_datas)
       node_datas_(node_datas),
       cur_node_idx_(num_nodes)
 {
-    for (int32_t i = 1; i <= consts::maxMegakernelBlocksPerSM; i++) {
+    for (int32_t i = 1; i <= MADRONA_MWGPU_MAX_BLOCKS_PER_SM; i++) {
         init_barriers_.emplace(i - 1, i * MADRONA_MWGPU_NUM_SMS);
     }
 }

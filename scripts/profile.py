@@ -3,6 +3,7 @@ import sys
 import json
 import subprocess
 import pandas as pd
+import argparse
 
 NUM_THREADS_PER_BLOCK = 256
 NUM_SMS = 82
@@ -12,18 +13,23 @@ DIR_PATH = "/tmp/profile_blocks__megakernel_events"
 THRESHOLD = 1000
 
 
-def profile_madrona(path_to_lib,
-                    path_to_bench,
+def profile_madrona(args,
                     block_config=range(1, 7),
                     cache="/tmp/madcache"):
+    try:
+        os.remove(cache)
+    except:
+        pass
+
     for config in block_config:
-        profile_command = "MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_EXEC_CONFIG_OVERRIDE={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} PYTHONPATH={lib} python {benchmark} 16384 20 1 0".format(
+        profile_command = "MADRONA_MWGPU_ENABLE_PGO=1 MADRONA_MWGPU_TRACE_NAME=profile_{block}_block MADRONA_MWGPU_EXEC_CONFIG_OVERRIDE={thread},{block},{sm} MADRONA_MWGPU_KERNEL_CACHE={cache} python {benchmark} --num-worlds {num_worlds} --num-steps {num_steps}".format(
             thread=NUM_THREADS_PER_BLOCK,
             block=config,
             sm=NUM_SMS,
             cache=cache,
-            lib=path_to_lib,
-            benchmark=path_to_bench)
+            benchmark=args.benchmark_script,
+            num_worlds=args.num_worlds,
+            num_steps=args.num_steps)
         subprocess.run(profile_command, shell=True, text=True)
 
 
@@ -97,12 +103,12 @@ def generate_json(block_config=range(1, 7)):
         json.dump(split_nodes, f)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(
-            "Usage: python profile.py [path_to_python_lib] [path_to_benchmark_script]]"
-        )
-        sys.exit(1)
-    profile_madrona(sys.argv[1], sys.argv[2])
-    parse_traces()
-    generate_json()
+arg_parser = argparse.ArgumentParser()
+arg_parser.add_argument('--num-worlds', type=int, required=True)
+arg_parser.add_argument('--num-steps', type=int, required=True)
+arg_parser.add_argument('--benchmark-script', type=str, required=True)
+
+args = arg_parser.parse_args()
+profile_madrona(args)
+parse_traces()
+generate_json()

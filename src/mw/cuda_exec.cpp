@@ -947,12 +947,24 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
         to_string(cuda_arch.second);
 
-    string num_sms_str = "-DMADRONA_MWGPU_NUM_SMS=" + to_string(num_sms);
+    string num_sms_str =
+        "-DMADRONA_MWGPU_NUM_SMS=(" + to_string(num_sms) + "_i32)";
+
+    CountT max_megakernel_blocks_per_sm = 1;
+    for (const MegakernelConfig &megakernel_cfg : megakernel_cfgs) {
+        if (megakernel_cfg.numBlocksPerSM > max_megakernel_blocks_per_sm) {
+            max_megakernel_blocks_per_sm = megakernel_cfg.numBlocksPerSM;
+        }
+    }
+
+    string max_blocks_str = "-DMADRONA_MWGPU_MAX_BLOCKS_PER_SM=(" +
+        to_string(max_megakernel_blocks_per_sm) + "_i32)";
 
     DynArray<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-arch", gpu_arch_str.c_str(),
         num_sms_str.c_str(),
+        max_blocks_str.c_str(),
 #ifdef MADRONA_TRACING
         "-DMADRONA_TRACING=1",
 #endif
@@ -1738,26 +1750,19 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
     REQ_CU(cuDeviceGetAttribute(
         &num_sms, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, cu_gpu));
 
-    DynArray<MegakernelConfig> megakernel_cfgs(
-        consts::maxMegakernelBlocksPerSM);
-    for (uint32_t i = 1; i <= consts::maxMegakernelBlocksPerSM; i++) {
-        // todo: iterate over block sizes
-        // for (uint32_t j = 32; j <= numMegakernelThreads; j += 32) {
-        //     megakernel_dims.push_back(std::make_tuple(j, i, num_sms));
-        // }
+    CountT max_megakernel_blocks_per_sm = 1;
+    const char *enable_pgo_env = getenv("MADRONA_MWGPU_ENABLE_PGO");
+    if (enable_pgo_env && enable_pgo_env[0] == '1') {
+        max_megakernel_blocks_per_sm = 6;
+    }
+
+    DynArray<MegakernelConfig> megakernel_cfgs(max_megakernel_blocks_per_sm);
+    for (uint32_t i = 1; i <= max_megakernel_blocks_per_sm; i++) {
         megakernel_cfgs.push_back({
             consts::numMegakernelThreads,
             i,
             (uint32_t)num_sms,
         });
-        
-        // skip extra compilation if unnecessary
-        // auto *get_config_dims = getenv("MADRONA_MWGPU_CONFIG_DIMS");
-        // auto *get_profile_config_file = getenv("MADRONA_MWGPU_PROFILE_CONFIG_FILE");
-        // if (get_config_dims == nullptr && get_profile_config_file == nullptr) {
-        //     // no need to compile multiple megakernels if we're not using other configurations
-        //     break;
-        // }
     }
 
     std::pair<int, int> cu_capability;
