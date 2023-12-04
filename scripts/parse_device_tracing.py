@@ -2,9 +2,9 @@ import os
 import sys
 import argparse
 import pandas as pd
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
-HIDE_SEEK = True
+HIDE_SEEK = False
 SPLIT_LINES = False
 MAX_BLOCKS_PER_SM = 6
 
@@ -392,6 +392,9 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
     print("Percentage of active warps is {:.2f}%".format(active_warps /
                                                          num_stamps * 100))
 
+    fontsize = 65
+    font = ImageFont.load_default(size=fontsize)
+
     if not HIDE_SEEK:
         # mark the start and the end of major nodes_map
         y_shift = 0.9
@@ -406,7 +409,7 @@ def plot_events(step_log, nodes_map, blocks, file_name, args):
                           nodes_map[n]["funcID"],
                           (nodes_map[n]["duration (ns)"]) / 1000000,
                           nodes_map[n]["percentage (%)"]),
-                      fill=(0, 0, 0))
+                      fill=(0, 0, 0), font = font)
             y_shift = 1.3 - y_shift
 
     img.save(file_name)
@@ -439,7 +442,7 @@ if __name__ == "__main__":
                         type=int,
                         default=5,
                         help="number of steps to be analyzed")
-    parser.add_argument("--num_highlight_nodes", type=int, default=10)
+    parser.add_argument("--num_highlight_nodes", type=int, default=16)
     parser.add_argument("--aspect_ratio", type=float, default=2)
     parser.add_argument("--fixed_scale", action="store_true")
     parser.add_argument("--tpp",
