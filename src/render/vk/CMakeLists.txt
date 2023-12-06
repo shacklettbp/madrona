@@ -93,4 +93,9 @@ if (TARGET madrona_cuda AND NOT MADRONA_WINDOWS)
 
     target_link_libraries(madrona_render_vk_cuda PUBLIC
         madrona_render_vk madrona_cuda madrona_common)
+
+    target_compile_definitions(madrona_render_vk_cuda
+        PUBLIC
+            "-DMADRONA_VK_CUDA_SUPPORT"
+    )
 endif()

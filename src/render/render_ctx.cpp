@@ -5,7 +5,7 @@
 
 #include <madrona/render/vk/backend.hpp>
 #include <madrona/render/shader_compiler.hpp>
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
 #include <madrona/cuda_utils.hpp>
 #endif
 
@@ -569,7 +569,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     auto instances_cpu = Optional<render::vk::HostBuffer>::none();
     auto instance_offsets_cpu = Optional<render::vk::HostBuffer>::none();
 
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
     auto views_gpu = Optional<render::vk::DedicatedBuffer>::none();
     auto views_cuda = Optional<render::vk::CudaImportedBuffer>::none();
 
@@ -612,7 +612,7 @@ static EngineInterop setupEngineInterop(Device &dev,
             world_ids_instances_base = malloc(sizeof(uint64_t) * num_worlds * max_instances_per_world);
             world_ids_views_base = malloc(sizeof(uint64_t) * num_worlds * max_views_per_world);
         } else {
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
             views_gpu = alloc.makeDedicatedBuffer(
                 num_views_bytes, false, true);
 
@@ -635,7 +635,7 @@ static EngineInterop setupEngineInterop(Device &dev,
             // instances_base = instances_cpu->ptr;
             instances_base = malloc(sizeof(render::shader::PackedInstanceData) * num_worlds * max_instances_per_world);
         } else {
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
             instances_gpu = alloc.makeDedicatedBuffer(
                 num_instances_bytes, false, true);
 
@@ -656,7 +656,7 @@ static EngineInterop setupEngineInterop(Device &dev,
             instance_offsets_hdl = instance_offsets_cpu->buffer;
             instance_offsets_base = instance_offsets_cpu->ptr;
         } else {
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
             instance_offsets_gpu = alloc.makeDedicatedBuffer(
                 num_offsets_bytes, false, true);
 
@@ -677,7 +677,7 @@ static EngineInterop setupEngineInterop(Device &dev,
             view_offsets_hdl = view_offsets_cpu->buffer;
             view_offsets_base = view_offsets_cpu->ptr;
         } else {
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
             view_offsets_gpu = alloc.makeDedicatedBuffer(
                 num_offsets_bytes, false, true);
 
@@ -698,7 +698,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     VkBuffer voxel_buffer_hdl = VK_NULL_HANDLE;
     uint32_t *voxel_buffer_ptr = nullptr;
 
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
     auto voxel_gpu = Optional<render::vk::DedicatedBuffer>::none();
     auto voxel_cuda = Optional<render::vk::CudaImportedBuffer>::none();
 #endif
@@ -708,7 +708,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         voxel_buffer_ptr = num_voxels ? (uint32_t *)voxel_cpu->ptr : nullptr;
         voxel_buffer_hdl = voxel_cpu->buffer;
     } else {
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
         voxel_gpu = alloc.makeDedicatedBuffer(
             staging_size, false, true);
 
@@ -738,7 +738,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         total_num_views_cpu_inc->store_release(0);
         total_num_instances_cpu_inc->store_release(0);
     } else {
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
         total_num_views_readback = (uint32_t *)cu::allocReadback(
             2*sizeof(uint32_t));
         total_num_instances_readback = total_num_views_readback + 1;
@@ -768,7 +768,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     if (!gpu_input) {
         gpu_bridge = nullptr;
     } else {
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
         gpu_bridge = (const RenderECSBridge *)cu::allocGPU(
             sizeof(RenderECSBridge));
         cudaMemcpy((void *)gpu_bridge, &bridge, sizeof(RenderECSBridge),
@@ -793,7 +793,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(view_offsets_cpu),
         std::move(instances_cpu),
         std::move(instance_offsets_cpu),
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
         std::move(views_gpu),
         std::move(view_offsets_gpu),
 
@@ -815,7 +815,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         max_views_per_world,
         max_instances_per_world,
         std::move(voxel_cpu),
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
         std::move(voxel_gpu),
         std::move(voxel_cuda),
 #endif

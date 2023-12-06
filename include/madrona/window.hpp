@@ -1,6 +1,7 @@
 #pragma once
 
 #include <madrona/render/api.hpp>
+#include <memory>
 
 namespace madrona {
 

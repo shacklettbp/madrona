@@ -462,7 +462,7 @@ struct BatchFrame {
     vk::DedicatedBuffer rgbOutput;
     vk::DedicatedBuffer depthOutput;
 
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
     vk::CudaImportedBuffer rgbOutputCUDA;
     vk::CudaImportedBuffer depthOutputCUDA;
 #endif
@@ -609,7 +609,7 @@ static void makeBatchFrame(vk::Device& dev,
     VkFence render_fence = vk::makeFence(dev, true);
 
     const bool supports_cuda_export =
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
         true;
 #else
         false;
@@ -622,7 +622,7 @@ static void makeBatchFrame(vk::Device& dev,
         auto fake_depth_buf = alloc.makeDedicatedBuffer(
             1, false, supports_cuda_export);
 
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
         vk::CudaImportedBuffer fake_rgb_cuda(dev, fake_rgb_buf.mem, 1);
         vk::CudaImportedBuffer fake_depth_cuda(dev, fake_depth_buf.mem, 1);
 #endif
@@ -635,7 +635,7 @@ static void makeBatchFrame(vk::Device& dev,
             HeapArray<LayeredTarget>(0),
             std::move(fake_rgb_buf),
             std::move(fake_depth_buf),
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
             std::move(fake_rgb_cuda),
             std::move(fake_depth_cuda),
 #endif
@@ -752,7 +752,7 @@ static void makeBatchFrame(vk::Device& dev,
     vk::DedicatedBuffer depth_output_buffer = alloc.makeDedicatedBuffer(
         num_depth_bytes, false, supports_cuda_export);
 
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
     vk::CudaImportedBuffer rgb_output_cuda(
         dev, rgb_output_buffer.mem, num_rgb_bytes);
 
@@ -826,7 +826,7 @@ static void makeBatchFrame(vk::Device& dev,
         std::move(layered_targets),
         std::move(rgb_output_buffer),
         std::move(depth_output_buffer),
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
         std::move(rgb_output_cuda),
         std::move(depth_output_cuda),
 #endif
@@ -1849,7 +1849,7 @@ VkSemaphore BatchRenderer::getLatestWaitSemaphore()
 
 const uint8_t * BatchRenderer::getRGBCUDAPtr() const
 {
-#ifndef MADRONA_CUDA_SUPPORT
+#ifndef MADRONA_VK_CUDA_SUPPORT
     return nullptr;
 #else
     return (uint8_t *)impl->batchFrames[0].rgbOutputCUDA.getDevicePointer();
@@ -1858,7 +1858,7 @@ const uint8_t * BatchRenderer::getRGBCUDAPtr() const
 
 const float * BatchRenderer::getDepthCUDAPtr() const
 {
-#ifndef MADRONA_CUDA_SUPPORT
+#ifndef MADRONA_VK_CUDA_SUPPORT
     return nullptr;
 #else
     return (float *)impl->batchFrames[0].depthOutputCUDA.getDevicePointer();

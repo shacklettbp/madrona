@@ -10,7 +10,7 @@
 #include "vk/descriptors.hpp"
 #include "vk/utils.hpp"
 
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
 #include "vk/cuda_interop.hpp"
 #endif
 
@@ -103,7 +103,7 @@ struct EngineInterop {
     Optional<render::vk::HostBuffer> instancesCPU;
     Optional<render::vk::HostBuffer> instanceOffsetsCPU;
 
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
     Optional<render::vk::DedicatedBuffer> viewsGPU;
     Optional<render::vk::DedicatedBuffer> viewOffsetsGPU;
 
@@ -130,7 +130,7 @@ struct EngineInterop {
     uint32_t maxInstancesPerWorld;
 
     Optional<render::vk::HostBuffer> voxelInputCPU;
-#ifdef MADRONA_CUDA_SUPPORT
+#ifdef MADRONA_VK_CUDA_SUPPORT
     Optional<render::vk::DedicatedBuffer> voxelInputGPU;
     Optional<render::vk::CudaImportedBuffer> voxelInputCUDA;
 #endif
