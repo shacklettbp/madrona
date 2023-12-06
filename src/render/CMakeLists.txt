@@ -44,7 +44,7 @@ target_link_libraries(madrona_render_core
 )
 
 if (TARGET madrona_render_vk_cuda)
-    target_link_libraries(madrona_render_core PRIVATE
+    target_link_libraries(madrona_render_core PUBLIC
         madrona_render_vk_cuda
     )
 endif()
