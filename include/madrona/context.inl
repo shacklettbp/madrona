@@ -23,6 +23,12 @@ Loc Context::makeTemporary()
         MADRONA_MW_COND(cur_world_id_));
 }
 
+template <typename LogT>
+void Context::stateLog(LogT l)
+{
+    state_mgr_->stateLog<LogT>(MADRONA_MW_COND(cur_world_id_,) l);
+}
+
 void Context::destroyEntity(Entity e)
 {
     state_mgr_->destroyEntityNow(MADRONA_MW_COND(cur_world_id_,)

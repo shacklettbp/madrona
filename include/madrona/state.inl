@@ -175,6 +175,18 @@ void StateManager::registerSingleton()
 #endif
 }
 
+template <typename LogT>
+void StateManager::registerStateLogEntry()
+{
+    using ArchetypeT = StateLogArchetype<LogT>;
+
+    registerComponent<LogT>();
+    ArchetypeID archetype_id = registerArchetype<ArchetypeT>(
+        ComponentMetadataSelector {}, ArchetypeFlags::None, 0);
+
+    trackLogArchetype(archetype_id);
+}
+
 template <typename ArchetypeT, typename ComponentT>
 ComponentT * StateManager::exportColumn()
 {
@@ -451,6 +463,21 @@ Loc StateManager::makeTemporary(MADRONA_MW_COND(uint32_t world_id))
         archetype_id.id,
         int32_t(new_row),
     };
+}
+
+template <typename LogT>
+void StateManager::stateLog(MADRONA_MW_COND(uint32_t world_id,) LogT l)
+{
+    if (!enable_state_logging_) {
+        return;
+    }
+
+    using ArchetypeT = StateLogArchetype<LogT>;
+
+    Loc loc = makeTemporary<ArchetypeT>(MADRONA_MW_COND(world_id));
+
+    getDirect<LogT>(
+        MADRONA_MW_COND(world_id,) user_component_offset_, loc) = l;
 }
 
 template <typename ArchetypeT>

@@ -96,7 +96,7 @@ friend class StateManager;
 class StateManager {
 public:
 #ifdef MADRONA_MW_MODE
-    StateManager(CountT num_worlds);
+    StateManager(CountT num_worlds, bool enable_state_logging);
 #else
     StateManager();
 #endif
@@ -112,6 +112,9 @@ public:
 
     template <typename SingletonT>
     void registerSingleton();
+
+    template <typename LogT>
+    void registerStateLogEntry();
 
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * exportColumn();
@@ -167,7 +170,7 @@ public:
 
     template <typename... ComponentTs, typename Fn>
     inline void iterateQuery(MADRONA_MW_COND(uint32_t world_id,)
-                                const Query<ComponentTs...> &query, Fn &&fn);
+                             const Query<ComponentTs...> &query, Fn &&fn);
 
     Transaction makeTransaction();
     void commitTransaction(Transaction &&txn);
@@ -190,6 +193,9 @@ public:
     template <typename ArchetypeT>
     inline Loc makeTemporary(MADRONA_MW_COND(uint32_t world_id));
 
+    template <typename LogT>
+    inline void stateLog(MADRONA_MW_COND(uint32_t world_id,) LogT l);
+
     template <typename ArchetypeT>
     inline void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
                       bool is_temporary);
@@ -201,9 +207,15 @@ public:
     void * tmpAlloc(MADRONA_MW_COND(uint32_t world_id,) uint64_t num_bytes);
     void resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id));
 
+    HeapArray<uint32_t> getLogEntrySizes() const;
+    void saveCurrentStepLogs(StateLogStore &save_state);
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
+
+    template <typename LogT>
+    struct StateLogArchetype : public madrona::Archetype<LogT> {};
 
     using ColumnMap = StaticIntegerMap<1024>;
     static constexpr uint32_t max_archetype_components_ = ColumnMap::capacity();
@@ -292,6 +304,8 @@ private:
                            const ComponentID *components,
                            const ComponentFlags *component_flags);
 
+    void trackLogArchetype(ArchetypeID archetype_id);
+
     void * exportColumn(uint32_t archetype_id, uint32_t component_id);
 
     void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
@@ -302,6 +316,8 @@ private:
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;
+    DynArray<ArchetypeID> log_archetypes_;
+    bool enable_state_logging_;
 
 #ifdef MADRONA_MW_MODE
     DynArray<ExportJob> export_jobs_;

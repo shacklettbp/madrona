@@ -31,6 +31,12 @@ void ECSRegistry::registerSingleton()
     state_mgr_->registerSingleton<SingletonT>();
 }
 
+template <typename LogT>
+void ECSRegistry::registerStateLogEntry()
+{
+    state_mgr_->registerStateLogEntry<LogT>();
+}
+
 template <typename ArchetypeT, typename ComponentT>
 void ECSRegistry::exportColumn(int32_t slot)
 {

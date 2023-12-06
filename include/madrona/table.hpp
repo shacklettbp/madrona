@@ -39,7 +39,7 @@ public:
 
     inline uint32_t numRows() const { return num_rows_; }
 
-    // Drops all rows in the table and frees memory
+    // Drops all rows in the table
     void clear();
 
     static constexpr uint32_t maxColumns = 128;

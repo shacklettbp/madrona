@@ -12,7 +12,7 @@ TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::TaskGraphExecutor(
       world_datas_(cfg.numWorlds),
       jobs_(cfg.numWorlds)
 {
-    auto ecs_reg = getECSRegistry();
+    auto ecs_reg = initECSRegistry();
     WorldT::registerTypes(ecs_reg, user_cfg);
 
     auto ctx_init_cb = [&](const WorkerInit &worker_init,
@@ -40,6 +40,7 @@ TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::TaskGraphExecutor(
         jobs_[i].data = &run_datas_[i];
     }
 
+    initLogs(cfg.stateLogRecordDirectory);
     initExport();
 }
 

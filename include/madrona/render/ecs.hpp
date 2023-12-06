@@ -24,32 +24,34 @@ struct Renderable {
 struct RenderECSBridge;
 
 namespace RenderingSystem {
-    void registerTypes(ECSRegistry &registry,
-                       const RenderECSBridge *bridge);
 
-    TaskGraphNodeID setupTasks(
-        TaskGraphBuilder &builder,
-        Span<const TaskGraphNodeID> deps);
+void registerTypes(ECSRegistry &registry,
+                   const RenderECSBridge *bridge);
 
-    void init(Context &ctx,
-              const RenderECSBridge *bridge);
+TaskGraphNodeID setupTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps);
 
-    uint32_t * getVoxelPtr(Context &ctx);
+void init(Context &ctx,
+          const RenderECSBridge *bridge);
 
-    void makeEntityRenderable(Context &ctx,
-                              Entity e);
+uint32_t * getVoxelPtr(Context &ctx);
 
-    void attachEntityToView(Context &ctx,
-                            Entity e,
-                            float vfov_degrees,
-                            float z_near,
-                            const math::Vector3 &camera_offset);
+void makeEntityRenderable(Context &ctx,
+                          Entity e);
 
-    // Need to call these before destroying entities
-    void cleanupViewingEntity(Context &ctx,
-                              Entity e);
-    void cleanupRenderableEntity(Context &ctx,
-                                 Entity e);
-};
+void attachEntityToView(Context &ctx,
+                        Entity e,
+                        float vfov_degrees,
+                        float z_near,
+                        const math::Vector3 &camera_offset);
+
+// Need to call these before destroying entities
+void cleanupViewingEntity(Context &ctx,
+                          Entity e);
+void cleanupRenderableEntity(Context &ctx,
+                             Entity e);
+
+}
 
 }

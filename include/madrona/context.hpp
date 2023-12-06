@@ -43,6 +43,9 @@ public:
     template <typename ArchetypeT>
     inline Loc makeTemporary();
 
+    template <typename LogT>
+    inline void stateLog(LogT l);
+
     // Destroy Entity e
     inline void destroyEntity(Entity e);
 

@@ -1,4 +1,6 @@
 #include <madrona/mw_cpu.hpp>
+#include <madrona/state_log.hpp>
+
 #include "../core/worker_init.hpp"
 
 #if defined(MADRONA_LINUX) or defined(MADRONA_MACOS)
@@ -20,11 +22,14 @@ struct ThreadPoolExecutor::Impl {
     StateManager stateMgr;
     HeapArray<StateCache> stateCaches;
     HeapArray<void *> exportPtrs;
+    Optional<StateLogStore> stateLogStore;
 
     static Impl * make(const ThreadPoolExecutor::Config &cfg);
     ~Impl();
     void run(Job *jobs, CountT num_jobs);
     void workerThread(CountT worker_id);
+
+    void saveLogs();
 };
 
 static CountT getNumCores()
@@ -106,9 +111,11 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
         .numJobs = 0,
         .nextJob = 0,
         .numFinished = 0,
-        .stateMgr = StateManager(cfg.numWorlds),
+        .stateMgr = StateManager(
+            cfg.numWorlds, cfg.stateLogRecordDirectory != nullptr),
         .stateCaches = HeapArray<StateCache>(cfg.numWorlds),
         .exportPtrs = HeapArray<void *>(cfg.numExportedBuffers),
+        .stateLogStore = Optional<StateLogStore>::none(),
     };
 
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
@@ -142,6 +149,15 @@ ThreadPoolExecutor::Impl::~Impl()
 
 ThreadPoolExecutor::~ThreadPoolExecutor() = default;
 
+void ThreadPoolExecutor::Impl::saveLogs()
+{
+    if (!stateLogStore.has_value()) {
+        return;
+    }
+
+    stateMgr.saveCurrentStepLogs(*stateLogStore);
+}
+
 void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
 {
     stateMgr.copyInExportedColumns();
@@ -157,6 +173,8 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
     mainWakeup.store_relaxed(0);
 
     stateMgr.copyOutExportedColumns();
+
+    saveLogs();
 }
 
 void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs)
@@ -184,9 +202,22 @@ void ThreadPoolExecutor::initializeContexts(
     }
 }
 
-ECSRegistry ThreadPoolExecutor::getECSRegistry()
+ECSRegistry ThreadPoolExecutor::initECSRegistry()
 {
     return ECSRegistry(&impl_->stateMgr, impl_->exportPtrs.data());
+}
+
+void ThreadPoolExecutor::initLogs(const char *log_dir)
+{
+    if (log_dir == nullptr) {
+        return;
+    }
+
+    HeapArray<uint32_t> log_entry_sizes = impl_->stateMgr.getLogEntrySizes();
+
+    impl_->stateLogStore = StateLogStore::initNewStateLog({
+        .numBytesPerLogType = log_entry_sizes,
+    }, log_dir);
 }
 
 void ThreadPoolExecutor::initExport()

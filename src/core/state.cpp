@@ -9,6 +9,11 @@
 #include <madrona/registry.hpp>
 #include <madrona/utils.hpp>
 #include <madrona/dyn_array.hpp>
+#include <madrona/stack_alloc.hpp>
+
+#ifdef MADRONA_MW_MODE
+#include <madrona/state_log.hpp>
+#endif
 
 #include <cassert>
 #include <functional>
@@ -130,12 +135,14 @@ void StateManager::TmpAllocator::reset()
 }
 
 #ifdef MADRONA_MW_MODE
-StateManager::StateManager(CountT num_worlds)
+StateManager::StateManager(CountT num_worlds, bool enable_state_logging)
     : init_state_cache_(),
       entity_store_(),
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
+      log_archetypes_(0),
+      enable_state_logging_(enable_state_logging),
       export_jobs_(0),
       tmp_allocators_(num_worlds),
       num_worlds_(num_worlds),
@@ -443,6 +450,11 @@ void StateManager::registerArchetype(uint32_t id,
     });
 }
 
+void StateManager::trackLogArchetype(ArchetypeID archetype_id)
+{
+    log_archetypes_.push_back(archetype_id);
+}
+
 void * StateManager::exportColumn(uint32_t archetype_id, uint32_t component_id)
 {
     auto &archetype = *archetype_stores_[archetype_id];
@@ -593,6 +605,89 @@ void StateManager::resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id))
     tmp_allocators_[world_id].reset();
 #else
     tmp_allocator_.reset();
+#endif
+}
+
+HeapArray<uint32_t> StateManager::getLogEntrySizes() const
+{
+    HeapArray<uint32_t> log_type_sizes(log_archetypes_.size());
+
+    for (CountT i = 0; i < log_type_sizes.size(); i++) {
+        const ArchetypeStore &archetype_store =
+            *(archetype_stores_[log_archetypes_[i].id]);
+        ComponentID log_component = archetype_components_[
+            archetype_store.componentOffset];
+        const TypeInfo &log_type = *(component_infos_[log_component.id]);
+        log_type_sizes[i] = log_type.numBytes;
+    }
+
+    return log_type_sizes;
+}
+
+void StateManager::saveCurrentStepLogs(StateLogStore &save_state)
+{
+#ifdef MADRONA_MW_MODE
+    using LogEntries = StateLogStore::LogEntries;
+
+    CountT num_log_types = log_archetypes_.size();
+
+    StackAlloc tmp_alloc;
+    LogEntries *step_data = tmp_alloc.allocN<LogEntries>(num_log_types);
+
+    for (CountT log_type_idx  = 0;
+         log_type_idx < num_log_types;
+         log_type_idx++) {
+        const ArchetypeStore &archetype_store =
+            *(archetype_stores_[log_archetypes_[log_type_idx].id]);
+        const TableStorage &tbl_storage = archetype_store.tblStorage;
+
+        uint32_t *world_offsets = tmp_alloc.allocN<uint32_t>(num_worlds_);
+        uint32_t *world_counts = tmp_alloc.allocN<uint32_t>(num_worlds_);
+
+        CountT num_total_entries = 0;
+        for (CountT world_idx = 0; world_idx < (CountT)num_worlds_; world_idx++) {
+            const Table &tbl = tbl_storage.tbls[world_idx];
+            CountT num_rows = tbl.numRows();
+
+            world_offsets[world_idx] = (uint32_t)num_total_entries;
+            world_counts[world_idx] = (uint32_t)num_rows;
+
+            num_total_entries += num_rows;
+        }
+
+        ComponentID log_component = archetype_components_[
+            archetype_store.componentOffset];
+        const TypeInfo &type_info = *(component_infos_[log_component.id]);
+        const CountT num_bytes_per_entry = (CountT)type_info.numBytes;
+
+        char *log_data = (char *)tmp_alloc.alloc(
+            (CountT)num_total_entries * num_bytes_per_entry,
+            type_info.alignment);
+            
+        CountT cur_offset = 0;
+        for (CountT world_idx = 0; world_idx < (CountT)num_worlds_; world_idx++) {
+            Table &tbl = tbl_storage.tbls[world_idx];
+            CountT num_tbl_bytes =
+                num_bytes_per_entry * (CountT)tbl.numRows();
+
+            memcpy(log_data + cur_offset, tbl.data(user_component_offset_),
+                num_tbl_bytes);
+
+            cur_offset += num_tbl_bytes;
+
+            tbl.clear();
+        }
+
+        step_data[log_type_idx] = {
+            .data = log_data,
+            .worldOffsets = world_offsets,
+            .worldCounts = world_counts,
+            .numTotalEntries = (uint32_t)num_total_entries,
+        };
+    }
+
+    save_state.addStepLogs(
+        Span<LogEntries>(step_data, num_log_types), num_worlds_);
 #endif
 }
 

@@ -45,6 +45,9 @@ public:
     template <typename SingletonT>
     void registerSingleton();
 
+    template <typename LogT>
+    void registerStateLogEntry();
+
     // Export ComponentT of ArchetypeT for use by code outside the ECS,
     // such as learning. The exported pointer can be retrieved from the CPU or
     // GPU backend's getExported() function by passing the same value of 'slot'

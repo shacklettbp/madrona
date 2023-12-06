@@ -21,6 +21,9 @@ public:
         uint32_t numWorlds;
         // Number of exported ECS components
         uint32_t numExportedBuffers;
+        // Directory to save logs from Context::stateLog
+        // if null, logging is disabled
+        const char *stateLogRecordDirectory = nullptr;
         // Number of worker threads
         uint32_t numWorkers = 0;
     };
@@ -45,8 +48,9 @@ protected:
         Context & (*init_fn)(void *, const WorkerInit &, CountT),
         void *init_data, CountT num_worlds);
 
-    ECSRegistry getECSRegistry();
+    ECSRegistry initECSRegistry();
 
+    void initLogs(const char *log_dir);
     void initExport();
 private:
     struct Impl;

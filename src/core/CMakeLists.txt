@@ -28,6 +28,7 @@ target_compile_definitions(madrona_core
 add_library(madrona_mw_core STATIC
     ${MADRONA_CORE_SRCS}
     ${MADRONA_INC_DIR}/taskgraph.hpp ${MADRONA_INC_DIR}/taskgraph.inl taskgraph.cpp
+    ${MADRONA_INC_DIR}/state_log.hpp state_log.cpp
 )
 
 target_compile_definitions(madrona_mw_core
@@ -40,6 +41,12 @@ target_link_libraries(madrona_mw_core
     PUBLIC
         madrona_common
 )
+
+add_library(madrona_learning_utils STATIC
+    ${MADRONA_INC_DIR}/learning_utils.hpp learning_utils.cpp
+)
+
+target_link_libraries(madrona_learning_utils PUBLIC madrona_mw_core)
 
 #add_library(madrona_wm STATIC
 #    ${INC_DIR}/window.hpp ${INC_DIR}/window.inl window.cpp
