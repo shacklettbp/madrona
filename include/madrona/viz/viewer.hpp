@@ -61,6 +61,8 @@ public:
 
     void stopLoop();
 
+    CountT getRenderedWorldID() const;
+
 private:
     void loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
               void *input_data, void (*step_fn)(void *), void *step_data,

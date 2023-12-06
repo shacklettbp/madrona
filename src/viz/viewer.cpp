@@ -674,4 +674,9 @@ void Viewer::stopLoop()
     impl_->shouldExit = true;
 }
 
+CountT Viewer::getRenderedWorldID() const
+{
+    return (CountT)impl_->vizCtrl.worldIdx;
+}
+
 }
