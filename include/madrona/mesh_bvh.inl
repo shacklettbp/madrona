@@ -588,7 +588,7 @@ float MeshBVH::sphereCast(math::Vector3 ray_o,
         *out_hit_normal = closest_hit_normal;
     }
 
-    return t_max;
+    return hit_t;
 }
 
 bool MeshBVH::sphereCastNodeCheck(math::Vector3 o,

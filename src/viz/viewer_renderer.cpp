@@ -3332,9 +3332,11 @@ void ViewerRendererState::renderGUIAndPresent(
     };
 
     VkPipelineStageFlags wait_flags[] = {
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
-        prepare_screenshot ? VK_PIPELINE_STAGE_TRANSFER_BIT :
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        (VkPipelineStageFlags)VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 
+        (VkPipelineStageFlags)(
+            prepare_screenshot ? VK_PIPELINE_STAGE_TRANSFER_BIT :
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        ),
     };
 
     VkSubmitInfo gfx_submit {
