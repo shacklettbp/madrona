@@ -702,11 +702,15 @@ float MeshBVH::sphereCastTriangle(math::Vector3 tri_a,
     const Vector3 v1 = tri_b - ray_o;
     const Vector3 v2 = tri_c - ray_o;
 
-    Vector3 triangle_normal = geo::computeTriangleGeoNormal(e01, e02, e12);
-    triangle_normal = triangle_normal.normalize();
+    Vector3 triangle_normal_unnormalized =
+        geo::computeTriangleGeoNormal(e01, e02, e12);
+    float triangle_normal_len = triangle_normal_unnormalized.length();
+    Vector3 triangle_normal =
+        triangle_normal_unnormalized / triangle_normal_len;
+
+    const float normal_dot_direction = dot(triangle_normal, ray_d);
 
     const float sphere_r2 = sphere_r * sphere_r;
-    const float normal_dot_direction = dot(triangle_normal, ray_d);
 
     // This first if statement is an optimization to avoid the Case 0 check 
     // if possible. The sphere is centered at (0, 0, 0), so we can avoid the
@@ -742,7 +746,7 @@ float MeshBVH::sphereCastTriangle(math::Vector3 tri_a,
         float normal_dir_sign = copysignf(1.f, normal_dot_direction);
         Vector3 extruded_delta = normal_dir_sign * sphere_r * triangle_normal;
         // Want to extrude triangle *towards* ray
-        Vector3 v0_extruded = v0 - extruded_delta;
+        Vector3 v0_extruded = v0 - extruded_delta; // A in RTCD
         float tri_plane_hit_t =
             dot(v0_extruded, triangle_normal) / normal_dot_direction;
         
@@ -751,7 +755,7 @@ float MeshBVH::sphereCastTriangle(math::Vector3 tri_a,
         if (
 	        // Sphere hits the plane before the sweep, cannot intersect
             tri_plane_hit_t * abs_normal_dot_direction < -sphere_r ||
-            // Sphere hits the plane after the sweep / early out fraction,
+            // Sphere hits the plane after the sweep / current hit_t
             // cannot intersect
             tri_plane_hit_t >= t_max
         ) {
@@ -762,15 +766,14 @@ float MeshBVH::sphereCastTriangle(math::Vector3 tri_a,
         // our sweep and not before
         if (tri_plane_hit_t >= 0.0f) {
             Vector3 e = cross(ray_d, v0_extruded);
-            float v = -dot(e02, e);
-            float w = dot(e01, e);
+            float v = -dot(e02, e) * normal_dir_sign;
+            float w = dot(e01, e) * normal_dir_sign;
 
-            if (v >= 0.f && w >= 0.f && v + w <= 1.f) {
-                if (tri_plane_hit_t < t_max) {
-                    *out_hit_normal = normal_dir_sign * triangle_normal;
-                    return tri_plane_hit_t;
-                }
-        	}
+            if (v >= 0.f && w >= 0.f &&
+                    v + w <= triangle_normal_len * abs_normal_dot_direction) {
+                *out_hit_normal = -normal_dir_sign * triangle_normal;
+                return tri_plane_hit_t;
+            } 
         }
     }
 
