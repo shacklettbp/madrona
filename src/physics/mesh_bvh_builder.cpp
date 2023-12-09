@@ -88,7 +88,7 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
     // to be tightly packed.
     int32_t max_num_leaves = total_num_tris;
     int32_t max_num_nodes = std::max(utils::divideRoundUp(max_num_leaves - 1,
-        MeshBVH::nodeWidth - 1), int32_t(1)) + max_num_leaves;
+        (int32_t)MeshBVH::nodeWidth - 1), int32_t(1)) + max_num_leaves;
 
     Node *nodes = tmp_alloc.allocN<Node>(max_num_nodes);
     LeafGeometry *leaf_geos =

@@ -106,4 +106,81 @@ inline float intersectRayZOriginCapsule(
     return fminf(lower_sphere_t, upper_sphere_t);
 }
 
+inline math::Vector3 computeTriangleGeoNormal(
+    math::Vector3 ab,
+    math::Vector3 ac,
+    math::Vector3 bc)
+{
+    // Normals can be inaccurate even using Newell's method when one
+    // edge is very long.
+    // https://box2d.org/posts/2014/01/troublesome-triangle/
+    // 
+	// Always will use ab as the base, pick shorter of the other two
+    // to compute cross product.
+
+    math::Vector3 normal_bc = cross(ab, bc);
+	math::Vector3 normal_ac = cross(ab, ac);
+    return bc.length2() < ac.length2() ? normal_bc : normal_ac;
+}
+
+inline math::Vector3 triangleClosestPointToOrigin(
+    math::Vector3 a,
+    math::Vector3 b,
+    math::Vector3 c,
+    math::Vector3 ab,
+    math::Vector3 ac)
+{
+    using namespace math;
+    // RTCD 5.1.5. Assumes P is at origin
+
+    // Check if P in vertex region outside A
+    float d1 = dot(ab, a);
+    float d2 = dot(ac, a);
+    if (d1 >= 0.f && d2 >= 0.f) {
+        return a; // barycentric coordinates (1,0,0)
+    }
+
+    // Check if P in vertex region outside B
+    float d3 = dot(ab, b);
+    float d4 = dot(ac, b);
+    if (d3 <= 0.f && d3 <= d4) {
+        return b; // barycentric coordinates (0,1,0)
+    }
+
+    // Check if P in edge region of AB, if so return projection of P onto AB
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0.f && d1 <= 0.f && d3 >= 0.f) {
+        float v = d1 / (d1 - d3);
+        return a + v * ab; // barycentric coordinates (1-v,v,0)
+    }
+
+    // Check if P in vertex region outside C
+    float d5 = dot(ab, c);
+    float d6 = dot(ac, c);
+    if (d6 <= 0.f && d5 >= d6) {
+        return c; // barycentric coordinates (0,0,1)
+    }
+        
+    // Check if P in edge region of AC, if so return projection of P onto AC
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0.f && d2 <= 0.f && d6 >= 0.f) {
+        float w = d2 / (d2 - d6);
+        return a + w * ac; // barycentric coordinates (1-w,0,w)
+    }
+
+    // Check if P in edge region of BC, if so return projection of P onto BC
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0.f && (d4 - d3) <= 0.f && (d5 - d6) <= 0.f) {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return b + w * (c - b); // barycentric coordinates (0,1-w,w)
+    }
+
+    // P inside face region. Compute Q through its barycentric coordinates
+    // (u,v,w)
+    float denom = 1.f / (va + vb + vc);
+    float v = vb * denom;
+    float w = vc * denom;
+    return a + ab * v + ac * w; //=u*a+v*b+w*c,u=va*denom=1.0f-v-w
+}
+
 }

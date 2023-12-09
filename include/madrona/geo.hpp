@@ -22,6 +22,19 @@ inline float intersectRayZOriginCapsule(
     float r,
     float h);
 
+// Returns non-unit normal
+inline math::Vector3 computeTriangleGeoNormal(
+    math::Vector3 ab,
+    math::Vector3 ac,
+    math::Vector3 bc);
+
+inline math::Vector3 triangleClosestPointToOrigin(
+    math::Vector3 a,
+    math::Vector3 b,
+    math::Vector3 c,
+    math::Vector3 ab,
+    math::Vector3 ac);
+
 }
 
 #include "geo.inl"

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <madrona/types.hpp>
+#include <madrona/geo.hpp>
 
 namespace madrona::phys {
 
@@ -13,8 +14,8 @@ struct CollisionMaterial {
 };
 
 struct MeshBVH {
-    static constexpr inline int32_t numTrisPerLeaf = 8;
-    static constexpr inline int32_t nodeWidth = 4;
+    static constexpr inline CountT numTrisPerLeaf = 8;
+    static constexpr inline CountT nodeWidth = 4;
     static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
 
     struct Node {
@@ -68,13 +69,19 @@ struct MeshBVH {
     template <typename Fn>
     void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
 
-    inline bool traceRay(math::Vector3 o,
-                         math::Vector3 d,
+    inline bool traceRay(math::Vector3 ray_o,
+                         math::Vector3 ray_d,
                          float *out_hit_t,
                          math::Vector3 *out_hit_normal,
                          float t_max = float(FLT_MAX)) const;
 
-    inline bool traceRayIntoLeaf(
+    inline float sphereCast(math::Vector3 ray_o,
+                            math::Vector3 ray_d,
+                            float sphere_r,
+                            math::Vector3 *out_hit_normal,
+                            float t_max = float(FLT_MAX));
+
+    inline bool traceRayLeaf(
         int32_t leaf_idx,
         RayIsectTxfm tri_isect_txfm,
         math::Vector3 ray_o,
@@ -99,6 +106,28 @@ struct MeshBVH {
 
     inline RayIsectTxfm computeRayIsectTxfm(
         math::Vector3 o, math::Vector3 d, math::Diag3x3 inv_d) const;
+
+    inline bool sphereCastNodeCheck(math::Vector3 ray_o,
+                                    math::Diag3x3 inv_d,
+                                    float t_max,
+                                    float sphere_r,
+                                    math::AABB aabb) const;
+
+    inline float sphereCastLeaf(int32_t leaf_idx,
+                                math::Vector3 ray_o,
+                                math::Vector3 ray_d,
+                                float t_max,
+                                float sphere_r,
+                                math::Vector3 *out_hit_normal) const;
+
+    inline float sphereCastTriangle(math::Vector3 tri_a,
+                                    math::Vector3 tri_b,
+                                    math::Vector3 tri_c,
+                                    math::Vector3 ray_o,
+                                    math::Vector3 ray_d,
+                                    float t_max,
+                                    float sphere_r,
+                                    math::Vector3 *out_hit_normal) const;
 
     Node *nodes;
     LeafGeometry *leafGeos;
