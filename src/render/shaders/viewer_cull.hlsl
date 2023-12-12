@@ -90,7 +90,7 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
     for (int i = 0; i < sm.numInstancesPerThread; ++i) {
         uint local_idx = i * sm.numInstancesPerThread + tid.x;
 
-        if (local_idx > sm.numInstances) {
+        if (local_idx >= sm.numInstances) {
             return;
         }
 

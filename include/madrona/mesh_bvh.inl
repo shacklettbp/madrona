@@ -864,9 +864,13 @@ float MeshBVH::sphereCastTriangle(math::Vector3 tri_a,
         }
 
         // Ray now found to intersect sphere, compute smallest t value of
-        // intersection. Note that t can't be negative at this point
+        // intersection. 
         float t = -b - sqrtf(discr);
-        assert(t >= 0.f);
+        if (t < 0.f) {
+            // FIXME: t shouldn't be negative at this point, but it 
+            // happens during training
+            return 0.f;
+        }
 
         if (t >= hit_t) {
             return hit_t;

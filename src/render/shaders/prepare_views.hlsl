@@ -113,7 +113,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
 
     for (int i = 0; i < sm.numInstancesPerThread; ++i) {
         uint local_idx = i * sm.numInstancesPerThread + tid_local.x;
-        if (local_idx > sm.numInstancesForWorld)
+        if (local_idx >= sm.numInstancesForWorld)
             return;
 
         uint current_instance_idx = sm.offset +
