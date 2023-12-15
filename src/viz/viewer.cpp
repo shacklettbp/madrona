@@ -606,8 +606,8 @@ void Viewer::Impl::loop(
         key_state[(uint32_t)KeyboardKey::Shift] |=
             (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
         
-        if (frameCfg.viewIDX == 0) {
-            handleCamera(window, cam, cameraMoveSpeed);
+        if (vizCtrl.viewIdx == 0) {
+            handleCamera(window, vizCtrl.flyCam, cameraMoveSpeed);
         }
 
         auto cur_frame_start_time = chrono::steady_clock::now();
@@ -619,8 +619,8 @@ void Viewer::Impl::loop(
         if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
             prev_key_state = key_state;
             UserInput user_input(key_state.data(),press_state.data());
-            input_fn(input_data, frameCfg.worldIDX,
-                     frameCfg.viewIDX - 1, user_input);
+            input_fn(input_data, vizCtrl.worldIdx,
+                     vizCtrl.viewIdx - 1, user_input);
             utils::zeroN<bool>(key_state.data(), key_state.size());
             utils::zeroN<bool>(press_state.data(), press_state.size());
 
