@@ -56,17 +56,25 @@ public:
     void configureLighting(Span<const render::LightConfig> lights);
 
     // Run the viewer
-    template <typename InputFn, typename StepFn, typename UIFn>
-    void loop(InputFn &&input_fn, StepFn &&step_fn, UIFn &&ui_fn);
+    template <typename WorldInputFn, typename AgentInputFn,
+              typename StepFn, typename UIFn>
+    void loop(WorldInputFn &&world_input_fn, AgentInputFn &&agent_input_fn,
+              StepFn &&step_fn, UIFn &&ui_fn);
 
     void stopLoop();
 
-    CountT getRenderedWorldID() const;
+    CountT getCurrentWorldID() const;
+    CountT getCurrentViewID() const;
+    CountT getCurrentControlID() const;
 
 private:
-    void loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
-              void *input_data, void (*step_fn)(void *), void *step_data,
-              void (*ui_fn)(void *), void *ui_data);
+    void loop(
+        void (*world_input_fn)(void *, CountT, const UserInput &),
+        void *world_input_data,
+        void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
+        void *agent_input_data,
+        void (*step_fn)(void *), void *step_data,
+        void (*ui_fn)(void *), void *ui_data);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

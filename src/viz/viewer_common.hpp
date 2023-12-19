@@ -26,6 +26,8 @@ struct ViewerControl {
     // Which world to render in the flycam
     uint32_t worldIdx;
     uint32_t viewIdx;
+    uint32_t controlIdx;
+    bool linkViewControl;
 
     ViewerCam flyCam;
 

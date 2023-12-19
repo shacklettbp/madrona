@@ -57,8 +57,11 @@ struct Viewer::Impl {
     inline void render(float frame_duration);
 
     inline void loop(
-        void (*input_fn)(void *, CountT, CountT, const UserInput &),
-        void *input_data, void (*step_fn)(void *), void *step_data,
+        void (*world_input_fn)(void *, CountT, const UserInput &),
+        void *world_input_data,
+        void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
+        void *agent_input_data,
+        void (*step_fn)(void *), void *step_data,
         void (*ui_fn)(void *), void *ui_data);
 };
 
@@ -302,44 +305,6 @@ static void cfgUI(ViewerControl &ctrl,
     ImGui::PopItemWidth();
 
     {
-        StackAlloc str_alloc;
-        const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
-        cam_opts[0] = "Free Camera";
-
-        ImVec2 combo_size = ImGui::CalcTextSize(" Free Camera ");
-
-        for (CountT i = 0; i < num_agents; i++) {
-            const char *agent_prefix = "Agent ";
-
-            CountT num_bytes = strlen(agent_prefix) + numDigits(i) + 1;
-            cam_opts[i + 1] = str_alloc.allocN<char>(num_bytes);
-            snprintf((char *)cam_opts[i + 1], num_bytes, "%s%u",
-                     agent_prefix, (uint32_t)i);
-        }
-
-        ImGui::PushItemWidth(combo_size.x * 1.25f);
-        if (ImGui::BeginCombo("Input Control", cam_opts[ctrl.viewIdx])) {
-            for (CountT i = 0; i < num_agents + 1; i++) {
-                const bool is_selected = ctrl.viewIdx == (uint32_t)i;
-                if (ImGui::Selectable(cam_opts[i], is_selected)) {
-                    ctrl.viewIdx = (uint32_t)i;
-                }
-
-                if (is_selected) {
-                    ImGui::SetItemDefaultFocus();
-                }
-            }
-
-            ImGui::EndCombo();
-        }
-        ImGui::PopItemWidth();
-    }
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted("Simulation Settings");
-    ImGui::Separator();
-
-    {
         int world_idx = ctrl.worldIdx;
         float worldbox_width =
             ImGui::CalcTextSize(" ").x * (max(numDigits(num_worlds) + 2, 7_i32));
@@ -357,6 +322,72 @@ static void cfgUI(ViewerControl &ctrl,
 
         ctrl.worldIdx = world_idx;
     }
+
+    ImGui::Checkbox("Control Current View", &ctrl.linkViewControl);
+
+    {
+        StackAlloc str_alloc;
+        const char **cam_opts = str_alloc.allocN<const char *>(num_agents + 1);
+        cam_opts[0] = "Free Camera";
+
+        ImVec2 combo_size = ImGui::CalcTextSize(" Free Camera ");
+
+        for (CountT i = 0; i < num_agents; i++) {
+            const char *agent_prefix = "Agent ";
+
+            CountT num_bytes = strlen(agent_prefix) + numDigits(i) + 1;
+            cam_opts[i + 1] = str_alloc.allocN<char>(num_bytes);
+            snprintf((char *)cam_opts[i + 1], num_bytes, "%s%u",
+                     agent_prefix, (uint32_t)i);
+        }
+
+        ImGui::PushItemWidth(combo_size.x * 1.25f);
+        if (ImGui::BeginCombo("Current View", cam_opts[ctrl.viewIdx])) {
+            for (CountT i = 0; i < num_agents + 1; i++) {
+                const bool is_selected = ctrl.viewIdx == (uint32_t)i;
+                if (ImGui::Selectable(cam_opts[i], is_selected)) {
+                    ctrl.viewIdx = (uint32_t)i;
+                }
+
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+
+            ImGui::EndCombo();
+        }
+        ImGui::PopItemWidth();
+
+        if (ctrl.linkViewControl) {
+            ctrl.controlIdx = ctrl.viewIdx;
+            ImGui::BeginDisabled();
+        }
+
+        ImGui::PushItemWidth(combo_size.x * 1.25f);
+        if (ImGui::BeginCombo("Input Control", cam_opts[ctrl.controlIdx])) {
+            for (CountT i = 0; i < num_agents + 1; i++) {
+                const bool is_selected = ctrl.controlIdx == (uint32_t)i;
+                if (ImGui::Selectable(cam_opts[i], is_selected)) {
+                    ctrl.controlIdx = (uint32_t)i;
+                }
+
+                if (is_selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+
+            ImGui::EndCombo();
+        }
+        ImGui::PopItemWidth();
+
+        if (ctrl.linkViewControl) {
+            ImGui::EndDisabled();
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Simulation Settings");
+    ImGui::Separator();
 
 #if 0
     {
@@ -485,6 +516,8 @@ Viewer::Impl::Impl(
       vizCtrl {
           .worldIdx = 0,
           .viewIdx = 0,
+          .controlIdx = 0,
+          .linkViewControl = true,
           .flyCam = initCam(cfg.cameraPosition, cfg.cameraRotation),
           .requestedScreenshot = false,
           .screenshotFilePath = "screenshot.bmp",
@@ -493,6 +526,7 @@ Viewer::Impl::Impl(
           .gridImageSize = 256,
           .batchRenderOffsetX = 0,
           .batchRenderOffsetY = 0,
+          .batchRenderShowDepth = false,
       },
       numWorlds(cfg.numWorlds),
       maxNumAgents(
@@ -519,8 +553,11 @@ Viewer::UserInput::UserInput(bool *keys_state, bool *press_state)
 {}
 
 void Viewer::Impl::loop(
-    void (*input_fn)(void *, CountT, CountT, const UserInput &),
-    void *input_data, void (*step_fn)(void *), void *step_data,
+    void (*world_input_fn)(void *, CountT, const UserInput &),
+    void *world_input_data,
+    void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
+    void *agent_input_data,
+    void (*step_fn)(void *), void *step_data,
     void (*ui_fn)(void *), void *ui_data)
 {
     GLFWwindow *window = renderer.osWindow();
@@ -528,13 +565,14 @@ void Viewer::Impl::loop(
     std::array<bool, (uint32_t)KeyboardKey::NumKeys> key_state;
     std::array<bool, (uint32_t)KeyboardKey::NumKeys> press_state;
     std::array<bool, (uint32_t)KeyboardKey::NumKeys> prev_key_state;
-    utils::zeroN<bool>(key_state.data(), key_state.size());
     utils::zeroN<bool>(prev_key_state.data(), prev_key_state.size());
-    utils::zeroN<bool>(press_state.data(), press_state.size());
 
     float frame_duration = InternalConfig::secondsPerFrame;
     auto last_sim_tick_time = chrono::steady_clock::now();
     while (!glfwWindowShouldClose(window) && !shouldExit) {
+        utils::zeroN<bool>(key_state.data(), key_state.size());
+        utils::zeroN<bool>(press_state.data(), press_state.size());
+
         key_state[(uint32_t)KeyboardKey::W] |=
             (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS);
         key_state[(uint32_t)KeyboardKey::A] |=
@@ -606,7 +644,7 @@ void Viewer::Impl::loop(
         key_state[(uint32_t)KeyboardKey::Shift] |=
             (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS);
         
-        if (vizCtrl.viewIdx == 0) {
+        if (vizCtrl.controlIdx == 0) {
             handleCamera(window, vizCtrl.flyCam, cameraMoveSpeed);
         }
 
@@ -618,11 +656,14 @@ void Viewer::Impl::loop(
 
         if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
             prev_key_state = key_state;
-            UserInput user_input(key_state.data(),press_state.data());
-            input_fn(input_data, vizCtrl.worldIdx,
-                     vizCtrl.viewIdx - 1, user_input);
-            utils::zeroN<bool>(key_state.data(), key_state.size());
-            utils::zeroN<bool>(press_state.data(), press_state.size());
+            UserInput user_input(key_state.data(), press_state.data());
+
+            world_input_fn(world_input_data, vizCtrl.worldIdx, user_input);
+
+            if (vizCtrl.controlIdx != 0) {
+                agent_input_fn(agent_input_data, vizCtrl.worldIdx,
+                         vizCtrl.controlIdx - 1, user_input);
+            }
 
             step_fn(step_data);
 
@@ -660,11 +701,17 @@ void Viewer::configureLighting(Span<const render::LightConfig> lights)
     impl_->renderer.configureLighting(lights);
 }
 
-void Viewer::loop(void (*input_fn)(void *, CountT, CountT, const UserInput &),
-                  void *input_data, void (*step_fn)(void *), void *step_data,
-                  void (*ui_fn)(void *), void *ui_data)
+void Viewer::loop(
+    void (*world_input_fn)(void *, CountT, const UserInput &),
+    void *world_input_data,
+    void (*agent_input_fn)(void *, CountT, CountT, const UserInput &),
+    void *agent_input_data,
+    void (*step_fn)(void *), void *step_data,
+    void (*ui_fn)(void *), void *ui_data)
 {
-    impl_->loop(input_fn, input_data, step_fn, step_data, ui_fn, ui_data);
+    impl_->loop(world_input_fn, world_input_data,
+                agent_input_fn, agent_input_data,
+                step_fn, step_data, ui_fn, ui_data);
 }
 
 void Viewer::stopLoop()
@@ -672,9 +719,19 @@ void Viewer::stopLoop()
     impl_->shouldExit = true;
 }
 
-CountT Viewer::getRenderedWorldID() const
+CountT Viewer::getCurrentWorldID() const
 {
     return (CountT)impl_->vizCtrl.worldIdx;
+}
+
+CountT Viewer::getCurrentViewID() const
+{
+    return (CountT)impl_->vizCtrl.viewIdx - 1;
+}
+
+CountT Viewer::getCurrentControlID() const
+{
+    return (CountT)impl_->vizCtrl.viewIdx - 1;
 }
 
 }
