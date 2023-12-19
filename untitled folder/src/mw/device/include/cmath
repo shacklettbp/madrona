@@ -1,0 +1,17 @@
+#pragma once
+
+#include <cuda/std/cmath>
+
+#include "cuda_std_post"
+
+namespace std {
+    inline float floor(float arg)
+    {
+        return ::floor(arg);
+    }
+
+    inline double floor(double arg)
+    {
+        return ::floor(arg);
+    }
+}

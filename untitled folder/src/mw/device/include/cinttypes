@@ -1,0 +1,4 @@
+#pragma once
+
+#undef PRIu64
+#define PRIu64 "lu"
