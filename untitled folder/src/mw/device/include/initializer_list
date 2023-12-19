@@ -1,5 +1,0 @@
-#pragma once
-
-#include <cuda/std/initializer_list>
-
-#include "cuda_std_post"
