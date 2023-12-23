@@ -10,6 +10,17 @@ constexpr uint32_t mappingNodesDefaultSize = 64;
 constexpr uint32_t invalidNodeIndex = 0xFFFF'FFFF;
 }
 
+GPUExternalVMRegistry::GPUExternalVMRegistry()
+    : allocatorCount(0)
+{
+}
+
+GPUExternalVMInstance GPUExternalVMRegistry::registerInstance()
+{
+    assert(allocatorCount < maxVMAllocators);
+    return allocatorCount++;
+}
+
 struct GPUMappingNode {
     GPUMapping data;
 
@@ -31,34 +42,27 @@ struct GPUExternalVM::Impl {
     // Each one of these pairs contain the tail and head of the queue.
     InstanceQueue instances[maxVMAllocators];
 
-    Impl();
+    Impl(GPUExternalVMRegistry registry);
     ~Impl();
 };
 
-GPUExternalVM::Impl::Impl()
-    : allocatorCounter(0),
+GPUExternalVM::Impl::Impl(GPUExternalVMRegistry registry)
+    : allocatorCounter(registry.allocatorCount),
       bufferSize(mappingNodesDefaultSize),
       reachedNodes(0),
       firstFreeNodeIdx(invalidNodeIndex),
       mappingNodesBuffer((GPUMappingNode *)malloc(
                          sizeof(GPUMappingNode) * bufferSize))
 {
+    for (uint32_t i = 0; i < allocatorCounter; ++i) {
+        instances[i].first = invalidNodeIndex;
+        instances[i].second = invalidNodeIndex;
+    }
 }
 
 GPUExternalVM::Impl::~Impl()
 {
     free(mappingNodesBuffer);
-}
-
-GPUExternalVMInstance GPUExternalVM::registerInstance()
-{
-    assert(impl_->allocatorCounter < maxVMAllocators);
-    uint32_t inst = impl_->allocatorCounter++;
-
-    impl_->instances[inst].first = invalidNodeIndex;
-    impl_->instances[inst].second = invalidNodeIndex;
-
-    return inst;
 }
 
 GPUMapping GPUExternalVM::dequeueMapping(GPUExternalVMInstance inst) const
@@ -132,8 +136,8 @@ void GPUExternalVM::queueMapping(GPUExternalVMInstance inst,
     }
 }
 
-GPUExternalVM::GPUExternalVM()
-    : impl_(std::make_unique<Impl>())
+GPUExternalVM::GPUExternalVM(GPUExternalVMRegistry registry)
+    : impl_(std::make_unique<Impl>(registry))
 {
 }
 

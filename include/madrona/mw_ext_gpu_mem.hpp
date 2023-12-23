@@ -25,14 +25,20 @@ struct GPUMapping {
 
 using GPUExternalVMInstance = uint32_t;
 
+// This needs to get created at initialization (it's a temporary structure).
+struct GPUExternalVMRegistry {
+    MADRONA_MWGPU_EXPORT GPUExternalVMRegistry();
+
+    // Assigns a unique ID to the VM allocation instance.
+    MADRONA_MWGPU_EXPORT GPUExternalVMInstance registerInstance();
+
+    uint32_t allocatorCount;
+};
+
 // This is likely going to be unused unless rendering is involved,
 // in which this will be a necessity.
 class GPUExternalVM {
 public:
-    // A VM Instance must be registered in order for there to be external
-    // VM support.
-    MADRONA_MWGPU_EXPORT GPUExternalVMInstance registerInstance();
-
     // Returns the current state of the allocator state.
     // It is the responsibility of the external system to keep track of
     // differences.
@@ -43,8 +49,8 @@ public:
         GPUExternalVMInstance instance_id,
         const GPUMapping &mapping);
 
-    GPUExternalVM();
-    ~GPUExternalVM();
+    MADRONA_MWGPU_EXPORT GPUExternalVM(GPUExternalVMRegistry registry);
+    MADRONA_MWGPU_EXPORT ~GPUExternalVM();
 
 private:
     struct Impl;
