@@ -559,7 +559,8 @@ static EngineInterop setupEngineInterop(Device &dev,
                                         uint32_t max_instances_per_world,
                                         uint32_t render_width,
                                         uint32_t render_height,
-                                        VoxelConfig voxel_config)
+                                        VoxelConfig voxel_config,
+                                        GPUExternalVMRegistry *vm_reg)
 {
     (void)dev;
 
@@ -1163,6 +1164,7 @@ static Sky loadSky(const vk::Device &dev, MemoryAllocator &alloc, VkQueue queue)
 RenderContext::RenderContext(
         APIBackend *render_backend,
         GPUDevice *render_dev,
+        GPUExternalVMRegistry *vm_reg,
         const RenderManager::Config &cfg)
     : backend(*static_cast<vk::Backend *>(render_backend)),
       dev(static_cast<vk::Device &>(*render_dev)),
@@ -1197,7 +1199,7 @@ RenderContext::RenderContext(
       engine_interop_(setupEngineInterop(
           dev, alloc, cfg.execMode == ExecMode::CUDA, cfg.numWorlds,
           cfg.maxViewsPerWorld, cfg.maxInstancesPerWorld,
-          br_width_, br_height_, cfg.voxelCfg)),
+          br_width_, br_height_, cfg.voxelCfg, vm_reg)),
       lights_(InternalConfig::maxLights),
       loaded_assets_(0),
       sky_(loadSky(dev, alloc, renderQueue)),

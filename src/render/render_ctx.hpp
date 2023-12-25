@@ -9,6 +9,7 @@ namespace madrona::render {
 struct RenderContext {
     RenderContext(APIBackend *render_backend,
                   GPUDevice *render_dev,
+                  GPUExternalVMRegistry *vm_reg,
                   const RenderManager::Config &cfg);
     RenderContext(const RenderContext &) = delete;
     ~RenderContext();

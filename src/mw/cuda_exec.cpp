@@ -20,6 +20,7 @@
 #include <madrona/cuda_utils.hpp>
 #include <madrona/tracing.hpp>
 #include <madrona/json.hpp>
+#include <madrona/mw_ext_gpu_mem.hpp>
 
 #include "cpp_compile.hpp"
 
@@ -328,6 +329,7 @@ struct MWCudaExecutor::Impl {
     CUmodule cuModule;
     GPUEngineState engineState; 
     CUgraphExec runGraph;
+    GPUExternalVM extVM;
 };
 
 static void getUserEntries(const char *entry_class, CUmodule mod,
@@ -1736,6 +1738,7 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
 
 MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
                                const CompileConfig &compile_cfg,
+                               GPUExternalVMRegistry ext_mem_registry,
                                CUcontext cu_ctx)
     : impl_(nullptr)
 {
@@ -1795,6 +1798,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         gpu_kernels.mod,
         std::move(eng_state),
         run_graph,
+        ext_mem_registry
     });
 
     std::cout << "Initialization finished" << std::endl;
@@ -1842,6 +1846,11 @@ void MWCudaExecutor::runAsync(cudaStream_t strm)
 void * MWCudaExecutor::getExported(CountT slot) const
 {
     return impl_->engineState.exportedColumns[slot];
+}
+
+GPUExternalVM & MWCudaExecutor::getExtMemory()
+{
+    return impl_->extVM;
 }
 
 }

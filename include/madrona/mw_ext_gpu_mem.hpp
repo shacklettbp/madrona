@@ -21,6 +21,7 @@ namespace madrona {
 struct GPUMapping {
     void *basePtr;
     uint64_t numBytes;
+    uint64_t handle;
 };
 
 using GPUExternalVMInstance = uint32_t;
@@ -45,9 +46,8 @@ public:
     MADRONA_MWGPU_EXPORT GPUMapping dequeueMapping(GPUExternalVMInstance) const;
 
     // Gets called by the VM allocator thread in the cuda executor.
-    MADRONA_MWGPU_EXPORT void queueMapping(
-        GPUExternalVMInstance instance_id,
-        const GPUMapping &mapping);
+    MADRONA_MWGPU_EXPORT void queueMapping(GPUExternalVMInstance,
+                                           const GPUMapping &mapping);
 
     MADRONA_MWGPU_EXPORT GPUExternalVM(GPUExternalVMRegistry registry);
     MADRONA_MWGPU_EXPORT ~GPUExternalVM();

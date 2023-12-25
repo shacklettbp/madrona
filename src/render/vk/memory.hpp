@@ -6,7 +6,10 @@
 
 #include <madrona/render/vk/backend.hpp>
 
+#include "madrona/dyn_array.hpp"
 #include "utils.hpp"
+
+#include "cuda_interop.hpp"
 
 namespace madrona {
 namespace render {
@@ -24,6 +27,8 @@ public:
 
     void operator()(VkBuffer buffer) const;
     void operator()(VkImage image) const;
+    void operator()(VkBuffer buffer, 
+                    const DynArray<CudaExportedMemory> &mems) const;
 
     void clear();
 
@@ -93,21 +98,30 @@ private:
     friend class MemoryAllocator;
 };
 
-class SparseBuffer {
+// This sparse buffer assumes that the memory pages get mapped one
+// after the other. Avoids the need to have some sort of page table.
+class LinearSparseBuffer {
 public:
-    SparseBuffer(const SparseBuffer &) = delete;
-    SparseBuffer(SparseBuffer &&o);
-    ~SparseBuffer();
+    LinearSparseBuffer(const LinearSparseBuffer &) = delete;
+    LinearSparseBuffer(LinearSparseBuffer &&o);
+    ~LinearSparseBuffer();
 
-    SparseBuffer & operator=(const SparseBuffer &) = delete;
-    SparseBuffer & operator=(SparseBuffer &&);
+    LinearSparseBuffer & operator=(const LinearSparseBuffer &) = delete;
+    LinearSparseBuffer & operator=(LinearSparseBuffer &&);
+
+    void attach(CudaExportedMemory mem_group);
 
     VkBuffer buffer;
+    DynArray<CudaExportedMemory> memGroups;
 
 private:
-    SparseBuffer(VkBuffer buf);
+    LinearSparseBuffer(VkBuffer buf, AllocDeleter<false> deleter);
 
-    // AllocDeleter<false> deleter_;
+    uint32_t refreshed_counter_;
+    uint32_t bound_bytes_;
+
+    AllocDeleter<false> deleter_;
+
     friend class MemoryAllocator;
 };
 
@@ -200,8 +214,17 @@ public:
     std::optional<LocalBuffer> makeLocalBuffer(VkDeviceSize num_bytes,
                                                bool dev_addr = false);
 
-    std::optional<SparseBuffer> makeSparseBuffer(VkDeviceSize num_bytes,
-                                                 bool dev_addr = false);
+    CudaExportedMemory makeCudaExportedMemory(GPUMapping gpu_mapping);
+
+    std::optional<LinearSparseBuffer> makeLinearSparseBuffer(
+        VkDeviceSize max_num_bytes,
+        bool dev_addr = false);
+
+    void refreshLinearSparseBuffers(Span<LinearSparseBuffer *> buffers,
+                                    VkQueue queue,
+                                    VkSemaphore wait_sema,
+                                    VkSemaphore signal_sema,
+                                    VkFence fence);
 
     DedicatedBuffer makeDedicatedBuffer(VkDeviceSize num_bytes,
         bool dev_addr = false, bool support_export = false);

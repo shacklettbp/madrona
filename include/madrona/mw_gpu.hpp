@@ -18,6 +18,7 @@
 #include <madrona/macros.hpp>
 #include <madrona/span.hpp>
 #include <madrona/importer.hpp>
+#include <madrona/mw_ext_gpu_mem.hpp>
 
 #include <cuda_runtime.h>
 #include <cuda.h>
@@ -76,8 +77,12 @@ public:
     // Initializes CUDA context, sets current device
     static CUcontext initCUDA(int gpu_id);
 
+    // `ext_mem_registry` should be set to {} unless rendering is enabled.
+    // If rendering is enabled, a registry filled by the render context must
+    // be passed in.
     MADRONA_MWGPU_EXPORT MWCudaExecutor(const StateConfig &state_cfg,
                                         const CompileConfig &compile_cfg,
+                                        GPUExternalVMRegistry ext_mem_registry,
                                         CUcontext cu_ctx);
 
     MADRONA_MWGPU_EXPORT MWCudaExecutor(MWCudaExecutor &&o);
@@ -92,6 +97,11 @@ public:
     // Get the base pointer of the component data exported with
     // ECSRegister::exportColumn. Note that this will be a GPU pointer.
     MADRONA_MWGPU_EXPORT void * getExported(CountT slot) const;
+
+    // Allows the renderer or any other system which requires exported
+    // GPU memory pages to see what has been mapped and update the respective
+    // internal resources accordingly.
+    MADRONA_MWGPU_EXPORT GPUExternalVM & getExtMemory();
 
 private:
     struct Impl;

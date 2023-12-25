@@ -7,6 +7,8 @@
 #include <madrona/render/common.hpp>
 #include <madrona/render/ecs.hpp>
 
+#include <madrona/mw_ext_gpu_mem.hpp>
+
 #include <memory>
 
 namespace madrona::render {
@@ -34,6 +36,7 @@ public:
 
     RenderManager(APIBackend *render_backend,
                   GPUDevice *dev,
+                  GPUExternalVMRegistry *vm_reg,
                   const Config &cfg);
     RenderManager(RenderManager &&);
     ~RenderManager();

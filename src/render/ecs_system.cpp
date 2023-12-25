@@ -148,6 +148,7 @@ void registerTypes(ECSRegistry &registry,
             ComponentMetadataSelector<PerspectiveCameraData>(ComponentFlags::ImportMemory),
             ArchetypeFlags::None,
             bridge->maxViewsPerworld);
+
         registry.registerArchetype<RenderableArchetype>(
             ComponentMetadataSelector<InstanceData>(ComponentFlags::ImportMemory),
             ArchetypeFlags::ImportOffsets,

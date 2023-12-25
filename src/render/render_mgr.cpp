@@ -25,8 +25,9 @@ void RenderManager::configureLighting(Span<const LightConfig> lights)
 RenderManager::RenderManager(
         APIBackend *render_backend,
         GPUDevice *render_dev,
+        GPUExternalVMRegistry *vm_reg,
         const Config &cfg)
-    : rctx_(new RenderContext(render_backend, render_dev, cfg))
+    : rctx_(new RenderContext(render_backend, render_dev, vm_reg, cfg))
 {
 }
 

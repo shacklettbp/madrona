@@ -83,4 +83,26 @@ CudaImportedBuffer::~CudaImportedBuffer()
     close(ext_fd_);
 }
 
+CudaExportedMemory::CudaExportedMemory(VkDeviceMemory memory,
+                                       GPUMapping gpu_mapping)
+    : mem(memory), mappingInfo(gpu_mapping)
+{
+}
+
+CudaExportedMemory::CudaExportedMemory(const CudaExportedMemory &o)
+{
+    mem = o.mem;
+    mappingInfo = o.mappingInfo;
+}
+
+CudaExportedMemory::CudaExportedMemory(CudaExportedMemory &&o)
+{
+    mem = o.mem;
+    mappingInfo = o.mappingInfo;
+}
+
+CudaExportedMemory::~CudaExportedMemory()
+{
+}
+
 }

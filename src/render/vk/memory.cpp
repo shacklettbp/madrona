@@ -2,6 +2,7 @@
 
 #include "utils.hpp"
 #include "config.hpp"
+#include "vulkan/vulkan_core.h"
 
 #include <cstring>
 #include <iostream>
@@ -108,6 +109,20 @@ void AllocDeleter<false>::operator()(VkImage image) const
     dev.dt.freeMemory(dev.hdl, mem_, nullptr);
 }
 
+template <>
+void AllocDeleter<false>::operator()(
+    VkBuffer buffer, 
+    const DynArray<CudaExportedMemory> &mems) const
+{
+    const Device &dev = alloc_->dev;
+
+    dev.dt.destroyBuffer(dev.hdl, buffer, nullptr);
+
+    for (int i = 0; i < mems.size(); ++i) {
+        dev.dt.freeMemory(dev.hdl, mems[i].mem, nullptr);
+    }
+}
+
 template <bool host_mapped>
 void AllocDeleter<host_mapped>::clear()
 {
@@ -210,24 +225,43 @@ LocalBuffer::~LocalBuffer()
     deleter_(buffer);
 }
 
-SparseBuffer::SparseBuffer(VkBuffer buf)
-    : buffer(buf)
+LinearSparseBuffer::LinearSparseBuffer(VkBuffer buf,
+                                       AllocDeleter<false> deleter)
+    : buffer(buf), 
+      memGroups{},
+      refreshed_counter_(0),
+      bound_bytes_(0), 
+      deleter_(deleter)
 {}
 
-SparseBuffer::SparseBuffer(SparseBuffer &&o)
-    : buffer(o.buffer)
+LinearSparseBuffer::LinearSparseBuffer(LinearSparseBuffer &&o)
+    : buffer(o.buffer), 
+      memGroups(std::move(o.memGroups)),
+      refreshed_counter_(o.refreshed_counter_),
+      bound_bytes_(0), 
+      deleter_(o.deleter_)
 {
 }
 
-SparseBuffer & SparseBuffer::operator=(SparseBuffer &&o)
+LinearSparseBuffer & LinearSparseBuffer::operator=(LinearSparseBuffer &&o)
 {
     buffer = o.buffer;
+    memGroups = std::move(o.memGroups);
+    refreshed_counter_ = o.refreshed_counter_;
+    bound_bytes_ = o.bound_bytes_;
+    deleter_ = o.deleter_;
 
     return *this;
 }
 
-SparseBuffer::~SparseBuffer()
+LinearSparseBuffer::~LinearSparseBuffer()
 {
+    deleter_(buffer, memGroups);
+}
+
+void LinearSparseBuffer::attach(CudaExportedMemory mem)
+{
+    memGroups.push_back(mem);
 }
 
 LocalImage::LocalImage(uint32_t w,
@@ -619,8 +653,38 @@ HostBuffer MemoryAllocator::makeParamBuffer(VkDeviceSize num_bytes,
                                          dev_addr);
 }
 
-optional<SparseBuffer> MemoryAllocator::makeSparseBuffer(
-    VkDeviceSize num_bytes,
+CudaExportedMemory MemoryAllocator::makeCudaExportedMemory(
+    GPUMapping gpu_mapping)
+{
+#ifdef _WIN64
+    VkImportMemoryWin32HandleInfoKHR handleInfo = {};
+    handleInfo.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+    handleInfo.pNext = NULL;
+    handleInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+    handleInfo.handle = (void *)gpu_mapping.handle;
+    handleInfo.name = NULL;
+#else
+    VkImportMemoryFdInfoKHR handleInfo = {};
+    handleInfo.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+    handleInfo.pNext = NULL;
+    handleInfo.fd = (int)gpu_mapping.handle;
+    handleInfo.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#endif /* _WIN64 */
+
+    VkMemoryAllocateInfo memAllocation = {};
+    memAllocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memAllocation.pNext = (void *)&handleInfo;
+    memAllocation.allocationSize = gpu_mapping.numBytes;
+    memAllocation.memoryTypeIndex = type_indices_.dedicatedBuffer;
+
+    VkDeviceMemory memory;
+    REQ_VK(dev.dt.allocateMemory(dev.hdl, &memAllocation, nullptr, &memory));
+
+    return CudaExportedMemory(memory, gpu_mapping);
+}
+
+optional<LinearSparseBuffer> MemoryAllocator::makeLinearSparseBuffer(
+    VkDeviceSize max_num_bytes,
     bool dev_addr)
 {
     VkBufferUsageFlags usage = local_buffer_usage_flags_;
@@ -629,9 +693,66 @@ optional<SparseBuffer> MemoryAllocator::makeSparseBuffer(
         usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     }
 
-    auto [buffer, reqs] = makeUnboundBuffer(dev, num_bytes, usage, 1);
+    auto [buffer, reqs] = makeUnboundBuffer(dev, max_num_bytes, usage, 1);
 
-    return SparseBuffer(buffer);
+    return LinearSparseBuffer(buffer, AllocDeleter<false>(VK_NULL_HANDLE, *this));
+}
+
+void MemoryAllocator::refreshLinearSparseBuffers(
+    Span<LinearSparseBuffer *> buffers,
+    VkQueue queue,
+    VkSemaphore wait_sema,
+    VkSemaphore signal_sema,
+    VkFence fence)
+{
+    DynArray<uint32_t> bind_offsets{};
+    DynArray<VkSparseBufferMemoryBindInfo> bind_infos{};
+    DynArray<VkSparseMemoryBind> binds{};
+
+    for (int buf_idx = 0; buf_idx < buffers.size(); ++buf_idx) {
+        auto *buf = buffers[buf_idx];
+        bind_offsets.push_back(binds.size());
+
+        for (int i = buf->refreshed_counter_; i < buf->memGroups.size(); ++i) {
+            auto &mapping = buf->memGroups[i];
+
+            VkSparseMemoryBind bind = {
+                .resourceOffset = buf->bound_bytes_,
+                .size = mapping.mappingInfo.numBytes,
+                .memory = mapping.mem,
+                .memoryOffset = 0
+            };
+
+            binds.push_back(bind);
+
+            buf->bound_bytes_ += mapping.mappingInfo.numBytes;
+        }
+
+        VkSparseBufferMemoryBindInfo buffer_bind_info = {
+            .buffer = buf->buffer,
+            .bindCount = (uint32_t)binds.size() - bind_offsets[buf_idx],
+            .pBinds = binds.data()
+        };
+
+        bind_infos.push_back(buffer_bind_info);
+    }
+
+    VkBindSparseInfo bind_sparse_info = {
+        .sType = VK_STRUCTURE_TYPE_BIND_SPARSE_INFO,
+        .pNext = nullptr,
+        .waitSemaphoreCount = wait_sema == VK_NULL_HANDLE ? 0u : 1u,
+        .pWaitSemaphores = wait_sema == VK_NULL_HANDLE ? nullptr : &wait_sema,
+        .bufferBindCount = (uint32_t)bind_infos.size(),
+        .pBufferBinds = bind_infos.data(),
+        .imageOpaqueBindCount = 0,
+        .pImageOpaqueBinds = nullptr,
+        .imageBindCount = 0,
+        .pImageBinds = nullptr,
+        .signalSemaphoreCount = signal_sema == VK_NULL_HANDLE ? 0u : 1u,
+        .pSignalSemaphores = signal_sema == VK_NULL_HANDLE ? nullptr : &signal_sema
+    };
+
+    dev.dt.queueBindSparse(queue, 1, &bind_sparse_info, fence);
 }
 
 optional<LocalBuffer> MemoryAllocator::makeLocalBuffer(
