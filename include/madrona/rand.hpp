@@ -11,7 +11,7 @@ struct RandKey {
 
 namespace rand {
 
-inline RandKey initKey(uint32_t seed);
+inline RandKey initKey(uint32_t seed, uint32_t seed_upper = 0);
 inline RandKey split_i(RandKey src, uint32_t idx, uint32_t idx_upper = 0);
 
 inline uint32_t bits32(RandKey k);

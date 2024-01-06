@@ -1,9 +1,9 @@
 namespace madrona {
 namespace rand {
 
-RandKey initKey(uint32_t seed)
+RandKey initKey(uint32_t seed, uint32_t seed_upper)
 {
-    return split_i(RandKey { seed, 0 }, 0);
+    return split_i(RandKey { seed, seed_upper }, 0);
 }
 
 // This implementation is based on JAX's threefry splitting implementation.
