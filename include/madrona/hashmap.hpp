@@ -10,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <utility>
+#include <madrona/macros.hpp>
 #include <madrona/optional.hpp>
 
 namespace madrona {
@@ -19,20 +20,7 @@ struct IntegerMapPair {
     uint32_t value;
 };
 
-struct StaticMapHelper {
-    static void buildMap(uint32_t *key_storage, uint32_t *value_storage,
-                         bool *scratch_storage, uint32_t storage_size,
-                         const IntegerMapPair *inputs,
-                         uint32_t num_inputs, uint32_t shift_idx,
-                         uint32_t constant_idx);
-
-    static inline uint32_t map(uint32_t key, uint32_t shift,
-                               uint32_t constant);
-
-    static constexpr uint32_t invalidKey = ~0u;
-};
-
-template <uint32_t maxN>
+template <uint32_t num_bytes>
 class StaticIntegerMap {
 public:
     StaticIntegerMap(const IntegerMapPair *inputs, uint32_t num_inputs);
@@ -42,14 +30,16 @@ public:
 
     inline Optional<uint32_t> lookup(uint32_t key) const;
 
-    constexpr static uint32_t numFree();
+    constexpr static inline uint32_t capacity();
 
 private:
-    static constexpr uint32_t shift_idx_ = 0;
-    static constexpr uint32_t constant_idx_ = 1;
+    constexpr static inline uint32_t numInts();
 
-    alignas(64) std::array<uint32_t, maxN> keys_;
-    alignas(64) std::array<uint32_t, maxN> values_;
+    static inline constexpr uint32_t shift_idx_ = numInts() - 2;
+    static inline constexpr uint32_t constant_idx_ = numInts() - 1;
+
+    alignas(64) std::array<uint32_t, numInts()> keys_;
+    alignas(64) std::array<uint32_t, numInts()> values_;
 };
 
 }

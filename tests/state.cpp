@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <madrona/state.hpp>
+#include <madrona/registry.hpp>
 
 #include <array>
 
@@ -41,8 +42,9 @@ TEST(State, Indexing)
 
     StateManager state;
     StateCache cache;
-    state.registerComponent<Component1>();
-    state.registerArchetype<Archetype1>();
+    ECSRegistry registry(&state, nullptr);
+    registry.registerComponent<Component1>();
+    registry.registerArchetype<Archetype1>();
 
     Entity init_e = state.makeEntityNow<Archetype1>(cache);
 
@@ -131,10 +133,11 @@ TEST(State, MultiColumn)
 {
     StateManager state;
     StateCache cache;
-    state.registerComponent<Component1>();
-    state.registerComponent<Component2>();
-    state.registerComponent<Component3>();
-    state.registerArchetype<Archetype2>();
+    ECSRegistry registry(&state, nullptr);
+    registry.registerComponent<Component1>();
+    registry.registerComponent<Component2>();
+    registry.registerComponent<Component3>();
+    registry.registerArchetype<Archetype2>();
 
     int num_entities = 1'001;
 
@@ -193,8 +196,9 @@ TEST(State, DeleteMany)
 {
     StateManager state;
     StateCache cache;
-    state.registerComponent<ComponentBig>();
-    state.registerArchetype<Archetype3>();
+    ECSRegistry registry(&state, nullptr);
+    registry.registerComponent<ComponentBig>();
+    registry.registerArchetype<Archetype3>();
 
     int num_entities = 1'000'000;
 
@@ -228,11 +232,12 @@ TEST(State, Reset)
 {
     StateManager state;
     StateCache cache;
-    state.registerComponent<Component1>();
-    state.registerComponent<Component2>();
-    state.registerComponent<Component3>();
-    state.registerArchetype<Archetype1>();
-    state.registerArchetype<Archetype2>();
+    ECSRegistry registry(&state, nullptr);
+    registry.registerComponent<Component1>();
+    registry.registerComponent<Component2>();
+    registry.registerComponent<Component3>();
+    registry.registerArchetype<Archetype1>();
+    registry.registerArchetype<Archetype2>();
 
     int num_entities = 100'000;
 
@@ -245,7 +250,7 @@ TEST(State, Reset)
         EXPECT_TRUE(state.get<Component1>(e).valid());
     }
 
-    state.clear<Archetype1>(cache);
+    state.clear<Archetype1>(cache, false);
 
     for (Entity e : initial_entities) {
         EXPECT_FALSE(state.get<Component1>(e).valid());

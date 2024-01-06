@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2022 Brennan Shacklett and contributors
+ * Copyright 2021-2024 Brennan Shacklett and contributors
  *
  * Use of this source code is governed by an MIT-style
  * license that can be found in the LICENSE file or at
@@ -13,28 +13,38 @@
 using namespace madrona;
 
 class StaticIntegerMapTest : public testing::Test {
-protected:
+public:
+    // Seems to max out currently at 80 elements (81 can't find perfect hash)
+    static constexpr int numElems = 90;
+    static constexpr int numBytes = 1024;
+    using MapT = StaticIntegerMap<numBytes>;
+
     void SetUp() override {
-        for (uint32_t i = 0; i < num_elems_; i++) {
-            integer_map_array_[i] = IntegerMapPair{.key = i, .value = i};
+        IntegerMapPair inputs[numElems];
+        for (uint32_t i = 0; i < numElems; i++) {
+            inputs[i] = IntegerMapPair {
+                .key = i,
+                .value = i,
+            };
         }
-        static_integer_map_ = new StaticIntegerMap<max_n_> {
-            integer_map_array_.data(), (uint32_t)integer_map_array_.size()};
+        testMap = new StaticIntegerMap<numBytes>(inputs, numElems);
     }
 
-    void TearDown() override { delete static_integer_map_; }
+    void TearDown() override { delete testMap; }
 
-    // Seems to max out currently at 80 elements (81 can't find perfect hash)
-    static constexpr int num_elems_ = 80;
-    static constexpr int max_n_ = 128;
-    std::array<IntegerMapPair, num_elems_> integer_map_array_;
-    StaticIntegerMap<max_n_> *static_integer_map_;
+    StaticIntegerMap<numBytes> *testMap;
 };
 
 TEST_F(StaticIntegerMapTest, SimpleTest) {
-    EXPECT_EQ(static_integer_map_->numFree(), max_n_ - 2);
-    for (uint32_t i = 0; i < num_elems_; i++) {
-        EXPECT_TRUE(static_integer_map_->exists(i));
-        EXPECT_EQ(*static_integer_map_->lookup(i), i);
+    EXPECT_EQ(testMap->capacity(), 126);
+    static_assert(sizeof(*testMap) == numBytes);
+
+    for (uint32_t i = 0; i < numElems; i++) {
+        EXPECT_TRUE(testMap->exists(i));
+        EXPECT_EQ(*testMap->lookup(i), i);
+    }
+
+    for (uint32_t i = numElems; i < numElems * 2; i++) {
+        EXPECT_FALSE(testMap->exists(i));
     }
 }

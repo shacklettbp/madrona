@@ -205,8 +205,8 @@ private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
 
-    using ColumnMap = StaticIntegerMap<128>;
-    static constexpr uint32_t max_archetype_components_ = ColumnMap::numFree();
+    using ColumnMap = StaticIntegerMap<1024>;
+    static constexpr uint32_t max_archetype_components_ = ColumnMap::capacity();
 
     // FIXME: a lot of the conditional logic in this class could be
     // removed by leveraging the fact that the data structure of 

@@ -67,6 +67,8 @@ add_library(madrona_common STATIC
         stack_alloc.cpp
     ${MADRONA_INC_DIR}/heap_array.hpp
     ${MADRONA_INC_DIR}/span.hpp
+    ${MADRONA_INC_DIR}/math.hpp ${MADRONA_INC_DIR}/math.inl
+    ${MADRONA_INC_DIR}/rnd.hpp ${MADRONA_INC_DIR}/rnd.inl
     ${MADRONA_INC_DIR}/utils.hpp
     ${MADRONA_INC_DIR}/ecs.hpp ${MADRONA_INC_DIR}/ecs.inl
     ${MADRONA_INC_DIR}/type_tracker.hpp ${MADRONA_INC_DIR}/type_tracker.inl

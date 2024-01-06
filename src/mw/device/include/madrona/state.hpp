@@ -177,18 +177,17 @@ private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
 
-    using ColumnMap = StaticIntegerMap<Table::maxColumns>;
-    static constexpr uint32_t max_archetype_components_ = ColumnMap::numFree();
+    using ColumnMap = StaticIntegerMap<1024>;
+    static inline constexpr uint32_t max_archetype_components_ = ColumnMap::capacity();
 
     static inline uint32_t num_components_ = 0;
     static inline uint32_t num_archetypes_ = 0;
 
-    static constexpr uint32_t max_components_ = 512;
-    static constexpr uint32_t max_archetypes_ = 128;
-    static constexpr uint32_t user_component_offset_ = 2;
-    static constexpr uint32_t max_query_slots_ = 65536;
+    static inline constexpr uint32_t max_components_ = 512;
+    static inline constexpr uint32_t max_archetypes_ = 128;
+    static inline constexpr uint32_t user_component_offset_ = 2;
+    static inline constexpr uint32_t max_query_slots_ = 65536;
     static inline constexpr int32_t num_elems_per_sort_thread_ = 2;
-
 
     template <typename> struct RegistrationHelper;
 

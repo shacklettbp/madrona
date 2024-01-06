@@ -9,9 +9,6 @@
 
 #include <madrona/math.hpp>
 
-#include <glm/glm.hpp>
-#include <glm/gtc/quaternion.hpp>
-
 using namespace madrona;
 using namespace madrona::math;
 
@@ -23,7 +20,7 @@ static inline void expectQuat(Quat a, Quat b)
     EXPECT_NEAR(a.z, b.z, 1e-4f);
 }
 
-TEST(Quaternions, Math)
+TEST(Math, Quaternions)
 {
     auto q1 = Quat::angleAxis(0, {0, 1, 0});
     {
@@ -50,6 +47,6 @@ TEST(Quaternions, Math)
     }
 }
 
-TEST(Mat3x4, Math)
+TEST(Math, Mat3x4)
 {
 }

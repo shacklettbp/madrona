@@ -86,8 +86,12 @@ endif()
 set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_ORIG})
 
 if (MADRONA_ENABLE_TESTS)
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    #set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     add_subdirectory(googletest EXCLUDE_FROM_ALL)
+    target_link_libraries(gtest_main PUBLIC
+        madrona_libcxx madrona_noexceptrtti)
+    target_link_libraries(gtest PUBLIC
+        madrona_libcxx madrona_noexceptrtti)
 endif ()
 
 if (Python_FOUND)

@@ -35,8 +35,7 @@ static bool searchForPerfectHash(const IntegerMapPair *inputs,
     for (int attempts = 0; attempts < max_attempts; attempts++) {
         clearUsed();
 
-        // the hash table needs to not map valid inputs into the metadata
-        // slots in the first cacheline
+        // the hash table needs to not map valid inputs into the metadata slots 
         slot_tracker[shift_idx] = true;
         slot_tracker[constant_idx] = true;
     

@@ -6,6 +6,7 @@ add_executable(tests
     state.cpp
     static_map.cpp
     math.cpp
+    rnd.cpp
 )
 
 target_link_libraries(tests
