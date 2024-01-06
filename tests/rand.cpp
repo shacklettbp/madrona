@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <madrona/rnd.hpp>
+#include <madrona/rand.hpp>
 
 using namespace madrona;
 
@@ -49,7 +49,8 @@ TEST_F(RandomSplitTest, Int)
     EXPECT_LT(num_matches, 3);
 }
 
-static inline void checkLimits(RNG &rng_a, RNG &rng_b, const int32_t low, const int32_t high, const int32_t num_tries)
+static inline void checkLimits(RNG &rng_a, RNG &rng_b, const int32_t low,
+                               const int32_t high, const int32_t num_tries)
 {
     int32_t num_matches = 0;
     bool low_found_a = false;
