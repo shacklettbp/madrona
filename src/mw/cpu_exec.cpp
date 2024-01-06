@@ -22,7 +22,8 @@ struct ThreadPoolExecutor::Impl {
     StateManager stateMgr;
     HeapArray<StateCache> stateCaches;
     HeapArray<void *> exportPtrs;
-    Optional<StateLogStore> stateLogStore;
+    Optional<StateLogReader> stateLogReader;
+    Optional<StateLogWriter> stateLogWriter;
 
     static Impl * make(const ThreadPoolExecutor::Config &cfg);
     ~Impl();
@@ -115,7 +116,8 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
             cfg.numWorlds, cfg.stateLogRecordDirectory != nullptr),
         .stateCaches = HeapArray<StateCache>(cfg.numWorlds),
         .exportPtrs = HeapArray<void *>(cfg.numExportedBuffers),
-        .stateLogStore = Optional<StateLogStore>::none(),
+        .stateLogReader = Optional<StateLogReader>::none(),
+        .stateLogWriter = Optional<StateLogWriter>::none(),
     };
 
     for (CountT i = 0; i < (CountT)cfg.numWorlds; i++) {
@@ -151,11 +153,11 @@ ThreadPoolExecutor::~ThreadPoolExecutor() = default;
 
 void ThreadPoolExecutor::Impl::saveLogs()
 {
-    if (!stateLogStore.has_value()) {
+    if (!stateLogWriter.has_value()) {
         return;
     }
 
-    stateMgr.saveCurrentStepLogs(*stateLogStore);
+    stateMgr.saveCurrentStepLogs(*stateLogWriter);
 }
 
 void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
@@ -207,7 +209,7 @@ ECSRegistry ThreadPoolExecutor::initECSRegistry()
     return ECSRegistry(&impl_->stateMgr, impl_->exportPtrs.data());
 }
 
-void ThreadPoolExecutor::initLogs(const char *log_dir)
+void ThreadPoolExecutor::initRecordLogs(const char *log_dir)
 {
     if (log_dir == nullptr) {
         return;
@@ -215,9 +217,20 @@ void ThreadPoolExecutor::initLogs(const char *log_dir)
 
     HeapArray<uint32_t> log_entry_sizes = impl_->stateMgr.getLogEntrySizes();
 
-    impl_->stateLogStore = StateLogStore::initNewStateLog({
+    impl_->stateLogWriter.emplace(StateLogWriter::Config {
         .numBytesPerLogType = log_entry_sizes,
     }, log_dir);
+}
+
+void ThreadPoolExecutor::initReplayLogs(const char *log_dir)
+{
+    if (log_dir == nullptr) {
+        return;
+    }
+
+    HeapArray<uint32_t> log_entry_sizes = impl_->stateMgr.getLogEntrySizes();
+
+    impl_->stateLogReader.emplace(log_dir);
 }
 
 void ThreadPoolExecutor::initExport()

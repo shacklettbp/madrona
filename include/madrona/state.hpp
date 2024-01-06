@@ -208,7 +208,7 @@ public:
     void resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id));
 
     HeapArray<uint32_t> getLogEntrySizes() const;
-    void saveCurrentStepLogs(StateLogStore &save_state);
+    void saveCurrentStepLogs(StateLogWriter &writer);
 
 private:
     template <typename SingletonT>

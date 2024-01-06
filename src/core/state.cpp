@@ -624,10 +624,10 @@ HeapArray<uint32_t> StateManager::getLogEntrySizes() const
     return log_type_sizes;
 }
 
-void StateManager::saveCurrentStepLogs(StateLogStore &save_state)
+void StateManager::saveCurrentStepLogs(StateLogWriter &writer)
 {
 #ifdef MADRONA_MW_MODE
-    using LogEntries = StateLogStore::LogEntries;
+    using LogEntries = StateLogWriter::LogEntries;
 
     CountT num_log_types = log_archetypes_.size();
 
@@ -686,7 +686,7 @@ void StateManager::saveCurrentStepLogs(StateLogStore &save_state)
         };
     }
 
-    save_state.addStepLogs(
+    writer.addStepLogs(
         Span<LogEntries>(step_data, num_log_types), num_worlds_);
 #endif
 }

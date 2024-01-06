@@ -12,7 +12,8 @@ namespace madrona {
 class JobManager;
 class StateCache;
 class StateManager;
-class StateLogStore;
+class StateLogReader;
+class StateLogWriter;
 class ECSRegistry;
 class Context;
 struct WorkerInit;

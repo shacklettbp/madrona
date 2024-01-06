@@ -24,6 +24,7 @@ public:
         // Directory to save logs from Context::stateLog
         // if null, logging is disabled
         const char *stateLogRecordDirectory = nullptr;
+        const char *stateLogReplayDirectory = nullptr;
         // Number of worker threads
         uint32_t numWorkers = 0;
     };
@@ -50,7 +51,8 @@ protected:
 
     ECSRegistry initECSRegistry();
 
-    void initLogs(const char *log_dir);
+    void initRecordLogs(const char *log_dir);
+    void initReplayLogs(const char *log_dir);
     void initExport();
 private:
     struct Impl;
