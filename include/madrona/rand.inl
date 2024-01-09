@@ -59,35 +59,35 @@ RandKey split_i(RandKey src, uint32_t idx, uint32_t idx_upper)
     // We are conservative and use 20 rounds.
     x[0] = x[0] + ks[0];
     x[1] = x[1] + ks[1];
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 0; i < 4; ++i) {
         round(x, rotations[i]);
     }
     
     x[0] = x[0] + ks[1];
     x[1] = x[1] + ks[2] + 1u;
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 4; i < 8; ++i) {
         round(x, rotations[i]);
     }
     
     x[0] = x[0] + ks[2];
     x[1] = x[1] + ks[0] + 2u;
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 0; i < 4; ++i) {
         round(x, rotations[i]);
     }
     
     x[0] = x[0] + ks[0];
     x[1] = x[1] + ks[1] + 3u;
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 4; i < 8; ++i) {
         round(x, rotations[i]);
     }
     
     x[0] = x[0] + ks[1];
     x[1] = x[1] + ks[2] + 4u;
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 0; i < 4; ++i) {
         round(x, rotations[i]);
     }
@@ -131,7 +131,7 @@ int32_t sampleI32(RandKey k, int32_t a, int32_t b)
 
     if (l < s) [[unlikely]] {
         // 2^32 % s == (2^32 - s) % s == -s % s
-        uint32_t t = -s % s;
+        uint32_t t = (0_u32 - s) % s;
 
         while (l < t) {
             // This might be suspect: reusing k but we're rejecting the random

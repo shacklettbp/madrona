@@ -107,3 +107,9 @@
 
 #define STATIC_UNIMPLEMENTED() \
     static_assert(false, "Unimplemented")
+
+#if defined(MADRONA_GPU_MODE) || defined(MADRONA_CLANG)
+#define MADRONA_UNROLL _Pragma("unroll")
+#else
+#define MADRONA_UNROLL
+#endif
