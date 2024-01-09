@@ -18,6 +18,7 @@ inline uint32_t bits32(RandKey k);
 inline uint64_t bits64(RandKey k);
 
 inline int32_t sampleI32(RandKey k, int32_t a, int32_t b);
+inline int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b);
 inline float sampleUniform(RandKey k);
 
 
@@ -30,6 +31,7 @@ public:
     inline RNG(uint32_t seed);
 
     inline int32_t sampleI32(int32_t a, int32_t b);
+    inline int32_t sampleI32Biased(int32_t a, int32_t b);
     inline float sampleUniform();
 
     RNG(const RNG &) = delete;

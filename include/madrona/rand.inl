@@ -155,6 +155,19 @@ int32_t sampleI32(RandKey k, int32_t a, int32_t b)
     return (int32_t)h + a;
 }
 
+int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b)
+{
+    uint32_t s = (uint32_t)(b - a);
+    uint32_t x = bits32(k);
+
+#ifdef MADRONA_GPU_MODE
+    return __umulhi(x, s);
+#else
+    uint64_t m = uint64_t(x) * uint64_t(s);
+    return uint32_t(m >> 32);
+#endif
+}
+
 float sampleUniform(RandKey k)
 {
     uint32_t rand_bits = bits32(k);
@@ -205,6 +218,12 @@ int32_t RNG::sampleI32(int32_t a, int32_t b)
 {
     RandKey sample_k = advance();
     return rand::sampleI32(sample_k, a, b);
+}
+
+int32_t RNG::sampleI32Biased(int32_t a, int32_t b)
+{
+    RandKey sample_k = advance();
+    return rand::sampleI32Biased(sample_k, a, b);
 }
 
 float RNG::sampleUniform()
