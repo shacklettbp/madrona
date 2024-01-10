@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madrona/macros.hpp>
 #include <madrona/types.hpp>
 
 namespace madrona {
