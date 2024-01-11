@@ -1516,11 +1516,11 @@ AABB AABB::applyTRS(const Vector3 &translation,
 
      // RTCD page 86
      AABB txfmed;
-#pragma unroll
+MADRONA_UNROLL
      for (CountT i = 0; i < 3; i++) {
          txfmed.pMin[i] = txfmed.pMax[i] = translation[i];
 
-#pragma unroll
+MADRONA_UNROLL
          for (CountT j = 0; j < 3; j++) {
              // Flipped because rot_mat is column major
              float e = rot_mat[j][i] * pMin[j];

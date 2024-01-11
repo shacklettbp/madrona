@@ -170,8 +170,19 @@ int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b)
 
 float sampleUniform(RandKey k)
 {
-    uint32_t rand_bits = bits32(k);
+    return bitsToFloat01(bits32(k));
+}
 
+math::Vector2 sample2xUniform(RandKey k)
+{
+    return math::Vector2 {
+        .x = bitsToFloat01(k.a),
+        .y = bitsToFloat01(k.b),
+    };
+}
+
+float bitsToFloat01(uint32_t rand_bits)
+{
     // This implementation (and the one commented out below), generate random
     // numbers in the interval [0, 1). This is done by randomizing the mantissa
     // while leaving the exponent at 0. This means some small random numbers
@@ -230,6 +241,11 @@ float RNG::sampleUniform()
 {
     RandKey sample_k = advance();
     return rand::sampleUniform(sample_k);
+}
+
+RandKey RNG::randKey()
+{
+    return advance();
 }
 
 RandKey RNG::advance()
