@@ -36,6 +36,13 @@ bool FixedSizeQueue<T>::isEmpty() const
 }
 
 template <typename T>
+void FixedSizeQueue<T>::clear()
+{
+    head_ = 0;
+    tail_ = 0;
+}
+
+template <typename T>
 uint32_t FixedSizeQueue<T>::increment(uint32_t i)
 {
     if (i == max_size_ - 1) {

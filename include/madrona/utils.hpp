@@ -69,6 +69,7 @@ struct FixedSizeQueue {
 
     uint32_t capacity() const;
     bool isEmpty() const;
+    void clear();
 
 private:
     uint32_t increment(uint32_t i);
