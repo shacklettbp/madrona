@@ -130,6 +130,7 @@ inline float dot(Vector3 a, Vector3 b);
 inline Vector3 cross(Vector3 a, Vector3 b);
 inline Mat3x3 outerProduct(Vector3 a, Vector3 b);
 inline Vector3 normalize(Vector3 v);
+inline float sqr(float x);
 
 struct Vector4 {
     float x;
@@ -315,6 +316,7 @@ struct AABB {
     Vector3 pMax;
 
     inline float surfaceArea() const;
+    inline float distance2(const AABB &o) const;
     inline bool overlaps(const AABB &o) const;
     inline bool contains(const AABB &o) const;
     inline void expand(const Vector3 &p);

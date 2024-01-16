@@ -1,3 +1,6 @@
+#include <madrona/macros.hpp>
+#include <madrona/utils.hpp>
+
 namespace madrona {
 namespace rand {
 
@@ -160,12 +163,7 @@ int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b)
     uint32_t s = (uint32_t)(b - a);
     uint32_t x = bits32(k);
 
-#ifdef MADRONA_GPU_MODE
-    return __umulhi(x, s);
-#else
-    uint64_t m = uint64_t(x) * uint64_t(s);
-    return uint32_t(m >> 32);
-#endif
+    return utils::u32mulhi(x, s);
 }
 
 float sampleUniform(RandKey k)

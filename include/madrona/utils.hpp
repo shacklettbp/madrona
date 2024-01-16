@@ -58,7 +58,28 @@ MADRONA_ALWAYS_INLINE constexpr inline int __builtin_clzll(long long int v)
 
 #endif
 
-namespace madrona::utils {
+namespace madrona {
+
+template <typename T>
+struct FixedSizeQueue {
+    FixedSizeQueue(T *data, uint32_t max_size);
+
+    void add(T t);
+    T remove();
+
+    uint32_t capacity() const;
+    bool isEmpty() const;
+
+private:
+    uint32_t increment(uint32_t i);
+
+    T *data_;
+    uint32_t max_size_;
+    uint32_t head_;
+    uint32_t tail_;
+};
+
+namespace utils {
 
 template <typename T>
 constexpr inline T divideRoundUp(T a, T b)
@@ -183,4 +204,10 @@ inline void zeroN(std::type_identity_t<T> *ptr, CountT num_elems)
     memset(ptr, 0, num_elems * sizeof(T));
 }
 
+inline uint32_t u32mulhi(uint32_t a, uint32_t b);
+
 }
+
+}
+
+#include "utils.inl"

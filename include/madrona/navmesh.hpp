@@ -2,10 +2,13 @@
 
 #include <madrona/math.hpp>
 #include <madrona/rand.hpp>
+#include <madrona/utils.hpp>
 
 namespace madrona {
 
 struct Navmesh {
+    using TraversalQueue = FixedSizeQueue<uint32_t>;
+
     struct AliasEntry {
         float tau;
         uint32_t alias;
@@ -18,7 +21,21 @@ struct Navmesh {
     uint32_t numVerts;
     uint32_t numTris;
 
+    inline math::Vector3 samplePointAndPoly(RandKey rnd, uint32_t *out_poly);
     inline math::Vector3 samplePoint(RandKey rnd);
+
+    inline void getTriangleVertices(uint32_t tri_idx,
+                                    math::Vector3 *out_a,
+                                    math::Vector3 *out_b,
+                                    math::Vector3 *out_c);
+
+    template <typename Fn>
+    inline void bfsFromPoly(
+        uint32_t poly,
+        TraversalQueue traversal_queue,
+        bool *visited_tmp,
+        CountT max_visited,
+        Fn &&fn);
 
     static Navmesh initFromPolygons(
         math::Vector3 *poly_vertices,

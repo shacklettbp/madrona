@@ -6,6 +6,24 @@ namespace madrona {
 
 using namespace math;
 
+static inline uint32_t hashNavmeshEdge(uint32_t a, uint32_t b)
+{
+    // MurmurHash2 Finalizer
+    
+    const uint32_t m = 0x5bd1e995;
+    
+    a ^= b >> 18;
+    a *= m;
+    b ^= a >> 22;
+    b *= m;
+    a ^= b >> 17;
+    a *= m;
+    b ^= a >> 19;
+    b *= m;
+    
+    return b;
+}
+
 Navmesh Navmesh::initFromPolygons(
     Vector3 *poly_vertices,
     uint32_t *poly_idxs,
@@ -26,6 +44,9 @@ Navmesh Navmesh::initFromPolygons(
 
     uint32_t *tri_indices =
         (uint32_t *)rawAlloc(sizeof(uint32_t) * 3 * num_tris);
+    uint32_t *tri_adjacency =
+        (uint32_t *)rawAlloc(sizeof(uint32_t) * 3 * num_tris);
+
     AliasEntry *alias_tbl =
         (AliasEntry *)rawAlloc(sizeof(AliasEntry) * num_tris);
 
@@ -43,12 +64,11 @@ Navmesh Navmesh::initFromPolygons(
     uint32_t cur_tri = 0;
     for (CountT i = 0; i < (CountT)num_polys; i++) {
         uint32_t poly_size = poly_sizes[i];
-        uint32_t poly_idx_offset = poly_idx_offsets[i];
-        for (uint32_t tri_base_offset = 0; tri_base_offset < poly_size - 2;
-             tri_base_offset++) {
-            uint32_t idx_a = poly_idxs[poly_idx_offset + tri_base_offset];
-            uint32_t idx_b = poly_idxs[poly_idx_offset + tri_base_offset + 1];
-            uint32_t idx_c = poly_idxs[poly_idx_offset + tri_base_offset + 2];
+        uint32_t poly_idx_base = poly_idx_offsets[i];
+        for (uint32_t tri_offset = 1; tri_offset < poly_size - 1; tri_offset++) {
+            uint32_t idx_a = poly_idxs[poly_idx_base];
+            uint32_t idx_b = poly_idxs[poly_idx_base + tri_offset];
+            uint32_t idx_c = poly_idxs[poly_idx_base + tri_offset + 1];
 
             tri_indices[3 * cur_tri] = idx_a;
             tri_indices[3 * cur_tri + 1] = idx_b;
@@ -90,7 +110,7 @@ Navmesh Navmesh::initFromPolygons(
         };
 
         float new_over_weight =
-            tri_weights[over_idx] + tri_weights[under_idx] - 1.f;
+            (tri_weights[over_idx] + tri_weights[under_idx]) - 1.f;
         tri_weights[over_idx] = new_over_weight;
 
         if (new_over_weight < 1.f) {
@@ -121,10 +141,78 @@ Navmesh Navmesh::initFromPolygons(
     rawDealloc(alias_stack);
     rawDealloc(tri_weights);
 
+    struct EdgeEntry {
+        uint32_t vertA;
+        uint32_t vertB;
+        uint32_t firstTriIdx;
+        uint32_t firstTriEdgeOffset;
+    };
+
+    uint32_t max_edges = num_tris * 3;
+    auto *edge_tbl = (EdgeEntry *)rawAlloc(sizeof(EdgeEntry) * max_edges);
+
+    for (uint32_t i = 0; i < max_edges; i++) {
+        tri_adjacency[i] = sentinel;
+        edge_tbl[i] = { sentinel, sentinel, sentinel, 0 };
+    }
+
+    // This uses a super simple open addressing hash table. The max_edges bound
+    // is quite pessimistic, so shouldn't get too close to full on the hash
+    // table.
+    auto recordEdge = [edge_tbl, tri_adjacency, max_edges, out_vertices](
+        uint32_t tri_idx,
+        uint32_t tri_edge_offset,
+        uint32_t a, uint32_t b)
+    {
+        if (b < a) {
+            std::swap(a, b);
+        }
+
+        // Use Lemire fast modulo replacement trick
+        uint32_t edge_hash = utils::u32mulhi(hashNavmeshEdge(a, b), max_edges);
+
+        while (edge_tbl[edge_hash].vertA != sentinel && (
+                edge_tbl[edge_hash].vertA != a || 
+                edge_tbl[edge_hash].vertB != b)) {
+            if (edge_hash == max_edges - 1) {
+                edge_hash = 0;
+            } else {
+                edge_hash += 1;
+            }
+        }
+
+        EdgeEntry &entry = edge_tbl[edge_hash];
+        entry.vertA = a;
+        entry.vertB = b;
+
+        if (entry.firstTriIdx == sentinel) {
+            entry.firstTriIdx = tri_idx;
+            entry.firstTriEdgeOffset = tri_edge_offset;
+        } else {
+            uint32_t other_tri_idx = entry.firstTriIdx;
+            uint32_t other_tri_edge_offset = entry.firstTriEdgeOffset;
+
+            tri_adjacency[3 * tri_idx + tri_edge_offset] = other_tri_idx;
+            tri_adjacency[3 * other_tri_idx + other_tri_edge_offset] = tri_idx;
+        }
+    };
+
+    for (uint32_t tri_idx = 0; tri_idx < num_tris; tri_idx++) {
+        uint32_t a_idx = tri_indices[3 * tri_idx];
+        uint32_t b_idx = tri_indices[3 * tri_idx + 1];
+        uint32_t c_idx = tri_indices[3 * tri_idx + 2];
+
+        recordEdge(tri_idx, 0, a_idx, b_idx);
+        recordEdge(tri_idx, 1, a_idx, c_idx);
+        recordEdge(tri_idx, 2, b_idx, c_idx);
+    }
+
+    rawDealloc(edge_tbl);
+
     return Navmesh {
         .vertices = out_vertices,
         .triIndices = tri_indices,
-        .triAdjacency = nullptr,
+        .triAdjacency = tri_adjacency,
         .triSampleAliasTable = alias_tbl,
         .numVerts = num_verts,
         .numTris = num_tris,
