@@ -194,16 +194,13 @@ inline int64_t computeBufferOffsets(const Span<const int64_t> chunk_sizes,
 template <typename T>
 inline void copyN(std::type_identity_t<T> *dst,
                   const std::type_identity_t<T> *src,
-                  CountT num_elems)
-{
-    memcpy(dst, src, sizeof(T) * num_elems);
-}
+                  CountT num_elems);
 
 template <typename T>
-inline void zeroN(std::type_identity_t<T> *ptr, CountT num_elems)
-{
-    memset(ptr, 0, num_elems * sizeof(T));
-}
+inline void zeroN(std::type_identity_t<T> *ptr, CountT num_elems);
+
+template <typename T>
+inline void fillN(std::type_identity_t<T> *ptr, T v, CountT num_elems);
 
 inline uint32_t u32mulhi(uint32_t a, uint32_t b);
 
