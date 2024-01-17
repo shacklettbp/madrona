@@ -1,3 +1,5 @@
+#include <cassert>
+
 namespace madrona {
 
 math::Vector3 Navmesh::samplePointAndPoly(RandKey rnd, uint32_t *out_poly)

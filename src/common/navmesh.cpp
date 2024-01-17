@@ -203,8 +203,8 @@ Navmesh Navmesh::initFromPolygons(
         uint32_t c_idx = tri_indices[3 * tri_idx + 2];
 
         recordEdge(tri_idx, 0, a_idx, b_idx);
-        recordEdge(tri_idx, 1, a_idx, c_idx);
-        recordEdge(tri_idx, 2, b_idx, c_idx);
+        recordEdge(tri_idx, 1, b_idx, c_idx);
+        recordEdge(tri_idx, 2, c_idx, a_idx);
     }
 
     rawDealloc(edge_tbl);
