@@ -1692,7 +1692,7 @@ static void makeFrame(Frame *dst,
     const int32_t vertices_size = num_voxels > 0 ? num_voxels * 32 * 6 * sizeof(float) : 4;
     const int32_t indices_size = num_voxels > 0 ? num_voxels * 6 * 6 * sizeof(int32_t) : 4;
 
-    std::array<VkWriteDescriptorSet, 5> voxel_updates;
+    std::array<VkWriteDescriptorSet, 7> voxel_updates;
 
     LocalBuffer voxel_vbo = *alloc.makeLocalBuffer(vertices_size);
     LocalBuffer voxel_ibo = *alloc.makeLocalBuffer(indices_size);
@@ -1726,6 +1726,10 @@ static void makeFrame(Frame *dst,
     vert_info.offset = 0;
     vert_info.range = vertices_size;
     DescHelper::storage(voxel_updates[4], voxel_draw_set, &vert_info, 1);
+
+    DescHelper::storage(voxel_updates[5], voxel_draw_set, &batch_view_info, 2);
+    DescHelper::storage(voxel_updates[6], voxel_draw_set, &batch_view_offset_info, 3);
+
     DescHelper::update(dev, voxel_updates.data(), voxel_updates.size());
 
     DescHelper::update(dev, desc_updates.data(), desc_counter);
