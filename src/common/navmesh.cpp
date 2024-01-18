@@ -56,9 +56,8 @@ uint32_t Navmesh::PathFindQueue::removeMin()
     float moved_cost = costs[moved_poly];
 
     CountT moved_idx = 0;
-    for (CountT child_offset = heapChildOffset(moved_idx);
-         child_offset < heapSize;
-         child_offset = heapChildOffset(moved_idx)) {
+    CountT child_offset;
+    while ((child_offset = heapChildOffset(moved_idx)) < heapSize) {
         CountT child_idx = child_offset;
         uint32_t child_poly = heap[child_idx];
         float child_cost = costs[child_poly];
