@@ -6,6 +6,103 @@ namespace madrona {
 
 using namespace math;
 
+static inline CountT heapParent(CountT idx)
+{
+    return (idx - 1) / 2;
+}
+
+static inline CountT heapChildOffset(CountT idx)
+{
+    return 2 * idx + 1;
+}
+
+static inline void heapMoveUp(CountT moved_idx,
+                              uint32_t moved_poly,
+                              float moved_cost,
+                              uint32_t *heap,
+                              uint32_t *heap_index,
+                              float *costs)
+{
+    while (moved_idx != 0) {
+        CountT parent_idx = heapParent(moved_idx);
+        uint32_t parent_poly = heap[parent_idx];
+        if (costs[parent_poly] <= moved_cost) {
+            break;
+        }
+
+        heap[moved_idx] = parent_poly;
+        heap_index[parent_poly] = moved_idx;
+
+        moved_idx = parent_idx;
+    }
+
+    heap[moved_idx] = moved_poly;
+    heap_index[moved_poly] = moved_idx;
+}
+
+void Navmesh::PathFindQueue::add(uint32_t poly, float cost)
+{
+    costs[poly] = cost;
+
+    CountT new_idx = heapSize++;
+    heapMoveUp(new_idx, poly, cost, heap, heapIndex, costs);
+}
+
+uint32_t Navmesh::PathFindQueue::removeMin()
+{
+    uint32_t root_poly = heap[0];
+
+    uint32_t moved_poly = heap[--heapSize];
+    float moved_cost = costs[moved_poly];
+
+    CountT moved_idx = 0;
+    for (CountT child_offset = heapChildOffset(moved_idx);
+         child_offset < heapSize;
+         child_offset = heapChildOffset(moved_idx)) {
+        CountT child_idx = child_offset;
+        uint32_t child_poly = heap[child_idx];
+        float child_cost = costs[child_poly];
+        {
+            // Pick the lowest cost child
+            CountT right_idx = child_idx + 1;
+            if (right_idx < heapSize) {
+                uint32_t right_poly = heap[right_idx];
+                float right_cost = costs[right_poly];
+                if (right_cost < child_cost) {
+                    child_idx = right_idx;
+                    child_poly = right_poly;
+                    child_cost = right_cost;
+                }
+            }
+        }
+
+        // moved_idx is now a valid position for moved_poly in the heap
+        if (moved_cost < child_cost) {
+            break;
+        }
+
+        heap[moved_idx] = child_poly;
+        heapIndex[child_poly] = moved_idx;
+
+        moved_idx = child_idx;
+    }
+        
+    heap[moved_idx] = moved_poly;
+    heapIndex[moved_poly] = moved_idx;
+
+    heapIndex[root_poly] = Navmesh::sentinel;
+    return root_poly;
+}
+
+void Navmesh::PathFindQueue::decreaseCost(uint32_t poly, float cost)
+{
+    costs[poly] = cost;
+
+    CountT cur_idx = (CountT)heapIndex[poly];
+
+    heapMoveUp(cur_idx, poly, cost, heap, heapIndex, costs);
+}
+
 static inline uint32_t hashNavmeshEdge(uint32_t a, uint32_t b)
 {
     // MurmurHash2 Finalizer

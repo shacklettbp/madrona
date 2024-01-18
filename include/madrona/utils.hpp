@@ -61,8 +61,9 @@ MADRONA_ALWAYS_INLINE constexpr inline int __builtin_clzll(long long int v)
 namespace madrona {
 
 template <typename T>
-struct FixedSizeQueue {
-    FixedSizeQueue(T *data, uint32_t max_size);
+class ArrayQueue {
+public:
+    ArrayQueue(T *data, uint32_t capacity);
 
     void add(T t);
     T remove();
@@ -75,7 +76,7 @@ private:
     uint32_t increment(uint32_t i);
 
     T *data_;
-    uint32_t max_size_;
+    uint32_t capacity_;
     uint32_t head_;
     uint32_t tail_;
 };

@@ -1,22 +1,22 @@
 namespace madrona {
 
 template <typename T>
-FixedSizeQueue<T>::FixedSizeQueue(T *data, uint32_t max_size)
+ArrayQueue<T>::ArrayQueue(T *data, uint32_t capacity)
     : data_(data),
-      max_size_(max_size),
+      capacity_(capacity),
       head_(0),
       tail_(0)
 {}
 
 template <typename T>
-void FixedSizeQueue<T>::add(T t)
+void ArrayQueue<T>::add(T t)
 {
     data_[tail_] = t;
     tail_ = increment(tail_);
 }
 
 template <typename T>
-T FixedSizeQueue<T>::remove()
+T ArrayQueue<T>::remove()
 {
     T t = data_[head_];
     head_ = increment(head_);
@@ -24,28 +24,28 @@ T FixedSizeQueue<T>::remove()
 }
 
 template <typename T>
-uint32_t FixedSizeQueue<T>::capacity() const
+uint32_t ArrayQueue<T>::capacity() const
 {
-    return max_size_;
+    return capacity_;
 }
 
 template <typename T>
-bool FixedSizeQueue<T>::isEmpty() const
+bool ArrayQueue<T>::isEmpty() const
 {
     return head_ == tail_;
 }
 
 template <typename T>
-void FixedSizeQueue<T>::clear()
+void ArrayQueue<T>::clear()
 {
     head_ = 0;
     tail_ = 0;
 }
 
 template <typename T>
-uint32_t FixedSizeQueue<T>::increment(uint32_t i)
+uint32_t ArrayQueue<T>::increment(uint32_t i)
 {
-    if (i == max_size_ - 1) {
+    if (i == capacity_ - 1) {
         return 0;
     }
 

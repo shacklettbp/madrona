@@ -7,7 +7,16 @@
 namespace madrona {
 
 struct Navmesh {
-    using TraversalQueue = FixedSizeQueue<uint32_t>;
+    struct PathFindQueue {
+        float *costs;
+        uint32_t *heap;
+        uint32_t *heapIndex;
+        CountT heapSize;
+
+        void add(uint32_t poly, float cost);
+        uint32_t removeMin();
+        void decreaseCost(uint32_t poly, float cost);
+    };
 
     struct AliasEntry {
         float tau;
@@ -29,12 +38,29 @@ struct Navmesh {
                                     math::Vector3 *out_b,
                                     math::Vector3 *out_c);
 
+    struct BFSState {
+        uint32_t *queue;
+        bool *visited;
+    };
+
     template <typename Fn>
     inline void bfsFromPoly(
         uint32_t poly,
-        TraversalQueue traversal_queue,
-        bool *visited_tmp,
-        CountT max_visited,
+        BFSState bfs_state,
+        Fn &&fn);
+
+    struct DijkstrasState {
+        float *distances;
+        math::Vector3 *entryPoints;
+        uint32_t *heap;
+        uint32_t *heapIndex;
+    };
+
+    template <typename Fn>
+    inline void dijkstrasFromPoly(
+        uint32_t start_poly,
+        math::Vector3 start_pos,
+        DijkstrasState dijkstras_state,
         Fn &&fn);
 
     static Navmesh initFromPolygons(
