@@ -113,7 +113,7 @@ ThreadPoolExecutor::Impl * ThreadPoolExecutor::Impl::make(
         .nextJob = 0,
         .numFinished = 0,
         .stateMgr = StateManager(
-            cfg.numWorlds, cfg.stateLogRecordDirectory != nullptr),
+            cfg.numWorlds, cfg.stateLogRecordConfig.has_value()),
         .stateCaches = HeapArray<StateCache>(cfg.numWorlds),
         .exportPtrs = HeapArray<void *>(cfg.numExportedBuffers),
         .stateLogReader = Optional<StateLogReader>::none(),
@@ -209,28 +209,25 @@ ECSRegistry ThreadPoolExecutor::initECSRegistry()
     return ECSRegistry(&impl_->stateMgr, impl_->exportPtrs.data());
 }
 
-void ThreadPoolExecutor::initRecordLogs(const char *log_dir)
+void ThreadPoolExecutor::initRecordLogs(const LogRecordConfig &cfg)
 {
-    if (log_dir == nullptr) {
-        return;
-    }
-
     HeapArray<uint32_t> log_entry_sizes = impl_->stateMgr.getLogEntrySizes();
 
     impl_->stateLogWriter.emplace(StateLogWriter::Config {
         .numBytesPerLogType = log_entry_sizes,
-    }, log_dir);
+        .numBufferedSteps = cfg.numBufferedSteps,
+        .maxNumStepsSaved = cfg.maxNumStepsSaved,
+        .numWorlds = impl_->stateMgr.numWorlds(),
+    }, cfg.logDir);
 }
 
 void ThreadPoolExecutor::initReplayLogs(const char *log_dir)
 {
-    if (log_dir == nullptr) {
-        return;
-    }
-
     HeapArray<uint32_t> log_entry_sizes = impl_->stateMgr.getLogEntrySizes();
 
-    impl_->stateLogReader.emplace(log_dir);
+    impl_->stateLogReader.emplace(StateLogReader::Config {
+        .numBytesPerLogType = log_entry_sizes,
+    }, log_dir);
 }
 
 void ThreadPoolExecutor::initExport()

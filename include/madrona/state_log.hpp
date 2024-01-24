@@ -14,7 +14,7 @@ public:
     };
 
     StateLogReader(const Config &cfg, const char *dir);
-    StateLogReader(StateLogReader &);
+    StateLogReader(StateLogReader &&);
     ~StateLogReader();
     StateLogReader & operator=(StateLogReader &&);
 
@@ -28,8 +28,9 @@ class StateLogWriter {
 public:
     struct Config {
         Span<const uint32_t> numBytesPerLogType;
-        uint32_t numBufferSteps;
+        uint32_t numBufferedSteps;
         uint32_t maxNumStepsSaved;
+        uint32_t numWorlds;
     };
 
     struct LogEntries {
@@ -45,7 +46,7 @@ public:
     ~StateLogWriter();
     StateLogWriter & operator=(StateLogWriter &&);
 
-    void addStepLogs(Span<LogEntries> step_data, CountT num_worlds);
+    void addStepLogs(Span<LogEntries> step_data);
 
 private:
     struct Impl;

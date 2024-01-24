@@ -16,14 +16,25 @@ namespace madrona {
 // Base class for TaskGraphExecutor below, don't use directly
 class ThreadPoolExecutor {
 public:
+    struct LogRecordConfig {
+        // Directory to save logs
+        const char *logDir;
+        // How many steps before flushing logs to disk?
+        uint32_t numBufferedSteps;
+        // Maximum number of steps to save on disk. Unlimited if 0.
+        uint32_t maxNumStepsSaved = 0;
+    };
+
     struct Config {
         // Batch size for the backend
         uint32_t numWorlds;
         // Number of exported ECS components
         uint32_t numExportedBuffers;
-        // Directory to save logs from Context::stateLog
-        // if null, logging is disabled
-        const char *stateLogRecordDirectory = nullptr;
+        // Configuration for recording logs. If none, logs are not saved.
+        Optional<LogRecordConfig> stateLogRecordConfig =
+            Optional<LogRecordConfig>::none();
+        // Directory containing saved logs from Context::stateLog
+        // that will be replayed. If null, replay is disabled
         const char *stateLogReplayDirectory = nullptr;
         // Number of worker threads
         uint32_t numWorkers = 0;
@@ -51,7 +62,7 @@ protected:
 
     ECSRegistry initECSRegistry();
 
-    void initRecordLogs(const char *log_dir);
+    void initRecordLogs(const LogRecordConfig &record_cfg);
     void initReplayLogs(const char *log_dir);
     void initExport();
 private:

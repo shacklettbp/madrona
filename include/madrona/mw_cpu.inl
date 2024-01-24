@@ -40,8 +40,13 @@ TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::TaskGraphExecutor(
         jobs_[i].data = &run_datas_[i];
     }
 
-    initRecordLogs(cfg.stateLogRecordDirectory);
-    initReplayLogs(cfg.stateLogReplayDirectory);
+    if (cfg.stateLogRecordConfig.has_value()) {
+        initRecordLogs(*cfg.stateLogRecordConfig);
+    }
+
+    if (cfg.stateLogReplayDirectory) {
+        initReplayLogs(cfg.stateLogReplayDirectory);
+    }
     initExport();
 }
 

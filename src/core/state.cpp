@@ -687,7 +687,7 @@ void StateManager::saveCurrentStepLogs(StateLogWriter &writer)
     }
 
     writer.addStepLogs(
-        Span<LogEntries>(step_data, num_log_types), num_worlds_);
+        Span<LogEntries>(step_data, num_log_types));
 #endif
 }
 
