@@ -184,8 +184,6 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef *query_ref,
         Fn &&fn, 
         std::integer_sequence<int32_t, Indices...>) 
 {
-
-    
     uint32_t *query_values = &query_data_[query_ref->offset];
     int32_t num_archetypes = query_ref->numMatchingArchetypes;
 

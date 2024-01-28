@@ -266,6 +266,11 @@ static void flyCamUI(ViewerCam &cam)
         ImGui::DragFloat("View Size", &cam.orthoHeight,
                           0.5f, 0.f, 100.f, "%0.1f");
     }
+
+    ImGui::Text("Position: %f %f %f", 
+                cam.position.x, cam.position.y, cam.position.z);
+    ImGui::Text("View Direction: %f %f %f", 
+                cam.fwd.x, cam.fwd.y, cam.fwd.z);
 }
 
 static void cfgUI(ViewerControl &ctrl,

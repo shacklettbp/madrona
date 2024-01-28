@@ -25,6 +25,8 @@ namespace mwGPU {
 }
 
 struct NodeBase {
+    // Number of threads to dispatch for the next node in the graph of the same 
+    // node type (e.g. SortArchetypeNode).
     uint32_t numDynamicInvocations;
 };
 
@@ -294,6 +296,15 @@ struct SortArchetypeNodeBase : NodeBase {
         void rearrangeColumn(int32_t invocation_idx);
     };
 
+    struct ClearCountNode : NodeBase {
+        ClearCountNode(int32_t *world_offsets, int32_t *world_counts);
+
+        int32_t *worldOffsets;
+        int32_t *worldCounts;
+
+        void clearCounts(int32_t invocation_idx);
+    };
+
     SortArchetypeNodeBase(uint32_t archetype_id,
                           int32_t col_idx,
                           uint32_t *keys_col,
@@ -329,6 +340,7 @@ struct SortArchetypeNodeBase : NodeBase {
 
     TaskGraph::TypedDataID<OnesweepNode> onesweepNodes[4];
     TaskGraph::TypedDataID<RearrangeNode> firstRearrangePassData;
+    TaskGraph::TypedDataID<ClearCountNode> clearWorldCountData;
 
     // Per-run state
     uint32_t numRows;

@@ -55,6 +55,8 @@ struct Vector2 {
     inline Vector2 & operator*=(float o);
     inline Vector2 & operator/=(float o);
 
+    static inline constexpr Vector2 fromVector3(Vector3 v);
+
     friend inline Vector2 operator+(Vector2 v);
     friend inline Vector2 operator-(Vector2 v);
 
@@ -124,12 +126,15 @@ struct Vector3 {
 
     static constexpr inline Vector3 zero();
     static constexpr inline Vector3 one();
+    static constexpr inline Vector3 all(float v);
 };
 
 inline float dot(Vector3 a, Vector3 b);
 inline Vector3 cross(Vector3 a, Vector3 b);
 inline Mat3x3 outerProduct(Vector3 a, Vector3 b);
 inline Vector3 normalize(Vector3 v);
+// Reflects the vector `direction` over the `normal`
+inline Vector3 reflect(Vector3 direction, Vector3 normal);
 
 struct Vector4 {
     float x;
@@ -321,6 +326,9 @@ struct AABB {
 
     inline bool rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
                               float ray_t_min, float ray_t_max);
+    inline bool rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
+                              float ray_t_min, float ray_t_max,
+                              float &t_out);
 
     [[nodiscard]] inline AABB applyTRS(const Vector3 &translation,
                                        const Quat &rotation,

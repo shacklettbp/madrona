@@ -446,7 +446,10 @@ Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
 Loc StateManager::makeTemporary(WorldID world_id,
                                 uint32_t archetype_id)
 {
-    Table &tbl = archetypes_[archetype_id]->tbl;
+    auto &archetype = *archetypes_[archetype_id];
+
+    Table &tbl = archetype.tbl;
+    archetype.needsSort = true;
 
     int32_t row = tbl.numRows.fetch_add_relaxed(1);
 
@@ -487,8 +490,15 @@ void StateManager::destroyEntityNow(Entity e)
 
 void StateManager::clearTemporaries(uint32_t archetype_id)
 {
-    Table &tbl = archetypes_[archetype_id]->tbl;
-    tbl.numRows.store_relaxed(0);
+    auto &archetype = *archetypes_[archetype_id];
+
+    Table &tbl = archetype.tbl;
+    auto num_rows_bef = 
+        tbl.numRows.exchange<sync::memory_order::relaxed>(0);
+
+    if (num_rows_bef != 0) {
+        archetype.needsSort = true;
+    }
 }
 
 void StateManager::resizeArchetype(uint32_t archetype_id, int32_t num_rows)
