@@ -499,6 +499,11 @@ Vector3 normalize(Vector3 v)
     return v.normalize();
 }
 
+float sqr(float x)
+{
+    return x * x;
+}
+
 Vector3 Vector4::xyz() const
 {
     return Vector3 {
@@ -1451,6 +1456,23 @@ float AABB::surfaceArea() const
     return 2.f * (d.x * d.y + d.x * d.z + d.y * d.z);
 }
 
+float AABB::distance2(const AABB &o) const
+{
+    float dist2 = 0.f;
+    MADRONA_UNROLL
+    for (CountT i = 0; i < 3; i++) {
+        float isect_min = fmaxf(pMin[i], o.pMin[i]);
+        float isect_max = fminf(pMax[i], o.pMax[i]);
+
+        float diff = isect_min - isect_max;
+        if (diff > 0) {
+            dist2 += diff * diff;
+        }
+    }
+
+    return dist2;
+}
+
 bool AABB::overlaps(const AABB &o) const
 {
     auto [a_min, a_max] = *this;
@@ -1569,11 +1591,11 @@ AABB AABB::applyTRS(const Vector3 &translation,
 
      // RTCD page 86
      AABB txfmed;
-#pragma unroll
+MADRONA_UNROLL
      for (CountT i = 0; i < 3; i++) {
          txfmed.pMin[i] = txfmed.pMax[i] = translation[i];
 
-#pragma unroll
+MADRONA_UNROLL
          for (CountT j = 0; j < 3; j++) {
              // Flipped because rot_mat is column major
              float e = rot_mat[j][i] * pMin[j];

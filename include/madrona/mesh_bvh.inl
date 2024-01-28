@@ -545,7 +545,7 @@ float MeshBVH::sphereCast(math::Vector3 ray_o,
         int32_t node_idx = stack[--stack_size];
         const Node &node = nodes[node_idx];
 
-#pragma unroll
+MADRONA_UNROLL
         for (CountT i = 0; i < (CountT)MeshBVH::nodeWidth; i++) {
             if (!node.hasChild(i)) {
                 continue; // Technically this could be break?
@@ -608,7 +608,7 @@ bool MeshBVH::sphereCastNodeCheck(math::Vector3 o,
 
     // https://tavianator.com/2022/ray_box_boundary.html
     float t_min = 0.f;
-#pragma unroll
+MADRONA_UNROLL
     for (CountT i = 0; i < 3; i++) {
         float inv_d_i = inv_d[i];
         float b_min, b_max;

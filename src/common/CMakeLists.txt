@@ -69,7 +69,7 @@ add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/span.hpp
     ${MADRONA_INC_DIR}/math.hpp ${MADRONA_INC_DIR}/math.inl
     ${MADRONA_INC_DIR}/rand.hpp ${MADRONA_INC_DIR}/rand.inl
-    ${MADRONA_INC_DIR}/utils.hpp
+    ${MADRONA_INC_DIR}/utils.hpp ${MADRONA_INC_DIR}/utils.inl
     ${MADRONA_INC_DIR}/ecs.hpp ${MADRONA_INC_DIR}/ecs.inl
     ${MADRONA_INC_DIR}/type_tracker.hpp ${MADRONA_INC_DIR}/type_tracker.inl
         type_tracker.cpp
@@ -101,6 +101,12 @@ set_property(TARGET madrona_common PROPERTY
     POSITION_INDEPENDENT_CODE TRUE)
 set_property(TARGET madrona_common PROPERTY
     INTERFACE_POSITION_INDEPENDENT_CODE TRUE)
+
+add_library(madrona_navmesh STATIC
+    ${MADRONA_INC_DIR}/navmesh.hpp ${MADRONA_INC_DIR}/navmesh.inl navmesh.cpp
+)
+
+target_link_libraries(madrona_navmesh PUBLIC madrona_common)
 
 if (CUDAToolkit_FOUND)
     add_library(madrona_cuda STATIC

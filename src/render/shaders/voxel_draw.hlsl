@@ -5,11 +5,17 @@
 DrawPushConst push_const;
 
 [[vk::binding(0, 0)]]
-StructuredBuffer<PackedViewData> viewDataBuffer;
+StructuredBuffer<PackedViewData> flycamBuffer;
 
 // Asset descriptor bindings
 [[vk::binding(1, 0)]]
 StructuredBuffer<PackedVertex> vertexDataBuffer;
+
+[[vk::binding(2, 0)]]
+StructuredBuffer<PackedViewData> viewDataBuffer;
+
+[[vk::binding(3, 0)]]
+StructuredBuffer<int> viewOffsetsBuffer;
 
 // Texture descriptor bindings
 [[vk::binding(0, 1)]]
@@ -42,10 +48,10 @@ float3 rotateVec(float4 q, float3 v)
 {
     float3 pure = q.xyz;
     float scalar = q.w;
-    
+
     float3 pure_x_v = cross(pure, v);
     float3 pure_x_pure_x_v = cross(pure, pure_x_v);
-    
+
     return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
 }
 
@@ -63,6 +69,26 @@ PerspectiveCameraData unpackViewData(PackedViewData packed)
     cam.zNear = d2.y;
 
     return cam;
+}
+
+PerspectiveCameraData getCameraData()
+{
+    PerspectiveCameraData camera_data;
+
+    if (push_const.viewIdx == 0) {
+        camera_data = unpackViewData(flycamBuffer[0]);
+    } else {
+        PerspectiveCameraData fly_cam = unpackViewData(flycamBuffer[0]);
+
+        int view_idx = (push_const.viewIdx - 1) + viewOffsetsBuffer[push_const.worldIdx];
+        camera_data = unpackViewData(viewDataBuffer[view_idx]);
+
+        // We want to inherit the aspect ratio from the flycam camera
+        camera_data.xScale = fly_cam.xScale;
+        camera_data.yScale = fly_cam.yScale;
+    }
+
+    return camera_data;
 }
 
 Vertex unpackVertex(PackedVertex packed)
@@ -134,8 +160,8 @@ float4 vert(in uint vid : SV_VertexID,
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
     float4 color = float4(1,1,1,1);
 
-    PerspectiveCameraData view_data =
-        unpackViewData(viewDataBuffer[push_const.viewIdx]);
+    PerspectiveCameraData view_data = getCameraData();
+        //unpackViewData(viewDataBuffer[push_const.viewIdx]);
 
     float3 to_view_translation;
     float4 to_view_rotation;
@@ -199,6 +225,8 @@ PixelOutput frag(in V2F v2f)
         output.color *= materialTexturesArray[v2f.texIdx].SampleLevel(
             linearSampler, float2(v2f.uv.x, 1.f - v2f.uv.y), 0);
     }
+
+    //output.color = max(float4(1,1,1,1),output.color);
     //output.color = max(float4(1,1,1,1),output.color);
     //output.color = output.color*float4((output.normal.xyz+float3(1,1,1))*0.5,1);
 

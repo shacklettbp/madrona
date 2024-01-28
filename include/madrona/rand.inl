@@ -1,3 +1,6 @@
+#include <madrona/macros.hpp>
+#include <madrona/utils.hpp>
+
 namespace madrona {
 namespace rand {
 
@@ -59,35 +62,35 @@ RandKey split_i(RandKey src, uint32_t idx, uint32_t idx_upper)
     // We are conservative and use 20 rounds.
     x[0] = x[0] + ks[0];
     x[1] = x[1] + ks[1];
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 0; i < 4; ++i) {
         round(x, rotations[i]);
     }
     
     x[0] = x[0] + ks[1];
     x[1] = x[1] + ks[2] + 1u;
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 4; i < 8; ++i) {
         round(x, rotations[i]);
     }
     
     x[0] = x[0] + ks[2];
     x[1] = x[1] + ks[0] + 2u;
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 0; i < 4; ++i) {
         round(x, rotations[i]);
     }
     
     x[0] = x[0] + ks[0];
     x[1] = x[1] + ks[1] + 3u;
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 4; i < 8; ++i) {
         round(x, rotations[i]);
     }
     
     x[0] = x[0] + ks[1];
     x[1] = x[1] + ks[2] + 4u;
-#pragma unroll
+MADRONA_UNROLL
     for (int i = 0; i < 4; ++i) {
         round(x, rotations[i]);
     }
@@ -131,7 +134,7 @@ int32_t sampleI32(RandKey k, int32_t a, int32_t b)
 
     if (l < s) [[unlikely]] {
         // 2^32 % s == (2^32 - s) % s == -s % s
-        uint32_t t = -s % s;
+        uint32_t t = (0_u32 - s) % s;
 
         while (l < t) {
             // This might be suspect: reusing k but we're rejecting the random
@@ -155,10 +158,29 @@ int32_t sampleI32(RandKey k, int32_t a, int32_t b)
     return (int32_t)h + a;
 }
 
+int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b)
+{
+    uint32_t s = (uint32_t)(b - a);
+    uint32_t x = bits32(k);
+
+    return utils::u32mulhi(x, s);
+}
+
 float sampleUniform(RandKey k)
 {
-    uint32_t rand_bits = bits32(k);
+    return bitsToFloat01(bits32(k));
+}
 
+math::Vector2 sample2xUniform(RandKey k)
+{
+    return math::Vector2 {
+        .x = bitsToFloat01(k.a),
+        .y = bitsToFloat01(k.b),
+    };
+}
+
+float bitsToFloat01(uint32_t rand_bits)
+{
     // This implementation (and the one commented out below), generate random
     // numbers in the interval [0, 1). This is done by randomizing the mantissa
     // while leaving the exponent at 0. This means some small random numbers
@@ -207,10 +229,21 @@ int32_t RNG::sampleI32(int32_t a, int32_t b)
     return rand::sampleI32(sample_k, a, b);
 }
 
+int32_t RNG::sampleI32Biased(int32_t a, int32_t b)
+{
+    RandKey sample_k = advance();
+    return rand::sampleI32Biased(sample_k, a, b);
+}
+
 float RNG::sampleUniform()
 {
     RandKey sample_k = advance();
     return rand::sampleUniform(sample_k);
+}
+
+RandKey RNG::randKey()
+{
+    return advance();
 }
 
 RandKey RNG::advance()

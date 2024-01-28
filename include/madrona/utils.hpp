@@ -58,7 +58,30 @@ MADRONA_ALWAYS_INLINE constexpr inline int __builtin_clzll(long long int v)
 
 #endif
 
-namespace madrona::utils {
+namespace madrona {
+
+template <typename T>
+class ArrayQueue {
+public:
+    ArrayQueue(T *data, uint32_t capacity);
+
+    void add(T t);
+    T remove();
+
+    uint32_t capacity() const;
+    bool isEmpty() const;
+    void clear();
+
+private:
+    uint32_t increment(uint32_t i);
+
+    T *data_;
+    uint32_t capacity_;
+    uint32_t head_;
+    uint32_t tail_;
+};
+
+namespace utils {
 
 template <typename T>
 constexpr inline T divideRoundUp(T a, T b)
@@ -172,15 +195,18 @@ inline int64_t computeBufferOffsets(const Span<const int64_t> chunk_sizes,
 template <typename T>
 inline void copyN(std::type_identity_t<T> *dst,
                   const std::type_identity_t<T> *src,
-                  CountT num_elems)
-{
-    memcpy(dst, src, sizeof(T) * num_elems);
-}
+                  CountT num_elems);
 
 template <typename T>
-inline void zeroN(std::type_identity_t<T> *ptr, CountT num_elems)
-{
-    memset(ptr, 0, num_elems * sizeof(T));
+inline void zeroN(std::type_identity_t<T> *ptr, CountT num_elems);
+
+template <typename T>
+inline void fillN(std::type_identity_t<T> *ptr, T v, CountT num_elems);
+
+inline uint32_t u32mulhi(uint32_t a, uint32_t b);
+
 }
 
 }
+
+#include "utils.inl"
