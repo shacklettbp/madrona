@@ -4,6 +4,7 @@
 
 #include <imgui.h>
 
+#include "madrona/render/vk/window.hpp"
 #include "present.hpp"
 #include "viewer_common.hpp"
 #include "render_common.hpp"
@@ -113,6 +114,8 @@ struct ViewerRendererState {
     void renderGUIAndPresent(const ViewerControl &viz_ctrl,
                              bool prepare_screenshot);
 
+    void handleResize();
+
     void destroy();
 };
 
@@ -135,6 +138,10 @@ public:
     void configureLighting(Span<const render::LightConfig> lights);
     
     inline GLFWwindow * osWindow() const { return state_.window->hdl; }
+
+    bool needResize() const;
+
+    void handleResize();
  
 private:
     ViewerRendererState state_;

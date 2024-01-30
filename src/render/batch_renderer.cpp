@@ -1865,4 +1865,25 @@ const float * BatchRenderer::getDepthCUDAPtr() const
 #endif
 }
 
+void BatchRenderer::recreateSemaphores()
+{
+    vk::Device &dev = impl->dev;
+
+    for (int i = 0; i < impl->batchFrames.size(); ++i) {
+        BatchFrame &frame = impl->batchFrames[i];
+        dev.dt.destroyFence(dev.hdl, frame.prepareFence, nullptr);
+        dev.dt.destroyFence(dev.hdl, frame.renderFence, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.prepareFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.renderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.layoutTransitionFinished, nullptr);
+
+        frame.prepareFence = makeFence(dev, true);
+        frame.renderFence = makeFence(dev, true);
+
+        frame.prepareFinished = vk::makeBinarySemaphore(dev);
+        frame.renderFinished = vk::makeBinarySemaphore(dev);
+        frame.layoutTransitionFinished = vk::makeBinarySemaphore(dev);
+    }
+}
+
 }

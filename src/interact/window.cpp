@@ -7,6 +7,7 @@
 #include <cassert>
 
 #include "../render/vk/utils.hpp"
+#include "GLFW/glfw3.h"
 
 namespace madrona {
 
@@ -75,7 +76,7 @@ static GLFWwindow *makeGLFWwindow(const char *title,
                                   uint32_t width,
                                   uint32_t height)
 {
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
 
@@ -85,6 +86,16 @@ static GLFWwindow *makeGLFWwindow(const char *title,
 #endif
 
     return glfwCreateWindow(width, height, title, nullptr, nullptr);
+}
+
+// This gets called before the vulkan acquire/present failure
+static void framebufferSizeCallback(GLFWwindow *window, int width, int height)
+{
+    vk::RenderWindow *render_win = 
+        (vk::RenderWindow *)glfwGetWindowUserPointer(window);
+
+    render_win->width = width;
+    render_win->height = height;
 }
 
 WindowManager::WindowManager(const Config &cfg)
@@ -111,11 +122,15 @@ WindowHandle WindowManager::makeWindow(const char *title,
 
     VkSurfaceKHR surface = getWindowSurface(backend, glfw_window);
 
+    glfwSetFramebufferSizeCallback(glfw_window, &framebufferSizeCallback);
+
     vk::RenderWindow *render_window = new vk::RenderWindow {};
     render_window->width = width;
     render_window->height = height;
     render_window->hdl = glfw_window;
     render_window->surface = surface;
+
+    glfwSetWindowUserPointer(glfw_window, render_window);
 
     return WindowHandle(render_window, this);
 }

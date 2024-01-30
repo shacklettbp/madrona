@@ -257,7 +257,14 @@ LocalImage::LocalImage(LocalImage &&o)
 
 LocalImage::~LocalImage()
 {
-    deleter_(image);
+    if (image != VK_NULL_HANDLE) {
+        deleter_(image);
+    }
+}
+
+LocalImage LocalImage::makeEmpty()
+{
+    return LocalImage(0, 0, 0, VK_NULL_HANDLE, {}, {});
 }
 
 static VkFormatProperties2 getFormatProperties(const Backend &backend,

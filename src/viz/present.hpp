@@ -35,7 +35,8 @@ public:
                          uint32_t qf_idx);
 
     uint32_t acquireNext(const Device &dev,
-                         VkSemaphore signal_sema);
+                         VkSemaphore signal_sema,
+                         bool &need_resize);
 
     VkImage getImage(uint32_t idx) const;
     uint32_t numSwapchainImages() const;
@@ -43,7 +44,14 @@ public:
     void present(const Device &dev, uint32_t swapchain_idx,
                  const QueueState &present_queue,
                  uint32_t num_wait_semas,
-                 const VkSemaphore *wait_semas);
+                 const VkSemaphore *wait_semas,
+                 bool &need_resize);
+
+    void resize(const Backend &backend,
+                const Device &dev,
+                const RenderWindow *window,
+                uint32_t num_frames_inflight,
+                bool need_immediate);
 
 private:
     Swapchain swapchain_;

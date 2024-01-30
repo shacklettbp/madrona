@@ -173,6 +173,13 @@ void Viewer::Impl::startFrame()
 
     glfwPollEvents();
 
+    // Handle the window resize if needed before anything else
+    if (renderer.needResize()) {
+        // Handle resize!
+        printf("WINDOW RESIZE\n");
+        renderer.handleResize();
+    }
+
     renderer.startFrame();
     ImGui::NewFrame();
 }

@@ -25,6 +25,8 @@ public:
                            const VkBindSparseInfo *pSubmits,
                            VkFence fence) const;
 
+    // Returns true if successful. Returns false if failed (for instance,
+    // in case of needing swapchain resizing.
     inline bool presentSubmit(const Device &dev,
                               const VkPresentInfoKHR *present_info) const;
 

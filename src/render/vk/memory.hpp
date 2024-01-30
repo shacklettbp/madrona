@@ -22,6 +22,14 @@ public:
           alloc_(&alloc)
     {}
 
+    // TODO: This is very temporary.
+    //
+    // needed for the same reason we need the makeEmpty in LocalImage
+    AllocDeleter()
+        : mem_(VK_NULL_HANDLE),
+          alloc_(nullptr)
+    {}
+
     void operator()(VkBuffer buffer) const;
     void operator()(VkImage image) const;
 
@@ -121,6 +129,15 @@ public:
     LocalImage(const LocalImage &) = delete;
     LocalImage(LocalImage &&o);
     ~LocalImage();
+
+    // TODO: This is very temporary.
+    //
+    // needed to get over some pretty dumb decisions made about
+    // how the imgui framebuffer is handled. not to worry, i will
+    // clean this up real soon.
+    //
+    // (imgui code refactor coming soon)
+    static LocalImage makeEmpty();
 
     uint32_t width;
     uint32_t height;
