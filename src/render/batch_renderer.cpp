@@ -1834,7 +1834,7 @@ VkSemaphore BatchRenderer::getLatestWaitSemaphore()
     uint32_t last_frame = (impl->currentFrame + impl->batchFrames.size() - 1) %
         impl->batchFrames.size();
 
-    assert(impl->batchFrames[last_frame].latestOp != LatestOperation::None);
+    // assert(impl->batchFrames[last_frame].latestOp != LatestOperation::None);
 
     if (impl->batchFrames[last_frame].latestOp == LatestOperation::RenderPrepare) {
         return impl->batchFrames[last_frame].prepareFinished;
@@ -1883,6 +1883,14 @@ void BatchRenderer::recreateSemaphores()
         frame.prepareFinished = vk::makeBinarySemaphore(dev);
         frame.renderFinished = vk::makeBinarySemaphore(dev);
         frame.layoutTransitionFinished = vk::makeBinarySemaphore(dev);
+    }
+
+    didRender = false;
+
+    for (int i = 0; i < impl->batchFrames.size(); ++i) {
+        // Make sure all the previous operations are just none
+        // Reset all synchronization
+        impl->batchFrames[i].latestOp = LatestOperation::None;
     }
 }
 

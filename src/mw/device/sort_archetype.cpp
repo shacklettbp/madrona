@@ -1237,7 +1237,9 @@ void SortArchetypeNodeBase::ClearCountNode::clearCounts(int32_t invocation_idx)
     worldOffsets[invocation_idx] = 0;
     worldCounts[invocation_idx] = 0;
 
-    numDynamicInvocations = 0;
+    if (invocation_idx == 0) {
+        numDynamicInvocations = 0;
+    }
 }
 
 void SortArchetypeNodeBase::clearWorldOffsetsAndCounts(int32_t invocation_idx)

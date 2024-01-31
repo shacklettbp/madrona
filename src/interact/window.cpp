@@ -76,7 +76,7 @@ static GLFWwindow *makeGLFWwindow(const char *title,
                                   uint32_t width,
                                   uint32_t height)
 {
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
 
@@ -96,6 +96,8 @@ static void framebufferSizeCallback(GLFWwindow *window, int width, int height)
 
     render_win->width = width;
     render_win->height = height;
+
+    render_win->needResize = true;
 }
 
 WindowManager::WindowManager(const Config &cfg)
@@ -129,6 +131,7 @@ WindowHandle WindowManager::makeWindow(const char *title,
     render_window->height = height;
     render_window->hdl = glfw_window;
     render_window->surface = surface;
+    render_window->needResize = false;
 
     glfwSetWindowUserPointer(glfw_window, render_window);
 

@@ -1,3 +1,4 @@
+#include <chrono>
 #include "present.hpp"
 
 namespace madrona::render::vk {
@@ -113,6 +114,8 @@ static Swapchain makeSwapchain(const Backend &backend,
     swapchain_info.clipped = VK_TRUE;
     swapchain_info.oldSwapchain = VK_NULL_HANDLE;
 
+    using namespace std::chrono;
+
     VkSwapchainKHR swapchain;
     REQ_VK(dev.dt.createSwapchainKHR(dev.hdl, &swapchain_info, nullptr,
                                      &swapchain));
@@ -222,7 +225,9 @@ uint32_t PresentationState::acquireNext(const Device &dev,
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         need_resize = true;
-    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+    } else if (result == VK_SUBOPTIMAL_KHR) {
+        need_resize = true;
+    } else if (result != VK_SUCCESS) {
         assert(false);
     } else {
         need_resize = false;

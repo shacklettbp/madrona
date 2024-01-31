@@ -56,7 +56,9 @@ bool QueueState::presentSubmit(const Device &dev,
         mutex_.unlock();
     }
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        return false;
+    } else if (result == VK_SUBOPTIMAL_KHR) {
         return false;
     } else if (result != VK_SUCCESS) {
         assert(false);

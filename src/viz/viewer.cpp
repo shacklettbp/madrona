@@ -46,7 +46,7 @@ struct Viewer::Impl {
                 const Window *window,
                 const Viewer::Config &cfg);
 
-    inline void startFrame();
+    inline bool startFrame();
 
     // This is going to render all the views which were registered
     // by the ECS
@@ -167,21 +167,26 @@ static float throttleFPS(chrono::time_point<chrono::steady_clock> start) {
     return duration<float>(end - start).count();
 }
 
-void Viewer::Impl::startFrame()
+bool Viewer::Impl::startFrame()
 {
-    renderer.waitUntilFrameReady();
-
     glfwPollEvents();
 
+    renderer.waitUntilFrameReady();
+
+#if 1
     // Handle the window resize if needed before anything else
     if (renderer.needResize()) {
         // Handle resize!
-        printf("WINDOW RESIZE\n");
         renderer.handleResize();
+
+        return false;
     }
+#endif
 
     renderer.startFrame();
     ImGui::NewFrame();
+
+    return true;
 }
 
 // https://lemire.me/blog/2021/06/03/computing-the-number-of-digits-of-an-integer-even-faster/
@@ -273,11 +278,6 @@ static void flyCamUI(ViewerCam &cam)
         ImGui::DragFloat("View Size", &cam.orthoHeight,
                           0.5f, 0.f, 100.f, "%0.1f");
     }
-
-    ImGui::Text("Position: %f %f %f", 
-                cam.position.x, cam.position.y, cam.position.z);
-    ImGui::Text("View Direction: %f %f %f", 
-                cam.fwd.x, cam.fwd.y, cam.fwd.z);
 }
 
 static void cfgUI(ViewerControl &ctrl,
@@ -670,29 +670,31 @@ void Viewer::Impl::loop(
 
         auto sim_delta_t = chrono::duration<float>(1.f / (float)simTickRate);
 
-        startFrame();
+        bool success = startFrame();
 
-        if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
-            prev_key_state = key_state;
-            UserInput user_input(key_state.data(), press_state.data());
+        if (success) {
+            if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
+                prev_key_state = key_state;
+                UserInput user_input(key_state.data(), press_state.data());
 
-            world_input_fn(world_input_data, vizCtrl.worldIdx, user_input);
+                world_input_fn(world_input_data, vizCtrl.worldIdx, user_input);
 
-            if (vizCtrl.controlIdx != 0) {
-                agent_input_fn(agent_input_data, vizCtrl.worldIdx,
-                         vizCtrl.controlIdx - 1, user_input);
+                if (vizCtrl.controlIdx != 0) {
+                    agent_input_fn(agent_input_data, vizCtrl.worldIdx,
+                             vizCtrl.controlIdx - 1, user_input);
+                }
+
+                step_fn(step_data);
+
+                last_sim_tick_time = cur_frame_start_time;
             }
 
-            step_fn(step_data);
+            ui_fn(ui_data);
 
-            last_sim_tick_time = cur_frame_start_time;
+            render(frame_duration);
+
+            frame_duration = throttleFPS(cur_frame_start_time);
         }
-
-        ui_fn(ui_data);
-
-        render(frame_duration);
-
-        frame_duration = throttleFPS(cur_frame_start_time);
     }
 
     renderer.waitForIdle();

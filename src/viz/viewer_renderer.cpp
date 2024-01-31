@@ -7,6 +7,7 @@
 
 #include "render_common.hpp"
 #include "render_ctx.hpp"
+#include "vulkan/vulkan_core.h"
 
 #include <stb_image_write.h>
 
@@ -2761,6 +2762,10 @@ bool ViewerRendererState::renderGridFrame(const viz::ViewerControl &viz_ctrl)
         VK_PIPELINE_STAGE_TRANSFER_BIT
     };
 
+    if (waits[0] == VK_NULL_HANDLE) {
+        wait_count = 0;
+    }
+
     if (!rctx.batchRenderer->didRender) {
         wait_count = 0;
     } else {
@@ -3196,6 +3201,10 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
         VK_PIPELINE_STAGE_TRANSFER_BIT
     };
 
+    if (waits[0] == VK_NULL_HANDLE) {
+        wait_count = 0;
+    }
+
     if (!rctx.batchRenderer->didRender) {
         wait_count = 0;
     } else {
@@ -3220,11 +3229,23 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
     return prepare_screenshot;
 }
 
-void ViewerRendererState::renderGUIAndPresent(
+bool ViewerRendererState::renderGUIAndPresent(
     const viz::ViewerControl &viz_ctrl,
     bool prepare_screenshot)
 {
     Frame &frame = frames[curFrame];
+
+    bool need_resize;
+    currentSwapchainIndex = present.acquireNext(dev, 
+            frame.swapchainReady, need_resize);
+
+    if (need_resize) {
+        handleResize();
+
+        return false;
+    }
+
+    VkImage swapchain_img = present.getImage(currentSwapchainIndex);
 
     VkCommandBuffer draw_cmd = frame.presentCmd;
     { // Get command buffer for this frame and start it
@@ -3263,17 +3284,6 @@ void ViewerRendererState::renderGUIAndPresent(
 #endif
 
     dev.dt.cmdEndRenderPass(draw_cmd);
-
-    bool need_resize;
-    uint32_t swapchain_idx = present.acquireNext(dev, 
-            frame.swapchainReady, need_resize);
-
-    if (need_resize) {
-        printf("ACQUIRENEXT RESIZE\n");
-        return;
-    }
-
-    VkImage swapchain_img = present.getImage(swapchain_idx);
 
     array<VkImageMemoryBarrier, 2> blit_prepare {{
         {
@@ -3390,13 +3400,14 @@ void ViewerRendererState::renderGUIAndPresent(
     REQ_VK(dev.dt.queueSubmit(rctx.renderQueue, 1, &gfx_submit,
                               frame.cpuFinished));
 
-    present.present(dev, swapchain_idx, presentWrapper,
+    present.present(dev, currentSwapchainIndex, presentWrapper,
                     1, &frame.guiRenderFinished,
                     need_resize);
 
     if (need_resize) {
-        printf("PRESENT RESIZE\n");
-        return;
+        handleResize();
+
+        return false;
     }
 
     curFrame = (curFrame + 1) % frames.size();
@@ -3423,6 +3434,8 @@ void ViewerRendererState::renderGUIAndPresent(
     }
 
     globalFrameNum += 1;
+
+    return true;
 }
 
 void ViewerRendererState::destroy()
@@ -3570,6 +3583,31 @@ void ViewerRendererState::handleResize()
 
     fbWidth = new_width;
     fbHeight = new_height;
+
+    const_cast<vk::RenderWindow *>(window)->needResize = false;
+}
+
+void ViewerRendererState::recreateSemaphores()
+{
+    dev.dt.deviceWaitIdle(dev.hdl);
+
+    for (uint32_t i = 0; i < InternalConfig::numFrames; ++i) {
+        Frame &frame = frames[i];
+
+        dev.dt.destroyFence(dev.hdl, frame.cpuFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.renderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.guiRenderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.swapchainReady, nullptr);
+
+        frame.cpuFinished = makeFence(dev, true);
+        frame.renderFinished = makeBinarySemaphore(dev);
+        frame.guiRenderFinished = makeBinarySemaphore(dev);
+        frame.swapchainReady = makeBinarySemaphore(dev);
+    }
+
+    if (rctx.batchRenderer) {
+        rctx.batchRenderer->recreateSemaphores();
+    }
 }
 
 ViewerRenderer::ViewerRenderer(const render::RenderManager &render_mgr,
@@ -3588,10 +3626,8 @@ void ViewerRenderer::waitUntilFrameReady()
     Frame &frame = state_.frames[state_.curFrame];
     // Wait until frame using this slot has finished
 
-    // printf("before wait...\n");
     REQ_VK(state_.dev.dt.waitForFences(
         state_.dev.hdl, 1, &frame.cpuFinished, VK_TRUE, UINT64_MAX));
-    // printf("after wait\n");
 }
 
 void ViewerRenderer::waitForIdle()
@@ -3635,12 +3671,14 @@ bool ViewerRenderer::needResize() const
 {
     // If the width/height doesn't match, that means a resize is needed
     return state_.window->width != state_.fbWidth ||
-        state_.window->height != state_.fbHeight;
+        state_.window->height != state_.fbHeight ||
+        state_.window->needResize;
 }
 
 void ViewerRenderer::handleResize()
 {
     state_.handleResize();
+    // const_cast<vk::RenderWindow *>(state_.window)->needResize = true;
 }
 
 }
