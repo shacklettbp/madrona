@@ -7,7 +7,6 @@
 #include <cassert>
 
 #include "../render/vk/utils.hpp"
-#include "GLFW/glfw3.h"
 
 namespace madrona {
 

@@ -7,7 +7,6 @@
 
 #include "render_common.hpp"
 #include "render_ctx.hpp"
-#include "vulkan/vulkan_core.h"
 
 #include <stb_image_write.h>
 
