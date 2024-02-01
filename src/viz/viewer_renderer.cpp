@@ -6,6 +6,7 @@
 #include "backends/imgui_impl_glfw.h"
 
 #include "render_common.hpp"
+#include "render_ctx.hpp"
 
 #include <stb_image_write.h>
 
@@ -1279,6 +1280,27 @@ static array<VkClearValue, 2> makeShadowClearValues()
     };
 }
 
+static void destroyFramebuffers(const Device &dev,
+                                MemoryAllocator &alloc,
+                                Framebuffer &fb,
+                                Framebuffer &imgui_fb)
+{
+    (void)alloc;
+
+    dev.dt.destroyFramebuffer(dev.hdl, fb.hdl, nullptr);
+    dev.dt.destroyFramebuffer(dev.hdl, imgui_fb.hdl, nullptr);
+    dev.dt.destroyImageView(dev.hdl, fb.colorView, nullptr);
+    dev.dt.destroyImageView(dev.hdl, fb.normalView, nullptr);
+    dev.dt.destroyImageView(dev.hdl, fb.positionView, nullptr);
+    dev.dt.destroyImageView(dev.hdl, fb.depthView, nullptr);
+
+    // This sucks - will fix momentarily once the imgui refactor comes in
+    fb.colorAttachment.~LocalImage();
+    fb.normalAttachment.~LocalImage();
+    fb.positionAttachment.~LocalImage();
+    fb.depthAttachment.~LocalImage();
+}
+
 static std::pair<Framebuffer, Framebuffer> makeFramebuffers(
     const Device &dev,
     MemoryAllocator &alloc,
@@ -1384,14 +1406,14 @@ static std::pair<Framebuffer, Framebuffer> makeFramebuffers(
             hdl 
         },
         Framebuffer {
-            std::move(albedo),
-            std::move(normal),
-            std::move(position),
-            std::move(depth),
-            albedo_view,
-            normal_view,
-            position_view,
-            depth_view,
+            LocalImage::makeEmpty(),
+            LocalImage::makeEmpty(),
+            LocalImage::makeEmpty(),
+            LocalImage::makeEmpty(),
+            VK_NULL_HANDLE,
+            VK_NULL_HANDLE,
+            VK_NULL_HANDLE,
+            VK_NULL_HANDLE,
             imgui_hdl 
         });
 }
@@ -1490,7 +1512,8 @@ static void makeFrame(Frame *dst,
                       const LocalBuffer &batch_rgb_out,
                       const LocalBuffer &batch_depth_out)
 {
-    auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, fb_width, fb_height, render_pass, imgui_render_pass);
+    auto [fb, imgui_fb] = makeFramebuffers(dev, alloc, 
+            fb_width, fb_height, render_pass, imgui_render_pass);
 
     auto shadow_fb = makeShadowFramebuffer(dev, alloc, 
         InternalConfig::shadowMapSize,
@@ -2738,6 +2761,10 @@ bool ViewerRendererState::renderGridFrame(const viz::ViewerControl &viz_ctrl)
         VK_PIPELINE_STAGE_TRANSFER_BIT
     };
 
+    if (waits[0] == VK_NULL_HANDLE) {
+        wait_count = 0;
+    }
+
     if (!rctx.batchRenderer->didRender) {
         wait_count = 0;
     } else {
@@ -3173,6 +3200,10 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
         VK_PIPELINE_STAGE_TRANSFER_BIT
     };
 
+    if (waits[0] == VK_NULL_HANDLE) {
+        wait_count = 0;
+    }
+
     if (!rctx.batchRenderer->didRender) {
         wait_count = 0;
     } else {
@@ -3197,11 +3228,23 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
     return prepare_screenshot;
 }
 
-void ViewerRendererState::renderGUIAndPresent(
+bool ViewerRendererState::renderGUIAndPresent(
     const viz::ViewerControl &viz_ctrl,
     bool prepare_screenshot)
 {
     Frame &frame = frames[curFrame];
+
+    bool need_resize;
+    currentSwapchainIndex = present.acquireNext(dev, 
+            frame.swapchainReady, need_resize);
+
+    if (need_resize) {
+        handleResize();
+
+        return false;
+    }
+
+    VkImage swapchain_img = present.getImage(currentSwapchainIndex);
 
     VkCommandBuffer draw_cmd = frame.presentCmd;
     { // Get command buffer for this frame and start it
@@ -3240,9 +3283,6 @@ void ViewerRendererState::renderGUIAndPresent(
 #endif
 
     dev.dt.cmdEndRenderPass(draw_cmd);
-
-    uint32_t swapchain_idx = present.acquireNext(dev, frame.swapchainReady);
-    VkImage swapchain_img = present.getImage(swapchain_idx);
 
     array<VkImageMemoryBarrier, 2> blit_prepare {{
         {
@@ -3359,8 +3399,15 @@ void ViewerRendererState::renderGUIAndPresent(
     REQ_VK(dev.dt.queueSubmit(rctx.renderQueue, 1, &gfx_submit,
                               frame.cpuFinished));
 
-    present.present(dev, swapchain_idx, presentWrapper,
-                    1, &frame.guiRenderFinished);
+    present.present(dev, currentSwapchainIndex, presentWrapper,
+                    1, &frame.guiRenderFinished,
+                    need_resize);
+
+    if (need_resize) {
+        handleResize();
+
+        return false;
+    }
 
     curFrame = (curFrame + 1) % frames.size();
 
@@ -3386,6 +3433,8 @@ void ViewerRendererState::renderGUIAndPresent(
     }
 
     globalFrameNum += 1;
+
+    return true;
 }
 
 void ViewerRendererState::destroy()
@@ -3451,6 +3500,115 @@ void ViewerRendererState::destroy()
     present.destroy(dev);
 }
 
+void ViewerRendererState::handleResize()
+{
+    // Wait for everything to finish
+    dev.dt.deviceWaitIdle(dev.hdl);
+
+    uint32_t new_width = window->width;
+    uint32_t new_height = window->height;
+
+
+    // Recreate the swapchain first
+    present.resize(rctx.backend,
+                   dev,
+                   window,
+                   InternalConfig::numFrames,
+                   true);
+
+    // Destroy the image views for the framebuffer
+    for (uint32_t i = 0; i < InternalConfig::numFrames; ++i) {
+        Frame &frame = frames[i];
+
+        destroyFramebuffers(dev, rctx.alloc, 
+                frame.fb, frame.imguiFB);
+
+        auto [fb, imgui_fb] = makeFramebuffers(
+                dev, rctx.alloc, new_width, new_height, 
+                rctx.renderPass, imguiState.renderPass);
+
+        new(&frame.fb) Framebuffer(std::move(fb));
+        new(&frame.imguiFB) Framebuffer(std::move(imgui_fb));
+
+        // Need to update relevant descriptor sets now (nightmare)
+        std::array<VkWriteDescriptorSet, 16> desc_updates;
+        uint32_t desc_counter = 0;
+
+        VkDescriptorImageInfo gbuffer_albedo_info;
+        gbuffer_albedo_info.imageView = fb.colorView;
+        gbuffer_albedo_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        gbuffer_albedo_info.sampler = VK_NULL_HANDLE;
+
+        DescHelper::storageImage(desc_updates[desc_counter++],
+                frame.lightingSet, &gbuffer_albedo_info, 0);
+
+        if (frame.gridDrawSet != VK_NULL_HANDLE) {
+            DescHelper::storageImage(desc_updates[desc_counter++],
+                    frame.gridDrawSet, &gbuffer_albedo_info, 0);
+        }
+
+        VkDescriptorImageInfo gbuffer_normal_info;
+        gbuffer_normal_info.imageView = fb.normalView;
+        gbuffer_normal_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        gbuffer_normal_info.sampler = VK_NULL_HANDLE;
+
+        DescHelper::storageImage(desc_updates[desc_counter++],
+                frame.lightingSet, &gbuffer_normal_info, 1);
+
+        VkDescriptorImageInfo gbuffer_position_info;
+        gbuffer_position_info.imageView = fb.positionView;
+        gbuffer_position_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        gbuffer_position_info.sampler = VK_NULL_HANDLE;
+
+        DescHelper::storageImage(desc_updates[desc_counter++],
+                frame.lightingSet, &gbuffer_position_info, 2);
+
+        DescHelper::update(dev, desc_updates.data(), desc_counter);
+
+        dev.dt.destroyFence(dev.hdl, frame.cpuFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.renderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.guiRenderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.swapchainReady, nullptr);
+
+        frame.cpuFinished = makeFence(dev, true);
+        frame.renderFinished = makeBinarySemaphore(dev);
+        frame.guiRenderFinished = makeBinarySemaphore(dev);
+        frame.swapchainReady = makeBinarySemaphore(dev);
+    }
+
+    if (rctx.batchRenderer) {
+        rctx.batchRenderer->recreateSemaphores();
+    }
+
+    fbWidth = new_width;
+    fbHeight = new_height;
+
+    const_cast<vk::RenderWindow *>(window)->needResize = false;
+}
+
+void ViewerRendererState::recreateSemaphores()
+{
+    dev.dt.deviceWaitIdle(dev.hdl);
+
+    for (uint32_t i = 0; i < InternalConfig::numFrames; ++i) {
+        Frame &frame = frames[i];
+
+        dev.dt.destroyFence(dev.hdl, frame.cpuFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.renderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.guiRenderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.swapchainReady, nullptr);
+
+        frame.cpuFinished = makeFence(dev, true);
+        frame.renderFinished = makeBinarySemaphore(dev);
+        frame.guiRenderFinished = makeBinarySemaphore(dev);
+        frame.swapchainReady = makeBinarySemaphore(dev);
+    }
+
+    if (rctx.batchRenderer) {
+        rctx.batchRenderer->recreateSemaphores();
+    }
+}
+
 ViewerRenderer::ViewerRenderer(const render::RenderManager &render_mgr,
                                const Window *window)
     : state_(initState(render_mgr.renderContext(),
@@ -3466,6 +3624,7 @@ void ViewerRenderer::waitUntilFrameReady()
 {
     Frame &frame = state_.frames[state_.curFrame];
     // Wait until frame using this slot has finished
+
     REQ_VK(state_.dev.dt.waitForFences(
         state_.dev.hdl, 1, &frame.cpuFinished, VK_TRUE, UINT64_MAX));
 }
@@ -3505,6 +3664,20 @@ CountT ViewerRenderer::loadObjects(Span<const imp::SourceObject> objs,
 void ViewerRenderer::configureLighting(Span<const render::LightConfig> lights)
 {
     state_.rctx.configureLighting(lights);
+}
+
+bool ViewerRenderer::needResize() const
+{
+    // If the width/height doesn't match, that means a resize is needed
+    return state_.window->width != state_.fbWidth ||
+        state_.window->height != state_.fbHeight ||
+        state_.window->needResize;
+}
+
+void ViewerRenderer::handleResize()
+{
+    state_.handleResize();
+    // const_cast<vk::RenderWindow *>(state_.window)->needResize = true;
 }
 
 }

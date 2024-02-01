@@ -1,3 +1,4 @@
+#include <chrono>
 #include "present.hpp"
 
 namespace madrona::render::vk {
@@ -113,6 +114,8 @@ static Swapchain makeSwapchain(const Backend &backend,
     swapchain_info.clipped = VK_TRUE;
     swapchain_info.oldSwapchain = VK_NULL_HANDLE;
 
+    using namespace std::chrono;
+
     VkSwapchainKHR swapchain;
     REQ_VK(dev.dt.createSwapchainKHR(dev.hdl, &swapchain_info, nullptr,
                                      &swapchain));
@@ -211,13 +214,24 @@ void PresentationState::forceTransition(const Device &dev,
 }
 
 uint32_t PresentationState::acquireNext(const Device &dev,
-                                        VkSemaphore signal_sema)
+                                        VkSemaphore signal_sema,
+                                        bool &need_resize)
 {
     uint32_t swapchain_idx;
-    REQ_VK(dev.dt.acquireNextImageKHR(dev.hdl, swapchain_.hdl,
-                                      0, signal_sema,
-                                      VK_NULL_HANDLE,
-                                      &swapchain_idx));
+    VkResult result = dev.dt.acquireNextImageKHR(dev.hdl, swapchain_.hdl,
+                                                 0, signal_sema,
+                                                 VK_NULL_HANDLE,
+                                                 &swapchain_idx);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        need_resize = true;
+    } else if (result == VK_SUBOPTIMAL_KHR) {
+        need_resize = true;
+    } else if (result != VK_SUCCESS) {
+        assert(false);
+    } else {
+        need_resize = false;
+    }
 
     return swapchain_idx;
 }
@@ -235,7 +249,8 @@ uint32_t PresentationState::numSwapchainImages() const
 void PresentationState::present(const Device &dev, uint32_t swapchain_idx,
                                 const QueueState &present_queue,
                                 uint32_t num_wait_semas,
-                                const VkSemaphore *wait_semas)
+                                const VkSemaphore *wait_semas,
+                                bool &need_resize)
 {
     VkPresentInfoKHR present_info;
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -248,8 +263,36 @@ void PresentationState::present(const Device &dev, uint32_t swapchain_idx,
     present_info.pImageIndices = &swapchain_idx;
     present_info.pResults = nullptr;
 
-    present_queue.presentSubmit(dev, &present_info);
+    bool submit_success = present_queue.presentSubmit(dev, &present_info);
+
+    if (submit_success) {
+        // If the present was successful, no need to resize
+        need_resize = false;
+    } else {
+        // If the present failed, need to resize
+        need_resize = true;
+    }
 }
 
+
+void PresentationState::resize(const Backend &backend,
+                               const Device &dev,
+                               const RenderWindow *window,
+                               uint32_t num_frames_inflight,
+                               bool need_immediate)
+{
+    // Destroy the swapchain first
+    destroy(dev);
+
+    swapchain_ = makeSwapchain(backend, 
+                               dev,
+                               window,
+                               num_frames_inflight,
+                               need_immediate);
+
+    swapchain_imgs_.clear();
+
+    swapchain_imgs_ = getSwapchainImages(dev, swapchain_.hdl);
+}
 
 }

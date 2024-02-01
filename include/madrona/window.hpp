@@ -8,6 +8,7 @@ namespace madrona {
 struct Window {
     uint32_t width;
     uint32_t height;
+    bool needResize;
 };
 
 class WindowManager;

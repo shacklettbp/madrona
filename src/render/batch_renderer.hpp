@@ -87,6 +87,8 @@ struct BatchRenderer {
 
     const uint8_t * getRGBCUDAPtr() const;
     const float * getDepthCUDAPtr() const;
+
+    void recreateSemaphores();
 };
 
 }

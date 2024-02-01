@@ -1834,7 +1834,7 @@ VkSemaphore BatchRenderer::getLatestWaitSemaphore()
     uint32_t last_frame = (impl->currentFrame + impl->batchFrames.size() - 1) %
         impl->batchFrames.size();
 
-    assert(impl->batchFrames[last_frame].latestOp != LatestOperation::None);
+    // assert(impl->batchFrames[last_frame].latestOp != LatestOperation::None);
 
     if (impl->batchFrames[last_frame].latestOp == LatestOperation::RenderPrepare) {
         return impl->batchFrames[last_frame].prepareFinished;
@@ -1863,6 +1863,35 @@ const float * BatchRenderer::getDepthCUDAPtr() const
 #else
     return (float *)impl->batchFrames[0].depthOutputCUDA.getDevicePointer();
 #endif
+}
+
+void BatchRenderer::recreateSemaphores()
+{
+    vk::Device &dev = impl->dev;
+
+    for (int i = 0; i < impl->batchFrames.size(); ++i) {
+        BatchFrame &frame = impl->batchFrames[i];
+        dev.dt.destroyFence(dev.hdl, frame.prepareFence, nullptr);
+        dev.dt.destroyFence(dev.hdl, frame.renderFence, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.prepareFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.renderFinished, nullptr);
+        dev.dt.destroySemaphore(dev.hdl, frame.layoutTransitionFinished, nullptr);
+
+        frame.prepareFence = makeFence(dev, true);
+        frame.renderFence = makeFence(dev, true);
+
+        frame.prepareFinished = vk::makeBinarySemaphore(dev);
+        frame.renderFinished = vk::makeBinarySemaphore(dev);
+        frame.layoutTransitionFinished = vk::makeBinarySemaphore(dev);
+    }
+
+    didRender = false;
+
+    for (int i = 0; i < impl->batchFrames.size(); ++i) {
+        // Make sure all the previous operations are just none
+        // Reset all synchronization
+        impl->batchFrames[i].latestOp = LatestOperation::None;
+    }
 }
 
 }

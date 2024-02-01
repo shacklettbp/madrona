@@ -50,10 +50,18 @@ bool QueueState::presentSubmit(const Device &dev,
     }
 
     // FIXME resize
-    REQ_VK(dev.dt.queuePresentKHR(queue_hdl_, present_info));
+    VkResult result = dev.dt.queuePresentKHR(queue_hdl_, present_info);
 
     if (shared_) {
         mutex_.unlock();
+    }
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        return false;
+    } else if (result == VK_SUBOPTIMAL_KHR) {
+        return false;
+    } else if (result != VK_SUCCESS) {
+        assert(false);
     }
 
     return true;

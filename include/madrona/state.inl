@@ -229,6 +229,12 @@ ComponentID StateManager::componentID() const
 template <typename ArchetypeT>
 ArchetypeID StateManager::archetypeID() const
 {
+#if 0
+    uint32_t id = TypeTracker::typeID<ArchetypeID>();
+    
+    assert(id != TypeTracker::unassignedTypeID &&
+           "Trying to access an unregistered archetype!");
+#endif
     return ArchetypeID {
         TypeTracker::typeID<ArchetypeT>(),
     };

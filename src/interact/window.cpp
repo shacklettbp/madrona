@@ -87,6 +87,18 @@ static GLFWwindow *makeGLFWwindow(const char *title,
     return glfwCreateWindow(width, height, title, nullptr, nullptr);
 }
 
+// This gets called before the vulkan acquire/present failure
+static void framebufferSizeCallback(GLFWwindow *window, int width, int height)
+{
+    vk::RenderWindow *render_win = 
+        (vk::RenderWindow *)glfwGetWindowUserPointer(window);
+
+    render_win->width = width;
+    render_win->height = height;
+
+    render_win->needResize = true;
+}
+
 WindowManager::WindowManager(const Config &cfg)
     : impl_(Impl::init(cfg))
 {}
@@ -111,11 +123,16 @@ WindowHandle WindowManager::makeWindow(const char *title,
 
     VkSurfaceKHR surface = getWindowSurface(backend, glfw_window);
 
+    glfwSetFramebufferSizeCallback(glfw_window, &framebufferSizeCallback);
+
     vk::RenderWindow *render_window = new vk::RenderWindow {};
     render_window->width = width;
     render_window->height = height;
     render_window->hdl = glfw_window;
     render_window->surface = surface;
+    render_window->needResize = false;
+
+    glfwSetWindowUserPointer(glfw_window, render_window);
 
     return WindowHandle(render_window, this);
 }

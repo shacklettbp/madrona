@@ -133,6 +133,11 @@ Vector2 & Vector2::operator/=(float o)
     return *this *= inv;
 }
 
+constexpr Vector2 Vector2::fromVector3(Vector3 v)
+{
+    return { v.x, v.y };
+}
+
 Vector2 operator-(Vector2 v)
 {
     return Vector2 {
@@ -457,6 +462,13 @@ constexpr Vector3 Vector3::one()
     };
 }
 
+constexpr Vector3 Vector3::all(float v)
+{
+    return Vector3 {
+        v, v, v
+    };
+}
+
 float dot(Vector3 a, Vector3 b)
 {
     return a.dot(b);
@@ -465,6 +477,12 @@ float dot(Vector3 a, Vector3 b)
 Vector3 cross(Vector3 a, Vector3 b)
 {
     return a.cross(b);
+}
+
+Vector3 reflect(Vector3 direction, Vector3 normal)
+{
+    return direction - (2.f * direction.dot(normal) * normal) /
+        normal.dot(normal);
 }
 
 Mat3x3 outerProduct(Vector3 a, Vector3 b)
@@ -1525,6 +1543,41 @@ bool AABB::rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
     float t_box_min = max_component(t_mins);
     float t_box_max = min_component(t_maxes);
     return t_box_min <= t_box_max;
+}
+
+bool AABB::rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
+                         float ray_t_min, float ray_t_max,
+                         float &t_out)
+{
+    // Ray tracing gems II, chapter 2
+    
+    // Absolute distances to lower and upper box coordinates
+    math::Vector3 t_lower = inv_ray_d * (pMin - ray_o);
+    math::Vector3 t_upper = inv_ray_d * (pMax - ray_o);
+    // The four t-intervals (for x-/y-/z-slabs, and ray p(t))
+    math::Vector4 t_mins =
+        Vector4::fromVector3(Vector3::min(t_lower, t_upper), ray_t_min);
+    math::Vector4 t_maxes = 
+        Vector4::fromVector3(Vector3::max(t_lower, t_upper), ray_t_max);
+    // Easy to remember: ``max of mins, and min of maxes''
+
+    auto max_component = [](Vector4 v) {
+        return fmaxf(v.x, fmaxf(v.y, fmaxf(v.z, v.w)));
+    };
+
+    auto min_component = [](Vector4 v) {
+        return fminf(v.x, fminf(v.y, fminf(v.z, v.w)));
+    };
+   
+    float t_box_min = max_component(t_mins);
+    float t_box_max = min_component(t_maxes);
+
+    if (t_box_min <= t_box_max) {
+        t_out = t_box_min;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 AABB AABB::applyTRS(const Vector3 &translation,

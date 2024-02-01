@@ -8,6 +8,7 @@
 #include <cub/block/block_scan.cuh>
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_store.cuh>
+#include <madrona/mw_gpu/host_print.hpp>
 
 namespace madrona {
 
@@ -946,6 +947,12 @@ SortArchetypeNodeBase::RearrangeNode::RearrangeNode(ParentNodeT parent,
       columnIndex(col_idx)
 {}
 
+SortArchetypeNodeBase::ClearCountNode::ClearCountNode(int32_t *offsets,
+                                                      int32_t *counts)
+    : worldOffsets(offsets),
+      worldCounts(counts)
+{}
+
 SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id,
                                              int32_t col_idx,
                                              uint32_t *keys_col,
@@ -971,6 +978,9 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
 
     if (!state_mgr->archetypeNeedsSort(archetypeID)) {
         numDynamicInvocations = 0;
+
+        auto &clear_count_node_data = taskgraph->getNodeData(clearWorldCountData);
+        clear_count_node_data.numDynamicInvocations = 0;
 
         for (int i = 0; i < numPasses; i++) {
             taskgraph->getNodeData(onesweepNodes[i]).numDynamicInvocations = 0;
@@ -1027,6 +1037,15 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
         postBinScanThreads = 1;
     } else {
         postBinScanThreads = numRows;
+    }
+
+    // This is only necessary if the global number of entities is 0
+    auto &clear_count_node_data = taskgraph->getNodeData(clearWorldCountData);
+    if (numRows == 0) {
+        clear_count_node_data.numDynamicInvocations =
+            mwGPU::GPUImplConsts::get().numWorlds;
+    } else {
+        clear_count_node_data.numDynamicInvocations = 0;
     }
 
     indicesFinal = (int *)(tmp_buffer + indices_final_offset);
@@ -1213,7 +1232,18 @@ void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)
     numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
 }
 
-void SortArchetypeNodeBase::clearWorldOffsetsAndCounts(int32_t invocation_idx) {
+void SortArchetypeNodeBase::ClearCountNode::clearCounts(int32_t invocation_idx)
+{
+    worldOffsets[invocation_idx] = 0;
+    worldCounts[invocation_idx] = 0;
+
+    if (invocation_idx == 0) {
+        numDynamicInvocations = 0;
+    }
+}
+
+void SortArchetypeNodeBase::clearWorldOffsetsAndCounts(int32_t invocation_idx)
+{
     int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
 
     // The counts computation for worldID i works by setting:
@@ -1396,8 +1426,16 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         &SortArchetypeNodeBase::sortSetup>(data_id, dependencies,
             Optional<TaskGraph::NodeID>::none(), 1);
 
+    // Create the clear world count pass (which will run optionally 
+    // if archetype needs sorting but the number of entities is 0).
+    sort_node_data.clearWorldCountData = builder.constructNodeData<
+        ClearCountNode>(world_offsets, world_counts);
+    auto clear_counts = builder.addNodeFn<
+        &ClearCountNode::clearCounts>(sort_node_data.clearWorldCountData,
+            {setup}, setup);
+
     auto zero_bins = builder.addNodeFn<
-        &SortArchetypeNodeBase::zeroBins>(data_id, {setup}, setup);
+        &SortArchetypeNodeBase::zeroBins>(data_id, {clear_counts}, setup);
 
     auto compute_histogram = builder.addNodeFn<
         &SortArchetypeNodeBase::histogram>(data_id, {zero_bins}, setup, 0,

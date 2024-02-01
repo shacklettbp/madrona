@@ -4,6 +4,7 @@
 
 #include <imgui.h>
 
+#include "madrona/render/vk/window.hpp"
 #include "present.hpp"
 #include "viewer_common.hpp"
 #include "render_common.hpp"
@@ -108,10 +109,19 @@ struct ViewerRendererState {
 
     render::vk::HostBuffer screenshotBuffer;
 
+    uint32_t currentSwapchainIndex;
+
     bool renderFlycamFrame(const ViewerControl &viz_ctrl);
     bool renderGridFrame(const ViewerControl &viz_ctrl);
-    void renderGUIAndPresent(const ViewerControl &viz_ctrl,
+
+    // Returns true if nothing wrong happened
+    // Returns false if resize happened
+    bool renderGUIAndPresent(const ViewerControl &viz_ctrl,
                              bool prepare_screenshot);
+
+    void handleResize();
+
+    void recreateSemaphores();
 
     void destroy();
 };
@@ -135,6 +145,10 @@ public:
     void configureLighting(Span<const render::LightConfig> lights);
     
     inline GLFWwindow * osWindow() const { return state_.window->hdl; }
+
+    bool needResize() const;
+
+    void handleResize();
  
 private:
     ViewerRendererState state_;
