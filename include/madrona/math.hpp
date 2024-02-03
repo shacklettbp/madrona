@@ -129,6 +129,7 @@ struct Vector3 {
     static constexpr inline Vector3 all(float v);
 };
 
+inline float dot(Vector2 a, Vector2 b);
 inline float dot(Vector3 a, Vector3 b);
 inline Vector3 cross(Vector3 a, Vector3 b);
 inline Mat3x3 outerProduct(Vector3 a, Vector3 b);

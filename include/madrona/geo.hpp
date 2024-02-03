@@ -10,7 +10,8 @@ inline float intersectRayOriginSphere(
     math::Vector3 ray_d,
     float r);
 
-// Assumes (0, 0, 0) is at the base of the capsule line segment.
+// Assumes (0, 0, 0) is at the base of the capsule line segment, and that
+// ray_d is normalized.
 // h is the length of the line segment (not overall height of the capsule).
 inline float intersectRayZOriginCapsule(
     math::Vector3 ray_o,

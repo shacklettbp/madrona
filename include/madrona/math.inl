@@ -469,6 +469,11 @@ constexpr Vector3 Vector3::all(float v)
     };
 }
 
+float dot(Vector2 a, Vector2 b)
+{
+    return a.x * b.x + a.y * b.y;
+}
+
 float dot(Vector3 a, Vector3 b)
 {
     return a.dot(b);

@@ -5,28 +5,36 @@ inline float intersectRayOriginSphere(
     math::Vector3 ray_d,
     float r)
 {
-    // RTCD 5.3.2
-
     using namespace math;
 
-    float b = dot(ray_d, ray_o);
-    float c = ray_o.length2() - r * r;
+    // Accurate ray-sphere collision from Chapter 7 RT Gems I:
+    // (see explanation below in capsule routine)
 
+    // Counter intuitive that we compute c here and then derive discriminant
+    // without it, but this is essential for precision. Note that the
+    // early out will only trigger when o is close to the sphere, where
+    // precision isn't an issue for this check.
+    float r2 = math::sqr(r);
+    float c = ray_o.length2() - r2;
     if (c <= 0.f) {
         return 0.f;
     }
 
-    // Pointing away from sphere
-    if (b > 0.f) {
+    float b_prime = -dot(ray_o, ray_d);
+
+    if (b_prime < 0.f) {
         return FLT_MAX;
     }
 
-    float discr = b * b - c;
-    if (discr < 0.f) {
+    float l2 = (ray_o + b_prime * ray_d).length2();
+    float delta = r2 - l2;
+
+    if (delta < 0.f) {
         return FLT_MAX;
     }
 
-    return -b - sqrtf(discr);
+    float q = b_prime + sqrtf(delta);
+    return c / q;
 }
 
 inline float intersectRayZOriginCapsule(
@@ -42,6 +50,11 @@ inline float intersectRayZOriginCapsule(
         Vector2 d,
         float r)
     {
+        // The naive way to do this is with the quadratic equation, as below:
+        // Unfortunately, this is SUPER imprecise when ray_o is moderately
+        // ~500? units away from the origin. Better solution from RT gems 
+        // afterwards.
+        //
         // Need to find closest point between line and circle
         // Circle equation: x^2 + y^2 = r^2
         // ray(t) = o + t * d 
@@ -53,32 +66,40 @@ inline float intersectRayZOriginCapsule(
         // a = d.x^2 + d.y^2
         // b = d.x * o.x + d.y * o.y
         // c = o.x * o.x + o.y * o.y - r^2
-    
-        float a = d.x * d.x + d.y * d.y;
-        float b = d.x * o.x + d.y * o.y;
-        float c = o.x * o.x + o.y * o.y - r * r;
-    
-        // Ray starts inside cylinder
-        if (c <= 0.f) {
-            return 0.f;
-        }
-    
+        
+        // Accurate solution, Chapter 7, Ray Tracing Gems I:
+
+        float a = d.length2();
+
         // This ray is parallel to the Z axis and starts outside the cylinder
         // Special exit necessary to avoid div by 0
         if (a == 0.f) {
             return FLT_MAX;
         }
-    
-        if (b > 0.f) {
+
+        float r2 = math::sqr(r);
+
+        float c = o.length2() - r2;
+        if (c <= 0.f) {
+            return 0.f;
+        }
+
+        // f = o because capsule is at origin
+        float b_prime = -dot(o, d);
+        if (b_prime < 0.f) {
             return FLT_MAX;
         }
-    
-        float discr = b * b - a * c;
-        if (discr < 0.f) {
+
+        float l2 = (o + (b_prime / a) * d).length2();
+        float delta = r2 - l2;
+
+        if (delta < 0.f ) {
             return FLT_MAX;
         }
-    
-        return -b - sqrtf(discr);
+
+        float q = b_prime + sqrtf(a * delta);
+
+        return c / q;
     };
 
     Vector2 o_2d { .x = ray_o.x, .y = ray_o.y };
