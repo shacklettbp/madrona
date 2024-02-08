@@ -93,7 +93,7 @@ static nb::dict train_interface_to_pytree(const TrainInterface &iface)
 
     nb::dict stats;
     for (const TrainInterface::NamedTensor &t : src_stats) {
-        obs[t.name] = tensor_to_jax(t.hdl);
+        stats[t.name] = tensor_to_jax(t.hdl);
     }
     
     d["obs"] = obs;
