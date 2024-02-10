@@ -8,69 +8,123 @@ from jax.core import ShapedArray
 from jax.lib import xla_client
 from jax.interpreters import xla
 from jax.interpreters import mlir
-from jax.interpreters.mlir import ir
+from jax.interpreters.mlir import ir, dtype_to_ir_type
 from jaxlib.hlo_helpers import custom_call
 import builtins as __builtins__
 
-custom_call_name = f"{type(sim_obj).__name__}_{id(sim_obj)}_step"
+custom_call_prefix = f"{type(sim_obj).__name__}_{id(sim_obj)}"
+init_custom_call_name = f"{custom_call_prefix}_init"
+step_custom_call_name = f"{custom_call_prefix}_step"
 del sim_obj
 
 xla_client.register_custom_call_target(
-    custom_call_name, custom_call_capsule, platform=custom_call_platform)
+    init_custom_call_name, init_custom_call_capsule,
+    platform=custom_call_platform)
+
+xla_client.register_custom_call_target(
+    step_custom_call_name, step_custom_call_capsule,
+    platform=custom_call_platform)
 
 def _row_major_layout(shape):
     return tuple(range(len(shape) -1, -1, -1))
 
-def _lowering(ctx, *flattened_data):
-    operand_types = [ir.RankedTensorType(i.type) for i in flattened_data]
-    operand_layouts = [_row_major_layout(t.shape) for t in operand_types]
 
-    aliases = {idx: idx for idx in range(len(flattened_data))}
+def _shape_dtype_to_abstract_vals(vs):
+    return tuple(ShapedArray(v.shape, v.dtype) for v in vs)
+
+def _lower_shape_dtypes(shape_dtypes):
+    return [ir.RankedTensorType.get(i.shape, dtype_to_ir_type(i.dtype))
+        for i in shape_dtypes]
+
+def _init_lowering(ctx):
+    result_types = _lower_shape_dtypes(step_outputs_iface['obs'].values())
+    result_layouts = [_row_major_layout(t.shape) for t in result_types]
 
     return custom_call(
-        custom_call_name,
-        result_types=operand_types,
-        operands=flattened_data,
+        init_custom_call_name,
         backend_config=sim_encode,
-        operand_output_aliases=aliases,
-        operand_layouts=operand_layouts,
-        result_layouts=operand_layouts,
+        operands=[],
+        operand_layouts=[],
+        result_types=result_types,
+        result_layouts=result_layouts,
         has_side_effect=True,
     ).results
 
-def _abstract(*inputs):
-    return tuple(ShapedArray(
-        i.shape, i.dtype, named_shape=i.named_shape) for i in inputs)
 
-_primitive = core.Primitive(custom_call_name)
-_primitive.multiple_results = True
-_primitive.def_impl(partial(xla.apply_primitive, _primitive))
-_primitive.def_abstract_eval(_abstract)
+def _init_abstract():
+    return _shape_dtype_to_abstract_vals(step_outputs_iface['obs'].values())
+
+
+def _flatten_step_output_shape_dtypes():
+    result_shape_dtypes = list(step_outputs_iface['obs'].values())
+
+    result_shape_dtypes.append(step_outputs_iface['rewards'])
+    result_shape_dtypes.append(step_outputs_iface['dones'])
+
+    result_shape_dtypes += step_outputs_iface['pbt'].values()
+
+    return result_shape_dtypes
+
+
+def _step_lowering(ctx, *flattened_inputs):
+    input_types = [ir.RankedTensorType(i.type) for i in flattened_inputs]
+    input_layouts = [_row_major_layout(t.shape) for t in input_types]
+
+    result_types = _lower_shape_dtypes(_flatten_step_output_shape_dtypes())
+    result_layouts = [_row_major_layout(t.shape) for t in result_types]
+
+    return custom_call(
+        step_custom_call_name,
+        backend_config=sim_encode,
+        operands=flattened_inputs,
+        operand_layouts=input_layouts,
+        result_types=result_types,
+        result_layouts=result_layouts,
+        has_side_effect=True,
+    ).results
+
+
+def _step_abstract(*inputs):
+    return _shape_dtype_to_abstract_vals(_flatten_step_output_shape_dtypes())
+
+
+_init_primitive = core.Primitive(init_custom_call_name)
+_init_primitive.multiple_results = True
+_init_primitive.def_impl(partial(xla.apply_primitive, _init_primitive))
+_init_primitive.def_abstract_eval(_init_abstract)
 
 mlir.register_lowering(
-    _primitive,
-    _lowering,
+    _init_primitive,
+    _init_lowering,
     platform=custom_call_platform,
 )
 
-def step_func(sim_data):
+_step_primitive = core.Primitive(step_custom_call_name)
+_step_primitive.multiple_results = True
+_step_primitive.def_impl(partial(xla.apply_primitive, _step_primitive))
+_step_primitive.def_abstract_eval(_step_abstract)
+
+mlir.register_lowering(
+    _step_primitive,
+    _step_lowering,
+    platform=custom_call_platform,
+)
+
+def init_func():
+    flattened_out = _init_primitive.bind()
+    return {k: o for k, o in zip(step_outputs_iface['obs'].keys(), flattened_out)}
+
+
+def step_func(step_inputs):
     flattened_in = []
 
-    flattened_in.append(sim_data['actions'])
-    flattened_in.append(sim_data['resets'])
-    flattened_in.append(sim_data['rewards'])
-    flattened_in.append(sim_data['dones'])
+    flattened_in.append(step_inputs['actions'])
+    flattened_in.append(step_inputs['resets'])
 
-    if 'policy_assignments' in sim_iface_shapes:
-        flattened_in.append(sim_data['policy_assignments'])
+    for k in step_inputs_iface['pbt'].keys():
+        flattened_in.append(step_inputs['pbt'][k])
 
-    for k in sim_iface_shapes['obs'].keys():
-        flattened_in.append(sim_data['obs'][k])
-
-    for k in sim_iface_shapes['stats'].keys():
-        flattened_in.append(sim_data['stats'][k])
-
-    flattened_out = _primitive.bind(*flattened_in)
+    flattened_out = _step_primitive.bind(*flattened_in)
 
     out = {}
 
@@ -82,24 +136,20 @@ def step_func(sim_data):
         cur_idx += 1
         return o
 
-    out['actions'] = next_out()
-    out['resets'] = next_out()
+    out['obs'] = {}
+    for k in step_outputs_iface['obs'].keys():
+        out['obs'][k] = next_out()
+
     out['rewards'] = next_out()
     out['dones'] = next_out()
 
-    if 'policy_assignments' in sim_iface_shapes:
-        out['policy_assignments'] = next_out()
-
-    out['obs'] = {}
-    for k in sim_iface_shapes['obs'].keys():
-        out['obs'][k] = next_out()
-
-    out['stats'] = {}
-    for k in sim_iface_shapes['stats'].keys():
-        out['stats'][k] = next_out()
+    out['pbt'] = {}
+    for k in step_outputs_iface['pbt'].keys():
+        out['pbt'][k] = next_out()
 
     return out
 
-step_func = jax.jit(step_func, donate_argnums=0)
+init_func = jax.jit(init_func)
+step_func = jax.jit(step_func)
 
 #)==="

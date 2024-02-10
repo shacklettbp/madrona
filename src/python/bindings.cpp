@@ -7,32 +7,49 @@ namespace nb = nanobind;
 
 namespace madrona::py {
 
-static nb::dlpack::dtype toDLPackType(Tensor::ElementType type)
+namespace {
+
+struct JAXModule {
+    nb::object mod;
+    nb::object typeU8;
+    nb::object typeI8;
+    nb::object typeI16;
+    nb::object typeI32;
+    nb::object typeI64;
+    nb::object typeF16;
+    nb::object typeF32;
+    nb::object typeShapeDtypeStruct;
+
+    static inline JAXModule imp();
+    inline nb::object getDType(TensorElementType type) const;
+};
+
+nb::dlpack::dtype toDLPackType(TensorElementType type)
 {
     switch (type) {
-        case Tensor::ElementType::UInt8:
+        case TensorElementType::UInt8:
             return nb::dtype<uint8_t>();
-        case Tensor::ElementType::Int8:
+        case TensorElementType::Int8:
             return nb::dtype<int8_t>();
-        case Tensor::ElementType::Int16:
+        case TensorElementType::Int16:
             return nb::dtype<int16_t>();
-        case Tensor::ElementType::Int32:
+        case TensorElementType::Int32:
             return nb::dtype<int32_t>();
-        case Tensor::ElementType::Int64:
+        case TensorElementType::Int64:
             return nb::dtype<int64_t>();
-        case Tensor::ElementType::Float16:
+        case TensorElementType::Float16:
             return nb::dlpack::dtype {
                 static_cast<uint8_t>(nb::dlpack::dtype_code::Float),
                 sizeof(int16_t) * 8,
                 1,
             };
-        case Tensor::ElementType::Float32:
+        case TensorElementType::Float32:
             return nb::dtype<float>();
         default: MADRONA_UNREACHABLE();
     }
 }
 
-static auto tensor_to_pytorch(const Tensor &tensor)
+auto tensor_to_pytorch(const Tensor &tensor)
 {
     nb::dlpack::dtype type = toDLPackType(tensor.type());
 
@@ -50,7 +67,7 @@ static auto tensor_to_pytorch(const Tensor &tensor)
     };
 }
 
-static auto tensor_to_jax(const Tensor &tensor)
+auto tensor_to_jax(const Tensor &tensor)
 {
     nb::dlpack::dtype type = toDLPackType(tensor.type());
 
@@ -68,98 +85,157 @@ static auto tensor_to_jax(const Tensor &tensor)
     };
 }
 
-static nb::dict train_interface_to_pytree(const TrainInterface &iface)
+JAXModule JAXModule::imp()
 {
+    nb::object mod = nb::module_::import_("jax");
+    nb::object jnp = mod.attr("numpy");
+
+    nb::object type_u8 = jnp.attr("uint8");
+    nb::object type_i8 = jnp.attr("int8");
+    nb::object type_i16 = jnp.attr("int16");
+    nb::object type_i32 = jnp.attr("int32");
+    nb::object type_i64 = jnp.attr("int64");
+    nb::object type_f16 = jnp.attr("float16");
+    nb::object type_f32 = jnp.attr("float32");
+
+    nb::object type_shapedtype = mod.attr("ShapeDtypeStruct");
+
+    return JAXModule {
+        .mod = mod,
+        .typeU8 = type_u8,
+        .typeI8 = type_i8,
+        .typeI16 = type_i16,
+        .typeI32 = type_i32,
+        .typeI64 = type_i64,
+        .typeF16 = type_f16,
+        .typeF32 = type_f32,
+        .typeShapeDtypeStruct = type_shapedtype,
+    };
+}
+
+nb::object JAXModule::getDType(TensorElementType type) const
+{
+    switch (type) {
+        case TensorElementType::UInt8:
+            return typeU8;
+        case TensorElementType::Int8:
+            return typeI8;
+        case TensorElementType::Int16:
+            return typeI16;
+        case TensorElementType::Int32:
+            return typeI32;
+        case TensorElementType::Int64:
+            return typeI64;
+        case TensorElementType::Float16:
+            return typeF16;
+        case TensorElementType::Float32:
+            return typeF32;
+        default: MADRONA_UNREACHABLE();
+    }
+}
+
+nb::object tensor_iface_to_jax(
+    const JAXModule &jax_mod,
+    TensorInterface iface)
+{
+    nb::list shape;
+
+    for (int64_t d : iface.dimensions) {
+        shape.append(d);
+    }
+
+    return jax_mod.typeShapeDtypeStruct(
+        nb::arg("dtype") = jax_mod.getDType(iface.type),
+        nb::arg("shape") = shape);
+}
+
+nb::dict train_interface_inputs_to_pytree(
+    const JAXModule &jax_mod,
+    const TrainInterface &iface)
+{
+    const TrainStepInputInterface &inputs = iface.stepInputs();
+
     nb::dict d;
 
-    d["actions"] = tensor_to_jax(iface.actions());
-    d["resets"] = tensor_to_jax(iface.resets());
+    d["actions"] = tensor_iface_to_jax(jax_mod, inputs.actions);
+    d["resets"] = tensor_iface_to_jax(jax_mod, inputs.resets);
 
-    d["rewards"] = tensor_to_jax(iface.rewards());
-    d["dones"] = tensor_to_jax(iface.dones());
-
-    auto policy_assignments = iface.policyAssignments();
-    if (policy_assignments.has_value()) {
-        d["policy_assignments"] = tensor_to_jax(*policy_assignments);
-    }
-    
-    Span<const TrainInterface::NamedTensor> src_obs = iface.observations();
-    Span<const TrainInterface::NamedTensor> src_stats = iface.stats();
-
-    nb::dict obs;
-    for (const TrainInterface::NamedTensor &t : src_obs) {
-        obs[t.name] = tensor_to_jax(t.hdl);
+    nb::dict pbt;
+    for (const NamedTensorInterface &t : inputs.pbt) {
+        pbt[t.name] = tensor_iface_to_jax(jax_mod, t.interface);
     }
 
-    nb::dict stats;
-    for (const TrainInterface::NamedTensor &t : src_stats) {
-        stats[t.name] = tensor_to_jax(t.hdl);
-    }
-    
-    d["obs"] = obs;
-    d["stats"] = stats;
+    d["pbt"] = pbt;
     
     return d;
+}
+
+nb::dict train_interface_outputs_to_pytree(
+    const JAXModule &jax_mod,
+    const TrainInterface &iface)
+{
+    const TrainStepOutputInterface &outputs = iface.stepOutputs();
+
+    nb::dict d;
+
+    nb::dict obs;
+    for (const NamedTensorInterface &t : outputs.observations) {
+        obs[t.name] = tensor_iface_to_jax(jax_mod, t.interface);
+    }
+
+    d["obs"] = obs;
+
+    d["rewards"] = tensor_iface_to_jax(jax_mod, outputs.rewards);
+    d["dones"] = tensor_iface_to_jax(jax_mod, outputs.dones);
+
+    nb::dict pbt;
+    for (const NamedTensorInterface &t : outputs.pbt) {
+        pbt[t.name] = tensor_iface_to_jax(jax_mod, t.interface);
+    }
+
+    d["pbt"] = pbt;
+
+    return d;
+}
+
 }
 
 nb::object JAXInterface::setup(const TrainInterface &iface,
                                nb::object sim_obj,
                                void *sim_ptr,
-                               void *fn,
+                               void *init_fn,
+                               void *step_fn,
                                bool xla_gpu)
 {
-    nb::capsule fn_capsule(fn, "xla._CUSTOM_CALL_TARGET");
+    JAXModule jax_mod = JAXModule::imp();
+
+    nb::capsule init_fn_capsule(init_fn, "xla._CUSTOM_CALL_TARGET");
+    nb::capsule step_fn_capsule(step_fn, "xla._CUSTOM_CALL_TARGET");
 
     auto sim_encode = nb::bytes((char *)&sim_ptr, sizeof(char *));
 
-    auto tensor_to_shape = [](nb::object o) {
-        return o.attr("shape");
-    };
-
-    nb::dict iface_dict = train_interface_to_pytree(iface);
-    nb::dict iface_shapes;
-    iface_shapes["actions"] = tensor_to_shape(iface_dict["actions"]);
-    iface_shapes["resets"] = tensor_to_shape(iface_dict["resets"]);
-    iface_shapes["rewards"] = tensor_to_shape(iface_dict["rewards"]);
-    iface_shapes["dones"] = tensor_to_shape(iface_dict["dones"]);
-
-    if (iface_dict.contains("policy_assignments")) {
-        iface_shapes["policy_assignments"] = tensor_to_shape(
-            iface_dict["policy_assignments"]);
-    }
-
-    nb::dict obs_shapes;
-    for (const auto &k : iface_dict["obs"]) {
-        obs_shapes[k] = tensor_to_shape(iface_dict["obs"][k]);
-    }
-
-    iface_shapes["obs"] = obs_shapes;
-
-    nb::dict stats_shapes;
-    for (const auto &k : iface_dict["stats"]) {
-        stats_shapes[k] = tensor_to_shape(iface_dict["stats"][k]);
-    }
-
-    iface_shapes["stats"] = stats_shapes;
+    nb::dict input_iface = train_interface_inputs_to_pytree(jax_mod, iface);
+    nb::dict output_iface = train_interface_outputs_to_pytree(jax_mod, iface);
 
     nb::dict scope;
     scope["sim_obj"] = sim_obj;
     scope["sim_encode"] = sim_encode;
-    scope["sim_iface_shapes"] = iface_shapes;
-    scope["custom_call_capsule"] = fn_capsule;
+    scope["step_inputs_iface"] = input_iface;
+    scope["step_outputs_iface"] = output_iface;
+    scope["init_custom_call_capsule"] = init_fn_capsule;
+    scope["step_custom_call_capsule"] = step_fn_capsule;
     scope["custom_call_platform"] = xla_gpu ? "gpu" : "cpu";
 
     nb::exec(
 #include "jax_register.py"
     , scope);
 
-    return nb::make_tuple(
-        scope["step_func"], iface_dict);
+    return nb::make_tuple(scope["init_func"], scope["step_func"]);
 }
 
-static Tensor::ElementType fromDLPackType(nb::dlpack::dtype dtype)
+static TensorElementType fromDLPackType(nb::dlpack::dtype dtype)
 {
-    using ET = Tensor::ElementType;
+    using ET = TensorElementType;
 
     if (nb::dlpack::dtype_code(dtype.code) == nb::dlpack::dtype_code::Int) {
         switch (dtype.bits) {
@@ -238,8 +314,14 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
 #endif
 
     nb::class_<TrainInterface>(m, "TrainInterface")
-        .def("to_pytree", train_interface_to_pytree,
-             nb::rv_policy::automatic_reference)
+        .def("step_inputs", [](const TrainInterface &iface) {
+            return train_interface_inputs_to_pytree(
+                JAXModule::imp(), iface);
+        })
+        .def("step_outputs", [](const TrainInterface &iface) {
+            return train_interface_outputs_to_pytree(
+                JAXModule::imp(), iface);
+        })
     ;
 }
 

@@ -55,19 +55,63 @@ private:
     ExecMode v_;
 };
 
+enum class TensorElementType {
+    UInt8,
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Float16,
+    Float32,
+};
+
+struct TensorInterface {
+    TensorElementType type;
+    Span<const int64_t> dimensions;
+};
+
+struct NamedTensorInterface {
+    const char *name;
+    TensorInterface interface;
+};
+
+struct TrainStepInputInterface {
+    TensorInterface actions;
+    TensorInterface resets;
+    Span<const NamedTensorInterface> pbt = {};
+};
+
+struct TrainStepOutputInterface {
+    Span<const NamedTensorInterface> observations;
+    TensorInterface rewards;
+    TensorInterface dones;
+    Span<const NamedTensorInterface> stats = {};
+    Span<const NamedTensorInterface> pbt = {};
+};
+
+class TrainInterface {
+public:
+    TrainInterface(TrainStepInputInterface step_inputs,
+                   TrainStepOutputInterface step_outputs);
+    TrainInterface(TrainInterface &&o);
+    ~TrainInterface();
+
+    TrainStepInputInterface stepInputs() const;
+    TrainStepOutputInterface stepOutputs() const;
+
+private:
+    struct Impl;
+
+#ifdef MADRONA_LINUX
+    virtual void key_();
+#endif
+
+    std::unique_ptr<Impl> impl_;
+};
+
 class Tensor final {
 public:
     static inline constexpr int64_t maxDimensions = 16;
-
-    enum class ElementType {
-        UInt8,
-        Int8,
-        Int16,
-        Int32,
-        Int64,
-        Float16,
-        Float32,
-    };
 
     class Printer {
     public:
@@ -80,20 +124,20 @@ public:
     private:
         inline Printer(void *dev_ptr,
                        void *print_ptr,
-                       ElementType type,
+                       TensorElementType type,
                        int64_t num_items,
                        int64_t num_bytes_per_item);
 
         void *dev_ptr_;
         void *print_ptr_;
-        ElementType type_;
+        TensorElementType type_;
         int64_t num_items_;
         int64_t num_bytes_per_item_;
 
     friend class Tensor;
     };
 
-    Tensor(void *dev_ptr, ElementType type,
+    Tensor(void *dev_ptr, TensorElementType type,
            Span<const int64_t> dimensions,
            Optional<int> gpu_id);
 
@@ -101,12 +145,14 @@ public:
     Tensor & operator=(const Tensor &o);
     
     inline void * devicePtr() const { return dev_ptr_; }
-    inline ElementType type() const { return type_; }
+    inline TensorElementType type() const { return type_; }
     inline bool isOnGPU() const { return gpu_id_ != -1; }
     inline int gpuID() const { return gpu_id_; }
     inline int64_t numDims() const { return num_dimensions_; }
     inline const int64_t *dims() const { return dimensions_.data(); }
     int64_t numBytesPerItem() const;
+
+    TensorInterface interface() const;
 
     Printer makePrinter() const;
 private:
@@ -115,46 +161,11 @@ private:
 #endif
 
     void *dev_ptr_;
-    ElementType type_;
+    TensorElementType type_;
     int gpu_id_;
 
     int64_t num_dimensions_;
     std::array<int64_t, maxDimensions> dimensions_;
-};
-
-class TrainInterface {
-public:
-    struct NamedTensor {
-        const char *name;
-        Tensor hdl;
-    };
-
-    TrainInterface(Span<const NamedTensor> obs,
-                   Tensor actions,
-                   Tensor rewards,
-                   Tensor dones,
-                   Tensor resets,
-                   Optional<Tensor> policy_assignments,
-                   Span<const NamedTensor> stats = {});
-    TrainInterface(TrainInterface &&o);
-    ~TrainInterface();
-
-    Span<const NamedTensor> observations() const;
-    Tensor actions() const;
-    Tensor rewards() const;
-    Tensor dones() const;
-    Tensor resets() const;
-    Optional<Tensor> policyAssignments() const;
-    Span<const NamedTensor> stats() const;
-
-private:
-    struct Impl;
-
-#ifdef MADRONA_LINUX
-    virtual void key_();
-#endif
-
-    std::unique_ptr<Impl> impl_;
 };
 
 }

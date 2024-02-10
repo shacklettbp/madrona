@@ -21,23 +21,28 @@ public:
     // Returns a function that registers custom_call_name with XLA
     // to call step_fn (or async_step_fn in GPU mode) and returns
     // the python function implementing the custom call.
-    template <auto iface_fn, auto cpu_step_fn, auto gpu_step_fn = nullptr>
+    template <auto iface_fn,
+              auto cpu_init_fn,
+              auto cpu_step_fn,
+              auto gpu_init_fn = nullptr,
+              auto gpu_step_fn = nullptr>
     static auto buildEntry();
 
 private:
-    template <typename SimT, auto cpu_step_fn>
-    static void cpuStepFn(void *out, void **in);
+    template <typename SimT, auto fn>
+    static void cpuEntryFn(void *out, void **in);
 
 #ifdef MADRONA_CUDA_SUPPORT
-    template <typename SimT, auto gpu_step_fn>
-    static void gpuStepFn(cudaStream_t strm, void **buffers,
-                          const char *opaque, size_t opaque_len);
+    template <typename SimT, auto fn>
+    static void gpuEntryFn(cudaStream_t strm, void **buffers,
+                           const char *opaque, size_t opaque_len);
 #endif
 
     static nb::object setup(const TrainInterface &iface,
                             nb::object sim_obj,
                             void *sim_ptr,
-                            void *fn,
+                            void *init_fn,
+                            void *step_fn,
                             bool xla_gpu);
 };
 

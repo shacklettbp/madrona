@@ -31,6 +31,153 @@ void CudaSync::key_() {}
 #endif
 #endif
 
+struct TrainInterface::Impl {
+    HeapArray<char> nameBuffer;
+    HeapArray<int64_t> dimsBuffer;
+    HeapArray<NamedTensorInterface> namedInterfaces;
+
+    TrainStepInputInterface inputs;
+    TrainStepOutputInterface outputs;
+
+    static inline Impl * init(TrainStepInputInterface inputs,
+                              TrainStepOutputInterface outputs);
+};
+
+TrainInterface::Impl * TrainInterface::Impl::init(
+    TrainStepInputInterface inputs,
+    TrainStepOutputInterface outputs)
+{
+    CountT num_total_name_chars = 0;
+    CountT num_total_dims = 0;
+    CountT num_total_interfaces = 0;
+
+    auto sumStorageRequirements = [
+        &num_total_dims, &num_total_name_chars, &num_total_interfaces
+    ](Span<const NamedTensorInterface> tensors)
+    {
+        for (NamedTensorInterface named_iface : tensors) {
+            num_total_name_chars += strlen(named_iface.name) + 1;
+            num_total_dims += named_iface.interface.dimensions.size();
+        }
+
+        num_total_interfaces += tensors.size();
+    };
+
+    num_total_dims += inputs.actions.dimensions.size();
+    num_total_dims += inputs.resets.dimensions.size();
+    sumStorageRequirements(inputs.pbt);
+
+    sumStorageRequirements(outputs.observations);
+    num_total_dims += outputs.rewards.dimensions.size();
+    num_total_dims += outputs.dones.dimensions.size();
+    sumStorageRequirements(outputs.stats);
+    sumStorageRequirements(outputs.pbt);
+
+    HeapArray<char> name_buffer(num_total_name_chars);
+    HeapArray<int64_t> dims_buffer(num_total_dims);
+    HeapArray<NamedTensorInterface> named_interfaces(num_total_interfaces);
+
+    char *cur_name_ptr = name_buffer.data();
+    int64_t *cur_dims_ptr = dims_buffer.data();
+    NamedTensorInterface *cur_iface_ptr = named_interfaces.data();
+
+    auto makeOwnedName = [
+        &cur_name_ptr
+    ](const char *in_name)
+    {
+        char *out_name = cur_name_ptr;
+
+        size_t name_len = strlen(in_name) + 1;
+        memcpy(out_name, in_name, name_len);
+        cur_name_ptr += name_len;
+
+        return out_name;
+    };
+
+    auto makeOwnedDims = [
+        &cur_dims_ptr
+    ](Span<const int64_t> in_dims)
+    {
+        Span out_dims(cur_dims_ptr, in_dims.size());
+
+        utils::copyN<int64_t>(cur_dims_ptr, in_dims.data(), in_dims.size());
+        cur_dims_ptr += in_dims.size();
+
+        return out_dims;
+    };
+
+    auto makeOwnedInterface = [
+        &makeOwnedDims
+    ](TensorInterface in_iface)
+    {
+        return TensorInterface {
+            .type = in_iface.type,
+            .dimensions = makeOwnedDims(in_iface.dimensions),
+        };
+    };
+
+    auto makeOwnedNamedInterfaces = [
+        &makeOwnedName, &makeOwnedInterface, &cur_iface_ptr
+    ](Span<const NamedTensorInterface> inputs)
+    {
+        NamedTensorInterface *out_start = cur_iface_ptr;
+
+        for (NamedTensorInterface named_in : inputs) {
+            *(cur_iface_ptr++) = {
+                .name = makeOwnedName(named_in.name),
+                .interface = makeOwnedInterface(named_in.interface),
+            };
+        }
+
+        return Span<const NamedTensorInterface>(out_start, inputs.size());
+    };
+
+    TrainStepInputInterface owned_inputs {
+        .actions = makeOwnedInterface(inputs.actions),
+        .resets = makeOwnedInterface(inputs.resets),
+        .pbt = makeOwnedNamedInterfaces(inputs.pbt),
+    };
+
+    TrainStepOutputInterface owned_outputs {
+        .observations = makeOwnedNamedInterfaces(outputs.observations),
+        .rewards = makeOwnedInterface(outputs.rewards),
+        .dones = makeOwnedInterface(outputs.dones),
+        .stats = makeOwnedNamedInterfaces(outputs.stats),
+        .pbt = makeOwnedNamedInterfaces(outputs.pbt),
+    };
+
+    assert(cur_name_ptr == name_buffer.data() + name_buffer.size());
+    assert(cur_dims_ptr == dims_buffer.data() + dims_buffer.size());
+    assert(cur_iface_ptr == named_interfaces.data() + named_interfaces.size());
+
+    return new Impl {
+        .nameBuffer = std::move(name_buffer),
+        .dimsBuffer = std::move(dims_buffer),
+        .namedInterfaces = std::move(named_interfaces),
+        .inputs = owned_inputs,
+        .outputs = owned_outputs,
+    };
+}
+
+TrainInterface::TrainInterface(
+        TrainStepInputInterface step_inputs,
+        TrainStepOutputInterface step_outputs)
+    : impl_(Impl::init(step_inputs, step_outputs))
+{}
+    
+TrainInterface::TrainInterface(TrainInterface &&) = default;
+TrainInterface::~TrainInterface() = default;
+
+TrainStepInputInterface TrainInterface::stepInputs() const
+{
+    return impl_->inputs;
+}
+
+TrainStepOutputInterface TrainInterface::stepOutputs() const
+{
+    return impl_->outputs;
+}
+
 Tensor::Printer::Printer(Printer &&o)
     : dev_ptr_(o.dev_ptr_),
       print_ptr_(o.print_ptr_)
@@ -67,10 +214,10 @@ void Tensor::Printer::print() const
 
     for (int64_t i = 0; i < num_items_; i++) {
         switch (type_) {
-        case ElementType::Int32: {
+        case TensorElementType::Int32: {
             printf("%d ", ((int32_t *)print_ptr)[i]);
         } break;
-        case ElementType::Float32: {
+        case TensorElementType::Float32: {
             printf("%.3f ", ((float *)print_ptr)[i]);
         } break;
         default: break;
@@ -82,7 +229,7 @@ void Tensor::Printer::print() const
 
 Tensor::Printer::Printer(void *dev_ptr,
                          void *print_ptr,
-                         ElementType type,
+                         TensorElementType type,
                          int64_t num_items,
                          int64_t num_bytes_per_item)
     : dev_ptr_(dev_ptr),
@@ -92,7 +239,7 @@ Tensor::Printer::Printer(void *dev_ptr,
       num_bytes_per_item_(num_bytes_per_item)
 {}
 
-Tensor::Tensor(void *dev_ptr, ElementType type,
+Tensor::Tensor(void *dev_ptr, TensorElementType type,
                               Span<const int64_t> dimensions,
                               Optional<int> gpu_id)
     : dev_ptr_(dev_ptr),
@@ -157,111 +304,23 @@ Tensor::Printer Tensor::makePrinter() const
 int64_t Tensor::numBytesPerItem() const
 {
     switch (type_) {
-        case ElementType::UInt8: return 1;
-        case ElementType::Int8: return 1;
-        case ElementType::Int16: return 2;
-        case ElementType::Int32: return 4;
-        case ElementType::Int64: return 8;
-        case ElementType::Float16: return 2;
-        case ElementType::Float32: return 4;
+        case TensorElementType::UInt8: return 1;
+        case TensorElementType::Int8: return 1;
+        case TensorElementType::Int16: return 2;
+        case TensorElementType::Int32: return 4;
+        case TensorElementType::Int64: return 8;
+        case TensorElementType::Float16: return 2;
+        case TensorElementType::Float32: return 4;
         default: return 0;
     }
 }
 
-struct TrainInterface::Impl {
-    HeapArray<NamedTensor> obs;
-    Tensor actions;
-    Tensor rewards;
-    Tensor dones;
-    Tensor resets;
-    Optional<Tensor> policyAssignments;
-
-    HeapArray<NamedTensor> stats;
-    HeapArray<std::string> nameStrings;
-};
-
-TrainInterface::TrainInterface(
-        Span<const NamedTensor> obs,
-        Tensor actions,
-        Tensor rewards,
-        Tensor dones,
-        Tensor resets,
-        Optional<Tensor> policy_assignments,
-        Span<const NamedTensor> stats)
-    : impl_(new Impl {
-        .obs = HeapArray<NamedTensor>(obs.size()),
-        .actions = actions,
-        .rewards = rewards,
-        .dones = dones,
-        .resets = resets,
-        .policyAssignments = policy_assignments,
-        .stats = HeapArray<NamedTensor>(stats.size()),
-        .nameStrings = HeapArray<std::string>(obs.size() + stats.size()),
-    })
+TensorInterface Tensor::interface() const
 {
-    const NamedTensor *src_obs = obs.data();
-    const NamedTensor *src_stats = stats.data();
-
-    CountT cur_str_idx = 0;
-    for (CountT i = 0; i < (CountT)obs.size(); i++) {
-        impl_->nameStrings.emplace(cur_str_idx, src_obs[i].name);
-        impl_->obs.emplace(i, NamedTensor {
-            impl_->nameStrings[cur_str_idx].c_str(),
-            src_obs[i].hdl,
-        });
-
-        cur_str_idx += 1;
-    }
-
-    for (CountT i = 0; i < (CountT)stats.size(); i++) {
-        impl_->nameStrings.emplace(cur_str_idx, src_stats[i].name);
-        impl_->stats.emplace(i, NamedTensor {
-            impl_->nameStrings[cur_str_idx].c_str(),
-            src_stats[i].hdl,
-        });
-
-        cur_str_idx += 1;
-    }
-}
-
-TrainInterface::TrainInterface(TrainInterface &&) = default;
-TrainInterface::~TrainInterface() = default;
-
-Span<const TrainInterface::NamedTensor> TrainInterface::observations() const
-{
-    return Span<const NamedTensor>(
-        impl_->obs.data(), impl_->obs.size());
-}
-
-Tensor TrainInterface::actions() const
-{
-    return impl_->actions;
-}
-
-Tensor TrainInterface::rewards() const
-{
-    return impl_->rewards;
-}
-
-Tensor TrainInterface::dones() const
-{
-    return impl_->dones;
-}
-
-Tensor TrainInterface::resets() const
-{
-    return impl_->resets;
-}
-
-Optional<Tensor> TrainInterface::policyAssignments() const
-{
-    return impl_->policyAssignments;
-}
-
-Span<const TrainInterface::NamedTensor> TrainInterface::stats() const
-{
-    return Span<const NamedTensor>(
-        impl_->stats.data(), impl_->stats.size());
+    return TensorInterface {
+        .type = type_,
+        .dimensions = Span<const int64_t>(dimensions_.data(), num_dimensions_),
+    };
 }
 
 #ifdef MADRONA_LINUX
