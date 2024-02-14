@@ -8,34 +8,26 @@ namespace madrona::phys {
 using namespace base;
 using namespace math;
 
-SolverData::SolverData(CountT max_contacts_per_step,
-                       CountT max_joint_constraints,
-                       float delta_t,
-                       CountT num_substeps,
-                       Vector3 gravity)
-    : contacts((Contact *)rawAlloc(
-          sizeof(Contact) * max_contacts_per_step)),
-      numContacts(0),
-      jointConstraints((JointConstraint *)rawAlloc(
-          sizeof(JointConstraint) * max_joint_constraints)),
-      numJointConstraints(0),
-      maxContacts(max_contacts_per_step),
-      deltaT(delta_t),
-      h(delta_t / (float)num_substeps),
-      g(gravity),
-      gMagnitude(gravity.length()),
-      restitutionThreshold(2.f * gMagnitude * h)
-{}
-
-inline void collectConstraintsSystem(Context &ctx,
-                                     JointConstraint &constraint)
-{
-    auto &solver = ctx.singleton<SolverData>();
-    solver.jointConstraints[
-        solver.numJointConstraints.fetch_add_relaxed(1)] = constraint;
-}
-
 namespace solver {
+
+static SolverData initSolverState(Context &ctx,
+                                  float delta_t,
+                                  CountT num_substeps,
+                                  Vector3 gravity)
+{
+    float h = delta_t / (float)num_substeps;
+    float g_mag = gravity.length();
+
+    return SolverData {
+        .deltaT = delta_t,
+        .h = h,
+        .g = gravity,
+        .gMagnitude = g_mag,
+        .restitutionThreshold = 2.f * g_mag * h,
+        .jointQuery = ctx.query<JointConstraint>(),
+        .contactQuery = ctx.query<ContactConstraint>(),
+    };
+}
 
 static inline bool hasNaN(Vector3 v)
 {
@@ -390,7 +382,7 @@ MADRONA_ALWAYS_INLINE static inline void handleContactConstraint(
 MADRONA_ALWAYS_INLINE static inline std::pair<Vector3, Vector3>
 getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
                       const PreSolvePositional &presolve_pos2,
-                      const Contact &contact,
+                      const ContactConstraint &contact,
                       CountT point_idx)
 {
     Vector3 contact1 = contact.points[point_idx].xyz();
@@ -411,7 +403,7 @@ getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
 // component for static objects.
 static inline void handleContact(Context &ctx,
                                  ObjectManager &obj_mgr,
-                                 Contact contact,
+                                 ContactConstraint contact,
                                  float *lambdas)
 {
     Position *x1_ptr = &ctx.getDirect<Position>(Cols::Position, contact.ref);
@@ -672,21 +664,13 @@ inline void solvePositions(Context &ctx, SolverData &solver)
 {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
-    CountT num_contacts = solver.numContacts.load_relaxed();
+    ctx.iterateQuery(solver.contactQuery, [&](ContactConstraint &contact) {
+        handleContact(ctx, obj_mgr, contact, contact.lambdaN);
+    });
 
-    for (CountT i = 0; i < num_contacts; i++) {
-        Contact contact = solver.contacts[i];
-        handleContact(ctx, obj_mgr, contact, solver.contacts[i].lambdaN);
-    }
-
-    CountT num_joint_constraints = solver.numJointConstraints.load_relaxed();
-
-    for (CountT i = 0; i < num_joint_constraints; i++) {
-        JointConstraint joint_constraint = solver.jointConstraints[i];
-        handleJointConstraint(ctx, joint_constraint);
-    }
-
-    solver.numJointConstraints.store_relaxed(0);
+    ctx.iterateQuery(solver.jointQuery, [&](JointConstraint joint) {
+        handleJointConstraint(ctx, joint);
+    });
 }
 
 inline void setVelocities(Context &ctx,
@@ -883,7 +867,7 @@ static inline void applyRestitutionVelocityUpdate(
 
 static inline void solveVelocitiesForContact(Context &ctx,
                                              ObjectManager &obj_mgr,
-                                             Contact contact,
+                                             ContactConstraint contact,
                                              float h,
                                              float restitution_threshold)
 {
@@ -1015,15 +999,10 @@ inline void solveVelocities(Context &ctx, SolverData &solver)
 {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
-    CountT num_contacts = solver.numContacts.load_relaxed();
-
-    for (CountT i = 0; i < num_contacts; i++) {
-        const Contact &contact = solver.contacts[i];
+    ctx.iterateQuery(solver.contactQuery, [&](ContactConstraint &contact) {
         solveVelocitiesForContact(ctx, obj_mgr, contact, solver.h,
                                   solver.restitutionThreshold);
-    }
-
-    solver.numContacts.store_relaxed(0);
+    });
 }
 
 }
@@ -1033,9 +1012,7 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
                                   float delta_t,
                                   CountT num_substeps,
                                   math::Vector3 gravity,
-                                  CountT max_dynamic_objects,
-                                  CountT max_contacts_per_world,
-                                  CountT max_joint_constraints_per_world)
+                                  CountT max_dynamic_objects)
 {
     broadphase::BVH &bvh = ctx.singleton<broadphase::BVH>();
 
@@ -1046,10 +1023,8 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
         obj_mgr, max_dynamic_objects, 2.f * delta_t,
         max_inst_accel * delta_t * delta_t);
 
-    SolverData &solver = ctx.singleton<SolverData>();
-    new (&solver) SolverData(max_contacts_per_world, 
-                             max_joint_constraints_per_world,
-                             delta_t, num_substeps, gravity);
+    ctx.singleton<SolverData>() = solver::initSolverState(
+        ctx, delta_t, num_substeps, gravity);
 
     ObjectData &objs = ctx.singleton<ObjectData>();
     new (&objs) ObjectData { obj_mgr };
@@ -1186,7 +1161,10 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     registry.registerArchetype<CandidateTemporary>();
 
     registry.registerComponent<JointConstraint>();
-    registry.registerArchetype<ConstraintData>();
+    registry.registerArchetype<Joint>();
+
+    registry.registerComponent<ContactConstraint>();
+    registry.registerArchetype<Contact>();
 
     registry.registerSingleton<SolverData>();
     registry.registerSingleton<ObjectData>();
@@ -1259,6 +1237,21 @@ TaskGraphNodeID RigidBodyPhysicsSystem::setupBroadphaseTasks(
     return broadphase::setupBVHTasks(builder, deps);
 }
 
+#ifdef MADRONA_GPU_MODE
+template <typename ArchetypeT>
+TaskGraph::NodeID queueSortByWorld(TaskGraph::Builder &builder,
+                                   Span<const TaskGraph::NodeID> deps)
+{
+    auto sort_sys =
+        builder.addToGraph<SortArchetypeNode<ArchetypeT, WorldID>>(
+                deps);
+    auto post_sort_reset_tmp =
+        builder.addToGraph<ResetTmpAllocNode>({sort_sys});
+
+    return post_sort_reset_tmp;
+}
+#endif
+
 TaskGraphNodeID RigidBodyPhysicsSystem::setupSubstepTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps,
@@ -1268,11 +1261,11 @@ TaskGraphNodeID RigidBodyPhysicsSystem::setupSubstepTasks(
         broadphase::setupPreIntegrationTasks(builder, deps);
 
     auto cur_node = broadphase_pre;
-    for (CountT i = 0; i < num_substeps; i++) {
-        // FIXME, Should only need to collect these once per frame
-        auto collect_constraints = builder.addToGraph<ParallelForNode<Context,
-            collectConstraintsSystem, JointConstraint>>({cur_node});
+#ifdef MADRONA_GPU_MODE
+    cur_node = queueSortByWorld<Joint>(builder, {cur_node});
+#endif
 
+    for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             solver::substepRigidBodies, Position, Rotation, Velocity, ObjectID,
             ResponseType, ExternalForce, ExternalTorque,
@@ -1281,9 +1274,14 @@ TaskGraphNodeID RigidBodyPhysicsSystem::setupSubstepTasks(
 
         auto run_narrowphase = narrowphase::setupTasks(builder, {rgb_update});
 
+#ifdef MADRONA_GPU_MODE
+        run_narrowphase = queueSortByWorld<Contact>(
+            builder, {run_narrowphase});
+#endif
+
         auto solve_pos = builder.addToGraph<ParallelForNode<Context,
             solver::solvePositions, SolverData>>(
-                {run_narrowphase, collect_constraints});
+                {run_narrowphase});
 
         auto vel_set = builder.addToGraph<ParallelForNode<Context,
             solver::setVelocities, Position, Rotation,
@@ -1292,7 +1290,10 @@ TaskGraphNodeID RigidBodyPhysicsSystem::setupSubstepTasks(
         auto solve_vel = builder.addToGraph<ParallelForNode<Context,
             solver::solveVelocities, SolverData>>({vel_set});
 
-        cur_node = builder.addToGraph<ResetTmpAllocNode>({solve_vel});
+        auto clear_contacts = builder.addToGraph<
+            ClearTmpNode<Contact>>({solve_vel});
+            
+        cur_node = builder.addToGraph<ResetTmpAllocNode>({clear_contacts});
 
 #if 0
         cur_node = builder.addToGraph<ParallelForNode<Context,

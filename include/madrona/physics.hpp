@@ -80,7 +80,7 @@ struct CandidateCollision {
 
 struct CandidateTemporary : Archetype<CandidateCollision> {};
 
-struct Contact {
+struct ContactConstraint {
     Loc ref;
     Loc alt;
     math::Vector4 points[4];
@@ -88,6 +88,8 @@ struct Contact {
     math::Vector3 normal;
     float lambdaN[4];
 };
+
+struct Contact : Archetype<ContactConstraint> {};
 
 struct CollisionEventTemporary : Archetype<CollisionEvent> {};
 
@@ -122,20 +124,22 @@ struct JointConstraint {
     math::Vector3 r1;
     math::Vector3 r2;
 
-    static inline JointConstraint setupFixed(
+    static inline Entity setupFixed(
+        Context &ctx,
         Entity e1, Entity e2,
         math::Quat attach_rot1, math::Quat attach_rot2,
         math::Vector3 r1, math::Vector3 r2,
         float separation);
 
-    static inline JointConstraint setupHinge(
+    static inline Entity setupHinge(
+        Context &ctx,
         Entity e1, Entity e2,
         math::Vector3 a1_local, math::Vector3 a2_local,
         math::Vector3 b1_local, math::Vector3 b2_local,
         math::Vector3 r1, math::Vector3 r2);
 };
 
-struct ConstraintData : Archetype<JointConstraint> {};
+struct Joint : Archetype<JointConstraint> {};
 
 // Per object state
 struct RigidBodyMassData {
@@ -326,9 +330,7 @@ struct RigidBodyPhysicsSystem {
                      float delta_t,
                      CountT num_substeps,
                      math::Vector3 gravity,
-                     CountT max_dynamic_objects,
-                     CountT max_contacts_per_world,
-                     CountT max_joint_constraints_per_world);
+                     CountT max_dynamic_objects);
 
     static void reset(Context &ctx);
     static broadphase::LeafID registerEntity(Context &ctx,

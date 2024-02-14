@@ -148,13 +148,16 @@ void BVH::Node::clearChild(CountT child)
 
 }
 
-JointConstraint JointConstraint::setupFixed(
+Entity JointConstraint::setupFixed(
+    Context &ctx,
     Entity e1, Entity e2,
     math::Quat attach_rot1, math::Quat attach_rot2,
     math::Vector3 r1, math::Vector3 r2,
     float separation)
 {
-    return JointConstraint {
+    Entity e = ctx.makeEntity<Joint>();
+
+    ctx.get<JointConstraint>(e) = {
         .e1 = e1,
         .e2 = e2,
         .type = JointConstraint::Type::Fixed,
@@ -166,15 +169,20 @@ JointConstraint JointConstraint::setupFixed(
         .r1 = r1,
         .r2 = r2,
     };
+
+    return e;
 }
 
-JointConstraint JointConstraint::setupHinge(
+Entity JointConstraint::setupHinge(
+    Context &ctx,
     Entity e1, Entity e2,
     math::Vector3 a1_local, math::Vector3 a2_local,
     math::Vector3 b1_local, math::Vector3 b2_local,
     math::Vector3 r1, math::Vector3 r2)
 {
-    return JointConstraint {
+    Entity e = ctx.makeEntity<Joint>();
+
+    ctx.get<JointConstraint>(e) = {
         .e1 = e1,
         .e2 = e2,
         .type = JointConstraint::Type::Hinge,
@@ -187,6 +195,8 @@ JointConstraint JointConstraint::setupHinge(
         .r1 = r1,
         .r2 = r2,
     };
+
+    return e;
 }
 
 template <typename Fn>

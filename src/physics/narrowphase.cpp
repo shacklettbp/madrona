@@ -1120,29 +1120,15 @@ static Manifold createEdgeContact(Vector3 normal,
                              world_offset, to_world_frame);
 }
 
-static inline void addContactsToSolver(
-    SolverData &solver_data,
-    Span<const Contact> added_contacts)
-{
-    int32_t contact_idx = solver_data.numContacts.fetch_add_relaxed(
-        added_contacts.size());
-
-    assert(contact_idx < solver_data.maxContacts);
-    
-    for (CountT i = 0; i < added_contacts.size(); i++) {
-        solver_data.contacts[contact_idx + i] = added_contacts[i];
-    }
-}
-
-static inline void addManifoldToSolver(
-    SolverData &solver_data,
+static inline void addManifoldContacts(
+    Context &ctx,
     Manifold manifold,
     Loc ref_loc, Loc other_loc)
 {
     PROF_START(save_contacts_ctr, narrowphaseSaveContactsClocks);
 
-    addContactsToSolver(
-        solver_data, {{
+    Loc c = ctx.makeTemporary<Contact>();
+    ctx.get<ContactConstraint>(c) = {
         ref_loc,
         other_loc,
         {
@@ -1158,7 +1144,7 @@ static inline void addManifoldToSolver(
         manifold.numContactPoints,
         manifold.normal,
         {},
-    }});
+    };
 }
 
 #ifdef MADRONA_GPU_MODE
@@ -1369,7 +1355,7 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
 }
 
 MADRONA_ALWAYS_INLINE static inline void generateContacts(
-    SolverData &solver,
+    Context &ctx,
     NarrowphaseResult narrowphase_result,
     Loc a_loc, Loc b_loc,
 #ifdef MADRONA_GPU_MODE
@@ -1513,7 +1499,7 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
     }
 
     if (manifold.numContactPoints > 0) {
-        addManifoldToSolver(solver, manifold, ref_loc, other_loc);
+        addManifoldContacts(ctx, manifold, ref_loc, other_loc);
     }
 }
 
@@ -1718,10 +1704,9 @@ static inline void runNarrowphase(
 
     __syncwarp(mwGPU::allActive);
 
-    SolverData &solver = ctx.singleton<SolverData>();
-
     if (lane_active) {
-        generateContacts(solver, thread_result, a_loc, b_loc,
+        generateContacts(ctx, thread_result,
+                         a_loc, b_loc,
                          a_pos, a_rot, a_scale,
                          b_pos, b_rot, b_scale,
                          tmp_faces_buffer,
@@ -1737,9 +1722,8 @@ static inline void runNarrowphase(
         max_num_tmp_vertices, max_num_tmp_faces,
         tmp_vertices_buffer, tmp_faces_buffer);
 
-    SolverData &solver = ctx.singleton<SolverData>();
-
-    generateContacts(solver, result, a_loc, b_loc,
+    generateContacts(ctx, result,
+                     a_loc, b_loc,
                      tmp_faces_buffer,
                      tmp_faces_buffer + max_num_tmp_faces / 2);
 #endif

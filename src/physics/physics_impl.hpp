@@ -5,24 +5,14 @@
 namespace madrona::phys {
 
 struct SolverData {
-    Contact *contacts;
-    AtomicCount numContacts;
-
-    JointConstraint *jointConstraints;
-    AtomicCount numJointConstraints;
-
-    CountT maxContacts;
     float deltaT;
     float h;
     math::Vector3 g;
     float gMagnitude;
     float restitutionThreshold;
 
-    inline SolverData(CountT max_contacts_per_step,
-                      CountT max_joint_constraints,
-                      float delta_t,
-                      CountT num_substeps,
-                      math::Vector3 gravity);
+    Query<JointConstraint> jointQuery;
+    Query<ContactConstraint> contactQuery;
 };
 
 namespace broadphase {
