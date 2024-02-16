@@ -290,6 +290,11 @@ struct MegakernelConfig {
     uint32_t numSMs;
 };
 
+struct BVHKernels {
+    CUmodule mod;
+    CUfunction mortonCodes;
+};
+
 struct GPUKernels {
     CUmodule mod;
     HeapArray<CUfunction> megakernels;
@@ -898,6 +903,52 @@ static __attribute__((always_inline)) inline void dispatch(
         .initWorldsName = std::move(init_worlds_name),
         .initTasksName = std::move(init_tasks_name),
     };
+}
+
+// We still want to have the same compiler flags as passed to the megakernel
+static BVHKernels buildBVHKernels(const CompileConfig &cfg,
+                                  int32_t num_sms,
+                                  int32_t num_blocks_per_sm,
+                                  std::pair<int, int> cuda_arch)
+{
+    using namespace std;
+
+    array bvh_srcs = {
+        MADRONA_MW_GPU_BVH_INTERNAL_CPP
+    };
+
+    std::cout << "Compiling " << MADRONA_MW_GPU_BVH_INTERNAL_CPP << std::endl;
+
+    // Build architecture string for this GPU
+    string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
+        to_string(cuda_arch.second);
+
+    string num_sms_str =
+        "-DMADRONA_MWGPU_NUM_SMS=(" + to_string(num_sms) + ")";
+
+    string max_blocks_str = "-DMADRONA_MWGPU_MAX_BLOCKS_PER_SM=(" +
+        to_string(max_megakernel_blocks_per_sm) + ")";
+
+    DynArray<const char *> common_compile_flags {
+        MADRONA_NVRTC_OPTIONS
+        "-arch", gpu_arch_str.c_str(),
+        num_sms_str.c_str(),
+        max_blocks_str.c_str(),
+#ifdef MADRONA_TRACING
+        "-DMADRONA_TRACING=1",
+#endif
+    };
+
+    for (const char *user_flag : cfg.userCompileFlags) {
+        common_compile_flags.push_back(user_flag);
+    }
+
+    DynArray<const char *> fast_compile_flags(common_compile_flags.size());
+    for (const char *flag : common_compile_flags) {
+        fast_compile_flags.push_back(flag);
+    }
+
+    DynArray<const char *> compile_flags = std::move(common_compile_flags);
 }
 
 static GPUKernels buildKernels(const CompileConfig &cfg,
