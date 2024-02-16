@@ -966,14 +966,14 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     CUmodule mod;
     REQ_CU(cuModuleLoadData(&mod, cubin_data));
 
-    CUfunction morton_codes_func;
-    REQ_CU(cuModuleGetFunction(&morton_codes_func, mod,
-                               "bvhMortonCodes"));
+    CUfunction bvh_entry;
+    REQ_CU(cuModuleGetFunction(&bvh_entry, mod,
+                               "bvhEntry"));
 
     BVHKernels bvh_kernels = {
-        .numSMs = num_sms,
+        .numSMs = (uint32_t)num_sms,
         .mod = mod,
-        .mortonCodes = morton_codes_func
+        .mortonCodes = bvh_entry
     };
 
     return bvh_kernels;
@@ -1795,6 +1795,7 @@ static CUgraphExec makeTaskGraphRunGraph(
     { // Add the bvh kernel node
         CUDA_KERNEL_NODE_PARAMS bvh_morton_params = {
             .func = bvh_kernels.mortonCodes,
+            // We want to max-out the GPU for all the BVH kernels
             .gridDimX = bvh_kernels.numSMs * 16,
             .gridDimY = 1,
             .gridDimZ = 1,
@@ -1807,7 +1808,9 @@ static CUgraphExec makeTaskGraphRunGraph(
         };
 
         CUgraphNode morton_code_node;
-        REQ_CU();
+        REQ_CU(cuGraphAddKernelNode(&morton_code_node, run_graph,
+                                    &megakernel_launches.back(), 1, 
+                                    &bvh_morton_params));
     }
 
     CUgraphExec run_graph_exec;

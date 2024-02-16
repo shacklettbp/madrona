@@ -49,7 +49,9 @@ __constant__ BVHParams params;
 // 2) Sort the morton codes
 // 3) Generate the internal nodes
 // 4) Optimize the BVH
-void bvhMortonCodes()
+extern "C" __global__ void bvhEntry()
 {
-    printf("Hello from BVH module!\n");
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        printf("Hello from BVH module!\n");
+    }
 }
