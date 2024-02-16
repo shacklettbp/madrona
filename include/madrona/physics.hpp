@@ -3,6 +3,7 @@
 #include <madrona/components.hpp>
 #include <madrona/span.hpp>
 #include <madrona/taskgraph_builder.hpp>
+#include <madrona/context.hpp>
 
 namespace madrona::phys {
 
