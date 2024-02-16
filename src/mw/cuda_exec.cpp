@@ -67,7 +67,7 @@ public:
     HostPrintCPU(HostPrintCPU &&o) = delete;
 
     inline ~HostPrintCPU()
-    {
+{
         channel_->signal.store(-1, cuda::std::memory_order_release);
         thread_.join();
         REQ_CU(cuMemFree((CUdeviceptr)channel_));
@@ -291,6 +291,7 @@ struct MegakernelConfig {
 };
 
 struct BVHKernels {
+    uint32_t numSMs;
     CUmodule mod;
     CUfunction mortonCodes;
 };
@@ -908,7 +909,7 @@ static __attribute__((always_inline)) inline void dispatch(
 // We still want to have the same compiler flags as passed to the megakernel
 static BVHKernels buildBVHKernels(const CompileConfig &cfg,
                                   int32_t num_sms,
-                                  int32_t num_blocks_per_sm,
+                                  // int32_t num_blocks_per_sm,
                                   std::pair<int, int> cuda_arch)
 {
     using namespace std;
@@ -923,20 +924,9 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
         to_string(cuda_arch.second);
 
-    string num_sms_str =
-        "-DMADRONA_MWGPU_NUM_SMS=(" + to_string(num_sms) + ")";
-
-    string max_blocks_str = "-DMADRONA_MWGPU_MAX_BLOCKS_PER_SM=(" +
-        to_string(max_megakernel_blocks_per_sm) + ")";
-
     DynArray<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
-        "-arch", gpu_arch_str.c_str(),
-        num_sms_str.c_str(),
-        max_blocks_str.c_str(),
-#ifdef MADRONA_TRACING
-        "-DMADRONA_TRACING=1",
-#endif
+        "-arch", gpu_arch_str.c_str()
     };
 
     for (const char *user_flag : cfg.userCompileFlags) {
@@ -949,6 +939,44 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     }
 
     DynArray<const char *> compile_flags = std::move(common_compile_flags);
+
+    std::string linker_arch_str = std::string("-arch=") + gpu_arch_str;
+
+    DynArray<const char *> linker_flags {
+        linker_arch_str.c_str(),
+        "-ftz=1",
+        "-prec-div=0",
+        "-prec-sqrt=0",
+        "-fma=1",
+        "-optimize-unused-variables"
+    };
+
+    std::ifstream bvh_file_stream(MADRONA_MW_GPU_BVH_INTERNAL_CPP);
+    std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
+        std::istreambuf_iterator<char>());
+
+    auto jit_output = cu::jitCompileCPPSrc(
+        bvh_src.c_str(), MADRONA_MW_GPU_BVH_INTERNAL_CPP,
+        compile_flags.data(), compile_flags.size(),
+        compile_flags.data(), compile_flags.size(),
+        false);
+
+    void *cubin_data = jit_output.outputBinary.data();
+
+    CUmodule mod;
+    REQ_CU(cuModuleLoadData(&mod, cubin_data));
+
+    CUfunction morton_codes_func;
+    REQ_CU(cuModuleGetFunction(&morton_codes_func, mod,
+                               "bvhMortonCodes"));
+
+    BVHKernels bvh_kernels = {
+        .numSMs = num_sms,
+        .mod = mod,
+        .mortonCodes = morton_codes_func
+    };
+
+    return bvh_kernels;
 }
 
 static GPUKernels buildKernels(const CompileConfig &cfg,
@@ -1671,7 +1699,8 @@ static DynArray<int32_t> processExecConfigFile(
 static CUgraphExec makeTaskGraphRunGraph(
     const MegakernelConfig *megakernel_cfgs,
     const CUfunction *megakernels,
-    int64_t num_megakernels)
+    int64_t num_megakernels,
+    BVHKernels &bvh_kernels)
 {
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
@@ -1763,6 +1792,24 @@ static CUgraphExec makeTaskGraphRunGraph(
         cur_node_idx = switch_node_idx;
     }
 
+    { // Add the bvh kernel node
+        CUDA_KERNEL_NODE_PARAMS bvh_morton_params = {
+            .func = bvh_kernels.mortonCodes,
+            .gridDimX = bvh_kernels.numSMs * 16,
+            .gridDimY = 1,
+            .gridDimZ = 1,
+            .blockDimX = 256,
+            .blockDimY = 1,
+            .blockDimZ = 1,
+            .sharedMemBytes = 0,
+            .kernelParams = nullptr,
+            .extra = nullptr
+        };
+
+        CUgraphNode morton_code_node;
+        REQ_CU();
+    }
+
     CUgraphExec run_graph_exec;
     REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph, 0));
 
@@ -1822,6 +1869,8 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
     REQ_CU(cuDeviceGetAttribute(&cu_capability.second,
         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, cu_gpu));
 
+    auto bvh_kernels = buildBVHKernels(compile_cfg, num_sms, cu_capability);
+
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
         exec_mode, num_sms, cu_capability);
 
@@ -1839,7 +1888,8 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
                                state_cfg.numWorlds) :
             makeTaskGraphRunGraph(megakernel_cfgs.data(),
                                   gpu_kernels.megakernels.data(),
-                                  gpu_kernels.megakernels.size());
+                                  gpu_kernels.megakernels.size(),
+                                  bvh_kernels);
 
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,
