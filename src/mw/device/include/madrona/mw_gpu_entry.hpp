@@ -91,7 +91,12 @@ struct BVHParams {
 
 extern "C" __global__ void initBVHParams(BVHParams *params)
 {
-    printf("Hello from initBVHParams");
+    printf("Hello from initBVHParams: %p\n", (void *)params);
+    params->instances = (void *)0x42424242;
+    params->views = (void *)0x10203040;
+    params->instanceOffsets = (int32_t *)0x80808080;
+    params->viewOffsets = (int32_t *)0xDEADBEEF;
+    params->mortonCodes = (uint64_t *)0xBABEAAAA;
 }
 
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates

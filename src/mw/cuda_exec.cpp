@@ -1535,6 +1535,8 @@ static GPUEngineState initEngineAndUserState(
         // Pass this to the ECS to fill in
         auto params_tmp = cu::allocGPU(sizeof(BVHParams));
 
+        printf("From CPU, bvh params temporary is in %p\n", params_tmp);
+
         // Address to the BVHParams struct
         CUdeviceptr bvh_consts_addr;
         size_t bvh_consts_size;
