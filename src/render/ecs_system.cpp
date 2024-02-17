@@ -8,18 +8,6 @@ namespace madrona::render::RenderingSystem {
 using namespace base;
 using namespace math;
 
-struct RenderableArchetype : public Archetype<
-    InstanceData,
-
-    // For BVH support, we need to sort these not just be world ID,
-    // but first by morton code too.
-    MortonCode
-> {};
-
-struct RenderCameraArchetype : public Archetype<
-    PerspectiveCameraData
-> {};
-
 struct RenderingSystemState {
     uint32_t *totalNumViews;
     uint32_t *totalNumInstances;
@@ -183,6 +171,8 @@ inline void exportCountsGPU(Context &ctx,
 void registerTypes(ECSRegistry &registry,
                    const RenderECSBridge *bridge)
 {
+    printf("Printing from rendering system register types\n");
+
     registry.registerComponent<RenderCamera>();
     registry.registerComponent<Renderable>();
     registry.registerComponent<PerspectiveCameraData>();
@@ -225,6 +215,14 @@ void registerTypes(ECSRegistry &registry,
         state_mgr->setArchetypeComponent<RenderCameraArchetype, PerspectiveCameraData>(
             bridge->views);
     }
+
+#if 0
+    auto *state_mgr = mwGPU::getStateManager();
+    auto instance_ptr = (void *)state_mgr->getArchetypeComponent<
+        RenderableArchetype, InstanceData>();
+
+    printf("From rendering system init, instance_ptr=%p\n", instance_ptr);
+#endif
 #else
     (void)bridge;
 #endif

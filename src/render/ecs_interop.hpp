@@ -1,24 +1,8 @@
 #pragma once
 
+#include <madrona/render/ecs.hpp>
+
 namespace madrona::render {
-
-struct alignas(16) PerspectiveCameraData {
-    math::Vector3 position;
-    math::Quat rotation;
-    float xScale;
-    float yScale;
-    float zNear;
-    int32_t worldIDX;
-    uint32_t pad;
-};
-
-struct alignas(16) InstanceData {
-    math::Vector3 position;
-    math::Quat rotation;
-    math::Diag3x3 scale;
-    int32_t objectID;
-    int32_t worldIDX;
-};
 
 struct RenderECSBridge {
     // Allocated from Vulkan, to be imported into Cuda

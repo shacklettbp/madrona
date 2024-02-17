@@ -4,6 +4,7 @@
 #include <madrona/memory.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 #include <madrona/mw_gpu/tracing.hpp>
+#include <madrona/render/ecs.hpp>
 
 namespace madrona {
 namespace mwGPU {
@@ -86,17 +87,33 @@ struct BVHParams {
     void *views;
     int32_t *instanceOffsets;
     int32_t *viewOffsets;
-    uint64_t *mortonCodes;
+    uint32_t *mortonCodes;
 };
 
 extern "C" __global__ void initBVHParams(BVHParams *params)
 {
+    using namespace madrona;
+    using namespace madrona::render;
+
+    // Need to get the pointers to instances, views, offsets, etc...
+    StateManager *mgr = mwGPU::getStateManager();
+
     printf("Hello from initBVHParams: %p\n", (void *)params);
-    params->instances = (void *)0x42424242;
-    params->views = (void *)0x10203040;
-    params->instanceOffsets = (int32_t *)0x80808080;
-    params->viewOffsets = (int32_t *)0xDEADBEEF;
-    params->mortonCodes = (uint64_t *)0xBABEAAAA;
+
+    params->instances = (void *)mgr->getArchetypeComponent<
+        RenderableArchetype, InstanceData>();
+
+    params->views = (void *)mgr->getArchetypeComponent<
+        RenderCameraArchetype, PerspectiveCameraData>();
+
+    params->instanceOffsets = (int32_t *)mgr->getArchetypeWorldOffsets<
+        RenderableArchetype>();
+
+    params->viewOffsets = (int32_t *)mgr->getArchetypeWorldOffsets<
+        RenderCameraArchetype>();
+
+    params->mortonCodes = (uint32_t *)mgr->getArchetypeComponent<
+        RenderableArchetype, MortonCode>();
 }
 
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates

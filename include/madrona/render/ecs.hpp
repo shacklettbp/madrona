@@ -21,8 +21,50 @@ struct Renderable {
     Entity renderEntity;
 };
 
-// This will be attached to any renderable entity
+
+
+
+// TODO: Make sure to move this to private headers which can be
+// included by the device code for the BVH.
+
+// For private usage - not to be used by user.
 using MortonCode = uint32_t;
+
+// For private usage - not to be used by user.
+struct alignas(16) PerspectiveCameraData {
+    math::Vector3 position;
+    math::Quat rotation;
+    float xScale;
+    float yScale;
+    float zNear;
+    int32_t worldIDX;
+    uint32_t pad;
+};
+
+// For private usage - not to be used by user.
+struct alignas(16) InstanceData {
+    math::Vector3 position;
+    math::Quat rotation;
+    math::Diag3x3 scale;
+    int32_t objectID;
+    int32_t worldIDX;
+};
+
+// For private usage - not to be used by user.
+struct RenderableArchetype : public Archetype<
+    InstanceData,
+
+    // For BVH support, we need to sort these not just be world ID,
+    // but first by morton code too.
+    MortonCode
+> {};
+
+// For private usage - not to be used by user.
+struct RenderCameraArchetype : public Archetype<
+    PerspectiveCameraData
+> {};
+
+
 
 struct RenderECSBridge;
 
