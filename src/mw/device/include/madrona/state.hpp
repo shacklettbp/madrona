@@ -166,6 +166,7 @@ public:
 
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
     inline void archetypeClearNeedsSort(uint32_t archetype_id);
+    inline void archetypeSetNeedsSort(uint32_t archetype_id);
 
     // Included for compatibility with ECSRegistry
     template <typename ArchetypeT, typename ComponentT>
@@ -234,6 +235,7 @@ private:
         int32_t *worldOffsets;
         int32_t *worldCounts;
 
+        // This denotes whether or not the entity needs a world sort
         bool needsSort;
     };
 

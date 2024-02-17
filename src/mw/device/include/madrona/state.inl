@@ -468,6 +468,11 @@ void StateManager::archetypeClearNeedsSort(uint32_t archetype_id)
     archetypes_[archetype_id]->needsSort = false;
 }
 
+void StateManager::archetypeSetNeedsSort(uint32_t archetype_id)
+{
+    archetypes_[archetype_id]->needsSort = true;
+}
+
 template <typename ArchetypeT, typename ComponentT>
 ComponentT * StateManager::exportColumn()
 {

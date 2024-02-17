@@ -21,6 +21,9 @@ struct Renderable {
     Entity renderEntity;
 };
 
+// This will be attached to any renderable entity
+using MortonCode = uint32_t;
+
 struct RenderECSBridge;
 
 namespace RenderingSystem {

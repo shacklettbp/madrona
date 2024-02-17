@@ -9,7 +9,11 @@ using namespace base;
 using namespace math;
 
 struct RenderableArchetype : public Archetype<
-    InstanceData
+    InstanceData,
+
+    // For BVH support, we need to sort these not just be world ID,
+    // but first by morton code too.
+    MortonCode
 > {};
 
 struct RenderCameraArchetype : public Archetype<
@@ -36,6 +40,36 @@ struct RenderingSystemState {
     uint64_t *instanceWorldIDsCPU;
     uint64_t *viewWorldIDsCPU;
 };
+
+inline uint32_t leftShift3(uint32_t x)
+{
+    if (x == (1 << 10)) {
+        --x;
+    }
+
+    x = (x | (x << 16)) & 0b00000011000000000000000011111111;
+    x = (x | (x << 8)) & 0b00000011000000001111000000001111;
+    x = (x | (x << 4)) & 0b00000011000011000011000011000011;
+    x = (x | (x << 2)) & 0b00001001001001001001001001001001;
+
+    return x;
+}
+
+uint32_t encodeMorton3(const Vector3 &v) {
+    return (leftShift3(*((uint32_t *)&v.z)) << 2) | 
+           (leftShift3(*((uint32_t *)&v.y)) << 1) | 
+            leftShift3(*((uint32_t *)&v.x));
+}
+
+inline void mortonCodeUpdate(Context &ctx,
+                             Entity e,
+                             const Position &pos,
+                             const Renderable &renderable)
+{
+    // Calculate and set the morton code
+    MortonCode &morton_code = ctx.get<MortonCode>(renderable.renderEntity);
+    morton_code = encodeMorton3(pos);
+}
 
 inline void instanceTransformUpdate(Context &ctx,
                                     Entity e,
@@ -125,10 +159,24 @@ inline void exportCountsGPU(Context &ctx,
 
     auto state_mgr = mwGPU::getStateManager();
 
-    *sys_state.totalNumViews = state_mgr->getArchetypeNumRows<
-        RenderCameraArchetype>();
-    *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
-        RenderableArchetype>();
+    if (sys_state.totalNumViews) {
+        *sys_state.totalNumViews = state_mgr->getArchetypeNumRows<
+            RenderCameraArchetype>();
+        *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
+            RenderableArchetype>();
+    }
+
+    uint32_t *morton_codes = state_mgr->getArchetypeComponent<
+        RenderableArchetype, MortonCode>();
+    
+    WorldID *world_ids = state_mgr->getArchetypeComponent<
+        RenderableArchetype, WorldID>();
+
+    for (int i = 0; 
+         i < state_mgr->getArchetypeNumRows<RenderableArchetype>();
+         ++i) {
+        printf("%d: %u\n", world_ids[i].idx, morton_codes[i]);
+    }
 }
 #endif
 
@@ -139,6 +187,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<Renderable>();
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
+    registry.registerComponent<MortonCode>();
 
 
     // Pointers get set in RenderingSystem::init
@@ -208,14 +257,25 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             RenderCamera
         >>({instance_setup});
 
+    auto mortoncode_update = builder.addToGraph<ParallelForNode<Context,
+         mortonCodeUpdate,
+            Entity,
+            Position,
+            Renderable
+        >>({viewdata_update});
+
 #ifdef MADRONA_GPU_MODE
     // Need to sort the instances, as well as the views
-    auto sort_instances = 
+    auto sort_instances_by_morton =
+        builder.addToGraph<SortArchetypeNode<RenderableArchetype, MortonCode>>(
+            {mortoncode_update});
+
+    auto sort_instances_by_world = 
         builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
-            {viewdata_update});
+            {sort_instances_by_morton});
 
     auto post_instance_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_instances});
+        builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_world});
 
     auto sort_views = 
         builder.addToGraph<SortArchetypeNode<RenderCameraArchetype, WorldID>>(
@@ -268,7 +328,6 @@ void makeEntityRenderable(Context &ctx,
                           Entity e)
 {
     Entity render_entity = ctx.makeEntity<RenderableArchetype>();
-
     ctx.get<Renderable>(e).renderEntity = render_entity;
 }
 

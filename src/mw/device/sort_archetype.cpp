@@ -969,7 +969,10 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     StateManager *state_mgr = mwGPU::getStateManager();
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetypeID);
 
-    if (!state_mgr->archetypeNeedsSort(archetypeID)) {
+    // If this is not a world sort, we want to perform the sort always
+    bool world_sort = sortColumnIndex == 1 /* 1 is the WorldID column */;
+
+    if (!state_mgr->archetypeNeedsSort(archetypeID) && world_sort) {
         numDynamicInvocations = 0;
 
         for (int i = 0; i < numPasses; i++) {
@@ -977,7 +980,16 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
         }
         return;
     }
-    state_mgr->archetypeClearNeedsSort(archetypeID);
+
+    if (world_sort) {
+        state_mgr->archetypeClearNeedsSort(archetypeID);
+    } else {
+        // If this isn't a world sort, this sort will scramble the entities
+        // across worlds and therefore we need to set the needs sort
+        // (which denotes whether the entity needs to be sorted by world)
+        // to true
+        state_mgr->archetypeSetNeedsSort(archetypeID);
+    }
 
     int num_rows = state_mgr->numArchetypeRows(archetypeID);
 
@@ -1431,15 +1443,17 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
             data_id, {cur_task}, setup);
     }
     
-    // Compute counts for each world by writing upper ranges to worldCounts
-    // and lower ranges to worldOffsets. 
-    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
-        data_id, {cur_task}, setup, 0, 1);
+    if (world_sort) {
+        // Compute counts for each world by writing upper ranges to worldCounts
+        // and lower ranges to worldOffsets. 
+        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
+            data_id, {cur_task}, setup, 0, 1);
 
-    // Compute final counts by subtracting worldOffsets from worldCounts
-    // Worlds with 0 entities have offset numEntities.
-    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::correctWorldCounts>(
-        data_id, {cur_task}, setup, 0, 1);
+        // Compute final counts by subtracting worldOffsets from worldCounts
+        // Worlds with 0 entities have offset numEntities.
+        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::correctWorldCounts>(
+            data_id, {cur_task}, setup, 0, 1);
+    }
 
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 
