@@ -20,12 +20,13 @@ struct CompileOutput {
 };
 
 CompileOutput jitCompileCPPSrc(const char *src,
-                                const char *src_path,
-                                const char **opt_compile_flags,
-                                uint32_t num_opt_compile_flags,
-                                const char **fast_compile_flags,
-                                uint32_t num_fast_compile_flags,
-                                bool nvvm_out);
+                               const char *src_path,
+                               const char **opt_compile_flags,
+                               uint32_t num_opt_compile_flags,
+                               const char **fast_compile_flags,
+                               uint32_t num_fast_compile_flags,
+                               bool nvvm_out,
+                               bool print_ptx = false);
 
 CompileOutput jitCompileCPPFile(const char *src_path,
                                 const char **compile_flags,

@@ -924,6 +924,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
         to_string(cuda_arch.second);
 
+    string gpu_arch_flag = std::string("-arch=") + gpu_arch_str;
+
     DynArray<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-arch", gpu_arch_str.c_str()
@@ -942,24 +944,19 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     std::string linker_arch_str = std::string("-arch=") + gpu_arch_str;
 
-    DynArray<const char *> linker_flags {
-        linker_arch_str.c_str(),
-        "-ftz=1",
-        "-prec-div=0",
-        "-prec-sqrt=0",
-        "-fma=1",
-        "-optimize-unused-variables"
-    };
-
     std::ifstream bvh_file_stream(MADRONA_MW_GPU_BVH_INTERNAL_CPP);
     std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
         std::istreambuf_iterator<char>());
+
+    for (int i = 0; i < compile_flags.size(); ++i) {
+        printf("Flags: %s\n", compile_flags[i]);
+    }
 
     auto jit_output = cu::jitCompileCPPSrc(
         bvh_src.c_str(), MADRONA_MW_GPU_BVH_INTERNAL_CPP,
         compile_flags.data(), compile_flags.size(),
         compile_flags.data(), compile_flags.size(),
-        false);
+        false, true);
 
     void *cubin_data = jit_output.outputBinary.data();
 
@@ -1792,6 +1789,7 @@ static CUgraphExec makeTaskGraphRunGraph(
         cur_node_idx = switch_node_idx;
     }
 
+#if 1
     { // Add the bvh kernel node
         CUDA_KERNEL_NODE_PARAMS bvh_morton_params = {
             .func = bvh_kernels.mortonCodes,
@@ -1812,6 +1810,7 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &megakernel_launches.back(), 1, 
                                     &bvh_morton_params));
     }
+#endif
 
     CUgraphExec run_graph_exec;
     REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph, 0));
@@ -1872,7 +1871,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
     REQ_CU(cuDeviceGetAttribute(&cu_capability.second,
         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, cu_gpu));
 
-    auto bvh_kernels = buildBVHKernels(compile_cfg, num_sms, cu_capability);
+    BVHKernels bvh_kernels = buildBVHKernels(compile_cfg, num_sms, cu_capability);
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
         exec_mode, num_sms, cu_capability);

@@ -55,3 +55,7 @@ extern "C" __global__ void bvhEntry()
         printf("Hello from BVH module!\n");
     }
 }
+
+
+
+

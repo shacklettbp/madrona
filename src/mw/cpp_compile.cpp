@@ -21,7 +21,8 @@ CompileOutput jitCompileCPPSrc(const char *src,
                                uint32_t num_opt_compile_flags,
                                const char **fast_compile_flags,
                                uint32_t num_fast_compile_flags,
-                               bool ltoir_out)
+                               bool ltoir_out,
+                               bool print_ptx)
 {
     auto print_compile_log = [](nvrtcProgram prog) {
         // Retrieve log output
@@ -47,12 +48,16 @@ CompileOutput jitCompileCPPSrc(const char *src,
         return ltoir_data;
     };
 
-    auto getPTX = [](nvrtcProgram prog) {
+    auto getPTX = [print_ptx](nvrtcProgram prog) {
         size_t num_ptx_bytes;
         REQ_NVRTC(nvrtcGetPTXSize(prog, &num_ptx_bytes));
 
         HeapArray<char> ptx(num_ptx_bytes);
         REQ_NVRTC(nvrtcGetPTX(prog, ptx.data()));
+
+        if (print_ptx) {
+            printf("%s\n", ptx.data());
+        }
 
         return ptx;
     };
