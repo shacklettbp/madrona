@@ -26,14 +26,15 @@ struct BVHParams {
     PerspectiveCameraData *views;
     int32_t *instanceOffsets;
     int32_t *viewOffsets;
-
-    // Things which are required for the BVH build but the memory footprint
-    // depends on quantities that only the ECS will know (i.e., num instances)
-    uint32_t *mortonCodes;
+    // This is also going to be given by the ECS. Need to basically create a
+    // new system for this (for all rendering objects).
+    //
+    // These are going to be sorted by the ECS too.
+    uint64_t *mortonCodes;
 };
 
-namespace consts {
-__constant__ BVHParams params;
+extern "C" {
+    __constant__ BVHParams bvhParams;
 }
 
 // For now, just use #defines for parameterizing the kernels
@@ -52,7 +53,12 @@ __constant__ BVHParams params;
 extern "C" __global__ void bvhEntry()
 {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
-        printf("Hello from BVH module!\n");
+        printf("Hello from BVH module! %p %p %p %p %p\n", 
+                bvhParams.instances,
+                bvhParams.views,
+                bvhParams.instanceOffsets,
+                bvhParams.viewOffsets,
+                bvhParams.mortonCodes);
     }
 }
 

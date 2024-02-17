@@ -80,6 +80,20 @@ struct alignas(16) MWGPUEntry : MWGPUEntryInstantiate<
 }
 }
 
+struct BVHParams {
+    // Given by the ECS
+    void *instances;
+    void *views;
+    int32_t *instanceOffsets;
+    int32_t *viewOffsets;
+    uint64_t *mortonCodes;
+};
+
+extern "C" __global__ void initBVHParams(BVHParams *params)
+{
+    printf("Hello from initBVHParams");
+}
+
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates
 // the entryKernels::* __global__ entry points. static_assert with a trivially
 // true check leaves no side effects in the scope where this macro is called.

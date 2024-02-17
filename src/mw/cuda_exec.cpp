@@ -305,6 +305,7 @@ struct GPUKernels {
     CUfunction initTasks;
     CUfunction queueUserInit;
     CUfunction queueUserRun;
+    CUfunction initBVHParams;
 };
 
 struct MegakernelCache {
@@ -958,10 +959,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         compile_flags.data(), compile_flags.size(),
         false, true);
 
-    void *cubin_data = jit_output.outputBinary.data();
-
     CUmodule mod;
-    REQ_CU(cuModuleLoadData(&mod, cubin_data));
+    REQ_CU(cuModuleLoadData(&mod, jit_output.outputPTX.data()));
 
     CUfunction bvh_entry;
     REQ_CU(cuModuleGetFunction(&bvh_entry, mod,
@@ -1161,6 +1160,9 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
                                    compile_results.initTasksName.c_str()));
     }
 
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.initBVHParams, gpu_kernels.mod,
+                               "initBVHParams"));
+
     return gpu_kernels;
 }
 
@@ -1346,6 +1348,7 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_user_cfg_bytes,
     uint32_t num_exported,
     const GPUKernels &gpu_kernels,
+    const BVHKernels &bvh_kernels,
     ExecutorMode exec_mode,
     CUdevice cu_gpu,
     CUcontext cu_ctx,
@@ -1518,6 +1521,39 @@ static GPUEngineState initEngineAndUserState(
            sizeof(void *) * (uint64_t)num_exported);
 
     cu::deallocCPU(exported_readback);
+
+    { // Setup the BVH parameters in the __constant__ block of the bvh module
+        struct BVHParams {
+            // Given by the ECS
+            void *instances;
+            void *views;
+            int32_t *instanceOffsets;
+            int32_t *viewOffsets;
+            uint64_t *mortonCodes;
+        };
+
+        // Pass this to the ECS to fill in
+        auto params_tmp = cu::allocGPU(sizeof(BVHParams));
+
+        // Address to the BVHParams struct
+        CUdeviceptr bvh_consts_addr;
+        size_t bvh_consts_size;
+        REQ_CU(cuModuleGetGlobal(&bvh_consts_addr, &bvh_consts_size,
+                                 bvh_kernels.mod, "bvhParams"));
+
+        auto init_bvh_args = makeKernelArgBuffer((void *)params_tmp);
+
+        // Launch the kernel in the megakernel module to initialize the BVH 
+        // params
+        launchKernel(gpu_kernels.initBVHParams, 1, 1,
+                     init_bvh_args);
+
+        REQ_CUDA(cudaStreamSynchronize(strm));
+
+        cuMemcpy(bvh_consts_addr, (CUdeviceptr)params_tmp, sizeof(BVHParams));
+
+        cu::deallocGPU(params_tmp);
+    }
 
     return GPUEngineState {
         gpu_state_buffer,
@@ -1881,7 +1917,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
         state_cfg.numUserConfigBytes, state_cfg.numExportedBuffers,
-        gpu_kernels, exec_mode, cu_gpu, cu_ctx, strm);
+        gpu_kernels, bvh_kernels, exec_mode, cu_gpu, cu_ctx, strm);
 
     auto run_graph =
         exec_mode == ExecutorMode::JobSystem ?
