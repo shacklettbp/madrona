@@ -67,7 +67,7 @@ public:
     HostPrintCPU(HostPrintCPU &&o) = delete;
 
     inline ~HostPrintCPU()
-{
+    {
         channel_->signal.store(-1, cuda::std::memory_order_release);
         thread_.join();
         REQ_CU(cuMemFree((CUdeviceptr)channel_));
@@ -293,7 +293,15 @@ struct MegakernelConfig {
 struct BVHKernels {
     uint32_t numSMs;
     CUmodule mod;
-    CUfunction mortonCodes;
+
+    // Initializes BVH internal data
+    CUfunction init;
+
+    // Allocates internal nodes
+    CUfunction allocInternalNodes;
+
+    // Entry point for creating the tree
+    CUfunction entry;
 };
 
 struct GPUKernels {
@@ -966,10 +974,20 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_entry, mod,
                                "bvhEntry"));
 
+    CUfunction bvh_init;
+    REQ_CU(cuModuleGetFunction(&bvh_init, mod,
+                               "bvhInit"));
+
+    CUfunction bvh_alloc;
+    REQ_CU(cuModuleGetFunction(&bvh_alloc, mod,
+                               "bvhAllocInternalNodes"));
+
     BVHKernels bvh_kernels = {
         .numSMs = (uint32_t)num_sms,
         .mod = mod,
-        .mortonCodes = bvh_entry
+        .init = bvh_init,
+        .allocInternalNodes = bvh_alloc,
+        .entry = bvh_entry
     };
 
     return bvh_kernels;
@@ -1393,6 +1411,8 @@ static GPUEngineState initEngineAndUserState(
 
     HostChannel *allocator_channel = (HostChannel *)allocator_channel_devptr;
 
+    printf("From the CPU, allocator channel at %p\n", allocator_channel);
+
     size_t cu_va_alloc_granularity;
     {
         CUmemAllocationProp default_prop {};
@@ -1525,15 +1545,33 @@ static GPUEngineState initEngineAndUserState(
     { // Setup the BVH parameters in the __constant__ block of the bvh module
         struct BVHParams {
             // Given by the ECS
+            uint32_t numWorlds;
             void *instances;
             void *views;
             int32_t *instanceOffsets;
+            int32_t *instanceCounts;
             int32_t *viewOffsets;
-            uint64_t *mortonCodes;
+            uint32_t *mortonCodes;
         };
+
+#if 0
+        struct BVHInternalData {
+            // These are the internal nodes. Needs to be properly allocated to
+            // accomodate for the number of instances.
+            InternalNode *internalNodes;
+            uint32_t allocatedNodes;
+
+
+            // For memory allocation purposes
+            HostChannel *hostChannel;
+            uint64_t pageSize;
+            uint64_t granularity;
+        };
+#endif
 
         // Pass this to the ECS to fill in
         auto params_tmp = cu::allocGPU(sizeof(BVHParams));
+        // auto bvh_internals = cu::allocGPU(sizeof());
 
         printf("From CPU, bvh params temporary is in %p\n", params_tmp);
 
@@ -1543,12 +1581,20 @@ static GPUEngineState initEngineAndUserState(
         REQ_CU(cuModuleGetGlobal(&bvh_consts_addr, &bvh_consts_size,
                                  bvh_kernels.mod, "bvhParams"));
 
-        auto init_bvh_args = makeKernelArgBuffer((void *)params_tmp);
+        auto init_bvh_args = makeKernelArgBuffer((void *)params_tmp,
+                                                 num_worlds);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params
         launchKernel(gpu_kernels.initBVHParams, 1, 1,
                      init_bvh_args);
+
+        REQ_CUDA(cudaStreamSynchronize(strm));
+
+        // Call the bvh init function from bvh module
+        auto bvh_init_internal_args = makeKernelArgBuffer(alloc_init);
+        launchKernel(bvh_kernels.init, 1, 1,
+                     bvh_init_internal_args);
 
         REQ_CUDA(cudaStreamSynchronize(strm));
 
@@ -1830,7 +1876,7 @@ static CUgraphExec makeTaskGraphRunGraph(
 #if 1
     { // Add the bvh kernel node
         CUDA_KERNEL_NODE_PARAMS bvh_morton_params = {
-            .func = bvh_kernels.mortonCodes,
+            .func = bvh_kernels.entry,
             // We want to max-out the GPU for all the BVH kernels
             .gridDimX = bvh_kernels.numSMs * 16,
             .gridDimY = 1,

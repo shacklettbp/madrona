@@ -103,6 +103,9 @@ public:
     uint64_t roundUpReservation(uint64_t num_bytes);
     uint64_t roundUpAlloc(uint64_t num_bytes);
 
+    // This is temporary and only needed for BVH test purposes
+    HostChannel * getHostChannel();
+
 private:
     HostChannel *channel_;
     SpinLock device_lock_;

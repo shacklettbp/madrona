@@ -1,3 +1,4 @@
+#include <atomic>
 #include <madrona/math.hpp>
 
 using namespace madrona;
@@ -20,21 +21,86 @@ struct alignas(16) InstanceData {
     int32_t worldIDX;
 };
 
+// We need to be able to communicate with the memory allocator
+struct HostChannel {
+    enum class Op {
+        Reserve,
+        Map,
+        Alloc,
+        Terminate
+    };
+
+    struct Reserve {
+        uint64_t maxBytes;
+        uint64_t initNumBytes;
+        void *result;
+    };
+
+    struct Map {
+        void *addr;
+        uint64_t numBytes;
+    };
+
+    struct Alloc {
+        uint64_t numBytes;
+        void *result;
+    };
+
+    Op op;
+
+    union {
+        Reserve reserve;
+        Map map;
+        Alloc alloc;
+    };
+
+    cuda::atomic<uint32_t, cuda::thread_scope_system> ready;
+    cuda::atomic<uint32_t, cuda::thread_scope_system> finished;
+};
+
+struct InternalNode {
+    uint32_t start;
+    uint32_t splitIndex;
+    uint32_t end;
+};
+
+// Internal data for the BVH
+struct BVHInternalData {
+    // These are the internal nodes. Needs to be properly allocated to
+    // accomodate for the number of instances.
+    InternalNode *internalNodes;
+    uint32_t allocatedNodes;
+
+
+    // For memory allocation purposes
+    HostChannel *hostChannel;
+    uint64_t pageSize;
+    uint64_t granularity;
+};
+
 struct BVHParams {
-    // Given by the ECS
+    uint32_t numWorlds;
     InstanceData *instances;
     PerspectiveCameraData *views;
     int32_t *instanceOffsets;
+    int32_t *instanceCounts;
     int32_t *viewOffsets;
-    // This is also going to be given by the ECS. Need to basically create a
-    // new system for this (for all rendering objects).
-    //
-    // These are going to be sorted by the ECS too.
-    uint64_t *mortonCodes;
+    uint32_t *mortonCodes;
 };
 
 extern "C" {
     __constant__ BVHParams bvhParams;
+}
+
+struct HostAllocInit {
+    uint64_t pageSize;
+    uint64_t allocGranularity;
+    HostChannel *channel;
+};
+
+extern "C" __global__ void bvhInit(HostAllocInit alloc_init)
+{
+    printf("Hello from bvhInit\n");
 }
 
 // For now, just use #defines for parameterizing the kernels
@@ -46,22 +112,34 @@ extern "C" {
 // approach to make sure all the work gets done.
 
 // Stages of the top-level BVH build and ray cast
-// 1) Generate morton codes
-// 2) Sort the morton codes
-// 3) Generate the internal nodes
-// 4) Optimize the BVH
+// 1) Generate the internal nodes
+// 2) Optimize the BVH
+extern "C" __global__ void bvhAllocInternalNodes()
+{
+    // We need to make sure we have enough internal nodes for the initial
+    // 2-wide BVH which gets constructed before the optimized tree
+    uint32_t num_instances = bvhParams.instanceOffsets[bvhParams.numWorlds-1] +
+                             bvhParams.instanceCounts[bvhParams.numWorlds-1];
+
+    // For the 2-wide tree, we need about num_instances internal nodes
+    uint32_t num_required_nodes = num_instances;
+
+#if 0
+    if (num_required_nodes > bvhParams.internalData.allocatedNodes) {
+        // TODO:
+    }
+#endif
+}
+
 extern "C" __global__ void bvhEntry()
 {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
-        printf("Hello from BVH module! %p %p %p %p %p\n", 
-                bvhParams.instances,
-                bvhParams.views,
-                bvhParams.instanceOffsets,
-                bvhParams.viewOffsets,
-                bvhParams.mortonCodes);
+        uint32_t num_worlds = bvhParams.numWorlds;
+        uint32_t last_world_offset = bvhParams.instanceOffsets[num_worlds-1];
+        uint32_t last_world_count = bvhParams.instanceCounts[num_worlds-1];
+        uint32_t num_instances = last_world_offset + last_world_count;
+
+        printf("There are %u total instances (host channel)\n", 
+                num_instances);
     }
 }
-
-
-
-

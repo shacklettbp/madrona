@@ -298,28 +298,30 @@ void init(Context &ctx,
 {
     auto &system_state = ctx.singleton<RenderingSystemState>();
 
-    // This is where the renderer will read out the totals
-    system_state.totalNumViews = bridge->totalNumViews;
-    system_state.totalNumInstances = bridge->totalNumInstances;
+    if (bridge) {
+        // This is where the renderer will read out the totals
+        system_state.totalNumViews = bridge->totalNumViews;
+        system_state.totalNumInstances = bridge->totalNumInstances;
 
 #if !defined(MADRONA_GPU_MODE)
-    // This is just an atomic counter (final value will be moved to
-    // the totalNumViews/Instances variables).
-    system_state.totalNumViewsCPU = bridge->totalNumViewsCPUInc;
-    system_state.totalNumInstancesCPU = bridge->totalNumInstancesCPUInc;
+        // This is just an atomic counter (final value will be moved to
+        // the totalNumViews/Instances variables).
+        system_state.totalNumViewsCPU = bridge->totalNumViewsCPUInc;
+        system_state.totalNumInstancesCPU = bridge->totalNumInstancesCPUInc;
 
-    // This is only relevant for the CPU backend
-    system_state.instancesCPU = bridge->instances;
-    system_state.viewsCPU = bridge->views;
+        // This is only relevant for the CPU backend
+        system_state.instancesCPU = bridge->instances;
+        system_state.viewsCPU = bridge->views;
 
-    system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
-    system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
+        system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
+        system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
 #endif
 
-    system_state.aspectRatio = 
-        (float)bridge->renderWidth / (float)bridge->renderHeight;
+        system_state.aspectRatio = 
+            (float)bridge->renderWidth / (float)bridge->renderHeight;
 
-    system_state.voxels = bridge->voxels;
+        system_state.voxels = bridge->voxels;
+    }
 }
 
 void makeEntityRenderable(Context &ctx,

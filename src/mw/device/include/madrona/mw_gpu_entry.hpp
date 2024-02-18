@@ -82,23 +82,28 @@ struct alignas(16) MWGPUEntry : MWGPUEntryInstantiate<
 }
 
 struct BVHParams {
-    // Given by the ECS
+    uint32_t numWorlds;
     void *instances;
     void *views;
     int32_t *instanceOffsets;
+    int32_t *instanceCounts;
     int32_t *viewOffsets;
     uint32_t *mortonCodes;
 };
 
-extern "C" __global__ void initBVHParams(BVHParams *params)
+extern "C" __global__ void initBVHParams(BVHParams *params,
+                                         uint32_t num_worlds)
 {
     using namespace madrona;
     using namespace madrona::render;
 
     // Need to get the pointers to instances, views, offsets, etc...
     StateManager *mgr = mwGPU::getStateManager();
+    // mwGPU::HostAllocator *host_alloc = mwGPU::getHostAllocator();
 
     printf("Hello from initBVHParams: %p\n", (void *)params);
+
+    params->numWorlds = num_worlds;
 
     params->instances = (void *)mgr->getArchetypeComponent<
         RenderableArchetype, InstanceData>();
@@ -109,11 +114,16 @@ extern "C" __global__ void initBVHParams(BVHParams *params)
     params->instanceOffsets = (int32_t *)mgr->getArchetypeWorldOffsets<
         RenderableArchetype>();
 
+    params->instanceCounts = (int32_t *)mgr->getArchetypeWorldCounts<
+        RenderableArchetype>();
+
     params->viewOffsets = (int32_t *)mgr->getArchetypeWorldOffsets<
         RenderCameraArchetype>();
 
     params->mortonCodes = (uint32_t *)mgr->getArchetypeComponent<
         RenderableArchetype, MortonCode>();
+
+    // params->hostChannel = (void *)host_alloc->getHostChannel();
 }
 
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates

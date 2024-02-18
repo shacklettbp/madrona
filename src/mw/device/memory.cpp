@@ -80,6 +80,11 @@ uint64_t HostAllocator::roundUpAlloc(uint64_t num_bytes)
     return utils::roundUp(num_bytes, alloc_granularity_);
 }
 
+HostChannel * HostAllocator::getHostChannel()
+{
+    return channel_;
+}
+
 namespace SharedMemStorage {
 __shared__ Chunk buffer[numSMemBytes / sizeof(Chunk)];
 }
