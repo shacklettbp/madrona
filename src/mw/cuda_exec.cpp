@@ -1620,15 +1620,22 @@ static GPUEngineState initEngineAndUserState(
             int32_t *instanceCounts;
             int32_t *viewOffsets;
             uint32_t *mortonCodes;
+            void *internalData;
             void *hostAllocator;
             void *tmpAllocator;
         };
 
+        struct BVHInternalData {
+            void *internalNodes;
+            uint32_t allocatedNodes;
+        };
+
         // Pass this to the ECS to fill in
         auto params_tmp = cu::allocGPU(sizeof(BVHParams));
-        // auto bvh_internals = cu::allocGPU(sizeof());
+        auto bvh_internals = cu::allocGPU(sizeof(BVHInternalData));
 
-        printf("From CPU, bvh params temporary is in %p\n", params_tmp);
+        printf("From CPU, bvh params temporary is in %p (data %p)\n", 
+                params_tmp, bvh_internals);
 
         // Address to the BVHParams struct
         CUdeviceptr bvh_consts_addr;
@@ -1637,7 +1644,8 @@ static GPUEngineState initEngineAndUserState(
                                  bvh_kernels.mod, "bvhParams"));
 
         auto init_bvh_args = makeKernelArgBuffer((void *)params_tmp,
-                                                 num_worlds);
+                                                 num_worlds,
+                                                 bvh_internals);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params

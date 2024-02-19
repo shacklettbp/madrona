@@ -89,12 +89,14 @@ struct BVHParams {
     int32_t *instanceCounts;
     int32_t *viewOffsets;
     uint32_t *mortonCodes;
+    void *internalData;
     void *hostAllocator;
     void *tmpAllocator;
 };
 
 extern "C" __global__ void initBVHParams(BVHParams *params,
-                                         uint32_t num_worlds)
+                                         uint32_t num_worlds,
+                                         void *internal_data)
 {
     using namespace madrona;
     using namespace madrona::render;
@@ -125,6 +127,8 @@ extern "C" __global__ void initBVHParams(BVHParams *params,
 
     params->mortonCodes = (uint32_t *)mgr->getArchetypeComponent<
         RenderableArchetype, MortonCode>();
+
+    params->internalData = internal_data;
 
     params->hostAllocator = (void *)host_alloc;
     params->tmpAllocator = (void *)tmp_alloc;

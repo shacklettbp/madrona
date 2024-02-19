@@ -22,43 +22,6 @@ struct alignas(16) InstanceData {
     int32_t worldIDX;
 };
 
-// We need to be able to communicate with the memory allocator
-struct HostChannel {
-    enum class Op {
-        Reserve,
-        Map,
-        Alloc,
-        Terminate
-    };
-
-    struct Reserve {
-        uint64_t maxBytes;
-        uint64_t initNumBytes;
-        void *result;
-    };
-
-    struct Map {
-        void *addr;
-        uint64_t numBytes;
-    };
-
-    struct Alloc {
-        uint64_t numBytes;
-        void *result;
-    };
-
-    Op op;
-
-    union {
-        Reserve reserve;
-        Map map;
-        Alloc alloc;
-    };
-
-    cuda::atomic<uint32_t, cuda::thread_scope_system> ready;
-    cuda::atomic<uint32_t, cuda::thread_scope_system> finished;
-};
-
 struct InternalNode {
     uint32_t start;
     uint32_t splitIndex;
@@ -71,12 +34,6 @@ struct BVHInternalData {
     // accomodate for the number of instances.
     InternalNode *internalNodes;
     uint32_t allocatedNodes;
-
-
-    // For memory allocation purposes
-    HostChannel *hostChannel;
-    uint64_t pageSize;
-    uint64_t granularity;
 };
 
 struct BVHParams {
@@ -87,6 +44,7 @@ struct BVHParams {
     int32_t *instanceCounts;
     int32_t *viewOffsets;
     uint32_t *mortonCodes;
+    BVHInternalData *internalData;
 
     // These are all going to be inherited from the ECS
     mwGPU::HostAllocator *hostAllocator;
@@ -96,12 +54,6 @@ struct BVHParams {
 extern "C" {
     __constant__ BVHParams bvhParams;
 }
-
-struct HostAllocInit {
-    uint64_t pageSize;
-    uint64_t allocGranularity;
-    HostChannel *channel;
-};
 
 extern "C" __global__ void bvhInit()
 {
@@ -122,6 +74,8 @@ extern "C" __global__ void bvhInit()
 // 2) Optimize the BVH
 extern "C" __global__ void bvhAllocInternalNodes()
 {
+    BVHInternalData *internal_data = bvhParams.internalData;
+
     // We need to make sure we have enough internal nodes for the initial
     // 2-wide BVH which gets constructed before the optimized tree
     uint32_t num_instances = bvhParams.instanceOffsets[bvhParams.numWorlds-1] +
@@ -133,6 +87,7 @@ extern "C" __global__ void bvhAllocInternalNodes()
 
     auto *ptr = bvhParams.tmpAllocator->alloc(num_bytes);
     printf("From allocInternalNode: tmp allocated: %p\n", ptr);
+    printf("From allocInternalNode: internal data at: %p\n", internal_data);
 
     uint32_t *ptr_u32 = (uint32_t *)ptr;
     *ptr_u32 = 42;
