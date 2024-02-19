@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bvh.hpp"
+
 #include <madrona/taskgraph.hpp>
 #include <madrona/memory.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
@@ -81,20 +83,7 @@ struct alignas(16) MWGPUEntry : MWGPUEntryInstantiate<
 }
 }
 
-struct BVHParams {
-    uint32_t numWorlds;
-    void *instances;
-    void *views;
-    int32_t *instanceOffsets;
-    int32_t *instanceCounts;
-    int32_t *viewOffsets;
-    uint32_t *mortonCodes;
-    void *internalData;
-    void *hostAllocator;
-    void *tmpAllocator;
-};
-
-extern "C" __global__ void initBVHParams(BVHParams *params,
+extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
                                          uint32_t num_worlds,
                                          void *internal_data)
 {
@@ -110,10 +99,10 @@ extern "C" __global__ void initBVHParams(BVHParams *params,
 
     params->numWorlds = num_worlds;
 
-    params->instances = (void *)mgr->getArchetypeComponent<
+    params->instances = mgr->getArchetypeComponent<
         RenderableArchetype, InstanceData>();
 
-    params->views = (void *)mgr->getArchetypeComponent<
+    params->views = mgr->getArchetypeComponent<
         RenderCameraArchetype, PerspectiveCameraData>();
 
     params->instanceOffsets = (int32_t *)mgr->getArchetypeWorldOffsets<
@@ -128,7 +117,7 @@ extern "C" __global__ void initBVHParams(BVHParams *params,
     params->mortonCodes = (uint32_t *)mgr->getArchetypeComponent<
         RenderableArchetype, MortonCode>();
 
-    params->internalData = internal_data;
+    params->internalData = (BVHInternalData *)internal_data;
 
     params->hostAllocator = (void *)host_alloc;
     params->tmpAllocator = (void *)tmp_alloc;

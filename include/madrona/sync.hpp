@@ -193,7 +193,7 @@ using AtomicCount = Atomic<CountT>;
 template <typename T>
 class AtomicRef {
 public:
-    AtomicRef(T &ref)
+gg/    AtomicRef(T &ref)
 #ifndef MADRONA_STD_ATOMIC_REF
         : addr_(&ref)
 #else

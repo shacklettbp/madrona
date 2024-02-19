@@ -85,9 +85,11 @@ HostChannel * HostAllocator::getHostChannel()
     return channel_;
 }
 
+#if !defined(MADRONA_MWGPU_BVH_MODULE)
 namespace SharedMemStorage {
 __shared__ Chunk buffer[numSMemBytes / sizeof(Chunk)];
 }
+#endif
 
 TmpAllocator::TmpAllocator()
     : base_(mwGPU::getHostAllocator()->reserveMemory(128ul * 1024ul * 1024ul * 1024ul, 0)),

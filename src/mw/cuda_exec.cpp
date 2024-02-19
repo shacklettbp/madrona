@@ -32,6 +32,7 @@ using namespace madrona;
 #include "device/include/madrona/memory.hpp"
 #include "device/include/madrona/mw_gpu/host_print.hpp"
 #include "device/include/madrona/mw_gpu/tracing.hpp"
+#include "device/include/madrona/bvh.hpp"
 
 namespace madrona::mwGPU {
 
@@ -300,8 +301,8 @@ struct BVHKernels {
     // Allocates internal nodes
     CUfunction allocInternalNodes;
 
-    // Entry point for creating the tree
-    CUfunction entry;
+    // Entry point for creating the initial tree
+    CUfunction buildFast;
 };
 
 struct GPUKernels {
@@ -993,7 +994,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     DynArray<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-dlto",
-        "-arch", gpu_arch_str.c_str()
+        "-DMADRONA_MWGPU_BVH_MODULE",
+        "-arch", gpu_arch_str.c_str(),
     };
 
     for (const char *user_flag : cfg.userCompileFlags) {
@@ -1038,9 +1040,9 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     REQ_NVJITLINK(nvJitLinkDestroy(&linker));
 
-    CUfunction bvh_entry;
-    REQ_CU(cuModuleGetFunction(&bvh_entry, mod,
-                               "bvhEntry"));
+    CUfunction bvh_build_fast;
+    REQ_CU(cuModuleGetFunction(&bvh_build_fast, mod,
+                               "bvhBuildFast"));
 
     CUfunction bvh_init;
     REQ_CU(cuModuleGetFunction(&bvh_init, mod,
@@ -1055,7 +1057,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .mod = mod,
         .init = bvh_init,
         .allocInternalNodes = bvh_alloc,
-        .entry = bvh_entry
+        .buildFast = bvh_build_fast
     };
 
     return bvh_kernels;
@@ -1611,28 +1613,9 @@ static GPUEngineState initEngineAndUserState(
     cu::deallocCPU(exported_readback);
 
     { // Setup the BVH parameters in the __constant__ block of the bvh module
-        struct BVHParams {
-            // Given by the ECS
-            uint32_t numWorlds;
-            void *instances;
-            void *views;
-            int32_t *instanceOffsets;
-            int32_t *instanceCounts;
-            int32_t *viewOffsets;
-            uint32_t *mortonCodes;
-            void *internalData;
-            void *hostAllocator;
-            void *tmpAllocator;
-        };
-
-        struct BVHInternalData {
-            void *internalNodes;
-            uint32_t allocatedNodes;
-        };
-
         // Pass this to the ECS to fill in
-        auto params_tmp = cu::allocGPU(sizeof(BVHParams));
-        auto bvh_internals = cu::allocGPU(sizeof(BVHInternalData));
+        auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
+        auto bvh_internals = cu::allocGPU(sizeof(mwGPU::madrona::BVHInternalData));
 
         printf("From CPU, bvh params temporary is in %p (data %p)\n", 
                 params_tmp, bvh_internals);
@@ -1661,7 +1644,8 @@ static GPUEngineState initEngineAndUserState(
 
         REQ_CUDA(cudaStreamSynchronize(strm));
 
-        cuMemcpy(bvh_consts_addr, (CUdeviceptr)params_tmp, sizeof(BVHParams));
+        cuMemcpy(bvh_consts_addr, (CUdeviceptr)params_tmp, 
+                 sizeof(mwGPU::madrona::BVHParams));
 
         cu::deallocGPU(params_tmp);
     }
@@ -1844,7 +1828,8 @@ static CUgraphExec makeTaskGraphRunGraph(
     const MegakernelConfig *megakernel_cfgs,
     const CUfunction *megakernels,
     int64_t num_megakernels,
-    BVHKernels &bvh_kernels)
+    BVHKernels &bvh_kernels,
+    int shared_mem_per_sm)
 {
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
@@ -1957,12 +1942,16 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &megakernel_launches.back(), 1,
                                     &bvh_launch_params));
 
-        bvh_launch_params.func = bvh_kernels.entry;
-        bvh_launch_params.gridDimX = bvh_kernels.numSMs * 16;
+        const uint32_t num_blocks_per_sm_fast_build = 16;
+        bvh_launch_params.func = bvh_kernels.buildFast;
+        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+                                     num_blocks_per_sm_fast_build;
         bvh_launch_params.blockDimX = 256;
+        bvh_launch_params.sharedMemBytes = shared_mem_per_sm / 
+                                           num_blocks_per_sm_fast_build;
 
-        CUgraphNode entry_node;
-        REQ_CU(cuGraphAddKernelNode(&entry_node, run_graph,
+        CUgraphNode build_fast_node;
+        REQ_CU(cuGraphAddKernelNode(&build_fast_node, run_graph,
                                     &alloc_node, 1, 
                                     &bvh_launch_params));
     }
@@ -2006,6 +1995,12 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
     REQ_CU(cuDeviceGetAttribute(
         &num_sms, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, cu_gpu));
 
+    int shared_mem_per_sm;
+    REQ_CU(cuDeviceGetAttribute(
+           &shared_mem_per_sm, 
+           CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
+           cu_gpu));
+
     CountT max_megakernel_blocks_per_sm = 1;
     const char *enable_pgo_env = getenv("MADRONA_MWGPU_ENABLE_PGO");
     if (enable_pgo_env && enable_pgo_env[0] == '1') {
@@ -2047,7 +2042,8 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
             makeTaskGraphRunGraph(megakernel_cfgs.data(),
                                   gpu_kernels.megakernels.data(),
                                   gpu_kernels.megakernels.size(),
-                                  bvh_kernels);
+                                  bvh_kernels,
+                                  shared_mem_per_sm);
 
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,
