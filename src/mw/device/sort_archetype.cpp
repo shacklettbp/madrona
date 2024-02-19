@@ -1305,6 +1305,8 @@ void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
 }
 
 void SortArchetypeNodeBase::correctWorldCounts(int32_t invocation_idx) {
+    auto taskgraph = mwGPU::getTaskGraph();
+
     // Correct world counts by subtracting "entities before" from "entities
     // before and including" for each world. A world with 0 entities will
     // compute numEntities - numEntities = 0. For worlds with 0 entities,
@@ -1313,8 +1315,10 @@ void SortArchetypeNodeBase::correctWorldCounts(int32_t invocation_idx) {
 
     if (invocation_idx == 0)
     {
-        int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
-        numDynamicInvocations = numEntities;
+        int32_t num_entities = bins[(numPasses - 1) * 256 + 255];
+
+        taskgraph->getNodeData(firstRearrangePassData).numDynamicInvocations =
+            num_entities;
     }
 }
 
@@ -1349,7 +1353,12 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_
     Entity e = entities_staging[invocation_idx];
 
     dst[invocation_idx] = e;
-    state_mgr->remapEntity(e, invocation_idx);
+
+    // FIXME: temporary entities still have an entity column, but they need to
+    // *NOT* be remapped
+    if (e != Entity::none()) {
+        state_mgr->remapEntity(e, invocation_idx);
+    }
 
     if (invocation_idx == 0) {
         numDynamicInvocations = 0;

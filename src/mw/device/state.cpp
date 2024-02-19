@@ -462,6 +462,13 @@ Loc StateManager::makeTemporary(WorldID world_id,
         row,
     };
 
+    // FIXME: Shouldn't even need to write entity IDs
+    // for tmp entities (or have the column), but the sort
+    // needs a sentinel value written here so it doesn't try to do
+    // invalid entity ID remapping
+    Entity *entity_column = (Entity *)tbl.columns[0];
+    entity_column[row] = Entity::none();
+
     WorldID *world_column = (WorldID *)tbl.columns[1];
     world_column[row] = world_id;
 
