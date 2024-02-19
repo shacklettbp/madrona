@@ -1620,6 +1620,8 @@ static GPUEngineState initEngineAndUserState(
             int32_t *instanceCounts;
             int32_t *viewOffsets;
             uint32_t *mortonCodes;
+            void *hostAllocator;
+            void *tmpAllocator;
         };
 
         // Pass this to the ECS to fill in
@@ -1647,7 +1649,7 @@ static GPUEngineState initEngineAndUserState(
         // Call the bvh init function from bvh module
         auto bvh_init_internal_args = makeKernelArgBuffer(alloc_init);
         launchKernel(bvh_kernels.init, 1, 1,
-                     bvh_init_internal_args);
+                     no_args);
 
         REQ_CUDA(cudaStreamSynchronize(strm));
 
@@ -1927,14 +1929,14 @@ static CUgraphExec makeTaskGraphRunGraph(
     }
 
 #if 1
-    { // Add the bvh kernel node
-        CUDA_KERNEL_NODE_PARAMS bvh_morton_params = {
-            .func = bvh_kernels.entry,
+    { // Add the bvh kernel nodes
+        CUDA_KERNEL_NODE_PARAMS bvh_launch_params = {
+            .func = bvh_kernels.allocInternalNodes,
             // We want to max-out the GPU for all the BVH kernels
-            .gridDimX = bvh_kernels.numSMs * 16,
+            .gridDimX = 1,
             .gridDimY = 1,
             .gridDimZ = 1,
-            .blockDimX = 256,
+            .blockDimX = 1,
             .blockDimY = 1,
             .blockDimZ = 1,
             .sharedMemBytes = 0,
@@ -1942,10 +1944,19 @@ static CUgraphExec makeTaskGraphRunGraph(
             .extra = nullptr
         };
 
-        CUgraphNode morton_code_node;
-        REQ_CU(cuGraphAddKernelNode(&morton_code_node, run_graph,
-                                    &megakernel_launches.back(), 1, 
-                                    &bvh_morton_params));
+        CUgraphNode alloc_node;
+        REQ_CU(cuGraphAddKernelNode(&alloc_node, run_graph,
+                                    &megakernel_launches.back(), 1,
+                                    &bvh_launch_params));
+
+        bvh_launch_params.func = bvh_kernels.entry;
+        bvh_launch_params.gridDimX = bvh_kernels.numSMs * 16;
+        bvh_launch_params.blockDimX = 256;
+
+        CUgraphNode entry_node;
+        REQ_CU(cuGraphAddKernelNode(&entry_node, run_graph,
+                                    &alloc_node, 1, 
+                                    &bvh_launch_params));
     }
 #endif
 

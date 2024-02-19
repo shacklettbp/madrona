@@ -89,6 +89,8 @@ struct BVHParams {
     int32_t *instanceCounts;
     int32_t *viewOffsets;
     uint32_t *mortonCodes;
+    void *hostAllocator;
+    void *tmpAllocator;
 };
 
 extern "C" __global__ void initBVHParams(BVHParams *params,
@@ -99,7 +101,8 @@ extern "C" __global__ void initBVHParams(BVHParams *params,
 
     // Need to get the pointers to instances, views, offsets, etc...
     StateManager *mgr = mwGPU::getStateManager();
-    // mwGPU::HostAllocator *host_alloc = mwGPU::getHostAllocator();
+    mwGPU::HostAllocator *host_alloc = mwGPU::getHostAllocator();
+    mwGPU::TmpAllocator *tmp_alloc = &mwGPU::TmpAllocator::get();
 
     printf("Hello from initBVHParams: %p\n", (void *)params);
 
@@ -122,6 +125,9 @@ extern "C" __global__ void initBVHParams(BVHParams *params,
 
     params->mortonCodes = (uint32_t *)mgr->getArchetypeComponent<
         RenderableArchetype, MortonCode>();
+
+    params->hostAllocator = (void *)host_alloc;
+    params->tmpAllocator = (void *)tmp_alloc;
 
     // params->hostChannel = (void *)host_alloc->getHostChannel();
 }

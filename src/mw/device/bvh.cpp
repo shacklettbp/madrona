@@ -1,5 +1,6 @@
 #include <atomic>
 #include <madrona/math.hpp>
+#include <madrona/memory.hpp>
 
 using namespace madrona;
 
@@ -86,6 +87,10 @@ struct BVHParams {
     int32_t *instanceCounts;
     int32_t *viewOffsets;
     uint32_t *mortonCodes;
+
+    // These are all going to be inherited from the ECS
+    mwGPU::HostAllocator *hostAllocator;
+    mwGPU::TmpAllocator *tmpAllocator;
 };
 
 extern "C" {
@@ -98,7 +103,7 @@ struct HostAllocInit {
     HostChannel *channel;
 };
 
-extern "C" __global__ void bvhInit(HostAllocInit alloc_init)
+extern "C" __global__ void bvhInit()
 {
     printf("Hello from bvhInit\n");
     printf("Got numWorlds=%u\n", bvhParams.numWorlds);
@@ -124,12 +129,13 @@ extern "C" __global__ void bvhAllocInternalNodes()
 
     // For the 2-wide tree, we need about num_instances internal nodes
     uint32_t num_required_nodes = num_instances;
+    uint32_t num_bytes = num_required_nodes * sizeof(InternalNode);
 
-#if 0
-    if (num_required_nodes > bvhParams.internalData.allocatedNodes) {
-        // TODO:
-    }
-#endif
+    auto *ptr = bvhParams.tmpAllocator->alloc(num_bytes);
+    printf("From allocInternalNode: tmp allocated: %p\n", ptr);
+
+    uint32_t *ptr_u32 = (uint32_t *)ptr;
+    *ptr_u32 = 42;
 }
 
 extern "C" __global__ void bvhEntry()
@@ -140,7 +146,9 @@ extern "C" __global__ void bvhEntry()
         uint32_t last_world_count = bvhParams.instanceCounts[num_worlds-1];
         uint32_t num_instances = last_world_offset + last_world_count;
 
-        printf("There are %u total instances (host channel)\n", 
-                num_instances);
+        printf("There are %u total instances (hostalloc %p, tmpalloc %p)\n", 
+                num_instances,
+                bvhParams.hostAllocator,
+                bvhParams.tmpAllocator);
     }
 }
