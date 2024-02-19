@@ -151,8 +151,14 @@ extern "C" __global__ void bvhBuildFast()
             return -1;
         }
 
-        return bits::llcp(bvhParams.mortonCodes[i+world_info.internalNodesOffset],
-                         bvhParams.mortonCodes[j+world_info.internalNodesOffset]);
+        int32_t llcp = bits::llcp(bvhParams.mortonCodes[i+world_info.internalNodesOffset],
+                bvhParams.mortonCodes[j+world_info.internalNodesOffset]);
+
+        if (llcp == 8 * sizeof(uint32_t)) {
+            return llcp + bits::llcp(i, j);
+        } else {
+            return llcp;
+        }
     };
 
     int32_t direction = bits::sign(llcp_nodes(tn_offset, tn_offset+1) -
