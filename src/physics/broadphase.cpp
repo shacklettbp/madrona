@@ -29,7 +29,7 @@ BVH::BVH(const ObjectManager *obj_mgr,
       num_allocated_leaves_(max_leaves),
       leaf_velocity_expansion_(leaf_velocity_expansion),
       leaf_accel_expansion_(leaf_accel_expansion),
-      force_rebuild_(false)
+      force_rebuild_(true)
 {}
 
 CountT BVH::numInternalNodes(CountT num_leaves) const

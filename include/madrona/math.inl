@@ -1501,6 +1501,18 @@ bool AABB::contains(const AABB &o) const
            a_max.z >= b_max.z; 
 }
 
+bool AABB::contains(const Vector3 &p) const
+{
+    auto [a_min, a_max] = *this;
+
+    return a_min.x <= p.x &&
+           a_min.y <= p.y &&
+           a_min.z <= p.z &&
+           a_max.x >= p.x &&
+           a_max.y >= p.y &&
+           a_max.z >= p.z; 
+}
+
 void AABB::expand(const Vector3 &p)
 {
     if (p.x < pMin.x) {

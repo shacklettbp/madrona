@@ -325,6 +325,7 @@ struct AABB {
     inline float distance2(const AABB &o) const;
     inline bool overlaps(const AABB &o) const;
     inline bool contains(const AABB &o) const;
+    inline bool contains(const Vector3 &p) const;
     inline void expand(const Vector3 &p);
 
     inline bool rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
