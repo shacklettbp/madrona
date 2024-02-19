@@ -303,6 +303,9 @@ struct BVHKernels {
 
     // Entry point for creating the initial tree
     CUfunction buildFast;
+
+    // Debugging function
+    CUfunction debug;
 };
 
 struct GPUKernels {
@@ -1052,12 +1055,17 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_alloc, mod,
                                "bvhAllocInternalNodes"));
 
+    CUfunction bvh_debug;
+    REQ_CU(cuModuleGetFunction(&bvh_debug, mod,
+                               "bvhDebug"));
+
     BVHKernels bvh_kernels = {
         .numSMs = (uint32_t)num_sms,
         .mod = mod,
         .init = bvh_init,
         .allocInternalNodes = bvh_alloc,
-        .buildFast = bvh_build_fast
+        .buildFast = bvh_build_fast,
+        .debug = bvh_debug
     };
 
     return bvh_kernels;
@@ -1937,11 +1945,13 @@ static CUgraphExec makeTaskGraphRunGraph(
             .extra = nullptr
         };
 
+        // Allocation node
         CUgraphNode alloc_node;
         REQ_CU(cuGraphAddKernelNode(&alloc_node, run_graph,
                                     &megakernel_launches.back(), 1,
                                     &bvh_launch_params));
 
+        // Fast LBVH build node
         const uint32_t num_blocks_per_sm_fast_build = 16;
         bvh_launch_params.func = bvh_kernels.buildFast;
         bvh_launch_params.gridDimX = bvh_kernels.numSMs *
@@ -1954,6 +1964,19 @@ static CUgraphExec makeTaskGraphRunGraph(
         REQ_CU(cuGraphAddKernelNode(&build_fast_node, run_graph,
                                     &alloc_node, 1, 
                                     &bvh_launch_params));
+
+#if 1
+        // Debug node
+        bvh_launch_params.func = bvh_kernels.debug;
+        bvh_launch_params.gridDimX = 1;
+        bvh_launch_params.blockDimX = 1;
+        bvh_launch_params.sharedMemBytes = 0;
+        
+        CUgraphNode debug_node;
+        REQ_CU(cuGraphAddKernelNode(&debug_node, run_graph,
+                                    &build_fast_node, 1,
+                                    &bvh_launch_params));
+#endif
     }
 #endif
 

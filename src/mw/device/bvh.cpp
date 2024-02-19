@@ -52,7 +52,7 @@ extern "C" __global__ void bvhAllocInternalNodes()
 
     // For the 2-wide tree, we need about num_instances internal nodes
     uint32_t num_required_nodes = num_instances;
-    uint32_t num_bytes = num_required_nodes * sizeof(InternalNode);
+    uint32_t num_bytes = num_required_nodes * sizeof(LBVHNode);
 
     mwGPU::TmpAllocator *allocator = (mwGPU::TmpAllocator *)bvhParams.tmpAllocator;
 
@@ -60,7 +60,7 @@ extern "C" __global__ void bvhAllocInternalNodes()
     printf("From allocInternalNode: tmp allocated: %p\n", ptr);
     printf("From allocInternalNode: internal data at: %p\n", internal_data);
 
-    internal_data->internalNodes = (InternalNode *)ptr;
+    internal_data->internalNodes = (LBVHNode *)ptr;
     internal_data->numAllocatedNodes = num_required_nodes;
     internal_data->buildFastAccumulator.store_relaxed(0);
 }
@@ -130,23 +130,20 @@ extern "C" __global__ void bvhBuildFast()
         uint32_t internalNodesOffset;
     } world_info;
 
-    world_info.idx = bvhParams->instances[thread_global_idx].worldIDX;
-
-    world_info.numInternalNodes = 
-        bvhParams->instanceCounts[instance_data.worldIDX] - 1;
-    world_info.internalNodesOffset = 
-        bvhParams->instanceOffsets[instance_data.worldIDX];
+    world_info.idx = bvhParams.instances[thread_global_idx].worldIDX;
+    world_info.numInternalNodes = bvhParams.instanceCounts[world_info.idx] - 1;
+    world_info.internalNodesOffset = bvhParams.instanceOffsets[world_info.idx];
 
     // The offset into the nodes of the world this thread is dealing with
     int32_t tn_offset = thread_offset - world_info.internalNodesOffset;
 
-    if (thread_node_offset >= world_info.numInternalNodes) {
+    if (tn_offset >= world_info.numInternalNodes) {
         return;
     }
 
     // For now, we load things directly from global memory which sucks.
     // Need to try the strategy from the TODO
-    auto llcp_nodes = [&bvhParams, &world_info](int32_t i, int32_t j) {
+    auto llcp_nodes = [&world_info](int32_t i, int32_t j) {
         if (j >= world_info.numInternalNodes || j < 0) {
             return -1;
         }
@@ -174,12 +171,12 @@ extern "C" __global__ void bvhBuildFast()
 
     for (int32_t t = length_max / 2; t >= 1; t /= 2) {
         if (llcp_nodes(tn_offset, 
-                      tn_offset + (length + t) * direction) > llcp_min) {
+                       tn_offset + (true_length + t) * direction) > llcp_min) {
             true_length += t;
         }
     }
 
-    int32_t other_end = tn_offset + length * direction;
+    int32_t other_end = tn_offset + true_length * direction;
 
     // The number of common bits for all leaves coming out of this node
     int32_t node_llcp = llcp_nodes(tn_offset, other_end);
@@ -187,8 +184,8 @@ extern "C" __global__ void bvhBuildFast()
     // Relative to the tn_offset
     int32_t rel_split_offset = 0;
     
-    for (int32_t divisor = 2, t = ceil_div(length, divisor);
-            t >= 1; (divisor *= 2), t = ceil_div(length, divisor)) {
+    for (int32_t divisor = 2, t = bits::ceil_div(true_length, divisor);
+            t >= 1; (divisor *= 2), t = bits::ceil_div(true_length, divisor)) {
         if (llcp_nodes(tn_offset, tn_offset + 
                     (rel_split_offset + t) * direction) > node_llcp) {
             rel_split_offset += t;
@@ -201,7 +198,7 @@ extern "C" __global__ void bvhBuildFast()
     int32_t left_index = std::min(tn_offset, other_end);
     int32_t right_index = std::max(tn_offset, other_end);
 
-    LBVHNode *nodes = bvhParams.internalData->internalNodes +
+    LBVHNode *nodes = internal_data->internalNodes +
                       world_info.internalNodesOffset;
 
     if (left_index == split_index) {
@@ -219,4 +216,25 @@ extern "C" __global__ void bvhBuildFast()
         // The right node is an internal node and its index is split_index+1
         nodes[tn_offset].right = split_index+1;
     }
+}
+
+extern "C" __global__ void bvhDebug()
+{
+#if 1
+    BVHInternalData *internal_data = bvhParams.internalData;
+
+    uint32_t num_instances = bvhParams.instanceOffsets[bvhParams.numWorlds-1] +
+                             bvhParams.instanceCounts[bvhParams.numWorlds-1];
+
+    for (int i = 0; i < num_instances; ++i) {
+        render::InstanceData &instance_data = bvhParams.instances[i];
+        LBVHNode *node = &internal_data->internalNodes[i];
+        uint32_t offset = bvhParams.instanceOffsets[i];
+
+        printf("(Internal node %d) %d: left: %d, right: %d\n",
+               i - offset,
+               instance_data.worldIDX,
+               node->left, node->right);
+    }
+#endif
 }

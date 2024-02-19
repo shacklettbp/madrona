@@ -183,4 +183,33 @@ inline void zeroN(std::type_identity_t<T> *ptr, CountT num_elems)
     memset(ptr, 0, num_elems * sizeof(T));
 }
 
+// For printing binary
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  ((byte) & 0x80 ? '1' : '0'), \
+  ((byte) & 0x40 ? '1' : '0'), \
+  ((byte) & 0x20 ? '1' : '0'), \
+  ((byte) & 0x10 ? '1' : '0'), \
+  ((byte) & 0x08 ? '1' : '0'), \
+  ((byte) & 0x04 ? '1' : '0'), \
+  ((byte) & 0x02 ? '1' : '0'), \
+  ((byte) & 0x01 ? '1' : '0') 
+
+#define USHORT_TO_BINARY_PATTERN BYTE_TO_BINARY_PATTERN " " BYTE_TO_BINARY_PATTERN
+#define UINT_TO_BINARY_PATTERN \
+    BYTE_TO_BINARY_PATTERN " " \
+    BYTE_TO_BINARY_PATTERN " " \
+    BYTE_TO_BINARY_PATTERN " " \
+    BYTE_TO_BINARY_PATTERN
+
+#define USHORT_TO_BINARY(x) \
+    BYTE_TO_BINARY((x >> 8)), \
+    BYTE_TO_BINARY((x))
+
+#define UINT_TO_BINARY(x) \
+    BYTE_TO_BINARY((x >> 24)), \
+    BYTE_TO_BINARY((x >> 16)), \
+    BYTE_TO_BINARY((x >> 8)), \
+    BYTE_TO_BINARY((x))
+
 }
