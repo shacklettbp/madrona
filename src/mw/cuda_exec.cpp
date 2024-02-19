@@ -918,7 +918,6 @@ static __attribute__((always_inline)) inline void dispatch(
 // We still want to have the same compiler flags as passed to the megakernel
 static BVHKernels buildBVHKernels(const CompileConfig &cfg,
                                   int32_t num_sms,
-                                  // int32_t num_blocks_per_sm,
                                   std::pair<int, int> cuda_arch)
 {
     using namespace std;
@@ -927,16 +926,73 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         MADRONA_MW_GPU_BVH_INTERNAL_CPP
     };
 
-    std::cout << "Compiling " << MADRONA_MW_GPU_BVH_INTERNAL_CPP << std::endl;
-
     // Build architecture string for this GPU
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
         to_string(cuda_arch.second);
+
+    std::string linker_arch_str =
+        std::string("-arch=") + gpu_arch_str;
+
+    DynArray<const char *> linker_flags {
+        linker_arch_str.c_str(),
+        "-ftz=1",
+        "-prec-div=0",
+        "-prec-sqrt=0",
+        "-fma=1",
+        // "-optimize-unused-variables",
+        "-lto"
+    };
+
+    nvJitLinkHandle linker;
+    REQ_NVJITLINK(nvJitLinkCreate(
+        &linker, linker_flags.size(), linker_flags.data()));
+
+    nvJitLinkInputType linker_input_type = NVJITLINK_INPUT_LTOIR;
+
+    auto printLinkerLogs = [&linker](FILE *out) {
+        size_t info_log_size, err_log_size;
+        REQ_NVJITLINK(
+            nvJitLinkGetInfoLogSize(linker, &info_log_size));
+        REQ_NVJITLINK(
+            nvJitLinkGetErrorLogSize(linker, &err_log_size));
+
+        if (info_log_size > 0) {
+            HeapArray<char> info_log(info_log_size);
+            REQ_NVJITLINK(nvJitLinkGetInfoLog(linker, info_log.data()));
+
+            fprintf(out, "%s\n", info_log.data());
+        }
+
+        if (err_log_size > 0) {
+            HeapArray<char> err_log(err_log_size);
+            REQ_NVJITLINK(nvJitLinkGetErrorLog(linker, err_log.data()));
+
+            fprintf(out, "%s\n", err_log.data());
+        }
+    };
+
+    auto checkLinker = [&printLinkerLogs](nvJitLinkResult res) {
+        if (res != NVJITLINK_SUCCESS) {
+            fprintf(stderr, "CUDA linking Failed!\n");
+
+            printLinkerLogs(stderr);
+
+            fprintf(stderr, "\n");
+
+            ERR_NVJITLINK(res);
+        }
+    };
+
+    auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
+        checkLinker(nvJitLinkAddData(linker, linker_input_type,
+            (char *)cubin.data(), cubin.size(), name));
+    };
 
     string gpu_arch_flag = std::string("-arch=") + gpu_arch_str;
 
     DynArray<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
+        "-dlto",
         "-arch", gpu_arch_str.c_str()
     };
 
@@ -951,24 +1007,36 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     DynArray<const char *> compile_flags = std::move(common_compile_flags);
 
-    std::string linker_arch_str = std::string("-arch=") + gpu_arch_str;
+    for (int i = 0; i < bvh_srcs.size(); ++i) {
+        std::ifstream bvh_file_stream(bvh_srcs[i]);
+        std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
+            std::istreambuf_iterator<char>());
 
-    std::ifstream bvh_file_stream(MADRONA_MW_GPU_BVH_INTERNAL_CPP);
-    std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
-        std::istreambuf_iterator<char>());
+        for (int i = 0; i < compile_flags.size(); ++i) {
+            printf("Flags: %s\n", compile_flags[i]);
+        }
 
-    for (int i = 0; i < compile_flags.size(); ++i) {
-        printf("Flags: %s\n", compile_flags[i]);
+        // Gives us LTOIR
+        auto jit_output = cu::jitCompileCPPSrc(
+            bvh_src.c_str(), bvh_srcs[i],
+            compile_flags.data(), compile_flags.size(),
+            compile_flags.data(), compile_flags.size(),
+            true, true);
+
+        addToLinker(jit_output.outputBinary, bvh_srcs[i]);
     }
 
-    auto jit_output = cu::jitCompileCPPSrc(
-        bvh_src.c_str(), MADRONA_MW_GPU_BVH_INTERNAL_CPP,
-        compile_flags.data(), compile_flags.size(),
-        compile_flags.data(), compile_flags.size(),
-        false, true);
+    checkLinker(nvJitLinkComplete(linker));
+
+    size_t cubin_size;
+    REQ_NVJITLINK(nvJitLinkGetLinkedCubinSize(linker, &cubin_size));
+    HeapArray<char> linked_cubin(cubin_size);
+    REQ_NVJITLINK(nvJitLinkGetLinkedCubin(linker, linked_cubin.data()));
 
     CUmodule mod;
-    REQ_CU(cuModuleLoadData(&mod, jit_output.outputPTX.data()));
+    REQ_CU(cuModuleLoadData(&mod, linked_cubin.data()));
+
+    REQ_NVJITLINK(nvJitLinkDestroy(&linker));
 
     CUfunction bvh_entry;
     REQ_CU(cuModuleGetFunction(&bvh_entry, mod,
@@ -1553,21 +1621,6 @@ static GPUEngineState initEngineAndUserState(
             int32_t *viewOffsets;
             uint32_t *mortonCodes;
         };
-
-#if 0
-        struct BVHInternalData {
-            // These are the internal nodes. Needs to be properly allocated to
-            // accomodate for the number of instances.
-            InternalNode *internalNodes;
-            uint32_t allocatedNodes;
-
-
-            // For memory allocation purposes
-            HostChannel *hostChannel;
-            uint64_t pageSize;
-            uint64_t granularity;
-        };
-#endif
 
         // Pass this to the ECS to fill in
         auto params_tmp = cu::allocGPU(sizeof(BVHParams));

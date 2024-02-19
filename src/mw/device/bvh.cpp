@@ -101,6 +101,7 @@ struct HostAllocInit {
 extern "C" __global__ void bvhInit(HostAllocInit alloc_init)
 {
     printf("Hello from bvhInit\n");
+    printf("Got numWorlds=%u\n", bvhParams.numWorlds);
 }
 
 // For now, just use #defines for parameterizing the kernels

@@ -56,7 +56,7 @@ CompileOutput jitCompileCPPSrc(const char *src,
         REQ_NVRTC(nvrtcGetPTX(prog, ptx.data()));
 
         if (print_ptx) {
-            printf("%s\n", ptx.data());
+            printf("PTX: %s\n", ptx.data());
         }
 
         return ptx;
@@ -87,6 +87,10 @@ CompileOutput jitCompileCPPSrc(const char *src,
         }
 
         HeapArray<char> ptx = getPTX(fake_prog);
+
+        if (print_ptx) {
+            printf("PTX: %s\n", ptx.data());
+        }
 
         REQ_NVRTC(nvrtcDestroyProgram(&fake_prog));
 
