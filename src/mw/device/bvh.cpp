@@ -1,6 +1,8 @@
 // Dummy stuff we don't need but certain headers need
 #define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
 
+#define MADRONA_DEBUG_TEST
+
 #include <atomic>
 #include <algorithm>
 #include <madrona/bvh.hpp>
@@ -63,6 +65,29 @@ extern "C" __global__ void bvhAllocInternalNodes()
     internal_data->internalNodes = (LBVHNode *)ptr;
     internal_data->numAllocatedNodes = num_required_nodes;
     internal_data->buildFastAccumulator.store_relaxed(0);
+
+#if defined(MADRONA_DEBUG_TEST)
+    // We are going to set up a test case here from the paper
+    uint32_t *codes = bvhParams.mortonCodes;
+
+    codes[0] = 0b00001;
+    codes[1] = 0b00010;
+    codes[2] = 0b00100;
+    codes[3] = 0b00101;
+    codes[4] = 0b10011;
+    codes[5] = 0b11000;
+    codes[6] = 0b11001;
+    codes[7] = 0b11110;
+
+    codes[8+0] = 0b00001;
+    codes[8+1] = 0b00010;
+    codes[8+2] = 0b00100;
+    codes[8+3] = 0b00101;
+    codes[8+4] = 0b10011;
+    codes[8+5] = 0b11000;
+    codes[8+6] = 0b11001;
+    codes[8+7] = 0b11110;
+#endif
 }
 
 namespace bits {
@@ -75,7 +100,7 @@ int32_t llcp(uint32_t a, uint32_t b)
 int32_t sign(int32_t x)
 {
     uint32_t x_u32 = *((uint32_t *)&x);
-    return (int32_t)(x_u32 >> 31) * 2 - 1;
+    return 1 - (int32_t)(x_u32 >> 31) * 2;
 }
 
 int32_t ceil_div(int32_t a, int32_t b)
@@ -111,6 +136,12 @@ extern "C" __global__ void bvhBuildFast()
         return;
     }
 
+#if defined(MADRONA_DEBUG_TEST)
+    if (thread_offset >= 16) {
+        return;
+    }
+#endif
+
     // Load a bunch of morton codes into shared memory.
     //
     // TODO: Profile the difference between directly loading the morton codes
@@ -128,23 +159,42 @@ extern "C" __global__ void bvhBuildFast()
         uint32_t idx;
         uint32_t numInternalNodes;
         uint32_t internalNodesOffset;
+        uint32_t numLeaves;
     } world_info;
 
     world_info.idx = bvhParams.instances[thread_global_idx].worldIDX;
-    world_info.numInternalNodes = bvhParams.instanceCounts[world_info.idx] - 1;
+    world_info.numLeaves = bvhParams.instanceCounts[world_info.idx];
+    world_info.numInternalNodes = world_info.numLeaves - 1;
     world_info.internalNodesOffset = bvhParams.instanceOffsets[world_info.idx];
+
+#if defined(MADRONA_DEBUG_TEST)
+    world_info.idx = 0;
+    world_info.numLeaves = 8;
+    world_info.numInternalNodes = 7;
+    world_info.internalNodesOffset = 0;
+    
+    if (thread_offset >= 8) {
+        world_info.internalNodesOffset = 8;
+        world_info.idx = 1;
+    }
+#endif
 
     // The offset into the nodes of the world this thread is dealing with
     int32_t tn_offset = thread_offset - world_info.internalNodesOffset;
 
+    LBVHNode *nodes = internal_data->internalNodes +
+                      world_info.internalNodesOffset;
+
     if (tn_offset >= world_info.numInternalNodes) {
+        nodes[tn_offset].left = -1;
+        nodes[tn_offset].right = -1;
         return;
     }
 
     // For now, we load things directly from global memory which sucks.
     // Need to try the strategy from the TODO
     auto llcp_nodes = [&world_info](int32_t i, int32_t j) {
-        if (j >= world_info.numInternalNodes || j < 0) {
+        if (j >= world_info.numLeaves || j < 0) {
             return -1;
         }
 
@@ -178,6 +228,15 @@ extern "C" __global__ void bvhBuildFast()
 
     int32_t other_end = tn_offset + true_length * direction;
 
+#if defined (MADRONA_DEBUG_TEST)
+    printf("tn_offset %d: direction=%d = %d - %d | true_length %d | other_end %d\n", 
+            tn_offset, direction,
+            llcp_nodes(tn_offset, tn_offset+1),
+            llcp_nodes(tn_offset, tn_offset-1),
+            true_length,
+            other_end);
+#endif
+
     // The number of common bits for all leaves coming out of this node
     int32_t node_llcp = llcp_nodes(tn_offset, other_end);
 
@@ -197,9 +256,6 @@ extern "C" __global__ void bvhBuildFast()
 
     int32_t left_index = std::min(tn_offset, other_end);
     int32_t right_index = std::max(tn_offset, other_end);
-
-    LBVHNode *nodes = internal_data->internalNodes +
-                      world_info.internalNodesOffset;
 
     if (left_index == split_index) {
         // The left node is a leaf and the leaf's index is split_index
@@ -226,13 +282,13 @@ extern "C" __global__ void bvhDebug()
     uint32_t num_instances = bvhParams.instanceOffsets[bvhParams.numWorlds-1] +
                              bvhParams.instanceCounts[bvhParams.numWorlds-1];
 
-    for (int i = 0; i < num_instances; ++i) {
+    for (int i = 0; i < 16; ++i) {
         render::InstanceData &instance_data = bvhParams.instances[i];
         LBVHNode *node = &internal_data->internalNodes[i];
         uint32_t offset = bvhParams.instanceOffsets[i];
 
         printf("(Internal node %d) %d: left: %d, right: %d\n",
-               i - offset,
+               i,
                instance_data.worldIDX,
                node->left, node->right);
     }

@@ -154,6 +154,7 @@ inline void exportCountsGPU(Context &ctx,
             RenderableArchetype>();
     }
 
+#if 0
     uint32_t *morton_codes = state_mgr->getArchetypeComponent<
         RenderableArchetype, MortonCode>();
     
@@ -180,6 +181,7 @@ inline void exportCountsGPU(Context &ctx,
                 world_ids[i].idx, 
                 morton_codes[i]);
     }
+#endif
 }
 #endif
 
