@@ -1,7 +1,7 @@
 // Dummy stuff we don't need but certain headers need
 #define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
 
-#define MADRONA_DEBUG_TEST
+// #define MADRONA_DEBUG_TEST
 
 #include <atomic>
 #include <algorithm>
@@ -61,6 +61,7 @@ extern "C" __global__ void bvhAllocInternalNodes()
     auto *ptr = allocator->alloc(num_bytes);
     printf("From allocInternalNode: tmp allocated: %p\n", ptr);
     printf("From allocInternalNode: internal data at: %p\n", internal_data);
+    printf("There are %d total instances\n", (int32_t)num_instances);
 
     internal_data->internalNodes = (LBVHNode *)ptr;
     internal_data->numAllocatedNodes = num_required_nodes;
@@ -155,6 +156,7 @@ extern "C" __global__ void bvhBuildFast()
     // However, the complication lies in the case where 
 
     // Number of leaves in the world of this thread
+    //
     struct {
         uint32_t idx;
         uint32_t numInternalNodes;
@@ -162,7 +164,7 @@ extern "C" __global__ void bvhBuildFast()
         uint32_t numLeaves;
     } world_info;
 
-    world_info.idx = bvhParams.instances[thread_global_idx].worldIDX;
+    world_info.idx = bvhParams.instances[thread_offset].worldIDX;
     world_info.numLeaves = bvhParams.instanceCounts[world_info.idx];
     world_info.numInternalNodes = world_info.numLeaves - 1;
     world_info.internalNodesOffset = bvhParams.instanceOffsets[world_info.idx];
@@ -190,6 +192,9 @@ extern "C" __global__ void bvhBuildFast()
         nodes[tn_offset].right = -1;
         return;
     }
+
+    printf("(thread_offset = %d) tn_offset = %d | internalNodesOffset = %d | numInternalNodes = %d\n",
+            thread_offset, tn_offset, world_info.internalNodesOffset, world_info.numInternalNodes);
 
     // For now, we load things directly from global memory which sucks.
     // Need to try the strategy from the TODO
@@ -282,13 +287,13 @@ extern "C" __global__ void bvhDebug()
     uint32_t num_instances = bvhParams.instanceOffsets[bvhParams.numWorlds-1] +
                              bvhParams.instanceCounts[bvhParams.numWorlds-1];
 
-    for (int i = 0; i < 16; ++i) {
+    for (int i = 0; i < num_instances; ++i) {
         render::InstanceData &instance_data = bvhParams.instances[i];
         LBVHNode *node = &internal_data->internalNodes[i];
-        uint32_t offset = bvhParams.instanceOffsets[i];
+        uint32_t offset = bvhParams.instanceOffsets[instance_data.worldIDX];
 
         printf("(Internal node %d) %d: left: %d, right: %d\n",
-               i,
+               i - offset,
                instance_data.worldIDX,
                node->left, node->right);
     }
