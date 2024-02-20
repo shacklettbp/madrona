@@ -304,6 +304,9 @@ struct BVHKernels {
     // Entry point for creating the initial tree
     CUfunction buildFast;
 
+    // Entry point for optimizing the initial tree
+    CUfunction optFast;
+
     // Debugging function
     CUfunction debug;
 };
@@ -1055,6 +1058,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_alloc, mod,
                                "bvhAllocInternalNodes"));
 
+    CUfunction bvh_opt;
+    REQ_CU(cuModuleGetFunction(&bvh_opt, mod,
+                               "bvhOptimizeLBVH"));
+
     CUfunction bvh_debug;
     REQ_CU(cuModuleGetFunction(&bvh_debug, mod,
                                "bvhDebug"));
@@ -1065,6 +1072,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .init = bvh_init,
         .allocInternalNodes = bvh_alloc,
         .buildFast = bvh_build_fast,
+        .optFast = bvh_opt,
         .debug = bvh_debug
     };
 
@@ -1964,6 +1972,22 @@ static CUgraphExec makeTaskGraphRunGraph(
         REQ_CU(cuGraphAddKernelNode(&build_fast_node, run_graph,
                                     &alloc_node, 1, 
                                     &bvh_launch_params));
+
+#if 0
+        // Optimize LBVH build node
+        const uint32_t num_blocks_per_sm_opt_build = 16;
+        bvh_launch_params.func = bvh_kernels.optFast;
+        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+                                     num_blocks_per_sm_opt_build;
+        bvh_launch_params.blockDimX = 256;
+        bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
+                                           num_blocks_per_sm_opt_build;
+
+        CUgraphNode opt_fast_node;
+        REQ_CU(cuGraphAddKernelNode(&opt_fast_node, run_graph,
+                                    &build_fast_node, 1,
+                                    &bvh_launch_params));
+#endif
 
 #if 1
         // Debug node
