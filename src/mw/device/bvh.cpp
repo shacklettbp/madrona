@@ -1,7 +1,8 @@
 // Dummy stuff we don't need but certain headers need
 #define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
 
-// #define MADRONA_DEBUG_TEST
+#define MADRONA_DEBUG_TEST
+#define MADRONA_DEBUG_TEST_NUM_LEAVES 11
 
 #include <atomic>
 #include <algorithm>
@@ -71,23 +72,39 @@ extern "C" __global__ void bvhAllocInternalNodes()
     // We are going to set up a test case here from the paper
     uint32_t *codes = bvhParams.mortonCodes;
 
-    codes[0] = 0b00001;
-    codes[1] = 0b00010;
-    codes[2] = 0b00100;
-    codes[3] = 0b00101;
-    codes[4] = 0b10011;
-    codes[5] = 0b11000;
-    codes[6] = 0b11001;
-    codes[7] = 0b11110;
+    codes[0] = 1;
+    codes[1] = 3;
+    codes[2] = 11;
+    codes[3] = 19;
+    codes[4] = 25;
+    codes[5] = 39;
+    codes[6] = 57;
+    codes[7] = 90;
+    codes[8] = 121;
+    codes[9] = 251;
+    codes[10] = 253;
 
-    codes[8+0] = 0b00001;
-    codes[8+1] = 0b00010;
-    codes[8+2] = 0b00100;
-    codes[8+3] = 0b00101;
-    codes[8+4] = 0b10011;
-    codes[8+5] = 0b11000;
-    codes[8+6] = 0b11001;
-    codes[8+7] = 0b11110;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+0] = 1;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+1] = 3;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+2] = 11;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+3] = 19;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+4] = 25;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+5] = 39;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+6] = 57;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+7] = 90;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+8] = 121;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+9] = 251;
+    codes[MADRONA_DEBUG_TEST_NUM_LEAVES+10] = 253;
+
+    for (int i = 0; i < MADRONA_DEBUG_TEST_NUM_LEAVES; ++i) {
+        uint32_t code = codes[i];
+        printf(USHORT_TO_BINARY_PATTERN " ", USHORT_TO_BINARY((code>>16)));
+        printf(USHORT_TO_BINARY_PATTERN " \t", USHORT_TO_BINARY((code)));
+
+        printf("(Leaf node %d): \t (%d)\n", 
+                i, 
+                codes[i]);
+    }
 #endif
 }
 
@@ -117,7 +134,6 @@ extern "C" __global__ void bvhBuildFast()
     sm::BuildFastBuffer *smem = (sm::BuildFastBuffer *)sm::buffer;
 
     const uint32_t threads_per_block = blockDim.x;
-    const uint32_t thread_global_idx = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (threadIdx.x == 0) {
         uint32_t node_offset = internal_data->buildFastAccumulator.fetch_add<
@@ -138,7 +154,7 @@ extern "C" __global__ void bvhBuildFast()
     }
 
 #if defined(MADRONA_DEBUG_TEST)
-    if (thread_offset >= 16) {
+    if (thread_offset >= 2 * MADRONA_DEBUG_TEST_NUM_LEAVES) {
         return;
     }
 #endif
@@ -171,12 +187,12 @@ extern "C" __global__ void bvhBuildFast()
 
 #if defined(MADRONA_DEBUG_TEST)
     world_info.idx = 0;
-    world_info.numLeaves = 8;
-    world_info.numInternalNodes = 7;
+    world_info.numLeaves = MADRONA_DEBUG_TEST_NUM_LEAVES;
+    world_info.numInternalNodes = MADRONA_DEBUG_TEST_NUM_LEAVES-1;
     world_info.internalNodesOffset = 0;
     
-    if (thread_offset >= 8) {
-        world_info.internalNodesOffset = 8;
+    if (thread_offset >= MADRONA_DEBUG_TEST_NUM_LEAVES) {
+        world_info.internalNodesOffset = MADRONA_DEBUG_TEST_NUM_LEAVES;
         world_info.idx = 1;
     }
 #endif
@@ -287,7 +303,11 @@ extern "C" __global__ void bvhDebug()
     uint32_t num_instances = bvhParams.instanceOffsets[bvhParams.numWorlds-1] +
                              bvhParams.instanceCounts[bvhParams.numWorlds-1];
 
+#if defined(MADRONA_DEBUG_TEST)
+    for (int i = 0; i < MADRONA_DEBUG_TEST_NUM_LEAVES; ++i) {
+#else
     for (int i = 0; i < num_instances; ++i) {
+#endif
         render::InstanceData &instance_data = bvhParams.instances[i];
         LBVHNode *node = &internal_data->internalNodes[i];
         uint32_t offset = bvhParams.instanceOffsets[instance_data.worldIDX];
