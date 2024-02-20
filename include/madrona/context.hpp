@@ -69,6 +69,20 @@ public:
     template <typename ComponentT>
     inline ResultRef<ComponentT> getSafe(Entity e);
 
+    // Equivalent to Context::getSafe for entities. Note that the
+    // Loc overload below is not safe.
+    template <typename ComponentT>
+    inline ResultRef<ComponentT> getCheck(Entity e);
+
+    // Checks if the entity at Loc l has ComponentT and returns a reference
+    // to the component ata if so. Use ResultRef::valid() to check if the
+    // entity has the component and ResultRef::value() to get the reference.
+    // NOTE: This function is not safe, because Loc's can be invalidated
+    // by creating / deleting entities of the same archetype. This function
+    // does not / can not check if the Loc is still valid.
+    template <typename ComponentT>
+    inline ResultRef<ComponentT> getCheck(Loc l);
+
     // Directly get an entity's component by column ID and Loc.
     // This is fast but not recommended. Will likely be removed in future.
     template <typename ComponentT>

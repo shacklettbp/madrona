@@ -56,6 +56,20 @@ ResultRef<ComponentT> Context::getSafe(Entity e)
 }
 
 template <typename ComponentT>
+ResultRef<ComponentT> Context::getCheck(Entity e)
+{
+    return state_mgr_->get<ComponentT>(
+        MADRONA_MW_COND(cur_world_id_,) e);
+}
+
+template <typename ComponentT>
+ResultRef<ComponentT> Context::getCheck(Loc l)
+{
+    return state_mgr_->get<ComponentT>(
+        MADRONA_MW_COND(cur_world_id_,) l);
+}
+
+template <typename ComponentT>
 ComponentT & Context::getDirect(int32_t column_idx, Loc loc)
 {
     return state_mgr_->getDirect<ComponentT>(

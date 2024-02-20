@@ -38,7 +38,10 @@ public:
     ResultRef<ComponentT> getSafe(Entity e);
 
     template <typename ComponentT>
-    ResultRef<ComponentT> getSafe(Loc loc);
+    ResultRef<ComponentT> getCheck(Entity e);
+
+    template <typename ComponentT>
+    ResultRef<ComponentT> getCheck(Loc loc);
 
     template <typename ComponentT>
     ComponentT & getDirect(int32_t column_idx, Loc loc);

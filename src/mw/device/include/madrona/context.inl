@@ -60,7 +60,13 @@ ResultRef<ComponentT> Context::getSafe(Entity e)
 }
 
 template <typename ComponentT>
-ResultRef<ComponentT> Context::getSafe(Loc l)
+ResultRef<ComponentT> Context::getCheck(Entity e)
+{
+    return mwGPU::getStateManager()->get<ComponentT>(e);
+}
+
+template <typename ComponentT>
+ResultRef<ComponentT> Context::getCheck(Loc l)
 {
     return mwGPU::getStateManager()->get<ComponentT>(l);
 }

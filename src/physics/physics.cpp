@@ -1237,6 +1237,13 @@ TaskGraphNodeID RigidBodyPhysicsSystem::setupBroadphaseTasks(
     return broadphase::setupBVHTasks(builder, deps);
 }
 
+TaskGraphNodeID setupBroadphaseOverlapTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
+{
+    return broadphase::setupPreIntegrationTasks(builder, deps);
+}
+
 #ifdef MADRONA_GPU_MODE
 template <typename ArchetypeT>
 TaskGraph::NodeID queueSortByWorld(TaskGraph::Builder &builder,

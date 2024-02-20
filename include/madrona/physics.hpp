@@ -353,6 +353,10 @@ struct RigidBodyPhysicsSystem {
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
 
+    static TaskGraphNodeID setupBroadphaseOverlapTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
+
     static TaskGraphNodeID setupSubstepTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps,
