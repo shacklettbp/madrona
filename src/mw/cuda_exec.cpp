@@ -309,6 +309,8 @@ struct BVHKernels {
 
     // Debugging function
     CUfunction debug;
+
+    CUfunction raycast;
 };
 
 struct GPUKernels {
@@ -1020,9 +1022,12 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
             std::istreambuf_iterator<char>());
 
+#if 0
         for (int i = 0; i < compile_flags.size(); ++i) {
             printf("Flags: %s\n", compile_flags[i]);
         }
+#endif
+        printf("Compiling %s\n", bvh_srcs[i]);
 
         // Gives us LTOIR
         auto jit_output = cu::jitCompileCPPSrc(
@@ -1066,6 +1071,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_debug, mod,
                                "bvhDebug"));
 
+    CUfunction bvh_raycast_entry;
+    REQ_CU(cuModuleGetFunction(&bvh_raycast_entry, mod,
+                               "bvhRaycastEntry"));
+
     BVHKernels bvh_kernels = {
         .numSMs = (uint32_t)num_sms,
         .mod = mod,
@@ -1073,7 +1082,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .allocInternalNodes = bvh_alloc,
         .buildFast = bvh_build_fast,
         .optFast = bvh_opt,
-        .debug = bvh_debug
+        .debug = bvh_debug,
+        .raycast = bvh_raycast_entry
     };
 
     return bvh_kernels;
@@ -2001,6 +2011,15 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &build_fast_node, 1,
                                     &bvh_launch_params));
 #endif
+
+        bvh_launch_params.func = bvh_kernels.raycast;
+        bvh_launch_params.gridDimX = 1;
+        bvh_launch_params.blockDimX = 1;
+        bvh_launch_params.sharedMemBytes = 0;
+        CUgraphNode raycast_node;
+        REQ_CU(cuGraphAddKernelNode(&raycast_node, run_graph,
+                                    &debug_node, 1,
+                                    &bvh_launch_params));
     }
 #endif
 

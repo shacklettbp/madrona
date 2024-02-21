@@ -51,6 +51,7 @@ set(JOB_SYS_DEVICE_SOURCES
 
 set(BVH_DEVICE_SOURCES
     ${DEVICE_SRC_DIR}/bvh.cpp
+    ${DEVICE_SRC_DIR}/bvh_raycast.cpp
     ${DEVICE_SRC_DIR}/memory.cpp
 )
 
