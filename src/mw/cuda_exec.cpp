@@ -935,6 +935,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         MADRONA_MW_GPU_BVH_INTERNAL_CPP
     };
 
+    const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
+
     // Build architecture string for this GPU
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
         to_string(cuda_arch.second);
@@ -951,6 +953,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         // "-optimize-unused-variables",
         "-lto"
     };
+
+    if (force_debug_env[0] == '1') {
+        linker_flags.push_back("-g");
+    }
 
     nvJitLinkHandle linker;
     REQ_NVJITLINK(nvJitLinkCreate(
@@ -1005,6 +1011,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         "-DMADRONA_MWGPU_BVH_MODULE",
         "-arch", gpu_arch_str.c_str(),
     };
+
+    if (force_debug_env[0] == '1') {
+        common_compile_flags.push_back("--device-debug");
+    }
 
     for (const char *user_flag : cfg.userCompileFlags) {
         common_compile_flags.push_back(user_flag);
@@ -1983,7 +1993,7 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &alloc_node, 1, 
                                     &bvh_launch_params));
 
-#if 0
+#if 1
         // Optimize LBVH build node
         const uint32_t num_blocks_per_sm_opt_build = 16;
         bvh_launch_params.func = bvh_kernels.optFast;
@@ -2008,7 +2018,7 @@ static CUgraphExec makeTaskGraphRunGraph(
         
         CUgraphNode debug_node;
         REQ_CU(cuGraphAddKernelNode(&debug_node, run_graph,
-                                    &build_fast_node, 1,
+                                    &opt_fast_node, 1,
                                     &bvh_launch_params));
 #endif
 
