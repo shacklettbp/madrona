@@ -1037,6 +1037,11 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
         postBinScanThreads = 1;
     } else {
         postBinScanThreads = numRows;
+
+        // resizeTable won't run so must set the rearrange passes to run
+        // over the correct number of rows.
+        taskgraph->getNodeData(firstRearrangePassData).numDynamicInvocations =
+            numRows;
     }
 
     // This is only necessary if the global number of entities is 0
@@ -1090,9 +1095,6 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
             pass_data.dstVals = indices;
         }
     } 
-
-    taskgraph->getNodeData(firstRearrangePassData).numDynamicInvocations =
-        numRows;
 }
 
 void SortArchetypeNodeBase::zeroBins(int32_t invocation_idx)
@@ -1225,8 +1227,12 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
 
 void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)
 {
-    int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
-    mwGPU::getStateManager()->resizeArchetype(archetypeID, numEntities);
+    int32_t num_entities = bins[(numPasses - 1) * 256 + 255];
+    mwGPU::getStateManager()->resizeArchetype(archetypeID, num_entities);
+
+    auto taskgraph = mwGPU::getTaskGraph();
+    taskgraph->getNodeData(firstRearrangePassData).numDynamicInvocations =
+        num_entities;
 
     // Set for clearWorldOffsetsAndCounts
     numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
@@ -1244,7 +1250,7 @@ void SortArchetypeNodeBase::ClearCountNode::clearCounts(int32_t invocation_idx)
 
 void SortArchetypeNodeBase::clearWorldOffsetsAndCounts(int32_t invocation_idx)
 {
-    int32_t numEntities = bins[(numPasses - 1) * 256 + 255];
+    int32_t num_entities = bins[(numPasses - 1) * 256 + 255];
 
     // The counts computation for worldID i works by setting:
     // worldOffsets[i] = entities before world i;
@@ -1257,12 +1263,12 @@ void SortArchetypeNodeBase::clearWorldOffsetsAndCounts(int32_t invocation_idx)
 
     // Clear to numEntities in case some number of final worlds
     // have 0 elements (see computeWorldCounts(int32_t invocation_idx)).
-    worldOffsets[invocation_idx] = numEntities;
-    worldCounts[invocation_idx] = numEntities;
+    worldOffsets[invocation_idx] = num_entities;
+    worldCounts[invocation_idx] = num_entities;
     
     if (invocation_idx == 0) {
         // Set for copyKeys and computeWorldCounts
-        numDynamicInvocations = numEntities;
+        numDynamicInvocations = num_entities;
     }
 }
 
@@ -1312,14 +1318,6 @@ void SortArchetypeNodeBase::correctWorldCounts(int32_t invocation_idx) {
     // compute numEntities - numEntities = 0. For worlds with 0 entities,
     // worldOffsets = numEntities. Otherwise, worldOffsets are correct.
     worldCounts[invocation_idx] -= worldOffsets[invocation_idx];
-
-    if (invocation_idx == 0)
-    {
-        int32_t num_entities = bins[(numPasses - 1) * 256 + 255];
-
-        taskgraph->getNodeData(firstRearrangePassData).numDynamicInvocations =
-            num_entities;
-    }
 }
 
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
@@ -1477,17 +1475,20 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
             data_id, {cur_task}, setup);
     }
+
+
+    if (world_sort) {
+        // Compute counts for each world by writing upper ranges to worldCounts
+        // and lower ranges to worldOffsets. 
+        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
+            data_id, {cur_task}, setup);
+
+        // Compute final counts by subtracting worldOffsets from worldCounts
+        // Worlds with 0 entities have offset numEntities.
+        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::correctWorldCounts>(
+            data_id, {cur_task}, setup);
+    }
     
-    // Compute counts for each world by writing upper ranges to worldCounts
-    // and lower ranges to worldOffsets. 
-    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
-        data_id, {cur_task}, setup, 0, 1);
-
-    // Compute final counts by subtracting worldOffsets from worldCounts
-    // Worlds with 0 entities have offset numEntities.
-    cur_task = builder.addNodeFn<&SortArchetypeNodeBase::correctWorldCounts>(
-        data_id, {cur_task}, setup, 0, 1);
-
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 
     TaskGraph::TypedDataID<RearrangeNode> prev_rearrange_node { -1 };
@@ -1496,6 +1497,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         if (col_idx == sort_column_idx) continue;
         auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
             data_id, col_idx);
+        builder.getDataRef(cur_rearrange_node).numDynamicInvocations = 0;
 
         if (prev_rearrange_node.id == -1) {
             sort_node_data.firstRearrangePassData = cur_rearrange_node;
@@ -1525,6 +1527,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     builder.getDataRef(prev_rearrange_node).nextRearrangeNode =
         entities_rearrange_node;
     builder.getDataRef(entities_rearrange_node).nextRearrangeNode = { -1 };
+    builder.getDataRef(entities_rearrange_node).numDynamicInvocations = 0;
 
     return cur_task;
 }
