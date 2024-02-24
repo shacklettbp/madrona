@@ -119,20 +119,31 @@ public:
         Printer(Printer &&o);
         ~Printer();
 
-        void print() const;
+        void print(int64_t flatten_dim = 0) const;
 
     private:
+        int64_t printInnerDims(void *print_ptr,
+                               int64_t num_inner_items,
+                               int64_t cur_offset) const;
+
+        int64_t printOuterDim(int64_t dim,
+                              int64_t flatten_dim,
+                              void *print_ptr,
+                              int64_t num_inner_items,
+                              int64_t cur_offset) const;
+
         inline Printer(void *dev_ptr,
                        void *print_ptr,
                        TensorElementType type,
-                       int64_t num_items,
-                       int64_t num_bytes_per_item);
+                       Span<const int64_t> dimensions,
+                       int64_t num_total_bytes);
 
         void *dev_ptr_;
         void *print_ptr_;
         TensorElementType type_;
-        int64_t num_items_;
-        int64_t num_bytes_per_item_;
+        int64_t num_dimensions_;
+        std::array<int64_t, maxDimensions> dimensions_;
+        int64_t num_total_bytes_;
 
     friend class Tensor;
     };

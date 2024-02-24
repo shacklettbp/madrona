@@ -196,7 +196,7 @@ Tensor::Printer::~Printer()
 #endif
 }
 
-void Tensor::Printer::print() const
+void Tensor::Printer::print(int64_t flatten_dim) const
 {
     void *print_ptr;
     if (print_ptr_ == nullptr) {
@@ -204,7 +204,7 @@ void Tensor::Printer::print() const
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
         cudaMemcpy(print_ptr_, dev_ptr_,
-                   num_items_ * num_bytes_per_item_,
+                   num_total_bytes_,
                    cudaMemcpyDeviceToHost);
 #else
         (void)num_bytes_per_item_;
@@ -212,32 +212,100 @@ void Tensor::Printer::print() const
         print_ptr = print_ptr_;
     }
 
-    for (int64_t i = 0; i < num_items_; i++) {
-        switch (type_) {
-        case TensorElementType::Int32: {
-            printf("%d ", ((int32_t *)print_ptr)[i]);
-        } break;
-        case TensorElementType::Float32: {
-            printf("%.3f ", ((float *)print_ptr)[i]);
-        } break;
-        default: break;
+    int64_t num_inner_items = 1;
+    for (int64_t i = flatten_dim + 1; i < num_dimensions_; i++) {
+        int64_t dim_size = dimensions_[i];
+        num_inner_items *= dim_size;
+    }
+
+    printOuterDim(0, flatten_dim, print_ptr, num_inner_items, 0);
+}
+
+int64_t Tensor::Printer::printInnerDims(void *print_ptr,
+                                        int64_t num_inner_items,
+                                        int64_t cur_offset) const
+{
+    switch (type_) {
+    case TensorElementType::Int32: {
+        auto base = (int32_t *)print_ptr + cur_offset;
+    
+        for (int64_t i = 0; i < num_inner_items; i++) {
+            printf("%d ", base[i]);
+        }
+    } break;
+    case TensorElementType::Float32: {
+        auto base = (float *)print_ptr + cur_offset;
+    
+        for (int64_t i = 0; i < num_inner_items; i++) {
+            printf("%.3f ", base[i]);
+        }
+    } break;
+    default: break;
+    }
+
+    return cur_offset + num_inner_items;
+}
+
+int64_t Tensor::Printer::printOuterDim(int64_t dim,
+                                       int64_t flatten_dim,
+                                       void *print_ptr,
+                                       int64_t num_inner_items,
+                                       int64_t cur_offset) const
+{
+    int64_t dim_size = dimensions_[dim];
+    if (dim == flatten_dim) {
+        for (CountT i = 0; i < dim_size; i++) {
+            for (int64_t j = 0; j < dim; j++) {
+                printf("  ");
+            }
+
+            if (num_dimensions_ - flatten_dim > 1) {
+                printf("[ ");
+            }
+            cur_offset = printInnerDims(
+                print_ptr, num_inner_items, cur_offset);
+
+            if (num_dimensions_ - flatten_dim > 1) {
+                printf("]");
+            }
+            printf("\n");
+        }
+    } else {
+        for (CountT i = 0; i < dim_size; i++) {
+            for (int64_t j = 0; j < dim; j++) {
+                printf("  ");
+            }
+
+            printf("[\n");
+            cur_offset = printOuterDim(dim + 1, flatten_dim, print_ptr,
+                                       num_inner_items, cur_offset);
+
+            for (int64_t j = 0; j < dim; j++) {
+                printf("  ");
+            }
+            printf("]\n");
         }
     }
 
-    printf("\n");
+    return cur_offset;
 }
 
 Tensor::Printer::Printer(void *dev_ptr,
                          void *print_ptr,
                          TensorElementType type,
-                         int64_t num_items,
-                         int64_t num_bytes_per_item)
+                         Span<const int64_t> dimensions,
+                         int64_t num_total_bytes)
     : dev_ptr_(dev_ptr),
       print_ptr_(print_ptr),
       type_(type),
-      num_items_(num_items),
-      num_bytes_per_item_(num_bytes_per_item)
-{}
+      num_dimensions_(dimensions.size()),
+      dimensions_(),
+      num_total_bytes_(num_total_bytes)
+{
+    for (int64_t i = 0; i < num_dimensions_; i++) {
+        dimensions_[i] = dimensions[i];
+    }
+}
 
 Tensor::Tensor(void *dev_ptr, TensorElementType type,
                               Span<const int64_t> dimensions,
@@ -274,19 +342,18 @@ Tensor & Tensor::operator=(const Tensor &o)
 
 Tensor::Printer Tensor::makePrinter() const
 {
-    int64_t num_items = dimensions_[num_dimensions_ - 1];
+    int64_t num_total_items = dimensions_[num_dimensions_ - 1];
     for (int64_t i = num_dimensions_ - 2; i >= 0; i--) {
-        num_items *= dimensions_[i];
+        num_total_items *= dimensions_[i];
     }
-    int64_t bytes_per_item = numBytesPerItem();
+    int64_t num_total_bytes = num_total_items * numBytesPerItem();
 
     void *print_ptr;
     if (!isOnGPU()) {
         print_ptr = nullptr;
     } else {
 #ifdef MADRONA_CUDA_SUPPORT
-        int64_t num_bytes = bytes_per_item * num_items;
-        print_ptr = cu::allocReadback(num_bytes);
+        print_ptr = cu::allocReadback(num_total_bytes);
 #else
         print_ptr = nullptr;
 #endif
@@ -296,8 +363,8 @@ Tensor::Printer Tensor::makePrinter() const
         dev_ptr_,
         print_ptr,
         type_,
-        num_items,
-        bytes_per_item,
+        Span(dimensions_.data(), num_dimensions_),
+        num_total_bytes,
     };
 }
 
