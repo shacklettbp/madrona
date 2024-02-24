@@ -426,9 +426,9 @@ static void cfgUI(ViewerControl &ctrl,
 #endif
 
     ImGui::PushItemWidth(ImGui::CalcTextSize(" ").x * 7);
-    ImGui::DragInt("Tick Rate (Hz)", (int *)tick_rate, 5.f, 1, 1000);
-    if (*tick_rate < 1) {
-        *tick_rate = 1;
+    ImGui::DragInt("Tick Rate (Hz)", (int *)tick_rate, 5.f, 0, 1000);
+    if (*tick_rate < 0) {
+        *tick_rate = 0;
     }
     ImGui::PopItemWidth();
 
