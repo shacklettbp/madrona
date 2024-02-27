@@ -20,8 +20,8 @@ auto JAXInterface::buildEntry()
         void *init_fn;
         void *step_fn;
         if (xla_gpu) {
-            static_assert(gpu_init_fn != nullptr && gpu_step_fn != nullptr);
 #ifdef MADRONA_CUDA_SUPPORT
+            static_assert(gpu_init_fn != nullptr && gpu_step_fn != nullptr);
             auto init_wrapper =
                 &JAXInterface::gpuEntryFn<SimT, gpu_init_fn>;
             init_fn = std::bit_cast<void *>(init_wrapper);
