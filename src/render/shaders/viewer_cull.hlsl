@@ -88,7 +88,7 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
     GroupMemoryBarrierWithGroupSync();
 
     for (int i = 0; i < sm.numInstancesPerThread; ++i) {
-        uint local_idx = i * sm.numInstancesPerThread + tid.x;
+        uint local_idx = i * pushConst.numThreads + tid.x;
 
         if (local_idx >= sm.numInstances) {
             return;

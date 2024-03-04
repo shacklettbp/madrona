@@ -106,13 +106,13 @@ void main(uint3 tid       : SV_DispatchThreadID,
         sm.camera = unpackViewData(cameraBuffer[sm.viewIdx]);
         sm.offset = getInstanceOffsetsForWorld(sm.camera.worldID);
         sm.numInstancesForWorld = getNumInstancesForWorld(sm.camera.worldID);
-        sm.numInstancesPerThread = (sm.numInstancesForWorld+32) / 32;
+        sm.numInstancesPerThread = (sm.numInstancesForWorld+31) / 32;
     }
 
     GroupMemoryBarrierWithGroupSync();
 
     for (int i = 0; i < sm.numInstancesPerThread; ++i) {
-        uint local_idx = i * sm.numInstancesPerThread + tid_local.x;
+        uint local_idx = i * 32 + tid_local.x;
         if (local_idx >= sm.numInstancesForWorld)
             return;
 
