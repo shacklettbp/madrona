@@ -634,6 +634,13 @@ void Viewer::Impl::loop(
             (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS);
         key_state[(uint32_t)KeyboardKey::Space] |=
             (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
+        key_state[(uint32_t)KeyboardKey::K] |=
+            (glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS);
+        press_state[(uint32_t)KeyboardKey::K] |=
+            (!prev_key_state[(uint32_t)KeyboardKey::K]) &&
+            (glfwGetKey(window, GLFW_KEY_K) == GLFW_PRESS);
+        key_state[(uint32_t)KeyboardKey::Space] |=
+            (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS);
         key_state[(uint32_t)KeyboardKey::T] |=
             (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS);
         key_state[(uint32_t)KeyboardKey::F] |=
