@@ -6,19 +6,23 @@ namespace madrona {
 TaskGraph::Builder::Builder(int32_t max_num_nodes,
                             int32_t max_node_datas,
                             int32_t max_num_dependencies)
-    : staged_((StagedNode *)rawAlloc(sizeof(StagedNode) * max_num_nodes)),
+    : staged_((StagedNode *)
+        mwGPU::TmpAllocator::get().alloc(sizeof(StagedNode) * max_num_nodes)),
       num_nodes_(0),
-      node_datas_((NodeData *)rawAlloc(sizeof(NodeData) * max_node_datas)),
+      node_datas_((NodeData *)
+        mwGPU::TmpAllocator::get().alloc(sizeof(NodeData) * max_node_datas)),
       num_datas_(0),
-      all_dependencies_((NodeID *)rawAlloc(sizeof(NodeID) * max_num_dependencies)),
-      num_dependencies_(0)
+      all_dependencies_((NodeID *)
+        mwGPU::TmpAllocator::get().alloc(sizeof(NodeID) * max_num_dependencies)),
+      num_dependencies_(0),
+      max_num_nodes_(max_num_nodes),
+      max_num_node_datas_(max_node_datas),
+      max_num_dependencies_(max_num_dependencies)
 {}
 
 TaskGraph::Builder::~Builder()
 {
-    rawDealloc(all_dependencies_);
-    rawDealloc(node_datas_),
-    rawDealloc(staged_);
+    mwGPU::TmpAllocator::get().reset();
 }
 
 TaskGraph::NodeID TaskGraph::Builder::registerNode(
@@ -35,12 +39,14 @@ TaskGraph::NodeID TaskGraph::Builder::registerNode(
     uint32_t num_deps = dependencies.size();
 
     num_dependencies_ += num_deps;
+    assert(num_dependencies_ <= max_num_dependencies_);
 
     for (int i = 0; i < (int)num_deps; i++) {
         all_dependencies_[offset + i] = dependencies[i];
     }
 
     int32_t node_idx = num_nodes_++;
+    assert(num_nodes_ <= max_num_nodes_);
 
     new (&staged_[node_idx]) StagedNode {
         {

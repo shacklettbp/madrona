@@ -48,6 +48,7 @@ TaskGraph::TypedDataID<NodeT> TaskGraph::Builder::constructNodeData(
     static_assert(alignof(NodeT) <= maxNodeDataBytes);
 
     int32_t data_idx = num_datas_++;
+    assert(num_datas_ <= max_num_node_datas_);
     new (&node_datas_[data_idx]) NodeT(std::forward<Args>(args)...);
 
     return TypedDataID<NodeT> {

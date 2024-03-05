@@ -121,7 +121,9 @@ public:
         int32_t num_datas_;
         NodeID *all_dependencies_;
         uint32_t num_dependencies_;
-        uint32_t num_worlds_;
+        uint32_t max_num_nodes_;
+        uint32_t max_num_node_datas_;
+        uint32_t max_num_dependencies_;
     };
 
     enum class WorkerState {
