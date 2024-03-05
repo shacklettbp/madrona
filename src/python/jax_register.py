@@ -4,13 +4,20 @@ from functools import partial
 
 import jax
 from jax import core, dtypes
-from jax.core import ShapedArray
+from jax.core import ShapedArray, Effect
+from jax._src import effects
 from jax.lib import xla_client
 from jax.interpreters import xla
 from jax.interpreters import mlir
 from jax.interpreters.mlir import ir, dtype_to_ir_type
 from jaxlib.hlo_helpers import custom_call
 import builtins as __builtins__
+
+class SimEffect(Effect):
+    __str__ = lambda self: "Sim"
+_SimEffect = SimEffect()
+mlir.lowerable_effects.add_type(SimEffect)
+effects.control_flow_allowed_effects.add_type(SimEffect)
 
 custom_call_prefix = f"{type(sim_obj).__name__}_{id(sim_obj)}"
 init_custom_call_name = f"{custom_call_prefix}_init"
@@ -52,7 +59,7 @@ def _init_lowering(ctx):
 
 
 def _init_abstract():
-    return _shape_dtype_to_abstract_vals(step_outputs_iface['obs'].values())
+    return _shape_dtype_to_abstract_vals(step_outputs_iface['obs'].values()), {_SimEffect}
 
 
 def _flatten_step_output_shape_dtypes():
@@ -85,13 +92,13 @@ def _step_lowering(ctx, *flattened_inputs):
 
 
 def _step_abstract(*inputs):
-    return _shape_dtype_to_abstract_vals(_flatten_step_output_shape_dtypes())
+    return _shape_dtype_to_abstract_vals(_flatten_step_output_shape_dtypes()), {_SimEffect}
 
 
 _init_primitive = core.Primitive(init_custom_call_name)
 _init_primitive.multiple_results = True
 _init_primitive.def_impl(partial(xla.apply_primitive, _init_primitive))
-_init_primitive.def_abstract_eval(_init_abstract)
+_init_primitive.def_effectful_abstract_eval(_init_abstract)
 
 mlir.register_lowering(
     _init_primitive,
@@ -102,7 +109,7 @@ mlir.register_lowering(
 _step_primitive = core.Primitive(step_custom_call_name)
 _step_primitive.multiple_results = True
 _step_primitive.def_impl(partial(xla.apply_primitive, _step_primitive))
-_step_primitive.def_abstract_eval(_step_abstract)
+_step_primitive.def_effectful_abstract_eval(_step_abstract)
 
 mlir.register_lowering(
     _step_primitive,
