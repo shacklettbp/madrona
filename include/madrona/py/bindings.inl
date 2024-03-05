@@ -64,7 +64,9 @@ void JAXInterface::gpuEntryFn(cudaStream_t strm, void **buffers,
                               const char *opaque, size_t)
 {
     SimT *sim = *(SimT **)opaque;
-    std::invoke(fn, *sim, strm, buffers);
+
+    // The first buffer entry is a token JAX uses for ordering, skip over it
+    std::invoke(fn, *sim, strm, buffers + 1);
 }
 #endif
 
