@@ -13,13 +13,14 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     uint32_t num_worlds,
     uint32_t num_world_data_bytes,
     uint32_t world_data_alignment,
+    uint32_t num_taskgraphs,
     madrona::mwGPU::GPUImplConsts *out_constants,
     size_t *job_system_buffer_size)
 {
     using namespace madrona;
     using namespace madrona::mwGPU;
 
-    uint64_t total_bytes = sizeof(TaskGraph);
+    uint64_t total_bytes = sizeof(TaskGraph) * (uint64_t)num_taskgraphs;
 
     uint64_t state_mgr_offset = utils::roundUp(total_bytes,
         (uint64_t)alignof(StateManager));

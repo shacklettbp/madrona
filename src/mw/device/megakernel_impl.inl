@@ -21,23 +21,24 @@ static inline __attribute__((always_inline)) void dispatch(
 #endif
 
 static inline __attribute__((always_inline)) void megakernelImpl(
-    int32_t start_node_idx, int32_t end_node_idx, int32_t num_blocks_per_sm)
+    uint32_t taskgraph_id, int32_t start_node_idx,
+    int32_t end_node_idx, int32_t num_blocks_per_sm)
 {
     {
-        TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
-        taskgraph->init(start_node_idx, end_node_idx, num_blocks_per_sm);
+        mwGPU::getTaskGraph(taskgraph_id).init(
+            start_node_idx, end_node_idx, num_blocks_per_sm);
     }
 
     __syncthreads();
 
     while (true) {
-        TaskGraph *taskgraph = (TaskGraph *)GPUImplConsts::get().taskGraph;
+        Taskgraph &taskgraph = mwGPU::getTaskGraph(taskgraph_id);
 
         NodeBase *node_data;
         uint32_t func_id;
         uint32_t node_id;
         int32_t invocation_offset;
-        TaskGraph::WorkerState worker_state = taskgraph->getWork(
+        TaskGraph::WorkerState worker_state = taskgraph.getWork(
             &node_data, &func_id, &node_id, &invocation_offset);
 
         if (worker_state == TaskGraph::WorkerState::Exit) {
@@ -68,7 +69,7 @@ static inline __attribute__((always_inline)) void megakernelImpl(
             lane_executed = false;
         }
 
-        taskgraph->finishWork(lane_executed);
+        taskgraph.finishWork(lane_executed);
     }
 }
 

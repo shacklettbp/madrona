@@ -310,6 +310,12 @@ struct MegakernelCache {
     const char *initTasksName;
 };
 
+struct TaskGraphsState {
+    HeapArray<CUfunction> megakernels;
+    HeapArray<MegakernelConfig> megakernelConfigs;
+    uint32_t numTaskgraphs;
+};
+
 struct GPUEngineState {
     void *stateBuffer;
 
@@ -323,11 +329,15 @@ struct GPUEngineState {
     HeapArray<void *> exportedColumns;
 };
 
+struct MWCudaLaunchGraph::Impl {
+    CUgraphExec runGraph;
+};
+
 struct MWCudaExecutor::Impl {
     cudaStream_t cuStream;
     CUmodule cuModule;
     GPUEngineState engineState; 
-    CUgraphExec runGraph;
+    TaskGraphsState taskGraphsState;
 };
 
 static void getUserEntries(const char *entry_class, CUmodule mod,
@@ -803,10 +813,10 @@ static __attribute__((always_inline)) inline void dispatch(
 
         megakernel_postfix += "madronaMWGPUMegakernel_" +
             megakernel_cfg_suffix +
-            "(int32_t start_node_idx, int32_t end_node_idx)\n";
+            "(uint32_t taskgraph_id, int32_t start_node_idx, int32_t end_node_idx)\n";
 
         megakernel_postfix += R"__({
-    madrona::mwGPU::megakernelImpl(start_node_idx, end_node_idx, )__";
+    madrona::mwGPU::megakernelImpl(taskgraph_id, start_node_idx, end_node_idx, )__";
         megakernel_postfix += std::to_string(megakernel_cfg.numBlocksPerSM);
 
         megakernel_postfix += R"__();
@@ -1268,6 +1278,7 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_world_init_bytes,
     void *user_cfg_host_ptr,
     uint32_t num_user_cfg_bytes,
+    uint32_t num_taskgraphs,
     uint32_t num_exported,
     const GPUKernels &gpu_kernels,
     ExecutorMode exec_mode,
@@ -1338,6 +1349,7 @@ static GPUEngineState initEngineAndUserState(
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
                                                    world_data_alignment,
+                                                   num_taskgraphs,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback);
 
@@ -1455,9 +1467,10 @@ static GPUEngineState initEngineAndUserState(
     };
 }
 
-static CUgraphExec makeJobSysRunGraph(CUfunction queue_run_kernel,
-                                      CUfunction job_sys_kernel,
-                                      uint32_t num_worlds)
+[[maybe_unused]] static CUgraphExec makeJobSysRunGraph(
+    CUfunction queue_run_kernel,
+    CUfunction job_sys_kernel,
+    uint32_t num_worlds)
 {
     auto queue_args = makeKernelArgBuffer(num_worlds);
     auto no_args = makeKernelArgBuffer();
@@ -1618,6 +1631,7 @@ static DynArray<int32_t> processExecConfigFile(
 }
 
 static CUgraphExec makeTaskGraphRunGraph(
+    Span<const uint32_t> taskgraph_ids,
     const MegakernelConfig *megakernel_cfgs,
     const CUfunction *megakernels,
     int64_t num_megakernels)
@@ -1681,35 +1695,41 @@ static CUgraphExec makeTaskGraphRunGraph(
         megakernel_launches.push_back(megakernel_node);
     };
 
-    int64_t cur_node_idx = 0;
-    while (cur_node_idx < node_megakernels.size()) {
-        int64_t cur_megakernel_idx = node_megakernels[cur_node_idx];
+    void addNodesForTaskGraph = [&](uint32_t taskgraph_id) {
+        int64_t cur_node_idx = 0;
+        while (cur_node_idx < node_megakernels.size()) {
+            int64_t cur_megakernel_idx = node_megakernels[cur_node_idx];
 
-        int64_t switch_node_idx;
-        for (switch_node_idx = cur_node_idx + 1;
-             switch_node_idx < node_megakernels.size() &&
-                 node_megakernels[switch_node_idx] == cur_megakernel_idx;
-             switch_node_idx++) {}
+            int64_t switch_node_idx;
+            for (switch_node_idx = cur_node_idx + 1;
+                 switch_node_idx < node_megakernels.size() &&
+                     node_megakernels[switch_node_idx] == cur_megakernel_idx;
+                 switch_node_idx++) {}
 
-        // FIXME: this use of -1 is hacky. The profiling code should
-        // just write the total number of nodes into the json file.
-        int64_t end_node_idx = switch_node_idx == node_megakernels.size() ?
-            -1 : switch_node_idx;
+            // FIXME: this use of -1 is hacky. The profiling code should
+            // just write the total number of nodes into the json file.
+            int64_t end_node_idx = switch_node_idx == node_megakernels.size() ?
+                -1 : switch_node_idx;
 
-        CUgraphNode *deps = nullptr;
-        unsigned int num_deps = 0;
-        if (megakernel_launches.size() > 0) {
-            deps = &megakernel_launches.back();
-            num_deps = 1;
+            CUgraphNode *deps = nullptr;
+            unsigned int num_deps = 0;
+            if (megakernel_launches.size() > 0) {
+                deps = &megakernel_launches.back();
+                num_deps = 1;
+            }
+
+            auto megakernel_args = makeKernelArgBuffer(
+                taskgraph_id, (int32_t)cur_node_idx, (int32_t)end_node_idx);
+
+            addMegakernelNode(cur_megakernel_idx, deps, num_deps,
+                              megakernel_args.data());
+
+            cur_node_idx = switch_node_idx;
         }
+    };
 
-        auto megakernel_args = makeKernelArgBuffer((int32_t)cur_node_idx,
-            (int32_t)end_node_idx);
-
-        addMegakernelNode(cur_megakernel_idx, deps, num_deps,
-                          megakernel_args.data());
-
-        cur_node_idx = switch_node_idx;
+    for (uint32_t taskgraph_id : taskgraph_ids) {
+        addNodesForTaskGraph(taskgraph_id);
     }
 
     CUgraphExec run_graph_exec;
@@ -1718,6 +1738,15 @@ static CUgraphExec makeTaskGraphRunGraph(
     REQ_CU(cuGraphDestroy(run_graph));
 
     return run_graph_exec;
+}
+
+MWCudaLaunchGraph::MWCudaLaunchGraph(Impl *impl)
+    : impl_(impl)
+{}
+
+MWCudaLaunchGraph::~MWCudaLaunchGraph()
+{
+    REQ_CU(cuGraphExecDestroy(impl_->runGraph));
 }
 
 CUcontext MWCudaExecutor::initCUDA(int gpu_id)
@@ -1756,13 +1785,13 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         max_megakernel_blocks_per_sm = 6;
     }
 
-    DynArray<MegakernelConfig> megakernel_cfgs(max_megakernel_blocks_per_sm);
+    HeapArray<MegakernelConfig> megakernel_cfgs(max_megakernel_blocks_per_sm);
     for (uint32_t i = 1; i <= max_megakernel_blocks_per_sm; i++) {
-        megakernel_cfgs.push_back({
+        megakernel_cfgs[i] = {
             consts::numMegakernelThreads,
             i,
             (uint32_t)num_sms,
-        });
+        };
     }
 
     std::pair<int, int> cu_capability;
@@ -1778,23 +1807,21 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.numWorlds, state_cfg.numWorldDataBytes,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
-        state_cfg.numUserConfigBytes, state_cfg.numExportedBuffers,
+        state_cfg.numUserConfigBytes,  state_cfg.numTaskgraphs,
+        state_cfg.numExportedBuffers,
         gpu_kernels, exec_mode, cu_gpu, cu_ctx, strm);
 
-    auto run_graph =
-        exec_mode == ExecutorMode::JobSystem ?
-            makeJobSysRunGraph(gpu_kernels.queueUserRun,
-                               gpu_kernels.megakernels[0],
-                               state_cfg.numWorlds) :
-            makeTaskGraphRunGraph(megakernel_cfgs.data(),
-                                  gpu_kernels.megakernels.data(),
-                                  gpu_kernels.megakernels.size());
+    TaskGraphsState taskgraphs_state {
+        .megakernels = std::move(gpu_kernels.megakernels),
+        .megakernelConfigs = std::move(megakernel_cfgs),
+        .numTaskgraphs = state_cfg.numTaskGraphs,
+    };
 
     impl_ = std::unique_ptr<Impl>(new Impl {
         strm,
         gpu_kernels.mod,
         std::move(eng_state),
-        run_graph,
+        std::move(taskgraphs_state),
     });
 
     std::cout << "Initialization finished" << std::endl;
@@ -1818,25 +1845,47 @@ MWCudaExecutor::~MWCudaExecutor()
         1, cuda::std::memory_order_release);
     impl_->engineState.allocatorThread.join();
 
-    REQ_CU(cuGraphExecDestroy(impl_->runGraph));
     REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
 }
 
-void MWCudaExecutor::run()
+MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(Span<const uint32_t> taskgraph_ids)
 {
-    HostEventLogging(HostEvent::megaKernelStart);
-    REQ_CU(cuGraphLaunch(impl_->runGraph, impl_->cuStream));
+    auto run_graph = makeTaskGraphRunGraph(
+        taskgraph_ids,
+        impl_->taskGraphsState.megakernelConfigs.data(),
+        impl_->taskGraphsState.megakernels.data(),
+        impl_->taskGraphsState.megakernels.size());
+
+    return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
+        .runGraph = run_graph,
+    });
+}
+
+MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs()
+{
+    const CountT num_taskgraphs = impl_->taskgraphsState.numTaskgraphs;
+    HeapArray<uint32_t> all_taskgraph_ids(num_taskgraphs);
+    for (CountT i = 0; i < num_taskgraphs; i++) {
+        all_taskgraph_ids[i] = i;
+    }
+
+    buildLaunchGraph(all_taskgraph_ids);
+}
+
+void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
+{
+    REQ_CU(cuGraphLaunch(launch_graph.impl_->runGraph, impl_->cuStream));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
-    HostEventLogging(HostEvent::megaKernelEnd);
 #ifdef MADRONA_TRACING
     impl_->engineState.deviceTracing->transferLogToCPU();
 #endif
 }
 
-void MWCudaExecutor::runAsync(cudaStream_t strm)
+void MWCudaExecutor::runAsync(MWCudaLaunchGraph &launch_graph,
+                              cudaStream_t strm)
 {
-    REQ_CU(cuGraphLaunch(impl_->runGraph, strm));
+    REQ_CU(cuGraphLaunch(launch_graph.impl_->runGraph, strm));
 }
 
 void * MWCudaExecutor::getExported(CountT slot) const

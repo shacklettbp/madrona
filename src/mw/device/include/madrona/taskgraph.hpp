@@ -19,9 +19,10 @@
 namespace madrona {
 
 class TaskGraph;
+class TaskGraphManager;
 
 namespace mwGPU {
-    inline TaskGraph * getTaskGraph();
+    inline TaskGraph & getTaskGraph(uint32_t taskgraph_idx);
 }
 
 struct NodeBase {
@@ -178,6 +179,17 @@ private:
         > init_barriers_;
 
 friend class Builder;
+};
+
+class TaskGraphManager {
+public:
+    // Create a new TaskgraphBuilder for building a task graph
+    TaskGraphBuilder init();
+
+    // Finalize the graph setup within builder
+    template <EnumType EnumT>
+    void build(EnumT taskgraph_id, TaskGraphBuilder &&builder);
+    void build(uint32_t taskgraph_id, TaskGraphBuilder &&builder);
 };
 
 // FIXME: Compat with new CPU naming scheme

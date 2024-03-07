@@ -59,12 +59,9 @@ template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 __launch_bounds__(madrona::consts::numMegakernelThreads, 1)
 __global__ void initTasks(void *cfg)
 {
-    constexpr CountT max_num_nodes = 16384;
-    TaskGraph::Builder builder(max_num_nodes, max_num_nodes * 2,
-                              max_num_nodes * 5);
-    WorldT::setupTasks(builder, *(ConfigT *)cfg);
+    TaskGraphManager taskgraph_mgr;
 
-    builder.build((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph);
+    WorldT::setupTasks(taskgraph_mgr, *(ConfigT *)cfg);
 
     TmpAllocator::get().reset();
 }

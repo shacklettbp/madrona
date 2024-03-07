@@ -143,6 +143,19 @@ void TaskGraph::Builder::build(TaskGraph *out)
     new (out) TaskGraph(sorted_nodes, num_nodes_, tg_datas);
 }
 
+TaskGraphBuilder TaskGraphManager::init()
+{
+    constexpr CountT max_num_nodes = 16384;
+    return TaskGraph::Builder(max_num_nodes, max_num_nodes * 2,
+                              max_num_nodes * 5);
+}
+
+void TaskGraphManager::build(uint32_t taskgraph_id,
+                             TaskGraphBuilder &&builder)
+{
+    builder.build(&mwGPU::getTaskGraph((int32_t)taskgraph_id));
+}
+
 ClearTmpNodeBase::ClearTmpNodeBase(uint32_t archetype_id)
     : NodeBase(),
       archetypeID(archetype_id)

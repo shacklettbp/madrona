@@ -4,9 +4,9 @@ namespace madrona {
 
 namespace mwGPU {
 
-TaskGraph * getTaskGraph()
+TaskGraph & getTaskGraph(uint32_t taskgraph_idx)
 {
-    return (TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph;
+    return ((TaskGraph *)mwGPU::GPUImplConsts::get().taskGraph)[taskgraph_idx];
 }
 
 template <typename NodeT, auto fn>
@@ -121,6 +121,12 @@ template <typename NodeT>
 NodeT & TaskGraph::Builder::getDataRef(TypedDataID<NodeT> data_id)
 {
     return *(NodeT *)node_datas_[data_id.id].userData;
+}
+
+template <EnumType EnumT>
+void TaskGraphManager::build(EnumT taskgraph_id, TaskGraphBuilder &&builder)
+{
+    build(static_cast<uint32_t>(taskgraph_id), std::move(builder));
 }
 
 WorldBase * TaskGraph::getWorld(int32_t world_idx)

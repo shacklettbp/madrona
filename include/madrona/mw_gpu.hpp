@@ -6,11 +6,6 @@
  * https://opensource.org/licenses/MIT.
  */
 #pragma once
-#ifdef mw_gpu_EXPORTS
-#define MADRONA_MWGPU_EXPORT MADRONA_EXPORT
-#else
-#define MADRONA_MWGPU_EXPORT MADRONA_IMPORT
-#endif
 
 #include <cstdint>
 #include <memory>
@@ -46,7 +41,7 @@ struct StateConfig {
     uint32_t numWorlds;
 
     // Number of taskgraphs that will be constructed in the environment's setupTasks
-    uint32_t numTaskgraphs;
+    uint32_t numTaskGraphs;
 
     // Number of exported ECS components
     uint32_t numExportedBuffers;
@@ -74,27 +69,52 @@ struct CompileConfig {
     OptMode optMode = OptMode::LTO;
 };
 
+class MWCudaExecutor;
+
+class MWCudaLaunchGraph {
+public:
+    ~MWCudaLaunchGraph();
+
+private:
+    struct Impl;
+
+    MWCudaLaunchGraph(Impl *impl);
+
+    std::unique_ptr<Impl> impl_;
+
+friend class MWCudaExecutor;
+};
+
 class MWCudaExecutor {
 public:
+
     // Initializes CUDA context, sets current device
     static CUcontext initCUDA(int gpu_id);
 
-    MADRONA_MWGPU_EXPORT MWCudaExecutor(const StateConfig &state_cfg,
+    MWCudaExecutor(const StateConfig &state_cfg,
                                         const CompileConfig &compile_cfg,
                                         CUcontext cu_ctx);
 
-    MADRONA_MWGPU_EXPORT MWCudaExecutor(MWCudaExecutor &&o);
+    MWCudaExecutor(MWCudaExecutor &&o);
+    ~MWCudaExecutor();
 
-    MADRONA_MWGPU_EXPORT ~MWCudaExecutor();
+    // Builds a CUDA graph that will launch all the taskgraphs specified by
+    // taskgraph_ids one after the other. Typically this correspond to
+    // one step across all worlds, or a subset of the logic for a step.
+    template <EnumType EnumT>
+    MWCudaLaunchGraph buildLaunchGraph(Span<const EnumT> taskgraph_ids);
+    MWCudaLaunchGraph buildLaunchGraph(Span<const uint32_t> taskgraph_ids);
+    // Helper to build a a launch graph that launches all task graphs
+    MWCudaLaunchGraph buildLaunchGraphAllTaskGraphs();
 
-    // Run one invocation of the task graph across all worlds (one step)
-    // Only returns after synchronization with the GPU is complete (not async)
-    MADRONA_MWGPU_EXPORT void run();
-    MADRONA_MWGPU_EXPORT void runAsync(cudaStream_t strm);
+    // Runs the pre-built CUDA graph stored in launch_graph synchronously
+    void run(MWCudaLaunchGraph &launch_graph);
+    // Runs the pre-built CUDA graph stored in launch_graph asynchronously on strm
+    void runAsync(MWCudaLaunchGraph &launch_graph, cudaStream_t strm);
 
     // Get the base pointer of the component data exported with
     // ECSRegister::exportColumn. Note that this will be a GPU pointer.
-    MADRONA_MWGPU_EXPORT void * getExported(CountT slot) const;
+    void * getExported(CountT slot) const;
 
 private:
     struct Impl;
@@ -102,3 +122,5 @@ private:
 };
 
 }
+
+#include "mw_gpu.inl"
