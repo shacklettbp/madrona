@@ -112,6 +112,37 @@ TaskGraph TaskGraphBuilder::build()
         std::move(sorted_nodes), std::move(data_cpy));
 }
 
+struct TaskGraphManager::Impl {
+    HeapArray<TaskGraph> taskgraphs;
+    WorkerInit workerInit;
+};
+
+TaskGraphManager::TaskGraphManager(CountT num_taskgraphs,
+                                   const WorkerInit &init)
+    : impl_(new TaskGraphManager::Impl {
+        .taskgraphs = HeapArray<TaskGraph>(num_taskgraphs),
+        .workerInit = init,
+    })
+{}
+
+TaskGraphManager::~TaskGraphManager() = default;
+
+TaskGraphBuilder TaskGraphManager::init()
+{
+    return TaskGraphBuilder(impl_->workerInit);
+}
+
+void TaskGraphManager::build(uint32_t taskgraph_id,
+                             TaskGraphBuilder &&builder)
+{
+    impl_->taskgraphs[taskgraph_id] = builder.build();
+}
+
+HeapArray<TaskGraph> TaskGraphManager::getBuiltGraphs()
+{
+    return std::move(impl_->taskgraphs);
+}
+
 TaskGraph::TaskGraph(StateManager *state_mgr,
                      StateCache *state_cache,
                      MADRONA_MW_COND(uint32_t world_id,) 

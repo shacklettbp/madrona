@@ -45,6 +45,9 @@ struct StateConfig {
     // Batch size for the backend
     uint32_t numWorlds;
 
+    // Number of taskgraphs that will be constructed in the environment's setupTasks
+    uint32_t numTaskgraphs;
+
     // Number of exported ECS components
     uint32_t numExportedBuffers;
 };

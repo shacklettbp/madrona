@@ -35,6 +35,10 @@ public:
               HeapArray<Node> &&sorted_nodes,
               HeapArray<NodeData> &&node_datas);
     TaskGraph(const TaskGraph &) = delete;
+    TaskGraph(TaskGraph &&) = default;
+
+    TaskGraph & operator=(const TaskGraph &) = delete;
+    TaskGraph & operator=(TaskGraph &&) = default;
 
     void run(Context *ctx);
 

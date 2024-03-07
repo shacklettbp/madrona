@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <type_traits>
 
 namespace madrona {
 
@@ -29,5 +30,8 @@ using CountT = int64_t;
 #else
 using CountT = int32_t;
 #endif
+
+template<typename T>
+concept EnumType = std::is_enum_v<T>;
 
 }

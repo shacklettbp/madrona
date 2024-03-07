@@ -6,6 +6,8 @@
 
 namespace madrona {
 
+class TaskGraphManager;
+
 // ID for a node in an under construction taskgraph. Used to link
 // dependencies between nodes.
 struct TaskGraphNodeID {
@@ -19,8 +21,6 @@ struct TaskGraphNodeID {
 // to create the final taskgraph.
 class TaskGraphBuilder {
 public:
-    TaskGraphBuilder(const WorkerInit &init);
-
     // addToGraph is the primary function for end users.
     // Pass in the template'd type of the node to create and the
     // TaskGraphNodeIDs the node should depend on.
@@ -59,10 +59,12 @@ public:
     template <typename NodeT>
     NodeT & getDataRef(TypedDataID<NodeT> data_id);
 
+private:
+    TaskGraphBuilder(const WorkerInit &init);
+
     // Called by the backend to build the taskgraph.
     TaskGraph build();
 
-private:
     TaskGraphNodeID registerNode(uint32_t data_idx,
         void (*fn)(NodeBase *, Context *, TaskGraph *),
         Span<const TaskGraphNodeID> dependencies,
@@ -83,6 +85,28 @@ private:
     DynArray<StagedNode> staged_;
     DynArray<TaskGraph::NodeData> node_datas_;
     DynArray<TaskGraphNodeID> all_dependencies_;
+
+friend class TaskGraphManager;
+};
+
+class TaskGraphManager {
+public:
+    TaskGraphManager(CountT num_taskgraphs, const WorkerInit &init);
+    ~TaskGraphManager();
+
+    // Create a new TaskgraphBuilder for building a task graph
+    TaskGraphBuilder init();
+
+    // Finalize the graph setup within builder
+    template <EnumType EnumT>
+    void build(EnumT taskgraph_id, TaskGraphBuilder &&builder);
+    void build(uint32_t taskgraph_id, TaskGraphBuilder &&builder);
+
+    // Called by the backend after user's setupTasks runs
+    HeapArray<TaskGraph> getBuiltGraphs();
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 // Builtin taskgraph nodes

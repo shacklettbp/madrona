@@ -56,6 +56,12 @@ NodeT & TaskGraphBuilder::getDataRef(TypedDataID<NodeT> data_id)
     return *(NodeT *)node_datas_[data_id.id].userData;
 }
 
+template <EnumType EnumT>
+void TaskGraphManager::build(EnumT taskgraph_id, TaskGraphBuilder &&builder)
+{
+    build(static_cast<uint32_t>(taskgraph_id), std::move(builder));
+}
+
 template <typename ContextT, auto Fn, typename ...ComponentTs>
 ParallelForNode<ContextT, Fn, ComponentTs...>::ParallelForNode(
         Query<ComponentTs...> &&query)

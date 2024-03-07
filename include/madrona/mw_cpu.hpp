@@ -48,6 +48,7 @@ protected:
     ECSRegistry getECSRegistry();
 
     void initExport();
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -75,9 +76,15 @@ public:
     TaskGraphExecutor(
         const Config &cfg,
         const ConfigT &user_cfg,
-        const InitT *user_inits);
+        const InitT *user_inits,
+        CountT num_taskgraphs);
 
     // Run one invocation of the task graph across all worlds (one step)
+    template <EnumType EnumT>
+    inline void runTaskGraph(EnumT taskgraph_id);
+
+    inline void runTaskGraph(uint32_t taskgraph_idx);
+
     inline void run();
 
     // Get the base pointer of the component data exported with
@@ -88,19 +95,16 @@ public:
     inline WorldT & getWorldData(CountT world_idx);
 
 private:
-    struct RunData {
-        ContextT ctx;
+    struct JobData {
+        Context *ctx;
         TaskGraph taskgraph;
-
-        inline RunData(WorldT *world_data, const ConfigT &cfg,
-                       const WorkerInit &worker_init);
     };
 
-    static inline void stepWorld(void *data_raw);
-
-    HeapArray<RunData> run_datas_;
+    HeapArray<ContextT> contexts_;
     HeapArray<WorldT> world_datas_;
+    HeapArray<JobData> job_datas_;
     HeapArray<Job> jobs_;
+    uint32_t num_taskgraphs_;
 };
 
 }
