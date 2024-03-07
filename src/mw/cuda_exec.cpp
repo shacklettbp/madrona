@@ -1023,6 +1023,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         "-prec-sqrt=0",
         "-fma=1",
         "-optimize-unused-variables",
+        "-split-compile=0",
     };
 
     if (opt_mode == CompileConfig::OptMode::Debug) {
