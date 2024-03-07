@@ -102,7 +102,8 @@ public:
     // taskgraph_ids one after the other. Typically this correspond to
     // one step across all worlds, or a subset of the logic for a step.
     template <EnumType EnumT>
-    MWCudaLaunchGraph buildLaunchGraph(Span<const EnumT> taskgraph_ids);
+    inline MWCudaLaunchGraph buildLaunchGraph(EnumT taskgraph_id);
+    inline MWCudaLaunchGraph buildLaunchGraph(uint32_t taskgraph_id);
     MWCudaLaunchGraph buildLaunchGraph(Span<const uint32_t> taskgraph_ids);
     // Helper to build a a launch graph that launches all task graphs
     MWCudaLaunchGraph buildLaunchGraphAllTaskGraphs();
