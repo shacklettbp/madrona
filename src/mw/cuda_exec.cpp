@@ -1662,14 +1662,6 @@ static CUgraphExec makeTaskGraphRunGraph(
                               num_megakernels) :
         DynArray<int32_t>({(int32_t)default_megakernel_idx});
 
-    {
-        MegakernelConfig default_cfg = megakernel_cfgs[default_megakernel_idx];
-
-        printf("Using %u %u %u as the default megakernel configuration\n",
-            default_cfg.numThreads, default_cfg.numBlocksPerSM,
-            default_cfg.numSMs);
-    }
-
     DynArray<CUgraphNode> megakernel_launches(0);
 
     auto addMegakernelNode = [&](int64_t megakernel_idx,
