@@ -3,7 +3,8 @@
 
 namespace madrona {
 
-TaskGraph::Builder::Builder(int32_t max_num_nodes,
+TaskGraph::Builder::Builder(uint32_t taskgraph_id,
+                            int32_t max_num_nodes,
                             int32_t max_node_datas,
                             int32_t max_num_dependencies)
     : staged_((StagedNode *)
@@ -14,6 +15,7 @@ TaskGraph::Builder::Builder(int32_t max_num_nodes,
       num_datas_(0),
       all_dependencies_((NodeID *)
         mwGPU::TmpAllocator::get().alloc(sizeof(NodeID) * max_num_dependencies)),
+      taskgraph_id_(taskgraph_id),
       num_dependencies_(0),
       max_num_nodes_(max_num_nodes),
       max_num_node_datas_(max_node_datas),
@@ -143,17 +145,27 @@ void TaskGraph::Builder::build(TaskGraph *out)
     new (out) TaskGraph(sorted_nodes, num_nodes_, tg_datas);
 }
 
-TaskGraphBuilder TaskGraphManager::init()
+TaskGraphManager::TaskGraphManager(uint32_t num_taskgraphs)
+    : builders_((TaskGraphBuilder *)mwGPU::TmpAllocator::get().alloc(
+        sizeof(TaskGraphBuilder) * (uint64_t)num_taskgraphs)),
+      num_taskgraphs_(num_taskgraphs)
 {
-    constexpr CountT max_num_nodes = 16384;
-    return TaskGraph::Builder(max_num_nodes, max_num_nodes * 2,
-                              max_num_nodes * 5);
 }
 
-void TaskGraphManager::build(uint32_t taskgraph_id,
-                             TaskGraphBuilder &&builder)
+TaskGraphBuilder & TaskGraphManager::init(uint32_t taskgraph_id)
 {
-    builder.build(&mwGPU::getTaskGraph((int32_t)taskgraph_id));
+    assert(taskgraph_id < num_taskgraphs_);
+
+    constexpr CountT max_num_nodes = 16384;
+    return *new (&builders_[taskgraph_id]) TaskGraphBuilder(
+        taskgraph_id, max_num_nodes, max_num_nodes * 2, max_num_nodes * 5);
+}
+
+void TaskGraphManager::constructGraphs()
+{
+    for (uint32_t i = 0; i < num_taskgraphs_; i++) {
+        builders_[i].build(&mwGPU::getTaskGraph(i));
+    }
 }
 
 ClearTmpNodeBase::ClearTmpNodeBase(uint32_t archetype_id)

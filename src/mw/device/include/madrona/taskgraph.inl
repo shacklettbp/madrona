@@ -123,10 +123,16 @@ NodeT & TaskGraph::Builder::getDataRef(TypedDataID<NodeT> data_id)
     return *(NodeT *)node_datas_[data_id.id].userData;
 }
 
-template <EnumType EnumT>
-void TaskGraphManager::build(EnumT taskgraph_id, TaskGraphBuilder &&builder)
+
+inline uint32_t TaskGraph::Builder::getTaskgraphID() const
 {
-    build(static_cast<uint32_t>(taskgraph_id), std::move(builder));
+    return taskgraph_id_;
+}
+
+template <EnumType EnumT>
+TaskGraphBuilder & TaskGraphManager::init(EnumT taskgraph_id)
+{
+    return init(static_cast<uint32_t>(taskgraph_id));
 }
 
 WorldBase * TaskGraph::getWorld(int32_t world_idx)

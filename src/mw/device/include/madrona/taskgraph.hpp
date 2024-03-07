@@ -65,7 +65,8 @@ public:
 
     class Builder {
     public:
-        Builder(int32_t max_nodes,
+        Builder(uint32_t taskgraph_id,
+                int32_t max_nodes,
                 int32_t max_node_datas,
                 int32_t max_num_dependencies);
         ~Builder();
@@ -96,6 +97,8 @@ public:
         template <typename NodeT>
         NodeT & getDataRef(TypedDataID<NodeT> data_id);
 
+        inline uint32_t getTaskgraphID() const;
+
         void build(TaskGraph *out);
 
     private:
@@ -121,6 +124,7 @@ public:
         NodeData *node_datas_;
         int32_t num_datas_;
         NodeID *all_dependencies_;
+        uint32_t taskgraph_id_;
         uint32_t num_dependencies_;
         uint32_t max_num_nodes_;
         uint32_t max_num_node_datas_;
@@ -181,20 +185,24 @@ private:
 friend class Builder;
 };
 
-class TaskGraphManager {
-public:
-    // Create a new TaskgraphBuilder for building a task graph
-    TaskGraphBuilder init();
-
-    // Finalize the graph setup within builder
-    template <EnumType EnumT>
-    void build(EnumT taskgraph_id, TaskGraphBuilder &&builder);
-    void build(uint32_t taskgraph_id, TaskGraphBuilder &&builder);
-};
-
 // FIXME: Compat with new CPU naming scheme
 using TaskGraphNodeID = TaskGraph::NodeID;
 using TaskGraphBuilder = TaskGraph::Builder;
+
+class TaskGraphManager {
+public:
+    TaskGraphManager(uint32_t num_taskgraphs);
+
+    // Create a new TaskgraphBuilder for building a task graph
+    template <EnumType EnumT>
+    TaskGraphBuilder & init(EnumT taskgraph_id);
+    TaskGraphBuilder & init(uint32_t taskgraph_id);
+
+    void constructGraphs();
+private:
+    TaskGraphBuilder *builders_;
+    uint32_t num_taskgraphs_;
+};
 
 template <typename ContextT, auto Fn,
           int32_t threads_per_invocation,
@@ -286,7 +294,9 @@ struct SortArchetypeNodeBase : NodeBase {
 
     using ParentNodeT = TaskGraph::TypedDataID<SortArchetypeNodeBase>;
     struct OnesweepNode : NodeBase {
-        OnesweepNode(ParentNodeT parent, int32_t pass, bool final_pass);
+        OnesweepNode(uint32_t taskgraph_id, ParentNodeT parent,
+                     int32_t pass, bool final_pass);
+        uint32_t taskGraphID;
         ParentNodeT parentNode;
         int32_t passIDX;
         bool finalPass;
@@ -300,7 +310,9 @@ struct SortArchetypeNodeBase : NodeBase {
     };
 
     struct RearrangeNode : NodeBase {
-        RearrangeNode(ParentNodeT parent, int32_t col_idx);
+        RearrangeNode(uint32_t taskgraph_id, ParentNodeT parent,
+                      int32_t col_idx);
+        uint32_t taskGraphID;
         TaskGraph::TypedDataID<SortArchetypeNodeBase> parentNode;
         int32_t columnIndex;
         TaskGraph::TypedDataID<RearrangeNode> nextRearrangeNode;
@@ -319,7 +331,8 @@ struct SortArchetypeNodeBase : NodeBase {
         void clearCounts(int32_t invocation_idx);
     };
 
-    SortArchetypeNodeBase(uint32_t archetype_id,
+    SortArchetypeNodeBase(uint32_t taskgraph_id,
+                          uint32_t archetype_id,
                           int32_t col_idx,
                           uint32_t *keys_col,
                           int32_t num_passes,
@@ -345,6 +358,7 @@ struct SortArchetypeNodeBase : NodeBase {
         int32_t component_id);
 
     // Constant state
+    uint32_t taskGraphID;
     uint32_t archetypeID;
     int32_t sortColumnIndex;
     uint32_t *keysCol;

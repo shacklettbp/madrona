@@ -57,9 +57,9 @@ NodeT & TaskGraphBuilder::getDataRef(TypedDataID<NodeT> data_id)
 }
 
 template <EnumType EnumT>
-void TaskGraphManager::build(EnumT taskgraph_id, TaskGraphBuilder &&builder)
+TaskGraphBuilder & TaskGraphManager::init(EnumT taskgraph_id)
 {
-    build(static_cast<uint32_t>(taskgraph_id), std::move(builder));
+    return init(static_cast<uint32_t>(taskgraph_id));
 }
 
 template <typename ContextT, auto Fn, typename ...ComponentTs>

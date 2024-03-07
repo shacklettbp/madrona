@@ -57,11 +57,13 @@ __global__ void initWorlds(int32_t num_worlds,
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 __launch_bounds__(madrona::consts::numMegakernelThreads, 1)
-__global__ void initTasks(void *cfg)
+__global__ void initTasks(uint32_t num_taskgraphs, void *cfg)
 {
-    TaskGraphManager taskgraph_mgr;
+    TaskGraphManager taskgraph_mgr(num_taskgraphs);
 
     WorldT::setupTasks(taskgraph_mgr, *(ConfigT *)cfg);
+
+    taskgraph_mgr.constructGraphs();
 
     TmpAllocator::get().reset();
 }

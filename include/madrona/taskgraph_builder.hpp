@@ -60,7 +60,7 @@ public:
     NodeT & getDataRef(TypedDataID<NodeT> data_id);
 
 private:
-    TaskGraphBuilder(const WorkerInit &init);
+    TaskGraphBuilder(uint32_t taskgraph_id, const WorkerInit &init);
 
     // Called by the backend to build the taskgraph.
     TaskGraph build();
@@ -82,6 +82,7 @@ private:
 #ifdef MADRONA_MW_MODE
     uint32_t world_id_;
 #endif
+    uint32_t taskgraph_id_;
     DynArray<StagedNode> staged_;
     DynArray<TaskGraph::NodeData> node_datas_;
     DynArray<TaskGraphNodeID> all_dependencies_;
@@ -95,15 +96,12 @@ public:
     ~TaskGraphManager();
 
     // Create a new TaskgraphBuilder for building a task graph
-    TaskGraphBuilder init();
-
-    // Finalize the graph setup within builder
     template <EnumType EnumT>
-    void build(EnumT taskgraph_id, TaskGraphBuilder &&builder);
-    void build(uint32_t taskgraph_id, TaskGraphBuilder &&builder);
+    TaskGraphBuilder & init(EnumT taskgraph_id);
+    TaskGraphBuilder & init(uint32_t taskgraph_id);
 
-    // Called by the backend after user's setupTasks runs
-    HeapArray<TaskGraph> getBuiltGraphs();
+    // Called by the backend after user's setupTasks populates the graphs
+    HeapArray<TaskGraph> constructGraphs();
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

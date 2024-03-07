@@ -32,7 +32,7 @@ static inline __attribute__((always_inline)) void megakernelImpl(
     __syncthreads();
 
     while (true) {
-        Taskgraph &taskgraph = mwGPU::getTaskGraph(taskgraph_id);
+        TaskGraph &taskgraph = mwGPU::getTaskGraph(taskgraph_id);
 
         NodeBase *node_data;
         uint32_t func_id;

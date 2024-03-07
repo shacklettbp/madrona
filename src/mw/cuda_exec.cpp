@@ -1286,6 +1286,8 @@ static GPUEngineState initEngineAndUserState(
     CUcontext cu_ctx,
     cudaStream_t strm)
 {
+    assert(num_taskgraphs > 0);
+
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
                                uint32_t num_threads,
                                HeapArray<void *> &args) {
@@ -1358,7 +1360,8 @@ static GPUEngineState initEngineAndUserState(
                                              exported_readback,
                                              user_cfg_gpu_buffer);
 
-    auto init_tasks_args = makeKernelArgBuffer(user_cfg_gpu_buffer);
+    auto init_tasks_args = makeKernelArgBuffer(
+        num_taskgraphs, user_cfg_gpu_buffer);
 
     auto init_worlds_args = makeKernelArgBuffer(num_worlds,
         user_cfg_gpu_buffer,
@@ -1695,7 +1698,7 @@ static CUgraphExec makeTaskGraphRunGraph(
         megakernel_launches.push_back(megakernel_node);
     };
 
-    void addNodesForTaskGraph = [&](uint32_t taskgraph_id) {
+    auto addNodesForTaskGraph = [&](uint32_t taskgraph_id) {
         int64_t cur_node_idx = 0;
         while (cur_node_idx < node_megakernels.size()) {
             int64_t cur_megakernel_idx = node_megakernels[cur_node_idx];
@@ -1786,10 +1789,10 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
     }
 
     HeapArray<MegakernelConfig> megakernel_cfgs(max_megakernel_blocks_per_sm);
-    for (uint32_t i = 1; i <= max_megakernel_blocks_per_sm; i++) {
+    for (uint32_t i = 0; i < max_megakernel_blocks_per_sm; i++) {
         megakernel_cfgs[i] = {
             consts::numMegakernelThreads,
-            i,
+            i + 1,
             (uint32_t)num_sms,
         };
     }
@@ -1807,7 +1810,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.numWorlds, state_cfg.numWorldDataBytes,
         state_cfg.worldDataAlignment, state_cfg.worldInitPtr,
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
-        state_cfg.numUserConfigBytes,  state_cfg.numTaskgraphs,
+        state_cfg.numUserConfigBytes,  state_cfg.numTaskGraphs,
         state_cfg.numExportedBuffers,
         gpu_kernels, exec_mode, cu_gpu, cu_ctx, strm);
 
@@ -1864,13 +1867,13 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(Span<const uint32_t> taskgrap
 
 MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs()
 {
-    const CountT num_taskgraphs = impl_->taskgraphsState.numTaskgraphs;
+    const CountT num_taskgraphs = impl_->taskGraphsState.numTaskgraphs;
     HeapArray<uint32_t> all_taskgraph_ids(num_taskgraphs);
     for (CountT i = 0; i < num_taskgraphs; i++) {
         all_taskgraph_ids[i] = i;
     }
 
-    buildLaunchGraph(all_taskgraph_ids);
+    return buildLaunchGraph(all_taskgraph_ids);
 }
 
 void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)

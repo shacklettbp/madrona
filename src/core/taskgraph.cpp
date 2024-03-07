@@ -7,16 +7,20 @@
 
 namespace madrona {
 
-TaskGraphBuilder::TaskGraphBuilder(const WorkerInit &init)
+TaskGraphBuilder::TaskGraphBuilder(uint32_t taskgraph_id,
+                                   const WorkerInit &init)
     : state_mgr_(init.stateMgr),
       state_cache_(init.stateCache),
 #ifdef MADRONA_MW_MODE
       world_id_(init.worldID),
 #endif
+      taskgraph_id_(taskgraph_id),
       staged_(0),
       node_datas_(0),
       all_dependencies_(0)
-{}
+{
+    (void)taskgraph_id_;
+}
 
 TaskGraphNodeID TaskGraphBuilder::registerNode(
     uint32_t data_idx,
@@ -113,34 +117,35 @@ TaskGraph TaskGraphBuilder::build()
 }
 
 struct TaskGraphManager::Impl {
-    HeapArray<TaskGraph> taskgraphs;
     WorkerInit workerInit;
+    HeapArray<TaskGraphBuilder> builders;
 };
 
 TaskGraphManager::TaskGraphManager(CountT num_taskgraphs,
                                    const WorkerInit &init)
     : impl_(new TaskGraphManager::Impl {
-        .taskgraphs = HeapArray<TaskGraph>(num_taskgraphs),
         .workerInit = init,
+        .builders = HeapArray<TaskGraphBuilder>(num_taskgraphs),
     })
 {}
 
 TaskGraphManager::~TaskGraphManager() = default;
 
-TaskGraphBuilder TaskGraphManager::init()
+TaskGraphBuilder & TaskGraphManager::init(uint32_t taskgraph_id)
 {
-    return TaskGraphBuilder(impl_->workerInit);
+    return *new (&impl_->builders[taskgraph_id]) TaskGraphBuilder(
+        taskgraph_id, impl_->workerInit);
 }
 
-void TaskGraphManager::build(uint32_t taskgraph_id,
-                             TaskGraphBuilder &&builder)
+HeapArray<TaskGraph> TaskGraphManager::constructGraphs()
 {
-    impl_->taskgraphs[taskgraph_id] = builder.build();
-}
+    HeapArray<TaskGraph> graphs(impl_->builders.size());
 
-HeapArray<TaskGraph> TaskGraphManager::getBuiltGraphs()
-{
-    return std::move(impl_->taskgraphs);
+    for (CountT i = 0; i < impl_->builders.size(); i++) {
+        graphs.emplace(i, impl_->builders[i].build());
+    }
+
+    return graphs;
 }
 
 TaskGraph::TaskGraph(StateManager *state_mgr,

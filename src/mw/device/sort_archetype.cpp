@@ -933,17 +933,21 @@ static uint32_t __reduce_add_sync(uint32_t mask, uint32_t val)
 }
 #endif
 
-SortArchetypeNodeBase::OnesweepNode::OnesweepNode(ParentNodeT parent,
+SortArchetypeNodeBase::OnesweepNode::OnesweepNode(uint32_t taskgraph_id,
+                                                  ParentNodeT parent,
                                                   int32_t pass,
                                                   bool final_pass)
-    : parentNode(parent),
+    : taskGraphID(taskgraph_id),
+      parentNode(parent),
       passIDX(pass),
       finalPass(final_pass)
 {}
 
-SortArchetypeNodeBase::RearrangeNode::RearrangeNode(ParentNodeT parent,
+SortArchetypeNodeBase::RearrangeNode::RearrangeNode(uint32_t taskgraph_id,
+                                                    ParentNodeT parent,
                                                     int32_t col_idx)
-    : parentNode(parent),
+    : taskGraphID(taskgraph_id),
+      parentNode(parent),
       columnIndex(col_idx)
 {}
 
@@ -953,13 +957,15 @@ SortArchetypeNodeBase::ClearCountNode::ClearCountNode(int32_t *offsets,
       worldCounts(counts)
 {}
 
-SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t archetype_id,
+SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t taskgraph_id,
+                                             uint32_t archetype_id,
                                              int32_t col_idx,
                                              uint32_t *keys_col,
                                              int32_t num_passes,
                                              int32_t *sort_offsets,
                                              int32_t *counts)
     :  NodeBase {},
+       taskGraphID(taskgraph_id),
        archetypeID(archetype_id),
        sortColumnIndex(col_idx),
        keysCol(keys_col),
@@ -972,18 +978,18 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
 {
     using namespace sortConsts;
 
-    auto taskgraph = mwGPU::getTaskGraph();
+    auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
     StateManager *state_mgr = mwGPU::getStateManager();
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetypeID);
 
     if (!state_mgr->archetypeNeedsSort(archetypeID)) {
         numDynamicInvocations = 0;
 
-        auto &clear_count_node_data = taskgraph->getNodeData(clearWorldCountData);
+        auto &clear_count_node_data = taskgraph.getNodeData(clearWorldCountData);
         clear_count_node_data.numDynamicInvocations = 0;
 
         for (int i = 0; i < numPasses; i++) {
-            taskgraph->getNodeData(onesweepNodes[i]).numDynamicInvocations = 0;
+            taskgraph.getNodeData(onesweepNodes[i]).numDynamicInvocations = 0;
         }
         return;
     }
@@ -1040,12 +1046,12 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
 
         // resizeTable won't run so must set the rearrange passes to run
         // over the correct number of rows.
-        taskgraph->getNodeData(firstRearrangePassData).numDynamicInvocations =
+        taskgraph.getNodeData(firstRearrangePassData).numDynamicInvocations =
             numRows;
     }
 
     // This is only necessary if the global number of entities is 0
-    auto &clear_count_node_data = taskgraph->getNodeData(clearWorldCountData);
+    auto &clear_count_node_data = taskgraph.getNodeData(clearWorldCountData);
     if (numRows == 0) {
         clear_count_node_data.numDynamicInvocations =
             mwGPU::GPUImplConsts::get().numWorlds;
@@ -1080,7 +1086,7 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     }
 
     for (int i = 0; i < numPasses; i++) {
-        auto &pass_data = taskgraph->getNodeData(onesweepNodes[i]);
+        auto &pass_data = taskgraph.getNodeData(onesweepNodes[i]);
         pass_data.numDynamicInvocations = numSortBlocks * RADIX_DIGITS;
 
         if (i % 2 == 0) {
@@ -1186,7 +1192,7 @@ void SortArchetypeNodeBase::binScan(int32_t block_idx)
 void SortArchetypeNodeBase::OnesweepNode::prepareOnesweep(
     int32_t invocation_idx)
 {
-    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+    auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
     // Zero out the lookback counters
     parent.lookback[invocation_idx]  = 0;
 
@@ -1206,7 +1212,7 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
     auto smem_tmp =
         (RadixSortOnesweepCustom::TempStorage *)SharedMemStorage::buffer;
 
-    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+    auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
 
     int32_t pass = passIDX;
     RadixSortOnesweepCustom agent(*smem_tmp,
@@ -1230,8 +1236,8 @@ void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)
     int32_t num_entities = bins[(numPasses - 1) * 256 + 255];
     mwGPU::getStateManager()->resizeArchetype(archetypeID, num_entities);
 
-    auto taskgraph = mwGPU::getTaskGraph();
-    taskgraph->getNodeData(firstRearrangePassData).numDynamicInvocations =
+    auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
+    taskgraph.getNodeData(firstRearrangePassData).numDynamicInvocations =
         num_entities;
 
     // Set for clearWorldOffsetsAndCounts
@@ -1311,8 +1317,6 @@ void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
 }
 
 void SortArchetypeNodeBase::correctWorldCounts(int32_t invocation_idx) {
-    auto taskgraph = mwGPU::getTaskGraph();
-
     // Correct world counts by subtracting "entities before" from "entities
     // before and including" for each world. A world with 0 entities will
     // compute numEntities - numEntities = 0. For worlds with 0 entities,
@@ -1323,7 +1327,7 @@ void SortArchetypeNodeBase::correctWorldCounts(int32_t invocation_idx) {
 void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    auto &parent = mwGPU::getTaskGraph()->getNodeData(parentNode);
+    auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
 
     uint32_t bytes_per_elem = state_mgr->getArchetypeColumnBytesPerRow(
         parent.archetypeID, columnIndex);
@@ -1341,8 +1345,7 @@ void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
 void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    auto taskgraph = mwGPU::getTaskGraph();
-    auto &parent = taskgraph->getNodeData(parentNode);
+    auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
 
     auto entities_staging = (Entity *)parent.columnStaging;
     auto dst = (Entity *)state_mgr->getArchetypeColumn(parent.archetypeID, 0);
@@ -1366,8 +1369,8 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_
 void SortArchetypeNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    auto taskgraph = mwGPU::getTaskGraph();
-    auto &parent = taskgraph->getNodeData(parentNode);
+    auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
+    auto &parent = taskgraph.getNodeData(parentNode);
 
     auto staging = (char *)parent.columnStaging;
     auto dst = (char *)state_mgr->getArchetypeColumn(
@@ -1382,7 +1385,7 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_id
 
     if (invocation_idx == 0) {
         if (nextRearrangeNode.id != -1) {
-            taskgraph->getNodeData(nextRearrangeNode).numDynamicInvocations =
+            taskgraph.getNodeData(nextRearrangeNode).numDynamicInvocations =
                 numDynamicInvocations;
         }
         numDynamicInvocations = 0;
@@ -1424,8 +1427,10 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
         num_passes = 4;
     }
 
+    uint32_t taskgraph_id = builder.getTaskgraphID();
+
     auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
-        archetype_id, sort_column_idx, keys_col, 
+        taskgraph_id, archetype_id, sort_column_idx, keys_col,
         num_passes, world_offsets, world_counts);
     auto &sort_node_data = builder.getDataRef(data_id);
 
@@ -1453,13 +1458,14 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
 
     for (int32_t i = 0; i < num_passes; i++) {
         auto pass_data = builder.constructNodeData<OnesweepNode>(
-            data_id, i, i == num_passes - 1);
+            taskgraph_id, data_id, i, i == num_passes - 1);
         sort_node_data.onesweepNodes[i] = pass_data;
         cur_task = builder.addNodeFn<
             &OnesweepNode::prepareOnesweep>(pass_data, {cur_task}, setup);
 
         cur_task = builder.addNodeFn<&OnesweepNode::onesweep>(
-            pass_data, {cur_task}, setup, 0, consts::numMegakernelThreads);
+            pass_data, {cur_task}, setup, 0,
+            consts::numMegakernelThreads);
     }
 
     // FIXME this could be a fixed-size count
@@ -1496,7 +1502,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     for (int32_t col_idx = 1; col_idx < num_columns; col_idx++) {
         if (col_idx == sort_column_idx) continue;
         auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
-            data_id, col_idx);
+            taskgraph_id, data_id, col_idx);
         builder.getDataRef(cur_rearrange_node).numDynamicInvocations = 0;
 
         if (prev_rearrange_node.id == -1) {
@@ -1515,7 +1521,7 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     }
 
     auto entities_rearrange_node = builder.constructNodeData<RearrangeNode>(
-        data_id, 0);
+        taskgraph_id, data_id, 0);
 
     cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
         entities_rearrange_node, {cur_task}, setup);

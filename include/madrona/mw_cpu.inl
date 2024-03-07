@@ -49,20 +49,19 @@ TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::TaskGraphExecutor(
         WorldT::setupTasks(taskgraph_mgrs[world_idx], user_cfg);
 
         built_graphs.emplace(world_idx,
-                             taskgraph_mgrs[world_idx].getBuiltGraphs());
+                             taskgraph_mgrs[world_idx].constructGraphs());
     }
 
-    HeapArray<TaskGraph> taskgraphs(cfg.numWorlds);
     for (CountT taskgraph_idx = 0; taskgraph_idx < num_taskgraphs;
          taskgraph_idx++) {
         for (CountT world_idx = 0; world_idx < (CountT)cfg.numWorlds;
              world_idx++) {
             CountT job_idx = taskgraph_idx * cfg.numWorlds + world_idx;
 
-            job_datas_[job_idx] = {
+            job_datas_.emplace(job_idx, JobData {
                 .ctx = &contexts_[world_idx],
                 .taskgraph = std::move(built_graphs[world_idx][taskgraph_idx]),
-            };
+            });
 
             jobs_[job_idx].fn = [](void *ptr) {
                 auto job_data = (JobData *)ptr;
