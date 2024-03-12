@@ -283,8 +283,8 @@ UVInterpolation interpolateUVs(
 
 uint zeroDummy()
 {
-    uint zero_dummy = min(asint(viewDataBuffer[0].data[2].w), 0) +
-                      min(asint(engineInstanceBuffer[0].data[0].x), 0) +
+    uint zero_dummy = min(asuint(viewDataBuffer[0].data[2].w), 0) +
+                      min(asuint(engineInstanceBuffer[0].data[0].x), 0) +
                       min(asuint(vertexDataBuffer[0].data[0].x), 0) +
                       min(meshDataBuffer[0].vertexOffset, 0) +
                       min(indexBuffer[0], 0) +
@@ -692,6 +692,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     if (was_rasterized) {
         radiance = point_radiance.xyz;
     }
+
     // float point_alpha = was_rasterized ? 1.0 : 0.0;
     // radiance = lerp(radiance, point_radiance.xyz, point_alpha);
 
