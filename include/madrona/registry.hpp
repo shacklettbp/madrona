@@ -58,6 +58,11 @@ public:
     template <typename SingletonT>
     void exportSingleton(int32_t slot);
 
+    template <typename ArchetypeT, typename ComponentT, EnumType EnumT>
+    void exportColumn(EnumT slot);
+    template <typename SingletonT, EnumType EnumT>
+    void exportSingleton(EnumT slot);
+
 private:
     StateManager *state_mgr_;
     void **export_ptrs_;

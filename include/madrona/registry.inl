@@ -43,4 +43,16 @@ void ECSRegistry::exportSingleton(int32_t slot)
     export_ptrs_[slot] = state_mgr_->exportSingleton<SingletonT>();
 }
 
+template <typename ArchetypeT, typename ComponentT, EnumType EnumT>
+void ECSRegistry::exportColumn(EnumT slot)
+{
+    exportColumn<ArchetypeT, ComponentT>(static_cast<uint32_t>(slot));
+}
+
+template <typename SingletonT, EnumType EnumT>
+void ECSRegistry::exportSingleton(EnumT slot)
+{
+    exportSingleton<SingletonT>(static_cast<uint32_t>(slot));
+}
+
 }
