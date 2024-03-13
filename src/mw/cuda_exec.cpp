@@ -1739,8 +1739,15 @@ MWCudaLaunchGraph::MWCudaLaunchGraph(Impl *impl)
     : impl_(impl)
 {}
 
+
+MWCudaLaunchGraph::MWCudaLaunchGraph(MWCudaLaunchGraph &&) = default;
+
 MWCudaLaunchGraph::~MWCudaLaunchGraph()
 {
+    if (!impl_) {
+        return;
+    }
+
     REQ_CU(cuGraphExecDestroy(impl_->runGraph));
 }
 
