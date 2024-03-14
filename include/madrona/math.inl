@@ -133,11 +133,6 @@ Vector2 & Vector2::operator/=(float o)
     return *this *= inv;
 }
 
-constexpr Vector2 Vector2::fromVector3(Vector3 v)
-{
-    return { v.x, v.y };
-}
-
 Vector2 operator-(Vector2 v)
 {
     return Vector2 {
@@ -273,6 +268,36 @@ Vector3 Vector3::normalize() const
 {
     return *this * invLength();
 } 
+
+Vector2 Vector3::xy() const
+{
+    return Vector2 { .x = x, .y = y };
+}
+
+Vector2 Vector3::yz() const
+{
+    return Vector2 { .x = y, .y = z };
+}
+
+Vector2 Vector3::xz() const
+{
+    return Vector2 { .x = x, .y = z };
+}
+
+Vector2 Vector3::yx() const
+{
+    return Vector2 { .x = y, .y = x };
+}
+
+Vector2 Vector3::zy() const
+{
+    return Vector2 { .x = z, .y = y };
+}
+
+Vector2 Vector3::zx() const
+{
+    return Vector2 { .x = z, .y = x };
+}
 
 float & Vector3::operator[](CountT i)
 {

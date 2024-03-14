@@ -55,8 +55,6 @@ struct Vector2 {
     inline Vector2 & operator*=(float o);
     inline Vector2 & operator/=(float o);
 
-    static inline constexpr Vector2 fromVector3(Vector3 v);
-
     friend inline Vector2 operator+(Vector2 v);
     friend inline Vector2 operator-(Vector2 v);
 
@@ -94,6 +92,13 @@ struct Vector3 {
     inline float distance2(const Vector3 &o) const;
 
     [[nodiscard]] inline Vector3 normalize() const;
+
+    inline Vector2 xy() const;
+    inline Vector2 yz() const;
+    inline Vector2 xz() const;
+    inline Vector2 yx() const;
+    inline Vector2 zy() const;
+    inline Vector2 zx() const;
 
     inline float & operator[](CountT i);
     inline float operator[](CountT i) const;
