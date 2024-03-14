@@ -131,8 +131,8 @@ TEST(RandomInit, DifferentSeeds)
 TEST(RandomRange, UpperLimit)
 {
     RandKey k { 0xFFFF'FFFF_u32, 0_u32 };
-    RandBits32 bits = rand::bits32(k);
-    EXPECT_EQ(bits.x, 0xFFFF'FFFF_u32);
+    uint32_t bits = rand::bits32(k);
+    EXPECT_EQ(bits, 0xFFFF'FFFF_u32);
 
     int32_t r1 = rand::sampleI32(k, 0, 64);
     int32_t r2 = rand::sampleI32Biased(k, 0, 64);
