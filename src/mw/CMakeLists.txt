@@ -63,6 +63,7 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/navmesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../core/base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/physics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/xpbd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/narrowphase.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/broadphase.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../render/ecs_system.cpp

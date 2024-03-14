@@ -306,7 +306,7 @@ private:
 
 }
 
-namespace solver {
+namespace xpbd {
 
 struct SubstepPrevState {
     math::Vector3 prevPosition;
