@@ -255,7 +255,7 @@ TaskGraphNodeID RigidBodyPhysicsSystem::setupBroadphaseTasks(
     return broadphase::setupBVHTasks(builder, deps);
 }
 
-TaskGraphNodeID setupBroadphaseOverlapTasks(
+TaskGraphNodeID RigidBodyPhysicsSystem::setupBroadphaseOverlapTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps)
 {
