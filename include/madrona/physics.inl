@@ -60,7 +60,7 @@ math::AABB BVH::getLeafAABB(LeafID leaf_id) const
 }
 
 template <typename Fn>
-void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
+void BVH::findIntersecting(const math::AABB &aabb, Fn &&fn) const
 {
     int32_t stack[32];
     stack[0] = 0;
@@ -100,10 +100,10 @@ void BVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 }
 
 template <typename Fn>
-void BVH::findOverlapsForLeaf(LeafID leaf_id, Fn &&fn) const
+void BVH::findLeafIntersecting(LeafID leaf_id, Fn &&fn) const
 {
     math::AABB leaf_aabb = leaf_aabbs_[leaf_id.id];
-    findOverlaps(leaf_aabb, std::forward<Fn>(fn));
+    findIntersecting(leaf_aabb, std::forward<Fn>(fn));
 }
 
 void BVH::rebuildOnUpdate()
@@ -209,7 +209,7 @@ void RigidBodyPhysicsSystem::findEntitiesWithinAABB(Context &ctx,
 
     auto &bvh = ctx.singleton<broadphase::BVH>();
 
-    bvh.findOverlaps(aabb, [&](Entity e) {
+    bvh.findIntersecting(aabb, [&](Entity e) {
         bool overlap = RigidBodyPhysicsSystem::checkEntityAABBOverlap(
             ctx, aabb, e);
         if (overlap) {

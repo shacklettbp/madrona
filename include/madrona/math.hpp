@@ -328,7 +328,12 @@ struct AABB {
 
     inline float surfaceArea() const;
     inline float distance2(const AABB &o) const;
+
     inline bool overlaps(const AABB &o) const;
+    // intersects returns true if AABBs are overlapping or if
+    // they are exactly touching with no overlap.
+    inline bool intersects(const AABB &o) const;
+
     inline bool contains(const AABB &o) const;
     inline bool contains(const Vector3 &p) const;
     inline void expand(const Vector3 &p);

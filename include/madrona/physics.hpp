@@ -216,10 +216,10 @@ public:
     inline math::AABB getLeafAABB(LeafID leaf_id) const;
 
     template <typename Fn>
-    inline void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
+    inline void findIntersecting(const math::AABB &aabb, Fn &&fn) const;
 
     template <typename Fn>
-    inline void findOverlapsForLeaf(LeafID leaf_id, Fn &&fn) const;
+    inline void findLeafIntersecting(LeafID leaf_id, Fn &&fn) const;
 
     Entity traceRay(math::Vector3 o,
                     math::Vector3 d,

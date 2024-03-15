@@ -1597,7 +1597,7 @@ static inline void runNarrowphase(
         AABB a_world_aabb = a_obj_aabb.applyTRS(a_pos, a_rot, a_scale);
         AABB b_world_aabb = b_obj_aabb.applyTRS(b_pos, b_rot, b_scale);
 
-        if (!a_world_aabb.overlaps(b_world_aabb)) {
+        if (!a_world_aabb.intersects(b_world_aabb)) {
 #ifdef MADRONA_GPU_MODE
             lane_active = false;
 #else

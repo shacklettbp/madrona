@@ -1513,6 +1513,19 @@ bool AABB::overlaps(const AABB &o) const
            a_min.z < b_max.z && b_min.z < a_max.z;
 }
 
+bool AABB::intersects(const AABB &o) const
+{
+    auto [a_min, a_max] = *this;
+    auto [b_min, b_max] = o;
+
+    // SAT
+    bool x_sep = a_max.x < b_min.x || a_min.x > b_max.x;
+    bool y_sep = a_max.y < b_min.y || a_min.y > b_max.y;
+    bool z_sep = a_max.z < b_min.z || a_min.z > b_max.z;
+
+    return !x_sep && !y_sep && !z_sep;
+}
+
 bool AABB::contains(const AABB &o) const
 {
     auto [a_min, a_max] = *this;

@@ -926,7 +926,7 @@ inline void refitEntry(Context &ctx, LeafID leaf_id)
     bvh.refitLeaf(leaf_id, bvh.getLeafAABB(leaf_id));
 }
 
-inline void findOverlappingEntry(
+inline void findIntersectingEntry(
     Context &ctx,
     const Entity &e,
     LeafID leaf_id)
@@ -945,9 +945,9 @@ inline void findOverlappingEntry(
 
     CountT a_num_prims = obj_mgr.rigidBodyPrimitiveCounts[a_obj.idx];
 
-    bvh.findOverlapsForLeaf(leaf_id, [&](Entity overlapping_entity) {
-        if (e.id < overlapping_entity.id) {
-            Loc b_loc = ctx.loc(overlapping_entity);
+    bvh.findLeafIntersecting(leaf_id, [&](Entity intersecting_entity) {
+        if (e.id < intersecting_entity.id) {
+            Loc b_loc = ctx.loc(intersecting_entity);
 
             // FIXME: Change this so static objects are kept in a separate BVH
             // and this check can be removed.
@@ -1019,10 +1019,10 @@ TaskGraphNodeID setupPreIntegrationTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps)
 {
-    auto find_overlapping = builder.addToGraph<ParallelForNode<Context,
-        broadphase::findOverlappingEntry, Entity, LeafID>>(deps);
+    auto find_intersects = builder.addToGraph<ParallelForNode<Context,
+        broadphase::findIntersectingEntry, Entity, LeafID>>(deps);
 
-    return find_overlapping;
+    return find_intersects;
 }
 
 TaskGraphNodeID setupPostIntegrationTasks(
