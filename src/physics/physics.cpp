@@ -3,11 +3,72 @@
 
 #include "physics_impl.hpp"
 #include "xpbd.hpp"
+#include "tgs.hpp"
 
 namespace madrona::phys {
 
 using namespace base;
 using namespace math;
+
+#ifdef MADRONA_GPU_MODE
+//#define COUNT_GPU_CLOCKS
+#endif
+
+#ifdef COUNT_GPU_CLOCKS
+extern "C" {
+extern AtomicU64 narrowphaseAllClocks;
+extern AtomicU64 narrowphaseFetchWorldClocks;
+extern AtomicU64 narrowphaseSetupClocks;
+extern AtomicU64 narrowphasePrepClocks;
+extern AtomicU64 narrowphaseSwitchClocks;
+extern AtomicU64 narrowphaseSATFaceClocks;
+extern AtomicU64 narrowphaseSATEdgeClocks;
+extern AtomicU64 narrowphaseSATPlaneClocks;
+extern AtomicU64 narrowphaseSATContactClocks;
+extern AtomicU64 narrowphaseSATPlaneContactClocks;
+extern AtomicU64 narrowphaseSaveContactsClocks;
+extern AtomicU64 narrowphaseTxfmHullCtrs;
+}
+
+inline void reportNarrowphaseClocks(Engine &ctx,
+                                    SolverData &)
+{
+    if (ctx.worldID().idx != 0) {
+        return;
+    }
+
+    if (threadIdx.x == 0 && ctx.worldID().idx == 0) {
+        printf("[%lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu]\n",
+                narrowphaseAllClocks.load<sync::relaxed>(),
+                narrowphaseFetchWorldClocks.load<sync::relaxed>(),
+                narrowphaseSetupClocks.load<sync::relaxed>(),
+                narrowphasePrepClocks.load<sync::relaxed>(),
+                narrowphaseSwitchClocks.load<sync::relaxed>(),
+                narrowphaseSATFaceClocks.load<sync::relaxed>(),
+                narrowphaseSATEdgeClocks.load<sync::relaxed>(),
+                narrowphaseSATPlaneClocks.load<sync::relaxed>(),
+                narrowphaseSATContactClocks.load<sync::relaxed>(),
+                narrowphaseSATPlaneContactClocks.load<sync::relaxed>(),
+                narrowphaseSaveContactsClocks.load<sync::relaxed>(),
+                narrowphaseTxfmHullCtrs.load<sync::relaxed>()
+               );
+
+        narrowphaseAllClocks.store<sync::relaxed>(0);
+        narrowphaseFetchWorldClocks.store<sync::relaxed>(0);
+        narrowphaseSetupClocks.store<sync::relaxed>(0),
+        narrowphasePrepClocks.store<sync::relaxed>(0);
+        narrowphaseSwitchClocks.store<sync::relaxed>(0);
+        narrowphaseSATFaceClocks.store<sync::relaxed>(0);
+        narrowphaseSATEdgeClocks.store<sync::relaxed>(0);
+        narrowphaseSATPlaneClocks.store<sync::relaxed>(0);
+        narrowphaseSATContactClocks.store<sync::relaxed>(0);
+        narrowphaseSATPlaneContactClocks.store<sync::relaxed>(0);
+        narrowphaseSaveContactsClocks.store<sync::relaxed>(0);
+        narrowphaseTxfmHullCtrs.store<sync::relaxed>(0);
+    }
+}
+#endif
+
 
 static SolverData initSolverState(Context &ctx,
                                   float delta_t,
@@ -28,12 +89,14 @@ static SolverData initSolverState(Context &ctx,
     };
 }
 
-void RigidBodyPhysicsSystem::init(Context &ctx,
-                                  ObjectManager *obj_mgr,
-                                  float delta_t,
-                                  CountT num_substeps,
-                                  math::Vector3 gravity,
-                                  CountT max_dynamic_objects)
+namespace PhysicsSystem {
+
+void init(Context &ctx,
+          ObjectManager *obj_mgr,
+          float delta_t,
+          CountT num_substeps,
+          math::Vector3 gravity,
+          CountT max_dynamic_objects)
 {
     broadphase::BVH &bvh = ctx.singleton<broadphase::BVH>();
 
@@ -51,21 +114,21 @@ void RigidBodyPhysicsSystem::init(Context &ctx,
     new (&objs) ObjectData { obj_mgr };
 }
 
-void RigidBodyPhysicsSystem::reset(Context &ctx)
+void reset(Context &ctx)
 {
     broadphase::BVH &bvh = ctx.singleton<broadphase::BVH>();
     bvh.rebuildOnUpdate();
     bvh.clearLeaves();
 }
 
-broadphase::LeafID RigidBodyPhysicsSystem::registerEntity(Context &ctx,
-                                                          Entity e,
-                                                          ObjectID obj_id)
+broadphase::LeafID registerEntity(Context &ctx,
+                                  Entity e,
+                                  ObjectID obj_id)
 {
     return ctx.singleton<broadphase::BVH>().reserveLeaf(e, obj_id);
 }
 
-bool RigidBodyPhysicsSystem::checkEntityAABBOverlap(
+bool checkEntityAABBOverlap(
     Context &ctx, math::AABB aabb, Entity e)
 {
     const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
@@ -161,7 +224,58 @@ bool RigidBodyPhysicsSystem::checkEntityAABBOverlap(
 }
 
 
-void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
+Entity makeFixedJoint(
+    Context &ctx,
+    Entity e1, Entity e2,
+    math::Quat attach_rot1, math::Quat attach_rot2,
+    math::Vector3 r1, math::Vector3 r2,
+    float separation)
+{
+    Entity e = ctx.makeEntity<Joint>();
+
+    ctx.get<JointConstraint>(e) = {
+        .e1 = e1,
+        .e2 = e2,
+        .type = JointConstraint::Type::Fixed,
+        .fixed = {
+            .attachRot1 = attach_rot1,
+            .attachRot2 = attach_rot2,
+            .separation = separation,
+        },
+        .r1 = r1,
+        .r2 = r2,
+    };
+
+    return e;
+}
+
+Entity makeHingeJoint(
+    Context &ctx,
+    Entity e1, Entity e2,
+    math::Vector3 a1_local, math::Vector3 a2_local,
+    math::Vector3 b1_local, math::Vector3 b2_local,
+    math::Vector3 r1, math::Vector3 r2)
+{
+    Entity e = ctx.makeEntity<Joint>();
+
+    ctx.get<JointConstraint>(e) = {
+        .e1 = e1,
+        .e2 = e2,
+        .type = JointConstraint::Type::Hinge,
+        .hinge = {
+            .a1Local = a1_local,
+            .a2Local = a2_local,
+            .b1Local = b1_local,
+            .b2Local = b2_local,
+        },
+        .r1 = r1,
+        .r2 = r2,
+    };
+
+    return e;
+}
+
+void registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<broadphase::LeafID>();
     registry.registerSingleton<broadphase::BVH>();
@@ -189,108 +303,42 @@ void RigidBodyPhysicsSystem::registerTypes(ECSRegistry &registry)
     xpbd::registerTypes(registry);
 }
 
-#ifdef MADRONA_GPU_MODE
-//#define COUNT_GPU_CLOCKS
-#endif
-
-#ifdef COUNT_GPU_CLOCKS
-extern "C" {
-extern AtomicU64 narrowphaseAllClocks;
-extern AtomicU64 narrowphaseFetchWorldClocks;
-extern AtomicU64 narrowphaseSetupClocks;
-extern AtomicU64 narrowphasePrepClocks;
-extern AtomicU64 narrowphaseSwitchClocks;
-extern AtomicU64 narrowphaseSATFaceClocks;
-extern AtomicU64 narrowphaseSATEdgeClocks;
-extern AtomicU64 narrowphaseSATPlaneClocks;
-extern AtomicU64 narrowphaseSATContactClocks;
-extern AtomicU64 narrowphaseSATPlaneContactClocks;
-extern AtomicU64 narrowphaseSaveContactsClocks;
-extern AtomicU64 narrowphaseTxfmHullCtrs;
-}
-
-inline void reportNarrowphaseClocks(Engine &ctx,
-                                    SolverData &)
-{
-    if (ctx.worldID().idx != 0) {
-        return;
-    }
-
-    if (threadIdx.x == 0 && ctx.worldID().idx == 0) {
-        printf("[%lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu, %lu]\n",
-                narrowphaseAllClocks.load<sync::relaxed>(),
-                narrowphaseFetchWorldClocks.load<sync::relaxed>(),
-                narrowphaseSetupClocks.load<sync::relaxed>(),
-                narrowphasePrepClocks.load<sync::relaxed>(),
-                narrowphaseSwitchClocks.load<sync::relaxed>(),
-                narrowphaseSATFaceClocks.load<sync::relaxed>(),
-                narrowphaseSATEdgeClocks.load<sync::relaxed>(),
-                narrowphaseSATPlaneClocks.load<sync::relaxed>(),
-                narrowphaseSATContactClocks.load<sync::relaxed>(),
-                narrowphaseSATPlaneContactClocks.load<sync::relaxed>(),
-                narrowphaseSaveContactsClocks.load<sync::relaxed>(),
-                narrowphaseTxfmHullCtrs.load<sync::relaxed>()
-               );
-
-        narrowphaseAllClocks.store<sync::relaxed>(0);
-        narrowphaseFetchWorldClocks.store<sync::relaxed>(0);
-        narrowphaseSetupClocks.store<sync::relaxed>(0),
-        narrowphasePrepClocks.store<sync::relaxed>(0);
-        narrowphaseSwitchClocks.store<sync::relaxed>(0);
-        narrowphaseSATFaceClocks.store<sync::relaxed>(0);
-        narrowphaseSATEdgeClocks.store<sync::relaxed>(0);
-        narrowphaseSATPlaneClocks.store<sync::relaxed>(0);
-        narrowphaseSATContactClocks.store<sync::relaxed>(0);
-        narrowphaseSATPlaneContactClocks.store<sync::relaxed>(0);
-        narrowphaseSaveContactsClocks.store<sync::relaxed>(0);
-        narrowphaseTxfmHullCtrs.store<sync::relaxed>(0);
-    }
-}
-#endif
-
-TaskGraphNodeID RigidBodyPhysicsSystem::setupBroadphaseTasks(
+TaskGraphNodeID setupBroadphaseTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps)
 {
     return broadphase::setupBVHTasks(builder, deps);
 }
 
-TaskGraphNodeID RigidBodyPhysicsSystem::setupBroadphaseOverlapTasks(
+TaskGraphNodeID setupBroadphaseOverlapTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps)
 {
     return broadphase::setupPreIntegrationTasks(builder, deps);
 }
 
-#ifdef MADRONA_GPU_MODE
-template <typename ArchetypeT>
-TaskGraph::NodeID queueSortByWorld(TaskGraph::Builder &builder,
-                                   Span<const TaskGraph::NodeID> deps)
-{
-    auto sort_sys =
-        builder.addToGraph<SortArchetypeNode<ArchetypeT, WorldID>>(
-                deps);
-    auto post_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_sys});
-
-    return post_sort_reset_tmp;
-}
-#endif
-
-TaskGraphNodeID RigidBodyPhysicsSystem::setupSubstepTasks(
+TaskGraphNodeID setupSubstepTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps,
-    CountT num_substeps)
+    CountT num_substeps,
+    bool use_tgs)
 {
     auto broadphase_pre =
         broadphase::setupPreIntegrationTasks(builder, deps);
 
     auto cur_node = broadphase_pre;
+
 #ifdef MADRONA_GPU_MODE
-    cur_node = queueSortByWorld<Joint>(builder, {cur_node});
+    cur_node = 
+        builder.addToGraph<SortArchetypeNode<Joint, WorldID>>({cur_node});
+    cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
 #endif
 
-    cur_node = xpbd::setupXPBDSolverTasks(builder, cur_node, num_substeps);
+    if (use_tgs) {
+        cur_node = tgs::setupTGSSolverTasks(builder, cur_node, num_substeps);
+    } else {
+        cur_node = xpbd::setupXPBDSolverTasks(builder, cur_node, num_substeps);
+    }
 
     auto clear_candidates = builder.addToGraph<
         ClearTmpNode<CandidateTemporary>>({cur_node});
@@ -308,10 +356,12 @@ TaskGraphNodeID RigidBodyPhysicsSystem::setupSubstepTasks(
     return physics_done;
 }
 
-TaskGraphNodeID RigidBodyPhysicsSystem::setupCleanupTasks(
+TaskGraphNodeID setupCleanupTasks(
     TaskGraphBuilder &builder, Span<const TaskGraphNodeID> deps)
 {
     return builder.addToGraph<ClearTmpNode<CollisionEventTemporary>>(deps);
+}
+
 }
 
 }

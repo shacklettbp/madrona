@@ -82,6 +82,10 @@ private:
 #define PROF_END(name)
 #endif
 
+#ifdef MADRONA_GPU_MODE
+#define MADRONA_GPU_MODE_HACK
+#endif
+
 // Unconditionally disable GPU narrowphase version
 #undef MADRONA_GPU_MODE
 #undef MADRONA_GPU_COND
@@ -1779,8 +1783,16 @@ TaskGraphNodeID setupTasks(
         runNarrowphaseSystem, CandidateCollision>>(deps);
 #endif
 
-    // FIXME do some kind of scoped reset on tmp alloc
-    return builder.addToGraph<ResetTmpAllocNode>({narrowphase});
+    auto finished = builder.addToGraph<ResetTmpAllocNode>({narrowphase});
+
+#ifdef MADRONA_GPU_MODE_HACK
+    auto sort_contacts =
+        builder.addToGraph<SortArchetypeNode<Contact, WorldID>>({finished});
+
+    finished = builder.addToGraph<ResetTmpAllocNode>({sort_contacts});
+#endif
+
+    return finished;
 }
 
 }

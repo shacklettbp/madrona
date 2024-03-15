@@ -2,6 +2,7 @@
 #include <madrona/context.hpp>
 
 #include "physics_impl.hpp"
+#include "xpbd.hpp"
 
 namespace madrona::phys::xpbd {
 
@@ -1020,11 +1021,6 @@ TaskGraphNodeID setupXPBDSolverTasks(
             PreSolveVelocity>>({cur_node});
 
         auto run_narrowphase = narrowphase::setupTasks(builder, {rgb_update});
-
-#ifdef MADRONA_GPU_MODE
-        run_narrowphase = queueSortByWorld<Contact>(
-            builder, {run_narrowphase});
-#endif
 
         auto solve_pos = builder.addToGraph<ParallelForNode<Context,
             solvePositions, SolverData>>(

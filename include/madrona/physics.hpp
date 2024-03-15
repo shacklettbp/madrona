@@ -67,19 +67,12 @@ struct Velocity {
     math::Vector3 angular;
 };
 
-struct CollisionEvent {
-    Entity a;
-    Entity b;
-};
-
 struct CandidateCollision {
     Loc a;
     Loc b;
     uint32_t aPrim;
     uint32_t bPrim;
 };
-
-struct CandidateTemporary : Archetype<CandidateCollision> {};
 
 struct ContactConstraint {
     Loc ref;
@@ -89,10 +82,6 @@ struct ContactConstraint {
     math::Vector3 normal;
     float lambdaN[4];
 };
-
-struct Contact : Archetype<ContactConstraint> {};
-
-struct CollisionEventTemporary : Archetype<CollisionEvent> {};
 
 struct JointConstraint {
     enum class Type {
@@ -124,23 +113,14 @@ struct JointConstraint {
 
     math::Vector3 r1;
     math::Vector3 r2;
-
-    static inline Entity setupFixed(
-        Context &ctx,
-        Entity e1, Entity e2,
-        math::Quat attach_rot1, math::Quat attach_rot2,
-        math::Vector3 r1, math::Vector3 r2,
-        float separation);
-
-    static inline Entity setupHinge(
-        Context &ctx,
-        Entity e1, Entity e2,
-        math::Vector3 a1_local, math::Vector3 a2_local,
-        math::Vector3 b1_local, math::Vector3 b2_local,
-        math::Vector3 r1, math::Vector3 r2);
 };
 
-struct Joint : Archetype<JointConstraint> {};
+struct CollisionEvent {
+    Entity a;
+    Entity b;
+};
+
+struct CollisionEventTemporary : Archetype<CollisionEvent> {};
 
 // Per object state
 struct RigidBodyMassData {
@@ -325,63 +305,60 @@ struct PreSolveVelocity {
 
 }
 
-struct RigidBodyPhysicsSystem {
-    static void init(Context &ctx,
-                     ObjectManager *obj_mgr,
-                     float delta_t,
-                     CountT num_substeps,
-                     math::Vector3 gravity,
-                     CountT max_dynamic_objects);
+namespace PhysicsSystem {
+    void init(Context &ctx,
+              ObjectManager *obj_mgr,
+              float delta_t,
+              CountT num_substeps,
+              math::Vector3 gravity,
+              CountT max_dynamic_objects);
 
-    static void reset(Context &ctx);
-    static broadphase::LeafID registerEntity(Context &ctx,
-                                             Entity e,
-                                             base::ObjectID obj_id);
+    void reset(Context &ctx);
+    broadphase::LeafID registerEntity(Context &ctx,
+                                      Entity e,
+                                      base::ObjectID obj_id);
 
     template <typename Fn>
-    static void findEntitiesWithinAABB(Context &ctx,
+    void findEntitiesWithinAABB(Context &ctx,
                                        math::AABB aabb,
                                        Fn &&fn);
 
-    static bool checkEntityAABBOverlap(Context &ctx,
+    bool checkEntityAABBOverlap(Context &ctx,
                                        math::AABB aabb,
                                        Entity e);
 
-    static void registerTypes(ECSRegistry &registry);
+    Entity makeFixedJoint(Context &ctx,
+                          Entity e1, Entity e2,
+                          math::Quat attach_rot1, math::Quat attach_rot2,
+                          math::Vector3 r1, math::Vector3 r2,
+                          float separation);
 
-    static TaskGraphNodeID setupBroadphaseTasks(
+    Entity makeHingeJoint(Context &ctx,
+                          Entity e1, Entity e2,
+                          math::Vector3 a1_local, math::Vector3 a2_local,
+                          math::Vector3 b1_local, math::Vector3 b2_local,
+                          math::Vector3 r1, math::Vector3 r2);
+
+
+    void registerTypes(ECSRegistry &registry);
+
+    TaskGraphNodeID setupBroadphaseTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
 
-    static TaskGraphNodeID setupBroadphaseOverlapTasks(
+    TaskGraphNodeID setupBroadphaseOverlapTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
 
-    static TaskGraphNodeID setupSubstepTasks(
+    TaskGraphNodeID setupSubstepTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps,
-        CountT num_substeps);
+        CountT num_substeps,
+        bool use_tgs = false);
 
-    static TaskGraphNodeID setupCleanupTasks(
+    TaskGraphNodeID setupCleanupTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
-};
-
-struct Cols {
-    static constexpr inline CountT Position = 2;
-    static constexpr inline CountT Rotation = 3;
-    static constexpr inline CountT Scale = 4;
-    static constexpr inline CountT Velocity = 5;
-    static constexpr inline CountT ObjectID = 6;
-    static constexpr inline CountT ResponseType = 7;
-    static constexpr inline CountT SubstepPrevState = 8;
-    static constexpr inline CountT PreSolvePositional = 9;
-    static constexpr inline CountT PreSolveVelocity = 10;
-    static constexpr inline CountT ExternalForce = 11;
-    static constexpr inline CountT ExternalTorque = 12;
-    static constexpr inline CountT LeafID = 13;
-
-    static constexpr inline CountT CandidateCollision = 2;
 };
 
 }
