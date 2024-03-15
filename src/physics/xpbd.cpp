@@ -943,6 +943,11 @@ static inline void solveVelocitiesForContact(Context &ctx,
             vn_bar);
     }
 
+    float penetration_sum = 0.f;
+    for (CountT i = 0; i < contact.numPoints; i++) {
+        penetration_sum += contact.points[i].w;
+    }
+
     for (CountT i = 0; i < contact.numPoints; i++) {
         auto [r1, r2] = getLocalSpaceContacts(presolve_pos1, presolve_pos2,
             contact.points[i].xyz(), contact.points[i].w, contact.normal);
@@ -960,7 +965,7 @@ static inline void solveVelocitiesForContact(Context &ctx,
             mu_d, h,
             r1, r2,
             r1_world, r2_world,
-            contact.lambdaN[0]);
+            contact.lambdaN[0] * (contact.points[i].w / penetration_sum));
     }
 
     *v1_out = Velocity { v1, omega1 };
