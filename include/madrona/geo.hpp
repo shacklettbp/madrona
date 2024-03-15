@@ -4,6 +4,39 @@
 
 namespace madrona::geo {
 
+struct HalfEdge {
+    uint32_t next;
+    uint32_t rootVertex;
+    uint32_t face;
+};
+
+struct Plane {
+    math::Vector3 normal; // Potentially unnormalized
+    float d;
+};
+
+struct Segment {
+    math::Vector3 p1;
+    math::Vector3 p2;
+};
+
+struct HalfEdgeMesh {
+    template <typename Fn>
+    inline void iterateFaceIndices(uint32_t face, Fn &&fn) const;
+    inline uint32_t twinIDX(uint32_t half_edge_id) const;
+    inline uint32_t numEdges() const;
+    inline uint32_t edgeToHalfEdge(uint32_t edge_id) const;
+
+    HalfEdge *halfEdges;
+    uint32_t *faceBaseHalfEdges;
+    Plane *facePlanes;
+    math::Vector3 *vertices;
+
+    uint32_t numHalfEdges;
+    uint32_t numFaces;
+    uint32_t numVertices;
+};
+
 // Sphere at origin, ray_d must be normalized
 inline float intersectRayOriginSphere(
     math::Vector3 ray_o,

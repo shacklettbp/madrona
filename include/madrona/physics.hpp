@@ -6,45 +6,9 @@
 #include <madrona/context.hpp>
 
 #include <madrona/broadphase.hpp>
+#include <madrona/geo.hpp>
 
 namespace madrona::phys {
-
-namespace geometry {
-
-struct HalfEdge {
-    uint32_t next;
-    uint32_t rootVertex;
-    uint32_t face;
-};
-
-struct Plane {
-    math::Vector3 normal; // Potentially unnormalized
-    float d;
-};
-
-struct Segment {
-    math::Vector3 p1;
-    math::Vector3 p2;
-};
-
-struct HalfEdgeMesh {
-    template <typename Fn>
-    inline void iterateFaceIndices(uint32_t face, Fn &&fn) const;
-    inline uint32_t twinIDX(uint32_t half_edge_id) const;
-    inline uint32_t numEdges() const;
-    inline uint32_t edgeToHalfEdge(uint32_t edge_id) const;
-
-    HalfEdge *halfEdges;
-    uint32_t *faceBaseHalfEdges;
-    Plane *facePlanes;
-    math::Vector3 *vertices;
-
-    uint32_t numHalfEdges;
-    uint32_t numFaces;
-    uint32_t numVertices;
-};
-
-}
 
 struct ExternalForce : math::Vector3 {
     ExternalForce(math::Vector3 v)
@@ -154,7 +118,7 @@ struct CollisionPrimitive {
     };
 
     struct Hull {
-        geometry::HalfEdgeMesh halfEdgeMesh;
+        geo::HalfEdgeMesh halfEdgeMesh;
     };
 
     struct Plane {};

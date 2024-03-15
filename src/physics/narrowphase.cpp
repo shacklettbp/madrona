@@ -95,7 +95,7 @@ namespace madrona::phys::narrowphase {
 
 using namespace base;
 using namespace math;
-using namespace geometry;
+using namespace geo;
 
 enum class NarrowphaseTest : uint32_t {
     SphereSphere = 1,
@@ -133,7 +133,7 @@ struct Manifold {
 
 static HullState makeHullState(
     MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
-    const geometry::HalfEdgeMesh &mesh,
+    const HalfEdgeMesh &mesh,
     Vector3 translation,
     Quat rotation,
     Diag3x3 scale,
@@ -213,7 +213,7 @@ static inline float getDistanceFromPlane(
 }
 
 // Get intersection on plane of the line passing through 2 points
-inline math::Vector3 planeIntersection(const geometry::Plane &plane, const math::Vector3 &p1, const math::Vector3 &p2) {
+inline math::Vector3 planeIntersection(const Plane &plane, const math::Vector3 &p1, const math::Vector3 &p2) {
     float distance = getDistanceFromPlane(plane, p1);
 
     return p1 + (p2 - p1) * (-distance / plane.normal.dot(p2 - p1));
@@ -1264,7 +1264,7 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
         Vector3 b_scale = ctx.getUnsafe<Rotation>(b_entity);
 
-        geometry::CollisionMesh b_collision_mesh = 
+        CollisionMesh b_collision_mesh = 
             buildCollisionMesh(b_he_mesh, b_pos, b_rot, b_scale);
 #endif
         assert(false);
@@ -1335,7 +1335,7 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
 
         Vector3 plane_normal = b_rot.rotateVec(base_normal);
             
-        geometry::Plane plane {
+        Plane plane {
             plane_normal,
             dot(plane_normal, b_pos),
         };

@@ -5,6 +5,8 @@
 #include <madrona/stack_alloc.hpp>
 #include <madrona/mesh_bvh.hpp>
 
+#include <madrona/geo.hpp>
+
 namespace madrona::phys {
 
 struct SourceCollisionPrimitive {
@@ -27,9 +29,9 @@ struct SourceCollisionObject {
 
 struct RigidBodyAssets {
     struct HullData {
-        geometry::HalfEdge *halfEdges;
+        geo::HalfEdge *halfEdges;
         uint32_t *faceBaseHalfEdges;
-        geometry::Plane *facePlanes;
+        geo::Plane *facePlanes;
         math::Vector3 *vertices;
 
         uint32_t numHalfEdges;

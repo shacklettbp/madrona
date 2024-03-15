@@ -7,6 +7,7 @@ namespace madrona::phys::broadphase {
 
 using namespace base;
 using namespace math;
+using namespace geo;
 
 BVH::BVH(const ObjectManager *obj_mgr,
          CountT max_leaves,
@@ -751,14 +752,12 @@ static inline bool traceRayIntoPlane(
 // specified by the n halfspaces defined by the planes p[]. On exit tfirst
 // and tlast define the intersection, if any
 static inline bool traceRayIntoConvexPolyhedron(
-    const geometry::HalfEdgeMesh &convex_mesh,
+    const HalfEdgeMesh &convex_mesh,
     Vector3 ray_o, Vector3 ray_d,
     float t_min, float t_max,
     float *hit_t,
     Vector3 *hit_normal)
 {
-    using namespace geometry;
-
     // Set initial interval based on t_min & t_max. For a ray, tlast should be
     // set to +FLT_MAX. For a line, tfirst should also be set to –FLT_MAX
     float tfirst = t_min;

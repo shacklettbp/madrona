@@ -8,7 +8,7 @@
 #include <unordered_map>
 
 namespace madrona::phys {
-using namespace geometry;
+using namespace geo;
 using namespace math;
 
 namespace {
@@ -1275,8 +1275,8 @@ void * RigidBodyAssets::processRigidBodyAssets(
 {
     auto tmp_frame = tmp_alloc.push();
 
-    geometry::HalfEdgeMesh *built_hulls =
-        tmp_alloc.allocN<geometry::HalfEdgeMesh>(convex_hull_meshes.size());
+    HalfEdgeMesh *built_hulls =
+        tmp_alloc.allocN<HalfEdgeMesh>(convex_hull_meshes.size());
 
     auto hull_build_frame = tmp_alloc.push();
 

@@ -8,7 +8,7 @@
 #include <unordered_map>
 
 namespace madrona::phys {
-using namespace geometry;
+using namespace geo;
 using namespace math;
 
 #ifndef MADRONA_CUDA_SUPPORT
