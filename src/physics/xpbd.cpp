@@ -166,7 +166,7 @@ static inline float generalizedInverseMass(Vector3 torque_axis,
     return inv_m + dot(torque_axis, rot_axis);
 }
 
-float computePositionalLambda(
+static float computePositionalLambda(
     Vector3 torque_axis1, Vector3 torque_axis2,
     Vector3 rot_axis1, Vector3 rot_axis2,
     float inv_m1, float inv_m2,
@@ -266,7 +266,7 @@ std::pair<Quat, Quat> computeAngularUpdate(
     };
 }
 
-void applyAngularUpdate(
+static void applyAngularUpdate(
     Quat &q1, Quat &q2,
     Quat q1_update, Quat q2_update)
 {
@@ -374,7 +374,7 @@ getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
     return { r1, r2 };
 }
 
-static void getAvgContact(ContactConstraint contact, Vector3 *avg_out, float *penetration_out)
+static bool getAvgContact(ContactConstraint contact, Vector3 *avg_out, float *penetration_out)
 {
     Vector3 avg_contact = Vector3::zero();
 
@@ -389,6 +389,10 @@ static void getAvgContact(ContactConstraint contact, Vector3 *avg_out, float *pe
         penetration_sum += pt.w;
     }
 
+    if (penetration_sum == 0.f) {
+        return true;
+    }
+
     for (CountT i = 0; i < contact.numPoints; i++) {
         Vector4 pt = contact.points[i];
         avg_contact += pt.w / penetration_sum * pt.xyz();
@@ -396,6 +400,8 @@ static void getAvgContact(ContactConstraint contact, Vector3 *avg_out, float *pe
 
     *avg_out = avg_contact;
     *penetration_out = max_penetration;
+
+    return false;
 }
 
 // For now, this function assumes both a & b are dynamic objects.
@@ -463,7 +469,10 @@ static inline void handleContact(Context &ctx,
 
     Vector3 avg_contact_pos;
     float contact_pos_penetration;
-    getAvgContact(contact, &avg_contact_pos, &contact_pos_penetration);
+    bool zero_separation = getAvgContact(contact, &avg_contact_pos, &contact_pos_penetration);
+    if (zero_separation) {
+        return;
+    }
 
     {
         CountT i = 0;
@@ -781,11 +790,11 @@ static inline void applyFrictionVelocityUpdate(
     float corrected_magnitude =
         -fminf(dynamic_friction_magnitude, vt_len);
     
-    if (corrected_magnitude == 0.f) {
+    float impulse_magnitude = corrected_magnitude * inv_mass_scale;
+
+    if (impulse_magnitude == 0.f) {
         return;
     }
-    
-    float impulse_magnitude = corrected_magnitude * inv_mass_scale;
     
     v1 += delta_world * impulse_magnitude * inv_m1;
     v2 -= delta_world * impulse_magnitude * inv_m2;
@@ -838,6 +847,10 @@ static inline void applyRestitutionVelocityUpdate(
     float inv_mass_scale = 1.f / (w1 + w2);
 
     float impulse_magnitude = restitution_magnitude * inv_mass_scale;
+
+    if (impulse_magnitude == 0.f) {
+        return;
+    }
 
     v1 += n * impulse_magnitude * inv_m1;
     v2 -= n * impulse_magnitude * inv_m2;
@@ -907,7 +920,10 @@ static inline void solveVelocitiesForContact(Context &ctx,
     {
         Vector3 avg_contact_pos;
         float contact_pos_penetration;
-        getAvgContact(contact, &avg_contact_pos, &contact_pos_penetration);
+        bool zero_separation = getAvgContact(contact, &avg_contact_pos, &contact_pos_penetration);
+        if (zero_separation) {
+            return;
+        }
 
         auto [r1, r2] = getLocalSpaceContacts(presolve_pos1, presolve_pos2,
             avg_contact_pos, contact_pos_penetration, contact.normal);

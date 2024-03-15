@@ -956,7 +956,7 @@ MADRONA_ALWAYS_INLINE static inline Manifold createFaceContact(
     CountT num_below_plane = 0;
     for (CountT i = 0; i < num_clipped_vertices; ++i) {
         Vector3 vertex = clipping_input[i];
-        if (float d = getDistanceFromPlane(ref_plane, vertex); d < 0.0f) {
+        if (float d = getDistanceFromPlane(ref_plane, vertex); d <= 0.0f) {
             // Project the point onto the reference plane
             // (d guaranteed to be negative)
             clipping_input[num_below_plane] = vertex - d * ref_plane.normal;
@@ -999,7 +999,7 @@ static Manifold createFacePlaneContact(Plane plane,
             vertex = hull_txfm.txfmPoint(vertex);
 #endif
 
-            if (float d = getDistanceFromPlane(plane, vertex); d < 0.0f) {
+            if (float d = getDistanceFromPlane(plane, vertex); d <= 0.0f) {
                 // Project the point onto the reference plane
                 // (d guaranteed to be negative)
                 contacts_tmp[num_incident_vertices] =
