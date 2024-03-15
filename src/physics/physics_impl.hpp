@@ -4,21 +4,17 @@
 
 namespace madrona::phys {
 
-struct SolverData {
+struct PhysicsSystemState {
     float deltaT;
     float h;
     math::Vector3 g;
     float gMagnitude;
     float restitutionThreshold;
-
-    Query<JointConstraint> jointQuery;
-    Query<ContactConstraint> contactQuery;
+    uint32_t contactArchetypeID;
+    uint32_t jointArchetypeID;
 };
 
-struct Contact : Archetype<ContactConstraint> {};
 struct CandidateTemporary : Archetype<CandidateCollision> {};
-
-struct Joint : Archetype<JointConstraint> {};
 
 namespace broadphase {
 

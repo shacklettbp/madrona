@@ -6,6 +6,14 @@
 
 namespace madrona::phys::xpbd {
 
+struct Contact : Archetype<ContactConstraint> {};
+struct Joint : Archetype<JointConstraint> {};
+
+struct SolverState {
+    Query<JointConstraint> jointQuery;
+    Query<ContactConstraint> contactQuery;
+};
+
 using namespace base;
 using namespace math;
 
@@ -92,17 +100,17 @@ inline void substepRigidBodies(Context &ctx,
     prev_state.prevPosition = x;
     prev_state.prevRotation = q;
 
-    const auto &solver = ctx.singleton<SolverData>();
+    const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
     const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     const RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
 
     float inv_m = metadata.mass.invMass;
     Vector3 inv_I = metadata.mass.invInertiaTensor;
 
-    float h = solver.h;
+    float h = physics_sys.h;
 
     if (response_type == ResponseType::Dynamic) {
-        v += h * solver.g;
+        v += h * physics_sys.g;
     }
     
     v += h * inv_m * ext_force;
@@ -674,15 +682,15 @@ inline void handleJointConstraint(Context &ctx,
     *q2_ptr = q2;
 }
 
-inline void solvePositions(Context &ctx, SolverData &solver)
+inline void solvePositions(Context &ctx, SolverState &solver_state)
 {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
-    ctx.iterateQuery(solver.contactQuery, [&](ContactConstraint &contact) {
+    ctx.iterateQuery(solver_state.contactQuery, [&](ContactConstraint &contact) {
         handleContact(ctx, obj_mgr, contact, contact.lambdaN);
     });
 
-    ctx.iterateQuery(solver.jointQuery, [&](JointConstraint joint) {
+    ctx.iterateQuery(solver_state.jointQuery, [&](JointConstraint joint) {
         handleJointConstraint(ctx, joint);
     });
 }
@@ -693,8 +701,8 @@ inline void setVelocities(Context &ctx,
                           const SubstepPrevState &prev_state,
                           Velocity &vel)
 {
-    const auto &solver = ctx.singleton<SolverData>();
-    float h = solver.h;
+    const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
+    float h = physics_sys.h;
 
     Vector3 x = pos;
     Quat q = rot;
@@ -989,13 +997,14 @@ static inline void solveVelocitiesForContact(Context &ctx,
     *v2_out = Velocity { v2, omega2 };
 }
 
-inline void solveVelocities(Context &ctx, SolverData &solver)
+inline void solveVelocities(Context &ctx, SolverState &solver)
 {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+    PhysicsSystemState &physics_sys = ctx.singleton<PhysicsSystemState>();
 
     ctx.iterateQuery(solver.contactQuery, [&](ContactConstraint &contact) {
-        solveVelocitiesForContact(ctx, obj_mgr, contact, solver.h,
-                                  solver.restitutionThreshold);
+        solveVelocitiesForContact(ctx, obj_mgr, contact, physics_sys.h,
+                                  physics_sys.restitutionThreshold);
     });
 }
 
@@ -1004,6 +1013,26 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<SubstepPrevState>();
     registry.registerComponent<PreSolvePositional>();
     registry.registerComponent<PreSolveVelocity>();
+
+    registry.registerArchetype<Joint>();
+    registry.registerArchetype<Contact>();
+
+    registry.registerSingleton<SolverState>();
+}
+
+void init(Context &ctx)
+{
+    ctx.singleton<SolverState>() = {
+        .jointQuery = ctx.query<JointConstraint>(),
+        .contactQuery = ctx.query<ContactConstraint>(),
+    };
+}
+
+void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
+                           uint32_t *joint_archetype_id)
+{
+    *contact_archetype_id = TypeTracker::typeID<Contact>();
+    *joint_archetype_id = TypeTracker::typeID<Joint>();
 }
 
 TaskGraphNodeID setupXPBDSolverTasks(
@@ -1022,8 +1051,16 @@ TaskGraphNodeID setupXPBDSolverTasks(
 
         auto run_narrowphase = narrowphase::setupTasks(builder, {rgb_update});
 
+#ifdef MADRONA_GPU_MODE
+        run_narrowphase = builder.addToGraph<SortArchetypeNode<Contact, WorldID>>(
+                {run_narrowphase});
+
+        run_narrowphase = builder.addToGraph<ResetTmpAllocNode>(
+            {run_narrowphase});
+#endif
+
         auto solve_pos = builder.addToGraph<ParallelForNode<Context,
-            solvePositions, SolverData>>(
+            solvePositions, SolverState>>(
                 {run_narrowphase});
 
         auto vel_set = builder.addToGraph<ParallelForNode<Context,
@@ -1031,7 +1068,7 @@ TaskGraphNodeID setupXPBDSolverTasks(
             SubstepPrevState, Velocity>>({solve_pos});
 
         auto solve_vel = builder.addToGraph<ParallelForNode<Context,
-            solveVelocities, SolverData>>({vel_set});
+            solveVelocities, SolverState>>({vel_set});
 
         auto clear_contacts = builder.addToGraph<
             ClearTmpNode<Contact>>({solve_vel});
@@ -1047,7 +1084,10 @@ TaskGraphNodeID setupXPBDSolverTasks(
 #endif
     }
 
-    return cur_node;
+    auto clear_broadphase = builder.addToGraph<
+        ClearTmpNode<CandidateTemporary>>({cur_node});
+
+    return clear_broadphase;
 }
 
 }

@@ -82,10 +82,6 @@ private:
 #define PROF_END(name)
 #endif
 
-#ifdef MADRONA_GPU_MODE
-#define MADRONA_GPU_MODE_HACK
-#endif
-
 // Unconditionally disable GPU narrowphase version
 #undef MADRONA_GPU_MODE
 #undef MADRONA_GPU_COND
@@ -1131,8 +1127,10 @@ static inline void addManifoldContacts(
 {
     PROF_START(save_contacts_ctr, narrowphaseSaveContactsClocks);
 
-    Loc c = ctx.makeTemporary<Contact>();
-    ctx.get<ContactConstraint>(c) = {
+    const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
+
+    Loc c = ctx.makeTemporary(physics_sys.contactArchetypeID);
+    ctx.getDirect<ContactConstraint>(2, c) = {
         ref_loc,
         other_loc,
         {
@@ -1784,13 +1782,6 @@ TaskGraphNodeID setupTasks(
 #endif
 
     auto finished = builder.addToGraph<ResetTmpAllocNode>({narrowphase});
-
-#ifdef MADRONA_GPU_MODE_HACK
-    auto sort_contacts =
-        builder.addToGraph<SortArchetypeNode<Contact, WorldID>>({finished});
-
-    finished = builder.addToGraph<ResetTmpAllocNode>({sort_contacts});
-#endif
 
     return finished;
 }

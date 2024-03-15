@@ -70,22 +70,24 @@ inline void reportNarrowphaseClocks(Engine &ctx,
 #endif
 
 
-static SolverData initSolverState(Context &ctx,
-                                  float delta_t,
-                                  CountT num_substeps,
-                                  Vector3 gravity)
+static PhysicsSystemState initPhysicsState(Context &ctx,
+                                           float delta_t,
+                                           CountT num_substeps,
+                                           Vector3 gravity,
+                                           uint32_t contact_archetype_id,
+                                           uint32_t joint_archetype_id)
 {
     float h = delta_t / (float)num_substeps;
     float g_mag = gravity.length();
 
-    return SolverData {
+    return PhysicsSystemState {
         .deltaT = delta_t,
         .h = h,
         .g = gravity,
         .gMagnitude = g_mag,
         .restitutionThreshold = 2.f * g_mag * h,
-        .jointQuery = ctx.query<JointConstraint>(),
-        .contactQuery = ctx.query<ContactConstraint>(),
+        .contactArchetypeID = contact_archetype_id,
+        .jointArchetypeID = joint_archetype_id,
     };
 }
 
@@ -96,7 +98,8 @@ void init(Context &ctx,
           float delta_t,
           CountT num_substeps,
           math::Vector3 gravity,
-          CountT max_dynamic_objects)
+          CountT max_dynamic_objects,
+          Solver solver)
 {
     broadphase::BVH &bvh = ctx.singleton<broadphase::BVH>();
 
@@ -107,11 +110,34 @@ void init(Context &ctx,
         obj_mgr, max_dynamic_objects, 2.f * delta_t,
         max_inst_accel * delta_t * delta_t);
 
-    ctx.singleton<SolverData>() = initSolverState(
-        ctx, delta_t, num_substeps, gravity);
+    uint32_t contact_archetype_id, joint_archetype_id;
+    switch (solver) {
+    case Solver::XPBD: {
+        xpbd::getSolverArchetypeIDs(&contact_archetype_id,
+                                    &joint_archetype_id);
+    } break;
+    case Solver::TGS: {
+        tgs::getSolverArchetypeIDs(&contact_archetype_id,
+                                   &joint_archetype_id);
+    } break;
+    default: MADRONA_UNREACHABLE();
+    }
 
-    ObjectData &objs = ctx.singleton<ObjectData>();
-    new (&objs) ObjectData { obj_mgr };
+    ctx.singleton<PhysicsSystemState>() = initPhysicsState(
+        ctx, delta_t, num_substeps, gravity,
+        contact_archetype_id, joint_archetype_id);
+
+    switch (solver) {
+    case Solver::XPBD: {
+        xpbd::init(ctx);
+    } break;
+    case Solver::TGS: {
+        tgs::init(ctx);
+    } break;
+    default: MADRONA_UNREACHABLE();
+    }
+
+    ctx.singleton<ObjectData>() = { obj_mgr };
 }
 
 void reset(Context &ctx)
@@ -231,7 +257,8 @@ Entity makeFixedJoint(
     math::Vector3 r1, math::Vector3 r2,
     float separation)
 {
-    Entity e = ctx.makeEntity<Joint>();
+    const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
+    Entity e = ctx.makeEntity(physics_sys.jointArchetypeID);
 
     ctx.get<JointConstraint>(e) = {
         .e1 = e1,
@@ -256,7 +283,8 @@ Entity makeHingeJoint(
     math::Vector3 b1_local, math::Vector3 b2_local,
     math::Vector3 r1, math::Vector3 r2)
 {
-    Entity e = ctx.makeEntity<Joint>();
+    const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
+    Entity e = ctx.makeEntity(physics_sys.jointArchetypeID);
 
     ctx.get<JointConstraint>(e) = {
         .e1 = e1,
@@ -275,7 +303,8 @@ Entity makeHingeJoint(
     return e;
 }
 
-void registerTypes(ECSRegistry &registry)
+void registerTypes(ECSRegistry &registry,
+                   Solver solver)
 {
     registry.registerComponent<broadphase::LeafID>();
     registry.registerSingleton<broadphase::BVH>();
@@ -292,15 +321,20 @@ void registerTypes(ECSRegistry &registry)
     registry.registerArchetype<CandidateTemporary>();
 
     registry.registerComponent<JointConstraint>();
-    registry.registerArchetype<Joint>();
-
     registry.registerComponent<ContactConstraint>();
-    registry.registerArchetype<Contact>();
 
-    registry.registerSingleton<SolverData>();
+    registry.registerSingleton<PhysicsSystemState>();
     registry.registerSingleton<ObjectData>();
 
-    xpbd::registerTypes(registry);
+    switch (solver) {
+    case Solver::XPBD: {
+        xpbd::registerTypes(registry);
+    } break;
+    case Solver::TGS: {
+        tgs::registerTypes(registry);
+    } break;
+    default: MADRONA_UNREACHABLE();
+    }
 }
 
 TaskGraphNodeID setupBroadphaseTasks(
@@ -321,7 +355,7 @@ TaskGraphNodeID setupSubstepTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps,
     CountT num_substeps,
-    bool use_tgs)
+    Solver solver)
 {
     auto broadphase_pre =
         broadphase::setupPreIntegrationTasks(builder, deps);
@@ -334,10 +368,14 @@ TaskGraphNodeID setupSubstepTasks(
     cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
 #endif
 
-    if (use_tgs) {
-        cur_node = tgs::setupTGSSolverTasks(builder, cur_node, num_substeps);
-    } else {
+    switch (solver) {
+    case Solver::XPBD: {
         cur_node = xpbd::setupXPBDSolverTasks(builder, cur_node, num_substeps);
+    } break;
+    case Solver::TGS: {
+        cur_node = tgs::setupTGSSolverTasks(builder, cur_node, num_substeps);
+    } break;
+    default: MADRONA_UNREACHABLE();
     }
 
     auto clear_candidates = builder.addToGraph<

@@ -9,16 +9,42 @@
 
 namespace madrona::phys::tgs {
 
+struct Contact : Archetype<ContactConstraint> {};
+struct Joint : Archetype<JointConstraint> {};
+
+struct SolverState {
+    Query<JointConstraint> jointQuery;
+    Query<ContactConstraint> contactQuery;
+};
+
 using namespace base;
 using namespace math;
 
 void registerTypes(ECSRegistry &registry)
 {
-    (void)registry;
+    registry.registerArchetype<Joint>();
+    registry.registerArchetype<Contact>();
+
+    registry.registerSingleton<SolverState>();
+}
+
+void init(Context &ctx)
+{
+    ctx.singleton<SolverState>() = {
+        .jointQuery = ctx.query<JointConstraint>(),
+        .contactQuery = ctx.query<ContactConstraint>(),
+    };
+}
+
+void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
+                           uint32_t *joint_archetype_id)
+{
+    *contact_archetype_id = TypeTracker::typeID<Contact>();
+    *joint_archetype_id = TypeTracker::typeID<Joint>();
 }
 
 static inline void solveJoints(Context &ctx,
-                               SolverData &solver,
+                               SolverState &solver,
                                bool use_bias)
 {
     (void)ctx;
@@ -27,7 +53,7 @@ static inline void solveJoints(Context &ctx,
 }
 
 static inline void solveContacts(Context &ctx,
-                                 SolverData &solver,
+                                 SolverState &solver,
                                  bool use_bias)
 {
     (void)ctx;
@@ -64,17 +90,17 @@ inline void integrateVelocities(Context &ctx,
     Vector3 v = vel.linear;
     Vector3 omega = vel.angular;
 
-    const auto &solver = ctx.singleton<SolverData>();
+    const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
     const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     const RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
 
     float inv_m = metadata.mass.invMass;
     Diag3x3 inv_I = Diag3x3::fromVec(metadata.mass.invInertiaTensor);
 
-    float h = solver.h;
+    float h = physics_sys.h;
 
     if (response_type == ResponseType::Dynamic) {
-        v += h * solver.g;
+        v += h * physics_sys.g;
     }
 
     v += h * inv_m * ext_force;
@@ -117,13 +143,13 @@ inline void warmStartJoints(Context &ctx,
 }
 
 inline void solveJointsBiased(Context &ctx,
-                              SolverData &solver)
+                              SolverState &solver)
 {
     solveJoints(ctx, solver, true);
 }
 
 inline void solveContactsBiased(Context &ctx,
-                                SolverData &solver)
+                                SolverState &solver)
 {
     solveContacts(ctx, solver, true);
 }
@@ -139,8 +165,8 @@ inline void integratePositions(Context &ctx,
     Vector3 v = vel.linear;
     Vector3 omega = vel.angular;
 
-    const auto &solver = ctx.singleton<SolverData>();
-    float h = solver.h;
+    const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
+    float h = physics_sys.h;
 
     x += h * v;
 
@@ -154,13 +180,13 @@ inline void integratePositions(Context &ctx,
 }
 
 inline void solveJointsUnbiased(Context &ctx,
-                                SolverData &solver)
+                                SolverState &solver)
 {
     solveJoints(ctx, solver, false);
 }
 
 inline void solveContactsUnbiased(Context &ctx,
-                                  SolverData &solver)
+                                  SolverState &solver)
 {
     solveContacts(ctx, solver, false);
 }
@@ -170,7 +196,22 @@ TaskGraphNodeID setupTGSSolverTasks(
     TaskGraphNodeID broadphase,
     CountT num_substeps)
 {
-    auto cur_node = narrowphase::setupTasks(builder, {broadphase});
+    auto run_narrowphase = narrowphase::setupTasks(builder, {broadphase});
+
+#ifdef MADRONA_GPU_MODE
+    // The GPU backend requires contacts to be sorted before iterateQuery
+    // can be called.
+    run_narrowphase = builder.addToGraph<SortArchetypeNode<Contact, WorldID>>(
+            {run_narrowphase});
+
+    run_narrowphase = builder.addToGraph<ResetTmpAllocNode>(
+        {run_narrowphase});
+#endif
+
+    auto clear_broadphase = builder.addToGraph<
+        ClearTmpNode<CandidateTemporary>>({run_narrowphase});
+
+    auto cur_node = clear_broadphase;
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
         prepareContacts,
@@ -205,12 +246,12 @@ TaskGraphNodeID setupTGSSolverTasks(
          
         cur_node = builder.addToGraph<ParallelForNode<Context,
             solveJointsBiased,
-                SolverData
+                SolverState
             >>({cur_node});
 
         cur_node = builder.addToGraph<ParallelForNode<Context,
             solveContactsBiased,
-                SolverData
+                SolverState
             >>({cur_node});
 
         cur_node = builder.addToGraph<ParallelForNode<Context,
@@ -222,16 +263,21 @@ TaskGraphNodeID setupTGSSolverTasks(
 
         cur_node = builder.addToGraph<ParallelForNode<Context,
             solveJointsUnbiased,
-                SolverData
+                SolverState
             >>({cur_node});
 
         cur_node = builder.addToGraph<ParallelForNode<Context,
             solveContactsUnbiased,
-                SolverData
+                SolverState
             >>({cur_node});
     }
 
-    return cur_node;
+    // For now, we don't have any persistent contacts support, so clear
+    // the contacts (free the memory).
+    auto clear_contacts = builder.addToGraph<
+        ClearTmpNode<Contact>>({cur_node});
+
+    return clear_contacts;
 }
 
 }

@@ -10,6 +10,11 @@
 
 namespace madrona::phys {
 
+enum class Solver : uint32_t {
+    XPBD,
+    TGS,
+};
+
 struct ExternalForce : math::Vector3 {
     ExternalForce(math::Vector3 v)
         : Vector3(v)
@@ -170,7 +175,8 @@ namespace PhysicsSystem {
               float delta_t,
               CountT num_substeps,
               math::Vector3 gravity,
-              CountT max_dynamic_objects);
+              CountT max_dynamic_objects,
+              Solver solver = Solver::XPBD);
 
     void reset(Context &ctx);
     broadphase::LeafID registerEntity(Context &ctx,
@@ -199,7 +205,8 @@ namespace PhysicsSystem {
                           math::Vector3 r1, math::Vector3 r2);
 
 
-    void registerTypes(ECSRegistry &registry);
+    void registerTypes(ECSRegistry &registry,
+                       Solver solver = Solver::XPBD);
 
     TaskGraphNodeID setupBroadphaseTasks(
         TaskGraphBuilder &builder,
@@ -213,7 +220,7 @@ namespace PhysicsSystem {
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps,
         CountT num_substeps,
-        bool use_tgs = false);
+        Solver solver = Solver::XPBD);
 
     TaskGraphNodeID setupCleanupTasks(
         TaskGraphBuilder &builder,
