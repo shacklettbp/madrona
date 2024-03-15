@@ -361,20 +361,41 @@ MADRONA_ALWAYS_INLINE static inline void handleContactConstraint(
 MADRONA_ALWAYS_INLINE static inline std::pair<Vector3, Vector3>
 getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
                       const PreSolvePositional &presolve_pos2,
-                      const ContactConstraint &contact,
-                      CountT point_idx)
+                      Vector3 contact1, float penetration_depth,
+                      Vector3 contact_normal)
 {
-    Vector3 contact1 = contact.points[point_idx].xyz();
-    float penetration_depth = contact.points[point_idx].w;
-
     Vector3 contact2 = 
-        contact1 - contact.normal * penetration_depth;
+        contact1 - contact_normal * penetration_depth;
 
     // Transform the contact points into local space for a & b
     Vector3 r1 = presolve_pos1.q.inv().rotateVec(contact1 - presolve_pos1.x);
     Vector3 r2 = presolve_pos2.q.inv().rotateVec(contact2 - presolve_pos2.x);
 
     return { r1, r2 };
+}
+
+static void getAvgContact(ContactConstraint contact, Vector3 *avg_out, float *penetration_out)
+{
+    Vector3 avg_contact = Vector3::zero();
+
+    float max_penetration = -FLT_MAX;
+    float penetration_sum = 0.f;
+    for (CountT i = 0; i < contact.numPoints; i++) {
+        Vector4 pt = contact.points[i];
+        if (pt.w > max_penetration) {
+            max_penetration = pt.w;
+        }
+
+        penetration_sum += pt.w;
+    }
+
+    for (CountT i = 0; i < contact.numPoints; i++) {
+        Vector4 pt = contact.points[i];
+        avg_contact += pt.w / penetration_sum * pt.xyz();
+    }
+
+    *avg_out = avg_contact;
+    *penetration_out = max_penetration;
 }
 
 // For now, this function assumes both a & b are dynamic objects.
@@ -440,12 +461,16 @@ static inline void handleContact(Context &ctx,
 
     float avg_mu_s = 0.5f * (mu_s1 + mu_s2);
 
-#pragma unroll
-    for (CountT i = 4 - 1; i >= 0; i--) {
-        if (i >= contact.numPoints) continue;
+    Vector3 avg_contact_pos;
+    float contact_pos_penetration;
+    getAvgContact(contact, &avg_contact_pos, &contact_pos_penetration);
 
-        auto [r1, r2] =
-            getLocalSpaceContacts(presolve_pos1, presolve_pos2, contact, i);
+    {
+        CountT i = 0;
+
+        auto [r1, r2] = getLocalSpaceContacts(
+            presolve_pos1, presolve_pos2,
+            avg_contact_pos, contact_pos_penetration, contact.normal);
 
         float lambda_n = 0.f;
         float lambda_t = 0.f;
@@ -703,34 +728,6 @@ static inline Vector3 computeRelativeVelocity(
     return (v1 + cross(omega1, dir1)) - (v2 + cross(omega2, dir2));
 }
 
-static inline void applyVelocityUpdate(
-    Vector3 &v1, Vector3 &v2,
-    Vector3 &omega1, Vector3 &omega2,
-    Quat q1, Quat q2,
-    Vector3 torque_axis1, Vector3 torque_axis2,
-    float inv_m1, float inv_m2,
-    Vector3 inv_I1, Vector3 inv_I2,
-    Vector3 delta_v,
-    float delta_v_magnitude)
-{
-    Vector3 rot_axis1 = multDiag(inv_I1, torque_axis1);
-    Vector3 rot_axis2 = multDiag(inv_I2, torque_axis2);
-
-    float w1 = generalizedInverseMass(torque_axis1, rot_axis1, inv_m1);
-    float w2 = generalizedInverseMass(torque_axis2, rot_axis2, inv_m2);
-
-    delta_v_magnitude *= 1.f / (w1 + w2);
-
-    v1 += delta_v_magnitude * inv_m1 * delta_v;
-    v2 -= delta_v_magnitude * inv_m2 * delta_v;
-
-    Vector3 omega1_update_local = delta_v_magnitude * rot_axis1;
-    Vector3 omega2_update_local = delta_v_magnitude * rot_axis2;
-
-    omega1 += q1.rotateVec(omega1_update_local);
-    omega2 -= q2.rotateVec(omega2_update_local);
-}
-
 static inline void applyFrictionVelocityUpdate(
     Vector3 &v1, Vector3 &v2,
     Vector3 &omega1, Vector3 &omega2,
@@ -739,57 +736,67 @@ static inline void applyFrictionVelocityUpdate(
     Vector3 inv_I1, Vector3 inv_I2,
     Vector3 n,
     float mu_d, float h,
-    Vector3 r1_locals[4], Vector3 r2_locals[4],
-    Vector3 r1_worlds[4], Vector3 r2_worlds[4],
-    float lambdas[4],
-    CountT num_contacts)
+    Vector3 r1_local, Vector3 r2_local,
+    Vector3 r1_world, Vector3 r2_world,
+    float lambda)
 {
-#pragma unroll
-    for (CountT i = 0; i < 4; i++) {
-        if (i >= num_contacts) continue;
-
-        Vector3 r1_local = r1_locals[i];
-        Vector3 r2_local = r2_locals[i];
-
-        Vector3 r1_world = r1_worlds[i];
-        Vector3 r2_world = r2_worlds[i];
-
-        Vector3 v = computeRelativeVelocity(
-            v1, v2, omega1, omega2, r1_world, r2_world);
-
-        // h * mu_d * |f_n| in paper
-        float dynamic_friction_magnitude =
-            mu_d * fabsf(lambdas[i]) / h;
-
-        float vn = dot(n, v);
-        Vector3 vt = v - n * vn;
-
-        float vt_len = vt.length();
-
-        if (vt_len != 0 && dynamic_friction_magnitude != 0.f) {
-            float corrected_magnitude =
-                -fminf(dynamic_friction_magnitude, vt_len);
-
-            Vector3 delta_world = vt / vt_len;
-
-            Vector3 delta1_local = q1.inv().rotateVec(delta_world);
-            Vector3 delta2_local = q2.inv().rotateVec(delta_world);
-
-            Vector3 friction_torque_axis_local1 =
-                cross(r1_local, delta1_local);
-            Vector3 friction_torque_axis_local2 =
-                cross(r2_local, delta2_local);
-
-            applyVelocityUpdate(
-                v1, v2,
-                omega1, omega2,
-                q1, q2,
-                friction_torque_axis_local1, friction_torque_axis_local2,
-                inv_m1, inv_m2,
-                inv_I1, inv_I2,
-                delta_world, corrected_magnitude);
-        }
+    Vector3 v = computeRelativeVelocity(
+        v1, v2, omega1, omega2, r1_world, r2_world);
+    
+    float vn = dot(n, v);
+    Vector3 vt = v - n * vn;
+    
+    float vt_len = vt.length();
+    if (vt_len == 0.f) {
+        return;
     }
+    
+    Vector3 delta_world = vt / vt_len;
+    
+    Vector3 delta_local1 = q1.inv().rotateVec(delta_world);
+    Vector3 delta_local2 = q2.inv().rotateVec(delta_world);
+    
+    Vector3 friction_torque_axis_local1 =
+        cross(r1_local, delta_local1);
+    Vector3 friction_torque_axis_local2 =
+        cross(r2_local, delta_local2);
+    
+    Vector3 friction_rot_axis_local1 = multDiag(
+        inv_I1, friction_torque_axis_local1);
+    Vector3 friction_rot_axis_local2 = multDiag(
+        inv_I2, friction_torque_axis_local2);
+    
+    float w1 = generalizedInverseMass(
+        friction_torque_axis_local1, friction_rot_axis_local1, inv_m1);
+    float w2 = generalizedInverseMass(
+        friction_torque_axis_local2, friction_rot_axis_local2, inv_m2);
+    
+    float inv_mass_scale = 1.f / (w1 + w2);
+    
+    // h * mu_d * |f_n| in paper. Note the paper is incorrect here
+    // (doesn't have w1 + w2 divisor).
+    float dynamic_friction_magnitude =
+        mu_d * fabsf(lambda) * inv_mass_scale / h;
+    
+    float corrected_magnitude =
+        -fminf(dynamic_friction_magnitude, vt_len);
+    
+    if (corrected_magnitude == 0.f) {
+        return;
+    }
+    
+    float impulse_magnitude = corrected_magnitude * inv_mass_scale;
+    
+    v1 += delta_world * impulse_magnitude * inv_m1;
+    v2 -= delta_world * impulse_magnitude * inv_m2;
+    
+    Vector3 omega1_update_local = 
+        impulse_magnitude * friction_rot_axis_local1;
+    Vector3 omega2_update_local =
+        impulse_magnitude * friction_rot_axis_local2;
+    
+    omega1 += q1.rotateVec(omega1_update_local);
+    omega2 -= q2.rotateVec(omega2_update_local);
 }
 
 static inline void applyRestitutionVelocityUpdate(
@@ -800,48 +807,48 @@ static inline void applyRestitutionVelocityUpdate(
     Vector3 inv_I1, Vector3 inv_I2,
     Vector3 n,
     float restitution_threshold,
-    Vector3 r1_worlds[4],
-    Vector3 r2_worlds[4],
-    Vector3 restitution_torques1_local[4],
-    Vector3 restitution_torques2_local[4],
-    float vn_bars[4],
-    CountT num_contacts)
+    Vector3 r1_world,
+    Vector3 r2_world,
+    Vector3 restitution_torque_axis_local1,
+    Vector3 restitution_torque_axis_local2,
+    float vn_bar)
 {
-#pragma unroll
-    for (CountT i = 0; i < 4; i++) {
-        if (i >= num_contacts) continue;
+    Vector3 v = computeRelativeVelocity(
+        v1, v2, omega1, omega2, r1_world, r2_world);
 
-        Vector3 r1_world = r1_worlds[i];
-        Vector3 r2_world = r2_worlds[i];
+    float vn = dot(n, v);
 
-        Vector3 v = computeRelativeVelocity(
-            v1, v2, omega1, omega2, r1_world, r2_world);
-
-        float vn = dot(n, v);
-
-        float vn_bar = vn_bars[i];
-
-        float e = 0.3f; // FIXME
-        if (fabsf(vn_bar) <= restitution_threshold) {
-            e = 0.f;
-        }
-
-        float restitution_magnitude = fminf(-e * vn_bar, 0) - vn;
-
-        Vector3 restitution_torque_axis_local1 =
-            restitution_torques1_local[i];
-        Vector3 restitution_torque_axis_local2 =
-            restitution_torques2_local[i];
-
-        applyVelocityUpdate(
-            v1, v2,
-            omega1, omega2,
-            q1, q2,
-            restitution_torque_axis_local1, restitution_torque_axis_local2,
-            inv_m1, inv_m2,
-            inv_I1, inv_I2,
-            n, restitution_magnitude);
+    float e = 0.3f; // FIXME
+    if (fabsf(vn_bar) <= restitution_threshold) {
+        e = 0.f;
     }
+
+    float restitution_magnitude = fminf(-e * vn_bar, 0) - vn;
+
+    Vector3 restitution_rot_axis_local1 =
+        multDiag(inv_I1, restitution_torque_axis_local1);
+    Vector3 restitution_rot_axis_local2 = 
+        multDiag(inv_I2, restitution_torque_axis_local2);
+
+    float w1 = generalizedInverseMass(
+        restitution_torque_axis_local1, restitution_rot_axis_local1, inv_m1);
+    float w2 = generalizedInverseMass(
+        restitution_torque_axis_local2, restitution_rot_axis_local2, inv_m2);
+
+    float inv_mass_scale = 1.f / (w1 + w2);
+
+    float impulse_magnitude = restitution_magnitude * inv_mass_scale;
+
+    v1 += n * impulse_magnitude * inv_m1;
+    v2 -= n * impulse_magnitude * inv_m2;
+
+    Vector3 omega1_update_local =
+        impulse_magnitude * restitution_rot_axis_local1;
+    Vector3 omega2_update_local =
+        impulse_magnitude * restitution_rot_axis_local2;
+
+    omega1 += q1.rotateVec(omega1_update_local);
+    omega2 -= q2.rotateVec(omega2_update_local);
 }
 
 static inline void solveVelocitiesForContact(Context &ctx,
@@ -897,24 +904,14 @@ static inline void solveVelocitiesForContact(Context &ctx,
 
     float mu_d = 0.5f * (metadata1.friction.muD + metadata2.friction.muD);
 
-    Vector3 r1_locals[4];
-    Vector3 r2_locals[4];
-    Vector3 r1_worlds[4];
-    Vector3 r2_worlds[4];
-    Vector3 restitution_torque1_locals[4];
-    Vector3 restitution_torque2_locals[4];
+    {
+        Vector3 avg_contact_pos;
+        float contact_pos_penetration;
+        getAvgContact(contact, &avg_contact_pos, &contact_pos_penetration);
 
-    float vn_bars[4];
+        auto [r1, r2] = getLocalSpaceContacts(presolve_pos1, presolve_pos2,
+            avg_contact_pos, contact_pos_penetration, contact.normal);
 
-#pragma unroll
-    for (CountT i = 0; i < 4; i++) {
-        if (i >= contact.numPoints) {
-            continue;
-        }
-
-        auto [r1, r2] = getLocalSpaceContacts(
-            presolve_pos1, presolve_pos2, contact, i);
-    
         Vector3 r1_presolve = presolve_pos1.q.rotateVec(r1);
         Vector3 r2_presolve = presolve_pos2.q.rotateVec(r2);
 
@@ -933,18 +930,6 @@ static inline void solveVelocitiesForContact(Context &ctx,
         Vector3 restitution_torque_axis_local2 =
             cross(r2, q2.inv().rotateVec(contact.normal));
 
-        r1_locals[i] = r1;
-        r2_locals[i] = r2;
-        r1_worlds[i] = r1_world;
-        r2_worlds[i] = r2_world;
-        restitution_torque1_locals[i] = restitution_torque_axis_local1;
-        restitution_torque2_locals[i] = restitution_torque_axis_local2;
-
-        vn_bars[i] = vn_bar;
-    }
-
-    for (CountT restitution_iters = 0; restitution_iters < 2;
-         restitution_iters++) {
         applyRestitutionVelocityUpdate(
             v1, v2,
             omega1, omega2,
@@ -953,22 +938,30 @@ static inline void solveVelocitiesForContact(Context &ctx,
             inv_I1, inv_I2,
             contact.normal,
             restitution_threshold,
-            r1_worlds, r2_worlds,
-            restitution_torque1_locals, restitution_torque2_locals,
-            vn_bars, contact.numPoints);
+            r1_world, r2_world,
+            restitution_torque_axis_local1, restitution_torque_axis_local2,
+            vn_bar);
     }
 
-    applyFrictionVelocityUpdate(
-        v1, v2,
-        omega1, omega2,
-        q1, q2,
-        inv_m1, inv_m2,
-        inv_I1, inv_I2,
-        contact.normal,
-        mu_d, h,
-        r1_locals, r2_locals,
-        r1_worlds, r2_worlds,
-        contact.lambdaN, contact.numPoints);
+    for (CountT i = 0; i < contact.numPoints; i++) {
+        auto [r1, r2] = getLocalSpaceContacts(presolve_pos1, presolve_pos2,
+            contact.points[i].xyz(), contact.points[i].w, contact.normal);
+        
+        Vector3 r1_world = q1.rotateVec(r1);
+        Vector3 r2_world = q2.rotateVec(r2);
+
+        applyFrictionVelocityUpdate(
+            v1, v2,
+            omega1, omega2,
+            q1, q2,
+            inv_m1, inv_m2,
+            inv_I1, inv_I2,
+            contact.normal,
+            mu_d, h,
+            r1, r2,
+            r1_world, r2_world,
+            contact.lambdaN[0]);
+    }
 
     *v1_out = Velocity { v1, omega1 };
     *v2_out = Velocity { v2, omega2 };
