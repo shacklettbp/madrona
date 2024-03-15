@@ -184,11 +184,20 @@ public:
     inline Entity makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
                                 StateCache &cache, Args && ...args);
 
+    template <typename... Args>
+    inline Entity makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
+                                StateCache &cache,
+                                uint32_t archetype_id,
+                                Args && ...args);
+
     void destroyEntityNow(MADRONA_MW_COND(uint32_t world_id,)
                           StateCache &cache, Entity e);
 
     template <typename ArchetypeT>
     inline Loc makeTemporary(MADRONA_MW_COND(uint32_t world_id));
+
+    inline Loc makeTemporary(MADRONA_MW_COND(uint32_t world_id,)
+                             uint32_t archetype_id);
 
     template <typename ArchetypeT>
     inline void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,

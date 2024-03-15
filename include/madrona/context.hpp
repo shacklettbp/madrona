@@ -31,6 +31,7 @@ public:
     // or later delete it.
     template <typename ArchetypeT>
     inline Entity makeEntity();
+    inline Entity makeEntity(uint32_t archetype_id);
 
     // Create a Temporary of archetype ArchetypeT. Temporaries are
     // entities without a persistent Entity identifier, instead represented
@@ -42,6 +43,7 @@ public:
     // Example use case: per-step temporaries like candidate collisions.
     template <typename ArchetypeT>
     inline Loc makeTemporary();
+    inline Loc makeTemporary(uint32_t archetype_id);
 
     // Destroy Entity e
     inline void destroyEntity(Entity e);

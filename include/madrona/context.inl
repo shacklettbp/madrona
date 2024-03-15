@@ -16,11 +16,23 @@ Entity Context::makeEntity()
         MADRONA_MW_COND(cur_world_id_,) *state_cache_);
 }
 
+Entity Context::makeEntity(uint32_t archetype_id)
+{
+    return state_mgr_->makeEntityNow(
+        MADRONA_MW_COND(cur_world_id_,) *state_cache_, archetype_id);
+}
+
 template <typename ArchetypeT>
 Loc Context::makeTemporary()
 {
     return state_mgr_->makeTemporary<ArchetypeT>(
         MADRONA_MW_COND(cur_world_id_));
+}
+
+Loc Context::makeTemporary(uint32_t archetype_id)
+{
+    return state_mgr_->makeTemporary(MADRONA_MW_COND(cur_world_id_,)
+                                     archetype_id);
 }
 
 void Context::destroyEntity(Entity e)

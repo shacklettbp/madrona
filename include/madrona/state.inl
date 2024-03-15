@@ -395,9 +395,20 @@ template <typename ArchetypeT, typename... Args>
 Entity StateManager::makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
                                    StateCache &cache, Args && ...args)
 {
-    ArchetypeID archetype_id = archetypeID<ArchetypeT>();
+    uint32_t archetype_id = archetypeID<ArchetypeT>().id;
 
-    ArchetypeStore &archetype = *archetype_stores_[archetype_id.id];
+    return makeEntityNow<Args...>(
+        MADRONA_MW_COND(world_id,) cache, archetype_id,
+        std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+Entity StateManager::makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
+                                   StateCache &cache,
+                                   uint32_t archetype_id,
+                                   Args && ...args)
+{
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id];
 
     constexpr uint32_t num_args = sizeof...(Args);
 
@@ -437,7 +448,7 @@ Entity StateManager::makeEntityNow(MADRONA_MW_COND(uint32_t world_id,)
     ( constructNextComponent(std::forward<Args>(args)), ... );
     
     entity_store_.setLoc(e, Loc {
-        .archetype = archetype_id.id,
+        .archetype = archetype_id,
         .row = int32_t(new_row),
     });
 
@@ -448,13 +459,20 @@ template <typename ArchetypeT>
 Loc StateManager::makeTemporary(MADRONA_MW_COND(uint32_t world_id))
 {
     ArchetypeID archetype_id = archetypeID<ArchetypeT>();
-    ArchetypeStore &archetype = *archetype_stores_[archetype_id.id];
+
+    return makeTemporary(MADRONA_MW_COND(world_id,) archetype_id.id);
+}
+
+Loc StateManager::makeTemporary(MADRONA_MW_COND(uint32_t world_id,)
+                                uint32_t archetype_id)
+{
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id];
 
     CountT new_row = archetype.tblStorage.addRow(
         MADRONA_MW_COND(world_id));
 
     return Loc {
-        archetype_id.id,
+        archetype_id,
         int32_t(new_row),
     };
 }
