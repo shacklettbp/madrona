@@ -17,64 +17,6 @@ ComponentID StateManager::registerComponent()
     };
 }
 
-template <template <typename...> typename T, typename ...ComponentTs>
-struct StateManager::RegistrationHelper<T<ComponentTs...>> {
-    using ArchetypeT = T<ComponentTs...>;
-    static_assert(std::is_same_v<ArchetypeT, Archetype<ComponentTs...>>);
-
-    template <typename ComponentT>
-    static void registerColumnIndex(uint32_t *idx)
-    {
-        using LookupT = typename ArchetypeRef<ArchetypeT>::
-            template ComponentLookup<ComponentT>;
-
-        TypeTracker::registerType<LookupT>(idx);
-    }
-
-    template <typename... MetadataComponentTs>
-    static std::pair<
-            std::array<ComponentID, sizeof...(ComponentTs)>,
-            std::array<ComponentFlags, sizeof...(ComponentTs)>
-        >
-        registerArchetypeComponents(
-            const ComponentMetadataSelector<MetadataComponentTs...> &
-                component_metadata)
-    {
-        uint32_t column_idx = user_component_offset_;
-
-        ( registerColumnIndex<ComponentTs>(&column_idx), ... );
-
-        std::array archetype_components {
-            ComponentID { TypeTracker::typeID<ComponentTs>() }
-            ...
-        };
-
-        std::array<ComponentFlags, sizeof...(ComponentTs)> component_flags;
-        component_flags.fill(ComponentFlags::None);
-
-        int32_t cur_metadata_idx = 0;
-        auto setFlags = [&]<typename ComponentT>() {
-            ComponentFlags cur_flags =
-                component_metadata.flags[cur_metadata_idx++];
-
-            using LookupT = typename ArchetypeRef<ArchetypeT>::
-                template ComponentLookup<ComponentT>;
-
-            uint32_t flag_out_idx =
-                TypeTracker::typeID<LookupT>() - user_component_offset_;
-
-            component_flags[flag_out_idx] = cur_flags;
-        };
-
-        ( setFlags.template operator()<MetadataComponentTs>(), ... );
-
-        return {
-            archetype_components,
-            component_flags,
-        };
-    }
-};
-
 template <typename ArchetypeT, typename... MetadataComponentTs>
 ArchetypeID StateManager::registerArchetype(
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
@@ -86,9 +28,54 @@ ArchetypeID StateManager::registerArchetype(
 
     using Base = typename ArchetypeT::Base;
 
-    auto [archetype_components, component_flags] =
-        RegistrationHelper<Base>::registerArchetypeComponents(
-            component_metadatas);
+
+    using Delegator = utils::PackDelegator<Base>;
+
+    auto [archetype_components, component_flags] = Delegator::call(
+        [&component_metadatas]<typename... Args>()
+    {
+        static_assert(std::is_same_v<Base, Archetype<Args...>>);
+
+        std::array components {
+            ComponentID { TypeTracker::typeID<Args>() }
+            ...
+        };
+
+        #pragma nv_diagnostic push
+        #pragma nv_diag_suppress 445
+        auto getComponentFlags =
+        []<typename ComponentT, typename... FlagComponentTs>(
+            const ComponentMetadataSelector<FlagComponentTs...> &component_metadata
+        ) constexpr -> ComponentFlags
+        {
+            constexpr size_t num_metadatas = sizeof...(FlagComponentTs);
+
+            if constexpr (num_metadatas == 0) {
+                return ComponentFlags::None;
+            } else {
+                bool matches[] = {
+                    std::is_same_v<ComponentT, FlagComponentTs>
+                    ...
+                };
+
+                for (size_t i = 0; i < num_metadatas; i++) {
+                    if (matches[i]) {
+                        return component_metadata.flags[i];
+                    }
+                }
+
+                return ComponentFlags::None;
+            }
+        };
+        #pragma nv_diagnostic pop
+
+        std::array component_flags {
+            getComponentFlags.template operator()<Args>(component_metadatas)
+            ...
+        };
+
+        return std::make_pair(components, component_flags);
+    });
 
     registerArchetype(archetype_id,
                       archetype_flags,

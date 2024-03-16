@@ -316,7 +316,7 @@ void StateManager::registerArchetype(uint32_t id,
                             num_total_components,
                             type_infos.data(),
                             lookup_input.data(),
-                            component_flags);
+                            flattened_flags.data());
 }
 
 

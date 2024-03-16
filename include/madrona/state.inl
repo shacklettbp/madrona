@@ -104,41 +104,41 @@ ArchetypeID StateManager::registerArchetype(
         [&component_metadata]<typename... Args>()
     {
         static_assert(std::is_same_v<Base, Archetype<Args...>>);
-        uint32_t column_idx = user_component_offset_;
-
-        auto registerColumnIndex =
-                [&column_idx]<typename ComponentT>() {
-            using LookupT = typename ArchetypeRef<ArchetypeT>::
-                template ComponentLookup<ComponentT>;
-
-            TypeTracker::registerType<LookupT>(&column_idx);
-        };
-
-        ( registerColumnIndex.template operator()<Args>(), ... );
 
         std::array components {
             ComponentID { TypeTracker::typeID<Args>() }
             ...
         };
 
-        std::array<ComponentFlags, components.size()> component_flags;
-        component_flags.fill(ComponentFlags::None);
+        auto getComponentFlags =
+        []<typename ComponentT, typename... FlagComponentTs>(
+            const ComponentMetadataSelector<FlagComponentTs...> &component_metadata
+        ) constexpr -> ComponentFlags
+        {
+            constexpr size_t num_metadatas = sizeof...(FlagComponentTs);
 
-        int32_t cur_metadata_idx = 0;
-        auto setFlags = [&]<typename ComponentT>() {
-            ComponentFlags cur_flags =
-                component_metadata.flags[cur_metadata_idx++];
+            if constexpr (num_metadatas == 0) {
+                return ComponentFlags::None;
+            } else {
+                bool matches[] = {
+                    std::is_same_v<ComponentT, FlagComponentTs>
+                    ...
+                };
 
-            using LookupT = typename ArchetypeRef<ArchetypeT>::
-                template ComponentLookup<ComponentT>;
+                for (size_t i = 0; i < num_metadatas; i++) {
+                    if (matches[i]) {
+                        return component_metadata.flags[i];
+                    }
+                }
 
-            uint32_t flag_out_idx =
-                TypeTracker::typeID<LookupT>() - user_component_offset_;
-
-            component_flags[flag_out_idx] = cur_flags;
+                return ComponentFlags::None;
+            }
         };
 
-        ( setFlags.template operator()<MetadataComponentTs>(), ... );
+        std::array component_flags {
+            getComponentFlags.template operator()<Args>(component_metadata)
+            ...
+        };
 
         return std::make_pair(components, component_flags);
     });
@@ -353,30 +353,6 @@ inline ComponentT & StateManager::getDirect(MADRONA_MW_COND(uint32_t world_id,)
         MADRONA_MW_COND(world_id,) col_idx);
 
     return col[loc.row];
-}
-
-template <typename ArchetypeT>
-ArchetypeRef<ArchetypeT> StateManager::archetype(
-    MADRONA_MW_COND(uint32_t world_id))
-{
-#ifdef MADRONA_MW_MODE
-    (void)world_id;
-#endif
-    assert(false);
-#if 0
-    auto archetype_id = archetypeID<ArchetypeT>();
-
-    ArchetypeStore &archetype = *archetype_stores_[archetype_id.id];
-
-    Table &tbl = 
-#ifdef MADRONA_MW_MODE
-        archetype.tbls[world_id];
-#else
-        archetype.tbl;
-#endif
-
-    return ArchetypeRef<ArchetypeT>(&tbl);
-#endif
 }
 
 template <typename... ComponentTs>

@@ -160,10 +160,6 @@ public:
                                   CountT col_idx,
                                   Loc loc);
 
-    template <typename ArchetypeT>
-    inline ArchetypeRef<ArchetypeT> archetype(
-        MADRONA_MW_COND(uint32_t world_id));
-
     template <typename... ComponentTs>
     inline Query<ComponentTs...> query();
 

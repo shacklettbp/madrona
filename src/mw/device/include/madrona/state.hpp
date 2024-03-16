@@ -196,8 +196,6 @@ private:
     static inline constexpr uint32_t max_query_slots_ = 65536;
     static inline constexpr int32_t num_elems_per_sort_thread_ = 2;
 
-    template <typename> struct RegistrationHelper;
-
     void registerComponent(uint32_t id, uint32_t alignment,
                            uint32_t num_bytes);
     void registerArchetype(uint32_t id, 
