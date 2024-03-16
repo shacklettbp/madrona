@@ -105,14 +105,16 @@ public:
             return;
         }
 
-        realloc(capacity);
+        void *old = realloc(capacity);
+        alloc_.dealloc(old);
     }
 
     template <typename Fn>
     void resize(CountT new_size, Fn &&fn)
     {
         if (new_size > capacity_) {
-            expand(new_size);
+            void *old = expand(new_size);
+            alloc_.dealloc(old);
         }
 
         if (new_size > n_) {
@@ -133,7 +135,8 @@ public:
     void reserve(CountT new_capacity)
     {
         if (new_capacity > capacity_) {
-            expand(new_capacity);
+            void *old_ptr = expand(new_capacity);
+            alloc_.dealloc(old_ptr);
         }
     }
 
@@ -168,10 +171,12 @@ public:
     RefT emplace_back(Args &&...args)
     {
         if (n_ == capacity_) [[unlikely]] {
-            expand(n_ + 1);
+            T *old_ptr = expand(n_ + 1);
+            new (&ptr_[n_]) T(std::forward<Args>(args)...);
+            alloc_.dealloc(old_ptr);
+        } else {
+            new (&ptr_[n_]) T(std::forward<Args>(args)...);
         }
-
-        new (&ptr_[n_]) T(std::forward<Args>(args)...);
 
         return ptr_[n_++];
     }
@@ -179,10 +184,12 @@ public:
     RefT push_back(const T &v)
     {
         if (n_ == capacity_) [[unlikely]] {
-            expand(n_ + 1);
+            T *old_ptr = expand(n_ + 1);
+            new (&ptr_[n_]) T(v);
+            alloc_.dealloc(old_ptr);
+        } else {
+            new (&ptr_[n_]) T(v);
         }
-
-        new (&ptr_[n_]) T(v);
 
         return ptr_[n_++];
     }
@@ -190,10 +197,12 @@ public:
     RefT push_back(T &&v)
     {
         if (n_ == capacity_) [[unlikely]] {
-            expand(n_ + 1);
+            T *old_ptr = expand(n_ + 1);
+            new (&ptr_[n_]) T(std::move(v));
+            alloc_.dealloc(old_ptr);
+        } else {
+            new (&ptr_[n_]) T(std::move(v));
         }
-
-        new (&ptr_[n_]) T(std::move(v));
 
         return ptr_[n_++];
     }
@@ -201,7 +210,8 @@ public:
     CountT uninit_back()
     {
         if (n_ == capacity_) [[unlikely]] {
-            expand(n_ + 1);
+            T *old_ptr = expand(n_ + 1);
+            alloc_.dealloc(old_ptr);
         }
 
         return n_++;
@@ -246,15 +256,15 @@ public:
     CountT size() const { return n_; }
 
 private:
-    void expand(CountT new_size)
+    [[nodiscard]] T * expand(CountT new_size)
     {
         CountT new_capacity = capacity_ * expansion_factor_;
         new_capacity = std::max(new_capacity, new_size);
 
-        realloc(new_capacity);
+        return realloc(new_capacity);
     }
 
-    void realloc(CountT new_capacity)
+    [[nodiscard]] T * realloc(CountT new_capacity)
     {
         auto new_ptr = (T *)alloc_.alloc(new_capacity * sizeof(T));
 
@@ -267,12 +277,14 @@ private:
 #if MADRONA_GCC
 #pragma GCC diagnostic pop
 #endif
-
-            alloc_.dealloc(ptr_);
         }
+
+        T *old_ptr = ptr_;
 
         ptr_ = new_ptr;
         capacity_ = new_capacity;
+
+        return old_ptr;
     }
 
     [[no_unique_address]] A alloc_;
