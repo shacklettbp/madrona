@@ -268,6 +268,7 @@ void StateManager::registerArchetype(uint32_t id,
     type_ptr++;
 
     uint32_t flattened_user_component_start = archetype_component_offset_;
+    uint32_t flag_offset = 0;
     for (int i = 0; i < (int)num_user_components; i++) {
         uint32_t component_id = components[i].id;
         assert(component_id != TypeTracker::unassignedTypeID);
@@ -282,15 +283,14 @@ void StateManager::registerArchetype(uint32_t id,
 
                 archetype_components_[archetype_component_offset_++] =
                     bundle_component_id;
-            }
 
-            flattened_flags[i] = ComponentFlags::None;
+                flattened_flags[flag_offset++] = component_flags[i];
+            }
         } else {
             archetype_components_[archetype_component_offset_++] = component_id;
-            flattened_flags[i] = component_flags[i];
+            flattened_flags[flag_offset++] = component_flags[i];
         }
     }
-
     uint32_t num_flattened_user_components =
         archetype_component_offset_ - flattened_user_component_start;
 
