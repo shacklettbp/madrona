@@ -6,12 +6,20 @@
 
 namespace madrona::phys::xpbd {
 
-struct Contact : Archetype<ContactConstraint> {};
+struct XPBDContactState {
+    float lambdaN[4];
+};
+
+struct Contact : Archetype<
+    ContactConstraint,
+    XPBDContactState 
+> {};
+
 struct Joint : Archetype<JointConstraint> {};
 
 struct SolverState {
     Query<JointConstraint> jointQuery;
-    Query<ContactConstraint> contactQuery;
+    Query<ContactConstraint, XPBDContactState> contactQuery;
 };
 
 using namespace base;
@@ -686,8 +694,13 @@ inline void solvePositions(Context &ctx, SolverState &solver_state)
 {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
-    ctx.iterateQuery(solver_state.contactQuery, [&](ContactConstraint &contact) {
-        handleContact(ctx, obj_mgr, contact, contact.lambdaN);
+    ctx.iterateQuery(solver_state.contactQuery,
+    [&](ContactConstraint &contact, XPBDContactState &contact_solver_state) {
+        contact_solver_state.lambdaN[0] = 0.f;
+        contact_solver_state.lambdaN[1] = 0.f;
+        contact_solver_state.lambdaN[2] = 0.f;
+        contact_solver_state.lambdaN[3] = 0.f;
+        handleContact(ctx, obj_mgr, contact, contact_solver_state.lambdaN);
     });
 
     ctx.iterateQuery(solver_state.jointQuery, [&](JointConstraint joint) {
@@ -876,6 +889,7 @@ static inline void applyRestitutionVelocityUpdate(
 static inline void solveVelocitiesForContact(Context &ctx,
                                              ObjectManager &obj_mgr,
                                              ContactConstraint contact,
+                                             float lambdaN[4],
                                              float h,
                                              float restitution_threshold)
 {
@@ -990,7 +1004,7 @@ static inline void solveVelocitiesForContact(Context &ctx,
             mu_d, h,
             r1, r2,
             r1_world, r2_world,
-            contact.lambdaN[0] * (contact.points[i].w / penetration_sum));
+            lambdaN[0] * (contact.points[i].w / penetration_sum));
     }
 
     *v1_out = Velocity { v1, omega1 };
@@ -1002,9 +1016,11 @@ inline void solveVelocities(Context &ctx, SolverState &solver)
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     PhysicsSystemState &physics_sys = ctx.singleton<PhysicsSystemState>();
 
-    ctx.iterateQuery(solver.contactQuery, [&](ContactConstraint &contact) {
-        solveVelocitiesForContact(ctx, obj_mgr, contact, physics_sys.h,
-                                  physics_sys.restitutionThreshold);
+    ctx.iterateQuery(solver.contactQuery,
+    [&](ContactConstraint &contact, XPBDContactState &contact_solver_state) {
+        solveVelocitiesForContact(
+            ctx, obj_mgr, contact, contact_solver_state.lambdaN,
+            physics_sys.h, physics_sys.restitutionThreshold);
     });
 }
 
@@ -1013,6 +1029,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<SubstepPrevState>();
     registry.registerComponent<PreSolvePositional>();
     registry.registerComponent<PreSolveVelocity>();
+    registry.registerComponent<XPBDContactState>();
 
     registry.registerArchetype<Joint>();
     registry.registerArchetype<Contact>();
@@ -1024,7 +1041,7 @@ void init(Context &ctx)
 {
     ctx.singleton<SolverState>() = {
         .jointQuery = ctx.query<JointConstraint>(),
-        .contactQuery = ctx.query<ContactConstraint>(),
+        .contactQuery = ctx.query<ContactConstraint, XPBDContactState>(),
     };
 }
 

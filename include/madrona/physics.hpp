@@ -51,7 +51,6 @@ struct ContactConstraint {
     math::Vector4 points[4];
     int32_t numPoints;
     math::Vector3 normal;
-    float lambdaN[4];
 };
 
 struct JointConstraint {

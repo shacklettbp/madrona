@@ -1145,7 +1145,6 @@ static inline void addManifoldContacts(
         },
         manifold.numContactPoints,
         manifold.normal,
-        {},
     };
 }
 
