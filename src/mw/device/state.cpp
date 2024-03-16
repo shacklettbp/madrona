@@ -252,13 +252,9 @@ void StateManager::registerArchetype(uint32_t id,
                                      ComponentFlags *component_flags,
                                      uint32_t num_user_components)
 {
-    uint32_t offset = archetype_component_offset_;
-    archetype_component_offset_ += num_user_components;
-
-    uint32_t num_total_components = num_user_components + 2;
-
     std::array<TypeInfo, max_archetype_components_> type_infos;
     std::array<IntegerMapPair, max_archetype_components_> lookup_input;
+    std::array<ComponentFlags, max_archetype_components_> flattened_flags;
 
     TypeInfo *type_ptr = type_infos.data();
     IntegerMapPair *lookup_input_ptr = lookup_input.data();
@@ -271,27 +267,93 @@ void StateManager::registerArchetype(uint32_t id,
     *type_ptr = *components_[1];
     type_ptr++;
 
+    uint32_t flattened_user_component_start = archetype_component_offset_;
     for (int i = 0; i < (int)num_user_components; i++) {
-        ComponentID component_id = components[i];
-        assert(component_id.id != TypeTracker::unassignedTypeID);
-        archetype_components_[offset + i] = component_id.id;
+        uint32_t component_id = components[i].id;
+        assert(component_id != TypeTracker::unassignedTypeID);
 
-        type_ptr[i] = *components_[component_id.id];
+        if ((component_id & bundle_typeid_mask_) != 0) {
+            uint32_t bundle_id = component_id & ~bundle_typeid_mask_;
+            BundleInfo bundle_info = bundle_infos_[bundle_id];
+
+            for (CountT j = 0; j < (CountT)bundle_info.numComponents; j++) {
+                uint32_t bundle_component_id =
+                    bundle_components_[bundle_info.componentOffset + j];
+
+                archetype_components_[archetype_component_offset_++] =
+                    bundle_component_id;
+            }
+
+            flattened_flags[i] = ComponentFlags::None;
+        } else {
+            archetype_components_[archetype_component_offset_++] = component_id;
+            flattened_flags[i] = component_flags[i];
+        }
+    }
+
+    uint32_t num_flattened_user_components =
+        archetype_component_offset_ - flattened_user_component_start;
+
+    for (int i = 0; i < (int)num_flattened_user_components; i++) {
+        uint32_t component_id = archetype_components_[
+            flattened_user_component_start + i];
+
+        type_ptr[i] = *components_[component_id];
 
         lookup_input_ptr[i] = IntegerMapPair {
-            /* .key = */   component_id.id,
+            /* .key = */   component_id,
             /* .value = */ (uint32_t)i + user_component_offset_,
         };
     }
 
-    archetypes_[id].emplace(offset,
+    uint32_t num_total_components =
+        num_flattened_user_components + user_component_offset_;
+
+    archetypes_[id].emplace(flattened_user_component_start,
                             archetype_flags,
                             max_num_entities_per_world,
-                            num_user_components,
+                            num_flattened_user_components,
                             num_total_components,
                             type_infos.data(),
                             lookup_input.data(),
                             component_flags);
+}
+
+
+void StateManager::registerBundle(uint32_t id,
+                                  const uint32_t *components,
+                                  CountT num_components)
+{
+    id &= ~bundle_typeid_mask_;
+
+    uint32_t bundle_offset = bundle_component_offset_;
+
+    for (CountT i = 0; i < num_components; i++) {
+        uint32_t component_type_id = components[i];
+        assert(component_type_id != TypeTracker::unassignedTypeID);
+
+        if ((component_type_id & bundle_typeid_mask_) != 0) {
+            uint32_t sub_bundle_id = component_type_id & ~bundle_typeid_mask_;
+            BundleInfo sub_bundle_info = bundle_infos_[sub_bundle_id];
+
+            for (CountT j = 0; j < (CountT)sub_bundle_info.numComponents; j++) {
+                uint32_t bundle_component_id = 
+                    bundle_components_[sub_bundle_info.componentOffset + j];
+                bundle_components_[bundle_component_offset_++] = 
+                    bundle_component_id;
+            }
+        } else {
+            bundle_components_[bundle_component_offset_++] = component_type_id;
+        }
+    }
+
+    uint32_t num_flattened_components =
+        bundle_component_offset_ - bundle_offset;
+
+    bundle_infos_[id] = BundleInfo {
+        .componentOffset = bundle_offset,
+        .numComponents = num_flattened_components,
+    };
 }
 
 void StateManager::makeQuery(const uint32_t *components,

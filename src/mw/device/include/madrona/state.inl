@@ -102,6 +102,43 @@ ArchetypeID StateManager::registerArchetype(
     };
 }
 
+template <typename BundleT>
+void StateManager::registerBundle()
+{
+    uint32_t bundle_id = TypeTracker::registerType<BundleT>(
+        &StateManager::next_bundle_id_);
+
+    using Base = typename BundleT::Base;
+
+    using Delegator = utils::PackDelegator<Base>;
+
+    auto bundle_components = Delegator::call(
+    []<typename... Args>()
+    {
+        static_assert(std::is_same_v<Base, Bundle<Args...>>);
+
+        std::array components {
+            TypeTracker::typeID<Args>()
+            ...
+        };
+
+        return components;
+    });
+    
+    uint32_t id = TypeTracker::typeID<BundleT>();
+
+    registerBundle(id, bundle_components.data(), bundle_components.size());
+}
+
+template <typename AliasT, typename BundleT>
+void StateManager::registerBundleAlias()
+{
+    uint32_t bundle_id = TypeTracker::typeID<BundleT>();
+    assert(bundle_id != TypeTracker::unassignedTypeID);
+
+    TypeTracker::registerType<AliasT>(&bundle_id);
+}
+
 template <typename SingletonT>
 void StateManager::registerSingleton()
 {

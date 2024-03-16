@@ -70,6 +70,12 @@ public:
     template <typename SingletonT>
     void registerSingleton();
 
+    template <typename BundleT>
+    void registerBundle();
+
+    template <typename AliasT, typename BundleT>
+    void registerBundleAlias();
+
     template <typename SingletonT>
     SingletonT & getSingleton(WorldID world_id);
 
@@ -177,12 +183,15 @@ private:
 
     using ColumnMap = StaticIntegerMap<1024>;
     static inline constexpr uint32_t max_archetype_components_ = ColumnMap::capacity();
+    static constexpr uint32_t bundle_typeid_mask_ = 0x8000'0000_u32;
 
     static inline uint32_t num_components_ = 0;
     static inline uint32_t num_archetypes_ = 0;
+    static inline uint32_t next_bundle_id_ = bundle_typeid_mask_;
 
-    static inline constexpr uint32_t max_components_ = 512;
-    static inline constexpr uint32_t max_archetypes_ = 128;
+    static inline constexpr uint32_t max_components_ = 1024;
+    static inline constexpr uint32_t max_bundles_ = 512;
+    static inline constexpr uint32_t max_archetypes_ = 256;
     static inline constexpr uint32_t user_component_offset_ = 2;
     static inline constexpr uint32_t max_query_slots_ = 65536;
     static inline constexpr int32_t num_elems_per_sort_thread_ = 2;
@@ -197,6 +206,10 @@ private:
                            ComponentID *components,
                            ComponentFlags *component_flags,
                            uint32_t num_components);
+
+    void registerBundle(uint32_t id,
+                        const uint32_t *components,
+                        CountT num_components);
 
     template <typename Fn, int32_t... Indices>
     void iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
@@ -232,13 +245,22 @@ private:
         bool needsSort;
     };
 
+    struct BundleInfo {
+        uint32_t componentOffset;
+        uint32_t numComponents;
+    };
+
     uint32_t archetype_component_offset_ = 0;
+    uint32_t bundle_component_offset_ = 0;
     uint32_t query_data_offset_ = 0;
     SpinLock query_data_lock_ {};
     FixedInlineArray<Optional<TypeInfo>, max_components_> components_ {};
     std::array<uint32_t, max_archetype_components_ * max_archetypes_>
         archetype_components_ {};
     FixedInlineArray<Optional<ArchetypeStore>, max_archetypes_> archetypes_ {};
+    std::array<uint32_t, max_archetype_components_ * max_archetypes_>
+        bundle_components_ {};
+    std::array<BundleInfo, max_bundles_> bundle_infos_ {};
     std::array<uint32_t, max_query_slots_> query_data_ {};
     EntityStore entity_store_;
 };

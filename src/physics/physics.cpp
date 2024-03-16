@@ -151,7 +151,9 @@ broadphase::LeafID registerEntity(Context &ctx,
                                   Entity e,
                                   ObjectID obj_id)
 {
-    return ctx.singleton<broadphase::BVH>().reserveLeaf(e, obj_id);
+    auto &bvh = ctx.singleton<broadphase::BVH>();
+
+    return bvh.reserveLeaf(e, obj_id);
 }
 
 bool checkEntityAABBOverlap(
@@ -306,13 +308,13 @@ Entity makeHingeJoint(
 void registerTypes(ECSRegistry &registry,
                    Solver solver)
 {
+    registry.registerComponent<ResponseType>();
     registry.registerComponent<broadphase::LeafID>();
-    registry.registerSingleton<broadphase::BVH>();
-
+    registry.registerComponent<Velocity>();
     registry.registerComponent<ExternalForce>();
     registry.registerComponent<ExternalTorque>();
-    registry.registerComponent<ResponseType>();
-    registry.registerComponent<Velocity>();
+
+    registry.registerSingleton<broadphase::BVH>();
 
     registry.registerComponent<CollisionEvent>();
     registry.registerArchetype<CollisionEventTemporary>();
