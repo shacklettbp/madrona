@@ -12,6 +12,11 @@ namespace madrona::phys::tgs {
 struct Contact : Archetype<ContactConstraint> {};
 struct Joint : Archetype<JointConstraint> {};
 
+// Any per-body solver state would go in components in this bundle
+// (check XPBDRigidBodyState for example).
+struct TGSRigidBodyState : Bundle<
+> {};
+
 struct SolverState {
     Query<JointConstraint> jointQuery;
     Query<ContactConstraint> contactQuery;
@@ -24,6 +29,14 @@ void registerTypes(ECSRegistry &registry)
 {
     registry.registerArchetype<Joint>();
     registry.registerArchetype<Contact>();
+
+    // Any components in the bundle specific to this solver must be
+    // registered first.
+    registry.registerBundle<TGSRigidBodyState>();
+
+    // This registers the solver's per-body state bundle for use in all
+    // rigid bodies in the system
+    registry.registerBundleAlias<SolverBundleAlias, TGSRigidBodyState>();
 
     registry.registerSingleton<SolverState>();
 }

@@ -201,12 +201,16 @@ void StateManager::registerBundle()
     {
         static_assert(std::is_same_v<Base, Bundle<Args...>>);
 
-        std::array components {
-            TypeTracker::typeID<Args>()
-            ...
-        };
+        if constexpr (sizeof...(Args) == 0) {
+            return std::array<uint32_t, 0> {};
+        } else {
+            std::array components {
+                TypeTracker::typeID<Args>()
+                ...
+            };
 
-        return components;
+            return components;
+        }
     });
     
     uint32_t id = TypeTracker::typeID<BundleT>();
