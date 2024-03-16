@@ -197,21 +197,27 @@ TaskGraphNodeID setupTGSSolverTasks(
     CountT num_substeps)
 {
     auto run_narrowphase = narrowphase::setupTasks(builder, {broadphase});
-
-#ifdef MADRONA_GPU_MODE
-    // The GPU backend requires contacts to be sorted before iterateQuery
-    // can be called.
-    run_narrowphase = builder.addToGraph<SortArchetypeNode<Contact, WorldID>>(
-            {run_narrowphase});
-
-    run_narrowphase = builder.addToGraph<ResetTmpAllocNode>(
-        {run_narrowphase});
-#endif
-
     auto clear_broadphase = builder.addToGraph<
         ClearTmpNode<CandidateTemporary>>({run_narrowphase});
 
-    auto cur_node = clear_broadphase;
+    auto constraints_ready = clear_broadphase;
+#ifdef MADRONA_GPU_MODE
+    // The GPU backend requires constraints to be sorted before iterateQuery
+    // can be called. This requires sorting both Contact and Joint entities.
+    constraints_ready = builder.addToGraph<SortArchetypeNode<Contact, WorldID>>(
+        {constraints_ready});
+
+    constraints_ready =
+        builder.addToGraph<ResetTmpAllocNode>({constraints_ready});
+
+    constraints_ready = builder.addToGraph<SortArchetypeNode<Joint, WorldID>>(
+        {constraints_ready});
+
+    constraints_ready =
+        builder.addToGraph<ResetTmpAllocNode>({constraints_ready});
+#endif
+
+    auto cur_node = constraints_ready;
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
         prepareContacts,

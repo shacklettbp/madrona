@@ -70,17 +70,17 @@ inline void reportNarrowphaseClocks(Engine &ctx,
 #endif
 
 
-static PhysicsSystemState initPhysicsState(Context &ctx,
-                                           float delta_t,
-                                           CountT num_substeps,
-                                           Vector3 gravity,
-                                           uint32_t contact_archetype_id,
-                                           uint32_t joint_archetype_id)
+static void initPhysicsState(Context &ctx,
+                             float delta_t,
+                             CountT num_substeps,
+                             Vector3 gravity,
+                             uint32_t contact_archetype_id,
+                             uint32_t joint_archetype_id)
 {
     float h = delta_t / (float)num_substeps;
     float g_mag = gravity.length();
 
-    return PhysicsSystemState {
+    ctx.singleton<PhysicsSystemState>() = {
         .deltaT = delta_t,
         .h = h,
         .g = gravity,
@@ -123,7 +123,7 @@ void init(Context &ctx,
     default: MADRONA_UNREACHABLE();
     }
 
-    ctx.singleton<PhysicsSystemState>() = initPhysicsState(
+    initPhysicsState(
         ctx, delta_t, num_substeps, gravity,
         contact_archetype_id, joint_archetype_id);
 
@@ -357,32 +357,24 @@ TaskGraphNodeID setupSubstepTasks(
     CountT num_substeps,
     Solver solver)
 {
-    auto broadphase_pre =
+    auto broadphase_prep =
         broadphase::setupPreIntegrationTasks(builder, deps);
 
-    auto cur_node = broadphase_pre;
-
-#ifdef MADRONA_GPU_MODE
-    cur_node = 
-        builder.addToGraph<SortArchetypeNode<Joint, WorldID>>({cur_node});
-    cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
-#endif
-
+    TaskGraphNodeID solver_finished;
     switch (solver) {
     case Solver::XPBD: {
-        cur_node = xpbd::setupXPBDSolverTasks(builder, cur_node, num_substeps);
+        solver_finished = xpbd::setupXPBDSolverTasks(
+            builder, broadphase_prep, num_substeps);
     } break;
     case Solver::TGS: {
-        cur_node = tgs::setupTGSSolverTasks(builder, cur_node, num_substeps);
+        solver_finished = tgs::setupTGSSolverTasks(
+            builder, broadphase_prep, num_substeps);
     } break;
     default: MADRONA_UNREACHABLE();
     }
 
-    auto clear_candidates = builder.addToGraph<
-        ClearTmpNode<CandidateTemporary>>({cur_node});
-
     auto broadphase_post =
-        broadphase::setupPostIntegrationTasks(builder, {clear_candidates});
+        broadphase::setupPostIntegrationTasks(builder, {solver_finished});
 
     auto physics_done = broadphase_post;
 

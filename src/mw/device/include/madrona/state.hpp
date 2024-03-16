@@ -84,13 +84,11 @@ public:
 
     inline uint32_t numMatchingEntities(QueryRef *query_ref);
 
-    template <typename ArchetypeT>
-    Entity makeEntityNow(WorldID world_id);
+    Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
 
     void destroyEntityNow(Entity e);
 
-    template <typename ArchetypeT>
-    Loc makeTemporary(WorldID world_id);
+    Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
 
     template <typename ArchetypeT>
     void clearTemporaries();
@@ -211,9 +209,6 @@ private:
     void makeQuery(const uint32_t *components,
                    uint32_t num_components,
                    QueryRef *query_ref);
-
-    Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
-    Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
 
     struct ArchetypeStore {
         ArchetypeStore(uint32_t offset,

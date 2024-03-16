@@ -114,7 +114,8 @@ void StateManager::registerSingleton()
         ComponentMetadataSelector<> {}, ArchetypeFlags::None, 1);
 
     for (uint32_t i = 0; i < num_worlds; i++) {
-        makeEntityNow<ArchetypeT>(WorldID { int32_t(i) });
+        makeEntityNow(WorldID { int32_t(i) },
+                      TypeTracker::typeID<ArchetypeT>());
     }
 }
 
@@ -237,22 +238,6 @@ uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)
     }
 
     return total_rows;
-}
-
-template <typename ArchetypeT>
-Entity StateManager::makeEntityNow(WorldID world_id)
-{
-    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-
-    return makeEntityNow(world_id, archetype_id);
-}
-
-template <typename ArchetypeT>
-Loc StateManager::makeTemporary(WorldID world_id)
-{
-    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
-
-    return makeTemporary(world_id, archetype_id);
 }
 
 template <typename ArchetypeT>

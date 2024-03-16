@@ -1042,6 +1042,12 @@ TaskGraphNodeID setupXPBDSolverTasks(
 {
     auto cur_node = broadphase;
 
+#ifdef MADRONA_GPU_MODE
+    cur_node = 
+        builder.addToGraph<SortArchetypeNode<Joint, WorldID>>({cur_node});
+    cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
+#endif
+
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
             substepRigidBodies, Position, Rotation, Velocity, ObjectID,

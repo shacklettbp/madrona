@@ -20,15 +20,27 @@ Context::Context(WorldBase *world_data, const WorkerInit &init)
 template <typename ArchetypeT>
 Entity Context::makeEntity()
 {
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    return makeEntity(archetype_id);
+}
+
+Entity Context::makeEntity(uint32_t archetype_id)
+{
     StateManager *state_mgr = mwGPU::getStateManager();
-    return state_mgr->makeEntityNow<ArchetypeT>(world_id_);
+    return state_mgr->makeEntityNow(world_id_, archetype_id);
 }
 
 template <typename ArchetypeT>
 Loc Context::makeTemporary()
 {
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    return makeTemporary(archetype_id);
+}
+
+Loc Context::makeTemporary(uint32_t archetype_id)
+{
     StateManager *state_mgr = mwGPU::getStateManager();
-    return state_mgr->makeTemporary<ArchetypeT>(world_id_);
+    return state_mgr->makeTemporary(world_id_, archetype_id);
 }
 
 void Context::destroyEntity(Entity e)

@@ -20,9 +20,11 @@ public:
 
     template <typename ArchetypeT>
     Entity makeEntity();
+    inline Entity makeEntity(uint32_t archetype_id);
 
     template <typename ArchetypeT>
     Loc makeTemporary();
+    inline Loc makeTemporary(uint32_t archetype_id);
 
     inline void destroyEntity(Entity e);
 
