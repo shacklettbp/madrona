@@ -10,11 +10,6 @@
 
 namespace madrona::phys {
 
-enum class Solver : uint32_t {
-    XPBD,
-    TGS,
-};
-
 struct ExternalForce : math::Vector3 {
     ExternalForce(math::Vector3 v)
         : Vector3(v)
@@ -37,6 +32,18 @@ struct Velocity {
     math::Vector3 linear;
     math::Vector3 angular;
 };
+
+struct SolverBundleAlias {};
+
+struct RigidBody : Bundle<
+    base::ObjectInstance,
+    ResponseType,
+    broadphase::LeafID,
+    Velocity, 
+    ExternalForce,
+    ExternalTorque,
+    SolverBundleAlias
+> {};
 
 struct CandidateCollision {
     Loc a;
@@ -149,26 +156,12 @@ struct ObjectData {
     ObjectManager *mgr;
 };
 
-namespace xpbd {
-
-struct SubstepPrevState {
-    math::Vector3 prevPosition;
-    math::Quat prevRotation;
-};
-
-struct PreSolvePositional {
-    math::Vector3 x;
-    math::Quat q;
-};
-
-struct PreSolveVelocity {
-    math::Vector3 v;
-    math::Vector3 omega;
-};
-
-}
-
 namespace PhysicsSystem {
+    enum class Solver : uint32_t {
+        XPBD,
+        TGS,
+    };
+
     void init(Context &ctx,
               ObjectManager *obj_mgr,
               float delta_t,
@@ -215,7 +208,7 @@ namespace PhysicsSystem {
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
 
-    TaskGraphNodeID setupSubstepTasks(
+    TaskGraphNodeID setupPhysicsStepTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps,
         CountT num_substeps,

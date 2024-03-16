@@ -175,6 +175,64 @@ void StateManager::registerSingleton()
 #endif
 }
 
+template <typename BundleT>
+void StateManager::registerBundle()
+{
+#ifdef MADRONA_MW_MODE
+    std::lock_guard lock(register_lock_);
+
+    uint32_t check_id = TypeTracker::typeID<BundleT>();
+    check_id &= ~bundle_typeid_mask_;
+
+    if (check_id < bundle_infos_.size() &&
+            bundle_infos_[check_id].has_value()) {
+        return;
+    }
+#endif
+
+    TypeTracker::registerType<BundleT>(&next_bundle_id_);
+
+    using Base = typename BundleT::Base;
+
+    using Delegator = utils::PackDelegator<Base>;
+
+    auto bundle_components = Delegator::call(
+    []<typename... Args>()
+    {
+        static_assert(std::is_same_v<Base, Bundle<Args...>>);
+
+        std::array components {
+            TypeTracker::typeID<Args>()
+            ...
+        };
+
+        return components;
+    });
+    
+    uint32_t id = TypeTracker::typeID<BundleT>();
+
+    registerBundle(id, bundle_components.data(), bundle_components.size());
+}
+
+template <typename AliasT, typename BundleT>
+void StateManager::registerBundleAlias()
+{
+#ifdef MADRONA_MW_MODE
+    std::lock_guard lock(register_lock_);
+
+    uint32_t check_id = TypeTracker::typeID<AliasT>();
+
+    if (check_id != TypeTracker::unassignedTypeID) {
+        return;
+    }
+#endif
+
+    uint32_t bundle_id = TypeTracker::typeID<BundleT>();
+    assert(bundle_id != TypeTracker::unassignedTypeID);
+
+    TypeTracker::registerType<AliasT>(&bundle_id);
+}
+
 template <typename ArchetypeT, typename ComponentT>
 ComponentT * StateManager::exportColumn()
 {

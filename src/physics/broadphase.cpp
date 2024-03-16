@@ -937,10 +937,10 @@ inline void findIntersectingEntry(
     // directly into the system
     Loc a_loc = ctx.loc(e);
     bool a_is_static = 
-        ctx.getDirect<ResponseType>(Cols::ResponseType, a_loc) ==
+        ctx.getDirect<ResponseType>(RGDCols::ResponseType, a_loc) ==
         ResponseType::Static;
 
-    ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
+    ObjectID a_obj = ctx.getDirect<ObjectID>(RGDCols::ObjectID, a_loc);
 
     CountT a_num_prims = obj_mgr.rigidBodyPrimitiveCounts[a_obj.idx];
 
@@ -951,7 +951,7 @@ inline void findIntersectingEntry(
             // FIXME: Change this so static objects are kept in a separate BVH
             // and this check can be removed.
             if (a_is_static &&
-                ctx.getDirect<ResponseType>(Cols::ResponseType, b_loc) ==
+                ctx.getDirect<ResponseType>(RGDCols::ResponseType, b_loc) ==
                     ResponseType::Static) {
                 return;
             }
@@ -961,7 +961,7 @@ inline void findIntersectingEntry(
             // between each pair of primitives in the entity. Narrowphase
             // will check transformed AABBs.
             
-            ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
+            ObjectID b_obj = ctx.getDirect<ObjectID>(RGDCols::ObjectID, b_loc);
             CountT b_num_prims =
                 obj_mgr.rigidBodyPrimitiveCounts[b_obj.idx];
 
@@ -979,7 +979,7 @@ inline void findIntersectingEntry(
                 Loc candidate_loc = ctx.makeTemporary<CandidateTemporary>();
                 CandidateCollision &candidate =
                     ctx.getDirect<CandidateCollision>(
-                        Cols::CandidateCollision, candidate_loc);
+                        RGDCols::CandidateCollision, candidate_loc);
 
                 candidate.a = a_loc;
                 candidate.b = b_loc;

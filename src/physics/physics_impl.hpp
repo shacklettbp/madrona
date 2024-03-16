@@ -40,21 +40,21 @@ TaskGraphNodeID setupTasks(
 
 }
 
-struct Cols {
-    static constexpr inline CountT Position = 2;
-    static constexpr inline CountT Rotation = 3;
-    static constexpr inline CountT Scale = 4;
-    static constexpr inline CountT Velocity = 5;
-    static constexpr inline CountT ObjectID = 6;
-    static constexpr inline CountT ResponseType = 7;
-    static constexpr inline CountT SubstepPrevState = 8;
-    static constexpr inline CountT PreSolvePositional = 9;
-    static constexpr inline CountT PreSolveVelocity = 10;
-    static constexpr inline CountT ExternalForce = 11;
-    static constexpr inline CountT ExternalTorque = 12;
-    static constexpr inline CountT LeafID = 13;
+namespace RGDCols {
+    constexpr inline CountT Position = 2;
+    constexpr inline CountT Rotation = 3;
+    constexpr inline CountT Scale = 4;
+    constexpr inline CountT ObjectID = 5;
+    constexpr inline CountT ResponseType = 6;
+    constexpr inline CountT LeafID = 7;
+    constexpr inline CountT Velocity = 8;
+    constexpr inline CountT ExternalForce = 9;
+    constexpr inline CountT ExternalTorque = 10;
+    constexpr inline CountT SolverBase = 11;
 
-    static constexpr inline CountT CandidateCollision = 2;
+    constexpr inline CountT CandidateCollision = 2;
+    constexpr inline CountT ContactConstraint = 2;
+    constexpr inline CountT JointConstraint = 2;
 };
 
 }

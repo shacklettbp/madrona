@@ -39,6 +39,12 @@ public:
         ArchetypeFlags archetype_flags,
         CountT max_num_entities_per_world = 0);
 
+    template <typename BundleT>
+    void registerBundle();
+
+    template <typename AliasT, typename BundleT>
+    void registerBundleAlias();
+
     // Register a singleton component. Note that you should pass the desired
     // component type to this function, not an archetype (singletons implicitly
     // create an archetype with 1 component).

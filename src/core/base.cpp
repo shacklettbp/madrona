@@ -13,6 +13,8 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<Rotation>();
     registry.registerComponent<Scale>();
     registry.registerComponent<ObjectID>();
+
+    registry.registerBundle<ObjectInstance>();
 }
 
 }

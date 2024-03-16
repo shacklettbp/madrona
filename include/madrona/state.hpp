@@ -113,6 +113,12 @@ public:
     template <typename SingletonT>
     void registerSingleton();
 
+    template <typename BundleT>
+    void registerBundle();
+
+    template <typename AliasT, typename BundleT>
+    void registerBundleAlias();
+
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * exportColumn();
 
@@ -265,6 +271,11 @@ private:
         ColumnMap columnLookup;
     };
 
+    struct BundleInfo {
+        uint32_t componentOffset;
+        uint32_t numComponents;
+    };
+
     struct QueryState {
         QueryState();
 
@@ -301,6 +312,10 @@ private:
                            const ComponentID *components,
                            const ComponentFlags *component_flags);
 
+    void registerBundle(uint32_t id,
+                        const uint32_t *components,
+                        CountT num_components);
+
     void * exportColumn(uint32_t archetype_id, uint32_t component_id);
 
     void clear(MADRONA_MW_COND(uint32_t world_id,) StateCache &cache,
@@ -311,6 +326,8 @@ private:
     DynArray<Optional<TypeInfo>> component_infos_;
     DynArray<ComponentID> archetype_components_;
     DynArray<Optional<ArchetypeStore>> archetype_stores_;
+    DynArray<uint32_t> bundle_components_;
+    DynArray<Optional<BundleInfo>> bundle_infos_;
 
 #ifdef MADRONA_MW_MODE
     DynArray<ExportJob> export_jobs_;
@@ -363,10 +380,13 @@ private:
         1;
 #endif
 
+    static constexpr uint32_t bundle_typeid_mask_ = 0x8000'0000_u32;
+
     static QueryState query_state_;
 
     static uint32_t next_component_id_;
     static uint32_t next_archetype_id_;
+    static uint32_t next_bundle_id_;
 };
 
 }

@@ -136,6 +136,8 @@ StateManager::StateManager(CountT num_worlds)
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
+      bundle_components_(0),
+      bundle_infos_(0),
       export_jobs_(0),
       tmp_allocators_(num_worlds),
       num_worlds_(num_worlds),
@@ -154,6 +156,8 @@ StateManager::StateManager()
       component_infos_(0),
       archetype_components_(0),
       archetype_stores_(0),
+      bundle_components_(0),
+      bundle_infos_(0),
       tmp_allocator_()
 {
     registerComponent<Entity>();
@@ -391,13 +395,6 @@ void StateManager::registerArchetype(uint32_t id,
 {
     (void)archetype_flags, (void)component_flags;
 
-    uint32_t offset = archetype_components_.size();
-
-    uint32_t num_total_components = num_user_components + 1;
-#ifdef MADRONA_MW_MODE
-    num_total_components += 1;
-#endif
-
     std::array<TypeInfo, max_archetype_components_> type_infos;
     std::array<IntegerMapPair, max_archetype_components_> lookup_input;
 
@@ -412,10 +409,38 @@ void StateManager::registerArchetype(uint32_t id,
     type_ptr++;
 #endif
 
-    for (int i = 0; i < (int)num_user_components; i++) {
-        ComponentID component_id = components[i];
+    CountT user_component_start = archetype_components_.size();
 
-        archetype_components_.push_back(component_id);
+    for (CountT i = 0; i < (CountT)num_user_components; i++) {
+        uint32_t component_id = components[i].id;
+        assert(component_id != TypeTracker::unassignedTypeID);
+
+        if ((component_id & bundle_typeid_mask_) != 0) {
+            uint32_t bundle_id = component_id & ~bundle_typeid_mask_;
+            BundleInfo bundle_info = *bundle_infos_[bundle_id];
+
+            for (CountT j = 0; j < (CountT)bundle_info.numComponents; j++) {
+                uint32_t bundle_component_id =
+                    bundle_components_[bundle_info.componentOffset + j];
+
+                archetype_components_.push_back(
+                    ComponentID { bundle_component_id });
+            }
+        } else {
+            archetype_components_.push_back(ComponentID {component_id});
+        }
+    }
+
+    CountT num_total_user_components =
+        archetype_components_.size() - user_component_start;
+
+    CountT num_total_components =
+        user_component_offset_ + num_total_user_components;
+
+    for (CountT i = 0; i < num_total_user_components; i++) {
+        ComponentID component_id =
+            archetype_components_[i + user_component_start];
+
         type_ptr[i] = *component_infos_[component_id.id];
 
         lookup_input[i] = IntegerMapPair {
@@ -433,14 +458,55 @@ void StateManager::registerArchetype(uint32_t id,
     }
 
     archetype_stores_[id].emplace(ArchetypeStore::Init {
-        offset,
-        uint32_t(num_user_components),
+        uint32_t(user_component_start),
+        uint32_t(num_total_user_components),
         id,
         Span(type_infos.data(), num_total_components),
-        Span(lookup_input.data(), num_user_components),
+        Span(lookup_input.data(), num_total_user_components),
         max_num_entities_per_world,
         MADRONA_MW_COND(num_worlds_,)
     });
+}
+
+void StateManager::registerBundle(uint32_t id,
+                                  const uint32_t *components,
+                                  CountT num_components)
+{
+    id &= ~bundle_typeid_mask_;
+
+    uint32_t bundle_offset = bundle_components_.size();
+
+    for (CountT i = 0; i < num_components; i++) {
+        uint32_t component_type_id = components[i];
+        assert(component_type_id != TypeTracker::unassignedTypeID);
+
+        if ((component_type_id & bundle_typeid_mask_) != 0) {
+            uint32_t sub_bundle_id = component_type_id & ~bundle_typeid_mask_;
+            BundleInfo sub_bundle_info = *bundle_infos_[sub_bundle_id];
+
+            for (CountT j = 0; j < (CountT)sub_bundle_info.numComponents; j++) {
+                uint32_t bundle_component_id = 
+                    bundle_components_[sub_bundle_info.componentOffset + j];
+                bundle_components_.push_back(bundle_component_id);
+            }
+        } else {
+            bundle_components_.push_back(component_type_id);
+        }
+    }
+
+    if (bundle_infos_.size() <= (CountT)id) {
+        bundle_infos_.resize(id + 1, [](auto ptr) {
+            Optional<BundleInfo>::noneAt(ptr);
+        });
+    }
+
+    uint32_t num_flattened_components =
+        (uint32_t)bundle_components_.size() - bundle_offset;
+
+    bundle_infos_[id] = BundleInfo {
+        .componentOffset = bundle_offset,
+        .numComponents = num_flattened_components,
+    };
 }
 
 void * StateManager::exportColumn(uint32_t archetype_id, uint32_t component_id)
@@ -600,5 +666,6 @@ StateManager::QueryState StateManager::query_state_ = StateManager::QueryState()
 
 uint32_t StateManager::next_component_id_ = 0;
 uint32_t StateManager::next_archetype_id_ = 0;
+uint32_t StateManager::next_bundle_id_ = StateManager::bundle_typeid_mask_;
 
 }

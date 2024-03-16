@@ -22,6 +22,33 @@ struct SolverState {
     Query<ContactConstraint, XPBDContactState> contactQuery;
 };
 
+struct SubstepPrevState {
+    math::Vector3 prevPosition;
+    math::Quat prevRotation;
+};
+
+struct PreSolvePositional {
+    math::Vector3 x;
+    math::Quat q;
+};
+
+struct PreSolveVelocity {
+    math::Vector3 v;
+    math::Vector3 omega;
+};
+
+struct XPBDRigidBodyState : Bundle<
+    SubstepPrevState,
+    PreSolvePositional,
+    PreSolveVelocity
+> {};
+
+namespace XPBDCols {
+    constexpr inline CountT SubstepPrevState = RGDCols::SolverBase;
+    constexpr inline CountT PreSolvePositional = RGDCols::SolverBase + 1;
+    constexpr inline CountT PreSolveVelocity = RGDCols::SolverBase + 2;
+};
+
 using namespace base;
 using namespace math;
 
@@ -429,30 +456,30 @@ static inline void handleContact(Context &ctx,
                                  ContactConstraint contact,
                                  float *lambdas)
 {
-    Position *x1_ptr = &ctx.getDirect<Position>(Cols::Position, contact.ref);
-    Position *x2_ptr = &ctx.getDirect<Position>(Cols::Position, contact.alt);
+    Position *x1_ptr = &ctx.getDirect<Position>(RGDCols::Position, contact.ref);
+    Position *x2_ptr = &ctx.getDirect<Position>(RGDCols::Position, contact.alt);
 
-    Rotation *q1_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, contact.ref);
-    Rotation *q2_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, contact.alt);
+    Rotation *q1_ptr = &ctx.getDirect<Rotation>(RGDCols::Rotation, contact.ref);
+    Rotation *q2_ptr = &ctx.getDirect<Rotation>(RGDCols::Rotation, contact.alt);
 
     SubstepPrevState prev1 = ctx.getDirect<SubstepPrevState>(
-        Cols::SubstepPrevState, contact.ref);
+        XPBDCols::SubstepPrevState, contact.ref);
     SubstepPrevState prev2 = ctx.getDirect<SubstepPrevState>(
-        Cols::SubstepPrevState, contact.alt);
+        XPBDCols::SubstepPrevState, contact.alt);
 
     PreSolvePositional presolve_pos1 = ctx.getDirect<PreSolvePositional>(
-        Cols::PreSolvePositional, contact.ref);
+        XPBDCols::PreSolvePositional, contact.ref);
     PreSolvePositional presolve_pos2 = ctx.getDirect<PreSolvePositional>(
-        Cols::PreSolvePositional, contact.alt);
+        XPBDCols::PreSolvePositional, contact.alt);
 
     ObjectID obj_id1 = ctx.getDirect<ObjectID>(
-        Cols::ObjectID, contact.ref);
-    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.alt);
+        RGDCols::ObjectID, contact.ref);
+    ObjectID obj_id2 = ctx.getDirect<ObjectID>(RGDCols::ObjectID, contact.alt);
 
     ResponseType resp_type1 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, contact.ref);
+        RGDCols::ResponseType, contact.ref);
     ResponseType resp_type2 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, contact.alt);
+        RGDCols::ResponseType, contact.alt);
 
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
@@ -583,20 +610,20 @@ inline void handleJointConstraint(Context &ctx,
     Loc l1 = ctx.loc(joint.e1);
     Loc l2 = ctx.loc(joint.e2);
 
-    Vector3 *x1_ptr = &ctx.getDirect<Position>(Cols::Position, l1);
-    Vector3 *x2_ptr = &ctx.getDirect<Position>(Cols::Position, l2);
-    Quat *q1_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, l1);
-    Quat *q2_ptr = &ctx.getDirect<Rotation>(Cols::Rotation, l2);
+    Vector3 *x1_ptr = &ctx.getDirect<Position>(RGDCols::Position, l1);
+    Vector3 *x2_ptr = &ctx.getDirect<Position>(RGDCols::Position, l2);
+    Quat *q1_ptr = &ctx.getDirect<Rotation>(RGDCols::Rotation, l1);
+    Quat *q2_ptr = &ctx.getDirect<Rotation>(RGDCols::Rotation, l2);
     Vector3 x1 = *x1_ptr;
     Vector3 x2 = *x2_ptr;
     Quat q1 = *q1_ptr;
     Quat q2 = *q2_ptr;
     ResponseType resp_type1 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, l1);
+        RGDCols::ResponseType, l1);
     ResponseType resp_type2 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, l2);
-    ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, l1);
-    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, l2);
+        RGDCols::ResponseType, l2);
+    ObjectID obj_id1 = ctx.getDirect<ObjectID>(RGDCols::ObjectID, l1);
+    ObjectID obj_id2 = ctx.getDirect<ObjectID>(RGDCols::ObjectID, l2);
 
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
@@ -893,29 +920,29 @@ static inline void solveVelocitiesForContact(Context &ctx,
                                              float h,
                                              float restitution_threshold)
 {
-    Velocity *v1_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.ref);
-    Velocity *v2_out = &ctx.getDirect<Velocity>(Cols::Velocity, contact.alt);
+    Velocity *v1_out = &ctx.getDirect<Velocity>(RGDCols::Velocity, contact.ref);
+    Velocity *v2_out = &ctx.getDirect<Velocity>(RGDCols::Velocity, contact.alt);
 
-    Quat q1 = ctx.getDirect<Rotation>(Cols::Rotation, contact.ref);
-    Quat q2 = ctx.getDirect<Rotation>(Cols::Rotation, contact.alt);
+    Quat q1 = ctx.getDirect<Rotation>(RGDCols::Rotation, contact.ref);
+    Quat q2 = ctx.getDirect<Rotation>(RGDCols::Rotation, contact.alt);
 
     PreSolvePositional presolve_pos1 = ctx.getDirect<PreSolvePositional>(
-        Cols::PreSolvePositional, contact.ref);
+        XPBDCols::PreSolvePositional, contact.ref);
     PreSolvePositional presolve_pos2 =  ctx.getDirect<PreSolvePositional>(
-        Cols::PreSolvePositional, contact.alt);
+        XPBDCols::PreSolvePositional, contact.alt);
 
     PreSolveVelocity presolve_vel1 =
-        ctx.getDirect<PreSolveVelocity>(Cols::PreSolveVelocity, contact.ref);
+        ctx.getDirect<PreSolveVelocity>(XPBDCols::PreSolveVelocity, contact.ref);
     PreSolveVelocity presolve_vel2 =
-        ctx.getDirect<PreSolveVelocity>(Cols::PreSolveVelocity, contact.alt);
+        ctx.getDirect<PreSolveVelocity>(XPBDCols::PreSolveVelocity, contact.alt);
 
-    ObjectID obj_id1 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.ref);
-    ObjectID obj_id2 = ctx.getDirect<ObjectID>(Cols::ObjectID, contact.alt);
+    ObjectID obj_id1 = ctx.getDirect<ObjectID>(RGDCols::ObjectID, contact.ref);
+    ObjectID obj_id2 = ctx.getDirect<ObjectID>(RGDCols::ObjectID, contact.alt);
 
     ResponseType resp_type1 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, contact.ref);
+        RGDCols::ResponseType, contact.ref);
     ResponseType resp_type2 = ctx.getDirect<ResponseType>(
-        Cols::ResponseType, contact.alt);
+        RGDCols::ResponseType, contact.alt);
 
     RigidBodyMetadata metadata1 = obj_mgr.metadata[obj_id1.idx];
     RigidBodyMetadata metadata2 = obj_mgr.metadata[obj_id2.idx];
@@ -1035,6 +1062,9 @@ void registerTypes(ECSRegistry &registry)
     registry.registerArchetype<Contact>();
 
     registry.registerSingleton<SolverState>();
+
+    registry.registerBundle<XPBDRigidBodyState>();
+    registry.registerBundleAlias<SolverBundleAlias, XPBDRigidBodyState>();
 }
 
 void init(Context &ctx)

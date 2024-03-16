@@ -1130,7 +1130,7 @@ static inline void addManifoldContacts(
     const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
 
     Loc c = ctx.makeTemporary(physics_sys.contactArchetypeID);
-    ctx.getDirect<ContactConstraint>(2, c) = {
+    ctx.getDirect<ContactConstraint>(RGDCols::ContactConstraint, c) = {
         ref_loc,
         other_loc,
         {
@@ -1556,8 +1556,8 @@ static inline void runNarrowphase(
 
     uint32_t a_prim_idx, b_prim_idx;
     {
-        ObjectID a_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, a_loc);
-        ObjectID b_obj = ctx.getDirect<ObjectID>(Cols::ObjectID, b_loc);
+        ObjectID a_obj = ctx.getDirect<ObjectID>(RGDCols::ObjectID, a_loc);
+        ObjectID b_obj = ctx.getDirect<ObjectID>(RGDCols::ObjectID, b_loc);
     
         const uint32_t a_prim_offset =
             obj_mgr.rigidBodyPrimitiveOffsets[a_obj.idx];
@@ -1584,12 +1584,12 @@ static inline void runNarrowphase(
         std::swap(raw_type_a, raw_type_b);
     }
 
-    const Vector3 a_pos = ctx.getDirect<Position>(Cols::Position, a_loc);
-    const Vector3 b_pos = ctx.getDirect<Position>(Cols::Position, b_loc);
-    const Quat a_rot = ctx.getDirect<Rotation>(Cols::Rotation, a_loc);
-    const Quat b_rot = ctx.getDirect<Rotation>(Cols::Rotation, b_loc);
-    const Diag3x3 a_scale(ctx.getDirect<Scale>(Cols::Scale, a_loc));
-    const Diag3x3 b_scale(ctx.getDirect<Scale>(Cols::Scale, b_loc));
+    const Vector3 a_pos = ctx.getDirect<Position>(RGDCols::Position, a_loc);
+    const Vector3 b_pos = ctx.getDirect<Position>(RGDCols::Position, b_loc);
+    const Quat a_rot = ctx.getDirect<Rotation>(RGDCols::Rotation, a_loc);
+    const Quat b_rot = ctx.getDirect<Rotation>(RGDCols::Rotation, b_loc);
+    const Diag3x3 a_scale(ctx.getDirect<Scale>(RGDCols::Scale, a_loc));
+    const Diag3x3 b_scale(ctx.getDirect<Scale>(RGDCols::Scale, b_loc));
 
     {
         AABB a_obj_aabb = obj_mgr.primitiveAABBs[a_prim_idx];

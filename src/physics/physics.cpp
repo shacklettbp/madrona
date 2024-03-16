@@ -335,6 +335,8 @@ void registerTypes(ECSRegistry &registry,
     } break;
     default: MADRONA_UNREACHABLE();
     }
+
+    registry.registerBundle<RigidBody>();
 }
 
 TaskGraphNodeID setupBroadphaseTasks(
@@ -351,7 +353,7 @@ TaskGraphNodeID setupBroadphaseOverlapTasks(
     return broadphase::setupPreIntegrationTasks(builder, deps);
 }
 
-TaskGraphNodeID setupSubstepTasks(
+TaskGraphNodeID setupPhysicsStepTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps,
     CountT num_substeps,

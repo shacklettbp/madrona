@@ -35,6 +35,10 @@ struct IndexHelper {
     uint32_t next;
 };
 
+template <typename... ComponentTs> struct Bundle {
+    using Base = Bundle<ComponentTs...>;
+};
+
 template <typename... ComponentTs> struct Archetype {
     using Base = Archetype<ComponentTs...>;
 };

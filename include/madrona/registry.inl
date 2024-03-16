@@ -25,6 +25,18 @@ void ECSRegistry::registerArchetype(
         component_metadatas, archetype_flags, max_num_entities_per_world);
 }
 
+template <typename BundleT>
+void ECSRegistry::registerBundle()
+{
+    state_mgr_->registerBundle<BundleT>();
+}
+
+template <typename AliasT, typename BundleT>
+void ECSRegistry::registerBundleAlias()
+{
+    state_mgr_->registerBundleAlias<AliasT, BundleT>();
+}
+
 template <typename SingletonT>
 void ECSRegistry::registerSingleton()
 {

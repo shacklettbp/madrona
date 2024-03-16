@@ -28,6 +28,13 @@ struct ObjectID {
     int32_t idx;
 };
 
+struct ObjectInstance : Bundle<
+    Position, 
+    Rotation,
+    Scale,
+    ObjectID
+> {};
+
 void registerTypes(ECSRegistry &registry);
 
 }
