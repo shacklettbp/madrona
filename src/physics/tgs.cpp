@@ -69,9 +69,11 @@ static inline void solveContacts(Context &ctx,
                                  SolverState &solver,
                                  bool use_bias)
 {
-    (void)ctx;
-    (void)solver;
-    (void)use_bias;
+    ctx.iterateQuery(solver.contactQuery, [&](ContactConstraint &contact) {
+        // Solve contact
+        (void)contact;
+        (void)use_bias;
+    });
 }
 
 inline void prepareContacts(Context &ctx,
