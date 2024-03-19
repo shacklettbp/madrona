@@ -65,6 +65,14 @@ inline math::Vector3 triangleClosestPointToOrigin(
     math::Vector3 ab,
     math::Vector3 ac);
 
+// Returns distance to closest point squared + closest point itself
+// in *closest_point. If the hull is touching the origin returns 0 and
+// *closest_point is invalid.
+float hullClosestPointToOriginGJK(
+    HalfEdgeMesh &hull,
+    float err_tolerance2,
+    math::Vector3 *closest_point);
+
 }
 
 #include "geo.inl"

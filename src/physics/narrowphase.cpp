@@ -127,6 +127,27 @@ struct Manifold {
     math::Vector3 normal;
 };
 
+enum class ContactType {
+    None,
+    Sphere,
+    SATPlane,
+    SATFace,
+    SATEdge,
+};
+
+struct SphereContact {
+    Vector3 normal;
+    Vector3 pt;
+    float depth;
+};
+
+struct SATContact {
+    Vector3 normal;
+    float planeDOrSeparation;
+    uint32_t refFaceIdxOrEdgeIdxA;
+    uint32_t incidentFaceIdxOrEdgeIdxB;
+};
+
 static HullState makeHullState(
     MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
     const HalfEdgeMesh &mesh,
@@ -631,18 +652,8 @@ static inline CountT clipPolygon(Vector3 *dst_vertices,
 }
 
 struct SATResult {
-    enum class Type : uint32_t {
-        None,
-        Plane,
-        Face,
-        Edge,
-    };
-
-    Type type;
-    Vector3 normal;
-    float planeDOrSeparation;
-    uint32_t refFaceIdxOrEdgeIdxA;
-    uint32_t incidentFaceIdxOrEdgeIdxB;
+    ContactType type;
+    SATContact contact;
 };
 
 static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
@@ -655,7 +666,7 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     if (faceQueryA.separation > 0.0f) {
         // There is a separating axis - no collision
         SATResult result;
-        result.type = SATResult::Type::None;
+        result.type = ContactType::None;
 
         return result;
     }
@@ -665,7 +676,7 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     if (faceQueryB.separation > 0.0f) {
         // There is a separating axis - no collision
         SATResult result;
-        result.type = SATResult::Type::None;
+        result.type = ContactType::None;
 
         return result;
     }
@@ -678,7 +689,7 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
     if (edgeQuery.separation > 0.0f) {
         // There is a separating axis - no collision
         SATResult result;
-        result.type = SATResult::Type::None;
+        result.type = ContactType::None;
 
         return result;
     }
@@ -703,26 +714,26 @@ static inline SATResult doSAT(MADRONA_GPU_COND(int32_t mwgpu_lane_id,)
             MADRONA_GPU_COND(mwgpu_lane_id,) incident_hull, ref_plane.normal);
 
         SATResult result;
-        result.type = SATResult::Type::Face,
-        result.normal = ref_plane.normal;
-        result.planeDOrSeparation = ref_plane.d;
+        result.type = ContactType::SATFace,
+        result.contact.normal = ref_plane.normal;
+        result.contact.planeDOrSeparation = ref_plane.d;
         uint32_t mask;
         if (a_is_ref) {
             mask = 0_u32;
         } else {
             mask = 1_u32 << 31_u32;
         }
-        result.refFaceIdxOrEdgeIdxA = uint32_t(ref_face_idx) | mask;
-        result.incidentFaceIdxOrEdgeIdxB = uint32_t(incident_face_idx);
+        result.contact.refFaceIdxOrEdgeIdxA = uint32_t(ref_face_idx) | mask;
+        result.contact.incidentFaceIdxOrEdgeIdxB = uint32_t(incident_face_idx);
 
         return result;
     } else {
         SATResult result;
-        result.type = SATResult::Type::Edge;
-        result.normal = edgeQuery.normal;
-        result.planeDOrSeparation = edgeQuery.separation;
-        result.refFaceIdxOrEdgeIdxA = edgeQuery.edgeIdxA;
-        result.incidentFaceIdxOrEdgeIdxB = edgeQuery.edgeIdxB;
+        result.type = ContactType::SATEdge;
+        result.contact.normal = edgeQuery.normal;
+        result.contact.planeDOrSeparation = edgeQuery.separation;
+        result.contact.refFaceIdxOrEdgeIdxA = edgeQuery.edgeIdxA;
+        result.contact.incidentFaceIdxOrEdgeIdxB = edgeQuery.edgeIdxB;
         return result;
     }
 }
@@ -737,7 +748,7 @@ SATResult doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
 
     if (separation > 0.0f) {
         SATResult result;
-        result.type = SATResult::Type::None;
+        result.type = ContactType::None;
 
         return result;
     }
@@ -749,10 +760,10 @@ SATResult doSATPlane(MADRONA_GPU_COND(const int32_t mwgpu_lane_id,)
         MADRONA_GPU_COND(mwgpu_lane_id,) h, plane.normal);
 
     SATResult result;
-    result.type = SATResult::Type::Plane;
-    result.normal = plane.normal;
-    result.planeDOrSeparation = plane.d;
-    result.incidentFaceIdxOrEdgeIdxB = uint32_t(incident_face_idx);
+    result.type = ContactType::SATPlane;
+    result.contact.normal = plane.normal;
+    result.contact.planeDOrSeparation = plane.d;
+    result.contact.incidentFaceIdxOrEdgeIdxB = uint32_t(incident_face_idx);
 
     return result;
 }
@@ -1134,17 +1145,43 @@ static inline void addManifoldContacts(
         ref_loc,
         other_loc,
         {
-            Vector4::fromVector3(manifold.contactPoints[0],
-                                 manifold.penetrationDepths[0]),
-            Vector4::fromVector3(manifold.contactPoints[1],
-                                 manifold.penetrationDepths[1]),
-            Vector4::fromVector3(manifold.contactPoints[2],
-                                 manifold.penetrationDepths[2]),
-            Vector4::fromVector3(manifold.contactPoints[3],
-                                 manifold.penetrationDepths[3]),
+            Vector4::fromVec3W(manifold.contactPoints[0],
+                               manifold.penetrationDepths[0]),
+            Vector4::fromVec3W(manifold.contactPoints[1],
+                               manifold.penetrationDepths[1]),
+            Vector4::fromVec3W(manifold.contactPoints[2],
+                               manifold.penetrationDepths[2]),
+            Vector4::fromVec3W(manifold.contactPoints[3],
+                               manifold.penetrationDepths[3]),
         },
         manifold.numContactPoints,
         manifold.normal,
+    };
+}
+
+static inline void addSinglePointContact(
+    Context &ctx,
+    Vector3 point,
+    Vector3 normal,
+    float depth,
+    Loc ref_loc,
+    Loc other_loc)
+{
+    const auto &physics_sys = ctx.singleton<PhysicsSystemState>();
+
+    Loc c = ctx.makeTemporary(physics_sys.contactArchetypeID);
+
+    ctx.getDirect<ContactConstraint>(RGDCols::ContactConstraint, c) = {
+        ref_loc,
+        other_loc,
+        {
+            Vector4::fromVec3W(point, depth),
+            Vector4::zero(),
+            Vector4::zero(),
+            Vector4::zero(),
+        },
+        1,
+        normal,
     };
 }
 
@@ -1157,13 +1194,15 @@ inline constexpr int32_t numPlaneFloats = maxNumPlanes * 4;
 #endif
 
 struct NarrowphaseResult {
-    SATResult sat;
-    const Vector3 * aVertices;
-    const Vector3 * bVertices;
-    const HalfEdge * aHalfEdges;
-    const HalfEdge * bHalfEdges;
-    const uint32_t * aFaceHedgeRoots;
-    const uint32_t * bFaceHedgeRoots;
+    ContactType type;
+    SphereContact sphere;
+    SATContact sat;
+    const Vector3 *aVertices;
+    const Vector3 *bVertices;
+    const HalfEdge *aHalfEdges;
+    const HalfEdge *bHalfEdges;
+    const uint32_t *aFaceHedgeRoots;
+    const uint32_t *bFaceHedgeRoots;
 };
 
 MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
@@ -1182,34 +1221,53 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
 
     switch (test_type) {
     case NarrowphaseTest::SphereSphere: {
-        assert(false);
-        MADRONA_UNREACHABLE();
-#if 0
-        float a_radius = a_prim->sphere.radius;
-        float b_radius = b_prim->sphere.radius;
+        float a_radius, b_radius;
+        {
+            assert(a_scale.d0 == a_scale.d1 && a_scale.d0 == a_scale.d2);
+            assert(b_scale.d0 == b_scale.d1 && b_scale.d0 == b_scale.d2);
+
+            a_radius = a_scale.d0 * a_prim->sphere.radius;
+            b_radius = b_scale.d0 * b_prim->sphere.radius;
+        }
 
         Vector3 to_b = b_pos - a_pos;
         float dist = to_b.length();
 
-        if (dist > 0 && dist < a_radius + b_radius) {
-            Vector3 mid = to_b / 2.f;
-
-            Vector3 to_b_normal = to_b / dist;
-
-            addContactsToSolver(
-                solver, {{
-                    a_loc,
-                    b_loc,
-                    { 
-                        makeVector4(a_pos + mid, dist / 2.f),
-                        {}, {}, {}
-                    },
-                    1,
-                    to_b_normal,
-                    {},
-                }});
+        if (dist > a_radius + b_radius) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
         }
-#endif
+
+        Vector3 normal;
+        float penetration;
+
+        if (dist > 0.f) {
+            normal = to_b / dist;
+        } else {
+            normal = math::up;
+        }
+
+        penetration = a_radius + b_radius - dist;
+
+        SphereContact contact {
+            .normal = normal,
+            .pt = a_pos + a_radius * normal,
+            .depth = penetration,
+        };
+
+        NarrowphaseResult result;
+        result.type = ContactType::Sphere;
+        result.sphere = contact;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aHalfEdges = nullptr;
+        result.bHalfEdges = nullptr;
+        result.aFaceHedgeRoots = nullptr;
+        result.bFaceHedgeRoots = nullptr;
+        return result;
     } break;
     case NarrowphaseTest::HullHull: {
         // Get half edge mesh for hull A and hull B
@@ -1242,30 +1300,85 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         const SATResult sat = doSAT(MADRONA_GPU_COND(mwgpu_lane_id,)
             a_hull_state, b_hull_state);
 
-        return NarrowphaseResult {
-            sat,
+        NarrowphaseResult result;
+        result.type = sat.type;
+        result.sat = sat.contact;
 #ifdef MADRONA_GPU_MODE
-            a_he_mesh.vertices, b_he_mesh.vertices,
+        result.aVertices = a_he_mesh.vertices;
+        result.bVertices = b_he_mesh.vertices;
 #else
-            a_hull_state.mesh.vertices, b_hull_state.mesh.vertices,
+        result.aVertices = a_hull_state.mesh.vertices;
+        result.bVertices = b_hull_state.mesh.vertices;
 #endif
-            a_hull_state.mesh.halfEdges, b_hull_state.mesh.halfEdges,
-            a_hull_state.mesh.faceBaseHalfEdges,
-            b_hull_state.mesh.faceBaseHalfEdges,
-        };
+        result.aHalfEdges = a_hull_state.mesh.halfEdges;
+        result.bHalfEdges = b_hull_state.mesh.halfEdges;
+        result.aFaceHedgeRoots = a_hull_state.mesh.faceBaseHalfEdges;
+        result.bFaceHedgeRoots = b_hull_state.mesh.faceBaseHalfEdges;
+
+        return result;
     } break;
     case NarrowphaseTest::SphereHull: {
-#if 0
-        auto a_sphere = a_prim->sphere;
-        const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
-        Quat b_rot = ctx.getUnsafe<Rotation>(b_entity);
-        Vector3 b_scale = ctx.getUnsafe<Rotation>(b_entity);
+        float sphere_radius;
+        {
+            auto sphere = a_prim->sphere;
+            assert(a_scale.d0 == a_scale.d1 && a_scale.d0 == a_scale.d2);
+            sphere_radius = a_scale.d0 * sphere.radius;
+        }
 
-        CollisionMesh b_collision_mesh = 
-            buildCollisionMesh(b_he_mesh, b_pos, b_rot, b_scale);
-#endif
-        assert(false);
-        MADRONA_UNREACHABLE();
+        const auto &b_he_mesh = b_prim->hull.halfEdgeMesh;
+        assert(b_he_mesh.numFaces < max_num_tmp_faces);
+        assert(b_he_mesh.numVertices <  max_num_tmp_vertices);
+
+        PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
+
+        Vector3 hull_origin = b_pos - a_pos;
+        HullState b_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
+            b_he_mesh, hull_origin, b_rot, b_scale,
+            txfm_vertex_buffer, txfm_face_buffer);
+
+        MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
+
+        PROF_END(txfm_hull_ctr);
+
+        Vector3 hull_closest_pt;
+        float hull_dist2 = hullClosestPointToOriginGJK(
+            b_hull_state.mesh, 1e-10f, &hull_closest_pt);
+        printf("%f\n", sqrtf(hull_dist2));
+
+        if (hull_dist2 > sphere_radius * sphere_radius) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
+        }
+
+        SphereContact sphere_contact;
+
+        if (hull_dist2 == 0.f) {
+            // Need to do SAT
+            assert(false);
+        } else {
+            float to_hull_len = sqrtf(hull_dist2);
+
+            float depth = sphere_radius - to_hull_len;
+            Vector3 normal = hull_closest_pt / to_hull_len;
+
+            sphere_contact.normal = normal;
+            sphere_contact.pt = a_pos + normal * sphere_radius;
+            sphere_contact.depth = depth;
+        }
+
+        NarrowphaseResult result;
+        result.type = ContactType::Sphere;
+        result.sphere = sphere_contact;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aHalfEdges = nullptr;
+        result.bHalfEdges = nullptr;
+        result.aFaceHedgeRoots = nullptr;
+        result.bFaceHedgeRoots = nullptr;
+        return result;
     } break;
     case NarrowphaseTest::PlanePlane: {
         // Planes must be static, this should never be called
@@ -1273,10 +1386,12 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         MADRONA_UNREACHABLE();
     } break;
     case NarrowphaseTest::SpherePlane: {
-        assert(false);
-        MADRONA_UNREACHABLE();
-#if 0
-        auto sphere = a_prim->sphere;
+        float sphere_radius;
+        {
+            auto sphere = a_prim->sphere;
+            assert(a_scale.d0 == a_scale.d1 && a_scale.d0 == a_scale.d2);
+            sphere_radius = a_scale.d0 * sphere.radius;
+        }
 
         constexpr Vector3 base_normal = { 0, 0, 1 };
         Vector3 plane_normal = b_rot.rotateVec(base_normal);
@@ -1284,24 +1399,33 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         float d = plane_normal.dot(b_pos);
         float t = plane_normal.dot(a_pos) - d;
 
-        float penetration = sphere.radius - t;
-        if (penetration > 0) {
-            Vector3 contact_point = a_pos - t * plane_normal;
-
-            addContactsToSolver(
-                solver, {{
-                    b_loc,
-                    a_loc,
-                    {
-                        makeVector4(contact_point, penetration),
-                        {}, {}, {}
-                    },
-                    1,
-                    plane_normal,
-                    {},
-                }});
+        float penetration = sphere_radius - t;
+        if (penetration < 0) {
+            NarrowphaseResult result;
+            result.type = ContactType::None;
+            return result;
         }
-#endif
+
+        Vector3 contact_point = a_pos - t * plane_normal;
+
+        SphereContact sphere_contact {
+            .normal = plane_normal,
+            .pt = contact_point,
+            .depth = penetration,
+        };
+
+        NarrowphaseResult result;
+        result.type = ContactType::Sphere;
+        result.sphere = sphere_contact;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aVertices = nullptr;
+        result.bVertices = nullptr;
+        result.aHalfEdges = nullptr;
+        result.bHalfEdges = nullptr;
+        result.aFaceHedgeRoots = nullptr;
+        result.bFaceHedgeRoots = nullptr;
+        return result;
     } break;
     case NarrowphaseTest::HullPlane: {
         // Get half edge mesh for entity a (the hull)
@@ -1340,16 +1464,21 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         const SATResult sat = doSATPlane(
             MADRONA_GPU_COND(mwgpu_lane_id,) plane, a_hull_state);
 
-        return NarrowphaseResult {
-            sat,
+        NarrowphaseResult result;
+        result.type = sat.type;
+        result.sat = sat.contact;
 #ifdef MADRONA_GPU_MODE
-            a_he_mesh.vertices, nullptr,
+        result.aVertices = a_he_mesh.vertices;
+        result.bVertices = nullptr;
 #else
-            a_hull_state.mesh.vertices, nullptr,
+        result.aVertices = a_hull_state.mesh.vertices;
+        result.bVertices = nullptr;
 #endif
-            a_hull_state.mesh.halfEdges, nullptr,
-            a_hull_state.mesh.faceBaseHalfEdges, nullptr,
-        };
+        result.aHalfEdges = a_hull_state.mesh.halfEdges;
+        result.bHalfEdges = nullptr;
+        result.aFaceHedgeRoots = a_hull_state.mesh.faceBaseHalfEdges;
+        result.bFaceHedgeRoots = nullptr;
+        return result;
     } break;
     default: MADRONA_UNREACHABLE();
     }
@@ -1365,18 +1494,20 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
 #endif
     void *thread_tmp_storage_a, void *thread_tmp_storage_b)
 {
-    Manifold manifold;
-    Loc ref_loc;
-    Loc other_loc;
-
-    switch (narrowphase_result.sat.type) {
-    case SATResult::Type::None: {
+    switch (narrowphase_result.type) {
+    case ContactType::None: {
         return;
     } break;
-    case SATResult::Type::Plane: {
+    case ContactType::Sphere: {
+        SphereContact sphere_contact = narrowphase_result.sphere;
+
+        addSinglePointContact(ctx, sphere_contact.pt, sphere_contact.normal,
+                              sphere_contact.depth, b_loc, a_loc);
+    } break;
+    case ContactType::SATPlane: {
         // Plane is always b, always reference
-        ref_loc = b_loc;
-        other_loc = a_loc;
+        Loc ref_loc = b_loc;
+        Loc other_loc = a_loc;
 
 #ifdef MADRONA_GPU_MODE
         Mat3x4 hull_txfm = Mat3x4::fromTRS(a_pos, a_rot, a_scale);
@@ -1388,7 +1519,7 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
         };
 
         // Create plane contact
-        manifold = createFacePlaneContact(
+        Manifold manifold = createFacePlaneContact(
             plane,
             int32_t(narrowphase_result.sat.incidentFaceIdxOrEdgeIdxB),
             narrowphase_result.aVertices,
@@ -1401,8 +1532,11 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
 #endif
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
+
+        assert(manifold.numContactPoints > 0);
+        addManifoldContacts(ctx, manifold, ref_loc, other_loc);
     } break;
-    case SATResult::Type::Face: {
+    case ContactType::SATFace: {
         const Vector3 *ref_vertices;
         const Vector3 *other_vertices;
         const HalfEdge *ref_hedges;
@@ -1423,6 +1557,7 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
         uint32_t ref_face_idx = ref_face_idx_and_ref_mask & 0x7FFF'FFFF;
         bool a_is_ref = ref_face_idx == ref_face_idx_and_ref_mask;
 
+        Loc ref_loc, other_loc;
         if (a_is_ref) {
             ref_loc = a_loc;
             other_loc = b_loc;
@@ -1457,7 +1592,7 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
         };
 
         // Create face contact
-        manifold = createFaceContact(
+        Manifold manifold = createFaceContact(
             ref_plane,
             int32_t(ref_face_idx),
             int32_t(incident_face_idx),
@@ -1474,14 +1609,17 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
 #endif
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
+
+        assert(manifold.numContactPoints > 0);
+        addManifoldContacts(ctx, manifold, ref_loc, other_loc);
     } break;
-    case SATResult::Type::Edge: {
+    case ContactType::SATEdge: {
         // A is always reference
-        ref_loc = a_loc;
-        other_loc = b_loc;
+        Loc ref_loc = a_loc;
+        Loc other_loc = b_loc;
 
         // Create edge contact
-        manifold = createEdgeContact(
+        Manifold manifold = createEdgeContact(
             narrowphase_result.sat.normal,
             narrowphase_result.sat.planeDOrSeparation,
             int32_t(narrowphase_result.sat.refFaceIdxOrEdgeIdxA),
@@ -1495,12 +1633,10 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
             b_pos, b_rot, b_scale,
 #endif
             { 0, 0, 0 }, { 1, 0, 0, 0 });
+
+        addManifoldContacts(ctx, manifold, ref_loc, other_loc);
     } break;
     default: MADRONA_UNREACHABLE();
-    }
-
-    if (manifold.numContactPoints > 0) {
-        addManifoldContacts(ctx, manifold, ref_loc, other_loc);
     }
 }
 
@@ -1712,6 +1848,7 @@ static inline void runNarrowphase(
                          b_pos, b_rot, b_scale,
                          tmp_faces_buffer,
                          tmp_faces_buffer + max_num_tmp_faces / 2);
+        
     }
 #else
     NarrowphaseResult result = narrowphaseDispatch(
