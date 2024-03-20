@@ -402,8 +402,19 @@ GJKSimplexSolveState gjkSolve4Simplex(
 
     float det_M = C_41 + C_42 + C_43 + C_44;
 
-    if (gjkCompareSigns(det_M, C_41) && gjkCompareSigns(det_M, C_42) &&
-            gjkCompareSigns(det_M, C_43) && gjkCompareSigns(det_M, C_44)) {
+    bool cmp_signs[4] = {
+        gjkCompareSigns(det_M, C_41),
+        gjkCompareSigns(det_M, C_42), 
+        gjkCompareSigns(det_M, C_43),
+        gjkCompareSigns(det_M, C_44),
+    };
+
+#ifdef MADRONA_GJK_DEBUG
+    printf("%d %d %d %d\n", (int)cmp_signs[0], (int)cmp_signs[1], 
+        (int)cmp_signs[2], (int)cmp_signs[3]);
+#endif
+
+    if (cmp_signs[0] && cmp_signs[1] && cmp_signs[2] && cmp_signs[3]) {
         float lambda1 = C_41 / det_M;
         float lambda2 = C_42 / det_M;
         float lambda3 = C_43 / det_M;
@@ -419,38 +430,40 @@ GJKSimplexSolveState gjkSolve4Simplex(
     }
 
     // Deviation from paper in conditions to check the faces:
-    // if det_M is 0, all these gjkCompareSigns calls will be false! This would
-    // cause the function to test nothing, return FLT_MAX and terminate (if we
+    // if det_M is 0, CompareSigns calls will be false! This would cause the 
+    // function to test nothing, return FLT_MAX and terminate (if we
     // ignore several asserts along the way). Not 100% sure but this seems
     // risky because this case is quite common: Consider a cube tested against
     // the origin. The two triangles that make up the cube face will make a
     // degenerate tetrahedron that will trigger this issue. In the cube case
     // this doesn't really matter since continuing to iterate after the first
     // triangle won't get any closer but is this true in general?
-    // For now, if det_M == 0.f, check all the faces.
+    // For now, we're going to just use the negation of the positive 
+    // CompareSigns check above, which will cause the 0 case for det_M or C_4J
+    // to check the face.
     GJKSimplexSolveState res;
     res.vLen2 = FLT_MAX;
-    if (det_M == 0.f || gjkCompareSigns(det_M, -C_42)) {
+    if (!cmp_signs[0]) {
         // s4, s3, s1
         res = gjkSolve3Simplex(Y0, Y1, Y3);
         res.lambdas = { res.lambdas[0], res.lambdas[1], 0.f, res.lambdas[2] };
     }
 
-    if (det_M == 0.f || gjkCompareSigns(det_M, -C_43)) {
+    if (!cmp_signs[1]) {
         // s4, s2, s1
         GJKSimplexSolveState res3 = gjkSolve3Simplex(Y0, Y2, Y3);
 
-        if (res3.vLen2 > res.vLen2) {
+        if (res3.vLen2 < res.vLen2) {
             res = res3;
             res.lambdas = { res.lambdas[0], 0.f, res.lambdas[1], res.lambdas[2] };
         }
     }
 
-    if (det_M == 0.f || gjkCompareSigns(det_M, -C_44)) {
+    if (!cmp_signs[2]) {
         // s3, s2, s1
         GJKSimplexSolveState res4 = gjkSolve3Simplex(Y1, Y2, Y3);
 
-        if (res4.vLen2 > res.vLen2) {
+        if (res4.vLen2 < res.vLen2) {
             res = res4;
             res.lambdas = { 0.f, res.lambdas[0], res.lambdas[1], res.lambdas[2] };
         }
