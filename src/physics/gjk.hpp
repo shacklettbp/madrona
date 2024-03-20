@@ -426,6 +426,7 @@ GJKSimplexSolveState gjkSolve4Simplex(
 #ifdef MADRONA_GJK_DEBUG
     printf("%d %d %d %d\n", (int)cmp_signs[0], (int)cmp_signs[1], 
         (int)cmp_signs[2], (int)cmp_signs[3]);
+    printf("%f, %f %f %f %f\n", det_M, C_41, C_42, C_43, C_44);
 #endif
 
     if (cmp_signs[0] && cmp_signs[1] && cmp_signs[2] && cmp_signs[3]) {
@@ -457,29 +458,40 @@ GJKSimplexSolveState gjkSolve4Simplex(
     // to check the face.
     GJKSimplexSolveState res;
     res.vLen2 = FLT_MAX;
-    if (!cmp_signs[0]) {
+    if (!cmp_signs[1]) {
         // s4, s3, s1
         res = gjkSolve3Simplex(Y0, Y1, Y3);
         res.lambdas = { res.lambdas[0], res.lambdas[1], 0.f, res.lambdas[2] };
     }
 
-    if (!cmp_signs[1]) {
+    if (!cmp_signs[2]) {
         // s4, s2, s1
-        GJKSimplexSolveState res3 = gjkSolve3Simplex(Y0, Y2, Y3);
+        GJKSimplexSolveState sub = gjkSolve3Simplex(Y0, Y2, Y3);
 
-        if (res3.vLen2 < res.vLen2) {
-            res = res3;
+        if (sub.vLen2 < res.vLen2) {
+            res = sub;
             res.lambdas = { res.lambdas[0], 0.f, res.lambdas[1], res.lambdas[2] };
         }
     }
 
-    if (!cmp_signs[2]) {
+    if (!cmp_signs[3]) {
         // s3, s2, s1
-        GJKSimplexSolveState res4 = gjkSolve3Simplex(Y1, Y2, Y3);
+        GJKSimplexSolveState sub = gjkSolve3Simplex(Y1, Y2, Y3);
 
-        if (res4.vLen2 < res.vLen2) {
-            res = res4;
+        if (sub.vLen2 < res.vLen2) {
+            res = sub;
             res.lambdas = { 0.f, res.lambdas[0], res.lambdas[1], res.lambdas[2] };
+        }
+    }
+
+    // This final check isn't included in the paper 
+    if (!cmp_signs[0]) {
+        // s4, s3, s2
+        GJKSimplexSolveState sub = gjkSolve3Simplex(Y0, Y1, Y2);
+
+        if (sub.vLen2 < res.vLen2) {
+            res = sub;
+            res.lambdas = { res.lambdas[0], res.lambdas[1], res.lambdas[2], 0.f };
         }
     }
 
