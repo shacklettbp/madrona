@@ -189,22 +189,19 @@ GJKSimplexSolveState gjkSolve2Simplex(
 
     Vector3 t = s2 - s1;
     float t_len2 = t.length2();
-    Vector3 pO = (dot(s2, t) / t_len2) * t + s2;
 
     float mu_max;
-    float s1_I, s2_I, pO_I;
+    float s1_I, s2_I;
     {
         mu_max = s1.x - s2.x;
         s1_I = s1.x;
         s2_I = s2.x;
-        pO_I = pO.x;
 
         float mu_y = s1.y - s2.y;
         if (fabsf(mu_y) > fabsf(mu_max)) {
             mu_max = mu_y;
             s1_I = s1.y;
             s2_I = s2.y;
-            pO_I = pO.y;
         }
 
         float mu_z = s1.z - s2.z;
@@ -212,16 +209,26 @@ GJKSimplexSolveState gjkSolve2Simplex(
             mu_max = mu_z;
             s1_I = s1.z;
             s2_I = s2.z;
-            pO_I = pO.z;
         }
     }
+
+    // There seems to be a slight bug in the paper here:
+    // Paper algorithm 3 says pO should be
+    // Vector3 pO = (dot(s2, t) / t_len2) * t + s2;
+    // This doesn't really make sense because t goes from s1 to s2, but
+    // then we're adding s2?
+    // Flipping this around seems to work. Also slight optimization to
+    // only compute the needed coordinate of pO
+    float pO_I = (dot(s2, t) / t_len2) * (s1_I - s2_I) + s2_I;
 
     float C1 = pO_I - s2_I;
     float C2 = s1_I - pO_I;
 
 #ifdef MADRONA_GJK_DEBUG
-    printf("2 simplex: %f %f %f\n",
-        mu_max, C1, C2);
+    printf("2 simplex:\n");
+    printf("  (%f %f %f)\n  (%f %f %f)\n",
+        s1.x, s1.y, s1.z, s2.x, s2.y, s2.z);
+    printf("%f %f %f\n", mu_max, C1, C2);
 #endif
 
     if (gjkCompareSigns(mu_max, C1) && gjkCompareSigns(mu_max, C2)) {
@@ -254,6 +261,12 @@ GJKSimplexSolveState gjkSolve3Simplex(
     Vector3 s2 = Y1;
     Vector3 s3 = Y0;
 
+#ifdef MADRONA_GJK_DEBUG
+    printf("3 simplex\n");
+    printf("  (%f %f %f)\n  (%f %f %f)\n  (%f %f %f)\n",
+        s1.x, s1.y, s1.z, s2.x, s2.y, s2.z, s3.x, s3.y, s3.z);
+#endif
+
     Vector3 n = cross(s2 - s1, s3 - s1);
     float n_len2 = n.length2();
     Vector3 pO = dot(s1, n) * n / n_len2;
@@ -276,6 +289,10 @@ GJKSimplexSolveState gjkSolve3Simplex(
         float M_34 = s2.x * s3.y - s3.x * s2.y
                    - s1.x * s3.y + s3.x * s1.y
                    + s1.x * s2.y - s2.x * s1.y;
+
+#ifdef MADRONA_GJK_DEBUG
+        printf("%f %f %f\n", M_14, M_24, M_34);
+#endif
 
         float M_14_abs = fabsf(M_14);
         float M_24_abs = fabsf(M_24);
@@ -302,10 +319,17 @@ GJKSimplexSolveState gjkSolve3Simplex(
         }
     }
 
-    float C2 = pO.x * s2_2D.y + pO.y * s3_2D.x + s2_2D.x * s3_2D.y
-        - pO.x * s3_2D.y - pO.y * s2_2D.x - s3_2D.x * s2_2D.y;
-    float C3 = pO.x * s1_2D.y + pO.y * s3_2D.x + s1_2D.x * s3_2D.y
-        - pO.x * s3_2D.y - pO.y * s1_2D.x - s3_2D.x * s1_2D.y;
+    float C2 = pO_2D.x * s3_2D.y + pO_2D.y * s1_2D.x + s3_2D.x * s1_2D.y 
+             - pO_2D.x * s1_2D.y - pO_2D.y * s3_2D.x - s1_2D.x * s3_2D.y;
+
+    float C3 = pO_2D.x * s1_2D.y + pO_2D.y * s2_2D.x + s1_2D.x * s2_2D.y
+             - pO_2D.x * s2_2D.y - pO_2D.y * s1_2D.x - s2_2D.x * s1_2D.y;
+
+#ifdef MADRONA_GJK_DEBUG
+    printf("(%f %f) (%f %f) (%f %f)\n",
+        s1_2D.x, s1_2D.y, s2_2D.x, s2_2D.y, s3_2D.x, s3_2D.y);
+    printf("(%f %f %f)\n", mu_max, C2, C3);
+#endif
 
     if (gjkCompareSigns(mu_max, C2) && gjkCompareSigns(mu_max, C3)) {
         float lambda2 = C2 / mu_max;
@@ -350,6 +374,13 @@ GJKSimplexSolveState gjkSolve4Simplex(
     Vector3 s3 = Y1;
     Vector3 s4 = Y0;
 
+#ifdef MADRONA_GJK_DEBUG
+    printf("4 simplex\n");
+    printf("  (%f %f %f)\n  (%f %f %f)\n  (%f %f %f)\n  (%f %f %f)\n",
+        s1.x, s1.y, s1.z, s2.x, s2.y, s2.z, s3.x, s3.y, s3.z,
+        s4.x, s4.y, s4.z);
+#endif
+
     /* M = [
         [ s1.x, s2.x, s3.x, s4.x ],
         [ s1.y, s2.y, s3.y, s4.y ],
@@ -370,7 +401,6 @@ GJKSimplexSolveState gjkSolve4Simplex(
     float C_44 = det(s1, s2, s3);
 
     float det_M = C_41 + C_42 + C_43 + C_44;
-    assert(det_M != 0);
 
     if (gjkCompareSigns(det_M, C_41) && gjkCompareSigns(det_M, C_42) &&
             gjkCompareSigns(det_M, C_43) && gjkCompareSigns(det_M, C_44)) {
@@ -388,15 +418,25 @@ GJKSimplexSolveState gjkSolve4Simplex(
         };
     }
 
+    // Deviation from paper in conditions to check the faces:
+    // if det_M is 0, all these gjkCompareSigns calls will be false! This would
+    // cause the function to test nothing, return FLT_MAX and terminate (if we
+    // ignore several asserts along the way). Not 100% sure but this seems
+    // risky because this case is quite common: Consider a cube tested against
+    // the origin. The two triangles that make up the cube face will make a
+    // degenerate tetrahedron that will trigger this issue. In the cube case
+    // this doesn't really matter since continuing to iterate after the first
+    // triangle won't get any closer but is this true in general?
+    // For now, if det_M == 0.f, check all the faces.
     GJKSimplexSolveState res;
     res.vLen2 = FLT_MAX;
-    if (gjkCompareSigns(det_M, -C_42)) {
+    if (det_M == 0.f || gjkCompareSigns(det_M, -C_42)) {
         // s4, s3, s1
         res = gjkSolve3Simplex(Y0, Y1, Y3);
         res.lambdas = { res.lambdas[0], res.lambdas[1], 0.f, res.lambdas[2] };
     }
 
-    if (gjkCompareSigns(det_M, -C_43)) {
+    if (det_M == 0.f || gjkCompareSigns(det_M, -C_43)) {
         // s4, s2, s1
         GJKSimplexSolveState res3 = gjkSolve3Simplex(Y0, Y2, Y3);
 
@@ -406,7 +446,7 @@ GJKSimplexSolveState gjkSolve4Simplex(
         }
     }
 
-    if (gjkCompareSigns(det_M, -C_44)) {
+    if (det_M == 0.f || gjkCompareSigns(det_M, -C_44)) {
         // s3, s2, s1
         GJKSimplexSolveState res4 = gjkSolve3Simplex(Y1, Y2, Y3);
 
@@ -460,7 +500,6 @@ inline float GJK<T>::computeDistance2(
             solve_state = gjkSolve1Simplex(Y[0]);
         } break;
         case 1: {
-            // The paper 
             storeSupports<1>(w, a_support, b_support);
             solve_state = gjkSolve2Simplex(Y[0], Y[1]);
         } break;
@@ -475,13 +514,17 @@ inline float GJK<T>::computeDistance2(
         default: MADRONA_UNREACHABLE();
         }
 
-        assert(solve_state.vLen2 <= prev_v_len2);
-
 #ifdef MADRONA_GJK_DEBUG
-        printf("Post solve (%f, %f, %f, %f)\n",
+        printf("Post solve\n");
+        printf("(%f %f %f) %f\n",
+            solve_state.v.x, solve_state.v.y, solve_state.v.z,
+            solve_state.vLen2);
+        printf("(%f, %f, %f, %f)\n",
             solve_state.lambdas[0], solve_state.lambdas[1],
             solve_state.lambdas[2], solve_state.lambdas[3]);
 #endif
+
+        assert(solve_state.vLen2 <= prev_v_len2);
 
         // Compact the simplex to remove unnecessary points that don't support
         // solver_state.v
