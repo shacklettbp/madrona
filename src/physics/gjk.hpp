@@ -1,5 +1,10 @@
 #pragma once
 
+#include <madrona/math.hpp>
+
+#include <array>
+#include <cassert>
+
 #ifdef MADRONA_GJK_DEBUG
 #include <cstdio>
 #endif
@@ -385,7 +390,7 @@ GJKSimplexSolveState gjkSolve4Simplex(
 
 #ifdef MADRONA_GJK_DEBUG
     printf("4 simplex\n");
-    printf("  (%f %f %f)\n  (%f %f %f)\n  (%f %f %f)\n  (%f %f %f)\n",
+    printf("  (%.9g %.9g %.9g)\n  (%.9g %.9g %.9g)\n  (%.9g %.9g %.9g)\n  (%.9g %.9g %.9g)\n",
         s1.x, s1.y, s1.z, s2.x, s2.y, s2.z, s3.x, s3.y, s3.z,
         s4.x, s4.y, s4.z);
 #endif
@@ -639,7 +644,7 @@ inline float GJK<T>::computeDistance2(
         prev_v_len2 = v_len2;
     }
 
-#if MADRONA_GJK_DEBUG
+#ifdef MADRONA_GJK_DEBUG
     printf("Finished %f\n", v_len2);
 #endif
 

@@ -1,9 +1,6 @@
 #include <madrona/geo.hpp>
 
-#include <cassert>
-#include <array>
-
-#define MADRONA_GJK_DEBUG 1
+#define MADRONA_GJK_DEBUG
 #include "gjk.hpp"
 
 namespace madrona::geo {
