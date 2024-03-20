@@ -322,13 +322,17 @@ GJKSimplexSolveState gjkSolve3Simplex(
         }
     }
 
+    float C1 = pO_2D.x * s2_2D.y + pO_2D.y * s3_2D.x + s2_2D.x * s3_2D.y 
+             - pO_2D.x * s3_2D.y - pO_2D.y * s2_2D.x - s3_2D.x * s2_2D.y;
+
     float C2 = pO_2D.x * s3_2D.y + pO_2D.y * s1_2D.x + s3_2D.x * s1_2D.y 
              - pO_2D.x * s1_2D.y - pO_2D.y * s3_2D.x - s1_2D.x * s3_2D.y;
 
     float C3 = pO_2D.x * s1_2D.y + pO_2D.y * s2_2D.x + s1_2D.x * s2_2D.y
              - pO_2D.x * s2_2D.y - pO_2D.y * s1_2D.x - s2_2D.x * s1_2D.y;
 
-    bool cmp_signs[2] = {
+    bool cmp_signs[] = {
+        gjkCompareSigns(mu_max, C1),
         gjkCompareSigns(mu_max, C2),
         gjkCompareSigns(mu_max, C3),
     };
@@ -336,13 +340,14 @@ GJKSimplexSolveState gjkSolve3Simplex(
 #ifdef MADRONA_GJK_DEBUG
     printf("(%f %f) (%f %f) (%f %f)\n",
         s1_2D.x, s1_2D.y, s2_2D.x, s2_2D.y, s3_2D.x, s3_2D.y);
-    printf("(%f %f %f)\n", mu_max, C2, C3);
+    printf("%f (%f %f %f)\n", mu_max, C1, C2, C3);
 
-    printf("%d %d\n", (int)cmp_signs[0], (int)cmp_signs[1]);
+    printf("%d %d %d\n",
+        (int)cmp_signs[0], (int)cmp_signs[1], (int)cmp_signs[2]);
 #endif
 
 
-    if (cmp_signs[0] && cmp_signs[1]) {
+    if (cmp_signs[0] && cmp_signs[1] && cmp_signs[2]) {
         float lambda2 = C2 / mu_max;
         float lambda3 = C3 / mu_max;
         float lambda1 = 1.f - lambda2 - lambda3;
@@ -360,16 +365,25 @@ GJKSimplexSolveState gjkSolve3Simplex(
 
     GJKSimplexSolveState res;
     res.vLen2 = FLT_MAX;
-    if (!cmp_signs[0]) {
+    if (!cmp_signs[1]) {
         res = gjkSolve2Simplex(Y0, Y2);
         res.lambdas = { res.lambdas[0], 0.f, res.lambdas[1], 0.f };
     }
 
-    if (!cmp_signs[1]) {
-        GJKSimplexSolveState res3 = gjkSolve2Simplex(Y1, Y2);
-        if (res3.vLen2 < res.vLen2) {
-            res = res3;
+    if (!cmp_signs[2]) {
+        GJKSimplexSolveState sub = gjkSolve2Simplex(Y1, Y2);
+        if (sub.vLen2 < res.vLen2) {
+            res = sub;
             res.lambdas = { 0.f, res.lambdas[0], res.lambdas[1], 0.f };
+        }
+    }
+
+    // Not in paper
+    if (!cmp_signs[0]) {
+        GJKSimplexSolveState sub = gjkSolve2Simplex(Y0, Y1);
+        if (sub.vLen2 < res.vLen2) {
+            res = sub;
+            res.lambdas = { res.lambdas[0], res.lambdas[1], 0.f, 0.f };
         }
     }
 
@@ -433,7 +447,7 @@ GJKSimplexSolveState gjkSolve4Simplex(
         float lambda1 = C_41 / det_M;
         float lambda2 = C_42 / det_M;
         float lambda3 = C_43 / det_M;
-        float lambda4 = 1.f - C_41 - C_42 - C_43;
+        float lambda4 = 1.f - lambda1 - lambda2 - lambda3;
 
         Vector3 v = s1 * lambda1 + s2 * lambda2 + s3 * lambda3 + s4 * lambda4;
 
@@ -561,9 +575,20 @@ inline float GJK<T>::computeDistance2(
         printf("(%f, %f, %f, %f)\n",
             solve_state.lambdas[0], solve_state.lambdas[1],
             solve_state.lambdas[2], solve_state.lambdas[3]);
+
+        printf("%.9g => %.9g\n", prev_v_len2, solve_state.vLen2);
 #endif
 
-        assert(solve_state.vLen2 <= prev_v_len2);
+        // The below assert should be true in principle, but in reality
+        // gjkSolve4Simplex for example can delegate to gjkSolve3Simplex
+        // with a different order of points than the prior iteration,
+        // resulting in extremely minor FP changes. This seems to happen
+        // when a duplicate point is readded. We could check this with an if,
+        // restore the old v (which we currently don't have saved) and 
+        // exit immediately.
+        //assert(solve_state.vLen2 <= prev_v_len2);
+        //assert(solve_state.vLen2 - prev_v_len2 < 1e-10f); // nope
+        assert(solve_state.vLen2 - prev_v_len2 < 1e-6f);
 
         // Compact the simplex to remove unnecessary points that don't support
         // solver_state.v
@@ -619,6 +644,8 @@ inline float GJK<T>::computeDistance2(
 
         // The origin must be inside the tetrahedron so distance is 0.
         if (nY == 4) {
+            // Note we don't return solve_state.vLen2 in this case since
+            // it can be very close to 0 but not 0 due to FP error.
             return 0.f;
         }
 

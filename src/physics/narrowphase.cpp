@@ -1332,9 +1332,18 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
         PROF_START(txfm_hull_ctr, narrowphaseTxfmHullCtrs);
 
         Vector3 hull_origin = b_pos - a_pos;
+
         HullState b_hull_state = makeHullState(MADRONA_GPU_COND(mwgpu_lane_id,)
             b_he_mesh, hull_origin, b_rot, b_scale,
             txfm_vertex_buffer, txfm_face_buffer);
+
+        printf("\n(%f %f %f)\n", hull_origin.x, hull_origin.y, hull_origin.z);
+        for (CountT i = 0; i < b_hull_state.mesh.numVertices; i++) {
+            printf("(%f %f %f)\n",
+                b_hull_state.mesh.vertices[i].x,
+                b_hull_state.mesh.vertices[i].y,
+                b_hull_state.mesh.vertices[i].z);
+        }
 
         MADRONA_GPU_COND(__syncwarp(mwGPU::allActive));
 
@@ -1362,9 +1371,9 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
             float depth = sphere_radius - to_hull_len;
             Vector3 normal = hull_closest_pt / to_hull_len;
 
-            sphere_contact.normal = normal;
+            sphere_contact.normal = -normal;
             sphere_contact.pt = a_pos + normal * sphere_radius;
-            sphere_contact.depth = depth;
+            sphere_contact.depth = -depth;
         }
 
         NarrowphaseResult result;

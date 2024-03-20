@@ -16,27 +16,33 @@ using namespace madrona;
 using namespace madrona::geo;
 using namespace madrona::math;
 
-TEST(GJK, Solve4Simplex1)
+TEST(GJK, Solve4SimplexDuplicatePoint)
 {
     Vector3 Y[4] {
-        {1.1680119, 2.82056189, 0.699643314},
-        {0.189007372, -0.435441136, -0.700356662},
-        {-1.34322929, 0.0252667665, 0.699643314},
-        {1.1680119, 2.82056189, -0.700356662},
+        {0.814353108, 0.195752025, -0.698764443},
+        {-0.784147143, 0.126484752, 0.701235533},
+        {-0.784147143, 0.126484752, -0.698764443},
+        {-0.784147143, 0.126484752, 0.701235533},
     };
 
-    gjkSolve4Simplex(Y[3], Y[2], Y[1], Y[0]);
-    
+    auto solve3 = gjkSolve3Simplex(Y[0], Y[1], Y[2]);
+    auto solve4 = gjkSolve4Simplex(Y[0], Y[1], Y[2], Y[3]);
+
+    EXPECT_LE(solve4.vLen2 - solve3.vLen2, 1e-5f);
 }
 
-TEST(GJK, Solve4Simplex2)
+TEST(GJK, Solve4SimplexAroundOrigin)
 {
     Vector3 Y[4] {
-        {0.114758693, -0.194909215, 0.699410498},
-        {0.114758693, -0.194909215, -0.700589478},
-        {0.114758693, -0.194909215, 0.699410498},
-        {-1.32535255, 2.88504028, -0.700589478},
+        {0.793287277, 2.86326122, -0.700307727},
+        {-0.794485092, -0.542466521, 0.699692249},
+        {0.80550468, -0.536717057, -0.700307727},
+        {-0.794485092, -0.542466521, -0.700307727},
     };
 
-    gjkSolve4Simplex(Y[0], Y[1], Y[2], Y[3]);
+    auto solve_state = gjkSolve4Simplex(Y[0], Y[1], Y[2], Y[3]);
+    EXPECT_LT(fabsf(solve_state.v.x), 1e-5f);
+    EXPECT_LT(fabsf(solve_state.v.y), 1e-5f);
+    EXPECT_LT(fabsf(solve_state.v.z), 1e-5f);
+    EXPECT_LT(solve_state.vLen2, 1e-5f);
 }
