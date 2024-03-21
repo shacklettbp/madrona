@@ -1355,7 +1355,30 @@ MADRONA_ALWAYS_INLINE static inline NarrowphaseResult narrowphaseDispatch(
 
         if (hull_dist2 == 0.f) {
             // Need to do SAT
-            assert(false);
+            float max_sep = -FLT_MAX;
+            Vector3 sep_normal;
+            const CountT num_faces = b_hull_state.mesh.numFaces;
+            for (CountT i = 0; i < num_faces; i++) {
+                Plane plane = b_hull_state.mesh.facePlanes[i];
+                // hull has already been moved so sphere is at origin
+                float face_dist = -plane.d;
+
+                if (face_dist > max_sep) {
+                    max_sep = face_dist;
+                    sep_normal = plane.normal;
+                }
+            }
+
+            // Discrepancy between SAT and GJK
+            if (max_sep > 0.f) {
+                assert(max_sep < 1e-5f);
+                NarrowphaseResult result;
+                result.type = ContactType::None;
+                return result;
+            }
+            sphere_contact.normal = sep_normal;
+            sphere_contact.pt = a_pos + sep_normal * sphere_radius;
+            sphere_contact.depth = -max_sep;
         } else {
             float to_hull_len = sqrtf(hull_dist2);
 
