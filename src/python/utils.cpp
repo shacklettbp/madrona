@@ -38,14 +38,18 @@ struct TrainInterface::Impl {
 
     TrainStepInputInterface inputs;
     TrainStepOutputInterface outputs;
+    Optional<TrainCheckpointingInterface> checkpointing;
 
-    static inline Impl * init(TrainStepInputInterface inputs,
-                              TrainStepOutputInterface outputs);
+    static inline Impl * init(
+        TrainStepInputInterface inputs,
+        TrainStepOutputInterface outputs,
+        Optional<TrainCheckpointingInterface> checkpointing);
 };
 
 TrainInterface::Impl * TrainInterface::Impl::init(
     TrainStepInputInterface inputs,
-    TrainStepOutputInterface outputs)
+    TrainStepOutputInterface outputs,
+    Optional<TrainCheckpointingInterface> checkpointing)
 {
     CountT num_total_name_chars = 0;
     CountT num_total_dims = 0;
@@ -72,6 +76,11 @@ TrainInterface::Impl * TrainInterface::Impl::init(
     num_total_dims += outputs.dones.dimensions.size();
     sumStorageRequirements(outputs.stats);
     sumStorageRequirements(outputs.pbt);
+
+    if (checkpointing.has_value()) {
+        num_total_dims += checkpointing->triggerLoad.dimensions.size();
+        num_total_dims += checkpointing->checkpointData.dimensions.size();
+    }
 
     HeapArray<char> name_buffer(num_total_name_chars);
     HeapArray<int64_t> dims_buffer(num_total_dims);
@@ -146,6 +155,17 @@ TrainInterface::Impl * TrainInterface::Impl::init(
         .pbt = makeOwnedNamedInterfaces(outputs.pbt),
     };
 
+    Optional<TrainCheckpointingInterface> owned_checkpointing =
+        Optional<TrainCheckpointingInterface>::none();
+
+    if (checkpointing.has_value()) {
+        owned_checkpointing = TrainCheckpointingInterface {
+            .triggerLoad = makeOwnedInterface(checkpointing->triggerLoad),
+            .checkpointData = makeOwnedInterface(
+                checkpointing->checkpointData),
+        };
+    }
+
     assert(cur_name_ptr == name_buffer.data() + name_buffer.size());
     assert(cur_dims_ptr == dims_buffer.data() + dims_buffer.size());
     assert(cur_iface_ptr == named_interfaces.data() + named_interfaces.size());
@@ -156,13 +176,15 @@ TrainInterface::Impl * TrainInterface::Impl::init(
         .namedInterfaces = std::move(named_interfaces),
         .inputs = owned_inputs,
         .outputs = owned_outputs,
+        .checkpointing = std::move(owned_checkpointing),
     };
 }
 
 TrainInterface::TrainInterface(
         TrainStepInputInterface step_inputs,
-        TrainStepOutputInterface step_outputs)
-    : impl_(Impl::init(step_inputs, step_outputs))
+        TrainStepOutputInterface step_outputs,
+        Optional<TrainCheckpointingInterface> checkpointing)
+    : impl_(Impl::init(step_inputs, step_outputs, std::move(checkpointing)))
 {}
     
 TrainInterface::TrainInterface(TrainInterface &&) = default;
@@ -176,6 +198,11 @@ TrainStepInputInterface TrainInterface::stepInputs() const
 TrainStepOutputInterface TrainInterface::stepOutputs() const
 {
     return impl_->outputs;
+}
+
+Optional<TrainCheckpointingInterface> TrainInterface::checkpointing() const
+{
+    return impl_->checkpointing;
 }
 
 Tensor::Printer::Printer(Printer &&o)
