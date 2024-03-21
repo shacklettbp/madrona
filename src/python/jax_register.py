@@ -282,7 +282,7 @@ if ckpt_iface != None:
             get_ckpts_custom_call_name,
             backend_config=sim_encode,
             operands=[token],
-            operand_layouts=input_layouts,
+            operand_layouts=[()],
             result_types=result_types,
             result_layouts=result_layouts,
             has_side_effect=True,
