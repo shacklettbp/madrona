@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cassert>
+#include <cfloat>
 
 #ifdef MADRONA_GJK_DEBUG
 #include <cstdio>
