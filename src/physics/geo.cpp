@@ -1,6 +1,6 @@
 #include <madrona/geo.hpp>
 
-#define MADRONA_GJK_DEBUG
+//#define MADRONA_GJK_DEBUG
 #include "gjk.hpp"
 
 namespace madrona::geo {
