@@ -225,8 +225,8 @@ static HullState makeHullState(
 static inline float getDistanceFromPlane(
     const Plane &plane, const Vector3 &a)
 {
-    float adotn = a.dot(plane.normal);
-    return (adotn - plane.d);
+    float adotn = dot(a, plane.normal);
+    return adotn - plane.d;
 }
 
 // Get intersection on plane of the line passing through 2 points
@@ -307,7 +307,7 @@ static float getHullDistanceFromPlane(
 
     auto computeVertexDotN = [&h, &plane](CountT vert_idx) {
         Vector3 vertex = h.mesh.vertices[vert_idx];
-        return plane.normal.dot(vertex);
+        return dot(vertex, plane.normal);
     };
 
     const CountT num_verts = (CountT)h.mesh.numVertices;
@@ -959,6 +959,8 @@ MADRONA_ALWAYS_INLINE static inline Manifold createFaceContact(
         } while (hedge_idx != start_hedge_idx);
     }
 
+    assert(num_clipped_vertices > 0);
+
     // clipping_input has the result due to the final swap
 
     // Filter clipping_input to ones below ref_plane and save penetration depth
@@ -1556,8 +1558,13 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
 
-        assert(manifold.numContactPoints > 0);
-        addManifoldContacts(ctx, manifold, ref_loc, other_loc);
+        // Sadly there are cases where two objects are just barely
+        // touching and post contact clipping all the clipped contacts
+        // are just barely separated due to FP32. For now just don't
+        // make a Contact in this situation.
+        if (manifold.numContactPoints > 0) {
+            addManifoldContacts(ctx, manifold, ref_loc, other_loc);
+        }
     } break;
     case ContactType::SATFace: {
         const Vector3 *ref_vertices;
@@ -1633,8 +1640,13 @@ MADRONA_ALWAYS_INLINE static inline void generateContacts(
             { 0, 0, 0, },
             { 1, 0, 0, 0 });
 
-        assert(manifold.numContactPoints > 0);
-        addManifoldContacts(ctx, manifold, ref_loc, other_loc);
+        // Sadly there are cases where two objects are just barely
+        // touching and post contact clipping all the clipped contacts
+        // are just barely separated due to FP32. For now just don't
+        // make a Contact in this situation.
+        if (manifold.numContactPoints > 0) {
+            addManifoldContacts(ctx, manifold, ref_loc, other_loc);
+        }
     } break;
     case ContactType::SATEdge: {
         // A is always reference
