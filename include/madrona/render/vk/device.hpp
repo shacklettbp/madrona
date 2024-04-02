@@ -22,10 +22,13 @@ public:
 
     uint32_t maxNumLayersPerImage;
 
+    float timestampPeriod;
+
     Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
            uint32_t num_gfx_queues, uint32_t num_compute_queues,
            uint32_t num_transfer_queues, bool rt_available,
            uint32_t max_num_layers_per_img,
+           float timestamp_period,
            VkPhysicalDevice phy_dev, VkDevice dev,
            DeviceDispatch &&dispatch_table);
 

@@ -839,6 +839,9 @@ Device * Backend::makeDevice(
     VkPhysicalDeviceProperties physical_device_properties;
     dt.getPhysicalDeviceProperties(phy, &physical_device_properties);
 
+    uint32_t timestamp_period = 
+        physical_device_properties.limits.timestampPeriod;
+
     return new Device(
         qf_choices.gfxQF,
         qf_choices.computeQF,
@@ -848,6 +851,7 @@ Device * Backend::makeDevice(
         num_transfer_queues,
         supports_rt,
         physical_device_properties.limits.maxImageArrayLayers,
+        physical_device_properties.limits.timestampPeriod,
         phy,
         dev,
         DeviceDispatch(dev, get_dev_addr,

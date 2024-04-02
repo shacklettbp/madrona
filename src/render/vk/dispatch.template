@@ -106,6 +106,7 @@ device:
     - vkGetSemaphoreFdKHR
 - vkCmdBeginRenderingKHR
 - vkCmdEndRenderingKHR
+- vkCmdWriteTimestamp
 
 instance:
 - vkEnumeratePhysicalDevices

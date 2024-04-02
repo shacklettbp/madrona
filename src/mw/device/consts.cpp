@@ -78,6 +78,8 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         /* .numMeshBVHs =  */                  num_mesh_bvhs,
         /* .raycastOutputResolution =  */      raycast_output_resolution,
     };
+    
+    printf("Passed in resolution %d\n", raycast_output_resolution);
 
     *job_system_buffer_size = total_bytes;
 }
