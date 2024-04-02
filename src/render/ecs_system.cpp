@@ -7,6 +7,7 @@
 
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/const.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
 #endif
 
 namespace madrona::render::RenderingSystem {
