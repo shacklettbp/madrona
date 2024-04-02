@@ -21,6 +21,7 @@ struct GPUImplConsts {
     void *hostPrintAddr;
     void *tmpAllocatorAddr;
     void *deviceTracingAddr;
+    void *meshBVHsAddr;
     uint32_t numWorldDataBytes;
     uint32_t numWorlds;
     uint32_t jobGridsOffset;
@@ -28,6 +29,8 @@ struct GPUImplConsts {
     uint32_t maxJobsPerGrid;
     uint32_t sharedJobTrackerOffset;
     uint32_t userJobTrackerOffset;
+    uint32_t numMeshBVHs;
+    uint32_t raycastOutputResolution;
 
     static inline GPUImplConsts & get();
 };

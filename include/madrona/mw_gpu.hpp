@@ -45,6 +45,11 @@ struct StateConfig {
 
     // Number of exported ECS components
     uint32_t numExportedBuffers;
+
+    // This is required if the BVH is to be invoked.
+    imp::ImportedAssets::GPUGeometryData *geometryData;
+
+    uint32_t raycastOutputResolution;
 };
 
 struct CompileConfig {
@@ -103,11 +108,14 @@ public:
     // taskgraph_ids one after the other. Typically this correspond to
     // one step across all worlds, or a subset of the logic for a step.
     template <EnumType EnumT>
-    inline MWCudaLaunchGraph buildLaunchGraph(EnumT taskgraph_id);
-    inline MWCudaLaunchGraph buildLaunchGraph(uint32_t taskgraph_id);
-    MWCudaLaunchGraph buildLaunchGraph(Span<const uint32_t> taskgraph_ids);
+    inline MWCudaLaunchGraph buildLaunchGraph(EnumT taskgraph_id,
+                                              bool enable_raytracing);
+    inline MWCudaLaunchGraph buildLaunchGraph(uint32_t taskgraph_id,
+                                              bool enable_raytracing);
+    MWCudaLaunchGraph buildLaunchGraph(Span<const uint32_t> taskgraph_ids,
+                                       bool enable_raytracing);
     // Helper to build a a launch graph that launches all task graphs
-    MWCudaLaunchGraph buildLaunchGraphAllTaskGraphs();
+    MWCudaLaunchGraph buildLaunchGraphAllTaskGraphs(bool enable_raytracing);
 
     // Runs the pre-built CUDA graph stored in launch_graph synchronously
     void run(MWCudaLaunchGraph &launch_graph);

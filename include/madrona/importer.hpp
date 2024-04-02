@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madrona/mesh_bvh.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/math.hpp>
 #include <madrona/span.hpp>
@@ -13,9 +14,11 @@ struct SourceMesh {
     math::Vector3 *normals;
     math::Vector4 *tangentAndSigns;
     math::Vector2 *uvs;
+
     uint32_t *indices;
     uint32_t *faceCounts;
     uint32_t *faceMaterials;
+
     uint32_t numVertices;
     uint32_t numFaces;
     uint32_t materialIDX;
@@ -23,6 +26,7 @@ struct SourceMesh {
 
 struct SourceObject {
     Span<SourceMesh> meshes;
+    uint32_t bvhIndex;
 };
 
 struct SourceTexture {
@@ -49,6 +53,20 @@ struct SourceInstance {
 };
 
 struct ImportedAssets {
+    struct GPUGeometryData {
+        render::MeshBVH::Node *nodes;
+        uint32_t numNodes;
+
+        render::MeshBVH::LeafGeometry *leafGeos;
+        uint32_t numLeaves;
+
+        math::Vector3 *vertices;
+        uint32_t numVerts;
+
+        render::MeshBVH *meshBVHs;
+        uint32_t numBVHs;
+    };
+
     struct GeometryData {
         DynArray<DynArray<math::Vector3>> positionArrays;
         DynArray<DynArray<math::Vector3>> normalArrays;
@@ -57,6 +75,7 @@ struct ImportedAssets {
         DynArray<DynArray<uint32_t>> indexArrays;
         DynArray<DynArray<uint32_t>> faceCountArrays;
         DynArray<DynArray<SourceMesh>> meshArrays;
+        DynArray<DynArray<render::MeshBVH>> meshBVHArrays;
     } geoData;
 
     DynArray<SourceObject> objects;
@@ -66,7 +85,12 @@ struct ImportedAssets {
     static Optional<ImportedAssets> importFromDisk(
         Span<const char * const> asset_paths,
         Span<char> err_buf = { nullptr, 0 },
-        bool one_object_per_asset = false);
+        bool one_object_per_asset = false,
+        bool generate_mesh_bvhs = false);
+
+    // Unfinished but provides just enough to support BVH raytracing.
+    static Optional<GPUGeometryData> makeGPUData(
+        const ImportedAssets &assets);
 };
 
 }

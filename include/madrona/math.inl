@@ -1602,7 +1602,7 @@ bool AABB::rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
 
 bool AABB::rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
                          float ray_t_min, float ray_t_max,
-                         float &t_out)
+                         float &hit_t, float &far_t)
 {
     // Ray tracing gems II, chapter 2
     
@@ -1628,9 +1628,13 @@ bool AABB::rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
     float t_box_max = min_component(t_maxes);
 
     if (t_box_min <= t_box_max) {
-        t_out = t_box_min;
+        hit_t = t_box_min;
+        far_t = t_box_max;
         return true;
     } else {
+        // No intersection
+        hit_t = FLT_MAX;
+        far_t = FLT_MAX;
         return false;
     }
 }

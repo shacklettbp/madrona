@@ -7,9 +7,10 @@ using namespace madrona::math;
 
 void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
                              StackAlloc &tmp_alloc,
-                             MeshBVH *out_bvh,
+                             render::MeshBVH *out_bvh,
                              CountT *out_num_bytes)
 {
+#if 0
     using Node = MeshBVH::Node;
     using LeafGeometry = MeshBVH::LeafGeometry;
     using LeafMaterial = MeshBVH::LeafMaterial;
@@ -415,6 +416,9 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
     tmp_alloc.pop(tmp_frame);
 
     return buffer;
+#endif
+
+    return nullptr;
 }
 
 }

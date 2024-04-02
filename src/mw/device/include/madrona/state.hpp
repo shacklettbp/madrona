@@ -59,7 +59,7 @@ public:
     StateManager(uint32_t max_components);
 
     template <typename ComponentT>
-    ComponentID registerComponent();
+    ComponentID registerComponent(uint32_t num_bytes = 0);
 
     template <typename ArchetypeT, typename... MetadataComponentTs>
     ArchetypeID registerArchetype(
@@ -170,6 +170,7 @@ public:
 
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
     inline void archetypeClearNeedsSort(uint32_t archetype_id);
+    inline void archetypeSetNeedsSort(uint32_t archetype_id);
 
     // Included for compatibility with ECSRegistry
     template <typename ArchetypeT, typename ComponentT>

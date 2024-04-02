@@ -1,20 +1,17 @@
+#include <madrona/mesh_bvh.hpp>
 #include <madrona/render/ecs.hpp>
 #include <madrona/components.hpp>
 #include <madrona/context.hpp>
 
 #include "ecs_interop.hpp"
 
+#ifdef MADRONA_GPU_MODE
+#include <madrona/mw_gpu/const.hpp>
+#endif
+
 namespace madrona::render::RenderingSystem {
 using namespace base;
 using namespace math;
-
-struct RenderableArchetype : public Archetype<
-    InstanceData
-> {};
-
-struct RenderCameraArchetype : public Archetype<
-    PerspectiveCameraData
-> {};
 
 struct RenderingSystemState {
     uint32_t *totalNumViews;
@@ -35,7 +32,42 @@ struct RenderingSystemState {
     // Also only used when on the CPU backend
     uint64_t *instanceWorldIDsCPU;
     uint64_t *viewWorldIDsCPU;
+
+    MeshBVH *bvhs;
+    uint32_t numBVHs;
 };
+
+inline uint32_t leftShift3(uint32_t x)
+{
+    if (x == (1 << 10)) {
+        --x;
+    }
+
+    x = (x | (x << 16)) & 0b00000011000000000000000011111111;
+    x = (x | (x << 8)) & 0b00000011000000001111000000001111;
+    x = (x | (x << 4)) & 0b00000011000011000011000011000011;
+    x = (x | (x << 2)) & 0b00001001001001001001001001001001;
+
+    return x;
+}
+
+uint32_t encodeMorton3(const Vector3 &v) {
+    return (leftShift3(*((uint32_t *)&v.z)) << 2) | 
+           (leftShift3(*((uint32_t *)&v.y)) << 1) | 
+            leftShift3(*((uint32_t *)&v.x));
+}
+
+inline void mortonCodeUpdate(Context &ctx,
+                             Entity e,
+                             const Position &pos,
+                             const Renderable &renderable)
+{
+    (void)e;
+
+    // Calculate and set the morton code
+    MortonCode &morton_code = ctx.get<MortonCode>(renderable.renderEntity);
+    morton_code = encodeMorton3(pos);
+}
 
 inline void instanceTransformUpdate(Context &ctx,
                                     Entity e,
@@ -69,6 +101,20 @@ inline void instanceTransformUpdate(Context &ctx,
     data.scale = scale;
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
+
+    // Get the root AABB from the model and translate it to store
+    // it in the TLBVHNode structure.
+
+#ifdef MADRONA_GPU_MODE
+    render::MeshBVH *bvh = (render::MeshBVH *)
+        mwGPU::GPUImplConsts::get().meshBVHsAddr +
+        obj_id.idx;
+
+    math::AABB aabb = bvh->rootAABB.applyTRS(
+            data.position, data.rotation, data.scale);
+
+    ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
+#endif
 }
 
 uint32_t * getVoxelPtr(Context &ctx)
@@ -125,20 +171,68 @@ inline void exportCountsGPU(Context &ctx,
 
     auto state_mgr = mwGPU::getStateManager();
 
-    *sys_state.totalNumViews = state_mgr->getArchetypeNumRows<
-        RenderCameraArchetype>();
-    *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
-        RenderableArchetype>();
+    if (sys_state.totalNumViews) {
+        *sys_state.totalNumViews = state_mgr->getArchetypeNumRows<
+            RenderCameraArchetype>();
+        *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
+            RenderableArchetype>();
+    }
+
+#if 0
+    uint32_t *morton_codes = state_mgr->getArchetypeComponent<
+        RenderableArchetype, MortonCode>();
+    
+    WorldID *world_ids = state_mgr->getArchetypeComponent<
+        RenderableArchetype, WorldID>();
+
+    uint32_t current_world = 0;
+    uint32_t current_world_offset = 0;
+
+    for (int i = 0; 
+         i < state_mgr->getArchetypeNumRows<RenderableArchetype>();
+         ++i) {
+        if (world_ids[i].idx != current_world) {
+            current_world = world_ids[i].idx;
+            current_world_offset = i;
+        }
+
+        uint32_t code = morton_codes[i];
+        printf(USHORT_TO_BINARY_PATTERN " ", USHORT_TO_BINARY((code>>16)));
+        printf(USHORT_TO_BINARY_PATTERN " \t", USHORT_TO_BINARY((code)));
+
+        printf("(Leaf node %d)\t %d: (%d)\n", 
+                i - current_world_offset, 
+                world_ids[i].idx, 
+                morton_codes[i]);
+    }
+#endif
 }
 #endif
 
 void registerTypes(ECSRegistry &registry,
                    const RenderECSBridge *bridge)
 {
+    printf("Printing from rendering system register types\n");
+
+#ifdef MADRONA_GPU_MODE
+    uint32_t render_output_res = 
+        mwGPU::GPUImplConsts::get().raycastOutputResolution;
+    uint32_t render_output_bytes = render_output_res * render_output_res * 3;
+#else
+    uint32_t render_output_bytes = 4;
+#endif
+
     registry.registerComponent<RenderCamera>();
     registry.registerComponent<Renderable>();
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
+    registry.registerComponent<MortonCode>();
+    registry.registerComponent<RenderOutputBuffer>(render_output_bytes);
+
+    registry.registerComponent<RenderOutputRef>();
+    registry.registerComponent<TLBVHNode>();
+
+    registry.registerArchetype<RaycastOutputArchetype>();
 
 
     // Pointers get set in RenderingSystem::init
@@ -176,6 +270,14 @@ void registerTypes(ECSRegistry &registry,
         state_mgr->setArchetypeComponent<RenderCameraArchetype, PerspectiveCameraData>(
             bridge->views);
     }
+
+#if 0
+    auto *state_mgr = mwGPU::getStateManager();
+    auto instance_ptr = (void *)state_mgr->getArchetypeComponent<
+        RenderableArchetype, InstanceData>();
+
+    printf("From rendering system init, instance_ptr=%p\n", instance_ptr);
+#endif
 #else
     (void)bridge;
 #endif
@@ -208,14 +310,27 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             RenderCamera
         >>({instance_setup});
 
+    auto mortoncode_update = builder.addToGraph<ParallelForNode<Context,
+         mortonCodeUpdate,
+            Entity,
+            Position,
+            Renderable
+        >>({viewdata_update});
+
+    (void)mortoncode_update;
+
 #ifdef MADRONA_GPU_MODE
     // Need to sort the instances, as well as the views
-    auto sort_instances = 
+    auto sort_instances_by_morton =
+        builder.addToGraph<SortArchetypeNode<RenderableArchetype, MortonCode>>(
+            {mortoncode_update});
+
+    auto sort_instances_by_world = 
         builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
-            {viewdata_update});
+            {sort_instances_by_morton});
 
     auto post_instance_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_instances});
+        builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_world});
 
     auto sort_views = 
         builder.addToGraph<SortArchetypeNode<RenderCameraArchetype, WorldID>>(
@@ -240,35 +355,36 @@ void init(Context &ctx,
 {
     auto &system_state = ctx.singleton<RenderingSystemState>();
 
-    // This is where the renderer will read out the totals
-    system_state.totalNumViews = bridge->totalNumViews;
-    system_state.totalNumInstances = bridge->totalNumInstances;
+    if (bridge) {
+        // This is where the renderer will read out the totals
+        system_state.totalNumViews = bridge->totalNumViews;
+        system_state.totalNumInstances = bridge->totalNumInstances;
 
 #if !defined(MADRONA_GPU_MODE)
-    // This is just an atomic counter (final value will be moved to
-    // the totalNumViews/Instances variables).
-    system_state.totalNumViewsCPU = bridge->totalNumViewsCPUInc;
-    system_state.totalNumInstancesCPU = bridge->totalNumInstancesCPUInc;
+        // This is just an atomic counter (final value will be moved to
+        // the totalNumViews/Instances variables).
+        system_state.totalNumViewsCPU = bridge->totalNumViewsCPUInc;
+        system_state.totalNumInstancesCPU = bridge->totalNumInstancesCPUInc;
 
-    // This is only relevant for the CPU backend
-    system_state.instancesCPU = bridge->instances;
-    system_state.viewsCPU = bridge->views;
+        // This is only relevant for the CPU backend
+        system_state.instancesCPU = bridge->instances;
+        system_state.viewsCPU = bridge->views;
 
-    system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
-    system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
+        system_state.instanceWorldIDsCPU = bridge->instancesWorldIDs;
+        system_state.viewWorldIDsCPU = bridge->viewsWorldIDs;
 #endif
 
-    system_state.aspectRatio = 
-        (float)bridge->renderWidth / (float)bridge->renderHeight;
+        system_state.aspectRatio = 
+            (float)bridge->renderWidth / (float)bridge->renderHeight;
 
-    system_state.voxels = bridge->voxels;
+        system_state.voxels = bridge->voxels;
+    }
 }
 
 void makeEntityRenderable(Context &ctx,
                           Entity e)
 {
     Entity render_entity = ctx.makeEntity<RenderableArchetype>();
-
     ctx.get<Renderable>(e).renderEntity = render_entity;
 }
 
@@ -281,7 +397,9 @@ void attachEntityToView(Context &ctx,
     float fov_scale = 1.0f / tanf(toRadians(vfov_degrees * 0.5f));
 
     Entity camera_entity = ctx.makeEntity<RenderCameraArchetype>();
-    ctx.get<RenderCamera>(e) = { camera_entity, fov_scale, z_near, camera_offset };
+    ctx.get<RenderCamera>(e) = { 
+        camera_entity, fov_scale, z_near, camera_offset 
+    };
 
     PerspectiveCameraData &cam_data = 
         ctx.get<PerspectiveCameraData>(camera_entity);
@@ -299,6 +417,13 @@ void attachEntityToView(Context &ctx,
         ctx.worldID().idx,
         0 // Padding
     };
+
+    Entity render_output_entity = ctx.makeEntity<RaycastOutputArchetype>();
+
+    RenderOutputRef &ref = ctx.get<RenderOutputRef>(camera_entity);
+    ref.outputEntity = render_output_entity;
+
+    printf("attached entity to output %d\n", render_output_entity.id);
 }
 
 void cleanupViewingEntity(Context &ctx,

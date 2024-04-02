@@ -5,12 +5,15 @@
 namespace madrona {
 
 template <typename ComponentT>
-ComponentID StateManager::registerComponent()
+ComponentID StateManager::registerComponent(uint32_t num_bytes)
 {
     uint32_t id = TypeTracker::registerType<ComponentT>(
         &StateManager::num_components_);
 
-    registerComponent(id, alignof(ComponentT), sizeof(ComponentT));
+    uint32_t component_size = (num_bytes == 0) ?
+        sizeof(ComponentT) : num_bytes;
+
+    registerComponent(id, alignof(ComponentT), component_size);
 
     return ComponentID {
         id,
@@ -477,6 +480,11 @@ bool StateManager::archetypeNeedsSort(uint32_t archetype_id) const
 void StateManager::archetypeClearNeedsSort(uint32_t archetype_id)
 {
     archetypes_[archetype_id]->needsSort = false;
+}
+
+void StateManager::archetypeSetNeedsSort(uint32_t archetype_id)
+{
+    archetypes_[archetype_id]->needsSort = true;
 }
 
 template <typename ArchetypeT, typename ComponentT>

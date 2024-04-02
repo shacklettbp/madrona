@@ -93,10 +93,20 @@ public:
         n_ = 0;
     }
 
-    void release()
+    T * release(bool retrieve_ptr = false)
     {
-        clear();
-        alloc_.dealloc(ptr_);
+        if (retrieve_ptr) {
+            T *ptr = ptr_;
+            ptr_ = nullptr;
+            return ptr;
+        } else {
+            clear();
+            alloc_.dealloc(ptr_);
+
+            ptr_ = nullptr;
+
+            return nullptr;
+        }
     }
 
     void set_min_capacity(CountT capacity)

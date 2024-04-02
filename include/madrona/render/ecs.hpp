@@ -1,7 +1,7 @@
 #pragma once
 
-#include <madrona/taskgraph_builder.hpp>
 #include <madrona/math.hpp>
+#include <madrona/taskgraph_builder.hpp>
 
 namespace madrona::render {
 
@@ -20,6 +20,74 @@ struct RenderCamera {
 struct Renderable {
     Entity renderEntity;
 };
+
+
+
+
+// TODO: Make sure to move this to private headers which can be
+// included by the device code for the BVH.
+
+// For private usage - not to be used by user.
+using MortonCode = uint32_t;
+
+// For private usage - not to be used by user.
+struct alignas(16) PerspectiveCameraData {
+    math::Vector3 position;
+    math::Quat rotation;
+    float xScale;
+    float yScale;
+    float zNear;
+    int32_t worldIDX;
+    uint32_t pad;
+};
+
+// For private usage - not to be used by user.
+struct alignas(16) InstanceData {
+    math::Vector3 position;
+    math::Quat rotation;
+    math::Diag3x3 scale;
+    int32_t objectID;
+    int32_t worldIDX;
+};
+
+// This contains the actual render output
+struct RenderOutputBuffer {
+    char buffer[1];
+};
+
+// Reference to an output
+struct RenderOutputRef {
+    Entity outputEntity;
+};
+
+// Top level acceleration structure node
+struct TLBVHNode {
+    math::AABB aabb;
+};
+
+// For private usage - not to be used by user.
+struct RenderableArchetype : public Archetype<
+    InstanceData,
+
+    // For BVH support, we need to sort these not just be world ID,
+    // but first by morton code too.
+    MortonCode,
+
+    TLBVHNode
+> {};
+
+// For private usage - not to be used by user.
+struct RenderCameraArchetype : public Archetype<
+    PerspectiveCameraData,
+    RenderOutputRef
+> {};
+
+// This is an unsorted archetype with a runtime-sized component
+struct RaycastOutputArchetype : public Archetype<
+    RenderOutputBuffer
+> {};
+
+
 
 struct RenderECSBridge;
 

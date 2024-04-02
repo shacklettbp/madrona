@@ -15,7 +15,10 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     uint32_t world_data_alignment,
     uint32_t num_taskgraphs,
     madrona::mwGPU::GPUImplConsts *out_constants,
-    size_t *job_system_buffer_size)
+    size_t *job_system_buffer_size,
+    void *mesh_bvhs,
+    uint32_t num_mesh_bvhs,
+    uint32_t raycast_output_resolution)
 {
     using namespace madrona;
     using namespace madrona::mwGPU;
@@ -64,6 +67,7 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         /* .hostPrintAddr = */                 (void *)host_print_offset,
         /* .tmpAllocatorAddr */                (void *)tmp_allocator_offset,
         /* .deviceTracingAddr = */             (void *)device_tracing_offset,
+        /* .meshBVHsAddr = */                  (void *)mesh_bvhs,
         /* .numWorldDataBytes = */             num_world_data_bytes,
         /* .numWorlds = */                     num_worlds,
         /* .jobGridsOffset = */                (uint32_t)0,
@@ -71,6 +75,8 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         /* .maxJobsPerGrid = */                0,
         /* .sharedJobTrackerOffset = */        (uint32_t)0,
         /* .userJobTrackerOffset = */          (uint32_t)0,
+        /* .numMeshBVHs =  */                  num_mesh_bvhs,
+        /* .raycastOutputResolution =  */      raycast_output_resolution,
     };
 
     *job_system_buffer_size = total_bytes;

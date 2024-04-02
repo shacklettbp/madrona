@@ -102,7 +102,7 @@ public:
 #endif
 
     template <typename ComponentT>
-    ComponentID registerComponent();
+    ComponentID registerComponent(uint32_t num_bytes = 0);
 
     template <typename ArchetypeT, typename... MetadataComponentTs>
     ArchetypeID registerArchetype(

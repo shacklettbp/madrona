@@ -3,9 +3,9 @@
 namespace madrona {
 
 template <typename ComponentT>
-void ECSRegistry::registerComponent()
+void ECSRegistry::registerComponent(uint32_t num_bytes)
 {
-    state_mgr_->registerComponent<ComponentT>();
+    state_mgr_->registerComponent<ComponentT>(num_bytes);
 }
 
 template <typename ArchetypeT>

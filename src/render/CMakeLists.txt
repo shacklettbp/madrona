@@ -12,6 +12,11 @@ endif ()
 
 add_library(madrona_rendering_system STATIC
     ${MADRONA_INC_DIR}/render/ecs.hpp ecs_interop.hpp ecs_system.cpp
+    ${MADRONA_INC_DIR}/mesh_bvh.hpp 
+    ${MADRONA_INC_DIR}/mesh_bvh_uncompressed.hpp
+    ${MADRONA_INC_DIR}/mesh_bvh_uncompressed.inl
+    ${MADRONA_INC_DIR}/mesh_bvh_compressed.hpp
+    ${MADRONA_INC_DIR}/mesh_bvh_compressed.inl
 )
 
 target_link_libraries(madrona_rendering_system PRIVATE

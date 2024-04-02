@@ -48,7 +48,7 @@ void EntityStore::setRow(Entity e, uint32_t row)
 }
 
 template <typename ComponentT>
-ComponentID StateManager::registerComponent()
+ComponentID StateManager::registerComponent(uint32_t num_bytes)
 {
 #ifdef MADRONA_MW_MODE
     std::lock_guard lock(register_lock_);
@@ -67,8 +67,11 @@ ComponentID StateManager::registerComponent()
 
     uint32_t id = TypeTracker::typeID<ComponentT>();
 
+    uint32_t component_size = (num_bytes == 0) ?
+        sizeof(ComponentT) : num_bytes;
+
     registerComponent(id, std::alignment_of_v<ComponentT>,
-                      sizeof(ComponentT));
+                      component_size);
 
     return ComponentID {
         id,

@@ -1,3 +1,6 @@
+set(embree_DIR ~/Development/embree/lib/cmake/embree-4.3.1)
+find_package(embree 4 REQUIRED)
+
 add_library(madrona_json STATIC
     ${MADRONA_INC_DIR}/json.hpp json.cpp
 )
@@ -13,6 +16,7 @@ set(IMPORTER_SOURCES
     ${MADRONA_INC_DIR}/importer.hpp importer.cpp
     gltf.hpp gltf.cpp
     obj.hpp obj.cpp
+    embree.hpp embree.cpp
 )
 
 if (MADRONA_USD_SUPPORT)
@@ -30,7 +34,13 @@ target_link_libraries(madrona_importer PRIVATE
     madrona_json
     meshoptimizer
     fast_float
+    embree
 )
+
+if (TARGET madrona_cuda)
+    target_link_libraries(madrona_importer PRIVATE
+        madrona_cuda)
+endif()
 
 if (MADRONA_USD_SUPPORT)
     target_link_libraries(madrona_importer PRIVATE

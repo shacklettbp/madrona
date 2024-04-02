@@ -32,6 +32,7 @@ using namespace madrona;
 #include "device/include/madrona/memory.hpp"
 #include "device/include/madrona/mw_gpu/host_print.hpp"
 #include "device/include/madrona/mw_gpu/tracing.hpp"
+#include "device/include/madrona/bvh.hpp"
 
 namespace madrona::mwGPU {
 
@@ -290,6 +291,46 @@ struct MegakernelConfig {
     uint32_t numSMs;
 };
 
+struct TimingData {
+    float totalTime;
+    float buildTimeRatio;
+    float traceTimeRatio;
+};
+
+struct BVHKernels {
+    uint32_t numSMs;
+    CUmodule mod;
+
+    // Initializes BVH internal data
+    CUfunction init;
+
+    // Allocates internal nodes
+    CUfunction allocInternalNodes;
+
+    // Entry point for creating the initial tree
+    CUfunction buildFast;
+
+    // Entry point for optimizing the initial tree
+    CUfunction optFast;
+
+    // Debugging function
+    CUfunction debug;
+
+    // Raycasts
+    CUfunction raycast;
+
+    // Walks up the tree and constructs AABBs from the LBVH
+    CUfunction constructAABBs;
+
+    CUevent startBuildEvent;
+    CUevent startTraceEvent;
+    CUevent stopEvent;
+
+    std::vector<TimingData> recordedTimings;
+
+    mwGPU::madrona::KernelTimingInfo *timingInfo;
+};
+
 struct GPUKernels {
     CUmodule mod;
     HeapArray<CUfunction> megakernels;
@@ -299,6 +340,7 @@ struct GPUKernels {
     CUfunction initTasks;
     CUfunction queueUserInit;
     CUfunction queueUserRun;
+    CUfunction initBVHParams;
 };
 
 struct MegakernelCache {
@@ -331,6 +373,7 @@ struct GPUEngineState {
 
 struct MWCudaLaunchGraph::Impl {
     CUgraphExec runGraph;
+    bool enableRaytracing;
 };
 
 struct MWCudaExecutor::Impl {
@@ -338,6 +381,13 @@ struct MWCudaExecutor::Impl {
     CUmodule cuModule;
     GPUEngineState engineState; 
     TaskGraphsState taskGraphsState;
+    bool enableRaycasting;
+    BVHKernels bvhKernels;
+
+    uint32_t numWorlds;
+    uint32_t numVertices;
+    uint32_t renderOutputResolution;
+    uint32_t sharedMemPerSM;
 };
 
 static void getUserEntries(const char *entry_class, CUmodule mod,
@@ -910,6 +960,202 @@ static __attribute__((always_inline)) inline void dispatch(
     };
 }
 
+// We still want to have the same compiler flags as passed to the megakernel
+static BVHKernels buildBVHKernels(const CompileConfig &cfg,
+                                  int32_t num_sms,
+                                  std::pair<int, int> cuda_arch)
+{
+    using namespace std;
+
+    array bvh_srcs = {
+        MADRONA_MW_GPU_BVH_INTERNAL_CPP
+    };
+
+    const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
+
+    // Build architecture string for this GPU
+    string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
+        to_string(cuda_arch.second);
+
+    std::string linker_arch_str =
+        std::string("-arch=") + gpu_arch_str;
+
+    DynArray<const char *> linker_flags {
+        linker_arch_str.c_str(),
+        "-ftz=1",
+        "-prec-div=0",
+        "-prec-sqrt=0",
+        "-fma=1",
+        // "-optimize-unused-variables",
+        "-lto"
+    };
+
+    if (force_debug_env != nullptr && force_debug_env[0] == '1') {
+        linker_flags.push_back("-g");
+        printf("compiling with debug\n");
+    }
+
+    nvJitLinkHandle linker;
+    REQ_NVJITLINK(nvJitLinkCreate(
+        &linker, linker_flags.size(), linker_flags.data()));
+
+    nvJitLinkInputType linker_input_type = NVJITLINK_INPUT_LTOIR;
+
+    auto printLinkerLogs = [&linker](FILE *out) {
+        size_t info_log_size, err_log_size;
+        REQ_NVJITLINK(
+            nvJitLinkGetInfoLogSize(linker, &info_log_size));
+        REQ_NVJITLINK(
+            nvJitLinkGetErrorLogSize(linker, &err_log_size));
+
+        if (info_log_size > 0) {
+            HeapArray<char> info_log(info_log_size);
+            REQ_NVJITLINK(nvJitLinkGetInfoLog(linker, info_log.data()));
+
+            fprintf(out, "%s\n", info_log.data());
+        }
+
+        if (err_log_size > 0) {
+            HeapArray<char> err_log(err_log_size);
+            REQ_NVJITLINK(nvJitLinkGetErrorLog(linker, err_log.data()));
+
+            fprintf(out, "%s\n", err_log.data());
+        }
+    };
+
+    auto checkLinker = [&printLinkerLogs](nvJitLinkResult res) {
+        if (res != NVJITLINK_SUCCESS) {
+            fprintf(stderr, "CUDA linking Failed!\n");
+
+            printLinkerLogs(stderr);
+
+            fprintf(stderr, "\n");
+
+            ERR_NVJITLINK(res);
+        }
+    };
+
+    auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
+        checkLinker(nvJitLinkAddData(linker, linker_input_type,
+            (char *)cubin.data(), cubin.size(), name));
+    };
+
+    string gpu_arch_flag = std::string("-arch=") + gpu_arch_str;
+
+    DynArray<const char *> common_compile_flags {
+        MADRONA_NVRTC_OPTIONS
+        "-dlto",
+        "-DMADRONA_MWGPU_BVH_MODULE",
+        "-arch", gpu_arch_str.c_str(),
+    };
+
+    if (force_debug_env != nullptr && force_debug_env[0] == '1') {
+        common_compile_flags.push_back("--device-debug");
+    }
+
+    for (const char *user_flag : cfg.userCompileFlags) {
+        common_compile_flags.push_back(user_flag);
+    }
+
+    DynArray<const char *> fast_compile_flags(common_compile_flags.size());
+    for (const char *flag : common_compile_flags) {
+        fast_compile_flags.push_back(flag);
+    }
+
+    DynArray<const char *> compile_flags = std::move(common_compile_flags);
+
+    for (int i = 0; i < bvh_srcs.size(); ++i) {
+        std::ifstream bvh_file_stream(bvh_srcs[i]);
+        std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
+            std::istreambuf_iterator<char>());
+
+#if 0
+        for (int i = 0; i < compile_flags.size(); ++i) {
+            printf("Flags: %s\n", compile_flags[i]);
+        }
+#endif
+        printf("Compiling %s\n", bvh_srcs[i]);
+
+        // Gives us LTOIR
+        auto jit_output = cu::jitCompileCPPSrc(
+            bvh_src.c_str(), bvh_srcs[i],
+            compile_flags.data(), compile_flags.size(),
+            compile_flags.data(), compile_flags.size(),
+            true);
+
+        addToLinker(jit_output.outputBinary, bvh_srcs[i]);
+    }
+
+    checkLinker(nvJitLinkComplete(linker));
+
+    size_t cubin_size;
+    REQ_NVJITLINK(nvJitLinkGetLinkedCubinSize(linker, &cubin_size));
+    HeapArray<char> linked_cubin(cubin_size);
+    REQ_NVJITLINK(nvJitLinkGetLinkedCubin(linker, linked_cubin.data()));
+
+    CUmodule mod;
+    REQ_CU(cuModuleLoadData(&mod, linked_cubin.data()));
+
+    REQ_NVJITLINK(nvJitLinkDestroy(&linker));
+
+    CUfunction bvh_build_fast;
+    REQ_CU(cuModuleGetFunction(&bvh_build_fast, mod,
+                               "bvhBuildFast"));
+
+    CUfunction bvh_init;
+    REQ_CU(cuModuleGetFunction(&bvh_init, mod,
+                               "bvhInit"));
+
+    CUfunction bvh_alloc;
+    REQ_CU(cuModuleGetFunction(&bvh_alloc, mod,
+                               "bvhAllocInternalNodes"));
+
+    CUfunction bvh_aabbs;
+    REQ_CU(cuModuleGetFunction(&bvh_aabbs, mod,
+                               "bvhConstructAABBs"));
+
+    CUfunction bvh_opt;
+    REQ_CU(cuModuleGetFunction(&bvh_opt, mod,
+                               "bvhOptimizeLBVH"));
+
+    CUfunction bvh_debug;
+    REQ_CU(cuModuleGetFunction(&bvh_debug, mod,
+                               "bvhDebug"));
+
+    CUfunction bvh_raycast_entry;
+    REQ_CU(cuModuleGetFunction(&bvh_raycast_entry, mod,
+                               "bvhRaycastEntry"));
+
+    CUevent start_build_record;
+    CUevent start_trace_record;
+    CUevent end_record;
+
+    cuEventCreate(&start_build_record, CU_EVENT_DEFAULT);
+    cuEventCreate(&start_trace_record, CU_EVENT_DEFAULT);
+    cuEventCreate(&end_record, CU_EVENT_DEFAULT);
+
+    auto *timing_info = (mwGPU::madrona::KernelTimingInfo *)
+        cu::allocReadback(sizeof(mwGPU::madrona::KernelTimingInfo));
+
+    BVHKernels bvh_kernels = {
+        .numSMs = (uint32_t)num_sms,
+        .mod = mod,
+        .init = bvh_init,
+        .allocInternalNodes = bvh_alloc,
+        .buildFast = bvh_build_fast,
+        .optFast = bvh_opt,
+        .debug = bvh_debug,
+        .raycast = bvh_raycast_entry,
+        .constructAABBs = bvh_aabbs,
+        .startBuildEvent = start_build_record,
+        .startTraceEvent = start_trace_record,
+        .stopEvent = end_record,
+        .timingInfo = timing_info
+    };
+
+    return bvh_kernels;
+}
+
 static GPUKernels buildKernels(const CompileConfig &cfg,
                                Span<const MegakernelConfig> megakernel_cfgs,
                                ExecutorMode exec_mode,
@@ -1094,6 +1340,9 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         REQ_CU(cuModuleGetFunction(&gpu_kernels.initTasks, gpu_kernels.mod,
                                    compile_results.initTasksName.c_str()));
     }
+
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.initBVHParams, gpu_kernels.mod,
+                               "initBVHParams"));
 
     return gpu_kernels;
 }
@@ -1281,6 +1530,10 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_taskgraphs,
     uint32_t num_exported,
     const GPUKernels &gpu_kernels,
+    const BVHKernels &bvh_kernels,
+    render::MeshBVH *bvhs_ptr,
+    uint32_t num_bvhs,
+    uint32_t raycast_output_resolution,
     ExecutorMode exec_mode,
     CUdevice cu_gpu,
     CUcontext cu_ctx,
@@ -1353,7 +1606,10 @@ static GPUEngineState initEngineAndUserState(
                                                    world_data_alignment,
                                                    num_taskgraphs,
                                                    gpu_consts_readback,
-                                                   gpu_state_size_readback);
+                                                   gpu_state_size_readback,
+                                                   (void *)bvhs_ptr,
+                                                   num_bvhs,
+                                                   raycast_output_resolution);
 
     auto init_ecs_args = makeKernelArgBuffer(alloc_init,
                                              host_print->getChannelPtr(),
@@ -1457,6 +1713,48 @@ static GPUEngineState initEngineAndUserState(
            sizeof(void *) * (uint64_t)num_exported);
 
     cu::deallocCPU(exported_readback);
+
+    { // Setup the BVH parameters in the __constant__ block of the bvh module
+        // Pass this to the ECS to fill in
+        auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
+        auto bvh_internals = cu::allocGPU(
+                sizeof(mwGPU::madrona::BVHInternalData));
+
+        printf("From CPU, bvh params temporary is in %p (data %p)\n", 
+                params_tmp, bvh_internals);
+
+        // Address to the BVHParams struct
+        CUdeviceptr bvh_consts_addr;
+        size_t bvh_consts_size;
+        REQ_CU(cuModuleGetGlobal(&bvh_consts_addr, &bvh_consts_size,
+                                 bvh_kernels.mod, "bvhParams"));
+
+        auto init_bvh_args = makeKernelArgBuffer((void *)params_tmp,
+                                                 num_worlds,
+                                                 bvh_internals,
+                                                 bvhs_ptr,
+                                                 num_bvhs,
+                                                 bvh_kernels.timingInfo);
+
+        // Launch the kernel in the megakernel module to initialize the BVH 
+        // params
+        launchKernel(gpu_kernels.initBVHParams, 1, 1,
+                     init_bvh_args);
+
+        REQ_CUDA(cudaStreamSynchronize(strm));
+
+        // Call the bvh init function from bvh module
+        auto bvh_init_internal_args = makeKernelArgBuffer(alloc_init);
+        launchKernel(bvh_kernels.init, 1, 1,
+                     no_args);
+
+        REQ_CUDA(cudaStreamSynchronize(strm));
+
+        cuMemcpy(bvh_consts_addr, (CUdeviceptr)params_tmp, 
+                 sizeof(mwGPU::madrona::BVHParams));
+
+        cu::deallocGPU(params_tmp);
+    }
 
     return GPUEngineState {
         gpu_state_buffer,
@@ -1637,7 +1935,11 @@ static CUgraphExec makeTaskGraphRunGraph(
     Span<const uint32_t> taskgraph_ids,
     const MegakernelConfig *megakernel_cfgs,
     const CUfunction *megakernels,
-    int64_t num_megakernels)
+    int64_t num_megakernels,
+    BVHKernels &bvh_kernels,
+    bool enable_raycasting,
+    uint32_t render_output_resolution,
+    int shared_mem_per_sm)
 {
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
@@ -1727,6 +2029,97 @@ static CUgraphExec makeTaskGraphRunGraph(
         addNodesForTaskGraph(taskgraph_id);
     }
 
+#if 1
+    if (enable_raycasting) { // Add the bvh kernel nodes
+        // Add the start record event
+        CUgraphNode start_record_node;
+        REQ_CU(cuGraphAddEventRecordNode(
+                    &start_record_node, run_graph,
+                    &megakernel_launches.back(), 1,
+                    bvh_kernels.startBuildEvent));
+
+        CUDA_KERNEL_NODE_PARAMS bvh_launch_params = {
+            .func = bvh_kernels.allocInternalNodes,
+            // We want to max-out the GPU for all the BVH kernels
+            .gridDimX = 1,
+            .gridDimY = 1,
+            .gridDimZ = 1,
+            .blockDimX = 1,
+            .blockDimY = 1,
+            .blockDimZ = 1,
+            .sharedMemBytes = 0,
+            .kernelParams = nullptr,
+            .extra = nullptr
+        };
+
+        // Allocation node
+        CUgraphNode alloc_node;
+        REQ_CU(cuGraphAddKernelNode(&alloc_node, run_graph,
+                                    &start_record_node, 1,
+                                    &bvh_launch_params));
+
+        // Fast LBVH build node
+        const uint32_t num_blocks_per_sm_fast_build = 16;
+        bvh_launch_params.func = bvh_kernels.buildFast;
+        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+                                     num_blocks_per_sm_fast_build;
+        bvh_launch_params.blockDimX = 256;
+        bvh_launch_params.sharedMemBytes = shared_mem_per_sm / 
+                                           num_blocks_per_sm_fast_build;
+
+        CUgraphNode build_fast_node;
+        REQ_CU(cuGraphAddKernelNode(&build_fast_node, run_graph,
+                                    &alloc_node, 1, 
+                                    &bvh_launch_params));
+
+        bvh_launch_params.func = bvh_kernels.constructAABBs;
+
+        CUgraphNode construct_aabbs_node;
+        REQ_CU(cuGraphAddKernelNode(&construct_aabbs_node, run_graph,
+                                    &build_fast_node, 1, 
+                                    &bvh_launch_params));
+
+        // We assign a 4x4 region of blocks per image/view
+        // Each block processes 16x16 pixels and we have one thread per pixel.
+
+#if 1
+        CUgraphNode start_trace_node;
+        REQ_CU(cuGraphAddEventRecordNode(
+                    &start_trace_node, run_graph,
+                    &construct_aabbs_node, 1,
+                    bvh_kernels.startTraceEvent));
+
+
+        const uint32_t num_resident_views_per_sm = 4;
+
+        uint32_t grid_dim = render_output_resolution / 16;
+
+        CUDA_KERNEL_NODE_PARAMS bvh_launch_raycast = {
+            .func = bvh_kernels.raycast,
+            .gridDimX = bvh_kernels.numSMs * num_resident_views_per_sm,
+            .gridDimY = grid_dim,
+            .gridDimZ = grid_dim,
+            .blockDimX = 16,
+            .blockDimY = 16,
+            .blockDimZ = 1,
+            .sharedMemBytes = shared_mem_per_sm / num_resident_views_per_sm
+        };
+
+        CUgraphNode raycast_node;
+        REQ_CU(cuGraphAddKernelNode(&raycast_node, run_graph,
+                                    &start_trace_node, 1,
+                                    &bvh_launch_raycast));
+#endif
+
+        CUgraphNode end_record_node;
+        REQ_CU(cuGraphAddEventRecordNode(
+                    &end_record_node, run_graph,
+                    &raycast_node, 1,
+                    bvh_kernels.stopEvent));
+    }
+#endif
+
+
     CUgraphExec run_graph_exec;
     REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph, 0));
 
@@ -1802,6 +2195,19 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
     REQ_CU(cuDeviceGetAttribute(&cu_capability.second,
         CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, cu_gpu));
 
+    int shared_mem_per_sm;
+    REQ_CU(cuDeviceGetAttribute(
+           &shared_mem_per_sm, 
+           CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
+           cu_gpu));
+
+    auto *render_mode = getenv("MADRONA_RENDER_MODE");
+
+    bool enable_raycasting = (render_mode[0] == '2');
+
+    BVHKernels bvh_kernels = buildBVHKernels(
+                compile_cfg, num_sms, cu_capability);
+
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
         exec_mode, num_sms, cu_capability);
 
@@ -1811,7 +2217,11 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
         state_cfg.numUserConfigBytes,  state_cfg.numTaskGraphs,
         state_cfg.numExportedBuffers,
-        gpu_kernels, exec_mode, cu_gpu, cu_ctx, strm);
+        gpu_kernels, bvh_kernels, 
+        state_cfg.geometryData ? state_cfg.geometryData->meshBVHs : nullptr,
+        state_cfg.geometryData ? state_cfg.geometryData->numBVHs : 0,
+        state_cfg.raycastOutputResolution,
+        exec_mode, cu_gpu, cu_ctx, strm);
 
     TaskGraphsState taskgraphs_state {
         .megakernels = std::move(gpu_kernels.megakernels),
@@ -1824,6 +2234,12 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         gpu_kernels.mod,
         std::move(eng_state),
         std::move(taskgraphs_state),
+        enable_raycasting,
+        bvh_kernels,
+        state_cfg.numWorlds,
+        state_cfg.geometryData ? state_cfg.geometryData->numVerts : 0,
+        state_cfg.raycastOutputResolution,
+        (uint32_t)shared_mem_per_sm,
     });
 
     std::cout << "Initialization finished" << std::endl;
@@ -1849,22 +2265,64 @@ MWCudaExecutor::~MWCudaExecutor()
 
     REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
+
+    if (impl_->enableRaycasting) {
+        float avg_total_time = 0.f;
+        float avg_trace_time = 0.f;
+
+        for (auto timing : impl_->bvhKernels.recordedTimings) {
+            avg_total_time += timing.totalTime;
+            avg_trace_time += timing.totalTime * timing.traceTimeRatio;
+        }
+
+        avg_total_time /= (float)impl_->bvhKernels.recordedTimings.size();
+        avg_trace_time /= (float)impl_->bvhKernels.recordedTimings.size();
+
+        printf("Average BVH kernels time: %f (%f spent in tracing)\n",
+                avg_total_time, avg_trace_time);
+
+        // Save this to a file
+        auto *output_file_name = getenv("MADRONA_TIMING_FILE");
+        assert(output_file_name);
+        char output_buffer[512] = {};
+
+        sprintf(output_buffer, "{\n  \"num_worlds\":%d\n  \"num_vertices\":%d\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n}", 
+                (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
+
+        printf("%s\n", output_buffer);
+ 
+        std::ofstream stream;
+        stream.open(output_file_name);
+        if (!stream) {
+            std::cout << "Couldn't open file" << std::endl;
+        }
+        stream << output_buffer;
+        stream.close();
+    }
 }
 
-MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(Span<const uint32_t> taskgraph_ids)
+MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
+        Span<const uint32_t> taskgraph_ids,
+        bool enable_raytracing)
 {
     auto run_graph = makeTaskGraphRunGraph(
         taskgraph_ids,
         impl_->taskGraphsState.megakernelConfigs.data(),
         impl_->taskGraphsState.megakernels.data(),
-        impl_->taskGraphsState.megakernels.size());
+        impl_->taskGraphsState.megakernels.size(),
+        impl_->bvhKernels,
+        enable_raytracing,
+        impl_->renderOutputResolution,
+        impl_->sharedMemPerSM);
 
     return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
         .runGraph = run_graph,
+        .enableRaytracing = enable_raytracing
     });
 }
 
-MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs()
+MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs(
+        bool enable_raytracing)
 {
     const CountT num_taskgraphs = impl_->taskGraphsState.numTaskgraphs;
     HeapArray<uint32_t> all_taskgraph_ids(num_taskgraphs);
@@ -1872,7 +2330,7 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs()
         all_taskgraph_ids[i] = i;
     }
 
-    return buildLaunchGraph(all_taskgraph_ids);
+    return buildLaunchGraph(all_taskgraph_ids, enable_raytracing);
 }
 
 void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
@@ -1881,6 +2339,56 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
 #ifdef MADRONA_TRACING
     impl_->engineState.deviceTracing->transferLogToCPU();
+#endif
+
+#if 1
+    if (launch_graph.impl_->enableRaytracing) {
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.startBuildEvent));
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.startTraceEvent));
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.stopEvent));
+
+        float build_time_ms = 0.f;
+        REQ_CU(cuEventElapsedTime(&build_time_ms,
+                    impl_->bvhKernels.startBuildEvent, 
+                    impl_->bvhKernels.startTraceEvent));
+
+        float trace_time_ms = 0.f;
+        REQ_CU(cuEventElapsedTime(&trace_time_ms,
+                    impl_->bvhKernels.startTraceEvent, 
+                    impl_->bvhKernels.stopEvent));
+
+        float total_time = trace_time_ms + build_time_ms;
+
+        impl_->bvhKernels.recordedTimings.push_back({
+            total_time,
+            build_time_ms / total_time,
+            trace_time_ms / total_time
+        });
+
+        uint64_t time_in_tlas_u64 = 
+            impl_->bvhKernels.timingInfo->tlasTime.load_relaxed();
+        uint64_t time_in_blas_u64 = 
+            impl_->bvhKernels.timingInfo->blasTime.load_relaxed();
+        uint64_t num_processed_pixels =
+            impl_->bvhKernels.timingInfo->timingCounts.load_relaxed();
+
+        double time_in_tlas_f64 = (double)time_in_tlas_u64 / 1000000000.f;
+        double time_in_blas_f64 = (double)time_in_blas_u64 / 1000000000.f;
+        time_in_tlas_f64 /= (double)num_processed_pixels;
+        time_in_blas_f64 /= (double)num_processed_pixels;
+
+        printf("Time in TLAS: %lf; Time in BLAS: %lf\n",
+                time_in_tlas_f64, time_in_blas_f64);
+        printf("Time in TLAS: %llu; Time in BLAS: %llu\n",
+                time_in_tlas_u64, time_in_blas_u64);
+
+#if 0
+        printf("ray casting kernels took %f (%f build vs %f trace) ms\n",
+                total_time,
+                build_time_ms / total_time,
+                trace_time_ms / total_time);
+#endif
+    }
 #endif
 }
 

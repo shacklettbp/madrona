@@ -22,7 +22,7 @@ public:
     // Use as follows to register MyComponent:
     // registry.registerComponent<MyComponent>();
     template <typename ComponentT>
-    void registerComponent();
+    void registerComponent(uint32_t num_bytes = 0);
 
     // Use as follows to register MyArchetype:
     // registry.registerComponent<MyArchetype>();
