@@ -1503,6 +1503,20 @@ float AABB::distance2(const AABB &o) const
     return dist2;
 }
 
+inline Vector3 AABB::centroid() const
+{
+    return 0.5f * (pMin + pMax);
+}
+
+inline int AABB::maxDimension() const
+{
+    Vector3 d = pMax - pMin;
+
+    if (d.x > d.y && d.x > d.z) return 0;
+    else if (d.y > d.z)         return 1;
+    else                        return 2;
+}
+
 bool AABB::overlaps(const AABB &o) const
 {
     auto [a_min, a_max] = *this;

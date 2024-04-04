@@ -328,6 +328,8 @@ struct AABB {
 
     inline float surfaceArea() const;
     inline float distance2(const AABB &o) const;
+    inline Vector3 centroid() const;
+    inline int maxDimension() const;
 
     inline bool overlaps(const AABB &o) const;
     // intersects returns true if AABBs are overlapping or if

@@ -15,7 +15,87 @@
 
 using namespace madrona;
 
+struct BinnedSAHJob {
+    enum class Direction {
+        None, Left, Right
+    };
+
+    // Start index of the instances for the current job.
+    uint32_t start;
+
+    // End index of the instances for the current job.
+    uint32_t end;
+
+    // Parent index
+    uint32_t parent;
+
+    // Is this job for the left or right child of the parent.
+    Direction currentDir;
+};
+
 namespace sm {
+
+// We cannot do a true lock-free stack because the items of the stack are
+// stored in a contiguous array.
+template <typename T, int MaxN>
+struct Stack {
+    void init()
+    {
+        lock_.store_relaxed(0);
+        offset = 0;
+    }
+
+    void push(T item)
+    {
+        while (lock_.exchange<sync::acquire(1) == 1) {
+            while (lock_.load_relaxed() == 1);
+        }
+
+        items[offset++] = item;
+
+        lock_.store_release(0);
+    }
+
+    T pop()
+    {
+        while (lock_.exchange<sync::acquire(1) == 1) {
+            while (lock_.load_relaxed() == 1);
+        }
+
+        T item = {};
+
+        if (offset > 0) {
+            item = items[--offset];
+        }
+
+        lock_.store_release(0);
+
+        return item;
+    }
+
+    [[maybe_unused]] bool tryPop(T *item)
+    {
+        int32_t is_locked = lock_.load_relaxed();
+        if (is_locked == 1) return false;
+
+        int32_t prev_locked = lock_.exchange<sync::relaxed>(1);
+        if (prev_locked) return false;
+
+        if (offset > 0) {
+            *item = items[--offset];
+        }
+
+        lock_.store_release(0);
+
+        return true;
+    }
+
+private:
+    cuda::atomic<int32_t, cuda::thread_scope_block> lock_;
+    uint32_t offset;
+    T items[MaxN];
+};
+
 extern __shared__ uint8_t buffer[];
 
 // For the initial BVH build.
@@ -28,6 +108,33 @@ struct BuildFastBuffer {
     uint32_t mortonCodesEnd;
 
     char buffer[1];
+};
+
+struct BuildSlowBuffer {
+    uint32_t worldIdx;
+    uint32_t instancesOffset;
+    uint32_t numInstances;
+    LBVHNode *internalNodesPtr;
+    LBVHNode *leafNodesPtr;
+    render::InstanceData *instances;
+    render::TLBVHNode *aabbs;
+    // We use these indirect indices to refer to instances.
+    uint32_t *indirectIndices;
+
+    // For each world, we keep looping for work until numJobs hits 0
+    cuda::atomic<int32_t, cuda::thread_scope_block> numJobs;
+    cuda::atomic<int32_t, cuda::thread_scope_block> leafCounter;
+    cuda::atomic<int32_t, cuda::thread_scope_block> internalNodeCounter;
+
+    Stack<BinnedSAHJob, 64> stack;
+
+    char buffer[1];
+
+
+
+    math::AABB getAABB(uint32_t idx) {
+        return aabbs[indirectIndices[idx]].aabb;
+    }
 };
 
 struct ConstructAABBBuffer {
@@ -105,7 +212,7 @@ extern "C" __global__ void bvhAllocInternalNodes()
     uint32_t num_required_nodes = num_instances;
     uint32_t num_bytes = num_required_nodes * 
         (2 * sizeof(LBVHNode) + sizeof(TreeletFormationNode) +
-         sizeof(uint32_t));
+         sizeof(uint32_t) + sizeof(uint32_t));
 
     mwGPU::TmpAllocator *allocator = (mwGPU::TmpAllocator *)
         bvhParams.tmpAllocator;
@@ -115,6 +222,7 @@ extern "C" __global__ void bvhAllocInternalNodes()
     internal_data->internalNodes = (LBVHNode *)ptr;
     internal_data->numAllocatedNodes = num_required_nodes;
     internal_data->buildFastAccumulator.store_relaxed(0);
+    internal_data->buildSlowAccumulator.store_relaxed(0);
     internal_data->constructAABBsAccumulator.store_relaxed(0);
 
     internal_data->leaves = (LBVHNode *)((char *)ptr +
@@ -125,9 +233,16 @@ extern "C" __global__ void bvhAllocInternalNodes()
     internal_data->treeletFormNodes = (TreeletFormationNode *)
         ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode));
 
-    internal_data->treeletRootIndices = (uint32_t *)
+    internal_data->indirectIndices = (uint32_t *)
         ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode)
                      + num_required_nodes * sizeof(TreeletFormationNode));
+
+#if 0
+    internal_data->indirectIndices = (uint32_t *)
+        ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode)
+                     + num_required_nodes * sizeof(TreeletFormationNode)
+                     + num_required_nodes * sizeof(uint32_t));
+#endif
 
     internal_data->treeletRootIndexCounter.store_relaxed(0);
 
@@ -151,6 +266,314 @@ int32_t ceil_div(int32_t a, int32_t b)
 {
     return (a + b-1) / b;
 }
+}
+
+inline __device__ BinnedSAHJob getBinnedSAHJob(sm::BuildSlowBuffer *smem)
+{
+    uint32_t lane_idx = threadIdx.x % MADRONA_WARP_SIZE;
+
+    BinnedSAHJob current_job = { 0, 0 };
+    if (lane_idx == 0) {
+        // Try to pull some work in
+        smem->stack.tryPop(&current_job);
+    }
+
+    __syncwarp();
+
+    // Synchronize all lanes in the warp with the job
+    current_job = __shfl_sync(0xFFFF'FFFF, current_job, 0);
+
+    return current_job;
+}
+
+inline __device__ math::AABB getBounds(bool &is_leaf,
+                                       sm::BuildSlowBuffer *smem,
+                                       const BinnedSAHJob &job)
+{
+    uint32_t lane_idx = threadIdx.x % MADRONA_WARP_SIZE;
+
+    // Only the first thread calculates the bounds
+    math::AABB bounds = math::AABB::invalid();
+    is_leaf = false;
+    if (lane_idx == 0) {
+        bounds = smem->aabbs[smem->indirectIndices[job.start]].aabb;
+
+        for (int i = job.start + 1; i < job.end; ++i) {
+            math::AABB current_aabb = 
+                smem->aabbs[smem->indirectIndices[i]].aabb;
+            bounds = math::AABB::merge(bounds, current_aabb)
+        }
+
+        if (num_instances == 0) {
+            is_leaf = true;
+        }
+    }
+
+    __syncwarp();
+
+    bounds = __shfl_sync(0xFFFF'FFFF, bounds, 0);
+    is_leaf = __shfl_sync(0xFFFF'FFFF, is_leaf, 0);
+
+    return bounds;
+}
+
+inline __device__ void updateParent(sm::BuildSlowBuffer *smem,
+                                    const BinnedSAHJob &current_job,
+                                    bool is_leaf,
+                                    int32_t current_node_idx)
+{
+    if (current_job.parent == 0xFFFF'FFFF) {
+        return;
+    }
+
+    LBVHNode *parent_node = smem->internalNodesPtr + current_job.parent;
+    
+    switch (current_job.currentDir) {
+
+    case BinnedSAHJob::Direction::Left: {
+        parent_node->left = LBVHNode::childIdxToStoreIdx(
+                current_node_idx, is_leaf);
+    } break;
+
+    case BinnedSAHJob::Direction::Right: {
+        parent_node->right = LBVHNode::childIdxToStoreIdx(
+                current_node_idx, is_leaf);
+    } break;
+
+    case BinnedSAHJob::Direction::None: {
+        // This should never ever happen.
+        assert(false);
+    } break;
+
+    }
+}
+
+inline __device__ void pushLeaf(sm::BuildSlowBuffer *smem,
+                                const BinnedSAHJob &current_job,
+                                const math::AABB &bounds)
+{
+    int32_t current_leaf_idx = (int32_t)smem->leafCounter.fetch_add_relaxed(0);
+
+    LBVHNode *leaf_node = smem->leafNodesPtr + current_leaf_idx;
+
+    leaf_node->left = leaf_node->right = 0;
+
+    // Just get only instance index in this span of instances
+    leaf_node->instanceIdx = 
+        smem->indirectIndices[current_job.start];
+
+    leaf_node->parent = current_job.parent;
+    leaf_node->aabb = bounds;
+
+    updateParent(smem, current_job, true, current_leaf_idx);
+}
+
+inline __device__ math::AABB getCentroidBounds(sm::BuildSlowBuffer *smem,
+                                               const BinnedSAHJob &job)
+{
+    uint32_t lane_idx = threadIdx.x % MADRONA_WARP_SIZE;
+
+    math::AABB centroid_bounds = math::AABB::invalid();
+
+    if (lane_idx == 0) {
+        centroid_bounds = math::AABB::point(
+                smem->getAABB(job.start).centroid());
+
+        for (int i = job.start + 1; i < job.end; ++i) {
+            math::Vector3 current_centroid = smem->getAABB(i).centroid();
+            centroid_bounds.expand(current_centroid);
+        }
+    }
+
+    __syncwarp();
+
+    centroid_bounds = __shfl_sync(0xFFFF'FFFF, centroid_bounds, 0);
+
+    return centroid_bounds;
+}
+
+inline __device__ uint32_t pushInternalNode(sm::BuildSlowBuffer *smem,
+                                            const BinnedSAHJob &current_job,
+                                            const math::AABB &bounds)
+{
+    int32_t current_node_idx = (int32_t)
+        smem->internalNodeCounter.fetch_add_relaxed(0);
+
+    LBVHNode *node = smem->internalNodesPtr + current_node_idx;
+
+    // For now, just initialize to 0 (this will be updated by later recursive
+    // calls.
+    node->left = node->right = 0;
+    node->instanceIdx = 0xFFFF'FFFF;
+    node->parent = current_job_parent;
+    node->aabb = bounds;
+    
+    updateParent(smem, current_job, false, current_node_idx);
+
+    return (uint32_t)current_node_idx;
+}
+
+inline __device__ void updateJobCount(sm::BuildSlowBuffer *smem,
+                                      int32_t job_count_diff)
+{
+    smem->numJobs.fetch_add_relaxed(job_count_diff);
+}
+
+inline __device__ int32_t pushJobs(sm::BuildSlowBuffer *smem,
+                                   const BinnedSAHJob &current_job,
+                                   uint32_t mid,
+                                   uint32_t current_node_idx)
+{
+    int32_t job_count_diff = -1;
+
+    // Push the left job if there is one to push
+    if (mid - current_job.start > 0) {
+        BinnedSAHJob job = {
+            .start = current_job.start,
+            .end = mid,
+            .parent = current_node_idx,
+            .currentDir = BinnedSAHJob::Direction::Left,
+        };
+
+        smem->stack.push(job);
+
+        ++job_count_diff;
+    }
+
+    // Push the right job if there is one to push
+    if (current_job.end - mid > 0) {
+        BinnedSAHJob job = {
+            .start = mid,
+            .end = current_job.end,
+            .parent = current_node_idx,
+            .currentDir = BinnedSAHJob::Direction::Right,
+        };
+
+        smem->stack.push(job);
+
+        ++job_count_diff;
+    }
+
+    return job_count_diff;
+}
+
+// This builds a high quality tree but slowly
+extern "C" __global__ void bvhBuildSlow()
+{
+    BVHInternalData *internal_data = bvhParams.internalData;
+    sm::BuildSlowBuffer *smem = (sm::BuildSlowBuffer *)sm::buffer;
+
+    uint32_t current_world_idx = blockIdx.x;
+    uint32_t lane_idx = threadIdx.x % MADRONA_WARP_SIZE;
+
+    while (current_world_idx < bvhParams.numWorlds) {
+        // Get the instance offsets and stuff.
+        if (threadIdx.x == 0) {
+            smem->worldIdx = current_world_idx;
+            smem->instancesOffset = bvhParams.instanceOffsets[current_world_idx];
+            smem->numInstances = bvhParams.instanceCounts[current_world_idx];
+            smem->internalNodesPtr = internal_data->internalNodes +
+                                     smem->instancesOffset;
+            smem->leafNodesPtr = internal_data->leaves +
+                                 smem-instancesOffset;
+            smem->instances = bvhParams.instances + smem->instancesOffset;
+            smem->aabbs = bvhParams.aabbs + smem->instancesOffset;
+            smem->stack.init();
+            smem->stack.push({ 0, smem->numInstances, 0xFFFF'FFFF, 
+                               BinnedSAHJob::Direction::None });
+            smem->numJobs.store_relaxed(1);
+            smem->indirectIndices = internal_data->indirectIndices + 
+                smem->instancesOffset;
+        }
+
+        __syncthreads();
+
+        // Set the indirect indices to just a simple iota
+        for (int i = threadIdx.x; i < smem->numInstances; i += blockDim.x) {
+            smem->indirectIndices[i] = i;
+        }
+
+        __syncthreads();
+        
+        while (smem->numJobs.load_relaxed() > 0) {
+            // Try to pop a job from the stack.
+            BinnedSAHJob current_job = getBinnedSAHJob(smem);
+
+
+
+            // If the range of the instances for this job is 0, that means
+            // that we didn't manage to get a job.
+            uint32_t num_instances = current_job.end - current_job.start;
+            if (num_instances == 0) {
+                // For whatever reason, we didn't get a job (either lock failed,
+                // or there weren't any jobs in the stack).
+                continue;
+            }
+
+
+
+            // Only the first thread calculates the bounds (of the AABBs)
+            bool is_leaf = false;
+            math::AABB bounds = getBounds(is_leaf, smem, current_job);
+
+
+
+            // If we are a leaf, push leaf and just continue.
+            if (is_leaf) {
+                // Push this as a leaf.
+                if (lane_idx == 0) {
+                    pushLeaf(smem, current_job);
+
+                    // No jobs were pushed, this is just removing a job
+                    updateJobCount(smem, -1);
+                }
+
+                __syncwarp();
+                continue;
+            } 
+
+            
+
+            // If we hit this point, we aren't at a leaf.
+            math::AABB centroid_bounds = getCentroidBounds(smem, current_job);
+            int max_dim = centroid_bounds.maxDimension();
+
+
+
+            // The case where num_instances is 1 is already handled
+            if (num_instances == 2) {
+                if (lane_idx == 0) {
+                    int mid = current_job.start + 1;
+                    if (smem->getAABB(current_job.start).centroid()[max_dim] >
+                            smem->getAABB(current_job.start+1).centroid()[max_dim]) {
+                        std::swap(smem->indirectIndices[current_job.start],
+                                  smem->indirectIndices[current_job.start+1]);
+                    }
+
+                    // Push the new internal node
+                    uint32_t current_node_idx = pushInternalNode(
+                            smem, current_job, bounds);
+
+                    int32_t job_count_diff = pushJobs(
+                            smem, current_job, mid, current_node_idx);
+
+                    updateJobCount(smem, job_count_diff);
+                }
+
+                __syncwarp();
+
+                continue;
+            }
+
+            // Now, handle the case where there are more than 2 instances.
+            // i.e., do the binned SAH method.
+
+        }
+
+
+        // Increment the world that this thread block is working on
+        current_world_idx += gridDim.x;
+    }
 }
 
 // We are going to have each thread be responsible for a single internal node
