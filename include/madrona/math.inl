@@ -1517,6 +1517,15 @@ inline int AABB::maxDimension() const
     else                        return 2;
 }
 
+inline Vector3 AABB::offset(const Vector3 &p) const
+{
+    Vector3 o = p - pMin;
+    if (pMax.x > pMin.x) o.x /= pMax.x - pMin.x;
+    if (pMax.y > pMin.y) o.y /= pMax.y - pMin.y;
+    if (pMax.z > pMin.z) o.z /= pMax.z - pMin.z;
+    return o;
+}
+
 bool AABB::overlaps(const AABB &o) const
 {
     auto [a_min, a_max] = *this;

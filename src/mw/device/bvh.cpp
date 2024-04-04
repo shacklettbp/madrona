@@ -33,6 +33,12 @@ struct BinnedSAHJob {
     Direction currentDir;
 };
 
+struct SAHBucket {
+    uint32_t count;
+    float pMin[3];
+    float pMax[3];
+};
+
 namespace sm {
 
 // We cannot do a true lock-free stack because the items of the stack are
@@ -567,7 +573,67 @@ extern "C" __global__ void bvhBuildSlow()
 
             // Now, handle the case where there are more than 2 instances.
             // i.e., do the binned SAH method.
+            // Each thread in the warp has a bucket
+            if (lane_idx == 0) {
+                static constexpr uint32_t kNumBuckets = 12;
+                SAHBucket buckets[kNumBuckets];
 
+                // Initialize the buckets
+                for (uint32_t i = 0; i < kNumBuckets; ++i) {
+                    buckets[i].count = 0;
+                    buckets[i].bounds = math::AABB::invalid();
+                }
+
+                // Create the bounds
+                for (uint32_t prim_idx = current_job.start;
+                        prim_idx < current_job.end;
+                        prim_idx++) {
+                    int b = kNumBuckets * centroid_bounds.offset();
+
+                    if (b >= kNumBuckets) {
+                        b = kNumBuckets - 1;
+                    }
+
+                    buckets[b].count++;
+                    buckets[b].bounds = math::AABB::merge(buckets[b].bounds, 
+                            smem->getAABB(prim_idx));
+                }
+
+                static constexpr uint32_t kNumSplits = kNumBuckets-1;
+                float costs[kNumSplits] = {};
+
+                int count_below = 0;
+                math::AABB bound_below = math::AABB::invalid();
+
+                for (int i = 0; i < nSplits; ++i) {
+                    bound_below = math::AABB::merge(bound_below, buckets[i].bounds);
+                    count_below += buckets[i].count;
+                    costs[i] += count_below * bound_below.surfaceArea();
+                }
+
+                int count_above = 0;
+                math::AABB bound_above = math::AABB::invalid();
+
+                for (int i = nSplits; i >= 1; --i) {
+                    bound_above = math::AABB::merge(bound_above, buckets[i].bounds);
+                    costs[i - 1] += count_above * bound_above.surfaceArea();
+                }
+
+                int min_cost_split_bucket = -1;
+                float min_cost = FLT_MAX;
+
+                for (int i = 0; i < nSplits; ++i) {
+                    if (costs[i] < min_cost) {
+                        min_cost = costs[i];
+                        min_cost_split_bucket = i;
+                    }
+                }
+
+                float leaf_cost = num_instances;
+                min_cost = 1.f / 2.f + min_cost / bounds.surfaceArea();
+
+                
+            }
         }
 
 

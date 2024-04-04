@@ -330,6 +330,7 @@ struct AABB {
     inline float distance2(const AABB &o) const;
     inline Vector3 centroid() const;
     inline int maxDimension() const;
+    inline Vector3 offset(const Vector3 &p) const;
 
     inline bool overlaps(const AABB &o) const;
     // intersects returns true if AABBs are overlapping or if
