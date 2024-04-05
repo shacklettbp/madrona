@@ -23,6 +23,8 @@
 
 #include "cpp_compile.hpp"
 
+// #define MADRONA_FAST_BVH
+
 // Wrap GPU headers in the mwGPU namespace. This is a weird situation where
 // the CPU madrona headers are available but we need access to the GPU
 // headers in order to do initial setup.
@@ -309,6 +311,8 @@ struct BVHKernels {
 
     // Entry point for creating the initial tree
     CUfunction buildFast;
+
+    CUfunction buildSlow;
 
     // Entry point for optimizing the initial tree
     CUfunction optFast;
@@ -1102,6 +1106,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_build_fast, mod,
                                "bvhBuildFast"));
 
+    CUfunction bvh_build_slow;
+    REQ_CU(cuModuleGetFunction(&bvh_build_slow, mod,
+                               "bvhBuildSlow"));
+
     CUfunction bvh_init;
     REQ_CU(cuModuleGetFunction(&bvh_init, mod,
                                "bvhInit"));
@@ -1143,6 +1151,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .init = bvh_init,
         .allocInternalNodes = bvh_alloc,
         .buildFast = bvh_build_fast,
+        .buildSlow = bvh_build_slow,
         .optFast = bvh_opt,
         .debug = bvh_debug,
         .raycast = bvh_raycast_entry,
@@ -2029,7 +2038,6 @@ static CUgraphExec makeTaskGraphRunGraph(
         addNodesForTaskGraph(taskgraph_id);
     }
 
-#if 1
     if (enable_raycasting) { // Add the bvh kernel nodes
         // Add the start record event
         CUgraphNode start_record_node;
@@ -2058,6 +2066,7 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &start_record_node, 1,
                                     &bvh_launch_params));
 
+#if defined(MADRONA_FAST_BVH)
         // Fast LBVH build node
         const uint32_t num_blocks_per_sm_fast_build = 16;
         bvh_launch_params.func = bvh_kernels.buildFast;
@@ -2079,14 +2088,30 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &build_fast_node, 1, 
                                     &bvh_launch_params));
 
+        CUgraphNode *last = &construct_aabbs_node;
+#else
+        const uint32_t num_blocks_per_sm_slow_build = 16;
+        bvh_launch_params.func = bvh_kernels.buildSlow;
+        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+                                     num_blocks_per_sm_slow_build;
+        bvh_launch_params.blockDimX = 256;
+        bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
+                                           num_blocks_per_sm_slow_build;
+
+        CUgraphNode build_slow_node;
+        REQ_CU(cuGraphAddKernelNode(&build_slow_node, run_graph,
+                                    &alloc_node, 1, &bvh_launch_params));
+
+        CUgraphNode *last = &build_slow_node;
+#endif
+
         // We assign a 4x4 region of blocks per image/view
         // Each block processes 16x16 pixels and we have one thread per pixel.
 
-#if 1
         CUgraphNode start_trace_node;
         REQ_CU(cuGraphAddEventRecordNode(
                     &start_trace_node, run_graph,
-                    &construct_aabbs_node, 1,
+                    last, 1,
                     bvh_kernels.startTraceEvent));
 
 
@@ -2109,7 +2134,6 @@ static CUgraphExec makeTaskGraphRunGraph(
         REQ_CU(cuGraphAddKernelNode(&raycast_node, run_graph,
                                     &start_trace_node, 1,
                                     &bvh_launch_raycast));
-#endif
 
         CUgraphNode end_record_node;
         REQ_CU(cuGraphAddEventRecordNode(
@@ -2117,7 +2141,6 @@ static CUgraphExec makeTaskGraphRunGraph(
                     &raycast_node, 1,
                     bvh_kernels.stopEvent));
     }
-#endif
 
 
     CUgraphExec run_graph_exec;

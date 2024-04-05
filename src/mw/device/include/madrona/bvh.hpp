@@ -123,6 +123,7 @@ struct BVHParams {
     // These are all going to be inherited from the ECS
     void *hostAllocator;
     void *tmpAllocator;
+    void *hostPrintAddr;
 
     KernelTimingInfo *timingInfo;
 };

@@ -2,6 +2,7 @@
 
 #include <madrona/bvh.hpp>
 #include <madrona/mesh_bvh.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
 
 // #define MADRONA_PROFILE_BVH_KERNEL
 
@@ -62,6 +63,8 @@ struct Profiler {
     }
 };
 
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+
 // Trace a ray through the top level structure.
 static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     uint32_t view_idx,
@@ -73,7 +76,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     float t_max,
                                     Profiler *profiler)
 {
-#define INSPECT(...) if (pixel_x == 32 && pixel_y == 32) { printf(__VA_ARGS__); }
+#define INSPECT(...) if (pixel_x == 32 && pixel_y == 32) { LOG(__VA_ARGS__); }
     static constexpr float epsilon = 0.00001f;
 
     if (ray_d.x == 0.f) {
@@ -152,6 +155,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                 // intersection we got thus far, try tracing through.
 
                 if (child_is_leaf) {
+                    INSPECT("Hit child aabb {}\n", 
+                            child_node_idx);
 
                     // Child node idx is the index of the mesh bvh
                     // LBVHNode *leaf_node = &leaves[child_node_idx];
@@ -194,6 +199,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     profiler->markState(ProfilerState::TLAS);
 
                     if (leaf_hit) {
+                        INSPECT("################ Hit child node {} (instance {})\n", 
+                                child_node_idx, instance_data->objectID);
 
                         ray_hit = true;
                         t_max = hit_t * t_scale;

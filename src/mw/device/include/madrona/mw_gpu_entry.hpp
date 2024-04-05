@@ -100,11 +100,8 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
     StateManager *mgr = mwGPU::getStateManager();
     mwGPU::HostAllocator *host_alloc = mwGPU::getHostAllocator();
     mwGPU::TmpAllocator *tmp_alloc = &mwGPU::TmpAllocator::get();
-
-#if 0
-    GPUImplConsts::get().meshBVHsAddr = bvhs;
-    GPUImplConsts::get().numMeshBVHs = num_bvhs;
-#endif
+    mwGPU::HostPrint *host_print = 
+        (mwGPU::HostPrint *)mwGPU::GPUImplConsts::get().hostPrintAddr;
 
     printf("Hello from initBVHParams: %p\n", (void *)params);
 
@@ -138,11 +135,6 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->timingInfo = (KernelTimingInfo *)timings;
 
-#if 0
-    params->bvhModels = (render::BVHModel *)mgr->getArchetypeComponent<
-        RenderableArchetype, render::BVHModel>();
-#endif
-
     params->renderOutput = (void *)mgr->getArchetypeComponent<
         RaycastOutputArchetype, render::RenderOutputBuffer>();
 
@@ -153,6 +145,7 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->hostAllocator = (void *)host_alloc;
     params->tmpAllocator = (void *)tmp_alloc;
+    params->hostPrintAddr = (void *)host_print;
 
     // params->hostChannel = (void *)host_alloc->getHostChannel();
 }
