@@ -567,6 +567,10 @@ extern "C" __global__ void bvhBuildSlow()
                 math::AABB bounds = getBounds(is_leaf, smem, 
                         current_job, num_instances);
 
+                LOG("{} {} {} -> {} {} {}\n",
+                        bounds.pMin.x, bounds.pMin.y, bounds.pMin.z,
+                        bounds.pMax.x, bounds.pMax.y, bounds.pMax.z);
+
                 // If we are a leaf, push leaf and just continue.
                 if (is_leaf) {
                     // Push this as a leaf.
@@ -582,6 +586,8 @@ extern "C" __global__ void bvhBuildSlow()
                 math::AABB centroid_bounds = getCentroidBounds(smem, current_job);
 
                 int max_dim = centroid_bounds.maxDimension();
+
+                LOG("Max dimension {}\n", max_dim);
 
                 // The case where num_instances is 1 is already handled
                 if (num_instances == 2) {
@@ -630,7 +636,7 @@ extern "C" __global__ void bvhBuildSlow()
 
                         buckets[b].count++;
                         buckets[b].bounds = math::AABB::merge(buckets[b].bounds, 
-                                smem->getAABB(prim_idx));
+                                aabb);
                     }
 
                     static constexpr uint32_t kNumSplits = kNumBuckets-1;
@@ -650,6 +656,7 @@ extern "C" __global__ void bvhBuildSlow()
 
                     for (int i = kNumSplits; i >= 1; --i) {
                         bound_above = math::AABB::merge(bound_above, buckets[i].bounds);
+                        count_above += buckets[i].count;
                         costs[i - 1] += count_above * bound_above.surfaceArea();
                     }
 
@@ -675,6 +682,15 @@ extern "C" __global__ void bvhBuildSlow()
                                 min_cost_split_bucket,
                                 centroid_bounds,
                                 max_dim);
+
+                        for (int i = current_job.start; i < mid_idx; ++i) {
+                            assert(getBucket(smem, i, centroid_bounds, max_dim) <= 
+                                    min_cost_split_bucket);
+                        }
+
+                        LOG("Partition: {} -> {}; {} -> {}\n",
+                                current_job.start, mid_idx,
+                                mid_idx, current_job.end);
                     }
 
                     uint32_t current_node_idx = pushInternalNode(
@@ -689,7 +705,7 @@ extern "C" __global__ void bvhBuildSlow()
                 __syncwarp();
             }
 
-#if 1
+#if 0
             if (threadIdx.x == 0) {
                 // Print everything
                 uint32_t num_internal_nodes =
