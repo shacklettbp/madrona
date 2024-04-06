@@ -155,17 +155,12 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                 // intersection we got thus far, try tracing through.
 
                 if (child_is_leaf) {
-                    INSPECT("Hit child aabb {}\n", 
-                            child_node_idx);
+                    uint32_t instance_idx = child_node->instanceIdx;
 
-                    // Child node idx is the index of the mesh bvh
-                    // LBVHNode *leaf_node = &leaves[child_node_idx];
-
-                    // render::BVHModel *model = &bvh_models[child_node_idx];
                     render::MeshBVH *model_bvh = bvhParams.bvhs +
-                        instances[child_node_idx].objectID;
+                        instances[instance_idx].objectID;
 
-                    render::InstanceData *instance_data = &instances[child_node_idx];
+                    render::InstanceData *instance_data = &instances[instance_idx];
 
                     // Now we trace through this model.
                     float hit_t;
@@ -199,9 +194,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     profiler->markState(ProfilerState::TLAS);
 
                     if (leaf_hit) {
-                        INSPECT("################ Hit child node {} (instance {})\n", 
-                                child_node_idx, instance_data->objectID);
-
                         ray_hit = true;
                         t_max = hit_t * t_scale;
 

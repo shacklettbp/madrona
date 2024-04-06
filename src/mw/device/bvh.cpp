@@ -208,8 +208,10 @@ extern "C" __global__ void bvhInit()
 // 2) Optimize the BVH
 extern "C" __global__ void bvhAllocInternalNodes()
 {
+#if 0
     LOG("\n\n\n\nrender resolution {}\n", bvhParams.renderOutputResolution);
     LOG("pixels are at {}\n", bvhParams.renderOutput);
+#endif
 
     bvhParams.timingInfo->timingCounts.store_relaxed(0);
     bvhParams.timingInfo->tlasTime.store_relaxed(0);
@@ -567,10 +569,6 @@ extern "C" __global__ void bvhBuildSlow()
                 math::AABB bounds = getBounds(is_leaf, smem, 
                         current_job, num_instances);
 
-                LOG("{} {} {} -> {} {} {}\n",
-                        bounds.pMin.x, bounds.pMin.y, bounds.pMin.z,
-                        bounds.pMax.x, bounds.pMax.y, bounds.pMax.z);
-
                 // If we are a leaf, push leaf and just continue.
                 if (is_leaf) {
                     // Push this as a leaf.
@@ -586,8 +584,6 @@ extern "C" __global__ void bvhBuildSlow()
                 math::AABB centroid_bounds = getCentroidBounds(smem, current_job);
 
                 int max_dim = centroid_bounds.maxDimension();
-
-                LOG("Max dimension {}\n", max_dim);
 
                 // The case where num_instances is 1 is already handled
                 if (num_instances == 2) {
@@ -687,10 +683,6 @@ extern "C" __global__ void bvhBuildSlow()
                             assert(getBucket(smem, i, centroid_bounds, max_dim) <= 
                                     min_cost_split_bucket);
                         }
-
-                        LOG("Partition: {} -> {}; {} -> {}\n",
-                                current_job.start, mid_idx,
-                                mid_idx, current_job.end);
                     }
 
                     uint32_t current_node_idx = pushInternalNode(
@@ -715,8 +707,18 @@ extern "C" __global__ void bvhBuildSlow()
 
                 for (int i = 0; i < num_internal_nodes; ++i) {
                     LBVHNode *node = &smem->internalNodesPtr[i];
-                    LOG("Internal node {}: left = {}; right = {}; instanceIdx = {}; parent = {}; aabb = {} {} {} -> {} {} {}\n",
-                        i, node->left, node->right, node->instanceIdx,
+
+                    bool left_is_leaf = false;
+                    int32_t left_idx = LBVHNode::storeIdxToChildIdx(node->left, left_is_leaf);
+
+                    bool right_is_leaf = false;
+                    int32_t right_idx = LBVHNode::storeIdxToChildIdx(node->right, right_is_leaf);
+
+                    LOG("Internal node {}: left = {} ({}); right = {} ({}); instanceIdx = {}; parent = {}; aabb = {} {} {} -> {} {} {}\n",
+                        i, 
+                        left_idx, left_is_leaf ? 1 : 2, 
+                        right_idx, right_is_leaf ? 1 : 2,
+                        node->instanceIdx,
                         node->parent,
                         node->aabb.pMin.x, node->aabb.pMin.y, node->aabb.pMin.z,
                         node->aabb.pMax.x, node->aabb.pMax.y, node->aabb.pMax.z);
