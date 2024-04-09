@@ -297,6 +297,10 @@ struct TimingData {
     float totalTime;
     float buildTimeRatio;
     float traceTimeRatio;
+
+    float numTLASTraces;
+    float numBLASTraces;
+    float tlasRatio;
 };
 
 struct BVHKernels {
@@ -2292,17 +2296,29 @@ MWCudaExecutor::~MWCudaExecutor()
     if (impl_->enableRaycasting) {
         float avg_total_time = 0.f;
         float avg_trace_time = 0.f;
+        float avg_num_tlas_traces = 0.f;
+        float avg_num_blas_traces = 0.f;
+        float avg_tlas_ratio = 0.f;
 
         for (auto timing : impl_->bvhKernels.recordedTimings) {
             avg_total_time += timing.totalTime;
             avg_trace_time += timing.totalTime * timing.traceTimeRatio;
+            avg_num_tlas_traces += timing.numTLASTraces;
+            avg_num_blas_traces += timing.numBLASTraces;
+            avg_tlas_ratio += timing.tlasRatio;
         }
 
         avg_total_time /= (float)impl_->bvhKernels.recordedTimings.size();
         avg_trace_time /= (float)impl_->bvhKernels.recordedTimings.size();
+        avg_num_tlas_traces /= (float)impl_->bvhKernels.recordedTimings.size();
+        avg_num_blas_traces /= (float)impl_->bvhKernels.recordedTimings.size();
+        avg_tlas_ratio /= (float)impl_->bvhKernels.recordedTimings.size();
 
         printf("Average BVH kernels time: %f (%f spent in tracing)\n",
                 avg_total_time, avg_trace_time);
+        printf("Average number of TLAS traces per pixel: %f\n", avg_num_tlas_traces);
+        printf("Average number of BLAS traces per pixel: %f\n", avg_num_blas_traces);
+        printf("Average ratio TLAS/trace time: %f\n", avg_tlas_ratio);
 
         // Save this to a file
         auto *output_file_name = getenv("MADRONA_TIMING_FILE");
@@ -2382,28 +2398,52 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
 
         float total_time = trace_time_ms + build_time_ms;
 
-        impl_->bvhKernels.recordedTimings.push_back({
-            total_time,
-            build_time_ms / total_time,
-            trace_time_ms / total_time
-        });
-
         uint64_t time_in_tlas_u64 = 
             impl_->bvhKernels.timingInfo->tlasTime.load_relaxed();
         uint64_t time_in_blas_u64 = 
             impl_->bvhKernels.timingInfo->blasTime.load_relaxed();
         uint64_t num_processed_pixels =
             impl_->bvhKernels.timingInfo->timingCounts.load_relaxed();
+        uint64_t num_tlas_traces =
+            impl_->bvhKernels.timingInfo->numTLASTraces.load_relaxed();
+        uint64_t num_blas_traces =
+            impl_->bvhKernels.timingInfo->numBLASTraces.load_relaxed();
 
         double time_in_tlas_f64 = (double)time_in_tlas_u64 / 1000000000.f;
         double time_in_blas_f64 = (double)time_in_blas_u64 / 1000000000.f;
         time_in_tlas_f64 /= (double)num_processed_pixels;
         time_in_blas_f64 /= (double)num_processed_pixels;
 
+#if 0
         printf("Time in TLAS: %lf; Time in BLAS: %lf\n",
                 time_in_tlas_f64, time_in_blas_f64);
         printf("Time in TLAS: %llu; Time in BLAS: %llu\n",
                 time_in_tlas_u64, time_in_blas_u64);
+#endif
+
+        double ratio = time_in_tlas_f64 / (time_in_tlas_f64 + time_in_blas_f64);
+#if 0
+        printf("Ratio of TLAS over whole trace time: %lf\n", ratio);
+#endif
+
+        double avg_num_tlas_traces = (double)num_tlas_traces / 
+            (double)num_processed_pixels;
+        double avg_num_blas_traces = (double)num_blas_traces / 
+            (double)num_processed_pixels;
+
+#if 0
+        printf("Avg num TLAS traces: %lf; Avg num BLAS traces: %lf\n",
+                avg_num_tlas_traces, avg_num_blas_traces);
+#endif
+
+        impl_->bvhKernels.recordedTimings.push_back({
+            total_time,
+            build_time_ms / total_time,
+            trace_time_ms / total_time,
+            (float)avg_num_tlas_traces,
+            (float)avg_num_blas_traces,
+            (float)ratio,
+        });
 
 #if 0
         printf("ray casting kernels took %f (%f build vs %f trace) ms\n",

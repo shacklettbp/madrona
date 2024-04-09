@@ -101,6 +101,8 @@ struct KernelTimingInfo {
     AtomicU32 timingCounts;
     AtomicU64 tlasTime;
     AtomicU64 blasTime;
+    AtomicU64 numTLASTraces;
+    AtomicU64 numBLASTraces;
 };
 
 struct BVHParams {

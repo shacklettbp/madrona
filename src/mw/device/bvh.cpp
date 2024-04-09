@@ -216,6 +216,8 @@ extern "C" __global__ void bvhAllocInternalNodes()
     bvhParams.timingInfo->timingCounts.store_relaxed(0);
     bvhParams.timingInfo->tlasTime.store_relaxed(0);
     bvhParams.timingInfo->blasTime.store_relaxed(0);
+    bvhParams.timingInfo->numTLASTraces.store_relaxed(0);
+    bvhParams.timingInfo->numBLASTraces.store_relaxed(0);
 
     BVHInternalData *internal_data = bvhParams.internalData;
 
@@ -724,6 +726,8 @@ extern "C" __global__ void bvhBuildSlow()
                         node->aabb.pMax.x, node->aabb.pMax.y, node->aabb.pMax.z);
                 }
 
+                LOG("\n\n");
+
                 for (int i = 0; i < num_leaf_nodes; ++i) {
                     LBVHNode *node = &smem->leafNodesPtr[i];
                     LOG("Leaf node {}: left = {}; right = {}; instanceIdx = {}; parent = {}; aabb = {} {} {} -> {} {} {}\n",
@@ -888,6 +892,7 @@ extern "C" __global__ void bvhBuildFast()
 
         leaves[split_index].aabb = bvhParams.aabbs[instance_idx].aabb;
         leaves[split_index].reachedCount.store_relaxed(0);
+        leaves[split_index].instanceIdx = instance_idx;
     } else {
         // The left node is an internal node and its index is split_index
         nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, false);
@@ -905,6 +910,7 @@ extern "C" __global__ void bvhBuildFast()
             world_info.internalNodesOffset);
         leaves[split_index+1].aabb = bvhParams.aabbs[instance_idx].aabb;
         leaves[split_index+1].reachedCount.store_relaxed(0);
+        leaves[split_index+1].instanceIdx = instance_idx;
     } else {
         // The right node is an internal node and its index is split_index+1
         nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, false);

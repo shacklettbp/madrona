@@ -4,7 +4,7 @@
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 
-// #define MADRONA_PROFILE_BVH_KERNEL
+#define MADRONA_PROFILE_BVH_KERNEL
 
 using namespace madrona;
 
@@ -12,6 +12,14 @@ namespace sm {
 
 // Only shared memory to be used
 extern __shared__ uint8_t buffer[];
+
+struct RaycastCounters {
+    cuda::atomic<uint64_t, cuda::thread_scope_block> timingCounts;
+    cuda::atomic<uint64_t, cuda::thread_scope_block> tlasTime;
+    cuda::atomic<uint64_t, cuda::thread_scope_block> blasTime;
+    cuda::atomic<uint64_t, cuda::thread_scope_block> numTLASTraces;
+    cuda::atomic<uint64_t, cuda::thread_scope_block> numBLASTraces;
+};
 
 }
 
@@ -35,6 +43,11 @@ struct Profiler {
     uint64_t mark;
     uint64_t timeInTLAS;
     uint64_t timeInBLAS;
+
+    // This is the number of traces we performed in the BLAS (mesh bvh tests)
+    uint64_t numBLASTraces;
+    // This is the number of traces we performed in the TLAS (AABB tests)
+    uint64_t numTLASTraces;
 
     ProfilerState state;
 
@@ -150,6 +163,9 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             bool intersect_aabb = child_aabb.rayIntersects(ray_o, inv_ray_d,
                     4.0f, t_max, aabb_hit_t, aabb_far_t);
 
+            // Performed a AABB test
+            profiler->numTLASTraces++;
+
             if (aabb_hit_t <= t_max) {
                 // If the near T of the box intersection happens before the closest
                 // intersection we got thus far, try tracing through.
@@ -188,14 +204,22 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     txfm_ray_d /= t_scale;
 
                     
+
                     profiler->markState(ProfilerState::BLAS);
                     bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, &hit_t,
-                            &leaf_hit_normal, &stack, txfm, t_max);
+                            &leaf_hit_normal, &stack, txfm, t_max * t_scale);
                     profiler->markState(ProfilerState::TLAS);
+
+
+
+                    // Performed a mesh bvh test
+                    profiler->numBLASTraces++;
 
                     if (leaf_hit) {
                         ray_hit = true;
-                        t_max = hit_t * t_scale;
+
+                        float old_t_max = t_max;
+                        t_max = hit_t / t_scale;
 
                         closest_hit_normal = instance_data->rotation.rotateVec(
                                 instance_data->scale * leaf_hit_normal);
@@ -221,6 +245,19 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
 extern "C" __global__ void bvhRaycastEntry()
 {
+#ifdef MADRONA_PROFILE_BVH_KERNEL
+    if (threadIdx.x == 0) {
+        sm::RaycastCounters *counters = (sm::RaycastCounters *)sm::buffer;
+        counters->timingCounts.store(0, std::memory_order_relaxed);
+        counters->tlasTime.store(0, std::memory_order_relaxed);
+        counters->blasTime.store(0, std::memory_order_relaxed);
+        counters->numTLASTraces.store(0, std::memory_order_relaxed);
+        counters->numBLASTraces.store(0, std::memory_order_relaxed);
+    }
+
+    __syncthreads();
+#endif
+
     Profiler profiler = {
         .mark = 0,
         .timeInTLAS = 0,
@@ -320,9 +357,36 @@ extern "C" __global__ void bvhRaycastEntry()
         __syncthreads();
     }
 
+    __syncthreads();
+
 #ifdef MADRONA_PROFILE_BVH_KERNEL
-    bvhParams.timingInfo->timingCounts.fetch_add_relaxed(num_processed_pixels);
-    bvhParams.timingInfo->tlasTime.fetch_add_relaxed(profiler.timeInTLAS);
-    bvhParams.timingInfo->blasTime.fetch_add_relaxed(profiler.timeInBLAS);
+    // Update the counters in shared memory first
+    sm::RaycastCounters *counters = (sm::RaycastCounters *)sm::buffer;
+    counters->timingCounts.fetch_add(num_processed_pixels,
+            std::memory_order_relaxed);
+    counters->tlasTime.fetch_add(profiler.timeInTLAS,
+            std::memory_order_relaxed);
+    counters->blasTime.fetch_add(profiler.timeInBLAS,
+            std::memory_order_relaxed);
+    counters->numTLASTraces.fetch_add(profiler.numTLASTraces,
+            std::memory_order_relaxed);
+    counters->numBLASTraces.fetch_add(profiler.numBLASTraces,
+            std::memory_order_relaxed);
+
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+        uint64_t timing_counts = counters->timingCounts.load(std::memory_order_relaxed);
+        uint64_t tlas_time = counters->tlasTime.load(std::memory_order_relaxed);
+        uint64_t blas_time = counters->blasTime.load(std::memory_order_relaxed);
+        uint64_t num_tlas_traces = counters->numTLASTraces.load(std::memory_order_relaxed);
+        uint64_t num_blas_traces = counters->numBLASTraces.load(std::memory_order_relaxed);
+
+        bvhParams.timingInfo->timingCounts.fetch_add_relaxed(num_processed_pixels);
+        bvhParams.timingInfo->tlasTime.fetch_add_relaxed(profiler.timeInTLAS);
+        bvhParams.timingInfo->blasTime.fetch_add_relaxed(profiler.timeInBLAS);
+        bvhParams.timingInfo->numTLASTraces.fetch_add_relaxed(profiler.numTLASTraces);
+        bvhParams.timingInfo->numBLASTraces.fetch_add_relaxed(profiler.numBLASTraces);
+    }
 #endif
 }
