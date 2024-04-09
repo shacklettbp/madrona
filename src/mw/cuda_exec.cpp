@@ -980,6 +980,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     };
 
     const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
+    const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
 
     // Build architecture string for this GPU
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
@@ -1056,6 +1057,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         "-DMADRONA_MWGPU_BVH_MODULE",
         "-arch", gpu_arch_str.c_str(),
     };
+
+    if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
+        common_compile_flags.push_back("-DMADRONA_PROFILE_BVH_KERNEL");
+    }
 
     if (force_debug_env != nullptr && force_debug_env[0] == '1') {
         common_compile_flags.push_back("--device-debug");
@@ -2294,6 +2299,13 @@ MWCudaExecutor::~MWCudaExecutor()
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
 
     if (impl_->enableRaycasting) {
+        bool enable_trace_split = false;
+
+        const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
+        if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
+            enable_trace_split = true;
+        }
+
         float avg_total_time = 0.f;
         float avg_trace_time = 0.f;
         float avg_num_tlas_traces = 0.f;
@@ -2325,8 +2337,21 @@ MWCudaExecutor::~MWCudaExecutor()
         assert(output_file_name);
         char output_buffer[512] = {};
 
+#if 0
         sprintf(output_buffer, "{\n  \"num_worlds\":%d\n  \"num_vertices\":%d\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n}", 
                 (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
+#endif
+
+        if (enable_trace_split) {
+            sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"num_vertices\":%d,\n  \"avg_total_time\":%f,\n  \"tlas_percent\":%f,\n  \"avg_trace_time_ratio\":%f\n}",
+                    (int)impl_->numWorlds, (int)impl_->numVertices,
+                    avg_total_time,
+                    avg_tlas_ratio,
+                    avg_trace_time / avg_total_time);
+        } else {
+            sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"num_vertices\":%d,\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n}",
+                    (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
+        } 
 
         printf("%s\n", output_buffer);
  

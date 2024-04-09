@@ -4,7 +4,7 @@
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 
-#define MADRONA_PROFILE_BVH_KERNEL
+// #define MADRONA_PROFILE_BVH_KERNEL
 
 using namespace madrona;
 
