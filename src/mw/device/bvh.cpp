@@ -140,7 +140,7 @@ struct BuildSlowBuffer {
     cuda::atomic<int32_t, cuda::thread_scope_block> internalNodeCounter;
     cuda::atomic<int32_t, cuda::thread_scope_block> processedJobsCounter;
 
-    Stack<BinnedSAHJob, 32> stack;
+    Stack<BinnedSAHJob, 64> stack;
 
     char buffer[1];
 

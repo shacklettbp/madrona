@@ -61,7 +61,7 @@ struct RenderOutputRef {
 };
 
 // Top level acceleration structure node
-struct TLBVHNode {
+struct alignas(16) TLBVHNode {
     math::AABB aabb;
 };
 

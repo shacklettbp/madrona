@@ -7,7 +7,6 @@
 
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/const.hpp>
-#include <madrona/mw_gpu/host_print.hpp>
 #endif
 
 namespace madrona::render::RenderingSystem {
@@ -115,6 +114,7 @@ inline void instanceTransformUpdate(Context &ctx,
             data.position, data.rotation, data.scale);
 
     ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
+    //printf("AABB loc we %p\n",&(ctx.get<TLBVHNode>(renderable.renderEntity).aabb));
 #endif
 }
 
@@ -244,7 +244,7 @@ void registerTypes(ECSRegistry &registry,
             ArchetypeFlags::None,
             bridge->maxViewsPerworld);
         registry.registerArchetype<RenderableArchetype>(
-            ComponentMetadataSelector<InstanceData>(ComponentFlags::ImportMemory),
+            ComponentMetadataSelector<InstanceData,TLBVHNode>(ComponentFlags::ImportMemory,ComponentFlags::ImportMemory),
             ArchetypeFlags::ImportOffsets,
             bridge->maxInstancesPerWorld);
 #else
@@ -270,6 +270,8 @@ void registerTypes(ECSRegistry &registry,
             bridge->instances);
         state_mgr->setArchetypeComponent<RenderCameraArchetype, PerspectiveCameraData>(
             bridge->views);
+        state_mgr->setArchetypeComponent<RenderableArchetype, TLBVHNode>(
+            bridge->aabbs);
     }
 
 #if 0

@@ -458,6 +458,7 @@ struct BatchFrame {
 
     // View, instance info, instance data
     VkDescriptorSet viewInstanceSetPrepare;
+    VkDescriptorSet viewAABBSetPrepare;
     VkDescriptorSet viewInstanceSetDraw;
     VkDescriptorSet viewInstanceSetLighting;
 
@@ -593,6 +594,9 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(InstanceData);
     vk::LocalBuffer instances = alloc.makeLocalBuffer(instance_size).value();
 
+    VkDeviceSize aabb_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(shader::AABB);
+    vk::LocalBuffer aabbs = alloc.makeLocalBuffer(aabb_size).value();
+
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
@@ -631,10 +635,11 @@ static void makeBatchFrame(vk::Device& dev,
 #endif
 
         new (frame) BatchFrame{
-            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
+            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets),
+              std::move(aabbs) },
             std::move(lights), std::move(lights_staging),
             std::move(sky_input), std::move(sky_input_staging),
-            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+            VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
             HeapArray<LayeredTarget>(0),
             std::move(fake_rgb_buf),
             std::move(fake_depth_buf),
@@ -661,9 +666,10 @@ static void makeBatchFrame(vk::Device& dev,
 
     VkDescriptorSet prepare_views_set = prepare_views.descPools[0].makeSet();
     VkDescriptorSet draw_views_set = draw->descPools[0].makeSet();
- 
+    VkDescriptorSet aabb_set = prepare_views.descPools[3].makeSet();
+
     //Descriptor sets
-    std::array<VkWriteDescriptorSet, 11> desc_updates;
+    std::array<VkWriteDescriptorSet, 12> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = views.buffer;
@@ -686,6 +692,12 @@ static void makeBatchFrame(vk::Device& dev,
     vk::DescHelper::storage(desc_updates[4], prepare_views_set, &offset_info, 2);
     vk::DescHelper::storage(desc_updates[5], draw_views_set, &offset_info, 2);
 
+    VkDescriptorBufferInfo aabb_info;
+    aabb_info.buffer = aabbs.buffer;
+    aabb_info.offset = 0;
+    aabb_info.range = aabb_size;
+    vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
+
     // PBR descriptor sets
 
     VkDescriptorBufferInfo light_data_info;
@@ -693,7 +705,7 @@ static void makeBatchFrame(vk::Device& dev,
     light_data_info.offset = 0;
     light_data_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[6],
+    vk::DescHelper::storage(desc_updates[7],
                             pbr_set, &light_data_info, 0);
 
     VkDescriptorImageInfo transmittance_info;
@@ -701,7 +713,7 @@ static void makeBatchFrame(vk::Device& dev,
     transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     transmittance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[7],
+    vk::DescHelper::textures(desc_updates[8],
                              pbr_set, &transmittance_info, 1, 1);
 
     VkDescriptorImageInfo irradiance_info;
@@ -709,7 +721,7 @@ static void makeBatchFrame(vk::Device& dev,
     irradiance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     irradiance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[8],
+    vk::DescHelper::textures(desc_updates[9],
                              pbr_set, &irradiance_info, 1, 2);
 
     VkDescriptorImageInfo scattering_info;
@@ -717,7 +729,7 @@ static void makeBatchFrame(vk::Device& dev,
     scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[9],
+    vk::DescHelper::textures(desc_updates[10],
                              pbr_set, &scattering_info, 1, 3);
 
     VkDescriptorBufferInfo sky_info;
@@ -725,7 +737,7 @@ static void makeBatchFrame(vk::Device& dev,
     sky_info.offset = 0;
     sky_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[10],
+    vk::DescHelper::storage(desc_updates[11],
                             pbr_set, &sky_info, 4);
 
     // Set descriptors
@@ -818,12 +830,14 @@ static void makeBatchFrame(vk::Device& dev,
             std::move(view_offsets),
             std::move(instances),
             std::move(instance_offsets),
+            std::move(aabbs),
         },
         std::move(lights),
         std::move(lights_staging),
         std::move(sky_input),
         std::move(sky_input_staging),
         prepare_views_set,
+        aabb_set,
         draw_views_set,
         prepare_views_set,
         std::move(layered_targets),
@@ -1131,7 +1145,7 @@ BatchRenderer::Impl::Impl(const Config &cfg,
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
       numWorlds(cfg.numWorlds),
       // This is required whether we want the batch renderer or not
-      prepareViews(makeComputePipeline(dev, rctx.pipelineCache, 2,
+      prepareViews(makeComputePipeline(dev, rctx.pipelineCache, 4,
           sizeof(shader::PrepareViewPushConstant),
           4 + consts::numDrawCmdBuffers, rctx.repeatSampler,
           "prepare_views.hlsl", "main", makeShaders)),
@@ -1282,7 +1296,6 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
 {
     (void)num_views;
     (void)num_processed_batches;
-
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
                            prepare_views.hdls[0]);
 
@@ -1291,6 +1304,7 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
             frame.viewInstanceSetPrepare,
             batch.drawBufferSetPrepare,
             assetSetPrepareView,
+            frame.viewAABBSetPrepare,
         };
 
         dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1439,6 +1453,7 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
             interop->viewOffsetsCPU->flush(impl->dev);
             interop->instancesCPU->flush(impl->dev);
             interop->instanceOffsetsCPU->flush(impl->dev);
+            interop->aabbCPU->flush(impl->dev);
         }
 
         if (interop->voxelInputCPU.has_value()) {
@@ -1509,6 +1524,20 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
         impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instanceOffsetsHdl,
                              batch_buffers.instanceOffsets.buffer,
                              1, &offsets_data_copy);
+    }
+
+    { // Import the aabbs for instances
+        VkDeviceSize num_aabbs_bytes = info.numInstances *
+            sizeof(shader::AABB);
+
+        VkBufferCopy aabb_data_copy = {
+            .srcOffset = 0, .dstOffset = 0,
+            .size = num_aabbs_bytes
+        };
+
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->aabbHdl,
+                             batch_buffers.aabbs.buffer,
+                             1, &aabb_data_copy);
     }
 
     { // Import the offsets for views
@@ -1694,6 +1723,14 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
                 frame_data.buffers.instanceOffsets.buffer,
+                0, VK_WHOLE_SIZE
+            },
+            VkBufferMemoryBarrier{
+                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                nullptr,
+                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
+                frame_data.buffers.aabbs.buffer,
                 0, VK_WHOLE_SIZE
             },
             VkBufferMemoryBarrier{
@@ -1936,10 +1973,6 @@ const float * BatchRenderer::getDepthCUDAPtr() const
 #else
     return (float *)impl->batchFrames[0].depthOutputCUDA.getDevicePointer();
 #endif
-}
-
-void BatchRenderer::recreateSemaphores()
-{
 }
 
 }

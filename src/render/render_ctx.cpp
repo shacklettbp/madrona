@@ -567,6 +567,7 @@ static EngineInterop setupEngineInterop(Device &dev,
 
     auto instances_cpu = Optional<render::vk::HostBuffer>::none();
     auto instance_offsets_cpu = Optional<render::vk::HostBuffer>::none();
+    auto aabb_cpu = Optional<render::vk::HostBuffer>::none();
 
 #ifdef MADRONA_VK_CUDA_SUPPORT
     auto views_gpu = Optional<render::vk::DedicatedBuffer>::none();
@@ -580,18 +581,24 @@ static EngineInterop setupEngineInterop(Device &dev,
 
     auto instance_offsets_gpu = Optional<render::vk::DedicatedBuffer>::none();
     auto instance_offsets_cuda = Optional<render::vk::CudaImportedBuffer>::none();
+
+    auto aabb_gpu = Optional<render::vk::DedicatedBuffer>::none();
+    auto aabb_cuda = Optional<render::vk::CudaImportedBuffer>::none();
 #endif
 
     VkBuffer views_hdl = VK_NULL_HANDLE;
     VkBuffer view_offsets_hdl = VK_NULL_HANDLE;
     VkBuffer instances_hdl = VK_NULL_HANDLE;
     VkBuffer instance_offsets_hdl = VK_NULL_HANDLE;
+    VkBuffer aabb_hdl = VK_NULL_HANDLE;
 
     void *views_base = nullptr;
     void *view_offsets_base = nullptr;
 
     void *instances_base = nullptr;
     void *instance_offsets_base = nullptr;
+
+    void *aabb_base = nullptr;
 
     void *world_ids_instances_base = nullptr;
     void *world_ids_views_base = nullptr;
@@ -614,7 +621,6 @@ static EngineInterop setupEngineInterop(Device &dev,
 #ifdef MADRONA_VK_CUDA_SUPPORT
             views_gpu = alloc.makeDedicatedBuffer(
                 num_views_bytes, false, true);
-
             views_cuda.emplace(dev, views_gpu->mem,
                 num_views_bytes);
 
@@ -643,6 +649,28 @@ static EngineInterop setupEngineInterop(Device &dev,
 
             instances_hdl = instances_gpu->buf.buffer;
             instances_base = (char *)instances_cuda->getDevicePointer();
+#endif
+        }
+    }
+
+    { // Create the aabb buffer
+        uint64_t num_aabb_bytes = num_worlds * max_instances_per_world *
+            (int64_t)sizeof(render::shader::AABB);
+
+        if (!gpu_input) {
+            aabb_cpu = alloc.makeStagingBuffer(num_aabb_bytes);
+            aabb_hdl = aabb_cpu->buffer;
+            // instances_base = instances_cpu->ptr;
+            aabb_base = malloc(sizeof(render::shader::AABB) * num_worlds * max_instances_per_world);
+        } else {
+#ifdef MADRONA_VK_CUDA_SUPPORT
+            aabb_gpu = alloc.makeDedicatedBuffer(
+                num_aabb_bytes, false, true);
+            aabb_cuda.emplace(dev, aabb_gpu->mem,
+                num_aabb_bytes);
+
+            aabb_hdl = aabb_gpu->buf.buffer;
+            aabb_base = (char *)aabb_cuda->getDevicePointer();
 #endif
         }
     }
@@ -747,6 +775,7 @@ static EngineInterop setupEngineInterop(Device &dev,
     RenderECSBridge bridge = {
         .views = (PerspectiveCameraData *)views_base,
         .instances = (InstanceData *)instances_base,
+        .aabbs = (TLBVHNode *)aabb_base,
         .instanceOffsets = (int32_t *)instance_offsets_base,
         .viewOffsets = (int32_t *)view_offsets_base,
         .totalNumViews = total_num_views_readback,
@@ -792,6 +821,7 @@ static EngineInterop setupEngineInterop(Device &dev,
         std::move(view_offsets_cpu),
         std::move(instances_cpu),
         std::move(instance_offsets_cpu),
+        std::move(aabb_cpu),
 #ifdef MADRONA_VK_CUDA_SUPPORT
         std::move(views_gpu),
         std::move(view_offsets_gpu),
@@ -804,11 +834,15 @@ static EngineInterop setupEngineInterop(Device &dev,
 
         std::move(instances_cuda),
         std::move(instance_offsets_cuda),
+
+        std::move(aabb_gpu),
+        std::move(aabb_cuda),
 #endif
         views_hdl,
         view_offsets_hdl,
         instances_hdl,
         instance_offsets_hdl,
+        aabb_hdl,
         bridge,
         gpu_bridge,
         max_views_per_world,

@@ -103,6 +103,8 @@ struct EngineInterop {
     Optional<render::vk::HostBuffer> instancesCPU;
     Optional<render::vk::HostBuffer> instanceOffsetsCPU;
 
+    Optional<render::vk::HostBuffer> aabbCPU;
+
 #ifdef MADRONA_VK_CUDA_SUPPORT
     Optional<render::vk::DedicatedBuffer> viewsGPU;
     Optional<render::vk::DedicatedBuffer> viewOffsetsGPU;
@@ -115,6 +117,9 @@ struct EngineInterop {
 
     Optional<render::vk::CudaImportedBuffer> instancesCUDA;
     Optional<render::vk::CudaImportedBuffer> instanceOffsetsCUDA;
+
+    Optional<render::vk::DedicatedBuffer> aabbGPU;
+    Optional<render::vk::CudaImportedBuffer> aabbCUDA;
 #endif
 
     VkBuffer viewsHdl;
@@ -122,6 +127,8 @@ struct EngineInterop {
 
     VkBuffer instancesHdl;
     VkBuffer instanceOffsetsHdl;
+
+    VkBuffer aabbHdl;
 
     RenderECSBridge bridge;
     const RenderECSBridge *gpuBridge;

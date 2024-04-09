@@ -43,6 +43,7 @@ struct BatchImportedBuffers {
 
     render::vk::LocalBuffer instances;
     render::vk::LocalBuffer instanceOffsets;
+    render::vk::LocalBuffer aabbs;
 };
 
 struct BatchRenderer {
@@ -87,8 +88,6 @@ struct BatchRenderer {
 
     const uint8_t * getRGBCUDAPtr() const;
     const float * getDepthCUDAPtr() const;
-
-    void recreateSemaphores();
 };
 
 }

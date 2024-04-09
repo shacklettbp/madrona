@@ -33,6 +33,9 @@ StructuredBuffer<ObjectData> objectDataBuffer;
 [[vk::binding(1, 2)]]
 StructuredBuffer<MeshData> meshDataBuffer;
 
+[[vk::binding(0, 3)]]
+StructuredBuffer<AABB> aabbs;
+
 uint getNumInstancesForWorld(uint world_idx)
 {
     if (world_idx == pushConst.numWorlds - 1) {
@@ -81,12 +84,39 @@ PerspectiveCameraData unpackViewData(PackedViewData packed)
     return cam;
 }
 
+float3 rotateVec(float4 q, float3 v)
+{
+    float3 pure = q.xyz;
+    float scalar = q.w;
+
+    float3 pure_x_v = cross(pure, v);
+    float3 pure_x_pure_x_v = cross(pure, pure_x_v);
+
+    return v + 2.f * ((pure_x_v * scalar) + pure_x_pure_x_v);
+}
+
+float4 quatInv(float4 q){
+    return float4(-q.x,-q.y,-q.z,q.w)/length(q);
+}
+
+bool planeAABB(float4 plane, float3 pos, float3 extents){
+    float r = dot(extents,float3(abs(plane.x),abs(plane.y),abs(plane.z)));
+    float planeDist = dot(plane.xyz, pos) + plane.w;
+    return planeDist + r >= 0;
+}
+
 struct SharedData {
     uint viewIdx;
     uint numInstancesPerThread;
     uint offset;
     PerspectiveCameraData camera;
     uint numInstancesForWorld;
+    float4 nearPlane;
+    float4 farPlane;
+    float4 leftPlane;
+    float4 rightPlane;
+    float4 bottomPlane;
+    float4 topPlane;
 };
 
 groupshared SharedData sm;
@@ -103,10 +133,36 @@ void main(uint3 tid       : SV_DispatchThreadID,
     if (tid_local.x == 0) {
         // Each group processes a single view
         sm.viewIdx = gid.x + pushConst.offset;
-        sm.camera = unpackViewData(cameraBuffer[sm.viewIdx]);
+        PerspectiveCameraData view_data = unpackViewData(cameraBuffer[sm.viewIdx]);
+        sm.camera = view_data;
         sm.offset = getInstanceOffsetsForWorld(sm.camera.worldID);
         sm.numInstancesForWorld = getNumInstancesForWorld(sm.camera.worldID);
         sm.numInstancesPerThread = (sm.numInstancesForWorld+31) / 32;
+
+        float4 qInv = quatInv(view_data.rot);
+
+        float3 front = rotateVec(qInv,float3(0, 1, 0));
+        float3 up = rotateVec(qInv,float3(0, 0, 1));
+        float3 right = cross(front,up);
+
+        float zFar = 200; //Dummy value for now
+        float aspectRatio = view_data.yScale/view_data.xScale;
+        float farPlaneHalfHeight = zFar; //Assumed fov of 90
+        float farPlaneHalfWidth = farPlaneHalfHeight * aspectRatio;
+        float3 farVec = zFar * front;
+
+        sm.nearPlane = float4(front,dot(-front,view_data.pos+view_data.zNear*front));
+        sm.farPlane = float4(-front,dot(front,view_data.pos+farVec));
+
+        float3 leftNorm = cross(up,farVec - farPlaneHalfWidth*right);
+        sm.leftPlane = float4(leftNorm,dot(-leftNorm,view_data.pos));
+        float3 rightNorm = cross(farVec + farPlaneHalfWidth*right,up);
+        sm.rightPlane = float4(rightNorm,dot(-rightNorm,view_data.pos));
+
+        float3 bottomNorm = cross(right, farVec - up * farPlaneHalfHeight);
+        sm.bottomPlane = float4(bottomNorm,dot(-bottomNorm,view_data.pos));
+        float3 topNorm = cross(farVec + up * farPlaneHalfHeight, right);
+        sm.topPlane = float4(topNorm,dot(-topNorm,view_data.pos));
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -122,7 +178,28 @@ void main(uint3 tid       : SV_DispatchThreadID,
         EngineInstanceData instance_data = 
             unpackEngineInstanceData(instanceData[current_instance_idx]);
 
+        AABB aabb = aabbs[current_instance_idx];
+        float3 center = (aabb.data[0].xyz + float3(aabb.data[0].w,aabb.data[1].xy))/2;
+        float3 extents = float3(aabb.data[0].w,aabb.data[1].xy) - center;
+
+
         // Don't do culling yet.
+
+        //Test code for aabb validation
+        //extents *= 0.7;
+        /*if((dot(float4(center,1),sm.nearPlane) < 0)
+            || (dot(float4(center,1),sm.leftPlane) < 0)
+            || (dot(float4(center,1),sm.rightPlane) < 0)
+            || (dot(float4(center,1),sm.bottomPlane) < 0)
+            || (dot(float4(center,1),sm.topPlane) < 0)
+            || (dot(float4(center,1),sm.farPlane) < 0)){
+            continue;
+        }*/
+        if((!planeAABB(sm.nearPlane,center,extents) || !planeAABB(sm.leftPlane,center,extents) ||
+           !planeAABB(sm.rightPlane,center,extents) || !planeAABB(sm.bottomPlane,center,extents) ||
+           !planeAABB(sm.topPlane,center,extents) || !planeAABB(sm.farPlane,center,extents))){
+            continue;
+        }
 
         ObjectData obj = objectDataBuffer[instance_data.objectID];
 

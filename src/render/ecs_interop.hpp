@@ -1,14 +1,14 @@
 #pragma once
 
-namespace madrona::render {
+#include <madrona/render/ecs.hpp>
 
-struct InstanceData;
-struct PerspectiveCameraData;
+namespace madrona::render {
 
 struct RenderECSBridge {
     // Allocated from Vulkan, to be imported into Cuda
     PerspectiveCameraData *views;
     InstanceData *instances;
+    TLBVHNode *aabbs;
 
     int32_t *instanceOffsets;
     int32_t *viewOffsets;

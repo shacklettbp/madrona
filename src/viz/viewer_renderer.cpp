@@ -3576,9 +3576,11 @@ void ViewerRendererState::handleResize()
         frame.swapchainReady = makeBinarySemaphore(dev);
     }
 
+#if 0
     if (rctx.batchRenderer) {
         rctx.batchRenderer->recreateSemaphores();
     }
+#endif
 
     fbWidth = new_width;
     fbHeight = new_height;
@@ -3604,9 +3606,11 @@ void ViewerRendererState::recreateSemaphores()
         frame.swapchainReady = makeBinarySemaphore(dev);
     }
 
+#if 0
     if (rctx.batchRenderer) {
         rctx.batchRenderer->recreateSemaphores();
     }
+#endif
 }
 
 ViewerRenderer::ViewerRenderer(const render::RenderManager &render_mgr,

@@ -152,6 +152,10 @@ struct PackedInstanceData {
     float4 data[3];
 };
 
+struct AABB {
+    float4 data[2];
+};
+
 struct EngineInstanceData {
     float3 position;
     float4 rotation;
