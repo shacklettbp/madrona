@@ -117,6 +117,7 @@ struct SharedData {
     float4 rightPlane;
     float4 bottomPlane;
     float4 topPlane;
+    uint counter;
 };
 
 groupshared SharedData sm;
@@ -133,6 +134,9 @@ void main(uint3 tid       : SV_DispatchThreadID,
     if (tid_local.x == 0) {
         // Each group processes a single view
         sm.viewIdx = gid.x + pushConst.offset;
+        /*if(sm.viewIdx == 0){
+            sm.counter = 0;
+        }*/
         PerspectiveCameraData view_data = unpackViewData(cameraBuffer[sm.viewIdx]);
         sm.camera = view_data;
         sm.offset = getInstanceOffsetsForWorld(sm.camera.worldID);
@@ -181,7 +185,14 @@ void main(uint3 tid       : SV_DispatchThreadID,
         AABB aabb = aabbs[current_instance_idx];
         float3 center = (aabb.data[0].xyz + float3(aabb.data[0].w,aabb.data[1].xy))/2;
         float3 extents = float3(aabb.data[0].w,aabb.data[1].xy) - center;
+        float4 qInv = quatInv(sm.camera.rot);
+        float3 front = rotateVec(qInv,float3(0, 1, 0));
 
+        float3 boxDims = 2*extents;
+        float areaEstimate = dot(abs(front),boxDims.yzx*boxDims.zxy);
+        float dist = distance(sm.camera.pos, center);
+        dist = dist * dist;
+        float projectedEstimate = areaEstimate / dist;
 
         // Don't do culling yet.
 
@@ -195,11 +206,19 @@ void main(uint3 tid       : SV_DispatchThreadID,
             || (dot(float4(center,1),sm.farPlane) < 0)){
             continue;
         }*/
-        if((!planeAABB(sm.nearPlane,center,extents) || !planeAABB(sm.leftPlane,center,extents) ||
+        //projectedEstimate < 0.002
+        //projectedEstimate < 0.003 ||
+        if(projectedEstimate < 0.0007 || (!planeAABB(sm.nearPlane,center,extents) || !planeAABB(sm.leftPlane,center,extents) ||
            !planeAABB(sm.rightPlane,center,extents) || !planeAABB(sm.bottomPlane,center,extents) ||
            !planeAABB(sm.topPlane,center,extents) || !planeAABB(sm.farPlane,center,extents))){
+           /*if(sm.viewIdx == 0){
+                InterlockedAdd(sm.counter, 1);
+           }*/
             continue;
         }
+        /*        if(sm.viewIdx == 0){
+            printf("surface_area %f\n",lod);
+        }*/
 
         ObjectData obj = objectDataBuffer[instance_data.objectID];
 
@@ -227,5 +246,10 @@ void main(uint3 tid       : SV_DispatchThreadID,
             drawCommandBuffer[draw_id] = draw_cmd;
             drawDataBuffer[draw_id] = draw_data;
         }
+
+
     }
+    /*if(sm.viewIdx == 0){
+        printf("Culled %f\n",sm.counter/(float)sm.numInstancesForWorld);
+    }*/
 }
