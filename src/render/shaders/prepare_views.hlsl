@@ -195,10 +195,13 @@ void main(uint3 tid       : SV_DispatchThreadID,
             || (dot(float4(center,1),sm.farPlane) < 0)){
             continue;
         }*/
+
+        int some_value = 0;
+
         if((!planeAABB(sm.nearPlane,center,extents) || !planeAABB(sm.leftPlane,center,extents) ||
            !planeAABB(sm.rightPlane,center,extents) || !planeAABB(sm.bottomPlane,center,extents) ||
            !planeAABB(sm.topPlane,center,extents) || !planeAABB(sm.farPlane,center,extents))){
-            continue;
+            some_value = 1;
         }
 
         ObjectData obj = objectDataBuffer[instance_data.objectID];
@@ -212,7 +215,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
             uint draw_id = draw_offset + i;
             DrawCmd draw_cmd;
             draw_cmd.indexCount = mesh.numIndices;
-            draw_cmd.instanceCount = 1;
+            draw_cmd.instanceCount = 1 + min(some_value, 0);
             draw_cmd.firstIndex = mesh.indexOffset;
             draw_cmd.vertexOffset = mesh.vertexOffset;
             draw_cmd.firstInstance = draw_id;

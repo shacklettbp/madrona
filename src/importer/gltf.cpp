@@ -1637,6 +1637,7 @@ static bool gltfImportAssets(LoaderData &loader,
         const SourceInstance &inst = imported.instances[inst_idx];
         const SourceObject &src_obj = imported.objects[inst.objIDX];
 
+#if 0
         math::Vector3 *new_mesh_positions_ptr =
             new_positions_arr.data() + new_positions_arr.size();
         math::Vector3 *new_mesh_normals_ptr =
@@ -1644,8 +1645,16 @@ static bool gltfImportAssets(LoaderData &loader,
 
         math::Vector4 *new_mesh_tangents_ptr =
             new_tangentsigns_arr.data() + new_tangentsigns_arr.size();
+#endif
 
         for (const SourceMesh &src_mesh : src_obj.meshes) {
+            math::Vector3 *new_mesh_positions_ptr =
+                new_positions_arr.data() + new_positions_arr.size();
+            math::Vector3 *new_mesh_normals_ptr =
+                new_normals_arr.data() + new_normals_arr.size();
+            math::Vector4 *new_mesh_tangents_ptr =
+                new_tangentsigns_arr.data() + new_tangentsigns_arr.size();
+
             for (CountT i = 0; i < src_mesh.numVertices; i++) {
                 math::Vector3 orig_pos = src_mesh.positions[i];
 
