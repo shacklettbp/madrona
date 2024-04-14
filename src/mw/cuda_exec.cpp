@@ -23,7 +23,7 @@
 
 #include "cpp_compile.hpp"
 
-// #define MADRONA_FAST_BVH
+#define MADRONA_FAST_BVH
 
 // Wrap GPU headers in the mwGPU namespace. This is a weird situation where
 // the CPU madrona headers are available but we need access to the GPU

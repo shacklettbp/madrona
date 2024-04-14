@@ -140,7 +140,7 @@ struct BuildSlowBuffer {
     cuda::atomic<int32_t, cuda::thread_scope_block> internalNodeCounter;
     cuda::atomic<int32_t, cuda::thread_scope_block> processedJobsCounter;
 
-    Stack<BinnedSAHJob, 64> stack;
+    Stack<BinnedSAHJob, 96> stack;
 
     char buffer[1];
 
@@ -885,18 +885,21 @@ extern "C" __global__ void bvhBuildFast()
         // The left node is a leaf and the leaf's index is split_index
         nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, true);
         nodes[tn_offset].reachedCount.store_relaxed(0);
+        nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
 
         leaves[split_index].parent = tn_offset;
-        uint32_t instance_idx = (leaves[split_index].instanceIdx = split_index +
+        leaves[split_index].instanceIdx = split_index;
+
+        uint32_t global_instance_idx = (split_index +
             world_info.internalNodesOffset);
 
-        leaves[split_index].aabb = bvhParams.aabbs[instance_idx].aabb;
+        leaves[split_index].aabb = bvhParams.aabbs[global_instance_idx].aabb;
         leaves[split_index].reachedCount.store_relaxed(0);
-        leaves[split_index].instanceIdx = instance_idx;
     } else {
         // The left node is an internal node and its index is split_index
         nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, false);
         nodes[tn_offset].reachedCount.store_relaxed(0);
+        nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
         nodes[split_index].parent = tn_offset;
     }
     
@@ -904,17 +907,21 @@ extern "C" __global__ void bvhBuildFast()
         // The right node is a leaf and the leaf's index is split_index+1
         nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, true);
         nodes[tn_offset].reachedCount.store_relaxed(0);
+        nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
 
         leaves[split_index+1].parent = tn_offset;
-        uint32_t instance_idx = (leaves[split_index+1].instanceIdx = split_index + 1 +
+        leaves[split_index+1].instanceIdx = split_index+1;
+
+        uint32_t global_instance_idx = (split_index + 1 +
             world_info.internalNodesOffset);
-        leaves[split_index+1].aabb = bvhParams.aabbs[instance_idx].aabb;
+
+        leaves[split_index+1].aabb = bvhParams.aabbs[global_instance_idx].aabb;
         leaves[split_index+1].reachedCount.store_relaxed(0);
-        leaves[split_index+1].instanceIdx = instance_idx;
     } else {
         // The right node is an internal node and its index is split_index+1
         nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, false);
         nodes[tn_offset].reachedCount.store_relaxed(0);
+        nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
         nodes[split_index + 1].parent = tn_offset;
     }
 

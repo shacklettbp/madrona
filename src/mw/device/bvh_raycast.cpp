@@ -173,6 +173,11 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                 if (child_is_leaf) {
                     uint32_t instance_idx = child_node->instanceIdx;
 
+                    if (instance_idx >= num_instances) {
+                        LOG("Got incorrect instance index: {}\n", instance_idx);
+                    }
+                    assert(instance_idx < num_instances);
+
                     render::MeshBVH *model_bvh = bvhParams.bvhs +
                         instances[instance_idx].objectID;
 
