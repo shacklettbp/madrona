@@ -851,6 +851,7 @@ Device * Backend::makeDevice(
         num_transfer_queues,
         supports_rt,
         physical_device_properties.limits.maxImageArrayLayers,
+        // 1,
         physical_device_properties.limits.timestampPeriod,
         phy,
         dev,

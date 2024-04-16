@@ -35,6 +35,8 @@ struct RenderingSystemState {
 
     MeshBVH *bvhs;
     uint32_t numBVHs;
+
+    bool enableRaycaster;
 };
 
 inline uint32_t leftShift3(uint32_t x)
@@ -219,6 +221,11 @@ void registerTypes(ECSRegistry &registry,
     uint32_t render_output_res = 
         mwGPU::GPUImplConsts::get().raycastOutputResolution;
     uint32_t render_output_bytes = render_output_res * render_output_res * 3;
+
+    // Make sure to have something there even if raycasting was disabled.
+    if (render_output_bytes == 0) {
+        render_output_bytes = 4;
+    }
 #else
     uint32_t render_output_bytes = 4;
 #endif
@@ -421,12 +428,21 @@ void attachEntityToView(Context &ctx,
         0 // Padding
     };
 
-    Entity render_output_entity = ctx.makeEntity<RaycastOutputArchetype>();
+#ifdef MADRONA_GPU_MODE
+    bool raycast_enabled = 
+        mwGPU::GPUImplConsts::get().raycastOutputResolution != 0;
+#else
+    bool raycast_enabled = false;
+#endif
 
-    RenderOutputRef &ref = ctx.get<RenderOutputRef>(camera_entity);
-    ref.outputEntity = render_output_entity;
+    if (raycast_enabled) {
+        Entity render_output_entity = ctx.makeEntity<RaycastOutputArchetype>();
 
-    printf("attached entity to output %d\n", render_output_entity.id);
+        RenderOutputRef &ref = ctx.get<RenderOutputRef>(camera_entity);
+        ref.outputEntity = render_output_entity;
+
+        printf("attached entity to output %d\n", render_output_entity.id);
+    }
 }
 
 void cleanupViewingEntity(Context &ctx,

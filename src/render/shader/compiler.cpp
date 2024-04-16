@@ -265,7 +265,7 @@ static HeapArray<uint32_t> hlslToSPV(
     DynArray<LPCWSTR> dxc_args {
         lshader_path.data(),
         DXC_ARG_WARNINGS_ARE_ERRORS,
-        DXC_ARG_DEBUG,
+        // DXC_ARG_DEBUG,
         DXC_ARG_PACK_MATRIX_COLUMN_MAJOR,
         L"-spirv",
         L"-fspv-target-env=vulkan1.2",

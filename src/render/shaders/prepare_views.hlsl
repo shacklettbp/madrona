@@ -139,6 +139,8 @@ void main(uint3 tid       : SV_DispatchThreadID,
         sm.numInstancesForWorld = getNumInstancesForWorld(sm.camera.worldID);
         sm.numInstancesPerThread = (sm.numInstancesForWorld+31) / 32;
 
+        printf("Num instances %u for world\n", sm.numInstancesForWorld);
+
         float4 qInv = quatInv(view_data.rot);
 
         float3 front = rotateVec(qInv,float3(0, 1, 0));
