@@ -9,6 +9,10 @@
 
 namespace madrona::render {
 
+struct TriangleIndices {
+    uint32_t indices[3];
+};
+
 struct TraversalStack {
     static constexpr CountT stackSize = 32;
 
@@ -60,7 +64,7 @@ struct MeshBVHCompressed {
     };
 
     struct LeafGeometry {
-        uint64_t packedIndices[numTrisPerLeaf];
+        TriangleIndices packedIndices[numTrisPerLeaf];
     };
 
     struct LeafMaterial {
@@ -110,7 +114,6 @@ struct MeshBVHCompressed {
                          math::Vector3 ray_d,
                          float *out_hit_t,
                          math::Vector3 *out_hit_normal,
-                         void* shared,
                          TraversalStack *stack,
                          const AABBTransform &txfm,
                          float t_max = float(FLT_MAX)) const;
@@ -191,6 +194,8 @@ struct MeshBVHCompressed {
     uint32_t numNodes;
     uint32_t numLeaves;
     uint32_t numVerts;
+
+    uint32_t magic;
 };
 
 }
