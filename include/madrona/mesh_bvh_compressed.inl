@@ -98,7 +98,6 @@ bool MeshBVHCompressed::traceRay(math::Vector3 ray_o,
                        math::Vector3 ray_d,
                        float *out_hit_t,
                        math::Vector3 *out_hit_normal,
-                       void* shared,
                        TraversalStack *stack,
                        const AABBTransform &txfm,
                        float t_max) const
@@ -108,10 +107,8 @@ bool MeshBVHCompressed::traceRay(math::Vector3 ray_o,
 
     Diag3x3 inv_d = Diag3x3::fromVec(ray_d).inv();
 
-    math::AABB root_aabb = rootAABB.applyTRS(txfm.pos, txfm.rot, txfm.scale);
-
-    RayIsectTxfm tri_isect_txfm = 
-        computeRayIsectTxfm(ray_o, ray_d, inv_d, root_aabb);
+    RayIsectTxfm tri_isect_txfm =
+        computeRayIsectTxfm(ray_o, ray_d, inv_d, rootAABB);
 
     uint32_t previous_stack_size = stack->size;
 
@@ -564,16 +561,29 @@ bool MeshBVHCompressed::fetchLeafTriangle(CountT leaf_idx,
                                 math::Vector3 *b,
                                 math::Vector3 *c) const
 {
-    uint64_t packed = leafGeos[leaf_idx].packedIndices[offset];
-    if (packed == 0xFFFF'FFFF'FFFF'FFFF) {
+    TriangleIndices packed = leafGeos[leaf_idx].packedIndices[offset];
+
+    if (packed.indices[0] == 0xFFFF'FFFF &&
+        packed.indices[1] == 0xFFFF'FFFF &&
+        packed.indices[2] == 0xFFFF'FFFF) {
         return false;
     }
 
+    uint32_t a_idx = packed.indices[0];
+    uint32_t b_idx = packed.indices[1];
+    uint32_t c_idx = packed.indices[2];
+
+#if 0
     uint32_t a_idx = uint32_t(packed >> 32);
     int16_t b_diff = int16_t((packed >> 16) & 0xFFFF);
     int16_t c_diff = int16_t(packed & 0xFFFF);
     uint32_t b_idx = uint32_t((int32_t)a_idx + b_diff);
     uint32_t c_idx = uint32_t((int32_t)a_idx + c_diff);
+#endif
+
+    assert(a_idx < numVerts);
+    assert(b_idx < numVerts);
+    assert(c_idx < numVerts);
 
     *a = vertices[a_idx];
     *b = vertices[b_idx];

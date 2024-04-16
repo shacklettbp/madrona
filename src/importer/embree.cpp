@@ -393,29 +393,6 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
 
     madrona::Optional<std::ofstream> out = madrona::Optional<std::ofstream>::none();
 
-    if(innerID == 0){
-        render::MeshBVH::Node node;
-        for(int j=0;j<nodeWidth;j++){
-            int32_t child;
-            if(j < (int)leafNodes.size()) {
-                LeafNode *iNode = (LeafNode *) leafNodes[j];
-                child = 0x80000000 | iNode->lid;
-                BoundingBox box = iNode->bounds;
-                node.minX[j] = box.lower_x;
-                node.minY[j] = box.lower_y;
-                node.minZ[j] = box.lower_z;
-                node.maxX[j] = box.upper_x;
-                node.maxY[j] = box.upper_y;
-                node.maxZ[j] = box.upper_z;
-            }else{
-                child = sentinel;
-            }
-            node.children[j] = child;
-            //node.children[j] = 0xBBBBBBBB;
-        }
-        nodes.push_back(node);
-    }
-
 #ifdef MADRONA_COMPRESSED_BVH
     float rootMaxX = FLT_MIN;
     float rootMaxY = FLT_MIN;
@@ -548,7 +525,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
         .pMax = { rootMaxX, rootMaxY, rootMaxZ },
     };
 
-    aabbOut = merged;
+    aabb_out = merged;
 #else
     if(innerID == 0){
         MeshBVH::Node node;
