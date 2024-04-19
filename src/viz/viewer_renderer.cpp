@@ -736,9 +736,25 @@ static Pipeline<1> makeVoxelDrawPipeline(const Device& dev,
         },
         }};
 
+    VkFormat color_formats[] = {
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_FORMAT_R16G16B16A16_SFLOAT,
+        VK_FORMAT_R16G16B16A16_SFLOAT
+    };
+
+    VkFormat depth_format = InternalConfig::depthFormat;
+
+    VkPipelineRenderingCreateInfo rendering_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .pNext = nullptr,
+        .colorAttachmentCount = 3,
+        .pColorAttachmentFormats = color_formats,
+        .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT
+    };
+
     VkGraphicsPipelineCreateInfo gfx_info;
     gfx_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gfx_info.pNext = nullptr;
+    gfx_info.pNext = &rendering_info;
     gfx_info.flags = 0;
     gfx_info.stageCount = gfx_stages.size();
     gfx_info.pStages = gfx_stages.data();
@@ -3012,110 +3028,210 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
 #endif
     }
 
-    dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           rctx.objectDraw.hdls[0]);
 
-    std::array draw_descriptors {
-        frame.drawShaderSet,
-        rctx.asset_set_draw_,
-        rctx.asset_set_mat_tex_
-    };
+    { // GBuffer pass draw
+        {
+            std::array barriers = {
+                VkImageMemoryBarrier{
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_NONE,
+                    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    .image = frame.fb.colorAttachment.image,
+                    .subresourceRange = {
+                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1
+                    }
+                },
+                VkImageMemoryBarrier{
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_NONE,
+                    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    .image = frame.fb.normalAttachment.image,
+                    .subresourceRange = {
+                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1
+                    }
+                },
+                VkImageMemoryBarrier{
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_NONE,
+                    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    .image = frame.fb.positionAttachment.image,
+                    .subresourceRange = {
+                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1
+                    }
+                },
+                VkImageMemoryBarrier{
+                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_NONE,
+                    .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                    .image = frame.fb.depthAttachment.image,
+                    .subresourceRange = {
+                        .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = 1
+                    }
+                },
+            };
 
-    dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                 rctx.objectDraw.layout, 0,
-                                 draw_descriptors.size(),
-                                 draw_descriptors.data(),
-                                 0, nullptr);
+            dev.dt.cmdPipelineBarrier(draw_cmd,
+                    VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+                    0, 0, nullptr, 0, nullptr,
+                    barriers.size(), barriers.data());   
+        }
 
-    DrawPushConst draw_const {
-        (uint32_t)view_idx,
-        world_idx
-    };
-
-    dev.dt.cmdPushConstants(draw_cmd, rctx.objectDraw.layout,
-                            VK_SHADER_STAGE_VERTEX_BIT |
-                            VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                            sizeof(DrawPushConst), &draw_const);
-
-    dev.dt.cmdBindIndexBuffer(draw_cmd, rctx.loaded_assets_[0].buf.buffer,
-                              rctx.loaded_assets_[0].idxBufferOffset,
-                              VK_INDEX_TYPE_UINT32);
-
-    VkViewport viewport {
-        0,
-        0,
-        (float)fbWidth,
-        (float)fbHeight,
-        0.f,
-        1.f,
-    };
-
-    dev.dt.cmdSetViewport(draw_cmd, 0, 1, &viewport);
-
-    VkRect2D scissor {
-        { 0, 0 },
-        { fbWidth, fbHeight },
-    };
-
-    dev.dt.cmdSetScissor(draw_cmd, 0, 1, &scissor);
-
-
-    VkRenderPassBeginInfo render_pass_info;
-    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    render_pass_info.pNext = nullptr;
-    render_pass_info.renderPass = rctx.renderPass;
-    render_pass_info.framebuffer = frame.fb.hdl;
-    render_pass_info.clearValueCount = fbClear.size();
-    render_pass_info.pClearValues = fbClear.data();
-    render_pass_info.renderArea.offset = {
-        0, 0,
-    };
-    render_pass_info.renderArea.extent = {
-        fbWidth, fbHeight,
-    };
-
-    dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
-                              VK_SUBPASS_CONTENTS_INLINE);
-
-    dev.dt.cmdDrawIndexedIndirect(draw_cmd,
-                                  frame.renderInput.buffer,
-                                  frame.drawCmdOffset,
-                                  rctx.engine_interop_.maxInstancesPerWorld * 10,
-                                  sizeof(DrawCmd));
-
-    if (num_voxels > 0) {
         dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            voxelDraw.hdls[0]);
+                               rctx.objectDraw.hdls[0]);
 
-        std::array voxel_draw_descriptors {
-            frame.voxelDrawSet,
+        std::array draw_descriptors {
+            frame.drawShaderSet,
+            rctx.asset_set_draw_,
             rctx.asset_set_mat_tex_
         };
 
         dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            voxelDraw.layout, 0,
-            voxel_draw_descriptors.size(),
-            voxel_draw_descriptors.data(),
-            0, nullptr);
+                                     rctx.objectDraw.layout, 0,
+                                     draw_descriptors.size(),
+                                     draw_descriptors.data(),
+                                     0, nullptr);
 
-        DrawPushConst voxel_draw_const{
+        DrawPushConst draw_const {
             (uint32_t)view_idx,
             world_idx
         };
 
-        dev.dt.cmdPushConstants(draw_cmd, voxelDraw.layout,
-            VK_SHADER_STAGE_VERTEX_BIT |
-            VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-            sizeof(DrawPushConst), &voxel_draw_const);
+        dev.dt.cmdPushConstants(draw_cmd, rctx.objectDraw.layout,
+                                VK_SHADER_STAGE_VERTEX_BIT |
+                                VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                sizeof(DrawPushConst), &draw_const);
 
-        dev.dt.cmdBindIndexBuffer(draw_cmd, frame.voxelIndexBuffer.buffer,
+        dev.dt.cmdBindIndexBuffer(draw_cmd, rctx.loaded_assets_[0].buf.buffer,
+                                  rctx.loaded_assets_[0].idxBufferOffset,
+                                  VK_INDEX_TYPE_UINT32);
+
+        VkViewport viewport {
             0,
-            VK_INDEX_TYPE_UINT32);
-        dev.dt.cmdDrawIndexed(draw_cmd, static_cast<uint32_t>(num_voxels * 6 * 6),
-            1, 0, 0, 0);
+            0,
+            (float)fbWidth,
+            (float)fbHeight,
+            0.f,
+            1.f,
+        };
+
+        dev.dt.cmdSetViewport(draw_cmd, 0, 1, &viewport);
+
+        VkRect2D scissor {
+            { 0, 0 },
+            { fbWidth, fbHeight },
+        };
+
+        dev.dt.cmdSetScissor(draw_cmd, 0, 1, &scissor);
+
+
+#if 0
+        VkRenderPassBeginInfo render_pass_info;
+        render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_info.pNext = nullptr;
+        render_pass_info.renderPass = rctx.renderPass;
+        render_pass_info.framebuffer = frame.fb.hdl;
+        render_pass_info.clearValueCount = fbClear.size();
+        render_pass_info.pClearValues = fbClear.data();
+        render_pass_info.renderArea.offset = {
+            0, 0,
+        };
+        render_pass_info.renderArea.extent = {
+            fbWidth, fbHeight,
+        };
+
+        dev.dt.cmdBeginRenderPass(draw_cmd, &render_pass_info,
+                                  VK_SUBPASS_CONTENTS_INLINE);
+#endif
+
+        VkRenderingAttachmentInfoKHR color_attachs[3] = {
+            VkRenderingAttachmentInfoKHR {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+                .imageView = frame.fb.colorView,
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+            },
+            VkRenderingAttachmentInfoKHR {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+                .imageView = frame.fb.normalView,
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+            },
+            VkRenderingAttachmentInfoKHR {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+                .imageView = frame.fb.positionView,
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+            }
+        };
+
+        VkRenderingAttachmentInfoKHR depth_attach = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+            .imageView = frame.fb.depthView,
+            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+        };
+
+        VkRect2D rect = {
+            .offset = {},
+            .extent = { fbWidth, fbHeight }
+        };
+
+        VkRenderingInfo rendering_info = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = rect,
+            .layerCount = 1,
+            .colorAttachmentCount = 3,
+            .pColorAttachments = color_attachs,
+            .pDepthAttachment = &depth_attach
+        };
+
+        dev.dt.cmdBeginRenderingKHR(draw_cmd, &rendering_info);
+
+        dev.dt.cmdDrawIndexedIndirect(draw_cmd,
+                                      frame.renderInput.buffer,
+                                      frame.drawCmdOffset,
+                                      rctx.engine_interop_.maxInstancesPerWorld * 10,
+                                      sizeof(DrawCmd));
+
+        dev.dt.cmdEndRenderingKHR(draw_cmd);
+
+#if 0
+        dev.dt.cmdEndRenderPass(draw_cmd);
+#endif
     }
 
-    dev.dt.cmdEndRenderPass(draw_cmd);
+
+
 
     issueLightingPass(dev, frame, deferredLighting, draw_cmd, viz_ctrl.flyCam,
                       view_idx, world_idx);

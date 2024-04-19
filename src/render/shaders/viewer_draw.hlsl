@@ -156,7 +156,8 @@ void computeCompositeTransform(float3 obj_t,
                                out float4 to_view_rotation)
 {
     to_view_translation = rotateVec(cam_r_inv, obj_t - cam_t);
-    to_view_rotation = normalize(composeQuats(cam_r_inv, obj_r));
+    // to_view_rotation = normalize(composeQuats(cam_r_inv, obj_r));
+    to_view_rotation = float4(1, 0, 0, 1);
 }
 
 PerspectiveCameraData getCameraData()
@@ -184,6 +185,7 @@ float4 vert(in uint vid : SV_VertexID,
             in uint draw_id : SV_InstanceID,
             out V2F v2f) : SV_Position
 {
+#if 0
     DrawData draw_data = drawDataBuffer[draw_id];
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
@@ -228,6 +230,27 @@ float4 vert(in uint vid : SV_VertexID,
     v2f.metalness = materialBuffer[draw_data.materialID].metalness;
 
     return clip_pos;
+#endif
+
+    v2f.normal = float3(0, 0, 0);
+    v2f.uv = float2(0, 0);
+    v2f.color = float4(0, 0, 0, 0);
+    v2f.texIdx = 0;
+    v2f.roughness = 0;
+    v2f.metalness = 0;
+
+    if (vid == 0 && draw_id == 0) {
+        v2f.dummy = min(0, abs(flycamBuffer[0].data[0].x)) +
+                    min(0, abs(engineInstanceBuffer[0].data[0].x)) +
+                    min(0, drawDataBuffer[0].instanceID) +
+                    min(0, shadowViewDataBuffer[0].viewProjectionMatrix[0][0]) +
+                    min(0, abs(viewDataBuffer[0].data[0].x)) +
+                    min(0, abs(vertexDataBuffer[0].data[0].x)) +
+                    min(0, abs(materialBuffer[0].textureIdx)) +
+                    min(0, viewOffsetsBuffer[0]);
+    }
+
+    return float4(0, 0, 0, 1);
 }
 
 struct PixelOutput {
@@ -240,6 +263,7 @@ struct PixelOutput {
 PixelOutput frag(in V2F v2f)
 {
     PixelOutput output;
+
     output.color = v2f.color;
     output.color.a = v2f.roughness;
     output.normal = float4(normalize(v2f.normal), 1.f);

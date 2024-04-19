@@ -30,7 +30,7 @@ StructuredBuffer<MeshData> meshDataBuffer;
 
 struct V2F {
     [[vk::location(0)]] uint instanceID : TEXCOORD0;
-    [[vk::location(1)]] uint meshID : TEXCOORD3;
+    [[vk::location(1)]] uint meshID : TEXCOORD1;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -142,7 +142,8 @@ void computeCompositeTransform(float3 obj_t,
                                out float4 to_view_rotation)
 {
     to_view_translation = rotateVec(cam_r_inv, obj_t - cam_t);
-    to_view_rotation = normalize(composeQuats(cam_r_inv, obj_r));
+    //to_view_rotation = normalize(composeQuats(cam_r_inv, obj_r));
+    to_view_rotation = float4(1, 0, 0, 1);
 }
 
 [shader("vertex")]
@@ -151,6 +152,7 @@ float4 vert(in uint vid : SV_VertexID,
             out int layer_id : SV_RenderTargetArrayIndex,
             out V2F v2f) : SV_Position
 {
+#if 1
     DrawDataBR draw_data = drawDataBuffer[draw_id];
 
     layer_id = draw_data.layerID;
@@ -180,15 +182,37 @@ float4 vert(in uint vid : SV_VertexID,
         view_data.zNear,
         view_pos.y);
 
-    v2f.instanceID = draw_data.instanceID +
-                     min(0, instanceOffsets[0]) +
-                     min(0, drawCount[0]) +
-                     min(0, drawCommandBuffer[0].vertexOffset) +
-                     min(0, int(ceil(meshDataBuffer[0].vertexOffset)));
+    v2f.instanceID = draw_data.instanceID;
+
+    if (vid == 0 && draw_id == 0) {
+        v2f.instanceID += min(0, instanceOffsets[0]) +
+            min(0, drawCount[0]) +
+            min(0, drawCommandBuffer[0].vertexOffset) +
+            min(0, int(ceil(meshDataBuffer[0].vertexOffset)));
+    }
 
     v2f.meshID = draw_data.meshID;
 
     return clip_pos;
+#else
+
+    v2f.instanceID = 0;
+    v2f.meshID = 0;
+
+    if (vid == 0 && draw_id == 0) {
+        v2f.instanceID += min(0, instanceOffsets[0]) +
+            min(0, drawCount[0]) +
+            min(0, drawCommandBuffer[0].vertexOffset) +
+            min(0, int(ceil(meshDataBuffer[0].vertexOffset))) +
+            min(0, abs(float(viewDataBuffer[0].data[0].x))) +
+            min(0, abs(float(engineInstanceBuffer[0].data[0].x))) +
+            min(0, instanceOffsets[0]) +
+            min(0, drawDataBuffer[0].instanceID) +
+            min(0, abs(vertexDataBuffer[0].data[0].x));
+    }
+
+    return float4(0, 0, 0, 1);
+#endif
 }
 
 struct PixelOutput {

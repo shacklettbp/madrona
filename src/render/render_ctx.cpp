@@ -439,9 +439,25 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
         },
     }};
 
+    VkFormat color_formats[] = {
+        VK_FORMAT_R8G8B8A8_UNORM,
+        VK_FORMAT_R16G16B16A16_SFLOAT,
+        VK_FORMAT_R16G16B16A16_SFLOAT
+    };
+
+    VkFormat depth_format = InternalConfig::depthFormat;
+
+    VkPipelineRenderingCreateInfo rendering_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .pNext = nullptr,
+        .colorAttachmentCount = 3,
+        .pColorAttachmentFormats = color_formats,
+        .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT
+    };
+
     VkGraphicsPipelineCreateInfo gfx_info;
     gfx_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gfx_info.pNext = nullptr;
+    gfx_info.pNext = &rendering_info;
     gfx_info.flags = 0;
     gfx_info.stageCount = gfx_stages.size();
     gfx_info.pStages = gfx_stages.data();
@@ -455,7 +471,8 @@ static Pipeline<1> makeDrawPipeline(const Device &dev,
     gfx_info.pColorBlendState = &blend_info;
     gfx_info.pDynamicState = &dyn_info;
     gfx_info.layout = draw_layout;
-    gfx_info.renderPass = render_pass;
+    // gfx_info.renderPass = render_pass;
+    gfx_info.renderPass = VK_NULL_HANDLE;
     gfx_info.subpass = 0;
     gfx_info.basePipelineHandle = VK_NULL_HANDLE;
     gfx_info.basePipelineIndex = -1;

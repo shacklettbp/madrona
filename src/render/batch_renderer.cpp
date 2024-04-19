@@ -28,7 +28,7 @@ enum class LatestOperation {
 };
 
 namespace consts {
-inline constexpr uint32_t maxDrawsPerLayeredImage = 65536*256;
+inline constexpr uint32_t maxDrawsPerLayeredImage = 65536*16;
 inline constexpr VkFormat colorFormat = VK_FORMAT_R32G32_UINT;
 inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 inline constexpr VkFormat outputColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -1003,6 +1003,8 @@ static void issueRasterization(vk::Device &dev,
     dev.dt.cmdBindPipeline(draw_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                            draw_pipeline.hdls[0]);
 
+    printf("Width=%d Height=%d Layers=%d\n", render_extent.width, render_extent.height, target.layerCount);
+
     VkViewport viewport = {
         .width = (float)render_extent.width,
         .height = (float)render_extent.height,
@@ -1031,12 +1033,14 @@ static void issueRasterization(vk::Device &dev,
                                  draw_descriptors.data(), 
                                  0, nullptr);
 
+#if 1
     dev.dt.cmdDrawIndexedIndirectCount(draw_cmd, 
                                        view_batch.drawBuffer.buffer,
                                        view_batch.drawCmdOffset,
                                        view_batch.drawBuffer.buffer,
                                        0, consts::maxDrawsPerLayeredImage,
                                        sizeof(shader::DrawCmd));
+#endif
 
     dev.dt.cmdEndRenderingKHR(draw_cmd);
 }
@@ -1670,10 +1674,12 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
         REQ_VK(impl->dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
     }
 
+#if 0
     impl->dev.dt.cmdResetQueryPool(draw_cmd, impl->timeQueryPool, 0, 2);
 
     impl->dev.dt.cmdWriteTimestamp(draw_cmd, 
                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, impl->timeQueryPool, 0);
+#endif
 
     ////////////////////////////////////////////////////////////////
 
@@ -1823,9 +1829,12 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                            VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
                            VK_ACCESS_MEMORY_READ_BIT,
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT);
+#if 0
                            VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
                                VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+#endif
 
         for (int batch = 0; batch < (int)cur_num_batches; ++batch) {
             int batch_no = batch + iter * consts::numDrawCmdBuffers;
@@ -1885,8 +1894,10 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
         loaded_assets[0].indexBufferSet,
         frame_data.pbrSet);
 
+#if 0
     impl->dev.dt.cmdWriteTimestamp(draw_cmd, 
                 VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, impl->timeQueryPool, 1);
+#endif
 
     // End the command buffer and stuff
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
@@ -1909,10 +1920,12 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.renderFence));
     REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.renderFence));
 
+#if 0
     impl->dev.dt.getQueryPoolResults(
                 impl->dev.hdl, impl->timeQueryPool, 0, 2, sizeof(uint64_t) * 2, 
                 impl->timestamps, sizeof(uint64_t),
                 VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+#endif
 
     float delta_in_ms = float(impl->timestamps[1] - impl->timestamps[0]) *
         impl->dev.timestampPeriod / 1000000.0f;

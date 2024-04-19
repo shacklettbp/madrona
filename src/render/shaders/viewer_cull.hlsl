@@ -82,7 +82,7 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
         sm.numInstancesPerThread = (sm.numInstances + pushConst.numThreads-1) /
                                    pushConst.numThreads;
         sm.instancesOffset = getInstanceOffsetsForWorld(pushConst.worldIDX);
-        // printf("%d\n", sm.numInstances);
+        // printf("numInstances=%d, numThreads=%d\n", sm.numInstances, pushConst.numThreads);
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -103,6 +103,8 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
 
         uint draw_offset;
         InterlockedAdd(drawCount[0], obj.numMeshes, draw_offset);
+
+        printf("Adding %d draws at offset %d\n", obj.numMeshes, draw_offset);
 
         for (int32_t i = 0; i < obj.numMeshes; i++) {
             MeshData mesh = meshDataBuffer[obj.meshOffset + i];
