@@ -1,6 +1,10 @@
 #ifndef MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 #define MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 
+struct BatchDrawPushConst {
+    uint viewsPerLayer;
+};
+
 struct GridDrawPushConst {
     uint numViews;
     uint viewWidth;
@@ -30,6 +34,7 @@ struct PrepareViewPushConstant {
 
 struct DeferredLightingPushConstBR {
     uint32_t maxLayersPerImage;
+    uint32_t maxViewsPerLayer;
     uint32_t renderWidth;
     uint32_t renderHeight;
 };
@@ -214,8 +219,7 @@ struct InstanceDataBR {
 struct DrawDataBR {
     uint instanceID;
     uint viewID;
-
-    uint layerID;
+    uint localViewID;
     uint meshID;
 };
 

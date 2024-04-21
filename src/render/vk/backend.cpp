@@ -800,6 +800,7 @@ Device * Backend::makeDevice(
     vk12_features.shaderInt8 = true;
     vk12_features.storageBuffer8BitAccess = true;
     vk12_features.shaderOutputLayer = true;
+    vk12_features.shaderOutputViewportIndex = true;
 
     VkPhysicalDeviceVulkan11Features vk11_features {};
     vk11_features.sType =
@@ -817,6 +818,7 @@ Device * Backend::makeDevice(
     requested_features.features.wideLines = false; // No MoltenVK support :(
     requested_features.features.fillModeNonSolid = true;
     requested_features.features.multiDrawIndirect = true;
+    requested_features.features.multiViewport = true;
 
 #ifdef MADRONA_MACOS
     requested_features.features.geometryShader = false;
@@ -842,6 +844,9 @@ Device * Backend::makeDevice(
     uint32_t timestamp_period = 
         physical_device_properties.limits.timestampPeriod;
 
+    printf("Max viewports: %u\n",
+        physical_device_properties.limits.maxViewports);
+
     return new Device(
         qf_choices.gfxQF,
         qf_choices.computeQF,
@@ -851,6 +856,7 @@ Device * Backend::makeDevice(
         num_transfer_queues,
         supports_rt,
         physical_device_properties.limits.maxImageArrayLayers,
+        physical_device_properties.limits.maxViewports,
         // 1,
         physical_device_properties.limits.timestampPeriod,
         phy,

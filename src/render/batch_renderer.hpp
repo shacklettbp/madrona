@@ -26,6 +26,7 @@ struct LayeredTarget {
     render::vk::LocalImage depth;
     VkImageView depthView;
 
+    // The number of views is layerCount * dev.maxViewports
     uint32_t layerCount;
 
     VkDescriptorSet lightingSet;
