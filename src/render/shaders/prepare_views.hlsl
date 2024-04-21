@@ -139,7 +139,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
         sm.numInstancesForWorld = getNumInstancesForWorld(sm.camera.worldID);
         sm.numInstancesPerThread = (sm.numInstancesForWorld+31) / 32;
 
-        printf("Num instances %u for world\n", sm.numInstancesForWorld);
+        // printf("Num instances %u for world\n", sm.numInstancesForWorld);
 
         float4 qInv = quatInv(view_data.rot);
 
@@ -225,7 +225,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
             DrawDataBR draw_data;
             draw_data.viewID = sm.viewIdx ;
             draw_data.instanceID =  current_instance_idx;
-            draw_data.layerID = gid.x;
+            draw_data.localViewID = gid.x;
             // This will allow us to access the vertex offset and the index offset
             draw_data.meshID = obj.meshOffset + i;
 

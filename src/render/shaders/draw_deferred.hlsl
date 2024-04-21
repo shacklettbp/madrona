@@ -549,8 +549,20 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 {
     uint view_idx = idx.z;
 
-    uint target_idx = view_idx / pushConst.maxLayersPerImage;
-    uint target_layer_idx = view_idx % pushConst.maxLayersPerImage;
+    uint num_views_per_image = pushConst.maxLayersPerImage * 
+                               pushConst.maxViewsPerLayer;
+
+    // Figure out which image to render to
+    uint target_idx = view_idx / num_views_per_image;
+
+    // View index within that target
+    uint target_view_idx = view_idx % num_views_per_image;
+
+    // Layer index within that target
+    uint target_layer_idx = target_view_idx / pushConst.maxViewsPerLayer;
+    uint viewport_idx = target_view_idx % pushConst.maxViewsPerLayer;
+
+    float x_pixel_offset = viewport_idx * pushConst.renderWidth;
 
     if (idx.x >= pushConst.renderWidth || idx.y >= pushConst.renderHeight) {
         return;
@@ -564,7 +576,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     vbuffer_pixel_clip = vbuffer_pixel_clip * 2.0f - float2(1.0f, 1.0f);
     vbuffer_pixel_clip.y *= -1.0;
 
-    uint2 data = vizBuffer[target_idx][vbuffer_pixel];
+    // Apply the offset when reading the pixel value from the image
+    uint2 data = vizBuffer[target_idx][vbuffer_pixel + uint3(x_pixel_offset, 0, 0)];
 
     uint3 unpacked_viz_data = unpackVizBufferData(data);
 

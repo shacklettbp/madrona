@@ -1,6 +1,9 @@
 #include "shader_common.h"
 #include "../../render/vk/shaders/utils.hlsl"
 
+[[vk::push_constant]]
+BatchDrawPushConst pushConst;
+
 // Instances and views
 [[vk::binding(0, 0)]]
 StructuredBuffer<PackedViewData> viewDataBuffer;
@@ -150,12 +153,14 @@ void computeCompositeTransform(float3 obj_t,
 float4 vert(in uint vid : SV_VertexID,
             in uint draw_id : SV_InstanceID,
             out int layer_id : SV_RenderTargetArrayIndex,
+            out int viewport_id : SV_ViewportArrayIndex,
             out V2F v2f) : SV_Position
 {
 #if 1
     DrawDataBR draw_data = drawDataBuffer[draw_id];
 
-    layer_id = draw_data.layerID;
+    layer_id = draw_data.localViewID / pushConst.viewsPerLayer;
+    viewport_id = draw_data.localViewID % pushConst.viewsPerLayer;
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
     uint instance_id = draw_data.instanceID;
