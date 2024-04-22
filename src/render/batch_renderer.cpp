@@ -1304,7 +1304,7 @@ BatchRenderer::~BatchRenderer()
         assert(output_file_name);
         char output_buffer[512] = {};
 
-        sprintf(output_buffer, "{\n  \"num_worlds\":%d\n  \"avg_total_time\":%f,\n}", 
+        sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"avg_total_time\":%f\n}", 
                 (int)impl->numWorlds, avg_total_time);
 
         printf("%s\n", output_buffer);

@@ -440,8 +440,6 @@ void attachEntityToView(Context &ctx,
 
         RenderOutputRef &ref = ctx.get<RenderOutputRef>(camera_entity);
         ref.outputEntity = render_output_entity;
-
-        printf("attached entity to output %d\n", render_output_entity.id);
     }
 }
 
