@@ -266,7 +266,11 @@ extern "C" __global__ void bvhAllocInternalNodes()
     mwGPU::TmpAllocator *allocator = (mwGPU::TmpAllocator *)
         bvhParams.tmpAllocator;
 
+    LOG("Requesting {} bytes\n", num_bytes);
+
     auto *ptr = allocator->alloc(num_bytes);
+
+    LOG("Finished request -> {}\n", ptr);
 
     internal_data->internalNodes = (LBVHNode *)ptr;
 

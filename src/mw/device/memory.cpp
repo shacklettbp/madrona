@@ -2,7 +2,21 @@
 
 #include <madrona/utils.hpp>
 
+#include <madrona/mw_gpu/host_print.hpp>
+
+#if defined (MADRONA_MWGPU_BVH_MODULE)
+#define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
+#include <madrona/bvh.hpp>
+#endif
+
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+
+#if defined (MADRONA_MWGPU_BVH_MODULE)
+extern "C" __constant__ madrona::BVHParams bvhParams;
+#endif
+
 namespace madrona {
+
 namespace mwGPU {
 
 HostAllocator::HostAllocator(HostAllocInit init)
@@ -103,7 +117,14 @@ void * TmpAllocator::alloc(uint64_t num_bytes)
 
         uint64_t cur_mapped_bytes = num_mapped_bytes_;
         if (required_bytes > cur_mapped_bytes) {
+
+#if defined (MADRONA_MWGPU_BVH_MODULE)
+            HostAllocator *host_alloc = (HostAllocator *)bvhParams.hostAllocator;
+#else
             auto *host_alloc = mwGPU::getHostAllocator();
+#endif
+
+            LOG("Need to map more shit: {}\n", host_alloc);
 
             uint64_t min_grow = required_bytes - cur_mapped_bytes;
 
