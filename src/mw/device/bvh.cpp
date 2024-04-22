@@ -260,8 +260,6 @@ extern "C" __global__ void bvhAllocInternalNodes()
     uint32_t num_required_nodes = num_instances;
     uint32_t num_bytes = num_required_nodes * 
         (2 * sizeof(LBVHNode) + 
-         sizeof(TreeletFormationNode) +
-         sizeof(uint32_t) + 
          sizeof(uint32_t) +
          sizeof(QBVHNode));
 
@@ -271,6 +269,7 @@ extern "C" __global__ void bvhAllocInternalNodes()
     auto *ptr = allocator->alloc(num_bytes);
 
     internal_data->internalNodes = (LBVHNode *)ptr;
+
     internal_data->numAllocatedNodes = num_required_nodes;
     internal_data->buildFastAccumulator.store_relaxed(0);
     internal_data->buildSlowAccumulator.store_relaxed(0);
@@ -278,20 +277,17 @@ extern "C" __global__ void bvhAllocInternalNodes()
 
     internal_data->leaves = (LBVHNode *)((char *)ptr +
             num_required_nodes * sizeof(LBVHNode));
+
     internal_data->numAllocatedLeaves = num_required_nodes;
     internal_data->optFastAccumulator.store_relaxed(0);
 
-    internal_data->treeletFormNodes = (TreeletFormationNode *)
-        ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode));
-
     internal_data->indirectIndices = (uint32_t *)
-        ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode)
-                     + num_required_nodes * sizeof(TreeletFormationNode));
+        ((char *)ptr + 
+         num_required_nodes * (2 * sizeof(LBVHNode)));
 
     internal_data->traversalNodes = (QBVHNode *)
-        ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode)
-                     + num_required_nodes * sizeof(TreeletFormationNode)
-                     + num_required_nodes * sizeof(uint32_t));
+        ((char *)ptr + num_required_nodes * 
+                       (2 * sizeof(LBVHNode) + sizeof(uint32_t)));
 
 #if 0
     internal_data->indirectIndices = (uint32_t *)
