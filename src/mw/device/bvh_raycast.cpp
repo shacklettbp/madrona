@@ -78,6 +78,140 @@ struct Profiler {
 
 #define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 
+#define MADRONA_COMPRESSED_TLAS
+
+#if defined(MADRONA_COMPRESSED_TLAS)
+
+static __device__ bool traceRayTLAS(uint32_t world_idx,
+                                    uint32_t view_idx,
+                                    uint32_t pixel_x, uint32_t pixel_y,
+                                    const math::Vector3 &ray_o,
+                                    math::Vector3 ray_d,
+                                    float *out_hit_t,
+                                    math::Vector3 *out_hit_normal,
+                                    float t_max,
+                                    Profiler *profiler)
+{
+#define INSPECT(...) if (pixel_x == 32 && pixel_y == 32) { LOG(__VA_ARGS__); }
+    static constexpr float epsilon = 0.00001f;
+
+    if (ray_d.x == 0.f) {
+        ray_d.x += epsilon;
+    }
+
+    if (ray_d.y == 0.f) {
+        ray_d.y += epsilon;
+    }
+
+    if (ray_d.z == 0.f) {
+        ray_d.z += epsilon;
+    }
+
+    using namespace madrona::math;
+
+    BVHInternalData *internal_data = bvhParams.internalData;
+
+    // internal_nodes_offset contains the offset to instance attached
+    // data of world being operated on.
+    uint32_t internal_nodes_offset = bvhParams.instanceOffsets[world_idx];
+    uint32_t num_instances = bvhParams.instanceCounts[world_idx];
+
+    QBVHNode *nodes = internal_data->traversalNodes +
+                      internal_nodes_offset;
+    render::InstanceData *instances = bvhParams.instances + 
+                                      internal_nodes_offset;
+
+    render::TraversalStack stack = {};
+
+    // This starts us at root
+    stack.push(1);
+
+    bool ray_hit = false;
+    Vector3 closest_hit_normal = {};
+
+    while (stack.size > 0) {
+        int32_t node_idx = stack.pop() - 1;
+
+        QBVHNode *node = &nodes[node_idx];
+
+        for (int i = 0; i < node->numChildren; ++i) {
+            assert(node->childrenIdx[i] != 0);
+
+            math::AABB child_aabb = node->convertToAABB(
+                    node->childrenIdx[i]);
+
+            float aabb_hit_t, aabb_far_t;
+            Diag3x3 inv_ray_d = { 1.f/ray_d.x, 1.f/ray_d.y, 1.f/ray_d.z };
+            bool intersect_aabb = child_aabb.rayIntersects(ray_o, inv_ray_d,
+                    4.0f, t_max, aabb_hit_t, aabb_far_t);
+
+            if (aabb_hit_t <= t_max) {
+                if (node->childrenIdx[i] < 0) {
+                    // This child is a leaf.
+                    int32_t instance_idx = (int32_t)(-node->childrenIdx[i] - 1);
+
+                    if (instance_idx >= num_instances)
+                        LOG("Got incorrect instance index: {}\n", instance_idx);
+
+                    assert(instance_idx < num_instances);
+
+                    render::MeshBVH *model_bvh = bvhParams.bvhs +
+                        instances[instance_idx].objectID;
+
+                    render::InstanceData *instance_data =
+                        &instances[instance_idx];
+
+                    // Now we trace through this model.
+                    float hit_t;
+                    Vector3 leaf_hit_normal;
+
+                    // Ok we are going to just do something stupid.
+                    //
+                    // Also need to bound the mesh bvh trace ray by t_max.
+
+                    render::MeshBVH::AABBTransform txfm = {
+                        instance_data->position,
+                        instance_data->rotation,
+                        instance_data->scale
+                    };
+
+                    Vector3 txfm_ray_o = instance_data->scale.inv() *
+                        instance_data->rotation.inv().rotateVec(
+                            (ray_o - instance_data->position));
+
+                    Vector3 txfm_ray_d = instance_data->scale.inv() *
+                        instance_data->rotation.inv().rotateVec(ray_d);
+
+                    float t_scale = txfm_ray_d.length();
+
+                    txfm_ray_d /= t_scale;
+
+                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, &hit_t,
+                            &leaf_hit_normal, &stack, txfm, t_max * t_scale);
+
+                    if (leaf_hit) {
+                        ray_hit = true;
+
+                        float old_t_max = t_max;
+                        t_max = hit_t / t_scale;
+
+                        closest_hit_normal = instance_data->rotation.rotateVec(
+                                instance_data->scale * leaf_hit_normal);
+                        closest_hit_normal = closest_hit_normal.normalize();
+                    }
+                } else {
+                    stack.push(node->childrenIdx[i]);
+                }
+            }
+        }
+    }
+
+    *out_hit_normal = closest_hit_normal;
+    return ray_hit;
+}
+
+#else
+
 // Trace a ray through the top level structure.
 static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     uint32_t view_idx,
@@ -247,6 +381,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     return ray_hit;
 }
+#endif
 
 extern "C" __global__ void bvhRaycastEntry()
 {

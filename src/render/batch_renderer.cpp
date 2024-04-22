@@ -28,7 +28,7 @@ enum class LatestOperation {
 };
 
 namespace consts {
-inline constexpr uint32_t maxDrawsPerLayeredImage = 65536*256;
+inline constexpr uint32_t maxDrawsPerLayeredImage = 65536*16;
 inline constexpr VkFormat colorFormat = VK_FORMAT_R32G32_UINT;
 inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 inline constexpr VkFormat outputColorFormat = VK_FORMAT_R8G8B8A8_UNORM;

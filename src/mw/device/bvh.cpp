@@ -47,6 +47,8 @@ namespace sm {
 
 // We cannot do a true lock-free stack because the items of the stack are
 // stored in a contiguous array.
+//
+// We require the the default constructor of T creates an invalid item.
 template <typename T, int MaxN>
 struct Stack {
     void init()
@@ -151,6 +153,34 @@ struct BuildSlowBuffer {
     }
 };
 
+struct WidenJob {
+    // Index of the LBVH internal node
+    uint32_t lbvhNodeIndex;
+
+    // Index of the QBVH internal node
+    uint32_t qbvhNodeIndex;
+};
+
+struct WidenBuffer {
+    uint32_t worldIdx;
+    uint32_t instancesOffset;
+    uint32_t numInstances;
+    LBVHNode *internalNodesPtr;
+    LBVHNode *leafNodesPtr;
+    render::InstanceData *instances;
+    render::TLBVHNode *aabbs;
+    QBVHNode *traversalNodes;
+
+    cuda::atomic<int32_t, cuda::thread_scope_block> numJobs;
+    cuda::atomic<int32_t, cuda::thread_scope_block> traversalNodesCounter;
+    cuda::atomic<int32_t, cuda::thread_scope_block> processedJobsCounter;
+
+    // Stack containing the indices to the internal nodes
+    Stack<WidenJob, 64> stack;
+
+    char buffer[1];
+};
+
 struct ConstructAABBBuffer {
     uint32_t blockNodeOffset;
     uint32_t totalNumInstances;
@@ -229,8 +259,11 @@ extern "C" __global__ void bvhAllocInternalNodes()
     // For the 2-wide tree, we need about num_instances internal nodes
     uint32_t num_required_nodes = num_instances;
     uint32_t num_bytes = num_required_nodes * 
-        (2 * sizeof(LBVHNode) + sizeof(TreeletFormationNode) +
-         sizeof(uint32_t) + sizeof(uint32_t));
+        (2 * sizeof(LBVHNode) + 
+         sizeof(TreeletFormationNode) +
+         sizeof(uint32_t) + 
+         sizeof(uint32_t) +
+         sizeof(QBVHNode));
 
     mwGPU::TmpAllocator *allocator = (mwGPU::TmpAllocator *)
         bvhParams.tmpAllocator;
@@ -254,6 +287,11 @@ extern "C" __global__ void bvhAllocInternalNodes()
     internal_data->indirectIndices = (uint32_t *)
         ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode)
                      + num_required_nodes * sizeof(TreeletFormationNode));
+
+    internal_data->traversalNodes = (QBVHNode *)
+        ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode)
+                     + num_required_nodes * sizeof(TreeletFormationNode)
+                     + num_required_nodes * sizeof(uint32_t));
 
 #if 0
     internal_data->indirectIndices = (uint32_t *)
@@ -510,7 +548,6 @@ extern "C" __global__ void bvhBuildSlow()
 
     uint32_t current_world_idx = blockIdx.x;
     uint32_t lane_idx = threadIdx.x % MADRONA_WARP_SIZE;
-    uint32_t warp_idx = threadIdx.x / MADRONA_WARP_SIZE;
 
     while (current_world_idx < bvhParams.numWorlds) {
         // Get the instance offsets and stuff.
@@ -668,7 +705,6 @@ extern "C" __global__ void bvhBuildSlow()
                         }
                     }
 
-                    float leaf_cost = num_instances;
                     min_cost = 1.f / 2.f + min_cost / bounds.surfaceArea();
                     uint32_t mid_idx = 0;
 
@@ -698,46 +734,6 @@ extern "C" __global__ void bvhBuildSlow()
 
                 __syncwarp();
             }
-
-#if 0
-            if (threadIdx.x == 0) {
-                // Print everything
-                uint32_t num_internal_nodes =
-                    smem->internalNodeCounter.load(std::memory_order_relaxed);
-                uint32_t num_leaf_nodes =
-                    smem->leafCounter.load(std::memory_order_relaxed);
-
-                for (int i = 0; i < num_internal_nodes; ++i) {
-                    LBVHNode *node = &smem->internalNodesPtr[i];
-
-                    bool left_is_leaf = false;
-                    int32_t left_idx = LBVHNode::storeIdxToChildIdx(node->left, left_is_leaf);
-
-                    bool right_is_leaf = false;
-                    int32_t right_idx = LBVHNode::storeIdxToChildIdx(node->right, right_is_leaf);
-
-                    LOG("Internal node {}: left = {} ({}); right = {} ({}); instanceIdx = {}; parent = {}; aabb = {} {} {} -> {} {} {}\n",
-                        i, 
-                        left_idx, left_is_leaf ? 1 : 2, 
-                        right_idx, right_is_leaf ? 1 : 2,
-                        node->instanceIdx,
-                        node->parent,
-                        node->aabb.pMin.x, node->aabb.pMin.y, node->aabb.pMin.z,
-                        node->aabb.pMax.x, node->aabb.pMax.y, node->aabb.pMax.z);
-                }
-
-                LOG("\n\n");
-
-                for (int i = 0; i < num_leaf_nodes; ++i) {
-                    LBVHNode *node = &smem->leafNodesPtr[i];
-                    LOG("Leaf node {}: left = {}; right = {}; instanceIdx = {}; parent = {}; aabb = {} {} {} -> {} {} {}\n",
-                        i, node->left, node->right, node->instanceIdx,
-                        node->parent,
-                        node->aabb.pMin.x, node->aabb.pMin.y, node->aabb.pMin.z,
-                        node->aabb.pMax.x, node->aabb.pMax.y, node->aabb.pMax.z);
-                }
-            }
-#endif
         }
 
         __syncwarp();
@@ -1051,6 +1047,142 @@ extern "C" __global__ void bvhConstructAABBs()
             // at current->parent.
             current = &internal_nodes[current->parent];
         }
+    }
+}
+
+inline __device__ sm::WidenJob getWidenJob(sm::WidenBuffer *smem)
+{
+    sm::WidenJob stored_job = {};
+    smem->stack.tryPop(&stored_job);
+    return stored_job;
+}
+
+// For now, we're just doing a very naive widening of the initial binary tree.
+extern "C" __global__ void bvhWidenTree()
+{
+    BVHInternalData *internal_data = bvhParams.internalData;
+    sm::WidenBuffer *smem = (sm::WidenBuffer *)sm::buffer;
+
+    uint32_t current_world_idx = blockIdx.x;
+    uint32_t lane_idx = threadIdx.x % MADRONA_WARP_SIZE;
+    uint32_t warp_idx = threadIdx.x / MADRONA_WARP_SIZE;
+
+    while (current_world_idx < bvhParams.numWorlds) {
+        __syncthreads();
+
+        if (threadIdx.x == 0) {
+            smem->worldIdx = current_world_idx;
+            smem->instancesOffset = bvhParams.instanceOffsets[current_world_idx];
+            smem->numInstances = bvhParams.instanceCounts[current_world_idx];
+            smem->internalNodesPtr = internal_data->internalNodes +
+                                     smem->instancesOffset;
+            smem->leafNodesPtr = internal_data->leaves +
+                                 smem->instancesOffset;
+            smem->traversalNodes = internal_data->traversalNodes +
+                                 smem->instancesOffset;
+            smem->instances = bvhParams.instances + smem->instancesOffset;
+            smem->aabbs = bvhParams.aabbs + smem->instancesOffset;
+
+            smem->stack.init();
+            // Push the root node (indices start at 1)
+            smem->stack.push({ 1, 1 });
+
+            smem->numJobs.store(1, std::memory_order_relaxed);
+            smem->processedJobsCounter.store(0, std::memory_order_relaxed);
+            smem->traversalNodesCounter.store(1, std::memory_order_relaxed);
+        }
+
+        __syncthreads();
+
+        if (lane_idx == 0) {
+            while (smem->numJobs.load(std::memory_order_relaxed) > 0) {
+                auto stored_job = getWidenJob(smem);
+
+                if (stored_job.lbvhNodeIndex == 0) {
+                    continue;
+                }
+
+                int32_t processed_jobs_count = 
+                    smem->processedJobsCounter.fetch_add(
+                        1, std::memory_order_relaxed);
+
+                int32_t lbvh_node_idx = stored_job.lbvhNodeIndex - 1;
+
+                LBVHNode *current_node = &smem->internalNodesPtr[lbvh_node_idx];
+
+                uint32_t num_children = 0;
+                QBVHNode::NodeIndexT children_indices[QBVHNode::NodeWidth];
+                math::AABB children_aabbs[QBVHNode::NodeWidth];
+
+                // Push the children
+                if (current_node->left < 0) {
+                    children_indices[num_children++] = current_node->left;
+                } else {
+                    LBVHNode *child = 
+                        &smem->internalNodesPtr[current_node->left - 1];
+
+                    children_indices[num_children++] = child->left;
+                    children_indices[num_children++] = child->right;
+                }
+
+                if (current_node->right < 0) {
+                    children_indices[num_children++] = current_node->right;
+                } else {
+                    LBVHNode *child = 
+                        &smem->internalNodesPtr[current_node->right - 1];
+
+                    children_indices[num_children++] = child->left;
+                    children_indices[num_children++] = child->right;
+                }
+
+                for (int i = 0; i < num_children; ++i) {
+                    if (children_indices[i] < 0) {
+                        LBVHNode *leaf_node = 
+                            &smem->leafNodesPtr[-children_indices[i] - 1];
+
+                        // Store the instance index as negative
+                        children_indices[i] =
+                            -(QBVHNode::NodeIndexT)leaf_node->instanceIdx - 1;
+                        children_aabbs[i] = leaf_node->aabb;
+                    } else {
+                        // Store the indices and aabb, but also start new jobs
+                        LBVHNode *inode =
+                            &smem->internalNodesPtr[children_indices[i] - 1];
+
+                        // Create a new QBVHNode
+                        uint32_t qbvh_node_idx =
+                            smem->traversalNodesCounter.fetch_add(1,
+                                    std::memory_order_relaxed);
+
+                        sm::WidenJob new_job = {
+                            .lbvhNodeIndex = (uint32_t)children_indices[i],
+                            .qbvhNodeIndex = qbvh_node_idx + 1
+                        };
+
+                        smem->stack.push(new_job);
+                        smem->numJobs.fetch_add(1, std::memory_order_relaxed);
+
+                        children_indices[i] = 
+                            (QBVHNode::NodeIndexT)qbvh_node_idx + 1;
+                        children_aabbs[i] = inode->aabb;
+                    }
+                }
+
+                QBVHNode *current_qbvh_node =
+                    &smem->traversalNodes[stored_job.qbvhNodeIndex];
+
+                *current_qbvh_node = QBVHNode::construct(
+                        num_children,
+                        children_aabbs,
+                        children_indices);
+
+                smem->numJobs.fetch_add(-1, std::memory_order_relaxed);
+            }
+        }
+
+        __syncwarp();
+
+        current_world_idx += gridDim.x;
     }
 }
 

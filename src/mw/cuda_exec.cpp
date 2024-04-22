@@ -23,7 +23,7 @@
 
 #include "cpp_compile.hpp"
 
-#define MADRONA_FAST_BVH
+// #define MADRONA_FAST_BVH
 
 // Wrap GPU headers in the mwGPU namespace. This is a weird situation where
 // the CPU madrona headers are available but we need access to the GPU
@@ -329,6 +329,8 @@ struct BVHKernels {
 
     // Walks up the tree and constructs AABBs from the LBVH
     CUfunction constructAABBs;
+
+    CUfunction widenTree;
 
     CUevent startBuildEvent;
     CUevent startTraceEvent;
@@ -1131,6 +1133,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_aabbs, mod,
                                "bvhConstructAABBs"));
 
+    CUfunction widen_tree;
+    REQ_CU(cuModuleGetFunction(&widen_tree, mod,
+                               "bvhWidenTree"));
+
     CUfunction bvh_opt;
     REQ_CU(cuModuleGetFunction(&bvh_opt, mod,
                                "bvhOptimizeLBVH"));
@@ -1165,6 +1171,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .debug = bvh_debug,
         .raycast = bvh_raycast_entry,
         .constructAABBs = bvh_aabbs,
+        .widenTree = widen_tree,
         .startBuildEvent = start_build_record,
         .startTraceEvent = start_trace_record,
         .stopEvent = end_record,
@@ -2111,7 +2118,13 @@ static CUgraphExec makeTaskGraphRunGraph(
         REQ_CU(cuGraphAddKernelNode(&build_slow_node, run_graph,
                                     &alloc_node, 1, &bvh_launch_params));
 
-        CUgraphNode *last = &build_slow_node;
+        bvh_launch_params.func = bvh_kernels.widenTree;
+
+        CUgraphNode widen_trees_node;
+        REQ_CU(cuGraphAddKernelNode(&widen_trees_node, run_graph,
+                                    &build_slow_node, 1, &bvh_launch_params));
+
+        CUgraphNode *last = &widen_trees_node;
 #endif
 
         // We assign a 4x4 region of blocks per image/view
