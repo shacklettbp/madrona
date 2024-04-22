@@ -118,6 +118,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     QBVHNode *nodes = internal_data->traversalNodes +
                       internal_nodes_offset;
+
     render::InstanceData *instances = bvhParams.instances + 
                                       internal_nodes_offset;
 
@@ -131,14 +132,17 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     while (stack.size > 0) {
         int32_t node_idx = stack.pop() - 1;
-
         QBVHNode *node = &nodes[node_idx];
+
+#if 0
+        INSPECT("Going into node: {} with {} children\n",
+                node_idx, (uint32_t)node->numChildren);
+#endif
 
         for (int i = 0; i < node->numChildren; ++i) {
             assert(node->childrenIdx[i] != 0);
 
-            math::AABB child_aabb = node->convertToAABB(
-                    node->childrenIdx[i]);
+            math::AABB child_aabb = node->convertToAABB(i);
 
             float aabb_hit_t, aabb_far_t;
             Diag3x3 inv_ray_d = { 1.f/ray_d.x, 1.f/ray_d.y, 1.f/ray_d.z };

@@ -1080,6 +1080,7 @@ extern "C" __global__ void bvhWidenTree()
                                  smem->instancesOffset;
             smem->traversalNodes = internal_data->traversalNodes +
                                  smem->instancesOffset;
+
             smem->instances = bvhParams.instances + smem->instancesOffset;
             smem->aabbs = bvhParams.aabbs + smem->instancesOffset;
 
@@ -1101,6 +1102,11 @@ extern "C" __global__ void bvhWidenTree()
                 if (stored_job.lbvhNodeIndex == 0) {
                     continue;
                 }
+
+#if 0
+                LOG("Got job lbvhNodeIndex = {}; qbvhNodeIndex = {}\n",
+                    stored_job.lbvhNodeIndex, stored_job.qbvhNodeIndex);
+#endif
 
                 int32_t processed_jobs_count = 
                     smem->processedJobsCounter.fetch_add(
@@ -1169,7 +1175,7 @@ extern "C" __global__ void bvhWidenTree()
                 }
 
                 QBVHNode *current_qbvh_node =
-                    &smem->traversalNodes[stored_job.qbvhNodeIndex];
+                    &smem->traversalNodes[stored_job.qbvhNodeIndex - 1];
 
                 *current_qbvh_node = QBVHNode::construct(
                         num_children,
