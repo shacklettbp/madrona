@@ -4,9 +4,6 @@
 #include <madrona/render/ecs.hpp>
 #include <madrona/components.hpp>
 #include <madrona/mesh_bvh.hpp>
-#include <madrona/mw_gpu/host_print.hpp>
-
-#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 
 namespace madrona {
 
