@@ -40,6 +40,14 @@ uint64_t globalTimer()
 }
 
 struct Profiler {
+    uint64_t timeInTLAS;
+    uint64_t timeInBLAS;
+    uint64_t numBLASTraces;
+    uint64_t numTLASTraces;
+};
+
+#if 0
+struct Profiler {
     uint64_t mark;
     uint64_t timeInTLAS;
     uint64_t timeInBLAS;
@@ -75,6 +83,7 @@ struct Profiler {
 #endif
     }
 };
+#endif
 
 #define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 
@@ -125,6 +134,12 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     bool ray_hit = false;
     Vector3 closest_hit_normal = {};
+
+    uint64_t total_blas_time = 0;
+
+#if defined(MADRONA_PROFILE_BVH_KERNEL)
+    uint64_t start_time = globalTimer();
+#endif
 
     while (stack.size > 0) {
         int32_t node_idx = stack.pop() - 1;
@@ -186,8 +201,16 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
                     txfm_ray_d /= t_scale;
 
+#if defined(MADRONA_PROFILE_BVH_KERNEL)
+                    uint64_t blas_start_time = globalTimer();
                     bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, &hit_t,
                             &leaf_hit_normal, &stack, txfm, t_max * t_scale);
+                    uint64_t blas_end_time = globalTimer();
+                    total_blas_time += (blas_end_time - blas_start_time);
+#else
+                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, &hit_t,
+                            &leaf_hit_normal, &stack, txfm, t_max * t_scale);
+#endif
 
                     if (leaf_hit) {
                         ray_hit = true;
@@ -205,6 +228,14 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             }
         }
     }
+
+#if defined(MADRONA_PROFILE_BVH_KERNEL)
+    uint64_t end_time = globalTimer();
+    uint64_t total_trace_time = end_time - start_time;
+
+    profiler->timeInBLAS += total_blas_time;
+    profiler->timeInTLAS += (total_trace_time - total_blas_time);
+#endif
 
     *out_hit_normal = closest_hit_normal;
     return ray_hit;
@@ -227,10 +258,10 @@ extern "C" __global__ void bvhRaycastEntry()
 #endif
 
     Profiler profiler = {
-        .mark = 0,
         .timeInTLAS = 0,
         .timeInBLAS = 0,
-        .state = ProfilerState::None
+        .numBLASTraces = 0,
+        .numTLASTraces = 0
     };
 
     const uint32_t num_worlds = bvhParams.numWorlds;
