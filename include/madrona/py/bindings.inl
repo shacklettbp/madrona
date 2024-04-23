@@ -25,14 +25,19 @@ auto JAXInterface::buildEntry()
         void *get_ckpts_fn;
         if (xla_gpu) {
 #ifdef MADRONA_CUDA_SUPPORT
-            static_assert(gpu_init_fn != nullptr && gpu_step_fn != nullptr);
-            auto init_wrapper =
-                &JAXInterface::gpuEntryFn<SimT, gpu_init_fn>;
-            init_fn = std::bit_cast<void *>(init_wrapper);
+            if constexpr (gpu_init_fn != nullptr &&
+                          gpu_step_fn != nullptr) {
+                auto init_wrapper =
+                    &JAXInterface::gpuEntryFn<SimT, gpu_init_fn>;
+                init_fn = std::bit_cast<void *>(init_wrapper);
 
-            auto step_wrapper =
-                &JAXInterface::gpuEntryFn<SimT, gpu_step_fn>;
-            step_fn = std::bit_cast<void *>(step_wrapper);
+                auto step_wrapper =
+                    &JAXInterface::gpuEntryFn<SimT, gpu_step_fn>;
+                step_fn = std::bit_cast<void *>(step_wrapper);
+            } else {
+                init_fn = nullptr;
+                step_fn = nullptr;
+            }
 
             if constexpr (gpu_load_ckpts_fn != nullptr &&
                     gpu_get_ckpts_fn != nullptr) {
