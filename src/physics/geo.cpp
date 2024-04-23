@@ -7,7 +7,7 @@ namespace madrona::geo {
 
 using namespace math;
 
-static inline MADRONA_ALWAYS_INLINE
+MADRONA_ALWAYS_INLINE static inline
 Vector3 getHullSupportPointGJK(
     HalfEdgeMesh &hull,
     Vector3 v)

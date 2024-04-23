@@ -167,13 +167,13 @@ struct GJKSimplexSolveState {
     std::array<float, 4> lambdas;
 };
 
-inline MADRONA_ALWAYS_INLINE
+MADRONA_ALWAYS_INLINE inline
 bool gjkCompareSigns(float a, float b)
 {
     return (a > 0 && b > 0) || (a < 0 && b < 0);
 }
 
-inline MADRONA_ALWAYS_INLINE
+MADRONA_ALWAYS_INLINE inline
 GJKSimplexSolveState gjkSolve1Simplex(Vector3 Y0)
 {
     return {
@@ -183,7 +183,7 @@ GJKSimplexSolveState gjkSolve1Simplex(Vector3 Y0)
     };
 }
 
-inline MADRONA_ALWAYS_INLINE
+MADRONA_ALWAYS_INLINE inline
 GJKSimplexSolveState gjkSolve2Simplex(
     Vector3 Y0, Vector3 Y1)
 {
@@ -255,7 +255,7 @@ GJKSimplexSolveState gjkSolve2Simplex(
 }
 
 
-inline MADRONA_ALWAYS_INLINE
+MADRONA_ALWAYS_INLINE inline
 GJKSimplexSolveState gjkSolve3Simplex(
     Vector3 Y0, Vector3 Y1, Vector3 Y2)
 {
@@ -392,7 +392,7 @@ GJKSimplexSolveState gjkSolve3Simplex(
     return res;
 }
 
-inline MADRONA_ALWAYS_INLINE
+MADRONA_ALWAYS_INLINE inline
 GJKSimplexSolveState gjkSolve4Simplex(
     Vector3 Y0, Vector3 Y1, Vector3 Y2, Vector3 Y3)
 {
