@@ -124,8 +124,6 @@ void * TmpAllocator::alloc(uint64_t num_bytes)
             auto *host_alloc = mwGPU::getHostAllocator();
 #endif
 
-            LOG("Need to map more shit: {}\n", host_alloc);
-
             uint64_t min_grow = required_bytes - cur_mapped_bytes;
 
             // Double by default

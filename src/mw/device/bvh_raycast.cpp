@@ -151,8 +151,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 #endif
 
         for (int i = 0; i < node->numChildren; ++i) {
-            assert(node->childrenIdx[i] != 0);
-
             math::AABB child_aabb = node->convertToAABB(i);
 
             float aabb_hit_t, aabb_far_t;
@@ -167,8 +165,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
                     if (instance_idx >= num_instances)
                         LOG("Got incorrect instance index: {}\n", instance_idx);
-
-                    assert(instance_idx < num_instances);
 
                     render::MeshBVH *model_bvh = bvhParams.bvhs +
                         instances[instance_idx].objectID;
