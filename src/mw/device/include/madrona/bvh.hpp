@@ -5,6 +5,10 @@
 #include <madrona/components.hpp>
 #include <madrona/mesh_bvh.hpp>
 
+#ifndef MADRONA_TLAS_WIDTH
+#define MADRONA_TLAS_WIDTH 4
+#endif
+
 namespace madrona {
 
 // This is the structure of the node which is just used for traversal
@@ -106,7 +110,7 @@ struct BVHNodeQuantized {
 };
 
 // The quantized BVH node used currently
-using QBVHNode = BVHNodeQuantized<int16_t, 4>;
+using QBVHNode = BVHNodeQuantized<int16_t, MADRONA_TLAS_WIDTH>;
 
 // This isn't going to be the representation that actually gets traversed
 // through. This is just for construction purposes.

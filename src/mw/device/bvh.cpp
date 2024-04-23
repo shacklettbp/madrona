@@ -800,8 +800,6 @@ extern "C" __global__ void bvhBuildFast()
                       world_info.internalNodesOffset;
     LBVHNode *leaves = internal_data->leaves + 
                        world_info.internalNodesOffset;
-    TreeletFormationNode *treelet_form_nodes = internal_data->treeletFormNodes +
-                                               world_info.internalNodesOffset;
 
     nodes[tn_offset].left = 0;
     nodes[tn_offset].right = 0;
@@ -916,9 +914,6 @@ extern "C" __global__ void bvhBuildFast()
         nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
         nodes[split_index + 1].parent = tn_offset;
     }
-
-    treelet_form_nodes[tn_offset].numLeaves.store_relaxed(0);
-    treelet_form_nodes[tn_offset].numReached.store_relaxed(0);
 }
 
 // Constructs the internal nodes' AABBs
@@ -1099,11 +1094,6 @@ extern "C" __global__ void bvhWidenTree()
                     continue;
                 }
 
-#if 0
-                LOG("Got job lbvhNodeIndex = {}; qbvhNodeIndex = {}\n",
-                    stored_job.lbvhNodeIndex, stored_job.qbvhNodeIndex);
-#endif
-
                 int32_t processed_jobs_count = 
                     smem->processedJobsCounter.fetch_add(
                         1, std::memory_order_relaxed);
@@ -1116,25 +1106,35 @@ extern "C" __global__ void bvhWidenTree()
                 QBVHNode::NodeIndexT children_indices[QBVHNode::NodeWidth];
                 math::AABB children_aabbs[QBVHNode::NodeWidth];
 
-                // Push the children
-                if (current_node->left < 0) {
-                    children_indices[num_children++] = current_node->left;
+                if constexpr (QBVHNode::NodeWidth == 2) {
+                    if (current_node->left != 0) {
+                        children_indices[num_children++] = current_node->left;
+                    }
+
+                    if (current_node->left != 0) {
+                        children_indices[num_children++] = current_node->right;
+                    }
                 } else {
-                    LBVHNode *child = 
-                        &smem->internalNodesPtr[current_node->left - 1];
+                    // Push the children
+                    if (current_node->left < 0) {
+                        children_indices[num_children++] = current_node->left;
+                    } else if (current_node->left != 0) {
+                        LBVHNode *child = 
+                            &smem->internalNodesPtr[current_node->left - 1];
 
-                    children_indices[num_children++] = child->left;
-                    children_indices[num_children++] = child->right;
-                }
+                        children_indices[num_children++] = child->left;
+                        children_indices[num_children++] = child->right;
+                    }
 
-                if (current_node->right < 0) {
-                    children_indices[num_children++] = current_node->right;
-                } else {
-                    LBVHNode *child = 
-                        &smem->internalNodesPtr[current_node->right - 1];
+                    if (current_node->right < 0) {
+                        children_indices[num_children++] = current_node->right;
+                    } else if (current_node->left != 0) {
+                        LBVHNode *child = 
+                            &smem->internalNodesPtr[current_node->right - 1];
 
-                    children_indices[num_children++] = child->left;
-                    children_indices[num_children++] = child->right;
+                        children_indices[num_children++] = child->left;
+                        children_indices[num_children++] = child->right;
+                    }
                 }
 
                 for (int i = 0; i < num_children; ++i) {

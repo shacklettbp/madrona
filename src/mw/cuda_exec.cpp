@@ -1068,6 +1068,15 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         common_compile_flags.push_back("--device-debug");
     }
 
+    const char *widen_bvh_env = getenv("MADRONA_WIDEN");
+    bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
+
+    if (widen_bvh) {
+        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=4");
+    } else {
+        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=2");
+    }
+
     for (const char *user_flag : cfg.userCompileFlags) {
         common_compile_flags.push_back(user_flag);
     }
@@ -2082,54 +2091,76 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &start_record_node, 1,
                                     &bvh_launch_params));
 
-#if defined(MADRONA_FAST_BVH)
-        // Fast LBVH build node
-        const uint32_t num_blocks_per_sm_fast_build = 16;
-        bvh_launch_params.func = bvh_kernels.buildFast;
-        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
-                                     num_blocks_per_sm_fast_build;
-        bvh_launch_params.blockDimX = 256;
-        bvh_launch_params.sharedMemBytes = shared_mem_per_sm / 
-                                           num_blocks_per_sm_fast_build;
+        const char *fast_bvh_env = getenv("MADRONA_LBVH");
+        bool fast_bvh = (fast_bvh_env && fast_bvh_env[0] == '1');
+
+        const char *widen_bvh_env = getenv("MADRONA_WIDEN");
+        bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
+
+        CUgraphNode *last = nullptr;
 
         CUgraphNode build_fast_node;
-        REQ_CU(cuGraphAddKernelNode(&build_fast_node, run_graph,
-                                    &alloc_node, 1, 
-                                    &bvh_launch_params));
-
-        bvh_launch_params.func = bvh_kernels.constructAABBs;
-
         CUgraphNode construct_aabbs_node;
-        REQ_CU(cuGraphAddKernelNode(&construct_aabbs_node, run_graph,
-                                    &build_fast_node, 1, 
-                                    &bvh_launch_params));
-
-        CUgraphNode *last = &construct_aabbs_node;
-#else
-        const uint32_t num_blocks_per_sm_slow_build = 16;
-        bvh_launch_params.func = bvh_kernels.buildSlow;
-        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
-                                     num_blocks_per_sm_slow_build;
-        bvh_launch_params.blockDimX = 256;
-        bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
-                                           num_blocks_per_sm_slow_build;
-
         CUgraphNode build_slow_node;
-        REQ_CU(cuGraphAddKernelNode(&build_slow_node, run_graph,
-                                    &alloc_node, 1, &bvh_launch_params));
-
-        bvh_launch_params.func = bvh_kernels.widenTree;
-
         CUgraphNode widen_trees_node;
-        REQ_CU(cuGraphAddKernelNode(&widen_trees_node, run_graph,
-                                    &build_slow_node, 1, &bvh_launch_params));
 
-        CUgraphNode *last = &widen_trees_node;
-#endif
+        if (fast_bvh) {
+            printf(">>>>>>>>>>>>>> Using LBVH <<<<<<<<<<<<<<\n");
+
+            // Fast LBVH build node
+            const uint32_t num_blocks_per_sm_fast_build = 16;
+            bvh_launch_params.func = bvh_kernels.buildFast;
+            bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+                num_blocks_per_sm_fast_build;
+            bvh_launch_params.blockDimX = 256;
+            bvh_launch_params.sharedMemBytes = shared_mem_per_sm / 
+                num_blocks_per_sm_fast_build;
+
+            REQ_CU(cuGraphAddKernelNode(&build_fast_node, run_graph,
+                        &alloc_node, 1, 
+                        &bvh_launch_params));
+
+            bvh_launch_params.func = bvh_kernels.constructAABBs;
+
+            REQ_CU(cuGraphAddKernelNode(&construct_aabbs_node, run_graph,
+                        &build_fast_node, 1, 
+                        &bvh_launch_params));
+
+            last = &construct_aabbs_node;
+        } else {
+            printf(">>>>>>>>>>>>>> Using Binned SAH <<<<<<<<<<<<<<\n");
+
+            const uint32_t num_blocks_per_sm_slow_build = 16;
+            bvh_launch_params.func = bvh_kernels.buildSlow;
+            bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+                num_blocks_per_sm_slow_build;
+            bvh_launch_params.blockDimX = 256;
+            bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
+                num_blocks_per_sm_slow_build;
+
+            REQ_CU(cuGraphAddKernelNode(&build_slow_node, run_graph,
+                        &alloc_node, 1, &bvh_launch_params));
+
+            last = &build_slow_node;
+        }
+
+        if (true) {
+            const uint32_t num_blocks_per_sm_slow_build = 16;
+            bvh_launch_params.func = bvh_kernels.widenTree;
+            bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+                num_blocks_per_sm_slow_build;
+            bvh_launch_params.blockDimX = 256;
+            bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
+                num_blocks_per_sm_slow_build;
+
+            REQ_CU(cuGraphAddKernelNode(&widen_trees_node, run_graph,
+                        last, 1, &bvh_launch_params));
+
+            last = &widen_trees_node;
+        }
 
         // We assign a 4x4 region of blocks per image/view
         // Each block processes 16x16 pixels and we have one thread per pixel.
-
         CUgraphNode start_trace_node;
         REQ_CU(cuGraphAddEventRecordNode(
                     &start_trace_node, run_graph,
