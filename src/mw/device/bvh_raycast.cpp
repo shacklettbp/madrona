@@ -35,7 +35,7 @@ enum class ProfilerState {
 uint64_t globalTimer()
 {
     uint64_t timestamp;
-    asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(timestamp));
+    asm volatile("mov.u64 %0, %%clock64;" : "=l"(timestamp));
     return timestamp;
 }
 

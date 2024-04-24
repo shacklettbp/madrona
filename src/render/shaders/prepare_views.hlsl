@@ -203,7 +203,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
         if((!planeAABB(sm.nearPlane,center,extents) || !planeAABB(sm.leftPlane,center,extents) ||
            !planeAABB(sm.rightPlane,center,extents) || !planeAABB(sm.bottomPlane,center,extents) ||
            !planeAABB(sm.topPlane,center,extents) || !planeAABB(sm.farPlane,center,extents))){
-            some_value = 1;
+            continue;
         }
 
         ObjectData obj = objectDataBuffer[instance_data.objectID];
