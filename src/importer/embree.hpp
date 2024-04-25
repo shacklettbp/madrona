@@ -5,16 +5,5 @@
 
 namespace madrona::imp {
 
-struct EmbreeLoader {
-    struct Impl;
-
-    EmbreeLoader(Span<char> err_buf);
-    EmbreeLoader(EmbreeLoader &&) = default;
-    ~EmbreeLoader();
-
-    std::unique_ptr<Impl> impl_;
-
-    Optional<render::MeshBVH> load(const SourceObject &obj);
-};
     
 }

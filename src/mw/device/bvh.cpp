@@ -657,6 +657,7 @@ extern "C" __global__ void bvhBuildSlow()
                             prim_idx < current_job.end;
                             prim_idx++) {
                         math::AABB aabb = smem->getAABB(prim_idx);
+
                         int b = kNumBuckets * centroid_bounds.offset(
                                 aabb.centroid())[max_dim];
 
@@ -711,13 +712,6 @@ extern "C" __global__ void bvhBuildSlow()
                                 min_cost_split_bucket,
                                 centroid_bounds,
                                 max_dim);
-
-                        for (int i = current_job.start; i < mid_idx; ++i) {
-#if 0
-                            assert(getBucket(smem, i, centroid_bounds, max_dim) <= 
-                                    min_cost_split_bucket);
-#endif
-                        }
                     }
 
                     uint32_t current_node_idx = pushInternalNode(
