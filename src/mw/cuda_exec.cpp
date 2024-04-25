@@ -332,8 +332,17 @@ struct BVHKernels {
 
     CUfunction widenTree;
 
+#if 0
     CUevent startBuildEvent;
+    CUevent startWidenEvent;
     CUevent startTraceEvent;
+    CUevent stopEvent;
+#endif
+
+    CUevent allocEvent;
+    CUevent buildEvent;
+    CUevent widenEvent;
+    CUevent traceEvent;
     CUevent stopEvent;
 
     std::vector<TimingData> recordedTimings;
@@ -1158,13 +1167,17 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     REQ_CU(cuModuleGetFunction(&bvh_raycast_entry, mod,
                                "bvhRaycastEntry"));
 
-    CUevent start_build_record;
-    CUevent start_trace_record;
-    CUevent end_record;
+    CUevent alloc_event;
+    CUevent build_event;
+    CUevent widen_event;
+    CUevent trace_event;
+    CUevent stop_event;
 
-    cuEventCreate(&start_build_record, CU_EVENT_DEFAULT);
-    cuEventCreate(&start_trace_record, CU_EVENT_DEFAULT);
-    cuEventCreate(&end_record, CU_EVENT_DEFAULT);
+    cuEventCreate(&alloc_event, CU_EVENT_DEFAULT);
+    cuEventCreate(&build_event, CU_EVENT_DEFAULT);
+    cuEventCreate(&widen_event, CU_EVENT_DEFAULT);
+    cuEventCreate(&trace_event, CU_EVENT_DEFAULT);
+    cuEventCreate(&stop_event, CU_EVENT_DEFAULT);
 
     auto *timing_info = (mwGPU::madrona::KernelTimingInfo *)
         cu::allocReadback(sizeof(mwGPU::madrona::KernelTimingInfo));
@@ -1181,9 +1194,11 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .raycast = bvh_raycast_entry,
         .constructAABBs = bvh_aabbs,
         .widenTree = widen_tree,
-        .startBuildEvent = start_build_record,
-        .startTraceEvent = start_trace_record,
-        .stopEvent = end_record,
+        .allocEvent = alloc_event,
+        .buildEvent = build_event,
+        .widenEvent = widen_event,
+        .traceEvent = trace_event,
+        .stopEvent = stop_event,
         .timingInfo = timing_info
     };
 
@@ -2065,11 +2080,11 @@ static CUgraphExec makeTaskGraphRunGraph(
 
     if (enable_raycasting) { // Add the bvh kernel nodes
         // Add the start record event
-        CUgraphNode start_record_node;
+        CUgraphNode alloc_event_node;
         REQ_CU(cuGraphAddEventRecordNode(
-                    &start_record_node, run_graph,
+                    &alloc_event_node, run_graph,
                     &megakernel_launches.back(), 1,
-                    bvh_kernels.startBuildEvent));
+                    bvh_kernels.allocEvent));
 
         CUDA_KERNEL_NODE_PARAMS bvh_launch_params = {
             .func = bvh_kernels.allocInternalNodes,
@@ -2088,7 +2103,7 @@ static CUgraphExec makeTaskGraphRunGraph(
         // Allocation node
         CUgraphNode alloc_node;
         REQ_CU(cuGraphAddKernelNode(&alloc_node, run_graph,
-                                    &start_record_node, 1,
+                                    &alloc_event_node, 1,
                                     &bvh_launch_params));
 
         const char *fast_bvh_env = getenv("MADRONA_LBVH");
@@ -2103,6 +2118,9 @@ static CUgraphExec makeTaskGraphRunGraph(
         CUgraphNode construct_aabbs_node;
         CUgraphNode build_slow_node;
         CUgraphNode widen_trees_node;
+
+        CUgraphNode build_event_node, widen_event_node,
+                    trace_event_node, stop_event_node;
 
         if (fast_bvh) {
             printf(">>>>>>>>>>>>>> Using LBVH <<<<<<<<<<<<<<\n");
@@ -2130,6 +2148,11 @@ static CUgraphExec makeTaskGraphRunGraph(
         } else {
             printf(">>>>>>>>>>>>>> Using Binned SAH <<<<<<<<<<<<<<\n");
 
+            REQ_CU(cuGraphAddEventRecordNode(
+                        &build_event_node, run_graph,
+                        &alloc_node, 1,
+                        bvh_kernels.buildEvent));
+
             const uint32_t num_blocks_per_sm_slow_build = 16;
             bvh_launch_params.func = bvh_kernels.buildSlow;
             bvh_launch_params.gridDimX = bvh_kernels.numSMs *
@@ -2139,12 +2162,17 @@ static CUgraphExec makeTaskGraphRunGraph(
                 num_blocks_per_sm_slow_build;
 
             REQ_CU(cuGraphAddKernelNode(&build_slow_node, run_graph,
-                        &alloc_node, 1, &bvh_launch_params));
+                        &build_event_node, 1, &bvh_launch_params));
 
             last = &build_slow_node;
         }
 
         if (true) {
+            REQ_CU(cuGraphAddEventRecordNode(
+                        &widen_event_node, run_graph,
+                        last, 1,
+                        bvh_kernels.widenEvent));
+
             const uint32_t num_blocks_per_sm_slow_build = 16;
             bvh_launch_params.func = bvh_kernels.widenTree;
             bvh_launch_params.gridDimX = bvh_kernels.numSMs *
@@ -2154,18 +2182,23 @@ static CUgraphExec makeTaskGraphRunGraph(
                 num_blocks_per_sm_slow_build;
 
             REQ_CU(cuGraphAddKernelNode(&widen_trees_node, run_graph,
-                        last, 1, &bvh_launch_params));
+                        &widen_event_node, 1, &bvh_launch_params));
 
             last = &widen_trees_node;
         }
+
+        REQ_CU(cuGraphAddEventRecordNode(
+                    &trace_event_node, run_graph,
+                    last, 1,
+                    bvh_kernels.traceEvent));
 
         // We assign a 4x4 region of blocks per image/view
         // Each block processes 16x16 pixels and we have one thread per pixel.
         CUgraphNode start_trace_node;
         REQ_CU(cuGraphAddEventRecordNode(
                     &start_trace_node, run_graph,
-                    last, 1,
-                    bvh_kernels.startTraceEvent));
+                    &trace_event_node, 1,
+                    bvh_kernels.traceEvent));
 
 
         const uint32_t num_resident_views_per_sm = 4;
@@ -2188,9 +2221,8 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &start_trace_node, 1,
                                     &bvh_launch_raycast));
 
-        CUgraphNode end_record_node;
         REQ_CU(cuGraphAddEventRecordNode(
-                    &end_record_node, run_graph,
+                    &stop_event_node, run_graph,
                     &raycast_node, 1,
                     bvh_kernels.stopEvent));
     }
@@ -2441,6 +2473,73 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs(
     return buildLaunchGraph(all_taskgraph_ids, enable_raytracing);
 }
 
+void MWCudaExecutor::getTimings()
+{
+    REQ_CU(cuEventSynchronize(impl_->bvhKernels.allocEvent));
+    REQ_CU(cuEventSynchronize(impl_->bvhKernels.buildEvent));
+    REQ_CU(cuEventSynchronize(impl_->bvhKernels.widenEvent));
+    REQ_CU(cuEventSynchronize(impl_->bvhKernels.traceEvent));
+    REQ_CU(cuEventSynchronize(impl_->bvhKernels.stopEvent));
+
+    float alloc_time_ms = 0.f;
+    REQ_CU(cuEventElapsedTime(&alloc_time_ms,
+                impl_->bvhKernels.allocEvent, 
+                impl_->bvhKernels.buildEvent));
+
+    float build_time_ms = 0.f;
+    REQ_CU(cuEventElapsedTime(&build_time_ms,
+                impl_->bvhKernels.buildEvent, 
+                impl_->bvhKernels.widenEvent));
+
+    float widen_time_ms = 0.f;
+    REQ_CU(cuEventElapsedTime(&build_time_ms,
+                impl_->bvhKernels.widenEvent, 
+                impl_->bvhKernels.traceEvent));
+
+    float trace_time_ms = 0.f;
+    REQ_CU(cuEventElapsedTime(&trace_time_ms,
+                impl_->bvhKernels.traceEvent, 
+                impl_->bvhKernels.stopEvent));
+
+    printf("alloc time: %f ms; build time: %f ms; widen time: %f; trace time: %f\n",
+            alloc_time_ms, build_time_ms,
+            widen_time_ms, trace_time_ms);
+
+    float total_time = trace_time_ms + build_time_ms;
+
+    uint64_t time_in_tlas_u64 = 
+        impl_->bvhKernels.timingInfo->tlasTime.load_relaxed();
+    uint64_t time_in_blas_u64 = 
+        impl_->bvhKernels.timingInfo->blasTime.load_relaxed();
+    uint64_t num_processed_pixels =
+        impl_->bvhKernels.timingInfo->timingCounts.load_relaxed();
+    uint64_t num_tlas_traces =
+        impl_->bvhKernels.timingInfo->numTLASTraces.load_relaxed();
+    uint64_t num_blas_traces =
+        impl_->bvhKernels.timingInfo->numBLASTraces.load_relaxed();
+
+    double time_in_tlas_f64 = (double)time_in_tlas_u64 / 1000000000.f;
+    double time_in_blas_f64 = (double)time_in_blas_u64 / 1000000000.f;
+    time_in_tlas_f64 /= (double)num_processed_pixels;
+    time_in_blas_f64 /= (double)num_processed_pixels;
+
+    double ratio = time_in_tlas_f64 / (time_in_tlas_f64 + time_in_blas_f64);
+
+    double avg_num_tlas_traces = (double)num_tlas_traces / 
+        (double)num_processed_pixels;
+    double avg_num_blas_traces = (double)num_blas_traces / 
+        (double)num_processed_pixels;
+
+    impl_->bvhKernels.recordedTimings.push_back({
+        total_time,
+        build_time_ms / total_time,
+        trace_time_ms / total_time,
+        (float)avg_num_tlas_traces,
+        (float)avg_num_blas_traces,
+        (float)ratio,
+    });
+}
+
 void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
 {
     REQ_CU(cuGraphLaunch(launch_graph.impl_->runGraph, impl_->cuStream));
@@ -2451,19 +2550,35 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
 
 #if 1
     if (launch_graph.impl_->enableRaytracing) {
-        REQ_CU(cuEventSynchronize(impl_->bvhKernels.startBuildEvent));
-        REQ_CU(cuEventSynchronize(impl_->bvhKernels.startTraceEvent));
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.allocEvent));
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.buildEvent));
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.widenEvent));
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.traceEvent));
         REQ_CU(cuEventSynchronize(impl_->bvhKernels.stopEvent));
+
+        float alloc_time_ms = 0.f;
+        REQ_CU(cuEventElapsedTime(&alloc_time_ms,
+                    impl_->bvhKernels.allocEvent, 
+                    impl_->bvhKernels.buildEvent));
 
         float build_time_ms = 0.f;
         REQ_CU(cuEventElapsedTime(&build_time_ms,
-                    impl_->bvhKernels.startBuildEvent, 
-                    impl_->bvhKernels.startTraceEvent));
+                    impl_->bvhKernels.buildEvent, 
+                    impl_->bvhKernels.widenEvent));
+
+        float widen_time_ms = 0.f;
+        REQ_CU(cuEventElapsedTime(&build_time_ms,
+                    impl_->bvhKernels.widenEvent, 
+                    impl_->bvhKernels.traceEvent));
 
         float trace_time_ms = 0.f;
         REQ_CU(cuEventElapsedTime(&trace_time_ms,
-                    impl_->bvhKernels.startTraceEvent, 
+                    impl_->bvhKernels.traceEvent, 
                     impl_->bvhKernels.stopEvent));
+
+        printf("alloc time: %f ms; build time: %f ms; widen time: %f; trace time: %f\n",
+                alloc_time_ms, build_time_ms,
+                widen_time_ms, trace_time_ms);
 
         float total_time = trace_time_ms + build_time_ms;
 
@@ -2483,43 +2598,21 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
         time_in_tlas_f64 /= (double)num_processed_pixels;
         time_in_blas_f64 /= (double)num_processed_pixels;
 
-#if 0
-        printf("Time in TLAS: %lf; Time in BLAS: %lf\n",
-                time_in_tlas_f64, time_in_blas_f64);
-        printf("Time in TLAS: %llu; Time in BLAS: %llu\n",
-                time_in_tlas_u64, time_in_blas_u64);
-#endif
-
         double ratio = time_in_tlas_f64 / (time_in_tlas_f64 + time_in_blas_f64);
-#if 0
-        printf("Ratio of TLAS over whole trace time: %lf\n", ratio);
-#endif
 
         double avg_num_tlas_traces = (double)num_tlas_traces / 
             (double)num_processed_pixels;
         double avg_num_blas_traces = (double)num_blas_traces / 
             (double)num_processed_pixels;
 
-#if 0
-        printf("Avg num TLAS traces: %lf; Avg num BLAS traces: %lf\n",
-                avg_num_tlas_traces, avg_num_blas_traces);
-#endif
-
         impl_->bvhKernels.recordedTimings.push_back({
-            total_time,
-            build_time_ms / total_time,
-            trace_time_ms / total_time,
-            (float)avg_num_tlas_traces,
-            (float)avg_num_blas_traces,
-            (float)ratio,
-        });
-
-#if 0
-        printf("ray casting kernels took %f (%f build vs %f trace) ms\n",
                 total_time,
                 build_time_ms / total_time,
-                trace_time_ms / total_time);
-#endif
+                trace_time_ms / total_time,
+                (float)avg_num_tlas_traces,
+                (float)avg_num_blas_traces,
+                (float)ratio,
+                });
     }
 #endif
 }

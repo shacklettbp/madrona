@@ -581,6 +581,8 @@ extern "C" __global__ void bvhBuildSlow()
         __syncthreads();
 
         if (lane_idx == 0) {
+            uint32_t num_jobs = 0;
+
             while (smem->numJobs.load(std::memory_order_relaxed) > 0) {
                 // Try to pop a job from the stack.
                 BinnedSAHJob current_job = getBinnedSAHJob(smem);
@@ -593,6 +595,8 @@ extern "C" __global__ void bvhBuildSlow()
                     // or there weren't any jobs in the stack).
                     continue;
                 }
+
+                ++num_jobs;
 
                 int32_t processed_jobs_count = 
                     smem->processedJobsCounter.fetch_add(
