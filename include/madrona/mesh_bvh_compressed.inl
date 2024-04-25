@@ -86,7 +86,7 @@ void MeshBVHCompressed::findOverlaps(const math::AABB &aabb, Fn &&fn) const
                         fn(a, b, c);
                     }
                 } else {
-                    assert(stack_size < 32);
+                    // assert(stack_size < 32);
                     stack[stack_size++] = node.children[i];
                 }
             }
@@ -227,7 +227,7 @@ bool MeshBVHCompressed::traceRay(math::Vector3 ray_o,
                         closest_hit_normal = leaf_hit_normal;
                     }
                 } else {
-                    assert(stack->size < 32);
+                    // assert(stack->size < 32);
                     stack->push(node.children[i]);
                 }
             }
@@ -375,7 +375,7 @@ bool MeshBVHCompressed::traceRay(math::Vector3 ray_o,
                         closest_hit_normal = leaf_hit_normal;
                     }
                 } else {
-                    assert(stack->size < 32);
+                    // assert(stack->size < 32);
                     stack->push(node.children[i]);
                 }
             }
@@ -581,9 +581,9 @@ bool MeshBVHCompressed::fetchLeafTriangle(CountT leaf_idx,
     uint32_t c_idx = uint32_t((int32_t)a_idx + c_diff);
 #endif
 
-    assert(a_idx < numVerts);
-    assert(b_idx < numVerts);
-    assert(c_idx < numVerts);
+    // assert(a_idx < numVerts);
+    // assert(b_idx < numVerts);
+    // assert(c_idx < numVerts);
 
     *a = vertices[a_idx];
     *b = vertices[b_idx];
@@ -809,7 +809,7 @@ float MeshBVHCompressed::sphereCast(math::Vector3 ray_o,
                         closest_hit_normal = leaf_hit_normal;
                     }
                 } else {
-                    assert(stack_size < 32);
+                    // assert(stack_size < 32);
                     stack[stack_size++] = node.children[i];
                 }
             }

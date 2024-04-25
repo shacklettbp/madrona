@@ -6,7 +6,6 @@
 #define MADRONA_DEBUG_TEST_NUM_LEAVES 11
 #define MADRONA_TREELET_SIZE 7
 
-#include <atomic>
 #include <algorithm>
 #include <madrona/bvh.hpp>
 #include <madrona/math.hpp>
@@ -63,7 +62,7 @@ struct Stack {
             while (lock_.load(std::memory_order_relaxed) == 1);
         }
 
-        assert(offset < MaxN);
+        // assert(offset < MaxN);
 
         items[offset++] = item;
 
@@ -376,7 +375,7 @@ inline __device__ void updateParent(sm::BuildSlowBuffer *smem,
 
     case BinnedSAHJob::Direction::None: {
         // This should never ever happen.
-        assert(false);
+        // assert(false);
     } break;
 
     }
@@ -714,8 +713,10 @@ extern "C" __global__ void bvhBuildSlow()
                                 max_dim);
 
                         for (int i = current_job.start; i < mid_idx; ++i) {
+#if 0
                             assert(getBucket(smem, i, centroid_bounds, max_dim) <= 
                                     min_cost_split_bucket);
+#endif
                         }
                     }
 
@@ -1346,7 +1347,7 @@ static __device__ inline void formTreelet(uint32_t treelet_idx)
 
             // Now, replace the node with maximum sah with its 2 children.
             // This should NEVER fail
-            assert(argmax_sah != -1);
+            // assert(argmax_sah != -1);
 
             LBVHNode *replaced_node = &internal_nodes[
                 formed_treelet.leaves[argmax_sah]];

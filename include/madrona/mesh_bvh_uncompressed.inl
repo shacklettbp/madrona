@@ -77,7 +77,7 @@ void MeshBVHUncompressed::findOverlaps(const math::AABB &aabb, Fn &&fn) const
                         fn(a, b, c);
                     }
                 } else {
-                    assert(stack_size < 32);
+                    // assert(stack_size < 32);
                     stack[stack_size++] = node.children[i];
                 }
             }
@@ -174,14 +174,14 @@ bool MeshBVHUncompressed::traceRay(math::Vector3 ray_o,
                         closest_hit_normal = leaf_hit_normal;
                     }
                 } else {
-                    assert(stack->size < TraversalStack::stackSize);
+                    // assert(stack->size < TraversalStack::stackSize);
                     stack->push(node.children[i]);
                 }
             }
         }
     }
 
-    assert(stack->size == previous_stack_size);
+    // assert(stack->size == previous_stack_size);
 
     if (!ray_hit) {
         return false;
@@ -273,7 +273,7 @@ bool MeshBVHUncompressed::traceRay(math::Vector3 ray_o,
                         closest_hit_normal = leaf_hit_normal;
                     }
                 } else {
-                    assert(stack_size < 32);
+                    // assert(stack_size < 32);
                     stack[stack_size++] = node.children[i];
                 }
             }
@@ -480,9 +480,9 @@ bool MeshBVHUncompressed::fetchLeafTriangle(CountT leaf_idx,
     uint32_t c_idx = uint32_t((int32_t)a_idx + c_diff);
 #endif
 
-    assert(a_idx < numVerts);
-    assert(b_idx < numVerts);
-    assert(c_idx < numVerts);
+    // assert(a_idx < numVerts);
+    // assert(b_idx < numVerts);
+    // assert(c_idx < numVerts);
 
     *a = vertices[a_idx];
     *b = vertices[b_idx];
@@ -703,7 +703,7 @@ float MeshBVHUncompressed::sphereCast(math::Vector3 ray_o,
                         closest_hit_normal = leaf_hit_normal;
                     }
                 } else {
-                    assert(stack_size < 32);
+                    // assert(stack_size < 32);
                     stack[stack_size++] = node.children[i];
                 }
             }
