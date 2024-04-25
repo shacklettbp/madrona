@@ -85,6 +85,7 @@ auto tensor_to_jax(const Tensor &tensor)
     };
 }
 
+
 JAXModule JAXModule::imp()
 {
     nb::object mod = nb::module_::import_("jax");
@@ -198,14 +199,30 @@ nb::dict train_interface_outputs_to_pytree(
     return d;
 }
 
+nb::dict train_interface_checkpointing_to_pytree(
+    const JAXModule &jax_mod,
+    const TrainInterface &iface)
+{
+    nb::dict d;
+
+    d["load"] = tensor_iface_to_jax(
+        jax_mod, iface.checkpointing()->triggerLoad);
+    d["data"] = tensor_iface_to_jax(
+        jax_mod, iface.checkpointing()->checkpointData);
+
+    return d;
 }
 
-nb::object JAXInterface::setup(const TrainInterface &iface,
-                               nb::object sim_obj,
-                               void *sim_ptr,
-                               void *init_fn,
-                               void *step_fn,
-                               bool xla_gpu)
+}
+
+nb::dict JAXInterface::setup(const TrainInterface &iface,
+                             nb::object sim_obj,
+                             void *sim_ptr,
+                             void *init_fn,
+                             void *step_fn,
+                             void *load_ckpts_fn,
+                             void *get_ckpts_fn,
+                             bool xla_gpu)
 {
     JAXModule jax_mod = JAXModule::imp();
 
@@ -226,11 +243,39 @@ nb::object JAXInterface::setup(const TrainInterface &iface,
     scope["step_custom_call_capsule"] = step_fn_capsule;
     scope["custom_call_platform"] = xla_gpu ? "gpu" : "cpu";
 
+
+    if (iface.checkpointing().has_value()) {
+        assert(load_ckpts_fn && get_ckpts_fn);
+
+        nb::dict checkpointing_iface = train_interface_checkpointing_to_pytree(
+            jax_mod, iface);
+
+        nb::capsule load_ckpts_fn_capsule(
+            load_ckpts_fn, "xla._CUSTOM_CALL_TARGET");
+        nb::capsule get_ckpts_fn_capsule(
+            get_ckpts_fn, "xla._CUSTOM_CALL_TARGET");
+
+        scope["ckpt_iface"] = checkpointing_iface;
+        scope["load_ckpts_custom_call_capsule"] = load_ckpts_fn_capsule;
+        scope["get_ckpts_custom_call_capsule"] = get_ckpts_fn_capsule;
+    } else {
+        scope["ckpt_iface"] = nb::none();
+    }
+
     nb::exec(
 #include "jax_register.py"
     , scope);
 
-    return nb::make_tuple(scope["init_func"], scope["step_func"]);
+    nb::dict fns;
+    fns["init"] = scope["init_func"];
+    fns["step"] = scope["step_func"];
+
+    if (iface.checkpointing().has_value()) {
+        fns["load_ckpts"] = scope["load_ckpts_func"];
+        fns["get_ckpts"] = scope["get_ckpts_func"];
+    }
+
+    return fns;
 }
 
 static TensorElementType fromDLPackType(nb::dlpack::dtype dtype)

@@ -10,7 +10,9 @@ template <auto iface_fn,
           auto cpu_init_fn,
           auto cpu_step_fn,
           auto gpu_init_fn,
-          auto gpu_step_fn>
+          auto gpu_step_fn,
+          auto gpu_load_ckpts_fn,
+          auto gpu_get_ckpts_fn>
 auto JAXInterface::buildEntry()
 {
     using SimT =
@@ -19,19 +21,42 @@ auto JAXInterface::buildEntry()
     return [](nb::object sim, bool xla_gpu) {
         void *init_fn;
         void *step_fn;
+        void *load_ckpts_fn;
+        void *get_ckpts_fn;
         if (xla_gpu) {
 #ifdef MADRONA_CUDA_SUPPORT
-            static_assert(gpu_init_fn != nullptr && gpu_step_fn != nullptr);
-            auto init_wrapper =
-                &JAXInterface::gpuEntryFn<SimT, gpu_init_fn>;
-            init_fn = std::bit_cast<void *>(init_wrapper);
+            if constexpr (gpu_init_fn != nullptr &&
+                          gpu_step_fn != nullptr) {
+                auto init_wrapper =
+                    &JAXInterface::gpuEntryFn<SimT, gpu_init_fn>;
+                init_fn = std::bit_cast<void *>(init_wrapper);
 
-            auto step_wrapper =
-                &JAXInterface::gpuEntryFn<SimT, gpu_step_fn>;
-            step_fn = std::bit_cast<void *>(step_wrapper);
+                auto step_wrapper =
+                    &JAXInterface::gpuEntryFn<SimT, gpu_step_fn>;
+                step_fn = std::bit_cast<void *>(step_wrapper);
+            } else {
+                init_fn = nullptr;
+                step_fn = nullptr;
+            }
+
+            if constexpr (gpu_load_ckpts_fn != nullptr &&
+                    gpu_get_ckpts_fn != nullptr) {
+                auto load_ckpts_wrapper =
+                    &JAXInterface::gpuEntryFn<SimT, gpu_load_ckpts_fn>;
+                load_ckpts_fn = std::bit_cast<void *>(load_ckpts_wrapper);
+
+                auto get_ckpts_wrapper =
+                    &JAXInterface::gpuEntryFn<SimT, gpu_get_ckpts_fn>;
+                get_ckpts_fn = std::bit_cast<void *>(get_ckpts_wrapper);
+            } else {
+                load_ckpts_fn = nullptr;
+                get_ckpts_fn = nullptr;
+            }
 #else
             init_fn = nullptr;
             step_fn = nullptr;
+            load_ckpts_fn = nullptr;
+            get_ckpts_fn = nullptr;
 #endif
         } else {
             auto init_wrapper =
@@ -41,12 +66,16 @@ auto JAXInterface::buildEntry()
             auto step_wrapper =
                 &JAXInterface::cpuEntryFn<SimT, cpu_step_fn>;
             step_fn = std::bit_cast<void *>(step_wrapper);
+
+            load_ckpts_fn = nullptr;
+            get_ckpts_fn = nullptr;
         }
         assert(init_fn != nullptr && step_fn != nullptr);
 
         SimT *sim_ptr = nb::inst_ptr<SimT>(sim);
         TrainInterface iface = std::invoke(iface_fn, *sim_ptr);
-        return setup(iface, sim, (void *)sim_ptr, init_fn, step_fn, xla_gpu);
+        return setup(iface, sim, (void *)sim_ptr, init_fn, step_fn,
+                     load_ckpts_fn, get_ckpts_fn, xla_gpu);
     };
 }
 

@@ -70,6 +70,7 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/navmesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../core/base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/physics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/geo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/xpbd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/tgs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/narrowphase.cpp
@@ -113,6 +114,7 @@ foreach(f ${MADRONA_MW_GPU_COMPILE_FLAGS})
 endforeach()
 set(NVRTC_OPTIONS "${NVRTC_OPTIONS}")
 
+
 target_compile_definitions(madrona_mw_gpu PRIVATE
     MADRONA_NVRTC_OPTIONS=${NVRTC_OPTIONS}
     MADRONA_MW_GPU_JOB_SYS_INTERNAL_CPP=${JOB_SYS_INTERNAL_SRC_LIST}
@@ -120,6 +122,17 @@ target_compile_definitions(madrona_mw_gpu PRIVATE
     MADRONA_MW_GPU_BVH_INTERNAL_CPP=${BVH_INTERNAL_SRC_LIST}
     MADRONA_CUDADEVRT_PATH=\"${CUDA_DEVICE_RUNTIME}\"
     MADRONA_MW_GPU_DEVICE_SRC_DIR=\"${DEVICE_SRC_DIR}\"
+)
+
+target_compile_definitions(madrona_mw_gpu
+    PUBLIC
+        MADRONA_MWGPU_SUPPORT=1
+    PRIVATE
+        MADRONA_NVRTC_OPTIONS=${NVRTC_OPTIONS}
+        MADRONA_MW_GPU_JOB_SYS_INTERNAL_CPP=${JOB_SYS_INTERNAL_SRC_LIST}
+        MADRONA_MW_GPU_TASK_GRAPH_INTERNAL_CPP=${TASK_GRAPH_INTERNAL_SRC_LIST}
+        MADRONA_CUDADEVRT_PATH=\"${CUDA_DEVICE_RUNTIME}\"
+        MADRONA_MW_GPU_DEVICE_SRC_DIR=\"${DEVICE_SRC_DIR}\"
 )
 
 # Helper function for library users to get list of sources / compileflags

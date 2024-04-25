@@ -89,15 +89,23 @@ struct TrainStepOutputInterface {
     Span<const NamedTensorInterface> pbt = {};
 };
 
+struct TrainCheckpointingInterface {
+    TensorInterface triggerLoad;
+    TensorInterface checkpointData;
+};
+
 class TrainInterface {
 public:
     TrainInterface(TrainStepInputInterface step_inputs,
-                   TrainStepOutputInterface step_outputs);
+                   TrainStepOutputInterface step_outputs,
+                   Optional<TrainCheckpointingInterface> checkpointing = 
+                       Optional<TrainCheckpointingInterface>::none());
     TrainInterface(TrainInterface &&o);
     ~TrainInterface();
 
     TrainStepInputInterface stepInputs() const;
     TrainStepOutputInterface stepOutputs() const;
+    Optional<TrainCheckpointingInterface> checkpointing() const;
 
 private:
     struct Impl;

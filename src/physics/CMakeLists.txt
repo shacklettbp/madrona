@@ -2,6 +2,8 @@ set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include/madrona")
 
 set(MADRONA_PHYSICS_SRCS
     ${INC_DIR}/physics.hpp ${INC_DIR}/physics.inl physics.cpp
+    ${INC_DIR}/mesh_bvh.hpp ${INC_DIR}/mesh_bvh.inl
+    ${INC_DIR}/geo.hpp ${INC_DIR}/geo.inl geo.cpp
     narrowphase.cpp broadphase.cpp
     xpbd.hpp xpbd.cpp
     tgs.hpp tgs.cpp

@@ -8,4 +8,6 @@
 #define DBL_MAX (__DBL_MAX__)
 #define DBL_MIN (__DBL_MIN__)
 
+#define FLT_EPSILON (__FLT_EPSILON__)
+
 #include "cuda_std_post"

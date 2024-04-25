@@ -201,4 +201,123 @@ def step_func(step_inputs):
 init_func = jax.jit(init_func)
 step_func = jax.jit(step_func)
 
+if ckpt_iface != None:
+    load_ckpts_custom_call_name = f"{custom_call_prefix}_load_ckpts"
+    get_ckpts_custom_call_name = f"{custom_call_prefix}_get_ckpts"
+
+    xla_client.register_custom_call_target(
+        load_ckpts_custom_call_name, load_ckpts_custom_call_capsule,
+        platform=custom_call_platform)
+    
+    xla_client.register_custom_call_target(
+        get_ckpts_custom_call_name, get_ckpts_custom_call_capsule,
+        platform=custom_call_platform)
+
+    def _flatten_load_ckpts_output_shape_dtypes():
+        result_shape_dtypes = list(step_outputs_iface['obs'].values())
+        return result_shape_dtypes
+
+    def _load_ckpts_lowering(ctx, *flattened_inputs):
+        token = ctx.tokens_in.get(_SimEffect)[0]
+        inputs = [token, *flattened_inputs]
+    
+        input_types = [ir.RankedTensorType(i.type) for i in flattened_inputs]
+        input_layouts = [_row_major_layout(t.shape) for t in input_types]
+        input_types, input_layouts = _prepend_token_to_inputs(
+            input_types, input_layouts)
+    
+        result_types = _lower_shape_dtypes(
+            _flatten_load_ckpts_output_shape_dtypes())
+        result_layouts = [_row_major_layout(t.shape) for t in result_types]
+        result_types, result_layouts = _append_token_to_results(
+            result_types, result_layouts)
+    
+        results = custom_call(
+            load_ckpts_custom_call_name,
+            backend_config=sim_encode,
+            operands=inputs,
+            operand_layouts=input_layouts,
+            result_types=result_types,
+            result_layouts=result_layouts,
+            has_side_effect=True,
+        ).results
+    
+        *results, token = results
+        ctx.set_tokens_out(mlir.TokenSet({_SimEffect: (token,)}))
+    
+        return results
+    
+    
+    def _load_ckpts_abstract(*inputs):
+        return _shape_dtype_to_abstract_vals(
+            _flatten_load_ckpts_output_shape_dtypes()), {_SimEffect}
+    
+    _load_ckpts_primitive = core.Primitive(load_ckpts_custom_call_name)
+    _load_ckpts_primitive.multiple_results = True
+    _load_ckpts_primitive.def_impl(partial(xla.apply_primitive, _load_ckpts_primitive))
+    _load_ckpts_primitive.def_effectful_abstract_eval(_load_ckpts_abstract)
+    
+    mlir.register_lowering(
+        _load_ckpts_primitive,
+        _load_ckpts_lowering,
+        platform=custom_call_platform,
+    )
+    
+
+    def _flatten_get_ckpts_output_shape_dtypes():
+        result_shape_dtypes = [ckpt_iface['data']]
+        return result_shape_dtypes
+
+
+    def _get_ckpts_lowering(ctx, *flattened_inputs):
+        token = ctx.tokens_in.get(_SimEffect)[0]
+
+        result_types = _lower_shape_dtypes(
+            _flatten_get_ckpts_output_shape_dtypes())
+        result_layouts = [_row_major_layout(t.shape) for t in result_types]
+        result_types, result_layouts = _append_token_to_results(
+            result_types, result_layouts)
+    
+        results = custom_call(
+            get_ckpts_custom_call_name,
+            backend_config=sim_encode,
+            operands=[token],
+            operand_layouts=[()],
+            result_types=result_types,
+            result_layouts=result_layouts,
+            has_side_effect=True,
+        ).results
+    
+        *results, token = results
+        ctx.set_tokens_out(mlir.TokenSet({_SimEffect: (token,)}))
+    
+        return results
+    
+    
+    def _get_ckpts_abstract():
+        return _shape_dtype_to_abstract_vals(
+            _flatten_get_ckpts_output_shape_dtypes()), {_SimEffect}
+    
+    _get_ckpts_primitive = core.Primitive(get_ckpts_custom_call_name)
+    _get_ckpts_primitive.multiple_results = True
+    _get_ckpts_primitive.def_impl(partial(xla.apply_primitive, _get_ckpts_primitive))
+    _get_ckpts_primitive.def_effectful_abstract_eval(_get_ckpts_abstract)
+    
+    mlir.register_lowering(
+        _get_ckpts_primitive,
+        _get_ckpts_lowering,
+        platform=custom_call_platform,
+    )
+    
+    def load_ckpts_func(trigger_load, ckpts):
+        flattened_out = _load_ckpts_primitive.bind(trigger_load, ckpts)
+        return {k: o for k, o in zip(step_outputs_iface['obs'].keys(), flattened_out)}
+
+    def get_ckpts_func():
+        return _get_ckpts_primitive.bind()[0]
+    
+    
+    load_ckpts_func = jax.jit(load_ckpts_func)
+    get_ckpts_func = jax.jit(get_ckpts_func)
+
 #)==="

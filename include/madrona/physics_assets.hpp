@@ -17,6 +17,7 @@ struct SourceCollisionPrimitive {
     CollisionPrimitive::Type type;
     union {
         CollisionPrimitive::Sphere sphere;
+        CollisionPrimitive::Plane plane;
         HullInput hullInput;
     };
 };

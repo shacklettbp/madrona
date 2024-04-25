@@ -574,7 +574,7 @@ float Vector4::operator[](CountT i) const
     }
 }
 
-Vector4 Vector4::fromVector3(Vector3 v, float w)
+Vector4 Vector4::fromVec3W(Vector3 v, float w)
 {
     return Vector4 {
         v.x,
@@ -1605,9 +1605,9 @@ bool AABB::rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
     math::Vector3 t_upper = inv_ray_d * (pMax - ray_o);
     // The four t-intervals (for x-/y-/z-slabs, and ray p(t))
     math::Vector4 t_mins =
-        Vector4::fromVector3(Vector3::min(t_lower, t_upper), ray_t_min);
+        Vector4::fromVec3W(Vector3::min(t_lower, t_upper), ray_t_min);
     math::Vector4 t_maxes = 
-        Vector4::fromVector3(Vector3::max(t_lower, t_upper), ray_t_max);
+        Vector4::fromVec3W(Vector3::max(t_lower, t_upper), ray_t_max);
     // Easy to remember: ``max of mins, and min of maxes''
 
     auto max_component = [](Vector4 v) {
@@ -1634,9 +1634,9 @@ bool AABB::rayIntersects(Vector3 ray_o, Diag3x3 inv_ray_d,
     math::Vector3 t_upper = inv_ray_d * (pMax - ray_o);
     // The four t-intervals (for x-/y-/z-slabs, and ray p(t))
     math::Vector4 t_mins =
-        Vector4::fromVector3(Vector3::min(t_lower, t_upper), ray_t_min);
+        Vector4::fromVec3W(Vector3::min(t_lower, t_upper), ray_t_min);
     math::Vector4 t_maxes = 
-        Vector4::fromVector3(Vector3::max(t_lower, t_upper), ray_t_max);
+        Vector4::fromVec3W(Vector3::max(t_lower, t_upper), ray_t_max);
     // Easy to remember: ``max of mins, and min of maxes''
 
     auto max_component = [](Vector4 v) {

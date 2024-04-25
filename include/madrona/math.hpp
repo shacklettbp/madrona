@@ -154,7 +154,7 @@ struct Vector4 {
     inline float & operator[](CountT i);
     inline float operator[](CountT i) const;
 
-    static inline Vector4 fromVector3(Vector3 v, float w);
+    static inline Vector4 fromVec3W(Vector3 v, float w);
 
     inline Vector4 operator*(float a) const;
     inline Vector4 operator+(const Vector4 &) const;

@@ -25,7 +25,9 @@ public:
               auto cpu_init_fn,
               auto cpu_step_fn,
               auto gpu_init_fn = nullptr,
-              auto gpu_step_fn = nullptr>
+              auto gpu_step_fn = nullptr,
+              auto gpu_load_ckpts_fn = nullptr,
+              auto gpu_get_ckpts_fn = nullptr>
     static auto buildEntry();
 
 private:
@@ -38,12 +40,14 @@ private:
                            const char *opaque, size_t opaque_len);
 #endif
 
-    static nb::object setup(const TrainInterface &iface,
-                            nb::object sim_obj,
-                            void *sim_ptr,
-                            void *init_fn,
-                            void *step_fn,
-                            bool xla_gpu);
+    static nb::dict setup(const TrainInterface &iface,
+                          nb::object sim_obj,
+                          void *sim_ptr,
+                          void *init_fn,
+                          void *step_fn,
+                          void *load_ckpts_fn,
+                          void *get_ckpts_fn,
+                          bool xla_gpu);
 };
 
 void setupMadronaSubmodule(nb::module_ parent_mod);
