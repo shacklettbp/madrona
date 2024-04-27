@@ -24,7 +24,7 @@ namespace InternalConfig {
 inline constexpr uint32_t numFrames = 2;
 inline constexpr uint32_t initMaxTransforms = 100000;
 inline constexpr uint32_t initMaxMatIndices = 100000;
-inline constexpr uint32_t shadowMapSize = 4096;
+inline constexpr uint32_t shadowMapSize = 256;
 inline constexpr uint32_t maxLights = 10;
 inline constexpr uint32_t maxTextures = 100;
 inline constexpr VkFormat gbufferFormat = VK_FORMAT_R16G16B16A16_SFLOAT;

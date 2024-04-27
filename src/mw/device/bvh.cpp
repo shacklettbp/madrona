@@ -569,6 +569,8 @@ extern "C" __global__ void bvhBuildSlow()
             smem->leafCounter.store(0, std::memory_order_relaxed);
             smem->internalNodeCounter.store(0, std::memory_order_relaxed);
             smem->processedJobsCounter.store(0, std::memory_order_relaxed);
+
+            // LOG("num_worlds={}; num_instances={}\n", bvhParams.numWorlds, smem->numInstances);
         }
 
         __syncthreads();

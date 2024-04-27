@@ -627,6 +627,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     }
 
     rtcReleaseBVH(bvh);
+    rtcReleaseDevice(device);
 
     bvh_out.numNodes = nodes.size();
     bvh_out.numLeaves = leaf_geos.size();
@@ -639,7 +640,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     bvh_out.vertices = vertices.release(true);
     bvh_out.rootAABB = aabb_out;
 
-    printf("AABB: %f\n", bvh_out.rootAABB.surfaceArea());
+    // printf("AABB: %f\n", bvh_out.rootAABB.surfaceArea());
 
     return bvh_out;
 }
