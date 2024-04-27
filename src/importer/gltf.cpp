@@ -1397,6 +1397,22 @@ static bool gltfParseMesh(
 
                     indices.push_back(idx);
                 }
+            } else if (index_type == GLTFComponentType::UINT8) {
+                auto idx_accessor = getGLTFAccessorView<const uint8_t>(
+                    loader, prim.indicesIdx);
+                if (!idx_accessor.has_value()) {
+                    return false;
+                }
+
+                indices.reserve(idx_accessor->size());
+
+                for (uint16_t idx : *idx_accessor) {
+                    if (idx > max_idx) {
+                        max_idx = idx;
+                    }
+
+                    indices.push_back(idx);
+                }
             } else {
                 loader.recordError(
                     "GLTF loading failed: unsupported index type");
