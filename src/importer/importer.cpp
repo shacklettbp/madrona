@@ -55,9 +55,13 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
     auto embree_loader = Optional<EmbreeLoader>::none();
 
+    printf("Asset load progress: \n");
+
     bool load_success = false;
     for (const char *path : paths) {
         uint32_t pre_objects_offset = imported.objects.size();
+        printf(".");
+        fflush(stdout);
 
         std::string_view path_view(path);
 
@@ -99,6 +103,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         }
 
         if (!load_success) {
+            printf("Load failed\n");
             break;
         }
 
@@ -125,6 +130,8 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         }
 #endif
     }
+
+    printf("\n");
 
     if (!load_success) {
         return Optional<ImportedAssets>::none();

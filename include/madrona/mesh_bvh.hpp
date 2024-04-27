@@ -1,7 +1,7 @@
 #pragma once
 
 // We are not working with the compressed BVH for now.
-#define MADRONA_COMPRESSED_BVH
+// #define MADRONA_COMPRESSED_BVH
 
 #ifdef MADRONA_COMPRESSED_BVH
 #include "mesh_bvh_compressed.hpp"
