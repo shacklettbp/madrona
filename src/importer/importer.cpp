@@ -4,6 +4,8 @@
 #include <madrona/heap_array.hpp>
 
 #include <string_view>
+#include <filesystem>
+#include <string>
 
 #include <meshoptimizer.h>
 
@@ -23,6 +25,84 @@
 namespace madrona::imp {
 
 using namespace math;
+
+bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
+    FILE *ptr;
+    ptr = fopen(location, "rb");
+
+    if(ptr == nullptr){
+        return false;
+    }
+
+    uint32_t num_bvhs;
+    fread(&num_bvhs,sizeof(num_bvhs),1,ptr);
+    bvhs_out.reserve(num_bvhs);
+
+    for(CountT i = 0; i < num_bvhs; i++) {
+        uint32_t num_verts;
+        uint32_t num_nodes;
+        uint32_t num_leaves;
+        math::AABB aabb_out;
+        fread(&num_verts, sizeof(num_verts), 1, ptr);
+        fread(&num_nodes, sizeof(num_nodes), 1, ptr);
+        fread(&num_leaves, sizeof(num_leaves), 1, ptr);
+        fread(&aabb_out, sizeof(aabb_out), 1, ptr);
+
+        assert(num_verts < 2000000);
+        assert(num_nodes < 2000000);
+        assert(num_leaves < 2000000);
+
+        DynArray<render::MeshBVH::Node> nodes{num_nodes};
+        fread(nodes.data(), sizeof(render::MeshBVH::Node), num_nodes, ptr);
+
+        DynArray<render::MeshBVH::LeafGeometry> leaf_geos{num_leaves};
+        fread(leaf_geos.data(), sizeof(render::MeshBVH::LeafGeometry), num_leaves, ptr);
+
+        DynArray<render::MeshBVH::LeafMaterial> leaf_materials{num_leaves};
+        fread(leaf_materials.data(), sizeof(render::MeshBVH::LeafMaterial), num_leaves, ptr);
+
+        DynArray<math::Vector3> vertices{num_verts};
+        fread(vertices.data(), sizeof(math::Vector3), num_verts, ptr);
+
+        render::MeshBVH bvh;
+        bvh.numNodes = num_nodes;
+        bvh.numLeaves = num_leaves;
+        bvh.numVerts = num_verts;
+        bvh.magic = render::MeshBVH::magicSignature;
+
+        bvh.nodes = nodes.release(true);
+        bvh.leafGeos = leaf_geos.release(true);
+        bvh.leafMats = leaf_materials.release(true);
+        bvh.vertices = vertices.release(true);
+        bvh.rootAABB = aabb_out;
+        bvhs_out.push_back(bvh);
+    }
+
+    fclose(ptr);
+    return true;
+}
+
+void writeCache(const char* location, DynArray<render::MeshBVH>& bvhs){
+    FILE *ptr;
+    ptr = fopen(location, "wb");
+
+    uint32_t num_bvhs = bvhs.size();
+    fwrite(&num_bvhs, sizeof(uint32_t), 1, ptr);
+
+    for(CountT i = 0; i < bvhs.size(); i++) {
+        fwrite(&bvhs[i].numVerts, sizeof(uint32_t), 1, ptr);
+        fwrite(&bvhs[i].numNodes, sizeof(uint32_t), 1, ptr);
+        fwrite(&bvhs[i].numLeaves, sizeof(uint32_t), 1, ptr);
+        fwrite(&bvhs[i].rootAABB, sizeof(math::AABB), 1, ptr);
+
+        fwrite(bvhs[i].nodes, sizeof(render::MeshBVH::Node), bvhs[i].numNodes, ptr);
+        fwrite(bvhs[i].leafGeos, sizeof(render::MeshBVH::LeafGeometry), bvhs[i].numLeaves, ptr);
+        fwrite(bvhs[i].leafMats, sizeof(render::MeshBVH::LeafMaterial), bvhs[i].numLeaves, ptr);
+        fwrite(bvhs[i].vertices, sizeof(math::Vector3), bvhs[i].numVerts, ptr);
+    }
+
+    fclose(ptr);
+}
 
 Optional<ImportedAssets> ImportedAssets::importFromDisk(
     Span<const char * const> paths, Span<char> err_buf,
@@ -54,6 +134,19 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 #endif
 
     auto embree_loader = Optional<EmbreeLoader>::none();
+
+    char* bvh_cache_dir = getenv("MADRONA_BVH_CACHE_DIR");
+    std::filesystem::path cache_dir = "";
+
+    char* bvh_cache = getenv("MADRONA_REGEN_BVH_CACHE");
+    bool regen_cache = false;
+    if(bvh_cache){
+       regen_cache = atoi(bvh_cache);
+    }
+
+    if(bvh_cache_dir){
+        cache_dir = bvh_cache_dir;
+    }
 
     printf("Asset load progress: \n");
 
@@ -109,21 +202,40 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
 #if 1
         if (generate_mesh_bvhs) {
-            uint32_t post_objects_offset = imported.objects.size();
+            std::filesystem::path loaded_path = path;
+
+            bool should_construct = true;
 
             // Create a mesh BVH for all the meshes in recently loaded objects.
             DynArray<render::MeshBVH> asset_bvhs { 0 };
 
-            for (uint32_t object_idx = pre_objects_offset;
-                    object_idx < post_objects_offset; ++object_idx) {
-                SourceObject &obj = imported.objects[object_idx];
+            if(bvh_cache_dir && !regen_cache) {
+                should_construct = !loadCache((cache_dir /
+                        loaded_path.filename()).c_str(), asset_bvhs);
+                if(should_construct){
+                    printf("Missing %s. Reconstructing.\n",loaded_path.filename().c_str());
+                }
+            }
 
-                obj.bvhIndex = (uint32_t)asset_bvhs.size();
+            if(should_construct) {
+                uint32_t post_objects_offset = imported.objects.size();
 
-                Optional<render::MeshBVH> bvh = embree_loader->load(obj);
-                assert(bvh.has_value());
+                for (uint32_t object_idx = pre_objects_offset;
+                     object_idx < post_objects_offset; ++object_idx) {
+                    SourceObject &obj = imported.objects[object_idx];
 
-                asset_bvhs.push_back(*bvh);
+                    obj.bvhIndex = (uint32_t) asset_bvhs.size();
+
+                    Optional<render::MeshBVH> bvh = embree_loader->load(obj);
+                    assert(bvh.has_value());
+
+                    asset_bvhs.push_back(*bvh);
+                }
+            }
+
+            if(bvh_cache_dir && (regen_cache || should_construct)){
+                printf("Caching File %s\n",loaded_path.filename().c_str());
+                writeCache((cache_dir / loaded_path.filename()).c_str(), asset_bvhs);
             }
 
             imported.geoData.meshBVHArrays.push_back(std::move(asset_bvhs));
