@@ -1391,7 +1391,13 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
 
     GPUKernels gpu_kernels {
         .mod = compile_results.mod,
-        .megakernels = std::move(megakernel_fns)
+        .megakernels = std::move(megakernel_fns),
+        .computeGPUImplConsts = 0,
+        .initECS = 0,
+        .initWorlds = 0,
+        .initTasks = 0,
+        .queueUserInit = 0,
+        .queueUserRun = 0,
     };
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
@@ -1663,7 +1669,8 @@ static GPUEngineState initEngineAndUserState(
     }
 
     HostAllocInit alloc_init {
-        (uint64_t)sysconf(_SC_PAGESIZE),
+        std::max((uint64_t)sysconf(_SC_PAGESIZE),
+                 (uint64_t)cu_va_alloc_granularity),
         (uint64_t)cu_va_alloc_granularity,
         allocator_channel,
     };
@@ -1865,6 +1872,8 @@ static GPUEngineState initEngineAndUserState(
         .sharedMemBytes = 0,
         .kernelParams = nullptr,
         .extra = queue_args.data(),
+        .kern = nullptr,
+        .ctx = nullptr,
     };
 
     CUgraphNode queue_node;
@@ -2069,6 +2078,8 @@ static CUgraphExec makeTaskGraphRunGraph(
             .sharedMemBytes = 0,
             .kernelParams = nullptr,
             .extra = args,
+            .kern = nullptr,
+            .ctx = nullptr,
         };
 
         CUgraphNode megakernel_node;

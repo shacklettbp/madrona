@@ -31,10 +31,12 @@ struct Table {
     int32_t numColumns;
 
     AtomicI32 numRows;
+    int32_t reservedRows;
     int32_t mappedRows;
     SpinLock growLock;
      
-    static inline constexpr uint32_t maxRowsPerTable = 1_u32 << 30;
+    static inline constexpr uint64_t maxReservedBytesPerTable =
+        128_u64 * 1024_u64 * 1024_u64 * 1024_u64;
 };
 
 }
