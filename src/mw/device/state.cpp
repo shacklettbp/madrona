@@ -43,7 +43,9 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
         new_num_rows = tbl.mappedRows + 500'000;
     }
 
-    int32_t min_mapped_rows = Table::maxRowsPerTable;
+    assert(new_num_rows < tbl.reservedRows);
+
+    int32_t min_mapped_rows = tbl.reservedRows;
 
     for (int32_t i = 0; i < tbl.numColumns; i++) {
         void *column_base = tbl.columns[i];
@@ -180,7 +182,19 @@ StateManager::ArchetypeStore::ArchetypeStore(
     tbl.numColumns = num_columns;
     tbl.numRows.store_relaxed(0);
 
-    int32_t min_mapped_rows = Table::maxRowsPerTable;
+    uint64_t bytes_per_row = 0;
+    for (int32_t i = 0; i < (int32_t)num_columns; i++) {
+        uint64_t col_row_bytes = type_infos[i].numBytes;
+        bytes_per_row += col_row_bytes;
+    }
+    
+    uint64_t num_reserved_rows = Table::maxReservedBytesPerTable /
+        bytes_per_row;
+    num_reserved_rows = min(num_reserved_rows, 0x7FFF'FFFF_u64);
+    
+    tbl.reservedRows = (int32_t)num_reserved_rows;
+
+    int32_t min_mapped_rows = (int32_t)num_reserved_rows;
 
     uint32_t max_column_size = 0;
 
@@ -194,8 +208,7 @@ StateManager::ArchetypeStore::ArchetypeStore(
     for (int32_t i = 0; i < (int32_t)num_columns; i++) {
         uint64_t col_row_bytes = type_infos[i].numBytes;
 
-        uint64_t reserve_bytes =
-            col_row_bytes * (uint64_t)Table::maxRowsPerTable;
+        uint64_t reserve_bytes = col_row_bytes * num_reserved_rows;
         reserve_bytes = alloc->roundUpReservation(reserve_bytes);
 
         uint64_t init_bytes = col_row_bytes * (uint64_t)num_worlds;
