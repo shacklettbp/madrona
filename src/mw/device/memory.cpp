@@ -1,5 +1,5 @@
 #include <madrona/memory.hpp>
-
+#include <madrona/table.hpp>
 #include <madrona/utils.hpp>
 
 namespace madrona {
@@ -85,7 +85,7 @@ __shared__ Chunk buffer[numSMemBytes / sizeof(Chunk)];
 }
 
 TmpAllocator::TmpAllocator()
-    : base_(mwGPU::getHostAllocator()->reserveMemory(128ul * 1024ul * 1024ul * 1024ul, 0)),
+    : base_(mwGPU::getHostAllocator()->reserveMemory(Table::maxReservedBytesPerTable, 0)),
       offset_(0),
       num_mapped_bytes_(0),
       grow_lock_()
