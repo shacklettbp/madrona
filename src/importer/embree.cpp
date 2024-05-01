@@ -16,8 +16,8 @@ struct EmbreeLoader::Impl {
     // Right now, this is unused.
 };
 
-constexpr int numTrisPerLeaf = 8;
-constexpr int nodeWidth = 4;
+constexpr int numTrisPerLeaf = render::MeshBVH ::numTrisPerLeaf;
+constexpr int nodeWidth = render::MeshBVH::nodeWidth;
 static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
 
 struct NodeCompressed {
@@ -96,15 +96,17 @@ struct Node {
 };
 
 struct InnerNode : public Node {
-    BoundingBox bounds[4];
-    Node* children[4];
+    BoundingBox bounds[render::MeshBVH::nodeWidth];
+    Node* children[render::MeshBVH::nodeWidth];
     int numChildren;
     int id = -1;
 
     InnerNode()
     {
-        bounds[0] = bounds[1] = bounds[2] = bounds[3] = {};
-        children[0] = children[1] = children[2] = children[3] = nullptr;
+        for(int i=0;i<render::MeshBVH::nodeWidth;i++){
+            bounds[i] = {};
+            children[i] = nullptr;
+        }
         numChildren = 0;
         isLeaf = false;
     }
@@ -123,7 +125,7 @@ struct InnerNode : public Node {
             0
         };
 
-        for(int i = 0; i < 4; i++){
+        for(int i = 0; i < render::MeshBVH::nodeWidth; i++){
             if(children[i] != nullptr){
                 cost += children[i]->sah() * area(bounds[i]);
                 total = merge(bounds[i],total);
@@ -173,7 +175,7 @@ struct InnerNode : public Node {
 };
 
 struct LeafNode : public Node {
-    unsigned int id[8];
+    unsigned int id[render::MeshBVH::numTrisPerLeaf];
     unsigned int numPrims;
     BoundingBox bounds;
     int lid = -1;
@@ -325,11 +327,11 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     arguments.byteSize = sizeof(arguments);
     arguments.buildFlags = RTC_BUILD_FLAG_NONE;
     arguments.buildQuality = RTC_BUILD_QUALITY_HIGH;
-    arguments.maxBranchingFactor = 4;
+    arguments.maxBranchingFactor = MeshBVH::nodeWidth;
     arguments.maxDepth = 1024;
     arguments.sahBlockSize = 1;
-    arguments.minLeafSize = 4;
-    arguments.maxLeafSize = 8;
+    arguments.minLeafSize = ceil(MeshBVH::numTrisPerLeaf / 2.0);
+    arguments.maxLeafSize = MeshBVH::numTrisPerLeaf;
     arguments.traversalCost = 1.0f;
     arguments.intersectionCost = 8.0f;
     arguments.bvh = bvh;
@@ -369,7 +371,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
         stack.pop_back();
         if(!node->isLeaf){
             auto* inner = (InnerNode*)node;
-            for(int i=0;i<4;i++){
+            for(int i=0;i<MeshBVH::nodeWidth;i++){
                 if(inner->children[i] != nullptr){
                     stack.push_back(inner->children[i]);
                 }
