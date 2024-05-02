@@ -32,7 +32,7 @@ struct TraversalStack {
 };
 
 struct MeshBVHCompressed {
-    static constexpr inline CountT numTrisPerLeaf = 8;
+    static constexpr inline CountT numTrisPerLeaf = 2;
     static constexpr inline CountT nodeWidth = 4;
     static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
     static constexpr inline uint32_t magicSignature = 0x69426942;
