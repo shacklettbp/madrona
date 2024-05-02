@@ -255,6 +255,8 @@ extern "C" __global__ void bvhRaycastEntry()
     __syncthreads();
 #endif
 
+    uint32_t pixels_per_block = blockDim.x;
+
     Profiler profiler = {
         .timeInTLAS = 0,
         .timeInBLAS = 0,
@@ -309,8 +311,8 @@ extern "C" __global__ void bvhRaycastEntry()
 
         auto lower_left_corner = ray_start - horizontal / 2 - vertical / 2 + forward;
 
-        uint32_t pixel_x = blockIdx.y * 16 + threadIdx.x;
-        uint32_t pixel_y = blockIdx.z * 16 + threadIdx.y;
+        uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
+        uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
 
         float pixel_u = ((float)pixel_x) / (float)bvhParams.renderOutputResolution;
         float pixel_v = ((float)pixel_y) / (float)bvhParams.renderOutputResolution;

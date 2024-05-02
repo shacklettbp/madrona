@@ -1081,7 +1081,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
 
     if (widen_bvh) {
-        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=4");
+        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
     } else {
         common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=2");
     }
@@ -2200,18 +2200,19 @@ static CUgraphExec makeTaskGraphRunGraph(
                     &trace_event_node, 1,
                     bvh_kernels.traceEvent));
 
-
         const uint32_t num_resident_views_per_sm = 4;
 
-        uint32_t grid_dim = render_output_resolution / 16;
+        const uint32_t pixels_per_block = 16;
+
+        uint32_t grid_dim = render_output_resolution / pixels_per_block;
 
         CUDA_KERNEL_NODE_PARAMS bvh_launch_raycast = {
             .func = bvh_kernels.raycast,
             .gridDimX = bvh_kernels.numSMs * num_resident_views_per_sm,
             .gridDimY = grid_dim,
             .gridDimZ = grid_dim,
-            .blockDimX = 16,
-            .blockDimY = 16,
+            .blockDimX = pixels_per_block,
+            .blockDimY = pixels_per_block,
             .blockDimZ = 1,
             .sharedMemBytes = shared_mem_per_sm / num_resident_views_per_sm
         };

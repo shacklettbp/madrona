@@ -17,7 +17,7 @@
 
 using namespace madrona;
 
-static constexpr uint32_t kNumBuckets = 12;
+static constexpr uint32_t kNumBuckets = 32;
 
 struct BinnedSAHJob {
     enum class Direction {
@@ -1107,6 +1107,29 @@ extern "C" __global__ void bvhWidenTree()
                 QBVHNode::NodeIndexT children_indices[QBVHNode::NodeWidth];
                 math::AABB children_aabbs[QBVHNode::NodeWidth];
 
+                auto push_4wide = [&](LBVHNode *node) {
+                    // Push the children
+                    if (node->left < 0) {
+                        children_indices[num_children++] = node->left;
+                    } else if (node->left != 0) {
+                        LBVHNode *child = 
+                            &smem->internalNodesPtr[node->left - 1];
+
+                        children_indices[num_children++] = child->left;
+                        children_indices[num_children++] = child->right;
+                    }
+
+                    if (node->right < 0) {
+                        children_indices[num_children++] = node->right;
+                    } else if (node->left != 0) {
+                        LBVHNode *child = 
+                            &smem->internalNodesPtr[node->right - 1];
+
+                        children_indices[num_children++] = child->left;
+                        children_indices[num_children++] = child->right;
+                    }
+                };
+
                 if constexpr (QBVHNode::NodeWidth == 2) {
                     if (current_node->left != 0) {
                         children_indices[num_children++] = current_node->left;
@@ -1115,16 +1138,17 @@ extern "C" __global__ void bvhWidenTree()
                     if (current_node->left != 0) {
                         children_indices[num_children++] = current_node->right;
                     }
-                } else {
+                } else if constexpr (QBVHNode::NodeWidth == 4) {
                     // Push the children
+                    push_4wide(current_node);
+                } else {
+                    // 8 wide bvh
                     if (current_node->left < 0) {
                         children_indices[num_children++] = current_node->left;
                     } else if (current_node->left != 0) {
                         LBVHNode *child = 
                             &smem->internalNodesPtr[current_node->left - 1];
-
-                        children_indices[num_children++] = child->left;
-                        children_indices[num_children++] = child->right;
+                        push_4wide(child);
                     }
 
                     if (current_node->right < 0) {
@@ -1132,9 +1156,7 @@ extern "C" __global__ void bvhWidenTree()
                     } else if (current_node->left != 0) {
                         LBVHNode *child = 
                             &smem->internalNodesPtr[current_node->right - 1];
-
-                        children_indices[num_children++] = child->left;
-                        children_indices[num_children++] = child->right;
+                        push_4wide(child);
                     }
                 }
 

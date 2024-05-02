@@ -6,7 +6,7 @@
 #include <madrona/mesh_bvh.hpp>
 
 #ifndef MADRONA_TLAS_WIDTH
-#define MADRONA_TLAS_WIDTH 4
+#define MADRONA_TLAS_WIDTH 8
 #endif
 
 namespace madrona {
