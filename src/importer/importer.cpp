@@ -292,8 +292,12 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
     // All pointers to GPU memory
     auto *bvhs = (MeshBVH *)cu::allocGPU(num_bvh_bytes);
     auto *nodes = (MeshBVH::Node *)cu::allocGPU(num_nodes_bytes);
-    auto *leaf_geos = (MeshBVH::LeafGeometry *)
+#ifdef MADRONA_COMPRESSED_DEINDEXED
+    MeshBVH::LeafGeometry *leaf_geos = nullptr;
+#else
+    MeshBVH::LeafGeometry *leaf_geos = (MeshBVH::LeafGeometry *)
         cu::allocGPU(num_leaf_geos_bytes);
+#endif
     math::Vector3 *vertices = (math::Vector3 *)cu::allocGPU(num_vertices_bytes);
 
     uint32_t bvh_offset = 0;
@@ -321,10 +325,12 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
             REQ_CUDA(cudaMemcpy(nodes + node_offset,
                         bvh.nodes, bvh.numNodes * sizeof(MeshBVH::Node),
                         cudaMemcpyHostToDevice));
+#if !defined(MADRONA_COMPRESSED_DEINDEXED)
             REQ_CUDA(cudaMemcpy(leaf_geos + leaf_offset,
                         bvh.leafGeos, bvh.numLeaves * 
                             sizeof(MeshBVH::LeafGeometry),
                         cudaMemcpyHostToDevice));
+#endif
             REQ_CUDA(cudaMemcpy(vertices + vert_offset,
                         bvh.vertices, bvh.numVerts * sizeof(math::Vector3),
                         cudaMemcpyHostToDevice));
