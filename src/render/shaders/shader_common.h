@@ -2,7 +2,7 @@
 #define MADRONA_VIEWER_SHADER_COMMON_H_INCLUDED
 
 struct BatchDrawPushConst {
-    uint viewsPerLayer;
+    uint drawDataOffset;
 };
 
 struct GridDrawPushConst {
@@ -30,13 +30,13 @@ struct PrepareViewPushConstant {
     uint32_t offset;
     uint32_t numWorlds;
     uint32_t numInstances;
+    uint32_t maxDrawsPerView;
 };
 
 struct DeferredLightingPushConstBR {
-    uint32_t maxLayersPerImage;
-    uint32_t maxViewsPerLayer;
-    uint32_t renderWidth;
-    uint32_t renderHeight;
+    uint32_t maxImagesXPerTarget;
+    uint32_t maxImagesYPerTarget;
+    uint32_t viewDim;
 };
 
 struct BlurPushConst {

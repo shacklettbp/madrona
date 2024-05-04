@@ -857,6 +857,7 @@ Device * Backend::makeDevice(
         supports_rt,
         physical_device_properties.limits.maxImageArrayLayers,
         physical_device_properties.limits.maxViewports,
+        physical_device_properties.limits.maxImageDimension2D,
         // 1,
         physical_device_properties.limits.timestampPeriod,
         phy,

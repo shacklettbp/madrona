@@ -549,8 +549,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 {
     uint view_idx = idx.z;
 
-    uint num_views_per_image = pushConst.maxLayersPerImage * 
-                               pushConst.maxViewsPerLayer;
+    uint num_views_per_image = pushConst.maxImagesXPerTarget * 
+                               pushConst.maxImagesYPerTarget;
 
     // Figure out which image to render to
     uint target_idx = view_idx / num_views_per_image;
@@ -558,26 +558,30 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     // View index within that target
     uint target_view_idx = view_idx % num_views_per_image;
 
-    // Layer index within that target
-    uint target_layer_idx = target_view_idx / pushConst.maxViewsPerLayer;
-    uint viewport_idx = target_view_idx % pushConst.maxViewsPerLayer;
+    uint target_view_idx_x = target_view_idx %
+                             pushConst.maxImagesXPerTarget;
+    uint target_view_idx_y = target_view_idx /
+                             pushConst.maxImagesXPerTarget;
 
-    float x_pixel_offset = viewport_idx * pushConst.renderWidth;
+    float x_pixel_offset = target_view_idx_x * pushConst.viewDim;
+    float y_pixel_offset = target_view_idx_y * pushConst.viewDim;
 
-    if (idx.x >= pushConst.renderWidth || idx.y >= pushConst.renderHeight) {
+    if (idx.x >= pushConst.viewDim || idx.y >= pushConst.viewDim) {
         return;
     }
 
-    uint3 vbuffer_pixel = uint3(idx.x, idx.y, target_layer_idx);
+    uint3 vbuffer_pixel = uint3(idx.x, idx.y, 0);
 
     float2 vbuffer_pixel_clip =
         float2(float(vbuffer_pixel.x) + 0.5f, float(vbuffer_pixel.y) + 0.5f) /
-        float2(pushConst.renderWidth, pushConst.renderHeight);
+        float2(pushConst.viewDim, pushConst.viewDim);
+
     vbuffer_pixel_clip = vbuffer_pixel_clip * 2.0f - float2(1.0f, 1.0f);
     vbuffer_pixel_clip.y *= -1.0;
 
     // Apply the offset when reading the pixel value from the image
-    uint2 data = vizBuffer[target_idx][vbuffer_pixel + uint3(x_pixel_offset, 0, 0)];
+    uint2 data = vizBuffer[target_idx][vbuffer_pixel + 
+                 uint3(x_pixel_offset, y_pixel_offset, 0)];
 
     uint3 unpacked_viz_data = unpackVizBufferData(data);
 
@@ -651,7 +655,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
                 vertices[1].postMvp,
                 vertices[2].postMvp,
                 vbuffer_pixel_clip,
-                float2(pushConst.renderWidth, pushConst.renderHeight));
+                float2(pushConst.viewDim, pushConst.viewDim));
 
         float interpolated_w = 1.0f / dot(w_inv, bc.m_lambda);
 
@@ -683,7 +687,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     // Lighting calculations
     float3 outgoing_ray = getOutgoingRay(
         float2(vbuffer_pixel.xy),
-        float2(pushConst.renderWidth, pushConst.renderHeight),
+        float2(pushConst.viewDim, pushConst.viewDim),
         view_data);
     float4 point_radiance = getPointRadianceBRDF(roughness, metalness, gbuffer_data, view_data, vbuffer_pixel.xy);
 
@@ -719,8 +723,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     out_color += zeroDummy();
 
     uint32_t out_pixel_idx =
-        view_idx * pushConst.renderHeight * pushConst.renderWidth +
-        idx.y * pushConst.renderWidth + idx.x;
+        view_idx * pushConst.viewDim * pushConst.viewDim +
+        idx.y * pushConst.viewDim + idx.x;
 
     rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(out_color); 
 

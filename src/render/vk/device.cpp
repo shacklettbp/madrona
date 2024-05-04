@@ -9,6 +9,7 @@ Device::Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
                uint32_t num_transfer_queues, bool rt_available,
                uint32_t max_num_layers_per_img,
                uint32_t max_viewports,
+               uint32_t max_image_dim,
                float timestamp_period,
                VkPhysicalDevice phy_dev, VkDevice dev,
                DeviceDispatch &&dispatch_table)
@@ -25,6 +26,7 @@ Device::Device(uint32_t gfx_qf, uint32_t compute_qf, uint32_t transfer_qf,
       rtAvailable(rt_available),
       maxNumLayersPerImage(max_num_layers_per_img),
       maxViewports(max_viewports),
+      maxImageDim(max_image_dim),
       timestampPeriod(timestamp_period)
 {}
 

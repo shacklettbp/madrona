@@ -209,7 +209,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
         ObjectData obj = objectDataBuffer[instance_data.objectID];
 
         uint draw_offset;
-        InterlockedAdd(drawCount[0], obj.numMeshes, draw_offset);
+        InterlockedAdd(drawCount[gid.x], obj.numMeshes, draw_offset);
 
         for (int32_t i = 0; i < obj.numMeshes; i++) {
             MeshData mesh = meshDataBuffer[obj.meshOffset + i];
@@ -229,8 +229,10 @@ void main(uint3 tid       : SV_DispatchThreadID,
             // This will allow us to access the vertex offset and the index offset
             draw_data.meshID = obj.meshOffset + i;
 
-            drawCommandBuffer[draw_id] = draw_cmd;
-            drawDataBuffer[draw_id] = draw_data;
+            drawCommandBuffer[gid.x * pushConst.maxDrawsPerView + draw_id] = draw_cmd;
+            drawDataBuffer[gid.x * pushConst.maxDrawsPerView + draw_id] = draw_data;
         }
     }
+
+    GroupMemoryBarrierWithGroupSync();
 }

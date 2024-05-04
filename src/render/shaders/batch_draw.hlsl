@@ -151,14 +151,9 @@ void computeCompositeTransform(float3 obj_t,
 [shader("vertex")]
 float4 vert(in uint vid : SV_VertexID,
             in uint draw_id : SV_InstanceID,
-            out int layer_id : SV_RenderTargetArrayIndex,
-            out int viewport_id : SV_ViewportArrayIndex,
             out V2F v2f) : SV_Position
 {
-    DrawDataBR draw_data = drawDataBuffer[draw_id];
-
-    layer_id = draw_data.localViewID / pushConst.viewsPerLayer;
-    viewport_id = draw_data.localViewID % pushConst.viewsPerLayer;
+    DrawDataBR draw_data = drawDataBuffer[draw_id + pushConst.drawDataOffset];
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
     uint instance_id = draw_data.instanceID;
