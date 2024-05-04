@@ -230,7 +230,7 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
 
     return gpu_data;
 #else
-    return {};
+    return Optional<ImportedAssets::GPUGeometryData>::none();
 #endif
 }
 
