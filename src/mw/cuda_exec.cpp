@@ -1007,7 +1007,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         "-prec-sqrt=0",
         "-fma=1",
         // "-optimize-unused-variables",
-        "-lto"
+        "-lto",
+    //    "-lineinfo"
     };
 
     if (force_debug_env != nullptr && force_debug_env[0] == '1') {
@@ -1067,6 +1068,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         "-dlto",
         "-DMADRONA_MWGPU_BVH_MODULE",
         "-arch", gpu_arch_str.c_str(),
+    //    "-lineinfo"
     };
 
     if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
@@ -1085,6 +1087,14 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     } else {
         common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=2");
     }
+
+    string blas_const = "-DMADRONA_BLAS_WIDTH=";
+    blas_const += to_string(MADRONA_BLAS_WIDTH);
+    common_compile_flags.push_back(blas_const.c_str());
+
+    string blas_const2 = "-DMADRONA_BLAS_LEAF_WIDTH=";
+    blas_const2 += to_string(MADRONA_BLAS_LEAF_WIDTH);
+    common_compile_flags.push_back(blas_const2.c_str());
 
     for (const char *user_flag : cfg.userCompileFlags) {
         common_compile_flags.push_back(user_flag);

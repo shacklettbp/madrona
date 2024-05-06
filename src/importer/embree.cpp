@@ -334,8 +334,8 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     arguments.sahBlockSize = 1;
     arguments.minLeafSize = ceil(MeshBVH::numTrisPerLeaf / 2.0);
     arguments.maxLeafSize = MeshBVH::numTrisPerLeaf;
-    arguments.traversalCost = 1.0f;
-    arguments.intersectionCost = 8.0f;
+    arguments.traversalCost = 4.0f;
+    arguments.intersectionCost = 1.0f;
     arguments.bvh = bvh;
     arguments.primitives = prims.data();
     arguments.primitiveCount = prims.size();

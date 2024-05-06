@@ -7,6 +7,14 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #endif
 
+#ifndef MADRONA_BLAS_WIDTH
+#define MADRONA_BLAS_WIDTH 4
+#endif
+
+#ifndef MADRONA_BLAS_LEAF_WIDTH
+#define MADRONA_BLAS_LEAF_WIDTH 2
+#endif
+
 namespace madrona::render {
 
 struct TriangleIndices {
@@ -32,8 +40,8 @@ struct TraversalStack {
 };
 
 struct MeshBVHCompUnIndexed {
-    static constexpr inline CountT numTrisPerLeaf = 4;
-    static constexpr inline CountT nodeWidth = 4;
+    static constexpr inline CountT numTrisPerLeaf = MADRONA_BLAS_LEAF_WIDTH;
+    static constexpr inline CountT nodeWidth = MADRONA_BLAS_WIDTH;
     static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
     static constexpr inline uint32_t magicSignature = 0x69426942;
 

@@ -24,3 +24,10 @@ include(build_type)
 if (NOT CMAKE_PROJECT_NAME AND NOT CMAKE_TOOLCHAIN_FILE AND NOT WIN32)
     include("${MADRONA_DIR}/external/madrona-toolchain/cmake/set_toolchain.cmake")
 endif()
+include(CMakePrintHelpers)
+
+SET(MADRONA_LEAF_WIDTH "2" CACHE STRING "Number of triangles in BLAS leaf")
+SET(MADRONA_BLAS_WIDTH "4" CACHE STRING "Width of BLAS tree")
+
+add_definitions(-DMADRONA_BLAS_LEAF_WIDTH=${MADRONA_LEAF_WIDTH})
+add_definitions(-DMADRONA_BLAS_WIDTH=${MADRONA_BLAS_WIDTH})
