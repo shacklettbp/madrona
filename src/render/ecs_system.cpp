@@ -7,6 +7,10 @@
 
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/const.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+#else
+#define LOG(...)
 #endif
 
 namespace madrona::render::RenderingSystem {
@@ -215,7 +219,9 @@ inline void exportCountsGPU(Context &ctx,
 void registerTypes(ECSRegistry &registry,
                    const RenderECSBridge *bridge)
 {
-    printf("Printing from rendering system register types\n");
+    LOG("Starting registerTypes in render ECS\n");
+
+    LOG("Here 0\n");
 
 #ifdef MADRONA_GPU_MODE
     uint32_t render_output_res = 
@@ -231,9 +237,21 @@ void registerTypes(ECSRegistry &registry,
 #endif
 
     registry.registerComponent<RenderCamera>();
+
+    LOG("Here 1\n");
+
     registry.registerComponent<Renderable>();
+
+    LOG("Here 2\n");
+
     registry.registerComponent<PerspectiveCameraData>();
+
+    LOG("Here 3\n");
+
     registry.registerComponent<InstanceData>();
+
+    LOG("Here 4\n");
+
     registry.registerComponent<MortonCode>();
     registry.registerComponent<RenderOutputBuffer>(render_output_bytes);
 
@@ -241,6 +259,8 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<TLBVHNode>();
 
     registry.registerArchetype<RaycastOutputArchetype>();
+
+    LOG("Here 5\n");
 
 
     // Pointers get set in RenderingSystem::init
@@ -254,6 +274,8 @@ void registerTypes(ECSRegistry &registry,
             ComponentMetadataSelector<InstanceData,TLBVHNode>(ComponentFlags::ImportMemory,ComponentFlags::ImportMemory),
             ArchetypeFlags::ImportOffsets,
             bridge->maxInstancesPerWorld);
+
+    LOG("Here 6\n");
 #else
         registry.registerArchetype<RenderCameraArchetype>();
         registry.registerArchetype<RenderableArchetype>();
@@ -293,6 +315,8 @@ void registerTypes(ECSRegistry &registry,
 #endif
 
     registry.registerSingleton<RenderingSystemState>();
+
+    LOG("Here 7\n");
 }
 
 TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
