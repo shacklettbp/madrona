@@ -393,6 +393,17 @@ struct GPUEngineState {
 struct MWCudaLaunchGraph::Impl {
     CUgraphExec runGraph;
     bool enableRaytracing;
+
+    CUevent start;
+    CUevent end;
+
+    const char *statName;
+    uint32_t timingGroupIndex;
+};
+
+struct TimingGroup {
+    const char *statName;
+    std::vector<float> recordedTimings;
 };
 
 struct MWCudaExecutor::Impl {
@@ -407,6 +418,8 @@ struct MWCudaExecutor::Impl {
     uint32_t numVertices;
     uint32_t renderOutputResolution;
     uint32_t sharedMemPerSM;
+
+    std::vector<TimingGroup> timingGroups;
 };
 
 static void getUserEntries(const char *entry_class, CUmodule mod,
@@ -1998,7 +2011,10 @@ static CUgraphExec makeTaskGraphRunGraph(
     BVHKernels &bvh_kernels,
     bool enable_raycasting,
     uint32_t render_output_resolution,
-    int shared_mem_per_sm)
+    int shared_mem_per_sm,
+    const char *stat_name,
+    CUevent *start,
+    CUevent *end)
 {
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
@@ -2024,6 +2040,16 @@ static CUgraphExec makeTaskGraphRunGraph(
         DynArray<int32_t>({(int32_t)default_megakernel_idx});
 
     DynArray<CUgraphNode> megakernel_launches(0);
+
+    if (stat_name) {
+        CUgraphNode start_node;
+        REQ_CU(cuGraphAddEventRecordNode(
+                    &start_node, run_graph,
+                    nullptr, 0,
+                    *start));
+
+        megakernel_launches.push_back(start_node);
+    }
 
     auto addMegakernelNode = [&](int64_t megakernel_idx,
                                  CUgraphNode *dependencies,
@@ -2086,6 +2112,16 @@ static CUgraphExec makeTaskGraphRunGraph(
 
     for (uint32_t taskgraph_id : taskgraph_ids) {
         addNodesForTaskGraph(taskgraph_id);
+    }
+
+    if (stat_name) {
+        CUgraphNode end_node;
+        REQ_CU(cuGraphAddEventRecordNode(
+                    &end_node, run_graph,
+                    &megakernel_launches.back(), 1,
+                    *end));
+
+        megakernel_launches.push_back(end_node);
     }
 
     if (enable_raycasting) { // Add the bvh kernel nodes
@@ -2422,7 +2458,7 @@ MWCudaExecutor::~MWCudaExecutor()
         // Save this to a file
         auto *output_file_name = getenv("MADRONA_TIMING_FILE");
         assert(output_file_name);
-        char output_buffer[512] = {};
+        char output_buffer[1024] = {};
 
 #if 0
         sprintf(output_buffer, "{\n  \"num_worlds\":%d\n  \"num_vertices\":%d\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n}", 
@@ -2436,8 +2472,46 @@ MWCudaExecutor::~MWCudaExecutor()
                     avg_tlas_ratio,
                     avg_trace_time / avg_total_time);
         } else {
-            sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"num_vertices\":%d,\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n}",
-                    (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
+            uint32_t current_offset = 0;
+
+            if (impl_->timingGroups.size()) {
+                sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"num_vertices\":%d,\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f,\n",
+                        (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
+            }
+            else {
+                sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"num_vertices\":%d,\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n",
+                        (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
+            }
+
+            current_offset = strlen(output_buffer);
+
+            for (int i = 0; i < impl_->timingGroups.size(); ++i) {
+                auto &group = impl_->timingGroups[i];
+
+                float avg_time = 0.f;
+                for (int t = 0; t < group.recordedTimings.size(); ++t) {
+                    avg_time += group.recordedTimings[i];
+                }
+
+                avg_time /= (float)group.recordedTimings.size();
+
+                if (i == impl_->timingGroups.size() - 1) {
+                    sprintf(output_buffer + current_offset, 
+                            "  \"%s\":%f\n", 
+                            group.statName, avg_time);
+                } else {
+                    sprintf(output_buffer + current_offset, 
+                            "  \"%s\":%f\n,", 
+                            group.statName, avg_time);
+                }
+
+                current_offset = strlen(output_buffer);
+            }
+
+            sprintf(output_buffer + current_offset,
+                    "}");
+
+            current_offset = strlen(output_buffer);
         } 
 
         printf("%s\n", output_buffer);
@@ -2454,8 +2528,16 @@ MWCudaExecutor::~MWCudaExecutor()
 
 MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
         Span<const uint32_t> taskgraph_ids,
-        bool enable_raytracing)
+        bool enable_raytracing,
+        const char *stat_name)
 {
+    CUevent start, end;
+
+    if (stat_name) {
+        cuEventCreate(&start, CU_EVENT_DEFAULT);
+        cuEventCreate(&end, CU_EVENT_DEFAULT);
+    }
+
     auto run_graph = makeTaskGraphRunGraph(
         taskgraph_ids,
         impl_->taskGraphsState.megakernelConfigs.data(),
@@ -2464,16 +2546,29 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
         impl_->bvhKernels,
         enable_raytracing,
         impl_->renderOutputResolution,
-        impl_->sharedMemPerSM);
+        impl_->sharedMemPerSM,
+        stat_name,
+        &start, &end);
+
+    uint32_t group_index = 0;
+    if (stat_name) {
+        group_index = (uint32_t)impl_->timingGroups.size();
+        impl_->timingGroups.push_back({ stat_name, {} });
+    }
 
     return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
         .runGraph = run_graph,
-        .enableRaytracing = enable_raytracing
+        .enableRaytracing = enable_raytracing,
+        .start = start,
+        .end = end,
+        .statName = stat_name,
+        .timingGroupIndex = group_index
     });
 }
 
 MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs(
-        bool enable_raytracing)
+        bool enable_raytracing,
+        const char *stat_name)
 {
     const CountT num_taskgraphs = impl_->taskGraphsState.numTaskgraphs;
     HeapArray<uint32_t> all_taskgraph_ids(num_taskgraphs);
@@ -2481,11 +2576,24 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs(
         all_taskgraph_ids[i] = i;
     }
 
-    return buildLaunchGraph(all_taskgraph_ids, enable_raytracing);
+    return buildLaunchGraph(all_taskgraph_ids, enable_raytracing, stat_name);
 }
 
-void MWCudaExecutor::getTimings()
+void MWCudaExecutor::getTimings(MWCudaLaunchGraph &launch_graph)
 {
+    if (launch_graph.impl_->statName) {
+        REQ_CU(cuEventSynchronize(launch_graph.impl_->start));
+        REQ_CU(cuEventSynchronize(launch_graph.impl_->end));
+
+        float sort_ms = 0.f;
+        REQ_CU(cuEventElapsedTime(&sort_ms,
+                    launch_graph.impl_->start, 
+                    launch_graph.impl_->end));
+
+        impl_->timingGroups[launch_graph.impl_->timingGroupIndex].
+            recordedTimings.push_back(sort_ms);
+    }
+
     REQ_CU(cuEventSynchronize(impl_->bvhKernels.allocEvent));
     REQ_CU(cuEventSynchronize(impl_->bvhKernels.buildEvent));
     REQ_CU(cuEventSynchronize(impl_->bvhKernels.widenEvent));
@@ -2558,6 +2666,19 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
 #ifdef MADRONA_TRACING
     impl_->engineState.deviceTracing->transferLogToCPU();
 #endif
+
+    if (launch_graph.impl_->statName) {
+        REQ_CU(cuEventSynchronize(launch_graph.impl_->start));
+        REQ_CU(cuEventSynchronize(launch_graph.impl_->end));
+
+        float sort_ms = 0.f;
+        REQ_CU(cuEventElapsedTime(&sort_ms,
+                    launch_graph.impl_->start, 
+                    launch_graph.impl_->end));
+
+        impl_->timingGroups[launch_graph.impl_->timingGroupIndex].
+            recordedTimings.push_back(sort_ms);
+    }
 
 #if 1
     if (launch_graph.impl_->enableRaytracing) {

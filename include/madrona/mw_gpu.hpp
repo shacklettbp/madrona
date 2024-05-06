@@ -109,13 +109,19 @@ public:
     // one step across all worlds, or a subset of the logic for a step.
     template <EnumType EnumT>
     inline MWCudaLaunchGraph buildLaunchGraph(EnumT taskgraph_id,
-                                              bool enable_raytracing);
+                                              bool enable_raytracing,
+                                              const char *stat_name = nullptr);
+
     inline MWCudaLaunchGraph buildLaunchGraph(uint32_t taskgraph_id,
-                                              bool enable_raytracing);
+                                              bool enable_raytracing,
+                                              const char *stat_name = nullptr);
+
     MWCudaLaunchGraph buildLaunchGraph(Span<const uint32_t> taskgraph_ids,
-                                       bool enable_raytracing);
+                                       bool enable_raytracing,
+                                       const char *stat_name = nullptr);
     // Helper to build a a launch graph that launches all task graphs
-    MWCudaLaunchGraph buildLaunchGraphAllTaskGraphs(bool enable_raytracing);
+    MWCudaLaunchGraph buildLaunchGraphAllTaskGraphs(bool enable_raytracing,
+                                                    const char *stat_name = nullptr);
 
     // Runs the pre-built CUDA graph stored in launch_graph synchronously
     void run(MWCudaLaunchGraph &launch_graph);
@@ -126,7 +132,7 @@ public:
     // ECSRegister::exportColumn. Note that this will be a GPU pointer.
     void * getExported(CountT slot) const;
 
-    void getTimings();
+    void getTimings(MWCudaLaunchGraph &launch_graph);
 
 private:
     struct Impl;
