@@ -1,7 +1,11 @@
 #pragma once
 
-#include <madrona/types.hpp>
-#include <madrona/geo.hpp>
+#include "types.hpp"
+#include "geo.hpp"
+
+#ifdef MADRONA_GPU_MODE
+#include <madrona/mw_gpu/host_print.hpp>
+#endif
 
 #ifndef MADRONA_BLAS_WIDTH
 #define MADRONA_BLAS_WIDTH 4
@@ -17,16 +21,8 @@ struct TriangleIndices {
     uint32_t indices[3];
 };
 
-enum class CollisionFlags : uint64_t {
-    BlocksRaycasts = 1 << 0,
-};
-
-struct CollisionMaterial {
-    CollisionFlags flags;
-};
-
 struct TraversalStack {
-    static constexpr CountT stackSize = 40;
+    static constexpr CountT stackSize = 32;
 
     int32_t s[stackSize];
     CountT size;
@@ -43,19 +39,27 @@ struct TraversalStack {
     }
 };
 
-struct MeshBVHUncompressed {
+struct MeshBVHCompUnIndexedTex {
     static constexpr inline CountT numTrisPerLeaf = MADRONA_BLAS_LEAF_WIDTH;
     static constexpr inline CountT nodeWidth = MADRONA_BLAS_WIDTH;
     static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
     static constexpr inline uint32_t magicSignature = 0x69426942;
 
     struct Node {
-        float minX[nodeWidth];
-        float minY[nodeWidth];
-        float minZ[nodeWidth];
-        float maxX[nodeWidth];
-        float maxY[nodeWidth];
-        float maxZ[nodeWidth];
+        float minX;
+        float minY;
+        float minZ;
+        int8_t expX;
+        int8_t expY;
+        int8_t expZ;
+        uint8_t internalNodes;
+        uint8_t triSize[nodeWidth];
+        uint8_t qMinX[nodeWidth];
+        uint8_t qMinY[nodeWidth];
+        uint8_t qMinZ[nodeWidth];
+        uint8_t qMaxX[nodeWidth];
+        uint8_t qMaxY[nodeWidth];
+        uint8_t qMaxZ[nodeWidth];
         int32_t children[nodeWidth];
         int32_t parentID;
 
@@ -69,7 +73,6 @@ struct MeshBVHUncompressed {
     };
 
     struct LeafGeometry {
-        TriangleIndices packedIndices[numTrisPerLeaf];
     };
 
     struct BVHMaterial{
@@ -82,6 +85,7 @@ struct MeshBVHUncompressed {
 
     struct BVHVertex{
         madrona::math::Vector3 pos;
+        madrona::math::Vector2 uv;
     };
 
     // Helper struct for Ray-Triangle intersection
@@ -112,6 +116,8 @@ struct MeshBVHUncompressed {
                          math::Vector3 ray_d,
                          float *out_hit_t,
                          math::Vector3 *out_hit_normal,
+                         void* shared,
+                         TraversalStack *stack,
                          float t_max = float(FLT_MAX)) const;
 
     // Apply this transform onto the root AABB
@@ -137,11 +143,20 @@ struct MeshBVHUncompressed {
 
     inline bool traceRayLeaf(
         int32_t leaf_idx,
+        int32_t num_tris,
         RayIsectTxfm tri_isect_txfm,
         math::Vector3 ray_o,
         float t_max,
         float *out_hit_t,
         math::Vector3 *out_hit_normal) const;
+
+    inline bool traceRayLeafIndexed(int32_t leaf_idx,
+                           int32_t i,
+                           MeshBVHCompUnIndexedTex::RayIsectTxfm tri_isect_txfm,
+                           math::Vector3 ray_o,
+                           float t_max,
+                           float *out_hit_t,
+                           math::Vector3 *out_hit_normal) const;
 
     inline bool rayTriangleIntersection(
         math::Vector3 tri_a, math::Vector3 tri_b, math::Vector3 tri_c,
@@ -150,17 +165,24 @@ struct MeshBVHUncompressed {
         math::Vector3 org,
         float t_max,
         float *out_hit_t,
+        math::Vector3 *bary_out,
         math::Vector3 *out_hit_normal) const;
 
     inline bool fetchLeafTriangle(CountT leaf_idx,
                                   CountT offset,
                                   math::Vector3 *a,
                                   math::Vector3 *b,
-                                  math::Vector3 *c) const;
+                                  math::Vector3 *c,
+                                  math::Vector2 *uv_a,
+                                  math::Vector2 *uv_b,
+                                  math::Vector2 *uv_c) const;
+
+    static inline RayIsectTxfm computeRayIsectTxfm(
+        math::Vector3 o, math::Vector3 d, math::Diag3x3 inv_d,
+        math::AABB root_aabb);
 
     inline RayIsectTxfm computeRayIsectTxfm(
-        math::Vector3 o, math::Vector3 d, math::Diag3x3 inv_d,
-        const math::AABB &root_aabb) const;
+        math::Vector3 o, math::Vector3 d, math::Diag3x3 inv_d) const;
 
     inline bool sphereCastNodeCheck(math::Vector3 ray_o,
                                     math::Diag3x3 inv_d,
@@ -187,6 +209,7 @@ struct MeshBVHUncompressed {
     Node *nodes;
     LeafGeometry *leafGeos;
     LeafMaterial *leafMats;
+
     BVHVertex *vertices;
 
     math::AABB rootAABB;
@@ -199,4 +222,4 @@ struct MeshBVHUncompressed {
 
 }
 
-#include "mesh_bvh_uncompressed.inl"
+#include "mesh_bvh_comp_deindex_tex.inl"

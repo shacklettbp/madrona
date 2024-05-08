@@ -527,9 +527,9 @@ bool MeshBVHCompUnIndexed::fetchLeafTriangle(CountT leaf_idx,
                                 math::Vector3 *b,
                                 math::Vector3 *c) const
 {
-    *a = vertices[(leaf_idx + offset)*3 + 0];
-    *b = vertices[(leaf_idx + offset)*3 + 1];
-    *c = vertices[(leaf_idx + offset)*3 + 2];
+    *a = vertices[(leaf_idx + offset)*3 + 0].pos;
+    *b = vertices[(leaf_idx + offset)*3 + 1].pos;
+    *c = vertices[(leaf_idx + offset)*3 + 2].pos;
 
     return true;
 }

@@ -75,8 +75,16 @@ struct MeshBVHCompUnIndexed {
     struct LeafGeometry {
     };
 
+    struct BVHMaterial{
+        uint32_t tex_id;
+    };
+
     struct LeafMaterial {
-        uint32_t material[numTrisPerLeaf];
+        BVHMaterial material[numTrisPerLeaf];
+    };
+
+    struct BVHVertex{
+        madrona::math::Vector3 pos;
     };
 
     // Helper struct for Ray-Triangle intersection
@@ -197,7 +205,7 @@ struct MeshBVHCompUnIndexed {
     LeafGeometry *leafGeos;
     LeafMaterial *leafMats;
 
-    math::Vector3 *vertices;
+    BVHVertex *vertices;
 
     math::AABB rootAABB;
     uint32_t numNodes;
