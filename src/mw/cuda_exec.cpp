@@ -1732,6 +1732,7 @@ static GPUEngineState initEngineAndUserState(
 
     cu::deallocCPU(exported_readback);
 
+#if 0
     { // Setup the BVH parameters in the __constant__ block of the bvh module
         // Pass this to the ECS to fill in
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
@@ -1773,6 +1774,7 @@ static GPUEngineState initEngineAndUserState(
 
         cu::deallocGPU(params_tmp);
     }
+#endif
 
     return GPUEngineState {
         gpu_state_buffer,
@@ -2237,8 +2239,10 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
 
     bool enable_raycasting = (render_mode[0] == '2');
 
+#if 0
     BVHKernels bvh_kernels = buildBVHKernels(
                 compile_cfg, num_sms, cu_capability);
+#endif
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
         exec_mode, num_sms, cu_capability);
@@ -2249,7 +2253,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
         state_cfg.numUserConfigBytes,  state_cfg.numTaskGraphs,
         state_cfg.numExportedBuffers,
-        gpu_kernels, bvh_kernels, 
+        gpu_kernels, /* bvh_kernels */ {}, 
         state_cfg.geometryData ? state_cfg.geometryData->meshBVHs : nullptr,
         state_cfg.geometryData ? state_cfg.geometryData->numBVHs : 0,
         state_cfg.raycastOutputResolution,
@@ -2267,7 +2271,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         std::move(eng_state),
         std::move(taskgraphs_state),
         enable_raycasting,
-        bvh_kernels,
+        /* bvh_kernels */ {},
         state_cfg.numWorlds,
         state_cfg.geometryData ? state_cfg.geometryData->numVerts : 0,
         state_cfg.raycastOutputResolution,
