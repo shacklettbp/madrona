@@ -1971,7 +1971,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     float delta_in_ms = float(impl->timestamps[1] - impl->timestamps[0]) *
         impl->dev.timestampPeriod / 1000000.0f;
 
-    // printf("rasterizer batch renderer took %f ms\n", delta_in_ms);
+    printf("rasterizer batch renderer took %f ms\n", delta_in_ms);
     impl->recordedTimings.push_back(delta_in_ms);
 
     frame_data.latestOp = LatestOperation::RenderViews;
