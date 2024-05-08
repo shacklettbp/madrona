@@ -7,6 +7,14 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #endif
 
+#ifndef MADRONA_BLAS_WIDTH
+#define MADRONA_BLAS_WIDTH 4
+#endif
+
+#ifndef MADRONA_BLAS_LEAF_WIDTH
+#define MADRONA_BLAS_LEAF_WIDTH 2
+#endif
+
 namespace madrona::render {
 
 struct TriangleIndices {
@@ -31,9 +39,9 @@ struct TraversalStack {
     }
 };
 
-struct MeshBVHCompressed {
-    static constexpr inline CountT numTrisPerLeaf = 2;
-    static constexpr inline CountT nodeWidth = 4;
+struct MeshBVHCompUnIndexed {
+    static constexpr inline CountT numTrisPerLeaf = MADRONA_BLAS_LEAF_WIDTH;
+    static constexpr inline CountT nodeWidth = MADRONA_BLAS_WIDTH;
     static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
     static constexpr inline uint32_t magicSignature = 0x69426942;
 
@@ -45,6 +53,7 @@ struct MeshBVHCompressed {
         int8_t expY;
         int8_t expZ;
         uint8_t internalNodes;
+        uint8_t triSize[nodeWidth];
         uint8_t qMinX[nodeWidth];
         uint8_t qMinY[nodeWidth];
         uint8_t qMinZ[nodeWidth];
@@ -64,7 +73,6 @@ struct MeshBVHCompressed {
     };
 
     struct LeafGeometry {
-        TriangleIndices packedIndices[numTrisPerLeaf];
     };
 
     struct BVHMaterial{
@@ -134,6 +142,7 @@ struct MeshBVHCompressed {
 
     inline bool traceRayLeaf(
         int32_t leaf_idx,
+        int32_t num_tris,
         RayIsectTxfm tri_isect_txfm,
         math::Vector3 ray_o,
         float t_max,
@@ -142,7 +151,7 @@ struct MeshBVHCompressed {
 
     inline bool traceRayLeafIndexed(int32_t leaf_idx,
                            int32_t i,
-                           MeshBVHCompressed::RayIsectTxfm tri_isect_txfm,
+                           MeshBVHCompUnIndexed::RayIsectTxfm tri_isect_txfm,
                            math::Vector3 ray_o,
                            float t_max,
                            float *out_hit_t,
@@ -203,11 +212,9 @@ struct MeshBVHCompressed {
     uint32_t numLeaves;
     uint32_t numVerts;
 
-    uint32_t materialIDX;
-
     uint32_t magic;
 };
 
 }
 
-#include "mesh_bvh_compressed.inl"
+#include "mesh_bvh_comp_deindex.inl"

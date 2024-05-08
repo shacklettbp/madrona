@@ -210,7 +210,7 @@ struct LeafNode : public Node {
     }
 };
 
-Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
+Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<SourceMaterial>& materials)
 {
     using render::MeshBVH;
 
@@ -246,10 +246,15 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     std::vector<RTCBuildPrimitive> prims_i;
     prims_i.resize(numTriangles);
 
-    DynArray<math::Vector3> vertices { 0 };
-    vertices.resize(numVertices, [](math::Vector3 *) {});
+    DynArray<MeshBVH::BVHVertex>* verticesPtr;
+    DynArray<MeshBVH::BVHVertex> vertices { 0 };
+    vertices.resize(numVertices, [](MeshBVH::BVHVertex *) {});
+    verticesPtr = &vertices;
+
 
     std::vector<madrona::render::TriangleIndices> prims_compressed;
+    prims_compressed.resize(numTriangles);
+    std::vector<MeshBVH::BVHMaterial> prims_mats;
     prims_compressed.resize(numTriangles);
 
     int index = 0;
@@ -260,11 +265,23 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
 
         for(uint32_t vert_idx = 0; vert_idx < mesh.numVertices; vert_idx++) {
             madrona::math::Vector3 v1 = mesh.positions[vert_idx];
+            madrona::math::Vector2 uv = mesh.uvs ? mesh.uvs[vert_idx] : Vector2{0,0};
+            assert(vert_idx + offsets[mesh_idx] < vertices.size());
+
+#ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
+            vertices[vert_idx + offsets[mesh_idx]] = MeshBVH::BVHVertex{.pos=v1,.uv=uv};
+#else
+            vertices[vert_idx + offsets[mesh_idx]] = MeshBVH::BVHVertex{.pos=v1};
+#endif
+        }
+
+        /*for(uint32_t vert_idx = 0; vert_idx < mesh.numVertices; vert_idx++) {
+            madrona::math::Vector2 uv = mesh.uvs[vert_idx];
             assert(vert_idx + offsets[mesh_idx] < vertices.size());
             assert(counter < vertices.size());
             vertices[vert_idx + offsets[mesh_idx]] = {v1.x,v1.y,v1.z};
             counter++;
-        }
+        }*/
 
         for(int face_idx = 0; face_idx < (int)mesh.numFaces; face_idx++){
             if (mesh.faceCounts != nullptr) {
@@ -314,6 +331,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
             prim.upper_z = maxZ;
             prim.primID = index;
             prims_i[index] = prim;
+            //prims_mats[index] = MeshBVH::BVHMaterial{(uint32_t)materials[mesh.materialIDX].textureIdx};
             index++;
         }
     }
@@ -332,8 +350,8 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     arguments.sahBlockSize = 1;
     arguments.minLeafSize = ceil(MeshBVH::numTrisPerLeaf / 2.0);
     arguments.maxLeafSize = MeshBVH::numTrisPerLeaf;
-    arguments.traversalCost = 1.0f;
-    arguments.intersectionCost = 8.0f;
+    arguments.traversalCost = 4.0f;
+    arguments.intersectionCost = 1.0f;
     arguments.bvh = bvh;
     arguments.primitives = prims.data();
     arguments.primitiveCount = prims.size();
@@ -393,9 +411,20 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
         }
     }
 
+#if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
+    //Adjust Leaves to Reindexed Triangles
+    unsigned int numTris = 0;
+    for(CountT i = 0;i < leafNodes.size();i++) {
+        leafNodes[i]->lid = numTris;
+        numTris += leafNodes[i]->numPrims;
+    }
+#endif
+
+
     madrona::Optional<std::ofstream> out = madrona::Optional<std::ofstream>::none();
 
-#ifdef MADRONA_COMPRESSED_BVH
+#if defined(MADRONA_COMPRESSED_BVH) || defined(MADRONA_COMPRESSED_DEINDEXED) \
+|| defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
     float rootMaxX = FLT_MIN;
     float rootMaxY = FLT_MIN;
     float rootMaxZ = FLT_MIN;
@@ -438,6 +467,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
         node.expZ = ez;
         for(int j = 0; j < nodeWidth; j++){
             int32_t child;
+            int32_t numTris;
             if(j < leafNodes.size()) {
                 LeafNode *iNode = (LeafNode *) leafNodes[j];
                 child = 0x80000000 | iNode->lid;
@@ -448,10 +478,15 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
                 node.qMaxX[j] = ceilf((box.upper_x - minX) / powf(2, ex));
                 node.qMaxY[j] = ceilf((box.upper_y - minY) / powf(2, ey));
                 node.qMaxZ[j] = ceilf((box.upper_z - minZ) / powf(2, ez));
+                numTris = iNode->numPrims;
             } else {
                 child = sentinel;
+                numTris = 0;
             }
             node.children[j] = child;
+#if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
+            node.triSize[j] = numTris;
+#endif
             //node.children[j] = 0xBBBBBBBB;
         }
         nodes.push_back(node);
@@ -500,21 +535,29 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
             node.qMaxY[i2] = ceilf((innerNodes[i]->bounds[i2].upper_y - minY) / powf(2, ey));
             node.qMaxZ[i2] = ceilf((innerNodes[i]->bounds[i2].upper_z - minZ) / powf(2, ez));
         }
+
         for(int j = 0; j < nodeWidth; j++){
             int32_t child;
+            int32_t triSize;
             if(j < innerNodes[i]->numChildren) {
                 Node *node2 = innerNodes[i]->children[j];
                 if (!node2->isLeaf) {
                     InnerNode *iNode = (InnerNode *) node2;
                     child = iNode->id;
+                    triSize = 0;
                 } else {
                     LeafNode *iNode = (LeafNode *) node2;
                     child = 0x80000000 | iNode->lid;
+                    triSize = iNode->numPrims;
                 }
             } else {
                 child = sentinel;
+                triSize = 0;
             }
             node.children[j] = child;
+#if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
+            node.triSize[j] = triSize;
+#endif
         }
         nodes.push_back(node);
     }
@@ -605,6 +648,8 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     aabb_out = merged;
 
 #endif
+
+#if !defined(MADRONA_COMPRESSED_DEINDEXED) && !defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
     for(int i=0;i<leafID;i++){
         LeafNode* node = leafNodes[i];
         render::MeshBVH::LeafGeometry geos;
@@ -623,25 +668,76 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     for(int i=0;i<leafID;i++){
         render::MeshBVH::LeafMaterial geos;
         for(int i2=0;i2<numTrisPerLeaf;i2++){
-            geos.material[i2] = 0xAAAAAAAA;
+            geos.material[i2] = {0xaaaaaaaa};
         }
         leaf_materials.push_back(geos);
     }
+#elif defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
+    DynArray<MeshBVH::BVHVertex> reIndexedVertices { 0 };
+    int newIndex = 0;
+    for(int i=0;i<leafID;i++){
+        LeafNode* node = leafNodes[i];
+        for(int i2=0;i2<(int)numTrisPerLeaf;i2++){
+            if(i2<(int)node->numPrims){
+                uint32_t a = prims_compressed[node->id[i2]].indices[0];
+                uint32_t b = prims_compressed[node->id[i2]].indices[1];
+                uint32_t c = prims_compressed[node->id[i2]].indices[2];
+
+                reIndexedVertices.push_back(vertices[a]);
+                reIndexedVertices.push_back(vertices[b]);
+                reIndexedVertices.push_back(vertices[c]);
+            }
+        }
+        render::MeshBVH::LeafMaterial geos;
+        for(int i2=0;i2<numTrisPerLeaf;i2++){
+            geos.material[i2] = {0xaaaaaaaa};
+        }
+        leaf_materials.push_back(geos);
+    }
+    vertices.release();
+    verticesPtr = &reIndexedVertices;
+#elif defined(MADRONA_COMPRESSED_DEINDEXED)
+    DynArray<MeshBVH::BVHVertex> reIndexedVertices { 0 };
+    int newIndex = 0;
+    for(int i=0;i<leafID;i++){
+        LeafNode* node = leafNodes[i];
+        for(int i2=0;i2<(int)numTrisPerLeaf;i2++){
+            if(i2<(int)node->numPrims){
+                uint32_t a = prims_compressed[node->id[i2]].indices[0];
+                uint32_t b = prims_compressed[node->id[i2]].indices[1];
+                uint32_t c = prims_compressed[node->id[i2]].indices[2];
+
+                reIndexedVertices.push_back(vertices[a]);
+                reIndexedVertices.push_back(vertices[b]);
+                reIndexedVertices.push_back(vertices[c]);
+            }
+        }
+    }
+    for(int i=0;i<leafID;i++){
+        render::MeshBVH::LeafMaterial geos;
+        for(int i2=0;i2<numTrisPerLeaf;i2++){
+            geos.material[i2] = {0xaaaaaaaa};
+        }
+        leaf_materials.push_back(geos);
+    }
+    vertices.release();
+    verticesPtr = &reIndexedVertices;
+#endif
+
 
     rtcReleaseBVH(bvh);
     rtcReleaseDevice(device);
 
     bvh_out.numNodes = nodes.size();
-    bvh_out.numLeaves = leaf_geos.size();
-    bvh_out.numVerts = vertices.size();
+    bvh_out.numLeaves = leafNodes.size();
+    bvh_out.numVerts = verticesPtr->size();
     bvh_out.magic = MeshBVH::magicSignature;
 
     bvh_out.nodes = nodes.release(true);
     bvh_out.leafGeos = leaf_geos.release(true);
     bvh_out.leafMats = leaf_materials.release(true);
-    bvh_out.vertices = vertices.release(true);
+    bvh_out.vertices = verticesPtr->release(true);
     bvh_out.rootAABB = aabb_out;
-    bvh_out.materialIDX = -1;
 
     // printf("AABB: %f\n", bvh_out.rootAABB.surfaceArea());
 

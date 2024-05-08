@@ -61,8 +61,8 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         DynArray<render::MeshBVH::LeafMaterial> leaf_materials{num_leaves};
         fread(leaf_materials.data(), sizeof(render::MeshBVH::LeafMaterial), num_leaves, ptr);
 
-        DynArray<math::Vector3> vertices{num_verts};
-        fread(vertices.data(), sizeof(math::Vector3), num_verts, ptr);
+        DynArray<render::MeshBVH::BVHVertex> vertices{num_verts};
+        fread(vertices.data(), sizeof(render::MeshBVH::BVHVertex), num_verts, ptr);
 
         render::MeshBVH bvh;
         bvh.numNodes = num_nodes;
@@ -98,7 +98,7 @@ void writeCache(const char* location, DynArray<render::MeshBVH>& bvhs){
         fwrite(bvhs[i].nodes, sizeof(render::MeshBVH::Node), bvhs[i].numNodes, ptr);
         fwrite(bvhs[i].leafGeos, sizeof(render::MeshBVH::LeafGeometry), bvhs[i].numLeaves, ptr);
         fwrite(bvhs[i].leafMats, sizeof(render::MeshBVH::LeafMaterial), bvhs[i].numLeaves, ptr);
-        fwrite(bvhs[i].vertices, sizeof(math::Vector3), bvhs[i].numVerts, ptr);
+        fwrite(bvhs[i].vertices, sizeof(render::MeshBVH::BVHVertex), bvhs[i].numVerts, ptr);
     }
 
     fclose(ptr);
@@ -226,7 +226,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
                     obj.bvhIndex = (uint32_t) asset_bvhs.size();
 
-                    Optional<render::MeshBVH> bvh = embree_loader->load(obj);
+                    Optional<render::MeshBVH> bvh = embree_loader->load(obj,imported.materials);
                     assert(bvh.has_value());
 
                     asset_bvhs.push_back(*bvh);
@@ -286,15 +286,21 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
         sizeof(MeshBVH::Node);
     uint32_t num_leaf_geos_bytes = num_leaf_geos *
         sizeof(MeshBVH::LeafGeometry);
+    uint32_t num_leaf_mat_bytes = num_leaf_geos *
+        sizeof(MeshBVH::LeafMaterial);
     uint32_t num_vertices_bytes = num_vertices *
-        sizeof(math::Vector3);
+        sizeof(MeshBVH::BVHVertex);
 
     // All pointers to GPU memory
     auto *bvhs = (MeshBVH *)cu::allocGPU(num_bvh_bytes);
     auto *nodes = (MeshBVH::Node *)cu::allocGPU(num_nodes_bytes);
-    auto *leaf_geos = (MeshBVH::LeafGeometry *)
+#if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
+    MeshBVH::LeafGeometry *leaf_geos = nullptr;
+#else
+    MeshBVH::LeafGeometry *leaf_geos = (MeshBVH::LeafGeometry *)
         cu::allocGPU(num_leaf_geos_bytes);
-    math::Vector3 *vertices = (math::Vector3 *)cu::allocGPU(num_vertices_bytes);
+#endif
+    MeshBVH::BVHVertex *vertices = (MeshBVH::BVHVertex *)cu::allocGPU(num_vertices_bytes);
 
     uint32_t bvh_offset = 0;
     uint32_t node_offset = 0;
@@ -321,12 +327,15 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
             REQ_CUDA(cudaMemcpy(nodes + node_offset,
                         bvh.nodes, bvh.numNodes * sizeof(MeshBVH::Node),
                         cudaMemcpyHostToDevice));
+#if !defined(MADRONA_COMPRESSED_DEINDEXED) && !defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
             REQ_CUDA(cudaMemcpy(leaf_geos + leaf_offset,
                         bvh.leafGeos, bvh.numLeaves * 
                             sizeof(MeshBVH::LeafGeometry),
                         cudaMemcpyHostToDevice));
+#endif
+
             REQ_CUDA(cudaMemcpy(vertices + vert_offset,
-                        bvh.vertices, bvh.numVerts * sizeof(math::Vector3),
+                        bvh.vertices, bvh.numVerts * sizeof(MeshBVH::BVHVertex),
                         cudaMemcpyHostToDevice));
 
             bvh_offset += 1;
@@ -340,6 +349,7 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
         .nodes = nodes,
         .numNodes = node_offset,
         .leafGeos = leaf_geos,
+        .leafMaterial = nullptr,
         .numLeaves = leaf_offset,
         .vertices = vertices,
         .numVerts = vert_offset,

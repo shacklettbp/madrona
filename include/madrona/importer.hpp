@@ -61,7 +61,7 @@ struct EmbreeLoader {
 
     std::unique_ptr<Impl> impl_;
 
-    Optional<render::MeshBVH> load(const SourceObject &obj);
+    Optional<render::MeshBVH> load(const SourceObject &obj, const DynArray<SourceMaterial> &materials);
 };
 
 struct ImportedAssets {
@@ -70,9 +70,10 @@ struct ImportedAssets {
         uint32_t numNodes;
 
         render::MeshBVH::LeafGeometry *leafGeos;
+        render::MeshBVH::LeafMaterial *leafMaterial;
         uint32_t numLeaves;
 
-        math::Vector3 *vertices;
+        render::MeshBVH::BVHVertex *vertices;
         uint32_t numVerts;
 
         render::MeshBVH *meshBVHs;
@@ -93,6 +94,7 @@ struct ImportedAssets {
     DynArray<SourceObject> objects;
     DynArray<SourceMaterial> materials;
     DynArray<SourceInstance> instances;
+    DynArray<SourceTexture> texture;
 
     static Optional<ImportedAssets> importFromDisk(
         Span<const char * const> asset_paths,

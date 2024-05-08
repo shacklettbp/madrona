@@ -7,6 +7,14 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #endif
 
+#ifndef MADRONA_BLAS_WIDTH
+#define MADRONA_BLAS_WIDTH 4
+#endif
+
+#ifndef MADRONA_BLAS_LEAF_WIDTH
+#define MADRONA_BLAS_LEAF_WIDTH 2
+#endif
+
 namespace madrona::render {
 
 struct TriangleIndices {
@@ -31,9 +39,9 @@ struct TraversalStack {
     }
 };
 
-struct MeshBVHCompressed {
-    static constexpr inline CountT numTrisPerLeaf = 2;
-    static constexpr inline CountT nodeWidth = 4;
+struct MeshBVHCompUnIndexedTex {
+    static constexpr inline CountT numTrisPerLeaf = MADRONA_BLAS_LEAF_WIDTH;
+    static constexpr inline CountT nodeWidth = MADRONA_BLAS_WIDTH;
     static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
     static constexpr inline uint32_t magicSignature = 0x69426942;
 
@@ -45,6 +53,7 @@ struct MeshBVHCompressed {
         int8_t expY;
         int8_t expZ;
         uint8_t internalNodes;
+        uint8_t triSize[nodeWidth];
         uint8_t qMinX[nodeWidth];
         uint8_t qMinY[nodeWidth];
         uint8_t qMinZ[nodeWidth];
@@ -64,7 +73,6 @@ struct MeshBVHCompressed {
     };
 
     struct LeafGeometry {
-        TriangleIndices packedIndices[numTrisPerLeaf];
     };
 
     struct BVHMaterial{
@@ -77,6 +85,7 @@ struct MeshBVHCompressed {
 
     struct BVHVertex{
         madrona::math::Vector3 pos;
+        madrona::math::Vector2 uv;
     };
 
     // Helper struct for Ray-Triangle intersection
@@ -134,6 +143,7 @@ struct MeshBVHCompressed {
 
     inline bool traceRayLeaf(
         int32_t leaf_idx,
+        int32_t num_tris,
         RayIsectTxfm tri_isect_txfm,
         math::Vector3 ray_o,
         float t_max,
@@ -142,7 +152,7 @@ struct MeshBVHCompressed {
 
     inline bool traceRayLeafIndexed(int32_t leaf_idx,
                            int32_t i,
-                           MeshBVHCompressed::RayIsectTxfm tri_isect_txfm,
+                           MeshBVHCompUnIndexedTex::RayIsectTxfm tri_isect_txfm,
                            math::Vector3 ray_o,
                            float t_max,
                            float *out_hit_t,
@@ -155,13 +165,17 @@ struct MeshBVHCompressed {
         math::Vector3 org,
         float t_max,
         float *out_hit_t,
+        math::Vector3 *bary_out,
         math::Vector3 *out_hit_normal) const;
 
     inline bool fetchLeafTriangle(CountT leaf_idx,
                                   CountT offset,
                                   math::Vector3 *a,
                                   math::Vector3 *b,
-                                  math::Vector3 *c) const;
+                                  math::Vector3 *c,
+                                  math::Vector2 *uv_a,
+                                  math::Vector2 *uv_b,
+                                  math::Vector2 *uv_c) const;
 
     static inline RayIsectTxfm computeRayIsectTxfm(
         math::Vector3 o, math::Vector3 d, math::Diag3x3 inv_d,
@@ -203,11 +217,9 @@ struct MeshBVHCompressed {
     uint32_t numLeaves;
     uint32_t numVerts;
 
-    uint32_t materialIDX;
-
     uint32_t magic;
 };
 
 }
 
-#include "mesh_bvh_compressed.inl"
+#include "mesh_bvh_comp_deindex_tex.inl"

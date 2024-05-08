@@ -585,9 +585,9 @@ bool MeshBVHCompressed::fetchLeafTriangle(CountT leaf_idx,
     // assert(b_idx < numVerts);
     // assert(c_idx < numVerts);
 
-    *a = vertices[a_idx];
-    *b = vertices[b_idx];
-    *c = vertices[c_idx];
+    *a = vertices[a_idx].pos;
+    *b = vertices[b_idx].pos;
+    *c = vertices[c_idx].pos;
 
     return true;
 }
