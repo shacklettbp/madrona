@@ -10,7 +10,7 @@
 #endif
 
 namespace madrona::render {
-    
+
 #ifdef MADRONA_COMPRESSED_BVH
 using MeshBVH = MeshBVHCompressed;
 #else

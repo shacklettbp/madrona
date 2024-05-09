@@ -178,6 +178,8 @@ struct MeshBVHUncompressed {
     uint32_t numLeaves;
     uint32_t numVerts;
 
+    uint32_t materialIDX;
+
     uint32_t magic;
 };
 

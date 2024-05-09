@@ -29,6 +29,7 @@ target_link_libraries(madrona_mw_gpu
         madrona_mw_core madrona_json
         CUDA::nvrtc CUDA::cuda_driver
         ${CUDA_NVJITLINK_LIBRARY}
+        stb
 )
 
 file(GLOB CUDA_DEVICE_RUNTIME "${CUDAToolkit_LIBRARY_DIR}/*cudadevrt*")

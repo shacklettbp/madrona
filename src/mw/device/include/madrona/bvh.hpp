@@ -11,6 +11,16 @@
 
 namespace madrona {
 
+struct Material {
+    // For now, just a color
+    math::Vector4 color;
+
+    int32_t textureIdx;
+
+    float roughness;
+    float metalness;
+};
+
 // This is the structure of the node which is just used for traversal
 template <typename NodeIndex, int Width>
 struct BVHNodeQuantized {
@@ -236,6 +246,9 @@ struct BVHParams {
     void *hostPrintAddr;
 
     KernelTimingInfo *timingInfo;
+
+    Material *materials;
+    cudaTextureObject_t *textures;
 };
 
 }

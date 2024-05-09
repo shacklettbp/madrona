@@ -23,6 +23,8 @@
 
 #include "cpp_compile.hpp"
 
+#include <stb_image.h>
+
 // #define MADRONA_FAST_BVH
 
 // Wrap GPU headers in the mwGPU namespace. This is a weird situation where
@@ -1574,6 +1576,105 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
     }
 }
 
+struct MaterialData {
+    // GPU buffer containing array of texture objects
+    cudaTextureObject_t *textures;
+    cudaArray_t *textureBuffers;
+    mwGPU::madrona::Material *materials;
+};
+
+static MaterialData initMaterialData(
+    const imp::SourceMaterial *materials,
+    uint32_t num_materials,
+    const imp::SourceTexture *textures,
+    uint32_t num_textures)
+{
+    MaterialData cpu_mat_data = {
+        .textures = (cudaTextureObject_t *)
+            malloc(sizeof(cudaTextureObject_t) * num_textures),
+        .textureBuffers = (cudaArray_t *)
+            malloc(sizeof(cudaArray_t) * num_textures),
+        .materials = (mwGPU::madrona::Material *)
+            malloc(sizeof(mwGPU::madrona::Material) * num_materials)
+    };
+
+    for (int i = 0; i < num_textures; ++i) {
+        const auto &tex = textures[i];
+
+        int width, height, components;
+        void *pixels = stbi_load(tex.path, &width, 
+                &height, &components, STBI_rgb_alpha);
+
+
+        // For now, only allow this format
+        cudaChannelFormatDesc channel_desc =
+            cudaCreateChannelDesc<uchar4>();
+
+
+        cudaArray_t cuda_array;
+        REQ_CUDA(cudaMallocArray(&cuda_array, &channel_desc, 
+                                 width, height, cudaArrayDefault));
+
+        REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, pixels, 
+                                   sizeof(uint32_t) * width,
+                                   sizeof(uint32_t) * width,
+                                   height, 
+                                   cudaMemcpyHostToDevice));
+
+        cudaResourceDesc res_desc = {};
+        res_desc.resType = cudaResourceTypeArray;
+        res_desc.res.array.array = cuda_array;
+
+        cudaTextureDesc tex_desc = {};
+        tex_desc.addressMode[0] = cudaAddressModeWrap;
+        tex_desc.addressMode[1] = cudaAddressModeWrap;
+        tex_desc.filterMode = cudaFilterModeLinear;
+        tex_desc.readMode = cudaReadModeNormalizedFloat;
+        tex_desc.normalizedCoords = 1;
+
+        cudaTextureObject_t tex_obj = 0;
+        REQ_CUDA(cudaCreateTextureObject(&tex_obj, 
+                    &res_desc, &tex_desc, nullptr));
+
+        cpu_mat_data.textures[i] = tex_obj;
+        cpu_mat_data.textureBuffers[i] = cuda_array;
+    }
+
+    for (int i = 0; i < num_materials; ++i) {
+        mwGPU::madrona::Material mat = {
+            .color = materials[i].color,
+            .textureIdx = materials[i].textureIdx,
+            .roughness = materials[i].roughness,
+            .metalness = materials[i].metalness,
+        };
+
+        cpu_mat_data.materials[i] = mat;
+    }
+
+    cudaTextureObject_t *gpu_tex_buffer;
+    REQ_CUDA(cudaMalloc(&gpu_tex_buffer, 
+                sizeof(cudaTextureObject_t) * num_textures));
+    REQ_CUDA(cudaMemcpy(gpu_tex_buffer, cpu_mat_data.textures, 
+                sizeof(cudaTextureObject_t) * num_textures,
+                cudaMemcpyHostToDevice));
+
+    mwGPU::madrona::Material *mat_buffer;
+    REQ_CUDA(cudaMalloc(&mat_buffer, 
+                sizeof(mwGPU::madrona::Material) * num_materials));
+    REQ_CUDA(cudaMemcpy(mat_buffer, cpu_mat_data.materials, 
+                sizeof(mwGPU::madrona::Material) * num_materials,
+                cudaMemcpyHostToDevice));
+
+    free(cpu_mat_data.textures);
+    free(cpu_mat_data.materials);
+
+    auto gpu_mat_data = cpu_mat_data;
+    gpu_mat_data.textures = gpu_tex_buffer;
+    gpu_mat_data.materials = mat_buffer;
+
+    return gpu_mat_data;
+}
+
 static GPUEngineState initEngineAndUserState(
     uint32_t num_worlds,
     uint32_t num_world_data_bytes,
@@ -1588,6 +1689,10 @@ static GPUEngineState initEngineAndUserState(
     const BVHKernels &bvh_kernels,
     render::MeshBVH *bvhs_ptr,
     uint32_t num_bvhs,
+    const imp::SourceMaterial *materials,
+    uint32_t num_materials,
+    const imp::SourceTexture *textures,
+    uint32_t num_textures,
     uint32_t raycast_output_resolution,
     ExecutorMode exec_mode,
     CUdevice cu_gpu,
@@ -1772,6 +1877,10 @@ static GPUEngineState initEngineAndUserState(
 
     { // Setup the BVH parameters in the __constant__ block of the bvh module
         // Pass this to the ECS to fill in
+        MaterialData mat_data = initMaterialData(
+                materials, num_materials,
+                textures, num_textures);
+
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
         auto bvh_internals = cu::allocGPU(
                 sizeof(mwGPU::madrona::BVHInternalData));
@@ -1790,7 +1899,9 @@ static GPUEngineState initEngineAndUserState(
                                                  bvh_internals,
                                                  bvhs_ptr,
                                                  num_bvhs,
-                                                 bvh_kernels.timingInfo);
+                                                 bvh_kernels.timingInfo,
+                                                 mat_data.materials,
+                                                 mat_data.textures);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params
@@ -2340,6 +2451,10 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         gpu_kernels, bvh_kernels, 
         state_cfg.geometryData ? state_cfg.geometryData->meshBVHs : nullptr,
         state_cfg.geometryData ? state_cfg.geometryData->numBVHs : 0,
+        state_cfg.materials.data() ? state_cfg.materials.data() : nullptr,
+        state_cfg.materials.data() ? state_cfg.materials.size() : 0,
+        state_cfg.textures.data() ? state_cfg.textures.data() : nullptr,
+        state_cfg.textures.data() ? state_cfg.textures.size() : 0,
         state_cfg.raycastOutputResolution,
         exec_mode, cu_gpu, cu_ctx, strm);
 

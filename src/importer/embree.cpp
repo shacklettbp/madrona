@@ -641,6 +641,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object)
     bvh_out.leafMats = leaf_materials.release(true);
     bvh_out.vertices = vertices.release(true);
     bvh_out.rootAABB = aabb_out;
+    bvh_out.materialIDX = -1;
 
     // printf("AABB: %f\n", bvh_out.rootAABB.surfaceArea());
 

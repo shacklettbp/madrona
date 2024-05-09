@@ -46,8 +46,11 @@ struct StateConfig {
     // Number of exported ECS components
     uint32_t numExportedBuffers;
 
-    // This is required if the BVH is to be invoked.
+    // This is required if the BVH is to be invoked (holds object information).
     imp::ImportedAssets::GPUGeometryData *geometryData;
+
+    Span<const imp::SourceMaterial> materials;
+    Span<const imp::SourceTexture> textures;
 
     uint32_t raycastOutputResolution;
 };
@@ -98,8 +101,8 @@ public:
     static CUcontext initCUDA(int gpu_id);
 
     MWCudaExecutor(const StateConfig &state_cfg,
-                                        const CompileConfig &compile_cfg,
-                                        CUcontext cu_ctx);
+                   const CompileConfig &compile_cfg,
+                   CUcontext cu_ctx);
 
     MWCudaExecutor(MWCudaExecutor &&o);
     ~MWCudaExecutor();
