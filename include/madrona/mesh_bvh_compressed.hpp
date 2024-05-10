@@ -102,6 +102,11 @@ struct MeshBVHCompressed {
 
     template <typename Fn>
     void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
+    
+    struct HitInfo {
+        int32_t materialIDX;
+        math::Vector3 normal;
+    };
 
     inline bool traceRay(math::Vector3 ray_o,
                          math::Vector3 ray_d,

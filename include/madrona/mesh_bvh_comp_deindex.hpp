@@ -212,6 +212,8 @@ struct MeshBVHCompUnIndexed {
     uint32_t numLeaves;
     uint32_t numVerts;
 
+    int32_t materialIDX;
+
     uint32_t magic;
 };
 

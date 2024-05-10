@@ -1,5 +1,7 @@
 #include <cassert>
 
+#define MADRONA_MESHBVH_BACKFACE_CULLING
+
 namespace madrona::render {
 
 constexpr int SHARED_STACK_SIZE = 6;
@@ -98,8 +100,7 @@ void MeshBVHCompUnIndexedTex::findOverlaps(const math::AABB &aabb, Fn &&fn) cons
 
 bool MeshBVHCompUnIndexedTex::traceRay(math::Vector3 ray_o,
                        math::Vector3 ray_d,
-                       float *out_hit_t,
-                       math::Vector3 *out_hit_normal,
+                       HitInfo *hit_info,
                        TraversalStack *stack,
                        const AABBTransform &txfm,
                        float t_max) const
@@ -129,7 +130,6 @@ bool MeshBVHCompUnIndexedTex::traceRay(math::Vector3 ray_o,
 #endif
 
     bool ray_hit = false;
-    Vector3 closest_hit_normal = Vector3{0,0,0};
 
     while (stack->size > previous_stack_size) { 
         int32_t node_idx = stack->pop();
@@ -179,19 +179,15 @@ bool MeshBVHCompUnIndexedTex::traceRay(math::Vector3 ray_o,
             if (t_near <= t_far) {
                 if (node.isLeaf(i)) {
                     int32_t leaf_idx = node.leafIDX(i);
-                    //printf("leafy %d\n",leaf_idx);
-                    float hit_t;
-                    Vector3 leaf_hit_normal = Vector3{0,0,0};
+                    
                     bool leaf_hit = traceRayLeaf(leaf_idx, node.triSize[i], tri_isect_txfm,
-                        ray_o, t_max, &hit_t, &leaf_hit_normal);
+                        ray_o, t_max, hit_info);
 
                     if (leaf_hit) {
                         ray_hit = true;
-                        t_max = hit_t;
-                        closest_hit_normal = leaf_hit_normal;
+                        t_max = hit_info->tHit;
                     }
                 } else {
-                    // assert(stack->size < 32);
                     stack->push(node.children[i]);
                 }
             }
@@ -202,11 +198,10 @@ bool MeshBVHCompUnIndexedTex::traceRay(math::Vector3 ray_o,
         return false;
     }
     
-    *out_hit_t = t_max;
-    *out_hit_normal = closest_hit_normal;
     return ray_hit;
 }
 
+#if 0
 bool MeshBVHCompUnIndexedTex::traceRay(math::Vector3 ray_o,
                        math::Vector3 ray_d,
                        float *out_hit_t,
@@ -354,23 +349,26 @@ bool MeshBVHCompUnIndexedTex::traceRay(math::Vector3 ray_o,
     *out_hit_normal = closest_hit_normal;
     return ray_hit;
 }
+#endif
 
 bool MeshBVHCompUnIndexedTex::traceRayLeaf(int32_t leaf_idx,
                            int32_t num_tris,
                            RayIsectTxfm tri_isect_txfm,
                            math::Vector3 ray_o,
                            float t_max,
-                           float *out_hit_t,
-                           math::Vector3 *out_hit_normal) const
+                           HitInfo *hit_info) const
 {
     using namespace madrona::math;
 
     // Woop et al 2013 Watertight Ray/Triangle Intersection
-    Vector3 hit_normal = {0,0,0};
-    Vector3 baryout = {0,0,0};
-    Vector3 realout = {0,0,0};
+    Vector3 hit_normal = { 0, 0, 0 };
+    Vector3 baryout = { 0, 0, 0 };
+    Vector3 realout = { 0, 0, 0 };
+    Vector2 realuv = { 0, 0 };
+
     float hit_t;
     bool hit_tri = false;
+
 /*#ifdef MADRONA_GPU_MODE
     mwGPU::HostPrint::log("Testing {}\n",num_tris);
 #endif*/
@@ -392,17 +390,20 @@ bool MeshBVHCompUnIndexedTex::traceRayLeaf(int32_t leaf_idx,
 
         if (intersects) {
             hit_tri = true;
-            Vector2 real_uv = uva*baryout.x + uvb*baryout.y + uvc*baryout.z;
 
-            realout = baryout;
+            realuv = uva*baryout.x + uvb*baryout.y + uvc*baryout.z;
+
+            realout = hit_normal;
 
             t_max = hit_t;
         }
     }
 
     if (hit_tri) {
-        *out_hit_t = hit_t;
-        *out_hit_normal = realout;
+        hit_info->tHit = hit_t;
+        hit_info->normal = realout;
+        hit_info->uv = realuv;
+
         return true;
     } else {
         return false;

@@ -93,7 +93,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     const math::Vector3 &ray_o,
                                     math::Vector3 ray_d,
                                     float *out_hit_t,
-                                    math::Vector3 *out_hit_normal,
+                                    math::Vector3 *out_color,
                                     float t_max,
                                     Profiler *profiler)
 {
@@ -133,7 +133,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     stack.push(1);
 
     bool ray_hit = false;
-    Vector3 closest_hit_normal = {};
+
+    render::MeshBVH::HitInfo closest_hit_info = {};
 
     uint64_t total_blas_time = 0;
 
@@ -158,7 +159,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             float aabb_hit_t, aabb_far_t;
             Diag3x3 inv_ray_d = { 1.f/ray_d.x, 1.f/ray_d.y, 1.f/ray_d.z };
             bool intersect_aabb = child_aabb.rayIntersects(ray_o, inv_ray_d,
-                    4.f, t_max, aabb_hit_t, aabb_far_t);
+                    2.f, t_max, aabb_hit_t, aabb_far_t);
 
             if (aabb_hit_t <= t_max) {
                 if (node->childrenIdx[i] < 0) {
@@ -173,10 +174,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
                     render::InstanceData *instance_data =
                         &instances[instance_idx];
-
-                    // Now we trace through this model.
-                    float hit_t;
-                    Vector3 leaf_hit_normal;
 
                     // Ok we are going to just do something stupid.
                     //
@@ -199,26 +196,34 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
                     txfm_ray_d /= t_scale;
 
+                    render::MeshBVH::HitInfo hit_info = {};
+
 #if defined(MADRONA_PROFILE_BVH_KERNEL)
                     uint64_t blas_start_time = globalTimer();
-                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, &hit_t,
-                            &leaf_hit_normal, &stack, txfm, t_max * t_scale);
+                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
+                            &hit_info, &stack, txfm, t_max * t_scale);
                     uint64_t blas_end_time = globalTimer();
                     total_blas_time += (blas_end_time - blas_start_time);
 #else
-                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, &hit_t,
-                            &leaf_hit_normal, &stack, txfm, t_max * t_scale);
+                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
+                            &hit_info, &stack, txfm, t_max * t_scale);
 #endif
 
                     if (leaf_hit) {
                         ray_hit = true;
 
                         float old_t_max = t_max;
-                        t_max = hit_t / t_scale;
+                        t_max = hit_info.tHit / t_scale;
 
-                        closest_hit_normal = instance_data->rotation.rotateVec(
-                                instance_data->scale * leaf_hit_normal);
-                        closest_hit_normal = closest_hit_normal.normalize();
+                        closest_hit_info = hit_info;
+                        closest_hit_info.normal = 
+                            instance_data->rotation.rotateVec(
+                                instance_data->scale * closest_hit_info.normal);
+
+                        closest_hit_info.normal = 
+                            closest_hit_info.normal.normalize();
+
+                        closest_hit_info.materialIDX = model_bvh->materialIDX;
                     }
                 } else {
                     stack.push(node->childrenIdx[i]);
@@ -235,7 +240,38 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     profiler->timeInTLAS += (total_trace_time - total_blas_time);
 #endif
 
-    *out_hit_normal = closest_hit_normal;
+    // *out_color = closest_hit_info.normal;
+
+    if (ray_hit) {
+        // Get the material info:
+        Material *mat = &bvhParams.materials[closest_hit_info.materialIDX];
+
+        *out_color = { mat->color.x, mat->color.y, mat->color.z };
+
+        if (mat->textureIdx != -1) {
+            cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
+
+            float4 sampled_color = tex2D<float4>(*tex,
+                    closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
+
+            math::Vector3 tex_color = { sampled_color.x,
+                                        sampled_color.y,
+                                        sampled_color.z };
+
+            out_color->x *= tex_color.x;
+            out_color->y *= tex_color.y;
+            out_color->z *= tex_color.z;
+        }
+
+#if 0
+        if (mat->textureIdx == -1) {
+            *out_color = { 1.f, 0.f, 0.f };
+        } else {
+            *out_color = { mat->color.x, mat->color.y, mat->color.z };
+        }
+#endif
+    }
+
     return ray_hit;
 }
 
@@ -322,15 +358,19 @@ extern "C" __global__ void bvhRaycastEntry()
         ray_dir = ray_dir.normalize();
 
         float t;
+#if 0
         math::Vector3 normal = {pixel_u * 2 - 1, pixel_v * 2 - 1, 0};
         normal = ray_dir;
+#endif
+
+        math::Vector3 color;
 
         // For now, just hack in a t_max of 10000.
         bool hit = traceRayTLAS(
                 world_idx, current_view_offset, 
                 pixel_x, pixel_y,
                 ray_start, ray_dir, 
-                &t, &normal, 10000.f, &profiler);
+                &t, &color, 10000.f, &profiler);
 
         uint32_t linear_pixel_idx = 3 * 
             (pixel_y + pixel_x * bvhParams.renderOutputResolution);
@@ -340,9 +380,9 @@ extern "C" __global__ void bvhRaycastEntry()
         char *write_out = (char *)bvhParams.renderOutput + global_pixel_idx;
 
         if (hit) {
-            write_out[0] = (normal.x * 0.5f + 0.5f) * 255;
-            write_out[1] = (normal.y * 0.5f + 0.5f) * 255;
-            write_out[2] = (normal.z * 0.5f + 0.5f) * 255;
+            write_out[0] = (color.x) * 255;
+            write_out[1] = (color.y) * 255;
+            write_out[2] = (color.z) * 255;
         } else {
             write_out[0] = 0;
             write_out[1] = 0;

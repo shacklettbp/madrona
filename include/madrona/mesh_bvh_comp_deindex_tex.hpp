@@ -109,9 +109,18 @@ struct MeshBVHCompUnIndexedTex {
         math::Vector3 invDirFar;
     };
 
+    struct HitInfo {
+        float tHit;
+        math::Vector3 normal;
+        math::Vector2 uv;
+
+        int32_t materialIDX;
+    };
+
     template <typename Fn>
     void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
 
+#if 0
     inline bool traceRay(math::Vector3 ray_o,
                          math::Vector3 ray_d,
                          float *out_hit_t,
@@ -119,6 +128,7 @@ struct MeshBVHCompUnIndexedTex {
                          void* shared,
                          TraversalStack *stack,
                          float t_max = float(FLT_MAX)) const;
+#endif
 
     // Apply this transform onto the root AABB
     struct AABBTransform {
@@ -129,8 +139,7 @@ struct MeshBVHCompUnIndexedTex {
 
     inline bool traceRay(math::Vector3 ray_o,
                          math::Vector3 ray_d,
-                         float *out_hit_t,
-                         math::Vector3 *out_hit_normal,
+                         HitInfo *out_hit_info,
                          TraversalStack *stack,
                          const AABBTransform &txfm,
                          float t_max = float(FLT_MAX)) const;
@@ -147,8 +156,7 @@ struct MeshBVHCompUnIndexedTex {
         RayIsectTxfm tri_isect_txfm,
         math::Vector3 ray_o,
         float t_max,
-        float *out_hit_t,
-        math::Vector3 *out_hit_normal) const;
+        HitInfo *hit_info) const;
 
     inline bool traceRayLeafIndexed(int32_t leaf_idx,
                            int32_t i,
@@ -216,6 +224,8 @@ struct MeshBVHCompUnIndexedTex {
     uint32_t numNodes;
     uint32_t numLeaves;
     uint32_t numVerts;
+
+    int32_t materialIDX;
 
     uint32_t magic;
 };
