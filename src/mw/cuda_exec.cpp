@@ -1663,34 +1663,40 @@ static MaterialData initMaterialData(
             ktx_size_t offset;
             ktx_uint8_t* image;
             ktx_uint32_t level, layer, faceSlice;
-            printf("Pre Texture %p,%d",tex.pix_info.pixels,tex.pix_info.bufferSize);
+            //printf("Pre Texture %p,%d",tex.pix_info.pixels,tex.pix_info.bufferSize);
             result = ktxTexture_CreateFromMemory((ktx_uint8_t*)tex.pix_info.pixels,
                                                  tex.pix_info.bufferSize,
                                                  KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
                                                  &texture);
-            printf("Compression: %d,%d,%d\n",texture->isCompressed,texture->numLayers,texture->numDimensions);
+            //printf("Compression: %d,%d,%d\n",texture->isCompressed,texture->numLayers,texture->numDimensions);
             if(texture->classId == ktxTexture2_c){
                 ktxTexture2 *texture2 = (ktxTexture2 *)texture;
-                printf("Compression: %d,%d\n",texture->isCompressed,texture2->vkFormat);
-                KTX_error_code ret = ktxTexture2_TranscodeBasis(texture2, KTX_TTF_RGBA4444, 0);
-                printf("Transcode: %s\n",ktxErrorString(ret));
+                //printf("Compression: %d,%d\n",texture->isCompressed,texture2->vkFormat);
+                KTX_error_code ret = ktxTexture2_TranscodeBasis(texture2, KTX_TTF_BC7_RGBA, 0);
+                //printf("Transcode: %s\n",ktxErrorString(ret));
             }
             pixels = texture->pData;
 
             width = texture->baseWidth;
             height = texture->baseHeight;
 
+            ktx_size_t tex_offset;
+            ktxTexture_GetImageOffset(texture,0,0,0,&tex_offset);
+            ktx_size_t tex_size = ktxTexture_GetImageSize(texture,0);
+
+            //printf("Whatabug %d,%d,%d,%d\n",width,height,tex_offset,tex_size);
+
             cudaChannelFormatDesc channel_desc =
-                cudaCreateChannelDesc<uchar4>();
+                cudaCreateChannelDesc<cudaChannelFormatKindUnsignedBlockCompressed7>();
 
             cudaArray_t cuda_array;
             REQ_CUDA(cudaMallocArray(&cuda_array, &channel_desc,
                                      width, height, cudaArrayDefault));
 
-            REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, pixels,
-                                       sizeof(uint32_t) * width,
-                                       sizeof(uint32_t) * width,
-                                       height,
+            REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, (void*)((ktx_uint8_t*)pixels+tex_offset),
+                                       16 * width/4,
+                                       16 * width/4,
+                                       height/4,
                                        cudaMemcpyHostToDevice));
 
             cudaResourceDesc res_desc = {};
@@ -1711,8 +1717,8 @@ static MaterialData initMaterialData(
             cpu_mat_data.textures[i] = tex_obj;
             cpu_mat_data.textureBuffers[i] = cuda_array;
 
-            printf("KTX ERROR: %s\n",ktxErrorString(result));
-            printf("Texture %d,%d\n",texture->baseWidth,texture->baseHeight);
+            //printf("KTX ERROR: %s\n",ktxErrorString(result));
+            //printf("Texture %d,%d\n",texture->baseWidth,texture->baseHeight);
             ktxTexture_Destroy(texture);
         }
     }

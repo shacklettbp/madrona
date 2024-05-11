@@ -244,7 +244,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
         // Get the material info:
         if (false) {
             Vector3 color;
-            uint32_t idx = closest_hit_info.materialIDX;
+            uint32_t idx = bvhParams.materials[closest_hit_info.materialIDX].textureIdx;
             idx = ((idx >> 16) ^ idx) * 0x45d9f3b;
             idx = ((idx >> 16) ^ idx) * 0x45d9f3b;
             idx = (idx >> 16) ^ idx;

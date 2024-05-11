@@ -1765,7 +1765,7 @@ static bool gltfImportAssets(LoaderData &loader,
     imported.geoData.normalArrays.emplace_back(std::move(new_normals_arr));
     imported.geoData.uvArrays.emplace_back(std::move(new_uvs_arr));
 
-    CountT prev_img_idx = 0;
+    CountT prev_img_idx = imported.imgData.imageArrays.size();
     CountT prev_tex_idx = imported.texture.size();
 
     for(const auto& image : loader.images){
@@ -1783,7 +1783,7 @@ static bool gltfImportAssets(LoaderData &loader,
     }
 
     for(const auto& material : loader.materials){
-        SourceMaterial s_mat = {.color = material.baseColor,.textureIdx = (int32_t)material.baseColorIdx+(int32_t)prev_img_idx,
+        SourceMaterial s_mat = {.color = material.baseColor,.textureIdx = (int32_t)material.baseColorIdx+(int32_t)prev_tex_idx,
                                 .roughness=material.roughness,.metalness=material.metallic};
         imported.materials.emplace_back(s_mat);
     }
