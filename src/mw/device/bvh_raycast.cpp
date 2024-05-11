@@ -244,32 +244,31 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     if (ray_hit) {
         // Get the material info:
-        Material *mat = &bvhParams.materials[closest_hit_info.materialIDX];
-
-        *out_color = { mat->color.x, mat->color.y, mat->color.z };
-
-        if (mat->textureIdx != -1) {
-            cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
-
-            float4 sampled_color = tex2D<float4>(*tex,
-                    closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
-
-            math::Vector3 tex_color = { sampled_color.x,
-                                        sampled_color.y,
-                                        sampled_color.z };
-
-            out_color->x *= tex_color.x;
-            out_color->y *= tex_color.y;
-            out_color->z *= tex_color.z;
-        }
-
-#if 0
-        if (mat->textureIdx == -1) {
-            *out_color = { 1.f, 0.f, 0.f };
+        if (closest_hit_info.materialIDX == -1) {
+            auto normal = closest_hit_info.normal;
+            *out_color = { 0.5 * (normal.x + 1.0), 
+                           0.5 * (normal.y + 1.0),
+                           0.5 * (normal.z + 1.0) };
         } else {
+            Material *mat = &bvhParams.materials[closest_hit_info.materialIDX];
+
             *out_color = { mat->color.x, mat->color.y, mat->color.z };
+
+            if (mat->textureIdx != -1) {
+                cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
+
+                float4 sampled_color = tex2D<float4>(*tex,
+                        closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
+
+                math::Vector3 tex_color = { sampled_color.x,
+                                            sampled_color.y,
+                                            sampled_color.z };
+
+                out_color->x *= tex_color.x;
+                out_color->y *= tex_color.y;
+                out_color->z *= tex_color.z;
+            }
         }
-#endif
     }
 
     return ray_hit;
