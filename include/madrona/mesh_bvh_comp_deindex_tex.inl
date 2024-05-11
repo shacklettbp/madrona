@@ -368,6 +368,7 @@ bool MeshBVHCompUnIndexedTex::traceRayLeaf(int32_t leaf_idx,
 
     float hit_t;
     bool hit_tri = false;
+    uint32_t hit_tri_idx = 0;
 
 /*#ifdef MADRONA_GPU_MODE
     mwGPU::HostPrint::log("Testing {}\n",num_tris);
@@ -394,6 +395,7 @@ bool MeshBVHCompUnIndexedTex::traceRayLeaf(int32_t leaf_idx,
             realuv = uva*baryout.x + uvb*baryout.y + uvc*baryout.z;
 
             realout = hit_normal;
+            hit_tri_idx = i;
 
             t_max = hit_t;
         }
@@ -403,6 +405,7 @@ bool MeshBVHCompUnIndexedTex::traceRayLeaf(int32_t leaf_idx,
         hit_info->tHit = hit_t;
         hit_info->normal = realout;
         hit_info->uv = realuv;
+        hit_info->materialIDX = leafMats[leaf_idx + hit_tri_idx].material[0].tex_id;
 
         return true;
     } else {

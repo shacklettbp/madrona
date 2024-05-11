@@ -151,14 +151,14 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->materials = (Material *)materials;
 
-    for (int i = 0; i < 7; ++i) {
+    /*for (int i = 0; i < 7; ++i) {
         printf("texture_idx = %d\n", params->materials[i].textureIdx);
         printf("color = %f %f %f\n", 
                 params->materials[i].color.x,
                 params->materials[i].color.y,
                 params->materials[i].color.z
                 );
-    }
+    }*/
 
     for (int i = 0; i < num_bvhs; ++i) {
         printf("MaterialIdx = %d\n", params->bvhs[i].materialIDX);

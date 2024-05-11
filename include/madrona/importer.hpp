@@ -29,8 +29,33 @@ struct SourceObject {
     uint32_t bvhIndex;
 };
 
+enum TextureLoadInfo {
+    FILE_NAME,
+    PIXEL_BUFFER
+};
+
+struct PixelBufferInfo {
+    void *pixels;
+    int format;
+    int bufferSize;
+};
+
 struct SourceTexture {
-    const char *path;
+    TextureLoadInfo info;
+    union {
+        const char *path;
+        PixelBufferInfo pix_info;
+    };
+    SourceTexture(const char *path_ptr) : info(FILE_NAME), path(path_ptr){
+    }
+    SourceTexture(TextureLoadInfo tex_info, const char *path_ptr) {
+        info = tex_info;
+        path = path_ptr;
+    }
+    SourceTexture(PixelBufferInfo p_info) {
+        info = PIXEL_BUFFER;
+        pix_info = p_info;
+    }
 };
 
 struct SourceMaterial {
@@ -90,6 +115,10 @@ struct ImportedAssets {
         DynArray<DynArray<SourceMesh>> meshArrays;
         DynArray<DynArray<render::MeshBVH>> meshBVHArrays;
     } geoData;
+
+    struct ImageData{
+        DynArray<DynArray<uint8_t>> imageArrays;
+    } imgData;
 
     DynArray<SourceObject> objects;
     DynArray<SourceMaterial> materials;

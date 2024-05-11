@@ -255,7 +255,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
     std::vector<madrona::render::TriangleIndices> prims_compressed;
     prims_compressed.resize(numTriangles);
     std::vector<MeshBVH::BVHMaterial> prims_mats;
-    prims_compressed.resize(numTriangles);
+    prims_mats.resize(numTriangles);
 
     int index = 0;
     int counter = 0;
@@ -331,7 +331,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
             prim.upper_z = maxZ;
             prim.primID = index;
             prims_i[index] = prim;
-            //prims_mats[index] = MeshBVH::BVHMaterial{(uint32_t)materials[mesh.materialIDX].textureIdx};
+            prims_mats[index] = MeshBVH::BVHMaterial{(int32_t)mesh.materialIDX};
             index++;
         }
     }
@@ -689,10 +689,13 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
             }
         }
         render::MeshBVH::LeafMaterial geos;
-        for(int i2=0;i2<numTrisPerLeaf;i2++){
-            geos.material[i2] = {0xaaaaaaaa};
+        for(uint32_t i2=0;i2<numTrisPerLeaf;i2++){
+            if(i2 < node->numPrims) {
+                render::MeshBVH::LeafMaterial geos;
+                geos.material[0] = prims_mats[node->id[i2]];
+                leaf_materials.push_back(geos);
+            }
         }
-        leaf_materials.push_back(geos);
     }
     vertices.release();
     verticesPtr = &reIndexedVertices;

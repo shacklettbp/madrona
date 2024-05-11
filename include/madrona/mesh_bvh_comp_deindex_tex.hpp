@@ -76,11 +76,11 @@ struct MeshBVHCompUnIndexedTex {
     };
 
     struct BVHMaterial{
-        uint32_t tex_id;
+        int32_t tex_id;
     };
 
     struct LeafMaterial {
-        BVHMaterial material[numTrisPerLeaf];
+        BVHMaterial material[1];
     };
 
     struct BVHVertex{

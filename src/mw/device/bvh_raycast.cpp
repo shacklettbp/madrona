@@ -222,8 +222,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
                         closest_hit_info.normal = 
                             closest_hit_info.normal.normalize();
-
-                        closest_hit_info.materialIDX = model_bvh->materialIDX;
                     }
                 } else {
                     stack.push(node->childrenIdx[i]);
@@ -244,23 +242,39 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     if (ray_hit) {
         // Get the material info:
-        Material *mat = &bvhParams.materials[closest_hit_info.materialIDX];
+        if (false) {
+            Vector3 color;
+            uint32_t idx = closest_hit_info.materialIDX;
+            idx = ((idx >> 16) ^ idx) * 0x45d9f3b;
+            idx = ((idx >> 16) ^ idx) * 0x45d9f3b;
+            idx = (idx >> 16) ^ idx;
+            float a = ((idx & 0xff000000) >> 24);
+            float r = ((idx & 0xff0000) >> 16);
+            float g = ((idx & 0xff00) >> 8);
+            float b = ((idx & 0xff));
+            color = Vector3(r, g, b) / 255.0;
+            if (idx == 0xffffffff) color = {1, 1, 1};
+            *out_color = color;
+        } else if (closest_hit_info.materialIDX == -1) {
+            *out_color = Vector3{1,0,0};
+        } else {
+            Material *mat = &bvhParams.materials[closest_hit_info.materialIDX];
+            *out_color = {mat->color.x, mat->color.y, mat->color.z};
 
-        *out_color = { mat->color.x, mat->color.y, mat->color.z };
+            if (mat->textureIdx != -1) {
+                cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
 
-        if (mat->textureIdx != -1) {
-            cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
+                float4 sampled_color = tex2D<float4>(*tex,
+                                                     closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
 
-            float4 sampled_color = tex2D<float4>(*tex,
-                    closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
+                math::Vector3 tex_color = {sampled_color.x,
+                                           sampled_color.y,
+                                           sampled_color.z};
 
-            math::Vector3 tex_color = { sampled_color.x,
-                                        sampled_color.y,
-                                        sampled_color.z };
-
-            out_color->x *= tex_color.x;
-            out_color->y *= tex_color.y;
-            out_color->z *= tex_color.z;
+                out_color->x *= tex_color.x;
+                out_color->y *= tex_color.y;
+                out_color->z *= tex_color.z;
+            }
         }
 
 #if 0
@@ -377,7 +391,7 @@ extern "C" __global__ void bvhRaycastEntry()
         uint32_t global_pixel_idx = current_view_offset * bytes_per_view +
             linear_pixel_idx;
 
-        char *write_out = (char *)bvhParams.renderOutput + global_pixel_idx;
+        uint8_t *write_out = (uint8_t *)bvhParams.renderOutput + global_pixel_idx;
 
         if (hit) {
             write_out[0] = (color.x) * 255;

@@ -58,11 +58,13 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         DynArray<render::MeshBVH::LeafGeometry> leaf_geos{num_leaves};
         fread(leaf_geos.data(), sizeof(render::MeshBVH::LeafGeometry), num_leaves, ptr);
 
-        DynArray<render::MeshBVH::LeafMaterial> leaf_materials{num_leaves};
-        fread(leaf_materials.data(), sizeof(render::MeshBVH::LeafMaterial), num_leaves, ptr);
-
         DynArray<render::MeshBVH::BVHVertex> vertices{num_verts};
         fread(vertices.data(), sizeof(render::MeshBVH::BVHVertex), num_verts, ptr);
+
+#ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
+        DynArray<render::MeshBVH::LeafMaterial> leaf_materials{num_leaves};
+        fread(leaf_materials.data(), sizeof(render::MeshBVH::LeafMaterial), num_verts/3, ptr);
+#endif
 
         render::MeshBVH bvh;
         bvh.numNodes = num_nodes;
@@ -97,8 +99,11 @@ void writeCache(const char* location, DynArray<render::MeshBVH>& bvhs){
 
         fwrite(bvhs[i].nodes, sizeof(render::MeshBVH::Node), bvhs[i].numNodes, ptr);
         fwrite(bvhs[i].leafGeos, sizeof(render::MeshBVH::LeafGeometry), bvhs[i].numLeaves, ptr);
-        fwrite(bvhs[i].leafMats, sizeof(render::MeshBVH::LeafMaterial), bvhs[i].numLeaves, ptr);
         fwrite(bvhs[i].vertices, sizeof(render::MeshBVH::BVHVertex), bvhs[i].numVerts, ptr);
+
+#ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
+        fwrite(bvhs[i].leafMats, sizeof(render::MeshBVH::LeafMaterial), bvhs[i].numVerts/3, ptr);
+#endif
     }
 
     fclose(ptr);
@@ -121,6 +126,9 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             .faceCountArrays { 0 },
             .meshArrays { 0 },
             .meshBVHArrays { 0 },
+        },
+        .imgData = ImageData {
+            .imageArrays {0},
         },
         .objects { 0 },
         .materials { 0 },
@@ -219,7 +227,6 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
             if(should_construct) {
                 uint32_t post_objects_offset = imported.objects.size();
-
                 for (uint32_t object_idx = pre_objects_offset;
                      object_idx < post_objects_offset; ++object_idx) {
                     SourceObject &obj = imported.objects[object_idx];
@@ -261,6 +268,7 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
     uint32_t num_bvhs = 0;
     uint32_t num_nodes = 0;
     uint32_t num_leaf_geos = 0;
+    uint32_t num_leaf_mats = 0;
     uint32_t num_vertices = 0;
 
     for (CountT asset_idx = 0; 
@@ -276,6 +284,9 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
 
             num_nodes += bvh.numNodes;
             num_leaf_geos += bvh.numLeaves;
+#ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
+            num_leaf_mats += bvh.numVerts/3;
+#endif
             num_vertices += bvh.numVerts;
         }
     }
@@ -286,7 +297,7 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
         sizeof(MeshBVH::Node);
     uint32_t num_leaf_geos_bytes = num_leaf_geos *
         sizeof(MeshBVH::LeafGeometry);
-    uint32_t num_leaf_mat_bytes = num_leaf_geos *
+    uint32_t num_leaf_mat_bytes = num_leaf_mats *
         sizeof(MeshBVH::LeafMaterial);
     uint32_t num_vertices_bytes = num_vertices *
         sizeof(MeshBVH::BVHVertex);
@@ -300,6 +311,12 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
     MeshBVH::LeafGeometry *leaf_geos = (MeshBVH::LeafGeometry *)
         cu::allocGPU(num_leaf_geos_bytes);
 #endif
+#if defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
+    MeshBVH::LeafMaterial *leaf_mats =(MeshBVH::LeafMaterial*)cu::allocGPU(num_leaf_mat_bytes);
+#else
+    MeshBVH::LeafMaterial *leaf_mats = nullptr;
+#endif
+
     MeshBVH::BVHVertex *vertices = (MeshBVH::BVHVertex *)cu::allocGPU(num_vertices_bytes);
 
     uint32_t bvh_offset = 0;
@@ -321,6 +338,11 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
             tmp.nodes = nodes + node_offset;
             tmp.leafGeos = leaf_geos + leaf_offset;
             tmp.vertices = vertices + vert_offset;
+#if defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
+            tmp.leafMats = leaf_mats + leaf_offset;
+#else
+            tmp.leafMats = nullptr;
+#endif
 
             REQ_CUDA(cudaMemcpy(bvhs + bvh_offset,
                         &tmp, sizeof(tmp), cudaMemcpyHostToDevice));
@@ -331,6 +353,12 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
             REQ_CUDA(cudaMemcpy(leaf_geos + leaf_offset,
                         bvh.leafGeos, bvh.numLeaves * 
                             sizeof(MeshBVH::LeafGeometry),
+                        cudaMemcpyHostToDevice));
+#endif
+#if defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
+            REQ_CUDA(cudaMemcpy(leaf_mats + leaf_offset,
+                        bvh.leafMats, (bvh.numVerts/3) *
+                            sizeof(MeshBVH::LeafMaterial),
                         cudaMemcpyHostToDevice));
 #endif
 
@@ -349,7 +377,7 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
         .nodes = nodes,
         .numNodes = node_offset,
         .leafGeos = leaf_geos,
-        .leafMaterial = nullptr,
+        .leafMaterial = leaf_mats,
         .numLeaves = leaf_offset,
         .vertices = vertices,
         .numVerts = vert_offset,
