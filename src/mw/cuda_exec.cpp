@@ -26,6 +26,7 @@
 #include <stb_image.h>
 #define KHRONOS_STATIC
 #include <ktx.h>
+//#include "/home/warrenxia/Desktop/MadronaBVH/madrona_escape_room/external/madrona/external/KTX-Software/include/ktx.h"
 // #define MADRONA_FAST_BVH
 
 // Wrap GPU headers in the mwGPU namespace. This is a weird situation where
@@ -1667,11 +1668,12 @@ static MaterialData initMaterialData(
                                                  tex.pix_info.bufferSize,
                                                  KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
                                                  &texture);
-            printf("Compression: %d\n",texture->isCompressed);
+            printf("Compression: %d,%d,%d\n",texture->isCompressed,texture->numLayers,texture->numDimensions);
             if(texture->classId == ktxTexture2_c){
                 ktxTexture2 *texture2 = (ktxTexture2 *)texture;
                 printf("Compression: %d,%d\n",texture->isCompressed,texture2->vkFormat);
-                //KTX_error_code ret = ktxTexture2_TranscodeBasis(texture2, KTX_TTF_RGBA4444, 0);
+                KTX_error_code ret = ktxTexture2_TranscodeBasis(texture2, KTX_TTF_RGBA4444, 0);
+                printf("Transcode: %s\n",ktxErrorString(ret));
             }
             pixels = texture->pData;
 
