@@ -407,7 +407,7 @@ extern "C" __global__ void bvhRaycastEntry()
 
         num_processed_pixels++;
 
-        __syncthreads();
+        __syncwarp();
     }
 
     __syncthreads();
