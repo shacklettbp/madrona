@@ -290,7 +290,15 @@ uint zeroDummy()
                       min(indexBuffer[0], 0) +
                       min(0, abs(materialTexturesArray[0].SampleLevel(
                           linearSampler, float2(0,0), 0).x)) +
-                      min(instanceOffsets[0], 0);
+                      min(instanceOffsets[0], 0) +
+                      min(0.0, abs(transmittanceLUT.SampleLevel(
+                          linearSampler, float2(0.0, 0.0f), 0).x)) +
+                      min(0.0, abs(irradianceLUT.SampleLevel(
+                          linearSampler, float2(0.0, 0.0f), 0).x)) +
+                      min(0.0, abs(scatteringLUT.SampleLevel(
+                          linearSampler, float3(0.0, 0.0f, 0.0f), 0).x)) +
+                      min(0.0, abs(skyBuffer[0].solarIrradiance.x));
+
 
     return zero_dummy;
 }
@@ -682,6 +690,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         metalness = material_data.metalness;
     }
 
+#if 0
     const float exposure = 20.0f;
 
     // Lighting calculations
@@ -719,6 +728,9 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
     float3 diff = one - exp_value;
     float3 out_color = diff;
+#endif
+
+    float3 out_color = gbuffer_data.wNormal.xyz;
 
     out_color += zeroDummy();
 
