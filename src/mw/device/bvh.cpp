@@ -94,6 +94,8 @@ struct Stack {
         int32_t prev_locked = lock_.exchange(1, std::memory_order_relaxed);
         if (prev_locked) return false;
 
+        std::atomic_thread_fence(std::memory_order_acquire);
+
         if (offset > 0) {
             *item = items[--offset];
         }
@@ -237,11 +239,6 @@ extern "C" __global__ void bvhInit()
 // 2) Optimize the BVH
 extern "C" __global__ void bvhAllocInternalNodes()
 {
-#if 0
-    LOG("\n\n\n\nrender resolution {}\n", bvhParams.renderOutputResolution);
-    LOG("pixels are at {}\n", bvhParams.renderOutput);
-#endif
-
     bvhParams.timingInfo->timingCounts.store_relaxed(0);
     bvhParams.timingInfo->tlasTime.store_relaxed(0);
     bvhParams.timingInfo->blasTime.store_relaxed(0);
@@ -267,6 +264,8 @@ extern "C" __global__ void bvhAllocInternalNodes()
 
     auto *ptr = allocator->alloc(num_bytes);
 
+    bvhParams.timingInfo->memoryUsage.store_relaxed(num_bytes);
+
     internal_data->internalNodes = (LBVHNode *)ptr;
 
     internal_data->numAllocatedNodes = num_required_nodes;
@@ -287,13 +286,6 @@ extern "C" __global__ void bvhAllocInternalNodes()
     internal_data->traversalNodes = (QBVHNode *)
         ((char *)ptr + num_required_nodes * 
                        (2 * sizeof(LBVHNode) + sizeof(uint32_t)));
-
-#if 0
-    internal_data->indirectIndices = (uint32_t *)
-        ((char *)ptr + 2 * num_required_nodes * sizeof(LBVHNode)
-                     + num_required_nodes * sizeof(TreeletFormationNode)
-                     + num_required_nodes * sizeof(uint32_t));
-#endif
 
     internal_data->treeletRootIndexCounter.store_relaxed(0);
 

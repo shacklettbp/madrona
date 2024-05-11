@@ -304,6 +304,8 @@ struct TimingData {
     float numTLASTraces;
     float numBLASTraces;
     float tlasRatio;
+
+    uint64_t memoryUsage;
 };
 
 struct BVHKernels {
@@ -2706,6 +2708,10 @@ void MWCudaExecutor::getTimings()
         impl_->bvhKernels.timingInfo->numTLASTraces.load_relaxed();
     uint64_t num_blas_traces =
         impl_->bvhKernels.timingInfo->numBLASTraces.load_relaxed();
+    uint64_t memory_usage = 
+        impl_->bvhKernels.timingInfo->memoryUsage.load_relaxed();
+
+    printf("Memory usage: %llu\n", memory_usage);
 
     double time_in_tlas_f64 = (double)time_in_tlas_u64 / 1000000000.f;
     double time_in_blas_f64 = (double)time_in_blas_u64 / 1000000000.f;
@@ -2726,6 +2732,7 @@ void MWCudaExecutor::getTimings()
         (float)avg_num_tlas_traces,
         (float)avg_num_blas_traces,
         (float)ratio,
+        memory_usage
     });
 }
 
@@ -2781,6 +2788,10 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
             impl_->bvhKernels.timingInfo->numTLASTraces.load_relaxed();
         uint64_t num_blas_traces =
             impl_->bvhKernels.timingInfo->numBLASTraces.load_relaxed();
+        uint64_t memory_usage = 
+            impl_->bvhKernels.timingInfo->memoryUsage.load_relaxed();
+
+        printf("Memory usage: %llu\n", memory_usage);
 
         double time_in_tlas_f64 = (double)time_in_tlas_u64 / 1000000000.f;
         double time_in_blas_f64 = (double)time_in_blas_u64 / 1000000000.f;
@@ -2801,7 +2812,8 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
                 (float)avg_num_tlas_traces,
                 (float)avg_num_blas_traces,
                 (float)ratio,
-                });
+                memory_usage
+            });
     }
 #endif
 }
