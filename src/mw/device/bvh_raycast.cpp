@@ -259,9 +259,10 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             *out_color = Vector3{1,0,0};
         } else {
             Material *mat = &bvhParams.materials[closest_hit_info.materialIDX];
-            *out_color = {mat->color.x, mat->color.y, mat->color.z};
 
-            if (mat->textureIdx != -1) {
+            if (mat->textureIdx == -1) {
+                *out_color = {mat->color.x, mat->color.y, mat->color.z};
+            } else {
                 cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
 
                 float4 sampled_color = tex2D<float4>(*tex,
@@ -271,9 +272,9 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                                            sampled_color.y,
                                            sampled_color.z};
 
-                out_color->x *= tex_color.x;
-                out_color->y *= tex_color.y;
-                out_color->z *= tex_color.z;
+                out_color->x = tex_color.x;
+                out_color->y = tex_color.y;
+                out_color->z = tex_color.z;
             }
         }
 

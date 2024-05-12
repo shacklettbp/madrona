@@ -160,10 +160,6 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
                 );
     }*/
 
-    for (int i = 0; i < num_bvhs; ++i) {
-        printf("MaterialIdx = %d\n", params->bvhs[i].materialIDX);
-    }
-
     params->textures = (cudaTextureObject_t *)textures;
 
     // params->hostChannel = (void *)host_alloc->getHostChannel();

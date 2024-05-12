@@ -52,7 +52,8 @@ Vertex unpackVertex(PackedVertex packed)
     vert.position = float3(d0.x, d0.y, d0.z);
     vert.normal = normal;
     vert.tangentAndSign = tangent_and_sign;
-    vert.uv = float2(d1.z, d1.w);
+    vert.uv = unpackHalf2x16(d1.z);
+    vert.materialIdx = asuint(d1.w);
 
     return vert;
 }
@@ -105,7 +106,7 @@ float4 vert(in uint vid : SV_VertexID,
 {
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
     DrawData draw_data = drawDataBuffer[draw_id];
-    float4 color = materialBuffer[draw_data.materialID].color;
+    float4 color = materialBuffer[vert.materialIdx].color;
     uint instance_id = draw_data.instanceID;
 
     float4x4 shadow_matrix = shadowViewDataBuffer[push_const.viewIdx].viewProjectionMatrix;

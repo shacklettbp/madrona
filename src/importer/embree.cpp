@@ -275,14 +275,6 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
 #endif
         }
 
-        /*for(uint32_t vert_idx = 0; vert_idx < mesh.numVertices; vert_idx++) {
-            madrona::math::Vector2 uv = mesh.uvs[vert_idx];
-            assert(vert_idx + offsets[mesh_idx] < vertices.size());
-            assert(counter < vertices.size());
-            vertices[vert_idx + offsets[mesh_idx]] = {v1.x,v1.y,v1.z};
-            counter++;
-        }*/
-
         for(int face_idx = 0; face_idx < (int)mesh.numFaces; face_idx++){
             if (mesh.faceCounts != nullptr) {
                 FATAL("MeshBVH only supports triangular meshes");

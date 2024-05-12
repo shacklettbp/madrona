@@ -1327,6 +1327,11 @@ static bool gltfParseMesh(
     const GLTFMesh &gltf_mesh = loader.meshes[mesh_idx];
 
     DynArray<SourceMesh> meshes(1);
+
+    if (gltf_mesh.numPrims > 1) {
+        // asm volatile("int $3");
+    }
+
     for (CountT prim_offset = 0; prim_offset < (CountT)gltf_mesh.numPrims;
          prim_offset++) {
         CountT prim_idx = prim_offset + gltf_mesh.primOffset;
@@ -1528,11 +1533,21 @@ static bool gltfParseMesh(
         uint32_t *idx_ptr = indices.data();
         imported.geoData.indexArrays.emplace_back(std::move(indices));
 
+        // Create the materials.
+        DynArray<uint32_t> vert_mats(num_vertices);
+        for (int i = 0; i < num_vertices; ++i) {
+            vert_mats[i] = prim.materialIdx;
+        }
+
+        uint32_t *vert_mat_ptr = vert_mats.data();
+        imported.geoData.materialIndices.emplace_back(std::move(vert_mats));
+
         meshes.push_back(SourceMesh {
             .positions = position_ptr,
             .normals = normal_ptr,
             .tangentAndSigns = nullptr,
             .uvs = uv_ptr,
+            .vertexMaterials = vert_mat_ptr,
             .indices = idx_ptr,
             .faceCounts = nullptr,
             .faceMaterials = nullptr,
@@ -1540,6 +1555,8 @@ static bool gltfParseMesh(
             .numFaces = num_faces,
             .materialIDX = prim.materialIdx, // FIXME
         });
+
+        // printf("%d ", (int)prim.materialIdx);
     }
 
     imported.objects.push_back({
@@ -1603,6 +1620,7 @@ static bool gltfImportAssets(LoaderData &loader,
     CountT new_vert_arrays_start = imported.geoData.positionArrays.size();
     CountT new_normal_arrays_start = imported.geoData.normalArrays.size();
     CountT new_uvs_arrays_start = imported.geoData.uvArrays.size();
+    CountT new_mats_arrays_start = imported.geoData.materialIndices.size();
     CountT new_objects_start = imported.objects.size();
     CountT new_instances_start = imported.instances.size();
 
@@ -1628,6 +1646,7 @@ static bool gltfImportAssets(LoaderData &loader,
     CountT total_new_vertices = 0;
     CountT total_new_normals = 0;
     CountT total_new_uvs = 0;
+    CountT total_new_mats = 0;
     CountT total_new_tangents = 0;
     CountT total_new_meshes = 0;
     for (CountT inst_idx = new_instances_start;
@@ -1648,6 +1667,10 @@ static bool gltfImportAssets(LoaderData &loader,
             if(src_mesh.uvs){
                 total_new_uvs += src_mesh.numVertices;
             }
+
+            if (src_mesh.vertexMaterials) {
+                total_new_mats += src_mesh.numVertices;
+            }
         }
 
         total_new_meshes += src_obj.meshes.size();
@@ -1657,6 +1680,7 @@ static bool gltfImportAssets(LoaderData &loader,
     DynArray<math::Vector3> new_positions_arr(total_new_vertices);
     DynArray<math::Vector3> new_normals_arr(total_new_normals);
     DynArray<math::Vector2> new_uvs_arr(total_new_uvs);
+    DynArray<uint32_t> new_mats_arr(total_new_mats);
     DynArray<math::Vector4> new_tangentsigns_arr(total_new_tangents);
 
     for (CountT inst_idx = new_instances_start;
@@ -1664,15 +1688,7 @@ static bool gltfImportAssets(LoaderData &loader,
         const SourceInstance &inst = imported.instances[inst_idx];
         const SourceObject &src_obj = imported.objects[inst.objIDX];
 
-#if 0
-        math::Vector3 *new_mesh_positions_ptr =
-            new_positions_arr.data() + new_positions_arr.size();
-        math::Vector3 *new_mesh_normals_ptr =
-            new_normals_arr.data() + new_normals_arr.size();
-
-        math::Vector4 *new_mesh_tangents_ptr =
-            new_tangentsigns_arr.data() + new_tangentsigns_arr.size();
-#endif
+        uint32_t max_mat_idx = 0;
 
         for (const SourceMesh &src_mesh : src_obj.meshes) {
             math::Vector3 *new_mesh_positions_ptr =
@@ -1683,6 +1699,8 @@ static bool gltfImportAssets(LoaderData &loader,
                 new_tangentsigns_arr.data() + new_tangentsigns_arr.size();
             math::Vector2 *new_mesh_uvs_ptr =
                 new_uvs_arr.data() + new_uvs_arr.size();
+            uint32_t *new_mats_ptr =
+                new_mats_arr.data() + new_mats_arr.size();
 
             for (CountT i = 0; i < src_mesh.numVertices; i++) {
                 math::Vector3 orig_pos = src_mesh.positions[i];
@@ -1714,7 +1732,15 @@ static bool gltfImportAssets(LoaderData &loader,
                 if(src_mesh.uvs){
                     new_uvs_arr.push_back(src_mesh.uvs[i]);
                 }
+
+                if (src_mesh.vertexMaterials) {
+                    new_mats_arr.push_back(src_mesh.vertexMaterials[i]);
+
+                    max_mat_idx = std::max(max_mat_idx, src_mesh.vertexMaterials[i]);
+                }
             }
+
+            // printf("%d ", (int)max_mat_idx);
 
             merged_meshes.push_back(SourceMesh {
                 .positions = new_mesh_positions_ptr,
@@ -1723,16 +1749,24 @@ static bool gltfImportAssets(LoaderData &loader,
                 .tangentAndSigns = src_mesh.tangentAndSigns ?
                     new_mesh_tangents_ptr : nullptr,
                 .uvs = src_mesh.uvs ? new_mesh_uvs_ptr : nullptr,
+                .vertexMaterials = src_mesh.vertexMaterials ?
+                    new_mats_ptr : nullptr,
                 .indices = src_mesh.indices,
                 .faceCounts = src_mesh.faceCounts,
                 .numVertices = src_mesh.numVertices,
                 .numFaces = src_mesh.numFaces,
                 .materialIDX = src_mesh.materialIDX,
             });
+
+            // printf("merged mesh materialIDX = %d\n", (int)src_mesh.materialIDX);
         }
     }
 
     for(SourceMesh& mesh:merged_meshes){
+        for (int i = 0; i < mesh.numVertices; ++i) {
+            mesh.vertexMaterials[i] = mesh.materialIDX + imported.materials.size();
+        }
+
         mesh.materialIDX = mesh.materialIDX + imported.materials.size();
     }
 
@@ -1742,6 +1776,8 @@ static bool gltfImportAssets(LoaderData &loader,
     imported.geoData.normalArrays.resize(new_normal_arrays_start,
                                          [](auto *) {});
     imported.geoData.uvArrays.resize(new_uvs_arrays_start,
+                                         [](auto *) {});
+    imported.geoData.materialIndices.resize(new_mats_arrays_start,
                                          [](auto *) {});
     imported.objects.resize(new_objects_start,
                             [](auto *) {});
@@ -1764,6 +1800,7 @@ static bool gltfImportAssets(LoaderData &loader,
     imported.geoData.positionArrays.emplace_back(std::move(new_positions_arr));
     imported.geoData.normalArrays.emplace_back(std::move(new_normals_arr));
     imported.geoData.uvArrays.emplace_back(std::move(new_uvs_arr));
+    imported.geoData.materialIndices.emplace_back(std::move(new_mats_arr));
 
     CountT prev_img_idx = imported.imgData.imageArrays.size();
     CountT prev_tex_idx = imported.texture.size();

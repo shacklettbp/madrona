@@ -14,6 +14,7 @@ struct SourceMesh {
     math::Vector3 *normals;
     math::Vector4 *tangentAndSigns;
     math::Vector2 *uvs;
+    uint32_t *vertexMaterials;
 
     uint32_t *indices;
     uint32_t *faceCounts;
@@ -116,8 +117,13 @@ struct ImportedAssets {
         DynArray<DynArray<math::Vector3>> normalArrays;
         DynArray<DynArray<math::Vector4>> tangentAndSignArrays;
         DynArray<DynArray<math::Vector2>> uvArrays;
+
+        // This is bad but we're currently assigning materials to vertices
+        DynArray<DynArray<uint32_t>> materialIndices;
+
         DynArray<DynArray<uint32_t>> indexArrays;
         DynArray<DynArray<uint32_t>> faceCountArrays;
+
         DynArray<DynArray<SourceMesh>> meshArrays;
         DynArray<DynArray<render::MeshBVH>> meshBVHArrays;
     } geoData;

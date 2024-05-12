@@ -82,7 +82,8 @@ Vertex unpackVertex(PackedVertex packed)
     vert.position = float3(d0.x, d0.y, d0.z);
     vert.normal = normal;
     vert.tangentAndSign = tangent_and_sign;
-    vert.uv = float2(d1.z, d1.w);
+    vert.uv = unpackHalf2x16(asuint(d1.z));
+    vert.materialIdx = asuint(d1.w);
 
     return vert;
 }
@@ -609,7 +610,8 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         was_rasterized = true;
 
         MeshData mesh_data = meshDataBuffer[mesh_id];
-        MaterialData material_data = materialBuffer[mesh_data.materialIndex];
+
+        uint32_t material_idx = 0;
 
         uint index_start = mesh_data.indexOffset + primitive_id * 3;
 
@@ -625,6 +627,10 @@ void lighting(uint3 idx : SV_DispatchThreadID)
             uint vertex_idx = indexBuffer[index_start + i];
             PackedVertex packed = vertexDataBuffer[mesh_data.vertexOffset + vertex_idx];
             Vertex vert = unpackVertex(packed);
+
+            if (i == 0) {
+                material_idx = vert.materialIdx;
+            }
 
             float3 to_view_translation;
             float4 to_view_rotation;
@@ -676,9 +682,11 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         // Get interpolated UVs
         UVInterpolation uv = interpolateUVs(bc, vertices[0].uv, vertices[1].uv, vertices[2].uv);
 
+        MaterialData material_data = materialBuffer[mesh_data.materialIndex];
+
         float4 color = material_data.color;
         if (material_data.textureIdx != -1) {
-            color *= materialTexturesArray[material_data.textureIdx].SampleLevel(
+            color = materialTexturesArray[material_data.textureIdx].SampleLevel(
                     linearSampler, uv.interp, 0);
         }
 
@@ -690,7 +698,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         metalness = material_data.metalness;
     }
 
-#if 0
+#if 1
     const float exposure = 20.0f;
 
     // Lighting calculations
@@ -728,9 +736,9 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
     float3 diff = one - exp_value;
     float3 out_color = diff;
-#endif
-
+#else
     float3 out_color = gbuffer_data.wNormal.xyz;
+#endif
 
     out_color += zeroDummy();
 

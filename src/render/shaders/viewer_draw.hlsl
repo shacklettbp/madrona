@@ -99,7 +99,8 @@ Vertex unpackVertex(PackedVertex packed)
     vert.position = float3(d0.x, d0.y, d0.z);
     vert.normal = normal;
     vert.tangentAndSign = tangent_and_sign;
-    vert.uv = float2(d1.z, d1.w);
+    vert.uv = unpackHalf2x16(asuint(d1.z));
+    vert.materialIdx = asuint(d1.w);
 
     return vert;
 }
@@ -187,7 +188,7 @@ float4 vert(in uint vid : SV_VertexID,
     DrawData draw_data = drawDataBuffer[draw_id];
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
-    float4 color = materialBuffer[draw_data.materialID].color;
+    float4 color = materialBuffer[vert.materialIdx].color;
     uint instance_id = draw_data.instanceID;
 
     PerspectiveCameraData view_data = getCameraData();
@@ -223,9 +224,9 @@ float4 vert(in uint vid : SV_VertexID,
     v2f.position = rotateVec(instance_data.rotation,
                              instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
-    v2f.texIdx = materialBuffer[draw_data.materialID].textureIdx;
-    v2f.roughness = materialBuffer[draw_data.materialID].roughness;
-    v2f.metalness = materialBuffer[draw_data.materialID].metalness;
+    v2f.texIdx = materialBuffer[vert.materialIdx].textureIdx;
+    v2f.roughness = materialBuffer[vert.materialIdx].roughness;
+    v2f.metalness = materialBuffer[vert.materialIdx].metalness;
 
     return clip_pos;
 }
@@ -249,8 +250,12 @@ PixelOutput frag(in V2F v2f)
     // output.color.rgb = v2f.normal.xyz;
 
     if (v2f.texIdx != -1) {
-        output.color *= materialTexturesArray[v2f.texIdx].SampleLevel(
+#if 1
+        output.color = materialTexturesArray[v2f.texIdx].SampleLevel(
             linearSampler, float2(v2f.uv.x, 1.f - v2f.uv.y), 0);
+#endif
+    } else {
+        output.color = float4(0,0,0,1);
     }
 
     return output;

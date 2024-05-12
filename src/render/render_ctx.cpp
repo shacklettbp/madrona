@@ -16,6 +16,8 @@
 #include "vk/descriptors.hpp"
 #include "shader.hpp"
 
+#include <ktx.h>
+
 #include <filesystem>
 #include <fstream>
 #include <signal.h>
@@ -1446,104 +1448,334 @@ static DynArray<MaterialTexture> loadTextures(
 
     for (const imp::SourceTexture &tx : textures)
     {
-        const char *filename = tx.path;
-        int width, height, components;
-        void *pixels = stbi_load(filename, &width, &height, &components, STBI_rgb_alpha);
+        if (tx.info == imp::TextureLoadInfo::FILE_NAME) {
+            const char *filename = tx.path;
+            int width, height, components;
+            void *pixels = stbi_load(filename, &width, &height, &components, STBI_rgb_alpha);
 
-        auto [texture, texture_reqs] = alloc.makeTexture2D(
-                width, height, 1, VK_FORMAT_R8G8B8A8_SRGB);
+            if (!pixels)
+                continue;
 
-        HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
-        memcpy(texture_hb_staging.ptr, pixels, width * height * 4 * sizeof(char));
-        texture_hb_staging.flush(dev);
-        stbi_image_free(pixels);
+            auto [texture, texture_reqs] = alloc.makeTexture2D(
+                    width, height, 1, VK_FORMAT_R8G8B8A8_SRGB);
 
-        std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
+            HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
+            memcpy(texture_hb_staging.ptr, pixels, width * height * 4 * sizeof(char));
+            texture_hb_staging.flush(dev);
+            stbi_image_free(pixels);
 
-        assert(texture_backing.has_value());
+            std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
 
-        dev.dt.bindImageMemory(dev.hdl, texture.image, texture_backing.value(), 0);
+            assert(texture_backing.has_value());
 
-        VkImageMemoryBarrier copy_prepare {
-            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            nullptr,
-            0,
-            VK_ACCESS_MEMORY_WRITE_BIT,
-            VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            texture.image,
-            {
-                VK_IMAGE_ASPECT_COLOR_BIT,
-                0, 1, 0, 1
-            },
-        };
+            dev.dt.bindImageMemory(dev.hdl, texture.image, texture_backing.value(), 0);
 
-        dev.dt.cmdPipelineBarrier(cmdbuf,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0,
-            0, nullptr, 0, nullptr,
-            1, &copy_prepare);
+            VkImageMemoryBarrier copy_prepare {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    nullptr,
+                    0,
+                    VK_ACCESS_MEMORY_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    texture.image,
+                    {
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                        0, 1, 0, 1
+                    },
+            };
 
-        VkBufferImageCopy copy = {};
-        copy.bufferOffset = 0;
-        copy.bufferRowLength = 0;
-        copy.bufferImageHeight = 0;
-        copy.imageExtent.width = width;
-        copy.imageExtent.height = height;
-        copy.imageExtent.depth = 1;
-        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copy.imageSubresource.mipLevel = 0;
-        copy.imageSubresource.baseArrayLayer = 0;
-        copy.imageSubresource.layerCount = 1;
+            dev.dt.cmdPipelineBarrier(cmdbuf,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0,
+                    0, nullptr, 0, nullptr,
+                    1, &copy_prepare);
 
-        dev.dt.cmdCopyBufferToImage(cmdbuf, texture_hb_staging.buffer,
-            texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+            VkBufferImageCopy copy = {};
+            copy.bufferOffset = 0;
+            copy.bufferRowLength = 0;
+            copy.bufferImageHeight = 0;
+            copy.imageExtent.width = width;
+            copy.imageExtent.height = height;
+            copy.imageExtent.depth = 1;
+            copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copy.imageSubresource.mipLevel = 0;
+            copy.imageSubresource.baseArrayLayer = 0;
+            copy.imageSubresource.layerCount = 1;
 
-        VkImageMemoryBarrier finish_prepare {
-            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            nullptr,
-            VK_ACCESS_MEMORY_WRITE_BIT,
-            VK_ACCESS_SHADER_READ_BIT,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            texture.image,
-            {
-                VK_IMAGE_ASPECT_COLOR_BIT,
-                0, 1, 0, 1
-            },
-        };
-        
+            dev.dt.cmdCopyBufferToImage(cmdbuf, texture_hb_staging.buffer,
+                    texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 
-        dev.dt.cmdPipelineBarrier(cmdbuf,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0,
-            0, nullptr, 0, nullptr,
-            1, &finish_prepare);
+            VkImageMemoryBarrier finish_prepare {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    nullptr,
+                    VK_ACCESS_MEMORY_WRITE_BIT,
+                    VK_ACCESS_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    texture.image,
+                    {
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                        0, 1, 0, 1
+                    },
+            };
 
-        VkImageViewCreateInfo view_info {};
-        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
-        view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_info_sr.baseMipLevel = 0;
-        view_info_sr.levelCount = 1;
-        view_info_sr.baseArrayLayer = 0;
-        view_info_sr.layerCount = 1;
 
-        VkImageView view;
-        view_info.image = texture.image;
-        view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
-        REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
+            dev.dt.cmdPipelineBarrier(cmdbuf,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    0,
+                    0, nullptr, 0, nullptr,
+                    1, &finish_prepare);
 
-        host_buffers.push_back(std::move(texture_hb_staging));
+            VkImageViewCreateInfo view_info {};
+            view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+            view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            view_info_sr.baseMipLevel = 0;
+            view_info_sr.levelCount = 1;
+            view_info_sr.baseArrayLayer = 0;
+            view_info_sr.layerCount = 1;
 
-        dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
+            VkImageView view;
+            view_info.image = texture.image;
+            view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+            REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
+
+            host_buffers.push_back(std::move(texture_hb_staging));
+
+            dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
+        } else if (tx.info == imp::TextureLoadInfo::PIXEL_BUFFER) {
+            if(tx.pix_info.format == imp::KTX2) {
+                ktxTexture *ktexture;
+                KTX_error_code result;
+                ktx_size_t offset;
+                ktx_uint8_t *image;
+                ktx_uint32_t level, layer, faceSlice;
+                result = ktxTexture_CreateFromMemory((ktx_uint8_t *) tx.pix_info.pixels,
+                        tx.pix_info.bufferSize,
+                        KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
+                        &ktexture);
+                if (ktexture->classId == ktxTexture2_c) {
+                    ktxTexture2 *texture2 = (ktxTexture2 *) ktexture;
+                    KTX_error_code ret = ktxTexture2_TranscodeBasis(texture2, KTX_TTF_BC7_RGBA, 0);
+                }
+                void *pixels = ktexture->pData;
+
+                uint32_t width = ktexture->baseWidth;
+                uint32_t height = ktexture->baseHeight;
+
+                ktx_size_t tex_offset;
+                ktxTexture_GetImageOffset(ktexture, 0, 0, 0, &tex_offset);
+                ktx_size_t tex_size = ktxTexture_GetImageSize(ktexture, 0);
+
+                auto [texture, texture_reqs] = alloc.makeTexture2D(
+                        width, height, 1, VK_FORMAT_BC7_UNORM_BLOCK);
+
+                HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
+                memcpy(texture_hb_staging.ptr, (void *)((char *)pixels + tex_offset), tex_size);
+                texture_hb_staging.flush(dev);
+
+                std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
+
+                assert(texture_backing.has_value());
+
+                dev.dt.bindImageMemory(dev.hdl, texture.image, texture_backing.value(), 0);
+
+                VkImageMemoryBarrier copy_prepare {
+                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        nullptr,
+                        0,
+                        VK_ACCESS_MEMORY_WRITE_BIT,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        texture.image,
+                        {
+                            VK_IMAGE_ASPECT_COLOR_BIT,
+                            0, 1, 0, 1
+                        },
+                };
+
+                dev.dt.cmdPipelineBarrier(cmdbuf,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        0,
+                        0, nullptr, 0, nullptr,
+                        1, &copy_prepare);
+
+                VkBufferImageCopy copy = {};
+                copy.bufferOffset = 0;
+                copy.bufferRowLength = 0;
+                copy.bufferImageHeight = 0;
+                copy.imageExtent.width = width;
+                copy.imageExtent.height = height;
+                copy.imageExtent.depth = 1;
+                copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                copy.imageSubresource.mipLevel = 0;
+                copy.imageSubresource.baseArrayLayer = 0;
+                copy.imageSubresource.layerCount = 1;
+
+                dev.dt.cmdCopyBufferToImage(cmdbuf, texture_hb_staging.buffer,
+                        texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+                VkImageMemoryBarrier finish_prepare {
+                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        nullptr,
+                        VK_ACCESS_MEMORY_WRITE_BIT,
+                        VK_ACCESS_SHADER_READ_BIT,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        texture.image,
+                        {
+                            VK_IMAGE_ASPECT_COLOR_BIT,
+                            0, 1, 0, 1
+                        },
+                };
+
+
+                dev.dt.cmdPipelineBarrier(cmdbuf,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                        0,
+                        0, nullptr, 0, nullptr,
+                        1, &finish_prepare);
+
+                VkImageViewCreateInfo view_info {};
+                view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+                view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                view_info_sr.baseMipLevel = 0;
+                view_info_sr.levelCount = 1;
+                view_info_sr.baseArrayLayer = 0;
+                view_info_sr.layerCount = 1;
+
+                VkImageView view;
+                view_info.image = texture.image;
+                view_info.format = VK_FORMAT_BC7_UNORM_BLOCK;
+                REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
+
+                host_buffers.push_back(std::move(texture_hb_staging));
+                dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
+
+                ktxTexture_Destroy(ktexture);
+            }else{
+                int width, height, components;
+
+                void *pixels = stbi_load_from_memory(
+                        (stbi_uc*)tx.pix_info.pixels,
+                        tx.pix_info.bufferSize,
+                        &width, &height, &components, 
+                        STBI_rgb_alpha);
+
+                if (!pixels)
+                    continue;
+
+                auto [texture, texture_reqs] = alloc.makeTexture2D(
+                        width, height, 1, VK_FORMAT_R8G8B8A8_SRGB);
+
+                HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
+                memcpy(texture_hb_staging.ptr, pixels, width * height * 4 * sizeof(char));
+                texture_hb_staging.flush(dev);
+                stbi_image_free(pixels);
+
+                std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
+
+                assert(texture_backing.has_value());
+
+                dev.dt.bindImageMemory(dev.hdl, texture.image, texture_backing.value(), 0);
+
+                VkImageMemoryBarrier copy_prepare {
+                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        nullptr,
+                        0,
+                        VK_ACCESS_MEMORY_WRITE_BIT,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        texture.image,
+                        {
+                            VK_IMAGE_ASPECT_COLOR_BIT,
+                            0, 1, 0, 1
+                        },
+                };
+
+                dev.dt.cmdPipelineBarrier(cmdbuf,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        0,
+                        0, nullptr, 0, nullptr,
+                        1, &copy_prepare);
+
+                VkBufferImageCopy copy = {};
+                copy.bufferOffset = 0;
+                copy.bufferRowLength = 0;
+                copy.bufferImageHeight = 0;
+                copy.imageExtent.width = width;
+                copy.imageExtent.height = height;
+                copy.imageExtent.depth = 1;
+                copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                copy.imageSubresource.mipLevel = 0;
+                copy.imageSubresource.baseArrayLayer = 0;
+                copy.imageSubresource.layerCount = 1;
+
+                dev.dt.cmdCopyBufferToImage(cmdbuf, texture_hb_staging.buffer,
+                        texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+                VkImageMemoryBarrier finish_prepare {
+                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                        nullptr,
+                        VK_ACCESS_MEMORY_WRITE_BIT,
+                        VK_ACCESS_SHADER_READ_BIT,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        VK_QUEUE_FAMILY_IGNORED,
+                        texture.image,
+                        {
+                            VK_IMAGE_ASPECT_COLOR_BIT,
+                            0, 1, 0, 1
+                        },
+                };
+
+
+                dev.dt.cmdPipelineBarrier(cmdbuf,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                        0,
+                        0, nullptr, 0, nullptr,
+                        1, &finish_prepare);
+
+                VkImageViewCreateInfo view_info {};
+                view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+                view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+                view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                view_info_sr.baseMipLevel = 0;
+                view_info_sr.levelCount = 1;
+                view_info_sr.baseArrayLayer = 0;
+                view_info_sr.layerCount = 1;
+
+                VkImageView view;
+                view_info.image = texture.image;
+                view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+                REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
+
+                host_buffers.push_back(std::move(texture_hb_staging));
+
+                dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
+            }
+        }
     }
 
     dev.dt.endCommandBuffer(cmdbuf);
@@ -1565,8 +1797,8 @@ static DynArray<MaterialTexture> loadTextures(
 }
 
 CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
-                                        Span<const imp::SourceMaterial> src_mats,
-                                        Span<const imp::SourceTexture> textures)
+                                  Span<const imp::SourceMaterial> src_mats,
+                                  Span<const imp::SourceTexture> textures)
 {
     using namespace imp;
     using namespace math;
@@ -1618,6 +1850,27 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     int32_t mesh_offset = 0;
     int32_t vertex_offset = 0;
     int32_t index_offset = 0;
+
+    auto packHalf2x16 = [](const Vector2 &v) {
+#if defined(MADRONA_MSVC)
+        uint16_t x_half = f32tof16(v.x);
+        uint16_t y_half = f32tof16(v.y);
+#else
+#if defined(MADRONA_GCC)
+        _Float16 x_half, y_half;
+#elif defined(MADRONA_CLANG)
+        __fp16 x_half, y_half;
+#else
+        STATIC_UNIMPLEMEMENTED();
+#endif
+        x_half = v.x;
+        y_half = v.y;
+#endif
+
+        return uint32_t(std::bit_cast<uint16_t>(y_half)) << 16 |
+            uint32_t(std::bit_cast<uint16_t>(x_half));
+    };
+
     for (const SourceObject &obj : src_objs) {
         *obj_ptr++ = ObjectData {
             .meshOffset = mesh_offset,
@@ -1625,6 +1878,8 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         };
 
         for (const SourceMesh &mesh : obj.meshes) {
+            uint32_t material_idx = mesh.materialIDX;
+
             int32_t num_mesh_verts = (int32_t)mesh.numVertices;
             int32_t num_mesh_indices = (int32_t)mesh.numFaces * 3;
 
@@ -1633,7 +1888,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
                 .numVertices = num_mesh_verts,
                 .indexOffset = index_offset,
                 .numIndices = num_mesh_indices,
-                .materialIndex = (int32_t)mesh.materialIDX
+                .materialIndex = (int32_t)material_idx
             };
 
             // Compute new normals
@@ -1678,6 +1933,20 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
             }
 
             for (int32_t i = 0; i < num_mesh_verts; i++) {
+                uint32_t vert_mat_index = [i, material_idx, &mesh] () {
+                    if (mesh.vertexMaterials) {
+                        return mesh.vertexMaterials[i];
+                    } else if (material_idx >= 0) {
+                        return material_idx;
+                    } else {
+                        printf("NO SOURCE MATERIAL!\n");
+
+                        return 0u;
+                    }
+                } ();
+
+                // printf("%u ", vert_mat_index);
+
                 Vector3 pos = mesh.positions[i];
                 Vector3 normal = mesh.normals ?
                     mesh.normals[i] : (*new_normals)[i];
@@ -1695,10 +1964,16 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
                         1.f,
                     };
                 }
+
                 Vector2 uv = mesh.uvs ? mesh.uvs[i] : Vector2 { 0, 0 };
 
                 Vector3 encoded_normal_tangent =
                     encodeNormalTangent(normal, tangent_sign);
+
+                // Encode UVs into a uint32 (how bad will this look on small images??
+                // Let's see I guess.
+                float encoded_uvs = std::bit_cast<float>(packHalf2x16(uv));
+                float encoded_mat_idx = std::bit_cast<float>(vert_mat_index);
 
                 vertex_ptr[vertex_offset++] = PackedVertex {
                     Vector4 {
@@ -1710,8 +1985,8 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
                     Vector4 {
                         encoded_normal_tangent.y,
                         encoded_normal_tangent.z,
-                        uv.x,
-                        uv.y,
+                        encoded_uvs,
+                        encoded_mat_idx,
                     },
                 };
             }

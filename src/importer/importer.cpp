@@ -122,6 +122,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             .normalArrays { 0 },
             .tangentAndSignArrays { 0 },
             .uvArrays { 0 },
+            .materialIndices { 0 },
             .indexArrays { 0 },
             .faceCountArrays { 0 },
             .meshArrays { 0 },
@@ -249,6 +250,8 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         }
 #endif
     }
+
+    printf("number of materials = %d\n", (int)imported.materials.size());
 
     printf("\n");
 
