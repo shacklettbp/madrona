@@ -698,7 +698,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         metalness = material_data.metalness;
     }
 
-#if 1
+#if 0
     const float exposure = 20.0f;
 
     // Lighting calculations
@@ -737,7 +737,13 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     float3 diff = one - exp_value;
     float3 out_color = diff;
 #else
-    float3 out_color = gbuffer_data.wNormal.xyz;
+    // float3 out_color = gbuffer_data.wNormal.xyz;
+    float3 out_color;
+    if (was_rasterized) {
+        out_color = gbuffer_data.albedo.xyz;
+    } else {
+        out_color = float3(0, 0, 0);
+    }
 #endif
 
     out_color += zeroDummy();
