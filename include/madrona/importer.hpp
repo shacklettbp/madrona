@@ -34,9 +34,15 @@ enum TextureLoadInfo {
     PIXEL_BUFFER
 };
 
+enum TextureFormat {
+    KTX2,
+    PNG,
+    JPG,
+};
+
 struct PixelBufferInfo {
     void *pixels;
-    int format;
+    TextureFormat format;
     int bufferSize;
 };
 

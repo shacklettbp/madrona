@@ -1779,7 +1779,23 @@ static bool gltfImportAssets(LoaderData &loader,
     for(const auto& texture : loader.textures){
         void *data = imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].data();
         CountT size = imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].size();
-        imported.texture.emplace_back(SourceTexture(PixelBufferInfo{.pixels=data,.bufferSize=(int)size}));
+
+        TextureFormat format;
+        switch(loader.images[texture.sourceIdx].type){
+            case GLTFImageType::PNG:
+                format = TextureFormat::PNG;
+                break;
+            case GLTFImageType::JPEG:
+                format = TextureFormat::JPG;
+                break;
+            case GLTFImageType::KTX2:
+                format = TextureFormat::KTX2;
+                break;
+            default:
+                format = TextureFormat::JPG;
+                break;
+        }
+        imported.texture.emplace_back(SourceTexture(PixelBufferInfo{.pixels=data,.format=format,.bufferSize=(int)size}));
     }
 
     for(const auto& material : loader.materials){
