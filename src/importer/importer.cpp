@@ -377,7 +377,7 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
 
             bvh_offset += 1;
             node_offset += bvh.numNodes;
-            leaf_offset += bvh.numLeaves;
+            leaf_offset += bvh.numVerts/3;
             vert_offset += bvh.numVerts;
         }
     }
