@@ -1594,7 +1594,7 @@ static DynArray<MaterialTexture> loadTextures(
                     FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
 
                     if (read_fp) {
-                        printf("Found texture in cache!\n");
+                        printf("*");
 
                         fread(&width, sizeof(uint32_t), 1, read_fp);
                         fread(&height, sizeof(uint32_t), 1, read_fp);

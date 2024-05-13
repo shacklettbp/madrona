@@ -1119,6 +1119,13 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=2");
     }
 
+    const char *render_rgb_env = getenv("MADRONA_RENDER_RGB");
+    bool render_rgb = (render_rgb_env && render_rgb_env[0] == '1');
+
+    if (render_rgb) {
+        common_compile_flags.push_back("-DMADRONA_RENDER_RGB=8");
+    }
+
     for (const char *user_flag : cfg.userCompileFlags) {
         common_compile_flags.push_back(user_flag);
     }
@@ -1700,7 +1707,7 @@ static MaterialData initMaterialData(
                     FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
 
                     if (read_fp) {
-                        printf("Found texture in cache!\n");
+                        printf("*");
 
                         fread(&width, sizeof(uint32_t), 1, read_fp);
                         fread(&height, sizeof(uint32_t), 1, read_fp);

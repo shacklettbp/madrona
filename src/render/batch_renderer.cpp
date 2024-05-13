@@ -30,7 +30,7 @@ enum class LatestOperation {
 namespace consts {
 
 
-inline constexpr uint32_t maxDrawsPerView = 512*2;
+inline constexpr uint32_t maxDrawsPerView = 512*4;
 
 
 inline constexpr uint32_t maxNumImagesX = 16;
@@ -1227,6 +1227,22 @@ struct BatchRenderer::Impl {
     Impl(const Config &cfg, RenderContext &rctx);
 };
 
+static const char *getDrawDeferredPath()
+{
+    const char *render_rgb_env = getenv("MADRONA_RENDER_RGB");
+    bool render_rgb = (render_rgb_env && render_rgb_env[0] == '1');
+
+    assert(render_rgb_env);
+
+    if (render_rgb) {
+        printf("USING RGB SHADER\n");
+        return "draw_deferred_rgb.hlsl";
+    } else {
+        printf("USING DEPTH SHADER\n");
+        return "draw_deferred_depth.hlsl";
+    }
+}
+
 BatchRenderer::Impl::Impl(const Config &cfg,
                           RenderContext &rctx)
     : dev(rctx.dev),
@@ -1253,7 +1269,7 @@ BatchRenderer::Impl::Impl(const Config &cfg,
           makeComputePipeline(dev, rctx.pipelineCache, 6, 
               sizeof(shader::DeferredLightingPushConstBR),
               consts::numDrawCmdBuffers * cfg.numFrames, rctx.repeatSampler, 
-              "draw_deferred.hlsl","lighting", makeShadersLighting) :
+              getDrawDeferredPath(),"lighting", makeShadersLighting) :
           Optional<PipelineMP<1>>::none()),
       batchFrames(cfg.numFrames),
       assetSetPrepare(rctx.asset_set_cull_),

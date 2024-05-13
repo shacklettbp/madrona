@@ -242,9 +242,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     profiler->timeInTLAS += (total_trace_time - total_blas_time);
 #endif
 
-    // *out_color = closest_hit_info.normal;
-
     if (ray_hit) {
+#if defined (MADRONA_RENDER_RGB)
         int32_t material_idx = 
             closest_hit_info.bvh->getMaterialIDX(closest_hit_info);
 
@@ -266,6 +265,9 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             out_color->y *= tex_color.y;
             out_color->z *= tex_color.z;
         }
+#else
+        *out_color = closest_hit_info.normal;
+#endif
     }
 
     return ray_hit;
