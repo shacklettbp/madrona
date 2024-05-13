@@ -43,10 +43,12 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         uint32_t num_nodes;
         uint32_t num_leaves;
         math::AABB aabb_out;
+        int32_t material_idx;
         fread(&num_verts, sizeof(num_verts), 1, ptr);
         fread(&num_nodes, sizeof(num_nodes), 1, ptr);
         fread(&num_leaves, sizeof(num_leaves), 1, ptr);
         fread(&aabb_out, sizeof(aabb_out), 1, ptr);
+        fread(&material_idx, sizeof(material_idx), 1, ptr);
 
         assert(num_verts < 2000000);
         assert(num_nodes < 2000000);
@@ -55,14 +57,16 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         DynArray<render::MeshBVH::Node> nodes{num_nodes};
         fread(nodes.data(), sizeof(render::MeshBVH::Node), num_nodes, ptr);
 
+#if 0
         DynArray<render::MeshBVH::LeafGeometry> leaf_geos{num_leaves};
         fread(leaf_geos.data(), sizeof(render::MeshBVH::LeafGeometry), num_leaves, ptr);
+#endif
 
         DynArray<render::MeshBVH::BVHVertex> vertices{num_verts};
         fread(vertices.data(), sizeof(render::MeshBVH::BVHVertex), num_verts, ptr);
 
 #ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
-        DynArray<render::MeshBVH::LeafMaterial> leaf_materials{num_leaves};
+        DynArray<render::MeshBVH::LeafMaterial> leaf_materials{num_verts/3};
         fread(leaf_materials.data(), sizeof(render::MeshBVH::LeafMaterial), num_verts/3, ptr);
 #endif
 
@@ -73,10 +77,11 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         bvh.magic = render::MeshBVH::magicSignature;
 
         bvh.nodes = nodes.release(true);
-        bvh.leafGeos = leaf_geos.release(true);
+        // bvh.leafGeos = leaf_geos.release(true);
         bvh.leafMats = leaf_materials.release(true);
         bvh.vertices = vertices.release(true);
         bvh.rootAABB = aabb_out;
+        bvh.materialIDX = material_idx;
         bvhs_out.push_back(bvh);
     }
 
@@ -96,9 +101,10 @@ void writeCache(const char* location, DynArray<render::MeshBVH>& bvhs){
         fwrite(&bvhs[i].numNodes, sizeof(uint32_t), 1, ptr);
         fwrite(&bvhs[i].numLeaves, sizeof(uint32_t), 1, ptr);
         fwrite(&bvhs[i].rootAABB, sizeof(math::AABB), 1, ptr);
+        fwrite(&bvhs[i].materialIDX, sizeof(int32_t), 1, ptr);
 
         fwrite(bvhs[i].nodes, sizeof(render::MeshBVH::Node), bvhs[i].numNodes, ptr);
-        fwrite(bvhs[i].leafGeos, sizeof(render::MeshBVH::LeafGeometry), bvhs[i].numLeaves, ptr);
+        // fwrite(bvhs[i].leafGeos, sizeof(render::MeshBVH::LeafGeometry), bvhs[i].numLeaves, ptr);
         fwrite(bvhs[i].vertices, sizeof(render::MeshBVH::BVHVertex), bvhs[i].numVerts, ptr);
 
 #ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
