@@ -1937,10 +1937,10 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
                 uint32_t vert_mat_index = [override_materials, i, material_idx, &mesh] () {
                     if (override_materials) {
                         return material_idx;
-                    } else if (material_idx >= 0) {
+                    } else if (material_idx >= 0 && mesh.vertexMaterials) {
                         return mesh.vertexMaterials[i];
                     } else {
-                        printf("NO SOURCE MATERIAL!\n");
+                        // printf("NO SOURCE MATERIAL!\n");
 
                         return 0u;
                     }
