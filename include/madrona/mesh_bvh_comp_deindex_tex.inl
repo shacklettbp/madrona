@@ -406,11 +406,16 @@ bool MeshBVHCompUnIndexedTex::traceRayLeaf(int32_t leaf_idx,
         hit_info->normal = realout;
         hit_info->uv = realuv;
 
+        hit_info->leafMaterialIDX = leaf_idx + hit_tri_idx;
+
+#if 0
         if (materialIDX == -1) {
-            hit_info->materialIDX = leafMats[leaf_idx + hit_tri_idx].material[0].tex_id;
+            hit_info->materialIDX =
+                leafMats[leaf_idx + hit_tri_idx].material[0].matIDX;
         } else {
             hit_info->materialIDX = materialIDX;
         }
+#endif
 
         return true;
     } else {
@@ -1104,6 +1109,15 @@ float MeshBVHCompUnIndexedTex::sphereCastTriangle(math::Vector3 tri_a,
 
     *out_hit_normal = normalize(closest_tri_pt);
     return hit_t;
+}
+
+uint32_t MeshBVHCompUnIndexedTex::getMaterialIDX(const HitInfo &info) const
+{
+    if (materialIDX == -1) {
+        return leafMats[info.leafMaterialIDX].material[0].matIDX;
+    } else {
+        return materialIDX;
+    }
 }
 
 }

@@ -225,8 +225,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                         closest_hit_info.normal = 
                             closest_hit_info.normal.normalize();
 
-                        closest_hit_info.objectIDX =
-                            instances[instance_idx].objectID;
+                        closest_hit_info.bvh = model_bvh;
                     }
                 } else {
                     stack.push(node->childrenIdx[i]);
@@ -246,35 +245,27 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     // *out_color = closest_hit_info.normal;
 
     if (ray_hit) {
-        // Get the material info:
-        if (closest_hit_info.materialIDX == -1) {
-            *out_color = Vector3{1,0,0};
-        } else {
-            Material *mat = &bvhParams.materials[closest_hit_info.materialIDX];
+        int32_t material_idx = 
+            closest_hit_info.bvh->getMaterialIDX(closest_hit_info);
 
-            *out_color = {mat->color.x, mat->color.y, mat->color.z};
+        Material *mat = &bvhParams.materials[material_idx];
 
-            if (mat->textureIdx != -1) {
-                cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
+        *out_color = {mat->color.x, mat->color.y, mat->color.z};
 
-                float4 sampled_color = tex2D<float4>(*tex,
-                    closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
+        if (mat->textureIdx != -1) {
+            cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
 
-                math::Vector3 tex_color = {sampled_color.x,
-                                           sampled_color.y,
-                                           sampled_color.z};
+            float4 sampled_color = tex2D<float4>(*tex,
+                closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
 
-                out_color->x *= tex_color.x;
-                out_color->y *= tex_color.y;
-                out_color->z *= tex_color.z;
-            }
+            math::Vector3 tex_color = {sampled_color.x,
+                                       sampled_color.y,
+                                       sampled_color.z};
+
+            out_color->x *= tex_color.x;
+            out_color->y *= tex_color.y;
+            out_color->z *= tex_color.z;
         }
-
-#if 0
-        if (closest_hit_info.objectIDX == 1) {
-            *out_color = { 1.f, 0.f, 0.f };
-        }
-#endif
     }
 
     return ray_hit;

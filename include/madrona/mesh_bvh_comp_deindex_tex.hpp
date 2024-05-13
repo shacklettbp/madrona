@@ -76,7 +76,7 @@ struct MeshBVHCompUnIndexedTex {
     };
 
     struct BVHMaterial{
-        int32_t tex_id;
+        int32_t matIDX;
     };
 
     struct LeafMaterial {
@@ -114,8 +114,9 @@ struct MeshBVHCompUnIndexedTex {
         math::Vector3 normal;
         math::Vector2 uv;
 
-        int32_t materialIDX;
-        int32_t objectIDX;
+        MeshBVHCompUnIndexedTex *bvh;
+
+        uint32_t leafMaterialIDX;
     };
 
     template <typename Fn>
@@ -214,6 +215,8 @@ struct MeshBVHCompUnIndexedTex {
                                     float t_max,
                                     float sphere_r,
                                     math::Vector3 *out_hit_normal) const;
+
+    inline uint32_t getMaterialIDX(const HitInfo &info) const;
 
     Node *nodes;
     LeafGeometry *leafGeos;
