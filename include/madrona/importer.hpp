@@ -99,17 +99,17 @@ struct EmbreeLoader {
 struct ImportedAssets {
     struct GPUGeometryData {
         render::MeshBVH::Node *nodes;
-        uint32_t numNodes;
+        uint64_t numNodes;
 
         render::MeshBVH::LeafGeometry *leafGeos;
         render::MeshBVH::LeafMaterial *leafMaterial;
-        uint32_t numLeaves;
+        uint64_t numLeaves;
 
         render::MeshBVH::BVHVertex *vertices;
-        uint32_t numVerts;
+        uint64_t numVerts;
 
         render::MeshBVH *meshBVHs;
-        uint32_t numBVHs;
+        uint64_t numBVHs;
     };
 
     struct GeometryData {

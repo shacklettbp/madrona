@@ -420,7 +420,7 @@ struct MWCudaExecutor::Impl {
     BVHKernels bvhKernels;
 
     uint32_t numWorlds;
-    uint32_t numVertices;
+    uint64_t numVertices;
     uint32_t renderOutputResolution;
     uint32_t sharedMemPerSM;
 

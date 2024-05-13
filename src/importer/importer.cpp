@@ -274,11 +274,11 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
 #ifdef MADRONA_CUDA_SUPPORT
     using render::MeshBVH;
 
-    uint32_t num_bvhs = 0;
-    uint32_t num_nodes = 0;
-    uint32_t num_leaf_geos = 0;
-    uint32_t num_leaf_mats = 0;
-    uint32_t num_vertices = 0;
+    uint64_t num_bvhs = 0;
+    uint64_t num_nodes = 0;
+    uint64_t num_leaf_geos = 0;
+    uint64_t num_leaf_mats = 0;
+    uint64_t num_vertices = 0;
 
     for (CountT asset_idx = 0; 
             asset_idx < assets.geoData.meshBVHArrays.size(); 
@@ -300,15 +300,15 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
         }
     }
 
-    uint32_t num_bvh_bytes = num_bvhs *
+    uint64_t num_bvh_bytes = num_bvhs *
         sizeof(MeshBVH);
-    uint32_t num_nodes_bytes = num_nodes *
+    uint64_t num_nodes_bytes = num_nodes *
         sizeof(MeshBVH::Node);
-    uint32_t num_leaf_geos_bytes = num_leaf_geos *
+    uint64_t num_leaf_geos_bytes = num_leaf_geos *
         sizeof(MeshBVH::LeafGeometry);
-    uint32_t num_leaf_mat_bytes = num_leaf_mats *
+    uint64_t num_leaf_mat_bytes = num_leaf_mats *
         sizeof(MeshBVH::LeafMaterial);
-    uint32_t num_vertices_bytes = num_vertices *
+    uint64_t num_vertices_bytes = num_vertices *
         sizeof(MeshBVH::BVHVertex);
 
     // All pointers to GPU memory
@@ -328,10 +328,10 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
 
     MeshBVH::BVHVertex *vertices = (MeshBVH::BVHVertex *)cu::allocGPU(num_vertices_bytes);
 
-    uint32_t bvh_offset = 0;
-    uint32_t node_offset = 0;
-    uint32_t leaf_offset = 0;
-    uint32_t vert_offset = 0;
+    uint64_t bvh_offset = 0;
+    uint64_t node_offset = 0;
+    uint64_t leaf_offset = 0;
+    uint64_t vert_offset = 0;
 
     for (CountT asset_idx = 0; 
             asset_idx < assets.geoData.meshBVHArrays.size(); 
