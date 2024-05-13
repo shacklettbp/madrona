@@ -152,6 +152,7 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->materials = (Material *)materials;
 
+#if 0
     for (int i = 0; i < num_bvhs; ++i) {
         printf("bvh %d has material %d\n", i, (int)params->bvhs[i].materialIDX);
     }
@@ -165,6 +166,7 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
                 params->materials[i].color.z
                 );
     }
+#endif
 #endif
 
     params->textures = (cudaTextureObject_t *)textures;
