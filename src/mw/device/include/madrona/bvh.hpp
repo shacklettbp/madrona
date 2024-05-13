@@ -250,6 +250,8 @@ struct BVHParams {
 
     Material *materials;
     cudaTextureObject_t *textures;
+
+    float nearSphere;
 };
 
 }

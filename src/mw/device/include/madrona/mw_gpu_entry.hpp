@@ -93,7 +93,8 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
                                          uint32_t num_bvhs,
                                          void *timings,
                                          void *materials,
-                                         void *textures)
+                                         void *textures,
+                                         float near_sphere)
 {
     using namespace madrona;
     using namespace madrona::render;
@@ -167,6 +168,8 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 #endif
 
     params->textures = (cudaTextureObject_t *)textures;
+
+    params->nearSphere = near_sphere;
 
     // params->hostChannel = (void *)host_alloc->getHostChannel();
 }

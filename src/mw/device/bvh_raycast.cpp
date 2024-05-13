@@ -116,6 +116,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     BVHInternalData *internal_data = bvhParams.internalData;
 
+    float near_sphere = bvhParams.nearSphere;
+
     // internal_nodes_offset contains the offset to instance attached
     // data of world being operated on.
     uint32_t internal_nodes_offset = bvhParams.instanceOffsets[world_idx];
@@ -159,7 +161,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             float aabb_hit_t, aabb_far_t;
             Diag3x3 inv_ray_d = { 1.f/ray_d.x, 1.f/ray_d.y, 1.f/ray_d.z };
             bool intersect_aabb = child_aabb.rayIntersects(ray_o, inv_ray_d,
-                    2.f, t_max, aabb_hit_t, aabb_far_t);
+                    near_sphere, t_max, aabb_hit_t, aabb_far_t);
 
             if (aabb_hit_t <= t_max) {
                 if (node->childrenIdx[i] < 0) {

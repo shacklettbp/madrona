@@ -1808,6 +1808,7 @@ static GPUEngineState initEngineAndUserState(
     const imp::SourceTexture *textures,
     uint32_t num_textures,
     uint32_t raycast_output_resolution,
+    float near_sphere,
     ExecutorMode exec_mode,
     CUdevice cu_gpu,
     CUcontext cu_ctx,
@@ -2015,7 +2016,8 @@ static GPUEngineState initEngineAndUserState(
                                                  num_bvhs,
                                                  bvh_kernels.timingInfo,
                                                  mat_data.materials,
-                                                 mat_data.textures);
+                                                 mat_data.textures,
+                                                 near_sphere);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params
@@ -2590,6 +2592,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.textures.data() ? state_cfg.textures.data() : nullptr,
         state_cfg.textures.data() ? state_cfg.textures.size() : 0,
         state_cfg.raycastOutputResolution,
+        state_cfg.nearSphere,
         exec_mode, cu_gpu, cu_ctx, strm);
 
     TaskGraphsState taskgraphs_state {

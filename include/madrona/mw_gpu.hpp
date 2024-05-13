@@ -53,6 +53,8 @@ struct StateConfig {
     Span<const imp::SourceTexture> textures;
 
     uint32_t raycastOutputResolution;
+
+    float nearSphere;
 };
 
 struct CompileConfig {
