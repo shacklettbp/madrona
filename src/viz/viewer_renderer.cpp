@@ -3660,9 +3660,10 @@ void ViewerRenderer::render(const viz::ViewerControl &viz_ctrl)
 
 CountT ViewerRenderer::loadObjects(Span<const imp::SourceObject> objs,
                                    Span<const imp::SourceMaterial> mats,
-                                   Span<const imp::SourceTexture> textures)
+                                   Span<const imp::SourceTexture> textures,
+                                   bool override_materials)
 {
-    return state_.rctx.loadObjects(objs, mats, textures);
+    return state_.rctx.loadObjects(objs, mats, textures, override_materials);
 }
 
 void ViewerRenderer::configureLighting(Span<const render::LightConfig> lights)

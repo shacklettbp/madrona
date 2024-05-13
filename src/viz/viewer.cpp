@@ -742,9 +742,11 @@ Viewer::~Viewer() = default;
 
 CountT Viewer::loadObjects(Span<const imp::SourceObject> objs,
                            Span<const imp::SourceMaterial> mats,
-                           Span<const imp::SourceTexture> textures)
+                           Span<const imp::SourceTexture> textures,
+                           bool override_materials)
 {
-    return impl_->renderer.loadObjects(objs, mats, textures);
+    return impl_->renderer.loadObjects(objs, mats, textures,
+            override_materials);
 }
 
 void Viewer::configureLighting(Span<const render::LightConfig> lights)

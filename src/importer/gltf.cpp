@@ -1836,8 +1836,12 @@ static bool gltfImportAssets(LoaderData &loader,
     }
 
     for(const auto& material : loader.materials){
-        SourceMaterial s_mat = {.color = material.baseColor,.textureIdx = (int32_t)material.baseColorIdx+(int32_t)prev_tex_idx,
-                                .roughness=material.roughness,.metalness=material.metallic};
+        SourceMaterial s_mat = {
+            // .color = material.baseColor,
+            .color = math::Vector4{1.f, 1.f, 1.f, 1.f},
+            .textureIdx = (int32_t)material.baseColorIdx+(int32_t)prev_tex_idx,
+            .roughness=material.roughness,
+            .metalness=material.metallic};
         imported.materials.emplace_back(s_mat);
     }
 

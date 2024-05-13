@@ -1798,7 +1798,8 @@ static DynArray<MaterialTexture> loadTextures(
 
 CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
                                   Span<const imp::SourceMaterial> src_mats,
-                                  Span<const imp::SourceTexture> textures)
+                                  Span<const imp::SourceTexture> textures,
+                                  bool override_materials)
 {
     using namespace imp;
     using namespace math;
@@ -1933,11 +1934,11 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
             }
 
             for (int32_t i = 0; i < num_mesh_verts; i++) {
-                uint32_t vert_mat_index = [i, material_idx, &mesh] () {
-                    if (mesh.vertexMaterials) {
-                        return mesh.vertexMaterials[i];
-                    } else if (material_idx >= 0) {
+                uint32_t vert_mat_index = [override_materials, i, material_idx, &mesh] () {
+                    if (override_materials) {
                         return material_idx;
+                    } else if (material_idx >= 0) {
+                        return mesh.vertexMaterials[i];
                     } else {
                         printf("NO SOURCE MATERIAL!\n");
 

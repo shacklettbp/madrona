@@ -405,7 +405,12 @@ bool MeshBVHCompUnIndexedTex::traceRayLeaf(int32_t leaf_idx,
         hit_info->tHit = hit_t;
         hit_info->normal = realout;
         hit_info->uv = realuv;
-        hit_info->materialIDX = leafMats[leaf_idx + hit_tri_idx].material[0].tex_id;
+
+        if (materialIDX == -1) {
+            hit_info->materialIDX = leafMats[leaf_idx + hit_tri_idx].material[0].tex_id;
+        } else {
+            hit_info->materialIDX = materialIDX;
+        }
 
         return true;
     } else {

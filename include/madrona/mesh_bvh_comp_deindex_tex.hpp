@@ -115,6 +115,7 @@ struct MeshBVHCompUnIndexedTex {
         math::Vector2 uv;
 
         int32_t materialIDX;
+        int32_t objectIDX;
     };
 
     template <typename Fn>

@@ -15,7 +15,8 @@ struct RenderContext {
 
     CountT loadObjects(Span<const imp::SourceObject> src_objs,
                        Span<const imp::SourceMaterial> src_mats,
-                       Span<const imp::SourceTexture> textures);
+                       Span<const imp::SourceTexture> textures,
+                       bool override_materials);
 
     void configureLighting(Span<const LightConfig> lights);
 

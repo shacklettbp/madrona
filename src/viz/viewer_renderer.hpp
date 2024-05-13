@@ -140,7 +140,8 @@ public:
 
     CountT loadObjects(Span<const imp::SourceObject> objs,
                        Span<const imp::SourceMaterial> mats,
-                       Span<const imp::SourceTexture> textures);
+                       Span<const imp::SourceTexture> textures,
+                       bool override_materials);
 
     void configureLighting(Span<const render::LightConfig> lights);
     

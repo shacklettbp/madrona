@@ -686,7 +686,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
         float4 color = material_data.color;
         if (material_data.textureIdx != -1) {
-            color = materialTexturesArray[material_data.textureIdx].SampleLevel(
+            color *= materialTexturesArray[material_data.textureIdx].SampleLevel(
                     linearSampler, uv.interp, 0);
         }
 
