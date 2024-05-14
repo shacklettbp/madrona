@@ -720,8 +720,6 @@ extern "C" __global__ void bvhBuildSlow()
 
                     updateJobCount(smem, job_count_diff);
                 }
-
-                __syncwarp();
             }
         }
 
