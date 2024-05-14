@@ -435,7 +435,7 @@ inline __device__ void updateJobCount(sm::BuildSlowBuffer *smem,
                                       int32_t job_count_diff)
 {
     int32_t new_job_count = 
-        smem->numJobs.fetch_add(job_count_diff, std::memory_order_relaxed);
+        smem->numJobs.fetch_add(job_count_diff, std::memory_order_release);
 }
 
 inline __device__ int32_t pushJobs(sm::BuildSlowBuffer *smem,
@@ -577,7 +577,7 @@ extern "C" __global__ void bvhBuildSlow()
         if (lane_idx == 0) {
             uint32_t num_jobs = 0;
 
-            while (smem->numJobs.load(std::memory_order_relaxed) > 0) {
+            while (smem->numJobs.load(std::memory_order_acquire) > 0) {
                 // Try to pop a job from the stack.
                 BinnedSAHJob current_job = getBinnedSAHJob(smem);
 
@@ -1080,7 +1080,7 @@ extern "C" __global__ void bvhWidenTree()
         __syncthreads();
 
         if (lane_idx == 0) {
-            while (smem->numJobs.load(std::memory_order_relaxed) > 0) {
+            while (smem->numJobs.load(std::memory_order_acquire) > 0) {
                 auto stored_job = getWidenJob(smem);
 
                 if (stored_job.lbvhNodeIndex == 0) {
@@ -1177,7 +1177,7 @@ extern "C" __global__ void bvhWidenTree()
                         };
 
                         smem->stack.push(new_job);
-                        smem->numJobs.fetch_add(1, std::memory_order_relaxed);
+                        smem->numJobs.fetch_add(1, std::memory_order_release);
 
                         children_indices[i] = 
                             (QBVHNode::NodeIndexT)qbvh_node_idx + 1;
@@ -1193,7 +1193,7 @@ extern "C" __global__ void bvhWidenTree()
                         children_aabbs,
                         children_indices);
 
-                smem->numJobs.fetch_add(-1, std::memory_order_relaxed);
+                smem->numJobs.fetch_add(-1, std::memory_order_release);
             }
         }
 
