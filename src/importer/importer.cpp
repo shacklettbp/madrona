@@ -50,10 +50,6 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         fread(&aabb_out, sizeof(aabb_out), 1, ptr);
         fread(&material_idx, sizeof(material_idx), 1, ptr);
 
-        assert(num_verts < 2000000);
-        assert(num_nodes < 2000000);
-        assert(num_leaves < 2000000);
-
         DynArray<render::MeshBVH::Node> nodes{num_nodes};
         fread(nodes.data(), sizeof(render::MeshBVH::Node), num_nodes, ptr);
 
