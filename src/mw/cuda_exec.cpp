@@ -2919,9 +2919,11 @@ void MWCudaExecutor::getTimings(MWCudaLaunchGraph &launch_graph)
                 impl_->bvhKernels.traceEvent, 
                 impl_->bvhKernels.stopEvent));
 
+#if 0
     printf("alloc time: %f ms; build time: %f ms; widen time: %f; trace time: %f\n",
             alloc_time_ms, build_time_ms,
             widen_time_ms, trace_time_ms);
+#endif
 
     float total_time = trace_time_ms + build_time_ms;
 
@@ -2938,7 +2940,7 @@ void MWCudaExecutor::getTimings(MWCudaLaunchGraph &launch_graph)
     uint64_t memory_usage = 
         impl_->bvhKernels.timingInfo->memoryUsage.load_relaxed();
 
-    printf("Memory usage: %llu\n", memory_usage);
+    // printf("Memory usage: %llu\n", memory_usage);
 
     double time_in_tlas_f64 = (double)time_in_tlas_u64 / 1000000000.f;
     double time_in_blas_f64 = (double)time_in_blas_u64 / 1000000000.f;
@@ -3012,9 +3014,11 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
                     impl_->bvhKernels.traceEvent, 
                     impl_->bvhKernels.stopEvent));
 
+#if 0
         printf("alloc time: %f ms; build time: %f ms; widen time: %f; trace time: %f\n",
                 alloc_time_ms, build_time_ms,
                 widen_time_ms, trace_time_ms);
+#endif
 
         float total_time = trace_time_ms + build_time_ms;
 
@@ -3031,7 +3035,7 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
         uint64_t memory_usage = 
             impl_->bvhKernels.timingInfo->memoryUsage.load_relaxed();
 
-        printf("Memory usage: %llu\n", memory_usage);
+        // printf("Memory usage: %llu\n", memory_usage);
 
         double time_in_tlas_f64 = (double)time_in_tlas_u64 / 1000000000.f;
         double time_in_blas_f64 = (double)time_in_blas_u64 / 1000000000.f;

@@ -61,6 +61,8 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         DynArray<render::MeshBVH::BVHVertex> vertices{num_verts};
         fread(vertices.data(), sizeof(render::MeshBVH::BVHVertex), num_verts, ptr);
 
+
+
 #ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
         DynArray<render::MeshBVH::LeafMaterial> leaf_materials{num_verts/3};
         fread(leaf_materials.data(), sizeof(render::MeshBVH::LeafMaterial), num_verts/3, ptr);

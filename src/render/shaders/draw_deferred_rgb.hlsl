@@ -298,7 +298,8 @@ uint zeroDummy()
                           linearSampler, float2(0.0, 0.0f), 0).x)) +
                       min(0.0, abs(scatteringLUT.SampleLevel(
                           linearSampler, float3(0.0, 0.0f, 0.0f), 0).x)) +
-                      min(0.0, abs(skyBuffer[0].solarIrradiance.x));
+                      min(0.0, abs(skyBuffer[0].solarIrradiance.x)) +
+                      min(0.0, abs(lights[0].color.x));
 
 
     return zero_dummy;

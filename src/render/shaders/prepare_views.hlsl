@@ -147,7 +147,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
         float3 up = rotateVec(qInv,float3(0, 0, 1));
         float3 right = cross(front,up);
 
-        float zFar = 200; //Dummy value for now
+        float zFar = 20000; //Dummy value for now
         float aspectRatio = view_data.yScale/view_data.xScale;
         float farPlaneHalfHeight = zFar; //Assumed fov of 90
         float farPlaneHalfWidth = farPlaneHalfHeight * aspectRatio;
@@ -168,6 +168,9 @@ void main(uint3 tid       : SV_DispatchThreadID,
     }
 
     GroupMemoryBarrierWithGroupSync();
+
+    uint num_culled = 0;
+    uint total = 0;
 
     for (int i = 0; i < sm.numInstancesPerThread; ++i) {
         uint local_idx = i * 32 + tid_local.x;
@@ -200,9 +203,12 @@ void main(uint3 tid       : SV_DispatchThreadID,
 
         int some_value = 0;
 
+        total++;
+
         if((!planeAABB(sm.nearPlane,center,extents) || !planeAABB(sm.leftPlane,center,extents) ||
            !planeAABB(sm.rightPlane,center,extents) || !planeAABB(sm.bottomPlane,center,extents) ||
            !planeAABB(sm.topPlane,center,extents) || !planeAABB(sm.farPlane,center,extents))){
+            num_culled++;
             continue;
         }
 
@@ -233,6 +239,8 @@ void main(uint3 tid       : SV_DispatchThreadID,
             drawDataBuffer[gid.x * pushConst.maxDrawsPerView + draw_id] = draw_data;
         }
     }
+
+    printf("percent culled: %f\n", (float)num_culled / (float)total);
 
     GroupMemoryBarrierWithGroupSync();
 }
