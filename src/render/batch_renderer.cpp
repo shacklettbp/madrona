@@ -42,7 +42,7 @@ inline constexpr uint32_t maxNumImagesPerTarget =
 
 // 256, is the number of views per image we can have
 inline constexpr uint32_t maxDrawsPerLayeredImage = maxDrawsPerView * maxNumImagesPerTarget;
-inline constexpr VkFormat colorFormat = VK_FORMAT_R32G32_UINT;
+inline constexpr VkFormat colorFormat = VK_FORMAT_R32_SFLOAT;
 inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 inline constexpr VkFormat outputColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
 inline constexpr uint32_t numDrawCmdBuffers = 4; // Triple buffering
@@ -231,9 +231,9 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
     blend_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     blend_info.logicOpEnable = VK_FALSE;
-    blend_info.attachmentCount = 0;
-        // static_cast<uint32_t>(blend_attachments.size());
-    //blend_info.pAttachments = blend_attachments.data();
+    blend_info.attachmentCount = 
+        static_cast<uint32_t>(blend_attachments.size());
+    blend_info.pAttachments = blend_attachments.data();
 
     // Dynamic
     std::array dyn_enable {
@@ -301,8 +301,8 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
     VkPipelineRenderingCreateInfo rendering_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .pNext = nullptr,
-        .colorAttachmentCount = 0,
-        .pColorAttachmentFormats = nullptr, // &color_format,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &color_format,
         .depthAttachmentFormat = depth_format
     };
 
@@ -1056,9 +1056,8 @@ static void issueRasterization(vk::Device &dev,
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = total_rect,
         .layerCount = 1,
-        .colorAttachmentCount = 0,
-        //.pColorAttachments = &color_attach,
-        .pColorAttachments = nullptr,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_attach,
         .pDepthAttachment = &depth_attach
     };
 

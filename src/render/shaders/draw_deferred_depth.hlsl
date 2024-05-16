@@ -8,7 +8,7 @@ DeferredLightingPushConstBR pushConst;
 
 // This is an array of all the textures
 [[vk::binding(0, 0)]]
-RWTexture2DArray<uint2> vizBuffer[];
+RWTexture2DArray<float> vizBuffer[];
 
 [[vk::binding(1, 0)]]
 RWStructuredBuffer<uint32_t> rgbOutputBuffer;
@@ -309,7 +309,8 @@ uint zeroDummy()
                       min(0.0, abs(engineInstanceBuffer[0].data[0].x)) +
                       min(0.0, abs(float(indexBuffer[0]))) +
                       min(0.0, abs(vertexDataBuffer[0].data[0].x)) +
-                      min(0.0, abs(lights[0].color.x));
+                      min(0.0, abs(lights[0].color.x)) +
+                      min(0.0, abs(depthInBuffer[0].SampleLevel(linearSampler, float2(0,0), 0).x));
 
 
     return zero_dummy;
@@ -608,8 +609,11 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     sample_uv.y = 1.0 - sample_uv.y;
 
     // Apply the offset when reading the pixel value from the image
-    float depth = depthInBuffer[target_idx].SampleLevel(linearSampler,
-                                                        sample_uv, 0).x;
+    // float depth = depthInBuffer[target_idx].SampleLevel(linearSampler,
+                                                        // sample_uv, 0).x;
+
+    float depth = vizBuffer[target_idx][vbuffer_pixel + 
+                     uint3(x_pixel_offset, y_pixel_offset, 0)] / 1000.0;
 
 #if 0
     uint2 data = vizBuffer[target_idx][vbuffer_pixel + 

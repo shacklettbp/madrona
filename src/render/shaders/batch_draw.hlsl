@@ -32,8 +32,7 @@ StructuredBuffer<PackedVertex> vertexDataBuffer;
 StructuredBuffer<MeshData> meshDataBuffer;
 
 struct V2F {
-    [[vk::location(0)]] uint instanceID : TEXCOORD0;
-    [[vk::location(1)]] uint meshID : TEXCOORD3;
+    [[vk::location(0)]] float depth : TEXCOORD0;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -151,7 +150,8 @@ void computeCompositeTransform(float3 obj_t,
 
 [shader("vertex")]
 float4 vert(in uint vid : SV_VertexID,
-            in uint draw_id : SV_InstanceID) : SV_Position
+            in uint draw_id : SV_InstanceID,
+            out V2F v2f) : SV_Position
 {
     DrawDataBR draw_data = drawDataBuffer[draw_id + pushConst.drawDataOffset];
 
@@ -193,6 +193,8 @@ float4 vert(in uint vid : SV_VertexID,
                   min(0.0, abs(float(draw_data.instanceID))) +
                   something;
 
+    v2f.depth = clip_pos.w;
+
     return clip_pos;
 }
 
@@ -220,8 +222,17 @@ uint3 unpackVizBufferData(in uint2 data)
     return uint3(primitive_id-1, mesh_id-1, instance_id-1);
 }
 
+struct PixelOutput {
+    float depthOut : SV_Target0;
+};
+
 [shader("pixel")]
-void frag(in V2F v2f,
-                 in uint prim_id : SV_PrimitiveID)
+PixelOutput frag(in V2F v2f,
+          in uint prim_id : SV_PrimitiveID)
 {
+    PixelOutput output;
+
+    output.depthOut = v2f.depth;
+
+    return output;
 }
