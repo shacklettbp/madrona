@@ -51,7 +51,7 @@ static constexpr VkBufferUsageFlags localRTUsage =
     rtGeometryUsage | rtAccelScratchUsage | rtAccelUsage;
 
 static constexpr VkBufferUsageFlags localUsage =
-    commonUsage | geometryUsage | shaderUsage | indirectUsage | localRTUsage;
+    commonUsage | geometryUsage | shaderUsage | indirectUsage;
 
 static constexpr VkBufferUsageFlags dedicatedUsage =
     localUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
