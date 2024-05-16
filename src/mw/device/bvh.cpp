@@ -753,6 +753,8 @@ extern "C" __global__ void bvhBuildFast()
 
     uint32_t thread_offset = global_tid;
 
+    uint32_t num_loops = 0;
+
     while (thread_offset < smem->totalNumInstances) {
         // Load a bunch of morton codes into shared memory.
         //
@@ -907,6 +909,8 @@ extern "C" __global__ void bvhBuildFast()
         thread_offset += threads_per_grid;
 
         __syncthreads();
+
+        num_loops++;
     }
 }
 

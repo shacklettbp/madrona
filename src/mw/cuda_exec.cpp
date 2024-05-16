@@ -2911,11 +2911,6 @@ void MWCudaExecutor::getTimings(MWCudaLaunchGraph &launch_graph)
 
     float build_time_ms = 0.f;
     REQ_CU(cuEventElapsedTime(&build_time_ms,
-                impl_->bvhKernels.widenEvent, 
-                impl_->bvhKernels.traceEvent));
-
-    float widen_time_ms = 0.f;
-    REQ_CU(cuEventElapsedTime(&build_time_ms,
                 impl_->bvhKernels.buildEvent, 
                 impl_->bvhKernels.traceEvent));
 
