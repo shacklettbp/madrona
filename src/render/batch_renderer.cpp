@@ -1778,6 +1778,8 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                 EngineInterop *interop,
                                 RenderContext &rctx)
 {
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    
     (void)interop;
 
     // prepareForRendering(info, interop);
@@ -2041,6 +2043,31 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.renderFence));
     REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.renderFence));
 
+    REQ_VK(impl->dev.dt.deviceWaitIdle(impl->dev.hdl));
+
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
+    double duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
+    float duration_ms = (float)(duration/1000000.0);
+
+    printf("rasterizer batch renderer took %f ms\n", duration_ms);
+
+    impl->recordedTimings.push_back(duration_ms);
+
+    impl->dev.dt.getQueryPoolResults(
+                impl->dev.hdl, impl->timeQueryPool, 0, 2, sizeof(uint64_t) * 2, 
+                impl->timestamps, sizeof(uint64_t),
+                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+
+    double delta_in_ms = double(impl->timestamps[1] - impl->timestamps[0]) *
+        impl->dev.timestampPeriod / 1000000.0;
+
+    // printf("rasterizer batch renderer took %f ms\n", (float)delta_in_ms);
+    // impl->recordedTimings.push_back((float)delta_in_ms);
+
+    frame_data.latestOp = LatestOperation::RenderViews;
+
+#if 0
     impl->dev.dt.getQueryPoolResults(
                 impl->dev.hdl, impl->timeQueryPool, 0, 2, sizeof(uint64_t) * 2, 
                 impl->timestamps, sizeof(uint64_t),
@@ -2053,6 +2080,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     impl->recordedTimings.push_back(delta_in_ms);
 
     frame_data.latestOp = LatestOperation::RenderViews;
+#endif
 }
 
 
