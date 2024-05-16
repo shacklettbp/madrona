@@ -738,172 +738,175 @@ extern "C" __global__ void bvhBuildFast()
     sm::BuildFastBuffer *smem = (sm::BuildFastBuffer *)sm::buffer;
 
     const uint32_t threads_per_block = blockDim.x;
+    const uint32_t threads_per_grid = gridDim.x * blockDim.x;
+    
+    uint32_t global_tid = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (threadIdx.x == 0) {
-        uint32_t node_offset = internal_data->buildFastAccumulator.fetch_add<
-            sync::memory_order::relaxed>(threads_per_block);
         uint32_t num_instances = bvhParams.instanceOffsets[bvhParams.numWorlds-1] +
                                  bvhParams.instanceCounts[bvhParams.numWorlds-1];
 
-        smem->blockNodeOffset = node_offset;
         smem->totalNumInstances = num_instances;
     }
 
     __syncthreads();
 
-    // For now, each thread is individually processing an internal node
-    uint32_t thread_offset = smem->blockNodeOffset + threadIdx.x;
-    if (thread_offset >= smem->totalNumInstances) {
-        return;
-    }
+    uint32_t thread_offset = global_tid;
 
-    // Load a bunch of morton codes into shared memory.
-    //
-    // TODO: Profile the difference between directly loading the morton codes
-    // from memory vs first loading them into shared memory and operating on
-    // them there. Problem is, would need an edge case for access morton codes
-    // outside of bounds.
-    //
-    // We'd have to get the min/max world ID handled by this thread block and
-    // load all the morton codes from the worlds within that range.
-    //
-    // However, the complication lies in the case where 
+    while (thread_offset < smem->totalNumInstances) {
+        // Load a bunch of morton codes into shared memory.
+        //
+        // TODO: Profile the difference between directly loading the morton codes
+        // from memory vs first loading them into shared memory and operating on
+        // them there. Problem is, would need an edge case for access morton codes
+        // outside of bounds.
+        //
+        // We'd have to get the min/max world ID handled by this thread block and
+        // load all the morton codes from the worlds within that range.
+        //
+        // However, the complication lies in the case where 
 
-    // Number of leaves in the world of this thread
-    //
-    struct {
-        uint32_t idx;
-        uint32_t numInternalNodes;
-        uint32_t internalNodesOffset;
-        uint32_t numLeaves;
-    } world_info;
+        // Number of leaves in the world of this thread
+        //
+        struct {
+            uint32_t idx;
+            uint32_t numInternalNodes;
+            uint32_t internalNodesOffset;
+            uint32_t numLeaves;
+        } world_info;
 
-    world_info.idx = bvhParams.instances[thread_offset].worldIDX;
-    world_info.numLeaves = bvhParams.instanceCounts[world_info.idx];
-    world_info.numInternalNodes = world_info.numLeaves - 1;
-    world_info.internalNodesOffset = bvhParams.instanceOffsets[world_info.idx];
+        world_info.idx = bvhParams.instances[thread_offset].worldIDX;
+        world_info.numLeaves = bvhParams.instanceCounts[world_info.idx];
+        world_info.numInternalNodes = world_info.numLeaves - 1;
+        world_info.internalNodesOffset = bvhParams.instanceOffsets[world_info.idx];
 
-    // The offset into the nodes of the world this thread is dealing with
-    int32_t tn_offset = thread_offset - world_info.internalNodesOffset;
+        // The offset into the nodes of the world this thread is dealing with
+        int32_t tn_offset = thread_offset - world_info.internalNodesOffset;
 
-    // Both the nodes and the leaves use the same offset
-    LBVHNode *nodes = internal_data->internalNodes +
-                      world_info.internalNodesOffset;
-    LBVHNode *leaves = internal_data->leaves + 
-                       world_info.internalNodesOffset;
+        // Both the nodes and the leaves use the same offset
+        LBVHNode *nodes = internal_data->internalNodes +
+            world_info.internalNodesOffset;
+        LBVHNode *leaves = internal_data->leaves + 
+            world_info.internalNodesOffset;
 
-    nodes[tn_offset].left = 0;
-    nodes[tn_offset].right = 0;
-    nodes[tn_offset].parent = 0;
+        nodes[tn_offset].left = 0;
+        nodes[tn_offset].right = 0;
+        nodes[tn_offset].parent = 0;
 
-    if (tn_offset == 0) {
-        nodes[tn_offset].parent = 0xFFFF'FFFF;
-        // printf("Root at %p\n", &nodes[tn_offset]);
-    }
-
-    if (tn_offset >= world_info.numInternalNodes) {
-        return;
-    }
-
-    // For now, we load things directly from global memory which sucks.
-    // Need to try the strategy from the TODO
-    auto llcp_nodes = [&world_info](int32_t i, int32_t j) {
-        if (j >= world_info.numLeaves || j < 0) {
-            return -1;
+        if (tn_offset == 0) {
+            nodes[tn_offset].parent = 0xFFFF'FFFF;
+            // printf("Root at %p\n", &nodes[tn_offset]);
         }
 
-        int32_t llcp = bits::llcp(bvhParams.mortonCodes[i+world_info.internalNodesOffset],
-                bvhParams.mortonCodes[j+world_info.internalNodesOffset]);
+        if (tn_offset >= world_info.numInternalNodes) {
+            thread_offset += threads_per_grid;
+            continue;
+        }
 
-        if (llcp == 8 * sizeof(uint32_t)) {
-            return llcp + bits::llcp(i, j);
+        // For now, we load things directly from global memory which sucks.
+        // Need to try the strategy from the TODO
+        auto llcp_nodes = [&world_info](int32_t i, int32_t j) {
+            if (j >= world_info.numLeaves || j < 0) {
+                return -1;
+            }
+
+            int32_t llcp = bits::llcp(bvhParams.mortonCodes[i+world_info.internalNodesOffset],
+                    bvhParams.mortonCodes[j+world_info.internalNodesOffset]);
+
+            if (llcp == 8 * sizeof(uint32_t)) {
+                return llcp + bits::llcp(i, j);
+            } else {
+                return llcp;
+            }
+        };
+
+        int32_t direction = bits::sign(llcp_nodes(tn_offset, tn_offset+1) -
+                llcp_nodes(tn_offset, tn_offset-1));
+        int32_t llcp_min = llcp_nodes(tn_offset, tn_offset - direction);
+        int32_t length_max = 2;
+
+        while (llcp_nodes(tn_offset, tn_offset + length_max * direction) > llcp_min) {
+            length_max *= 2;
+        }
+
+        int32_t true_length = 0;
+
+        for (int32_t t = length_max / 2; t >= 1; t /= 2) {
+            if (llcp_nodes(tn_offset, 
+                        tn_offset + (true_length + t) * direction) > llcp_min) {
+                true_length += t;
+            }
+        }
+
+        int32_t other_end = tn_offset + true_length * direction;
+
+        // The number of common bits for all leaves coming out of this node
+        int32_t node_llcp = llcp_nodes(tn_offset, other_end);
+
+        // Relative to the tn_offset
+        int32_t rel_split_offset = 0;
+
+        for (int32_t divisor = 2, t = bits::ceil_div(true_length, divisor);
+                t >= 1; (divisor *= 2), t = bits::ceil_div(true_length, divisor)) {
+            if (llcp_nodes(tn_offset, tn_offset + 
+                        (rel_split_offset + t) * direction) > node_llcp) {
+                rel_split_offset += t;
+            }
+        }
+
+        int32_t split_index = tn_offset + rel_split_offset * direction +
+            std::min(direction, 0);
+
+        int32_t left_index = std::min(tn_offset, other_end);
+        int32_t right_index = std::max(tn_offset, other_end);
+
+        if (left_index == split_index) {
+            // The left node is a leaf and the leaf's index is split_index
+            nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, true);
+            nodes[tn_offset].reachedCount.store_relaxed(0);
+            nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
+
+            leaves[split_index].parent = tn_offset;
+            leaves[split_index].instanceIdx = split_index;
+
+            uint32_t global_instance_idx = (split_index +
+                    world_info.internalNodesOffset);
+
+            leaves[split_index].aabb = bvhParams.aabbs[global_instance_idx].aabb;
+            leaves[split_index].reachedCount.store_relaxed(0);
         } else {
-            return llcp;
+            // The left node is an internal node and its index is split_index
+            nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, false);
+            nodes[tn_offset].reachedCount.store_relaxed(0);
+            nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
+            nodes[split_index].parent = tn_offset;
         }
-    };
 
-    int32_t direction = bits::sign(llcp_nodes(tn_offset, tn_offset+1) -
-                                   llcp_nodes(tn_offset, tn_offset-1));
-    int32_t llcp_min = llcp_nodes(tn_offset, tn_offset - direction);
-    int32_t length_max = 2;
+        if (right_index == split_index + 1) {
+            // The right node is a leaf and the leaf's index is split_index+1
+            nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, true);
+            nodes[tn_offset].reachedCount.store_relaxed(0);
+            nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
 
-    while (llcp_nodes(tn_offset, tn_offset + length_max * direction) > llcp_min) {
-        length_max *= 2;
-    }
+            leaves[split_index+1].parent = tn_offset;
+            leaves[split_index+1].instanceIdx = split_index+1;
 
-    int32_t true_length = 0;
+            uint32_t global_instance_idx = (split_index + 1 +
+                    world_info.internalNodesOffset);
 
-    for (int32_t t = length_max / 2; t >= 1; t /= 2) {
-        if (llcp_nodes(tn_offset, 
-                       tn_offset + (true_length + t) * direction) > llcp_min) {
-            true_length += t;
+            leaves[split_index+1].aabb = bvhParams.aabbs[global_instance_idx].aabb;
+            leaves[split_index+1].reachedCount.store_relaxed(0);
+        } else {
+            // The right node is an internal node and its index is split_index+1
+            nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, false);
+            nodes[tn_offset].reachedCount.store_relaxed(0);
+            nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
+            nodes[split_index + 1].parent = tn_offset;
         }
-    }
 
-    int32_t other_end = tn_offset + true_length * direction;
+        thread_offset += threads_per_grid;
 
-    // The number of common bits for all leaves coming out of this node
-    int32_t node_llcp = llcp_nodes(tn_offset, other_end);
-
-    // Relative to the tn_offset
-    int32_t rel_split_offset = 0;
-    
-    for (int32_t divisor = 2, t = bits::ceil_div(true_length, divisor);
-            t >= 1; (divisor *= 2), t = bits::ceil_div(true_length, divisor)) {
-        if (llcp_nodes(tn_offset, tn_offset + 
-                    (rel_split_offset + t) * direction) > node_llcp) {
-            rel_split_offset += t;
-        }
-    }
-
-    int32_t split_index = tn_offset + rel_split_offset * direction +
-        std::min(direction, 0);
-
-    int32_t left_index = std::min(tn_offset, other_end);
-    int32_t right_index = std::max(tn_offset, other_end);
-
-    if (left_index == split_index) {
-        // The left node is a leaf and the leaf's index is split_index
-        nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, true);
-        nodes[tn_offset].reachedCount.store_relaxed(0);
-        nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
-
-        leaves[split_index].parent = tn_offset;
-        leaves[split_index].instanceIdx = split_index;
-
-        uint32_t global_instance_idx = (split_index +
-            world_info.internalNodesOffset);
-
-        leaves[split_index].aabb = bvhParams.aabbs[global_instance_idx].aabb;
-        leaves[split_index].reachedCount.store_relaxed(0);
-    } else {
-        // The left node is an internal node and its index is split_index
-        nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, false);
-        nodes[tn_offset].reachedCount.store_relaxed(0);
-        nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
-        nodes[split_index].parent = tn_offset;
-    }
-    
-    if (right_index == split_index + 1) {
-        // The right node is a leaf and the leaf's index is split_index+1
-        nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, true);
-        nodes[tn_offset].reachedCount.store_relaxed(0);
-        nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
-
-        leaves[split_index+1].parent = tn_offset;
-        leaves[split_index+1].instanceIdx = split_index+1;
-
-        uint32_t global_instance_idx = (split_index + 1 +
-            world_info.internalNodesOffset);
-
-        leaves[split_index+1].aabb = bvhParams.aabbs[global_instance_idx].aabb;
-        leaves[split_index+1].reachedCount.store_relaxed(0);
-    } else {
-        // The right node is an internal node and its index is split_index+1
-        nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, false);
-        nodes[tn_offset].reachedCount.store_relaxed(0);
-        nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
-        nodes[split_index + 1].parent = tn_offset;
+        __syncthreads();
     }
 }
 
@@ -917,118 +920,121 @@ extern "C" __global__ void bvhConstructAABBs()
 
     const uint32_t threads_per_block = blockDim.x;
 
+    const uint32_t threads_per_grid = gridDim.x * blockDim.x;
+    
+    uint32_t global_tid = blockDim.x * blockIdx.x + threadIdx.x;
+
     if (threadIdx.x == 0) {
-        uint32_t node_offset = internal_data->constructAABBsAccumulator.fetch_add<
-            sync::memory_order::relaxed>(threads_per_block);
         uint32_t num_instances = bvhParams.instanceOffsets[bvhParams.numWorlds-1] +
                                  bvhParams.instanceCounts[bvhParams.numWorlds-1];
 
-        smem->blockNodeOffset = node_offset;
         smem->totalNumInstances = num_instances;
     }
 
     __syncthreads();
 
-    uint32_t thread_offset = smem->blockNodeOffset + threadIdx.x;
+    uint32_t thread_offset = global_tid;
 
-    if (thread_offset >= smem->totalNumInstances) {
-        return;
-    }
+    while (thread_offset < smem->totalNumInstances) {
+        struct {
+            uint32_t idx;
+            uint32_t numInternalNodes;
+            uint32_t internalNodesOffset;
+            uint32_t numLeaves;
+        } world_info;
 
-    struct {
-        uint32_t idx;
-        uint32_t numInternalNodes;
-        uint32_t internalNodesOffset;
-        uint32_t numLeaves;
-    } world_info;
+        world_info.idx = bvhParams.instances[thread_offset].worldIDX;
+        world_info.numLeaves = bvhParams.instanceCounts[world_info.idx];
+        world_info.numInternalNodes = world_info.numLeaves - 1;
+        world_info.internalNodesOffset = bvhParams.instanceOffsets[world_info.idx];
 
-    world_info.idx = bvhParams.instances[thread_offset].worldIDX;
-    world_info.numLeaves = bvhParams.instanceCounts[world_info.idx];
-    world_info.numInternalNodes = world_info.numLeaves - 1;
-    world_info.internalNodesOffset = bvhParams.instanceOffsets[world_info.idx];
+        int32_t tn_offset = thread_offset - world_info.internalNodesOffset;
 
-    int32_t tn_offset = thread_offset - world_info.internalNodesOffset;
+        LBVHNode *internal_nodes = internal_data->internalNodes +
+            world_info.internalNodesOffset;
+        LBVHNode *leaves = internal_data->leaves +
+            world_info.internalNodesOffset;
 
-    LBVHNode *internal_nodes = internal_data->internalNodes +
-                               world_info.internalNodesOffset;
-    LBVHNode *leaves = internal_data->leaves +
-                       world_info.internalNodesOffset;
+        LBVHNode *current = &leaves[tn_offset];
 
-    LBVHNode *current = &leaves[tn_offset];
-
-    if (current->isInvalid() || tn_offset >= world_info.numLeaves) {
-        return;
-    }
-
-    current = &internal_nodes[current->parent];
-
-    // If the value before the add is 0, then we are the first to hit this node.
-    // => we need to break out of the loop.
-    while (current->reachedCount.fetch_add_release(1) == 1) {
-        // Merge the AABBs of the children nodes. (Store like this for now to
-        // help when we make the tree 4 wide or 8 wide.
-        LBVHNode *children[2];
-        bool are_leaves[2];
-
-        if (current->left == 0) {
-            children[0] = nullptr;
-        } else {
-            bool is_leaf;
-            int32_t node_idx = LBVHNode::storeIdxToChildIdx(
-                    current->left, is_leaf);
-
-            if (is_leaf) {
-                children[0] = &leaves[node_idx];
-                are_leaves[0] = true;
-            } else {
-                children[0] = &internal_nodes[node_idx];
-                are_leaves[0] = false;
-            }
+        if (current->isInvalid() || tn_offset >= world_info.numLeaves) {
+            thread_offset += threads_per_grid;
+            continue;
         }
 
-        if (current->right == 0) {
-            children[1] = nullptr;
-        } else {
-            bool is_leaf;
-            int32_t node_idx = LBVHNode::storeIdxToChildIdx(
-                    current->right, is_leaf);
+        current = &internal_nodes[current->parent];
 
-            if (is_leaf) {
-                children[1] = &leaves[node_idx];
-                are_leaves[1] = true;
+        // If the value before the add is 0, then we are the first to hit this node.
+        // => we need to break out of the loop.
+        while (current->reachedCount.fetch_add_release(1) == 1) {
+            // Merge the AABBs of the children nodes. (Store like this for now to
+            // help when we make the tree 4 wide or 8 wide.
+            LBVHNode *children[2];
+            bool are_leaves[2];
+
+            if (current->left == 0) {
+                children[0] = nullptr;
             } else {
-                children[1] = &internal_nodes[node_idx];
-                are_leaves[1] = false;
-            }
-        }
+                bool is_leaf;
+                int32_t node_idx = LBVHNode::storeIdxToChildIdx(
+                        current->left, is_leaf);
 
-        bool got_valid_node = false;
-        math::AABB merged_aabb;
-
-        // Merge the AABBs
-#pragma unroll
-        for (int i = 0; i < 2; ++i) {
-            LBVHNode *node = children[i];
-
-            if (node) {
-                if (!got_valid_node) {
-                    got_valid_node = true;
-                    merged_aabb = node->aabb;
+                if (is_leaf) {
+                    children[0] = &leaves[node_idx];
+                    are_leaves[0] = true;
                 } else {
-                    merged_aabb = math::AABB::merge(node->aabb, merged_aabb);
+                    children[0] = &internal_nodes[node_idx];
+                    are_leaves[0] = false;
                 }
             }
+
+            if (current->right == 0) {
+                children[1] = nullptr;
+            } else {
+                bool is_leaf;
+                int32_t node_idx = LBVHNode::storeIdxToChildIdx(
+                        current->right, is_leaf);
+
+                if (is_leaf) {
+                    children[1] = &leaves[node_idx];
+                    are_leaves[1] = true;
+                } else {
+                    children[1] = &internal_nodes[node_idx];
+                    are_leaves[1] = false;
+                }
+            }
+
+            bool got_valid_node = false;
+            math::AABB merged_aabb;
+
+            // Merge the AABBs
+#pragma unroll
+            for (int i = 0; i < 2; ++i) {
+                LBVHNode *node = children[i];
+
+                if (node) {
+                    if (!got_valid_node) {
+                        got_valid_node = true;
+                        merged_aabb = node->aabb;
+                    } else {
+                        merged_aabb = math::AABB::merge(node->aabb, merged_aabb);
+                    }
+                }
+            }
+
+            current->aabb = merged_aabb;
+
+            if (current->parent == 0xFFFF'FFFF) {
+                break;
+            } else {
+                // Parent is 0 indexed so no problem just indexing 
+                // at current->parent.
+                current = &internal_nodes[current->parent];
+            }
         }
 
-        current->aabb = merged_aabb;
-
-        if (current->parent == 0xFFFF'FFFF) {
-            break;
-        } else {
-            // Parent is 0 indexed so no problem just indexing 
-            // at current->parent.
-            current = &internal_nodes[current->parent];
-        }
+        thread_offset += threads_per_grid;
+        __syncthreads();
     }
 }
 
