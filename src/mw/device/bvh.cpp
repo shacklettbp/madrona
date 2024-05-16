@@ -17,7 +17,7 @@
 
 using namespace madrona;
 
-static constexpr uint32_t kNumBuckets = 32;
+static constexpr uint32_t kNumBuckets = 16;
 
 struct BinnedSAHJob {
     enum class Direction {
