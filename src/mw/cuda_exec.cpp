@@ -2799,7 +2799,7 @@ MWCudaExecutor::~MWCudaExecutor()
 
                 float avg_time = 0.f;
                 for (int t = 0; t < group.recordedTimings.size(); ++t) {
-                    avg_time += group.recordedTimings[i];
+                    avg_time += group.recordedTimings[t];
                 }
 
                 avg_time /= (float)group.recordedTimings.size();
@@ -2849,7 +2849,7 @@ MWCudaExecutor::~MWCudaExecutor()
 
             float avg_time = 0.f;
             for (int t = 0; t < group.recordedTimings.size(); ++t) {
-                avg_time += group.recordedTimings[i];
+                avg_time += group.recordedTimings[t];
             }
 
             avg_time /= (float)group.recordedTimings.size();
