@@ -42,7 +42,8 @@ inline constexpr uint32_t maxNumImagesPerTarget =
 
 // 256, is the number of views per image we can have
 inline constexpr uint32_t maxDrawsPerLayeredImage = maxDrawsPerView * maxNumImagesPerTarget;
-inline constexpr VkFormat colorFormat = VK_FORMAT_R32_SFLOAT;
+inline constexpr VkFormat colorOnlyFormat = VK_FORMAT_R32_SFLOAT;
+inline constexpr VkFormat depthOnlyFormat = VK_FORMAT_R32_SFLOAT;
 inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 inline constexpr VkFormat outputColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
 inline constexpr uint32_t numDrawCmdBuffers = 4; // Triple buffering
@@ -64,7 +65,8 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
                                                    uint32_t height,
                                                    uint32_t max_num_views,
                                                    const vk::Device &dev,
-                                                   vk::MemoryAllocator &alloc)
+                                                   vk::MemoryAllocator &alloc,
+                                                   bool depth_only)
 {
     uint32_t max_image_dim = consts::maxNumImagesX * width;
 
@@ -96,7 +98,7 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
         LayeredTarget target = {
             .vizBuffer = alloc.makeColorAttachment(image_width, image_height,
                                                    1,
-                                                   consts::colorFormat),
+                                                   depth_only ? consts::depthOnlyFormat : consts::colorOnlyFormat),
             .depth = alloc.makeDepthAttachment(image_width, image_height,
                                                1,
                                                consts::depthFormat),
@@ -115,7 +117,7 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
         };
 
         view_info.image = target.vizBuffer.image;
-        view_info.format = consts::colorFormat;
+        view_info.format = depth_only ? consts::depthOnlyFormat : consts::colorOnlyFormat;
         REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &target.vizBufferView));
 
         view_info.image = target.depth.image;
@@ -159,7 +161,8 @@ struct DrawCommandPackage {
 ////////////////////////////////////////////////////////////////////////////////
 static vk::PipelineShaders makeDrawShaders(const vk::Device &dev, 
                                            VkSampler repeat_sampler,
-                                           VkSampler clamp_sampler)
+                                           VkSampler clamp_sampler,
+                                           bool depth_only)
 {
     (void)repeat_sampler;
     (void)clamp_sampler;
@@ -168,7 +171,13 @@ static vk::PipelineShaders makeDrawShaders(const vk::Device &dev,
         std::filesystem::path(STRINGIFY(MADRONA_RENDER_DATA_DIR)) /
         "shaders";
 
-    auto shader_path = (shader_dir / "batch_draw.hlsl").string();
+    auto shader_path = [depth_only, shader_dir] () {
+        if (depth_only) {
+            return (shader_dir / "batch_draw_depth.hlsl").string();
+        } else {
+            return (shader_dir / "batch_draw_rgb.hlsl").string();
+        }
+    } ();
 
     ShaderCompiler compiler;
     SPIRVShader vert_spirv = compiler.compileHLSLFileToSPV(
@@ -184,18 +193,36 @@ static vk::PipelineShaders makeDrawShaders(const vk::Device &dev,
         std::move(frag_spirv),
     };
 
-    StackAlloc tmp_alloc;
-    return vk::PipelineShaders(dev, tmp_alloc, shaders,
-        Span<const vk::BindingOverride>({}));
+    if (depth_only) {
+        StackAlloc tmp_alloc;
+        return vk::PipelineShaders(dev, tmp_alloc, shaders,
+            Span<const vk::BindingOverride>({}));
+    } else {
+        StackAlloc tmp_alloc;
+        printf("binding override with repeat sampler!!!!!!!!!! WHAT THE F\n");
+
+        return vk::PipelineShaders(dev, tmp_alloc, shaders,
+            Span<const vk::BindingOverride>({
+                 vk::BindingOverride {
+                     4, 0, VK_NULL_HANDLE,
+                     InternalConfig::maxTextures, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+                 },
+                 vk::BindingOverride {
+                     4, 1, repeat_sampler, 1, 0
+                 }
+            }));
+    }
 }
 
 static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
                                     VkPipelineCache pipeline_cache,
                                     VkRenderPass render_pass,
                                     uint32_t num_frames,
-                                    uint32_t num_pools)
+                                    uint32_t num_pools,
+                                    bool depth_only,
+                                    VkSampler repeat_sampler)
 {
-    auto shaders = makeDrawShaders(dev, VK_NULL_HANDLE, VK_NULL_HANDLE);
+    auto shaders = makeDrawShaders(dev, repeat_sampler, repeat_sampler, depth_only);
 
     VkPipelineVertexInputStateCreateInfo vert_info {};
     VkPipelineInputAssemblyStateCreateInfo input_assembly_info {};
@@ -254,18 +281,24 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
 
     // Layout configuration
 
-    std::array<VkDescriptorSetLayout, 3> draw_desc_layouts {{
+    uint32_t num_layouts = depth_only ? 3 : 4;
+    std::array<VkDescriptorSetLayout, 4> draw_desc_layouts {{
         shaders.getLayout(0),
         shaders.getLayout(1),
         shaders.getLayout(2)
+        //shaders.getLayout(4)
     }};
+
+    if (!depth_only) {
+        draw_desc_layouts[3] = shaders.getLayout(4);
+    }
 
     VkPipelineLayoutCreateInfo gfx_layout_info;
     gfx_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     gfx_layout_info.pNext = nullptr;
     gfx_layout_info.flags = 0;
     gfx_layout_info.setLayoutCount =
-        static_cast<uint32_t>(draw_desc_layouts.size());
+        static_cast<uint32_t>(num_layouts);
     gfx_layout_info.pSetLayouts = draw_desc_layouts.data();
     gfx_layout_info.pushConstantRangeCount = 1;
     gfx_layout_info.pPushConstantRanges = &push_const;
@@ -295,7 +328,7 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
         },
     }};
 
-    VkFormat color_format = consts::colorFormat;
+    VkFormat color_format = depth_only ? consts::depthOnlyFormat : consts::colorOnlyFormat;
     VkFormat depth_format = consts::depthFormat;
 
     VkPipelineRenderingCreateInfo rendering_info = {
@@ -414,6 +447,7 @@ static PipelineMP<1> makeComputePipeline(const vk::Device &dev,
                                             uint32_t num_descriptor_sets,
                                             VkSampler repeat_sampler,
                                             const char *shader_file,
+                                            bool depth_only = false,
                                             const char *func_name = "main",
                                             T make_shaders_proc = makeShaders)
 {
@@ -615,7 +649,8 @@ static void makeBatchFrame(vk::Device& dev,
                            bool enable_batch_renderer,
                            RenderContext &rctx,
                            uint32_t view_width,
-                           uint32_t view_height)
+                           uint32_t view_height,
+                           bool depth_only)
 {
     VkDeviceSize lights_size = InternalConfig::maxLights * sizeof(render::shader::DirectionalLight);
     vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
@@ -777,8 +812,6 @@ static void makeBatchFrame(vk::Device& dev,
     vk::DescHelper::storage(desc_updates[11],
                             pbr_set, &sky_info, 4);
 
-    // Set descriptors
-
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
     HeapArray<DrawCommandPackage> draw_packages(consts::numDrawCmdBuffers);
@@ -800,7 +833,8 @@ static void makeBatchFrame(vk::Device& dev,
     HeapArray<LayeredTarget> layered_targets = makeLayeredTargets(
         cfg.renderWidth, cfg.renderHeight, 
         cfg.numWorlds * cfg.maxViewsPerWorld,
-        dev, alloc);
+        dev, alloc,
+        depth_only);
 
     uint64_t total_num_pixels = 
         (uint64_t)cfg.renderWidth * (uint64_t)cfg.renderHeight * 
@@ -1028,8 +1062,10 @@ static void issueRasterization(vk::Device &dev,
                                DrawCommandPackage &view_batch,
                                BatchFrame &batch_frame,
                                VkDescriptorSet asset_set,
+                               VkDescriptorSet asset_mat_tex_set,
                                VkExtent2D render_extent,
-                               const DynArray<AssetData> &loaded_assets)
+                               const DynArray<AssetData> &loaded_assets,
+                               bool depth_only)
 {
     VkRenderingAttachmentInfoKHR color_attach = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
@@ -1070,17 +1106,19 @@ static void issueRasterization(vk::Device &dev,
                               loaded_assets[0].idxBufferOffset,
                               VK_INDEX_TYPE_UINT32);
 
-    std::array draw_descriptors = {
+    uint32_t num_descriptors = depth_only ? 3 : 4;
+    std::array<VkDescriptorSet, 4> draw_descriptors = {
         batch_frame.viewInstanceSetDraw,
         view_batch.drawBufferSetDraw,
         asset_set,
+        asset_mat_tex_set
     };
 
     dev.dt.cmdBindDescriptorSets(draw_cmd,
                                  VK_PIPELINE_BIND_POINT_GRAPHICS,
                                  draw_pipeline.layout,
                                  0, 
-                                 draw_descriptors.size(),
+                                 num_descriptors,
                                  draw_descriptors.data(), 
                                  0, nullptr);
 
@@ -1197,6 +1235,7 @@ static void issueDeferred(vk::Device &dev,
 
 struct BatchRenderer::Impl {
     vk::Device &dev;
+    bool depthOnly;
     vk::MemoryAllocator &mem;
 
     uint32_t maxNumViews;
@@ -1237,6 +1276,7 @@ struct BatchRenderer::Impl {
     HeapArray<VkRect2D> rects;
     HeapArray<VkViewport> viewports;
 
+
     // This pipeline prepares the draw commands in the buffered draw cmds buffer
     // Pipeline<1> prepareViews;
 
@@ -1259,9 +1299,26 @@ static const char *getDrawDeferredPath()
     }
 }
 
+static bool isDepthOnly()
+{
+    const char *rgb_only_str = getenv("MADRONA_RENDER_RGB");
+    assert(rgb_only_str);
+
+    if (rgb_only_str[0] == '1') {
+        printf("RGB!!!\n");
+
+        return false;
+    } else {
+        printf("DEPTH!!!\n");
+
+        return true;
+    }
+}
+
 BatchRenderer::Impl::Impl(const Config &cfg,
                           RenderContext &rctx)
     : dev(rctx.dev),
+      depthOnly(isDepthOnly()),
       mem(rctx.alloc),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
       numWorlds(cfg.numWorlds),
@@ -1269,23 +1326,23 @@ BatchRenderer::Impl::Impl(const Config &cfg,
       prepareViews(makeComputePipeline(dev, rctx.pipelineCache, 4,
           sizeof(shader::PrepareViewPushConstant),
           4 + consts::numDrawCmdBuffers, rctx.repeatSampler,
-          "prepare_views.hlsl", "main", makeShaders)),
+          "prepare_views.hlsl", false, "main", makeShaders)),
       batchDraw(cfg.enableBatchRenderer ? 
           makeDrawPipeline(dev, rctx.pipelineCache, VK_NULL_HANDLE, 
-                           consts::numDrawCmdBuffers * cfg.numFrames, 2) :
+                           consts::numDrawCmdBuffers * cfg.numFrames, 2, depthOnly, rctx.repeatSampler) :
           Optional<PipelineMP<1>>::none()),
       createVisualization(cfg.enableBatchRenderer ?
           makeComputePipeline(
               dev, rctx.pipelineCache, 1,
               sizeof(uint32_t) * 2,
               cfg.numFrames * consts::numDrawCmdBuffers, rctx.repeatSampler,
-              "visualize_tris.hlsl", "visualize", makeShaders) :
+              "visualize_tris.hlsl", false, "visualize", makeShaders) :
           Optional<PipelineMP<1>>::none()),
       lighting(cfg.enableBatchRenderer ?
           makeComputePipeline(dev, rctx.pipelineCache, 6, 
               sizeof(shader::DeferredLightingPushConstBR),
               consts::numDrawCmdBuffers * cfg.numFrames, rctx.repeatSampler, 
-              getDrawDeferredPath(),"lighting", makeShadersLighting) :
+              getDrawDeferredPath(), depthOnly, "lighting", makeShadersLighting) :
           Optional<PipelineMP<1>>::none()),
       batchFrames(cfg.numFrames),
       assetSetPrepare(rctx.asset_set_cull_),
@@ -1299,6 +1356,7 @@ BatchRenderer::Impl::Impl(const Config &cfg,
       rects(dev.maxViewports),
       viewports(dev.maxViewports)
 {
+
     for (uint32_t i = 0; i < cfg.numFrames; i++) {
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
                        prepareViews,
@@ -1307,7 +1365,8 @@ BatchRenderer::Impl::Impl(const Config &cfg,
                        cfg.enableBatchRenderer ? lighting->descPools[5].makeSet() : VK_NULL_HANDLE,
                        cfg.enableBatchRenderer,
                        rctx,
-                       cfg.renderWidth, cfg.renderHeight);
+                       cfg.renderWidth, cfg.renderHeight,
+                       depthOnly);
     }
 
     VkQueryPoolCreateInfo pool_create_info = {
@@ -1999,8 +2058,10 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                            draw_package,
                            frame_data,
                            impl->assetSetDraw,
+                           impl->assetSetTextureMat,
                            impl->renderExtent,
-                           loaded_assets);
+                           loaded_assets,
+                           impl->depthOnly);
 
         issueComputeLayoutTransitions(impl->dev,
                                target,
