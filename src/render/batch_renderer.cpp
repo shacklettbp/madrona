@@ -2061,11 +2061,11 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 impl->timestamps, sizeof(uint64_t),
                 VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 
-    float delta_in_ms = float(impl->timestamps[1] - impl->timestamps[0]) *
-        impl->dev.timestampPeriod / 1000000.0f;
+    double delta_in_ms = double(impl->timestamps[1] - impl->timestamps[0]) *
+        impl->dev.timestampPeriod / 1000000.0;
 
     // printf("rasterizer batch renderer took %f ms\n", delta_in_ms);
-    impl->recordedTimings.push_back(delta_in_ms);
+    impl->recordedTimings.push_back((float)delta_in_ms);
 
     frame_data.latestOp = LatestOperation::RenderViews;
 }
