@@ -1393,10 +1393,8 @@ BatchRenderer::~BatchRenderer()
     if (render_mode[0] == '1') {
         float avg_total_time = 0.f;
         for (float timing : impl->recordedTimings) {
-            avg_total_time += timing;
+            avg_total_time += timing / (float)impl->recordedTimings.size();
         }
-
-        avg_total_time /= (float)impl->recordedTimings.size();
         
         printf("Rasterizer had average %f per frame\n", avg_total_time);
 
