@@ -320,11 +320,24 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             RenderCamera
         >>({instance_setup});
 
+    auto mortoncode_update = builder.addToGraph<ParallelForNode<Context,
+         mortonCodeUpdate,
+            Entity,
+            Position,
+            Renderable
+        >>({viewdata_update});
+
+    (void)mortoncode_update;
+
 #ifdef MADRONA_GPU_MODE
     // Need to sort the instances, as well as the views
+    auto sort_instances_by_morton =
+        builder.addToGraph<SortArchetypeNode<RenderableArchetype, MortonCode>>(
+            {mortoncode_update});
+
     auto sort_instances_by_world = 
         builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
-            {viewdata_update});
+            {sort_instances_by_morton});
 
     auto post_instance_sort_reset_tmp =
         builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_world});

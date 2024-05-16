@@ -3010,10 +3010,10 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
                     impl_->bvhKernels.traceEvent, 
                     impl_->bvhKernels.stopEvent));
 
-#if 0
-        printf("alloc time: %f ms; build time: %f ms; widen time: %f; trace time: %f\n",
+#if 1
+        printf("alloc time: %f ms; build time: %f ms; trace time: %f\n",
                 alloc_time_ms, build_time_ms,
-                widen_time_ms, trace_time_ms);
+                trace_time_ms);
 #endif
 
         float total_time = trace_time_ms + build_time_ms;
