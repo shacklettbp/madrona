@@ -2907,12 +2907,8 @@ void MWCudaExecutor::getTimings(MWCudaLaunchGraph &launch_graph)
     float build_time_ms = 0.f;
     REQ_CU(cuEventElapsedTime(&build_time_ms,
                 impl_->bvhKernels.buildEvent, 
-                impl_->bvhKernels.widenEvent));
-
-    float widen_time_ms = 0.f;
-    REQ_CU(cuEventElapsedTime(&build_time_ms,
-                impl_->bvhKernels.widenEvent, 
                 impl_->bvhKernels.traceEvent));
+
 
     float trace_time_ms = 0.f;
     REQ_CU(cuEventElapsedTime(&trace_time_ms,
@@ -3002,11 +2998,6 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
         float build_time_ms = 0.f;
         REQ_CU(cuEventElapsedTime(&build_time_ms,
                     impl_->bvhKernels.buildEvent, 
-                    impl_->bvhKernels.widenEvent));
-
-        float widen_time_ms = 0.f;
-        REQ_CU(cuEventElapsedTime(&build_time_ms,
-                    impl_->bvhKernels.widenEvent, 
                     impl_->bvhKernels.traceEvent));
 
         float trace_time_ms = 0.f;
