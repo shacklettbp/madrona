@@ -16,6 +16,9 @@ RWStructuredBuffer<uint32_t> rgbOutputBuffer;
 [[vk::binding(2, 0)]]
 RWStructuredBuffer<float> depthOutputBuffer;
 
+[[vk::binding(3, 0)]]
+Texture2D<float> depthInBuffer[];
+
 [[vk::binding(0, 1)]]
 StructuredBuffer<uint> indexBuffer;
 
@@ -298,7 +301,15 @@ uint zeroDummy()
                           linearSampler, float2(0.0, 0.0f), 0).x)) +
                       min(0.0, abs(scatteringLUT.SampleLevel(
                           linearSampler, float3(0.0, 0.0f, 0.0f), 0).x)) +
-                      min(0.0, abs(skyBuffer[0].solarIrradiance.x));
+                      min(0.0, abs(skyBuffer[0].solarIrradiance.x)) +
+                      min(0.0, abs(float(vizBuffer[0][uint3(0,0,0)].x))) + 
+                      min(0.0, abs(materialBuffer[0].color.x)) +
+                      min(0.0, abs(viewDataBuffer[0].data[0].x)) +
+                      min(0.0, abs(float(meshDataBuffer[0].vertexOffset))) +
+                      min(0.0, abs(engineInstanceBuffer[0].data[0].x)) +
+                      min(0.0, abs(float(indexBuffer[0]))) +
+                      min(0.0, abs(vertexDataBuffer[0].data[0].x)) +
+                      min(0.0, abs(lights[0].color.x));
 
 
     return zero_dummy;
@@ -588,7 +599,19 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     vbuffer_pixel_clip = vbuffer_pixel_clip * 2.0f - float2(1.0f, 1.0f);
     vbuffer_pixel_clip.y *= -1.0;
 
+    uint2 sample_uv_u32 = vbuffer_pixel.xy + uint2(x_pixel_offset, y_pixel_offset);
+
+    uint total_res = pushConst.viewDim * pushConst.maxImagesXPerTarget;
+
+    float2 sample_uv = float2(sample_uv_u32) / 
+                       float2(total_res, total_res);
+    sample_uv.y = 1.0 - sample_uv.y;
+
     // Apply the offset when reading the pixel value from the image
+    float depth = depthInBuffer[target_idx].SampleLevel(linearSampler,
+                                                        sample_uv, 0).x;
+
+#if 0
     uint2 data = vizBuffer[target_idx][vbuffer_pixel + 
                  uint3(x_pixel_offset, y_pixel_offset, 0)];
 
@@ -694,6 +717,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         roughness = material_data.roughness;
         metalness = material_data.metalness;
     }
+#endif
 
 #if 0
     const float exposure = 20.0f;
@@ -735,15 +759,10 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     float3 out_color = diff;
 #else
     // float3 out_color = gbuffer_data.wNormal.xyz;
-    float3 out_color;
-    if (was_rasterized) {
-        out_color = gbuffer_data.albedo.xyz;
-    } else {
-        out_color = float3(0, 0, 0);
-    }
 #endif
+    float3 out_color = float3(depth, depth, depth);
 
-    out_color += zeroDummy();
+    out_color.x += zeroDummy();
 
     uint32_t out_pixel_idx =
         view_idx * pushConst.viewDim * pushConst.viewDim +
@@ -751,11 +770,5 @@ void lighting(uint3 idx : SV_DispatchThreadID)
 
     rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(out_color); 
 
-    float depth;
-    if (was_rasterized) {
-        depth = length(gbuffer_data.wPosition - gbuffer_data.wCameraPos);
-    } else {
-        depth = 0.f;
-    }
     depthOutputBuffer[out_pixel_idx] = depth;
 }

@@ -229,9 +229,9 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
     blend_info.sType =
         VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     blend_info.logicOpEnable = VK_FALSE;
-    blend_info.attachmentCount =
-        static_cast<uint32_t>(blend_attachments.size());
-    blend_info.pAttachments = blend_attachments.data();
+    blend_info.attachmentCount = 0;
+        // static_cast<uint32_t>(blend_attachments.size());
+    //blend_info.pAttachments = blend_attachments.data();
 
     // Dynamic
     std::array dyn_enable {
@@ -299,8 +299,8 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
     VkPipelineRenderingCreateInfo rendering_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .pNext = nullptr,
-        .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &color_format,
+        .colorAttachmentCount = 0,
+        .pColorAttachmentFormats = nullptr, // &color_format,
         .depthAttachmentFormat = depth_format
     };
 
@@ -391,7 +391,7 @@ static vk::PipelineShaders makeShadersLighting(const vk::Device &dev,
                                        100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT 
                                    },
                                    vk::BindingOverride {
-                                       0, 1, VK_NULL_HANDLE,
+                                       0, 3, VK_NULL_HANDLE,
                                        100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
                                    },
                                    vk::BindingOverride {
@@ -825,8 +825,10 @@ static void makeBatchFrame(vk::Device& dev,
         // Update lighting_set to point to the layered vbuffer and 
         // output buffer
         HeapArray<VkWriteDescriptorSet> lighting_desc_updates(
-            layered_targets.size() + 2);
+            2*layered_targets.size() + 2);
         HeapArray<VkDescriptorImageInfo> vbuffer_infos(
+            layered_targets.size());
+        HeapArray<VkDescriptorImageInfo> depth_buffer_infos(
             layered_targets.size());
 
         for (CountT i = 0; i < layered_targets.size(); ++i) {
@@ -836,10 +838,22 @@ static void makeBatchFrame(vk::Device& dev,
                 .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
             };
 
-            vk::DescHelper::storageImage(lighting_desc_updates[i],
+            depth_buffer_infos[i] = {
+                .sampler = VK_NULL_HANDLE,
+                .imageView = layered_targets[i].depthView,
+                .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+            };
+
+            vk::DescHelper::storageImage(lighting_desc_updates[i*2],
                                          lighting_set, 
                                          &vbuffer_infos[i],
                                          0, i);
+
+            vk::DescHelper::textures(lighting_desc_updates[i*2 + 1],
+                                         lighting_set, 
+                                         &depth_buffer_infos[i],
+                                         1,
+                                         3, i);
         }
 
         VkDescriptorBufferInfo rgb_buffer_info {
@@ -1040,8 +1054,9 @@ static void issueRasterization(vk::Device &dev,
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = total_rect,
         .layerCount = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments = &color_attach,
+        .colorAttachmentCount = 0,
+        //.pColorAttachments = &color_attach,
+        .pColorAttachments = nullptr,
         .pDepthAttachment = &depth_attach
     };
 

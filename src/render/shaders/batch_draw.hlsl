@@ -151,8 +151,7 @@ void computeCompositeTransform(float3 obj_t,
 
 [shader("vertex")]
 float4 vert(in uint vid : SV_VertexID,
-            in uint draw_id : SV_InstanceID,
-            out V2F v2f) : SV_Position
+            in uint draw_id : SV_InstanceID) : SV_Position
 {
     DrawDataBR draw_data = drawDataBuffer[draw_id + pushConst.drawDataOffset];
 
@@ -181,20 +180,21 @@ float4 vert(in uint vid : SV_VertexID,
         view_data.zNear,
         view_pos.y);
 
-    v2f.instanceID = draw_data.instanceID +
-                     min(0, instanceOffsets[0]) +
+#if 1
+    uint something = min(0, instanceOffsets[0]) +
                      min(0, drawCount[0]) +
                      min(0, drawCommandBuffer[0].vertexOffset) +
                      min(0, int(ceil(meshDataBuffer[0].vertexOffset)));
 
-    v2f.meshID = draw_data.meshID;
+    // v2f.meshID = draw_data.meshID;
+#endif
+
+    clip_pos.x += min(0.0, abs(float(draw_data.meshID))) +
+                  min(0.0, abs(float(draw_data.instanceID))) +
+                  something;
 
     return clip_pos;
 }
-
-struct PixelOutput {
-    uint2 ids : SV_Target0;
-};
 
 // We are basically packing 3 uints into 2. 21 bits per uint except for 22 
 // for the instance ID
@@ -221,18 +221,7 @@ uint3 unpackVizBufferData(in uint2 data)
 }
 
 [shader("pixel")]
-PixelOutput frag(in V2F v2f,
+void frag(in V2F v2f,
                  in uint prim_id : SV_PrimitiveID)
 {
-    PixelOutput output;
-
-    // IDs needs to hold the following information:
-    // vertex_offset | index_start | instance_id | texture_id
-
-    // Maximum value of texture_id is 100 (7 bits required)
-    // instance_id will take up 25 bits
-    // vertex_offset and index_start will both be 16 bits each
-    output.ids = packVizBufferData(prim_id, v2f.meshID, v2f.instanceID);
-
-    return output;
 }

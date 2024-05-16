@@ -240,7 +240,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
         }
     }
 
-    printf("percent culled: %f\n", (float)num_culled / (float)total);
+    // printf("percent culled: %f\n", (float)num_culled / (float)total);
 
     GroupMemoryBarrierWithGroupSync();
 }
