@@ -2465,6 +2465,11 @@ static CUgraphExec makeTaskGraphRunGraph(
         if (fast_bvh) {
             printf(">>>>>>>>>>>>>> Using LBVH <<<<<<<<<<<<<<\n");
 
+            REQ_CU(cuGraphAddEventRecordNode(
+                        &build_event_node, run_graph,
+                        &alloc_node, 1,
+                        bvh_kernels.buildEvent));
+
             // Fast LBVH build node
             const uint32_t num_blocks_per_sm_fast_build = 16;
             bvh_launch_params.func = bvh_kernels.buildFast;
