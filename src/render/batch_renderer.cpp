@@ -42,7 +42,7 @@ inline constexpr uint32_t maxNumImagesPerTarget =
 
 // 256, is the number of views per image we can have
 inline constexpr uint32_t maxDrawsPerLayeredImage = maxDrawsPerView * maxNumImagesPerTarget;
-inline constexpr VkFormat colorOnlyFormat = VK_FORMAT_R32_SFLOAT;
+inline constexpr VkFormat colorOnlyFormat = VK_FORMAT_R8G8B8A8_UNORM;
 inline constexpr VkFormat depthOnlyFormat = VK_FORMAT_R32_SFLOAT;
 inline constexpr VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
 inline constexpr VkFormat outputColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -204,11 +204,11 @@ static vk::PipelineShaders makeDrawShaders(const vk::Device &dev,
         return vk::PipelineShaders(dev, tmp_alloc, shaders,
             Span<const vk::BindingOverride>({
                  vk::BindingOverride {
-                     4, 0, VK_NULL_HANDLE,
+                     3, 0, VK_NULL_HANDLE,
                      InternalConfig::maxTextures, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
                  },
                  vk::BindingOverride {
-                     4, 1, repeat_sampler, 1, 0
+                     3, 1, repeat_sampler, 1, 0
                  }
             }));
     }
@@ -247,8 +247,15 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
     // Blend
     VkPipelineColorBlendAttachmentState blend_attach {};
     blend_attach.blendEnable = VK_FALSE;
-    blend_attach.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT;
+
+    if (depth_only) {
+        blend_attach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
+    } else {
+        blend_attach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+                                      VK_COLOR_COMPONENT_G_BIT |
+                                      VK_COLOR_COMPONENT_B_BIT |
+                                      VK_COLOR_COMPONENT_A_BIT;
+    }
 
     std::array<VkPipelineColorBlendAttachmentState, 1> blend_attachments {{
         blend_attach
@@ -286,11 +293,10 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
         shaders.getLayout(0),
         shaders.getLayout(1),
         shaders.getLayout(2)
-        //shaders.getLayout(4)
     }};
 
     if (!depth_only) {
-        draw_desc_layouts[3] = shaders.getLayout(4);
+        draw_desc_layouts[3] = shaders.getLayout(3);
     }
 
     VkPipelineLayoutCreateInfo gfx_layout_info;
@@ -430,11 +436,7 @@ static vk::PipelineShaders makeShadersLighting(const vk::Device &dev,
                                        100, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
                                    },
                                    vk::BindingOverride {
-                                       4, 0, VK_NULL_HANDLE,
-                                       InternalConfig::maxTextures, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
-                                   },
-                                   vk::BindingOverride {
-                                       4, 1, repeat_sampler, 1, 0
+                                       0, 4, repeat_sampler, 1, 0
                                    },
                                 }));
 }
@@ -1208,8 +1210,6 @@ static void issueDeferred(vk::Device &dev,
         batch_frame.targetsSetLighting,
         index_buffer_set,
         batch_frame.viewInstanceSetLighting,
-        asset_set,
-        asset_mat_tex_set,
         pbr_set
     };
 
@@ -1339,7 +1339,7 @@ BatchRenderer::Impl::Impl(const Config &cfg,
               "visualize_tris.hlsl", false, "visualize", makeShaders) :
           Optional<PipelineMP<1>>::none()),
       lighting(cfg.enableBatchRenderer ?
-          makeComputePipeline(dev, rctx.pipelineCache, 6, 
+          makeComputePipeline(dev, rctx.pipelineCache, 4, 
               sizeof(shader::DeferredLightingPushConstBR),
               consts::numDrawCmdBuffers * cfg.numFrames, rctx.repeatSampler, 
               getDrawDeferredPath(), depthOnly, "lighting", makeShadersLighting) :
@@ -1362,7 +1362,7 @@ BatchRenderer::Impl::Impl(const Config &cfg,
                        prepareViews,
                        batchDraw,
                        cfg.enableBatchRenderer ? lighting->descPools[0].makeSet() : VK_NULL_HANDLE,
-                       cfg.enableBatchRenderer ? lighting->descPools[5].makeSet() : VK_NULL_HANDLE,
+                       cfg.enableBatchRenderer ? lighting->descPools[3].makeSet() : VK_NULL_HANDLE,
                        cfg.enableBatchRenderer,
                        rctx,
                        cfg.renderWidth, cfg.renderHeight,
@@ -2057,7 +2057,7 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                            draw_cmd,
                            draw_package,
                            frame_data,
-                           impl->assetSetDraw,
+                           impl->assetSetLighting,
                            impl->assetSetTextureMat,
                            impl->renderExtent,
                            loaded_assets,

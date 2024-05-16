@@ -19,6 +19,9 @@ RWStructuredBuffer<float> depthOutputBuffer;
 [[vk::binding(3, 0)]]
 Texture2D<float> depthInBuffer[];
 
+[[vk::binding(4, 0)]]
+SamplerState linearSampler;
+
 [[vk::binding(0, 1)]]
 StructuredBuffer<uint> indexBuffer;
 
@@ -32,38 +35,21 @@ StructuredBuffer<PackedInstanceData> engineInstanceBuffer;
 [[vk::binding(2, 2)]]
 StructuredBuffer<uint32_t> instanceOffsets;
 
-// Asset descriptor bindings
-[[vk::binding(0, 3)]]
-StructuredBuffer<PackedVertex> vertexDataBuffer;
-
-[[vk::binding(1, 3)]]
-StructuredBuffer<MeshData> meshDataBuffer;
-
-[[vk::binding(2, 3)]]
-StructuredBuffer<MaterialData> materialBuffer;
-
-// Texture descriptor bindings
-[[vk::binding(0, 4)]]
-Texture2D<float4> materialTexturesArray[];
-
-[[vk::binding(1, 4)]]
-SamplerState linearSampler;
-
 
 // Lighting
-[[vk::binding(0, 5)]]
+[[vk::binding(0, 3)]]
 StructuredBuffer<DirectionalLight> lights;
 
-[[vk::binding(1, 5)]]
+[[vk::binding(1, 3)]]
 Texture2D<float4> transmittanceLUT;
 
-[[vk::binding(2, 5)]]
+[[vk::binding(2, 3)]]
 Texture2D<float4> irradianceLUT;
 
-[[vk::binding(3, 5)]]
+[[vk::binding(3, 3)]]
 Texture3D<float4> scatteringLUT;
 
-[[vk::binding(4, 5)]]
+[[vk::binding(4, 3)]]
 StructuredBuffer<SkyData> skyBuffer;
 
 
@@ -289,11 +275,7 @@ uint zeroDummy()
 {
     uint zero_dummy = min(asuint(viewDataBuffer[0].data[2].w), 0) +
                       min(asuint(engineInstanceBuffer[0].data[0].x), 0) +
-                      min(asuint(vertexDataBuffer[0].data[0].x), 0) +
-                      min(meshDataBuffer[0].vertexOffset, 0) +
                       min(indexBuffer[0], 0) +
-                      min(0, abs(materialTexturesArray[0].SampleLevel(
-                          linearSampler, float2(0,0), 0).x)) +
                       min(instanceOffsets[0], 0) +
                       min(0.0, abs(transmittanceLUT.SampleLevel(
                           linearSampler, float2(0.0, 0.0f), 0).x)) +
@@ -303,12 +285,9 @@ uint zeroDummy()
                           linearSampler, float3(0.0, 0.0f, 0.0f), 0).x)) +
                       min(0.0, abs(skyBuffer[0].solarIrradiance.x)) +
                       min(0.0, abs(float(vizBuffer[0][uint3(0,0,0)].x))) + 
-                      min(0.0, abs(materialBuffer[0].color.x)) +
                       min(0.0, abs(viewDataBuffer[0].data[0].x)) +
-                      min(0.0, abs(float(meshDataBuffer[0].vertexOffset))) +
                       min(0.0, abs(engineInstanceBuffer[0].data[0].x)) +
                       min(0.0, abs(float(indexBuffer[0]))) +
-                      min(0.0, abs(vertexDataBuffer[0].data[0].x)) +
                       min(0.0, abs(lights[0].color.x)) +
                       min(0.0, abs(depthInBuffer[0].SampleLevel(linearSampler, float2(0,0), 0).x));
 
