@@ -2460,7 +2460,7 @@ static CUgraphExec makeTaskGraphRunGraph(
         CUgraphNode widen_trees_node;
 
         CUgraphNode build_event_node, widen_event_node,
-                    trace_event_node, stop_event_node;
+                    start_trace_node, stop_event_node;
 
         if (fast_bvh) {
             printf(">>>>>>>>>>>>>> Using LBVH <<<<<<<<<<<<<<\n");
@@ -2532,17 +2532,18 @@ static CUgraphExec makeTaskGraphRunGraph(
             last = &widen_trees_node;
         }
 
+#if 0
         REQ_CU(cuGraphAddEventRecordNode(
                     &trace_event_node, run_graph,
                     last, 1,
                     bvh_kernels.traceEvent));
+#endif
 
         // We assign a 4x4 region of blocks per image/view
         // Each block processes 16x16 pixels and we have one thread per pixel.
-        CUgraphNode start_trace_node;
         REQ_CU(cuGraphAddEventRecordNode(
                     &start_trace_node, run_graph,
-                    &trace_event_node, 1,
+                    last, 1,
                     bvh_kernels.traceEvent));
 
         const uint32_t num_resident_views_per_sm = 4;
