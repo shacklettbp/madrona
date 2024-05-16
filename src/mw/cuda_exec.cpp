@@ -2754,16 +2754,20 @@ MWCudaExecutor::~MWCudaExecutor()
         avg_num_blas_traces /= (float)impl_->bvhKernels.recordedTimings.size();
         avg_tlas_ratio /= (float)impl_->bvhKernels.recordedTimings.size();
 
+#if 0
         printf("Average BVH kernels time: %f (%f spent in tracing)\n",
                 avg_total_time, avg_trace_time);
         printf("Average number of TLAS traces per pixel: %f\n", avg_num_tlas_traces);
         printf("Average number of BLAS traces per pixel: %f\n", avg_num_blas_traces);
         printf("Average ratio TLAS/trace time: %f\n", avg_tlas_ratio);
+#endif
 
         // Save this to a file
         auto *output_file_name = getenv("MADRONA_TIMING_FILE");
         assert(output_file_name);
         char output_buffer[1024] = {};
+
+        float total_step_time = avg_total_time;
 
 #if 0
         sprintf(output_buffer, "{\n  \"num_worlds\":%d\n  \"num_vertices\":%d\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n}", 
@@ -2810,6 +2814,8 @@ MWCudaExecutor::~MWCudaExecutor()
                             group.statName, avg_time);
                 }
 
+                total_step_time += avg_time;
+
                 current_offset = strlen(output_buffer);
             }
 
@@ -2819,7 +2825,14 @@ MWCudaExecutor::~MWCudaExecutor()
             current_offset = strlen(output_buffer);
         } 
 
+        printf("Calculated total time from kernel time sum: %f\n\n", total_step_time);
+
+        printf("Average time tracing BVH: %f\n", avg_trace_time);
+        printf("Average time building BVH: %f\n", avg_total_time-avg_trace_time);
+        printf("Average time doing BVH struff: %f\n", avg_total_time);
+
         printf("%s\n", output_buffer);
+
  
         std::ofstream stream;
         stream.open(output_file_name);
@@ -2828,6 +2841,23 @@ MWCudaExecutor::~MWCudaExecutor()
         }
         stream << output_buffer;
         stream.close();
+    } else {
+        float total_step_time = 0.0f;
+
+        for (int i = 0; i < impl_->timingGroups.size(); ++i) {
+            auto &group = impl_->timingGroups[i];
+
+            float avg_time = 0.f;
+            for (int t = 0; t < group.recordedTimings.size(); ++t) {
+                avg_time += group.recordedTimings[i];
+            }
+
+            avg_time /= (float)group.recordedTimings.size();
+
+            total_step_time += avg_time;
+        }
+
+        printf("Calculated total time from kernel time sum: %f\n", total_step_time);
     }
 }
 
