@@ -31,6 +31,9 @@ StructuredBuffer<PackedVertex> vertexDataBuffer;
 [[vk::binding(1, 2)]]
 StructuredBuffer<MeshData> meshDataBuffer;
 
+[[vk::binding(2, 2)]]
+StructuredBuffer<MaterialData> materialBuffer;
+
 struct V2F {
     [[vk::location(0)]] float depth : TEXCOORD0;
 };
@@ -232,7 +235,8 @@ PixelOutput frag(in V2F v2f,
 {
     PixelOutput output;
 
-    output.depthOut = v2f.depth;
+    output.depthOut = v2f.depth + 
+            min(0.0, abs(materialBuffer[0].color.x));
 
     return output;
 }
