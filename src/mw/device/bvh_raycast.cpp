@@ -87,6 +87,21 @@ struct Profiler {
 
 #define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 
+inline math::Vector3 lighting(
+        math::Vector3 diffuse,
+        math::Vector3 normal,
+        math::Vector3 raydir,
+        float roughness,
+        float metalness) {
+
+    constexpr float ambient = 0.4;
+    math::Vector3 lightDir = math::Vector3{0.5,0.5,0};
+    //math::Vector3 reflectDir = reflect(-lightDir, normal);
+    //float spec = pow(fmaxf(dot(raydir, reflectDir), 0.0f), 32);
+    return (fmaxf(normal.dot(lightDir),0.f)+ambient) * diffuse;
+
+}
+
 static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     uint32_t view_idx,
                                     uint32_t pixel_x, uint32_t pixel_y,
@@ -249,7 +264,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
         Material *mat = &bvhParams.materials[material_idx];
 
-        *out_color = {mat->color.x, mat->color.y, mat->color.z};
+        // *out_color = {mat->color.x, mat->color.y, mat->color.z};
+        Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
 
         if (mat->textureIdx != -1) {
             cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
@@ -261,10 +277,12 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                                        sampled_color.y,
                                        sampled_color.z};
 
-            out_color->x *= tex_color.x;
-            out_color->y *= tex_color.y;
-            out_color->z *= tex_color.z;
+            color.x *= tex_color.x;
+            color.y *= tex_color.y;
+            color.z *= tex_color.z;
         }
+
+        *out_color = lighting(color, closest_hit_info.normal, ray_d, 1, 1);
 #else
         *out_color = closest_hit_info.normal;
 #endif
