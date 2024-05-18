@@ -723,7 +723,7 @@ static bool gltfLoad(const char *gltf_filename,
 
     if (!materials.error()) {
         for (auto material : materials.value_unsafe()) {
-            const uint32_t tex_missing = loader.textures.size();
+            const uint32_t tex_missing = -1;
             auto pbr = material["pbrMetallicRoughness"];
             uint32_t base_color_idx;
             bool mat_err = jsonGetOr(
@@ -1836,10 +1836,14 @@ static bool gltfImportAssets(LoaderData &loader,
     }
 
     for(const auto& material : loader.materials){
+        int32_t texture_id = material.baseColorIdx;
+        if(texture_id != -1){
+            texture_id += prev_tex_idx;
+        }
         SourceMaterial s_mat = {
-            // .color = material.baseColor,
-            .color = math::Vector4{1.f, 1.f, 1.f, 1.f},
-            .textureIdx = (int32_t)material.baseColorIdx+(int32_t)prev_tex_idx,
+            .color = material.baseColor,
+            //.color = math::Vector4{1.f, 1.f, 1.f, 1.f},
+            .textureIdx = texture_id,
             .roughness=material.roughness,
             .metalness=material.metallic};
         imported.materials.emplace_back(s_mat);
