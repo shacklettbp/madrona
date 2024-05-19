@@ -95,10 +95,9 @@ inline math::Vector3 lighting(
         float metalness) {
 
     constexpr float ambient = 0.4;
+
     math::Vector3 lightDir = math::Vector3{0.5,0.5,0};
-    //math::Vector3 reflectDir = reflect(-lightDir, normal);
-    //float spec = pow(fmaxf(dot(raydir, reflectDir), 0.0f), 32);
-    return (fmaxf(normal.dot(lightDir),0.f)+ambient) * diffuse;
+    return (fminf(fmaxf(normal.dot(lightDir),0.f)+ambient, 1.0f)) * diffuse;
 
 }
 
@@ -271,7 +270,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
 
             float4 sampled_color = tex2D<float4>(*tex,
-                closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
+                closest_hit_info.uv.x, closest_hit_info.uv.y);
 
             math::Vector3 tex_color = {sampled_color.x,
                                        sampled_color.y,
