@@ -2710,6 +2710,7 @@ MWCudaExecutor::~MWCudaExecutor()
     REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
 
+#if 0
     if (impl_->enableRaycasting) {
          bool enable_trace_split = false;
 
@@ -2838,6 +2839,7 @@ MWCudaExecutor::~MWCudaExecutor()
 
         printf("Calculated total time from kernel time sum: %f\n", total_step_time);
     }
+#endif
 }
 
 MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
