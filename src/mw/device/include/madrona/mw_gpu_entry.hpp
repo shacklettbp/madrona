@@ -17,6 +17,10 @@ __launch_bounds__(madrona::consts::numMegakernelThreads, 1)
 __global__ void initECS(HostAllocInit alloc_init, void *print_channel,
                         void **exported_columns, void *cfg)
 {
+    // mwGPU::HostPrint::log("host allocator channel at: {}\n",
+                          //alloc_init.channel);
+    printf("Host channel at: %p\n", alloc_init.channel);
+
     HostAllocator *host_alloc = mwGPU::getHostAllocator();
     new (host_alloc) HostAllocator(alloc_init);
 
@@ -96,6 +100,7 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
                                          void *textures,
                                          float near_sphere)
 {
+#if 0
     using namespace madrona;
     using namespace madrona::render;
 
@@ -152,28 +157,12 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->materials = (Material *)materials;
 
-#if 0
-    for (int i = 0; i < num_bvhs; ++i) {
-        printf("bvh %d has material %d\n", i, (int)params->bvhs[i].materialIDX);
-    }
-
-#if 1
-    for (int i = 0; i < 7; ++i) {
-        printf("texture_idx = %d\n", params->materials[i].textureIdx);
-        printf("color = %f %f %f\n", 
-                params->materials[i].color.x,
-                params->materials[i].color.y,
-                params->materials[i].color.z
-                );
-    }
-#endif
-#endif
-
     params->textures = (cudaTextureObject_t *)textures;
 
     params->nearSphere = near_sphere;
 
     // params->hostChannel = (void *)host_alloc->getHostChannel();
+#endif
 }
 
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates

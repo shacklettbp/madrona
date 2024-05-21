@@ -23,6 +23,8 @@
 
 #include "cpp_compile.hpp"
 
+#define STB_IMAGE_IMPLEMENTATION
+
 #include <stb_image.h>
 #define KHRONOS_STATIC
 #include <ktx.h>
@@ -1110,21 +1112,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         common_compile_flags.push_back("--device-debug");
     }
 
-    const char *widen_bvh_env = getenv("MADRONA_WIDEN");
-    bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
-
-    if (widen_bvh) {
-        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
-    } else {
-        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=2");
-    }
-
-    const char *render_rgb_env = getenv("MADRONA_RENDER_RGB");
-    bool render_rgb = (render_rgb_env && render_rgb_env[0] == '1');
-
-    if (render_rgb) {
-        common_compile_flags.push_back("-DMADRONA_RENDER_RGB=8");
-    }
+    common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=4");
+    common_compile_flags.push_back("-DMADRONA_RENDER_RGB");
 
     for (const char *user_flag : cfg.userCompileFlags) {
         common_compile_flags.push_back(user_flag);
@@ -2446,11 +2435,8 @@ static CUgraphExec makeTaskGraphRunGraph(
                                     &alloc_event_node, 1,
                                     &bvh_launch_params));
 
-        const char *fast_bvh_env = getenv("MADRONA_LBVH");
-        bool fast_bvh = (fast_bvh_env && fast_bvh_env[0] == '1');
-
-        const char *widen_bvh_env = getenv("MADRONA_WIDEN");
-        bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
+        bool fast_bvh = true;
+        bool widen_bvh = true;
 
         CUgraphNode *last = nullptr;
 
@@ -2656,9 +2642,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
            CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
            cu_gpu));
 
-    auto *render_mode = getenv("MADRONA_RENDER_MODE");
-
-    bool enable_raycasting = (render_mode[0] == '2');
+    bool enable_raycasting = true;
 
     BVHKernels bvh_kernels = buildBVHKernels(
                 compile_cfg, num_sms, cu_capability);
@@ -2728,11 +2712,6 @@ MWCudaExecutor::~MWCudaExecutor()
 
     if (impl_->enableRaycasting) {
          bool enable_trace_split = false;
-
-        const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
-        if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
-            enable_trace_split = true;
-        }
 
         float avg_total_time = 0.f;
         float avg_trace_time = 0.f;
