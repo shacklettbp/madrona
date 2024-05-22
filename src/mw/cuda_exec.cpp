@@ -630,6 +630,11 @@ static GPUCompileResults compileCode(
     CompileConfig::OptMode opt_mode,
     ExecutorMode exec_mode, bool verbose_compile)
 {
+    for (int i = 0; i < num_sources; ++i) {
+        printf("%p\n", sources[i]);
+        printf("%s\n", sources[i]);
+    }
+
     auto kernel_cache = Optional<MegakernelCache>::none();
     auto cache_write_path = Optional<std::string>::none();
     checkAndLoadMegakernelCache(kernel_cache, cache_write_path);
@@ -1276,6 +1281,11 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     memcpy(all_cpp_files.data() + num_exec_srcs,
            cfg.userSources.data(),
            sizeof(const char *) * cfg.userSources.size());
+
+    for (int i = 0; i < all_cpp_files.size(); ++i) {
+        printf("%p\n", all_cpp_files[i]);
+        printf("%s\n", all_cpp_files[i]);
+    }
 
     // Build architecture string for this GPU
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
@@ -2518,13 +2528,6 @@ static CUgraphExec makeTaskGraphRunGraph(
             last = &widen_trees_node;
         }
 
-#if 0
-        REQ_CU(cuGraphAddEventRecordNode(
-                    &trace_event_node, run_graph,
-                    last, 1,
-                    bvh_kernels.traceEvent));
-#endif
-
         // We assign a 4x4 region of blocks per image/view
         // Each block processes 16x16 pixels and we have one thread per pixel.
         REQ_CU(cuGraphAddEventRecordNode(
@@ -2532,19 +2535,17 @@ static CUgraphExec makeTaskGraphRunGraph(
                     last, 1,
                     bvh_kernels.traceEvent));
 
-        const uint32_t num_resident_views_per_sm = 4;
+        const uint32_t num_resident_workers_per_sm = 4;
 
-        const uint32_t pixels_per_block = 8;
-
-        uint32_t grid_dim = render_output_resolution / pixels_per_block;
+        const uint32_t num_threads_per_block = 1024;
 
         CUDA_KERNEL_NODE_PARAMS bvh_launch_raycast = {
             .func = bvh_kernels.raycast,
-            .gridDimX = bvh_kernels.numSMs * num_resident_views_per_sm,
-            .gridDimY = grid_dim,
-            .gridDimZ = grid_dim,
-            .blockDimX = pixels_per_block,
-            .blockDimY = pixels_per_block,
+            .gridDimX = bvh_kernels.numSMs * num_resident_workers_per_sm,
+            .gridDimY = 1,
+            .gridDimZ = 1,
+            .blockDimX = num_threads_per_block,
+            .blockDimY = 1,
             .blockDimZ = 1,
             .sharedMemBytes = 1024
         };

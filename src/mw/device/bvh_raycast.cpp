@@ -46,45 +46,6 @@ struct Profiler {
     uint64_t numTLASTraces;
 };
 
-#if 0
-struct Profiler {
-    uint64_t mark;
-    uint64_t timeInTLAS;
-    uint64_t timeInBLAS;
-
-    // This is the number of traces we performed in the BLAS (mesh bvh tests)
-    uint64_t numBLASTraces;
-    // This is the number of traces we performed in the TLAS (AABB tests)
-    uint64_t numTLASTraces;
-
-    ProfilerState state;
-
-    void markState(ProfilerState profiler_state)
-    {
-#ifdef MADRONA_PROFILE_BVH_KERNEL
-        if (profiler_state == state) {
-            return;
-        } else {
-            if (state == ProfilerState::None) {
-                mark = globalTimer();
-                state = profiler_state;
-            } else if (state == ProfilerState::TLAS) {
-                uint64_t new_mark = globalTimer();
-                timeInTLAS += (new_mark - mark);
-                mark = new_mark;
-                state = profiler_state;
-            } else if (state == ProfilerState::BLAS) {
-                uint64_t new_mark = globalTimer();
-                timeInBLAS += (new_mark - mark);
-                mark = new_mark;
-                state = profiler_state;
-            }
-        }
-#endif
-    }
-};
-#endif
-
 #define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 
 inline math::Vector3 lighting(
@@ -293,19 +254,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
 extern "C" __global__ void bvhRaycastEntry()
 {
-#ifdef MADRONA_PROFILE_BVH_KERNEL
-    if (threadIdx.x == 0) {
-        sm::RaycastCounters *counters = (sm::RaycastCounters *)sm::buffer;
-        counters->timingCounts.store(0, std::memory_order_relaxed);
-        counters->tlasTime.store(0, std::memory_order_relaxed);
-        counters->blasTime.store(0, std::memory_order_relaxed);
-        counters->numTLASTraces.store(0, std::memory_order_relaxed);
-        counters->numBLASTraces.store(0, std::memory_order_relaxed);
-    }
-
-    __syncthreads();
-#endif
-
     uint32_t pixels_per_block = blockDim.x;
 
     Profiler profiler = {
@@ -320,18 +268,21 @@ extern "C" __global__ void bvhRaycastEntry()
                                      bvhParams.viewCounts[num_worlds-1];
 
     // This is the number of views currently being processed.
-    const uint32_t num_resident_views = gridDim.x;
+    const uint32_t num_resident_views = gridDim.x *
+        (blockDim.x / bvhParams.renderOutputResolution);
+
+    // Each thread deals with one pixel of the output
+    const uint32_t threads_per_view = bvhParams.renderOutputResolution;
 
     // This is the offset into the resident view processors that we are
     // currently in.
-    const uint32_t resident_view_offset = blockIdx.x;
+    const uint32_t resident_view_offset = blockIdx.x +
+        threadIdx.x / threads_per_view;
 
     uint32_t current_view_offset = resident_view_offset;
 
     uint32_t bytes_per_view =
-        bvhParams.renderOutputResolution * bvhParams.renderOutputResolution * 3;
-
-    uint32_t num_processed_pixels = 0;
+        bvhParams.renderOutputResolution * 4;
 
     while (current_view_offset < total_num_views) {
         // While we still have views to generate, trace.
@@ -373,10 +324,6 @@ extern "C" __global__ void bvhRaycastEntry()
         ray_dir = ray_dir.normalize();
 
         float t;
-#if 0
-        math::Vector3 normal = {pixel_u * 2 - 1, pixel_v * 2 - 1, 0};
-        normal = ray_dir;
-#endif
 
         math::Vector3 color;
 
@@ -406,41 +353,6 @@ extern "C" __global__ void bvhRaycastEntry()
 
         current_view_offset += num_resident_views;
 
-        num_processed_pixels++;
-
         __syncwarp();
     }
-
-    __syncthreads();
-
-#ifdef MADRONA_PROFILE_BVH_KERNEL
-    // Update the counters in shared memory first
-    sm::RaycastCounters *counters = (sm::RaycastCounters *)sm::buffer;
-    counters->timingCounts.fetch_add(num_processed_pixels,
-            std::memory_order_relaxed);
-    counters->tlasTime.fetch_add(profiler.timeInTLAS,
-            std::memory_order_relaxed);
-    counters->blasTime.fetch_add(profiler.timeInBLAS,
-            std::memory_order_relaxed);
-    counters->numTLASTraces.fetch_add(profiler.numTLASTraces,
-            std::memory_order_relaxed);
-    counters->numBLASTraces.fetch_add(profiler.numBLASTraces,
-            std::memory_order_relaxed);
-
-    __syncthreads();
-
-    if (threadIdx.x == 0) {
-        uint64_t timing_counts = counters->timingCounts.load(std::memory_order_relaxed);
-        uint64_t tlas_time = counters->tlasTime.load(std::memory_order_relaxed);
-        uint64_t blas_time = counters->blasTime.load(std::memory_order_relaxed);
-        uint64_t num_tlas_traces = counters->numTLASTraces.load(std::memory_order_relaxed);
-        uint64_t num_blas_traces = counters->numBLASTraces.load(std::memory_order_relaxed);
-
-        bvhParams.timingInfo->timingCounts.fetch_add_relaxed(num_processed_pixels);
-        bvhParams.timingInfo->tlasTime.fetch_add_relaxed(profiler.timeInTLAS);
-        bvhParams.timingInfo->blasTime.fetch_add_relaxed(profiler.timeInBLAS);
-        bvhParams.timingInfo->numTLASTraces.fetch_add_relaxed(profiler.numTLASTraces);
-        bvhParams.timingInfo->numBLASTraces.fetch_add_relaxed(profiler.numBLASTraces);
-    }
-#endif
 }

@@ -32,22 +32,41 @@ using MortonCode = uint32_t;
 
 // For private usage - not to be used by user.
 struct alignas(16) PerspectiveCameraData {
+    math::Vector2 position;
+
+    // Eurler angle of viewing direction
+    float viewDirPolar;
+
+    uint8_t numForwardRays;
+    uint8_t numBackwardRays;
+
+    int32_t worldIDX;
+
+#if 0
     math::Vector3 position;
     math::Quat rotation;
-    float xScale;
-    float yScale;
-    float zNear;
+
+    uint8_t numForwardRays;
+    uint8_t numBackwardRays;
+
+    uint16_t pad0;
+
     int32_t worldIDX;
-    uint32_t pad;
+#endif
 };
 
 // For private usage - not to be used by user.
 struct alignas(16) InstanceData {
+    math::Vector2 position;
+    int32_t worldIDX;
+
+#if 0
     math::Vector3 position;
     math::Quat rotation;
     math::Diag3x3 scale;
     int32_t objectID;
     int32_t worldIDX;
+#endif
 };
 
 // This contains the actual render output

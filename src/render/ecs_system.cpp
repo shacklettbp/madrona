@@ -39,18 +39,24 @@ struct RenderingSystemState {
     bool enableRaycaster;
 };
 
-inline uint32_t leftShift3(uint32_t x)
+uint32_t part1By1(uint32_t x)
 {
-    if (x == (1 << 10)) {
-        --x;
-    }
-
-    x = (x | (x << 16)) & 0b00000011000000000000000011111111;
-    x = (x | (x << 8)) & 0b00000011000000001111000000001111;
-    x = (x | (x << 4)) & 0b00000011000011000011000011000011;
-    x = (x | (x << 2)) & 0b00001001001001001001001001001001;
-
+    x &= 0x0000ffff;
+    x = (x ^ (x <<  8)) & 0x00ff00ff;
+    x = (x ^ (x <<  4)) & 0x0f0f0f0f;
+    x = (x ^ (x <<  2)) & 0x33333333;
+    x = (x ^ (x <<  1)) & 0x55555555;
     return x;
+}
+
+uint32_t encodeMorton2(uint32_t x, uint32_t y)
+{
+    return (part1By1(y) << 1) + part1By1(x);
+}
+
+uint32_t mortonVector2(const Vector2 &v)
+{
+    return encodeMorton2();
 }
 
 uint32_t encodeMorton3(const Vector3 &v) {
@@ -108,15 +114,26 @@ inline void instanceTransformUpdate(Context &ctx,
     // it in the TLBVHNode structure.
 
 #ifdef MADRONA_GPU_MODE
+
+#if 0
     render::MeshBVH *bvh = (render::MeshBVH *)
         mwGPU::GPUImplConsts::get().meshBVHsAddr +
         obj_id.idx;
+#endif
 
-    math::AABB aabb = bvh->rootAABB.applyTRS(
+    // For script bots, we don't read the BVH from the MeshBVH.
+    // It's just a Box surrounding the circle of the bot.
+    math::AABB model_space_aabb = {
+        .pMin = { -1.f, -1.f, -1.f },
+        .pMax = { +1.f, +1.f, +1.f }
+    };
+
+
+
+    math::AABB aabb = model_space_aabb.applyTRS(
             data.position, data.rotation, data.scale);
 
     ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
-    //printf("AABB loc we %p\n",&(ctx.get<TLBVHNode>(renderable.renderEntity).aabb));
 #endif
 }
 
@@ -180,35 +197,6 @@ inline void exportCountsGPU(Context &ctx,
         *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
             RenderableArchetype>();
     }
-
-#if 0
-    uint32_t *morton_codes = state_mgr->getArchetypeComponent<
-        RenderableArchetype, MortonCode>();
-    
-    WorldID *world_ids = state_mgr->getArchetypeComponent<
-        RenderableArchetype, WorldID>();
-
-    uint32_t current_world = 0;
-    uint32_t current_world_offset = 0;
-
-    for (int i = 0; 
-         i < state_mgr->getArchetypeNumRows<RenderableArchetype>();
-         ++i) {
-        if (world_ids[i].idx != current_world) {
-            current_world = world_ids[i].idx;
-            current_world_offset = i;
-        }
-
-        uint32_t code = morton_codes[i];
-        printf(USHORT_TO_BINARY_PATTERN " ", USHORT_TO_BINARY((code>>16)));
-        printf(USHORT_TO_BINARY_PATTERN " \t", USHORT_TO_BINARY((code)));
-
-        printf("(Leaf node %d)\t %d: (%d)\n", 
-                i - current_world_offset, 
-                world_ids[i].idx, 
-                morton_codes[i]);
-    }
-#endif
 }
 #endif
 
@@ -220,7 +208,10 @@ void registerTypes(ECSRegistry &registry,
 #ifdef MADRONA_GPU_MODE
     uint32_t render_output_res = 
         mwGPU::GPUImplConsts::get().raycastOutputResolution;
-    uint32_t render_output_bytes = render_output_res * render_output_res * 3;
+
+    // The raycast output resolution is simply the number of pixels
+    // for script bots because the visualization is just 1D
+    uint32_t render_output_bytes = render_output_res * 4;
 
     // Make sure to have something there even if raycasting was disabled.
     if (render_output_bytes == 0) {
