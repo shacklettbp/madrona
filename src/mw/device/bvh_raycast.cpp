@@ -220,7 +220,7 @@ extern "C" __global__ void bvhRaycastEntry()
 
 
         // Initialize the ray and trace.
-        float ray_theta = 0.f;
+        float ray_theta = view_data->viewDirPolar;
         if (thread_offset_in_view < view_data->numForwardRays) {
             // First pixels are the forward rays
             ray_theta = (ray_theta - math::pi * 0.25f) + thread_offset_in_view *
@@ -256,7 +256,6 @@ extern "C" __global__ void bvhRaycastEntry()
 
         if (hit) {
             write_out[0] = 255;
-            LOG("Hit! with distance: {}\n", t);
         } else {
             write_out[0] = 0;
         }
