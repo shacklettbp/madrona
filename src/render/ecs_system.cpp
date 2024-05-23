@@ -7,6 +7,7 @@
 
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/const.hpp>
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 #endif
 
 namespace madrona::render::RenderingSystem {
@@ -56,15 +57,11 @@ uint32_t encodeMorton2(uint32_t x, uint32_t y)
 
 uint32_t mortonVector2(const Vector2 &v)
 {
-    return encodeMorton2();
+    return encodeMorton2(*((uint32_t *)&v.x),
+                         *((uint32_t *)&v.y));
 }
 
-uint32_t encodeMorton3(const Vector3 &v) {
-    return (leftShift3(*((uint32_t *)&v.z)) << 2) | 
-           (leftShift3(*((uint32_t *)&v.y)) << 1) | 
-            leftShift3(*((uint32_t *)&v.x));
-}
-
+// For script bots, we're dealing with 2D
 inline void mortonCodeUpdate(Context &ctx,
                              Entity e,
                              const Position &pos,
@@ -74,7 +71,7 @@ inline void mortonCodeUpdate(Context &ctx,
 
     // Calculate and set the morton code
     MortonCode &morton_code = ctx.get<MortonCode>(renderable.renderEntity);
-    morton_code = encodeMorton3(pos);
+    morton_code = mortonVector2({pos.x, pos.y});
 }
 
 inline void instanceTransformUpdate(Context &ctx,
@@ -85,41 +82,13 @@ inline void instanceTransformUpdate(Context &ctx,
                                     const ObjectID &obj_id,
                                     const Renderable &renderable)
 {
-    // Just update the instance data that is associated with this entity
-#if defined(MADRONA_GPU_MODE)
     (void)e;
 
     InstanceData &data = ctx.get<InstanceData>(renderable.renderEntity);
-#else
-    (void)renderable;
 
-    // Just update the instance data that is associated with this entity
-    auto &system_state = ctx.singleton<RenderingSystemState>();
-    uint32_t instance_id = system_state.totalNumInstancesCPU->fetch_add<sync::acq_rel>(1);
-
-    // Required for stable sorting on CPU
-    system_state.instanceWorldIDsCPU[instance_id] = 
-        ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
-
-    InstanceData &data = system_state.instancesCPU[instance_id];
-#endif
-
-    data.position = pos;
-    data.rotation = rot;
-    data.scale = scale;
+    data.position = { pos.x, pos.y };
+    data.scale = { scale.d0, scale.d1 };
     data.worldIDX = ctx.worldID().idx;
-    data.objectID = obj_id.idx;
-
-    // Get the root AABB from the model and translate it to store
-    // it in the TLBVHNode structure.
-
-#ifdef MADRONA_GPU_MODE
-
-#if 0
-    render::MeshBVH *bvh = (render::MeshBVH *)
-        mwGPU::GPUImplConsts::get().meshBVHsAddr +
-        obj_id.idx;
-#endif
 
     // For script bots, we don't read the BVH from the MeshBVH.
     // It's just a Box surrounding the circle of the bot.
@@ -128,13 +97,10 @@ inline void instanceTransformUpdate(Context &ctx,
         .pMax = { +1.f, +1.f, +1.f }
     };
 
-
-
     math::AABB aabb = model_space_aabb.applyTRS(
-            data.position, data.rotation, data.scale);
+            pos, rot, scale);
 
     ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
-#endif
 }
 
 uint32_t * getVoxelPtr(Context &ctx)
@@ -149,54 +115,34 @@ inline void viewTransformUpdate(Context &ctx,
                                 const Rotation &rot,
                                 const RenderCamera &cam)
 {
+    (void)e;
+
+    uint32_t render_output_res = 
+        mwGPU::GPUImplConsts::get().raycastOutputResolution;
+
+
     Vector3 camera_pos = pos + cam.cameraOffset;
 
-#if defined(MADRONA_GPU_MODE)
-    (void)e;
 
     PerspectiveCameraData &cam_data = 
         ctx.get<PerspectiveCameraData>(cam.cameraEntity);
-#else
-    auto &system_state = ctx.singleton<RenderingSystemState>();
-    uint32_t view_id = system_state.totalNumViewsCPU->fetch_add<sync::acq_rel>(1);
 
-    // Required for stable sorting on CPU
-    system_state.viewWorldIDsCPU[view_id] = 
-        ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
+    Vector3 rotated_x = rot.rotateVec(Vector3{ 1.f, 0.f, 0.f });
 
-    PerspectiveCameraData &cam_data = system_state.viewsCPU[view_id];
-#endif
-    cam_data.position = camera_pos;
-    cam_data.rotation = rot.inv();
+
+
+    // Set all the camera data information
+    cam_data.position = {camera_pos.x, camera_pos.y};
+    cam_data.viewDirPolar = atanf(rotated_x.y / rotated_x.x);
+    cam_data.numForwardRays = 3 * render_output_res / 4;
+    cam_data.numBackwardRays = render_output_res / 4;
     cam_data.worldIDX = ctx.worldID().idx;
-
-#if !defined(MADRONA_GPU_MODE)
-    float x_scale = cam.fovScale / system_state.aspectRatio;
-    float y_scale = -cam.fovScale;
-
-    cam_data.xScale = x_scale;
-    cam_data.yScale = y_scale;
-    cam_data.zNear = cam.zNear;
-#endif
 }
 
 #ifdef MADRONA_GPU_MODE
 inline void exportCountsGPU(Context &ctx,
                             RenderingSystemState &sys_state)
 {
-    // FIXME: Add option for global, across worlds, systems
-    if (ctx.worldID().idx != 0) {
-        return;
-    }
-
-    auto state_mgr = mwGPU::getStateManager();
-
-    if (sys_state.totalNumViews) {
-        *sys_state.totalNumViews = state_mgr->getArchetypeNumRows<
-            RenderCameraArchetype>();
-        *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
-            RenderableArchetype>();
-    }
 }
 #endif
 
@@ -211,7 +157,7 @@ void registerTypes(ECSRegistry &registry,
 
     // The raycast output resolution is simply the number of pixels
     // for script bots because the visualization is just 1D
-    uint32_t render_output_bytes = render_output_res * 4;
+    uint32_t render_output_bytes = render_output_res;
 
     // Make sure to have something there even if raycasting was disabled.
     if (render_output_bytes == 0) {
@@ -407,16 +353,11 @@ void attachEntityToView(Context &ctx,
 
     auto &state = ctx.singleton<RenderingSystemState>();
 
-    float x_scale = fov_scale / state.aspectRatio;
-    float y_scale = -fov_scale;
-
     cam_data = PerspectiveCameraData {
         { /* Position */ }, 
-        { /* Rotation */ }, 
-        x_scale, y_scale, 
-        z_near, 
+        0.f,
+        0, 0,
         ctx.worldID().idx,
-        0 // Padding
     };
 
 #ifdef MADRONA_GPU_MODE

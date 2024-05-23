@@ -630,11 +630,6 @@ static GPUCompileResults compileCode(
     CompileConfig::OptMode opt_mode,
     ExecutorMode exec_mode, bool verbose_compile)
 {
-    for (int i = 0; i < num_sources; ++i) {
-        printf("%p\n", sources[i]);
-        printf("%s\n", sources[i]);
-    }
-
     auto kernel_cache = Optional<MegakernelCache>::none();
     auto cache_write_path = Optional<std::string>::none();
     checkAndLoadMegakernelCache(kernel_cache, cache_write_path);
@@ -1281,11 +1276,6 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     memcpy(all_cpp_files.data() + num_exec_srcs,
            cfg.userSources.data(),
            sizeof(const char *) * cfg.userSources.size());
-
-    for (int i = 0; i < all_cpp_files.size(); ++i) {
-        printf("%p\n", all_cpp_files[i]);
-        printf("%s\n", all_cpp_files[i]);
-    }
 
     // Build architecture string for this GPU
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
@@ -2073,9 +2063,13 @@ static GPUEngineState initEngineAndUserState(
 
     { // Setup the BVH parameters in the __constant__ block of the bvh module
         // Pass this to the ECS to fill in
+#if 0
         MaterialData mat_data = initMaterialData(
                 materials, num_materials,
                 textures, num_textures);
+#endif
+
+        MaterialData mat_data = {};
 
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
         auto bvh_internals = cu::allocGPU(
@@ -2537,7 +2531,7 @@ static CUgraphExec makeTaskGraphRunGraph(
 
         const uint32_t num_resident_workers_per_sm = 4;
 
-        const uint32_t num_threads_per_block = 1024;
+        const uint32_t num_threads_per_block = 128;
 
         CUDA_KERNEL_NODE_PARAMS bvh_launch_raycast = {
             .func = bvh_kernels.raycast,

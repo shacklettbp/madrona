@@ -737,7 +737,6 @@ extern "C" __global__ void bvhBuildFast()
     BVHInternalData *internal_data = bvhParams.internalData;
     sm::BuildFastBuffer *smem = (sm::BuildFastBuffer *)sm::buffer;
 
-    const uint32_t threads_per_block = blockDim.x;
     const uint32_t threads_per_grid = gridDim.x * blockDim.x;
     
     uint32_t global_tid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -922,8 +921,6 @@ extern "C" __global__ void bvhConstructAABBs()
     BVHInternalData *internal_data = bvhParams.internalData;
     sm::ConstructAABBBuffer *smem = (sm::ConstructAABBBuffer *)sm::buffer;
 
-    const uint32_t threads_per_block = blockDim.x;
-
     const uint32_t threads_per_grid = gridDim.x * blockDim.x;
     
     uint32_t global_tid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -974,7 +971,6 @@ extern "C" __global__ void bvhConstructAABBs()
             // Merge the AABBs of the children nodes. (Store like this for now to
             // help when we make the tree 4 wide or 8 wide.
             LBVHNode *children[2];
-            bool are_leaves[2];
 
             if (current->left == 0) {
                 children[0] = nullptr;
@@ -985,10 +981,8 @@ extern "C" __global__ void bvhConstructAABBs()
 
                 if (is_leaf) {
                     children[0] = &leaves[node_idx];
-                    are_leaves[0] = true;
                 } else {
                     children[0] = &internal_nodes[node_idx];
-                    are_leaves[0] = false;
                 }
             }
 
@@ -1001,10 +995,8 @@ extern "C" __global__ void bvhConstructAABBs()
 
                 if (is_leaf) {
                     children[1] = &leaves[node_idx];
-                    are_leaves[1] = true;
                 } else {
                     children[1] = &internal_nodes[node_idx];
-                    are_leaves[1] = false;
                 }
             }
 
@@ -1057,7 +1049,6 @@ extern "C" __global__ void bvhWidenTree()
 
     uint32_t current_world_idx = blockIdx.x;
     uint32_t lane_idx = threadIdx.x % MADRONA_WARP_SIZE;
-    uint32_t warp_idx = threadIdx.x / MADRONA_WARP_SIZE;
 
     while (current_world_idx < bvhParams.numWorlds) {
         __syncthreads();

@@ -100,7 +100,7 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
                                          void *textures,
                                          float near_sphere)
 {
-#if 0
+#if 1
     using namespace madrona;
     using namespace madrona::render;
 

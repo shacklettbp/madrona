@@ -41,32 +41,14 @@ struct alignas(16) PerspectiveCameraData {
     uint8_t numBackwardRays;
 
     int32_t worldIDX;
-
-#if 0
-    math::Vector3 position;
-    math::Quat rotation;
-
-    uint8_t numForwardRays;
-    uint8_t numBackwardRays;
-
-    uint16_t pad0;
-
-    int32_t worldIDX;
-#endif
 };
 
 // For private usage - not to be used by user.
 struct alignas(16) InstanceData {
     math::Vector2 position;
-    int32_t worldIDX;
+    math::Vector2 scale;
 
-#if 0
-    math::Vector3 position;
-    math::Quat rotation;
-    math::Diag3x3 scale;
-    int32_t objectID;
     int32_t worldIDX;
-#endif
 };
 
 // This contains the actual render output

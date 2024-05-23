@@ -62,17 +62,43 @@ inline math::Vector3 lighting(
 
 }
 
+struct SphereIntersection {
+    bool intersects;
+    float tHitClosest;
+};
+
+SphereIntersection raySphereIntersect(const math::Vector3 &sphere_center,
+                                      float sphere_radius,
+                                      const math::Vector3 &ray_origin,
+                                      const math::Vector3 &ray_dir)
+{
+    math::Vector3 oc = ray_origin - sphere_center;
+    float a = dot(ray_dir, ray_dir);
+    float b = 2.0 * dot(oc, ray_dir);
+    float c = dot(oc,oc) - sphere_radius * sphere_radius;
+    float discriminant = b*b - 4*a*c;
+    if(discriminant < 0){
+        return {
+            .intersects = false,
+            .tHitClosest = -1.f
+        };
+    }
+    else{
+        return {
+            .intersects = true,
+            .tHitClosest = (-b - sqrt(discriminant)) / (2.0f*a)
+        };
+    }
+}
+
 static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     uint32_t view_idx,
-                                    uint32_t pixel_x, uint32_t pixel_y,
                                     const math::Vector3 &ray_o,
                                     math::Vector3 ray_d,
                                     float *out_hit_t,
                                     math::Vector3 *out_color,
-                                    float t_max,
-                                    Profiler *profiler)
+                                    float t_max)
 {
-#define INSPECT(...) if (pixel_x == 32 && pixel_y == 32) { LOG(__VA_ARGS__); }
     static constexpr float epsilon = 0.00001f;
 
     if (ray_d.x == 0.f) {
@@ -111,24 +137,11 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     bool ray_hit = false;
 
-    render::MeshBVH::HitInfo closest_hit_info = {};
-
-    uint64_t total_blas_time = 0;
-
-#if defined(MADRONA_PROFILE_BVH_KERNEL)
-    uint64_t start_time = globalTimer();
-#endif
+    float t_min = bvhParams.nearSphere;
 
     while (stack.size > 0) {
         int32_t node_idx = stack.pop() - 1;
         QBVHNode *node = &nodes[node_idx];
-
-#if 0
-        INSPECT("Going into node: {} with {} children\n",
-                node_idx, (uint32_t)node->numChildren);
-#endif
-
-        // LOG("num_children={}\n", node->numChildren);
 
         for (int i = 0; i < node->numChildren; ++i) {
             math::AABB child_aabb = node->convertToAABB(i);
@@ -140,67 +153,27 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
             if (aabb_hit_t <= t_max) {
                 if (node->childrenIdx[i] < 0) {
-                    // This child is a leaf.
                     int32_t instance_idx = (int32_t)(-node->childrenIdx[i] - 1);
 
                     if (instance_idx >= num_instances)
                         LOG("Got incorrect instance index: {}\n", instance_idx);
 
-                    render::MeshBVH *model_bvh = bvhParams.bvhs +
-                        instances[instance_idx].objectID;
-
                     render::InstanceData *instance_data =
                         &instances[instance_idx];
 
-                    // Ok we are going to just do something stupid.
-                    //
-                    // Also need to bound the mesh bvh trace ray by t_max.
+                    // Get sphere intersection with this instance
+                    SphereIntersection sphere_intersect_info =
+                        raySphereIntersect({instance_data->position.x, 
+                                                instance_data->position.y, 0.f},
+                                           instance_data->scale.x,
+                                           ray_o, ray_d);
 
-                    render::MeshBVH::AABBTransform txfm = {
-                        instance_data->position,
-                        instance_data->rotation,
-                        instance_data->scale
-                    };
-
-                    Vector3 txfm_ray_o = instance_data->scale.inv() *
-                        instance_data->rotation.inv().rotateVec(
-                            (ray_o - instance_data->position));
-
-                    Vector3 txfm_ray_d = instance_data->scale.inv() *
-                        instance_data->rotation.inv().rotateVec(ray_d);
-
-                    float t_scale = txfm_ray_d.length();
-
-                    txfm_ray_d /= t_scale;
-
-                    render::MeshBVH::HitInfo hit_info = {};
-
-#if defined(MADRONA_PROFILE_BVH_KERNEL)
-                    uint64_t blas_start_time = globalTimer();
-                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
-                            &hit_info, &stack, txfm, t_max * t_scale);
-                    uint64_t blas_end_time = globalTimer();
-                    total_blas_time += (blas_end_time - blas_start_time);
-#else
-                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
-                            &hit_info, &stack, txfm, t_max * t_scale);
-#endif
-
-                    if (leaf_hit) {
+                    if (sphere_intersect_info.intersects && 
+                            sphere_intersect_info.tHitClosest > t_min) {
                         ray_hit = true;
 
-                        float old_t_max = t_max;
-                        t_max = hit_info.tHit / t_scale;
-
-                        closest_hit_info = hit_info;
-                        closest_hit_info.normal = 
-                            instance_data->rotation.rotateVec(
-                                instance_data->scale * closest_hit_info.normal);
-
-                        closest_hit_info.normal = 
-                            closest_hit_info.normal.normalize();
-
-                        closest_hit_info.bvh = model_bvh;
+                        t_max = sphere_intersect_info.tHitClosest;
+                        *out_hit_t = t_max;
                     }
                 } else {
                     stack.push(node->childrenIdx[i]);
@@ -209,80 +182,34 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
         }
     }
 
-#if defined(MADRONA_PROFILE_BVH_KERNEL)
-    uint64_t end_time = globalTimer();
-    uint64_t total_trace_time = end_time - start_time;
-
-    profiler->timeInBLAS += total_blas_time;
-    profiler->timeInTLAS += (total_trace_time - total_blas_time);
-#endif
-
-    if (ray_hit) {
-#if defined (MADRONA_RENDER_RGB)
-        int32_t material_idx = 
-            closest_hit_info.bvh->getMaterialIDX(closest_hit_info);
-
-        Material *mat = &bvhParams.materials[material_idx];
-
-        // *out_color = {mat->color.x, mat->color.y, mat->color.z};
-        Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
-
-        if (mat->textureIdx != -1) {
-            cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
-
-            float4 sampled_color = tex2D<float4>(*tex,
-                closest_hit_info.uv.x, closest_hit_info.uv.y);
-
-            math::Vector3 tex_color = {sampled_color.x,
-                                       sampled_color.y,
-                                       sampled_color.z};
-
-            color.x *= tex_color.x;
-            color.y *= tex_color.y;
-            color.z *= tex_color.z;
-        }
-
-        *out_color = lighting(color, closest_hit_info.normal, ray_d, 1, 1);
-#else
-        *out_color = closest_hit_info.normal;
-#endif
-    }
-
     return ray_hit;
 }
 
 
 extern "C" __global__ void bvhRaycastEntry()
 {
-    uint32_t pixels_per_block = blockDim.x;
-
-    Profiler profiler = {
-        .timeInTLAS = 0,
-        .timeInBLAS = 0,
-        .numBLASTraces = 0,
-        .numTLASTraces = 0
-    };
-
     const uint32_t num_worlds = bvhParams.numWorlds;
     const uint32_t total_num_views = bvhParams.viewOffsets[num_worlds-1] +
                                      bvhParams.viewCounts[num_worlds-1];
 
+    const uint32_t views_per_block = blockDim.x / bvhParams.renderOutputResolution;
+
     // This is the number of views currently being processed.
-    const uint32_t num_resident_views = gridDim.x *
-        (blockDim.x / bvhParams.renderOutputResolution);
+    const uint32_t num_resident_views = gridDim.x * views_per_block;
 
     // Each thread deals with one pixel of the output
     const uint32_t threads_per_view = bvhParams.renderOutputResolution;
 
     // This is the offset into the resident view processors that we are
     // currently in.
-    const uint32_t resident_view_offset = blockIdx.x +
+    const uint32_t resident_view_offset = blockIdx.x * views_per_block +
         threadIdx.x / threads_per_view;
+
+    const uint32_t thread_offset_in_view = threadIdx.x % threads_per_view;
 
     uint32_t current_view_offset = resident_view_offset;
 
-    uint32_t bytes_per_view =
-        bvhParams.renderOutputResolution * 4;
+    uint32_t bytes_per_view = bvhParams.renderOutputResolution;
 
     while (current_view_offset < total_num_views) {
         // While we still have views to generate, trace.
@@ -293,62 +220,45 @@ extern "C" __global__ void bvhRaycastEntry()
 
 
         // Initialize the ray and trace.
-        math::Quat rot = view_data->rotation;
-        math::Vector3 ray_start = view_data->position;
-        math::Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
+        float ray_theta = 0.f;
+        if (thread_offset_in_view < view_data->numForwardRays) {
+            // First pixels are the forward rays
+            ray_theta = (ray_theta - math::pi * 0.25f) + thread_offset_in_view *
+                (math::pi * 0.5f / ((float)view_data->numForwardRays - 1.f));
+        } else {
+            // Last pixels are the backward rays
+            ray_theta += math::pi;
 
-        constexpr float theta = 1.5708f;
+            ray_theta = (ray_theta - math::pi * 0.25f) + thread_offset_in_view *
+                (math::pi * 0.5f / ((float)view_data->numBackwardRays - 1.f));
+        }
 
-        const float h = tanf(theta / 2);
 
-        const auto viewport_height = 2 * h;
-        const auto viewport_width = viewport_height;
-        const auto forward = look_at.normalize();
+        math::Vector3 ray_start = { view_data->position.x, view_data->position.y, 0.f };
 
-        auto u = rot.inv().rotateVec({1, 0, 0});
-        auto v = cross(forward, u).normalize();
-
-        auto horizontal = u * viewport_width;
-        auto vertical = v * viewport_height;
-
-        auto lower_left_corner = ray_start - horizontal / 2 - vertical / 2 + forward;
-
-        uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
-        uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
-
-        float pixel_u = ((float)pixel_x) / (float)bvhParams.renderOutputResolution;
-        float pixel_v = ((float)pixel_y) / (float)bvhParams.renderOutputResolution;
-
-        math::Vector3 ray_dir = lower_left_corner + pixel_u * horizontal + 
-            pixel_v * vertical - ray_start;
-        ray_dir = ray_dir.normalize();
-
-        float t;
-
-        math::Vector3 color;
+        // math::Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
+        math::Vector3 look_at = { cosf(ray_theta), sinf(ray_theta), 0.0f };
 
         // For now, just hack in a t_max of 10000.
+        float t;
+        math::Vector3 color;
         bool hit = traceRayTLAS(
                 world_idx, current_view_offset, 
-                pixel_x, pixel_y,
-                ray_start, ray_dir, 
-                &t, &color, 10000.f, &profiler);
+                ray_start, look_at, 
+                &t, &color, 10000.f);
 
-        uint32_t linear_pixel_idx = 3 * 
-            (pixel_y + pixel_x * bvhParams.renderOutputResolution);
+        uint32_t linear_pixel_idx = thread_offset_in_view;
+
         uint32_t global_pixel_idx = current_view_offset * bytes_per_view +
             linear_pixel_idx;
 
         uint8_t *write_out = (uint8_t *)bvhParams.renderOutput + global_pixel_idx;
 
         if (hit) {
-            write_out[0] = (color.x) * 255;
-            write_out[1] = (color.y) * 255;
-            write_out[2] = (color.z) * 255;
+            write_out[0] = 255;
+            LOG("Hit! with distance: {}\n", t);
         } else {
             write_out[0] = 0;
-            write_out[1] = 0;
-            write_out[2] = 0;
         }
 
         current_view_offset += num_resident_views;
