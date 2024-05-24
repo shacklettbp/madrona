@@ -2624,6 +2624,7 @@ static ViewerRendererState initState(RenderContext &rctx,
         .frames = std::move(frames),
         .globalFrameNum = 0,
         .screenshotBuffer = std::move(screenshot_buffer),
+        .currentSwapchainIndex = 0,
     };
 }
 
@@ -2704,6 +2705,7 @@ bool ViewerRendererState::renderGridFrame(const viz::ViewerControl &viz_ctrl)
 
         VkBufferMemoryBarrier buffer_prepare = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_NONE,
             .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -3144,13 +3146,14 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
 
         VkBufferMemoryBarrier buffer_prepare = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_NONE,
             .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .buffer = screenshotBuffer.buffer,
             .offset = 0,
-            .size = VK_WHOLE_SIZE
+            .size = VK_WHOLE_SIZE,
         };
 
         dev.dt.cmdPipelineBarrier(draw_cmd,
@@ -3169,7 +3172,11 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
                 .layerCount = 1
             },
             .imageOffset = {},
-            .imageExtent = {frame.fb.colorAttachment.width, frame.fb.colorAttachment.height, 1}
+            .imageExtent = {
+                frame.fb.colorAttachment.width,
+                frame.fb.colorAttachment.height, 
+                1,
+            },
         };
 
         dev.dt.cmdCopyImageToBuffer(draw_cmd, frame.fb.colorAttachment.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

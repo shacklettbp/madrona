@@ -64,14 +64,28 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
             .vizBuffer = alloc.makeColorAttachment(width, height,
                                                    current_layer_count,
                                                    consts::colorFormat),
+            .vizBufferView = VK_NULL_HANDLE,
             .depth = alloc.makeDepthAttachment(width, height,
                                                current_layer_count,
                                                consts::depthFormat),
+            .depthView = VK_NULL_HANDLE,
+            .layerCount = 0,
+            .lightingSet = VK_NULL_HANDLE,
         };
 
         VkImageViewCreateInfo view_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .image = target.vizBuffer.image,
             .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+            .format = consts::colorFormat,
+            .components = {
+                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = VK_COMPONENT_SWIZZLE_IDENTITY, 
+                .b = VK_COMPONENT_SWIZZLE_IDENTITY, 
+                .a = VK_COMPONENT_SWIZZLE_IDENTITY, 
+            },
             .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .baseMipLevel = 0,
@@ -81,8 +95,6 @@ static HeapArray<LayeredTarget> makeLayeredTargets(uint32_t width,
             }
         };
 
-        view_info.image = target.vizBuffer.image;
-        view_info.format = consts::colorFormat;
         REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &target.vizBufferView));
 
         view_info.image = target.depth.image;
@@ -265,9 +277,11 @@ static PipelineMP<1> makeDrawPipeline(const vk::Device &dev,
     VkPipelineRenderingCreateInfo rendering_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .pNext = nullptr,
+        .viewMask = 0,
         .colorAttachmentCount = 1,
         .pColorAttachmentFormats = &color_format,
-        .depthAttachmentFormat = depth_format
+        .depthAttachmentFormat = depth_format,
+        .stencilAttachmentFormat = VK_FORMAT_UNDEFINED,
     };
 
     VkGraphicsPipelineCreateInfo gfx_info;
@@ -857,10 +871,13 @@ static void issueRasterLayoutTransitions(vk::Device &dev,
     std::array barriers = {
         VkImageMemoryBarrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_NONE,
             .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = target.vizBuffer.image,
             .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -868,22 +885,25 @@ static void issueRasterLayoutTransitions(vk::Device &dev,
                 .levelCount = 1,
                 .baseArrayLayer = 0,
                 .layerCount = target.layerCount
-            }
+            },
         },
         VkImageMemoryBarrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_NONE,
             .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = target.depth.image,
             .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
                 .baseMipLevel = 0,
                 .levelCount = 1,
                 .baseArrayLayer = 0,
-                .layerCount = target.layerCount
-            }
+                .layerCount = target.layerCount,
+            },
         },
     };
 
@@ -903,10 +923,13 @@ static void issueComputeLayoutTransitions(vk::Device &dev,
     std::array barriers = {
         VkImageMemoryBarrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
             .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = target.vizBuffer.image,
             .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -914,14 +937,17 @@ static void issueComputeLayoutTransitions(vk::Device &dev,
                 .levelCount = 1,
                 .baseArrayLayer = 0,
                 .layerCount = target.layerCount
-            }
+            },
         },
         VkImageMemoryBarrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
             .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
             .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = target.depth.image,
             .subresourceRange = {
                 .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -929,7 +955,7 @@ static void issueComputeLayoutTransitions(vk::Device &dev,
                 .levelCount = 1,
                 .baseArrayLayer = 0,
                 .layerCount = target.layerCount
-            }
+            },
         },
     };
 
@@ -959,27 +985,45 @@ static void issueRasterization(vk::Device &dev,
 
     VkRenderingAttachmentInfoKHR color_attach = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+        .pNext = nullptr,
         .imageView = target.vizBufferView,
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .resolveMode = VK_RESOLVE_MODE_NONE,
+        .resolveImageView = VK_NULL_HANDLE,
+        .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = {
+            .color = { .float32 = {0, 0, 0, 0} },
+        },
     };
 
     VkRenderingAttachmentInfoKHR depth_attach = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+        .pNext = nullptr,
         .imageView = target.depthView,
         .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        .resolveMode = VK_RESOLVE_MODE_NONE,
+        .resolveImageView = VK_NULL_HANDLE,
+        .resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = {
+            .color = { .float32 = {0, 0, 0, 0} },
+        },
     };
 
     VkRenderingInfo rendering_info = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .pNext = nullptr,
+        .flags = 0,
         .renderArea = rect,
         .layerCount = target.layerCount,
+        .viewMask = 0,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color_attach,
-        .pDepthAttachment = &depth_attach
+        .pDepthAttachment = &depth_attach,
+        .pStencilAttachment = nullptr,
     };
 
     dev.dt.cmdBeginRenderingKHR(draw_cmd, &rendering_info);
@@ -988,6 +1032,8 @@ static void issueRasterization(vk::Device &dev,
                            draw_pipeline.hdls[0]);
 
     VkViewport viewport = {
+        .x = 0.f,
+        .y = 0.f,
         .width = (float)render_extent.width,
         .height = (float)render_extent.height,
         .minDepth = 0.0f,
