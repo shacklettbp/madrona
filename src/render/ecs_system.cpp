@@ -133,7 +133,7 @@ inline void viewTransformUpdate(Context &ctx,
 
     // Set all the camera data information
     cam_data.position = {camera_pos.x, camera_pos.y};
-    cam_data.viewDirPolar = atanf(rotated_x.y / rotated_x.x);
+    cam_data.viewDirPolar = atan2f(rotated_x.y, rotated_x.x);
     cam_data.numForwardRays = 3 * render_output_res / 4;
     cam_data.numBackwardRays = render_output_res / 4;
     cam_data.worldIDX = ctx.worldID().idx;

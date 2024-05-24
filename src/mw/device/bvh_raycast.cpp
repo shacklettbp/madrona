@@ -221,6 +221,7 @@ extern "C" __global__ void bvhRaycastEntry()
 
         // Initialize the ray and trace.
         float ray_theta = view_data->viewDirPolar;
+
         if (thread_offset_in_view < view_data->numForwardRays) {
             // First pixels are the forward rays
             ray_theta = (ray_theta - math::pi * 0.25f) + thread_offset_in_view *
@@ -229,7 +230,8 @@ extern "C" __global__ void bvhRaycastEntry()
             // Last pixels are the backward rays
             ray_theta += math::pi;
 
-            ray_theta = (ray_theta - math::pi * 0.25f) + thread_offset_in_view *
+            ray_theta = (ray_theta - math::pi * 0.25f) + 
+                (thread_offset_in_view - view_data->numForwardRays) *
                 (math::pi * 0.5f / ((float)view_data->numBackwardRays - 1.f));
         }
 
