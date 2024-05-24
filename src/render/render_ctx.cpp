@@ -1641,8 +1641,13 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 
                     Vector3 face_normal = cross(e0, e1);
                     float face_len = face_normal.length();
-                    assert(face_len != 0);
-                    face_normal /= face_len;
+
+                    if (face_len == 0.f) {
+                        // Degenerate triangle
+                        face_normal = math::up;
+                    } else {
+                        face_normal /= face_len;
+                    }
 
                     (*new_normals)[i0] += face_normal;
                     (*new_normals)[i1] += face_normal;
