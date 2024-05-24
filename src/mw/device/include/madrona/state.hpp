@@ -96,6 +96,11 @@ public:
 
     Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
 
+    // These are for objects which aren't dynamic but for which we want
+    // to use the memory-allocation scheme of the ECS.
+    Loc makeStationary(WorldID world_id, uint32_t archetype_id,
+                       uint32_t num_stationaries);
+
     template <typename ArchetypeT>
     void clearTemporaries();
 

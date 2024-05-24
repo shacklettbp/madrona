@@ -26,6 +26,11 @@ public:
     Loc makeTemporary();
     inline Loc makeTemporary(uint32_t archetype_id);
 
+    template <typename ArchetypeT>
+    Loc makeStationary(uint32_t num_stationaries);
+    inline Loc makeStationary(uint32_t archetype_id,
+                              uint32_t num_stationaries);
+
     inline void destroyEntity(Entity e);
 
     inline Loc loc(Entity e) const;

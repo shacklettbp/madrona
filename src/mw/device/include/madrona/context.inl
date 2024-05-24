@@ -43,6 +43,21 @@ Loc Context::makeTemporary(uint32_t archetype_id)
     return state_mgr->makeTemporary(world_id_, archetype_id);
 }
 
+template <typename ArchetypeT>
+Loc Context::makeStationary(uint32_t num_stationaries)
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    return makeStationary(archetype_id, num_stationaries);
+}
+
+Loc Context::makeStationary(uint32_t archetype_id,
+                            uint32_t num_stationaries)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    return state_mgr->makeStationary(world_id_, archetype_id,
+                                     num_stationaries);
+}
+
 void Context::destroyEntity(Entity e)
 {
     return mwGPU::getStateManager()->destroyEntityNow(e);

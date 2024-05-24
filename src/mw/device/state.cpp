@@ -10,6 +10,8 @@
 #include <madrona/mw_gpu/megakernel_consts.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 
+#define LOG(...) madrona::mwGPU::HostPrint::log(__VA_ARGS__)
+
 namespace madrona {
 
 Table::Table()
@@ -41,6 +43,11 @@ static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
 
     if (new_num_rows - tbl.mappedRows > 500'000) {
         new_num_rows = tbl.mappedRows + 500'000;
+    }
+
+    if (new_num_rows >= tbl.reservedRows) {
+        LOG("new_num_rows ({}) >= tbl.reservedRows ({})\n", 
+                new_num_rows, tbl.reservedRows);
     }
 
     assert(new_num_rows < tbl.reservedRows);
@@ -546,6 +553,36 @@ Loc StateManager::makeTemporary(WorldID world_id,
 
     WorldID *world_column = (WorldID *)tbl.columns[1];
     world_column[row] = world_id;
+
+    return loc;
+}
+
+Loc StateManager::makeStationary(WorldID world_id, uint32_t archetype_id,
+                                 uint32_t num_stationaries)
+{
+    auto &archetype = *archetypes_[archetype_id];
+
+    Table &tbl = archetype.tbl;
+    archetype.needsSort = true;
+
+    int32_t row = tbl.numRows.fetch_add_relaxed(num_stationaries);
+
+    if (row >= tbl.mappedRows) {
+        growTable(tbl, row);
+    }
+
+    Loc loc {
+        archetype_id,
+        row,
+    };
+
+    Entity *entity_column = (Entity *)tbl.columns[0];
+    WorldID *world_column = (WorldID *)tbl.columns[1];
+
+    for (int i = row; i < row + num_stationaries; ++i) {
+        entity_column[i] = Entity::none();
+        world_column[i] = world_id;
+    }
 
     return loc;
 }
