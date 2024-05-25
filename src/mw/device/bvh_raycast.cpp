@@ -97,6 +97,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     math::Vector3 ray_d,
                                     float *out_hit_t,
                                     math::Vector3 *out_color,
+                                    Entity *out_entity,
                                     float t_max)
 {
     static constexpr float epsilon = 0.00001f;
@@ -174,6 +175,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
                         t_max = sphere_intersect_info.tHitClosest;
                         *out_hit_t = t_max;
+                        *out_entity = instance_data->owner;
                     }
                 } else {
                     stack.push(node->childrenIdx[i]);
@@ -244,10 +246,11 @@ extern "C" __global__ void bvhRaycastEntry()
         // For now, just hack in a t_max of 10000.
         float t;
         math::Vector3 color;
+        Entity seen_entity;
         bool hit = traceRayTLAS(
                 world_idx, current_view_offset, 
                 ray_start, look_at, 
-                &t, &color, 10000.f);
+                &t, &color, &seen_entity, 10000.f);
 
         uint32_t linear_pixel_idx = thread_offset_in_view;
 
@@ -258,8 +261,30 @@ extern "C" __global__ void bvhRaycastEntry()
 
         if (hit) {
             write_out[0] = (uint8_t)t;
+
+            // Make sure to write out the finder information
+            if (thread_offset_in_view == view_data->numForwardRays / 2) {
+                render::FinderOutput *entity_write_out = 
+                    (render::FinderOutput *)bvhParams.finderOutput +
+                        current_view_offset;
+
+                *entity_write_out = {
+                    seen_entity, t
+                };
+            }
         } else {
-            write_out[0] = 0;
+            write_out[0] = 255;
+
+            if (thread_offset_in_view == view_data->numForwardRays / 2) {
+                render::FinderOutput *entity_write_out = 
+                    (render::FinderOutput *)bvhParams.finderOutput +
+                        current_view_offset;
+
+                *entity_write_out = {
+                    Entity::none(),
+                    255.f
+                };
+            }
         }
 
         current_view_offset += num_resident_views;

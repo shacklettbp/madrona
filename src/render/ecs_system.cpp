@@ -82,13 +82,12 @@ inline void instanceTransformUpdate(Context &ctx,
                                     const ObjectID &obj_id,
                                     const Renderable &renderable)
 {
-    (void)e;
-
     InstanceData &data = ctx.get<InstanceData>(renderable.renderEntity);
 
     data.position = { pos.x, pos.y };
     data.scale = { scale.d0, scale.d1 };
     data.worldIDX = ctx.worldID().idx;
+    data.owner = e;
 
     // For script bots, we don't read the BVH from the MeshBVH.
     // It's just a Box surrounding the circle of the bot.
@@ -173,6 +172,9 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<InstanceData>();
     registry.registerComponent<MortonCode>();
     registry.registerComponent<RenderOutputBuffer>(render_output_bytes);
+
+    // This is enough to store a number denoting the 
+    registry.registerComponent<FinderOutputBuffer>(sizeof(FinderOutput));
 
     registry.registerComponent<RenderOutputRef>();
     registry.registerComponent<TLBVHNode>();

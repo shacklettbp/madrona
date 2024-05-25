@@ -1317,7 +1317,7 @@ void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
         // The offset of the first entity's world must be 0.
         worldOffsets[keysCol[invocation_idx]] = invocation_idx;
         numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
-    }
+   }
     else if (keysCol[invocation_idx] != keysCol[invocation_idx - 1])
     {
         // This thread is the index of the first entity in 

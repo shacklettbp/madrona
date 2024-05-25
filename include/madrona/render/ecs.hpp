@@ -6,6 +6,9 @@
 namespace madrona::render {
 
 // This will be attached to any entity that wants to be a viewer
+//
+// For ScriptBots, we want multiple camera outputs, one for sensor information
+// and another for figuring out which entity is in front of us (finder).
 struct RenderCamera {
     Entity cameraEntity;
 
@@ -48,17 +51,33 @@ struct alignas(16) InstanceData {
     math::Vector2 position;
     math::Vector2 scale;
 
+    Entity owner;
     int32_t worldIDX;
 };
 
 // This contains the actual render output
-struct RenderOutputBuffer {
+struct RenderOutputBufferImpl {
     char buffer[1];
+};
+
+struct RenderOutputBuffer : RenderOutputBufferImpl
+{
+};
+
+// The finder outputs depth and the entity
+struct FinderOutput {
+    Entity hitEntity;
+    float depth;
+};
+
+struct FinderOutputBuffer : RenderOutputBufferImpl
+{
 };
 
 // Reference to an output
 struct RenderOutputRef {
     Entity outputEntity;
+    Entity finderOutputEntity;
 };
 
 // Top level acceleration structure node
@@ -85,7 +104,8 @@ struct RenderCameraArchetype : public Archetype<
 
 // This is an unsorted archetype with a runtime-sized component
 struct RaycastOutputArchetype : public Archetype<
-    RenderOutputBuffer
+    RenderOutputBuffer,
+    FinderOutputBuffer
 > {};
 
 
@@ -119,6 +139,11 @@ namespace RenderingSystem {
                               Entity e);
     void cleanupRenderableEntity(Context &ctx,
                                  Entity e);
+
+    template <typename OutputT>
+    OutputT *getRenderOutput(const RenderCamera &camera);
 };
 
 }
+
+#include "ecs.inl"

@@ -239,6 +239,7 @@ struct BVHParams {
     ::madrona::render::MeshBVH *bvhs;
 
     void *renderOutput;
+    void *finderOutput;
     uint32_t renderOutputResolution;
 
     // These are all going to be inherited from the ECS
