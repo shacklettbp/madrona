@@ -257,7 +257,7 @@ extern "C" __global__ void bvhRaycastEntry()
         uint8_t *write_out = (uint8_t *)bvhParams.renderOutput + global_pixel_idx;
 
         if (hit) {
-            write_out[0] = 255;
+            write_out[0] = (uint8_t)t;
         } else {
             write_out[0] = 0;
         }
