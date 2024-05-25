@@ -38,6 +38,8 @@ struct RenderingSystemState {
     uint32_t numBVHs;
 
     bool enableRaycaster;
+
+    AtomicI32 numDeleted;
 };
 
 uint32_t part1By1(uint32_t x)
@@ -304,6 +306,8 @@ void init(Context &ctx,
 {
     auto &system_state = ctx.singleton<RenderingSystemState>();
 
+    system_state.numDeleted.store_relaxed(0);
+
     if (bridge) {
         // This is where the renderer will read out the totals
         system_state.totalNumViews = bridge->totalNumViews;
@@ -370,16 +374,25 @@ void attachEntityToView(Context &ctx,
 #endif
 
     if (raycast_enabled) {
-        Entity render_output_entity = ctx.makeEntity<RaycastOutputArchetype>();
+        // Here, we aren't really treating these guys as entities. We are more
+        // so just using the ECS as memory allocator.
+        // So only create a new entity (i.e., allocate more space) if we need to.
 
-        RenderOutputRef &ref = ctx.get<RenderOutputRef>(camera_entity);
-        ref.outputEntity = render_output_entity;
+        if (state.numDeleted.load_relaxed() == 0) {
+            Entity render_output_entity = 
+                ctx.makeEntity<RaycastOutputArchetype>();
+        } else {
+            state.numDeleted.fetch_add_relaxed(-1);
+        }
     }
 }
 
 void cleanupViewingEntity(Context &ctx,
                           Entity e)
 {
+    auto &state = ctx.singleton<RenderingSystemState>();
+    state.numDeleted.fetch_add_relaxed(1);
+
     Entity view_entity = ctx.get<RenderCamera>(e).cameraEntity;
     ctx.destroyEntity(view_entity);
 }
