@@ -1301,6 +1301,7 @@ static const char *getDrawDeferredPath()
 
 static bool isDepthOnly()
 {
+#if 0
     const char *rgb_only_str = getenv("MADRONA_RENDER_RGB");
     assert(rgb_only_str);
 
@@ -1313,6 +1314,9 @@ static bool isDepthOnly()
 
         return true;
     }
+#endif
+
+    return true;
 }
 
 BatchRenderer::Impl::Impl(const Config &cfg,
@@ -1730,7 +1734,8 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
 
         VkBufferCopy aabb_data_copy = {
             .srcOffset = 0, .dstOffset = 0,
-            .size = num_aabbs_bytes
+            // .size = num_aabbs_bytes
+            .size = 0
         };
 
         impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->aabbHdl,
@@ -2448,7 +2453,7 @@ VkSemaphore BatchRenderer::getLatestWaitSemaphore()
     uint32_t last_frame = (impl->currentFrame + impl->batchFrames.size() - 1) %
         impl->batchFrames.size();
 
-    assert(impl->batchFrames[last_frame].latestOp != LatestOperation::None);
+    // assert(impl->batchFrames[last_frame].latestOp != LatestOperation::None);
 
     if (impl->batchFrames[last_frame].latestOp == LatestOperation::RenderPrepare) {
         return impl->batchFrames[last_frame].prepareFinished;

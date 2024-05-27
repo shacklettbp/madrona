@@ -50,9 +50,16 @@ struct alignas(16) PerspectiveCameraData {
 struct alignas(16) InstanceData {
     math::Vector2 position;
     math::Vector2 scale;
+    float viewDirPolar;
 
     Entity owner;
+
+    int32_t objectIDX;
     int32_t worldIDX;
+
+    // We store this separately so that the 1D raytracer doesn't have
+    // to be rewritten.
+    float zOffset;
 };
 
 // This contains the actual render output

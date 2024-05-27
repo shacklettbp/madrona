@@ -1,3 +1,5 @@
+#ifdef MADRONA_GPU_MODE
+
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/render/ecs.hpp>
 #include <madrona/components.hpp>
@@ -40,6 +42,15 @@ struct RenderingSystemState {
     bool enableRaycaster;
 
     AtomicI32 numDeleted;
+
+    // Specific to the script bots backend.
+    struct {
+        AtomicU32 totalNumInstances;
+
+        InstanceData *instances;
+
+        bool isTracking;
+    } scriptBots;
 };
 
 uint32_t part1By1(uint32_t x)
@@ -88,8 +99,15 @@ inline void instanceTransformUpdate(Context &ctx,
 
     data.position = { pos.x, pos.y };
     data.scale = { scale.d0, scale.d1 };
+    data.objectIDX = obj_id.idx;
     data.worldIDX = ctx.worldID().idx;
     data.owner = e;
+    data.zOffset = pos.z;
+
+    Vector3 rotated_x = rot.rotateVec(Vector3{ 1.f, 0.f, 0.f });
+
+    // Set the orientation
+    data.viewDirPolar = atan2f(rotated_x.y, rotated_x.x);
 
     // For script bots, we don't read the BVH from the MeshBVH.
     // It's just a Box surrounding the circle of the bot.
@@ -98,10 +116,25 @@ inline void instanceTransformUpdate(Context &ctx,
         .pMax = { +1.f, +1.f, +1.f }
     };
 
+    Position pos_tmp = pos;
+    pos_tmp.z = 0.f;
+
     math::AABB aabb = model_space_aabb.applyTRS(
-            pos, rot, scale);
+            pos_tmp, rot, scale);
 
     ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
+
+    auto &state = ctx.singleton<RenderingSystemState>();
+
+    if (state.scriptBots.isTracking) {
+        // Only do this for world 0 for now.
+        if (ctx.worldID().idx == 0) {
+            uint32_t offset =
+                state.scriptBots.totalNumInstances.fetch_add_relaxed(1);
+
+            state.scriptBots.instances[offset] = data;
+        }
+    }
 }
 
 uint32_t * getVoxelPtr(Context &ctx)
@@ -144,14 +177,23 @@ inline void viewTransformUpdate(Context &ctx,
 inline void exportCountsGPU(Context &ctx,
                             RenderingSystemState &sys_state)
 {
+    if (sys_state.scriptBots.isTracking && ctx.worldID().idx == 0) {
+        uint32_t num_instances =
+            sys_state.scriptBots.totalNumInstances.load_relaxed();
+
+        // This is the number that the renderer will see.
+        *sys_state.totalNumInstances = num_instances;
+
+        *sys_state.totalNumViews = 0;
+
+        sys_state.scriptBots.totalNumInstances.store_relaxed(0);
+    }
 }
 #endif
 
 void registerTypes(ECSRegistry &registry,
                    const RenderECSBridge *bridge)
 {
-    printf("Printing from rendering system register types\n");
-
 #ifdef MADRONA_GPU_MODE
     uint32_t render_output_res = 
         mwGPU::GPUImplConsts::get().raycastOutputResolution;
@@ -183,7 +225,12 @@ void registerTypes(ECSRegistry &registry,
 
     registry.registerArchetype<RaycastOutputArchetype>();
 
+    registry.registerSingleton<RenderingSystemState>();
 
+    registry.registerArchetype<RenderCameraArchetype>();
+    registry.registerArchetype<RenderableArchetype>();
+
+#if 0
     // Pointers get set in RenderingSystem::init
     if (bridge) {
 #if defined(MADRONA_GPU_MODE)
@@ -221,19 +268,9 @@ void registerTypes(ECSRegistry &registry,
         state_mgr->setArchetypeComponent<RenderableArchetype, TLBVHNode>(
             bridge->aabbs);
     }
-
-#if 0
-    auto *state_mgr = mwGPU::getStateManager();
-    auto instance_ptr = (void *)state_mgr->getArchetypeComponent<
-        RenderableArchetype, InstanceData>();
-
-    printf("From rendering system init, instance_ptr=%p\n", instance_ptr);
-#endif
-#else
-    (void)bridge;
 #endif
 
-    registry.registerSingleton<RenderingSystemState>();
+#endif
 }
 
 TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
@@ -309,6 +346,19 @@ void init(Context &ctx,
     system_state.numDeleted.store_relaxed(0);
 
     if (bridge) {
+        system_state.totalNumViews = bridge->totalNumViews;
+        system_state.totalNumInstances = bridge->totalNumInstances;
+
+        system_state.scriptBots.totalNumInstances.store_relaxed(0);
+        system_state.scriptBots.instances = bridge->instances;
+
+        system_state.scriptBots.isTracking = true;
+    } else {
+        system_state.scriptBots.isTracking = false;
+    }
+
+#if 0
+    if (bridge) {
         // This is where the renderer will read out the totals
         system_state.totalNumViews = bridge->totalNumViews;
         system_state.totalNumInstances = bridge->totalNumInstances;
@@ -332,6 +382,7 @@ void init(Context &ctx,
 
         system_state.voxels = bridge->voxels;
     }
+#endif
 }
 
 void makeEntityRenderable(Context &ctx,
@@ -405,3 +456,5 @@ void cleanupRenderableEntity(Context &ctx,
 }
 
 }
+
+#endif

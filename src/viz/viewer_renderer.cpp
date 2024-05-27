@@ -2881,6 +2881,9 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
     }
 
     uint32_t cur_num_instances = *rctx.engine_interop_.bridge.totalNumInstances;
+
+    // printf("CurNumInstances = %u\n", cur_num_instances);
+
     uint32_t cur_num_views = *rctx.engine_interop_.bridge.totalNumViews;
 
     { // Generate draw commands from the flycam.

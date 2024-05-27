@@ -78,11 +78,12 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
                   uint3 gid           : SV_GroupID)
 {
     if (tid_local.x == 0) {
-        sm.numInstances = getNumInstancesForWorld(pushConst.worldIDX);
+        // sm.numInstances = getNumInstancesForWorld(pushConst.worldIDX);
+        sm.numInstances = pushConst.numInstances;
+
         sm.numInstancesPerThread = (sm.numInstances + pushConst.numThreads-1) /
                                    pushConst.numThreads;
         sm.instancesOffset = getInstanceOffsetsForWorld(pushConst.worldIDX);
-        // printf("%d\n", sm.numInstances);
     }
 
     GroupMemoryBarrierWithGroupSync();

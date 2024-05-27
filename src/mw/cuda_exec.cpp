@@ -23,9 +23,7 @@
 
 #include "cpp_compile.hpp"
 
-#define STB_IMAGE_IMPLEMENTATION
 
-#include <stb_image.h>
 #define KHRONOS_STATIC
 #include <ktx.h>
 #include <span>
@@ -1616,6 +1614,8 @@ static MaterialData initMaterialData(
     const imp::SourceTexture *textures,
     uint32_t num_textures)
 {
+    return {};
+#if 0
     MaterialData cpu_mat_data = {
         .textures = (cudaTextureObject_t *)
             malloc(sizeof(cudaTextureObject_t) * num_textures),
@@ -1858,6 +1858,7 @@ static MaterialData initMaterialData(
     printf("Material Buffer %d %p\n",num_materials,mat_buffer);
 
     return gpu_mat_data;
+#endif
 }
 
 static GPUEngineState initEngineAndUserState(

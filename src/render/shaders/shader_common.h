@@ -162,6 +162,7 @@ struct AABB {
     float4 data[2];
 };
 
+#if 1
 struct EngineInstanceData {
     float3 position;
     float4 rotation;
@@ -169,6 +170,24 @@ struct EngineInstanceData {
     int32_t objectID;
     int32_t worldID;
 };
+#endif
+
+#if 0
+struct EngineInstanceData {
+    float2 position;
+    float2 scale;
+    float viewDirPolar;
+
+    // Because of the Entity struct
+    uint pad0[2];
+
+    int objectID;
+    int worldID;
+    float zOffset;
+
+    uint pad1[2];
+};
+#endif
 
 struct PackedViewData {
     float4 data[3];
