@@ -111,16 +111,21 @@ inline void instanceTransformUpdate(Context &ctx,
 
     // For script bots, we don't read the BVH from the MeshBVH.
     // It's just a Box surrounding the circle of the bot.
-    math::AABB model_space_aabb = {
-        .pMin = { -1.f, -1.f, -1.f },
-        .pMax = { +1.f, +1.f, +1.f }
-    };
-
-    Position pos_tmp = pos;
-    pos_tmp.z = 0.f;
+    math::AABB model_space_aabb;
+    if (obj_id.idx == 0) {
+        model_space_aabb = {
+            .pMin = { -1.f, -1.f, -1.f },
+            .pMax = { +1.f, +1.f, +1.f }
+        };
+    } else {
+        model_space_aabb = {
+            .pMin = { -1.f, -1.f, 0.f },
+            .pMax = { +1.f, +1.f, 0.f }
+        };
+    }
 
     math::AABB aabb = model_space_aabb.applyTRS(
-            pos_tmp, rot, scale);
+            pos, rot, scale);
 
     ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
 
@@ -171,6 +176,7 @@ inline void viewTransformUpdate(Context &ctx,
     cam_data.numForwardRays = 3 * render_output_res / 4;
     cam_data.numBackwardRays = render_output_res / 4;
     cam_data.worldIDX = ctx.worldID().idx;
+    cam_data.zOffset = camera_pos.z;
 }
 
 #ifdef MADRONA_GPU_MODE

@@ -201,7 +201,7 @@ float4 vert(in uint vid : SV_VertexID,
     DrawData draw_data = drawDataBuffer[draw_id];
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
-    float4 color = materialBuffer[vert.materialIdx].color;
+    float4 color = materialBuffer[draw_data.materialID].color;
     uint instance_id = draw_data.instanceID;
 
     PerspectiveCameraData view_data = getCameraData();
@@ -237,9 +237,9 @@ float4 vert(in uint vid : SV_VertexID,
     v2f.position = rotateVec(instance_data.rotation,
                              instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
-    v2f.texIdx = materialBuffer[vert.materialIdx].textureIdx;
-    v2f.roughness = materialBuffer[vert.materialIdx].roughness;
-    v2f.metalness = materialBuffer[vert.materialIdx].metalness;
+    v2f.texIdx = materialBuffer[draw_data.materialID].textureIdx;
+    v2f.roughness = materialBuffer[draw_data.materialID].roughness;
+    v2f.metalness = materialBuffer[draw_data.materialID].metalness;
 
     return clip_pos;
 }

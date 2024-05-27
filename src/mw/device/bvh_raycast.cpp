@@ -162,20 +162,23 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     render::InstanceData *instance_data =
                         &instances[instance_idx];
 
-                    // Get sphere intersection with this instance
-                    SphereIntersection sphere_intersect_info =
-                        raySphereIntersect({instance_data->position.x, 
-                                                instance_data->position.y, 0.f},
-                                           instance_data->scale.x,
-                                           ray_o, ray_d);
+                    if (instance_data->objectIDX == 0) {
+                        // Get sphere intersection with this instance
+                        SphereIntersection sphere_intersect_info =
+                            raySphereIntersect({instance_data->position.x, 
+                                    instance_data->position.y,
+                                    instance_data->zOffset},
+                                    instance_data->scale.x,
+                                    ray_o, ray_d);
 
-                    if (sphere_intersect_info.intersects && 
-                            sphere_intersect_info.tHitClosest > t_min) {
-                        ray_hit = true;
+                        if (sphere_intersect_info.intersects && 
+                                sphere_intersect_info.tHitClosest > t_min) {
+                            ray_hit = true;
 
-                        t_max = sphere_intersect_info.tHitClosest;
-                        *out_hit_t = t_max;
-                        *out_entity = instance_data->owner;
+                            t_max = sphere_intersect_info.tHitClosest;
+                            *out_hit_t = t_max;
+                            *out_entity = instance_data->owner;
+                        }
                     }
                 } else {
                     stack.push(node->childrenIdx[i]);
@@ -238,7 +241,11 @@ extern "C" __global__ void bvhRaycastEntry()
         }
 
 
-        math::Vector3 ray_start = { view_data->position.x, view_data->position.y, 0.f };
+        math::Vector3 ray_start = { 
+            view_data->position.x,
+            view_data->position.y,
+            view_data->zOffset 
+        };
 
         // math::Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
         math::Vector3 look_at = { cosf(ray_theta), sinf(ray_theta), 0.0f };

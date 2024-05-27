@@ -46,6 +46,7 @@ uint getInstanceOffsetsForWorld(uint world_idx)
     return instanceOffsets[world_idx];
 }
 
+#if 0
 EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
 {
     const float4 d0 = packed.data[0];
@@ -58,6 +59,35 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     o.scale = float3(d1.w, d2.xy);
     o.objectID = asint(d2.z);
     o.worldID = asint(d2.w);
+
+    return o;
+}
+#endif
+
+float4 quatAngleAxis(float angle, float3 normal)
+{
+    float coshalf = cos(angle / 2.f);
+    float sinhalf = sin(angle / 2.f);
+
+    return float4 (
+        normal.x * sinhalf,
+        normal.y * sinhalf,
+        normal.z * sinhalf,
+        coshalf
+    );
+}
+
+EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
+{
+    const float4 d0 = packed.data[0];
+    const float4 d1 = packed.data[1];
+    const float4 d2 = packed.data[2];
+
+    EngineInstanceData o;
+    o.position = float3(d0.x, d0.y, d2.y);
+    o.scale = float3(d0.z, d0.w, 1.0);
+    o.rotation = quatAngleAxis(d1.x, float3(0.f, 0.f, 1.f));
+    o.objectID = asint(d1.w);
 
     return o;
 }
@@ -99,6 +129,8 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
 
         EngineInstanceData instance_data = unpackEngineInstanceData(
             engineInstanceBuffer[current_instance_idx]);
+
+        printf("ObjectID=%d\n", instance_data.objectID);
 
         ObjectData obj = objectDataBuffer[instance_data.objectID];
 

@@ -44,6 +44,8 @@ struct alignas(16) PerspectiveCameraData {
     uint8_t numBackwardRays;
 
     int32_t worldIDX;
+
+    float zOffset;
 };
 
 // For private usage - not to be used by user.
