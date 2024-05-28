@@ -45,6 +45,10 @@ struct alignas(16) PerspectiveCameraData {
 
     int32_t worldIDX;
 
+    // This is the row index that has to match the row index of the
+    // entity rendering this thing.
+    uint32_t rowIDX;
+
     float zOffset;
 };
 

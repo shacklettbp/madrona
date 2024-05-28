@@ -92,7 +92,6 @@ SphereIntersection raySphereIntersect(const math::Vector3 &sphere_center,
 }
 
 static __device__ bool traceRayTLAS(uint32_t world_idx,
-                                    uint32_t view_idx,
                                     const math::Vector3 &ray_o,
                                     math::Vector3 ray_d,
                                     float *out_hit_t,
@@ -255,13 +254,13 @@ extern "C" __global__ void bvhRaycastEntry()
         math::Vector3 color;
         Entity seen_entity;
         bool hit = traceRayTLAS(
-                world_idx, current_view_offset, 
+                world_idx, 
                 ray_start, look_at, 
                 &t, &color, &seen_entity, 10000.f);
 
         uint32_t linear_pixel_idx = thread_offset_in_view;
 
-        uint32_t global_pixel_idx = current_view_offset * bytes_per_view +
+        uint32_t global_pixel_idx = view_data->rowIDX * bytes_per_view +
             linear_pixel_idx;
 
         uint8_t *write_out = (uint8_t *)bvhParams.renderOutput + global_pixel_idx;
@@ -273,7 +272,7 @@ extern "C" __global__ void bvhRaycastEntry()
             if (thread_offset_in_view == view_data->numForwardRays / 2) {
                 render::FinderOutput *entity_write_out = 
                     (render::FinderOutput *)bvhParams.finderOutput +
-                        current_view_offset;
+                        view_data->rowIDX;
 
                 *entity_write_out = {
                     seen_entity, t
@@ -285,13 +284,18 @@ extern "C" __global__ void bvhRaycastEntry()
             if (thread_offset_in_view == view_data->numForwardRays / 2) {
                 render::FinderOutput *entity_write_out = 
                     (render::FinderOutput *)bvhParams.finderOutput +
-                        current_view_offset;
+                        view_data->rowIDX;
 
                 *entity_write_out = {
                     Entity::none(),
                     255.f
                 };
             }
+        }
+
+        // As sanity check make sure the output gets written to the gith image.
+        if (linear_pixel_idx == 0) {
+            write_out[0] = (uint8_t)view_data->rowIDX;
         }
 
         current_view_offset += num_resident_views;

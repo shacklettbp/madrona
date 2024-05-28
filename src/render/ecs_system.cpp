@@ -113,6 +113,9 @@ inline void instanceTransformUpdate(Context &ctx,
     // It's just a Box surrounding the circle of the bot.
     math::AABB model_space_aabb;
     if (obj_id.idx == 0) {
+        // Object 0 is the agent
+        data.viewDirPolar += -math::pi * 0.5f;
+
         model_space_aabb = {
             .pMin = { -1.f, -1.f, -1.f },
             .pMax = { +1.f, +1.f, +1.f }
@@ -154,7 +157,9 @@ inline void viewTransformUpdate(Context &ctx,
                                 const Rotation &rot,
                                 const RenderCamera &cam)
 {
-    (void)e;
+    Loc loc = ctx.loc(e);
+
+
 
     uint32_t render_output_res = 
         mwGPU::GPUImplConsts::get().raycastOutputResolution;
@@ -176,6 +181,7 @@ inline void viewTransformUpdate(Context &ctx,
     cam_data.numForwardRays = 3 * render_output_res / 4;
     cam_data.numBackwardRays = render_output_res / 4;
     cam_data.worldIDX = ctx.worldID().idx;
+    cam_data.rowIDX = loc.row;
     cam_data.zOffset = camera_pos.z;
 }
 
