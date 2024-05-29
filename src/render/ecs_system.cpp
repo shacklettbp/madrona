@@ -183,7 +183,7 @@ inline void viewTransformUpdate(Context &ctx,
     cam_data.numForwardRays = 3 * render_output_res / 4;
     cam_data.numBackwardRays = render_output_res / 4;
     cam_data.worldIDX = ctx.worldID().idx;
-    cam_data.rowIDX = loc.row;
+    // cam_data.rowIDX = loc.row;
     cam_data.zOffset = camera_pos.z;
 }
 

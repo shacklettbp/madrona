@@ -8,18 +8,17 @@ OutputT *getRenderOutput(Context &ctx,
                          uint32_t output_size)
 {
 #if MADRONA_GPU_MODE
-    // What we need from this is the Loc because the index of the
-    // PerspectiveCameraData struct is what determines the index of this
-    // entity's view output.
+    // What determines where the output is, is the rowIDX set in the 
+    // PerspectiveCameraData struct.
     Entity camera_entity = camera.cameraEntity;
-    Loc cam_entity_loc = ctx.loc(camera_entity);
+    uint32_t offset = ctx.get<PerspectiveCameraData>(camera_entity).rowIDX;
 
     StateManager *mgr = mwGPU::getStateManager();
 
     uint8_t *output_ptr = (uint8_t *)mgr->getArchetypeComponent<
         RaycastOutputArchetype, OutputT>();
 
-    output_ptr += output_size * cam_entity_loc.row;
+    output_ptr += output_size * offset;
 
     return (OutputT *)output_ptr;
 #else
