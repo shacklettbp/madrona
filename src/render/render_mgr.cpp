@@ -4,6 +4,11 @@
 
 namespace madrona::render {
 
+uint32_t *RenderManager::exportedWorldID()
+{
+    return rctx_->engine_interop_.exportedWorldID;
+}
+
 const render::RenderECSBridge * RenderManager::bridge() const
 {
     return rctx_->engine_interop_.gpuBridge ?

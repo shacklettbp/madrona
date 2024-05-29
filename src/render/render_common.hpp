@@ -150,6 +150,8 @@ struct EngineInterop {
     // We need the sorted instance world IDs in order to compute the instance offsets
     uint64_t *sortedInstanceWorldIDs;
     uint64_t *sortedViewWorldIDs;
+
+    uint32_t *exportedWorldID;
 };
 
 struct ShadowOffsets {

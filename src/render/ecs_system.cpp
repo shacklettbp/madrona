@@ -50,6 +50,8 @@ struct RenderingSystemState {
         InstanceData *instances;
 
         bool isTracking;
+
+        uint32_t *exportedWorldID;
     } scriptBots;
 };
 
@@ -136,7 +138,7 @@ inline void instanceTransformUpdate(Context &ctx,
 
     if (state.scriptBots.isTracking) {
         // Only do this for world 0 for now.
-        if (ctx.worldID().idx == 0) {
+        if (ctx.worldID().idx == *state.scriptBots.exportedWorldID) {
             uint32_t offset =
                 state.scriptBots.totalNumInstances.fetch_add_relaxed(1);
 
@@ -189,7 +191,8 @@ inline void viewTransformUpdate(Context &ctx,
 inline void exportCountsGPU(Context &ctx,
                             RenderingSystemState &sys_state)
 {
-    if (sys_state.scriptBots.isTracking && ctx.worldID().idx == 0) {
+    if (sys_state.scriptBots.isTracking && 
+            ctx.worldID().idx == *sys_state.scriptBots.exportedWorldID) {
         uint32_t num_instances =
             sys_state.scriptBots.totalNumInstances.load_relaxed();
 
@@ -363,6 +366,8 @@ void init(Context &ctx,
 
         system_state.scriptBots.totalNumInstances.store_relaxed(0);
         system_state.scriptBots.instances = bridge->instances;
+
+        system_state.scriptBots.exportedWorldID = bridge->exportedWorldID;
 
         system_state.scriptBots.isTracking = true;
     } else {

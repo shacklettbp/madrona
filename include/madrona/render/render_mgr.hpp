@@ -47,6 +47,7 @@ public:
 
     void configureLighting(Span<const LightConfig> lights);
 
+    uint32_t *exportedWorldID();
     const RenderECSBridge * bridge() const;
     inline RenderContext & renderContext() const;
 

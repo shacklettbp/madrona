@@ -42,6 +42,8 @@ struct Viewer::Impl {
     float cameraMoveSpeed;
     bool shouldExit;
 
+    uint32_t *exportedWorldID;
+
     inline Impl(const render::RenderManager &render_mgr,
                 const Window *window,
                 const Viewer::Config &cfg);
@@ -545,13 +547,15 @@ Viewer::Impl::Impl(
           render_mgr.renderContext().engine_interop_.maxViewsPerWorld),
       simTickRate(cfg.simTickRate),
       cameraMoveSpeed(cfg.cameraMoveSpeed),
-      shouldExit(false)
+      shouldExit(false),
+      exportedWorldID(const_cast<render::RenderManager &>(render_mgr).exportedWorldID())
 {}
 
 void Viewer::Impl::render(float frame_duration)
 {
     // FIXME: pass actual active agents, not max
     cfgUI(vizCtrl, maxNumAgents, numWorlds, &simTickRate);
+    *exportedWorldID = vizCtrl.worldIdx;
 
     fpsCounterUI(frame_duration);
 

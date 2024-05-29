@@ -5,6 +5,9 @@
 namespace madrona::render {
 
 struct RenderECSBridge {
+    // Readback
+    uint32_t *exportedWorldID;
+
     // Allocated from Vulkan, to be imported into Cuda
     PerspectiveCameraData *views;
     InstanceData *instances;

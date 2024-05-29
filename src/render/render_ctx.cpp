@@ -787,7 +787,11 @@ static EngineInterop setupEngineInterop(Device &dev,
 #endif
     }
 
+    uint32_t *exported_world_id = (uint32_t *)
+        cu::allocReadback(sizeof(uint32_t));
+
     RenderECSBridge bridge = {
+        .exportedWorldID = exported_world_id,
         .views = (PerspectiveCameraData *)views_base,
         .instances = (InstanceData *)instances_base,
         .aabbs = (TLBVHNode *)aabb_base,
@@ -871,7 +875,8 @@ static EngineInterop setupEngineInterop(Device &dev,
         iota_array_instances,
         iota_array_views,
         sorted_instance_world_ids,
-        sorted_view_world_ids
+        sorted_view_world_ids,
+        exported_world_id
     };
 }
 
