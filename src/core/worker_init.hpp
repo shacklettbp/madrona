@@ -9,6 +9,8 @@
 
 #include <madrona/fwd.hpp>
 
+#include <cstdint>
+
 namespace madrona {
 
 struct WorkerInit {
