@@ -7,6 +7,7 @@
  */
 #include <madrona/table.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <type_traits>
 

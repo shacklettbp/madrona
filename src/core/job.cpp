@@ -254,7 +254,7 @@ inline void releaseArena(JobManager::Alloc::SharedState &shared,
 
     do {
         new_head = (cur_head & 0xFFFF0000) + ((uint32_t)1u << (uint32_t)16) + arena_idx;
-        shared.arenas[arena_idx].metadata.store(cur_head, sync::relaxed);
+        shared.arenas[arena_idx].metadata.store<sync::relaxed>(cur_head);
     } while (!shared.freeHead.compare_exchange_weak<
         sync::release, sync::relaxed>(cur_head, new_head));
 }
@@ -859,11 +859,11 @@ JobManager::JobManager(const Init &init)
 
         start.func(ctx, start.data);
 
-        uint32_t job_id = ptr->id.id;
+        // uint32_t job_id = ptr->id.id;
         start.remainingLaunches.fetch_sub_release(1);
 
-        ctx->job_mgr_->markInvocationsFinished(ctx->worker_idx_, nullptr,
-                                               job_id, 1);
+        // ctx->job_mgr_->markInvocationsFinished(ctx->worker_idx_, nullptr,
+        //                                        job_id, 1);
     };
 
     // Initial job
@@ -914,20 +914,20 @@ JobManager::JobManager(const Init &init)
                 world_idx * (uint64_t)init.numCtxUserdataBytes;
 
             init.ctxInitFn(cur_ctx, cur_userdata, WorkerInit {
-                .jobMgr = this,
+                // .jobMgr = this,
                 .stateMgr = init.stateMgr,
                 .stateCache = thread_state_cache,
-                .workerIdx = thread_idx,
+                // .workerIdx = thread_idx,
                 .worldID = (uint32_t)world_idx,
             });
         }
 #else
         void *ctx_store = (char *)init.ctxBase + thread_idx * init.numCtxBytes;
         init.ctxInitFn(ctx_store, init.ctxUserdataBase, WorkerInit {
-            .jobMgr = this,
+            // .jobMgr = this,
             .stateMgr = init.stateMgr,
             .stateCache = thread_state_cache,
-            .workerIdx = thread_idx,
+            // .workerIdx = thread_idx,
         });
 #endif
         threads_.emplace(thread_idx, [this](
@@ -1266,7 +1266,7 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
             }
         }
 
-        worker_state.logHead.store(log_head, sync::relaxed);
+        worker_state.logHead.store<sync::relaxed>(log_head);
     }
 
     // Move all now runnable jobs to the scheduler's global run queue
@@ -1320,14 +1320,13 @@ JobManager::WorkerControl JobManager::schedule(int thread_idx, Job *run_job)
                     for (int64_t i = 0; i < num_compute_workers_; i++) {
                         WorkerState &worker_state =
                             getWorkerState(worker_base_, i);
-                        worker_state.wakeUp.store(~0_u32,
-                                                  sync::relaxed);
+                        worker_state.wakeUp.store<sync::relaxed>(~0_u32);
                         worker_state.wakeUp.notify_one();
                     }
                     return WorkerControl::Exit;
                 } else {
                     getWorkerState(worker_base_, thread_idx)
-                        .wakeUp.store(0, sync::relaxed);
+                        .wakeUp.store<sync::relaxed>(0);
                     return WorkerControl::Sleep;
                 }
             } else {
@@ -1540,7 +1539,7 @@ void JobManager::runJob(const int thread_idx,
                         uint32_t invocation_offset,
                         uint32_t num_invocations)
 {
-    ctx->cur_job_id_ = job_data->id;
+    // ctx->cur_job_id_ = job_data->id;
 
     if (num_invocations == 0) {
         auto fn = (SingleInvokeFn)generic_fn;

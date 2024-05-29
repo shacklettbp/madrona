@@ -10,6 +10,7 @@
 #include <madrona/crash.hpp>
 #include <madrona/heap_array.hpp>
 
+#include <algorithm>
 #include <cassert>
 
 namespace madrona {
