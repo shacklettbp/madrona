@@ -104,3 +104,4 @@ if __name__ == "__main__":
 
     events, time_stamps = read_binary_file(sys.argv[1])
     plot_events(events, time_stamps, sys.argv[1])
+
