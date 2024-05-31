@@ -287,8 +287,8 @@ extern "C" __global__ void bvhRaycastEntry()
                 depth_write_out[0] = (uint8_t)t;
 
             // We need to write the semantic information too.
-            semantic_write_out[0] = (hit_info.objectIDX == 0) ?
-                hit_info.speciesIDX : 0;
+            semantic_write_out[0] = (hit_info.objectID == 0) ?
+                hit_info.speciesID : 0;
 
             // Make sure to write out the finder information
             if (thread_offset_in_view == view_data->numForwardRays / 2) {
