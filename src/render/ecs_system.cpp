@@ -114,7 +114,7 @@ inline void instanceTransformUpdate(Context &ctx,
     // For script bots, we don't read the BVH from the MeshBVH.
     // It's just a Box surrounding the circle of the bot.
     math::AABB model_space_aabb;
-    if (obj_id.idx == 0) {
+    if (obj_id.idx == 0 || obj_id.idx == 2) {
         // Object 0 is the agent
         data.viewDirPolar += -math::pi * 0.5f;
 
@@ -230,7 +230,8 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
     registry.registerComponent<MortonCode>();
-    registry.registerComponent<RenderOutputBuffer>(render_output_bytes);
+    registry.registerComponent<SemanticOutputBuffer>(render_output_bytes);
+    registry.registerComponent<DepthOutputBuffer>(render_output_bytes);
 
     // This is enough to store a number denoting the 
     registry.registerComponent<FinderOutputBuffer>(sizeof(FinderOutput));

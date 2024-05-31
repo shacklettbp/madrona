@@ -144,7 +144,10 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
     params->timingInfo = (KernelTimingInfo *)timings;
 
     params->renderOutput = (void *)mgr->getArchetypeComponent<
-        RaycastOutputArchetype, render::RenderOutputBuffer>();
+        RaycastOutputArchetype, render::SemanticOutputBuffer>();
+
+    params->depthOutput = (void *)mgr->getArchetypeComponent<
+        RaycastOutputArchetype, render::DepthOutputBuffer>();
 
     params->finderOutput = (void *)mgr->getArchetypeComponent<
         RaycastOutputArchetype, render::FinderOutputBuffer>();

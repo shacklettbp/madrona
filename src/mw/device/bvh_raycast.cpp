@@ -91,13 +91,19 @@ SphereIntersection raySphereIntersect(const math::Vector3 &sphere_center,
     }
 }
 
+struct HitInfo {
+    uint32_t objectID;
+    uint32_t speciesID;
+};
+
 static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     const math::Vector3 &ray_o,
                                     math::Vector3 ray_d,
                                     float *out_hit_t,
                                     math::Vector3 *out_color,
                                     Entity *out_entity,
-                                    float t_max)
+                                    float t_max,
+                                    HitInfo *out_hit_info)
 {
     static constexpr float epsilon = 0.00001f;
 
@@ -161,7 +167,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     render::InstanceData *instance_data =
                         &instances[instance_idx];
 
-                    if (instance_data->objectIDX == 0) {
+                    if (instance_data->objectIDX == 0 || instance_data->objectIDX == 2) {
                         // Get sphere intersection with this instance
                         SphereIntersection sphere_intersect_info =
                             raySphereIntersect({instance_data->position.x, 
@@ -177,6 +183,12 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                             t_max = sphere_intersect_info.tHitClosest;
                             *out_hit_t = t_max;
                             *out_entity = instance_data->owner;
+
+                            out_hit_info->objectID = instance_data->objectIDX;
+
+                            if (instance_data->objectIDX == 0) {
+                                out_hit_info->speciesID = instance_data->speciesIDX;
+                            }
                         }
                     }
                 } else {
@@ -253,20 +265,30 @@ extern "C" __global__ void bvhRaycastEntry()
         float t;
         math::Vector3 color;
         Entity seen_entity;
+        HitInfo hit_info;
         bool hit = traceRayTLAS(
                 world_idx, 
                 ray_start, look_at, 
-                &t, &color, &seen_entity, 10000.f);
+                &t, &color, &seen_entity, 10000.f,
+                &hit_info);
 
         uint32_t linear_pixel_idx = thread_offset_in_view;
 
         uint32_t global_pixel_idx = view_data->rowIDX * bytes_per_view +
             linear_pixel_idx;
 
-        uint8_t *write_out = (uint8_t *)bvhParams.renderOutput + global_pixel_idx;
+        uint8_t *depth_write_out = (uint8_t *)bvhParams.depthOutput + global_pixel_idx;
+        int8_t *semantic_write_out = (int8_t *)bvhParams.semanticOutput + global_pixel_idx;
 
         if (hit) {
-            write_out[0] = (uint8_t)t;
+            if (t > 255.f) 
+                depth_write_out[0] = 255;
+            else
+                depth_write_out[0] = (uint8_t)t;
+
+            // We need to write the semantic information too.
+            semantic_write_out[0] = (hit_info.objectIDX == 0) ?
+                hit_info.speciesIDX : 0;
 
             // Make sure to write out the finder information
             if (thread_offset_in_view == view_data->numForwardRays / 2) {
@@ -279,7 +301,8 @@ extern "C" __global__ void bvhRaycastEntry()
                 };
             }
         } else {
-            write_out[0] = 255;
+            depth_write_out[0] = 255;
+            semantic_write_out[0] = -1;
 
             if (thread_offset_in_view == view_data->numForwardRays / 2) {
                 render::FinderOutput *entity_write_out = 
@@ -293,10 +316,12 @@ extern "C" __global__ void bvhRaycastEntry()
             }
         }
 
+#if 0
         // As sanity check make sure the output gets written to the gith image.
         if (linear_pixel_idx == 0) {
             write_out[0] = (uint8_t)view_data->rowIDX;
         }
+#endif
 
         current_view_offset += num_resident_views;
 

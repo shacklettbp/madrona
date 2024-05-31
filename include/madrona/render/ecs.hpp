@@ -61,7 +61,9 @@ struct alignas(16) InstanceData {
     Entity owner;
 
     int32_t objectIDX;
-    int32_t worldIDX;
+
+    uint16_t worldIDX;
+    uint16_t speciesIDX;
 
     // We store this separately so that the 1D raytracer doesn't have
     // to be rewritten.
@@ -73,7 +75,11 @@ struct RenderOutputBufferImpl {
     char buffer[1];
 };
 
-struct RenderOutputBuffer : RenderOutputBufferImpl
+struct SemanticOutputBuffer : RenderOutputBufferImpl
+{
+};
+
+struct DepthOutputBuffer : RenderOutputBufferImpl
 {
 };
 
@@ -117,7 +123,8 @@ struct RenderCameraArchetype : public Archetype<
 
 // This is an unsorted archetype with a runtime-sized component
 struct RaycastOutputArchetype : public Archetype<
-    RenderOutputBuffer,
+    SemanticOutputBuffer,
+    DepthOutputBuffer,
     FinderOutputBuffer
 > {};
 

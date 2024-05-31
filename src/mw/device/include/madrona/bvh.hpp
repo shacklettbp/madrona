@@ -238,7 +238,8 @@ struct BVHParams {
 
     ::madrona::render::MeshBVH *bvhs;
 
-    void *renderOutput;
+    void *semanticOutput;
+    void *depthOutput;
     void *finderOutput;
     uint32_t renderOutputResolution;
 
