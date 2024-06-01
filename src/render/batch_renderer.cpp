@@ -1452,6 +1452,7 @@ BatchRenderer::~BatchRenderer()
 
     impl->dev.dt.destroyQueryPool(impl->dev.hdl, impl->timeQueryPool, nullptr);
 
+#if 0
     auto *render_mode = getenv("MADRONA_RENDER_MODE");
 
     if (render_mode[0] == '1') {
@@ -1480,6 +1481,7 @@ BatchRenderer::~BatchRenderer()
         stream << output_buffer;
         stream.close();
     }
+#endif
 }
 
 
