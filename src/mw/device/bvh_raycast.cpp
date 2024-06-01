@@ -296,9 +296,17 @@ extern "C" __global__ void bvhRaycastEntry()
                     (render::FinderOutput *)bvhParams.finderOutput +
                         view_data->rowIDX;
 
-                *entity_write_out = {
-                    seen_entity, t
-                };
+                // There is a range of 3 for this
+                if (t < 3) {
+                    *entity_write_out = {
+                        seen_entity, t
+                    };
+                } else {
+                    *entity_write_out = {
+                        Entity::none(),
+                        255.f
+                    };
+                }
             }
         } else {
             depth_write_out[0] = 255;
