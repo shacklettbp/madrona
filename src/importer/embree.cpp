@@ -1,3 +1,4 @@
+#if 0
 #include <vector>
 #include <fstream>
 #include <iostream>
@@ -750,3 +751,4 @@ EmbreeLoader::~EmbreeLoader()
 }
 
 }
+#endif

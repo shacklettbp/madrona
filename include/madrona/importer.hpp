@@ -87,13 +87,13 @@ struct SourceInstance {
 struct EmbreeLoader {
     struct Impl;
 
-    EmbreeLoader(Span<char> err_buf);
+    EmbreeLoader(Span<char> err_buf) {}
     EmbreeLoader(EmbreeLoader &&) = default;
-    ~EmbreeLoader();
+    ~EmbreeLoader() {}
 
-    std::unique_ptr<Impl> impl_;
+    // std::unique_ptr<Impl> impl_;
 
-    Optional<render::MeshBVH> load(const SourceObject &obj, const DynArray<SourceMaterial> &materials);
+    Optional<render::MeshBVH> load(const SourceObject &obj, const DynArray<SourceMaterial> &materials) {}
 };
 
 struct ImportedAssets {
