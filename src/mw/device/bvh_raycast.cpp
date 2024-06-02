@@ -297,7 +297,7 @@ extern "C" __global__ void bvhRaycastEntry()
                         view_data->rowIDX;
 
                 // There is a range of 3 for this
-                if (t < 3) {
+                if (t < 3 && hit_info.objectID == 0) {
                     *entity_write_out = {
                         seen_entity, t
                     };
