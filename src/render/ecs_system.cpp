@@ -233,6 +233,11 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<SemanticOutputBuffer>(render_output_bytes);
     registry.registerComponent<DepthOutputBuffer>(render_output_bytes);
 
+    registry.registerComponent<PrevSemanticOutputBuffer>(
+            render_output_bytes);
+    registry.registerComponent<PrevDepthOutputBuffer>(
+            render_output_bytes);
+
     // This is enough to store a number denoting the 
     registry.registerComponent<FinderOutputBuffer>(sizeof(FinderOutput));
 

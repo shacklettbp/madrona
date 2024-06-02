@@ -75,13 +75,11 @@ struct RenderOutputBufferImpl {
     char buffer[1];
 };
 
-struct SemanticOutputBuffer : RenderOutputBufferImpl
-{
-};
+struct SemanticOutputBuffer : RenderOutputBufferImpl {};
+struct DepthOutputBuffer : RenderOutputBufferImpl {};
 
-struct DepthOutputBuffer : RenderOutputBufferImpl
-{
-};
+struct PrevSemanticOutputBuffer : RenderOutputBufferImpl {};
+struct PrevDepthOutputBuffer : RenderOutputBufferImpl {};
 
 // The finder outputs depth and the entity
 struct FinderOutput {
@@ -125,6 +123,10 @@ struct RenderCameraArchetype : public Archetype<
 struct RaycastOutputArchetype : public Archetype<
     SemanticOutputBuffer,
     DepthOutputBuffer,
+
+    PrevSemanticOutputBuffer,
+    PrevDepthOutputBuffer,
+
     FinderOutputBuffer
 > {};
 
