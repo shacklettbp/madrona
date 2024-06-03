@@ -7,7 +7,10 @@
 #include <meshoptimizer.h>
 
 #include "obj.hpp"
+
+#ifdef MADRONA_GLTF_SUPPORT
 #include "gltf.hpp"
+#endif
 
 #ifdef MADRONA_USD_SUPPORT
 #include "usd.hpp"
@@ -37,7 +40,9 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
     };
 
     auto obj_loader = Optional<OBJLoader>::none();
+#ifdef MADRONA_GLTF_SUPPORT
     auto gltf_loader = Optional<GLTFLoader>::none();
+#endif
 #ifdef MADRONA_USD_SUPPORT
     auto usd_loader = Optional<USDLoader>::none();
 #endif
@@ -58,6 +63,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             }
 
             load_success = obj_loader->load(path, imported);
+#ifdef MADRONA_GLTF_SUPPORT
         } else if (extension == "gltf" || extension == "glb") {
             if (!gltf_loader.has_value()) {
                 gltf_loader.emplace(err_buf);
@@ -65,6 +71,11 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
             load_success = gltf_loader->load(path, imported,
                                              one_object_per_asset);
+#else
+            load_success = false;
+            snprintf(err_buf.data(), err_buf.size(),
+                     "Madrona not compiled with glTF support");
+#endif
         } else if (extension == "usd" ||
                    extension == "usda" ||
                    extension == "usdc" ||
