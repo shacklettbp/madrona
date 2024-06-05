@@ -26,6 +26,7 @@ struct Scale : math::Diag3x3 {
 
 struct ObjectID {
     int32_t idx;
+    int32_t extra;
 };
 
 struct ObjectInstance : Bundle<

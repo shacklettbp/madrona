@@ -105,6 +105,7 @@ inline void instanceTransformUpdate(Context &ctx,
     data.worldIDX = ctx.worldID().idx;
     data.owner = e;
     data.zOffset = pos.z;
+    data.speciesIDX = obj_id.extra;
 
     Vector3 rotated_x = rot.rotateVec(Vector3{ 1.f, 0.f, 0.f });
 

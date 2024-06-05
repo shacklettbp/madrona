@@ -129,6 +129,7 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     o.scale = float3(d0.z, d0.w, 1.0);
     o.rotation = quatAngleAxis(d1.x, float3(0.f, 0.f, 1.f));
     o.objectID = asint(d1.w);
+    o.speciesID = asint(d2.x) >> 16;
 
     return o;
 }
@@ -198,6 +199,19 @@ float4 vert(in uint vid : SV_VertexID,
             in uint draw_id : SV_InstanceID,
             out V2F v2f) : SV_Position
 {
+    float4 randomColorTable[] = {
+        float4(0, 0, 0, 255) / 255.f,
+        float4(170, 0, 0, 255) / 255.f,
+
+        float4(0, 170, 170, 255) / 255.f,
+
+        float4(0, 0, 170, 255) / 255.f,
+        float4(170, 0, 170, 255) / 255.f,
+
+        float4(170, 170, 0, 255) / 255.f,
+        float4(0, 170, 0, 255) / 255.f
+    };
+
     DrawData draw_data = drawDataBuffer[draw_id];
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
@@ -233,7 +247,13 @@ float4 vert(in uint vid : SV_VertexID,
     v2f.normal = normalize(
         rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
     v2f.uv = vert.uv;
+
     v2f.color = color;
+
+    if (instance_data.objectID == 0 && draw_data.materialID == 3) {
+        v2f.color = randomColorTable[(instance_data.speciesID + 1) % 7];
+    }
+
     v2f.position = rotateVec(instance_data.rotation,
                              instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];

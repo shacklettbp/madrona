@@ -169,6 +169,7 @@ struct EngineInstanceData {
     float3 scale;
     int32_t objectID;
     int32_t worldID;
+    int32_t speciesID;
 };
 #endif
 

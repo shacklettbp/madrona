@@ -88,6 +88,7 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     o.scale = float3(d0.z, d0.w, 1.0);
     o.rotation = quatAngleAxis(d1.x, float3(0.f, 0.f, 1.f));
     o.objectID = asint(d1.w);
+    o.speciesID = asint(d2.x);
 
     return o;
 }
@@ -129,8 +130,6 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
 
         EngineInstanceData instance_data = unpackEngineInstanceData(
             engineInstanceBuffer[current_instance_idx]);
-
-        printf("ObjectID=%d\n", instance_data.objectID);
 
         ObjectData obj = objectDataBuffer[instance_data.objectID];
 
