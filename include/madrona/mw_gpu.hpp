@@ -79,6 +79,13 @@ struct CompileConfig {
     OptMode optMode = OptMode::LTO;
 };
 
+struct RenderConfig {
+    imp::ImportedAssets *importedAssets;
+    uint32_t renderResolution;
+    float nearPlane;
+    float farPlane;
+};
+
 class MWCudaExecutor;
 
 class MWCudaLaunchGraph {
@@ -104,6 +111,7 @@ public:
 
     MWCudaExecutor(const StateConfig &state_cfg,
                    const CompileConfig &compile_cfg,
+                   const RenderConfig &render_cfg,
                    CUcontext cu_ctx);
 
     MWCudaExecutor(MWCudaExecutor &&o);
@@ -113,18 +121,14 @@ public:
     // taskgraph_ids one after the other. Typically this correspond to
     // one step across all worlds, or a subset of the logic for a step.
     template <EnumType EnumT>
-    inline MWCudaLaunchGraph buildLaunchGraph(EnumT taskgraph_id,
-                                              bool enable_raytracing,
-                                              const char *stat_name = nullptr);
-    inline MWCudaLaunchGraph buildLaunchGraph(uint32_t taskgraph_id,
-                                              bool enable_raytracing,
-                                              const char *stat_name = nullptr);
-    MWCudaLaunchGraph buildLaunchGraph(Span<const uint32_t> taskgraph_ids,
-                                       bool enable_raytracing,
-                                       const char *stat_name = nullptr);
+    inline MWCudaLaunchGraph buildLaunchGraph(EnumT taskgraph_id);
+    inline MWCudaLaunchGraph buildLaunchGraph(uint32_t taskgraph_id);
+    MWCudaLaunchGraph buildLaunchGraph(Span<const uint32_t> taskgraph_ids);
     // Helper to build a a launch graph that launches all task graphs
-    MWCudaLaunchGraph buildLaunchGraphAllTaskGraphs(bool enable_raytracing,
-                                                    const char *stat_name = nullptr);
+    MWCudaLaunchGraph buildLaunchGraphAllTaskGraphs();
+
+    // Builds the launch graph which launches the ray tracing
+    MWCudaLaunchGraph buildRenderGraph();
 
     // Runs the pre-built CUDA graph stored in launch_graph synchronously
     void run(MWCudaLaunchGraph &launch_graph);

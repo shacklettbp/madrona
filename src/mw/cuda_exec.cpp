@@ -2302,14 +2302,7 @@ static CUgraphExec makeTaskGraphRunGraph(
     Span<const uint32_t> taskgraph_ids,
     const MegakernelConfig *megakernel_cfgs,
     const CUfunction *megakernels,
-    int64_t num_megakernels,
-    BVHKernels &bvh_kernels,
-    bool enable_raycasting,
-    uint32_t render_output_resolution,
-    int shared_mem_per_sm,
-    const char *stat_name,
-    CUevent *start,
-    CUevent *end)
+    int64_t num_megakernels)
 {
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
@@ -2335,14 +2328,6 @@ static CUgraphExec makeTaskGraphRunGraph(
         DynArray<int32_t>({(int32_t)default_megakernel_idx});
 
     DynArray<CUgraphNode> megakernel_launches(0);
-
-    if (stat_name) {
-        CUgraphNode start_node;
-        REQ_CU(cuGraphAddEventRecordNode(&start_node,
-                    run_graph, nullptr, 0, *start));
-
-        megakernel_launches.push_back(start_node);
-    }
 
     auto addMegakernelNode = [&](int64_t megakernel_idx,
                                  CUgraphNode *dependencies,
@@ -2409,172 +2394,6 @@ static CUgraphExec makeTaskGraphRunGraph(
         addNodesForTaskGraph(taskgraph_id);
     }
 
-    if (stat_name) {
-        CUgraphNode end_node;
-        REQ_CU(cuGraphAddEventRecordNode(
-                    &end_node, run_graph,
-                    &megakernel_launches.back(), 1,
-                    *end));
-        megakernel_launches.push_back(end_node);
-    }
-
-    if (enable_raycasting) { // Add the bvh kernel nodes
-        // Add the start record event
-        CUgraphNode alloc_event_node;
-        REQ_CU(cuGraphAddEventRecordNode(
-                    &alloc_event_node, run_graph,
-                    &megakernel_launches.back(), 1,
-                    bvh_kernels.allocEvent));
-
-        CUDA_KERNEL_NODE_PARAMS bvh_launch_params = {
-            .func = bvh_kernels.allocInternalNodes,
-            // We want to max-out the GPU for all the BVH kernels
-            .gridDimX = 1,
-            .gridDimY = 1,
-            .gridDimZ = 1,
-            .blockDimX = 1,
-            .blockDimY = 1,
-            .blockDimZ = 1,
-            .sharedMemBytes = 0,
-            .kernelParams = nullptr,
-            .extra = nullptr
-        };
-
-        // Allocation node
-        CUgraphNode alloc_node;
-        REQ_CU(cuGraphAddKernelNode(&alloc_node, run_graph,
-                                    &alloc_event_node, 1,
-                                    &bvh_launch_params));
-
-        const char *fast_bvh_env = getenv("MADRONA_LBVH");
-        bool fast_bvh = (fast_bvh_env && fast_bvh_env[0] == '1');
-
-        const char *widen_bvh_env = getenv("MADRONA_WIDEN");
-        bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
-
-        CUgraphNode *last = nullptr;
-
-        CUgraphNode build_fast_node;
-        CUgraphNode construct_aabbs_node;
-        CUgraphNode build_slow_node;
-        CUgraphNode widen_trees_node;
-
-        CUgraphNode build_event_node, widen_event_node,
-                    start_trace_node, stop_event_node;
-
-        if (fast_bvh) {
-            printf(">>>>>>>>>>>>>> Using LBVH <<<<<<<<<<<<<<\n");
-
-            REQ_CU(cuGraphAddEventRecordNode(
-                        &build_event_node, run_graph,
-                        &alloc_node, 1,
-                        bvh_kernels.buildEvent));
-
-            // Fast LBVH build node
-            const uint32_t num_blocks_per_sm_fast_build = 16;
-            bvh_launch_params.func = bvh_kernels.buildFast;
-            bvh_launch_params.gridDimX = bvh_kernels.numSMs *
-                num_blocks_per_sm_fast_build;
-            bvh_launch_params.blockDimX = 256;
-            bvh_launch_params.sharedMemBytes = shared_mem_per_sm / 
-                num_blocks_per_sm_fast_build;
-
-            REQ_CU(cuGraphAddKernelNode(&build_fast_node, run_graph,
-                        &alloc_node, 1, 
-                        &bvh_launch_params));
-
-            bvh_launch_params.func = bvh_kernels.constructAABBs;
-
-            REQ_CU(cuGraphAddKernelNode(&construct_aabbs_node, run_graph,
-                        &build_fast_node, 1, 
-                        &bvh_launch_params));
-
-            last = &construct_aabbs_node;
-        } else {
-            printf(">>>>>>>>>>>>>> Using Binned SAH <<<<<<<<<<<<<<\n");
-
-            REQ_CU(cuGraphAddEventRecordNode(
-                        &build_event_node, run_graph,
-                        &alloc_node, 1,
-                        bvh_kernels.buildEvent));
-
-            const uint32_t num_blocks_per_sm_slow_build = 16;
-            bvh_launch_params.func = bvh_kernels.buildSlow;
-            bvh_launch_params.gridDimX = bvh_kernels.numSMs *
-                num_blocks_per_sm_slow_build;
-            bvh_launch_params.blockDimX = 256;
-            bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
-                num_blocks_per_sm_slow_build;
-
-            REQ_CU(cuGraphAddKernelNode(&build_slow_node, run_graph,
-                        &build_event_node, 1, &bvh_launch_params));
-
-            last = &build_slow_node;
-        }
-
-        if (true) {
-            REQ_CU(cuGraphAddEventRecordNode(
-                        &widen_event_node, run_graph,
-                        last, 1,
-                        bvh_kernels.widenEvent));
-
-            const uint32_t num_blocks_per_sm_slow_build = 16;
-            bvh_launch_params.func = bvh_kernels.widenTree;
-            bvh_launch_params.gridDimX = bvh_kernels.numSMs *
-                num_blocks_per_sm_slow_build;
-            bvh_launch_params.blockDimX = 256;
-            bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
-                num_blocks_per_sm_slow_build;
-
-            REQ_CU(cuGraphAddKernelNode(&widen_trees_node, run_graph,
-                        &widen_event_node, 1, &bvh_launch_params));
-
-            last = &widen_trees_node;
-        }
-
-#if 0
-        REQ_CU(cuGraphAddEventRecordNode(
-                    &trace_event_node, run_graph,
-                    last, 1,
-                    bvh_kernels.traceEvent));
-#endif
-
-        // We assign a 4x4 region of blocks per image/view
-        // Each block processes 16x16 pixels and we have one thread per pixel.
-        REQ_CU(cuGraphAddEventRecordNode(
-                    &start_trace_node, run_graph,
-                    last, 1,
-                    bvh_kernels.traceEvent));
-
-        const uint32_t num_resident_views_per_sm = 4;
-
-        const uint32_t pixels_per_block = 8;
-
-        uint32_t grid_dim = render_output_resolution / pixels_per_block;
-
-        CUDA_KERNEL_NODE_PARAMS bvh_launch_raycast = {
-            .func = bvh_kernels.raycast,
-            .gridDimX = bvh_kernels.numSMs * num_resident_views_per_sm,
-            .gridDimY = grid_dim,
-            .gridDimZ = grid_dim,
-            .blockDimX = pixels_per_block,
-            .blockDimY = pixels_per_block,
-            .blockDimZ = 1,
-            .sharedMemBytes = 1024
-        };
-
-        CUgraphNode raycast_node;
-        REQ_CU(cuGraphAddKernelNode(&raycast_node, run_graph,
-                                    &start_trace_node, 1,
-                                    &bvh_launch_raycast));
-
-        REQ_CU(cuGraphAddEventRecordNode(
-                    &stop_event_node, run_graph,
-                    &raycast_node, 1,
-                    bvh_kernels.stopEvent));
-    }
-
-
     CUgraphExec run_graph_exec;
     REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph, 0));
 
@@ -2615,6 +2434,7 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
 
 MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
                                const CompileConfig &compile_cfg,
+                               const RenderConfig &render_cfg,
                                CUcontext cu_ctx)
     : impl_(nullptr)
 {
@@ -2656,6 +2476,22 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
            CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
            cu_gpu));
 
+    Optional<imp::ImportedAssets::GPUGeometryData> gpu_imported_assets = 
+        [&render_cfg] () {
+            if (render_cfg.importedAssets) {
+                return imp::ImportedAssets::makeGPUData(
+                        *render_cfg.importedAssets);
+            } else {
+                return Optional<imp::ImportedAssets::GPUGeometryData>::none();
+            }
+        } ();
+
+    bool has_geometry = gpu_imported_assets.has_value();
+    bool has_textures = has_geometry ? 
+        (render_cfg.importedAssets->materials.data() != nullptr) : false;
+    bool has_materials = has_geometry ? 
+        (render_cfg.importedAssets->texture.data() != nullptr) : false;
+
     auto *render_mode = getenv("MADRONA_RENDER_MODE");
 
     bool enable_raycasting = (render_mode[0] == '2');
@@ -2673,14 +2509,14 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.numUserConfigBytes,  state_cfg.numTaskGraphs,
         state_cfg.numExportedBuffers,
         gpu_kernels, bvh_kernels, 
-        state_cfg.geometryData ? state_cfg.geometryData->meshBVHs : nullptr,
-        state_cfg.geometryData ? state_cfg.geometryData->numBVHs : 0,
-        state_cfg.materials.data() ? state_cfg.materials.data() : nullptr,
-        state_cfg.materials.data() ? state_cfg.materials.size() : 0,
-        state_cfg.textures.data() ? state_cfg.textures.data() : nullptr,
-        state_cfg.textures.data() ? state_cfg.textures.size() : 0,
-        state_cfg.raycastOutputResolution,
-        state_cfg.nearSphere,
+        has_geometry ? gpu_imported_assets->meshBVHs : nullptr,
+        has_geometry ? gpu_imported_assets->numBVHs : 0,
+        has_materials ? render_cfg.importedAssets->materials.data() : nullptr,
+        has_materials ? render_cfg.importedAssets->materials.size() : 0,
+        has_textures ? render_cfg.importedAssets->texture.data() : nullptr,
+        has_textures ? render_cfg.importedAssets->texture.size() : 0,
+        render_cfg.renderResolution,
+        render_cfg.nearPlane,
         exec_mode, cu_gpu, cu_ctx, strm);
 
     TaskGraphsState taskgraphs_state {
@@ -2697,8 +2533,8 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         enable_raycasting,
         bvh_kernels,
         state_cfg.numWorlds,
-        state_cfg.geometryData ? state_cfg.geometryData->numVerts : 0,
-        state_cfg.raycastOutputResolution,
+        has_geometry ? gpu_imported_assets->numVerts : 0,
+        render_cfg.renderResolution,
         (uint32_t)shared_mem_per_sm,
     });
 
@@ -2861,49 +2697,201 @@ MWCudaExecutor::~MWCudaExecutor()
     }
 }
 
-MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
-        Span<const uint32_t> taskgraph_ids,
-        bool enable_raytracing,
-        const char *stat_name)
+MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
 {
-    CUevent start, end;
+    auto &bvh_kernels = impl_->bvhKernels;
 
-    if (stat_name) {
-        cuEventCreate(&start, CU_EVENT_DEFAULT);
-        cuEventCreate(&end, CU_EVENT_DEFAULT);
+    CUgraph run_graph;
+    REQ_CU(cuGraphCreate(&run_graph, 0));
+
+    DynArray<CUgraphNode> nodes(0);
+
+    auto get_prev_node = [&nodes]() -> CUgraphNode * {
+        if (nodes.size() <= 1) {
+            return nullptr;
+        } else {
+            return &nodes[nodes.size() - 2];
+        }
+    };
+
+    auto get_new_node = [&nodes]() {
+        return &nodes[nodes.size() - 1];
+    };
+
+    auto push_new_node = [&nodes]() {
+        nodes.push_back(CUgraphNode{});
+    };
+
+    push_new_node();
+
+    REQ_CU(cuGraphAddEventRecordNode(
+                get_new_node(), run_graph,
+                get_prev_node(), 0,
+                bvh_kernels.allocEvent));
+
+    CUDA_KERNEL_NODE_PARAMS bvh_launch_params = {
+        .func = bvh_kernels.allocInternalNodes,
+        // We want to max-out the GPU for all the BVH kernels
+        .gridDimX = 1,
+        .gridDimY = 1,
+        .gridDimZ = 1,
+        .blockDimX = 1,
+        .blockDimY = 1,
+        .blockDimZ = 1,
+        .sharedMemBytes = 0,
+        .kernelParams = nullptr,
+        .extra = nullptr
+    };
+
+    // Allocation node
+    push_new_node();
+    REQ_CU(cuGraphAddKernelNode(get_new_node(), run_graph,
+                get_prev_node(), 1,
+                &bvh_launch_params));
+
+    const char *fast_bvh_env = getenv("MADRONA_LBVH");
+    bool fast_bvh = (fast_bvh_env && fast_bvh_env[0] == '1');
+
+    const char *widen_bvh_env = getenv("MADRONA_WIDEN");
+    bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
+
+    auto shared_mem_per_sm = impl_->sharedMemPerSM;
+
+    if (fast_bvh) {
+        printf(">>>>>>>>>>>>>> Using LBVH <<<<<<<<<<<<<<\n");
+
+        push_new_node();
+        REQ_CU(cuGraphAddEventRecordNode(
+                    get_new_node(), run_graph,
+                    get_prev_node(), 1,
+                    bvh_kernels.buildEvent));
+
+        // Fast LBVH build node
+        const uint32_t num_blocks_per_sm_fast_build = 16;
+        bvh_launch_params.func = bvh_kernels.buildFast;
+        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+            num_blocks_per_sm_fast_build;
+        bvh_launch_params.blockDimX = 256;
+        bvh_launch_params.sharedMemBytes = shared_mem_per_sm / 
+            num_blocks_per_sm_fast_build;
+
+        push_new_node();
+        REQ_CU(cuGraphAddKernelNode(get_new_node(), run_graph,
+                    get_prev_node(), 1, 
+                    &bvh_launch_params));
+
+        bvh_launch_params.func = bvh_kernels.constructAABBs;
+
+        push_new_node();
+        REQ_CU(cuGraphAddKernelNode(get_new_node(), run_graph,
+                    get_prev_node(), 1, 
+                    &bvh_launch_params));
+    } else {
+        printf(">>>>>>>>>>>>>> Using Binned SAH <<<<<<<<<<<<<<\n");
+
+        push_new_node();
+        REQ_CU(cuGraphAddEventRecordNode(
+                    get_new_node(), run_graph,
+                    get_prev_node(), 1,
+                    bvh_kernels.buildEvent));
+
+        const uint32_t num_blocks_per_sm_slow_build = 16;
+        bvh_launch_params.func = bvh_kernels.buildSlow;
+        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+            num_blocks_per_sm_slow_build;
+        bvh_launch_params.blockDimX = 256;
+        bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
+            num_blocks_per_sm_slow_build;
+
+        push_new_node();
+        REQ_CU(cuGraphAddKernelNode(get_new_node(), run_graph,
+                    get_prev_node(), 1, &bvh_launch_params));
     }
 
+    if (true) {
+        push_new_node();
+        REQ_CU(cuGraphAddEventRecordNode(
+                    get_new_node(), run_graph,
+                    get_prev_node(), 1,
+                    bvh_kernels.widenEvent));
+
+        const uint32_t num_blocks_per_sm_slow_build = 16;
+        bvh_launch_params.func = bvh_kernels.widenTree;
+        bvh_launch_params.gridDimX = bvh_kernels.numSMs *
+            num_blocks_per_sm_slow_build;
+        bvh_launch_params.blockDimX = 256;
+        bvh_launch_params.sharedMemBytes = shared_mem_per_sm /
+            num_blocks_per_sm_slow_build;
+
+        push_new_node();
+        REQ_CU(cuGraphAddKernelNode(get_new_node(), run_graph,
+                    get_prev_node(), 1, &bvh_launch_params));
+    }
+
+    // We assign a 4x4 region of blocks per image/view
+    // Each block processes 16x16 pixels and we have one thread per pixel.
+    push_new_node();
+    REQ_CU(cuGraphAddEventRecordNode(
+                get_new_node(), run_graph,
+                get_prev_node(), 1,
+                bvh_kernels.traceEvent));
+
+    const uint32_t num_resident_views_per_sm = 4;
+
+    const uint32_t pixels_per_block = 8;
+
+    uint32_t grid_dim = impl_->renderOutputResolution / pixels_per_block;
+
+    CUDA_KERNEL_NODE_PARAMS bvh_launch_raycast = {
+        .func = bvh_kernels.raycast,
+        .gridDimX = bvh_kernels.numSMs * num_resident_views_per_sm,
+        .gridDimY = grid_dim,
+        .gridDimZ = grid_dim,
+        .blockDimX = pixels_per_block,
+        .blockDimY = pixels_per_block,
+        .blockDimZ = 1,
+        .sharedMemBytes = 1024
+    };
+
+    CUgraphNode raycast_node;
+
+    push_new_node();
+    REQ_CU(cuGraphAddKernelNode(get_new_node(), run_graph,
+                get_prev_node(), 1,
+                &bvh_launch_raycast));
+
+    push_new_node();
+    REQ_CU(cuGraphAddEventRecordNode(
+                get_new_node(), run_graph,
+                get_prev_node(), 1,
+                bvh_kernels.stopEvent));
+
+    CUgraphExec run_graph_exec;
+    REQ_CU(cuGraphInstantiate(&run_graph_exec, run_graph, 0));
+
+    REQ_CU(cuGraphDestroy(run_graph));
+
+    return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
+        .runGraph = run_graph_exec,
+        .enableRaytracing = true,
+    });
+}
+
+MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
+        Span<const uint32_t> taskgraph_ids)
+{
     auto run_graph = makeTaskGraphRunGraph(
         taskgraph_ids,
         impl_->taskGraphsState.megakernelConfigs.data(),
         impl_->taskGraphsState.megakernels.data(),
-        impl_->taskGraphsState.megakernels.size(),
-        impl_->bvhKernels,
-        enable_raytracing,
-        impl_->renderOutputResolution,
-        impl_->sharedMemPerSM,
-        stat_name,
-        &start, &end);
-
-    uint32_t group_index = 0;
-    if (stat_name) {
-        group_index = (uint32_t)impl_->timingGroups.size();
-        impl_->timingGroups.push_back({ stat_name, {} });
-    }
+        impl_->taskGraphsState.megakernels.size());
 
     return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
         .runGraph = run_graph,
-        .enableRaytracing = enable_raytracing,
-        .start = start,
-        .end = end,
-        .statName = stat_name,
-        .timingGroupIndex = group_index
     });
 }
 
-MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs(
-        bool enable_raytracing,
-        const char *stat_name)
+MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs()
 {
     const CountT num_taskgraphs = impl_->taskGraphsState.numTaskgraphs;
     HeapArray<uint32_t> all_taskgraph_ids(num_taskgraphs);
@@ -2911,7 +2899,7 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraphAllTaskGraphs(
         all_taskgraph_ids[i] = i;
     }
 
-    return buildLaunchGraph(all_taskgraph_ids, enable_raytracing);
+    return buildLaunchGraph(all_taskgraph_ids);
 }
 
 void MWCudaExecutor::getTimings(MWCudaLaunchGraph &launch_graph)
