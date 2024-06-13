@@ -63,8 +63,8 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             }
 
             load_success = obj_loader->load(path, imported);
-#ifdef MADRONA_GLTF_SUPPORT
         } else if (extension == "gltf" || extension == "glb") {
+#ifdef MADRONA_GLTF_SUPPORT
             if (!gltf_loader.has_value()) {
                 gltf_loader.emplace(err_buf);
             }
