@@ -1407,7 +1407,7 @@ RenderContext::RenderContext(
 
     BatchRenderer::Config br_cfg = {
          cfg.enableBatchRenderer,
-         (BatchRenderer::Config::RenderMode)cfg.renderMode,
+         (RenderManager::Config::RenderMode)cfg.renderMode,
          br_width_,
          br_height_,
          cfg.numWorlds,

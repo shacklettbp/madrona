@@ -1295,7 +1295,7 @@ static const char *getDrawDeferredPath(bool render_rgb)
 BatchRenderer::Impl::Impl(const Config &cfg,
                           RenderContext &rctx)
     : dev(rctx.dev),
-      depthOnly(cfg.renderMode == Config::RenderMode::Depth),
+      depthOnly(cfg.renderMode == RenderManager::Config::RenderMode::Depth),
       mem(rctx.alloc),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
       numWorlds(cfg.numWorlds),

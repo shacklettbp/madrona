@@ -13,6 +13,8 @@
 #include "ecs_interop.hpp"
 #include "render_common.hpp"
 
+#include <madrona/render/render_mgr.hpp>
+
 namespace madrona::render {
 
 struct RenderContext;
@@ -58,14 +60,9 @@ struct BatchRenderer {
     bool didRender;
 
     struct Config {
-        enum RenderMode {
-            Color,
-            Depth
-        };
-
         bool enableBatchRenderer;
 
-        RenderMode renderMode;
+        RenderManager::Config::RenderMode renderMode;
         uint32_t renderWidth;
         uint32_t renderHeight;
         uint32_t numWorlds;
