@@ -1283,42 +1283,19 @@ struct BatchRenderer::Impl {
     Impl(const Config &cfg, RenderContext &rctx);
 };
 
-static const char *getDrawDeferredPath()
+static const char *getDrawDeferredPath(bool render_rgb)
 {
-    const char *render_rgb_env = getenv("MADRONA_RENDER_RGB");
-    bool render_rgb = (render_rgb_env && render_rgb_env[0] == '1');
-
-    assert(render_rgb_env);
-
     if (render_rgb) {
-        printf("USING RGB SHADER\n");
         return "draw_deferred_rgb.hlsl";
     } else {
-        printf("USING DEPTH SHADER\n");
         return "draw_deferred_depth.hlsl";
-    }
-}
-
-static bool isDepthOnly()
-{
-    const char *rgb_only_str = getenv("MADRONA_RENDER_RGB");
-    assert(rgb_only_str);
-
-    if (rgb_only_str[0] == '1') {
-        printf("RGB!!!\n");
-
-        return false;
-    } else {
-        printf("DEPTH!!!\n");
-
-        return true;
     }
 }
 
 BatchRenderer::Impl::Impl(const Config &cfg,
                           RenderContext &rctx)
     : dev(rctx.dev),
-      depthOnly(isDepthOnly()),
+      depthOnly(cfg.renderMode == Config::RenderMode::Depth),
       mem(rctx.alloc),
       maxNumViews(cfg.numWorlds * cfg.maxViewsPerWorld),
       numWorlds(cfg.numWorlds),
@@ -1342,7 +1319,7 @@ BatchRenderer::Impl::Impl(const Config &cfg,
           makeComputePipeline(dev, rctx.pipelineCache, 4, 
               sizeof(shader::DeferredLightingPushConstBR),
               consts::numDrawCmdBuffers * cfg.numFrames, rctx.repeatSampler, 
-              getDrawDeferredPath(), depthOnly, "lighting", makeShadersLighting) :
+              getDrawDeferredPath(!depthOnly), depthOnly, "lighting", makeShadersLighting) :
           Optional<PipelineMP<1>>::none()),
       batchFrames(cfg.numFrames),
       assetSetPrepare(rctx.asset_set_cull_),
@@ -1356,7 +1333,6 @@ BatchRenderer::Impl::Impl(const Config &cfg,
       rects(dev.maxViewports),
       viewports(dev.maxViewports)
 {
-
     for (uint32_t i = 0; i < cfg.numFrames; i++) {
         makeBatchFrame(dev, &batchFrames[i], mem, cfg,
                        prepareViews,
@@ -1447,35 +1423,6 @@ BatchRenderer::~BatchRenderer()
     }
 
     impl->dev.dt.destroyQueryPool(impl->dev.hdl, impl->timeQueryPool, nullptr);
-
-    auto *render_mode = getenv("MADRONA_RENDER_MODE");
-
-    if (render_mode[0] == '1') {
-        float avg_total_time = 0.f;
-        for (float timing : impl->recordedTimings) {
-            avg_total_time += timing / (float)impl->recordedTimings.size();
-        }
-        
-        printf("Rasterizer had average %f per frame\n", avg_total_time);
-
-        // Save this to a file
-        auto *output_file_name = getenv("MADRONA_TIMING_FILE");
-        assert(output_file_name);
-        char output_buffer[512] = {};
-
-        sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"avg_total_time\":%f\n}", 
-                (int)impl->numWorlds, avg_total_time);
-
-        printf("%s\n", output_buffer);
- 
-        std::ofstream stream;
-        stream.open(output_file_name);
-        if (!stream) {
-            std::cout << "Couldn't open file" << std::endl;
-        }
-        stream << output_buffer;
-        stream.close();
-    }
 }
 
 

@@ -84,7 +84,8 @@ struct RenderConfig {
     // between rendering color or depth.
     enum class RenderMode : uint32_t {
         Color,
-        Depth
+        Depth,
+        None
     };
 
     RenderMode renderMode;

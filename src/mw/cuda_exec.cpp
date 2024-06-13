@@ -2483,7 +2483,14 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         (render_cfg.importedAssets->materials.data() != nullptr) : false;
     bool has_materials = has_geometry ? 
         (render_cfg.importedAssets->texture.data() != nullptr) : false;
-    bool enable_raycasting = (render_cfg.renderResolution != 0);
+    // bool enable_raycasting = (render_cfg.renderResolution != 0);
+    bool enable_raytracing = 
+        (render_cfg.renderMode != RenderConfig::RenderMode::None);
+
+    uint32_t render_resolution = render_cfg.renderResolution;
+    if (!enable_raytracing) {
+        render_resolution = 0;
+    }
 
     BVHKernels bvh_kernels = buildBVHKernels(
                 compile_cfg, num_sms, cu_capability, render_cfg.renderMode);
@@ -2504,7 +2511,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         has_materials ? render_cfg.importedAssets->materials.size() : 0,
         has_textures ? render_cfg.importedAssets->texture.data() : nullptr,
         has_textures ? render_cfg.importedAssets->texture.size() : 0,
-        render_cfg.renderResolution,
+        render_resolution,
         render_cfg.nearPlane,
         exec_mode, cu_gpu, cu_ctx, strm);
 
@@ -2519,11 +2526,11 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         gpu_kernels.mod,
         std::move(eng_state),
         std::move(taskgraphs_state),
-        enable_raycasting,
+        enable_raytracing,
         bvh_kernels,
         state_cfg.numWorlds,
         has_geometry ? gpu_imported_assets->numVerts : 0,
-        render_cfg.renderResolution,
+        render_resolution,
         (uint32_t)shared_mem_per_sm,
     });
 
@@ -2554,6 +2561,10 @@ MWCudaExecutor::~MWCudaExecutor()
 
 MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
 {
+    if (!impl_->enableRaycasting) {
+        FATAL("Trying to build render graph when raytracing was disabled.");
+    }
+
     auto &bvh_kernels = impl_->bvhKernels;
 
     CUgraph run_graph;

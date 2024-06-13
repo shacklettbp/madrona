@@ -17,7 +17,14 @@ struct RenderContext;
 class RenderManager {
 public:
     struct Config {
+        enum RenderMode {
+            Color,
+            Depth
+        };
+
         bool enableBatchRenderer;
+
+        RenderMode renderMode;
 
         // Width and height of the batch renderer output
         uint32_t agentViewWidth;

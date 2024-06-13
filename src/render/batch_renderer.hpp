@@ -58,7 +58,14 @@ struct BatchRenderer {
     bool didRender;
 
     struct Config {
+        enum RenderMode {
+            Color,
+            Depth
+        };
+
         bool enableBatchRenderer;
+
+        RenderMode renderMode;
         uint32_t renderWidth;
         uint32_t renderHeight;
         uint32_t numWorlds;
