@@ -726,7 +726,6 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
     bvh_out.numNodes = nodes.size();
     bvh_out.numLeaves = leafNodes.size();
     bvh_out.numVerts = verticesPtr->size();
-    bvh_out.magic = MeshBVH::magicSignature;
 
     bvh_out.nodes = nodes.release(true);
     bvh_out.leafGeos = leaf_geos.release(true);

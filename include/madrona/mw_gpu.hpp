@@ -80,8 +80,23 @@ struct CompileConfig {
 };
 
 struct RenderConfig {
+    // Until we support custom rendering functions, for now we must toggle
+    // between rendering color or depth.
+    enum class RenderMode : uint32_t {
+        Color,
+        Depth
+    };
+
+    RenderMode renderMode;
+
+    // Imported assets from disk.
     imp::ImportedAssets *importedAssets;
+
+    // The raytracer output is square so the resolution of the outputs would be
+    // renderResolution x renderResolution.
     uint32_t renderResolution;
+
+    // Configure near and far planes of the rendering.
     float nearPlane;
     float farPlane;
 };

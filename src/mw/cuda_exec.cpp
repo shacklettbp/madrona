@@ -528,7 +528,6 @@ template <typename T> __global__ void submitRun(uint32_t) {}
     REQ_NVRTC(nvrtcDestroyProgram(&prog));
 }
 
-
 static void checkAndLoadMegakernelCache(
     Optional<MegakernelCache> &cache,
     Optional<std::string> &cache_write_path)
@@ -1013,7 +1012,8 @@ static __attribute__((always_inline)) inline void dispatch(
 // We still want to have the same compiler flags as passed to the megakernel
 static BVHKernels buildBVHKernels(const CompileConfig &cfg,
                                   int32_t num_sms,
-                                  std::pair<int, int> cuda_arch)
+                                  std::pair<int, int> cuda_arch,
+                                  RenderConfig::RenderMode render_mode)
 {
     using namespace std;
 
@@ -1110,20 +1110,12 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         common_compile_flags.push_back("--device-debug");
     }
 
-    const char *widen_bvh_env = getenv("MADRONA_WIDEN");
-    bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
+    common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
 
-    if (widen_bvh) {
-        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
-    } else {
-        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=2");
-    }
-
-    const char *render_rgb_env = getenv("MADRONA_RENDER_RGB");
-    bool render_rgb = (render_rgb_env && render_rgb_env[0] == '1');
+    bool render_rgb = (render_mode == RenderConfig::RenderMode::Color);
 
     if (render_rgb) {
-        common_compile_flags.push_back("-DMADRONA_RENDER_RGB=8");
+        common_compile_flags.push_back("-DMADRONA_RENDER_RGB=1");
     }
 
     for (const char *user_flag : cfg.userCompileFlags) {
@@ -2491,13 +2483,10 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         (render_cfg.importedAssets->materials.data() != nullptr) : false;
     bool has_materials = has_geometry ? 
         (render_cfg.importedAssets->texture.data() != nullptr) : false;
-
-    auto *render_mode = getenv("MADRONA_RENDER_MODE");
-
-    bool enable_raycasting = (render_mode[0] == '2');
+    bool enable_raycasting = (render_cfg.renderResolution != 0);
 
     BVHKernels bvh_kernels = buildBVHKernels(
-                compile_cfg, num_sms, cu_capability);
+                compile_cfg, num_sms, cu_capability, render_cfg.renderMode);
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
         exec_mode, num_sms, cu_capability);
@@ -2561,140 +2550,6 @@ MWCudaExecutor::~MWCudaExecutor()
 
     REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
-
-    if (impl_->enableRaycasting) {
-         bool enable_trace_split = false;
-
-        const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
-        if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
-            enable_trace_split = true;
-        }
-
-        float avg_total_time = 0.f;
-        float avg_trace_time = 0.f;
-        float avg_num_tlas_traces = 0.f;
-        float avg_num_blas_traces = 0.f;
-        float avg_tlas_ratio = 0.f;
-
-        for (auto timing : impl_->bvhKernels.recordedTimings) {
-            avg_total_time += timing.totalTime;
-            avg_trace_time += timing.totalTime * timing.traceTimeRatio;
-            avg_num_tlas_traces += timing.numTLASTraces;
-            avg_num_blas_traces += timing.numBLASTraces;
-            avg_tlas_ratio += timing.tlasRatio;
-        }
-
-        avg_total_time /= (float)impl_->bvhKernels.recordedTimings.size();
-        avg_trace_time /= (float)impl_->bvhKernels.recordedTimings.size();
-        avg_num_tlas_traces /= (float)impl_->bvhKernels.recordedTimings.size();
-        avg_num_blas_traces /= (float)impl_->bvhKernels.recordedTimings.size();
-        avg_tlas_ratio /= (float)impl_->bvhKernels.recordedTimings.size();
-
-#if 0
-        printf("Average BVH kernels time: %f (%f spent in tracing)\n",
-                avg_total_time, avg_trace_time);
-        printf("Average number of TLAS traces per pixel: %f\n", avg_num_tlas_traces);
-        printf("Average number of BLAS traces per pixel: %f\n", avg_num_blas_traces);
-        printf("Average ratio TLAS/trace time: %f\n", avg_tlas_ratio);
-#endif
-
-        // Save this to a file
-        auto *output_file_name = getenv("MADRONA_TIMING_FILE");
-        assert(output_file_name);
-        char output_buffer[1024] = {};
-
-        float total_step_time = avg_total_time;
-
-#if 0
-        sprintf(output_buffer, "{\n  \"num_worlds\":%d\n  \"num_vertices\":%d\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n}", 
-                (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
-#endif
-
-        if (enable_trace_split) {
-            sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"num_vertices\":%d,\n  \"avg_total_time\":%f,\n  \"tlas_percent\":%f,\n  \"avg_trace_time_ratio\":%f\n}",
-                    (int)impl_->numWorlds, (int)impl_->numVertices,
-                    avg_total_time,
-                    avg_tlas_ratio,
-                    avg_trace_time / avg_total_time);
-        } else {
-            uint32_t current_offset = 0;
-
-            if (impl_->timingGroups.size()) {
-                sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"num_vertices\":%d,\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f,\n",
-                        (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
-            }
-            else {
-                sprintf(output_buffer, "{\n  \"num_worlds\":%d,\n  \"num_vertices\":%d,\n  \"avg_total_time\":%f,\n  \"avg_trace_time_ratio\":%f\n",
-                        (int)impl_->numWorlds, (int)impl_->numVertices, avg_total_time, avg_trace_time / avg_total_time);
-            }
-
-            current_offset = strlen(output_buffer);
-
-            for (int i = 0; i < impl_->timingGroups.size(); ++i) {
-                auto &group = impl_->timingGroups[i];
-
-                float avg_time = 0.f;
-                for (int t = 0; t < group.recordedTimings.size(); ++t) {
-                    avg_time += group.recordedTimings[t];
-                }
-
-                avg_time /= (float)group.recordedTimings.size();
-
-                if (i == impl_->timingGroups.size() - 1) {
-                    sprintf(output_buffer + current_offset, 
-                            "  \"%s\":%f\n", 
-                            group.statName, avg_time);
-                } else {
-                    sprintf(output_buffer + current_offset, 
-                            "  \"%s\":%f\n,", 
-                            group.statName, avg_time);
-                }
-
-                total_step_time += avg_time;
-
-                current_offset = strlen(output_buffer);
-            }
-
-            sprintf(output_buffer + current_offset,
-                    "}");
-
-            current_offset = strlen(output_buffer);
-        } 
-
-        printf("Calculated total time from kernel time sum: %f\n\n", total_step_time);
-
-        printf("Average time tracing BVH: %f\n", avg_trace_time);
-        printf("Average time building BVH: %f\n", avg_total_time-avg_trace_time);
-        printf("Average time doing BVH struff: %f\n", avg_total_time);
-
-        printf("%s\n", output_buffer);
-
- 
-        std::ofstream stream;
-        stream.open(output_file_name);
-        if (!stream) {
-            std::cout << "Couldn't open file" << std::endl;
-        }
-        stream << output_buffer;
-        stream.close();
-    } else {
-        float total_step_time = 0.0f;
-
-        for (int i = 0; i < impl_->timingGroups.size(); ++i) {
-            auto &group = impl_->timingGroups[i];
-
-            float avg_time = 0.f;
-            for (int t = 0; t < group.recordedTimings.size(); ++t) {
-                avg_time += group.recordedTimings[t];
-            }
-
-            avg_time /= (float)group.recordedTimings.size();
-
-            total_step_time += avg_time;
-        }
-
-        printf("Calculated total time from kernel time sum: %f\n", total_step_time);
-    }
 }
 
 MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
@@ -2749,17 +2604,12 @@ MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
                 get_prev_node(), 1,
                 &bvh_launch_params));
 
-    const char *fast_bvh_env = getenv("MADRONA_LBVH");
-    bool fast_bvh = (fast_bvh_env && fast_bvh_env[0] == '1');
-
-    const char *widen_bvh_env = getenv("MADRONA_WIDEN");
-    bool widen_bvh = (widen_bvh_env && widen_bvh_env[0] == '1');
+    bool fast_bvh = true;
+    bool widen_bvh = true;
 
     auto shared_mem_per_sm = impl_->sharedMemPerSM;
 
     if (fast_bvh) {
-        printf(">>>>>>>>>>>>>> Using LBVH <<<<<<<<<<<<<<\n");
-
         push_new_node();
         REQ_CU(cuGraphAddEventRecordNode(
                     get_new_node(), run_graph,
@@ -2787,8 +2637,6 @@ MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
                     get_prev_node(), 1, 
                     &bvh_launch_params));
     } else {
-        printf(">>>>>>>>>>>>>> Using Binned SAH <<<<<<<<<<<<<<\n");
-
         push_new_node();
         REQ_CU(cuGraphAddEventRecordNode(
                     get_new_node(), run_graph,

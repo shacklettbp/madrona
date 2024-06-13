@@ -72,7 +72,6 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         bvh.numNodes = num_nodes;
         bvh.numLeaves = num_leaves;
         bvh.numVerts = num_verts;
-        bvh.magic = render::MeshBVH::magicSignature;
 
         bvh.nodes = nodes.release(true);
         // bvh.leafGeos = leaf_geos.release(true);
