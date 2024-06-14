@@ -928,8 +928,6 @@ static __attribute__((always_inline)) inline void dispatch(
             specialized_megakernel += megakernel_func_ids;
         }
 
-        //printf("Compiling megakernel:\n%s\n", specialized_megakernel.c_str());
-
         std::string megakernel_file = "megakernel_" + megakernel_cfg_suffix +
             ".cpp";
         std::string fake_megakernel_cpp_path =
@@ -1995,9 +1993,6 @@ static GPUEngineState initEngineAndUserState(
                 textures, num_textures);
 
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
-
-        printf("From CPU, bvh params temporary is in %p (data %p)\n", 
-                params_tmp, bvh_internals);
 
         // Address to the BVHParams struct
         CUdeviceptr bvh_consts_addr;

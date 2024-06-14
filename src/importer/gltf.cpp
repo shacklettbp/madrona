@@ -1328,10 +1328,6 @@ static bool gltfParseMesh(
 
     DynArray<SourceMesh> meshes(1);
 
-    if (gltf_mesh.numPrims > 1) {
-        // asm volatile("int $3");
-    }
-
     for (CountT prim_offset = 0; prim_offset < (CountT)gltf_mesh.numPrims;
          prim_offset++) {
         CountT prim_idx = prim_offset + gltf_mesh.primOffset;

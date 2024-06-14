@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined (MADRONA_MWGPU_BVH_MODULE)
+#define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 8
+#endif
+
 #include <madrona/mw_gpu/host_print.hpp>
 #include <madrona/mw_gpu/const.hpp>
 

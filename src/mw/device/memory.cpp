@@ -9,8 +9,6 @@
 #include <madrona/bvh.hpp>
 #endif
 
-#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
-
 #if defined (MADRONA_MWGPU_BVH_MODULE)
 extern "C" __constant__ madrona::BVHParams bvhParams;
 #endif

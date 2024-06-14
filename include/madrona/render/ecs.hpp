@@ -24,9 +24,6 @@ struct Renderable {
 
 
 
-// TODO: Make sure to move this to private headers which can be
-// included by the device code for the BVH.
-
 // For private usage - not to be used by user.
 using MortonCode = uint32_t;
 
