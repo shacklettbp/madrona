@@ -988,6 +988,9 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     if (!state_mgr->archetypeNeedsSort(archetypeID) && world_sort) {
         numDynamicInvocations = 0;
 
+        auto &clear_count_node_data = taskgraph.getNodeData(clearWorldCountData);
+        clear_count_node_data.numDynamicInvocations = 0;
+
         for (int i = 0; i < numPasses; i++) {
             taskgraph.getNodeData(onesweepNodes[i]).numDynamicInvocations = 0;
         }
@@ -1008,8 +1011,6 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     if (!state_mgr->archetypeNeedsSort(archetypeID)) {
         numDynamicInvocations = 0;
 
-        auto &clear_count_node_data = taskgraph.getNodeData(clearWorldCountData);
-        clear_count_node_data.numDynamicInvocations = 0;
 
         for (int i = 0; i < numPasses; i++) {
             taskgraph.getNodeData(onesweepNodes[i]).numDynamicInvocations = 0;
@@ -1017,7 +1018,6 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
         return;
     }
     state_mgr->archetypeClearNeedsSort(archetypeID);
-
 #endif
 
     int num_rows = state_mgr->numArchetypeRows(archetypeID);

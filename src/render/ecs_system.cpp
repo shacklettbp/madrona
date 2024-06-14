@@ -1,3 +1,7 @@
+#ifndef MADRONA_GPU_MODE
+#include <bit>
+#endif
+
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/render/ecs.hpp>
 #include <madrona/components.hpp>
@@ -59,9 +63,15 @@ inline uint32_t leftShift3(uint32_t x)
 }
 
 uint32_t encodeMorton3(const Vector3 &v) {
-    return (leftShift3(*((uint32_t *)&v.z)) << 2) | 
-           (leftShift3(*((uint32_t *)&v.y)) << 1) | 
-            leftShift3(*((uint32_t *)&v.x));
+#ifdef MADRONA_GPU_MODE
+    return (__float_as_uint(v.z) << 2) | 
+           (__float_as_uint(v.y) << 1) | 
+            __float_as_uint(v.x);
+#else
+    return (std::bit_cast<uint32_t>(v.z) << 2) | 
+           (std::bit_cast<uint32_t>(v.y) << 1) | 
+            std::bit_cast<uint32_t>(v.x);
+#endif
 }
 
 inline void mortonCodeUpdate(Context &ctx,
