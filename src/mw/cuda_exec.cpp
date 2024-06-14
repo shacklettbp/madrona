@@ -1951,6 +1951,9 @@ static GPUEngineState initEngineAndUserState(
 
     auto host_print = std::make_unique<HostPrintCPU>(cu_gpu);
 
+    auto bvh_internals = cu::allocGPU(
+            sizeof(mwGPU::madrona::BVHInternalData));
+
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
                                                    world_data_alignment,
@@ -1959,7 +1962,8 @@ static GPUEngineState initEngineAndUserState(
                                                    gpu_state_size_readback,
                                                    (void *)bvhs_ptr,
                                                    num_bvhs,
-                                                   raycast_output_resolution);
+                                                   raycast_output_resolution,
+                                                   bvh_internals);
 
     auto init_ecs_args = makeKernelArgBuffer(alloc_init,
                                              host_print->getChannelPtr(),
@@ -2071,8 +2075,6 @@ static GPUEngineState initEngineAndUserState(
                 textures, num_textures);
 
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
-        auto bvh_internals = cu::allocGPU(
-                sizeof(mwGPU::madrona::BVHInternalData));
 
         printf("From CPU, bvh params temporary is in %p (data %p)\n", 
                 params_tmp, bvh_internals);

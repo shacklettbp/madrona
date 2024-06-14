@@ -18,7 +18,8 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     size_t *job_system_buffer_size,
     void *mesh_bvhs,
     uint32_t num_mesh_bvhs,
-    uint32_t raycast_output_resolution)
+    uint32_t raycast_output_resolution,
+    void *bvh_internal_data)
 {
     using namespace madrona;
     using namespace madrona::mwGPU;
@@ -68,6 +69,7 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         /* .tmpAllocatorAddr */                (void *)tmp_allocator_offset,
         /* .deviceTracingAddr = */             (void *)device_tracing_offset,
         /* .meshBVHsAddr = */                  (void *)mesh_bvhs,
+        /* .bvhInternalData = */               bvh_internal_data,
         /* .numWorldDataBytes = */             num_world_data_bytes,
         /* .numWorlds = */                     num_worlds,
         /* .jobGridsOffset = */                (uint32_t)0,
@@ -78,8 +80,6 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         /* .numMeshBVHs =  */                  num_mesh_bvhs,
         /* .raycastOutputResolution =  */      raycast_output_resolution,
     };
-    
-    printf("Passed in resolution %d\n", raycast_output_resolution);
 
     *job_system_buffer_size = total_bytes;
 }

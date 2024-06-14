@@ -60,6 +60,10 @@ struct RenderOutputRef {
     Entity outputEntity;
 };
 
+struct RenderOutputIndex {
+    uint32_t index;
+};
+
 // Top level acceleration structure node
 struct alignas(16) TLBVHNode {
     math::AABB aabb;
@@ -79,15 +83,14 @@ struct RenderableArchetype : public Archetype<
 // For private usage - not to be used by user.
 struct RenderCameraArchetype : public Archetype<
     PerspectiveCameraData,
-    RenderOutputRef
+    RenderOutputRef,
+    RenderOutputIndex
 > {};
 
 // This is an unsorted archetype with a runtime-sized component
 struct RaycastOutputArchetype : public Archetype<
     RenderOutputBuffer
 > {};
-
-
 
 struct RenderECSBridge;
 

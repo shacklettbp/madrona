@@ -213,6 +213,8 @@ struct BVHInternalData {
 
     // NOTE: may use this for treelet optimization later
     uint32_t *indirectIndices;
+
+    uint32_t numViews;
 };
 
 struct KernelTimingInfo {

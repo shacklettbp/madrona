@@ -6,7 +6,12 @@
 #include "ecs_interop.hpp"
 
 #ifdef MADRONA_GPU_MODE
+#include <madrona/bvh.hpp>
 #include <madrona/mw_gpu/const.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+#else
+#define LOG(...)
 #endif
 
 namespace madrona::render::RenderingSystem {
@@ -139,6 +144,10 @@ inline void viewTransformUpdate(Context &ctx,
 
     PerspectiveCameraData &cam_data = 
         ctx.get<PerspectiveCameraData>(cam.cameraEntity);
+
+    ctx.get<RenderOutputIndex>(cam.cameraEntity).index = 
+        ctx.loc(e).row;
+
 #else
     auto &system_state = ctx.singleton<RenderingSystemState>();
     uint32_t view_id = system_state.totalNumViewsCPU->fetch_add<sync::acq_rel>(1);
@@ -180,6 +189,16 @@ inline void exportCountsGPU(Context &ctx,
         *sys_state.totalNumInstances = state_mgr->getArchetypeNumRows<
             RenderableArchetype>();
     }
+
+#if MADRONA_GPU_MODE
+    auto &gpu_consts = mwGPU::GPUImplConsts::get();
+    uint32_t num_views =
+        state_mgr->getArchetypeNumRows<RenderCameraArchetype>();
+    ((BVHInternalData *)gpu_consts.internalData)->numViews = num_views;
+#endif
+
+
+
 
 #if 0
     uint32_t *morton_codes = state_mgr->getArchetypeComponent<
@@ -236,6 +255,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<InstanceData>();
     registry.registerComponent<MortonCode>();
     registry.registerComponent<RenderOutputBuffer>(render_output_bytes);
+    registry.registerComponent<RenderOutputIndex>();
 
     registry.registerComponent<RenderOutputRef>();
     registry.registerComponent<TLBVHNode>();
@@ -342,12 +362,22 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
     auto post_instance_sort_reset_tmp =
         builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_world});
 
+#if 0
     auto sort_views = 
         builder.addToGraph<SortArchetypeNode<RenderCameraArchetype, WorldID>>(
             {post_instance_sort_reset_tmp});
+#endif
+
+    auto sort_views_world = builder.addToGraph<SortArchetypeNode<
+        RenderCameraArchetype, WorldID>>(
+                {post_instance_sort_reset_tmp});
+
+    auto sort_views_index = builder.addToGraph<SortArchetypeNode<
+        RenderCameraArchetype, RenderOutputIndex>>(
+                {sort_views_world});
 
     auto post_view_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_views});
+        builder.addToGraph<ResetTmpAllocNode>({sort_views_index});
 
     auto export_counts = builder.addToGraph<ParallelForNode<Context,
         exportCountsGPU,
@@ -456,5 +486,14 @@ void cleanupRenderableEntity(Context &ctx,
     Entity render_entity = ctx.get<Renderable>(e).renderEntity;
     ctx.destroyEntity(render_entity);
 }
+
+// Add this later when we decide to make the renderer more flexible
+#if 0
+void setEntityOutputIndex(Context &ctx, Entity e, uint32_t index)
+{
+    auto cam_entity = ctx.get<RenderCamera>(e).cameraEntity;
+    ctx.get<RenderOutputIndex>(cam_entity).index = index;
+}
+#endif
 
 }

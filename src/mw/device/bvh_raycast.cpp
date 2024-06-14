@@ -315,9 +315,13 @@ extern "C" __global__ void bvhRaycastEntry()
         .numTLASTraces = 0
     };
 
+#if 0
     const uint32_t num_worlds = bvhParams.numWorlds;
     const uint32_t total_num_views = bvhParams.viewOffsets[num_worlds-1] +
                                      bvhParams.viewCounts[num_worlds-1];
+#endif
+
+    const uint32_t total_num_views = bvhParams.internalData->numViews;
 
     // This is the number of views currently being processed.
     const uint32_t num_resident_views = gridDim.x;
