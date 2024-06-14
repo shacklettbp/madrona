@@ -88,7 +88,6 @@ get_target_property(MADRONA_HDRS_INCLUDES madrona_hdrs INTERFACE_INCLUDE_DIRECTO
 set(NVRTC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/device/include
     ${MADRONA_HDRS_INCLUDES}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/cub
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 
