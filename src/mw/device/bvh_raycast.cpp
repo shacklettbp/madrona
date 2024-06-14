@@ -143,14 +143,14 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     render::InstanceData *instances = bvhParams.instances + 
                                       internal_nodes_offset;
 
-    render::TraversalStack stack = {};
+    TraversalStack stack = {};
 
     // This starts us at root
     stack.push(1);
 
     bool ray_hit = false;
 
-    render::MeshBVH::HitInfo closest_hit_info = {};
+    MeshBVH::HitInfo closest_hit_info = {};
 
     uint64_t total_blas_time = 0;
 
@@ -185,7 +185,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     if (instance_idx >= num_instances)
                         LOG("Got incorrect instance index: {}\n", instance_idx);
 
-                    render::MeshBVH *model_bvh = bvhParams.bvhs +
+                    MeshBVH *model_bvh = bvhParams.bvhs +
                         instances[instance_idx].objectID;
 
                     render::InstanceData *instance_data =
@@ -195,7 +195,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     //
                     // Also need to bound the mesh bvh trace ray by t_max.
 
-                    render::MeshBVH::AABBTransform txfm = {
+                    MeshBVH::AABBTransform txfm = {
                         instance_data->position,
                         instance_data->rotation,
                         instance_data->scale
@@ -212,7 +212,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
                     txfm_ray_d /= t_scale;
 
-                    render::MeshBVH::HitInfo hit_info = {};
+                    MeshBVH::HitInfo hit_info = {};
 
 #if defined(MADRONA_PROFILE_BVH_KERNEL)
                     uint64_t blas_start_time = globalTimer();

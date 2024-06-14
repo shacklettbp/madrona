@@ -1795,7 +1795,7 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_exported,
     const GPUKernels &gpu_kernels,
     const BVHKernels &bvh_kernels,
-    render::MeshBVH *bvhs_ptr,
+    MeshBVH *bvhs_ptr,
     uint32_t num_bvhs,
     const imp::SourceMaterial *materials,
     uint32_t num_materials,

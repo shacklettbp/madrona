@@ -1614,7 +1614,6 @@ static bool gltfImportAssets(LoaderData &loader,
     CountT new_vert_arrays_start = imported.geoData.positionArrays.size();
     CountT new_normal_arrays_start = imported.geoData.normalArrays.size();
     CountT new_uvs_arrays_start = imported.geoData.uvArrays.size();
-    CountT new_mats_arrays_start = imported.geoData.materialIndices.size();
     CountT new_objects_start = imported.objects.size();
     CountT new_instances_start = imported.instances.size();
 
@@ -1754,8 +1753,6 @@ static bool gltfImportAssets(LoaderData &loader,
                                          [](auto *) {});
     imported.geoData.uvArrays.resize(new_uvs_arrays_start,
                                          [](auto *) {});
-    imported.geoData.materialIndices.resize(new_mats_arrays_start,
-                                         [](auto *) {});
     imported.objects.resize(new_objects_start,
                             [](auto *) {});
     imported.instances.resize(new_instances_start,
@@ -1777,7 +1774,6 @@ static bool gltfImportAssets(LoaderData &loader,
     imported.geoData.positionArrays.emplace_back(std::move(new_positions_arr));
     imported.geoData.normalArrays.emplace_back(std::move(new_normals_arr));
     imported.geoData.uvArrays.emplace_back(std::move(new_uvs_arr));
-    imported.geoData.materialIndices.emplace_back(std::move(new_mats_arr));
 
     CountT prev_img_idx = imported.imgData.imageArrays.size();
     CountT prev_tex_idx = imported.texture.size();

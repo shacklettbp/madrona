@@ -16,8 +16,8 @@ struct EmbreeLoader::Impl {
     // Right now, this is unused.
 };
 
-constexpr int numTrisPerLeaf = render::MeshBVH ::numTrisPerLeaf;
-constexpr int nodeWidth = render::MeshBVH::nodeWidth;
+constexpr int numTrisPerLeaf = MeshBVH ::numTrisPerLeaf;
+constexpr int nodeWidth = MeshBVH::nodeWidth;
 static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
 
 struct NodeCompressed {
@@ -96,14 +96,14 @@ struct Node {
 };
 
 struct InnerNode : public Node {
-    BoundingBox bounds[render::MeshBVH::nodeWidth];
-    Node* children[render::MeshBVH::nodeWidth];
+    BoundingBox bounds[MeshBVH::nodeWidth];
+    Node* children[MeshBVH::nodeWidth];
     int numChildren;
     int id = -1;
 
     InnerNode()
     {
-        for(int i=0;i<render::MeshBVH::nodeWidth;i++){
+        for(int i=0;i<MeshBVH::nodeWidth;i++){
             bounds[i] = {};
             children[i] = nullptr;
         }
@@ -125,7 +125,7 @@ struct InnerNode : public Node {
             0
         };
 
-        for(int i = 0; i < render::MeshBVH::nodeWidth; i++){
+        for(int i = 0; i < MeshBVH::nodeWidth; i++){
             if(children[i] != nullptr){
                 cost += children[i]->sah() * area(bounds[i]);
                 total = merge(bounds[i],total);
@@ -175,7 +175,7 @@ struct InnerNode : public Node {
 };
 
 struct LeafNode : public Node {
-    unsigned int id[render::MeshBVH::numTrisPerLeaf];
+    unsigned int id[MeshBVH::numTrisPerLeaf];
     unsigned int numPrims;
     BoundingBox bounds;
     int lid = -1;
@@ -210,17 +210,15 @@ struct LeafNode : public Node {
     }
 };
 
-Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<SourceMaterial>& materials)
+Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<SourceMaterial>& materials)
 {
-    using render::MeshBVH;
-
-    DynArray<render::MeshBVH::Node> nodes { 0 };
-    DynArray<render::MeshBVH::LeafGeometry> leaf_geos { 0 };
-    DynArray<render::MeshBVH::LeafMaterial> leaf_materials { 0 };
+    DynArray<MeshBVH::Node> nodes { 0 };
+    DynArray<MeshBVH::LeafGeometry> leaf_geos { 0 };
+    DynArray<MeshBVH::LeafMaterial> leaf_materials { 0 };
 
     math::AABB aabb_out;
 
-    render::MeshBVH bvh_out;
+    MeshBVH bvh_out;
 
     uint32_t current_node_offset = nodes.size();
 
@@ -252,7 +250,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
     verticesPtr = &vertices;
 
 
-    std::vector<madrona::render::TriangleIndices> prims_compressed;
+    std::vector<madrona::TriangleIndices> prims_compressed;
     prims_compressed.resize(numTriangles);
     std::vector<MeshBVH::BVHMaterial> prims_mats;
     prims_mats.resize(numTriangles);
@@ -587,7 +585,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
     }
 
     for(int i = 0; i < innerID; i++){
-        render::MeshBVH::Node node;
+        MeshBVH::Node node;
         node.parentID = -1;
         for (int i2 = 0; i2 < nodeWidth; i2++){
             BoundingBox box = innerNodes[i]->bounds[i2];
@@ -644,7 +642,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
 #if !defined(MADRONA_COMPRESSED_DEINDEXED) && !defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
     for(int i=0;i<leafID;i++){
         LeafNode* node = leafNodes[i];
-        render::MeshBVH::LeafGeometry geos;
+        MeshBVH::LeafGeometry geos;
         for(int i2=0;i2<(int)numTrisPerLeaf;i2++){
             if(i2<(int)node->numPrims){
                 geos.packedIndices[i2] = prims_compressed[node->id[i2]];
@@ -658,7 +656,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
         leaf_geos.push_back(geos);
     }
     for(int i=0;i<leafID;i++){
-        render::MeshBVH::LeafMaterial geos;
+        MeshBVH::LeafMaterial geos;
         for(int i2=0;i2<numTrisPerLeaf;i2++){
             geos.material[i2] = {0xaaaaaaaa};
         }
@@ -680,10 +678,10 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
                 reIndexedVertices.push_back(vertices[c]);
             }
         }
-        render::MeshBVH::LeafMaterial geos;
+        MeshBVH::LeafMaterial geos;
         for(uint32_t i2=0;i2<numTrisPerLeaf;i2++){
             if(i2 < node->numPrims) {
-                render::MeshBVH::LeafMaterial geos;
+                MeshBVH::LeafMaterial geos;
                 geos.material[0] = prims_mats[node->id[i2]];
                 leaf_materials.push_back(geos);
             }
@@ -709,7 +707,7 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
         }
     }
     for(int i=0;i<leafID;i++){
-        render::MeshBVH::LeafMaterial geos;
+        MeshBVH::LeafMaterial geos;
         for(int i2=0;i2<numTrisPerLeaf;i2++){
             geos.material[i2] = {0xaaaaaaaa};
         }

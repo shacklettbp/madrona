@@ -45,16 +45,6 @@ struct StateConfig {
 
     // Number of exported ECS components
     uint32_t numExportedBuffers;
-
-    // This is required if the BVH is to be invoked (holds object information).
-    imp::ImportedAssets::GPUGeometryData *geometryData;
-
-    Span<const imp::SourceMaterial> materials;
-    Span<const imp::SourceTexture> textures;
-
-    uint32_t raycastOutputResolution;
-
-    float nearSphere;
 };
 
 struct CompileConfig {

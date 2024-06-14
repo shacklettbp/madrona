@@ -7,7 +7,7 @@ using namespace madrona::math;
 
 void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
                              StackAlloc &tmp_alloc,
-                             render::MeshBVH *out_bvh,
+                             MeshBVH *out_bvh,
                              CountT *out_num_bytes)
 {
 #if 0

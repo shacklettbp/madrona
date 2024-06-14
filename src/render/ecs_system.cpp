@@ -113,7 +113,7 @@ inline void instanceTransformUpdate(Context &ctx,
     // it in the TLBVHNode structure.
 
 #ifdef MADRONA_GPU_MODE
-    render::MeshBVH *bvh = (render::MeshBVH *)
+    MeshBVH *bvh = (MeshBVH *)
         mwGPU::GPUImplConsts::get().meshBVHsAddr +
         obj_id.idx;
 

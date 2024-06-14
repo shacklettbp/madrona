@@ -238,7 +238,7 @@ struct BVHParams {
     uint32_t *mortonCodes;
     BVHInternalData *internalData;
 
-    ::madrona::render::MeshBVH *bvhs;
+    ::madrona::MeshBVH *bvhs;
 
     void *renderOutput;
     uint32_t renderOutputResolution;

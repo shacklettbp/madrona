@@ -1,7 +1,7 @@
 #pragma once
 
-#include "types.hpp"
-#include "geo.hpp"
+#include <madrona/types.hpp>
+#include <madrona/geo.hpp>
 
 #define MADRONA_COMPRESSED_DEINDEXED_TEX
 
@@ -17,7 +17,7 @@
 #define MADRONA_BLAS_LEAF_WIDTH 2
 #endif
 
-namespace madrona::render {
+namespace madrona {
 
 struct TriangleIndices {
     uint32_t indices[3];

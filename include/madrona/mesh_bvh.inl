@@ -2,7 +2,7 @@
 
 #define MADRONA_MESHBVH_BACKFACE_CULLING
 
-namespace madrona::render {
+namespace madrona {
 
 constexpr int SHARED_STACK_SIZE = 6;
 

@@ -137,7 +137,7 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
     }
 }
 
-bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
+bool loadCache(const char* location, DynArray<MeshBVH>& bvhs_out){
     FILE *ptr;
     ptr = fopen(location, "rb");
 
@@ -161,25 +161,25 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         fread(&aabb_out, sizeof(aabb_out), 1, ptr);
         fread(&material_idx, sizeof(material_idx), 1, ptr);
 
-        DynArray<render::MeshBVH::Node> nodes{num_nodes};
-        fread(nodes.data(), sizeof(render::MeshBVH::Node), num_nodes, ptr);
+        DynArray<MeshBVH::Node> nodes{num_nodes};
+        fread(nodes.data(), sizeof(MeshBVH::Node), num_nodes, ptr);
 
 #if 0
-        DynArray<render::MeshBVH::LeafGeometry> leaf_geos{num_leaves};
-        fread(leaf_geos.data(), sizeof(render::MeshBVH::LeafGeometry), num_leaves, ptr);
+        DynArray<MeshBVH::LeafGeometry> leaf_geos{num_leaves};
+        fread(leaf_geos.data(), sizeof(MeshBVH::LeafGeometry), num_leaves, ptr);
 #endif
 
-        DynArray<render::MeshBVH::BVHVertex> vertices{num_verts};
-        fread(vertices.data(), sizeof(render::MeshBVH::BVHVertex), num_verts, ptr);
+        DynArray<MeshBVH::BVHVertex> vertices{num_verts};
+        fread(vertices.data(), sizeof(MeshBVH::BVHVertex), num_verts, ptr);
 
 
 
 #ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
-        DynArray<render::MeshBVH::LeafMaterial> leaf_materials{num_verts/3};
-        fread(leaf_materials.data(), sizeof(render::MeshBVH::LeafMaterial), num_verts/3, ptr);
+        DynArray<MeshBVH::LeafMaterial> leaf_materials{num_verts/3};
+        fread(leaf_materials.data(), sizeof(MeshBVH::LeafMaterial), num_verts/3, ptr);
 #endif
 
-        render::MeshBVH bvh;
+        MeshBVH bvh;
         bvh.numNodes = num_nodes;
         bvh.numLeaves = num_leaves;
         bvh.numVerts = num_verts;
@@ -197,7 +197,7 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
     return true;
 }
 
-void writeCache(const char* location, DynArray<render::MeshBVH>& bvhs){
+void writeCache(const char* location, DynArray<MeshBVH>& bvhs){
     FILE *ptr;
     ptr = fopen(location, "wb");
 
@@ -211,12 +211,12 @@ void writeCache(const char* location, DynArray<render::MeshBVH>& bvhs){
         fwrite(&bvhs[i].rootAABB, sizeof(math::AABB), 1, ptr);
         fwrite(&bvhs[i].materialIDX, sizeof(int32_t), 1, ptr);
 
-        fwrite(bvhs[i].nodes, sizeof(render::MeshBVH::Node), bvhs[i].numNodes, ptr);
-        // fwrite(bvhs[i].leafGeos, sizeof(render::MeshBVH::LeafGeometry), bvhs[i].numLeaves, ptr);
-        fwrite(bvhs[i].vertices, sizeof(render::MeshBVH::BVHVertex), bvhs[i].numVerts, ptr);
+        fwrite(bvhs[i].nodes, sizeof(MeshBVH::Node), bvhs[i].numNodes, ptr);
+        // fwrite(bvhs[i].leafGeos, sizeof(MeshBVH::LeafGeometry), bvhs[i].numLeaves, ptr);
+        fwrite(bvhs[i].vertices, sizeof(MeshBVH::BVHVertex), bvhs[i].numVerts, ptr);
 
 #ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
-        fwrite(bvhs[i].leafMats, sizeof(render::MeshBVH::LeafMaterial), bvhs[i].numVerts/3, ptr);
+        fwrite(bvhs[i].leafMats, sizeof(MeshBVH::LeafMaterial), bvhs[i].numVerts/3, ptr);
 #endif
     }
 
@@ -236,7 +236,6 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             .normalArrays { 0 },
             .tangentAndSignArrays { 0 },
             .uvArrays { 0 },
-            .materialIndices { 0 },
             .indexArrays { 0 },
             .faceCountArrays { 0 },
             .meshArrays { 0 },
@@ -330,7 +329,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             bool should_construct = true;
 
             // Create a mesh BVH for all the meshes in recently loaded objects.
-            DynArray<render::MeshBVH> asset_bvhs { 0 };
+            DynArray<MeshBVH> asset_bvhs { 0 };
 
             if(bvh_cache_dir && !regen_cache) {
                 should_construct = !loadCache((cache_dir /
@@ -348,7 +347,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
                     obj.bvhIndex = (uint32_t) asset_bvhs.size();
 
-                    Optional<render::MeshBVH> bvh = embree_loader->load(obj,imported.materials);
+                    Optional<MeshBVH> bvh = embree_loader->load(obj,imported.materials);
                     assert(bvh.has_value());
 
                     asset_bvhs.push_back(*bvh);
@@ -380,8 +379,6 @@ Optional<ImportedAssets::GPUGeometryData> ImportedAssets::makeGPUData(
     const ImportedAssets &assets)
 {
 #ifdef MADRONA_CUDA_SUPPORT
-    using render::MeshBVH;
-
     uint64_t num_bvhs = 0;
     uint64_t num_nodes = 0;
     uint64_t num_leaf_geos = 0;

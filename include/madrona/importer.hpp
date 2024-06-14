@@ -102,22 +102,22 @@ struct EmbreeLoader {
 
     std::unique_ptr<Impl> impl_;
 
-    Optional<render::MeshBVH> load(const SourceObject &obj, const DynArray<SourceMaterial> &materials);
+    Optional<MeshBVH> load(const SourceObject &obj, const DynArray<SourceMaterial> &materials);
 };
 
 struct ImportedAssets {
     struct GPUGeometryData {
-        render::MeshBVH::Node *nodes;
+        MeshBVH::Node *nodes;
         uint64_t numNodes;
 
-        render::MeshBVH::LeafGeometry *leafGeos;
-        render::MeshBVH::LeafMaterial *leafMaterial;
+        MeshBVH::LeafGeometry *leafGeos;
+        MeshBVH::LeafMaterial *leafMaterial;
         uint64_t numLeaves;
 
-        render::MeshBVH::BVHVertex *vertices;
+        MeshBVH::BVHVertex *vertices;
         uint64_t numVerts;
 
-        render::MeshBVH *meshBVHs;
+        MeshBVH *meshBVHs;
         uint64_t numBVHs;
     };
 
@@ -127,14 +127,11 @@ struct ImportedAssets {
         DynArray<DynArray<math::Vector4>> tangentAndSignArrays;
         DynArray<DynArray<math::Vector2>> uvArrays;
 
-        // This is bad but we're currently assigning materials to vertices
-        DynArray<DynArray<uint32_t>> materialIndices;
-
         DynArray<DynArray<uint32_t>> indexArrays;
         DynArray<DynArray<uint32_t>> faceCountArrays;
 
         DynArray<DynArray<SourceMesh>> meshArrays;
-        DynArray<DynArray<render::MeshBVH>> meshBVHArrays;
+        DynArray<DynArray<MeshBVH>> meshBVHArrays;
     } geoData;
 
     struct ImageData {
