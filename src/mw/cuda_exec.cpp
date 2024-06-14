@@ -1668,13 +1668,12 @@ static MaterialData initMaterialData(
             cpu_mat_data.textures[i] = tex_obj;
             cpu_mat_data.textureBuffers[i] = cuda_array;
         }else if (tex.info == imp::TextureLoadInfo::PixelBuffer){
-            printf("whatever %d,%d,%p\n",static_cast<int>(tex.pix_info.data.format),static_cast<int>(imp::TextureFormat::BC7),tex.pix_info.data.imageData);
             if(tex.pix_info.data.format == imp::TextureFormat::BC7) {
                 void *pixel_data = tex.pix_info.data.imageData;
                 uint32_t pixel_data_size = tex.pix_info.data.imageSize;
 
-                uint32_t width = tex.pix_info.data.width,
-                         height = tex.pix_info.data.height;
+                width = tex.pix_info.data.width;
+                height = tex.pix_info.data.height;
 
                 cudaChannelFormatDesc channel_desc =
                         cudaCreateChannelDesc<cudaChannelFormatKindUnsignedBlockCompressed7>();

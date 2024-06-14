@@ -44,7 +44,6 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
     printf("Processing Textures\n");
     for(SourceTexture& tx: texture) {
         tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
-        printf("Testing %p,%lu\n", tx.pix_info.data.imageData,tx.pix_info.data.imageSize);
         if (tx.info == imp::TextureLoadInfo::PixelBuffer && !tx.pix_info.data.processed) {
             std::filesystem::path cache_dir = texture_cache;
 
@@ -81,7 +80,10 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
                     fread(&data, sizeof(BackingImageData), 1, read_fp);
 
                     pixel_data = (uint8_t *)malloc(data.imageSize);
-                    fread(pixel_data, pixel_data_size, 1, read_fp);
+
+                    fread(pixel_data, data.imageSize, 1, read_fp);
+
+                    auto processOutput = process_tex_func(tx);
 
                     data.imageData = pixel_data;
                     data.processed = true;
