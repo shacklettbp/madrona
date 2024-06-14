@@ -117,20 +117,20 @@ target_include_directories(stb SYSTEM INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/stb
 )
 
-file(GLOB_RECURSE KTX_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/include/*.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/include/khr_df.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/vk2dfd.inl
-        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/*.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/*.cxx
-        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/*.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/*.inl )
+#file(GLOB_RECURSE KTX_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/include/*.h
+#        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/include/khr_df.h
+#        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/vk2dfd.inl
+#        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/*.c
+#        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/*.cxx
+#        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/*.h
+#        ${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software/lib/*.inl )
 
 
-set(KTX_FEATURE_STATIC_LIBRARY ON)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software)
+#set(KTX_FEATURE_STATIC_LIBRARY ON)
+#add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/KTX-Software)
 
-target_compile_options(ktx PUBLIC "-fPIC")
-target_link_libraries(ktx PUBLIC madrona_libcxx)
+#target_compile_options(ktx PUBLIC "-fPIC")
+#target_link_libraries(ktx PUBLIC madrona_libcxx)
 
 
 if (MADRONA_LINUX)

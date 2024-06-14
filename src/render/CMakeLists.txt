@@ -43,7 +43,6 @@ target_link_libraries(madrona_render_core
         madrona_rendering_system
     PRIVATE
         stb
-        ktx
 )
 
 if (TARGET madrona_render_vk_cuda)

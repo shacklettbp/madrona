@@ -22,9 +22,120 @@
 #include <madrona/cuda_utils.hpp>
 #endif
 
+#include <span>
+#include <array>
+
+using bytes = std::span<const std::byte>;
+
+template <>
+struct std::hash<bytes>
+{
+    std::size_t operator()(const bytes& x) const noexcept
+    {
+        return std::hash<std::string_view>{}({reinterpret_cast<const char*>(x.data()), x.size()});
+    }
+};
+
 namespace madrona::imp {
 
 using namespace math;
+
+void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProcessFunc process_tex_func) {
+    printf("Processing Textures\n");
+    for(SourceTexture& tx: texture) {
+        tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
+        printf("Testing %p,%lu\n", tx.pix_info.data.imageData,tx.pix_info.data.imageSize);
+        if (tx.info == imp::TextureLoadInfo::PixelBuffer && !tx.pix_info.data.processed) {
+            std::filesystem::path cache_dir = texture_cache;
+
+            if (texture_cache) {
+                cache_dir = texture_cache;
+            }
+
+            auto texture_hasher = std::hash < bytes > {};
+            std::size_t hash = texture_hasher(
+                    std::as_bytes(
+                            std::span(tx.pix_info.data.imageData,
+                                      tx.pix_info.data.imageSize)));
+
+            std::string hash_str = std::to_string(hash);
+
+            bool should_construct = false;
+
+            uint8_t *pixel_data;
+            uint32_t pixel_data_size = 0;
+
+            uint32_t width, height;
+
+            TextureFormat format;
+
+            if (texture_cache) {
+                std::string path_to_cached_tex = (cache_dir / hash_str);
+
+                FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
+
+                if (read_fp) {
+                    printf("*");
+
+                    BackingImageData data;
+                    fread(&data, sizeof(BackingImageData), 1, read_fp);
+
+                    pixel_data = (uint8_t *)malloc(data.imageSize);
+                    fread(pixel_data, pixel_data_size, 1, read_fp);
+
+                    data.imageData = pixel_data;
+                    data.processed = true;
+
+                    free(tx.pix_info.data.imageData);
+
+                    imgData.imageArrays[tx.pix_info.backingDataIndex] = data;
+                    tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
+
+                    fclose(read_fp);
+                } else {
+                    printf("Did not find texture in cache - need to construct\n");
+
+                    auto processOutput = process_tex_func(tx);
+
+                    if(!processOutput.shouldCache)
+                        continue;
+
+                    free(tx.pix_info.data.imageData);
+
+                    imgData.imageArrays[tx.pix_info.backingDataIndex] = processOutput.newTex;
+                    tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
+
+                    pixel_data = tx.pix_info.data.imageData;
+                    pixel_data_size = tx.pix_info.data.imageSize;
+
+                    // Write this data to the cache
+                    FILE *write_fp = fopen(path_to_cached_tex.c_str(), "wb");
+
+                    fwrite(&tx.pix_info.data, sizeof(BackingImageData), 1, write_fp);
+                    fwrite(pixel_data, pixel_data_size, 1, write_fp );
+
+                    fclose(write_fp);
+                }
+            } else {
+                bool preProcess = tx.pix_info.data.processed;
+                void *oldImageData = tx.pix_info.data.imageData;
+
+                auto processOutput = process_tex_func(tx);
+
+                if(!processOutput.shouldCache)
+                        continue;
+
+                if(preProcess != processOutput.newTex.processed) {
+                    free(oldImageData);
+                    imgData.imageArrays[tx.pix_info.backingDataIndex] =
+                            processOutput.newTex;
+                }
+
+                tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
+            }
+        }
+    }
+}
 
 bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
     FILE *ptr;

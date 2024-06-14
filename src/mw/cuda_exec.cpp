@@ -25,7 +25,6 @@
 
 #include <stb_image.h>
 #define KHRONOS_STATIC
-#include <ktx.h>
 #include <span>
 // #define MADRONA_FAST_BVH
 
@@ -1633,7 +1632,7 @@ static MaterialData initMaterialData(
         int width, height, components;
         void *pixels = nullptr;
 
-        if (tex.info == imp::TextureLoadInfo::FILE_NAME) {
+        if (tex.info == imp::TextureLoadInfo::FileName) {
             pixels = stbi_load(tex.path, &width,
                                      &height, &components, STBI_rgb_alpha);
                         // For now, only allow this format
@@ -1668,91 +1667,14 @@ static MaterialData initMaterialData(
 
             cpu_mat_data.textures[i] = tex_obj;
             cpu_mat_data.textureBuffers[i] = cuda_array;
-        }else if (tex.info == imp::TextureLoadInfo::PIXEL_BUFFER){
-            if(tex.pix_info.format == imp::KTX2) {
-                char *texture_cache = getenv("MADRONA_TEXTURE_CACHE_DIR");
-                std::filesystem::path cache_dir = "";
+        }else if (tex.info == imp::TextureLoadInfo::PixelBuffer){
+            printf("whatever %d,%d,%p\n",static_cast<int>(tex.pix_info.data.format),static_cast<int>(imp::TextureFormat::BC7),tex.pix_info.data.imageData);
+            if(tex.pix_info.data.format == imp::TextureFormat::BC7) {
+                void *pixel_data = tex.pix_info.data.imageData;
+                uint32_t pixel_data_size = tex.pix_info.data.imageSize;
 
-                if (texture_cache) {
-                    cache_dir = texture_cache;
-                }
-
-                auto texture_hasher = std::hash<bytes>{};
-                std::size_t hash = texture_hasher(
-                        std::as_bytes(
-                            std::span((char *)tex.pix_info.pixels, 
-                                      tex.pix_info.bufferSize)));
-
-                std::string hash_str = std::to_string(hash);
-
-                bool should_construct = false;
-
-                void *pixel_data;
-                uint32_t pixel_data_size;
-
-                ktxTexture *ktexture;
-                uint32_t width, height;
-
-                if (texture_cache) {
-                    std::string path_to_cached_tex = (cache_dir / hash_str);
-
-                    FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
-
-                    if (read_fp) {
-                        printf("*");
-
-                        fread(&width, sizeof(uint32_t), 1, read_fp);
-                        fread(&height, sizeof(uint32_t), 1, read_fp);
-                        fread(&pixel_data_size, sizeof(uint32_t), 1, read_fp);
-
-                        pixel_data = malloc(pixel_data_size);
-                        fread(pixel_data, pixel_data_size, 1, read_fp);
-
-                        fclose(read_fp);
-                    } else {
-                        printf("Did not find texture in cache - need to construct\n");
-
-                        // Need to construct
-                        KTX_error_code result;
-                        ktx_size_t offset;
-                        ktx_uint8_t *image;
-                        ktx_uint32_t level, layer, faceSlice;
-                        result = ktxTexture_CreateFromMemory((ktx_uint8_t *) tex.pix_info.pixels,
-                                tex.pix_info.bufferSize,
-                                KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
-                                &ktexture);
-                        if (ktexture->classId == ktxTexture2_c) {
-                            ktxTexture2 *texture2 = (ktxTexture2 *) ktexture;
-                            KTX_error_code ret = ktxTexture2_TranscodeBasis(texture2, KTX_TTF_BC7_RGBA, 0);
-                        }
-
-                        void *pixels = ktexture->pData;
-
-                        ktx_size_t tex_offset;
-                        ktxTexture_GetImageOffset(ktexture, 0, 0, 0, &tex_offset);
-                        ktx_size_t tex_size = ktxTexture_GetImageSize(ktexture, 0);
-
-                        width = ktexture->baseWidth;
-                        height = ktexture->baseHeight;
-
-                        pixel_data_size = tex_size;
-                        pixel_data = malloc(pixel_data_size);
-
-                        memcpy(pixel_data, (void *)((char *)pixels + tex_offset), tex_size);
-
-                        // Write this data to the cache
-                        FILE *write_fp = fopen(path_to_cached_tex.c_str(), "wb");
-
-                        fwrite(&width, sizeof(uint32_t), 1, write_fp);
-                        fwrite(&height, sizeof(uint32_t), 1, write_fp);
-                        fwrite(&pixel_data_size, sizeof(uint32_t), 1, write_fp);
-                        fwrite(pixel_data, pixel_data_size, 1, write_fp);
-
-                        fclose(write_fp);
-
-                        ktxTexture_Destroy(ktexture);
-                    }
-                }
+                uint32_t width = tex.pix_info.data.width,
+                         height = tex.pix_info.data.height;
 
                 cudaChannelFormatDesc channel_desc =
                         cudaCreateChannelDesc<cudaChannelFormatKindUnsignedBlockCompressed7>();
@@ -1761,7 +1683,7 @@ static MaterialData initMaterialData(
                 REQ_CUDA(cudaMallocArray(&cuda_array, &channel_desc,
                                          width, height, cudaArrayDefault));
 
-                REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, (void *) ((ktx_uint8_t *) pixel_data),
+                REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, (void *) pixel_data,
                                              16 * width / 4,
                                              16 * width / 4,
                                              height / 4,
@@ -1784,11 +1706,10 @@ static MaterialData initMaterialData(
 
                 cpu_mat_data.textures[i] = tex_obj;
                 cpu_mat_data.textureBuffers[i] = cuda_array;
+            } else {
 
-                free(pixel_data);
-            }else{
-
-                pixels = stbi_load_from_memory((stbi_uc*)tex.pix_info.pixels,tex.pix_info.bufferSize,&width,
+                pixels = stbi_load_from_memory((stbi_uc*)tex.pix_info.data.imageData,
+                                     tex.pix_info.data.imageSize, &width,
                                      &height, &components, STBI_rgb_alpha);
                 // For now, only allow this format
                 cudaChannelFormatDesc channel_desc =

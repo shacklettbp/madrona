@@ -1807,18 +1807,11 @@ static bool gltfImportAssets(LoaderData &loader,
 
     for(const auto& image : loader.images){
         GLTFBufferView view = loader.bufferViews[image.viewIdx];
-        DynArray<uint8_t> image_data(0);
-        image_data.resize(view.numBytes,[](auto) {});
-        memcpy(image_data.data(),loader.buffers[view.bufferIdx].dataPtr + view.offset, view.numBytes);
-        imported.imgData.imageArrays.emplace_back(std::move(image_data));
-    }
-
-    for(const auto& texture : loader.textures){
-        void *data = imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].data();
-        CountT size = imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].size();
+        auto *image_memory = (uint8_t*)malloc(view.numBytes);
+        memcpy(image_memory, loader.buffers[view.bufferIdx].dataPtr + view.offset, view.numBytes);
 
         TextureFormat format;
-        switch(loader.images[texture.sourceIdx].type){
+        switch(image.type){
             case GLTFImageType::PNG:
                 format = TextureFormat::PNG;
                 break;
@@ -1832,7 +1825,19 @@ static bool gltfImportAssets(LoaderData &loader,
                 format = TextureFormat::JPG;
                 break;
         }
-        imported.texture.emplace_back(SourceTexture(PixelBufferInfo{.pixels=data,.format=format,.bufferSize=(int)size}));
+
+        imported.imgData.imageArrays.emplace_back(BackingImageData {
+            .imageData = image_memory, .imageSize = view.numBytes,.format = format});
+    }
+
+    for(const auto& texture : loader.textures){
+        //auto *data = (uint8_t *)imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].imageData.data();
+        //CountT size = imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].imageData.size();
+        printf("backing %p,%lu\n",imported.imgData.imageArrays.data() + (texture.sourceIdx + prev_img_idx),
+               imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].imageSize);
+        uint32_t backingIndex = (texture.sourceIdx + prev_img_idx);
+        imported.texture.emplace_back(SourceTexture(
+                PixelBufferInfo{.backingDataIndex = backingIndex}));
     }
 
     for(const auto& material : loader.materials){

@@ -18,8 +18,6 @@
 #include "vk/descriptors.hpp"
 #include "shader.hpp"
 
-#include <ktx.h>
-
 #include <filesystem>
 #include <fstream>
 #include <signal.h>
@@ -1493,7 +1491,7 @@ static DynArray<MaterialTexture> loadTextures(
 
     for (const imp::SourceTexture &tx : textures)
     {
-        if (tx.info == imp::TextureLoadInfo::FILE_NAME) {
+        if (tx.info == imp::TextureLoadInfo::FileName) {
             const char *filename = tx.path;
             int width, height, components;
             void *pixels = stbi_load(filename, &width, &height, &components, STBI_rgb_alpha);
@@ -1595,94 +1593,14 @@ static DynArray<MaterialTexture> loadTextures(
             host_buffers.push_back(std::move(texture_hb_staging));
 
             dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
-        } else if (tx.info == imp::TextureLoadInfo::PIXEL_BUFFER) {
-            if(tx.pix_info.format == imp::KTX2) {
-                char *texture_cache = getenv("MADRONA_TEXTURE_CACHE_DIR");
-                std::filesystem::path cache_dir = "";
+        } else if (tx.info == imp::TextureLoadInfo::PixelBuffer) {
+            if(tx.pix_info.data.format == imp::TextureFormat::BC7) {
+                void *pixel_data = tx.pix_info.data.imageData;
+                uint32_t pixel_data_size = tx.pix_info.data.imageSize;
 
-                if (texture_cache) {
-                    cache_dir = texture_cache;
-                }
+                uint32_t width = tx.pix_info.data.width,
+                         height = tx.pix_info.data.height;
 
-                auto texture_hasher = std::hash<bytes>{};
-                std::size_t hash = texture_hasher(
-                        std::as_bytes(
-                            std::span((char *)tx.pix_info.pixels, 
-                                      tx.pix_info.bufferSize)));
-
-                std::string hash_str = std::to_string(hash);
-
-                bool should_construct = false;
-
-                void *pixel_data;
-                uint32_t pixel_data_size;
-
-                ktxTexture *ktexture;
-                uint32_t width, height;
-
-                if (texture_cache) {
-                    std::string path_to_cached_tex = (cache_dir / hash_str);
-
-                    FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
-
-                    if (read_fp) {
-                        printf("*");
-
-                        fread(&width, sizeof(uint32_t), 1, read_fp);
-                        fread(&height, sizeof(uint32_t), 1, read_fp);
-                        fread(&pixel_data_size, sizeof(uint32_t), 1, read_fp);
-
-                        pixel_data = malloc(pixel_data_size);
-                        fread(pixel_data, pixel_data_size, 1, read_fp);
-
-                        fclose(read_fp);
-                    } else {
-                        printf("Did not find texture in cache - need to construct\n");
-
-                        // Need to construct
-                        KTX_error_code result;
-                        ktx_size_t offset;
-                        ktx_uint8_t *image;
-                        ktx_uint32_t level, layer, faceSlice;
-                        result = ktxTexture_CreateFromMemory((ktx_uint8_t *) tx.pix_info.pixels,
-                                tx.pix_info.bufferSize,
-                                KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
-                                &ktexture);
-                        if (ktexture->classId == ktxTexture2_c) {
-                            ktxTexture2 *texture2 = (ktxTexture2 *) ktexture;
-                            KTX_error_code ret = ktxTexture2_TranscodeBasis(texture2, KTX_TTF_BC7_RGBA, 0);
-                        }
-
-                        void *pixels = ktexture->pData;
-
-                        ktx_size_t tex_offset;
-                        ktxTexture_GetImageOffset(ktexture, 0, 0, 0, &tex_offset);
-                        ktx_size_t tex_size = ktxTexture_GetImageSize(ktexture, 0);
-
-                        width = ktexture->baseWidth;
-                        height = ktexture->baseHeight;
-
-                        pixel_data_size = tex_size;
-                        pixel_data = malloc(pixel_data_size);
-
-                        memcpy(pixel_data, (void *)((char *)pixels + tex_offset), tex_size);
-
-                        // Write this data to the cache
-                        FILE *write_fp = fopen(path_to_cached_tex.c_str(), "wb");
-
-                        fwrite(&width, sizeof(uint32_t), 1, write_fp);
-                        fwrite(&height, sizeof(uint32_t), 1, write_fp);
-                        fwrite(&pixel_data_size, sizeof(uint32_t), 1, write_fp);
-                        fwrite(pixel_data, pixel_data_size, 1, write_fp);
-
-                        fclose(write_fp);
-
-
-                        ktxTexture_Destroy(ktexture);
-                    }
-                } else {
-                    assert(false);
-                }
 
                 auto [texture, texture_reqs] = alloc.makeTexture2D(
                         width, height, 1, VK_FORMAT_BC7_UNORM_BLOCK);
@@ -1776,14 +1694,12 @@ static DynArray<MaterialTexture> loadTextures(
 
                 host_buffers.push_back(std::move(texture_hb_staging));
                 dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
-
-                free(pixel_data);
             }else{
                 int width, height, components;
 
                 void *pixels = stbi_load_from_memory(
-                        (stbi_uc*)tx.pix_info.pixels,
-                        tx.pix_info.bufferSize,
+                        (stbi_uc*)tx.pix_info.data.imageData,
+                        tx.pix_info.data.imageSize,
                         &width, &height, &components, 
                         STBI_rgb_alpha);
 

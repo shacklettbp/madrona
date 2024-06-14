@@ -30,21 +30,30 @@ struct SourceObject {
     uint32_t bvhIndex;
 };
 
-enum TextureLoadInfo {
-    FILE_NAME,
-    PIXEL_BUFFER
+enum class TextureLoadInfo {
+    FileName,
+    PixelBuffer,
 };
 
-enum TextureFormat {
+enum class TextureFormat : int {
     KTX2,
     PNG,
     JPG,
+    BC7,
+};
+
+struct BackingImageData {
+    uint8_t *imageData;
+    size_t imageSize;
+    TextureFormat format;
+    uint32_t width;
+    uint32_t height;
+    bool processed = false;
 };
 
 struct PixelBufferInfo {
-    void *pixels;
-    TextureFormat format;
-    int bufferSize;
+    uint32_t backingDataIndex;
+    BackingImageData data;
 };
 
 struct SourceTexture {
@@ -53,14 +62,15 @@ struct SourceTexture {
         const char *path;
         PixelBufferInfo pix_info;
     };
-    SourceTexture(const char *path_ptr) : info(FILE_NAME), path(path_ptr){
+    SourceTexture(){}
+    SourceTexture(const char *path_ptr) : info(TextureLoadInfo::FileName), path(path_ptr){
     }
     SourceTexture(TextureLoadInfo tex_info, const char *path_ptr) {
         info = tex_info;
         path = path_ptr;
     }
     SourceTexture(PixelBufferInfo p_info) {
-        info = PIXEL_BUFFER;
+        info = TextureLoadInfo::PixelBuffer;
         pix_info = p_info;
     }
 };
@@ -128,8 +138,8 @@ struct ImportedAssets {
         DynArray<DynArray<render::MeshBVH>> meshBVHArrays;
     } geoData;
 
-    struct ImageData{
-        DynArray<DynArray<uint8_t>> imageArrays;
+    struct ImageData {
+        DynArray<BackingImageData> imageArrays;
     } imgData;
 
     DynArray<SourceObject> objects;
@@ -146,6 +156,14 @@ struct ImportedAssets {
     // Unfinished but provides just enough to support BVH raytracing.
     static Optional<GPUGeometryData> makeGPUData(
         const ImportedAssets &assets);
+
+    struct ProcessOutput {
+        bool shouldCache;
+        BackingImageData newTex;
+    };
+
+    using TextureProcessFunc = ProcessOutput (*)(SourceTexture&);
+    void postProcessTextures(const char *texture_cache, TextureProcessFunc process_tex_func);
 };
 
 }

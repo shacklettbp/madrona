@@ -30,7 +30,6 @@ target_link_libraries(madrona_mw_gpu
         CUDA::nvrtc CUDA::cuda_driver
         ${CUDA_NVJITLINK_LIBRARY}
         stb
-        ktx
 )
 get_target_property(OUT madrona_mw_gpu LINK_LIBRARIES)
 
