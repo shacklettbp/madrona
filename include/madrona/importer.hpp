@@ -14,11 +14,10 @@ struct SourceMesh {
     math::Vector3 *normals;
     math::Vector4 *tangentAndSigns;
     math::Vector2 *uvs;
-    // uint32_t *vertexMaterials;
 
     uint32_t *indices;
     uint32_t *faceCounts;
-    // uint32_t *faceMaterials;
+    uint32_t *faceMaterials;
 
     uint32_t numVertices;
     uint32_t numFaces;

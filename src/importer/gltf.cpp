@@ -1539,13 +1539,6 @@ static bool gltfParseMesh(
             face_mats[i] = prim.materialIdx;
         }
 
-#if 0
-        DynArray<uint32_t> vert_mats(num_vertices);
-        for (int i = 0; i < num_vertices; ++i) {
-            vert_mats[i] = prim.materialIdx;
-        }
-#endif
-
         meshes.push_back(SourceMesh {
             .positions = position_ptr,
             .normals = normal_ptr,
@@ -1553,13 +1546,11 @@ static bool gltfParseMesh(
             .uvs = uv_ptr,
             .indices = idx_ptr,
             .faceCounts = nullptr,
-            // .faceMaterials = face_mat_ptr,
+            .faceMaterials = nullptr,
             .numVertices = num_vertices,
             .numFaces = num_faces,
             .materialIDX = prim.materialIdx, // FIXME
         });
-
-        // printf("%d ", (int)prim.materialIdx);
     }
 
     imported.objects.push_back({
@@ -1670,12 +1661,6 @@ static bool gltfImportAssets(LoaderData &loader,
             if(src_mesh.uvs){
                 total_new_uvs += src_mesh.numVertices;
             }
-
-#if 0
-            if (src_mesh.faceMaterials) {
-                total_new_mats += src_mesh.numFaces;
-            }
-#endif
         }
 
         total_new_meshes += src_obj.meshes.size();
@@ -1738,12 +1723,6 @@ static bool gltfImportAssets(LoaderData &loader,
                     new_uvs_arr.push_back(src_mesh.uvs[i]);
                 }
 
-#if 0
-                if (src_mesh.faceMaterials) {
-                    new_mats_arr.push_back(src_mesh.faceMaterials[i]);
-
-                }
-#endif
                 max_mat_idx = std::max(max_mat_idx, src_mesh.materialIDX);
             }
 
@@ -1754,16 +1733,9 @@ static bool gltfImportAssets(LoaderData &loader,
                 .tangentAndSigns = src_mesh.tangentAndSigns ?
                     new_mesh_tangents_ptr : nullptr,
                 .uvs = src_mesh.uvs ? new_mesh_uvs_ptr : nullptr,
-#if 0
-                .vertexMaterials = src_mesh.vertexMaterials ?
-                    new_mats_ptr : nullptr,
-#endif
                 .indices = src_mesh.indices,
                 .faceCounts = src_mesh.faceCounts,
-#if 0
-                .faceMaterials = src_mesh.faceMaterials ?
-                    new_mats_ptr : nullptr,
-#endif
+                .faceMaterials = nullptr,
                 .numVertices = src_mesh.numVertices,
                 .numFaces = src_mesh.numFaces,
                 .materialIDX = src_mesh.materialIDX,
@@ -1772,12 +1744,6 @@ static bool gltfImportAssets(LoaderData &loader,
     }
 
     for(SourceMesh& mesh:merged_meshes){
-#if 0
-        for (int i = 0; i < mesh.numFaces; ++i) {
-            mesh.faceMaterials[i] = mesh.materialIDX + imported.materials.size();
-        }
-#endif
-
         mesh.materialIDX = mesh.materialIDX + imported.materials.size();
     }
 
