@@ -727,10 +727,10 @@ Optional<render::MeshBVH> EmbreeLoader::load(const SourceObject& object, const D
     bvh_out.numLeaves = leafNodes.size();
     bvh_out.numVerts = verticesPtr->size();
 
-    bvh_out.nodes = nodes.release(true);
-    bvh_out.leafGeos = leaf_geos.release(true);
-    bvh_out.leafMats = leaf_materials.release(true);
-    bvh_out.vertices = verticesPtr->release(true);
+    bvh_out.nodes = nodes.retrieve_ptr();
+    bvh_out.leafGeos = leaf_geos.retrieve_ptr();
+    bvh_out.leafMats = leaf_materials.retrieve_ptr();
+    bvh_out.vertices = verticesPtr->retrieve_ptr();
     bvh_out.rootAABB = aabb_out;
     bvh_out.materialIDX = -1;
 

@@ -184,10 +184,10 @@ bool loadCache(const char* location, DynArray<render::MeshBVH>& bvhs_out){
         bvh.numLeaves = num_leaves;
         bvh.numVerts = num_verts;
 
-        bvh.nodes = nodes.release(true);
+        bvh.nodes = nodes.retrieve_ptr();
         // bvh.leafGeos = leaf_geos.release(true);
-        bvh.leafMats = leaf_materials.release(true);
-        bvh.vertices = vertices.release(true);
+        bvh.leafMats = leaf_materials.retrieve_ptr();
+        bvh.vertices = vertices.retrieve_ptr();
         bvh.rootAABB = aabb_out;
         bvh.materialIDX = material_idx;
         bvhs_out.push_back(bvh);

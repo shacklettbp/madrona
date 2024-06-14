@@ -1960,18 +1960,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
             }
 
             for (int32_t i = 0; i < num_mesh_verts; i++) {
-                uint32_t vert_mat_index = [override_materials, i, material_idx, &mesh] () {
-                    if (override_materials) {
-                        return material_idx;
-                    } else if (material_idx >= 0 && mesh.vertexMaterials) {
-                        return mesh.vertexMaterials[i];
-                    } else {
-                        // printf("NO SOURCE MATERIAL!\n");
-
-                        return 0u;
-                    }
-                } ();
-
                 // printf("%u ", vert_mat_index);
 
                 Vector3 pos = mesh.positions[i];
@@ -2000,7 +1988,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
                 // Encode UVs into a uint32 (how bad will this look on small images??
                 // Let's see I guess.
                 float encoded_uvs = std::bit_cast<float>(packHalf2x16(uv));
-                float encoded_mat_idx = std::bit_cast<float>(vert_mat_index);
 
                 vertex_ptr[vertex_offset++] = PackedVertex {
                     Vector4 {
@@ -2013,7 +2000,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
                         encoded_normal_tangent.y,
                         encoded_normal_tangent.z,
                         encoded_uvs,
-                        encoded_mat_idx,
+                        0
                     },
                 };
             }
