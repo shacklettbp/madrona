@@ -82,9 +82,7 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
                     pixel_data = (uint8_t *)malloc(data.imageSize);
 
                     fread(pixel_data, data.imageSize, 1, read_fp);
-
-                    auto processOutput = process_tex_func(tx);
-
+                    
                     data.imageData = pixel_data;
                     data.processed = true;
 
