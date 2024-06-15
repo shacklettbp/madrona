@@ -1800,11 +1800,11 @@ static bool gltfImportAssets(LoaderData &loader,
     }
 
     for(const auto& texture : loader.textures){
-        //auto *data = (uint8_t *)imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].imageData.data();
-        //CountT size = imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].imageData.size();
         printf("backing %p,%lu\n",imported.imgData.imageArrays.data() + (texture.sourceIdx + prev_img_idx),
                imported.imgData.imageArrays[texture.sourceIdx + prev_img_idx].imageSize);
+
         uint32_t backingIndex = (texture.sourceIdx + prev_img_idx);
+
         imported.texture.emplace_back(SourceTexture(
                 PixelBufferInfo{.backingDataIndex = backingIndex}));
     }

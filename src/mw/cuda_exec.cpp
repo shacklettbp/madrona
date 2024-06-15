@@ -20,6 +20,7 @@
 #include <madrona/cuda_utils.hpp>
 #include <madrona/tracing.hpp>
 #include <madrona/json.hpp>
+#include <madrona/render/asset_processor.hpp>
 
 #include "cpp_compile.hpp"
 
@@ -2385,13 +2386,13 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
            CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
            cu_gpu));
 
-    Optional<imp::ImportedAssets::GPUGeometryData> gpu_imported_assets = 
+    Optional<render::MeshBVHData> gpu_imported_assets = 
         [&render_cfg] () {
             if (render_cfg.importedAssets) {
-                return imp::ImportedAssets::makeGPUData(
+                return render::AssetProcessor::makeBVHData(
                         *render_cfg.importedAssets);
             } else {
-                return Optional<imp::ImportedAssets::GPUGeometryData>::none();
+                return Optional<render::MeshBVHData>::none();
             }
         } ();
 

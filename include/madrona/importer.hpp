@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/math.hpp>
@@ -57,17 +58,27 @@ struct PixelBufferInfo {
 
 struct SourceTexture {
     TextureLoadInfo info;
+
     union {
         const char *path;
         PixelBufferInfo pix_info;
     };
-    SourceTexture(){}
-    SourceTexture(const char *path_ptr) : info(TextureLoadInfo::FileName), path(path_ptr){
+
+    SourceTexture()
+    {
     }
-    SourceTexture(TextureLoadInfo tex_info, const char *path_ptr) {
+
+    SourceTexture(const char *path_ptr) : 
+        info(TextureLoadInfo::FileName), path(path_ptr)
+    {
+    }
+
+    SourceTexture(TextureLoadInfo tex_info, const char *path_ptr) 
+    {
         info = tex_info;
         path = path_ptr;
     }
+
     SourceTexture(PixelBufferInfo p_info) {
         info = TextureLoadInfo::PixelBuffer;
         pix_info = p_info;
@@ -102,25 +113,16 @@ struct EmbreeLoader {
 
     std::unique_ptr<Impl> impl_;
 
-    Optional<MeshBVH> load(const SourceObject &obj, const DynArray<SourceMaterial> &materials);
+    Optional<MeshBVH> load(const SourceObject &obj,
+            const DynArray<SourceMaterial> &materials);
+};
+
+struct SourceAssetInfo {
+    uint32_t numObjects;
+    std::string path;
 };
 
 struct ImportedAssets {
-    struct GPUGeometryData {
-        MeshBVH::Node *nodes;
-        uint64_t numNodes;
-
-        MeshBVH::LeafGeometry *leafGeos;
-        MeshBVH::LeafMaterial *leafMaterial;
-        uint64_t numLeaves;
-
-        MeshBVH::BVHVertex *vertices;
-        uint64_t numVerts;
-
-        MeshBVH *meshBVHs;
-        uint64_t numBVHs;
-    };
-
     struct GeometryData {
         DynArray<DynArray<math::Vector3>> positionArrays;
         DynArray<DynArray<math::Vector3>> normalArrays;
@@ -131,7 +133,6 @@ struct ImportedAssets {
         DynArray<DynArray<uint32_t>> faceCountArrays;
 
         DynArray<DynArray<SourceMesh>> meshArrays;
-        DynArray<DynArray<MeshBVH>> meshBVHArrays;
     } geoData;
 
     struct ImageData {
@@ -142,16 +143,12 @@ struct ImportedAssets {
     DynArray<SourceMaterial> materials;
     DynArray<SourceInstance> instances;
     DynArray<SourceTexture> texture;
+    DynArray<SourceAssetInfo> assetInfos;
 
     static Optional<ImportedAssets> importFromDisk(
         Span<const char * const> asset_paths,
         Span<char> err_buf = { nullptr, 0 },
-        bool one_object_per_asset = false,
-        bool generate_mesh_bvhs = false);
-
-    // Unfinished but provides just enough to support BVH raytracing.
-    static Optional<GPUGeometryData> makeGPUData(
-        const ImportedAssets &assets);
+        bool one_object_per_asset = false);
 
     struct ProcessOutput {
         bool shouldCache;
@@ -159,7 +156,8 @@ struct ImportedAssets {
     };
 
     using TextureProcessFunc = ProcessOutput (*)(SourceTexture&);
-    void postProcessTextures(const char *texture_cache, TextureProcessFunc process_tex_func);
+    void postProcessTextures(const char *texture_cache, 
+            TextureProcessFunc process_tex_func);
 };
 
 }
