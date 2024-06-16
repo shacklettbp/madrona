@@ -1,5 +1,5 @@
-set(embree_DIR ~/Development/embree/lib/cmake/embree-4.3.1)
-find_package(embree 4 REQUIRED)
+# set(embree_DIR ~/Development/embree/lib/cmake/embree-4.3.1)
+# find_package(embree 4 REQUIRED)
 
 add_library(madrona_json STATIC
     ${MADRONA_INC_DIR}/json.hpp json.cpp
@@ -34,7 +34,7 @@ target_link_libraries(madrona_importer PRIVATE
     madrona_json
     meshoptimizer
     fast_float
-    embree
+    madrona_embree
 )
 
 if (TARGET madrona_cuda)

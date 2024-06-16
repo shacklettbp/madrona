@@ -133,9 +133,6 @@ static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
         if(bvh_cache_dir && !regen_cache) {
             should_construct = !loadCache((cache_dir /
                     loaded_path.filename()).c_str(), asset_bvhs);
-            if(should_construct){
-                printf("Missing %s. Reconstructing.\n",loaded_path.filename().c_str());
-            }
         }
 
         if(should_construct) {
@@ -153,7 +150,6 @@ static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
         }
 
         if(bvh_cache_dir && (regen_cache || should_construct)){
-            printf("Caching File %s\n",loaded_path.filename().c_str());
             writeCache((cache_dir / loaded_path.filename()).c_str(), 
                     asset_bvhs);
         }
@@ -464,8 +460,6 @@ MaterialData initMaterialData(
     auto gpu_mat_data = cpu_mat_data;
     gpu_mat_data.textures = gpu_tex_buffer;
     gpu_mat_data.materials = mat_buffer;
-
-    printf("Material Buffer %d %p\n",num_materials,mat_buffer);
 
     return gpu_mat_data;
 }

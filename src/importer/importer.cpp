@@ -41,7 +41,6 @@ namespace madrona::imp {
 using namespace math;
 
 void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProcessFunc process_tex_func) {
-    printf("Processing Textures\n");
     for(SourceTexture& tx: texture) {
         tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
         if (tx.info == imp::TextureLoadInfo::PixelBuffer && !tx.pix_info.data.processed) {
@@ -74,8 +73,6 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
                 FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
 
                 if (read_fp) {
-                    printf("*");
-
                     BackingImageData data;
                     fread(&data, sizeof(BackingImageData), 1, read_fp);
 
@@ -93,8 +90,6 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
 
                     fclose(read_fp);
                 } else {
-                    printf("Did not find texture in cache - need to construct\n");
-
                     auto processOutput = process_tex_func(tx);
 
                     if(!processOutput.shouldCache)
@@ -223,10 +218,6 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             std::string(path_view)
         });
     }
-
-    printf("number of materials = %d\n", (int)imported.materials.size());
-
-    printf("\n");
 
     if (!load_success) {
         return Optional<ImportedAssets>::none();

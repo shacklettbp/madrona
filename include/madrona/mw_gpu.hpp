@@ -145,8 +145,6 @@ public:
     // ECSRegister::exportColumn. Note that this will be a GPU pointer.
     void * getExported(CountT slot) const;
 
-    void getTimings(MWCudaLaunchGraph &launch_graph);
-
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
