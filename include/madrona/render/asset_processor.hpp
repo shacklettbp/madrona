@@ -20,9 +20,22 @@ struct MeshBVHData {
     uint64_t numBVHs;
 };
 
+struct MaterialData {
+    // GPU buffer containing array of texture objects
+    cudaTextureObject_t *textures;
+    cudaArray_t *textureBuffers;
+    Material *materials;
+};
+
 namespace AssetProcessor {
     Optional<MeshBVHData> makeBVHData(
             const imp::ImportedAssets &assets);
+
+    MaterialData initMaterialData(
+        const imp::SourceMaterial *materials,
+        uint32_t num_materials,
+        const imp::SourceTexture *textures,
+        uint32_t num_textures);
 };
     
 }

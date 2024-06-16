@@ -19,6 +19,16 @@
 
 namespace madrona {
 
+struct Material {
+    // For now, just a color
+    math::Vector4 color;
+
+    int32_t textureIdx;
+
+    float roughness;
+    float metalness;
+};
+
 struct TriangleIndices {
     uint32_t indices[3];
 };
