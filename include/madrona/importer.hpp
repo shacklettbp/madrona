@@ -27,7 +27,6 @@ struct SourceMesh {
 
 struct SourceObject {
     Span<SourceMesh> meshes;
-    uint32_t bvhIndex;
 };
 
 enum class TextureLoadInfo {
