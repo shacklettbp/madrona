@@ -1545,7 +1545,7 @@ static bool gltfParseMesh(
             .faceMaterials = nullptr,
             .numVertices = num_vertices,
             .numFaces = num_faces,
-            .materialIDX = prim.materialIdx, // FIXME
+            .materialIDX = prim.materialIdx,
         });
     }
 
@@ -1653,7 +1653,7 @@ static bool gltfImportAssets(LoaderData &loader,
                 total_new_tangents += src_mesh.numVertices;
             }
 
-            if(src_mesh.uvs){
+            if (src_mesh.uvs) {
                 total_new_uvs += src_mesh.numVertices;
             }
         }
@@ -1714,7 +1714,7 @@ static bool gltfImportAssets(LoaderData &loader,
                     });
                 }
 
-                if(src_mesh.uvs){
+                if (src_mesh.uvs) {
                     new_uvs_arr.push_back(src_mesh.uvs[i]);
                 }
 
@@ -1738,7 +1738,7 @@ static bool gltfImportAssets(LoaderData &loader,
         }
     }
 
-    for(SourceMesh& mesh:merged_meshes){
+    for (SourceMesh& mesh:merged_meshes) {
         mesh.materialIDX = mesh.materialIDX + imported.materials.size();
     }
 
@@ -1774,7 +1774,7 @@ static bool gltfImportAssets(LoaderData &loader,
     CountT prev_img_idx = imported.imgData.imageArrays.size();
     CountT prev_tex_idx = imported.texture.size();
 
-    for(const auto& image : loader.images){
+    for (const auto& image : loader.images) {
         GLTFBufferView view = loader.bufferViews[image.viewIdx];
         auto *image_memory = (uint8_t*)malloc(view.numBytes);
         memcpy(image_memory, loader.buffers[view.bufferIdx].dataPtr + view.offset, view.numBytes);
@@ -1799,24 +1799,25 @@ static bool gltfImportAssets(LoaderData &loader,
             .imageData = image_memory, .imageSize = view.numBytes,.format = format});
     }
 
-    for(const auto& texture : loader.textures){
+    for (const auto& texture : loader.textures) {
         uint32_t backingIndex = (texture.sourceIdx + prev_img_idx);
 
         imported.texture.emplace_back(SourceTexture(
                 PixelBufferInfo{.backingDataIndex = backingIndex}));
     }
 
-    for(const auto& material : loader.materials){
+    for (const auto& material : loader.materials) {
         int32_t texture_id = material.baseColorIdx;
-        if(texture_id != -1){
+        if (texture_id != -1) {
             texture_id += prev_tex_idx;
         }
         SourceMaterial s_mat = {
             .color = material.baseColor,
             //.color = math::Vector4{1.f, 1.f, 1.f, 1.f},
             .textureIdx = texture_id,
-            .roughness=material.roughness,
-            .metalness=material.metallic};
+            .roughness = material.roughness,
+            .metalness = material.metallic,
+        };
         imported.materials.emplace_back(s_mat);
     }
 

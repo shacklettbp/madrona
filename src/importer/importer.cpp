@@ -43,8 +43,9 @@ namespace madrona::imp {
 
 using namespace math;
 
-void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProcessFunc process_tex_func) {
-    for(SourceTexture& tx: texture) {
+void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProcessFunc process_tex_func)
+{
+    for (SourceTexture& tx: texture) {
         tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
         if (tx.info == imp::TextureLoadInfo::PixelBuffer && !tx.pix_info.data.processed) {
             std::filesystem::path cache_dir = texture_cache;
@@ -120,10 +121,10 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
 
                 auto processOutput = process_tex_func(tx);
 
-                if(!processOutput.shouldCache)
+                if (!processOutput.shouldCache)
                         continue;
 
-                if(preProcess != processOutput.newTex.processed) {
+                if (preProcess != processOutput.newTex.processed) {
                     free(oldImageData);
                     imgData.imageArrays[tx.pix_info.backingDataIndex] =
                             processOutput.newTex;
