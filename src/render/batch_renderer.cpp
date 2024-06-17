@@ -2072,8 +2072,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
     double duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
     float duration_ms = (float)(duration/1000000.0);
 
-    printf("rasterizer batch renderer took %f ms\n", duration_ms);
-
     impl->recordedTimings.push_back(duration_ms);
 
     impl->dev.dt.getQueryPoolResults(
