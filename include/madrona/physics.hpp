@@ -204,10 +204,6 @@ namespace PhysicsSystem {
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
 
-    TaskGraphNodeID setupBroadphaseOverlapTasks(
-        TaskGraphBuilder &builder,
-        Span<const TaskGraphNodeID> deps);
-
     TaskGraphNodeID setupPhysicsStepTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps,
@@ -217,6 +213,18 @@ namespace PhysicsSystem {
     TaskGraphNodeID setupCleanupTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
+
+    // Use the below two functions if you just want to use the broadphase without
+    // the rest of the physics system
+
+    TaskGraphNodeID setupStandaloneBroadphaseOverlapTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
+
+    TaskGraphNodeID setupStandaloneBroadphaseCleanupTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
+
 };
 
 }

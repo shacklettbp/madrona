@@ -348,13 +348,6 @@ TaskGraphNodeID setupBroadphaseTasks(
     return broadphase::setupBVHTasks(builder, deps);
 }
 
-TaskGraphNodeID setupBroadphaseOverlapTasks(
-    TaskGraphBuilder &builder,
-    Span<const TaskGraphNodeID> deps)
-{
-    return broadphase::setupPreIntegrationTasks(builder, deps);
-}
-
 TaskGraphNodeID setupPhysicsStepTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps,
@@ -395,6 +388,22 @@ TaskGraphNodeID setupCleanupTasks(
 {
     return builder.addToGraph<ClearTmpNode<CollisionEventTemporary>>(deps);
 }
+
+
+TaskGraphNodeID setupStandaloneBroadphaseOverlapTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
+{
+    return broadphase::setupPreIntegrationTasks(builder, deps);
+}
+
+TaskGraphNodeID setupStandaloneBroadphaseCleanupTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps)
+{
+    return builder.addToGraph<ClearTmpNode<CandidateTemporary>>(deps);
+}
+
 
 }
 

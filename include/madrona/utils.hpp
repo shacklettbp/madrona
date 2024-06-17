@@ -15,6 +15,7 @@
 #ifdef MADRONA_MSVC
 #include <bit>
 #endif
+#include <cstring>
 #include <cstdint>
 #include <type_traits>
 

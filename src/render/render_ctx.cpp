@@ -1274,13 +1274,16 @@ RenderContext::RenderContext(
             .binding = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            .pImmutableSamplers = nullptr,
         };
 
         VkDescriptorSetLayoutCreateInfo info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
             .bindingCount = 1,
-            .pBindings = &binding
+            .pBindings = &binding,
         };
 
         dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_layout_);
@@ -1341,6 +1344,8 @@ RenderContext::RenderContext(
 
         VkDescriptorSetLayoutCreateInfo info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
             .bindingCount = 3,
             .pBindings = bindings
         };
@@ -1353,8 +1358,9 @@ RenderContext::RenderContext(
 
         VkDescriptorSetLayoutBindingFlagsCreateInfo flag_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            .pNext = nullptr,
             .bindingCount = 2,
-            .pBindingFlags = flags
+            .pBindingFlags = flags,
         };
 
         VkDescriptorSetLayoutBinding bindings[] = {
@@ -1377,6 +1383,7 @@ RenderContext::RenderContext(
         VkDescriptorSetLayoutCreateInfo info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .pNext = &flag_info,
+            .flags = 0,
             .bindingCount = 2,
             .pBindings = bindings
         };
@@ -1387,6 +1394,7 @@ RenderContext::RenderContext(
     {
         VkDescriptorSetAllocateInfo alloc_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .pNext = nullptr,
             .descriptorPool = asset_pool_,
             .descriptorSetCount = 1,
             .pSetLayouts = &asset_tex_layout_
@@ -1944,8 +1952,13 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 
                     Vector3 face_normal = cross(e0, e1);
                     float face_len = face_normal.length();
-                    assert(face_len != 0);
-                    face_normal /= face_len;
+
+                    if (face_len == 0.f) {
+                        // Degenerate triangle
+                        face_normal = math::up;
+                    } else {
+                        face_normal /= face_len;
+                    }
 
                     (*new_normals)[i0] += face_normal;
                     (*new_normals)[i1] += face_normal;
@@ -2048,6 +2061,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     {
         VkDescriptorSetAllocateInfo alloc_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .pNext = nullptr,
             .descriptorPool = asset_pool_,
             .descriptorSetCount = 1,
             .pSetLayouts = &asset_layout_

@@ -140,7 +140,7 @@ public:
                 this->destruct();
                 this->initialized_ = false;
             }
-        } else if (o.initialized) {
+        } else if (o.initialized_) {
             this->construct(std::forward<T>(o.value_));
             this->initialized_ = true;
         }
