@@ -5,10 +5,9 @@ namespace madrona::phys {
 
 using namespace madrona::math;
 
-void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
-                             StackAlloc &tmp_alloc,
-                             MeshBVH *out_bvh,
-                             CountT *out_num_bytes)
+MeshBVH MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
+                              StackAlloc &tmp_alloc,
+                              StackAlloc::Frame *out_alloc_frame)
 {
     using Node = MeshBVH::Node;
     using LeafGeometry = MeshBVH::LeafGeometry;
@@ -381,40 +380,18 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
     int32_t num_nodes = cur_node_offset;
     int32_t num_leaves = cur_leaf_offset;
 
-    auto buffer_sizes = std::to_array<int64_t>({
-        (int64_t)sizeof(Node) * num_nodes,
-        (int64_t)sizeof(LeafGeometry) * num_leaves,
-        (int64_t)sizeof(LeafMaterial) * num_leaves,
-        (int64_t)sizeof(Vector3) * total_num_verts,
-    });
+    *out_alloc_frame = tmp_frame;
 
-    int64_t buffer_offsets[buffer_sizes.size() - 1];
-    int64_t total_num_bytes = utils::computeBufferOffsets(
-        buffer_sizes, buffer_offsets, MADRONA_CACHE_LINE);
-
-    char *buffer = (char *)malloc(total_num_bytes);
-
-    *out_bvh = MeshBVH {
-        .nodes = (Node * )(buffer),
-        .leafGeos = (LeafGeometry *)(buffer + buffer_offsets[0]),
-        .leafMats = (LeafMaterial *)(buffer + buffer_offsets[1]),
-        .vertices = (Vector3 *)(buffer + buffer_offsets[2]),
+    return MeshBVH {
+        .nodes = nodes,
+        .leafGeos = leaf_geos,
+        .leafMats = leaf_mats,
+        .vertices = combined_verts,
         .rootAABB = root_aabb,
         .numNodes = (uint32_t)num_nodes,
         .numLeaves = (uint32_t)num_leaves,
         .numVerts = (uint32_t)total_num_verts,
     };
-    *out_num_bytes = total_num_bytes;
-
-    memcpy(out_bvh->nodes, nodes, sizeof(Node) * num_nodes);
-    memcpy(out_bvh->leafGeos, leaf_geos, sizeof(LeafGeometry) * num_leaves);
-    memcpy(out_bvh->leafMats, leaf_mats, sizeof(LeafMaterial) * num_leaves);
-    memcpy(out_bvh->vertices, combined_verts,
-           sizeof(Vector3) * total_num_verts);
-
-    tmp_alloc.pop(tmp_frame);
-
-    return buffer;
 }
 
 }
