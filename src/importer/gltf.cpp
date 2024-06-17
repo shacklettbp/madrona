@@ -1531,7 +1531,7 @@ static bool gltfParseMesh(
 
         // Create the materials.
         DynArray<uint32_t> face_mats(num_faces);
-        for (int i = 0; i < num_faces; ++i) {
+        for (uint32_t i = 0; i < num_faces; ++i) {
             face_mats[i] = prim.materialIdx;
         }
 
@@ -1780,7 +1780,7 @@ static bool gltfImportAssets(LoaderData &loader,
         memcpy(image_memory, loader.buffers[view.bufferIdx].dataPtr + view.offset, view.numBytes);
 
         TextureFormat format;
-        switch(image.type){
+        switch (image.type) {
             case GLTFImageType::PNG:
                 format = TextureFormat::PNG;
                 break;
@@ -1813,7 +1813,6 @@ static bool gltfImportAssets(LoaderData &loader,
         }
         SourceMaterial s_mat = {
             .color = material.baseColor,
-            //.color = math::Vector4{1.f, 1.f, 1.f, 1.f},
             .textureIdx = texture_id,
             .roughness = material.roughness,
             .metalness = material.metallic,
