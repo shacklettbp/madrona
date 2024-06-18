@@ -73,23 +73,23 @@ struct RenderConfig {
     // Until we support custom rendering functions, for now we must toggle
     // between rendering color or depth.
     enum class RenderMode : uint32_t {
+        None,
         Color,
         Depth,
-        None,
     };
 
-    RenderMode renderMode;
+    RenderMode renderMode = RenderMode::None;
 
     // Imported assets from disk.
-    imp::ImportedAssets *importedAssets;
+    imp::ImportedAssets *importedAssets = nullptr;
 
     // The raytracer output is square so the resolution of the outputs would be
     // renderResolution x renderResolution.
-    uint32_t renderResolution;
+    uint32_t renderResolution = 0;
 
     // Configure near and far planes of the rendering.
-    float nearPlane;
-    float farPlane;
+    float nearPlane = 0.f;
+    float farPlane = 0.f;
 };
 
 class MWCudaExecutor;
