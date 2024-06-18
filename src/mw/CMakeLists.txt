@@ -88,9 +88,21 @@ set(TASK_GRAPH_INTERNAL_SRC_LIST "${TASK_GRAPH_INTERNAL_SRC_LIST}")
 
 get_target_property(MADRONA_HDRS_INCLUDES madrona_hdrs INTERFACE_INCLUDE_DIRECTORIES)
 
+set(CCCL_OVERRIDE_INCLUDE_DIRS "")
+if (CUDAToolkit_VERSION_MINOR LESS 5)
+    set(CCCL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/cccl")
+
+    list(APPEND CCCL_OVERRIDE_INCLUDE_DIRS
+        "${CCCL_DIR}/libcudacxx/include/"
+        "${CCCL_DIR}/cub"
+        "${CCCL_DIR}/thrust"
+    )
+endif()
+
 set(NVRTC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/device/include
     ${MADRONA_HDRS_INCLUDES}
+    ${CCCL_OVERRIDE_INCLUDE_DIRS}
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 
