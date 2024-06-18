@@ -88,19 +88,6 @@ struct SourceInstance {
     uint32_t objIDX;
 };
 
-struct EmbreeLoader {
-    struct Impl;
-
-    EmbreeLoader(Span<char> err_buf);
-    EmbreeLoader(EmbreeLoader &&) = default;
-    ~EmbreeLoader();
-
-    std::unique_ptr<Impl> impl_;
-
-    Optional<MeshBVH> load(const SourceObject &obj,
-            const DynArray<SourceMaterial> &materials);
-};
-
 struct SourceAssetInfo {
     uint32_t numObjects;
     std::string path;

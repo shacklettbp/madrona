@@ -14,6 +14,8 @@
 #include <madrona/span.hpp>
 #include <madrona/importer.hpp>
 
+#include <madrona/mesh_bvh.hpp>
+
 #include <cuda_runtime.h>
 #include <cuda.h>
 
@@ -69,7 +71,11 @@ struct CompileConfig {
     OptMode optMode = OptMode::LTO;
 };
 
-struct RenderConfig {
+//struct CudaBatchRenderAssets {
+//    MeshBVHData 
+//};
+
+struct CudaBatchRenderConfig {
     // Until we support custom rendering functions, for now we must toggle
     // between rendering color or depth.
     enum class RenderMode : uint32_t {
@@ -118,7 +124,7 @@ public:
     MWCudaExecutor(const StateConfig &state_cfg,
                    const CompileConfig &compile_cfg,
                    CUcontext cu_ctx,
-                   const RenderConfig &render_cfg = {});
+                   const CudaBatchRenderConfig &render_cfg = {});
 
     MWCudaExecutor(MWCudaExecutor &&o);
     ~MWCudaExecutor();

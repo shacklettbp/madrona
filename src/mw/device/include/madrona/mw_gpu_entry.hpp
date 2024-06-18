@@ -106,8 +106,6 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
     mwGPU::HostPrint *host_print = 
         (mwGPU::HostPrint *)mwGPU::GPUImplConsts::get().hostPrintAddr;
 
-    printf("Hello from initBVHParams: %p\n", (void *)params);
-
     params->numWorlds = num_worlds;
 
     params->instances = mgr->getArchetypeComponent<

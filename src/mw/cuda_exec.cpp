@@ -432,7 +432,6 @@ struct MWCudaExecutor::Impl {
     BVHKernels bvhKernels;
 
     uint32_t numWorlds;
-    uint64_t numVertices;
     uint32_t renderOutputResolution;
     uint32_t sharedMemPerSM;
 
@@ -1010,7 +1009,7 @@ static __attribute__((always_inline)) inline void dispatch(
 static BVHKernels buildBVHKernels(const CompileConfig &cfg,
                                   int32_t num_sms,
                                   std::pair<int, int> cuda_arch,
-                                  RenderConfig::RenderMode render_mode)
+                                  CudaBatchRenderConfig::RenderMode render_mode)
 {
     using namespace std;
 
@@ -1109,7 +1108,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
 
-    bool render_rgb = (render_mode == RenderConfig::RenderMode::Color);
+    bool render_rgb = (render_mode == CudaBatchRenderConfig::RenderMode::Color);
 
     if (render_rgb) {
         common_compile_flags.push_back("-DMADRONA_RENDER_RGB=1");
@@ -1605,6 +1604,21 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
     }
 }
 
+namespace {
+
+struct RendererInitData {
+    MeshBVH *bvhsPtr;
+    uint32_t numBVHs;
+    const imp::SourceMaterial *materials;
+    uint32_t numMaterials;
+    const imp::SourceTexture *textures;
+    uint32_t numTextures;
+    uint32_t raycastOutputResolution;
+    float nearSphere;
+};
+
+}
+
 static GPUEngineState initEngineAndUserState(
     uint32_t num_worlds,
     uint32_t num_world_data_bytes,
@@ -1617,14 +1631,7 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_exported,
     const GPUKernels &gpu_kernels,
     const BVHKernels &bvh_kernels,
-    MeshBVH *bvhs_ptr,
-    uint32_t num_bvhs,
-    const imp::SourceMaterial *materials,
-    uint32_t num_materials,
-    const imp::SourceTexture *textures,
-    uint32_t num_textures,
-    uint32_t raycast_output_resolution,
-    float near_sphere,
+    const Optional<RendererInitData> &renderer_init_data,
     ExecutorMode exec_mode,
     CUdevice cu_gpu,
     CUcontext cu_ctx,
@@ -1693,8 +1700,26 @@ static GPUEngineState initEngineAndUserState(
 
     auto host_print = std::make_unique<HostPrintCPU>(cu_gpu);
 
-    auto bvh_internals = cu::allocGPU(
+    void *bvh_internals;
+    void *bvh_ptrs;
+    uint32_t num_bvhs;
+    uint32_t raycast_output_resolution;
+    if (renderer_init_data.has_value()) {
+        bvh_ptrs = renderer_init_data->bvhsPtr;
+        num_bvhs = renderer_init_data->numBVHs;
+
+        raycast_output_resolution = renderer_init_data->raycastOutputResolution;
+
+        bvh_internals = cu::allocGPU(
             sizeof(mwGPU::madrona::BVHInternalData));
+    } else {
+        bvh_ptrs = nullptr;
+        num_bvhs = 0;
+
+        raycast_output_resolution = 0;
+
+        bvh_internals = nullptr;
+    }
 
     auto compute_consts_args = makeKernelArgBuffer(num_worlds,
                                                    num_world_data_bytes,
@@ -1702,7 +1727,7 @@ static GPUEngineState initEngineAndUserState(
                                                    num_taskgraphs,
                                                    gpu_consts_readback,
                                                    gpu_state_size_readback,
-                                                   (void *)bvhs_ptr,
+                                                   bvh_ptrs,
                                                    num_bvhs,
                                                    raycast_output_resolution,
                                                    bvh_internals);
@@ -1810,12 +1835,14 @@ static GPUEngineState initEngineAndUserState(
 
     cu::deallocCPU(exported_readback);
 
-    { // Setup the BVH parameters in the __constant__ block of the bvh module
-        // Pass this to the ECS to fill in
+    if (renderer_init_data.has_value()) { 
+        // FIXME: this *REALLY* should not be happening in cuda_exec.cpp
         render::MaterialData mat_data =
             render::AssetProcessor::initMaterialData(
-                materials, num_materials,
-                textures, num_textures);
+                renderer_init_data->materials,
+                renderer_init_data->numMaterials,
+                renderer_init_data->textures,
+                renderer_init_data->numTextures);
 
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
 
@@ -1825,15 +1852,18 @@ static GPUEngineState initEngineAndUserState(
         REQ_CU(cuModuleGetGlobal(&bvh_consts_addr, &bvh_consts_size,
                                  bvh_kernels.mod, "bvhParams"));
 
-        auto init_bvh_args = makeKernelArgBuffer((void *)params_tmp,
-                                                 num_worlds,
-                                                 bvh_internals,
-                                                 bvhs_ptr,
-                                                 num_bvhs,
-                                                 bvh_kernels.timingInfo,
-                                                 mat_data.materials,
-                                                 mat_data.textures,
-                                                 near_sphere);
+        // Setup the BVH parameters in the __constant__ block of the bvh module
+        // Pass this to the ECS to fill in
+        auto init_bvh_args = makeKernelArgBuffer(
+            (void *)params_tmp,
+            num_worlds,
+            bvh_internals,
+            bvh_ptrs,
+            num_bvhs,
+            bvh_kernels.timingInfo,
+            mat_data.materials,
+            mat_data.textures,
+            renderer_init_data->nearSphere);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params
@@ -2169,7 +2199,7 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
 MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
                                const CompileConfig &compile_cfg,
                                CUcontext cu_ctx,
-                               const RenderConfig &render_cfg)
+                               const CudaBatchRenderConfig &render_cfg)
     : impl_(nullptr)
 {
     const ExecutorMode exec_mode = ExecutorMode::TaskGraph;
@@ -2210,32 +2240,46 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
            CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
            cu_gpu));
 
-    Optional<render::MeshBVHData> gpu_imported_assets = 
-        [&render_cfg] () {
-            if (render_cfg.importedAssets) {
-                return render::AssetProcessor::makeBVHData(
-                        *render_cfg.importedAssets);
-            } else {
-                return Optional<render::MeshBVHData>::none();
-            }
-        } ();
-
-    bool has_geometry = gpu_imported_assets.has_value();
-    bool has_textures = has_geometry ? 
-        (render_cfg.importedAssets->materials.data() != nullptr) : false;
-    bool has_materials = has_geometry ? 
-        (render_cfg.importedAssets->texture.data() != nullptr) : false;
-    // bool enable_raycasting = (render_cfg.renderResolution != 0);
     bool enable_raytracing = 
-        (render_cfg.renderMode != RenderConfig::RenderMode::None);
+        (render_cfg.renderMode != CudaBatchRenderConfig::RenderMode::None);
 
-    uint32_t render_resolution = render_cfg.renderResolution;
-    if (!enable_raytracing) {
-        render_resolution = 0;
-    }
+    Optional<RendererInitData> renderer_init_data =
+        Optional<RendererInitData>::none();
+    Optional<render::MeshBVHData> gpu_imported_assets = 
+        Optional<render::MeshBVHData>::none();
+    
+    BVHKernels bvh_kernels {};
+    if (enable_raytracing) {
+        if (render_cfg.importedAssets) {
+            gpu_imported_assets = render::AssetProcessor::makeBVHData(
+                *render_cfg.importedAssets);
+        }
 
-    BVHKernels bvh_kernels = buildBVHKernels(
-                compile_cfg, num_sms, cu_capability, render_cfg.renderMode);
+        bool has_geometry = gpu_imported_assets.has_value();
+        bool has_textures = has_geometry ? 
+            (render_cfg.importedAssets->materials.data() != nullptr) : false;
+        bool has_materials = has_geometry ? 
+            (render_cfg.importedAssets->texture.data() != nullptr) : false;
+
+        uint32_t render_resolution = render_cfg.renderResolution;
+        renderer_init_data = RendererInitData {
+            .bvhsPtr = has_geometry ? gpu_imported_assets->meshBVHs : nullptr,
+            .numBVHs = has_geometry ? (uint32_t)gpu_imported_assets->numBVHs : 0,
+            .materials = has_materials ? 
+                render_cfg.importedAssets->materials.data() : nullptr,
+            .numMaterials = has_materials ?
+                (uint32_t)render_cfg.importedAssets->materials.size() : 0,
+            .textures = has_textures ?
+                render_cfg.importedAssets->texture.data() : nullptr,
+            .numTextures = has_textures ?
+                (uint32_t)render_cfg.importedAssets->texture.size() : 0,
+            .raycastOutputResolution = render_resolution,
+            .nearSphere = render_cfg.nearPlane,
+        };
+
+        bvh_kernels = buildBVHKernels(
+            compile_cfg, num_sms, cu_capability, render_cfg.renderMode);
+    } 
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
         exec_mode, num_sms, cu_capability);
@@ -2247,14 +2291,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.numUserConfigBytes,  state_cfg.numTaskGraphs,
         state_cfg.numExportedBuffers,
         gpu_kernels, bvh_kernels, 
-        has_geometry ? gpu_imported_assets->meshBVHs : nullptr,
-        has_geometry ? gpu_imported_assets->numBVHs : 0,
-        has_materials ? render_cfg.importedAssets->materials.data() : nullptr,
-        has_materials ? render_cfg.importedAssets->materials.size() : 0,
-        has_textures ? render_cfg.importedAssets->texture.data() : nullptr,
-        has_textures ? render_cfg.importedAssets->texture.size() : 0,
-        render_resolution,
-        render_cfg.nearPlane,
+        renderer_init_data,
         exec_mode, cu_gpu, cu_ctx, strm);
 
     TaskGraphsState taskgraphs_state {
@@ -2271,8 +2308,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         enable_raytracing,
         bvh_kernels,
         state_cfg.numWorlds,
-        has_geometry ? gpu_imported_assets->numVerts : 0,
-        render_resolution,
+        enable_raytracing ? render_cfg.renderResolution : 0,
         (uint32_t)shared_mem_per_sm,
         {}
     });

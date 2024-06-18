@@ -37,5 +37,5 @@ namespace AssetProcessor {
         const imp::SourceTexture *textures,
         uint32_t num_textures);
 };
-    
+
 }

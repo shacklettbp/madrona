@@ -3,6 +3,8 @@
 #include <madrona/cuda_utils.hpp>
 #include <madrona/render/asset_processor.hpp>
 
+#include <madrona/mesh_bvh_builder.hpp>
+
 #include <stb_image.h>
 
 using namespace madrona::imp;
@@ -114,8 +116,6 @@ static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
         cache_dir = bvh_cache_dir;
     }
 
-    auto embree_loader = Optional<EmbreeLoader>::none();
-
     DynArray<DynArray<MeshBVH>> mesh_bvh_arrays { 0 };
 
     uint32_t obj_offset = 0;
@@ -140,12 +140,9 @@ static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
                 const SourceObject &obj =
                     assets.objects[obj_offset + obj_idx];
 
-                Optional<MeshBVH> bvh =
-                    embree_loader->load(obj, assets.materials);
+                MeshBVH bvh = MeshBVHBuilder::build(obj.meshes);
 
-                assert(bvh.has_value());
-
-                asset_bvhs.push_back(*bvh);
+                asset_bvhs.push_back(bvh);
             }
         }
 

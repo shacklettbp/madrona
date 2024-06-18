@@ -44,6 +44,7 @@ target_link_libraries(madrona_render_core
         madrona_importer
         madrona_rendering_system
     PRIVATE
+        madrona_bvh_builder
         stb
 )
 

@@ -63,11 +63,5 @@ struct RigidBodyAssets {
         CountT *out_num_bytes);
 };
 
-struct MeshBVHBuilder {
-    static MeshBVH build(
-        Span<const imp::SourceMesh> src_meshes,
-        StackAlloc &tmp_alloc,
-        StackAlloc::Frame *out_alloc_frame);
-};
 
 }

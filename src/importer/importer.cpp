@@ -160,8 +160,6 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
     auto usd_loader = Optional<USDLoader>::none();
 #endif
 
-    auto embree_loader = Optional<EmbreeLoader>::none();
-
     bool load_success = false;
     for (const char *path : paths) {
         uint32_t pre_objects_offset = imported.objects.size();

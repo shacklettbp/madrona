@@ -29,7 +29,6 @@ target_link_libraries(madrona_mw_physics
 
 add_library(madrona_physics_assets STATIC
     ${INC_DIR}/physics_assets.hpp physics_assets.cpp
-    mesh_bvh_builder.cpp
 )
 
 target_link_libraries(madrona_physics_assets PRIVATE

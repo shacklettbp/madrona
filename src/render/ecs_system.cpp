@@ -138,7 +138,6 @@ inline void instanceTransformUpdate(Context &ctx,
             data.position, data.rotation, data.scale);
 
     ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
-    //printf("AABB loc we %p\n",&(ctx.get<TLBVHNode>(renderable.renderEntity).aabb));
 #endif
 }
 
@@ -203,9 +202,15 @@ inline void exportCountsGPU(Context &ctx,
 
 #if MADRONA_GPU_MODE
     auto &gpu_consts = mwGPU::GPUImplConsts::get();
-    uint32_t num_views =
-        state_mgr->getArchetypeNumRows<RenderCameraArchetype>();
-    ((BVHInternalData *)gpu_consts.bvhInternalData)->numViews = num_views;
+
+    BVHInternalData *bvh_internals =
+        (BVHInternalData *)gpu_consts.bvhInternalData;
+
+    if (bvh_internals != nullptr) {
+        uint32_t num_views =
+            state_mgr->getArchetypeNumRows<RenderCameraArchetype>();
+        bvh_internals->numViews = num_views;
+    }
 #endif
 
 
