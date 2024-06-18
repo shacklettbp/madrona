@@ -48,7 +48,7 @@ struct RenderingSystemState {
     bool enableRaycaster;
 };
 
-inline uint32_t leftShift3(uint32_t x)
+static inline uint32_t leftShift3(uint32_t x)
 {
     if (x == (1 << 10)) {
         --x;
@@ -62,7 +62,8 @@ inline uint32_t leftShift3(uint32_t x)
     return x;
 }
 
-uint32_t encodeMorton3(const Vector3 &v) {
+static inline uint32_t encodeMorton3(const Vector3 &v)
+{
 #ifdef MADRONA_GPU_MODE
     return (__float_as_uint(v.z) << 2) | 
            (__float_as_uint(v.y) << 1) | 
@@ -133,12 +134,6 @@ inline void instanceTransformUpdate(Context &ctx,
     ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
     //printf("AABB loc we %p\n",&(ctx.get<TLBVHNode>(renderable.renderEntity).aabb));
 #endif
-}
-
-uint32_t * getVoxelPtr(Context &ctx)
-{
-    auto &sys_state = ctx.singleton<RenderingSystemState>();
-    return sys_state.voxels;
 }
 
 inline void viewTransformUpdate(Context &ctx,
