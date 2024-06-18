@@ -349,7 +349,7 @@ MaterialData initMaterialData(
         }else if (tex.info == imp::TextureLoadInfo::PixelBuffer){
             if (tex.pix_info.data.format == imp::TextureFormat::BC7) {
                 void *pixel_data = tex.pix_info.data.imageData;
-                
+
                 width = tex.pix_info.data.width;
                 height = tex.pix_info.data.height;
 

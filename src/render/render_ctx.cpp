@@ -1295,27 +1295,29 @@ RenderContext::RenderContext(
                 .binding = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                .pImmutableSamplers = nullptr,
             },
             {
                 .binding = 1,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                .pImmutableSamplers = nullptr,
             },
             {
                 .binding = 2,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                .pImmutableSamplers = nullptr,
             }
         };
 
-        VkDescriptorSetLayoutCreateInfo info = {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-            .bindingCount = 3,
-            .pBindings = bindings
-        };
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = 3;
+        info.pBindings = bindings;
 
         dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_batch_draw_layout_);
     }
@@ -1326,19 +1328,22 @@ RenderContext::RenderContext(
                 .binding = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+                .pImmutableSamplers = nullptr,
             },
             {
                 .binding = 1,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+                .pImmutableSamplers = nullptr,
             },
             {
                 .binding = 2,
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
-                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .pImmutableSamplers = nullptr,
             }
         };
 
@@ -1368,7 +1373,8 @@ RenderContext::RenderContext(
                 .binding = 0,
                 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
                 .descriptorCount = InternalConfig::maxTextures,
-                .stageFlags =  VK_SHADER_STAGE_FRAGMENT_BIT
+                .stageFlags =  VK_SHADER_STAGE_FRAGMENT_BIT,
+                .pImmutableSamplers = nullptr,
             },
 
             {
@@ -1918,13 +1924,14 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
             int32_t num_mesh_verts = (int32_t)mesh.numVertices;
             int32_t num_mesh_indices = (int32_t)mesh.numFaces * 3;
 
-            mesh_ptr[mesh_offset++] = MeshData {
-                .vertexOffset = vertex_offset,
-                .numVertices = num_mesh_verts,
-                .indexOffset = index_offset,
-                .numIndices = num_mesh_indices,
-                .materialIndex = (int32_t)material_idx
-            };
+            MeshData mesh_data = MeshData {};
+            mesh_data.vertexOffset = vertex_offset;
+            mesh_data.numVertices = num_mesh_verts;
+            mesh_data.indexOffset = index_offset;
+            mesh_data.numIndices = num_mesh_indices;
+            mesh_data.materialIndex = (int32_t)material_idx;
+
+            mesh_ptr[mesh_offset++] = mesh_data;
 
             // Compute new normals
             auto new_normals = Optional<HeapArray<Vector3>>::none();

@@ -67,12 +67,12 @@ struct SourceTexture {
     {
     }
 
-    SourceTexture(const char *path_ptr) : 
+    SourceTexture(const char *path_ptr) :
         info(TextureLoadInfo::FileName), path(path_ptr)
     {
     }
 
-    SourceTexture(TextureLoadInfo tex_info, const char *path_ptr) 
+    SourceTexture(TextureLoadInfo tex_info, const char *path_ptr)
     {
         info = tex_info;
         path = path_ptr;

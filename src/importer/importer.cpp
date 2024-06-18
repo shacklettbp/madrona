@@ -62,14 +62,8 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
 
             std::string hash_str = std::to_string(hash);
 
-            bool should_construct = false;
-
-            uint8_t *pixel_data;
+            uint8_t *pixel_data = nullptr;
             uint32_t pixel_data_size = 0;
-
-            uint32_t width, height;
-
-            TextureFormat format;
 
             if (texture_cache) {
                 std::string path_to_cached_tex = (cache_dir / hash_str);
@@ -156,6 +150,7 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         .objects { 0 },
         .materials { 0 },
         .instances { 0 },
+        .texture = DynArray<SourceTexture>(0),
         .assetInfos { 0 },
     };
 
