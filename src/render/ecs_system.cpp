@@ -204,7 +204,7 @@ inline void exportCountsGPU(Context &ctx,
     auto &gpu_consts = mwGPU::GPUImplConsts::get();
     uint32_t num_views =
         state_mgr->getArchetypeNumRows<RenderCameraArchetype>();
-    ((BVHInternalData *)gpu_consts.internalData)->numViews = num_views;
+    ((BVHInternalData *)gpu_consts.bvhInternalData)->numViews = num_views;
 #endif
 
 

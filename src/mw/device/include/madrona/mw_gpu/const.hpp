@@ -22,7 +22,7 @@ struct GPUImplConsts {
     void *tmpAllocatorAddr;
     void *deviceTracingAddr;
     void *meshBVHsAddr;
-    void *internalData;
+    void *bvhInternalData;
     uint32_t numWorldDataBytes;
     uint32_t numWorlds;
     uint32_t jobGridsOffset;

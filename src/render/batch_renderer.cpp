@@ -201,8 +201,6 @@ static vk::PipelineShaders makeDrawShaders(const vk::Device &dev,
             Span<const vk::BindingOverride>({}));
     } else {
         StackAlloc tmp_alloc;
-        printf("binding override with repeat sampler!!!!!!!!!! WHAT THE F\n");
-
         return vk::PipelineShaders(dev, tmp_alloc, shaders,
             Span<const vk::BindingOverride>({
                  vk::BindingOverride {
