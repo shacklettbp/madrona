@@ -65,14 +65,20 @@ static inline uint32_t leftShift3(uint32_t x)
 static inline uint32_t encodeMorton3(const Vector3 &v)
 {
 #ifdef MADRONA_GPU_MODE
-    return (__float_as_uint(v.z) << 2) | 
-           (__float_as_uint(v.y) << 1) | 
-            __float_as_uint(v.x);
+    uint32_t x_u32 = __float_as_uint(v.x);
+    uint32_t y_u32 = __float_as_uint(v.y);
+    uint32_t z_u32 = __float_as_uint(v.z);
 #else
-    return (std::bit_cast<uint32_t>(v.z) << 2) | 
-           (std::bit_cast<uint32_t>(v.y) << 1) | 
-            std::bit_cast<uint32_t>(v.x);
+    uint32_t x_u32 = std::bit_cast<uint32_t>(v.x);
+    uint32_t y_u32 = std::bit_cast<uint32_t>(v.y);
+    uint32_t z_u32 = std::bit_cast<uint32_t>(v.z);
 #endif
+
+    // FIXME: not convinced this is correct
+
+    return (leftShift3(z_u32) << 2) | 
+           (leftShift3(y_u32) << 1) | 
+            leftShift3(x_u32);
 }
 
 inline void mortonCodeUpdate(Context &ctx,
