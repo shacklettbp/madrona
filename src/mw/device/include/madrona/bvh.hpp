@@ -87,7 +87,7 @@ struct BVHNodeQuantized {
             .expX = (int8_t)ceilf(log2f(root_extent.x / (powf(2.f, 8.f) - 1.f))),
             .expY = (int8_t)ceilf(log2f(root_extent.y / (powf(2.f, 8.f) - 1.f))),
             .expZ = (int8_t)ceilf(log2f(root_extent.z / (powf(2.f, 8.f) - 1.f))),
-            .numChildren = num_children
+            .numChildren = (uint8_t)num_children
         };
 
         for (int i = 0; i < num_children; ++i) {

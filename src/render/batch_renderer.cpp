@@ -453,6 +453,8 @@ static PipelineMP<1> makeComputePipeline(const vk::Device &dev,
                                             const char *func_name = "main",
                                             T make_shaders_proc = makeShaders)
 {
+    (void)depth_only;
+
     vk::PipelineShaders shader = make_shaders_proc(dev, shader_file, func_name, repeat_sampler);
 
     VkPushConstantRange push_const = {
@@ -1081,6 +1083,8 @@ static void issueRasterization(vk::Device &dev,
                                const DynArray<AssetData> &loaded_assets,
                                bool depth_only)
 {
+    (void)render_extent;
+
     VkRenderingAttachmentInfoKHR color_attach = {};
     color_attach.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
     color_attach.imageView = target.vizBufferView;
@@ -1195,6 +1199,9 @@ static void issueDeferred(vk::Device &dev,
                           VkDescriptorSet pbr_set,
                           uint32_t view_dim) 
 {
+    (void)asset_set;
+    (void)asset_mat_tex_set;
+
     uint32_t max_image_dim = consts::maxNumImagesX * view_dim;
 
     uint32_t max_images_x = max_image_dim / view_dim;

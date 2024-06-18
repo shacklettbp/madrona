@@ -105,6 +105,8 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
                        const AABBTransform &txfm,
                        float t_max) const
 {
+    (void)txfm;
+
     using namespace math;
     constexpr float diveps = 0.0000001f;
 
@@ -376,6 +378,7 @@ bool MeshBVH::traceRayLeaf(int32_t leaf_idx,
         Vector2 uva, uvb, uvc;
 
         bool tri_exists = fetchLeafTriangle(leaf_idx, i, &a, &b, &c, &uva, &uvb, &uvc);
+        (void)tri_exists;
 
         bool intersects = rayTriangleIntersection(
             a, b, c,

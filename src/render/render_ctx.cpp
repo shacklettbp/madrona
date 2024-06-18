@@ -1841,6 +1841,8 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
                                   Span<const imp::SourceTexture> textures,
                                   bool override_materials)
 {
+    (void)override_materials;
+
     using namespace imp;
     using namespace math;
 

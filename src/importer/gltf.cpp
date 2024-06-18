@@ -1046,8 +1046,6 @@ static bool gltfLoad(const char *gltf_filename,
             mesh_name = mesh_name_view;
         }
 
-        uint32_t mat_idx = -1;
-
         loader.meshes.push_back(GLTFMesh {
             std::move(mesh_name),
             prim_offset,
@@ -1684,8 +1682,6 @@ static bool gltfImportAssets(LoaderData &loader,
                 new_tangentsigns_arr.data() + new_tangentsigns_arr.size();
             math::Vector2 *new_mesh_uvs_ptr =
                 new_uvs_arr.data() + new_uvs_arr.size();
-            uint32_t *new_mats_ptr =
-                new_mats_arr.data() + new_mats_arr.size();
 
             for (CountT i = 0; i < src_mesh.numVertices; i++) {
                 math::Vector3 orig_pos = src_mesh.positions[i];
@@ -1795,15 +1791,22 @@ static bool gltfImportAssets(LoaderData &loader,
                 break;
         }
 
-        imported.imgData.imageArrays.emplace_back(BackingImageData {
-            .imageData = image_memory, .imageSize = view.numBytes,.format = format});
+        imported.imgData.imageArrays.emplace_back(
+                BackingImageData {
+                    .imageData = image_memory,
+                    .imageSize = view.numBytes,
+                    .format = format
+                });
     }
 
     for (const auto& texture : loader.textures) {
         uint32_t backingIndex = (texture.sourceIdx + prev_img_idx);
 
         imported.texture.emplace_back(SourceTexture(
-                PixelBufferInfo{.backingDataIndex = backingIndex}));
+                PixelBufferInfo {
+                    .backingDataIndex = backingIndex,
+                    .data = {}
+                }));
     }
 
     for (const auto& material : loader.materials) {

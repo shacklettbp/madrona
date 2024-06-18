@@ -841,12 +841,6 @@ Device * Backend::makeDevice(
     VkPhysicalDeviceProperties physical_device_properties;
     dt.getPhysicalDeviceProperties(phy, &physical_device_properties);
 
-    uint32_t timestamp_period = 
-        physical_device_properties.limits.timestampPeriod;
-
-    printf("Max viewports: %u\n",
-        physical_device_properties.limits.maxViewports);
-
     return new Device(
         qf_choices.gfxQF,
         qf_choices.computeQF,

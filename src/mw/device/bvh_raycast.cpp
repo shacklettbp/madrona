@@ -152,9 +152,9 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
     MeshBVH::HitInfo closest_hit_info = {};
 
-    uint64_t total_blas_time = 0;
 
 #if defined(MADRONA_PROFILE_BVH_KERNEL)
+    uint64_t total_blas_time = 0;
     uint64_t start_time = globalTimer();
 #endif
 
@@ -228,7 +228,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     if (leaf_hit) {
                         ray_hit = true;
 
-                        float old_t_max = t_max;
                         t_max = hit_info.tHit / t_scale;
 
                         closest_hit_info = hit_info;

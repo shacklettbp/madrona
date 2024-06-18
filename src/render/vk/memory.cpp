@@ -37,19 +37,6 @@ static constexpr VkBufferUsageFlags hostUsage =
 static constexpr VkBufferUsageFlags indirectUsage =
     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 
-static constexpr VkBufferUsageFlags rtGeometryUsage =
-    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-static constexpr VkBufferUsageFlags rtAccelScratchUsage =
-    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-
-static constexpr VkBufferUsageFlags rtAccelUsage =
-    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
-
-static constexpr VkBufferUsageFlags localRTUsage =
-    rtGeometryUsage | rtAccelScratchUsage | rtAccelUsage;
-
 static constexpr VkBufferUsageFlags localUsage =
     commonUsage | geometryUsage | shaderUsage | indirectUsage;
 

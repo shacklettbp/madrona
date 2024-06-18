@@ -10,6 +10,11 @@ void * MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
                              MeshBVH *out_bvh,
                              CountT *out_num_bytes)
 {
+    (void)src_meshes;
+    (void)tmp_alloc;
+    (void)out_bvh;
+    (void)out_num_bytes;
+
 #if 0
     using Node = MeshBVH::Node;
     using LeafGeometry = MeshBVH::LeafGeometry;

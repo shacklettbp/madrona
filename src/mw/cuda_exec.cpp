@@ -1229,6 +1229,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .widenEvent = widen_event,
         .traceEvent = trace_event,
         .stopEvent = stop_event,
+        .recordedTimings = {},
         .timingInfo = timing_info
     };
 
@@ -2274,6 +2275,7 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         has_geometry ? gpu_imported_assets->numVerts : 0,
         render_resolution,
         (uint32_t)shared_mem_per_sm,
+        {}
     });
 
     std::cout << "Initialization finished" << std::endl;
@@ -2478,6 +2480,10 @@ MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
     return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
         .runGraph = run_graph_exec,
         .enableRaytracing = true,
+        .start = {},
+        .end = {},
+        .statName = nullptr,
+        .timingGroupIndex = 0,
     });
 }
 
@@ -2493,6 +2499,10 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
     return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
         .runGraph = run_graph,
         .enableRaytracing = false,
+        .start = {},
+        .end = {},
+        .statName = nullptr,
+        .timingGroupIndex = 0,
     });
 }
 
