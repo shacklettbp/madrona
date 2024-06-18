@@ -19,8 +19,6 @@
 #include "usd.hpp"
 #endif
 
-#include "embree.hpp"
-
 #ifdef MADRONA_CUDA_SUPPORT
 #include <madrona/cuda_utils.hpp>
 #endif

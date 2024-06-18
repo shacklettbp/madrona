@@ -39,6 +39,7 @@ target_link_libraries(madrona_importer PRIVATE
     meshoptimizer
     fast_float
     madrona_embree
+    stb
 )
 
 if (MADRONA_GLTF_SUPPORT)

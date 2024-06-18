@@ -6,8 +6,6 @@
 #include <madrona/importer.hpp>
 #include <embree4/rtcore_common.h>
 
-#include "embree.hpp"
-
 namespace madrona::imp {
 
 using namespace math;

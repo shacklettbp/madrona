@@ -24,7 +24,6 @@
 
 #include "cpp_compile.hpp"
 
-#include <stb_image.h>
 #define KHRONOS_STATIC
 #include <span>
 // #define MADRONA_FAST_BVH
@@ -2169,8 +2168,8 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
 
 MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
                                const CompileConfig &compile_cfg,
-                               const RenderConfig &render_cfg,
-                               CUcontext cu_ctx)
+                               CUcontext cu_ctx,
+                               const RenderConfig &render_cfg)
     : impl_(nullptr)
 {
     const ExecutorMode exec_mode = ExecutorMode::TaskGraph;

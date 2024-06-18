@@ -63,25 +63,10 @@ struct SourceTexture {
         PixelBufferInfo pix_info;
     };
 
-    SourceTexture()
-    {
-    }
-
-    SourceTexture(const char *path_ptr) :
-        info(TextureLoadInfo::FileName), path(path_ptr)
-    {
-    }
-
-    SourceTexture(TextureLoadInfo tex_info, const char *path_ptr)
-    {
-        info = tex_info;
-        path = path_ptr;
-    }
-
-    SourceTexture(PixelBufferInfo p_info) {
-        info = TextureLoadInfo::PixelBuffer;
-        pix_info = p_info;
-    }
+    inline SourceTexture();
+    inline SourceTexture(const char *path_ptr);
+    inline SourceTexture(TextureLoadInfo tex_info, const char *path_ptr);
+    inline SourceTexture(PixelBufferInfo p_info);
 };
 
 struct SourceMaterial {
@@ -161,3 +146,5 @@ struct ImportedAssets {
 
 }
 }
+
+#include "importer.inl"

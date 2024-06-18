@@ -1007,19 +1007,6 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
         state_mgr->archetypeSetNeedsSort(archetypeID);
     }
 
-#if 0
-    if (!state_mgr->archetypeNeedsSort(archetypeID)) {
-        numDynamicInvocations = 0;
-
-
-        for (int i = 0; i < numPasses; i++) {
-            taskgraph.getNodeData(onesweepNodes[i]).numDynamicInvocations = 0;
-        }
-        return;
-    }
-    state_mgr->archetypeClearNeedsSort(archetypeID);
-#endif
-
     int num_rows = state_mgr->numArchetypeRows(archetypeID);
 
     int32_t num_threads =

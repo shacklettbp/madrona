@@ -19,7 +19,7 @@ public:
     struct Config {
         enum RenderMode {
             Color,
-            Depth
+            Depth,
         };
 
         bool enableBatchRenderer;

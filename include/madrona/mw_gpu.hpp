@@ -117,8 +117,8 @@ public:
 
     MWCudaExecutor(const StateConfig &state_cfg,
                    const CompileConfig &compile_cfg,
-                   const RenderConfig &render_cfg,
-                   CUcontext cu_ctx);
+                   CUcontext cu_ctx,
+                   const RenderConfig &render_cfg = {});
 
     MWCudaExecutor(MWCudaExecutor &&o);
     ~MWCudaExecutor();
