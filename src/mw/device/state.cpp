@@ -10,6 +10,8 @@
 #include <madrona/mw_gpu/megakernel_consts.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 
+#include <algorithm>
+
 namespace madrona {
 
 Table::Table()
