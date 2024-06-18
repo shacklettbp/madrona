@@ -17,7 +17,7 @@ struct EmbreeLoader::Impl {
 };
 
 constexpr int numTrisPerLeaf = MeshBVH ::numTrisPerLeaf;
-constexpr int nodeWidth = MeshBVH::nodeWidth;
+constexpr uint32_t nodeWidth = MeshBVH::nodeWidth;
 static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
 
 struct NodeCompressed {
@@ -232,7 +232,7 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
     offsets[0] = 0;
     triOffsets[0] = 0;
 
-    for(int i = 0; i < object.meshes.size(); i++) {
+    for (int i = 0; i < object.meshes.size(); i++) {
         numTriangles += object.meshes[i].numFaces;
         numVertices += object.meshes[i].numVertices;
         offsets[i+1] = object.meshes[i].numVertices+offsets[i];
@@ -258,7 +258,7 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
     int index = 0;
     int counter = 0;
 
-    for(int mesh_idx = 0; mesh_idx < object.meshes.size(); mesh_idx++){
+    for (int mesh_idx = 0; mesh_idx < object.meshes.size(); mesh_idx++) {
         auto& mesh = object.meshes[mesh_idx];
 
         for(uint32_t vert_idx = 0; vert_idx < mesh.numVertices; vert_idx++) {
@@ -273,7 +273,7 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
 #endif
         }
 
-        for(int face_idx = 0; face_idx < (int)mesh.numFaces; face_idx++){
+        for (int face_idx = 0; face_idx < (int)mesh.numFaces; face_idx++) {
             if (mesh.faceCounts != nullptr) {
                 FATAL("MeshBVH only supports triangular meshes");
             }
@@ -379,18 +379,18 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
         stack.pop_back();
         if(!node->isLeaf){
             auto* inner = (InnerNode*)node;
-            for(int i=0;i<MeshBVH::nodeWidth;i++){
+            for (int i=0;i<MeshBVH::nodeWidth;i++) {
                 if(inner->children[i] != nullptr){
                     stack.push_back(inner->children[i]);
                 }
             }
-            if(inner->id == -1){
+            if (inner->id == -1) {
                 inner->id = innerID;
                 innerNodes.push_back(inner);
                 innerID++;
             }
             childrenCounts[inner->numChildren]++;
-        }else{
+        } else {
             auto* leaf = (LeafNode*)node;
 
             if(leaf->lid == -1){
@@ -404,7 +404,7 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
 #if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
     //Adjust Leaves to Reindexed Triangles
     unsigned int numTris = 0;
-    for(CountT i = 0;i < leafNodes.size();i++) {
+    for (CountT i = 0;i < leafNodes.size();i++) {
         leafNodes[i]->lid = numTris;
         numTris += leafNodes[i]->numPrims;
     }
@@ -427,7 +427,7 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
               maxY = FLT_MIN,
               maxZ = FLT_MIN;
 
-        for(int i2 = 0; i2 < nodeWidth; i2++) {
+        for(uint32_t i2 = 0; i2 < MeshBVH::nodeWidth; i2++) {
             if(i2 < leafNodes.size()) {
                 LeafNode *iNode = (LeafNode *) leafNodes[i2];
                 BoundingBox box = iNode->bounds;
@@ -455,7 +455,7 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
         node.expX = ex;
         node.expY = ey;
         node.expZ = ez;
-        for(int j = 0; j < nodeWidth; j++){
+        for(uint32_t j = 0; j < MeshBVH::nodeWidth; j++){
             int32_t child;
             int32_t numTris;
             if(j < leafNodes.size()) {
@@ -490,7 +490,7 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
               maxY = FLT_MIN,
               maxZ = FLT_MIN;
 
-        for(int i2 = 0; i2 < nodeWidth; i2++){
+        for(int i2 = 0; i2 < MeshBVH::nodeWidth; i2++){
             if(innerNodes[i]->children[i2] != nullptr) {
                 minX = fminf(minX, innerNodes[i]->bounds[i2].lower_x);
                 minY = fminf(minY, innerNodes[i]->bounds[i2].lower_y);
@@ -517,7 +517,7 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
         node.expY = ey;
         node.expZ = ez;
         node.parentID = -1;
-        for(int i2 = 0; i2 < nodeWidth; i2++) {
+        for (int i2 = 0; i2 < MeshBVH::nodeWidth; i2++) {
             node.qMinX[i2] = floorf((innerNodes[i]->bounds[i2].lower_x - minX) / powf(2, ex));
             node.qMinY[i2] = floorf((innerNodes[i]->bounds[i2].lower_y - minY) / powf(2, ey));
             node.qMinZ[i2] = floorf((innerNodes[i]->bounds[i2].lower_z - minZ) / powf(2, ez));
@@ -526,10 +526,10 @@ Optional<MeshBVH> EmbreeLoader::load(const SourceObject& object, const DynArray<
             node.qMaxZ[i2] = ceilf((innerNodes[i]->bounds[i2].upper_z - minZ) / powf(2, ez));
         }
 
-        for(int j = 0; j < nodeWidth; j++){
+        for (int j = 0; j < MeshBVH::nodeWidth; j++){
             int32_t child;
             int32_t triSize;
-            if(j < innerNodes[i]->numChildren) {
+            if (j < innerNodes[i]->numChildren) {
                 Node *node2 = innerNodes[i]->children[j];
                 if (!node2->isLeaf) {
                     InnerNode *iNode = (InnerNode *) node2;

@@ -174,8 +174,6 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
             float t_far = fminf(fmaxf(t_far_x,t_near_x), fminf(fmaxf(t_far_y,t_near_y),
                 fminf(fmaxf(t_far_z,t_near_z), t_max)));
 
-            //printf("%f,%f,%f,%f,%f,%f\n",t_near_x,t_near_y,t_near_z,t_far_x,t_far_y,t_far_z);
-
             if (t_near <= t_far) {
                 if (node.isLeaf(i)) {
                     int32_t leaf_idx = node.leafIDX(i);

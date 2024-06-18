@@ -24,7 +24,7 @@ static bool loadCache(const char* location, DynArray<MeshBVH>& bvhs_out)
     fread(&num_bvhs,sizeof(num_bvhs),1,ptr);
     bvhs_out.reserve(num_bvhs);
 
-    for(CountT i = 0; i < num_bvhs; i++) {
+    for (CountT i = 0; i < num_bvhs; i++) {
         uint32_t num_verts;
         uint32_t num_nodes;
         uint32_t num_leaves;
@@ -80,7 +80,7 @@ static void writeCache(const char* location, DynArray<MeshBVH>& bvhs)
     uint32_t num_bvhs = bvhs.size();
     fwrite(&num_bvhs, sizeof(uint32_t), 1, ptr);
 
-    for(CountT i = 0; i < bvhs.size(); i++) {
+    for (CountT i = 0; i < bvhs.size(); i++) {
         fwrite(&bvhs[i].numVerts, sizeof(uint32_t), 1, ptr);
         fwrite(&bvhs[i].numNodes, sizeof(uint32_t), 1, ptr);
         fwrite(&bvhs[i].numLeaves, sizeof(uint32_t), 1, ptr);
@@ -106,11 +106,11 @@ static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
 
     char* bvh_cache = getenv("MADRONA_REGEN_BVH_CACHE");
     bool regen_cache = false;
-    if(bvh_cache){
+    if (bvh_cache) {
        regen_cache = atoi(bvh_cache);
     }
 
-    if(bvh_cache_dir){
+    if (bvh_cache_dir) {
         cache_dir = bvh_cache_dir;
     }
 
@@ -136,7 +136,7 @@ static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
         }
 
         if(should_construct) {
-            for (int obj_idx = 0; obj_idx < asset_info.numObjects; ++obj_idx) {
+            for (uint32_t obj_idx = 0; obj_idx < asset_info.numObjects; ++obj_idx) {
                 const SourceObject &obj =
                     assets.objects[obj_offset + obj_idx];
 
@@ -171,7 +171,6 @@ Optional<MeshBVHData> makeBVHData(
 #ifdef MADRONA_CUDA_SUPPORT
     uint64_t num_bvhs = 0;
     uint64_t num_nodes = 0;
-    uint64_t num_leaf_geos = 0;
     uint64_t num_leaf_mats = 0;
     uint64_t num_vertices = 0;
 
@@ -187,7 +186,6 @@ Optional<MeshBVHData> makeBVHData(
             const MeshBVH &bvh = asset_bvhs[bvh_idx];
 
             num_nodes += bvh.numNodes;
-            num_leaf_geos += bvh.numLeaves;
 #ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
             num_leaf_mats += bvh.numVerts/3;
 #endif
@@ -199,8 +197,6 @@ Optional<MeshBVHData> makeBVHData(
         sizeof(MeshBVH);
     uint64_t num_nodes_bytes = num_nodes *
         sizeof(MeshBVH::Node);
-    uint64_t num_leaf_geos_bytes = num_leaf_geos *
-        sizeof(MeshBVH::LeafGeometry);
     uint64_t num_leaf_mat_bytes = num_leaf_mats *
         sizeof(MeshBVH::LeafMaterial);
     uint64_t num_vertices_bytes = num_vertices *
@@ -310,7 +306,7 @@ MaterialData initMaterialData(
             malloc(sizeof(Material) * num_materials)
     };
 
-    for (int i = 0; i < num_textures; ++i) {
+    for (uint32_t i = 0; i < num_textures; ++i) {
         const auto &tex = textures[i];
         int width, height, components;
         void *pixels = nullptr;
@@ -351,10 +347,9 @@ MaterialData initMaterialData(
             cpu_mat_data.textures[i] = tex_obj;
             cpu_mat_data.textureBuffers[i] = cuda_array;
         }else if (tex.info == imp::TextureLoadInfo::PixelBuffer){
-            if(tex.pix_info.data.format == imp::TextureFormat::BC7) {
+            if (tex.pix_info.data.format == imp::TextureFormat::BC7) {
                 void *pixel_data = tex.pix_info.data.imageData;
-                uint32_t pixel_data_size = tex.pix_info.data.imageSize;
-
+                
                 width = tex.pix_info.data.width;
                 height = tex.pix_info.data.height;
 
@@ -429,7 +424,7 @@ MaterialData initMaterialData(
         }
     }
 
-    for (int i = 0; i < num_materials; ++i) {
+    for (uint32_t i = 0; i < num_materials; ++i) {
         Material mat = {
             .color = materials[i].color,
             .textureIdx = materials[i].textureIdx,

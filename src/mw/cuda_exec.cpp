@@ -1127,7 +1127,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     DynArray<const char *> compile_flags = std::move(common_compile_flags);
 
-    for (int i = 0; i < bvh_srcs.size(); ++i) {
+    for (uint32_t i = 0; i < bvh_srcs.size(); ++i) {
         std::ifstream bvh_file_stream(bvh_srcs[i]);
         std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
             std::istreambuf_iterator<char>());
@@ -1399,12 +1399,13 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
     GPUKernels gpu_kernels {
         .mod = compile_results.mod,
         .megakernels = std::move(megakernel_fns),
-        .computeGPUImplConsts = 0,
-        .initECS = 0,
-        .initWorlds = 0,
-        .initTasks = 0,
-        .queueUserInit = 0,
-        .queueUserRun = 0,
+        .computeGPUImplConsts = nullptr,
+        .initECS = nullptr,
+        .initWorlds = nullptr,
+        .initTasks = nullptr,
+        .queueUserInit = nullptr,
+        .queueUserRun = nullptr,
+        .initBVHParams = nullptr,
     };
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
@@ -2347,7 +2348,9 @@ MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
         .blockDimZ = 1,
         .sharedMemBytes = 0,
         .kernelParams = nullptr,
-        .extra = nullptr
+        .extra = nullptr,
+        .kern = nullptr,
+        .ctx = nullptr,
     };
 
     // Allocation node
@@ -2357,7 +2360,6 @@ MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
                 &bvh_launch_params));
 
     bool fast_bvh = true;
-    bool widen_bvh = true;
 
     auto shared_mem_per_sm = impl_->sharedMemPerSM;
 
@@ -2450,10 +2452,12 @@ MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
         .blockDimX = pixels_per_block,
         .blockDimY = pixels_per_block,
         .blockDimZ = 1,
-        .sharedMemBytes = 1024
+        .sharedMemBytes = 1024,
+        .kernelParams = nullptr,
+        .extra = nullptr,
+        .kern = nullptr,
+        .ctx = nullptr,
     };
-
-    CUgraphNode raycast_node;
 
     push_new_node();
     REQ_CU(cuGraphAddKernelNode(get_new_node(), run_graph,
@@ -2488,6 +2492,7 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
 
     return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
         .runGraph = run_graph,
+        .enableRaytracing = false,
     });
 }
 

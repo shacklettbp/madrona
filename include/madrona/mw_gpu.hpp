@@ -75,7 +75,7 @@ struct RenderConfig {
     enum class RenderMode : uint32_t {
         Color,
         Depth,
-        None
+        None,
     };
 
     RenderMode renderMode;
