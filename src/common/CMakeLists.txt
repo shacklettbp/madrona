@@ -77,6 +77,7 @@ add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/table.hpp ${MADRONA_INC_DIR}/table.inl table.cpp
     ${MADRONA_INC_DIR}/virtual.hpp virtual.cpp
     ${MADRONA_INC_DIR}/tracing.hpp tracing.cpp
+    ${MADRONA_INC_DIR}/io.hpp io.cpp
     #${MADRONA_INC_DIR}/hash.hpp
     #${INC_DIR}/platform_utils.hpp ${INC_DIR}/platform_utils.inl
     #    platform_utils.cpp

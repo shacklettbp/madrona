@@ -7,22 +7,37 @@
  */
 #include <madrona/io.hpp>
 
+#include <madrona/crash.hpp>
+#include <madrona/memory.hpp>
+
+#include <fstream>
+
 namespace madrona {
 
-IOManager::IOManager(JobManager &job_mgr)
-    : job_mgr_(job_mgr)
-{}
-
-IOPromise IOManager::makePromise()
+char * readBinaryFile(const char *path,
+                      size_t buffer_alignment,
+                      size_t *out_num_bytes)
 {
-}
+    // FIXME: look into platform specific alternatives for better
+    // errors
 
-IOPromise IOManager::load(IOPromise promise, const char *path, Job job)
-{
-}
+    std::fstream file(path, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        return nullptr;
+    }
 
-IOBuffer IOManager::getBuffer(IOPromise promise)
-{
+    size_t num_bytes = file.tellg();
+    file.seekg(std::ios::beg);
+
+    char *data = (char *)rawAllocAligned(num_bytes, buffer_alignment);
+    file.read(data, num_bytes);
+    if (file.fail()) {
+        rawDeallocAligned(data);
+        return nullptr;
+    }
+
+    *out_num_bytes = num_bytes;
+    return data;
 }
 
 }
