@@ -40,6 +40,9 @@ set(MADRONA_MW_GPU_COMPILE_FLAGS
     -rdc=true
     -use_fast_math
     -DMADRONA_GPU_MODE=1
+    -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CPP
+    -DCCCL_DISABLE_BF16_SUPPORT=1
+    -DCUB_DISABLE_BF16_SUPPORT=1
 )
 
 set(DEVICE_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/device)
@@ -99,10 +102,21 @@ set(BVH_INTERNAL_SRC_LIST "${BVH_INTERNAL_SRC_LIST}")
 
 get_target_property(MADRONA_HDRS_INCLUDES madrona_hdrs INTERFACE_INCLUDE_DIRECTORIES)
 
+set(CCCL_OVERRIDE_INCLUDE_DIRS "")
+if (CUDAToolkit_VERSION_MINOR LESS 5)
+    set(CCCL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../external/cccl")
+
+    list(APPEND CCCL_OVERRIDE_INCLUDE_DIRS
+        "${CCCL_DIR}/libcudacxx/include/"
+        "${CCCL_DIR}/cub"
+        "${CCCL_DIR}/thrust"
+    )
+endif()
+
 set(NVRTC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/device/include
     ${MADRONA_HDRS_INCLUDES}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/cub
+    ${CCCL_OVERRIDE_INCLUDE_DIRS}
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 

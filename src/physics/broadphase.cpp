@@ -1,6 +1,8 @@
 #include <madrona/context.hpp>
 #include <madrona/physics.hpp>
 
+#include <algorithm>
+
 #include "physics_impl.hpp"
 
 namespace madrona::phys::broadphase {

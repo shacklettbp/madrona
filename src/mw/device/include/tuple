@@ -1,5 +1,5 @@
 #pragma once
 
-#include <cuda/std/__algorithm>
+#include <cuda/std/tuple>
 
 #include "cuda_std_post"
