@@ -88,11 +88,6 @@ struct SourceInstance {
     uint32_t objIDX;
 };
 
-struct SourceAssetInfo {
-    uint32_t numObjects;
-    std::string path;
-};
-
 struct ImportedAssets {
     struct GeometryData {
         DynArray<DynArray<math::Vector3>> positionArrays;
@@ -114,7 +109,6 @@ struct ImportedAssets {
     DynArray<SourceMaterial> materials;
     DynArray<SourceInstance> instances;
     DynArray<SourceTexture> texture;
-    DynArray<SourceAssetInfo> assetInfos;
 
     static Optional<ImportedAssets> importFromDisk(
         Span<const char * const> asset_paths,

@@ -149,7 +149,6 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         .materials { 0 },
         .instances { 0 },
         .texture = DynArray<SourceTexture>(0),
-        .assetInfos { 0 },
     };
 
     auto obj_loader = Optional<OBJLoader>::none();
@@ -162,8 +161,6 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
 
     bool load_success = false;
     for (const char *path : paths) {
-        uint32_t pre_objects_offset = imported.objects.size();
-
         std::string_view path_view(path);
 
         auto extension_pos = path_view.rfind('.');
@@ -213,13 +210,6 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             printf("Load failed\n");
             break;
         }
-
-        uint32_t post_objects_offset = imported.objects.size();
-
-        imported.assetInfos.push_back(SourceAssetInfo{
-            post_objects_offset - pre_objects_offset,
-            std::string(path_view)
-        });
     }
 
     if (!load_success) {

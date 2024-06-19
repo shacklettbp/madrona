@@ -13,7 +13,8 @@ namespace madrona::render {
 
 namespace AssetProcessor {
 
-static bool loadCache(const char* location, DynArray<MeshBVH>& bvhs_out)
+static bool loadCache(const char *location,
+                      HeapArray<MeshBVH> &bvhs_out)
 {
     FILE *ptr;
     ptr = fopen(location, "rb");
@@ -22,10 +23,7 @@ static bool loadCache(const char* location, DynArray<MeshBVH>& bvhs_out)
         return false;
     }
 
-    uint32_t num_bvhs;
-    fread(&num_bvhs,sizeof(num_bvhs),1,ptr);
-    bvhs_out.reserve(num_bvhs);
-
+    const CountT num_bvhs = bvhs_out->size();
     for (CountT i = 0; i < num_bvhs; i++) {
         uint32_t num_verts;
         uint32_t num_nodes;
@@ -67,20 +65,17 @@ static bool loadCache(const char* location, DynArray<MeshBVH>& bvhs_out)
         bvh.vertices = vertices.retrieve_ptr();
         bvh.rootAABB = aabb_out;
         bvh.materialIDX = material_idx;
-        bvhs_out.push_back(bvh);
+        bvhs_out.emplace(i, bvh);
     }
 
     fclose(ptr);
     return true;
 }
 
-static void writeCache(const char* location, DynArray<MeshBVH>& bvhs)
+static void writeCache(const char *location, HeapArray<MeshBVH> &bvhs)
 {
     FILE *ptr;
     ptr = fopen(location, "wb");
-
-    uint32_t num_bvhs = bvhs.size();
-    fwrite(&num_bvhs, sizeof(uint32_t), 1, ptr);
 
     for (CountT i = 0; i < bvhs.size(); i++) {
         fwrite(&bvhs[i].numVerts, sizeof(uint32_t), 1, ptr);
@@ -101,7 +96,8 @@ static void writeCache(const char* location, DynArray<MeshBVH>& bvhs)
     fclose(ptr);
 }
 
-static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
+static HeapArray<MeshBVH> createMeshBVHs(
+    Span<const SourceObject> objs)
 {
     char* bvh_cache_dir = getenv("MADRONA_BVH_CACHE_DIR");
     std::filesystem::path cache_dir = "";
@@ -116,77 +112,50 @@ static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
         cache_dir = bvh_cache_dir;
     }
 
-    DynArray<DynArray<MeshBVH>> mesh_bvh_arrays { 0 };
+    HeapArray<MeshBVH> mesh_bvhs(objs.size());
 
-    uint32_t obj_offset = 0;
+    if (bvh_cache_dir && !regen_cache) {
+        bool valid_cache =
+            loadCache((cache_dir / "bvh_data").c_str(), mesh_bvhs);
 
-    for (int asset_idx = 0; asset_idx < assets.assetInfos.size(); ++asset_idx) {
-        const SourceAssetInfo &asset_info = assets.assetInfos[asset_idx];
-
-        std::filesystem::path loaded_path = asset_info.path;
-
-        bool should_construct = true;
-
-        // Create a mesh BVH for all the meshes in recently loaded objects.
-        DynArray<MeshBVH> asset_bvhs { 0 };
-
-        if(bvh_cache_dir && !regen_cache) {
-            should_construct = !loadCache((cache_dir /
-                    loaded_path.filename()).c_str(), asset_bvhs);
+        if (valid_cache) {
+            return mesh_bvhs
         }
-
-        if(should_construct) {
-            for (uint32_t obj_idx = 0; obj_idx < asset_info.numObjects; ++obj_idx) {
-                const SourceObject &obj =
-                    assets.objects[obj_offset + obj_idx];
-
-                MeshBVH bvh = MeshBVHBuilder::build(obj.meshes);
-
-                asset_bvhs.push_back(bvh);
-            }
-        }
-
-        if(bvh_cache_dir && (regen_cache || should_construct)){
-            writeCache((cache_dir / loaded_path.filename()).c_str(), 
-                    asset_bvhs);
-        }
-
-        mesh_bvh_arrays.push_back(std::move(asset_bvhs));
-
-        obj_offset += asset_info.numObjects;
     }
 
-    return mesh_bvh_arrays;
+    for (CountT obj_idx = 0; obj_idx < objs.size(); obj_idx++) {
+        const SourceObject &obj = objs[obj_offset + obj_idx];
+
+        MeshBVH bvh = MeshBVHBuilder::build(obj.meshes);
+        mesh_bvhs[obj_idx] = bvh;
+    }
+
+     if (bvh_cache_dir) {
+         writeCache((cache_dir / "bvh_data").c_str(), 
+                 asset_bvhs);
+     }
+
+    return mesh_bvhs;
 }
 
 MeshBVHData makeBVHData(
-    const ImportedAssets &assets)
+    Span<const imp::SourceObject> src_objs)
 {
-    DynArray<DynArray<MeshBVH>> mesh_bvh_arrays =
-        createMeshBVHs(assets);
+    HeapArray<MeshBVH> mesh_bvhs = createMeshBVHs(src_objs);
 
-    uint64_t num_bvhs = 0;
+    uint64_t num_bvhs = (uint32_t)mesh_bvhs.size();
     uint64_t num_nodes = 0;
     uint64_t num_leaf_mats = 0;
     uint64_t num_vertices = 0;
 
-    for (CountT asset_idx = 0; 
-            asset_idx < mesh_bvh_arrays.size(); 
-            ++asset_idx) {
-        const DynArray<MeshBVH> &asset_bvhs = 
-            mesh_bvh_arrays[asset_idx];
+    for (CountT bvh_idx = 0; bvh_idx < mesh_bvhs.size(); ++bvh_idx) {
+        const MeshBVH &bvh = asset_bvhs[bvh_idx];
 
-        num_bvhs += (uint32_t)asset_bvhs.size();
-
-        for (CountT bvh_idx = 0; bvh_idx < asset_bvhs.size(); ++bvh_idx) {
-            const MeshBVH &bvh = asset_bvhs[bvh_idx];
-
-            num_nodes += bvh.numNodes;
+        num_nodes += bvh.numNodes;
 #ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
-            num_leaf_mats += bvh.numVerts/3;
+        num_leaf_mats += bvh.numVerts/3;
 #endif
-            num_vertices += bvh.numVerts;
-        }
+        num_vertices += bvh.numVerts;
     }
 
     uint64_t num_bvh_bytes = num_bvhs *
@@ -215,58 +184,48 @@ MeshBVHData makeBVHData(
 
     MeshBVH::BVHVertex *vertices = (MeshBVH::BVHVertex *)cu::allocGPU(num_vertices_bytes);
 
-    uint64_t bvh_offset = 0;
     uint64_t node_offset = 0;
     uint64_t leaf_offset = 0;
     uint64_t vert_offset = 0;
 
-    for (CountT asset_idx = 0; 
-            asset_idx < mesh_bvh_arrays.size(); 
-            ++asset_idx) {
-        const DynArray<MeshBVH> &asset_bvhs = 
-            mesh_bvh_arrays[asset_idx];
+    for (CountT bvh_idx = 0; bvh_idx < mesh_bvhs.size(); ++bvh_idx) {
+        const MeshBVH &bvh = asset_bvhs[bvh_idx];
 
-        for (CountT bvh_idx = 0; bvh_idx < asset_bvhs.size(); ++bvh_idx) {
-            const MeshBVH &bvh = asset_bvhs[bvh_idx];
-
-            // Need to make sure the pointers in the BVH point to GPU memory
-            MeshBVH tmp = bvh;
-            tmp.nodes = nodes + node_offset;
-            tmp.leafGeos = leaf_geos + leaf_offset;
-            tmp.vertices = vertices + vert_offset;
+        // Need to make sure the pointers in the BVH point to GPU memory
+        MeshBVH tmp = bvh;
+        tmp.nodes = nodes + node_offset;
+        tmp.leafGeos = leaf_geos + leaf_offset;
+        tmp.vertices = vertices + vert_offset;
 #if defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
-            tmp.leafMats = leaf_mats + leaf_offset;
+        tmp.leafMats = leaf_mats + leaf_offset;
 #else
-            tmp.leafMats = nullptr;
+        tmp.leafMats = nullptr;
 #endif
 
-            REQ_CUDA(cudaMemcpy(bvhs + bvh_offset,
-                        &tmp, sizeof(tmp), cudaMemcpyHostToDevice));
-            REQ_CUDA(cudaMemcpy(nodes + node_offset,
-                        bvh.nodes, bvh.numNodes * sizeof(MeshBVH::Node),
-                        cudaMemcpyHostToDevice));
+        REQ_CUDA(cudaMemcpy(bvhs + bvh_idx,
+            &tmp, sizeof(tmp), cudaMemcpyHostToDevice));
+        REQ_CUDA(cudaMemcpy(nodes + node_offset,
+            bvh.nodes, bvh.numNodes * sizeof(MeshBVH::Node),
+            cudaMemcpyHostToDevice));
 #if !defined(MADRONA_COMPRESSED_DEINDEXED) && !defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
-            REQ_CUDA(cudaMemcpy(leaf_geos + leaf_offset,
-                        bvh.leafGeos, bvh.numLeaves * 
-                            sizeof(MeshBVH::LeafGeometry),
-                        cudaMemcpyHostToDevice));
+        REQ_CUDA(cudaMemcpy(leaf_geos + leaf_offset,
+            bvh.leafGeos, bvh.numLeaves * sizeof(MeshBVH::LeafGeometry),
+            cudaMemcpyHostToDevice));
 #endif
 #if defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
-            REQ_CUDA(cudaMemcpy(leaf_mats + leaf_offset,
-                        bvh.leafMats, (bvh.numVerts/3) *
-                            sizeof(MeshBVH::LeafMaterial),
-                        cudaMemcpyHostToDevice));
+        REQ_CUDA(cudaMemcpy(leaf_mats + leaf_offset,
+            bvh.leafMats, (bvh.numVerts / 3) *
+            sizeof(MeshBVH::LeafMaterial),
+            cudaMemcpyHostToDevice));
 #endif
 
-            REQ_CUDA(cudaMemcpy(vertices + vert_offset,
-                        bvh.vertices, bvh.numVerts * sizeof(MeshBVH::BVHVertex),
-                        cudaMemcpyHostToDevice));
+        REQ_CUDA(cudaMemcpy(vertices + vert_offset,
+                    bvh.vertices, bvh.numVerts * sizeof(MeshBVH::BVHVertex),
+                    cudaMemcpyHostToDevice));
 
-            bvh_offset += 1;
-            node_offset += bvh.numNodes;
-            leaf_offset += bvh.numVerts/3;
-            vert_offset += bvh.numVerts;
-        }
+        node_offset += bvh.numNodes;
+        leaf_offset += bvh.numVerts/3;
+        vert_offset += bvh.numVerts;
     }
 
     MeshBVHData gpu_data = {
@@ -278,7 +237,7 @@ MeshBVHData makeBVHData(
         .vertices = vertices,
         .numVerts = vert_offset,
         .meshBVHs = bvhs,
-        .numBVHs = bvh_offset,
+        .numBVHs = (uint64_t)mesh_bvhs.size(),
     };
 
     return gpu_data;

@@ -9,7 +9,7 @@ namespace madrona::render {
 
 namespace AssetProcessor {
     Optional<MeshBVHData> makeBVHData(
-            const imp::ImportedAssets &assets);
+        Span<const imp::SourceObject> src_objs);
 
     MaterialData initMaterialData(
         const imp::SourceMaterial *materials,
