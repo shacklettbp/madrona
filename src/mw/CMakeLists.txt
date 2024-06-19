@@ -20,7 +20,8 @@ add_library(madrona_mw_gpu STATIC
     cpp_compile.hpp cpp_compile.cpp
     cuda_compile_helpers.hpp cuda_compile_helpers.inl cuda_compile_helpers.cpp
     ${MADRONA_INC_DIR}/mw_gpu.hpp ${MADRONA_INC_DIR}/mw_ext_gpu_mem.hpp 
-    cuda_exec.cpp ext_gpu_mem.cpp)
+    cuda_exec.cpp ext_gpu_mem.cpp
+)
 
 target_link_libraries(madrona_mw_gpu
     PUBLIC

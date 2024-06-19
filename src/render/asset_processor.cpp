@@ -159,13 +159,12 @@ static DynArray<DynArray<MeshBVH>> createMeshBVHs(const ImportedAssets &assets)
     return mesh_bvh_arrays;
 }
 
-Optional<MeshBVHData> makeBVHData(
+MeshBVHData makeBVHData(
     const ImportedAssets &assets)
 {
     DynArray<DynArray<MeshBVH>> mesh_bvh_arrays =
         createMeshBVHs(assets);
 
-#ifdef MADRONA_CUDA_SUPPORT
     uint64_t num_bvhs = 0;
     uint64_t num_nodes = 0;
     uint64_t num_leaf_mats = 0;
@@ -283,9 +282,6 @@ Optional<MeshBVHData> makeBVHData(
     };
 
     return gpu_data;
-#else
-    return {};
-#endif
 }
 
 MaterialData initMaterialData(

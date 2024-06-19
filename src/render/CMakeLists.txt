@@ -14,7 +14,6 @@ add_library(madrona_rendering_system STATIC
     ${MADRONA_INC_DIR}/render/ecs.hpp ecs_interop.hpp ecs_system.cpp
     ${MADRONA_INC_DIR}/mesh_bvh.hpp 
     ${MADRONA_INC_DIR}/mesh_bvh.inl 
-    ${MADRONA_INC_DIR}/render/asset_processor.hpp
 )
 
 target_link_libraries(madrona_rendering_system PRIVATE
@@ -29,9 +28,7 @@ add_library(madrona_render_core STATIC
     batch_renderer.hpp batch_renderer.cpp
     render_common.hpp
     image_util.cpp
-    asset_processor.cpp
 )
-
 target_compile_definitions(madrona_render_core PUBLIC
     "-DMADRONA_RENDER_DATA_DIR=${CMAKE_CURRENT_SOURCE_DIR}/"
 )
@@ -44,9 +41,23 @@ target_link_libraries(madrona_render_core
         madrona_importer
         madrona_rendering_system
     PRIVATE
-        madrona_bvh_builder
         stb
 )
+
+
+if (TARGET madrona_cuda)
+    add_library(madrona_render_asset_processor STATIC
+        ${MADRONA_INC_DIR}/render/cuda_batch_render_assets.hpp
+        ${MADRONA_INC_DIR}/render/asset_processor.hpp asset_processor.cpp
+    )
+
+    target_link_libraries(madrona_render_asset_processor PRIVATE
+        madrona_bvh_builder
+        madrona_common
+        madrona_cuda
+    )
+endif()
+
 
 if (TARGET madrona_render_vk_cuda)
     target_link_libraries(madrona_render_core PUBLIC

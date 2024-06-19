@@ -14,7 +14,7 @@
 #include <madrona/span.hpp>
 #include <madrona/importer.hpp>
 
-#include <madrona/mesh_bvh.hpp>
+#include <madrona/render/cuda_batch_render_assets.hpp>
 
 #include <cuda_runtime.h>
 #include <cuda.h>
@@ -71,23 +71,19 @@ struct CompileConfig {
     OptMode optMode = OptMode::LTO;
 };
 
-//struct CudaBatchRenderAssets {
-//    MeshBVHData 
-//};
-
 struct CudaBatchRenderConfig {
     // Until we support custom rendering functions, for now we must toggle
     // between rendering color or depth.
     enum class RenderMode : uint32_t {
-        None,
         Color,
         Depth,
     };
 
-    RenderMode renderMode = RenderMode::None;
+    RenderMode renderMode;
 
-    // Imported assets from disk.
-    imp::ImportedAssets *importedAssets = nullptr;
+    // Data
+    render::MeshBVHData geoBVHData;
+    render::MaterialData materialData;
 
     // The raytracer output is square so the resolution of the outputs would be
     // renderResolution x renderResolution.
@@ -124,7 +120,8 @@ public:
     MWCudaExecutor(const StateConfig &state_cfg,
                    const CompileConfig &compile_cfg,
                    CUcontext cu_ctx,
-                   const CudaBatchRenderConfig &render_cfg = {});
+                   const Optional<CudaBatchRenderConfig> &render_cfg = 
+                       Optional<CudaBatchRenderConfig>::none());
 
     MWCudaExecutor(MWCudaExecutor &&o);
     ~MWCudaExecutor();

@@ -1604,21 +1604,6 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
     }
 }
 
-namespace {
-
-struct RendererInitData {
-    MeshBVH *bvhsPtr;
-    uint32_t numBVHs;
-    const imp::SourceMaterial *materials;
-    uint32_t numMaterials;
-    const imp::SourceTexture *textures;
-    uint32_t numTextures;
-    uint32_t raycastOutputResolution;
-    float nearSphere;
-};
-
-}
-
 static GPUEngineState initEngineAndUserState(
     uint32_t num_worlds,
     uint32_t num_world_data_bytes,
@@ -1631,7 +1616,7 @@ static GPUEngineState initEngineAndUserState(
     uint32_t num_exported,
     const GPUKernels &gpu_kernels,
     const BVHKernels &bvh_kernels,
-    const Optional<RendererInitData> &renderer_init_data,
+    const Optional<CudaBatchRenderConfig> &render_cfg,
     ExecutorMode exec_mode,
     CUdevice cu_gpu,
     CUcontext cu_ctx,
@@ -1704,11 +1689,11 @@ static GPUEngineState initEngineAndUserState(
     void *bvh_ptrs;
     uint32_t num_bvhs;
     uint32_t raycast_output_resolution;
-    if (renderer_init_data.has_value()) {
-        bvh_ptrs = renderer_init_data->bvhsPtr;
-        num_bvhs = renderer_init_data->numBVHs;
+    if (render_cfg.has_value()) {
+        bvh_ptrs = render_cfg->geoBVHData.meshBVHs;
+        num_bvhs = (uint32_t)render_cfg->geoBVHData.numBVHs;
 
-        raycast_output_resolution = renderer_init_data->raycastOutputResolution;
+        raycast_output_resolution = render_cfg->renderResolution;
 
         bvh_internals = cu::allocGPU(
             sizeof(mwGPU::madrona::BVHInternalData));
@@ -1835,15 +1820,7 @@ static GPUEngineState initEngineAndUserState(
 
     cu::deallocCPU(exported_readback);
 
-    if (renderer_init_data.has_value()) { 
-        // FIXME: this *REALLY* should not be happening in cuda_exec.cpp
-        render::MaterialData mat_data =
-            render::AssetProcessor::initMaterialData(
-                renderer_init_data->materials,
-                renderer_init_data->numMaterials,
-                renderer_init_data->textures,
-                renderer_init_data->numTextures);
-
+    if (render_cfg.has_value()) { 
         auto params_tmp = cu::allocGPU(sizeof(mwGPU::madrona::BVHParams));
 
         // Address to the BVHParams struct
@@ -1861,9 +1838,9 @@ static GPUEngineState initEngineAndUserState(
             bvh_ptrs,
             num_bvhs,
             bvh_kernels.timingInfo,
-            mat_data.materials,
-            mat_data.textures,
-            renderer_init_data->nearSphere);
+            render_cfg->materialData.materials,
+            render_cfg->materialData.textures,
+            render_cfg->nearPlane);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params
@@ -2196,10 +2173,11 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
     return cu_ctx;
 }
 
-MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
-                               const CompileConfig &compile_cfg,
-                               CUcontext cu_ctx,
-                               const CudaBatchRenderConfig &render_cfg)
+MWCudaExecutor::MWCudaExecutor(
+        const StateConfig &state_cfg,
+        const CompileConfig &compile_cfg,
+        CUcontext cu_ctx,
+        const Optional<CudaBatchRenderConfig> &render_cfg)
     : impl_(nullptr)
 {
     const ExecutorMode exec_mode = ExecutorMode::TaskGraph;
@@ -2240,45 +2218,10 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
            CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
            cu_gpu));
 
-    bool enable_raytracing = 
-        (render_cfg.renderMode != CudaBatchRenderConfig::RenderMode::None);
-
-    Optional<RendererInitData> renderer_init_data =
-        Optional<RendererInitData>::none();
-    Optional<render::MeshBVHData> gpu_imported_assets = 
-        Optional<render::MeshBVHData>::none();
-    
     BVHKernels bvh_kernels {};
-    if (enable_raytracing) {
-        if (render_cfg.importedAssets) {
-            gpu_imported_assets = render::AssetProcessor::makeBVHData(
-                *render_cfg.importedAssets);
-        }
-
-        bool has_geometry = gpu_imported_assets.has_value();
-        bool has_textures = has_geometry ? 
-            (render_cfg.importedAssets->materials.data() != nullptr) : false;
-        bool has_materials = has_geometry ? 
-            (render_cfg.importedAssets->texture.data() != nullptr) : false;
-
-        uint32_t render_resolution = render_cfg.renderResolution;
-        renderer_init_data = RendererInitData {
-            .bvhsPtr = has_geometry ? gpu_imported_assets->meshBVHs : nullptr,
-            .numBVHs = has_geometry ? (uint32_t)gpu_imported_assets->numBVHs : 0,
-            .materials = has_materials ? 
-                render_cfg.importedAssets->materials.data() : nullptr,
-            .numMaterials = has_materials ?
-                (uint32_t)render_cfg.importedAssets->materials.size() : 0,
-            .textures = has_textures ?
-                render_cfg.importedAssets->texture.data() : nullptr,
-            .numTextures = has_textures ?
-                (uint32_t)render_cfg.importedAssets->texture.size() : 0,
-            .raycastOutputResolution = render_resolution,
-            .nearSphere = render_cfg.nearPlane,
-        };
-
+    if (render_cfg.has_value()) {
         bvh_kernels = buildBVHKernels(
-            compile_cfg, num_sms, cu_capability, render_cfg.renderMode);
+            compile_cfg, num_sms, cu_capability, render_cfg->renderMode);
     } 
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
@@ -2290,8 +2233,8 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         state_cfg.numWorldInitBytes, state_cfg.userConfigPtr,
         state_cfg.numUserConfigBytes,  state_cfg.numTaskGraphs,
         state_cfg.numExportedBuffers,
-        gpu_kernels, bvh_kernels, 
-        renderer_init_data,
+        gpu_kernels,
+        bvh_kernels, render_cfg,
         exec_mode, cu_gpu, cu_ctx, strm);
 
     TaskGraphsState taskgraphs_state {
@@ -2305,10 +2248,10 @@ MWCudaExecutor::MWCudaExecutor(const StateConfig &state_cfg,
         gpu_kernels.mod,
         std::move(eng_state),
         std::move(taskgraphs_state),
-        enable_raytracing,
+        render_cfg.has_value(),
         bvh_kernels,
         state_cfg.numWorlds,
-        enable_raytracing ? render_cfg.renderResolution : 0,
+        render_cfg.has_value() ? render_cfg->renderResolution : 0,
         (uint32_t)shared_mem_per_sm,
         {}
     });
