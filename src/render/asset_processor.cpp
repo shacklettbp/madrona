@@ -1,9 +1,11 @@
-#include <filesystem>
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/cuda_utils.hpp>
 #include <madrona/render/asset_processor.hpp>
+#include <madrona/heap_array.hpp>
 
 #include <madrona/mesh_bvh_builder.hpp>
+
+#include <filesystem>
 
 #include <stb_image.h>
 
@@ -23,7 +25,7 @@ static bool loadCache(const char *location,
         return false;
     }
 
-    const CountT num_bvhs = bvhs_out->size();
+    const CountT num_bvhs = bvhs_out.size();
     for (CountT i = 0; i < num_bvhs; i++) {
         uint32_t num_verts;
         uint32_t num_nodes;
@@ -99,40 +101,35 @@ static void writeCache(const char *location, HeapArray<MeshBVH> &bvhs)
 static HeapArray<MeshBVH> createMeshBVHs(
     Span<const SourceObject> objs)
 {
-    char* bvh_cache_dir = getenv("MADRONA_BVH_CACHE_DIR");
-    std::filesystem::path cache_dir = "";
+    char *bvh_cache_path = getenv("MADRONA_BVH_CACHE");
 
-    char* bvh_cache = getenv("MADRONA_REGEN_BVH_CACHE");
     bool regen_cache = false;
-    if (bvh_cache) {
-       regen_cache = atoi(bvh_cache);
-    }
-
-    if (bvh_cache_dir) {
-        cache_dir = bvh_cache_dir;
+    {
+       char *regen_env = getenv("MADRONA_REGEN_BVH_CACHE");
+       if (regen_env) {
+           regen_cache = atoi(regen_env);
+       }
     }
 
     HeapArray<MeshBVH> mesh_bvhs(objs.size());
 
-    if (bvh_cache_dir && !regen_cache) {
-        bool valid_cache =
-            loadCache((cache_dir / "bvh_data").c_str(), mesh_bvhs);
+    if (bvh_cache_path && !regen_cache) {
+        bool valid_cache = loadCache(bvh_cache_path, mesh_bvhs);
 
         if (valid_cache) {
-            return mesh_bvhs
+            return mesh_bvhs;
         }
     }
 
     for (CountT obj_idx = 0; obj_idx < objs.size(); obj_idx++) {
-        const SourceObject &obj = objs[obj_offset + obj_idx];
+        const SourceObject &obj = objs[obj_idx];
 
         MeshBVH bvh = MeshBVHBuilder::build(obj.meshes);
         mesh_bvhs[obj_idx] = bvh;
     }
 
-     if (bvh_cache_dir) {
-         writeCache((cache_dir / "bvh_data").c_str(), 
-                 asset_bvhs);
+     if (bvh_cache_path) {
+         writeCache(bvh_cache_path, mesh_bvhs);
      }
 
     return mesh_bvhs;
@@ -149,7 +146,7 @@ MeshBVHData makeBVHData(
     uint64_t num_vertices = 0;
 
     for (CountT bvh_idx = 0; bvh_idx < mesh_bvhs.size(); ++bvh_idx) {
-        const MeshBVH &bvh = asset_bvhs[bvh_idx];
+        const MeshBVH &bvh = mesh_bvhs[bvh_idx];
 
         num_nodes += bvh.numNodes;
 #ifdef MADRONA_COMPRESSED_DEINDEXED_TEX
@@ -189,7 +186,7 @@ MeshBVHData makeBVHData(
     uint64_t vert_offset = 0;
 
     for (CountT bvh_idx = 0; bvh_idx < mesh_bvhs.size(); ++bvh_idx) {
-        const MeshBVH &bvh = asset_bvhs[bvh_idx];
+        const MeshBVH &bvh = mesh_bvhs[bvh_idx];
 
         // Need to make sure the pointers in the BVH point to GPU memory
         MeshBVH tmp = bvh;

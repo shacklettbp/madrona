@@ -55,6 +55,7 @@ if (TARGET madrona_cuda)
         madrona_bvh_builder
         madrona_common
         madrona_cuda
+        stb
     )
 endif()
 
