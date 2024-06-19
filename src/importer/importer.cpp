@@ -74,6 +74,7 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
                 imgData.imageArrays[tx.dataBufferIndex].imageData.clear();
                 imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
                 fread(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), tx.config.imageSize, 1, read_fp);
+                tx.imageData = imgData.imageArrays[tx.dataBufferIndex].imageData.data();
 
                 free(pixel_data);
                 fclose(read_fp);
@@ -88,6 +89,7 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
                 imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
                 memcpy(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), processOutput.outputData,
                        tx.config.imageSize);
+                tx.imageData = imgData.imageArrays[tx.dataBufferIndex].imageData.data();
 
                 free(processOutput.outputData);
 
@@ -113,6 +115,7 @@ void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProce
             imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
             memcpy(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), processOutput.outputData,
                        tx.config.imageSize);
+            tx.imageData = imgData.imageArrays[tx.dataBufferIndex].imageData.data();
 
             free(processOutput.outputData);
         }
