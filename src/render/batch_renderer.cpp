@@ -740,7 +740,7 @@ static void makeBatchFrame(vk::Device& dev,
     VkDescriptorSet aabb_set = prepare_views.descPools[3].makeSet();
 
     //Descriptor sets
-    std::array<VkWriteDescriptorSet, 12> desc_updates;
+    std::array<VkWriteDescriptorSet, 11> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = views.buffer;
@@ -771,12 +771,6 @@ static void makeBatchFrame(vk::Device& dev,
     vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
 #endif
 
-    VkDescriptorBufferInfo aabb_info;
-    aabb_info.buffer = asset_data[0].buf.buffer;
-    aabb_info.offset = asset_data[0].aabbBufferOffset;
-    aabb_info.range = asset_data[0].aabbBufferSize;
-    vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
-
     // PBR descriptor sets
 
     VkDescriptorBufferInfo light_data_info;
@@ -784,7 +778,7 @@ static void makeBatchFrame(vk::Device& dev,
     light_data_info.offset = 0;
     light_data_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[7],
+    vk::DescHelper::storage(desc_updates[6],
                             pbr_set, &light_data_info, 0);
 
     VkDescriptorImageInfo transmittance_info;
@@ -792,7 +786,7 @@ static void makeBatchFrame(vk::Device& dev,
     transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     transmittance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[8],
+    vk::DescHelper::textures(desc_updates[7],
                              pbr_set, &transmittance_info, 1, 1);
 
     VkDescriptorImageInfo irradiance_info;
@@ -800,7 +794,7 @@ static void makeBatchFrame(vk::Device& dev,
     irradiance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     irradiance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[9],
+    vk::DescHelper::textures(desc_updates[8],
                              pbr_set, &irradiance_info, 1, 2);
 
     VkDescriptorImageInfo scattering_info;
@@ -808,7 +802,7 @@ static void makeBatchFrame(vk::Device& dev,
     scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[10],
+    vk::DescHelper::textures(desc_updates[9],
                              pbr_set, &scattering_info, 1, 3);
 
     VkDescriptorBufferInfo sky_info;
@@ -816,7 +810,7 @@ static void makeBatchFrame(vk::Device& dev,
     sky_info.offset = 0;
     sky_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[11],
+    vk::DescHelper::storage(desc_updates[10],
                             pbr_set, &sky_info, 4);
 
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
@@ -1454,7 +1448,8 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
                                       uint32_t num_instances,
                                       uint32_t num_views,
                                       uint32_t view_start,
-                                      uint32_t num_processed_batches)
+                                      uint32_t num_processed_batches,
+                                      RenderContext &rctx)
 {
     (void)num_views;
     (void)num_processed_batches;
@@ -1466,7 +1461,8 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
             frame.viewInstanceSetPrepare,
             batch.drawBufferSetPrepare,
             assetSetPrepareView,
-            frame.viewAABBSetPrepare,
+            // frame.viewAABBSetPrepare,
+            rctx.loaded_assets_[0].aabbSet
         };
 
         dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1980,7 +1976,8 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                   info.numInstances,
                                   target.numViews,
                                   num_processed_views,
-                                  draw_package_idx);
+                                  draw_package_idx,
+                                  rctx);
 
         { // Issue buffer barrier for this draw package buffer
             VkBufferMemoryBarrier draw_pckg_barrier = {

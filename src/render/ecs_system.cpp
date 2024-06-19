@@ -130,14 +130,16 @@ inline void instanceTransformUpdate(Context &ctx,
     // it in the TLBVHNode structure.
 
 #ifdef MADRONA_GPU_MODE
-    MeshBVH *bvh = (MeshBVH *)
-        mwGPU::GPUImplConsts::get().meshBVHsAddr +
-        obj_id.idx;
+    if (system_state.enableRaycaster) {
+        MeshBVH *bvh = (MeshBVH *)
+            mwGPU::GPUImplConsts::get().meshBVHsAddr +
+            obj_id.idx;
 
-    math::AABB aabb = bvh->rootAABB.applyTRS(
-            data.position, data.rotation, data.scale);
+        math::AABB aabb = bvh->rootAABB.applyTRS(
+                data.position, data.rotation, data.scale);
 
-    ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
+        ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
+    }
 #endif
 }
 

@@ -26,6 +26,10 @@
 #include <dlfcn.h>
 #endif
 
+#include <stb_image.h>
+
+#include <madrona/render/asset_processor.hpp>
+
 using bytes = std::span<const std::byte>;
 
 template <>
@@ -1252,7 +1256,7 @@ RenderContext::RenderContext(
 {
     {
         VkDescriptorPoolSize pool_sizes[] = {
-            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 20 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 25 },
             { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, InternalConfig::maxTextures*2 },
             { VK_DESCRIPTOR_TYPE_SAMPLER, 1 }
         };
@@ -1285,6 +1289,26 @@ RenderContext::RenderContext(
         };
 
         dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &asset_layout_);
+    }
+
+    {
+        VkDescriptorSetLayoutBinding binding = {
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            .pImmutableSamplers = nullptr,
+        };
+
+        VkDescriptorSetLayoutCreateInfo info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .bindingCount = 1,
+            .pBindings = &binding,
+        };
+
+        dev.dt.createDescriptorSetLayout(dev.hdl, &info, nullptr, &aabb_set_layout_);
     }
 
     {
@@ -1778,7 +1802,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         (MaterialDataShader *)(staging_ptr + buffer_offsets[3]);
     math::AABB *aabbs_ptr =
         (math::AABB *)(staging_ptr + buffer_offsets[4]);
-    (void)aabbs_ptr;
 
     int32_t mesh_offset = 0;
     int32_t vertex_offset = 0;
@@ -1932,6 +1955,10 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         materials_ptr[mat_idx++].textureIdx = mat.textureIdx;
     }
 
+    math::AABB *aabbs_src = AssetProcessor::makeAABBs(src_objs);
+    memcpy(aabbs_ptr, aabbs_src, sizeof(math::AABB) * src_objs.size());
+    free(aabbs_src);
+
     staging.flush(dev);
 
     LocalBuffer asset_buffer = *alloc.makeLocalBuffer(num_asset_bytes);
@@ -1969,7 +1996,20 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &index_buffer_set);
     }
 
-    DynArray<VkWriteDescriptorSet> desc_updates(8 + (material_textures_.size() > 0 ? 2 : 0));
+    VkDescriptorSet aabb_buffer_set;
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .descriptorPool = asset_pool_,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &aabb_set_layout_
+        };
+
+        dev.dt.allocateDescriptorSets(dev.hdl, &alloc_info, &aabb_buffer_set);
+    }
+
+    DynArray<VkWriteDescriptorSet> desc_updates(9 + (material_textures_.size() > 0 ? 2 : 0));
 
     VkDescriptorBufferInfo obj_info;
     obj_info.buffer = asset_buffer.buffer;
@@ -2020,6 +2060,14 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     desc_updates.push_back({});
     DescHelper::storage(desc_updates[7], asset_batch_lighting_set_, &mat_info, 2);
 
+    VkDescriptorBufferInfo aabb_set_info;
+    aabb_set_info.buffer = asset_buffer.buffer;
+    aabb_set_info.offset = buffer_offsets[4];
+    aabb_set_info.range = buffer_sizes[5];
+
+    desc_updates.push_back({});
+    DescHelper::storage(desc_updates[8], aabb_buffer_set, &aabb_set_info, 0);
+
     material_textures_ = loadTextures(dev, alloc, renderQueue, textures);
 
     DynArray<VkDescriptorImageInfo> tx_infos(material_textures_.size()+1);
@@ -2033,10 +2081,10 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 
     if (material_textures_.size()) {
         desc_updates.push_back({});
-        DescHelper::textures(desc_updates[8], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
+        DescHelper::textures(desc_updates[9], asset_set_mat_tex_, tx_infos.data(), tx_infos.size(), 0);
 
         desc_updates.push_back({});
-        DescHelper::textures(desc_updates[9], asset_set_tex_compute_, tx_infos.data(), tx_infos.size(), 0);
+        DescHelper::textures(desc_updates[10], asset_set_tex_compute_, tx_infos.data(), tx_infos.size(), 0);
     }
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
@@ -2045,9 +2093,9 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         std::move(asset_buffer),
         (uint32_t)buffer_offsets[2],
         index_buffer_set,
-        // AABB offsets
-        (uint32_t)buffer_offsets[4],
-        (uint32_t)buffer_sizes[5],
+        buffer_offsets[4],
+        buffer_sizes[5],
+        aabb_buffer_set
     };
 
     loaded_assets_.emplace_back(std::move(asset_data));

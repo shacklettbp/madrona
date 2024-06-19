@@ -209,6 +209,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
            !planeAABB(sm.rightPlane,center,extents) || !planeAABB(sm.bottomPlane,center,extents) ||
            !planeAABB(sm.topPlane,center,extents) || !planeAABB(sm.farPlane,center,extents))){
             num_culled++;
+            some_value += (int)aabbs[0].data[0].x;
             // continue;
         }
 
@@ -223,7 +224,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
             uint draw_id = draw_offset + i;
             DrawCmd draw_cmd;
             draw_cmd.indexCount = mesh.numIndices;
-            draw_cmd.instanceCount = 1 + min(some_value, 0);
+            draw_cmd.instanceCount = 1 + min(abs(some_value), 0);
             draw_cmd.firstIndex = mesh.indexOffset;
             draw_cmd.vertexOffset = mesh.vertexOffset;
             draw_cmd.firstInstance = draw_id;
