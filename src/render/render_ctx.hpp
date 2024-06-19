@@ -83,6 +83,8 @@ struct RenderContext {
     VkDescriptorSet sky_data_set_;
 
     bool gpu_input_;
+
+    VkDescriptorSetLayout aabb_set_layout_;
 };
 
 }

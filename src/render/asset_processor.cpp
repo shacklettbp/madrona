@@ -368,6 +368,45 @@ MaterialData initMaterialData(
 
     return gpu_mat_data;
 }
+
+math::AABB *makeAABBs(
+        Span<const imp::SourceObject> src_objs)
+{
+    int num_objects = (int)src_objs.size();
+
+    math::AABB *aabbs = (math::AABB *)malloc(sizeof(math::AABB) *
+            num_objects);
+
+    for (int obj_idx = 0; obj_idx < num_objects; ++obj_idx) {
+        auto &obj = src_objs[obj_idx];
+
+        float min_x = FLT_MAX, min_y = FLT_MAX, min_z = FLT_MAX;
+        float max_x = -FLT_MAX, max_y = -FLT_MAX, max_z = -FLT_MAX;
+
+        for (int mesh_idx = 0; mesh_idx < (int)obj.meshes.size(); ++mesh_idx) {
+            auto &mesh = obj.meshes[mesh_idx];
+
+            for (int v_i = 0; v_i < (int)mesh.numVertices; ++v_i) {
+                auto &v = mesh.positions[v_i];
+
+                min_x = std::min(min_x, v.x);
+                min_y = std::min(min_y, v.y);
+                min_z = std::min(min_z, v.z);
+
+                max_x = std::max(max_x, v.x);
+                max_y = std::max(max_y, v.y);
+                max_z = std::max(max_z, v.z);
+            }
+        }
+
+        aabbs[obj_idx] = math::AABB {
+            { min_x, min_y, min_z },
+            { max_x, max_y, max_z }
+        };
+    }
+
+    return aabbs;
+}
     
 }
 

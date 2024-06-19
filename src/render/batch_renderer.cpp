@@ -668,9 +668,6 @@ static void makeBatchFrame(vk::Device& dev,
     VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(InstanceData);
     vk::LocalBuffer instances = alloc.makeLocalBuffer(instance_size).value();
 
-    VkDeviceSize aabb_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(shader::AABB);
-    vk::LocalBuffer aabbs = alloc.makeLocalBuffer(aabb_size).value();
-
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
 
@@ -709,8 +706,7 @@ static void makeBatchFrame(vk::Device& dev,
 #endif
 
         new (frame) BatchFrame{
-            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets),
-              std::move(aabbs) },
+            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
             std::move(lights), std::move(lights_staging),
             std::move(sky_input), std::move(sky_input_staging),
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -743,7 +739,7 @@ static void makeBatchFrame(vk::Device& dev,
     VkDescriptorSet aabb_set = prepare_views.descPools[3].makeSet();
 
     //Descriptor sets
-    std::array<VkWriteDescriptorSet, 12> desc_updates;
+    std::array<VkWriteDescriptorSet, 11> desc_updates;
 
     VkDescriptorBufferInfo view_info;
     view_info.buffer = views.buffer;
@@ -766,11 +762,21 @@ static void makeBatchFrame(vk::Device& dev,
     vk::DescHelper::storage(desc_updates[4], prepare_views_set, &offset_info, 2);
     vk::DescHelper::storage(desc_updates[5], draw_views_set, &offset_info, 2);
 
+#if 0
     VkDescriptorBufferInfo aabb_info;
     aabb_info.buffer = aabbs.buffer;
     aabb_info.offset = 0;
     aabb_info.range = aabb_size;
     vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
+#endif
+
+#if 0
+    VkDescriptorBufferInfo aabb_info;
+    aabb_info.buffer = rctx.loaded_assets_[0].buf.buffer;
+    aabb_info.offset = rctx.loaded_assets_[0].aabbBufferOffset;
+    aabb_info.range = rctx.loaded_assets_[0].aabbBufferSize;
+    vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
+#endif
 
     // PBR descriptor sets
 
@@ -779,7 +785,7 @@ static void makeBatchFrame(vk::Device& dev,
     light_data_info.offset = 0;
     light_data_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[7],
+    vk::DescHelper::storage(desc_updates[6],
                             pbr_set, &light_data_info, 0);
 
     VkDescriptorImageInfo transmittance_info;
@@ -787,7 +793,7 @@ static void makeBatchFrame(vk::Device& dev,
     transmittance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     transmittance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[8],
+    vk::DescHelper::textures(desc_updates[7],
                              pbr_set, &transmittance_info, 1, 1);
 
     VkDescriptorImageInfo irradiance_info;
@@ -795,7 +801,7 @@ static void makeBatchFrame(vk::Device& dev,
     irradiance_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     irradiance_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[9],
+    vk::DescHelper::textures(desc_updates[8],
                              pbr_set, &irradiance_info, 1, 2);
 
     VkDescriptorImageInfo scattering_info;
@@ -803,7 +809,7 @@ static void makeBatchFrame(vk::Device& dev,
     scattering_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     scattering_info.sampler = VK_NULL_HANDLE;
 
-    vk::DescHelper::textures(desc_updates[10],
+    vk::DescHelper::textures(desc_updates[9],
                              pbr_set, &scattering_info, 1, 3);
 
     VkDescriptorBufferInfo sky_info;
@@ -811,7 +817,7 @@ static void makeBatchFrame(vk::Device& dev,
     sky_info.offset = 0;
     sky_info.range = VK_WHOLE_SIZE;
 
-    vk::DescHelper::storage(desc_updates[11],
+    vk::DescHelper::storage(desc_updates[10],
                             pbr_set, &sky_info, 4);
 
     vk::DescHelper::update(dev, desc_updates.data(), desc_updates.size());
@@ -928,7 +934,6 @@ static void makeBatchFrame(vk::Device& dev,
             std::move(view_offsets),
             std::move(instances),
             std::move(instance_offsets),
-            std::move(aabbs),
         },
         std::move(lights),
         std::move(lights_staging),
@@ -1449,7 +1454,8 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
                                       uint32_t num_instances,
                                       uint32_t num_views,
                                       uint32_t view_start,
-                                      uint32_t num_processed_batches)
+                                      uint32_t num_processed_batches,
+                                      RenderContext &rctx)
 {
     (void)num_views;
     (void)num_processed_batches;
@@ -1461,7 +1467,8 @@ static void issuePrepareViewsPipeline(vk::Device& dev,
             frame.viewInstanceSetPrepare,
             batch.drawBufferSetPrepare,
             assetSetPrepareView,
-            frame.viewAABBSetPrepare,
+            // frame.viewAABBSetPrepare,
+            rctx.loaded_assets_[0].aabbSet
         };
 
         dev.dt.cmdBindDescriptorSets(draw_cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1684,6 +1691,7 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                              1, &offsets_data_copy);
     }
 
+#if 0
     { // Import the aabbs for instances
         VkDeviceSize num_aabbs_bytes = info.numInstances *
             sizeof(shader::AABB);
@@ -1697,6 +1705,7 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                              batch_buffers.aabbs.buffer,
                              1, &aabb_data_copy);
     }
+#endif
 
     { // Import the offsets for views
         VkDeviceSize num_offsets_bytes = info.numWorlds *
@@ -1891,14 +1900,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 nullptr,
                 VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame_data.buffers.aabbs.buffer,
-                0, VK_WHOLE_SIZE
-            },
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
                 frame_data.lighting.buffer,
                 0, VK_WHOLE_SIZE
             },
@@ -1981,7 +1982,8 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                                   info.numInstances,
                                   target.numViews,
                                   num_processed_views,
-                                  draw_package_idx);
+                                  draw_package_idx,
+                                  rctx);
 
         { // Issue buffer barrier for this draw package buffer
             VkBufferMemoryBarrier draw_pckg_barrier = {
