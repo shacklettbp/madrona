@@ -652,7 +652,8 @@ static void makeBatchFrame(vk::Device& dev,
                            RenderContext &rctx,
                            uint32_t view_width,
                            uint32_t view_height,
-                           bool depth_only)
+                           bool depth_only,
+                           const DynArray<AssetData> &asset_data)
 {
     VkDeviceSize lights_size = InternalConfig::maxLights * sizeof(render::shader::DirectionalLight);
     vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
@@ -667,9 +668,6 @@ static void makeBatchFrame(vk::Device& dev,
 
     VkDeviceSize instance_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(InstanceData);
     vk::LocalBuffer instances = alloc.makeLocalBuffer(instance_size).value();
-
-    VkDeviceSize aabb_size = (cfg.numWorlds * cfg.maxInstancesPerWorld) * sizeof(shader::AABB);
-    vk::LocalBuffer aabbs = alloc.makeLocalBuffer(aabb_size).value();
 
     VkDeviceSize instance_offset_size = (cfg.numWorlds) * sizeof(uint32_t);
     vk::LocalBuffer instance_offsets = alloc.makeLocalBuffer(instance_offset_size).value();
@@ -709,8 +707,7 @@ static void makeBatchFrame(vk::Device& dev,
 #endif
 
         new (frame) BatchFrame{
-            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets),
-              std::move(aabbs) },
+            { std::move(views), std::move(view_offsets), std::move(instances), std::move(instance_offsets) },
             std::move(lights), std::move(lights_staging),
             std::move(sky_input), std::move(sky_input_staging),
             VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
@@ -766,10 +763,18 @@ static void makeBatchFrame(vk::Device& dev,
     vk::DescHelper::storage(desc_updates[4], prepare_views_set, &offset_info, 2);
     vk::DescHelper::storage(desc_updates[5], draw_views_set, &offset_info, 2);
 
+#if 0
     VkDescriptorBufferInfo aabb_info;
     aabb_info.buffer = aabbs.buffer;
     aabb_info.offset = 0;
     aabb_info.range = aabb_size;
+    vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
+#endif
+
+    VkDescriptorBufferInfo aabb_info;
+    aabb_info.buffer = asset_data[0].buf.buffer;
+    aabb_info.offset = asset_data[0].aabbBufferOffset;
+    aabb_info.range = asset_data[0].aabbBufferSize;
     vk::DescHelper::storage(desc_updates[6], aabb_set, &aabb_info, 0);
 
     // PBR descriptor sets
@@ -928,7 +933,6 @@ static void makeBatchFrame(vk::Device& dev,
             std::move(view_offsets),
             std::move(instances),
             std::move(instance_offsets),
-            std::move(aabbs),
         },
         std::move(lights),
         std::move(lights_staging),
@@ -1356,7 +1360,8 @@ BatchRenderer::Impl::Impl(const Config &cfg,
                        cfg.enableBatchRenderer,
                        rctx,
                        cfg.renderWidth, cfg.renderHeight,
-                       depthOnly);
+                       depthOnly,
+                       rctx.loaded_assets_);
     }
 
     VkQueryPoolCreateInfo pool_create_info = {};
@@ -1684,6 +1689,7 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                              1, &offsets_data_copy);
     }
 
+#if 0
     { // Import the aabbs for instances
         VkDeviceSize num_aabbs_bytes = info.numInstances *
             sizeof(shader::AABB);
@@ -1697,6 +1703,7 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
                              batch_buffers.aabbs.buffer,
                              1, &aabb_data_copy);
     }
+#endif
 
     { // Import the offsets for views
         VkDeviceSize num_offsets_bytes = info.numWorlds *
@@ -1884,14 +1891,6 @@ void BatchRenderer::renderViews(BatchRenderInfo info,
                 VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
                 frame_data.buffers.instanceOffsets.buffer,
-                0, VK_WHOLE_SIZE
-            },
-            VkBufferMemoryBarrier{
-                VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                nullptr,
-                VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
-                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED,
-                frame_data.buffers.aabbs.buffer,
                 0, VK_WHOLE_SIZE
             },
             VkBufferMemoryBarrier{

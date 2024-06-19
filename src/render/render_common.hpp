@@ -94,6 +94,9 @@ struct AssetData {
 
     // This is a descriptor set which just contains the buffer
     VkDescriptorSet indexBufferSet;
+
+    uint32_t aabbBufferOffset;
+    uint32_t aabbBufferSize;
 };
 
 struct EngineInterop {

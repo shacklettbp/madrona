@@ -5,6 +5,8 @@
 #include <string_view>
 #include <filesystem>
 
+#include <madrona/render/asset_processor.hpp>
+
 #include <madrona/render/vk/backend.hpp>
 #include <madrona/render/shader_compiler.hpp>
 #ifdef MADRONA_VK_CUDA_SUPPORT
@@ -53,7 +55,7 @@ using namespace vk;
 using Vertex = render::shader::Vertex;
 using PackedVertex = render::shader::PackedVertex;
 using MeshData = render::shader::MeshData;
-using MaterialData = render::shader::MaterialData;
+using MaterialDataShader = render::shader::MaterialData;
 using ObjectData = render::shader::ObjectData;
 using DrawPushConst = render::shader::DrawPushConst;
 using CullPushConst = render::shader::CullPushConst;
@@ -1866,14 +1868,16 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 
     int64_t num_total_objs = src_objs.size();
 
-    int64_t buffer_offsets[4];
-    int64_t buffer_sizes[5] = {
+    int64_t buffer_offsets[5];
+    int64_t buffer_sizes[6] = {
         (int64_t)sizeof(ObjectData) * num_total_objs,
         (int64_t)sizeof(MeshData) * num_total_meshes,
         (int64_t)sizeof(PackedVertex) * num_total_vertices,
         (int64_t)sizeof(uint32_t) * num_total_indices,
-        (int64_t)sizeof(MaterialData) * src_mats.size()
+        (int64_t)sizeof(MaterialDataShader) * src_mats.size(),
+        (int64_t)sizeof(math::AABB) * num_total_objs
     };
+
     int64_t num_asset_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
 
@@ -1886,8 +1890,10 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         (PackedVertex *)(staging_ptr + buffer_offsets[1]);
     uint32_t *indices_ptr =
         (uint32_t *)(staging_ptr + buffer_offsets[2]);
-    MaterialData *materials_ptr =
-        (MaterialData *)(staging_ptr + buffer_offsets[3]);
+    MaterialDataShader *materials_ptr =
+        (MaterialDataShader *)(staging_ptr + buffer_offsets[3]);
+    math::AABB *aabbs_ptr =
+        (math::AABB *)(staging_ptr + buffer_offsets[4]);
 
     int32_t mesh_offset = 0;
     int32_t vertex_offset = 0;
@@ -2041,6 +2047,12 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         materials_ptr[mat_idx++].textureIdx = mat.textureIdx;
     }
 
+#if 0
+    math::AABB *aabbs_src = AssetProcessor::makeAABBs(src_objs);
+    memcpy(aabbs_ptr, aabbs_src, sizeof(math::AABB) * src_objs.size());
+    free(aabbs_src);
+#endif
+
     staging.flush(dev);
 
     LocalBuffer asset_buffer = *alloc.makeLocalBuffer(num_asset_bytes);
@@ -2153,7 +2165,10 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     AssetData asset_data {
         std::move(asset_buffer),
         (uint32_t)buffer_offsets[2],
-        index_buffer_set
+        index_buffer_set,
+        // AABB offsets
+        (uint32_t)buffer_offsets[4],
+        (uint32_t)buffer_sizes[5],
     };
 
     loaded_assets_.emplace_back(std::move(asset_data));

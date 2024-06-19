@@ -135,8 +135,50 @@ static HeapArray<MeshBVH> createMeshBVHs(
     return mesh_bvhs;
 }
 
-MeshBVHData makeBVHData(
-    Span<const imp::SourceObject> src_objs)
+math::AABB *makeAABBs(Span<const imp::SourceObject> src_objs)
+{
+    uint32_t num_objs = src_objs.size();
+
+    math::AABB *aabbs = (math::AABB *)malloc(
+            sizeof(math::AABB) * num_objs);
+
+    for (int obj_idx = 0; 
+            obj_idx < (int)num_objs; 
+            ++obj_idx) {
+        auto &obj = src_objs[obj_idx];
+
+        float min_x = FLT_MAX, min_y = FLT_MAX, min_z = FLT_MAX;
+        float max_x = -FLT_MAX, max_y = -FLT_MAX, max_z = -FLT_MAX;
+
+        for (int mesh_idx = 0;
+                mesh_idx < (int)obj.meshes.size();
+                mesh_idx++) {
+            auto &mesh = obj.meshes[mesh_idx];
+
+            for (int v_idx = 0;
+                    v_idx < mesh.numVertices;
+                    ++v_idx) {
+                auto &v = mesh.positions[v_idx];
+
+                min_x = std::min(min_x, v.x);
+                min_y = std::min(min_y, v.y);
+                min_z = std::min(min_z, v.z);
+
+                max_x = std::max(max_x, v.x);
+                max_y = std::max(max_y, v.y);
+                max_z = std::max(max_z, v.z);
+            }
+        }
+
+        aabbs[obj_idx] = math::AABB {
+            { min_x, min_y, min_z }, { max_x, max_y, max_z }
+        };
+    }
+
+    return aabbs;
+}
+
+MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
 {
     HeapArray<MeshBVH> mesh_bvhs = createMeshBVHs(src_objs);
 

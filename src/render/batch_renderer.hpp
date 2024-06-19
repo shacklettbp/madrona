@@ -50,7 +50,6 @@ struct BatchImportedBuffers {
 
     render::vk::LocalBuffer instances;
     render::vk::LocalBuffer instanceOffsets;
-    render::vk::LocalBuffer aabbs;
 };
 
 struct BatchRenderer {

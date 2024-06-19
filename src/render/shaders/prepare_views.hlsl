@@ -209,7 +209,7 @@ void main(uint3 tid       : SV_DispatchThreadID,
            !planeAABB(sm.rightPlane,center,extents) || !planeAABB(sm.bottomPlane,center,extents) ||
            !planeAABB(sm.topPlane,center,extents) || !planeAABB(sm.farPlane,center,extents))){
             num_culled++;
-            continue;
+            // continue;
         }
 
         ObjectData obj = objectDataBuffer[instance_data.objectID];
