@@ -1505,7 +1505,7 @@ static DynArray<MaterialTexture> loadTextures(
 
     for (const imp::SourceTexture &tx : textures)
     {
-        if (tx.info == imp::TextureLoadInfo::FileName) {
+        /*if (tx.info == imp::TextureLoadInfo::FileName) {
             const char *filename = tx.path;
             int width, height, components;
             void *pixels = stbi_load(filename, &width, &height, &components, STBI_rgb_alpha);
@@ -1607,13 +1607,13 @@ static DynArray<MaterialTexture> loadTextures(
             host_buffers.push_back(std::move(texture_hb_staging));
 
             dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
-        } else if (tx.info == imp::TextureLoadInfo::PixelBuffer) {
-            if(tx.pix_info.data.format == imp::TextureFormat::BC7) {
-                void *pixel_data = tx.pix_info.data.imageData;
-                uint32_t pixel_data_size = tx.pix_info.data.imageSize;
+        } else */
+            if(tx.config.format == imp::TextureFormat::BC7) {
+                void *pixel_data = tx.imageData;
+                uint32_t pixel_data_size = tx.config.imageSize;
 
-                uint32_t width = tx.pix_info.data.width,
-                         height = tx.pix_info.data.height;
+                uint32_t width = tx.config.width,
+                         height = tx.config.height;
 
 
                 auto [texture, texture_reqs] = alloc.makeTexture2D(
@@ -1712,8 +1712,8 @@ static DynArray<MaterialTexture> loadTextures(
                 int width, height, components;
 
                 void *pixels = stbi_load_from_memory(
-                        (stbi_uc*)tx.pix_info.data.imageData,
-                        tx.pix_info.data.imageSize,
+                        (stbi_uc*)tx.imageData,
+                        tx.config.imageSize,
                         &width, &height, &components, 
                         STBI_rgb_alpha);
 
@@ -1815,7 +1815,6 @@ static DynArray<MaterialTexture> loadTextures(
 
                 dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
             }
-        }
     }
 
     dev.dt.endCommandBuffer(cmdbuf);

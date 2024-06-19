@@ -1,25 +1,30 @@
 namespace madrona::imp {
 
-inline SourceTexture::SourceTexture()
+inline SourceTexture::SourceTexture() :
+        imageData(0)
 {
 }
 
 inline SourceTexture::SourceTexture(const char *path_ptr) :
-    info(TextureLoadInfo::FileName), path(path_ptr)
+    imageData(0)
 {
+    config = {};
+    config.format = TextureFormat::PNG;
 }
 
 inline SourceTexture::SourceTexture(
-        TextureLoadInfo tex_info, const char *path_ptr)
+        TextureLoadInfo tex_info, const char *path_ptr) :
+        imageData(0)
 {
-    info = tex_info;
-    path = path_ptr;
+    config = {};
+    config.format = TextureFormat::PNG;
 }
 
-inline SourceTexture::SourceTexture(PixelBufferInfo p_info) 
+inline SourceTexture::SourceTexture(PixelBufferInfo p_info) :
+imageData(0)
 {
-    info = TextureLoadInfo::PixelBuffer;
-    pix_info = p_info;
+    config = {};
+    config.format = TextureFormat::PNG;
 }
 
 }
