@@ -44,86 +44,77 @@ using namespace math;
 void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProcessFunc process_tex_func)
 {
     for (SourceTexture& tx: texture) {
-        tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
-        if (tx.info == imp::TextureLoadInfo::PixelBuffer && !tx.pix_info.data.processed) {
-            std::filesystem::path cache_dir = texture_cache;
+        std::filesystem::path cache_dir = texture_cache;
 
-            if (texture_cache) {
-                cache_dir = texture_cache;
-            }
+        if (texture_cache) {
+            cache_dir = texture_cache;
+        }
 
-            auto texture_hasher = std::hash < bytes > {};
-            std::size_t hash = texture_hasher(
-                    std::as_bytes(
-                            std::span(tx.pix_info.data.imageData,
-                                      tx.pix_info.data.imageSize)));
+        auto texture_hasher = std::hash<bytes>{};
+        std::size_t hash = texture_hasher(
+                std::as_bytes(
+                        std::span((char *)tx.imageData,
+                                  tx.config.imageSize)));
 
-            std::string hash_str = std::to_string(hash);
+        std::string hash_str = std::to_string(hash);
 
-            uint8_t *pixel_data = nullptr;
-            uint32_t pixel_data_size = 0;
+        uint8_t *pixel_data = nullptr;
+        uint32_t pixel_data_size = 0;
 
-            if (texture_cache) {
-                std::string path_to_cached_tex = (cache_dir / hash_str);
+        if (texture_cache) {
+            std::string path_to_cached_tex = (cache_dir / hash_str);
 
-                FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
+            FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
 
-                if (read_fp) {
-                    BackingImageData data;
-                    fread(&data, sizeof(BackingImageData), 1, read_fp);
+            if (read_fp) {
+                fread(&tx.config, sizeof(SourceTextureConfig), 1, read_fp);
 
-                    pixel_data = (uint8_t *)malloc(data.imageSize);
+                pixel_data = (uint8_t *) malloc(tx.config.imageSize);
 
-                    fread(pixel_data, data.imageSize, 1, read_fp);
-                    
-                    data.imageData = pixel_data;
-                    data.processed = true;
+                imgData.imageArrays[tx.dataBufferIndex].imageData.clear();
+                imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
+                fread(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), tx.config.imageSize, 1, read_fp);
 
-                    free(tx.pix_info.data.imageData);
-
-                    imgData.imageArrays[tx.pix_info.backingDataIndex] = data;
-                    tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
-
-                    fclose(read_fp);
-                } else {
-                    auto processOutput = process_tex_func(tx);
-
-                    if(!processOutput.shouldCache)
-                        continue;
-
-                    free(tx.pix_info.data.imageData);
-
-                    imgData.imageArrays[tx.pix_info.backingDataIndex] = processOutput.newTex;
-                    tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
-
-                    pixel_data = tx.pix_info.data.imageData;
-                    pixel_data_size = tx.pix_info.data.imageSize;
-
-                    // Write this data to the cache
-                    FILE *write_fp = fopen(path_to_cached_tex.c_str(), "wb");
-
-                    fwrite(&tx.pix_info.data, sizeof(BackingImageData), 1, write_fp);
-                    fwrite(pixel_data, pixel_data_size, 1, write_fp );
-
-                    fclose(write_fp);
-                }
+                free(pixel_data);
+                fclose(read_fp);
             } else {
-                bool preProcess = tx.pix_info.data.processed;
-                void *oldImageData = tx.pix_info.data.imageData;
-
                 auto processOutput = process_tex_func(tx);
 
                 if (!processOutput.shouldCache)
-                        continue;
+                    continue;
 
-                if (preProcess != processOutput.newTex.processed) {
-                    free(oldImageData);
-                    imgData.imageArrays[tx.pix_info.backingDataIndex] =
-                            processOutput.newTex;
-                }
+                tx.config = processOutput.newTex;
+                imgData.imageArrays[tx.dataBufferIndex].imageData.clear();
+                imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
+                memcpy(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), processOutput.outputData,
+                       tx.config.imageSize);
 
-                tx.pix_info.data = imgData.imageArrays[tx.pix_info.backingDataIndex];
+                free(processOutput.outputData);
+
+                pixel_data = imgData.imageArrays[tx.dataBufferIndex].imageData.data();
+                pixel_data_size = tx.config.imageSize;
+
+                // Write this data to the cache
+                FILE *write_fp = fopen(path_to_cached_tex.c_str(), "wb");
+
+                fwrite(&tx.config, sizeof(SourceTextureConfig), 1, write_fp);
+                fwrite(pixel_data, pixel_data_size, 1, write_fp);
+
+                fclose(write_fp);
             }
+        } else {
+            auto processOutput = process_tex_func(tx);
+
+            if (!processOutput.shouldCache)
+                continue;
+
+            tx.config = processOutput.newTex;
+            imgData.imageArrays[tx.dataBufferIndex].imageData.clear();
+            imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
+            memcpy(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), processOutput.outputData,
+                       tx.config.imageSize);
+
+            free(processOutput.outputData);
         }
     }
 }

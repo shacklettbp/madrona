@@ -308,10 +308,46 @@ MaterialData initMaterialData(
         int width, height, components;
         void *pixels = nullptr;
 
-        if (tex.info == imp::TextureLoadInfo::FileName) {
-            pixels = stbi_load(tex.path, &width,
-                                     &height, &components, STBI_rgb_alpha);
-                        // For now, only allow this format
+        if (tex.config.format == imp::TextureFormat::BC7) {
+            width = tex.config.width;
+            height = tex.config.height;
+
+            cudaChannelFormatDesc channel_desc =
+                    cudaCreateChannelDesc<cudaChannelFormatKindUnsignedBlockCompressed7>();
+
+            cudaArray_t cuda_array;
+            REQ_CUDA(cudaMallocArray(&cuda_array, &channel_desc,
+                                     width, height, cudaArrayDefault));
+
+            REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, tex.imageData,
+                                         16 * width / 4,
+                                         16 * width / 4,
+                                         height / 4,
+                                         cudaMemcpyHostToDevice));
+
+            cudaResourceDesc res_desc = {};
+            res_desc.resType = cudaResourceTypeArray;
+            res_desc.res.array.array = cuda_array;
+
+            cudaTextureDesc tex_desc = {};
+            tex_desc.addressMode[0] = cudaAddressModeWrap;
+            tex_desc.addressMode[1] = cudaAddressModeWrap;
+            tex_desc.filterMode = cudaFilterModeLinear;
+            tex_desc.readMode = cudaReadModeNormalizedFloat;
+            tex_desc.normalizedCoords = 1;
+
+            cudaTextureObject_t tex_obj = 0;
+            REQ_CUDA(cudaCreateTextureObject(&tex_obj,
+                                             &res_desc, &tex_desc, nullptr));
+
+            cpu_mat_data.textures[i] = tex_obj;
+            cpu_mat_data.textureBuffers[i] = cuda_array;
+        } else {
+
+            pixels = stbi_load_from_memory((stbi_uc*)tex.imageData,
+                                 tex.config.imageSize, &width,
+                                 &height, &components, STBI_rgb_alpha);
+            // For now, only allow this format
             cudaChannelFormatDesc channel_desc =
                 cudaCreateChannelDesc<uchar4>();
 
@@ -343,81 +379,6 @@ MaterialData initMaterialData(
 
             cpu_mat_data.textures[i] = tex_obj;
             cpu_mat_data.textureBuffers[i] = cuda_array;
-        }else if (tex.info == imp::TextureLoadInfo::PixelBuffer){
-            if (tex.pix_info.data.format == imp::TextureFormat::BC7) {
-                void *pixel_data = tex.pix_info.data.imageData;
-
-                width = tex.pix_info.data.width;
-                height = tex.pix_info.data.height;
-
-                cudaChannelFormatDesc channel_desc =
-                        cudaCreateChannelDesc<cudaChannelFormatKindUnsignedBlockCompressed7>();
-
-                cudaArray_t cuda_array;
-                REQ_CUDA(cudaMallocArray(&cuda_array, &channel_desc,
-                                         width, height, cudaArrayDefault));
-
-                REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, (void *) pixel_data,
-                                             16 * width / 4,
-                                             16 * width / 4,
-                                             height / 4,
-                                             cudaMemcpyHostToDevice));
-
-                cudaResourceDesc res_desc = {};
-                res_desc.resType = cudaResourceTypeArray;
-                res_desc.res.array.array = cuda_array;
-
-                cudaTextureDesc tex_desc = {};
-                tex_desc.addressMode[0] = cudaAddressModeWrap;
-                tex_desc.addressMode[1] = cudaAddressModeWrap;
-                tex_desc.filterMode = cudaFilterModeLinear;
-                tex_desc.readMode = cudaReadModeNormalizedFloat;
-                tex_desc.normalizedCoords = 1;
-
-                cudaTextureObject_t tex_obj = 0;
-                REQ_CUDA(cudaCreateTextureObject(&tex_obj,
-                                                 &res_desc, &tex_desc, nullptr));
-
-                cpu_mat_data.textures[i] = tex_obj;
-                cpu_mat_data.textureBuffers[i] = cuda_array;
-            } else {
-
-                pixels = stbi_load_from_memory((stbi_uc*)tex.pix_info.data.imageData,
-                                     tex.pix_info.data.imageSize, &width,
-                                     &height, &components, STBI_rgb_alpha);
-                // For now, only allow this format
-                cudaChannelFormatDesc channel_desc =
-                    cudaCreateChannelDesc<uchar4>();
-
-
-                cudaArray_t cuda_array;
-                REQ_CUDA(cudaMallocArray(&cuda_array, &channel_desc,
-                                         width, height, cudaArrayDefault));
-
-                REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, pixels,
-                                           sizeof(uint32_t) * width,
-                                           sizeof(uint32_t) * width,
-                                           height,
-                                           cudaMemcpyHostToDevice));
-
-                cudaResourceDesc res_desc = {};
-                res_desc.resType = cudaResourceTypeArray;
-                res_desc.res.array.array = cuda_array;
-
-                cudaTextureDesc tex_desc = {};
-                tex_desc.addressMode[0] = cudaAddressModeWrap;
-                tex_desc.addressMode[1] = cudaAddressModeWrap;
-                tex_desc.filterMode = cudaFilterModeLinear;
-                tex_desc.readMode = cudaReadModeNormalizedFloat;
-                tex_desc.normalizedCoords = 1;
-
-                cudaTextureObject_t tex_obj = 0;
-                REQ_CUDA(cudaCreateTextureObject(&tex_obj,
-                            &res_desc, &tex_desc, nullptr));
-
-                cpu_mat_data.textures[i] = tex_obj;
-                cpu_mat_data.textureBuffers[i] = cuda_array;
-            }
         }
     }
 

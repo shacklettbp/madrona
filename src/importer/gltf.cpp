@@ -1772,11 +1772,24 @@ static bool gltfImportAssets(LoaderData &loader,
 
     for (const auto& image : loader.images) {
         GLTFBufferView view = loader.bufferViews[image.viewIdx];
-        auto *image_memory = (uint8_t*)malloc(view.numBytes);
-        memcpy(image_memory, loader.buffers[view.bufferIdx].dataPtr + view.offset, view.numBytes);
+
+        DynArray<uint8_t> data(view.numBytes);
+        data.resize(view.numBytes, [](uint8_t*){});
+        memcpy(data.data(), loader.buffers[view.bufferIdx].dataPtr + view.offset, view.numBytes);
+
+        imported.imgData.imageArrays.emplace_back(std::move(data));
+    }
+
+    for (const auto& texture : loader.textures) {
+        uint32_t backingIndex = (texture.sourceIdx + prev_img_idx);
+
+        SourceTexture tex = {};
+        tex.dataBufferIndex = backingIndex;
+        tex.imageData = imported.imgData.imageArrays[tex.dataBufferIndex].imageData.data();
+        tex.config.imageSize = imported.imgData.imageArrays[tex.dataBufferIndex].imageData.size();
 
         TextureFormat format;
-        switch (image.type) {
+        switch (loader.images[texture.sourceIdx].type) {
             case GLTFImageType::PNG:
                 format = TextureFormat::PNG;
                 break;
@@ -1791,22 +1804,9 @@ static bool gltfImportAssets(LoaderData &loader,
                 break;
         }
 
-        imported.imgData.imageArrays.emplace_back(
-                BackingImageData {
-                    .imageData = image_memory,
-                    .imageSize = view.numBytes,
-                    .format = format
-                });
-    }
+        tex.config.format = format;
 
-    for (const auto& texture : loader.textures) {
-        uint32_t backingIndex = (texture.sourceIdx + prev_img_idx);
-
-        imported.texture.emplace_back(SourceTexture(
-                PixelBufferInfo {
-                    .backingDataIndex = backingIndex,
-                    .data = {}
-                }));
+        imported.texture.emplace_back(tex);
     }
 
     for (const auto& material : loader.materials) {

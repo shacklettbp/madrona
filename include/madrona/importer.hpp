@@ -42,7 +42,7 @@ enum class TextureFormat : int {
 };
 
 struct BackingImageData {
-    uint8_t *imageData;
+    DynArray<uint8_t> imageData;
     size_t imageSize;
     TextureFormat format;
     uint32_t width = 0;
@@ -55,14 +55,17 @@ struct PixelBufferInfo {
     BackingImageData data;
 };
 
+struct SourceTextureConfig {
+    size_t imageSize;
+    TextureFormat format;
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
 struct SourceTexture {
-    TextureLoadInfo info;
-
-    union {
-        const char *path;
-        PixelBufferInfo pix_info;
-    };
-
+    void *imageData;
+    SourceTextureConfig config;
+    uint32_t dataBufferIndex;
     inline SourceTexture();
     inline SourceTexture(const char *path_ptr);
     inline SourceTexture(TextureLoadInfo tex_info, const char *path_ptr);
@@ -123,7 +126,8 @@ struct ImportedAssets {
 
     struct ProcessOutput {
         bool shouldCache;
-        BackingImageData newTex;
+        void *outputData;
+        SourceTextureConfig newTex;
     };
 
     using TextureProcessFunc = ProcessOutput (*)(SourceTexture&);
