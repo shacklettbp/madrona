@@ -5,8 +5,6 @@
 #include <string_view>
 #include <filesystem>
 
-#include <madrona/render/asset_processor.hpp>
-
 #include <madrona/render/vk/backend.hpp>
 #include <madrona/render/shader_compiler.hpp>
 #ifdef MADRONA_VK_CUDA_SUPPORT
@@ -1933,12 +1931,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         materials_ptr[mat_idx].metalness = mat.metalness;
         materials_ptr[mat_idx++].textureIdx = mat.textureIdx;
     }
-
-#if 0
-    math::AABB *aabbs_src = AssetProcessor::makeAABBs(src_objs);
-    memcpy(aabbs_ptr, aabbs_src, sizeof(math::AABB) * src_objs.size());
-    free(aabbs_src);
-#endif
 
     staging.flush(dev);
 
