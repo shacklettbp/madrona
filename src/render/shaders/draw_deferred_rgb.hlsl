@@ -594,155 +594,27 @@ void lighting(uint3 idx : SV_DispatchThreadID)
     float4 color = vizBuffer[target_idx][vbuffer_pixel + 
                      uint3(x_pixel_offset, y_pixel_offset, 0)];
 
-#if 0
-    uint2 data = vizBuffer[target_idx][vbuffer_pixel + 
-                 uint3(x_pixel_offset, y_pixel_offset, 0)];
+    uint2 depth_dim;
+    depthInBuffer[target_idx].GetDimensions(
+        depth_dim.x, depth_dim.y);
 
-    uint3 unpacked_viz_data = unpackVizBufferData(data);
+    float2 depth_uv = float2(vbuffer_pixel.x + x_pixel_offset, 
+                             vbuffer_pixel.y + y_pixel_offset) / 
+                      float2(depth_dim.x, depth_dim.y);
 
-    uint primitive_id = unpacked_viz_data.x;
-    uint mesh_id = unpacked_viz_data.y;
-    uint instance_id = unpacked_viz_data.z;
+    // printf("%f %f\n", depth_uv.x, depth_uv.y);
 
-    GBufferData gbuffer_data;
-    float roughness;
-    float metalness;
+    float depth_in = // depthInBuffer[target_idx][vbuffer_pixel + 
+                     // uint3(x_pixel_offset, y_pixel_offset, 0)].x;
+                     depthInBuffer[target_idx].SampleLevel(
+                         linearSampler, depth_uv, 0).x;
 
-    bool was_rasterized = false;
+    float z_near = unpackViewData(viewDataBuffer[0]).zNear;
 
-    PerspectiveCameraData view_data = unpackViewData(viewDataBuffer[view_idx]);
+    float depth = abs(z_near / depth_in);
+    // float depth = abs(depth_in);
 
-    if (primitive_id != 0xFFFFFFFF || mesh_id != 0xFFFFFFFF || instance_id != 0xFFFFFFFF) {
-        was_rasterized = true;
 
-        MeshData mesh_data = meshDataBuffer[mesh_id];
-
-        uint32_t material_idx = 0;
-
-        uint index_start = mesh_data.indexOffset + primitive_id * 3;
-
-        EngineInstanceData instance_data = unpackEngineInstanceData(engineInstanceBuffer[instance_id]);
-
-        // This is the interpolated vertex information at the pixel that the given thread is on
-        VertexData vertices[3];
-
-        float3 w_inv;
-        float3 w_values;
-
-        for (int i = 0; i < 3; ++i) {
-            uint vertex_idx = indexBuffer[index_start + i];
-            PackedVertex packed = vertexDataBuffer[mesh_data.vertexOffset + vertex_idx];
-            Vertex vert = unpackVertex(packed);
-
-            if (i == 0) {
-                material_idx = vert.materialIdx;
-            }
-
-            float3 to_view_translation;
-            float4 to_view_rotation;
-            computeCompositeTransform(instance_data.position, instance_data.rotation,
-                    view_data.pos, view_data.rot,
-                    to_view_translation, to_view_rotation);
-
-            float3 view_pos =
-                rotateVec(to_view_rotation, instance_data.scale * vert.position) +
-                to_view_translation;
-
-            float3 world_pos =
-                rotateVec(instance_data.rotation, instance_data.scale * vert.position) +
-                instance_data.position;
-
-            float4 clip_pos = float4(
-                    view_data.xScale * view_pos.x,
-                    -view_data.yScale * view_pos.z,
-                    view_data.zNear,
-                    view_pos.y);
-
-            w_values[i] = clip_pos.w;
-            w_inv[i] = 1.0f / clip_pos.w;
-
-            vertices[i].postMvp = clip_pos;
-            vertices[i].pos = world_pos;
-
-            vertices[i].normal = normalize(
-                    rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
-
-            vertices[i].uv = float2(vert.uv.x, 1.0 - vert.uv.y);
-        }
-
-        // Get barrycentric coordinates
-        BarycentricDeriv bc = calcFullBary(vertices[0].postMvp,
-                vertices[1].postMvp,
-                vertices[2].postMvp,
-                vbuffer_pixel_clip,
-                float2(pushConst.viewDim, pushConst.viewDim));
-
-        float interpolated_w = 1.0f / dot(w_inv, bc.m_lambda);
-
-        // Get interpolated normal
-        float3 normal = normalize(interpolateVec3(bc, vertices[0].normal, vertices[1].normal, vertices[2].normal));
-
-        // Get interpolated position
-        float3 position = interpolateVec3(bc, vertices[0].pos, vertices[1].pos, vertices[2].pos);
-
-        // Get interpolated UVs
-        UVInterpolation uv = interpolateUVs(bc, vertices[0].uv, vertices[1].uv, vertices[2].uv);
-
-        MaterialData material_data = materialBuffer[mesh_data.materialIndex];
-
-        float4 color = material_data.color * 0.00001f;
-        color.rgb += normal;
-
-        gbuffer_data.wPosition = position;
-        gbuffer_data.wNormal = normal;
-        gbuffer_data.albedo = color.rgb;
-        gbuffer_data.wCameraPos = view_data.pos;
-        roughness = material_data.roughness;
-        metalness = material_data.metalness;
-    }
-#endif
-
-#if 0
-    const float exposure = 20.0f;
-
-    // Lighting calculations
-    float3 outgoing_ray = getOutgoingRay(
-        float2(vbuffer_pixel.xy),
-        float2(pushConst.viewDim, pushConst.viewDim),
-        view_data);
-    float4 point_radiance = getPointRadianceBRDF(roughness, metalness, gbuffer_data, view_data, vbuffer_pixel.xy);
-
-    float3 sun_direction = normalize(-lights[0].lightDir.xyz);
-
-    /* Incoming radiance from the sky: */
-    float3 transmittance;
-    float3 radiance = getSkyRadiance(skyBuffer[0], transmittanceLUT,
-                                     scatteringLUT, scatteringLUT,
-                                     (gbuffer_data.wCameraPos / 1000.0 - skyBuffer[0].wPlanetCenter.xyz),
-                                     outgoing_ray, 0.0, sun_direction,
-                                     transmittance);
-
-    if (dot(outgoing_ray, sun_direction) >
-            skyBuffer[0].sunSize.y * 0.99999) {
-        radiance = radiance + transmittance * getSolarRadiance(skyBuffer[0]) * 0.06;
-    }
-
-    if (was_rasterized) {
-        radiance = point_radiance.xyz;
-    }
-
-    // float point_alpha = was_rasterized ? 1.0 : 0.0;
-    // radiance = lerp(radiance, point_radiance.xyz, point_alpha);
-
-    /* Tone Mapping. */
-    float3 one = float3(1.0, 1.0, 1.0);
-    float3 exp_value = exp(-radiance / float3(2.0f, 2.0f, 2.0f) * exposure);
-
-    float3 diff = one - exp_value;
-    float3 out_color = diff;
-#else
-    // float3 out_color = gbuffer_data.wNormal.xyz;
-#endif
     float3 out_color = color.rgb;
 
     out_color.x += zeroDummy();
@@ -752,6 +624,5 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         idx.y * pushConst.viewDim + idx.x;
 
     rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(out_color); 
-
-    depthOutputBuffer[out_pixel_idx] = 0.0;
+    depthOutputBuffer[out_pixel_idx] = depth;
 }

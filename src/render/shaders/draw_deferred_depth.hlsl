@@ -751,7 +751,6 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         view_idx * pushConst.viewDim * pushConst.viewDim +
         idx.y * pushConst.viewDim + idx.x;
 
-    rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(out_color / 1000.0); 
-
+    rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(float3(0 + zeroDummy(), 0, 0)); 
     depthOutputBuffer[out_pixel_idx] = depth;
 }

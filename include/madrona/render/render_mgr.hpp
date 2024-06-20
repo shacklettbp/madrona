@@ -18,7 +18,7 @@ class RenderManager {
 public:
     struct Config {
         enum RenderMode {
-            Color,
+            RGBD,
             Depth,
         };
 
