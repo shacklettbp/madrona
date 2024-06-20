@@ -188,7 +188,7 @@ float4 vert(in uint vid : SV_VertexID,
     DrawData draw_data = drawDataBuffer[draw_id];
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
-    float4 color = materialBuffer[vert.materialIdx].color;
+    float4 color = materialBuffer[draw_data.materialID].color;
     uint instance_id = draw_data.instanceID;
 
     PerspectiveCameraData view_data = getCameraData();
