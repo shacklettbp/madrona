@@ -652,8 +652,7 @@ static void makeBatchFrame(vk::Device& dev,
                            RenderContext &rctx,
                            uint32_t view_width,
                            uint32_t view_height,
-                           bool depth_only,
-                           const DynArray<AssetData> &asset_data)
+                           bool depth_only)
 {
     VkDeviceSize lights_size = InternalConfig::maxLights * sizeof(render::shader::DirectionalLight);
     vk::LocalBuffer lights = alloc.makeLocalBuffer(lights_size).value();
@@ -1354,8 +1353,7 @@ BatchRenderer::Impl::Impl(const Config &cfg,
                        cfg.enableBatchRenderer,
                        rctx,
                        cfg.renderWidth, cfg.renderHeight,
-                       depthOnly,
-                       rctx.loaded_assets_);
+                       depthOnly);
     }
 
     VkQueryPoolCreateInfo pool_create_info = {};

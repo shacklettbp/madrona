@@ -629,6 +629,13 @@ Device * Backend::makeDevice(
         supports_rt = accel_struct_ext_available && ray_query_ext_available;
     }
 
+    {
+        char *disable_rt_env = getenv("MADRONA_VK_DISABLE_RT");
+        if (disable_rt_env && disable_rt_env[0] == '1') {
+            supports_rt = false;
+        }
+    }
+
     if (supports_rt) {
         extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
         extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
