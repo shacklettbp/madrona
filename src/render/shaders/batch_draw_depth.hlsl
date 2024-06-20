@@ -35,7 +35,7 @@ StructuredBuffer<MeshData> meshDataBuffer;
 StructuredBuffer<MaterialData> materialBuffer;
 
 struct V2F {
-    [[vk::location(0)]] float depth : TEXCOORD0;
+    [[vk::location(0)]] float3 vsCoord : TEXCOORD0;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -177,6 +177,8 @@ float4 vert(in uint vid : SV_VertexID,
         rotateVec(to_view_rotation, instance_data.scale * vert.position) +
             to_view_translation;
 
+    float depth = length(view_pos);
+
     float4 clip_pos = float4(
         view_data.xScale * view_pos.x,
         view_data.yScale * view_pos.z,
@@ -196,7 +198,7 @@ float4 vert(in uint vid : SV_VertexID,
                   min(0.0, abs(float(draw_data.instanceID))) +
                   something;
 
-    v2f.depth = clip_pos.w;
+    v2f.vsCoord = view_pos;
 
     return clip_pos;
 }
@@ -235,7 +237,7 @@ PixelOutput frag(in V2F v2f,
 {
     PixelOutput output;
 
-    output.depthOut = v2f.depth + 
+    output.depthOut = length(v2f.vsCoord) + 
             min(0.0, abs(materialBuffer[0].color.x));
 
     return output;

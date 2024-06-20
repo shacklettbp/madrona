@@ -592,7 +592,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
                                                         // sample_uv, 0).x;
 
     float depth = vizBuffer[target_idx][vbuffer_pixel + 
-                     uint3(x_pixel_offset, y_pixel_offset, 0)] / 1000.0;
+                     uint3(x_pixel_offset, y_pixel_offset, 0)];
 
 #if 0
     uint2 data = vizBuffer[target_idx][vbuffer_pixel + 
@@ -751,7 +751,7 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         view_idx * pushConst.viewDim * pushConst.viewDim +
         idx.y * pushConst.viewDim + idx.x;
 
-    rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(out_color); 
+    rgbOutputBuffer[out_pixel_idx] = linearToSRGB8(out_color / 1000.0); 
 
     depthOutputBuffer[out_pixel_idx] = depth;
 }
