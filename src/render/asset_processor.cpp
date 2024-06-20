@@ -9,6 +9,20 @@
 
 #include <stb_image.h>
 
+#include <span>
+#include <array>
+
+using bytes = std::span<const std::byte>;
+
+template <>
+struct std::hash<bytes>
+{
+    std::size_t operator()(const bytes& x) const noexcept
+    {
+        return std::hash<std::string_view>{}({reinterpret_cast<const char*>(x.data()), x.size()});
+    }
+};
+
 using namespace madrona::imp;
 
 namespace madrona::render {
@@ -142,22 +156,16 @@ math::AABB *makeAABBs(Span<const imp::SourceObject> src_objs)
     math::AABB *aabbs = (math::AABB *)malloc(
             sizeof(math::AABB) * num_objs);
 
-    for (int obj_idx = 0; 
-            obj_idx < (int)num_objs; 
-            ++obj_idx) {
+    for (CountT obj_idx = 0; obj_idx < (CountT)num_objs; ++obj_idx) {
         auto &obj = src_objs[obj_idx];
 
         float min_x = FLT_MAX, min_y = FLT_MAX, min_z = FLT_MAX;
         float max_x = -FLT_MAX, max_y = -FLT_MAX, max_z = -FLT_MAX;
 
-        for (int mesh_idx = 0;
-                mesh_idx < (int)obj.meshes.size();
-                mesh_idx++) {
+        for (CountT mesh_idx = 0; mesh_idx < obj.meshes.size(); mesh_idx++) {
             auto &mesh = obj.meshes[mesh_idx];
 
-            for (int v_idx = 0;
-                    v_idx < mesh.numVertices;
-                    ++v_idx) {
+            for (CountT v_idx = 0; v_idx < (CountT)mesh.numVertices; ++v_idx) {
                 auto &v = mesh.positions[v_idx];
 
                 min_x = std::min(min_x, v.x);
@@ -302,9 +310,9 @@ MaterialData initMaterialData(
         int width, height, components;
         void *pixels = nullptr;
 
-        if (tex.config.format == imp::TextureFormat::BC7) {
-            width = tex.config.width;
-            height = tex.config.height;
+        if (tex.format == imp::SourceTextureFormat::BC7) {
+            width = tex.width;
+            height = tex.height;
 
             cudaChannelFormatDesc channel_desc =
                     cudaCreateChannelDesc<cudaChannelFormatKindUnsignedBlockCompressed7>();
@@ -313,7 +321,7 @@ MaterialData initMaterialData(
             REQ_CUDA(cudaMallocArray(&cuda_array, &channel_desc,
                                      width, height, cudaArrayDefault));
 
-            REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, tex.imageData,
+            REQ_CUDA(cudaMemcpy2DToArray(cuda_array, 0, 0, tex.data,
                                          16 * width / 4,
                                          16 * width / 4,
                                          height / 4,
@@ -338,8 +346,8 @@ MaterialData initMaterialData(
             cpu_mat_data.textureBuffers[i] = cuda_array;
         } else {
 
-            pixels = stbi_load_from_memory((stbi_uc*)tex.imageData,
-                                 tex.config.imageSize, &width,
+            pixels = stbi_load_from_memory((stbi_uc*)tex.data,
+                                 tex.numBytes, &width,
                                  &height, &components, STBI_rgb_alpha);
             // For now, only allow this format
             cudaChannelFormatDesc channel_desc =
@@ -410,6 +418,89 @@ MaterialData initMaterialData(
 
     return gpu_mat_data;
 }
+
+#if 0
+void postProcessTextures(Span<imp::SourceTexture> textures,
+                         const char *texture_cache,
+                         TextureProcessFunc process_tex_func)
+{
+    for (SourceTexture &tx: textures) {
+        std::filesystem::path cache_dir = texture_cache;
+
+        if (texture_cache) {
+            cache_dir = texture_cache;
+        }
+
+        auto texture_hasher = std::hash<bytes>{};
+        std::size_t hash = texture_hasher(
+            std::as_bytes(std::span((char *)tx.data, tx.numBytes)));
+
+        std::string hash_str = std::to_string(hash);
+
+        uint8_t *pixel_data = nullptr;
+        uint32_t pixel_data_size = 0;
+
+        if (texture_cache) {
+            std::string path_to_cached_tex = (cache_dir / hash_str);
+
+            FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
+
+            if (read_fp) {
+                fread(&tx, sizeof(SourceTextureConfig), 1, read_fp);
+
+                pixel_data = (uint8_t *) malloc(tx.numBytes);
+
+                imgData.imageArrays[tx.dataBufferIndex].data.clear();
+                imgData.imageArrays[tx.dataBufferIndex].data.resize(tx.numBytes,[](uint8_t*){});
+                fread(imgData.imageArrays[tx.dataBufferIndex].data.data(), tx.numBytes, 1, read_fp);
+                tx.data = imgData.imageArrays[tx.dataBufferIndex].data.data();
+
+                free(pixel_data);
+                fclose(read_fp);
+            } else {
+                auto processOutput = process_tex_func(tx);
+
+                if (!processOutput.shouldCache)
+                    continue;
+
+                tx = processOutput.newTex;
+                imgData.imageArrays[tx.dataBufferIndex].data.clear();
+                imgData.imageArrays[tx.dataBufferIndex].data.resize(tx.numBytes,[](uint8_t*){});
+                memcpy(imgData.imageArrays[tx.dataBufferIndex].data.data(), processOutput.outputData,
+                       tx.numBytes);
+                tx.data = imgData.imageArrays[tx.dataBufferIndex].data.data();
+
+                free(processOutput.outputData);
+
+                pixel_data = imgData.imageArrays[tx.dataBufferIndex].data.data();
+                pixel_data_size = tx.numBytes;
+
+                // Write this data to the cache
+                FILE *write_fp = fopen(path_to_cached_tex.c_str(), "wb");
+
+                fwrite(&tx, sizeof(SourceTextureConfig), 1, write_fp);
+                fwrite(pixel_data, pixel_data_size, 1, write_fp);
+
+                fclose(write_fp);
+            }
+        } else {
+            auto processOutput = process_tex_func(tx);
+
+            if (!processOutput.shouldCache)
+                continue;
+
+            tx = processOutput.newTex;
+            imgData.imageArrays[tx.dataBufferIndex].data.clear();
+            imgData.imageArrays[tx.dataBufferIndex].data.resize(tx.numBytes,[](uint8_t*){});
+            memcpy(imgData.imageArrays[tx.dataBufferIndex].data.data(), processOutput.outputData,
+                       tx.numBytes);
+            tx.data = imgData.imageArrays[tx.dataBufferIndex].data.data();
+
+            free(processOutput.outputData);
+        }
+    }
+}
+#endif
     
 }
 

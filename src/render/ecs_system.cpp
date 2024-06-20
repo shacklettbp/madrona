@@ -250,8 +250,6 @@ inline void exportCountsGPU(Context &ctx,
 void registerTypes(ECSRegistry &registry,
                    const RenderECSBridge *bridge)
 {
-    printf("Printing from rendering system register types\n");
-
 #ifdef MADRONA_GPU_MODE
     uint32_t render_output_res = 
         mwGPU::GPUImplConsts::get().raycastOutputResolution;

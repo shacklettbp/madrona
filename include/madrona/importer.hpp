@@ -6,9 +6,9 @@
 #include <madrona/math.hpp>
 #include <madrona/span.hpp>
 #include <madrona/optional.hpp>
+#include <madrona/stack_alloc.hpp>
 
-namespace madrona {
-namespace imp {
+namespace madrona::imp {
 
 struct SourceMesh {
     math::Vector3 *positions;
@@ -29,47 +29,17 @@ struct SourceObject {
     Span<SourceMesh> meshes;
 };
 
-enum class TextureLoadInfo {
-    FileName,
-    PixelBuffer,
-};
-
-enum class TextureFormat : int {
-    KTX2,
-    PNG,
-    JPG,
+enum class SourceTextureFormat : int32_t {
+    R8G8B8A8,
     BC7,
 };
 
-struct BackingImageData {
-    DynArray<uint8_t> imageData;
-    size_t imageSize;
-    TextureFormat format;
-    uint32_t width = 0;
-    uint32_t height = 0;
-    bool processed = false;
-};
-
-struct PixelBufferInfo {
-    uint32_t backingDataIndex;
-    BackingImageData data;
-};
-
-struct SourceTextureConfig {
-    size_t imageSize;
-    TextureFormat format;
-    uint32_t width = 0;
-    uint32_t height = 0;
-};
-
 struct SourceTexture {
-    void *imageData;
-    SourceTextureConfig config;
-    uint32_t dataBufferIndex;
-    inline SourceTexture();
-    inline SourceTexture(const char *path_ptr);
-    inline SourceTexture(TextureLoadInfo tex_info, const char *path_ptr);
-    inline SourceTexture(PixelBufferInfo p_info);
+    void *data;
+    SourceTextureFormat format;
+    uint32_t width;
+    uint32_t height;
+    size_t numBytes;
 };
 
 struct SourceMaterial {
@@ -91,6 +61,37 @@ struct SourceInstance {
     uint32_t objIDX;
 };
 
+class ImageImporter {
+public:
+    ImageImporter();
+    ImageImporter(ImageImporter &&);
+    ~ImageImporter();
+
+    using ImportHandler =
+        Optional<SourceTexture> (*)(void *data, size_t num_bytes);
+
+    int32_t addHandler(const char *extension, ImportHandler fn);
+
+    int32_t getPNGTypeCode();
+    int32_t getJPGTypeCode();
+    int32_t getExtensionTypeCode(const char *extension);
+
+    Optional<SourceTexture> importImage(
+        void *data, size_t num_bytes, int32_t type_code);
+
+    Optional<SourceTexture> importImage(const char *path);
+
+    Span<SourceTexture> importImages(
+        StackAlloc &tmp_alloc, Span<const char * const> paths);
+
+    void deallocImportedImages(Span<SourceTexture> textures);
+    
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 struct ImportedAssets {
     struct GeometryData {
         DynArray<DynArray<math::Vector3>> positionArrays;
@@ -104,32 +105,30 @@ struct ImportedAssets {
         DynArray<DynArray<SourceMesh>> meshArrays;
     } geoData;
 
-    struct ImageData {
-        DynArray<BackingImageData> imageArrays;
-    } imgData;
-
     DynArray<SourceObject> objects;
     DynArray<SourceMaterial> materials;
     DynArray<SourceInstance> instances;
-    DynArray<SourceTexture> texture;
+    DynArray<SourceTexture> textures;
 
-    static Optional<ImportedAssets> importFromDisk(
+};
+
+class AssetImporter {
+public:
+    AssetImporter();
+    AssetImporter(ImageImporter &&img_importer);
+    AssetImporter(AssetImporter &&);
+    ~AssetImporter();
+
+    ImageImporter & imageImporter();
+
+    Optional<ImportedAssets> importFromDisk(
         Span<const char * const> asset_paths,
         Span<char> err_buf = { nullptr, 0 },
         bool one_object_per_asset = false);
-
-    struct ProcessOutput {
-        bool shouldCache;
-        void *outputData;
-        SourceTextureConfig newTex;
-    };
-
-    using TextureProcessFunc = ProcessOutput (*)(SourceTexture&);
-    void postProcessTextures(const char *texture_cache, 
-            TextureProcessFunc process_tex_func);
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
-}
-}
 
-#include "importer.inl"
+}

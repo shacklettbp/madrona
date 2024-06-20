@@ -342,7 +342,11 @@ struct GLTFLoader::Impl {
     DynArray<GLTFNode> nodes;
     DynArray<int32_t> rootNodes;
 
-    Impl(Span<char> err_buf);
+    int32_t imageImportPNGTypeCode;
+    int32_t imageImportJPGTypeCode;
+    int32_t imageImportKTXTypeCode;
+
+    inline Impl(ImageImporter &img_import, Span<char> err_buf);
     void recordError(const char *fmt, ...) const;
     void recordJSONError(error_code err) const;
 };
@@ -1602,7 +1606,8 @@ static bool gltfParseInstances(const LoaderData &loader,
 
 static bool gltfImportAssets(LoaderData &loader,
                              ImportedAssets &imported,
-                             bool merge_and_flatten)
+                             bool merge_and_flatten,
+                             ImageImporter &img_importer)
 {
     CountT new_mesh_arrays_start = imported.geoData.meshArrays.size();
     CountT new_vert_arrays_start = imported.geoData.positionArrays.size();
@@ -1767,46 +1772,44 @@ static bool gltfImportAssets(LoaderData &loader,
     imported.geoData.normalArrays.emplace_back(std::move(new_normals_arr));
     imported.geoData.uvArrays.emplace_back(std::move(new_uvs_arr));
 
-    CountT prev_img_idx = imported.imgData.imageArrays.size();
-    CountT prev_tex_idx = imported.texture.size();
-
-    for (const auto& image : loader.images) {
-        GLTFBufferView view = loader.bufferViews[image.viewIdx];
-
-        DynArray<uint8_t> data(view.numBytes);
-        data.resize(view.numBytes, [](uint8_t*){});
-        memcpy(data.data(), loader.buffers[view.bufferIdx].dataPtr + view.offset, view.numBytes);
-
-        imported.imgData.imageArrays.emplace_back(std::move(data));
-    }
+    CountT prev_tex_idx = imported.textures.size();
 
     for (const auto& texture : loader.textures) {
-        uint32_t backingIndex = (texture.sourceIdx + prev_img_idx);
+        const GLTFImage &img = loader.images[texture.sourceIdx];
+        const GLTFBufferView &img_buf_view = loader.bufferViews[img.viewIdx];
+        const GLTFBuffer &img_buf = loader.buffers[img_buf_view.bufferIdx];
 
-        SourceTexture tex = {};
-        tex.dataBufferIndex = backingIndex;
-        tex.imageData = imported.imgData.imageArrays[tex.dataBufferIndex].imageData.data();
-        tex.config.imageSize = imported.imgData.imageArrays[tex.dataBufferIndex].imageData.size();
+        size_t num_tex_bytes = (size_t)img_buf_view.numBytes;
+        void *data_ptr = (char *)img_buf.dataPtr + img_buf_view.offset;
 
-        TextureFormat format;
+        int32_t img_type_code = -1;
         switch (loader.images[texture.sourceIdx].type) {
-            case GLTFImageType::PNG:
-                format = TextureFormat::PNG;
-                break;
-            case GLTFImageType::JPEG:
-                format = TextureFormat::JPG;
-                break;
-            case GLTFImageType::KTX2:
-                format = TextureFormat::KTX2;
-                break;
-            default:
-                format = TextureFormat::JPG;
-                break;
+        case GLTFImageType::PNG: {
+            img_type_code = loader.imageImportPNGTypeCode;
+        } break;
+        case GLTFImageType::JPEG: {
+            img_type_code = loader.imageImportJPGTypeCode;
+        } break;
+        case GLTFImageType::KTX2: {
+            img_type_code = loader.imageImportKTXTypeCode;
+        } break;
+        default: break;
         }
 
-        tex.config.format = format;
+        if (img_type_code == -1) {
+            loader.recordError("Unsupported image file type");
+            return false;
+        }
 
-        imported.texture.emplace_back(tex);
+        Optional<SourceTexture> tex = img_importer.importImage(
+            data_ptr, num_tex_bytes, img_type_code);
+
+        if (!tex.has_value()) {
+            loader.recordError("Failed to load image");
+            return false;
+        }
+
+        imported.textures.push_back(*tex);
     }
 
     for (const auto& material : loader.materials) {
@@ -1826,7 +1829,7 @@ static bool gltfImportAssets(LoaderData &loader,
     return true;
 }
 
-GLTFLoader::Impl::Impl(Span<char> err_buf)
+GLTFLoader::Impl::Impl(ImageImporter &img_import, Span<char> err_buf)
     : errBuf(err_buf),
       jsonBuf(0),
       jsonParser(),
@@ -1844,7 +1847,10 @@ GLTFLoader::Impl::Impl(Span<char> err_buf)
       meshes(0),
       childNodes(0),
       nodes(0),
-      rootNodes(0)
+      rootNodes(0),
+      imageImportPNGTypeCode(img_import.getPNGTypeCode()),
+      imageImportJPGTypeCode(img_import.getJPGTypeCode()),
+      imageImportKTXTypeCode(img_import.getExtensionTypeCode("ktx2"))
 {}
 
 void GLTFLoader::Impl::recordError(const char *fmt, ...) const
@@ -1878,15 +1884,17 @@ void GLTFLoader::Impl::recordJSONError(error_code err) const
         error_message(err));
 }
 
-GLTFLoader::GLTFLoader(Span<char> err_buf)
-    : impl_(new Impl(err_buf))
+GLTFLoader::GLTFLoader(ImageImporter &img_importer, 
+                       Span<char> err_buf)
+    : impl_(new Impl(img_importer, err_buf))
 {}
 
 GLTFLoader::~GLTFLoader() {}
 
 bool GLTFLoader::load(const char *path, 
                       ImportedAssets &imported_assets,
-                      bool merge_and_flatten)
+                      bool merge_and_flatten,
+                      ImageImporter &img_importer)
 {
     bool json_parsed = gltfLoad(path, *impl_);
     if (!json_parsed) {
@@ -1894,7 +1902,8 @@ bool GLTFLoader::load(const char *path,
     }
 
     bool import_success = gltfImportAssets(*impl_, imported_assets,
-                                           merge_and_flatten);
+                                           merge_and_flatten,
+                                           img_importer);
     if (!import_success) {
         return false;
     }

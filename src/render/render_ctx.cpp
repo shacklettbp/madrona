@@ -28,8 +28,6 @@
 #include <dlfcn.h>
 #endif
 
-#include <stb_image.h>
-
 using bytes = std::span<const std::byte>;
 
 template <>
@@ -1507,13 +1505,109 @@ static DynArray<MaterialTexture> loadTextures(
 
     for (const imp::SourceTexture &tx : textures)
     {
-        /*if (tx.info == imp::TextureLoadInfo::FileName) {
-            const char *filename = tx.path;
-            int width, height, components;
-            void *pixels = stbi_load(filename, &width, &height, &components, STBI_rgb_alpha);
+        if (tx.format == imp::SourceTextureFormat::BC7) {
+            void *pixel_data = tx.data;
+            uint32_t pixel_data_size = tx.numBytes;
 
-            if (!pixels)
-                continue;
+            uint32_t width = tx.width,
+                     height = tx.height;
+
+            auto [texture, texture_reqs] = alloc.makeTexture2D(
+                    width, height, 1, VK_FORMAT_BC7_UNORM_BLOCK);
+
+            HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
+            memcpy(texture_hb_staging.ptr, pixel_data, pixel_data_size);
+            texture_hb_staging.flush(dev);
+
+            std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
+
+            assert(texture_backing.has_value());
+
+            dev.dt.bindImageMemory(dev.hdl, texture.image, texture_backing.value(), 0);
+
+            VkImageMemoryBarrier copy_prepare {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    nullptr,
+                    0,
+                    VK_ACCESS_MEMORY_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    texture.image,
+                    {
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                        0, 1, 0, 1
+                    },
+            };
+
+            dev.dt.cmdPipelineBarrier(cmdbuf,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0,
+                    0, nullptr, 0, nullptr,
+                    1, &copy_prepare);
+
+            VkBufferImageCopy copy = {};
+            copy.bufferOffset = 0;
+            copy.bufferRowLength = 0;
+            copy.bufferImageHeight = 0;
+            copy.imageExtent.width = width;
+            copy.imageExtent.height = height;
+            copy.imageExtent.depth = 1;
+            copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            copy.imageSubresource.mipLevel = 0;
+            copy.imageSubresource.baseArrayLayer = 0;
+            copy.imageSubresource.layerCount = 1;
+
+            dev.dt.cmdCopyBufferToImage(cmdbuf, texture_hb_staging.buffer,
+                    texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+            VkImageMemoryBarrier finish_prepare {
+                VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                    nullptr,
+                    VK_ACCESS_MEMORY_WRITE_BIT,
+                    VK_ACCESS_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    VK_QUEUE_FAMILY_IGNORED,
+                    texture.image,
+                    {
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                        0, 1, 0, 1
+                    },
+            };
+
+
+            dev.dt.cmdPipelineBarrier(cmdbuf,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    0,
+                    0, nullptr, 0, nullptr,
+                    1, &finish_prepare);
+
+            VkImageViewCreateInfo view_info {};
+            view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
+            view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            view_info_sr.baseMipLevel = 0;
+            view_info_sr.levelCount = 1;
+            view_info_sr.baseArrayLayer = 0;
+            view_info_sr.layerCount = 1;
+
+            VkImageView view;
+            view_info.image = texture.image;
+            view_info.format = VK_FORMAT_BC7_UNORM_BLOCK;
+            REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
+
+            host_buffers.push_back(std::move(texture_hb_staging));
+            dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
+        } else {
+            void *pixels = tx.data;
+            uint32_t width = tx.width;
+            uint32_t height = tx.height;
 
             auto [texture, texture_reqs] = alloc.makeTexture2D(
                     width, height, 1, VK_FORMAT_R8G8B8A8_SRGB);
@@ -1521,7 +1615,6 @@ static DynArray<MaterialTexture> loadTextures(
             HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
             memcpy(texture_hb_staging.ptr, pixels, width * height * 4 * sizeof(char));
             texture_hb_staging.flush(dev);
-            stbi_image_free(pixels);
 
             std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
 
@@ -1609,214 +1702,7 @@ static DynArray<MaterialTexture> loadTextures(
             host_buffers.push_back(std::move(texture_hb_staging));
 
             dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
-        } else */
-            if(tx.config.format == imp::TextureFormat::BC7) {
-                void *pixel_data = tx.imageData;
-                uint32_t pixel_data_size = tx.config.imageSize;
-
-                uint32_t width = tx.config.width,
-                         height = tx.config.height;
-
-
-                auto [texture, texture_reqs] = alloc.makeTexture2D(
-                        width, height, 1, VK_FORMAT_BC7_UNORM_BLOCK);
-
-                HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
-                memcpy(texture_hb_staging.ptr, pixel_data, pixel_data_size);
-                texture_hb_staging.flush(dev);
-
-                std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
-
-                assert(texture_backing.has_value());
-
-                dev.dt.bindImageMemory(dev.hdl, texture.image, texture_backing.value(), 0);
-
-                VkImageMemoryBarrier copy_prepare {
-                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                        nullptr,
-                        0,
-                        VK_ACCESS_MEMORY_WRITE_BIT,
-                        VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        VK_QUEUE_FAMILY_IGNORED,
-                        VK_QUEUE_FAMILY_IGNORED,
-                        texture.image,
-                        {
-                            VK_IMAGE_ASPECT_COLOR_BIT,
-                            0, 1, 0, 1
-                        },
-                };
-
-                dev.dt.cmdPipelineBarrier(cmdbuf,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                        VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        0,
-                        0, nullptr, 0, nullptr,
-                        1, &copy_prepare);
-
-                VkBufferImageCopy copy = {};
-                copy.bufferOffset = 0;
-                copy.bufferRowLength = 0;
-                copy.bufferImageHeight = 0;
-                copy.imageExtent.width = width;
-                copy.imageExtent.height = height;
-                copy.imageExtent.depth = 1;
-                copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                copy.imageSubresource.mipLevel = 0;
-                copy.imageSubresource.baseArrayLayer = 0;
-                copy.imageSubresource.layerCount = 1;
-
-                dev.dt.cmdCopyBufferToImage(cmdbuf, texture_hb_staging.buffer,
-                        texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-
-                VkImageMemoryBarrier finish_prepare {
-                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                        nullptr,
-                        VK_ACCESS_MEMORY_WRITE_BIT,
-                        VK_ACCESS_SHADER_READ_BIT,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                        VK_QUEUE_FAMILY_IGNORED,
-                        VK_QUEUE_FAMILY_IGNORED,
-                        texture.image,
-                        {
-                            VK_IMAGE_ASPECT_COLOR_BIT,
-                            0, 1, 0, 1
-                        },
-                };
-
-
-                dev.dt.cmdPipelineBarrier(cmdbuf,
-                        VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0,
-                        0, nullptr, 0, nullptr,
-                        1, &finish_prepare);
-
-                VkImageViewCreateInfo view_info {};
-                view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-                view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
-                view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                view_info_sr.baseMipLevel = 0;
-                view_info_sr.levelCount = 1;
-                view_info_sr.baseArrayLayer = 0;
-                view_info_sr.layerCount = 1;
-
-                VkImageView view;
-                view_info.image = texture.image;
-                view_info.format = VK_FORMAT_BC7_UNORM_BLOCK;
-                REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
-
-                host_buffers.push_back(std::move(texture_hb_staging));
-                dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
-            }else{
-                int width, height, components;
-
-                void *pixels = stbi_load_from_memory(
-                        (stbi_uc*)tx.imageData,
-                        tx.config.imageSize,
-                        &width, &height, &components, 
-                        STBI_rgb_alpha);
-
-                if (!pixels)
-                    continue;
-
-                auto [texture, texture_reqs] = alloc.makeTexture2D(
-                        width, height, 1, VK_FORMAT_R8G8B8A8_SRGB);
-
-                HostBuffer texture_hb_staging = alloc.makeStagingBuffer(texture_reqs.size);
-                memcpy(texture_hb_staging.ptr, pixels, width * height * 4 * sizeof(char));
-                texture_hb_staging.flush(dev);
-                stbi_image_free(pixels);
-
-                std::optional<VkDeviceMemory> texture_backing = alloc.alloc(texture_reqs.size);
-
-                assert(texture_backing.has_value());
-
-                dev.dt.bindImageMemory(dev.hdl, texture.image, texture_backing.value(), 0);
-
-                VkImageMemoryBarrier copy_prepare {
-                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                        nullptr,
-                        0,
-                        VK_ACCESS_MEMORY_WRITE_BIT,
-                        VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        VK_QUEUE_FAMILY_IGNORED,
-                        VK_QUEUE_FAMILY_IGNORED,
-                        texture.image,
-                        {
-                            VK_IMAGE_ASPECT_COLOR_BIT,
-                            0, 1, 0, 1
-                        },
-                };
-
-                dev.dt.cmdPipelineBarrier(cmdbuf,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                        VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        0,
-                        0, nullptr, 0, nullptr,
-                        1, &copy_prepare);
-
-                VkBufferImageCopy copy = {};
-                copy.bufferOffset = 0;
-                copy.bufferRowLength = 0;
-                copy.bufferImageHeight = 0;
-                copy.imageExtent.width = width;
-                copy.imageExtent.height = height;
-                copy.imageExtent.depth = 1;
-                copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                copy.imageSubresource.mipLevel = 0;
-                copy.imageSubresource.baseArrayLayer = 0;
-                copy.imageSubresource.layerCount = 1;
-
-                dev.dt.cmdCopyBufferToImage(cmdbuf, texture_hb_staging.buffer,
-                        texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-
-                VkImageMemoryBarrier finish_prepare {
-                    VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                        nullptr,
-                        VK_ACCESS_MEMORY_WRITE_BIT,
-                        VK_ACCESS_SHADER_READ_BIT,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                        VK_QUEUE_FAMILY_IGNORED,
-                        VK_QUEUE_FAMILY_IGNORED,
-                        texture.image,
-                        {
-                            VK_IMAGE_ASPECT_COLOR_BIT,
-                            0, 1, 0, 1
-                        },
-                };
-
-
-                dev.dt.cmdPipelineBarrier(cmdbuf,
-                        VK_PIPELINE_STAGE_TRANSFER_BIT,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0,
-                        0, nullptr, 0, nullptr,
-                        1, &finish_prepare);
-
-                VkImageViewCreateInfo view_info {};
-                view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-                view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                VkImageSubresourceRange &view_info_sr = view_info.subresourceRange;
-                view_info_sr.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                view_info_sr.baseMipLevel = 0;
-                view_info_sr.levelCount = 1;
-                view_info_sr.baseArrayLayer = 0;
-                view_info_sr.layerCount = 1;
-
-                VkImageView view;
-                view_info.image = texture.image;
-                view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
-                REQ_VK(dev.dt.createImageView(dev.hdl, &view_info, nullptr, &view));
-
-                host_buffers.push_back(std::move(texture_hb_staging));
-
-                dst_textures.emplace_back(std::move(texture), view, texture_backing.value());
-            }
+        }
     }
 
     dev.dt.endCommandBuffer(cmdbuf);
@@ -1894,6 +1780,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         (MaterialDataShader *)(staging_ptr + buffer_offsets[3]);
     math::AABB *aabbs_ptr =
         (math::AABB *)(staging_ptr + buffer_offsets[4]);
+    (void)aabbs_ptr;
 
     int32_t mesh_offset = 0;
     int32_t vertex_offset = 0;

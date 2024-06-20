@@ -14,6 +14,7 @@ target_link_libraries(madrona_json
 set(IMPORTER_SOURCES
     ${MADRONA_INC_DIR}/importer.hpp importer.cpp
     obj.hpp obj.cpp
+    stb_read.cpp img.cpp
 )
 
 if (MADRONA_GLTF_SUPPORT)

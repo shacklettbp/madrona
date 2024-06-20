@@ -21,14 +21,16 @@ USDLoader::Impl * USDLoader::Impl::init(Span<char> err_buf)
     };
 }
 
-USDLoader::USDLoader(Span<char> err_buf)
+USDLoader::USDLoader(ImageImporter &, Span<char> err_buf)
     : impl_(Impl::init(err_buf))
 {}
 
 USDLoader::~USDLoader() = default;
 
-bool USDLoader::load(const char *path, ImportedAssets &imported_assets,
-                     bool merge_and_flatten)
+bool USDLoader::load(const char *path,
+                     ImportedAssets &imported_assets,
+                     bool merge_and_flatten,
+                     ImageImporter &)
 {
     tinyusdz::Stage stage;
     std::string warn, err;

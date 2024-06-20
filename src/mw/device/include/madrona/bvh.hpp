@@ -68,7 +68,7 @@ struct BVHNodeQuantized {
                       root_max = child_aabbs[0].pMax;
 
         // Get the bounds of the parent of the given children
-        for (int i = 1; i < num_children; ++i) {
+        for (uint32_t i = 1; i < num_children; ++i) {
             math::AABB &aabb = child_aabbs[i];
 
             root_min.x = fminf(root_min.x, aabb.pMin.x);

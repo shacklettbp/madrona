@@ -23,111 +23,55 @@
 #include <madrona/cuda_utils.hpp>
 #endif
 
-#include <span>
-#include <array>
-
-using bytes = std::span<const std::byte>;
-
-template <>
-struct std::hash<bytes>
-{
-    std::size_t operator()(const bytes& x) const noexcept
-    {
-        return std::hash<std::string_view>{}({reinterpret_cast<const char*>(x.data()), x.size()});
-    }
-};
-
 namespace madrona::imp {
 
 using namespace math;
 
-void ImportedAssets::postProcessTextures(const char *texture_cache, TextureProcessFunc process_tex_func)
+struct AssetImporter::Impl {
+    ImageImporter imgImporter;
+
+    Optional<OBJLoader> objLoader;
+
+#ifdef MADRONA_GLTF_SUPPORT
+    Optional<GLTFLoader> gltfLoader;
+#endif
+
+#ifdef MADRONA_USD_SUPPORT
+    Optional<USDLoader> usdLoader;
+#endif
+
+    static inline Impl * make(ImageImporter &&img_importer);
+
+    inline Optional<ImportedAssets> importFromDisk(
+        Span<const char * const> asset_paths,
+        Span<char> err_buf, bool one_object_per_asset);
+};
+
+AssetImporter::Impl * AssetImporter::Impl::make(ImageImporter &&img_importer)
 {
-    for (SourceTexture& tx: texture) {
-        std::filesystem::path cache_dir = texture_cache;
-
-        if (texture_cache) {
-            cache_dir = texture_cache;
-        }
-
-        auto texture_hasher = std::hash<bytes>{};
-        std::size_t hash = texture_hasher(
-                std::as_bytes(
-                        std::span((char *)tx.imageData,
-                                  tx.config.imageSize)));
-
-        std::string hash_str = std::to_string(hash);
-
-        uint8_t *pixel_data = nullptr;
-        uint32_t pixel_data_size = 0;
-
-        if (texture_cache) {
-            std::string path_to_cached_tex = (cache_dir / hash_str);
-
-            FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
-
-            if (read_fp) {
-                fread(&tx.config, sizeof(SourceTextureConfig), 1, read_fp);
-
-                pixel_data = (uint8_t *) malloc(tx.config.imageSize);
-
-                imgData.imageArrays[tx.dataBufferIndex].imageData.clear();
-                imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
-                fread(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), tx.config.imageSize, 1, read_fp);
-                tx.imageData = imgData.imageArrays[tx.dataBufferIndex].imageData.data();
-
-                free(pixel_data);
-                fclose(read_fp);
-            } else {
-                auto processOutput = process_tex_func(tx);
-
-                if (!processOutput.shouldCache)
-                    continue;
-
-                tx.config = processOutput.newTex;
-                imgData.imageArrays[tx.dataBufferIndex].imageData.clear();
-                imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
-                memcpy(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), processOutput.outputData,
-                       tx.config.imageSize);
-                tx.imageData = imgData.imageArrays[tx.dataBufferIndex].imageData.data();
-
-                free(processOutput.outputData);
-
-                pixel_data = imgData.imageArrays[tx.dataBufferIndex].imageData.data();
-                pixel_data_size = tx.config.imageSize;
-
-                // Write this data to the cache
-                FILE *write_fp = fopen(path_to_cached_tex.c_str(), "wb");
-
-                fwrite(&tx.config, sizeof(SourceTextureConfig), 1, write_fp);
-                fwrite(pixel_data, pixel_data_size, 1, write_fp);
-
-                fclose(write_fp);
-            }
-        } else {
-            auto processOutput = process_tex_func(tx);
-
-            if (!processOutput.shouldCache)
-                continue;
-
-            tx.config = processOutput.newTex;
-            imgData.imageArrays[tx.dataBufferIndex].imageData.clear();
-            imgData.imageArrays[tx.dataBufferIndex].imageData.resize(tx.config.imageSize,[](uint8_t*){});
-            memcpy(imgData.imageArrays[tx.dataBufferIndex].imageData.data(), processOutput.outputData,
-                       tx.config.imageSize);
-            tx.imageData = imgData.imageArrays[tx.dataBufferIndex].imageData.data();
-
-            free(processOutput.outputData);
-        }
-    }
+    return new Impl {
+        .imgImporter = std::move(img_importer),
+        .objLoader = Optional<OBJLoader>::none(),
+#ifdef MADRONA_GLTF_SUPPORT
+        .gltfLoader = Optional<GLTFLoader>::none(),
+#endif
+#ifdef MADRONA_USD_SUPPORT
+        .usdLoader = Optional<USDLoader>::none(),
+#endif
+    };
 }
 
-Optional<ImportedAssets> ImportedAssets::importFromDisk(
-    Span<const char * const> paths, Span<char> err_buf,
-    bool one_object_per_asset)
+ImageImporter & AssetImporter::imageImporter()
+{
+    return impl_->imgImporter;
+}
+
+Optional<ImportedAssets> AssetImporter::Impl::importFromDisk(
+    Span<const char * const> asset_paths,
+    Span<char> err_buf, bool one_object_per_asset)
 {
     ImportedAssets imported {
-        .geoData = GeometryData {
+        .geoData = ImportedAssets::GeometryData {
             .positionArrays { 0 },
             .normalArrays { 0 },
             .tangentAndSignArrays { 0 },
@@ -136,25 +80,14 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
             .faceCountArrays { 0 },
             .meshArrays { 0 },
         },
-        .imgData = ImageData {
-            .imageArrays {0},
-        },
         .objects { 0 },
         .materials { 0 },
         .instances { 0 },
-        .texture = DynArray<SourceTexture>(0),
+        .textures { 0 },
     };
 
-    auto obj_loader = Optional<OBJLoader>::none();
-#ifdef MADRONA_GLTF_SUPPORT
-    auto gltf_loader = Optional<GLTFLoader>::none();
-#endif
-#ifdef MADRONA_USD_SUPPORT
-    auto usd_loader = Optional<USDLoader>::none();
-#endif
-
     bool load_success = false;
-    for (const char *path : paths) {
+    for (const char *path : asset_paths) {
         std::string_view path_view(path);
 
         auto extension_pos = path_view.rfind('.');
@@ -164,19 +97,19 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
         auto extension = path_view.substr(extension_pos + 1);
 
         if (extension == "obj") {
-            if (!obj_loader.has_value()) {
-                obj_loader.emplace(err_buf);
+            if (!objLoader.has_value()) {
+                objLoader.emplace(err_buf);
             }
 
-            load_success = obj_loader->load(path, imported);
+            load_success = objLoader->load(path, imported);
         } else if (extension == "gltf" || extension == "glb") {
 #ifdef MADRONA_GLTF_SUPPORT
-            if (!gltf_loader.has_value()) {
-                gltf_loader.emplace(err_buf);
+            if (!gltfLoader.has_value()) {
+                gltfLoader.emplace(imgImporter, err_buf);
             }
 
-            load_success = gltf_loader->load(path, imported,
-                                             one_object_per_asset);
+            load_success = gltfLoader->load(
+                path, imported, one_object_per_asset, imgImporter);
 #else
             load_success = false;
             snprintf(err_buf.data(), err_buf.size(),
@@ -187,12 +120,12 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
                    extension == "usdc" ||
                    extension == "usdz") {
 #ifdef MADRONA_USD_SUPPORT
-            if (!usd_loader.has_value()) {
-                usd_loader.emplace(err_buf);
+            if (!usdLoader.has_value()) {
+                usdLoader.emplace(imgImporter, err_buf);
             }
 
-            load_success = usd_loader->load(path, imported,
-                                            one_object_per_asset);
+            load_success = usdLoader->load(
+                path, imported, one_object_per_asset, imgImporter);
 #else
             load_success = false;
             snprintf(err_buf.data(), err_buf.size(),
@@ -211,6 +144,24 @@ Optional<ImportedAssets> ImportedAssets::importFromDisk(
     }
 
     return imported;
+}
+
+AssetImporter::AssetImporter()
+    : AssetImporter(ImageImporter())
+{}
+
+AssetImporter::AssetImporter(ImageImporter &&img_importer)
+    : impl_(Impl::make(std::move(img_importer)))
+{}
+
+AssetImporter::AssetImporter(AssetImporter &&) = default;
+AssetImporter::~AssetImporter() = default;
+
+Optional<ImportedAssets> AssetImporter::importFromDisk(
+    Span<const char * const> paths, Span<char> err_buf,
+    bool one_object_per_asset)
+{
+    return impl_->importFromDisk(paths, err_buf, one_object_per_asset);
 }
 
 }
