@@ -87,7 +87,6 @@ Optional<ImportedAssets> AssetImporter::Impl::importFromDisk(
     };
 
     bool load_success = false;
-    uint32_t iter = 0;
     for (const char *path : asset_paths) {
         std::string_view path_view(path);
 
@@ -138,9 +137,6 @@ Optional<ImportedAssets> AssetImporter::Impl::importFromDisk(
             printf("Load failed\n");
             break;
         }
-
-        iter++;
-        printf("%d\n", iter);
     }
 
     if (!load_success) {

@@ -57,6 +57,11 @@ if (TARGET madrona_cuda)
         madrona_cuda
         stb
     )
+
+    target_link_libraries(madrona_render_core 
+        PUBLIC
+            madrona_render_asset_processor
+    )
 endif()
 
 

@@ -111,7 +111,8 @@ Optional<SourceTexture> ImageImporter::importImage(const char *path)
 {
     std::string extension = std::filesystem::path(path).extension().string();
 
-    int32_t type_code = getExtensionTypeCode(extension.c_str());
+    // Extension contains the leading .
+    int32_t type_code = getExtensionTypeCode(extension.c_str() + 1);
 
     if (type_code == -1) {
         return Optional<SourceTexture>::none();
