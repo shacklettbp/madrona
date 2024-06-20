@@ -106,6 +106,8 @@ inline void instanceTransformUpdate(Context &ctx,
     (void)e;
 
     InstanceData &data = ctx.get<InstanceData>(renderable.renderEntity);
+
+    auto &system_state = ctx.singleton<RenderingSystemState>();
 #else
     (void)renderable;
 
