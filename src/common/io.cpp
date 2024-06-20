@@ -21,7 +21,7 @@ char * readBinaryFile(const char *path,
     // FIXME: look into platform specific alternatives for better
     // errors
 
-    std::fstream file(path, std::ios::binary | std::ios::ate);
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         return nullptr;
     }
