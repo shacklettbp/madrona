@@ -45,24 +45,29 @@ target_link_libraries(madrona_render_core
 )
 
 
+add_library(madrona_render_asset_processor STATIC
+    ${MADRONA_INC_DIR}/render/cuda_batch_render_assets.hpp
+    ${MADRONA_INC_DIR}/render/asset_processor.hpp asset_processor.cpp
+)
+
+target_link_libraries(madrona_render_asset_processor PRIVATE
+    madrona_bvh_builder
+    madrona_common
+    stb
+)
+
 if (TARGET madrona_cuda)
-    add_library(madrona_render_asset_processor STATIC
-        ${MADRONA_INC_DIR}/render/cuda_batch_render_assets.hpp
-        ${MADRONA_INC_DIR}/render/asset_processor.hpp asset_processor.cpp
-    )
-
-    target_link_libraries(madrona_render_asset_processor PRIVATE
-        madrona_bvh_builder
-        madrona_common
-        madrona_cuda
-        stb
-    )
-
-    target_link_libraries(madrona_render_core 
-        PUBLIC
-            madrona_render_asset_processor
+    target_link_libraries(madrona_render_asset_processor 
+        PRIVATE
+            madrona_cuda
     )
 endif()
+
+
+target_link_libraries(madrona_render_core 
+    PUBLIC
+        madrona_render_asset_processor
+)
 
 
 if (TARGET madrona_render_vk_cuda)

@@ -1,8 +1,10 @@
-#include <madrona/mesh_bvh.hpp>
+#ifdef MADRONA_CUDA_SUPPORT
 #include <madrona/cuda_utils.hpp>
+#endif
+
+#include <madrona/mesh_bvh.hpp>
 #include <madrona/render/asset_processor.hpp>
 #include <madrona/heap_array.hpp>
-
 #include <madrona/mesh_bvh_builder.hpp>
 
 #include <filesystem>
@@ -149,47 +151,9 @@ static HeapArray<MeshBVH> createMeshBVHs(
     return mesh_bvhs;
 }
 
-#if 0
-math::AABB *makeAABBs(Span<const imp::SourceObject> src_objs)
-{
-    uint32_t num_objs = src_objs.size();
-
-    math::AABB *aabbs = (math::AABB *)malloc(
-            sizeof(math::AABB) * num_objs);
-
-    for (CountT obj_idx = 0; obj_idx < (CountT)num_objs; ++obj_idx) {
-        auto &obj = src_objs[obj_idx];
-
-        float min_x = FLT_MAX, min_y = FLT_MAX, min_z = FLT_MAX;
-        float max_x = -FLT_MAX, max_y = -FLT_MAX, max_z = -FLT_MAX;
-
-        for (CountT mesh_idx = 0; mesh_idx < obj.meshes.size(); mesh_idx++) {
-            auto &mesh = obj.meshes[mesh_idx];
-
-            for (CountT v_idx = 0; v_idx < (CountT)mesh.numVertices; ++v_idx) {
-                auto &v = mesh.positions[v_idx];
-
-                min_x = std::min(min_x, v.x);
-                min_y = std::min(min_y, v.y);
-                min_z = std::min(min_z, v.z);
-
-                max_x = std::max(max_x, v.x);
-                max_y = std::max(max_y, v.y);
-                max_z = std::max(max_z, v.z);
-            }
-        }
-
-        aabbs[obj_idx] = math::AABB {
-            { min_x, min_y, min_z }, { max_x, max_y, max_z }
-        };
-    }
-
-    return aabbs;
-}
-#endif
-
 MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
 {
+#ifdef MADRONA_CUDA_SUPPORT
     HeapArray<MeshBVH> mesh_bvhs = createMeshBVHs(src_objs);
 
     uint64_t num_bvhs = (uint32_t)mesh_bvhs.size();
@@ -290,6 +254,9 @@ MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
     };
 
     return gpu_data;
+#else
+    return {};
+#endif
 }
 
 MaterialData initMaterialData(
@@ -298,6 +265,7 @@ MaterialData initMaterialData(
     const imp::SourceTexture *textures,
     uint32_t num_textures)
 {
+#ifdef MADRONA_CUDA_SUPPORT
     MaterialData cpu_mat_data = {
         .textures = (cudaTextureObject_t *)
             malloc(sizeof(cudaTextureObject_t) * num_textures),
@@ -419,90 +387,10 @@ MaterialData initMaterialData(
     gpu_mat_data.materials = mat_buffer;
 
     return gpu_mat_data;
-}
-
-#if 0
-void postProcessTextures(Span<imp::SourceTexture> textures,
-                         const char *texture_cache,
-                         TextureProcessFunc process_tex_func)
-{
-    for (SourceTexture &tx: textures) {
-        std::filesystem::path cache_dir = texture_cache;
-
-        if (texture_cache) {
-            cache_dir = texture_cache;
-        }
-
-        auto texture_hasher = std::hash<bytes>{};
-        std::size_t hash = texture_hasher(
-            std::as_bytes(std::span((char *)tx.data, tx.numBytes)));
-
-        std::string hash_str = std::to_string(hash);
-
-        uint8_t *pixel_data = nullptr;
-        uint32_t pixel_data_size = 0;
-
-        if (texture_cache) {
-            std::string path_to_cached_tex = (cache_dir / hash_str);
-
-            FILE *read_fp = fopen(path_to_cached_tex.c_str(), "rb");
-
-            if (read_fp) {
-                fread(&tx, sizeof(SourceTextureConfig), 1, read_fp);
-
-                pixel_data = (uint8_t *) malloc(tx.numBytes);
-
-                imgData.imageArrays[tx.dataBufferIndex].data.clear();
-                imgData.imageArrays[tx.dataBufferIndex].data.resize(tx.numBytes,[](uint8_t*){});
-                fread(imgData.imageArrays[tx.dataBufferIndex].data.data(), tx.numBytes, 1, read_fp);
-                tx.data = imgData.imageArrays[tx.dataBufferIndex].data.data();
-
-                free(pixel_data);
-                fclose(read_fp);
-            } else {
-                auto processOutput = process_tex_func(tx);
-
-                if (!processOutput.shouldCache)
-                    continue;
-
-                tx = processOutput.newTex;
-                imgData.imageArrays[tx.dataBufferIndex].data.clear();
-                imgData.imageArrays[tx.dataBufferIndex].data.resize(tx.numBytes,[](uint8_t*){});
-                memcpy(imgData.imageArrays[tx.dataBufferIndex].data.data(), processOutput.outputData,
-                       tx.numBytes);
-                tx.data = imgData.imageArrays[tx.dataBufferIndex].data.data();
-
-                free(processOutput.outputData);
-
-                pixel_data = imgData.imageArrays[tx.dataBufferIndex].data.data();
-                pixel_data_size = tx.numBytes;
-
-                // Write this data to the cache
-                FILE *write_fp = fopen(path_to_cached_tex.c_str(), "wb");
-
-                fwrite(&tx, sizeof(SourceTextureConfig), 1, write_fp);
-                fwrite(pixel_data, pixel_data_size, 1, write_fp);
-
-                fclose(write_fp);
-            }
-        } else {
-            auto processOutput = process_tex_func(tx);
-
-            if (!processOutput.shouldCache)
-                continue;
-
-            tx = processOutput.newTex;
-            imgData.imageArrays[tx.dataBufferIndex].data.clear();
-            imgData.imageArrays[tx.dataBufferIndex].data.resize(tx.numBytes,[](uint8_t*){});
-            memcpy(imgData.imageArrays[tx.dataBufferIndex].data.data(), processOutput.outputData,
-                       tx.numBytes);
-            tx.data = imgData.imageArrays[tx.dataBufferIndex].data.data();
-
-            free(processOutput.outputData);
-        }
-    }
-}
+#else
+    return {};
 #endif
+}
 
 math::AABB *makeAABBs(
         Span<const imp::SourceObject> src_objs)
