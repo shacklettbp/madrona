@@ -13,6 +13,10 @@ namespace madrona {
 
 void * rawAllocAligned(size_t num_bytes, size_t alignment)
 {
+    if (alignment < sizeof(void*)) {
+        alignment = sizeof(void*);
+    }
+
 #if defined(_LIBCPP_VERSION)
     return std::aligned_alloc(alignment, num_bytes);
 #elif defined(MADRONA_MSVC)
