@@ -203,8 +203,13 @@ inline void opDeleteImpl(void *ptr) noexcept
 
 inline void * opNewAlignImpl(size_t num_bytes, std::align_val_t al) noexcept
 {
+    size_t alignment = static_cast<size_t>(al);
+    if (alignment < sizeof(void *)) {
+        alignment = sizeof(void *);
+    }
+
     static_assert(sizeof(al) == sizeof(size_t));
-    void *ptr = rawAllocAligned(num_bytes, static_cast<size_t>(al));
+    void *ptr = rawAllocAligned(num_bytes, alignment);
     if (!ptr) [[unlikely]] {
         FATAL("OOM");
     }

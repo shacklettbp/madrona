@@ -29,7 +29,13 @@ char * readBinaryFile(const char *path,
     size_t num_bytes = file.tellg();
     file.seekg(std::ios::beg);
 
-    char *data = (char *)rawAllocAligned(num_bytes, buffer_alignment);
+    if (buffer_alignment < sizeof(void *)) {
+        buffer_alignment = sizeof(void *);
+    }
+
+    size_t alloc_size = utils::roundUpPow2(num_bytes, buffer_alignment);
+
+    char *data = (char *)rawAllocAligned(alloc_size, buffer_alignment);
     file.read(data, num_bytes);
     if (file.fail()) {
         rawDeallocAligned(data);
