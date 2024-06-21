@@ -107,12 +107,19 @@ add_library(madrona_bvh_builder STATIC
     ${MADRONA_INC_DIR}/mesh_bvh_builder.hpp mesh_bvh_builder.cpp
 )
 
-target_link_libraries(madrona_bvh_builder
-    PUBLIC
-        madrona_common
-    PRIVATE
-        madrona_embree
-)
+if (TARGET madrona_embree)
+    target_link_libraries(madrona_bvh_builder
+        PUBLIC
+            madrona_common
+        PRIVATE
+            madrona_embree
+    )
+else()
+    target_link_libraries(madrona_bvh_builder
+        PUBLIC
+            madrona_common
+    )
+endif()
 
 add_library(madrona_navmesh STATIC
     ${MADRONA_INC_DIR}/navmesh.hpp ${MADRONA_INC_DIR}/navmesh.inl navmesh.cpp
