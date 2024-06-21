@@ -13,8 +13,8 @@ namespace madrona {
 
 void * rawAllocAligned(size_t num_bytes, size_t alignment)
 {
-    if (alignment < sizeof(void*)) {
-        alignment = sizeof(void*);
+    if (alignment < sizeof(void *)) {
+        alignment = sizeof(void *);
     }
 
 #if defined(_LIBCPP_VERSION)
