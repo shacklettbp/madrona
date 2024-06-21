@@ -234,6 +234,7 @@ void Tensor::Printer::print(int64_t flatten_dim) const
                    num_total_bytes_,
                    cudaMemcpyDeviceToHost);
 #else
+        (void)num_total_bytes_;
         FATAL("Trying to print CUDA tensor, no CUDA support");
 #endif
         print_ptr = print_ptr_;
