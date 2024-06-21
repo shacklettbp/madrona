@@ -4,15 +4,6 @@ set(MADRONA_USD_SUPPORT OFF CACHE BOOL "")
 
 unset(CMAKE_CXX_VISIBILITY_PRESET)
 
-#add_library(glm INTERFACE)
-#target_include_directories(glm SYSTEM
-#    INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/glm")
-#
-#add_library(spirv_reflect STATIC
-#    SPIRV-Reflect/spirv_reflect.h SPIRV-Reflect/spirv_reflect.c)
-#target_include_directories(spirv_reflect
-#    INTERFACE SPIRV-Reflect)
-#
 if (NOT WIN32) #FIX
     add_subdirectory(madrona-toolchain)
 else()
