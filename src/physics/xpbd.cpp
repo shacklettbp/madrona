@@ -1069,7 +1069,7 @@ void registerTypes(ECSRegistry &registry)
 
 void init(Context &ctx)
 {
-    ctx.singleton<SolverState>() = {
+    new (&ctx.singleton<SolverState>()) SolverState {
         .jointQuery = ctx.query<JointConstraint>(),
         .contactQuery = ctx.query<ContactConstraint, XPBDContactState>(),
     };
