@@ -31,6 +31,7 @@ namespace madrona::render {
 
 namespace AssetProcessor {
 
+#ifdef MADRONA_CUDA_SUPPORT
 static bool loadCache(const char *location,
                       HeapArray<MeshBVH> &bvhs_out)
 {
@@ -153,7 +154,6 @@ static HeapArray<MeshBVH> createMeshBVHs(
 
 MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
 {
-#ifdef MADRONA_CUDA_SUPPORT
     HeapArray<MeshBVH> mesh_bvhs = createMeshBVHs(src_objs);
 
     uint64_t num_bvhs = (uint32_t)mesh_bvhs.size();
@@ -254,9 +254,6 @@ MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
     };
 
     return gpu_data;
-#else
-    return {};
-#endif
 }
 
 MaterialData initMaterialData(
@@ -265,7 +262,6 @@ MaterialData initMaterialData(
     const imp::SourceTexture *textures,
     uint32_t num_textures)
 {
-#ifdef MADRONA_CUDA_SUPPORT
     MaterialData cpu_mat_data = {
         .textures = (cudaTextureObject_t *)
             malloc(sizeof(cudaTextureObject_t) * num_textures),
@@ -387,10 +383,8 @@ MaterialData initMaterialData(
     gpu_mat_data.materials = mat_buffer;
 
     return gpu_mat_data;
-#else
-    return {};
-#endif
 }
+#endif
 
 math::AABB *makeAABBs(
         Span<const imp::SourceObject> src_objs)

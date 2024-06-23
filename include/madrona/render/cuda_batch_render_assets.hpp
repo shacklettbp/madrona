@@ -1,13 +1,7 @@
 #pragma once
 
 #include <madrona/mesh_bvh.hpp>
-
-#ifdef MADRONA_CUDA_SUPPORT
 #include <madrona/cuda_utils.hpp>
-#else
-using cudaTextureObject_t = uint32_t;
-using cudaArray_t = uint32_t;
-#endif
 
 namespace madrona::render {
 

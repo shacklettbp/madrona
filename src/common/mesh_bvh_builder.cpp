@@ -7,48 +7,28 @@
 #include <fstream>
 #include <iostream>
 
-#ifndef MADRONA_MACOS
 #include <embree4/rtcore.h>
 #include <embree4/rtcore_common.h>
-#endif
 
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/importer.hpp>
 
 namespace madrona {
 
-#ifndef MADRONA_MACOS
-
 using namespace math;
 
-constexpr int numTrisPerLeaf = MeshBVH ::numTrisPerLeaf;
-constexpr uint32_t nodeWidth = MeshBVH::nodeWidth;
-static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
+namespace {
 
-struct NodeCompressed {
-    float minX;
-    float minY;
-    float minZ;
-    int8_t expX;
-    int8_t expY;
-    int8_t expZ;
-    uint8_t internalNodes;
-    uint8_t qMinX[nodeWidth];
-    uint8_t qMinY[nodeWidth];
-    uint8_t qMinZ[nodeWidth];
-    uint8_t qMaxX[nodeWidth];
-    uint8_t qMaxY[nodeWidth];
-    uint8_t qMaxZ[nodeWidth];
-    int32_t children[nodeWidth];
-    int32_t parentID;
-};
+constexpr inline int numTrisPerLeaf = MeshBVH::numTrisPerLeaf;
+constexpr inline uint32_t nodeWidth = MeshBVH::nodeWidth;
+constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
 
 struct RTC_ALIGN(16) BoundingBox {
     float lower_x, lower_y, lower_z, align0;
     float upper_x, upper_y, upper_z, align1;
 };
 
-inline float area(BoundingBox box)
+static inline float area(BoundingBox box)
 {
     float spanX = box.upper_x - box.lower_x;
     float spanY = box.upper_y - box.lower_y;
@@ -56,7 +36,7 @@ inline float area(BoundingBox box)
     return spanX * spanY * 2 + spanY * spanZ * 2 + spanX * spanZ * 2;
 }
 
-inline BoundingBox merge(BoundingBox box1, BoundingBox box2)
+static inline BoundingBox merge(BoundingBox box1, BoundingBox box2)
 {
     return BoundingBox {
         std::min(box1.lower_x, box2.lower_x),
@@ -78,22 +58,23 @@ static bool buildProgress(void* userPtr, double f)
     return true;
 }
 
-static void splitPrimitive(const RTCBuildPrimitive* prim, 
-                           unsigned int dim,
-                           float pos,
-                           RTCBounds* lprim,
-                           RTCBounds* rprim,
-                           void* userPtr)
-{
-    (void)userPtr;
-
-    assert(dim < 3);
-    assert(prim->geomID == 0);
-    *(BoundingBox *)lprim = *(BoundingBox *)prim;
-    *(BoundingBox *)rprim = *(BoundingBox *)prim;
-    (&lprim->upper_x)[dim] = pos;
-    (&rprim->lower_x)[dim] = pos;
-}
+struct NodeCompressed {
+    float minX;
+    float minY;
+    float minZ;
+    int8_t expX;
+    int8_t expY;
+    int8_t expZ;
+    uint8_t internalNodes;
+    uint8_t qMinX[nodeWidth];
+    uint8_t qMinY[nodeWidth];
+    uint8_t qMinZ[nodeWidth];
+    uint8_t qMaxX[nodeWidth];
+    uint8_t qMaxY[nodeWidth];
+    uint8_t qMaxZ[nodeWidth];
+    int32_t children[nodeWidth];
+    int32_t parentID;
+};
 
 struct Node {
     bool isLeaf;
@@ -214,14 +195,28 @@ struct LeafNode : public Node {
         return (void *)leaf;
     }
 };
-#endif
+}
+
+static void splitPrimitive(const RTCBuildPrimitive* prim, 
+                           unsigned int dim,
+                           float pos,
+                           RTCBounds* lprim,
+                           RTCBounds* rprim,
+                           void* userPtr)
+{
+    (void)userPtr;
+
+    assert(dim < 3);
+    assert(prim->geomID == 0);
+    *(BoundingBox *)lprim = *(BoundingBox *)prim;
+    *(BoundingBox *)rprim = *(BoundingBox *)prim;
+    (&lprim->upper_x)[dim] = pos;
+    (&rprim->lower_x)[dim] = pos;
+}
 
 MeshBVH MeshBVHBuilder::build(
         Span<const imp::SourceMesh> src_meshes)
 {
-#ifdef MADRONA_MACOS
-    return {};
-#else
     DynArray<MeshBVH::Node> nodes { 0 };
     DynArray<MeshBVH::LeafGeometry> leaf_geos { 0 };
     DynArray<MeshBVH::LeafMaterial> leaf_materials { 0 };
@@ -740,7 +735,6 @@ MeshBVH MeshBVHBuilder::build(
     bvh_out.materialIDX = -1;
 
     return bvh_out;
-#endif
 }
 
 }
