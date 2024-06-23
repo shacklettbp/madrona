@@ -284,6 +284,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 #else
         *out_color = closest_hit_info.normal;
 #endif
+
+        *out_hit_t = t_max;
     }
 
     return ray_hit;
@@ -332,7 +334,7 @@ extern "C" __global__ void bvhRaycastEntry()
     uint32_t current_view_offset = resident_view_offset;
 
     uint32_t bytes_per_view =
-        bvhParams.renderOutputResolution * bvhParams.renderOutputResolution * 3;
+        bvhParams.renderOutputResolution * bvhParams.renderOutputResolution * 4;
 
     uint32_t num_processed_pixels = 0;
 
@@ -390,22 +392,35 @@ extern "C" __global__ void bvhRaycastEntry()
                 ray_start, ray_dir, 
                 &t, &color, 10000.f, &profiler);
 
-        uint32_t linear_pixel_idx = 3 * 
+        uint32_t linear_pixel_idx = 4 * 
             (pixel_y + pixel_x * bvhParams.renderOutputResolution);
         uint32_t global_pixel_idx = current_view_offset * bytes_per_view +
             linear_pixel_idx;
 
+#if defined (MADRONA_RENDER_RGB)
         uint8_t *write_out = (uint8_t *)bvhParams.renderOutput + global_pixel_idx;
 
         if (hit) {
             write_out[0] = (color.x) * 255;
             write_out[1] = (color.y) * 255;
             write_out[2] = (color.z) * 255;
+            write_out[3] = 255;
         } else {
             write_out[0] = 0;
             write_out[1] = 0;
             write_out[2] = 0;
+            write_out[3] = 0;
         }
+#else
+        float *write_out = (float *)
+            ((uint8_t *)bvhParams.renderOutput + global_pixel_idx);
+
+        if (hit) {
+            write_out[0] = t;
+        } else {
+            write_out[0] = 10000.0f;
+        }
+#endif
 
         current_view_offset += num_resident_views;
 

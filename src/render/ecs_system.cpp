@@ -132,7 +132,10 @@ inline void instanceTransformUpdate(Context &ctx,
     // it in the TLBVHNode structure.
 
 #ifdef MADRONA_GPU_MODE
-    if (system_state.enableRaycaster) {
+    bool raycast_enabled = 
+        mwGPU::GPUImplConsts::get().raycastOutputResolution != 0;
+
+    if (raycast_enabled) {
         MeshBVH *bvh = (MeshBVH *)
             mwGPU::GPUImplConsts::get().meshBVHsAddr +
             obj_id.idx;
@@ -257,7 +260,7 @@ void registerTypes(ECSRegistry &registry,
 #ifdef MADRONA_GPU_MODE
     uint32_t render_output_res = 
         mwGPU::GPUImplConsts::get().raycastOutputResolution;
-    uint32_t render_output_bytes = render_output_res * render_output_res * 3;
+    uint32_t render_output_bytes = render_output_res * render_output_res * 4;
 
     // Make sure to have something there even if raycasting was disabled.
     if (render_output_bytes == 0) {
@@ -437,6 +440,13 @@ void init(Context &ctx,
 
         system_state.voxels = bridge->voxels;
     }
+
+#if 0
+    bool raycast_enabled = 
+        mwGPU::GPUImplConsts::get().raycastOutputResolution != 0;
+
+    system_state.enableRaycaster = raycast_enabled;
+#endif
 }
 
 void makeEntityRenderable(Context &ctx,

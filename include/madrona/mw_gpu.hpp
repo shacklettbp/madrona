@@ -14,6 +14,7 @@
 #include <madrona/span.hpp>
 #include <madrona/importer.hpp>
 
+#include <madrona/render/asset_processor.hpp>
 #include <madrona/render/cuda_batch_render_assets.hpp>
 
 #include <cuda_runtime.h>
