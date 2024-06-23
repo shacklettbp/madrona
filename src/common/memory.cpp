@@ -236,45 +236,51 @@ inline void opDeleteAlignImpl(void *ptr, std::align_val_t al) noexcept
 
 // Unaligned versions
 
-MADRONA_EXPORT void * operator new(size_t num_bytes)
+#ifdef MADRONA_WINDOWS
+#define MADRONA_NEWDEL_VIS
+#else
+#define MADRONA_NEWDEL_VIS MADRONA_EXPORT
+#endif
+
+MADRONA_NEWDEL_VIS void * operator new(size_t num_bytes)
 {
     return ::madrona::opNewImpl(num_bytes);
 }
 
-MADRONA_EXPORT void operator delete(void *ptr) noexcept
+MADRONA_NEWDEL_VIS void operator delete(void *ptr) noexcept
 {
     ::madrona::opDeleteImpl(ptr);
 }
 
-MADRONA_EXPORT void * operator new(
+MADRONA_NEWDEL_VIS void * operator new(
     size_t num_bytes, const std::nothrow_t &) noexcept
 {
     return ::madrona::opNewImpl(num_bytes);
 }
 
-MADRONA_EXPORT void operator delete(
+MADRONA_NEWDEL_VIS void operator delete(
     void *ptr, const std::nothrow_t &) noexcept
 {
     ::madrona::opDeleteImpl(ptr);
 }
 
-MADRONA_EXPORT void * operator new[](size_t num_bytes)
+MADRONA_NEWDEL_VIS void * operator new[](size_t num_bytes)
 {
     return ::madrona::opNewImpl(num_bytes);
 }
 
-MADRONA_EXPORT void operator delete[](void *ptr) noexcept
+MADRONA_NEWDEL_VIS void operator delete[](void *ptr) noexcept
 {
     ::madrona::opDeleteImpl(ptr);
 }
 
-MADRONA_EXPORT void * operator new[](
+MADRONA_NEWDEL_VIS void * operator new[](
     size_t num_bytes, const std::nothrow_t &) noexcept
 {
     return ::madrona::opNewImpl(num_bytes);
 }
 
-MADRONA_EXPORT void operator delete[](
+MADRONA_NEWDEL_VIS void operator delete[](
     void *ptr, const std::nothrow_t &) noexcept
 {
     ::madrona::opDeleteImpl(ptr);
@@ -282,45 +288,45 @@ MADRONA_EXPORT void operator delete[](
 
 // Aligned versions
 
-MADRONA_EXPORT void * operator new(size_t num_bytes, std::align_val_t al)
+MADRONA_NEWDEL_VIS void * operator new(size_t num_bytes, std::align_val_t al)
 {
     return ::madrona::opNewAlignImpl(num_bytes, al);
 }
 
-MADRONA_EXPORT void operator delete(void *ptr, std::align_val_t al) noexcept
+MADRONA_NEWDEL_VIS void operator delete(void *ptr, std::align_val_t al) noexcept
 {
     ::madrona::opDeleteAlignImpl(ptr, al);
 }
 
-MADRONA_EXPORT void * operator new(
+MADRONA_NEWDEL_VIS void * operator new(
     size_t num_bytes, std::align_val_t al, const std::nothrow_t &) noexcept
 {
     return ::madrona::opNewAlignImpl(num_bytes, al);
 }
 
-MADRONA_EXPORT void operator delete(
+MADRONA_NEWDEL_VIS void operator delete(
     void *ptr, std::align_val_t al, const std::nothrow_t &) noexcept
 {
     ::madrona::opDeleteAlignImpl(ptr, al);
 }
 
-MADRONA_EXPORT void * operator new[](size_t num_bytes, std::align_val_t al)
+MADRONA_NEWDEL_VIS void * operator new[](size_t num_bytes, std::align_val_t al)
 {
     return ::madrona::opNewAlignImpl(num_bytes, al);
 }
 
-MADRONA_EXPORT void operator delete[](void *ptr, std::align_val_t al) noexcept
+MADRONA_NEWDEL_VIS void operator delete[](void *ptr, std::align_val_t al) noexcept
 {
     ::madrona::opDeleteAlignImpl(ptr, al);
 }
 
-MADRONA_EXPORT void * operator new[](
+MADRONA_NEWDEL_VIS void * operator new[](
     size_t num_bytes, std::align_val_t al, const std::nothrow_t &) noexcept
 {
     return ::madrona::opNewAlignImpl(num_bytes, al);
 }
 
-MADRONA_EXPORT void operator delete[](
+MADRONA_NEWDEL_VIS void operator delete[](
     void *ptr, std::align_val_t al, const std::nothrow_t &) noexcept
 {
     ::madrona::opDeleteAlignImpl(ptr, al);
