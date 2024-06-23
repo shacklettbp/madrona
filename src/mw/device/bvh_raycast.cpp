@@ -191,6 +191,12 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     render::InstanceData *instance_data =
                         &instances[instance_idx];
 
+                    if (instance_data->scale.d0 == 0.0f &&
+                        instance_data->scale.d1 == 0.0f &&
+                        instance_data->scale.d2 == 0.0f) {
+                        continue;
+                    }
+
                     // Ok we are going to just do something stupid.
                     //
                     // Also need to bound the mesh bvh trace ray by t_max.
@@ -420,6 +426,7 @@ extern "C" __global__ void bvhRaycastEntry()
         } else {
             write_out[0] = 10000.0f;
         }
+
 #endif
 
         current_view_offset += num_resident_views;
