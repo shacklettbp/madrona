@@ -102,11 +102,8 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
                        math::Vector3 ray_d,
                        HitInfo *hit_info,
                        TraversalStack *stack,
-                       const AABBTransform &txfm,
                        float t_max) const
 {
-    (void)txfm;
-
     using namespace math;
     constexpr float diveps = 0.0000001f;
 
@@ -754,7 +751,7 @@ float MeshBVH::sphereCast(math::Vector3 ray_o,
     while (stack_size > 0) { 
         int32_t node_idx = stack[--stack_size];
         const Node &node = nodes[node_idx];
-#pragma unroll
+        MADRONA_UNROLL
         for (CountT i = 0; i < (CountT)MeshBVH::nodeWidth; i++) {
             if (!node.hasChild(i)) {
                 continue; // Technically this could be break?
@@ -817,7 +814,7 @@ bool MeshBVH::sphereCastNodeCheck(math::Vector3 o,
 
     // https://tavianator.com/2022/ray_box_boundary.html
     float t_min = 0.f;
-#pragma unroll
+    MADRONA_UNROLL
     for (CountT i = 0; i < 3; i++) {
         float inv_d_i = inv_d[i];
         float b_min, b_max;

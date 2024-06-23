@@ -83,9 +83,6 @@ struct MeshBVH {
         inline void clearChild(madrona::CountT child);
     };
 
-    struct LeafGeometry {
-    };
-
     struct BVHMaterial{
         int32_t matIDX;
     };
@@ -143,18 +140,10 @@ struct MeshBVH {
                          float t_max = float(FLT_MAX)) const;
 #endif
 
-    // Apply this transform onto the root AABB
-    struct AABBTransform {
-        math::Vector3 pos;
-        math::Quat rot;
-        math::Diag3x3 scale;
-    };
-
     inline bool traceRay(math::Vector3 ray_o,
                          math::Vector3 ray_d,
                          HitInfo *out_hit_info,
                          TraversalStack *stack,
-                         const AABBTransform &txfm,
                          float t_max = float(FLT_MAX)) const;
 
     inline float sphereCast(math::Vector3 ray_o,
@@ -230,7 +219,6 @@ struct MeshBVH {
     inline uint32_t getMaterialIDX(const HitInfo &info) const;
 
     Node *nodes;
-    LeafGeometry *leafGeos;
     LeafMaterial *leafMats;
 
     BVHVertex *vertices;

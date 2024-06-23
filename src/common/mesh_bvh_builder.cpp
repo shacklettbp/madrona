@@ -218,7 +218,6 @@ MeshBVH MeshBVHBuilder::build(
         Span<const imp::SourceMesh> src_meshes)
 {
     DynArray<MeshBVH::Node> nodes { 0 };
-    DynArray<MeshBVH::LeafGeometry> leaf_geos { 0 };
     DynArray<MeshBVH::LeafMaterial> leaf_materials { 0 };
 
     math::AABB aabb_out;
@@ -728,7 +727,6 @@ MeshBVH MeshBVHBuilder::build(
     bvh_out.numVerts = verticesPtr->size();
 
     bvh_out.nodes = nodes.retrieve_ptr();
-    bvh_out.leafGeos = leaf_geos.retrieve_ptr();
     bvh_out.leafMats = leaf_materials.retrieve_ptr();
     bvh_out.vertices = verticesPtr->retrieve_ptr();
     bvh_out.rootAABB = aabb_out;

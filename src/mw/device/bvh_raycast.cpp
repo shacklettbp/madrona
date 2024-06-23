@@ -201,12 +201,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     //
                     // Also need to bound the mesh bvh trace ray by t_max.
 
-                    MeshBVH::AABBTransform txfm = {
-                        instance_data->position,
-                        instance_data->rotation,
-                        instance_data->scale
-                    };
-
                     Vector3 txfm_ray_o = instance_data->scale.inv() *
                         instance_data->rotation.inv().rotateVec(
                             (ray_o - instance_data->position));

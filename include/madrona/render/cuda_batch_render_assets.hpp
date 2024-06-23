@@ -9,7 +9,6 @@ struct MeshBVHData {
     MeshBVH::Node *nodes;
     uint64_t numNodes;
 
-    MeshBVH::LeafGeometry *leafGeos;
     MeshBVH::LeafMaterial *leafMaterial;
     uint64_t numLeaves;
 

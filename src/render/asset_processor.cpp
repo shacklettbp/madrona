@@ -184,7 +184,6 @@ MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
     auto *bvhs = (MeshBVH *)cu::allocGPU(num_bvh_bytes);
     auto *nodes = (MeshBVH::Node *)cu::allocGPU(num_nodes_bytes);
 #if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
-    MeshBVH::LeafGeometry *leaf_geos = nullptr;
 #else
     MeshBVH::LeafGeometry *leaf_geos = (MeshBVH::LeafGeometry *)
         cu::allocGPU(num_leaf_geos_bytes);
@@ -207,7 +206,6 @@ MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
         // Need to make sure the pointers in the BVH point to GPU memory
         MeshBVH tmp = bvh;
         tmp.nodes = nodes + node_offset;
-        tmp.leafGeos = leaf_geos + leaf_offset;
         tmp.vertices = vertices + vert_offset;
 #if defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
         tmp.leafMats = leaf_mats + leaf_offset;
@@ -244,7 +242,6 @@ MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
     MeshBVHData gpu_data = {
         .nodes = nodes,
         .numNodes = node_offset,
-        .leafGeos = leaf_geos,
         .leafMaterial = leaf_mats,
         .numLeaves = leaf_offset,
         .vertices = vertices,
