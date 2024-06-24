@@ -324,6 +324,9 @@ void lighting(uint3 idx : SV_DispatchThreadID)
         float3 diff = one - exp_value;
         float3 out_color = diff;
 
+        float viz = abs(dot(normal.xyz, outgoing_ray));
+        out_color = float3(viz, viz, viz) * color.xyz + 1e-6f * out_color;
+
         gbufferAlbedo[target_pixel] = float4(out_color, 1.0);
     }
 }

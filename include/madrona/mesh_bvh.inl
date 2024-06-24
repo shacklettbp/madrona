@@ -62,18 +62,27 @@ void MeshBVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
             if (!node.hasChild(i)) {
                 continue; // Technically this could be break?
             };
+
+
+#ifdef MADRONA_GPU_MODE
+#define U32TOFLOAT(x) (__uint_as_float(x))
+#else
+#define U32TOFLOAT(x) (std::bit_cast<float>(x))
+#endif
+
             math::AABB child_aabb {
                 .pMin = {
-                    node.minX + std::bit_cast<float>((node.expX + 127) << 23) * node.qMinX[i],
-                    node.minY + std::bit_cast<float>((node.expY + 127) << 23) * node.qMinY[i],
-                    node.minZ + std::bit_cast<float>((node.expZ + 127) << 23) * node.qMinZ[i],
+                    node.minX + U32TOFLOAT((node.expX + 127) << 23) * node.qMinX[i],
+                    node.minY + U32TOFLOAT((node.expY + 127) << 23) * node.qMinY[i],
+                    node.minZ + U32TOFLOAT((node.expZ + 127) << 23) * node.qMinZ[i],
                 },
                 .pMax = {
-                    node.minX + std::bit_cast<float>((node.expX + 127) << 23) * node.qMaxX[i],
-                    node.minY + std::bit_cast<float>((node.expY + 127) << 23) * node.qMaxY[i],
-                    node.minZ + std::bit_cast<float>((node.expZ + 127) << 23) * node.qMaxZ[i],
+                    node.minX + U32TOFLOAT((node.expX + 127) << 23) * node.qMaxX[i],
+                    node.minY + U32TOFLOAT((node.expY + 127) << 23) * node.qMaxY[i],
+                    node.minZ + U32TOFLOAT((node.expZ + 127) << 23) * node.qMaxZ[i],
                 },
             };
+#undef U32TOFLOAT
 
             if (aabb.overlaps(child_aabb)) {
                 if (node.isLeaf(i)) {
