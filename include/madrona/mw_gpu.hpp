@@ -102,6 +102,8 @@ public:
     MWCudaLaunchGraph(MWCudaLaunchGraph &&);
     ~MWCudaLaunchGraph();
 
+    MWCudaLaunchGraph & operator=(MWCudaLaunchGraph &&);
+
 private:
     struct Impl;
 

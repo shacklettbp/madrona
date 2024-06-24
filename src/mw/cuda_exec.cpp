@@ -2149,6 +2149,7 @@ MWCudaLaunchGraph::MWCudaLaunchGraph(Impl *impl)
 
 
 MWCudaLaunchGraph::MWCudaLaunchGraph(MWCudaLaunchGraph &&) = default;
+MWCudaLaunchGraph & MWCudaLaunchGraph::operator=(MWCudaLaunchGraph &&) = default;
 
 MWCudaLaunchGraph::~MWCudaLaunchGraph()
 {
