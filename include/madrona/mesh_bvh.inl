@@ -757,18 +757,26 @@ float MeshBVH::sphereCast(math::Vector3 ray_o,
                 continue; // Technically this could be break?
             };
 
+#ifdef MADRONA_GPU_MODE
+#define U32TOFLOAT(x) (__uint_as_float(x))
+#else
+#define U32TOFLOAT(x) (std::bit_cast<float>(x))
+#endif
+
             math::AABB child_aabb {
                 .pMin = {
-                    node.minX + (1 << node.expX) * node.qMinX[i],
-                    node.minY + (1 << node.expY) * node.qMinY[i],
-                    node.minZ + (1 << node.expZ) * node.qMinZ[i],
+                    node.minX + U32TOFLOAT(((uint32_t)node.expX + 127) << 23) * node.qMinX[i],
+                    node.minY + U32TOFLOAT(((uint32_t)node.expY + 127) << 23) * node.qMinY[i],
+                    node.minZ + U32TOFLOAT(((uint32_t)node.expZ + 127) << 23) * node.qMinZ[i],
                 },
                 .pMax = {
-                    node.minX + (1 << node.expX) * node.qMaxX[i],
-                    node.minY + (1 << node.expY) * node.qMaxY[i],
-                    node.minZ + (1 << node.expZ) * node.qMaxZ[i],
+                    node.minX + U32TOFLOAT(((uint32_t)node.expX + 127) << 23) * node.qMaxX[i],
+                    node.minY + U32TOFLOAT(((uint32_t)node.expY + 127) << 23) * node.qMaxY[i],
+                    node.minZ + U32TOFLOAT(((uint32_t)node.expZ + 127) << 23) * node.qMaxZ[i],
                 },
             };
+
+#undef U32TOFLOAT
 
             if (sphereCastNodeCheck(ray_o, inv_d, hit_t, sphere_r, child_aabb)) {
                 if (node.isLeaf(i)) {

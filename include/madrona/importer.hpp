@@ -1,7 +1,6 @@
 #pragma once
 
 #include <string>
-#include <madrona/mesh_bvh.hpp>
 #include <madrona/dyn_array.hpp>
 #include <madrona/math.hpp>
 #include <madrona/span.hpp>
