@@ -393,7 +393,7 @@ extern "C" __global__ void bvhRaycastEntry()
                 &t, &color, 10000.f, &profiler);
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_y + pixel_x * bvhParams.renderOutputResolution);
+            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
         uint32_t global_pixel_idx = current_view_offset * bytes_per_view +
             linear_pixel_idx;
 
@@ -418,7 +418,7 @@ extern "C" __global__ void bvhRaycastEntry()
         if (hit) {
             write_out[0] = t;
         } else {
-            write_out[0] = 10000.0f;
+            write_out[0] = 0.f;
         }
 
 #endif
