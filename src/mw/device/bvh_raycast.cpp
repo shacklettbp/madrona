@@ -351,10 +351,8 @@ extern "C" __global__ void bvhRaycastEntry()
         math::Vector3 ray_start = view_data->position;
         math::Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
 
-        // constexpr float theta = 1.5708f;
-        float theta = -view_data->yScale*0.5f;
-
-        const float h = tanf(theta / 2);
+        // const float h = tanf(theta / 2);
+        const float h = 1.0f / (-view_data->yScale);
 
         const auto viewport_height = 2 * h;
         const auto viewport_width = viewport_height;
