@@ -1752,6 +1752,10 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 {
     (void)override_materials;
 
+    struct ShaderAABB {
+        math::Vector4 data[2];
+    };
+
     using namespace imp;
     using namespace math;
 
@@ -1783,7 +1787,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         (int64_t)sizeof(PackedVertex) * num_total_vertices,
         (int64_t)sizeof(uint32_t) * num_total_indices,
         (int64_t)sizeof(MaterialDataShader) * src_mats.size(),
-        (int64_t)sizeof(math::AABB) * num_total_objs
+        (int64_t)sizeof(ShaderAABB) * num_total_objs
     };
 
     int64_t num_asset_bytes = utils::computeBufferOffsets(
@@ -1800,8 +1804,8 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         (uint32_t *)(staging_ptr + buffer_offsets[2]);
     MaterialDataShader *materials_ptr =
         (MaterialDataShader *)(staging_ptr + buffer_offsets[3]);
-    math::AABB *aabbs_ptr =
-        (math::AABB *)(staging_ptr + buffer_offsets[4]);
+    ShaderAABB *aabbs_ptr =
+        (ShaderAABB *)(staging_ptr + buffer_offsets[4]);
 
     int32_t mesh_offset = 0;
     int32_t vertex_offset = 0;
@@ -1956,7 +1960,25 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     }
 
     math::AABB *aabbs_src = AssetProcessor::makeAABBs(src_objs);
-    memcpy(aabbs_ptr, aabbs_src, sizeof(math::AABB) * src_objs.size());
+
+    ShaderAABB *shader_aabbs_src = (ShaderAABB *)malloc(
+            sizeof(ShaderAABB) * src_objs.size());
+
+    for (int i = 0; i < src_objs.size(); ++i) {
+        math::AABB *src = aabbs_src + i;
+        ShaderAABB *current = shader_aabbs_src + i;
+
+        current->data[0].x = src->pMin.x;
+        current->data[0].y = src->pMin.y;
+        current->data[0].z = src->pMin.z;
+
+        current->data[0].w = src->pMax.x;
+        current->data[1].x = src->pMax.y;
+        current->data[1].y = src->pMax.z;
+    }
+
+    memcpy(aabbs_ptr, shader_aabbs_src, sizeof(ShaderAABB) * src_objs.size());
+
     free(aabbs_src);
 
     staging.flush(dev);

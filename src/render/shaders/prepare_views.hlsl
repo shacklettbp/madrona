@@ -119,6 +119,66 @@ struct SharedData {
     float4 topPlane;
 };
 
+struct TransformedAABB {
+    float3 pMin;
+    float3 pMax;
+};
+
+float3x3 fromRS(float4 r, float3 s)
+{
+    float x2 = r.x * r.x;
+    float y2 = r.y * r.y;
+    float z2 = r.z * r.z;
+    float xz = r.x * r.z;
+    float xy = r.x * r.y;
+    float yz = r.y * r.z;
+    float wx = r.w * r.x;
+    float wy = r.w * r.y;
+    float wz = r.w * r.z;
+
+    float3 ds = 2.f * s;
+
+    return float3x3(
+        s.x - ds.x * (y2 + z2),
+        ds.x * (xy + wz),
+        ds.x * (xz - wy),
+        ds.y * (xy - wz),
+        s.y - ds.y * (x2 + z2),
+        ds.y * (yz + wx),
+        ds.z * (xz + wy),
+        ds.z * (yz - wx),
+        s.z - ds.z * (x2 + y2)
+    );
+}
+
+TransformedAABB applyTRS(in float3 pmin, in float3 pmax,
+                         in EngineInstanceData instance_data)
+{
+    float3x3 rot_mat = fromRS(instance_data.rotation, instance_data.scale);
+
+     // RTCD page 86
+     TransformedAABB txfmed;
+     [unroll] for (int i = 0; i < 3; i++) {
+         txfmed.pMin[i] = txfmed.pMax[i] = instance_data.position[i];
+
+         [unroll] for (int j = 0; j < 3; j++) {
+             // Flipped because rot_mat is column major
+             float e = rot_mat[j][i] * pmin[j];
+             float f = rot_mat[j][i] * pmax[j];
+
+             if (e < f) {
+                 txfmed.pMin[i] += e;
+                 txfmed.pMax[i] += f;
+             } else {
+                 txfmed.pMin[i] += f;
+                 txfmed.pMax[i] += e;
+             }
+         }
+     }
+
+     return txfmed;
+}
+
 groupshared SharedData sm;
 
 [numThreads(32, 1, 1)]
@@ -183,23 +243,18 @@ void main(uint3 tid       : SV_DispatchThreadID,
         EngineInstanceData instance_data = 
             unpackEngineInstanceData(instanceData[current_instance_idx]);
 
-        AABB aabb = aabbs[current_instance_idx];
-        float3 center = (aabb.data[0].xyz + float3(aabb.data[0].w,aabb.data[1].xy))/2;
-        float3 extents = float3(aabb.data[0].w,aabb.data[1].xy) - center;
+        AABB aabb = aabbs[instance_data.objectID];
 
+        float3 pre_pmin = aabb.data[0].xyz;
+        float3 pre_pmax = float3(aabb.data[0].w, aabb.data[1].xy);
+
+        TransformedAABB txfm_aabb = applyTRS(pre_pmin, pre_pmax,
+                                             instance_data);
+
+        float3 center = (txfm_aabb.pMin + txfm_aabb.pMax)/2;
+        float3 extents = txfm_aabb.pMax - center;
 
         // Don't do culling yet.
-
-        //Test code for aabb validation
-        //extents *= 0.7;
-        /*if((dot(float4(center,1),sm.nearPlane) < 0)
-            || (dot(float4(center,1),sm.leftPlane) < 0)
-            || (dot(float4(center,1),sm.rightPlane) < 0)
-            || (dot(float4(center,1),sm.bottomPlane) < 0)
-            || (dot(float4(center,1),sm.topPlane) < 0)
-            || (dot(float4(center,1),sm.farPlane) < 0)){
-            continue;
-        }*/
 
         int some_value = 0;
 
@@ -208,9 +263,12 @@ void main(uint3 tid       : SV_DispatchThreadID,
         if((!planeAABB(sm.nearPlane,center,extents) || !planeAABB(sm.leftPlane,center,extents) ||
            !planeAABB(sm.rightPlane,center,extents) || !planeAABB(sm.bottomPlane,center,extents) ||
            !planeAABB(sm.topPlane,center,extents) || !planeAABB(sm.farPlane,center,extents))){
+
             num_culled++;
+
             some_value += (int)aabbs[0].data[0].x;
-            // continue;
+
+            continue;
         }
 
         ObjectData obj = objectDataBuffer[instance_data.objectID];
