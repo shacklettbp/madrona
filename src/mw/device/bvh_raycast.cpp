@@ -217,12 +217,12 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 #if defined(MADRONA_PROFILE_BVH_KERNEL)
                     uint64_t blas_start_time = globalTimer();
                     bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
-                            &hit_info, &stack, txfm, t_max * t_scale);
+                            &hit_info, &stack, t_max * t_scale);
                     uint64_t blas_end_time = globalTimer();
                     total_blas_time += (blas_end_time - blas_start_time);
 #else
                     bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
-                            &hit_info, &stack, txfm, t_max * t_scale);
+                            &hit_info, &stack, t_max * t_scale);
 #endif
 
                     if (leaf_hit) {
