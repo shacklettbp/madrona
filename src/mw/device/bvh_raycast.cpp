@@ -369,8 +369,8 @@ extern "C" __global__ void bvhRaycastEntry()
         uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
         uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
 
-        float pixel_u = ((float)pixel_x) / (float)bvhParams.renderOutputResolution;
-        float pixel_v = ((float)pixel_y) / (float)bvhParams.renderOutputResolution;
+        float pixel_u = ((float)pixel_x + 0.5f) / (float)bvhParams.renderOutputResolution;
+        float pixel_v = ((float)pixel_y + 0.5f) / (float)bvhParams.renderOutputResolution;
 
         math::Vector3 ray_dir = lower_left_corner + pixel_u * horizontal + 
             pixel_v * vertical - ray_start;
