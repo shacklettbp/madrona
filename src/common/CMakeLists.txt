@@ -66,7 +66,7 @@ add_library(madrona_std_mem SHARED
 )
 
 target_link_libraries(madrona_std_mem PRIVATE
-    madrona_hdrs madrona_noexceptrtti
+    madrona_hdrs madrona_noexceptrtti madrona_libcxx
 )
 
 add_library(madrona_common STATIC
