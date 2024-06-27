@@ -1,6 +1,7 @@
 #include <madrona/memory.hpp>
 
 #include <cstdlib>
+#include <cstdio>
 
 namespace madrona {
 
