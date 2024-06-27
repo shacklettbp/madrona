@@ -61,6 +61,14 @@ target_link_libraries(madrona_err
         madrona_noexceptrtti
 )
 
+add_library(madrona_std_mem SHARED
+    op_new_delete.cpp
+)
+
+target_link_libraries(madrona_std_mem PRIVATE
+    madrona_hdrs madrona_noexceptrtti
+)
+
 add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/memory.hpp ${MADRONA_INC_DIR}/memory.inl memory.cpp
     ${MADRONA_INC_DIR}/stack_alloc.hpp ${MADRONA_INC_DIR}/stack_alloc.inl
@@ -96,6 +104,7 @@ target_link_libraries(madrona_common
         madrona_libcxx
         madrona_err
         madrona_noexceptrtti
+        madrona_std_mem
 )
 
 set_property(TARGET madrona_common PROPERTY
