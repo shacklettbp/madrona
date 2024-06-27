@@ -14,7 +14,8 @@
 #include <madrona/types.hpp>
 #include <madrona/macros.hpp>
 
-namespace madrona::math {
+namespace madrona {
+namespace math {
 
 struct Vector2;
 struct Vector3;
@@ -181,6 +182,7 @@ struct Quat {
     static inline Quat angleAxis(float angle, Vector3 normal);
     static inline Quat fromAngularVec(Vector3 v);
     static inline Quat fromBasis(Vector3 a, Vector3 b, Vector3 c);
+    static constexpr inline Quat id();
 
     inline Quat & operator+=(Quat o);
     inline Quat & operator-=(Quat o);
@@ -203,7 +205,8 @@ struct Diag3x3 {
 
     static inline Diag3x3 fromVec(Vector3 v);
 
-    static constexpr inline Diag3x3 uniform(float scale = 1.f);
+    static constexpr inline Diag3x3 uniform(float scale);
+    static constexpr inline Diag3x3 id();
 
     inline Diag3x3 & operator*=(Diag3x3 o);
     inline Diag3x3 & operator*=(float o);
@@ -363,6 +366,11 @@ constexpr inline Vector3 up { 0, 0, 1 };
 constexpr inline Vector3 fwd { 0, 1, 0 };
 constexpr inline Vector3 right { 1, 0, 0 };
 
+}
+
+constexpr inline math::Vector3 worldUp = math::up;
+constexpr inline math::Vector3 worldFwd = math::fwd;
+constexpr inline math::Vector3 worldRight = math::right;
 }
 
 #include "math.inl"

@@ -786,6 +786,11 @@ THE SOFTWARE.
     }
 }
 
+constexpr Quat Quat::id()
+{
+    return { 1.f, 0.f, 0.f, 0.f };
+}
+
 Quat & Quat::operator+=(Quat o)
 {
     w += o.w;
@@ -883,6 +888,11 @@ constexpr Diag3x3 Diag3x3::uniform(float scale)
         scale,
         scale,
     };
+}
+
+constexpr Diag3x3 Diag3x3::id()
+{
+    return Diag3x3::uniform(1.f);
 }
 
 Diag3x3 & Diag3x3::operator*=(Diag3x3 o)

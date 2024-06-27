@@ -24,8 +24,8 @@ public:
     };
 
     enum class KeyboardKey : uint32_t {
-        W, A, S, D, Q, E, R, X, Z, C, G, L, T, F, M, K,
-        K1, K2, K3, K4, K5, K6, K7, K8, K9, K0,
+        A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X,
+        Y, Z, K1, K2, K3, K4, K5, K6, K7, K8, K9, K0,
         Shift, Space, NumKeys,
     };
 
