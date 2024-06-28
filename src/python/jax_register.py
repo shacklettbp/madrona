@@ -77,8 +77,8 @@ def _init_lowering(ctx):
     results = custom_call(
         init_custom_call_name,
         backend_config=sim_encode,
-        operands=[token],
-        operand_layouts=[()],
+        operands=[mlir.ir_constant(sim_ptr), token],
+        operand_layouts=[(), ()],
         result_types=result_types,
         result_layouts=result_layouts,
         has_side_effect=True,
@@ -120,8 +120,8 @@ def _step_lowering(ctx, *flattened_inputs):
     results = custom_call(
         step_custom_call_name,
         backend_config=sim_encode,
-        operands=inputs,
-        operand_layouts=input_layouts,
+        operands=[mlir.ir_constant(sim_ptr), *inputs],
+        operand_layouts=[(), *input_layouts],
         result_types=result_types,
         result_layouts=result_layouts,
         has_side_effect=True,

@@ -32,7 +32,7 @@ public:
 
 private:
     template <typename SimT, auto fn>
-    static void cpuEntryFn(void *out, void **in);
+    static void cpuEntryFn(void **out, void **in);
 
 #ifdef MADRONA_CUDA_SUPPORT
     template <typename SimT, auto fn>

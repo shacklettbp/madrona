@@ -80,11 +80,10 @@ auto JAXInterface::buildEntry()
 }
 
 template <typename SimT, auto fn>
-void JAXInterface::cpuEntryFn(void *, void **in)
+void JAXInterface::cpuEntryFn(void **out, void **in)
 {
     SimT *sim = *(SimT **)in[0];
-    // FIXME: currently_broken, need to pass args
-    std::invoke(fn, *sim);
+    std::invoke(fn, *sim, in + 2, out);
 }
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -94,8 +93,9 @@ void JAXInterface::gpuEntryFn(cudaStream_t strm, void **buffers,
 {
     SimT *sim = *(SimT **)opaque;
 
-    // The first buffer entry is a token JAX uses for ordering, skip over it
-    std::invoke(fn, *sim, strm, buffers + 1);
+    // The first buffer entry is used by the CPU backend, skip
+    // The scond buffer entry is a token JAX uses for ordering, skip
+    std::invoke(fn, *sim, strm, buffers + 2);
 }
 #endif
 

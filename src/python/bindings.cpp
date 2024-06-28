@@ -236,6 +236,7 @@ nb::dict JAXInterface::setup(const TrainInterface &iface,
 
     nb::dict scope;
     scope["sim_obj"] = sim_obj;
+    scope["sim_ptr"] = (uint64_t)sim_ptr;
     scope["sim_encode"] = sim_encode;
     scope["step_inputs_iface"] = input_iface;
     scope["step_outputs_iface"] = output_iface;
