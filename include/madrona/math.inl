@@ -1757,4 +1757,9 @@ AABB AABB::merge(const AABB &a, const AABB &b)
     };
 }
 
+Vector2 AABB2D::centroid() const
+{
+    return 0.5f * (pMin + pMax);
+}
+
 }

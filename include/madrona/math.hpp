@@ -323,8 +323,6 @@ struct Mat4x4 {
     static constexpr inline Mat4x4 identity();
 };
 
-Mat4x4 transpose(const Mat4x4 &m);
-
 struct AABB {
     Vector3 pMin;
     Vector3 pMax;
@@ -360,6 +358,13 @@ struct AABB {
     static inline AABB invalid();
     static inline AABB point(const Vector3 &p);
     static inline AABB merge(const AABB &a, const AABB &b);
+};
+
+struct AABB2D {
+    Vector2 pMin;
+    Vector2 pMax;
+
+    inline Vector2 centroid() const;
 };
 
 constexpr inline Vector3 up { 0, 0, 1 };
