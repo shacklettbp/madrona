@@ -372,16 +372,24 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
 
 #ifdef MADRONA_GPU_MODE
     // Need to sort the instances, as well as the views
-    auto sort_instances_by_morton =
-        builder.addToGraph<SortArchetypeNode<RenderableArchetype, MortonCode>>(
+
+    // Need to sort by worlds first to handle deleted RenderableArchetypes
+    auto sort_instances_by_world1 = 
+        builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
             {mortoncode_update});
 
-    auto sort_instances_by_world = 
+    // Then sort by morton
+    auto sort_instances_by_morton =
+        builder.addToGraph<SortArchetypeNode<RenderableArchetype, MortonCode>>(
+            {sort_instances_by_world1});
+
+    // Then sort by world again to group up by world
+    auto sort_instances_by_world2 = 
         builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
             {sort_instances_by_morton});
 
     auto post_instance_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_world});
+        builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_world2});
 
 #if 0
     auto sort_views = 
