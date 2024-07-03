@@ -173,7 +173,16 @@ float sampleUniform(RandKey k)
 
 bool sampleBool(RandKey k)
 {
-    return (std::popcount(k.a ^ k.b) & 1) == 0;
+    uint32_t bits = bits32(k);
+
+    uint32_t num_set = 
+#ifdef MADRONA_GPU_MODE
+        (uint32_t)__popc(bits);
+#else
+        std::popcount(bits);
+#endif
+
+    return (num_set & 1) == 0;
 }
 
 math::Vector2 sample2xUniform(RandKey k)
