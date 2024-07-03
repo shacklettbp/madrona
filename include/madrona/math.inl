@@ -1729,7 +1729,7 @@ float AABB::operator[](CountT i) const
         case 3: return pMax.x;
         case 4: return pMax.y;
         case 5: return pMax.z;
-        default: return 0.f;
+        default: MADRONA_UNREACHABLE();
     }
 }
 
@@ -1760,6 +1760,12 @@ AABB AABB::merge(const AABB &a, const AABB &b)
 Vector2 AABB2D::centroid() const
 {
     return 0.5f * (pMin + pMax);
+}
+
+float AABB2D::area() const
+{
+    Vector2 diff = pMax - pMin;
+    return diff.x * diff.y;
 }
 
 }

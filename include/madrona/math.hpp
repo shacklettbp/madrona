@@ -365,6 +365,7 @@ struct AABB2D {
     Vector2 pMax;
 
     inline Vector2 centroid() const;
+    inline float area() const;
 };
 
 constexpr inline Vector3 up { 0, 0, 1 };

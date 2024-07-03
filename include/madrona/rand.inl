@@ -171,6 +171,11 @@ float sampleUniform(RandKey k)
     return bitsToFloat01(bits32(k));
 }
 
+bool sampleBool(RandKey k)
+{
+    return (std::popcount(k.a ^ k.b) & 1) == 0;
+}
+
 math::Vector2 sample2xUniform(RandKey k)
 {
     return math::Vector2 {
@@ -239,6 +244,12 @@ float RNG::sampleUniform()
 {
     RandKey sample_k = advance();
     return rand::sampleUniform(sample_k);
+}
+
+bool RNG::sampleBool()
+{
+    RandKey sample_k = advance();
+    return rand::sampleBool(sample_k);
 }
 
 RandKey RNG::randKey()
