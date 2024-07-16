@@ -48,29 +48,29 @@ struct Vector2 {
     inline float & operator[](CountT i);
     inline float operator[](CountT i) const;
 
-    inline Vector2 & operator+=(const Vector2 &o);
-    inline Vector2 & operator-=(const Vector2 &o);
+    constexpr inline Vector2 & operator+=(const Vector2 &o);
+    constexpr inline Vector2 & operator-=(const Vector2 &o);
 
-    inline Vector2 & operator+=(float o);
-    inline Vector2 & operator-=(float o);
-    inline Vector2 & operator*=(float o);
-    inline Vector2 & operator/=(float o);
+    constexpr inline Vector2 & operator+=(float o);
+    constexpr inline Vector2 & operator-=(float o);
+    constexpr inline Vector2 & operator*=(float o);
+    constexpr inline Vector2 & operator/=(float o);
 
-    friend inline Vector2 operator+(Vector2 v);
-    friend inline Vector2 operator-(Vector2 v);
+    constexpr friend inline Vector2 operator+(Vector2 v);
+    constexpr friend inline Vector2 operator-(Vector2 v);
 
-    friend inline Vector2 operator+(Vector2 a, const Vector2 &b);
-    friend inline Vector2 operator-(Vector2 a, const Vector2 &b);
+    constexpr friend inline Vector2 operator+(Vector2 a, const Vector2 &b);
+    constexpr friend inline Vector2 operator-(Vector2 a, const Vector2 &b);
 
-    friend inline Vector2 operator+(Vector2 a, float b);
-    friend inline Vector2 operator-(Vector2 a, float b);
-    friend inline Vector2 operator*(Vector2 a, float b);
-    friend inline Vector2 operator/(Vector2 a, float b);
+    constexpr friend inline Vector2 operator+(Vector2 a, float b);
+    constexpr friend inline Vector2 operator-(Vector2 a, float b);
+    constexpr friend inline Vector2 operator*(Vector2 a, float b);
+    constexpr friend inline Vector2 operator/(Vector2 a, float b);
 
-    friend inline Vector2 operator+(float a, Vector2 b);
-    friend inline Vector2 operator-(float a, Vector2 b);
-    friend inline Vector2 operator*(float a, Vector2 b);
-    friend inline Vector2 operator/(float a, Vector2 b);
+    constexpr friend inline Vector2 operator+(float a, Vector2 b);
+    constexpr friend inline Vector2 operator-(float a, Vector2 b);
+    constexpr friend inline Vector2 operator*(float a, Vector2 b);
+    constexpr friend inline Vector2 operator/(float a, Vector2 b);
 };
 
 struct Vector3 {
@@ -94,38 +94,38 @@ struct Vector3 {
 
     [[nodiscard]] inline Vector3 normalize() const;
 
-    inline Vector2 xy() const;
-    inline Vector2 yz() const;
-    inline Vector2 xz() const;
-    inline Vector2 yx() const;
-    inline Vector2 zy() const;
-    inline Vector2 zx() const;
+    constexpr inline Vector2 xy() const;
+    constexpr inline Vector2 yz() const;
+    constexpr inline Vector2 xz() const;
+    constexpr inline Vector2 yx() const;
+    constexpr inline Vector2 zy() const;
+    constexpr inline Vector2 zx() const;
 
     inline float & operator[](CountT i);
     inline float operator[](CountT i) const;
 
-    inline Vector3 & operator+=(const Vector3 &o);
-    inline Vector3 & operator-=(const Vector3 &o);
+    constexpr inline Vector3 & operator+=(const Vector3 &o);
+    constexpr inline Vector3 & operator-=(const Vector3 &o);
 
-    inline Vector3 & operator+=(float o);
-    inline Vector3 & operator-=(float o);
-    inline Vector3 & operator*=(float o);
-    inline Vector3 & operator/=(float o);
+    constexpr inline Vector3 & operator+=(float o);
+    constexpr inline Vector3 & operator-=(float o);
+    constexpr inline Vector3 & operator*=(float o);
+    constexpr inline Vector3 & operator/=(float o);
 
-    friend inline Vector3 operator-(Vector3 v);
+    constexpr friend inline Vector3 operator-(Vector3 v);
 
-    friend inline Vector3 operator+(Vector3 a, const Vector3 &b);
-    friend inline Vector3 operator-(Vector3 a, const Vector3 &b);
+    constexpr friend inline Vector3 operator+(Vector3 a, const Vector3 &b);
+    constexpr friend inline Vector3 operator-(Vector3 a, const Vector3 &b);
 
-    friend inline Vector3 operator+(Vector3 a, float b);
-    friend inline Vector3 operator-(Vector3 a, float b);
-    friend inline Vector3 operator*(Vector3 a, float b);
-    friend inline Vector3 operator/(Vector3 a, float b);
+    constexpr friend inline Vector3 operator+(Vector3 a, float b);
+    constexpr friend inline Vector3 operator-(Vector3 a, float b);
+    constexpr friend inline Vector3 operator*(Vector3 a, float b);
+    constexpr friend inline Vector3 operator/(Vector3 a, float b);
 
-    friend inline Vector3 operator+(float a, Vector3 b);
-    friend inline Vector3 operator-(float a, Vector3 b);
-    friend inline Vector3 operator*(float a, Vector3 b);
-    friend inline Vector3 operator/(float a, Vector3 b);
+    constexpr friend inline Vector3 operator+(float a, Vector3 b);
+    constexpr friend inline Vector3 operator-(float a, Vector3 b);
+    constexpr friend inline Vector3 operator*(float a, Vector3 b);
+    constexpr friend inline Vector3 operator/(float a, Vector3 b);
 
     static inline Vector3 min(Vector3 a, Vector3 b);
     static inline Vector3 max(Vector3 a, Vector3 b);
