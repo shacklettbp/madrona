@@ -503,9 +503,7 @@ Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
         entity_store_.entities[entity_slot_idx];
 
     entity_slot.loc = loc;
-    entity_slot.gen = 0;
 
-    // FIXME: proper entity mapping on GPU
     Entity e {
         entity_slot.gen,
         entity_slot_idx,
