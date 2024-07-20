@@ -152,13 +152,16 @@ mlir.register_lowering(
 
 def init_func():
     sim_state, *flattened_out = _init_primitive.bind()
-    return sim_state, {
-        k: o for k, o in zip(step_outputs_iface['obs'].keys(), flattened_out)
+    return {
+        'state': sim_state,
+        'obs': {
+            k: o for k, o in zip(step_outputs_iface['obs'].keys(), flattened_out)
+        }
     }
 
 
-def step_func(sim_state, step_inputs):
-    flattened_in = [sim_state]
+def step_func(step_inputs):
+    flattened_in = [step_inputs['state']]
 
     flattened_in.append(step_inputs['actions'])
     flattened_in.append(step_inputs['resets'])
@@ -178,6 +181,7 @@ def step_func(sim_state, step_inputs):
         cur_idx += 1
         return o
 
+    out['state'] = sim_state
     out['obs'] = {}
     for k in step_outputs_iface['obs'].keys():
         out['obs'][k] = next_out()
@@ -189,7 +193,7 @@ def step_func(sim_state, step_inputs):
     for k in step_outputs_iface['pbt'].keys():
         out['pbt'][k] = next_out()
 
-    return sim_state, out
+    return out
 
 init_func = jax.jit(init_func)
 step_func = jax.jit(step_func)
