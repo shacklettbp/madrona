@@ -42,9 +42,9 @@ public:
 
     inline RandKey randKey();
 
-    RNG(const RNG &) = delete;
+    RNG(const RNG &) = default;
     RNG(RNG &&) = default;
-    RNG & operator=(const RNG &) = delete;
+    RNG & operator=(const RNG &) = default;
     RNG & operator=(RNG &&) = default;
 
 private:
