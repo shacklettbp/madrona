@@ -90,7 +90,6 @@ struct TrainStepOutputInterface {
 };
 
 struct TrainCheckpointingInterface {
-    TensorInterface triggerLoad;
     TensorInterface checkpointData;
 };
 

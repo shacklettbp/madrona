@@ -78,7 +78,6 @@ TrainInterface::Impl * TrainInterface::Impl::init(
     sumStorageRequirements(outputs.pbt);
 
     if (checkpointing.has_value()) {
-        num_total_dims += checkpointing->triggerLoad.dimensions.size();
         num_total_dims += checkpointing->checkpointData.dimensions.size();
     }
 
@@ -160,7 +159,6 @@ TrainInterface::Impl * TrainInterface::Impl::init(
 
     if (checkpointing.has_value()) {
         owned_checkpointing = TrainCheckpointingInterface {
-            .triggerLoad = makeOwnedInterface(checkpointing->triggerLoad),
             .checkpointData = makeOwnedInterface(
                 checkpointing->checkpointData),
         };
