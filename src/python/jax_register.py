@@ -289,8 +289,7 @@ if ckpt_iface != None:
     
         *results, token = results
         return token, *results
-    
-    
+
     def _restore_ckpts_abstract(*inputs):
         return (core.abstract_token,
             *_shape_dtype_to_abstract_vals(_flatten_restore_ckpts_output_shape_dtypes()))
@@ -309,7 +308,7 @@ if ckpt_iface != None:
     
     def save_ckpts_func(save_inputs):
         flattened_in = [save_inputs['state']]
-        flattened_in.append(flattened_inputs['should_save'])
+        flattened_in.append(save_inputs['should_save'])
 
         sim_state, *flattened_out = _save_ckpts_primitive.bind(*flattened_in)
 
