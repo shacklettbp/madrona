@@ -337,7 +337,7 @@ private:
             CountT offset;
         };
 
-        static constexpr inline uint64_t numBlockBytes = 64 * 1024;
+        static constexpr inline uint64_t numBlockBytes = 256 * 1024;
 
         static constexpr inline uint64_t numFreeBlockBytes =
             numBlockBytes - sizeof(Metadata);
