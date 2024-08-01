@@ -36,8 +36,9 @@ Table::Table(const TypeInfo *component_types, CountT num_components,
             MADRONA_CACHE_LINE * (i + 1), ICfg::maxRowsPerTable);
 #endif
 
-        uint32_t column_bytes_per_row = type.numBytes;
-        columns_[i] = malloc(column_bytes_per_row * num_allocated_rows_);
+        size_t column_bytes_per_row = (size_t)type.numBytes;
+        columns_[i] = malloc(
+            (size_t)column_bytes_per_row * (size_t)num_allocated_rows_);
         bytes_per_column_[i] = column_bytes_per_row;
     }
 }
