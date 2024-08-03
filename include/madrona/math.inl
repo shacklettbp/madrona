@@ -205,6 +205,22 @@ constexpr Vector2 operator/(float a, Vector2 b)
     };
 }
 
+Vector2 Vector2::min(Vector2 a, Vector2 b)
+{
+    return Vector2 {
+        fminf(a.x, b.x),
+        fminf(a.y, b.y),
+    };
+}
+
+Vector2 Vector2::max(Vector2 a, Vector2 b)
+{
+    return Vector2 {
+        fmaxf(a.x, b.x),
+        fmaxf(a.y, b.y),
+    };
+}
+
 float Vector3::dot(const Vector3 &o) const
 {
     return x * o.x + y * o.y + z * o.z;

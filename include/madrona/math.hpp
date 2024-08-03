@@ -71,6 +71,9 @@ struct Vector2 {
     constexpr friend inline Vector2 operator-(float a, Vector2 b);
     constexpr friend inline Vector2 operator*(float a, Vector2 b);
     constexpr friend inline Vector2 operator/(float a, Vector2 b);
+
+    static inline Vector2 min(Vector2 a, Vector2 b);
+    static inline Vector2 max(Vector2 a, Vector2 b);
 };
 
 struct Vector3 {
