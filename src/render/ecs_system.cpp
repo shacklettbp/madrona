@@ -130,7 +130,10 @@ inline void instanceTransformUpdate(Context &ctx,
     // it in the TLBVHNode structure.
 
 #ifdef MADRONA_GPU_MODE
-    if (system_state.enableRaycaster) {
+    bool raycast_enabled = 
+        mwGPU::GPUImplConsts::get().raycastOutputResolution != 0;
+
+    if (raycast_enabled) {
         MeshBVH *bvh = (MeshBVH *)
             mwGPU::GPUImplConsts::get().meshBVHsAddr +
             obj_id.idx;
