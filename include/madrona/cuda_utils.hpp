@@ -6,8 +6,11 @@
  * https://opensource.org/licenses/MIT.
  */
 #pragma once
+
+#if 0
 #include <cuda.h>
 #include <cuda_runtime.h>
+#endif
 
 #include <madrona/macros.hpp>
 
@@ -23,6 +26,7 @@ inline void *allocReadback(size_t num_bytes);
 
 inline void deallocCPU(void *ptr);
 
+#if 0
 inline void cpyCPUToGPU(cudaStream_t strm, void *gpu, void *cpu, size_t num_bytes);
 
 inline void cpyGPUToCPU(cudaStream_t strm, void *cpu, void *gpu, size_t num_bytes);
@@ -40,7 +44,7 @@ inline void checkCuda(cudaError_t res, const char *file,
                       int line, const char *funcname) noexcept;
 inline void checkCuDrv(CUresult res, const char *file,
                        int line, const char *funcname) noexcept;
-
+#endif
 }
 
 #define ERR_CUDA(err) ::madrona::cu::cudaError((err), __FILE__, __LINE__,\

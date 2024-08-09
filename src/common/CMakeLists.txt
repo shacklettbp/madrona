@@ -120,7 +120,8 @@ add_library(madrona_navmesh STATIC
 
 target_link_libraries(madrona_navmesh PUBLIC madrona_common)
 
-if (CUDAToolkit_FOUND)
+#if (CUDAToolkit_FOUND)
+if (FALSE)
     add_library(madrona_cuda STATIC
         ${MADRONA_INC_DIR}/cuda_utils.hpp ${MADRONA_INC_DIR}/cuda_utils.inl
             cuda_utils.cpp

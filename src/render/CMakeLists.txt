@@ -45,7 +45,7 @@ target_link_libraries(madrona_render_core
 )
 
 
-if (TARGET madrona_cuda)
+if (TRUE)
     add_library(madrona_render_asset_processor STATIC
         ${MADRONA_INC_DIR}/render/cuda_batch_render_assets.hpp
         ${MADRONA_INC_DIR}/render/asset_processor.hpp asset_processor.cpp
@@ -54,7 +54,7 @@ if (TARGET madrona_cuda)
     target_link_libraries(madrona_render_asset_processor PRIVATE
         madrona_bvh_builder
         madrona_common
-        madrona_cuda
+        # madrona_cuda
         stb
     )
 endif()

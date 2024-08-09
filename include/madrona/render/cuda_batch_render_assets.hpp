@@ -22,8 +22,8 @@ struct MeshBVHData {
 
 struct MaterialData {
     // GPU buffer containing array of texture objects
-    cudaTextureObject_t *textures;
-    cudaArray_t *textureBuffers;
+    void *textures;
+    void *textureBuffers;
     Material *materials;
 };
 

@@ -1,5 +1,5 @@
 #include <madrona/mesh_bvh.hpp>
-#include <madrona/cuda_utils.hpp>
+// #include <madrona/cuda_utils.hpp>
 #include <madrona/render/asset_processor.hpp>
 #include <madrona/heap_array.hpp>
 
@@ -29,6 +29,7 @@ namespace madrona::render {
 
 namespace AssetProcessor {
 
+#if 0
 static bool loadCache(const char *location,
                       HeapArray<MeshBVH> &bvhs_out)
 {
@@ -502,6 +503,8 @@ void postProcessTextures(Span<imp::SourceTexture> textures,
         }
     }
 }
+#endif
+
 #endif
 
 math::AABB *makeAABBs(

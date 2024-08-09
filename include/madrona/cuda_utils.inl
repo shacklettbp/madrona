@@ -8,6 +8,31 @@
 
 namespace madrona::cu {
 
+  void* allocGPU(size_t num_bytes)
+  {
+    return nullptr;
+  }
+
+  void deallocGPU(void* ptr)
+  {
+  }
+
+  void* allocStaging(size_t num_bytes)
+  {
+    return nullptr;
+  }
+
+  void* allocReadback(size_t num_bytes)
+  {
+    return nullptr;
+  }
+
+  void deallocCPU(void* ptr)
+  {
+  }
+
+
+#if 0
 void *allocGPU(size_t num_bytes)
 {
     void *ptr;
@@ -79,5 +104,6 @@ void checkCuDrv(CUresult res, const char *file,
         cuDrvError(res, file, line, funcname);
     }
 }
+#endif
 
 }
