@@ -110,8 +110,8 @@ add_library(madrona_bvh_builder STATIC
 target_link_libraries(madrona_bvh_builder
     PUBLIC
         madrona_common
-    PRIVATE
-        madrona_embree
+        # PRIVATE
+        # madrona_embree
 )
 
 add_library(madrona_navmesh STATIC

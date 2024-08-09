@@ -1,3 +1,4 @@
+#if 0
 #include <madrona/mesh_bvh_builder.hpp>
 
 #include <madrona/physics_assets.hpp>
@@ -1129,4 +1130,28 @@ MeshBVH MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes,
 }
 #endif
 
+}
+#endif
+
+#include <madrona/mesh_bvh_builder.hpp>
+#include <madrona/physics_assets.hpp>
+#include <madrona/macros.hpp>
+
+#include <vector>
+#include <fstream>
+#include <iostream>
+
+namespace madrona {
+static MeshBVH build( 
+    Span<const imp::SourceMesh> src_meshes)
+{
+    return {};
+}
+
+using namespace math;
+
+MeshBVH MeshBVHBuilder::build(Span<const imp::SourceMesh> src_meshes)
+{
+    return {};
+}
 }
