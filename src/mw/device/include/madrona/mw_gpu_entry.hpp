@@ -105,6 +105,7 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
     mwGPU::TmpAllocator *tmp_alloc = &mwGPU::TmpAllocator::get();
     mwGPU::HostPrint *host_print = 
         (mwGPU::HostPrint *)mwGPU::GPUImplConsts::get().hostPrintAddr;
+    uint32_t raycast_rgbd = mwGPU::GPUImplConsts::get().raycastRGBD;
 
     params->numWorlds = num_worlds;
 
@@ -136,8 +137,11 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->timingInfo = (KernelTimingInfo *)timings;
 
-    params->renderOutput = (void *)mgr->getArchetypeComponent<
-        RaycastOutputArchetype, render::RenderOutputBuffer>();
+    params->rgbOutput = (void *)mgr->getArchetypeComponent<
+        RaycastOutputArchetype, render::RGBOutputBuffer>();
+
+    params->depthOutput = (void *)mgr->getArchetypeComponent<
+        RaycastOutputArchetype, render::DepthOutputBuffer>();
 
     params->renderOutputResolution = 
         mwGPU::GPUImplConsts::get().raycastOutputResolution;
@@ -150,28 +154,11 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->materials = (Material *)materials;
 
-#if 0
-    for (int i = 0; i < num_bvhs; ++i) {
-        printf("bvh %d has material %d\n", i, (int)params->bvhs[i].materialIDX);
-    }
-
-#if 1
-    for (int i = 0; i < 7; ++i) {
-        printf("texture_idx = %d\n", params->materials[i].textureIdx);
-        printf("color = %f %f %f\n", 
-                params->materials[i].color.x,
-                params->materials[i].color.y,
-                params->materials[i].color.z
-                );
-    }
-#endif
-#endif
-
     params->textures = (cudaTextureObject_t *)textures;
 
     params->nearSphere = near_sphere;
 
-    // params->hostChannel = (void *)host_alloc->getHostChannel();
+    params->raycastRGBD = raycast_rgbd;
 }
 
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates

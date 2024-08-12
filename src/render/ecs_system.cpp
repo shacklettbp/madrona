@@ -260,14 +260,22 @@ void registerTypes(ECSRegistry &registry,
 #ifdef MADRONA_GPU_MODE
     uint32_t render_output_res = 
         mwGPU::GPUImplConsts::get().raycastOutputResolution;
-    uint32_t render_output_bytes = render_output_res * render_output_res * 4;
+
+    uint32_t rgb_output_bytes = render_output_res * render_output_res * 4;
+    uint32_t depth_output_bytes = render_output_res * render_output_res * 4;
 
     // Make sure to have something there even if raycasting was disabled.
-    if (render_output_bytes == 0) {
-        render_output_bytes = 4;
+    if (depth_output_bytes == 0) {
+        rgb_output_bytes = 4;
+        depth_output_bytes = 4;
+    } else if (mwGPU::GPUImplConsts::get().raycastRGBD == 0) {
+        // Depth always renders whether we're in RGBD or Depth so we just 
+        // disable RGB rendering.
+        rgb_output_bytes = 4;
     }
 #else
-    uint32_t render_output_bytes = 4;
+    uint32_t rgb_output_bytes = 4;
+    uint32_t depth_output_bytes = 4;
 #endif
 
     registry.registerComponent<RenderCamera>();
@@ -275,7 +283,10 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
     registry.registerComponent<MortonCode>();
-    registry.registerComponent<RenderOutputBuffer>(render_output_bytes);
+
+    registry.registerComponent<RGBOutputBuffer>(rgb_output_bytes);
+    registry.registerComponent<DepthOutputBuffer>(depth_output_bytes);
+
     registry.registerComponent<RenderOutputIndex>();
 
     registry.registerComponent<RenderOutputRef>();

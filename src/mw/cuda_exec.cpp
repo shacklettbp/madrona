@@ -349,13 +349,6 @@ struct BVHKernels {
 
     CUfunction widenTree;
 
-#if 0
-    CUevent startBuildEvent;
-    CUevent startWidenEvent;
-    CUevent startTraceEvent;
-    CUevent stopEvent;
-#endif
-
     CUevent allocEvent;
     CUevent buildEvent;
     CUevent widenEvent;
@@ -365,6 +358,8 @@ struct BVHKernels {
     std::vector<TimingData> recordedTimings;
 
     mwGPU::madrona::KernelTimingInfo *timingInfo;
+
+    uint32_t raycastRGBD;
 };
 
 struct GPUKernels {
@@ -1108,7 +1103,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
 
-    bool render_rgb = (render_mode == CudaBatchRenderConfig::RenderMode::Color);
+    bool render_rgb = (render_mode == CudaBatchRenderConfig::RenderMode::RGBD);
 
     if (render_rgb) {
         common_compile_flags.push_back("-DMADRONA_RENDER_RGB=1");
@@ -1130,11 +1125,6 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
             std::istreambuf_iterator<char>());
 
-#if 0
-        for (int i = 0; i < compile_flags.size(); ++i) {
-            printf("Flags: %s\n", compile_flags[i]);
-        }
-#endif
         printf("Compiling %s\n", bvh_srcs[i]);
 
         // Gives us LTOIR
@@ -1228,7 +1218,9 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .traceEvent = trace_event,
         .stopEvent = stop_event,
         .recordedTimings = {},
-        .timingInfo = timing_info
+        .timingInfo = timing_info,
+        .raycastRGBD = (uint32_t)(render_mode == 
+                CudaBatchRenderConfig::RenderMode::RGBD),
     };
 
     return bvh_kernels;
@@ -1715,7 +1707,8 @@ static GPUEngineState initEngineAndUserState(
                                                    bvh_ptrs,
                                                    num_bvhs,
                                                    raycast_output_resolution,
-                                                   bvh_internals);
+                                                   bvh_internals,
+                                                   bvh_kernels.raycastRGBD);
 
     auto init_ecs_args = makeKernelArgBuffer(alloc_init,
                                              host_print->getChannelPtr(),

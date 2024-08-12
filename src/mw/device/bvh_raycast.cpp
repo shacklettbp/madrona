@@ -291,22 +291,27 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     return ray_hit;
 }
 
+static __device__ void writeRGB(uint32_t pixel_byte_offset,
+                           const math::Vector3 &color)
+{
+    uint8_t *rgb_out = (uint8_t *)bvhParams.rgbOutput + pixel_byte_offset;
+
+    *(rgb_out + 0) = (color.x) * 255;
+    *(rgb_out + 1) = (color.y) * 255;
+    *(rgb_out + 2) = (color.z) * 255;
+    *(rgb_out + 3) = 255;
+}
+
+static __device__ void writeDepth(uint32_t pixel_byte_offset,
+                             float depth)
+{
+    float *depth_out = (float *)
+        ((uint8_t *)bvhParams.depthOutput + pixel_byte_offset);
+    *depth_out = depth;
+}
 
 extern "C" __global__ void bvhRaycastEntry()
 {
-#ifdef MADRONA_PROFILE_BVH_KERNEL
-    if (threadIdx.x == 0) {
-        sm::RaycastCounters *counters = (sm::RaycastCounters *)sm::buffer;
-        counters->timingCounts.store(0, std::memory_order_relaxed);
-        counters->tlasTime.store(0, std::memory_order_relaxed);
-        counters->blasTime.store(0, std::memory_order_relaxed);
-        counters->numTLASTraces.store(0, std::memory_order_relaxed);
-        counters->numBLASTraces.store(0, std::memory_order_relaxed);
-    }
-
-    __syncthreads();
-#endif
-
     uint32_t pixels_per_block = blockDim.x;
 
     Profiler profiler = {
@@ -315,12 +320,6 @@ extern "C" __global__ void bvhRaycastEntry()
         .numBLASTraces = 0,
         .numTLASTraces = 0
     };
-
-#if 0
-    const uint32_t num_worlds = bvhParams.numWorlds;
-    const uint32_t total_num_views = bvhParams.viewOffsets[num_worlds-1] +
-                                     bvhParams.viewCounts[num_worlds-1];
-#endif
 
     const uint32_t total_num_views = bvhParams.internalData->numViews;
 
@@ -377,10 +376,6 @@ extern "C" __global__ void bvhRaycastEntry()
         ray_dir = ray_dir.normalize();
 
         float t;
-#if 0
-        math::Vector3 normal = {pixel_u * 2 - 1, pixel_v * 2 - 1, 0};
-        normal = ray_dir;
-#endif
 
         math::Vector3 color;
 
@@ -396,31 +391,25 @@ extern "C" __global__ void bvhRaycastEntry()
         uint32_t global_pixel_idx = current_view_offset * bytes_per_view +
             linear_pixel_idx;
 
-#if defined (MADRONA_RENDER_RGB)
-        uint8_t *write_out = (uint8_t *)bvhParams.renderOutput + global_pixel_idx;
 
-        if (hit) {
-            write_out[0] = (color.x) * 255;
-            write_out[1] = (color.y) * 255;
-            write_out[2] = (color.z) * 255;
-            write_out[3] = 255;
+
+        if (bvhParams.raycastRGBD) {
+            // Write both depth and color information
+            if (hit) {
+                writeRGB(global_pixel_idx, color);
+                writeDepth(global_pixel_idx, t);
+            } else {
+                writeRGB(global_pixel_idx, { 0.f, 0.f, 0.f });
+                writeDepth(global_pixel_idx, 0.f);
+            }
         } else {
-            write_out[0] = 0;
-            write_out[1] = 0;
-            write_out[2] = 0;
-            write_out[3] = 0;
+            // Only write depth information
+            if (hit) {
+                writeDepth(global_pixel_idx, t);
+            } else {
+                writeDepth(global_pixel_idx, 0.f);
+            }
         }
-#else
-        float *write_out = (float *)
-            ((uint8_t *)bvhParams.renderOutput + global_pixel_idx);
-
-        if (hit) {
-            write_out[0] = t;
-        } else {
-            write_out[0] = 0.f;
-        }
-
-#endif
 
         current_view_offset += num_resident_views;
 
@@ -430,35 +419,4 @@ extern "C" __global__ void bvhRaycastEntry()
     }
 
     __syncthreads();
-
-#ifdef MADRONA_PROFILE_BVH_KERNEL
-    // Update the counters in shared memory first
-    sm::RaycastCounters *counters = (sm::RaycastCounters *)sm::buffer;
-    counters->timingCounts.fetch_add(num_processed_pixels,
-            std::memory_order_relaxed);
-    counters->tlasTime.fetch_add(profiler.timeInTLAS,
-            std::memory_order_relaxed);
-    counters->blasTime.fetch_add(profiler.timeInBLAS,
-            std::memory_order_relaxed);
-    counters->numTLASTraces.fetch_add(profiler.numTLASTraces,
-            std::memory_order_relaxed);
-    counters->numBLASTraces.fetch_add(profiler.numBLASTraces,
-            std::memory_order_relaxed);
-
-    __syncthreads();
-
-    if (threadIdx.x == 0) {
-        uint64_t timing_counts = counters->timingCounts.load(std::memory_order_relaxed);
-        uint64_t tlas_time = counters->tlasTime.load(std::memory_order_relaxed);
-        uint64_t blas_time = counters->blasTime.load(std::memory_order_relaxed);
-        uint64_t num_tlas_traces = counters->numTLASTraces.load(std::memory_order_relaxed);
-        uint64_t num_blas_traces = counters->numBLASTraces.load(std::memory_order_relaxed);
-
-        bvhParams.timingInfo->timingCounts.fetch_add_relaxed(num_processed_pixels);
-        bvhParams.timingInfo->tlasTime.fetch_add_relaxed(profiler.timeInTLAS);
-        bvhParams.timingInfo->blasTime.fetch_add_relaxed(profiler.timeInBLAS);
-        bvhParams.timingInfo->numTLASTraces.fetch_add_relaxed(profiler.numTLASTraces);
-        bvhParams.timingInfo->numBLASTraces.fetch_add_relaxed(profiler.numBLASTraces);
-    }
-#endif
 }

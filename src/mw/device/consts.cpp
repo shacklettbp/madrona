@@ -19,7 +19,8 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
     void *mesh_bvhs,
     uint32_t num_mesh_bvhs,
     uint32_t raycast_output_resolution,
-    void *bvh_internal_data)
+    void *bvh_internal_data,
+    uint32_t raycast_rgbd)
 {
     using namespace madrona;
     using namespace madrona::mwGPU;
@@ -79,6 +80,7 @@ extern "C" __global__ void madronaMWGPUComputeConstants(
         .userJobTrackerOffset =             (uint32_t)0,
         .numMeshBVHs =                      num_mesh_bvhs,
         .raycastOutputResolution =          raycast_output_resolution,
+        .raycastRGBD =                      raycast_rgbd,
     };
 
     *job_system_buffer_size = total_bytes;

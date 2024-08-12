@@ -52,6 +52,9 @@ struct RenderOutputBuffer {
     char buffer[1];
 };
 
+struct RGBOutputBuffer : RenderOutputBuffer {};
+struct DepthOutputBuffer : RenderOutputBuffer {};
+
 // Reference to an output
 struct RenderOutputRef {
     Entity outputEntity;
@@ -86,7 +89,8 @@ struct RenderCameraArchetype : public Archetype<
 
 // This is an unsorted archetype with a runtime-sized component
 struct RaycastOutputArchetype : public Archetype<
-    RenderOutputBuffer
+    RGBOutputBuffer,
+    DepthOutputBuffer
 > {};
 
 struct RenderECSBridge;

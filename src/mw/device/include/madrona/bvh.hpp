@@ -230,8 +230,12 @@ struct BVHParams {
 
     ::madrona::MeshBVH *bvhs;
 
-    void *renderOutput;
+    void *rgbOutput;
+    void *depthOutput;
     uint32_t renderOutputResolution;
+
+    // This will render the depth component as well as the RGB component.
+    uint32_t raycastRGBD;
 
     // These are all going to be inherited from the ECS
     void *hostAllocator;
