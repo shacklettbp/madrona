@@ -4,114 +4,69 @@
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 
-// #define MADRONA_PROFILE_BVH_KERNEL
-
 using namespace madrona;
 
 namespace sm {
-
 // Only shared memory to be used
 extern __shared__ uint8_t buffer[];
-
-struct RaycastCounters {
-    cuda::atomic<uint64_t, cuda::thread_scope_block> timingCounts;
-    cuda::atomic<uint64_t, cuda::thread_scope_block> tlasTime;
-    cuda::atomic<uint64_t, cuda::thread_scope_block> blasTime;
-    cuda::atomic<uint64_t, cuda::thread_scope_block> numTLASTraces;
-    cuda::atomic<uint64_t, cuda::thread_scope_block> numBLASTraces;
-};
-
 }
 
 extern "C" __constant__ BVHParams bvhParams;
-
-enum class ProfilerState {
-    TLAS,
-    BLAS,
-    None
-};
-
-// For tracing purposes.
-uint64_t globalTimer()
-{
-    uint64_t timestamp;
-    asm volatile("mov.u64 %0, %%clock64;" : "=l"(timestamp));
-    return timestamp;
-}
-
-struct Profiler {
-    uint64_t timeInTLAS;
-    uint64_t timeInBLAS;
-    uint64_t numBLASTraces;
-    uint64_t numTLASTraces;
-};
-
-#if 0
-struct Profiler {
-    uint64_t mark;
-    uint64_t timeInTLAS;
-    uint64_t timeInBLAS;
-
-    // This is the number of traces we performed in the BLAS (mesh bvh tests)
-    uint64_t numBLASTraces;
-    // This is the number of traces we performed in the TLAS (AABB tests)
-    uint64_t numTLASTraces;
-
-    ProfilerState state;
-
-    void markState(ProfilerState profiler_state)
-    {
-#ifdef MADRONA_PROFILE_BVH_KERNEL
-        if (profiler_state == state) {
-            return;
-        } else {
-            if (state == ProfilerState::None) {
-                mark = globalTimer();
-                state = profiler_state;
-            } else if (state == ProfilerState::TLAS) {
-                uint64_t new_mark = globalTimer();
-                timeInTLAS += (new_mark - mark);
-                mark = new_mark;
-                state = profiler_state;
-            } else if (state == ProfilerState::BLAS) {
-                uint64_t new_mark = globalTimer();
-                timeInBLAS += (new_mark - mark);
-                mark = new_mark;
-                state = profiler_state;
-            }
-        }
-#endif
-    }
-};
-#endif
-
-#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 
 inline math::Vector3 lighting(
         math::Vector3 diffuse,
         math::Vector3 normal,
         math::Vector3 raydir,
         float roughness,
-        float metalness) {
-
+        float metalness)
+{
     constexpr float ambient = 0.4;
 
     math::Vector3 lightDir = math::Vector3{0.5,0.5,0};
     return (fminf(fmaxf(normal.dot(lightDir),0.f)+ambient, 1.0f)) * diffuse;
+}
 
+inline math::Vector3 calculateOutRay(
+        render::PerspectiveCameraData *view_data,
+        uint32_t pixel_x, uint32_t pixel_y)
+{
+    math::Quat rot = view_data->rotation;
+    math::Vector3 ray_start = view_data->position;
+    math::Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
+ 
+    // const float h = tanf(theta / 2);
+    const float h = 1.0f / (-view_data->yScale);
+
+    const auto viewport_height = 2 * h;
+    const auto viewport_width = viewport_height;
+    const auto forward = look_at.normalize();
+
+    auto u = rot.inv().rotateVec({1, 0, 0});
+    auto v = cross(forward, u).normalize();
+
+    auto horizontal = u * viewport_width;
+    auto vertical = v * viewport_height;
+
+    auto lower_left_corner = ray_start - horizontal / 2 - vertical / 2 + forward;
+  
+    float pixel_u = ((float)pixel_x + 0.5f) / (float)bvhParams.renderOutputResolution;
+    float pixel_v = ((float)pixel_y + 0.5f) / (float)bvhParams.renderOutputResolution;
+
+    math::Vector3 ray_dir = lower_left_corner + pixel_u * horizontal + 
+        pixel_v * vertical - ray_start;
+    ray_dir = ray_dir.normalize();
+
+    return ray_dir;
 }
 
 static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     uint32_t view_idx,
-                                    uint32_t pixel_x, uint32_t pixel_y,
                                     const math::Vector3 &ray_o,
                                     math::Vector3 ray_d,
                                     float *out_hit_t,
                                     math::Vector3 *out_color,
-                                    float t_max,
-                                    Profiler *profiler)
+                                    float t_max)
 {
-#define INSPECT(...) if (pixel_x == 32 && pixel_y == 32) { LOG(__VA_ARGS__); }
     static constexpr float epsilon = 0.00001f;
 
     if (ray_d.x == 0.f) {
@@ -153,21 +108,9 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     MeshBVH::HitInfo closest_hit_info = {};
 
 
-#if defined(MADRONA_PROFILE_BVH_KERNEL)
-    uint64_t total_blas_time = 0;
-    uint64_t start_time = globalTimer();
-#endif
-
     while (stack.size > 0) {
         int32_t node_idx = stack.pop() - 1;
         QBVHNode *node = &nodes[node_idx];
-
-#if 0
-        INSPECT("Going into node: {} with {} children\n",
-                node_idx, (uint32_t)node->numChildren);
-#endif
-
-        // LOG("num_children={}\n", node->numChildren);
 
         for (int i = 0; i < node->numChildren; ++i) {
             math::AABB child_aabb = node->convertToAABB(i);
@@ -181,9 +124,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                 if (node->childrenIdx[i] < 0) {
                     // This child is a leaf.
                     int32_t instance_idx = (int32_t)(-node->childrenIdx[i] - 1);
-
-                    if (instance_idx >= num_instances)
-                        LOG("Got incorrect instance index: {}\n", instance_idx);
 
                     MeshBVH *model_bvh = bvhParams.bvhs +
                         instances[instance_idx].objectID;
@@ -214,16 +154,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
                     MeshBVH::HitInfo hit_info = {};
 
-#if defined(MADRONA_PROFILE_BVH_KERNEL)
-                    uint64_t blas_start_time = globalTimer();
                     bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
                             &hit_info, &stack, t_max * t_scale);
-                    uint64_t blas_end_time = globalTimer();
-                    total_blas_time += (blas_end_time - blas_start_time);
-#else
-                    bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
-                            &hit_info, &stack, t_max * t_scale);
-#endif
 
                     if (leaf_hit) {
                         ray_hit = true;
@@ -247,44 +179,35 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
         }
     }
 
-#if defined(MADRONA_PROFILE_BVH_KERNEL)
-    uint64_t end_time = globalTimer();
-    uint64_t total_trace_time = end_time - start_time;
-
-    profiler->timeInBLAS += total_blas_time;
-    profiler->timeInTLAS += (total_trace_time - total_blas_time);
-#endif
-
     if (ray_hit) {
-#if defined (MADRONA_RENDER_RGB)
-        int32_t material_idx = 
-            closest_hit_info.bvh->getMaterialIDX(closest_hit_info);
+        if (bvhParams.raycastRGBD) {
+            int32_t material_idx = 
+                closest_hit_info.bvh->getMaterialIDX(closest_hit_info);
 
-        Material *mat = &bvhParams.materials[material_idx];
+            Material *mat = &bvhParams.materials[material_idx];
 
-        // *out_color = {mat->color.x, mat->color.y, mat->color.z};
-        Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
+            // *out_color = {mat->color.x, mat->color.y, mat->color.z};
+            Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
 
-        if (mat->textureIdx != -1) {
-            cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
+            if (mat->textureIdx != -1) {
+                cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
 
-            float4 sampled_color = tex2D<float4>(*tex,
-                closest_hit_info.uv.x, closest_hit_info.uv.y);
+                float4 sampled_color = tex2D<float4>(*tex,
+                    closest_hit_info.uv.x, closest_hit_info.uv.y);
 
-            math::Vector3 tex_color = {sampled_color.x,
-                                       sampled_color.y,
-                                       sampled_color.z};
+                math::Vector3 tex_color = {sampled_color.x,
+                                           sampled_color.y,
+                                           sampled_color.z};
 
-            color.x *= tex_color.x;
-            color.y *= tex_color.y;
-            color.z *= tex_color.z;
+                color.x *= tex_color.x;
+                color.y *= tex_color.y;
+                color.z *= tex_color.z;
+            }
+
+            *out_color = lighting(color, closest_hit_info.normal, ray_d, 1, 1);
         }
 
-        *out_color = lighting(color, closest_hit_info.normal, ray_d, 1, 1);
-#else
         *out_color = closest_hit_info.normal;
-#endif
-
         *out_hit_t = t_max;
     }
 
@@ -314,13 +237,6 @@ extern "C" __global__ void bvhRaycastEntry()
 {
     uint32_t pixels_per_block = blockDim.x;
 
-    Profiler profiler = {
-        .timeInTLAS = 0,
-        .timeInBLAS = 0,
-        .numBLASTraces = 0,
-        .numTLASTraces = 0
-    };
-
     const uint32_t total_num_views = bvhParams.internalData->numViews;
 
     // This is the number of views currently being processed.
@@ -337,6 +253,9 @@ extern "C" __global__ void bvhRaycastEntry()
 
     uint32_t num_processed_pixels = 0;
 
+    uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
+    uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
+
     while (current_view_offset < total_num_views) {
         // While we still have views to generate, trace.
         render::PerspectiveCameraData *view_data = 
@@ -344,36 +263,8 @@ extern "C" __global__ void bvhRaycastEntry()
 
         uint32_t world_idx = (uint32_t)view_data->worldIDX;
 
-
-        // Initialize the ray and trace.
-        math::Quat rot = view_data->rotation;
         math::Vector3 ray_start = view_data->position;
-        math::Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
-
-        // const float h = tanf(theta / 2);
-        const float h = 1.0f / (-view_data->yScale);
-
-        const auto viewport_height = 2 * h;
-        const auto viewport_width = viewport_height;
-        const auto forward = look_at.normalize();
-
-        auto u = rot.inv().rotateVec({1, 0, 0});
-        auto v = cross(forward, u).normalize();
-
-        auto horizontal = u * viewport_width;
-        auto vertical = v * viewport_height;
-
-        auto lower_left_corner = ray_start - horizontal / 2 - vertical / 2 + forward;
-
-        uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
-        uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
-
-        float pixel_u = ((float)pixel_x + 0.5f) / (float)bvhParams.renderOutputResolution;
-        float pixel_v = ((float)pixel_y + 0.5f) / (float)bvhParams.renderOutputResolution;
-
-        math::Vector3 ray_dir = lower_left_corner + pixel_u * horizontal + 
-            pixel_v * vertical - ray_start;
-        ray_dir = ray_dir.normalize();
+        math::Vector3 ray_dir = calculateOutRay(view_data, pixel_x, pixel_y);
 
         float t;
 
@@ -382,32 +273,29 @@ extern "C" __global__ void bvhRaycastEntry()
         // For now, just hack in a t_max of 10000.
         bool hit = traceRayTLAS(
                 world_idx, current_view_offset, 
-                pixel_x, pixel_y,
                 ray_start, ray_dir, 
-                &t, &color, 10000.f, &profiler);
+                &t, &color, 10000.f);
 
         uint32_t linear_pixel_idx = 4 * 
             (pixel_x + pixel_y * bvhParams.renderOutputResolution);
-        uint32_t global_pixel_idx = current_view_offset * bytes_per_view +
+        uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;
-
-
 
         if (bvhParams.raycastRGBD) {
             // Write both depth and color information
             if (hit) {
-                writeRGB(global_pixel_idx, color);
-                writeDepth(global_pixel_idx, t);
+                writeRGB(global_pixel_byte_off, color);
+                writeDepth(global_pixel_byte_off, t);
             } else {
-                writeRGB(global_pixel_idx, { 0.f, 0.f, 0.f });
-                writeDepth(global_pixel_idx, 0.f);
+                writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f });
+                writeDepth(global_pixel_byte_off, 0.f);
             }
         } else {
             // Only write depth information
             if (hit) {
-                writeDepth(global_pixel_idx, t);
+                writeDepth(global_pixel_byte_off, t);
             } else {
-                writeDepth(global_pixel_idx, 0.f);
+                writeDepth(global_pixel_byte_off, 0.f);
             }
         }
 
