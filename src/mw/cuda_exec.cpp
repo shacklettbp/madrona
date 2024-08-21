@@ -1101,7 +1101,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         common_compile_flags.push_back("--device-debug");
     }
 
-    common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
+    common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=4");
 
     bool render_rgb = (render_mode == CudaBatchRenderConfig::RenderMode::RGBD);
 

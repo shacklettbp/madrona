@@ -65,7 +65,6 @@ struct NodeCompressed {
     int8_t expX;
     int8_t expY;
     int8_t expZ;
-    uint8_t internalNodes;
     uint8_t qMinX[nodeWidth];
     uint8_t qMinY[nodeWidth];
     uint8_t qMinZ[nodeWidth];
@@ -73,7 +72,6 @@ struct NodeCompressed {
     uint8_t qMaxY[nodeWidth];
     uint8_t qMaxZ[nodeWidth];
     int32_t children[nodeWidth];
-    int32_t parentID;
 };
 
 struct Node {
@@ -519,7 +517,6 @@ MeshBVH MeshBVHBuilder::build(
         node.expX = ex;
         node.expY = ey;
         node.expZ = ez;
-        node.parentID = -1;
         for (int i2 = 0; i2 < MeshBVH::nodeWidth; i2++) {
             node.qMinX[i2] = floorf((innerNodes[i]->bounds[i2].lower_x - minX) / powf(2, ex));
             node.qMinY[i2] = floorf((innerNodes[i]->bounds[i2].lower_y - minY) / powf(2, ey));
@@ -589,7 +586,6 @@ MeshBVH MeshBVHBuilder::build(
 
     for(int i = 0; i < innerID; i++){
         MeshBVH::Node node;
-        node.parentID = -1;
         for (int i2 = 0; i2 < nodeWidth; i2++){
             BoundingBox box = innerNodes[i]->bounds[i2];
             node.minX[i2] = box.lower_x;

@@ -5,6 +5,7 @@
 #include <madrona/mw_gpu/host_print.hpp>
 
 using namespace madrona;
+using namespace madrona::math;
 
 namespace sm {
 // Only shared memory to be used
@@ -13,26 +14,26 @@ extern __shared__ uint8_t buffer[];
 
 extern "C" __constant__ BVHParams bvhParams;
 
-inline math::Vector3 lighting(
-        math::Vector3 diffuse,
-        math::Vector3 normal,
-        math::Vector3 raydir,
+inline Vector3 lighting(
+        Vector3 diffuse,
+        Vector3 normal,
+        Vector3 raydir,
         float roughness,
         float metalness)
 {
     constexpr float ambient = 0.4;
 
-    math::Vector3 lightDir = math::Vector3{0.5,0.5,0};
+    Vector3 lightDir = Vector3{0.5,0.5,0};
     return (fminf(fmaxf(normal.dot(lightDir),0.f)+ambient, 1.0f)) * diffuse;
 }
 
-inline math::Vector3 calculateOutRay(
+inline Vector3 calculateOutRay(
         render::PerspectiveCameraData *view_data,
         uint32_t pixel_x, uint32_t pixel_y)
 {
-    math::Quat rot = view_data->rotation;
-    math::Vector3 ray_start = view_data->position;
-    math::Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
+    Quat rot = view_data->rotation;
+    Vector3 ray_start = view_data->position;
+    Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
  
     // const float h = tanf(theta / 2);
     const float h = 1.0f / (-view_data->yScale);
@@ -52,34 +53,95 @@ inline math::Vector3 calculateOutRay(
     float pixel_u = ((float)pixel_x + 0.5f) / (float)bvhParams.renderOutputResolution;
     float pixel_v = ((float)pixel_y + 0.5f) / (float)bvhParams.renderOutputResolution;
 
-    math::Vector3 ray_dir = lower_left_corner + pixel_u * horizontal + 
+    Vector3 ray_dir = lower_left_corner + pixel_u * horizontal + 
         pixel_v * vertical - ray_start;
     ray_dir = ray_dir.normalize();
 
     return ray_dir;
 }
 
+static __device__ Vector3 getRayInv(const Vector3 &ray_d)
+{
+    float inv_diveps = 1.f / 0.0000001f;
+
+    float ray_x_inv = copysignf(ray_d.x == 0 ? 
+            inv_diveps : 1 / ray_d.x, ray_d.x);
+    float ray_y_inv = copysignf(ray_d.y == 0 ?
+            inv_diveps : 1 / ray_d.y, ray_d.y);
+    float ray_z_inv = copysignf(ray_d.z == 0 ?
+            inv_diveps : 1 / ray_d.z, ray_d.z);
+    return { ray_x_inv, ray_y_inv, ray_z_inv };
+}
+
+static __device__ inline Vector3 getDirQuant(QBVHNode *node,
+                                             const Vector3 &ray_inv)
+{
+    float dir_quant_x = __uint_as_float((node->expX + 127) << 23) * 
+        ray_inv.x;
+    float dir_quant_y = __uint_as_float((node->expY + 127) << 23) *
+        ray_inv.y;
+    float dir_quant_z = __uint_as_float((node->expZ + 127) << 23) *
+        ray_inv.z;
+    return { dir_quant_x, dir_quant_y, dir_quant_z };
+}
+
+static __device__ inline Vector3 getOriginQuant(QBVHNode *node,
+                                                const Vector3 &ray_o,
+                                                const Vector3 &ray_inv)
+{
+    float origin_quant_x = (node->minPoint.x - ray_o.x) * 
+        ray_inv.x;
+    float origin_quant_y = (node->minPoint.y - ray_o.y) * 
+        ray_inv.y;
+    float origin_quant_z = (node->minPoint.z - ray_o.z) * 
+        ray_inv.z;
+    return { origin_quant_x, origin_quant_y, origin_quant_z };
+}
+
+static __device__ inline Vector3 getTNear(QBVHNode *node,
+                                          const Vector3 &dir_quant,
+                                          const Vector3 &origin_quant)
+{
+    float t_near_x = node->qMinX[i] * dir_quant.x + origin_quant.x;
+    float t_near_y = node->qMinY[i] * dir_quant.y + origin_quant.y;
+    float t_near_z = node->qMinZ[i] * dir_quant.z + origin_quant.z;
+    return { t_near_x, t_near_y, t_near_z };
+}
+
+static __device__ inline Vector3 getTFar(QBVHNode *node,
+                                         const Vector3 &dir_quant,
+                                         const Vector3 &origin_quant)
+{
+    float t_far_x = node->qMaxX[i] * dir_quant.x + origin_quant.x;
+    float t_far_y = node->qMaxY[i] * dir_quant.y + origin_quant.y;
+    float t_far_z = node->qMaxZ[i] * dir_quant.z + origin_quant.z;
+    return { t_far_x, t_far_y, t_far_z };
+}
+
+static __device__ inline bool instanceIsValid(render::InstanceData *inst)
+{
+    return !(instance_data->scale.d0 == 0.0f &&
+             instance_data->scale.d1 == 0.0f &&
+             instance_data->scale.d2 == 0.0f);
+}
+
 static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     uint32_t view_idx,
-                                    const math::Vector3 &ray_o,
-                                    math::Vector3 ray_d,
+                                    Vector3 ray_o,
+                                    Vector3 ray_d,
                                     float *out_hit_t,
-                                    math::Vector3 *out_color,
+                                    Vector3 *out_color,
                                     float t_max)
 {
+    Vector3 ray_o_world = ray_o;
+    Vector3 ray_d_world = ray_d;
+    float t_scale = 1.f;
+
     static constexpr float epsilon = 0.00001f;
 
-    if (ray_d.x == 0.f) {
-        ray_d.x += epsilon;
-    }
-
-    if (ray_d.y == 0.f) {
-        ray_d.y += epsilon;
-    }
-
-    if (ray_d.z == 0.f) {
-        ray_d.z += epsilon;
-    }
+    if (ray_d.x == 0.f) ray_d.x += epsilon;
+    if (ray_d.y == 0.f) ray_d.y += epsilon;
+    if (ray_d.z == 0.f) ray_d.z += epsilon;
 
     using namespace madrona::math;
 
@@ -92,8 +154,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     uint32_t internal_nodes_offset = bvhParams.instanceOffsets[world_idx];
     uint32_t num_instances = bvhParams.instanceCounts[world_idx];
 
-    QBVHNode *nodes = internal_data->traversalNodes +
-                      internal_nodes_offset;
+    QBVHNode *tlas_nodes = internal_data->traversalNodes +
+                           internal_nodes_offset;
 
     render::InstanceData *instances = bvhParams.instances + 
                                       internal_nodes_offset;
@@ -101,29 +163,93 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     TraversalStack stack = {};
 
     // This starts us at root
-    stack.push(1);
+    stack.push(0, true);
 
     bool ray_hit = false;
 
-    MeshBVH::HitInfo closest_hit_info = {};
+    Vector3 ray_inv = getRayInv(ray_d);
 
+    // For BLAS
+    MeshBVH::RayIsectTxfm tri_isect_txfm;
+    MeshBVH *blas = nullptr;
 
     while (stack.size > 0) {
-        int32_t node_idx = stack.pop() - 1;
-        QBVHNode *node = &nodes[node_idx];
+        // This variable holds information as to whether we are in BLAS or not
+        TraversalStack::Entry node_idx = stack.pop();
 
-        for (int i = 0; i < node->numChildren; ++i) {
-            math::AABB child_aabb = node->convertToAABB(i);
+        QBVHNode *node = nullptr;
 
-            float aabb_hit_t, aabb_far_t;
-            Diag3x3 inv_ray_d = { 1.f/ray_d.x, 1.f/ray_d.y, 1.f/ray_d.z };
-            bool intersect_aabb = child_aabb.rayIntersects(ray_o, inv_ray_d,
-                    near_sphere, t_max, aabb_hit_t, aabb_far_t);
+        // Fetch node from the right location
+        if (TraversalStack::entryIsTLAS(node_idx)) {
+            node = &tlas_nodes[node_idx & (~0x80000000)];
+        } else {
+            node = &blas->nodes[node_idx];
+        }
 
-            if (aabb_hit_t <= t_max) {
-                if (node->childrenIdx[i] < 0) {
-                    // This child is a leaf.
-                    int32_t instance_idx = (int32_t)(-node->childrenIdx[i] - 1);
+        Vector3 dir_quant = getDirQuant(node, ray_inv);
+        Vector3 origin_quant = getOriginQuant(node, ray_o, ray_inv);
+
+        for (int child_idx = 0; child_idx < node->numChildren; ++child_idx) {
+            Vector3 t_near = getTNear(node, dir_quant, origin_quant);
+            Vector3 t_far = getTFar(node, dir_quant, origin_quant);
+
+            float t_near = fmaxf(
+                    fminf(t_near.x, t_far.x), 
+                    fmaxf(fminf(t_near.y, t_far.y),
+                        fmaxf(fminf(t_near.z, t_far.z), 0.f)));
+
+            float t_far = fminf(
+                    fmaxf(t_far.x, t_near.x), 
+                    fminf(fmaxf(t_far.y, t_near.y),
+                        fminf(fmaxf(t_far.z, t_near.z), t_max)));
+
+            if (t_near <= t_far) {
+                // Intersection happened
+                if (node->isLeaf(child_idx)) {
+                    // If this is a leaf, we're going to have to switch from TLAS
+                    // to BLAS, or from BLAS to triangle intersection test.
+                    if (TraversalStack::entryIsTLAS(node_idx)) {
+                        // We hit a leaf in TLAS mode. Need to transform ray
+                        // direction and origin.
+                        int32_t instance_idx = node->getLeafIndex(child_idx);
+
+                        MeshBVH *blas = bvhParams.bvhs +
+                                        instances[instance_idx].objectID;
+
+                        render::InstanceData *instance_data =
+                            &instances[instance_idx];
+
+                        if (!instanceIsValid(instance_data)) {
+                            continue;
+                        }
+
+                        // Transform the ray_o and ray_d for the BLAS tracing
+                        ray_o = instance_data->scale.inv() *
+                            instance_data->rotation.inv().rotateVec(
+                                (ray_o - instance_data->position));
+                        ray_d = instance_data->scale.inv() *
+                            instance_data->rotation.inv().rotateVec(ray_d);
+                        t_scale = ray_d.length();
+                        ray_d /= t_scale;
+                        t_max *= t_scale;
+
+                        // Push the root node of the BLAS
+                        stack.push(0, false /* in BLAS mode now */);
+                    } else {
+
+                    }
+                } else {
+                    // Just push the child if this isn't a leaf
+                    stack.push(node->childrenIdx[child_idx],
+                            TraversalStack::entryIsTLAS(node_idx));
+                }
+            }
+
+#if 0
+            if (t_near <= t_far) {
+                if (node->isLeaf(i)) {
+                    // This child is a leaf in the TLAS
+                    int32_t instance_idx = node->getLeafIndex(i);
 
                     MeshBVH *model_bvh = bvhParams.bvhs +
                         instances[instance_idx].objectID;
@@ -136,10 +262,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                         instance_data->scale.d2 == 0.0f) {
                         continue;
                     }
-
-                    // Ok we are going to just do something stupid.
-                    //
-                    // Also need to bound the mesh bvh trace ray by t_max.
 
                     Vector3 txfm_ray_o = instance_data->scale.inv() *
                         instance_data->rotation.inv().rotateVec(
@@ -176,6 +298,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     stack.push(node->childrenIdx[i]);
                 }
             }
+#endif
         }
     }
 
@@ -195,7 +318,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                 float4 sampled_color = tex2D<float4>(*tex,
                     closest_hit_info.uv.x, closest_hit_info.uv.y);
 
-                math::Vector3 tex_color = {sampled_color.x,
+                Vector3 tex_color = {sampled_color.x,
                                            sampled_color.y,
                                            sampled_color.z};
 
@@ -215,7 +338,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 }
 
 static __device__ void writeRGB(uint32_t pixel_byte_offset,
-                           const math::Vector3 &color)
+                           const Vector3 &color)
 {
     uint8_t *rgb_out = (uint8_t *)bvhParams.rgbOutput + pixel_byte_offset;
 
@@ -263,12 +386,12 @@ extern "C" __global__ void bvhRaycastEntry()
 
         uint32_t world_idx = (uint32_t)view_data->worldIDX;
 
-        math::Vector3 ray_start = view_data->position;
-        math::Vector3 ray_dir = calculateOutRay(view_data, pixel_x, pixel_y);
+        Vector3 ray_start = view_data->position;
+        Vector3 ray_dir = calculateOutRay(view_data, pixel_x, pixel_y);
 
         float t;
 
-        math::Vector3 color;
+        Vector3 color;
 
         // For now, just hack in a t_max of 10000.
         bool hit = traceRayTLAS(

@@ -6,7 +6,7 @@
 #include <madrona/mesh_bvh.hpp>
 
 #ifndef MADRONA_TLAS_WIDTH
-#define MADRONA_TLAS_WIDTH 8
+#define MADRONA_TLAS_WIDTH 4
 #endif
 
 namespace madrona {
@@ -17,12 +17,16 @@ struct BVHNodeQuantized {
     using BVHNodeT = BVHNodeQuantized<NodeIndex, Width>;
     using NodeIndexT = NodeIndex;
     
-    static constexpr int NodeWidth = Width;
+    static constexpr int32_t NodeWidth = Width;
+    static constexpr int32_t Sentinel = (int32_t)0xFFFF'FFFF;
 
     math::Vector3 minPoint;
 
     int8_t expX, expY, expZ;
     uint8_t numChildren;
+
+    // Only relevant for BLAS nodes.
+    uint8_t triSize[Width];
 
     // Quantized min and max coordinates of the children
     uint8_t qMinX[Width], qMinY[Width], qMinZ[Width];
@@ -102,15 +106,51 @@ struct BVHNodeQuantized {
             ret.qMaxY[i] = ceilf((aabb.pMax.y - root_min.y) / powf(2, ret.expY));
             ret.qMaxZ[i] = ceilf((aabb.pMax.z - root_min.z) / powf(2, ret.expZ));
 
-            ret.childrenIdx[i] = child_indices[i];
+            // Need to convert from LBVH node child index representation
+            // to QBVH node index representation
+            if (child_indices[i] < 0) {
+                ret.childrenIdx[i] = (-child_indices[i] - 1) | 0x80000000;
+            } else {
+                ret.childrenIdx[i] = child_indices[i] - 1;
+            }
         }
 
         return ret;
     }
+
+    inline bool hasChild(uint32_t child_idx) const
+    {
+        return childrenIdx[child_idx] != 0;
+    }
+
+    inline bool isLeaf(uint32_t child_idx) const
+    {
+        return childrenIdx[child_idx] & 0x80000000;
+    }
+
+    inline void setLeaf(uint32_t child_idx, int32_t node_idx)
+    {
+        childrenIdx[child_idx] = 0x80000000 | node_idx;
+    }
+
+    inline void setInternal(uint32_t child_idx, int32_t node_idx)
+    {
+        childrenIdx[child_idx] = node_idx;
+    }
+
+    inline void clearChild(uint32_t child_idx)
+    {
+        childrenIdx[child_idx] = Sentinel;
+    }
+
+    int32_t getLeafIndex(uint32_t child_idx)
+    {
+        return childrenIdx[child_idx] & ~0x80000000;
+    }
 };
 
 // The quantized BVH node used currently
-using QBVHNode = BVHNodeQuantized<int16_t, MADRONA_TLAS_WIDTH>;
+using QBVHNode = BVHNodeQuantized<int32_t, MADRONA_TLAS_WIDTH>;
 
 // This isn't going to be the representation that actually gets traversed
 // through. This is just for construction purposes.

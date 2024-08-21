@@ -1778,6 +1778,8 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         }
     }
 
+    const char *render_dump = getenv("MADRONA_RENDER_DUMP");
+
     int64_t num_total_objs = src_objs.size();
 
     int64_t buffer_offsets[5];
@@ -1792,6 +1794,24 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 
     int64_t num_asset_bytes = utils::computeBufferOffsets(
         buffer_sizes, buffer_offsets, 256);
+
+
+    if (render_dump && render_dump[0] == '1' && false) {
+        { // Buffer offsets
+            FILE *fp = fopen("buffer_offsets.bin", "wb");
+            fwrite(buffer_offsets, sizeof(int64_t) * 5, 1, fp);
+            fclose(fp);
+        }
+
+        { // Buffer sizes
+            FILE *fp = fopen("buffer_sizes.bin", "wb");
+            fwrite(buffer_sizes, sizeof(int64_t) * 6, 1, fp);
+            fclose(fp);
+        }
+
+        exit(0);
+    }
+
 
     HostBuffer staging = alloc.makeStagingBuffer(num_asset_bytes);
     char *staging_ptr = (char *)staging.ptr;
@@ -2004,6 +2024,18 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     
 
     gpu_run.submit(dev);
+
+
+
+
+    if (render_dump && render_dump[0] == '1' && false) {
+        FILE *fp = fopen("geom.bin", "wb");
+        fwrite(staging_ptr, num_asset_bytes, 1, fp);
+        fclose(fp);
+    }
+
+
+
 
     VkDescriptorSet index_buffer_set;
     {

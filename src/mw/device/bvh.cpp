@@ -796,7 +796,6 @@ extern "C" __global__ void bvhBuildFast()
 
         if (tn_offset == 0) {
             nodes[tn_offset].parent = 0xFFFF'FFFF;
-            // printf("Root at %p\n", &nodes[tn_offset]);
         }
 
         if (tn_offset >= world_info.numInternalNodes) {

@@ -125,28 +125,15 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
 
     stack->push(0);
 
-#ifdef SHARED_STACK
-    const int32_t mwgpu_warp_id = threadIdx.x / 32;
-    const int32_t mwgpu_warp_lane = threadIdx.x % 32;
-    const int32_t num_smem_bytes_per_warp =
-        (mwGPU::SharedMemStorage::numBytesPerWarp()/4)*4;
-
-    auto sharedMem = ((char*)shared) + mwgpu_warp_id * num_smem_bytes_per_warp +
-            SHARED_STACK_SIZE * sizeof(int32_t) * mwgpu_warp_lane;
-    int32_t* shared_stack = (int32_t*)sharedMem;
-    shared_stack[0] = 0;
-#endif
-
     bool ray_hit = false;
+
+    float rayXInv = copysignf(ray_d.x == 0 ? 1/diveps : 1/ray_d.x,ray_d.x);
+    float rayYInv = copysignf(ray_d.y == 0 ? 1/diveps : 1/ray_d.y,ray_d.y);
+    float rayZInv = copysignf(ray_d.z == 0 ? 1/diveps : 1/ray_d.z,ray_d.z);
 
     while (stack->size > previous_stack_size) { 
         int32_t node_idx = stack->pop();
         const Node &node = nodes[node_idx];
-
-        float rayXInv = copysignf(ray_d.x == 0 ? 1/diveps : 1/ray_d.x,ray_d.x);
-        float rayYInv = copysignf(ray_d.y == 0 ? 1/diveps : 1/ray_d.y,ray_d.y);
-        float rayZInv = copysignf(ray_d.z == 0 ? 1/diveps : 1/ray_d.z,ray_d.z);
-        //NVIDIA's method, transform for ray plane to quantized space. Shift to IEEE exponent bits.
 
 #ifdef MADRONA_GPU_MODE
         float dirQuantX = __uint_as_float((node.expX + 127) << 23) * rayXInv;
@@ -207,156 +194,6 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
     return ray_hit;
 }
 
-#if 0
-bool MeshBVH::traceRay(math::Vector3 ray_o,
-                       math::Vector3 ray_d,
-                       float *out_hit_t,
-                       math::Vector3 *out_hit_normal,
-                       void* shared,
-                       TraversalStack *stack,
-                       float t_max) const
-{
-    using namespace math;
-    constexpr float diveps = 0.0000001f;
-
-    Diag3x3 inv_d = Diag3x3::fromVec(ray_d).inv();
-
-    RayIsectTxfm tri_isect_txfm = computeRayIsectTxfm(ray_o, ray_d, inv_d);
-
-    uint32_t previous_stack_size = stack->size;
-
-    stack->push(0);
-
-#ifdef SHARED_STACK
-    const int32_t mwgpu_warp_id = threadIdx.x / 32;
-    const int32_t mwgpu_warp_lane = threadIdx.x % 32;
-    const int32_t num_smem_bytes_per_warp =
-        (mwGPU::SharedMemStorage::numBytesPerWarp()/4)*4;
-
-    auto sharedMem = ((char*)shared) + mwgpu_warp_id * num_smem_bytes_per_warp +
-            SHARED_STACK_SIZE * sizeof(int32_t) * mwgpu_warp_lane;
-    int32_t* shared_stack = (int32_t*)sharedMem;
-    shared_stack[0] = 0;
-#endif
-
-    bool ray_hit = false;
-    Vector3 closest_hit_normal = Vector3{0,0,0};
-
-    while (stack->size > previous_stack_size) { 
-        int32_t node_idx = stack->pop();
-        const Node &node = nodes[node_idx];
-
-        float rayXInv = copysignf(ray_d.x == 0 ? 1/diveps : 1/ray_d.x,ray_d.x);
-        float rayYInv = copysignf(ray_d.y == 0 ? 1/diveps : 1/ray_d.y,ray_d.y);
-        float rayZInv = copysignf(ray_d.z == 0 ? 1/diveps : 1/ray_d.z,ray_d.z);
-        //NVIDIA's method, transform for ray plane to quantized space. Shift to IEEE exponent bits.
-
-#ifdef MADRONA_GPU_MODE
-        float dirQuantX = __uint_as_float((node.expX + 127) << 23) * rayXInv;
-        float dirQuantY = __uint_as_float((node.expY + 127) << 23) * rayYInv;
-        float dirQuantZ = __uint_as_float((node.expZ + 127) << 23) * rayZInv;
-#else
-        float dirQuantX = std::bit_cast<float>((node.expX + 127) << 23) * rayXInv;
-        float dirQuantY = std::bit_cast<float>((node.expY + 127) << 23) * rayYInv;
-        float dirQuantZ = std::bit_cast<float>((node.expZ + 127) << 23) * rayZInv;
-#endif
-
-        float originQuantX = (node.minX - ray_o.x) * rayXInv;
-        float originQuantY = (node.minY - ray_o.y) * rayYInv;
-        float originQuantZ = (node.minZ - ray_o.z) * rayZInv;
-
-        for (CountT i = 0; i < MeshBVH::nodeWidth; i++) {
-            if (!node.hasChild(i)) {
-                continue; // Technically this could be break?
-            };
-
-
-            float t_near_x = node.qMinX[i] * dirQuantX + originQuantX;
-            float t_near_y = node.qMinY[i] * dirQuantY + originQuantY;
-            float t_near_z = node.qMinZ[i] * dirQuantZ + originQuantZ;
-
-            float t_far_x = node.qMaxX[i] * dirQuantX + originQuantX;
-            float t_far_y = node.qMaxY[i] * dirQuantY + originQuantY;
-            float t_far_z = node.qMaxZ[i] * dirQuantZ + originQuantZ;
-/*
-            madrona::math::AABB child_aabb {
-                .pMin = {
-                    node.minX + std::bit_cast<float>((node.expX + 127) << 23) * node.qMinX[i],
-                    node.minY + std::bit_cast<float>((node.expY + 127) << 23) * node.qMinY[i],
-                    node.minZ + std::bit_cast<float>((node.expZ + 127) << 23) * node.qMinZ[i],
-                },
-                .pMax = {
-                    node.minX + std::bit_cast<float>((node.expX + 127) << 23) * node.qMaxX[i],
-                    node.minY + std::bit_cast<float>((node.expY + 127) << 23) * node.qMaxY[i],
-                    node.minZ + std::bit_cast<float>((node.expZ + 127) << 23) * node.qMaxZ[i]
-                },
-            };
-
-            float t_near_x = (child_aabb[tri_isect_txfm.nearX] -
-                              tri_isect_txfm.oNear.x) *
-                                 tri_isect_txfm.invDirNear.x;
-            float t_near_y = (child_aabb[tri_isect_txfm.nearY] -
-                              tri_isect_txfm.oNear.y) *
-                                 tri_isect_txfm.invDirNear.y;
-            float t_near_z = (child_aabb[tri_isect_txfm.nearZ] -
-                              tri_isect_txfm.oNear.z) *
-                                 tri_isect_txfm.invDirNear.z;
-
-            float t_far_x = (child_aabb[tri_isect_txfm.farX] -
-                              tri_isect_txfm.oFar.x) *
-                                 tri_isect_txfm.invDirFar.x;
-            float t_far_y = (child_aabb[tri_isect_txfm.farY] -
-                              tri_isect_txfm.oFar.y) *
-                                 tri_isect_txfm.invDirFar.y;
-            float t_far_z = (child_aabb[tri_isect_txfm.farZ] -
-                              tri_isect_txfm.oFar.z) *
-                                 tri_isect_txfm.invDirFar.z;
-            float t_near = fmaxf(t_near_x, fmaxf(t_near_y,
-                fmaxf(t_near_z, 0.f)));
-            float t_far = fminf(t_far_x, fminf(t_far_y,
-                fminf(t_far_z, t_max)));
-
-                                 */
-
-            float t_near = fmaxf(fminf(t_near_x,t_far_x), fmaxf(fminf(t_near_y,t_far_y),
-                fmaxf(fminf(t_near_z,t_far_z), 0.f)));
-            float t_far = fminf(fmaxf(t_far_x,t_near_x), fminf(fmaxf(t_far_y,t_near_y),
-                fminf(fmaxf(t_far_z,t_near_z), t_max)));
-
-            //printf("%f,%f,%f,%f,%f,%f\n",t_near_x,t_near_y,t_near_z,t_far_x,t_far_y,t_far_z);
-
-            if (t_near <= t_far) {
-                if (node.isLeaf(i)) {
-                    int32_t leaf_idx = node.leafIDX(i);
-                    
-                    float hit_t;
-                    Vector3 leaf_hit_normal;
-                    bool leaf_hit = traceRayLeaf(leaf_idx, node.triSize[i], tri_isect_txfm,
-                        ray_o, t_max, &hit_t, &leaf_hit_normal);
-
-                    if (leaf_hit) {
-                        ray_hit = true;
-                        t_max = hit_t;
-                        closest_hit_normal = leaf_hit_normal;
-                    }
-                } else {
-                    // assert(stack->size < 32);
-                    stack->push(node.children[i]);
-                }
-            }
-        }
-    }
-
-    if (!ray_hit) {
-        return false;
-    }
-    
-    *out_hit_t = t_max;
-    *out_hit_normal = closest_hit_normal;
-    return ray_hit;
-}
-#endif
-
 bool MeshBVH::traceRayLeaf(int32_t leaf_idx,
                            int32_t num_tris,
                            RayIsectTxfm tri_isect_txfm,
@@ -376,9 +213,6 @@ bool MeshBVH::traceRayLeaf(int32_t leaf_idx,
     bool hit_tri = false;
     uint32_t hit_tri_idx = 0;
 
-/*#ifdef MADRONA_GPU_MODE
-    mwGPU::HostPrint::log("Testing {}\n",num_tris);
-#endif*/
     for (CountT i = 0; i < num_tris; i++) {
         Vector3 a, b, c;
         Vector2 uva, uvb, uvc;
@@ -414,15 +248,6 @@ bool MeshBVH::traceRayLeaf(int32_t leaf_idx,
         hit_info->uv = realuv;
 
         hit_info->leafMaterialIDX = leaf_idx + hit_tri_idx;
-
-#if 0
-        if (materialIDX == -1) {
-            hit_info->materialIDX =
-                leafMats[leaf_idx + hit_tri_idx].material[0].matIDX;
-        } else {
-            hit_info->materialIDX = materialIDX;
-        }
-#endif
 
         return true;
     } else {

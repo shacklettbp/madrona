@@ -34,20 +34,27 @@ struct TriangleIndices {
 };
 
 struct TraversalStack {
+    using Entry = uint32_t;
+
     static constexpr CountT stackSize = 32;
 
-    int32_t s[stackSize];
+    Entry s[stackSize];
     CountT size;
 
     // if def for the shared version
-    void push(int32_t v)
+    void push(uint32_t node_idx, uint32_t is_tlas)
     {
-        s[size++] = v;
+        s[size++] = node_idx | (is_tlas << 31);
     }
 
-    int32_t pop()
+    Entry pop()
     {
         return s[--size];
+    }
+
+    static bool entryIsTLAS(Entry entry)
+    {
+        return entry & 0x80000000;
     }
 };
 
@@ -63,7 +70,6 @@ struct MeshBVH {
         int8_t expX;
         int8_t expY;
         int8_t expZ;
-        uint8_t internalNodes;
         uint8_t triSize[nodeWidth];
         uint8_t qMinX[nodeWidth];
         uint8_t qMinY[nodeWidth];
@@ -72,7 +78,6 @@ struct MeshBVH {
         uint8_t qMaxY[nodeWidth];
         uint8_t qMaxZ[nodeWidth];
         int32_t children[nodeWidth];
-        int32_t parentID;
 
         inline bool isLeaf(madrona::CountT child) const;
         inline int32_t leafIDX(madrona::CountT child) const;

@@ -1641,24 +1641,57 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
         REQ_VK(impl->dev.dt.beginCommandBuffer(draw_cmd, &begin_info));
     }
 
-    { // Import the views
-        VkDeviceSize num_views_bytes = info.numViews *
-            sizeof(shader::PackedViewData);
+    const char *render_dump = getenv("MADRONA_RENDER_DUMP");
+    bool dump = (render_dump && render_dump[0] == '1');
 
+
+    VkDeviceSize num_views_bytes = info.numViews *
+        sizeof(shader::PackedViewData);
+    VkDeviceSize num_instances_bytes = info.numInstances *
+        sizeof(shader::PackedInstanceData);
+    VkDeviceSize num_instance_offsets_bytes = info.numWorlds *
+        sizeof(int32_t);
+    VkDeviceSize num_view_offsets_bytes = info.numWorlds *
+        sizeof(int32_t);
+
+    using vk::HostBuffer;
+
+    auto make_staging_dump = [this, dump](VkDeviceSize nbytes) -> Optional<HostBuffer> {
+        if (dump) {
+            return impl->mem.makeStagingBuffer(nbytes);
+        } else {
+            return Optional<HostBuffer>::none();
+        }
+    };
+    
+    Optional<HostBuffer> views_staging = make_staging_dump(
+            num_views_bytes);
+    Optional<HostBuffer> instances_staging = make_staging_dump(
+            num_instances_bytes);
+    Optional<HostBuffer> instance_offsets_staging = make_staging_dump(
+            num_instance_offsets_bytes);
+    Optional<HostBuffer> view_offsets_staging = make_staging_dump(
+            num_view_offsets_bytes);
+
+
+    { // Import the views
         VkBufferCopy view_data_copy = {
             .srcOffset = 0, .dstOffset = 0,
             .size = num_views_bytes
         };
 
-       impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewsHdl,
-                             batch_buffers.views.buffer,
-                             1, &view_data_copy);
+        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewsHdl,
+                              batch_buffers.views.buffer,
+                              1, &view_data_copy);
+
+        if (views_staging.has_value()) {
+            impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewsHdl,
+                                       views_staging->buffer,
+                                       1, &view_data_copy);
+        }
     }
 
     { // Import the instances
-        VkDeviceSize num_instances_bytes = info.numInstances *
-            sizeof(shader::PackedInstanceData);
-
         VkBufferCopy instance_data_copy = {
             .srcOffset = 0, .dstOffset = 0,
             .size = num_instances_bytes
@@ -1667,50 +1700,46 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
         impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instancesHdl,
                              batch_buffers.instances.buffer,
                              1, &instance_data_copy);
+
+        if (instances_staging.has_value()) {
+            impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instancesHdl,
+                                       instances_staging->buffer,
+                                       1, &instance_data_copy);
+        }
     }
 
     { // Import the offsets for instances
-        VkDeviceSize num_offsets_bytes = info.numWorlds *
-            sizeof(int32_t);
-
         VkBufferCopy offsets_data_copy = {
             .srcOffset = 0, .dstOffset = 0,
-            .size = num_offsets_bytes
+            .size = num_instance_offsets_bytes
         };
 
         impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instanceOffsetsHdl,
                              batch_buffers.instanceOffsets.buffer,
                              1, &offsets_data_copy);
+
+        if (instance_offsets_staging.has_value()) {
+            impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->instanceOffsetsHdl,
+                                       instance_offsets_staging->buffer,
+                                       1, &offsets_data_copy);
+        }
     }
-
-#if 0
-    { // Import the aabbs for instances
-        VkDeviceSize num_aabbs_bytes = info.numInstances *
-            sizeof(shader::AABB);
-
-        VkBufferCopy aabb_data_copy = {
-            .srcOffset = 0, .dstOffset = 0,
-            .size = num_aabbs_bytes
-        };
-
-        impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->aabbHdl,
-                             batch_buffers.aabbs.buffer,
-                             1, &aabb_data_copy);
-    }
-#endif
 
     { // Import the offsets for views
-        VkDeviceSize num_offsets_bytes = info.numWorlds *
-            sizeof(int32_t);
-
         VkBufferCopy offsets_data_copy = {
             .srcOffset = 0, .dstOffset = 0,
-            .size = num_offsets_bytes
+            .size = num_view_offsets_bytes
         };
 
         impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewOffsetsHdl,
                              batch_buffers.viewOffsets.buffer,
                              1, &offsets_data_copy);
+
+        if (view_offsets_staging.has_value()) {
+            impl->dev.dt.cmdCopyBuffer(draw_cmd, interop->viewOffsetsHdl,
+                                       view_offsets_staging->buffer,
+                                       1, &offsets_data_copy);
+        }
     }
 
     REQ_VK(impl->dev.dt.endCommandBuffer(draw_cmd));
@@ -1734,8 +1763,42 @@ void BatchRenderer::prepareForRendering(BatchRenderInfo info,
         .pSignalSemaphores = &frame_data.prepareFinished
     };
 
-    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl, 1, &frame_data.prepareFence));
-    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue, 1, &submit_info, frame_data.prepareFence));
+    REQ_VK(impl->dev.dt.resetFences(impl->dev.hdl,
+                1, &frame_data.prepareFence));
+    REQ_VK(impl->dev.dt.queueSubmit(impl->renderQueue,
+                1, &submit_info, frame_data.prepareFence));
+
+    if (dump) {
+        impl->dev.dt.deviceWaitIdle(impl->dev.hdl);
+
+        { // Views copy to file
+            FILE *fp = fopen("views.bin", "wb");
+            fwrite(views_staging->ptr, num_views_bytes, 1, fp);
+            fclose(fp);
+        }
+        
+        { // Instances copy to file
+            FILE *fp = fopen("instances.bin", "wb");
+            fwrite(instances_staging->ptr, num_instances_bytes, 1, fp);
+            fclose(fp);
+        }
+
+        { // Instance offsets copy to file
+            FILE *fp = fopen("instance_offsets.bin", "wb");
+            fwrite(instance_offsets_staging->ptr, 
+                    num_instance_offsets_bytes, 1, fp);
+            fclose(fp);
+        }
+
+        { // View offsets copy to file
+            FILE *fp = fopen("view_offsets.bin", "wb");
+            fwrite(view_offsets_staging->ptr, 
+                    num_view_offsets_bytes, 1, fp);
+            fclose(fp);
+        }
+
+        exit(0);
+    }
 
     frame_data.latestOp = LatestOperation::RenderPrepare;
 
