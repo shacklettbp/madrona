@@ -4,6 +4,8 @@
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+
 using namespace madrona;
 
 namespace sm {
@@ -186,7 +188,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
             Material *mat = &bvhParams.materials[material_idx];
 
-            // *out_color = {mat->color.x, mat->color.y, mat->color.z};
             Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
 
             if (mat->textureIdx != -1) {
@@ -206,8 +207,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 
             *out_color = lighting(color, closest_hit_info.normal, ray_d, 1, 1);
         }
-
-        *out_color = closest_hit_info.normal;
+        
+        // *out_color = closest_hit_info.normal;
         *out_hit_t = t_max;
     }
 
@@ -305,6 +306,4 @@ extern "C" __global__ void bvhRaycastEntry()
 
         __syncwarp();
     }
-
-    __syncthreads();
 }
