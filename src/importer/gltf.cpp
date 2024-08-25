@@ -1796,7 +1796,6 @@ static bool gltfImportAssets(LoaderData &loader,
         default: break;
         }
 
-#if 0
         if (img_type_code == -1) {
             loader.recordError("Unsupported image file type");
             return false;
@@ -1811,7 +1810,6 @@ static bool gltfImportAssets(LoaderData &loader,
         }
 
         imported.textures.push_back(*tex);
-#endif
     }
 
     for (const auto& material : loader.materials) {
@@ -1821,8 +1819,7 @@ static bool gltfImportAssets(LoaderData &loader,
         }
         SourceMaterial s_mat = {
             .color = material.baseColor,
-            // .textureIdx = texture_id,
-            .textureIdx = -1,
+            .textureIdx = texture_id,
             .roughness = material.roughness,
             .metalness = material.metallic,
         };
