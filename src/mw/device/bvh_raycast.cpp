@@ -363,14 +363,16 @@ static __device__ math::Vector3 calculateOutRay(
 }
 
 static __device__ void writeRGB(uint32_t pixel_byte_offset,
-                           const math::Vector3 &color)
+                           const math::Vector3 &color,
+                                uint32_t debug_a,
+                                uint32_t debug_b)
 {
     uint8_t *rgb_out = (uint8_t *)bvhParams.rgbOutput + pixel_byte_offset;
 
     *(rgb_out + 0) = (color.x) * 255;
-    *(rgb_out + 1) = (color.y) * 255;
-    *(rgb_out + 2) = (color.z) * 255;
-    *(rgb_out + 3) = 255;
+    *(rgb_out + 1) = (uint8_t)debug_a;
+    *(rgb_out + 2) = (uint8_t)debug_b;
+    *(rgb_out + 3) = (uint8_t)pixel_byte_offset;
 }
 
 static __device__ void writeDepth(uint32_t pixel_byte_offset,
@@ -465,6 +467,9 @@ extern "C" __global__ void bvhRaycastEntry()
     const uint32_t resident_view_offset = blockIdx.x;
 
     uint32_t current_view_offset = resident_view_offset;
+    if (current_view_offset >= total_num_views) {
+      return;
+    }
 
     uint32_t bytes_per_view =
         128 * 128 * 4;
@@ -472,6 +477,7 @@ extern "C" __global__ void bvhRaycastEntry()
     uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
     uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
 
+    int i = 0;
     while (current_view_offset < total_num_views) {
         // While we still have views to generate, trace.
         render::PerspectiveCameraData *view_data = 
@@ -495,10 +501,10 @@ extern "C" __global__ void bvhRaycastEntry()
             if (bvhParams.raycastRGBD) {
                 // Write both depth and color information
                 if (trace_res.hit) {
-                    writeRGB(global_pixel_byte_off, trace_res.color);
+                    writeRGB(global_pixel_byte_off, trace_res.color, current_view_offset, i);
                     writeDepth(global_pixel_byte_off, trace_res.depth);
                 } else {
-                    writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f });
+                    writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f }, current_view_offset, i);
                     writeDepth(global_pixel_byte_off, 0.f);
                 }
             } else {
@@ -514,6 +520,9 @@ extern "C" __global__ void bvhRaycastEntry()
         current_view_offset += num_resident_views;
 
         // __syncwarp();
+        //
+
+        i++;
     }
 }
 #endif
