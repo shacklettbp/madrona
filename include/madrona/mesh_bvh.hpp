@@ -37,7 +37,7 @@ struct TraversalStack {
     static constexpr CountT stackSize = 32;
 
     int32_t s[stackSize];
-    CountT size;
+    uint32_t size;
 
     // if def for the shared version
     void push(int32_t v)

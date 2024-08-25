@@ -219,24 +219,20 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 static __device__ void writeRGB(uint32_t pixel_byte_offset,
                            const math::Vector3 &color)
 {
-    if (pixel_byte_offset < 128 * 128 * 4) {
-        uint8_t *rgb_out = (uint8_t *)bvhParams.rgbOutput + pixel_byte_offset;
+    uint8_t *rgb_out = (uint8_t *)bvhParams.rgbOutput + pixel_byte_offset;
 
-        *(rgb_out + 0) = (color.x) * 255;
-        *(rgb_out + 1) = (color.y) * 255;
-        *(rgb_out + 2) = (color.z) * 255;
-        *(rgb_out + 3) = 255;
-    }
+    *(rgb_out + 0) = (color.x) * 255;
+    *(rgb_out + 1) = (color.y) * 255;
+    *(rgb_out + 2) = (color.z) * 255;
+    *(rgb_out + 3) = 255;
 }
 
 static __device__ void writeDepth(uint32_t pixel_byte_offset,
                              float depth)
 {
-    if (pixel_byte_offset < 128 * 128 * 4) {
-        float *depth_out = (float *)
-            ((uint8_t *)bvhParams.depthOutput + pixel_byte_offset);
-        *depth_out = depth;
-    }
+    float *depth_out = (float *)
+        ((uint8_t *)bvhParams.depthOutput + pixel_byte_offset);
+    *depth_out = depth;
 }
 
 extern "C" __global__ void bvhRaycastEntry()
@@ -262,7 +258,7 @@ extern "C" __global__ void bvhRaycastEntry()
     uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
     uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
 
-    while (current_view_offset < total_num_views) {
+    // while (current_view_offset < total_num_views) {
         // While we still have views to generate, trace.
         render::PerspectiveCameraData *view_data = 
             &bvhParams.views[current_view_offset];
@@ -278,14 +274,14 @@ extern "C" __global__ void bvhRaycastEntry()
 
         // For now, just hack in a t_max of 10000.
         bool hit = traceRayTLAS(
-                world_idx, current_view_offset, 
+                world_idx, /*current_view_offset*/ 0, 
                 ray_start, ray_dir, 
                 &t, &color, 10000.f);
 
         uint32_t linear_pixel_idx = 4 * 
             (pixel_x + pixel_y * 128);
 
-        uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
+        uint32_t global_pixel_byte_off = /* current_view_offset */ 0 * bytes_per_view +
             linear_pixel_idx;
 
         if (bvhParams.raycastRGBD) {
@@ -311,7 +307,7 @@ extern "C" __global__ void bvhRaycastEntry()
         num_processed_pixels++;
 
         __syncwarp();
-    }
+    // }
 }
 #else
 
@@ -457,10 +453,6 @@ static __device__ TraceResult traceRayTLAS(
 
 extern "C" __global__ void bvhRaycastEntry()
 {
-    if (!((threadIdx.x == 0 || threadIdx.x == 1) && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0)) {
-        return;
-    }
-
     uint32_t pixels_per_block = blockDim.x;
 
     const uint32_t total_num_views = bvhParams.internalData->numViews;
