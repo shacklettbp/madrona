@@ -308,10 +308,11 @@ MaterialData initMaterialData(
             cpu_mat_data.textures[i] = tex_obj;
             cpu_mat_data.textureBuffers[i] = cuda_array;
         } else {
+            pixels = tex.data;
+            width = tex.width;
+            height = tex.height; 
+            components = 4;
 
-            pixels = stbi_load_from_memory((stbi_uc*)tex.data,
-                                 tex.numBytes, &width,
-                                 &height, &components, STBI_rgb_alpha);
             // For now, only allow this format
             cudaChannelFormatDesc channel_desc =
                 cudaCreateChannelDesc<uchar4>();
