@@ -37,7 +37,7 @@ struct BVHNodeQuantized {
     // between 0th leaf node and 0th internal node.
     NodeIndex childrenIdx[Width];
 
-    math::AABB convertToAABB(uint32_t child_idx)
+    math::AABB convertToAABB(uint32_t child_idx) const
     {
         auto to_float = [](uint32_t data) -> float {
             return *((float *)&data);

@@ -1,3 +1,4 @@
+#if 0
 #define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
 
 #include <madrona/bvh.hpp>
@@ -218,20 +219,24 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
 static __device__ void writeRGB(uint32_t pixel_byte_offset,
                            const math::Vector3 &color)
 {
-    uint8_t *rgb_out = (uint8_t *)bvhParams.rgbOutput + pixel_byte_offset;
+    if (pixel_byte_offset < 128 * 128 * 4) {
+        uint8_t *rgb_out = (uint8_t *)bvhParams.rgbOutput + pixel_byte_offset;
 
-    *(rgb_out + 0) = (color.x) * 255;
-    *(rgb_out + 1) = (color.y) * 255;
-    *(rgb_out + 2) = (color.z) * 255;
-    *(rgb_out + 3) = 255;
+        *(rgb_out + 0) = (color.x) * 255;
+        *(rgb_out + 1) = (color.y) * 255;
+        *(rgb_out + 2) = (color.z) * 255;
+        *(rgb_out + 3) = 255;
+    }
 }
 
 static __device__ void writeDepth(uint32_t pixel_byte_offset,
                              float depth)
 {
-    float *depth_out = (float *)
-        ((uint8_t *)bvhParams.depthOutput + pixel_byte_offset);
-    *depth_out = depth;
+    if (pixel_byte_offset < 128 * 128 * 4) {
+        float *depth_out = (float *)
+            ((uint8_t *)bvhParams.depthOutput + pixel_byte_offset);
+        *depth_out = depth;
+    }
 }
 
 extern "C" __global__ void bvhRaycastEntry()
@@ -250,7 +255,7 @@ extern "C" __global__ void bvhRaycastEntry()
     uint32_t current_view_offset = resident_view_offset;
 
     uint32_t bytes_per_view =
-        bvhParams.renderOutputResolution * bvhParams.renderOutputResolution * 4;
+        128 * 128 * 4;
 
     uint32_t num_processed_pixels = 0;
 
@@ -278,7 +283,8 @@ extern "C" __global__ void bvhRaycastEntry()
                 &t, &color, 10000.f);
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
+            (pixel_x + pixel_y * 128);
+
         uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;
 
@@ -307,3 +313,215 @@ extern "C" __global__ void bvhRaycastEntry()
         __syncwarp();
     }
 }
+#else
+
+#define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
+
+#include <madrona/bvh.hpp>
+#include <madrona/mesh_bvh.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
+
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+
+using namespace madrona;
+using namespace madrona::math;
+
+namespace sm {
+// Only shared memory to be used
+extern __shared__ uint8_t buffer[];
+}
+
+extern "C" __constant__ BVHParams bvhParams;
+
+static __device__ math::Vector3 calculateOutRay(
+        render::PerspectiveCameraData *view_data,
+        uint32_t pixel_x, uint32_t pixel_y)
+{
+    math::Quat rot = view_data->rotation;
+    math::Vector3 ray_start = view_data->position;
+    math::Vector3 look_at = rot.inv().rotateVec({0, 1, 0});
+ 
+    // const float h = tanf(theta / 2);
+    const float h = 1.0f / (-view_data->yScale);
+
+    const auto viewport_height = 2 * h;
+    const auto viewport_width = viewport_height;
+    const auto forward = look_at.normalize();
+
+    auto u = rot.inv().rotateVec({1, 0, 0});
+    auto v = cross(forward, u).normalize();
+
+    auto horizontal = u * viewport_width;
+    auto vertical = v * viewport_height;
+
+    auto lower_left_corner = ray_start - horizontal / 2 - vertical / 2 + forward;
+  
+    float pixel_u = ((float)pixel_x + 0.5f) / (float)128;
+    float pixel_v = ((float)pixel_y + 0.5f) / (float)128;
+
+    math::Vector3 ray_dir = lower_left_corner + pixel_u * horizontal + 
+        pixel_v * vertical - ray_start;
+    ray_dir = ray_dir.normalize();
+
+    return ray_dir;
+}
+
+static __device__ void writeRGB(uint32_t pixel_byte_offset,
+                           const math::Vector3 &color)
+{
+    uint8_t *rgb_out = (uint8_t *)bvhParams.rgbOutput + pixel_byte_offset;
+
+    *(rgb_out + 0) = (color.x) * 255;
+    *(rgb_out + 1) = (color.y) * 255;
+    *(rgb_out + 2) = (color.z) * 255;
+    *(rgb_out + 3) = 255;
+}
+
+static __device__ void writeDepth(uint32_t pixel_byte_offset,
+                             float depth)
+{
+    float *depth_out = (float *)
+        ((uint8_t *)bvhParams.depthOutput + pixel_byte_offset);
+    *depth_out = depth;
+}
+
+struct TraceResult {
+    bool hit;
+    Vector3 color;
+    float depth;
+};
+
+static __device__ TraceResult traceRayTLAS(
+        uint32_t world_idx,
+        math::Vector3 ray_o,
+        math::Vector3 ray_d,
+        float t_max)
+{
+    { // Adjust ray direction
+        static constexpr float epsilon = 0.00001f;
+        if (ray_d.x == 0.f) ray_d.x += epsilon;
+        if (ray_d.y == 0.f) ray_d.y += epsilon;
+        if (ray_d.z == 0.f) ray_d.z += epsilon;
+    }
+
+    TraceResult result;
+    result.hit = false;
+
+    TraversalStack stack;
+
+    { // Initialize the stack
+        stack.size = 0;
+        stack.push(1);
+    }
+    
+    // Get some required pointers and info
+    const BVHInternalData *internal_data = bvhParams.internalData;
+    uint32_t internal_nodes_offset = bvhParams.instanceOffsets[world_idx];
+    const QBVHNode *nodes = internal_data->traversalNodes +
+                            internal_nodes_offset;
+    const render::InstanceData *instances = bvhParams.instances + 
+                                            internal_nodes_offset;
+    float near_sphere = bvhParams.nearSphere;
+
+    Diag3x3 inv_ray_d = { 1.f/ray_d.x, 1.f/ray_d.y, 1.f/ray_d.z };
+
+    uint32_t iter = 0;
+    while (stack.size > 0 && iter < 65 && stack.size < 32) {
+        int32_t node_idx = stack.pop() - 1;
+        const QBVHNode *node = &nodes[node_idx];
+
+        for (unsigned int i = 0; i < node->numChildren && i < 8; ++i) {
+            math::AABB child_aabb = node->convertToAABB(i);
+
+            float aabb_hit_t = 0.f, aabb_far_t = 0.f;
+            child_aabb.rayIntersects(ray_o, inv_ray_d,
+                    near_sphere, t_max, aabb_hit_t, aabb_far_t);
+
+            if (aabb_hit_t <= t_max) {
+                if (node->childrenIdx[i] < 0) {
+                    result.hit = true;
+                    result.color = ray_d;
+                    result.depth = 1.f;
+                } else {
+                    stack.push(node->childrenIdx[i]);
+                    // stack.push(1);
+                }
+            }
+        }
+
+        ++iter;
+    }
+
+    return result;
+}
+
+extern "C" __global__ void bvhRaycastEntry()
+{
+    if (!((threadIdx.x == 0 || threadIdx.x == 1) && threadIdx.y == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0)) {
+        return;
+    }
+
+    uint32_t pixels_per_block = blockDim.x;
+
+    const uint32_t total_num_views = bvhParams.internalData->numViews;
+
+    // This is the number of views currently being processed.
+    const uint32_t num_resident_views = gridDim.x;
+
+    // This is the offset into the resident view processors that we are
+    // currently in.
+    const uint32_t resident_view_offset = blockIdx.x;
+
+    uint32_t current_view_offset = resident_view_offset;
+
+    uint32_t bytes_per_view =
+        128 * 128 * 4;
+
+    uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
+    uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
+
+    while (current_view_offset < total_num_views) {
+        // While we still have views to generate, trace.
+        render::PerspectiveCameraData *view_data = 
+            &bvhParams.views[current_view_offset];
+
+        math::Vector3 ray_start = view_data->position;
+        math::Vector3 ray_dir = calculateOutRay(view_data, pixel_x, pixel_y);
+
+        TraceResult trace_res = traceRayTLAS(
+                view_data->worldIDX, ray_start, ray_dir, 
+                // (float)global_pixel_byte_off);
+                10000.f);
+
+        uint32_t linear_pixel_idx = 4 * 
+            (pixel_x + pixel_y * 128);
+
+        // if (current_view_offset == 0) {
+            uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
+                linear_pixel_idx;
+
+            if (bvhParams.raycastRGBD) {
+                // Write both depth and color information
+                if (trace_res.hit) {
+                    writeRGB(global_pixel_byte_off, trace_res.color);
+                    writeDepth(global_pixel_byte_off, trace_res.depth);
+                } else {
+                    writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f });
+                    writeDepth(global_pixel_byte_off, 0.f);
+                }
+            } else {
+                // Only write depth information
+                if (trace_res.hit) {
+                    writeDepth(global_pixel_byte_off, trace_res.depth);
+                } else {
+                    writeDepth(global_pixel_byte_off, 0.f);
+                }
+            }
+        // }
+
+        current_view_offset += num_resident_views;
+
+        // __syncwarp();
+    }
+}
+#endif

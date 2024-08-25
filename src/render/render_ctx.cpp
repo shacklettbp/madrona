@@ -2091,7 +2091,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     desc_updates.push_back({});
     DescHelper::storage(desc_updates[8], aabb_buffer_set, &aabb_set_info, 0);
 
-#if 1
+#if 0
     material_textures_ = loadTextures(dev, alloc, renderQueue, textures);
 
     DynArray<VkDescriptorImageInfo> tx_infos(material_textures_.size()+1);

@@ -56,9 +56,9 @@ set(JOB_SYS_DEVICE_SOURCES
 
 set(BVH_DEVICE_SOURCES
     ${DEVICE_SRC_DIR}/bvh.cpp
-    ${DEVICE_SRC_DIR}/bvh_raycast.cpp
     ${DEVICE_SRC_DIR}/memory.cpp
     ${DEVICE_SRC_DIR}/host_print.cpp
+    ${DEVICE_SRC_DIR}/bvh_raycast.cpp
 )
 
 set(TASK_GRAPH_DEVICE_SOURCES

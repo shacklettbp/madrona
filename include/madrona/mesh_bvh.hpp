@@ -42,7 +42,9 @@ struct TraversalStack {
     // if def for the shared version
     void push(int32_t v)
     {
-        s[size++] = v;
+        if (size < stackSize) {
+            s[size++] = v;
+        }
     }
 
     int32_t pop()

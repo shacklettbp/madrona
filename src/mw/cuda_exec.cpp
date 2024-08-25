@@ -1085,12 +1085,12 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     string gpu_arch_flag = std::string("-arch=") + gpu_arch_str;
 
-    DynArray<const char *> common_compile_flags {
+    std::vector<const char *> common_compile_flags {
         MADRONA_NVRTC_OPTIONS
         "-dlto",
         "-DMADRONA_MWGPU_BVH_MODULE",
         "-arch", gpu_arch_str.c_str(),
-        "-lineinfo"
+        "-lineinfo",
     };
 
     if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
@@ -1118,9 +1118,11 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         fast_compile_flags.push_back(flag);
     }
 
-    DynArray<const char *> compile_flags = std::move(common_compile_flags);
+    std::vector<const char *> compile_flags = std::move(common_compile_flags);
 
     for (uint32_t i = 0; i < bvh_srcs.size(); ++i) {
+        auto cur_compile_flags = compile_flags;
+
         std::ifstream bvh_file_stream(bvh_srcs[i]);
         std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
             std::istreambuf_iterator<char>());
