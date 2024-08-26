@@ -1146,12 +1146,6 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
     HeapArray<char> linked_cubin(cubin_size);
     REQ_NVJITLINK(nvJitLinkGetLinkedCubin(linker, linked_cubin.data()));
 
-    { // Write the cubin
-        FILE *fp = fopen("mybin.bin", "wb");
-        fwrite(linked_cubin.data(), linked_cubin.size(), 1, fp);
-        fclose(fp);
-    }
-
     CUmodule mod;
     REQ_CU(cuModuleLoadData(&mod, linked_cubin.data()));
 
