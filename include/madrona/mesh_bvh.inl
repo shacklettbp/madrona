@@ -110,7 +110,8 @@ void MeshBVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 bool MeshBVH::traceRay(math::Vector3 ray_o,
                        math::Vector3 ray_d,
                        HitInfo *hit_info,
-                       TraversalStack *stack,
+                       int32_t *stack,
+                       int32_t &stack_size,
                        float t_max) const
 {
     using namespace math;
@@ -121,9 +122,9 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
     RayIsectTxfm tri_isect_txfm =
         computeRayIsectTxfm(ray_o, ray_d, inv_d, rootAABB);
 
-    uint32_t previous_stack_size = stack->size;
+    uint32_t previous_stack_size = stack_size;
 
-    stack->push(0);
+    stack[stack_size++] = 0;
 
 #ifdef SHARED_STACK
     const int32_t mwgpu_warp_id = threadIdx.x / 32;
@@ -139,8 +140,8 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
 
     bool ray_hit = false;
 
-    while (stack->size > previous_stack_size) { 
-        int32_t node_idx = stack->pop();
+    while (stack_size > previous_stack_size) { 
+        int32_t node_idx = stack[--stack_size];
         const Node &node = nodes[node_idx];
 
         float rayXInv = copysignf(ray_d.x == 0 ? 1/diveps : 1/ray_d.x,ray_d.x);
@@ -194,7 +195,8 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
                         t_max = hit_info->tHit;
                     }
                 } else {
-                    stack->push(node.children[i]);
+                    // stack->push(node.children[i]);
+                    stack[stack_size++] = node.children[i];
                 }
             }
         }

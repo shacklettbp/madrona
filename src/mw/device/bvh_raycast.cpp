@@ -1,4 +1,4 @@
-#if 0
+#if 1
 #define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
 
 #include <madrona/bvh.hpp>
@@ -101,18 +101,19 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     render::InstanceData *instances = bvhParams.instances + 
                                       internal_nodes_offset;
 
-    TraversalStack stack = {};
 
-    // This starts us at root
-    stack.push(1);
+    int32_t stack[32];
+    int32_t stack_size = 0;
+    stack[stack_size++] = 1;
+
 
     bool ray_hit = false;
 
     MeshBVH::HitInfo closest_hit_info = {};
 
 
-    while (stack.size > 0) {
-        int32_t node_idx = stack.pop() - 1;
+    while (stack_size > 0) {
+        int32_t node_idx = stack[--stack_size] - 1;
         QBVHNode *node = &nodes[node_idx];
 
         for (int i = 0; i < node->numChildren; ++i) {
@@ -158,7 +159,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     MeshBVH::HitInfo hit_info = {};
 
                     bool leaf_hit = model_bvh->traceRay(txfm_ray_o, txfm_ray_d, 
-                            &hit_info, &stack, t_max * t_scale);
+                            &hit_info, stack, stack_size, t_max * t_scale);
 
                     if (leaf_hit) {
                         ray_hit = true;
@@ -176,7 +177,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                         closest_hit_info.bvh = model_bvh;
                     }
                 } else {
-                    stack.push(node->childrenIdx[i]);
+                    // stack.push(node->childrenIdx[i]);
+                    stack[stack_size++] = node->childrenIdx[i];
                 }
             }
         }
@@ -251,14 +253,14 @@ extern "C" __global__ void bvhRaycastEntry()
     uint32_t current_view_offset = resident_view_offset;
 
     uint32_t bytes_per_view =
-        128 * 128 * 4;
+        bvhParams.renderOutputResolution * bvhParams.renderOutputResolution * 4;
 
     uint32_t num_processed_pixels = 0;
 
     uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
     uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
 
-    // while (current_view_offset < total_num_views) {
+    while (current_view_offset < total_num_views) {
         // While we still have views to generate, trace.
         render::PerspectiveCameraData *view_data = 
             &bvhParams.views[current_view_offset];
@@ -274,14 +276,14 @@ extern "C" __global__ void bvhRaycastEntry()
 
         // For now, just hack in a t_max of 10000.
         bool hit = traceRayTLAS(
-                world_idx, /*current_view_offset*/ 0, 
+                world_idx, current_view_offset, 
                 ray_start, ray_dir, 
                 &t, &color, 10000.f);
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_x + pixel_y * 128);
+            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
 
-        uint32_t global_pixel_byte_off = /* current_view_offset */ 0 * bytes_per_view +
+        uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;
 
         if (bvhParams.raycastRGBD) {
@@ -307,7 +309,7 @@ extern "C" __global__ void bvhRaycastEntry()
         num_processed_pixels++;
 
         __syncwarp();
-    // }
+    }
 }
 #else
 
@@ -405,13 +407,22 @@ static __device__ TraceResult traceRayTLAS(
     TraceResult result;
     result.hit = false;
 
+#if 0
+    int32_t stack[32];
+    int32_t stack_size = 0;
+
+    stack[stack_size++] = 1;
+#endif
+
+#if 1
     TraversalStack stack;
+    stack.size = 0;
 
     { // Initialize the stack
-        stack.size = 0;
         stack.push(1);
     }
-    
+#endif
+
     // Get some required pointers and info
     const BVHInternalData *internal_data = bvhParams.internalData;
     uint32_t internal_nodes_offset = bvhParams.instanceOffsets[world_idx];
@@ -424,11 +435,12 @@ static __device__ TraceResult traceRayTLAS(
     Diag3x3 inv_ray_d = { 1.f/ray_d.x, 1.f/ray_d.y, 1.f/ray_d.z };
 
     uint32_t iter = 0;
-    while (stack.size > 0 && iter < 65 && stack.size < 32) {
+    while (stack.size > 0) {
+        // int32_t node_idx = stack[--stack_size] - 1;
         int32_t node_idx = stack.pop() - 1;
         const QBVHNode *node = &nodes[node_idx];
 
-        for (unsigned int i = 0; i < node->numChildren && i < 8; ++i) {
+        for (unsigned int i = 0; i < node->numChildren; ++i) {
             math::AABB child_aabb = node->convertToAABB(i);
 
             float aabb_hit_t = 0.f, aabb_far_t = 0.f;
@@ -441,8 +453,8 @@ static __device__ TraceResult traceRayTLAS(
                     result.color = ray_d;
                     result.depth = 1.f;
                 } else {
+                    // stack[stack_size++] = node->childrenIdx[i];
                     stack.push(node->childrenIdx[i]);
-                    // stack.push(1);
                 }
             }
         }

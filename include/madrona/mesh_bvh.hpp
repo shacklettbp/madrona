@@ -42,9 +42,7 @@ struct TraversalStack {
     // if def for the shared version
     void push(int32_t v)
     {
-        if (size < stackSize) {
-            s[size++] = v;
-        }
+        s[size++] = v;
     }
 
     int32_t pop()
@@ -145,7 +143,8 @@ struct MeshBVH {
     inline bool traceRay(math::Vector3 ray_o,
                          math::Vector3 ray_d,
                          HitInfo *out_hit_info,
-                         TraversalStack *stack,
+                         int32_t *stack,
+                         int32_t &stack_size,
                          float t_max = float(FLT_MAX)) const;
 
     inline float sphereCast(math::Vector3 ray_o,
