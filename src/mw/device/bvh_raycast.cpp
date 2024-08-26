@@ -93,7 +93,6 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
     // internal_nodes_offset contains the offset to instance attached
     // data of world being operated on.
     uint32_t internal_nodes_offset = bvhParams.instanceOffsets[world_idx];
-    uint32_t num_instances = bvhParams.instanceCounts[world_idx];
 
     QBVHNode *nodes = internal_data->traversalNodes +
                       internal_nodes_offset;
@@ -281,7 +280,7 @@ extern "C" __global__ void bvhRaycastEntry()
                 &t, &color, 10000.f);
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
+            (pixel_y + pixel_x * bvhParams.renderOutputResolution);
 
         uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;
