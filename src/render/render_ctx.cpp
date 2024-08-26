@@ -2032,7 +2032,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     }
 
     // DynArray<VkWriteDescriptorSet> desc_updates(9 + (material_textures_.size() > 0 ? 2 : 0));
-    DynArray<VkWriteDescriptorSet> desc_updates(0);
+    DynArray<VkWriteDescriptorSet> desc_updates(100);
 
     VkDescriptorBufferInfo obj_info;
     obj_info.buffer = asset_buffer.buffer;
@@ -2091,7 +2091,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
     desc_updates.push_back({});
     DescHelper::storage(desc_updates[8], aabb_buffer_set, &aabb_set_info, 0);
 
-#if 0
     material_textures_ = loadTextures(dev, alloc, renderQueue, textures);
 
     DynArray<VkDescriptorImageInfo> tx_infos(material_textures_.size()+1);
@@ -2110,7 +2109,6 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         desc_updates.push_back({});
         DescHelper::textures(desc_updates[10], asset_set_tex_compute_, tx_infos.data(), tx_infos.size(), 0);
     }
-#endif
 
     DescHelper::update(dev, desc_updates.data(), desc_updates.size());
 
