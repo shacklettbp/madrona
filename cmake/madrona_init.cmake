@@ -21,6 +21,6 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${MADRONA_DIR}/cmake")
 
 include(build_type)
 
-if (NOT CMAKE_TOOLCHAIN_FILE AND NOT WIN32)
+if (NOT WIN32)
     include("${MADRONA_DIR}/external/madrona-toolchain/cmake/set_toolchain.cmake")
 endif()
