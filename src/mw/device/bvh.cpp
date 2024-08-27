@@ -239,12 +239,6 @@ extern "C" __global__ void bvhInit()
 // 2) Optimize the BVH
 extern "C" __global__ void bvhAllocInternalNodes()
 {
-    bvhParams.timingInfo->timingCounts.store_relaxed(0);
-    bvhParams.timingInfo->tlasTime.store_relaxed(0);
-    bvhParams.timingInfo->blasTime.store_relaxed(0);
-    bvhParams.timingInfo->numTLASTraces.store_relaxed(0);
-    bvhParams.timingInfo->numBLASTraces.store_relaxed(0);
-
     BVHInternalData *internal_data = bvhParams.internalData;
 
     // We need to make sure we have enough internal nodes for the initial
