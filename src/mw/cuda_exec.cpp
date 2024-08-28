@@ -853,7 +853,7 @@ static __attribute__((always_inline)) inline void dispatch(
     DynArray<HeapArray<char>> source_bytecodes(num_sources);
     printf("Compiling GPU engine code:\n");
     for (int64_t i = 0; i < num_sources; i++) {
-        if verbose_compile {
+        if (verbose_compile) {
             printf("%s\n", sources[i]);
         }
         auto [ptx, bytecode] = cu::jitCompileCPPFile(sources[i],
