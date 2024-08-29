@@ -188,23 +188,26 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             int32_t material_idx = 
                 closest_hit_info.bvh->getMaterialIDX(closest_hit_info);
 
-            Material *mat = &bvhParams.materials[material_idx];
+            Vector3 color = Vector3{ 1.f, 1.f, 1.f };
+            if (material_idx != -1) {
+                Material *mat = &bvhParams.materials[material_idx];
 
-            Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
+                color = {mat->color.x, mat->color.y, mat->color.z};
 
-            if (mat->textureIdx != -1) {
-                cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
+                if (mat->textureIdx != -1) {
+                    cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
 
-                float4 sampled_color = tex2D<float4>(*tex,
-                    closest_hit_info.uv.x, closest_hit_info.uv.y);
+                    float4 sampled_color = tex2D<float4>(*tex,
+                            closest_hit_info.uv.x, closest_hit_info.uv.y);
 
-                math::Vector3 tex_color = {sampled_color.x,
-                                           sampled_color.y,
-                                           sampled_color.z};
+                    math::Vector3 tex_color = {sampled_color.x,
+                        sampled_color.y,
+                        sampled_color.z};
 
-                color.x *= tex_color.x;
-                color.y *= tex_color.y;
-                color.z *= tex_color.z;
+                    color.x *= tex_color.x;
+                    color.y *= tex_color.y;
+                    color.z *= tex_color.z;
+                }
             }
 
             *out_color = lighting(color, closest_hit_info.normal, ray_d, 1, 1);
