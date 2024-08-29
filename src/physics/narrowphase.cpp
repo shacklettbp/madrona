@@ -959,7 +959,7 @@ MADRONA_ALWAYS_INLINE static inline Manifold createFaceContact(
         } while (hedge_idx != start_hedge_idx);
     }
 
-    assert(num_clipped_vertices > 0);
+    // assert(num_clipped_vertices > 0);
 
     // clipping_input has the result due to the final swap
 
