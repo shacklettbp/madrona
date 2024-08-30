@@ -219,38 +219,6 @@ inline void exportCountsGPU(Context &ctx,
         bvh_internals->numViews = num_views;
     }
 #endif
-
-
-
-
-#if 0
-    uint32_t *morton_codes = state_mgr->getArchetypeComponent<
-        RenderableArchetype, MortonCode>();
-    
-    WorldID *world_ids = state_mgr->getArchetypeComponent<
-        RenderableArchetype, WorldID>();
-
-    uint32_t current_world = 0;
-    uint32_t current_world_offset = 0;
-
-    for (int i = 0; 
-         i < state_mgr->getArchetypeNumRows<RenderableArchetype>();
-         ++i) {
-        if (world_ids[i].idx != current_world) {
-            current_world = world_ids[i].idx;
-            current_world_offset = i;
-        }
-
-        uint32_t code = morton_codes[i];
-        printf(USHORT_TO_BINARY_PATTERN " ", USHORT_TO_BINARY((code>>16)));
-        printf(USHORT_TO_BINARY_PATTERN " \t", USHORT_TO_BINARY((code)));
-
-        printf("(Leaf node %d)\t %d: (%d)\n", 
-                i - current_world_offset, 
-                world_ids[i].idx, 
-                morton_codes[i]);
-    }
-#endif
 }
 #endif
 
@@ -286,6 +254,9 @@ void registerTypes(ECSRegistry &registry,
 
     registry.registerComponent<RGBOutputBuffer>(rgb_output_bytes);
     registry.registerComponent<DepthOutputBuffer>(depth_output_bytes);
+
+    // Segmask uses same amount of space as RGB buffer.
+    registry.registerComponent<SegmaskOutputBuffer>(rgb_output_bytes);
 
     registry.registerComponent<RenderOutputIndex>();
 

@@ -232,6 +232,7 @@ struct BVHParams {
 
     void *rgbOutput;
     void *depthOutput;
+    void *segmaskOutput;
     uint32_t renderOutputResolution;
 
     // This will render the depth component as well as the RGB component.

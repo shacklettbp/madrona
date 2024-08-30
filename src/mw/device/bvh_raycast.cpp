@@ -68,6 +68,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                                     math::Vector3 ray_d,
                                     float *out_hit_t,
                                     math::Vector3 *out_color,
+                                    int32_t *object_idx,
                                     float t_max)
 {
     static constexpr float epsilon = 0.00001f;
@@ -174,6 +175,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                             closest_hit_info.normal.normalize();
 
                         closest_hit_info.bvh = model_bvh;
+
+                        closest_hit_info.objectIDX = instance_data->objectID;
                     }
                 } else {
                     // stack.push(node->childrenIdx[i]);
@@ -213,7 +216,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
             *out_color = lighting(color, closest_hit_info.normal, ray_d, 1, 1);
         }
         
-        // *out_color = closest_hit_info.normal;
+        *object_idx = closest_hit_info.objectIDX;
         *out_hit_t = t_max;
     }
 
@@ -229,6 +232,14 @@ static __device__ void writeRGB(uint32_t pixel_byte_offset,
     *(rgb_out + 1) = (color.y) * 255;
     *(rgb_out + 2) = (color.z) * 255;
     *(rgb_out + 3) = 255;
+}
+
+static __device__ void writeSegmask(uint32_t pixel_byte_offset,
+                                    int32_t object_id)
+{
+    int32_t *segmask_out = (int32_t *)
+        ((uint8_t *)bvhParams.segmaskOutput + pixel_byte_offset);
+    *segmask_out = object_id;
 }
 
 static __device__ void writeDepth(uint32_t pixel_byte_offset,
@@ -273,14 +284,14 @@ extern "C" __global__ void bvhRaycastEntry()
         math::Vector3 ray_dir = calculateOutRay(view_data, pixel_x, pixel_y);
 
         float t;
-
         math::Vector3 color;
+        int32_t object_idx = -1;
 
         // For now, just hack in a t_max of 10000.
         bool hit = traceRayTLAS(
                 world_idx, current_view_offset, 
                 ray_start, ray_dir, 
-                &t, &color, 10000.f);
+                &t, &color, &object_idx, 10000.f);
 
         uint32_t linear_pixel_idx = 4 * 
             (pixel_y + pixel_x * bvhParams.renderOutputResolution);
@@ -292,9 +303,11 @@ extern "C" __global__ void bvhRaycastEntry()
             // Write both depth and color information
             if (hit) {
                 writeRGB(global_pixel_byte_off, color);
+                writeSegmask(global_pixel_byte_off, object_idx);
                 writeDepth(global_pixel_byte_off, t);
             } else {
                 writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f });
+                writeSegmask(global_pixel_byte_off, -1);
                 writeDepth(global_pixel_byte_off, 0.f);
             }
         } else {

@@ -121,10 +121,9 @@ struct MeshBVH {
         float tHit;
         math::Vector3 normal;
         math::Vector2 uv;
-
         MeshBVH *bvh;
-
         uint32_t leafMaterialIDX;
+        int32_t objectIDX;
     };
 
     template <typename Fn>

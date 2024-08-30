@@ -54,6 +54,7 @@ struct RenderOutputBuffer {
 
 struct RGBOutputBuffer : RenderOutputBuffer {};
 struct DepthOutputBuffer : RenderOutputBuffer {};
+struct SegmaskOutputBuffer : RenderOutputBuffer {};
 
 // Reference to an output
 struct RenderOutputRef {
