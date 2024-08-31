@@ -4,7 +4,7 @@
 namespace madrona {
 namespace rand {
 
-RandKey initKey(uint32_t seed, uint32_t seed_upper)
+constexpr RandKey initKey(uint32_t seed, uint32_t seed_upper)
 {
     return split_i(RandKey { seed, seed_upper }, 0);
 }
@@ -28,7 +28,7 @@ RandKey initKey(uint32_t seed, uint32_t seed_upper)
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-RandKey split_i(RandKey src, uint32_t idx, uint32_t idx_upper)
+constexpr RandKey split_i(RandKey src, uint32_t idx, uint32_t idx_upper)
 {
     // Rotation distances specified by the Threefry2x32 algorithm.
     uint32_t rotations[8] = {13, 15, 26, 6, 17, 29, 16, 24};
@@ -102,17 +102,17 @@ MADRONA_UNROLL
     return out;
 }
 
-uint32_t bits32(RandKey k)
+constexpr uint32_t bits32(RandKey k)
 {
     return k.a ^ k.b;
 }
 
-uint64_t bits64(RandKey k)
+constexpr uint64_t bits64(RandKey k)
 {
     return ((uint64_t)k.b << 32_u64) | (uint64_t)k.a;
 }
 
-int32_t sampleI32(RandKey k, int32_t a, int32_t b)
+constexpr int32_t sampleI32(RandKey k, int32_t a, int32_t b)
 {
     uint32_t s = (uint32_t)(b - a);
 
@@ -158,7 +158,7 @@ int32_t sampleI32(RandKey k, int32_t a, int32_t b)
     return (int32_t)h + a;
 }
 
-int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b)
+constexpr int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b)
 {
     uint32_t s = (uint32_t)(b - a);
     uint32_t x = bits32(k);
@@ -166,12 +166,12 @@ int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b)
     return utils::u32mulhi(x, s);
 }
 
-float sampleUniform(RandKey k)
+constexpr float sampleUniform(RandKey k)
 {
     return bitsToFloat01(bits32(k));
 }
 
-bool sampleBool(RandKey k)
+constexpr bool sampleBool(RandKey k)
 {
     uint32_t bits = bits32(k);
 
@@ -185,7 +185,7 @@ bool sampleBool(RandKey k)
     return (num_set & 1) == 0;
 }
 
-math::Vector2 sample2xUniform(RandKey k)
+constexpr math::Vector2 sample2xUniform(RandKey k)
 {
     return math::Vector2 {
         .x = bitsToFloat01(k.a),
@@ -193,7 +193,7 @@ math::Vector2 sample2xUniform(RandKey k)
     };
 }
 
-float bitsToFloat01(uint32_t rand_bits)
+constexpr float bitsToFloat01(uint32_t rand_bits)
 {
     // This implementation (and the one commented out below), generate random
     // numbers in the interval [0, 1). This is done by randomizing the mantissa

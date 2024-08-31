@@ -13,18 +13,19 @@ struct RandKey {
 
 namespace rand {
 
-inline RandKey initKey(uint32_t seed, uint32_t seed_upper = 0);
-inline RandKey split_i(RandKey src, uint32_t idx, uint32_t idx_upper = 0);
+constexpr inline RandKey initKey(uint32_t seed, uint32_t seed_upper = 0);
+constexpr inline RandKey split_i(
+  RandKey src, uint32_t idx, uint32_t idx_upper = 0);
 
-inline uint32_t bits32(RandKey k);
-inline uint64_t bits64(RandKey k);
+constexpr inline uint32_t bits32(RandKey k);
+constexpr inline uint64_t bits64(RandKey k);
 
-inline int32_t sampleI32(RandKey k, int32_t a, int32_t b);
-inline int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b);
-inline float sampleUniform(RandKey k);
-inline bool sampleBool(RandKey k);
-inline math::Vector2 sample2xUniform(RandKey k);
-inline float bitsToFloat01(uint32_t rand_bits);
+constexpr inline int32_t sampleI32(RandKey k, int32_t a, int32_t b);
+constexpr inline int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b);
+constexpr inline float sampleUniform(RandKey k);
+constexpr inline bool sampleBool(RandKey k);
+constexpr inline math::Vector2 sample2xUniform(RandKey k);
+constexpr inline float bitsToFloat01(uint32_t rand_bits);
 
 
 }
