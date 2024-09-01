@@ -12,6 +12,12 @@
 #include <cstdio>
 #include <cstdlib>
 
+#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
+#include <csignal>
+#elif defined(MADRONA_WINDOWS)
+#include <windows.h>
+#endif
+
 using namespace std;
 
 namespace madrona {
@@ -46,6 +52,19 @@ void fatal(const CrashInfo &crash)
 
     fflush(stderr);
     abort();
+}
+
+void debuggerBreakPoint()
+{
+#if defined(MADRONA_LINUX) || defined(MADRONA_MACOS)
+  signal(SIGTRAP, SIG_IGN);
+  raise(SIGTRAP);
+  signal(SIGTRAP, SIG_DFL);
+#elif defined(MADRONA_WINDOWS)
+  if (IsDebuggerPresent()) {
+    DebugBreak();
+  }
+#endif
 }
 
 }
