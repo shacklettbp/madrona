@@ -126,18 +126,6 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
 
     stack[stack_size++] = 0;
 
-#ifdef SHARED_STACK
-    const int32_t mwgpu_warp_id = threadIdx.x / 32;
-    const int32_t mwgpu_warp_lane = threadIdx.x % 32;
-    const int32_t num_smem_bytes_per_warp =
-        (mwGPU::SharedMemStorage::numBytesPerWarp()/4)*4;
-
-    auto sharedMem = ((char*)shared) + mwgpu_warp_id * num_smem_bytes_per_warp +
-            SHARED_STACK_SIZE * sizeof(int32_t) * mwgpu_warp_lane;
-    int32_t* shared_stack = (int32_t*)sharedMem;
-    shared_stack[0] = 0;
-#endif
-
     bool ray_hit = false;
 
     while (stack_size > previous_stack_size) { 
