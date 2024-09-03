@@ -85,45 +85,61 @@ enum class GroupType : uint8_t {
     None
 };
 
-using NodeGroupEncoded = uint64_t;
+using NodeGroup = uint64_t;
 
-struct NodeGroup {
-    uint32_t nodeIdx;
-    uint8_t presentBits;
-    GroupType type;
-};
-
-static NodeGroupEncoded encodeNodeGroup(
+// Node group just has 8 present bits
+static NodeGroup encodeNodeGroup(
         uint32_t node_idx,
         uint8_t present_bits,
         GroupType type)
 {
     return (uint64_t)node_idx |
            ((uint64_t)present_bits << 32) |
-           ((uint64_t)types << 40;
+           ((uint64_t)types << 62;
 }
 
-static NodeGroup decodeNodeGroup(NodeGroupEncoded code)
+// Triangle group will have more present bits
+static NodeGroup encodeTriangleGroup(
+        uint32_t node_idx,
+        uint32_t present_bits,
+        GroupType type)
 {
-    NodeGroup group = {
-        .nodeIdx = (uint32_t)(code & 0xFFFF'FFFF),
-        .presentBits = (uint8_t)((code >> 32) & 0xFF),
-        .type = (uint8_t)((code >> 40) & 0xFF),
-    };
+    return (uint64_t)node_idx |
+           ((uint64_t)present_bits << 32) |
+           ((uint64_t)types << 62;
+}
 
-    return group;
+static NodeGroup invalidNodeGroup()
+{
+    return encodeNodeGroup(0xFFFF'FFFF, 0, GroupType::None);
 }
 
 static NodeGroup getRootGroup(TraceWorldInfo world_info)
 {
     uint32_t children_count = world_info.nodes[0].numChildren;
     uint8_t present_bits = (uint8_t)((1 << children_count) - 1);
+    return encodeNodeGroup(0, present_bits, GroupType::TopLevel);
+}
 
-    return {
-        .nodeIdx = 0,
-        .presentBits = present_bits,
-        .type = GroupType::TopLevel,
-    };
+static GroupType getGroupType(NodeGroup grp)
+{
+    return (GroupType)((grp >> 62) & 0b11);
+}
+
+static NodeGroup unsetPresentBit(NodeGroup grp, uint32_t idx)
+{
+    grp &= ~(1 << (idx + 32));
+}
+
+static uint32_t getPresentBits(NodeGroup grp);
+{
+    return (uint32_t)((grp >> 32) & 0xFF),
+}
+
+static uint32_t getTrianglesPresentBits(NodeGroup grp);
+{
+    // 24 bits used for triangle presence
+    return (uint32_t)((grp >> 32) & ((1 << 24) - 1)),
 }
 
 static __device__ TraceResult traceRay(
@@ -134,17 +150,18 @@ static __device__ TraceResult traceRay(
         .hit = false
     };
 
-    NodeGroupEncoded stack[64];
+    NodeGroup stack[64];
     uint32_t stack_size = 0;
 
     NodeGroup current_grp = getRootGroup(world_info);
+    NodeGroup triangle_grp = NodeGroup::invalid();
 
     for (;;) {
-        if (current_grp.type != GroupType::Triangle) {
+        if (getGroupType(current_grp) != GroupType::Triangles) {
             // TODO: Make sure to have the node traversal order
             // sorted according to the ray direction.
             // NOTE: This should never underflow
-            uint32_t child_idx = __ffs(current_grp.presentBits) - 1;
+            uint32_t child_idx = __ffs(getPresentBits(current_grp)) - 1;
             current_grp.presentBits &= ~(1 << child_idx);
 
             if (current_grp.presentBits != 0)
@@ -153,6 +170,71 @@ static __device__ TraceResult traceRay(
             // Intersect with the children of the child to get a new node group
             // and calculate the present bits according to which were
             // intersected
+            // TODO: Differentiate between TLAS and BLAS. For now, we are just
+            // rewriting the TLAS tracing code for testing.
+            uint32_t child_node_idx =
+                world_info.nodes[current_grp.nodeIndex].childrenIdx[child_idx];
+            
+            QBVHNode new_current = world_info.nodes[child_node_idx];
+
+            Vector3 dir_quant = {
+                __uint_as_float((node.expX + 127) << 23) * inv_ray_d.d0,
+                __uint_as_float((node.expY + 127) << 23) * inv_ray_d.d1,
+                __uint_as_float((node.expZ + 127) << 23) * inv_ray_d.d2,
+            };
+
+            Vector3 origin_quant = {
+                (node.minPoint.x - trace_info.rayOrigin.x) * inv_ray_d.d0,
+                (node.minPoint.y - trace_info.rayOrigin.y) * inv_ray_d.d1,
+                (node.minPoint.z - trace_info.rayOrigin.z) * inv_ray_d.d2,            
+            };
+
+            uint8_t present_bits = 0;
+
+            for (int i = 0; i < new_current.numChildren; ++i) {
+                Vector3 t_near3 = {
+                    node.qMinX[i] * dir_quant.x + origin_quant.x,
+                    node.qMinY[i] * dir_quant.y + origin_quant.y,
+                    node.qMinZ[i] * dir_quant.z + origin_quant.z,
+                };
+
+                Vector3 t_far3 = {
+                    node.qMaxX[i] * dir_quant.x + origin_quant.x,
+                    node.qMaxY[i] * dir_quant.y + origin_quant.y,
+                    node.qMaxZ[i] * dir_quant.z + origin_quant.z,
+                };
+
+                float t_near = fmaxf(fminf(t_near3.x, t_far3.x), 
+                                     fmaxf(fminf(t_near3.y, t_far3.y),
+                                           fmaxf(fminf(t_near3.z, t_far3.z), 
+                                                 0.f)));
+
+                float t_far = fminf(fmaxf(t_far3.x, t_near3.x), 
+                                    fminf(fmaxf(t_far3.y, t_near3.y),
+                                          fminf(fmaxf(t_far3.z, t_near3.z), 
+                                                trace_info.tMax)));
+
+                if (t_near <= t_far) {
+                    // Intersection has happened, change the current_grp
+                    present_bits |= (1 << i);
+                }
+            }
+
+            current_grp = NodeGroup {
+                .nodeIndex = child_node_idx,
+                .presentBits = present_bits,
+                .type = GroupType::TopLevel
+            };
+
+            // The intersect children might lead to triangles - in which case
+            // we need to fill in triangle_grp
+        } else {
+            triangle_grp = current_grp;
+            current_grp = NodeGroup::invalid();
+        }
+
+        while (getTrianglesPresentBits(triangle_grp) != 0) {
+
         }
     }
 }
