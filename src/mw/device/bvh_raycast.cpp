@@ -78,6 +78,91 @@ struct TraceWorldInfo {
     InstanceData *instances;
 };
 
+enum class GroupType : uint8_t {
+    TopLevel,
+    BottomLevel,
+    Triangles,
+    None
+};
+
+using NodeGroupEncoded = uint64_t;
+
+struct NodeGroup {
+    uint32_t nodeIdx;
+    uint8_t presentBits;
+    GroupType type;
+};
+
+static NodeGroupEncoded encodeNodeGroup(
+        uint32_t node_idx,
+        uint8_t present_bits,
+        GroupType type)
+{
+    return (uint64_t)node_idx |
+           ((uint64_t)present_bits << 32) |
+           ((uint64_t)types << 40;
+}
+
+static NodeGroup decodeNodeGroup(NodeGroupEncoded code)
+{
+    NodeGroup group = {
+        .nodeIdx = (uint32_t)(code & 0xFFFF'FFFF),
+        .presentBits = (uint8_t)((code >> 32) & 0xFF),
+        .type = (uint8_t)((code >> 40) & 0xFF),
+    };
+
+    return group;
+}
+
+static NodeGroup getRootGroup(TraceWorldInfo world_info)
+{
+    uint32_t children_count = world_info.nodes[0].numChildren;
+    uint8_t present_bits = (uint8_t)((1 << children_count) - 1);
+
+    return {
+        .nodeIdx = 0,
+        .presentBits = present_bits,
+        .type = GroupType::TopLevel,
+    };
+}
+
+static __device__ TraceResult traceRay(
+    TraceInfo trace_info,
+    TraceWorldInfo world_info)
+{
+    TraceResult result = {
+        .hit = false
+    };
+
+    NodeGroupEncoded stack[64];
+    uint32_t stack_size = 0;
+
+    NodeGroup current_grp = getRootGroup(world_info);
+
+    for (;;) {
+        if (current_grp.type != GroupType::Triangle) {
+            // TODO: Make sure to have the node traversal order
+            // sorted according to the ray direction.
+            // NOTE: This should never underflow
+            uint32_t child_idx = __ffs(current_grp.presentBits) - 1;
+            current_grp.presentBits &= ~(1 << child_idx);
+
+            if (current_grp.presentBits != 0)
+                stack[stack_size++] = encodeNodeGroup(current_grp);
+
+            // Intersect with the children of the child to get a new node group
+            // and calculate the present bits according to which were
+            // intersected
+        }
+    }
+}
+
+
+
+
+
+
+
 static __device__ TraceResult traceRayTLAS(
         TraceInfo trace_info,
         TraceWorldInfo world_info)
@@ -161,9 +246,6 @@ static __device__ TraceResult traceRayTLAS(
                         continue;
                     }
 
-                    // Ok we are going to just do something stupid.
-                    //
-                    // Also need to bound the mesh bvh trace ray by t_max.
                     Vector3 txfm_ray_o = instance_data->scale.inv() *
                         instance_data->rotation.inv().rotateVec(
                             (trace_info.rayOrigin - instance_data->position));
