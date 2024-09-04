@@ -24,6 +24,9 @@ struct BVHNodeQuantized {
     int8_t expX, expY, expZ;
     uint8_t numChildren;
 
+    // If this is a bottom level BVH node
+    uint8_t triSizes[Width];
+
     // Quantized min and max coordinates of the children
     uint8_t qMinX[Width], qMinY[Width], qMinZ[Width];
     uint8_t qMaxX[Width], qMaxY[Width], qMaxZ[Width];

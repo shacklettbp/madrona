@@ -80,6 +80,7 @@ struct TraceWorldInfo {
 
 enum class GroupType : uint8_t {
     TopLevel,
+    BottomLevelRoot,
     BottomLevel,
     Triangles,
     None
@@ -95,7 +96,7 @@ static NodeGroup encodeNodeGroup(
 {
     return (uint64_t)node_idx |
            ((uint64_t)present_bits << 32) |
-           ((uint64_t)types << 62;
+           ((uint64_t)types << 61;
 }
 
 // Triangle group will have more present bits
@@ -106,7 +107,7 @@ static NodeGroup encodeTriangleGroup(
 {
     return (uint64_t)node_idx |
            ((uint64_t)present_bits << 32) |
-           ((uint64_t)types << 62;
+           ((uint64_t)types << 61;
 }
 
 static NodeGroup invalidNodeGroup()
@@ -123,7 +124,7 @@ static NodeGroup getRootGroup(TraceWorldInfo world_info)
 
 static GroupType getGroupType(NodeGroup grp)
 {
-    return (GroupType)((grp >> 62) & 0b11);
+    return (GroupType)((grp >> 61) & 0b111);
 }
 
 static NodeGroup unsetPresentBit(NodeGroup grp, uint32_t idx)
@@ -142,10 +143,125 @@ static uint32_t getTrianglesPresentBits(NodeGroup grp);
     return (uint32_t)((grp >> 32) & ((1 << 24) - 1)),
 }
 
+static Vector3 getDirQuant(QBVHNode node, Diag3x3 inv_ray_d)
+{
+    return Vector3 {
+        __uint_as_float((node.expX + 127) << 23) * inv_ray_d.d0,
+        __uint_as_float((node.expY + 127) << 23) * inv_ray_d.d1,
+        __uint_as_float((node.expZ + 127) << 23) * inv_ray_d.d2,
+    };
+}
+
+static Vector3 getOriginQuant(QBVHNode node, Diag3x3 inv_ray_d)
+{
+    return Vector3 {
+        (node.minPoint.x - trace_info.rayOrigin.x) * inv_ray_d.d0,
+        (node.minPoint.y - trace_info.rayOrigin.y) * inv_ray_d.d1,
+        (node.minPoint.z - trace_info.rayOrigin.z) * inv_ray_d.d2,            
+    };
+}
+
+static std::pair<float, float> getNearFar(
+        QBVHNode node, uint32_t child_idx,
+        Vector3 dir_quant,
+        Vector3 origin_quant,
+        float t_max)
+{
+    Vector3 t_near3 = {
+        node.qMinX[i] * dir_quant.x + origin_quant.x,
+        node.qMinY[i] * dir_quant.y + origin_quant.y,
+        node.qMinZ[i] * dir_quant.z + origin_quant.z,
+    };
+
+    Vector3 t_far3 = {
+        node.qMaxX[i] * dir_quant.x + origin_quant.x,
+        node.qMaxY[i] * dir_quant.y + origin_quant.y,
+        node.qMaxZ[i] * dir_quant.z + origin_quant.z,
+    };
+
+    float t_near = fmaxf(fminf(t_near3.x, t_far3.x), 
+                         fmaxf(fminf(t_near3.y, t_far3.y),
+                               fmaxf(fminf(t_near3.z, t_far3.z), 
+                                     0.f)));
+
+    float t_far = fminf(fmaxf(t_far3.x, t_near3.x), 
+                        fminf(fmaxf(t_far3.y, t_near3.y),
+                              fminf(fmaxf(t_far3.z, t_near3.z), 
+                                    t_max)));
+
+    return {
+        t_near, t_far
+    };
+}
+
+struct TriangleIsectInfo {
+    // TODO: can reduce register usage by storing kx/y/z in a single int32_t
+    int32_t kx, ky, kz;
+    float Sx, Sy, Sz;
+};
+
+static TriangleIsectInfo computeRayIsectInfo(
+        Vector3 o, Vector3 d,
+        Diag3x3 inv_d)
+{
+    // Woop et al 2013
+    float abs_x = fabsf(d.x);
+    float abs_y = fabsf(d.y);
+    float abs_z = fabsf(d.z);
+
+    int32_t kz;
+    if (abs_x > abs_y && abs_x > abs_z) {
+        kz = 0;
+    } else if (abs_y > abs_z) {
+        kz = 1;
+    } else {
+        kz = 2;
+    }
+
+    int32_t kx = kz + 1;
+    if (kx == 3) {
+        kx = 0;
+    }
+
+    int32_t ky = kx + 1;
+    if (ky == 3) {
+        ky = 0;
+    }
+
+    // swap kx and ky dimensions to preserve winding direction of triangles
+    if (d[kz] < 0.f) {
+        std::swap(kx, ky);
+    }
+
+    // Calculate shear constants
+    float Sx = d[kx] * inv_d[kz];
+    float Sy = d[ky] * inv_d[kz];
+    float Sz = inv_d[kz];
+
+    return {
+        kx, ky, kz,
+        Sx, Sy, Sz
+    };
+}
+
+static bool instanceHasVolume(InstanceData *instance_data)
+{
+    return !(instance_data->scale.d0 == 0.f &&
+             instance_data->scale.d1 == 0.f &&
+             instance_data->scale.d2 == 0.f);
+}
+
 static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
 {
+    // We create these so that we can keep track of the original ray origin,
+    // direction in world space. We will need to transform them when we enter
+    // a bottom level structure.
+    Vector3 ray_o = trace_info.rayOrigin;
+    Vector3 ray_d = trace_info.rayDirection;
+    Diag3x3 inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+
     TraceResult result = {
         .hit = false
     };
@@ -156,16 +272,25 @@ static __device__ TraceResult traceRay(
     NodeGroup current_grp = getRootGroup(world_info);
     NodeGroup triangle_grp = NodeGroup::invalid();
 
+    // Here is some stuff we need to store in case we are now in the bottom
+    // level structure. Need to maintain some extra state unfortunately.
+    TriangleIsectInfo isect_info = {};
+    MeshBVH *current_bvh = nullptr;
+    float t_scale = 1.f;
+
+    QBVHNode *node_buffer = world_info.nodes;
+
     for (;;) {
-        if (getGroupType(current_grp) != GroupType::Triangles) {
+        if (GroupType parent_grp_type = getGroupType(current_grp); 
+                parent_grp_type != GroupType::Triangles) {
             // TODO: Make sure to have the node traversal order
             // sorted according to the ray direction.
             // NOTE: This should never underflow
             uint32_t child_idx = __ffs(getPresentBits(current_grp)) - 1;
-            current_grp.presentBits &= ~(1 << child_idx);
+            current_grp = unsetPresentBit(current_grp, child_idx);
 
-            if (current_grp.presentBits != 0)
-                stack[stack_size++] = encodeNodeGroup(current_grp);
+            if (getPresentBits(current_grp) != 0)
+                stack[stack_size++] = current_grp;
 
             // Intersect with the children of the child to get a new node group
             // and calculate the present bits according to which were
@@ -173,49 +298,48 @@ static __device__ TraceResult traceRay(
             // TODO: Differentiate between TLAS and BLAS. For now, we are just
             // rewriting the TLAS tracing code for testing.
             uint32_t child_node_idx =
-                world_info.nodes[current_grp.nodeIndex].childrenIdx[child_idx];
-            
-            QBVHNode new_current = world_info.nodes[child_node_idx];
+                node_buffer[current_grp & 0xFFFF'FFFF].childrenIdx[child_idx];
+            bool child_is_leaf = (child_node_idx & 0x8000'0000);
 
-            Vector3 dir_quant = {
-                __uint_as_float((node.expX + 127) << 23) * inv_ray_d.d0,
-                __uint_as_float((node.expY + 127) << 23) * inv_ray_d.d1,
-                __uint_as_float((node.expZ + 127) << 23) * inv_ray_d.d2,
-            };
+            if (parent_grp_type == GroupType::TopLevel &&
+                child_is_leaf) {
+                // Need to compute new ray o/d/etc...
+                int32_t instance_idx = (int32_t)(child_node_idx & ~0x8000'0000);
+                InstanceData *instance_data = world_info.instances + 
+                                              instance_idx;
+                current_bvh = bvhParams.bvhs + 
+                              world_info.instances[instance_idx].objectID;
 
-            Vector3 origin_quant = {
-                (node.minPoint.x - trace_info.rayOrigin.x) * inv_ray_d.d0,
-                (node.minPoint.y - trace_info.rayOrigin.y) * inv_ray_d.d1,
-                (node.minPoint.z - trace_info.rayOrigin.z) * inv_ray_d.d2,            
-            };
+                // Should be able to just do a continue in this case - we'll
+                // just resume processing the parent node
+                if (!instanceHasVolume(instance_data))
+                    continue;
+
+                ray_o = instance_data->scale.inv() *
+                    instance_data->rotation.inv().rotateVec(
+                            (ray_o - instance_data->position));
+                ray_d = instance_data->scale.inv() *
+                    instance_data->rotation.inv().rotateVec(
+                            ray_d);
+                t_scale = ray_d.length();
+                ray_d /= t_scale;
+            }
+
+            QBVHNode new_current = node_buffer[child_node_idx];
+
+            Vector3 dir_quant = getDirQuant(new_current, inv_ray_d);
+            Vector3 origin_quant = getOriginQuant(new_current, inv_ray_d);
 
             uint8_t present_bits = 0;
 
             for (int i = 0; i < new_current.numChildren; ++i) {
-                Vector3 t_near3 = {
-                    node.qMinX[i] * dir_quant.x + origin_quant.x,
-                    node.qMinY[i] * dir_quant.y + origin_quant.y,
-                    node.qMinZ[i] * dir_quant.z + origin_quant.z,
-                };
-
-                Vector3 t_far3 = {
-                    node.qMaxX[i] * dir_quant.x + origin_quant.x,
-                    node.qMaxY[i] * dir_quant.y + origin_quant.y,
-                    node.qMaxZ[i] * dir_quant.z + origin_quant.z,
-                };
-
-                float t_near = fmaxf(fminf(t_near3.x, t_far3.x), 
-                                     fmaxf(fminf(t_near3.y, t_far3.y),
-                                           fmaxf(fminf(t_near3.z, t_far3.z), 
-                                                 0.f)));
-
-                float t_far = fminf(fmaxf(t_far3.x, t_near3.x), 
-                                    fminf(fmaxf(t_far3.y, t_near3.y),
-                                          fminf(fmaxf(t_far3.z, t_near3.z), 
-                                                trace_info.tMax)));
+                auto [t_near, t_far] = getNearFar(
+                        new_current, i,
+                        dir_quant,
+                        origin_quant,
+                        trace_info.tMax);
 
                 if (t_near <= t_far) {
-                    // Intersection has happened, change the current_grp
                     present_bits |= (1 << i);
                 }
             }
@@ -234,6 +358,13 @@ static __device__ TraceResult traceRay(
         }
 
         while (getTrianglesPresentBits(triangle_grp) != 0) {
+            // TODO: check active mask against heuristic to exit if not enough
+            // threads are working on this
+
+            uint32_t glob_tri_idx = __ffs(getTrianglePresentBits(triangle_grp)) - 1;
+            uint32_t leaf_idx = tri_idx / MeshBVH::numTrisPerLeaf;
+            uint32_t tri_idx = tri_idx % MeshBVH::numTrisPerLeaf;
+
 
         }
     }
