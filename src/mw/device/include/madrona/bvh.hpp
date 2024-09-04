@@ -105,7 +105,11 @@ struct BVHNodeQuantized {
             ret.qMaxY[i] = ceilf((aabb.pMax.y - root_min.y) / powf(2, ret.expY));
             ret.qMaxZ[i] = ceilf((aabb.pMax.z - root_min.z) / powf(2, ret.expZ));
 
-            ret.childrenIdx[i] = child_indices[i];
+            if (child_indices[i] < 0) {
+                ret.childrenIdx[i] = (-child_indices[i] - 1) | 0x8000'0000;
+            } else {
+                ret.childrenIdx[i] = child_indices[i] - 1;
+            }
         }
 
         return ret;
@@ -113,7 +117,7 @@ struct BVHNodeQuantized {
 };
 
 // The quantized BVH node used currently
-using QBVHNode = BVHNodeQuantized<int16_t, MADRONA_TLAS_WIDTH>;
+using QBVHNode = BVHNodeQuantized<uint32_t, MADRONA_TLAS_WIDTH>;
 
 // This isn't going to be the representation that actually gets traversed
 // through. This is just for construction purposes.

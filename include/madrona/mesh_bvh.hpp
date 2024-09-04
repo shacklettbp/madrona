@@ -130,16 +130,6 @@ struct MeshBVH {
     template <typename Fn>
     void findOverlaps(const math::AABB &aabb, Fn &&fn) const;
 
-#if 0
-    inline bool traceRay(math::Vector3 ray_o,
-                         math::Vector3 ray_d,
-                         float *out_hit_t,
-                         math::Vector3 *out_hit_normal,
-                         void* shared,
-                         TraversalStack *stack,
-                         float t_max = float(FLT_MAX)) const;
-#endif
-
     inline bool traceRay(math::Vector3 ray_o,
                          math::Vector3 ray_d,
                          HitInfo *out_hit_info,
@@ -218,6 +208,7 @@ struct MeshBVH {
                                     math::Vector3 *out_hit_normal) const;
 
     inline uint32_t getMaterialIDX(const HitInfo &info) const;
+    inline uint32_t getMaterialIDX(int32_t mat_idx) const;
 
     Node *nodes;
     LeafMaterial *leafMats;

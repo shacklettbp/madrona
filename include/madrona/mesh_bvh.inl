@@ -366,9 +366,6 @@ bool MeshBVH::traceRayLeaf(int32_t leaf_idx,
     bool hit_tri = false;
     uint32_t hit_tri_idx = 0;
 
-/*#ifdef MADRONA_GPU_MODE
-    mwGPU::HostPrint::log("Testing {}\n",num_tris);
-#endif*/
     for (CountT i = 0; i < num_tris; i++) {
         Vector3 a, b, c;
         Vector2 uva, uvb, uvc;
@@ -404,15 +401,6 @@ bool MeshBVH::traceRayLeaf(int32_t leaf_idx,
         hit_info->uv = realuv;
 
         hit_info->leafMaterialIDX = leaf_idx + hit_tri_idx;
-
-#if 0
-        if (materialIDX == -1) {
-            hit_info->materialIDX =
-                leafMats[leaf_idx + hit_tri_idx].material[0].matIDX;
-        } else {
-            hit_info->materialIDX = materialIDX;
-        }
-#endif
 
         return true;
     } else {
@@ -1120,6 +1108,15 @@ uint32_t MeshBVH::getMaterialIDX(const HitInfo &info) const
 {
     if (materialIDX == -1) {
         return leafMats[info.leafMaterialIDX].material[0].matIDX;
+    } else {
+        return materialIDX;
+    }
+}
+
+uint32_t MeshBVH::getMaterialIDX(int32_t mat_idx) const
+{
+    if (materialIDX == -1) {
+        return leafMats[mat_idx].material[0].matIDX;
     } else {
         return materialIDX;
     }

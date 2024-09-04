@@ -91,7 +91,7 @@ using NodeGroup = uint64_t;
 // Node group just has 8 present bits
 static NodeGroup encodeNodeGroup(
         uint32_t node_idx,
-        uint8_t present_bits,
+        uint32_t present_bits,
         GroupType type)
 {
     return (uint64_t)node_idx |
@@ -251,6 +251,201 @@ static bool instanceHasVolume(InstanceData *instance_data)
              instance_data->scale.d2 == 0.f);
 }
 
+struct TriHitInfo {
+    bool hit;
+
+    float tHit;
+
+    Vector3 normal;
+    Vector2 uv;
+
+    uint32_t leafMaterialIndex;
+
+    MeshBVH *bvh;
+};
+
+struct TriangleFetch {
+    Vector3 a, b, c;
+    Vector2 uva, uvb, uvc;
+};
+
+static TriangleFetch fetchLeafTriangle(int32_t leaf_idx,
+                                       int32_t offset,
+                                       MeshBVH *mesh_bvh)
+{
+    TriangleFetch fetched = {
+        .a = mesh_bvh->vertices[(leaf_idx + offset)*3 + 0].pos,
+        .b = mesh_bvh->vertices[(leaf_idx + offset)*3 + 1].pos,
+        .c = mesh_bvh->vertices[(leaf_idx + offset)*3 + 2].pos,
+        .uva = mesh_bvh->vertices[(leaf_idx + offset)*3 + 0].uv,
+        .uvb = mesh_bvh->vertices[(leaf_idx + offset)*3 + 1].uv,
+        .uvc = mesh_bvh->vertices[(leaf_idx + offset)*3 + 2].uv,
+    };
+
+    return fetched;
+}
+
+static bool rayTriangleIntersection(
+    Vector3 tri_a, Vector3 tri_b, Vector3 tri_c,
+    int32_t kx, int32_t ky, int32_t kz,
+    float Sx, float Sy, float Sz,
+    Vector3 org,
+    float t_max,
+    float *out_hit_t,
+    Vector3 *bary_out,
+    Vector3 *out_hit_normal)
+{
+    // Calculate vertices relative to ray origin
+    const Vector3 A = tri_a - org;
+    const Vector3 B = tri_b - org;
+    const Vector3 C = tri_c - org;
+
+    // Perform shear and scale of vertices
+    const float Ax = fmaf(-Sx, A[kz], A[kx]);
+    const float Ay = fmaf(-Sy, A[kz], A[ky]);
+    const float Bx = fmaf(-Sx, B[kz], B[kx]);
+    const float By = fmaf(-Sy, B[kz], B[ky]);
+    const float Cx = fmaf(-Sx, C[kz], C[kx]);
+    const float Cy = fmaf(-Sy, C[kz], C[ky]);
+
+    // calculate scaled barycentric coordinates
+    float U = fmaf(Cx, By, - Cy * Bx);
+    float V = fmaf(Ax, Cy, - Ay * Cx);
+    float W = fmaf(Bx, Ay, - By * Ax);
+
+    // Perform edge tests
+#ifdef MADRONA_MESHBVH_BACKFACE_CULLING
+    if (U < 0.0f || V < 0.0f || W < 0.0f) {
+        return false;
+    }
+#else
+    if ((U < 0.0f || V < 0.0f || W < 0.0f) &&
+            (U > 0.0f || V > 0.0f || W > 0.0f)) {
+        return false;
+    }
+#endif
+
+    // fallback  to testing against edges using double precision
+    if (U == 0.0f || V == 0.0f || W == 0.0f) [[unlikely]] {
+        double CxBy = (double)Cx * (double)By;
+        double CyBx = (double)Cy * (double)Bx;
+        U = (float)(CxBy - CyBx);
+        double AxCy = (double)Ax * (double)Cy;
+        double AyCx = (double)Ay * (double)Cx;
+        V = (float)(AxCy - AyCx);
+        double BxAy = (double)Bx * (double)Ay;
+        double ByAx = (double)By * (double)Ax;
+        W = (float)(BxAy - ByAx);
+
+        // Perform edge tests
+#ifdef MADRONA_MESHBVH_BACKFACE_CULLING
+        if (U < 0.0f || V < 0.0f || W < 0.0f) {
+            return false;
+        }
+#else
+        if ((U < 0.0f || V < 0.0f || W < 0.0f) &&
+                (U > 0.0f || V > 0.0f || W > 0.0f)) {
+            return false;
+        }
+#endif
+    }
+
+    // Calculate determinant
+    float det = U + V + W;
+    if (det == 0.f) return false;
+
+    // Calculate scaled z-coordinates of vertices and use them to calculate
+    // the hit distance
+    const float Az = Sz * A[kz];
+    const float Bz = Sz * B[kz];
+    const float Cz = Sz * C[kz];
+    const float T = fmaf(U, Az, fmaf(V, Bz, W * Cz));
+
+#ifdef MADRONA_MESHBVH_BACKFACE_CULLING
+    if (T < 0.0f || T > t_max * det) {
+        return false;
+    }
+
+#else
+#ifdef MADRONA_GPU_MODE
+    uint32_t det_sign_mask =
+        __float_as_uint(det) & 0x8000'0000_u32;
+
+    float xor_T = __uint_as_float(
+        __float_as_uint(T) ^ det_sign_mask);
+#else
+    uint32_t det_sign_mask =
+        std::bit_cast<uint32_t>(det) & 0x8000'0000_u32;
+
+    float xor_T = std::bit_cast<float>(
+        std::bit_cast<uint32_t>(T) ^ det_sign_mask);
+#endif
+    
+    float xor_det = copysignf(det, 1.f);
+    if (xor_T < 0.0f || xor_T > t_max * xor_det) {
+        return false;
+    }
+#endif
+
+    // normalize U, V, W, and T
+    const float rcpDet = 1.0f / det;
+
+    *out_hit_t = T * rcpDet;
+    *bary_out = Vector3{U,V,W} * rcpDet;
+
+    // FIXME better way to get geo normal?
+    *out_hit_normal = normalize(cross(B - A, C - A));
+
+    return true;
+}
+
+static TriHitInfo triangleIntersect(int32_t leaf_idx,
+                                    int32_t tri_idx,
+                                    TriangleIsectInfo isect_info,
+                                    Vector3 ray_o,
+                                    float t_max,
+                                    MeshBVH *mesh_bvh)
+{
+    // Woop et al 2013 Watertight Ray/Triangle Intersection
+    Vector3 hit_normal = { 0, 0, 0 };
+    Vector3 baryout = { 0, 0, 0 };
+
+    float hit_t;
+    bool hit_tri = false;
+
+    TriangleFetch fetched = fetchLeafTriangle(
+            leaf_idx, tri_idx, mesh_bvh);
+
+    bool intersects = rayTriangleIntersection(
+            fetched.a, fetched.b, fetched.c,
+            isect_info.kx,  isect_info.ky, isect_info.kz, 
+            isect_info.Sx,  isect_info.Sy, isect_info.Sz, 
+            ray_o,
+            t_max,
+            &hit_t,
+            &baryout,
+            &hit_normal);
+
+    if (intersects) {
+        Vector2 realuv = fetched.uva * baryout.x +
+                         fetched.uvb * baryout.y +
+                         fetched.uvc * baryout.z;
+
+        return {
+            .hit = true,
+            .tHit = hit_t,
+            .normal = hit_normal,
+            .uv = realuv,
+            .leafMaterialIndex = leaf_idx + tri_idx;
+            .bvh = mesh_bvh
+        };
+    } else {
+        return {
+            .hit = false,
+        };
+    }
+}
+
 static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
@@ -261,6 +456,7 @@ static __device__ TraceResult traceRay(
     Vector3 ray_o = trace_info.rayOrigin;
     Vector3 ray_d = trace_info.rayDirection;
     Diag3x3 inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+    float t_max = trace_info.tMax;
 
     TraceResult result = {
         .hit = false
@@ -270,7 +466,7 @@ static __device__ TraceResult traceRay(
     uint32_t stack_size = 0;
 
     NodeGroup current_grp = getRootGroup(world_info);
-    NodeGroup triangle_grp = NodeGroup::invalid();
+    NodeGroup triangle_grp = invalidNodeGroup();
 
     // Here is some stuff we need to store in case we are now in the bottom
     // level structure. Need to maintain some extra state unfortunately.
@@ -279,6 +475,8 @@ static __device__ TraceResult traceRay(
     float t_scale = 1.f;
 
     QBVHNode *node_buffer = world_info.nodes;
+
+    TriHitInfo tri_hit;
 
     for (;;) {
         if (GroupType parent_grp_type = getGroupType(current_grp); 
@@ -301,6 +499,8 @@ static __device__ TraceResult traceRay(
                 node_buffer[current_grp & 0xFFFF'FFFF].childrenIdx[child_idx];
             bool child_is_leaf = (child_node_idx & 0x8000'0000);
 
+            GroupType new_grp_type = GroupType::TopLevel;
+
             if (parent_grp_type == GroupType::TopLevel &&
                 child_is_leaf) {
                 // Need to compute new ray o/d/etc...
@@ -322,7 +522,15 @@ static __device__ TraceResult traceRay(
                     instance_data->rotation.inv().rotateVec(
                             ray_d);
                 t_scale = ray_d.length();
+                t_max *= t_scale;
+
                 ray_d /= t_scale;
+                inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+                isect_info = computeRayIsectInfo(ray_o, ray_d, inv_ray_d);
+
+                new_grp_type = GroupType::BottomLevelRoot;
+            } else if (parent_grp_type == GroupType::BottomLevelRoot) {
+                new_grp_type = GroupType::BottomLevel;
             }
 
             QBVHNode new_current = node_buffer[child_node_idx];
@@ -330,28 +538,40 @@ static __device__ TraceResult traceRay(
             Vector3 dir_quant = getDirQuant(new_current, inv_ray_d);
             Vector3 origin_quant = getOriginQuant(new_current, inv_ray_d);
 
-            uint8_t present_bits = 0;
+            uint32_t grp_present_bits = 0;
+            uint32_t tri_present_bits = 0;
 
             for (int i = 0; i < new_current.numChildren; ++i) {
                 auto [t_near, t_far] = getNearFar(
                         new_current, i,
                         dir_quant,
                         origin_quant,
-                        trace_info.tMax);
+                        t_max);
 
                 if (t_near <= t_far) {
-                    present_bits |= (1 << i);
+                    // If we are in BLAS, check for possible triangles!
+                    if ((new_grp_type == GroupType::BottomLevel ||
+                        new_grp_type == GroupType::BottomLevelRoot) &&
+                            new_current.childrenIdx[i] & 0x8000'0000) {
+                        // Is this child triangles?? It is if this is the leaf
+                        // of a bottom level tree
+                        tri_present_bits |= (((1 << new_current.triSizes[i]) - 1) << 
+                                (MADRONA_BLAS_LEAF_WIDTH * i));
+                    } else {
+                        grp_present_bits |= (1 << i);
+                    }
                 }
             }
 
-            current_grp = NodeGroup {
-                .nodeIndex = child_node_idx,
-                .presentBits = present_bits,
-                .type = GroupType::TopLevel
-            };
+            current_grp = encodeNodeGroup(
+                    child_node_idx, grp_present_bits, new_grp_type);
 
-            // The intersect children might lead to triangles - in which case
-            // we need to fill in triangle_grp
+            if (tri_present_bits) {
+                triangle_grp = encodeNodeGroup(
+                        child_node_idx, tri_present_bits, GroupType::Trianlges);
+            } else {
+                triangle_grp = invalidNodeGroup();
+            }
         } else {
             triangle_grp = current_grp;
             current_grp = NodeGroup::invalid();
@@ -365,9 +585,74 @@ static __device__ TraceResult traceRay(
             uint32_t leaf_idx = tri_idx / MeshBVH::numTrisPerLeaf;
             uint32_t tri_idx = tri_idx % MeshBVH::numTrisPerLeaf;
 
+            TriHitInfo hit_info = triangleIntersect(
+                    leaf_idx, tri_idx, isect_info,
+                    ray_o, t_max);
 
+            if (hit_info.hit) {
+                t_max = hit_info.tHit;
+
+                tri_hit = hit_info;
+            }
+        }
+
+        // If the current node group is empty, make sure to pop something or
+        // break out of the tracing loop
+        if (getPresentBits(current_grp) == 0) {
+            if (stack_size == 0)
+                break; // Break out of tracing loop
+
+            // If we are breaking out of BLAS, reset all the appropriate state.
+            if (getGroupType(current_grp) == GroupType::BottomLevelRoot) {
+                t_max = t_max / t_scale;
+                t_scale = 1.f;
+
+                // Just restore all the trace info.
+                ray_o = trace_info.rayOrigin;
+                ray_d = trace_info.rayDirection;
+                inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+            }
+
+            current_grp = stack[--stack_size];
         }
     }
+
+    if (tri_hit) {
+        tri_hit.tHit = t_max;
+
+        if (bvhParams.raycastRGBD) {
+            int32_t material_idx = tri_hit.bvh->getMaterialIDX(
+                    tri_hit.leafMaterialIndex);
+
+            Material *mat = &bvhParams.materials[material_idx];
+
+            Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
+
+            if (mat->textureIdx != -1) {
+                cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
+
+                float4 sampled_color = tex2D<float4>(*tex,
+                    tri_hit.uv.x, tri_hit.uv.y);
+
+                Vector3 tex_color = { sampled_color.x,
+                                      sampled_color.y,
+                                      sampled_color.z };
+
+                color.x *= tex_color.x;
+                color.y *= tex_color.y;
+                color.z *= tex_color.z;
+            }
+
+            result.color = lighting(
+                    color, tri_hit.normal, 
+                    trace_info.rayDirection, 1, 1);
+        }
+        
+        result.depth = tri_hit.tHit;
+        result.hit = true;
+    }
+
+    return result;
 }
 
 
@@ -588,6 +873,21 @@ extern "C" __global__ void bvhRaycastEntry()
 
         uint32_t internal_nodes_offset = bvhParams.instanceOffsets[world_idx];
 
+        TraceResult result = traceRay(
+            TraceInfo {
+                .rayOrigin = ray_start,
+                .rayDirection = ray_dir,
+                .tMin = bvhParams.nearSphere,
+                .tMax = 10000.f,
+            },
+            TraceWorldInfo {
+                .nodes = bvhParams.internalData->traversalNodes + 
+                         internal_nodes_offset,
+                .instances = bvhParams.instances + internal_nodes_offset
+            }
+        );
+
+#if 0
         TraceResult result = traceRayTLAS(
             TraceInfo {
                 .rayOrigin = ray_start,
@@ -601,6 +901,7 @@ extern "C" __global__ void bvhRaycastEntry()
                 .instances = bvhParams.instances + internal_nodes_offset
             }
         );
+#endif
 
         uint32_t linear_pixel_idx = 4 * 
             (pixel_y + pixel_x * bvhParams.renderOutputResolution);
