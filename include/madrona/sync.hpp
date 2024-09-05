@@ -277,6 +277,16 @@ public:
 #endif
     }
 
+    template <sync::memory_order order>
+    inline T fetch_or(T v) requires std::is_integral_v<T>
+    {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __atomic_fetch_or(addr_, v, OrderMap<order>::builtin);
+#else
+        return ref_.fetch_or(v, order);
+#endif
+    }
+
 private:
     static_assert(sizeof(T) == 4 || sizeof(T) == 8);
     static_assert(std::is_trivially_copyable_v<T>);
