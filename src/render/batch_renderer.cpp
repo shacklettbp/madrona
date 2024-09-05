@@ -1433,6 +1433,15 @@ BatchRenderer::~BatchRenderer()
     }
 
     impl->dev.dt.destroyQueryPool(impl->dev.hdl, impl->timeQueryPool, nullptr);
+
+    float avg_total_time = 0.f;
+
+    for (int i = 0; i < impl->recordedTimings.size(); ++i) {
+        avg_total_time += impl->recordedTimings[i] /
+                          (float)impl->recordedTimings.size();
+    }
+
+    printf("rast avg total time = %f ms\n", avg_total_time);
 }
 
 
