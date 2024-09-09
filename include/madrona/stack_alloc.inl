@@ -1,8 +1,8 @@
 namespace madrona {
 
-StackAlloc::Frame StackAlloc::push()
+AllocFrame StackAlloc::push()
 {
-    return Frame {
+    return AllocFrame {
         cur_chunk_ + chunk_offset_,
     };
 }
@@ -13,7 +13,7 @@ void * StackAlloc::alloc(CountT num_bytes, CountT alignment)
         (CountT)utils::roundUpPow2(chunk_offset_, (uint32_t)alignment);
     CountT new_offset = alloc_offset + num_bytes;
 
-    if (new_offset <= chunk_size_) {
+    if (new_offset <= chunk_size_) [[likely]] {
         void *start = cur_chunk_ + alloc_offset;
         chunk_offset_ = new_offset;
 

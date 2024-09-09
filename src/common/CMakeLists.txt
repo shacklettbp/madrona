@@ -75,10 +75,16 @@ target_link_libraries(madrona_std_mem PRIVATE
     madrona_hdrs madrona_noexceptrtti madrona_libcxx
 )
 
-add_library(madrona_common STATIC
+add_library(madrona_mem STATIC
     ${MADRONA_INC_DIR}/memory.hpp ${MADRONA_INC_DIR}/memory.inl memory.cpp
     ${MADRONA_INC_DIR}/stack_alloc.hpp ${MADRONA_INC_DIR}/stack_alloc.inl
         stack_alloc.cpp
+)
+
+target_link_libraries(madrona_mem PRIVATE
+  madrona_hdrs madrona_libcxx_hdrs madrona_noexceptrtti)
+
+add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/heap_array.hpp
     ${MADRONA_INC_DIR}/span.hpp
     ${MADRONA_INC_DIR}/math.hpp ${MADRONA_INC_DIR}/math.inl
@@ -111,6 +117,7 @@ target_link_libraries(madrona_common
         madrona_err
         madrona_noexceptrtti
         madrona_std_mem
+        madrona_mem
 )
 
 set_property(TARGET madrona_common PROPERTY
