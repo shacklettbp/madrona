@@ -7,6 +7,11 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #include <madrona/mw_gpu/const.hpp>
 
+#if defined (MADRONA_MWGPU_BVH_MODULE)
+#include <madrona/bvh.hpp>
+extern "C" __constant__ madrona::BVHParams bvhParams;
+#endif
+
 namespace madrona {
 namespace mwGPU {
 
@@ -18,7 +23,11 @@ HostPrint::HostPrint(void *channel_raw)
 void HostPrint::logSubmit(const char *str, void **ptrs, FmtType *types,
                           int32_t num_args)
 {
+#if defined (MADRONA_MWGPU_BVH_MODULE)
+    HostPrint *host_print = (HostPrint *)bvhParams.hostPrintAddr;
+#else
     auto host_print = (HostPrint *)GPUImplConsts::get().hostPrintAddr;
+#endif
     host_print->logSubmitImpl(str, ptrs, types, num_args);
 }
 

@@ -20,7 +20,7 @@ using namespace math;
 namespace {
 
 constexpr inline int numTrisPerLeaf = MeshBVH::numTrisPerLeaf;
-constexpr inline uint32_t nodeWidth = MeshBVH::nodeWidth;
+constexpr inline uint32_t nodeWidth = QBVHNode::NodeWidth;
 constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
 
 struct RTC_ALIGN(16) BoundingBox {
@@ -82,14 +82,14 @@ struct Node {
 };
 
 struct InnerNode : public Node {
-    BoundingBox bounds[MeshBVH::nodeWidth];
-    Node* children[MeshBVH::nodeWidth];
+    BoundingBox bounds[QBVHNode::NodeWidth];
+    Node* children[QBVHNode::NodeWidth];
     int numChildren;
     int id = -1;
 
     InnerNode()
     {
-        for(int i=0;i<MeshBVH::nodeWidth;i++){
+        for(int i=0;i<QBVHNode::NodeWidth;i++){
             bounds[i] = {};
             children[i] = nullptr;
         }
@@ -111,7 +111,7 @@ struct InnerNode : public Node {
             0
         };
 
-        for(int i = 0; i < MeshBVH::nodeWidth; i++){
+        for(int i = 0; i < QBVHNode::NodeWidth; i++){
             if(children[i] != nullptr){
                 cost += children[i]->sah() * area(bounds[i]);
                 total = merge(bounds[i],total);
@@ -217,7 +217,7 @@ static void splitPrimitive(const RTCBuildPrimitive* prim,
 MeshBVH MeshBVHBuilder::build(
         Span<const imp::SourceMesh> src_meshes)
 {
-    DynArray<MeshBVH::Node> nodes { 0 };
+    DynArray<QBVHNode> nodes { 0 };
     DynArray<MeshBVH::LeafMaterial> leaf_materials { 0 };
 
     math::AABB aabb_out;
@@ -338,7 +338,7 @@ MeshBVH MeshBVHBuilder::build(
     arguments.byteSize = sizeof(arguments);
     arguments.buildFlags = RTC_BUILD_FLAG_NONE;
     arguments.buildQuality = RTC_BUILD_QUALITY_HIGH;
-    arguments.maxBranchingFactor = MeshBVH::nodeWidth;
+    arguments.maxBranchingFactor = QBVHNode::NodeWidth;
     arguments.maxDepth = 1024;
     arguments.sahBlockSize = 1;
     arguments.minLeafSize = ceil(MeshBVH::numTrisPerLeaf / 2.0);
@@ -382,7 +382,7 @@ MeshBVH MeshBVHBuilder::build(
         stack.pop_back();
         if(!node->isLeaf){
             auto* inner = (InnerNode*)node;
-            for (int i=0;i<MeshBVH::nodeWidth;i++) {
+            for (int i=0;i<QBVHNode::NodeWidth;i++) {
                 if(inner->children[i] != nullptr){
                     stack.push_back(inner->children[i]);
                 }
@@ -430,7 +430,7 @@ MeshBVH MeshBVHBuilder::build(
               maxY = FLT_MIN,
               maxZ = FLT_MIN;
 
-        for(uint32_t i2 = 0; i2 < MeshBVH::nodeWidth; i2++) {
+        for(uint32_t i2 = 0; i2 < QBVHNode::NodeWidth; i2++) {
             if(i2 < leafNodes.size()) {
                 LeafNode *iNode = (LeafNode *) leafNodes[i2];
                 BoundingBox box = iNode->bounds;
@@ -447,18 +447,16 @@ MeshBVH MeshBVHBuilder::build(
         rootMaxY = maxY;
         rootMaxZ = maxZ;
 
-        MeshBVH::Node node;
+        QBVHNode node;
         int8_t ex = ceilf(log2f((maxX-minX) / (powf(2, 8) - 1)));
         int8_t ey = ceilf(log2f((maxY-minY) / (powf(2, 8) - 1)));
         int8_t ez = ceilf(log2f((maxZ-minZ) / (powf(2, 8) - 1)));
         
-        node.minX = minX;
-        node.minY = minY;
-        node.minZ = minZ;
+        node.minPoint = { minX, minY, minZ };
         node.expX = ex;
         node.expY = ey;
         node.expZ = ez;
-        for(uint32_t j = 0; j < MeshBVH::nodeWidth; j++){
+        for(uint32_t j = 0; j < QBVHNode::NodeWidth; j++){
             int32_t child;
             int32_t numTrisInner;
             if(j < leafNodes.size()) {
@@ -476,7 +474,7 @@ MeshBVH MeshBVHBuilder::build(
                 child = sentinel;
                 numTrisInner = 0;
             }
-            node.children[j] = child;
+            node.childrenIdx[j] = child;
 #if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
             node.triSize[j] = numTrisInner;
 #endif
@@ -485,7 +483,7 @@ MeshBVH MeshBVHBuilder::build(
         nodes.push_back(node);
     }
     for(int i = 0; i < innerID; i++){
-        MeshBVH::Node node;
+        QBVHNode node;
         float minX = FLT_MAX,
               minY = FLT_MAX,
               minZ = FLT_MAX,
@@ -493,7 +491,7 @@ MeshBVH MeshBVHBuilder::build(
               maxY = FLT_MIN,
               maxZ = FLT_MIN;
 
-        for(int i2 = 0; i2 < MeshBVH::nodeWidth; i2++){
+        for(int i2 = 0; i2 < QBVHNode::NodeWidth; i2++){
             if(innerNodes[i]->children[i2] != nullptr) {
                 minX = fminf(minX, innerNodes[i]->bounds[i2].lower_x);
                 minY = fminf(minY, innerNodes[i]->bounds[i2].lower_y);
@@ -513,14 +511,11 @@ MeshBVH MeshBVHBuilder::build(
         int8_t ey = ceilf(log2f((maxY-minY)/(powf(2, 8) - 1)));
         int8_t ez = ceilf(log2f((maxZ-minZ)/(powf(2, 8) - 1)));
         //printf("%d,%d,%d\n",ex,ey,ez);
-        node.minX = minX;
-        node.minY = minY;
-        node.minZ = minZ;
+        node.minPoint = { minX, minY, minZ };
         node.expX = ex;
         node.expY = ey;
         node.expZ = ez;
-        node.parentID = -1;
-        for (int i2 = 0; i2 < MeshBVH::nodeWidth; i2++) {
+        for (int i2 = 0; i2 < QBVHNode::NodeWidth; i2++) {
             node.qMinX[i2] = floorf((innerNodes[i]->bounds[i2].lower_x - minX) / powf(2, ex));
             node.qMinY[i2] = floorf((innerNodes[i]->bounds[i2].lower_y - minY) / powf(2, ey));
             node.qMinZ[i2] = floorf((innerNodes[i]->bounds[i2].lower_z - minZ) / powf(2, ez));
@@ -529,7 +524,7 @@ MeshBVH MeshBVHBuilder::build(
             node.qMaxZ[i2] = ceilf((innerNodes[i]->bounds[i2].upper_z - minZ) / powf(2, ez));
         }
 
-        for (int j = 0; j < MeshBVH::nodeWidth; j++){
+        for (int j = 0; j < QBVHNode::NodeWidth; j++){
             int32_t child;
             int32_t triSize;
             if (j < innerNodes[i]->numChildren) {
@@ -547,7 +542,7 @@ MeshBVH MeshBVHBuilder::build(
                 child = sentinel;
                 triSize = 0;
             }
-            node.children[j] = child;
+            node.childrenIdx[j] = child;
 #if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
             node.triSize[j] = triSize;
 #endif
@@ -559,14 +554,14 @@ MeshBVH MeshBVHBuilder::build(
 
     // Create root AABB
     madrona::math::AABB merged = {
-        .pMin = { root_node->minX, root_node->minY, root_node->minZ},
+        .pMin = root_node->minPoint,
         .pMax = { rootMaxX, rootMaxY, rootMaxZ },
     };
 
     aabb_out = merged;
 #else
     if(innerID == 0){
-        MeshBVH::Node node;
+        QBVHNode node;
         for(int j = 0; j < nodeWidth; j++){
             int32_t child;
             if(j < leafNodes.size()) {
@@ -588,7 +583,7 @@ MeshBVH MeshBVHBuilder::build(
     }
 
     for(int i = 0; i < innerID; i++){
-        MeshBVH::Node node;
+        QBVHNode node;
         node.parentID = -1;
         for (int i2 = 0; i2 < nodeWidth; i2++){
             BoundingBox box = innerNodes[i]->bounds[i2];

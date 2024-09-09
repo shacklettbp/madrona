@@ -6,7 +6,7 @@
 namespace madrona::render {
 
 struct MeshBVHData {
-    MeshBVH::Node *nodes;
+    QBVHNode *nodes;
     uint64_t numNodes;
 
     MeshBVH::LeafMaterial *leafMaterial;

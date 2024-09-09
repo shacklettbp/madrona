@@ -15,37 +15,6 @@ constexpr int SHARED_STACK_SIZE = 6;
     #define STACK_PUSH(X) { stack[stack_size++] = X; }
 #endif
 
-
-bool MeshBVH::Node::isLeaf(madrona::CountT child) const
-{
-    return children[child] & 0x80000000;
-}
-
-int32_t MeshBVH::Node::leafIDX(madrona::CountT child) const
-{
-    return children[child] & ~0x80000000;
-}
-
-void MeshBVH::Node::setLeaf(madrona::CountT child, int32_t idx)
-{
-    children[child] = 0x80000000 | idx;
-}
-
-void MeshBVH::Node::setInternal(madrona::CountT child, int32_t internal_idx)
-{
-    children[child] = internal_idx;
-}
-
-bool MeshBVH::Node::hasChild(madrona::CountT child) const
-{
-    return children[child] != sentinel;
-}
-
-void MeshBVH::Node::clearChild(madrona::CountT child)
-{
-    children[child] = sentinel;
-}
-
 template <typename Fn>
 void MeshBVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 {
@@ -57,8 +26,8 @@ void MeshBVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 
     while (stack_size > 0) {
         int32_t node_idx = stack[--stack_size];
-        const Node &node = nodes[node_idx];
-        for (int32_t i = 0; i < MeshBVH::nodeWidth; i++) {
+        const QBVHNode &node = nodes[node_idx];
+        for (int32_t i = 0; i < QBVHNode::NodeWidth; i++) {
             if (!node.hasChild(i)) {
                 continue; // Technically this could be break?
             };
@@ -72,14 +41,14 @@ void MeshBVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
 
             math::AABB child_aabb {
                 .pMin = {
-                    node.minX + U32TOFLOAT((node.expX + 127) << 23) * node.qMinX[i],
-                    node.minY + U32TOFLOAT((node.expY + 127) << 23) * node.qMinY[i],
-                    node.minZ + U32TOFLOAT((node.expZ + 127) << 23) * node.qMinZ[i],
+                    node.minPoint.x + U32TOFLOAT((node.expX + 127) << 23) * node.qMinX[i],
+                    node.minPoint.y + U32TOFLOAT((node.expY + 127) << 23) * node.qMinY[i],
+                    node.minPoint.z + U32TOFLOAT((node.expZ + 127) << 23) * node.qMinZ[i],
                 },
                 .pMax = {
-                    node.minX + U32TOFLOAT((node.expX + 127) << 23) * node.qMaxX[i],
-                    node.minY + U32TOFLOAT((node.expY + 127) << 23) * node.qMaxY[i],
-                    node.minZ + U32TOFLOAT((node.expZ + 127) << 23) * node.qMaxZ[i],
+                    node.minPoint.x + U32TOFLOAT((node.expX + 127) << 23) * node.qMaxX[i],
+                    node.minPoint.y + U32TOFLOAT((node.expY + 127) << 23) * node.qMaxY[i],
+                    node.minPoint.z + U32TOFLOAT((node.expZ + 127) << 23) * node.qMaxZ[i],
                 },
             };
 #undef U32TOFLOAT
@@ -100,7 +69,7 @@ void MeshBVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
                     }
                 } else {
                     // assert(stack_size < 32);
-                    stack[stack_size++] = node.children[i];
+                    stack[stack_size++] = node.childrenIdx[i];
                 }
             }
         }
@@ -122,7 +91,7 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
     RayIsectTxfm tri_isect_txfm =
         computeRayIsectTxfm(ray_o, ray_d, inv_d, rootAABB);
 
-    uint32_t previous_stack_size = stack_size;
+    int32_t previous_stack_size = stack_size;
 
     stack[stack_size++] = 0;
 
@@ -130,7 +99,7 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
 
     while (stack_size > previous_stack_size) { 
         int32_t node_idx = stack[--stack_size];
-        const Node &node = nodes[node_idx];
+        const QBVHNode &node = nodes[node_idx];
 
         float rayXInv = copysignf(ray_d.x == 0 ? 1/diveps : 1/ray_d.x,ray_d.x);
         float rayYInv = copysignf(ray_d.y == 0 ? 1/diveps : 1/ray_d.y,ray_d.y);
@@ -147,9 +116,9 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
         float dirQuantZ = std::bit_cast<float>((node.expZ + 127) << 23) * rayZInv;
 #endif
 
-        float originQuantX = (node.minX - ray_o.x) * rayXInv;
-        float originQuantY = (node.minY - ray_o.y) * rayYInv;
-        float originQuantZ = (node.minZ - ray_o.z) * rayZInv;
+        float originQuantX = (node.minPoint.x - ray_o.x) * rayXInv;
+        float originQuantY = (node.minPoint.y - ray_o.y) * rayYInv;
+        float originQuantZ = (node.minPoint.z - ray_o.z) * rayZInv;
 
         for (CountT i = 0; i < MeshBVH::nodeWidth; i++) {
             if (!node.hasChild(i)) {
@@ -184,7 +153,7 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
                     }
                 } else {
                     // stack->push(node.children[i]);
-                    stack[stack_size++] = node.children[i];
+                    stack[stack_size++] = node.childrenIdx[i];
                 }
             }
         }
@@ -234,7 +203,7 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
 
     while (stack->size > previous_stack_size) { 
         int32_t node_idx = stack->pop();
-        const Node &node = nodes[node_idx];
+        const QBVHNode &node = nodes[node_idx];
 
         float rayXInv = copysignf(ray_d.x == 0 ? 1/diveps : 1/ray_d.x,ray_d.x);
         float rayYInv = copysignf(ray_d.y == 0 ? 1/diveps : 1/ray_d.y,ray_d.y);
@@ -331,7 +300,7 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
                     }
                 } else {
                     // assert(stack->size < 32);
-                    stack->push(node.children[i]);
+                    stack->push(node.childrenIdx[i]);
                 }
             }
         }
@@ -737,7 +706,7 @@ float MeshBVH::sphereCast(math::Vector3 ray_o,
     float hit_t = t_max;
     while (stack_size > 0) { 
         int32_t node_idx = stack[--stack_size];
-        const Node &node = nodes[node_idx];
+        const QBVHNode &node = nodes[node_idx];
         MADRONA_UNROLL
         for (CountT i = 0; i < (CountT)MeshBVH::nodeWidth; i++) {
             if (!node.hasChild(i)) {
@@ -752,14 +721,14 @@ float MeshBVH::sphereCast(math::Vector3 ray_o,
 
             math::AABB child_aabb {
                 .pMin = {
-                    node.minX + U32TOFLOAT(((uint32_t)node.expX + 127) << 23) * node.qMinX[i],
-                    node.minY + U32TOFLOAT(((uint32_t)node.expY + 127) << 23) * node.qMinY[i],
-                    node.minZ + U32TOFLOAT(((uint32_t)node.expZ + 127) << 23) * node.qMinZ[i],
+                    node.minPoint.x + U32TOFLOAT(((uint32_t)node.expX + 127) << 23) * node.qMinX[i],
+                    node.minPoint.y + U32TOFLOAT(((uint32_t)node.expY + 127) << 23) * node.qMinY[i],
+                    node.minPoint.z + U32TOFLOAT(((uint32_t)node.expZ + 127) << 23) * node.qMinZ[i],
                 },
                 .pMax = {
-                    node.minX + U32TOFLOAT(((uint32_t)node.expX + 127) << 23) * node.qMaxX[i],
-                    node.minY + U32TOFLOAT(((uint32_t)node.expY + 127) << 23) * node.qMaxY[i],
-                    node.minZ + U32TOFLOAT(((uint32_t)node.expZ + 127) << 23) * node.qMaxZ[i],
+                    node.minPoint.x + U32TOFLOAT(((uint32_t)node.expX + 127) << 23) * node.qMaxX[i],
+                    node.minPoint.y + U32TOFLOAT(((uint32_t)node.expY + 127) << 23) * node.qMaxY[i],
+                    node.minPoint.z + U32TOFLOAT(((uint32_t)node.expZ + 127) << 23) * node.qMaxZ[i],
                 },
             };
 
@@ -779,7 +748,7 @@ float MeshBVH::sphereCast(math::Vector3 ray_o,
                     }
                 } else {
                     // assert(stack_size < 32);
-                    stack[stack_size++] = node.children[i];
+                    stack[stack_size++] = node.childrenIdx[i];
                 }
             }
         }

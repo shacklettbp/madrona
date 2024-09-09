@@ -96,18 +96,7 @@ static NodeGroup encodeNodeGroup(
 {
     return (uint64_t)node_idx |
            ((uint64_t)present_bits << 32) |
-           ((uint64_t)types << 61;
-}
-
-// Triangle group will have more present bits
-static NodeGroup encodeTriangleGroup(
-        uint32_t node_idx,
-        uint32_t present_bits,
-        GroupType type)
-{
-    return (uint64_t)node_idx |
-           ((uint64_t)present_bits << 32) |
-           ((uint64_t)types << 61;
+           ((uint64_t)type << 61);
 }
 
 static NodeGroup invalidNodeGroup()
@@ -130,17 +119,18 @@ static GroupType getGroupType(NodeGroup grp)
 static NodeGroup unsetPresentBit(NodeGroup grp, uint32_t idx)
 {
     grp &= ~(1 << (idx + 32));
+    return grp;
 }
 
-static uint32_t getPresentBits(NodeGroup grp);
+static uint32_t getPresentBits(NodeGroup grp)
 {
-    return (uint32_t)((grp >> 32) & 0xFF),
+    return (uint32_t)((grp >> 32) & 0xFF);
 }
 
-static uint32_t getTrianglesPresentBits(NodeGroup grp);
+static uint32_t getTrianglePresentBits(NodeGroup grp)
 {
     // 24 bits used for triangle presence
-    return (uint32_t)((grp >> 32) & ((1 << 24) - 1)),
+    return (uint32_t)((grp >> 32) & ((1 << 24) - 1));
 }
 
 static Vector3 getDirQuant(QBVHNode node, Diag3x3 inv_ray_d)
@@ -152,31 +142,32 @@ static Vector3 getDirQuant(QBVHNode node, Diag3x3 inv_ray_d)
     };
 }
 
-static Vector3 getOriginQuant(QBVHNode node, Diag3x3 inv_ray_d)
+static Vector3 getOriginQuant(QBVHNode node, Vector3 ray_o, Diag3x3 inv_ray_d)
 {
     return Vector3 {
-        (node.minPoint.x - trace_info.rayOrigin.x) * inv_ray_d.d0,
-        (node.minPoint.y - trace_info.rayOrigin.y) * inv_ray_d.d1,
-        (node.minPoint.z - trace_info.rayOrigin.z) * inv_ray_d.d2,            
+        (node.minPoint.x - ray_o.x) * inv_ray_d.d0,
+        (node.minPoint.y - ray_o.y) * inv_ray_d.d1,
+        (node.minPoint.z - ray_o.z) * inv_ray_d.d2,            
     };
 }
 
 static std::pair<float, float> getNearFar(
-        QBVHNode node, uint32_t child_idx,
+        QBVHNode node, 
+        uint32_t child_idx,
         Vector3 dir_quant,
         Vector3 origin_quant,
         float t_max)
 {
     Vector3 t_near3 = {
-        node.qMinX[i] * dir_quant.x + origin_quant.x,
-        node.qMinY[i] * dir_quant.y + origin_quant.y,
-        node.qMinZ[i] * dir_quant.z + origin_quant.z,
+        node.qMinX[child_idx] * dir_quant.x + origin_quant.x,
+        node.qMinY[child_idx] * dir_quant.y + origin_quant.y,
+        node.qMinZ[child_idx] * dir_quant.z + origin_quant.z,
     };
 
     Vector3 t_far3 = {
-        node.qMaxX[i] * dir_quant.x + origin_quant.x,
-        node.qMaxY[i] * dir_quant.y + origin_quant.y,
-        node.qMaxZ[i] * dir_quant.z + origin_quant.z,
+        node.qMaxX[child_idx] * dir_quant.x + origin_quant.x,
+        node.qMaxY[child_idx] * dir_quant.y + origin_quant.y,
+        node.qMaxZ[child_idx] * dir_quant.z + origin_quant.z,
     };
 
     float t_near = fmaxf(fminf(t_near3.x, t_far3.x), 
@@ -411,7 +402,6 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
     Vector3 baryout = { 0, 0, 0 };
 
     float hit_t;
-    bool hit_tri = false;
 
     TriangleFetch fetched = fetchLeafTriangle(
             leaf_idx, tri_idx, mesh_bvh);
@@ -436,8 +426,8 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
             .tHit = hit_t,
             .normal = hit_normal,
             .uv = realuv,
-            .leafMaterialIndex = leaf_idx + tri_idx;
-            .bvh = mesh_bvh
+            .leafMaterialIndex = (uint32_t)(leaf_idx + tri_idx),
+            .bvh = mesh_bvh,
         };
     } else {
         return {
@@ -487,8 +477,9 @@ static __device__ TraceResult traceRay(
             uint32_t child_idx = __ffs(getPresentBits(current_grp)) - 1;
             current_grp = unsetPresentBit(current_grp, child_idx);
 
-            if (getPresentBits(current_grp) != 0)
+            if (getPresentBits(current_grp) != 0) {
                 stack[stack_size++] = current_grp;
+            }
 
             // Intersect with the children of the child to get a new node group
             // and calculate the present bits according to which were
@@ -528,6 +519,8 @@ static __device__ TraceResult traceRay(
                 inv_ray_d = Diag3x3::fromVec(ray_d).inv();
                 isect_info = computeRayIsectInfo(ray_o, ray_d, inv_ray_d);
 
+                node_buffer = current_bvh->nodes;
+
                 new_grp_type = GroupType::BottomLevelRoot;
             } else if (parent_grp_type == GroupType::BottomLevelRoot) {
                 new_grp_type = GroupType::BottomLevel;
@@ -536,7 +529,7 @@ static __device__ TraceResult traceRay(
             QBVHNode new_current = node_buffer[child_node_idx];
 
             Vector3 dir_quant = getDirQuant(new_current, inv_ray_d);
-            Vector3 origin_quant = getOriginQuant(new_current, inv_ray_d);
+            Vector3 origin_quant = getOriginQuant(new_current, ray_o, inv_ray_d);
 
             uint32_t grp_present_bits = 0;
             uint32_t tri_present_bits = 0;
@@ -555,7 +548,7 @@ static __device__ TraceResult traceRay(
                             new_current.childrenIdx[i] & 0x8000'0000) {
                         // Is this child triangles?? It is if this is the leaf
                         // of a bottom level tree
-                        tri_present_bits |= (((1 << new_current.triSizes[i]) - 1) << 
+                        tri_present_bits |= (((1 << new_current.triSize[i]) - 1) << 
                                 (MADRONA_BLAS_LEAF_WIDTH * i));
                     } else {
                         grp_present_bits |= (1 << i);
@@ -568,26 +561,33 @@ static __device__ TraceResult traceRay(
 
             if (tri_present_bits) {
                 triangle_grp = encodeNodeGroup(
-                        child_node_idx, tri_present_bits, GroupType::Trianlges);
+                        child_node_idx, tri_present_bits, GroupType::Triangles);
             } else {
                 triangle_grp = invalidNodeGroup();
             }
         } else {
             triangle_grp = current_grp;
-            current_grp = NodeGroup::invalid();
+            current_grp = invalidNodeGroup();
         }
 
-        while (getTrianglesPresentBits(triangle_grp) != 0) {
+        while (getTrianglePresentBits(triangle_grp) != 0) {
             // TODO: check active mask against heuristic to exit if not enough
             // threads are working on this
 
-            uint32_t glob_tri_idx = __ffs(getTrianglePresentBits(triangle_grp)) - 1;
-            uint32_t leaf_idx = tri_idx / MeshBVH::numTrisPerLeaf;
-            uint32_t tri_idx = tri_idx % MeshBVH::numTrisPerLeaf;
+            uint32_t node_tri_idx = __ffs(getTrianglePresentBits(triangle_grp)) - 1;
+            uint32_t leaf_idx = node_tri_idx / MeshBVH::numTrisPerLeaf;
+            uint32_t tri_idx = node_tri_idx % MeshBVH::numTrisPerLeaf;
+
+            uint32_t glob_offset = 
+                ((triangle_grp & 0xFFFF'FFFF) & ~0x8000'000);
 
             TriHitInfo hit_info = triangleIntersect(
-                    leaf_idx, tri_idx, isect_info,
-                    ray_o, t_max);
+                    glob_offset + leaf_idx,
+                    tri_idx,
+                    isect_info,
+                    ray_o,
+                    t_max,
+                    current_bvh);
 
             if (hit_info.hit) {
                 t_max = hit_info.tHit;
@@ -611,13 +611,16 @@ static __device__ TraceResult traceRay(
                 ray_o = trace_info.rayOrigin;
                 ray_d = trace_info.rayDirection;
                 inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+
+                node_buffer = world_info.nodes;
             }
 
+            printf("popping! %d\n", stack_size);
             current_grp = stack[--stack_size];
         }
     }
 
-    if (tri_hit) {
+    if (tri_hit.hit) {
         tri_hit.tHit = t_max;
 
         if (bvhParams.raycastRGBD) {
@@ -661,6 +664,7 @@ static __device__ TraceResult traceRay(
 
 
 
+#if 0
 static __device__ TraceResult traceRayTLAS(
         TraceInfo trace_info,
         TraceWorldInfo world_info)
@@ -818,6 +822,7 @@ static __device__ TraceResult traceRayTLAS(
 
     return result;
 }
+#endif
 
 static __device__ void writeRGB(uint32_t pixel_byte_offset,
                            const Vector3 &color)
@@ -860,6 +865,11 @@ extern "C" __global__ void bvhRaycastEntry()
 
     uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
     uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
+
+#if 0
+    if (pixel_x != 0 || pixel_y != 0)
+        return;
+#endif
 
     while (current_view_offset < total_num_views) {
         // While we still have views to generate, trace.

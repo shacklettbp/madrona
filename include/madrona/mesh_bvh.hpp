@@ -19,6 +19,127 @@
 
 namespace madrona {
 
+// This is the structure of the node which is just used for traversal
+template <typename NodeIndex, int Width>
+struct BVHNodeQuantized {
+    using BVHNodeT = BVHNodeQuantized<NodeIndex, Width>;
+    using NodeIndexT = NodeIndex;
+    
+    static constexpr int NodeWidth = Width;
+
+    math::Vector3 minPoint;
+
+    int8_t expX, expY, expZ;
+    uint8_t numChildren;
+
+    // If this is a bottom level BVH node
+    uint8_t triSize[Width];
+
+    // Quantized min and max coordinates of the children
+    uint8_t qMinX[Width], qMinY[Width], qMinZ[Width];
+    uint8_t qMaxX[Width], qMaxY[Width], qMaxZ[Width];
+
+    // We don't need to store the parent.
+    // If the child is an internal node, it will be positive.
+    // If the child is a leaf node, it will be negative and store
+    // the instance index.
+    //
+    // NOTE: 0 is reserved for invalid nodes and also removes the ambiguity
+    // between 0th leaf node and 0th internal node.
+    NodeIndex childrenIdx[Width];
+
+    math::AABB convertToAABB(uint32_t child_idx) const
+    {
+        auto to_float = [](uint32_t data) -> float {
+            return *((float *)&data);
+        };
+
+        return math::AABB {
+            .pMin = {
+                minPoint.x + to_float((expX + 127) << 23) * qMinX[child_idx],
+                minPoint.y + to_float((expY + 127) << 23) * qMinY[child_idx],
+                minPoint.z + to_float((expZ + 127) << 23) * qMinZ[child_idx],
+            },
+
+            .pMax = {
+                minPoint.x + to_float((expX + 127) << 23) * qMaxX[child_idx],
+                minPoint.y + to_float((expY + 127) << 23) * qMaxY[child_idx],
+                minPoint.z + to_float((expZ + 127) << 23) * qMaxZ[child_idx],
+            },
+        };
+    }
+
+    static BVHNodeT construct(uint32_t num_children,
+                              math::AABB *child_aabbs,
+                              int32_t *child_indices)
+    {
+        math::Vector3 root_min = child_aabbs[0].pMin,
+                      root_max = child_aabbs[0].pMax;
+
+        // Get the bounds of the parent of the given children
+        for (uint32_t i = 1; i < num_children; ++i) {
+            math::AABB &aabb = child_aabbs[i];
+
+            root_min.x = fminf(root_min.x, aabb.pMin.x);
+            root_min.y = fminf(root_min.y, aabb.pMin.y);
+            root_min.z = fminf(root_min.z, aabb.pMin.z);
+
+            root_max.x = fmaxf(root_max.x, aabb.pMax.x);
+            root_max.y = fmaxf(root_max.y, aabb.pMax.y);
+            root_max.z = fmaxf(root_max.z, aabb.pMax.z);
+        }
+
+        math::Vector3 root_extent = root_max - root_min;
+
+        BVHNodeT ret = {
+            .minPoint = root_min,
+            .expX = (int8_t)ceilf(log2f(root_extent.x / (powf(2.f, 8.f) - 1.f))),
+            .expY = (int8_t)ceilf(log2f(root_extent.y / (powf(2.f, 8.f) - 1.f))),
+            .expZ = (int8_t)ceilf(log2f(root_extent.z / (powf(2.f, 8.f) - 1.f))),
+            .numChildren = (uint8_t)num_children
+        };
+
+        for (int i = 0; i < num_children; ++i) {
+            // Quantize the AABB of the child
+            math::AABB &aabb = child_aabbs[i];
+
+            ret.qMinX[i] = floorf((aabb.pMin.x - root_min.x) / powf(2, ret.expX));
+            ret.qMinY[i] = floorf((aabb.pMin.y - root_min.y) / powf(2, ret.expY));
+            ret.qMinZ[i] = floorf((aabb.pMin.z - root_min.z) / powf(2, ret.expZ));
+
+            ret.qMaxX[i] = ceilf((aabb.pMax.x - root_min.x) / powf(2, ret.expX));
+            ret.qMaxY[i] = ceilf((aabb.pMax.y - root_min.y) / powf(2, ret.expY));
+            ret.qMaxZ[i] = ceilf((aabb.pMax.z - root_min.z) / powf(2, ret.expZ));
+
+            if (child_indices[i] < 0) {
+                ret.childrenIdx[i] = (-child_indices[i] - 1) | 0x8000'0000;
+            } else {
+                ret.childrenIdx[i] = child_indices[i] - 1;
+            }
+        }
+
+        return ret;
+    }
+
+    bool hasChild(uint32_t i) const
+    {
+        return childrenIdx[i] != 0xFFFF'FFFF;
+    }
+
+    bool isLeaf(uint32_t i) const
+    {
+        return childrenIdx[i] & 0x8000'0000;
+    }
+
+    uint32_t leafIDX(uint32_t i) const
+    {
+        return childrenIdx[i] & ~0x8000'0000;
+    }
+};
+
+// The quantized BVH node used currently
+using QBVHNode = BVHNodeQuantized<uint32_t, 4>;
+
 struct Material {
     // For now, just a color
     math::Vector4 color;
@@ -33,55 +154,10 @@ struct TriangleIndices {
     uint32_t indices[3];
 };
 
-struct TraversalStack {
-    static constexpr CountT stackSize = 32;
-
-    int32_t s[stackSize];
-    uint32_t size;
-
-    // if def for the shared version
-    void push(int32_t v)
-    {
-        s[size++] = v;
-    }
-
-    int32_t pop()
-    {
-        return s[--size];
-    }
-};
-
 struct MeshBVH {
     static constexpr inline CountT numTrisPerLeaf = MADRONA_BLAS_LEAF_WIDTH;
     static constexpr inline CountT nodeWidth = MADRONA_BLAS_WIDTH;
     static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
-
-    struct Node {
-        float minX;
-        float minY;
-        float minZ;
-        int8_t expX;
-        int8_t expY;
-        int8_t expZ;
-        uint8_t internalNodes;
-        uint8_t triSize[nodeWidth];
-        uint8_t qMinX[nodeWidth];
-        uint8_t qMinY[nodeWidth];
-        uint8_t qMinZ[nodeWidth];
-        uint8_t qMaxX[nodeWidth];
-        uint8_t qMaxY[nodeWidth];
-        uint8_t qMaxZ[nodeWidth];
-        int32_t children[nodeWidth];
-        int32_t parentID;
-
-        inline bool isLeaf(madrona::CountT child) const;
-        inline int32_t leafIDX(madrona::CountT child) const;
-
-        inline void setLeaf(madrona::CountT child, int32_t idx);
-        inline void setInternal(madrona::CountT child, int32_t internal_idx);
-        inline bool hasChild(madrona::CountT child) const;
-        inline void clearChild(madrona::CountT child);
-    };
 
     struct BVHMaterial{
         int32_t matIDX;
@@ -210,7 +286,7 @@ struct MeshBVH {
     inline uint32_t getMaterialIDX(const HitInfo &info) const;
     inline uint32_t getMaterialIDX(int32_t mat_idx) const;
 
-    Node *nodes;
+    QBVHNode *nodes;
     LeafMaterial *leafMats;
 
     BVHVertex *vertices;

@@ -1089,7 +1089,7 @@ extern "C" __global__ void bvhWidenTree()
                 LBVHNode *current_node = &smem->internalNodesPtr[lbvh_node_idx];
 
                 uint32_t num_children = 0;
-                QBVHNode::NodeIndexT children_indices[QBVHNode::NodeWidth];
+                int32_t children_indices[QBVHNode::NodeWidth];
                 math::AABB children_aabbs[QBVHNode::NodeWidth];
 
                 auto push_4wide = [&](LBVHNode *node) {
