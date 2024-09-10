@@ -480,6 +480,7 @@ MeshBVH MeshBVHBuilder::build(
 #endif
             //node.children[j] = 0xBBBBBBBB;
         }
+        node.numChildren = QBVHNode::NodeWidth;
         nodes.push_back(node);
     }
     for(int i = 0; i < innerID; i++){
@@ -547,6 +548,7 @@ MeshBVH MeshBVHBuilder::build(
             node.triSize[j] = triSize;
 #endif
         }
+        node.numChildren = QBVHNode::NodeWidth;
         nodes.push_back(node);
     }
 
@@ -579,6 +581,7 @@ MeshBVH MeshBVHBuilder::build(
             }
             node.children[j] = child;
         }
+        node.numChildren = QBVHNode::NodeWidth;
         nodes.push_back(node);
     }
 
@@ -611,6 +614,7 @@ MeshBVH MeshBVHBuilder::build(
             node.children[j] = child;
         }
 
+        node.numChildren = QBVHNode::NodeWidth;
         nodes.push_back(node);
     }
 

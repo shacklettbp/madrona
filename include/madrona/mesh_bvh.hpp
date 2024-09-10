@@ -71,7 +71,8 @@ struct BVHNodeQuantized {
 
     static BVHNodeT construct(uint32_t num_children,
                               math::AABB *child_aabbs,
-                              int32_t *child_indices)
+                              int32_t *child_indices,
+                              uint32_t my_index)
     {
         math::Vector3 root_min = child_aabbs[0].pMin,
                       root_max = child_aabbs[0].pMax;
@@ -112,7 +113,9 @@ struct BVHNodeQuantized {
             ret.qMaxZ[i] = ceilf((aabb.pMax.z - root_min.z) / powf(2, ret.expZ));
 
             if (child_indices[i] < 0) {
-                ret.childrenIdx[i] = (-child_indices[i] - 1) | 0x8000'0000;
+                ret.childrenIdx[i] = (uint32_t)(-child_indices[i] - 1) | 
+                                     0x8000'0000;
+
             } else {
                 ret.childrenIdx[i] = child_indices[i] - 1;
             }

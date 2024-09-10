@@ -1184,7 +1184,8 @@ extern "C" __global__ void bvhWidenTree()
                 *current_qbvh_node = QBVHNode::construct(
                         num_children,
                         children_aabbs,
-                        children_indices);
+                        children_indices,
+                        stored_job.qbvhNodeIndex - 1);
 
                 smem->numJobs.fetch_add(-1, std::memory_order_release);
             }

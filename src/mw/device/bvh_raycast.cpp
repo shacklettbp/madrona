@@ -107,18 +107,18 @@ static NodeGroup invalidNodeGroup()
 static NodeGroup getRootGroup(TraceWorldInfo world_info)
 {
     uint32_t children_count = world_info.nodes[0].numChildren;
-    uint8_t present_bits = (uint8_t)((1 << children_count) - 1);
+    uint8_t present_bits = (uint8_t)((1ull << children_count) - 1);
     return encodeNodeGroup(0, present_bits, GroupType::TopLevel);
 }
 
 static GroupType getGroupType(NodeGroup grp)
 {
-    return (GroupType)((grp >> 61) & 0b111);
+    return (GroupType)((grp >> 61ull) & 0b111);
 }
 
 static NodeGroup unsetPresentBit(NodeGroup grp, uint32_t idx)
 {
-    grp &= ~(1 << (idx + 32));
+    grp &= ~(1ull << (idx + 32ull));
     return grp;
 }
 
@@ -130,7 +130,7 @@ static uint32_t getPresentBits(NodeGroup grp)
 static uint32_t getTrianglePresentBits(NodeGroup grp)
 {
     // 24 bits used for triangle presence
-    return (uint32_t)((grp >> 32) & ((1 << 24) - 1));
+    return (uint32_t)((grp >> 32) & ((1ull << 24) - 1));
 }
 
 static Vector3 getDirQuant(QBVHNode node, Diag3x3 inv_ray_d)
@@ -264,6 +264,8 @@ static TriangleFetch fetchLeafTriangle(int32_t leaf_idx,
                                        int32_t offset,
                                        MeshBVH *mesh_bvh)
 {
+    assert((leaf_idx + offset + 1) * 3 <= mesh_bvh->numVerts);
+
     TriangleFetch fetched = {
         .a = mesh_bvh->vertices[(leaf_idx + offset)*3 + 0].pos,
         .b = mesh_bvh->vertices[(leaf_idx + offset)*3 + 1].pos,
@@ -402,7 +404,6 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
     Vector3 baryout = { 0, 0, 0 };
 
     float hit_t;
-
     TriangleFetch fetched = fetchLeafTriangle(
             leaf_idx, tri_idx, mesh_bvh);
 
@@ -436,6 +437,11 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
     }
 }
 
+static void printStackPush()
+{
+    LOG("Push");
+}
+
 static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
@@ -466,18 +472,25 @@ static __device__ TraceResult traceRay(
 
     QBVHNode *node_buffer = world_info.nodes;
 
-    TriHitInfo tri_hit;
+    TriHitInfo tri_hit = {
+        .hit = false
+    };
 
     for (;;) {
         if (GroupType parent_grp_type = getGroupType(current_grp); 
-                parent_grp_type != GroupType::Triangles) {
+                parent_grp_type != GroupType::Triangles &&
+                getPresentBits(current_grp) != 0) {
             // TODO: Make sure to have the node traversal order
             // sorted according to the ray direction.
             // NOTE: This should never underflow
             uint32_t child_idx = __ffs(getPresentBits(current_grp)) - 1;
             current_grp = unsetPresentBit(current_grp, child_idx);
 
-            if (getPresentBits(current_grp) != 0) {
+            // Bottom level root needs to be pushed no matter what
+            // so that when popping, we can restore the state of the
+            // ray data.
+            if (getPresentBits(current_grp) != 0 ||
+                    parent_grp_type == GroupType::BottomLevelRoot) {
                 stack[stack_size++] = current_grp;
             }
 
@@ -486,9 +499,11 @@ static __device__ TraceResult traceRay(
             // intersected
             // TODO: Differentiate between TLAS and BLAS. For now, we are just
             // rewriting the TLAS tracing code for testing.
+
             uint32_t child_node_idx =
                 node_buffer[current_grp & 0xFFFF'FFFF].childrenIdx[child_idx];
             bool child_is_leaf = (child_node_idx & 0x8000'0000);
+            child_node_idx = child_node_idx & (~0x8000'0000);
 
             GroupType new_grp_type = GroupType::TopLevel;
 
@@ -522,7 +537,12 @@ static __device__ TraceResult traceRay(
                 node_buffer = current_bvh->nodes;
 
                 new_grp_type = GroupType::BottomLevelRoot;
-            } else if (parent_grp_type == GroupType::BottomLevelRoot) {
+
+                // Set this to 0 so that when we read from node_buffer,
+                // we're reading the root node of the mesh BVH.
+                child_node_idx = 0;
+            } else if (parent_grp_type == GroupType::BottomLevelRoot ||
+                       parent_grp_type == GroupType::BottomLevel) {
                 new_grp_type = GroupType::BottomLevel;
             }
 
@@ -535,33 +555,43 @@ static __device__ TraceResult traceRay(
             uint32_t tri_present_bits = 0;
 
             for (int i = 0; i < new_current.numChildren; ++i) {
-                auto [t_near, t_far] = getNearFar(
-                        new_current, i,
-                        dir_quant,
-                        origin_quant,
-                        t_max);
+                if (new_current.childrenIdx[i] != 0xFFFF'FFFF) {
+                    auto [t_near, t_far] = getNearFar(
+                            new_current, i,
+                            dir_quant,
+                            origin_quant,
+                            t_max);
 
-                if (t_near <= t_far) {
-                    // If we are in BLAS, check for possible triangles!
-                    if ((new_grp_type == GroupType::BottomLevel ||
-                        new_grp_type == GroupType::BottomLevelRoot) &&
-                            new_current.childrenIdx[i] & 0x8000'0000) {
-                        // Is this child triangles?? It is if this is the leaf
-                        // of a bottom level tree
-                        tri_present_bits |= (((1 << new_current.triSize[i]) - 1) << 
-                                (MADRONA_BLAS_LEAF_WIDTH * i));
-                    } else {
-                        grp_present_bits |= (1 << i);
+                    if (t_near <= t_far) {
+                        // If we are in BLAS, check for possible triangles!
+                        if ((new_grp_type == GroupType::BottomLevel ||
+                                    new_grp_type == GroupType::BottomLevelRoot) &&
+                                new_current.childrenIdx[i] & 0x8000'0000) {
+                            // Is this child triangles?? It is if this is the leaf
+                            // of a bottom level tree
+                            tri_present_bits |= (((1 << new_current.triSize[i]) - 1) << 
+                                    (MADRONA_BLAS_LEAF_WIDTH * i));
+                        } else {
+                            grp_present_bits |= (1 << i);
+                        }
                     }
                 }
             }
 
+            uint32_t parent_grp_idx = (current_grp & 0xFFFF'FFFF);
+
             current_grp = encodeNodeGroup(
                     child_node_idx, grp_present_bits, new_grp_type);
+
+            LOG("new current_grp: node_idx={}, pres_bits={}, type={}\n", (current_grp & 0xFFFF'FFFF),
+                    getPresentBits(current_grp), (uint32_t)getGroupType(current_grp));
 
             if (tri_present_bits) {
                 triangle_grp = encodeNodeGroup(
                         child_node_idx, tri_present_bits, GroupType::Triangles);
+
+                LOG("setting triangle group to {} (parent = {})\n", child_node_idx,
+                        parent_grp_idx);
             } else {
                 triangle_grp = invalidNodeGroup();
             }
@@ -570,30 +600,47 @@ static __device__ TraceResult traceRay(
             current_grp = invalidNodeGroup();
         }
 
-        while (getTrianglePresentBits(triangle_grp) != 0) {
-            // TODO: check active mask against heuristic to exit if not enough
-            // threads are working on this
+        if (getTrianglePresentBits(triangle_grp) != 0) {
+            QBVHNode parent = node_buffer[triangle_grp & 0xFFFF'FFFF];
 
-            uint32_t node_tri_idx = __ffs(getTrianglePresentBits(triangle_grp)) - 1;
-            uint32_t leaf_idx = node_tri_idx / MeshBVH::numTrisPerLeaf;
-            uint32_t tri_idx = node_tri_idx % MeshBVH::numTrisPerLeaf;
+            LOG("starting triangle processing {} ({})\n",
+                    (triangle_grp & 0xFFFF'FFFF),
+                    getTrianglePresentBits(triangle_grp));
+            while (getTrianglePresentBits(triangle_grp) != 0) {
+                // TODO: check active mask against heuristic to exit if not enough
+                // threads are working on this
+                uint32_t local_node_tri_idx = 
+                    __ffs(getTrianglePresentBits(triangle_grp)) - 1;
 
-            uint32_t glob_offset = 
-                ((triangle_grp & 0xFFFF'FFFF) & ~0x8000'000);
+                LOG("processing triangle {}\n", local_node_tri_idx);
 
-            TriHitInfo hit_info = triangleIntersect(
-                    glob_offset + leaf_idx,
-                    tri_idx,
-                    isect_info,
-                    ray_o,
-                    t_max,
-                    current_bvh);
+                uint32_t local_leaf_idx = 
+                    local_node_tri_idx / MeshBVH::numTrisPerLeaf;
+                uint32_t tri_idx = 
+                    local_node_tri_idx % MeshBVH::numTrisPerLeaf;
 
-            if (hit_info.hit) {
-                t_max = hit_info.tHit;
+                uint32_t glob_leaf_idx =
+                    parent.childrenIdx[local_leaf_idx] & (~0x8000'0000);
 
-                tri_hit = hit_info;
+                TriHitInfo hit_info = triangleIntersect(
+                        glob_leaf_idx,
+                        tri_idx,
+                        isect_info,
+                        ray_o,
+                        t_max,
+                        current_bvh);
+
+                if (hit_info.hit) {
+                    t_max = hit_info.tHit;
+
+                    tri_hit = hit_info;
+                }
+
+                triangle_grp = unsetPresentBit(triangle_grp, local_node_tri_idx);
             }
+
+            LOG("stopping triangle processing ({})\n",
+                    getTrianglePresentBits(triangle_grp));
         }
 
         // If the current node group is empty, make sure to pop something or
@@ -615,8 +662,9 @@ static __device__ TraceResult traceRay(
                 node_buffer = world_info.nodes;
             }
 
-            printf("popping! %d\n", stack_size);
             current_grp = stack[--stack_size];
+            LOG("popped: node_idx={}, pres_bits={}, type={}\n", (current_grp & 0xFFFF'FFFF),
+                    getPresentBits(current_grp), (uint32_t)getGroupType(current_grp));
         }
     }
 
@@ -626,7 +674,6 @@ static __device__ TraceResult traceRay(
         if (bvhParams.raycastRGBD) {
             int32_t material_idx = tri_hit.bvh->getMaterialIDX(
                     tri_hit.leafMaterialIndex);
-
             Material *mat = &bvhParams.materials[material_idx];
 
             Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
@@ -869,6 +916,13 @@ extern "C" __global__ void bvhRaycastEntry()
 #if 0
     if (pixel_x != 0 || pixel_y != 0)
         return;
+#endif
+
+#if 1
+    if (!(threadIdx.x == 1 && threadIdx.y == 7 && threadIdx.z == 0 &&
+                blockIdx.x == 3 && blockIdx.y == 5 && blockIdx.z == 3)) {
+        return;
+    }
 #endif
 
     while (current_view_offset < total_num_views) {
