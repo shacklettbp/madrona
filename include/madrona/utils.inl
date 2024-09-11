@@ -54,7 +54,7 @@ uint32_t ArrayQueue<T>::increment(uint32_t i)
 
 namespace utils {
 
-inline uint32_t u32mulhi(uint32_t a, uint32_t b)
+constexpr inline uint32_t u32mulhi(uint32_t a, uint32_t b)
 {
 #ifdef MADRONA_GPU_MODE
     return __umulhi(a, b);
