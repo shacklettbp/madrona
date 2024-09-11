@@ -82,7 +82,13 @@ add_library(madrona_mem STATIC
 )
 
 target_link_libraries(madrona_mem PRIVATE
-  madrona_hdrs madrona_libcxx_hdrs madrona_noexceptrtti)
+  madrona_hdrs madrona_noexceptrtti)
+
+if (NOT WIN32)
+    target_link_libraries(madrona_mem PRIVATE
+        madrona_libcxx_hdrs 
+    )
+endif()
 
 add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/heap_array.hpp
