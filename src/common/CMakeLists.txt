@@ -40,8 +40,15 @@ elseif (FRONTEND_MSVC)
         /permissive-
         /W4
         /wd4324 # Struct padded for alignas ... yeah that's the point
+        /wd4701 # Potentially uninitialized variable. MSVC analysis really sucks on this
         /wd4244 /wd4267 # Should reenable these
     )
+
+    if (MSVC_VERSION LESS 1936)
+        target_compile_options(madrona_hdrs INTERFACE
+            /wd5223 /wd5030 # msvc::lifetimebound not supported in older msvc, causes warnings
+        )
+    endif()
 
     if (NOT FRONTEND_CLANG_CL)
         target_compile_options(madrona_hdrs INTERFACE
