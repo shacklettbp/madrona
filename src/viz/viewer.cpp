@@ -207,6 +207,16 @@ static int32_t numDigits(uint32_t x)
 
 static void flyCamUI(ViewerCam &cam)
 {
+#if 1
+    printf("pos = %f %f %f\n", cam.position.x, cam.position.y, cam.position.z);
+    printf("fwd = %f %f %f\n", cam.fwd.x, cam.fwd.y, cam.fwd.z);
+    printf("up = %f %f %f\n", cam.up.x, cam.up.y, cam.up.z);
+    printf("right = %f %f %f\n", cam.right.x, cam.right.y, cam.right.z);
+
+    math::Quat r = math::Quat::fromBasis(cam.right, cam.fwd, cam.up);
+    printf("r = %f %f %f %f\n", r.w, r.x, r.y, r.z);
+#endif
+
     auto side_size = ImGui::CalcTextSize(" Bottom " );
     side_size.y *= 1.4f;
     ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign,

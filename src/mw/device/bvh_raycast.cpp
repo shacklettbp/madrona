@@ -201,7 +201,7 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
 
                     float4 sampled_color = tex2D<float4>(*tex,
-                            closest_hit_info.uv.x, closest_hit_info.uv.y);
+                            closest_hit_info.uv.x, 1.f - closest_hit_info.uv.y);
 
                     math::Vector3 tex_color = {sampled_color.x,
                         sampled_color.y,
@@ -210,6 +210,8 @@ static __device__ bool traceRayTLAS(uint32_t world_idx,
                     color.x *= tex_color.x;
                     color.y *= tex_color.y;
                     color.z *= tex_color.z;
+
+                    // printf("%f %f %f\n", color.x, color.y, color.z);
                 }
             }
 
