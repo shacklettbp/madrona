@@ -187,43 +187,79 @@ using AtomicI64 = Atomic<int64_t>;
 using AtomicFloat = Atomic<float>;
 using AtomicCount = Atomic<CountT>;
 
+#if defined(__cpp_lib_atomic_ref) or defined(MADRONA_GPU_MODE)
+#define MADRONA_STD_ATOMIC_REF
+#endif
 template <typename T>
 class AtomicRef {
 public:
     AtomicRef(T &ref)
+#ifndef MADRONA_STD_ATOMIC_REF
+        : addr_(&ref)
+#else
         : ref_(ref)
+#endif
     {}
 
     template <sync::memory_order order>
     inline T load() const
     {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __builtin_bit_cast(T,
+            __atomic_load_n((ValueT *)addr_, OrderMap<order>::builtin));
+#else
         return ref_.load(order);
+#endif
     }
 
     template <sync::memory_order order>
     inline void store(T v)
     {
+#ifndef MADRONA_STD_ATOMIC_REF
+        __atomic_store_n((ValueT *)addr_, __builtin_bit_cast(ValueT, v),
+                        OrderMap<order>::builtin);
+#else
         ref_.store(v, order);
+#endif
     }
 
     template <sync::memory_order order>
     inline T exchange(T v)
     {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __atomic_exchange_n(
+            (ValueT *)addr_,
+            __builtin_bit_cast(ValueT, v),
+            OrderMap<order>::builtin);
+#else
         return ref_.exchange(v, order);
+#endif
     }
 
     template <sync::memory_order success_order,
               sync::memory_order failure_order>
     inline bool compare_exchange_weak(T &expected, T desired)
     {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __atomic_compare_exchange_n(
+            (ValueT *)addr_, (ValueT *)&expected,
+            __builtin_bit_cast(ValueT, desired), true,
+            OrderMap<success_order>::builtin,
+            OrderMap<failure_order>::builtin);
+#else
         return ref_.compare_exchange_weak(expected, desired,
                                           success_order, failure_order);
+#endif
     }
 
     template <sync::memory_order order>
     inline T fetch_add(T v)
     {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __atomic_fetch_add(addr_, v, OrderMap<order>::builtin);
+#else
         return ref_.fetch_add(v, order);
+#endif
     }
 
     inline T fetch_add_relaxed(T v)
@@ -234,26 +270,65 @@ public:
     template <sync::memory_order order>
     inline T fetch_sub(T v)
     {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __atomic_fetch_sub(addr_, v, OrderMap<order>::builtin);
+#else
         return ref_.fetch_sub(v, order);
+#endif
     }
 
     template <sync::memory_order order>
     inline T fetch_or(T v)
     {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __atomic_fetch_or(addr_, v, OrderMap<order>::builtin);
+#else
         return ref_.fetch_or(v, order);
+#endif
     }
 
 private:
     static_assert(sizeof(T) == 4 || sizeof(T) == 8);
     static_assert(std::is_trivially_copyable_v<T>);
 
-#ifdef MADRONA_GPU_MODE
-    cuda::atomic_ref<T> ref_;
+#ifndef MADRONA_STD_ATOMIC_REF
+    template <size_t t_size> struct ValueType;
+    template <> struct ValueType<8> {
+        using type = uint64_t;
+    };
+    template <> struct ValueType<4> {
+        using type = uint32_t;
+    };
+
+    template <sync::memory_order order> struct OrderMap;
+    template <> struct OrderMap<sync::relaxed> {
+        static inline constexpr int builtin = __ATOMIC_RELAXED;
+    };
+
+    template <> struct OrderMap<sync::acquire> {
+        static inline constexpr int builtin = __ATOMIC_ACQUIRE;
+    };
+
+    template <> struct OrderMap<sync::release> {
+        static inline constexpr int builtin = __ATOMIC_RELEASE;
+    };
+
+    template <> struct OrderMap<sync::acq_rel> {
+        static inline constexpr int builtin = __ATOMIC_ACQ_REL;
+    };
+
+    template <> struct OrderMap<sync::seq_cst> {
+        static inline constexpr int builtin = __ATOMIC_SEQ_CST;
+    };
+
+    using ValueT = typename ValueType<sizeof(T)>::type;
+    T *addr_;
 #else
     std::atomic_ref<T> ref_;
-#endif
     static_assert(decltype(ref_)::is_always_lock_free);
+#endif
 };
+#undef MADRONA_STD_ATOMIC_REF
 
 using AtomicI32Ref = AtomicRef<int32_t>;
 using AtomicU32Ref = AtomicRef<uint32_t>;
