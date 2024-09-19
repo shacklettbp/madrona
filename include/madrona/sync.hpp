@@ -324,7 +324,11 @@ private:
     using ValueT = typename ValueType<sizeof(T)>::type;
     T *addr_;
 #else
+#ifdef MADRONA_GPU_MODE
+    cuda::atomic_ref<T, cuda::thread_scope_device> ref_;
+#else
     std::atomic_ref<T> ref_;
+#endif
     static_assert(decltype(ref_)::is_always_lock_free);
 #endif
 };
