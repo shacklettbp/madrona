@@ -100,25 +100,31 @@ struct BVHNodeQuantized {
             .numChildren = (uint8_t)num_children
         };
 
-        for (int i = 0; i < num_children; ++i) {
+        int iter = 0;
+        for (; iter < num_children; ++iter) {
             // Quantize the AABB of the child
-            math::AABB &aabb = child_aabbs[i];
+            math::AABB &aabb = child_aabbs[iter];
 
-            ret.qMinX[i] = floorf((aabb.pMin.x - root_min.x) / powf(2, ret.expX));
-            ret.qMinY[i] = floorf((aabb.pMin.y - root_min.y) / powf(2, ret.expY));
-            ret.qMinZ[i] = floorf((aabb.pMin.z - root_min.z) / powf(2, ret.expZ));
+            ret.qMinX[iter] = floorf((aabb.pMin.x - root_min.x) / powf(2, ret.expX));
+            ret.qMinY[iter] = floorf((aabb.pMin.y - root_min.y) / powf(2, ret.expY));
+            ret.qMinZ[iter] = floorf((aabb.pMin.z - root_min.z) / powf(2, ret.expZ));
 
-            ret.qMaxX[i] = ceilf((aabb.pMax.x - root_min.x) / powf(2, ret.expX));
-            ret.qMaxY[i] = ceilf((aabb.pMax.y - root_min.y) / powf(2, ret.expY));
-            ret.qMaxZ[i] = ceilf((aabb.pMax.z - root_min.z) / powf(2, ret.expZ));
+            ret.qMaxX[iter] = ceilf((aabb.pMax.x - root_min.x) / powf(2, ret.expX));
+            ret.qMaxY[iter] = ceilf((aabb.pMax.y - root_min.y) / powf(2, ret.expY));
+            ret.qMaxZ[iter] = ceilf((aabb.pMax.z - root_min.z) / powf(2, ret.expZ));
 
-            if (child_indices[i] < 0) {
-                ret.childrenIdx[i] = (uint32_t)(-child_indices[i] - 1) | 
+            if (child_indices[iter] < 0) {
+                ret.childrenIdx[iter] = (uint32_t)(-child_indices[iter] - 1) | 
                                      0x8000'0000;
 
             } else {
-                ret.childrenIdx[i] = child_indices[i] - 1;
+                ret.childrenIdx[iter] = child_indices[iter] - 1;
             }
+        }
+
+        for (; iter < 4; ++iter) {
+            // Set the remaining ones to invalid node indices.
+            ret.childrenIdx[iter] = 0xFFFF'FFFF;
         }
 
         return ret;
