@@ -500,9 +500,6 @@ static __device__ TraceResult traceRay(
             // Intersect with the children of the child to get a new node group
             // and calculate the present bits according to which were
             // intersected
-            // TODO: Differentiate between TLAS and BLAS. For now, we are just
-            // rewriting the TLAS tracing code for testing.
-
             uint32_t child_node_idx =
                 node_buffer[current_grp & 0xFFFF'FFFF].childrenIdx[child_idx];
             bool child_is_leaf = (child_node_idx & 0x8000'0000);
@@ -561,7 +558,8 @@ static __device__ TraceResult traceRay(
             uint32_t tri_present_bits = 0;
 
             // if (child_node_idx == 
-            for (int i = 0; i < new_current.numChildren; ++i) {
+#pragma unroll
+            for (int i = 0; i < 4 /* new_current.numChildren */; ++i) {
                 if (new_current.childrenIdx[i] != 0xFFFF'FFFF) {
                     auto [t_near, t_far] = getNearFar(
                             new_current, i,
@@ -637,23 +635,23 @@ static __device__ TraceResult traceRay(
         // If the current node group is empty, make sure to pop something or
         // break out of the tracing loop
         if (getPresentBits(current_grp) == 0) {
-            if (stack_size == 0)
-                break; // Break out of tracing loop
+            if (stack_size == 0) {
+                break;
+            } else {
+                if (getGroupType(current_grp) == GroupType::BottomLevelRoot) {
+                    t_max = t_max / t_scale;
+                    t_scale = 1.f;
 
-            // If we are breaking out of BLAS, reset all the appropriate state.
-            if (getGroupType(current_grp) == GroupType::BottomLevelRoot) {
-                t_max = t_max / t_scale;
-                t_scale = 1.f;
+                    // Just restore all the trace info.
+                    ray_o = trace_info.rayOrigin;
+                    ray_d = trace_info.rayDirection;
+                    inv_ray_d = Diag3x3::fromVec(ray_d).inv();
 
-                // Just restore all the trace info.
-                ray_o = trace_info.rayOrigin;
-                ray_d = trace_info.rayDirection;
-                inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+                    node_buffer = world_info.nodes;
+                }
 
-                node_buffer = world_info.nodes;
+                current_grp = stack[--stack_size];
             }
-
-            current_grp = stack[--stack_size];
         }
     }
 
@@ -693,172 +691,6 @@ static __device__ TraceResult traceRay(
 
     return result;
 }
-
-
-
-
-
-
-
-#if 0
-static __device__ TraceResult traceRayTLAS(
-        TraceInfo trace_info,
-        TraceWorldInfo world_info)
-{
-    static constexpr float inv_epsilon = 100000.0f;
-
-    // Stack (needs to be declared locally due to a weird CUDA compiler bug).
-    int32_t stack[32];
-    int32_t stack_size = 0;
-    stack[stack_size++] = 1;
-
-    MeshBVH::HitInfo closest_hit_info = {};
-
-    Diag3x3 inv_ray_d = {
-        copysignf(trace_info.rayDirection.x == 0.f ? inv_epsilon : 
-                1.f / trace_info.rayDirection.x, trace_info.rayDirection.x),
-        copysignf(trace_info.rayDirection.y == 0.f ? inv_epsilon : 
-                1.f / trace_info.rayDirection.y, trace_info.rayDirection.y),
-        copysignf(trace_info.rayDirection.z == 0.f ? inv_epsilon : 
-                1.f / trace_info.rayDirection.z, trace_info.rayDirection.z),
-    };
-
-    TraceResult result = {
-        .hit = false
-    };
-
-    while (stack_size > 0) {
-        int32_t node_idx = stack[--stack_size] - 1;
-        QBVHNode node = world_info.nodes[node_idx];
-
-        Vector3 dir_quant = {
-            __uint_as_float((node.expX + 127) << 23) * inv_ray_d.d0,
-            __uint_as_float((node.expY + 127) << 23) * inv_ray_d.d1,
-            __uint_as_float((node.expZ + 127) << 23) * inv_ray_d.d2,
-        };
-
-        Vector3 origin_quant = {
-            (node.minPoint.x - trace_info.rayOrigin.x) * inv_ray_d.d0,
-            (node.minPoint.y - trace_info.rayOrigin.y) * inv_ray_d.d1,
-            (node.minPoint.z - trace_info.rayOrigin.z) * inv_ray_d.d2,            
-        };
-        
-        for (int i = 0; i < node.numChildren; ++i) {
-            Vector3 t_near3 = {
-                node.qMinX[i] * dir_quant.x + origin_quant.x,
-                node.qMinY[i] * dir_quant.y + origin_quant.y,
-                node.qMinZ[i] * dir_quant.z + origin_quant.z,
-            };
-
-            Vector3 t_far3 = {
-                node.qMaxX[i] * dir_quant.x + origin_quant.x,
-                node.qMaxY[i] * dir_quant.y + origin_quant.y,
-                node.qMaxZ[i] * dir_quant.z + origin_quant.z,
-            };
-
-            float t_near = fmaxf(fminf(t_near3.x, t_far3.x), 
-                                 fmaxf(fminf(t_near3.y, t_far3.y),
-                                       fmaxf(fminf(t_near3.z, t_far3.z), 
-                                             0.f)));
-
-            float t_far = fminf(fmaxf(t_far3.x, t_near3.x), 
-                                fminf(fmaxf(t_far3.y, t_near3.y),
-                                      fminf(fmaxf(t_far3.z, t_near3.z), 
-                                            trace_info.tMax)));
-
-            if (t_near <= t_far) {
-                if (node.childrenIdx[i] < 0) {
-                    // This child is a leaf.
-                    int32_t instance_idx = (int32_t)(-node.childrenIdx[i] - 1);
-
-                    MeshBVH *model_bvh = bvhParams.bvhs +
-                        world_info.instances[instance_idx].objectID;
-
-                    InstanceData *instance_data =
-                        &world_info.instances[instance_idx];
-
-                    // Skip the instance if it doesn't have any scale
-                    if (instance_data->scale.d0 == 0.0f &&
-                        instance_data->scale.d1 == 0.0f &&
-                        instance_data->scale.d2 == 0.0f) {
-                        continue;
-                    }
-
-                    Vector3 txfm_ray_o = instance_data->scale.inv() *
-                        instance_data->rotation.inv().rotateVec(
-                            (trace_info.rayOrigin - instance_data->position));
-
-                    Vector3 txfm_ray_d = instance_data->scale.inv() *
-                        instance_data->rotation.inv().rotateVec(
-                                trace_info.rayDirection);
-
-                    float t_scale = txfm_ray_d.length();
-
-                    txfm_ray_d /= t_scale;
-
-                    MeshBVH::HitInfo hit_info = {};
-
-                    bool leaf_hit = model_bvh->traceRay(
-                            txfm_ray_o, txfm_ray_d, &hit_info, 
-                            stack, stack_size, trace_info.tMax * t_scale);
-
-                    if (leaf_hit) {
-                        result.hit = true;
-
-                        trace_info.tMax = hit_info.tHit / t_scale;
-
-                        closest_hit_info = hit_info;
-                        closest_hit_info.normal = 
-                            instance_data->rotation.rotateVec(
-                                instance_data->scale * closest_hit_info.normal);
-
-                        closest_hit_info.normal = 
-                            closest_hit_info.normal.normalize();
-
-                        closest_hit_info.bvh = model_bvh;
-                    }
-                } else {
-                    stack[stack_size++] = node.childrenIdx[i];
-                }
-            }
-        }
-    }
-
-    if (result.hit) {
-        if (bvhParams.raycastRGBD) {
-            int32_t material_idx = 
-                closest_hit_info.bvh->getMaterialIDX(closest_hit_info);
-
-            Material *mat = &bvhParams.materials[material_idx];
-
-            Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
-
-            if (mat->textureIdx != -1) {
-                cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
-
-                float4 sampled_color = tex2D<float4>(*tex,
-                    closest_hit_info.uv.x, closest_hit_info.uv.y);
-
-                Vector3 tex_color = { sampled_color.x,
-                                      sampled_color.y,
-                                      sampled_color.z };
-
-                color.x *= tex_color.x;
-                color.y *= tex_color.y;
-                color.z *= tex_color.z;
-            }
-
-            result.color = lighting(
-                    color, closest_hit_info.normal, 
-                    trace_info.rayDirection, 1, 1);
-        }
-        
-        result.depth = trace_info.tMax;
-    }
-
-    return result;
-}
-#endif
 
 static __device__ void writeRGB(uint32_t pixel_byte_offset,
                            const Vector3 &color)
@@ -902,18 +734,6 @@ extern "C" __global__ void bvhRaycastEntry()
     uint32_t pixel_x = blockIdx.y * pixels_per_block + threadIdx.x;
     uint32_t pixel_y = blockIdx.z * pixels_per_block + threadIdx.y;
 
-#if 0
-    if (pixel_x != 0 || pixel_y != 0)
-        return;
-#endif
-
-#if 0
-    if (!(threadIdx.x == 1 && threadIdx.y == 7 && threadIdx.z == 0 &&
-                blockIdx.x == 3 && blockIdx.y == 5 && blockIdx.z == 3)) {
-        return;
-    }
-#endif
-
     while (current_view_offset < total_num_views) {
         // While we still have views to generate, trace.
         PerspectiveCameraData *view_data = 
@@ -939,22 +759,6 @@ extern "C" __global__ void bvhRaycastEntry()
                 .instances = bvhParams.instances + internal_nodes_offset
             }
         );
-
-#if 0
-        TraceResult result = traceRayTLAS(
-            TraceInfo {
-                .rayOrigin = ray_start,
-                .rayDirection = ray_dir,
-                .tMin = bvhParams.nearSphere,
-                .tMax = 10000.f,
-            },
-            TraceWorldInfo {
-                .nodes = bvhParams.internalData->traversalNodes + 
-                         internal_nodes_offset,
-                .instances = bvhParams.instances + internal_nodes_offset
-            }
-        );
-#endif
 
         uint32_t linear_pixel_idx = 4 * 
             (pixel_y + pixel_x * bvhParams.renderOutputResolution);
