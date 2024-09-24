@@ -10,7 +10,7 @@
 #define LOG_RECURSE(...)
 #endif
 
-#if 1
+#if 0
 #define LOG_INST(...) mwGPU::HostPrint::log(__VA_ARGS__)
 #else
 #define LOG_INST(...)
@@ -274,8 +274,6 @@ static TriangleFetch fetchLeafTriangle(int32_t leaf_idx,
                                        int32_t offset,
                                        MeshBVH *mesh_bvh)
 {
-    assert((leaf_idx + offset + 1) * 3 <= mesh_bvh->numVerts);
-
     TriangleFetch fetched = {
         .a = mesh_bvh->vertices[(leaf_idx + offset)*3 + 0].pos,
         .b = mesh_bvh->vertices[(leaf_idx + offset)*3 + 1].pos,
@@ -447,11 +445,6 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
     }
 }
 
-static void printStackPush()
-{
-    LOG_RECURSE("Push");
-}
-
 static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
@@ -486,9 +479,6 @@ static __device__ TraceResult traceRay(
         .hit = false
     };
 
-    LOG_RECURSE("root current_grp: node_idx={}, pres_bits={}, type={}\n", (current_grp & 0xFFFF'FFFF),
-            getPresentBits(current_grp), (uint32_t)getGroupType(current_grp));
-
     for (;;) {
         if (GroupType parent_grp_type = getGroupType(current_grp); 
                 parent_grp_type != GroupType::Triangles &&
@@ -503,7 +493,7 @@ static __device__ TraceResult traceRay(
             // so that when popping, we can restore the state of the
             // ray data.
             if (getPresentBits(current_grp) != 0 ||
-                    parent_grp_type == GroupType::BottomLevelRoot) {
+                    (parent_grp_type == GroupType::BottomLevelRoot)) {
                 stack[stack_size++] = current_grp;
             }
 
@@ -518,22 +508,9 @@ static __device__ TraceResult traceRay(
             bool child_is_leaf = (child_node_idx & 0x8000'0000);
             child_node_idx = child_node_idx & (~0x8000'0000);
 
-            LOG_RECURSE("parent_grp: node_idx={}, pres_bits={}, type={}\n", 
-                    (current_grp & 0xFFFF'FFFF),
-                    getPresentBits(current_grp), (uint32_t)getGroupType(current_grp));
-#if 0
-            if ((current_grp & 0xFFFF'FFFF) == 1) {
-                for (int i = 0; i < 4; ++i) {
-                    uint32_t tmp =
-                        node_buffer[current_grp & 0xFFFF'FFFF].childrenIdx[i];
-                    LOG_RECURSE("########################\n");
-                    LOG_RECURSE("node {}'s child {} has ID {}\n", (current_grp & 0xFFFF'FFFF), i, tmp);
-                    LOG_RECURSE("########################\n");
-                }
-            }
-#endif
-
             GroupType new_grp_type = GroupType::TopLevel;
+
+            uint32_t parent_grp_idx = (current_grp & 0xFFFF'FFFF);
 
             if (parent_grp_type == GroupType::TopLevel &&
                 child_is_leaf) {
@@ -542,11 +519,6 @@ static __device__ TraceResult traceRay(
                 InstanceData *instance_data = world_info.instances + 
                                               instance_idx;
 
-                LOG_INST("parent_grp: node_idx={}, pres_bits={}, type={}\n", 
-                        (current_grp & 0xFFFF'FFFF),
-                        getPresentBits(current_grp), (uint32_t)getGroupType(current_grp));
-
-                LOG_INST("(child {}), instance_idx = {}\n", child_idx, instance_idx);
                 current_bvh = bvhParams.bvhs + 
                               world_info.instances[instance_idx].objectID;
 
@@ -613,42 +585,28 @@ static __device__ TraceResult traceRay(
                 }
             }
 
-            uint32_t parent_grp_idx = (current_grp & 0xFFFF'FFFF);
-
             current_grp = encodeNodeGroup(
                     child_node_idx, grp_present_bits, new_grp_type);
-
-            LOG_RECURSE("new current_grp (child {}): node_idx={}, pres_bits={}, type={}\n", 
-                    child_idx, (current_grp & 0xFFFF'FFFF),
-                    getPresentBits(current_grp), (uint32_t)getGroupType(current_grp));
 
             if (tri_present_bits) {
                 triangle_grp = encodeNodeGroup(
                         child_node_idx, tri_present_bits, GroupType::Triangles);
-
-                LOG_RECURSE("setting triangle group to {} (parent = {})\n", child_node_idx,
-                        parent_grp_idx);
             } else {
                 triangle_grp = invalidNodeGroup();
             }
         } else {
             triangle_grp = current_grp;
-            current_grp = invalidNodeGroup();
+            // current_grp = invalidNodeGroup();
         }
 
         if (getTrianglePresentBits(triangle_grp) != 0) {
             QBVHNode parent = node_buffer[triangle_grp & 0xFFFF'FFFF];
 
-            LOG_RECURSE("starting triangle processing {} ({})\n",
-                    (triangle_grp & 0xFFFF'FFFF),
-                    getTrianglePresentBits(triangle_grp));
             while (getTrianglePresentBits(triangle_grp) != 0) {
                 // TODO: check active mask against heuristic to exit if not enough
                 // threads are working on this
                 uint32_t local_node_tri_idx = 
                     __ffs(getTrianglePresentBits(triangle_grp)) - 1;
-
-                LOG_RECURSE("processing triangle {}\n", local_node_tri_idx);
 
                 uint32_t local_leaf_idx = 
                     local_node_tri_idx / MeshBVH::numTrisPerLeaf;
@@ -674,9 +632,6 @@ static __device__ TraceResult traceRay(
 
                 triangle_grp = unsetPresentBit(triangle_grp, local_node_tri_idx);
             }
-
-            LOG_RECURSE("stopping triangle processing ({})\n",
-                    getTrianglePresentBits(triangle_grp));
         }
 
         // If the current node group is empty, make sure to pop something or
@@ -699,8 +654,6 @@ static __device__ TraceResult traceRay(
             }
 
             current_grp = stack[--stack_size];
-            LOG_RECURSE("popped: node_idx={}, pres_bits={}, type={}\n", (current_grp & 0xFFFF'FFFF),
-                    getPresentBits(current_grp), (uint32_t)getGroupType(current_grp));
         }
     }
 
@@ -954,7 +907,7 @@ extern "C" __global__ void bvhRaycastEntry()
         return;
 #endif
 
-#if 1
+#if 0
     if (!(threadIdx.x == 1 && threadIdx.y == 7 && threadIdx.z == 0 &&
                 blockIdx.x == 3 && blockIdx.y == 5 && blockIdx.z == 3)) {
         return;

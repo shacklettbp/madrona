@@ -1181,6 +1181,7 @@ extern "C" __global__ void bvhWidenTree()
                 QBVHNode *current_qbvh_node =
                     &smem->traversalNodes[stored_job.qbvhNodeIndex - 1];
 
+#if 0
                 if (stored_job.qbvhNodeIndex - 1 == 1) {
                     LOG("CONSTRUCTION LBVH NODE WITH INDEX 1: num_children = {}\n",
                             num_children);
@@ -1189,6 +1190,7 @@ extern "C" __global__ void bvhWidenTree()
                         LOG("child {} is {}\n", i, children_indices[i]);
                     }
                 }
+#endif
 
                 *current_qbvh_node = QBVHNode::construct(
                         num_children,

@@ -116,7 +116,6 @@ struct BVHNodeQuantized {
             if (child_indices[iter] < 0) {
                 ret.childrenIdx[iter] = (uint32_t)(-child_indices[iter] - 1) | 
                                      0x8000'0000;
-
             } else {
                 ret.childrenIdx[iter] = child_indices[iter] - 1;
             }
