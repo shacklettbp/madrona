@@ -496,14 +496,20 @@ static inline void handleContact(Context &ctx,
     Vector3 inv_I1 = metadata1.mass.invInertiaTensor;
     Vector3 inv_I2 = metadata2.mass.invInertiaTensor;
 
-    if (resp_type1 == ResponseType::Static) {
+    if (resp_type1 != ResponseType::Dynamic) {
         inv_m1 = 0.f;
         inv_I1 = Vector3::zero();
+        if (resp_type2 == ResponseType::Kinematic) {
+            return;
+        }
     }
 
-    if (resp_type2 == ResponseType::Static) {
+    if (resp_type2 != ResponseType::Dynamic) {
         inv_m2 = 0.f;
         inv_I2 = Vector3::zero();
+        if (resp_type1 == ResponseType::Kinematic) {
+            return;
+        }
     }
 
     float mu_s1 = metadata1.friction.muS;
@@ -517,6 +523,19 @@ static inline void handleContact(Context &ctx,
     if (zero_separation) {
         return;
     }
+
+    // Check for agent type.
+    // Do this here so we get the above filtering.
+    // If type is agent, set the "touched" flag of
+    // the other RigidBody to true.
+    if (obj_id1.idx == 6) {
+        ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.alt).touched = true;
+    }
+    if (obj_id2.idx == 6) {
+        ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.ref).touched = true;
+    }
+
+
 
     {
         CountT i = 0;
@@ -955,14 +974,20 @@ static inline void solveVelocitiesForContact(Context &ctx,
     Vector3 inv_I1 = metadata1.mass.invInertiaTensor;
     Vector3 inv_I2 = metadata2.mass.invInertiaTensor;
 
-    if (resp_type1 == ResponseType::Static) {
+    if (resp_type1 != ResponseType::Dynamic) {
         inv_m1 = 0.f;
         inv_I1 = Vector3::zero();
+        if (resp_type2 == ResponseType::Kinematic) {
+            return;
+        }
     }
 
-    if (resp_type2 == ResponseType::Static) {
+    if (resp_type2 != ResponseType::Dynamic) {
         inv_m2 = 0.f;
         inv_I2 = Vector3::zero();
+        if (resp_type1 == ResponseType::Kinematic) {
+            return;
+        }
     }
 
     float mu_d = 0.5f * (metadata1.friction.muD + metadata2.friction.muD);
@@ -987,6 +1012,12 @@ static inline void solveVelocitiesForContact(Context &ctx,
             r1_presolve, r2_presolve); // FIXME r1_world or presolve?
 
         float vn_bar = dot(contact.normal, v_bar);
+
+        // Special purpose agent logic.
+        if (obj_id1.idx == 6 || obj_id2.idx == 6) {
+            // Agent don't bounce.
+            vn_bar = 0.0f;
+        }
 
         Vector3 r1_world = q1.rotateVec(r1);
         Vector3 r2_world = q2.rotateVec(r2);

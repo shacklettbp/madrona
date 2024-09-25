@@ -33,6 +33,10 @@ struct Velocity {
     math::Vector3 angular;
 };
 
+struct AgentTouched {
+    bool touched;
+};
+
 struct SolverBundleAlias {};
 
 struct RigidBody : Bundle<
@@ -42,6 +46,7 @@ struct RigidBody : Bundle<
     Velocity, 
     ExternalForce,
     ExternalTorque,
+    AgentTouched,
     SolverBundleAlias
 > {};
 
@@ -161,6 +166,11 @@ namespace PhysicsSystem {
         XPBD,
         TGS,
     };
+
+    void updatePhysicsStepParameters(Context &ctx,
+                             float delta_t,
+                             CountT num_substeps,
+                             float g_mag);
 
     void init(Context &ctx,
               ObjectManager *obj_mgr,

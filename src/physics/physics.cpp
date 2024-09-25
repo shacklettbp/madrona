@@ -93,6 +93,20 @@ static void initPhysicsState(Context &ctx,
 
 namespace PhysicsSystem {
 
+void updatePhysicsStepParameters(Context &ctx,
+                             float delta_t,
+                             CountT num_substeps,
+                             float g_mag)
+{
+    float h = delta_t / (float)num_substeps;
+    
+    PhysicsSystemState &state = ctx.singleton<PhysicsSystemState>();
+
+    state.deltaT = delta_t;
+    state.h = h;
+    state.restitutionThreshold = 2.f * g_mag * h;
+}
+
 void init(Context &ctx,
           ObjectManager *obj_mgr,
           float delta_t,
@@ -313,6 +327,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<Velocity>();
     registry.registerComponent<ExternalForce>();
     registry.registerComponent<ExternalTorque>();
+    registry.registerComponent<AgentTouched>();
 
     registry.registerSingleton<broadphase::BVH>();
 
