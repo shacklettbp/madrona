@@ -147,6 +147,10 @@ struct BVHParams {
     cudaTextureObject_t *textures;
 
     float nearSphere;
+
+    // Used to determine how many thread blocks per SM.
+    uint32_t numSMs;
+    uint32_t smSharedMemory;
 };
 
 }

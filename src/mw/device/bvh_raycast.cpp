@@ -557,9 +557,8 @@ static __device__ TraceResult traceRay(
             uint32_t grp_present_bits = 0;
             uint32_t tri_present_bits = 0;
 
-            // if (child_node_idx == 
 #pragma unroll
-            for (int i = 0; i < 4 /* new_current.numChildren */; ++i) {
+            for (int i = 0; i < 4; ++i) {
                 if (new_current.childrenIdx[i] != 0xFFFF'FFFF) {
                     auto [t_near, t_far] = getNearFar(
                             new_current, i,
@@ -594,7 +593,6 @@ static __device__ TraceResult traceRay(
             }
         } else {
             triangle_grp = current_grp;
-            // current_grp = invalidNodeGroup();
         }
 
         if (getTrianglePresentBits(triangle_grp) != 0) {

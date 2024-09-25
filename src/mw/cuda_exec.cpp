@@ -1616,6 +1616,18 @@ static GPUEngineState initEngineAndUserState(
     CUcontext cu_ctx,
     cudaStream_t strm)
 {
+    int num_sms;
+    int shared_mem_per_sm;
+
+    { // Get properties about the GPU
+        REQ_CU(cuDeviceGetAttribute(
+            &num_sms, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, cu_gpu));
+        REQ_CU(cuDeviceGetAttribute(
+               &shared_mem_per_sm, 
+               CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
+               cu_gpu));
+    }
+
     assert(num_taskgraphs > 0);
 
     auto launchKernel = [strm](CUfunction f, uint32_t num_blocks,
@@ -1835,7 +1847,9 @@ static GPUEngineState initEngineAndUserState(
             bvh_kernels.timingInfo,
             render_cfg->materialData.materials,
             render_cfg->materialData.textures,
-            render_cfg->nearPlane);
+            render_cfg->nearPlane,
+            (uint32_t)num_sms,
+            (uint32_t)shared_mem_per_sm);
 
         // Launch the kernel in the megakernel module to initialize the BVH 
         // params
@@ -2038,7 +2052,9 @@ static CUgraphExec makeTaskGraphRunGraph(
     Span<const uint32_t> taskgraph_ids,
     const MegakernelConfig *megakernel_cfgs,
     const CUfunction *megakernels,
-    int64_t num_megakernels)
+    int64_t num_megakernels,
+    const char *stat_name,
+    CUevent *start, CUevent *end)
 {
     CUgraph run_graph;
     REQ_CU(cuGraphCreate(&run_graph, 0));
@@ -2064,6 +2080,13 @@ static CUgraphExec makeTaskGraphRunGraph(
         DynArray<int32_t>({(int32_t)default_megakernel_idx});
 
     DynArray<CUgraphNode> megakernel_launches(0);
+
+    if (stat_name) {
+        CUgraphNode start_node;
+        REQ_CU(cuGraphAddEventRecordNode(&start_node,
+                    run_graph, nullptr, 0, *start));
+        megakernel_launches.push_back(start_node);
+    }
 
     auto addMegakernelNode = [&](int64_t megakernel_idx,
                                  CUgraphNode *dependencies,
@@ -2128,6 +2151,13 @@ static CUgraphExec makeTaskGraphRunGraph(
 
     for (uint32_t taskgraph_id : taskgraph_ids) {
         addNodesForTaskGraph(taskgraph_id);
+    }
+
+    if (stat_name) {
+        CUgraphNode end_node;
+        REQ_CU(cuGraphAddEventRecordNode(&end_node,
+                    run_graph, &megakernel_launches.back(), 1,
+                    *end));
     }
 
     CUgraphExec run_graph_exec;
@@ -2275,6 +2305,31 @@ MWCudaExecutor::~MWCudaExecutor()
 
     REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
+
+    if (impl_->enableRaycasting) { // RT times
+        float avg_total_time = 0.f;
+        uint32_t num_times = impl_->bvhKernels.recordedTimings.size();
+        for (int i = 0; i < num_times; ++i) {
+            avg_total_time += impl_->bvhKernels.recordedTimings[i].totalTime /
+                (float)num_times;
+        }
+
+        printf("rt avg total time = %f ms\n", avg_total_time);
+    }
+
+    // Other times
+    for (int g = 0; g < impl_->timingGroups.size(); ++g) {
+        TimingGroup &times = impl_->timingGroups[g];
+
+        float avg_total_time = 0.f;
+        for (int i = 0; i < times.recordedTimings.size(); ++i) {
+            avg_total_time += times.recordedTimings[i] /
+                (float)times.recordedTimings.size();
+        }
+
+        printf("%s avg total time = %f ms\n", times.statName,
+                avg_total_time);
+    }
 }
 
 MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
@@ -2386,7 +2441,7 @@ MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
                     get_prev_node(), 1, &bvh_launch_params));
     }
 
-    if (true) {
+    { // Push the widen node
         push_new_node();
         REQ_CU(cuGraphAddEventRecordNode(
                     get_new_node(), run_graph,
@@ -2462,21 +2517,36 @@ MWCudaLaunchGraph MWCudaExecutor::buildRenderGraph()
 }
 
 MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
-        Span<const uint32_t> taskgraph_ids)
+        Span<const uint32_t> taskgraph_ids,
+        const char *stat_name)
 {
+    CUevent start, end;
+
+    if (stat_name) {
+        cuEventCreate(&start, CU_EVENT_DEFAULT);
+        cuEventCreate(&end, CU_EVENT_DEFAULT);
+    }
+
     auto run_graph = makeTaskGraphRunGraph(
         taskgraph_ids,
         impl_->taskGraphsState.megakernelConfigs.data(),
         impl_->taskGraphsState.megakernels.data(),
-        impl_->taskGraphsState.megakernels.size());
+        impl_->taskGraphsState.megakernels.size(),
+        stat_name,
+        &start, &end);
+
+    uint32_t timing_group_idx = impl_->timingGroups.size();
+    if (stat_name) {
+        impl_->timingGroups.push_back({stat_name});
+    }
 
     return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
         .runGraph = run_graph,
         .enableRaytracing = false,
-        .start = {},
-        .end = {},
-        .statName = nullptr,
-        .timingGroupIndex = 0,
+        .start = start,
+        .end = end,
+        .statName = stat_name,
+        .timingGroupIndex = timing_group_idx,
     });
 }
 
@@ -2510,6 +2580,18 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
 
         impl_->timingGroups[launch_graph.impl_->timingGroupIndex].
             recordedTimings.push_back(sort_ms);
+    } else if (launch_graph.impl_->enableRaytracing) {
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.allocEvent));
+        REQ_CU(cuEventSynchronize(impl_->bvhKernels.stopEvent));
+
+        float total_time = 0.f;
+        REQ_CU(cuEventElapsedTime(&total_time, 
+                    impl_->bvhKernels.allocEvent,
+                    impl_->bvhKernels.stopEvent));
+
+        impl_->bvhKernels.recordedTimings.push_back({
+                .totalTime = total_time
+                });
     }
 }
 
