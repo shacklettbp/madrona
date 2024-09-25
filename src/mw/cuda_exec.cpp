@@ -1091,6 +1091,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         "-DMADRONA_MWGPU_BVH_MODULE",
         "-arch", gpu_arch_str.c_str(),
         "-lineinfo",
+        "-maxrregcount=96"
     };
 
     if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
@@ -1122,6 +1123,13 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     for (uint32_t i = 0; i < bvh_srcs.size(); ++i) {
         auto cur_compile_flags = compile_flags;
+        std::string cur_path = bvh_srcs[i];
+
+#if 0
+        if (cur_path.find("raycast") != std::string::npos) {
+            cur_compile_flags.push_back("-maxrregcount=96");
+        }
+#endif
 
         std::ifstream bvh_file_stream(bvh_srcs[i]);
         std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
@@ -1132,8 +1140,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         // Gives us LTOIR
         auto jit_output = cu::jitCompileCPPSrc(
             bvh_src.c_str(), bvh_srcs[i],
-            compile_flags.data(), compile_flags.size(),
-            compile_flags.data(), compile_flags.size(),
+            cur_compile_flags.data(), cur_compile_flags.size(),
+            cur_compile_flags.data(), cur_compile_flags.size(),
             true);
 
         addToLinker(jit_output.outputBinary, bvh_srcs[i]);
