@@ -20,9 +20,18 @@ using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::render;
 
-namespace sm {
-// Only shared memory to be used
-extern __shared__ uint8_t buffer[];
+namespace smem {
+// Per thread, we can store 18 stack entries.
+static constexpr size_t kBufSize = 9 * 1024;
+extern __shared__ uint8_t buffer[kBufSize];
+
+struct TraceState {
+    Vector3 rayO;
+    Vector3 rayD;
+    Diag3x3 invRayD;
+    float tMax;
+};
+
 }
 
 extern "C" __constant__ BVHParams bvhParams;
@@ -449,6 +458,18 @@ static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
 {
+    uint8_t *smem_scratch = nullptr;
+    {
+        uint32_t linear_tid =
+            threadIdx.x + 
+            threadIdx.y * blockDim.x + 
+            threadIdx.z * blockDim.x * blockDim.y;
+        uint32_t bytes_per_thread = smem::kBufSize /
+            (blockDim.x * blockDim.y * blockDim.z);
+
+        smem_scratch = &smem::buffer[linear_tid * bytes_per_thread];
+    }
+
     // We create these so that we can keep track of the original ray origin,
     // direction in world space. We will need to transform them when we enter
     // a bottom level structure.
