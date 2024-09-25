@@ -309,6 +309,13 @@ struct SortArchetypeNodeBase : NodeBase {
         void onesweep(int32_t invocation_idx);
     };
 
+    struct ScanNode : NodeBase {
+        ScanNode(ParentNodeT parent);
+        ParentNodeT parentNode;
+
+        void scan(int32_t invocation_idx);
+    }
+
     struct RearrangeNode : NodeBase {
         RearrangeNode(uint32_t taskgraph_id, ParentNodeT parent,
                       int32_t col_idx);
