@@ -455,6 +455,17 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
     }
 }
 
+static Diag3x3 getInvRay(Vector3 ray_d)
+{
+    constexpr float diveps = 0.0000001f;
+
+    return Diag3x3 {
+        copysignf(ray_d.x == 0 ? 1/diveps : 1/ray_d.x, ray_d.x),
+        copysignf(ray_d.y == 0 ? 1/diveps : 1/ray_d.y, ray_d.y),
+        copysignf(ray_d.z == 0 ? 1/diveps : 1/ray_d.z, ray_d.z),
+    };
+}
+
 static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
@@ -464,7 +475,7 @@ static __device__ TraceResult traceRay(
     // a bottom level structure.
     Vector3 ray_o = trace_info.rayOrigin;
     Vector3 ray_d = trace_info.rayDirection;
-    Diag3x3 inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+    Diag3x3 inv_ray_d = getInvRay(ray_d);// Diag3x3::fromVec(ray_d).inv();
     float t_max = trace_info.tMax;
 
     TraceResult result = {
@@ -542,7 +553,7 @@ static __device__ TraceResult traceRay(
                 t_max *= t_scale;
 
                 ray_d /= t_scale;
-                inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+                inv_ray_d = getInvRay(ray_d); // Diag3x3::fromVec(ray_d).inv();
                 isect_info = computeRayIsectInfo(ray_o, ray_d, inv_ray_d);
 
                 node_buffer = current_bvh->nodes;
@@ -651,7 +662,7 @@ static __device__ TraceResult traceRay(
                     // Just restore all the trace info.
                     ray_o = trace_info.rayOrigin;
                     ray_d = trace_info.rayDirection;
-                    inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+                    inv_ray_d = getInvRay(ray_d); //Diag3x3::fromVec(ray_d).inv();
 
                     node_buffer = world_info.nodes;
                 }
