@@ -20,31 +20,27 @@ using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::render;
 
-namespace smem {
-// Per thread, we can store 18 stack entries.
-static constexpr size_t kBufSize = 9 * 1024;
-extern __shared__ uint8_t buffer[kBufSize];
-
-struct TraceState {
-    Vector3 rayO;
-    Vector3 rayD;
-    Diag3x3 invRayD;
-    float tMax;
-};
-
+namespace sm {
+// Only shared memory to be used
+extern __shared__ uint8_t buffer[];
 }
 
 extern "C" __constant__ BVHParams bvhParams;
 
 inline Vector3 lighting(Vector3 diffuse,
                         Vector3 normal,
-                        Vector3 raydir,
-                        float roughness,
-                        float metalness)
+                        Vector3 light_dir)
 {
     constexpr float ambient = 0.4;
-    Vector3 lightDir = Vector3{0.5,0.5,0};
-    return (fminf(fmaxf(normal.dot(lightDir),0.f)+ambient, 1.0f)) * diffuse;
+    return (fminf(fmaxf(normal.dot(light_dir),0.f)+ambient, 1.0f)) * diffuse;
+}
+
+inline Vector3 lightingShadow(
+        Vector3 diffuse,
+        Vector3 normal)
+{
+    constexpr float ambient = 0.4;
+    return ambient * diffuse;
 }
 
 inline Vector3 calculateOutRay(PerspectiveCameraData *view_data,
@@ -82,6 +78,9 @@ inline Vector3 calculateOutRay(PerspectiveCameraData *view_data,
 struct TraceResult {
     bool hit;
     Vector3 color;
+    Vector3 normal;
+    float metalness;
+    float roughness;
     float depth;
 };
 
@@ -90,11 +89,13 @@ struct TraceInfo {
     Vector3 rayDirection;
     float tMin;
     float tMax;
+    bool dOnly; // Depth only
 };
 
 struct TraceWorldInfo {
     QBVHNode *nodes;
     InstanceData *instances;
+    Vector3 lightDir;
 };
 
 enum class GroupType : uint8_t {
@@ -458,18 +459,6 @@ static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
 {
-    uint8_t *smem_scratch = nullptr;
-    {
-        uint32_t linear_tid =
-            threadIdx.x + 
-            threadIdx.y * blockDim.x + 
-            threadIdx.z * blockDim.x * blockDim.y;
-        uint32_t bytes_per_thread = smem::kBufSize /
-            (blockDim.x * blockDim.y * blockDim.z);
-
-        smem_scratch = &smem::buffer[linear_tid * bytes_per_thread];
-    }
-
     // We create these so that we can keep track of the original ray origin,
     // direction in world space. We will need to transform them when we enter
     // a bottom level structure.
@@ -527,8 +516,6 @@ static __device__ TraceResult traceRay(
             child_node_idx = child_node_idx & (~0x8000'0000);
 
             GroupType new_grp_type = GroupType::TopLevel;
-
-            uint32_t parent_grp_idx = (current_grp & 0xFFFF'FFFF);
 
             if (parent_grp_type == GroupType::TopLevel &&
                 child_is_leaf) {
@@ -677,31 +664,36 @@ static __device__ TraceResult traceRay(
     if (tri_hit.hit) {
         tri_hit.tHit = t_max;
 
-        if (bvhParams.raycastRGBD) {
+        if (bvhParams.raycastRGBD && (!trace_info.dOnly)) {
             int32_t material_idx = tri_hit.bvh->getMaterialIDX(
                     tri_hit.leafMaterialIndex);
-            Material *mat = &bvhParams.materials[material_idx];
 
-            Vector3 color = {mat->color.x, mat->color.y, mat->color.z};
+            Vector3 color = { 1.f, 1.f, 1.f };
 
-            if (mat->textureIdx != -1) {
-                cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
+            if (material_idx != -1) {
+                Material *mat = &bvhParams.materials[material_idx];
 
-                float4 sampled_color = tex2D<float4>(*tex,
-                    tri_hit.uv.x, tri_hit.uv.y);
+                if (mat->textureIdx != -1) {
+                    cudaTextureObject_t *tex = &bvhParams.textures[mat->textureIdx];
 
-                Vector3 tex_color = { sampled_color.x,
-                                      sampled_color.y,
-                                      sampled_color.z };
+                    float4 sampled_color = tex2D<float4>(*tex,
+                            tri_hit.uv.x, 1.f - tri_hit.uv.y);
 
-                color.x *= tex_color.x;
-                color.y *= tex_color.y;
-                color.z *= tex_color.z;
+                    Vector3 tex_color = { sampled_color.x,
+                        sampled_color.y,
+                        sampled_color.z };
+
+                    color.x *= tex_color.x;
+                    color.y *= tex_color.y;
+                    color.z *= tex_color.z;
+                }
+
+                result.metalness = mat->metalness;
+                result.roughness = mat->roughness;
             }
 
-            result.color = lighting(
-                    color, tri_hit.normal, 
-                    trace_info.rayDirection, 1, 1);
+            result.color = color;
+            result.normal = tri_hit.normal;
         }
         
         result.depth = tri_hit.tHit;
@@ -728,6 +720,60 @@ static __device__ void writeDepth(uint32_t pixel_byte_offset,
     float *depth_out = (float *)
         ((uint8_t *)bvhParams.depthOutput + pixel_byte_offset);
     *depth_out = depth;
+}
+
+struct FragmentResult {
+    bool hit;
+    Vector3 color;
+    Vector3 normal;
+    float depth;
+};
+
+static __device__ FragmentResult computeFragment(
+    TraceInfo trace_info,
+    TraceWorldInfo world_info)
+{
+    // Direct hit first
+    TraceResult first_hit = traceRay(trace_info, world_info);
+    TraceResult shadow_hit = {};
+
+    __syncwarp();
+
+    if (first_hit.hit) {
+        Vector3 hit_pos = trace_info.rayOrigin +
+                          first_hit.depth * trace_info.rayDirection;
+
+        shadow_hit = traceRay(
+                TraceInfo {
+                    .rayOrigin = hit_pos,
+                    .rayDirection = world_info.lightDir,
+                    .tMin = 0.000001f,
+                    .tMax = 10000.f,
+                    .dOnly = true
+                }, world_info);
+
+        if (shadow_hit.hit) {
+            return FragmentResult {
+                .hit = true,
+                .color = lightingShadow(first_hit.color, first_hit.normal),
+                .normal = first_hit.normal,
+                .depth = first_hit.depth
+            };
+        } else {
+            return FragmentResult {
+                .hit = true,
+                .color = lighting(first_hit.color, 
+                                  first_hit.normal,
+                                  world_info.lightDir),
+                .normal = first_hit.normal,
+                .depth = first_hit.depth
+            };
+        }
+    }
+
+    return FragmentResult {
+        .hit = false
+    };
 }
 
 extern "C" __global__ void bvhRaycastEntry()
@@ -765,19 +811,28 @@ extern "C" __global__ void bvhRaycastEntry()
 
         uint32_t internal_nodes_offset = bvhParams.instanceOffsets[world_idx];
 
-        TraceResult result = traceRay(
+
+
+        // This does both the tracing / lighting, etc... just like a fragment
+        // shader does in GLSL.
+        FragmentResult result = computeFragment(
             TraceInfo {
                 .rayOrigin = ray_start,
                 .rayDirection = ray_dir,
                 .tMin = bvhParams.nearSphere,
                 .tMax = 10000.f,
+                .dOnly = false
             },
             TraceWorldInfo {
                 .nodes = bvhParams.internalData->traversalNodes + 
                          internal_nodes_offset,
-                .instances = bvhParams.instances + internal_nodes_offset
+                .instances = bvhParams.instances + internal_nodes_offset,
+                .lightDir = Vector3{ 0.5, 0.5, 0.5 }.normalize()
             }
         );
+
+
+
 
         uint32_t linear_pixel_idx = 4 * 
             (pixel_y + pixel_x * bvhParams.renderOutputResolution);
