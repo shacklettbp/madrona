@@ -94,7 +94,9 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
                                          void *timings,
                                          void *materials,
                                          void *textures,
-                                         float near_sphere)
+                                         float near_sphere,
+                                         uint32_t num_sms,
+                                         uint32_t sm_shared_memory)
 {
     using namespace madrona;
     using namespace madrona::render;
@@ -162,6 +164,9 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
     params->nearSphere = near_sphere;
 
     params->raycastRGBD = raycast_rgbd;
+
+    params->numSMs = num_sms;
+    params->smSharedMemory = sm_shared_memory;
 }
 
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates

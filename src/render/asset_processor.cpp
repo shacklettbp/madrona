@@ -55,8 +55,8 @@ static bool loadCache(const char *location,
         fread(&aabb_out, sizeof(aabb_out), 1, ptr);
         fread(&material_idx, sizeof(material_idx), 1, ptr);
 
-        DynArray<MeshBVH::Node> nodes{num_nodes};
-        fread(nodes.data(), sizeof(MeshBVH::Node), num_nodes, ptr);
+        DynArray<QBVHNode> nodes{num_nodes};
+        fread(nodes.data(), sizeof(QBVHNode), num_nodes, ptr);
 
 #if 0
         DynArray<MeshBVH::LeafGeometry> leaf_geos{num_leaves};
@@ -103,7 +103,7 @@ static void writeCache(const char *location, HeapArray<MeshBVH> &bvhs)
         fwrite(&bvhs[i].rootAABB, sizeof(math::AABB), 1, ptr);
         fwrite(&bvhs[i].materialIDX, sizeof(int32_t), 1, ptr);
 
-        fwrite(bvhs[i].nodes, sizeof(MeshBVH::Node), bvhs[i].numNodes, ptr);
+        fwrite(bvhs[i].nodes, sizeof(QBVHNode), bvhs[i].numNodes, ptr);
         // fwrite(bvhs[i].leafGeos, sizeof(MeshBVH::LeafGeometry), bvhs[i].numLeaves, ptr);
         fwrite(bvhs[i].vertices, sizeof(MeshBVH::BVHVertex), bvhs[i].numVerts, ptr);
 
@@ -174,7 +174,7 @@ MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
     uint64_t num_bvh_bytes = num_bvhs *
         sizeof(MeshBVH);
     uint64_t num_nodes_bytes = num_nodes *
-        sizeof(MeshBVH::Node);
+        sizeof(QBVHNode);
     uint64_t num_leaf_mat_bytes = num_leaf_mats *
         sizeof(MeshBVH::LeafMaterial);
     uint64_t num_vertices_bytes = num_vertices *
@@ -182,7 +182,7 @@ MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
 
     // All pointers to GPU memory
     auto *bvhs = (MeshBVH *)cu::allocGPU(num_bvh_bytes);
-    auto *nodes = (MeshBVH::Node *)cu::allocGPU(num_nodes_bytes);
+    auto *nodes = (QBVHNode *)cu::allocGPU(num_nodes_bytes);
 #if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
 #else
     MeshBVH::LeafGeometry *leaf_geos = (MeshBVH::LeafGeometry *)
@@ -216,7 +216,7 @@ MeshBVHData makeBVHData(Span<const imp::SourceObject> src_objs)
         REQ_CUDA(cudaMemcpy(bvhs + bvh_idx,
             &tmp, sizeof(tmp), cudaMemcpyHostToDevice));
         REQ_CUDA(cudaMemcpy(nodes + node_offset,
-            bvh.nodes, bvh.numNodes * sizeof(MeshBVH::Node),
+            bvh.nodes, bvh.numNodes * sizeof(QBVHNode),
             cudaMemcpyHostToDevice));
 #if !defined(MADRONA_COMPRESSED_DEINDEXED) && !defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
         REQ_CUDA(cudaMemcpy(leaf_geos + leaf_offset,
@@ -270,7 +270,7 @@ MaterialData initMaterialData(
 
     for (uint32_t i = 0; i < num_textures; ++i) {
         const auto &tex = textures[i];
-        int width, height, components;
+        int width, height;
         void *pixels = nullptr;
 
         if (tex.format == imp::SourceTextureFormat::BC7) {
@@ -311,7 +311,6 @@ MaterialData initMaterialData(
             pixels = tex.data;
             width = tex.width;
             height = tex.height; 
-            components = 4;
 
             // For now, only allow this format
             cudaChannelFormatDesc channel_desc =

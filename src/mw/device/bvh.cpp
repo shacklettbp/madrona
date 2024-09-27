@@ -1089,7 +1089,7 @@ extern "C" __global__ void bvhWidenTree()
                 LBVHNode *current_node = &smem->internalNodesPtr[lbvh_node_idx];
 
                 uint32_t num_children = 0;
-                QBVHNode::NodeIndexT children_indices[QBVHNode::NodeWidth];
+                int32_t children_indices[QBVHNode::NodeWidth];
                 math::AABB children_aabbs[QBVHNode::NodeWidth];
 
                 auto push_4wide = [&](LBVHNode *node) {
@@ -1181,10 +1181,22 @@ extern "C" __global__ void bvhWidenTree()
                 QBVHNode *current_qbvh_node =
                     &smem->traversalNodes[stored_job.qbvhNodeIndex - 1];
 
+#if 0
+                if (stored_job.qbvhNodeIndex - 1 == 1) {
+                    LOG("CONSTRUCTION LBVH NODE WITH INDEX 1: num_children = {}\n",
+                            num_children);
+
+                    for (int i = 0; i < num_children; ++i) {
+                        LOG("child {} is {}\n", i, children_indices[i]);
+                    }
+                }
+#endif
+
                 *current_qbvh_node = QBVHNode::construct(
                         num_children,
                         children_aabbs,
-                        children_indices);
+                        children_indices,
+                        stored_job.qbvhNodeIndex - 1);
 
                 smem->numJobs.fetch_add(-1, std::memory_order_release);
             }
