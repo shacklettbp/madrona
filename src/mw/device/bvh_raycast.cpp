@@ -739,7 +739,14 @@ static __device__ FragmentResult computeFragment(
 
     __syncwarp();
 
-    if (first_hit.hit) {
+    if (!bvhParams.raycastRGBD) {
+        if (first_hit.hit) {
+            return FragmentResult {
+                .hit = true,
+                .depth = first_hit.depth
+            };
+        }
+    } else if (first_hit.hit) {
         Vector3 hit_pos = trace_info.rayOrigin +
                           first_hit.depth * trace_info.rayDirection;
 
@@ -827,7 +834,7 @@ extern "C" __global__ void bvhRaycastEntry()
                 .nodes = bvhParams.internalData->traversalNodes + 
                          internal_nodes_offset,
                 .instances = bvhParams.instances + internal_nodes_offset,
-                .lightDir = Vector3{ 0.5, 0.5, 0.5 }.normalize()
+                .lightDir = Vector3{ 0.5, 0.5, 2.f }.normalize()
             }
         );
 
