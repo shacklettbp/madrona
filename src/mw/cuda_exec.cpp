@@ -1014,6 +1014,7 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 
     const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
     const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
+    const char *shadow_enable_env = getenv("MADRONA_RT_SHADOWS");
 
     // Build architecture string for this GPU
     string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
@@ -1094,6 +1095,10 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         "-lineinfo",
         "-maxrregcount=96"
     };
+
+    if (shadow_enable_env && shadow_enable_env[0] == '1') {
+        common_compile_flags.push_back("-DMADRONA_RT_SHADOWS");
+    }
 
     if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
         common_compile_flags.push_back("-DMADRONA_PROFILE_BVH_KERNEL");

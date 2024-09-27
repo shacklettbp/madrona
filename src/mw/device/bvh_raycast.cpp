@@ -753,6 +753,7 @@ static __device__ FragmentResult computeFragment(
         Vector3 hit_pos = trace_info.rayOrigin +
                           first_hit.depth * trace_info.rayDirection;
 
+#if defined (MADRONA_RT_SHADOWS)
         shadow_hit = traceRay(
                 TraceInfo {
                     .rayOrigin = hit_pos,
@@ -770,6 +771,7 @@ static __device__ FragmentResult computeFragment(
                 .depth = first_hit.depth
             };
         } else {
+#endif
             return FragmentResult {
                 .hit = true,
                 .color = lighting(first_hit.color, 
@@ -778,7 +780,9 @@ static __device__ FragmentResult computeFragment(
                 .normal = first_hit.normal,
                 .depth = first_hit.depth
             };
+#if defined (MADRONA_RT_SHADOWS)
         }
+#endif
     }
 
     return FragmentResult {
