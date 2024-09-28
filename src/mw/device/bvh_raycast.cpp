@@ -4,6 +4,8 @@
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
 
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__);
+
 #if 0
 #define LOG_RECURSE(...) mwGPU::HostPrint::log(__VA_ARGS__)
 #else
@@ -858,7 +860,6 @@ extern "C" __global__ void bvhRaycastEntry()
 
 
 
-
         uint32_t linear_pixel_idx = 4 * 
             (pixel_y + pixel_x * bvhParams.renderOutputResolution);
 
@@ -871,7 +872,7 @@ extern "C" __global__ void bvhRaycastEntry()
                 writeRGB(global_pixel_byte_off, result.color);
                 writeDepth(global_pixel_byte_off, result.depth);
             } else {
-                writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f });
+                writeRGB(global_pixel_byte_off, { 1.f, 0.f, 0.f });
                 writeDepth(global_pixel_byte_off, 0.f);
             }
         } else {
