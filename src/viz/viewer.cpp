@@ -621,7 +621,10 @@ void Viewer::Impl::loop(
     glfw_keys[(size_t)KeyboardKey::K7] = GLFW_KEY_7;
     glfw_keys[(size_t)KeyboardKey::K8] = GLFW_KEY_8;
     glfw_keys[(size_t)KeyboardKey::K9] = GLFW_KEY_9;
-    glfw_keys[(size_t)KeyboardKey::K9] = GLFW_KEY_9;
+    glfw_keys[(size_t)KeyboardKey::K0] = GLFW_KEY_0;
+
+    glfw_keys[(size_t)KeyboardKey::Shift] = GLFW_KEY_LEFT_SHIFT;
+    glfw_keys[(size_t)KeyboardKey::Space] = GLFW_KEY_SPACE;
 
     float frame_duration = InternalConfig::secondsPerFrame;
     auto last_sim_tick_time = chrono::steady_clock::now();

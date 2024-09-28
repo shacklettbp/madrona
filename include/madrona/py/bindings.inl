@@ -11,8 +11,10 @@ template <auto iface_fn,
           auto cpu_step_fn,
           auto gpu_init_fn,
           auto gpu_step_fn,
-          auto gpu_load_ckpts_fn,
-          auto gpu_get_ckpts_fn>
+          auto cpu_save_ckpts_fn,
+          auto cpu_restore_ckpts_fn,
+          auto gpu_save_ckpts_fn,
+          auto gpu_restore_ckpts_fn>
 auto JAXInterface::buildEntry()
 {
     using SimT =
@@ -21,8 +23,8 @@ auto JAXInterface::buildEntry()
     return [](nb::object sim, bool xla_gpu) {
         void *init_fn;
         void *step_fn;
-        void *load_ckpts_fn;
-        void *get_ckpts_fn;
+        void *save_ckpts_fn;
+        void *restore_ckpts_fn;
         if (xla_gpu) {
 #ifdef MADRONA_CUDA_SUPPORT
             if constexpr (gpu_init_fn != nullptr &&
@@ -39,24 +41,28 @@ auto JAXInterface::buildEntry()
                 step_fn = nullptr;
             }
 
-            if constexpr (gpu_load_ckpts_fn != nullptr &&
-                    gpu_get_ckpts_fn != nullptr) {
-                auto load_ckpts_wrapper =
-                    &JAXInterface::gpuEntryFn<SimT, gpu_load_ckpts_fn>;
-                load_ckpts_fn = std::bit_cast<void *>(load_ckpts_wrapper);
+            if constexpr (gpu_save_ckpts_fn != nullptr &&
+                    gpu_restore_ckpts_fn != nullptr) {
+                auto gpu_save_ckpts_wrapper =
+                    &JAXInterface::gpuEntryFn<
+                        SimT, gpu_save_ckpts_fn>;
+                save_ckpts_fn = std::bit_cast<void *>(
+                    gpu_save_ckpts_wrapper);
 
-                auto get_ckpts_wrapper =
-                    &JAXInterface::gpuEntryFn<SimT, gpu_get_ckpts_fn>;
-                get_ckpts_fn = std::bit_cast<void *>(get_ckpts_wrapper);
+                auto gpu_restore_ckpts_wrapper =
+                    &JAXInterface::gpuEntryFn<
+                        SimT, gpu_restore_ckpts_fn>;
+                restore_ckpts_fn = std::bit_cast<void *>(
+                    gpu_restore_ckpts_wrapper);
             } else {
-                load_ckpts_fn = nullptr;
-                get_ckpts_fn = nullptr;
+                save_ckpts_fn = nullptr;
+                restore_ckpts_fn = nullptr;
             }
 #else
             init_fn = nullptr;
             step_fn = nullptr;
-            load_ckpts_fn = nullptr;
-            get_ckpts_fn = nullptr;
+            save_ckpts_fn = nullptr;
+            restore_ckpts_fn = nullptr;
 #endif
         } else {
             auto init_wrapper =
@@ -67,24 +73,38 @@ auto JAXInterface::buildEntry()
                 &JAXInterface::cpuEntryFn<SimT, cpu_step_fn>;
             step_fn = std::bit_cast<void *>(step_wrapper);
 
-            load_ckpts_fn = nullptr;
-            get_ckpts_fn = nullptr;
+            if constexpr (cpu_save_ckpts_fn != nullptr &&
+                    cpu_restore_ckpts_fn != nullptr) {
+                auto cpu_save_ckpts_wrapper =
+                    &JAXInterface::cpuEntryFn<
+                        SimT, cpu_save_ckpts_fn>;
+                save_ckpts_fn = std::bit_cast<void *>(
+                    cpu_save_ckpts_wrapper);
+
+                auto cpu_restore_ckpts_wrapper =
+                    &JAXInterface::cpuEntryFn<
+                        SimT, cpu_restore_ckpts_fn>;
+                restore_ckpts_fn = std::bit_cast<void *>(
+                    cpu_restore_ckpts_wrapper);
+            } else {
+                save_ckpts_fn = nullptr;
+                restore_ckpts_fn = nullptr;
+            }
         }
         assert(init_fn != nullptr && step_fn != nullptr);
 
         SimT *sim_ptr = nb::inst_ptr<SimT>(sim);
         TrainInterface iface = std::invoke(iface_fn, *sim_ptr);
         return setup(iface, sim, (void *)sim_ptr, init_fn, step_fn,
-                     load_ckpts_fn, get_ckpts_fn, xla_gpu);
+                     save_ckpts_fn, restore_ckpts_fn, xla_gpu);
     };
 }
 
 template <typename SimT, auto fn>
-void JAXInterface::cpuEntryFn(void *, void **in)
+void JAXInterface::cpuEntryFn(void **out, void **in)
 {
     SimT *sim = *(SimT **)in[0];
-    // FIXME: currently_broken, need to pass args
-    std::invoke(fn, *sim);
+    std::invoke(fn, *sim, in + 2, out);
 }
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -94,8 +114,9 @@ void JAXInterface::gpuEntryFn(cudaStream_t strm, void **buffers,
 {
     SimT *sim = *(SimT **)opaque;
 
-    // The first buffer entry is a token JAX uses for ordering, skip over it
-    std::invoke(fn, *sim, strm, buffers + 1);
+    // The first buffer entry is used by the CPU backend, skip
+    // The scond buffer entry is a token JAX uses for ordering, skip
+    std::invoke(fn, *sim, strm, buffers + 2);
 }
 #endif
 

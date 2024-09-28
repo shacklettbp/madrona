@@ -281,6 +281,11 @@ void StateManager::clearTemporaries()
 inline Loc StateManager::getLoc(Entity e) const
 {
     const EntityStore::EntitySlot &slot = entity_store_.entities[e.id];
+
+    if (slot.gen != e.gen) {
+        return Loc::none();
+    }
+
     return slot.loc;
 }
 

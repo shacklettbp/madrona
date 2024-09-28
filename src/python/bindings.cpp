@@ -205,8 +205,6 @@ nb::dict train_interface_checkpointing_to_pytree(
 {
     nb::dict d;
 
-    d["load"] = tensor_iface_to_jax(
-        jax_mod, iface.checkpointing()->triggerLoad);
     d["data"] = tensor_iface_to_jax(
         jax_mod, iface.checkpointing()->checkpointData);
 
@@ -220,8 +218,8 @@ nb::dict JAXInterface::setup(const TrainInterface &iface,
                              void *sim_ptr,
                              void *init_fn,
                              void *step_fn,
-                             void *load_ckpts_fn,
-                             void *get_ckpts_fn,
+                             void *save_ckpts_fn,
+                             void *restore_ckpts_fn,
                              bool xla_gpu)
 {
     JAXModule jax_mod = JAXModule::imp();
@@ -236,6 +234,7 @@ nb::dict JAXInterface::setup(const TrainInterface &iface,
 
     nb::dict scope;
     scope["sim_obj"] = sim_obj;
+    scope["sim_ptr"] = (uint64_t)sim_ptr;
     scope["sim_encode"] = sim_encode;
     scope["step_inputs_iface"] = input_iface;
     scope["step_outputs_iface"] = output_iface;
@@ -243,21 +242,20 @@ nb::dict JAXInterface::setup(const TrainInterface &iface,
     scope["step_custom_call_capsule"] = step_fn_capsule;
     scope["custom_call_platform"] = xla_gpu ? "gpu" : "cpu";
 
-
     if (iface.checkpointing().has_value()) {
-        assert(load_ckpts_fn && get_ckpts_fn);
+        assert(save_ckpts_fn != nullptr && restore_ckpts_fn != nullptr);
 
         nb::dict checkpointing_iface = train_interface_checkpointing_to_pytree(
             jax_mod, iface);
 
-        nb::capsule load_ckpts_fn_capsule(
-            load_ckpts_fn, "xla._CUSTOM_CALL_TARGET");
-        nb::capsule get_ckpts_fn_capsule(
-            get_ckpts_fn, "xla._CUSTOM_CALL_TARGET");
+        nb::capsule save_ckpts_fn_capsule(
+            save_ckpts_fn, "xla._CUSTOM_CALL_TARGET");
+        nb::capsule restore_ckpts_fn_capsule(
+            restore_ckpts_fn, "xla._CUSTOM_CALL_TARGET");
 
         scope["ckpt_iface"] = checkpointing_iface;
-        scope["load_ckpts_custom_call_capsule"] = load_ckpts_fn_capsule;
-        scope["get_ckpts_custom_call_capsule"] = get_ckpts_fn_capsule;
+        scope["save_ckpts_custom_call_capsule"] = save_ckpts_fn_capsule;
+        scope["restore_ckpts_custom_call_capsule"] = restore_ckpts_fn_capsule;
     } else {
         scope["ckpt_iface"] = nb::none();
     }
@@ -271,8 +269,8 @@ nb::dict JAXInterface::setup(const TrainInterface &iface,
     fns["step"] = scope["step_func"];
 
     if (iface.checkpointing().has_value()) {
-        fns["load_ckpts"] = scope["load_ckpts_func"];
-        fns["get_ckpts"] = scope["get_ckpts_func"];
+        fns["save_ckpts"] = scope["save_ckpts_func"];
+        fns["restore_ckpts"] = scope["restore_ckpts_func"];
     }
 
     return fns;

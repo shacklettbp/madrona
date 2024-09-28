@@ -86,7 +86,7 @@ float Vector2::operator[](CountT i) const
     }
 }
 
-Vector2 & Vector2::operator+=(const Vector2 &o)
+constexpr Vector2 & Vector2::operator+=(const Vector2 &o)
 {
     x += o.x;
     y += o.y;
@@ -94,7 +94,7 @@ Vector2 & Vector2::operator+=(const Vector2 &o)
     return *this;
 }
 
-Vector2 & Vector2::operator-=(const Vector2 &o)
+constexpr Vector2 & Vector2::operator-=(const Vector2 &o)
 {
     x -= o.x;
     y -= o.y;
@@ -102,7 +102,7 @@ Vector2 & Vector2::operator-=(const Vector2 &o)
     return *this;
 }
 
-Vector2 & Vector2::operator+=(float o)
+constexpr Vector2 & Vector2::operator+=(float o)
 {
     x += o;
     y += o;
@@ -110,7 +110,7 @@ Vector2 & Vector2::operator+=(float o)
     return *this;
 }
 
-Vector2 & Vector2::operator-=(float o)
+constexpr Vector2 & Vector2::operator-=(float o)
 {
     x -= o;
     y -= o;
@@ -118,7 +118,7 @@ Vector2 & Vector2::operator-=(float o)
     return *this;
 }
 
-Vector2 & Vector2::operator*=(float o)
+constexpr Vector2 & Vector2::operator*=(float o)
 {
     x *= o;
     y *= o;
@@ -126,14 +126,14 @@ Vector2 & Vector2::operator*=(float o)
     return *this;
 }
 
-Vector2 & Vector2::operator/=(float o)
+constexpr Vector2 & Vector2::operator/=(float o)
 {
     float inv = 1.f / o;
 
     return *this *= inv;
 }
 
-Vector2 operator-(Vector2 v)
+constexpr Vector2 operator-(Vector2 v)
 {
     return Vector2 {
         -v.x,
@@ -141,67 +141,83 @@ Vector2 operator-(Vector2 v)
     };
 }
 
-Vector2 operator+(Vector2 a, const Vector2 &b)
+constexpr Vector2 operator+(Vector2 a, const Vector2 &b)
 {
     a += b;
 
     return a;
 }
 
-Vector2 operator-(Vector2 a, const Vector2 &b)
+constexpr Vector2 operator-(Vector2 a, const Vector2 &b)
 {
     a -= b;
 
     return a;
 }
 
-Vector2 operator+(Vector2 a, float b)
+constexpr Vector2 operator+(Vector2 a, float b)
 {
     a += b;
 
     return a;
 }
 
-Vector2 operator-(Vector2 a, float b)
+constexpr Vector2 operator-(Vector2 a, float b)
 {
     a -= b;
 
     return a;
 }
 
-Vector2 operator*(Vector2 a, float b)
+constexpr Vector2 operator*(Vector2 a, float b)
 {
     a *= b;
 
     return a;
 }
 
-Vector2 operator/(Vector2 a, float b)
+constexpr Vector2 operator/(Vector2 a, float b)
 {
     a /= b;
     return a;
 }
 
-Vector2 operator+(float a, Vector2 b)
+constexpr Vector2 operator+(float a, Vector2 b)
 {
     return b + a;
 }
 
-Vector2 operator-(float a, Vector2 b)
+constexpr Vector2 operator-(float a, Vector2 b)
 {
     return -b + a;
 }
 
-Vector2 operator*(float a, Vector2 b)
+constexpr Vector2 operator*(float a, Vector2 b)
 {
     return b * a;
 }
 
-Vector2 operator/(float a, Vector2 b)
+constexpr Vector2 operator/(float a, Vector2 b)
 {
     return Vector2 {
         a / b.x,
         a / b.y,
+    };
+}
+
+Vector2 Vector2::min(Vector2 a, Vector2 b)
+{
+    return Vector2 {
+        fminf(a.x, b.x),
+        fminf(a.y, b.y),
+    };
+}
+
+Vector2 Vector2::max(Vector2 a, Vector2 b)
+{
+    return Vector2 {
+        fmaxf(a.x, b.x),
+        fmaxf(a.y, b.y),
     };
 }
 
@@ -269,32 +285,32 @@ Vector3 Vector3::normalize() const
     return *this * invLength();
 } 
 
-Vector2 Vector3::xy() const
+constexpr Vector2 Vector3::xy() const
 {
     return Vector2 { .x = x, .y = y };
 }
 
-Vector2 Vector3::yz() const
+constexpr Vector2 Vector3::yz() const
 {
     return Vector2 { .x = y, .y = z };
 }
 
-Vector2 Vector3::xz() const
+constexpr Vector2 Vector3::xz() const
 {
     return Vector2 { .x = x, .y = z };
 }
 
-Vector2 Vector3::yx() const
+constexpr Vector2 Vector3::yx() const
 {
     return Vector2 { .x = y, .y = x };
 }
 
-Vector2 Vector3::zy() const
+constexpr Vector2 Vector3::zy() const
 {
     return Vector2 { .x = z, .y = y };
 }
 
-Vector2 Vector3::zx() const
+constexpr Vector2 Vector3::zx() const
 {
     return Vector2 { .x = z, .y = x };
 }
@@ -325,7 +341,7 @@ float Vector3::operator[](CountT i) const
     }
 }
 
-Vector3 & Vector3::operator+=(const Vector3 &o)
+constexpr Vector3 & Vector3::operator+=(const Vector3 &o)
 {
     x += o.x;
     y += o.y;
@@ -334,7 +350,7 @@ Vector3 & Vector3::operator+=(const Vector3 &o)
     return *this;
 }
 
-Vector3 & Vector3::operator-=(const Vector3 &o)
+constexpr Vector3 & Vector3::operator-=(const Vector3 &o)
 {
     x -= o.x;
     y -= o.y;
@@ -343,7 +359,7 @@ Vector3 & Vector3::operator-=(const Vector3 &o)
     return *this;
 }
 
-Vector3 & Vector3::operator+=(float o)
+constexpr Vector3 & Vector3::operator+=(float o)
 {
     x += o;
     y += o;
@@ -352,7 +368,7 @@ Vector3 & Vector3::operator+=(float o)
     return *this;
 }
 
-Vector3 & Vector3::operator-=(float o)
+constexpr Vector3 & Vector3::operator-=(float o)
 {
     x -= o;
     y -= o;
@@ -361,7 +377,7 @@ Vector3 & Vector3::operator-=(float o)
     return *this;
 }
 
-Vector3 & Vector3::operator*=(float o)
+constexpr Vector3 & Vector3::operator*=(float o)
 {
     x *= o;
     y *= o;
@@ -370,14 +386,14 @@ Vector3 & Vector3::operator*=(float o)
     return *this;
 }
 
-Vector3 & Vector3::operator/=(float o)
+constexpr Vector3 & Vector3::operator/=(float o)
 {
     float inv = 1.f / o;
 
     return *this *= inv;
 }
 
-Vector3 operator-(Vector3 v)
+constexpr Vector3 operator-(Vector3 v)
 {
     return Vector3 {
         -v.x,
@@ -386,63 +402,63 @@ Vector3 operator-(Vector3 v)
     };
 }
 
-Vector3 operator+(Vector3 a, const Vector3 &b)
+constexpr Vector3 operator+(Vector3 a, const Vector3 &b)
 {
     a += b;
 
     return a;
 }
 
-Vector3 operator-(Vector3 a, const Vector3 &b)
+constexpr Vector3 operator-(Vector3 a, const Vector3 &b)
 {
     a -= b;
 
     return a;
 }
 
-Vector3 operator+(Vector3 a, float b)
+constexpr Vector3 operator+(Vector3 a, float b)
 {
     a += b;
 
     return a;
 }
 
-Vector3 operator-(Vector3 a, float b)
+constexpr Vector3 operator-(Vector3 a, float b)
 {
     a -= b;
 
     return a;
 }
 
-Vector3 operator*(Vector3 a, float b)
+constexpr Vector3 operator*(Vector3 a, float b)
 {
     a *= b;
 
     return a;
 }
 
-Vector3 operator/(Vector3 a, float b)
+constexpr Vector3 operator/(Vector3 a, float b)
 {
     a /= b;
     return a;
 }
 
-Vector3 operator+(float a, Vector3 b)
+constexpr Vector3 operator+(float a, Vector3 b)
 {
     return b + a;
 }
 
-Vector3 operator-(float a, Vector3 b)
+constexpr Vector3 operator-(float a, Vector3 b)
 {
     return -b + a;
 }
 
-Vector3 operator*(float a, Vector3 b)
+constexpr Vector3 operator*(float a, Vector3 b)
 {
     return b * a;
 }
 
-Vector3 operator/(float a, Vector3 b)
+constexpr Vector3 operator/(float a, Vector3 b)
 {
     return Vector3 {
         a / b.x,
@@ -1729,7 +1745,7 @@ float AABB::operator[](CountT i) const
         case 3: return pMax.x;
         case 4: return pMax.y;
         case 5: return pMax.z;
-        default: return 0.f;
+        default: MADRONA_UNREACHABLE();
     }
 }
 
@@ -1755,6 +1771,17 @@ AABB AABB::merge(const AABB &a, const AABB &b)
         /* .pMin = */ Vector3::min(a.pMin, b.pMin),
         /* .pMax = */ Vector3::max(a.pMax, b.pMax),
     };
+}
+
+Vector2 AABB2D::centroid() const
+{
+    return 0.5f * (pMin + pMax);
+}
+
+float AABB2D::area() const
+{
+    Vector2 diff = pMax - pMin;
+    return diff.x * diff.y;
 }
 
 }

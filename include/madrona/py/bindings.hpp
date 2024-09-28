@@ -26,13 +26,15 @@ public:
               auto cpu_step_fn,
               auto gpu_init_fn = nullptr,
               auto gpu_step_fn = nullptr,
-              auto gpu_load_ckpts_fn = nullptr,
-              auto gpu_get_ckpts_fn = nullptr>
+              auto cpu_save_ckpts_fn = nullptr,
+              auto cpu_restore_ckpts_fn = nullptr,
+              auto gpu_save_ckpts_fn = nullptr,
+              auto gpu_restore_ckpts_fn = nullptr>
     static auto buildEntry();
 
 private:
     template <typename SimT, auto fn>
-    static void cpuEntryFn(void *out, void **in);
+    static void cpuEntryFn(void **out, void **in);
 
 #ifdef MADRONA_CUDA_SUPPORT
     template <typename SimT, auto fn>
@@ -45,8 +47,8 @@ private:
                           void *sim_ptr,
                           void *init_fn,
                           void *step_fn,
-                          void *load_ckpts_fn,
-                          void *get_ckpts_fn,
+                          void *save_ckpts_fn,
+                          void *restore_ckpts_fn,
                           bool xla_gpu);
 };
 

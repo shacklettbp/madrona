@@ -22,6 +22,7 @@ inline uint64_t bits64(RandKey k);
 inline int32_t sampleI32(RandKey k, int32_t a, int32_t b);
 inline int32_t sampleI32Biased(RandKey k, int32_t a, int32_t b);
 inline float sampleUniform(RandKey k);
+inline bool sampleBool(RandKey k);
 inline math::Vector2 sample2xUniform(RandKey k);
 inline float bitsToFloat01(uint32_t rand_bits);
 
@@ -37,12 +38,13 @@ public:
     inline int32_t sampleI32(int32_t a, int32_t b);
     inline int32_t sampleI32Biased(int32_t a, int32_t b);
     inline float sampleUniform();
+    inline bool sampleBool();
 
     inline RandKey randKey();
 
-    RNG(const RNG &) = delete;
+    RNG(const RNG &) = default;
     RNG(RNG &&) = default;
-    RNG & operator=(const RNG &) = delete;
+    RNG & operator=(const RNG &) = default;
     RNG & operator=(RNG &&) = default;
 
 private:

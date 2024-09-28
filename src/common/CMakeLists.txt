@@ -61,7 +61,13 @@ target_link_libraries(madrona_err
         madrona_noexceptrtti
 )
 
-add_library(madrona_std_mem SHARED
+if (MADRONA_WINDOWS)
+    set(MADRONA_STD_MEM_LIB_TYPE STATIC)
+else()
+    set(MADRONA_STD_MEM_LIB_TYPE SHARED)
+endif()
+
+add_library(madrona_std_mem ${MADRONA_STD_MEM_LIB_TYPE}
     op_new_delete.cpp
 )
 
