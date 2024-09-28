@@ -81,9 +81,14 @@ if (MADRONA_ENABLE_TESTS)
     #set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     add_subdirectory(googletest EXCLUDE_FROM_ALL)
     target_link_libraries(gtest_main PUBLIC
-        madrona_libcxx madrona_noexceptrtti)
+        madrona_noexceptrtti)
     target_link_libraries(gtest PUBLIC
-        madrona_libcxx madrona_noexceptrtti)
+        madrona_noexceptrtti)
+
+    if (NOT WIN32)
+        target_link_libraries(gtest_main PUBLIC madrona_libcxx)
+        target_link_libraries(gtest PUBLIC madrona_libcxx)
+    endif()
 endif ()
 
 if (Python_FOUND)

@@ -19,6 +19,8 @@ namespace madrona {
 template <typename T>
 class Span {
 public:
+    Span() : ptr_(nullptr), n_(0) {}
+
     Span(T *ptr, CountT num_elems)
         : ptr_(ptr), n_(num_elems)
     {}
@@ -43,7 +45,7 @@ public:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winit-list-lifetime"
 #endif
-    Span(std::initializer_list<std::remove_cv_t<T>> init MADRONA_LFBOUND)
+    Span(std::initializer_list<std::remove_cv_t<T>> const && init MADRONA_LFBOUND)
             requires(std::is_const_v<T>)
         : ptr_(init.begin()), n_(init.size())
     {}

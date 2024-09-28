@@ -22,6 +22,8 @@ struct CrashInfo {
     const char *funcname, const char *fmt, ...);
 [[noreturn]] void fatal(const CrashInfo &crash);
 
+void debuggerBreakPoint();
+
 #if __cplusplus >= 202002L
 #define FATAL(fmt, ...) ::madrona::fatal(__FILE__, __LINE__,\
     MADRONA_COMPILER_FUNCTION_NAME, fmt __VA_OPT__(,) __VA_ARGS__ )

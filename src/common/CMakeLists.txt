@@ -40,8 +40,15 @@ elseif (FRONTEND_MSVC)
         /permissive-
         /W4
         /wd4324 # Struct padded for alignas ... yeah that's the point
+        /wd4701 # Potentially uninitialized variable. MSVC analysis really sucks on this
         /wd4244 /wd4267 # Should reenable these
     )
+
+    if (MSVC_VERSION LESS 1936)
+        target_compile_options(madrona_hdrs INTERFACE
+            /wd5223 /wd5030 # msvc::lifetimebound not supported in older msvc, causes warnings
+        )
+    endif()
 
     if (NOT FRONTEND_CLANG_CL)
         target_compile_options(madrona_hdrs INTERFACE
@@ -75,10 +82,22 @@ target_link_libraries(madrona_std_mem PRIVATE
     madrona_hdrs madrona_noexceptrtti madrona_libcxx
 )
 
-add_library(madrona_common STATIC
+add_library(madrona_mem STATIC
     ${MADRONA_INC_DIR}/memory.hpp ${MADRONA_INC_DIR}/memory.inl memory.cpp
     ${MADRONA_INC_DIR}/stack_alloc.hpp ${MADRONA_INC_DIR}/stack_alloc.inl
         stack_alloc.cpp
+)
+
+target_link_libraries(madrona_mem PRIVATE
+  madrona_hdrs madrona_noexceptrtti)
+
+if (NOT WIN32)
+    target_link_libraries(madrona_mem PRIVATE
+        madrona_libcxx_hdrs 
+    )
+endif()
+
+add_library(madrona_common STATIC
     ${MADRONA_INC_DIR}/heap_array.hpp
     ${MADRONA_INC_DIR}/span.hpp
     ${MADRONA_INC_DIR}/math.hpp ${MADRONA_INC_DIR}/math.inl
@@ -111,6 +130,7 @@ target_link_libraries(madrona_common
         madrona_err
         madrona_noexceptrtti
         madrona_std_mem
+        madrona_mem
 )
 
 set_property(TARGET madrona_common PROPERTY

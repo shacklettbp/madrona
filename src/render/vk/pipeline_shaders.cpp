@@ -85,7 +85,7 @@ PipelineShaders::PipelineShaders(
         shaders_.push_back(shader_module);
     }
 
-    StackAlloc::Frame alloc_frame = tmp_alloc.push();
+    AllocFrame alloc_frame = tmp_alloc.push();
 
     CountT merged_set_arr_size = 0;
     for (const SPIRVShader &shader : shaders) {

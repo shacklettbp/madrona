@@ -110,48 +110,48 @@ public:
         return impl_.fetch_add(v, order);
     }
 
-    inline T fetch_add_relaxed(T v) requires (std::is_integral_v<T>)
+    inline T fetch_add_relaxed(T v)
     {
         return impl_.fetch_add(v, sync::relaxed);
     }
 
-    inline T fetch_add_acquire(T v) requires (std::is_integral_v<T>)
+    inline T fetch_add_acquire(T v)
     {
         return impl_.fetch_add(v, sync::acquire);
     }
 
-    inline T fetch_add_release(T v) requires (std::is_integral_v<T>)
+    inline T fetch_add_release(T v)
     {
         return impl_.fetch_add(v, sync::release);
     }
 
-    inline T fetch_add_acq_rel(T v) requires (std::is_integral_v<T>)
+    inline T fetch_add_acq_rel(T v)
     {
         return impl_.fetch_add(v, sync::acq_rel);
     }
 
     template <sync::memory_order order>
-    T fetch_sub(T v) requires (std::is_integral_v<T>)
+    T fetch_sub(T v)
     {
         return impl_.fetch_sub(v, order);
     }
 
-    inline T fetch_sub_relaxed(T v) requires (std::is_integral_v<T>)
+    inline T fetch_sub_relaxed(T v)
     {
         return impl_.fetch_sub(v, sync::relaxed);
     }
 
-    inline T fetch_sub_acquire(T v) requires (std::is_integral_v<T>)
+    inline T fetch_sub_acquire(T v)
     {
         return impl_.fetch_sub(v, sync::acquire);
     }
 
-    inline T fetch_sub_release(T v) requires (std::is_integral_v<T>)
+    inline T fetch_sub_release(T v)
     {
         return impl_.fetch_sub(v, sync::release);
     }
 
-    inline T fetch_sub_acq_rel(T v) requires (std::is_integral_v<T>)
+    inline T fetch_sub_acq_rel(T v)
     {
         return impl_.fetch_sub(v, sync::acq_rel);
     }
@@ -253,7 +253,7 @@ public:
     }
 
     template <sync::memory_order order>
-    inline T fetch_add(T v) requires std::is_integral_v<T>
+    inline T fetch_add(T v)
     {
 #ifndef MADRONA_STD_ATOMIC_REF
         return __atomic_fetch_add(addr_, v, OrderMap<order>::builtin);
@@ -262,18 +262,28 @@ public:
 #endif
     }
 
-    inline T fetch_add_relaxed(T v) requires std::is_integral_v<T>
+    inline T fetch_add_relaxed(T v)
     {
         return fetch_add<sync::relaxed>(v);
     }
 
     template <sync::memory_order order>
-    inline T fetch_sub(T v) requires std::is_integral_v<T>
+    inline T fetch_sub(T v)
     {
 #ifndef MADRONA_STD_ATOMIC_REF
         return __atomic_fetch_sub(addr_, v, OrderMap<order>::builtin);
 #else
         return ref_.fetch_sub(v, order);
+#endif
+    }
+
+    template <sync::memory_order order>
+    inline T fetch_or(T v)
+    {
+#ifndef MADRONA_STD_ATOMIC_REF
+        return __atomic_fetch_or(addr_, v, OrderMap<order>::builtin);
+#else
+        return ref_.fetch_or(v, order);
 #endif
     }
 
@@ -314,7 +324,11 @@ private:
     using ValueT = typename ValueType<sizeof(T)>::type;
     T *addr_;
 #else
+#ifdef MADRONA_GPU_MODE
+    cuda::atomic_ref<T, cuda::thread_scope_device> ref_;
+#else
     std::atomic_ref<T> ref_;
+#endif
     static_assert(decltype(ref_)::is_always_lock_free);
 #endif
 };

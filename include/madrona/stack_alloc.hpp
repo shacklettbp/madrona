@@ -5,18 +5,20 @@
 
 namespace madrona {
 
+struct AllocFrame {
+    void *ptr;
+};
+
 class StackAlloc {
 public:
-    struct Frame {
-        void *ptr;
-    };
-
     StackAlloc(CountT chunk_size = 32768);
     StackAlloc(const StackAlloc &) = delete;
     ~StackAlloc();
 
-    inline Frame push();
-    void pop(Frame frame);
+    inline AllocFrame push();
+    void pop(AllocFrame frame);
+
+    void release();
 
     inline void * alloc(CountT num_bytes, CountT alignment);
 
@@ -30,8 +32,6 @@ private:
     struct ChunkMetadata {
         ChunkMetadata *next;
     };
-
-    [[noreturn]] void allocTooLarge();
 
     static char * newChunk(CountT num_bytes, CountT alignment);
 

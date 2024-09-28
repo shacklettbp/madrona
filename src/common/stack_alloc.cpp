@@ -15,15 +15,10 @@ StackAlloc::StackAlloc(CountT chunk_size)
 
 StackAlloc::~StackAlloc()
 {
-    auto *metadata = (ChunkMetadata *)first_chunk_;
-    while (metadata != nullptr) {
-        auto *next = metadata->next;
-        rawDeallocAligned(metadata);
-        metadata = next;
-    }
+    release();
 }
 
-void StackAlloc::pop(Frame frame)
+void StackAlloc::pop(AllocFrame frame)
 {
     uintptr_t mask = chunk_size_ - 1;
     uintptr_t cur_offset = (uintptr_t)frame.ptr & mask;
@@ -44,9 +39,18 @@ void StackAlloc::pop(Frame frame)
     chunk_offset_ = (uint32_t)cur_offset;
 }
 
-[[noreturn]] void StackAlloc::allocTooLarge()
+void StackAlloc::release()
 {
-    FATAL("StackAlloc cannot satisfy allocation larger than chunk size");
+    auto *metadata = (ChunkMetadata *)first_chunk_;
+    while (metadata != nullptr) {
+        auto *next = metadata->next;
+        rawDeallocAligned(metadata);
+        metadata = next;
+    }
+
+    first_chunk_ = nullptr;
+    cur_chunk_ = nullptr;
+    chunk_offset_ = chunk_size_;
 }
 
 char * StackAlloc::newChunk(CountT num_bytes, CountT alignment)
