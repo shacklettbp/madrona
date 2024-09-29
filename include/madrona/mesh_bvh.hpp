@@ -9,9 +9,7 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #endif
 
-#ifndef MADRONA_BLAS_WIDTH
-#define MADRONA_BLAS_WIDTH 4
-#endif
+#define MADRONA_BVH_WIDTH 8
 
 #ifndef MADRONA_BLAS_LEAF_WIDTH
 #define MADRONA_BLAS_LEAF_WIDTH 2
@@ -121,7 +119,7 @@ struct BVHNodeQuantized {
             }
         }
 
-        for (; iter < 4; ++iter) {
+        for (; iter < MADRONA_BVH_WIDTH; ++iter) {
             // Set the remaining ones to invalid node indices.
             ret.childrenIdx[iter] = 0xFFFF'FFFF;
         }
@@ -146,7 +144,7 @@ struct BVHNodeQuantized {
 };
 
 // The quantized BVH node used currently
-using QBVHNode = BVHNodeQuantized<uint32_t, 4>;
+using QBVHNode = BVHNodeQuantized<uint32_t, MADRONA_BVH_WIDTH>;
 
 struct Material {
     // For now, just a color
@@ -164,7 +162,7 @@ struct TriangleIndices {
 
 struct MeshBVH {
     static constexpr inline CountT numTrisPerLeaf = MADRONA_BLAS_LEAF_WIDTH;
-    static constexpr inline CountT nodeWidth = MADRONA_BLAS_WIDTH;
+    static constexpr inline CountT nodeWidth = MADRONA_BVH_WIDTH;
     static constexpr inline int32_t sentinel = (int32_t)0xFFFF'FFFF;
 
     struct BVHMaterial{

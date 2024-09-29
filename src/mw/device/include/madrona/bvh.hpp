@@ -5,10 +5,6 @@
 #include <madrona/components.hpp>
 #include <madrona/mesh_bvh.hpp>
 
-#ifndef MADRONA_TLAS_WIDTH
-#define MADRONA_TLAS_WIDTH 8
-#endif
-
 namespace madrona {
 
 // This isn't going to be the representation that actually gets traversed

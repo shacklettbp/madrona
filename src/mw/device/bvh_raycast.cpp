@@ -566,7 +566,7 @@ static __device__ TraceResult traceRay(
             uint32_t tri_present_bits = 0;
 
 #pragma unroll
-            for (int i = 0; i < 4; ++i) {
+            for (int i = 0; i < MADRONA_BVH_WIDTH; ++i) {
                 if (new_current.childrenIdx[i] != 0xFFFF'FFFF) {
                     auto [t_near, t_far] = getNearFar(
                             new_current, i,
@@ -735,7 +735,10 @@ static __device__ FragmentResult computeFragment(
 {
     // Direct hit first
     TraceResult first_hit = traceRay(trace_info, world_info);
+
+#if defined (MADRONA_RT_SHADOWS)
     TraceResult shadow_hit = {};
+#endif
 
     __syncwarp();
 

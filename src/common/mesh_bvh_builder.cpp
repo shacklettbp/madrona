@@ -372,12 +372,16 @@ MeshBVH MeshBVHBuilder::build(
     std::vector<InnerNode*> innerNodes;
     std::vector<LeafNode*> leafNodes;
 
-    int childrenCounts[]{0,0,0,0,0};
+    int childrenCounts[]{0,0,0,0,0,0,0,0,0};
 
     int leafID = 0;
     int innerID = 0;
 
+    uint32_t iter_count = 0;
+
     while(!stack.empty()){
+        iter_count++;
+
         Node* node = stack.back();
         stack.pop_back();
         if(!node->isLeaf){
@@ -403,6 +407,8 @@ MeshBVH MeshBVHBuilder::build(
             }
         }
     }
+
+    (void)iter_count;
 
 #if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
     //Adjust Leaves to Reindexed Triangles
