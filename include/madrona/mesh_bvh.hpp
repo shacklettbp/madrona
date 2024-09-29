@@ -9,7 +9,7 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #endif
 
-#define MADRONA_BVH_WIDTH 8
+#define MADRONA_BVH_WIDTH 4
 
 #ifndef MADRONA_BLAS_LEAF_WIDTH
 #define MADRONA_BLAS_LEAF_WIDTH 2
