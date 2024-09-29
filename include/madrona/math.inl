@@ -318,7 +318,6 @@ constexpr Vector2 Vector3::zx() const
 float & Vector3::operator[](CountT i)
 {
     switch (i) {
-        default:
         case 0:
             return x;
         case 1:
