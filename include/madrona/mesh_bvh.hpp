@@ -69,8 +69,7 @@ struct BVHNodeQuantized {
 
     static BVHNodeT construct(uint32_t num_children,
                               math::AABB *child_aabbs,
-                              int32_t *child_indices,
-                              uint32_t my_index)
+                              int32_t *child_indices)
     {
         math::Vector3 root_min = child_aabbs[0].pMin,
                       root_max = child_aabbs[0].pMax;
