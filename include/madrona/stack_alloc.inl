@@ -36,8 +36,12 @@ void * StackAlloc::alloc(CountT num_bytes, CountT alignment)
 
     char *new_chunk = StackAlloc::newChunk(alloc_size, chunk_size_);
 
-    auto *cur_metadata = (ChunkMetadata *)cur_chunk_;
-    cur_metadata->next = (ChunkMetadata *)new_chunk;
+    if (first_chunk_ == nullptr) {
+      first_chunk_ = new_chunk;
+    } else {
+      auto *cur_metadata = (ChunkMetadata *)cur_chunk_;
+      cur_metadata->next = (ChunkMetadata *)new_chunk;
+    }
 
     cur_chunk_ = new_chunk;
     chunk_offset_ = new_offset;

@@ -103,4 +103,11 @@ WorldT & TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::getWorldData(
     return world_datas_[world_idx];
 }
 
+template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
+ContextT & TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::getWorldContext(
+    CountT world_idx)
+{
+    return contexts_[world_idx];
+}
+
 }

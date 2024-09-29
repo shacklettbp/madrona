@@ -94,6 +94,8 @@ public:
     // Get a reference to the per world data class
     inline WorldT & getWorldData(CountT world_idx);
 
+    inline ContextT & getWorldContext(CountT idx);
+
 private:
     struct JobData {
         Context *ctx;
