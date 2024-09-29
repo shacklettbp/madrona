@@ -311,13 +311,23 @@ static bool rayTriangleIntersection(
     const Vector3 B = tri_b - org;
     const Vector3 C = tri_c - org;
 
+    const float a_kz = A[kz];
+    const float a_kx = A[kx];
+    const float a_ky = A[ky];
+    const float b_kz = B[kz];
+    const float b_kx = B[kx];
+    const float b_ky = B[ky];
+    const float c_kz = C[kz];
+    const float c_kx = C[kx];
+    const float c_ky = C[ky];
+
     // Perform shear and scale of vertices
-    const float Ax = fmaf(-Sx, A[kz], A[kx]);
-    const float Ay = fmaf(-Sy, A[kz], A[ky]);
-    const float Bx = fmaf(-Sx, B[kz], B[kx]);
-    const float By = fmaf(-Sy, B[kz], B[ky]);
-    const float Cx = fmaf(-Sx, C[kz], C[kx]);
-    const float Cy = fmaf(-Sy, C[kz], C[ky]);
+    const float Ax = fmaf(-Sx, a_kz, a_kx);
+    const float Ay = fmaf(-Sy, a_kz, a_ky);
+    const float Bx = fmaf(-Sx, b_kz, b_kx);
+    const float By = fmaf(-Sy, b_kz, b_ky);
+    const float Cx = fmaf(-Sx, c_kz, c_kx);
+    const float Cy = fmaf(-Sy, c_kz, c_ky);
 
     // calculate scaled barycentric coordinates
     float U = fmaf(Cx, By, - Cy * Bx);
@@ -367,9 +377,9 @@ static bool rayTriangleIntersection(
 
     // Calculate scaled z-coordinates of vertices and use them to calculate
     // the hit distance
-    const float Az = Sz * A[kz];
-    const float Bz = Sz * B[kz];
-    const float Cz = Sz * C[kz];
+    const float Az = Sz * a_kz;
+    const float Bz = Sz * b_kz;
+    const float Cz = Sz * c_kz;
     const float T = fmaf(U, Az, fmaf(V, Bz, W * Cz));
 
 #ifdef MADRONA_MESHBVH_BACKFACE_CULLING
