@@ -325,6 +325,8 @@ float & Vector3::operator[](CountT i)
             return y;
         case 2:
             return z;
+        default:
+            MADRONA_UNREACHABLE();
     }
 }
 
