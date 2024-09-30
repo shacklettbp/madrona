@@ -66,24 +66,40 @@ float Vector2::invLength() const
 
 float & Vector2::operator[](CountT i)
 {
+#ifdef MADRONA_GPU_MODE
+    // For some reason, the CUDA compiler will sometimes insert a BSYNC 
+    // instruction when using the switch statement. The ternary leads
+    // to the least amount of instructions.
+    return (i == 0) ? x : y;
+#else
     switch (i) {
-        default:
         case 0:
             return x;
         case 1:
             return y;
+        default:
+            MADRONA_UNREACHABLE();
     }
+#endif
 }
 
 float Vector2::operator[](CountT i) const
 {
+#ifdef MADRONA_GPU_MODE
+    // For some reason, the CUDA compiler will sometimes insert a BSYNC 
+    // instruction when using the switch statement. The ternary leads
+    // to the least amount of instructions.
+    return (i == 0) ? x : y;
+#else
     switch (i) {
-        default:
         case 0:
             return x;
         case 1:
             return y;
+        default:
+            MADRONA_UNREACHABLE();
     }
+#endif
 }
 
 constexpr Vector2 & Vector2::operator+=(const Vector2 &o)
@@ -317,6 +333,12 @@ constexpr Vector2 Vector3::zx() const
 
 float & Vector3::operator[](CountT i)
 {
+#ifdef MADRONA_GPU_MODE
+    // For some reason, the CUDA compiler will sometimes insert a BSYNC 
+    // instruction when using the switch statement. The ternary leads
+    // to the least amount of instructions.
+    return (i == 0) ? x : ((i == 1) ? y : z);
+#else
     switch (i) {
         case 0:
             return x;
@@ -327,19 +349,28 @@ float & Vector3::operator[](CountT i)
         default:
             MADRONA_UNREACHABLE();
     }
+#endif
 }
 
 float Vector3::operator[](CountT i) const
 {
+#ifdef MADRONA_GPU_MODE
+    // For some reason, the CUDA compiler will sometimes insert a BSYNC 
+    // instruction when using the switch statement. The ternary leads
+    // to the least amount of instructions.
+    return (i == 0) ? x : ((i == 1) ? y : z);
+#else
     switch (i) {
-        default:
         case 0:
             return x;
         case 1:
             return y;
         case 2:
             return z;
+        default:
+            MADRONA_UNREACHABLE();
     }
+#endif
 }
 
 constexpr Vector3 & Vector3::operator+=(const Vector3 &o)

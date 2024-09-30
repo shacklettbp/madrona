@@ -1,5 +1,8 @@
 #define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
 
+#include <cuda/barrier>
+#include <cuda/pipeline>
+
 #include <madrona/bvh.hpp>
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
@@ -20,9 +23,10 @@ using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::render;
 
-namespace sm {
+namespace smem {
 // Only shared memory to be used
-extern __shared__ uint8_t buffer[];
+static constexpr size_t kBufSize = 9 * 1024;
+extern __shared__ uint8_t buffer[kBufSize];
 }
 
 extern "C" __constant__ BVHParams bvhParams;
@@ -465,10 +469,48 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
     }
 }
 
+static void prefetchNode(uint32_t node_idx,
+                         QBVHNode *node_buffer,
+                         QBVHNode *result_smem,
+                         cuda::pipeline<cuda::thread_scope_thread> &pipe)
+{
+    pipe.producer_acquire();
+    {
+        cuda::memcpy_async(result_smem, 
+                           &node_buffer[node_idx],
+                           sizeof(QBVHNode),
+                           pipe);
+    }
+    pipe.producer_commit();
+}
+
+static QBVHNode readNode(QBVHNode *node_smem,
+                         cuda::pipeline<cuda::thread_scope_thread> &pipe)
+{
+    cuda::pipeline_consumer_wait_prior<0>(pipe);
+    QBVHNode read_node = *node_smem;
+    pipe.consumer_release();
+
+    return read_node;
+}
+
 static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
 {
+    uint8_t *smem_scratch = nullptr;
+    {
+        uint32_t linear_tid =
+            threadIdx.x + 
+            threadIdx.y * blockDim.x + 
+            threadIdx.z * blockDim.x * blockDim.y;
+        uint32_t bytes_per_thread = smem::kBufSize /
+            (blockDim.x * blockDim.y * blockDim.z);
+        smem_scratch = &smem::buffer[linear_tid * bytes_per_thread];
+    }
+
+    cuda::pipeline<cuda::thread_scope_thread> pipe = cuda::make_pipeline();
+
     // We create these so that we can keep track of the original ray origin,
     // direction in world space. We will need to transform them when we enter
     // a bottom level structure.
