@@ -5,17 +5,12 @@
 namespace madrona {
 
 StackAlloc::StackAlloc(CountT chunk_size)
-    : first_chunk_(StackAlloc::newChunk(chunk_size, chunk_size)),
+    : first_chunk_(nullptr),
       cur_chunk_(first_chunk_),
-      chunk_offset_(sizeof(ChunkMetadata)),
+      chunk_offset_((uint32_t)chunk_size),
       chunk_size_((uint32_t)chunk_size)
 {
     assert(utils::isPower2((uint64_t)chunk_size));
-}
-
-StackAlloc::~StackAlloc()
-{
-    release();
 }
 
 void StackAlloc::pop(AllocFrame frame)

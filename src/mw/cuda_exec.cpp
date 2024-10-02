@@ -2318,8 +2318,8 @@ MWCudaExecutor::~MWCudaExecutor()
 
     if (impl_->enableRaycasting) { // RT times
         float avg_total_time = 0.f;
-        uint32_t num_times = impl_->bvhKernels.recordedTimings.size();
-        for (int i = 0; i < num_times; ++i) {
+        u32 num_times = impl_->bvhKernels.recordedTimings.size();
+        for (u32 i = 0; i < num_times; ++i) {
             avg_total_time += impl_->bvhKernels.recordedTimings[i].totalTime /
                 (float)num_times;
         }
@@ -2328,11 +2328,11 @@ MWCudaExecutor::~MWCudaExecutor()
     }
 
     // Other times
-    for (int g = 0; g < impl_->timingGroups.size(); ++g) {
+    for (u32 g = 0; g < impl_->timingGroups.size(); ++g) {
         TimingGroup &times = impl_->timingGroups[g];
 
         float avg_total_time = 0.f;
-        for (int i = 0; i < times.recordedTimings.size(); ++i) {
+        for (u32 i = 0; i < times.recordedTimings.size(); ++i) {
             avg_total_time += times.recordedTimings[i] /
                 (float)times.recordedTimings.size();
         }
@@ -2547,7 +2547,7 @@ MWCudaLaunchGraph MWCudaExecutor::buildLaunchGraph(
 
     uint32_t timing_group_idx = impl_->timingGroups.size();
     if (stat_name) {
-        impl_->timingGroups.push_back({stat_name});
+        impl_->timingGroups.push_back({stat_name, {}});
     }
 
     return MWCudaLaunchGraph(new MWCudaLaunchGraph::Impl {
@@ -2600,8 +2600,14 @@ void MWCudaExecutor::run(MWCudaLaunchGraph &launch_graph)
                     impl_->bvhKernels.stopEvent));
 
         impl_->bvhKernels.recordedTimings.push_back({
-                .totalTime = total_time
-                });
+                .totalTime = total_time,
+                .buildTimeRatio = {},
+                .traceTimeRatio = {},
+                .numTLASTraces = {},
+                .numBLASTraces = {},
+                .tlasRatio = {},
+                .memoryUsage = {},
+            });
     }
 }
 

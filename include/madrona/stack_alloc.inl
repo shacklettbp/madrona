@@ -1,5 +1,35 @@
 namespace madrona {
 
+StackAlloc::StackAlloc(StackAlloc &&o)
+  : first_chunk_(o.first_chunk_),
+    cur_chunk_(o.cur_chunk_),
+    chunk_offset_(o.chunk_offset_),
+    chunk_size_(o.chunk_size_)
+{
+    o.first_chunk_ = nullptr;
+    o.cur_chunk_ = nullptr;
+    o.chunk_offset_ = chunk_size_;
+}
+
+StackAlloc::~StackAlloc()
+{
+    release();
+}
+
+StackAlloc & StackAlloc::operator=(StackAlloc &&o)
+{
+    first_chunk_ = o.first_chunk_;
+    cur_chunk_ = o.cur_chunk_;
+    chunk_offset_ = o.chunk_offset_;
+    chunk_size_ = o.chunk_size_;
+
+    o.first_chunk_ = nullptr;
+    o.cur_chunk_ = nullptr;
+    o.chunk_offset_ = chunk_size_;
+
+    return *this;
+}
+
 AllocFrame StackAlloc::push()
 {
     return AllocFrame {

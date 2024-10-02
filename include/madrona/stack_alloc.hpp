@@ -13,7 +13,11 @@ class StackAlloc {
 public:
     StackAlloc(CountT chunk_size = 32768);
     StackAlloc(const StackAlloc &) = delete;
-    ~StackAlloc();
+    inline StackAlloc(StackAlloc &&o);
+    inline ~StackAlloc();
+
+    StackAlloc & operator=(const StackAlloc &) = delete;
+    inline StackAlloc & operator=(StackAlloc &&o);
 
     inline AllocFrame push();
     void pop(AllocFrame frame);
