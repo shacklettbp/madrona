@@ -872,7 +872,7 @@ extern "C" __global__ void bvhRaycastEntry()
                 writeRGB(global_pixel_byte_off, result.color);
                 writeDepth(global_pixel_byte_off, result.depth);
             } else {
-                writeRGB(global_pixel_byte_off, { 1.f, 0.f, 0.f });
+                writeRGB(global_pixel_byte_off, { 0.f, 0.f, 0.f });
                 writeDepth(global_pixel_byte_off, 0.f);
             }
         } else {
