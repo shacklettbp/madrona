@@ -1769,9 +1769,11 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
         num_total_meshes += obj.meshes.size();
 
         for (const SourceMesh &mesh : obj.meshes) {
+#if 0
             if (mesh.faceCounts != nullptr) {
                 FATAL("Render mesh isn't triangular");
             }
+#endif
 
             num_total_vertices += mesh.numVertices;
             num_total_indices += mesh.numFaces * 3;
