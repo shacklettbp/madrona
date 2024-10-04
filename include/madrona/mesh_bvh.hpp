@@ -1,5 +1,6 @@
 #pragma once
 
+#include <assert.h>
 #include <madrona/types.hpp>
 #include <madrona/geo.hpp>
 
@@ -20,6 +21,8 @@ namespace madrona {
 // This is the structure of the node which is just used for traversal
 template <typename NodeIndex, int Width>
 struct BVHNodeQuantized {
+    static_assert(Width <= 4 && MADRONA_BLAS_LEAF_WIDTH == 2);
+
     using BVHNodeT = BVHNodeQuantized<NodeIndex, Width>;
     using NodeIndexT = NodeIndex;
     
@@ -28,10 +31,7 @@ struct BVHNodeQuantized {
     math::Vector3 minPoint;
 
     int8_t expX, expY, expZ;
-    uint8_t numChildren;
-
-    // If this is a bottom level BVH node
-    uint8_t triSize[Width];
+    uint8_t triSizes;
 
     // Quantized min and max coordinates of the children
     uint8_t qMinX[Width], qMinY[Width], qMinZ[Width];
@@ -94,7 +94,7 @@ struct BVHNodeQuantized {
             .expX = (int8_t)ceilf(log2f(root_extent.x / (powf(2.f, 8.f) - 1.f))),
             .expY = (int8_t)ceilf(log2f(root_extent.y / (powf(2.f, 8.f) - 1.f))),
             .expZ = (int8_t)ceilf(log2f(root_extent.z / (powf(2.f, 8.f) - 1.f))),
-            .numChildren = (uint8_t)num_children
+            // .numChildren = (uint8_t)num_children
         };
 
         int iter = 0;
@@ -139,6 +139,17 @@ struct BVHNodeQuantized {
     uint32_t leafIDX(uint32_t i) const
     {
         return childrenIdx[i] & ~0x8000'0000;
+    }
+
+    void setTriSize(uint32_t i, uint32_t size)
+    {
+        assert(size <= 2);
+        triSizes |= (size << (2 * i));
+    }
+
+    uint32_t getTriSize(uint32_t i) const
+    {
+        return (triSizes >> (2 * i)) & 0b11;
     }
 };
 

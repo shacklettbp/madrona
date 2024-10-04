@@ -57,7 +57,7 @@ void MeshBVH::findOverlaps(const math::AABB &aabb, Fn &&fn) const
                 if (node.isLeaf(i)) {
                     int32_t leaf_idx = node.leafIDX(i);
                     for (CountT leaf_offset = 0;
-                         leaf_offset < node.triSize[i];
+                         leaf_offset < node.getTriSize(i);
                          leaf_offset++) {
                         Vector3 a, b, c;
                         Vector2 uva, uvb, uvc;
@@ -144,7 +144,7 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
                 if (node.isLeaf(i)) {
                     int32_t leaf_idx = node.leafIDX(i);
                     
-                    bool leaf_hit = traceRayLeaf(leaf_idx, node.triSize[i], tri_isect_txfm,
+                    bool leaf_hit = traceRayLeaf(leaf_idx, node.getTriSize(i), tri_isect_txfm,
                         ray_o, t_max, hit_info);
 
                     if (leaf_hit) {
@@ -290,7 +290,7 @@ bool MeshBVH::traceRay(math::Vector3 ray_o,
                     
                     float hit_t;
                     Vector3 leaf_hit_normal;
-                    bool leaf_hit = traceRayLeaf(leaf_idx, node.triSize[i], tri_isect_txfm,
+                    bool leaf_hit = traceRayLeaf(leaf_idx, node.getTriSize(i), tri_isect_txfm,
                         ray_o, t_max, &hit_t, &leaf_hit_normal);
 
                     if (leaf_hit) {

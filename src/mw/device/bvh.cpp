@@ -749,6 +749,8 @@ extern "C" __global__ void bvhBuildFast()
     uint32_t num_loops = 0;
 
     while (thread_offset < smem->totalNumInstances) {
+        __syncthreads();
+
         // Load a bunch of morton codes into shared memory.
         //
         // TODO: Profile the difference between directly loading the morton codes
@@ -790,7 +792,7 @@ extern "C" __global__ void bvhBuildFast()
 
         if (tn_offset == 0) {
             nodes[tn_offset].parent = 0xFFFF'FFFF;
-            // printf("Root at %p\n", &nodes[tn_offset]);
+            // LOG("Hello\n");
         }
 
         if (tn_offset >= world_info.numInternalNodes) {
@@ -858,7 +860,7 @@ extern "C" __global__ void bvhBuildFast()
         if (left_index == split_index) {
             // The left node is a leaf and the leaf's index is split_index
             nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, true);
-            nodes[tn_offset].reachedCount.store_relaxed(0);
+            nodes[tn_offset].reachedCount.store_release(0);
             nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
 
             leaves[split_index].parent = tn_offset;
@@ -868,11 +870,11 @@ extern "C" __global__ void bvhBuildFast()
                     world_info.internalNodesOffset);
 
             leaves[split_index].aabb = bvhParams.aabbs[global_instance_idx].aabb;
-            leaves[split_index].reachedCount.store_relaxed(0);
+            leaves[split_index].reachedCount.store_release(0);
         } else {
             // The left node is an internal node and its index is split_index
             nodes[tn_offset].left = LBVHNode::childIdxToStoreIdx(split_index, false);
-            nodes[tn_offset].reachedCount.store_relaxed(0);
+            nodes[tn_offset].reachedCount.store_release(0);
             nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
             nodes[split_index].parent = tn_offset;
         }
@@ -880,7 +882,7 @@ extern "C" __global__ void bvhBuildFast()
         if (right_index == split_index + 1) {
             // The right node is a leaf and the leaf's index is split_index+1
             nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, true);
-            nodes[tn_offset].reachedCount.store_relaxed(0);
+            nodes[tn_offset].reachedCount.store_release(0);
             nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
 
             leaves[split_index+1].parent = tn_offset;
@@ -890,18 +892,16 @@ extern "C" __global__ void bvhBuildFast()
                     world_info.internalNodesOffset);
 
             leaves[split_index+1].aabb = bvhParams.aabbs[global_instance_idx].aabb;
-            leaves[split_index+1].reachedCount.store_relaxed(0);
+            leaves[split_index+1].reachedCount.store_release(0);
         } else {
             // The right node is an internal node and its index is split_index+1
             nodes[tn_offset].right = LBVHNode::childIdxToStoreIdx(split_index + 1, false);
-            nodes[tn_offset].reachedCount.store_relaxed(0);
+            nodes[tn_offset].reachedCount.store_release(0);
             nodes[tn_offset].instanceIdx = 0xFFFF'FFFF;
             nodes[split_index + 1].parent = tn_offset;
         }
 
         thread_offset += threads_per_grid;
-
-        __syncthreads();
 
         num_loops++;
     }
@@ -931,6 +931,8 @@ extern "C" __global__ void bvhConstructAABBs()
     uint32_t thread_offset = global_tid;
 
     while (thread_offset < smem->totalNumInstances) {
+        __syncthreads();
+
         struct {
             uint32_t idx;
             uint32_t numInternalNodes;
@@ -961,7 +963,7 @@ extern "C" __global__ void bvhConstructAABBs()
 
         // If the value before the add is 0, then we are the first to hit this node.
         // => we need to break out of the loop.
-        while (current->reachedCount.fetch_add_release(1) == 1) {
+        while (current->reachedCount.fetch_add_acq_rel(1) == 1) {
             // Merge the AABBs of the children nodes. (Store like this for now to
             // help when we make the tree 4 wide or 8 wide.
             LBVHNode *children[2];
@@ -1024,7 +1026,6 @@ extern "C" __global__ void bvhConstructAABBs()
         }
 
         thread_offset += threads_per_grid;
-        __syncthreads();
     }
 }
 

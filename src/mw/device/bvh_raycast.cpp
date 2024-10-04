@@ -19,6 +19,8 @@
 #define LOG_INST(...)
 #endif
 
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+
 using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::render;
@@ -128,35 +130,6 @@ static NodeGroup invalidNodeGroup()
     return encodeNodeGroup(0xFFFF'FFFF, 0, GroupType::None);
 }
 
-static NodeGroup getRootGroup(TraceWorldInfo world_info)
-{
-    uint32_t children_count = world_info.nodes[0].numChildren;
-    uint8_t present_bits = (uint8_t)((1ull << children_count) - 1);
-    return encodeNodeGroup(0, present_bits, GroupType::TopLevel);
-}
-
-static GroupType getGroupType(NodeGroup grp)
-{
-    return (GroupType)((grp >> 61ull) & 0b111);
-}
-
-static NodeGroup unsetPresentBit(NodeGroup grp, uint32_t idx)
-{
-    grp &= ~(1ull << (idx + 32ull));
-    return grp;
-}
-
-static uint32_t getPresentBits(NodeGroup grp)
-{
-    return (uint32_t)((grp >> 32) & 0xFF);
-}
-
-static uint32_t getTrianglePresentBits(NodeGroup grp)
-{
-    // 24 bits used for triangle presence
-    return (uint32_t)((grp >> 32) & ((1ull << 24) - 1));
-}
-
 static Vector3 getDirQuant(QBVHNode node, Diag3x3 inv_ray_d)
 {
     return Vector3 {
@@ -209,8 +182,60 @@ static std::pair<float, float> getNearFar(
     };
 }
 
+static NodeGroup getRootGroup(TraceWorldInfo world_info,
+                              Diag3x3 inv_ray_d,
+                              Vector3 ray_o,
+                              float t_max)
+{
+    QBVHNode root_node = world_info.nodes[0];
+
+    uint32_t grp_present_bits = 0;
+
+    { // Calculate the present bits for the root node
+        Vector3 dir_quant = getDirQuant(root_node, inv_ray_d);
+        Vector3 origin_quant = getOriginQuant(root_node, ray_o, inv_ray_d);
+
+        for (int i = 0; i < MADRONA_BVH_WIDTH; ++i) {
+            if (root_node.childrenIdx[i] != 0xFFFF'FFFF) {
+                auto [t_near, t_far] = getNearFar(
+                        root_node, i,
+                        dir_quant,
+                        origin_quant,
+                        t_max);
+
+                if (t_near <= t_far) {
+                    grp_present_bits |= (1 << i);
+                }
+            }
+        }
+    }
+
+    return encodeNodeGroup(0, grp_present_bits, GroupType::TopLevel);
+}
+
+static GroupType getGroupType(NodeGroup grp)
+{
+    return (GroupType)((grp >> 61ull) & 0b111);
+}
+
+static NodeGroup unsetPresentBit(NodeGroup grp, uint32_t idx)
+{
+    grp &= ~(1ull << (idx + 32ull));
+    return grp;
+}
+
+static uint32_t getPresentBits(NodeGroup grp)
+{
+    return (uint32_t)((grp >> 32) & 0xFF);
+}
+
+static uint32_t getTrianglePresentBits(NodeGroup grp)
+{
+    // 24 bits used for triangle presence
+    return (uint32_t)((grp >> 32) & ((1ull << 24) - 1));
+}
+
 struct TriangleIsectInfo {
-    // TODO: can reduce register usage by storing kx/y/z in a single int32_t
     int32_t kx, ky, kz;
     float Sx, Sy, Sz;
 };
@@ -526,7 +551,7 @@ static __device__ TraceResult traceRay(
     NodeGroup stack[64];
     uint32_t stack_size = 0;
 
-    NodeGroup current_grp = getRootGroup(world_info);
+    NodeGroup current_grp = getRootGroup(world_info, inv_ray_d, ray_o, t_max);
     NodeGroup triangle_grp = invalidNodeGroup();
 
     // Here is some stuff we need to store in case we are now in the bottom
@@ -633,7 +658,8 @@ static __device__ TraceResult traceRay(
                                 new_current.childrenIdx[i] & 0x8000'0000) {
                             // Is this child triangles?? It is if this is the leaf
                             // of a bottom level tree
-                            tri_present_bits |= (((1 << new_current.triSize[i]) - 1) << 
+                            // LOG("tri_size = {}\n", new_current.getTriSize(i));
+                            tri_present_bits |= (((1 << new_current.getTriSize(i)) - 1) << 
                                     (MADRONA_BLAS_LEAF_WIDTH * i));
                         } else {
                             grp_present_bits |= (1 << i);
@@ -901,7 +927,7 @@ extern "C" __global__ void bvhRaycastEntry()
 
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_y + pixel_x * bvhParams.renderOutputResolution);
+            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
 
         uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;

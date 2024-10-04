@@ -454,6 +454,7 @@ MeshBVH MeshBVHBuilder::build(
         rootMaxZ = maxZ;
 
         QBVHNode node;
+        node.triSizes = 0;
         int8_t ex = ceilf(log2f((maxX-minX) / (powf(2, 8) - 1)));
         int8_t ey = ceilf(log2f((maxY-minY) / (powf(2, 8) - 1)));
         int8_t ez = ceilf(log2f((maxZ-minZ) / (powf(2, 8) - 1)));
@@ -482,15 +483,17 @@ MeshBVH MeshBVHBuilder::build(
             }
             node.childrenIdx[j] = child;
 #if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
-            node.triSize[j] = numTrisInner;
+            //node.triSize[j] = numTrisInner;
+            node.setTriSize(j, numTrisInner);
 #endif
             //node.children[j] = 0xBBBBBBBB;
         }
-        node.numChildren = QBVHNode::NodeWidth;
+        // node.numChildren = QBVHNode::NodeWidth;
         nodes.push_back(node);
     }
     for(int i = 0; i < innerID; i++){
         QBVHNode node;
+        node.triSizes = 0;
         float minX = FLT_MAX,
               minY = FLT_MAX,
               minZ = FLT_MAX,
@@ -551,10 +554,11 @@ MeshBVH MeshBVHBuilder::build(
             }
             node.childrenIdx[j] = child;
 #if defined(MADRONA_COMPRESSED_DEINDEXED) || defined(MADRONA_COMPRESSED_DEINDEXED_TEX)
-            node.triSize[j] = triSize;
+            // node.triSize[j] = triSize;
+            node.setTriSize(j, triSize);
 #endif
         }
-        node.numChildren = QBVHNode::NodeWidth;
+        // node.numChildren = QBVHNode::NodeWidth;
         nodes.push_back(node);
     }
 
@@ -570,6 +574,7 @@ MeshBVH MeshBVHBuilder::build(
 #else
     if(innerID == 0){
         QBVHNode node;
+        node.triSizes = 0;
         for(int j = 0; j < nodeWidth; j++){
             int32_t child;
             if(j < leafNodes.size()) {
@@ -587,12 +592,13 @@ MeshBVH MeshBVHBuilder::build(
             }
             node.children[j] = child;
         }
-        node.numChildren = QBVHNode::NodeWidth;
+        // node.numChildren = QBVHNode::NodeWidth;
         nodes.push_back(node);
     }
 
     for(int i = 0; i < innerID; i++){
         QBVHNode node;
+        node.triSizes = 0;
         node.parentID = -1;
         for (int i2 = 0; i2 < nodeWidth; i2++){
             BoundingBox box = innerNodes[i]->bounds[i2];
@@ -620,7 +626,7 @@ MeshBVH MeshBVHBuilder::build(
             node.children[j] = child;
         }
 
-        node.numChildren = QBVHNode::NodeWidth;
+        // node.numChildren = QBVHNode::NodeWidth;
         nodes.push_back(node);
     }
 
