@@ -35,6 +35,7 @@ struct Velocity {
 
 struct AgentTouched {
     bool touched;
+    math::Vector3 normal;
 };
 
 struct SolverBundleAlias {};

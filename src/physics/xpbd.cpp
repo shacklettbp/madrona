@@ -12,7 +12,7 @@ struct XPBDContactState {
 
 struct Contact : Archetype<
     ContactConstraint,
-    XPBDContactState 
+    XPBDContactState
 > {};
 
 struct Joint : Archetype<JointConstraint> {};
@@ -147,9 +147,9 @@ inline void substepRigidBodies(Context &ctx,
     if (response_type == ResponseType::Dynamic) {
         v += h * physics_sys.g;
     }
-    
+
     v += h * inv_m * ext_force;
- 
+
     x += h * v;
 
     Vector3 I = {
@@ -348,7 +348,7 @@ MADRONA_ALWAYS_INLINE static inline void handleContactConstraint(
         n_world,
         d, 0);
     *lambda_n_out = lambda_n;
-     
+
     Vector3 x1_prev = prev1.prevPosition;
     Quat q1_prev = prev1.prevRotation;
 
@@ -391,7 +391,7 @@ MADRONA_ALWAYS_INLINE static inline void handleContactConstraint(
 
         if (lambda_t > lambda_threshold) {
             *lambda_t_out = lambda_t;
-            
+
             applyPositionalUpdate(
                 x1, x2,
                 q1, q2,
@@ -408,7 +408,7 @@ getLocalSpaceContacts(const PreSolvePositional &presolve_pos1,
                       Vector3 contact1, float penetration_depth,
                       Vector3 contact_normal)
 {
-    Vector3 contact2 = 
+    Vector3 contact2 =
         contact1 - contact_normal * penetration_depth;
 
     // Transform the contact points into local space for a & b
@@ -530,9 +530,11 @@ static inline void handleContact(Context &ctx,
     // the other RigidBody to true.
     if (obj_id1.idx == 6) {
         ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.alt).touched = true;
+        ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.alt).normal = -contact.normal;
     }
     if (obj_id2.idx == 6) {
         ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.ref).touched = true;
+        ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.ref).normal = contact.normal;
     }
 
 
@@ -607,7 +609,7 @@ static void applyJointAxisConstraint(
 
     Vector3 delta_q = cross(axis1, axis2);
     float delta_q_magnitude = delta_q.length();
-    
+
     if (delta_q_magnitude > 0) {
         delta_q /= delta_q_magnitude;
         Vector3 delta_q_local1 = q1.inv().rotateVec(delta_q);
@@ -618,7 +620,7 @@ static void applyJointAxisConstraint(
             inv_I1, inv_I2,
             delta_q_local1, delta_q_local2,
             delta_q_magnitude, 0);
-        
+
         applyAngularUpdate(q1, q2, update_q1, update_q2);
     }
 }
@@ -768,7 +770,7 @@ inline void setVelocities(Context &ctx,
 
     Vector3 x_prev = prev_state.prevPosition;
     Quat q_prev = prev_state.prevRotation;
-    
+
     // when cur and prev rotation are equal there should be 0 angular velocity
     // Unfortunately, this computation introduces a small amount of FP error
     // and in some rotations the object winds up with a small delta_q, so
@@ -819,59 +821,59 @@ static inline void applyFrictionVelocityUpdate(
 {
     Vector3 v = computeRelativeVelocity(
         v1, v2, omega1, omega2, r1_world, r2_world);
-    
+
     float vn = dot(n, v);
     Vector3 vt = v - n * vn;
-    
+
     float vt_len = vt.length();
     if (vt_len == 0.f) {
         return;
     }
-    
+
     Vector3 delta_world = vt / vt_len;
-    
+
     Vector3 delta_local1 = q1.inv().rotateVec(delta_world);
     Vector3 delta_local2 = q2.inv().rotateVec(delta_world);
-    
+
     Vector3 friction_torque_axis_local1 =
         cross(r1_local, delta_local1);
     Vector3 friction_torque_axis_local2 =
         cross(r2_local, delta_local2);
-    
+
     Vector3 friction_rot_axis_local1 = multDiag(
         inv_I1, friction_torque_axis_local1);
     Vector3 friction_rot_axis_local2 = multDiag(
         inv_I2, friction_torque_axis_local2);
-    
+
     float w1 = generalizedInverseMass(
         friction_torque_axis_local1, friction_rot_axis_local1, inv_m1);
     float w2 = generalizedInverseMass(
         friction_torque_axis_local2, friction_rot_axis_local2, inv_m2);
-    
+
     float inv_mass_scale = 1.f / (w1 + w2);
-    
+
     // h * mu_d * |f_n| in paper. Note the paper is incorrect here
     // (doesn't have w1 + w2 divisor).
     float dynamic_friction_magnitude =
         mu_d * fabsf(lambda) * inv_mass_scale / h;
-    
+
     float corrected_magnitude =
         -fminf(dynamic_friction_magnitude, vt_len);
-    
+
     float impulse_magnitude = corrected_magnitude * inv_mass_scale;
 
     if (impulse_magnitude == 0.f) {
         return;
     }
-    
+
     v1 += delta_world * impulse_magnitude * inv_m1;
     v2 -= delta_world * impulse_magnitude * inv_m2;
-    
-    Vector3 omega1_update_local = 
+
+    Vector3 omega1_update_local =
         impulse_magnitude * friction_rot_axis_local1;
     Vector3 omega2_update_local =
         impulse_magnitude * friction_rot_axis_local2;
-    
+
     omega1 += q1.rotateVec(omega1_update_local);
     omega2 -= q2.rotateVec(omega2_update_local);
 }
@@ -904,7 +906,7 @@ static inline void applyRestitutionVelocityUpdate(
 
     Vector3 restitution_rot_axis_local1 =
         multDiag(inv_I1, restitution_torque_axis_local1);
-    Vector3 restitution_rot_axis_local2 = 
+    Vector3 restitution_rot_axis_local2 =
         multDiag(inv_I2, restitution_torque_axis_local2);
 
     float w1 = generalizedInverseMass(
@@ -1048,7 +1050,7 @@ static inline void solveVelocitiesForContact(Context &ctx,
     for (CountT i = 0; i < contact.numPoints; i++) {
         auto [r1, r2] = getLocalSpaceContacts(presolve_pos1, presolve_pos2,
             contact.points[i].xyz(), contact.points[i].w, contact.normal);
-        
+
         Vector3 r1_world = q1.rotateVec(r1);
         Vector3 r2_world = q2.rotateVec(r2);
 
@@ -1121,7 +1123,7 @@ TaskGraphNodeID setupXPBDSolverTasks(
     auto cur_node = broadphase;
 
 #ifdef MADRONA_GPU_MODE
-    cur_node = 
+    cur_node =
         builder.addToGraph<SortArchetypeNode<Joint, WorldID>>({cur_node});
     cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
 #endif
@@ -1156,7 +1158,7 @@ TaskGraphNodeID setupXPBDSolverTasks(
 
         auto clear_contacts = builder.addToGraph<
             ClearTmpNode<Contact>>({solve_vel});
-            
+
         cur_node = builder.addToGraph<ResetTmpAllocNode>({clear_contacts});
 
 #if 0
