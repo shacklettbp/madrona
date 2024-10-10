@@ -860,8 +860,12 @@ static Manifold buildFaceContactManifold(
             }
         }
 
-        //assert(max_dist_sq != 0.f && max_tri_area != 0.f &&
-        //       most_neg_area != 0.f);
+        if (max_dist_sq == 0.f || max_tri_area == 0.f || most_neg_area == 0.f) {
+          // FIXME: should not be possible
+          manifold.numContactPoints = 0;
+          manifold.normal = Vector3::zero();
+          return manifold;
+        }
     }
 
     for (CountT i = 0; i < (CountT)manifold.numContactPoints; i++) {
