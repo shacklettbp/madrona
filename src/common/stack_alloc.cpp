@@ -15,6 +15,11 @@ StackAlloc::StackAlloc(CountT chunk_size)
 
 void StackAlloc::pop(AllocFrame frame)
 {
+    if ((uintptr_t)frame.ptr == chunk_size_) {
+        release();
+        return;
+    }
+
     uintptr_t mask = chunk_size_ - 1;
     uintptr_t cur_offset = (uintptr_t)frame.ptr & mask;
 
