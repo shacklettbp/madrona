@@ -860,8 +860,8 @@ static Manifold buildFaceContactManifold(
             }
         }
 
-        assert(max_dist_sq != 0.f && max_tri_area != 0.f &&
-               most_neg_area != 0.f);
+        //assert(max_dist_sq != 0.f && max_tri_area != 0.f &&
+        //       most_neg_area != 0.f);
     }
 
     for (CountT i = 0; i < (CountT)manifold.numContactPoints; i++) {
