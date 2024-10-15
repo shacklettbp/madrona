@@ -120,6 +120,7 @@ public:
     // Initializes CUDA context, sets current device
     static CUcontext initCUDA(int gpu_id);
 
+    MWCudaExecutor();
     MWCudaExecutor(const StateConfig &state_cfg,
                    const CompileConfig &compile_cfg,
                    CUcontext cu_ctx,
@@ -128,6 +129,8 @@ public:
 
     MWCudaExecutor(MWCudaExecutor &&o);
     ~MWCudaExecutor();
+
+    MWCudaExecutor & operator=(MWCudaExecutor &&o);
 
     // Builds a CUDA graph that will launch all the taskgraphs specified by
     // taskgraph_ids one after the other. Typically this correspond to

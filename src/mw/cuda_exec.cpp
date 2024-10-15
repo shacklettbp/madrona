@@ -2209,6 +2209,10 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
     return cu_ctx;
 }
 
+MWCudaExecutor::MWCudaExecutor()
+  : impl_(nullptr)
+{}
+
 MWCudaExecutor::MWCudaExecutor(
         const StateConfig &state_cfg,
         const CompileConfig &compile_cfg,
@@ -2297,6 +2301,8 @@ MWCudaExecutor::MWCudaExecutor(
 
 MWCudaExecutor::MWCudaExecutor(MWCudaExecutor &&o)
     = default;
+
+MWCudaExecutor & MWCudaExecutor::operator=(MWCudaExecutor &&) = default;
 
 MWCudaExecutor::~MWCudaExecutor()
 {
