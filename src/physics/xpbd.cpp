@@ -780,6 +780,7 @@ inline void setVelocities(Context &ctx,
     if (q.w != q_prev.w || q.x != q_prev.x ||
             q.y != q_prev.y || q.z != q_prev.z) {
         delta_q = q * q_prev.inv();
+        delta_q = delta_q * (1.0f / delta_q.w);
     } else {
         delta_q = { 1, 0, 0, 0 };
     }
