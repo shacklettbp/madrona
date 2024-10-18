@@ -2178,6 +2178,10 @@ static CUgraphExec makeTaskGraphRunGraph(
     return run_graph_exec;
 }
 
+MWCudaLaunchGraph::MWCudaLaunchGraph()
+    : impl_(nullptr)
+{}
+
 MWCudaLaunchGraph::MWCudaLaunchGraph(Impl *impl)
     : impl_(impl)
 {}
@@ -2210,7 +2214,7 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
 }
 
 MWCudaExecutor::MWCudaExecutor()
-  : impl_(nullptr)
+    : impl_(nullptr)
 {}
 
 MWCudaExecutor::MWCudaExecutor(
