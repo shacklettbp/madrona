@@ -714,6 +714,17 @@ Quat Quat::inv() const
     };
 }
 
+Vector3 Quat::extractPYR() const
+{
+    float pitch = asin(-2.0*(x*z - w*y));
+    float yaw = atan2(2.0*(y*z + w*x), w*w - x*x - y*y + z*z);
+    float roll = atan2(2.0*(x*y + w*z), w*w + x*x - y*y - z*z);
+
+    return {
+        pitch, yaw, roll
+    };
+}
+
 Vector3 Quat::rotateVec(Vector3 v) const
 {
     Vector3 pure {x, y, z};

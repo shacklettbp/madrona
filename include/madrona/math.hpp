@@ -182,6 +182,9 @@ struct Quat {
 
     inline Vector3 rotateVec(Vector3 v) const;
 
+    // Extract Pitch, yaw and roll
+    inline Vector3 extractPYR() const;
+
     static inline Quat angleAxis(float angle, Vector3 normal);
     static inline Quat fromAngularVec(Vector3 v);
     static inline Quat fromBasis(Vector3 a, Vector3 b, Vector3 c);
