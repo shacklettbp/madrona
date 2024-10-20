@@ -89,7 +89,7 @@ static void convertPostSolve(
         Context &ctx,
         Position &position,
         Rotation &rotation,
-        const PhysicalComponent &phys)
+        const CVPhysicalComponent &phys)
 {
     Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
     
@@ -118,7 +118,7 @@ namespace PhysicsSystem {
 
 void registerTypes(ECSRegistry &registry)
 {
-    registry.registerComponent<PhysicalComponent>();
+    registry.registerComponent<CVPhysicalComponent>();
 
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
@@ -156,14 +156,14 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
 
     ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 6;
 
-    ctx.get<PhysicalComponent>(e) = {
+    ctx.get<CVPhysicalComponent>(e) = {
         .physicsEntity = physical_entity,
     };
 }
 
 void cleanupPhysicalEntity(Context &ctx, Entity e)
 {
-    PhysicalComponent physical_comp = ctx.get<PhysicalComponent>(e);
+    CVPhysicalComponent physical_comp = ctx.get<CVPhysicalComponent>(e);
     ctx.destroyEntity(physical_comp.physicsEntity);
 }
 
@@ -174,7 +174,7 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
         builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
             Position,
             Rotation,
-            PhysicalComponent
+            CVPhysicalComponent
         >>(deps);
 
 #ifdef MADRONA_GPU_MODE

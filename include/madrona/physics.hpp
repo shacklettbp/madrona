@@ -160,6 +160,7 @@ namespace PhysicsSystem {
     enum class Solver : uint32_t {
         XPBD,
         TGS,
+        Convex,
     };
 
     void init(Context &ctx,

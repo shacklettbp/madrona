@@ -6,7 +6,7 @@
 namespace madrona::phys {
 
 // Attach this component to entities that you want to have obey physics.
-struct PhysicalComponent {
+struct CVPhysicalComponent {
     // This is going to be one of the DOF entities (i.e. DOFFreeBodyArchetype).
     Entity physicsEntity;
 };
