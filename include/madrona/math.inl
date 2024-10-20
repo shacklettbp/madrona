@@ -716,9 +716,9 @@ Quat Quat::inv() const
 
 Vector3 Quat::extractPYR() const
 {
-    float pitch = asin(-2.0*(x*z - w*y));
-    float yaw = atan2(2.0*(y*z + w*x), w*w - x*x - y*y + z*z);
-    float roll = atan2(2.0*(x*y + w*z), w*w + x*x - y*y - z*z);
+    float pitch = asin(-2.0f*(x*z - w*y));
+    float yaw = std::atan2(2.0f*(y*z + w*x), w*w - x*x - y*y + z*z);
+    float roll = std::atan2(2.0f*(x*y + w*z), w*w + x*x - y*y - z*z);
 
     return {
         pitch, yaw, roll
