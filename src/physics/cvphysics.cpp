@@ -1,6 +1,114 @@
 #include "cvphysics.hpp"
 
+#include <madrona/taskgraph.hpp>
+
 namespace madrona::phys {
+
+namespace tasks {
+
+// We are going to need a different way of solving on GPU mode
+#ifdef MADRONA_GPU_MODE
+struct GaussMinimizationNode : NodeBase {
+    GaussMinimizationNode(mwGPU::StateManager *state_mgr);
+
+    void solve();
+
+    static TaskGraphID::NodeID addToGraph(
+            TaskGraph::Builder &builder,
+            Span<const TaskGraph::NodeID> dependencies);
+
+    DofObjectPosition *positions;
+    DofObjectVelocity *velocities;
+    DofNumDofs *numDofs;
+
+    // World offsets of the positions.
+    int32_t *worldOffsets;
+};
+
+GaussMinimizationNode::GaussMinimizationNode(
+        mwGPU::StateManager *s)
+    : positions(s->getArchetypeComponent<DofObjectArchetype, 
+            DofObjectPosition>()),
+      velocities(s->getArchetypeComponent<DofObjectArchetype,
+            DofObjectVelocity>()),
+      numDofs(s->getArchetypeComponent<DofObjectArchetype,
+            DofObjectNumDofs>()),
+      worldOffsets(s->getArchetypeWorldOffsets<DofObjectArchetype>())
+{
+}
+
+void GaussMinimizationNode::solve()
+{
+    // TODO: do the magic here!
+}
+
+static TaskGraphID::NodeID GaussMinimizationNode::addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> deps)
+{
+    using namespace mwGPU;
+
+    // First, we must sort the physics DOF object archetypes by world.
+    auto sort_sys =
+        builder.addToGraph<SortArchetypeNode<
+            DofObjectArchetype, WorldID>>(
+            deps);
+    auto post_sort_reset_tmp =
+        builder.addToGraph<ResetTmpAllocNode>({sort_sys});
+
+    StateManager *state_mgr = getStateManager();
+
+    auto data_id = builder.constructNodeData<GaussMinimizationNode>(
+            state_mgr);
+    auto &gauss_data = builder.getDataRef(data_id);
+
+    // For now, we are going with the persistent threads approach where each
+    // thread block is going to process a world.
+    uint32_t num_invocations = (uint32_t)gridDim.x;
+    assert(blockDim.x == consts::numMegakernelThreads);
+
+    TaskGraph::NodeID solve_node = builder.addNodeFn<
+        &GaussMinimizationNode::solve>(data_id, { post_sort_reset_tmp },
+                Optional<TaskGraph::NodeID>::none(),
+                num_invocations,
+                // This is the thread block dimension
+                consts::numMegakernelThreads);
+
+    return solve_node;
+}
+#else
+
+#endif
+
+// Convert all the generalized coordinates here.
+static void convertPostSolve(
+        Context &ctx,
+        Position &position,
+        Rotation &rotation,
+        const PhysicalComponent &phys)
+{
+    Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
+    
+    DofNumDofs num_dofs = ctx.get<DofNumDofs>(physical_entity);
+    DofObjectPosition pos = ctx.get<DofObjectPosition>(physical_entity);
+
+    if (num_dofs == (uint32_t)DofType::FreeBody) {
+        position.x = pos.q[0];
+        position.y = pos.q[1];
+        position.z = pos.q[2];
+
+        rotation = Quat::fromAngularVec(
+            Vector3{
+                pos.q[3],
+                pos.q[4],
+                pos.q[5] 
+            });
+    } else {
+        MADRONA_UNREACHABLE();
+    }
+}
+
+}
     
 namespace PhysicsSystem {
 
@@ -58,7 +166,21 @@ void cleanupPhysicalEntity(Context &ctx, Entity e)
 TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
                            Span<const TaskGraphNodeID> deps)
 {
+    auto convert_post_solve =
+        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Position,
+            Rotation,
+            PhysicalComponent
+        >>(deps);
+
+#ifdef MADRONA_GPU_MODE
+    auto gauss_node = builder.addToGraph<GaussMinimizationNode>(
+            {convert_post_solve});
+#else
+    // TODO:
+#endif
     
+    return convert_post_solve;
 }
     
 }

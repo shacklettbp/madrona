@@ -14,6 +14,13 @@ struct PhysicalComponent {
 
 static constexpr uint32_t kMaxCoords = 6;
 
+enum class DofType {
+    FreeBody == 6,
+
+    // When we add other types of physics DOF objects, we will encode
+    // the number of degrees of freedom they all have here.
+};
+
 struct DofObjectPosition {
     float q[kMaxCoords];
 };
