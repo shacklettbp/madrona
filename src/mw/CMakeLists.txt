@@ -75,6 +75,7 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/navmesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../core/base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/physics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/cvphysics.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/geo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/xpbd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../physics/tgs.cpp

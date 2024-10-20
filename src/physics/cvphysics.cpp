@@ -1,6 +1,10 @@
-#include "cvphysics.hpp"
-
+#include <madrona/state.hpp>
+#include <madrona/context.hpp>
+#include <madrona/cvphysics.hpp>
 #include <madrona/taskgraph.hpp>
+
+using namespace madrona::math;
+using namespace madrona::base;
 
 namespace madrona::phys {
 
@@ -9,24 +13,24 @@ namespace tasks {
 // We are going to need a different way of solving on GPU mode
 #ifdef MADRONA_GPU_MODE
 struct GaussMinimizationNode : NodeBase {
-    GaussMinimizationNode(mwGPU::StateManager *state_mgr);
+    GaussMinimizationNode(StateManager *state_mgr);
 
-    void solve();
+    void solve(int32_t invocation_idx);
 
-    static TaskGraphID::NodeID addToGraph(
+    static TaskGraph::NodeID addToGraph(
             TaskGraph::Builder &builder,
             Span<const TaskGraph::NodeID> dependencies);
 
     DofObjectPosition *positions;
     DofObjectVelocity *velocities;
-    DofNumDofs *numDofs;
+    DofObjectNumDofs *numDofs;
 
     // World offsets of the positions.
     int32_t *worldOffsets;
 };
 
 GaussMinimizationNode::GaussMinimizationNode(
-        mwGPU::StateManager *s)
+        StateManager *s)
     : positions(s->getArchetypeComponent<DofObjectArchetype, 
             DofObjectPosition>()),
       velocities(s->getArchetypeComponent<DofObjectArchetype,
@@ -37,12 +41,12 @@ GaussMinimizationNode::GaussMinimizationNode(
 {
 }
 
-void GaussMinimizationNode::solve()
+void GaussMinimizationNode::solve(int32_t invocation_idx)
 {
     // TODO: do the magic here!
 }
 
-static TaskGraphID::NodeID GaussMinimizationNode::addToGraph(
+TaskGraph::NodeID GaussMinimizationNode::addToGraph(
         TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> deps)
 {
@@ -89,10 +93,10 @@ static void convertPostSolve(
 {
     Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
     
-    DofNumDofs num_dofs = ctx.get<DofNumDofs>(physical_entity);
+    DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(physical_entity);
     DofObjectPosition pos = ctx.get<DofObjectPosition>(physical_entity);
 
-    if (num_dofs == (uint32_t)DofType::FreeBody) {
+    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
         position.x = pos.q[0];
         position.y = pos.q[1];
         position.z = pos.q[2];
@@ -118,7 +122,7 @@ void registerTypes(ECSRegistry &registry)
 
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
-    registry.registerComponent<DofNumDofs>();
+    registry.registerComponent<DofObjectNumDofs>();
 
     registry.registerArchetype<DofObjectArchetype>();
 }
@@ -150,7 +154,7 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
     vel.qv[4] = 0.f;
     vel.qv[5] = 0.f;
 
-    ctx.get<DofNumDofs>(physical_entity).numDofs = 6;
+    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 6;
 
     ctx.get<PhysicalComponent>(e) = {
         .physicsEntity = physical_entity,
@@ -174,7 +178,7 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
         >>(deps);
 
 #ifdef MADRONA_GPU_MODE
-    auto gauss_node = builder.addToGraph<GaussMinimizationNode>(
+    auto gauss_node = builder.addToGraph<tasks::GaussMinimizationNode>(
             {convert_post_solve});
 #else
     // TODO:

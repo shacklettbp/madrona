@@ -7,6 +7,7 @@ set(MADRONA_PHYSICS_SRCS
     narrowphase.cpp broadphase.cpp
     xpbd.hpp xpbd.cpp
     tgs.hpp tgs.cpp
+    ${INC_DIR}/cvphysics.hpp cvphysics.cpp
 )
 
 add_library(madrona_physics STATIC

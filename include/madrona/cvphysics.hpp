@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madrona/components.hpp>
 #include <madrona/taskgraph_builder.hpp>
 
 namespace madrona::phys {
@@ -15,7 +16,7 @@ struct PhysicalComponent {
 static constexpr uint32_t kMaxCoords = 6;
 
 enum class DofType {
-    FreeBody == 6,
+    FreeBody = 6,
 
     // When we add other types of physics DOF objects, we will encode
     // the number of degrees of freedom they all have here.
@@ -29,14 +30,14 @@ struct DofObjectVelocity {
     float qv[kMaxCoords];
 };
 
-struct DofNumDofs {
+struct DofObjectNumDofs {
     uint32_t numDofs;
 };
 
 struct DofObjectArchetype : public Archetype<
     DofObjectPosition,
     DofObjectVelocity,
-    DofNumDofs
+    DofObjectNumDofs
 > {};
 
  
@@ -46,8 +47,8 @@ void registerTypes(ECSRegistry &registry);
     
 // For now, initial velocities are just going to be 0
 void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
-                                Position position,
-                                Rotation rotation);
+                                base::Position position,
+                                base::Rotation rotation);
 
 void cleanupPhysicalEntity(Context &ctx, Entity e);
 
