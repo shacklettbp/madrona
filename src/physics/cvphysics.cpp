@@ -55,7 +55,7 @@ GaussMinimizationNode::GaussMinimizationNode(
       numDofs(s->getArchetypeComponent<DofObjectArchetype,
             DofObjectNumDofs>()),
       contactWorldOffsets(s->getArchetypeWorldOffsets<Contact>()),
-      dofObjectWorldOffsets(s->getArchetypeWorldOffsets<DofObjectArchetype>()),
+      dofObjectWorldOffsets(s->getArchetypeWorldOffsets<DofObjectArchetype>())
 {
 }
 
