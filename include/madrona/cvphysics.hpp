@@ -3,7 +3,7 @@
 #include <madrona/components.hpp>
 #include <madrona/taskgraph_builder.hpp>
 
-namespace madrona::phys {
+namespace madrona::phys::cv {
 
 // Attach this component to entities that you want to have obey physics.
 struct CVPhysicalComponent {
@@ -41,20 +41,22 @@ struct DofObjectArchetype : public Archetype<
 > {};
 
  
-namespace PhysicsSystem {
 
-void registerTypes(ECSRegistry &registry);
     
 // For now, initial velocities are just going to be 0
 void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
                                 base::Position position,
                                 base::Rotation rotation);
-
 void cleanupPhysicalEntity(Context &ctx, Entity e);
 
-TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
-                           Span<const TaskGraphNodeID> deps);
 
-}
+
+void registerTypes(ECSRegistry &registry);
+void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
+                           uint32_t *joint_archetype_id);
+void init(Context &ctx);
+TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
+                                   TaskGraphNodeID broadphase,
+                                   CountT num_substeps);
 
 }

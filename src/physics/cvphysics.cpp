@@ -1,12 +1,23 @@
 #include <madrona/state.hpp>
+#include <madrona/physics.hpp>
 #include <madrona/context.hpp>
 #include <madrona/cvphysics.hpp>
 #include <madrona/taskgraph.hpp>
 
+#include "physics_impl.hpp"
+
 using namespace madrona::math;
 using namespace madrona::base;
 
-namespace madrona::phys {
+namespace madrona::phys::cv {
+
+struct Contact : Archetype<
+    ContactConstraint
+> {};
+
+struct Joint : Archetype<
+    JointConstraint
+> {};
 
 namespace tasks {
 
@@ -25,8 +36,14 @@ struct GaussMinimizationNode : NodeBase {
     DofObjectVelocity *velocities;
     DofObjectNumDofs *numDofs;
 
-    // World offsets of the positions.
-    int32_t *worldOffsets;
+    // This is generated from narrowphase.
+    ContactConstraint *contacts;
+
+    // World offsets of the contact constraints.
+    int32_t *contactWorldOffsets;
+
+    // World offsets of the positions / velocities.
+    int32_t *dofObjectWorldOffsets;
 };
 
 GaussMinimizationNode::GaussMinimizationNode(
@@ -37,13 +54,21 @@ GaussMinimizationNode::GaussMinimizationNode(
             DofObjectVelocity>()),
       numDofs(s->getArchetypeComponent<DofObjectArchetype,
             DofObjectNumDofs>()),
-      worldOffsets(s->getArchetypeWorldOffsets<DofObjectArchetype>())
+      contactWorldOffsets(s->getArchetypeWorldOffsets<Contact>()),
+      dofObjectWorldOffsets(s->getArchetypeWorldOffsets<DofObjectArchetype>()),
 {
 }
 
 void GaussMinimizationNode::solve(int32_t invocation_idx)
 {
     // TODO: do the magic here!
+    // Note, the refs that are in the ContactConstraint are not to the
+    // DOF object but to the entity which holds the position / rotation
+    // components. This just means we have to inefficiently go through another
+    // indirection to get the Dof positions / velocities of affected objects
+    // (with that indirection being CVPhysicalComponent).
+    // We can fix this by having the contact generation directly output
+    // the locs of the DOF objects instead but that we can do in the future.
 }
 
 TaskGraph::NodeID GaussMinimizationNode::addToGraph(
@@ -81,7 +106,16 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
     return solve_node;
 }
 #else
-
+static void gaussMinimizeFn(Context &ctx,
+                            DofObjectPosition &pos,
+                            DofObjectVelocity &vel,
+                            const DofObjectNumDofs &num_dofs)
+{
+    (void)ctx;
+    (void)pos;
+    (void)vel;
+    (void)num_dofs;
+}
 #endif
 
 // Convert all the generalized coordinates here.
@@ -114,8 +148,6 @@ static void convertPostSolve(
 
 }
     
-namespace PhysicsSystem {
-
 void registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<CVPhysicalComponent>();
@@ -125,6 +157,8 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<DofObjectNumDofs>();
 
     registry.registerArchetype<DofObjectArchetype>();
+    registry.registerArchetype<Contact>();
+    registry.registerArchetype<Joint>();
 }
 
 void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
@@ -167,26 +201,60 @@ void cleanupPhysicalEntity(Context &ctx, Entity e)
     ctx.destroyEntity(physical_comp.physicsEntity);
 }
 
-TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
-                           Span<const TaskGraphNodeID> deps)
+TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
+                                   TaskGraphNodeID broadphase,
+                                   CountT num_substeps)
 {
-    auto convert_post_solve =
-        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
-            Position,
-            Rotation,
-            CVPhysicalComponent
-        >>(deps);
+    auto cur_node = broadphase;
+
+    for (CountT i = 0; i < num_substeps; ++i) {
+        auto run_narrowphase = narrowphase::setupTasks(builder, {cur_node});
 
 #ifdef MADRONA_GPU_MODE
-    auto gauss_node = builder.addToGraph<tasks::GaussMinimizationNode>(
-            {convert_post_solve});
-#else
-    // TODO:
+        // We need to sort the contacts by world.
+        run_narrowphase = builder.addToGraph<
+            SortArchetypeNode<Contact, WorldID>>(
+                {run_narrowphase});
+        run_narrowphase = builder.addToGraph<ResetTmpAllocNode>(
+                {run_narrowphase});
 #endif
+
+#ifdef MADRONA_GPU_MODE
+        auto gauss_node = builder.addToGraph<tasks::GaussMinimizationNode>(
+                {run_narrowphase});
+#else
+        auto gauss_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::gaussMinimizeFn,
+                DofObjectPosition,
+                DofObjectVelocity,
+                DofObjectNumDofs
+            >>({run_narrowphase});
+#endif
+
+        cur_node =
+            builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+                Position,
+                Rotation,
+                CVPhysicalComponent
+            >>({gauss_node});
+    }
     
-    return convert_post_solve;
-}
-    
+    return cur_node;
 }
 
+
+
+void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
+                           uint32_t *joint_archetype_id)
+{
+    *contact_archetype_id = TypeTracker::typeID<Contact>();
+    *joint_archetype_id = TypeTracker::typeID<Joint>();
+}
+
+void init(Context &ctx)
+{
+    // Nothing for now
+    (void)ctx;
+}
+    
 }

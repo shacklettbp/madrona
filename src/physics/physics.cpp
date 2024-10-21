@@ -1,6 +1,8 @@
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
 
+#include <madrona/cvphysics.hpp>
+
 #include "physics_impl.hpp"
 #include "xpbd.hpp"
 #include "tgs.hpp"
@@ -365,6 +367,11 @@ TaskGraphNodeID setupPhysicsStepTasks(
     } break;
     case Solver::TGS: {
         solver_finished = tgs::setupTGSSolverTasks(
+            builder, broadphase_prep, num_substeps);
+    } break;
+
+    case Solver::Convex: {
+        solver_finished = cv::setupCVSolverTasks(
             builder, broadphase_prep, num_substeps);
     } break;
     default: MADRONA_UNREACHABLE();
