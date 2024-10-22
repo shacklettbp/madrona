@@ -122,6 +122,11 @@ void init(Context &ctx,
         tgs::getSolverArchetypeIDs(&contact_archetype_id,
                                    &joint_archetype_id);
     } break;
+
+    case Solver::Convex: {
+        cv::getSolverArchetypeIDs(&contact_archetype_id,
+                                   &joint_archetype_id);
+    } break;
     default: MADRONA_UNREACHABLE();
     }
 
@@ -135,6 +140,9 @@ void init(Context &ctx,
     } break;
     case Solver::TGS: {
         tgs::init(ctx);
+    } break;
+    case Solver::Convex: {
+        cv::init(ctx);
     } break;
     default: MADRONA_UNREACHABLE();
     }
@@ -336,6 +344,9 @@ void registerTypes(ECSRegistry &registry,
     } break;
     case Solver::TGS: {
         tgs::registerTypes(registry);
+    } break;
+    case Solver::Convex: {
+        cv::registerTypes(registry);
     } break;
     default: MADRONA_UNREACHABLE();
     }

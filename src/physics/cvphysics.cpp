@@ -19,6 +19,14 @@ struct Joint : Archetype<
     JointConstraint
 > {};
 
+struct DummyState {
+    float v;
+};
+
+struct CVRigidBodyState : Bundle<
+    DummyState
+> {};
+
 namespace tasks {
 
 // We are going to need a different way of solving on GPU mode
@@ -159,6 +167,9 @@ void registerTypes(ECSRegistry &registry)
     registry.registerArchetype<DofObjectArchetype>();
     registry.registerArchetype<Contact>();
     registry.registerArchetype<Joint>();
+
+    registry.registerBundle<CVRigidBodyState>();
+    registry.registerBundleAlias<SolverBundleAlias, CVRigidBodyState>();
 }
 
 void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
