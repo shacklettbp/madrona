@@ -19,12 +19,8 @@ struct Joint : Archetype<
     JointConstraint
 > {};
 
-struct DummyState {
-    float v;
-};
-
 struct CVRigidBodyState : Bundle<
-    DummyState
+    CVPhysicalComponent
 > {};
 
 namespace tasks {
@@ -77,6 +73,7 @@ void GaussMinimizationNode::solve(int32_t invocation_idx)
     // (with that indirection being CVPhysicalComponent).
     // We can fix this by having the contact generation directly output
     // the locs of the DOF objects instead but that we can do in the future.
+    assert(blockDim.x == consts::numMegakernelThreads);
 }
 
 TaskGraph::NodeID GaussMinimizationNode::addToGraph(
@@ -102,7 +99,6 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
     // For now, we are going with the persistent threads approach where each
     // thread block is going to process a world.
     uint32_t num_invocations = (uint32_t)gridDim.x;
-    assert(blockDim.x == consts::numMegakernelThreads);
 
     TaskGraph::NodeID solve_node = builder.addNodeFn<
         &GaussMinimizationNode::solve>(data_id, { post_sort_reset_tmp },
