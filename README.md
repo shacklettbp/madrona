@@ -49,6 +49,9 @@ Madrona itself is not an RL environment simulator. It is a game engine / framewo
 ### [Cartpole](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/cartpole_env#cartpole-environment)
   * The canonical RL training environment.
 
+### [Madrona MJX](https://github.com/shacklettbp/madrona_mjx)
+  * An example of hooking up Madrona's batch renderer to an external simulator like MJX.
+
 ### [Madrona Renderer Benchmark](https://github.com/llGuy/madrona_benchmark)
   * A benchmarking repository with a couple different examples of the renderer's usage that were included in the SIGGRAPH Asia 2024 paper.
 
