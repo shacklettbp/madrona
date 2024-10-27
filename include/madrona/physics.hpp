@@ -172,9 +172,13 @@ namespace PhysicsSystem {
               Solver solver = Solver::XPBD);
 
     void reset(Context &ctx);
+
+    // Make sure to set the initial position and rotation before
+    // invoking this function.
     broadphase::LeafID registerEntity(Context &ctx,
                                       Entity e,
-                                      base::ObjectID obj_id);
+                                      base::ObjectID obj_id,
+                                      Solver solver = Solver::XPBD);
 
     template <typename Fn>
     void findEntitiesWithinAABB(Context &ctx,

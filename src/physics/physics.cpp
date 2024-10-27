@@ -159,9 +159,21 @@ void reset(Context &ctx)
 
 broadphase::LeafID registerEntity(Context &ctx,
                                   Entity e,
-                                  ObjectID obj_id)
+                                  ObjectID obj_id,
+                                  Solver solver)
 {
     auto &bvh = ctx.singleton<broadphase::BVH>();
+
+    if (solver == Solver::Convex) {
+        Position initial_position = ctx.get<Position>(e);
+        Rotation initial_rotation = ctx.get<Rotation>(e);
+        base::ObjectID obj_id = ctx.get<base::ObjectID>(e);
+
+        cv::makeFreeBodyEntityPhysical(ctx, e,
+                                       initial_position,
+                                       initial_rotation,
+                                       obj_id);
+    }
 
     return bvh.reserveLeaf(e, obj_id);
 }

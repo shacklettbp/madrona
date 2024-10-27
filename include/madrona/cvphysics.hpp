@@ -13,7 +13,8 @@ struct CVPhysicalComponent {
 
 
 
-static constexpr uint32_t kMaxCoords = 6;
+static constexpr uint32_t kMaxPositionCoords = 7;
+static constexpr uint32_t kMaxVelocityCoords = 6;
 
 enum class DofType {
     FreeBody = 6,
@@ -23,11 +24,11 @@ enum class DofType {
 };
 
 struct DofObjectPosition {
-    float q[kMaxCoords];
+    float q[kMaxPositionCoords];
 };
 
 struct DofObjectVelocity {
-    float qv[kMaxCoords];
+    float qv[kMaxVelocityCoords];
 };
 
 struct DofObjectNumDofs {
@@ -37,6 +38,11 @@ struct DofObjectNumDofs {
 struct DofObjectArchetype : public Archetype<
     DofObjectPosition,
     DofObjectVelocity,
+
+    // Currently, this is being duplicated but it's small. We can
+    // maybe find a way around this later.
+    base::ObjectID,
+
     DofObjectNumDofs
 > {};
 
@@ -46,7 +52,8 @@ struct DofObjectArchetype : public Archetype<
 // For now, initial velocities are just going to be 0
 void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
                                 base::Position position,
-                                base::Rotation rotation);
+                                base::Rotation rotation,
+                                base::ObjectID obj_id);
 void cleanupPhysicalEntity(Context &ctx, Entity e);
 
 

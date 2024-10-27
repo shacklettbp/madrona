@@ -39,6 +39,7 @@ struct GaussMinimizationNode : NodeBase {
     DofObjectPosition *positions;
     DofObjectVelocity *velocities;
     DofObjectNumDofs *numDofs;
+    ObjectID *objIDs;
 
     // This is generated from narrowphase.
     ContactConstraint *contacts;
@@ -48,6 +49,7 @@ struct GaussMinimizationNode : NodeBase {
 
     // World offsets of the positions / velocities.
     int32_t *dofObjectWorldOffsets;
+    int32_t *dofObjectWorldCounts;
 };
 
 GaussMinimizationNode::GaussMinimizationNode(
@@ -58,13 +60,37 @@ GaussMinimizationNode::GaussMinimizationNode(
             DofObjectVelocity>()),
       numDofs(s->getArchetypeComponent<DofObjectArchetype,
             DofObjectNumDofs>()),
+      objIDs(s->getArchetypeComponent<DofObjectArchetype,
+            ObjectID>()),
+      contacts(s->getArchetypeComponent<Contact,
+            ContactConstraint>()),
       contactWorldOffsets(s->getArchetypeWorldOffsets<Contact>()),
-      dofObjectWorldOffsets(s->getArchetypeWorldOffsets<DofObjectArchetype>())
+      dofObjectWorldOffsets(s->getArchetypeWorldOffsets<DofObjectArchetype>()),
+      dofObjectWorldCounts(s->getArchetypeWorldCounts<DofObjectArchetype>())
 {
 }
 
 void GaussMinimizationNode::solve(int32_t invocation_idx)
 {
+    uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
+
+    uint32_t total_num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
+    uint32_t world_idx = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
+
+    uint32_t warp_id = threadIdx.x / 32;
+    uint32_t lane_id = threadIdx.x % 32;
+
+
+
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    enum PhaseSMemBytes {
+
+    };
+
     // TODO: do the magic here!
     // Note, the refs that are in the ContactConstraint are not to the
     // DOF object but to the entity which holds the position / rotation
@@ -74,6 +100,64 @@ void GaussMinimizationNode::solve(int32_t invocation_idx)
     // We can fix this by having the contact generation directly output
     // the locs of the DOF objects instead but that we can do in the future.
     assert(blockDim.x == consts::numMegakernelThreads);
+
+    while (world_idx < total_num_worlds) {
+        { // Compute data for mass matrix
+            ObjectManager &state_mgr = 
+                mwGPU::getStateManager()->getSingleton<ObjectData>(
+                        world_idx).mgr;
+
+            uint32_t num_phys_objs = dofObjectWorldCounts[world_idx];
+            uint32_t phys_objs_offset = dofObjectWorldOffsets[world_idx];
+                
+            uint32_t current_phys_obj = lane_id;
+
+            uint32_t per_world_alloc = num_phys_objs * 
+                ((3 * 3 * 4) + // Inverse generalized mass rotation components
+                 // TODO
+                 0);
+
+            // TODO: Possibly merge this over threadblock to avoid
+            // device <-> cpu communication.
+            void *per_world_bytes = 
+                mwGPU::TmpAllocator::get().alloc(per_world_alloc);
+
+            while (current_phys_obj < num_phys_objs) {
+                DofObjectPosition gen_pos = positions[current_phys_obj +
+                                                      phys_objs_offset];
+                ObjectID obj_id = objIDs[current_phys_obj +
+                                         phys_objs_offset];
+
+                const RigidBodyMetadata &metadata =
+                    obj_mgr.metadata[obj_id.idx];
+                
+                Vector3 inv_inertia = metadata.invInertiaTensor;
+
+                Quat rot_quat = {
+                    gen_pos.q[3],
+                    gen_pos.q[4],
+                    gen_pos.q[5],
+                    gen_pos.q[6],
+                };
+
+                Mat3x3 body_jacob = Mat3x3::fromQuat(rot_quat);
+                Diag3x3 inv_inertia = Diag3x3::fromVec(
+                    inv_inertia);
+
+                Mat3x3 inv_rot_mass = body_jacob * inv_inertia;
+                inv_rot_mass = body_jacob * inv_rot_mass.transpose();
+
+                *((Mat3x3 *)per_world_bytes + current_phys_obj) = inv_rot_mass;
+
+                current_phys_obj += 32;
+            }
+
+            __syncwarp();
+        }
+
+
+        world_idx += total_resident_warps;
+    }
 }
 
 TaskGraph::NodeID GaussMinimizationNode::addToGraph(
@@ -170,7 +254,8 @@ void registerTypes(ECSRegistry &registry)
 
 void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
                                 Position position,
-                                Rotation rotation)
+                                Rotation rotation,
+                                base::ObjectID obj_id)
 {
     Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
 
@@ -180,11 +265,10 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
     pos.q[1] = position.y;
     pos.q[2] = position.z;
 
-    Vector3 pyr = rotation.extractPYR();
-
-    pos.q[3] = pyr.x;
-    pos.q[4] = pyr.x;
-    pos.q[5] = pyr.x;
+    pos.q[3] = rotation.w;
+    pos.q[4] = rotation.x;
+    pos.q[5] = rotation.y;
+    pos.q[6] = rotation.z;
 
     auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
 
@@ -195,7 +279,9 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
     vel.qv[4] = 0.f;
     vel.qv[5] = 0.f;
 
-    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 6;
+    ctx.get<base::ObjectID>(physical_entity) = obj_id;
+
+    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 7;
 
     ctx.get<CVPhysicalComponent>(e) = {
         .physicsEntity = physical_entity,
@@ -229,6 +315,9 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 #ifdef MADRONA_GPU_MODE
         auto gauss_node = builder.addToGraph<tasks::GaussMinimizationNode>(
                 {run_narrowphase});
+
+        gauss_node = builder.addToGraph<ResetTmpAllocNode>(
+                {gauss_node});
 #else
         auto gauss_node = builder.addToGraph<ParallelForNode<Context,
              tasks::gaussMinimizeFn,

@@ -264,6 +264,8 @@ struct Mat3x3 {
     friend inline Mat3x3 operator*(const Mat3x3 &m, Diag3x3 d);
     friend inline Mat3x3 operator*(Diag3x3 d, const Mat3x3 &m);
 
+    friend inline Mat3x3 operator*(Diag3x3 a, Mat3x3::Transpose b);
+
     friend inline Mat3x3 operator*(Mat3x3 a, Mat3x3::Transpose b);
     friend inline Mat3x3 operator*(Mat3x3::Transpose a, Mat3x3 b);
 
