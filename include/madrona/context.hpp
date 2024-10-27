@@ -122,6 +122,8 @@ public:
     // from CustomContext.
     inline WorldBase & data() { return *data_; }
 
+    StateManager * getStateManager() { return state_mgr_; }
+
 protected:
     WorldBase *data_;
 

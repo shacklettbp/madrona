@@ -23,6 +23,10 @@ struct CVRigidBodyState : Bundle<
     CVPhysicalComponent
 > {};
 
+struct CVSingleton {
+    // Just to have something to loop over for CPU solver
+};
+
 namespace tasks {
 
 // We are going to need a different way of solving on GPU mode
@@ -195,14 +199,11 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
 }
 #else
 static void gaussMinimizeFn(Context &ctx,
-                            DofObjectPosition &pos,
-                            DofObjectVelocity &vel,
-                            const DofObjectNumDofs &num_dofs)
+                            CVSingleton &singleton)
 {
-    (void)ctx;
-    (void)pos;
-    (void)vel;
-    (void)num_dofs;
+    StateManager *state_mgr = ctx.getStateManager();
+    DofObjectPosition *positions = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectPosition>(ctx.worldID().idx);
 }
 #endif
 
@@ -239,6 +240,8 @@ static void convertPostSolve(
 void registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<CVPhysicalComponent>();
+
+    registry.registerSingleton<CVSingleton>();
 
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
@@ -321,9 +324,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 #else
         auto gauss_node = builder.addToGraph<ParallelForNode<Context,
              tasks::gaussMinimizeFn,
-                DofObjectPosition,
-                DofObjectVelocity,
-                DofObjectNumDofs
+                CVSingleton
             >>({run_narrowphase});
 #endif
 
