@@ -213,7 +213,7 @@ static void convertPostSolve(
         Rotation &rotation,
         const CVPhysicalComponent &phys)
 {
-    Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
+    Entity physical_entity = phys.physicsEntity;
     
     DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(physical_entity);
     DofObjectPosition pos = ctx.get<DofObjectPosition>(physical_entity);
@@ -223,12 +223,12 @@ static void convertPostSolve(
         position.y = pos.q[1];
         position.z = pos.q[2];
 
-        rotation = Quat::fromAngularVec(
-            Vector3{
-                pos.q[3],
-                pos.q[4],
-                pos.q[5] 
-            });
+        rotation = Quat {
+            pos.q[3],
+            pos.q[4],
+            pos.q[5],
+            pos.q[6],
+        };
     } else {
         MADRONA_UNREACHABLE();
     }
