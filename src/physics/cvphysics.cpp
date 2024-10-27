@@ -229,55 +229,56 @@ static void gaussMinimizeFn(Context &ctx,
 
     Mat3x3 body_jacob = Mat3x3::fromQuat(rot_quat);
 
+    // Inertia and Inverse Inertia in world frame
+    Mat3x3 rot_mass = body_jacob * inertia;
+    rot_mass = body_jacob * rot_mass.transpose();
     Mat3x3 inv_rot_mass = body_jacob * inv_inertia;
     inv_rot_mass = body_jacob * inv_rot_mass.transpose();
-
     // Step 2: compute the external and gyroscopic forces
-    float h[numDofs.numDofs];
-    for (int i = 0; i < numDofs.numDofs; ++i) {
-        h[i] = 0.f;
-    }
     // Step 2.1: gravity
-    h[2] = -9.81f / metadata.mass.invMass;
+    Vector3 gravity = {0.f, 0.f, -9.81f / metadata.mass.invMass};
 
     // Step 2.2: gyroscopic forces
-    Vector3 gyro_force = cross(-omega, inertia * omega);
-    for (int i = 3; i < 6; ++i) {
-        h[i] = gyro_force[i - 3];
-    }
+    Vector3 gyro_force = cross(-omega, rot_mass * omega);
 
     // Step 3: Contact Jacobians
+    // TODO!
 
     // Step N-1: Integrate velocity
     float deltaT = ctx.singleton<PhysicsSystemState>().deltaT;
     if (metadata.mass.invMass > 0) {
         for (int i = 0; i < 3; ++i) {
-            velocity.qv[i] += deltaT * metadata.mass.invMass * h[i];
+            velocity.qv[i] += deltaT * metadata.mass.invMass * gravity[i];
         }
     }
-    Vector3 mInvIOmega = inv_inertia * omega;
+    Vector3 invIGyro = inv_inertia * gyro_force;
     for (int i = 3; i < 6; ++i) {
         if(metadata.mass.invInertiaTensor[i - 3] > 0) {
-            velocity.qv[i] += deltaT * mInvIOmega[i - 3];
+            velocity.qv[i] += deltaT * invIGyro[i - 3];
         }
     }
 
     // Step N: Integrate position
+
     for (int i = 0; i < 3; ++i) {
         if (metadata.mass.invMass > 0) {
             position.q[i] += deltaT * velocity.qv[i];
         }
     }
 
-    // From angular velocity to quaternion [Q_s, Q_x, Q_y, Q_z]
+    // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
+    omega = { velocity.qv[3], velocity.qv[4], velocity.qv[5] };
     position.q[3] += 0.5f * deltaT * (-position.q[4] * omega.x - position.q[5] * omega.y - position.q[6] * omega.z);
     position.q[4] += 0.5f * deltaT * (position.q[3] * omega.x + position.q[6] * omega.y - position.q[5] * omega.z);
     position.q[5] += 0.5f * deltaT * (-position.q[6] * omega.x + position.q[3] * omega.y + position.q[4] * omega.z);
     position.q[6] += 0.5f * deltaT * (position.q[5] * omega.x - position.q[4] * omega.y + position.q[3] * omega.z);
-    // Renormalize quaternion
+    // Re-normalize quaternion
     float norm = sqrt(position.q[3] * position.q[3] + position.q[4] * position.q[4] +
         position.q[5] * position.q[5] + position.q[6] * position.q[6]);
-    position.q[3] /= norm;
+    for(int i = 3; i < 7; ++i) {
+        position.q[i] /= norm;
+    }
+
 
 }
 #endif
@@ -333,8 +334,7 @@ void registerTypes(ECSRegistry &registry)
 void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
                                 Position position,
                                 Rotation rotation,
-                                base::ObjectID obj_id)
-{
+                                base::ObjectID obj_id) {
     Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
 
     auto &pos = ctx.get<DofObjectPosition>(physical_entity);
