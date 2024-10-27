@@ -1,3 +1,4 @@
+#include <iostream>
 #include <madrona/state.hpp>
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
@@ -199,11 +200,85 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
 }
 #else
 static void gaussMinimizeFn(Context &ctx,
-                            CVSingleton &singleton)
+                            DofObjectPosition &position,
+                            DofObjectVelocity &velocity,
+                            DofObjectNumDofs &numDofs,
+                            ObjectID &objID)
 {
+    // TODO: Gather all the physics objects and do the minimization
     StateManager *state_mgr = ctx.getStateManager();
-    DofObjectPosition *positions = state_mgr->getWorldComponents<
-        DofObjectArchetype, DofObjectPosition>(ctx.worldID().idx);
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+    // DofObjectPosition *positions = state_mgr->getWorldComponents<
+    //     DofObjectArchetype, DofObjectPosition>(ctx.worldID().idx);
+
+    // Phase 1: compute the mass matrix data
+    RigidBodyMetadata &metadata = obj_mgr.metadata[objID.idx];
+    Diag3x3 inv_inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor);
+    Diag3x3 inertia = inv_inertia.inv();
+    Quat rot_quat = {
+        position.q[3],
+        position.q[4],
+        position.q[5],
+        position.q[6],
+    };
+    Vector3 omega = {
+        velocity.qv[3],
+        velocity.qv[4],
+        velocity.qv[5],
+    };
+
+    Mat3x3 body_jacob = Mat3x3::fromQuat(rot_quat);
+
+    Mat3x3 inv_rot_mass = body_jacob * inv_inertia;
+    inv_rot_mass = body_jacob * inv_rot_mass.transpose();
+
+    // Step 2: compute the external and gyroscopic forces
+    float h[numDofs.numDofs];
+    for (int i = 0; i < numDofs.numDofs; ++i) {
+        h[i] = 0.f;
+    }
+    // Step 2.1: gravity
+    h[2] = -9.81f / metadata.mass.invMass;
+
+    // Step 2.2: gyroscopic forces
+    Vector3 gyro_force = cross(-omega, inertia * omega);
+    for (int i = 3; i < 6; ++i) {
+        h[i] = gyro_force[i - 3];
+    }
+
+    // Step 3: Contact Jacobians
+
+    // Step N-1: Integrate velocity
+    float deltaT = ctx.singleton<PhysicsSystemState>().deltaT;
+    if (metadata.mass.invMass > 0) {
+        for (int i = 0; i < 3; ++i) {
+            velocity.qv[i] += deltaT * metadata.mass.invMass * h[i];
+        }
+    }
+    Vector3 mInvIOmega = inv_inertia * omega;
+    for (int i = 3; i < 6; ++i) {
+        if(metadata.mass.invInertiaTensor[i - 3] > 0) {
+            velocity.qv[i] += deltaT * mInvIOmega[i - 3];
+        }
+    }
+
+    // Step N: Integrate position
+    for (int i = 0; i < 3; ++i) {
+        if (metadata.mass.invMass > 0) {
+            position.q[i] += deltaT * velocity.qv[i];
+        }
+    }
+
+    // From angular velocity to quaternion [Q_s, Q_x, Q_y, Q_z]
+    position.q[3] += 0.5f * deltaT * (-position.q[4] * omega.x - position.q[5] * omega.y - position.q[6] * omega.z);
+    position.q[4] += 0.5f * deltaT * (position.q[3] * omega.x + position.q[6] * omega.y - position.q[5] * omega.z);
+    position.q[5] += 0.5f * deltaT * (-position.q[6] * omega.x + position.q[3] * omega.y + position.q[4] * omega.z);
+    position.q[6] += 0.5f * deltaT * (position.q[5] * omega.x - position.q[4] * omega.y + position.q[3] * omega.z);
+    // Renormalize quaternion
+    float norm = sqrt(position.q[3] * position.q[3] + position.q[4] * position.q[4] +
+        position.q[5] * position.q[5] + position.q[6] * position.q[6]);
+    position.q[3] /= norm;
+
 }
 #endif
 
@@ -284,7 +359,7 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
 
     ctx.get<base::ObjectID>(physical_entity) = obj_id;
 
-    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 7;
+    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 6;
 
     ctx.get<CVPhysicalComponent>(e) = {
         .physicsEntity = physical_entity,
@@ -324,7 +399,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 #else
         auto gauss_node = builder.addToGraph<ParallelForNode<Context,
              tasks::gaussMinimizeFn,
-                CVSingleton
+                DofObjectPosition,
+                DofObjectVelocity,
+                DofObjectNumDofs,
+                ObjectID
             >>({run_narrowphase});
 #endif
 
