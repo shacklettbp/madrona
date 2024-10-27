@@ -208,6 +208,7 @@ static void gaussMinimizeFn(Context &ctx,
     // TODO: Gather all the physics objects and do the minimization
     StateManager *state_mgr = ctx.getStateManager();
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     // DofObjectPosition *positions = state_mgr->getWorldComponents<
     //     DofObjectArchetype, DofObjectPosition>(ctx.worldID().idx);
 
@@ -230,36 +231,39 @@ static void gaussMinimizeFn(Context &ctx,
     Mat3x3 body_jacob = Mat3x3::fromQuat(rot_quat);
 
     // Inertia and Inverse Inertia in world frame
-    Mat3x3 rot_mass = body_jacob * inertia;
-    rot_mass = body_jacob * rot_mass.transpose();
-    Mat3x3 inv_rot_mass = body_jacob * inv_inertia;
-    inv_rot_mass = body_jacob * inv_rot_mass.transpose();
+    Mat3x3 I_world_frame = body_jacob * inertia;
+    I_world_frame = body_jacob * I_world_frame.transpose();
+    Mat3x3 inv_I_world_frame = body_jacob * inv_inertia;
+    inv_I_world_frame = body_jacob * inv_I_world_frame.transpose();
+
     // Step 2: compute the external and gyroscopic forces
     // Step 2.1: gravity
-    Vector3 gravity = {0.f, 0.f, -9.81f / metadata.mass.invMass};
+    Vector3 force_gravity = physics_state.g / metadata.mass.invMass;
+    Vector3 trans_forces = force_gravity;
 
     // Step 2.2: gyroscopic forces
-    Vector3 gyro_force = cross(-omega, rot_mass * omega);
+    Vector3 gyro_force = -cross(omega, I_world_frame * omega);
+    Vector3 rot_forces = gyro_force;
 
     // Step 3: Contact Jacobians
     // TODO!
 
     // Step N-1: Integrate velocity
-    float deltaT = ctx.singleton<PhysicsSystemState>().deltaT;
+    float deltaT = physics_state.deltaT;
     if (metadata.mass.invMass > 0) {
+        Vector3 delta_v = deltaT * metadata.mass.invMass * trans_forces;
         for (int i = 0; i < 3; ++i) {
-            velocity.qv[i] += deltaT * metadata.mass.invMass * gravity[i];
+            velocity.qv[i] += delta_v[i];
         }
     }
-    Vector3 invIGyro = inv_inertia * gyro_force;
     for (int i = 3; i < 6; ++i) {
+        Vector3 delta_omega = deltaT * inv_I_world_frame * rot_forces;
         if(metadata.mass.invInertiaTensor[i - 3] > 0) {
-            velocity.qv[i] += deltaT * invIGyro[i - 3];
+            velocity.qv[i] += delta_omega[i - 3];
         }
     }
 
     // Step N: Integrate position
-
     for (int i = 0; i < 3; ++i) {
         if (metadata.mass.invMass > 0) {
             position.q[i] += deltaT * velocity.qv[i];
@@ -356,7 +360,6 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
     vel.qv[3] = 0.f;
     vel.qv[4] = 0.f;
     vel.qv[5] = 0.f;
-
     ctx.get<base::ObjectID>(physical_entity) = obj_id;
 
     ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 6;
