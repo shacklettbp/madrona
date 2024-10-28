@@ -36,9 +36,18 @@ struct DofObjectNumDofs {
     uint32_t numDofs;
 };
 
+// Just some space to store temporary per-entity data.
+struct DofObjectTmpState {
+    math::Mat3x3 invInertia;
+    math::Vector3 externalForces;
+    math::Vector3 externalMoment;
+};
+
 struct DofObjectArchetype : public Archetype<
     DofObjectPosition,
     DofObjectVelocity,
+
+    DofObjectTmpState,
 
     // Currently, this is being duplicated but it's small. We can
     // maybe find a way around this later.

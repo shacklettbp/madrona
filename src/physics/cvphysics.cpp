@@ -202,6 +202,7 @@ static void gaussMinimizeFn(Context &ctx,
                             DofObjectPosition &position,
                             DofObjectVelocity &velocity,
                             DofObjectNumDofs &numDofs,
+                            DofObjectTmpState &tmp_state,
                             ObjectID &objID)
 {
     // TODO: Gather all the physics objects and do the minimization
@@ -244,10 +245,60 @@ static void gaussMinimizeFn(Context &ctx,
     Vector3 gyro_moment = -(omega.cross(I_world_frame * omega));
     Vector3 rot_moments = gyro_moment;
 
+    tmp_state.invInertia = inv_I_world_frame;
+    tmp_state.externalForces = trans_forces;
+    tmp_state.externalMoment = rot_moments;
+
+#if 0
     // Step 3: Contact Jacobians
     // TODO!
 
-    // Step N-1: Integrate velocity
+#endif
+}
+
+static void processContacts(Context &ctx,
+                            ContactConstraint &constraint)
+{
+    CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
+            constraint.ref);
+    CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
+            constraint.alt);
+
+    auto &ref_pos = ctx.get<DofObjectPosition>(ref.physicsEntity);
+    auto &alt_pos = ctx.get<DofObjectPosition>(alt.physicsEntity);
+
+    printf("ref: %f %f %f\n", ref_pos.q[0], ref_pos.q[1],
+                              ref_pos.q[2]);
+    printf("alt: %f %f %f\n", alt_pos.q[0], alt_pos.q[1],
+                              alt_pos.q[2]);
+}
+
+static void integrationStep(Context &ctx,
+                            DofObjectPosition &position,
+                            DofObjectVelocity &velocity,
+                            DofObjectNumDofs &numDofs,
+                            DofObjectTmpState &tmp_state,
+                            ObjectID &objID)
+{
+    StateManager *state_mgr = ctx.getStateManager();
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+
+    // Phase 1: compute the mass matrix data
+    RigidBodyMetadata &metadata = obj_mgr.metadata[objID.idx];
+
+    Quat rot_quat = {
+        position.q[3],
+        position.q[4],
+        position.q[5],
+        position.q[6],
+    };
+
+    Mat3x3 inv_I_world_frame = tmp_state.invInertia;
+
+    Vector3 trans_forces = tmp_state.externalForces;
+    Vector3 rot_moments = tmp_state.externalMoment;
+
     Vector3 delta_v = metadata.mass.invMass * trans_forces;
     Vector3 delta_omega = inv_I_world_frame * rot_moments;
     float h = physics_state.h;
@@ -268,7 +319,7 @@ static void gaussMinimizeFn(Context &ctx,
     }
 
     // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
-    omega = { velocity.qv[3], velocity.qv[4], velocity.qv[5] };
+    Vector3 omega = { velocity.qv[3], velocity.qv[4], velocity.qv[5] };
     Quat new_rot = {rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z};
     new_rot.w += 0.5f * h * (-rot_quat.x * omega.x - rot_quat.y * omega.y - rot_quat.z * omega.z);
     new_rot.x += 0.5f * h * (rot_quat.w * omega.x + rot_quat.z * omega.y - rot_quat.y * omega.z);
@@ -321,6 +372,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
     registry.registerComponent<DofObjectNumDofs>();
+    registry.registerComponent<DofObjectTmpState>();
 
     registry.registerArchetype<DofObjectArchetype>();
     registry.registerArchetype<Contact>();
@@ -400,8 +452,23 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 DofObjectPosition,
                 DofObjectVelocity,
                 DofObjectNumDofs,
+                DofObjectTmpState,
                 ObjectID
             >>({run_narrowphase});
+
+        auto contact_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::processContacts,
+                ContactConstraint
+            >>({gauss_node});
+
+        auto int_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::integrationStep,
+                 DofObjectPosition,
+                 DofObjectVelocity,
+                 DofObjectNumDofs,
+                 DofObjectTmpState,
+                 ObjectID
+            >>({contact_node});
 #endif
 
         cur_node =
@@ -409,10 +476,18 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 Position,
                 Rotation,
                 CVPhysicalComponent
-            >>({gauss_node});
+            >>({int_node});
+
+        cur_node = builder.addToGraph<
+            ClearTmpNode<Contact>>({cur_node});
+
+        cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
     }
+
+    auto clear_broadphase = builder.addToGraph<
+        ClearTmpNode<CandidateTemporary>>({cur_node});
     
-    return cur_node;
+    return clear_broadphase;
 }
 
 
