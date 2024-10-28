@@ -59,7 +59,7 @@ struct GaussMinimizationNode : NodeBase {
 
 GaussMinimizationNode::GaussMinimizationNode(
         StateManager *s)
-    : positions(s->getArchetypeComponent<DofObjectArchetype, 
+    : positions(s->getArchetypeComponent<DofObjectArchetype,
             DofObjectPosition>()),
       velocities(s->getArchetypeComponent<DofObjectArchetype,
             DofObjectVelocity>()),
@@ -108,23 +108,23 @@ void GaussMinimizationNode::solve(int32_t invocation_idx)
 
     while (world_idx < total_num_worlds) {
         { // Compute data for mass matrix
-            ObjectManager &state_mgr = 
+            ObjectManager &state_mgr =
                 mwGPU::getStateManager()->getSingleton<ObjectData>(
                         world_idx).mgr;
 
             uint32_t num_phys_objs = dofObjectWorldCounts[world_idx];
             uint32_t phys_objs_offset = dofObjectWorldOffsets[world_idx];
-                
+
             uint32_t current_phys_obj = lane_id;
 
-            uint32_t per_world_alloc = num_phys_objs * 
+            uint32_t per_world_alloc = num_phys_objs *
                 ((3 * 3 * 4) + // Inverse generalized mass rotation components
                  // TODO
                  0);
 
             // TODO: Possibly merge this over threadblock to avoid
             // device <-> cpu communication.
-            void *per_world_bytes = 
+            void *per_world_bytes =
                 mwGPU::TmpAllocator::get().alloc(per_world_alloc);
 
             while (current_phys_obj < num_phys_objs) {
@@ -135,7 +135,7 @@ void GaussMinimizationNode::solve(int32_t invocation_idx)
 
                 const RigidBodyMetadata &metadata =
                     obj_mgr.metadata[obj_id.idx];
-                
+
                 Vector3 inv_inertia = metadata.invInertiaTensor;
 
                 Quat rot_quat = {
@@ -249,15 +249,15 @@ static void gaussMinimizeFn(Context &ctx,
     // TODO!
 
     // Step N-1: Integrate velocity
-    float deltaT = physics_state.deltaT;
+    float h = physics_state.h;
     if (metadata.mass.invMass > 0) {
-        Vector3 delta_v = deltaT * metadata.mass.invMass * trans_forces;
+        Vector3 delta_v = h * metadata.mass.invMass * trans_forces;
         for (int i = 0; i < 3; ++i) {
             velocity.qv[i] += delta_v[i];
         }
     }
     for (int i = 3; i < 6; ++i) {
-        Vector3 delta_omega = deltaT * inv_I_world_frame * rot_forces;
+        Vector3 delta_omega = h * inv_I_world_frame * rot_forces;
         if(metadata.mass.invInertiaTensor[i - 3] > 0) {
             velocity.qv[i] += delta_omega[i - 3];
         }
@@ -266,16 +266,22 @@ static void gaussMinimizeFn(Context &ctx,
     // Step N: Integrate position
     for (int i = 0; i < 3; ++i) {
         if (metadata.mass.invMass > 0) {
-            position.q[i] += deltaT * velocity.qv[i];
+            position.q[i] += h * velocity.qv[i];
         }
     }
 
     // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
     omega = { velocity.qv[3], velocity.qv[4], velocity.qv[5] };
-    position.q[3] += 0.5f * deltaT * (-position.q[4] * omega.x - position.q[5] * omega.y - position.q[6] * omega.z);
-    position.q[4] += 0.5f * deltaT * (position.q[3] * omega.x + position.q[6] * omega.y - position.q[5] * omega.z);
-    position.q[5] += 0.5f * deltaT * (-position.q[6] * omega.x + position.q[3] * omega.y + position.q[4] * omega.z);
-    position.q[6] += 0.5f * deltaT * (position.q[5] * omega.x - position.q[4] * omega.y + position.q[3] * omega.z);
+    Quat new_rot = {rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z};
+    new_rot.w += 0.5f * h * (-rot_quat.x * omega.x - rot_quat.y * omega.y - rot_quat.z * omega.z);
+    new_rot.x += 0.5f * h * (rot_quat.w * omega.x + rot_quat.z * omega.y - rot_quat.y * omega.z);
+    new_rot.y += 0.5f * h * (-rot_quat.z * omega.x + rot_quat.w * omega.y + rot_quat.x * omega.z);
+    new_rot.z += 0.5f * h * (rot_quat.y * omega.x - rot_quat.x * omega.y + rot_quat.w * omega.z);
+    new_rot = new_rot.normalize();
+    position.q[3] = new_rot.w;
+    position.q[4] = new_rot.x;
+    position.q[5] = new_rot.y;
+    position.q[6] = new_rot.z;
     // Re-normalize quaternion
     float norm = sqrt(position.q[3] * position.q[3] + position.q[4] * position.q[4] +
         position.q[5] * position.q[5] + position.q[6] * position.q[6]);
@@ -295,7 +301,7 @@ static void convertPostSolve(
         const CVPhysicalComponent &phys)
 {
     Entity physical_entity = phys.physicsEntity;
-    
+
     DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(physical_entity);
     DofObjectPosition pos = ctx.get<DofObjectPosition>(physical_entity);
 
@@ -316,7 +322,7 @@ static void convertPostSolve(
 }
 
 }
-    
+
 void registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<CVPhysicalComponent>();
