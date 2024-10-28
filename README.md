@@ -25,7 +25,7 @@ Shacklett et al. SIGGRAPH 2023
 
 For more details on Madrona's batch renderer, refer to:
 
-* [High-Throughput Batch Rendering for Embodied AI](https://madrona-engine.github.io/shacklett_siggraph23.pdf).
+* [High-Throughput Batch Rendering for Embodied AI](https://madrona-engine.github.io/madrona-renderer.pdf).
 Rosenzweig et al. SIGGRAPH Asia 2024
 
 Madrona uses an Entity Component System (ECS) architecture for defining game state and expressing game logic. For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Mertens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
