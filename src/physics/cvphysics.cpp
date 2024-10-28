@@ -1,4 +1,3 @@
-#include <iostream>
 #include <madrona/state.hpp>
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
@@ -282,14 +281,6 @@ static void gaussMinimizeFn(Context &ctx,
     position.q[4] = new_rot.x;
     position.q[5] = new_rot.y;
     position.q[6] = new_rot.z;
-    // Re-normalize quaternion
-    float norm = sqrt(position.q[3] * position.q[3] + position.q[4] * position.q[4] +
-        position.q[5] * position.q[5] + position.q[6] * position.q[6]);
-    for(int i = 3; i < 7; ++i) {
-        position.q[i] /= norm;
-    }
-
-
 }
 #endif
 
