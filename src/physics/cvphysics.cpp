@@ -1,4 +1,3 @@
-#include <iostream>
 #include <madrona/state.hpp>
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
@@ -241,25 +240,23 @@ static void gaussMinimizeFn(Context &ctx,
     Vector3 force_gravity = physics_state.g / metadata.mass.invMass;
     Vector3 trans_forces = force_gravity;
 
-    // Step 2.2: gyroscopic forces
-    Vector3 gyro_force = -cross(omega, I_world_frame * omega);
-    Vector3 rot_forces = gyro_force;
+    // Step 2.2: gyroscopic moments
+    Vector3 gyro_moment = -(omega.cross(I_world_frame * omega));
+    Vector3 rot_moments = gyro_moment;
 
     // Step 3: Contact Jacobians
     // TODO!
 
     // Step N-1: Integrate velocity
+    Vector3 delta_v = metadata.mass.invMass * trans_forces;
+    Vector3 delta_omega = inv_I_world_frame * rot_moments;
     float h = physics_state.h;
     if (metadata.mass.invMass > 0) {
-        Vector3 delta_v = h * metadata.mass.invMass * trans_forces;
         for (int i = 0; i < 3; ++i) {
-            velocity.qv[i] += delta_v[i];
+            velocity.qv[i] += h * delta_v[i];
         }
-    }
-    for (int i = 3; i < 6; ++i) {
-        Vector3 delta_omega = h * inv_I_world_frame * rot_forces;
-        if(metadata.mass.invInertiaTensor[i - 3] > 0) {
-            velocity.qv[i] += delta_omega[i - 3];
+        for (int i = 3; i < 6; ++i) {
+            velocity.qv[i] += h * delta_omega[i - 3];
         }
     }
 
@@ -282,14 +279,6 @@ static void gaussMinimizeFn(Context &ctx,
     position.q[4] = new_rot.x;
     position.q[5] = new_rot.y;
     position.q[6] = new_rot.z;
-    // Re-normalize quaternion
-    float norm = sqrt(position.q[3] * position.q[3] + position.q[4] * position.q[4] +
-        position.q[5] * position.q[5] + position.q[6] * position.q[6]);
-    for(int i = 3; i < 7; ++i) {
-        position.q[i] /= norm;
-    }
-
-
 }
 #endif
 
@@ -366,6 +355,10 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
     vel.qv[3] = 0.f;
     vel.qv[4] = 0.f;
     vel.qv[5] = 0.f;
+    if (pos.q[2] > 10) {
+        vel.qv[3] = 1.0f;
+        vel.qv[5] = 5.0f;
+    }
     ctx.get<base::ObjectID>(physical_entity) = obj_id;
 
     ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 6;
