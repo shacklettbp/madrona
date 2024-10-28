@@ -12,7 +12,8 @@ using namespace madrona::base;
 namespace madrona::phys::cv {
 
 struct Contact : Archetype<
-    ContactConstraint
+    ContactConstraint,
+    ContactTmpState
 > {};
 
 struct Joint : Archetype<
@@ -257,20 +258,56 @@ static void gaussMinimizeFn(Context &ctx,
 }
 
 static void processContacts(Context &ctx,
-                            ContactConstraint &constraint)
+                            ContactConstraint &contact,
+                            ContactTmpState &tmp_state)
 {
     CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
-            constraint.ref);
+            contact.ref);
     CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
-            constraint.alt);
+            contact.alt);
 
     auto &ref_pos = ctx.get<DofObjectPosition>(ref.physicsEntity);
     auto &alt_pos = ctx.get<DofObjectPosition>(alt.physicsEntity);
+    Vector3 ref_com = Vector3(ref_pos.q[0], ref_pos.q[1], ref_pos.q[2]);
+    Vector3 alt_com = Vector3(alt_pos.q[0], alt_pos.q[1], alt_pos.q[2]);
 
     printf("ref: %f %f %f\n", ref_pos.q[0], ref_pos.q[1],
                               ref_pos.q[2]);
     printf("alt: %f %f %f\n", alt_pos.q[0], alt_pos.q[1],
                               alt_pos.q[2]);
+
+    // Create a coordinate system for the contact
+    Vector3 n = contact.normal.normalize();
+    Vector3 t{};
+    Vector3 s{};
+
+    Vector3 x_axis = {1.f, 0.f, 0.f};
+    if(n.cross(x_axis).length() > 0.01f) {
+        t = n.cross(x_axis).normalize();
+    } else {
+        t = n.cross({0.f, 1.f, 0.f}).normalize();
+    }
+    s = n.cross(t).normalize();
+
+    // Get the average contact
+    float penetration_sum = 0.f;
+    Vector3 avg_contact = Vector3::zero();
+    for(CountT i = 0; i < contact.numPoints; ++i) {
+        Vector4 point = contact.points[i];
+        penetration_sum += point.w;
+        avg_contact += point.w * point.xyz();
+    }
+    avg_contact /= penetration_sum;
+
+    // Compute the relative positions of the contact
+    Vector3 rRef = avg_contact - ref_com;
+    Vector3 rAlt = avg_contact - alt_com;
+
+    tmp_state.n = n;
+    tmp_state.t = t;
+    tmp_state.s = s;
+    tmp_state.rRef = rRef;
+    tmp_state.rAlt = rAlt;
 }
 
 static void integrationStep(Context &ctx,
@@ -373,6 +410,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<DofObjectVelocity>();
     registry.registerComponent<DofObjectNumDofs>();
     registry.registerComponent<DofObjectTmpState>();
+    registry.registerComponent<ContactTmpState>();
 
     registry.registerArchetype<DofObjectArchetype>();
     registry.registerArchetype<Contact>();
@@ -458,7 +496,8 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 
         auto contact_node = builder.addToGraph<ParallelForNode<Context,
              tasks::processContacts,
-                ContactConstraint
+                ContactConstraint,
+                ContactTmpState
             >>({gauss_node});
 
         auto int_node = builder.addToGraph<ParallelForNode<Context,

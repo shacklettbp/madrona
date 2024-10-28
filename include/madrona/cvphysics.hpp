@@ -36,6 +36,14 @@ struct DofObjectNumDofs {
     uint32_t numDofs;
 };
 
+struct ContactTmpState {
+    math::Vector3 n;
+    math::Vector3 t;
+    math::Vector3 s;
+    math::Vector3 rRef;
+    math::Vector3 rAlt;
+};
+
 // Just some space to store temporary per-entity data.
 struct DofObjectTmpState {
     math::Mat3x3 invInertia;
