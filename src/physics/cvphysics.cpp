@@ -355,10 +355,6 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
     vel.qv[3] = 0.f;
     vel.qv[4] = 0.f;
     vel.qv[5] = 0.f;
-    if (pos.q[2] > 10) {
-        vel.qv[3] = 1.0f;
-        vel.qv[5] = 5.0f;
-    }
     ctx.get<base::ObjectID>(physical_entity) = obj_id;
 
     ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 6;
