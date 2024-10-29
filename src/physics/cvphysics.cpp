@@ -446,31 +446,33 @@ static void solveSystem(Context &ctx,
     }
 
     // Build A=J_c M^{-1} J_c^T
-    // First, compute J_c M^{-1}
+    // First, compute J_c M^{-1} (3 * num_contacts x num_dof)
     float *J_M_inv_ptr = (float *)state_mgr->tmpAlloc(
-            world_id, sizeof(float) * (3 * num_contacts) * (6 * num_bodies));
-    memset(J_M_inv_ptr, 0, sizeof(float) * (3 * num_contacts) * (6 * num_bodies));
+            world_id, sizeof(float) * (3 * num_contacts) * num_dof);
+    memset(J_M_inv_ptr, 0, sizeof(float) * (3 * num_contacts) * num_dof);
+    // We can re-use the lambda earlier since they share same num rows
+    auto jm_inv_entry = [J_M_inv_ptr, num_contacts](int col, int row) -> float & {
+        return J_M_inv_ptr[row + col * (3 * num_contacts)];
+    };
     for(CountT i = 0; i < 3 * num_contacts; ++i) {
-        for(CountT j = 0; j < 6 * num_bodies; ++j) {
-            for(CountT k = 0; k < 6 * num_bodies; ++k) {
-                J_M_inv_ptr[i * (6 * num_bodies) + j] +=
-                    jacob_ptr[i + k * (3 * num_contacts)] *
-                    M_inv_ptr[k + j * (6 * num_bodies)];
+        for(CountT j = 0; j < num_dof; ++j) {
+            for(CountT k = 0; k < num_dof; ++k) {
+                jm_inv_entry(j, i) += j_entry(k, i) * M_inv_entry(k, j);
             }
         }
     }
-    // Then, compute J_c M^{-1} J_c^T
+    // Then, compute A = J_c M^{-1} J_c^T
     CountT A_size = (3 * num_contacts) * (3 * num_contacts);
     float *A_ptr = (float *)state_mgr->tmpAlloc(
             world_id, sizeof(float) * A_size);
     memset(A_ptr, 0, sizeof(float) * A_size);
-    // Now, compute A = J_c M^{-1} J_c^T
+    auto A_entry = [A_ptr, num_contacts](int col, int row) -> float & {
+        return A_ptr[row + col * (3 * num_contacts)];
+    };
     for(CountT i = 0; i < 3 * num_contacts; ++i) {
         for(CountT j = 0; j < 3 * num_contacts; ++j) {
-            for(CountT k = 0; k < 6 * num_bodies; ++k) {
-                A_ptr[i + j * (3 * num_contacts)] +=
-                    J_M_inv_ptr[i * (6 * num_bodies) + k] *
-                    jacob_ptr[j + k * (3 * num_contacts)];
+            for(CountT k = 0; k < num_dof; ++k) {
+                A_entry(j, i) += jm_inv_entry(k, i) * j_entry(k, j);
             }
         }
     }
@@ -485,7 +487,6 @@ static void solveSystem(Context &ctx,
             v_h_M_inv_b[i] += physics_state.h * M_inv_entry(j, i) * btr[j];
         }
     }
-
     // Finally, compute v0
     float *v0 = (float *)state_mgr->tmpAlloc(
             world_id, sizeof(float) * 3 * num_contacts);
