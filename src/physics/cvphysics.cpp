@@ -510,6 +510,33 @@ static void solveSystem(Context &ctx,
     float *f_C = (float *)state_mgr->tmpAlloc(
             world_id, sizeof(float) * 3 * num_contacts);
     memset(f_C, 0, sizeof(float) * 3 * num_contacts);
+
+
+    // TODO: build constraints, solve f_C,
+
+    // Post-solve f_C. Impulse is J_c^T f_C
+    float *contact_force = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * num_dof);
+    for(CountT i = 0; i < num_dof; ++i) {
+        contact_force[i] = 0.f;
+        for(CountT j = 0; j < 3 * num_contacts; ++j) {
+            contact_force[i] += j_entry(j, i) * f_C[j];
+        }
+    }
+    // Add to bodies
+    for(CountT i = 0; i < num_bodies; ++i) {
+        DofObjectTmpState &body_tmp_state = tmp_states[i];
+        CountT idx_start = i * 6;
+        if(body_tmp_state.invMass == 0) {
+            continue;
+        }
+        body_tmp_state.externalForces += Vector3(contact_force[idx_start],
+                                                contact_force[idx_start + 1],
+                                                contact_force[idx_start + 2]);
+        body_tmp_state.externalMoment += Vector3(contact_force[idx_start + 3],
+                                                contact_force[idx_start + 4],
+                                                contact_force[idx_start + 5]);
+    }
 }
 
 static void integrationStep(Context &ctx,
