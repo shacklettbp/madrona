@@ -315,9 +315,11 @@ static inline Mat3x3 rightMultiplyCross(const MatrixT &m,
                                         const Vector3 &v)
 {
     return {
-        { -m[2][0]*v.y + m[1][0]*v.z, -m[2][1]*v.y + m[1][1]*v.z, -m[2][2]*v.y + m[1][2]*v.z },
-        { m[2][0]*v.x - m[0][0]*v.z, m[2][1]*v.x - m[0][1]*v.z, m[2][2]*v.x - m[0][2]*v.z },
-        { -m[1][0]*v.x + m[0][0]*v.y, -m[1][1]*v.x + m[0][1]*v.y, -m[1][2]*v.x + m[0][2]*v.y },
+        {
+                { -m[2][0]*v.y + m[1][0]*v.z, -m[2][1]*v.y + m[1][1]*v.z, -m[2][2]*v.y + m[1][2]*v.z },
+               { m[2][0]*v.x - m[0][0]*v.z, m[2][1]*v.x - m[0][1]*v.z, m[2][2]*v.x - m[0][2]*v.z },
+               { -m[1][0]*v.x + m[0][0]*v.y, -m[1][1]*v.x + m[0][1]*v.y, -m[1][2]*v.x + m[0][2]*v.y }
+            }
     };
 }
 
@@ -335,7 +337,7 @@ static void solveSystem(Context &ctx,
         Contact, ContactConstraint>(world_id);
     ContactTmpState *contacts_tmp_state = state_mgr->getWorldComponents<
         Contact, ContactTmpState>(world_id);
-    DofObjectTmpState *tmp_states = state_mgr->getWorldComponent<
+    DofObjectTmpState *tmp_states = state_mgr->getWorldComponents<
         DofObjectArchetype, DofObjectTmpState>(world_id);
 
     printf("Num contacts: %d\n", (int)num_contacts);
@@ -349,7 +351,7 @@ static void solveSystem(Context &ctx,
             world_id, sizeof(float) * jacob_size);
     memset(jacob_ptr, 0, sizeof(float) * jacob_size);
 
-    auto j_entry = [jacob_ptr, num_bodies](int col, int row) -> float & {
+    auto j_entry = [jacob_ptr, num_contacts](int col, int row) -> float & {
         return jacob_ptr[row + col * (3 * num_contacts)];
     };
 
