@@ -216,6 +216,9 @@ public:
     void * tmpAlloc(MADRONA_MW_COND(uint32_t world_id,) uint64_t num_bytes);
     void resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id));
 
+    template <typename ArchetypeT>
+    inline CountT numRows(MADRONA_MW_COND(uint32_t world_id));
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};

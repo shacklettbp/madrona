@@ -365,6 +365,16 @@ ComponentT *StateManager::getWorldComponents(
     return col;
 }
 
+template <typename ArchetypeT>
+inline CountT StateManager::numRows(MADRONA_MW_COND(uint32_t world_id))
+{
+    uint32_t archetype_id = archetypeID<ArchetypeT>().id;
+
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id];
+
+    return archetype.tblStorage.numRows(MADRONA_MW_COND(world_id));
+}
+
 template <typename ComponentT>
 inline ComponentT & StateManager::getDirect(MADRONA_MW_COND(uint32_t world_id,)
                                             CountT col_idx,

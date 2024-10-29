@@ -310,6 +310,96 @@ static void processContacts(Context &ctx,
     tmp_state.rAlt = rAlt;
 }
 
+template <typename MatrixT>
+static inline Mat3x3 rightMultiplyCross(const MatrixT &m,
+                                        const Vector3 &v)
+{
+    return {
+        { -m[2][0]*v.y + m[1][0]*v.z, -m[2][1]*v.y + m[1][1]*v.z, -m[2][2]*v.y + m[1][2]*v.z },
+        { m[2][0]*v.x - m[0][0]*v.z, m[2][1]*v.x - m[0][1]*v.z, m[2][2]*v.x - m[0][2]*v.z },
+        { -m[1][0]*v.x + m[0][0]*v.y, -m[1][1]*v.x + m[0][1]*v.y, -m[1][2]*v.x + m[0][2]*v.y },
+    };
+}
+
+static void solveSystem(Context &ctx,
+                        CVSingleton &)
+{
+    uint32_t world_id = ctx.worldID().idx;
+
+    StateManager *state_mgr = ctx.getStateManager();
+
+    CountT num_contacts = state_mgr->numRows<Contact>(world_id);
+    CountT num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
+
+    ContactConstraint *contacts = state_mgr->getWorldComponents<
+        Contact, ContactConstraint>(world_id);
+    ContactTmpState *contacts_tmp_state = state_mgr->getWorldComponents<
+        Contact, ContactTmpState>(world_id);
+    DofObjectTmpState *tmp_states = state_mgr->getWorldComponent<
+        DofObjectArchetype, DofObjectTmpState>(world_id);
+
+    printf("Num contacts: %d\n", (int)num_contacts);
+
+
+
+    CountT jacob_size = (3 * num_contacts) * 6 * num_bodies;
+
+    // Row major order
+    float *jacob_ptr = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * jacob_size);
+    memset(jacob_ptr, 0, sizeof(float) * jacob_size);
+
+    auto j_entry = [jacob_ptr, num_bodies](int col, int row) -> float & {
+        return jacob_ptr[row + col * (3 * num_contacts)];
+    };
+
+    for (CountT cont_idx = 0; cont_idx < num_contacts; ++cont_idx) {
+        ContactConstraint &contact = contacts[cont_idx];
+        ContactTmpState &contact_tmp_state = contacts_tmp_state[cont_idx];
+
+        CVPhysicalComponent &ref_phys_comp = ctx.get<CVPhysicalComponent>(
+                contact.ref);
+        CountT ref_idx = ctx.loc(ref_phys_comp.physicsEntity).row;
+        DofObjectTmpState &ref_tmp_state = tmp_states[ref_idx];
+
+        CVPhysicalComponent &alt_phys_comp = ctx.get<CVPhysicalComponent>(
+                contact.alt);
+        CountT alt_idx = ctx.loc(alt_phys_comp.physicsEntity).row;
+        DofObjectTmpState &alt_tmp_state = tmp_states[alt_idx];
+
+        CountT row_start = cont_idx * 3;
+
+
+        CountT ref_col_start = ref_idx * 6;
+        CountT alt_col_start = alt_idx * 6;
+
+        Mat3x3 ref_linear_c;
+        Mat3x3 alt_linear_c;
+
+        for (int i = 0; i < 3; ++i) {
+            ref_linear_c[i][0] = j_entry(ref_col_start + i, row_start) = -contact_tmp_state.n[i];
+            ref_linear_c[i][1] = j_entry(ref_col_start + i, row_start+1) = -contact_tmp_state.t[i];
+            ref_linear_c[i][2] = j_entry(ref_col_start + i, row_start+2) = -contact_tmp_state.s[i];
+
+            alt_linear_c[i][0] = j_entry(alt_col_start + i, row_start) = contact_tmp_state.n[i];
+            alt_linear_c[i][1] = j_entry(alt_col_start + i, row_start+1) = contact_tmp_state.t[i];
+            alt_linear_c[i][2] = j_entry(alt_col_start + i, row_start+2) = contact_tmp_state.s[i];
+        }
+        
+        ref_linear_c = rightMultiplyCross(ref_linear_c.transpose(), 
+                                          contact_tmp_state.rRef);
+        alt_linear_c = rightMultiplyCross(alt_linear_c.transpose(), 
+                                          contact_tmp_state.rAlt);
+
+        for (int col = 0; col < 3; ++col) {
+            for (int row = 0; row < 3; ++row) {
+                j_entry(ref_col_start + 3 + col, row_start + row) = ref_linear_c[col][row];
+                j_entry(alt_col_start + 3 + col, row_start + row) = alt_linear_c[col][row];
+            }
+        }
+    }
+}
+
 static void integrationStep(Context &ctx,
                             DofObjectPosition &position,
                             DofObjectVelocity &velocity,
@@ -499,6 +589,11 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 ContactConstraint,
                 ContactTmpState
             >>({gauss_node});
+
+        auto solve_sys = builder.addToGraph<ParallelForNode<Context,
+             tasks::solveSystem,
+                CVSingleton
+            >>({contact_node});
 
         auto int_node = builder.addToGraph<ParallelForNode<Context,
              tasks::integrationStep,
