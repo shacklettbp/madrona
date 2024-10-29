@@ -37,6 +37,7 @@ struct DofObjectNumDofs {
 };
 
 struct ContactTmpState {
+    float mu;
     math::Vector3 n;
     math::Vector3 t;
     math::Vector3 s;

@@ -304,6 +304,15 @@ static void processContacts(Context &ctx,
     tmp_state.s = s;
     tmp_state.rRefComToPt = rRefComToPt;
     tmp_state.rAltComToPt = rAltComToPt;
+
+    // Get friction coefficient
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+    CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
+    CountT objID_j = ctx.get<ObjectID>(alt.physicsEntity).idx;
+    RigidBodyMetadata &metadata_i = obj_mgr.metadata[objID_i];
+    RigidBodyMetadata &metadata_j = obj_mgr.metadata[objID_j];
+    tmp_state.mu = std::min(metadata_i.friction.muS,
+                            metadata_j.friction.muS);
 }
 
 template <typename MatrixT>
@@ -530,13 +539,11 @@ static void integrationStep(Context &ctx,
     Vector3 delta_v = invMass * trans_forces;
     Vector3 delta_omega = inv_I_world_frame * rot_moments;
     float h = physics_state.h;
-    if (invMass > 0) {
-        for (int i = 0; i < 3; ++i) {
-            velocity.qv[i] += h * delta_v[i];
-        }
-        for (int i = 3; i < 6; ++i) {
-            velocity.qv[i] += h * delta_omega[i - 3];
-        }
+    for (int i = 0; i < 3; ++i) {
+        velocity.qv[i] += h * delta_v[i];
+    }
+    for (int i = 3; i < 6; ++i) {
+        velocity.qv[i] += h * delta_omega[i - 3];
     }
 
     // Step N: Integrate position
