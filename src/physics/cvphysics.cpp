@@ -400,30 +400,30 @@ static void solveSystem(Context &ctx,
         CountT ref_col_start = ref_idx * 6;
         CountT alt_col_start = alt_idx * 6;
 
-        Mat3x3 ref_linear_c;
-        Mat3x3 alt_linear_c;
+        Mat3x3 ref_linear_cT;
+        Mat3x3 alt_linear_cT;
 
         // J = [... -C^T, C^T r_i^x, ... C^T, -C^T r_j^x ...]
         for (int i = 0; i < 3; ++i) {
-            ref_linear_c[i][0] = j_entry(ref_col_start + i, row_start) = -contact_tmp_state.n[i];
-            ref_linear_c[i][1] = j_entry(ref_col_start + i, row_start+1) = -contact_tmp_state.t[i];
-            ref_linear_c[i][2] = j_entry(ref_col_start + i, row_start+2) = -contact_tmp_state.s[i];
+            ref_linear_cT[i][0] = j_entry(ref_col_start + i, row_start) = -contact_tmp_state.n[i];
+            ref_linear_cT[i][1] = j_entry(ref_col_start + i, row_start+1) = -contact_tmp_state.t[i];
+            ref_linear_cT[i][2] = j_entry(ref_col_start + i, row_start+2) = -contact_tmp_state.s[i];
 
-            alt_linear_c[i][0] = j_entry(alt_col_start + i, row_start) = contact_tmp_state.n[i];
-            alt_linear_c[i][1] = j_entry(alt_col_start + i, row_start+1) = contact_tmp_state.t[i];
-            alt_linear_c[i][2] = j_entry(alt_col_start + i, row_start+2) = contact_tmp_state.s[i];
+            alt_linear_cT[i][0] = j_entry(alt_col_start + i, row_start) = contact_tmp_state.n[i];
+            alt_linear_cT[i][1] = j_entry(alt_col_start + i, row_start+1) = contact_tmp_state.t[i];
+            alt_linear_cT[i][2] = j_entry(alt_col_start + i, row_start+2) = contact_tmp_state.s[i];
         }
 
         // C^T r_i^x, C^T r_j^x
-        ref_linear_c = rightMultiplyCross(ref_linear_c.transpose(), 
-                                          contact_tmp_state.rRefComToPt);
-        alt_linear_c = rightMultiplyCross(alt_linear_c.transpose(), 
-                                          contact_tmp_state.rAltComToPt);
+        ref_linear_cT = rightMultiplyCross(ref_linear_cT,
+                                          -contact_tmp_state.rRefComToPt); // need negative to cancel first one
+        alt_linear_cT = rightMultiplyCross(alt_linear_cT,
+                                          -contact_tmp_state.rAltComToPt);
 
         for (int col = 0; col < 3; ++col) {
             for (int row = 0; row < 3; ++row) {
-                j_entry(ref_col_start + 3 + col, row_start + row) = ref_linear_c[col][row];
-                j_entry(alt_col_start + 3 + col, row_start + row) = -alt_linear_c[col][row];
+                j_entry(ref_col_start + 3 + col, row_start + row) = ref_linear_cT[col][row];
+                j_entry(alt_col_start + 3 + col, row_start + row) = alt_linear_cT[col][row];
             }
         }
     }
