@@ -246,6 +246,7 @@ static void gaussMinimizeFn(Context &ctx,
     Vector3 gyro_moment = -(omega.cross(I_world_frame * omega));
     Vector3 rot_moments = gyro_moment;
 
+    tmp_state.invMass = metadata.mass.invMass;
     tmp_state.invInertia = inv_I_world_frame;
     tmp_state.externalForces = trans_forces;
     tmp_state.externalMoment = rot_moments;
@@ -335,7 +336,7 @@ static void solveSystem(Context &ctx,
     DofObjectTmpState *tmp_states = state_mgr->getWorldComponents<
         DofObjectArchetype, DofObjectTmpState>(world_id);
 
-    CountT jacob_size = (3 * num_contacts) * 6 * num_bodies;
+    CountT jacob_size = (3 * num_contacts) * (6 * num_bodies);
 
     // Row major order
     float *jacob_ptr = (float *)state_mgr->tmpAlloc(
@@ -391,6 +392,32 @@ static void solveSystem(Context &ctx,
             }
         }
     }
+
+    // Creating M^{-1}
+    CountT M_inv_size = (6 * num_bodies) * (6 * num_bodies);
+    float *M_inv_ptr = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * M_inv_size);
+    memset(M_inv_ptr, 0, sizeof(float) * M_inv_size);
+
+    auto M_inv_entry = [M_inv_ptr, num_bodies](int col, int row) -> float & {
+        return M_inv_ptr[row + col * (6 * num_bodies)];
+    };
+
+    for(CountT body_idx = 0; body_idx < num_bodies; ++body_idx) {
+        DofObjectTmpState &tmp_state = tmp_states[body_idx];
+        CountT idx_start = body_idx * 6;
+
+        // Diagonal 1 / mass entries
+        for (int i = 0; i < 3; ++i) {
+            M_inv_entry(idx_start + i, idx_start + i) = tmp_state.invMass;
+        }
+        // Inverse inertia entries
+        for (int i = 0; i < 3; ++i) {
+            M_inv_entry(idx_start + i + 3, idx_start + 3) = tmp_state.invInertia[i][i];
+            M_inv_entry(idx_start + i + 3, idx_start + 4) = tmp_state.invInertia[i][i + 1];
+            M_inv_entry(idx_start + i + 3, idx_start + 5) = tmp_state.invInertia[i][i + 2];
+        }
+    }
 }
 
 static void integrationStep(Context &ctx,
@@ -400,12 +427,9 @@ static void integrationStep(Context &ctx,
                             DofObjectTmpState &tmp_state,
                             ObjectID &objID)
 {
-    StateManager *state_mgr = ctx.getStateManager();
-    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
     // Phase 1: compute the mass matrix data
-    RigidBodyMetadata &metadata = obj_mgr.metadata[objID.idx];
 
     Quat rot_quat = {
         position.q[3],
@@ -414,15 +438,16 @@ static void integrationStep(Context &ctx,
         position.q[6],
     };
 
+    float invMass = tmp_state.invMass;
     Mat3x3 inv_I_world_frame = tmp_state.invInertia;
 
     Vector3 trans_forces = tmp_state.externalForces;
     Vector3 rot_moments = tmp_state.externalMoment;
 
-    Vector3 delta_v = metadata.mass.invMass * trans_forces;
+    Vector3 delta_v = invMass * trans_forces;
     Vector3 delta_omega = inv_I_world_frame * rot_moments;
     float h = physics_state.h;
-    if (metadata.mass.invMass > 0) {
+    if (invMass > 0) {
         for (int i = 0; i < 3; ++i) {
             velocity.qv[i] += h * delta_v[i];
         }
@@ -433,9 +458,7 @@ static void integrationStep(Context &ctx,
 
     // Step N: Integrate position
     for (int i = 0; i < 3; ++i) {
-        if (metadata.mass.invMass > 0) {
-            position.q[i] += h * velocity.qv[i];
-        }
+        position.q[i] += h * velocity.qv[i];
     }
 
     // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]

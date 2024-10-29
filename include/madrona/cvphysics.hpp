@@ -46,6 +46,7 @@ struct ContactTmpState {
 
 // Just some space to store temporary per-entity data.
 struct DofObjectTmpState {
+    float invMass;
     math::Mat3x3 invInertia;
     math::Vector3 externalForces;
     math::Vector3 externalMoment;
