@@ -735,7 +735,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                  DofObjectNumDofs,
                  DofObjectTmpState,
                  ObjectID
-            >>({contact_node});
+            >>({solve_sys});
 #endif
 
         cur_node =
