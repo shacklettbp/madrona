@@ -210,13 +210,14 @@ static void gaussMinimizeFn(Context &ctx,
     StateManager *state_mgr = ctx.getStateManager();
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
-    // DofObjectPosition *positions = state_mgr->getWorldComponents<
-    //     DofObjectArchetype, DofObjectPosition>(ctx.worldID().idx);
 
     // Phase 1: compute the mass matrix data
     RigidBodyMetadata &metadata = obj_mgr.metadata[objID.idx];
-    Diag3x3 inv_inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor);
-    Diag3x3 inertia = inv_inertia.inv();
+    float invMass = metadata.mass.invMass;
+    Vector3 invInertia = metadata.mass.invInertiaTensor;
+
+    Diag3x3 inv_inertia_body = Diag3x3::fromVec(invInertia);
+    Diag3x3 inertia_body = inv_inertia_body.inv();
     Quat rot_quat = {
         position.q[3],
         position.q[4],
@@ -229,38 +230,33 @@ static void gaussMinimizeFn(Context &ctx,
         velocity.qv[5],
     };
 
-    Mat3x3 body_jacob = Mat3x3::fromQuat(rot_quat);
+    Mat3x3 rot_mat = Mat3x3::fromQuat(rot_quat);
 
     // Inertia and Inverse Inertia in world frame
-    Mat3x3 I_world_frame = body_jacob * inertia;
-    I_world_frame = body_jacob * I_world_frame.transpose();
-    Mat3x3 inv_I_world_frame = body_jacob * inv_inertia;
-    inv_I_world_frame = body_jacob * inv_I_world_frame.transpose();
+    Mat3x3 I_world_frame = rot_mat * inertia_body;
+    I_world_frame = rot_mat * I_world_frame.transpose();
+    Mat3x3 inv_I_world_frame = rot_mat * inv_inertia_body;
+    inv_I_world_frame = rot_mat * inv_I_world_frame.transpose();
 
     // Step 2: compute the external and gyroscopic forces
     // Step 2.1: gravity
-    Vector3 force_gravity = physics_state.g / metadata.mass.invMass;
+    Vector3 force_gravity = physics_state.g / invMass;
     Vector3 trans_forces = force_gravity;
 
     // Step 2.2: gyroscopic moments
     Vector3 gyro_moment = -(omega.cross(I_world_frame * omega));
     Vector3 rot_moments = gyro_moment;
 
-    if(metadata.mass.invMass == 0) {
+    // Infinite mass object, just zero out the forces
+    if(invMass == 0) {
         trans_forces = Vector3::zero();
         rot_moments = Vector3::zero();
     }
 
-    tmp_state.invMass = metadata.mass.invMass;
+    tmp_state.invMass = invMass;
     tmp_state.invInertia = inv_I_world_frame;
     tmp_state.externalForces = trans_forces;
     tmp_state.externalMoment = rot_moments;
-
-#if 0
-    // Step 3: Contact Jacobians
-    // TODO!
-
-#endif
 }
 
 static void processContacts(Context &ctx,
@@ -280,7 +276,6 @@ static void processContacts(Context &ctx,
     // Create a coordinate system for the contact
     Vector3 n = contact.normal.normalize();
     Vector3 t{};
-    Vector3 s{};
 
     Vector3 x_axis = {1.f, 0.f, 0.f};
     if(n.cross(x_axis).length() > 0.01f) {
@@ -288,7 +283,7 @@ static void processContacts(Context &ctx,
     } else {
         t = n.cross({0.f, 1.f, 0.f}).normalize();
     }
-    s = n.cross(t).normalize();
+    Vector3 s = n.cross(t).normalize();
 
     // Get the average contact
     float penetration_sum = 0.f;
@@ -301,14 +296,14 @@ static void processContacts(Context &ctx,
     avg_contact /= penetration_sum;
 
     // Compute the relative positions of the contact
-    Vector3 rRef = avg_contact - ref_com;
-    Vector3 rAlt = avg_contact - alt_com;
+    Vector3 rRefComToPt = avg_contact - ref_com;
+    Vector3 rAltComToPt = avg_contact - alt_com;
 
     tmp_state.n = n;
     tmp_state.t = t;
     tmp_state.s = s;
-    tmp_state.rRef = rRef;
-    tmp_state.rAlt = rAlt;
+    tmp_state.rRefComToPt = rRefComToPt;
+    tmp_state.rAltComToPt = rAltComToPt;
 }
 
 template <typename MatrixT>
@@ -344,13 +339,37 @@ static void solveSystem(Context &ctx,
     DofObjectVelocity *body_vels = state_mgr->getWorldComponents<
         DofObjectArchetype, DofObjectVelocity>(world_id);
 
-    CountT jacob_size = (3 * num_contacts) * (6 * num_bodies);
+    CountT num_dof = 6 * num_bodies;
 
-    // Row major order
+    // Compute b, v (stack values for each body)
+    float *btr = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * num_dof);
+    float *vptr = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * num_dof);
+    for(CountT i = 0; i < num_bodies; ++i) {
+        DofObjectTmpState &body_tmp_state = tmp_states[i];
+        DofObjectVelocity &body_vel = body_vels[i];
+        CountT body_idx = i * 6;
+        btr[body_idx] = body_tmp_state.externalForces[0];
+        btr[body_idx + 1] = body_tmp_state.externalForces[1];
+        btr[body_idx + 2] = body_tmp_state.externalForces[2];
+        btr[body_idx + 3] = body_tmp_state.externalMoment[0];
+        btr[body_idx + 4] = body_tmp_state.externalMoment[1];
+        btr[body_idx + 5] = body_tmp_state.externalMoment[2];
+        vptr[body_idx] = body_vel.qv[0];
+        vptr[body_idx + 1] = body_vel.qv[1];
+        vptr[body_idx + 2] = body_vel.qv[2];
+        vptr[body_idx + 3] = body_vel.qv[3];
+        vptr[body_idx + 4] = body_vel.qv[4];
+        vptr[body_idx + 5] = body_vel.qv[5];
+    }
+
+    CountT jacob_size = (3 * num_contacts) * (num_dof);
+
     float *jacob_ptr = (float *)state_mgr->tmpAlloc(
             world_id, sizeof(float) * jacob_size);
     memset(jacob_ptr, 0, sizeof(float) * jacob_size);
-
+    // Lambda for setting in col major order
     auto j_entry = [jacob_ptr, num_contacts](int col, int row) -> float & {
         return jacob_ptr[row + col * (3 * num_contacts)];
     };
@@ -359,25 +378,23 @@ static void solveSystem(Context &ctx,
         ContactConstraint &contact = contacts[cont_idx];
         ContactTmpState &contact_tmp_state = contacts_tmp_state[cont_idx];
 
+        // Get the loc of the two bodies
         CVPhysicalComponent &ref_phys_comp = ctx.get<CVPhysicalComponent>(
                 contact.ref);
         CountT ref_idx = ctx.loc(ref_phys_comp.physicsEntity).row;
-        DofObjectTmpState &ref_tmp_state = tmp_states[ref_idx];
 
         CVPhysicalComponent &alt_phys_comp = ctx.get<CVPhysicalComponent>(
                 contact.alt);
         CountT alt_idx = ctx.loc(alt_phys_comp.physicsEntity).row;
-        DofObjectTmpState &alt_tmp_state = tmp_states[alt_idx];
 
         CountT row_start = cont_idx * 3;
-
-
         CountT ref_col_start = ref_idx * 6;
         CountT alt_col_start = alt_idx * 6;
 
         Mat3x3 ref_linear_c;
         Mat3x3 alt_linear_c;
 
+        // J = [... -C^T, C^T r_i^x, ... C^T, -C^T r_j^x ...]
         for (int i = 0; i < 3; ++i) {
             ref_linear_c[i][0] = j_entry(ref_col_start + i, row_start) = -contact_tmp_state.n[i];
             ref_linear_c[i][1] = j_entry(ref_col_start + i, row_start+1) = -contact_tmp_state.t[i];
@@ -387,11 +404,12 @@ static void solveSystem(Context &ctx,
             alt_linear_c[i][1] = j_entry(alt_col_start + i, row_start+1) = contact_tmp_state.t[i];
             alt_linear_c[i][2] = j_entry(alt_col_start + i, row_start+2) = contact_tmp_state.s[i];
         }
-        
+
+        // C^T r_i^x, C^T r_j^x
         ref_linear_c = rightMultiplyCross(ref_linear_c.transpose(), 
-                                          contact_tmp_state.rRef);
+                                          contact_tmp_state.rRefComToPt);
         alt_linear_c = rightMultiplyCross(alt_linear_c.transpose(), 
-                                          contact_tmp_state.rAlt);
+                                          contact_tmp_state.rAltComToPt);
 
         for (int col = 0; col < 3; ++col) {
             for (int row = 0; row < 3; ++row) {
@@ -402,13 +420,13 @@ static void solveSystem(Context &ctx,
     }
 
     // Create M^{-1}
-    CountT M_inv_size = (6 * num_bodies) * (6 * num_bodies);
+    CountT M_inv_size = num_dof * num_dof;
     float *M_inv_ptr = (float *)state_mgr->tmpAlloc(
             world_id, sizeof(float) * M_inv_size);
     memset(M_inv_ptr, 0, sizeof(float) * M_inv_size);
 
-    auto M_inv_entry = [M_inv_ptr, num_bodies](int col, int row) -> float & {
-        return M_inv_ptr[row + col * (6 * num_bodies)];
+    auto M_inv_entry = [M_inv_ptr, num_dof](int col, int row) -> float & {
+        return M_inv_ptr[row + col * num_dof];
     };
 
     for(CountT body_idx = 0; body_idx < num_bodies; ++body_idx) {
@@ -457,29 +475,6 @@ static void solveSystem(Context &ctx,
         }
     }
 
-    // Compute b, v (stacking values)
-    float *btr = (float *)state_mgr->tmpAlloc(
-            world_id, sizeof(float) * 6 * num_bodies);
-    float *vptr = (float *)state_mgr->tmpAlloc(
-            world_id, sizeof(float) * 6 * num_bodies);
-    for(CountT i = 0; i < num_bodies; ++i) {
-        CountT body_idx = i * 6;
-        DofObjectTmpState &body_tmp_state = tmp_states[i];
-        DofObjectVelocity &body_vel = body_vels[i];
-        btr[body_idx] = body_tmp_state.externalForces[0];
-        btr[body_idx + 1] = body_tmp_state.externalForces[1];
-        btr[body_idx + 2] = body_tmp_state.externalForces[2];
-        btr[body_idx + 3] = body_tmp_state.externalMoment[0];
-        btr[body_idx + 4] = body_tmp_state.externalMoment[1];
-        btr[body_idx + 5] = body_tmp_state.externalMoment[2];
-        vptr[body_idx] = body_vel.qv[0];
-        vptr[body_idx + 1] = body_vel.qv[1];
-        vptr[body_idx + 2] = body_vel.qv[2];
-        vptr[body_idx + 3] = body_vel.qv[3];
-        vptr[body_idx + 4] = body_vel.qv[4];
-        vptr[body_idx + 5] = body_vel.qv[5];
-    }
-
     // Compute v0 = J_c (v + h M^{-1} b)
     // First compute v + h M^{-1} b
     float *v_h_M_inv_b = (float *)state_mgr->tmpAlloc(
@@ -500,6 +495,11 @@ static void solveSystem(Context &ctx,
             v0[i] += j_entry(j, i) * v_h_M_inv_b[j];
         }
     }
+
+    // Start building f_C
+    float *f_C = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * 3 * num_contacts);
+    memset(f_C, 0, sizeof(float) * 3 * num_contacts);
 }
 
 static void integrationStep(Context &ctx,

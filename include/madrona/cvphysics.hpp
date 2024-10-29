@@ -40,8 +40,8 @@ struct ContactTmpState {
     math::Vector3 n;
     math::Vector3 t;
     math::Vector3 s;
-    math::Vector3 rRef;
-    math::Vector3 rAlt;
+    math::Vector3 rRefComToPt;
+    math::Vector3 rAltComToPt;
 };
 
 // Just some space to store temporary per-entity data.
