@@ -271,11 +271,6 @@ static void processContacts(Context &ctx,
     Vector3 ref_com = Vector3(ref_pos.q[0], ref_pos.q[1], ref_pos.q[2]);
     Vector3 alt_com = Vector3(alt_pos.q[0], alt_pos.q[1], alt_pos.q[2]);
 
-    printf("ref: %f %f %f\n", ref_pos.q[0], ref_pos.q[1],
-                              ref_pos.q[2]);
-    printf("alt: %f %f %f\n", alt_pos.q[0], alt_pos.q[1],
-                              alt_pos.q[2]);
-
     // Create a coordinate system for the contact
     Vector3 n = contact.normal.normalize();
     Vector3 t{};
@@ -340,10 +335,6 @@ static void solveSystem(Context &ctx,
     DofObjectTmpState *tmp_states = state_mgr->getWorldComponents<
         DofObjectArchetype, DofObjectTmpState>(world_id);
 
-    printf("Num contacts: %d\n", (int)num_contacts);
-
-
-
     CountT jacob_size = (3 * num_contacts) * 6 * num_bodies;
 
     // Row major order
@@ -396,7 +387,7 @@ static void solveSystem(Context &ctx,
         for (int col = 0; col < 3; ++col) {
             for (int row = 0; row < 3; ++row) {
                 j_entry(ref_col_start + 3 + col, row_start + row) = ref_linear_c[col][row];
-                j_entry(alt_col_start + 3 + col, row_start + row) = alt_linear_c[col][row];
+                j_entry(alt_col_start + 3 + col, row_start + row) = -alt_linear_c[col][row];
             }
         }
     }
