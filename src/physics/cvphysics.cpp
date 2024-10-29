@@ -246,6 +246,11 @@ static void gaussMinimizeFn(Context &ctx,
     Vector3 gyro_moment = -(omega.cross(I_world_frame * omega));
     Vector3 rot_moments = gyro_moment;
 
+    if(metadata.mass.invMass == 0) {
+        trans_forces = Vector3::zero();
+        rot_moments = Vector3::zero();
+    }
+
     tmp_state.invMass = metadata.mass.invMass;
     tmp_state.invInertia = inv_I_world_frame;
     tmp_state.externalForces = trans_forces;
@@ -325,6 +330,7 @@ static void solveSystem(Context &ctx,
     uint32_t world_id = ctx.worldID().idx;
 
     StateManager *state_mgr = ctx.getStateManager();
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
     CountT num_contacts = state_mgr->numRows<Contact>(world_id);
     CountT num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
@@ -335,6 +341,8 @@ static void solveSystem(Context &ctx,
         Contact, ContactTmpState>(world_id);
     DofObjectTmpState *tmp_states = state_mgr->getWorldComponents<
         DofObjectArchetype, DofObjectTmpState>(world_id);
+    DofObjectVelocity *body_vels = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectVelocity>(world_id);
 
     CountT jacob_size = (3 * num_contacts) * (6 * num_bodies);
 
@@ -393,7 +401,7 @@ static void solveSystem(Context &ctx,
         }
     }
 
-    // Creating M^{-1}
+    // Create M^{-1}
     CountT M_inv_size = (6 * num_bodies) * (6 * num_bodies);
     float *M_inv_ptr = (float *)state_mgr->tmpAlloc(
             world_id, sizeof(float) * M_inv_size);
@@ -416,6 +424,80 @@ static void solveSystem(Context &ctx,
             M_inv_entry(idx_start + i + 3, idx_start + 3) = tmp_state.invInertia[i][i];
             M_inv_entry(idx_start + i + 3, idx_start + 4) = tmp_state.invInertia[i][i + 1];
             M_inv_entry(idx_start + i + 3, idx_start + 5) = tmp_state.invInertia[i][i + 2];
+        }
+    }
+
+    // Build A=J_c M^{-1} J_c^T
+    // First, compute J_c M^{-1}
+    float *J_M_inv_ptr = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * (3 * num_contacts) * (6 * num_bodies));
+    memset(J_M_inv_ptr, 0, sizeof(float) * (3 * num_contacts) * (6 * num_bodies));
+    for(CountT i = 0; i < 3 * num_contacts; ++i) {
+        for(CountT j = 0; j < 6 * num_bodies; ++j) {
+            for(CountT k = 0; k < 6 * num_bodies; ++k) {
+                J_M_inv_ptr[i * (6 * num_bodies) + j] +=
+                    jacob_ptr[i + k * (3 * num_contacts)] *
+                    M_inv_ptr[k + j * (6 * num_bodies)];
+            }
+        }
+    }
+    // Then, compute J_c M^{-1} J_c^T
+    CountT A_size = (3 * num_contacts) * (3 * num_contacts);
+    float *A_ptr = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * A_size);
+    memset(A_ptr, 0, sizeof(float) * A_size);
+    // Now, compute A = J_c M^{-1} J_c^T
+    for(CountT i = 0; i < 3 * num_contacts; ++i) {
+        for(CountT j = 0; j < 3 * num_contacts; ++j) {
+            for(CountT k = 0; k < 6 * num_bodies; ++k) {
+                A_ptr[i + j * (3 * num_contacts)] +=
+                    J_M_inv_ptr[i * (6 * num_bodies) + k] *
+                    jacob_ptr[j + k * (3 * num_contacts)];
+            }
+        }
+    }
+
+    // Compute b, v (stacking values)
+    float *btr = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * 6 * num_bodies);
+    float *vptr = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * 6 * num_bodies);
+    for(CountT i = 0; i < num_bodies; ++i) {
+        CountT body_idx = i * 6;
+        DofObjectTmpState &body_tmp_state = tmp_states[i];
+        DofObjectVelocity &body_vel = body_vels[i];
+        btr[body_idx] = body_tmp_state.externalForces[0];
+        btr[body_idx + 1] = body_tmp_state.externalForces[1];
+        btr[body_idx + 2] = body_tmp_state.externalForces[2];
+        btr[body_idx + 3] = body_tmp_state.externalMoment[0];
+        btr[body_idx + 4] = body_tmp_state.externalMoment[1];
+        btr[body_idx + 5] = body_tmp_state.externalMoment[2];
+        vptr[body_idx] = body_vel.qv[0];
+        vptr[body_idx + 1] = body_vel.qv[1];
+        vptr[body_idx + 2] = body_vel.qv[2];
+        vptr[body_idx + 3] = body_vel.qv[3];
+        vptr[body_idx + 4] = body_vel.qv[4];
+        vptr[body_idx + 5] = body_vel.qv[5];
+    }
+
+    // Compute v0 = J_c (v + h M^{-1} b)
+    // First compute v + h M^{-1} b
+    float *v_h_M_inv_b = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * 6 * num_bodies);
+    for(CountT i = 0; i < 6 * num_bodies; ++i) {
+        v_h_M_inv_b[i] = vptr[i];
+        for(CountT j = 0; j < 6 * num_bodies; ++j) {
+            v_h_M_inv_b[i] += physics_state.h * M_inv_entry(j, i) * btr[j];
+        }
+    }
+
+    // Finally, compute v0
+    float *v0 = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * 3 * num_contacts);
+    for(CountT i = 0; i < 3 * num_contacts; ++i) {
+        v0[i] = 0.f;
+        for(CountT j = 0; j < 6 * num_bodies; ++j) {
+            v0[i] += j_entry(j, i) * v_h_M_inv_b[j];
         }
     }
 }
