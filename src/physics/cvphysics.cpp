@@ -576,7 +576,7 @@ static void solveSystem(Context &ctx,
             // Third constraint - avoid penetration
             float pen_depth = contact_tmp_state.maxDepth / physics_state.h;
             for(CountT j = 0; j < 3 * num_contacts; ++j) {
-                gradient[idx + j] += -kappa * A_entry(j, idx) / (v_C[idx]);
+                gradient[idx + j] += -kappa * A_entry(idx, ) / (v_C[idx]);
             }
         }
 
