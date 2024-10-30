@@ -448,9 +448,9 @@ static void solveSystem(Context &ctx,
         }
         // Inverse inertia entries
         for (int i = 0; i < 3; ++i) {
-            M_inv_entry(idx_start + i + 3, idx_start + 3) = tmp_state.invInertia[i][i];
-            M_inv_entry(idx_start + i + 3, idx_start + 4) = tmp_state.invInertia[i][i + 1];
-            M_inv_entry(idx_start + i + 3, idx_start + 5) = tmp_state.invInertia[i][i + 2];
+            M_inv_entry(idx_start + i + 3, idx_start + 3) = tmp_state.invInertia[i][0];
+            M_inv_entry(idx_start + i + 3, idx_start + 4) = tmp_state.invInertia[i][1];
+            M_inv_entry(idx_start + i + 3, idx_start + 5) = tmp_state.invInertia[i][2];
         }
     }
 
@@ -470,6 +470,7 @@ static void solveSystem(Context &ctx,
             }
         }
     }
+
     // Then, compute A = J_c M^{-1} J_c^T
     CountT A_size = (3 * num_contacts) * (3 * num_contacts);
     float *A_ptr = (float *)state_mgr->tmpAlloc(
@@ -496,7 +497,8 @@ static void solveSystem(Context &ctx,
             v_h_M_inv_b[i] += physics_state.h * M_inv_entry(j, i) * btr[j];
         }
     }
-    // Finally, compute v0
+
+    // Finally, compute v0 (multiply by J_c)
     float *v0 = (float *)state_mgr->tmpAlloc(
             world_id, sizeof(float) * 3 * num_contacts);
     for(CountT i = 0; i < 3 * num_contacts; ++i) {
@@ -511,8 +513,69 @@ static void solveSystem(Context &ctx,
             world_id, sizeof(float) * 3 * num_contacts);
     memset(f_C, 0, sizeof(float) * 3 * num_contacts);
 
+    // Begin solving for f_C
+    for(CountT i = 0; i < 3 * num_contacts; i += 3) {
+        f_C[i] = 100.f; // initial guess
+    }
 
-    // TODO: build constraints, solve f_C,
+    float* g = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * 3 * num_contacts);
+
+    // Populates gradient and returns the norm
+    auto grad = [A_entry, v0, num_contacts, contacts_tmp_state, state_mgr, world_id] (float *gradient, const float* f) -> float {
+        // v_C = A f_C + v0
+        float *v_C = (float *)state_mgr->tmpAlloc(world_id, sizeof(float) * num_contacts * 3);
+        for(CountT i = 0; i < 3 * num_contacts; ++i) {
+            v_C[i] = v0[i];
+            for(CountT j = 0; j < 3 * num_contacts; ++j) {
+                v_C[i] += A_entry(j, i) * f[j];
+            }
+        }
+
+        // Gradient of main objective is v_C
+        for(CountT i = 0; i < 3 * num_contacts; ++i) {
+            gradient[i] = v_C[i];
+        }
+
+        // Constraint barriers
+        float kappa = 0.1f;
+        for(CountT i = 0; i < num_contacts; ++i) {
+            ContactTmpState &contact_tmp_state = contacts_tmp_state[i];
+            CountT idx = 3 * i;
+
+            // Constraint 1: positivity at normals
+            float s1 = f[idx];
+            gradient[idx] += -kappa * (1 / s1);
+
+            // Second constraint - friction cone
+            float mu = contact_tmp_state.mu;
+            float s2 = (mu * mu * f[idx] * f[idx]) - f[idx + 1] * f[idx + 1] - f[idx + 2] * f[idx + 2];
+            gradient[idx] += -kappa * (2 * (mu * mu) * f[idx]) / s2;
+            gradient[idx + 1] += kappa * (2 * f[idx + 1]) / s2;
+            gradient[idx + 2] += kappa * (2 * f[idx + 2]) / s2;
+
+            // Third constraint - avoid penetration
+            for(CountT j = 0; j < 3 * num_contacts; ++j) {
+                gradient[idx + j] += -kappa * A_entry(j, idx) / (v_C[idx]);
+            }
+        }
+
+        float norm = 0.f;
+        for(CountT i = 0; i < 3 * num_contacts; ++i) {
+            norm += gradient[i] * gradient[i];
+        }
+        printf("Norm: %f\n", sqrt(norm));
+        return sqrt(norm);
+    };
+
+    float norm = grad(g, f_C);
+    while (norm > 0.1f)
+    {
+        for(CountT i = 0; i < 3 * num_contacts; ++i) {
+            f_C[i] -= 0.001f * g[i];
+        }
+        norm = grad(g, f_C);
+    }
 
     // Post-solve f_C. Impulse is J_c^T f_C
     float *contact_force = (float *)state_mgr->tmpAlloc(
@@ -520,9 +583,10 @@ static void solveSystem(Context &ctx,
     for(CountT i = 0; i < num_dof; ++i) {
         contact_force[i] = 0.f;
         for(CountT j = 0; j < 3 * num_contacts; ++j) {
-            contact_force[i] += j_entry(j, i) * f_C[j];
+            contact_force[i] += j_entry(i, j) * f_C[j];
         }
     }
+
     // Add to bodies
     for(CountT i = 0; i < num_bodies; ++i) {
         DofObjectTmpState &body_tmp_state = tmp_states[i];
