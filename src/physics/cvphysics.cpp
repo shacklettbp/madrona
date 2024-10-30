@@ -288,10 +288,13 @@ static void processContacts(Context &ctx,
     // Get the average contact
     float penetration_sum = 0.f;
     Vector3 avg_contact = Vector3::zero();
+    float max_depth = -FLT_MAX;
     for(CountT i = 0; i < contact.numPoints; ++i) {
         Vector4 point = contact.points[i];
         penetration_sum += point.w;
         avg_contact += point.w * point.xyz();
+
+        max_depth = std::max(max_depth, point.w);
     }
     avg_contact /= penetration_sum;
 
@@ -304,6 +307,7 @@ static void processContacts(Context &ctx,
     tmp_state.s = s;
     tmp_state.rRefComToPt = rRefComToPt;
     tmp_state.rAltComToPt = rAltComToPt;
+    tmp_state.maxDepth = max_depth;
 
     // Get friction coefficient
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
@@ -379,7 +383,10 @@ static void solveSystem(Context &ctx,
             world_id, sizeof(float) * jacob_size);
     memset(jacob_ptr, 0, sizeof(float) * jacob_size);
     // Lambda for setting in col major order
-    auto j_entry = [jacob_ptr, num_contacts](int col, int row) -> float & {
+    auto j_entry = [jacob_ptr, num_contacts, num_dof](int col, int row) -> float & {
+        assert(col < num_dof);
+        assert(row < 3 * num_contacts);
+
         return jacob_ptr[row + col * (3 * num_contacts)];
     };
 
@@ -435,6 +442,8 @@ static void solveSystem(Context &ctx,
     memset(M_inv_ptr, 0, sizeof(float) * M_inv_size);
 
     auto M_inv_entry = [M_inv_ptr, num_dof](int col, int row) -> float & {
+        assert(row < num_dof);
+        assert(col < num_dof);
         return M_inv_ptr[row + col * num_dof];
     };
 
@@ -460,13 +469,17 @@ static void solveSystem(Context &ctx,
             world_id, sizeof(float) * (3 * num_contacts) * num_dof);
     memset(J_M_inv_ptr, 0, sizeof(float) * (3 * num_contacts) * num_dof);
     // We can re-use the lambda earlier since they share same num rows
-    auto jm_inv_entry = [J_M_inv_ptr, num_contacts](int col, int row) -> float & {
+    auto jm_inv_entry = [J_M_inv_ptr, num_contacts, num_dof](int col, int row) -> float & {
+        assert(row < 3 * num_contacts);
+        assert(col < num_dof);
+
         return J_M_inv_ptr[row + col * (3 * num_contacts)];
     };
     for(CountT i = 0; i < 3 * num_contacts; ++i) {
         for(CountT j = 0; j < num_dof; ++j) {
             for(CountT k = 0; k < num_dof; ++k) {
-                jm_inv_entry(j, i) += j_entry(k, i) * M_inv_entry(k, j);
+                // (k, j) should be (j, k)
+                jm_inv_entry(j, i) += j_entry(k, i) * M_inv_entry(j, k);
             }
         }
     }
@@ -477,6 +490,9 @@ static void solveSystem(Context &ctx,
             world_id, sizeof(float) * A_size);
     memset(A_ptr, 0, sizeof(float) * A_size);
     auto A_entry = [A_ptr, num_contacts](int col, int row) -> float & {
+        assert(row < 3 * num_contacts);
+        assert(col < 3 * num_contacts);
+
         return A_ptr[row + col * (3 * num_contacts)];
     };
     for(CountT i = 0; i < 3 * num_contacts; ++i) {
@@ -522,9 +538,12 @@ static void solveSystem(Context &ctx,
             world_id, sizeof(float) * 3 * num_contacts);
 
     // Populates gradient and returns the norm
-    auto grad = [A_entry, v0, num_contacts, contacts_tmp_state, state_mgr, world_id] (float *gradient, const float* f) -> float {
+    float *v_C = (float *)state_mgr->tmpAlloc(world_id, sizeof(float) * num_contacts * 3);
+
+    auto grad = [&] (float *gradient, const float* f) -> float {
+        memset(v_C, 0, sizeof(float) * num_contacts * 3);
+
         // v_C = A f_C + v0
-        float *v_C = (float *)state_mgr->tmpAlloc(world_id, sizeof(float) * num_contacts * 3);
         for(CountT i = 0; i < 3 * num_contacts; ++i) {
             v_C[i] = v0[i];
             for(CountT j = 0; j < 3 * num_contacts; ++j) {
@@ -538,7 +557,7 @@ static void solveSystem(Context &ctx,
         }
 
         // Constraint barriers
-        float kappa = 0.1f;
+        float kappa = 10000.f;
         for(CountT i = 0; i < num_contacts; ++i) {
             ContactTmpState &contact_tmp_state = contacts_tmp_state[i];
             CountT idx = 3 * i;
@@ -555,6 +574,7 @@ static void solveSystem(Context &ctx,
             gradient[idx + 2] += kappa * (2 * f[idx + 2]) / s2;
 
             // Third constraint - avoid penetration
+            float pen_depth = contact_tmp_state.maxDepth / physics_state.h;
             for(CountT j = 0; j < 3 * num_contacts; ++j) {
                 gradient[idx + j] += -kappa * A_entry(j, idx) / (v_C[idx]);
             }
@@ -569,7 +589,7 @@ static void solveSystem(Context &ctx,
     };
 
     float norm = grad(g, f_C);
-    while (norm > 0.1f)
+    while (norm > 0.03f)
     {
         for(CountT i = 0; i < 3 * num_contacts; ++i) {
             f_C[i] -= 0.001f * g[i];
@@ -591,9 +611,16 @@ static void solveSystem(Context &ctx,
     for(CountT i = 0; i < num_bodies; ++i) {
         DofObjectTmpState &body_tmp_state = tmp_states[i];
         CountT idx_start = i * 6;
+
+        printf("contact_force: %f %f %f\n",
+                contact_force[idx_start],
+                contact_force[idx_start+1],
+                contact_force[idx_start+2]);
+
         if(body_tmp_state.invMass == 0) {
             continue;
         }
+
         body_tmp_state.externalForces += Vector3(contact_force[idx_start],
                                                 contact_force[idx_start + 1],
                                                 contact_force[idx_start + 2]);

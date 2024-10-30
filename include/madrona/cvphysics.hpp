@@ -43,6 +43,7 @@ struct ContactTmpState {
     math::Vector3 s;
     math::Vector3 rRefComToPt;
     math::Vector3 rAltComToPt;
+    float maxDepth;
 };
 
 // Just some space to store temporary per-entity data.
