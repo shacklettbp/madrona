@@ -351,11 +351,14 @@ static void solveSystem(Context &ctx,
     }
     ContactPointInfo *contact_point_info = (ContactPointInfo *)state_mgr->tmpAlloc(
             world_id, sizeof(ContactPointInfo) * total_contacts);
+
+    CountT contact_pt_idx = 0;
     for(CountT i = 0; i < num_contacts; ++i) {
         ContactTmpState &contact_tmp_state = contacts_tmp_state[i];
         for(CountT pt_idx = 0; pt_idx < contact_tmp_state.num_contacts; ++pt_idx) {
-            contact_point_info[pt_idx + i].parentIdx = i;
-            contact_point_info[pt_idx + i].subIdx = pt_idx;
+            contact_point_info[contact_pt_idx].parentIdx = i;
+            contact_point_info[contact_pt_idx].subIdx = pt_idx;
+            contact_pt_idx++;
         }
     }
 
