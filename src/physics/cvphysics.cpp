@@ -546,10 +546,20 @@ static void solveSystem(Context &ctx,
         f_C[i] = 10.f; //init guess: TODO: make this smarter
     }
 
+    float *mu_tmp_array = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * total_contacts);
+    for (int i = 0; i < total_contacts; ++i) {
+        uint32_t parent = contact_point_info[i].parentIdx;
+        mu_tmp_array[i] = contacts_tmp_state[parent].mu;
+    }
+
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
-        cv_sing.cvxSolve->fn(cv_sing.cvxSolve->data, 
-                A_ptr, 3 * num_contacts, 3 * num_contacts,
-                v0, 3 * num_contacts);
+        cv_sing.cvxSolve->fn(
+                cv_sing.cvxSolve->data, 
+                A_ptr, 3 * total_contacts, 3 * total_contacts,
+                v0, 3 * total_contacts,
+                mu_tmp_array,
+                3 * total_contacts);
     }
 
     float* g = (float *)state_mgr->tmpAlloc(
