@@ -548,7 +548,7 @@ static void solveSystem(Context &ctx,
 
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
         cv_sing.cvxSolve->fn(cv_sing.cvxSolve->data, 
-                nullptr, 3 * num_contacts, 3 * num_contacts,
+                A_ptr, 3 * num_contacts, 3 * num_contacts,
                 v0, 3 * num_contacts);
     }
 
