@@ -12,6 +12,7 @@ from jax.interpreters import mlir
 from jax.interpreters.mlir import ir, dtype_to_ir_type
 from jaxlib.hlo_helpers import custom_call
 import builtins as __builtins__
+import numpy as np
 
 from jax._src import effects
 from jax._src.lib.mlir.dialects import hlo
@@ -50,14 +51,17 @@ def _lower_shape_dtypes(shape_dtypes):
 # and write to the rest of the buffers normally, leaving the final token
 # output buffer untouched.
 
+def _fake_token_type():
+    return ir.RankedTensorType.get((0,), dtype_to_ir_type(np.dtype('float32')))
+
 def _prepend_token_to_inputs(types, layouts):
-    return [hlo.TokenType.get(), *types], [(), *layouts]
+    return [_fake_token_type(), *types], [(0,), *layouts]
 
 def _append_token_to_results(types, layouts):
-    return [*types, hlo.TokenType.get()], [*layouts, ()]
+    return [*types, _fake_token_type()], [*layouts, (0,)]
 
 def _init_lowering(ctx):
-    token = hlo.create_token()
+    token = mlir.ir_constant(np.empty((0,), np.float32))
 
     result_types = _lower_shape_dtypes(step_outputs_iface['obs'].values())
     result_layouts = [_row_major_layout(t.shape) for t in result_types]
@@ -69,7 +73,7 @@ def _init_lowering(ctx):
         init_custom_call_name,
         backend_config=sim_encode,
         operands=[mlir.ir_constant(sim_ptr), token],
-        operand_layouts=[(), ()],
+        operand_layouts=[(), (0,)],
         result_types=result_types,
         result_layouts=result_layouts,
         has_side_effect=True,
@@ -79,7 +83,7 @@ def _init_lowering(ctx):
     return token, *results
 
 def _init_abstract():
-    return (core.abstract_token, *_shape_dtype_to_abstract_vals(
+    return (ShapedArray((0,), jnp.float32), *_shape_dtype_to_abstract_vals(
          step_outputs_iface['obs'].values()))
 
 
@@ -124,7 +128,7 @@ def _step_lowering(ctx, *flattened_inputs):
 
 
 def _step_abstract(*inputs):
-    return (core.abstract_token,
+    return (ShapedArray((0,), jnp.float32),
         *_shape_dtype_to_abstract_vals(_flatten_step_output_shape_dtypes()))
 
 
