@@ -605,9 +605,10 @@ static void solveSystem(Context &ctx,
         }
         kappa /= 10.f;
     }
-    // print out f_C
+
+    // Divide by h (counteract the multiplication by h in the velocity update)
     for(CountT i = 0; i < 3 * total_contacts; ++i) {
-        printf("f_C[%d]: %f\n", i, f_C[i]);
+        f_C[i] /= physics_state.h;
     }
 
     // Post-solve f_C. Impulse is J_c^T f_C
