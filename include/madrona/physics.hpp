@@ -10,6 +10,23 @@
 
 namespace madrona::phys {
 
+#ifdef MADRONA_GPU_MODE
+struct CVXSolve {
+    void *fn;
+    void *data;
+};
+#else
+using CVXSolveFn = float *(*)(
+        void *data,
+        float *a_mat, uint32_t a_rows, uint32_t a_cols,
+        float *v0, uint32_t v0_rows);
+
+struct CVXSolve {
+    CVXSolveFn fn;
+    void *data;
+};
+#endif
+
 struct ExternalForce : math::Vector3 {
     ExternalForce(math::Vector3 v)
         : Vector3(v)
@@ -169,7 +186,8 @@ namespace PhysicsSystem {
               CountT num_substeps,
               math::Vector3 gravity,
               CountT max_dynamic_objects,
-              Solver solver = Solver::XPBD);
+              Solver solver = Solver::XPBD,
+              CVXSolve *cvx_solver = nullptr);
 
     void reset(Context &ctx);
 

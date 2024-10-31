@@ -101,7 +101,8 @@ void init(Context &ctx,
           CountT num_substeps,
           math::Vector3 gravity,
           CountT max_dynamic_objects,
-          Solver solver)
+          Solver solver,
+          CVXSolve *cvx_solve)
 {
     broadphase::BVH &bvh = ctx.singleton<broadphase::BVH>();
 
@@ -142,7 +143,7 @@ void init(Context &ctx,
         tgs::init(ctx);
     } break;
     case Solver::Convex: {
-        cv::init(ctx);
+        cv::init(ctx, cvx_solve);
     } break;
     default: MADRONA_UNREACHABLE();
     }

@@ -25,7 +25,7 @@ struct CVRigidBodyState : Bundle<
 > {};
 
 struct CVSingleton {
-    // Just to have something to loop over for CPU solver
+    CVXSolve *cvxSolve;
 };
 
 namespace tasks {
@@ -324,7 +324,7 @@ static inline Mat3x3 rightMultiplyCross(const MatrixT &m,
 }
 
 static void solveSystem(Context &ctx,
-                        CVSingleton &)
+                        CVSingleton &cv_sing)
 {
     uint32_t world_id = ctx.worldID().idx;
 
@@ -544,6 +544,12 @@ static void solveSystem(Context &ctx,
     // Begin solving for f_C
     for(CountT i = 0; i < 3 * total_contacts; i += 3) {
         f_C[i] = 10.f; //init guess: TODO: make this smarter
+    }
+
+    if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
+        cv_sing.cvxSolve->fn(cv_sing.cvxSolve->data, 
+                nullptr, 3 * num_contacts, 3 * num_contacts,
+                v0, 3 * num_contacts);
     }
 
     float* g = (float *)state_mgr->tmpAlloc(
@@ -869,10 +875,10 @@ void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
     *joint_archetype_id = TypeTracker::typeID<Joint>();
 }
 
-void init(Context &ctx)
+void init(Context &ctx, CVXSolve *cvx_solve)
 {
     // Nothing for now
-    (void)ctx;
+    ctx.singleton<CVSingleton>().cvxSolve = cvx_solve;
 }
     
 }
