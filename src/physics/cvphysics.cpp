@@ -540,7 +540,7 @@ static void solveSystem(Context &ctx,
 
     // Begin solving for f_C
     for(CountT i = 0; i < 3 * total_contacts; i += 3) {
-        f_C[i] = 0.79f; // initial guess
+        f_C[i] = 10.f; //init guess: TODO: make this smarter
     }
 
     float* g = (float *)state_mgr->tmpAlloc(
@@ -549,7 +549,7 @@ static void solveSystem(Context &ctx,
     // Populates gradient and returns the norm
     float *v_C = (float *)state_mgr->tmpAlloc(world_id, sizeof(float) * total_contacts * 3);
 
-    auto grad = [&] (float *gradient, const float* f) -> float {
+    auto grad = [&] (float *gradient, const float* f, const float kappa) -> float {
         memset(v_C, 0, sizeof(float) * total_contacts * 3);
 
         // v_C = A f_C + v0
@@ -564,9 +564,7 @@ static void solveSystem(Context &ctx,
         for(CountT i = 0; i < 3 * total_contacts; ++i) {
             gradient[i] = v_C[i];
         }
-
         // Constraint barriers
-        float kappa = 0.001f;
         for(CountT i = 0; i < total_contacts; ++i)
         {
             ContactPointInfo &pt_info = contact_point_info[i];
@@ -582,29 +580,34 @@ static void solveSystem(Context &ctx,
             gradient[idx] += -kappa * (2 * (mu * mu) * f[idx]) / s2;
             gradient[idx + 1] += kappa * (2 * f[idx + 1]) / s2;
             gradient[idx + 2] += kappa * (2 * f[idx + 2]) / s2;
-
-            // Third constraint - avoid penetration
-            // float pen_depth = contact_tmp_state.maxDepth / physics_state.h;
+            // // Third constraint - avoid penetration
+            // // float pen_depth = contact_tmp_state.maxDepth / physics_state.h;
             for(CountT j = 0; j < 3 * total_contacts; ++j) {
-                gradient[idx + j] += -kappa * A_entry(idx, j) / (v_C[idx]);
+                gradient[j] += -kappa * A_entry(idx, j) / (v_C[idx]);
             }
         }
-
         float norm = 0.f;
         for(CountT i = 0; i < 3 * total_contacts; ++i) {
             norm += gradient[i] * gradient[i];
         }
-        printf("Norm: %f\n", sqrt(norm));
         return sqrt(norm);
     };
 
-    float norm = grad(g, f_C);
-    while (norm > 0.01f)
-    {
-        for(CountT i = 0; i < 3 * total_contacts; ++i) {
-            f_C[i] -= 0.001f * g[i];
+    // Naive gradient descent
+    float kappa = 1.f;
+    while(kappa > 0.0000001f) {
+        for(CountT gd_iter = 0; gd_iter < 1000; ++gd_iter)
+        {
+            for(CountT i = 0; i < 3 * total_contacts; ++i) {
+                f_C[i] -= 0.01f * g[i];
+            }
+            grad(g, f_C, kappa);
         }
-        norm = grad(g, f_C);
+        kappa /= 10.f;
+    }
+    // print out f_C
+    for(CountT i = 0; i < 3 * total_contacts; ++i) {
+        printf("f_C[%d]: %f\n", i, f_C[i]);
     }
 
     // Post-solve f_C. Impulse is J_c^T f_C
