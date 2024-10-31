@@ -146,6 +146,11 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
 {
     stateMgr.copyInExportedColumns();
 
+    for (CountT i = 0; i < num_jobs; ++i) {
+        jobs[i].fn(jobs[i].data);
+    }
+
+#if 0
     currentJobs = jobs;
     numJobs = uint32_t(num_jobs);
     nextJob.store_relaxed(0);
@@ -155,6 +160,7 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
 
     mainWakeup.wait<sync::acquire>(0);
     mainWakeup.store_relaxed(0);
+#endif
 
     stateMgr.copyOutExportedColumns();
 }
