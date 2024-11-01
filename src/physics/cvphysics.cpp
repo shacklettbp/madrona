@@ -554,12 +554,15 @@ static void solveSystem(Context &ctx,
     }
 
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
-        cv_sing.cvxSolve->fn(
+        float* res = cv_sing.cvxSolve->fn(
                 cv_sing.cvxSolve->data, 
                 A_ptr, 3 * total_contacts, 3 * total_contacts,
                 v0, 3 * total_contacts,
                 mu_tmp_array,
                 3 * total_contacts);
+        for(CountT i = 0; i < 3 * total_contacts; ++i) {
+            f_C[i] = res[i];
+        }
     }
 
     float* g = (float *)state_mgr->tmpAlloc(
