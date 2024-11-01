@@ -21,6 +21,7 @@ using CVXSolveFn = float *(*)(
         float *a_mat, uint32_t a_rows, uint32_t a_cols,
         float *v0, uint32_t v0_rows,
         float *mu,
+        float *penetrations,
         uint32_t fc_rows);
 
 struct CVXSolve {

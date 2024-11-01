@@ -43,9 +43,8 @@ struct ContactTmpState {
     math::Vector3 s;
     math::Vector3 rRefComToPt[4];
     math::Vector3 rAltComToPt[4];
-    float penetrations[4];
+    float maxPenetration;
     uint32_t num_contacts;
-    float maxDepth;
 };
 
 // During solve, we will store the individual contact point info

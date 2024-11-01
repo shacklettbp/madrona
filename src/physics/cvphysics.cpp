@@ -290,12 +290,13 @@ static void processContacts(Context &ctx,
     tmp_state.s = s;
 
     CountT i = 0;
+    float max_penetration = -FLT_MAX;
     for(; i < contact.numPoints; ++i) {
         Vector4 point = contact.points[i];
         // Compute the relative positions of the contact
         tmp_state.rRefComToPt[i] = point.xyz() - ref_com;
         tmp_state.rAltComToPt[i] = point.xyz() - alt_com;
-        tmp_state.penetrations[i] = point.w;
+        tmp_state.maxPenetration = std::max(max_penetration, point.w);
     }
 
     tmp_state.num_contacts = contact.numPoints;
@@ -548,9 +549,12 @@ static void solveSystem(Context &ctx,
 
     float *mu_tmp_array = (float *)state_mgr->tmpAlloc(
             world_id, sizeof(float) * total_contacts);
+    float *penetration_tmp_array = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * total_contacts);
     for (int i = 0; i < total_contacts; ++i) {
         uint32_t parent = contact_point_info[i].parentIdx;
         mu_tmp_array[i] = contacts_tmp_state[parent].mu;
+        penetration_tmp_array[i] = contacts_tmp_state[parent].maxPenetration;
     }
 
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
@@ -559,6 +563,7 @@ static void solveSystem(Context &ctx,
                 A_ptr, 3 * total_contacts, 3 * total_contacts,
                 v0, 3 * total_contacts,
                 mu_tmp_array,
+                penetration_tmp_array,
                 3 * total_contacts);
         for(CountT i = 0; i < 3 * total_contacts; ++i) {
             f_C[i] = res[i];
