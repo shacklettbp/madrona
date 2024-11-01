@@ -613,18 +613,18 @@ static void solveSystem(Context &ctx,
     };
 
     // Naive gradient descent
-    float kappa = 1.f;
-    while(kappa > 0.0000001f) {
-        for(CountT gd_iter = 0; gd_iter < 1000; ++gd_iter)
-        {
-            for(CountT i = 0; i < 3 * total_contacts; ++i) {
-                f_C[i] -= 0.01f * g[i];
-            }
-            grad(g, f_C, kappa);
-        }
-        kappa /= 10.f;
-    }
-
+    // float kappa = 1.f;
+    // while(kappa > 0.0000001f) {
+    //     for(CountT gd_iter = 0; gd_iter < 1000; ++gd_iter)
+    //     {
+    //         for(CountT i = 0; i < 3 * total_contacts; ++i) {
+    //             f_C[i] -= 0.01f * g[i];
+    //         }
+    //         grad(g, f_C, kappa);
+    //     }
+    //     kappa /= 10.f;
+    // }
+    //
     // Divide by h (counteract the multiplication by h in the velocity update)
     for(CountT i = 0; i < 3 * total_contacts; ++i) {
         f_C[i] /= physics_state.h;
