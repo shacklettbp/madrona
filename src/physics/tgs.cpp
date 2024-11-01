@@ -114,7 +114,8 @@ inline void integrateVelocities(Context &ctx,
 
     float h = physics_sys.h;
 
-    if (response_type == ResponseType::Dynamic) {
+    if (response_type == ResponseType::Dynamic ||
+        response_type == ResponseType::Agent) {
         v += h * physics_sys.g;
     }
 

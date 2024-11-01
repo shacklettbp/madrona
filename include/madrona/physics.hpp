@@ -26,6 +26,7 @@ enum class ResponseType : uint32_t {
     Dynamic,
     Kinematic,
     Static,
+    Agent
 };
 
 struct Velocity {

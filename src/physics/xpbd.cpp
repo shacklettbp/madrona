@@ -144,7 +144,8 @@ inline void substepRigidBodies(Context &ctx,
 
     float h = physics_sys.h;
 
-    if (response_type == ResponseType::Dynamic) {
+    if (response_type == ResponseType::Dynamic || 
+        response_type == ResponseType::Agent) {
         v += h * physics_sys.g;
     }
 
@@ -496,7 +497,8 @@ static inline void handleContact(Context &ctx,
     Vector3 inv_I1 = metadata1.mass.invInertiaTensor;
     Vector3 inv_I2 = metadata2.mass.invInertiaTensor;
 
-    if (resp_type1 != ResponseType::Dynamic) {
+    if (resp_type1 != ResponseType::Dynamic &&
+        resp_type1 != ResponseType::Agent) {
         inv_m1 = 0.f;
         inv_I1 = Vector3::zero();
         if (resp_type2 == ResponseType::Kinematic) {
@@ -504,7 +506,8 @@ static inline void handleContact(Context &ctx,
         }
     }
 
-    if (resp_type2 != ResponseType::Dynamic) {
+    if (resp_type2 != ResponseType::Dynamic &&
+        resp_type2 != ResponseType::Agent) {
         inv_m2 = 0.f;
         inv_I2 = Vector3::zero();
         if (resp_type1 == ResponseType::Kinematic) {
@@ -528,11 +531,11 @@ static inline void handleContact(Context &ctx,
     // Do this here so we get the above filtering.
     // If type is agent, set the "touched" flag of
     // the other RigidBody to true.
-    if (obj_id1.idx == 6) {
+    if (resp_type1 == ResponseType::Agent) {
         ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.alt).touched = true;
         ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.alt).normal = -contact.normal;
     }
-    if (obj_id2.idx == 6) {
+    if (resp_type2 == ResponseType::Agent) {
         ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.ref).touched = true;
         ctx.getDirect<AgentTouched>(RGDCols::AgentTouched, contact.ref).normal = contact.normal;
     }
@@ -977,7 +980,8 @@ static inline void solveVelocitiesForContact(Context &ctx,
     Vector3 inv_I1 = metadata1.mass.invInertiaTensor;
     Vector3 inv_I2 = metadata2.mass.invInertiaTensor;
 
-    if (resp_type1 != ResponseType::Dynamic) {
+    if (resp_type1 != ResponseType::Dynamic &&
+        resp_type1 != ResponseType::Agent) {
         inv_m1 = 0.f;
         inv_I1 = Vector3::zero();
         if (resp_type2 == ResponseType::Kinematic) {
@@ -985,7 +989,8 @@ static inline void solveVelocitiesForContact(Context &ctx,
         }
     }
 
-    if (resp_type2 != ResponseType::Dynamic) {
+    if (resp_type2 != ResponseType::Dynamic &&
+        resp_type2 != ResponseType::Agent) {
         inv_m2 = 0.f;
         inv_I2 = Vector3::zero();
         if (resp_type1 == ResponseType::Kinematic) {
@@ -1017,7 +1022,8 @@ static inline void solveVelocitiesForContact(Context &ctx,
         float vn_bar = dot(contact.normal, v_bar);
 
         // Special purpose agent logic.
-        if (obj_id1.idx == 6 || obj_id2.idx == 6) {
+        if (resp_type1 == ResponseType::Agent ||
+            resp_type2 == ResponseType::Agent) {
             // Agent don't bounce.
             vn_bar = 0.0f;
         }
