@@ -206,8 +206,9 @@ static void gaussMinimizeFn(Context &ctx,
                             DofObjectTmpState &tmp_state,
                             ObjectID &objID)
 {
+    (void)numDofs;
+
     // TODO: Gather all the physics objects and do the minimization
-    StateManager *state_mgr = ctx.getStateManager();
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
@@ -780,6 +781,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<DofObjectVelocity>();
     registry.registerComponent<DofObjectNumDofs>();
     registry.registerComponent<DofObjectTmpState>();
+    registry.registerComponent<DofObjectHierarchyDesc>();
     registry.registerComponent<ContactTmpState>();
 
     registry.registerArchetype<DofObjectArchetype>();
@@ -822,6 +824,16 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
     ctx.get<CVPhysicalComponent>(e) = {
         .physicsEntity = physical_entity,
     };
+
+    auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physical_entity);
+    hierarchy.sync.store_relaxed(0);
+
+#ifdef MADRONA_GPU_MODE
+    static_assert(false, "Need to implement GPU DOF object hierarchy")
+#else
+    // By default, no parent
+    hierarchy.parent = Entity::none();
+#endif
 }
 
 void cleanupPhysicalEntity(Context &ctx, Entity e)
@@ -917,6 +929,23 @@ void init(Context &ctx, CVXSolve *cvx_solve)
 {
     // Nothing for now
     ctx.singleton<CVSingleton>().cvxSolve = cvx_solve;
+}
+
+void setCVEntityParent(Context &ctx,
+                       Entity parent,
+                       Entity child)
+{
+    Entity child_physics_entity =
+        ctx.get<CVPhysicalComponent>(child).physicsEntity;
+    Entity parent_physics_entity =
+        ctx.get<CVPhysicalComponent>(parent).physicsEntity;
+
+#ifdef MADRONA_GPU_MODE
+    static_assert(false, "Need to implement GPU DOF object hierarchy");
+#else
+    ctx.get<DofObjectHierarchyDesc>(child_physics_entity).parent = 
+        parent_physics_entity;
+#endif
 }
     
 }

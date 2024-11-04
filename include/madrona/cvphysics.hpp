@@ -59,11 +59,23 @@ struct DofObjectTmpState {
     math::Vector3 externalMoment;
 };
 
+struct DofObjectHierarchyDesc {
+    AtomicU32 sync;
+    
+#ifdef MADRONA_GPU_MODE
+    static_assert(false, "Need to implement GPU DOF object hierarchy");
+#else
+    Entity parent;
+#endif
+};
+
 struct DofObjectArchetype : public Archetype<
     DofObjectPosition,
     DofObjectVelocity,
 
     DofObjectTmpState,
+
+    DofObjectHierarchyDesc,
 
     // Currently, this is being duplicated but it's small. We can
     // maybe find a way around this later.
@@ -91,5 +103,9 @@ void init(Context &ctx, CVXSolve *cvx_solve);
 TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                                    TaskGraphNodeID broadphase,
                                    CountT num_substeps);
+
+void setCVEntityParent(Context &ctx,
+                       Entity parent,
+                       Entity child);
 
 }

@@ -179,6 +179,20 @@ broadphase::LeafID registerEntity(Context &ctx,
     return bvh.reserveLeaf(e, obj_id);
 }
 
+void setEntityParent(Context &ctx,
+                     Entity parent,
+                     Entity child,
+                     Solver solver)
+{
+    switch (solver) {
+    case Solver::Convex: {
+        cv::setCVEntityParent(ctx, parent, child);
+    } break;
+    default:
+        assert(false);
+    }
+}
+
 bool checkEntityAABBOverlap(
     Context &ctx, math::AABB aabb, Entity e)
 {

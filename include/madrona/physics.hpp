@@ -216,6 +216,11 @@ namespace PhysicsSystem {
                                       base::ObjectID obj_id,
                                       Solver solver = Solver::XPBD);
 
+    void setEntityParent(Context &ctx,
+                         Entity parent,
+                         Entity child,
+                         Solver solver = Solver::XPBD);
+
     template <typename Fn>
     void findEntitiesWithinAABB(Context &ctx,
                                        math::AABB aabb,
