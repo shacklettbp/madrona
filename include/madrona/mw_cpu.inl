@@ -76,23 +76,28 @@ TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::TaskGraphExecutor(
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
 template <EnumType EnumT>
-void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::runTaskGraph(EnumT taskgraph_id)
+void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::runTaskGraph(
+        EnumT taskgraph_id, phys::CVXSolve *cvx_solve)
 {
-    runTaskGraph(static_cast<uint32_t>(taskgraph_id));
+    runTaskGraph(static_cast<uint32_t>(taskgraph_id), cvx_solve);
 }
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
-void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::runTaskGraph(uint32_t taskgraph_idx)
+void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::runTaskGraph(
+        uint32_t taskgraph_idx,
+        phys::CVXSolve *cvx_solve)
 {
     CountT offset = taskgraph_idx * world_datas_.size();
-    ThreadPoolExecutor::run(jobs_.data() + offset, world_datas_.size());
+    ThreadPoolExecutor::run(jobs_.data() + offset, world_datas_.size(),
+                            cvx_solve);
 }
 
 template <typename ContextT, typename WorldT, typename ConfigT, typename InitT>
-void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::run()
+void TaskGraphExecutor<ContextT, WorldT, ConfigT, InitT>::run(
+        phys::CVXSolve *cvx_solve)
 {
     for (uint32_t i = 0; i < (uint32_t)num_taskgraphs_; i++) {
-        runTaskGraph(i);
+        runTaskGraph(i, cvx_solve);
     }
 }
 

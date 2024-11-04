@@ -558,6 +558,22 @@ static void solveSystem(Context &ctx,
     }
 
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
+        cv_sing.cvxSolve->aPtr = A_ptr;
+        cv_sing.cvxSolve->aRows = 3 * total_contacts;
+        cv_sing.cvxSolve->aCols = 3 * total_contacts;
+        cv_sing.cvxSolve->v0Ptr = v0; 
+        cv_sing.cvxSolve->v0Rows = 3 * total_contacts;
+        cv_sing.cvxSolve->muPtr = mu_tmp_array;
+        cv_sing.cvxSolve->penetrationsPtr = penetration_tmp_array;
+        cv_sing.cvxSolve->fcRows = 3 * total_contacts;
+
+        cv_sing.cvxSolve->callSolve.store_release(1);
+        while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
+        cv_sing.cvxSolve->callSolve.store_relaxed(0);
+
+        float *res = cv_sing.cvxSolve->resPtr;
+
+#if 0
         float* res = cv_sing.cvxSolve->fn(
                 cv_sing.cvxSolve->data, 
                 A_ptr, 3 * total_contacts, 3 * total_contacts,
@@ -565,8 +581,12 @@ static void solveSystem(Context &ctx,
                 mu_tmp_array,
                 penetration_tmp_array,
                 3 * total_contacts);
-        for(CountT i = 0; i < 3 * total_contacts; ++i) {
-            f_C[i] = res[i];
+#endif
+
+        if (res) {
+            for(CountT i = 0; i < 3 * total_contacts; ++i) {
+                f_C[i] = res[i];
+            }
         }
     }
 

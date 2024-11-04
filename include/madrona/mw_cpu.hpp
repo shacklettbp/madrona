@@ -10,6 +10,7 @@
 #include <madrona/taskgraph_builder.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/registry.hpp>
+#include <madrona/physics.hpp>
 
 namespace madrona {
 
@@ -34,7 +35,7 @@ public:
     ThreadPoolExecutor(ThreadPoolExecutor &&o);
 
     ~ThreadPoolExecutor();
-    void run(Job *jobs, CountT num_jobs);
+    void run(Job *jobs, CountT num_jobs, phys::CVXSolve *solve);
 
     // Get the base pointer of the component data exported with
     // ECSRegister::exportColumn
@@ -81,11 +82,13 @@ public:
 
     // Run one invocation of the task graph across all worlds (one step)
     template <EnumType EnumT>
-    inline void runTaskGraph(EnumT taskgraph_id);
+    inline void runTaskGraph(EnumT taskgraph_id,
+                             phys::CVXSolve *cvx_solve = nullptr);
 
-    inline void runTaskGraph(uint32_t taskgraph_idx);
+    inline void runTaskGraph(uint32_t taskgraph_idx,
+                             phys::CVXSolve *cvx_solve = nullptr);
 
-    inline void run();
+    inline void run(phys::CVXSolve *cvx_solve = nullptr);
 
     // Get the base pointer of the component data exported with
     // ECSRegister::exportColumn

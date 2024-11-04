@@ -7,7 +7,11 @@
 #include <windows.h>
 #endif
 
+#include <madrona/physics.hpp>
+
 namespace madrona {
+
+using phys::CVXSolve;
 
 struct ThreadPoolExecutor::Impl {
     HeapArray<std::thread> workers;
@@ -23,7 +27,7 @@ struct ThreadPoolExecutor::Impl {
 
     static Impl * make(const ThreadPoolExecutor::Config &cfg);
     ~Impl();
-    void run(Job *jobs, CountT num_jobs);
+    void run(Job *jobs, CountT num_jobs, CVXSolve *solve = nullptr);
     void workerThread(CountT worker_id);
 };
 
@@ -142,15 +146,17 @@ ThreadPoolExecutor::Impl::~Impl()
 
 ThreadPoolExecutor::~ThreadPoolExecutor() = default;
 
-void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
+void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs,
+                                   CVXSolve *solve)
 {
     stateMgr.copyInExportedColumns();
 
+#if 0
     for (CountT i = 0; i < num_jobs; ++i) {
         jobs[i].fn(jobs[i].data);
     }
+#endif
 
-#if 0
     currentJobs = jobs;
     numJobs = uint32_t(num_jobs);
     nextJob.store_relaxed(0);
@@ -158,16 +164,31 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs)
     workerWakeup.store_release(1);
     workerWakeup.notify_all();
 
+    // Wait until solve's atomic is 1
+    while (solve->callSolve.load_acquire() == 0);
+
+    float *res = solve->fn(
+            solve->data,
+            solve->aPtr, solve->aRows, solve->aCols,
+            solve->v0Ptr, solve->v0Rows,
+            solve->muPtr,
+            solve->penetrationsPtr,
+            solve->fcRows);
+
+    solve->resPtr = res;
+
+    solve->callSolve.store_release(2);
+
     mainWakeup.wait<sync::acquire>(0);
     mainWakeup.store_relaxed(0);
-#endif
 
     stateMgr.copyOutExportedColumns();
 }
 
-void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs)
+void ThreadPoolExecutor::run(Job *jobs, CountT num_jobs,
+                             CVXSolve *solve)
 {
-    impl_->run(jobs, num_jobs);
+    impl_->run(jobs, num_jobs, solve);
 }
 
 void * ThreadPoolExecutor::getExported(CountT slot) const

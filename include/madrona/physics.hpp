@@ -27,6 +27,21 @@ using CVXSolveFn = float *(*)(
 struct CVXSolve {
     CVXSolveFn fn;
     void *data;
+
+    // The main thread waits until this flips from 0 to 1 to call the
+    // correct solve function.
+    AtomicU32 callSolve;
+
+    float *aPtr;
+    uint32_t aRows;
+    uint32_t aCols;
+    float *v0Ptr;
+    uint32_t v0Rows;
+    float *muPtr;
+    float *penetrationsPtr;
+    uint32_t fcRows;
+
+    float *resPtr;
 };
 #endif
 

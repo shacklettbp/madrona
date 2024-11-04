@@ -11,8 +11,6 @@ struct CVPhysicalComponent {
     Entity physicsEntity;
 };
 
-
-
 static constexpr uint32_t kMaxPositionCoords = 7;
 static constexpr uint32_t kMaxVelocityCoords = 6;
 
