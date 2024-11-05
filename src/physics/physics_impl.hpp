@@ -48,10 +48,11 @@ namespace RGDCols {
     constexpr inline CountT ResponseType = 6;
     constexpr inline CountT LeafID = 7;
     constexpr inline CountT Velocity = 8;
-    constexpr inline CountT ExternalForce = 9;
-    constexpr inline CountT ExternalTorque = 10;
-    constexpr inline CountT AgentTouched = 11;
-    constexpr inline CountT SolverBase = 12;
+    constexpr inline CountT FrameLinearVelocity = 9;
+    constexpr inline CountT ExternalForce = 10;
+    constexpr inline CountT ExternalTorque = 11;
+    constexpr inline CountT AgentTouched = 12;
+    constexpr inline CountT SolverBase = 13;
 
     constexpr inline CountT CandidateCollision = 2;
     constexpr inline CountT ContactConstraint = 2;

@@ -39,13 +39,18 @@ struct AgentTouched {
     math::Vector3 normal;
 };
 
+struct FrameLinearVelocity {
+    math::Vector3 velocity;
+};
+
 struct SolverBundleAlias {};
 
 struct RigidBody : Bundle<
     base::ObjectInstance,
     ResponseType,
     broadphase::LeafID,
-    Velocity, 
+    Velocity,
+    FrameLinearVelocity,
     ExternalForce,
     ExternalTorque,
     AgentTouched,

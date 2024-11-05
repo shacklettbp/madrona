@@ -328,6 +328,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<ExternalForce>();
     registry.registerComponent<ExternalTorque>();
     registry.registerComponent<AgentTouched>();
+    registry.registerComponent<FrameLinearVelocity>();
 
     registry.registerSingleton<broadphase::BVH>();
 

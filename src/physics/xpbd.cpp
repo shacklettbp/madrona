@@ -43,6 +43,9 @@ struct XPBDRigidBodyState : Bundle<
     PreSolveVelocity
 > {};
 
+
+
+
 namespace XPBDCols {
     constexpr inline CountT SubstepPrevState = RGDCols::SolverBase;
     constexpr inline CountT PreSolvePositional = RGDCols::SolverBase + 1;
@@ -51,6 +54,20 @@ namespace XPBDCols {
 
 using namespace base;
 using namespace math;
+
+static inline Vector3 airResistanceForce(Vector3 v) {
+    Vector3 f_d = {0.0f, 0.0f, 0.0f};
+    v.z = 0.0f; // Ignore vertical resistance.
+    float v_2 = v.length2();
+    float c_d = 4.0f;
+    if (v_2 > 1e-5f) {
+        f_d = 0.5f * v_2 * v.normalize() * c_d;// * ctx.singleton<TimeStep>().delta;
+        //f_d = std::min(f_d.length(), vel.linear.length() / consts::minDeltaT) * f_d.normalize();
+    }
+
+    return f_d;
+}
+
 
 static inline bool hasNaN(Vector3 v)
 {
@@ -101,6 +118,7 @@ inline void substepRigidBodies(Context &ctx,
                                Position &pos,
                                Rotation &rot,
                                const Velocity &vel,
+                               const FrameLinearVelocity &rel_vel,
                                const ObjectID &obj_id,
                                ResponseType response_type,
                                ExternalForce &ext_force,
@@ -149,7 +167,8 @@ inline void substepRigidBodies(Context &ctx,
         v += h * physics_sys.g;
     }
 
-    v += h * inv_m * ext_force;
+    // Anything except the agent will have frame relative velocity of zero.
+    v += h * inv_m * (ext_force - airResistanceForce(v - rel_vel.velocity));
 
     x += h * v;
 
@@ -587,7 +606,7 @@ static void applyJointOrientationConstraint(
         2.f * math::Vector3 { diff.x, diff.y, diff.z };
     float delta_q_magnitude = delta_q.length();
 
-    if (delta_q_magnitude > 0) {
+    if (delta_q_magnitude > 1e-5) {
         delta_q /= delta_q_magnitude;
         Vector3 delta_q_local1 = q1.inv().rotateVec(delta_q);
         Vector3 delta_q_local2 = q2.inv().rotateVec(delta_q);
@@ -1137,7 +1156,7 @@ TaskGraphNodeID setupXPBDSolverTasks(
 
     for (CountT i = 0; i < num_substeps; i++) {
         auto rgb_update = builder.addToGraph<ParallelForNode<Context,
-            substepRigidBodies, Position, Rotation, Velocity, ObjectID,
+            substepRigidBodies, Position, Rotation, Velocity, FrameLinearVelocity, ObjectID,
             ResponseType, ExternalForce, ExternalTorque,
             SubstepPrevState, PreSolvePositional,
             PreSolveVelocity>>({cur_node});
