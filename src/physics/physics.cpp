@@ -161,6 +161,7 @@ void reset(Context &ctx)
 broadphase::LeafID registerEntity(Context &ctx,
                                   Entity e,
                                   ObjectID obj_id,
+                                  uint32_t num_dofs,
                                   Solver solver)
 {
     auto &bvh = ctx.singleton<broadphase::BVH>();
@@ -170,23 +171,30 @@ broadphase::LeafID registerEntity(Context &ctx,
         Rotation initial_rotation = ctx.get<Rotation>(e);
         base::ObjectID obj_id = ctx.get<base::ObjectID>(e);
 
-        cv::makeFreeBodyEntityPhysical(ctx, e,
-                                       initial_position,
-                                       initial_rotation,
-                                       obj_id);
+        cv::makeCVPhysicsEntity(ctx, e,
+                                initial_position,
+                                initial_rotation,
+                                obj_id,
+                                cv::DofType(num_dofs));
     }
 
     return bvh.reserveLeaf(e, obj_id);
 }
 
-void setEntityParent(Context &ctx,
-                     Entity parent,
-                     Entity child,
-                     Solver solver)
+void setEntityParentHinge(Context &ctx,
+                          Entity parent, Entity child,
+                          Vector3 rel_pos_parent,
+                          Vector3 rel_pos_child,
+                          Vector3 hinge_axis,
+                          Solver solver)
 {
     switch (solver) {
     case Solver::Convex: {
-        cv::setCVEntityParent(ctx, parent, child);
+        cv::setCVEntityParentHinge(ctx, 
+                                   parent, child,
+                                   rel_pos_parent,
+                                   rel_pos_child,
+                                   hinge_axis);
     } break;
     default:
         assert(false);

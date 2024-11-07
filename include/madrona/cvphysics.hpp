@@ -17,12 +17,22 @@ static constexpr uint32_t kMaxVelocityCoords = 6;
 enum class DofType {
     // The number of unique degrees of freedom (SE3)
     FreeBody = 6,
+    Hinge = 1,
 
     // When we add other types of physics DOF objects, we will encode
     // the number of degrees of freedom they all have here.
 };
 
 struct DofObjectPosition {
+    // There are multiple ways of interpreting the values in thie struct.
+    // If this is a free body (i.e., 6 degrees of freedom),
+    // - q[0:3] are the position
+    // - q[3:7] are the quaternion
+    //
+    // If this is a hinge joint (i.e., 1 degree of freedom),
+    // - q[0] is the angle
+    //
+    // TODO: Other types of DOF objects.
     float q[kMaxPositionCoords];
 };
 
@@ -51,15 +61,59 @@ struct ContactPointInfo {
     uint32_t subIdx;
 };
 
+// This is the phi linear operator which appears in Featherstone's Composite-
+// Rigid-Body Algorithm.
+struct Phi {
+    // Phi is parameterized by at most 6 values.
+    //
+    // For the free body, it just depends on the center of mass of the body.
+    //
+    // For the hinge, it depends on the normalized angular velocity vector 
+    // (first 3 values) of the hinge and the position of the joint 
+    // (not the body - last 3 values).
+    float v[6];
+};
+
+struct InertiaTensor {
+    // The inertia tensor is parameterized by 10 values:
+    float mass;
+    math::Vector3 com;
+
+    // The inertia matrix is symmetric so 6 values are required to 
+    // parameterize it. First 3 values are the diagonal. The next three
+    // are ordered from top left to bottom right.
+    float vInertia[6];
+
+    // This stores the components of r^x r^xT. We do this so that we
+    // can add the values of this like a vector before multiplying by phi.
+    float comSquared[6];
+};
+
 // Just some space to store temporary per-entity data.
 struct DofObjectTmpState {
-    float invMass;
-    math::Mat3x3 invInertia;
-    math::Vector3 externalForces;
-    math::Vector3 externalMoment;
+    math::Vector3 comPos;
+
+    // Position of the rotation point. For free body, it's just the COM.
+    // For the hinge, it's the position of the joint.
+    math::Vector3 orientPos;
+
+    math::Quat composedRot;
+
+    // Composed angular velocity
+    math::Vector3 composedLinearV;
+    math::Vector3 composedAngularV;
+
+
+
+    Phi phi;
+    InertiaTensor inertiaLocal;
 };
 
 struct DofObjectHierarchyDesc {
+    // The child is going to query the sync value of the parent.
+    // If the value is 0, the child must keep waiting. Otherwise,
+    // if it's 1, that means that the child can look up whatever
+    // value it's been waiting on.
     AtomicU32 sync;
     
 #ifdef MADRONA_GPU_MODE
@@ -67,6 +121,17 @@ struct DofObjectHierarchyDesc {
 #else
     Entity parent;
 #endif
+
+    // Relative position of the joint to the parent's COM.
+    math::Vector3 relPositionParent;
+
+    // Relative position of the child's COM to the joint.
+    math::Vector3 relPositionLocal;
+    
+    // Extra data:
+    math::Vector3 hingeAxis;
+
+    bool leaf;
 };
 
 struct DofObjectArchetype : public Archetype<
@@ -88,10 +153,12 @@ struct DofObjectArchetype : public Archetype<
 
     
 // For now, initial velocities are just going to be 0
-void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
-                                base::Position position,
-                                base::Rotation rotation,
-                                base::ObjectID obj_id);
+void makeCVPhysicsEntity(Context &ctx, Entity e,
+                         base::Position position,
+                         base::Rotation rotation,
+                         base::ObjectID obj_id,
+                         DofType dof_type);
+
 void cleanupPhysicalEntity(Context &ctx, Entity e);
 
 
@@ -104,8 +171,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                                    TaskGraphNodeID broadphase,
                                    CountT num_substeps);
 
-void setCVEntityParent(Context &ctx,
-                       Entity parent,
-                       Entity child);
+void setCVEntityParentHinge(Context &ctx,
+                            Entity parent, Entity child,
+                            math::Vector3 rel_pos_parent,
+                            math::Vector3 rel_pos_child,
+                            math::Vector3 hinge_axis);
 
 }

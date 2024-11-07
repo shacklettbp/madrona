@@ -199,6 +199,462 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
     return solve_node;
 }
 #else
+static Mat3x3 skewSymmetricMatrix(Vector3 v)
+{
+    return {
+        {
+            { 0.f, v.z, -v.y },
+            { -v.z, 0.f, v.x },
+            { v.y, -v.x, 0.f }
+        }
+    };
+}
+
+static void propagateHierarchy(Context &ctx,
+                               DofObjectPosition &position,
+                               DofObjectVelocity &velocity,
+                               DofObjectNumDofs &num_dofs,
+                               DofObjectTmpState &tmp_state,
+                               DofObjectHierarchyDesc &hier_desc,
+                               ObjectID &obj_id)
+{
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+
+    RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
+
+    float inv_mass = metadata.invMass;
+
+    // FIXME: This is really bad but we need to give the mass for this.
+    float mass = 1.f / inv_mass;
+    Vector3 inertia = { 1.f / metadata.invInertia[0],
+                        1.f / metadata.invInertia[1],
+                        1.f / metadata.invInertia[2] };
+
+    if (hier_desc.parent != Entity::none()) {
+        // We have a parent
+        Entity parent_e = hier_desc.parent;
+
+        DofObjectHierarchyDesc &parent_hier_desc =
+            ctx.get<DofObjectHierarchyDesc>(parent_e);
+        DofObjectTmpState &parent_tmp_state =
+            ctx.get<DofObjectTmpState>(parent_e);
+
+        while (parent_hier_desc.sync.load_acquire() != 1);
+
+        // We can calculate our stuff.
+        switch (num_dofs.numDofs) {
+        case (uint32_t)DofType::Hinge: {
+            Vector3 rotated_hinge_axis =
+                parent_tmp_state.composedRot.rotateVec(hier_desc.hingeAxis);
+
+            // Calculate the composed rotation applied to the child entity.
+            tmp_state.composedRot = parent_tmp_state.composedRot *
+                Quat::angleAxis(position.q[0], rotated_hinge_axis);
+
+            // Calculate the composed COM position of the child
+            tmp_state.comPos = parent_tmp_state.comPos +
+                parent_tmp_state.composedRot.rotateVec(
+                        hier_desc.relPositionParent +
+                        Quat::angleAxis(position.q[0], hier_desc.hingeAxis).
+                            rotateVec(hier_desc.relPositionLocal)
+                );
+
+            // All we are getting here is the position of the hinge point
+            // which is relative to the parent's COM.
+            tmp_state.orientPos = parent_tmp_state.comPos +
+                parent_tmp_state.composedRot.rotateVec(
+                        hier_desc.relPositionParent);
+
+            // Write the normalized world-space angular velocity vector.
+            tmp_state.phi.v[0] = rotated_hinge_axis[0];
+            tmp_state.phi.v[1] = rotated_hinge_axis[1];
+            tmp_state.phi.v[2] = rotated_hinge_axis[2];
+
+            // Write the world space position of the joint itself.
+            tmp_state.phi.v[3] = tmp_state.orientPos[0];
+            tmp_state.phi.v[4] = tmp_state.orientPos[1];
+            tmp_state.phi.v[5] = tmp_state.orientPos[2];
+
+            // Now, for the inertia tensor.
+            tmp_state.inertiaLocal.mass = mass;
+            
+            // We are doing this so that we can again just add the inertia tensor
+            // struct values like vectors.
+            tmp_state.inertiaLocal.com = mass * tmp_state.comPos;
+
+            { // Compute the 3x3 inertia matrix
+                // We need to inertia tensor (not inverse) so that is:
+                // R^T I_c R
+                Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
+                Mat3x3 i_world_frame = Diag3x3::fromVec(inertia) * rot_mat;
+                i_world_frame = i_world_frame.transpose() * rot_mat;
+
+                tmp_state.inertiaLocal.vInertia[0] = i_world_frame[0][0];
+                tmp_state.inertiaLocal.vInertia[1] = i_world_frame[1][1];
+                tmp_state.inertiaLocal.vInertia[2] = i_world_frame[2][2];
+
+                tmp_state.inertiaLocal.vInertia[3] = i_world_frame[0][1];
+                tmp_state.inertiaLocal.vInertia[4] = i_world_frame[0][2];
+                tmp_state.inertiaLocal.vInertia[5] = i_world_frame[1][2];
+            }
+
+            { // Compute the 3x3 symmetric matrix m r^x r^xT
+                Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.com);
+                sym_mat = sym_mat * sym_mat.transpose();
+                sym_mat = sym_mat * mass;
+
+                tmp_state.inertiaLocal.comSquared[0] = sym_mat[0][0] + parent_tmp_state.sym_mat[0];
+                tmp_state.inertiaLocal.comSquared[1] = sym_mat[1][1] + parent_tmp_state.sym_mat[1];
+                tmp_state.inertiaLocal.comSquared[2] = sym_mat[2][2] + parent_tmp_state.sym_mat[2];
+                tmp_state.inertiaLocal.comSquared[3] = sym_mat[0][1] + parent_tmp_state.sym_mat[3];
+                tmp_state.inertiaLocal.comSquared[4] = sym_mat[0][2] + parent_tmp_state.sym_mat[4];
+                tmp_state.inertiaLocal.comSquared[5] = sym_mat[1][2] + parent_tmp_state.sym_mat[5];
+            }
+        } break;
+
+        default: {
+            assert(false);
+        } break;
+        }
+
+        hier_desc.sync.store_release(1);
+
+        auto can_propagate_up = [&]() {
+            while (hier_desc.sync.load_acquire() != 2);
+        };
+
+        if (hier_desc.leaf || can_propagate_up()) {
+            // We can safely do this is we're a leaf because we could only get to this point
+            // if the parent has already calculated its inertia matrices and stuff.
+            parent_tmp_state.inertiaLocal.mass += tmp_state.inertiaLocal.mass;
+            parent_tmp_state.inertiaLocal.com += tmp_state.inertiaLocal.com;
+
+            for (int i = 0; i < 6; ++i) {
+                parent_tmp_state.inertiaLocal.vInertia[i] +=
+                    tmp_state.inertiaLocal.vInertia[i];
+                parent_tmp_state.inertiaLocal.comSquared[i] +=
+                    tmp_state.inertiaLocal.comSquared[i];
+            }
+
+            parent_hier_desc.sync.store_release(2);
+        }
+    } else {
+        tmp_state.comPos = {
+            position.q[0],
+            position.q[1],
+            position.q[2] 
+        };
+
+        tmp_state.composedRot = {
+            position.q[3],
+            position.q[4],
+            position.q[5],
+            position.q[6]
+        };
+
+        tmp_state.composedLinearV = {
+            velocity.qv[0],
+            velocity.qv[1],
+            velocity.qv[2],
+        };
+
+        tmp_state.composedAngularV = {
+            velocity.qv[3],
+            velocity.qv[4],
+            velocity.qv[5],
+        };
+
+        tmp_state.phi.v[0] = tmp_state.comPos[0];
+        tmp_state.phi.v[1] = tmp_state.comPos[1];
+        tmp_state.phi.v[2] = tmp_state.comPos[2];
+
+        {
+            Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.com);
+            sym_mat = sym_mat * sym_mat.transpose();
+            sym_mat = sym_mat * mass;
+        }
+
+        hier_desc.sync.store_release(1);
+    }
+}
+
+static void processContacts(Context &ctx,
+                            ContactConstraint &contact,
+                            ContactTmpState &tmp_state)
+{
+    CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
+            contact.ref);
+    CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
+            contact.alt);
+
+    auto &ref_pos = ctx.get<DofObjectPosition>(ref.physicsEntity);
+    auto &alt_pos = ctx.get<DofObjectPosition>(alt.physicsEntity);
+    Vector3 ref_com = Vector3(ref_pos.q[0], ref_pos.q[1], ref_pos.q[2]);
+    Vector3 alt_com = Vector3(alt_pos.q[0], alt_pos.q[1], alt_pos.q[2]);
+
+    // Create a coordinate system for the contact
+    Vector3 n = contact.normal.normalize();
+    Vector3 t{};
+
+    Vector3 x_axis = {1.f, 0.f, 0.f};
+    if(n.cross(x_axis).length() > 0.01f) {
+        t = n.cross(x_axis).normalize();
+    } else {
+        t = n.cross({0.f, 1.f, 0.f}).normalize();
+    }
+    Vector3 s = n.cross(t).normalize();
+
+    tmp_state.n = n;
+    tmp_state.t = t;
+    tmp_state.s = s;
+
+    CountT i = 0;
+    float max_penetration = -FLT_MAX;
+    for(; i < contact.numPoints; ++i) {
+        Vector4 point = contact.points[i];
+        // Compute the relative positions of the contact
+        tmp_state.rRefComToPt[i] = point.xyz() - ref_com;
+        tmp_state.rAltComToPt[i] = point.xyz() - alt_com;
+        tmp_state.maxPenetration = std::max(max_penetration, point.w);
+    }
+
+    tmp_state.num_contacts = contact.numPoints;
+
+    // Get friction coefficient
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+    CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
+    CountT objID_j = ctx.get<ObjectID>(alt.physicsEntity).idx;
+    RigidBodyMetadata &metadata_i = obj_mgr.metadata[objID_i];
+    RigidBodyMetadata &metadata_j = obj_mgr.metadata[objID_j];
+    tmp_state.mu = std::min(metadata_i.friction.muS,
+                            metadata_j.friction.muS);
+}
+
+static void gaussMinimizeFn(Context &ctx,
+                            CVSingleton &cv_sing)
+{
+    uint32_t world_id = ctx.worldID()idx;
+
+    StateManager *state_mgr = ctx.getStateManager();
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+
+    CountT num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
+
+    // Recover necessary pointers.
+    DofObjectNumDofs *num_dofs = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectNumDofs>(world_id);
+    DofObjectTmpState *tmp_states = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectTmpState>(world_id);
+    DofObjectVelocity *body_vels = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectVelocity>(world_id);
+    DofObjectHierarchyDesc *hier_descs = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectHierarchyDesc>(world_id);
+
+    uint32_t *vel_coord_offsets = (uint32_t *)state_mgr->allocTmp(
+            world_id, sizeof(uint32_t) * num_bodies);
+    uint32_t num_vel_coords = 0;
+
+    { // Compute the prefix sum of entities' num velocity dofs.
+        for (int i = 0; i < num_bodies; ++i) {
+            vel_coord_offsets[i] = num_vel_coords;
+
+            DofObjectNumDofs &num_dofs = ctx.get<DofObjectNumDofs>();
+            num_vel_coords += num_dofs.numDofs;
+        }
+    }
+
+    // c*(i) is the set of bodies in the subtree rooted at i.
+    // For each body i, this has an array of flags saying whether
+    // body j is in the subtree rooted at body i.
+    bool *subtree_flags = (bool *)state_mgr->tmpAlloc(
+            sizeof(bool) * num_bodies * num_bodies);
+    memset(subtree_flag, 0, sizeof(bool) * num_bodies * num_bodies);
+    auto c_star = [subtree_flags, num_bodies](uint32_t i, uint32_t j) -> bool & {
+        return subtree_flags[i * num_bodies + j];
+    };
+
+    for (int i = 0; i < num_bodies; ++i) {
+        Entity parent = hier_descs[i].parent;
+        if (parent != Entity::none() &&
+            c_star[parent.row, i] == 0) {
+            c_star[parent.row, i] = 1;
+
+            // Walk up
+            uint32_t current = parent.row;
+            parent = hier_descs[parent.row].parent;
+            while (parent != Entity::none()) {
+                c_star[parent.row, current] = 1;
+                parent = hier_descs[parent.row].parent;
+            }
+        }
+    }
+
+    float inertia_mat_tmp[6][6] = {};
+    float matmul_tmp[6][6] = {};
+
+    auto populate_inertia_sym = [&inertia_mat_tmp](uint32_t off_row,
+                                                   uint32_t off_col,
+                                                   float *values) {
+        inertia_mat_tmp[off_row+0][off_col+0] = values[0];
+        inertia_mat_tmp[off_row+1][off_col+1] = values[1];
+        inertia_mat_tmp[off_row+2][off_col+2] = values[2];
+
+        inertia_mat_tmp[off_row+1][off_col+0] = 
+            inertia_mat_tmp[off_row+0][off_col+1] =
+            values[3];
+
+        inertia_mat_tmp[off_row+2][off_col+0] = 
+            inertia_mat_tmp[off_row+0][off_col+2] =
+            values[4];
+
+        inertia_mat_tmp[off_row+2][off_col+1] = 
+            inertia_mat_tmp[off_row+1][off_col+2] =
+            values[5];
+    };
+
+    auto add_inertia_sym = [&inertia_mat_tmp](uint32_t off_row,
+                                               uint32_t off_col,
+                                               float *values) {
+        inertia_mat_tmp[off_row+0][off_col+0] += values[0];
+        inertia_mat_tmp[off_row+1][off_col+1] += values[1];
+        inertia_mat_tmp[off_row+2][off_col+2] += values[2];
+
+        inertia_mat_tmp[off_row+1][off_col+0] = 
+            (inertia_mat_tmp[off_row+0][off_col+1] +=
+            values[3]);
+
+        inertia_mat_tmp[off_row+2][off_col+0] = 
+            (inertia_mat_tmp[off_row+0][off_col+2] +=
+            values[4]);
+
+        inertia_mat_tmp[off_row+2][off_col+1] = 
+            (inertia_mat_tmp[off_row+1][off_col+2] +=
+            values[5]);
+    };
+
+    // skew symmetric
+    auto populate_inertia_ssym = [&inertia_mat_tmp](uint32_t off_row,
+                                                    uint32_t off_col,
+                                                    float *values,
+                                                    bool transpose = false) {
+        float coeff = transpose ? -1.f : 1.f;
+        inertia_mat_tmp[0][1] = -values[3] * coeff;
+        inertia_mat_tmp[0][2] = values[2] * coeff;
+        inertia_mat_tmp[1][0] = values[3] * coeff;
+        inertia_mat_tmp[1][2] = -values[1] * coeff;
+        inertia_mat_tmp[2][0] = -values[2] * coeff;
+        inertia_mat_tmp[2][1] = values[1] * coeff;
+    };
+
+    auto right_multiply_phi = [&](uint32_t body_idx,
+                                  float *inertia_matrix) {
+        if (num_dofs[body_idx].numDofs == 6) {
+            
+        }
+    }
+
+    for (int i = 0; i < num_bodies; ++i) {
+        for (int j = 0; j < num_bodies, ++j) {
+            uint32_t row = vel_coord_offsets[i];
+            uint32_t col = vel_coord_offsets[j];
+
+            uint32_t block_width = num_dofs[j].numDofs;
+            uint32_t block_height = num_dofs[i].numDofs;
+
+            if (subtree_flags[j][i]) {
+                // Use inertia matrix from i
+                populate_inertia_sym(0, 0, tmp_states[i].inertiaLocal.vInertia);
+                add_inertia_sym(0, 0, tmp_states[i].inertiaLocal.comSquared);
+
+                populate_inertia_ssym(0, 3, tmp_states[i].inertiaLocal.com);
+                populate_inertia_ssym(3, 0, tmp_states[i].inertiaLocal.com, true);
+
+                inertia_mat_tmp[3][3] = tmp_states[i].inertiaLocal.mass;
+                inertia_mat_tmp[4][4] = tmp_states[i].inertiaLocal.mass;
+                inertia_mat_tmp[5][5] = tmp_states[i].inertiaLocal.mass;
+
+
+                
+            } else if (subtree_flags[i][j]) {
+                // Use inertia matrix from j
+                populate_inertia_sym(0, 0, tmp_states[j].inertiaLocal.vInertia);
+                add_inertia_sym(0, 0, tmp_states[j].inertiaLocal.comSquared);
+
+                populate_inertia_ssym(0, 3, tmp_states[j].inertiaLocal.com);
+                populate_inertia_ssym(3, 0, tmp_states[j].inertiaLocal.com, true);
+
+                inertia_mat_tmp[3][3] = tmp_states[j].inertiaLocal.mass;
+                inertia_mat_tmp[4][4] = tmp_states[j].inertiaLocal.mass;
+                inertia_mat_tmp[5][5] = tmp_states[j].inertiaLocal.mass;
+            }
+
+            memset(inertia_mat_tmp, 0, sizeof(float) * 6 * 6);
+            memset(matmul_tmp, 0, sizeof(float) * 6 * 6);
+        }
+    }
+    
+#if 0
+    // Allocate space for all the linear and angular velocity jacobians:
+    // For now, we will keep them all separate and feed them into python.
+    // Each body needs a 3x[num_vel_coords] jacobian matrix for both the
+    // linear and angular velocities.
+    CountT num_lin_vel_jac_bytes = sizeof(float) * num_bodies * 3 * num_vel_coords;
+    CountT num_ang_vel_jac_bytes = sizeof(float) * num_bodies * 3 * num_vel_coords;
+
+    float *lin_vel_jac = (float *)state_mgr->allocTmp(
+            world_id, num_lin_vel_jac_bytes);
+    float *ang_vel_jac = (float *)state_mgr->allocTmp(
+            world_id, num_ang_vel_jac_bytes);
+
+    memset(lin_vel_jac, 0, num_lin_vel_jac_bytes);
+    memset(ang_vel_jac, 0, num_ang_vel_jac_bytes);
+
+    { // Compute these jacobians
+        // First, compute the individual local jacobians before doing a 
+        // prefix sum.
+        float *lin_vel_i, *ang_vel_i;
+        auto j_v_i = [&lin_vel_i, num_vel_coords]
+            (uint32_t row, uint32_t col) -> float & {
+            return lin_vel_i[col + row * num_vel_coords];
+        };
+
+        auto j_w_i = [&ang_vel_i, num_vel_coords]
+            (uint32_t row, uint32_t col) -> float & {
+            return ang_vel_i[col + row * num_vel_coords];
+        };
+        
+        for (int i = 0; i < num_bodies; ++i) {
+            lin_vel_i = lin_vel_jac + sizeof(float) * i * 3 * num_vel_coords;
+            ang_vel_i = ang_vel_jac + sizeof(float) * i * 3 * num_vel_coords;
+            
+            uint32_t vel_coord_offset = vel_coord_offsets[i];
+
+            if (num_dofs[i].numDofs == (uint32_t)DofType::FreeBody) {
+                // The jacobians are just identity at the right spot.
+                j_v_i[0, vel_coord_offset] = 1.f;
+                j_v_i[0, vel_coord_offset+1] = 1.f;
+                j_v_i[0, vel_coord_offset+2] = 1.f;
+
+                j_w_i[0, vel_coord_offset+3] = 1.f;
+                j_w_i[0, vel_coord_offset+4] = 1.f;
+                j_w_i[0, vel_coord_offset+5] = 1.f;
+            } else if (num_dofs[i].numDofs == (uint32_t)DofType::Hinge) {
+                DofObjectHierarchyDesc *hier_desc = &hier_descs[i];
+
+                // For hinges, it's a little more complicated. We need to walk
+                // up the hierarchy not only to figure out the row indices of
+                // the parent entities, but also the values in the matrices.
+                while (hier_desc->parent != Entity::none()) {
+                    
+                }
+            }
+        }
+    }
+#endif
+}
+
+#if 0
 static void gaussMinimizeFn(Context &ctx,
                             DofObjectPosition &position,
                             DofObjectVelocity &velocity,
@@ -259,59 +715,10 @@ static void gaussMinimizeFn(Context &ctx,
     tmp_state.externalForces = trans_forces;
     tmp_state.externalMoment = rot_moments;
 }
+#endif
 
-static void processContacts(Context &ctx,
-                            ContactConstraint &contact,
-                            ContactTmpState &tmp_state)
-{
-    CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
-            contact.ref);
-    CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
-            contact.alt);
 
-    auto &ref_pos = ctx.get<DofObjectPosition>(ref.physicsEntity);
-    auto &alt_pos = ctx.get<DofObjectPosition>(alt.physicsEntity);
-    Vector3 ref_com = Vector3(ref_pos.q[0], ref_pos.q[1], ref_pos.q[2]);
-    Vector3 alt_com = Vector3(alt_pos.q[0], alt_pos.q[1], alt_pos.q[2]);
-
-    // Create a coordinate system for the contact
-    Vector3 n = contact.normal.normalize();
-    Vector3 t{};
-
-    Vector3 x_axis = {1.f, 0.f, 0.f};
-    if(n.cross(x_axis).length() > 0.01f) {
-        t = n.cross(x_axis).normalize();
-    } else {
-        t = n.cross({0.f, 1.f, 0.f}).normalize();
-    }
-    Vector3 s = n.cross(t).normalize();
-
-    tmp_state.n = n;
-    tmp_state.t = t;
-    tmp_state.s = s;
-
-    CountT i = 0;
-    float max_penetration = -FLT_MAX;
-    for(; i < contact.numPoints; ++i) {
-        Vector4 point = contact.points[i];
-        // Compute the relative positions of the contact
-        tmp_state.rRefComToPt[i] = point.xyz() - ref_com;
-        tmp_state.rAltComToPt[i] = point.xyz() - alt_com;
-        tmp_state.maxPenetration = std::max(max_penetration, point.w);
-    }
-
-    tmp_state.num_contacts = contact.numPoints;
-
-    // Get friction coefficient
-    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-    CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
-    CountT objID_j = ctx.get<ObjectID>(alt.physicsEntity).idx;
-    RigidBodyMetadata &metadata_i = obj_mgr.metadata[objID_i];
-    RigidBodyMetadata &metadata_j = obj_mgr.metadata[objID_j];
-    tmp_state.mu = std::min(metadata_i.friction.muS,
-                            metadata_j.friction.muS);
-}
-
+#if 0
 template <typename MatrixT>
 static inline Mat3x3 rightMultiplyCross(const MatrixT &m,
                                         const Vector3 &v)
@@ -324,7 +731,9 @@ static inline Mat3x3 rightMultiplyCross(const MatrixT &m,
             }
     };
 }
+#endif
 
+#if 0
 static void solveSystem(Context &ctx,
                         CVSingleton &cv_sing)
 {
@@ -686,6 +1095,7 @@ static void solveSystem(Context &ctx,
                                                 contact_force[idx_start + 5]);
     }
 }
+#endif
 
 static void integrationStep(Context &ctx,
                             DofObjectPosition &position,
@@ -694,6 +1104,7 @@ static void integrationStep(Context &ctx,
                             DofObjectTmpState &tmp_state,
                             ObjectID &objID)
 {
+#if 0
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
     // Phase 1: compute the mass matrix data
@@ -738,6 +1149,7 @@ static void integrationStep(Context &ctx,
     position.q[4] = new_rot.x;
     position.q[5] = new_rot.y;
     position.q[6] = new_rot.z;
+#endif
 }
 #endif
 
@@ -792,22 +1204,32 @@ void registerTypes(ECSRegistry &registry)
     registry.registerBundleAlias<SolverBundleAlias, CVRigidBodyState>();
 }
 
-void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
-                                Position position,
-                                Rotation rotation,
-                                base::ObjectID obj_id) {
+void makeCVPhysicsEntity(Context &ctx, Entity e,
+                         Position position,
+                         Rotation rotation,
+                         base::ObjectID obj_id,
+                         DofType dof_type)
+{
     Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
 
     auto &pos = ctx.get<DofObjectPosition>(physical_entity);
 
-    pos.q[0] = position.x;
-    pos.q[1] = position.y;
-    pos.q[2] = position.z;
+    switch (dof_type) {
+    case DofType::FreeBody: {
+        pos.q[0] = position.x;
+        pos.q[1] = position.y;
+        pos.q[2] = position.z;
 
-    pos.q[3] = rotation.w;
-    pos.q[4] = rotation.x;
-    pos.q[5] = rotation.y;
-    pos.q[6] = rotation.z;
+        pos.q[3] = rotation.w;
+        pos.q[4] = rotation.x;
+        pos.q[5] = rotation.y;
+        pos.q[6] = rotation.z;
+    } break;
+
+    case DofType::Hinge: {
+        pos.q[0] = 0.f;
+    } break;
+    }
 
     auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
 
@@ -817,9 +1239,10 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
     vel.qv[3] = 0.f;
     vel.qv[4] = 0.f;
     vel.qv[5] = 0.f;
+
     ctx.get<base::ObjectID>(physical_entity) = obj_id;
 
-    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 6;
+    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = (uint32_t)dof_type;
 
     ctx.get<CVPhysicalComponent>(e) = {
         .physicsEntity = physical_entity,
@@ -827,6 +1250,7 @@ void makeFreeBodyEntityPhysical(Context &ctx, Entity e,
 
     auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physical_entity);
     hierarchy.sync.store_relaxed(0);
+    hierarchy.leaf = true;
 
 #ifdef MADRONA_GPU_MODE
     static_assert(false, "Need to implement GPU DOF object hierarchy")
@@ -867,12 +1291,13 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         gauss_node = builder.addToGraph<ResetTmpAllocNode>(
                 {gauss_node});
 #else
-        auto gauss_node = builder.addToGraph<ParallelForNode<Context,
-             tasks::gaussMinimizeFn,
+        auto propagate_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::propagateHierarchy,
                 DofObjectPosition,
                 DofObjectVelocity,
                 DofObjectNumDofs,
                 DofObjectTmpState,
+                DofObjectHierarchyDesc,
                 ObjectID
             >>({run_narrowphase});
 
@@ -880,10 +1305,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
              tasks::processContacts,
                 ContactConstraint,
                 ContactTmpState
-            >>({gauss_node});
+            >>({propagate_node});
 
-        auto solve_sys = builder.addToGraph<ParallelForNode<Context,
-             tasks::solveSystem,
+        auto gauss_node = builder.addToGraph<ParallelForNode<Context,
+             tasks::gaussMinimizeFn,
                 CVSingleton
             >>({contact_node});
 
@@ -894,7 +1319,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                  DofObjectNumDofs,
                  DofObjectTmpState,
                  ObjectID
-            >>({solve_sys});
+            >>({gauss_node});
 #endif
 
         cur_node =
@@ -931,9 +1356,11 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     ctx.singleton<CVSingleton>().cvxSolve = cvx_solve;
 }
 
-void setCVEntityParent(Context &ctx,
-                       Entity parent,
-                       Entity child)
+void setCVEntityParentHinge(Context &ctx,
+                            Entity parent, Entity child,
+                            Vector3 rel_pos_parent,
+                            Vector3 rel_pos_child,
+                            Vector3 hinge_axis)
 {
     Entity child_physics_entity =
         ctx.get<CVPhysicalComponent>(child).physicsEntity;
@@ -943,8 +1370,15 @@ void setCVEntityParent(Context &ctx,
 #ifdef MADRONA_GPU_MODE
     static_assert(false, "Need to implement GPU DOF object hierarchy");
 #else
-    ctx.get<DofObjectHierarchyDesc>(child_physics_entity).parent = 
-        parent_physics_entity;
+    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
+    hier_desc.parent = parent_physics_entity;
+    hier_desc.relPositionParent = rel_pos_parent;
+    hier_desc.relPositionLocal = rel_pos_child;
+    hier_desc.hingeAxis = hinge_axis;
+    hier_desc.leaf = true;
+
+    // Make the parent no longer a leaf
+    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
 #endif
 }
     

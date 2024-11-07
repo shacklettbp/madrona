@@ -214,12 +214,20 @@ namespace PhysicsSystem {
     broadphase::LeafID registerEntity(Context &ctx,
                                       Entity e,
                                       base::ObjectID obj_id,
+                                      uint32_t num_dofs = 0,
                                       Solver solver = Solver::XPBD);
 
-    void setEntityParent(Context &ctx,
-                         Entity parent,
-                         Entity child,
-                         Solver solver = Solver::XPBD);
+    void setEntityParentHinge(Context &ctx,
+                              Entity parent, Entity child,
+                              // Relative position of the joint relative to the
+                              // parent's COM.
+                              math::Vector3 rel_pos_parent,
+                              // Relative position of the joint relative to the 
+                              // child's COM.
+                              math::Vector3 rel_pos_child,
+                              // Axis of rotation in parent's coordinate system.
+                              math::Vector3 hinge_axis,
+                              Solver solver = Solver::XPBD);
 
     template <typename Fn>
     void findEntitiesWithinAABB(Context &ctx,
