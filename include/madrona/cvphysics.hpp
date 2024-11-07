@@ -18,13 +18,14 @@ enum class DofType {
     // The number of unique degrees of freedom (SE3)
     FreeBody = 6,
     Hinge = 1,
+    FixedBody = 0,
 
     // When we add other types of physics DOF objects, we will encode
     // the number of degrees of freedom they all have here.
 };
 
 struct DofObjectPosition {
-    // There are multiple ways of interpreting the values in thie struct.
+    // There are multiple ways of interpreting the values in this struct.
     // If this is a free body (i.e., 6 degrees of freedom),
     // - q[0:3] are the position
     // - q[3:7] are the quaternion
@@ -75,18 +76,16 @@ struct Phi {
 };
 
 struct InertiaTensor {
-    // The inertia tensor is parameterized by 10 values:
+    // The spatial inertia tensor is parameterized by 10 values:
     float mass;
     math::Vector3 com;
 
-    // The inertia matrix is symmetric so 6 values are required to 
-    // parameterize it. First 3 values are the diagonal. The next three
-    // are ordered from top left to bottom right.
-    float vInertia[6];
-
-    // This stores the components of r^x r^xT. We do this so that we
-    // can add the values of this like a vector before multiplying by phi.
-    float comSquared[6];
+    // The left block of the spatial inertia matrix is symmetric so
+    // 6 values are required to parameterize the first block
+    // (I_world + m * r^x r^xT).
+    // The first 3 values are the diagonal. The next three are ordered
+    // from top left to bottom right.
+    float spatial_inertia[6];
 };
 
 // Just some space to store temporary per-entity data.
@@ -95,7 +94,7 @@ struct DofObjectTmpState {
 
     // Position of the rotation point. For free body, it's just the COM.
     // For the hinge, it's the position of the joint.
-    math::Vector3 orientPos;
+    math::Vector3 anchorPos;
 
     math::Quat composedRot;
 

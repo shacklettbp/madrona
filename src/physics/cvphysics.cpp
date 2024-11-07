@@ -219,17 +219,12 @@ static void propagateHierarchy(Context &ctx,
                                ObjectID &obj_id)
 {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
-
     RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
 
-    float inv_mass = metadata.invMass;
-
+    float inv_mass = metadata.mass.invMass;
     // FIXME: This is really bad but we need to give the mass for this.
     float mass = 1.f / inv_mass;
-    Vector3 inertia = { 1.f / metadata.invInertia[0],
-                        1.f / metadata.invInertia[1],
-                        1.f / metadata.invInertia[2] };
+    Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
 
     if (hier_desc.parent != Entity::none()) {
         // We have a parent
@@ -240,11 +235,12 @@ static void propagateHierarchy(Context &ctx,
         DofObjectTmpState &parent_tmp_state =
             ctx.get<DofObjectTmpState>(parent_e);
 
-        while (parent_hier_desc.sync.load_acquire() != 1);
+        while (parent_hier_desc.sync.load_acquire() != 1) {}
 
         // We can calculate our stuff.
         switch (num_dofs.numDofs) {
         case (uint32_t)DofType::Hinge: {
+            // Find the hinge axis orientation in world space
             Vector3 rotated_hinge_axis =
                 parent_tmp_state.composedRot.rotateVec(hier_desc.hingeAxis);
 
@@ -253,6 +249,7 @@ static void propagateHierarchy(Context &ctx,
                 Quat::angleAxis(position.q[0], rotated_hinge_axis);
 
             // Calculate the composed COM position of the child
+            //  (parent COM + R_{parent} * (rel_pos_parent + R_{hinge} * rel_pos_local))
             tmp_state.comPos = parent_tmp_state.comPos +
                 parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
@@ -262,19 +259,20 @@ static void propagateHierarchy(Context &ctx,
 
             // All we are getting here is the position of the hinge point
             // which is relative to the parent's COM.
-            tmp_state.orientPos = parent_tmp_state.comPos +
+            tmp_state.anchorPos = parent_tmp_state.comPos +
                 parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent);
 
             // Write the normalized world-space angular velocity vector.
+            // TODO: check this
             tmp_state.phi.v[0] = rotated_hinge_axis[0];
             tmp_state.phi.v[1] = rotated_hinge_axis[1];
             tmp_state.phi.v[2] = rotated_hinge_axis[2];
 
             // Write the world space position of the joint itself.
-            tmp_state.phi.v[3] = tmp_state.orientPos[0];
-            tmp_state.phi.v[4] = tmp_state.orientPos[1];
-            tmp_state.phi.v[5] = tmp_state.orientPos[2];
+            tmp_state.phi.v[3] = tmp_state.anchorPos[0];
+            tmp_state.phi.v[4] = tmp_state.anchorPos[1];
+            tmp_state.phi.v[5] = tmp_state.anchorPos[2];
 
             // Now, for the inertia tensor.
             tmp_state.inertiaLocal.mass = mass;
@@ -283,37 +281,33 @@ static void propagateHierarchy(Context &ctx,
             // struct values like vectors.
             tmp_state.inertiaLocal.com = mass * tmp_state.comPos;
 
-            { // Compute the 3x3 inertia matrix
-                // We need to inertia tensor (not inverse) so that is:
-                // R^T I_c R
+            { // Inertia matrix in the Plücker origin frame
+                // We first need to inertia tensor in world space orientation
                 Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
-                Mat3x3 i_world_frame = Diag3x3::fromVec(inertia) * rot_mat;
+                Mat3x3 i_world_frame = inertia * rot_mat;
                 i_world_frame = i_world_frame.transpose() * rot_mat;
 
-                tmp_state.inertiaLocal.vInertia[0] = i_world_frame[0][0];
-                tmp_state.inertiaLocal.vInertia[1] = i_world_frame[1][1];
-                tmp_state.inertiaLocal.vInertia[2] = i_world_frame[2][2];
-
-                tmp_state.inertiaLocal.vInertia[3] = i_world_frame[0][1];
-                tmp_state.inertiaLocal.vInertia[4] = i_world_frame[0][2];
-                tmp_state.inertiaLocal.vInertia[5] = i_world_frame[1][2];
-            }
-
-            { // Compute the 3x3 symmetric matrix m r^x r^xT
-                Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.com);
+                // Compute the 3x3 symmetric matrix m r^x r^xT (where r is from Plücker origin to COM)
+                Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPos);
                 sym_mat = sym_mat * sym_mat.transpose();
                 sym_mat = sym_mat * mass;
 
-                tmp_state.inertiaLocal.comSquared[0] = sym_mat[0][0] + parent_tmp_state.sym_mat[0];
-                tmp_state.inertiaLocal.comSquared[1] = sym_mat[1][1] + parent_tmp_state.sym_mat[1];
-                tmp_state.inertiaLocal.comSquared[2] = sym_mat[2][2] + parent_tmp_state.sym_mat[2];
-                tmp_state.inertiaLocal.comSquared[3] = sym_mat[0][1] + parent_tmp_state.sym_mat[3];
-                tmp_state.inertiaLocal.comSquared[4] = sym_mat[0][2] + parent_tmp_state.sym_mat[4];
-                tmp_state.inertiaLocal.comSquared[5] = sym_mat[1][2] + parent_tmp_state.sym_mat[5];
+                // First part is I_world + m r^x r^xT
+                Mat3x3 inertia_mat = i_world_frame + sym_mat;
+
+                // Take only the upper triangular part (since it's symmetric)
+                tmp_state.inertiaLocal.spatial_inertia[0] = inertia_mat[0][0];
+                tmp_state.inertiaLocal.spatial_inertia[1] = inertia_mat[1][1];
+                tmp_state.inertiaLocal.spatial_inertia[2] = inertia_mat[2][2];
+
+                tmp_state.inertiaLocal.spatial_inertia[3] = inertia_mat[1][0];
+                tmp_state.inertiaLocal.spatial_inertia[4] = inertia_mat[2][0];
+                tmp_state.inertiaLocal.spatial_inertia[5] = inertia_mat[2][1];
             }
         } break;
 
         default: {
+            // Only hinges have parents
             assert(false);
         } break;
         }
@@ -324,6 +318,7 @@ static void propagateHierarchy(Context &ctx,
             while (hier_desc.sync.load_acquire() != 2);
         };
 
+        // Propagate up to parent, sum spatial inertia tensor to get inertia at subtree root
         if (hier_desc.leaf || can_propagate_up()) {
             // We can safely do this is we're a leaf because we could only get to this point
             // if the parent has already calculated its inertia matrices and stuff.
@@ -331,15 +326,15 @@ static void propagateHierarchy(Context &ctx,
             parent_tmp_state.inertiaLocal.com += tmp_state.inertiaLocal.com;
 
             for (int i = 0; i < 6; ++i) {
-                parent_tmp_state.inertiaLocal.vInertia[i] +=
-                    tmp_state.inertiaLocal.vInertia[i];
-                parent_tmp_state.inertiaLocal.comSquared[i] +=
-                    tmp_state.inertiaLocal.comSquared[i];
+                parent_tmp_state.inertiaLocal.spatial_inertia[i] +=
+                    tmp_state.inertiaLocal.spatial_inertia[i];
+                parent_tmp_state.inertiaLocal.spatial_inertia[i] +=
+                    tmp_state.inertiaLocal.spatial_inertia[i];
             }
 
             parent_hier_desc.sync.store_release(2);
         }
-    } else {
+    } else { // We are root
         tmp_state.comPos = {
             position.q[0],
             position.q[1],
@@ -365,12 +360,13 @@ static void propagateHierarchy(Context &ctx,
             velocity.qv[5],
         };
 
+        // TODO: check this
         tmp_state.phi.v[0] = tmp_state.comPos[0];
         tmp_state.phi.v[1] = tmp_state.comPos[1];
         tmp_state.phi.v[2] = tmp_state.comPos[2];
 
         {
-            Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.com);
+            Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPos);
             sym_mat = sym_mat * sym_mat.transpose();
             sym_mat = sym_mat * mass;
         }
@@ -451,7 +447,7 @@ static void gaussMinimizeFn(Context &ctx,
     DofObjectHierarchyDesc *hier_descs = state_mgr->getWorldComponents<
         DofObjectArchetype, DofObjectHierarchyDesc>(world_id);
 
-    uint32_t *vel_coord_offsets = (uint32_t *)state_mgr->allocTmp(
+    uint32_t *vel_coord_offsets = (uint32_t *)state_mgr->tmpAlloc(
             world_id, sizeof(uint32_t) * num_bodies);
     uint32_t num_vel_coords = 0;
 
@@ -468,8 +464,8 @@ static void gaussMinimizeFn(Context &ctx,
     // For each body i, this has an array of flags saying whether
     // body j is in the subtree rooted at body i.
     bool *subtree_flags = (bool *)state_mgr->tmpAlloc(
-            sizeof(bool) * num_bodies * num_bodies);
-    memset(subtree_flag, 0, sizeof(bool) * num_bodies * num_bodies);
+            world_id, sizeof(bool) * num_bodies * num_bodies);
+    memset(subtree_flags, 0, sizeof(bool) * num_bodies * num_bodies);
     auto c_star = [subtree_flags, num_bodies](uint32_t i, uint32_t j) -> bool & {
         return subtree_flags[i * num_bodies + j];
     };
@@ -552,7 +548,7 @@ static void gaussMinimizeFn(Context &ctx,
         if (num_dofs[body_idx].numDofs == 6) {
             
         }
-    }
+    };
 
     for (int i = 0; i < num_bodies; ++i) {
         for (int j = 0; j < num_bodies, ++j) {
