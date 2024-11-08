@@ -169,6 +169,7 @@ def step_func(step_inputs):
 
     flattened_in.append(step_inputs['actions'])
     flattened_in.append(step_inputs['resets'])
+    flattened_in.append(step_inputs['sim_ctrl'])
 
     for k in step_inputs_iface['pbt'].keys():
         flattened_in.append(step_inputs['pbt'][k])

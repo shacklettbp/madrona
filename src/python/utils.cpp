@@ -69,6 +69,7 @@ TrainInterface::Impl * TrainInterface::Impl::init(
 
     num_total_dims += inputs.actions.dimensions.size();
     num_total_dims += inputs.resets.dimensions.size();
+    num_total_dims += inputs.simCtrl.dimensions.size();
     sumStorageRequirements(inputs.pbt);
 
     sumStorageRequirements(outputs.observations);
@@ -143,6 +144,7 @@ TrainInterface::Impl * TrainInterface::Impl::init(
     TrainStepInputInterface owned_inputs {
         .actions = makeOwnedInterface(inputs.actions),
         .resets = makeOwnedInterface(inputs.resets),
+        .simCtrl = makeOwnedInterface(inputs.simCtrl),
         .pbt = makeOwnedNamedInterfaces(inputs.pbt),
     };
 

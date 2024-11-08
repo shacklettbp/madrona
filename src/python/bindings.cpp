@@ -160,6 +160,7 @@ nb::dict train_interface_inputs_to_pytree(
 
     d["actions"] = tensor_iface_to_jax(jax_mod, inputs.actions);
     d["resets"] = tensor_iface_to_jax(jax_mod, inputs.resets);
+    d["sim_ctrl"] = tensor_iface_to_jax(jax_mod, inputs.simCtrl);
 
     nb::dict pbt;
     for (const NamedTensorInterface &t : inputs.pbt) {

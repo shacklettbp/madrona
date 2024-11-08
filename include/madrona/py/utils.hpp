@@ -78,6 +78,7 @@ struct NamedTensorInterface {
 struct TrainStepInputInterface {
     TensorInterface actions;
     TensorInterface resets;
+    TensorInterface simCtrl;
     Span<const NamedTensorInterface> pbt = {};
 };
 
