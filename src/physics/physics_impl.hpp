@@ -9,6 +9,7 @@ struct PhysicsSystemState {
     float h;
     math::Vector3 g;
     float gMagnitude;
+    float airResistanceConstant;
     float restitutionThreshold;
     uint32_t contactArchetypeID;
     uint32_t jointArchetypeID;

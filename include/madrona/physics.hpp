@@ -177,7 +177,8 @@ namespace PhysicsSystem {
     void updatePhysicsStepParameters(Context &ctx,
                              float delta_t,
                              CountT num_substeps,
-                             float g_mag);
+                             float g_mag,
+                             float air_res_constant);
 
     void init(Context &ctx,
               ObjectManager *obj_mgr,

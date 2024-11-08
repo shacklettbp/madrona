@@ -96,7 +96,8 @@ namespace PhysicsSystem {
 void updatePhysicsStepParameters(Context &ctx,
                              float delta_t,
                              CountT num_substeps,
-                             float g_mag)
+                             float g_mag,
+                             float air_res_constant)
 {
     float h = delta_t / (float)num_substeps;
     
@@ -105,6 +106,7 @@ void updatePhysicsStepParameters(Context &ctx,
     state.deltaT = delta_t;
     state.h = h;
     state.restitutionThreshold = 2.f * g_mag * h;
+    state.airResistanceConstant = air_res_constant;
 }
 
 void init(Context &ctx,
