@@ -161,13 +161,18 @@ inline void substepRigidBodies(Context &ctx,
 
     float h = physics_sys.h;
 
+    Vector3 air_res = {0.0f, 0.0f, 0.0f};
     if (response_type == ResponseType::Dynamic || 
         response_type == ResponseType::Agent) {
         v += h * physics_sys.g;
+        if (response_type == ReponseType::Agent) {
+            air_res = airResistanceForce(v - rel_vel.velocity, physics_sys.airResistanceConstant);
+        }
     }
 
+
     // Anything except the agent will have frame relative velocity of zero.
-    v += h * inv_m * (ext_force - airResistanceForce(v - rel_vel.velocity, physics_sys.airResistanceConstant));
+    v += h * inv_m * (ext_force - air_res);
 
     x += h * v;
 
