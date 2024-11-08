@@ -143,6 +143,10 @@ struct DofObjectHierarchyDesc {
     math::Vector3 hingeAxis;
 
     bool leaf;
+
+    // Numbering of body. Satisfies that all children are numbered
+    // after their parent.
+    uint32_t numbering;
 };
 
 struct DofObjectArchetype : public Archetype<

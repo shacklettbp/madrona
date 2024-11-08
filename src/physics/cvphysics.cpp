@@ -24,6 +24,11 @@ struct CVRigidBodyState : Bundle<
     CVPhysicalComponent
 > {};
 
+struct CVHierarchyCounter
+{
+   uint32_t num_bodies;
+};
+
 struct CVSingleton {
     CVXSolve *cvxSolve;
 };
@@ -366,12 +371,15 @@ static void compositeRigidBody(Context &ctx,
     // TODO: Check that this is indeed a backward pass
     for (CountT i = num_bodies; i > 0; --i) {
         Entity parent = hier_descs[i].parent;
+        uint32_t parentIdx = ctx.get<DofObjectHierarchyDesc>(parent).numbering;
 
-        // 1. Find inertia tensor rooted at the subtree (composite spatial inertia)
+
+        InertiaTensor I_c = tmp_states[i].spatialInertia;
+        // 1. Add spatial inertia to parent's
         if(parent != Entity::none())
         {
             // TODO: make this a loc or something (row doesn't work)
-            tmp_states[parent.row].spatialInertia += tmp_states[i].spatialInertia;
+            tmp_states[parentIdx].spatialInertia += I_c;
         }
 
         // F = I_i^c * S_i
@@ -381,7 +389,7 @@ static void compositeRigidBody(Context &ctx,
         CountT j = i;
         while(hier_descs[j].parent != Entity::none())
         {
-            j = hier_descs[j].parent.row;
+            j = ctx.get<DofObjectHierarchyDesc>(hier_descs[j].parent).numbering;
             // M_ij = F^T S_j, H_ji = S_j^T F
         }
     }
@@ -1179,6 +1187,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<CVPhysicalComponent>();
 
     registry.registerSingleton<CVSingleton>();
+    registry.registerSingleton<CVHierarchyCounter>();
 
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
@@ -1201,6 +1210,7 @@ void makeCVPhysicsEntity(Context &ctx, Entity e,
                          ObjectID obj_id,
                          DofType dof_type)
 {
+    CVHierarchyCounter &hier_counter = ctx.singleton<CVHierarchyCounter>();
     Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
 
     auto &pos = ctx.get<DofObjectPosition>(physical_entity);
@@ -1245,6 +1255,7 @@ void makeCVPhysicsEntity(Context &ctx, Entity e,
     auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physical_entity);
     hierarchy.sync.store_relaxed(0);
     hierarchy.leaf = true;
+    hierarchy.numbering = hier_counter.num_bodies++;
 
 #ifdef MADRONA_GPU_MODE
     static_assert(false, "Need to implement GPU DOF object hierarchy")
@@ -1356,8 +1367,8 @@ void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
 
 void init(Context &ctx, CVXSolve *cvx_solve)
 {
-    // Nothing for now
     ctx.singleton<CVSingleton>().cvxSolve = cvx_solve;
+    ctx.singleton<CVHierarchyCounter>().num_bodies = 0;
 }
 
 void setCVEntityParentHinge(Context &ctx,
