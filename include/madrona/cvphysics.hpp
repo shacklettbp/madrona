@@ -88,6 +88,17 @@ struct InertiaTensor {
     // The first 3 values are the diagonal. The next three are ordered
     // from top left to bottom right.
     float spatial_inertia[6];
+
+    // Helper function to add two inertia tensors together
+    InertiaTensor& operator+=(const InertiaTensor& rhs) {
+        mass += rhs.mass;
+        com += rhs.com;
+        for (int i = 0; i < 6; i++) {
+            spatial_inertia[i] += rhs.spatial_inertia[i];
+        }
+        return *this;
+    }
+
 };
 
 // Just some space to store temporary per-entity data.

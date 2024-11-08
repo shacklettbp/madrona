@@ -342,14 +342,28 @@ static void computeSpatialInertia(Context &ctx,
 
 // CRB: find inertia of subtree (sum of all children's spatial inertia)
 static void compositeRigidBody(Context &ctx,
-                               DofObjectPosition &position,
-                               DofObjectVelocity &velocity,
-                               DofObjectNumDofs &num_dofs,
-                               DofObjectTmpState &tmp_state,
-                               DofObjectHierarchyDesc &hier_desc,
-                               ObjectID &obj_id)
+                               CVSingleton &cv_sing)
 {
-    // TODO: here's where we traverse up the tree
+    uint32_t world_id = ctx.worldID().idx;
+    StateManager *state_mgr = ctx.getStateManager();
+
+    DofObjectTmpState *tmp_states = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectTmpState>(world_id);
+    DofObjectHierarchyDesc *hier_descs = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectHierarchyDesc>(world_id);
+
+    CountT num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
+    // 1. Find inertia tensor rooted at the subtree
+    for (int i = 0; i < num_bodies; ++i) {
+        Entity parent = hier_descs[i].parent;
+        if(parent != Entity::none())
+        {
+            // TODO: make this a loc or something (row doesn't work)
+            tmp_states[parent.row].spatialInertia += tmp_states[i].spatialInertia;
+        }
+    }
+
+    // 2. TODO
 }
 
 static void processContacts(Context &ctx,
@@ -1112,6 +1126,7 @@ static void convertPostSolve(
         Rotation &rotation,
         const CVPhysicalComponent &phys)
 {
+    // TODO: use some forward kinematics results here
     Entity physical_entity = phys.physicsEntity;
 
     DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(physical_entity);
@@ -1264,12 +1279,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 
         auto composite_rigid_body = builder.addToGraph<ParallelForNode<Context,
              tasks::compositeRigidBody,
-                DofObjectPosition,
-                DofObjectVelocity,
-                DofObjectNumDofs,
-                DofObjectTmpState,
-                DofObjectHierarchyDesc,
-                ObjectID
+                CVSingleton
             >>({compute_spatial_inertia});
 
         auto contact_node = builder.addToGraph<ParallelForNode<Context,
