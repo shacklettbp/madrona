@@ -340,7 +340,7 @@ static void computeSpatialInertia(Context &ctx,
     tmp_state.spatialInertia.com = tmp_state.comPos;
 }
 
-// CRB: find inertia of subtree (sum of all children's spatial inertia)
+// CRB: Compute the Mass Matrix (n_dofs x n_dofs)
 static void compositeRigidBody(Context &ctx,
                                CVSingleton &cv_sing)
 {
@@ -351,19 +351,42 @@ static void compositeRigidBody(Context &ctx,
         DofObjectArchetype, DofObjectTmpState>(world_id);
     DofObjectHierarchyDesc *hier_descs = state_mgr->getWorldComponents<
         DofObjectArchetype, DofObjectHierarchyDesc>(world_id);
+    DofObjectNumDofs *num_dofs = state_mgr->getWorldComponents<
+        DofObjectArchetype, DofObjectNumDofs>(world_id);
 
     CountT num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
-    // 1. Find inertia tensor rooted at the subtree
-    for (int i = 0; i < num_bodies; ++i) {
+    CountT total_dofs = 0;
+    for (int i = 0; i < num_bodies; ++i) { total_dofs += num_dofs[i].numDofs; }
+
+    // Initialize M as n_dofs x n_dofs matrix
+    float *M = (float *)state_mgr->tmpAlloc(
+            world_id, sizeof(float) * total_dofs * total_dofs );
+    memset(M, 0, sizeof(float) * total_dofs * total_dofs);
+
+    // TODO: Check that this is indeed a backward pass
+    for (CountT i = num_bodies; i > 0; --i) {
         Entity parent = hier_descs[i].parent;
+
+        // 1. Find inertia tensor rooted at the subtree (composite spatial inertia)
         if(parent != Entity::none())
         {
             // TODO: make this a loc or something (row doesn't work)
             tmp_states[parent.row].spatialInertia += tmp_states[i].spatialInertia;
         }
+
+        // F = I_i^c * S_i
+
+        // M_{ii} = S_i^T I_i^c S_i = S_i^T F
+
+        CountT j = i;
+        while(hier_descs[j].parent != Entity::none())
+        {
+            j = hier_descs[j].parent.row;
+            // M_ij = F^T S_j, H_ji = S_j^T F
+        }
     }
 
-    // 2. TODO
+    // TODO: store M
 }
 
 static void processContacts(Context &ctx,
