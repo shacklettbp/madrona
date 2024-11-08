@@ -63,7 +63,8 @@ struct ContactPointInfo {
 };
 
 // This is the phi linear operator which appears in Featherstone's Composite-
-// Rigid-Body Algorithm.
+// Rigid-Body Algorithm. phi maps from our generalized velocities to the
+// velocities in Plücker coordinates.
 struct Phi {
     // Phi is parameterized by at most 6 values.
     //
@@ -75,10 +76,11 @@ struct Phi {
     float v[6];
 };
 
+// This represents the spatial inertia in Plücker coordinates
 struct InertiaTensor {
     // The spatial inertia tensor is parameterized by 10 values:
     float mass;
-    math::Vector3 com;
+    math::Vector3 com; // from Plücker origin to COM
 
     // The left block of the spatial inertia matrix is symmetric so
     // 6 values are required to parameterize the first block
@@ -90,21 +92,20 @@ struct InertiaTensor {
 
 // Just some space to store temporary per-entity data.
 struct DofObjectTmpState {
+    // World-space position of body COM
     math::Vector3 comPos;
+
+    // World-space orientation of body
+    math::Quat composedRot;
 
     // Position of the rotation point. For free body, it's just the COM.
     // For the hinge, it's the position of the joint.
     math::Vector3 anchorPos;
 
-    math::Quat composedRot;
-
-    // Composed angular velocity
-    math::Vector3 composedLinearV;
-    math::Vector3 composedAngularV;
-
-
-
+    // Map from generalized velocities to Plücker coordinates
     Phi phi;
+
+    // The spatial inertia tensor in Plücker coordinates
     InertiaTensor spatialInertia;
 };
 

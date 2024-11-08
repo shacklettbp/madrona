@@ -210,24 +210,36 @@ static Mat3x3 skewSymmetricMatrix(Vector3 v)
     };
 }
 
-static void propagateHierarchy(Context &ctx,
+// Forward Kinematics: compute world positions and orientations
+// We also
+static void forwardKinematics(Context &ctx,
                                DofObjectPosition &position,
-                               DofObjectVelocity &velocity,
                                DofObjectNumDofs &num_dofs,
                                DofObjectTmpState &tmp_state,
-                               DofObjectHierarchyDesc &hier_desc,
-                               ObjectID &obj_id)
+                               DofObjectHierarchyDesc &hier_desc)
 {
-    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-    RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
+    // We are root
+    if (hier_desc.parent == Entity::none()) {
+        tmp_state.comPos = {
+            position.q[0],
+            position.q[1],
+            position.q[2]
+        };
 
-    float inv_mass = metadata.mass.invMass;
-    // FIXME: This is really bad but we need to give the mass for this.
-    float mass = 1.f / inv_mass;
-    Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
+        tmp_state.composedRot = {
+            position.q[3],
+            position.q[4],
+            position.q[5],
+            position.q[6]
+        };
 
-    if (hier_desc.parent != Entity::none()) {
-        // We have a parent
+        // omega remains unchanged, and v only depends on the COM position
+        tmp_state.phi.v[0] = tmp_state.comPos[0];
+        tmp_state.phi.v[1] = tmp_state.comPos[1];
+        tmp_state.phi.v[2] = tmp_state.comPos[2];
+
+        hier_desc.sync.store_release(1);
+    } else { // We have a parent
         Entity parent_e = hier_desc.parent;
 
         DofObjectHierarchyDesc &parent_hier_desc =
@@ -235,6 +247,7 @@ static void propagateHierarchy(Context &ctx,
         DofObjectTmpState &parent_tmp_state =
             ctx.get<DofObjectTmpState>(parent_e);
 
+        // Wait for parent to finish computing their world pos / orientation
         while (parent_hier_desc.sync.load_acquire() != 1) {}
 
         // We can calculate our stuff.
@@ -257,6 +270,10 @@ static void propagateHierarchy(Context &ctx,
                             rotateVec(hier_desc.relPositionLocal)
                 );
 
+            // TODO: check this is ok (child only needs COM and quaternions right?)
+            // We're ok to let any children read our tmp state here
+            hier_desc.sync.store_release(1);
+
             // All we are getting here is the position of the hinge point
             // which is relative to the parent's COM.
             tmp_state.anchorPos = parent_tmp_state.comPos +
@@ -267,42 +284,9 @@ static void propagateHierarchy(Context &ctx,
             tmp_state.phi.v[0] = rotated_hinge_axis[0];
             tmp_state.phi.v[1] = rotated_hinge_axis[1];
             tmp_state.phi.v[2] = rotated_hinge_axis[2];
-
-            // Write the world space position of the joint itself.
             tmp_state.phi.v[3] = tmp_state.anchorPos[0];
             tmp_state.phi.v[4] = tmp_state.anchorPos[1];
             tmp_state.phi.v[5] = tmp_state.anchorPos[2];
-
-            // Now, for the inertia tensor.
-            tmp_state.spatialInertia.mass = mass;
-            
-            // We are doing this so that we can again just add the inertia tensor
-            // struct values like vectors.
-            tmp_state.spatialInertia.com = mass * tmp_state.comPos;
-
-            { // Inertia matrix in the Plücker origin frame
-                // We first need to inertia tensor in world space orientation
-                Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
-                Mat3x3 i_world_frame = inertia * rot_mat;
-                i_world_frame = i_world_frame.transpose() * rot_mat;
-
-                // Compute the 3x3 symmetric matrix m r^x r^xT (where r is from Plücker origin to COM)
-                Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPos);
-                sym_mat = sym_mat * sym_mat.transpose();
-                sym_mat = sym_mat * mass;
-
-                // First part is I_world + m r^x r^xT
-                Mat3x3 inertia_mat = i_world_frame + sym_mat;
-
-                // Take only the upper triangular part (since it's symmetric)
-                tmp_state.spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
-                tmp_state.spatialInertia.spatial_inertia[1] = inertia_mat[1][1];
-                tmp_state.spatialInertia.spatial_inertia[2] = inertia_mat[2][2];
-
-                tmp_state.spatialInertia.spatial_inertia[3] = inertia_mat[1][0];
-                tmp_state.spatialInertia.spatial_inertia[4] = inertia_mat[2][0];
-                tmp_state.spatialInertia.spatial_inertia[5] = inertia_mat[2][1];
-            }
         } break;
 
         default: {
@@ -311,64 +295,61 @@ static void propagateHierarchy(Context &ctx,
         } break;
         }
 
-        hier_desc.sync.store_release(1);
-
-        auto can_propagate_up = [&]() {
-            while (hier_desc.sync.load_acquire() != 2);
-        };
-
-        // Propagate up to parent, sum spatial inertia tensor to get inertia at subtree root
-        if (hier_desc.leaf || can_propagate_up()) {
-            // We can safely do this is we're a leaf because we could only get to this point
-            // if the parent has already calculated its inertia matrices and stuff.
-            parent_tmp_state.spatialInertia.mass += tmp_state.spatialInertia.mass;
-            parent_tmp_state.spatialInertia.com += tmp_state.spatialInertia.com;
-
-            for (int i = 0; i < 6; ++i) {
-                parent_tmp_state.spatialInertia.spatial_inertia[i] +=
-                    tmp_state.spatialInertia.spatial_inertia[i];
-                parent_tmp_state.spatialInertia.spatial_inertia[i] +=
-                    tmp_state.spatialInertia.spatial_inertia[i];
-            }
-
-            parent_hier_desc.sync.store_release(2);
-        }
-    } else { // We are root
-        tmp_state.comPos = {
-            position.q[0],
-            position.q[1],
-            position.q[2] 
-        };
-
-        tmp_state.composedRot = {
-            position.q[3],
-            position.q[4],
-            position.q[5],
-            position.q[6]
-        };
-
-        tmp_state.composedLinearV = {
-            velocity.qv[0],
-            velocity.qv[1],
-            velocity.qv[2],
-        };
-
-        tmp_state.composedAngularV = {
-            velocity.qv[3],
-            velocity.qv[4],
-            velocity.qv[5],
-        };
-
-        // Phi maps from [v, w] in a frame centered at the COM
-        //  to [v, w] in the Plücker origin frame.
-        //  omega remains unchanged, and v only depends on
-        //  the COM position
-        tmp_state.phi.v[0] = tmp_state.comPos[0];
-        tmp_state.phi.v[1] = tmp_state.comPos[1];
-        tmp_state.phi.v[2] = tmp_state.comPos[2];
-
-        hier_desc.sync.store_release(1);
     }
+}
+
+// Pre-CRB: compute the spatial inertia (inertia in a single common Plücker coordinates)
+static void computeSpatialInertia(Context &ctx,
+                               DofObjectNumDofs &num_dofs,
+                               DofObjectTmpState &tmp_state,
+                               ObjectID &obj_id)
+{
+    if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+        return;
+    }
+
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+    RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
+
+    Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
+    float mass = 1.f / metadata.mass.invMass;
+
+    // We need to find inertia tensor in world space orientation
+    Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
+    Mat3x3 i_world_frame = inertia * rot_mat;
+    i_world_frame = i_world_frame.transpose() * rot_mat;
+
+    // Compute the 3x3 symmetric matrix (m r^x r^xT) (where r is from Plücker origin to COM)
+    Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPos);
+    sym_mat = sym_mat * sym_mat.transpose();
+    sym_mat = sym_mat * mass;
+
+    // (I_world + m r^x r^xT)
+    Mat3x3 inertia_mat = i_world_frame + sym_mat;
+
+    // Take only the upper triangular part (since it's symmetric)
+    tmp_state.spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
+    tmp_state.spatialInertia.spatial_inertia[1] = inertia_mat[1][1];
+    tmp_state.spatialInertia.spatial_inertia[2] = inertia_mat[2][2];
+    tmp_state.spatialInertia.spatial_inertia[3] = inertia_mat[1][0];
+    tmp_state.spatialInertia.spatial_inertia[4] = inertia_mat[2][0];
+    tmp_state.spatialInertia.spatial_inertia[5] = inertia_mat[2][1];
+
+    // Rest of parameters
+    tmp_state.spatialInertia.mass = mass;
+    tmp_state.spatialInertia.com = tmp_state.comPos;
+}
+
+// CRB: find inertia of subtree (sum of all children's spatial inertia)
+static void compositeRigidBody(Context &ctx,
+                               DofObjectPosition &position,
+                               DofObjectVelocity &velocity,
+                               DofObjectNumDofs &num_dofs,
+                               DofObjectTmpState &tmp_state,
+                               DofObjectHierarchyDesc &hier_desc,
+                               ObjectID &obj_id)
+{
+    // TODO: here's where we traverse up the tree
 }
 
 static void processContacts(Context &ctx,
@@ -443,6 +424,7 @@ static void gaussMinimizeFn(Context &ctx,
     DofObjectHierarchyDesc *hier_descs = state_mgr->getWorldComponents<
         DofObjectArchetype, DofObjectHierarchyDesc>(world_id);
 
+    // Offets to know where particular DOF coordinates are set
     uint32_t *vel_coord_offsets = (uint32_t *)state_mgr->tmpAlloc(
             world_id, sizeof(uint32_t) * num_bodies);
     uint32_t num_vel_coords = 0;
@@ -450,9 +432,7 @@ static void gaussMinimizeFn(Context &ctx,
     { // Compute the prefix sum of entities' num velocity dofs.
         for (int i = 0; i < num_bodies; ++i) {
             vel_coord_offsets[i] = num_vel_coords;
-
-            DofObjectNumDofs &num_dofs = ctx.get<DofObjectNumDofs>();
-            num_vel_coords += num_dofs.numDofs;
+            num_vel_coords += num_dofs[i].numDofs;
         }
     }
 
@@ -483,27 +463,7 @@ static void gaussMinimizeFn(Context &ctx,
     }
 
     float inertia_mat_tmp[6][6] = {};
-    float matmul_tmp[6][6] = {};
-
-    auto populate_inertia_sym = [&inertia_mat_tmp](uint32_t off_row,
-                                                   uint32_t off_col,
-                                                   float *values) {
-        inertia_mat_tmp[off_row+0][off_col+0] = values[0];
-        inertia_mat_tmp[off_row+1][off_col+1] = values[1];
-        inertia_mat_tmp[off_row+2][off_col+2] = values[2];
-
-        inertia_mat_tmp[off_row+1][off_col+0] = 
-            inertia_mat_tmp[off_row+0][off_col+1] =
-            values[3];
-
-        inertia_mat_tmp[off_row+2][off_col+0] = 
-            inertia_mat_tmp[off_row+0][off_col+2] =
-            values[4];
-
-        inertia_mat_tmp[off_row+2][off_col+1] = 
-            inertia_mat_tmp[off_row+1][off_col+2] =
-            values[5];
-    };
+    memset(inertia_mat_tmp, 0, sizeof(float) * 6 * 6);
 
     auto add_inertia_sym = [&inertia_mat_tmp](uint32_t off_row,
                                                uint32_t off_col,
@@ -555,10 +515,10 @@ static void gaussMinimizeFn(Context &ctx,
             uint32_t block_height = num_dofs[i].numDofs;
 
             if (subtree_flags[j][i]) {
-                // Use inertia matrix from i
-                populate_inertia_sym(0, 0, tmp_states[i].spatialInertia.vInertia);
-                add_inertia_sym(0, 0, tmp_states[i].spatialInertia.comSquared);
+                // Top left is (I_world + m * r^x r^xT), which we already stored
+                add_inertia_sym(0, 0, tmp_states[i].spatialInertia.spatial_inertia);
 
+                // Top right, bottom left is (m * r^x)
                 populate_inertia_ssym(0, 3, tmp_states[i].spatialInertia.com);
                 populate_inertia_ssym(3, 0, tmp_states[i].spatialInertia.com, true);
 
@@ -1200,12 +1160,13 @@ void registerTypes(ECSRegistry &registry)
 void makeCVPhysicsEntity(Context &ctx, Entity e,
                          Position position,
                          Rotation rotation,
-                         base::ObjectID obj_id,
+                         ObjectID obj_id,
                          DofType dof_type)
 {
     Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
 
     auto &pos = ctx.get<DofObjectPosition>(physical_entity);
+    auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
 
     switch (dof_type) {
     case DofType::FreeBody: {
@@ -1217,24 +1178,26 @@ void makeCVPhysicsEntity(Context &ctx, Entity e,
         pos.q[4] = rotation.x;
         pos.q[5] = rotation.y;
         pos.q[6] = rotation.z;
+
+        vel.qv[0] = 0.f;
+        vel.qv[1] = 0.f;
+        vel.qv[2] = 0.f;
+        vel.qv[3] = 0.f;
+        vel.qv[4] = 0.f;
+        vel.qv[5] = 0.f;
     } break;
 
     case DofType::Hinge: {
         pos.q[0] = 0.f;
+        vel.qv[0] = 0.f;
+    } break;
+
+    case DofType::FixedBody: {
     } break;
     }
 
-    auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
 
-    vel.qv[0] = 0.f;
-    vel.qv[1] = 0.f;
-    vel.qv[2] = 0.f;
-    vel.qv[3] = 0.f;
-    vel.qv[4] = 0.f;
-    vel.qv[5] = 0.f;
-
-    ctx.get<base::ObjectID>(physical_entity) = obj_id;
-
+    ctx.get<ObjectID>(physical_entity) = obj_id;
     ctx.get<DofObjectNumDofs>(physical_entity).numDofs = (uint32_t)dof_type;
 
     ctx.get<CVPhysicalComponent>(e) = {
@@ -1284,21 +1247,36 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         gauss_node = builder.addToGraph<ResetTmpAllocNode>(
                 {gauss_node});
 #else
-        auto propagate_node = builder.addToGraph<ParallelForNode<Context,
-             tasks::propagateHierarchy,
+        auto forward_kinematics = builder.addToGraph<ParallelForNode<Context,
+             tasks::forwardKinematics,
+                DofObjectPosition,
+                DofObjectNumDofs,
+                DofObjectTmpState,
+                DofObjectHierarchyDesc
+            >>({run_narrowphase});
+
+        auto compute_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
+             tasks::computeSpatialInertia,
+                DofObjectNumDofs,
+                DofObjectTmpState,
+                ObjectID
+            >>({forward_kinematics});
+
+        auto composite_rigid_body = builder.addToGraph<ParallelForNode<Context,
+             tasks::compositeRigidBody,
                 DofObjectPosition,
                 DofObjectVelocity,
                 DofObjectNumDofs,
                 DofObjectTmpState,
                 DofObjectHierarchyDesc,
                 ObjectID
-            >>({run_narrowphase});
+            >>({compute_spatial_inertia});
 
         auto contact_node = builder.addToGraph<ParallelForNode<Context,
              tasks::processContacts,
                 ContactConstraint,
                 ContactTmpState
-            >>({propagate_node});
+            >>({composite_rigid_body});
 
         auto gauss_node = builder.addToGraph<ParallelForNode<Context,
              tasks::gaussMinimizeFn,
