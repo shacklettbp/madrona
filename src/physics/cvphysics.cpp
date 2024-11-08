@@ -368,7 +368,7 @@ static void compositeRigidBody(Context &ctx,
             world_id, sizeof(float) * total_dofs * total_dofs );
     memset(M, 0, sizeof(float) * total_dofs * total_dofs);
 
-    // TODO: Check that this is indeed a backward pass
+    // TODO: Need to sort hier_descs and tmp_states based on the hierarchy numbering
     for (CountT i = num_bodies; i > 0; --i) {
         Entity parent = hier_descs[i].parent;
         uint32_t parentIdx = ctx.get<DofObjectHierarchyDesc>(parent).numbering;
@@ -378,7 +378,6 @@ static void compositeRigidBody(Context &ctx,
         // 1. Add spatial inertia to parent's
         if(parent != Entity::none())
         {
-            // TODO: make this a loc or something (row doesn't work)
             tmp_states[parentIdx].spatialInertia += I_c;
         }
 
