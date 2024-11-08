@@ -382,7 +382,7 @@ static void compositeRigidBody(Context &ctx,
 
 
         InertiaTensor I_c = tmp_states[table_idx].spatialInertia;
-        // 1. Add spatial inertia to parent's
+        // Add spatial inertia to parent's value
         if(parent != Entity::none())
         {
             uint32_t parent_number = ctx.get<DofObjectHierarchyDesc>(parent).numbering;
@@ -391,6 +391,7 @@ static void compositeRigidBody(Context &ctx,
         }
 
         // F = I_i^c * S_i
+        tmp_states[table_idx].phi; // -> TODO: convert this to S_i
 
         // M_{ii} = S_i^T I_i^c S_i = S_i^T F
 
@@ -399,7 +400,9 @@ static void compositeRigidBody(Context &ctx,
         while(hier_descs[hier_to_table[j]].parent != Entity::none())
         {
             j = ctx.get<DofObjectHierarchyDesc>(hier_descs[j].parent).numbering;
-            // M_ij = F^T S_j, H_ji = S_j^T F
+            // M_ij = F^T S_j = S_i^T I_i^c S_j
+
+            // M_ji = M_ij^T (symmetric) - maybe don't need to store this
         }
     }
 
