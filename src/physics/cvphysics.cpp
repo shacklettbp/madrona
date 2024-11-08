@@ -368,17 +368,26 @@ static void compositeRigidBody(Context &ctx,
             world_id, sizeof(float) * total_dofs * total_dofs );
     memset(M, 0, sizeof(float) * total_dofs * total_dofs);
 
-    // TODO: Need to sort hier_descs and tmp_states based on the hierarchy numbering
+    // Want to map from hierarchy numbering to table numbering
+    uint32_t *hier_to_table = (uint32_t *)state_mgr->tmpAlloc(
+            world_id, sizeof(uint32_t) * num_bodies);
+    for(CountT i = 0; i < num_bodies; ++i) {
+        hier_to_table[hier_descs[i].numbering] = i;
+    }
+
+    // Backwards pass: children first
     for (CountT i = num_bodies; i > 0; --i) {
-        Entity parent = hier_descs[i].parent;
-        uint32_t parentIdx = ctx.get<DofObjectHierarchyDesc>(parent).numbering;
+        uint32_t table_idx = hier_to_table[i]; // index in the ECS table
+        Entity parent = hier_descs[table_idx].parent;
 
 
-        InertiaTensor I_c = tmp_states[i].spatialInertia;
+        InertiaTensor I_c = tmp_states[table_idx].spatialInertia;
         // 1. Add spatial inertia to parent's
         if(parent != Entity::none())
         {
-            tmp_states[parentIdx].spatialInertia += I_c;
+            uint32_t parent_number = ctx.get<DofObjectHierarchyDesc>(parent).numbering;
+            uint32_t parent_table_idx = hier_to_table[parent_number];
+            tmp_states[parent_table_idx].spatialInertia += I_c;
         }
 
         // F = I_i^c * S_i
@@ -386,7 +395,8 @@ static void compositeRigidBody(Context &ctx,
         // M_{ii} = S_i^T I_i^c S_i = S_i^T F
 
         CountT j = i;
-        while(hier_descs[j].parent != Entity::none())
+        // Traverse up the hierarchy
+        while(hier_descs[hier_to_table[j]].parent != Entity::none())
         {
             j = ctx.get<DofObjectHierarchyDesc>(hier_descs[j].parent).numbering;
             // M_ij = F^T S_j, H_ji = S_j^T F
