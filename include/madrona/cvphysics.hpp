@@ -105,7 +105,7 @@ struct DofObjectTmpState {
 
 
     Phi phi;
-    InertiaTensor inertiaLocal;
+    InertiaTensor spatialInertia;
 };
 
 struct DofObjectHierarchyDesc {

@@ -263,8 +263,7 @@ static void propagateHierarchy(Context &ctx,
                 parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent);
 
-            // Write the normalized world-space angular velocity vector.
-            // TODO: check this
+            // Phi only depends on the hinge axis and the hinge point
             tmp_state.phi.v[0] = rotated_hinge_axis[0];
             tmp_state.phi.v[1] = rotated_hinge_axis[1];
             tmp_state.phi.v[2] = rotated_hinge_axis[2];
@@ -275,11 +274,11 @@ static void propagateHierarchy(Context &ctx,
             tmp_state.phi.v[5] = tmp_state.anchorPos[2];
 
             // Now, for the inertia tensor.
-            tmp_state.inertiaLocal.mass = mass;
+            tmp_state.spatialInertia.mass = mass;
             
             // We are doing this so that we can again just add the inertia tensor
             // struct values like vectors.
-            tmp_state.inertiaLocal.com = mass * tmp_state.comPos;
+            tmp_state.spatialInertia.com = mass * tmp_state.comPos;
 
             { // Inertia matrix in the Plücker origin frame
                 // We first need to inertia tensor in world space orientation
@@ -296,13 +295,13 @@ static void propagateHierarchy(Context &ctx,
                 Mat3x3 inertia_mat = i_world_frame + sym_mat;
 
                 // Take only the upper triangular part (since it's symmetric)
-                tmp_state.inertiaLocal.spatial_inertia[0] = inertia_mat[0][0];
-                tmp_state.inertiaLocal.spatial_inertia[1] = inertia_mat[1][1];
-                tmp_state.inertiaLocal.spatial_inertia[2] = inertia_mat[2][2];
+                tmp_state.spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
+                tmp_state.spatialInertia.spatial_inertia[1] = inertia_mat[1][1];
+                tmp_state.spatialInertia.spatial_inertia[2] = inertia_mat[2][2];
 
-                tmp_state.inertiaLocal.spatial_inertia[3] = inertia_mat[1][0];
-                tmp_state.inertiaLocal.spatial_inertia[4] = inertia_mat[2][0];
-                tmp_state.inertiaLocal.spatial_inertia[5] = inertia_mat[2][1];
+                tmp_state.spatialInertia.spatial_inertia[3] = inertia_mat[1][0];
+                tmp_state.spatialInertia.spatial_inertia[4] = inertia_mat[2][0];
+                tmp_state.spatialInertia.spatial_inertia[5] = inertia_mat[2][1];
             }
         } break;
 
@@ -322,14 +321,14 @@ static void propagateHierarchy(Context &ctx,
         if (hier_desc.leaf || can_propagate_up()) {
             // We can safely do this is we're a leaf because we could only get to this point
             // if the parent has already calculated its inertia matrices and stuff.
-            parent_tmp_state.inertiaLocal.mass += tmp_state.inertiaLocal.mass;
-            parent_tmp_state.inertiaLocal.com += tmp_state.inertiaLocal.com;
+            parent_tmp_state.spatialInertia.mass += tmp_state.spatialInertia.mass;
+            parent_tmp_state.spatialInertia.com += tmp_state.spatialInertia.com;
 
             for (int i = 0; i < 6; ++i) {
-                parent_tmp_state.inertiaLocal.spatial_inertia[i] +=
-                    tmp_state.inertiaLocal.spatial_inertia[i];
-                parent_tmp_state.inertiaLocal.spatial_inertia[i] +=
-                    tmp_state.inertiaLocal.spatial_inertia[i];
+                parent_tmp_state.spatialInertia.spatial_inertia[i] +=
+                    tmp_state.spatialInertia.spatial_inertia[i];
+                parent_tmp_state.spatialInertia.spatial_inertia[i] +=
+                    tmp_state.spatialInertia.spatial_inertia[i];
             }
 
             parent_hier_desc.sync.store_release(2);
@@ -360,16 +359,13 @@ static void propagateHierarchy(Context &ctx,
             velocity.qv[5],
         };
 
-        // TODO: check this
+        // Phi maps from [v, w] in a frame centered at the COM
+        //  to [v, w] in the Plücker origin frame.
+        //  omega remains unchanged, and v only depends on
+        //  the COM position
         tmp_state.phi.v[0] = tmp_state.comPos[0];
         tmp_state.phi.v[1] = tmp_state.comPos[1];
         tmp_state.phi.v[2] = tmp_state.comPos[2];
-
-        {
-            Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPos);
-            sym_mat = sym_mat * sym_mat.transpose();
-            sym_mat = sym_mat * mass;
-        }
 
         hier_desc.sync.store_release(1);
     }
@@ -430,7 +426,7 @@ static void processContacts(Context &ctx,
 static void gaussMinimizeFn(Context &ctx,
                             CVSingleton &cv_sing)
 {
-    uint32_t world_id = ctx.worldID()idx;
+    uint32_t world_id = ctx.worldID().idx;
 
     StateManager *state_mgr = ctx.getStateManager();
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
@@ -560,29 +556,29 @@ static void gaussMinimizeFn(Context &ctx,
 
             if (subtree_flags[j][i]) {
                 // Use inertia matrix from i
-                populate_inertia_sym(0, 0, tmp_states[i].inertiaLocal.vInertia);
-                add_inertia_sym(0, 0, tmp_states[i].inertiaLocal.comSquared);
+                populate_inertia_sym(0, 0, tmp_states[i].spatialInertia.vInertia);
+                add_inertia_sym(0, 0, tmp_states[i].spatialInertia.comSquared);
 
-                populate_inertia_ssym(0, 3, tmp_states[i].inertiaLocal.com);
-                populate_inertia_ssym(3, 0, tmp_states[i].inertiaLocal.com, true);
+                populate_inertia_ssym(0, 3, tmp_states[i].spatialInertia.com);
+                populate_inertia_ssym(3, 0, tmp_states[i].spatialInertia.com, true);
 
-                inertia_mat_tmp[3][3] = tmp_states[i].inertiaLocal.mass;
-                inertia_mat_tmp[4][4] = tmp_states[i].inertiaLocal.mass;
-                inertia_mat_tmp[5][5] = tmp_states[i].inertiaLocal.mass;
+                inertia_mat_tmp[3][3] = tmp_states[i].spatialInertia.mass;
+                inertia_mat_tmp[4][4] = tmp_states[i].spatialInertia.mass;
+                inertia_mat_tmp[5][5] = tmp_states[i].spatialInertia.mass;
 
 
                 
             } else if (subtree_flags[i][j]) {
                 // Use inertia matrix from j
-                populate_inertia_sym(0, 0, tmp_states[j].inertiaLocal.vInertia);
-                add_inertia_sym(0, 0, tmp_states[j].inertiaLocal.comSquared);
+                populate_inertia_sym(0, 0, tmp_states[j].spatialInertia.vInertia);
+                add_inertia_sym(0, 0, tmp_states[j].spatialInertia.comSquared);
 
-                populate_inertia_ssym(0, 3, tmp_states[j].inertiaLocal.com);
-                populate_inertia_ssym(3, 0, tmp_states[j].inertiaLocal.com, true);
+                populate_inertia_ssym(0, 3, tmp_states[j].spatialInertia.com);
+                populate_inertia_ssym(3, 0, tmp_states[j].spatialInertia.com, true);
 
-                inertia_mat_tmp[3][3] = tmp_states[j].inertiaLocal.mass;
-                inertia_mat_tmp[4][4] = tmp_states[j].inertiaLocal.mass;
-                inertia_mat_tmp[5][5] = tmp_states[j].inertiaLocal.mass;
+                inertia_mat_tmp[3][3] = tmp_states[j].spatialInertia.mass;
+                inertia_mat_tmp[4][4] = tmp_states[j].spatialInertia.mass;
+                inertia_mat_tmp[5][5] = tmp_states[j].spatialInertia.mass;
             }
 
             memset(inertia_mat_tmp, 0, sizeof(float) * 6 * 6);
@@ -1172,7 +1168,8 @@ static void convertPostSolve(
             pos.q[5],
             pos.q[6],
         };
-    } else {
+    }
+    else {
         MADRONA_UNREACHABLE();
     }
 }
