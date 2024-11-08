@@ -165,7 +165,7 @@ inline void substepRigidBodies(Context &ctx,
     if (response_type == ResponseType::Dynamic || 
         response_type == ResponseType::Agent) {
         v += h * physics_sys.g;
-        if (response_type == ReponseType::Agent) {
+        if (response_type == ResponseType::Agent) {
             air_res = airResistanceForce(v - rel_vel.velocity, physics_sys.airResistanceConstant);
         }
     }
