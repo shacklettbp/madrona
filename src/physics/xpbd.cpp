@@ -164,10 +164,12 @@ inline void substepRigidBodies(Context &ctx,
     Vector3 air_res = {0.0f, 0.0f, 0.0f};
     if (response_type == ResponseType::Dynamic || 
         response_type == ResponseType::Agent) {
-        v += h * physics_sys.g;
+        Vector3 gravity = -9.8f * math::up;
         if (response_type == ResponseType::Agent) {
             air_res = airResistanceForce(v - rel_vel.velocity, physics_sys.airResistanceConstant);
+            gravity = physics_sys.g;
         }
+        v += h * gravity;
     }
 
 
@@ -806,6 +808,7 @@ inline void setVelocities(Context &ctx,
     if (q.w != q_prev.w || q.x != q_prev.x ||
             q.y != q_prev.y || q.z != q_prev.z) {
         delta_q = q * q_prev.inv();
+        // TODO: verify that this doesn't break things
         delta_q = delta_q * (1.0f / delta_q.w);
     } else {
         delta_q = { 1, 0, 0, 0 };
