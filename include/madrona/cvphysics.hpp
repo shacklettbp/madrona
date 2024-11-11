@@ -171,6 +171,9 @@ struct BodyGroupHierarchy {
     // This includes the free body too which will be at index 0.
     uint32_t numBodies;
     Entity bodies[kMaxJoints];
+
+    // Total number of DOFs in the body group
+    uint32_t numDofs;
 };
 
 struct BodyGroup : public Archetype<

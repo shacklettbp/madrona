@@ -403,7 +403,6 @@ static float* compute_phi(Context &ctx,
     else {
         MADRONA_UNREACHABLE();
     }
-
     return S;
 }
 
@@ -414,7 +413,9 @@ static void compositeRigidBody(Context &ctx,
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
 
-    uint32_t num_bodies = body_grp.numBodies;
+    uint32_t total_dofs = body_grp.numDofs;
+    float *M = (float *) state_mgr->tmpAlloc(world_id,
+        total_dofs * total_dofs * sizeof(float));
 
     for (CountT i = body_grp.numBodies-1; i > 0; --i) {
         auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(
@@ -424,8 +425,12 @@ static void compositeRigidBody(Context &ctx,
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
 
-        // Temporary store for I_i^C S_i: TODO!
-        float *S = compute_phi(ctx, i_num_dofs, i_tmp_state.phi);
+        // Temporary store for F = I_i^C S_i
+        float *S_i = compute_phi(ctx, i_num_dofs, i_tmp_state.phi);
+
+        float *F = (float *) state_mgr->tmpAlloc(world_id,
+            6 * i_num_dofs.numDofs * sizeof(float));
+        memset(F, 0.f, 6 * i_num_dofs.numDofs * sizeof(float));
 
         // Traverse up hierarchy
         uint32_t j = i;
@@ -433,6 +438,14 @@ static void compositeRigidBody(Context &ctx,
         while(parent_j != Entity::none()) {
             j = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[j]).parentIndex;
+            auto &j_tmp_state = ctx.get<DofObjectTmpState>(
+                body_grp.bodies[j]);
+            auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
+                body_grp.bodies[j]);
+
+            float *S_j = compute_phi(ctx, j_num_dofs, j_tmp_state.phi);
+            // H_{ij} = F^T S_j
+
             parent_j = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[j]).parent;
         }
@@ -589,6 +602,7 @@ void setCVGroupRoot(Context &ctx,
 
     body_grp_hier.numBodies = 1;
     body_grp_hier.bodies[0] = physics_entity;
+    body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(physics_entity).numDofs;
 }
 
 void makeCVPhysicsEntity(Context &ctx, 
@@ -798,6 +812,7 @@ void setCVEntityParentHinge(Context &ctx,
     ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
 
     ++grp.numBodies;
+    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
 }
 
 Entity makeCVBodyGroup(Context &ctx)
