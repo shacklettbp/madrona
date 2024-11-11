@@ -407,9 +407,11 @@ static void compositeRigidBody(Context &ctx,
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
 
+    // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = body_grp.numDofs;
     float *M = (float *) state_mgr->tmpAlloc(world_id,
         total_dofs * total_dofs * sizeof(float));
+    memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
     uint32_t block_start[body_grp.numBodies];
@@ -440,6 +442,18 @@ static void compositeRigidBody(Context &ctx,
             i_tmp_state.spatialInertia.multiply(S_col, F_col);
         }
 
+        // M_{ii} = S_i^T I_i^C S_i = F^T S_i
+        float *M_ii = M + block_start[i] * total_dofs + block_start[i];
+        for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
+            float *F_col = F + 6 * row; // take col for transpose
+            for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+                float *S_col = S_i + 6 * col;
+                for(CountT k = 0; k < 6; ++k) {
+                    M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
+                }
+            }
+        }
+
         // Traverse up hierarchy
         uint32_t j = i;
         auto parent_j = i_hier_desc.parent;
@@ -452,6 +466,8 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[j]);
 
             float *S_j = compute_phi(ctx, j_num_dofs, j_tmp_state.phi);
+            // TODO here: M_{ij} = M{ji} = F^T S_j
+
             parent_j = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[j]).parent;
         }
