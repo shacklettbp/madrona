@@ -181,6 +181,7 @@ broadphase::LeafID registerEntity(Context &ctx,
     return bvh.reserveLeaf(e, obj_id);
 }
 
+#if 0
 void setEntityParentHinge(Context &ctx,
                           Entity parent, Entity child,
                           Vector3 rel_pos_parent,
@@ -200,6 +201,7 @@ void setEntityParentHinge(Context &ctx,
         assert(false);
     }
 }
+#endif
 
 bool checkEntityAABBOverlap(
     Context &ctx, math::AABB aabb, Entity e)

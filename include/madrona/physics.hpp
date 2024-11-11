@@ -217,6 +217,7 @@ namespace PhysicsSystem {
                                       uint32_t num_dofs = 0,
                                       Solver solver = Solver::XPBD);
 
+#if 0
     void setEntityParentHinge(Context &ctx,
                               Entity parent, Entity child,
                               // Relative position of the joint relative to the
@@ -228,6 +229,7 @@ namespace PhysicsSystem {
                               // Axis of rotation in parent's coordinate system.
                               math::Vector3 hinge_axis,
                               Solver solver = Solver::XPBD);
+#endif
 
     template <typename Fn>
     void findEntitiesWithinAABB(Context &ctx,

@@ -144,9 +144,10 @@ struct DofObjectHierarchyDesc {
 
     bool leaf;
 
-    // Numbering of body. Satisfies that all children are numbered
-    // after their parent.
-    uint32_t numbering;
+    // Index in the body group hierarchy
+    int32_t index;
+    // Index of the parent in the body group hierarchy.
+    int32_t parentIndex;
 };
 
 struct DofObjectArchetype : public Archetype<
@@ -164,11 +165,27 @@ struct DofObjectArchetype : public Archetype<
     DofObjectNumDofs
 > {};
 
+struct BodyGroupHierarchy {
+    static constexpr uint32_t kMaxJoints = 8;
+
+    // This includes the free body too which will be at index 0.
+    uint32_t numBodies;
+    Entity bodies[kMaxJoints];
+};
+
+struct BodyGroup : public Archetype<
+    BodyGroupHierarchy
+> {};
+
  
 
+Entity makeCVBodyGroup(Context &ctx);
     
 // For now, initial velocities are just going to be 0
-void makeCVPhysicsEntity(Context &ctx, Entity e,
+// Also, when defining a body group, you need to make sure to define in
+// order of parent to children.
+void makeCVPhysicsEntity(Context &ctx, 
+                         Entity body,
                          base::Position position,
                          base::Rotation rotation,
                          base::ObjectID obj_id,
@@ -186,7 +203,12 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                                    TaskGraphNodeID broadphase,
                                    CountT num_substeps);
 
+void setCVGroupRoot(Context &ctx,
+                    Entity body_group,
+                    Entity body);
+
 void setCVEntityParentHinge(Context &ctx,
+                            Entity body_group,
                             Entity parent, Entity child,
                             math::Vector3 rel_pos_parent,
                             math::Vector3 rel_pos_child,
