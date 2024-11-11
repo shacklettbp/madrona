@@ -460,6 +460,12 @@ static void convertPostSolve(
             pos.q[6],
         };
     }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        // TODO: May need some forward kinematics here
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+        // Do nothing
+    }
     else {
         MADRONA_UNREACHABLE();
     }
