@@ -334,7 +334,7 @@ static void computeSpatialInertia(Context &ctx,
 
     // Rest of parameters
     tmp_state.spatialInertia.mass = mass;
-    tmp_state.spatialInertia.com = mass * tmp_state.comPos;
+    tmp_state.spatialInertia.mCom = mass * tmp_state.comPos;
 }
 
 // Compute spatial inertia of subtree rooted at the body.
@@ -452,8 +452,6 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[j]);
 
             float *S_j = compute_phi(ctx, j_num_dofs, j_tmp_state.phi);
-            // H_{ij} = F^T S_j
-
             parent_j = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[j]).parent;
         }
