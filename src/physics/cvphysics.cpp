@@ -350,12 +350,9 @@ static void combineSpatialInertias(Context &ctx,
                 body_grp.bodies[i]);
         auto &current_tmp_state = ctx.get<DofObjectTmpState>(
                 body_grp.bodies[i]);
-        // Propagate the spatial inertia to the parent
-        if(current_hier_desc.parent != Entity::none()) {
-            auto &parent_tmp_state = ctx.get<DofObjectTmpState>(
-                    body_grp.bodies[current_hier_desc.parentIndex]);
-            parent_tmp_state.spatialInertia += current_tmp_state.spatialInertia;
-        }
+        auto &parent_tmp_state = ctx.get<DofObjectTmpState>(
+                body_grp.bodies[current_hier_desc.parentIndex]);
+        parent_tmp_state.spatialInertia += current_tmp_state.spatialInertia;
     }
 }
 
@@ -375,7 +372,7 @@ static float* compute_phi(Context &ctx,
         memset(S, 0.f, 6 * 6 * sizeof(float));
         // Diagonal identity
         for(CountT i = 0; i < 6; ++i) {
-            S[i * 6] = 1.f;
+            S[i * 6 + i] = 1.f;
         }
         // r^x Skew symmetric matrix
         Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
@@ -417,7 +414,7 @@ static void compositeRigidBody(Context &ctx,
     float *M = (float *) state_mgr->tmpAlloc(world_id,
         total_dofs * total_dofs * sizeof(float));
 
-    for (CountT i = body_grp.numBodies-1; i > 0; --i) {
+    for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
         auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[i]);
         auto &i_tmp_state = ctx.get<DofObjectTmpState>(
