@@ -241,6 +241,7 @@ static void forwardKinematics(Context &ctx,
         tmp_state.phi.v[2] = tmp_state.comPos[2];
     }
 
+    // Forward pass from parent to children
     for (int i = 1; i < body_grp.numBodies; ++i) {
         auto &position = ctx.get<DofObjectPosition>(body_grp.bodies[i]);
         auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
@@ -297,7 +298,7 @@ static void forwardKinematics(Context &ctx,
     }
 }
 
-// Pre-CRB: compute the spatial inertia (inertia in a single common Plücker coordinates)
+// Pre-CRB: compute the spatial inertia in common Plücker coordinates
 static void computeSpatialInertia(Context &ctx,
                                DofObjectNumDofs &num_dofs,
                                DofObjectTmpState &tmp_state,
@@ -339,20 +340,71 @@ static void computeSpatialInertia(Context &ctx,
     tmp_state.spatialInertia.com = mass * tmp_state.comPos;
 }
 
+// Compute spatial inertia of subtree rooted at the body.
 static void combineSpatialInertias(Context &ctx,
                                    BodyGroupHierarchy &body_grp)
 {
-    // Compute each individual spatial inertia.
-    for (int i = body_grp.numBodies-1; i > 0; --i) {
+    // Backward pass from children to parent
+    for (CountT i = body_grp.numBodies-1; i > 0; --i) {
         auto &current_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[i]);
         auto &current_tmp_state = ctx.get<DofObjectTmpState>(
                 body_grp.bodies[i]);
-        auto &parent_tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[current_hier_desc.parentIndex]);
-
-        parent_tmp_state.spatialInertia += current_tmp_state.spatialInertia;
+        // Propagate the spatial inertia to the parent
+        if(current_hier_desc.parent != Entity::none()) {
+            auto &parent_tmp_state = ctx.get<DofObjectTmpState>(
+                    body_grp.bodies[current_hier_desc.parentIndex]);
+            parent_tmp_state.spatialInertia += current_tmp_state.spatialInertia;
+        }
     }
+}
+
+// Fully computes the Phi matrix from generalized velocities to Plücker coordinates
+static float* compute_phi(Context &ctx,
+                          DofObjectNumDofs &num_dofs,
+                          Phi &phi)
+{
+    uint32_t world_id = ctx.worldID().idx;
+    StateManager *state_mgr = ctx.getStateManager();
+    float *S;
+
+    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+        // S = [1_3x3 r^x; 0 1_3x3], TODO: keep row major?
+        S = (float *) state_mgr->tmpAlloc(world_id,
+            6 * 6 * sizeof(float));
+        memset(S, 0.f, 6 * 6 * sizeof(float));
+        // Diagonal identity
+        for(CountT i = 0; i < 6; ++i) {
+            S[i * 6] = 1.f;
+        }
+        // r^x Skew symmetric matrix
+        Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
+        S[0 * 6 + 4] = -comPos.z;
+        S[0 * 6 + 5] = comPos.y;
+        S[1 * 6 + 3] = comPos.z;
+        S[1 * 6 + 5] = -comPos.x;
+        S[2 * 6 + 3] = -comPos.y;
+        S[2 * 6 + 4] = comPos.x;
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        // S = [r \times hinge; hinge]
+        S = (float *) state_mgr->tmpAlloc(world_id,
+            6 * sizeof(float));
+        Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
+        Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
+        Vector3 r_cross_hinge = anchorPos.cross(hinge);
+        S[0] = r_cross_hinge.x;
+        S[1] = r_cross_hinge.y;
+        S[2] = r_cross_hinge.z;
+        S[3] = hinge.x;
+        S[4] = hinge.y;
+        S[5] = hinge.z;
+    }
+    else {
+        MADRONA_UNREACHABLE();
+    }
+
+    return S;
 }
 
 // CRB: Compute the Mass Matrix (n_dofs x n_dofs)
@@ -364,7 +416,28 @@ static void compositeRigidBody(Context &ctx,
 
     uint32_t num_bodies = body_grp.numBodies;
 
-    // TODO:
+    for (CountT i = body_grp.numBodies-1; i > 0; --i) {
+        auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                body_grp.bodies[i]);
+        auto &i_tmp_state = ctx.get<DofObjectTmpState>(
+                body_grp.bodies[i]);
+        auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
+                body_grp.bodies[i]);
+
+        // Temporary store for I_i^C S_i: TODO!
+        float *S = compute_phi(ctx, i_num_dofs, i_tmp_state.phi);
+
+        // Traverse up hierarchy
+        uint32_t j = i;
+        auto parent_j = i_hier_desc.parent;
+        while(parent_j != Entity::none()) {
+            j = ctx.get<DofObjectHierarchyDesc>(
+                body_grp.bodies[j]).parentIndex;
+            parent_j = ctx.get<DofObjectHierarchyDesc>(
+                body_grp.bodies[j]).parent;
+        }
+
+    }
 }
 
 static void processContacts(Context &ctx,
