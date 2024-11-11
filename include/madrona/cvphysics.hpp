@@ -82,13 +82,15 @@ struct Phi {
 struct InertiaTensor {
     // The spatial inertia tensor is parameterized by 10 values:
     float mass;
-    math::Vector3 mCom; // mass times (vector from Plücker origin to COM)
+    math::Vector3 mCom; // mass times [vector from Plücker origin to COM]
 
     // The left block of the spatial inertia matrix is symmetric so
     // 6 values are required to parameterize the first block
     // (I_world - m * r^x * r^x).
-    // The first 3 values are the diagonal. The next three are ordered
-    // from top left to bottom right.
+    // The values are ordered as:
+    // [ 0 3 4
+    //     1 5
+    //       2 ]
     float spatial_inertia[6];
 
     // Helper function to add two inertia tensors together
@@ -101,7 +103,7 @@ struct InertiaTensor {
         return *this;
     }
 
-    // Multiply with vector of length 6
+    // Multiply with vector [v] of length 6, storing the result in [out]
     void multiply(const float* v, float* out) const {
         math::Vector3 v_trans = {v[0], v[1], v[2]};
         math::Vector3 v_rot = {v[3], v[4], v[5]};
@@ -117,7 +119,6 @@ struct InertiaTensor {
         out[4] = out_rot.y;
         out[5] = out_rot.z;
     }
-
 
 };
 

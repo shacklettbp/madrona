@@ -288,6 +288,7 @@ static void forwardKinematics(Context &ctx,
             tmp_state.phi.v[3] = tmp_state.anchorPos[0];
             tmp_state.phi.v[4] = tmp_state.anchorPos[1];
             tmp_state.phi.v[5] = tmp_state.anchorPos[2];
+
         } break;
 
         default: {
@@ -466,12 +467,24 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[j]);
 
             float *S_j = compute_phi(ctx, j_num_dofs, j_tmp_state.phi);
-            // TODO here: M_{ij} = M{ji} = F^T S_j
+
+            // M_{ij} = M{ji} = F^T S_j
+            float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
+            float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
+            for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
+                float *F_col = F + 6 * row; // take col for transpose
+                for(CountT col = 0; col < j_num_dofs.numDofs; ++col) {
+                    float *S_col = S_j + 6 * col;
+                    for(CountT k = 0; k < 6; ++k) {
+                        M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
+                        M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
+                    }
+                }
+            }
 
             parent_j = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[j]).parent;
         }
-
     }
 }
 
