@@ -486,6 +486,8 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[j]).parent;
         }
     }
+
+    body_grp.massMatrix = M;
 }
 
 static void processContacts(Context &ctx,

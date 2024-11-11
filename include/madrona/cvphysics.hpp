@@ -195,6 +195,9 @@ struct BodyGroupHierarchy {
 
     // Total number of DOFs in the body group
     uint32_t numDofs;
+
+    // Mass matrix (num_dof x num_dof) of the body group
+    float *massMatrix;
 };
 
 struct BodyGroup : public Archetype<
