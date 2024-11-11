@@ -363,7 +363,7 @@ static float* compute_phi(Context &ctx,
     float *S;
 
     if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
-        // S = [1_3x3 r^x; 0 1_3x3], TODO: keep row major?
+        // S = [1_3x3 r^x; 0 1_3x3], column-major
         S = (float *) state_mgr->tmpAlloc(world_id,
             6 * 6 * sizeof(float));
         memset(S, 0.f, 6 * 6 * sizeof(float));
@@ -373,12 +373,12 @@ static float* compute_phi(Context &ctx,
         }
         // r^x Skew symmetric matrix
         Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
-        S[0 * 6 + 4] = -comPos.z;
-        S[0 * 6 + 5] = comPos.y;
-        S[1 * 6 + 3] = comPos.z;
-        S[1 * 6 + 5] = -comPos.x;
-        S[2 * 6 + 3] = -comPos.y;
-        S[2 * 6 + 4] = comPos.x;
+        S[0 + 6 * 4] = -comPos.z;
+        S[0 + 6 * 5] = comPos.y;
+        S[1 + 6 * 3] = comPos.z;
+        S[1 + 6 * 5] = -comPos.x;
+        S[2 + 6 * 3] = -comPos.y;
+        S[2 + 6 * 4] = comPos.x;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
         // S = [r \times hinge; hinge]
@@ -429,12 +429,16 @@ static void compositeRigidBody(Context &ctx,
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
 
-        // Temporary store for F = I_i^C S_i
         float *S_i = compute_phi(ctx, i_num_dofs, i_tmp_state.phi);
 
+        // Temporary store for F = I_i^C S_i, column-major
         float *F = (float *) state_mgr->tmpAlloc(world_id,
             6 * i_num_dofs.numDofs * sizeof(float));
-        memset(F, 0.f, 6 * i_num_dofs.numDofs * sizeof(float));
+        for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+            float *S_col = S_i + 6 * col;
+            float *F_col = F + 6 * col;
+            i_tmp_state.spatialInertia.multiply(S_col, F_col);
+        }
 
         // Traverse up hierarchy
         uint32_t j = i;
