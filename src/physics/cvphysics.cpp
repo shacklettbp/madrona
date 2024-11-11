@@ -319,13 +319,10 @@ static void computeSpatialInertia(Context &ctx,
     Mat3x3 i_world_frame = inertia * rot_mat;
     i_world_frame = i_world_frame.transpose() * rot_mat;
 
-    // Compute the 3x3 symmetric matrix (m r^x r^xT) (where r is from Plücker origin to COM)
+    // Compute the 3x3 skew-symmetric matrix (r^x) (where r is from Plücker origin to COM)
     Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPos);
-    sym_mat = sym_mat * sym_mat.transpose();
-    sym_mat = sym_mat * mass;
-
-    // (I_world + m r^x r^xT)
-    Mat3x3 inertia_mat = i_world_frame + sym_mat;
+    // (I_world - m r^x r^x)
+    Mat3x3 inertia_mat = i_world_frame - (mass * sym_mat * sym_mat);
 
     // Take only the upper triangular part (since it's symmetric)
     tmp_state.spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
@@ -414,6 +411,16 @@ static void compositeRigidBody(Context &ctx,
     float *M = (float *) state_mgr->tmpAlloc(world_id,
         total_dofs * total_dofs * sizeof(float));
 
+    // Compute prefix sum to determine the start of the block for each body
+    uint32_t block_start[body_grp.numBodies];
+    uint32_t block_offset = 0;
+    for (CountT i = 0; i < body_grp.numBodies; ++i) {
+        block_start[i] = block_offset;
+        block_offset += ctx.get<DofObjectNumDofs>(
+                body_grp.bodies[i]).numDofs;
+    }
+
+    // Backward pass
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
         auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[i]);

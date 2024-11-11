@@ -77,6 +77,8 @@ struct Phi {
 };
 
 // This represents the spatial inertia in Plücker coordinates
+// [m * 1_{3x3};  -m * r^x
+//  m * r^x;      I_world - m * r^x r^x ]
 struct InertiaTensor {
     // The spatial inertia tensor is parameterized by 10 values:
     float mass;
@@ -84,7 +86,7 @@ struct InertiaTensor {
 
     // The left block of the spatial inertia matrix is symmetric so
     // 6 values are required to parameterize the first block
-    // (I_world + m * r^x r^xT).
+    // (I_world - m * r^x * r^x).
     // The first 3 values are the diagonal. The next three are ordered
     // from top left to bottom right.
     float spatial_inertia[6];
@@ -98,6 +100,24 @@ struct InertiaTensor {
         }
         return *this;
     }
+
+    // Multiply with vector of length 6
+    void multiply(const float* v, float* out) const {
+        math::Vector3 v_trans = {v[0], v[1], v[2]};
+        math::Vector3 v_rot = {v[3], v[4], v[5]};
+        math::Vector3 out_trans = mass * (v_trans - com.cross(v_rot));
+        math::Vector3 out_rot = mass * com.cross(v_trans);
+        out_rot[0] += spatial_inertia[0] * v_rot[0] + spatial_inertia[3] * v_rot[1] + spatial_inertia[4] * v_rot[2];
+        out_rot[1] += spatial_inertia[3] * v_rot[0] + spatial_inertia[1] * v_rot[1] + spatial_inertia[5] * v_rot[2];
+        out_rot[2] += spatial_inertia[4] * v_rot[0] + spatial_inertia[5] * v_rot[1] + spatial_inertia[2] * v_rot[2];
+        out[0] = out_trans.x;
+        out[1] = out_trans.y;
+        out[2] = out_trans.z;
+        out[3] = out_rot.x;
+        out[4] = out_rot.y;
+        out[5] = out_rot.z;
+    }
+
 
 };
 
