@@ -43,8 +43,17 @@ struct alignas(16) InstanceData {
     math::Vector3 position;
     math::Quat rotation;
     math::Diag3x3 scale;
+
+    // If this is -1, we just use whatever default material the model
+    // has defined for it.
+    int32_t matID;
+
     int32_t objectID;
     int32_t worldIDX;
+};
+
+struct MaterialID {
+    int32_t matID;
 };
 
 // This contains the actual render output
