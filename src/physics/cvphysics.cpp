@@ -489,12 +489,32 @@ static void compositeRigidBody(Context &ctx,
 
 static void recursiveNewtonEuler(Context &ctx,
                                 BodyGroupHierarchy &body_grp) {
-
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     // Forward pass. Find in Plücker coordinates:
     //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
     //  2. accelerations. TODO
     //  3. forces. TODO
-    for (int i = 0; i < body_grp.numBodies; ++i) {
+
+    // First handle root of hierarchy
+    auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
+    auto tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
+    auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
+    float *S = computePhi(ctx, num_dofs, tmp_state.phi);
+    float *v = (float *) ctx.getStateManager()->tmpAlloc(
+        ctx.worldID().idx, 6 * sizeof(float));
+    for (int j = 0; j < 6; ++j) {
+        v[j] = 0.f;
+        for (int k = 0; k < num_dofs.numDofs; ++k) {
+            v[j] += S[j + 6 * k] * velocity.qv[k];
+        }
+    }
+    tmp_state.vTrans = {v[0], v[1], v[2]};
+    tmp_state.vRot = {v[3], v[4], v[5]};
+    tmp_state.aTrans = physics_state.g;
+    tmp_state.aRot = {0.f, 0.f, 0.f};
+
+    // Forward pass from parents to children
+    for (int i = 1; i < body_grp.numBodies; ++i) {
         auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
         auto tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
         auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
@@ -509,34 +529,32 @@ static void recursiveNewtonEuler(Context &ctx,
         float *f = (float *) ctx.getStateManager()->tmpAlloc(
             ctx.worldID().idx, 6 * sizeof(float));
 
-        // Find the generalized velocity for the relevant DOFs (\dot{q_i})
-        if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
-            for (int j = 0; j < 6; ++j) {
-                v[j] = 0.f;
-                for (int k = 0; k < num_dofs.numDofs; ++k) {
-                    v[j] += S[j + 6 * k] * velocity.qv[k];
-                }
-            }
-        }
-        else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+            // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
             for (int j = 0; j < 6; ++j) {
                 v[j] = velocity.qv[0] * S[j];
             }
+            // a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i} (\ddot{q_i} = 0)
+            //TODO!
         }
-        else {
+        else { // Fixed body, Free body
             MADRONA_UNREACHABLE();
         }
 
         // Store in tmp state
         tmp_state.vTrans = {v[0], v[1], v[2]};
         tmp_state.vRot = {v[3], v[4], v[5]};
+        tmp_state.aTrans = {a[0], a[1], a[2]};
+        tmp_state.aRot = {a[3], a[4], a[5]};
 
-        // Add in parent's velocity
+        // Add in velocity, acceleration, force from parent
         if(hier_desc.parent != Entity::none()) {
             auto parentTmpState = ctx.get<DofObjectTmpState>(
                 body_grp.bodies[hier_desc.parentIndex]);
             tmp_state.vTrans += parentTmpState.vTrans;
             tmp_state.vRot += parentTmpState.vRot;
+            tmp_state.aTrans += parentTmpState.aTrans;
+            tmp_state.aRot += parentTmpState.aRot;
         }
     }
 
