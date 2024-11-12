@@ -207,7 +207,12 @@ float4 vert(in uint vid : SV_VertexID,
                   something;
 
     v2f.uv = vert.uv;
-    v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
+
+    if (instance_data.matID == -1) {
+        v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
+    } else {
+        v2f.materialIdx = instance_data.matID;
+    }
 
     return clip_pos;
 }
