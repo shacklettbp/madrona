@@ -249,9 +249,6 @@ static void forwardKinematics(Context &ctx,
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
 
         Entity parent_e = hier_desc.parent;
-
-        DofObjectHierarchyDesc &parent_hier_desc =
-            ctx.get<DofObjectHierarchyDesc>(parent_e);
         DofObjectTmpState &parent_tmp_state =
             ctx.get<DofObjectTmpState>(parent_e);
 
@@ -355,9 +352,9 @@ static void combineSpatialInertias(Context &ctx,
 }
 
 // Fully computes the Phi matrix from generalized velocities to Plücker coordinates
-static float* compute_phi(Context &ctx,
-                          DofObjectNumDofs &num_dofs,
-                          Phi &phi)
+static float* computePhi(Context &ctx,
+                         DofObjectNumDofs &num_dofs,
+                         Phi &phi)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
@@ -432,7 +429,7 @@ static void compositeRigidBody(Context &ctx,
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
 
-        float *S_i = compute_phi(ctx, i_num_dofs, i_tmp_state.phi);
+        float *S_i = computePhi(ctx, i_num_dofs, i_tmp_state.phi);
 
         // Temporary store for F = I_i^C S_i, column-major
         float *F = (float *) state_mgr->tmpAlloc(world_id,
@@ -466,7 +463,7 @@ static void compositeRigidBody(Context &ctx,
             auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[j]);
 
-            float *S_j = compute_phi(ctx, j_num_dofs, j_tmp_state.phi);
+            float *S_j = computePhi(ctx, j_num_dofs, j_tmp_state.phi);
 
             // M_{ij} = M{ji} = F^T S_j
             float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
@@ -488,6 +485,70 @@ static void compositeRigidBody(Context &ctx,
     }
 
     body_grp.massMatrix = M;
+}
+
+static void recursiveNewtonEuler(Context &ctx,
+                                BodyGroupHierarchy &body_grp) {
+
+    // Forward pass. Find in Plücker coordinates:
+    //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
+    //  2. accelerations. TODO
+    //  3. forces. TODO
+    for (int i = 0; i < body_grp.numBodies; ++i) {
+        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        auto tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
+        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+        float *S = computePhi(ctx, num_dofs, tmp_state.phi);
+
+        // Output: Plücker coordinates velocity, acceleration, force
+        float *v = (float *) ctx.getStateManager()->tmpAlloc(
+            ctx.worldID().idx, 6 * sizeof(float));
+        float *a = (float *) ctx.getStateManager()->tmpAlloc(
+            ctx.worldID().idx, 6 * sizeof(float));
+        float *f = (float *) ctx.getStateManager()->tmpAlloc(
+            ctx.worldID().idx, 6 * sizeof(float));
+
+        // Find the generalized velocity for the relevant DOFs (\dot{q_i})
+        if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+            for (int j = 0; j < 6; ++j) {
+                v[j] = 0.f;
+                for (int k = 0; k < num_dofs.numDofs; ++k) {
+                    v[j] += S[j + 6 * k] * velocity.qv[k];
+                }
+            }
+        }
+        else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+            for (int j = 0; j < 6; ++j) {
+                v[j] = velocity.qv[0] * S[j];
+            }
+        }
+        else {
+            MADRONA_UNREACHABLE();
+        }
+
+        // Store in tmp state
+        tmp_state.vTrans = {v[0], v[1], v[2]};
+        tmp_state.vRot = {v[3], v[4], v[5]};
+
+        // Add in parent's velocity
+        if(hier_desc.parent != Entity::none()) {
+            auto parentTmpState = ctx.get<DofObjectTmpState>(
+                body_grp.bodies[hier_desc.parentIndex]);
+            tmp_state.vTrans += parentTmpState.vTrans;
+            tmp_state.vRot += parentTmpState.vRot;
+        }
+    }
+
+    // Backward pass to find bias forces
+    for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
+        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+        // tau_i = S_i^T f_i
+
+        // Add to parent's force (TODO: convince myself this makes sense)
+        if (hier_desc.parent != Entity::none()) {
+        }
+    }
 }
 
 static void processContacts(Context &ctx,
@@ -759,11 +820,16 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupHierarchy
             >>({combine_spatial_inertia});
 
+        auto recursive_newton_euler = builder.addToGraph<ParallelForNode<Context,
+             tasks::recursiveNewtonEuler,
+                BodyGroupHierarchy
+            >>({composite_rigid_body});
+
         auto contact_node = builder.addToGraph<ParallelForNode<Context,
              tasks::processContacts,
                 ContactConstraint,
                 ContactTmpState
-            >>({composite_rigid_body});
+            >>({recursive_newton_euler});
 
         auto gauss_node = builder.addToGraph<ParallelForNode<Context,
              tasks::gaussMinimizeFn,

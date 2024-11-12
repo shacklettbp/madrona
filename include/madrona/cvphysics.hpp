@@ -139,6 +139,10 @@ struct DofObjectTmpState {
 
     // The spatial inertia tensor in Plücker coordinates
     InertiaTensor spatialInertia;
+
+    // Velocity in Plücker coordinates
+    math::Vector3 vTrans;
+    math::Vector3 vRot;
 };
 
 struct DofObjectHierarchyDesc {
