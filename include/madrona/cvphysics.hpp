@@ -119,7 +119,34 @@ struct InertiaTensor {
         out[4] = out_rot.y;
         out[5] = out_rot.z;
     }
+};
 
+struct SpatialVector {
+    math::Vector3 linear;
+    math::Vector3 angular;
+
+    void set(const float* v) {
+        linear = {v[0], v[1], v[2]};
+        angular = {v[3], v[4], v[5]};
+    }
+
+    void set(math::Vector3 trans, math::Vector3 ang) {
+        linear = trans;
+        angular = ang;
+    }
+
+    SpatialVector& operator+=(const SpatialVector& rhs) {
+        linear += rhs.linear;
+        angular += rhs.angular;
+        return *this;
+    }
+
+    SpatialVector cross(const SpatialVector& rhs) const {
+        return {
+            angular.cross(rhs.linear) + linear.cross(rhs.angular),
+            angular.cross(rhs.linear)
+        };
+    }
 };
 
 // Just some space to store temporary per-entity data.
@@ -141,12 +168,9 @@ struct DofObjectTmpState {
     InertiaTensor spatialInertia;
 
     // Velocity, Acceleration, Force in Plücker coordinates
-    math::Vector3 vTrans;
-    math::Vector3 vRot;
-    math::Vector3 aTrans;
-    math::Vector3 aRot;
-    math::Vector3 fTrans;
-    math::Vector3 fRot;
+    SpatialVector spatialVelocity;
+    SpatialVector spatialAcceleration;
+    SpatialVector spatialForce;
 };
 
 struct DofObjectHierarchyDesc {

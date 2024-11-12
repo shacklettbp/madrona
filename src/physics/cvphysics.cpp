@@ -508,10 +508,8 @@ static void recursiveNewtonEuler(Context &ctx,
             v[j] += S[j + 6 * k] * velocity.qv[k];
         }
     }
-    tmp_state.vTrans = {v[0], v[1], v[2]};
-    tmp_state.vRot = {v[3], v[4], v[5]};
-    tmp_state.aTrans = physics_state.g;
-    tmp_state.aRot = {0.f, 0.f, 0.f};
+    tmp_state.spatialVelocity.set(v);
+    tmp_state.spatialAcceleration.set(physics_state.g, Vector3::zero());
 
     // Forward pass from parents to children
     for (int i = 1; i < body_grp.numBodies; ++i) {
@@ -536,25 +534,20 @@ static void recursiveNewtonEuler(Context &ctx,
             }
             // a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i} (\ddot{q_i} = 0)
             //TODO!
-        }
-        else { // Fixed body, Free body
+        } else { // Fixed body, Free body
             MADRONA_UNREACHABLE();
         }
 
         // Store in tmp state
-        tmp_state.vTrans = {v[0], v[1], v[2]};
-        tmp_state.vRot = {v[3], v[4], v[5]};
-        tmp_state.aTrans = {a[0], a[1], a[2]};
-        tmp_state.aRot = {a[3], a[4], a[5]};
+        tmp_state.spatialVelocity.set(v);
+        tmp_state.spatialAcceleration.set(a);
 
         // Add in velocity, acceleration, force from parent
         if(hier_desc.parent != Entity::none()) {
             auto parentTmpState = ctx.get<DofObjectTmpState>(
                 body_grp.bodies[hier_desc.parentIndex]);
-            tmp_state.vTrans += parentTmpState.vTrans;
-            tmp_state.vRot += parentTmpState.vRot;
-            tmp_state.aTrans += parentTmpState.aTrans;
-            tmp_state.aRot += parentTmpState.aRot;
+            tmp_state.spatialVelocity += parentTmpState.spatialVelocity;
+            tmp_state.spatialAcceleration += parentTmpState.spatialAcceleration;
         }
     }
 
