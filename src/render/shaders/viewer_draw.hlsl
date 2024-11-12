@@ -110,12 +110,15 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     const float4 d0 = packed.data[0];
     const float4 d1 = packed.data[1];
     const float4 d2 = packed.data[2];
+    const float4 d3 = packed.data[3];
 
     EngineInstanceData o;
     o.position = d0.xyz;
     o.rotation = float4(d1.xyz, d0.w);
     o.scale = float3(d1.w, d2.xy);
-    o.objectID = asint(d2.z);
+    o.matID = asint(d2.z);
+    o.objectID = asint(d2.w);
+    o.worldID = asint(d3.x);
 
     return o;
 }
@@ -188,13 +191,19 @@ float4 vert(in uint vid : SV_VertexID,
     DrawData draw_data = drawDataBuffer[draw_id];
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
-    float4 color = materialBuffer[draw_data.materialID].color;
+
     uint instance_id = draw_data.instanceID;
-
-    PerspectiveCameraData view_data = getCameraData();
-
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
+
+    int32_t material_id = draw_data.materialID;
+    if (instance_data.matID != -1) {
+        material_id = instance_data.matID;
+    }
+
+    float4 color = materialBuffer[material_id].color;
+
+    PerspectiveCameraData view_data = getCameraData();
 
     float3 to_view_translation;
     float4 to_view_rotation;
@@ -225,9 +234,9 @@ float4 vert(in uint vid : SV_VertexID,
                              instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
 
-    v2f.texIdx = materialBuffer[draw_data.materialID].textureIdx;
-    v2f.roughness = materialBuffer[draw_data.materialID].roughness;
-    v2f.metalness = materialBuffer[draw_data.materialID].metalness;
+    v2f.texIdx = materialBuffer[material_id].textureIdx;
+    v2f.roughness = materialBuffer[material_id].roughness;
+    v2f.metalness = materialBuffer[material_id].metalness;
 
     return clip_pos;
 }

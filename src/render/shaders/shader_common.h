@@ -155,7 +155,7 @@ struct ObjectData {
 };
 
 struct PackedInstanceData {
-    float4 data[3];
+    float4 data[4];
 };
 
 struct AABB {
@@ -166,6 +166,7 @@ struct EngineInstanceData {
     float3 position;
     float4 rotation;
     float3 scale;
+    int32_t matID;
     int32_t objectID;
     int32_t worldID;
 };
@@ -213,6 +214,7 @@ struct InstanceDataBR {
     float3 position;
     float4 rotation;
     float3 scale;
+    int32_t matID;
     int32_t objectID;
     int32_t worldID;
 };

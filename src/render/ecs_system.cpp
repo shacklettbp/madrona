@@ -125,6 +125,64 @@ inline void instanceTransformUpdate(Context &ctx,
     data.position = pos;
     data.rotation = rot;
     data.scale = scale;
+    data.matID = -1;
+    data.worldIDX = ctx.worldID().idx;
+    data.objectID = obj_id.idx;
+
+    // Get the root AABB from the model and translate it to store
+    // it in the TLBVHNode structure.
+
+#ifdef MADRONA_GPU_MODE
+    bool raycast_enabled = 
+        mwGPU::GPUImplConsts::get().raycastOutputResolution != 0;
+
+    if (raycast_enabled) {
+        MeshBVH *bvh = (MeshBVH *)
+            mwGPU::GPUImplConsts::get().meshBVHsAddr +
+            obj_id.idx;
+
+        math::AABB aabb = bvh->rootAABB.applyTRS(
+                data.position, data.rotation, data.scale);
+
+        ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
+    }
+#endif
+}
+
+inline void instanceTransformUpdateWithMat(Context &ctx,
+                                           Entity e,
+                                           const Position &pos,
+                                           const Rotation &rot,
+                                           const Scale &scale,
+                                           const ObjectID &obj_id,
+                                           const MaterialID &mat_id,
+                                           const Renderable &renderable)
+{
+    // Just update the instance data that is associated with this entity
+#if defined(MADRONA_GPU_MODE)
+    (void)e;
+
+    InstanceData &data = ctx.get<InstanceData>(renderable.renderEntity);
+
+    auto &system_state = ctx.singleton<RenderingSystemState>();
+#else
+    (void)renderable;
+
+    // Just update the instance data that is associated with this entity
+    auto &system_state = ctx.singleton<RenderingSystemState>();
+    uint32_t instance_id = system_state.totalNumInstancesCPU->fetch_add<sync::acq_rel>(1);
+
+    // Required for stable sorting on CPU
+    system_state.instanceWorldIDsCPU[instance_id] = 
+        ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
+
+    InstanceData &data = system_state.instancesCPU[instance_id];
+#endif
+
+    data.position = pos;
+    data.rotation = rot;
+    data.scale = scale;
+    data.matID = mat_id.matID;
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
 
@@ -283,6 +341,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
     registry.registerComponent<MortonCode>();
+    registry.registerComponent<MaterialID>();
 
     registry.registerComponent<RGBOutputBuffer>(rgb_output_bytes);
     registry.registerComponent<DepthOutputBuffer>(depth_output_bytes);
@@ -364,13 +423,24 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             Renderable
         >>(deps);
 
+    auto instance_mat_setup = builder.addToGraph<ParallelForNode<Context,
+        instanceTransformUpdateWithMat,
+            Entity,
+            Position,
+            Rotation,
+            Scale,
+            ObjectID,
+            MaterialID,
+            Renderable
+        >>({instance_setup});
+
     auto viewdata_update = builder.addToGraph<ParallelForNode<Context,
         viewTransformUpdate,
             Entity,
             Position,
             Rotation,
             RenderCamera
-        >>({instance_setup});
+        >>({instance_mat_setup});
 
     auto mortoncode_update = builder.addToGraph<ParallelForNode<Context,
          mortonCodeUpdate,

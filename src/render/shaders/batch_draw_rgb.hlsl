@@ -108,12 +108,15 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     const float4 d0 = packed.data[0];
     const float4 d1 = packed.data[1];
     const float4 d2 = packed.data[2];
+    const float4 d3 = packed.data[3];
 
     EngineInstanceData o;
     o.position = d0.xyz;
     o.rotation = float4(d1.xyz, d0.w);
     o.scale = float3(d1.w, d2.xy);
-    o.objectID = asint(d2.z);
+    o.matID = asint(d2.z);
+    o.objectID = asint(d2.w);
+    o.worldID = asint(d3.x);
 
     return o;
 }
@@ -204,7 +207,12 @@ float4 vert(in uint vid : SV_VertexID,
                   something;
 
     v2f.uv = vert.uv;
-    v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
+
+    if (instance_data.matID == -1) {
+        v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
+    } else {
+        v2f.materialIdx = instance_data.matID;
+    }
 
     return clip_pos;
 }
