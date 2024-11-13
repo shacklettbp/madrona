@@ -939,7 +939,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     case DofType::Hinge: {
         pos.q[0] = 0.f;
-        vel.qv[0] = 1.f;
+        vel.qv[0] = 0.f;
     } break;
 
     case DofType::FixedBody: {
