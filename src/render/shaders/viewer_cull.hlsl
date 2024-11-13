@@ -60,6 +60,7 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     o.matID = asint(d2.z);
     o.objectID = asint(d2.w);
     o.worldID = asint(d3.x);
+    o.color = asuint(d3.y);
 
     return o;
 }
@@ -118,8 +119,15 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
             draw_cmd.firstInstance = draw_id;
 
             DrawData draw_data;
-            draw_data.materialID = mesh.materialIndex;
+            
+            if (instance_data.matID == -1) {
+                draw_data.materialID = mesh.materialIndex;
+            } else {
+                draw_data.materialID = instance_data.matID;
+            }
+
             draw_data.instanceID = current_instance_idx;
+            draw_data.color = instance_data.color;
 
             drawCommandBuffer[draw_id] = draw_cmd;
             drawDataBuffer[draw_id] = draw_data;

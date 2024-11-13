@@ -276,7 +276,8 @@ struct TriHitInfo {
     bool hit;
 
     float tHit;
-    int32_t overrideMatID;
+
+    int32_t instanceIdx;
 
     Vector3 normal;
     Vector2 uv;
@@ -503,6 +504,16 @@ static QBVHNode readNode(QBVHNode *node_smem,
     return read_node;
 }
 
+static Vector3 hexToRgb(uint32_t hex)
+{
+    // Extract each color component and normalize to [0, 1] range
+    float r = ((hex >> 16) & 0xFF) / 255.0f;
+    float g = ((hex >> 8) & 0xFF) / 255.0f;
+    float b = (hex & 0xFF) / 255.0f;
+
+    return {r, g, b};
+}
+
 static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
@@ -542,14 +553,14 @@ static __device__ TraceResult traceRay(
     // level structure. Need to maintain some extra state unfortunately.
     TriangleIsectInfo isect_info = {};
     MeshBVH *current_bvh = nullptr;
-    int32_t mat_id_override = -1;
+    int32_t instance_idx = -1;
     float t_scale = 1.f;
 
     QBVHNode *node_buffer = world_info.nodes;
 
     TriHitInfo tri_hit = {
         .hit = false,
-        .overrideMatID = -1
+        .instanceIdx = -1
     };
 
     for (;;) {
@@ -583,7 +594,7 @@ static __device__ TraceResult traceRay(
             if (parent_grp_type == GroupType::TopLevel &&
                 child_is_leaf) {
                 // Need to compute new ray o/d/etc...
-                int32_t instance_idx = (int32_t)(child_node_idx & ~0x8000'0000);
+                instance_idx = (int32_t)(child_node_idx & ~0x8000'0000);
                 InstanceData *instance_data = world_info.instances + 
                                               instance_idx;
 
@@ -603,7 +614,9 @@ static __device__ TraceResult traceRay(
                             ray_d);
                 t_scale = ray_d.length();
                 t_max *= t_scale;
-                mat_id_override = instance_data->matID;
+
+                // mat_id_override = instance_data->matID;
+                // instance_idx = instance_idx;
 
                 ray_d /= t_scale;
                 inv_ray_d = Diag3x3::fromVec(ray_d).inv();
@@ -696,7 +709,7 @@ static __device__ TraceResult traceRay(
                     t_max = hit_info.tHit;
 
                     tri_hit = hit_info;
-                    tri_hit.overrideMatID = mat_id_override;
+                    tri_hit.instanceIdx = instance_idx;
                 }
 
                 triangle_grp = unsetPresentBit(triangle_grp, local_node_tri_idx);
@@ -717,7 +730,7 @@ static __device__ TraceResult traceRay(
                     ray_o = trace_info.rayOrigin;
                     ray_d = trace_info.rayDirection;
                     inv_ray_d = Diag3x3::fromVec(ray_d).inv();
-                    mat_id_override = -1;
+                    instance_idx = -1;
 
                     node_buffer = world_info.nodes;
                 }
@@ -731,16 +744,21 @@ static __device__ TraceResult traceRay(
         tri_hit.tHit = t_max;
 
         if (bvhParams.raycastRGBD && (!trace_info.dOnly)) {
-            int32_t material_idx = tri_hit.overrideMatID;
+            InstanceData *instance = world_info.instances + tri_hit.instanceIdx;
 
-            if (tri_hit.overrideMatID == -1) {
+            int32_t override_mat_id = instance->matID;
+            int32_t material_idx = override_mat_id;
+
+            if (override_mat_id == MaterialOverride::UseDefaultMaterial) {
                 material_idx = tri_hit.bvh->getMaterialIDX(
                         tri_hit.leafMaterialIndex);
             }
 
             Vector3 color = { 1.f, 1.f, 1.f };
 
-            if (material_idx != -1) {
+            if (override_mat_id == MaterialOverride::UseOverrideColor) {
+                color = hexToRgb(instance->color);
+            } else if (material_idx != -1) {
                 Material *mat = &bvhParams.materials[material_idx];
 
                 if (mat->textureIdx != -1) {

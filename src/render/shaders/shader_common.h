@@ -169,6 +169,7 @@ struct EngineInstanceData {
     int32_t matID;
     int32_t objectID;
     int32_t worldID;
+    uint32_t color;
 };
 
 struct PackedViewData {
@@ -237,6 +238,7 @@ struct DrawCmd {
 struct DrawData {
     int instanceID;
     int materialID;
+    uint32_t color;
 };
 
 #if 0

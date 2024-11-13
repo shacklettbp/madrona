@@ -126,6 +126,7 @@ inline void instanceTransformUpdate(Context &ctx,
     data.rotation = rot;
     data.scale = scale;
     data.matID = -1;
+    data.color = 0;
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
 
@@ -149,13 +150,35 @@ inline void instanceTransformUpdate(Context &ctx,
 #endif
 }
 
+uint32_t rgbToHex(Vector3 c) {
+    float r = c.x;
+    float g = c.y;
+    float b = c.z;
+
+    // Ensure the values are clamped between 0 and 1
+    if (r < 0.0f) r = 0.0f;
+    if (g < 0.0f) g = 0.0f;
+    if (b < 0.0f) b = 0.0f;
+    if (r > 1.0f) r = 1.0f;
+    if (g > 1.0f) g = 1.0f;
+    if (b > 1.0f) b = 1.0f;
+
+    // Convert each component to an integer from 0 to 255
+    uint8_t red = (uint8_t)(r * 255);
+    uint8_t green = (uint8_t)(g * 255);
+    uint8_t blue = (uint8_t)(b * 255);
+
+    // Combine into a single uint32_t hex code
+    return (red << 16) | (green << 8) | blue;
+}
+
 inline void instanceTransformUpdateWithMat(Context &ctx,
                                            Entity e,
                                            const Position &pos,
                                            const Rotation &rot,
                                            const Scale &scale,
                                            const ObjectID &obj_id,
-                                           const MaterialID &mat_id,
+                                           const MaterialOverride &mat,
                                            const Renderable &renderable)
 {
     // Just update the instance data that is associated with this entity
@@ -182,7 +205,11 @@ inline void instanceTransformUpdateWithMat(Context &ctx,
     data.position = pos;
     data.rotation = rot;
     data.scale = scale;
-    data.matID = mat_id.matID;
+
+    data.matID = mat.matID;
+    
+    data.color = rgbToHex(mat.color);
+
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
 
@@ -341,7 +368,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
     registry.registerComponent<MortonCode>();
-    registry.registerComponent<MaterialID>();
+    registry.registerComponent<MaterialOverride>();
 
     registry.registerComponent<RGBOutputBuffer>(rgb_output_bytes);
     registry.registerComponent<DepthOutputBuffer>(depth_output_bytes);
@@ -430,7 +457,7 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             Rotation,
             Scale,
             ObjectID,
-            MaterialID,
+            MaterialOverride,
             Renderable
         >>({instance_setup});
 

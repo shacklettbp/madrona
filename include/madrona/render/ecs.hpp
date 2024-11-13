@@ -46,14 +46,26 @@ struct alignas(16) InstanceData {
 
     // If this is -1, we just use whatever default material the model
     // has defined for it.
+    //
+    // If this is -2, we use the color at the end of this struct.
     int32_t matID;
 
     int32_t objectID;
     int32_t worldIDX;
+
+    uint32_t color;
 };
 
-struct MaterialID {
+struct MaterialOverride {
+    // These are values that matID can take on if not some override material ID.
+    enum {
+        UseDefaultMaterial = -1,
+        UseOverrideColor = -2
+    };
+
     int32_t matID;
+
+    math::Vector3 color;
 };
 
 // This contains the actual render output

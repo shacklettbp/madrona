@@ -119,6 +119,7 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     o.matID = asint(d2.z);
     o.objectID = asint(d2.w);
     o.worldID = asint(d3.x);
+    o.color = asuint(d3.y);
 
     return o;
 }
@@ -196,13 +197,6 @@ float4 vert(in uint vid : SV_VertexID,
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
 
-    int32_t material_id = draw_data.materialID;
-    if (instance_data.matID != -1) {
-        material_id = instance_data.matID;
-    }
-
-    float4 color = materialBuffer[material_id].color;
-
     PerspectiveCameraData view_data = getCameraData();
 
     float3 to_view_translation;
@@ -221,22 +215,34 @@ float4 vert(in uint vid : SV_VertexID,
         view_data.zNear,
         view_pos.y);
 
-    // v2f.viewPos = view_pos;
-#if 0
-    v2f.normal = normalize(
-        rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
-#endif
     v2f.normal = normalize(
         rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
     v2f.uv = vert.uv;
-    v2f.color = color;
+
     v2f.position = rotateVec(instance_data.rotation,
                              instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
 
-    v2f.texIdx = materialBuffer[material_id].textureIdx;
-    v2f.roughness = materialBuffer[material_id].roughness;
-    v2f.metalness = materialBuffer[material_id].metalness;
+
+
+    v2f.texIdx = -1;
+    // Defaults for now
+    v2f.roughness = 0.8;
+    v2f.metalness = 0.2;
+
+    if (draw_data.materialID == -2) {
+        v2f.color = hexToRgb(draw_data.color);
+    } else {
+        int32_t material_id = draw_data.materialID;
+        
+        float4 color = materialBuffer[material_id].color;
+
+        // Material
+        v2f.color = color;
+        v2f.texIdx = materialBuffer[material_id].textureIdx;
+        v2f.roughness = materialBuffer[material_id].roughness;
+        v2f.metalness = materialBuffer[material_id].metalness;
+    }
 
     return clip_pos;
 }
