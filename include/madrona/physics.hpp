@@ -18,11 +18,9 @@ struct CVXSolve {
 #else
 using CVXSolveFn = float *(*)(
         void *data,
-        float *a_mat, uint32_t a_rows, uint32_t a_cols,
-        float *v0, uint32_t v0_rows,
-        float *mu,
-        float *penetrations,
-        uint32_t fc_rows);
+        uint32_t total_num_dofs,
+        float *mass,
+        float *tau);
 
 struct CVXSolve {
     CVXSolveFn fn;
@@ -32,14 +30,9 @@ struct CVXSolve {
     // correct solve function.
     AtomicU32 callSolve;
 
-    float *aPtr;
-    uint32_t aRows;
-    uint32_t aCols;
-    float *v0Ptr;
-    uint32_t v0Rows;
-    float *muPtr;
-    float *penetrationsPtr;
-    uint32_t fcRows;
+    uint32_t totalNumDofs;
+    float *mass;
+    float *tau;
 
     float *resPtr;
 };

@@ -534,7 +534,8 @@ static void compositeRigidBody(Context &ctx,
 
 // RNE: Compute bias forces and gravity
 static void recursiveNewtonEuler(Context &ctx,
-                                BodyGroupHierarchy &body_grp) {
+                                BodyGroupHierarchy &body_grp)
+{
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     StateManager *state_mgr = ctx.getStateManager();
 
@@ -697,6 +698,72 @@ static void processContacts(Context &ctx,
 static void gaussMinimizeFn(Context &ctx,
                             CVSingleton &cv_sing)
 {
+    uint32_t world_id = ctx.worldID().idx;
+
+    StateManager *state_mgr = ctx.getStateManager();
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+
+    CountT num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
+
+    // Recover necessary pointers.
+    BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
+        BodyGroup, BodyGroupHierarchy>(world_id);
+    CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
+
+    uint32_t total_num_dofs = 0;
+
+    for (CountT i = 0; i < num_grps; ++i) {
+        total_num_dofs += hiers[i].numDofs;
+    }
+
+    CountT num_mass_mat_bytes = sizeof(float) *
+        total_num_dofs * total_num_dofs;
+    // Row-major
+    float *total_mass_mat = (float *) state_mgr->tmpAlloc(
+            world_id, num_mass_mat_bytes);
+    memset(total_mass_mat, 0, num_mass_mat_bytes);
+
+    CountT num_full_tau_bytes = sizeof(float) * total_num_dofs;
+    float *full_tau = (float *)state_mgr->tmpAlloc(world_id,
+            num_full_tau_bytes);
+    memset(full_tau, 0, num_full_tau_bytes);
+
+    uint32_t processed_dofs = 0;
+    for (CountT i = 0; i < num_grps; ++i) {
+        float *local_mass = hiers[i].massMatrix;
+
+        for (CountT row = 0; row < hiers[i].numDofs; ++row) {
+            full_tau[row + processed_dofs] = hiers[i].biasForces[row];
+
+            for (CountT col = 0; col < hiers[i].numDofs; ++col) {
+                uint32_t mi = row + processed_dofs;
+                uint32_t mj = col + processed_dofs;
+
+                // The total mass matrix is row major but the
+                // local mass matrix is column major.
+                total_mass_mat[mj + mi * total_num_dofs] =
+                    local_mass[row + hiers[i].numDofs * col];
+            }
+        }
+
+        processed_dofs += hiers[i].numDofs;
+    }
+
+    if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
+        cv_sing.cvxSolve->totalNumDofs = total_num_dofs;
+        cv_sing.cvxSolve->mass = total_mass_mat;
+        cv_sing.cvxSolve->tau = full_tau;
+
+        cv_sing.cvxSolve->callSolve.store_release(1);
+        while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
+        cv_sing.cvxSolve->callSolve.store_relaxed(0);
+
+        float *res = cv_sing.cvxSolve->resPtr;
+
+        if (res) {
+
+        }
+    }
 }
 
 

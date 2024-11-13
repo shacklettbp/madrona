@@ -169,11 +169,9 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs,
 
     float *res = solve->fn(
             solve->data,
-            solve->aPtr, solve->aRows, solve->aCols,
-            solve->v0Ptr, solve->v0Rows,
-            solve->muPtr,
-            solve->penetrationsPtr,
-            solve->fcRows);
+            solve->totalNumDofs,
+            solve->mass,
+            solve->tau);
 
     solve->resPtr = res;
 
