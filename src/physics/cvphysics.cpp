@@ -877,26 +877,26 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 ObjectID
             >>({forward_kinematics});
 
+        auto recursive_newton_euler = builder.addToGraph<ParallelForNode<Context,
+             tasks::recursiveNewtonEuler,
+                BodyGroupHierarchy
+            >>({compute_spatial_inertia});
+
         auto combine_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::combineSpatialInertias,
                 BodyGroupHierarchy
-            >>({compute_spatial_inertia});
+            >>({recursive_newton_euler});
 
         auto composite_rigid_body = builder.addToGraph<ParallelForNode<Context,
              tasks::compositeRigidBody,
                 BodyGroupHierarchy
             >>({combine_spatial_inertia});
 
-        auto recursive_newton_euler = builder.addToGraph<ParallelForNode<Context,
-             tasks::recursiveNewtonEuler,
-                BodyGroupHierarchy
-            >>({composite_rigid_body});
-
         auto contact_node = builder.addToGraph<ParallelForNode<Context,
              tasks::processContacts,
                 ContactConstraint,
                 ContactTmpState
-            >>({recursive_newton_euler});
+            >>({composite_rigid_body});
 
         auto gauss_node = builder.addToGraph<ParallelForNode<Context,
              tasks::gaussMinimizeFn,

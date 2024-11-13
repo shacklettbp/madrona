@@ -75,7 +75,7 @@ struct Phi {
     // (not the body - last 3 values).
     float v[6];
 };
-    
+
 struct SpatialVector {
     math::Vector3 linear;
     math::Vector3 angular;
@@ -197,6 +197,7 @@ struct DofObjectTmpState {
     Phi phi;
 
     // The spatial inertia tensor in Plücker coordinates
+    // Hold the combined inertia of subtree after combineSpatialInertia
     InertiaTensor spatialInertia;
 
     // Velocity, Acceleration, Force in Plücker coordinates
