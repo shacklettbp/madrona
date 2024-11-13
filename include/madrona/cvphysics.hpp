@@ -75,6 +75,53 @@ struct Phi {
     // (not the body - last 3 values).
     float v[6];
 };
+    
+struct SpatialVector {
+    math::Vector3 linear;
+    math::Vector3 angular;
+
+    static SpatialVector fromVec(const float* v) {
+        return { {v[0], v[1], v[2]}, {v[3], v[4], v[5]} };
+    }
+
+    float operator[](int i) const {
+        return i < 3 ? linear[i] : angular[i - 3];
+    }
+    float& operator[](int i) {
+        return i < 3 ? linear[i] : angular[i - 3];
+    }
+
+    void set(const float* v) {
+        linear = {v[0], v[1], v[2]};
+        angular = {v[3], v[4], v[5]};
+    }
+
+    void set(math::Vector3 trans, math::Vector3 ang) {
+        linear = trans;
+        angular = ang;
+    }
+
+    SpatialVector& operator+=(const SpatialVector& rhs) {
+        linear += rhs.linear;
+        angular += rhs.angular;
+        return *this;
+    }
+
+    SpatialVector cross(const SpatialVector& rhs) const {
+        return {
+            angular.cross(rhs.linear) + linear.cross(rhs.angular),
+            angular.cross(rhs.linear)
+        };
+    }
+
+    SpatialVector crossStar(const SpatialVector& rhs) const {
+        return {
+            angular.cross(rhs.linear),
+            angular.cross(rhs.angular) + linear.cross(rhs.linear)
+        };
+    }
+};
+
 
 // This represents the spatial inertia in Plücker coordinates
 // [m * 1_{3x3};  -m * r^x
@@ -119,33 +166,18 @@ struct InertiaTensor {
         out[4] = out_rot.y;
         out[5] = out_rot.z;
     }
-};
 
-struct SpatialVector {
-    math::Vector3 linear;
-    math::Vector3 angular;
-
-    void set(const float* v) {
-        linear = {v[0], v[1], v[2]};
-        angular = {v[3], v[4], v[5]};
-    }
-
-    void set(math::Vector3 trans, math::Vector3 ang) {
-        linear = trans;
-        angular = ang;
-    }
-
-    SpatialVector& operator+=(const SpatialVector& rhs) {
-        linear += rhs.linear;
-        angular += rhs.angular;
-        return *this;
-    }
-
-    SpatialVector cross(const SpatialVector& rhs) const {
-        return {
-            angular.cross(rhs.linear) + linear.cross(rhs.angular),
-            angular.cross(rhs.linear)
-        };
+    SpatialVector multiply(const SpatialVector& v) const {
+        SpatialVector out;
+        out.linear = mass * v.linear - mCom.cross(v.angular);
+        out.angular = mCom.cross(v.linear);
+        out.angular[0] += spatial_inertia[0] * v.angular[0]
+        + spatial_inertia[3] * v.angular[1] + spatial_inertia[4] * v.angular[2];
+        out.angular[1] += spatial_inertia[3] * v.angular[0]
+        + spatial_inertia[1] * v.angular[1] + spatial_inertia[5] * v.angular[2];
+        out.angular[2] += spatial_inertia[4] * v.angular[0]
+        + spatial_inertia[5] * v.angular[1] + spatial_inertia[2] * v.angular[2];
+        return out;
     }
 };
 
@@ -168,9 +200,9 @@ struct DofObjectTmpState {
     InertiaTensor spatialInertia;
 
     // Velocity, Acceleration, Force in Plücker coordinates
-    SpatialVector spatialVelocity;
-    SpatialVector spatialAcceleration;
-    SpatialVector spatialForce;
+    SpatialVector sVel;
+    SpatialVector sAcc;
+    SpatialVector sForce;
 };
 
 struct DofObjectHierarchyDesc {

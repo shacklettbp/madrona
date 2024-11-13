@@ -398,6 +398,51 @@ static float* computePhi(Context &ctx,
     return S;
 }
 
+
+static float* computePhiDot(Context &ctx,
+                            DofObjectNumDofs &num_dofs,
+                            SpatialVector &v_hat,
+                            Phi &phi)
+{
+    uint32_t world_id = ctx.worldID().idx;
+    StateManager *state_mgr = ctx.getStateManager();
+    float *S_dot;
+
+    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+        // S = [0_3x3 0_3x3; 0_3x3 v^x], column-major
+        S_dot = (float *) state_mgr->tmpAlloc(world_id,
+            6 * 6 * sizeof(float));
+        memset(S_dot, 0.f, 6 * 6 * sizeof(float));
+        // v^x Skew symmetric matrix
+        Vector3 v_trans = v_hat.linear;
+        S_dot[0 + 6 * 4] = -v_trans.z;
+        S_dot[0 + 6 * 5] = v_trans.y;
+        S_dot[1 + 6 * 3] = v_trans.z;
+        S_dot[1 + 6 * 5] = -v_trans.x;
+        S_dot[2 + 6 * 3] = -v_trans.y;
+        S_dot[2 + 6 * 4] = v_trans.x;
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        S_dot = (float *) state_mgr->tmpAlloc(world_id,
+            6 * sizeof(float));
+        // S = [r \times hinge; hinge]
+        float* S = computePhi(ctx, num_dofs, phi);
+        // S_dot = v [spatial cross] S
+        SpatialVector S_sv = SpatialVector::fromVec(S);
+        SpatialVector S_dot_sv = v_hat.cross(S_sv);
+        S_dot[0] = S_dot_sv.linear.x;
+        S_dot[1] = S_dot_sv.linear.y;
+        S_dot[2] = S_dot_sv.linear.z;
+        S_dot[3] = S_dot_sv.angular.x;
+        S_dot[4] = S_dot_sv.angular.y;
+        S_dot[5] = S_dot_sv.angular.z;
+    }
+    else {
+        MADRONA_UNREACHABLE();
+    }
+    return S_dot;
+}
+
 // CRB: Compute the Mass Matrix (n_dofs x n_dofs)
 static void compositeRigidBody(Context &ctx,
                                BodyGroupHierarchy &body_grp)
@@ -487,67 +532,75 @@ static void compositeRigidBody(Context &ctx,
     body_grp.massMatrix = M;
 }
 
+// RNE: Compute bias forces and gravity
 static void recursiveNewtonEuler(Context &ctx,
                                 BodyGroupHierarchy &body_grp) {
-    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+    auto &physics_state = ctx.singleton<PhysicsSystemState>();
     // Forward pass. Find in Plücker coordinates:
     //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
-    //  2. accelerations. TODO
-    //  3. forces. TODO
+    //  2. accelerations. a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i}
+    //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
 
     // First handle root of hierarchy
     auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
     auto tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
+    // v_0 = 0, compute S * \dot{q}
     auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
     float *S = computePhi(ctx, num_dofs, tmp_state.phi);
-    float *v = (float *) ctx.getStateManager()->tmpAlloc(
-        ctx.worldID().idx, 6 * sizeof(float));
     for (int j = 0; j < 6; ++j) {
-        v[j] = 0.f;
+        tmp_state.sVel[j] = 0.f;
         for (int k = 0; k < num_dofs.numDofs; ++k) {
-            v[j] += S[j + 6 * k] * velocity.qv[k];
+            tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
         }
     }
-    tmp_state.spatialVelocity.set(v);
-    tmp_state.spatialAcceleration.set(physics_state.g, Vector3::zero());
+    // a_0 = g, compute S_dot * \dot{q} = 0
+    tmp_state.sAcc.set(physics_state.g, Vector3::zero());
+    float *S_dot = computePhiDot(ctx, num_dofs, tmp_state.sVel, tmp_state.phi);
+    for (int j = 0; j < 6; ++j) {
+        for (int k = 0; k < num_dofs.numDofs; ++k) {
+            tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
+        }
+    }
+    // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+    tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
+    tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
 
     // Forward pass from parents to children
     for (int i = 1; i < body_grp.numBodies; ++i) {
-        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        auto tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-        auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
-        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
-        float *S = computePhi(ctx, num_dofs, tmp_state.phi);
+        num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
 
-        // Output: Plücker coordinates velocity, acceleration, force
-        float *v = (float *) ctx.getStateManager()->tmpAlloc(
-            ctx.worldID().idx, 6 * sizeof(float));
-        float *a = (float *) ctx.getStateManager()->tmpAlloc(
-            ctx.worldID().idx, 6 * sizeof(float));
-        float *f = (float *) ctx.getStateManager()->tmpAlloc(
-            ctx.worldID().idx, 6 * sizeof(float));
+        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+        assert(hier_desc.parent != Entity::none());
+        auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+
 
         if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+            tmp_state.sVel = parent_tmp_state.sVel;
+            tmp_state.sAcc = parent_tmp_state.sAcc;
+
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
+            S = computePhi(ctx, num_dofs, tmp_state.phi);
+            float q_dot = velocity.qv[0];
             for (int j = 0; j < 6; ++j) {
-                v[j] = velocity.qv[0] * S[j];
+                tmp_state.sVel[j] = S[j] * q_dot;
             }
+
             // a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i} (\ddot{q_i} = 0)
-            //TODO!
+            //  NOTE: we are using the parent velocity here (for hinge itself)
+            S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel, tmp_state.phi);
+            for (int j = 0; j < 6; ++j) {
+                for (int k = 0; k < 6; ++k) {
+                    tmp_state.sAcc[j] += S_dot[j] * q_dot;
+                }
+            }
+
+            // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+            tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
+            tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
         } else { // Fixed body, Free body
             MADRONA_UNREACHABLE();
-        }
-
-        // Store in tmp state
-        tmp_state.spatialVelocity.set(v);
-        tmp_state.spatialAcceleration.set(a);
-
-        // Add in velocity, acceleration, force from parent
-        if(hier_desc.parent != Entity::none()) {
-            auto parentTmpState = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[hier_desc.parentIndex]);
-            tmp_state.spatialVelocity += parentTmpState.spatialVelocity;
-            tmp_state.spatialAcceleration += parentTmpState.spatialAcceleration;
         }
     }
 
@@ -555,9 +608,12 @@ static void recursiveNewtonEuler(Context &ctx,
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
         // tau_i = S_i^T f_i
+        // TODO: store in buffer
 
-        // Add to parent's force (TODO: convince myself this makes sense)
+        // Add to parent's force
         if (hier_desc.parent != Entity::none()) {
+            auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+            parent_tmp_state.sForce += tmp_state.sForce;
         }
     }
 }
