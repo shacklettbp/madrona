@@ -84,26 +84,22 @@ struct SpatialVector {
         return { {v[0], v[1], v[2]}, {v[3], v[4], v[5]} };
     }
 
-    float operator[](int i) const {
+    float operator[](const CountT i) const {
         return i < 3 ? linear[i] : angular[i - 3];
     }
-    float& operator[](int i) {
+    float& operator[](const CountT i) {
         return i < 3 ? linear[i] : angular[i - 3];
-    }
-
-    void set(const float* v) {
-        linear = {v[0], v[1], v[2]};
-        angular = {v[3], v[4], v[5]};
-    }
-
-    void set(math::Vector3 trans, math::Vector3 ang) {
-        linear = trans;
-        angular = ang;
     }
 
     SpatialVector& operator+=(const SpatialVector& rhs) {
         linear += rhs.linear;
         angular += rhs.angular;
+        return *this;
+    }
+
+    SpatialVector& operator=(const SpatialVector& rhs) {
+        linear = rhs.linear;
+        angular = rhs.angular;
         return *this;
     }
 
@@ -263,6 +259,9 @@ struct BodyGroupHierarchy {
 
     // Mass matrix (num_dof x num_dof) of the body group
     float *massMatrix;
+
+    // Bias forces (num_dof) of the body group
+    float *biasForces;
 };
 
 struct BodyGroup : public Archetype<

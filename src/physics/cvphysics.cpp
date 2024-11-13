@@ -535,41 +535,53 @@ static void compositeRigidBody(Context &ctx,
 // RNE: Compute bias forces and gravity
 static void recursiveNewtonEuler(Context &ctx,
                                 BodyGroupHierarchy &body_grp) {
-    auto &physics_state = ctx.singleton<PhysicsSystemState>();
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+    StateManager *state_mgr = ctx.getStateManager();
+
+    uint32_t world_id = ctx.worldID().idx;
+    uint32_t total_dofs = body_grp.numDofs;
+    float *tau = (float *) state_mgr->tmpAlloc(world_id,
+        total_dofs * sizeof(float));
+    memset(tau, 0.f, total_dofs * sizeof(float));
+
     // Forward pass. Find in Plücker coordinates:
     //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
     //  2. accelerations. a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i}
     //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
 
     // First handle root of hierarchy
-    auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
-    auto tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
-    // v_0 = 0, compute S * \dot{q}
-    auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
-    float *S = computePhi(ctx, num_dofs, tmp_state.phi);
-    for (int j = 0; j < 6; ++j) {
-        tmp_state.sVel[j] = 0.f;
-        for (int k = 0; k < num_dofs.numDofs; ++k) {
-            tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
+    {
+        DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
+        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
+        // v_0 = 0, compute S * \dot{q}
+        auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
+        float *S = computePhi(ctx, num_dofs, tmp_state.phi);
+        for (int j = 0; j < 6; ++j) {
+            tmp_state.sVel[j] = 0.f;
+            for (int k = 0; k < num_dofs.numDofs; ++k) {
+                tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
+            }
         }
-    }
-    // a_0 = g, compute S_dot * \dot{q} = 0
-    tmp_state.sAcc.set(physics_state.g, Vector3::zero());
-    float *S_dot = computePhiDot(ctx, num_dofs, tmp_state.sVel, tmp_state.phi);
-    for (int j = 0; j < 6; ++j) {
-        for (int k = 0; k < num_dofs.numDofs; ++k) {
-            tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
+
+        // a_0 = g, compute S_dot * \dot{q} = 0
+        tmp_state.sAcc = {physics_state.g, Vector3::zero()};
+        float *S_dot = computePhiDot(ctx, num_dofs, tmp_state.sVel, tmp_state.phi);
+        for (int j = 0; j < 6; ++j) {
+            for (int k = 0; k < num_dofs.numDofs; ++k) {
+                tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
+            }
         }
+
+        // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+        tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
+        tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
     }
-    // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-    tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
-    tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
 
     // Forward pass from parents to children
     for (int i = 1; i < body_grp.numBodies; ++i) {
-        num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-        velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
+        DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        DofObjectTmpState tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        DofObjectVelocity velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
 
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
         assert(hier_desc.parent != Entity::none());
@@ -581,7 +593,7 @@ static void recursiveNewtonEuler(Context &ctx,
             tmp_state.sAcc = parent_tmp_state.sAcc;
 
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            S = computePhi(ctx, num_dofs, tmp_state.phi);
+            float *S = computePhi(ctx, num_dofs, tmp_state.phi);
             float q_dot = velocity.qv[0];
             for (int j = 0; j < 6; ++j) {
                 tmp_state.sVel[j] = S[j] * q_dot;
@@ -589,13 +601,12 @@ static void recursiveNewtonEuler(Context &ctx,
 
             // a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i} (\ddot{q_i} = 0)
             //  NOTE: we are using the parent velocity here (for hinge itself)
-            S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel, tmp_state.phi);
+            float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel, tmp_state.phi);
             for (int j = 0; j < 6; ++j) {
                 for (int k = 0; k < 6; ++k) {
                     tmp_state.sAcc[j] += S_dot[j] * q_dot;
                 }
             }
-
             // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
             tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
             tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
@@ -605,10 +616,21 @@ static void recursiveNewtonEuler(Context &ctx,
     }
 
     // Backward pass to find bias forces
+    CountT dof_index = total_dofs;
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
-        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+        DofObjectHierarchyDesc &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+        DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+
         // tau_i = S_i^T f_i
-        // TODO: store in buffer
+        dof_index -= num_dofs.numDofs;
+        float *S = computePhi(ctx, num_dofs, tmp_state.phi);
+        for(CountT row = 0; row < num_dofs.numDofs; ++row) {
+            float *S_col = S + 6 * row;
+            for(CountT k = 0; k < 6; ++k) {
+                tau[dof_index + row] += S_col[k] * tmp_state.sForce[k];
+            }
+        }
 
         // Add to parent's force
         if (hier_desc.parent != Entity::none()) {
@@ -616,6 +638,8 @@ static void recursiveNewtonEuler(Context &ctx,
             parent_tmp_state.sForce += tmp_state.sForce;
         }
     }
+
+    body_grp.biasForces = tau;
 }
 
 static void processContacts(Context &ctx,
