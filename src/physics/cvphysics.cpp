@@ -703,8 +703,6 @@ static void gaussMinimizeFn(Context &ctx,
     StateManager *state_mgr = ctx.getStateManager();
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
-    CountT num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
-
     // Recover necessary pointers.
     BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
         BodyGroup, BodyGroupHierarchy>(world_id);
@@ -760,8 +758,25 @@ static void gaussMinimizeFn(Context &ctx,
 
         float *res = cv_sing.cvxSolve->resPtr;
 
-        if (res) {
-
+        if (res)
+        {
+            // TODO: make separate integration i.e., put in forces. i'm lazy
+            PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+            float h = physics_state.h;
+            uint32_t processed_dofs = 0;
+            for (CountT i = 0; i < num_grps; ++i)
+            {
+                for (CountT j = 0; j < hiers[i].numBodies; j++)
+                {
+                    auto body = hiers[i].bodies[j];
+                    auto numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
+                    auto &velocity = ctx.get<DofObjectVelocity>(body);
+                    for (CountT k = 0; k < numDofs; k++) {
+                        velocity.qv[k] += h * res[processed_dofs];
+                        processed_dofs++;
+                    }
+                }
+            }
         }
     }
 }
@@ -774,6 +789,37 @@ static void integrationStep(Context &ctx,
                             DofObjectTmpState &tmp_state,
                             ObjectID &objID)
 {
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+    float h = physics_state.h;
+
+    if (numDofs.numDofs == (uint32_t)DofType::FreeBody) {
+        for (int i = 0; i < 3; ++i) {
+            position.q[i] += h * velocity.qv[i];
+        }
+
+        // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
+        Vector3 omega = { velocity.qv[3], velocity.qv[4], velocity.qv[5] };
+        Quat rot_quat = { position.q[3], position.q[4], position.q[5], position.q[6], };
+        Quat new_rot = {rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z};
+        new_rot.w += 0.5f * h * (-rot_quat.x * omega.x - rot_quat.y * omega.y - rot_quat.z * omega.z);
+        new_rot.x += 0.5f * h * (rot_quat.w * omega.x + rot_quat.z * omega.y - rot_quat.y * omega.z);
+        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x + rot_quat.w * omega.y + rot_quat.x * omega.z);
+        new_rot.z += 0.5f * h * (rot_quat.y * omega.x - rot_quat.x * omega.y + rot_quat.w * omega.z);
+        new_rot = new_rot.normalize();
+        position.q[3] = new_rot.w;
+        position.q[4] = new_rot.x;
+        position.q[5] = new_rot.y;
+        position.q[6] = new_rot.z;
+    }
+    else if (numDofs.numDofs == (uint32_t)DofType::Hinge) {
+        position.q[0] += h * velocity.qv[0];
+    }
+    else if (numDofs.numDofs == (uint32_t)DofType::FixedBody) {
+        // Do nothing
+    }
+    else {
+        MADRONA_UNREACHABLE();
+    }
 }
 #endif
 
@@ -788,22 +834,15 @@ static void convertPostSolve(
     Entity physical_entity = phys.physicsEntity;
 
     DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(physical_entity);
-    DofObjectPosition pos = ctx.get<DofObjectPosition>(physical_entity);
+    DofObjectTmpState tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
 
     if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
-        position.x = pos.q[0];
-        position.y = pos.q[1];
-        position.z = pos.q[2];
-
-        rotation = Quat {
-            pos.q[3],
-            pos.q[4],
-            pos.q[5],
-            pos.q[6],
-        };
+        position = tmp_state.comPos;
+        rotation = tmp_state.composedRot;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
-        // TODO: May need some forward kinematics here
+        position = tmp_state.comPos;
+        rotation = tmp_state.composedRot;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
         // Do nothing
