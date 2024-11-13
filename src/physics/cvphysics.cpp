@@ -261,7 +261,7 @@ static void forwardKinematics(Context &ctx,
 
             // Calculate the composed rotation applied to the child entity.
             tmp_state.composedRot = parent_tmp_state.composedRot *
-                Quat::angleAxis(position.q[0], rotated_hinge_axis);
+                Quat::angleAxis(position.q[0], hier_desc.hingeAxis);
 
             // Calculate the composed COM position of the child
             //  (parent COM + R_{parent} * (rel_pos_parent + R_{hinge} * rel_pos_local))
@@ -939,7 +939,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     case DofType::Hinge: {
         pos.q[0] = 0.f;
-        vel.qv[0] = 0.f;
+        vel.qv[0] = 1.f;
     } break;
 
     case DofType::FixedBody: {
@@ -1043,12 +1043,17 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
             >>({gauss_node});
 #endif
 
+        auto post_forward_kinematics = builder.addToGraph<ParallelForNode<Context,
+             tasks::forwardKinematics,
+                BodyGroupHierarchy
+            >>({int_node});
+
         cur_node =
             builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
                 Position,
                 Rotation,
                 CVPhysicalComponent
-            >>({int_node});
+            >>({post_forward_kinematics});
 
         cur_node = builder.addToGraph<
             ClearTmpNode<Contact>>({cur_node});
