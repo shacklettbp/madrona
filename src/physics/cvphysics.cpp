@@ -932,7 +932,7 @@ void makeCVPhysicsEntity(Context &ctx,
         vel.qv[2] = 0.f;
         vel.qv[3] = 0.f;
         vel.qv[4] = 0.f;
-        vel.qv[5] = 1.0f;
+        vel.qv[5] = 0.0f;
 
         tmp_state.sVel = {{vel.qv[0], vel.qv[1], vel.qv[2]},
                           {vel.qv[3], vel.qv[4], vel.qv[5]}};
@@ -940,7 +940,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     case DofType::Hinge: {
         pos.q[0] = 0.f;
-        vel.qv[0] = 1.0;
+        vel.qv[0] = 0.0;
     } break;
 
     case DofType::FixedBody: {
