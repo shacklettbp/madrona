@@ -409,7 +409,7 @@ static float* computePhiDot(Context &ctx,
     float *S_dot;
 
     if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
-        // S = [0_3x3 0_3x3; 0_3x3 v^x], column-major
+        // S = [0_3x3 v^x; 0_3x3 0_3x3], column-major
         S_dot = (float *) state_mgr->tmpAlloc(world_id,
             6 * 6 * sizeof(float));
         memset(S_dot, 0.f, 6 * 6 * sizeof(float));
@@ -554,21 +554,20 @@ static void recursiveNewtonEuler(Context &ctx,
     {
         DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
         DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
-        // v_0 = 0, compute S * \dot{q}
         auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
+
         float *S = computePhi(ctx, num_dofs, tmp_state.phi);
+        SpatialVector v_body = {{velocity.qv[0], velocity.qv[1], velocity.qv[2]},
+                              Vector3::zero()};
+        float *S_dot = computePhiDot(ctx, num_dofs, v_body, tmp_state.phi);
+
+        // v_0 = 0, a_0 = g
+        tmp_state.sAcc = {physics_state.g, Vector3::zero()};
+        tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+        // S\dot{q_i} and \dot{S}\dot{q_i}
         for (int j = 0; j < 6; ++j) {
-            tmp_state.sVel[j] = 0.f;
             for (int k = 0; k < num_dofs.numDofs; ++k) {
                 tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
-            }
-        }
-
-        // a_0 = g, compute S_dot * \dot{q} = 0
-        tmp_state.sAcc = {physics_state.g, Vector3::zero()};
-        float *S_dot = computePhiDot(ctx, num_dofs, tmp_state.sVel, tmp_state.phi);
-        for (int j = 0; j < 6; ++j) {
-            for (int k = 0; k < num_dofs.numDofs; ++k) {
                 tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
             }
         }
@@ -587,7 +586,6 @@ static void recursiveNewtonEuler(Context &ctx,
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
         assert(hier_desc.parent != Entity::none());
         auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
-
 
         if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
             tmp_state.sVel = parent_tmp_state.sVel;
@@ -911,6 +909,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     auto &pos = ctx.get<DofObjectPosition>(physical_entity);
     auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
+    auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
 
 #if 0
     auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physical_entity);
@@ -934,7 +933,10 @@ void makeCVPhysicsEntity(Context &ctx,
         vel.qv[2] = 0.f;
         vel.qv[3] = 0.f;
         vel.qv[4] = 0.f;
-        vel.qv[5] = 0.f;
+        vel.qv[5] = 0.0f;
+
+        tmp_state.sVel = {{vel.qv[0], vel.qv[1], vel.qv[2]},
+                          {vel.qv[3], vel.qv[4], vel.qv[5]}};
     } break;
 
     case DofType::Hinge: {
