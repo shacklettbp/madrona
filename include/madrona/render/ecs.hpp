@@ -64,8 +64,10 @@ struct MaterialOverride {
     };
 
     int32_t matID;
+};
 
-    math::Vector3 color;
+struct ColorOverride {
+    uint32_t color;
 };
 
 // This contains the actual render output
