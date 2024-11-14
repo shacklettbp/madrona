@@ -314,6 +314,7 @@ static void computeSpatialInertia(Context &ctx,
 
     // We need to find inertia tensor in world space orientation
     Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
+    // I_world = R^T * I * R = (I * R)^T * R
     Mat3x3 i_world_frame = inertia * rot_mat;
     i_world_frame = i_world_frame.transpose() * rot_mat;
 
@@ -554,16 +555,17 @@ static void recursiveNewtonEuler(Context &ctx,
     {
         DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
         DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
-        auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
+        DofObjectVelocity velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
 
         float *S = computePhi(ctx, num_dofs, tmp_state.phi);
         SpatialVector v_body = {{velocity.qv[0], velocity.qv[1], velocity.qv[2]},
                               Vector3::zero()};
         float *S_dot = computePhiDot(ctx, num_dofs, v_body, tmp_state.phi);
 
-        // v_0 = 0, a_0 = g
-        tmp_state.sAcc = {physics_state.g, Vector3::zero()};
+        // v_0 = 0, a_0 = -g (fictitious upward acceleration)
+        tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
         tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+
         // S\dot{q_i} and \dot{S}\dot{q_i}
         for (int j = 0; j < 6; ++j) {
             for (int k = 0; k < num_dofs.numDofs; ++k) {
@@ -580,12 +582,12 @@ static void recursiveNewtonEuler(Context &ctx,
     // Forward pass from parents to children
     for (int i = 1; i < body_grp.numBodies; ++i) {
         DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        DofObjectTmpState tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
         DofObjectVelocity velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
 
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
         assert(hier_desc.parent != Entity::none());
-        auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+        DofObjectTmpState parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
 
         if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
             tmp_state.sVel = parent_tmp_state.sVel;
@@ -593,19 +595,16 @@ static void recursiveNewtonEuler(Context &ctx,
 
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
             float *S = computePhi(ctx, num_dofs, tmp_state.phi);
-            float q_dot = velocity.qv[0];
-            for (int j = 0; j < 6; ++j) {
-                tmp_state.sVel[j] = S[j] * q_dot;
-            }
-
             // a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i} (\ddot{q_i} = 0)
             //  NOTE: we are using the parent velocity here (for hinge itself)
             float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel, tmp_state.phi);
+
+            float q_dot = velocity.qv[0];
             for (int j = 0; j < 6; ++j) {
-                for (int k = 0; k < 6; ++k) {
-                    tmp_state.sAcc[j] += S_dot[j] * q_dot;
-                }
+                tmp_state.sVel[j] += S[j] * q_dot;
+                tmp_state.sAcc[j] += S_dot[j] * q_dot;
             }
+
             // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
             tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
             tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
@@ -633,7 +632,7 @@ static void recursiveNewtonEuler(Context &ctx,
 
         // Add to parent's force
         if (hier_desc.parent != Entity::none()) {
-            auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+            DofObjectTmpState &parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
             parent_tmp_state.sForce += tmp_state.sForce;
         }
     }
@@ -933,7 +932,7 @@ void makeCVPhysicsEntity(Context &ctx,
         vel.qv[2] = 0.f;
         vel.qv[3] = 0.f;
         vel.qv[4] = 0.f;
-        vel.qv[5] = 0.0f;
+        vel.qv[5] = 1.0f;
 
         tmp_state.sVel = {{vel.qv[0], vel.qv[1], vel.qv[2]},
                           {vel.qv[3], vel.qv[4], vel.qv[5]}};
@@ -941,7 +940,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     case DofType::Hinge: {
         pos.q[0] = 0.f;
-        vel.qv[0] = 0.f;
+        vel.qv[0] = 1.0;
     } break;
 
     case DofType::FixedBody: {

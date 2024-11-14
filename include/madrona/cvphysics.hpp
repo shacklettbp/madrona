@@ -97,6 +97,12 @@ struct SpatialVector {
         return *this;
     }
 
+    SpatialVector& operator-=(const SpatialVector& rhs) {
+        linear -= rhs.linear;
+        angular -= rhs.angular;
+        return *this;
+    }
+
     SpatialVector& operator=(const SpatialVector& rhs) {
         linear = rhs.linear;
         angular = rhs.angular;
@@ -106,7 +112,7 @@ struct SpatialVector {
     SpatialVector cross(const SpatialVector& rhs) const {
         return {
             angular.cross(rhs.linear) + linear.cross(rhs.angular),
-            angular.cross(rhs.linear)
+            angular.cross(rhs.angular)
         };
     }
 
