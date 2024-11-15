@@ -188,6 +188,11 @@ struct DofObjectTmpState {
     // World-space position of body COM
     math::Vector3 comPos;
 
+    // BodyHierarchy COM-based position of body COM
+    // TODO: should store this in body hierarchy,
+    //  but computeSpatialInertia doesn't look at the hierarchy
+    math::Vector3 comPosHierarchy;
+
     // World-space orientation of body
     math::Quat composedRot;
 
@@ -259,6 +264,8 @@ struct BodyGroupHierarchy {
     // This includes the free body too which will be at index 0.
     uint32_t numBodies;
     Entity bodies[kMaxJoints];
+
+    math::Vector3 comPos;
 
     // Total number of DOFs in the body group
     uint32_t numDofs;

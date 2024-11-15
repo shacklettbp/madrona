@@ -296,11 +296,49 @@ static void forwardKinematics(Context &ctx,
     }
 }
 
+static void computeCenterOfMass(Context &ctx,
+                                BodyGroupHierarchy &body_grp) {
+
+    Vector3 hierarchy_com = Vector3::zero();
+    float total_mass = 0.f;
+    for (int i = 0; i < body_grp.numBodies; ++i) {
+        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(
+                body_grp.bodies[i]);
+        hierarchy_com += tmp_state.spatialInertia.mass * tmp_state.comPos;
+        total_mass += tmp_state.spatialInertia.mass;
+    }
+    body_grp.comPos = hierarchy_com / total_mass;
+
+    for (int i = 0; i < body_grp.numBodies; ++i) {
+        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(
+                body_grp.bodies[i]);
+        DofObjectNumDofs &num_dofs = ctx.get<DofObjectNumDofs>(
+                body_grp.bodies[i]);
+        tmp_state.comPosHierarchy = tmp_state.comPos - body_grp.comPos;
+
+        switch (num_dofs.numDofs) {
+            case (uint32_t)DofType::Hinge: {
+                tmp_state.phi.v[3] -= body_grp.comPos[0];
+                tmp_state.phi.v[4] -= body_grp.comPos[1];
+                tmp_state.phi.v[5] -= body_grp.comPos[2];
+            } break;
+            case (uint32_t)DofType::FreeBody: {
+                tmp_state.phi.v[0] -= body_grp.comPos[0];
+                tmp_state.phi.v[1] -= body_grp.comPos[1];
+                tmp_state.phi.v[2] -= body_grp.comPos[2];
+            } break;
+            default: {
+                MADRONA_UNREACHABLE();
+            } break;
+        }
+    }
+}
+
 // Pre-CRB: compute the spatial inertia in common Plücker coordinates
 static void computeSpatialInertia(Context &ctx,
-                               DofObjectNumDofs &num_dofs,
-                               DofObjectTmpState &tmp_state,
-                               ObjectID &obj_id)
+                                  DofObjectNumDofs &num_dofs,
+                                  DofObjectTmpState &tmp_state,
+                                  ObjectID &obj_id)
 {
     if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
         return;
@@ -319,7 +357,7 @@ static void computeSpatialInertia(Context &ctx,
     i_world_frame = i_world_frame.transpose() * rot_mat;
 
     // Compute the 3x3 skew-symmetric matrix (r^x) (where r is from Plücker origin to COM)
-    Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPos);
+    Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPosHierarchy);
     // (I_world - m r^x r^x)
     Mat3x3 inertia_mat = i_world_frame - (mass * sym_mat * sym_mat);
 
@@ -333,7 +371,7 @@ static void computeSpatialInertia(Context &ctx,
 
     // Rest of parameters
     tmp_state.spatialInertia.mass = mass;
-    tmp_state.spatialInertia.mCom = mass * tmp_state.comPos;
+    tmp_state.spatialInertia.mCom = mass * tmp_state.comPosHierarchy;
 }
 
 // Compute spatial inertia of subtree rooted at the body.
@@ -932,7 +970,7 @@ void makeCVPhysicsEntity(Context &ctx,
         vel.qv[2] = 0.f;
         vel.qv[3] = 0.f;
         vel.qv[4] = 0.f;
-        vel.qv[5] = 0.0f;
+        vel.qv[5] = 0.f;
 
         tmp_state.sVel = {{vel.qv[0], vel.qv[1], vel.qv[2]},
                           {vel.qv[3], vel.qv[4], vel.qv[5]}};
@@ -940,7 +978,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     case DofType::Hinge: {
         pos.q[0] = 0.f;
-        vel.qv[0] = 0.0;
+        vel.qv[0] = 0.f;
     } break;
 
     case DofType::FixedBody: {
@@ -1001,12 +1039,17 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupHierarchy
             >>({run_narrowphase});
 
+        auto compute_center_of_mass = builder.addToGraph<ParallelForNode<Context,
+             tasks::computeCenterOfMass,
+                BodyGroupHierarchy
+            >>({forward_kinematics});
+
         auto compute_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::computeSpatialInertia,
                 DofObjectNumDofs,
                 DofObjectTmpState,
                 ObjectID
-            >>({forward_kinematics});
+            >>({compute_center_of_mass});
 
         auto recursive_newton_euler = builder.addToGraph<ParallelForNode<Context,
              tasks::recursiveNewtonEuler,
