@@ -720,6 +720,9 @@ static __device__ TraceResult traceRay(
         // break out of the tracing loop
         if (getPresentBits(current_grp) == 0) {
             if (stack_size == 0) {
+                t_max = t_max / t_scale;
+                t_scale = 1.f;
+
                 break;
             } else {
                 if (getGroupType(current_grp) == GroupType::BottomLevelRoot) {
