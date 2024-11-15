@@ -179,6 +179,7 @@ inline void instanceTransformUpdateWithMat(Context &ctx,
                                            const Scale &scale,
                                            const ObjectID &obj_id,
                                            const MaterialOverride &mat,
+                                           const ColorOverride &color,
                                            const Renderable &renderable)
 {
     // Just update the instance data that is associated with this entity
@@ -207,8 +208,7 @@ inline void instanceTransformUpdateWithMat(Context &ctx,
     data.scale = scale;
 
     data.matID = mat.matID;
-    
-    data.color = rgbToHex(mat.color);
+    data.color = color.color;
 
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
@@ -369,6 +369,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<InstanceData>();
     registry.registerComponent<MortonCode>();
     registry.registerComponent<MaterialOverride>();
+    registry.registerComponent<ColorOverride>();
 
     registry.registerComponent<RGBOutputBuffer>(rgb_output_bytes);
     registry.registerComponent<DepthOutputBuffer>(depth_output_bytes);
@@ -458,6 +459,7 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             Scale,
             ObjectID,
             MaterialOverride,
+            ColorOverride,
             Renderable
         >>({instance_setup});
 
