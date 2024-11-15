@@ -308,70 +308,50 @@ static void computeCenterOfMass(Context &ctx,
         total_mass += tmp_state.spatialInertia.mass;
     }
     body_grp.comPos = hierarchy_com / total_mass;
-
-    for (int i = 0; i < body_grp.numBodies; ++i) {
-        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[i]);
-        DofObjectNumDofs &num_dofs = ctx.get<DofObjectNumDofs>(
-                body_grp.bodies[i]);
-        tmp_state.comPosHierarchy = tmp_state.comPos - body_grp.comPos;
-
-        switch (num_dofs.numDofs) {
-            case (uint32_t)DofType::Hinge: {
-                tmp_state.phi.v[3] -= body_grp.comPos[0];
-                tmp_state.phi.v[4] -= body_grp.comPos[1];
-                tmp_state.phi.v[5] -= body_grp.comPos[2];
-            } break;
-            case (uint32_t)DofType::FreeBody: {
-                tmp_state.phi.v[0] -= body_grp.comPos[0];
-                tmp_state.phi.v[1] -= body_grp.comPos[1];
-                tmp_state.phi.v[2] -= body_grp.comPos[2];
-            } break;
-            default: {
-                MADRONA_UNREACHABLE();
-            } break;
-        }
-    }
 }
 
 // Pre-CRB: compute the spatial inertia in common Plücker coordinates
 static void computeSpatialInertia(Context &ctx,
-                                  DofObjectNumDofs &num_dofs,
-                                  DofObjectTmpState &tmp_state,
-                                  ObjectID &obj_id)
-{
-    if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
-        return;
-    }
-
+                                  BodyGroupHierarchy &body_grp) {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-    RigidBodyMetadata &metadata = obj_mgr.metadata[obj_id.idx];
 
-    Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
-    float mass = 1.f / metadata.mass.invMass;
+    for(int i = 0; i < body_grp.numBodies; i++)
+    {
+        DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+            return;
+        }
 
-    // We need to find inertia tensor in world space orientation
-    Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
-    // I_world = R^T * I * R = (I * R)^T * R
-    Mat3x3 i_world_frame = inertia * rot_mat;
-    i_world_frame = i_world_frame.transpose() * rot_mat;
+        ObjectID obj_id = ctx.get<ObjectID>(body_grp.bodies[i]);
+        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        RigidBodyMetadata metadata = obj_mgr.metadata[obj_id.idx];
+        Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
+        float mass = 1.f / metadata.mass.invMass;
 
-    // Compute the 3x3 skew-symmetric matrix (r^x) (where r is from Plücker origin to COM)
-    Mat3x3 sym_mat = skewSymmetricMatrix(tmp_state.comPosHierarchy);
-    // (I_world - m r^x r^x)
-    Mat3x3 inertia_mat = i_world_frame - (mass * sym_mat * sym_mat);
+        // We need to find inertia tensor in world space orientation
+        Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
+        // I_world = R^T * I * R = (I * R)^T * R
+        Mat3x3 i_world_frame = inertia * rot_mat;
+        i_world_frame = i_world_frame.transpose() * rot_mat;
 
-    // Take only the upper triangular part (since it's symmetric)
-    tmp_state.spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
-    tmp_state.spatialInertia.spatial_inertia[1] = inertia_mat[1][1];
-    tmp_state.spatialInertia.spatial_inertia[2] = inertia_mat[2][2];
-    tmp_state.spatialInertia.spatial_inertia[3] = inertia_mat[1][0];
-    tmp_state.spatialInertia.spatial_inertia[4] = inertia_mat[2][0];
-    tmp_state.spatialInertia.spatial_inertia[5] = inertia_mat[2][1];
+        // Compute the 3x3 skew-symmetric matrix (r^x) (where r is from Plücker origin to COM)
+        Vector3 adjustedCom = tmp_state.comPos - body_grp.comPos;
+        Mat3x3 sym_mat = skewSymmetricMatrix(adjustedCom);
+        // (I_world - m r^x r^x)
+        Mat3x3 inertia_mat = i_world_frame - (mass * sym_mat * sym_mat);
 
-    // Rest of parameters
-    tmp_state.spatialInertia.mass = mass;
-    tmp_state.spatialInertia.mCom = mass * tmp_state.comPosHierarchy;
+        // Take only the upper triangular part (since it's symmetric)
+        tmp_state.spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
+        tmp_state.spatialInertia.spatial_inertia[1] = inertia_mat[1][1];
+        tmp_state.spatialInertia.spatial_inertia[2] = inertia_mat[2][2];
+        tmp_state.spatialInertia.spatial_inertia[3] = inertia_mat[1][0];
+        tmp_state.spatialInertia.spatial_inertia[4] = inertia_mat[2][0];
+        tmp_state.spatialInertia.spatial_inertia[5] = inertia_mat[2][1];
+
+        // Rest of parameters
+        tmp_state.spatialInertia.mass = mass;
+        tmp_state.spatialInertia.mCom = mass * adjustedCom;
+    }
 }
 
 // Compute spatial inertia of subtree rooted at the body.
@@ -393,6 +373,7 @@ static void combineSpatialInertias(Context &ctx,
 // Fully computes the Phi matrix from generalized velocities to Plücker coordinates
 static float* computePhi(Context &ctx,
                          DofObjectNumDofs &num_dofs,
+                         Vector3 origin,
                          Phi &phi)
 {
     uint32_t world_id = ctx.worldID().idx;
@@ -410,6 +391,7 @@ static float* computePhi(Context &ctx,
         }
         // r^x Skew symmetric matrix
         Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
+        comPos -= origin;
         S[0 + 6 * 4] = -comPos.z;
         S[0 + 6 * 5] = comPos.y;
         S[1 + 6 * 3] = comPos.z;
@@ -423,6 +405,7 @@ static float* computePhi(Context &ctx,
             6 * sizeof(float));
         Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
         Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
+        anchorPos -= origin;
         Vector3 r_cross_hinge = anchorPos.cross(hinge);
         S[0] = r_cross_hinge.x;
         S[1] = r_cross_hinge.y;
@@ -441,6 +424,7 @@ static float* computePhi(Context &ctx,
 static float* computePhiDot(Context &ctx,
                             DofObjectNumDofs &num_dofs,
                             SpatialVector &v_hat,
+                            Vector3 origin,
                             Phi &phi)
 {
     uint32_t world_id = ctx.worldID().idx;
@@ -465,7 +449,7 @@ static float* computePhiDot(Context &ctx,
         S_dot = (float *) state_mgr->tmpAlloc(world_id,
             6 * sizeof(float));
         // S = [r \times hinge; hinge]
-        float* S = computePhi(ctx, num_dofs, phi);
+        float* S = computePhi(ctx, num_dofs, origin, phi);
         // S_dot = v [spatial cross] S
         SpatialVector S_sv = SpatialVector::fromVec(S);
         SpatialVector S_dot_sv = v_hat.cross(S_sv);
@@ -513,7 +497,7 @@ static void compositeRigidBody(Context &ctx,
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
 
-        float *S_i = computePhi(ctx, i_num_dofs, i_tmp_state.phi);
+        float *S_i = computePhi(ctx, i_num_dofs, body_grp.comPos, i_tmp_state.phi);
 
         // Temporary store for F = I_i^C S_i, column-major
         float *F = (float *) state_mgr->tmpAlloc(world_id,
@@ -547,7 +531,7 @@ static void compositeRigidBody(Context &ctx,
             auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[j]);
 
-            float *S_j = computePhi(ctx, j_num_dofs, j_tmp_state.phi);
+            float *S_j = computePhi(ctx, j_num_dofs, body_grp.comPos, j_tmp_state.phi);
 
             // M_{ij} = M{ji} = F^T S_j
             float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
@@ -595,10 +579,10 @@ static void recursiveNewtonEuler(Context &ctx,
         DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
         DofObjectVelocity velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
 
-        float *S = computePhi(ctx, num_dofs, tmp_state.phi);
+        float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
         SpatialVector v_body = {{velocity.qv[0], velocity.qv[1], velocity.qv[2]},
                               Vector3::zero()};
-        float *S_dot = computePhiDot(ctx, num_dofs, v_body, tmp_state.phi);
+        float *S_dot = computePhiDot(ctx, num_dofs, v_body, body_grp.comPos, tmp_state.phi);
 
         // v_0 = 0, a_0 = -g (fictitious upward acceleration)
         tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
@@ -632,10 +616,11 @@ static void recursiveNewtonEuler(Context &ctx,
             tmp_state.sAcc = parent_tmp_state.sAcc;
 
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            float *S = computePhi(ctx, num_dofs, tmp_state.phi);
-            // a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i} (\ddot{q_i} = 0)
-            //  NOTE: we are using the parent velocity here (for hinge itself)
-            float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel, tmp_state.phi);
+            float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+            // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
+            // Note: we are using the parent velocity here (for hinge itself)
+            float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel,
+                body_grp.comPos, tmp_state.phi);
 
             float q_dot = velocity.qv[0];
             for (int j = 0; j < 6; ++j) {
@@ -660,7 +645,7 @@ static void recursiveNewtonEuler(Context &ctx,
 
         // tau_i = S_i^T f_i
         dof_index -= num_dofs.numDofs;
-        float *S = computePhi(ctx, num_dofs, tmp_state.phi);
+        float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
         for(CountT row = 0; row < num_dofs.numDofs; ++row) {
             float *S_col = S + 6 * row;
             for(CountT k = 0; k < 6; ++k) {
@@ -1046,9 +1031,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 
         auto compute_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::computeSpatialInertia,
-                DofObjectNumDofs,
-                DofObjectTmpState,
-                ObjectID
+                BodyGroupHierarchy
             >>({compute_center_of_mass});
 
         auto recursive_newton_euler = builder.addToGraph<ParallelForNode<Context,
