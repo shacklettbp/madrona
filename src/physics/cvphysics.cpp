@@ -436,17 +436,17 @@ static float* computePhiTrans(Context &ctx,
         memset(S, 0.f, 3 * 6 * sizeof(float));
         // Diagonal identity
         for(CountT i = 0; i < 3; ++i) {
-            S[i * 6 + i] = 1.f;
+            S[i * 3 + i] = 1.f;
         }
         // r^x Skew symmetric matrix
         Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
         comPos -= origin;
-        S[0 + 6 * 4] = -comPos.z;
-        S[0 + 6 * 5] = comPos.y;
-        S[1 + 6 * 3] = comPos.z;
-        S[1 + 6 * 5] = -comPos.x;
-        S[2 + 6 * 3] = -comPos.y;
-        S[2 + 6 * 4] = comPos.x;
+        S[0 + 3 * 4] = -comPos.z;
+        S[0 + 3 * 5] = comPos.y;
+        S[1 + 3 * 3] = comPos.z;
+        S[1 + 3 * 5] = -comPos.x;
+        S[2 + 3 * 3] = -comPos.y;
+        S[2 + 3 * 4] = comPos.x;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
         // S = [r \times hinge]
@@ -555,7 +555,6 @@ static float* computeContactJacobian(Context &ctx,
                 J_col[j] = S_col[j];
             }
         }
-
         // Traverse up to parent, breaking if none
         if(curr_hier_desc.parent == Entity::none()) {
             break;
@@ -795,9 +794,9 @@ static void processContacts(Context &ctx,
         t = n.cross({0.f, 1.f, 0.f}).normalize();
     }
     Vector3 s = n.cross(t).normalize();
-    tmp_state.C[0] = s;
+    tmp_state.C[0] = n;
     tmp_state.C[1] = t;
-    tmp_state.C[2] = n;
+    tmp_state.C[2] = s;
 
     // Get friction coefficient
     float mu = std::min(obj_mgr.metadata[objID_i].friction.muS,
