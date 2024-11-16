@@ -721,15 +721,14 @@ static void gaussMinimizeFn(Context &ctx,
     uint32_t world_id = ctx.worldID().idx;
 
     StateManager *state_mgr = ctx.getStateManager();
-    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
     // Recover necessary pointers.
     BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
         BodyGroup, BodyGroupHierarchy>(world_id);
     CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
 
+    // Create complete mass matrix and bias forces
     uint32_t total_num_dofs = 0;
-
     for (CountT i = 0; i < num_grps; ++i) {
         total_num_dofs += hiers[i].numDofs;
     }
@@ -767,6 +766,7 @@ static void gaussMinimizeFn(Context &ctx,
         processed_dofs += hiers[i].numDofs;
     }
 
+    // Call the solver
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
         cv_sing.cvxSolve->totalNumDofs = total_num_dofs;
         cv_sing.cvxSolve->mass = total_mass_mat;
@@ -778,11 +778,8 @@ static void gaussMinimizeFn(Context &ctx,
 
         float *res = cv_sing.cvxSolve->resPtr;
 
-        if (res)
-        {
-            // TODO: make separate integration i.e., put in forces. i'm lazy
-            PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
-            float h = physics_state.h;
+        if (res) {
+            // Update the body accelerations
             uint32_t processed_dofs = 0;
             for (CountT i = 0; i < num_grps; ++i)
             {
@@ -790,29 +787,33 @@ static void gaussMinimizeFn(Context &ctx,
                 {
                     auto body = hiers[i].bodies[j];
                     auto numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
-                    auto &velocity = ctx.get<DofObjectVelocity>(body);
+                    auto &acceleration = ctx.get<DofObjectAcceleration>(body);
                     for (CountT k = 0; k < numDofs; k++) {
-                        velocity.qv[k] += h * res[processed_dofs];
+                        acceleration.dqv[k] = res[processed_dofs];
                         processed_dofs++;
                     }
                 }
             }
         }
     }
+
 }
 
 
 static void integrationStep(Context &ctx,
                             DofObjectPosition &position,
                             DofObjectVelocity &velocity,
-                            DofObjectNumDofs &numDofs,
-                            DofObjectTmpState &tmp_state,
-                            ObjectID &objID)
+                            DofObjectAcceleration &acceleration,
+                            DofObjectNumDofs &numDofs)
 {
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     float h = physics_state.h;
 
     if (numDofs.numDofs == (uint32_t)DofType::FreeBody) {
+        // Symplectic Euler
+        for (int i = 0; i < 6; ++i) {
+            velocity.qv[i] += h * acceleration.dqv[i];
+        }
         for (int i = 0; i < 3; ++i) {
             position.q[i] += h * velocity.qv[i];
         }
@@ -832,6 +833,7 @@ static void integrationStep(Context &ctx,
         position.q[6] = new_rot.z;
     }
     else if (numDofs.numDofs == (uint32_t)DofType::Hinge) {
+        velocity.qv[0] += h * acceleration.dqv[0];
         position.q[0] += h * velocity.qv[0];
     }
     else if (numDofs.numDofs == (uint32_t)DofType::FixedBody) {
@@ -883,6 +885,7 @@ void registerTypes(ECSRegistry &registry)
 
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
+    registry.registerComponent<DofObjectAcceleration>();
     registry.registerComponent<DofObjectNumDofs>();
     registry.registerComponent<DofObjectTmpState>();
     registry.registerComponent<DofObjectHierarchyDesc>();
@@ -931,6 +934,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     auto &pos = ctx.get<DofObjectPosition>(physical_entity);
     auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
+    auto &acc = ctx.get<DofObjectAcceleration>(physical_entity);
     auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
 
 #if 0
@@ -950,12 +954,11 @@ void makeCVPhysicsEntity(Context &ctx,
         pos.q[5] = rotation.y;
         pos.q[6] = rotation.z;
 
-        vel.qv[0] = 0.f;
-        vel.qv[1] = 0.f;
-        vel.qv[2] = 0.f;
-        vel.qv[3] = 0.f;
-        vel.qv[4] = 0.f;
-        vel.qv[5] = 0.f;
+        for(int i = 0; i < 6; i++)
+        {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
 
         tmp_state.sVel = {{vel.qv[0], vel.qv[1], vel.qv[2]},
                           {vel.qv[3], vel.qv[4], vel.qv[5]}};
@@ -1064,9 +1067,8 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
              tasks::integrationStep,
                  DofObjectPosition,
                  DofObjectVelocity,
-                 DofObjectNumDofs,
-                 DofObjectTmpState,
-                 ObjectID
+                 DofObjectAcceleration,
+                 DofObjectNumDofs
             >>({gauss_node});
 #endif
 

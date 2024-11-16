@@ -41,6 +41,10 @@ struct DofObjectVelocity {
     float qv[kMaxVelocityCoords];
 };
 
+struct DofObjectAcceleration {
+    float dqv[kMaxVelocityCoords];
+};
+
 struct DofObjectNumDofs {
     uint32_t numDofs;
 };
@@ -202,7 +206,7 @@ struct DofObjectTmpState {
     // Hold the combined inertia of subtree after combineSpatialInertia
     InertiaTensor spatialInertia;
 
-    // Velocity, Acceleration, Force in Plücker coordinates
+    // Velocity, Acceleration, Force in Plücker coordinates (used for RNE)
     SpatialVector sVel;
     SpatialVector sAcc;
     SpatialVector sForce;
@@ -241,6 +245,7 @@ struct DofObjectHierarchyDesc {
 struct DofObjectArchetype : public Archetype<
     DofObjectPosition,
     DofObjectVelocity,
+    DofObjectAcceleration, // Δv, used for integration
 
     DofObjectTmpState,
 
