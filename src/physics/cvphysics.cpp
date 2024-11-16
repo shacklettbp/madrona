@@ -330,9 +330,8 @@ static void computeSpatialInertia(Context &ctx,
 
         // We need to find inertia tensor in world space orientation
         Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
-        // I_world = R^T * I * R = (I * R)^T * R
-        Mat3x3 i_world_frame = inertia * rot_mat;
-        i_world_frame = i_world_frame.transpose() * rot_mat;
+        // I_world = R * I * R^T (since R^T transforms from world to local)
+        Mat3x3 i_world_frame = rot_mat * inertia * rot_mat.transpose();
 
         // Compute the 3x3 skew-symmetric matrix (r^x) (where r is from Plücker origin to COM)
         Vector3 adjustedCom = tmp_state.comPos - body_grp.comPos;
@@ -764,10 +763,10 @@ static void processContacts(Context &ctx,
 
         // TODO: Need to have the body hierarchy to be able to traverse up the root
         // TODO: Traverse up root here
-        float *S_ref = computePhiTrans(ctx, num_dofs_ref,
-            pt, tmp_state_ref.phi);
-        float *S_alt = computePhiTrans(ctx, num_dofs_alt,
-            pt, tmp_state_alt.phi);
+        // float *S_ref = computePhiTrans(ctx, num_dofs_ref,
+        //     pt, tmp_state_ref.phi);
+        // float *S_alt = computePhiTrans(ctx, num_dofs_alt,
+        //     pt, tmp_state_alt.phi);
 
         // TODO: Multiply each S by C^T
         // J_ref = C^T \sum S_ref ( summing up to root)
@@ -1027,7 +1026,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     case DofType::Hinge: {
         pos.q[0] = 0.f;
-        vel.qv[0] = 0.f;
+        vel.qv[0] = 1.f;
     } break;
 
     case DofType::FixedBody: {
