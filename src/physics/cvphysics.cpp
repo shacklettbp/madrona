@@ -451,7 +451,7 @@ static float* computePhiTrans(Context &ctx,
     else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
         // S = [r \times hinge]
         S = (float *) state_mgr->tmpAlloc(world_id,
-            6 * sizeof(float));
+            3 * sizeof(float));
         Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
         Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
         anchorPos -= origin;
@@ -509,6 +509,70 @@ static float* computePhiDot(Context &ctx,
         MADRONA_UNREACHABLE();
     }
     return S_dot;
+}
+
+static float* computeContactJacobian(Context &ctx,
+                                     DofObjectNumDofs &num_dofs,
+                                     BodyGroupHierarchy &body_grp,
+                                     DofObjectHierarchyDesc &hier_desc,
+                                     Mat3x3 &C,
+                                     Vector3 &origin,
+                                     Phi &phi)
+{
+    uint32_t world_id = ctx.worldID().idx;
+    StateManager *state_mgr = ctx.getStateManager();
+    // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
+    //  where e_{bi} = 1 if body i is an ancestor of b
+    //  C^T projects into the contact space
+    float *J = (float *) state_mgr->tmpAlloc(world_id,
+        3 * body_grp.numDofs * sizeof(float));
+    memset(J, 0.f, 3 * body_grp.numDofs * sizeof(float));
+
+    // Compute prefix sum to determine the start of the block for each body
+    uint32_t block_start[body_grp.numBodies];
+    uint32_t block_offset = 0;
+    for (CountT i = 0; i < body_grp.numBodies; ++i) {
+        block_start[i] = block_offset;
+        block_offset += ctx.get<DofObjectNumDofs>(
+                body_grp.bodies[i]).numDofs;
+    }
+
+    // todo: this is dangerous, maybe we need a do-while (but those are hard to read)
+    CountT curr_idx = hier_desc.index;
+    while(true) {
+        auto &curr_tmp_state = ctx.get<DofObjectTmpState>(
+                body_grp.bodies[curr_idx]);
+        auto &curr_num_dofs = ctx.get<DofObjectNumDofs>(
+                body_grp.bodies[curr_idx]);
+        auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                body_grp.bodies[curr_idx]);
+        // Populate columns of J_C
+        float *S_trans = computePhiTrans(ctx, curr_num_dofs, origin, curr_tmp_state.phi);
+        for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
+            float *J_col = J + 3 * (block_start[curr_idx] + i);
+            float *S_col = S_trans + 3 * i;
+            for(CountT j = 0; j < 3; ++j) {
+                J_col[j] = S_col[j];
+            }
+        }
+
+        // Traverse up to parent, breaking if none
+        if(curr_hier_desc.parent == Entity::none()) {
+            break;
+        }
+        curr_idx = curr_hier_desc.parentIndex;
+    }
+
+    // Project into contact space
+    for(CountT i = 0; i < body_grp.numDofs; ++i) {
+        float *J_col = J + 3 * i;
+        Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
+        J_col_vec = C.transpose() * J_col_vec;
+        J_col[0] = J_col_vec.x;
+        J_col[1] = J_col_vec.y;
+        J_col[2] = J_col_vec.z;
+    }
+    return J;
 }
 
 // CRB: Compute the Mass Matrix (n_dofs x n_dofs)
@@ -720,20 +784,6 @@ static void processContacts(Context &ctx,
     CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
     CountT objID_j = ctx.get<ObjectID>(alt.physicsEntity).idx;
 
-    // Get the two bodies involved
-    tmp_state.ref = contact.ref;
-    tmp_state.alt = contact.alt;
-    Entity refEntity = ref.physicsEntity;
-    Entity altEntity = alt.physicsEntity;
-    DofObjectTmpState &tmp_state_ref = ctx.get<DofObjectTmpState>(
-            refEntity);
-    DofObjectTmpState &tmp_state_alt = ctx.get<DofObjectTmpState>(
-            altEntity);
-    DofObjectNumDofs &num_dofs_ref = ctx.get<DofObjectNumDofs>(
-            refEntity);
-    DofObjectNumDofs &num_dofs_alt = ctx.get<DofObjectNumDofs>(
-            altEntity);
-
     // Create a coordinate system for the contact
     Vector3 n = contact.normal.normalize();
     Vector3 t{};
@@ -745,34 +795,14 @@ static void processContacts(Context &ctx,
         t = n.cross({0.f, 1.f, 0.f}).normalize();
     }
     Vector3 s = n.cross(t).normalize();
-    Mat3x3 C = {t, s, n};
+    tmp_state.C[0] = s;
+    tmp_state.C[1] = t;
+    tmp_state.C[2] = n;
 
     // Get friction coefficient
     float mu = std::min(obj_mgr.metadata[objID_i].friction.muS,
                         obj_mgr.metadata[objID_j].friction.muS);
-
-    // Process each contact point
-    for(CountT i = 0; i < contact.numPoints; ++i) {
-        Vector4 point = contact.points[i];
-        // Need to store the penetration depth
-        tmp_state.penetrations[i] = point.w;
-        Vector3 pt = point.xyz();
-
-        // Compute the Jacobians.
-        // TODO: Check if i or j is fixed body either here or in computePhi
-
-        // TODO: Need to have the body hierarchy to be able to traverse up the root
-        // TODO: Traverse up root here
-        // float *S_ref = computePhiTrans(ctx, num_dofs_ref,
-        //     pt, tmp_state_ref.phi);
-        // float *S_alt = computePhiTrans(ctx, num_dofs_alt,
-        //     pt, tmp_state_alt.phi);
-
-        // TODO: Multiply each S by C^T
-        // J_ref = C^T \sum S_ref ( summing up to root)
-        // J_alt = C^T \sum S_alt ( summing up to root)
-    }
-    tmp_state.num_contacts = contact.numPoints;
+    tmp_state.mu = mu;
 }
 
 static void gaussMinimizeFn(Context &ctx,
@@ -781,6 +811,7 @@ static void gaussMinimizeFn(Context &ctx,
     uint32_t world_id = ctx.worldID().idx;
 
     StateManager *state_mgr = ctx.getStateManager();
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
     // Recover necessary pointers.
     BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
@@ -800,17 +831,20 @@ static void gaussMinimizeFn(Context &ctx,
             world_id, num_mass_mat_bytes);
     memset(total_mass_mat, 0, num_mass_mat_bytes);
 
-    CountT num_full_tau_bytes = sizeof(float) * total_num_dofs;
-    float *full_tau = (float *)state_mgr->tmpAlloc(world_id,
-            num_full_tau_bytes);
-    memset(full_tau, 0, num_full_tau_bytes);
+    CountT num_full_dofs_bytes = sizeof(float) * total_num_dofs;
+    float *full_bias = (float *)state_mgr->tmpAlloc(world_id,
+            total_num_dofs * sizeof(float));
+    float *full_vel = (float *)state_mgr->tmpAlloc(world_id,
+            num_full_dofs_bytes);
+    memset(full_bias, 0, num_full_dofs_bytes);
+    memset(full_vel, 0, num_full_dofs_bytes);
 
     uint32_t processed_dofs = 0;
     for (CountT i = 0; i < num_grps; ++i) {
         float *local_mass = hiers[i].massMatrix;
 
         for (CountT row = 0; row < hiers[i].numDofs; ++row) {
-            full_tau[row + processed_dofs] = hiers[i].biasForces[row];
+            full_bias[row + processed_dofs] = hiers[i].biasForces[row];
 
             for (CountT col = 0; col < hiers[i].numDofs; ++col) {
                 uint32_t mi = row + processed_dofs;
@@ -820,17 +854,133 @@ static void gaussMinimizeFn(Context &ctx,
                 // local mass matrix is column major.
                 total_mass_mat[mj + mi * total_num_dofs] =
                     local_mass[row + hiers[i].numDofs * col];
+
             }
         }
 
         processed_dofs += hiers[i].numDofs;
     }
 
+    // Full velocity
+    processed_dofs = 0;
+    for (CountT i = 0; i < num_grps; ++i) {
+        for (CountT j = 0; j < hiers[i].numBodies; ++j) {
+            DofObjectVelocity vel = ctx.get<DofObjectVelocity>(
+                    hiers[i].bodies[j]);
+            DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(
+                    hiers[i].bodies[j]);
+            for (CountT k = 0; k < num_dofs.numDofs; ++k) {
+                full_vel[processed_dofs] = vel.qv[k];
+                processed_dofs++;
+            }
+        }
+    }
+
+    // Create the contact Jacobian
+    ContactConstraint *contacts = state_mgr->getWorldComponents<
+        Contact, ContactConstraint>(world_id);
+    ContactTmpState *contacts_tmp_state = state_mgr->getWorldComponents<
+        Contact, ContactTmpState>(world_id);
+    // Count contacts
+    CountT num_contacts = state_mgr->numRows<Contact>(world_id);
+    CountT total_contact_pts = 0;
+    for (int i = 0; i < num_contacts; ++i) {
+        total_contact_pts += contacts[i].numPoints;
+    }
+    // Prefix sum for each of the body groups
+    uint32_t block_start[num_grps];
+    uint32_t block_offset = 0;
+    for (CountT i = 0; i < num_grps; ++i) {
+        block_start[i] = block_offset;
+        block_offset += hiers[i].numDofs;
+        hiers[i].tmpIdx = i;
+    }
+
+    // Jacobian is size 3n_c x n_dofs, column-major
+    uint32_t J_rows = 3 * total_contact_pts;
+    uint32_t J_cols = total_num_dofs;
+    float *J_c = (float *) state_mgr->tmpAlloc(world_id,
+        J_rows * J_cols * sizeof(float));
+    memset(J_c, 0, J_rows * J_cols * sizeof(float));
+
+    CountT jac_row = 0;
+    for(CountT ct_idx = 0; ct_idx < num_contacts; ++ct_idx) {
+        ContactConstraint contact = contacts[ct_idx];
+        ContactTmpState &tmp_state = contacts_tmp_state[ct_idx];
+        CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
+                contact.ref);
+        CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
+                contact.alt);
+        DofObjectTmpState &ref_tmp_state = ctx.get<DofObjectTmpState>(
+                ref.physicsEntity);
+        DofObjectTmpState &alt_tmp_state = ctx.get<DofObjectTmpState>(
+                alt.physicsEntity);
+        DofObjectNumDofs &ref_num_dofs = ctx.get<DofObjectNumDofs>(
+                ref.physicsEntity);
+        DofObjectNumDofs &alt_num_dofs = ctx.get<DofObjectNumDofs>(
+                alt.physicsEntity);
+        bool ref_fixed = ref_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
+        bool alt_fixed = alt_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
+        // Each of the contact points
+        for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
+            Vector3 contact_pt = contact.points[pt_idx].xyz();
+            // Compute the Jacobians for each body at the contact point
+            if(!ref_fixed) {
+                DofObjectHierarchyDesc &ref_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                        ref.physicsEntity);
+                BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
+                        ref_hier_desc.bodyGroup);
+                float* J_ref = computeContactJacobian(ctx,
+                    ref_num_dofs, ref_grp, ref_hier_desc,
+                    tmp_state.C, contact_pt, ref_tmp_state.phi);
+                for(CountT i = 0; i < ref_num_dofs.numDofs; ++i) {
+                    float *J_col = J_c +
+                        J_rows * (block_start[ref_grp.tmpIdx] + i) + jac_row;
+                    float *J_ref_col = J_ref + 3 * i;
+                    for(CountT j = 0; j < 3; ++j) {
+                        J_col[j] += J_ref_col[j];
+                    }
+                }
+            }
+            if(!alt_fixed) {
+                DofObjectHierarchyDesc &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                        alt.physicsEntity);
+                BodyGroupHierarchy &alt_grp = ctx.get<BodyGroupHierarchy>(
+                        alt_hier_desc.bodyGroup);
+                float *J_alt = computeContactJacobian(ctx,
+                    alt_num_dofs, alt_grp, alt_hier_desc,
+                    tmp_state.C, contact_pt, alt_tmp_state.phi);
+                for(CountT i = 0; i < alt_num_dofs.numDofs; ++i) {
+                    float *J_col = J_c +
+                        J_rows * (block_start[alt_grp.tmpIdx] + i) + jac_row;
+                    float *J_alt_col = J_alt + 3 * i;
+                    for(CountT j = 0; j < 3; ++j) {
+                        J_col[j] -= J_alt_col[j];
+                    }
+                }
+            }
+            jac_row += 3;
+        }
+    }
+
+    // Convert J to row-major
+    float *J_c_rm = (float *) state_mgr->tmpAlloc(world_id,
+        J_rows * J_cols * sizeof(float));
+    for(CountT i = 0; i < J_rows; ++i) {
+        for(CountT j = 0; j < J_cols; ++j) {
+            J_c_rm[j + i * J_cols] = J_c[i + j * J_rows];
+        }
+    }
+
     // Call the solver
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
         cv_sing.cvxSolve->totalNumDofs = total_num_dofs;
+        cv_sing.cvxSolve->numContactPts = total_contact_pts;
+        cv_sing.cvxSolve->h = physics_state.h;
         cv_sing.cvxSolve->mass = total_mass_mat;
-        cv_sing.cvxSolve->tau = full_tau;
+        cv_sing.cvxSolve->bias = full_bias;
+        cv_sing.cvxSolve->vel = full_vel;
+        cv_sing.cvxSolve->J_c = J_c_rm;
 
         cv_sing.cvxSolve->callSolve.store_release(1);
         while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
@@ -975,6 +1125,7 @@ void setCVGroupRoot(Context &ctx,
     hierarchy.index = 0;
     hierarchy.parentIndex = -1;
     hierarchy.parent = Entity::none();
+    hierarchy.bodyGroup = ctx.loc(body_group);
 
     auto &body_grp_hier = ctx.get<BodyGroupHierarchy>(body_group);
 
@@ -1026,7 +1177,7 @@ void makeCVPhysicsEntity(Context &ctx,
 
     case DofType::Hinge: {
         pos.q[0] = 0.f;
-        vel.qv[0] = 1.f;
+        vel.qv[0] = 0.f;
     } break;
 
     case DofType::FixedBody: {
@@ -1194,7 +1345,7 @@ void setCVEntityParentHinge(Context &ctx,
     hier_desc.relPositionLocal = rel_pos_child;
     hier_desc.hingeAxis = hinge_axis;
     hier_desc.leaf = true;
-
+    hier_desc.bodyGroup = ctx.loc(body_grp);
 
     hier_desc.index = grp.numBodies;
     hier_desc.parentIndex = parent_hier_desc.index;

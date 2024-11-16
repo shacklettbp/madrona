@@ -170,8 +170,12 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs,
     float *res = solve->fn(
             solve->data,
             solve->totalNumDofs,
+            solve->numContactPts,
+            solve->h,
             solve->mass,
-            solve->tau);
+            solve->bias,
+            solve->vel,
+            solve->J_c);
 
     solve->resPtr = res;
 

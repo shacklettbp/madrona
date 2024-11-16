@@ -19,8 +19,12 @@ struct CVXSolve {
 using CVXSolveFn = float *(*)(
         void *data,
         uint32_t total_num_dofs,
+        uint32_t num_contact_pts,
+        float h,
         float *mass,
-        float *tau);
+        float *bias,
+        float *vel,
+        float *J_c);
 
 struct CVXSolve {
     CVXSolveFn fn;
@@ -31,8 +35,12 @@ struct CVXSolve {
     AtomicU32 callSolve;
 
     uint32_t totalNumDofs;
+    uint32_t numContactPts;
+    float h;
     float *mass;
-    float *tau;
+    float *bias;
+    float *vel;
+    float *J_c;
 
     float *resPtr;
 };

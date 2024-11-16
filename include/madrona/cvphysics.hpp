@@ -50,11 +50,9 @@ struct DofObjectNumDofs {
 };
 
 struct ContactTmpState {
-    Loc ref;
-    Loc alt;
-
-    uint32_t num_contacts;
-    float penetrations[4];
+    float mu;
+    // Contact coordinate system (first col is normal, two tangents)
+    math::Mat3x3 C;
 };
 
 // During solve, we will store the individual contact point info
@@ -237,6 +235,8 @@ struct DofObjectHierarchyDesc {
     int32_t index;
     // Index of the parent in the body group hierarchy.
     int32_t parentIndex;
+
+    Loc bodyGroup;
 };
 
 struct DofObjectArchetype : public Archetype<
@@ -273,6 +273,9 @@ struct BodyGroupHierarchy {
 
     // Bias forces (num_dof) of the body group
     float *biasForces;
+
+    // Temporary index used during stacking
+    uint32_t tmpIdx;
 };
 
 struct BodyGroup : public Archetype<
