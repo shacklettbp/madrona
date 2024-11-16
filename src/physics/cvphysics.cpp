@@ -886,6 +886,23 @@ static void gaussMinimizeFn(Context &ctx,
     for (int i = 0; i < num_contacts; ++i) {
         total_contact_pts += contacts[i].numPoints;
     }
+
+    // Process mu and penetrations for each point
+    CountT num_full_contact_bytes = sizeof(float) * total_contact_pts;
+    float *full_mu = (float *)state_mgr->tmpAlloc(world_id,
+            num_full_contact_bytes);
+    float *full_penetration = (float *)state_mgr->tmpAlloc(world_id,
+            num_full_contact_bytes);
+    CountT processed_pts = 0;
+    for (int i = 0; i < num_contacts; ++i) {
+        ContactTmpState &tmp_state = contacts_tmp_state[i];
+        for (int j = 0; j < contacts[i].numPoints; ++j) {
+            full_mu[processed_pts] = tmp_state.mu;
+            full_penetration[processed_pts] = contacts[i].points[j].w;
+            processed_pts++;
+        }
+    }
+
     // Prefix sum for each of the body groups
     uint32_t block_start[num_grps];
     uint32_t block_offset = 0;
@@ -980,6 +997,8 @@ static void gaussMinimizeFn(Context &ctx,
         cv_sing.cvxSolve->bias = full_bias;
         cv_sing.cvxSolve->vel = full_vel;
         cv_sing.cvxSolve->J_c = J_c_rm;
+        cv_sing.cvxSolve->mu = full_mu;
+        cv_sing.cvxSolve->penetrations = full_penetration;
 
         cv_sing.cvxSolve->callSolve.store_release(1);
         while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
@@ -1175,7 +1194,7 @@ void makeCVPhysicsEntity(Context &ctx,
     } break;
 
     case DofType::Hinge: {
-        pos.q[0] = 0.f;
+        pos.q[0] = 0.0f;
         vel.qv[0] = 0.f;
     } break;
 

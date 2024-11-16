@@ -175,7 +175,9 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs,
             solve->mass,
             solve->bias,
             solve->vel,
-            solve->J_c);
+            solve->J_c,
+            solve->mu,
+            solve->penetrations);
 
     solve->resPtr = res;
 

@@ -24,7 +24,9 @@ using CVXSolveFn = float *(*)(
         float *mass,
         float *bias,
         float *vel,
-        float *J_c);
+        float *J_c,
+        float *mu,
+        float *penetrations);
 
 struct CVXSolve {
     CVXSolveFn fn;
@@ -41,6 +43,8 @@ struct CVXSolve {
     float *bias;
     float *vel;
     float *J_c;
+    float *mu;
+    float *penetrations;
 
     float *resPtr;
 };
