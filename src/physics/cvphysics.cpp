@@ -949,7 +949,7 @@ static void gaussMinimizeFn(Context &ctx,
                 float* J_ref = computeContactJacobian(ctx,
                     ref_num_dofs, ref_grp, ref_hier_desc,
                     tmp_state.C, contact_pt, ref_tmp_state.phi);
-                for(CountT i = 0; i < ref_num_dofs.numDofs; ++i) {
+                for(CountT i = 0; i < ref_grp.numDofs; ++i) {
                     float *J_col = J_c +
                         J_rows * (block_start[ref_grp.tmpIdx] + i) + jac_row;
                     float *J_ref_col = J_ref + 3 * i;
@@ -966,7 +966,7 @@ static void gaussMinimizeFn(Context &ctx,
                 float *J_alt = computeContactJacobian(ctx,
                     alt_num_dofs, alt_grp, alt_hier_desc,
                     tmp_state.C, contact_pt, alt_tmp_state.phi);
-                for(CountT i = 0; i < alt_num_dofs.numDofs; ++i) {
+                for(CountT i = 0; i < alt_grp.numDofs; ++i) {
                     float *J_col = J_c +
                         J_rows * (block_start[alt_grp.tmpIdx] + i) + jac_row;
                     float *J_alt_col = J_alt + 3 * i;
