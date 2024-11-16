@@ -954,7 +954,7 @@ static void gaussMinimizeFn(Context &ctx,
                         J_rows * (block_start[ref_grp.tmpIdx] + i) + jac_row;
                     float *J_ref_col = J_ref + 3 * i;
                     for(CountT j = 0; j < 3; ++j) {
-                        J_col[j] += J_ref_col[j];
+                        J_col[j] -= J_ref_col[j];
                     }
                 }
             }
@@ -971,7 +971,7 @@ static void gaussMinimizeFn(Context &ctx,
                         J_rows * (block_start[alt_grp.tmpIdx] + i) + jac_row;
                     float *J_alt_col = J_alt + 3 * i;
                     for(CountT j = 0; j < 3; ++j) {
-                        J_col[j] -= J_alt_col[j];
+                        J_col[j] += J_alt_col[j];
                     }
                 }
             }
