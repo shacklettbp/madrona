@@ -50,14 +50,11 @@ struct DofObjectNumDofs {
 };
 
 struct ContactTmpState {
-    float mu;
-    math::Vector3 n;
-    math::Vector3 t;
-    math::Vector3 s;
-    math::Vector3 rRefComToPt[4];
-    math::Vector3 rAltComToPt[4];
-    float maxPenetration;
+    Loc ref;
+    Loc alt;
+
     uint32_t num_contacts;
+    float penetrations[4];
 };
 
 // During solve, we will store the individual contact point info

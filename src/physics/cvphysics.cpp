@@ -420,6 +420,52 @@ static float* computePhi(Context &ctx,
     return S;
 }
 
+// Computes only the first three rows of Phi (for the translational part)
+static float* computePhiTrans(Context &ctx,
+                              DofObjectNumDofs &num_dofs,
+                              Vector3 origin,
+                              Phi &phi)
+{
+    uint32_t world_id = ctx.worldID().idx;
+    StateManager *state_mgr = ctx.getStateManager();
+    float *S;
+
+    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+        // S = [1_3x3 r^x], column-major
+        S = (float *) state_mgr->tmpAlloc(world_id,
+            3 * 6 * sizeof(float));
+        memset(S, 0.f, 3 * 6 * sizeof(float));
+        // Diagonal identity
+        for(CountT i = 0; i < 3; ++i) {
+            S[i * 6 + i] = 1.f;
+        }
+        // r^x Skew symmetric matrix
+        Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
+        comPos -= origin;
+        S[0 + 6 * 4] = -comPos.z;
+        S[0 + 6 * 5] = comPos.y;
+        S[1 + 6 * 3] = comPos.z;
+        S[1 + 6 * 5] = -comPos.x;
+        S[2 + 6 * 3] = -comPos.y;
+        S[2 + 6 * 4] = comPos.x;
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        // S = [r \times hinge]
+        S = (float *) state_mgr->tmpAlloc(world_id,
+            6 * sizeof(float));
+        Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
+        Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
+        anchorPos -= origin;
+        Vector3 r_cross_hinge = anchorPos.cross(hinge);
+        S[0] = r_cross_hinge.x;
+        S[1] = r_cross_hinge.y;
+        S[2] = r_cross_hinge.z;
+    }
+    else {
+        MADRONA_UNREACHABLE();
+    }
+    return S;
+}
 
 static float* computePhiDot(Context &ctx,
                             DofObjectNumDofs &num_dofs,
@@ -667,15 +713,27 @@ static void processContacts(Context &ctx,
                             ContactConstraint &contact,
                             ContactTmpState &tmp_state)
 {
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
     CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
             contact.ref);
     CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
             contact.alt);
+    CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
+    CountT objID_j = ctx.get<ObjectID>(alt.physicsEntity).idx;
 
-    auto &ref_pos = ctx.get<DofObjectPosition>(ref.physicsEntity);
-    auto &alt_pos = ctx.get<DofObjectPosition>(alt.physicsEntity);
-    Vector3 ref_com = Vector3(ref_pos.q[0], ref_pos.q[1], ref_pos.q[2]);
-    Vector3 alt_com = Vector3(alt_pos.q[0], alt_pos.q[1], alt_pos.q[2]);
+    // Get the two bodies involved
+    tmp_state.ref = contact.ref;
+    tmp_state.alt = contact.alt;
+    Entity refEntity = ref.physicsEntity;
+    Entity altEntity = alt.physicsEntity;
+    DofObjectTmpState &tmp_state_ref = ctx.get<DofObjectTmpState>(
+            refEntity);
+    DofObjectTmpState &tmp_state_alt = ctx.get<DofObjectTmpState>(
+            altEntity);
+    DofObjectNumDofs &num_dofs_ref = ctx.get<DofObjectNumDofs>(
+            refEntity);
+    DofObjectNumDofs &num_dofs_alt = ctx.get<DofObjectNumDofs>(
+            altEntity);
 
     // Create a coordinate system for the contact
     Vector3 n = contact.normal.normalize();
@@ -688,31 +746,34 @@ static void processContacts(Context &ctx,
         t = n.cross({0.f, 1.f, 0.f}).normalize();
     }
     Vector3 s = n.cross(t).normalize();
-
-    tmp_state.n = n;
-    tmp_state.t = t;
-    tmp_state.s = s;
-
-    CountT i = 0;
-    float max_penetration = -FLT_MAX;
-    for(; i < contact.numPoints; ++i) {
-        Vector4 point = contact.points[i];
-        // Compute the relative positions of the contact
-        tmp_state.rRefComToPt[i] = point.xyz() - ref_com;
-        tmp_state.rAltComToPt[i] = point.xyz() - alt_com;
-        tmp_state.maxPenetration = std::max(max_penetration, point.w);
-    }
-
-    tmp_state.num_contacts = contact.numPoints;
+    Mat3x3 C = {t, s, n};
 
     // Get friction coefficient
-    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-    CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
-    CountT objID_j = ctx.get<ObjectID>(alt.physicsEntity).idx;
-    RigidBodyMetadata &metadata_i = obj_mgr.metadata[objID_i];
-    RigidBodyMetadata &metadata_j = obj_mgr.metadata[objID_j];
-    tmp_state.mu = std::min(metadata_i.friction.muS,
-                            metadata_j.friction.muS);
+    float mu = std::min(obj_mgr.metadata[objID_i].friction.muS,
+                        obj_mgr.metadata[objID_j].friction.muS);
+
+    // Process each contact point
+    for(CountT i = 0; i < contact.numPoints; ++i) {
+        Vector4 point = contact.points[i];
+        // Need to store the penetration depth
+        tmp_state.penetrations[i] = point.w;
+        Vector3 pt = point.xyz();
+
+        // Compute the Jacobians.
+        // TODO: Check if i or j is fixed body either here or in computePhi
+
+        // TODO: Need to have the body hierarchy to be able to traverse up the root
+        // TODO: Traverse up root here
+        float *S_ref = computePhiTrans(ctx, num_dofs_ref,
+            pt, tmp_state_ref.phi);
+        float *S_alt = computePhiTrans(ctx, num_dofs_alt,
+            pt, tmp_state_alt.phi);
+
+        // TODO: Multiply each S by C^T
+        // J_ref = C^T \sum S_ref ( summing up to root)
+        // J_alt = C^T \sum S_alt ( summing up to root)
+    }
+    tmp_state.num_contacts = contact.numPoints;
 }
 
 static void gaussMinimizeFn(Context &ctx,
