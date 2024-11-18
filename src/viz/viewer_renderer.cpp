@@ -2939,7 +2939,7 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
             (uint32_t)view_idx,
             world_idx,
 
-            1,  // Is orthographic
+            0,  // Is orthographic
             30.0f, // x max
             -30.0f, // x min
             40.0f, // y max
@@ -3048,7 +3048,7 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
         (uint32_t)view_idx,
         world_idx,
 
-        1,  // Is orthographic
+        0,  // Is orthographic
         60.0f, // x max
         -60.0f, // x min
         80.0f, // y max
