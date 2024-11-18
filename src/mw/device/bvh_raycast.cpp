@@ -1,7 +1,9 @@
 #define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
 
+#if 0
 #include <cuda/barrier>
 #include <cuda/pipeline>
+#endif
 
 #include <madrona/bvh.hpp>
 #include <madrona/mesh_bvh.hpp>
@@ -105,7 +107,9 @@ struct TraceInfo {
 struct TraceWorldInfo {
     QBVHNode *nodes;
     InstanceData *instances;
-    Vector3 lightDir;
+
+    LightDesc *lights;
+    uint32_t numLights;
 };
 
 enum class GroupType : uint8_t {
@@ -479,6 +483,7 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
     }
 }
 
+#if 0
 static void prefetchNode(uint32_t node_idx,
                          QBVHNode *node_buffer,
                          QBVHNode *result_smem,
@@ -493,7 +498,9 @@ static void prefetchNode(uint32_t node_idx,
     }
     pipe.producer_commit();
 }
+#endif
 
+#if 0
 static QBVHNode readNode(QBVHNode *node_smem,
                          cuda::pipeline<cuda::thread_scope_thread> &pipe)
 {
@@ -503,6 +510,7 @@ static QBVHNode readNode(QBVHNode *node_smem,
 
     return read_node;
 }
+#endif
 
 static Vector3 hexToRgb(uint32_t hex)
 {
@@ -518,6 +526,7 @@ static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
 {
+#if 0
     uint8_t *smem_scratch = nullptr;
     {
         uint32_t linear_tid =
@@ -528,8 +537,11 @@ static __device__ TraceResult traceRay(
             (blockDim.x * blockDim.y * blockDim.z);
         smem_scratch = &smem::buffer[linear_tid * bytes_per_thread];
     }
+#endif
 
+#if 0
     cuda::pipeline<cuda::thread_scope_thread> pipe = cuda::make_pipeline();
+#endif
 
     // We create these so that we can keep track of the original ray origin,
     // direction in world space. We will need to transform them when we enter
@@ -843,10 +855,6 @@ static __device__ FragmentResult computeFragment(
     // Direct hit first
     TraceResult first_hit = traceRay(trace_info, world_info);
 
-#if defined (MADRONA_RT_SHADOWS)
-    TraceResult shadow_hit = {};
-#endif
-
     __syncwarp();
 
     if (!bvhParams.raycastRGBD) {
@@ -857,39 +865,49 @@ static __device__ FragmentResult computeFragment(
             };
         }
     } else if (first_hit.hit) {
+        // Now we need to test against lights.
         Vector3 hit_pos = trace_info.rayOrigin +
                           first_hit.depth * trace_info.rayDirection;
 
-#if defined (MADRONA_RT_SHADOWS)
-        shadow_hit = traceRay(
-                TraceInfo {
-                    .rayOrigin = hit_pos,
-                    .rayDirection = world_info.lightDir,
-                    .tMin = 0.000001f,
-                    .tMax = 10000.f,
-                    .dOnly = true
-                }, world_info);
+        Vector3 acc_color = Vector3{ 0.f, 0.f, 0.f };
 
-        if (shadow_hit.hit) {
-            return FragmentResult {
-                .hit = true,
-                .color = lightingShadow(first_hit.color, first_hit.normal),
-                .normal = first_hit.normal,
-                .depth = first_hit.depth
-            };
-        } else {
-#endif
-            return FragmentResult {
-                .hit = true,
-                .color = lighting(first_hit.color, 
+        for (int i = 0; i < world_info.numLights; ++i) {
+            LightDesc desc = world_info.lights[i];
+
+            if (desc.castShadow) {
+                // TODO: Definitely do some sort of ray fetching because there will
+                // be threads doing nothing potentially.
+                TraceResult shadow_hit = traceRay(
+                        TraceInfo {
+                            .rayOrigin = hit_pos,
+                            .rayDirection = world_info.lights[i].direction,
+                            .tMin = 0.000001f,
+                            .tMax = 10000.f,
+                            .dOnly = true
+                        }, world_info);
+
+                if (shadow_hit.hit) {
+                    return FragmentResult {
+                        .hit = true,
+                        .color = lightingShadow(first_hit.color, first_hit.normal),
+                        .normal = first_hit.normal,
+                        .depth = first_hit.depth
+                    };
+                }
+            }
+
+            acc_color += lighting(first_hit.color, 
                                   first_hit.normal,
-                                  world_info.lightDir),
-                .normal = first_hit.normal,
-                .depth = first_hit.depth
-            };
-#if defined (MADRONA_RT_SHADOWS)
+                                  desc.direction);
         }
-#endif
+
+        // If we are still here, just do normal lighting calculation.
+        return FragmentResult {
+            .hit = true,
+            .color = acc_color,
+            .normal = first_hit.normal,
+            .depth = first_hit.depth
+        };
     }
 
     return FragmentResult {
@@ -948,7 +966,8 @@ extern "C" __global__ void bvhRaycastEntry()
                 .nodes = bvhParams.internalData->traversalNodes + 
                          internal_nodes_offset,
                 .instances = bvhParams.instances + internal_nodes_offset,
-                .lightDir = Vector3{ 0.5, 0.5, 2.f }.normalize()
+                .lights = &bvhParams.lights[bvhParams.lightOffsets[world_idx]],
+                .numLights = (uint32_t)bvhParams.lightCounts[world_idx]
             }
         );
 

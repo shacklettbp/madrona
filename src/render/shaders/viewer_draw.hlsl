@@ -209,11 +209,49 @@ float4 vert(in uint vid : SV_VertexID,
         rotateVec(to_view_rotation, instance_data.scale * vert.position) +
             to_view_translation;
 
+#if 0
     float4 clip_pos = float4(
         view_data.xScale * view_pos.x,
         view_data.yScale * view_pos.z,
         view_data.zNear,
         view_pos.y);
+#endif
+
+    float4 clip_pos;
+
+    if (push_const.isOrtho == 1) {
+        float x_max = push_const.xMax * view_data.xScale;
+        float x_min = push_const.xMin * view_data.xScale;
+
+        float y_max = push_const.yMax;
+        float y_min = push_const.yMin;
+
+        float z_max = push_const.zMax * (1.0f / -view_data.yScale);
+        float z_min = push_const.zMin * (1.0f / -view_data.yScale);
+
+        float4x4 m1 = float4x4(
+                float4(2.0f / (x_max - x_min),             0.0f,                       0.0f,                        -(x_max + x_min) / (x_max - x_min)),
+                float4(0.0f,                               0.0f,                      -2.0f / (z_max - z_min),      -(z_max+z_min) / (z_max - z_min)),
+                float4(0.0f,                               1.0f / (y_max - y_min),     0.0f,                        -(y_min) / (y_max - y_min)),
+                float4(0.0f,                               0.0f,                       0.0f,                        1.0f));
+
+        clip_pos = mul(m1, float4(view_pos.x, view_pos.y, view_pos.z, 1.0f));
+        clip_pos.z = 1.0 - clip_pos.z;
+    }
+    else {
+#if 0
+        clip_pos = float4( view_data.xScale * view_pos.x,
+                       view_data.yScale * view_pos.z,
+                       view_data.zNear,
+                       1.0);
+#endif
+
+        clip_pos = float4(
+            view_data.xScale * view_pos.x,
+            view_data.yScale * view_pos.z,
+            view_data.zNear,
+            view_pos.y);
+    }
 
     v2f.normal = normalize(
         rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));

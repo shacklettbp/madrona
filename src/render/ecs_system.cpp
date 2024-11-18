@@ -370,6 +370,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<MortonCode>();
     registry.registerComponent<MaterialOverride>();
     registry.registerComponent<ColorOverride>();
+    registry.registerComponent<LightDesc>();
 
     registry.registerComponent<RGBOutputBuffer>(rgb_output_bytes);
     registry.registerComponent<DepthOutputBuffer>(depth_output_bytes);
@@ -380,6 +381,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<TLBVHNode>();
 
     registry.registerArchetype<RaycastOutputArchetype>();
+    registry.registerArchetype<LightArchetype>();
 
 
     // Pointers get set in RenderingSystem::init
@@ -518,10 +520,17 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
     auto post_view_sort_reset_tmp =
         builder.addToGraph<ResetTmpAllocNode>({sort_views_index});
 
+    auto sort_lights_world = builder.addToGraph<SortArchetypeNode<
+        LightArchetype, WorldID>>(
+                {post_view_sort_reset_tmp});
+
+    auto post_light_sort_reset_tmp =
+        builder.addToGraph<ResetTmpAllocNode>({sort_lights_world});
+
     auto export_counts = builder.addToGraph<ParallelForNode<Context,
         exportCountsGPU,
             RenderingSystemState
-        >>({post_view_sort_reset_tmp});
+        >>({post_light_sort_reset_tmp});
 
     return export_counts;
 #else
@@ -631,6 +640,17 @@ void cleanupRenderableEntity(Context &ctx,
 {
     Entity render_entity = ctx.get<Renderable>(e).renderEntity;
     ctx.destroyEntity(render_entity);
+}
+
+Entity makeLight(Context &ctx)
+{
+    Entity light_entity = ctx.makeEntity<LightArchetype>();
+    return light_entity;
+}
+
+void configureLight(Context &ctx, Entity light, LightDesc desc)
+{
+    ctx.get<LightDesc>(light) = desc;
 }
 
 // Add this later when we decide to make the renderer more flexible

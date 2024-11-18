@@ -56,6 +56,28 @@ struct alignas(16) InstanceData {
     uint32_t color;
 };
 
+struct LightDesc {
+    enum Type : bool {
+        Directional = true,
+        Spotlight = false
+    };
+
+    Type type;
+    bool castShadow;
+
+    // Only affects the spotlight (defaults to 0 0 0).
+    math::Vector3 position;
+
+    // Affects both directional/spotlight.
+    math::Vector3 direction;
+
+    // Angle for the spotlight (default to pi/4).
+    float cutoff;
+
+    // Gives ability to turn light on or off.
+    bool active;
+};
+
 struct MaterialOverride {
     // These are values that matID can take on if not some override material ID.
     enum {
@@ -103,6 +125,10 @@ struct RenderableArchetype : public Archetype<
     TLBVHNode
 > {};
 
+struct LightArchetype : public Archetype<
+    LightDesc
+> {};
+
 // For private usage - not to be used by user.
 struct RenderCameraArchetype : public Archetype<
     PerspectiveCameraData,
@@ -145,6 +171,10 @@ namespace RenderingSystem {
                               Entity e);
     void cleanupRenderableEntity(Context &ctx,
                                  Entity e);
+
+    Entity makeLight(Context &ctx);
+
+    void configureLight(Context &ctx, Entity light, LightDesc desc);
 };
 
 }

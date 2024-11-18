@@ -117,6 +117,9 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
     params->views = mgr->getArchetypeComponent<
         RenderCameraArchetype, PerspectiveCameraData>();
 
+    params->lights = mgr->getArchetypeComponent<
+        LightArchetype, LightDesc>();
+
     params->instanceOffsets = (int32_t *)mgr->getArchetypeWorldOffsets<
         RenderableArchetype>();
 
@@ -131,6 +134,12 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
 
     params->viewCounts = (int32_t *)mgr->getArchetypeWorldCounts<
         RenderCameraArchetype>();
+
+    params->lightOffsets = (int32_t *)mgr->getArchetypeWorldOffsets<
+        LightArchetype>();
+
+    params->lightCounts = (int32_t *)mgr->getArchetypeWorldCounts<
+        LightArchetype>();
 
     params->mortonCodes = (uint32_t *)mgr->getArchetypeComponent<
         RenderableArchetype, MortonCode>();

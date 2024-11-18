@@ -101,6 +101,14 @@ struct SkyData {
 struct DrawPushConst {
     uint32_t viewIdx;
     uint32_t worldIdx;
+
+    uint32_t isOrtho;
+    float xMax;
+    float xMin;
+    float yMax;
+    float yMin;
+    float zMax;
+    float zMin;
 };
 
 struct ShadowGenPushConst {
