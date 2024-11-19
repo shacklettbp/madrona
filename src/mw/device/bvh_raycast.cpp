@@ -352,6 +352,15 @@ static bool rayTriangleIntersection(
     float V = fmaf(Ax, Cy, - Ay * Cx);
     float W = fmaf(Bx, Ay, - By * Ax);
 
+    static constexpr float eps_tol = 1e-7;
+
+    if (U > -eps_tol && U < eps_tol)
+        U = 0.f;
+    if (V > -eps_tol && V < eps_tol)
+        V = 0.f;
+    if (W > -eps_tol && W < eps_tol)
+        W = 0.f;
+
     // Perform edge tests
 #ifdef MADRONA_MESHBVH_BACKFACE_CULLING
     if (U < 0.0f || V < 0.0f || W < 0.0f) {
