@@ -150,7 +150,8 @@ namespace RenderingSystem {
 
     TaskGraphNodeID setupTasks(
         TaskGraphBuilder &builder,
-        Span<const TaskGraphNodeID> deps);
+        Span<const TaskGraphNodeID> deps,
+        bool update_mats = false);
 
     void init(Context &ctx,
               const RenderECSBridge *bridge);

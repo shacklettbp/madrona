@@ -125,8 +125,11 @@ inline void instanceTransformUpdate(Context &ctx,
     data.position = pos;
     data.rotation = rot;
     data.scale = scale;
-    data.matID = -1;
-    data.color = 0;
+
+    // Leave it to what is was previously
+    // data.matID = -1;
+    // data.color = 0;
+
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
 
@@ -437,7 +440,8 @@ void registerTypes(ECSRegistry &registry,
 }
 
 TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
-                           Span<const TaskGraphNodeID> deps)
+                           Span<const TaskGraphNodeID> deps,
+                           bool update_mats)
 {
     // FIXME: It feels like we should have persistent slots for renderer
     // state rather than needing to continually reset the instance count
@@ -453,17 +457,19 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             Renderable
         >>(deps);
 
-    auto instance_mat_setup = builder.addToGraph<ParallelForNode<Context,
-        instanceTransformUpdateWithMat,
-            Entity,
-            Position,
-            Rotation,
-            Scale,
-            ObjectID,
-            MaterialOverride,
-            ColorOverride,
-            Renderable
-        >>({instance_setup});
+    if (update_mats) {
+        instance_setup = builder.addToGraph<ParallelForNode<Context,
+            instanceTransformUpdateWithMat,
+                Entity,
+                Position,
+                Rotation,
+                Scale,
+                ObjectID,
+                MaterialOverride,
+                ColorOverride,
+                Renderable
+            >>({instance_setup});
+    }
 
     auto viewdata_update = builder.addToGraph<ParallelForNode<Context,
         viewTransformUpdate,
@@ -471,7 +477,7 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             Position,
             Rotation,
             RenderCamera
-        >>({instance_mat_setup});
+        >>({instance_setup});
 
     auto mortoncode_update = builder.addToGraph<ParallelForNode<Context,
          mortonCodeUpdate,
@@ -581,6 +587,10 @@ void makeEntityRenderable(Context &ctx,
 {
     Entity render_entity = ctx.makeEntity<RenderableArchetype>();
     ctx.get<Renderable>(e).renderEntity = render_entity;
+
+    // Set default mat / color to not be overriden
+    ctx.get<InstanceData>(render_entity).matID = -1;
+    ctx.get<InstanceData>(render_entity).color = 0;
 }
 
 void attachEntityToView(Context &ctx,
