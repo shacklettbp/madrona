@@ -24,6 +24,8 @@
 
 #include "cpp_compile.hpp"
 
+volatile int gLoopController = 0;
+
 #define KHRONOS_STATIC
 #include <span>
 // #define MADRONA_FAST_BVH
@@ -2301,6 +2303,11 @@ MWCudaExecutor::MWCudaExecutor(
     });
 
     std::cout << "Initialization finished" << std::endl;
+
+    printf("Waiting for attach %p\n", &gLoopController);
+    while (gLoopController == 0);
+    std::cout << "Attach happened" << std::endl;
+
 }
 
 MWCudaExecutor::MWCudaExecutor(MWCudaExecutor &&o)
