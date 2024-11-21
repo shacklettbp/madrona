@@ -160,6 +160,9 @@ namespace RenderingSystem {
 
     void makeEntityRenderable(Context &ctx,
                               Entity e);
+    
+    void disableEntityRenderable(Context &ctx,
+                                 Entity e);
 
     void attachEntityToView(Context &ctx,
                             Entity e,
