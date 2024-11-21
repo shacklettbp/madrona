@@ -101,6 +101,9 @@ inline void instanceTransformUpdate(Context &ctx,
                                     const ObjectID &obj_id,
                                     const Renderable &renderable)
 {
+    if (renderable.renderEntity == Entity::none()) {
+        return;
+    }
     // Just update the instance data that is associated with this entity
 #if defined(MADRONA_GPU_MODE)
     (void)e;
@@ -185,6 +188,9 @@ inline void instanceTransformUpdateWithMat(Context &ctx,
                                            const ColorOverride &color,
                                            const Renderable &renderable)
 {
+    if (renderable.renderEntity == Entity::none()) {
+        return;
+    }
     // Just update the instance data that is associated with this entity
 #if defined(MADRONA_GPU_MODE)
     (void)e;
@@ -591,6 +597,12 @@ void makeEntityRenderable(Context &ctx,
     // Set default mat / color to not be overriden
     ctx.get<InstanceData>(render_entity).matID = -1;
     ctx.get<InstanceData>(render_entity).color = 0;
+}
+
+void disableEntityRenderable(Context &ctx,
+                             Entity e)
+{
+    ctx.get<Renderable>(e).renderEntity = Entity::none();
 }
 
 void attachEntityToView(Context &ctx,
