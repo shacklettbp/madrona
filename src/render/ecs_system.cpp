@@ -88,6 +88,10 @@ inline void mortonCodeUpdate(Context &ctx,
 {
     (void)e;
 
+    if (renderable.renderEntity == Entity::none()) {
+        return;
+    }
+
     // Calculate and set the morton code
     MortonCode &morton_code = ctx.get<MortonCode>(renderable.renderEntity);
     morton_code = encodeMorton3(pos);
