@@ -113,6 +113,11 @@ inline void instanceTransformUpdate(Context &ctx,
 
     // Just update the instance data that is associated with this entity
     auto &system_state = ctx.singleton<RenderingSystemState>();
+
+    if (!system_state.totalNumInstancesCPU) {
+        return;
+    }
+    
     uint32_t instance_id = system_state.totalNumInstancesCPU->fetch_add<sync::acq_rel>(1);
 
     // Required for stable sorting on CPU
@@ -167,6 +172,11 @@ inline void viewTransformUpdate(Context &ctx,
 
 #else
     auto &system_state = ctx.singleton<RenderingSystemState>();
+
+    if (!system_state.totalNumViewsCPU) {
+        return;
+    }
+
     uint32_t view_id = system_state.totalNumViewsCPU->fetch_add<sync::acq_rel>(1);
 
     // Required for stable sorting on CPU
@@ -217,38 +227,6 @@ inline void exportCountsGPU(Context &ctx,
         uint32_t num_views =
             state_mgr->getArchetypeNumRows<RenderCameraArchetype>();
         bvh_internals->numViews = num_views;
-    }
-#endif
-
-
-
-
-#if 0
-    uint32_t *morton_codes = state_mgr->getArchetypeComponent<
-        RenderableArchetype, MortonCode>();
-    
-    WorldID *world_ids = state_mgr->getArchetypeComponent<
-        RenderableArchetype, WorldID>();
-
-    uint32_t current_world = 0;
-    uint32_t current_world_offset = 0;
-
-    for (int i = 0; 
-         i < state_mgr->getArchetypeNumRows<RenderableArchetype>();
-         ++i) {
-        if (world_ids[i].idx != current_world) {
-            current_world = world_ids[i].idx;
-            current_world_offset = i;
-        }
-
-        uint32_t code = morton_codes[i];
-        printf(USHORT_TO_BINARY_PATTERN " ", USHORT_TO_BINARY((code>>16)));
-        printf(USHORT_TO_BINARY_PATTERN " \t", USHORT_TO_BINARY((code)));
-
-        printf("(Leaf node %d)\t %d: (%d)\n", 
-                i - current_world_offset, 
-                world_ids[i].idx, 
-                morton_codes[i]);
     }
 #endif
 }
