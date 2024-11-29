@@ -18,6 +18,7 @@ enum class DofType {
     // The number of unique degrees of freedom (SE3)
     FreeBody = 6,
     Hinge = 1,
+    Ball = 3,
     FixedBody = 0,
 
     // When we add other types of physics DOF objects, we will encode
@@ -32,6 +33,9 @@ struct DofObjectPosition {
     //
     // If this is a hinge joint (i.e., 1 degree of freedom),
     // - q[0] is the angle
+    //
+    // If this is a ball joint (i.e. 3 degrees of freedom),
+    // - q[0:4] are the quaternion
     //
     // TODO: Other types of DOF objects.
     float q[kMaxPositionCoords];
@@ -227,6 +231,9 @@ struct DofObjectHierarchyDesc {
     math::Vector3 relPositionLocal;
     
     // Extra data:
+    // For hinge, this is the hinge rotation axis.
+    // For ball, this is the vector perpendicular to the plane of allowed
+    //           angular velocities
     math::Vector3 hingeAxis;
 
     bool leaf;
@@ -318,5 +325,11 @@ void setCVEntityParentHinge(Context &ctx,
                             math::Vector3 rel_pos_parent,
                             math::Vector3 rel_pos_child,
                             math::Vector3 hinge_axis);
+
+void setCVEntityParentBall(Context &ctx,
+                           Entity body_group,
+                           Entity parent, Entity child,
+                           math::Vector3 rel_pos_parent,
+                           math::Vector3 rel_pos_child);
 
 }

@@ -288,6 +288,34 @@ static void forwardKinematics(Context &ctx,
 
         } break;
 
+        case (uint32_t)DofType::Ball: {
+            Quat joint_rot = Quat{
+                position.q[0], position.q[1], position.q[2], position.q[3] 
+            };
+
+            // Calculate the composed rotation applied to the child entity.
+            tmp_state.composedRot = parent_tmp_state.composedRot * joint_rot;
+
+            // Calculate the composed COM position of the child
+            //  (parent COM + R_{parent} * (rel_pos_parent + R_{ball} * rel_pos_local))
+            tmp_state.comPos = parent_tmp_state.comPos +
+                parent_tmp_state.composedRot.rotateVec(
+                        hier_desc.relPositionParent +
+                        joint_rot. rotateVec(hier_desc.relPositionLocal)
+                );
+
+            // All we are getting here is the position of the ball point
+            // which is relative to the parent's COM.
+            tmp_state.anchorPos = parent_tmp_state.comPos +
+                parent_tmp_state.composedRot.rotateVec(
+                        hier_desc.relPositionParent);
+
+            // Phi only depends on the ball axis and the hinge point
+            tmp_state.phi.v[0] = tmp_state.anchorPos[0];
+            tmp_state.phi.v[1] = tmp_state.anchorPos[1];
+            tmp_state.phi.v[2] = tmp_state.anchorPos[2];
+        } break;
+
         default: {
             // Only hinges have parents
             assert(false);
@@ -413,6 +441,25 @@ static float* computePhi(Context &ctx,
         S[4] = hinge.y;
         S[5] = hinge.z;
     }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+        // This will just get right-multiplied by the angular velocity
+        S = (float *)state_mgr->tmpAlloc(world_id,
+            6 * 3 * sizeof(float));
+        memset(S, 0, 6 * 3 * sizeof(float));
+
+        Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
+        anchor_pos -= origin;
+
+        S[0 + 6 * 1] = -anchor_pos.z;
+        S[0 + 6 * 2] = anchor_pos.y;
+        S[1 + 6 * 0] = anchor_pos.z;
+        S[1 + 6 * 2] = -anchor_pos.x;
+        S[2 + 6 * 0] = -anchor_pos.y;
+        S[2 + 6 * 1] = anchor_pos.x;
+        S[3 + 6 * 0] = 1.f;
+        S[4 + 6 * 1] = 1.f;
+        S[5 + 6 * 2] = 1.f;
+    }
     else {
         MADRONA_UNREACHABLE();
     }
@@ -460,6 +507,20 @@ static float* computePhiTrans(Context &ctx,
         S[1] = r_cross_hinge.y;
         S[2] = r_cross_hinge.z;
     }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+        S = (float *)state_mgr->tmpAlloc(world_id,
+            3 * 3 * sizeof(float));
+
+        Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
+        anchor_pos -= origin;
+
+        S[0 + 3 * 1] = -anchor_pos.z;
+        S[0 + 3 * 2] = anchor_pos.y;
+        S[1 + 3 * 0] = anchor_pos.z;
+        S[1 + 3 * 2] = -anchor_pos.x;
+        S[2 + 3 * 0] = -anchor_pos.y;
+        S[2 + 3 * 1] = anchor_pos.x;
+    }
     else {
         MADRONA_UNREACHABLE();
     }
@@ -504,6 +565,19 @@ static float* computePhiDot(Context &ctx,
         S_dot[3] = S_dot_sv.angular.x;
         S_dot[4] = S_dot_sv.angular.y;
         S_dot[5] = S_dot_sv.angular.z;
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+        S_dot = (float *)state_mgr->tmpAlloc(world_id,
+            6 * 3 * sizeof(float));
+        memset(S_dot, 0.f, 6 * 3 * sizeof(float));
+
+        Vector3 v_trans = v_hat.linear;
+        S_dot[0 + 6 * 1] = -v_trans.z;
+        S_dot[0 + 6 * 2] = v_trans.y;
+        S_dot[1 + 6 * 0] = v_trans.z;
+        S_dot[1 + 6 * 2] = -v_trans.x;
+        S_dot[2 + 6 * 0] = -v_trans.y;
+        S_dot[2 + 6 * 1] = v_trans.x;
     }
     else {
         MADRONA_UNREACHABLE();
@@ -734,6 +808,35 @@ static void recursiveNewtonEuler(Context &ctx,
             for (int j = 0; j < 6; ++j) {
                 tmp_state.sVel[j] += S[j] * q_dot;
                 tmp_state.sAcc[j] += S_dot[j] * q_dot;
+            }
+
+            // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+            tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
+            tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
+        }
+        else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+            tmp_state.sVel = parent_tmp_state.sVel;
+            tmp_state.sAcc = parent_tmp_state.sAcc;
+
+            // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
+            float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+
+            // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
+            // Note: we are using the parent velocity here (for hinge itself)
+            float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel,
+                body_grp.comPos, tmp_state.phi);
+
+            float *q_dot = velocity.qv;
+            for (int j = 0; j < 6; ++j) {
+                // TODO: Probably should switch to row major - this isn't
+                // particularly cache-friendly.
+                tmp_state.sVel[j] += S[j + 6 * 0] * q_dot[0] + 
+                                     S[j + 6 * 1] * q_dot[1] +
+                                     S[j + 6 * 2] * q_dot[2];
+
+                tmp_state.sAcc[j] += S_dot[j + 6 * 0] * q_dot[0] +
+                                     S_dot[j + 6 * 1] * q_dot[1] +
+                                     S_dot[j + 6 * 2] * q_dot[2];
             }
 
             // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
@@ -1067,6 +1170,26 @@ static void integrationStep(Context &ctx,
     else if (numDofs.numDofs == (uint32_t)DofType::FixedBody) {
         // Do nothing
     }
+    else if (numDofs.numDofs == (uint32_t)DofType::Ball) {
+        // Symplectic Euler
+        for (int i = 0; i < 3; ++i) {
+            velocity.qv[i] += h * acceleration.dqv[i];
+        }
+
+        // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
+        Vector3 omega = { velocity.qv[0], velocity.qv[1], velocity.qv[2] };
+        Quat rot_quat = { position.q[0], position.q[1], position.q[2], position.q[3] };
+        Quat new_rot = {rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z};
+        new_rot.w += 0.5f * h * (-rot_quat.x * omega.x - rot_quat.y * omega.y - rot_quat.z * omega.z);
+        new_rot.x += 0.5f * h * (rot_quat.w * omega.x + rot_quat.z * omega.y - rot_quat.y * omega.z);
+        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x + rot_quat.w * omega.y + rot_quat.x * omega.z);
+        new_rot.z += 0.5f * h * (rot_quat.y * omega.x - rot_quat.x * omega.y + rot_quat.w * omega.z);
+        new_rot = new_rot.normalize();
+        position.q[0] = new_rot.w;
+        position.q[1] = new_rot.x;
+        position.q[2] = new_rot.y;
+        position.q[3] = new_rot.z;
+    }
     else {
         MADRONA_UNREACHABLE();
     }
@@ -1096,6 +1219,10 @@ static void convertPostSolve(
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
         // Do nothing
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+        position = tmp_state.comPos;
+        rotation = tmp_state.composedRot;
     }
     else {
         MADRONA_UNREACHABLE();
@@ -1183,8 +1310,7 @@ void makeCVPhysicsEntity(Context &ctx,
         pos.q[5] = rotation.y;
         pos.q[6] = rotation.z;
 
-        for(int i = 0; i < 6; i++)
-        {
+        for(int i = 0; i < 6; i++) {
             vel.qv[i] = 0.f;
             acc.dqv[i] = 0.f;
         }
@@ -1196,6 +1322,18 @@ void makeCVPhysicsEntity(Context &ctx,
     case DofType::Hinge: {
         pos.q[0] = 0.0f;
         vel.qv[0] = 0.f;
+    } break;
+    
+    case DofType::Ball: {
+        pos.q[0] = rotation.w;
+        pos.q[1] = rotation.x;
+        pos.q[2] = rotation.y;
+        pos.q[3] = rotation.z;
+
+        for(int i = 0; i < 3; i++) {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
     } break;
 
     case DofType::FixedBody: {
@@ -1361,7 +1499,46 @@ void setCVEntityParentHinge(Context &ctx,
     hier_desc.parent = parent_physics_entity;
     hier_desc.relPositionParent = rel_pos_parent;
     hier_desc.relPositionLocal = rel_pos_child;
+
     hier_desc.hingeAxis = hinge_axis;
+
+    hier_desc.leaf = true;
+    hier_desc.bodyGroup = ctx.loc(body_grp);
+
+    hier_desc.index = grp.numBodies;
+    hier_desc.parentIndex = parent_hier_desc.index;
+
+
+    grp.bodies[grp.numBodies] = child_physics_entity;
+
+    // Make the parent no longer a leaf
+    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
+
+    ++grp.numBodies;
+    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
+}
+
+void setCVEntityParentBall(Context &ctx,
+                           Entity body_grp,
+                           Entity parent, Entity child,
+                           Vector3 rel_pos_parent,
+                           Vector3 rel_pos_child)
+{
+    Entity child_physics_entity =
+        ctx.get<CVPhysicalComponent>(child).physicsEntity;
+    Entity parent_physics_entity =
+        ctx.get<CVPhysicalComponent>(parent).physicsEntity;
+
+    BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
+
+    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
+    auto &parent_hier_desc =
+        ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
+
+    hier_desc.parent = parent_physics_entity;
+    hier_desc.relPositionParent = rel_pos_parent;
+    hier_desc.relPositionLocal = rel_pos_child;
+
     hier_desc.leaf = true;
     hier_desc.bodyGroup = ctx.loc(body_grp);
 
