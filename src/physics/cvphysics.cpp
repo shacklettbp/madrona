@@ -553,8 +553,7 @@ static float* computePhiDot(Context &ctx,
                             DofObjectNumDofs &num_dofs,
                             SpatialVector &v_hat,
                             Vector3 origin,
-                            Phi &phi,
-                            Quat parent_composed_rot)
+                            Phi &phi)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
@@ -650,15 +649,6 @@ static float* computeContactJacobian(Context &ctx,
         auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[curr_idx]);
 
-        Quat parent_rot = [&] {
-            Entity parent_e = curr_hier_desc.parent;
-            if (parent_e == Entity::none()) {
-                return Quat{};
-            }
-            auto &parent_tmp_state = ctx.get<DofObjectTmpState>(parent_e);
-            return parent_tmp_state.composedRot;
-        } ();
-
         // Populate columns of J_C
         float *S_trans = computePhiTrans(
                 ctx, curr_num_dofs, origin, curr_tmp_state.phi);
@@ -714,18 +704,6 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[i]);
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
-
-        Quat parent_rot = [&]() {
-            Entity parent_e = i_hier_desc.parent;
-            if (parent_e == Entity::none()) {
-                return Quat{};
-            } else {
-                DofObjectTmpState &parent_tmp_state =
-                    ctx.get<DofObjectTmpState>(parent_e);
-                return parent_tmp_state.composedRot;
-            }
-        } ();
-
         float *S_i = computePhi(
                 ctx, i_num_dofs, body_grp.comPos, i_tmp_state.phi);
 
@@ -760,19 +738,6 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[j]);
             auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[j]);
-            auto &j_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies[j]);
-
-            Quat parent_rot = [&]() {
-                Entity parent_e = j_hier_desc.parent;
-                if (parent_e == Entity::none()) {
-                    return Quat{};
-                } else {
-                    DofObjectTmpState &parent_tmp_state =
-                        ctx.get<DofObjectTmpState>(parent_e);
-                    return parent_tmp_state.composedRot;
-                }
-            } ();
 
             float *S_j = computePhi(
                     ctx, j_num_dofs, body_grp.comPos, j_tmp_state.phi);
@@ -790,7 +755,6 @@ static void compositeRigidBody(Context &ctx,
                     }
                 }
             }
-
             parent_j = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[j]).parent;
         }
@@ -809,7 +773,8 @@ static void factorizeMassMatrix(Context &ctx,
     uint32_t total_dofs = body_grp.numDofs;
     float *LTDL = (float *) state_mgr->tmpAlloc(world_id,
         total_dofs * total_dofs * sizeof(float));
-    memcpy(LTDL, body_grp.massMatrix, total_dofs * total_dofs * sizeof(float));
+    memcpy(LTDL, body_grp.massMatrix,
+        total_dofs * total_dofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
     uint32_t block_start[body_grp.numBodies];
@@ -820,34 +785,52 @@ static void factorizeMassMatrix(Context &ctx,
                 body_grp.bodies[i]).numDofs;
     }
 
-    // Backward pass
+    // Backward pass through bodies
     for (CountT k = body_grp.numBodies-1; k >= 0; --k) {
-        auto &k_num_dofs = ctx.get<DofObjectNumDofs>(
-                body_grp.bodies[k]);
-        auto &k_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies[k]);
+        auto &k_num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[k]);
+        auto &k_hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[k]);
+        // Iterate through all DOFs of k (prevents temp storage of blocks)
+        for (CountT k_dof = 0; k_dof < k_num_dofs.numDofs; ++k_dof) {
+            CountT k_idx = block_start[k] + k_dof;
+            // i=parent(k), while i != none
+            int32_t i = k_hier_desc.parentIndex;
+            while (i != -1) {
+                auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
+                    body_grp.bodies[i]);
+                auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                    body_grp.bodies[i]);
+                // Iterate through all DOFs of i
+                for (CountT i_dof = 0; i_dof < i_num_dofs.numDofs; ++i_dof) {
+                    CountT i_idx = block_start[i] + i_dof;
+                    // a = M_{ki} / M{kk} (temporary store)
+                    float a = LTDL[k_idx + total_dofs * i_idx] /
+                        LTDL[k_idx + total_dofs * k_idx];
 
-        int32_t i = k_hier_desc.parentIndex;
-        // i=parent(k), while i != none
-        while(i != -1) {
-            auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies[i]);
-            // a = M_{ki} / M{kk}
-
-            int32_t j = i;
-            while(j != -1) {
-                auto &j_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                    body_grp.bodies[j]);
-                j = j_hier_desc.parentIndex;
+                    // j = i, traverse up the hierarchy
+                    int32_t j = i;
+                    while(j != -1) {
+                        auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
+                                body_grp.bodies[j]);
+                        auto &j_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                            body_grp.bodies[j]);
+                        // Iterate through all DOFs of j
+                        for (CountT j_dof = 0; j_dof < j_num_dofs.numDofs;
+                            ++j_dof) {
+                            // M_{ij} = M_{ij} - a * M_{kj}
+                            CountT j_idx = block_start[j] + j_dof;
+                            LTDL[i_idx + total_dofs * j_idx] -=
+                                a * LTDL[k_idx + total_dofs * j_idx];
+                        }
+                        j = j_hier_desc.parentIndex;
+                    }
+                    // M_{ki} = a
+                    LTDL[k_idx + total_dofs * i_idx] = a;
+                }
+                // i = parent(i)
+                i = i_hier_desc.parentIndex;
             }
-
-            // M_{ki} = a
-
-            // i = parent(i)
-            i = i_hier_desc.parentIndex;
         }
     }
-
 
     body_grp.massMatrixLTDL = LTDL;
 }
@@ -872,16 +855,16 @@ static void recursiveNewtonEuler(Context &ctx,
 
     // First handle root of hierarchy
     {
-        DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
-        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
-        DofObjectVelocity velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
+        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
+        auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
 
-        float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
-        SpatialVector v_body = {{velocity.qv[0], velocity.qv[1], velocity.qv[2]},
-                              Vector3::zero()};
+        float *S = computePhi(
+            ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+        SpatialVector v_body = {
+            {velocity.qv[0], velocity.qv[1], velocity.qv[2]}, Vector3::zero()};
         float *S_dot = computePhiDot(
-                ctx, num_dofs, v_body, body_grp.comPos, tmp_state.phi,
-                Quat{});
+                ctx, num_dofs, v_body, body_grp.comPos, tmp_state.phi);
 
         // v_0 = 0, a_0 = -g (fictitious upward acceleration)
         tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
@@ -897,19 +880,18 @@ static void recursiveNewtonEuler(Context &ctx,
 
         // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
         tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
-        tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
+        tmp_state.sForce += tmp_state.sVel.crossStar(
+            tmp_state.spatialInertia.multiply(tmp_state.sVel));
     }
 
     // Forward pass from parents to children
     for (int i = 1; i < body_grp.numBodies; ++i) {
-        DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-        DofObjectVelocity velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
-
+        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
-
         assert(hier_desc.parent != Entity::none());
-        DofObjectTmpState parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+        auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
 
         if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
             tmp_state.sVel = parent_tmp_state.sVel;
@@ -921,8 +903,7 @@ static void recursiveNewtonEuler(Context &ctx,
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
             // Note: we are using the parent velocity here (for hinge itself)
             float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel,
-                body_grp.comPos, tmp_state.phi,
-                parent_tmp_state.composedRot);
+                body_grp.comPos, tmp_state.phi);
 
             float q_dot = velocity.qv[0];
             for (int j = 0; j < 6; ++j) {
@@ -932,7 +913,8 @@ static void recursiveNewtonEuler(Context &ctx,
 
             // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
             tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
-            tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
+            tmp_state.sForce += tmp_state.sVel.crossStar(
+                tmp_state.spatialInertia.multiply(tmp_state.sVel));
         }
         else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
             tmp_state.sVel = parent_tmp_state.sVel;
@@ -945,8 +927,7 @@ static void recursiveNewtonEuler(Context &ctx,
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
             // Note: we are using the parent velocity here (for hinge itself)
             float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel,
-                body_grp.comPos, tmp_state.phi,
-                parent_tmp_state.composedRot);
+                body_grp.comPos, tmp_state.phi);
 
             float *q_dot = velocity.qv;
             for (int j = 0; j < 6; ++j) {
@@ -963,7 +944,8 @@ static void recursiveNewtonEuler(Context &ctx,
 
             // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
             tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
-            tmp_state.sForce += tmp_state.sVel.crossStar(tmp_state.spatialInertia.multiply(tmp_state.sVel));
+            tmp_state.sForce += tmp_state.sVel.crossStar(
+                tmp_state.spatialInertia.multiply(tmp_state.sVel));
         } else { // Fixed body, Free body
             MADRONA_UNREACHABLE();
         }
@@ -972,20 +954,9 @@ static void recursiveNewtonEuler(Context &ctx,
     // Backward pass to find bias forces
     CountT dof_index = total_dofs;
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
-        DofObjectHierarchyDesc &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
-        DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-
-        Quat parent_rot = [&]() {
-            Entity parent_e = hier_desc.parent;
-            if (parent_e == Entity::none()) {
-                return Quat{};
-            } else {
-                DofObjectTmpState &parent_tmp_state =
-                    ctx.get<DofObjectTmpState>(parent_e);
-                return parent_tmp_state.composedRot;
-            }
-        } ();
+        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
 
         // tau_i = S_i^T f_i
         dof_index -= num_dofs.numDofs;
@@ -999,7 +970,7 @@ static void recursiveNewtonEuler(Context &ctx,
 
         // Add to parent's force
         if (hier_desc.parent != Entity::none()) {
-            DofObjectTmpState &parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+            auto &parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
             parent_tmp_state.sForce += tmp_state.sForce;
         }
     }
