@@ -69,14 +69,17 @@ struct ContactPointInfo {
 // Rigid-Body Algorithm. phi maps from our generalized velocities to the
 // velocities in Plücker coordinates.
 struct Phi {
-    // Phi is parameterized by at most 6 values.
+    // Phi is parameterized by at most 6 values (7 for quaternion).
     //
     // For the free body, it just depends on the center of mass of the body.
     //
     // For the hinge, it depends on the normalized angular velocity vector 
     // (first 3 values) of the hinge and the position of the joint 
     // (not the body - last 3 values).
-    float v[6];
+    //
+    // For the ball joint, the position of the joint and the rotation of the
+    // parent (quaternion)
+    float v[7];
 };
 
 struct SpatialVector {
@@ -240,7 +243,7 @@ struct DofObjectHierarchyDesc {
 
     // Index in the body group hierarchy
     int32_t index;
-    // Index of the parent in the body group hierarchy.
+    // Index of the parent in the body group hierarchy. -1 if root.
     int32_t parentIndex;
 
     Loc bodyGroup;
@@ -277,6 +280,9 @@ struct BodyGroupHierarchy {
 
     // Mass matrix (num_dof x num_dof) of the body group
     float *massMatrix;
+
+    // LTDL factorization of matrix
+    float *massMatrixLTDL;
 
     // Bias forces (num_dof) of the body group
     float *biasForces;
