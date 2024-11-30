@@ -301,7 +301,7 @@ static void forwardKinematics(Context &ctx,
             tmp_state.comPos = parent_tmp_state.comPos +
                 parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
-                        joint_rot. rotateVec(hier_desc.relPositionLocal)
+                        joint_rot.rotateVec(hier_desc.relPositionLocal)
                 );
 
             // All we are getting here is the position of the ball point
@@ -401,7 +401,8 @@ static void combineSpatialInertias(Context &ctx,
 static float* computePhi(Context &ctx,
                          DofObjectNumDofs &num_dofs,
                          Vector3 origin,
-                         Phi &phi)
+                         Phi &phi,
+                         Quat parent_composed_rot)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
@@ -450,15 +451,23 @@ static float* computePhi(Context &ctx,
         Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
         anchor_pos -= origin;
 
-        S[0 + 6 * 1] = -anchor_pos.z;
-        S[0 + 6 * 2] = anchor_pos.y;
-        S[1 + 6 * 0] = anchor_pos.z;
-        S[1 + 6 * 2] = -anchor_pos.x;
-        S[2 + 6 * 0] = -anchor_pos.y;
-        S[2 + 6 * 1] = anchor_pos.x;
-        S[3 + 6 * 0] = 1.f;
-        S[4 + 6 * 1] = 1.f;
-        S[5 + 6 * 2] = 1.f;
+        // We need to right multiply these by the parent composed rotation
+        // matrix.
+
+        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
+        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
+
+        rx *= parent_rot;
+
+        for (int col = 0; col < 3; ++col) {
+            S[col * 6 + 0] = rx[col][0];
+            S[col * 6 + 1] = rx[col][1];
+            S[col * 6 + 2] = rx[col][2];
+
+            S[col * 6 + 3] = parent_rot[col][0];
+            S[col * 6 + 4] = parent_rot[col][1];
+            S[col * 6 + 5] = parent_rot[col][2];
+        }
     }
     else {
         MADRONA_UNREACHABLE();
@@ -470,7 +479,8 @@ static float* computePhi(Context &ctx,
 static float* computePhiTrans(Context &ctx,
                               DofObjectNumDofs &num_dofs,
                               Vector3 origin,
-                              Phi &phi)
+                              Phi &phi,
+                              Quat parent_composed_rot)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
@@ -514,12 +524,26 @@ static float* computePhiTrans(Context &ctx,
         Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
         anchor_pos -= origin;
 
+#if 0
         S[0 + 3 * 1] = -anchor_pos.z;
         S[0 + 3 * 2] = anchor_pos.y;
         S[1 + 3 * 0] = anchor_pos.z;
         S[1 + 3 * 2] = -anchor_pos.x;
         S[2 + 3 * 0] = -anchor_pos.y;
         S[2 + 3 * 1] = anchor_pos.x;
+#endif
+
+
+        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
+        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
+
+        rx *= parent_rot;
+
+        for (int col = 0; col < 3; ++col) {
+            S[col * 3 + 0] = rx[col][0];
+            S[col * 3 + 1] = rx[col][1];
+            S[col * 3 + 2] = rx[col][2];
+        }
     }
     else {
         MADRONA_UNREACHABLE();
@@ -531,7 +555,8 @@ static float* computePhiDot(Context &ctx,
                             DofObjectNumDofs &num_dofs,
                             SpatialVector &v_hat,
                             Vector3 origin,
-                            Phi &phi)
+                            Phi &phi,
+                            Quat parent_composed_rot)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
@@ -555,7 +580,8 @@ static float* computePhiDot(Context &ctx,
         S_dot = (float *) state_mgr->tmpAlloc(world_id,
             6 * sizeof(float));
         // S = [r \times hinge; hinge]
-        float* S = computePhi(ctx, num_dofs, origin, phi);
+        float* S = computePhi(ctx, num_dofs, origin, phi,
+                              parent_composed_rot);
         // S_dot = v [spatial cross] S
         SpatialVector S_sv = SpatialVector::fromVec(S);
         SpatialVector S_dot_sv = v_hat.cross(S_sv);
@@ -571,13 +597,20 @@ static float* computePhiDot(Context &ctx,
             6 * 3 * sizeof(float));
         memset(S_dot, 0.f, 6 * 3 * sizeof(float));
 
-        Vector3 v_trans = v_hat.linear;
-        S_dot[0 + 6 * 1] = -v_trans.z;
-        S_dot[0 + 6 * 2] = v_trans.y;
-        S_dot[1 + 6 * 0] = v_trans.z;
-        S_dot[1 + 6 * 2] = -v_trans.x;
-        S_dot[2 + 6 * 0] = -v_trans.y;
-        S_dot[2 + 6 * 1] = v_trans.x;
+        float* S = computePhi(ctx, num_dofs, origin, phi,
+                              parent_composed_rot);
+        // S_dot = v [spatial cross] S
+        for (int i = 0; i < 3; ++i) {
+            SpatialVector S_sv = SpatialVector::fromVec(S + (i * 6));
+            SpatialVector S_dot_sv = v_hat.cross(S_sv);
+
+            S_dot[i * 6 + 0] = S_dot_sv.linear.x;
+            S_dot[i * 6 + 1] = S_dot_sv.linear.y;
+            S_dot[i * 6 + 2] = S_dot_sv.linear.z;
+            S_dot[i * 6 + 3] = S_dot_sv.angular.x;
+            S_dot[i * 6 + 4] = S_dot_sv.angular.y;
+            S_dot[i * 6 + 5] = S_dot_sv.angular.z;
+        }
     }
     else {
         MADRONA_UNREACHABLE();
@@ -620,8 +653,22 @@ static float* computeContactJacobian(Context &ctx,
                 body_grp.bodies[curr_idx]);
         auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies[curr_idx]);
+
+        Quat parent_rot = [&]() {
+            Entity parent_e = curr_hier_desc.parent;
+            if (parent_e == Entity::none()) {
+                return Quat{};
+            } else {
+                DofObjectTmpState &parent_tmp_state =
+                    ctx.get<DofObjectTmpState>(parent_e);
+                return parent_tmp_state.composedRot;
+            }
+        } ();
+
         // Populate columns of J_C
-        float *S_trans = computePhiTrans(ctx, curr_num_dofs, origin, curr_tmp_state.phi);
+        float *S_trans = computePhiTrans(
+                ctx, curr_num_dofs, origin, curr_tmp_state.phi,
+                parent_rot);
         for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
             float *J_col = J + 3 * (block_start[curr_idx] + i);
             float *S_col = S_trans + 3 * i;
@@ -679,7 +726,20 @@ static void compositeRigidBody(Context &ctx,
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
 
-        float *S_i = computePhi(ctx, i_num_dofs, body_grp.comPos, i_tmp_state.phi);
+        Quat parent_rot = [&]() {
+            Entity parent_e = i_hier_desc.parent;
+            if (parent_e == Entity::none()) {
+                return Quat{};
+            } else {
+                DofObjectTmpState &parent_tmp_state =
+                    ctx.get<DofObjectTmpState>(parent_e);
+                return parent_tmp_state.composedRot;
+            }
+        } ();
+
+        float *S_i = computePhi(
+                ctx, i_num_dofs, body_grp.comPos, i_tmp_state.phi,
+                parent_rot);
 
         // Temporary store for F = I_i^C S_i, column-major
         float *F = (float *) state_mgr->tmpAlloc(world_id,
@@ -712,8 +772,23 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[j]);
             auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[j]);
+            auto &j_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                body_grp.bodies[j]);
 
-            float *S_j = computePhi(ctx, j_num_dofs, body_grp.comPos, j_tmp_state.phi);
+            Quat parent_rot = [&]() {
+                Entity parent_e = j_hier_desc.parent;
+                if (parent_e == Entity::none()) {
+                    return Quat{};
+                } else {
+                    DofObjectTmpState &parent_tmp_state =
+                        ctx.get<DofObjectTmpState>(parent_e);
+                    return parent_tmp_state.composedRot;
+                }
+            } ();
+
+            float *S_j = computePhi(
+                    ctx, j_num_dofs, body_grp.comPos, j_tmp_state.phi,
+                    parent_rot);
 
             // M_{ij} = M{ji} = F^T S_j
             float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
@@ -761,10 +836,14 @@ static void recursiveNewtonEuler(Context &ctx,
         DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
         DofObjectVelocity velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
 
-        float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+        float *S = computePhi(
+                ctx, num_dofs, body_grp.comPos, tmp_state.phi,
+                Quat{});
         SpatialVector v_body = {{velocity.qv[0], velocity.qv[1], velocity.qv[2]},
                               Vector3::zero()};
-        float *S_dot = computePhiDot(ctx, num_dofs, v_body, body_grp.comPos, tmp_state.phi);
+        float *S_dot = computePhiDot(
+                ctx, num_dofs, v_body, body_grp.comPos, tmp_state.phi,
+                Quat{});
 
         // v_0 = 0, a_0 = -g (fictitious upward acceleration)
         tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
@@ -790,6 +869,7 @@ static void recursiveNewtonEuler(Context &ctx,
         DofObjectVelocity velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
 
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+
         assert(hier_desc.parent != Entity::none());
         DofObjectTmpState parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
 
@@ -798,11 +878,14 @@ static void recursiveNewtonEuler(Context &ctx,
             tmp_state.sAcc = parent_tmp_state.sAcc;
 
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+            float *S = computePhi(
+                    ctx, num_dofs, body_grp.comPos, tmp_state.phi,
+                    parent_tmp_state.composedRot);
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
             // Note: we are using the parent velocity here (for hinge itself)
             float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel,
-                body_grp.comPos, tmp_state.phi);
+                body_grp.comPos, tmp_state.phi,
+                parent_tmp_state.composedRot);
 
             float q_dot = velocity.qv[0];
             for (int j = 0; j < 6; ++j) {
@@ -819,12 +902,15 @@ static void recursiveNewtonEuler(Context &ctx,
             tmp_state.sAcc = parent_tmp_state.sAcc;
 
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+            float *S = computePhi(
+                    ctx, num_dofs, body_grp.comPos, tmp_state.phi,
+                    parent_tmp_state.composedRot);
 
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
             // Note: we are using the parent velocity here (for hinge itself)
             float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel,
-                body_grp.comPos, tmp_state.phi);
+                body_grp.comPos, tmp_state.phi,
+                parent_tmp_state.composedRot);
 
             float *q_dot = velocity.qv;
             for (int j = 0; j < 6; ++j) {
@@ -854,9 +940,22 @@ static void recursiveNewtonEuler(Context &ctx,
         DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
         DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
 
+        Quat parent_rot = [&]() {
+            Entity parent_e = hier_desc.parent;
+            if (parent_e == Entity::none()) {
+                return Quat{};
+            } else {
+                DofObjectTmpState &parent_tmp_state =
+                    ctx.get<DofObjectTmpState>(parent_e);
+                return parent_tmp_state.composedRot;
+            }
+        } ();
+
         // tau_i = S_i^T f_i
         dof_index -= num_dofs.numDofs;
-        float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+        float *S = computePhi(
+                ctx, num_dofs, body_grp.comPos, tmp_state.phi,
+                parent_rot);
         for(CountT row = 0; row < num_dofs.numDofs; ++row) {
             float *S_col = S + 6 * row;
             for(CountT k = 0; k < 6; ++k) {
