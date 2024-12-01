@@ -22,7 +22,7 @@ using CVXSolveFn = float *(*)(
         uint32_t num_contact_pts,
         float h,
         float *mass,
-        float *bias,
+        float *free_acc,
         float *vel,
         float *J_c,
         float *mu,
@@ -40,7 +40,7 @@ struct CVXSolve {
     uint32_t numContactPts;
     float h;
     float *mass;
-    float *bias;
+    float *free_acc;
     float *vel;
     float *J_c;
     float *mu;

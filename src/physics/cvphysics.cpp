@@ -675,9 +675,32 @@ static float* computeContactJacobian(Context &ctx,
 }
 
 
-// Solves M^{-1}[in] and stores into [out], uses LTDL factorization
-static void solveM(float *LTDL, float *in, float *out) {
-
+// Solves M^{-1}x, overwriting x. Based on Table 6.5 in Featherstone
+static void solveM(BodyGroupHierarchy &body_grp, float *x) {
+    CountT total_dofs = body_grp.numDofs;
+    auto ltdl = [&](int32_t row, int32_t col) -> float& {
+        return body_grp.massMatrixLTDL[row + total_dofs * col];
+    };
+    // M=L^TDL, so first solve L^{-T} x
+    for (int32_t i = (int32_t) total_dofs - 1; i >= 0; --i) {
+        int32_t j = body_grp.expandedParent[i];
+        while (j != -1) {
+            x[j] -= ltdl(i, j) * x[i];
+            j = body_grp.expandedParent[j];
+        }
+    }
+    // D^{-1} x
+    for (int32_t i = 0; i < total_dofs; ++i) {
+        x[i] /= ltdl(i, i);
+    }
+    // L^{-1} x
+    for (int32_t i = 0; i < total_dofs; ++i) {
+        int32_t j = body_grp.expandedParent[i];
+        while (j != -1) {
+            x[i] -= ltdl(i, j) * x[j];
+            j = body_grp.expandedParent[j];
+        }
+    }
 }
 
 
@@ -829,6 +852,23 @@ static void factorizeMassMatrix(Context &ctx,
     body_grp.massMatrixLTDL = LTDL;
 }
 
+// Computes the unconstrained acceleration of each body
+static void computeFreeAcceleration(Context &ctx,
+                                    BodyGroupHierarchy &body_grp) {
+    StateManager *state_mgr = ctx.getStateManager();
+    uint32_t world_id = ctx.worldID().idx;
+    // Copy in the bias forces
+    CountT num_dofs = body_grp.numDofs;
+    float *freeAcc = (float *) state_mgr->tmpAlloc(world_id,
+        num_dofs * sizeof(float));
+    memcpy(freeAcc, body_grp.biasForces, num_dofs * sizeof(float));
+    // Negate the bias forces, solve
+    for (CountT i = 0; i < num_dofs; ++i) {
+        freeAcc[i] = -freeAcc[i];
+    }
+    solveM(body_grp, freeAcc);
+    body_grp.freeAcceleration = freeAcc;
+}
 
 // RNE: Compute bias forces and gravity
 static void recursiveNewtonEuler(Context &ctx,
@@ -1019,7 +1059,7 @@ static void gaussMinimizeFn(Context &ctx,
         BodyGroup, BodyGroupHierarchy>(world_id);
     CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
 
-    // Create complete mass matrix and bias forces
+    // Create complete mass matrix
     uint32_t total_num_dofs = 0;
     for (CountT i = 0; i < num_grps; ++i) {
         total_num_dofs += hiers[i].numDofs;
@@ -1033,11 +1073,11 @@ static void gaussMinimizeFn(Context &ctx,
     memset(total_mass_mat, 0, num_mass_mat_bytes);
 
     CountT num_full_dofs_bytes = sizeof(float) * total_num_dofs;
-    float *full_bias = (float *)state_mgr->tmpAlloc(world_id,
+    float *full_free_acc = (float *)state_mgr->tmpAlloc(world_id,
             total_num_dofs * sizeof(float));
     float *full_vel = (float *)state_mgr->tmpAlloc(world_id,
             num_full_dofs_bytes);
-    memset(full_bias, 0, num_full_dofs_bytes);
+    memset(full_free_acc, 0, num_full_dofs_bytes);
     memset(full_vel, 0, num_full_dofs_bytes);
 
     uint32_t processed_dofs = 0;
@@ -1045,7 +1085,7 @@ static void gaussMinimizeFn(Context &ctx,
         float *local_mass = hiers[i].massMatrix;
 
         for (CountT row = 0; row < hiers[i].numDofs; ++row) {
-            full_bias[row + processed_dofs] = hiers[i].biasForces[row];
+            full_free_acc[row + processed_dofs] = hiers[i].freeAcceleration[row];
 
             for (CountT col = 0; col < hiers[i].numDofs; ++col) {
                 uint32_t mi = row + processed_dofs;
@@ -1196,7 +1236,7 @@ static void gaussMinimizeFn(Context &ctx,
         cv_sing.cvxSolve->numContactPts = total_contact_pts;
         cv_sing.cvxSolve->h = physics_state.h;
         cv_sing.cvxSolve->mass = total_mass_mat;
-        cv_sing.cvxSolve->bias = full_bias;
+        cv_sing.cvxSolve->free_acc = full_free_acc;
         cv_sing.cvxSolve->vel = full_vel;
         cv_sing.cvxSolve->J_c = J_c_rm;
         cv_sing.cvxSolve->mu = full_mu;
@@ -1528,11 +1568,16 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupHierarchy
             >>({compute_expanded_parent});
 
+        auto compute_free_acc = builder.addToGraph<ParallelForNode<Context,
+             tasks::computeFreeAcceleration,
+                BodyGroupHierarchy
+            >>({factorize_mass_matrix});
+
         auto contact_node = builder.addToGraph<ParallelForNode<Context,
              tasks::processContacts,
                 ContactConstraint,
                 ContactTmpState
-            >>({factorize_mass_matrix});
+            >>({compute_free_acc});
 
         auto gauss_node = builder.addToGraph<ParallelForNode<Context,
              tasks::gaussMinimizeFn,

@@ -291,6 +291,9 @@ struct BodyGroupHierarchy {
     // Bias forces (num_dof) of the body group
     float *biasForces;
 
+    // Unconstrained accelerations (num_dof) of the body group
+    float *freeAcceleration;
+
     // Temporary index used during stacking
     uint32_t tmpIdx;
 };
