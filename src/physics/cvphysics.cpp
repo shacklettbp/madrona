@@ -674,6 +674,13 @@ static float* computeContactJacobian(Context &ctx,
     return J;
 }
 
+
+// Solves M^{-1}[in] and stores into [out], uses LTDL factorization
+static void solveM(float *LTDL, float *in, float *out) {
+
+}
+
+
 // CRB: Compute the Mass Matrix (n_dofs x n_dofs)
 static void compositeRigidBody(Context &ctx,
                                BodyGroupHierarchy &body_grp)
@@ -763,6 +770,30 @@ static void compositeRigidBody(Context &ctx,
     body_grp.massMatrix = M;
 }
 
+// Computes the expanded parent array (based on Table 6.4 of Featherstone)
+// TODO: this only needs to be done once (probably after construction)
+static void computeExpandedParent(Context &ctx,
+                                  BodyGroupHierarchy &body_grp) {
+    CountT N_B = body_grp.numBodies;
+    // Initialize n-N_B elements
+    for(int32_t i = 0; i < body_grp.numDofs; ++i) {
+        body_grp.expandedParent[i] = i - 1;
+    }
+    // Create a mapping from body index to start of block
+    int32_t map[N_B];
+    map[0] = -1;
+    for(int32_t i = 1; i < N_B; ++i) {
+        uint32_t n_i = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]).numDofs;
+        map[i] = map[i - 1] + (int32_t) n_i;
+    }
+    // Finish expanded parent array
+    for(int32_t i = 1; i < N_B; ++i) {
+        int32_t parent_idx = ctx.get<DofObjectHierarchyDesc>(
+            body_grp.bodies[i]).parentIndex;
+        body_grp.expandedParent[map[i - 1] + 1] = map[parent_idx];
+    }
+}
+
 // Computes the LTDL factorization of the mass matrix
 static void factorizeMassMatrix(Context &ctx,
                                 BodyGroupHierarchy &body_grp) {
@@ -775,65 +806,29 @@ static void factorizeMassMatrix(Context &ctx,
         total_dofs * total_dofs * sizeof(float));
     memcpy(LTDL, body_grp.massMatrix,
         total_dofs * total_dofs * sizeof(float));
+    // Helper
+    auto ltdl = [&](int32_t row, int32_t col) -> float& {
+        return LTDL[row + total_dofs * col];
+    };
 
-    // Compute prefix sum to determine the start of the block for each body
-    uint32_t block_start[body_grp.numBodies];
-    uint32_t block_offset = 0;
-    for (CountT i = 0; i < body_grp.numBodies; ++i) {
-        block_start[i] = block_offset;
-        block_offset += ctx.get<DofObjectNumDofs>(
-                body_grp.bodies[i]).numDofs;
-    }
-
-    // Backward pass through bodies
-    for (CountT k = body_grp.numBodies-1; k >= 0; --k) {
-        auto &k_num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[k]);
-        auto &k_hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[k]);
-        // Iterate through all DOFs of k (prevents temp storage of blocks)
-        for (CountT k_dof = 0; k_dof < k_num_dofs.numDofs; ++k_dof) {
-            CountT k_idx = block_start[k] + k_dof;
-            // i=parent(k), while i != none
-            int32_t i = k_hier_desc.parentIndex;
-            while (i != -1) {
-                auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
-                    body_grp.bodies[i]);
-                auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                    body_grp.bodies[i]);
-                // Iterate through all DOFs of i
-                for (CountT i_dof = 0; i_dof < i_num_dofs.numDofs; ++i_dof) {
-                    CountT i_idx = block_start[i] + i_dof;
-                    // a = M_{ki} / M{kk} (temporary store)
-                    float a = LTDL[k_idx + total_dofs * i_idx] /
-                        LTDL[k_idx + total_dofs * k_idx];
-
-                    // j = i, traverse up the hierarchy
-                    int32_t j = i;
-                    while(j != -1) {
-                        auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
-                                body_grp.bodies[j]);
-                        auto &j_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                            body_grp.bodies[j]);
-                        // Iterate through all DOFs of j
-                        for (CountT j_dof = 0; j_dof < j_num_dofs.numDofs;
-                            ++j_dof) {
-                            // M_{ij} = M_{ij} - a * M_{kj}
-                            CountT j_idx = block_start[j] + j_dof;
-                            LTDL[i_idx + total_dofs * j_idx] -=
-                                a * LTDL[k_idx + total_dofs * j_idx];
-                        }
-                        j = j_hier_desc.parentIndex;
-                    }
-                    // M_{ki} = a
-                    LTDL[k_idx + total_dofs * i_idx] = a;
-                }
-                // i = parent(i)
-                i = i_hier_desc.parentIndex;
+    // Backward pass through DOFs
+    for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
+        int32_t i = body_grp.expandedParent[k];
+        while (i != -1) {
+            // Temporary storage
+            float a = ltdl(k, i) / ltdl(k, k);
+            int32_t j = i;
+            while (j != -1) {
+                ltdl(i, j) = ltdl(i, j) - a * ltdl(k, j);
+                j = body_grp.expandedParent[j];
             }
+            ltdl(k, i) = a;
+            i = body_grp.expandedParent[i];
         }
     }
-
     body_grp.massMatrixLTDL = LTDL;
 }
+
 
 // RNE: Compute bias forces and gravity
 static void recursiveNewtonEuler(Context &ctx,
@@ -1523,10 +1518,15 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupHierarchy
             >>({combine_spatial_inertia});
 
+        auto compute_expanded_parent = builder.addToGraph<ParallelForNode<Context,
+             tasks::computeExpandedParent,
+                BodyGroupHierarchy
+            >>({composite_rigid_body});
+
         auto factorize_mass_matrix = builder.addToGraph<ParallelForNode<Context,
              tasks::factorizeMassMatrix,
                 BodyGroupHierarchy
-            >>({composite_rigid_body});
+            >>({compute_expanded_parent});
 
         auto contact_node = builder.addToGraph<ParallelForNode<Context,
              tasks::processContacts,
