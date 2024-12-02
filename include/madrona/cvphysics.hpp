@@ -286,7 +286,7 @@ struct BodyGroupHierarchy {
 
     // "Expanded" parent array for kinematic tree (chain of 1-DOF joints)
     //   used for factorization. See Featherstone pg. 114
-    int32_t expandedParent[kMaxJoints * kMaxVelocityCoords];
+    RangeMap<int32_t> expandedParent;
 
     // Center of mass of the body group
     math::Vector3 comPos;

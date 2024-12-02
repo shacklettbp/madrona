@@ -328,6 +328,8 @@ static void forwardKinematics(Context &ctx,
     }
 }
 
+// Computes center of mass of body hierarchy as Plücker origin
+// (for numerical stability)
 static void computeCenterOfMass(Context &ctx,
                                 BodyGroupHierarchy &body_grp) {
 
@@ -349,13 +351,13 @@ static void computeSpatialInertia(Context &ctx,
 
     for(int i = 0; i < body_grp.numBodies; i++)
     {
-        DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
         if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
             return;
         }
 
-        ObjectID obj_id = ctx.get<ObjectID>(body_grp.bodies[i]);
-        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        auto obj_id = ctx.get<ObjectID>(body_grp.bodies[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
         RigidBodyMetadata metadata = obj_mgr.metadata[obj_id.idx];
         Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
         float mass = 1.f / metadata.mass.invMass;
@@ -365,7 +367,8 @@ static void computeSpatialInertia(Context &ctx,
         // I_world = R * I * R^T (since R^T transforms from world to local)
         Mat3x3 i_world_frame = rot_mat * inertia * rot_mat.transpose();
 
-        // Compute the 3x3 skew-symmetric matrix (r^x) (where r is from Plücker origin to COM)
+        // Compute the 3x3 skew-symmetric matrix (r^x)
+        // (where r is from Plücker origin to COM)
         Vector3 adjustedCom = tmp_state.comPos - body_grp.comPos;
         Mat3x3 sym_mat = skewSymmetricMatrix(adjustedCom);
         // (I_world - m r^x r^x)
@@ -676,17 +679,18 @@ static float* computeContactJacobian(Context &ctx,
 
 
 // Solves M^{-1}x, overwriting x. Based on Table 6.5 in Featherstone
-static void solveM(BodyGroupHierarchy &body_grp, float *x) {
+static void solveM(Context &ctx, BodyGroupHierarchy &body_grp, float *x) {
     CountT total_dofs = body_grp.numDofs;
+    int32_t *expandedParent = ctx.rangeMapUnit(body_grp.expandedParent);
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return body_grp.massMatrixLTDL[row + total_dofs * col];
     };
     // M=L^TDL, so first solve L^{-T} x
     for (int32_t i = (int32_t) total_dofs - 1; i >= 0; --i) {
-        int32_t j = body_grp.expandedParent[i];
+        int32_t j = expandedParent[i];
         while (j != -1) {
             x[j] -= ltdl(i, j) * x[i];
-            j = body_grp.expandedParent[j];
+            j = expandedParent[j];
         }
     }
     // D^{-1} x
@@ -695,10 +699,10 @@ static void solveM(BodyGroupHierarchy &body_grp, float *x) {
     }
     // L^{-1} x
     for (int32_t i = 0; i < total_dofs; ++i) {
-        int32_t j = body_grp.expandedParent[i];
+        int32_t j = expandedParent[i];
         while (j != -1) {
             x[i] -= ltdl(i, j) * x[j];
-            j = body_grp.expandedParent[j];
+            j = expandedParent[j];
         }
     }
 }
@@ -794,26 +798,30 @@ static void compositeRigidBody(Context &ctx,
 }
 
 // Computes the expanded parent array (based on Table 6.4 of Featherstone)
-// TODO: this only needs to be done once (probably after construction)
 static void computeExpandedParent(Context &ctx,
                                   BodyGroupHierarchy &body_grp) {
-    CountT N_B = body_grp.numBodies;
+    // Allocate memory
+    CountT numDofs = body_grp.numDofs;
+    CountT numBodies = body_grp.numBodies;
+    body_grp.expandedParent = ctx.allocRangeMap<int32_t>(numDofs);
+    int32_t *expandedParent = ctx.rangeMapUnit(body_grp.expandedParent);
+
     // Initialize n-N_B elements
     for(int32_t i = 0; i < body_grp.numDofs; ++i) {
-        body_grp.expandedParent[i] = i - 1;
+        expandedParent[i] = i - 1;
     }
     // Create a mapping from body index to start of block
-    int32_t map[N_B];
+    int32_t map[numBodies];
     map[0] = -1;
-    for(int32_t i = 1; i < N_B; ++i) {
+    for(int32_t i = 1; i < numBodies; ++i) {
         uint32_t n_i = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]).numDofs;
         map[i] = map[i - 1] + (int32_t) n_i;
     }
     // Finish expanded parent array
-    for(int32_t i = 1; i < N_B; ++i) {
+    for(int32_t i = 1; i < numBodies; ++i) {
         int32_t parent_idx = ctx.get<DofObjectHierarchyDesc>(
             body_grp.bodies[i]).parentIndex;
-        body_grp.expandedParent[map[i - 1] + 1] = map[parent_idx];
+        expandedParent[map[i - 1] + 1] = map[parent_idx];
     }
 }
 
@@ -834,19 +842,21 @@ static void factorizeMassMatrix(Context &ctx,
         return LTDL[row + total_dofs * col];
     };
 
+    int32_t *expandedParent = ctx.rangeMapUnit(body_grp.expandedParent);
+
     // Backward pass through DOFs
     for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
-        int32_t i = body_grp.expandedParent[k];
+        int32_t i = expandedParent[k];
         while (i != -1) {
             // Temporary storage
             float a = ltdl(k, i) / ltdl(k, k);
             int32_t j = i;
             while (j != -1) {
                 ltdl(i, j) = ltdl(i, j) - a * ltdl(k, j);
-                j = body_grp.expandedParent[j];
+                j = expandedParent[j];
             }
             ltdl(k, i) = a;
-            i = body_grp.expandedParent[i];
+            i = expandedParent[i];
         }
     }
     body_grp.massMatrixLTDL = LTDL;
@@ -866,7 +876,7 @@ static void computeFreeAcceleration(Context &ctx,
     for (CountT i = 0; i < num_dofs; ++i) {
         freeAcc[i] = -freeAcc[i];
     }
-    solveM(body_grp, freeAcc);
+    solveM(ctx, body_grp, freeAcc);
     body_grp.freeAcceleration = freeAcc;
 }
 
@@ -1566,15 +1576,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupHierarchy
             >>({combine_spatial_inertia});
 
-        auto compute_expanded_parent = builder.addToGraph<ParallelForNode<Context,
-             tasks::computeExpandedParent,
-                BodyGroupHierarchy
-            >>({composite_rigid_body});
-
         auto factorize_mass_matrix = builder.addToGraph<ParallelForNode<Context,
              tasks::factorizeMassMatrix,
                 BodyGroupHierarchy
-            >>({compute_expanded_parent});
+            >>({composite_rigid_body});
 
         auto compute_free_acc = builder.addToGraph<ParallelForNode<Context,
              tasks::computeFreeAcceleration,
@@ -1736,6 +1741,9 @@ void initializeHierarchies(Context &ctx) {
 
         // Forward kinematics to get positions
         tasks::forwardKinematics(ctx, grp);
+
+        // Compute expanded parent array
+        tasks::computeExpandedParent(ctx, grp);
 
         // Allocate memory for mass matrix
         CountT num_dofs = grp.numDofs;
