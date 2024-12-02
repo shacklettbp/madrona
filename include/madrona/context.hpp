@@ -9,6 +9,7 @@
 
 #include <madrona/fwd.hpp>
 #include <madrona/ecs.hpp>
+#include <madrona/range.hpp>
 #include <madrona/state.hpp>
 #include <madrona/registry.hpp>
 
@@ -95,6 +96,15 @@ public:
     // ECSRegistry::registerSingleton, so you don't have to create them.
     template <typename SingletonT>
     SingletonT & singleton();
+
+    template <typename RangeMapUnit>
+    RangeMap<RangeMapUnit> allocRangeMap(CountT num_units);
+
+    template <typename RangeMapUnit>
+    void freeRangeMap(RangeMap<RangeMapUnit> range_map);
+
+    template <typename RangeMapUnit>
+    RangeMapUnit *rangeMapUnit(RangeMap<RangeMapUnit> range_map);
 
     // Allocate a raw chunk of memory num_bytes in length from a global
     // bump allocator. Use ResetTmpAllocNode in the taskgraph to reclaim

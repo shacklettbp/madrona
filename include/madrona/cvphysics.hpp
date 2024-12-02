@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madrona/range.hpp>
 #include <madrona/components.hpp>
 #include <madrona/taskgraph_builder.hpp>
 
@@ -265,6 +266,17 @@ struct DofObjectArchetype : public Archetype<
     DofObjectNumDofs
 > {};
 
+
+
+// Example of range map allocation usage.
+struct MassMatrixUnit {
+    static constexpr CountT kNumValsPerUnit = 16;
+    float values[kNumValsPerUnit];
+};
+
+
+
+
 struct BodyGroupHierarchy {
     static constexpr uint32_t kMaxJoints = 8;
 
@@ -284,6 +296,9 @@ struct BodyGroupHierarchy {
 
     // Mass matrix (num_dof x num_dof) of the body group
     float *massMatrix;
+
+    // TODO: Replace the massMatrix pointer with RangeMap<MassMatrixUnit>
+    RangeMap<MassMatrixUnit> massMatrixRange;
 
     // LTDL factorization of matrix
     float *massMatrixLTDL;

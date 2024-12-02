@@ -67,4 +67,10 @@ void ECSRegistry::exportSingleton(EnumT slot)
     exportSingleton<SingletonT>(static_cast<uint32_t>(slot));
 }
 
+template <typename RangeMapUnit>
+void ECSRegistry::registerRangeMapUnit()
+{
+    // Does nothing on the CPU backend.
+}
+
 }
