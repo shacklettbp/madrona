@@ -360,4 +360,6 @@ void setCVEntityParentBall(Context &ctx,
                            math::Vector3 rel_pos_parent,
                            math::Vector3 rel_pos_child);
 
+void initializeHierarchies(Context &ctx);
+
 }

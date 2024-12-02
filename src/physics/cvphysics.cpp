@@ -1530,15 +1530,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         gauss_node = builder.addToGraph<ResetTmpAllocNode>(
                 {gauss_node});
 #else
-        auto forward_kinematics = builder.addToGraph<ParallelForNode<Context,
-             tasks::forwardKinematics,
-                BodyGroupHierarchy
-            >>({run_narrowphase});
-
         auto compute_center_of_mass = builder.addToGraph<ParallelForNode<Context,
              tasks::computeCenterOfMass,
                 BodyGroupHierarchy
-            >>({forward_kinematics});
+            >>({run_narrowphase});
 
         auto compute_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::computeSpatialInertia,
@@ -1732,5 +1727,19 @@ Entity makeCVBodyGroup(Context &ctx)
 
     return e;
 }
-    
+
+void initializeHierarchies(Context &ctx) {
+    uint32_t world_id = ctx.worldID().idx;
+    StateManager *state_mgr = ctx.getStateManager();
+    BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
+        BodyGroup, BodyGroupHierarchy>(world_id);
+    // Run forward kinematics to get positions
+    for(CountT i = 0; i < state_mgr->numRows<BodyGroup>(world_id); ++i) {
+        tasks::forwardKinematics(ctx, hiers[i]);
+    }
+
+    // TODO: memory initialization here
+}
+
+
 }
