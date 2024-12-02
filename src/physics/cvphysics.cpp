@@ -681,7 +681,8 @@ static float* computeContactJacobian(Context &ctx,
 // Solves M^{-1}x, overwriting x. Based on Table 6.5 in Featherstone
 static void solveM(Context &ctx, BodyGroupHierarchy &body_grp, float *x) {
     CountT total_dofs = body_grp.numDofs;
-    int32_t *expandedParent = ctx.rangeMapUnit(body_grp.expandedParent);
+    int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit(
+        body_grp.expandedParent);
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return body_grp.massMatrixLTDL[row + total_dofs * col];
     };
@@ -797,11 +798,9 @@ static void compositeRigidBody(Context &ctx,
 // Computes the expanded parent array (based on Table 6.4 of Featherstone)
 static void computeExpandedParent(Context &ctx,
                                   BodyGroupHierarchy &body_grp) {
-    // Allocate memory
-    CountT numDofs = body_grp.numDofs;
     CountT numBodies = body_grp.numBodies;
-    body_grp.expandedParent = ctx.allocRangeMap<int32_t>(numDofs);
-    int32_t *expandedParent = ctx.rangeMapUnit(body_grp.expandedParent);
+    int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit(
+        body_grp.expandedParent);
 
     // Initialize n-N_B elements
     for(int32_t i = 0; i < body_grp.numDofs; ++i) {
@@ -839,7 +838,8 @@ static void factorizeMassMatrix(Context &ctx,
         return LTDL[row + total_dofs * col];
     };
 
-    int32_t *expandedParent = ctx.rangeMapUnit(body_grp.expandedParent);
+    int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit(
+        body_grp.expandedParent);
 
     // Backward pass through DOFs
     for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
@@ -864,7 +864,7 @@ static void computeFreeAcceleration(Context &ctx,
                                     BodyGroupHierarchy &body_grp) {
     // Negate the bias forces, solve
     CountT num_dofs = body_grp.numDofs;
-    float* bias = ctx.rangeMapUnit(body_grp.bias);
+    float* bias = (float*) ctx.rangeMapUnit(body_grp.bias);
     for (CountT i = 0; i < num_dofs; ++i) {
         bias[i] = -bias[i];
     }
@@ -983,7 +983,7 @@ static void recursiveNewtonEuler(Context &ctx,
     }
 
     // Backward pass to find bias forces
-    float *tau = ctx.rangeMapUnit(body_grp.bias);
+    float *tau = (float*) ctx.rangeMapUnit(body_grp.bias);
     memset(tau, 0, total_dofs * sizeof(float));
 
     CountT dof_index = total_dofs;
@@ -1093,7 +1093,7 @@ static void gaussMinimizeFn(Context &ctx,
         float *local_mass = (float*) ctx.rangeMapUnit(hiers[i].massMatrix);
 
         for (CountT row = 0; row < hiers[i].numDofs; ++row) {
-            float* freeAcceleration = ctx.rangeMapUnit(hiers[i].bias);
+            float* freeAcceleration = (float*) ctx.rangeMapUnit(hiers[i].bias);
             full_free_acc[row + processed_dofs] = freeAcceleration[row];
 
             for (CountT col = 0; col < hiers[i].numDofs; ++col) {
@@ -1405,6 +1405,8 @@ void registerTypes(ECSRegistry &registry)
     registry.registerBundleAlias<SolverBundleAlias, CVRigidBodyState>();
 
     registry.registerRangeMapUnit<MassMatrixUnit>();
+    registry.registerRangeMapUnit<ParentArrayUnit>();
+    registry.registerRangeMapUnit<BodyFloatUnit>();
 }
 
 void setCVGroupRoot(Context &ctx,
@@ -1726,24 +1728,30 @@ void initializeHierarchies(Context &ctx) {
     // Initialize each hierarchy
     for(CountT i = 0; i < state_mgr->numRows<BodyGroup>(world_id); ++i) {
         BodyGroupHierarchy &grp = hiers[i];
+        CountT num_dofs = grp.numDofs;
+        // Memory allocation starts here
 
-        // Forward kinematics to get positions
-        tasks::forwardKinematics(ctx, grp);
-
+        // Allocate memory for expanded parent array
+        CountT num_units = (num_dofs + ParentArrayUnit::kNumValsPerUnit - 1) /
+            ParentArrayUnit::kNumValsPerUnit;
+        grp.expandedParent = ctx.allocRangeMap<ParentArrayUnit>(num_units);
         // Compute expanded parent array
         tasks::computeExpandedParent(ctx, grp);
 
-        // Space for bias forces/unconstrained acceleration
-        grp.bias = ctx.allocRangeMap<float>(grp.numDofs);
+        // Allocate memory for bias forces/unconstrained acceleration
+        num_units = (num_dofs + BodyFloatUnit::kNumValsPerUnit - 1) /
+            BodyFloatUnit::kNumValsPerUnit;
+        grp.bias = ctx.allocRangeMap<BodyFloatUnit>(num_units);
 
         // Allocate memory for mass matrix
-        CountT num_dofs = grp.numDofs;
         CountT num_values_in_matrix = num_dofs * num_dofs;
-        CountT num_units =
+        num_units =
             (num_values_in_matrix + MassMatrixUnit::kNumValsPerUnit - 1) /
             MassMatrixUnit::kNumValsPerUnit;
         grp.massMatrix = ctx.allocRangeMap<MassMatrixUnit>(num_units);
 
+        // Forward kinematics to get positions
+        tasks::forwardKinematics(ctx, grp);
         // TODO: more initialization goes here
     }
 }

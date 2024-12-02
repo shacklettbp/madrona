@@ -205,6 +205,8 @@ struct DofObjectTmpState {
     // Map from generalized velocities to Plücker coordinates
     Phi phi;
 
+    // Actual storage of Phi, PhiDot
+
     // The spatial inertia tensor in Plücker coordinates
     // Hold the combined inertia of subtree after combineSpatialInertia
     InertiaTensor spatialInertia;
@@ -274,8 +276,15 @@ struct MassMatrixUnit {
     float values[kNumValsPerUnit];
 };
 
+struct ParentArrayUnit {
+    static constexpr CountT kNumValsPerUnit = 16;
+    int32_t values[kNumValsPerUnit];
+};
 
-
+struct BodyFloatUnit {
+    static constexpr CountT kNumValsPerUnit = 16;
+    float values[kNumValsPerUnit];
+};
 
 struct BodyGroupHierarchy {
     static constexpr uint32_t kMaxJoints = 8;
@@ -289,7 +298,7 @@ struct BodyGroupHierarchy {
 
     // "Expanded" parent array for kinematic tree (chain of 1-DOF joints)
     //   used for factorization. See Featherstone pg. 114
-    RangeMap<int32_t> expandedParent;
+    RangeMap<ParentArrayUnit> expandedParent;
 
     // Center of mass of the body group
     math::Vector3 comPos;
@@ -302,7 +311,7 @@ struct BodyGroupHierarchy {
 
     // Bias forces (num_dof) of the body group, gets replaced by the
     //  unconstrained acceleration after computeFreeAcceleration
-    RangeMap<float> bias;
+    RangeMap<BodyFloatUnit> bias;
 
     // Temporary index used during stacking
     uint32_t tmpIdx;
