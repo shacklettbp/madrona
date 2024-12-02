@@ -66,22 +66,6 @@ struct ContactPointInfo {
     uint32_t subIdx;
 };
 
-// This is the phi linear operator which appears in Featherstone's Composite-
-// Rigid-Body Algorithm. phi maps from our generalized velocities to the
-// velocities in Plücker coordinates.
-struct Phi {
-    // Phi is parameterized by at most 6 values (7 for quaternion).
-    //
-    // For the free body, it just depends on the center of mass of the body.
-    //
-    // For the hinge, it depends on the normalized angular velocity vector 
-    // (first 3 values) of the hinge and the position of the joint 
-    // (not the body - last 3 values).
-    //
-    // For the ball joint, the position of the joint and the rotation of the
-    // parent (quaternion)
-    float v[7];
-};
 
 struct SpatialVector {
     math::Vector3 linear;
@@ -190,6 +174,28 @@ struct InertiaTensor {
     }
 };
 
+// This is the phi linear operator which appears in Featherstone's Composite-
+// Rigid-Body Algorithm. phi maps from our generalized velocities to the
+// velocities in Plücker coordinates.
+struct Phi {
+    // Phi is parameterized by at most 6 values (7 for quaternion).
+    //
+    // For the free body, it just depends on the center of mass of the body.
+    //
+    // For the hinge, it depends on the normalized angular velocity vector
+    // (first 3 values) of the hinge and the position of the joint
+    // (not the body - last 3 values).
+    //
+    // For the ball joint, the position of the joint and the rotation of the
+    // parent (quaternion)
+    float v[7];
+};
+
+struct PhiUnit {
+    static constexpr CountT kNumValsPerUnit = 16;
+    float values[kNumValsPerUnit];
+};
+
 // Just some space to store temporary per-entity data.
 struct DofObjectTmpState {
     // World-space position of body COM
@@ -202,10 +208,11 @@ struct DofObjectTmpState {
     // For the hinge, it's the position of the joint.
     math::Vector3 anchorPos;
 
-    // Map from generalized velocities to Plücker coordinates
+    // Compressed values needed to compute Phi
     Phi phi;
 
-    // Actual storage of Phi, PhiDot
+    // Contains storage for both complete form of Phi and Phi_dot
+    RangeMap<PhiUnit> phiFull;
 
     // The spatial inertia tensor in Plücker coordinates
     // Hold the combined inertia of subtree after combineSpatialInertia

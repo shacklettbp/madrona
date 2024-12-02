@@ -336,8 +336,7 @@ static void computeCenterOfMass(Context &ctx,
     Vector3 hierarchy_com = Vector3::zero();
     float total_mass = 0.f;
     for (int i = 0; i < body_grp.numBodies; ++i) {
-        DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
         hierarchy_com += tmp_state.spatialInertia.mass * tmp_state.comPos;
         total_mass += tmp_state.spatialInertia.mass;
     }
@@ -404,20 +403,16 @@ static void combineSpatialInertias(Context &ctx,
     }
 }
 
-// Fully computes the Phi matrix from generalized velocities to Plücker coordinates
+// Computes the Phi matrix from generalized velocities to Plücker coordinates
 static float* computePhi(Context &ctx,
                          DofObjectNumDofs &num_dofs,
-                         Vector3 origin,
-                         Phi &phi)
+                         DofObjectTmpState &tmp_state,
+                         Vector3 origin)
 {
-    uint32_t world_id = ctx.worldID().idx;
-    StateManager *state_mgr = ctx.getStateManager();
-    float *S;
-
+    Phi phi = tmp_state.phi;
+    float *S = (float *) ctx.rangeMapUnit(tmp_state.phiFull);
     if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
         // S = [1_3x3 r^x; 0 1_3x3], column-major
-        S = (float *) state_mgr->tmpAlloc(world_id,
-            6 * 6 * sizeof(float));
         memset(S, 0.f, 6 * 6 * sizeof(float));
         // Diagonal identity
         for(CountT i = 0; i < 6; ++i) {
@@ -435,8 +430,6 @@ static float* computePhi(Context &ctx,
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
         // S = [r \times hinge; hinge]
-        S = (float *) state_mgr->tmpAlloc(world_id,
-            6 * sizeof(float));
         Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
         Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
         anchorPos -= origin;
@@ -450,10 +443,6 @@ static float* computePhi(Context &ctx,
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
         // This will just get right-multiplied by the angular velocity
-        S = (float *)state_mgr->tmpAlloc(world_id,
-            6 * 3 * sizeof(float));
-        memset(S, 0, 6 * 3 * sizeof(float));
-
         Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
         anchor_pos -= origin;
 
@@ -483,89 +472,17 @@ static float* computePhi(Context &ctx,
     return S;
 }
 
-// Computes only the first three rows of Phi (for the translational part)
-static float* computePhiTrans(Context &ctx,
-                              DofObjectNumDofs &num_dofs,
-                              Vector3 origin,
-                              Phi &phi)
-{
-    uint32_t world_id = ctx.worldID().idx;
-    StateManager *state_mgr = ctx.getStateManager();
-    float *S;
-
-    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
-        // S = [1_3x3 r^x], column-major
-        S = (float *) state_mgr->tmpAlloc(world_id,
-            3 * 6 * sizeof(float));
-        memset(S, 0.f, 3 * 6 * sizeof(float));
-        // Diagonal identity
-        for(CountT i = 0; i < 3; ++i) {
-            S[i * 3 + i] = 1.f;
-        }
-        // r^x Skew symmetric matrix
-        Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
-        comPos -= origin;
-        S[0 + 3 * 4] = -comPos.z;
-        S[0 + 3 * 5] = comPos.y;
-        S[1 + 3 * 3] = comPos.z;
-        S[1 + 3 * 5] = -comPos.x;
-        S[2 + 3 * 3] = -comPos.y;
-        S[2 + 3 * 4] = comPos.x;
-    }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
-        // S = [r \times hinge]
-        S = (float *) state_mgr->tmpAlloc(world_id,
-            3 * sizeof(float));
-        Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
-        Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
-        anchorPos -= origin;
-        Vector3 r_cross_hinge = anchorPos.cross(hinge);
-        S[0] = r_cross_hinge.x;
-        S[1] = r_cross_hinge.y;
-        S[2] = r_cross_hinge.z;
-    }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
-        S = (float *)state_mgr->tmpAlloc(world_id,
-            3 * 3 * sizeof(float));
-
-        Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
-        anchor_pos -= origin;
-
-        // Anchor position in the coordinate space, and parent rotation
-        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
-        Quat parent_composed_rot = Quat{
-            phi.v[3], phi.v[4], phi.v[5], phi.v[6]
-        };
-        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
-
-        rx *= parent_rot;
-
-        for (int col = 0; col < 3; ++col) {
-            S[col * 3 + 0] = rx[col][0];
-            S[col * 3 + 1] = rx[col][1];
-            S[col * 3 + 2] = rx[col][2];
-        }
-    }
-    else {
-        MADRONA_UNREACHABLE();
-    }
-    return S;
-}
-
 static float* computePhiDot(Context &ctx,
                             DofObjectNumDofs &num_dofs,
-                            SpatialVector &v_hat,
-                            Vector3 origin,
-                            Phi &phi)
+                            DofObjectTmpState &tmp_state,
+                            SpatialVector &v_hat)
 {
-    uint32_t world_id = ctx.worldID().idx;
-    StateManager *state_mgr = ctx.getStateManager();
-    float *S_dot;
+    float* S = (float *) ctx.rangeMapUnit(tmp_state.phiFull);
+    // Same storage location, but will need to be incremented based on size of S
+    float *S_dot = S + 6 * num_dofs.numDofs;
 
     if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
-        // S = [0_3x3 v^x; 0_3x3 0_3x3], column-major
-        S_dot = (float *) state_mgr->tmpAlloc(world_id,
-            6 * 6 * sizeof(float));
+        // S_dot = [0_3x3 v^x; 0_3x3 0_3x3], column-major
         memset(S_dot, 0.f, 6 * 6 * sizeof(float));
         // v^x Skew symmetric matrix
         Vector3 v_trans = v_hat.linear;
@@ -577,10 +494,6 @@ static float* computePhiDot(Context &ctx,
         S_dot[2 + 6 * 4] = v_trans.x;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
-        S_dot = (float *) state_mgr->tmpAlloc(world_id,
-            6 * sizeof(float));
-        // S = [r \times hinge; hinge]
-        float* S = computePhi(ctx, num_dofs, origin, phi);
         // S_dot = v [spatial cross] S
         SpatialVector S_sv = SpatialVector::fromVec(S);
         SpatialVector S_dot_sv = v_hat.cross(S_sv);
@@ -592,11 +505,6 @@ static float* computePhiDot(Context &ctx,
         S_dot[5] = S_dot_sv.angular.z;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
-        S_dot = (float *)state_mgr->tmpAlloc(world_id,
-            6 * 3 * sizeof(float));
-        memset(S_dot, 0.f, 6 * 3 * sizeof(float));
-
-        float* S = computePhi(ctx, num_dofs, origin, phi);
         // S_dot = v [spatial cross] S
         for (int i = 0; i < 3; ++i) {
             SpatialVector S_sv = SpatialVector::fromVec(S + (i * 6));
@@ -616,13 +524,22 @@ static float* computePhiDot(Context &ctx,
     return S_dot;
 }
 
+// First pass to compute Phi with body COM as origin
+static void computePhiHierarchy(Context &ctx,
+                                BodyGroupHierarchy &body_grp)
+{
+    for (int i = 0; i < body_grp.numBodies; ++i) {
+        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        computePhi(ctx, num_dofs, tmp_state, body_grp.comPos);
+    }
+}
+
 static float* computeContactJacobian(Context &ctx,
-                                     DofObjectNumDofs &num_dofs,
                                      BodyGroupHierarchy &body_grp,
                                      DofObjectHierarchyDesc &hier_desc,
                                      Mat3x3 &C,
-                                     Vector3 &origin,
-                                     Phi &phi)
+                                     Vector3 &origin)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
@@ -653,11 +570,11 @@ static float* computeContactJacobian(Context &ctx,
                 body_grp.bodies[curr_idx]);
 
         // Populate columns of J_C
-        float *S_trans = computePhiTrans(
-                ctx, curr_num_dofs, origin, curr_tmp_state.phi);
+        float *S = computePhi(ctx, curr_num_dofs, curr_tmp_state, origin);
+        // Only use translational part of S
         for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
             float *J_col = J + 3 * (block_start[curr_idx] + i);
-            float *S_col = S_trans + 3 * i;
+            float *S_col = S + 6 * i;
             for(CountT j = 0; j < 3; ++j) {
                 J_col[j] = S_col[j];
             }
@@ -738,8 +655,7 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[i]);
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
-        float *S_i = computePhi(
-                ctx, i_num_dofs, body_grp.comPos, i_tmp_state.phi);
+        float *S_i = (float *) ctx.rangeMapUnit(i_tmp_state.phiFull);
 
         // Temporary store for F = I_i^C S_i, column-major
         float *F = (float *) state_mgr->tmpAlloc(world_id,
@@ -773,8 +689,7 @@ static void compositeRigidBody(Context &ctx,
             auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[j]);
 
-            float *S_j = computePhi(
-                    ctx, j_num_dofs, body_grp.comPos, j_tmp_state.phi);
+            float *S_j = (float *) ctx.rangeMapUnit(j_tmp_state.phiFull);
 
             // M_{ij} = M{ji} = F^T S_j
             float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
@@ -890,12 +805,10 @@ static void recursiveNewtonEuler(Context &ctx,
         auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
         auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
 
-        float *S = computePhi(
-            ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+        float *S = (float *) ctx.rangeMapUnit(tmp_state.phiFull);
         SpatialVector v_body = {
             {velocity.qv[0], velocity.qv[1], velocity.qv[2]}, Vector3::zero()};
-        float *S_dot = computePhiDot(
-                ctx, num_dofs, v_body, body_grp.comPos, tmp_state.phi);
+        float *S_dot = computePhiDot(ctx, num_dofs, tmp_state, v_body);
 
         // v_0 = 0, a_0 = -g (fictitious upward acceleration)
         tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
@@ -924,17 +837,17 @@ static void recursiveNewtonEuler(Context &ctx,
         assert(hier_desc.parent != Entity::none());
         auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
 
+        float *S = (float *) ctx.rangeMapUnit(tmp_state.phiFull);
+
         if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
             tmp_state.sVel = parent_tmp_state.sVel;
             tmp_state.sAcc = parent_tmp_state.sAcc;
 
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            float *S = computePhi(
-                    ctx, num_dofs, body_grp.comPos, tmp_state.phi);
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
             // Note: we are using the parent velocity here (for hinge itself)
-            float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel,
-                body_grp.comPos, tmp_state.phi);
+            float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+                parent_tmp_state.sVel);
 
             float q_dot = velocity.qv[0];
             for (int j = 0; j < 6; ++j) {
@@ -952,13 +865,10 @@ static void recursiveNewtonEuler(Context &ctx,
             tmp_state.sAcc = parent_tmp_state.sAcc;
 
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            float *S = computePhi(
-                    ctx, num_dofs, body_grp.comPos, tmp_state.phi);
-
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
             // Note: we are using the parent velocity here (for hinge itself)
-            float *S_dot = computePhiDot(ctx, num_dofs, parent_tmp_state.sVel,
-                body_grp.comPos, tmp_state.phi);
+            float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+                parent_tmp_state.sVel);
 
             float *q_dot = velocity.qv;
             for (int j = 0; j < 6; ++j) {
@@ -994,7 +904,7 @@ static void recursiveNewtonEuler(Context &ctx,
 
         // tau_i = S_i^T f_i
         dof_index -= num_dofs.numDofs;
-        float *S = computePhi(ctx, num_dofs, body_grp.comPos, tmp_state.phi);
+        float *S = (float *) ctx.rangeMapUnit(tmp_state.phiFull);
         for(CountT row = 0; row < num_dofs.numDofs; ++row) {
             float *S_col = S + 6 * row;
             for(CountT k = 0; k < 6; ++k) {
@@ -1174,18 +1084,10 @@ static void gaussMinimizeFn(Context &ctx,
     for(CountT ct_idx = 0; ct_idx < num_contacts; ++ct_idx) {
         ContactConstraint contact = contacts[ct_idx];
         ContactTmpState &tmp_state = contacts_tmp_state[ct_idx];
-        CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
-                contact.ref);
-        CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
-                contact.alt);
-        DofObjectTmpState &ref_tmp_state = ctx.get<DofObjectTmpState>(
-                ref.physicsEntity);
-        DofObjectTmpState &alt_tmp_state = ctx.get<DofObjectTmpState>(
-                alt.physicsEntity);
-        DofObjectNumDofs &ref_num_dofs = ctx.get<DofObjectNumDofs>(
-                ref.physicsEntity);
-        DofObjectNumDofs &alt_num_dofs = ctx.get<DofObjectNumDofs>(
-                alt.physicsEntity);
+        auto ref = ctx.get<CVPhysicalComponent>(contact.ref);
+        auto alt = ctx.get<CVPhysicalComponent>(contact.alt);
+        auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref.physicsEntity);
+        auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt.physicsEntity);
         bool ref_fixed = ref_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
         bool alt_fixed = alt_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
         // Each of the contact points
@@ -1197,9 +1099,8 @@ static void gaussMinimizeFn(Context &ctx,
                         ref.physicsEntity);
                 BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
                         ref_hier_desc.bodyGroup);
-                float* J_ref = computeContactJacobian(ctx,
-                    ref_num_dofs, ref_grp, ref_hier_desc,
-                    tmp_state.C, contact_pt, ref_tmp_state.phi);
+                float* J_ref = computeContactJacobian(ctx, ref_grp,
+                    ref_hier_desc, tmp_state.C, contact_pt);
                 for(CountT i = 0; i < ref_grp.numDofs; ++i) {
                     float *J_col = J_c +
                         J_rows * (block_start[ref_grp.tmpIdx] + i) + jac_row;
@@ -1210,13 +1111,12 @@ static void gaussMinimizeFn(Context &ctx,
                 }
             }
             if(!alt_fixed) {
-                DofObjectHierarchyDesc &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                auto &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                         alt.physicsEntity);
-                BodyGroupHierarchy &alt_grp = ctx.get<BodyGroupHierarchy>(
+                auto &alt_grp = ctx.get<BodyGroupHierarchy>(
                         alt_hier_desc.bodyGroup);
-                float *J_alt = computeContactJacobian(ctx,
-                    alt_num_dofs, alt_grp, alt_hier_desc,
-                    tmp_state.C, contact_pt, alt_tmp_state.phi);
+                float *J_alt = computeContactJacobian(ctx, alt_grp,
+                    alt_hier_desc, tmp_state.C, contact_pt);
                 for(CountT i = 0; i < alt_grp.numDofs; ++i) {
                     float *J_col = J_c +
                         J_rows * (block_start[alt_grp.tmpIdx] + i) + jac_row;
@@ -1404,6 +1304,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerBundle<CVRigidBodyState>();
     registry.registerBundleAlias<SolverBundleAlias, CVRigidBodyState>();
 
+    registry.registerRangeMapUnit<PhiUnit>();
     registry.registerRangeMapUnit<MassMatrixUnit>();
     registry.registerRangeMapUnit<ParentArrayUnit>();
     registry.registerRangeMapUnit<BodyFloatUnit>();
@@ -1551,10 +1452,15 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupHierarchy
             >>({compute_center_of_mass});
 
+        auto compute_phi = builder.addToGraph<ParallelForNode<Context,
+             tasks::computePhiHierarchy,
+                BodyGroupHierarchy
+            >>({compute_spatial_inertia});
+
         auto recursive_newton_euler = builder.addToGraph<ParallelForNode<Context,
              tasks::recursiveNewtonEuler,
                 BodyGroupHierarchy
-            >>({compute_spatial_inertia});
+            >>({compute_phi});
 
         auto combine_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::combineSpatialInertias,
@@ -1729,7 +1635,6 @@ void initializeHierarchies(Context &ctx) {
     for(CountT i = 0; i < state_mgr->numRows<BodyGroup>(world_id); ++i) {
         BodyGroupHierarchy &grp = hiers[i];
         CountT num_dofs = grp.numDofs;
-        // Memory allocation starts here
 
         // Allocate memory for expanded parent array
         CountT num_units = (num_dofs + ParentArrayUnit::kNumValsPerUnit - 1) /
@@ -1744,11 +1649,22 @@ void initializeHierarchies(Context &ctx) {
         grp.bias = ctx.allocRangeMap<BodyFloatUnit>(num_units);
 
         // Allocate memory for mass matrix
-        CountT num_values_in_matrix = num_dofs * num_dofs;
-        num_units =
-            (num_values_in_matrix + MassMatrixUnit::kNumValsPerUnit - 1) /
+        CountT num_matrix_vals = num_dofs * num_dofs;
+        num_units = (num_matrix_vals + MassMatrixUnit::kNumValsPerUnit - 1) /
             MassMatrixUnit::kNumValsPerUnit;
         grp.massMatrix = ctx.allocRangeMap<MassMatrixUnit>(num_units);
+
+        // Allocate memory for each body (phi, phi_dot)
+        for(CountT j = 0; j < grp.numBodies; ++j) {
+            Entity body = grp.bodies[j];
+            auto &num_body_dofs = ctx.get<DofObjectNumDofs>(body);
+            auto &tmp_state = ctx.get<DofObjectTmpState>(body);
+            // Space for both phi and phi_dot
+            CountT num_phi_vals = 2 * 6 * num_body_dofs.numDofs;
+            num_units = (num_phi_vals + PhiUnit::kNumValsPerUnit - 1) /
+                PhiUnit::kNumValsPerUnit;
+            tmp_state.phiFull = ctx.allocRangeMap<PhiUnit>(num_units);
+        }
 
         // Forward kinematics to get positions
         tasks::forwardKinematics(ctx, grp);
