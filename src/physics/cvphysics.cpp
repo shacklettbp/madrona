@@ -1130,15 +1130,6 @@ static void gaussMinimizeFn(Context &ctx,
         }
     }
 
-    // Convert J to row-major
-    float *J_c_rm = (float *) state_mgr->tmpAlloc(world_id,
-        J_rows * J_cols * sizeof(float));
-    for(CountT i = 0; i < J_rows; ++i) {
-        for(CountT j = 0; j < J_cols; ++j) {
-            J_c_rm[j + i * J_cols] = J_c[i + j * J_rows];
-        }
-    }
-
     // Call the solver
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
         cv_sing.cvxSolve->totalNumDofs = total_num_dofs;
@@ -1147,7 +1138,7 @@ static void gaussMinimizeFn(Context &ctx,
         cv_sing.cvxSolve->mass = total_mass_mat;
         cv_sing.cvxSolve->free_acc = full_free_acc;
         cv_sing.cvxSolve->vel = full_vel;
-        cv_sing.cvxSolve->J_c = J_c_rm;
+        cv_sing.cvxSolve->J_c = J_c;
         cv_sing.cvxSolve->mu = full_mu;
         cv_sing.cvxSolve->penetrations = full_penetration;
 
