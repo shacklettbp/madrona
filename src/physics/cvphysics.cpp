@@ -717,8 +717,7 @@ static void compositeRigidBody(Context &ctx,
 
     // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = body_grp.numDofs;
-    float *M = (float *) state_mgr->tmpAlloc(world_id,
-        total_dofs * total_dofs * sizeof(float));
+    float *M = (float*) ctx.rangeMapUnit(body_grp.massMatrix);
     memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
@@ -793,8 +792,6 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[j]).parent;
         }
     }
-
-    body_grp.massMatrix = M;
 }
 
 // Computes the expanded parent array (based on Table 6.4 of Featherstone)
@@ -835,8 +832,8 @@ static void factorizeMassMatrix(Context &ctx,
     uint32_t total_dofs = body_grp.numDofs;
     float *LTDL = (float *) state_mgr->tmpAlloc(world_id,
         total_dofs * total_dofs * sizeof(float));
-    memcpy(LTDL, body_grp.massMatrix,
-        total_dofs * total_dofs * sizeof(float));
+    float *massMatrix = (float *) ctx.rangeMapUnit(body_grp.massMatrix);
+    memcpy(LTDL, massMatrix, total_dofs * total_dofs * sizeof(float));
     // Helper
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return LTDL[row + total_dofs * col];
@@ -1093,7 +1090,7 @@ static void gaussMinimizeFn(Context &ctx,
 
     uint32_t processed_dofs = 0;
     for (CountT i = 0; i < num_grps; ++i) {
-        float *local_mass = hiers[i].massMatrix;
+        float *local_mass = (float*) ctx.rangeMapUnit(hiers[i].massMatrix);
 
         for (CountT row = 0; row < hiers[i].numDofs; ++row) {
             float* freeAcceleration = ctx.rangeMapUnit(hiers[i].bias);
@@ -1745,7 +1742,7 @@ void initializeHierarchies(Context &ctx) {
         CountT num_units =
             (num_values_in_matrix + MassMatrixUnit::kNumValsPerUnit - 1) /
             MassMatrixUnit::kNumValsPerUnit;
-        grp.massMatrixRange = ctx.allocRangeMap<MassMatrixUnit>(num_units);
+        grp.massMatrix = ctx.allocRangeMap<MassMatrixUnit>(num_units);
 
         // TODO: more initialization goes here
     }

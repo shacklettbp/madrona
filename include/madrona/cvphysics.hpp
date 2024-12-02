@@ -295,10 +295,7 @@ struct BodyGroupHierarchy {
     math::Vector3 comPos;
 
     // Mass matrix (num_dof x num_dof) of the body group
-    float *massMatrix;
-
-    // TODO: Replace the massMatrix pointer with RangeMap<MassMatrixUnit>
-    RangeMap<MassMatrixUnit> massMatrixRange;
+    RangeMap<MassMatrixUnit> massMatrix;
 
     // LTDL factorization of matrix
     float *massMatrixLTDL;
