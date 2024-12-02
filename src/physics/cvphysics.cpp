@@ -600,8 +600,10 @@ static void solveM(Context &ctx, BodyGroupHierarchy &body_grp, float *x) {
     CountT total_dofs = body_grp.numDofs;
     int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit(
         body_grp.expandedParent);
+    float *massMatrixLTDL = (float*) ctx.rangeMapUnit(
+        body_grp.massMatrixLTDL);
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
-        return body_grp.massMatrixLTDL[row + total_dofs * col];
+        return massMatrixLTDL[row + total_dofs * col];
     };
     // M=L^TDL, so first solve L^{-T} x
     for (int32_t i = (int32_t) total_dofs - 1; i >= 0; --i) {
@@ -744,8 +746,7 @@ static void factorizeMassMatrix(Context &ctx,
 
     // First copy in the mass matrix
     uint32_t total_dofs = body_grp.numDofs;
-    float *LTDL = (float *) state_mgr->tmpAlloc(world_id,
-        total_dofs * total_dofs * sizeof(float));
+    float *LTDL = (float *) ctx.rangeMapUnit(body_grp.massMatrixLTDL);
     float *massMatrix = (float *) ctx.rangeMapUnit(body_grp.massMatrix);
     memcpy(LTDL, massMatrix, total_dofs * total_dofs * sizeof(float));
     // Helper
@@ -771,7 +772,6 @@ static void factorizeMassMatrix(Context &ctx,
             i = expandedParent[i];
         }
     }
-    body_grp.massMatrixLTDL = LTDL;
 }
 
 // Computes the unconstrained acceleration of each body
@@ -1644,6 +1644,7 @@ void initializeHierarchies(Context &ctx) {
         num_units = (num_matrix_vals + MassMatrixUnit::kNumValsPerUnit - 1) /
             MassMatrixUnit::kNumValsPerUnit;
         grp.massMatrix = ctx.allocRangeMap<MassMatrixUnit>(num_units);
+        grp.massMatrixLTDL = ctx.allocRangeMap<MassMatrixUnit>(num_units);
 
         // Allocate memory for each body (phi, phi_dot)
         for(CountT j = 0; j < grp.numBodies; ++j) {

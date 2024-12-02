@@ -314,7 +314,7 @@ struct BodyGroupHierarchy {
     RangeMap<MassMatrixUnit> massMatrix;
 
     // LTDL factorization of matrix
-    float *massMatrixLTDL;
+    RangeMap<MassMatrixUnit> massMatrixLTDL;
 
     // Bias forces (num_dof) of the body group, gets replaced by the
     //  unconstrained acceleration after computeFreeAcceleration
