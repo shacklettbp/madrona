@@ -284,15 +284,15 @@ struct BodyGroupHierarchy {
     uint32_t numBodies;
     Entity bodies[kMaxJoints];
 
+    // Total number of DOFs in the body group
+    uint32_t numDofs;
+
     // "Expanded" parent array for kinematic tree (chain of 1-DOF joints)
     //   used for factorization. See Featherstone pg. 114
     RangeMap<int32_t> expandedParent;
 
     // Center of mass of the body group
     math::Vector3 comPos;
-
-    // Total number of DOFs in the body group
-    uint32_t numDofs;
 
     // Mass matrix (num_dof x num_dof) of the body group
     float *massMatrix;
@@ -303,11 +303,9 @@ struct BodyGroupHierarchy {
     // LTDL factorization of matrix
     float *massMatrixLTDL;
 
-    // Bias forces (num_dof) of the body group
-    float *biasForces;
-
-    // Unconstrained accelerations (num_dof) of the body group
-    float *freeAcceleration;
+    // Bias forces (num_dof) of the body group, gets replaced by the
+    //  unconstrained acceleration after computeFreeAcceleration
+    RangeMap<float> bias;
 
     // Temporary index used during stacking
     uint32_t tmpIdx;

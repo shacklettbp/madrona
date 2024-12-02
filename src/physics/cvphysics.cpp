@@ -865,19 +865,14 @@ static void factorizeMassMatrix(Context &ctx,
 // Computes the unconstrained acceleration of each body
 static void computeFreeAcceleration(Context &ctx,
                                     BodyGroupHierarchy &body_grp) {
-    StateManager *state_mgr = ctx.getStateManager();
-    uint32_t world_id = ctx.worldID().idx;
-    // Copy in the bias forces
-    CountT num_dofs = body_grp.numDofs;
-    float *freeAcc = (float *) state_mgr->tmpAlloc(world_id,
-        num_dofs * sizeof(float));
-    memcpy(freeAcc, body_grp.biasForces, num_dofs * sizeof(float));
     // Negate the bias forces, solve
+    CountT num_dofs = body_grp.numDofs;
+    float* bias = ctx.rangeMapUnit(body_grp.bias);
     for (CountT i = 0; i < num_dofs; ++i) {
-        freeAcc[i] = -freeAcc[i];
+        bias[i] = -bias[i];
     }
-    solveM(ctx, body_grp, freeAcc);
-    body_grp.freeAcceleration = freeAcc;
+    // This overwrites bias with the acceleration
+    solveM(ctx, body_grp, bias);
 }
 
 // RNE: Compute bias forces and gravity
@@ -885,13 +880,7 @@ static void recursiveNewtonEuler(Context &ctx,
                                 BodyGroupHierarchy &body_grp)
 {
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
-    StateManager *state_mgr = ctx.getStateManager();
-
-    uint32_t world_id = ctx.worldID().idx;
     uint32_t total_dofs = body_grp.numDofs;
-    float *tau = (float *) state_mgr->tmpAlloc(world_id,
-        total_dofs * sizeof(float));
-    memset(tau, 0.f, total_dofs * sizeof(float));
 
     // Forward pass. Find in Plücker coordinates:
     //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
@@ -997,6 +986,9 @@ static void recursiveNewtonEuler(Context &ctx,
     }
 
     // Backward pass to find bias forces
+    float *tau = ctx.rangeMapUnit(body_grp.bias);
+    memset(tau, 0, total_dofs * sizeof(float));
+
     CountT dof_index = total_dofs;
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
@@ -1019,8 +1011,6 @@ static void recursiveNewtonEuler(Context &ctx,
             parent_tmp_state.sForce += tmp_state.sForce;
         }
     }
-
-    body_grp.biasForces = tau;
 }
 
 static void processContacts(Context &ctx,
@@ -1106,7 +1096,8 @@ static void gaussMinimizeFn(Context &ctx,
         float *local_mass = hiers[i].massMatrix;
 
         for (CountT row = 0; row < hiers[i].numDofs; ++row) {
-            full_free_acc[row + processed_dofs] = hiers[i].freeAcceleration[row];
+            float* freeAcceleration = ctx.rangeMapUnit(hiers[i].bias);
+            full_free_acc[row + processed_dofs] = freeAcceleration[row];
 
             for (CountT col = 0; col < hiers[i].numDofs; ++col) {
                 uint32_t mi = row + processed_dofs;
@@ -1744,6 +1735,9 @@ void initializeHierarchies(Context &ctx) {
 
         // Compute expanded parent array
         tasks::computeExpandedParent(ctx, grp);
+
+        // Space for bias forces/unconstrained acceleration
+        grp.bias = ctx.allocRangeMap<float>(grp.numDofs);
 
         // Allocate memory for mass matrix
         CountT num_dofs = grp.numDofs;
