@@ -1022,6 +1022,17 @@ static void processContacts(Context &ctx,
             contact.ref);
     CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
             contact.alt);
+
+    // If a parent collides with its direct child, unless the parent is a
+    //  fixed body, we should ignore the contact.
+    auto &refHier = ctx.get<DofObjectHierarchyDesc>(ref.physicsEntity);
+    auto &altHier = ctx.get<DofObjectHierarchyDesc>(alt.physicsEntity);
+    if (refHier.parent == alt.physicsEntity
+        || altHier.parent == ref.physicsEntity) {
+        contact.numPoints = 0;
+        return;
+    }
+
     CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
     CountT objID_j = ctx.get<ObjectID>(alt.physicsEntity).idx;
 
