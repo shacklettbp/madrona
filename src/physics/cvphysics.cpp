@@ -1710,21 +1710,6 @@ Entity makeCVBodyGroup(Context &ctx)
 {
     Entity e = ctx.makeEntity<BodyGroup>();
     ctx.get<BodyGroupHierarchy>(e).numBodies = 0;
-
-    // TODO: We'd have to somehow make this allocation after knowing how
-    // many DOFs this body group will have. Could just have the user specify
-    // this but then that would depend on the user calculating the correct
-    // numnber of DOFs in the body group.
-    static constexpr CountT placeholder = 10;
-    CountT num_dofs = placeholder;
-    CountT num_values_in_matrix = num_dofs * num_dofs;
-    CountT num_units =
-        (num_values_in_matrix + MassMatrixUnit::kNumValsPerUnit - 1) /
-        MassMatrixUnit::kNumValsPerUnit;
-
-    ctx.get<BodyGroupHierarchy>(e).massMatrixRange =
-        ctx.allocRangeMap<MassMatrixUnit>(num_units);
-
     return e;
 }
 
@@ -1733,12 +1718,24 @@ void initializeHierarchies(Context &ctx) {
     StateManager *state_mgr = ctx.getStateManager();
     BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
         BodyGroup, BodyGroupHierarchy>(world_id);
-    // Run forward kinematics to get positions
-    for(CountT i = 0; i < state_mgr->numRows<BodyGroup>(world_id); ++i) {
-        tasks::forwardKinematics(ctx, hiers[i]);
-    }
 
-    // TODO: memory initialization here
+    // Initialize each hierarchy
+    for(CountT i = 0; i < state_mgr->numRows<BodyGroup>(world_id); ++i) {
+        BodyGroupHierarchy &grp = hiers[i];
+
+        // Forward kinematics to get positions
+        tasks::forwardKinematics(ctx, grp);
+
+        // Allocate memory for mass matrix
+        CountT num_dofs = grp.numDofs;
+        CountT num_values_in_matrix = num_dofs * num_dofs;
+        CountT num_units =
+            (num_values_in_matrix + MassMatrixUnit::kNumValsPerUnit - 1) /
+            MassMatrixUnit::kNumValsPerUnit;
+        grp.massMatrixRange = ctx.allocRangeMap<MassMatrixUnit>(num_units);
+
+        // TODO: more initialization goes here
+    }
 }
 
 
