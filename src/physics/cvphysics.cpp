@@ -332,13 +332,21 @@ static void forwardKinematics(Context &ctx,
 // (for numerical stability)
 static void computeCenterOfMass(Context &ctx,
                                 BodyGroupHierarchy &body_grp) {
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
     Vector3 hierarchy_com = Vector3::zero();
     float total_mass = 0.f;
     for (int i = 0; i < body_grp.numBodies; ++i) {
         auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-        hierarchy_com += tmp_state.spatialInertia.mass * tmp_state.comPos;
-        total_mass += tmp_state.spatialInertia.mass;
+        auto &obj_id = ctx.get<ObjectID>(body_grp.bodies[i]);
+        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        // Fixed bodies should not contribute to the COM
+        if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+            continue;
+        }
+        float mass = 1.f / obj_mgr.metadata[obj_id.idx].mass.invMass;
+        hierarchy_com += mass * tmp_state.comPos;
+        total_mass += mass;
     }
     body_grp.comPos = hierarchy_com / total_mass;
 }
@@ -351,12 +359,14 @@ static void computeSpatialInertia(Context &ctx,
     for(int i = 0; i < body_grp.numBodies; i++)
     {
         auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
-            return;
-        }
-
         auto obj_id = ctx.get<ObjectID>(body_grp.bodies[i]);
         auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+
+        if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+            tmp_state.spatialInertia.mass = 0.f;
+            continue;;
+        }
+
         RigidBodyMetadata metadata = obj_mgr.metadata[obj_id.idx];
         Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
         float mass = 1.f / metadata.mass.invMass;
@@ -518,9 +528,6 @@ static float* computePhiDot(Context &ctx,
             S_dot[i * 6 + 5] = S_dot_sv.angular.z;
         }
     }
-    else {
-        MADRONA_UNREACHABLE();
-    }
     return S_dot;
 }
 
@@ -594,6 +601,30 @@ static float* computeContactJacobian(Context &ctx,
     return J;
 }
 
+// y = Mx. Based on Table 6.5 in Featherstone
+static void mulM(Context &ctx, BodyGroupHierarchy &body_grp,
+    float *x, float *y) {
+    CountT total_dofs = body_grp.numDofs;
+    int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit(
+        body_grp.expandedParent);
+    float *massMatrix = (float*) ctx.rangeMapUnit(body_grp.massMatrix);
+    auto M = [&](int32_t row, int32_t col) -> float& {
+        return massMatrix[row + total_dofs * col];
+    };
+
+    for(int32_t i = 0; i < total_dofs; ++i) {
+        y[i] = M(i, i) * x[i];
+    }
+
+    for(int32_t i = (int32_t) total_dofs - 1; i >= 0; --i) {
+        int32_t j = expandedParent[i];
+        while(j != -1) {
+            y[i] += M(i, j) * x[j];
+            y[j] += M(i, j) * x[i];
+            j = expandedParent[j];
+        }
+    }
+}
 
 // Solves M^{-1}x, overwriting x. Based on Table 6.5 in Featherstone
 static void solveM(Context &ctx, BodyGroupHierarchy &body_grp, float *x) {
@@ -798,48 +829,41 @@ static void recursiveNewtonEuler(Context &ctx,
     //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
     //  2. accelerations. a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i}
     //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-
-    // First handle root of hierarchy
-    {
-        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[0]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
-        auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[0]);
-
+    for (int i = 0; i < body_grp.numBodies; ++i) {
+        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        auto &velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
+        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
         float *S = (float *) ctx.rangeMapUnit(tmp_state.phiFull);
-        SpatialVector v_body = {
-            {velocity.qv[0], velocity.qv[1], velocity.qv[2]}, Vector3::zero()};
-        float *S_dot = computePhiDot(ctx, num_dofs, tmp_state, v_body);
 
-        // v_0 = 0, a_0 = -g (fictitious upward acceleration)
-        tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
-        tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+        if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+            // Free bodies must be root of their hierarchy
+            SpatialVector v_body = {
+                {velocity.qv[0], velocity.qv[1], velocity.qv[2]},
+                Vector3::zero()
+            };
+            float *S_dot = computePhiDot(ctx, num_dofs, tmp_state, v_body);
 
-        // S\dot{q_i} and \dot{S}\dot{q_i}
-        for (int j = 0; j < 6; ++j) {
-            for (int k = 0; k < num_dofs.numDofs; ++k) {
-                tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
-                tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
+            // v_0 = 0, a_0 = -g (fictitious upward acceleration)
+            tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
+            tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+
+            // S\dot{q_i} and \dot{S}\dot{q_i}
+            for (int j = 0; j < 6; ++j) {
+                for (int k = 0; k < num_dofs.numDofs; ++k) {
+                    tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
+                    tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
+                }
             }
         }
-
-        // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-        tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
-        tmp_state.sForce += tmp_state.sVel.crossStar(
-            tmp_state.spatialInertia.multiply(tmp_state.sVel));
-    }
-
-    // Forward pass from parents to children
-    for (int i = 1; i < body_grp.numBodies; ++i) {
-        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-        auto velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
-        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
-        assert(hier_desc.parent != Entity::none());
-        auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
-
-        float *S = (float *) ctx.rangeMapUnit(tmp_state.phiFull);
-
-        if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+            // Fixeds bodies must also be root of their hierarchy
+            tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+            tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
+        }
+        else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+            assert(hier_desc.parent != Entity::none());
+            auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
             tmp_state.sVel = parent_tmp_state.sVel;
             tmp_state.sAcc = parent_tmp_state.sAcc;
 
@@ -854,13 +878,10 @@ static void recursiveNewtonEuler(Context &ctx,
                 tmp_state.sVel[j] += S[j] * q_dot;
                 tmp_state.sAcc[j] += S_dot[j] * q_dot;
             }
-
-            // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-            tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
-            tmp_state.sForce += tmp_state.sVel.crossStar(
-                tmp_state.spatialInertia.multiply(tmp_state.sVel));
         }
         else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+            assert(hier_desc.parent != Entity::none());
+            auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
             tmp_state.sVel = parent_tmp_state.sVel;
             tmp_state.sAcc = parent_tmp_state.sAcc;
 
@@ -882,14 +903,14 @@ static void recursiveNewtonEuler(Context &ctx,
                                      S_dot[j + 6 * 1] * q_dot[1] +
                                      S_dot[j + 6 * 2] * q_dot[2];
             }
-
-            // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-            tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
-            tmp_state.sForce += tmp_state.sVel.crossStar(
-                tmp_state.spatialInertia.multiply(tmp_state.sVel));
-        } else { // Fixed body, Free body
+        } else {
             MADRONA_UNREACHABLE();
         }
+
+        // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+        tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
+        tmp_state.sForce += tmp_state.sVel.crossStar(
+            tmp_state.spatialInertia.multiply(tmp_state.sVel));
     }
 
     // Backward pass to find bias forces
@@ -936,8 +957,13 @@ static void processContacts(Context &ctx,
     auto &altHier = ctx.get<DofObjectHierarchyDesc>(alt.physicsEntity);
     if (refHier.parent == alt.physicsEntity
         || altHier.parent == ref.physicsEntity) {
-        contact.numPoints = 0;
-        return;
+        auto &refNumDofs = ctx.get<DofObjectNumDofs>(ref.physicsEntity);
+        auto &altNumDofs = ctx.get<DofObjectNumDofs>(alt.physicsEntity);
+        if (refNumDofs.numDofs != (uint32_t)DofType::FixedBody
+            && altNumDofs.numDofs != (uint32_t)DofType::FixedBody) {
+            contact.numPoints = 0;
+            return;
+        }
     }
 
     CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
@@ -1166,7 +1192,6 @@ static void gaussMinimizeFn(Context &ctx,
             }
         }
     }
-
 }
 
 
@@ -1358,9 +1383,6 @@ void makeCVPhysicsEntity(Context &ctx,
             vel.qv[i] = 0.f;
             acc.dqv[i] = 0.f;
         }
-
-        tmp_state.sVel = {{vel.qv[0], vel.qv[1], vel.qv[2]},
-                          {vel.qv[3], vel.qv[4], vel.qv[5]}};
     } break;
 
     case DofType::Hinge: {
@@ -1381,6 +1403,19 @@ void makeCVPhysicsEntity(Context &ctx,
     } break;
 
     case DofType::FixedBody: {
+        // Keep these around for forward kinematics
+        pos.q[0] = position.x;
+        pos.q[1] = position.y;
+        pos.q[2] = position.z;
+
+        pos.q[3] = rotation.w;
+        pos.q[4] = rotation.x;
+        pos.q[5] = rotation.y;
+        pos.q[6] = rotation.z;
+        for(int i = 0; i < 6; i++) {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
     } break;
     }
 
@@ -1660,7 +1695,6 @@ void initializeHierarchies(Context &ctx) {
 
         // Forward kinematics to get positions
         tasks::forwardKinematics(ctx, grp);
-        // TODO: more initialization goes here
     }
 }
 
