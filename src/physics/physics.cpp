@@ -103,6 +103,7 @@ void updatePhysicsStepParameters(Context &ctx,
     
     PhysicsSystemState &state = ctx.singleton<PhysicsSystemState>();
 
+    state.g = -math::up * g_mag;
     state.deltaT = delta_t;
     state.h = h;
     state.restitutionThreshold = 2.f * g_mag * h;

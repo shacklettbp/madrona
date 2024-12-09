@@ -57,11 +57,14 @@ using namespace math;
 
 static inline Vector3 airResistanceForce(Vector3 v, float c_d) {
     Vector3 f_d = {0.0f, 0.0f, 0.0f};
+    // When tested with the grid optimizer, vertical air resistance converged to a value
+    // of 0.002 with exactly matched gravity. This is falling from heights of 300-500m, so way
+    // faster than the agent would ever expect to fall in our obbies.
+    // For this reason, vertical air res is safe to ignore.
     v.z = 0.0f; // Ignore vertical resistance.
     float v_2 = v.length2();
     if (v_2 > 1e-5f) {
-        f_d = 0.5f * v_2 * v.normalize() * c_d;// * ctx.singleton<TimeStep>().delta;
-        //f_d = std::min(f_d.length(), vel.linear.length() / consts::minDeltaT) * f_d.normalize();
+        f_d = 0.5f * v_2 * v.normalize() * c_d;
     }
 
     return f_d;
