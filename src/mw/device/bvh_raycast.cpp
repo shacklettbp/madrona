@@ -883,13 +883,44 @@ static __device__ FragmentResult computeFragment(
         for (int i = 0; i < world_info.numLights; ++i) {
             LightDesc desc = world_info.lights[i];
 
-            if (desc.castShadow) {
+            float cutoff = -1.f;
+
+            Vector3 light_dir = desc.direction;
+            if (desc.type == LightDesc::Type::Spotlight) {
+                light_dir = (desc.position - hit_pos).normalize();
+                cutoff = desc.cutoff;
+            }
+
+            if (cutoff != -1.f) {
+                // Dot the vector going from point to light with the direction
+                // of the light.
+                float d = (-light_dir).dot(desc.direction);
+                d /= (light_dir.length() * desc.direction.length());
+                float angle = acosf(d);
+
+#if 0
+                LOG("light_dir=({}, {}, {})|dir=({} {} {})|angle={}\n",
+                    light_dir.x, light_dir.y, light_dir.z,
+                    desc.direction.x, desc.direction.y, desc.direction.z,
+                    angle,
+                    desc.cutoff);
+#endif
+
+                // This pixel isn't affected by this light.
+                if (std::abs(angle) > std::abs(desc.cutoff)) {
+                    continue;
+                }
+            }
+
+            // Make sure the surface is actually pointing to the light
+            // when casting shadow.
+            if (desc.castShadow && light_dir.dot(first_hit.normal) >= 0.f) {
                 // TODO: Definitely do some sort of ray fetching because there will
                 // be threads doing nothing potentially.
                 TraceResult shadow_hit = traceRay(
                         TraceInfo {
                             .rayOrigin = hit_pos,
-                            .rayDirection = world_info.lights[i].direction,
+                            .rayDirection = light_dir,
                             .tMin = 0.000001f,
                             .tMax = 10000.f,
                             .dOnly = true
@@ -907,7 +938,7 @@ static __device__ FragmentResult computeFragment(
 
             acc_color += lighting(first_hit.color, 
                                   first_hit.normal,
-                                  desc.direction);
+                                  desc.direction) * desc.intensity;
         }
 
         // If we are still here, just do normal lighting calculation.
@@ -984,7 +1015,7 @@ extern "C" __global__ void bvhRaycastEntry()
 
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
+            (pixel_y + pixel_x * bvhParams.renderOutputResolution);
 
         uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;

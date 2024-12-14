@@ -74,6 +74,9 @@ struct LightDesc {
     // Angle for the spotlight (default to pi/4).
     float cutoff;
 
+    // Intensity of the light. (1.f is default)
+    float intensity;
+
     // Gives ability to turn light on or off.
     bool active;
 };

@@ -144,6 +144,9 @@ static void handleCamera(GLFWwindow *window,
 
     cam.position += translate * cam_move_speed *
         InternalConfig::secondsPerFrame;
+
+    printf("cam.position = {%f %f %f}\n",
+            cam.position.x, cam.position.y, cam.position.z);
 }
 
 static float throttleFPS(chrono::time_point<chrono::steady_clock> start) {
