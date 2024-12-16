@@ -224,11 +224,11 @@ StateManager::RangeMapStore::RangeMapStore(
 
     TypeInfo infos[3] = {
         { .alignment = alignof(RangeMap), .numBytes = sizeof(RangeMap) },
-        { .alignment = alignof(WorldID), .numBytes = sizeof(WorldID) },
+        { .alignment = alignof(RangeMap::Status), .numBytes = sizeof(RangeMap::Status) },
         type_info,
     };
 
-    uint64_t bytes_per_row = sizeof(WorldID) + type_info.numBytes;
+    uint64_t bytes_per_row = sizeof(RangeMap::Status) + type_info.numBytes;
 
     uint64_t num_reserved_rows = RangeMapTable::maxReservedBytesPerTable /
         bytes_per_row;
@@ -657,7 +657,7 @@ RangeMap StateManager::allocRangeMap(
             range_map_unit_store_, num_units);
 
     RangeMap *range_map_col = (RangeMap *)tbl.columns[0];
-    WorldID *world_col = (WorldID *)tbl.columns[0];
+    RangeMap::Status *status_col = (RangeMap::Status *)tbl.columns[0];
 
     for (int i = 0; num_units; ++i) {
         Loc loc = {
@@ -680,7 +680,7 @@ RangeMap StateManager::allocRangeMap(
         };
 
         range_map_col[row + i] = range_map;
-        world_col[row + i] = world_id;
+        status_col[row + i] = RangeMap::Status::Allocated;
     }
 
     return range_map_col[row];
@@ -794,11 +794,11 @@ void StateManager::freeRangeMap(RangeMap range_map)
                 range_map.numUnits);
 
     RangeMap *rm_col = (RangeMap *)tbl.columns[0];
-    WorldID *world_col = (WorldID *)tbl.columns[1];
+    RangeMap::Status *status_col = (RangeMap::Status *)tbl.columns[1];
     for (int i = 0; i < range_map.numUnits; ++i) {
         uint32_t row = loc.row + i;
 
-        world_col[row] = WorldID{ -1 };
+        status_col[row] = RangeMap::Status::Freed;
         auto id = rm_col[row].id;
 
         range_map_unit_store_[id].gen++;
@@ -823,6 +823,11 @@ void StateManager::clearTemporaries(uint32_t archetype_id)
 void StateManager::resizeArchetype(uint32_t archetype_id, int32_t num_rows)
 {
     archetypes_[archetype_id]->tbl.numRows.store_relaxed(num_rows);
+}
+
+void StateManager::resizeRange(uint32_t unit_id, int32_t num_rows)
+{
+    range_map_units_[unit_id]->tbl.numRows.store_relaxed(num_rows);
 }
 
 int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const

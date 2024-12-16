@@ -12,6 +12,11 @@ namespace madrona {
 // On the CPU backend, the RangeMap is very trivial - just a simple
 // pointer to malloc'd memory.
 struct RangeMap {
+    enum Status : uint32_t {
+        Allocated = 0,
+        Freed = 1
+    };
+
 #ifdef MADRONA_GPU_MODE
     CountT numUnits;
     uint32_t gen;

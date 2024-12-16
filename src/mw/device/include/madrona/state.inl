@@ -432,12 +432,13 @@ int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
     }
 }
 
+#if 0
 inline void * getRangeMaps(uint32_t unit_id)
 {
     return *range_map_units_[unit_id].tbl.columns[0];
 }
 
-inline void * getRangeWorldIDs(uint32_t unit_id)
+inline void * getRangeStatus(uint32_t unit_id)
 {
     return *range_map_units_[unit_id].tbl.columns[1];
 }
@@ -446,6 +447,20 @@ inline void * getRangeUnits(uint32_t unit_id)
 {
     return *range_map_units_[unit_id].tbl.columns[2];
 }
+#endif
+
+void * StateManager::getRangeMapColumn(
+        uint32_t unit_id, uint32_t col_idx)
+{
+    return *range_map_units_[unit_id].tbl.columns[col_idx];
+}
+
+void * StateManager::getRangeMapColumnBytesPerRow(
+        uint32_t unit_id, uint32_t col_idx)
+{
+    auto &range = *range_map_units_[unit_id];
+    return range.tbl.columnSizes[column_idx];
+}
 
 template <typename ArchetypeT>
 inline uint32_t StateManager::getArchetypeNumRows()
@@ -453,6 +468,14 @@ inline uint32_t StateManager::getArchetypeNumRows()
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     auto &archetype = *archetypes_[archetype_id];
     return archetype.tbl.numRows.load_relaxed();
+}
+
+template <typename RangeMapUnitT>
+inline uint32_t StateManager::getRangeNumRows()
+{
+    uint32_t unit_id = TypeTracker::typeID<RangeMapUnitT>();
+    auto &range = *range_map_units_[unit_id];
+    return range.tbl.numRows.load_relaxed();
 }
 
 void * StateManager::getArchetypeColumn(uint32_t archetype_id,
@@ -477,6 +500,13 @@ uint32_t StateManager::getArchetypeColumnBytesPerRow(uint32_t archetype_id,
     return archetype.tbl.columnSizes[column_idx];
 }
 
+uint32_t StateManager::getRangeMapColumnBytesPerRow(uint32_t unit_id,
+                                                    int32_t column_idx)
+{
+    auto &unit = *range_map_units_[unit_id];
+    return unit.tbl.columnSizes[column_idx];
+}
+
 int32_t StateManager::getArchetypeNumColumns(uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
@@ -489,9 +519,20 @@ uint32_t StateManager::getArchetypeMaxColumnSize(uint32_t archetype_id)
     return archetype.tbl.maxColumnSize;
 }
 
+inline uint32_t StateManager::getRangeMaxColumnSize(uint32_t unit_id)
+{
+    auto &range = *range_map_units_[unit_id];
+    return range.tbl.maxColumnSize;
+}
+
 void StateManager::remapEntity(Entity e, int32_t row_idx)
 {
     entity_store_.entities[e.id].loc.row = row_idx;
+}
+
+void StateManager::remapRangeMapUnit(RangeMap rm, int32_t row_idx)
+{
+    range_map_unit_store_.slots[rm.id].loc.row = row_idx;
 }
 
 template <typename SingletonT>
@@ -520,6 +561,21 @@ void StateManager::archetypeClearNeedsSort(uint32_t archetype_id)
 void StateManager::archetypeSetNeedsSort(uint32_t archetype_id)
 {
     archetypes_[archetype_id]->needsSort = true;
+}
+
+bool StateManager::rangeNeedsSort(uint32_t unit_id) const
+{
+    return range_map_units_[unit_id]->needsSort;
+}
+
+void StateManager::rangeClearNeedsSort(uint32_t unit_id)
+{
+    range_map_units_[unit_id]->needsSort = false;
+}
+
+void StateManager::rangeSetNeedsSort(uint32_t unit_id)
+{
+    range_map_units_[unit_id]->needsSort = true;
 }
 
 template <typename ArchetypeT, typename ComponentT>

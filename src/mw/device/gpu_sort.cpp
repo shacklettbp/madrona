@@ -974,7 +974,7 @@ SortNodeBase::SortNodeBase(uint32_t taskgraph_id,
        worldCounts(counts)
 {}
 
-void SortNodeBase::sortSetup(int32_t)
+void SortNodeBase::sortSetupArchetype(int32_t)
 {
     using namespace sortConsts;
 
@@ -1070,6 +1070,138 @@ void SortNodeBase::sortSetup(int32_t)
     } else {
         clear_count_node_data.numDynamicInvocations = 0;
     }
+
+    indicesFinal = (int *)(tmp_buffer + indices_final_offset);
+    columnStaging = tmp_buffer + column_copy_offset;
+    bool alt_final = numPasses % 2 == 1;
+
+    if (alt_final) {
+        indices = (int *)(tmp_buffer + indices_alt_offset);
+        indicesAlt = (int *)(tmp_buffer + indices_final_offset);
+    } else {
+        indices = (int *)(tmp_buffer + indices_final_offset);
+        indicesAlt = (int *)(tmp_buffer + indices_alt_offset);
+    }
+
+    keysAlt = (uint32_t *)(tmp_buffer + keys_alt_offset);
+    bins = (int32_t *)(tmp_buffer + bins_offset);
+    lookback = (int32_t *)(tmp_buffer + lookback_offset);
+    counters = (int32_t *)(tmp_buffer + counters_offset);
+
+    uint32_t num_histogram_bins = numPasses * RADIX_DIGITS;
+
+    // Set launch count for next node that zeros the histogram
+    numDynamicInvocations = num_histogram_bins;
+    // Zero counters
+    for (int i = 0; i < numPasses; i++) {
+        counters[i] = 0;
+    }
+
+    for (int i = 0; i < numPasses; i++) {
+        auto &pass_data = taskgraph.getNodeData(onesweepNodes[i]);
+        pass_data.numDynamicInvocations = numSortBlocks * RADIX_DIGITS;
+
+        if (i % 2 == 0) {
+            pass_data.srcKeys = keysCol;
+            pass_data.dstKeys = keysAlt;
+            pass_data.srcVals = indices;
+            pass_data.dstVals = indicesAlt;
+        } else {
+            pass_data.srcKeys = keysAlt;
+            pass_data.dstKeys = keysCol;
+            pass_data.srcVals = indicesAlt;
+            pass_data.dstVals = indices;
+        }
+    } 
+}
+
+void SortNodeBase::sortSetupRange(int32_t)
+{
+    using namespace sortConsts;
+
+    auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
+    StateManager *state_mgr = mwGPU::getStateManager();
+    int32_t num_columns = 3;
+
+    if (!state_mgr->rangeNeedsSort(archetypeID)) {
+        numDynamicInvocations = 0;
+
+        auto &clear_count_node_data = taskgraph.getNodeData(clearWorldCountData);
+        clear_count_node_data.numDynamicInvocations = 0;
+
+        for (int i = 0; i < numPasses; i++) {
+            taskgraph.getNodeData(onesweepNodes[i]).numDynamicInvocations = 0;
+        }
+        return;
+    }
+
+    state_mgr->rangeClearNeedsSort(archetypeID);
+
+    int num_rows = state_mgr->numRangeRows(archetypeID);
+
+    int32_t num_threads =
+        utils::divideRoundUp(num_rows, (int32_t)num_elems_per_sort_thread_);
+
+    uint32_t num_blocks = utils::divideRoundUp((uint32_t)num_threads,
+        consts::numMegakernelThreads);
+
+    uint32_t rounded_num_threads = num_blocks * consts::numMegakernelThreads;
+
+    uint64_t indices_final_offset = 0;
+    uint64_t total_bytes = indices_final_offset +
+        uint64_t(num_rows) * sizeof(int);
+    uint64_t column_copy_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    uint64_t indices_alt_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = indices_alt_offset +
+        uint64_t(num_rows) * sizeof(int);
+    uint64_t keys_alt_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = keys_alt_offset + uint64_t(num_rows) * sizeof(uint32_t);
+
+    uint64_t bins_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = bins_offset +
+        uint64_t(numPasses * RADIX_DIGITS) * sizeof(int32_t);
+    uint64_t lookback_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = lookback_offset + 
+        (uint64_t)num_blocks * RADIX_DIGITS * sizeof(int32_t);
+    uint64_t counters_offset = utils::roundUpPow2(total_bytes, ALIGN_BYTES);
+    total_bytes = counters_offset + uint64_t(numPasses) * sizeof(int32_t);
+
+    uint64_t max_column_bytes =
+        (uint64_t)state_mgr->getRangeMaxColumnSize(archetypeID) *
+        (uint64_t)num_rows;
+
+    uint64_t free_column_bytes = total_bytes - column_copy_offset;
+
+    if (free_column_bytes < max_column_bytes) {
+        total_bytes += max_column_bytes - free_column_bytes;
+    }
+
+    char *tmp_buffer = (char *)mwGPU::TmpAllocator::get().alloc(total_bytes);
+
+    numRows = num_rows;
+    numSortBlocks = num_blocks;
+    numSortThreads = rounded_num_threads;
+    if (sortColumnIndex == 1) { // World sort
+        postBinScanThreads = 1;
+    } else {
+        postBinScanThreads = numRows;
+
+        // resizeTable won't run so must set the rearrange passes to run
+        // over the correct number of rows.
+        taskgraph.getNodeData(firstRearrangePassData).numDynamicInvocations =
+            numRows;
+    }
+
+#if 0
+    // This is only necessary if the global number of entities is 0
+    auto &clear_count_node_data = taskgraph.getNodeData(clearWorldCountData);
+    if (numRows == 0) {
+        clear_count_node_data.numDynamicInvocations =
+            mwGPU::GPUImplConsts::get().numWorlds;
+    } else {
+        clear_count_node_data.numDynamicInvocations = 0;
+    }
+#endif
 
     indicesFinal = (int *)(tmp_buffer + indices_final_offset);
     columnStaging = tmp_buffer + column_copy_offset;
@@ -1243,7 +1375,7 @@ void SortNodeBase::OnesweepNode::onesweep(int32_t block_idx)
     agent.Process();
 }
 
-void SortNodeBase::resizeTable(int32_t invocation_idx)
+void SortNodeBase::resizeTableArchetype(int32_t invocation_idx)
 {
     int32_t num_entities = bins[(numPasses - 1) * 256 + 255];
     mwGPU::getStateManager()->resizeArchetype(archetypeID, num_entities);
@@ -1254,6 +1386,19 @@ void SortNodeBase::resizeTable(int32_t invocation_idx)
 
     // Set for clearWorldOffsetsAndCounts
     numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
+}
+
+void SortNodeBase::resizeTableRange(int32_t invocation_idx)
+{
+    int32_t num_units = bins[(numPasses - 1) * 256 + 255];
+    mwGPU::getStateManager()->resizeRange(archetypeID, num_units);
+
+    auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
+    taskgraph.getNodeData(firstRearrangePassData).numDynamicInvocations =
+        num_units;
+
+    // Set for copyKeys
+    numDynamicInvocations = num_units;
 }
 
 void SortNodeBase::ClearCountNode::clearCounts(int32_t invocation_idx)
@@ -1404,6 +1549,75 @@ void SortNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_idx)
     }
 }
 
+void SortNodeBase::RearrangeNode::stageColumnRange(int32_t invocation_idx)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
+
+    uint32_t bytes_per_elem = state_mgr->getRangeMapColumnBytesPerRow(
+        parent.archetypeID, columnIndex);
+
+    void *src = state_mgr->getRangeMapColumn(
+            parent.archetypeID, columnIndex);
+
+    int src_idx = parent.indicesFinal[invocation_idx];
+
+    memcpy((char *)parent.columnStaging +
+                (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
+           (char *)src + (uint64_t)bytes_per_elem * (uint64_t)src_idx,
+           bytes_per_elem);
+}
+
+void SortNodeBase::RearrangeNode::rearrangeRangeUnits(int32_t invocation_idx)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
+
+    auto rm_staging = (RangeMap *)parent.columnStaging;
+    auto dst = (RangeMap *)state_mgr->getRangeMapColumn(parent.archetypeID, 0);
+    auto status = (RangeMap::Status *)state_mgr->getRangeMapColumn(parent.archetypeID, 1);
+
+    RangeMap rm = rm_staging[invocation_idx];
+
+    dst[invocation_idx] = rm;
+
+    // FIXME: temporary entities still have an entity column, but they need to
+    // *NOT* be remapped
+    if (e != Entity::none()) {
+        state_mgr->remapRangeMapUnit(rm, invocation_idx);
+    }
+
+    if (invocation_idx == 0) {
+        numDynamicInvocations = 0;
+    }
+}
+
+void SortNodeBase::RearrangeNode::rearrangeColumnRange(int32_t invocation_idx)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
+    auto &parent = taskgraph.getNodeData(parentNode);
+
+    auto staging = (char *)parent.columnStaging;
+    auto dst = (char *)state_mgr->getRangeMapColumn(
+        parent.archetypeID, columnIndex);
+
+    uint32_t bytes_per_elem = state_mgr->getRangeMapColumnBytesPerRow(
+        parent.archetypeID, columnIndex);
+
+    memcpy(dst + (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
+           staging + (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
+           bytes_per_elem);
+
+    if (invocation_idx == 0) {
+        if (nextRearrangeNode.id != -1) {
+            taskgraph.getNodeData(nextRearrangeNode).numDynamicInvocations =
+                numDynamicInvocations;
+        }
+        numDynamicInvocations = 0;
+    }
+}
+
 TaskGraph::NodeID SortNodeBase::addToGraphArchetype(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies,
@@ -1447,7 +1661,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphArchetype(
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
-        &SortNodeBase::sortSetup>(data_id, dependencies,
+        &SortNodeBase::sortSetupArchetype>(data_id, dependencies,
             Optional<TaskGraph::NodeID>::none(), 1);
 
     // Create the clear world count pass (which will run optionally 
@@ -1482,7 +1696,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphArchetype(
 
     // FIXME this could be a fixed-size count
     if (world_sort) {
-        cur_task = builder.addNodeFn<&SortNodeBase::resizeTable>(
+        cur_task = builder.addNodeFn<&SortNodeBase::resizeTableArchetype>(
             data_id, {cur_task}, setup);
 
         cur_task = builder.addNodeFn<&SortNodeBase::clearWorldOffsetsAndCounts>(
@@ -1562,17 +1776,18 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
 
     StateManager *state_mgr = getStateManager();
 
-    auto keys_col = (uint32_t *)
-
-    auto keys_col =  (uint32_t *)state_mgr->getRangeWorldIDs(unit_id);
+    auto keys_col = (uint32_t *)state_mgr->getRangeMapColumn(unit_id, 1);
 
     // Optimize for sorts on the WorldID column, where the 
     // max # of worlds is known
     int32_t num_passes;
     int32_t num_worlds = GPUImplConsts::get().numWorlds;
     // num_worlds + 1 to leave room for columns with WorldID == -1
-    int32_t num_bits = 32 - __clz(num_worlds + 1);
+    int32_t num_bits = 32 - __clz(RangeMap::Status::Freed + 1);
     num_passes = utils::divideRoundUp(num_bits, 8);
+
+    // num_passes should just be 1
+    assert(num_passes == 1);
 
     uint32_t taskgraph_id = builder.getTaskgraphID();
 
@@ -1582,7 +1797,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
-        &SortNodeBase::sortSetup>(data_id, dependencies,
+        &SortNodeBase::sortSetupRange>(data_id, dependencies,
             Optional<TaskGraph::NodeID>::none(), 1);
 
     // Create the clear world count pass (which will run optionally 
@@ -1609,7 +1824,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
             consts::numMegakernelThreads);
     }
 
-    cur_task = builder.addNodeFn<&SortNodeBase::resizeTable>(
+    cur_task = builder.addNodeFn<&SortNodeBase::resizeTableRange>(
         data_id, {cur_task}, setup);
 
     if (num_passes % 2 == 1) {
@@ -1617,15 +1832,12 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
             data_id, {cur_task}, setup);
     }
 
-
-    int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
-
     TaskGraph::TypedDataID<RearrangeNode> prev_rearrange_node { -1 };
 
-    for (int32_t col_idx = 1; col_idx < num_columns; col_idx++) {
+    { // Add the nodes for rearranging the unit column
         if (col_idx == sort_column_idx) continue;
         auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
-            taskgraph_id, data_id, col_idx);
+            taskgraph_id, data_id, 2);
         builder.getDataRef(cur_rearrange_node).numDynamicInvocations = 0;
 
         if (prev_rearrange_node.id == -1) {
@@ -1636,20 +1848,20 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
         }
         prev_rearrange_node = cur_rearrange_node;
 
-        cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
+        cur_task = builder.addNodeFn<&RearrangeNode::stageColumnRange>(
             cur_rearrange_node, {cur_task}, setup);
 
-        cur_task = builder.addNodeFn<&RearrangeNode::rearrangeColumn>(
+        cur_task = builder.addNodeFn<&RearrangeNode::rearrangeColumnRange>(
             cur_rearrange_node, {cur_task}, setup);
     }
 
     auto entities_rearrange_node = builder.constructNodeData<RearrangeNode>(
         taskgraph_id, data_id, 0);
 
-    cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
+    cur_task = builder.addNodeFn<&RearrangeNode::stageColumnRange>(
         entities_rearrange_node, {cur_task}, setup);
 
-    cur_task = builder.addNodeFn<&RearrangeNode::rearrangeEntities>(
+    cur_task = builder.addNodeFn<&RearrangeNode::rearrangeRangeUnits>(
         entities_rearrange_node, {cur_task}, setup);
 
     assert(prev_rearrange_node.id != -1);

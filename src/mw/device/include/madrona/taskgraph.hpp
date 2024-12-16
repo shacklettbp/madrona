@@ -321,6 +321,10 @@ struct SortNodeBase : NodeBase {
         void stageColumn(int32_t invocation_idx);
         void rearrangeEntities(int32_t invocation_idx);
         void rearrangeColumn(int32_t invocation_idx);
+
+        void stageColumnRange(int32_t invocation_idx);
+        void rearrangeRangeUnits(int32_t invocation_idx);
+        void rearrangeColumnRange(int32_t invocation_idx);
     };
 
     struct ClearCountNode : NodeBase {
@@ -340,11 +344,13 @@ struct SortNodeBase : NodeBase {
                           int32_t *sort_offsets,
                           int32_t *counts);
 
-    void sortSetup(int32_t);
+    void sortSetupArchetype(int32_t);
+    void sortSetupRange(int32_t);
     void zeroBins(int32_t invocation_idx);
     void histogram(int32_t invocation_idx);
     void binScan(int32_t invocation_idx);
-    void resizeTable(int32_t);
+    void resizeTableArchetype(int32_t);
+    void resizeTableRange(int32_t);
     void copyKeys(int32_t invocation_idx);
     void computeWorldCounts(int32_t invocation_idx);
     void correctWorldCounts(int32_t invocation_idx);

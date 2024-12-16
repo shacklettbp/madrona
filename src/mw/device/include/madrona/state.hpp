@@ -162,11 +162,16 @@ public:
                                      int32_t column_idx);
 
     // Returns pointer to RangeMap
-    inline void * getRangeMaps(uint32_t unit_id);
-    // Returns pointer to WorldID
-    inline void * getRangeWorldIDs(uint32_t unit_id);
+    inline void * getRangeMapsColumn(uint32_t unit_id);
+    // Returns pointer to status values of the units
+    inline void * getRangeStatus(uint32_t unit_id);
     // Returns pointer to the actual units
     inline void * getRangeUnits(uint32_t unit_id);
+
+    // 0: RangeMap *
+    // 1: RangeMap::Status *
+    // 2: RangeMapUnitT *
+    inline void * getRangeMapColumn(uint32_t unit_id, uint32_t col_idx);
 
     template <typename ArchetypeT>
     int32_t * getArchetypeWorldOffsets();
@@ -184,19 +189,30 @@ public:
     inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
                                                   int32_t column_idx);
 
+    inline uint32_t getRangeMapColumnBytesPerRow(uint32_t unit_id,
+                                                 int32_t column_idx);
+
     template <typename ArchetypeT>
     inline uint32_t getArchetypeNumRows();
+
+    template <typename RangeMapUnitT>
+    inline uint32_t getRangeNumRows();
 
     inline int32_t getArchetypeNumColumns(uint32_t archetype_id);
     inline uint32_t getArchetypeMaxColumnSize(uint32_t archetype_id);
 
+    inline uint32_t getRangeMaxColumnSize(uint32_t unit_id);
+
     inline void remapEntity(Entity e, int32_t row_idx);
+    inline void remapRangeMapUnit(RangeMap rm, int32_t row_idx);
 
     template <typename SingletonT>
     SingletonT * getSingletonColumn();
 
     void resizeArchetype(uint32_t archetype_id, int32_t num_rows);
     int32_t numArchetypeRows(uint32_t archetype_id) const;
+
+    void resizeRange(uint32_t unit_id, int32_t num_rows);
 
     std::pair<int32_t, int32_t> fetchRecyclableEntities();
 
@@ -208,6 +224,10 @@ public:
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
     inline void archetypeClearNeedsSort(uint32_t archetype_id);
     inline void archetypeSetNeedsSort(uint32_t archetype_id);
+
+    inline bool rangeNeedsSort(uint32_t unit_id) const;
+    inline void rangeClearNeedsSort(uint32_t unit_id);
+    inline void rangeSetNeedsSort(uint32_t unit_id);
 
     // Included for compatibility with ECSRegistry
     template <typename ArchetypeT, typename ComponentT>
