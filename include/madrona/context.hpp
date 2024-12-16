@@ -98,13 +98,12 @@ public:
     SingletonT & singleton();
 
     template <typename RangeMapUnit>
-    RangeMap<RangeMapUnit> allocRangeMap(CountT num_units);
+    RangeMap allocRangeMap(CountT num_units);
+
+    inline void freeRangeMap(RangeMap range_map);
 
     template <typename RangeMapUnit>
-    void freeRangeMap(RangeMap<RangeMapUnit> range_map);
-
-    template <typename RangeMapUnit>
-    RangeMapUnit *rangeMapUnit(RangeMap<RangeMapUnit> range_map);
+    RangeMapUnit *rangeMapUnit(RangeMap range_map);
 
     // Allocate a raw chunk of memory num_bytes in length from a global
     // bump allocator. Use ResetTmpAllocNode in the taskgraph to reclaim

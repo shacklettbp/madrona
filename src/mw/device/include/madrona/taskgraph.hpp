@@ -290,10 +290,10 @@ struct CompactArchetypeNode : CompactArchetypeNodeBase {
         Span<const TaskGraph::NodeID> dependencies);
 };
 
-struct SortArchetypeNodeBase : NodeBase {
+struct SortNodeBase : NodeBase {
     struct RadixSortOnesweepCustom;
 
-    using ParentNodeT = TaskGraph::TypedDataID<SortArchetypeNodeBase>;
+    using ParentNodeT = TaskGraph::TypedDataID<SortNodeBase>;
     struct OnesweepNode : NodeBase {
         OnesweepNode(uint32_t taskgraph_id, ParentNodeT parent,
                      int32_t pass, bool final_pass);
@@ -314,7 +314,7 @@ struct SortArchetypeNodeBase : NodeBase {
         RearrangeNode(uint32_t taskgraph_id, ParentNodeT parent,
                       int32_t col_idx);
         uint32_t taskGraphID;
-        TaskGraph::TypedDataID<SortArchetypeNodeBase> parentNode;
+        TaskGraph::TypedDataID<SortNodeBase> parentNode;
         int32_t columnIndex;
         TaskGraph::TypedDataID<RearrangeNode> nextRearrangeNode;
 
@@ -332,7 +332,7 @@ struct SortArchetypeNodeBase : NodeBase {
         void clearCounts(int32_t invocation_idx);
     };
 
-    SortArchetypeNodeBase(uint32_t taskgraph_id,
+    SortNodeBase(uint32_t taskgraph_id,
                           uint32_t archetype_id,
                           int32_t col_idx,
                           uint32_t *keys_col,
@@ -352,11 +352,18 @@ struct SortArchetypeNodeBase : NodeBase {
     void worldCountScan(int32_t invocation_idx);
 
 
-    static TaskGraph::NodeID addToGraph(
+    // For archetype sort
+    static TaskGraph::NodeID addToGraphArchetype(
         TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> dependencies,
         uint32_t archetype_id,
         int32_t component_id);
+
+    // For range sort
+    static TaskGraph::NodeID addToGraphRange(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies,
+        uint32_t unit_id);
 
     // Constant state
     uint32_t taskGraphID;
@@ -389,7 +396,14 @@ struct SortArchetypeNodeBase : NodeBase {
 };
 
 template <typename ArchetypeT, typename ComponentT>
-struct SortArchetypeNode : SortArchetypeNodeBase {
+struct SortArchetypeNode : SortNodeBase {
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies);
+};
+
+template <typename RangeMapUnitT>
+struct SortRangeNode : SortNodeBase {
     static TaskGraph::NodeID addToGraph(
         TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> dependencies);

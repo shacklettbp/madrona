@@ -12,6 +12,8 @@
 
 #include "mw_gpu/worker_init.hpp"
 
+#include <madrona/range.hpp>
+
 namespace madrona {
 
 class Context {
@@ -62,6 +64,15 @@ public:
 
     template <typename... ComponentTs, typename Fn>
     inline void iterateQuery(Query<ComponentTs...> &query, Fn &&fn);
+
+    template <typename RangeMapUnit>
+    RangeMap allocRangeMap(CountT num_units);
+    inline RangeMap allocRangeMap(uint32_t unit_it, CountT num_units);
+
+    void freeRangeMap(RangeMap range_map);
+
+    template <typename RangeMapUnit>
+    RangeMapUnit *rangeMapUnit(RangeMap range_map);
 
 protected:
     WorldBase *data_;

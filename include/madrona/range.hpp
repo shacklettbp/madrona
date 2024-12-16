@@ -11,19 +11,24 @@ namespace madrona {
 
 // On the CPU backend, the RangeMap is very trivial - just a simple
 // pointer to malloc'd memory.
-template <typename RangeMapUnit>
 struct RangeMap {
+#ifdef MADRONA_GPU_MODE
     CountT numUnits;
-
+    uint32_t gen;
+    int32_t id;
+#else
 private:
-    inline RangeMap(CountT num_units, RangeMapUnit *ptr)
-        : numUnits(num_units), ptr_(ptr)
+
+    inline RangeMap(CountT num_units, void *ptr)
+        : num_units_(num_units), ptr_(ptr)
     {
     }
 
-    RangeMapUnit *ptr_;
+    void *ptr_;
+    CountT num_units_;
 
     friend class Context;
+#endif
 };
     
 }

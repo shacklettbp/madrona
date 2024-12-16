@@ -14,25 +14,17 @@
 
 namespace madrona {
 
-Table::Table()
-    : columns(),
-      columnSizes(),
-      columnMappedBytes(),
-      columnFlags(),
-      maxColumnSize(),
-      numColumns(),
-      numRows(0),
-      mappedRows(0),
-      growLock()
-{}
-
-static MADRONA_NO_INLINE void growTable(Table &tbl, int32_t row)
+template <uint32_t max_columns>
+static MADRONA_NO_INLINE void growTable(
+        Table<max_columns> &tbl, 
+        int32_t row,
+        int32_t num_rows = 1)
 {
     using namespace mwGPU;
 
     tbl.growLock.lock();
 
-    if (tbl.mappedRows > row) {
+    if (tbl.mappedRows > row + num_rows - 1) {
         tbl.growLock.unlock();
         return;
     }
@@ -103,46 +95,90 @@ StateManager::StateManager(uint32_t)
     // Initialize entity store
     HostAllocator *alloc = getHostAllocator();
 
-    uint32_t init_mapped_entities = 1'048'576;
-    uint32_t max_mapped_entities = 2'147'483'648;
+    { // Initialize the entity store
+        uint32_t init_mapped_entities = 1'048'576;
+        uint32_t max_mapped_entities = 2'147'483'648;
 
-    uint64_t reserve_entity_bytes =
-        (uint64_t)max_mapped_entities * sizeof(EntityStore::EntitySlot);
-    uint64_t reserve_idx_bytes =
-        (uint64_t)max_mapped_entities * sizeof(int32_t);
+        uint64_t reserve_entity_bytes =
+            (uint64_t)max_mapped_entities * sizeof(EntityStore::EntitySlot);
+        uint64_t reserve_idx_bytes =
+            (uint64_t)max_mapped_entities * sizeof(int32_t);
 
-    reserve_entity_bytes = alloc->roundUpReservation(reserve_entity_bytes);
-    reserve_idx_bytes = alloc->roundUpReservation(reserve_idx_bytes);
+        reserve_entity_bytes = alloc->roundUpReservation(reserve_entity_bytes);
+        reserve_idx_bytes = alloc->roundUpReservation(reserve_idx_bytes);
 
-    uint64_t init_entity_bytes =
-        (uint64_t)init_mapped_entities * sizeof(EntityStore::EntitySlot);
-    uint64_t init_idx_bytes =
-        (uint64_t)init_mapped_entities * sizeof(int32_t);
+        uint64_t init_entity_bytes =
+            (uint64_t)init_mapped_entities * sizeof(EntityStore::EntitySlot);
+        uint64_t init_idx_bytes =
+            (uint64_t)init_mapped_entities * sizeof(int32_t);
 
-    entity_store_.numSlotGrowBytes = alloc->roundUpAlloc(init_entity_bytes);
+        entity_store_.numSlotGrowBytes = alloc->roundUpAlloc(init_entity_bytes);
 
-    entity_store_.numIdxGrowBytes = alloc->roundUpAlloc(init_idx_bytes);
+        entity_store_.numIdxGrowBytes = alloc->roundUpAlloc(init_idx_bytes);
 
-    // FIXME technically we should find some kind of common multiple here
-    assert(entity_store_.numSlotGrowBytes / sizeof(EntityStore::EntitySlot) ==
-           init_mapped_entities);
-    assert(entity_store_.numIdxGrowBytes / sizeof(int32_t) ==
-           init_mapped_entities);
+        // FIXME technically we should find some kind of common multiple here
+        assert(entity_store_.numSlotGrowBytes / sizeof(EntityStore::EntitySlot) ==
+                init_mapped_entities);
+        assert(entity_store_.numIdxGrowBytes / sizeof(int32_t) ==
+                init_mapped_entities);
 
-    entity_store_.entities = (EntityStore::EntitySlot *)alloc->reserveMemory(
-        reserve_entity_bytes, entity_store_.numSlotGrowBytes);
+        entity_store_.entities = (EntityStore::EntitySlot *)alloc->reserveMemory(
+                reserve_entity_bytes, entity_store_.numSlotGrowBytes);
 
-    entity_store_.availableEntities = (int32_t *)alloc->reserveMemory(
-        reserve_entity_bytes, entity_store_.numIdxGrowBytes);
-    entity_store_.deletedEntities = (int32_t *)alloc->reserveMemory(
-        reserve_entity_bytes, entity_store_.numIdxGrowBytes);
+        entity_store_.availableEntities = (int32_t *)alloc->reserveMemory(
+                reserve_entity_bytes, entity_store_.numIdxGrowBytes);
+        entity_store_.deletedEntities = (int32_t *)alloc->reserveMemory(
+                reserve_entity_bytes, entity_store_.numIdxGrowBytes);
 
-    entity_store_.numGrowEntities = init_mapped_entities;
-    entity_store_.numMappedEntities = init_mapped_entities;
+        entity_store_.numGrowEntities = init_mapped_entities;
+        entity_store_.numMappedEntities = init_mapped_entities;
 
-    for (int32_t i = 0; i < init_mapped_entities; i++) {
-        entity_store_.entities[i].gen = 0;
-        entity_store_.availableEntities[i] = i;
+        for (int32_t i = 0; i < init_mapped_entities; i++) {
+            entity_store_.entities[i].gen = 0;
+            entity_store_.availableEntities[i] = i;
+        }
+    }
+
+    { // Initialize range map store
+        uint32_t init_mapped_units = 1'048'576;
+        uint32_t max_mapped_units = 2'147'483'648;
+
+        uint64_t reserve_unit_bytes =
+            (uint64_t)max_mapped_units * sizeof(RangeMapUnitStore::Slot);
+        uint64_t reserve_idx_bytes =
+            (uint64_t)max_mapped_units * sizeof(int32_t);
+
+        reserve_unit_bytes = alloc->roundUpReservation(reserve_unit_bytes);
+        reserve_idx_bytes = alloc->roundUpReservation(reserve_idx_bytes);
+
+        uint64_t init_unit_bytes =
+            (uint64_t)init_mapped_units * sizeof(RangeMapUnitStore::Slot);
+        uint64_t init_idx_bytes =
+            (uint64_t)init_mapped_units * sizeof(int32_t);
+
+        range_map_unit_store_.numSlotGrowBytes = alloc->roundUpAlloc(init_unit_bytes);
+        range_map_unit_store_.numIdxGrowBytes = alloc->roundUpAlloc(init_idx_bytes);
+
+        assert(range_map_unit_store_.numSlotGrowBytes / sizeof(RangeMapUnitStore::Slot) ==
+                init_mapped_units);
+        assert(range_map_unit_store_.numIdxGrowBytes / sizeof(int32_t) ==
+                init_mapped_units);
+
+        range_map_unit_store_.slots = (RangeMapUnitStore::Slot *)alloc->reserveMemory(
+                reserve_unit_bytes, range_map_unit_store_.numSlotGrowBytes);
+
+        range_map_unit_store_.availableSlots = (int32_t *)alloc->reserveMemory(
+                reserve_unit_bytes, range_map_unit_store_.numIdxGrowBytes);
+        range_map_unit_store_.deletedSlots = (int32_t *)alloc->reserveMemory(
+                reserve_unit_bytes, range_map_unit_store_.numIdxGrowBytes);
+
+        range_map_unit_store_.numGrowSlots = init_mapped_units;
+        range_map_unit_store_.numMappedSlots = init_mapped_units;
+
+        for (int32_t i = 0; i < init_mapped_units; i++) {
+            range_map_unit_store_.slots[i].gen = 0;
+            range_map_unit_store_.availableSlots[i] = i;
+        }
     }
 
     registerComponent<Entity>();
@@ -156,6 +192,74 @@ void StateManager::registerComponent(uint32_t id, uint32_t alignment,
         /* .alignment = */ alignment,
         /* .numBytes = */  num_bytes,
     });
+}
+
+void StateManager::registerRangeMapUnit(
+        uint32_t id, uint32_t alignment, uint32_t num_bytes)
+{
+    TypeInfo type_info = {
+        /* .alignment =  */ alignment,
+        /* .numBytes =  */  num_bytes,
+    };
+
+    range_map_units_[id].emplace(RangeMapStore(
+        0, type_info
+    ));
+}
+
+StateManager::RangeMapStore::RangeMapStore(
+        uint32_t max_num_units,
+        TypeInfo type_info)
+    : typeInfo(type_info),
+      needsSort(false)
+{
+    using namespace mwGPU;
+
+    uint32_t num_worlds = GPUImplConsts::get().numWorlds;
+
+    HostAllocator *alloc = getHostAllocator();
+
+    tbl.numColumns = 3;
+    tbl.numRows.store_relaxed(0);
+
+    TypeInfo infos[3] = {
+        { .alignment = alignof(RangeMap), .numBytes = sizeof(RangeMap) },
+        { .alignment = alignof(WorldID), .numBytes = sizeof(WorldID) },
+        type_info,
+    };
+
+    uint64_t bytes_per_row = sizeof(WorldID) + type_info.numBytes;
+
+    uint64_t num_reserved_rows = RangeMapTable::maxReservedBytesPerTable /
+        bytes_per_row;
+    num_reserved_rows = min(num_reserved_rows, 0x7FFF'FFFF_u64);
+
+    tbl.reservedRows = (int32_t)num_reserved_rows;
+
+    int32_t min_mapped_rows = (int32_t)num_reserved_rows;
+    int32_t max_col_size = 0;
+
+#pragma unroll
+    for (int i = 0; i < 3; ++i) {
+        TypeInfo cur_info = infos[i];
+
+        uint64_t reserve_bytes = alloc->roundUpReservation(
+                cur_info.numBytes * num_reserved_rows);
+        uint64_t init_bytes = alloc->roundUpAlloc(
+                cur_info.numBytes * (uint64_t)num_worlds);
+
+        tbl.columns[0] = alloc->reserveMemory(reserve_bytes, init_bytes);
+        tbl.columnSizes[0] = cur_info.numBytes;
+        tbl.columnMappedBytes[0] = init_bytes;
+
+        int32_t col_num_mapped_rows = init_bytes / cur_info.numBytes;
+
+        min_mapped_rows = min(min_mapped_rows, col_num_mapped_rows);
+        max_col_size = max(cur_info.numByutes, max_col_size);
+    }
+
+    tbl.mappedRows = min_mapped_rows;
+    tbl.maxColumnSize = max_col_size;
 }
 
 StateManager::ArchetypeStore::ArchetypeStore(
@@ -190,7 +294,7 @@ StateManager::ArchetypeStore::ArchetypeStore(
         bytes_per_row += col_row_bytes;
     }
     
-    uint64_t num_reserved_rows = Table::maxReservedBytesPerTable /
+    uint64_t num_reserved_rows = ArchetypeTable::maxReservedBytesPerTable /
         bytes_per_row;
     num_reserved_rows = min(num_reserved_rows, 0x7FFF'FFFF_u64);
     
@@ -433,6 +537,59 @@ void StateManager::makeQuery(const uint32_t *components,
     query_data_lock_.unlock();
 }
 
+// Instead of returning the actual available entity ID, it just returns
+// the index of the available slot ID
+static inline int32_t getRangeMapUnitSlotIdx(
+        RangeMapStore &range_store,
+        uint32_t num_units)
+{
+    int32_t available_idx =
+        range_store.availableOffset.fetch_add_relaxed(num_units);
+
+    if (available_idx + num_units-1 <
+            range_store.numMappedSlots) [[likely]] {
+        return available_idx;
+    }
+
+    range_store.growLock.lock();
+
+    if (available_idx + num_units-1 <
+            range_store_store.numMappedSlots) {
+        range_store.growLock.unlock();
+
+        return available_idx;
+    }
+
+    void *unit_grow_base = (char *)range_store.units +
+        (uint64_t)range_store.numMappedSlots *
+            sizeof(RangeMapUnitStore::Slot);
+
+    void *available_grow_base =
+        (char *)range_store.availableSlots +
+            (uint64_t)range_store.numMappedSlots * sizeof(int32_t);
+
+    void *deleted_grow_base =
+        (char *)range_store.deletedSlots +
+            (uint64_t)range_store.numMappedSlots * sizeof(int32_t);
+
+    auto *alloc = mwGPU::getHostAllocator();
+    alloc->mapMemory(unit_grow_base, range_store.numSlotGrowBytes);
+    alloc->mapMemory(available_grow_base, range_store.numIdxGrowBytes);
+    alloc->mapMemory(deleted_grow_base, range_store.numIdxGrowBytes);
+
+    for (int32_t i = 0; i < range_store.numGrowSlots; i++) {
+        int32_t idx = i + range_store.numMappedSlots;
+        range_store.units[idx].gen = 0;
+        range_store.availableSlots[idx] = idx;
+    }
+
+    range_store.numMappedSlots += range_store.numGrowSlots;
+
+    range_store.growLock.unlock();
+
+    return available_idx;
+}
+
 static inline int32_t getEntitySlot(EntityStore &entity_store)
 {
     int32_t available_idx =
@@ -480,11 +637,60 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
     return entity_store.availableEntities[available_idx];
 }
 
+RangeMap StateManager::allocRangeMap(
+        WorldID world_id,
+        uint32_t unit_id, uint32_t num_units)
+{
+    auto &range_map_store = *range_map_units_[unit_id];
+    range_map_store.needsSort = true;
+
+    RangeMapTable &tbl = range_map_store.tbl;
+
+    // This is the starting row of the map
+    int32_t row = tbl.numRows.fetch_add_relaxed(num_units);
+
+    if (row + num_units-1 >= tbl.mappedRows) {
+        growTable(tbl, row, num_units);
+    }
+
+    int32_t unit_slot_idx = getRangeMapUnitSlotIdx(
+            range_map_unit_store_, num_units);
+
+    RangeMap *range_map_col = (RangeMap *)tbl.columns[0];
+    WorldID *world_col = (WorldID *)tbl.columns[0];
+
+    for (int i = 0; num_units; ++i) {
+        Loc loc = {
+            unit_id, 
+            row + i,
+        };
+
+        int32_t available_slot =
+            range_map_unit_store_.availableSlots[unit_slot_idx + i];
+        
+        RangeMapUnitStore::Slot &slot = range_map_unit_store_.slots[
+            available_slot];
+
+        slot.loc = loc;
+
+        RangeMap range_map = {
+            .numUnits = num_units,
+            .gen = slot.gen,
+            .id = available_slot
+        };
+
+        range_map_col[row + i] = range_map;
+        world_col[row + i] = world_id;
+    }
+
+    return range_map_col[row];
+}
+
 Entity StateManager::makeEntityNow(WorldID world_id, uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
     archetype.needsSort = true;
-    Table &tbl = archetype.tbl;
+    ArchetypeTable &tbl = archetype.tbl;
 
     int32_t row = tbl.numRows.fetch_add_relaxed(1);
 
@@ -523,7 +729,7 @@ Loc StateManager::makeTemporary(WorldID world_id,
 {
     auto &archetype = *archetypes_[archetype_id];
 
-    Table &tbl = archetype.tbl;
+    ArchetypeTable &tbl = archetype.tbl;
     archetype.needsSort = true;
 
     int32_t row = tbl.numRows.fetch_add_relaxed(1);
@@ -560,7 +766,7 @@ void StateManager::destroyEntityNow(Entity e)
 
     auto &archetype = *archetypes_[loc.archetype];
     archetype.needsSort = true;
-    Table &tbl = archetype.tbl;
+    ArchetypeTable &tbl = archetype.tbl;
     WorldID *world_column = (WorldID *)tbl.columns[1];
     world_column[loc.row] = WorldID { -1 };
 
@@ -570,11 +776,42 @@ void StateManager::destroyEntityNow(Entity e)
     entity_store_.deletedEntities[deleted_offset] = e.id;
 }
 
+void StateManager::freeRangeMap(RangeMap range_map)
+{
+    RangeMapUnitStore::Slot &slot =
+        range_map_unit_store_[range_map.id];
+
+    // We need to increment gen for all the units in this range map.
+    // To do this, we use the fact that the sort preserves order within
+    // a world and fetch the RangeMap's from the subsequent rows after
+    // the one give here.
+    Loc loc = slot.loc;
+    auto &unit = *range_map_units_[loc.archetype];
+    unit.needsSort = true;
+
+    int32_t deleted_offset =
+        range_map_unit_store_.deletedOffset.fetch_add_relaxed(
+                range_map.numUnits);
+
+    RangeMap *rm_col = (RangeMap *)tbl.columns[0];
+    WorldID *world_col = (WorldID *)tbl.columns[1];
+    for (int i = 0; i < range_map.numUnits; ++i) {
+        uint32_t row = loc.row + i;
+
+        world_col[row] = WorldID{ -1 };
+        auto id = rm_col[row].id;
+
+        range_map_unit_store_[id].gen++;
+
+        range_map_unit_store_.deletedSlots[deleted_offset + i] = id;
+    }
+}
+
 void StateManager::clearTemporaries(uint32_t archetype_id)
 {
     auto &archetype = *archetypes_[archetype_id];
 
-    Table &tbl = archetype.tbl;
+    ArchetypeTable &tbl = archetype.tbl;
     auto num_rows_bef = 
         tbl.numRows.exchange<sync::memory_order::relaxed>(0);
 
@@ -617,6 +854,13 @@ void StateManager::recycleEntities(int32_t thread_offset,
 {
     entity_store_.availableEntities[recycle_base + thread_offset] =
         entity_store_.deletedEntities[thread_offset];
+}
+
+void StateManager::recycleRangeMaps(int32_t thread_offset,
+                                     int32_t recycle_base)
+{
+    range_map_unit_store_.availableSlots[recycle_base + thread_offset] =
+        range_map_unit_store_.deletedSlots[thread_offset];
 }
 
 }

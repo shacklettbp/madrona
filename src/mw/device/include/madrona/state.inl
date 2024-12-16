@@ -92,6 +92,21 @@ ArchetypeID StateManager::registerArchetype(
     };
 }
 
+template <typename RangeMapUnitT>
+RangeMapUnitID StateManager::registerRangeMapUnit()
+{
+    uint32_t id = TypeTracker::registerType<RangeMapUnitT>(
+        &StateManager::num_range_map_units_);
+
+    uint32_t component_size = sizeof(RangeMapUnitT);
+
+    registerRangeMapUnit(id, alignof(RangeMapUnitT), component_size);
+
+    return RangeMapUnitID {
+        id,
+    };
+}
+
 template <typename BundleT>
 void StateManager::registerBundle()
 {
@@ -415,6 +430,21 @@ int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
     } else {
         return *archetype.columnLookup.lookup(component_id);
     }
+}
+
+inline void * getRangeMaps(uint32_t unit_id)
+{
+    return *range_map_units_[unit_id].tbl.columns[0];
+}
+
+inline void * getRangeWorldIDs(uint32_t unit_id)
+{
+    return *range_map_units_[unit_id].tbl.columns[1];
+}
+
+inline void * getRangeUnits(uint32_t unit_id)
+{
+    return *range_map_units_[unit_id].tbl.columns[2];
 }
 
 template <typename ArchetypeT>

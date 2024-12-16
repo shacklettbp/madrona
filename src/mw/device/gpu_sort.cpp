@@ -359,7 +359,7 @@ struct BlockRadixRankMatchEarlyCountsCustom
     }
 };
 
-struct SortArchetypeNodeBase::RadixSortOnesweepCustom {
+struct SortNodeBase::RadixSortOnesweepCustom {
     using OffsetT = int32_t;
     using AtomicOffsetT = int32_t;
     using PortionOffsetT = int32_t;
@@ -933,37 +933,37 @@ static uint32_t __reduce_add_sync(uint32_t mask, uint32_t val)
 }
 #endif
 
-SortArchetypeNodeBase::OnesweepNode::OnesweepNode(uint32_t taskgraph_id,
-                                                  ParentNodeT parent,
-                                                  int32_t pass,
-                                                  bool final_pass)
+SortNodeBase::OnesweepNode::OnesweepNode(uint32_t taskgraph_id,
+                                         ParentNodeT parent,
+                                         int32_t pass,
+                                         bool final_pass)
     : taskGraphID(taskgraph_id),
       parentNode(parent),
       passIDX(pass),
       finalPass(final_pass)
 {}
 
-SortArchetypeNodeBase::RearrangeNode::RearrangeNode(uint32_t taskgraph_id,
-                                                    ParentNodeT parent,
-                                                    int32_t col_idx)
+SortNodeBase::RearrangeNode::RearrangeNode(uint32_t taskgraph_id,
+                                           ParentNodeT parent,
+                                           int32_t col_idx)
     : taskGraphID(taskgraph_id),
       parentNode(parent),
       columnIndex(col_idx)
 {}
 
-SortArchetypeNodeBase::ClearCountNode::ClearCountNode(int32_t *offsets,
-                                                      int32_t *counts)
+SortNodeBase::ClearCountNode::ClearCountNode(int32_t *offsets,
+                                             int32_t *counts)
     : worldOffsets(offsets),
       worldCounts(counts)
 {}
 
-SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t taskgraph_id,
-                                             uint32_t archetype_id,
-                                             int32_t col_idx,
-                                             uint32_t *keys_col,
-                                             int32_t num_passes,
-                                             int32_t *sort_offsets,
-                                             int32_t *counts)
+SortNodeBase::SortNodeBase(uint32_t taskgraph_id,
+                           uint32_t archetype_id,
+                           int32_t col_idx,
+                           uint32_t *keys_col,
+                           int32_t num_passes,
+                           int32_t *sort_offsets,
+                           int32_t *counts)
     :  NodeBase {},
        taskGraphID(taskgraph_id),
        archetypeID(archetype_id),
@@ -974,7 +974,7 @@ SortArchetypeNodeBase::SortArchetypeNodeBase(uint32_t taskgraph_id,
        worldCounts(counts)
 {}
 
-void SortArchetypeNodeBase::sortSetup(int32_t)
+void SortNodeBase::sortSetup(int32_t)
 {
     using namespace sortConsts;
 
@@ -1115,7 +1115,7 @@ void SortArchetypeNodeBase::sortSetup(int32_t)
     } 
 }
 
-void SortArchetypeNodeBase::zeroBins(int32_t invocation_idx)
+void SortNodeBase::zeroBins(int32_t invocation_idx)
 {
     bins[invocation_idx] = 0;
 
@@ -1124,7 +1124,7 @@ void SortArchetypeNodeBase::zeroBins(int32_t invocation_idx)
     }
 }
 
-void SortArchetypeNodeBase::histogram(int32_t block_idx)
+void SortNodeBase::histogram(int32_t block_idx)
 {
     using namespace sortConsts;
 
@@ -1177,7 +1177,7 @@ void SortArchetypeNodeBase::histogram(int32_t block_idx)
     }
 }
 
-void SortArchetypeNodeBase::binScan(int32_t block_idx)
+void SortNodeBase::binScan(int32_t block_idx)
 {
     using namespace sortConsts;
 
@@ -1201,7 +1201,7 @@ void SortArchetypeNodeBase::binScan(int32_t block_idx)
     }
 }
 
-void SortArchetypeNodeBase::OnesweepNode::prepareOnesweep(
+void SortNodeBase::OnesweepNode::prepareOnesweep(
     int32_t invocation_idx)
 {
     auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
@@ -1213,7 +1213,7 @@ void SortArchetypeNodeBase::OnesweepNode::prepareOnesweep(
     }
 }
 
-void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
+void SortNodeBase::OnesweepNode::onesweep(int32_t block_idx)
 {
     using namespace sortConsts;
     using namespace mwGPU;
@@ -1243,7 +1243,7 @@ void SortArchetypeNodeBase::OnesweepNode::onesweep(int32_t block_idx)
     agent.Process();
 }
 
-void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)
+void SortNodeBase::resizeTable(int32_t invocation_idx)
 {
     int32_t num_entities = bins[(numPasses - 1) * 256 + 255];
     mwGPU::getStateManager()->resizeArchetype(archetypeID, num_entities);
@@ -1256,7 +1256,7 @@ void SortArchetypeNodeBase::resizeTable(int32_t invocation_idx)
     numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
 }
 
-void SortArchetypeNodeBase::ClearCountNode::clearCounts(int32_t invocation_idx)
+void SortNodeBase::ClearCountNode::clearCounts(int32_t invocation_idx)
 {
     worldOffsets[invocation_idx] = 0;
     worldCounts[invocation_idx] = 0;
@@ -1266,7 +1266,7 @@ void SortArchetypeNodeBase::ClearCountNode::clearCounts(int32_t invocation_idx)
     }
 }
 
-void SortArchetypeNodeBase::clearWorldOffsetsAndCounts(int32_t invocation_idx)
+void SortNodeBase::clearWorldOffsetsAndCounts(int32_t invocation_idx)
 {
     int32_t num_entities = bins[(numPasses - 1) * 256 + 255];
 
@@ -1291,13 +1291,13 @@ void SortArchetypeNodeBase::clearWorldOffsetsAndCounts(int32_t invocation_idx)
 }
 
 
-void SortArchetypeNodeBase::copyKeys(int32_t invocation_idx)
+void SortNodeBase::copyKeys(int32_t invocation_idx)
 {
     keysCol[invocation_idx] = keysAlt[invocation_idx];
     
 }
 
-void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
+void SortNodeBase::computeWorldCounts(int32_t invocation_idx)
 {
     if (invocation_idx == 0)
     {
@@ -1328,7 +1328,7 @@ void SortArchetypeNodeBase::computeWorldCounts(int32_t invocation_idx)
     }
 }
 
-void SortArchetypeNodeBase::correctWorldCounts(int32_t invocation_idx) {
+void SortNodeBase::correctWorldCounts(int32_t invocation_idx) {
     // Correct world counts by subtracting "entities before" from "entities
     // before and including" for each world. A world with 0 entities will
     // compute numEntities - numEntities = 0. For worlds with 0 entities,
@@ -1336,7 +1336,7 @@ void SortArchetypeNodeBase::correctWorldCounts(int32_t invocation_idx) {
     worldCounts[invocation_idx] -= worldOffsets[invocation_idx];
 }
 
-void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
+void SortNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
     auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
@@ -1354,7 +1354,7 @@ void SortArchetypeNodeBase::RearrangeNode::stageColumn(int32_t invocation_idx)
            bytes_per_elem);
 }
 
-void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_idx)
+void SortNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
     auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
@@ -1378,7 +1378,7 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeEntities(int32_t invocation_
     }
 }
 
-void SortArchetypeNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_idx)
+void SortNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
     auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
@@ -1404,7 +1404,7 @@ void SortArchetypeNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_id
     }
 }
 
-TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
+TaskGraph::NodeID SortNodeBase::addToGraphArchetype(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies,
     uint32_t archetype_id,
@@ -1441,13 +1441,13 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
 
     uint32_t taskgraph_id = builder.getTaskgraphID();
 
-    auto data_id = builder.constructNodeData<SortArchetypeNodeBase>(
+    auto data_id = builder.constructNodeData<SortNodeBase>(
         taskgraph_id, archetype_id, sort_column_idx, keys_col,
         num_passes, world_offsets, world_counts);
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
-        &SortArchetypeNodeBase::sortSetup>(data_id, dependencies,
+        &SortNodeBase::sortSetup>(data_id, dependencies,
             Optional<TaskGraph::NodeID>::none(), 1);
 
     // Create the clear world count pass (which will run optionally 
@@ -1459,13 +1459,13 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
             {setup}, setup);
 
     auto zero_bins = builder.addNodeFn<
-        &SortArchetypeNodeBase::zeroBins>(data_id, {clear_counts}, setup);
+        &SortNodeBase::zeroBins>(data_id, {clear_counts}, setup);
 
     auto compute_histogram = builder.addNodeFn<
-        &SortArchetypeNodeBase::histogram>(data_id, {zero_bins}, setup, 0,
+        &SortNodeBase::histogram>(data_id, {zero_bins}, setup, 0,
             consts::numMegakernelThreads);
 
-    auto cur_task = builder.addNodeFn<&SortArchetypeNodeBase::binScan>(
+    auto cur_task = builder.addNodeFn<&SortNodeBase::binScan>(
         data_id, {compute_histogram}, setup, 0, consts::numMegakernelThreads);
 
     for (int32_t i = 0; i < num_passes; i++) {
@@ -1482,15 +1482,15 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
 
     // FIXME this could be a fixed-size count
     if (world_sort) {
-        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::resizeTable>(
+        cur_task = builder.addNodeFn<&SortNodeBase::resizeTable>(
             data_id, {cur_task}, setup);
 
-        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::clearWorldOffsetsAndCounts>(
+        cur_task = builder.addNodeFn<&SortNodeBase::clearWorldOffsetsAndCounts>(
             data_id, {cur_task}, setup);
     }
 
     if (num_passes % 2 == 1) {
-        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::copyKeys>(
+        cur_task = builder.addNodeFn<&SortNodeBase::copyKeys>(
             data_id, {cur_task}, setup);
     }
 
@@ -1498,15 +1498,126 @@ TaskGraph::NodeID SortArchetypeNodeBase::addToGraph(
     if (world_sort) {
         // Compute counts for each world by writing upper ranges to worldCounts
         // and lower ranges to worldOffsets. 
-        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::computeWorldCounts>(
+        cur_task = builder.addNodeFn<&SortNodeBase::computeWorldCounts>(
             data_id, {cur_task}, setup);
 
         // Compute final counts by subtracting worldOffsets from worldCounts
         // Worlds with 0 entities have offset numEntities.
-        cur_task = builder.addNodeFn<&SortArchetypeNodeBase::correctWorldCounts>(
+        cur_task = builder.addNodeFn<&SortNodeBase::correctWorldCounts>(
             data_id, {cur_task}, setup);
     }
     
+    int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
+
+    TaskGraph::TypedDataID<RearrangeNode> prev_rearrange_node { -1 };
+
+    for (int32_t col_idx = 1; col_idx < num_columns; col_idx++) {
+        if (col_idx == sort_column_idx) continue;
+        auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
+            taskgraph_id, data_id, col_idx);
+        builder.getDataRef(cur_rearrange_node).numDynamicInvocations = 0;
+
+        if (prev_rearrange_node.id == -1) {
+            sort_node_data.firstRearrangePassData = cur_rearrange_node;
+        } else {
+            builder.getDataRef(prev_rearrange_node).nextRearrangeNode =
+                cur_rearrange_node;
+        }
+        prev_rearrange_node = cur_rearrange_node;
+
+        cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
+            cur_rearrange_node, {cur_task}, setup);
+
+        cur_task = builder.addNodeFn<&RearrangeNode::rearrangeColumn>(
+            cur_rearrange_node, {cur_task}, setup);
+    }
+
+    auto entities_rearrange_node = builder.constructNodeData<RearrangeNode>(
+        taskgraph_id, data_id, 0);
+
+    cur_task = builder.addNodeFn<&RearrangeNode::stageColumn>(
+        entities_rearrange_node, {cur_task}, setup);
+
+    cur_task = builder.addNodeFn<&RearrangeNode::rearrangeEntities>(
+        entities_rearrange_node, {cur_task}, setup);
+
+    assert(prev_rearrange_node.id != -1);
+    builder.getDataRef(prev_rearrange_node).nextRearrangeNode =
+        entities_rearrange_node;
+    builder.getDataRef(entities_rearrange_node).nextRearrangeNode = { -1 };
+    builder.getDataRef(entities_rearrange_node).numDynamicInvocations = 0;
+
+    return cur_task;
+}
+
+TaskGraph::NodeID SortNodeBase::addToGraphRange(
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> dependencies,
+    uint32_t unit_id)
+{
+    using namespace mwGPU;
+
+    static_assert(consts::numMegakernelThreads ==
+                  sortConsts::RADIX_DIGITS);
+
+    StateManager *state_mgr = getStateManager();
+
+    auto keys_col = (uint32_t *)
+
+    auto keys_col =  (uint32_t *)state_mgr->getRangeWorldIDs(unit_id);
+
+    // Optimize for sorts on the WorldID column, where the 
+    // max # of worlds is known
+    int32_t num_passes;
+    int32_t num_worlds = GPUImplConsts::get().numWorlds;
+    // num_worlds + 1 to leave room for columns with WorldID == -1
+    int32_t num_bits = 32 - __clz(num_worlds + 1);
+    num_passes = utils::divideRoundUp(num_bits, 8);
+
+    uint32_t taskgraph_id = builder.getTaskgraphID();
+
+    auto data_id = builder.constructNodeData<SortNodeBase>(
+        taskgraph_id, unit_id, 1, keys_col,
+        num_passes, nullptr, nullptr);
+    auto &sort_node_data = builder.getDataRef(data_id);
+
+    TaskGraph::NodeID setup = builder.addNodeFn<
+        &SortNodeBase::sortSetup>(data_id, dependencies,
+            Optional<TaskGraph::NodeID>::none(), 1);
+
+    // Create the clear world count pass (which will run optionally 
+    // if archetype needs sorting but the number of entities is 0).
+    auto zero_bins = builder.addNodeFn<
+        &SortNodeBase::zeroBins>(data_id, {setup}, setup);
+
+    auto compute_histogram = builder.addNodeFn<
+        &SortNodeBase::histogram>(data_id, {zero_bins}, setup, 0,
+            consts::numMegakernelThreads);
+
+    auto cur_task = builder.addNodeFn<&SortNodeBase::binScan>(
+        data_id, {compute_histogram}, setup, 0, consts::numMegakernelThreads);
+
+    for (int32_t i = 0; i < num_passes; i++) {
+        auto pass_data = builder.constructNodeData<OnesweepNode>(
+            taskgraph_id, data_id, i, i == num_passes - 1);
+        sort_node_data.onesweepNodes[i] = pass_data;
+        cur_task = builder.addNodeFn<
+            &OnesweepNode::prepareOnesweep>(pass_data, {cur_task}, setup);
+
+        cur_task = builder.addNodeFn<&OnesweepNode::onesweep>(
+            pass_data, {cur_task}, setup, 0,
+            consts::numMegakernelThreads);
+    }
+
+    cur_task = builder.addNodeFn<&SortNodeBase::resizeTable>(
+        data_id, {cur_task}, setup);
+
+    if (num_passes % 2 == 1) {
+        cur_task = builder.addNodeFn<&SortNodeBase::copyKeys>(
+            data_id, {cur_task}, setup);
+    }
+
+
     int32_t num_columns = state_mgr->getArchetypeNumColumns(archetype_id);
 
     TaskGraph::TypedDataID<RearrangeNode> prev_rearrange_node { -1 };

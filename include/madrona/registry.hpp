@@ -69,7 +69,7 @@ public:
     template <typename SingletonT, EnumType EnumT>
     void exportSingleton(EnumT slot);
 
-    template <typename RangeMapUnit>
+    template <typename RangeMapUnitT>
     void registerRangeMapUnit();
 
 private:

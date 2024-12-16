@@ -30,6 +30,20 @@ Entity Context::makeEntity(uint32_t archetype_id)
     return state_mgr->makeEntityNow(world_id_, archetype_id);
 }
 
+template <typename RangeMapUnitT>
+RangeMap Context::allocRangeMap(CountT num_units)
+{
+    uint32_t unit_id = TypeTracker::typeID<RangeMapUnitT>();
+    return allocRangeMap(unit_id, num_units);
+}
+
+inline RangeMap Context::allocRangeMap(
+        uint32_t unit_id, CountT num_units)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    return state_mgr->allocRangeMap(world_id_, unit_id, num_units);
+}
+
 template <typename ArchetypeT>
 Loc Context::makeTemporary()
 {

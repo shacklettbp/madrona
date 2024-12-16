@@ -54,6 +54,27 @@ struct EntityStore {
     SpinLock growLock {};
 };
 
+struct RangeMapUnitStore {
+    struct Slot {
+        Loc loc;
+        uint32_t gen;
+    };
+
+    AtomicI32 availableOffset = 0;
+    AtomicI32 deletedOffset = 0;
+
+    Slot *units;
+    int32_t *availableSlots;
+    int32_t *deletedSlots;
+
+    int32_t numMappedSlots;
+    uint32_t numGrowSlots;
+    uint32_t numSlotGrowBytes;
+    uint32_t numIdxGrowBytes;
+
+    SpinLock growLock {};
+};
+
 class StateManager {
 public:
     StateManager(uint32_t max_components);
@@ -66,6 +87,9 @@ public:
         ComponentMetadataSelector<MetadataComponentTs...> component_metadatas,
         ArchetypeFlags archetype_flags,
         CountT max_num_entities_per_world);
+
+    template <typename RangeMapUnitT>
+    RangeMapUnitID registerRangeMapUnit();
 
     template <typename SingletonT>
     void registerSingleton();
@@ -91,6 +115,10 @@ public:
     inline uint32_t numMatchingEntities(QueryRef *query_ref);
 
     Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
+
+    RangeMap allocRangeMap(WorldID world_id,
+                           uint32_t unit_id, uint32_t num_units);
+    void freeRangeMap(RangeMap range_map);
 
     void destroyEntityNow(Entity e);
 
@@ -133,6 +161,13 @@ public:
     inline void * getArchetypeColumn(uint32_t archetype_id,
                                      int32_t column_idx);
 
+    // Returns pointer to RangeMap
+    inline void * getRangeMaps(uint32_t unit_id);
+    // Returns pointer to WorldID
+    inline void * getRangeWorldIDs(uint32_t unit_id);
+    // Returns pointer to the actual units
+    inline void * getRangeUnits(uint32_t unit_id);
+
     template <typename ArchetypeT>
     int32_t * getArchetypeWorldOffsets();
 
@@ -167,6 +202,8 @@ public:
 
     void recycleEntities(int32_t thread_offset,
                          int32_t recycle_base);
+    void recycleRangeMaps(int32_t thread_offset,
+                          int32_t recycle_base);
 
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
     inline void archetypeClearNeedsSort(uint32_t archetype_id);
@@ -188,9 +225,11 @@ private:
 
     static inline uint32_t num_components_ = 0;
     static inline uint32_t num_archetypes_ = 0;
+    static inline uint32_t num_range_map_units_ = 0;
     static inline uint32_t next_bundle_id_ = bundle_typeid_mask_;
 
     static inline constexpr uint32_t max_components_ = 1024;
+    static inline constexpr uint32_t max_range_map_units_ = 64;
     static inline constexpr uint32_t max_bundles_ = 512;
     static inline constexpr uint32_t max_archetypes_ = 256;
     static inline constexpr uint32_t user_component_offset_ = 2;
@@ -205,6 +244,8 @@ private:
                            ComponentID *components,
                            ComponentFlags *component_flags,
                            uint32_t num_components);
+    void registerRangeMapUnit(uint32_t id, uint32_t alignment,
+                              uint32_t num_bytes);
 
     void registerBundle(uint32_t id,
                         const uint32_t *components,
@@ -222,6 +263,17 @@ private:
                    uint32_t num_components,
                    QueryRef *query_ref);
 
+    // This is basically a more stripped down version of an Archetype.
+    struct RangeMapStore {
+        RangeMapStore(uint32_t max_num_units,
+                      TypeInfo type_info);
+
+        TypeInfo typeInfo;
+        RangeMapTable tbl;
+
+        bool needsSort;
+    };
+
     struct ArchetypeStore {
         ArchetypeStore(uint32_t offset,
                        ArchetypeFlags archetype_flags,
@@ -234,7 +286,7 @@ private:
 
         uint32_t componentOffset;
         uint32_t numUserComponents;
-        Table tbl;
+        ArchetypeTable tbl;
         ColumnMap columnLookup;
         
         // The size of this array corresponds to the number of worlds
@@ -253,15 +305,22 @@ private:
     uint32_t bundle_component_offset_ = 0;
     uint32_t query_data_offset_ = 0;
     SpinLock query_data_lock_ {};
+    
     FixedInlineArray<Optional<TypeInfo>, max_components_> components_ {};
+
+    FixedInlineArray<Optional<RangeMapStore>, max_range_map_units_>
+        range_map_units_ {};
+
     std::array<uint32_t, max_archetype_components_ * max_archetypes_>
         archetype_components_ {};
+
     FixedInlineArray<Optional<ArchetypeStore>, max_archetypes_> archetypes_ {};
     std::array<uint32_t, max_archetype_components_ * max_archetypes_>
         bundle_components_ {};
     std::array<BundleInfo, max_bundles_> bundle_infos_ {};
     std::array<uint32_t, max_query_slots_> query_data_ {};
     EntityStore entity_store_;
+    RangeMapUnitStore range_map_unit_store_;
 };
 
 }

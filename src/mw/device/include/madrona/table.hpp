@@ -15,10 +15,21 @@ struct TypeInfo {
     uint32_t numBytes;
 };
 
+template <uint32_t max_columns>
 struct Table {
-    Table();
+    inline Table::Table()
+        : columns(),
+          columnSizes(),
+          columnMappedBytes(),
+          columnFlags(),
+          maxColumnSize(),
+          numColumns(),
+          numRows(0),
+          mappedRows(0),
+          growLock()
+    {}
 
-    static constexpr uint32_t maxColumns = 128;
+    static constexpr uint32_t maxColumns = max_columns;
 
     std::array<void *, maxColumns> columns;
 
@@ -38,5 +49,11 @@ struct Table {
     static inline constexpr uint64_t maxReservedBytesPerTable =
         128_u64 * 1024_u64 * 1024_u64 * 1024_u64;
 };
+
+using ArchetypeTable = Table<128>;
+
+// Range maps only need to keep track of 2 columns no matter the type.
+// It's just the WorldID and the actual units themselves.
+using RangeMapTable = Table<2>;
 
 }
