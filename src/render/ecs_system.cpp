@@ -182,6 +182,34 @@ uint32_t rgbToHex(Vector3 c) {
     return (red << 16) | (green << 8) | blue;
 }
 
+inline void lightUpdate(Context &ctx,
+                        Entity e,
+                        const Position &pos,
+                        const LightDescDirection &dir,
+                        const LightDescType &type,
+                        const LightDescShadow &shadow,
+                        const LightDescCutoffAngle &angle,
+                        const LightDescIntensity &intensity,
+                        const LightDescActive &active,
+                        LightCarrier &carrier)
+{
+    if (carrier.light == Entity::none()) {
+        return;
+    }
+
+    (void)e;
+
+    LightDesc &desc = ctx.get<LightDesc>(carrier.light);
+
+    desc.type = type.type;
+    desc.castShadow = shadow.castShadow;
+    desc.position = pos;
+    desc.direction = dir;
+    desc.cutoff = angle.cutoff;
+    desc.intensity = intensity.intensity;
+    desc.active = active.active;
+}
+
 inline void instanceTransformUpdateWithMat(Context &ctx,
                                            Entity e,
                                            const Position &pos,
@@ -385,6 +413,14 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<ColorOverride>();
     registry.registerComponent<LightDesc>();
 
+    registry.registerComponent<LightDescDirection>();
+    registry.registerComponent<LightDescType>();
+    registry.registerComponent<LightDescShadow>();
+    registry.registerComponent<LightDescCutoffAngle>();
+    registry.registerComponent<LightDescIntensity>();
+    registry.registerComponent<LightDescActive>();
+    registry.registerComponent<LightCarrier>();
+
     registry.registerComponent<RGBOutputBuffer>(rgb_output_bytes);
     registry.registerComponent<DepthOutputBuffer>(depth_output_bytes);
 
@@ -451,7 +487,7 @@ void registerTypes(ECSRegistry &registry,
 
 TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
                            Span<const TaskGraphNodeID> deps,
-                           bool update_mats)
+                           bool update_visual_properties)
 {
     // FIXME: It feels like we should have persistent slots for renderer
     // state rather than needing to continually reset the instance count
@@ -467,7 +503,7 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             Renderable
         >>(deps);
 
-    if (update_mats) {
+    if (update_visual_properties) {
         instance_setup = builder.addToGraph<ParallelForNode<Context,
             instanceTransformUpdateWithMat,
                 Entity,
@@ -478,6 +514,19 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
                 MaterialOverride,
                 ColorOverride,
                 Renderable
+            >>({instance_setup});
+
+        instance_setup = builder.addToGraph<ParallelForNode<Context,
+             lightUpdate,
+                Entity,
+                Position,
+                LightDescDirection,
+                LightDescType,
+                LightDescShadow,
+                LightDescCutoffAngle,
+                LightDescIntensity,
+                LightDescActive,
+                LightCarrier
             >>({instance_setup});
     }
 
@@ -668,16 +717,28 @@ void cleanupRenderableEntity(Context &ctx,
     ctx.destroyEntity(render_entity);
 }
 
-Entity makeLight(Context &ctx)
+void makeEntityLightCarrier(Context &ctx, Entity e)
 {
-    Entity light_entity = ctx.makeEntity<LightArchetype>();
-    return light_entity;
+    Entity light_e = ctx.makeEntity<LightArchetype>();
+    ctx.get<LightCarrier>(e).light = light_e;
+
+    ctx.get<LightDesc>(light_e) = LightDesc {
+        .type = ctx.get<LightDescType>(e).type,
+        .castShadow = ctx.get<LightDescShadow>(e).castShadow,
+        .position = ctx.get<Position>(e),
+        .direction = ctx.get<LightDescDirection>(e),
+        .cutoff = ctx.get<LightDescCutoffAngle>(e).cutoff,
+        .intensity = ctx.get<LightDescIntensity>(e).intensity,
+        .active = ctx.get<LightDescActive>(e).active,
+    };
 }
 
+#if 0
 void configureLight(Context &ctx, Entity light, LightDesc desc)
 {
     ctx.get<LightDesc>(light) = desc;
 }
+#endif
 
 // Add this later when we decide to make the renderer more flexible
 #if 0

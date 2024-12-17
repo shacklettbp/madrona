@@ -21,6 +21,10 @@ struct Renderable {
     Entity renderEntity;
 };
 
+struct LightCarrier {
+    Entity light;
+};
+
 
 
 
@@ -56,6 +60,8 @@ struct alignas(16) InstanceData {
     uint32_t color;
 };
 
+// This is all the data required to configure a light. The actual
+// data is read in / written to through SOA.
 struct LightDesc {
     enum Type : bool {
         Directional = true,
@@ -63,6 +69,7 @@ struct LightDesc {
     };
 
     Type type;
+
     bool castShadow;
 
     // Only affects the spotlight (defaults to 0 0 0).
@@ -80,6 +87,36 @@ struct LightDesc {
     // Gives ability to turn light on or off.
     bool active;
 };
+
+struct LightDescDirection : math::Vector3 {
+    LightDescDirection(math::Vector3 v)
+        : Vector3(v)
+    {}
+};
+
+struct LightDescType {
+    LightDesc::Type type;
+};
+
+struct LightDescShadow {
+    bool castShadow;
+};
+
+struct LightDescCutoffAngle {
+    float cutoff;
+};
+
+struct LightDescIntensity {
+    float intensity;
+};
+
+struct LightDescActive {
+    bool active;
+};
+
+struct LightArchetype : public Archetype<
+    LightDesc
+> {};
 
 struct MaterialOverride {
     // These are values that matID can take on if not some override material ID.
@@ -128,10 +165,6 @@ struct RenderableArchetype : public Archetype<
     TLBVHNode
 > {};
 
-struct LightArchetype : public Archetype<
-    LightDesc
-> {};
-
 // For private usage - not to be used by user.
 struct RenderCameraArchetype : public Archetype<
     PerspectiveCameraData,
@@ -154,7 +187,7 @@ namespace RenderingSystem {
     TaskGraphNodeID setupTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps,
-        bool update_mats = false);
+        bool update_visual_properties = false);
 
     void init(Context &ctx,
               const RenderECSBridge *bridge);
@@ -179,9 +212,9 @@ namespace RenderingSystem {
     void cleanupRenderableEntity(Context &ctx,
                                  Entity e);
 
-    Entity makeLight(Context &ctx);
 
-    void configureLight(Context &ctx, Entity light, LightDesc desc);
+    void makeEntityLightCarrier(Context &ctx,
+                                Entity e);
 };
 
 }
