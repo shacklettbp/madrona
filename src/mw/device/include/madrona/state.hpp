@@ -19,6 +19,7 @@
 #include <madrona/optional.hpp>
 #include <madrona/type_tracker.hpp>
 #include <madrona/memory.hpp>
+#include <madrona/range.hpp>
 
 #include "mw_gpu/const.hpp"
 
@@ -120,6 +121,9 @@ public:
                            uint32_t unit_id, uint32_t num_units);
     void freeRangeMap(RangeMap range_map);
 
+    template <typename RangeMapUnitT>
+    RangeMapUnitT * getRangeMapUnit(RangeMap range_map);
+
     void destroyEntityNow(Entity e);
 
     Loc makeTemporary(WorldID world_id, uint32_t archetype_id);
@@ -190,13 +194,14 @@ public:
                                                   int32_t column_idx);
 
     inline uint32_t getRangeMapColumnBytesPerRow(uint32_t unit_id,
-                                                 int32_t column_idx);
+                                                 uint32_t column_idx);
 
     template <typename ArchetypeT>
     inline uint32_t getArchetypeNumRows();
 
     template <typename RangeMapUnitT>
     inline uint32_t getRangeNumRows();
+    inline uint32_t getRangeNumRows(uint32_t unit_id);
 
     inline int32_t getArchetypeNumColumns(uint32_t archetype_id);
     inline uint32_t getArchetypeMaxColumnSize(uint32_t archetype_id);
@@ -215,6 +220,7 @@ public:
     void resizeRange(uint32_t unit_id, int32_t num_rows);
 
     std::pair<int32_t, int32_t> fetchRecyclableEntities();
+    std::pair<int32_t, int32_t> fetchRecyclableRangeMaps();
 
     void recycleEntities(int32_t thread_offset,
                          int32_t recycle_base);

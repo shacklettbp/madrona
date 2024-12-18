@@ -261,6 +261,19 @@ struct RecycleEntitiesNode : NodeBase {
     int32_t recycleBase;
 };
 
+struct RecycleRangeNode : NodeBase {
+    RecycleRangeNode();
+
+    void run(int32_t invocation_idx);
+    uint32_t numInvocations();
+
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies);
+
+    int32_t recycleBase;
+};
+
 struct ResetTmpAllocNode : NodeBase {
     void run(int32_t);
 

@@ -17,7 +17,7 @@ struct TypeInfo {
 
 template <uint32_t max_columns>
 struct Table {
-    inline Table::Table()
+    inline Table()
         : columns(),
           columnSizes(),
           columnMappedBytes(),
@@ -52,8 +52,8 @@ struct Table {
 
 using ArchetypeTable = Table<128>;
 
-// Range maps only need to keep track of 2 columns no matter the type.
+// Range maps only need to keep track of 3 columns no matter the type.
 // It's just the WorldID and the actual units themselves.
-using RangeMapTable = Table<2>;
+using RangeMapTable = Table<3>;
 
 }

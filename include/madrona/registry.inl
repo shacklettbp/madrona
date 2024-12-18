@@ -71,7 +71,7 @@ template <typename RangeMapUnitT>
 void ECSRegistry::registerRangeMapUnit()
 {
 #ifdef MADRONA_GPU_MODE
-    state_mgr_->registerRangeMapUnit<RangeMapUnit>();
+    state_mgr_->registerRangeMapUnit<RangeMapUnitT>();
 #else
     // Does nothing on the CPU backend.
 #endif

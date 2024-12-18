@@ -71,8 +71,8 @@ public:
 
     void freeRangeMap(RangeMap range_map);
 
-    template <typename RangeMapUnit>
-    RangeMapUnit *rangeMapUnit(RangeMap range_map);
+    template <typename RangeMapUnitT>
+    RangeMapUnitT * rangeMapUnit(RangeMap range_map);
 
 protected:
     WorldBase *data_;

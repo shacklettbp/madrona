@@ -164,7 +164,7 @@ StateManager::StateManager(uint32_t)
         assert(range_map_unit_store_.numIdxGrowBytes / sizeof(int32_t) ==
                 init_mapped_units);
 
-        range_map_unit_store_.slots = (RangeMapUnitStore::Slot *)alloc->reserveMemory(
+        range_map_unit_store_.units = (RangeMapUnitStore::Slot *)alloc->reserveMemory(
                 reserve_unit_bytes, range_map_unit_store_.numSlotGrowBytes);
 
         range_map_unit_store_.availableSlots = (int32_t *)alloc->reserveMemory(
@@ -176,7 +176,7 @@ StateManager::StateManager(uint32_t)
         range_map_unit_store_.numMappedSlots = init_mapped_units;
 
         for (int32_t i = 0; i < init_mapped_units; i++) {
-            range_map_unit_store_.slots[i].gen = 0;
+            range_map_unit_store_.units[i].gen = 0;
             range_map_unit_store_.availableSlots[i] = i;
         }
     }
@@ -202,9 +202,9 @@ void StateManager::registerRangeMapUnit(
         /* .numBytes =  */  num_bytes,
     };
 
-    range_map_units_[id].emplace(RangeMapStore(
+    range_map_units_[id].emplace(
         0, type_info
-    ));
+    );
 }
 
 StateManager::RangeMapStore::RangeMapStore(
@@ -248,18 +248,23 @@ StateManager::RangeMapStore::RangeMapStore(
         uint64_t init_bytes = alloc->roundUpAlloc(
                 cur_info.numBytes * (uint64_t)num_worlds);
 
-        tbl.columns[0] = alloc->reserveMemory(reserve_bytes, init_bytes);
-        tbl.columnSizes[0] = cur_info.numBytes;
-        tbl.columnMappedBytes[0] = init_bytes;
+        tbl.columns[i] = alloc->reserveMemory(reserve_bytes, init_bytes);
+
+        mwGPU::HostPrint::log("({}) columnSize[0] = {}\n", i, tbl.columnSizes[0]);
+
+        tbl.columnSizes[i] = cur_info.numBytes;
+        tbl.columnMappedBytes[i] = init_bytes;
 
         int32_t col_num_mapped_rows = init_bytes / cur_info.numBytes;
 
         min_mapped_rows = min(min_mapped_rows, col_num_mapped_rows);
-        max_col_size = max(cur_info.numByutes, max_col_size);
+        max_col_size = max(cur_info.numBytes, max_col_size);
     }
 
     tbl.mappedRows = min_mapped_rows;
     tbl.maxColumnSize = max_col_size;
+
+    mwGPU::HostPrint::log("columnSize[0] = {}\n", tbl.columnSizes[0]);
 }
 
 StateManager::ArchetypeStore::ArchetypeStore(
@@ -540,8 +545,8 @@ void StateManager::makeQuery(const uint32_t *components,
 // Instead of returning the actual available entity ID, it just returns
 // the index of the available slot ID
 static inline int32_t getRangeMapUnitSlotIdx(
-        RangeMapStore &range_store,
-        uint32_t num_units)
+    RangeMapUnitStore &range_store,
+    uint32_t num_units)
 {
     int32_t available_idx =
         range_store.availableOffset.fetch_add_relaxed(num_units);
@@ -554,7 +559,7 @@ static inline int32_t getRangeMapUnitSlotIdx(
     range_store.growLock.lock();
 
     if (available_idx + num_units-1 <
-            range_store_store.numMappedSlots) {
+            range_store.numMappedSlots) {
         range_store.growLock.unlock();
 
         return available_idx;
@@ -659,7 +664,7 @@ RangeMap StateManager::allocRangeMap(
     RangeMap *range_map_col = (RangeMap *)tbl.columns[0];
     RangeMap::Status *status_col = (RangeMap::Status *)tbl.columns[0];
 
-    for (int i = 0; num_units; ++i) {
+    for (int i = 0; i < num_units; ++i) {
         Loc loc = {
             unit_id, 
             row + i,
@@ -668,13 +673,13 @@ RangeMap StateManager::allocRangeMap(
         int32_t available_slot =
             range_map_unit_store_.availableSlots[unit_slot_idx + i];
         
-        RangeMapUnitStore::Slot &slot = range_map_unit_store_.slots[
+        RangeMapUnitStore::Slot &slot = range_map_unit_store_.units[
             available_slot];
 
         slot.loc = loc;
 
         RangeMap range_map = {
-            .numUnits = num_units,
+            .numUnits = (CountT)num_units,
             .gen = slot.gen,
             .id = available_slot
         };
@@ -779,7 +784,7 @@ void StateManager::destroyEntityNow(Entity e)
 void StateManager::freeRangeMap(RangeMap range_map)
 {
     RangeMapUnitStore::Slot &slot =
-        range_map_unit_store_[range_map.id];
+        range_map_unit_store_.units[range_map.id];
 
     // We need to increment gen for all the units in this range map.
     // To do this, we use the fact that the sort preserves order within
@@ -787,6 +792,8 @@ void StateManager::freeRangeMap(RangeMap range_map)
     // the one give here.
     Loc loc = slot.loc;
     auto &unit = *range_map_units_[loc.archetype];
+    auto &tbl = unit.tbl;
+
     unit.needsSort = true;
 
     int32_t deleted_offset =
@@ -801,7 +808,7 @@ void StateManager::freeRangeMap(RangeMap range_map)
         status_col[row] = RangeMap::Status::Freed;
         auto id = rm_col[row].id;
 
-        range_map_unit_store_[id].gen++;
+        range_map_unit_store_.units[id].gen++;
 
         range_map_unit_store_.deletedSlots[deleted_offset + i] = id;
     }
@@ -846,6 +853,25 @@ std::pair<int32_t, int32_t> StateManager::fetchRecyclableEntities()
     if (num_deleted > 0) {
         entity_store_.deletedOffset.store_relaxed(0);
         entity_store_.availableOffset.store_relaxed(recycle_base);
+    }
+
+    return {
+        recycle_base,
+        num_deleted,
+    };
+}
+
+std::pair<int32_t, int32_t> StateManager::fetchRecyclableRangeMaps()
+{
+    int32_t num_deleted = range_map_unit_store_.deletedOffset.load_relaxed();
+
+    int32_t available_end = range_map_unit_store_.availableOffset.load_relaxed();
+
+    int32_t recycle_base = available_end - num_deleted;
+
+    if (num_deleted > 0) {
+        range_map_unit_store_.deletedOffset.store_relaxed(0);
+        range_map_unit_store_.availableOffset.store_relaxed(recycle_base);
     }
 
     return {

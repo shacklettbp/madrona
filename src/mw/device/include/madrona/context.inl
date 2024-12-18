@@ -44,6 +44,13 @@ inline RangeMap Context::allocRangeMap(
     return state_mgr->allocRangeMap(world_id_, unit_id, num_units);
 }
 
+template <typename RangeMapUnitT>
+RangeMapUnitT * Context::rangeMapUnit(RangeMap range_map)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    return state_mgr->getRangeMapUnit<RangeMapUnitT>(range_map);
+}
+
 template <typename ArchetypeT>
 Loc Context::makeTemporary()
 {

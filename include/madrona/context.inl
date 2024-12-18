@@ -97,20 +97,21 @@ SingletonT & Context::singleton()
 template <typename RangeMapUnit>
 RangeMap Context::allocRangeMap(CountT num_units)
 {
-    return RangeMap(
-            num_units,
-            malloc(sizeof(RangeMapUnit) * num_units));
+    return RangeMap {
+        num_units,
+        malloc(sizeof(RangeMapUnit) * num_units) 
+    };
 }
 
 void Context::freeRangeMap(RangeMap range_map)
 {
-    free(range_map.ptr_);
+    free(range_map.ptr);
 }
 
 template <typename RangeMapUnit>
 RangeMapUnit * Context::rangeMapUnit(RangeMap range_map)
 {
-    return (RangeMapUnit *)range_map.ptr_;
+    return (RangeMapUnit *)range_map.ptr;
 }
 
 void * Context::tmpAlloc(uint64_t num_bytes)

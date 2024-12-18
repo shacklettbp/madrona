@@ -1121,7 +1121,6 @@ void SortNodeBase::sortSetupRange(int32_t)
 
     auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
     StateManager *state_mgr = mwGPU::getStateManager();
-    int32_t num_columns = 3;
 
     if (!state_mgr->rangeNeedsSort(archetypeID)) {
         numDynamicInvocations = 0;
@@ -1137,7 +1136,7 @@ void SortNodeBase::sortSetupRange(int32_t)
 
     state_mgr->rangeClearNeedsSort(archetypeID);
 
-    int num_rows = state_mgr->numRangeRows(archetypeID);
+    int num_rows = state_mgr->getRangeNumRows(archetypeID);
 
     int32_t num_threads =
         utils::divideRoundUp(num_rows, (int32_t)num_elems_per_sort_thread_);
@@ -1562,6 +1561,10 @@ void SortNodeBase::RearrangeNode::stageColumnRange(int32_t invocation_idx)
 
     int src_idx = parent.indicesFinal[invocation_idx];
 
+    mwGPU::HostPrint::log(
+            "col_idx = {}, parent.columnStaging = {}, bytes_per_elem = {}, src = {}, src_idx = {}, inv_idx = {}, num_inv = {}\n",
+            columnIndex, parent.columnStaging, bytes_per_elem, src, src_idx, invocation_idx, numDynamicInvocations);
+
     memcpy((char *)parent.columnStaging +
                 (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
            (char *)src + (uint64_t)bytes_per_elem * (uint64_t)src_idx,
@@ -1583,7 +1586,7 @@ void SortNodeBase::RearrangeNode::rearrangeRangeUnits(int32_t invocation_idx)
 
     // FIXME: temporary entities still have an entity column, but they need to
     // *NOT* be remapped
-    if (e != Entity::none()) {
+    if (rm != RangeMap::none()) {
         state_mgr->remapRangeMapUnit(rm, invocation_idx);
     }
 
@@ -1835,7 +1838,6 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
     TaskGraph::TypedDataID<RearrangeNode> prev_rearrange_node { -1 };
 
     { // Add the nodes for rearranging the unit column
-        if (col_idx == sort_column_idx) continue;
         auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
             taskgraph_id, data_id, 2);
         builder.getDataRef(cur_rearrange_node).numDynamicInvocations = 0;

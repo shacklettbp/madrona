@@ -1,6 +1,7 @@
 #pragma once
 
 #include <madrona/utils.hpp>
+#include <madrona/mw_gpu/host_print.hpp>
 
 namespace madrona {
 
@@ -203,7 +204,7 @@ void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
         uint32_t archetype_idx = *query_values;
         query_values += 1;
 
-        Table &tbl = archetypes_[archetype_idx]->tbl;
+        ArchetypeTable &tbl = archetypes_[archetype_idx]->tbl;
 
         bool early_out = fn(tbl.numRows.load_relaxed(),
             (WorldID *)(tbl.columns[1]),
@@ -238,7 +239,7 @@ void StateManager::iterateQueryImpl(int32_t world_id, QueryRef *query_ref,
         uint32_t archetype_idx = *query_values;
         query_values += 1;
 
-        Table &tbl = archetypes_[archetype_idx]->tbl;
+        ArchetypeTable &tbl = archetypes_[archetype_idx]->tbl;
 
         int32_t worldOffset = 
             getArchetypeWorldOffsets(archetype_idx)[world_id];
@@ -276,7 +277,7 @@ uint32_t StateManager::numMatchingEntities(QueryRef *query_ref)
     for (int i = 0; i < num_archetypes; i++) {
         uint32_t archetype_idx = *query_values;
 
-        Table &tbl = archetypes_[archetype_idx]->tbl;
+        ArchetypeTable &tbl = archetypes_[archetype_idx]->tbl;
 
         total_rows += tbl.numRows.load_relaxed();
 
@@ -321,7 +322,7 @@ ComponentT & StateManager::getUnsafe(Loc loc)
     auto col_idx = archetype.columnLookup.lookup(component_id);
     assert(col_idx.has_value());
 
-    Table &tbl = archetype.tbl;
+    ArchetypeTable &tbl = archetype.tbl;
 
     return ((ComponentT *)(tbl.columns[*col_idx]))[loc.row];
 }
@@ -350,7 +351,7 @@ ResultRef<ComponentT> StateManager::get(Loc loc)
 
     assert(col_idx.has_value());
 
-    Table &tbl = archetype.tbl;
+    ArchetypeTable &tbl = archetype.tbl;
 
     return ResultRef<ComponentT>(
         ((ComponentT *)(tbl.columns[*col_idx])) + loc.row);
@@ -432,6 +433,21 @@ int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
     }
 }
 
+template <typename RangeMapUnitT>
+RangeMapUnitT * StateManager::getRangeMapUnit(RangeMap range_map)
+{
+    const RangeMapUnitStore::Slot &slot =
+        range_map_unit_store_.units[range_map.id];
+    assert(slot.gen == range_map.gen);
+
+    auto &unit = *range_map_units_[slot.loc.archetype];
+
+    mwGPU::HostPrint::log("column at {}, row at {}\n",
+            unit.tbl.columns[2], slot.loc.row);
+
+    return (RangeMapUnitT *)unit.tbl.columns[2] + slot.loc.row;
+}
+
 #if 0
 inline void * getRangeMaps(uint32_t unit_id)
 {
@@ -452,14 +468,7 @@ inline void * getRangeUnits(uint32_t unit_id)
 void * StateManager::getRangeMapColumn(
         uint32_t unit_id, uint32_t col_idx)
 {
-    return *range_map_units_[unit_id].tbl.columns[col_idx];
-}
-
-void * StateManager::getRangeMapColumnBytesPerRow(
-        uint32_t unit_id, uint32_t col_idx)
-{
-    auto &range = *range_map_units_[unit_id];
-    return range.tbl.columnSizes[column_idx];
+    return range_map_units_[unit_id]->tbl.columns[col_idx];
 }
 
 template <typename ArchetypeT>
@@ -474,6 +483,12 @@ template <typename RangeMapUnitT>
 inline uint32_t StateManager::getRangeNumRows()
 {
     uint32_t unit_id = TypeTracker::typeID<RangeMapUnitT>();
+    auto &range = *range_map_units_[unit_id];
+    return range.tbl.numRows.load_relaxed();
+}
+
+inline uint32_t StateManager::getRangeNumRows(uint32_t unit_id)
+{
     auto &range = *range_map_units_[unit_id];
     return range.tbl.numRows.load_relaxed();
 }
@@ -501,9 +516,11 @@ uint32_t StateManager::getArchetypeColumnBytesPerRow(uint32_t archetype_id,
 }
 
 uint32_t StateManager::getRangeMapColumnBytesPerRow(uint32_t unit_id,
-                                                    int32_t column_idx)
+                                                    uint32_t column_idx)
 {
     auto &unit = *range_map_units_[unit_id];
+    mwGPU::HostPrint::log("unit = {}, col_idx = {}, col_size = {}\n", 
+            unit_id, column_idx, unit.tbl.columnSizes[column_idx]);
     return unit.tbl.columnSizes[column_idx];
 }
 
@@ -532,7 +549,7 @@ void StateManager::remapEntity(Entity e, int32_t row_idx)
 
 void StateManager::remapRangeMapUnit(RangeMap rm, int32_t row_idx)
 {
-    range_map_unit_store_.slots[rm.id].loc.row = row_idx;
+    range_map_unit_store_.units[rm.id].loc.row = row_idx;
 }
 
 template <typename SingletonT>
@@ -544,7 +561,7 @@ SingletonT * StateManager::getSingletonColumn()
     // Abuse the fact that the singleton only has one component that is going
     // to be in column 2
     
-    Table &tbl = archetypes_[archetype_id]->tbl;
+    ArchetypeTable &tbl = archetypes_[archetype_id]->tbl;
     return (SingletonT *)tbl.columns[2];
 }
 

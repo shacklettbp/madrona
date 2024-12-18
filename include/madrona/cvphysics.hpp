@@ -231,11 +231,7 @@ struct DofObjectHierarchyDesc {
     // value it's been waiting on.
     AtomicU32 sync;
     
-#ifdef MADRONA_GPU_MODE
-    static_assert(false, "Need to implement GPU DOF object hierarchy");
-#else
     Entity parent;
-#endif
 
     // Relative position of the joint to the parent's COM.
     math::Vector3 relPositionParent;

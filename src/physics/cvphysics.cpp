@@ -111,6 +111,7 @@ void GaussMinimizationNode::solve(int32_t invocation_idx)
     // the locs of the DOF objects instead but that we can do in the future.
     assert(blockDim.x == consts::numMegakernelThreads);
 
+#if 0
     while (world_idx < total_num_worlds) {
         { // Compute data for mass matrix
             ObjectManager &state_mgr =
@@ -168,6 +169,7 @@ void GaussMinimizationNode::solve(int32_t invocation_idx)
 
         world_idx += total_resident_warps;
     }
+#endif
 }
 
 TaskGraph::NodeID GaussMinimizationNode::addToGraph(
@@ -1532,17 +1534,19 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
             >>({gauss_node});
 #endif
 
+#if 0
         auto post_forward_kinematics = builder.addToGraph<ParallelForNode<Context,
              tasks::forwardKinematics,
                 BodyGroupHierarchy
-            >>({int_node});
+            >>({});
 
         cur_node =
             builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
                 Position,
                 Rotation,
                 CVPhysicalComponent
-            >>({post_forward_kinematics});
+            >>({});
+#endif
 
         cur_node = builder.addToGraph<
             ClearTmpNode<Contact>>({cur_node});

@@ -17,23 +17,42 @@ struct RangeMap {
         Freed = 1
     };
 
+    static constexpr inline RangeMap none()
+    {
+        return RangeMap {
+#ifdef MADRONA_GPU_MODE
+            0,
+            0xFFFF'FFFF_u32,
+            0xFFFF'FFFF_i32,
+#else
+            0,
+            nullptr,
+#endif
+        };
+    }
+
 #ifdef MADRONA_GPU_MODE
     CountT numUnits;
     uint32_t gen;
     int32_t id;
 #else
-private:
-
-    inline RangeMap(CountT num_units, void *ptr)
-        : num_units_(num_units), ptr_(ptr)
-    {
-    }
-
-    void *ptr_;
-    CountT num_units_;
-
-    friend class Context;
+    CountT numUnits;
+    void *ptr;
 #endif
 };
+
+inline bool operator==(RangeMap a, RangeMap b)
+{
+#ifdef MADRONA_GPU_MODE
+    return a.numUnits == b.numUnits && a.gen == b.gen && a.id == b.id;
+#else
+    return a.ptr == b.ptr && a.numUnits == b.numUnits;
+#endif
+}
+
+inline bool operator!=(RangeMap a, RangeMap b)
+{
+    return !(a == b);
+}
     
 }

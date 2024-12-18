@@ -217,6 +217,36 @@ TaskGraph::NodeID RecycleEntitiesNode::addToGraph(
     return builder.addDynamicCountNode<RecycleEntitiesNode>(dependencies, 1);
 }
 
+RecycleRangeNode::RecycleRangeNode()
+    : NodeBase(),
+      recycleBase(0)
+{}
+
+void RecycleRangeNode::run(int32_t invocation_idx)
+{
+    mwGPU::getStateManager()->recycleRangeMaps(
+        invocation_idx, recycleBase);
+}
+
+uint32_t RecycleRangeNode::numInvocations()
+{
+    auto [recycle_base, num_deleted] =
+        mwGPU::getStateManager()->fetchRecyclableRangeMaps();
+
+    if (num_deleted > 0) {
+        recycleBase = recycle_base;
+    }
+
+    return num_deleted;
+}
+
+TaskGraph::NodeID RecycleRangeNode::addToGraph(
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> dependencies)
+{
+    return builder.addDynamicCountNode<RecycleRangeNode>(dependencies, 1);
+}
+
 void ResetTmpAllocNode::run(int32_t)
 {
     mwGPU::TmpAllocator::get().reset();
