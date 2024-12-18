@@ -880,6 +880,8 @@ static __device__ FragmentResult computeFragment(
 
         Vector3 acc_color = Vector3{ 0.f, 0.f, 0.f };
 
+        float light_contrib = 0.f;
+
         for (int i = 0; i < world_info.numLights; ++i) {
             LightDesc desc = world_info.lights[i];
 
@@ -898,14 +900,6 @@ static __device__ FragmentResult computeFragment(
                 d /= (light_dir.length() * desc.direction.length());
                 float angle = acosf(d);
 
-#if 0
-                LOG("light_dir=({}, {}, {})|dir=({} {} {})|angle={}\n",
-                    light_dir.x, light_dir.y, light_dir.z,
-                    desc.direction.x, desc.direction.y, desc.direction.z,
-                    angle,
-                    desc.cutoff);
-#endif
-
                 // This pixel isn't affected by this light.
                 if (std::abs(angle) > std::abs(desc.cutoff)) {
                     continue;
@@ -914,32 +908,35 @@ static __device__ FragmentResult computeFragment(
 
             // Make sure the surface is actually pointing to the light
             // when casting shadow.
-            if (desc.castShadow && light_dir.dot(first_hit.normal) >= 0.f) {
-                // TODO: Definitely do some sort of ray fetching because there will
-                // be threads doing nothing potentially.
-                TraceResult shadow_hit = traceRay(
-                        TraceInfo {
+            if (desc.castShadow) {
+                if (light_dir.dot(first_hit.normal) > 0.f) {
+                    // TODO: Definitely do some sort of ray fetching because there will
+                    // be threads doing nothing potentially.
+                    TraceResult shadow_hit = traceRay(
+                            TraceInfo {
                             .rayOrigin = hit_pos,
                             .rayDirection = light_dir,
                             .tMin = 0.000001f,
                             .tMax = 10000.f,
                             .dOnly = true
-                        }, world_info);
+                            }, world_info);
 
-                if (shadow_hit.hit) {
-                    return FragmentResult {
-                        .hit = true,
-                        .color = lightingShadow(first_hit.color, first_hit.normal),
-                        .normal = first_hit.normal,
-                        .depth = first_hit.depth
-                    };
+                    if (!shadow_hit.hit) {
+                        light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
+                    }
                 }
+            } else {
+                light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
             }
 
+#if 0
             acc_color += lighting(first_hit.color, 
                                   first_hit.normal,
                                   desc.direction) * desc.intensity;
+#endif
         }
+
+        acc_color = fmaxf(0.2, light_contrib) * first_hit.color;
 
         // If we are still here, just do normal lighting calculation.
         return FragmentResult {
