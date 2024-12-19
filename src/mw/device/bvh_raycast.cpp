@@ -887,13 +887,13 @@ static __device__ FragmentResult computeFragment(
 
             float cutoff = -1.f;
 
-            Vector3 light_dir = desc.direction;
+            Vector3 light_dir = -desc.direction;
             if (desc.type == LightDesc::Type::Spotlight) {
                 light_dir = (desc.position - hit_pos).normalize();
                 cutoff = desc.cutoff;
             }
 
-            if (cutoff != -1.f) {
+            if (cutoff != -1.f && desc.type == LightDesc::Type::Spotlight) {
                 // Dot the vector going from point to light with the direction
                 // of the light.
                 float d = (-light_dir).dot(desc.direction);
