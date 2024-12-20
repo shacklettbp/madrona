@@ -10,9 +10,9 @@ Please see the [Madrona engine project page](https://madrona-engine.github.io) f
 * GPU-driven batch ECS implementation for high-throughput execution.
 * CPU backend for debugging and visualization. Simulators can execute on GPU or CPU with no code changes.
 * Export ECS simulation state as PyTorch tensors for efficient interoperability with learning code.
-* [High-throughput 3D batch renderer](https://madrona-engine.github.io/renderer.html) which renders small images from the point of view of agents for purposes like pixels-to-actions training.
+* [High-throughput batch renderer](https://madrona-engine.github.io/renderer.html) which renders small images from the point of view of agents for purposes like pixels-to-actions training.
 * [XPBD rigid body physics](https://matthias-research.github.io/pages/publications/PBDBodies.pdf) for basic 3D collision and contact support.
-* (Optional) Simple 3D renderer for visualizing agent behaviors and debugging.
+* (Optional) A simple interactive 3D renderer for visualizing agent behaviors and debugging.
 
 **Disclaimer**: The Madrona engine is a research code base. We hope to attract interested users / collaborators with this release, however there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
 
@@ -23,7 +23,7 @@ For more background and technical details on Madrona's design, please read:
 * [An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation](https://madrona-engine.github.io/shacklett_siggraph23.pdf).
 Shacklett et al. SIGGRAPH 2023
 
-For more details on Madrona's batch renderer, refer to:
+For more details on Madrona's batch renderer (also called ``tiled rendering'' by the AI community), refer to:
 
 * [High-Throughput Batch Rendering for Embodied AI](https://madrona-engine.github.io/madrona-renderer.pdf).
 Rosenzweig et al. SIGGRAPH Asia 2024
