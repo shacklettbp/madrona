@@ -278,6 +278,17 @@ static void setCudaHeapSize()
                                 heap_size));
 }
 
+struct FreeQueue {
+    struct Reserve {
+        void *addr;
+        uint64_t numBytes;
+        uint64_t numReserveBytes;
+    };
+
+    std::vector<void *> toFree;
+    std::vector<Reserve> reserveToFree;
+};
+
 using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
 using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
 using HostPrint = mwGPU::madrona::mwGPU::HostPrint;
@@ -401,6 +412,8 @@ struct GPUEngineState {
 #endif
 
     HeapArray<void *> exportedColumns;
+
+    FreeQueue *freeQueue;
 };
 
 struct MWCudaLaunchGraph::Impl {
@@ -1537,7 +1550,8 @@ static void mapGPUMemory(CUdevice dev, CUdeviceptr base, uint64_t num_bytes)
 
 }
 
-static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
+static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
+                                 FreeQueue *free_queue)
 {
     using namespace std::chrono_literals;
     using cuda::std::memory_order_acquire;
@@ -1565,21 +1579,23 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
             uint64_t num_reserve_bytes = channel->reserve.maxBytes;
             uint64_t num_alloc_bytes = channel->reserve.initNumBytes;
 
-            if (verbose_host_alloc) {
-                printf("Reserve request received %lu %lu\n",
-                       num_reserve_bytes, num_alloc_bytes);
-            }
-
             CUdeviceptr dev_ptr;
             REQ_CU(cuMemAddressReserve(&dev_ptr, num_reserve_bytes,
                                        0, 0, 0));
 
-            if (num_alloc_bytes > 0) {
-                mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
+            if (verbose_host_alloc) {
+                printf("Reserve request received %lu %lu, got %p\n",
+                       num_reserve_bytes, num_alloc_bytes, (void *)dev_ptr);
             }
 
-            if (verbose_host_alloc) {
-                printf("Reserved %p\n", (void *)dev_ptr);
+            if (num_alloc_bytes > 0) {
+                mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
+
+#if 0
+                // test this shit
+                REQ_CU(cuMemUnmap(dev_ptr, num_reserve_bytes));
+                REQ_CU(cuMemAddressFree(dev_ptr, num_reserve_bytes));
+#endif
             }
 
             channel->reserve.result = (void *)dev_ptr;
@@ -1607,26 +1623,32 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
                     (uint64_t)channel->alloc.numBytes, (void *)dev_ptr);
             }
         } else if (channel->op == HostChannel::Op::ReserveFree) {
-#if 0
             void *ptr = channel->reserveFree.addr;
             uint64_t num_bytes = channel->reserveFree.numBytes;
             uint64_t num_reserve_bytes = channel->reserveFree.numBytes;
 
+#if 0
             REQ_CU(cuMemUnmap((CUdeviceptr)ptr, num_bytes));
             REQ_CU(cuMemAddressFree((CUdeviceptr)ptr, num_reserve_bytes));
+#endif
 
             if (verbose_host_alloc) {
-                printf("Unmapped %lu bytes from %p, and freed %lu reservation\n",
+                printf("Unmapped %llu bytes from %p, and freed %llu reservation\n",
                     num_bytes, ptr, num_reserve_bytes);
             }
-#endif
+
+            free_queue->reserveToFree.push_back(FreeQueue::Reserve {
+                .addr = channel->reserveFree.addr,
+                .numBytes = channel->reserveFree.numBytes,
+                .numReserveBytes = channel->reserveFree.numReserveBytes,
+            });
         } else if (channel->op == HostChannel::Op::AllocFree) {
 #if 1
             void *ptr = channel->allocFree.addr;
 
             printf("calling cuMemFree on %p\n", ptr);
 
-            cuMemFree((CUdeviceptr)ptr);
+            // cuMemFree((CUdeviceptr)ptr);
 
             printf("finished calling cuMemFree\n");
 
@@ -1634,6 +1656,8 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
                 printf("Allocation free request received for %p\n",
                     ptr);
             }
+
+            free_queue->toFree.push_back(ptr);
 #endif
         } else if (channel->op == HostChannel::Op::Terminate) {
             break;
@@ -1731,8 +1755,10 @@ static GPUEngineState initEngineAndUserState(
         allocator_channel,
     };
 
+    FreeQueue *fq = new FreeQueue {};
+
     std::thread allocator_thread(
-        gpuVMAllocatorThread, allocator_channel, cu_ctx);
+        gpuVMAllocatorThread, allocator_channel, cu_ctx, fq);
 
     auto host_print = std::make_unique<HostPrintCPU>(cu_gpu);
 
@@ -1925,6 +1951,7 @@ static GPUEngineState initEngineAndUserState(
         std::move(device_tracing),
 #endif
         std::move(exported_cols),
+        fq
     };
 }
 
@@ -2360,6 +2387,25 @@ MWCudaExecutor::~MWCudaExecutor()
     REQ_CU(cuLaunchKernel(impl_->destroyKernel, 1, 1, 1, 1, 1, 1,
             0, impl_->cuStream, nullptr, nullptr));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
+
+    // Ok now, we go through the free queue
+    auto *fq = impl_->engineState.freeQueue;
+    for (int i = 0; i < (int)fq->toFree.size(); ++i) {
+        printf("trying to free alloc %p\n", fq->toFree[i]);
+        REQ_CU(cuMemFree((CUdeviceptr)fq->toFree[i]));
+        printf("success!\n");
+    }
+
+    for (int i = 0; i < (int)fq->reserveToFree.size(); ++i) {
+        void *ptr = fq->reserveToFree[i].addr;
+        uint64_t num_bytes = fq->reserveToFree[i].numBytes;
+        uint64_t num_reserve_bytes = fq->reserveToFree[i].numReserveBytes;
+
+        printf("trying to unmap %p, %llu\n", (void *)ptr, num_reserve_bytes);
+        REQ_CU(cuMemUnmap((CUdeviceptr)ptr, num_reserve_bytes));
+        REQ_CU(cuMemAddressFree((CUdeviceptr)ptr, num_reserve_bytes));
+        printf("success!\n");
+    }
 
 #ifdef MADRONA_TRACING
     // Seems good to copy the logs before the module is unloaded

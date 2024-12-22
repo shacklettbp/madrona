@@ -23,6 +23,8 @@ enum class ComponentFlags : uint32_t {
     None = 0,
     ExportMemory = 1_u32 << 0,
     ImportMemory = 1_u32 << 1,
+    CudaReserveMemory = 1_u32 << 2,
+    CudaAllocMemory = 1_u32 << 3,
 };
 
 template <typename... ComponentTs>

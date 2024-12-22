@@ -224,9 +224,11 @@ StateManager::ArchetypeStore::ArchetypeStore(
             if (max_num_entities == 0) {
                 tbl.columns[i] =
                     alloc->reserveMemory(reserve_bytes, init_bytes);
+                tbl.columnFlags[i] |= ComponentFlags::CudaReserveMemory;
             } else {
                 uint64_t alloc_bytes = col_row_bytes * max_num_entities;
                 tbl.columns[i] = alloc->allocMemory(alloc_bytes);
+                tbl.columnFlags[i] |= ComponentFlags::CudaAllocMemory;
             }
         }
 
@@ -652,20 +654,27 @@ void StateManager::freeTables()
                 if ((arch_store.tbl.columnFlags[col] & 
                             ComponentFlags::ImportMemory) !=
                     ComponentFlags::ImportMemory) {
+                    if ((arch_store.tbl.columnFlags[col] & 
+                                ComponentFlags::CudaReserveMemory) ==
+                        ComponentFlags::CudaReserveMemory) {
+                        uint64_t num_reserved_rows = Table::maxReservedBytesPerTable /
+                            bytes_per_row;
+                        num_reserved_rows = min(num_reserved_rows, 0x7FFF'FFFF_u64);
 
-                    uint64_t num_reserved_rows = Table::maxReservedBytesPerTable /
-                        bytes_per_row;
-                    num_reserved_rows = min(num_reserved_rows, 0x7FFF'FFFF_u64);
+                        uint64_t col_row_bytes = arch_store.tbl.columnSizes[col];
 
-                    uint64_t col_row_bytes = arch_store.tbl.columnSizes[col];
+                        uint64_t reserve_bytes = col_row_bytes * num_reserved_rows;
+                        reserve_bytes = host_alloc->roundUpReservation(reserve_bytes);
 
-                    uint64_t reserve_bytes = col_row_bytes * num_reserved_rows;
-                    reserve_bytes = host_alloc->roundUpReservation(reserve_bytes);
-
-                    host_alloc->reserveFree(
-                            arch_store.tbl.columns[col],
-                            arch_store.tbl.columnMappedBytes[col],
-                            reserve_bytes);
+                        host_alloc->reserveFree(
+                                arch_store.tbl.columns[col],
+                                arch_store.tbl.columnMappedBytes[col],
+                                reserve_bytes);
+                    } else if ((arch_store.tbl.columnFlags[col] & 
+                                ComponentFlags::CudaAllocMemory) ==
+                        ComponentFlags::CudaAllocMemory) {
+                        host_alloc->allocFree(arch_store.tbl.columns[col]);
+                    }
                 }
             }
         }
