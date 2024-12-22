@@ -632,15 +632,12 @@ void StateManager::freeTables()
     mwGPU::HostAllocator *host_alloc = mwGPU::getHostAllocator();
 
     for (int i = 0; i < archetypes_.size(); ++i) {
-        mwGPU::HostPrint::log("freeing archetype {}\n", i);
         if (archetypes_[i].has_value()) {
             auto &arch_store = *(archetypes_[i]);
 
             if ((arch_store.flags & ArchetypeFlags::ImportOffsets) !=
                 ArchetypeFlags::ImportOffsets) {
-                mwGPU::HostPrint::log("freeing world offsets\n");
                 host_alloc->allocFree(arch_store.worldOffsets);
-                mwGPU::HostPrint::log("freeing world counts\n");
                 host_alloc->allocFree(arch_store.worldCounts);
             }
 
@@ -699,9 +696,9 @@ void StateManager::freeTables()
         host_alloc->reserveFree(
                 entity_store_.entities, num_slot_bytes, reserve_entity_bytes);
         host_alloc->reserveFree(
-                entity_store_.availableEntities, num_idx_bytes, reserve_idx_bytes);
+                entity_store_.availableEntities, num_idx_bytes, reserve_entity_bytes);
         host_alloc->reserveFree(
-                entity_store_.deletedEntities, num_idx_bytes, reserve_idx_bytes);
+                entity_store_.deletedEntities, num_idx_bytes, reserve_entity_bytes);
     }
 }
 

@@ -1573,8 +1573,6 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
         }
         channel->ready.store(0, memory_order_relaxed);
 
-        printf("got op %u\n", (uint32_t)channel->op);
-
         if (channel->op == HostChannel::Op::Reserve) {
             uint64_t num_reserve_bytes = channel->reserve.maxBytes;
             uint64_t num_alloc_bytes = channel->reserve.initNumBytes;
@@ -1590,12 +1588,6 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
 
             if (num_alloc_bytes > 0) {
                 mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
-
-#if 0
-                // test this shit
-                REQ_CU(cuMemUnmap(dev_ptr, num_reserve_bytes));
-                REQ_CU(cuMemAddressFree(dev_ptr, num_reserve_bytes));
-#endif
             }
 
             channel->reserve.result = (void *)dev_ptr;
@@ -1625,12 +1617,7 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
         } else if (channel->op == HostChannel::Op::ReserveFree) {
             void *ptr = channel->reserveFree.addr;
             uint64_t num_bytes = channel->reserveFree.numBytes;
-            uint64_t num_reserve_bytes = channel->reserveFree.numBytes;
-
-#if 0
-            REQ_CU(cuMemUnmap((CUdeviceptr)ptr, num_bytes));
-            REQ_CU(cuMemAddressFree((CUdeviceptr)ptr, num_reserve_bytes));
-#endif
+            uint64_t num_reserve_bytes = channel->reserveFree.numReserveBytes;
 
             if (verbose_host_alloc) {
                 printf("Unmapped %llu bytes from %p, and freed %llu reservation\n",
@@ -1643,14 +1630,7 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
                 .numReserveBytes = channel->reserveFree.numReserveBytes,
             });
         } else if (channel->op == HostChannel::Op::AllocFree) {
-#if 1
             void *ptr = channel->allocFree.addr;
-
-            printf("calling cuMemFree on %p\n", ptr);
-
-            // cuMemFree((CUdeviceptr)ptr);
-
-            printf("finished calling cuMemFree\n");
 
             if (verbose_host_alloc) {
                 printf("Allocation free request received for %p\n",
@@ -1658,7 +1638,6 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
             }
 
             free_queue->toFree.push_back(ptr);
-#endif
         } else if (channel->op == HostChannel::Op::Terminate) {
             break;
         }
@@ -2373,17 +2352,8 @@ MWCudaExecutor & MWCudaExecutor::operator=(MWCudaExecutor &&) = default;
 
 MWCudaExecutor::~MWCudaExecutor()
 {
-    CUdeviceptr dev_ptr_test;
-    REQ_CU(cuMemAlloc(&dev_ptr_test, 42));
-    printf("managed to alloc\n");
-    REQ_CU(cuMemFree(dev_ptr_test));
-    printf("managed to free\n");
-
     if (!impl_) return;
 
-    printf("in destructor!!!\n");
-
-    printf("before destroy kernel\n");
     REQ_CU(cuLaunchKernel(impl_->destroyKernel, 1, 1, 1, 1, 1, 1,
             0, impl_->cuStream, nullptr, nullptr));
     REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
@@ -2391,9 +2361,7 @@ MWCudaExecutor::~MWCudaExecutor()
     // Ok now, we go through the free queue
     auto *fq = impl_->engineState.freeQueue;
     for (int i = 0; i < (int)fq->toFree.size(); ++i) {
-        printf("trying to free alloc %p\n", fq->toFree[i]);
         REQ_CU(cuMemFree((CUdeviceptr)fq->toFree[i]));
-        printf("success!\n");
     }
 
     for (int i = 0; i < (int)fq->reserveToFree.size(); ++i) {
@@ -2401,10 +2369,8 @@ MWCudaExecutor::~MWCudaExecutor()
         uint64_t num_bytes = fq->reserveToFree[i].numBytes;
         uint64_t num_reserve_bytes = fq->reserveToFree[i].numReserveBytes;
 
-        printf("trying to unmap %p, %llu\n", (void *)ptr, num_reserve_bytes);
         REQ_CU(cuMemUnmap((CUdeviceptr)ptr, num_reserve_bytes));
         REQ_CU(cuMemAddressFree((CUdeviceptr)ptr, num_reserve_bytes));
-        printf("success!\n");
     }
 
 #ifdef MADRONA_TRACING
@@ -2417,8 +2383,6 @@ MWCudaExecutor::~MWCudaExecutor()
     impl_->engineState.hostAllocatorChannel->ready.store(
         1, cuda::std::memory_order_release);
     impl_->engineState.allocatorThread.join();
-
-    printf("after allocator thread joined\n");
 
     REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));

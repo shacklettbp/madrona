@@ -30,11 +30,7 @@ static void submitRequest(HostChannel *channel)
 
     channel->ready.store(1, memory_order_release);
 
-    mwGPU::HostPrint::log("waiting for host now\n");
-
     while (channel->finished.load(memory_order_acquire) != 1) {}
-
-    mwGPU::HostPrint::log("host finished\n");
 
     channel->finished.store(0, memory_order_relaxed);
 }
@@ -103,9 +99,7 @@ void HostAllocator::reserveFree(void *addr, uint64_t num_bytes,
 
 void HostAllocator::allocFree(void *addr)
 {
-    mwGPU::HostPrint::log("before device_lock\n");
     device_lock_.lock();
-    mwGPU::HostPrint::log("after device lock\n");
 
     channel_->op = HostChannel::Op::AllocFree;
     channel_->allocFree.addr = addr;
