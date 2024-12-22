@@ -175,6 +175,13 @@ extern "C" __global__ void initBVHParams(madrona::BVHParams *params,
     params->smSharedMemory = sm_shared_memory;
 }
 
+extern "C" __global__ void freeECSTables()
+{
+    using namespace madrona;
+    StateManager *mgr = mwGPU::getStateManager();
+    mgr->freeTables();
+}
+
 // This macro forces MWGPUEntry to be instantiated, which in turn instantiates
 // the entryKernels::* __global__ entry points. static_assert with a trivially
 // true check leaves no side effects in the scope where this macro is called.

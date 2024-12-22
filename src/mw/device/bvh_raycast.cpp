@@ -928,12 +928,6 @@ static __device__ FragmentResult computeFragment(
             } else {
                 light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
             }
-
-#if 0
-            acc_color += lighting(first_hit.color, 
-                                  first_hit.normal,
-                                  desc.direction) * desc.intensity;
-#endif
         }
 
         acc_color = fmaxf(0.2, light_contrib) * first_hit.color;
@@ -1012,7 +1006,7 @@ extern "C" __global__ void bvhRaycastEntry()
 
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
+            (pixel_y + pixel_x * bvhParams.renderOutputResolution);
 
         uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;

@@ -50,6 +50,7 @@ struct EntityStore {
     uint32_t numGrowEntities;
     uint32_t numSlotGrowBytes;
     uint32_t numIdxGrowBytes;
+    uint32_t numGrows;
 
     SpinLock growLock {};
 };
@@ -178,6 +179,8 @@ public:
     template <typename SingletonT>
     SingletonT * exportSingleton();
 
+    void freeTables();
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};
@@ -241,6 +244,7 @@ private:
         int32_t *worldOffsets;
         int32_t *worldCounts;
 
+        ArchetypeFlags flags;
         bool needsSort;
     };
 

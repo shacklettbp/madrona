@@ -372,6 +372,7 @@ struct GPUKernels {
     CUfunction queueUserInit;
     CUfunction queueUserRun;
     CUfunction initBVHParams;
+    CUfunction destroyECS;
 };
 
 struct MegakernelCache {
@@ -425,6 +426,7 @@ struct MWCudaExecutor::Impl {
     TaskGraphsState taskGraphsState;
     bool enableRaycasting;
     BVHKernels bvhKernels;
+    CUfunction destroyKernel;
 
     uint32_t numWorlds;
     uint32_t renderOutputResolution;
@@ -1432,6 +1434,8 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.initBVHParams, gpu_kernels.mod,
                                "initBVHParams"));
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.destroyECS, gpu_kernels.mod,
+                               "freeECSTables"));
 
     return gpu_kernels;
 }
@@ -1555,6 +1559,8 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
         }
         channel->ready.store(0, memory_order_relaxed);
 
+        printf("got op %u\n", (uint32_t)channel->op);
+
         if (channel->op == HostChannel::Op::Reserve) {
             uint64_t num_reserve_bytes = channel->reserve.maxBytes;
             uint64_t num_alloc_bytes = channel->reserve.initNumBytes;
@@ -1597,9 +1603,38 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
             channel->alloc.result = (void *)dev_ptr;
 
             if (verbose_host_alloc) {
-                printf("Alloc request received %lu\n",
-                    (uint64_t)channel->alloc.numBytes);
+                printf("Alloc request received %lu, got %p\n",
+                    (uint64_t)channel->alloc.numBytes, (void *)dev_ptr);
             }
+        } else if (channel->op == HostChannel::Op::ReserveFree) {
+#if 0
+            void *ptr = channel->reserveFree.addr;
+            uint64_t num_bytes = channel->reserveFree.numBytes;
+            uint64_t num_reserve_bytes = channel->reserveFree.numBytes;
+
+            REQ_CU(cuMemUnmap((CUdeviceptr)ptr, num_bytes));
+            REQ_CU(cuMemAddressFree((CUdeviceptr)ptr, num_reserve_bytes));
+
+            if (verbose_host_alloc) {
+                printf("Unmapped %lu bytes from %p, and freed %lu reservation\n",
+                    num_bytes, ptr, num_reserve_bytes);
+            }
+#endif
+        } else if (channel->op == HostChannel::Op::AllocFree) {
+#if 1
+            void *ptr = channel->allocFree.addr;
+
+            printf("calling cuMemFree on %p\n", ptr);
+
+            cuMemFree((CUdeviceptr)ptr);
+
+            printf("finished calling cuMemFree\n");
+
+            if (verbose_host_alloc) {
+                printf("Allocation free request received for %p\n",
+                    ptr);
+            }
+#endif
         } else if (channel->op == HostChannel::Op::Terminate) {
             break;
         }
@@ -2294,6 +2329,7 @@ MWCudaExecutor::MWCudaExecutor(
         std::move(taskgraphs_state),
         render_cfg.has_value(),
         bvh_kernels,
+        gpu_kernels.destroyECS,
         state_cfg.numWorlds,
         render_cfg.has_value() ? render_cfg->renderResolution : 0,
         (uint32_t)shared_mem_per_sm,
@@ -2310,7 +2346,20 @@ MWCudaExecutor & MWCudaExecutor::operator=(MWCudaExecutor &&) = default;
 
 MWCudaExecutor::~MWCudaExecutor()
 {
+    CUdeviceptr dev_ptr_test;
+    REQ_CU(cuMemAlloc(&dev_ptr_test, 42));
+    printf("managed to alloc\n");
+    REQ_CU(cuMemFree(dev_ptr_test));
+    printf("managed to free\n");
+
     if (!impl_) return;
+
+    printf("in destructor!!!\n");
+
+    printf("before destroy kernel\n");
+    REQ_CU(cuLaunchKernel(impl_->destroyKernel, 1, 1, 1, 1, 1, 1,
+            0, impl_->cuStream, nullptr, nullptr));
+    REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
 
 #ifdef MADRONA_TRACING
     // Seems good to copy the logs before the module is unloaded
@@ -2322,6 +2371,8 @@ MWCudaExecutor::~MWCudaExecutor()
     impl_->engineState.hostAllocatorChannel->ready.store(
         1, cuda::std::memory_order_release);
     impl_->engineState.allocatorThread.join();
+
+    printf("after allocator thread joined\n");
 
     REQ_CU(cuModuleUnload(impl_->cuModule));
     REQ_CUDA(cudaStreamDestroy(impl_->cuStream));
