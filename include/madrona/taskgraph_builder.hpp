@@ -119,6 +119,12 @@ private:
 //
 // The following node type iterates over each entity with Position & Rotation:
 //     ParallelForNode<MyContext, mySystem, Position, Rotation>
+//
+// Make sure not to mark your function (in this case mySystem) as static.
+// This currently causes problems in the GPU backend.
+//
+// TODO: Make sure to either fix this, or throw an error in the case of this
+// happening.
 template <typename ContextT, auto Fn, typename ...ComponentTs>
 class ParallelForNode : public NodeBase {
 public:
