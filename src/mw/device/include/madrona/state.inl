@@ -93,17 +93,17 @@ ArchetypeID StateManager::registerArchetype(
     };
 }
 
-template <typename RangeMapUnitT>
-RangeMapUnitID StateManager::registerRangeMapUnit()
+template <typename ElementT>
+MemoryRangeElementID StateManager::registerMemoryRangeElement()
 {
-    uint32_t id = TypeTracker::registerType<RangeMapUnitT>(
-        &StateManager::num_range_map_units_);
+    uint32_t id = TypeTracker::registerType<ElementT>(
+        &StateManager::num_memory_range_elements_);
 
-    uint32_t component_size = sizeof(RangeMapUnitT);
+    uint32_t component_size = sizeof(ElementT);
 
-    registerRangeMapUnit(id, alignof(RangeMapUnitT), component_size);
+    registerMemoryRangeElement(id, alignof(ElementT), component_size);
 
-    return RangeMapUnitID {
+    return MemoryRangeElementID {
         id,
     };
 }
@@ -433,44 +433,22 @@ int32_t StateManager::getArchetypeColumnIndex(uint32_t archetype_id,
     }
 }
 
-template <typename RangeMapUnitT>
-RangeMapUnitT * StateManager::getRangeMapUnit(RangeMap range_map)
+template <typename ElementT>
+ElementT * StateManager::memoryRangePointer(MemoryRange memory_range)
 {
-    const RangeMapUnitStore::Slot &slot =
-        range_map_unit_store_.units[range_map.id];
-    assert(slot.gen == range_map.gen);
+    const MemoryRangeElementStore::Slot &slot =
+        mr_element_store_.slots[memory_range.id];
+    assert(slot.gen == memory_range.gen);
 
-    auto &unit = *range_map_units_[slot.loc.archetype];
+    auto &element = *memory_range_elements_[slot.loc.archetype];
 
-#if 0
-    mwGPU::HostPrint::log("column at {}, row at {}\n",
-            unit.tbl.columns[2], slot.loc.row);
-#endif
-
-    return (RangeMapUnitT *)unit.tbl.columns[2] + slot.loc.row;
+    return (ElementT *)element.tbl.columns[2] + slot.loc.row;
 }
 
-#if 0
-inline void * getRangeMaps(uint32_t unit_id)
+void * StateManager::getMemoryRangeColumn(
+        uint32_t element_id, uint32_t col_idx)
 {
-    return *range_map_units_[unit_id].tbl.columns[0];
-}
-
-inline void * getRangeStatus(uint32_t unit_id)
-{
-    return *range_map_units_[unit_id].tbl.columns[1];
-}
-
-inline void * getRangeUnits(uint32_t unit_id)
-{
-    return *range_map_units_[unit_id].tbl.columns[2];
-}
-#endif
-
-void * StateManager::getRangeMapColumn(
-        uint32_t unit_id, uint32_t col_idx)
-{
-    return range_map_units_[unit_id]->tbl.columns[col_idx];
+    return memory_range_elements_[element_id]->tbl.columns[col_idx];
 }
 
 template <typename ArchetypeT>
@@ -481,17 +459,17 @@ inline uint32_t StateManager::getArchetypeNumRows()
     return archetype.tbl.numRows.load_relaxed();
 }
 
-template <typename RangeMapUnitT>
-inline uint32_t StateManager::getRangeNumRows()
+template <typename ElementT>
+inline uint32_t StateManager::getMemoryRangeNumRows()
 {
-    uint32_t unit_id = TypeTracker::typeID<RangeMapUnitT>();
-    auto &range = *range_map_units_[unit_id];
+    uint32_t element_id = TypeTracker::typeID<ElementT>();
+    auto &range = *memory_range_elements_[element_id];
     return range.tbl.numRows.load_relaxed();
 }
 
-inline uint32_t StateManager::getRangeNumRows(uint32_t unit_id)
+inline uint32_t StateManager::getMemoryRangeNumRows(uint32_t element_id)
 {
-    auto &range = *range_map_units_[unit_id];
+    auto &range = *memory_range_elements_[element_id];
     return range.tbl.numRows.load_relaxed();
 }
 
@@ -517,16 +495,10 @@ uint32_t StateManager::getArchetypeColumnBytesPerRow(uint32_t archetype_id,
     return archetype.tbl.columnSizes[column_idx];
 }
 
-uint32_t StateManager::getRangeMapColumnBytesPerRow(uint32_t unit_id,
-                                                    uint32_t column_idx)
+uint32_t StateManager::getMemoryRangeColumnBytesPerRow(uint32_t element_id,
+                                                       uint32_t column_idx)
 {
-    auto &unit = *range_map_units_[unit_id];
-
-#if 0
-    mwGPU::HostPrint::log("unit = {}, col_idx = {}, col_size = {}\n", 
-            unit_id, column_idx, unit.tbl.columnSizes[column_idx]);
-#endif
-
+    auto &unit = *memory_range_elements_[element_id];
     return unit.tbl.columnSizes[column_idx];
 }
 
@@ -542,9 +514,9 @@ uint32_t StateManager::getArchetypeMaxColumnSize(uint32_t archetype_id)
     return archetype.tbl.maxColumnSize;
 }
 
-inline uint32_t StateManager::getRangeMaxColumnSize(uint32_t unit_id)
+inline uint32_t StateManager::getMemoryRangeMaxColumnSize(uint32_t element_id)
 {
-    auto &range = *range_map_units_[unit_id];
+    auto &range = *memory_range_elements_[element_id];
     return range.tbl.maxColumnSize;
 }
 
@@ -553,9 +525,9 @@ void StateManager::remapEntity(Entity e, int32_t row_idx)
     entity_store_.entities[e.id].loc.row = row_idx;
 }
 
-void StateManager::remapRangeMapUnit(RangeMap rm, int32_t row_idx)
+void StateManager::remapMemoryRangeElement(MemoryRange mr, int32_t row_idx)
 {
-    range_map_unit_store_.units[rm.id].loc.row = row_idx;
+    mr_element_store_.slots[mr.id].loc.row = row_idx;
 }
 
 template <typename SingletonT>
@@ -586,19 +558,19 @@ void StateManager::archetypeSetNeedsSort(uint32_t archetype_id)
     archetypes_[archetype_id]->needsSort = true;
 }
 
-bool StateManager::rangeNeedsSort(uint32_t unit_id) const
+bool StateManager::memoryRangeNeedsSort(uint32_t element_id) const
 {
-    return range_map_units_[unit_id]->needsSort;
+    return memory_range_elements_[element_id]->needsSort;
 }
 
-void StateManager::rangeClearNeedsSort(uint32_t unit_id)
+void StateManager::memoryRangeClearNeedsSort(uint32_t element_id)
 {
-    range_map_units_[unit_id]->needsSort = false;
+    memory_range_elements_[element_id]->needsSort = false;
 }
 
-void StateManager::rangeSetNeedsSort(uint32_t unit_id)
+void StateManager::memoryRangeSetNeedsSort(uint32_t unit_id)
 {
-    range_map_units_[unit_id]->needsSort = true;
+    memory_range_elements_[unit_id]->needsSort = true;
 }
 
 template <typename ArchetypeT, typename ComponentT>

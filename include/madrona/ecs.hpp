@@ -55,7 +55,7 @@ struct ArchetypeID {
     uint32_t id;
 };
 
-struct RangeMapUnitID {
+struct MemoryRangeElementID {
     uint32_t id;
 };
 

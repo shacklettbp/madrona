@@ -9,17 +9,17 @@
 
 namespace madrona {
 
-// On the CPU backend, the RangeMap is very trivial - just a simple
+// On the CPU backend, the MemoryRange is very trivial - just a simple
 // pointer to malloc'd memory.
-struct RangeMap {
+struct MemoryRange {
     enum Status : uint32_t {
         Allocated = 0,
         Freed = 1
     };
 
-    static constexpr inline RangeMap none()
+    static constexpr inline MemoryRange none()
     {
-        return RangeMap {
+        return MemoryRange {
 #ifdef MADRONA_GPU_MODE
             0,
             0xFFFF'FFFF_u32,
@@ -32,25 +32,25 @@ struct RangeMap {
     }
 
 #ifdef MADRONA_GPU_MODE
-    CountT numUnits;
+    CountT numElements;
     uint32_t gen;
     int32_t id;
 #else
-    CountT numUnits;
+    CountT numElements;
     void *ptr;
 #endif
 };
 
-inline bool operator==(RangeMap a, RangeMap b)
+inline bool operator==(MemoryRange a, MemoryRange b)
 {
 #ifdef MADRONA_GPU_MODE
-    return a.numUnits == b.numUnits && a.gen == b.gen && a.id == b.id;
+    return a.numElements == b.numElements && a.gen == b.gen && a.id == b.id;
 #else
-    return a.ptr == b.ptr && a.numUnits == b.numUnits;
+    return a.ptr == b.ptr && a.numElements == b.numElements;
 #endif
 }
 
-inline bool operator!=(RangeMap a, RangeMap b)
+inline bool operator!=(MemoryRange a, MemoryRange b)
 {
     return !(a == b);
 }

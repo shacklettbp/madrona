@@ -1,7 +1,7 @@
 #pragma once
 
-#include <madrona/range.hpp>
 #include <madrona/components.hpp>
+#include <madrona/memory_range.hpp>
 #include <madrona/taskgraph_builder.hpp>
 
 namespace madrona::phys::cv {
@@ -212,7 +212,7 @@ struct DofObjectTmpState {
     Phi phi;
 
     // Contains storage for both complete form of Phi and Phi_dot
-    RangeMap/*<PhiUnit>*/ phiFull;
+    MemoryRange/*<PhiUnit>*/ phiFull;
 
     // The spatial inertia tensor in Plücker coordinates
     // Hold the combined inertia of subtree after combineSpatialInertia
@@ -301,20 +301,20 @@ struct BodyGroupHierarchy {
 
     // "Expanded" parent array for kinematic tree (chain of 1-DOF joints)
     //   used for factorization. See Featherstone pg. 114
-    RangeMap/*<ParentArrayUnit>*/ expandedParent;
+    MemoryRange/*<ParentArrayUnit>*/ expandedParent;
 
     // Center of mass of the body group
     math::Vector3 comPos;
 
     // Mass matrix (num_dof x num_dof) of the body group
-    RangeMap/*<MassMatrixUnit>*/ massMatrix;
+    MemoryRange/*<MassMatrixUnit>*/ massMatrix;
 
     // LTDL factorization of matrix
-    RangeMap/*<MassMatrixUnit>*/ massMatrixLTDL;
+    MemoryRange/*<MassMatrixUnit>*/ massMatrixLTDL;
 
     // Bias forces (num_dof) of the body group, gets replaced by the
     //  unconstrained acceleration after computeFreeAcceleration
-    RangeMap/*<BodyFloatUnit>*/ bias;
+    MemoryRange/*<BodyFloatUnit>*/ bias;
 
     // Temporary index used during stacking
     uint32_t tmpIdx;

@@ -19,7 +19,7 @@
 #include <madrona/optional.hpp>
 #include <madrona/type_tracker.hpp>
 #include <madrona/memory.hpp>
-#include <madrona/range.hpp>
+#include <madrona/memory_range.hpp>
 
 #include "mw_gpu/const.hpp"
 
@@ -55,7 +55,7 @@ struct EntityStore {
     SpinLock growLock {};
 };
 
-struct RangeMapUnitStore {
+struct MemoryRangeElementStore {
     struct Slot {
         Loc loc;
         uint32_t gen;
@@ -64,7 +64,7 @@ struct RangeMapUnitStore {
     AtomicI32 availableOffset = 0;
     AtomicI32 deletedOffset = 0;
 
-    Slot *units;
+    Slot *slots;
     int32_t *availableSlots;
     int32_t *deletedSlots;
 
@@ -89,8 +89,8 @@ public:
         ArchetypeFlags archetype_flags,
         CountT max_num_entities_per_world);
 
-    template <typename RangeMapUnitT>
-    RangeMapUnitID registerRangeMapUnit();
+    template <typename ElementT>
+    MemoryRangeElementID registerMemoryRangeElement();
 
     template <typename SingletonT>
     void registerSingleton();
@@ -117,12 +117,12 @@ public:
 
     Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
 
-    RangeMap allocRangeMap(WorldID world_id,
-                           uint32_t unit_id, uint32_t num_units);
-    void freeRangeMap(RangeMap range_map);
+    MemoryRange allocMemoryRange(WorldID world_id,
+                           uint32_t elem_id, uint32_t num_elems);
+    void freeMemoryRange(MemoryRange memory_range);
 
-    template <typename RangeMapUnitT>
-    RangeMapUnitT * getRangeMapUnit(RangeMap range_map);
+    template <typename ElementT>
+    ElementT * memoryRangePointer(MemoryRange memory_range);
 
     void destroyEntityNow(Entity e);
 
@@ -165,17 +165,17 @@ public:
     inline void * getArchetypeColumn(uint32_t archetype_id,
                                      int32_t column_idx);
 
-    // Returns pointer to RangeMap
-    inline void * getRangeMapsColumn(uint32_t unit_id);
+    // Returns pointer to MemoryRange
+    inline void * getMemoryRangeColumn(uint32_t unit_id);
     // Returns pointer to status values of the units
-    inline void * getRangeStatus(uint32_t unit_id);
+    inline void * getMemoryRangeStatus(uint32_t unit_id);
     // Returns pointer to the actual units
-    inline void * getRangeUnits(uint32_t unit_id);
+    inline void * getMemoryRangeUnits(uint32_t unit_id);
 
     // 0: RangeMap *
     // 1: RangeMap::Status *
     // 2: RangeMapUnitT *
-    inline void * getRangeMapColumn(uint32_t unit_id, uint32_t col_idx);
+    inline void * getMemoryRangeColumn(uint32_t elem_id, uint32_t col_idx);
 
     template <typename ArchetypeT>
     int32_t * getArchetypeWorldOffsets();
@@ -193,23 +193,23 @@ public:
     inline uint32_t getArchetypeColumnBytesPerRow(uint32_t archetype_id,
                                                   int32_t column_idx);
 
-    inline uint32_t getRangeMapColumnBytesPerRow(uint32_t unit_id,
+    inline uint32_t getMemoryRangeColumnBytesPerRow(uint32_t element_id,
                                                  uint32_t column_idx);
 
     template <typename ArchetypeT>
     inline uint32_t getArchetypeNumRows();
 
-    template <typename RangeMapUnitT>
-    inline uint32_t getRangeNumRows();
-    inline uint32_t getRangeNumRows(uint32_t unit_id);
+    template <typename ElementT>
+    inline uint32_t getMemoryRangeNumRows();
+    inline uint32_t getMemoryRangeNumRows(uint32_t element_id);
 
     inline int32_t getArchetypeNumColumns(uint32_t archetype_id);
     inline uint32_t getArchetypeMaxColumnSize(uint32_t archetype_id);
 
-    inline uint32_t getRangeMaxColumnSize(uint32_t unit_id);
+    inline uint32_t getMemoryRangeMaxColumnSize(uint32_t unit_id);
 
     inline void remapEntity(Entity e, int32_t row_idx);
-    inline void remapRangeMapUnit(RangeMap rm, int32_t row_idx);
+    inline void remapMemoryRangeElement(MemoryRange mr, int32_t row_idx);
 
     template <typename SingletonT>
     SingletonT * getSingletonColumn();
@@ -217,31 +217,29 @@ public:
     void resizeArchetype(uint32_t archetype_id, int32_t num_rows);
     int32_t numArchetypeRows(uint32_t archetype_id) const;
 
-    void resizeRange(uint32_t unit_id, int32_t num_rows);
+    void resizeMemoryRange(uint32_t element_id, int32_t num_rows);
 
     std::pair<int32_t, int32_t> fetchRecyclableEntities();
-    std::pair<int32_t, int32_t> fetchRecyclableRangeMaps();
+    std::pair<int32_t, int32_t> fetchRecyclableMemoryRanges();
 
     void recycleEntities(int32_t thread_offset,
                          int32_t recycle_base);
-    void recycleRangeMaps(int32_t thread_offset,
-                          int32_t recycle_base);
+    void recycleMemoryRanges(int32_t thread_offset,
+                             int32_t recycle_base);
 
     inline bool archetypeNeedsSort(uint32_t archetype_id) const;
     inline void archetypeClearNeedsSort(uint32_t archetype_id);
     inline void archetypeSetNeedsSort(uint32_t archetype_id);
 
-    inline bool rangeNeedsSort(uint32_t unit_id) const;
-    inline void rangeClearNeedsSort(uint32_t unit_id);
-    inline void rangeSetNeedsSort(uint32_t unit_id);
+    inline bool memoryRangeNeedsSort(uint32_t unit_id) const;
+    inline void memoryRangeClearNeedsSort(uint32_t unit_id);
+    inline void memoryRangeSetNeedsSort(uint32_t unit_id);
 
     // Included for compatibility with ECSRegistry
     template <typename ArchetypeT, typename ComponentT>
     ComponentT * exportColumn();
     template <typename SingletonT>
     SingletonT * exportSingleton();
-
-    void logRangeMapsInfo();
 
 private:
     template <typename SingletonT>
@@ -253,11 +251,11 @@ private:
 
     static inline uint32_t num_components_ = 0;
     static inline uint32_t num_archetypes_ = 0;
-    static inline uint32_t num_range_map_units_ = 0;
+    static inline uint32_t num_memory_range_elements_ = 0;
     static inline uint32_t next_bundle_id_ = bundle_typeid_mask_;
 
     static inline constexpr uint32_t max_components_ = 1024;
-    static inline constexpr uint32_t max_range_map_units_ = 64;
+    static inline constexpr uint32_t max_memory_range_elements_ = 64;
     static inline constexpr uint32_t max_bundles_ = 512;
     static inline constexpr uint32_t max_archetypes_ = 256;
     static inline constexpr uint32_t user_component_offset_ = 2;
@@ -272,8 +270,8 @@ private:
                            ComponentID *components,
                            ComponentFlags *component_flags,
                            uint32_t num_components);
-    void registerRangeMapUnit(uint32_t id, uint32_t alignment,
-                              uint32_t num_bytes);
+    void registerMemoryRangeElement(uint32_t id, uint32_t alignment,
+                                    uint32_t num_bytes);
 
     void registerBundle(uint32_t id,
                         const uint32_t *components,
@@ -292,12 +290,12 @@ private:
                    QueryRef *query_ref);
 
     // This is basically a more stripped down version of an Archetype.
-    struct RangeMapStore {
-        RangeMapStore(uint32_t max_num_units,
-                      TypeInfo type_info);
+    struct MemoryRangeStore {
+        MemoryRangeStore(uint32_t max_num_elements,
+                         TypeInfo type_info);
 
         TypeInfo typeInfo;
-        RangeMapTable tbl;
+        MemoryRangeTable tbl;
 
         bool needsSort;
     };
@@ -336,8 +334,8 @@ private:
     
     FixedInlineArray<Optional<TypeInfo>, max_components_> components_ {};
 
-    FixedInlineArray<Optional<RangeMapStore>, max_range_map_units_>
-        range_map_units_ {};
+    FixedInlineArray<Optional<MemoryRangeStore>, max_memory_range_elements_>
+        memory_range_elements_ {};
 
     std::array<uint32_t, max_archetype_components_ * max_archetypes_>
         archetype_components_ {};
@@ -348,7 +346,8 @@ private:
     std::array<BundleInfo, max_bundles_> bundle_infos_ {};
     std::array<uint32_t, max_query_slots_> query_data_ {};
     EntityStore entity_store_;
-    RangeMapUnitStore range_map_unit_store_;
+
+    MemoryRangeElementStore mr_element_store_;
 };
 
 }

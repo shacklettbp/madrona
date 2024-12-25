@@ -1115,14 +1115,14 @@ void SortNodeBase::sortSetupArchetype(int32_t)
     } 
 }
 
-void SortNodeBase::sortSetupRange(int32_t)
+void SortNodeBase::sortSetupMemoryRange(int32_t)
 {
     using namespace sortConsts;
 
     auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
     StateManager *state_mgr = mwGPU::getStateManager();
 
-    if (!state_mgr->rangeNeedsSort(archetypeID)) {
+    if (!state_mgr->memoryRangeNeedsSort(archetypeID)) {
         numDynamicInvocations = 0;
 
         auto &clear_count_node_data = taskgraph.getNodeData(clearWorldCountData);
@@ -1134,9 +1134,9 @@ void SortNodeBase::sortSetupRange(int32_t)
         return;
     }
 
-    state_mgr->rangeClearNeedsSort(archetypeID);
+    state_mgr->memoryRangeClearNeedsSort(archetypeID);
 
-    int num_rows = state_mgr->getRangeNumRows(archetypeID);
+    int num_rows = state_mgr->getMemoryRangeNumRows(archetypeID);
 
     int32_t num_threads =
         utils::divideRoundUp(num_rows, (int32_t)num_elems_per_sort_thread_);
@@ -1166,7 +1166,7 @@ void SortNodeBase::sortSetupRange(int32_t)
     total_bytes = counters_offset + uint64_t(numPasses) * sizeof(int32_t);
 
     uint64_t max_column_bytes =
-        (uint64_t)state_mgr->getRangeMaxColumnSize(archetypeID) *
+        (uint64_t)state_mgr->getMemoryRangeMaxColumnSize(archetypeID) *
         (uint64_t)num_rows;
 
     uint64_t free_column_bytes = total_bytes - column_copy_offset;
@@ -1387,17 +1387,17 @@ void SortNodeBase::resizeTableArchetype(int32_t invocation_idx)
     numDynamicInvocations = mwGPU::GPUImplConsts::get().numWorlds;
 }
 
-void SortNodeBase::resizeTableRange(int32_t invocation_idx)
+void SortNodeBase::resizeTableMemoryRange(int32_t invocation_idx)
 {
-    int32_t num_units = bins[(numPasses - 1) * 256 + 255];
-    mwGPU::getStateManager()->resizeRange(archetypeID, num_units);
+    int32_t num_elements = bins[(numPasses - 1) * 256 + 255];
+    mwGPU::getStateManager()->resizeMemoryRange(archetypeID, num_elements);
 
     auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
     taskgraph.getNodeData(firstRearrangePassData).numDynamicInvocations =
-        num_units;
+        num_elements;
 
     // Set for copyKeys
-    numDynamicInvocations = num_units;
+    numDynamicInvocations = num_elements;
 }
 
 void SortNodeBase::ClearCountNode::clearCounts(int32_t invocation_idx)
@@ -1548,24 +1548,18 @@ void SortNodeBase::RearrangeNode::rearrangeColumn(int32_t invocation_idx)
     }
 }
 
-void SortNodeBase::RearrangeNode::stageColumnRange(int32_t invocation_idx)
+void SortNodeBase::RearrangeNode::stageColumnMemoryRange(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
     auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
 
-    uint32_t bytes_per_elem = state_mgr->getRangeMapColumnBytesPerRow(
+    uint32_t bytes_per_elem = state_mgr->getMemoryRangeColumnBytesPerRow(
         parent.archetypeID, columnIndex);
 
-    void *src = state_mgr->getRangeMapColumn(
+    void *src = state_mgr->getMemoryRangeColumn(
             parent.archetypeID, columnIndex);
 
     int src_idx = parent.indicesFinal[invocation_idx];
-
-#if 0
-    mwGPU::HostPrint::log(
-            "col_idx = {}, parent.columnStaging = {}, bytes_per_elem = {}, src = {}, src_idx = {}, inv_idx = {}, num_inv = {}\n",
-            columnIndex, parent.columnStaging, bytes_per_elem, src, src_idx, invocation_idx, numDynamicInvocations);
-#endif
 
     memcpy((char *)parent.columnStaging +
                 (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
@@ -1573,23 +1567,23 @@ void SortNodeBase::RearrangeNode::stageColumnRange(int32_t invocation_idx)
            bytes_per_elem);
 }
 
-void SortNodeBase::RearrangeNode::rearrangeRangeUnits(int32_t invocation_idx)
+void SortNodeBase::RearrangeNode::rearrangeMemoryRangeElements(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
     auto &parent = mwGPU::getTaskGraph(taskGraphID).getNodeData(parentNode);
 
-    auto rm_staging = (RangeMap *)parent.columnStaging;
-    auto dst = (RangeMap *)state_mgr->getRangeMapColumn(parent.archetypeID, 0);
-    auto status = (RangeMap::Status *)state_mgr->getRangeMapColumn(parent.archetypeID, 1);
+    auto rm_staging = (MemoryRange *)parent.columnStaging;
+    auto dst = (MemoryRange *)state_mgr->getMemoryRangeColumn(parent.archetypeID, 0);
+    auto status = (MemoryRange::Status *)state_mgr->getMemoryRangeColumn(parent.archetypeID, 1);
 
-    RangeMap rm = rm_staging[invocation_idx];
+    MemoryRange rm = rm_staging[invocation_idx];
 
     dst[invocation_idx] = rm;
 
     // FIXME: temporary entities still have an entity column, but they need to
     // *NOT* be remapped
-    if (rm != RangeMap::none()) {
-        state_mgr->remapRangeMapUnit(rm, invocation_idx);
+    if (rm != MemoryRange::none()) {
+        state_mgr->remapMemoryRangeElement(rm, invocation_idx);
     }
 
     if (invocation_idx == 0) {
@@ -1597,17 +1591,17 @@ void SortNodeBase::RearrangeNode::rearrangeRangeUnits(int32_t invocation_idx)
     }
 }
 
-void SortNodeBase::RearrangeNode::rearrangeColumnRange(int32_t invocation_idx)
+void SortNodeBase::RearrangeNode::rearrangeColumnMemoryRange(int32_t invocation_idx)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
     auto &taskgraph = mwGPU::getTaskGraph(taskGraphID);
     auto &parent = taskgraph.getNodeData(parentNode);
 
     auto staging = (char *)parent.columnStaging;
-    auto dst = (char *)state_mgr->getRangeMapColumn(
+    auto dst = (char *)state_mgr->getMemoryRangeColumn(
         parent.archetypeID, columnIndex);
 
-    uint32_t bytes_per_elem = state_mgr->getRangeMapColumnBytesPerRow(
+    uint32_t bytes_per_elem = state_mgr->getMemoryRangeColumnBytesPerRow(
         parent.archetypeID, columnIndex);
 
     memcpy(dst + (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,
@@ -1769,7 +1763,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphArchetype(
     return cur_task;
 }
 
-TaskGraph::NodeID SortNodeBase::addToGraphRange(
+TaskGraph::NodeID SortNodeBase::addToGraphMemoryRange(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies,
     uint32_t unit_id)
@@ -1781,14 +1775,14 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
 
     StateManager *state_mgr = getStateManager();
 
-    auto keys_col = (uint32_t *)state_mgr->getRangeMapColumn(unit_id, 1);
+    auto keys_col = (uint32_t *)state_mgr->getMemoryRangeColumn(unit_id, 1);
 
     // Optimize for sorts on the WorldID column, where the 
     // max # of worlds is known
     int32_t num_passes;
     int32_t num_worlds = GPUImplConsts::get().numWorlds;
     // num_worlds + 1 to leave room for columns with WorldID == -1
-    int32_t num_bits = 32 - __clz(RangeMap::Status::Freed + 1);
+    int32_t num_bits = 32 - __clz(MemoryRange::Status::Freed + 1);
     num_passes = utils::divideRoundUp(num_bits, 8);
 
     // num_passes should just be 1
@@ -1802,7 +1796,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
-        &SortNodeBase::sortSetupRange>(data_id, dependencies,
+        &SortNodeBase::sortSetupMemoryRange>(data_id, dependencies,
             Optional<TaskGraph::NodeID>::none(), 1);
 
     // Create the clear world count pass (which will run optionally 
@@ -1829,7 +1823,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
             consts::numMegakernelThreads);
     }
 
-    cur_task = builder.addNodeFn<&SortNodeBase::resizeTableRange>(
+    cur_task = builder.addNodeFn<&SortNodeBase::resizeTableMemoryRange>(
         data_id, {cur_task}, setup);
 
     if (num_passes % 2 == 1) {
@@ -1852,20 +1846,20 @@ TaskGraph::NodeID SortNodeBase::addToGraphRange(
         }
         prev_rearrange_node = cur_rearrange_node;
 
-        cur_task = builder.addNodeFn<&RearrangeNode::stageColumnRange>(
+        cur_task = builder.addNodeFn<&RearrangeNode::stageColumnMemoryRange>(
             cur_rearrange_node, {cur_task}, setup);
 
-        cur_task = builder.addNodeFn<&RearrangeNode::rearrangeColumnRange>(
+        cur_task = builder.addNodeFn<&RearrangeNode::rearrangeColumnMemoryRange>(
             cur_rearrange_node, {cur_task}, setup);
     }
 
     auto entities_rearrange_node = builder.constructNodeData<RearrangeNode>(
         taskgraph_id, data_id, 0);
 
-    cur_task = builder.addNodeFn<&RearrangeNode::stageColumnRange>(
+    cur_task = builder.addNodeFn<&RearrangeNode::stageColumnMemoryRange>(
         entities_rearrange_node, {cur_task}, setup);
 
-    cur_task = builder.addNodeFn<&RearrangeNode::rearrangeRangeUnits>(
+    cur_task = builder.addNodeFn<&RearrangeNode::rearrangeMemoryRangeElements>(
         entities_rearrange_node, {cur_task}, setup);
 
     assert(prev_rearrange_node.id != -1);

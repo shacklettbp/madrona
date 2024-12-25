@@ -217,21 +217,21 @@ TaskGraph::NodeID RecycleEntitiesNode::addToGraph(
     return builder.addDynamicCountNode<RecycleEntitiesNode>(dependencies, 1);
 }
 
-RecycleRangeNode::RecycleRangeNode()
+RecycleMemoryRangeNode::RecycleMemoryRangeNode()
     : NodeBase(),
       recycleBase(0)
 {}
 
-void RecycleRangeNode::run(int32_t invocation_idx)
+void RecycleMemoryRangeNode::run(int32_t invocation_idx)
 {
-    mwGPU::getStateManager()->recycleRangeMaps(
+    mwGPU::getStateManager()->recycleMemoryRanges(
         invocation_idx, recycleBase);
 }
 
-uint32_t RecycleRangeNode::numInvocations()
+uint32_t RecycleMemoryRangeNode::numInvocations()
 {
     auto [recycle_base, num_deleted] =
-        mwGPU::getStateManager()->fetchRecyclableRangeMaps();
+        mwGPU::getStateManager()->fetchRecyclableMemoryRanges();
 
     if (num_deleted > 0) {
         recycleBase = recycle_base;
@@ -240,11 +240,11 @@ uint32_t RecycleRangeNode::numInvocations()
     return num_deleted;
 }
 
-TaskGraph::NodeID RecycleRangeNode::addToGraph(
+TaskGraph::NodeID RecycleMemoryRangeNode::addToGraph(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies)
 {
-    return builder.addDynamicCountNode<RecycleRangeNode>(dependencies, 1);
+    return builder.addDynamicCountNode<RecycleMemoryRangeNode>(dependencies, 1);
 }
 
 void ResetTmpAllocNode::run(int32_t)

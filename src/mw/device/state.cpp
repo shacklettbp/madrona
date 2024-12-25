@@ -139,45 +139,45 @@ StateManager::StateManager(uint32_t)
         }
     }
 
-    { // Initialize range map store
-        uint32_t init_mapped_units = 1'048'576;
-        uint32_t max_mapped_units = 2'147'483'648;
+    { // Initialize memory range store
+        uint32_t init_mapped_elements = 1'048'576;
+        uint32_t max_mapped_elements = 2'147'483'648;
 
-        uint64_t reserve_unit_bytes =
-            (uint64_t)max_mapped_units * sizeof(RangeMapUnitStore::Slot);
+        uint64_t reserve_element_bytes =
+            (uint64_t)max_mapped_elements * sizeof(MemoryRangeElementStore::Slot);
         uint64_t reserve_idx_bytes =
-            (uint64_t)max_mapped_units * sizeof(int32_t);
+            (uint64_t)max_mapped_elements * sizeof(int32_t);
 
-        reserve_unit_bytes = alloc->roundUpReservation(reserve_unit_bytes);
+        reserve_element_bytes = alloc->roundUpReservation(reserve_element_bytes);
         reserve_idx_bytes = alloc->roundUpReservation(reserve_idx_bytes);
 
-        uint64_t init_unit_bytes =
-            (uint64_t)init_mapped_units * sizeof(RangeMapUnitStore::Slot);
+        uint64_t init_element_bytes =
+            (uint64_t)init_mapped_elements * sizeof(MemoryRangeElementStore::Slot);
         uint64_t init_idx_bytes =
-            (uint64_t)init_mapped_units * sizeof(int32_t);
+            (uint64_t)init_mapped_elements * sizeof(int32_t);
 
-        range_map_unit_store_.numSlotGrowBytes = alloc->roundUpAlloc(init_unit_bytes);
-        range_map_unit_store_.numIdxGrowBytes = alloc->roundUpAlloc(init_idx_bytes);
+        mr_element_store_.numSlotGrowBytes = alloc->roundUpAlloc(init_element_bytes);
+        mr_element_store_.numIdxGrowBytes = alloc->roundUpAlloc(init_idx_bytes);
 
-        assert(range_map_unit_store_.numSlotGrowBytes / sizeof(RangeMapUnitStore::Slot) ==
-                init_mapped_units);
-        assert(range_map_unit_store_.numIdxGrowBytes / sizeof(int32_t) ==
-                init_mapped_units);
+        assert(mr_element_store_.numSlotGrowBytes / sizeof(MemoryRangeElementStore::Slot) ==
+                init_mapped_elements);
+        assert(mr_element_store_.numIdxGrowBytes / sizeof(int32_t) ==
+                init_mapped_elements);
 
-        range_map_unit_store_.units = (RangeMapUnitStore::Slot *)alloc->reserveMemory(
-                reserve_unit_bytes, range_map_unit_store_.numSlotGrowBytes);
+        mr_element_store_.slots = (MemoryRangeElementStore::Slot *)alloc->reserveMemory(
+                reserve_element_bytes, mr_element_store_.numSlotGrowBytes);
 
-        range_map_unit_store_.availableSlots = (int32_t *)alloc->reserveMemory(
-                reserve_unit_bytes, range_map_unit_store_.numIdxGrowBytes);
-        range_map_unit_store_.deletedSlots = (int32_t *)alloc->reserveMemory(
-                reserve_unit_bytes, range_map_unit_store_.numIdxGrowBytes);
+        mr_element_store_.availableSlots = (int32_t *)alloc->reserveMemory(
+                reserve_element_bytes, mr_element_store_.numIdxGrowBytes);
+        mr_element_store_.deletedSlots = (int32_t *)alloc->reserveMemory(
+                reserve_element_bytes, mr_element_store_.numIdxGrowBytes);
 
-        range_map_unit_store_.numGrowSlots = init_mapped_units;
-        range_map_unit_store_.numMappedSlots = init_mapped_units;
+        mr_element_store_.numGrowSlots = init_mapped_elements;
+        mr_element_store_.numMappedSlots = init_mapped_elements;
 
-        for (int32_t i = 0; i < init_mapped_units; i++) {
-            range_map_unit_store_.units[i].gen = 0;
-            range_map_unit_store_.availableSlots[i] = i;
+        for (int32_t i = 0; i < init_mapped_elements; i++) {
+            mr_element_store_.slots[i].gen = 0;
+            mr_element_store_.availableSlots[i] = i;
         }
     }
 
@@ -194,7 +194,7 @@ void StateManager::registerComponent(uint32_t id, uint32_t alignment,
     });
 }
 
-void StateManager::registerRangeMapUnit(
+void StateManager::registerMemoryRangeElement(
         uint32_t id, uint32_t alignment, uint32_t num_bytes)
 {
     TypeInfo type_info = {
@@ -202,13 +202,13 @@ void StateManager::registerRangeMapUnit(
         /* .numBytes =  */  num_bytes,
     };
 
-    range_map_units_[id].emplace(
+    memory_range_elements_[id].emplace(
         0, type_info
     );
 }
 
-StateManager::RangeMapStore::RangeMapStore(
-        uint32_t max_num_units,
+StateManager::MemoryRangeStore::MemoryRangeStore(
+        uint32_t max_num_elements,
         TypeInfo type_info)
     : typeInfo(type_info),
       needsSort(false)
@@ -223,14 +223,14 @@ StateManager::RangeMapStore::RangeMapStore(
     tbl.numRows.store_relaxed(0);
 
     TypeInfo infos[3] = {
-        { .alignment = alignof(RangeMap), .numBytes = sizeof(RangeMap) },
-        { .alignment = alignof(RangeMap::Status), .numBytes = sizeof(RangeMap::Status) },
+        { .alignment = alignof(MemoryRange), .numBytes = sizeof(MemoryRange) },
+        { .alignment = alignof(MemoryRange::Status), .numBytes = sizeof(MemoryRange::Status) },
         type_info,
     };
 
-    uint64_t bytes_per_row = sizeof(RangeMap::Status) + type_info.numBytes;
+    uint64_t bytes_per_row = sizeof(MemoryRange::Status) + type_info.numBytes;
 
-    uint64_t num_reserved_rows = RangeMapTable::maxReservedBytesPerTable /
+    uint64_t num_reserved_rows = MemoryRangeTable::maxReservedBytesPerTable /
         bytes_per_row;
     num_reserved_rows = min(num_reserved_rows, 0x7FFF'FFFF_u64);
 
@@ -540,30 +540,30 @@ void StateManager::makeQuery(const uint32_t *components,
 
 // Instead of returning the actual available entity ID, it just returns
 // the index of the available slot ID
-static inline int32_t getRangeMapUnitSlotIdx(
-    RangeMapUnitStore &range_store,
-    uint32_t num_units)
+static inline int32_t getMemoryRangeElementSlotIdx(
+    MemoryRangeElementStore &range_store,
+    uint32_t num_elements)
 {
     int32_t available_idx =
-        range_store.availableOffset.fetch_add_relaxed(num_units);
+        range_store.availableOffset.fetch_add_relaxed(num_elements);
 
-    if (available_idx + num_units-1 <
+    if (available_idx + num_elements-1 <
             range_store.numMappedSlots) [[likely]] {
         return available_idx;
     }
 
     range_store.growLock.lock();
 
-    if (available_idx + num_units-1 <
+    if (available_idx + num_elements-1 <
             range_store.numMappedSlots) {
         range_store.growLock.unlock();
 
         return available_idx;
     }
 
-    void *unit_grow_base = (char *)range_store.units +
+    void *element_grow_base = (char *)range_store.slots +
         (uint64_t)range_store.numMappedSlots *
-            sizeof(RangeMapUnitStore::Slot);
+            sizeof(MemoryRangeElementStore::Slot);
 
     void *available_grow_base =
         (char *)range_store.availableSlots +
@@ -574,13 +574,13 @@ static inline int32_t getRangeMapUnitSlotIdx(
             (uint64_t)range_store.numMappedSlots * sizeof(int32_t);
 
     auto *alloc = mwGPU::getHostAllocator();
-    alloc->mapMemory(unit_grow_base, range_store.numSlotGrowBytes);
+    alloc->mapMemory(element_grow_base, range_store.numSlotGrowBytes);
     alloc->mapMemory(available_grow_base, range_store.numIdxGrowBytes);
     alloc->mapMemory(deleted_grow_base, range_store.numIdxGrowBytes);
 
     for (int32_t i = 0; i < range_store.numGrowSlots; i++) {
         int32_t idx = i + range_store.numMappedSlots;
-        range_store.units[idx].gen = 0;
+        range_store.slots[idx].gen = 0;
         range_store.availableSlots[idx] = idx;
     }
 
@@ -638,50 +638,50 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
     return entity_store.availableEntities[available_idx];
 }
 
-RangeMap StateManager::allocRangeMap(
+MemoryRange StateManager::allocMemoryRange(
         WorldID world_id,
-        uint32_t unit_id, uint32_t num_units)
+        uint32_t element_id, uint32_t num_elements)
 {
-    auto &range_map_store = *range_map_units_[unit_id];
+    auto &range_map_store = *memory_range_elements_[element_id];
     range_map_store.needsSort = true;
 
-    RangeMapTable &tbl = range_map_store.tbl;
+    MemoryRangeTable &tbl = range_map_store.tbl;
 
     // This is the starting row of the map
-    int32_t row = tbl.numRows.fetch_add_relaxed(num_units);
+    int32_t row = tbl.numRows.fetch_add_relaxed(num_elements);
 
-    if (row + num_units-1 >= tbl.mappedRows) {
-        growTable(tbl, row, num_units);
+    if (row + num_elements-1 >= tbl.mappedRows) {
+        growTable(tbl, row, num_elements);
     }
 
-    int32_t unit_slot_idx = getRangeMapUnitSlotIdx(
-            range_map_unit_store_, num_units);
+    int32_t element_slot_idx = getMemoryRangeElementSlotIdx(
+            mr_element_store_, num_elements);
 
-    RangeMap *range_map_col = (RangeMap *)tbl.columns[0];
-    RangeMap::Status *status_col = (RangeMap::Status *)tbl.columns[1];
+    MemoryRange *range_map_col = (MemoryRange *)tbl.columns[0];
+    MemoryRange::Status *status_col = (MemoryRange::Status *)tbl.columns[1];
 
-    for (int i = 0; i < num_units; ++i) {
+    for (int i = 0; i < num_elements; ++i) {
         Loc loc = {
-            unit_id, 
+            element_id, 
             row + i,
         };
 
         int32_t available_slot =
-            range_map_unit_store_.availableSlots[unit_slot_idx + i];
+            mr_element_store_.availableSlots[element_slot_idx + i];
         
-        RangeMapUnitStore::Slot &slot = range_map_unit_store_.units[
+        MemoryRangeElementStore::Slot &slot = mr_element_store_.slots[
             available_slot];
 
         slot.loc = loc;
 
-        RangeMap range_map = {
-            .numUnits = (CountT)num_units,
+        MemoryRange range_map = {
+            .numElements = (CountT)num_elements,
             .gen = slot.gen,
             .id = available_slot
         };
 
         range_map_col[row + i] = range_map;
-        status_col[row + i] = RangeMap::Status::Allocated;
+        status_col[row + i] = MemoryRange::Status::Allocated;
     }
 
     return range_map_col[row];
@@ -777,36 +777,36 @@ void StateManager::destroyEntityNow(Entity e)
     entity_store_.deletedEntities[deleted_offset] = e.id;
 }
 
-void StateManager::freeRangeMap(RangeMap range_map)
+void StateManager::freeMemoryRange(MemoryRange memory_range)
 {
-    RangeMapUnitStore::Slot &slot =
-        range_map_unit_store_.units[range_map.id];
+    MemoryRangeElementStore::Slot &slot =
+        mr_element_store_.slots[memory_range.id];
 
-    // We need to increment gen for all the units in this range map.
+    // We need to increment gen for all the elements in this range map.
     // To do this, we use the fact that the sort preserves order within
-    // a world and fetch the RangeMap's from the subsequent rows after
+    // a world and fetch the MemoryRange's from the subsequent rows after
     // the one give here.
     Loc loc = slot.loc;
-    auto &unit = *range_map_units_[loc.archetype];
-    auto &tbl = unit.tbl;
+    auto &element = *memory_range_elements_[loc.archetype];
+    auto &tbl = element.tbl;
 
-    unit.needsSort = true;
+    element.needsSort = true;
 
     int32_t deleted_offset =
-        range_map_unit_store_.deletedOffset.fetch_add_relaxed(
-                range_map.numUnits);
+        mr_element_store_.deletedOffset.fetch_add_relaxed(
+                memory_range.numElements);
 
-    RangeMap *rm_col = (RangeMap *)tbl.columns[0];
-    RangeMap::Status *status_col = (RangeMap::Status *)tbl.columns[1];
-    for (int i = 0; i < range_map.numUnits; ++i) {
+    MemoryRange *rm_col = (MemoryRange *)tbl.columns[0];
+    MemoryRange::Status *status_col = (MemoryRange::Status *)tbl.columns[1];
+    for (int i = 0; i < memory_range.numElements; ++i) {
         uint32_t row = loc.row + i;
 
-        status_col[row] = RangeMap::Status::Freed;
+        status_col[row] = MemoryRange::Status::Freed;
         auto id = rm_col[row].id;
 
-        range_map_unit_store_.units[id].gen++;
+        mr_element_store_.slots[id].gen++;
 
-        range_map_unit_store_.deletedSlots[deleted_offset + i] = id;
+        mr_element_store_.deletedSlots[deleted_offset + i] = id;
     }
 }
 
@@ -828,9 +828,9 @@ void StateManager::resizeArchetype(uint32_t archetype_id, int32_t num_rows)
     archetypes_[archetype_id]->tbl.numRows.store_relaxed(num_rows);
 }
 
-void StateManager::resizeRange(uint32_t unit_id, int32_t num_rows)
+void StateManager::resizeMemoryRange(uint32_t element_id, int32_t num_rows)
 {
-    range_map_units_[unit_id]->tbl.numRows.store_relaxed(num_rows);
+    memory_range_elements_[element_id]->tbl.numRows.store_relaxed(num_rows);
 }
 
 int32_t StateManager::numArchetypeRows(uint32_t archetype_id) const
@@ -857,17 +857,17 @@ std::pair<int32_t, int32_t> StateManager::fetchRecyclableEntities()
     };
 }
 
-std::pair<int32_t, int32_t> StateManager::fetchRecyclableRangeMaps()
+std::pair<int32_t, int32_t> StateManager::fetchRecyclableMemoryRanges()
 {
-    int32_t num_deleted = range_map_unit_store_.deletedOffset.load_relaxed();
+    int32_t num_deleted = mr_element_store_.deletedOffset.load_relaxed();
 
-    int32_t available_end = range_map_unit_store_.availableOffset.load_relaxed();
+    int32_t available_end = mr_element_store_.availableOffset.load_relaxed();
 
     int32_t recycle_base = available_end - num_deleted;
 
     if (num_deleted > 0) {
-        range_map_unit_store_.deletedOffset.store_relaxed(0);
-        range_map_unit_store_.availableOffset.store_relaxed(recycle_base);
+        mr_element_store_.deletedOffset.store_relaxed(0);
+        mr_element_store_.availableOffset.store_relaxed(recycle_base);
     }
 
     return {
@@ -883,22 +883,11 @@ void StateManager::recycleEntities(int32_t thread_offset,
         entity_store_.deletedEntities[thread_offset];
 }
 
-void StateManager::recycleRangeMaps(int32_t thread_offset,
+void StateManager::recycleMemoryRanges(int32_t thread_offset,
                                      int32_t recycle_base)
 {
-    range_map_unit_store_.availableSlots[recycle_base + thread_offset] =
-        range_map_unit_store_.deletedSlots[thread_offset];
-}
-
-void StateManager::logRangeMapsInfo()
-{
-#if 0
-    for (int i = 0; i < range_map_units_.size(); ++i) {
-        if (range_map_units_[i].has_value()) {
-            auto &unit = *range_map_units_[i];
-        }
-    }
-#endif
+    mr_element_store_.availableSlots[recycle_base + thread_offset] =
+        mr_element_store_.deletedSlots[thread_offset];
 }
 
 }

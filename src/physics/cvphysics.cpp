@@ -422,7 +422,7 @@ static float* computePhi(Context &ctx,
                          Vector3 origin)
 {
     Phi phi = tmp_state.phi;
-    float *S = (float *) ctx.rangeMapUnit<PhiUnit>(tmp_state.phiFull);
+    float *S = (float *) ctx.memoryRangePointer<PhiUnit>(tmp_state.phiFull);
     if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
         // S = [1_3x3 r^x; 0 1_3x3], column-major
         memset(S, 0.f, 6 * 6 * sizeof(float));
@@ -489,7 +489,7 @@ static float* computePhiDot(Context &ctx,
                             DofObjectTmpState &tmp_state,
                             SpatialVector &v_hat)
 {
-    float* S = (float *) ctx.rangeMapUnit<PhiUnit>(tmp_state.phiFull);
+    float* S = (float *) ctx.memoryRangePointer<PhiUnit>(tmp_state.phiFull);
     // Same storage location, but will need to be incremented based on size of S
     float *S_dot = S + 6 * num_dofs.numDofs;
 
@@ -607,9 +607,9 @@ static float* computeContactJacobian(Context &ctx,
 static void mulM(Context &ctx, BodyGroupHierarchy &body_grp,
     float *x, float *y) {
     CountT total_dofs = body_grp.numDofs;
-    int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit<ParentArrayUnit>(
+    int32_t *expandedParent = (int32_t*) ctx.memoryRangePointer<ParentArrayUnit>(
         body_grp.expandedParent);
-    float *massMatrix = (float*) ctx.rangeMapUnit<
+    float *massMatrix = (float*) ctx.memoryRangePointer<
         MassMatrixUnit>(body_grp.massMatrix);
     auto M = [&](int32_t row, int32_t col) -> float& {
         return massMatrix[row + total_dofs * col];
@@ -632,9 +632,9 @@ static void mulM(Context &ctx, BodyGroupHierarchy &body_grp,
 // Solves M^{-1}x, overwriting x. Based on Table 6.5 in Featherstone
 static void solveM(Context &ctx, BodyGroupHierarchy &body_grp, float *x) {
     CountT total_dofs = body_grp.numDofs;
-    int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit<ParentArrayUnit>(
+    int32_t *expandedParent = (int32_t*) ctx.memoryRangePointer<ParentArrayUnit>(
         body_grp.expandedParent);
-    float *massMatrixLTDL = (float*) ctx.rangeMapUnit<MassMatrixUnit>(
+    float *massMatrixLTDL = (float*) ctx.memoryRangePointer<MassMatrixUnit>(
         body_grp.massMatrixLTDL);
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return massMatrixLTDL[row + total_dofs * col];
@@ -671,7 +671,7 @@ static void compositeRigidBody(Context &ctx,
 
     // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = body_grp.numDofs;
-    float *M = (float*) ctx.rangeMapUnit<MassMatrixUnit>(body_grp.massMatrix);
+    float *M = (float*) ctx.memoryRangePointer<MassMatrixUnit>(body_grp.massMatrix);
     memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
@@ -691,7 +691,7 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[i]);
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
-        float *S_i = (float *) ctx.rangeMapUnit<PhiUnit>(i_tmp_state.phiFull);
+        float *S_i = (float *) ctx.memoryRangePointer<PhiUnit>(i_tmp_state.phiFull);
 
         // Temporary store for F = I_i^C S_i, column-major
         float *F = (float *) state_mgr->tmpAlloc(world_id,
@@ -725,7 +725,7 @@ static void compositeRigidBody(Context &ctx,
             auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[j]);
 
-            float *S_j = (float *) ctx.rangeMapUnit<PhiUnit>(j_tmp_state.phiFull);
+            float *S_j = (float *) ctx.memoryRangePointer<PhiUnit>(j_tmp_state.phiFull);
 
             // M_{ij} = M{ji} = F^T S_j
             float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
@@ -750,7 +750,7 @@ static void compositeRigidBody(Context &ctx,
 static void computeExpandedParent(Context &ctx,
                                   BodyGroupHierarchy &body_grp) {
     CountT numBodies = body_grp.numBodies;
-    int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit<ParentArrayUnit>(
+    int32_t *expandedParent = (int32_t*) ctx.memoryRangePointer<ParentArrayUnit>(
         body_grp.expandedParent);
 
     // Initialize n-N_B elements
@@ -780,15 +780,15 @@ static void factorizeMassMatrix(Context &ctx,
 
     // First copy in the mass matrix
     uint32_t total_dofs = body_grp.numDofs;
-    float *LTDL = (float *) ctx.rangeMapUnit<MassMatrixUnit>(body_grp.massMatrixLTDL);
-    float *massMatrix = (float *) ctx.rangeMapUnit<MassMatrixUnit>(body_grp.massMatrix);
+    float *LTDL = (float *) ctx.memoryRangePointer<MassMatrixUnit>(body_grp.massMatrixLTDL);
+    float *massMatrix = (float *) ctx.memoryRangePointer<MassMatrixUnit>(body_grp.massMatrix);
     memcpy(LTDL, massMatrix, total_dofs * total_dofs * sizeof(float));
     // Helper
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return LTDL[row + total_dofs * col];
     };
 
-    int32_t *expandedParent = (int32_t*) ctx.rangeMapUnit<ParentArrayUnit>(
+    int32_t *expandedParent = (int32_t*) ctx.memoryRangePointer<ParentArrayUnit>(
         body_grp.expandedParent);
 
     // Backward pass through DOFs
@@ -813,7 +813,7 @@ static void computeFreeAcceleration(Context &ctx,
                                     BodyGroupHierarchy &body_grp) {
     // Negate the bias forces, solve
     CountT num_dofs = body_grp.numDofs;
-    float* bias = (float*) ctx.rangeMapUnit<
+    float* bias = (float*) ctx.memoryRangePointer<
         BodyFloatUnit>(body_grp.bias);
     for (CountT i = 0; i < num_dofs; ++i) {
         bias[i] = -bias[i];
@@ -838,7 +838,7 @@ static void recursiveNewtonEuler(Context &ctx,
         auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
         auto &velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
-        float *S = (float *) ctx.rangeMapUnit<PhiUnit>(tmp_state.phiFull);
+        float *S = (float *) ctx.memoryRangePointer<PhiUnit>(tmp_state.phiFull);
 
         if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
             // Free bodies must be root of their hierarchy
@@ -918,7 +918,7 @@ static void recursiveNewtonEuler(Context &ctx,
     }
 
     // Backward pass to find bias forces
-    float *tau = (float*) ctx.rangeMapUnit<BodyFloatUnit>(body_grp.bias);
+    float *tau = (float*) ctx.memoryRangePointer<BodyFloatUnit>(body_grp.bias);
     memset(tau, 0, total_dofs * sizeof(float));
 
     CountT dof_index = total_dofs;
@@ -929,7 +929,7 @@ static void recursiveNewtonEuler(Context &ctx,
 
         // tau_i = S_i^T f_i
         dof_index -= num_dofs.numDofs;
-        float *S = (float *) ctx.rangeMapUnit<PhiUnit>(tmp_state.phiFull);
+        float *S = (float *) ctx.memoryRangePointer<PhiUnit>(tmp_state.phiFull);
         for(CountT row = 0; row < num_dofs.numDofs; ++row) {
             float *S_col = S + 6 * row;
             for(CountT k = 0; k < 6; ++k) {
@@ -1030,11 +1030,11 @@ static void gaussMinimizeFn(Context &ctx,
 
     uint32_t processed_dofs = 0;
     for (CountT i = 0; i < num_grps; ++i) {
-        float *local_mass = (float*) ctx.rangeMapUnit<
+        float *local_mass = (float*) ctx.memoryRangePointer<
             MassMatrixUnit>(hiers[i].massMatrix);
 
         for (CountT row = 0; row < hiers[i].numDofs; ++row) {
-            float* freeAcceleration = (float*) ctx.rangeMapUnit<
+            float* freeAcceleration = (float*) ctx.memoryRangePointer<
                 BodyFloatUnit>(hiers[i].bias);
             full_free_acc[row + processed_dofs] = freeAcceleration[row];
 
@@ -1326,10 +1326,10 @@ void registerTypes(ECSRegistry &registry)
     registry.registerBundle<CVRigidBodyState>();
     registry.registerBundleAlias<SolverBundleAlias, CVRigidBodyState>();
 
-    registry.registerRangeMapUnit<PhiUnit>();
-    registry.registerRangeMapUnit<MassMatrixUnit>();
-    registry.registerRangeMapUnit<ParentArrayUnit>();
-    registry.registerRangeMapUnit<BodyFloatUnit>();
+    registry.registerMemoryRangeElement<PhiUnit>();
+    registry.registerMemoryRangeElement<MassMatrixUnit>();
+    registry.registerMemoryRangeElement<ParentArrayUnit>();
+    registry.registerMemoryRangeElement<BodyFloatUnit>();
 }
 
 void setCVGroupRoot(Context &ctx,

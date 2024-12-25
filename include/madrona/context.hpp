@@ -9,9 +9,9 @@
 
 #include <madrona/fwd.hpp>
 #include <madrona/ecs.hpp>
-#include <madrona/range.hpp>
 #include <madrona/state.hpp>
 #include <madrona/registry.hpp>
+#include <madrona/memory_range.hpp>
 
 namespace madrona {
 
@@ -97,13 +97,13 @@ public:
     template <typename SingletonT>
     SingletonT & singleton();
 
-    template <typename RangeMapUnit>
-    RangeMap allocRangeMap(CountT num_units);
+    template <typename ElementT>
+    MemoryRange allocMemoryRange(CountT num_elements);
 
-    inline void freeRangeMap(RangeMap range_map);
+    inline void freeMemoryRange(MemoryRange memory_range);
 
-    template <typename RangeMapUnit>
-    RangeMapUnit *rangeMapUnit(RangeMap range_map);
+    template <typename ElementT>
+    ElementT * memoryRangePointer(MemoryRange memory_range);
 
     // Allocate a raw chunk of memory num_bytes in length from a global
     // bump allocator. Use ResetTmpAllocNode in the taskgraph to reclaim

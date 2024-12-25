@@ -67,11 +67,11 @@ void ECSRegistry::exportSingleton(EnumT slot)
     exportSingleton<SingletonT>(static_cast<uint32_t>(slot));
 }
 
-template <typename RangeMapUnitT>
-void ECSRegistry::registerRangeMapUnit()
+template <typename ElementT>
+void ECSRegistry::registerMemoryRangeElement()
 {
 #ifdef MADRONA_GPU_MODE
-    state_mgr_->registerRangeMapUnit<RangeMapUnitT>();
+    state_mgr_->registerMemoryRangeElement<ElementT>();
 #else
     // Does nothing on the CPU backend.
 #endif

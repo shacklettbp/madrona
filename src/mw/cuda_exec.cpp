@@ -523,7 +523,9 @@ template <typename T> __global__ void submitRun(uint32_t) {}
 
 static void checkAndLoadMegakernelCache(
     Optional<MegakernelCache> &cache,
-    Optional<std::string> &cache_write_path)
+    Optional<std::string> &cache_write_path,
+    const char **sources,
+    int64_t num_sources)
 {
     auto *cache_path =
         getenv("MADRONA_MWGPU_KERNEL_CACHE");
@@ -536,6 +538,43 @@ static void checkAndLoadMegakernelCache(
         cache_write_path.emplace(cache_path);
         return;
     }
+
+#if 0
+    { // Prompt for possible recompile
+        auto cache_write_time = std::filesystem::last_write_time(
+                std::filesystem::path(cache_path));
+
+        bool no_recompile = false;
+        for (int64_t i = 0; i < num_sources && !no_recompile; ++i) {
+            auto source_write_time = std::filesystem::last_write_time(
+                std::filesystem::path(sources[i]));
+
+            if (source_write_time >= cache_write_time) {
+                std::cout << "Source file write time: " << source_write_time << std::endl;
+                std::cout << "Cache write time: " << cache_write_time << std::endl;
+
+                bool inp_valid = false;
+                while (!inp_valid) {
+                    std::cout << "The file " << sources[i] << 
+                        " has been modified more recently than the cache at " << 
+                        cache_path << 
+                        ". Do you wish to proceed with this " 
+                        "cache or recompile it? (yes/no)" << std::endl;
+
+                    std::string inp;
+                    std::cin >> inp;
+
+                    if (inp == "yes") {
+                        return;
+                    } else if (inp == "no") {
+                        no_recompile = true;
+                        inp_valid = true;
+                    }
+                }
+            }
+        }
+    }
+#endif
 
     std::ifstream cache_file(cache_path,
         std::ios::binary | std::ios::ate);
@@ -622,7 +661,9 @@ static GPUCompileResults compileCode(
 {
     auto kernel_cache = Optional<MegakernelCache>::none();
     auto cache_write_path = Optional<std::string>::none();
-    checkAndLoadMegakernelCache(kernel_cache, cache_write_path);
+    checkAndLoadMegakernelCache(
+            kernel_cache, cache_write_path,
+            sources, num_sources);
 
     if (kernel_cache.has_value()) {
         CUmodule mod;

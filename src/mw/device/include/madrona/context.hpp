@@ -12,7 +12,7 @@
 
 #include "mw_gpu/worker_init.hpp"
 
-#include <madrona/range.hpp>
+#include <madrona/memory_range.hpp>
 
 namespace madrona {
 
@@ -65,14 +65,15 @@ public:
     template <typename... ComponentTs, typename Fn>
     inline void iterateQuery(Query<ComponentTs...> &query, Fn &&fn);
 
-    template <typename RangeMapUnit>
-    RangeMap allocRangeMap(CountT num_units);
-    inline RangeMap allocRangeMap(uint32_t unit_it, CountT num_units);
+    template <typename ElementT>
+    MemoryRange allocMemoryRange(CountT num_elements);
+    inline MemoryRange allocMemoryRange(uint32_t element_id, 
+                                        CountT num_elements);
 
-    inline void freeRangeMap(RangeMap range_map);
+    inline void freeMemoryRange(MemoryRange memory_range);
 
-    template <typename RangeMapUnitT>
-    RangeMapUnitT * rangeMapUnit(RangeMap range_map);
+    template <typename ElementT>
+    ElementT * memoryRangePointer(MemoryRange memory_range);
 
 protected:
     WorldBase *data_;

@@ -69,8 +69,8 @@ public:
     template <typename SingletonT, EnumType EnumT>
     void exportSingleton(EnumT slot);
 
-    template <typename RangeMapUnitT>
-    void registerRangeMapUnit();
+    template <typename ElementT>
+    void registerMemoryRangeElement();
 
 private:
     StateManager *state_mgr_;

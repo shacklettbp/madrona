@@ -261,8 +261,8 @@ struct RecycleEntitiesNode : NodeBase {
     int32_t recycleBase;
 };
 
-struct RecycleRangeNode : NodeBase {
-    RecycleRangeNode();
+struct RecycleMemoryRangeNode : NodeBase {
+    RecycleMemoryRangeNode();
 
     void run(int32_t invocation_idx);
     uint32_t numInvocations();
@@ -335,9 +335,9 @@ struct SortNodeBase : NodeBase {
         void rearrangeEntities(int32_t invocation_idx);
         void rearrangeColumn(int32_t invocation_idx);
 
-        void stageColumnRange(int32_t invocation_idx);
-        void rearrangeRangeUnits(int32_t invocation_idx);
-        void rearrangeColumnRange(int32_t invocation_idx);
+        void stageColumnMemoryRange(int32_t invocation_idx);
+        void rearrangeMemoryRangeElements(int32_t invocation_idx);
+        void rearrangeColumnMemoryRange(int32_t invocation_idx);
     };
 
     struct ClearCountNode : NodeBase {
@@ -358,12 +358,12 @@ struct SortNodeBase : NodeBase {
                           int32_t *counts);
 
     void sortSetupArchetype(int32_t);
-    void sortSetupRange(int32_t);
+    void sortSetupMemoryRange(int32_t);
     void zeroBins(int32_t invocation_idx);
     void histogram(int32_t invocation_idx);
     void binScan(int32_t invocation_idx);
     void resizeTableArchetype(int32_t);
-    void resizeTableRange(int32_t);
+    void resizeTableMemoryRange(int32_t);
     void copyKeys(int32_t invocation_idx);
     void computeWorldCounts(int32_t invocation_idx);
     void correctWorldCounts(int32_t invocation_idx);
@@ -379,10 +379,10 @@ struct SortNodeBase : NodeBase {
         int32_t component_id);
 
     // For range sort
-    static TaskGraph::NodeID addToGraphRange(
+    static TaskGraph::NodeID addToGraphMemoryRange(
         TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> dependencies,
-        uint32_t unit_id);
+        uint32_t element_id);
 
     // Constant state
     uint32_t taskGraphID;
@@ -421,8 +421,8 @@ struct SortArchetypeNode : SortNodeBase {
         Span<const TaskGraph::NodeID> dependencies);
 };
 
-template <typename RangeMapUnitT>
-struct SortRangeNode : SortNodeBase {
+template <typename ElementT>
+struct SortMemoryRangeNode : SortNodeBase {
     static TaskGraph::NodeID addToGraph(
         TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> dependencies);

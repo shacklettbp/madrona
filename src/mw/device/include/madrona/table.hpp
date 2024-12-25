@@ -52,8 +52,8 @@ struct Table {
 
 using ArchetypeTable = Table<128>;
 
-// Range maps only need to keep track of 3 columns no matter the type.
-// It's just the WorldID and the actual units themselves.
-using RangeMapTable = Table<3>;
+// Memory ranges only need to keep track of 3 columns no matter the type.
+// It's just the, ID, Status and the actual elements themselves.
+using MemoryRangeTable = Table<3>;
 
 }

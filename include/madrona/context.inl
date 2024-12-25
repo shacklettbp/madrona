@@ -94,24 +94,24 @@ SingletonT & Context::singleton()
     return state_mgr_->getSingleton<SingletonT>(MADRONA_MW_COND(cur_world_id_));
 }
 
-template <typename RangeMapUnit>
-RangeMap Context::allocRangeMap(CountT num_units)
+template <typename ElementT>
+MemoryRange Context::allocMemoryRange(CountT num_elements)
 {
-    return RangeMap {
-        num_units,
-        malloc(sizeof(RangeMapUnit) * num_units) 
+    return MemoryRange {
+        num_elements,
+        malloc(sizeof(ElementT) * num_elements) 
     };
 }
 
-void Context::freeRangeMap(RangeMap range_map)
+void Context::freeMemoryRange(MemoryRange memory_range)
 {
-    free(range_map.ptr);
+    free(memory_range.ptr);
 }
 
-template <typename RangeMapUnit>
-RangeMapUnit * Context::rangeMapUnit(RangeMap range_map)
+template <typename ElementT>
+ElementT * Context::memoryRangePointer(MemoryRange memory_range)
 {
-    return (RangeMapUnit *)range_map.ptr;
+    return (ElementT *)memory_range.ptr;
 }
 
 void * Context::tmpAlloc(uint64_t num_bytes)

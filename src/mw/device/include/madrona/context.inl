@@ -30,31 +30,31 @@ Entity Context::makeEntity(uint32_t archetype_id)
     return state_mgr->makeEntityNow(world_id_, archetype_id);
 }
 
-template <typename RangeMapUnitT>
-RangeMap Context::allocRangeMap(CountT num_units)
+template <typename ElementT>
+MemoryRange Context::allocMemoryRange(CountT num_elements)
 {
-    uint32_t unit_id = TypeTracker::typeID<RangeMapUnitT>();
-    return allocRangeMap(unit_id, num_units);
+    uint32_t element_id = TypeTracker::typeID<ElementT>();
+    return allocMemoryRange(element_id, num_elements);
 }
 
-inline RangeMap Context::allocRangeMap(
-        uint32_t unit_id, CountT num_units)
+inline MemoryRange Context::allocMemoryRange(
+        uint32_t element_id, CountT num_elements)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    return state_mgr->allocRangeMap(world_id_, unit_id, num_units);
+    return state_mgr->allocMemoryRange(world_id_, element_id, num_elements);
 }
 
-template <typename RangeMapUnitT>
-RangeMapUnitT * Context::rangeMapUnit(RangeMap range_map)
+template <typename ElementT>
+ElementT * Context::memoryRangePointer(MemoryRange memory_range)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    return state_mgr->getRangeMapUnit<RangeMapUnitT>(range_map);
+    return state_mgr->memoryRangePointer<ElementT>(memory_range);
 }
 
-void Context::freeRangeMap(RangeMap range_map)
+void Context::freeMemoryRange(MemoryRange memory_range)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    state_mgr->freeRangeMap(range_map);
+    state_mgr->freeMemoryRange(memory_range);
 }
 
 template <typename ArchetypeT>
