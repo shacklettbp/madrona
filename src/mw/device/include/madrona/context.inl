@@ -51,6 +51,12 @@ RangeMapUnitT * Context::rangeMapUnit(RangeMap range_map)
     return state_mgr->getRangeMapUnit<RangeMapUnitT>(range_map);
 }
 
+void Context::freeRangeMap(RangeMap range_map)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+    state_mgr->freeRangeMap(range_map);
+}
+
 template <typename ArchetypeT>
 Loc Context::makeTemporary()
 {

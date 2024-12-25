@@ -250,8 +250,6 @@ StateManager::RangeMapStore::RangeMapStore(
 
         tbl.columns[i] = alloc->reserveMemory(reserve_bytes, init_bytes);
 
-        mwGPU::HostPrint::log("({}) columnSize[0] = {}\n", i, tbl.columnSizes[0]);
-
         tbl.columnSizes[i] = cur_info.numBytes;
         tbl.columnMappedBytes[i] = init_bytes;
 
@@ -263,8 +261,6 @@ StateManager::RangeMapStore::RangeMapStore(
 
     tbl.mappedRows = min_mapped_rows;
     tbl.maxColumnSize = max_col_size;
-
-    mwGPU::HostPrint::log("columnSize[0] = {}\n", tbl.columnSizes[0]);
 }
 
 StateManager::ArchetypeStore::ArchetypeStore(
@@ -662,7 +658,7 @@ RangeMap StateManager::allocRangeMap(
             range_map_unit_store_, num_units);
 
     RangeMap *range_map_col = (RangeMap *)tbl.columns[0];
-    RangeMap::Status *status_col = (RangeMap::Status *)tbl.columns[0];
+    RangeMap::Status *status_col = (RangeMap::Status *)tbl.columns[1];
 
     for (int i = 0; i < num_units; ++i) {
         Loc loc = {
@@ -892,6 +888,17 @@ void StateManager::recycleRangeMaps(int32_t thread_offset,
 {
     range_map_unit_store_.availableSlots[recycle_base + thread_offset] =
         range_map_unit_store_.deletedSlots[thread_offset];
+}
+
+void StateManager::logRangeMapsInfo()
+{
+#if 0
+    for (int i = 0; i < range_map_units_.size(); ++i) {
+        if (range_map_units_[i].has_value()) {
+            auto &unit = *range_map_units_[i];
+        }
+    }
+#endif
 }
 
 }

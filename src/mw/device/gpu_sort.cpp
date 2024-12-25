@@ -1561,9 +1561,11 @@ void SortNodeBase::RearrangeNode::stageColumnRange(int32_t invocation_idx)
 
     int src_idx = parent.indicesFinal[invocation_idx];
 
+#if 0
     mwGPU::HostPrint::log(
             "col_idx = {}, parent.columnStaging = {}, bytes_per_elem = {}, src = {}, src_idx = {}, inv_idx = {}, num_inv = {}\n",
             columnIndex, parent.columnStaging, bytes_per_elem, src, src_idx, invocation_idx, numDynamicInvocations);
+#endif
 
     memcpy((char *)parent.columnStaging +
                 (uint64_t)bytes_per_elem * (uint64_t)invocation_idx,

@@ -241,6 +241,8 @@ public:
     template <typename SingletonT>
     SingletonT * exportSingleton();
 
+    void logRangeMapsInfo();
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};

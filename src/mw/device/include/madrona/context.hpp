@@ -69,7 +69,7 @@ public:
     RangeMap allocRangeMap(CountT num_units);
     inline RangeMap allocRangeMap(uint32_t unit_it, CountT num_units);
 
-    void freeRangeMap(RangeMap range_map);
+    inline void freeRangeMap(RangeMap range_map);
 
     template <typename RangeMapUnitT>
     RangeMapUnitT * rangeMapUnit(RangeMap range_map);

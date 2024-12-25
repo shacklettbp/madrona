@@ -442,8 +442,10 @@ RangeMapUnitT * StateManager::getRangeMapUnit(RangeMap range_map)
 
     auto &unit = *range_map_units_[slot.loc.archetype];
 
+#if 0
     mwGPU::HostPrint::log("column at {}, row at {}\n",
             unit.tbl.columns[2], slot.loc.row);
+#endif
 
     return (RangeMapUnitT *)unit.tbl.columns[2] + slot.loc.row;
 }
@@ -519,8 +521,12 @@ uint32_t StateManager::getRangeMapColumnBytesPerRow(uint32_t unit_id,
                                                     uint32_t column_idx)
 {
     auto &unit = *range_map_units_[unit_id];
+
+#if 0
     mwGPU::HostPrint::log("unit = {}, col_idx = {}, col_size = {}\n", 
             unit_id, column_idx, unit.tbl.columnSizes[column_idx]);
+#endif
+
     return unit.tbl.columnSizes[column_idx];
 }
 
