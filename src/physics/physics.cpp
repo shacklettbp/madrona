@@ -391,6 +391,28 @@ void registerTypes(ECSRegistry &registry,
     registry.registerBundle<RigidBody>();
 }
 
+inline void doNothing(Context &,
+                      PhysicsSystemState &)
+{
+}
+
+TaskGraphNodeID setupInitTasks(
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> deps,
+    Solver solver)
+{
+    switch (solver) {
+    case Solver::Convex:
+        return cv::setupCVInitTasks(builder, deps);
+
+    default:
+        return builder.addToGraph<ParallelForNode<Context,
+            doNothing,
+            PhysicsSystemState
+        >>(deps);
+    }
+}
+
 TaskGraphNodeID setupBroadphaseTasks(
     TaskGraphBuilder &builder,
     Span<const TaskGraphNodeID> deps)

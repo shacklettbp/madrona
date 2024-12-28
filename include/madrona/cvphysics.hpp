@@ -336,6 +336,11 @@ void registerTypes(ECSRegistry &registry);
 void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
                            uint32_t *joint_archetype_id);
 void init(Context &ctx, CVXSolve *cvx_solve);
+
+TaskGraphNodeID setupCVInitTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
+
 TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                                    TaskGraphNodeID broadphase,
                                    CountT num_substeps);

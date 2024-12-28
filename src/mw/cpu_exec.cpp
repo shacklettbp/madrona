@@ -164,24 +164,26 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs,
     workerWakeup.store_release(1);
     workerWakeup.notify_all();
 
-    // Wait until solve's atomic is 1
-    while (solve->callSolve.load_acquire() == 0);
+    if (solve) {
+        // Wait until solve's atomic is 1
+        while (solve->callSolve.load_acquire() == 0);
 
-    float *res = solve->fn(
-            solve->data,
-            solve->totalNumDofs,
-            solve->numContactPts,
-            solve->h,
-            solve->mass,
-            solve->free_acc,
-            solve->vel,
-            solve->J_c,
-            solve->mu,
-            solve->penetrations);
+        float *res = solve->fn(
+                solve->data,
+                solve->totalNumDofs,
+                solve->numContactPts,
+                solve->h,
+                solve->mass,
+                solve->free_acc,
+                solve->vel,
+                solve->J_c,
+                solve->mu,
+                solve->penetrations);
 
-    solve->resPtr = res;
+        solve->resPtr = res;
 
-    solve->callSolve.store_release(2);
+        solve->callSolve.store_release(2);
+    }
 
     mainWakeup.wait<sync::acquire>(0);
     mainWakeup.store_relaxed(0);

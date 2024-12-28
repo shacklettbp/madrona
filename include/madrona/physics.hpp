@@ -261,6 +261,11 @@ namespace PhysicsSystem {
     void registerTypes(ECSRegistry &registry,
                        Solver solver = Solver::XPBD);
 
+    TaskGraphNodeID setupInitTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps,
+        Solver solver);
+
     TaskGraphNodeID setupBroadphaseTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
