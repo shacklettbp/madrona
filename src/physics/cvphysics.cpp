@@ -11,6 +11,50 @@ using namespace madrona::base;
 
 namespace madrona::phys::cv {
 
+struct MRElement128b {
+    uint8_t d[128];
+};
+
+float * DofObjectTmpState::getPhiFull(Context &ctx)
+{
+    uint8_t *bytes = 
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(dynData) + 
+        phiFullOffset;
+    return (float *)bytes;
+}
+
+float * BodyGroupHierarchy::getMassMatrix(Context &ctx)
+{
+    uint8_t *bytes = 
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(dynData) + 
+        massMatrixOffset;
+    return (float *)bytes;
+}
+
+float * BodyGroupHierarchy::getMassMatrixLTDL(Context &ctx)
+{
+    uint8_t *bytes = 
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(dynData) + 
+        massMatrixLTDLOffset;
+    return (float *)bytes;
+}
+
+float * BodyGroupHierarchy::getBias(Context &ctx)
+{
+    uint8_t *bytes = 
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(dynData) + 
+        biasOffset;
+    return (float *)bytes;
+}
+
+int32_t * BodyGroupHierarchy::getExpandedParent(Context &ctx)
+{
+    uint8_t *bytes =
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(dynData) + 
+        expandedParentOffset;
+    return (int32_t *)bytes;
+}
+
 struct Contact : Archetype<
     ContactConstraint,
     ContactTmpState
@@ -417,7 +461,9 @@ static float* computePhi(Context &ctx,
                          Vector3 origin)
 {
     Phi phi = tmp_state.phi;
-    float *S = (float *) ctx.memoryRangePointer<PhiUnit>(tmp_state.phiFull);
+
+    float *S = tmp_state.getPhiFull(ctx);
+
     if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
         // S = [1_3x3 r^x; 0 1_3x3], column-major
         memset(S, 0.f, 6 * 6 * sizeof(float));
@@ -484,7 +530,8 @@ static float* computePhiDot(Context &ctx,
                             DofObjectTmpState &tmp_state,
                             SpatialVector &v_hat)
 {
-    float* S = (float *) ctx.memoryRangePointer<PhiUnit>(tmp_state.phiFull);
+    float *S = tmp_state.getPhiFull(ctx);
+
     // Same storage location, but will need to be incremented based on size of S
     float *S_dot = S + 6 * num_dofs.numDofs;
 
@@ -602,10 +649,11 @@ static float* computeContactJacobian(Context &ctx,
 static void mulM(Context &ctx, BodyGroupHierarchy &body_grp,
     float *x, float *y) {
     CountT total_dofs = body_grp.numDofs;
-    int32_t *expandedParent = (int32_t*) ctx.memoryRangePointer<ParentArrayUnit>(
-        body_grp.expandedParent);
-    float *massMatrix = (float*) ctx.memoryRangePointer<
-        MassMatrixUnit>(body_grp.massMatrix);
+
+    int32_t *expandedParent = body_grp.getExpandedParent(ctx);
+
+    float *massMatrix = body_grp.getMassMatrix(ctx);
+
     auto M = [&](int32_t row, int32_t col) -> float& {
         return massMatrix[row + total_dofs * col];
     };
@@ -627,10 +675,10 @@ static void mulM(Context &ctx, BodyGroupHierarchy &body_grp,
 // Solves M^{-1}x, overwriting x. Based on Table 6.5 in Featherstone
 static void solveM(Context &ctx, BodyGroupHierarchy &body_grp, float *x) {
     CountT total_dofs = body_grp.numDofs;
-    int32_t *expandedParent = (int32_t*) ctx.memoryRangePointer<ParentArrayUnit>(
-        body_grp.expandedParent);
-    float *massMatrixLTDL = (float*) ctx.memoryRangePointer<MassMatrixUnit>(
-        body_grp.massMatrixLTDL);
+
+    int32_t *expandedParent = body_grp.getExpandedParent(ctx);
+    float *massMatrixLTDL = body_grp.getMassMatrixLTDL(ctx);
+
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return massMatrixLTDL[row + total_dofs * col];
     };
@@ -666,7 +714,9 @@ static void compositeRigidBody(Context &ctx,
 
     // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = body_grp.numDofs;
-    float *M = (float*) ctx.memoryRangePointer<MassMatrixUnit>(body_grp.massMatrix);
+
+    float *M = body_grp.getMassMatrix(ctx);
+
     memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
@@ -686,7 +736,8 @@ static void compositeRigidBody(Context &ctx,
                 body_grp.bodies[i]);
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[i]);
-        float *S_i = (float *) ctx.memoryRangePointer<PhiUnit>(i_tmp_state.phiFull);
+
+        float *S_i = i_tmp_state.getPhiFull(ctx);
 
         // Temporary store for F = I_i^C S_i, column-major
         float *F = (float *) state_mgr->tmpAlloc(world_id,
@@ -720,7 +771,7 @@ static void compositeRigidBody(Context &ctx,
             auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
                 body_grp.bodies[j]);
 
-            float *S_j = (float *) ctx.memoryRangePointer<PhiUnit>(j_tmp_state.phiFull);
+            float *S_j = j_tmp_state.getPhiFull(ctx);
 
             // M_{ij} = M{ji} = F^T S_j
             float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
@@ -745,8 +796,8 @@ static void compositeRigidBody(Context &ctx,
 static void computeExpandedParent(Context &ctx,
                                   BodyGroupHierarchy &body_grp) {
     CountT numBodies = body_grp.numBodies;
-    int32_t *expandedParent = (int32_t*) ctx.memoryRangePointer<ParentArrayUnit>(
-        body_grp.expandedParent);
+
+    int32_t *expandedParent = body_grp.getExpandedParent(ctx);
 
     // Initialize n-N_B elements
     for(int32_t i = 0; i < body_grp.numDofs; ++i) {
@@ -775,16 +826,18 @@ static void factorizeMassMatrix(Context &ctx,
 
     // First copy in the mass matrix
     uint32_t total_dofs = body_grp.numDofs;
-    float *LTDL = (float *) ctx.memoryRangePointer<MassMatrixUnit>(body_grp.massMatrixLTDL);
-    float *massMatrix = (float *) ctx.memoryRangePointer<MassMatrixUnit>(body_grp.massMatrix);
+
+    float *LTDL = body_grp.getMassMatrixLTDL(ctx);
+    float *massMatrix = body_grp.getMassMatrix(ctx);
+
     memcpy(LTDL, massMatrix, total_dofs * total_dofs * sizeof(float));
+
     // Helper
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return LTDL[row + total_dofs * col];
     };
 
-    int32_t *expandedParent = (int32_t*) ctx.memoryRangePointer<ParentArrayUnit>(
-        body_grp.expandedParent);
+    int32_t *expandedParent = body_grp.getExpandedParent(ctx);
 
     // Backward pass through DOFs
     for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
@@ -808,8 +861,9 @@ static void computeFreeAcceleration(Context &ctx,
                                     BodyGroupHierarchy &body_grp) {
     // Negate the bias forces, solve
     CountT num_dofs = body_grp.numDofs;
-    float* bias = (float*) ctx.memoryRangePointer<
-        BodyFloatUnit>(body_grp.bias);
+
+    float *bias = body_grp.getBias(ctx);
+
     for (CountT i = 0; i < num_dofs; ++i) {
         bias[i] = -bias[i];
     }
@@ -833,7 +887,8 @@ static void recursiveNewtonEuler(Context &ctx,
         auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
         auto &velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
-        float *S = (float *) ctx.memoryRangePointer<PhiUnit>(tmp_state.phiFull);
+
+        float *S = tmp_state.getPhiFull(ctx);
 
         if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
             // Free bodies must be root of their hierarchy
@@ -913,7 +968,8 @@ static void recursiveNewtonEuler(Context &ctx,
     }
 
     // Backward pass to find bias forces
-    float *tau = (float*) ctx.memoryRangePointer<BodyFloatUnit>(body_grp.bias);
+    float *tau = body_grp.getBias(ctx);
+
     memset(tau, 0, total_dofs * sizeof(float));
 
     CountT dof_index = total_dofs;
@@ -924,7 +980,7 @@ static void recursiveNewtonEuler(Context &ctx,
 
         // tau_i = S_i^T f_i
         dof_index -= num_dofs.numDofs;
-        float *S = (float *) ctx.memoryRangePointer<PhiUnit>(tmp_state.phiFull);
+        float *S = tmp_state.getPhiFull(ctx);
         for(CountT row = 0; row < num_dofs.numDofs; ++row) {
             float *S_col = S + 6 * row;
             for(CountT k = 0; k < 6; ++k) {
@@ -1025,12 +1081,10 @@ static void gaussMinimizeFn(Context &ctx,
 
     uint32_t processed_dofs = 0;
     for (CountT i = 0; i < num_grps; ++i) {
-        float *local_mass = (float*) ctx.memoryRangePointer<
-            MassMatrixUnit>(hiers[i].massMatrix);
+        float *local_mass = hiers[i].getMassMatrix(ctx);
 
         for (CountT row = 0; row < hiers[i].numDofs; ++row) {
-            float* freeAcceleration = (float*) ctx.memoryRangePointer<
-                BodyFloatUnit>(hiers[i].bias);
+            float *freeAcceleration = hiers[i].getBias(ctx);
             full_free_acc[row + processed_dofs] = freeAcceleration[row];
 
             for (CountT col = 0; col < hiers[i].numDofs; ++col) {
@@ -1320,10 +1374,14 @@ void registerTypes(ECSRegistry &registry)
     registry.registerBundle<CVRigidBodyState>();
     registry.registerBundleAlias<SolverBundleAlias, CVRigidBodyState>();
 
+    registry.registerMemoryRangeElement<MRElement128b>();
+
+#if 0
     registry.registerMemoryRangeElement<PhiUnit>();
     registry.registerMemoryRangeElement<MassMatrixUnit>();
     registry.registerMemoryRangeElement<ParentArrayUnit>();
     registry.registerMemoryRangeElement<BodyFloatUnit>();
+#endif
 }
 
 void setCVGroupRoot(Context &ctx,
@@ -1648,7 +1706,6 @@ Entity makeCVBodyGroup(Context &ctx)
     return e;
 }
 
-#if 1
 void initializeHierarchies(Context &ctx) {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
@@ -1660,42 +1717,60 @@ void initializeHierarchies(Context &ctx) {
         BodyGroupHierarchy &grp = hiers[i];
         CountT num_dofs = grp.numDofs;
 
-        // Allocate memory for expanded parent array
-        CountT num_units = (num_dofs + ParentArrayUnit::kNumValsPerUnit - 1) /
-            ParentArrayUnit::kNumValsPerUnit;
-        grp.expandedParent = ctx.allocMemoryRange<ParentArrayUnit>(num_units);
-        // Compute expanded parent array
-        tasks::computeExpandedParent(ctx, grp);
+        uint64_t flts_per_elem = sizeof(MRElement128b) / sizeof(float);
+        uint64_t i32s_per_elem = sizeof(MRElement128b) / sizeof(int32_t);
 
-        // Allocate memory for bias forces/unconstrained acceleration
-        num_units = (num_dofs + BodyFloatUnit::kNumValsPerUnit - 1) /
-            BodyFloatUnit::kNumValsPerUnit;
-        grp.bias = ctx.allocMemoryRange<BodyFloatUnit>(num_units);
+        // We are going to do all dynamic allocations in one memory range to
+        // minimize fragmentation.
+        uint64_t required_bytes = 0;
 
-        // Allocate memory for mass matrix
-        CountT num_matrix_vals = num_dofs * num_dofs;
-        num_units = (num_matrix_vals + MassMatrixUnit::kNumValsPerUnit - 1) /
-            MassMatrixUnit::kNumValsPerUnit;
-        grp.massMatrix = ctx.allocMemoryRange<MassMatrixUnit>(num_units);
-        grp.massMatrixLTDL = ctx.allocMemoryRange<MassMatrixUnit>(num_units);
+        // Expanded parent arrary
+        grp.expandedParentOffset = required_bytes;
+        required_bytes += num_dofs * sizeof(int32_t);
 
-        // Allocate memory for each body (phi, phi_dot)
-        for(CountT j = 0; j < grp.numBodies; ++j) {
+        // Bias vector
+        grp.biasOffset = (uint32_t)required_bytes;
+        required_bytes += num_dofs * sizeof(float);
+
+        // Mass matrix
+        grp.massMatrixOffset = (uint32_t)required_bytes;
+        required_bytes += num_dofs * num_dofs * sizeof(float);
+
+        // LTDL mass matrix
+        grp.massMatrixLTDLOffset = (uint32_t)required_bytes;
+        required_bytes += num_dofs * num_dofs * sizeof(float);
+
+        // All the bodies' data
+        for (CountT j = 0; j < grp.numBodies; ++j) {
             Entity body = grp.bodies[j];
             auto &num_body_dofs = ctx.get<DofObjectNumDofs>(body);
             auto &tmp_state = ctx.get<DofObjectTmpState>(body);
+
+            tmp_state.phiFullOffset = (uint32_t)required_bytes;
+
             // Space for both phi and phi_dot
             CountT num_phi_vals = 2 * 6 * num_body_dofs.numDofs;
-            num_units = (num_phi_vals + PhiUnit::kNumValsPerUnit - 1) /
-                PhiUnit::kNumValsPerUnit;
-            tmp_state.phiFull = ctx.allocMemoryRange<PhiUnit>(num_units);
+            required_bytes += num_phi_vals * sizeof(float);
         }
+
+        // Do memory range allocation now
+        uint64_t num_elems = (required_bytes + sizeof(MRElement128b) - 1) /
+            sizeof(MRElement128b);
+        grp.dynData = ctx.allocMemoryRange<MRElement128b>(num_elems);
+
+        for (CountT j = 0; j < grp.numBodies; ++j) {
+            Entity body = grp.bodies[j];
+            auto &tmp_state = ctx.get<DofObjectTmpState>(body);
+            tmp_state.dynData = grp.dynData;
+        }
+
+        // Now do some post-allocation computations
+        tasks::computeExpandedParent(ctx, grp);
 
         // Forward kinematics to get positions
         tasks::forwardKinematics(ctx, grp);
     }
 }
-#endif
 
 
 }

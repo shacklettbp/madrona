@@ -191,11 +191,6 @@ struct Phi {
     float v[7];
 };
 
-struct PhiUnit {
-    static constexpr CountT kNumValsPerUnit = 16;
-    float values[kNumValsPerUnit];
-};
-
 // Just some space to store temporary per-entity data.
 struct DofObjectTmpState {
     // World-space position of body COM
@@ -212,7 +207,12 @@ struct DofObjectTmpState {
     Phi phi;
 
     // Contains storage for both complete form of Phi and Phi_dot
-    MemoryRange/*<PhiUnit>*/ phiFull;
+    // MemoryRange/*<PhiUnit>*/ phiFull;
+    // Offset in the full memory range for the entire body group
+    uint32_t phiFullOffset;
+
+    // Memory range containing everything.
+    MemoryRange dynData;
 
     // The spatial inertia tensor in Plücker coordinates
     // Hold the combined inertia of subtree after combineSpatialInertia
@@ -222,6 +222,9 @@ struct DofObjectTmpState {
     SpatialVector sVel;
     SpatialVector sAcc;
     SpatialVector sForce;
+
+
+    float * getPhiFull(Context &ctx);
 };
 
 struct DofObjectHierarchyDesc {
@@ -265,24 +268,6 @@ struct DofObjectArchetype : public Archetype<
     DofObjectNumDofs
 > {};
 
-
-
-// Example of range map allocation usage.
-struct MassMatrixUnit {
-    static constexpr CountT kNumValsPerUnit = 16;
-    float values[kNumValsPerUnit];
-};
-
-struct ParentArrayUnit {
-    static constexpr CountT kNumValsPerUnit = 16;
-    int32_t values[kNumValsPerUnit];
-};
-
-struct BodyFloatUnit {
-    static constexpr CountT kNumValsPerUnit = 16;
-    float values[kNumValsPerUnit];
-};
-
 struct BodyGroupHierarchy {
     static constexpr uint32_t kMaxJoints = 8;
 
@@ -293,25 +278,36 @@ struct BodyGroupHierarchy {
     // Total number of DOFs in the body group
     uint32_t numDofs;
 
+    // Memory range contains data for all data that is dynamically sized.
+    MemoryRange dynData;
+
     // "Expanded" parent array for kinematic tree (chain of 1-DOF joints)
     //   used for factorization. See Featherstone pg. 114
-    MemoryRange/*<ParentArrayUnit>*/ expandedParent;
+    uint32_t expandedParentOffset;
 
     // Center of mass of the body group
     math::Vector3 comPos;
 
     // Mass matrix (num_dof x num_dof) of the body group
-    MemoryRange/*<MassMatrixUnit>*/ massMatrix;
+    uint32_t massMatrixOffset;
 
     // LTDL factorization of matrix
-    MemoryRange/*<MassMatrixUnit>*/ massMatrixLTDL;
+    uint32_t massMatrixLTDLOffset;
 
     // Bias forces (num_dof) of the body group, gets replaced by the
     //  unconstrained acceleration after computeFreeAcceleration
-    MemoryRange/*<BodyFloatUnit>*/ bias;
+    uint32_t biasOffset;
 
     // Temporary index used during stacking
     uint32_t tmpIdx;
+
+
+
+    // Some helpers for the memory range
+    float * getMassMatrix(Context &ctx);
+    float * getMassMatrixLTDL(Context &ctx);
+    float * getBias(Context &ctx);
+    int32_t * getExpandedParent(Context &ctx);
 };
 
 struct BodyGroup : public Archetype<
