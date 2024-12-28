@@ -225,12 +225,6 @@ struct DofObjectTmpState {
 };
 
 struct DofObjectHierarchyDesc {
-    // The child is going to query the sync value of the parent.
-    // If the value is 0, the child must keep waiting. Otherwise,
-    // if it's 1, that means that the child can look up whatever
-    // value it's been waiting on.
-    AtomicU32 sync;
-    
     Entity parent;
 
     // Relative position of the joint to the parent's COM.

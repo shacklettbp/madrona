@@ -24,11 +24,6 @@ struct CVRigidBodyState : Bundle<
     CVPhysicalComponent
 > {};
 
-struct CVHierarchyCounter
-{
-   uint32_t num_bodies;
-};
-
 struct CVSingleton {
     CVXSolve *cvxSolve;
 };
@@ -1306,7 +1301,6 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<CVPhysicalComponent>();
 
     registry.registerSingleton<CVSingleton>();
-    registry.registerSingleton<CVHierarchyCounter>();
 
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
@@ -1340,7 +1334,6 @@ void setCVGroupRoot(Context &ctx,
         ctx.get<CVPhysicalComponent>(body).physicsEntity;
 
     auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physics_entity);
-    hierarchy.sync.store_relaxed(0);
     hierarchy.leaf = true;
     hierarchy.index = 0;
     hierarchy.parentIndex = -1;
@@ -1370,7 +1363,6 @@ void makeCVPhysicsEntity(Context &ctx,
 
 #if 0
     auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physical_entity);
-    hierarchy.sync.store_relaxed(0);
     hierarchy.leaf = true;
 #endif
 
@@ -1572,7 +1564,6 @@ void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
 void init(Context &ctx, CVXSolve *cvx_solve)
 {
     ctx.singleton<CVSingleton>().cvxSolve = cvx_solve;
-    ctx.singleton<CVHierarchyCounter>().num_bodies = 0;
 }
 
 void setCVEntityParentHinge(Context &ctx,
