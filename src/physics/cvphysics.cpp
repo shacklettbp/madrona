@@ -1524,20 +1524,18 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                  DofObjectAcceleration,
                  DofObjectNumDofs
             >>({gauss_node});
-#endif
 
-#if 0
         auto post_forward_kinematics = builder.addToGraph<ParallelForNode<Context,
              tasks::forwardKinematics,
                 BodyGroupHierarchy
-            >>({});
+            >>({int_node});
 
         cur_node =
             builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
                 Position,
                 Rotation,
                 CVPhysicalComponent
-            >>({});
+            >>({post_forward_kinematics});
 #endif
 
         cur_node = builder.addToGraph<
@@ -1650,7 +1648,7 @@ Entity makeCVBodyGroup(Context &ctx)
     return e;
 }
 
-#if 0
+#if 1
 void initializeHierarchies(Context &ctx) {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
@@ -1665,21 +1663,21 @@ void initializeHierarchies(Context &ctx) {
         // Allocate memory for expanded parent array
         CountT num_units = (num_dofs + ParentArrayUnit::kNumValsPerUnit - 1) /
             ParentArrayUnit::kNumValsPerUnit;
-        grp.expandedParent = ctx.allocRangeMap<ParentArrayUnit>(num_units);
+        grp.expandedParent = ctx.allocMemoryRange<ParentArrayUnit>(num_units);
         // Compute expanded parent array
         tasks::computeExpandedParent(ctx, grp);
 
         // Allocate memory for bias forces/unconstrained acceleration
         num_units = (num_dofs + BodyFloatUnit::kNumValsPerUnit - 1) /
             BodyFloatUnit::kNumValsPerUnit;
-        grp.bias = ctx.allocRangeMap<BodyFloatUnit>(num_units);
+        grp.bias = ctx.allocMemoryRange<BodyFloatUnit>(num_units);
 
         // Allocate memory for mass matrix
         CountT num_matrix_vals = num_dofs * num_dofs;
         num_units = (num_matrix_vals + MassMatrixUnit::kNumValsPerUnit - 1) /
             MassMatrixUnit::kNumValsPerUnit;
-        grp.massMatrix = ctx.allocRangeMap<MassMatrixUnit>(num_units);
-        grp.massMatrixLTDL = ctx.allocRangeMap<MassMatrixUnit>(num_units);
+        grp.massMatrix = ctx.allocMemoryRange<MassMatrixUnit>(num_units);
+        grp.massMatrixLTDL = ctx.allocMemoryRange<MassMatrixUnit>(num_units);
 
         // Allocate memory for each body (phi, phi_dot)
         for(CountT j = 0; j < grp.numBodies; ++j) {
@@ -1690,7 +1688,7 @@ void initializeHierarchies(Context &ctx) {
             CountT num_phi_vals = 2 * 6 * num_body_dofs.numDofs;
             num_units = (num_phi_vals + PhiUnit::kNumValsPerUnit - 1) /
                 PhiUnit::kNumValsPerUnit;
-            tmp_state.phiFull = ctx.allocRangeMap<PhiUnit>(num_units);
+            tmp_state.phiFull = ctx.allocMemoryRange<PhiUnit>(num_units);
         }
 
         // Forward kinematics to get positions
