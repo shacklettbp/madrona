@@ -55,6 +55,13 @@ int32_t * BodyGroupHierarchy::getExpandedParent(Context &ctx)
     return (int32_t *)bytes;
 }
 
+Entity * BodyGroupHierarchy::bodies(Context &ctx)
+{
+    uint8_t *bytes =
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(mrBodies);
+    return (Entity *)bytes;
+}
+
 struct Contact : Archetype<
     ContactConstraint,
     ContactTmpState
@@ -89,13 +96,13 @@ inline void computeExpandedParent(Context &ctx,
     int32_t map[numBodies];
     map[0] = -1;
     for(int32_t i = 1; i < numBodies; ++i) {
-        uint32_t n_i = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]).numDofs;
+        uint32_t n_i = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[i]).numDofs;
         map[i] = map[i - 1] + (int32_t) n_i;
     }
     // Finish expanded parent array
     for(int32_t i = 1; i < numBodies; ++i) {
         int32_t parent_idx = ctx.get<DofObjectHierarchyDesc>(
-            body_grp.bodies[i]).parentIndex;
+            body_grp.bodies(ctx)[i]).parentIndex;
         expandedParent[map[i - 1] + 1] = map[parent_idx];
     }
 }
@@ -104,8 +111,8 @@ inline void forwardKinematics(Context &ctx,
                               BodyGroupHierarchy &body_grp)
 {
     { // Set the parent's state
-        auto &position = ctx.get<DofObjectPosition>(body_grp.bodies[0]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[0]);
+        auto &position = ctx.get<DofObjectPosition>(body_grp.bodies(ctx)[0]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[0]);
 
         tmp_state.comPos = {
             position.q[0],
@@ -128,10 +135,11 @@ inline void forwardKinematics(Context &ctx,
 
     // Forward pass from parent to children
     for (int i = 1; i < body_grp.numBodies; ++i) {
-        auto &position = ctx.get<DofObjectPosition>(body_grp.bodies[i]);
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+        Entity body = body_grp.bodies(ctx)[i];
+        auto &position = ctx.get<DofObjectPosition>(body);
+        auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body);
+        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
 
         Entity parent_e = hier_desc.parent;
         DofObjectTmpState &parent_tmp_state =
@@ -244,7 +252,7 @@ inline void initHierarchies(Context &ctx,
 
     // All the bodies' data
     for (CountT j = 0; j < grp.numBodies; ++j) {
-        Entity body = grp.bodies[j];
+        Entity body = grp.bodies(ctx)[j];
         auto &num_body_dofs = ctx.get<DofObjectNumDofs>(body);
         auto &tmp_state = ctx.get<DofObjectTmpState>(body);
 
@@ -261,7 +269,7 @@ inline void initHierarchies(Context &ctx,
     grp.dynData = ctx.allocMemoryRange<MRElement128b>(num_elems);
 
     for (CountT j = 0; j < grp.numBodies; ++j) {
-        Entity body = grp.bodies[j];
+        Entity body = grp.bodies(ctx)[j];
         auto &tmp_state = ctx.get<DofObjectTmpState>(body);
         tmp_state.dynData = grp.dynData;
     }
@@ -464,9 +472,10 @@ inline void computeCenterOfMass(Context &ctx,
     Vector3 hierarchy_com = Vector3::zero();
     float total_mass = 0.f;
     for (int i = 0; i < body_grp.numBodies; ++i) {
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-        auto &obj_id = ctx.get<ObjectID>(body_grp.bodies[i]);
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
+        Entity body = body_grp.bodies(ctx)[i];
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body);
+        auto &obj_id = ctx.get<ObjectID>(body);
+        auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
         // Fixed bodies should not contribute to the COM
         if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
             continue;
@@ -485,9 +494,9 @@ inline void computeSpatialInertia(Context &ctx,
 
     for(int i = 0; i < body_grp.numBodies; i++)
     {
-        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        auto obj_id = ctx.get<ObjectID>(body_grp.bodies[i]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[i]);
+        auto obj_id = ctx.get<ObjectID>(body_grp.bodies(ctx)[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[i]);
 
         if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
             tmp_state.spatialInertia.mass = 0.f;
@@ -531,11 +540,11 @@ inline void combineSpatialInertias(Context &ctx,
     // Backward pass from children to parent
     for (CountT i = body_grp.numBodies-1; i > 0; --i) {
         auto &current_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies[i]);
+                body_grp.bodies(ctx)[i]);
         auto &current_tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[i]);
+                body_grp.bodies(ctx)[i]);
         auto &parent_tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[current_hier_desc.parentIndex]);
+                body_grp.bodies(ctx)[current_hier_desc.parentIndex]);
         parent_tmp_state.spatialInertia += current_tmp_state.spatialInertia;
     }
 }
@@ -666,8 +675,8 @@ inline void computePhiHierarchy(Context &ctx,
                                 BodyGroupHierarchy &body_grp)
 {
     for (int i = 0; i < body_grp.numBodies; ++i) {
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[i]);
         computePhi(ctx, num_dofs, tmp_state, body_grp.comPos);
     }
 }
@@ -693,18 +702,16 @@ inline float* computeContactJacobian(Context &ctx,
     for (CountT i = 0; i < body_grp.numBodies; ++i) {
         block_start[i] = block_offset;
         block_offset += ctx.get<DofObjectNumDofs>(
-                body_grp.bodies[i]).numDofs;
+                body_grp.bodies(ctx)[i]).numDofs;
     }
 
     // Populate J_C by traversing up the hierarchy
     int32_t curr_idx = hier_desc.index;
     while(curr_idx != -1) {
-        auto &curr_tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[curr_idx]);
-        auto &curr_num_dofs = ctx.get<DofObjectNumDofs>(
-                body_grp.bodies[curr_idx]);
-        auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies[curr_idx]);
+        Entity body = body_grp.bodies(ctx)[curr_idx];
+        auto &curr_tmp_state = ctx.get<DofObjectTmpState>(body);
+        auto &curr_num_dofs = ctx.get<DofObjectNumDofs>(body);
+        auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
 
         // Populate columns of J_C
         float *S = computePhi(ctx, curr_num_dofs, curr_tmp_state, origin);
@@ -811,17 +818,15 @@ inline void compositeRigidBody(Context &ctx,
     for (CountT i = 0; i < body_grp.numBodies; ++i) {
         block_start[i] = block_offset;
         block_offset += ctx.get<DofObjectNumDofs>(
-                body_grp.bodies[i]).numDofs;
+                body_grp.bodies(ctx)[i]).numDofs;
     }
 
     // Backward pass
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
-        auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies[i]);
-        auto &i_tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[i]);
-        auto &i_num_dofs = ctx.get<DofObjectNumDofs>(
-                body_grp.bodies[i]);
+        Entity body = body_grp.bodies(ctx)[i];
+        auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
+        auto &i_tmp_state = ctx.get<DofObjectTmpState>(body);
+        auto &i_num_dofs = ctx.get<DofObjectNumDofs>(body);
 
         float *S_i = i_tmp_state.getPhiFull(ctx);
 
@@ -851,11 +856,10 @@ inline void compositeRigidBody(Context &ctx,
         auto parent_j = i_hier_desc.parent;
         while(parent_j != Entity::none()) {
             j = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies[j]).parentIndex;
-            auto &j_tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies[j]);
-            auto &j_num_dofs = ctx.get<DofObjectNumDofs>(
-                body_grp.bodies[j]);
+                body_grp.bodies(ctx)[j]).parentIndex;
+            Entity body = body_grp.bodies(ctx)[j];
+            auto &j_tmp_state = ctx.get<DofObjectTmpState>(body);
+            auto &j_num_dofs = ctx.get<DofObjectNumDofs>(body);
 
             float *S_j = j_tmp_state.getPhiFull(ctx);
 
@@ -873,7 +877,7 @@ inline void compositeRigidBody(Context &ctx,
                 }
             }
             parent_j = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies[j]).parent;
+                body_grp.bodies(ctx)[j]).parent;
         }
     }
 }
@@ -943,10 +947,11 @@ inline void recursiveNewtonEuler(Context &ctx,
     //  2. accelerations. a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i}
     //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
     for (int i = 0; i < body_grp.numBodies; ++i) {
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
-        auto &velocity = ctx.get<DofObjectVelocity>(body_grp.bodies[i]);
-        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
+        Entity body = body_grp.bodies(ctx)[i];
+        auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body);
+        auto &velocity = ctx.get<DofObjectVelocity>(body);
+        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
 
         float *S = tmp_state.getPhiFull(ctx);
 
@@ -1034,9 +1039,9 @@ inline void recursiveNewtonEuler(Context &ctx,
 
     CountT dof_index = total_dofs;
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
-        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies[i]);
-        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies[i]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies[i]);
+        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies(ctx)[i]);
+        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[i]);
+        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[i]);
 
         // tau_i = S_i^T f_i
         dof_index -= num_dofs.numDofs;
@@ -1167,9 +1172,9 @@ inline void gaussMinimizeFn(Context &ctx,
     for (CountT i = 0; i < num_grps; ++i) {
         for (CountT j = 0; j < hiers[i].numBodies; ++j) {
             DofObjectVelocity vel = ctx.get<DofObjectVelocity>(
-                    hiers[i].bodies[j]);
+                    hiers[i].bodies(ctx)[j]);
             DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(
-                    hiers[i].bodies[j]);
+                    hiers[i].bodies(ctx)[j]);
             for (CountT k = 0; k < num_dofs.numDofs; ++k) {
                 full_vel[processed_dofs] = vel.qv[k];
                 processed_dofs++;
@@ -1296,7 +1301,7 @@ inline void gaussMinimizeFn(Context &ctx,
             {
                 for (CountT j = 0; j < hiers[i].numBodies; j++)
                 {
-                    auto body = hiers[i].bodies[j];
+                    auto body = hiers[i].bodies(ctx)[j];
                     auto numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
                     auto &acceleration = ctx.get<DofObjectAcceleration>(body);
                     for (CountT k = 0; k < numDofs; k++) {
@@ -1456,12 +1461,12 @@ void setCVGroupRoot(Context &ctx,
     hierarchy.index = 0;
     hierarchy.parentIndex = -1;
     hierarchy.parent = Entity::none();
-    hierarchy.bodyGroup = ctx.loc(body_group);
+    hierarchy.bodyGroup = body_group;
 
     auto &body_grp_hier = ctx.get<BodyGroupHierarchy>(body_group);
 
     body_grp_hier.numBodies = 1;
-    body_grp_hier.bodies[0] = physics_entity;
+    body_grp_hier.bodies(ctx)[0] = physics_entity;
     body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(physics_entity).numDofs;
 }
 
@@ -1719,13 +1724,13 @@ void setCVEntityParentHinge(Context &ctx,
     hier_desc.hingeAxis = hinge_axis;
 
     hier_desc.leaf = true;
-    hier_desc.bodyGroup = ctx.loc(body_grp);
+    hier_desc.bodyGroup = body_grp;
 
     hier_desc.index = grp.numBodies;
     hier_desc.parentIndex = parent_hier_desc.index;
 
 
-    grp.bodies[grp.numBodies] = child_physics_entity;
+    grp.bodies(ctx)[grp.numBodies] = child_physics_entity;
 
     // Make the parent no longer a leaf
     ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
@@ -1756,13 +1761,13 @@ void setCVEntityParentBall(Context &ctx,
     hier_desc.relPositionLocal = rel_pos_child;
 
     hier_desc.leaf = true;
-    hier_desc.bodyGroup = ctx.loc(body_grp);
+    hier_desc.bodyGroup = body_grp;
 
     hier_desc.index = grp.numBodies;
     hier_desc.parentIndex = parent_hier_desc.index;
 
 
-    grp.bodies[grp.numBodies] = child_physics_entity;
+    grp.bodies(ctx)[grp.numBodies] = child_physics_entity;
 
     // Make the parent no longer a leaf
     ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
@@ -1771,10 +1776,18 @@ void setCVEntityParentBall(Context &ctx,
     grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
 }
 
-Entity makeCVBodyGroup(Context &ctx)
+Entity makeCVBodyGroup(Context &ctx, uint32_t num_bodies)
 {
     Entity e = ctx.makeEntity<BodyGroup>();
-    ctx.get<BodyGroupHierarchy>(e).numBodies = 0;
+
+    auto &hier = ctx.get<BodyGroupHierarchy>(e);
+    hier.numBodies = 0;
+
+    uint64_t mr_num_bytes = num_bodies * sizeof(Entity);
+    uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
+        sizeof(MRElement128b);
+    hier.mrBodies = ctx.allocMemoryRange<MRElement128b>(num_elems);
+
     return e;
 }
 

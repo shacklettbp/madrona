@@ -249,7 +249,7 @@ struct DofObjectHierarchyDesc {
     // Index of the parent in the body group hierarchy. -1 if root.
     int32_t parentIndex;
 
-    Loc bodyGroup;
+    Entity bodyGroup;
 };
 
 struct DofObjectArchetype : public Archetype<
@@ -269,11 +269,9 @@ struct DofObjectArchetype : public Archetype<
 > {};
 
 struct BodyGroupHierarchy {
-    static constexpr uint32_t kMaxJoints = 8;
-
     // This includes the free body too which will be at index 0.
     uint32_t numBodies;
-    Entity bodies[kMaxJoints];
+    MemoryRange mrBodies;
 
     // Total number of DOFs in the body group
     uint32_t numDofs;
@@ -308,6 +306,7 @@ struct BodyGroupHierarchy {
     float * getMassMatrixLTDL(Context &ctx);
     float * getBias(Context &ctx);
     int32_t * getExpandedParent(Context &ctx);
+    Entity * bodies(Context &ctx);
 };
 
 struct BodyGroup : public Archetype<
@@ -316,7 +315,7 @@ struct BodyGroup : public Archetype<
 
  
 
-Entity makeCVBodyGroup(Context &ctx);
+Entity makeCVBodyGroup(Context &ctx, uint32_t num_bodies);
     
 // For now, initial velocities are just going to be 0
 // Also, when defining a body group, you need to make sure to define in
