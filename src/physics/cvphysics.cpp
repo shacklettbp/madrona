@@ -465,25 +465,77 @@ inline Mat3x3 skewSymmetricMatrix(Vector3 v)
 
 // Computes center of mass of body hierarchy as Plücker origin
 // (for numerical stability)
+#if 0
 inline void computeCenterOfMass(Context &ctx,
-                                BodyGroupHierarchy &body_grp) {
+                                BodyGroupHierarchy &body_grp)
+{
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
 
     Vector3 hierarchy_com = Vector3::zero();
     float total_mass = 0.f;
+
     for (int i = 0; i < body_grp.numBodies; ++i) {
         Entity body = body_grp.bodies(ctx)[i];
         auto &tmp_state = ctx.get<DofObjectTmpState>(body);
         auto &obj_id = ctx.get<ObjectID>(body);
         auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
+
         // Fixed bodies should not contribute to the COM
         if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
             continue;
         }
+
         float mass = 1.f / obj_mgr.metadata[obj_id.idx].mass.invMass;
         hierarchy_com += mass * tmp_state.comPos;
         total_mass += mass;
     }
+
+    body_grp.comPos = hierarchy_com / total_mass;
+}
+#endif
+
+inline void computeBodyCOM(Context &ctx,
+                           DofObjectTmpState &tmp_state,
+                           const ObjectID obj_id,
+                           const DofObjectNumDofs num_dofs)
+{
+    if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+        tmp_state.scratch[0] =
+            tmp_state.scratch[0] =
+            tmp_state.scratch[0] =
+            tmp_state.scratch[0] = 0.f;
+    } else {
+        const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+
+        float mass = 1.f / obj_mgr.metadata[obj_id.idx].mass.invMass;
+
+        tmp_state.scratch[0] = mass * tmp_state.comPos.x;
+        tmp_state.scratch[1] = mass * tmp_state.comPos.y;
+        tmp_state.scratch[2] = mass * tmp_state.comPos.z;
+        tmp_state.scratch[3] = mass;
+    }
+}
+
+inline void computeTotalCOM(Context &ctx,
+                            BodyGroupHierarchy &body_grp)
+{
+    Vector3 hierarchy_com = Vector3::zero();
+    float total_mass = 0.f;
+
+    Entity *bodies = body_grp.bodies(ctx);
+
+    for (int i = 0; i < body_grp.numBodies; ++i) {
+        auto &tmp_state = ctx.get<DofObjectTmpState>(bodies[i]);
+
+        hierarchy_com += Vector3 {
+            tmp_state.scratch[0],
+            tmp_state.scratch[1],
+            tmp_state.scratch[2] 
+        };
+
+        total_mass += tmp_state.scratch[3];
+    }
+
     body_grp.comPos = hierarchy_com / total_mass;
 }
 
@@ -1601,15 +1653,29 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         gauss_node = builder.addToGraph<ResetTmpAllocNode>(
                 {gauss_node});
 #else
+#if 0
         auto compute_center_of_mass = builder.addToGraph<ParallelForNode<Context,
              tasks::computeCenterOfMass,
+                BodyGroupHierarchy
+            >>({run_narrowphase});
+#endif
+
+        auto compute_body_coms = builder.addToGraph<ParallelForNode<Context,
+             tasks::computeBodyCOM,
+                DofObjectTmpState,
+                ObjectID,
+                DofObjectNumDofs
+            >>({run_narrowphase});
+
+        auto compute_total_com = builder.addToGraph<ParallelForNode<Context,
+             tasks::computeTotalCOM,
                 BodyGroupHierarchy
             >>({run_narrowphase});
 
         auto compute_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::computeSpatialInertia,
                 BodyGroupHierarchy
-            >>({compute_center_of_mass});
+            >>({compute_total_com});
 
         auto compute_phi = builder.addToGraph<ParallelForNode<Context,
              tasks::computePhiHierarchy,

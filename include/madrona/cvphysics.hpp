@@ -223,6 +223,7 @@ struct DofObjectTmpState {
     SpatialVector sAcc;
     SpatialVector sForce;
 
+    float scratch[4];
 
     float * getPhiFull(Context &ctx);
 };
