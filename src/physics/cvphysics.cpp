@@ -463,37 +463,6 @@ inline Mat3x3 skewSymmetricMatrix(Vector3 v)
     };
 }
 
-// Computes center of mass of body hierarchy as Plücker origin
-// (for numerical stability)
-#if 0
-inline void computeCenterOfMass(Context &ctx,
-                                BodyGroupHierarchy &body_grp)
-{
-    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-
-    Vector3 hierarchy_com = Vector3::zero();
-    float total_mass = 0.f;
-
-    for (int i = 0; i < body_grp.numBodies; ++i) {
-        Entity body = body_grp.bodies(ctx)[i];
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body);
-        auto &obj_id = ctx.get<ObjectID>(body);
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
-
-        // Fixed bodies should not contribute to the COM
-        if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
-            continue;
-        }
-
-        float mass = 1.f / obj_mgr.metadata[obj_id.idx].mass.invMass;
-        hierarchy_com += mass * tmp_state.comPos;
-        total_mass += mass;
-    }
-
-    body_grp.comPos = hierarchy_com / total_mass;
-}
-#endif
-
 inline void computeBodyCOM(Context &ctx,
                            DofObjectTmpState &tmp_state,
                            const ObjectID obj_id,
@@ -540,6 +509,7 @@ inline void computeTotalCOM(Context &ctx,
 }
 
 // Pre-CRB: compute the spatial inertia in common Plücker coordinates
+#if 0
 inline void computeSpatialInertia(Context &ctx,
                                   BodyGroupHierarchy &body_grp) {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
@@ -583,6 +553,52 @@ inline void computeSpatialInertia(Context &ctx,
         tmp_state.spatialInertia.mass = mass;
         tmp_state.spatialInertia.mCom = mass * adjustedCom;
     }
+}
+#endif
+
+inline void computeSpatialInertias(Context &ctx,
+                                   DofObjectTmpState &tmp_state,
+                                   const DofObjectHierarchyDesc hier_desc,
+                                   const ObjectID obj_id,
+                                   const DofObjectNumDofs num_dofs)
+{
+    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+
+    if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+        tmp_state.spatialInertia.mass = 0.f;
+        return;
+    }
+
+    Vector3 body_grp_com_pos = ctx.get<BodyGroupHierarchy>(
+            hier_desc.bodyGroup).comPos;
+
+    RigidBodyMetadata metadata = obj_mgr.metadata[obj_id.idx];
+    Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
+    float mass = 1.f / metadata.mass.invMass;
+
+    // We need to find inertia tensor in world space orientation
+    Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
+    // I_world = R * I * R^T (since R^T transforms from world to local)
+    Mat3x3 i_world_frame = rot_mat * inertia * rot_mat.transpose();
+
+    // Compute the 3x3 skew-symmetric matrix (r^x)
+    // (where r is from Plücker origin to COM)
+    Vector3 adjustedCom = tmp_state.comPos - body_grp_com_pos;
+    Mat3x3 sym_mat = skewSymmetricMatrix(adjustedCom);
+    // (I_world - m r^x r^x)
+    Mat3x3 inertia_mat = i_world_frame - (mass * sym_mat * sym_mat);
+
+    // Take only the upper triangular part (since it's symmetric)
+    tmp_state.spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
+    tmp_state.spatialInertia.spatial_inertia[1] = inertia_mat[1][1];
+    tmp_state.spatialInertia.spatial_inertia[2] = inertia_mat[2][2];
+    tmp_state.spatialInertia.spatial_inertia[3] = inertia_mat[1][0];
+    tmp_state.spatialInertia.spatial_inertia[4] = inertia_mat[2][0];
+    tmp_state.spatialInertia.spatial_inertia[5] = inertia_mat[2][1];
+
+    // Rest of parameters
+    tmp_state.spatialInertia.mass = mass;
+    tmp_state.spatialInertia.mCom = mass * adjustedCom;
 }
 
 // Compute spatial inertia of subtree rooted at the body.
@@ -1653,13 +1669,6 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         gauss_node = builder.addToGraph<ResetTmpAllocNode>(
                 {gauss_node});
 #else
-#if 0
-        auto compute_center_of_mass = builder.addToGraph<ParallelForNode<Context,
-             tasks::computeCenterOfMass,
-                BodyGroupHierarchy
-            >>({run_narrowphase});
-#endif
-
         auto compute_body_coms = builder.addToGraph<ParallelForNode<Context,
              tasks::computeBodyCOM,
                 DofObjectTmpState,
@@ -1673,8 +1682,11 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
             >>({run_narrowphase});
 
         auto compute_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
-             tasks::computeSpatialInertia,
-                BodyGroupHierarchy
+             tasks::computeSpatialInertias,
+                DofObjectTmpState,
+                DofObjectHierarchyDesc,
+                ObjectID,
+                DofObjectNumDofs
             >>({compute_total_com});
 
         auto compute_phi = builder.addToGraph<ParallelForNode<Context,
