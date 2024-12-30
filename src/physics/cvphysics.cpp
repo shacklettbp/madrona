@@ -76,6 +76,16 @@ struct CVRigidBodyState : Bundle<
 > {};
 
 struct CVSingleton {
+    uint32_t totalNumDofs;
+    uint32_t numContactPts;
+    float h;
+    float *mass;
+    float *freeAcc;
+    float *vel;
+    float *J_c;
+    float *mu;
+    float *penetrations;
+
     CVXSolve *cvxSolve;
 };
 
@@ -1189,8 +1199,16 @@ inline void processContacts(Context &ctx,
     tmp_state.mu = mu;
 }
 
-inline void gaussMinimizeFn(Context &ctx,
-                            CVSingleton &cv_sing)
+// TODO: This will require a complete rewrite for GPU version.
+// Will keep for now for the sake of having first iteration
+// of the numerical solver written.
+//
+// Renaming to brobdingnag for the time beingbecause it does a 
+// ton of crap - will need to separate.
+//
+// (https://en.wikipedia.org/wiki/Brobdingnag)
+inline void brobdingnag(Context &ctx,
+                        CVSingleton &cv_sing)
 {
     uint32_t world_id = ctx.worldID().idx;
 
@@ -1378,17 +1396,36 @@ inline void gaussMinimizeFn(Context &ctx,
         }
     }
 
+    cv_sing.totalNumDofs = total_num_dofs;
+    cv_sing.numContactPts = total_contact_pts;
+    cv_sing.h = physics_state.h;
+    cv_sing.mass = total_mass_mat;
+    cv_sing.freeAcc = full_free_acc;
+    cv_sing.vel = full_vel;
+    cv_sing.J_c = J_c;
+    cv_sing.mu = full_mu;
+    cv_sing.penetrations = full_penetration;
+}
+
+inline void solveCPU(Context &ctx,
+                     CVSingleton &cv_sing)
+{
+    uint32_t world_id = ctx.worldID().idx;
+
+    StateManager *state_mgr = ctx.getStateManager();
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+
     // Call the solver
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
-        cv_sing.cvxSolve->totalNumDofs = total_num_dofs;
-        cv_sing.cvxSolve->numContactPts = total_contact_pts;
-        cv_sing.cvxSolve->h = physics_state.h;
-        cv_sing.cvxSolve->mass = total_mass_mat;
-        cv_sing.cvxSolve->free_acc = full_free_acc;
-        cv_sing.cvxSolve->vel = full_vel;
-        cv_sing.cvxSolve->J_c = J_c;
-        cv_sing.cvxSolve->mu = full_mu;
-        cv_sing.cvxSolve->penetrations = full_penetration;
+        cv_sing.cvxSolve->totalNumDofs = cv_sing.totalNumDofs;
+        cv_sing.cvxSolve->numContactPts = cv_sing.numContactPts;
+        cv_sing.cvxSolve->h = cv_sing.h;
+        cv_sing.cvxSolve->mass = cv_sing.mass;
+        cv_sing.cvxSolve->free_acc = cv_sing.freeAcc;
+        cv_sing.cvxSolve->vel = cv_sing.vel;
+        cv_sing.cvxSolve->J_c = cv_sing.J_c;
+        cv_sing.cvxSolve->mu = cv_sing.mu;
+        cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
 
         cv_sing.cvxSolve->callSolve.store_release(1);
         while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
@@ -1397,6 +1434,10 @@ inline void gaussMinimizeFn(Context &ctx,
         float *res = cv_sing.cvxSolve->resPtr;
 
         if (res) {
+            BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
+                BodyGroup, BodyGroupHierarchy>(world_id);
+            CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
+
             // Update the body accelerations
             uint32_t processed_dofs = 0;
             for (CountT i = 0; i < num_grps; ++i)
@@ -1415,7 +1456,6 @@ inline void gaussMinimizeFn(Context &ctx,
         }
     }
 }
-
 
 inline void integrationStep(Context &ctx,
                             DofObjectPosition &position,
@@ -1762,10 +1802,15 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 ContactTmpState
             >>({compute_free_acc});
 
-        auto gauss_node = builder.addToGraph<ParallelForNode<Context,
-             tasks::gaussMinimizeFn,
+        auto thing = builder.addToGraph<ParallelForNode<Context,
+             tasks::brobdingnag,
                 CVSingleton
             >>({contact_node});
+
+        auto solve = builder.addToGraph<ParallelForNode<Context,
+             tasks::solveCPU,
+                CVSingleton
+            >>({thing});
 
         auto int_node = builder.addToGraph<ParallelForNode<Context,
              tasks::integrationStep,
@@ -1773,7 +1818,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                  DofObjectVelocity,
                  DofObjectAcceleration,
                  DofObjectNumDofs
-            >>({gauss_node});
+            >>({solve});
 
         auto post_forward_kinematics = builder.addToGraph<ParallelForNode<Context,
              tasks::forwardKinematics,
