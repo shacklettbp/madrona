@@ -607,19 +607,21 @@ inline void combineSpatialInertias(Context &ctx,
 {
     // Backward pass from children to parent
     for (CountT i = body_grp.numBodies-1; i > 0; --i) {
-        auto &current_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                body_grp.bodies(ctx)[i]);
-        auto &current_tmp_state = ctx.get<DofObjectTmpState>(
-                body_grp.bodies(ctx)[i]);
+        Entity body_i = body_grp.bodies(ctx)[i];
+
+        auto &current_hier_desc = ctx.get<DofObjectHierarchyDesc>(body_i);
+        auto &current_tmp_state = ctx.get<DofObjectTmpState>(body_i);
+
         auto &parent_tmp_state = ctx.get<DofObjectTmpState>(
                 body_grp.bodies(ctx)[current_hier_desc.parentIndex]);
+
         parent_tmp_state.spatialInertia += current_tmp_state.spatialInertia;
     }
 }
 
 // Computes the Phi matrix from generalized velocities to Plücker coordinates
 inline float* computePhi(Context &ctx,
-                         DofObjectNumDofs &num_dofs,
+                         const DofObjectNumDofs num_dofs,
                          DofObjectTmpState &tmp_state,
                          Vector3 origin)
 {
@@ -740,12 +742,13 @@ inline float* computePhiDot(Context &ctx,
 
 // First pass to compute Phi with body COM as origin
 inline void computePhiHierarchy(Context &ctx,
-                                BodyGroupHierarchy &body_grp)
+                                DofObjectTmpState &tmp_state,
+                                const DofObjectNumDofs num_dofs,
+                                const DofObjectHierarchyDesc &desc)
 {
-    for (int i = 0; i < body_grp.numBodies; ++i) {
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[i]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[i]);
-        computePhi(ctx, num_dofs, tmp_state, body_grp.comPos);
+    if (num_dofs.numDofs > 0) {
+        Vector3 com_pos = ctx.get<BodyGroupHierarchy>(desc.bodyGroup).comPos;
+        computePhi(ctx, num_dofs, tmp_state, com_pos);
     }
 }
 
@@ -753,15 +756,19 @@ inline float* computeContactJacobian(Context &ctx,
                                      BodyGroupHierarchy &body_grp,
                                      DofObjectHierarchyDesc &hier_desc,
                                      Mat3x3 &C,
-                                     Vector3 &origin)
+                                     Vector3 &origin,
+                                     float *J)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = ctx.getStateManager();
     // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
     //  where e_{bi} = 1 if body i is an ancestor of b
     //  C^T projects into the contact space
+#if 0
     float *J = (float *) state_mgr->tmpAlloc(world_id,
         3 * body_grp.numDofs * sizeof(float));
+#endif
+
     memset(J, 0.f, 3 * body_grp.numDofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
@@ -892,15 +899,15 @@ inline void compositeRigidBody(Context &ctx,
     // Backward pass
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
         Entity body = body_grp.bodies(ctx)[i];
+
         auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
         auto &i_tmp_state = ctx.get<DofObjectTmpState>(body);
         auto &i_num_dofs = ctx.get<DofObjectNumDofs>(body);
 
         float *S_i = i_tmp_state.getPhiFull(ctx);
 
-        // Temporary store for F = I_i^C S_i, column-major
-        float *F = (float *) state_mgr->tmpAlloc(world_id,
-            6 * i_num_dofs.numDofs * sizeof(float));
+        float *F = body_grp.scratch;
+
         for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
             float *S_col = S_i + 6 * col;
             float *F_col = F + 6 * col;
@@ -1004,6 +1011,8 @@ inline void computeFreeAcceleration(Context &ctx,
 }
 
 // RNE: Compute bias forces and gravity
+// May want to do a GPU specific version of this to extract some
+// parallelism out of this
 inline void recursiveNewtonEuler(Context &ctx,
                                 BodyGroupHierarchy &body_grp)
 {
@@ -1016,9 +1025,11 @@ inline void recursiveNewtonEuler(Context &ctx,
     //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
     for (int i = 0; i < body_grp.numBodies; ++i) {
         Entity body = body_grp.bodies(ctx)[i];
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
+
+        auto num_dofs = ctx.get<DofObjectNumDofs>(body);
+        auto velocity = ctx.get<DofObjectVelocity>(body);
+
         auto &tmp_state = ctx.get<DofObjectTmpState>(body);
-        auto &velocity = ctx.get<DofObjectVelocity>(body);
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
 
         float *S = tmp_state.getPhiFull(ctx);
@@ -1278,6 +1289,8 @@ inline void gaussMinimizeFn(Context &ctx,
         }
     }
 
+    uint32_t max_dofs = 0;
+
     // Prefix sum for each of the body groups
     uint32_t block_start[num_grps];
     uint32_t block_offset = 0;
@@ -1285,40 +1298,57 @@ inline void gaussMinimizeFn(Context &ctx,
         block_start[i] = block_offset;
         block_offset += hiers[i].numDofs;
         hiers[i].tmpIdx = i;
+
+        max_dofs = std::max(max_dofs, hiers[i].numDofs);
     }
 
     // Jacobian is size 3n_c x n_dofs, column-major
     uint32_t J_rows = 3 * total_contact_pts;
     uint32_t J_cols = total_num_dofs;
+
     float *J_c = (float *) state_mgr->tmpAlloc(world_id,
         J_rows * J_cols * sizeof(float));
+
     memset(J_c, 0, J_rows * J_cols * sizeof(float));
 
+    float *J_c_body_scratch = (float *)state_mgr->tmpAlloc(world_id,
+            3 * max_dofs * sizeof(float));
+
     CountT jac_row = 0;
+
     for(CountT ct_idx = 0; ct_idx < num_contacts; ++ct_idx) {
         ContactConstraint contact = contacts[ct_idx];
         ContactTmpState &tmp_state = contacts_tmp_state[ct_idx];
+
         auto ref = ctx.get<CVPhysicalComponent>(contact.ref);
         auto alt = ctx.get<CVPhysicalComponent>(contact.alt);
         auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref.physicsEntity);
         auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt.physicsEntity);
+
         bool ref_fixed = ref_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
         bool alt_fixed = alt_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
+
         // Each of the contact points
         for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
             Vector3 contact_pt = contact.points[pt_idx].xyz();
+
             // Compute the Jacobians for each body at the contact point
             if(!ref_fixed) {
                 DofObjectHierarchyDesc &ref_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                         ref.physicsEntity);
                 BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
                         ref_hier_desc.bodyGroup);
+
                 float* J_ref = computeContactJacobian(ctx, ref_grp,
-                    ref_hier_desc, tmp_state.C, contact_pt);
+                    ref_hier_desc, tmp_state.C, contact_pt, J_c_body_scratch);
+
                 for(CountT i = 0; i < ref_grp.numDofs; ++i) {
+
                     float *J_col = J_c +
                         J_rows * (block_start[ref_grp.tmpIdx] + i) + jac_row;
+
                     float *J_ref_col = J_ref + 3 * i;
+
                     for(CountT j = 0; j < 3; ++j) {
                         J_col[j] -= J_ref_col[j];
                     }
@@ -1329,12 +1359,16 @@ inline void gaussMinimizeFn(Context &ctx,
                         alt.physicsEntity);
                 auto &alt_grp = ctx.get<BodyGroupHierarchy>(
                         alt_hier_desc.bodyGroup);
+                
                 float *J_alt = computeContactJacobian(ctx, alt_grp,
-                    alt_hier_desc, tmp_state.C, contact_pt);
+                    alt_hier_desc, tmp_state.C, contact_pt, J_c_body_scratch);
+
                 for(CountT i = 0; i < alt_grp.numDofs; ++i) {
                     float *J_col = J_c +
                         J_rows * (block_start[alt_grp.tmpIdx] + i) + jac_row;
+
                     float *J_alt_col = J_alt + 3 * i;
+
                     for(CountT j = 0; j < 3; ++j) {
                         J_col[j] += J_alt_col[j];
                     }
@@ -1601,6 +1635,7 @@ void makeCVPhysicsEntity(Context &ctx,
         pos.q[4] = rotation.x;
         pos.q[5] = rotation.y;
         pos.q[6] = rotation.z;
+
         for(int i = 0; i < 6; i++) {
             vel.qv[i] = 0.f;
             acc.dqv[i] = 0.f;
@@ -1691,7 +1726,9 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 
         auto compute_phi = builder.addToGraph<ParallelForNode<Context,
              tasks::computePhiHierarchy,
-                BodyGroupHierarchy
+                DofObjectTmpState,
+                DofObjectNumDofs,
+                DofObjectHierarchyDesc
             >>({compute_spatial_inertia});
 
         auto recursive_newton_euler = builder.addToGraph<ParallelForNode<Context,

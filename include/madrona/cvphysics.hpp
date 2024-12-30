@@ -300,6 +300,9 @@ struct BodyGroupHierarchy {
     // Temporary index used during stacking
     uint32_t tmpIdx;
 
+    // Some scratch space for various calculations
+    float scratch[36];
+
 
 
     // Some helpers for the memory range
