@@ -169,6 +169,7 @@ public:
     void reset()
     {
         destruct();
+        initialized_ = false;
     }
 
     constexpr bool has_value() const { return initialized_; }
