@@ -75,10 +75,14 @@ struct CVRigidBodyState : Bundle<
     CVPhysicalComponent
 > {};
 
-struct CVSingleton {
+struct CVSolveData {
+    uint32_t numBodyGroups;
+    uint32_t *dofOffsets;
+
     uint32_t totalNumDofs;
     uint32_t numContactPts;
     float h;
+
     float *mass;
     float *freeAcc;
     float *vel;
@@ -302,20 +306,8 @@ struct GaussMinimizationNode : NodeBase {
             TaskGraph::Builder &builder,
             Span<const TaskGraph::NodeID> dependencies);
 
-    DofObjectPosition *positions;
-    DofObjectVelocity *velocities;
-    DofObjectNumDofs *numDofs;
-    ObjectID *objIDs;
-
-    // This is generated from narrowphase.
-    ContactConstraint *contacts;
-
-    // World offsets of the contact constraints.
-    int32_t *contactWorldOffsets;
-
-    // World offsets of the positions / velocities.
-    int32_t *dofObjectWorldOffsets;
-    int32_t *dofObjectWorldCounts;
+    // Each `CVSolveData` contains the matrices / vectors we need.
+    CVSolveData *solveDatas;
 };
 
 GaussMinimizationNode::GaussMinimizationNode(
@@ -1208,7 +1200,7 @@ inline void processContacts(Context &ctx,
 //
 // (https://en.wikipedia.org/wiki/Brobdingnag)
 inline void brobdingnag(Context &ctx,
-                        CVSingleton &cv_sing)
+                        CVSolveData &cv_sing)
 {
     uint32_t world_id = ctx.worldID().idx;
 
@@ -1310,8 +1302,10 @@ inline void brobdingnag(Context &ctx,
     uint32_t max_dofs = 0;
 
     // Prefix sum for each of the body groups
-    uint32_t block_start[num_grps];
+    uint32_t *block_start = (uint32_t *)state_mgr->tmpAlloc(world_id, 
+            num_grps * sizeof(uint32_t));
     uint32_t block_offset = 0;
+
     for (CountT i = 0; i < num_grps; ++i) {
         block_start[i] = block_offset;
         block_offset += hiers[i].numDofs;
@@ -1408,7 +1402,7 @@ inline void brobdingnag(Context &ctx,
 }
 
 inline void solveCPU(Context &ctx,
-                     CVSingleton &cv_sing)
+                     CVSolveData &cv_sing)
 {
     uint32_t world_id = ctx.worldID().idx;
 
@@ -1561,7 +1555,7 @@ void registerTypes(ECSRegistry &registry)
 {
     registry.registerComponent<CVPhysicalComponent>();
 
-    registry.registerSingleton<CVSingleton>();
+    registry.registerSingleton<CVSolveData>();
 
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
@@ -1737,13 +1731,14 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 {run_narrowphase});
 #endif
 
-#ifdef MADRONA_GPU_MODE
+#if 0
         auto gauss_node = builder.addToGraph<tasks::GaussMinimizationNode>(
                 {run_narrowphase});
 
         gauss_node = builder.addToGraph<ResetTmpAllocNode>(
                 {gauss_node});
-#else
+#endif
+
         auto compute_body_coms = builder.addToGraph<ParallelForNode<Context,
              tasks::computeBodyCOM,
                 DofObjectTmpState,
@@ -1804,13 +1799,21 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 
         auto thing = builder.addToGraph<ParallelForNode<Context,
              tasks::brobdingnag,
-                CVSingleton
+                CVSolveData
             >>({contact_node});
 
+#ifdef MADRONA_GPU_MODE
+        auto solve = builder.addToGraph<tasks::GaussMinimizationNode>(
+                {thing});
+
+        solve = builder.addToGraph<ResetTmpAllocNode>(
+                {gauss_node});
+#else
         auto solve = builder.addToGraph<ParallelForNode<Context,
              tasks::solveCPU,
-                CVSingleton
+                CVSolveData
             >>({thing});
+#endif
 
         auto int_node = builder.addToGraph<ParallelForNode<Context,
              tasks::integrationStep,
@@ -1831,7 +1834,6 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 Rotation,
                 CVPhysicalComponent
             >>({post_forward_kinematics});
-#endif
 
         cur_node = builder.addToGraph<
             ClearTmpNode<Contact>>({cur_node});
@@ -1856,7 +1858,7 @@ void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
 
 void init(Context &ctx, CVXSolve *cvx_solve)
 {
-    ctx.singleton<CVSingleton>().cvxSolve = cvx_solve;
+    ctx.singleton<CVSolveData>().cvxSolve = cvx_solve;
 }
 
 void setCVEntityParentHinge(Context &ctx,
