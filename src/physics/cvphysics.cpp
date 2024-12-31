@@ -369,7 +369,8 @@ struct GaussMinimizationNode : NodeBase {
             uint32_t b_rows, uint32_t b_cols);
 
     template <typename DataT,
-              uint32_t block_size>
+              uint32_t block_size,
+              bool reset_res = false>
     void gmmaWarpSmallReg(
             DataT *res,
             DataT *a,
@@ -379,9 +380,19 @@ struct GaussMinimizationNode : NodeBase {
 
     template <typename DataT,
               uint32_t block_size>
-    void copyToRegs(DataT *mtx,
-                    uint32_t mtx_rows, uint32_t mtx_cols,
-                    uint32_t blk_r, uint32_t blk_c);
+    void copyToRegs(
+            DataT (&blk_tmp)[block_size][block_size], // dst
+            DataT *mtx,                               // src
+            uint32_t mtx_rows, uint32_t mtx_cols,
+            uint32_t blk_r, uint32_t blk_c);
+
+    template <typename DataT,
+              uint32_t block_size>
+    void copyToMem(
+            DataT *mtx,                               // dst
+            DataT (&blk_tmp)[block_size][block_size], // src
+            uint32_t mtx_rows, uint32_t mtx_cols,
+            uint32_t blk_r, uint32_t blk_c);
 
     template <typename DataT,
               uint32_t block_size,
@@ -426,6 +437,30 @@ void GaussMinimizationNode::copyToRegs(
                  row_start + blk_row < mtx_rows) ?
                 mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] :
                 0.f;
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void GaussMinimizationNode::copyToMem(
+        DataT *mtx,
+        DataT (&blk_tmp)[block_size][block_size],
+        uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t blk_r, uint32_t blk_c)
+{
+    uint32_t col_start = blk_c * block_size;
+    uint32_t row_start = blk_r * block_size;
+
+    #pragma unroll
+    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
+        #pragma unroll
+        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
+            if (col_start + blk_col < mtx_cols &&
+                 row_start + blk_row < mtx_rows) {
+                mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] =
+                    blk_tmp[blk_row][blk_col];
+            }
         }
     }
 }
@@ -499,7 +534,8 @@ void GaussMinimizationNode::gmmaWarpSmallSmem(
 }
 
 template <typename DataT,
-          uint32_t block_size>
+          uint32_t block_size,
+          bool reset_res>
 void GaussMinimizationNode::gmmaWarpSmallReg(
         DataT *res,
         DataT *a,
@@ -515,12 +551,10 @@ void GaussMinimizationNode::gmmaWarpSmallReg(
     uint32_t res_rows = a_rows;
     uint32_t res_cols = b_cols;
 
-    // Outer loops
     uint32_t num_iters_r = (res_rows + block_size - 1) / block_size;
     uint32_t num_iters_c = (res_cols + block_size - 1) / block_size;
     uint32_t total_num_iters = num_iters_r * num_iters_c;
 
-    // Inner loops
     uint32_t num_blks_a = (a_cols + block_size - 1) / block_size;
     uint32_t num_blks_b = (b_rows + block_size - 1) / block_size;
 
@@ -531,7 +565,9 @@ void GaussMinimizationNode::gmmaWarpSmallReg(
         uint32_t res_blk_r = total_num_iters / num_iters_c;
         uint32_t res_blk_c = total_num_iters % num_iters_c;
 
-        setBlockZero(res_blk_tmp);
+        if constexpr (reset_res) {
+            setBlockZero(res_blk_tmp);
+        }
 
         for (uint32_t blk_i = 0; blk_i < num_blks_a; ++blk_i) {
             for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
@@ -540,6 +576,9 @@ void GaussMinimizationNode::gmmaWarpSmallReg(
                 gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
             }
         }
+
+        copyToMem(res, res_blk_tmp, res_rows, 
+                  res_cols, res_blk_r, res_blk_c);
 
         curr_iter += 32;
     }
@@ -589,6 +628,16 @@ void GaussMinimizationNode::computeARef(int32_t invocation_idx)
 
         __syncwarp();
         a_ref = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)a_ref, 0);
+
+        // Just make sure this compiles
+        gmmaWarpSmallReg<float, 4, true>(
+                a_ref, 
+                curr_sd->J_c,
+                curr_sd->vel,
+                curr_sd->numRowsJc,
+                curr_sd->numColsJc,
+                curr_sd->velDim,
+                1);
 
         world_id += total_resident_warps;
     }
