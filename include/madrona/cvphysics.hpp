@@ -297,6 +297,9 @@ struct BodyGroupHierarchy {
     //  unconstrained acceleration after computeFreeAcceleration
     uint32_t biasOffset;
 
+    // Offset to buffer containing prefix sum of the DOFs of the bodies.
+    uint32_t dofPrefixSumOffset;
+
     // Temporary index used during stacking
     uint32_t tmpIdx;
 
@@ -311,6 +314,7 @@ struct BodyGroupHierarchy {
     float * getBias(Context &ctx);
     int32_t * getExpandedParent(Context &ctx);
     Entity * bodies(Context &ctx);
+    uint32_t * getDofPrefixSum(Context &ctx);
 };
 
 struct BodyGroup : public Archetype<

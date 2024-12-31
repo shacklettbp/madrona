@@ -62,6 +62,14 @@ Entity * BodyGroupHierarchy::bodies(Context &ctx)
     return (Entity *)bytes;
 }
 
+uint32_t * BodyGroupHierarchy::getDofPrefixSum(Context &ctx)
+{
+    uint8_t *bytes =
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(dynData) +
+        dofPrefixSumOffset;
+    return (uint32_t *)bytes;
+}
+
 struct Contact : Archetype<
     ContactConstraint,
     ContactTmpState
@@ -264,6 +272,9 @@ inline void initHierarchies(Context &ctx,
     grp.massMatrixLTDLOffset = (uint32_t)required_bytes;
     required_bytes += num_dofs * num_dofs * sizeof(float);
 
+    grp.dofPrefixSumOffset = (uint32_t)required_bytes;
+    required_bytes += grp.numBodies * sizeof(uint32_t);
+
     // All the bodies' data
     for (CountT j = 0; j < grp.numBodies; ++j) {
         Entity body = grp.bodies(ctx)[j];
@@ -282,10 +293,17 @@ inline void initHierarchies(Context &ctx,
         sizeof(MRElement128b);
     grp.dynData = ctx.allocMemoryRange<MRElement128b>(num_elems);
 
+    uint32_t ps_offset = 0;
+    uint32_t *prefix_sum = grp.getDofPrefixSum(ctx);
     for (CountT j = 0; j < grp.numBodies; ++j) {
         Entity body = grp.bodies(ctx)[j];
         auto &tmp_state = ctx.get<DofObjectTmpState>(body);
+        auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
+
         tmp_state.dynData = grp.dynData;
+        prefix_sum[j] = ps_offset;
+
+        ps_offset += num_dofs.numDofs;
     }
     
     // Now do some post-allocation computations
@@ -774,13 +792,16 @@ inline float* computeContactJacobian(Context &ctx,
     memset(J, 0.f, 3 * body_grp.numDofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
-    uint32_t block_start[body_grp.numBodies];
+    uint32_t *block_start = body_grp.getDofPrefixSum(ctx); //[body_grp.numBodies];
+
+#if 0
     uint32_t block_offset = 0;
     for (CountT i = 0; i < body_grp.numBodies; ++i) {
         block_start[i] = block_offset;
         block_offset += ctx.get<DofObjectNumDofs>(
                 body_grp.bodies(ctx)[i]).numDofs;
     }
+#endif
 
     // Populate J_C by traversing up the hierarchy
     int32_t curr_idx = hier_desc.index;
@@ -890,13 +911,7 @@ inline void compositeRigidBody(Context &ctx,
     memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
-    uint32_t block_start[body_grp.numBodies];
-    uint32_t block_offset = 0;
-    for (CountT i = 0; i < body_grp.numBodies; ++i) {
-        block_start[i] = block_offset;
-        block_offset += ctx.get<DofObjectNumDofs>(
-                body_grp.bodies(ctx)[i]).numDofs;
-    }
+    uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
 
     // Backward pass
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
@@ -1399,6 +1414,8 @@ inline void brobdingnag(Context &ctx,
     cv_sing.J_c = J_c;
     cv_sing.mu = full_mu;
     cv_sing.penetrations = full_penetration;
+    cv_sing.dofOffsets = block_start;
+    cv_sing.numBodyGroups = num_grps;
 }
 
 inline void solveCPU(Context &ctx,
