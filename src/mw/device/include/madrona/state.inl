@@ -357,6 +357,27 @@ ResultRef<ComponentT> StateManager::get(Loc loc)
         ((ComponentT *)(tbl.columns[*col_idx])) + loc.row);
 }
 
+template <typename ArchetypeT, typename ComponentT>
+ComponentT * StateManager::getWorldComponents(uint32_t world_id)
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    auto &archetype = *archetypes_[archetype_id];
+
+    assert(!archetype.needsSort);
+
+    uint32_t component_id = TypeTracker::typeID<ComponentT>();
+    auto col_idx = archetype.columnLookup.lookup(component_id);
+
+    if (!col_idx.has_value()) {
+        return nullptr;
+    }
+
+    assert(col_idx.has_value());
+
+    ComponentT *base_ptr = (ComponentT *)(archetype.tbl.columns[*col_idx]);
+    return base_ptr + archetype.worldOffsets[world_id];
+}
+
 template <typename ComponentT>
 ComponentT & StateManager::getDirect(int32_t column_idx, Loc loc)
 {
@@ -457,6 +478,13 @@ inline uint32_t StateManager::getArchetypeNumRows()
     uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
     auto &archetype = *archetypes_[archetype_id];
     return archetype.tbl.numRows.load_relaxed();
+}
+
+template <typename ArchetypeT>
+inline uint32_t StateManager::numRows(uint32_t world_id)
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    return getArchetypeNumRowsInWorld(archetype_id, world_id);
 }
 
 template <typename ElementT>

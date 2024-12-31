@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <madrona/state.hpp>
+#include <madrona/utils.hpp>
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
 #include <madrona/cvphysics.hpp>
@@ -6,10 +8,35 @@
 
 #include "physics_impl.hpp"
 
+#ifdef MADRONA_GPU_MODE
+#include <madrona/mw_gpu/host_print.hpp>
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+#else
+#define LOG(...)
+#endif
+
 using namespace madrona::math;
 using namespace madrona::base;
 
 namespace madrona::phys::cv {
+
+StateManager * getStateManager(Context &ctx)
+{
+#ifdef MADRONA_GPU_MODE
+    return mwGPU::getStateManager();
+#else
+    return ctx.getStateManager();
+#endif
+}
+
+StateManager * getStateManager()
+{
+#ifdef MADRONA_GPU_MODE
+    return mwGPU::getStateManager();
+#else
+    assert(false);
+#endif
+}
 
 struct MRElement128b {
     uint8_t d[128];
@@ -91,12 +118,24 @@ struct CVSolveData {
     uint32_t numContactPts;
     float h;
 
+    // Values
     float *mass;
     float *freeAcc;
     float *vel;
     float *J_c;
     float *mu;
     float *penetrations;
+
+    uint32_t massDim;
+    uint32_t freeAccDim;
+    uint32_t velDim;
+    uint32_t numRowsJc;
+    uint32_t numColsJc;
+    uint32_t muDim;
+    uint32_t penetrationsDim;
+
+    // This is going to be allocated during the solve
+    float *aRef;
 
     CVXSolve *cvxSolve;
 };
@@ -114,9 +153,12 @@ inline void computeExpandedParent(Context &ctx,
     for(int32_t i = 0; i < body_grp.numDofs; ++i) {
         expandedParent[i] = i - 1;
     }
+
     // Create a mapping from body index to start of block
-    int32_t map[numBodies];
+    int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * numBodies);
+
     map[0] = -1;
+
     for(int32_t i = 1; i < numBodies; ++i) {
         uint32_t n_i = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[i]).numDofs;
         map[i] = map[i - 1] + (int32_t) n_i;
@@ -249,9 +291,6 @@ inline void initHierarchies(Context &ctx,
 {
     CountT num_dofs = grp.numDofs;
 
-    uint64_t flts_per_elem = sizeof(MRElement128b) / sizeof(float);
-    uint64_t i32s_per_elem = sizeof(MRElement128b) / sizeof(int32_t);
-
     // We are going to do all dynamic allocations in one memory range to
     // minimize fragmentation.
     uint64_t required_bytes = 0;
@@ -318,7 +357,46 @@ inline void initHierarchies(Context &ctx,
 struct GaussMinimizationNode : NodeBase {
     GaussMinimizationNode(StateManager *state_mgr);
 
-    void solve(int32_t invocation_idx);
+    // Unsure how efficient this will be exactly, but we're not dealing
+    // with HUGE matrices, just TONS of tiny ones. (WIP)
+    template <typename DataT,
+              uint32_t block_size>
+    void gmmaWarpSmallSmem(
+            DataT *res,
+            DataT *a,
+            DataT *b,
+            uint32_t a_rows, uint32_t a_cols,
+            uint32_t b_rows, uint32_t b_cols);
+
+    template <typename DataT,
+              uint32_t block_size>
+    void gmmaWarpSmallReg(
+            DataT *res,
+            DataT *a,
+            DataT *b,
+            uint32_t a_rows, uint32_t a_cols,
+            uint32_t b_rows, uint32_t b_cols);
+
+    template <typename DataT,
+              uint32_t block_size>
+    void copyToRegs(DataT *mtx,
+                    uint32_t mtx_rows, uint32_t mtx_cols,
+                    uint32_t blk_r, uint32_t blk_c);
+
+    template <typename DataT,
+              uint32_t block_size,
+              bool reset_res = false>
+    void gmmaBlockRegs(
+            DataT (&res)[block_size][block_size],
+            DataT (&a)[block_size][block_size],
+            DataT (&b)[block_size][block_size]);
+
+    template <typename DataT,
+              uint32_t block_size>
+    void setBlockZero(
+            DataT (&blk)[block_size][block_size]);
+
+    void computeARef(int32_t invocation_idx);
 
     static TaskGraph::NodeID addToGraph(
             TaskGraph::Builder &builder,
@@ -328,25 +406,154 @@ struct GaussMinimizationNode : NodeBase {
     CVSolveData *solveDatas;
 };
 
+template <typename DataT,
+          uint32_t block_size>
+void GaussMinimizationNode::copyToRegs(
+        DataT (&blk_tmp)[block_size][block_size],
+        DataT *mtx,
+        uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t blk_r, uint32_t blk_c)
+{
+    uint32_t col_start = blk_c * block_size;
+    uint32_t row_start = blk_r * block_size;
+
+    #pragma unroll
+    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
+        #pragma unroll
+        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
+            blk_tmp[blk_row][blk_col] = 
+                (col_start + blk_col < mtx_cols &&
+                 row_start + blk_row < mtx_rows) ?
+                mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] :
+                0.f;
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size,
+          bool reset_res>
+void GaussMinimizationNode::gmmaBlockRegs(
+        DataT (&res)[block_size][block_size],
+        DataT (&a)[block_size][block_size],
+        DataT (&b)[block_size][block_size])
+{
+    #pragma unroll
+    for (int i = 0; i < block_size; i++) {
+        #pragma unroll
+        for (int j = 0; j < block_size; j++) {
+            if constexpr (reset_res) {
+                res[i][j] = 0;
+            }
+
+            #pragma unroll
+            for (int k = 0; k < block_size; k++) {
+                res[i][j] += a[i][k] * b[k][j];
+            }
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void GaussMinimizationNode::setBlockZero(
+        DataT (&blk)[block_size][block_size])
+{
+    #pragma unroll
+    for (int i = 0; i < block_size; i++) {
+        #pragma unroll
+        for (int j = 0; j < block_size; j++) {
+            blk[i][j] = 0.f;
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void GaussMinimizationNode::gmmaWarpSmallSmem(
+        DataT *res,
+        DataT *a,
+        DataT *b,
+        uint32_t a_rows, uint32_t a_cols,
+        uint32_t b_rows, uint32_t b_cols)
+{
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    // This function requires (block_size x block_size) * 3 bytes of Smem
+    assert(3 * (block_size * block_size) < num_smem_bytes_per_warp);
+
+    DataT *a_blk_tmp = (DataT *)smem_buf;
+    DataT *b_blk_tmp = (DataT *)smem_buf + (block_size * block_size);
+    DataT *res_blk_tmp = (DataT *)smem_buf + (block_size * block_size) * 2;
+
+    // Get value in block tmp matrix
+    // TODO: Double check the compiler spits out not dumb stuff.
+    auto bv = [](DataT *d, uint32_t row, uint32_t col) -> DataT & {
+        return d[col + row * block_size];
+    };
+
+    
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void GaussMinimizationNode::gmmaWarpSmallReg(
+        DataT *res,
+        DataT *a,
+        DataT *b,
+        uint32_t a_rows, uint32_t a_cols,
+        uint32_t b_rows, uint32_t b_cols)
+{
+    // TODO: Make sure non of this stuff spills
+    DataT a_blk_tmp[block_size][block_size];
+    DataT b_blk_tmp[block_size][block_size];
+    DataT res_blk_tmp[block_size][block_size];
+
+    uint32_t res_rows = a_rows;
+    uint32_t res_cols = b_cols;
+
+    // Outer loops
+    uint32_t num_iters_r = (res_rows + block_size - 1) / block_size;
+    uint32_t num_iters_c = (res_cols + block_size - 1) / block_size;
+    uint32_t total_num_iters = num_iters_r * num_iters_c;
+
+    // Inner loops
+    uint32_t num_blks_a = (a_cols + block_size - 1) / block_size;
+    uint32_t num_blks_b = (b_rows + block_size - 1) / block_size;
+
+    uint32_t lane_id = threadIdx.x % 32;
+    uint32_t curr_iter = lane_id;
+    
+    while (curr_iter < total_num_iters) {
+        uint32_t res_blk_r = total_num_iters / num_iters_c;
+        uint32_t res_blk_c = total_num_iters % num_iters_c;
+
+        setBlockZero(res_blk_tmp);
+
+        for (uint32_t blk_i = 0; blk_i < num_blks_a; ++blk_i) {
+            for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
+                copyToRegs(a_blk_tmp, a, a_rows, a_cols, res_blk_r, blk_i);
+                copyToRegs(b_blk_tmp, b, b_rows, b_cols, blk_j, res_blk_c);
+                gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
+            }
+        }
+
+        curr_iter += 32;
+    }
+}
+
 GaussMinimizationNode::GaussMinimizationNode(
         StateManager *s)
-    : positions(s->getArchetypeComponent<DofObjectArchetype,
-            DofObjectPosition>()),
-      velocities(s->getArchetypeComponent<DofObjectArchetype,
-            DofObjectVelocity>()),
-      numDofs(s->getArchetypeComponent<DofObjectArchetype,
-            DofObjectNumDofs>()),
-      objIDs(s->getArchetypeComponent<DofObjectArchetype,
-            ObjectID>()),
-      contacts(s->getArchetypeComponent<Contact,
-            ContactConstraint>()),
-      contactWorldOffsets(s->getArchetypeWorldOffsets<Contact>()),
-      dofObjectWorldOffsets(s->getArchetypeWorldOffsets<DofObjectArchetype>()),
-      dofObjectWorldCounts(s->getArchetypeWorldCounts<DofObjectArchetype>())
+    : solveDatas(s->getSingletonColumn<CVSolveData>())
 {
 }
 
-void GaussMinimizationNode::solve(int32_t invocation_idx)
+// Might be overkill to allocate a warp per world but we can obviously
+// experiment.
+void GaussMinimizationNode::computeARef(int32_t invocation_idx)
 {
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
 
@@ -356,86 +563,35 @@ void GaussMinimizationNode::solve(int32_t invocation_idx)
     uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
 
-
-
     const int32_t num_smem_bytes_per_warp =
         mwGPU::SharedMemStorage::numBytesPerWarp();
     auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
                     num_smem_bytes_per_warp * warp_id;
 
-    enum PhaseSMemBytes {
-
-    };
-
-    // TODO: do the magic here!
-    // Note, the refs that are in the ContactConstraint are not to the
-    // DOF object but to the entity which holds the position / rotation
-    // components. This just means we have to inefficiently go through another
-    // indirection to get the Dof positions / velocities of affected objects
-    // (with that indirection being CVPhysicalComponent).
-    // We can fix this by having the contact generation directly output
-    // the locs of the DOF objects instead but that we can do in the future.
     assert(blockDim.x == consts::numMegakernelThreads);
 
-#if 0
-    while (world_idx < total_num_worlds) {
-        { // Compute data for mass matrix
-            ObjectManager &state_mgr =
-                mwGPU::getStateManager()->getSingleton<ObjectData>(
-                        world_idx).mgr;
+    StateManager *state_mgr = getStateManager();
 
-            uint32_t num_phys_objs = dofObjectWorldCounts[world_idx];
-            uint32_t phys_objs_offset = dofObjectWorldOffsets[world_idx];
+    uint32_t world_id = warp_id;
+    while (world_id < total_num_worlds) {
+        CVSolveData *curr_sd = &solveDatas[world_id];
 
-            uint32_t current_phys_obj = lane_id;
-
-            uint32_t per_world_alloc = num_phys_objs *
-                ((3 * 3 * 4) + // Inverse generalized mass rotation components
-                 // TODO
-                 0);
-
-            // TODO: Possibly merge this over threadblock to avoid
-            // device <-> cpu communication.
-            void *per_world_bytes =
-                mwGPU::TmpAllocator::get().alloc(per_world_alloc);
-
-            while (current_phys_obj < num_phys_objs) {
-                DofObjectPosition gen_pos = positions[current_phys_obj +
-                                                      phys_objs_offset];
-                ObjectID obj_id = objIDs[current_phys_obj +
-                                         phys_objs_offset];
-
-                const RigidBodyMetadata &metadata =
-                    obj_mgr.metadata[obj_id.idx];
-
-                Vector3 inv_inertia = metadata.invInertiaTensor;
-
-                Quat rot_quat = {
-                    gen_pos.q[3],
-                    gen_pos.q[4],
-                    gen_pos.q[5],
-                    gen_pos.q[6],
-                };
-
-                Mat3x3 body_jacob = Mat3x3::fromQuat(rot_quat);
-                Diag3x3 inv_inertia = Diag3x3::fromVec(
-                    inv_inertia);
-
-                Mat3x3 inv_rot_mass = body_jacob * inv_inertia;
-                inv_rot_mass = body_jacob * inv_rot_mass.transpose();
-
-                *((Mat3x3 *)per_world_bytes + current_phys_obj) = inv_rot_mass;
-
-                current_phys_obj += 32;
+        // Allocate space for the a_ref vector
+        float *a_ref = nullptr;
+        if (lane_id == 0) {
+            if (curr_sd->numRowsJc > 0) {
+                a_ref = (float *)mwGPU::TmpAllocator::get().alloc(
+                    sizeof(float) * curr_sd->numRowsJc);
             }
 
-            __syncwarp();
+            LOG("smem per warp: {}\n", num_smem_bytes_per_warp);
         }
 
+        __syncwarp();
+        a_ref = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)a_ref, 0);
 
-        world_idx += total_resident_warps;
+        world_id += total_resident_warps;
     }
-#endif
 }
 
 TaskGraph::NodeID GaussMinimizationNode::addToGraph(
@@ -443,14 +599,6 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
         Span<const TaskGraph::NodeID> deps)
 {
     using namespace mwGPU;
-
-    // First, we must sort the physics DOF object archetypes by world.
-    auto sort_sys =
-        builder.addToGraph<SortArchetypeNode<
-            DofObjectArchetype, WorldID>>(
-            deps);
-    auto post_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_sys});
 
     StateManager *state_mgr = getStateManager();
 
@@ -462,16 +610,68 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
     // thread block is going to process a world.
     uint32_t num_invocations = (uint32_t)gridDim.x;
 
-    TaskGraph::NodeID solve_node = builder.addNodeFn<
-        &GaussMinimizationNode::solve>(data_id, { post_sort_reset_tmp },
+    TaskGraph::NodeID a_ref_node = builder.addNodeFn<
+        &GaussMinimizationNode::computeARef>(data_id, {},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 // This is the thread block dimension
                 consts::numMegakernelThreads);
 
-    return solve_node;
+    return a_ref_node;
 }
 #else
+inline void solveCPU(Context &ctx,
+                     CVSolveData &cv_sing)
+{
+    uint32_t world_id = ctx.worldID().idx;
+
+    StateManager *state_mgr = getStateManager(ctx);
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+
+    // Call the solver
+    if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
+        cv_sing.cvxSolve->totalNumDofs = cv_sing.totalNumDofs;
+        cv_sing.cvxSolve->numContactPts = cv_sing.numContactPts;
+        cv_sing.cvxSolve->h = cv_sing.h;
+        cv_sing.cvxSolve->mass = cv_sing.mass;
+        cv_sing.cvxSolve->free_acc = cv_sing.freeAcc;
+        cv_sing.cvxSolve->vel = cv_sing.vel;
+        cv_sing.cvxSolve->J_c = cv_sing.J_c;
+        cv_sing.cvxSolve->mu = cv_sing.mu;
+        cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
+
+        cv_sing.cvxSolve->callSolve.store_release(1);
+        while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
+        cv_sing.cvxSolve->callSolve.store_relaxed(0);
+
+        float *res = cv_sing.cvxSolve->resPtr;
+
+        if (res) {
+            BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
+                BodyGroup, BodyGroupHierarchy>(world_id);
+
+            CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
+
+            // Update the body accelerations
+            uint32_t processed_dofs = 0;
+            for (CountT i = 0; i < num_grps; ++i)
+            {
+                for (CountT j = 0; j < hiers[i].numBodies; j++)
+                {
+                    auto body = hiers[i].bodies(ctx)[j];
+                    auto numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
+                    auto &acceleration = ctx.get<DofObjectAcceleration>(body);
+                    for (CountT k = 0; k < numDofs; k++) {
+                        acceleration.dqv[k] = res[processed_dofs];
+                        processed_dofs++;
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
+
 inline Mat3x3 skewSymmetricMatrix(Vector3 v)
 {
     return {
@@ -780,12 +980,12 @@ inline float* computeContactJacobian(Context &ctx,
                                      float *J)
 {
     uint32_t world_id = ctx.worldID().idx;
-    StateManager *state_mgr = ctx.getStateManager();
+    StateManager *state_mgr = getStateManager(ctx);
     // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
     //  where e_{bi} = 1 if body i is an ancestor of b
     //  C^T projects into the contact space
 #if 0
-    float *J = (float *) state_mgr->tmpAlloc(world_id,
+    float *J = (float *) ctx.tmpAlloc(world_id,
         3 * body_grp.numDofs * sizeof(float));
 #endif
 
@@ -901,7 +1101,7 @@ inline void compositeRigidBody(Context &ctx,
                                BodyGroupHierarchy &body_grp)
 {
     uint32_t world_id = ctx.worldID().idx;
-    StateManager *state_mgr = ctx.getStateManager();
+    StateManager *state_mgr = getStateManager(ctx);
 
     // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = body_grp.numDofs;
@@ -978,7 +1178,7 @@ inline void compositeRigidBody(Context &ctx,
 inline void factorizeMassMatrix(Context &ctx,
                                 BodyGroupHierarchy &body_grp) {
     uint32_t world_id = ctx.worldID().idx;
-    StateManager *state_mgr = ctx.getStateManager();
+    StateManager *state_mgr = getStateManager(ctx);
 
     // First copy in the mass matrix
     uint32_t total_dofs = body_grp.numDofs;
@@ -1201,7 +1401,7 @@ inline void processContacts(Context &ctx,
     tmp_state.C[2] = s;
 
     // Get friction coefficient
-    float mu = std::min(obj_mgr.metadata[objID_i].friction.muS,
+    float mu = fminf(obj_mgr.metadata[objID_i].friction.muS,
                         obj_mgr.metadata[objID_j].friction.muS);
     tmp_state.mu = mu;
 }
@@ -1219,7 +1419,7 @@ inline void brobdingnag(Context &ctx,
 {
     uint32_t world_id = ctx.worldID().idx;
 
-    StateManager *state_mgr = ctx.getStateManager();
+    StateManager *state_mgr = getStateManager(ctx);
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
     // Recover necessary pointers.
@@ -1236,14 +1436,14 @@ inline void brobdingnag(Context &ctx,
     CountT num_mass_mat_bytes = sizeof(float) *
         total_num_dofs * total_num_dofs;
     // Row-major
-    float *total_mass_mat = (float *) state_mgr->tmpAlloc(
-            world_id, num_mass_mat_bytes);
+    float *total_mass_mat = (float *)ctx.tmpAlloc(
+            num_mass_mat_bytes);
     memset(total_mass_mat, 0, num_mass_mat_bytes);
 
     CountT num_full_dofs_bytes = sizeof(float) * total_num_dofs;
-    float *full_free_acc = (float *)state_mgr->tmpAlloc(world_id,
+    float *full_free_acc = (float *)ctx.tmpAlloc(
             total_num_dofs * sizeof(float));
-    float *full_vel = (float *)state_mgr->tmpAlloc(world_id,
+    float *full_vel = (float *)ctx.tmpAlloc(
             num_full_dofs_bytes);
     memset(full_free_acc, 0, num_full_dofs_bytes);
     memset(full_vel, 0, num_full_dofs_bytes);
@@ -1300,9 +1500,9 @@ inline void brobdingnag(Context &ctx,
 
     // Process mu and penetrations for each point
     CountT num_full_contact_bytes = sizeof(float) * total_contact_pts;
-    float *full_mu = (float *)state_mgr->tmpAlloc(world_id,
+    float *full_mu = (float *)ctx.tmpAlloc(
             num_full_contact_bytes);
-    float *full_penetration = (float *)state_mgr->tmpAlloc(world_id,
+    float *full_penetration = (float *)ctx.tmpAlloc(
             num_full_contact_bytes);
     CountT processed_pts = 0;
     for (int i = 0; i < num_contacts; ++i) {
@@ -1317,7 +1517,7 @@ inline void brobdingnag(Context &ctx,
     uint32_t max_dofs = 0;
 
     // Prefix sum for each of the body groups
-    uint32_t *block_start = (uint32_t *)state_mgr->tmpAlloc(world_id, 
+    uint32_t *block_start = (uint32_t *)ctx.tmpAlloc( 
             num_grps * sizeof(uint32_t));
     uint32_t block_offset = 0;
 
@@ -1333,12 +1533,12 @@ inline void brobdingnag(Context &ctx,
     uint32_t J_rows = 3 * total_contact_pts;
     uint32_t J_cols = total_num_dofs;
 
-    float *J_c = (float *) state_mgr->tmpAlloc(world_id,
+    float *J_c = (float *) ctx.tmpAlloc(
         J_rows * J_cols * sizeof(float));
 
     memset(J_c, 0, J_rows * J_cols * sizeof(float));
 
-    float *J_c_body_scratch = (float *)state_mgr->tmpAlloc(world_id,
+    float *J_c_body_scratch = (float *)ctx.tmpAlloc(
             3 * max_dofs * sizeof(float));
 
     CountT jac_row = 0;
@@ -1416,56 +1616,14 @@ inline void brobdingnag(Context &ctx,
     cv_sing.penetrations = full_penetration;
     cv_sing.dofOffsets = block_start;
     cv_sing.numBodyGroups = num_grps;
-}
 
-inline void solveCPU(Context &ctx,
-                     CVSolveData &cv_sing)
-{
-    uint32_t world_id = ctx.worldID().idx;
-
-    StateManager *state_mgr = ctx.getStateManager();
-    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
-
-    // Call the solver
-    if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
-        cv_sing.cvxSolve->totalNumDofs = cv_sing.totalNumDofs;
-        cv_sing.cvxSolve->numContactPts = cv_sing.numContactPts;
-        cv_sing.cvxSolve->h = cv_sing.h;
-        cv_sing.cvxSolve->mass = cv_sing.mass;
-        cv_sing.cvxSolve->free_acc = cv_sing.freeAcc;
-        cv_sing.cvxSolve->vel = cv_sing.vel;
-        cv_sing.cvxSolve->J_c = cv_sing.J_c;
-        cv_sing.cvxSolve->mu = cv_sing.mu;
-        cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
-
-        cv_sing.cvxSolve->callSolve.store_release(1);
-        while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
-        cv_sing.cvxSolve->callSolve.store_relaxed(0);
-
-        float *res = cv_sing.cvxSolve->resPtr;
-
-        if (res) {
-            BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
-                BodyGroup, BodyGroupHierarchy>(world_id);
-            CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
-
-            // Update the body accelerations
-            uint32_t processed_dofs = 0;
-            for (CountT i = 0; i < num_grps; ++i)
-            {
-                for (CountT j = 0; j < hiers[i].numBodies; j++)
-                {
-                    auto body = hiers[i].bodies(ctx)[j];
-                    auto numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
-                    auto &acceleration = ctx.get<DofObjectAcceleration>(body);
-                    for (CountT k = 0; k < numDofs; k++) {
-                        acceleration.dqv[k] = res[processed_dofs];
-                        processed_dofs++;
-                    }
-                }
-            }
-        }
-    }
+    cv_sing.massDim = total_num_dofs;
+    cv_sing.freeAccDim = total_num_dofs;
+    cv_sing.velDim = total_num_dofs;
+    cv_sing.numRowsJc = J_rows;
+    cv_sing.numColsJc = J_cols;
+    cv_sing.muDim = total_contact_pts;
+    cv_sing.penetrationsDim = total_contact_pts;
 }
 
 inline void integrationStep(Context &ctx,
@@ -1531,7 +1689,6 @@ inline void integrationStep(Context &ctx,
         MADRONA_UNREACHABLE();
     }
 }
-#endif
 
 // Convert all the generalized coordinates here.
 inline void convertPostSolve(
@@ -1736,6 +1893,14 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 {
     auto cur_node = broadphase;
 
+#ifdef MADRONA_GPU_MODE
+    auto sort_sys = builder.addToGraph<
+        SortArchetypeNode<BodyGroup, WorldID>>({cur_node});
+    sort_sys = builder.addToGraph<
+        SortArchetypeNode<DofObjectArchetype, WorldID>>({sort_sys});
+    cur_node = builder.addToGraph<ResetTmpAllocNode>({sort_sys});
+#endif
+
     for (CountT i = 0; i < num_substeps; ++i) {
         auto run_narrowphase = narrowphase::setupTasks(builder, {cur_node});
 
@@ -1746,14 +1911,6 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 {run_narrowphase});
         run_narrowphase = builder.addToGraph<ResetTmpAllocNode>(
                 {run_narrowphase});
-#endif
-
-#if 0
-        auto gauss_node = builder.addToGraph<tasks::GaussMinimizationNode>(
-                {run_narrowphase});
-
-        gauss_node = builder.addToGraph<ResetTmpAllocNode>(
-                {gauss_node});
 #endif
 
         auto compute_body_coms = builder.addToGraph<ParallelForNode<Context,
@@ -1822,9 +1979,6 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 #ifdef MADRONA_GPU_MODE
         auto solve = builder.addToGraph<tasks::GaussMinimizationNode>(
                 {thing});
-
-        solve = builder.addToGraph<ResetTmpAllocNode>(
-                {gauss_node});
 #else
         auto solve = builder.addToGraph<ParallelForNode<Context,
              tasks::solveCPU,

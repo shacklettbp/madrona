@@ -199,6 +199,17 @@ public:
     template <typename ArchetypeT>
     inline uint32_t getArchetypeNumRows();
 
+    // The archetype has to be sorted by world for this to work
+    // TODO: choose better naming. we stick with this for the sake
+    // of sticking to what the CPU backend StateManager has
+    template <typename ArchetypeT>
+    inline uint32_t numRows(uint32_t world_id);
+    uint32_t getArchetypeNumRowsInWorld(uint32_t archetype_id, uint32_t world_id);
+
+    // The archetype has to be sorted by world for this to work
+    template <typename ArchetypeT, typename ComponentT>
+    inline ComponentT * getWorldComponents(uint32_t world_id);
+
     template <typename ElementT>
     inline uint32_t getMemoryRangeNumRows();
     inline uint32_t getMemoryRangeNumRows(uint32_t element_id);

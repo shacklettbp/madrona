@@ -890,4 +890,12 @@ void StateManager::recycleMemoryRanges(int32_t thread_offset,
         mr_element_store_.deletedSlots[thread_offset];
 }
 
+uint32_t StateManager::getArchetypeNumRowsInWorld(
+        uint32_t archetype_id, uint32_t world_id)
+{
+    auto &archetype = *archetypes_[archetype_id];
+    assert(!archetype.needsSort);
+    return archetype.worldCounts[world_id];
+}
+
 }
