@@ -266,9 +266,11 @@ namespace madrona {
 
 static void setCudaHeapSize()
 {
-    char *should_set_heap_size = getenv("MADRONA_SET_CUDA_HEAP_SIZE");
+    char *disable_heap_size = getenv("MADRONA_DISABLE_CUDA_HEAP_SIZE");
 
-    if (should_set_heap_size && should_set_heap_size == '1') {
+    if (disable_heap_size && disable_heap_size == '1') {
+        return;
+    } else {
         // FIXME size limit for device side malloc:
         size_t heap_size = 4ul*1024ul*1024ul*1024ul;
 
