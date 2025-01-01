@@ -483,7 +483,7 @@ template <typename DataT,
 void GaussMinimizationNode::copyToRegs(
         DataT (&blk_tmp)[block_size][block_size],
         DataT *mtx,
-       uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t mtx_rows, uint32_t mtx_cols,
         uint32_t blk_r, uint32_t blk_c)
 {
     uint32_t col_start = blk_c * block_size;
