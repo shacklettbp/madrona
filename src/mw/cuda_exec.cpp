@@ -268,7 +268,7 @@ static void setCudaHeapSize()
 {
     char *disable_heap_size = getenv("MADRONA_DISABLE_CUDA_HEAP_SIZE");
 
-    if (disable_heap_size && disable_heap_size == '1') {
+    if (disable_heap_size && disable_heap_size[0] == '1') {
         return;
     } else {
         // FIXME size limit for device side malloc:
