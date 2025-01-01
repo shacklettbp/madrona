@@ -266,16 +266,20 @@ namespace madrona {
 
 static void setCudaHeapSize()
 {
-    // FIXME size limit for device side malloc:
-    size_t heap_size = 4ul*1024ul*1024ul*1024ul;
+    char *should_set_heap_size = getenv("MADRONA_SET_CUDA_HEAP_SIZE");
 
-    char* user_heap_size = getenv("MADRONA_MWGPU_DEVICE_HEAP_SIZE");
-    if (user_heap_size) {
-        heap_size = strtoul(user_heap_size,nullptr,10);
+    if (should_set_heap_size && should_set_heap_size == '1') {
+        // FIXME size limit for device side malloc:
+        size_t heap_size = 4ul*1024ul*1024ul*1024ul;
+
+        char* user_heap_size = getenv("MADRONA_MWGPU_DEVICE_HEAP_SIZE");
+        if (user_heap_size) {
+            heap_size = strtoul(user_heap_size,nullptr,10);
+        }
+
+        REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
+                                    heap_size));
     }
-
-    REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
-                                heap_size));
 }
 
 struct FreeQueue {
