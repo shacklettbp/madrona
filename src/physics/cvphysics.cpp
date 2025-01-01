@@ -456,7 +456,7 @@ struct GaussMinimizationNode : NodeBase {
 
     template <typename DataT,
               uint32_t block_size,
-              bool a_transposed = false
+              bool a_transposed = false,
               bool b_transposed = false,
               bool reset_res = false>
     void sparseBlkDiagSmallReg(
@@ -468,6 +468,10 @@ struct GaussMinimizationNode : NodeBase {
 
     // This is a node in the taskgraph.
     void computeARef(int32_t invocation_idx);
+
+    // Let's test some of these helper functions
+    void testNodeMul(int32_t invocation_idx);
+    void testNodeIdenMul(int32_t invocation_idx);
 
     static TaskGraph::NodeID addToGraph(
             TaskGraph::Builder &builder,
@@ -692,9 +696,9 @@ void GaussMinimizationNode::gmmaWarpSmallReg(
     uint32_t num_blks_b = (b_rows + block_size - 1) / block_size;
 
     uint32_t lane_id = threadIdx.x % 32;
-    uint32_t curr_iter = lane_id;
+    uint32_t cur_iter = lane_id;
     
-    while (curr_iter < total_num_iters) {
+    while (cur_iter < total_num_iters) {
         uint32_t res_blk_r = cur_iter / num_iters_c;
         uint32_t res_blk_c = cur_iter % num_iters_c;
 
@@ -702,21 +706,19 @@ void GaussMinimizationNode::gmmaWarpSmallReg(
             setBlockZero(res_blk_tmp);
         }
 
-        for (uint32_t blk_i = 0; blk_i < num_blks_a; ++blk_i) {
-            for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
-                copyToRegs<DataT, block_size, a_transposed>(
-                        a_blk_tmp, a, a_rows, a_cols, res_blk_r, blk_i);
-                copyToRegs<DataT, block_size, b_transposed>(
-                        b_blk_tmp, b, b_rows, b_cols, blk_j, res_blk_c);
+        for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
+            copyToRegs<DataT, block_size, a_transposed>(
+                    a_blk_tmp, a, a_rows, a_cols, res_blk_r, blk_j);
+            copyToRegs<DataT, block_size, b_transposed>(
+                    b_blk_tmp, b, b_rows, b_cols, blk_j, res_blk_c);
 
-                gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
-            }
+            gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
         }
 
         copyToMem(res, res_blk_tmp, res_rows, 
                   res_cols, res_blk_r, res_blk_c);
 
-        curr_iter += 32;
+        cur_iter += 32;
     }
 }
 
@@ -736,9 +738,9 @@ DataT GaussMinimizationNode::warpInclusivePrefixSum(DataT value)
 
 template <typename DataT,
           uint32_t block_size,
-          bool a_transposed = false
-          bool b_transposed = false,
-          bool reset_res = false>
+          bool a_transposed,
+          bool b_transposed,
+          bool reset_res>
 void GaussMinimizationNode::sparseBlkDiagSmallReg(
         DataT *res,
         SparseBlkDiag *a,
@@ -804,24 +806,22 @@ void GaussMinimizationNode::sparseBlkDiagSmallReg(
             setBlockZero(res_blk_tmp);
         }
 
-        for (uint32_t blk_i = 0; blk_i < num_blks_a; ++blk_i) {
-            for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
-                // This is trivial
-                copyToRegs<DataT, block_size, a_transposed>(
-                        a_blk_tmp, blk.values, blk.dim, blk.dim, 
-                        res_blk_r, blk_i);
+        for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
+            // This is trivial
+            copyToRegs<DataT, block_size, a_transposed>(
+                    a_blk_tmp, blk.values, blk.dim, blk.dim, 
+                    res_blk_r, blk_j);
 
-                // This is a little more complicated
-                copyToRegsWithBoundary<DataT, block_size, b_transposed>(
-                        b_blk_tmp, 
-                        b, 
-                        processed_dims, 0,
-                        processed_dims + blk.dim, b_cols,
-                        b_rows, b_cols,
-                        blk_j, res_blk_c);
+            // This is a little more complicated
+            copyToRegsWithBoundary<DataT, block_size, b_transposed>(
+                    b_blk_tmp, 
+                    b, 
+                    processed_dims, 0,
+                    processed_dims + blk.dim, b_cols,
+                    b_rows, b_cols,
+                    blk_j, res_blk_c);
 
-                gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
-            }
+            gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
         }
 
         copyToMem(res, res_blk_tmp, res_rows, 
@@ -864,6 +864,153 @@ GaussMinimizationNode::GaussMinimizationNode(
 {
 }
 
+// Let's test some of these helper functions
+void GaussMinimizationNode::testNodeMul(int32_t invocation_idx)
+{
+    uint32_t warp_id = threadIdx.x / 32;
+    uint32_t lane_id = threadIdx.x % 32;
+
+    if (warp_id == 0) {
+        float *test_a_mat = nullptr;
+        float *test_b_mat = nullptr;
+        float *test_res_mat = nullptr;
+        uint32_t a_mat_rows, a_mat_cols;
+        uint32_t b_mat_rows, b_mat_cols;
+
+        if (lane_id == 0) {
+            a_mat_rows = 12;
+            a_mat_cols = 16;
+
+            b_mat_rows = 16;
+            b_mat_cols = 18;
+
+            test_a_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * a_mat_rows * a_mat_cols);
+            test_b_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * b_mat_rows * b_mat_cols);
+            test_res_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * a_mat_rows * b_mat_cols);
+
+            for (int i = 0; i < a_mat_rows; ++i) {
+                for (int j = 0; j < a_mat_cols; ++j) {
+                    test_a_mat[i * a_mat_cols + j] = (i * a_mat_cols + j) % 5;
+                }
+            }
+
+            for (int i = 0; i < b_mat_rows; ++i) {
+                for (int j = 0; j < b_mat_cols; ++j) {
+                    test_b_mat[i * b_mat_cols + j] = (i * b_mat_cols + j) % 7;
+                }
+            }
+        }
+
+        __syncwarp();
+
+        test_a_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_a_mat, 0);
+        test_b_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_b_mat, 0);
+        test_res_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_res_mat, 0);
+        a_mat_rows = __shfl_sync(0xFFFF'FFFF, a_mat_rows, 0);
+        a_mat_cols = __shfl_sync(0xFFFF'FFFF, a_mat_cols, 0);
+        b_mat_rows = __shfl_sync(0xFFFF'FFFF, b_mat_rows, 0);
+        b_mat_cols = __shfl_sync(0xFFFF'FFFF, b_mat_cols, 0);
+
+        gmmaWarpSmallReg<float, 4, false, false, true>(
+                test_res_mat, 
+                test_a_mat,
+                test_b_mat,
+                a_mat_rows,
+                a_mat_cols,
+                b_mat_rows,
+                b_mat_cols);
+
+        if (lane_id == 0) {
+            for (int i = 0; i < a_mat_rows; ++i) {
+                for (int j = 0; j < b_mat_cols; ++j) {
+                    float v = test_res_mat[i * b_mat_cols + j];
+
+                    printf("%f\t", v);
+                }
+
+                printf("\n");
+            }
+            printf("\n");
+        }
+    }
+}
+
+void GaussMinimizationNode::testNodeIdenMul(int32_t invocation_idx)
+{
+    uint32_t warp_id = threadIdx.x / 32;
+    uint32_t lane_id = threadIdx.x % 32;
+
+    if (warp_id == 0) {
+        float *test_a_mat = nullptr;
+        float *test_b_mat = nullptr;
+        float *test_res_mat = nullptr;
+        uint32_t a_mat_rows, a_mat_cols;
+        uint32_t b_mat_rows, b_mat_cols;
+
+        if (lane_id == 0) {
+            a_mat_rows = 8;
+            a_mat_cols = 8;
+
+            b_mat_rows = 8;
+            b_mat_cols = 6;
+
+            test_a_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * a_mat_rows * a_mat_cols);
+            test_b_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * b_mat_rows * b_mat_cols);
+            test_res_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * a_mat_rows * b_mat_cols);
+
+            memset(test_a_mat, 0, sizeof(float) * a_mat_rows * a_mat_cols);
+
+            for (int i = 0; i < a_mat_rows; ++i) {
+                test_a_mat[i * a_mat_cols + i] = 1.f;
+            }
+
+            for (int i = 0; i < b_mat_rows; ++i) {
+                for (int j = 0; j < b_mat_cols; ++j) {
+                    test_b_mat[i * b_mat_cols + j] = (i * b_mat_cols + j);
+                }
+            }
+        }
+
+        __syncwarp();
+
+        test_a_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_a_mat, 0);
+        test_b_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_b_mat, 0);
+        test_res_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_res_mat, 0);
+        a_mat_rows = __shfl_sync(0xFFFF'FFFF, a_mat_rows, 0);
+        a_mat_cols = __shfl_sync(0xFFFF'FFFF, a_mat_cols, 0);
+        b_mat_rows = __shfl_sync(0xFFFF'FFFF, b_mat_rows, 0);
+        b_mat_cols = __shfl_sync(0xFFFF'FFFF, b_mat_cols, 0);
+
+        gmmaWarpSmallReg<float, 2, false, false, true>(
+                test_res_mat, 
+                test_a_mat,
+                test_b_mat,
+                a_mat_rows,
+                a_mat_cols,
+                b_mat_rows,
+                b_mat_cols);
+
+        if (lane_id == 0) {
+            for (int i = 0; i < a_mat_rows; ++i) {
+                for (int j = 0; j < b_mat_cols; ++j) {
+                    float v = test_res_mat[i * b_mat_cols + j];
+
+                    printf("%f\t", v);
+                }
+
+                printf("\n");
+            }
+            printf("\n");
+        }
+    }
+}
+
 // Might be overkill to allocate a warp per world but we can obviously
 // experiment.
 void GaussMinimizationNode::computeARef(int32_t invocation_idx)
@@ -898,7 +1045,7 @@ void GaussMinimizationNode::computeARef(int32_t invocation_idx)
                 if (sizeof(float) * curr_sd->numRowsJc < 
                         num_smem_bytes_per_warp) {
                     a_ref = (float *)smem_buf;
-                    flags |= StateFlags::ARefSmem;
+                    flags |= CVSolveData::StateFlags::ARefSmem;
                 } else {
                     a_ref = (float *)mwGPU::TmpAllocator::get().alloc(
                         sizeof(float) * curr_sd->numRowsJc);
@@ -949,8 +1096,17 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
     // thread block is going to process a world.
     uint32_t num_invocations = (uint32_t)gridDim.x;
 
+#if 0
     TaskGraph::NodeID a_ref_node = builder.addNodeFn<
         &GaussMinimizationNode::computeARef>(data_id, {},
+                Optional<TaskGraph::NodeID>::none(),
+                num_invocations,
+                // This is the thread block dimension
+                consts::numMegakernelThreads);
+#endif
+
+    TaskGraph::NodeID a_ref_node = builder.addNodeFn<
+        &GaussMinimizationNode::testNodeIdenMul>(data_id, {},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 // This is the thread block dimension
