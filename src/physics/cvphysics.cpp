@@ -20,6 +20,18 @@ using namespace madrona::base;
 
 namespace madrona::phys::cv {
 
+struct SparseBlkDiag {
+    struct Blk {
+        uint32_t dim;
+        uint32_t scratch;
+        float *values;
+    };
+
+    uint32_t fullDim;
+    uint32_t numBlks;
+    Blk *blks;
+};
+
 StateManager * getStateManager(Context &ctx)
 {
 #ifdef MADRONA_GPU_MODE
@@ -136,6 +148,15 @@ struct CVSolveData {
 
     // This is going to be allocated during the solve
     float *aRef;
+
+    enum StateFlags {
+        // Is a_ref stored in shared memory?
+        ARefSmem = 1 << 0
+    };
+
+    uint32_t flags;
+
+    SparseBlkDiag massSparse;
 
     CVXSolve *cvxSolve;
 };
@@ -390,12 +411,32 @@ struct GaussMinimizationNode : NodeBase {
             uint32_t blk_r, uint32_t blk_c);
 
     template <typename DataT,
+              uint32_t block_size,
+              bool transposed>
+    void copyToRegsWithBoundary(
+            DataT (&blk_tmp)[block_size][block_size], // dst
+            DataT *mtx,                               // src
+            uint32_t mtx_rows_start, uint32_t mtx_cols_start,
+            uint32_t mtx_rows_end, uint32_t mtx_cols_end,
+            uint32_t mtx_rows, uint32_t mtx_cols,
+            uint32_t blk_r, uint32_t blk_c);
+
+    template <typename DataT,
               uint32_t block_size>
     void copyToMem(
             DataT *mtx,                               // dst
             DataT (&blk_tmp)[block_size][block_size], // src
             uint32_t mtx_rows, uint32_t mtx_cols,
             uint32_t blk_r, uint32_t blk_c);
+
+    template <typename DataT,
+              uint32_t block_size>
+    void copyToMemWithOffset(
+            DataT *mtx,                               // dst
+            DataT (&blk_tmp)[block_size][block_size], // src
+            uint32_t mtx_rows, uint32_t mtx_cols,
+            uint32_t blk_r, uint32_t blk_c,
+            uint32_t r_offset, uint32_t c_offset);
 
     template <typename DataT,
               uint32_t block_size,
@@ -410,6 +451,22 @@ struct GaussMinimizationNode : NodeBase {
     void setBlockZero(
             DataT (&blk)[block_size][block_size]);
 
+    template <typename DataT>
+    DataT warpInclusivePrefixSum(DataT value);
+
+    template <typename DataT,
+              uint32_t block_size,
+              bool a_transposed = false
+              bool b_transposed = false,
+              bool reset_res = false>
+    void sparseBlkDiagSmallReg(
+            DataT *res,
+            SparseBlkDiag *a,
+            DataT *b,
+            uint32_t b_rows, uint32_t b_cols);
+
+
+    // This is a node in the taskgraph.
     void computeARef(int32_t invocation_idx);
 
     static TaskGraph::NodeID addToGraph(
@@ -454,6 +511,43 @@ void GaussMinimizationNode::copyToRegs(
 }
 
 template <typename DataT,
+          uint32_t block_size,
+          bool transposed>
+void GaussMinimizationNode::copyToRegsWithBoundary(
+        DataT (&blk_tmp)[block_size][block_size], // dst
+        DataT *mtx,                               // src
+        uint32_t mtx_rows_start, uint32_t mtx_cols_start,
+        uint32_t mtx_rows_end, uint32_t mtx_cols_end,
+        uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t blk_r, uint32_t blk_c)
+{
+    uint32_t col_start = blk_c * block_size + mtx_cols_start;
+    uint32_t row_start = blk_r * block_size + mtx_rows_start;
+
+    #pragma unroll
+    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
+        #pragma unroll
+        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
+            if constexpr (transposed) {
+                blk_tmp[blk_row][blk_col] = 
+                    (col_start + blk_col < mtx_cols_end &&
+                     row_start + blk_row >= mtx_rows_start &&
+                     row_start + blk_row < mtx_rows_end) ?
+                    mtx[row_start + blk_row + mtx_rows * (col_start + blk_col)] :
+                    0.f;
+            } else {
+                blk_tmp[blk_row][blk_col] = 
+                    (col_start + blk_col < mtx_cols_end &&
+                     row_start + blk_row >= mtx_rows_start &&
+                     row_start + blk_row < mtx_rows_end) ?
+                    mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] :
+                    0.f;
+            }
+        }
+    }
+}
+
+template <typename DataT,
           uint32_t block_size>
 void GaussMinimizationNode::copyToMem(
         DataT *mtx,
@@ -463,6 +557,31 @@ void GaussMinimizationNode::copyToMem(
 {
     uint32_t col_start = blk_c * block_size;
     uint32_t row_start = blk_r * block_size;
+
+    #pragma unroll
+    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
+        #pragma unroll
+        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
+            if (col_start + blk_col < mtx_cols &&
+                 row_start + blk_row < mtx_rows) {
+                mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] =
+                    blk_tmp[blk_row][blk_col];
+            }
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void GaussMinimizationNode::copyToMemWithOffset(
+        DataT *mtx,                               // dst
+        DataT (&blk_tmp)[block_size][block_size], // src
+        uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t blk_r, uint32_t blk_c,
+        uint32_t r_offset, uint32_t c_offset)
+{
+    uint32_t col_start = blk_c * block_size + c_offset;
+    uint32_t row_start = blk_r * block_size + r_offset;
 
     #pragma unroll
     for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
@@ -576,8 +695,8 @@ void GaussMinimizationNode::gmmaWarpSmallReg(
     uint32_t curr_iter = lane_id;
     
     while (curr_iter < total_num_iters) {
-        uint32_t res_blk_r = total_num_iters / num_iters_c;
-        uint32_t res_blk_c = total_num_iters % num_iters_c;
+        uint32_t res_blk_r = cur_iter / num_iters_c;
+        uint32_t res_blk_c = cur_iter % num_iters_c;
 
         if constexpr (reset_res) {
             setBlockZero(res_blk_tmp);
@@ -598,6 +717,144 @@ void GaussMinimizationNode::gmmaWarpSmallReg(
                   res_cols, res_blk_r, res_blk_c);
 
         curr_iter += 32;
+    }
+}
+
+template <typename DataT>
+DataT GaussMinimizationNode::warpInclusivePrefixSum(DataT value)
+{
+    uint32_t lane_id = threadIdx.x % 32;
+
+    #pragma unroll
+    for (uint32_t i = 1; i <= 32; i *= 2) {
+        DataT prev_blk = __shfl_up_sync(0xFFFF'FFFF, value, i, 32);
+        if (lane_id >= i) value += prev_blk;
+    }
+
+    return value;
+}
+
+template <typename DataT,
+          uint32_t block_size,
+          bool a_transposed = false
+          bool b_transposed = false,
+          bool reset_res = false>
+void GaussMinimizationNode::sparseBlkDiagSmallReg(
+        DataT *res,
+        SparseBlkDiag *a,
+        DataT *b,
+        uint32_t b_rows, uint32_t b_cols)
+{
+    DataT a_blk_tmp[block_size][block_size];
+    DataT b_blk_tmp[block_size][block_size];
+    DataT res_blk_tmp[block_size][block_size];
+
+    uint32_t res_rows = a->fullDim;
+    uint32_t res_cols = b_cols;
+
+    auto get_num_iters = [b_cols](SparseBlkDiag::Blk blk) {
+        uint32_t res_rows = blk.dim;
+        uint32_t res_cols = b_cols;
+        uint32_t num_iters_r = (res_rows + block_size - 1) / block_size;
+        uint32_t num_iters_c = (res_cols + block_size - 1) / block_size;
+        return num_iters_r + num_iters_c;
+    };
+
+    uint32_t lane_id = threadIdx.x % 32;
+
+    // Everyone starts on blk 0
+    uint32_t cur_blk = 0;
+    uint32_t cur_iter = lane_id;
+
+    bool work_finished = false;
+
+    uint32_t processed_dims = 0;
+
+    while (!work_finished) {
+        while (cur_iter >= cur_num_iters) {
+            processed_dims += a->blks[cur_blk].dim;
+
+            cur_blk++;
+            cur_iter -= cur_num_iters;
+
+            if (cur_blk < a->numBlks) {
+                cur_num_iters = get_num_iters(a->blks[cur_blk]);
+            } else {
+                work_finished = true;
+                break;
+            }
+        }
+
+        if (work_finished)
+            break;
+
+        auto blk = a->blks[cur_blk];
+        uint32_t blk_num_iters = get_num_iters(blk);
+
+        uint32_t num_iters_c = (b_cols + block_size - 1) / block_size;
+
+        // These are blocks within the blk
+        uint32_t res_blk_r = cur_iter / num_iters_c;
+        uint32_t res_blk_c = cur_iter % num_iters_c;
+
+        uint32_t num_blks_a = (blk.dim + block_size - 1) / block_size;
+        uint32_t num_blks_b = (blk.dim + block_size - 1) / block_size;
+
+        if constexpr (reset_res) {
+            setBlockZero(res_blk_tmp);
+        }
+
+        for (uint32_t blk_i = 0; blk_i < num_blks_a; ++blk_i) {
+            for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
+                // This is trivial
+                copyToRegs<DataT, block_size, a_transposed>(
+                        a_blk_tmp, blk.values, blk.dim, blk.dim, 
+                        res_blk_r, blk_i);
+
+                // This is a little more complicated
+                copyToRegsWithBoundary<DataT, block_size, b_transposed>(
+                        b_blk_tmp, 
+                        b, 
+                        processed_dims, 0,
+                        processed_dims + blk.dim, b_cols,
+                        b_rows, b_cols,
+                        blk_j, res_blk_c);
+
+                gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
+            }
+        }
+
+        copyToMem(res, res_blk_tmp, res_rows, 
+                  res_cols, res_blk_r, res_blk_c,
+                  processed_dims, 0);
+
+#if 0 // Save for later to potenatially reduce divergence
+        bool valid_work;
+        uint32_t cur_num_iters;
+
+        if (cur_blk < a->numBlks) {
+            cur_num_iters = get_num_iters(a->blks[cur_blk]);
+            valid_work = (cur_iter < cur_num_iters);
+        } else {
+            valid_work = true;
+            work_finished = true;
+
+            cur_iter = 0;
+            cur_num_iters = 0xFFFF'FFFF;
+        }
+        
+        while (!__all_sync(0xFFFF'FFFF, valid_work)) {
+            if (cur_iter >= cur_num_iters) {
+                cur_blk++;
+                cur_iter -= cur_num_iters;
+
+                if (cur_blk < a->numBlks)
+                    cur_num_iters = get_num_iters(a->blks[cur_blk]);
+            }
+        }
+#endif
+
+        cur_iter += 32;
     }
 }
 
@@ -634,14 +891,23 @@ void GaussMinimizationNode::computeARef(int32_t invocation_idx)
 
         // Allocate space for the a_ref vector
         float *a_ref = nullptr;
+        uint32_t flags = 0;
+
         if (lane_id == 0) {
             if (curr_sd->numRowsJc > 0) {
-                a_ref = (float *)mwGPU::TmpAllocator::get().alloc(
-                    sizeof(float) * curr_sd->numRowsJc);
+                if (sizeof(float) * curr_sd->numRowsJc < 
+                        num_smem_bytes_per_warp) {
+                    a_ref = (float *)smem_buf;
+                    flags |= StateFlags::ARefSmem;
+                } else {
+                    a_ref = (float *)mwGPU::TmpAllocator::get().alloc(
+                        sizeof(float) * curr_sd->numRowsJc);
+                }
             }
         }
 
         __syncwarp();
+
         a_ref = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)a_ref, 0);
 
         if (a_ref) {
@@ -654,6 +920,13 @@ void GaussMinimizationNode::computeARef(int32_t invocation_idx)
                     curr_sd->numColsJc,
                     curr_sd->velDim,
                     1);
+        }
+
+        __syncwarp();
+
+        if (lane_id == 0) {
+            curr_sd->aRef = a_ref;
+            curr_sd->flags = flags;
         }
 
         world_id += total_resident_warps;
@@ -1514,7 +1787,28 @@ inline void brobdingnag(Context &ctx,
     memset(full_free_acc, 0, num_full_dofs_bytes);
     memset(full_vel, 0, num_full_dofs_bytes);
 
+    SparseBlkDiag mass_sparse;
+    mass_sparse.fullDim = total_num_dofs;
+    mass_sparse.numBlks = num_grps;
+    mass_sparse.blks = (SparseBlkDiag::Blk *)ctx.tmpAlloc(
+            sizeof(SparseBlkDiag::Blk) * num_grps);
+
     uint32_t processed_dofs = 0;
+#ifdef MADRONA_GPU_MODE
+    for (CountT i = 0; i < num_grps; ++i) {
+        // This pointer should be consistent for solver.
+        float *local_mass = hiers[i].getMassMatrix(ctx);
+        mass_sparse.blks[i].dim = hiers[i].numDofs;
+        mass_sparse.blks[i].values = local_mass;
+
+        for (CountT row = 0; row < hiers[i].numDofs; ++row) {
+            float *freeAcceleration = hiers[i].getBias(ctx);
+            full_free_acc[row + processed_dofs] = freeAcceleration[row];
+        }
+
+        processed_dofs += hiers[i].numDofs;
+    }
+#else
     for (CountT i = 0; i < num_grps; ++i) {
         float *local_mass = hiers[i].getMassMatrix(ctx);
 
@@ -1536,6 +1830,7 @@ inline void brobdingnag(Context &ctx,
 
         processed_dofs += hiers[i].numDofs;
     }
+#endif
 
     // Full velocity
     processed_dofs = 0;
@@ -1690,6 +1985,7 @@ inline void brobdingnag(Context &ctx,
     cv_sing.numColsJc = J_cols;
     cv_sing.muDim = total_contact_pts;
     cv_sing.penetrationsDim = total_contact_pts;
+    cv_sing.massSparse = mass_sparse;
 }
 
 inline void integrationStep(Context &ctx,
