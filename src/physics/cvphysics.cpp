@@ -25,6 +25,9 @@ struct SparseBlkDiag {
         uint32_t dim;
         uint32_t scratch;
         float *values;
+
+        // factorized version
+        float *ltdl;
     };
 
     uint32_t fullDim;
@@ -465,6 +468,13 @@ struct GaussMinimizationNode : NodeBase {
             DataT *b,
             uint32_t b_rows, uint32_t b_cols);
 
+    // Solves for x in Ax = b
+    template <typename DataT>
+    void sparseBlkDiagSolve(
+            DataT *res,
+            SparseBlkDiag *a,
+            DataT *b);
+
 
     // This is a node in the taskgraph.
     void computeARef(int32_t invocation_idx);
@@ -858,6 +868,15 @@ void GaussMinimizationNode::sparseBlkDiagSmallReg(
     }
 }
 
+template <typename DataT>
+void GasussMinimizationNode::sparseBlkDiagSolve(
+        DataT *res,
+        SparseBlkDiag *a,
+        DataT *b)
+{
+    
+}
+
 GaussMinimizationNode::GaussMinimizationNode(
         StateManager *s)
     : solveDatas(s->getSingletonColumn<CVSolveData>())
@@ -951,10 +970,10 @@ void GaussMinimizationNode::testNodeIdenMul(int32_t invocation_idx)
         uint32_t b_mat_rows, b_mat_cols;
 
         if (lane_id == 0) {
-            a_mat_rows = 8;
-            a_mat_cols = 8;
+            a_mat_rows = 7;
+            a_mat_cols = 7;
 
-            b_mat_rows = 8;
+            b_mat_rows = 7;
             b_mat_cols = 6;
 
             test_a_mat = (float *)mwGPU::TmpAllocator::get().alloc(
@@ -987,7 +1006,7 @@ void GaussMinimizationNode::testNodeIdenMul(int32_t invocation_idx)
         b_mat_rows = __shfl_sync(0xFFFF'FFFF, b_mat_rows, 0);
         b_mat_cols = __shfl_sync(0xFFFF'FFFF, b_mat_cols, 0);
 
-        gmmaWarpSmallReg<float, 2, false, false, true>(
+        gmmaWarpSmallReg<float, 4, false, false, true>(
                 test_res_mat, 
                 test_a_mat,
                 test_b_mat,
@@ -1106,7 +1125,7 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
 #endif
 
     TaskGraph::NodeID a_ref_node = builder.addNodeFn<
-        &GaussMinimizationNode::testNodeIdenMul>(data_id, {},
+        &GaussMinimizationNode::testNodeMul>(data_id, {},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 // This is the thread block dimension
@@ -1956,6 +1975,7 @@ inline void brobdingnag(Context &ctx,
         float *local_mass = hiers[i].getMassMatrix(ctx);
         mass_sparse.blks[i].dim = hiers[i].numDofs;
         mass_sparse.blks[i].values = local_mass;
+        mass_sparse.blks[i].ltdl = hiers[i].getMassMatrixLTDL(ctx);
 
         for (CountT row = 0; row < hiers[i].numDofs; ++row) {
             float *freeAcceleration = hiers[i].getBias(ctx);
