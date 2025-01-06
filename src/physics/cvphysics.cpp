@@ -1759,7 +1759,16 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
     StateManager *state_mgr = getStateManager();
 
     uint32_t world_id = warp_id;
+
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        LOG("In right thread\n");
+    }
+
     while (world_id < total_num_worlds) {
+        if (lane_id == 0) {
+            LOG("computeAccRef\n");
+        }
+
         CVSolveData *curr_sd = &solveDatas[world_id];
 
         scratch_alloc.clearSmemWarp();
@@ -1810,7 +1819,7 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
                 acc_ref[iter] -= k * imp * r;
             });
 
-            if (in_smem) {
+            if (acc_ref && in_smem) {
                 void * acc_ref_glob = scratch_alloc.allocWarpGlobal(
                         sizeof(float) * curr_sd->numRowsJc);
                 warpCopy(acc_ref_glob, acc_ref,
@@ -1839,6 +1848,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
     // Global warp ID
     uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
+    uint32_t lane_id = threadIdx.x % 32;
 
     ScratchMemAlloc scratch_alloc = { 0 };
 
@@ -1848,12 +1858,16 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
     uint32_t world_id = warp_id;
     while (world_id < total_num_worlds) {
+        if (lane_id == 0) {
+            LOG("nonlinearCG\n");
+        }
+
         CVSolveData *curr_sd = &solveDatas[world_id];
 
         scratch_alloc.clearSmemWarp();
 
         // TODO: We definitely are going to need a better way to handle these
-        // scratch memory allocations.
+        // scratch memory allocations. Let's get this working in 1 world first.
         auto [x, x_in_smem] = scratch_alloc.allocWarp<float>(
             sizeof(float) * curr_sd->freeAccDim);
         auto [m_grad, m_grad_in_smem] = scratch_alloc.allocWarp<float>(
@@ -1882,6 +1896,13 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
                        jaccref, mxmin);
         __syncwarp();
+
+        if (lane_id == 0) {
+            for (int i = 0; i < curr_sd->freeAccDim; ++i) {
+                printf("%f ", m_grad[i]);
+            }
+            printf("\n");
+        }
 
         // Keep track of the norm2 of g (m_grad currently has g)
         float g_norm2 = norm2Warp(m_grad, curr_sd->freeAccDim);
@@ -1967,6 +1988,61 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             }
         }
 
+        { // Now, we need to copy x into the right components
+            auto get_bodies = [state_mgr](BodyGroupHierarchy &hier) 
+                -> Entity * {
+                uint8_t *bytes =
+                    (uint8_t *)state_mgr->memoryRangePointer<
+                        MRElement128b>(hier.mrBodies);
+                return (Entity *)bytes;
+            };
+            
+            BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
+                BodyGroup, BodyGroupHierarchy>(world_id);
+            CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
+
+            // Make sure to have a phase where we first calculate prefix sums
+            // of all the DOFs of all bodies so we can get around this shit.
+
+            if (lane_id == 0) {
+                uint32_t processed_dofs = 0;
+                for (CountT i = 0; i < num_grps; ++i) {
+                    Entity * bodies = get_bodies(hiers[i]);
+                    for (CountT j = 0; j < hiers[i].numBodies; j++) {
+                        auto body = bodies[j];
+                        auto numDofs = state_mgr->getUnsafe<
+                                DofObjectNumDofs>(body).numDofs;
+                        auto &acceleration = state_mgr->getUnsafe<
+                                DofObjectAcceleration>(body);
+
+                        for (CountT k = 0; k < numDofs; k++) {
+                            acceleration.dqv[k] = x[processed_dofs];
+                            processed_dofs++;
+                        }
+                    }
+                }
+            }
+
+#if 0
+            uint32_t processed_dofs = 0;
+            warpLoopSync(num_grps, 
+                [&](uint32_t grp) {
+                    warpLoopSync(hiers[grp].numBodies,
+                        [&](uint32_t body_idx) {
+                            Entity body = get_bodies(hiers[grp])[body_idx];
+
+                            uint32_t num_dofs = state_mgr->getUnsafe<
+                                DofObjectNumDofs>(body).numDofs;
+                            auto &acc = state_mgr->getUnsafe<
+                                DofObjectAcceleration>(body);
+
+                            for (uint32_t k = 0; k < num_dofs; ++k) {
+                                acc.dqv[k] = x[processed_dofs];
+                            }
+                        });
+                });
+#endif
+        }
 
         world_id += total_resident_warps;
     }
@@ -1988,23 +2064,31 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
     // thread block is going to process a world.
     uint32_t num_invocations = (uint32_t)gridDim.x;
 
-#if 0
+#if 1
     TaskGraph::NodeID a_ref_node = builder.addNodeFn<
         &GaussMinimizationNode::computeAccRef>(data_id, {},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 // This is the thread block dimension
                 consts::numMegakernelThreads);
+
+    TaskGraphNodeID nonlinear_cg_node = builder.addNodeFn<
+        &GaussMinimizationNode::nonlinearCG>(data_id, {a_ref_node},
+                Optional<TaskGraph::NodeID>::none(),
+                num_invocations,
+                consts::numMegakernelThreads);
 #endif
 
+#if 0
     TaskGraph::NodeID a_ref_node = builder.addNodeFn<
         &GaussMinimizationNode::testNodeSparseMul>(data_id, {},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 // This is the thread block dimension
                 consts::numMegakernelThreads);
+#endif
 
-    return a_ref_node;
+    return nonlinear_cg_node;
 }
 #else
 inline void solveCPU(Context &ctx,
