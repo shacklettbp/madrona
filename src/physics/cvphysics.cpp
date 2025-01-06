@@ -1744,12 +1744,11 @@ float GaussMinimizationNode::exactLineSearch(
 void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
 {
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
-
     uint32_t total_num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
 
     // This is the global warp ID
-    uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
-
+    // uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
+    uint32_t warp_id = invocation_idx;
     uint32_t lane_id = threadIdx.x % 32;
 
     ScratchMemAlloc scratch_alloc = { 0 };
@@ -1764,7 +1763,7 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
         LOG("In right thread\n");
     }
 
-    while (world_id < total_num_worlds) {
+    { // Do the actual computation
         if (lane_id == 0) {
             LOG("computeAccRef\n");
         }
@@ -1847,7 +1846,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
     uint32_t total_num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
 
     // Global warp ID
-    uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
+    // uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
+    uint32_t warp_id = invocation_idx;
     uint32_t lane_id = threadIdx.x % 32;
 
     ScratchMemAlloc scratch_alloc = { 0 };
@@ -1857,7 +1857,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
     StateManager *state_mgr = getStateManager();
 
     uint32_t world_id = warp_id;
-    while (world_id < total_num_worlds) {
+
+    { // Do the computation
         if (lane_id == 0) {
             LOG("nonlinearCG\n");
         }
@@ -2062,7 +2063,8 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
 
     // For now, we are going with the persistent threads approach where each
     // thread block is going to process a world.
-    uint32_t num_invocations = (uint32_t)gridDim.x;
+    // uint32_t num_invocations = (uint32_t)gridDim.x;
+    uint32_t num_invocations = mwGPU::GPUImplConsts::get().numWorlds;
 
 #if 1
     TaskGraph::NodeID a_ref_node = builder.addNodeFn<
@@ -2070,13 +2072,13 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 // This is the thread block dimension
-                consts::numMegakernelThreads);
+                32);
 
     TaskGraphNodeID nonlinear_cg_node = builder.addNodeFn<
         &GaussMinimizationNode::nonlinearCG>(data_id, {a_ref_node},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
-                consts::numMegakernelThreads);
+                32);
 #endif
 
 #if 0
