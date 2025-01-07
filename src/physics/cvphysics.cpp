@@ -381,11 +381,53 @@ inline void initHierarchies(Context &ctx,
 struct GaussMinimizationNode : NodeBase {
     GaussMinimizationNode(StateManager *state_mgr);
 
+    // For debugging purposes
+    template <bool transposed, bool host_print>
+    void printMatrix(float *mat,
+                     uint32_t num_rows,
+                     uint32_t num_cols)
+    {
+        __syncwarp();
+        if (threadIdx.x % 32 == 0) {
+            if constexpr (host_print) {
+                LOG("printing matrix\n");
+            } else {
+                printf("printing matrix\n");
+            }
+
+            for (uint32_t r = 0; r < num_rows; ++r) {
+                if constexpr (host_print) {
+                    LOG("row {}\n", r);
+                }
+
+                for (uint32_t c = 0; c < num_cols; ++c) {
+                    float v = 0.f;
+                    if constexpr (transposed) {
+                        v = mat[r + c * num_rows];
+                    } else {
+                        v = mat[c + r * num_cols];
+                    }
+
+                    if constexpr (host_print) {
+                        LOG("{}\n", v);
+                    } else {
+                        printf("%f ", v);
+                    }
+                }
+
+                if constexpr (!host_print) {
+                    printf("\n");
+                }
+            }
+        }
+        __syncwarp();
+    }
+
     // Simple helper function for having a warp loop over work
     template <int granularity, typename Fn>
     void warpLoop(uint32_t total_num_iters, Fn &&fn)
     {
-        uint32_t iter = threadIdx.x % 32;
+        uint32_t iter = granularity * (threadIdx.x % 32);
         while (iter < total_num_iters) {
             #pragma unroll
             for (int i = 0; i < granularity; ++i) {
@@ -652,6 +694,7 @@ struct GaussMinimizationNode : NodeBase {
 
     // Let's test some of these helper functions
     void testNodeMul(int32_t invocation_idx);
+    void testNodeTransposeMul(int32_t invocation_idx);
     void testNodeIdenMul(int32_t invocation_idx);
     void testNodeSparseMul(int32_t invocation_idx);
 
@@ -1281,6 +1324,88 @@ GaussMinimizationNode::GaussMinimizationNode(
 }
 
 // Let's test some of these helper functions
+void GaussMinimizationNode::testNodeTransposeMul(int32_t invocation_idx)
+{
+    uint32_t warp_id = threadIdx.x / 32;
+    uint32_t lane_id = threadIdx.x % 32;
+
+    if (invocation_idx == 0) {
+        float *test_a_mat = nullptr;
+        float *test_b_mat = nullptr;
+        float *test_res_mat = nullptr;
+        uint32_t a_mat_rows, a_mat_cols;
+        uint32_t b_mat_rows, b_mat_cols;
+
+        if (lane_id == 0) {
+            a_mat_rows = 12;
+            a_mat_cols = 16;
+
+            b_mat_rows = 16;
+            b_mat_cols = 18;
+
+            test_a_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * a_mat_rows * a_mat_cols);
+            test_b_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * b_mat_rows * b_mat_cols);
+            test_res_mat = (float *)mwGPU::TmpAllocator::get().alloc(
+                sizeof(float) * a_mat_rows * b_mat_cols);
+
+            for (int j = 0; j < a_mat_cols; ++j) {
+                for (int i = 0; i < a_mat_rows; ++i) {
+                    //test_a_mat[i * a_mat_cols + j] = (i * a_mat_cols + j) % 5;
+                    test_a_mat[i + j * a_mat_rows] = (i * a_mat_cols + j) % 5;
+                }
+            }
+            
+#if 0
+            for (int i = 0; i < a_mat_rows; ++i) {
+                for (int j = 0; j < a_mat_cols; ++j) {
+                    test_a_mat[i * a_mat_cols + j] = (i * a_mat_cols + j) % 5;
+                }
+            }
+#endif
+
+            for (int i = 0; i < b_mat_rows; ++i) {
+                for (int j = 0; j < b_mat_cols; ++j) {
+                    test_b_mat[i * b_mat_cols + j] = (i * b_mat_cols + j) % 7;
+                }
+            }
+        }
+
+        __syncwarp();
+
+        test_a_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_a_mat, 0);
+        test_b_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_b_mat, 0);
+        test_res_mat = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)test_res_mat, 0);
+        a_mat_rows = __shfl_sync(0xFFFF'FFFF, a_mat_rows, 0);
+        a_mat_cols = __shfl_sync(0xFFFF'FFFF, a_mat_cols, 0);
+        b_mat_rows = __shfl_sync(0xFFFF'FFFF, b_mat_rows, 0);
+        b_mat_cols = __shfl_sync(0xFFFF'FFFF, b_mat_cols, 0);
+
+        gmmaWarpSmallReg<float, 4, true, false, true>(
+                test_res_mat, 
+                test_a_mat,
+                test_b_mat,
+                a_mat_rows,
+                a_mat_cols,
+                b_mat_rows,
+                b_mat_cols);
+
+        if (lane_id == 0) {
+            for (int i = 0; i < a_mat_rows; ++i) {
+                for (int j = 0; j < b_mat_cols; ++j) {
+                    float v = test_res_mat[i * b_mat_cols + j];
+
+                    printf("%f\t", v);
+                }
+
+                printf("\n");
+            }
+            printf("\n");
+        }
+    }
+}
+
 void GaussMinimizationNode::testNodeMul(int32_t invocation_idx)
 {
     uint32_t warp_id = threadIdx.x / 32;
@@ -1596,57 +1721,70 @@ float GaussMinimizationNode::exactLineSearch(
         float grad = alpha * pMp + pMx_free;
         float hess = pMp;
 
-        warpLoopSync(sd->numRowsJc,
+#if 0
+        if (threadIdx.x % 32 == 0) {
+            LOG("numRowsJc = {}\n", sd->numRowsJc);
+        }
+#endif
+
+        warpLoopSync(sd->numRowsJc / 3,
             [&](uint32_t iter) {
-                // ...
-                float n = jaccref[iter * 3];
-                float t1 = jaccref[iter * 3 + 1];
-                float t2 = jaccref[iter * 3 + 2];
-                float mu = sd->mu[iter];
-                float mw = 1.f / (1.f + mu * mu);
-
-                float p0 = Jp[iter * 3];
-                float p1 = Jp[iter * 3 + 1];
-                float p2 = Jp[iter * 3 + 2];
-                float np = n + alpha * p0;
-                float t1p = t1 + alpha * p1;
-                float t2p = t2 + alpha * p2;
-                float tp = sqrtf(t1p * t1p + t2p * t2p);
-
                 struct Diff {
                     float dfun;
                     float dgrad;
                     float dhess;
                 };
 
-                Diff d = [&]() -> Diff {
-                    if (np >= mu * tp) {
-                        // Don't add anything up
-                        return {0.f, 0.f, 0.f};
-                    } else if (mu * np + tp <= 0.f) {
-                        float p_sq = p0 * p0 + p1 * p1 + p2 * p2;
-
-                        return Diff {
-                            np * np + tp * tp,
-                            p0 * n + p1 * t1 + p2 * t2 + alpha * p_sq,
-                            p_sq,
+                auto d = [&]() -> Diff {
+                    if (iter == 0xFFFF'FFFF) {
+                        return {
+                            0.f, 0.f, 0.f
                         };
                     } else {
-                        float dnp_da = p0;
-                        float dtp_da = (p1 * t1 + p2 * t2 + 
-                                        alpha * (p1 * p1 + p2 * p2)) / tp;
-                        float d2tp_da2 = ((p2 * t1 - p1 * t2) * (p2 * t1 - p1 * t2)) /
-                            (tp * tp * tp);
-                        float tmp = np - mu * tp;
-                        float d_tmp = dnp_da - mu * dtp_da;
+                        // LOG("iter = {}\n", iter);
+                        float n = jaccref[iter * 3];
+                        float t1 = jaccref[iter * 3 + 1];
+                        float t2 = jaccref[iter * 3 + 2];
+                        float mu = sd->mu[iter];
+                        float mw = 1.f / (1.f + mu * mu);
 
-                        return Diff {
-                            mw * tmp * tmp,
-                            mw * tmp * d_tmp,
-                            mw * (d_tmp * d_tmp + tmp * (-mu * d2tp_da2))
-                        };
+                        float p0 = Jp[iter * 3];
+                        float p1 = Jp[iter * 3 + 1];
+                        float p2 = Jp[iter * 3 + 2];
+                        float np = n + alpha * p0;
+                        float t1p = t1 + alpha * p1;
+                        float t2p = t2 + alpha * p2;
+                        float tp = sqrtf(t1p * t1p + t2p * t2p);
+
+                        if (np >= mu * tp) {
+                            // Don't add anything up
+                            return {0.f, 0.f, 0.f};
+                        } else if (mu * np + tp <= 0.f) {
+                            float p_sq = p0 * p0 + p1 * p1 + p2 * p2;
+
+                            return Diff {
+                                np * np + tp * tp,
+                                p0 * n + p1 * t1 + p2 * t2 + alpha * p_sq,
+                                p_sq,
+                            };
+                        } else {
+                            float dnp_da = p0;
+                            float dtp_da = (p1 * t1 + p2 * t2 + 
+                                            alpha * (p1 * p1 + p2 * p2)) / tp;
+                            float d2tp_da2 = ((p2 * t1 - p1 * t2) * (p2 * t1 - p1 * t2)) /
+                                (tp * tp * tp);
+                            float tmp = np - mu * tp;
+                            float d_tmp = dnp_da - mu * dtp_da;
+
+                            return Diff {
+                                mw * tmp * tmp,
+                                mw * tmp * d_tmp,
+                                mw * (d_tmp * d_tmp + tmp * (-mu * d2tp_da2))
+                            };
+                        }
                     }
                 } ();
+
 
                 // These are summed from the current iteration
                 float dfun = warpReduceSum(d.dfun);
@@ -1690,6 +1828,7 @@ float GaussMinimizationNode::exactLineSearch(
     uint32_t iters = 0;
     for (; iters < ls_iters; ++iters) {
         __syncwarp();
+        
         evals_alpha1 = fdh_phi(alpha1);
         
         if (evals_alpha1.grad * a_dir > -sqrtf(avg_tol2))
@@ -1759,16 +1898,22 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
 
     uint32_t world_id = warp_id;
 
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        LOG("In right thread\n");
-    }
-
     { // Do the actual computation
-        if (lane_id == 0) {
-            LOG("computeAccRef\n");
-        }
-
         CVSolveData *curr_sd = &solveDatas[world_id];
+
+#if 0
+        if (invocation_idx == 0) {
+            printMatrix<true, false>(
+                curr_sd->J_c,
+                curr_sd->numRowsJc,
+                curr_sd->numColsJc);
+
+            printMatrix<false, false>(
+                curr_sd->vel,
+                1,
+                curr_sd->velDim);
+        }
+#endif
 
         scratch_alloc.clearSmemWarp();
         // We want acc_ref to have priority in shared memory
@@ -1818,6 +1963,18 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
                 acc_ref[iter] -= k * imp * r;
             });
 
+            if (threadIdx.x % 32 == 0) {
+                printf("accref\n");
+
+                for (int i = 0; i < curr_sd->numRowsJc; ++i) {
+                    printf("%f ", acc_ref[i]);
+                }
+
+                if (curr_sd->numRowsJc) {
+                    printf("\n");
+                }
+            }
+
             if (acc_ref && in_smem) {
                 void * acc_ref_glob = scratch_alloc.allocWarpGlobal(
                         sizeof(float) * curr_sd->numRowsJc);
@@ -1830,6 +1987,14 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
         __syncwarp();
 
         if (lane_id == 0) {
+            for (int i = 0; i < curr_sd->numRowsJc; ++i) {
+                printf("%f ", acc_ref[i]);
+            }
+
+            if (curr_sd->numRowsJc) {
+                printf("\n");
+            }
+
             curr_sd->accRef = acc_ref;
         }
 
@@ -1859,10 +2024,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
     uint32_t world_id = warp_id;
 
     { // Do the computation
-        if (lane_id == 0) {
-            LOG("nonlinearCG\n");
-        }
-
         CVSolveData *curr_sd = &solveDatas[world_id];
 
         scratch_alloc.clearSmemWarp();
@@ -1898,12 +2059,14 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                        jaccref, mxmin);
         __syncwarp();
 
+#if 0
         if (lane_id == 0) {
-            for (int i = 0; i < curr_sd->freeAccDim; ++i) {
-                printf("%f ", m_grad[i]);
+            for (int i = 0; i < curr_sd->numRowsJc; ++i) {
+                LOG("{}\n", jaccref[i]);
             }
-            printf("\n");
+            LOG("\n");
         }
+#endif
 
         // Keep track of the norm2 of g (m_grad currently has g)
         float g_norm2 = norm2Warp(m_grad, curr_sd->freeAccDim);
@@ -2067,30 +2230,33 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
     uint32_t num_invocations = mwGPU::GPUImplConsts::get().numWorlds;
 
 #if 1
-    TaskGraph::NodeID a_ref_node = builder.addNodeFn<
+    TaskGraph::NodeID cur_node = builder.addNodeFn<
         &GaussMinimizationNode::computeAccRef>(data_id, {},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 // This is the thread block dimension
                 32);
 
-    TaskGraphNodeID nonlinear_cg_node = builder.addNodeFn<
-        &GaussMinimizationNode::nonlinearCG>(data_id, {a_ref_node},
+    cur_node = builder.addNodeFn<
+        &GaussMinimizationNode::nonlinearCG>(data_id, {cur_node},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 32);
+
+    return cur_node;
 #endif
 
 #if 0
     TaskGraph::NodeID a_ref_node = builder.addNodeFn<
-        &GaussMinimizationNode::testNodeSparseMul>(data_id, {},
+        &GaussMinimizationNode::testNodeTransposeMul>(data_id, {},
                 Optional<TaskGraph::NodeID>::none(),
-                num_invocations,
+                1,
                 // This is the thread block dimension
-                consts::numMegakernelThreads);
+                32);
+    
+    return a_ref_node;
 #endif
 
-    return nonlinear_cg_node;
 }
 #else
 inline void solveCPU(Context &ctx,
