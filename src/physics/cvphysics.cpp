@@ -665,7 +665,8 @@ struct GaussMinimizationNode : NodeBase {
         CVSolveData *sd,
         float *scratch,
         float *jaccref,
-        float *Mxmin);
+        float *Mxmin,
+        bool dbg = false);
 
     template <typename DataT>
     float norm2Warp(DataT *values, uint32_t dim);
@@ -713,10 +714,11 @@ void GaussMinimizationNode::dobjWarp(
         CVSolveData *sd,
         float *scratch,
         float *jaccref,
-        float *Mxmin)
+        float *Mxmin,
+        bool dbg)
 {
     // x - acc_free
-    warpLoop<4>(sd->freeAccDim, [&](uint32_t iter) {
+    warpLoop(sd->freeAccDim, [&](uint32_t iter) {
         scratch[iter] = x[iter] - sd->freeAcc[iter];
     });
     __syncwarp();
@@ -735,7 +737,7 @@ void GaussMinimizationNode::dobjWarp(
     }
 
      // Creating J @ x - acc_ref to feed to ds
-    warpLoop<4>(sd->numRowsJc, [&](uint32_t iter) {
+    warpLoop(sd->numRowsJc, [&](uint32_t iter) {
         scratch[iter] = -sd->accRef[iter];
     });
     __syncwarp();
@@ -756,7 +758,7 @@ void GaussMinimizationNode::dobjWarp(
     }
 
     // ds
-    warpLoop<2>(sd->numRowsJc / 3, [&](uint32_t iter) {
+    warpLoop(sd->numRowsJc / 3, [&](uint32_t iter) {
         float n = scratch[iter * 3];
         float t1 = scratch[iter * 3 + 1];
         float t2 = scratch[iter * 3 + 2];
@@ -1066,6 +1068,10 @@ void GaussMinimizationNode::gmmaWarpSmallReg(
     while (cur_iter < total_num_iters) {
         uint32_t res_blk_r = cur_iter / num_iters_c;
         uint32_t res_blk_c = cur_iter % num_iters_c;
+
+        copyToRegs<DataT, block_size, false>(
+                res_blk_tmp, res, res_rows, res_cols,
+                res_blk_r, res_blk_c);
 
         if constexpr (reset_res) {
             setBlockZero(res_blk_tmp);
@@ -1901,20 +1907,6 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
     { // Do the actual computation
         CVSolveData *curr_sd = &solveDatas[world_id];
 
-#if 0
-        if (invocation_idx == 0) {
-            printMatrix<true, false>(
-                curr_sd->J_c,
-                curr_sd->numRowsJc,
-                curr_sd->numColsJc);
-
-            printMatrix<false, false>(
-                curr_sd->vel,
-                1,
-                curr_sd->velDim);
-        }
-#endif
-
         scratch_alloc.clearSmemWarp();
         // We want acc_ref to have priority in shared memory
         auto [acc_ref, in_smem] = scratch_alloc.allocWarp<float>(
@@ -1963,18 +1955,6 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
                 acc_ref[iter] -= k * imp * r;
             });
 
-            if (threadIdx.x % 32 == 0) {
-                printf("accref\n");
-
-                for (int i = 0; i < curr_sd->numRowsJc; ++i) {
-                    printf("%f ", acc_ref[i]);
-                }
-
-                if (curr_sd->numRowsJc) {
-                    printf("\n");
-                }
-            }
-
             if (acc_ref && in_smem) {
                 void * acc_ref_glob = scratch_alloc.allocWarpGlobal(
                         sizeof(float) * curr_sd->numRowsJc);
@@ -1987,14 +1967,6 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
         __syncwarp();
 
         if (lane_id == 0) {
-            for (int i = 0; i < curr_sd->numRowsJc; ++i) {
-                printf("%f ", acc_ref[i]);
-            }
-
-            if (curr_sd->numRowsJc) {
-                printf("\n");
-            }
-
             curr_sd->accRef = acc_ref;
         }
 
@@ -2056,20 +2028,12 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         __syncwarp();
 
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
-                       jaccref, mxmin);
+                       jaccref, mxmin, true);
         __syncwarp();
-
-#if 0
-        if (lane_id == 0) {
-            for (int i = 0; i < curr_sd->numRowsJc; ++i) {
-                LOG("{}\n", jaccref[i]);
-            }
-            LOG("\n");
-        }
-#endif
 
         // Keep track of the norm2 of g (m_grad currently has g)
         float g_norm2 = norm2Warp(m_grad, curr_sd->freeAccDim);
+
         float avg_total2 = kTolerance * (float)curr_sd->freeAccDim;
         avg_total2 *= avg_total2;
 
