@@ -3624,7 +3624,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         auto compute_total_com = builder.addToGraph<ParallelForNode<Context,
              tasks::computeTotalCOM,
                 BodyGroupHierarchy
-            >>({run_narrowphase});
+            >>({compute_body_coms});
 
         auto compute_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::computeSpatialInertias,
