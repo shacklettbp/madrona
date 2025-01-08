@@ -385,14 +385,15 @@ struct GaussMinimizationNode : NodeBase {
     template <bool transposed, bool host_print>
     void printMatrix(float *mat,
                      uint32_t num_rows,
-                     uint32_t num_cols)
+                     uint32_t num_cols,
+                     const char *name = "")
     {
         __syncwarp();
         if (threadIdx.x % 32 == 0) {
             if constexpr (host_print) {
-                LOG("printing matrix\n");
+                LOG("printing matrix {}\n", name);
             } else {
-                printf("printing matrix\n");
+                printf("printing matrix %s\n", name);
             }
 
             for (uint32_t r = 0; r < num_rows; ++r) {
@@ -419,6 +420,8 @@ struct GaussMinimizationNode : NodeBase {
                     printf("\n");
                 }
             }
+
+            printf("\n");
         }
         __syncwarp();
     }
@@ -590,7 +593,8 @@ struct GaussMinimizationNode : NodeBase {
             DataT (&blk_tmp)[block_size][block_size], // src
             uint32_t mtx_rows, uint32_t mtx_cols,
             uint32_t blk_r, uint32_t blk_c,
-            uint32_t r_offset, uint32_t c_offset);
+            uint32_t r_offset, uint32_t c_offset,
+            uint32_t r_end, uint32_t c_end);
 
     template <typename DataT,
               uint32_t block_size,
@@ -686,7 +690,7 @@ struct GaussMinimizationNode : NodeBase {
             float avg_tol2,
             float tol,
             float *scratch,
-            bool dbg);
+            bool dbg = false);
 
     // This is a node in the taskgraph.
     void computeAccRef(int32_t invocation_idx);
@@ -968,7 +972,8 @@ void GaussMinimizationNode::copyToMemWithOffset(
         DataT (&blk_tmp)[block_size][block_size], // src
         uint32_t mtx_rows, uint32_t mtx_cols,
         uint32_t blk_r, uint32_t blk_c,
-        uint32_t r_offset, uint32_t c_offset)
+        uint32_t r_offset, uint32_t c_offset,
+        uint32_t r_end, uint32_t c_end)
 {
     uint32_t col_start = blk_c * block_size + c_offset;
     uint32_t row_start = blk_r * block_size + r_offset;
@@ -977,8 +982,8 @@ void GaussMinimizationNode::copyToMemWithOffset(
     for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
         #pragma unroll
         for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
-            if (col_start + blk_col < mtx_cols &&
-                 row_start + blk_row < mtx_rows) {
+            if (col_start + blk_col < c_end &&
+                 row_start + blk_row < r_end) {
                 mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] =
                     blk_tmp[blk_row][blk_col];
             }
@@ -1230,10 +1235,17 @@ void GaussMinimizationNode::sparseBlkDiagSmallReg(
             gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
         }
 
+#if 0
+        printf("iter %d (offset %d), values: %f %f\n",
+                total_cur_iter,
+                processed_dims,
+                )
+#endif
         copyToMemWithOffset(res, res_blk_tmp, 
                             res_rows, res_cols, 
                             res_blk_r, res_blk_c,
-                            processed_dims, 0);
+                            processed_dims, 0,
+                            processed_dims + blk.dim, res_cols);
 
 #if 0 // Save for later to potenatially reduce divergence
         bool valid_work;
@@ -1528,10 +1540,10 @@ void GaussMinimizationNode::testNodeSparseMul(int32_t invocation_idx)
         float *blk1 = (float *)
             (smem_buf + sizeof(SparseBlkDiag) + 
                         2 * sizeof(SparseBlkDiag::Blk));
-        float *blk2 = blk1 + sizeof(float) * 4 * 4;
+        float *blk2 = blk1 + sizeof(float) * 5 * 5;
 
-        uint32_t b_rows = 10;
-        uint32_t b_cols = 6;
+        uint32_t b_rows = 12;
+        uint32_t b_cols = 1;
 
         float *test_res = nullptr;
         float *test_mat = nullptr;
@@ -1543,13 +1555,13 @@ void GaussMinimizationNode::testNodeSparseMul(int32_t invocation_idx)
                 sizeof(float) * b_rows * b_cols);
 
             *sps = SparseBlkDiag {
-                .fullDim = 10,
+                .fullDim = 12,
                 .numBlks = 2,
                 .blks = blk_array
             };
 
             sps->blks[0] = SparseBlkDiag::Blk {
-                .dim = 4,
+                .dim = 5,
                 .scratch = 0,
                 .values = blk1,
                 .ltdl = nullptr,
@@ -1557,7 +1569,7 @@ void GaussMinimizationNode::testNodeSparseMul(int32_t invocation_idx)
             };
 
             sps->blks[1] = SparseBlkDiag::Blk {
-                .dim = 6,
+                .dim = 7,
                 .scratch = 0,
                 .values = blk2,
                 .ltdl = nullptr,
@@ -1566,23 +1578,11 @@ void GaussMinimizationNode::testNodeSparseMul(int32_t invocation_idx)
 
             // Fill in the values of blocks
 #if 1
-            for (int i = 0; i < 4*4; ++i) {
+            for (int i = 0; i < 5*5; ++i) {
                 sps->blks[0].values[i] = (float)i;
             }
-            for (int i = 0; i < 6*6; ++i) {
+            for (int i = 0; i < 7*7; ++i) {
                 sps->blks[1].values[i] = (float)i;
-            }
-#endif
-
-#if 0
-            memset(sps->blks[0].values, 0, sizeof(float) * 4 * 4);
-            memset(sps->blks[1].values, 0, sizeof(float) * 6 * 6);
-
-            for (int i = 0; i < 4; ++i) {
-                sps->blks[0].values[i + i * 4] = (float)1.0f;
-            }
-            for (int i = 0; i < 6; ++i) {
-                sps->blks[1].values[i + i * 6] = (float)1.0f;
             }
 #endif
 
@@ -1700,6 +1700,8 @@ void GaussMinimizationNode::testNodeIdenMul(int32_t invocation_idx)
         }
     }
 }
+
+#define warp_printf(...) if (threadIdx.x % 32 == 0) { printf(__VA_ARGS__); }
 
 float GaussMinimizationNode::exactLineSearch(
         CVSolveData *sd,
@@ -1874,7 +1876,9 @@ float GaussMinimizationNode::exactLineSearch(
 
     // Initial convergence
     if (fabs(evals_alpha1.grad) < tol) {
-        return evals_alpha1.fun;
+        if (dbg)
+            warp_printf("first return %f\n", evals_alpha1.fun);
+        return alpha1;
     }
 
     float a_dir = (evals_alpha1.grad < 0.f) ? 1.f : -1.f;
@@ -1889,14 +1893,19 @@ float GaussMinimizationNode::exactLineSearch(
         
         if (evals_alpha1.grad * a_dir > -avg_tol)
             break;
-        if (fabs(evals_alpha1.grad)  < avg_tol)
+        if (fabs(evals_alpha1.grad)  < avg_tol) {
+            if (dbg)
+                warp_printf("second return\n");
             return alpha1;
+        }
 
         alpha1 -= evals_alpha1.grad / evals_alpha1.hess;
     }
 
     if (iters == ls_iters) {
         // Failed to bracket...
+        if (dbg)
+            warp_printf("third return\n");
         return alpha1;
     }
 
@@ -1914,20 +1923,28 @@ float GaussMinimizationNode::exactLineSearch(
         alpha_mid = 0.5f * (alpha_low + alpha_high);
         evals_alpha_mid = fdh_phi(alpha_mid);
 
-        if (fabs(evals_alpha_mid.grad) < avg_tol)
+        if (fabs(evals_alpha_mid.grad) < avg_tol) {
+            if (dbg)
+                warp_printf("fourth return\n");
             return alpha_mid;
+        }
 
         if (evals_alpha_mid.grad > 0.f)
             alpha_high = alpha_mid;
         else
             alpha_low = alpha_mid;
 
-        if (fabs(alpha_high - alpha_low) < tol)
+        if (fabs(alpha_high - alpha_low) < tol) {
+            if (dbg)
+                warp_printf("fifth return\n");
             return alpha_mid;
+        }
     }
 
     if (iters >= ls_iters) {
         // Failed to converge...
+        if (dbg)
+            warp_printf("sixth return\n");
         return alpha_mid;
     }
 
@@ -2024,6 +2041,8 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
     }
 }
 
+// #define ENABLE_PRINT
+
 void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 {
     constexpr float kTolerance = 1e-5f;
@@ -2078,7 +2097,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         __syncwarp();
 
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
-                       jaccref, mxmin, true);
+                       jaccref, mxmin, false);
         __syncwarp();
 
         // Keep track of the norm2 of g (m_grad currently has g)
@@ -2101,27 +2120,38 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             if (g_norm < avg_total)
                 break;
 
-            if (iter == 1) {
-                if (threadIdx.x % 32 == 0)
-                    printf("p\n");
-                printMatrix<false, false>(p, 1, curr_sd->freeAccDim);
+#ifdef ENABLE_PRINT
+            if (iter == 2) {
+                printMatrix<false, false>(x, 1, curr_sd->freeAccDim, "x at iter 2");
             }
+#endif
 
             float alpha = exactLineSearch(
-                curr_sd, jaccref, mxmin, p, x, avg_total, kTolerance, scratch1,
-                (iter == 2));
+                curr_sd, jaccref, mxmin, p, x, avg_total, kTolerance, scratch1/*, (iter == 2)*/);
             __syncwarp();
 
-            if (iter == 1) {
-                if (threadIdx.x % 32 == 0)
-                    printf("alpha = %f\n", alpha);
+#ifdef ENABLE_PRINT
+            if (iter == 2) {
+                printMatrix<false, false>(x, 1, curr_sd->freeAccDim, "x at iter 2 after line search");
             }
+#endif
 
             // Update x to the new value after alpha was found
             warpLoop<4>(curr_sd->freeAccDim,
                 [&](uint32_t iter) {
                     x[iter] += alpha * p[iter];
                 });
+
+#ifdef ENABLE_PRINT
+            if (iter == 2) {
+                if (threadIdx.x % 32 == 0)
+                    printf("alpha = %f\n", alpha);
+
+                printMatrix<false, false>(x, 1, curr_sd->freeAccDim, "x pre dobj (iter 2)");
+                printMatrix<false, false>(p, 1, curr_sd->freeAccDim, "p pre dobj (iter 2)");
+            }
+#endif
+
             float update = alpha * sqrtf(norm2Warp(p, curr_sd->freeAccDim));
             __syncwarp();
 
@@ -2129,21 +2159,9 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             { // Get the new gradient
                 warpCopy(scratch2, m_grad, curr_sd->freeAccDim * sizeof(float));
 
-                if (iter == 1) {
-                    if (threadIdx.x % 32 == 0)
-                        printf("x\n");
-                    printMatrix<false, false>(x, 1, curr_sd->freeAccDim);
-                }
-
                 dobjWarp<true>(g_new, x, curr_sd, scratch1,
-                               jaccref, mxmin, (iter == 1));
+                               jaccref, mxmin, false);
                 __syncwarp();
-
-                if (iter == 1) {
-                    if (threadIdx.x % 32 == 0)
-                        printf("g_new\n");
-                    printMatrix<false, false>(g_new, 1, curr_sd->freeAccDim);
-                }
 
                 g_norm = sqrtf(norm2Warp(g_new, curr_sd->freeAccDim));
             }
@@ -2160,6 +2178,13 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 //         scratch2 has m_grad
                 //         scratch3 has g_new
                 __syncwarp();
+
+#ifdef ENABLE_PRINT
+                if (iter == 1) {
+                    printMatrix<false, false>(m_grad, 1, curr_sd->freeAccDim, "m_grad");
+                    printMatrix<false, false>(x, 1, curr_sd->freeAccDim, "x post dobj");
+                }
+#endif
 
                 // dot(g_new, (M_gradnew - m_grad))
                 float g_new_dot_mgradmin = 
@@ -2182,6 +2207,13 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                     [&](uint32_t iter) {
                         p[iter] = -m_grad[iter] + beta * p[iter];
                     });
+
+#ifdef ENABLE_PRINT
+                if (iter == 1) {
+                    printMatrix<false, false>(x, 1, curr_sd->freeAccDim, "x before iter 2");
+                    printMatrix<false, false>(p, 1, curr_sd->freeAccDim, "p before iter 2");
+                }
+#endif
             }
 
             if (update < avg_total) {
@@ -2285,7 +2317,7 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
 
 #if 0
     TaskGraph::NodeID a_ref_node = builder.addNodeFn<
-        &GaussMinimizationNode::testWarpStuff>(data_id, {},
+        &GaussMinimizationNode::testNodeSparseMul>(data_id, {},
                 Optional<TaskGraph::NodeID>::none(),
                 1,
                 // This is the thread block dimension
