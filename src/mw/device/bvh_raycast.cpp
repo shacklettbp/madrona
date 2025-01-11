@@ -931,6 +931,9 @@ static __device__ FragmentResult computeFragment(
         }
 
         acc_color = fmaxf(0.2, light_contrib) * first_hit.color;
+        acc_color.x = fminf(1.f, acc_color.x);
+        acc_color.y = fminf(1.f, acc_color.y);
+        acc_color.z = fminf(1.f, acc_color.z);
 
         // If we are still here, just do normal lighting calculation.
         return FragmentResult {
