@@ -808,20 +808,8 @@ static __device__ TraceResult traceRay(
                 result.roughness = mat->roughness;
             }
 
-#if 0
-            if (tri_hit.overrideMatID != -1) {
-                Material *mat = &bvhParams.materials[tri_hit.overrideMatID];
-                LOG("Override material {}: {} {} {}", 
-                        tri_hit.overrideMatID,
-                        mat->color.x,
-                        mat->color.y,
-                        mat->color.z);
-                result.color = { mat->color.x, mat->color.y, mat->color.z };
-            }
-#endif
-
             result.color = color;
-            result.normal = tri_hit.normal;
+            result.normal = instance->rotation.rotateVec(tri_hit.normal);
         }
         
         result.depth = tri_hit.tHit;
