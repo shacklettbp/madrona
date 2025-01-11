@@ -350,12 +350,13 @@ struct SortNodeBase : NodeBase {
     };
 
     SortNodeBase(uint32_t taskgraph_id,
-                          uint32_t archetype_id,
-                          int32_t col_idx,
-                          uint32_t *keys_col,
-                          int32_t num_passes,
-                          int32_t *sort_offsets,
-                          int32_t *counts);
+                 uint32_t archetype_id,
+                 int32_t col_idx,
+                 uint32_t *keys_col,
+                 int32_t num_passes,
+                 int32_t *sort_offsets,
+                 int32_t *counts,
+                 bool move_data = true);
 
     void sortSetupArchetype(int32_t);
     void sortSetupMemoryRange(int32_t);
@@ -382,7 +383,8 @@ struct SortNodeBase : NodeBase {
     static TaskGraph::NodeID addToGraphMemoryRange(
         TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> dependencies,
-        uint32_t element_id);
+        uint32_t element_id,
+        bool move_data);
 
     // Constant state
     uint32_t taskGraphID;
@@ -410,6 +412,7 @@ struct SortNodeBase : NodeBase {
     int32_t *bins;
     int32_t *lookback;
     int32_t *counters;
+    bool moveData;
 
     static inline constexpr uint32_t num_elems_per_sort_thread_ = 2;
 };
@@ -421,7 +424,7 @@ struct SortArchetypeNode : SortNodeBase {
         Span<const TaskGraph::NodeID> dependencies);
 };
 
-template <typename ElementT>
+template <typename ElementT, bool move_data = true>
 struct SortMemoryRangeNode : SortNodeBase {
     static TaskGraph::NodeID addToGraph(
         TaskGraph::Builder &builder,

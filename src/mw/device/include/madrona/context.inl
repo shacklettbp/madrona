@@ -41,7 +41,7 @@ inline MemoryRange Context::allocMemoryRange(
         uint32_t element_id, CountT num_elements)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
-    return state_mgr->allocMemoryRange(world_id_, element_id, num_elements);
+    return state_mgr->allocMemoryRange(element_id, num_elements);
 }
 
 template <typename ElementT>

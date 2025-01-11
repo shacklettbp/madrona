@@ -327,14 +327,14 @@ TaskGraph::NodeID SortArchetypeNode<ArchetypeT, ComponentT>::addToGraph(
         TypeTracker::typeID<ComponentT>());
 }
 
-template <typename ElementT>
-TaskGraph::NodeID SortMemoryRangeNode<ElementT>::addToGraph(
+template <typename ElementT, bool move_data>
+TaskGraph::NodeID SortMemoryRangeNode<ElementT, move_data>::addToGraph(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies)
 {
     // This always is going to sort by world ID no matter what
     return SortNodeBase::addToGraphMemoryRange(builder, dependencies,
-        TypeTracker::typeID<ElementT>());
+        TypeTracker::typeID<ElementT>(), move_data);
 }
 
 }

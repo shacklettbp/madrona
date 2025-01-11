@@ -639,7 +639,6 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
 }
 
 MemoryRange StateManager::allocMemoryRange(
-        WorldID world_id,
         uint32_t element_id, uint32_t num_elements)
 {
     auto &range_map_store = *memory_range_elements_[element_id];

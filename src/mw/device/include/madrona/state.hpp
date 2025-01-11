@@ -117,8 +117,8 @@ public:
 
     Entity makeEntityNow(WorldID world_id, uint32_t archetype_id);
 
-    MemoryRange allocMemoryRange(WorldID world_id,
-                           uint32_t elem_id, uint32_t num_elems);
+    MemoryRange allocMemoryRange(
+            uint32_t elem_id, uint32_t num_elems);
     void freeMemoryRange(MemoryRange memory_range);
 
     template <typename ElementT>

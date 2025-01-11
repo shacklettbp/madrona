@@ -963,7 +963,8 @@ SortNodeBase::SortNodeBase(uint32_t taskgraph_id,
                            uint32_t *keys_col,
                            int32_t num_passes,
                            int32_t *sort_offsets,
-                           int32_t *counts)
+                           int32_t *counts,
+                           bool move_data)
     :  NodeBase {},
        taskGraphID(taskgraph_id),
        archetypeID(archetype_id),
@@ -971,7 +972,8 @@ SortNodeBase::SortNodeBase(uint32_t taskgraph_id,
        keysCol(keys_col),
        numPasses(num_passes),
        worldOffsets(sort_offsets),
-       worldCounts(counts)
+       worldCounts(counts),
+       moveData(move_data)
 {}
 
 void SortNodeBase::sortSetupArchetype(int32_t)
@@ -1190,17 +1192,6 @@ void SortNodeBase::sortSetupMemoryRange(int32_t)
         taskgraph.getNodeData(firstRearrangePassData).numDynamicInvocations =
             numRows;
     }
-
-#if 0
-    // This is only necessary if the global number of entities is 0
-    auto &clear_count_node_data = taskgraph.getNodeData(clearWorldCountData);
-    if (numRows == 0) {
-        clear_count_node_data.numDynamicInvocations =
-            mwGPU::GPUImplConsts::get().numWorlds;
-    } else {
-        clear_count_node_data.numDynamicInvocations = 0;
-    }
-#endif
 
     indicesFinal = (int *)(tmp_buffer + indices_final_offset);
     columnStaging = tmp_buffer + column_copy_offset;
@@ -1766,7 +1757,8 @@ TaskGraph::NodeID SortNodeBase::addToGraphArchetype(
 TaskGraph::NodeID SortNodeBase::addToGraphMemoryRange(
     TaskGraph::Builder &builder,
     Span<const TaskGraph::NodeID> dependencies,
-    uint32_t unit_id)
+    uint32_t unit_id,
+    bool move_data)
 {
     using namespace mwGPU;
 
@@ -1792,7 +1784,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphMemoryRange(
 
     auto data_id = builder.constructNodeData<SortNodeBase>(
         taskgraph_id, unit_id, 1, keys_col,
-        num_passes, nullptr, nullptr);
+        num_passes, nullptr, nullptr, move_data);
     auto &sort_node_data = builder.getDataRef(data_id);
 
     TaskGraph::NodeID setup = builder.addNodeFn<
@@ -1833,7 +1825,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphMemoryRange(
 
     TaskGraph::TypedDataID<RearrangeNode> prev_rearrange_node { -1 };
 
-    { // Add the nodes for rearranging the unit column
+    if (sort_node_data.moveData) { // Add the nodes for rearranging the unit column
         auto cur_rearrange_node = builder.constructNodeData<RearrangeNode>(
             taskgraph_id, data_id, 2);
         builder.getDataRef(cur_rearrange_node).numDynamicInvocations = 0;
