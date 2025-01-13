@@ -1319,7 +1319,8 @@ struct GaussMinimizationNode : NodeBase {
             uint32_t body_dof_offset,
             uint32_t jac_row,
             uint32_t j_num_rows,
-            float coeff);
+            float coeff,
+            bool dbg);
 
     void prepareRegInfos(CVSolveData *sd);
 
@@ -2356,37 +2357,25 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
             };
         };
 
-        uint32_t jacc_row = 0;
+        // uint32_t jacc_row = 0;
+        uint32_t processed_pts = 0;
+
         warpLoopSync(
             num_contacts,
             [&](uint32_t ct_idx) {
-                ContactInfo c_info = (ct_idx == 0xFFFF'FFFF) ?
-                    ContactInfo {} : get_contact_info(ct_idx);
+                    ContactInfo c_info = (ct_idx == 0xFFFF'FFFF) ?
+                        ContactInfo {} : get_contact_info(ct_idx);
+
+                uint32_t wave_pt_ips = warpInclusivePrefixSum(c_info.contact.numPoints);
+                uint32_t wave_num_pts = __shfl_sync(0xFFFF'FFFF, wave_pt_ips, 31);
+
+                uint32_t curr_pt = processed_pts + wave_pt_ips - c_info.contact.numPoints;
+
+                processed_pts += wave_num_pts;
 
                 #pragma unroll
                 for (uint32_t pt_idx = 0; pt_idx < ContactConstraint::kMaxPoints; ++pt_idx) {
-                    uint32_t curr_rows = warpInclusivePrefixSum(
-                            (pt_idx < c_info.contact.numPoints) ? 3 : 0);
-
-                    uint32_t curr_jacc_row = jacc_row + curr_rows - 3; 
-
-#if 0
-                    if (ct_idx != 0xFFFF'FFFF && pt_idx < c_info.contact.numPoints) {
-                        printf("lane_id=%d; ct_idx=%d; pt_idx=%d; numPoints=%d;curr_jacc_row=%d\n", 
-                                lane_id, ct_idx, pt_idx, c_info.contact.numPoints, curr_jacc_row);
-                    }
-#endif
-
-                    uint32_t to_add = __shfl_sync(0xFFFF'FFFF, curr_rows, 31);
-
-                    jacc_row += to_add;
-
-#if 0
-                    if (ct_idx != 0xFFFF'FFFF) {
-                        printf("lane_id=%d; adding %d -> jacc_row=%d\n",
-                                lane_id, to_add, jacc_row);
-                    }
-#endif
+                    uint32_t curr_jacc_row = (curr_pt + pt_idx) * 3;
 
                     if (pt_idx < c_info.contact.numPoints) {
                         Vector3 contact_pt = c_info.contact.points[pt_idx].xyz();
@@ -2407,7 +2396,8 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     world_block_start[grp->tmpIdx],
                                     curr_jacc_row,
                                     curr_sd->numRowsJc,
-                                    -1.f);
+                                    -1.f,
+                                    false);//(ct_idx == 0 && pt_idx == 0));
                         }
 
                         if (!c_info.altFixed) {
@@ -2426,7 +2416,8 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     world_block_start[grp->tmpIdx],
                                     curr_jacc_row,
                                     curr_sd->numRowsJc,
-                                    1.f);
+                                    1.f,
+                                    false);//(ct_idx == 0 && pt_idx == 0));
                         }
                     }
                 }
@@ -2444,7 +2435,8 @@ void GaussMinimizationNode::computeContactJacobian(
         uint32_t body_dof_offset,
         uint32_t jac_row,
         uint32_t j_num_rows,
-        float coeff)
+        float coeff,
+        bool dbg)
 {
     StateManager *state_mgr = mwGPU::getStateManager();
 
@@ -2499,6 +2491,12 @@ void GaussMinimizationNode::computeContactJacobian(
         J_col[0] = coeff * J_col_vec.x;
         J_col[1] = coeff * J_col_vec.y;
         J_col[2] = coeff * J_col_vec.z;
+
+        if (dbg) {
+            printf("(not working) (row=%d, col=%d) dof=%d, J_col=(%f %f %f)\n",
+                    jac_row, body_dof_offset + i,
+                    i, J_col[0], J_col[1], J_col[2]);
+        }
     }
 }
 
@@ -3252,7 +3250,8 @@ inline float* computeContactJacobian(Context &ctx,
                                      uint32_t body_dof_offset,
                                      uint32_t jac_row,
                                      uint32_t j_num_rows,
-                                     float coeff)
+                                     float coeff,
+                                     bool dbg)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = getStateManager(ctx);
@@ -3309,6 +3308,12 @@ inline float* computeContactJacobian(Context &ctx,
         J_col[0] = coeff * J_col_vec.x;
         J_col[1] = coeff * J_col_vec.y;
         J_col[2] = coeff * J_col_vec.z;
+
+        if (dbg) {
+            printf("(working) (row=%d, col=%d) dof=%d, J_col=(%f %f %f)\n",
+                    jac_row, body_dof_offset + i,
+                    i, J_col[0], J_col[1], J_col[2]);
+        }
     }
     // return J;
 }
@@ -4059,6 +4064,13 @@ inline void brobdingnag(Context &ctx,
         }
 #endif
 
+        // Jacobian is size 3n_c x n_dofs, column-major
+        uint32_t J_rows = 3 * total_contact_pts;
+        uint32_t J_cols = total_num_dofs;
+
+        CountT jac_row = 0;
+
+#if !defined(MADRONA_GPU_MODE)
         uint32_t max_dofs = 0;
 
         // Prefix sum for each of the body groups
@@ -4074,14 +4086,6 @@ inline void brobdingnag(Context &ctx,
             max_dofs = std::max(max_dofs, hiers[i].numDofs);
         }
 
-        // Jacobian is size 3n_c x n_dofs, column-major
-        uint32_t J_rows = 3 * total_contact_pts;
-        uint32_t J_cols = total_num_dofs;
-
-
-        CountT jac_row = 0;
-
-#ifndef MADRONA_GPU_MODE
         float *J_c = (float *) ctx.tmpAlloc(
             J_rows * J_cols * sizeof(float));
 
@@ -4104,9 +4108,6 @@ inline void brobdingnag(Context &ctx,
 
             // Each of the contact points
             for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
-                printf("ct_idx=%d; pt_idx=%d; numPoints=%d;curr_jacc_row=%d\n", 
-                        ct_idx, pt_idx, contact.numPoints, jac_row);
-
                 Vector3 contact_pt = contact.points[pt_idx].xyz();
 
                 // Compute the Jacobians for each body at the contact point
@@ -4118,7 +4119,8 @@ inline void brobdingnag(Context &ctx,
 
                     float *J_ref = computeContactJacobian(ctx, ref_grp,
                         ref_hier_desc, tmp_state.C, contact_pt, J_c,
-                        block_start[ref_grp.tmpIdx], jac_row, J_rows, -1.f);
+                        block_start[ref_grp.tmpIdx], jac_row, J_rows, -1.f,
+                        (ct_idx == 0 && pt_idx == 0));
 
 #if 0
                     for(CountT i = 0; i < ref_grp.numDofs; ++i) {
@@ -4140,7 +4142,8 @@ inline void brobdingnag(Context &ctx,
                     
                     float *J_alt = computeContactJacobian(ctx, alt_grp,
                         alt_hier_desc, tmp_state.C, contact_pt, J_c,
-                        block_start[alt_grp.tmpIdx], jac_row, J_rows, 1.f);
+                        block_start[alt_grp.tmpIdx], jac_row, J_rows, 1.f,
+                        (ct_idx == 0 && pt_idx == 0));
 
 #if 0
                     for(CountT i = 0; i < alt_grp.numDofs; ++i) {
@@ -4165,12 +4168,17 @@ inline void brobdingnag(Context &ctx,
         cv_sing.totalNumDofs = total_num_dofs;
         cv_sing.numContactPts = total_contact_pts;
         cv_sing.h = physics_state.h;
-        // cv_sing.mass = total_mass_mat;
-        // cv_sing.freeAcc = full_free_acc;
-        // cv_sing.vel = full_vel;
-        // cv_sing.mu = full_mu;
-        // cv_sing.penetrations = full_penetration;
+
+#ifndef MADRONA_GPU_MODE
+        cv_sing.mass = total_mass_mat;
+        cv_sing.freeAcc = full_free_acc;
+        cv_sing.vel = full_vel;
+        cv_sing.mu = full_mu;
+        cv_sing.penetrations = full_penetration;
         cv_sing.dofOffsets = block_start;
+        // cv_sing.massSparse = mass_sparse;
+#endif
+
         cv_sing.numBodyGroups = num_grps;
 
         cv_sing.massDim = total_num_dofs;
@@ -4180,7 +4188,6 @@ inline void brobdingnag(Context &ctx,
         cv_sing.numColsJc = J_cols;
         cv_sing.muDim = total_contact_pts;
         cv_sing.penetrationsDim = total_contact_pts;
-        // cv_sing.massSparse = mass_sparse;
     }
 }
 
