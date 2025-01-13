@@ -2157,9 +2157,10 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 {
     using namespace gpu_utils;
 
-    uint32_t warp_id = invocation_idx;
+    uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
-    uint32_t world_id = warp_id;
+
+    uint32_t world_id = invocation_idx;
 
     StateManager *state_mgr = getStateManager();
 
@@ -2511,7 +2512,7 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
 
     // This is the global warp ID
     // uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
-    uint32_t warp_id = invocation_idx;
+    uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
 
     assert(blockDim.x == consts::numMegakernelThreads);
@@ -2656,7 +2657,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
     // Global warp ID
     // uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
-    uint32_t warp_id = invocation_idx;
+    uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
 
     assert(blockDim.x == consts::numMegakernelThreads);
