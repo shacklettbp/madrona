@@ -93,9 +93,11 @@ struct CandidateCollision {
 };
 
 struct ContactConstraint {
+    static constexpr uint32_t kMaxPoints = 4;
+
     Loc ref;
     Loc alt;
-    math::Vector4 points[4];
+    math::Vector4 points[kMaxPoints];
     int32_t numPoints;
     math::Vector3 normal;
 };

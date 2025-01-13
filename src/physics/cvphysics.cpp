@@ -11,14 +11,13 @@
 #ifdef MADRONA_GPU_MODE
 #include <madrona/mw_gpu/host_print.hpp>
 #define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+#define warp_printf(...) if (threadIdx.x % 32 == 0) { printf(__VA_ARGS__); }
 #else
 #define LOG(...)
 #endif
 
 using namespace madrona::math;
 using namespace madrona::base;
-
-namespace madrona::phys::cv {
 
 struct SparseBlkDiag {
     struct Blk {
@@ -35,6 +34,666 @@ struct SparseBlkDiag {
     uint32_t numBlks;
     Blk *blks;
 };
+
+#ifdef MADRONA_GPU_MODE
+namespace madrona::gpu_utils {
+
+// For debugging purposes
+template <bool transposed, bool host_print>
+void printMatrix(float *mat,
+                 uint32_t num_rows,
+                 uint32_t num_cols,
+                 const char *name = "")
+{
+    __syncwarp();
+    if (threadIdx.x % 32 == 0) {
+        if constexpr (host_print) {
+            LOG("printing matrix {}\n", name);
+        } else {
+            printf("printing matrix %s\n", name);
+        }
+
+        for (uint32_t r = 0; r < num_rows; ++r) {
+            if constexpr (host_print) {
+                LOG("row {}\n", r);
+            }
+
+            for (uint32_t c = 0; c < num_cols; ++c) {
+                float v = 0.f;
+                if constexpr (transposed) {
+                    v = mat[r + c * num_rows];
+                } else {
+                    v = mat[c + r * num_cols];
+                }
+
+                if constexpr (host_print) {
+                    LOG("{}\n", v);
+                } else {
+                    printf("%f ", v);
+                }
+            }
+
+            if constexpr (!host_print) {
+                printf("\n");
+            }
+        }
+
+        printf("\n");
+    }
+    __syncwarp();
+}
+
+template <typename DataT>
+DataT warpReduceSum(DataT value)
+{
+    #pragma unroll
+    for (int i=16; i>=1; i/=2)
+        value += __shfl_xor_sync(0xffffffff, value, i, 32);
+
+    return value;
+}
+
+// Simple helper function for having a warp loop over work
+template <int granularity, typename Fn>
+void warpLoop(uint32_t total_num_iters, Fn &&fn)
+{
+    uint32_t iter = granularity * (threadIdx.x % 32);
+    while (iter < total_num_iters) {
+        #pragma unroll
+        for (int i = 0; i < granularity; ++i) {
+            fn(iter + i);
+        }
+
+        iter += 32 * granularity;
+    }
+}
+
+template <typename Fn>
+void warpLoop(uint32_t total_num_iters, Fn &&fn)
+{
+    uint32_t iter = threadIdx.x % 32;
+    while (iter < total_num_iters) {
+        fn(iter);
+
+        iter += 32;
+    }
+}
+
+// Passes in 0xFFFF'FFFF to fn if invalid run
+template <typename Fn>
+void warpLoopSync(uint32_t total_num_iters, Fn &&fn)
+{
+    uint32_t iter = threadIdx.x % 32;
+    bool run = (iter < total_num_iters);
+
+    while (__any_sync(0xFFFF'FFFF, run)) {
+        fn(run ? iter : 0xFFFF'FFFF);
+        iter += 32;
+
+        run = (iter < total_num_iters);
+    }
+}
+
+void warpSetZero(void *dst, uint32_t num_bytes)
+{
+    int32_t lane_id = threadIdx.x % 32;
+    int32_t bytes_per_warp = (num_bytes + 31) / 32;
+    int32_t bytes_to_set =
+        max(0, min(num_bytes - lane_id * bytes_per_warp, bytes_per_warp));
+
+    memset(
+        (uint8_t *)dst + bytes_per_warp * lane_id,
+        0,
+        bytes_to_set);
+}
+
+void warpCopy(void *dst, void *src, uint32_t num_bytes)
+{
+    int32_t lane_id = threadIdx.x % 32;
+    int32_t bytes_per_warp = (num_bytes + 31) / 32;
+    int32_t bytes_to_cpy =
+        max(0, min(num_bytes - lane_id * bytes_per_warp, bytes_per_warp));
+
+    memcpy(
+        (uint8_t *)dst + bytes_per_warp * lane_id,
+        (uint8_t *)src + bytes_per_warp * lane_id,
+        bytes_to_cpy);
+}
+
+template <typename DataT>
+float norm2Warp(DataT *values, uint32_t dim)
+{
+    float cur_sum = 0.f;
+
+    warpLoopSync(dim, [&](uint32_t iter) {
+        float v = (iter != 0xFFFF'FFFF) ? values[iter] : 0.f;
+
+        v = v * v;
+        v = warpReduceSum(v) + cur_sum;
+        cur_sum = v;
+    });
+
+    return cur_sum;
+}
+
+template <typename DataT>
+float dotVectors(
+        DataT *a_ptr, DataT *b_ptr, uint32_t dim)
+{
+    float cur_sum = 0.f;
+
+    warpLoopSync(dim, [&](uint32_t iter) {
+        float a = (iter != 0xFFFF'FFFF) ? a_ptr[iter] : 0.f;
+        float b = (iter != 0xFFFF'FFFF) ? b_ptr[iter] : 0.f;
+
+        float v = a * b;
+        v = warpReduceSum(v) + cur_sum;
+        cur_sum = v;
+    });
+
+    return cur_sum;
+}
+
+template <typename DataT, typename FnA, typename FnB>
+float dotVectorsPred(
+        FnA &&a_fn, FnB &&b_fn, uint32_t dim)
+{
+    float cur_sum = 0.f;
+
+    warpLoopSync(dim, [&](uint32_t iter) {
+        DataT a = (iter != 0xFFFF'FFFF) ? a_fn(iter) : 0.f;
+        DataT b = (iter != 0xFFFF'FFFF) ? b_fn(iter) : 0.f;
+
+        DataT v = a * b;
+        v = warpReduceSum(v) + cur_sum;
+        cur_sum = v;
+    });
+
+    return cur_sum;
+}
+
+template <typename DataT,
+          uint32_t block_size,
+          bool transposed>
+void copyToRegs(
+        DataT (&blk_tmp)[block_size][block_size],
+        DataT *mtx,
+        uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t blk_r, uint32_t blk_c)
+{
+    uint32_t col_start = blk_c * block_size;
+    uint32_t row_start = blk_r * block_size;
+
+    #pragma unroll
+    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
+        #pragma unroll
+        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
+            if constexpr (transposed) {
+                blk_tmp[blk_row][blk_col] = 
+                    (col_start + blk_col < mtx_cols &&
+                     row_start + blk_row < mtx_rows) ?
+                    mtx[row_start + blk_row + mtx_rows * (col_start + blk_col)] :
+                    0.f;
+            } else {
+                blk_tmp[blk_row][blk_col] = 
+                    (col_start + blk_col < mtx_cols &&
+                     row_start + blk_row < mtx_rows) ?
+                    mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] :
+                    0.f;
+            }
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size,
+          bool transposed>
+void copyToRegsWithBoundary(
+        DataT (&blk_tmp)[block_size][block_size], // dst
+        DataT *mtx,                               // src
+        uint32_t mtx_rows_start, uint32_t mtx_cols_start,
+        uint32_t mtx_rows_end, uint32_t mtx_cols_end,
+        uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t blk_r, uint32_t blk_c)
+{
+    uint32_t col_start = blk_c * block_size + mtx_cols_start;
+    uint32_t row_start = blk_r * block_size + mtx_rows_start;
+
+    #pragma unroll
+    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
+        #pragma unroll
+        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
+            if constexpr (transposed) {
+                blk_tmp[blk_row][blk_col] = 
+                    (col_start + blk_col < mtx_cols_end &&
+                     row_start + blk_row >= mtx_rows_start &&
+                     row_start + blk_row < mtx_rows_end) ?
+                    mtx[row_start + blk_row + mtx_rows * (col_start + blk_col)] :
+                    0.f;
+            } else {
+                blk_tmp[blk_row][blk_col] = 
+                    (col_start + blk_col < mtx_cols_end &&
+                     row_start + blk_row >= mtx_rows_start &&
+                     row_start + blk_row < mtx_rows_end) ?
+                    mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] :
+                    0.f;
+            }
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void copyToMem(
+        DataT *mtx,
+        DataT (&blk_tmp)[block_size][block_size],
+        uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t blk_r, uint32_t blk_c)
+{
+    uint32_t col_start = blk_c * block_size;
+    uint32_t row_start = blk_r * block_size;
+
+    #pragma unroll
+    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
+        #pragma unroll
+        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
+            if (col_start + blk_col < mtx_cols &&
+                 row_start + blk_row < mtx_rows) {
+                mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] =
+                    blk_tmp[blk_row][blk_col];
+            }
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void copyToMemWithOffset(
+        DataT *mtx,                               // dst
+        DataT (&blk_tmp)[block_size][block_size], // src
+        uint32_t mtx_rows, uint32_t mtx_cols,
+        uint32_t blk_r, uint32_t blk_c,
+        uint32_t r_offset, uint32_t c_offset,
+        uint32_t r_end, uint32_t c_end)
+{
+    uint32_t col_start = blk_c * block_size + c_offset;
+    uint32_t row_start = blk_r * block_size + r_offset;
+
+    #pragma unroll
+    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
+        #pragma unroll
+        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
+            if (col_start + blk_col < c_end &&
+                 row_start + blk_row < r_end) {
+                mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] =
+                    blk_tmp[blk_row][blk_col];
+            }
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size,
+          bool reset_res = false>
+void gmmaBlockRegs(
+        DataT (&res)[block_size][block_size],
+        DataT (&a)[block_size][block_size],
+        DataT (&b)[block_size][block_size])
+{
+    #pragma unroll
+    for (int i = 0; i < block_size; i++) {
+        #pragma unroll
+        for (int j = 0; j < block_size; j++) {
+            if constexpr (reset_res) {
+                res[i][j] = 0;
+            }
+
+            #pragma unroll
+            for (int k = 0; k < block_size; k++) {
+                res[i][j] += a[i][k] * b[k][j];
+            }
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void setBlockZero(
+        DataT (&blk)[block_size][block_size])
+{
+    #pragma unroll
+    for (int i = 0; i < block_size; i++) {
+        #pragma unroll
+        for (int j = 0; j < block_size; j++) {
+            blk[i][j] = 0.f;
+        }
+    }
+}
+
+template <typename DataT,
+          uint32_t block_size>
+void gmmaWarpSmallSmem(
+        DataT *res,
+        DataT *a,
+        DataT *b,
+        uint32_t a_rows, uint32_t a_cols,
+        uint32_t b_rows, uint32_t b_cols)
+{
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    // This function requires (block_size x block_size) * 3 bytes of Smem
+    assert(3 * (block_size * block_size) < num_smem_bytes_per_warp);
+
+    DataT *a_blk_tmp = (DataT *)smem_buf;
+    DataT *b_blk_tmp = (DataT *)smem_buf + (block_size * block_size);
+    DataT *res_blk_tmp = (DataT *)smem_buf + (block_size * block_size) * 2;
+
+    // Get value in block tmp matrix
+    // TODO: Double check the compiler spits out not dumb stuff.
+    auto bv = [](DataT *d, uint32_t row, uint32_t col) -> DataT & {
+        return d[col + row * block_size];
+    };
+
+    
+}
+
+template <typename DataT,
+          uint32_t block_size,
+          bool a_transposed,
+          bool b_transposed,
+          bool reset_res>
+void gmmaWarpSmallReg(
+        DataT *res,
+        DataT *a,
+        DataT *b,
+        uint32_t a_rows, uint32_t a_cols,
+        uint32_t b_rows, uint32_t b_cols)
+{
+    // TODO: Make sure non of this stuff spills
+    DataT a_blk_tmp[block_size][block_size];
+    DataT b_blk_tmp[block_size][block_size];
+    DataT res_blk_tmp[block_size][block_size];
+
+    uint32_t res_rows = a_rows;
+    uint32_t res_cols = b_cols;
+
+    uint32_t num_iters_r = (res_rows + block_size - 1) / block_size;
+    uint32_t num_iters_c = (res_cols + block_size - 1) / block_size;
+    uint32_t total_num_iters = num_iters_r * num_iters_c;
+
+    uint32_t num_blks_b = (b_rows + block_size - 1) / block_size;
+
+    uint32_t lane_id = threadIdx.x % 32;
+    uint32_t cur_iter = lane_id;
+    
+    while (cur_iter < total_num_iters) {
+        uint32_t res_blk_r = cur_iter / num_iters_c;
+        uint32_t res_blk_c = cur_iter % num_iters_c;
+
+        if constexpr (reset_res) {
+            setBlockZero(res_blk_tmp);
+        } else {
+            copyToRegs<DataT, block_size, false>(
+                    res_blk_tmp, res, res_rows, res_cols,
+                    res_blk_r, res_blk_c);
+        }
+
+        for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
+            copyToRegs<DataT, block_size, a_transposed>(
+                    a_blk_tmp, a, a_rows, a_cols, res_blk_r, blk_j);
+            copyToRegs<DataT, block_size, b_transposed>(
+                    b_blk_tmp, b, b_rows, b_cols, blk_j, res_blk_c);
+
+            gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
+        }
+
+        copyToMem(res, res_blk_tmp, res_rows, 
+                  res_cols, res_blk_r, res_blk_c);
+
+        cur_iter += 32;
+    }
+}
+
+template <typename DataT>
+DataT warpInclusivePrefixSum(DataT value)
+{
+    uint32_t lane_id = threadIdx.x % 32;
+
+    #pragma unroll
+    for (uint32_t i = 1; i <= 32; i *= 2) {
+        DataT prev_blk = __shfl_up_sync(0xFFFF'FFFF, value, i, 32);
+        if (lane_id >= i) value += prev_blk;
+    }
+
+    return value;
+}
+
+template <typename DataT,
+          uint32_t block_size,
+          bool a_transposed,
+          bool b_transposed,
+          bool reset_res>
+void sparseBlkDiagSmallReg(
+        DataT *res,
+        SparseBlkDiag *a,
+        DataT *b,
+        uint32_t b_rows, uint32_t b_cols)
+{
+    DataT a_blk_tmp[block_size][block_size];
+    DataT b_blk_tmp[block_size][block_size];
+    DataT res_blk_tmp[block_size][block_size];
+
+    uint32_t res_rows = a->fullDim;
+    uint32_t res_cols = b_cols;
+
+    auto get_num_iters = [b_cols](SparseBlkDiag::Blk blk) {
+        uint32_t res_rows = blk.dim;
+        uint32_t res_cols = b_cols;
+        uint32_t num_iters_r = (res_rows + block_size - 1) / block_size;
+        uint32_t num_iters_c = (res_cols + block_size - 1) / block_size;
+        return num_iters_r * num_iters_c;
+    };
+
+    uint32_t lane_id = threadIdx.x % 32;
+
+    // Everyone starts on blk 0
+    uint32_t cur_blk = 0;
+    uint32_t cur_num_iters = get_num_iters(a->blks[cur_blk]);
+    uint32_t cur_iter = lane_id;
+    uint32_t total_cur_iter = lane_id;
+
+    bool work_finished = false;
+
+    uint32_t processed_dims = 0;
+
+    while (!work_finished) {
+        while (cur_iter >= cur_num_iters) {
+            processed_dims += a->blks[cur_blk].dim;
+
+            cur_blk++;
+            cur_iter -= cur_num_iters;
+
+            if (cur_blk < a->numBlks) {
+                cur_num_iters = get_num_iters(a->blks[cur_blk]);
+            } else {
+                work_finished = true;
+                break;
+            }
+        }
+
+        if (work_finished)
+            break;
+
+        auto blk = a->blks[cur_blk];
+        uint32_t blk_num_iters = get_num_iters(blk);
+
+        uint32_t num_iters_c = (b_cols + block_size - 1) / block_size;
+
+        // These are blocks within the blk
+        uint32_t res_blk_r = cur_iter / num_iters_c;
+        uint32_t res_blk_c = cur_iter % num_iters_c;
+
+        uint32_t num_blks_b = (blk.dim + block_size - 1) / block_size;
+
+        if constexpr (reset_res) {
+            setBlockZero(res_blk_tmp);
+        } else {
+#if 0
+            copyToRegs<DataT, block_size, false>(
+                    res_blk_tmp, res, res_rows, res_cols,
+                    res_blk_r, res_blk_c);
+#endif
+        }
+
+        for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
+            // This is trivial
+            copyToRegs<DataT, block_size, a_transposed>(
+                    a_blk_tmp, blk.values, blk.dim, blk.dim, 
+                    res_blk_r, blk_j);
+
+            // This is a little more complicated
+            copyToRegsWithBoundary<DataT, block_size, b_transposed>(
+                    b_blk_tmp, 
+                    b, 
+                    processed_dims, 0,
+                    processed_dims + blk.dim, b_cols,
+                    b_rows, b_cols,
+                    blk_j, res_blk_c);
+
+            gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
+        }
+
+#if 0
+        printf("iter %d (offset %d), values: %f %f\n",
+                total_cur_iter,
+                processed_dims,
+                )
+#endif
+        copyToMemWithOffset(res, res_blk_tmp, 
+                            res_rows, res_cols, 
+                            res_blk_r, res_blk_c,
+                            processed_dims, 0,
+                            processed_dims + blk.dim, res_cols);
+
+#if 0 // Save for later to potenatially reduce divergence
+        bool valid_work;
+        uint32_t cur_num_iters;
+
+        if (cur_blk < a->numBlks) {
+            cur_num_iters = get_num_iters(a->blks[cur_blk]);
+            valid_work = (cur_iter < cur_num_iters);
+        } else {
+            valid_work = true;
+            work_finished = true;
+
+            cur_iter = 0;
+            cur_num_iters = 0xFFFF'FFFF;
+        }
+        
+        while (!__all_sync(0xFFFF'FFFF, valid_work)) {
+            if (cur_iter >= cur_num_iters) {
+                cur_blk++;
+                cur_iter -= cur_num_iters;
+
+                if (cur_blk < a->numBlks)
+                    cur_num_iters = get_num_iters(a->blks[cur_blk]);
+            }
+        }
+#endif
+
+        cur_iter += 32;
+        total_cur_iter += 32;
+    }
+}
+
+template <typename DataT, bool dot_res_and_input>
+DataT sparseBlkDiagSolve(
+        DataT *res,
+        SparseBlkDiag *a,
+        DataT *scratch)
+{
+    uint32_t lane_id = threadIdx.x % 32;
+    uint32_t cur_dim_offset = 0;
+
+    if constexpr (dot_res_and_input) {
+        warpCopy(scratch, res, a->fullDim * sizeof(DataT));
+    }
+
+    // I think for now, we are just going to naively assign each warp
+    // to a block to invert.
+    warpLoopSync(a->numBlks, [&](uint32_t iter) {
+        auto [num_dims, blk] = [&]() -> 
+            std::pair<uint32_t, SparseBlkDiag::Blk> {
+            if (iter == 0xFFFF'FFFF) {
+                return { 0, SparseBlkDiag::Blk{} };
+            } else {
+                auto blk = a->blks[iter];
+                return { blk.dim, blk };
+            }
+        } ();
+
+        uint32_t dim_offset = warpInclusivePrefixSum(num_dims) +
+                              cur_dim_offset;
+        if (lane_id == 31) {
+            cur_dim_offset = dim_offset;
+        }
+
+        CountT total_dofs = blk.dim;
+
+        int32_t *expandedParent = blk.expandedParent;
+        float *massMatrixLTDL = blk.ltdl;
+        float *x = res + dim_offset - num_dims;
+
+        auto ltdl = [&](int32_t row, int32_t col) -> float& {
+            return massMatrixLTDL[row + total_dofs * col];
+        };
+
+        for (int32_t i = (int32_t) total_dofs - 1; i >= 0; --i) {
+            int32_t j = expandedParent[i];
+            while (j != -1) {
+                x[j] -= ltdl(i, j) * x[i];
+                j = expandedParent[j];
+            }
+        }
+
+        for (int32_t i = 0; i < total_dofs; ++i) {
+            x[i] /= ltdl(i, i);
+        }
+
+        for (int32_t i = 0; i < total_dofs; ++i) {
+            int32_t j = expandedParent[i];
+            while (j != -1) {
+                x[i] -= ltdl(i, j) * x[j];
+                j = expandedParent[j];
+            }
+        }
+    });
+
+    float ret = 0.f;
+    if constexpr (dot_res_and_input) {
+        ret = dotVectors(res, scratch, a->fullDim);
+    }
+
+    return ret;
+}
+
+template <typename DataT>
+void blkDiagSolve(
+        DataT *res,
+        DataT *a_ltdl,
+        DataT *b,
+        uint32_t a_dim)
+{
+
+}
+
+}
+#endif
+
+namespace madrona::phys::cv {
 
 StateManager * getStateManager(Context &ctx)
 {
@@ -172,6 +831,11 @@ struct CVSolveData {
     uint32_t accRefAllocatedBytes;
     MemoryRange accRefMemory;
 
+    // This has mass matrix, full vel, free acc, jacobian, mu,
+    // penetrations
+    uint32_t prepAllocatedBytes;
+    MemoryRange prepMemory;
+
     static constexpr uint32_t kNumRegisters = 8;
 
     struct RegInfo {
@@ -181,6 +845,65 @@ struct CVSolveData {
     };
 
     RegInfo regInfos[kNumRegisters];
+
+#ifdef MADRONA_GPU_MODE
+    SparseBlkDiag::Blk * getMassBlks(StateManager *state_mgr)
+    {
+        uint8_t *bytes = 
+            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory);
+        return (SparseBlkDiag::Blk *)bytes;
+    }
+
+    float * getFullVel(StateManager *state_mgr)
+    {
+        uint8_t *bytes = 
+            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups;
+        return (float *)bytes;
+    }
+
+    float * getFreeAcc(StateManager *state_mgr)
+    {
+        uint8_t *bytes = 
+            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs;
+        return (float *)bytes;
+    }
+
+    float * getMu(StateManager *state_mgr)
+    {
+        uint8_t *bytes = 
+            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * totalNumDofs;
+        return (float *)bytes;
+    }
+
+    float * getPenetrations(StateManager *state_mgr)
+    {
+        uint8_t *bytes = 
+            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * numContactPts;
+        return (float *)bytes;
+    }
+
+    float * getJacobian(StateManager *state_mgr)
+    {
+        uint8_t *bytes = 
+            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts;
+        return (float *)bytes;
+    }
+#endif
 };
 
 namespace tasks {
@@ -358,12 +1081,16 @@ inline void initHierarchies(Context &ctx,
     required_bytes += grp.numBodies * sizeof(uint32_t);
 
     // All the bodies' data
+    uint32_t accum_dofs = 0;
     for (CountT j = 0; j < grp.numBodies; ++j) {
         Entity body = grp.bodies(ctx)[j];
         auto &num_body_dofs = ctx.get<DofObjectNumDofs>(body);
         auto &tmp_state = ctx.get<DofObjectTmpState>(body);
 
         tmp_state.phiFullOffset = (uint32_t)required_bytes;
+        tmp_state.dofOffset = accum_dofs;
+
+        accum_dofs += num_body_dofs.numDofs;
 
         // Space for both phi and phi_dot
         CountT num_phi_vals = 2 * 6 * num_body_dofs.numDofs;
@@ -395,272 +1122,153 @@ inline void initHierarchies(Context &ctx,
     tasks::forwardKinematics(ctx, grp);
 }
 
+inline Mat3x3 skewSymmetricMatrix(Vector3 v)
+{
+    return {
+        {
+            { 0.f, v.z, -v.y },
+            { -v.z, 0.f, v.x },
+            { v.y, -v.x, 0.f }
+        }
+    };
+}
+
+#ifdef MADRONA_GPU_MODE
+inline void computePhiTrans(
+        const DofObjectNumDofs num_dofs,
+        DofObjectTmpState &tmp_state,
+        Vector3 origin,
+        float (&S)[18])
+{
+    Phi phi = tmp_state.phi;
+
+    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+        // S = [1_3x3 r^x; 0 1_3x3], column-major
+        // memset(S, 0.f, 6 * 3 * sizeof(float));
+
+        // Diagonal identity
+        #pragma unroll
+        for(CountT i = 0; i < 3; ++i) {
+            S[i * 3 + i] = 1.f;
+        }
+        // r^x Skew symmetric matrix
+        Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
+        comPos -= origin;
+        S[0 + 3 * 4] = -comPos.z;
+        S[0 + 3 * 5] = comPos.y;
+        S[1 + 3 * 3] = comPos.z;
+        S[1 + 3 * 5] = -comPos.x;
+        S[2 + 3 * 3] = -comPos.y;
+        S[2 + 3 * 4] = comPos.x;
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        // S = [r \times hinge; hinge]
+        Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
+        Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
+        anchorPos -= origin;
+        Vector3 r_cross_hinge = anchorPos.cross(hinge);
+        S[0] = r_cross_hinge.x;
+        S[1] = r_cross_hinge.y;
+        S[2] = r_cross_hinge.z;
+        // S[3] = hinge.x;
+        // S[4] = hinge.y;
+        // S[5] = hinge.z;
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+        // This will just get right-multiplied by the angular velocity
+        Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
+        anchor_pos -= origin;
+
+        // We need to right multiply these by the parent composed rotation
+        // matrix.
+        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
+        Quat parent_composed_rot = Quat{
+            phi.v[3], phi.v[4], phi.v[5], phi.v[6]
+        };
+        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
+
+        rx *= parent_rot;
+
+        #pragma unroll
+        for (int col = 0; col < 3; ++col) {
+            S[col * 3 + 0] = rx[col][0];
+            S[col * 3 + 1] = rx[col][1];
+            S[col * 3 + 2] = rx[col][2];
+        }
+    }
+    else {
+        MADRONA_UNREACHABLE();
+    }
+}
+#else
+inline void computePhiTrans(
+        const DofObjectNumDofs num_dofs,
+        DofObjectTmpState &tmp_state,
+        Vector3 origin,
+        float *S)
+{
+    Phi phi = tmp_state.phi;
+
+    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+        // S = [1_3x3 r^x; 0 1_3x3], column-major
+        memset(S, 0.f, 6 * 3 * sizeof(float));
+        // Diagonal identity
+        for(CountT i = 0; i < 3; ++i) {
+            S[i * 3 + i] = 1.f;
+        }
+        // r^x Skew symmetric matrix
+        Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
+        comPos -= origin;
+        S[0 + 3 * 4] = -comPos.z;
+        S[0 + 3 * 5] = comPos.y;
+        S[1 + 3 * 3] = comPos.z;
+        S[1 + 3 * 5] = -comPos.x;
+        S[2 + 3 * 3] = -comPos.y;
+        S[2 + 3 * 4] = comPos.x;
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        // S = [r \times hinge; hinge]
+        Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
+        Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
+        anchorPos -= origin;
+        Vector3 r_cross_hinge = anchorPos.cross(hinge);
+        S[0] = r_cross_hinge.x;
+        S[1] = r_cross_hinge.y;
+        S[2] = r_cross_hinge.z;
+        // S[3] = hinge.x;
+        // S[4] = hinge.y;
+        // S[5] = hinge.z;
+    }
+    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+        // This will just get right-multiplied by the angular velocity
+        Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
+        anchor_pos -= origin;
+
+        // We need to right multiply these by the parent composed rotation
+        // matrix.
+        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
+        Quat parent_composed_rot = Quat{
+            phi.v[3], phi.v[4], phi.v[5], phi.v[6]
+        };
+        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
+
+        rx *= parent_rot;
+
+        for (int col = 0; col < 3; ++col) {
+            S[col * 3 + 0] = rx[col][0];
+            S[col * 3 + 1] = rx[col][1];
+            S[col * 3 + 2] = rx[col][2];
+        }
+    }
+    else {
+        MADRONA_UNREACHABLE();
+    }
+}
+#endif
+
 #ifdef MADRONA_GPU_MODE
 struct GaussMinimizationNode : NodeBase {
     GaussMinimizationNode(StateManager *state_mgr);
-
-    // For debugging purposes
-    template <bool transposed, bool host_print>
-    void printMatrix(float *mat,
-                     uint32_t num_rows,
-                     uint32_t num_cols,
-                     const char *name = "")
-    {
-        __syncwarp();
-        if (threadIdx.x % 32 == 0) {
-            if constexpr (host_print) {
-                LOG("printing matrix {}\n", name);
-            } else {
-                printf("printing matrix %s\n", name);
-            }
-
-            for (uint32_t r = 0; r < num_rows; ++r) {
-                if constexpr (host_print) {
-                    LOG("row {}\n", r);
-                }
-
-                for (uint32_t c = 0; c < num_cols; ++c) {
-                    float v = 0.f;
-                    if constexpr (transposed) {
-                        v = mat[r + c * num_rows];
-                    } else {
-                        v = mat[c + r * num_cols];
-                    }
-
-                    if constexpr (host_print) {
-                        LOG("{}\n", v);
-                    } else {
-                        printf("%f ", v);
-                    }
-                }
-
-                if constexpr (!host_print) {
-                    printf("\n");
-                }
-            }
-
-            printf("\n");
-        }
-        __syncwarp();
-    }
-
-    // Simple helper function for having a warp loop over work
-    template <int granularity, typename Fn>
-    void warpLoop(uint32_t total_num_iters, Fn &&fn)
-    {
-        uint32_t iter = granularity * (threadIdx.x % 32);
-        while (iter < total_num_iters) {
-            #pragma unroll
-            for (int i = 0; i < granularity; ++i) {
-                fn(iter + i);
-            }
-
-            iter += 32 * granularity;
-        }
-    }
-
-    template <typename Fn>
-    void warpLoop(uint32_t total_num_iters, Fn &&fn)
-    {
-        uint32_t iter = threadIdx.x % 32;
-        while (iter < total_num_iters) {
-            fn(iter);
-
-            iter += 32;
-        }
-    }
-
-    // Passes in 0xFFFF'FFFF to fn if invalid run
-    template <typename Fn>
-    void warpLoopSync(uint32_t total_num_iters, Fn &&fn)
-    {
-        uint32_t iter = threadIdx.x % 32;
-        bool run = (iter < total_num_iters);
-
-        while (__any_sync(0xFFFF'FFFF, run)) {
-            fn(run ? iter : 0xFFFF'FFFF);
-            iter += 32;
-
-            run = (iter < total_num_iters);
-        }
-    }
-
-    void warpCopy(void *dst, void *src, uint32_t num_bytes)
-    {
-        int32_t lane_id = threadIdx.x % 32;
-        int32_t bytes_per_warp = (num_bytes + 31) / 32;
-        int32_t bytes_to_cpy =
-            max(0, min(num_bytes - lane_id * bytes_per_warp, bytes_per_warp));
-
-        memcpy(
-            (uint8_t *)dst + bytes_per_warp * lane_id,
-            (uint8_t *)src + bytes_per_warp * lane_id,
-            bytes_to_cpy);
-    }
-
-    struct ScratchMemAlloc {
-        // if true, memory is in smem, otherwise, in global memory
-        template <typename T>
-        std::pair<T *, bool> allocWarp(uint32_t num_bytes)
-        {
-            uint32_t warp_id = threadIdx.x / 32;
-            uint32_t lane_id = threadIdx.x % 32;
-
-            const int32_t num_smem_bytes_per_warp =
-                mwGPU::SharedMemStorage::numBytesPerWarp();
-            auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
-                            num_smem_bytes_per_warp * warp_id;
-
-            uint64_t ptr = 0;
-            uint32_t in_smem = 0;
-            if (lane_id == 0) {
-                if (usedSmem + num_bytes < num_smem_bytes_per_warp) {
-                    ptr = (uint64_t)(smem_buf + usedSmem);
-                    usedSmem += num_bytes;
-                    in_smem = 1;
-                } else {
-                    StateManager *state_mgr = getStateManager();
-                    ptr = (uint64_t)mwGPU::TmpAllocator::get().alloc(num_bytes);
-                }
-            }
-
-            ptr = __shfl_sync(0xFFFF'FFFF, ptr, 0);
-            in_smem = __shfl_sync(0xFFFF'FFFF, in_smem, 0);
-
-            return { (T *)ptr, (bool)in_smem };
-        }
-
-        void * allocWarpGlobal(uint32_t num_bytes) {
-            uint32_t lane_id = threadIdx.x % 32;
-            uint64_t ptr = 0;
-            if (lane_id == 0) {
-                StateManager *state_mgr = getStateManager();
-                ptr = (uint64_t)mwGPU::TmpAllocator::get().alloc(num_bytes);
-            }
-            ptr = __shfl_sync(0xFFFF'FFFF, ptr, 0);
-
-            return (void *)ptr;
-        }
-
-        void clearSmemWarp()
-        {
-            uint32_t lane_id = threadIdx.x % 32;
-            if (lane_id == 0) {
-                usedSmem = 0;
-            }
-        }
-
-        uint32_t usedSmem;
-    };
-
-    // Unsure how efficient this will be exactly, but we're not dealing
-    // with HUGE matrices, just TONS of tiny ones. (WIP)
-    template <typename DataT,
-              uint32_t block_size>
-    void gmmaWarpSmallSmem(
-            DataT *res,
-            DataT *a,
-            DataT *b,
-            uint32_t a_rows, uint32_t a_cols,
-            uint32_t b_rows, uint32_t b_cols);
-
-    template <typename DataT,
-              uint32_t block_size,
-              bool a_transposed = false,
-              bool b_transposed = false,
-              bool reset_res = false>
-    void gmmaWarpSmallReg(
-            DataT *res,
-            DataT *a,
-            DataT *b,
-            uint32_t a_rows, uint32_t a_cols,
-            uint32_t b_rows, uint32_t b_cols);
-
-    template <typename DataT,
-              uint32_t block_size,
-              bool transposed>
-    void copyToRegs(
-            DataT (&blk_tmp)[block_size][block_size], // dst
-            DataT *mtx,                               // src
-            uint32_t mtx_rows, uint32_t mtx_cols,
-            uint32_t blk_r, uint32_t blk_c);
-
-    template <typename DataT,
-              uint32_t block_size,
-              bool transposed>
-    void copyToRegsWithBoundary(
-            DataT (&blk_tmp)[block_size][block_size], // dst
-            DataT *mtx,                               // src
-            uint32_t mtx_rows_start, uint32_t mtx_cols_start,
-            uint32_t mtx_rows_end, uint32_t mtx_cols_end,
-            uint32_t mtx_rows, uint32_t mtx_cols,
-            uint32_t blk_r, uint32_t blk_c);
-
-    template <typename DataT,
-              uint32_t block_size>
-    void copyToMem(
-            DataT *mtx,                               // dst
-            DataT (&blk_tmp)[block_size][block_size], // src
-            uint32_t mtx_rows, uint32_t mtx_cols,
-            uint32_t blk_r, uint32_t blk_c);
-
-    template <typename DataT,
-              uint32_t block_size>
-    void copyToMemWithOffset(
-            DataT *mtx,                               // dst
-            DataT (&blk_tmp)[block_size][block_size], // src
-            uint32_t mtx_rows, uint32_t mtx_cols,
-            uint32_t blk_r, uint32_t blk_c,
-            uint32_t r_offset, uint32_t c_offset,
-            uint32_t r_end, uint32_t c_end);
-
-    template <typename DataT,
-              uint32_t block_size,
-              bool reset_res = false>
-    void gmmaBlockRegs(
-            DataT (&res)[block_size][block_size],
-            DataT (&a)[block_size][block_size],
-            DataT (&b)[block_size][block_size]);
-
-    template <typename DataT,
-              uint32_t block_size>
-    void setBlockZero(
-            DataT (&blk)[block_size][block_size]);
-
-    template <typename DataT>
-    DataT warpInclusivePrefixSum(DataT value);
-
-    template <typename DataT>
-    DataT warpReduceSum(DataT value);
-
-    template <typename DataT,
-              uint32_t block_size,
-              bool a_transposed = false,
-              bool b_transposed = false,
-              bool reset_res = false>
-    void sparseBlkDiagSmallReg(
-            DataT *res,
-            SparseBlkDiag *a,
-            DataT *b,
-            uint32_t b_rows, uint32_t b_cols);
-
-    // Solves for x in Ax = b where A is sparse.
-    // x is stored in res and will get overriden with the solved vector.
-    // `dot_res_and_input` determines whether or not to calculate the dot
-    // product between the input and the result.
-    template <typename DataT, bool dot_res_and_input>
-    DataT sparseBlkDiagSolve(
-            DataT *res,
-            SparseBlkDiag *a,
-            DataT *scratch); // not used if dot_res_and_input = false
-
-    // Solves for x in Ax = b where A isn't sparse
-    template <typename DataT>
-    void blkDiagSolve(
-            DataT *res,
-            DataT *a,
-            DataT *b,
-            uint32_t a_dim);
 
     struct DObjPackage {
         // p.T @ M @ (x - accFree)
@@ -691,15 +1299,6 @@ struct GaussMinimizationNode : NodeBase {
         float *acc_ref,
         bool dbg = false);
 
-    template <typename DataT>
-    float norm2Warp(DataT *values, uint32_t dim);
-
-    template <typename DataT>
-    float dotVectors(DataT *a, DataT *b, uint32_t dim);
-
-    template <typename DataT, typename FnA, typename FnB>
-    float dotVectorsPred(FnA &&a_fn, FnB &&b_fn, uint32_t dim);
-
     float exactLineSearch(
             CVSolveData *sd,
             float *jaccref,
@@ -711,10 +1310,23 @@ struct GaussMinimizationNode : NodeBase {
             float *scratch,
             bool dbg = false);
 
+    void computeContactJacobian(
+            BodyGroupHierarchy *grp,
+            DofObjectHierarchyDesc *hier_desc,
+            Mat3x3 C,
+            Vector3 origin,
+            float *j_c,
+            uint32_t body_dof_offset,
+            uint32_t jac_row,
+            uint32_t j_num_rows,
+            float coeff);
+
     void prepareRegInfos(CVSolveData *sd);
 
     // Nodes in the taskgraph:
     void allocateScratch(int32_t invocation_idx);
+    // Prepares mass matrix and contact jacobian
+    void prepareSolver(int32_t invocation_idx);
     void computeAccRef(int32_t invocation_idx);
     void nonlinearCG(int32_t invocation_idx);
 
@@ -747,6 +1359,8 @@ void GaussMinimizationNode::dobjWarp(
         float *acc_ref,
         bool dbg)
 {
+    using namespace gpu_utils;
+
     // x - acc_free
     warpLoop(sd->freeAccDim, [&](uint32_t iter) {
         scratch[iter] = x[iter] - sd->freeAcc[iter];
@@ -837,546 +1451,6 @@ void GaussMinimizationNode::dobjWarp(
     __syncwarp();
 }
 
-template <typename DataT>
-float GaussMinimizationNode::norm2Warp(DataT *values, uint32_t dim)
-{
-    float cur_sum = 0.f;
-
-    warpLoopSync(dim, [&](uint32_t iter) {
-        float v = (iter != 0xFFFF'FFFF) ? values[iter] : 0.f;
-
-        v = v * v;
-        v = warpReduceSum(v) + cur_sum;
-        cur_sum = v;
-    });
-
-    return cur_sum;
-}
-
-template <typename DataT>
-float GaussMinimizationNode::dotVectors(
-        DataT *a_ptr, DataT *b_ptr, uint32_t dim)
-{
-    float cur_sum = 0.f;
-
-    warpLoopSync(dim, [&](uint32_t iter) {
-        float a = (iter != 0xFFFF'FFFF) ? a_ptr[iter] : 0.f;
-        float b = (iter != 0xFFFF'FFFF) ? b_ptr[iter] : 0.f;
-
-        float v = a * b;
-        v = warpReduceSum(v) + cur_sum;
-        cur_sum = v;
-    });
-
-    return cur_sum;
-}
-
-template <typename DataT, typename FnA, typename FnB>
-float GaussMinimizationNode::dotVectorsPred(
-        FnA &&a_fn, FnB &&b_fn, uint32_t dim)
-{
-    float cur_sum = 0.f;
-
-    warpLoopSync(dim, [&](uint32_t iter) {
-        DataT a = (iter != 0xFFFF'FFFF) ? a_fn(iter) : 0.f;
-        DataT b = (iter != 0xFFFF'FFFF) ? b_fn(iter) : 0.f;
-
-        DataT v = a * b;
-        v = warpReduceSum(v) + cur_sum;
-        cur_sum = v;
-    });
-
-    return cur_sum;
-}
-
-template <typename DataT,
-          uint32_t block_size,
-          bool transposed>
-void GaussMinimizationNode::copyToRegs(
-        DataT (&blk_tmp)[block_size][block_size],
-        DataT *mtx,
-        uint32_t mtx_rows, uint32_t mtx_cols,
-        uint32_t blk_r, uint32_t blk_c)
-{
-    uint32_t col_start = blk_c * block_size;
-    uint32_t row_start = blk_r * block_size;
-
-    #pragma unroll
-    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
-        #pragma unroll
-        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
-            if constexpr (transposed) {
-                blk_tmp[blk_row][blk_col] = 
-                    (col_start + blk_col < mtx_cols &&
-                     row_start + blk_row < mtx_rows) ?
-                    mtx[row_start + blk_row + mtx_rows * (col_start + blk_col)] :
-                    0.f;
-            } else {
-                blk_tmp[blk_row][blk_col] = 
-                    (col_start + blk_col < mtx_cols &&
-                     row_start + blk_row < mtx_rows) ?
-                    mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] :
-                    0.f;
-            }
-        }
-    }
-}
-
-template <typename DataT,
-          uint32_t block_size,
-          bool transposed>
-void GaussMinimizationNode::copyToRegsWithBoundary(
-        DataT (&blk_tmp)[block_size][block_size], // dst
-        DataT *mtx,                               // src
-        uint32_t mtx_rows_start, uint32_t mtx_cols_start,
-        uint32_t mtx_rows_end, uint32_t mtx_cols_end,
-        uint32_t mtx_rows, uint32_t mtx_cols,
-        uint32_t blk_r, uint32_t blk_c)
-{
-    uint32_t col_start = blk_c * block_size + mtx_cols_start;
-    uint32_t row_start = blk_r * block_size + mtx_rows_start;
-
-    #pragma unroll
-    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
-        #pragma unroll
-        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
-            if constexpr (transposed) {
-                blk_tmp[blk_row][blk_col] = 
-                    (col_start + blk_col < mtx_cols_end &&
-                     row_start + blk_row >= mtx_rows_start &&
-                     row_start + blk_row < mtx_rows_end) ?
-                    mtx[row_start + blk_row + mtx_rows * (col_start + blk_col)] :
-                    0.f;
-            } else {
-                blk_tmp[blk_row][blk_col] = 
-                    (col_start + blk_col < mtx_cols_end &&
-                     row_start + blk_row >= mtx_rows_start &&
-                     row_start + blk_row < mtx_rows_end) ?
-                    mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] :
-                    0.f;
-            }
-        }
-    }
-}
-
-template <typename DataT,
-          uint32_t block_size>
-void GaussMinimizationNode::copyToMem(
-        DataT *mtx,
-        DataT (&blk_tmp)[block_size][block_size],
-        uint32_t mtx_rows, uint32_t mtx_cols,
-        uint32_t blk_r, uint32_t blk_c)
-{
-    uint32_t col_start = blk_c * block_size;
-    uint32_t row_start = blk_r * block_size;
-
-    #pragma unroll
-    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
-        #pragma unroll
-        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
-            if (col_start + blk_col < mtx_cols &&
-                 row_start + blk_row < mtx_rows) {
-                mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] =
-                    blk_tmp[blk_row][blk_col];
-            }
-        }
-    }
-}
-
-template <typename DataT,
-          uint32_t block_size>
-void GaussMinimizationNode::copyToMemWithOffset(
-        DataT *mtx,                               // dst
-        DataT (&blk_tmp)[block_size][block_size], // src
-        uint32_t mtx_rows, uint32_t mtx_cols,
-        uint32_t blk_r, uint32_t blk_c,
-        uint32_t r_offset, uint32_t c_offset,
-        uint32_t r_end, uint32_t c_end)
-{
-    uint32_t col_start = blk_c * block_size + c_offset;
-    uint32_t row_start = blk_r * block_size + r_offset;
-
-    #pragma unroll
-    for (uint32_t blk_row = 0; blk_row < block_size; ++blk_row) {
-        #pragma unroll
-        for (uint32_t blk_col = 0; blk_col < block_size; ++blk_col) {
-            if (col_start + blk_col < c_end &&
-                 row_start + blk_row < r_end) {
-                mtx[col_start + blk_col + mtx_cols * (row_start + blk_row)] =
-                    blk_tmp[blk_row][blk_col];
-            }
-        }
-    }
-}
-
-template <typename DataT,
-          uint32_t block_size,
-          bool reset_res>
-void GaussMinimizationNode::gmmaBlockRegs(
-        DataT (&res)[block_size][block_size],
-        DataT (&a)[block_size][block_size],
-        DataT (&b)[block_size][block_size])
-{
-    #pragma unroll
-    for (int i = 0; i < block_size; i++) {
-        #pragma unroll
-        for (int j = 0; j < block_size; j++) {
-            if constexpr (reset_res) {
-                res[i][j] = 0;
-            }
-
-            #pragma unroll
-            for (int k = 0; k < block_size; k++) {
-                res[i][j] += a[i][k] * b[k][j];
-            }
-        }
-    }
-}
-
-template <typename DataT,
-          uint32_t block_size>
-void GaussMinimizationNode::setBlockZero(
-        DataT (&blk)[block_size][block_size])
-{
-    #pragma unroll
-    for (int i = 0; i < block_size; i++) {
-        #pragma unroll
-        for (int j = 0; j < block_size; j++) {
-            blk[i][j] = 0.f;
-        }
-    }
-}
-
-template <typename DataT,
-          uint32_t block_size>
-void GaussMinimizationNode::gmmaWarpSmallSmem(
-        DataT *res,
-        DataT *a,
-        DataT *b,
-        uint32_t a_rows, uint32_t a_cols,
-        uint32_t b_rows, uint32_t b_cols)
-{
-    const int32_t num_smem_bytes_per_warp =
-        mwGPU::SharedMemStorage::numBytesPerWarp();
-    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
-                    num_smem_bytes_per_warp * warp_id;
-
-    // This function requires (block_size x block_size) * 3 bytes of Smem
-    assert(3 * (block_size * block_size) < num_smem_bytes_per_warp);
-
-    DataT *a_blk_tmp = (DataT *)smem_buf;
-    DataT *b_blk_tmp = (DataT *)smem_buf + (block_size * block_size);
-    DataT *res_blk_tmp = (DataT *)smem_buf + (block_size * block_size) * 2;
-
-    // Get value in block tmp matrix
-    // TODO: Double check the compiler spits out not dumb stuff.
-    auto bv = [](DataT *d, uint32_t row, uint32_t col) -> DataT & {
-        return d[col + row * block_size];
-    };
-
-    
-}
-
-template <typename DataT,
-          uint32_t block_size,
-          bool a_transposed,
-          bool b_transposed,
-          bool reset_res>
-void GaussMinimizationNode::gmmaWarpSmallReg(
-        DataT *res,
-        DataT *a,
-        DataT *b,
-        uint32_t a_rows, uint32_t a_cols,
-        uint32_t b_rows, uint32_t b_cols)
-{
-    // TODO: Make sure non of this stuff spills
-    DataT a_blk_tmp[block_size][block_size];
-    DataT b_blk_tmp[block_size][block_size];
-    DataT res_blk_tmp[block_size][block_size];
-
-    uint32_t res_rows = a_rows;
-    uint32_t res_cols = b_cols;
-
-    uint32_t num_iters_r = (res_rows + block_size - 1) / block_size;
-    uint32_t num_iters_c = (res_cols + block_size - 1) / block_size;
-    uint32_t total_num_iters = num_iters_r * num_iters_c;
-
-    uint32_t num_blks_b = (b_rows + block_size - 1) / block_size;
-
-    uint32_t lane_id = threadIdx.x % 32;
-    uint32_t cur_iter = lane_id;
-    
-    while (cur_iter < total_num_iters) {
-        uint32_t res_blk_r = cur_iter / num_iters_c;
-        uint32_t res_blk_c = cur_iter % num_iters_c;
-
-        if constexpr (reset_res) {
-            setBlockZero(res_blk_tmp);
-        } else {
-            copyToRegs<DataT, block_size, false>(
-                    res_blk_tmp, res, res_rows, res_cols,
-                    res_blk_r, res_blk_c);
-        }
-
-        for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
-            copyToRegs<DataT, block_size, a_transposed>(
-                    a_blk_tmp, a, a_rows, a_cols, res_blk_r, blk_j);
-            copyToRegs<DataT, block_size, b_transposed>(
-                    b_blk_tmp, b, b_rows, b_cols, blk_j, res_blk_c);
-
-            gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
-        }
-
-        copyToMem(res, res_blk_tmp, res_rows, 
-                  res_cols, res_blk_r, res_blk_c);
-
-        cur_iter += 32;
-    }
-}
-
-template <typename DataT>
-DataT GaussMinimizationNode::warpInclusivePrefixSum(DataT value)
-{
-    uint32_t lane_id = threadIdx.x % 32;
-
-    #pragma unroll
-    for (uint32_t i = 1; i <= 32; i *= 2) {
-        DataT prev_blk = __shfl_up_sync(0xFFFF'FFFF, value, i, 32);
-        if (lane_id >= i) value += prev_blk;
-    }
-
-    return value;
-}
-
-template <typename DataT>
-DataT GaussMinimizationNode::warpReduceSum(DataT value)
-{
-    #pragma unroll
-    for (int i=16; i>=1; i/=2)
-        value += __shfl_xor_sync(0xffffffff, value, i, 32);
-
-    return value;
-}
-
-template <typename DataT,
-          uint32_t block_size,
-          bool a_transposed,
-          bool b_transposed,
-          bool reset_res>
-void GaussMinimizationNode::sparseBlkDiagSmallReg(
-        DataT *res,
-        SparseBlkDiag *a,
-        DataT *b,
-        uint32_t b_rows, uint32_t b_cols)
-{
-    DataT a_blk_tmp[block_size][block_size];
-    DataT b_blk_tmp[block_size][block_size];
-    DataT res_blk_tmp[block_size][block_size];
-
-    uint32_t res_rows = a->fullDim;
-    uint32_t res_cols = b_cols;
-
-    auto get_num_iters = [b_cols](SparseBlkDiag::Blk blk) {
-        uint32_t res_rows = blk.dim;
-        uint32_t res_cols = b_cols;
-        uint32_t num_iters_r = (res_rows + block_size - 1) / block_size;
-        uint32_t num_iters_c = (res_cols + block_size - 1) / block_size;
-        return num_iters_r * num_iters_c;
-    };
-
-    uint32_t lane_id = threadIdx.x % 32;
-
-    // Everyone starts on blk 0
-    uint32_t cur_blk = 0;
-    uint32_t cur_num_iters = get_num_iters(a->blks[cur_blk]);
-    uint32_t cur_iter = lane_id;
-    uint32_t total_cur_iter = lane_id;
-
-    bool work_finished = false;
-
-    uint32_t processed_dims = 0;
-
-    while (!work_finished) {
-        while (cur_iter >= cur_num_iters) {
-            processed_dims += a->blks[cur_blk].dim;
-
-            cur_blk++;
-            cur_iter -= cur_num_iters;
-
-            if (cur_blk < a->numBlks) {
-                cur_num_iters = get_num_iters(a->blks[cur_blk]);
-            } else {
-                work_finished = true;
-                break;
-            }
-        }
-
-        if (work_finished)
-            break;
-
-        auto blk = a->blks[cur_blk];
-        uint32_t blk_num_iters = get_num_iters(blk);
-
-        uint32_t num_iters_c = (b_cols + block_size - 1) / block_size;
-
-        // These are blocks within the blk
-        uint32_t res_blk_r = cur_iter / num_iters_c;
-        uint32_t res_blk_c = cur_iter % num_iters_c;
-
-        uint32_t num_blks_b = (blk.dim + block_size - 1) / block_size;
-
-        if constexpr (reset_res) {
-            setBlockZero(res_blk_tmp);
-        } else {
-#if 0
-            copyToRegs<DataT, block_size, false>(
-                    res_blk_tmp, res, res_rows, res_cols,
-                    res_blk_r, res_blk_c);
-#endif
-        }
-
-        for (uint32_t blk_j = 0; blk_j < num_blks_b; ++blk_j) {
-            // This is trivial
-            copyToRegs<DataT, block_size, a_transposed>(
-                    a_blk_tmp, blk.values, blk.dim, blk.dim, 
-                    res_blk_r, blk_j);
-
-            // This is a little more complicated
-            copyToRegsWithBoundary<DataT, block_size, b_transposed>(
-                    b_blk_tmp, 
-                    b, 
-                    processed_dims, 0,
-                    processed_dims + blk.dim, b_cols,
-                    b_rows, b_cols,
-                    blk_j, res_blk_c);
-
-            gmmaBlockRegs(res_blk_tmp, a_blk_tmp, b_blk_tmp);
-        }
-
-#if 0
-        printf("iter %d (offset %d), values: %f %f\n",
-                total_cur_iter,
-                processed_dims,
-                )
-#endif
-        copyToMemWithOffset(res, res_blk_tmp, 
-                            res_rows, res_cols, 
-                            res_blk_r, res_blk_c,
-                            processed_dims, 0,
-                            processed_dims + blk.dim, res_cols);
-
-#if 0 // Save for later to potenatially reduce divergence
-        bool valid_work;
-        uint32_t cur_num_iters;
-
-        if (cur_blk < a->numBlks) {
-            cur_num_iters = get_num_iters(a->blks[cur_blk]);
-            valid_work = (cur_iter < cur_num_iters);
-        } else {
-            valid_work = true;
-            work_finished = true;
-
-            cur_iter = 0;
-            cur_num_iters = 0xFFFF'FFFF;
-        }
-        
-        while (!__all_sync(0xFFFF'FFFF, valid_work)) {
-            if (cur_iter >= cur_num_iters) {
-                cur_blk++;
-                cur_iter -= cur_num_iters;
-
-                if (cur_blk < a->numBlks)
-                    cur_num_iters = get_num_iters(a->blks[cur_blk]);
-            }
-        }
-#endif
-
-        cur_iter += 32;
-        total_cur_iter += 32;
-    }
-}
-
-template <typename DataT, bool dot_res_and_input>
-DataT GaussMinimizationNode::sparseBlkDiagSolve(
-        DataT *res,
-        SparseBlkDiag *a,
-        DataT *scratch)
-{
-    uint32_t lane_id = threadIdx.x % 32;
-    uint32_t cur_dim_offset = 0;
-
-    if constexpr (dot_res_and_input) {
-        warpCopy(scratch, res, a->fullDim * sizeof(DataT));
-    }
-
-    // I think for now, we are just going to naively assign each warp
-    // to a block to invert.
-    warpLoopSync(a->numBlks, [&](uint32_t iter) {
-        auto [num_dims, blk] = [&]() -> 
-            std::pair<uint32_t, SparseBlkDiag::Blk> {
-            if (iter == 0xFFFF'FFFF) {
-                return { 0, SparseBlkDiag::Blk{} };
-            } else {
-                auto blk = a->blks[iter];
-                return { blk.dim, blk };
-            }
-        } ();
-
-        uint32_t dim_offset = warpInclusivePrefixSum(num_dims) +
-                              cur_dim_offset;
-        if (lane_id == 31) {
-            cur_dim_offset = dim_offset;
-        }
-
-        CountT total_dofs = blk.dim;
-
-        int32_t *expandedParent = blk.expandedParent;
-        float *massMatrixLTDL = blk.ltdl;
-        float *x = res + dim_offset - num_dims;
-
-        auto ltdl = [&](int32_t row, int32_t col) -> float& {
-            return massMatrixLTDL[row + total_dofs * col];
-        };
-
-        for (int32_t i = (int32_t) total_dofs - 1; i >= 0; --i) {
-            int32_t j = expandedParent[i];
-            while (j != -1) {
-                x[j] -= ltdl(i, j) * x[i];
-                j = expandedParent[j];
-            }
-        }
-
-        for (int32_t i = 0; i < total_dofs; ++i) {
-            x[i] /= ltdl(i, i);
-        }
-
-        for (int32_t i = 0; i < total_dofs; ++i) {
-            int32_t j = expandedParent[i];
-            while (j != -1) {
-                x[i] -= ltdl(i, j) * x[j];
-                j = expandedParent[j];
-            }
-        }
-    });
-
-    float ret = 0.f;
-    if constexpr (dot_res_and_input) {
-        ret = dotVectors(res, scratch, a->fullDim);
-    }
-
-    return ret;
-}
-
-template <typename DataT>
-void GaussMinimizationNode::blkDiagSolve(
-        DataT *res,
-        DataT *a_ltdl,
-        DataT *b,
-        uint32_t a_dim)
-{
-
-}
-
 GaussMinimizationNode::GaussMinimizationNode(
         StateManager *s)
     : solveDatas(s->getSingletonColumn<CVSolveData>())
@@ -1386,6 +1460,8 @@ GaussMinimizationNode::GaussMinimizationNode(
 // Let's test some of these helper functions
 void GaussMinimizationNode::testNodeTransposeMul(int32_t invocation_idx)
 {
+    using namespace gpu_utils;
+
     uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
 
@@ -1468,6 +1544,8 @@ void GaussMinimizationNode::testNodeTransposeMul(int32_t invocation_idx)
 
 void GaussMinimizationNode::testNodeMul(int32_t invocation_idx)
 {
+    using namespace gpu_utils;
+
     uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
 
@@ -1541,6 +1619,8 @@ void GaussMinimizationNode::testNodeMul(int32_t invocation_idx)
 
 void GaussMinimizationNode::testNodeSparseMul(int32_t invocation_idx)
 {
+    using namespace gpu_utils;
+
     uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
 
@@ -1641,6 +1721,8 @@ void GaussMinimizationNode::testNodeSparseMul(int32_t invocation_idx)
 
 void GaussMinimizationNode::testWarpStuff(int32_t invocation_idx)
 {
+    using namespace gpu_utils;
+
     uint32_t value = threadIdx.x % 32;
     uint32_t sum = warpReduceSum(value);
     printf("sum = %u\n", sum);
@@ -1648,6 +1730,8 @@ void GaussMinimizationNode::testWarpStuff(int32_t invocation_idx)
 
 void GaussMinimizationNode::testNodeIdenMul(int32_t invocation_idx)
 {
+    using namespace gpu_utils;
+
     uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
 
@@ -1719,8 +1803,6 @@ void GaussMinimizationNode::testNodeIdenMul(int32_t invocation_idx)
     }
 }
 
-#define warp_printf(...) if (threadIdx.x % 32 == 0) { printf(__VA_ARGS__); }
-
 float GaussMinimizationNode::exactLineSearch(
         CVSolveData *sd,
         float *jaccref,
@@ -1732,6 +1814,8 @@ float GaussMinimizationNode::exactLineSearch(
         float *scratch,
         bool dbg)
 {
+    using namespace gpu_utils;
+
     float pMx_free = dotVectors(p, Mxmin, sd->freeAccDim);
     float xmin_M_xmin = dotVectorsPred<float>(
         [&](uint32_t iter) {
@@ -1855,32 +1939,6 @@ float GaussMinimizationNode::exactLineSearch(
     float alpha = 0.f;
     Evals evals_alpha = fdh_phi(alpha, true && dbg);
 
-    if (dbg) {
-        if (threadIdx.x % 32 == 0) {
-            printf("f_alpha = %f\n", evals_alpha.fun);
-            printf("d_alpha = %f\n", evals_alpha.grad);
-            printf("h_alpha = %f\n", evals_alpha.hess);
-            printf("pMp = %f\n", pMp);
-            printf("pMx_free = %f\n", pMx_free);
-            printf("xmin_M_xmin = %f\n", xmin_M_xmin);
-        }
-
-        if (threadIdx.x % 32 == 0)
-            printf("p\n");
-
-        printMatrix<false, false>(p, 1, sd->freeAccDim);
-
-        if (threadIdx.x % 32 == 0)
-            printf("Jp\n");
-
-        printMatrix<false, false>(Jp, 1, sd->numRowsJc);
-
-        if (threadIdx.x % 32 == 0)
-            printf("Jx_aref\n");
-        
-        printMatrix<false, false>(jaccref, 1, sd->numRowsJc);
-    }
-
     // Newton step
     float alpha1 = alpha - evals_alpha.grad / evals_alpha.hess;
 
@@ -1894,8 +1952,6 @@ float GaussMinimizationNode::exactLineSearch(
 
     // Initial convergence
     if (fabs(evals_alpha1.grad) < tol) {
-        if (dbg)
-            warp_printf("first return %f\n", evals_alpha1.fun);
         return alpha1;
     }
 
@@ -1912,8 +1968,6 @@ float GaussMinimizationNode::exactLineSearch(
         if (evals_alpha1.grad * a_dir > -avg_tol)
             break;
         if (fabs(evals_alpha1.grad)  < avg_tol) {
-            if (dbg)
-                warp_printf("second return\n");
             return alpha1;
         }
 
@@ -1922,8 +1976,6 @@ float GaussMinimizationNode::exactLineSearch(
 
     if (iters == ls_iters) {
         // Failed to bracket...
-        if (dbg)
-            warp_printf("third return\n");
         return alpha1;
     }
 
@@ -1942,8 +1994,6 @@ float GaussMinimizationNode::exactLineSearch(
         evals_alpha_mid = fdh_phi(alpha_mid);
 
         if (fabs(evals_alpha_mid.grad) < avg_tol) {
-            if (dbg)
-                warp_printf("fourth return\n");
             return alpha_mid;
         }
 
@@ -1953,16 +2003,12 @@ float GaussMinimizationNode::exactLineSearch(
             alpha_low = alpha_mid;
 
         if (fabs(alpha_high - alpha_low) < tol) {
-            if (dbg)
-                warp_printf("fifth return\n");
             return alpha_mid;
         }
     }
 
     if (iters >= ls_iters) {
         // Failed to converge...
-        if (dbg)
-            warp_printf("sixth return\n");
         return alpha_mid;
     }
 
@@ -1976,7 +2022,8 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
             mwGPU::SharedMemStorage::numBytesPerWarp();
 
         // We want to fit as much data as possible into shared memory
-        CVSolveData *curr_sd = &solveDatas[invocation_idx];
+        uint32_t world_id = invocation_idx;
+        CVSolveData *curr_sd = &solveDatas[world_id];
 
         uint32_t max_num_comps = max(curr_sd->freeAccDim, curr_sd->numRowsJc);
 
@@ -2018,12 +2065,13 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
         StateManager *state_mgr = getStateManager();
 
         // Everything that isn't in shared memory, will have to go into a memory range.
-        if (curr_sd->scratchAllocatedBytes == 0) {
+        if (curr_sd->scratchAllocatedBytes == 0 && size_in_glob_mem != 0) {
             // Allocate the memory range
             curr_sd->solverScratchMemory = state_mgr->allocMemoryRange(
                     TypeTracker::typeID<SolverScratch256b>(),
                     (size_in_glob_mem + sizeof(SolverScratch256b)-1) /
                         sizeof(SolverScratch256b));
+            curr_sd->scratchAllocatedBytes = size_in_glob_mem;
         } else if (curr_sd->scratchAllocatedBytes < size_in_glob_mem) {
             state_mgr->freeMemoryRange(curr_sd->solverScratchMemory);
 
@@ -2031,15 +2079,17 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
                     TypeTracker::typeID<SolverScratch256b>(),
                     (size_in_glob_mem + sizeof(SolverScratch256b)) /
                         sizeof(SolverScratch256b));
+            curr_sd->scratchAllocatedBytes = size_in_glob_mem;
         }
 
         { // AccRef allocation
             uint32_t acc_ref_bytes = sizeof(float) * curr_sd->numRowsJc;
-            if (curr_sd->accRefAllocatedBytes == 0) {
+            if (curr_sd->accRefAllocatedBytes == 0 && curr_sd->numRowsJc != 0) {
                 curr_sd->accRefMemory = state_mgr->allocMemoryRange(
                     TypeTracker::typeID<SolverScratch256b>(),
                     (acc_ref_bytes + sizeof(SolverScratch256b)-1) /
                         sizeof(SolverScratch256b));
+                curr_sd->accRefAllocatedBytes = acc_ref_bytes;
             } else if (curr_sd->accRefAllocatedBytes < acc_ref_bytes) {
                 state_mgr->freeMemoryRange(curr_sd->accRefMemory);
 
@@ -2047,8 +2097,408 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
                         TypeTracker::typeID<SolverScratch256b>(),
                         (acc_ref_bytes + sizeof(SolverScratch256b)) /
                             sizeof(SolverScratch256b));
+                curr_sd->accRefAllocatedBytes = acc_ref_bytes;
             }
         }
+
+        { // Mass matrix allocation
+            CountT num_grps = state_mgr->numRows<BodyGroup>(world_id);
+            BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
+                BodyGroup, BodyGroupHierarchy>(world_id);
+            ContactConstraint *contacts = state_mgr->getWorldComponents<
+                Contact, ContactConstraint>(world_id);
+            CountT num_contacts = state_mgr->numRows<Contact>(world_id);
+
+            uint32_t total_num_dofs = 0;
+            for (int i = 0; i < num_grps; ++i) {
+                total_num_dofs += hiers[i].numDofs;
+            }
+
+            uint32_t total_contact_pts = 0;
+            for (int i = 0; i < num_contacts; ++i) {
+                total_contact_pts += contacts[i].numPoints;
+            }
+
+            uint32_t prep_bytes = 
+                // Mass matrix
+                sizeof(SparseBlkDiag::Blk) * num_grps +
+                // full vel
+                sizeof(float) * total_num_dofs +
+                // free acc
+                sizeof(float) * total_num_dofs +
+                // mu
+                sizeof(float) * total_contact_pts +
+                // penetrations
+                sizeof(float) * total_contact_pts +
+                // TODO: Make this sparse
+                sizeof(float) * 3 * total_contact_pts * total_num_dofs;
+
+            if (curr_sd->prepAllocatedBytes == 0) {
+                curr_sd->prepMemory = state_mgr->allocMemoryRange(
+                    TypeTracker::typeID<SolverScratch256b>(),
+                    (prep_bytes + sizeof(SolverScratch256b)-1) /
+                        sizeof(SolverScratch256b));
+                curr_sd->prepAllocatedBytes = prep_bytes;
+            } else if (curr_sd->prepAllocatedBytes < prep_bytes) {
+                state_mgr->freeMemoryRange(curr_sd->prepMemory);
+
+                curr_sd->prepMemory = state_mgr->allocMemoryRange(
+                        TypeTracker::typeID<SolverScratch256b>(),
+                        (prep_bytes + sizeof(SolverScratch256b)) /
+                            sizeof(SolverScratch256b));
+                curr_sd->prepAllocatedBytes = prep_bytes;
+            }
+        }
+    }
+}
+
+void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
+{
+    using namespace gpu_utils;
+
+    uint32_t warp_id = invocation_idx;
+    uint32_t lane_id = threadIdx.x % 32;
+    uint32_t world_id = warp_id;
+
+    StateManager *state_mgr = getStateManager();
+
+    CVSolveData *curr_sd = &solveDatas[world_id];
+
+    BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
+        BodyGroup, BodyGroupHierarchy>(world_id);
+
+    { // Prepare the mass matrix
+        SparseBlkDiag mass_sparse;
+        mass_sparse.fullDim = curr_sd->totalNumDofs;
+        mass_sparse.numBlks = curr_sd->numBodyGroups;
+        mass_sparse.blks = curr_sd->getMassBlks(state_mgr);
+
+        warpLoop(curr_sd->numBodyGroups,
+                [&](uint32_t i) {
+                    mass_sparse.blks[i].dim = hiers[i].numDofs;
+                    mass_sparse.blks[i].values = (float *)(
+                        (uint8_t *)state_mgr->memoryRangePointer<MRElement128b>(hiers[i].dynData) + 
+                        hiers[i].massMatrixOffset);
+                    mass_sparse.blks[i].ltdl = (float*)(
+                        (uint8_t *)state_mgr->memoryRangePointer<MRElement128b>(hiers[i].dynData) + 
+                        hiers[i].massMatrixLTDLOffset);
+                    mass_sparse.blks[i].expandedParent = (int32_t *)(
+                        (uint8_t *)state_mgr->memoryRangePointer<MRElement128b>(hiers[i].dynData) + 
+                        hiers[i].expandedParentOffset);
+                });
+        __syncwarp();
+
+        if (lane_id == 0) {
+            curr_sd->massSparse = mass_sparse;
+        }
+    }
+
+    { // Prepare free acc
+        float *free_acc = curr_sd->getFreeAcc(state_mgr);
+
+        uint32_t processed_dofs = 0;
+        for (uint32_t body = 0; body < curr_sd->numBodyGroups; ++body) {
+            __syncwarp();
+
+            float *local_free_acc = (float *)(
+                (uint8_t *)state_mgr->memoryRangePointer<MRElement128b>(hiers[body].dynData) + 
+                hiers[body].biasOffset);
+
+            warpLoop(hiers[body].numDofs,
+                    [&](uint32_t i) {
+                        free_acc[processed_dofs + i] = local_free_acc[i];
+                    });
+
+            processed_dofs += hiers[body].numDofs;
+        }
+
+        if (lane_id == 0) {
+            curr_sd->freeAcc = free_acc;
+        }
+    }
+ 
+    { // Prepare full velocity
+        float *full_vel = curr_sd->getFullVel(state_mgr);
+
+        uint32_t processed_dofs = 0;
+        for (uint32_t grp = 0; grp < curr_sd->numBodyGroups; ++grp) {
+            Entity *bodies = (Entity *)
+                (state_mgr->memoryRangePointer<MRElement128b>(hiers[grp].mrBodies));
+
+            warpLoop(hiers[grp].numBodies,
+                [&](uint32_t iter) {
+                    Entity body = bodies[iter];
+
+                    DofObjectVelocity vel = state_mgr->getUnsafe<DofObjectVelocity>(body);
+                    uint32_t dof_offset = state_mgr->getUnsafe<DofObjectTmpState>(body).dofOffset;
+                    uint32_t num_dofs = state_mgr->getUnsafe<DofObjectNumDofs>(body).numDofs;
+
+                    #pragma unroll
+                    for (uint32_t i = 0; i < 6; ++i) {
+                        if (i < num_dofs)
+                            full_vel[processed_dofs + dof_offset + i] = vel.qv[i];
+                    }
+                });
+
+            __syncwarp();
+            processed_dofs += hiers[grp].numDofs;
+        }
+
+        if (lane_id == 0) {
+            curr_sd->vel = full_vel;
+        }
+    }
+
+    uint32_t num_contacts = state_mgr->numRows<Contact>(world_id);
+
+    ContactConstraint *contacts = state_mgr->getWorldComponents<
+        Contact, ContactConstraint>(world_id);
+    ContactTmpState *contacts_tmp_state = state_mgr->getWorldComponents<
+        Contact, ContactTmpState>(world_id);
+
+    { // Prepare mu
+        float *full_mu = curr_sd->getMu(state_mgr);
+        float *full_penetrations = curr_sd->getPenetrations(state_mgr);
+
+        uint32_t processed_pts = 0;
+
+        warpLoopSync(
+            num_contacts,
+            [&](uint32_t iter) {
+                ContactTmpState tmp_state = (iter == 0xFFFF'FFFF) ? 
+                    ContactTmpState{} : contacts_tmp_state[iter];
+                ContactConstraint contact = (iter == 0xFFFF'FFFF) ?
+                    ContactConstraint{} : contacts[iter];
+
+                uint32_t num_pts_ipf = warpInclusivePrefixSum(
+                    (iter == 0xFFFF'FFFF) ? 0 : contact.numPoints);
+
+                if (iter != 0xFFFF'FFFF) {
+                    uint32_t offset = processed_pts + num_pts_ipf - contact.numPoints;
+                    for (int i = 0; i < contact.numPoints; ++i) {
+                        full_mu[offset + i] = tmp_state.mu;
+                        full_penetrations[offset + i] = contact.points[i].w;
+                    }
+                }
+
+                processed_pts += __shfl_sync(0xFFFF'FFFF, num_pts_ipf, 31);
+            });
+
+        curr_sd->mu = full_mu;
+        curr_sd->penetrations = full_penetrations;
+    }
+
+#if 1
+    { // Prepare the contact jacobian
+        const int32_t num_smem_bytes_per_warp =
+            mwGPU::SharedMemStorage::numBytesPerWarp();
+        auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                        num_smem_bytes_per_warp * warp_id;
+
+        uint32_t *world_block_start = (uint32_t *)smem_buf;
+        assert(curr_sd->numBodyGroups * sizeof(uint32_t) < num_smem_bytes_per_warp);
+
+        { // Quick prefix sum
+            uint32_t accum = 0;
+            if (lane_id == 0) {
+                for (uint32_t i = 0; i < curr_sd->numBodyGroups; ++i) {
+                    world_block_start[i] = accum;
+                    accum += hiers[i].numDofs;
+                    hiers[i].tmpIdx = i;
+                }
+            }
+            __syncwarp();
+        }
+
+        float *j_c = curr_sd->getJacobian(state_mgr);
+        curr_sd->J_c = j_c;
+
+        warpSetZero(j_c, sizeof(float) * 
+                         3 * curr_sd->numContactPts * 
+                         curr_sd->totalNumDofs);
+
+        // TODO: Maybe experiment with different axes of parallelism
+        // Right now, trying to parallelize over contacts
+        struct ContactInfo {
+            ContactConstraint contact;
+            ContactTmpState tmpState;
+            CVPhysicalComponent ref;
+            CVPhysicalComponent alt;
+            uint32_t refNumDofs;
+            uint32_t altNumDofs;
+            bool refFixed;
+            bool altFixed;
+            uint32_t numPoints;
+            float jaccCoeff;
+        };
+
+        auto get_contact_info = [&](uint32_t ct_idx) -> ContactInfo {
+            auto contact = contacts[ct_idx];
+
+            auto ref = state_mgr->getUnsafe<CVPhysicalComponent>(contact.ref);
+            auto alt = state_mgr->getUnsafe<CVPhysicalComponent>(contact.alt);
+
+            auto ref_num_dofs = state_mgr->getUnsafe<DofObjectNumDofs>(
+                    ref.physicsEntity).numDofs;
+            auto alt_num_dofs = state_mgr->getUnsafe<DofObjectNumDofs>(
+                    alt.physicsEntity).numDofs;
+
+            return {
+                contact,
+                contacts_tmp_state[ct_idx],
+                ref,
+                alt,
+                ref_num_dofs,
+                alt_num_dofs,
+                (ref_num_dofs == (uint32_t)DofType::FixedBody),
+                (alt_num_dofs == (uint32_t)DofType::FixedBody),
+                contacts[ct_idx].numPoints
+            };
+        };
+
+        uint32_t jacc_row = 0;
+        warpLoopSync(
+            num_contacts,
+            [&](uint32_t ct_idx) {
+                ContactInfo c_info = (ct_idx == 0xFFFF'FFFF) ?
+                    ContactInfo {} : get_contact_info(ct_idx);
+
+                #pragma unroll
+                for (uint32_t pt_idx = 0; pt_idx < ContactConstraint::kMaxPoints; ++pt_idx) {
+                    uint32_t curr_rows = warpInclusivePrefixSum(
+                            (pt_idx < c_info.contact.numPoints) ? 3 : 0);
+
+                    uint32_t curr_jacc_row = jacc_row + curr_rows - 3; 
+
+#if 0
+                    if (ct_idx != 0xFFFF'FFFF && pt_idx < c_info.contact.numPoints) {
+                        printf("lane_id=%d; ct_idx=%d; pt_idx=%d; numPoints=%d;curr_jacc_row=%d\n", 
+                                lane_id, ct_idx, pt_idx, c_info.contact.numPoints, curr_jacc_row);
+                    }
+#endif
+
+                    uint32_t to_add = __shfl_sync(0xFFFF'FFFF, curr_rows, 31);
+
+                    jacc_row += to_add;
+
+#if 0
+                    if (ct_idx != 0xFFFF'FFFF) {
+                        printf("lane_id=%d; adding %d -> jacc_row=%d\n",
+                                lane_id, to_add, jacc_row);
+                    }
+#endif
+
+                    if (pt_idx < c_info.contact.numPoints) {
+                        Vector3 contact_pt = c_info.contact.points[pt_idx].xyz();
+
+                        if (!c_info.refFixed) {
+                            DofObjectHierarchyDesc *hier = 
+                                &state_mgr->getUnsafe<DofObjectHierarchyDesc>(
+                                    c_info.ref.physicsEntity);
+                            BodyGroupHierarchy *grp =
+                                &state_mgr->getUnsafe<BodyGroupHierarchy>(hier->bodyGroup);
+
+                            computeContactJacobian(
+                                    grp,
+                                    hier,
+                                    c_info.tmpState.C,
+                                    contact_pt,
+                                    j_c,
+                                    world_block_start[grp->tmpIdx],
+                                    curr_jacc_row,
+                                    curr_sd->numRowsJc,
+                                    -1.f);
+                        }
+
+                        if (!c_info.altFixed) {
+                            DofObjectHierarchyDesc *hier = 
+                                &state_mgr->getUnsafe<DofObjectHierarchyDesc>(
+                                    c_info.alt.physicsEntity);
+                            BodyGroupHierarchy *grp =
+                                &state_mgr->getUnsafe<BodyGroupHierarchy>(hier->bodyGroup);
+
+                            computeContactJacobian(
+                                    grp,
+                                    hier,
+                                    c_info.tmpState.C,
+                                    contact_pt,
+                                    j_c,
+                                    world_block_start[grp->tmpIdx],
+                                    curr_jacc_row,
+                                    curr_sd->numRowsJc,
+                                    1.f);
+                        }
+                    }
+                }
+            });
+    }
+#endif
+}
+
+void GaussMinimizationNode::computeContactJacobian(
+        BodyGroupHierarchy *grp,
+        DofObjectHierarchyDesc *hier_desc,
+        Mat3x3 C,
+        Vector3 origin,
+        float *j_c,
+        uint32_t body_dof_offset,
+        uint32_t jac_row,
+        uint32_t j_num_rows,
+        float coeff)
+{
+    StateManager *state_mgr = mwGPU::getStateManager();
+
+    Entity *bodies = (Entity *)
+        (state_mgr->memoryRangePointer<MRElement128b>(grp->mrBodies));
+    uint32_t *block_start = (uint32_t *)
+        ((uint8_t *)state_mgr->memoryRangePointer<MRElement128b>(grp->dynData) +
+         grp->dofPrefixSumOffset);
+
+    int32_t curr_idx = hier_desc->index;
+    while(curr_idx != -1) {
+        Entity body = bodies[curr_idx];
+
+        auto &curr_tmp_state =
+            state_mgr->getUnsafe<DofObjectTmpState>(body);
+        auto &curr_num_dofs =
+            state_mgr->getUnsafe<DofObjectNumDofs>(body);
+        auto &curr_hier_desc =
+            state_mgr->getUnsafe<DofObjectHierarchyDesc>(body);
+
+        // Populate columns of J_C
+        float S[18] = {};
+        computePhiTrans(
+                curr_num_dofs, curr_tmp_state, origin, S);
+
+        // Only use translational part of S
+        for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
+            float *J_col = j_c +
+                j_num_rows * (body_dof_offset + block_start[curr_idx] + i) +
+                jac_row;
+
+            #pragma unroll
+            for(CountT j = 0; j < 3; ++j) {
+                J_col[j] = S[3 * i + j];
+            }
+        }
+
+        curr_idx = curr_hier_desc.parentIndex;
+    }
+
+
+    // Multiply by C^T to project into contact space
+    for(CountT i = 0; i < grp->numDofs; ++i) {
+        float *J_col = j_c + 
+                j_num_rows * (body_dof_offset + i) +
+                jac_row;
+
+        Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
+
+        J_col_vec = C.transpose() * J_col_vec;
+
+        J_col[0] = coeff * J_col_vec.x;
+        J_col[1] = coeff * J_col_vec.y;
+        J_col[2] = coeff * J_col_vec.z;
     }
 }
 
@@ -2056,6 +2506,8 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
 // experiment.
 void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
 {
+    using namespace gpu_utils;
+
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
     uint32_t total_num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
 
@@ -2064,13 +2516,11 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
     uint32_t warp_id = invocation_idx;
     uint32_t lane_id = threadIdx.x % 32;
 
-    ScratchMemAlloc scratch_alloc = { 0 };
-
     assert(blockDim.x == consts::numMegakernelThreads);
 
     StateManager *state_mgr = getStateManager();
 
-    uint32_t world_id = warp_id;
+    uint32_t world_id = invocation_idx;
 
     { // Do the actual computation
         CVSolveData *curr_sd = &solveDatas[world_id];
@@ -2173,8 +2623,14 @@ void GaussMinimizationNode::prepareRegInfos(CVSolveData *sd)
 
         uint32_t curr_reg = 0;
 
-        uint8_t *mr_mem = (uint8_t *)state_mgr->memoryRangePointer<
-            SolverScratch256b>(sd->solverScratchMemory);
+        uint8_t *mr_mem = [&]() -> uint8_t * {
+            if (sd->scratchAllocatedBytes == 0) {
+                return (uint8_t *)nullptr;
+            } else {
+                return (uint8_t *)state_mgr->memoryRangePointer<
+                    SolverScratch256b>(sd->solverScratchMemory);
+            }
+        } ();
 
         for (; curr_reg < CVSolveData::kNumRegisters; ++curr_reg) {
             if (sd->regInfos[curr_reg].inSmem) {
@@ -2192,6 +2648,8 @@ void GaussMinimizationNode::prepareRegInfos(CVSolveData *sd)
 
 void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 {
+    using namespace gpu_utils;
+
     constexpr float kTolerance = 1e-5f;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
@@ -2207,7 +2665,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
     StateManager *state_mgr = getStateManager();
 
-    uint32_t world_id = warp_id;
+    uint32_t world_id = invocation_idx;
 
     { // Do the computation
         CVSolveData *curr_sd = &solveDatas[world_id];
@@ -2223,8 +2681,14 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         float *jaccref = (float *)curr_sd->regInfos[6].ptr;
         float *mxmin = (float *)curr_sd->regInfos[7].ptr;
 
-        float *acc_ref = (float *)state_mgr->memoryRangePointer<
-            SolverScratch256b>(curr_sd->accRefMemory);
+        float *acc_ref = [&]() -> float * {
+            if (curr_sd->accRefAllocatedBytes == 0) {
+                return (float *)nullptr;
+            } else {
+                return (float *)state_mgr->memoryRangePointer<
+                    SolverScratch256b>(curr_sd->accRefMemory);
+            }
+        } ();
 
         // We are using freeAcc as initial guess
         warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
@@ -2405,6 +2869,12 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
                 32);
 
     cur_node = builder.addNodeFn<
+        &GaussMinimizationNode::prepareSolver>(data_id, {cur_node},
+                Optional<TaskGraph::NodeID>::none(),
+                num_invocations,
+                32);
+
+    cur_node = builder.addNodeFn<
         &GaussMinimizationNode::computeAccRef>(data_id, {cur_node},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
@@ -2483,17 +2953,6 @@ inline void solveCPU(Context &ctx,
     }
 }
 #endif
-
-inline Mat3x3 skewSymmetricMatrix(Vector3 v)
-{
-    return {
-        {
-            { 0.f, v.z, -v.y },
-            { -v.z, 0.f, v.x },
-            { v.y, -v.x, 0.f }
-        }
-    };
-}
 
 inline void computeBodyCOM(Context &ctx,
                            DofObjectTmpState &tmp_state,
@@ -2789,31 +3248,22 @@ inline float* computeContactJacobian(Context &ctx,
                                      DofObjectHierarchyDesc &hier_desc,
                                      Mat3x3 &C,
                                      Vector3 &origin,
-                                     float *J)
+                                     float *J,
+                                     uint32_t body_dof_offset,
+                                     uint32_t jac_row,
+                                     uint32_t j_num_rows,
+                                     float coeff)
 {
     uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = getStateManager(ctx);
     // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
     //  where e_{bi} = 1 if body i is an ancestor of b
     //  C^T projects into the contact space
-#if 0
-    float *J = (float *) ctx.tmpAlloc(world_id,
-        3 * body_grp.numDofs * sizeof(float));
-#endif
 
-    memset(J, 0.f, 3 * body_grp.numDofs * sizeof(float));
+    // memset(J, 0.f, 3 * body_grp.numDofs * sizeof(float));
 
     // Compute prefix sum to determine the start of the block for each body
     uint32_t *block_start = body_grp.getDofPrefixSum(ctx); //[body_grp.numBodies];
-
-#if 0
-    uint32_t block_offset = 0;
-    for (CountT i = 0; i < body_grp.numBodies; ++i) {
-        block_start[i] = block_offset;
-        block_offset += ctx.get<DofObjectNumDofs>(
-                body_grp.bodies(ctx)[i]).numDofs;
-    }
-#endif
 
     // Populate J_C by traversing up the hierarchy
     int32_t curr_idx = hier_desc.index;
@@ -2824,11 +3274,19 @@ inline float* computeContactJacobian(Context &ctx,
         auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
 
         // Populate columns of J_C
-        float *S = computePhi(ctx, curr_num_dofs, curr_tmp_state, origin);
+        float S[18] = {};
+        computePhiTrans(
+                curr_num_dofs, curr_tmp_state, origin, S);
         // Only use translational part of S
         for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
-            float *J_col = J + 3 * (block_start[curr_idx] + i);
-            float *S_col = S + 6 * i;
+#if 1
+            float *J_col = J + 
+                    j_num_rows * (body_dof_offset + block_start[curr_idx] + i) +
+                    jac_row;
+#endif
+            // float *J_col = J + 3 * (block_start[curr_idx] + i);
+
+            float *S_col = S + 3 * i;
             for(CountT j = 0; j < 3; ++j) {
                 J_col[j] = S_col[j];
             }
@@ -2838,14 +3296,21 @@ inline float* computeContactJacobian(Context &ctx,
 
     // Multiply by C^T to project into contact space
     for(CountT i = 0; i < body_grp.numDofs; ++i) {
-        float *J_col = J + 3 * i;
+        // float *J_col = J + 3 * i;
+
+#if 1
+        float *J_col = J + 
+                j_num_rows * (body_dof_offset + i) +
+                jac_row;
+#endif
+
         Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
         J_col_vec = C.transpose() * J_col_vec;
-        J_col[0] = J_col_vec.x;
-        J_col[1] = J_col_vec.y;
-        J_col[2] = J_col_vec.z;
+        J_col[0] = coeff * J_col_vec.x;
+        J_col[1] = coeff * J_col_vec.y;
+        J_col[2] = coeff * J_col_vec.z;
     }
-    return J;
+    // return J;
 }
 
 // y = Mx. Based on Table 6.5 in Featherstone
@@ -2909,6 +3374,7 @@ inline void solveM(Context &ctx, BodyGroupHierarchy &body_grp, float *x) {
 
 
 // CRB: Compute the Mass Matrix (n_dofs x n_dofs)
+#ifdef MADRONA_GPU_MODE
 inline void compositeRigidBody(Context &ctx,
                                BodyGroupHierarchy &body_grp)
 {
@@ -2985,6 +3451,84 @@ inline void compositeRigidBody(Context &ctx,
         }
     }
 }
+#else
+inline void compositeRigidBody(Context &ctx,
+                               BodyGroupHierarchy &body_grp)
+{
+    uint32_t world_id = ctx.worldID().idx;
+    StateManager *state_mgr = getStateManager(ctx);
+
+    // Mass Matrix of this entire body group, column-major
+    uint32_t total_dofs = body_grp.numDofs;
+
+    float *M = body_grp.getMassMatrix(ctx);
+
+    memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
+
+    // Compute prefix sum to determine the start of the block for each body
+    uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
+
+    // Backward pass
+    for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
+        Entity body = body_grp.bodies(ctx)[i];
+
+        auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
+        auto &i_tmp_state = ctx.get<DofObjectTmpState>(body);
+        auto &i_num_dofs = ctx.get<DofObjectNumDofs>(body);
+
+        float *S_i = i_tmp_state.getPhiFull(ctx);
+
+        float *F = body_grp.scratch;
+
+        for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+            float *S_col = S_i + 6 * col;
+            float *F_col = F + 6 * col;
+            i_tmp_state.spatialInertia.multiply(S_col, F_col);
+        }
+
+        // M_{ii} = S_i^T I_i^C S_i = F^T S_i
+        float *M_ii = M + block_start[i] * total_dofs + block_start[i];
+        for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
+            float *F_col = F + 6 * row; // take col for transpose
+            for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+                float *S_col = S_i + 6 * col;
+                for(CountT k = 0; k < 6; ++k) {
+                    M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
+                }
+            }
+        }
+
+        // Traverse up hierarchy
+        uint32_t j = i;
+        auto parent_j = i_hier_desc.parent;
+        while(parent_j != Entity::none()) {
+            j = ctx.get<DofObjectHierarchyDesc>(
+                body_grp.bodies(ctx)[j]).parentIndex;
+            Entity body = body_grp.bodies(ctx)[j];
+            auto &j_tmp_state = ctx.get<DofObjectTmpState>(body);
+            auto &j_num_dofs = ctx.get<DofObjectNumDofs>(body);
+
+            float *S_j = j_tmp_state.getPhiFull(ctx);
+
+            // M_{ij} = M{ji} = F^T S_j
+            float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
+            float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
+            for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
+                float *F_col = F + 6 * row; // take col for transpose
+                for(CountT col = 0; col < j_num_dofs.numDofs; ++col) {
+                    float *S_col = S_j + 6 * col;
+                    for(CountT k = 0; k < 6; ++k) {
+                        M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
+                        M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
+                    }
+                }
+            }
+            parent_j = ctx.get<DofObjectHierarchyDesc>(
+                body_grp.bodies(ctx)[j]).parent;
+        }
+    }
+}
+#endif
 
 // Computes the LTDL factorization of the mass matrix
 inline void factorizeMassMatrix(Context &ctx,
@@ -3039,6 +3583,158 @@ inline void computeFreeAcceleration(Context &ctx,
     solveM(ctx, body_grp, bias);
 }
 
+#if defined(MADRONA_GPU_MODE) && 1
+inline void recursiveNewtonEuler(Context &ctx,
+                                BodyGroupHierarchy &body_grp)
+{
+    using namespace gpu_utils;
+
+    uint32_t lane_id = threadIdx.x % 32;
+
+    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
+    uint32_t total_dofs = body_grp.numDofs;
+
+    if (lane_id == 0) {
+        // Forward pass. Find in Plücker coordinates:
+        //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
+        //  2. accelerations. a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i}
+        //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+        for (int i = 0; i < body_grp.numBodies; ++i) {
+            Entity body = body_grp.bodies(ctx)[i];
+
+            auto num_dofs = ctx.get<DofObjectNumDofs>(body);
+            auto velocity = ctx.get<DofObjectVelocity>(body);
+
+            auto &tmp_state = ctx.get<DofObjectTmpState>(body);
+            auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
+
+            float *S = tmp_state.getPhiFull(ctx);
+
+            if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+                // Free bodies must be root of their hierarchy
+                SpatialVector v_body = {
+                    {velocity.qv[0], velocity.qv[1], velocity.qv[2]},
+                    Vector3::zero()
+                };
+                float *S_dot = computePhiDot(ctx, num_dofs, tmp_state, v_body);
+
+                // v_0 = 0, a_0 = -g (fictitious upward acceleration)
+                tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
+                tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+
+                // S\dot{q_i} and \dot{S}\dot{q_i}
+                for (int j = 0; j < 6; ++j) {
+                    for (int k = 0; k < num_dofs.numDofs; ++k) {
+                        tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
+                        tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
+                    }
+                }
+            }
+            else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+                // Fixeds bodies must also be root of their hierarchy
+                tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+                tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
+            }
+            else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+                assert(hier_desc.parent != Entity::none());
+                auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                tmp_state.sVel = parent_tmp_state.sVel;
+                tmp_state.sAcc = parent_tmp_state.sAcc;
+
+                // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
+                // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
+                // Note: we are using the parent velocity here (for hinge itself)
+                float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+                    parent_tmp_state.sVel);
+
+                float q_dot = velocity.qv[0];
+                for (int j = 0; j < 6; ++j) {
+                    tmp_state.sVel[j] += S[j] * q_dot;
+                    tmp_state.sAcc[j] += S_dot[j] * q_dot;
+                }
+            }
+            else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+                assert(hier_desc.parent != Entity::none());
+                auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                tmp_state.sVel = parent_tmp_state.sVel;
+                tmp_state.sAcc = parent_tmp_state.sAcc;
+
+                // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
+                // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
+                // Note: we are using the parent velocity here (for hinge itself)
+                float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+                    parent_tmp_state.sVel);
+
+                float *q_dot = velocity.qv;
+                for (int j = 0; j < 6; ++j) {
+                    // TODO: Probably should switch to row major - this isn't
+                    // particularly cache-friendly.
+                    tmp_state.sVel[j] += S[j + 6 * 0] * q_dot[0] + 
+                                         S[j + 6 * 1] * q_dot[1] +
+                                         S[j + 6 * 2] * q_dot[2];
+
+                    tmp_state.sAcc[j] += S_dot[j + 6 * 0] * q_dot[0] +
+                                         S_dot[j + 6 * 1] * q_dot[1] +
+                                         S_dot[j + 6 * 2] * q_dot[2];
+                }
+            } else {
+                MADRONA_UNREACHABLE();
+            }
+
+            // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+            tmp_state.sForce = tmp_state.spatialInertia.multiply(tmp_state.sAcc);
+            tmp_state.sForce += tmp_state.sVel.crossStar(
+                tmp_state.spatialInertia.multiply(tmp_state.sVel));
+        }
+    }
+
+    // Backward pass to find bias forces
+    float *tau = body_grp.getBias(ctx);
+
+    warpSetZero(tau, total_dofs * sizeof(float));
+    __syncwarp();
+
+    uint32_t warp_id = threadIdx.x / 32;
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    float *smem_buf = (float *)((uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id);
+
+    if (lane_id == 0) {
+        for (CountT body = body_grp.numBodies-1; body >= 0; --body) {
+            auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies(ctx)[body]);
+            uint32_t num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[body]).numDofs;
+            auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[body]);
+
+            uint32_t dof_offset = tmp_state.dofOffset;
+            const float *S = tmp_state.getPhiFull(ctx);
+
+            float sForce[6] = {
+                tmp_state.sForce[0],
+                tmp_state.sForce[1],
+                tmp_state.sForce[2],
+                tmp_state.sForce[3],
+                tmp_state.sForce[4],
+                tmp_state.sForce[5]
+            };
+            
+            for (uint32_t row = 0; row < num_dofs; ++row) {
+                const float *S_col = S + 6 * row;
+
+                #pragma unroll
+                for (uint32_t k = 0; k < 6; ++k) {
+                    tau[dof_offset + row] += S_col[k] * sForce[k];
+                }
+            }
+
+            if (hier_desc.parent != Entity::none()) {
+                auto &parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                parent_tmp_state.sForce += tmp_state.sForce;
+            }
+        }
+    }
+}
+#else
 // RNE: Compute bias forces and gravity
 // May want to do a GPU specific version of this to extract some
 // parallelism out of this
@@ -3168,6 +3864,7 @@ inline void recursiveNewtonEuler(Context &ctx,
         }
     }
 }
+#endif
 
 inline void processContacts(Context &ctx,
                             ContactConstraint &contact,
@@ -3229,6 +3926,12 @@ inline void processContacts(Context &ctx,
 inline void brobdingnag(Context &ctx,
                         CVSolveData &cv_sing)
 {
+#ifdef MADRONA_GPU_MODE
+#define GPU_SINGLE_THREAD if (threadIdx.x % 32 == 0)
+#else
+#define GPU_SINGLE_THREAD
+#endif
+
     uint32_t world_id = ctx.worldID().idx;
 
     StateManager *state_mgr = getStateManager(ctx);
@@ -3245,20 +3948,19 @@ inline void brobdingnag(Context &ctx,
         total_num_dofs += hiers[i].numDofs;
     }
 
+#ifndef MADRONA_GPU_MODE
     CountT num_mass_mat_bytes = sizeof(float) *
         total_num_dofs * total_num_dofs;
+    CountT num_full_dofs_bytes = sizeof(float) * total_num_dofs;
+
     // Row-major
     float *total_mass_mat = (float *)ctx.tmpAlloc(
             num_mass_mat_bytes);
     memset(total_mass_mat, 0, num_mass_mat_bytes);
 
-    CountT num_full_dofs_bytes = sizeof(float) * total_num_dofs;
     float *full_free_acc = (float *)ctx.tmpAlloc(
             total_num_dofs * sizeof(float));
-    float *full_vel = (float *)ctx.tmpAlloc(
-            num_full_dofs_bytes);
     memset(full_free_acc, 0, num_full_dofs_bytes);
-    memset(full_vel, 0, num_full_dofs_bytes);
 
     SparseBlkDiag mass_sparse;
     mass_sparse.fullDim = total_num_dofs;
@@ -3266,24 +3968,12 @@ inline void brobdingnag(Context &ctx,
     mass_sparse.blks = (SparseBlkDiag::Blk *)ctx.tmpAlloc(
             sizeof(SparseBlkDiag::Blk) * num_grps);
 
+    float *full_vel = (float *)ctx.tmpAlloc(
+            num_full_dofs_bytes);
+    memset(full_vel, 0, num_full_dofs_bytes);
+
     uint32_t processed_dofs = 0;
-#ifdef MADRONA_GPU_MODE
-    for (CountT i = 0; i < num_grps; ++i) {
-        // This pointer should be consistent for solver.
-        float *local_mass = hiers[i].getMassMatrix(ctx);
-        mass_sparse.blks[i].dim = hiers[i].numDofs;
-        mass_sparse.blks[i].values = local_mass;
-        mass_sparse.blks[i].ltdl = hiers[i].getMassMatrixLTDL(ctx);
-        mass_sparse.blks[i].expandedParent = hiers[i].getExpandedParent(ctx);
 
-        for (CountT row = 0; row < hiers[i].numDofs; ++row) {
-            float *freeAcceleration = hiers[i].getBias(ctx);
-            full_free_acc[row + processed_dofs] = freeAcceleration[row];
-        }
-
-        processed_dofs += hiers[i].numDofs;
-    }
-#else
     for (CountT i = 0; i < num_grps; ++i) {
         float *local_mass = hiers[i].getMassMatrix(ctx);
 
@@ -3305,162 +3995,193 @@ inline void brobdingnag(Context &ctx,
 
         processed_dofs += hiers[i].numDofs;
     }
-#endif
 
     // Full velocity
     processed_dofs = 0;
     for (CountT i = 0; i < num_grps; ++i) {
         for (CountT j = 0; j < hiers[i].numBodies; ++j) {
+
             DofObjectVelocity vel = ctx.get<DofObjectVelocity>(
                     hiers[i].bodies(ctx)[j]);
             DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(
                     hiers[i].bodies(ctx)[j]);
+
             for (CountT k = 0; k < num_dofs.numDofs; ++k) {
                 full_vel[processed_dofs] = vel.qv[k];
                 processed_dofs++;
             }
+
         }
     }
+#endif
 
     // Create the contact Jacobian
     ContactConstraint *contacts = state_mgr->getWorldComponents<
         Contact, ContactConstraint>(world_id);
     ContactTmpState *contacts_tmp_state = state_mgr->getWorldComponents<
         Contact, ContactTmpState>(world_id);
+
     // Count contacts
+#if defined(MADRONA_GPU_MODE)
+    CountT num_contacts = state_mgr->numRows<Contact>(world_id);
+    CountT total_contact_pts = 0;
+
+    gpu_utils::warpLoopSync(
+        num_contacts,
+        [&](uint32_t iter) {
+            uint32_t v = (iter == 0xFFFF'FFFF) ? 0 : contacts[iter].numPoints;
+            total_contact_pts += gpu_utils::warpReduceSum(v);
+        });
+#else
     CountT num_contacts = state_mgr->numRows<Contact>(world_id);
     CountT total_contact_pts = 0;
     for (int i = 0; i < num_contacts; ++i) {
         total_contact_pts += contacts[i].numPoints;
     }
+#endif
 
-    // Process mu and penetrations for each point
-    CountT num_full_contact_bytes = sizeof(float) * total_contact_pts;
-    float *full_mu = (float *)ctx.tmpAlloc(
-            num_full_contact_bytes);
-    float *full_penetration = (float *)ctx.tmpAlloc(
-            num_full_contact_bytes);
-    CountT processed_pts = 0;
-    for (int i = 0; i < num_contacts; ++i) {
-        ContactTmpState &tmp_state = contacts_tmp_state[i];
-        for (int j = 0; j < contacts[i].numPoints; ++j) {
-            full_mu[processed_pts] = tmp_state.mu;
-            full_penetration[processed_pts] = contacts[i].points[j].w;
-            processed_pts++;
-        }
-    }
-
-    uint32_t max_dofs = 0;
-
-    // Prefix sum for each of the body groups
-    uint32_t *block_start = (uint32_t *)ctx.tmpAlloc( 
-            num_grps * sizeof(uint32_t));
-    uint32_t block_offset = 0;
-
-    for (CountT i = 0; i < num_grps; ++i) {
-        block_start[i] = block_offset;
-        block_offset += hiers[i].numDofs;
-        hiers[i].tmpIdx = i;
-
-        max_dofs = std::max(max_dofs, hiers[i].numDofs);
-    }
-
-    // Jacobian is size 3n_c x n_dofs, column-major
-    uint32_t J_rows = 3 * total_contact_pts;
-    uint32_t J_cols = total_num_dofs;
-
-    float *J_c = (float *) ctx.tmpAlloc(
-        J_rows * J_cols * sizeof(float));
-
-    memset(J_c, 0, J_rows * J_cols * sizeof(float));
-
-    float *J_c_body_scratch = (float *)ctx.tmpAlloc(
-            3 * max_dofs * sizeof(float));
-
-    CountT jac_row = 0;
-
-    for(CountT ct_idx = 0; ct_idx < num_contacts; ++ct_idx) {
-        ContactConstraint contact = contacts[ct_idx];
-        ContactTmpState &tmp_state = contacts_tmp_state[ct_idx];
-
-        auto ref = ctx.get<CVPhysicalComponent>(contact.ref);
-        auto alt = ctx.get<CVPhysicalComponent>(contact.alt);
-        auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref.physicsEntity);
-        auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt.physicsEntity);
-
-        bool ref_fixed = ref_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
-        bool alt_fixed = alt_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
-
-        // Each of the contact points
-        for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
-            Vector3 contact_pt = contact.points[pt_idx].xyz();
-
-            // Compute the Jacobians for each body at the contact point
-            if(!ref_fixed) {
-                DofObjectHierarchyDesc &ref_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                        ref.physicsEntity);
-                BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
-                        ref_hier_desc.bodyGroup);
-
-                float* J_ref = computeContactJacobian(ctx, ref_grp,
-                    ref_hier_desc, tmp_state.C, contact_pt, J_c_body_scratch);
-
-                for(CountT i = 0; i < ref_grp.numDofs; ++i) {
-
-                    float *J_col = J_c +
-                        J_rows * (block_start[ref_grp.tmpIdx] + i) + jac_row;
-
-                    float *J_ref_col = J_ref + 3 * i;
-
-                    for(CountT j = 0; j < 3; ++j) {
-                        J_col[j] -= J_ref_col[j];
-                    }
-                }
+    GPU_SINGLE_THREAD {
+        // Process mu and penetrations for each point
+#ifndef MADRONA_GPU_MODE
+        CountT num_full_contact_bytes = sizeof(float) * total_contact_pts;
+        float *full_mu = (float *)ctx.tmpAlloc(
+                num_full_contact_bytes);
+        float *full_penetration = (float *)ctx.tmpAlloc(
+                num_full_contact_bytes);
+        CountT processed_pts = 0;
+        for (int i = 0; i < num_contacts; ++i) {
+            ContactTmpState &tmp_state = contacts_tmp_state[i];
+            for (int j = 0; j < contacts[i].numPoints; ++j) {
+                full_mu[processed_pts] = tmp_state.mu;
+                full_penetration[processed_pts] = contacts[i].points[j].w;
+                processed_pts++;
             }
-            if(!alt_fixed) {
-                auto &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                        alt.physicsEntity);
-                auto &alt_grp = ctx.get<BodyGroupHierarchy>(
-                        alt_hier_desc.bodyGroup);
-                
-                float *J_alt = computeContactJacobian(ctx, alt_grp,
-                    alt_hier_desc, tmp_state.C, contact_pt, J_c_body_scratch);
-
-                for(CountT i = 0; i < alt_grp.numDofs; ++i) {
-                    float *J_col = J_c +
-                        J_rows * (block_start[alt_grp.tmpIdx] + i) + jac_row;
-
-                    float *J_alt_col = J_alt + 3 * i;
-
-                    for(CountT j = 0; j < 3; ++j) {
-                        J_col[j] += J_alt_col[j];
-                    }
-                }
-            }
-            jac_row += 3;
         }
+#endif
+
+        uint32_t max_dofs = 0;
+
+        // Prefix sum for each of the body groups
+        uint32_t *block_start = (uint32_t *)ctx.tmpAlloc( 
+                num_grps * sizeof(uint32_t));
+        uint32_t block_offset = 0;
+
+        for (CountT i = 0; i < num_grps; ++i) {
+            block_start[i] = block_offset;
+            block_offset += hiers[i].numDofs;
+            hiers[i].tmpIdx = i;
+
+            max_dofs = std::max(max_dofs, hiers[i].numDofs);
+        }
+
+        // Jacobian is size 3n_c x n_dofs, column-major
+        uint32_t J_rows = 3 * total_contact_pts;
+        uint32_t J_cols = total_num_dofs;
+
+
+        CountT jac_row = 0;
+
+#ifndef MADRONA_GPU_MODE
+        float *J_c = (float *) ctx.tmpAlloc(
+            J_rows * J_cols * sizeof(float));
+
+        memset(J_c, 0, J_rows * J_cols * sizeof(float));
+
+        float *J_c_body_scratch = (float *)ctx.tmpAlloc(
+                3 * max_dofs * sizeof(float));
+
+        for(CountT ct_idx = 0; ct_idx < num_contacts; ++ct_idx) {
+            ContactConstraint contact = contacts[ct_idx];
+            ContactTmpState &tmp_state = contacts_tmp_state[ct_idx];
+
+            auto ref = ctx.get<CVPhysicalComponent>(contact.ref);
+            auto alt = ctx.get<CVPhysicalComponent>(contact.alt);
+            auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref.physicsEntity);
+            auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt.physicsEntity);
+
+            bool ref_fixed = ref_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
+            bool alt_fixed = alt_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
+
+            // Each of the contact points
+            for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
+                printf("ct_idx=%d; pt_idx=%d; numPoints=%d;curr_jacc_row=%d\n", 
+                        ct_idx, pt_idx, contact.numPoints, jac_row);
+
+                Vector3 contact_pt = contact.points[pt_idx].xyz();
+
+                // Compute the Jacobians for each body at the contact point
+                if(!ref_fixed) {
+                    DofObjectHierarchyDesc &ref_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                            ref.physicsEntity);
+                    BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
+                            ref_hier_desc.bodyGroup);
+
+                    float *J_ref = computeContactJacobian(ctx, ref_grp,
+                        ref_hier_desc, tmp_state.C, contact_pt, J_c,
+                        block_start[ref_grp.tmpIdx], jac_row, J_rows, -1.f);
+
+#if 0
+                    for(CountT i = 0; i < ref_grp.numDofs; ++i) {
+                        float *J_col = J_c +
+                            J_rows * (block_start[ref_grp.tmpIdx] + i) + jac_row;
+
+                        float *J_ref_col = J_ref + 3 * i;
+                        for(CountT j = 0; j < 3; ++j) {
+                            J_col[j] = -J_ref_col[j];
+                        }
+                    }
+#endif
+                }
+                if(!alt_fixed) {
+                    auto &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                            alt.physicsEntity);
+                    auto &alt_grp = ctx.get<BodyGroupHierarchy>(
+                            alt_hier_desc.bodyGroup);
+                    
+                    float *J_alt = computeContactJacobian(ctx, alt_grp,
+                        alt_hier_desc, tmp_state.C, contact_pt, J_c,
+                        block_start[alt_grp.tmpIdx], jac_row, J_rows, 1.f);
+
+#if 0
+                    for(CountT i = 0; i < alt_grp.numDofs; ++i) {
+                        float *J_col = J_c +
+                            J_rows * (block_start[alt_grp.tmpIdx] + i) + jac_row;
+
+                        float *J_alt_col = J_alt + 3 * i;
+
+                        for(CountT j = 0; j < 3; ++j) {
+                            J_col[j] = J_alt_col[j];
+                        }
+                    }
+#endif
+                }
+                jac_row += 3;
+            }
+        }
+
+        cv_sing.J_c = J_c;
+#endif
+
+        cv_sing.totalNumDofs = total_num_dofs;
+        cv_sing.numContactPts = total_contact_pts;
+        cv_sing.h = physics_state.h;
+        // cv_sing.mass = total_mass_mat;
+        // cv_sing.freeAcc = full_free_acc;
+        // cv_sing.vel = full_vel;
+        // cv_sing.mu = full_mu;
+        // cv_sing.penetrations = full_penetration;
+        cv_sing.dofOffsets = block_start;
+        cv_sing.numBodyGroups = num_grps;
+
+        cv_sing.massDim = total_num_dofs;
+        cv_sing.freeAccDim = total_num_dofs;
+        cv_sing.velDim = total_num_dofs;
+        cv_sing.numRowsJc = J_rows;
+        cv_sing.numColsJc = J_cols;
+        cv_sing.muDim = total_contact_pts;
+        cv_sing.penetrationsDim = total_contact_pts;
+        // cv_sing.massSparse = mass_sparse;
     }
-
-    cv_sing.totalNumDofs = total_num_dofs;
-    cv_sing.numContactPts = total_contact_pts;
-    cv_sing.h = physics_state.h;
-    cv_sing.mass = total_mass_mat;
-    cv_sing.freeAcc = full_free_acc;
-    cv_sing.vel = full_vel;
-    cv_sing.J_c = J_c;
-    cv_sing.mu = full_mu;
-    cv_sing.penetrations = full_penetration;
-    cv_sing.dofOffsets = block_start;
-    cv_sing.numBodyGroups = num_grps;
-
-    cv_sing.massDim = total_num_dofs;
-    cv_sing.freeAccDim = total_num_dofs;
-    cv_sing.velDim = total_num_dofs;
-    cv_sing.numRowsJc = J_rows;
-    cv_sing.numColsJc = J_cols;
-    cv_sing.muDim = total_contact_pts;
-    cv_sing.penetrationsDim = total_contact_pts;
-    cv_sing.massSparse = mass_sparse;
 }
 
 inline void integrationStep(Context &ctx,
@@ -3778,10 +4499,17 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 DofObjectHierarchyDesc
             >>({compute_spatial_inertia});
 
+#ifdef MADRONA_GPU_MODE
+        auto recursive_newton_euler = builder.addToGraph<CustomParallelForNode<Context,
+             tasks::recursiveNewtonEuler, 32, 1,
+                BodyGroupHierarchy
+            >>({compute_phi});
+#else
         auto recursive_newton_euler = builder.addToGraph<ParallelForNode<Context,
              tasks::recursiveNewtonEuler,
                 BodyGroupHierarchy
             >>({compute_phi});
+#endif
 
         auto combine_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::combineSpatialInertias,
@@ -3809,14 +4537,25 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 ContactTmpState
             >>({compute_free_acc});
 
+#ifdef MADRONA_GPU_MODE
+        auto thing = builder.addToGraph<CustomParallelForNode<Context,
+             tasks::brobdingnag, 32, 1,
+                CVSolveData
+            >>({contact_node});
+#else
         auto thing = builder.addToGraph<ParallelForNode<Context,
              tasks::brobdingnag,
                 CVSolveData
             >>({contact_node});
+#endif
 
 #ifdef MADRONA_GPU_MODE
         auto solve = builder.addToGraph<tasks::GaussMinimizationNode>(
                 {thing});
+
+        solve = builder.addToGraph<
+            SortMemoryRangeNode<SolverScratch256b, false>>({solve});
+        solve = builder.addToGraph<ResetTmpAllocNode>({solve});
 #else
         auto solve = builder.addToGraph<ParallelForNode<Context,
              tasks::solveCPU,
@@ -3850,10 +4589,16 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
     }
 
-    auto clear_broadphase = builder.addToGraph<
+    cur_node = builder.addToGraph<
         ClearTmpNode<CandidateTemporary>>({cur_node});
+
+#ifdef MADRONA_GPU_MODE
+    cur_node = builder.addToGraph<
+        SortMemoryRangeNode<MRElement128b>>({cur_node});
+    cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
+#endif
     
-    return clear_broadphase;
+    return cur_node;
 }
 
 

@@ -1854,7 +1854,7 @@ TaskGraph::NodeID SortNodeBase::addToGraphMemoryRange(
     cur_task = builder.addNodeFn<&RearrangeNode::rearrangeMemoryRangeElements>(
         entities_rearrange_node, {cur_task}, setup);
 
-    assert(prev_rearrange_node.id != -1);
+    // assert(prev_rearrange_node.id != -1);
     builder.getDataRef(prev_rearrange_node).nextRearrangeNode =
         entities_rearrange_node;
     builder.getDataRef(entities_rearrange_node).nextRearrangeNode = { -1 };

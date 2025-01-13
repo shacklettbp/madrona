@@ -16,7 +16,7 @@ static constexpr uint32_t kMaxPositionCoords = 7;
 static constexpr uint32_t kMaxVelocityCoords = 6;
 
 enum class DofType {
-    // The number of unique degrees of freedom (SE3)
+    // The number of unique degrees of freedom (SE3). Maximum number of DOFs is 6
     FreeBody = 6,
     Hinge = 1,
     Ball = 3,
@@ -222,6 +222,9 @@ struct DofObjectTmpState {
     SpatialVector sVel;
     SpatialVector sAcc;
     SpatialVector sForce;
+
+    // DOF offset in the BodyGroup
+    uint32_t dofOffset;
 
     float scratch[4];
 
