@@ -12,6 +12,9 @@
 #include <madrona/mw_gpu/host_print.hpp>
 #define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 #define warp_printf(...) if (threadIdx.x % 32 == 0) { printf(__VA_ARGS__); }
+
+#define kernel_printf(...) if (invocation_idx == 0 && threadIdx.x == 0) {printf(__VA_ARGS__);}
+
 #else
 #define LOG(...)
 #endif
@@ -91,6 +94,38 @@ DataT warpReduceSum(DataT value)
         value += __shfl_xor_sync(0xffffffff, value, i, 32);
 
     return value;
+}
+
+// You pass in a pointer to all the values to sum up
+template <typename DataT>
+DataT warpSum(DataT *values, uint32_t num_values)
+{
+    uint32_t num_iters = (values + 31) / 32;
+    DataT running_sum = (DataT)0;
+
+    warpLoopSync(
+        num_iters,
+        [&](uint32_t iter) {
+            running_sum += warpReduceSum(
+                    iter == 0xFFFF'FFFF ? 0 : values[iter]);
+        });
+
+    return running_sum;
+}
+
+template <typename DataT, typename Fn>
+DataT warpSumPred(Fn &&fn, uint32_t num_values)
+{
+    DataT running_sum = (DataT)0;
+
+    warpLoopSync(
+        num_values,
+        [&](uint32_t iter) {
+            running_sum += warpReduceSum(
+                    (iter == 0xFFFF'FFFF) ? 0 : fn(iter));
+        });
+
+    return running_sum;
 }
 
 // Simple helper function for having a warp loop over work
@@ -813,6 +848,8 @@ struct CVSolveData {
     uint32_t muDim;
     uint32_t penetrationsDim;
 
+    float totalMass;
+
     enum StateFlags {
         // Is a_ref stored in shared memory?
         ARefSmem = 1 << 0
@@ -824,17 +861,22 @@ struct CVSolveData {
 
     CVXSolve *cvxSolve;
 
-    // Only relevant for the GPU implementation
+    uint8_t *solverScratchMem;
+    uint8_t *accRefMem;
+    uint8_t *prepMem;
     uint32_t scratchAllocatedBytes;
+    uint32_t accRefAllocatedBytes;
+    uint32_t prepAllocatedBytes;
+#if 0
+    // Only relevant for the GPU implementation
     MemoryRange solverScratchMemory;
 
-    uint32_t accRefAllocatedBytes;
     MemoryRange accRefMemory;
 
     // This has mass matrix, full vel, free acc, jacobian, mu,
     // penetrations
-    uint32_t prepAllocatedBytes;
     MemoryRange prepMemory;
+#endif
 
     static constexpr uint32_t kNumRegisters = 8;
 
@@ -850,14 +892,16 @@ struct CVSolveData {
     SparseBlkDiag::Blk * getMassBlks(StateManager *state_mgr)
     {
         uint8_t *bytes = 
-            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory);
+            //(uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory);
+            prepMem;
         return (SparseBlkDiag::Blk *)bytes;
     }
 
     float * getFullVel(StateManager *state_mgr)
     {
         uint8_t *bytes = 
-            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            //(uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups;
         return (float *)bytes;
     }
@@ -865,7 +909,8 @@ struct CVSolveData {
     float * getFreeAcc(StateManager *state_mgr)
     {
         uint8_t *bytes = 
-            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs;
         return (float *)bytes;
@@ -874,7 +919,8 @@ struct CVSolveData {
     float * getMu(StateManager *state_mgr)
     {
         uint8_t *bytes = 
-            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs;
@@ -884,7 +930,8 @@ struct CVSolveData {
     float * getPenetrations(StateManager *state_mgr)
     {
         uint8_t *bytes = 
-            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            //(uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
@@ -895,7 +942,8 @@ struct CVSolveData {
     float * getJacobian(StateManager *state_mgr)
     {
         uint8_t *bytes = 
-            (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) + 
+            prepMem +
             sizeof(SparseBlkDiag::Blk) * numBodyGroups +
             sizeof(float) * totalNumDofs +
             sizeof(float) * totalNumDofs +
@@ -1269,19 +1317,6 @@ inline void computePhiTrans(
 #ifdef MADRONA_GPU_MODE
 struct GaussMinimizationNode : NodeBase {
     GaussMinimizationNode(StateManager *state_mgr);
-
-    struct DObjPackage {
-        // p.T @ M @ (x - accFree)
-        float pT_M_xmin;
-
-        // (x - accFree).T @ M @ (x - accFree)
-        float xminT_M_xmin;
-
-#if 0
-        // J @ x - accRef
-        float *Jx_min_accRef;
-#endif
-    };
 
     // Make sure that res has shape sd->freeAccDim.
     // Make sure scratch has shape max(sd->freeAccDim, sd->numRowsJc)
@@ -2065,6 +2100,11 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
 
         StateManager *state_mgr = getStateManager();
 
+        curr_sd->solverScratchMem = (uint8_t *)mwGPU::TmpAllocator::get().alloc(
+                size_in_glob_mem);
+        curr_sd->scratchAllocatedBytes = size_in_glob_mem;
+
+#if 0
         // Everything that isn't in shared memory, will have to go into a memory range.
         if (curr_sd->scratchAllocatedBytes == 0 && size_in_glob_mem != 0) {
             // Allocate the memory range
@@ -2082,9 +2122,16 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
                         sizeof(SolverScratch256b));
             curr_sd->scratchAllocatedBytes = size_in_glob_mem;
         }
+#endif
+
 
         { // AccRef allocation
             uint32_t acc_ref_bytes = sizeof(float) * curr_sd->numRowsJc;
+
+            curr_sd->accRefMem = (uint8_t *)mwGPU::TmpAllocator::get().alloc(
+                    acc_ref_bytes);
+            curr_sd->accRefAllocatedBytes = acc_ref_bytes;
+#if 0
             if (curr_sd->accRefAllocatedBytes == 0 && curr_sd->numRowsJc != 0) {
                 curr_sd->accRefMemory = state_mgr->allocMemoryRange(
                     TypeTracker::typeID<SolverScratch256b>(),
@@ -2100,6 +2147,7 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
                             sizeof(SolverScratch256b));
                 curr_sd->accRefAllocatedBytes = acc_ref_bytes;
             }
+#endif
         }
 
         { // Mass matrix allocation
@@ -2134,6 +2182,11 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
                 // TODO: Make this sparse
                 sizeof(float) * 3 * total_contact_pts * total_num_dofs;
 
+            curr_sd->prepMem = (uint8_t *)mwGPU::TmpAllocator::get().alloc(
+                    prep_bytes);
+            curr_sd->prepAllocatedBytes = prep_bytes;
+
+#if 0
             if (curr_sd->prepAllocatedBytes == 0) {
                 curr_sd->prepMemory = state_mgr->allocMemoryRange(
                     TypeTracker::typeID<SolverScratch256b>(),
@@ -2149,6 +2202,7 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
                             sizeof(SolverScratch256b));
                 curr_sd->prepAllocatedBytes = prep_bytes;
             }
+#endif
         }
     }
 }
@@ -2168,6 +2222,23 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
     BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
         BodyGroup, BodyGroupHierarchy>(world_id);
+
+    { // Get the total mass in the world
+        float total_mass = 0.f;
+
+        DofObjectTmpState *tmp_states = state_mgr->getWorldComponents<
+            DofObjectArchetype, DofObjectTmpState>(world_id);
+        uint32_t num_masses = state_mgr->numRows<DofObjectArchetype>(world_id);
+
+        total_mass = warpSumPred<float>(
+            [&](uint32_t iter) -> float {
+                return tmp_states[iter].spatialInertia.mass;
+            }, num_masses);
+
+        if (lane_id == 0) {
+            curr_sd->totalMass = total_mass;
+        }
+    }
 
     { // Prepare the mass matrix
         SparseBlkDiag mass_sparse;
@@ -2539,8 +2610,11 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
                 return { (float *)smem_buf, true };
             } else {
                 return { 
+#if 0
                     (float *)state_mgr->memoryRangePointer<
                         SolverScratch256b>(curr_sd->accRefMemory),
+#endif
+                    (float *)curr_sd->accRefMem,
                     false
                 };
             }
@@ -2591,8 +2665,11 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
 
             if (acc_ref && in_smem) {
                 float * acc_ref_glob = 
+#if 0
                     (float *)state_mgr->memoryRangePointer<SolverScratch256b>(
                             curr_sd->accRefMemory);
+#endif
+                    (float *)curr_sd->accRefMem;
 
                 warpCopy(acc_ref_glob, acc_ref,
                          sizeof(float) * curr_sd->numRowsJc);
@@ -2626,8 +2703,11 @@ void GaussMinimizationNode::prepareRegInfos(CVSolveData *sd)
             if (sd->scratchAllocatedBytes == 0) {
                 return (uint8_t *)nullptr;
             } else {
+#if 0
                 return (uint8_t *)state_mgr->memoryRangePointer<
                     SolverScratch256b>(sd->solverScratchMemory);
+#endif
+                return (uint8_t *)sd->solverScratchMem;
             }
         } ();
 
@@ -2649,7 +2729,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 {
     using namespace gpu_utils;
 
-    constexpr float kTolerance = 1e-5f;
+    constexpr float kTolerance = 1e-4f;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
 
@@ -2669,6 +2749,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
     { // Do the computation
         CVSolveData *curr_sd = &solveDatas[world_id];
 
+        float tol_scale = 1.f / curr_sd->totalMass;
+
         prepareRegInfos(curr_sd);
 
         float *x = (float *)curr_sd->regInfos[0].ptr;
@@ -2684,8 +2766,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             if (curr_sd->accRefAllocatedBytes == 0) {
                 return (float *)nullptr;
             } else {
-                return (float *)state_mgr->memoryRangePointer<
-                    SolverScratch256b>(curr_sd->accRefMemory);
+                return (float *)curr_sd->accRefMem;
             }
         } ();
 
@@ -2713,8 +2794,9 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         __syncwarp();
 
         uint32_t max_iters = 100 * curr_sd->freeAccDim;
-        for (uint32_t iter = 0; iter < max_iters; ++iter) {
-            if (g_norm < avg_total)
+        uint32_t iter = 0;
+        for (; iter < max_iters; ++iter) {
+            if (tol_scale * g_norm < avg_total)
                 break;
 
             float alpha = exactLineSearch(
@@ -2766,6 +2848,10 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                         curr_sd->freeAccDim);
 
                 float beta = g_new_dot_mgradmin / g_dot_m_grad;
+                if (g_dot_m_grad == 0.f) {
+                    printf("nan going to happen\n");
+                }
+
                 g_dot_m_grad = g_dot_m_grad_new;
 
                 beta = fmax(0.f, beta);
@@ -2777,8 +2863,16 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                     });
             }
 
-            if (update < avg_total) {
+            if (tol_scale * update < avg_total) {
                 break;
+            }
+        }
+
+        if (lane_id == 0) {
+            if (iter > 5000) {
+                printf(
+                    "world_id = %d; num_iters = %d; g_norm = %f; g_dot_m_grad = %f\n", 
+                    world_id, iter, g_norm, g_dot_m_grad);
             }
         }
 
@@ -2816,26 +2910,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                     }
                 }
             }
-
-#if 0
-            uint32_t processed_dofs = 0;
-            warpLoopSync(num_grps, 
-                [&](uint32_t grp) {
-                    warpLoopSync(hiers[grp].numBodies,
-                        [&](uint32_t body_idx) {
-                            Entity body = get_bodies(hiers[grp])[body_idx];
-
-                            uint32_t num_dofs = state_mgr->getUnsafe<
-                                DofObjectNumDofs>(body).numDofs;
-                            auto &acc = state_mgr->getUnsafe<
-                                DofObjectAcceleration>(body);
-
-                            for (uint32_t k = 0; k < num_dofs; ++k) {
-                                acc.dqv[k] = x[processed_dofs];
-                            }
-                        });
-                });
-#endif
         }
 
         world_id += total_resident_warps;
@@ -2854,9 +2928,6 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
             state_mgr);
     auto &gauss_data = builder.getDataRef(data_id);
 
-    // For now, we are going with the persistent threads approach where each
-    // thread block is going to process a world.
-    // uint32_t num_invocations = (uint32_t)gridDim.x;
     uint32_t num_invocations = mwGPU::GPUImplConsts::get().numWorlds;
 
 #if 1
@@ -4561,8 +4632,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         auto solve = builder.addToGraph<tasks::GaussMinimizationNode>(
                 {thing});
 
+#if 0
         solve = builder.addToGraph<
             SortMemoryRangeNode<SolverScratch256b, false>>({solve});
+#endif
         solve = builder.addToGraph<ResetTmpAllocNode>({solve});
 #else
         auto solve = builder.addToGraph<ParallelForNode<Context,
@@ -4621,8 +4694,8 @@ void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
 void init(Context &ctx, CVXSolve *cvx_solve)
 {
     ctx.singleton<CVSolveData>().cvxSolve = cvx_solve;
-    ctx.singleton<CVSolveData>().solverScratchMemory = MemoryRange::none();
-    ctx.singleton<CVSolveData>().accRefMemory = MemoryRange::none();
+    // ctx.singleton<CVSolveData>().solverScratchMemory = MemoryRange::none();
+    // ctx.singleton<CVSolveData>().accRefMemory = MemoryRange::none();
     ctx.singleton<CVSolveData>().scratchAllocatedBytes = 0;
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
 }
