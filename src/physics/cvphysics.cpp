@@ -113,6 +113,23 @@ DataT warpSum(DataT *values, uint32_t num_values)
     return running_sum;
 }
 
+template <typename DataT>
+bool checkNan(DataT *values,
+              uint32_t num_rows,
+              uint32_t num_cols)
+{
+    uint32_t total_num_values = num_rows * num_cols;
+
+    warpLoopSync(
+        total_num_values,
+        [&](uint32_t iter) {
+            float v = (iter == 0xFFFF'FFFF) ? 0.f : values[iter];
+            bool invalid = isnan(v);
+
+
+        });
+}
+
 template <typename DataT, typename Fn>
 DataT warpSumPred(Fn &&fn, uint32_t num_values)
 {
@@ -695,6 +712,9 @@ DataT sparseBlkDiagSolve(
         }
 
         for (int32_t i = 0; i < total_dofs; ++i) {
+            if (ltdl(i, i) == 0.f) {
+                printf("nan going to happen ltdl!\n");
+            }
             x[i] /= ltdl(i, i);
         }
 
@@ -1402,16 +1422,6 @@ void GaussMinimizationNode::dobjWarp(
     });
     __syncwarp();
 
-    if (dbg && sd->numRowsJc > 0) {
-        if (threadIdx.x % 32 == 0)
-            printf("x - a_free\n");
-        printMatrix<false, false>(scratch, 1, sd->freeAccDim);
-
-        if (threadIdx.x % 32 == 0)
-            printf("res had\n");
-        printMatrix<false, false>(res, 1, sd->freeAccDim);
-    }
-
     sparseBlkDiagSmallReg<float, 4, false, false, true>(
             res,
             &sd->massSparse,
@@ -1467,6 +1477,10 @@ void GaussMinimizationNode::dobjWarp(
         } else {
             float tmp = mw * (n - mu * t);
             scratch[3 * iter] = tmp;
+
+            if (t == 0.f) {
+                printf("nan going to happen dobj!\n");
+            }
             scratch[3 * iter + 1] = -tmp * mu * t1 / t;
             scratch[3 * iter + 2] = -tmp * mu * t2 / t;
         }
@@ -1940,8 +1954,14 @@ float GaussMinimizationNode::exactLineSearch(
                             float dnp_da = p0;
                             float dtp_da = (p1 * t1 + p2 * t2 + 
                                             alpha * (p1 * p1 + p2 * p2)) / tp;
+                            if (tp == 0.f) {
+                                printf("nan going to happen exactLineSearch tp\n");
+                            }
                             float d2tp_da2 = ((p2 * t1 - p1 * t2) * (p2 * t1 - p1 * t2)) /
                                 (tp * tp * tp);
+                            if (tp * tp * tp == 0.f) {
+                                printf("nan going to happen exactLineSearch tp^3\n");
+                            }
                             float tmp = np - mu * tp;
                             float d_tmp = dnp_da - mu * dtp_da;
 
@@ -1975,6 +1995,9 @@ float GaussMinimizationNode::exactLineSearch(
 
     // Newton step
     float alpha1 = alpha - evals_alpha.grad / evals_alpha.hess;
+    if (evals_alpha.hess == 0.f) {
+        printf("nan going to happen exactLineSeaarch hess\n");
+    }
 
     Evals evals_alpha1 = fdh_phi(alpha1);
 
@@ -2006,6 +2029,9 @@ float GaussMinimizationNode::exactLineSearch(
         }
 
         alpha1 -= evals_alpha1.grad / evals_alpha1.hess;
+        if (evals_alpha1.hess == 0.f) {
+            printf("nan going to happen exactLineSeaarch hess1\n");
+        }
     }
 
     if (iters == ls_iters) {
@@ -2015,6 +2041,9 @@ float GaussMinimizationNode::exactLineSearch(
 
     float alpha_low = alpha1;
     float alpha_high = alpha1 - evals_alpha1.grad / evals_alpha1.hess;
+    if (evals_alpha1.hess == 0.f) {
+        printf("nan going to happen exactLineSeaarch hess2\n");
+    }
 
     Evals evals_alpha_mid = fdh_phi(alpha_low);
     if (evals_alpha_mid.grad > 0.f) {
@@ -2870,7 +2899,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         }
 
         if (lane_id == 0) {
-            if (iter > 5000) {
+            if (iter > 500) {
                 printf(
                     "world_id = %d; num_iters = %d; g_norm = %f; g_dot_m_grad = %f\n", 
                     world_id, iter, g_norm, g_dot_m_grad);
