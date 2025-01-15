@@ -2793,7 +2793,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         });
         __syncwarp();
 
-        uint32_t max_iters = 100 * curr_sd->freeAccDim;
+        uint32_t max_iters = 100;
         uint32_t iter = 0;
         for (; iter < max_iters; ++iter) {
             if (tol_scale * g_norm < avg_total)
