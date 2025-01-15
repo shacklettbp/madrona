@@ -392,6 +392,12 @@ struct GPUKernels {
     CUfunction destroyECS;
 };
 
+struct BVHKernelCache {
+    HeapArray<char> data;
+    const void *cubinStart;
+    size_t numCubinBytes;
+};
+
 struct MegakernelCache {
     HeapArray<char> data;
     const void *cubinStart;
@@ -1023,6 +1029,47 @@ static __attribute__((always_inline)) inline void dispatch(
     };
 }
 
+static void checkAndLoadBVHKernelCache(
+    Optional<BVHKernelCache> &cache,
+    Optional<std::string> &cache_write_path)
+{
+    auto *cache_path =
+        getenv("MADRONA_BVH_KERNEL_CACHE");
+
+    if (!cache_path || cache_path[0] == '\0') {
+        return;
+    }
+
+    if (!std::filesystem::exists(cache_path)) {
+        cache_write_path.emplace(cache_path);
+        return;
+    }
+
+    std::ifstream cache_file(cache_path,
+        std::ios::binary | std::ios::ate);
+    if (!cache_file.is_open()) {
+        FATAL("Failed to open megakernel cache file at %s",
+              cache_path);
+    }
+
+    size_t num_cache_bytes = cache_file.tellg();
+    cache_file.seekg(std::ios::beg);
+    HeapArray<char> cache_data(num_cache_bytes);
+    cache_file.read(cache_data.data(), cache_data.size());
+
+    size_t cur_cache_offset = 0;
+    size_t cache_remaining = cache_data.size();
+
+    void *cubin_ptr = cache_data.data();
+    size_t num_cubin_bytes = num_cache_bytes;
+
+    cache.emplace(BVHKernelCache {
+        .data = std::move(cache_data),
+        .cubinStart = cubin_ptr,
+        .numCubinBytes = num_cubin_bytes,
+    });
+}
+
 // We still want to have the same compiler flags as passed to the megakernel
 static BVHKernels buildBVHKernels(const CompileConfig &cfg,
                                   int32_t num_sms,
@@ -1031,156 +1078,172 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 {
     using namespace std;
 
-    array bvh_srcs = {
-        MADRONA_MW_GPU_BVH_INTERNAL_CPP
-    };
+    auto bvh_cache = Optional<BVHKernelCache>::none();
+    auto cache_write_path = Optional<std::string>::none();
 
-    const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
-    const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
-    const char *shadow_enable_env = getenv("MADRONA_RT_SHADOWS");
-
-    // Build architecture string for this GPU
-    string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
-        to_string(cuda_arch.second);
-
-    std::string linker_arch_str =
-        std::string("-arch=") + gpu_arch_str;
-
-    DynArray<const char *> linker_flags {
-        linker_arch_str.c_str(),
-        "-ftz=1",
-        "-prec-div=0",
-        "-prec-sqrt=0",
-        "-fma=1",
-        // "-optimize-unused-variables",
-        "-lto",
-        "-lineinfo",
-        "-maxrregcount=96"
-    };
-
-    if (force_debug_env != nullptr && force_debug_env[0] == '1') {
-        linker_flags.push_back("-g");
-        printf("compiling with debug\n");
-    }
-
-    nvJitLinkHandle linker;
-    REQ_NVJITLINK(nvJitLinkCreate(
-        &linker, linker_flags.size(), linker_flags.data()));
-
-    nvJitLinkInputType linker_input_type = NVJITLINK_INPUT_LTOIR;
-
-    auto printLinkerLogs = [&linker](FILE *out) {
-        size_t info_log_size, err_log_size;
-        REQ_NVJITLINK(
-            nvJitLinkGetInfoLogSize(linker, &info_log_size));
-        REQ_NVJITLINK(
-            nvJitLinkGetErrorLogSize(linker, &err_log_size));
-
-        if (info_log_size > 0) {
-            HeapArray<char> info_log(info_log_size);
-            REQ_NVJITLINK(nvJitLinkGetInfoLog(linker, info_log.data()));
-
-            fprintf(out, "%s\n", info_log.data());
-        }
-
-        if (err_log_size > 0) {
-            HeapArray<char> err_log(err_log_size);
-            REQ_NVJITLINK(nvJitLinkGetErrorLog(linker, err_log.data()));
-
-            fprintf(out, "%s\n", err_log.data());
-        }
-    };
-
-    auto checkLinker = [&printLinkerLogs](nvJitLinkResult res) {
-        if (res != NVJITLINK_SUCCESS) {
-            fprintf(stderr, "CUDA linking Failed!\n");
-
-            printLinkerLogs(stderr);
-
-            fprintf(stderr, "\n");
-
-            ERR_NVJITLINK(res);
-        }
-    };
-
-    auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
-        checkLinker(nvJitLinkAddData(linker, linker_input_type,
-            (char *)cubin.data(), cubin.size(), name));
-    };
-
-    string gpu_arch_flag = std::string("-arch=") + gpu_arch_str;
-
-    std::vector<const char *> common_compile_flags {
-        MADRONA_NVRTC_OPTIONS
-        "-dlto",
-        "-DMADRONA_MWGPU_BVH_MODULE",
-        "-arch", gpu_arch_str.c_str(),
-        "-lineinfo",
-        "-maxrregcount=96"
-    };
-
-    if (shadow_enable_env && shadow_enable_env[0] == '1') {
-        common_compile_flags.push_back("-DMADRONA_RT_SHADOWS");
-    }
-
-    if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
-        common_compile_flags.push_back("-DMADRONA_PROFILE_BVH_KERNEL");
-    }
-
-    if (force_debug_env != nullptr && force_debug_env[0] == '1') {
-        common_compile_flags.push_back("--device-debug");
-    }
-
-    common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
-
-    bool render_rgb = (render_mode == CudaBatchRenderConfig::RenderMode::RGBD);
-
-    if (render_rgb) {
-        common_compile_flags.push_back("-DMADRONA_RENDER_RGB=1");
-    }
-
-    for (const char *user_flag : cfg.userCompileFlags) {
-        common_compile_flags.push_back(user_flag);
-    }
-
-    DynArray<const char *> fast_compile_flags(common_compile_flags.size());
-    for (const char *flag : common_compile_flags) {
-        fast_compile_flags.push_back(flag);
-    }
-
-    std::vector<const char *> compile_flags = std::move(common_compile_flags);
-
-    for (uint32_t i = 0; i < bvh_srcs.size(); ++i) {
-        auto cur_compile_flags = compile_flags;
-        std::string cur_path = bvh_srcs[i];
-
-        std::ifstream bvh_file_stream(bvh_srcs[i]);
-        std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
-            std::istreambuf_iterator<char>());
-
-        printf("Compiling %s\n", bvh_srcs[i]);
-
-        // Gives us LTOIR
-        auto jit_output = cu::jitCompileCPPSrc(
-            bvh_src.c_str(), bvh_srcs[i],
-            cur_compile_flags.data(), cur_compile_flags.size(),
-            cur_compile_flags.data(), cur_compile_flags.size(),
-            true);
-
-        addToLinker(jit_output.outputBinary, bvh_srcs[i]);
-    }
-
-    checkLinker(nvJitLinkComplete(linker));
-
-    size_t cubin_size;
-    REQ_NVJITLINK(nvJitLinkGetLinkedCubinSize(linker, &cubin_size));
-    HeapArray<char> linked_cubin(cubin_size);
-    REQ_NVJITLINK(nvJitLinkGetLinkedCubin(linker, linked_cubin.data()));
+    checkAndLoadBVHKernelCache(bvh_cache, cache_write_path);
 
     CUmodule mod;
-    REQ_CU(cuModuleLoadData(&mod, linked_cubin.data()));
 
-    REQ_NVJITLINK(nvJitLinkDestroy(&linker));
+    if (bvh_cache.has_value()) {
+        printf("loading BVH kernels from cache\n");
+        REQ_CU(cuModuleLoadData(&mod, bvh_cache->cubinStart));
+    } else {
+        array bvh_srcs = {
+            MADRONA_MW_GPU_BVH_INTERNAL_CPP
+        };
+
+        const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
+        const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
+        const char *shadow_enable_env = getenv("MADRONA_RT_SHADOWS");
+
+        // Build architecture string for this GPU
+        string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
+            to_string(cuda_arch.second);
+
+        std::string linker_arch_str =
+            std::string("-arch=") + gpu_arch_str;
+
+        DynArray<const char *> linker_flags {
+            linker_arch_str.c_str(),
+            "-ftz=1",
+            "-prec-div=0",
+            "-prec-sqrt=0",
+            "-fma=1",
+            // "-optimize-unused-variables",
+            "-lto",
+            "-lineinfo",
+            "-maxrregcount=96"
+        };
+
+        if (force_debug_env != nullptr && force_debug_env[0] == '1') {
+            linker_flags.push_back("-g");
+            printf("compiling with debug\n");
+        }
+
+        nvJitLinkHandle linker;
+        REQ_NVJITLINK(nvJitLinkCreate(
+            &linker, linker_flags.size(), linker_flags.data()));
+
+        nvJitLinkInputType linker_input_type = NVJITLINK_INPUT_LTOIR;
+
+        auto printLinkerLogs = [&linker](FILE *out) {
+            size_t info_log_size, err_log_size;
+            REQ_NVJITLINK(
+                nvJitLinkGetInfoLogSize(linker, &info_log_size));
+            REQ_NVJITLINK(
+                nvJitLinkGetErrorLogSize(linker, &err_log_size));
+
+            if (info_log_size > 0) {
+                HeapArray<char> info_log(info_log_size);
+                REQ_NVJITLINK(nvJitLinkGetInfoLog(linker, info_log.data()));
+
+                fprintf(out, "%s\n", info_log.data());
+            }
+
+            if (err_log_size > 0) {
+                HeapArray<char> err_log(err_log_size);
+                REQ_NVJITLINK(nvJitLinkGetErrorLog(linker, err_log.data()));
+
+                fprintf(out, "%s\n", err_log.data());
+            }
+        };
+
+        auto checkLinker = [&printLinkerLogs](nvJitLinkResult res) {
+            if (res != NVJITLINK_SUCCESS) {
+                fprintf(stderr, "CUDA linking Failed!\n");
+
+                printLinkerLogs(stderr);
+
+                fprintf(stderr, "\n");
+
+                ERR_NVJITLINK(res);
+            }
+        };
+
+        auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
+            checkLinker(nvJitLinkAddData(linker, linker_input_type,
+                (char *)cubin.data(), cubin.size(), name));
+        };
+
+        string gpu_arch_flag = std::string("-arch=") + gpu_arch_str;
+
+        std::vector<const char *> common_compile_flags {
+            MADRONA_NVRTC_OPTIONS
+            "-dlto",
+            "-DMADRONA_MWGPU_BVH_MODULE",
+            "-arch", gpu_arch_str.c_str(),
+            "-lineinfo",
+            "-maxrregcount=96"
+        };
+
+        if (shadow_enable_env && shadow_enable_env[0] == '1') {
+            common_compile_flags.push_back("-DMADRONA_RT_SHADOWS");
+        }
+
+        if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
+            common_compile_flags.push_back("-DMADRONA_PROFILE_BVH_KERNEL");
+        }
+
+        if (force_debug_env != nullptr && force_debug_env[0] == '1') {
+            common_compile_flags.push_back("--device-debug");
+        }
+
+        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
+
+        bool render_rgb = (render_mode == CudaBatchRenderConfig::RenderMode::RGBD);
+
+        if (render_rgb) {
+            common_compile_flags.push_back("-DMADRONA_RENDER_RGB=1");
+        }
+
+        for (const char *user_flag : cfg.userCompileFlags) {
+            common_compile_flags.push_back(user_flag);
+        }
+
+        DynArray<const char *> fast_compile_flags(common_compile_flags.size());
+        for (const char *flag : common_compile_flags) {
+            fast_compile_flags.push_back(flag);
+        }
+
+        std::vector<const char *> compile_flags = std::move(common_compile_flags);
+
+        for (uint32_t i = 0; i < bvh_srcs.size(); ++i) {
+            auto cur_compile_flags = compile_flags;
+            std::string cur_path = bvh_srcs[i];
+
+            std::ifstream bvh_file_stream(bvh_srcs[i]);
+            std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
+                std::istreambuf_iterator<char>());
+
+            printf("Compiling %s\n", bvh_srcs[i]);
+
+            // Gives us LTOIR
+            auto jit_output = cu::jitCompileCPPSrc(
+                bvh_src.c_str(), bvh_srcs[i],
+                cur_compile_flags.data(), cur_compile_flags.size(),
+                cur_compile_flags.data(), cur_compile_flags.size(),
+                true);
+
+            addToLinker(jit_output.outputBinary, bvh_srcs[i]);
+        }
+
+        checkLinker(nvJitLinkComplete(linker));
+
+        size_t cubin_size;
+        REQ_NVJITLINK(nvJitLinkGetLinkedCubinSize(linker, &cubin_size));
+        HeapArray<char> linked_cubin(cubin_size);
+        REQ_NVJITLINK(nvJitLinkGetLinkedCubin(linker, linked_cubin.data()));
+
+        if (cache_write_path.has_value()) {
+            std::ofstream cache_file(*cache_write_path, std::ios::binary);
+            cache_file.write(linked_cubin.data(), linked_cubin.size());
+            cache_file.close();
+        }
+
+        REQ_CU(cuModuleLoadData(&mod, linked_cubin.data()));
+        REQ_NVJITLINK(nvJitLinkDestroy(&linker));
+    }
 
     CUfunction bvh_build_fast;
     REQ_CU(cuModuleGetFunction(&bvh_build_fast, mod,
@@ -2254,7 +2317,7 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
     REQ_CU(cuDeviceGet(&cu_dev, gpu_id));
     CUcontext cu_ctx;
     REQ_CU(cuDevicePrimaryCtxRetain(&cu_ctx, cu_dev));
-    setCudaHeapSize();
+    // setCudaHeapSize();
     REQ_CU(cuCtxSetCurrent(cu_ctx));
 
     return cu_ctx;
