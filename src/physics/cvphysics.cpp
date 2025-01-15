@@ -1340,7 +1340,6 @@ struct GaussMinimizationNode : NodeBase {
             float *Mxmin,
             float *p,
             float *x,
-            float avg_tol2,
             float tol,
             float *scratch,
             bool dbg = false);
@@ -1845,7 +1844,6 @@ float GaussMinimizationNode::exactLineSearch(
         float *Mxmin,
         float *p,
         float *x,
-        float avg_tol,
         float tol,
         float *scratch,
         bool dbg)
@@ -2001,9 +1999,9 @@ float GaussMinimizationNode::exactLineSearch(
         
         evals_alpha1 = fdh_phi(alpha1);
         
-        if (evals_alpha1.grad * a_dir > -avg_tol)
+        if (evals_alpha1.grad * a_dir > -tol)
             break;
-        if (fabs(evals_alpha1.grad)  < avg_tol) {
+        if (fabs(evals_alpha1.grad)  < tol) {
             return alpha1;
         }
 
@@ -2029,7 +2027,7 @@ float GaussMinimizationNode::exactLineSearch(
         alpha_mid = 0.5f * (alpha_low + alpha_high);
         evals_alpha_mid = fdh_phi(alpha_mid);
 
-        if (fabs(evals_alpha_mid.grad) < avg_tol) {
+        if (fabs(evals_alpha_mid.grad) < tol) {
             return alpha_mid;
         }
 
@@ -2729,7 +2727,9 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 {
     using namespace gpu_utils;
 
-    constexpr float kTolerance = 1e-4f;
+    constexpr float kTolerance = 1e-8f;
+    constexpr float lsTolerance = 0.01f;
+    constexpr float MINVAL = 1e-15f;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
 
@@ -2781,8 +2781,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         // Keep track of the norm2 of g (m_grad currently has g)
         float g_norm = sqrtf(norm2Warp(m_grad, curr_sd->freeAccDim));
 
-        float avg_total = kTolerance * (float)curr_sd->freeAccDim;
-
         float g_dot_m_grad = sparseBlkDiagSolve<float, true>(
                 m_grad, &curr_sd->massSparse, scratch1);
         // By now, m_grad actually has m_grad
@@ -2796,12 +2794,23 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         uint32_t max_iters = 100;
         uint32_t iter = 0;
         for (; iter < max_iters; ++iter) {
-            if (tol_scale * g_norm < avg_total)
+            // TODO: add improvement check
+            if (tol_scale * g_norm < kTolerance)
                 break;
 
+            float p_norm = sqrtf(norm2Warp(p, curr_sd->freeAccDim));
+
+            if (p_norm < MINVAL)
+                break;
+
+            float lsTol = lsTolerance * kTolerance * p_norm / tol_scale;
             float alpha = exactLineSearch(
-                curr_sd, jaccref, mxmin, p, x, avg_total, kTolerance, scratch1/*, (iter == 2)*/);
+                curr_sd, jaccref, mxmin, p, x, lsTol, scratch1/*, (iter == 2)*/);
             __syncwarp();
+
+            // No improvement
+            if (alpha == 0.f)
+                break;
 
             // Update x to the new value after alpha was found
             warpLoop<4>(curr_sd->freeAccDim,
@@ -2809,7 +2818,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                     x[iter] += alpha * p[iter];
                 });
 
-            float update = alpha * sqrtf(norm2Warp(p, curr_sd->freeAccDim));
             __syncwarp();
 
             float *g_new = m_grad;
@@ -2847,10 +2855,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                         },
                         curr_sd->freeAccDim);
 
-                float beta = g_new_dot_mgradmin / g_dot_m_grad;
-                if (g_dot_m_grad == 0.f) {
-                    printf("nan going to happen\n");
-                }
+                float beta = g_new_dot_mgradmin / fmax(g_dot_m_grad, MINVAL);
 
                 g_dot_m_grad = g_dot_m_grad_new;
 
@@ -2861,10 +2866,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                     [&](uint32_t iter) {
                         p[iter] = -m_grad[iter] + beta * p[iter];
                     });
-            }
-
-            if (tol_scale * update < avg_total) {
-                break;
             }
         }
 
