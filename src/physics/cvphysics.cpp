@@ -3388,7 +3388,7 @@ inline float* computeContactJacobian(Context &ctx,
                     i, J_col[0], J_col[1], J_col[2]);
         }
     }
-    // return J;
+    return J;
 }
 
 // y = Mx. Based on Table 6.5 in Featherstone
