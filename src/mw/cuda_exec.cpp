@@ -377,6 +377,9 @@ struct BVHKernels {
     mwGPU::madrona::KernelTimingInfo *timingInfo;
 
     uint32_t raycastRGBD;
+
+    render::MeshBVHData meshBVHData;
+    render::MaterialData materialData;
 };
 
 struct GPUKernels {
@@ -2376,6 +2379,8 @@ MWCudaExecutor::MWCudaExecutor(
     if (render_cfg.has_value()) {
         bvh_kernels = buildBVHKernels(
             compile_cfg, num_sms, cu_capability, render_cfg->renderMode);
+        bvh_kernels.meshBVHData = render_cfg->geoBVHData;
+        bvh_kernels.materialData = render_cfg->materialData;
     } 
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
@@ -2440,6 +2445,44 @@ MWCudaExecutor::~MWCudaExecutor()
 
         REQ_CU(cuMemUnmap((CUdeviceptr)ptr, num_reserve_bytes));
         REQ_CU(cuMemAddressFree((CUdeviceptr)ptr, num_reserve_bytes));
+    }
+
+    // Free mesh bvh data
+    if (impl_->bvhKernels.meshBVHData.numNodes) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.meshBVHData.nodes));
+    }
+
+    if (impl_->bvhKernels.meshBVHData.numLeaves) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.meshBVHData.leafMaterial));
+    }
+
+    if (impl_->bvhKernels.meshBVHData.numVerts) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.meshBVHData.vertices));
+    }
+
+    if (impl_->bvhKernels.meshBVHData.numBVHs) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.meshBVHData.meshBVHs));
+    }
+
+    if (impl_->bvhKernels.materialData.textures) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.materialData.textures));
+    }
+
+    if (impl_->bvhKernels.materialData.materials) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.materialData.materials));
+    }
+
+#if 0
+    if (impl_->bvhKernels.materialData.textureBuffers) {
+        cudaFree(impl_->bvhKernels.materialData.textures);
+    }
+#endif
+
+    for (uint32_t i = 0;
+            i < impl_->bvhKernels.materialData.numTextureBuffers;
+            ++i) {
+        REQ_CUDA(cudaFreeArray(
+            impl_->bvhKernels.materialData.textureBuffers[i]));
     }
 
 #ifdef MADRONA_TRACING

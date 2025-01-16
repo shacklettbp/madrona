@@ -347,6 +347,8 @@ MaterialData initMaterialData(
         }
     }
 
+    cpu_mat_data.numTextureBuffers = num_textures;
+
     for (uint32_t i = 0; i < num_materials; ++i) {
         Material mat = {
             .color = materials[i].color,
