@@ -42,7 +42,7 @@ struct SparseBlkDiag {
 namespace madrona::gpu_utils {
 
 // For debugging purposes
-template <bool transposed, bool host_print>
+template <bool transposed = false, bool host_print = false>
 void printMatrix(float *mat,
                  uint32_t num_rows,
                  uint32_t num_cols,
@@ -199,12 +199,12 @@ void warpSetZero(void *dst, uint32_t num_bytes)
         bytes_to_set);
 }
 
-void warpCopy(void *dst, void *src, uint32_t num_bytes)
+void warpCopy(void *dst, void *src, uint32_t num_bytes, bool dbg = false)
 {
     int32_t lane_id = threadIdx.x % 32;
     int32_t bytes_per_warp = (num_bytes + 31) / 32;
     int32_t bytes_to_cpy =
-        max(0, min(num_bytes - lane_id * bytes_per_warp, bytes_per_warp));
+        max(0, min((int32_t)num_bytes - lane_id * bytes_per_warp, bytes_per_warp));
 
     memcpy(
         (uint8_t *)dst + bytes_per_warp * lane_id,
@@ -1428,18 +1428,32 @@ void GaussMinimizationNode::dobjWarp(
             scratch,
             sd->freeAccDim, 1);
     __syncwarp();
+
+    if (dbg) {
+        printMatrix(res, 1, sd->freeAccDim, "mxmin new");
+    }
+
     // By now, res has M @ x_min_acc_free
 
     if constexpr (calc_package) {
         warpCopy(Mxmin, res, sd->freeAccDim * sizeof(float));
         __syncwarp();
+
+        if (dbg) {
+            printMatrix(Mxmin, 1, sd->freeAccDim, "mxmin new copied");
+        }
     }
 
+#if 0
      // Creating J @ x - acc_ref to feed to ds
     warpLoop(sd->numRowsJc, [&](uint32_t iter) {
         scratch[iter] = -acc_ref[iter];
     });
     __syncwarp();
+
+    if (dbg) {
+        printMatrix(scratch, 1, sd->numRowsJc, "-accref");
+    }
 
     gmmaWarpSmallReg<float, 4, true, false, false>(
             scratch, 
@@ -1450,10 +1464,59 @@ void GaussMinimizationNode::dobjWarp(
             sd->freeAccDim,
             1);
     __syncwarp();
+#endif
+
+    gmmaWarpSmallReg<float, 4, true, false, true>(
+            scratch, 
+            sd->J_c,
+            x,
+            sd->numRowsJc,
+            sd->numColsJc,
+            sd->freeAccDim,
+            1);
+    __syncwarp();
+
+    if (dbg) {
+        printMatrix(Mxmin, 1, sd->freeAccDim, "after Jx");
+    }
+
+#if 0
+    if (dbg) {
+        printMatrix(scratch, 1, sd->numRowsJc, "J @ x");
+    }
+#endif
+
+    warpLoop(sd->numRowsJc, [&](uint32_t iter) {
+        scratch[iter] -= acc_ref[iter];
+    });
+    __syncwarp();
+
+    if (dbg) {
+        printMatrix(Mxmin, 1, sd->freeAccDim, "after Jx-aref");
+    }
 
     if constexpr (calc_package) {
-        warpCopy(jaccref, scratch, sd->numRowsJc * sizeof(float));
+        if (dbg) {
+            warp_printf("jaccref at %p; mxmin at %p\n", jaccref, Mxmin);
+            warp_printf("memcpy of %d bytes\n", sd->numRowsJc * sizeof(float));
+        }
+
+        warpCopy(jaccref, scratch, sd->numRowsJc * sizeof(float), dbg);
         __syncwarp();
+    }
+
+    if (dbg) {
+        printMatrix(Mxmin, 1, sd->freeAccDim, "after copy Jx-aref");
+    }
+
+#if 0
+    if (dbg) {
+        printMatrix(scratch, 1, sd->numRowsJc, "J@x - accref");
+    }
+#endif
+
+    if (dbg) {
+        printMatrix(Mxmin, 1, sd->freeAccDim, "mxmin new copied before ds");
     }
 
     // ds
@@ -1498,6 +1561,10 @@ void GaussMinimizationNode::dobjWarp(
             sd->numRowsJc,
             1);
     __syncwarp();
+
+    if (dbg) {
+        printMatrix(Mxmin, 1, sd->freeAccDim, "mxmin new copied eof");
+    }
 }
 
 GaussMinimizationNode::GaussMinimizationNode(
@@ -1862,9 +1929,21 @@ float GaussMinimizationNode::exactLineSearch(
         float *scratch,
         bool dbg)
 {
+#define dbg_warp_printf(...) if (dbg) { warp_printf(__VA_ARGS__); }
+#define dbg_matrix_printf(...) if (dbg) { printMatrix(__VA_ARGS__); }
+
     using namespace gpu_utils;
 
     float pMx_free = dotVectors(p, Mxmin, sd->freeAccDim);
+
+    dbg_warp_printf("@@@@@@@@@@@@@ ENTERING FAUlTY LINE SEARCH\n");
+
+    dbg_matrix_printf(p, 1, sd->freeAccDim, "p");
+    dbg_matrix_printf(Mxmin, 1, sd->freeAccDim, "Mx_free");
+    dbg_matrix_printf(jaccref, 1, sd->numRowsJc, "jaccref");
+
+    dbg_warp_printf("pMx_free = %f\n", pMx_free);
+
     float xmin_M_xmin = dotVectorsPred<float>(
         [&](uint32_t iter) {
             return x[iter] - sd->freeAcc[iter];
@@ -1874,6 +1953,8 @@ float GaussMinimizationNode::exactLineSearch(
         },
         sd->freeAccDim);
     __syncwarp();
+
+    dbg_warp_printf("xmin_M_xmin = %f\n", xmin_M_xmin);
 
     float pMp = 0.f;
     { // Ok, now we don't need to store Mxmin anymore
@@ -1887,6 +1968,8 @@ float GaussMinimizationNode::exactLineSearch(
         pMp = dotVectors(p, Mp, sd->freeAccDim);
     }
     __syncwarp();
+
+    dbg_warp_printf("pMp = %f\n", pMp);
 
     // Store J @ p in the scratch space we used for Mp
     float *Jp = Mxmin;
@@ -1905,11 +1988,16 @@ float GaussMinimizationNode::exactLineSearch(
         float hess;
     };
 
-    auto fdh_phi = [&](float alpha, bool print = false) -> Evals {
-        float fun = 0.5f * alpha * 2.f * pMp + 
+   auto fdh_phi = [&](float alpha, bool print = false) -> Evals {
+        float fun = 0.5f * alpha * alpha * pMp + 
                     alpha * pMx_free + 0.5f * xmin_M_xmin;
         float grad = alpha * pMp + pMx_free;
         float hess = pMp;
+
+        if (print) {
+            warp_printf("fun0 = %f; grad0 = %f; hess0 = %f\n",
+                    fun, grad, hess);
+        }
 
         warpLoopSync(sd->numRowsJc / 3,
             [&](uint32_t iter) {
@@ -1942,34 +2030,43 @@ float GaussMinimizationNode::exactLineSearch(
                         if (np >= mu * tp) {
                             // Don't add anything up
                             return {0.f, 0.f, 0.f};
+
+                            if (print)
+                                printf("iter = %d; first return (0)\n", iter);
                         } else if (mu * np + tp <= 0.f) {
                             float p_sq = p0 * p0 + p1 * p1 + p2 * p2;
 
-                            return Diff {
+                            Diff diff = {
                                 np * np + tp * tp,
                                 p0 * n + p1 * t1 + p2 * t2 + alpha * p_sq,
                                 p_sq,
                             };
+
+                            if (print)
+                                printf("iter = %d; second return; f=%f; g=%f; h=%f\n", 
+                                        iter, diff.dfun, diff.dgrad, diff.dhess);
+
+                            return diff;
                         } else {
                             float dnp_da = p0;
                             float dtp_da = (p1 * t1 + p2 * t2 + 
                                             alpha * (p1 * p1 + p2 * p2)) / tp;
-                            if (tp == 0.f) {
-                                printf("nan going to happen exactLineSearch tp\n");
-                            }
                             float d2tp_da2 = ((p2 * t1 - p1 * t2) * (p2 * t1 - p1 * t2)) /
                                 (tp * tp * tp);
-                            if (tp * tp * tp == 0.f) {
-                                printf("nan going to happen exactLineSearch tp^3\n");
-                            }
                             float tmp = np - mu * tp;
                             float d_tmp = dnp_da - mu * dtp_da;
 
-                            return Diff {
+                            Diff diff = {
                                 mw * tmp * tmp,
                                 mw * tmp * d_tmp,
                                 mw * (d_tmp * d_tmp + tmp * (-mu * d2tp_da2))
                             };
+
+                            if (print)
+                                printf("iter = %d; second return; f=%f; g=%f; h=%f\n", 
+                                        iter, diff.dfun, diff.dgrad, diff.dhess);
+
+                            return diff;
                         }
                     }
                 } ();
@@ -1985,19 +2082,20 @@ float GaussMinimizationNode::exactLineSearch(
                 hess += dhess;
             });
 
+        if (print) {
+            warp_printf("final: fun=%f; grad=%f; hess=%f\n", fun, grad, hess);
+        }
+
         return Evals {
             fun, grad, hess
         };
     };
 
     float alpha = 0.f;
-    Evals evals_alpha = fdh_phi(alpha, true && dbg);
-
+    Evals evals_alpha = fdh_phi(alpha);
+    
     // Newton step
     float alpha1 = alpha - evals_alpha.grad / evals_alpha.hess;
-    if (evals_alpha.hess == 0.f) {
-        printf("nan going to happen exactLineSeaarch hess\n");
-    }
 
     Evals evals_alpha1 = fdh_phi(alpha1);
 
@@ -2005,7 +2103,14 @@ float GaussMinimizationNode::exactLineSearch(
         alpha1 = alpha;
     }
 
-    evals_alpha1 = fdh_phi(alpha1);
+    evals_alpha1 = fdh_phi(alpha1, dbg);
+
+    if (dbg) {
+        dbg_warp_printf("first return\n");
+        dbg_warp_printf("d_alpha1 = %f\n", evals_alpha1.grad);
+        dbg_warp_printf("tol = %f\n", tol);
+        dbg_warp_printf("alpha1 = %f\n", alpha1);
+    }
 
     // Initial convergence
     if (fabs(evals_alpha1.grad) < tol) {
@@ -2025,25 +2130,21 @@ float GaussMinimizationNode::exactLineSearch(
         if (evals_alpha1.grad * a_dir > -tol)
             break;
         if (fabs(evals_alpha1.grad)  < tol) {
+            dbg_warp_printf("second return\n");
             return alpha1;
         }
 
         alpha1 -= evals_alpha1.grad / evals_alpha1.hess;
-        if (evals_alpha1.hess == 0.f) {
-            printf("nan going to happen exactLineSeaarch hess1\n");
-        }
     }
 
     if (iters == ls_iters) {
         // Failed to bracket...
+        dbg_warp_printf("third return\n");
         return alpha1;
     }
 
     float alpha_low = alpha1;
     float alpha_high = alpha1 - evals_alpha1.grad / evals_alpha1.hess;
-    if (evals_alpha1.hess == 0.f) {
-        printf("nan going to happen exactLineSeaarch hess2\n");
-    }
 
     Evals evals_alpha_mid = fdh_phi(alpha_low);
     if (evals_alpha_mid.grad > 0.f) {
@@ -2057,6 +2158,7 @@ float GaussMinimizationNode::exactLineSearch(
         evals_alpha_mid = fdh_phi(alpha_mid);
 
         if (fabs(evals_alpha_mid.grad) < tol) {
+            dbg_warp_printf("fourth return\n");
             return alpha_mid;
         }
 
@@ -2066,12 +2168,14 @@ float GaussMinimizationNode::exactLineSearch(
             alpha_low = alpha_mid;
 
         if (fabs(alpha_high - alpha_low) < tol) {
+            dbg_warp_printf("fifth return\n");
             return alpha_mid;
         }
     }
 
     if (iters >= ls_iters) {
         // Failed to converge...
+        dbg_warp_printf("sixth return\n");
         return alpha_mid;
     }
 
@@ -2591,11 +2695,13 @@ void GaussMinimizationNode::computeContactJacobian(
         J_col[1] = coeff * J_col_vec.y;
         J_col[2] = coeff * J_col_vec.z;
 
+#if 0
         if (dbg) {
             printf("(not working) (row=%d, col=%d) dof=%d, J_col=(%f %f %f)\n",
                     jac_row, body_dof_offset + i,
                     i, J_col[0], J_col[1], J_col[2]);
         }
+#endif
     }
 }
 
@@ -2754,10 +2860,13 @@ void GaussMinimizationNode::prepareRegInfos(CVSolveData *sd)
 
 void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 {
+#define iter_warp_printf(...) if (iter < 4) { warp_printf(__VA_ARGS__); }
+#define iter_matrix_printf(...) if (iter < 4) { printMatrix(__VA_ARGS__); }
+
     using namespace gpu_utils;
 
-    constexpr float kTolerance = 1e-8f;
-    constexpr float lsTolerance = 0.01f;
+    constexpr float kTolerance = 1e-5f;
+    constexpr float lsTolerance = 0.1f;
     constexpr float MINVAL = 1e-15f;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
@@ -2799,9 +2908,13 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             }
         } ();
 
+        // printMatrix(acc_ref, 1, curr_sd->numRowsJc, "accref");
+
         // We are using freeAcc as initial guess
         warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
         __syncwarp();
+
+        // printMatrix(x, 1, curr_sd->freeAccDim, "x");
 
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
                        jaccref, mxmin, acc_ref, false);
@@ -2812,42 +2925,61 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
         float g_dot_m_grad = sparseBlkDiagSolve<float, true>(
                 m_grad, &curr_sd->massSparse, scratch1);
+
+        // printMatrix(m_grad, 1, curr_sd->freeAccDim, "m_grad");
+
+        // warp_printf("g_dot_m_grad = %f\n", g_dot_m_grad);
+
         // By now, m_grad actually has m_grad
         __syncwarp();
 
-        warpLoop<4>(curr_sd->freeAccDim, [&](uint32_t iter) {
+        warpLoop(curr_sd->freeAccDim, [&](uint32_t iter) {
             p[iter] = -m_grad[iter];
         });
         __syncwarp();
 
+#if 1
+        // printMatrix(p, 1, curr_sd->freeAccDim, "p");
+#endif
+
         uint32_t max_iters = 100;
         uint32_t iter = 0;
         for (; iter < max_iters; ++iter) {
+            // iter_warp_printf("##################### CG iter=%d\n", iter);
+
             // TODO: add improvement check
             if (tol_scale * g_norm < kTolerance)
                 break;
 
             float p_norm = sqrtf(norm2Warp(p, curr_sd->freeAccDim));
 
+            // iter_warp_printf("p_norm = %f\n", p_norm);
+
             if (p_norm < MINVAL)
                 break;
 
-            float lsTol = lsTolerance * kTolerance * p_norm / tol_scale;
-            float alpha = exactLineSearch(
-                curr_sd, jaccref, mxmin, p, x, lsTol, scratch1/*, (iter == 2)*/);
+           float lsTol = lsTolerance * kTolerance * p_norm / tol_scale;
+           float alpha = exactLineSearch(
+                curr_sd, jaccref, mxmin, p, x, lsTol, scratch1, false);
             __syncwarp();
+
+            // iter_warp_printf("alpha = %f\n", alpha);
+
+            // warp_printf("alpha = %f\n", alpha);
 
             // No improvement
             if (alpha == 0.f)
                 break;
 
             // Update x to the new value after alpha was found
-            warpLoop<4>(curr_sd->freeAccDim,
+            warpLoop(curr_sd->freeAccDim,
                 [&](uint32_t iter) {
                     x[iter] += alpha * p[iter];
                 });
 
             __syncwarp();
+
+            // iter_matrix_printf(x, 1, curr_sd->freeAccDim, "x_new");
 
             float *g_new = m_grad;
             { // Get the new gradient
@@ -2855,10 +2987,23 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
                 dobjWarp<true>(g_new, x, curr_sd, scratch1,
                                jaccref, mxmin, acc_ref, false);
+
+                // iter_matrix_printf(g_new, 1, curr_sd->freeAccDim, "g_new");
+
                 __syncwarp();
 
                 g_norm = sqrtf(norm2Warp(g_new, curr_sd->freeAccDim));
+
+                // iter_warp_printf("g_norm = %f\n", g_norm);
             }
+
+#if 0
+            if (iter == 0) {
+                warp_printf("alpha = %f\n", alpha);
+                printMatrix(g_new, 1, curr_sd->freeAccDim, "g_new");
+                printMatrix(x, 1, curr_sd->freeAccDim, "x_new");
+            }
+#endif
 
             {
                 // Now we have scratch1 and scratch2 to play with
@@ -2868,6 +3013,9 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
                 float g_dot_m_grad_new = sparseBlkDiagSolve<float, true>(
                         m_grad, &curr_sd->massSparse, scratch1);
+
+                // iter_matrix_printf(m_grad, 1, curr_sd->freeAccDim, "m_grad_new");
+
                 // By now, m_grad actually has m_grad_new,
                 //         scratch2 has m_grad
                 //         scratch3 has g_new
@@ -2890,21 +3038,37 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
                 beta = fmax(0.f, beta);
 
+                // iter_warp_printf("beta = %f\n", beta);
+
                 warpLoop(
                     curr_sd->freeAccDim,
                     [&](uint32_t iter) {
                         p[iter] = -m_grad[iter] + beta * p[iter];
                     });
+
+                // iter_matrix_printf(p, 1, curr_sd->freeAccDim, "p_new");
+
+#if 0
+                if (iter < 4) {
+                    warp_printf("beta=%f\n", beta);
+                    printMatrix(p, 1, curr_sd->freeAccDim, "p");
+                }
+#endif
             }
         }
 
-        if (lane_id == 0) {
-            if (iter > 500) {
+#if 1
+        if (lane_id == 0 && curr_sd->numRowsJc > 0) {
+            if (iter == 100) {
                 printf(
-                    "world_id = %d; num_iters = %d; g_norm = %f; g_dot_m_grad = %f\n", 
+                    "world_id = %d; num_iters = %d; g_norm = %f; g_dot_m_grad = %f;\n", 
                     world_id, iter, g_norm, g_dot_m_grad);
+                printf(
+                    "tol_scale (%f) * g_norm (%f) < ktolerance (%f)?\n", 
+                    tol_scale, g_norm, kTolerance);
             }
         }
+#endif
 
         { // Now, we need to copy x into the right components
             auto get_bodies = [state_mgr](BodyGroupHierarchy &hier) 
@@ -3411,11 +3575,13 @@ inline float* computeContactJacobian(Context &ctx,
         J_col[1] = coeff * J_col_vec.y;
         J_col[2] = coeff * J_col_vec.z;
 
+#if 0
         if (dbg) {
             printf("(working) (row=%d, col=%d) dof=%d, J_col=(%f %f %f)\n",
                     jac_row, body_dof_offset + i,
                     i, J_col[0], J_col[1], J_col[2]);
         }
+#endif
     }
     return J;
 }
