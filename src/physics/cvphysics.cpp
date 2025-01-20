@@ -1354,6 +1354,13 @@ struct GaussMinimizationNode : NodeBase {
         float *acc_ref,
         bool dbg = false);
 
+    // Call this after calling dobjWarp
+    float objWarp(
+        float *x,
+        CVSolveData *sd,
+        float *jaccref,
+        float *Mxmin);
+
     float exactLineSearch(
             CVSolveData *sd,
             float *jaccref,
@@ -1402,6 +1409,57 @@ struct GaussMinimizationNode : NodeBase {
     // Each `CVSolveData` contains the matrices / vectors we need.
     CVSolveData *solveDatas;
 };
+
+float GaussMinimizationNode::objWarp(
+    float *x,
+    CVSolveData *sd,
+    float *jaccref,
+    float *Mxmin)
+{
+    using namespace gpu_utils;
+
+    // Need to calculate the following:
+    // 0.5 * x_min_a_free.T @ (M @ x_min_a_free) + s(J @ x - a_ref)
+    float res =
+        dotVectorsPred<float>(
+            [&](uint32_t iter) {
+                return x[iter] - sd->freeAcc[iter];
+            },
+            [&](uint32_t iter) {
+                return Mxmin[iter];
+            },
+            sd->freeAccDim);
+
+    // Calculate s(...) now:
+    warpLoopSync(
+        sd->numRowsJc / 3,
+        [&](uint32_t iter) {
+            float curr_val = 0.f;
+            if (iter != 0xFFFF'FFFF) {
+                float n = jaccref[iter * 3];
+                float t1 = jaccref[iter * 3 + 1];
+                float t2 = jaccref[iter * 3 + 2];
+
+                float t = sqrtf(t1 * t1 + t2 * t2);
+                float mu = sd->mu[iter];
+                float mw = 1.f / (1.f + mu * mu);
+
+                if (n >= mu * t) {
+                    // Do nothing (top zone)
+                } else if (mu * n + t <= 0.f) {
+                    // Bottom zone
+                    curr_val = 0.5f * (n * n + t1 * t1 + t2 * t2);
+                } else {
+                    // Middle zone
+                    curr_val = 0.5f * mw * (n - mu * t) * (n - mu * t);
+                }
+            }
+
+            res += warpReduceSum(curr_val);
+        });
+
+    return res;
+}
 
 template <bool calc_package>
 void GaussMinimizationNode::dobjWarp(
@@ -2865,8 +2923,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
     using namespace gpu_utils;
 
-    constexpr float kTolerance = 1e-5f;
-    constexpr float lsTolerance = 0.1f;
+    constexpr float kTolerance = 1e-8f;
+    constexpr float lsTolerance = 0.01f;
     constexpr float MINVAL = 1e-15f;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
@@ -2920,6 +2978,9 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                        jaccref, mxmin, acc_ref, false);
         __syncwarp();
 
+        float curr_fun = objWarp(x, curr_sd, jaccref, mxmin);
+        __syncwarp();
+
         // Keep track of the norm2 of g (m_grad currently has g)
         float g_norm = sqrtf(norm2Warp(m_grad, curr_sd->freeAccDim));
 
@@ -2963,6 +3024,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 curr_sd, jaccref, mxmin, p, x, lsTol, scratch1, false);
             __syncwarp();
 
+            // warp_printf("alpha = %.17f\n", alpha);
+
             // iter_warp_printf("alpha = %f\n", alpha);
 
             // warp_printf("alpha = %f\n", alpha);
@@ -2982,6 +3045,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             // iter_matrix_printf(x, 1, curr_sd->freeAccDim, "x_new");
 
             float *g_new = m_grad;
+            float new_fun = 0.f;
             { // Get the new gradient
                 warpCopy(scratch2, m_grad, curr_sd->freeAccDim * sizeof(float));
 
@@ -2989,21 +3053,17 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                                jaccref, mxmin, acc_ref, false);
 
                 // iter_matrix_printf(g_new, 1, curr_sd->freeAccDim, "g_new");
+                __syncwarp();
 
+                new_fun = objWarp(x, curr_sd, jaccref, mxmin);
                 __syncwarp();
 
                 g_norm = sqrtf(norm2Warp(g_new, curr_sd->freeAccDim));
-
-                // iter_warp_printf("g_norm = %f\n", g_norm);
             }
 
-#if 0
-            if (iter == 0) {
-                warp_printf("alpha = %f\n", alpha);
-                printMatrix(g_new, 1, curr_sd->freeAccDim, "g_new");
-                printMatrix(x, 1, curr_sd->freeAccDim, "x_new");
+            if (tol_scale * (curr_fun - new_fun) < kTolerance) {
+                break;
             }
-#endif
 
             {
                 // Now we have scratch1 and scratch2 to play with
@@ -3055,10 +3115,17 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 }
 #endif
             }
+
+            curr_fun = new_fun;
         }
 
 #if 1
         if (lane_id == 0 && curr_sd->numRowsJc > 0) {
+            if (iter > 20) {
+                printf("world = %d; num CG iterations: %d; g_norm %f\n", world_id, iter, g_norm);
+            }
+
+#if 0
             if (iter == 100) {
                 printf(
                     "world_id = %d; num_iters = %d; g_norm = %f; g_dot_m_grad = %f;\n", 
@@ -3067,6 +3134,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                     "tol_scale (%f) * g_norm (%f) < ktolerance (%f)?\n", 
                     tol_scale, g_norm, kTolerance);
             }
+#endif
         }
 #endif
 
