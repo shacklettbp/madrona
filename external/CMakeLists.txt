@@ -49,6 +49,8 @@ elseif (MADRONA_ANDROID)
     target_compile_definitions(madrona_sys_defns INTERFACE "MADRONA_ANDROID=(1)")
 endif ()
 
+add_subdirectory(tinyxml2 EXCLUDE_FROM_ALL)
+
 add_subdirectory(meshoptimizer EXCLUDE_FROM_ALL)
 set_property(TARGET meshoptimizer PROPERTY
     POSITION_INDEPENDENT_CODE TRUE)
