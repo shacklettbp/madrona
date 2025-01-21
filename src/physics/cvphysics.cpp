@@ -1421,7 +1421,7 @@ float GaussMinimizationNode::objWarp(
     // Need to calculate the following:
     // 0.5 * x_min_a_free.T @ (M @ x_min_a_free) + s(J @ x - a_ref)
     float res =
-        dotVectorsPred<float>(
+        0.5f * dotVectorsPred<float>(
             [&](uint32_t iter) {
                 return x[iter] - sd->freeAcc[iter];
             },
@@ -2981,6 +2981,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         float curr_fun = objWarp(x, curr_sd, jaccref, mxmin);
         __syncwarp();
 
+        // warp_printf("curr_fun = %f\n", curr_fun);
+
         // Keep track of the norm2 of g (m_grad currently has g)
         float g_norm = sqrtf(norm2Warp(m_grad, curr_sd->freeAccDim));
 
@@ -3024,8 +3026,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 curr_sd, jaccref, mxmin, p, x, lsTol, scratch1, false);
             __syncwarp();
 
-            // warp_printf("alpha = %.17f\n", alpha);
-
             // iter_warp_printf("alpha = %f\n", alpha);
 
             // warp_printf("alpha = %f\n", alpha);
@@ -3061,7 +3061,17 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 g_norm = sqrtf(norm2Warp(g_new, curr_sd->freeAccDim));
             }
 
+            // warp_printf("curr_fun = %f\n", new_fun);
+
             if (tol_scale * (curr_fun - new_fun) < kTolerance) {
+#if 0
+                warp_printf(
+                    "tol_scale (%.17f) * (curr_fun (%.17f) - new_fun (%.17f)) < kTolerance (%.17f)\n",
+                    tol_scale,
+                    curr_fun,
+                    new_fun,
+                    kTolerance);
+#endif
                 break;
             }
 
@@ -3121,6 +3131,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
 #if 1
         if (lane_id == 0 && curr_sd->numRowsJc > 0) {
+            printf("fun = %f\n", curr_fun);
+
             if (iter > 20) {
                 printf("world = %d; num CG iterations: %d; g_norm %f\n", world_id, iter, g_norm);
             }
