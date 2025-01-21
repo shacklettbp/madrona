@@ -2925,7 +2925,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
     constexpr float kTolerance = 1e-8f;
     constexpr float lsTolerance = 0.01f;
-    constexpr float MINVAL = 1e-15f;
+    constexpr float MINVAL = 1e-12f;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
 
@@ -2945,7 +2945,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
     { // Do the computation
         CVSolveData *curr_sd = &solveDatas[world_id];
 
-        float tol_scale = 1.f / curr_sd->totalMass;
+        float tol_scale = 1.f / sqrtf(curr_sd->freeAccDim);
 
         prepareRegInfos(curr_sd);
 
@@ -3021,7 +3021,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             if (p_norm < MINVAL)
                 break;
 
-           float lsTol = lsTolerance * kTolerance * p_norm / tol_scale;
+           // float lsTol = lsTolerance * kTolerance * p_norm / tol_scale;
+           float lsTol = lsTolerance;
            float alpha = exactLineSearch(
                 curr_sd, jaccref, mxmin, p, x, lsTol, scratch1, false);
             __syncwarp();
