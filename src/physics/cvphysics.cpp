@@ -3131,8 +3131,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
 #if 1
         if (lane_id == 0 && curr_sd->numRowsJc > 0) {
-            printf("fun = %f\n", curr_fun);
-
             if (iter > 20) {
                 printf("world = %d; num CG iterations: %d; g_norm %f\n", world_id, iter, g_norm);
             }
