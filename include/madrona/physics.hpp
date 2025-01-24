@@ -388,6 +388,9 @@ namespace PhysicsSystem {
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
 
+    float getObjectMass(Context &, int32_t obj_id);
+    math::Diag3x3 getObjectInertia(Context &, int32_t obj_id);
+    float getObjectMuS(Context &, int32_t obj_id);
 };
 
 }

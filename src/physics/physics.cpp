@@ -493,6 +493,25 @@ TaskGraphNodeID setupStandaloneBroadphaseCleanupTasks(
     return builder.addToGraph<ClearTmpNode<CandidateTemporary>>(deps);
 }
 
+float getObjectMass(Context &ctx, int32_t obj_id)
+{
+    const ObjectManager &obj_mgr = *(ctx.singleton<ObjectData>().mgr);
+    return 1.f / obj_mgr.metadata[obj_id].mass.invMass;
+}
+
+Diag3x3 getObjectInertia(Context &ctx, int32_t obj_id)
+{
+    const ObjectManager &obj_mgr = *(ctx.singleton<ObjectData>().mgr);
+    RigidBodyMetadata metadata = obj_mgr.metadata[obj_id];
+    Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
+    return inertia;
+}
+
+float getObjectMuS(Context &ctx, int32_t obj_id)
+{
+    const ObjectManager &obj_mgr = *(ctx.singleton<ObjectData>().mgr);
+    return obj_mgr.metadata[obj_id].friction.muS;
+}
 
 }
 

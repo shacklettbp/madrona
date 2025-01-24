@@ -258,6 +258,15 @@ struct DofObjectHierarchyDesc {
     Entity bodyGroup;
 };
 
+struct DofObjectInertial {
+    float mass;
+    math::Diag3x3 inertia;
+};
+
+struct DofObjectFriction {
+    float muS;
+};
+
 struct DofObjectArchetype : public Archetype<
     DofObjectPosition,
     DofObjectVelocity,
@@ -266,6 +275,9 @@ struct DofObjectArchetype : public Archetype<
     DofObjectTmpState,
 
     DofObjectHierarchyDesc,
+
+    DofObjectInertial,
+    DofObjectFriction,
     
 #if 0
     // Currently, this is being duplicated but it's small. We can
@@ -371,6 +383,9 @@ struct BodyDesc {
     ResponseType responseType;
     uint32_t numCollisionObjs;
     uint32_t numVisualObjs;
+    float mass;
+    math::Diag3x3 inertia;
+    float muS;
 };
 
 struct CollisionDesc {

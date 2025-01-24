@@ -3318,23 +3318,19 @@ inline void solveCPU(Context &ctx,
 
 inline void computeBodyCOM(Context &ctx,
                            DofObjectTmpState &tmp_state,
-                           const ObjectID obj_id,
+                           const DofObjectInertial inertial,
                            const DofObjectNumDofs num_dofs)
 {
     if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
         tmp_state.scratch[0] =
-            tmp_state.scratch[0] =
-            tmp_state.scratch[0] =
-            tmp_state.scratch[0] = 0.f;
+            tmp_state.scratch[1] =
+            tmp_state.scratch[2] =
+            tmp_state.scratch[3] = 0.f;
     } else {
-        const ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-
-        float mass = 1.f / obj_mgr.metadata[obj_id.idx].mass.invMass;
-
-        tmp_state.scratch[0] = mass * tmp_state.comPos.x;
-        tmp_state.scratch[1] = mass * tmp_state.comPos.y;
-        tmp_state.scratch[2] = mass * tmp_state.comPos.z;
-        tmp_state.scratch[3] = mass;
+        tmp_state.scratch[0] = inertial.mass * tmp_state.comPos.x;
+        tmp_state.scratch[1] = inertial.mass * tmp_state.comPos.y;
+        tmp_state.scratch[2] = inertial.mass * tmp_state.comPos.z;
+        tmp_state.scratch[3] = inertial.mass;
     }
 }
 
@@ -3364,11 +3360,9 @@ inline void computeTotalCOM(Context &ctx,
 inline void computeSpatialInertias(Context &ctx,
                                    DofObjectTmpState &tmp_state,
                                    const DofObjectHierarchyDesc hier_desc,
-                                   const ObjectID obj_id,
+                                   const DofObjectInertial inertial,
                                    const DofObjectNumDofs num_dofs)
 {
-    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-
     if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
         tmp_state.spatialInertia.mass = 0.f;
         return;
@@ -3377,9 +3371,8 @@ inline void computeSpatialInertias(Context &ctx,
     Vector3 body_grp_com_pos = ctx.get<BodyGroupHierarchy>(
             hier_desc.bodyGroup).comPos;
 
-    RigidBodyMetadata metadata = obj_mgr.metadata[obj_id.idx];
-    Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
-    float mass = 1.f / metadata.mass.invMass;
+    Diag3x3 inertia = inertial.inertia;
+    float mass = inertial.mass;
 
     // We need to find inertia tensor in world space orientation
     Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
@@ -4203,8 +4196,13 @@ inline void processContacts(Context &ctx,
         }
     }
 
+#if 0
     CountT objID_i = ctx.get<ObjectID>(ref).idx;
     CountT objID_j = ctx.get<ObjectID>(alt).idx;
+#endif
+
+    DofObjectFriction friction_i = ctx.get<DofObjectFriction>(ref);
+    DofObjectFriction friction_j = ctx.get<DofObjectFriction>(alt);
 
     // Create a coordinate system for the contact
     Vector3 n = contact.normal.normalize();
@@ -4222,8 +4220,7 @@ inline void processContacts(Context &ctx,
     tmp_state.C[2] = s;
 
     // Get friction coefficient
-    float mu = fminf(obj_mgr.metadata[objID_i].friction.muS,
-                        obj_mgr.metadata[objID_j].friction.muS);
+    float mu = fminf(friction_i.muS, friction_j.muS);
     tmp_state.mu = mu;
 }
 
@@ -4571,6 +4568,9 @@ inline void convertPostSolve(
         rotation = tmp_state.composedRot * body_obj_data.rotation;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+        position = tmp_state.comPos + 
+                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+        rotation = tmp_state.composedRot * body_obj_data.rotation;
         // Do nothing
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
@@ -4598,6 +4598,8 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<DofObjectAcceleration>();
     registry.registerComponent<DofObjectNumDofs>();
     registry.registerComponent<DofObjectTmpState>();
+    registry.registerComponent<DofObjectInertial>();
+    registry.registerComponent<DofObjectFriction>();
     registry.registerComponent<DofObjectHierarchyDesc>();
     registry.registerComponent<ContactTmpState>();
     registry.registerComponent<LinkParentDofObject>();
@@ -4664,7 +4666,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         auto compute_body_coms = builder.addToGraph<ParallelForNode<Context,
              tasks::computeBodyCOM,
                 DofObjectTmpState,
-                ObjectID,
+                DofObjectInertial,
                 DofObjectNumDofs
             >>({run_narrowphase});
 
@@ -4677,7 +4679,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
              tasks::computeSpatialInertias,
                 DofObjectTmpState,
                 DofObjectHierarchyDesc,
-                ObjectID,
+                DofObjectInertial,
                 DofObjectNumDofs
             >>({compute_total_com});
 
@@ -4839,6 +4841,12 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
     auto &acc = ctx.get<DofObjectAcceleration>(physical_entity);
     auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
+    auto &inertial = ctx.get<DofObjectInertial>(physical_entity);
+    auto &friction = ctx.get<DofObjectFriction>(physical_entity);
+
+    inertial.mass = desc.mass;
+    inertial.inertia = desc.inertia;
+    friction.muS = desc.muS;
 
     tmp_state.responseType = desc.responseType;
 
@@ -4920,6 +4928,8 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
 
         grp_info.bodyCounter = 0;
     }
+
+    return physical_entity;
 }
 
 void attachCollision(
