@@ -1,19 +1,11 @@
 #pragma once
 
+#include <madrona/render/ecs.hpp>
 #include <madrona/components.hpp>
 #include <madrona/memory_range.hpp>
 #include <madrona/taskgraph_builder.hpp>
 
 namespace madrona::phys::cv {
-
-// Attach this component to entities that you want to have obey physics.
-struct CVPhysicalComponent {
-    // This is going to be one of the DOF entities (i.e. DOFFreeBodyArchetype).
-    Entity physicsEntity;
-};
-
-static constexpr uint32_t kMaxPositionCoords = 7;
-static constexpr uint32_t kMaxVelocityCoords = 6;
 
 enum class DofType {
     // The number of unique degrees of freedom (SE3). Maximum number of DOFs is 6
@@ -25,6 +17,9 @@ enum class DofType {
     // When we add other types of physics DOF objects, we will encode
     // the number of degrees of freedom they all have here.
 };
+
+static constexpr uint32_t kMaxPositionCoords = 7;
+static constexpr uint32_t kMaxVelocityCoords = 6;
 
 struct DofObjectPosition {
     // There are multiple ways of interpreting the values in this struct.
@@ -65,7 +60,6 @@ struct ContactPointInfo {
     uint32_t parentIdx;
     uint32_t subIdx;
 };
-
 
 struct SpatialVector {
     math::Vector3 linear;
@@ -226,6 +220,14 @@ struct DofObjectTmpState {
     // DOF offset in the BodyGroup
     uint32_t dofOffset;
 
+    uint32_t numCollisionObjs;
+    uint32_t collisionObjOffset;
+
+    uint32_t numVisualObjs;
+    uint32_t visualObjOffset;
+
+    ResponseType responseType;
+
     float scratch[4];
 
     float * getPhiFull(Context &ctx);
@@ -264,18 +266,54 @@ struct DofObjectArchetype : public Archetype<
     DofObjectTmpState,
 
     DofObjectHierarchyDesc,
-
+    
+#if 0
     // Currently, this is being duplicated but it's small. We can
     // maybe find a way around this later.
     base::ObjectID,
+#endif
 
     DofObjectNumDofs
 > {};
 
+struct LinkParentDofObject {
+    Entity parentDofObject;
+
+    // Offset in `BodyObjectData`
+    uint32_t mrOffset;
+};
+
+// This is the archetype for a signle body's link for collision detection
+struct LinkCollider : public Archetype<
+    RigidBody,
+    LinkParentDofObject
+> {};
+
+struct LinkVisual : public Archetype<
+    base::ObjectInstance,
+    render::Renderable,
+    LinkParentDofObject
+> {};
+
+struct BodyObjectData {
+    // Either a renderable, or rigid body entity
+    Entity proxy;
+    math::Vector3 offset;
+    math::Quat rotation;
+    math::Diag3x3 scale;
+};
+
 struct BodyGroupHierarchy {
     // This includes the free body too which will be at index 0.
     uint32_t numBodies;
+    uint32_t bodyCounter;
+
     MemoryRange mrBodies;
+
+    uint32_t collisionObjsCounter;
+    uint32_t visualObjsCounter;
+
+    MemoryRange mrCollisionVisual;
 
     // Total number of DOFs in the body group
     uint32_t numDofs;
@@ -318,14 +356,80 @@ struct BodyGroupHierarchy {
     int32_t * getExpandedParent(Context &ctx);
     Entity * bodies(Context &ctx);
     uint32_t * getDofPrefixSum(Context &ctx);
+    BodyObjectData *getCollisionData(Context &ctx);
+    BodyObjectData *getVisualData(Context &ctx);
 };
 
 struct BodyGroup : public Archetype<
     BodyGroupHierarchy
 > {};
 
- 
+struct BodyDesc {
+    uint32_t numDofs;
+    math::Vector3 initialPos;
+    math::Quat initialRot;
+    ResponseType responseType;
+    uint32_t numCollisionObjs;
+    uint32_t numVisualObjs;
+};
 
+struct CollisionDesc {
+    uint32_t objID;
+    math::Vector3 offset;
+    math::Quat rotation;
+    math::Diag3x3 scale;
+};
+
+using VisualDesc = CollisionDesc;
+
+Entity makeBodyGroup(Context &ctx, uint32_t num_bodies);
+Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc);
+
+void attachCollision(
+        Context &ctx, 
+        Entity body_grp,
+        Entity body, 
+        uint32_t idx,
+        CollisionDesc desc);
+
+void attachVisual(
+        Context &ctx,
+        Entity body_grp,
+        Entity body,
+        uint32_t idx,
+        VisualDesc desc);
+
+void setRoot(
+        Context &ctx,
+        Entity body_grp,
+        Entity body);
+
+struct JointHinge {
+    math::Vector3 relPositionParent;
+    math::Vector3 relPositionChild;
+    math::Vector3 hingeAxis;
+};
+
+void joinBodies(
+        Context &ctx,
+        Entity body_grp,
+        Entity parent,
+        Entity child,
+        JointHinge hinge_info);
+
+struct JointBall {
+    math::Vector3 relPositionParent;
+    math::Vector3 relPositionChild;
+};
+
+void joinBodies(
+        Context &ctx,
+        Entity body_grp,
+        Entity parent,
+        Entity child,
+        JointBall ball_info);
+
+#if 0
 Entity makeCVBodyGroup(Context &ctx, uint32_t num_bodies);
     
 // For now, initial velocities are just going to be 0
@@ -339,22 +443,11 @@ void makeCVPhysicsEntity(Context &ctx,
                          DofType dof_type);
 
 void cleanupPhysicalEntity(Context &ctx, Entity e);
+#endif
 
 
 
-void registerTypes(ECSRegistry &registry);
-void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
-                           uint32_t *joint_archetype_id);
-void init(Context &ctx, CVXSolve *cvx_solve);
-
-TaskGraphNodeID setupCVInitTasks(
-        TaskGraphBuilder &builder,
-        Span<const TaskGraphNodeID> deps);
-
-TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
-                                   TaskGraphNodeID broadphase,
-                                   CountT num_substeps);
-
+#if 0
 void setCVGroupRoot(Context &ctx,
                     Entity body_group,
                     Entity body);
@@ -371,6 +464,20 @@ void setCVEntityParentBall(Context &ctx,
                            Entity parent, Entity child,
                            math::Vector3 rel_pos_parent,
                            math::Vector3 rel_pos_child);
+#endif
+
+void registerTypes(ECSRegistry &registry);
+void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
+                           uint32_t *joint_archetype_id);
+void init(Context &ctx, CVXSolve *cvx_solve);
+
+TaskGraphNodeID setupCVInitTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps);
+
+TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
+                                   TaskGraphNodeID broadphase,
+                                   CountT num_substeps);
 
 void initializeHierarchies(Context &ctx);
 

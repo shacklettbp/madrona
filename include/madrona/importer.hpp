@@ -6,6 +6,7 @@
 #include <madrona/span.hpp>
 #include <madrona/optional.hpp>
 #include <madrona/stack_alloc.hpp>
+#include <madrona/physics.hpp>
 
 namespace madrona::imp {
 
@@ -108,7 +109,6 @@ struct ImportedAssets {
     DynArray<SourceMaterial> materials;
     DynArray<SourceInstance> instances;
     DynArray<SourceTexture> textures;
-
 };
 
 class AssetImporter {
@@ -121,6 +121,13 @@ public:
     ImageImporter & imageImporter();
 
     Optional<ImportedAssets> importFromDisk(
+        Span<const char * const> asset_paths,
+        Span<char> err_buf = { nullptr, 0 },
+        bool one_object_per_asset = false);
+
+    // This is to keep pushing assets to the imported assets list.
+    void importFromDisk(
+        ImportedAssets &imported_assets,
         Span<const char * const> asset_paths,
         Span<char> err_buf = { nullptr, 0 },
         bool one_object_per_asset = false);

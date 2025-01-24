@@ -42,7 +42,15 @@ struct AssetImporter::Impl {
 
     static inline Impl * make(ImageImporter &&img_importer);
 
+#if 0
     inline Optional<ImportedAssets> importFromDisk(
+        ImportedAssets &imported,
+        Span<const char * const> asset_paths,
+        Span<char> err_buf, bool one_object_per_asset);
+#endif
+
+    inline void importFromDisk(
+        ImportedAssets &imported,
         Span<const char * const> asset_paths,
         Span<char> err_buf, bool one_object_per_asset);
 };
@@ -66,33 +74,19 @@ ImageImporter & AssetImporter::imageImporter()
     return impl_->imgImporter;
 }
 
-Optional<ImportedAssets> AssetImporter::Impl::importFromDisk(
+void AssetImporter::Impl::importFromDisk(
+    ImportedAssets &imported,
     Span<const char * const> asset_paths,
     Span<char> err_buf, bool one_object_per_asset)
 {
-    ImportedAssets imported {
-        .geoData = ImportedAssets::GeometryData {
-            .positionArrays { 0 },
-            .normalArrays { 0 },
-            .tangentAndSignArrays { 0 },
-            .uvArrays { 0 },
-            .indexArrays { 0 },
-            .faceCountArrays { 0 },
-            .meshArrays { 0 },
-        },
-        .objects { 0 },
-        .materials { 0 },
-        .instances { 0 },
-        .textures { 0 },
-    };
-
     bool load_success = false;
     for (const char *path : asset_paths) {
         std::string_view path_view(path);
 
         auto extension_pos = path_view.rfind('.');
         if (extension_pos == path_view.npos) {
-            return Optional<ImportedAssets>::none();
+            printf("File has no extension\n");
+            assert(false);
         }
         auto extension = path_view.substr(extension_pos + 1);
 
@@ -139,11 +133,7 @@ Optional<ImportedAssets> AssetImporter::Impl::importFromDisk(
         }
     }
 
-    if (!load_success) {
-        return Optional<ImportedAssets>::none();
-    }
-
-    return imported;
+    assert(load_success);
 }
 
 AssetImporter::AssetImporter()
@@ -161,7 +151,39 @@ Optional<ImportedAssets> AssetImporter::importFromDisk(
     Span<const char * const> paths, Span<char> err_buf,
     bool one_object_per_asset)
 {
-    return impl_->importFromDisk(paths, err_buf, one_object_per_asset);
+    ImportedAssets imported {
+        .geoData = ImportedAssets::GeometryData {
+            .positionArrays { 0 },
+            .normalArrays { 0 },
+            .tangentAndSignArrays { 0 },
+            .uvArrays { 0 },
+            .indexArrays { 0 },
+            .faceCountArrays { 0 },
+            .meshArrays { 0 },
+        },
+        .objects { 0 },
+        .materials { 0 },
+        .instances { 0 },
+        .textures { 0 },
+    };
+
+    impl_->importFromDisk(
+        imported, paths, err_buf, one_object_per_asset);
+
+    return imported;
+}
+
+void AssetImporter::importFromDisk(
+    ImportedAssets &imported_assets,
+    Span<const char * const> asset_paths,
+    Span<char> err_buf,
+    bool one_object_per_asset)
+{
+    impl_->importFromDisk(
+        imported_assets, 
+        asset_paths,
+        err_buf,
+        one_object_per_asset);
 }
 
 }

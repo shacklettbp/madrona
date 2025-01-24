@@ -14,6 +14,7 @@ target_link_libraries(madrona_json
 set(IMPORTER_SOURCES
     ${MADRONA_INC_DIR}/importer.hpp importer.cpp
     obj.hpp obj.cpp
+    urdf.hpp urdf.cpp
     stb_read.cpp img.cpp
 )
 
@@ -39,6 +40,7 @@ target_link_libraries(madrona_importer PRIVATE
     meshoptimizer
     fast_float
     stb
+    tinyxml2
 )
 
 if (MADRONA_GLTF_SUPPORT)

@@ -831,6 +831,21 @@ uint32_t * BodyGroupHierarchy::getDofPrefixSum(Context &ctx)
     return (uint32_t *)bytes;
 }
 
+BodyObjectData *BodyGroupHierarchy::getCollisionData(Context &ctx)
+{
+    uint8_t *bytes =
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(mrCollisionVisual);
+    return (BodyObjectData *)bytes;
+}
+
+BodyObjectData *BodyGroupHierarchy::getVisualData(Context &ctx)
+{
+    uint8_t *bytes =
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(mrCollisionVisual) +
+        sizeof(BodyObjectData) * collisionObjsCounter;
+    return (BodyObjectData *)bytes;
+}
+
 struct Contact : Archetype<
     ContactConstraint,
     ContactTmpState
@@ -840,8 +855,12 @@ struct Joint : Archetype<
     JointConstraint
 > {};
 
+struct DummyComponent {
+    
+};
+
 struct CVRigidBodyState : Bundle<
-    CVPhysicalComponent
+    DummyComponent
 > {};
 
 struct CVSolveData {
@@ -2624,8 +2643,8 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
         warpLoopSync(
             num_contacts,
             [&](uint32_t ct_idx) {
-                    ContactInfo c_info = (ct_idx == 0xFFFF'FFFF) ?
-                        ContactInfo {} : get_contact_info(ct_idx);
+                ContactInfo c_info = (ct_idx == 0xFFFF'FFFF) ?
+                    ContactInfo {} : get_contact_info(ct_idx);
 
                 uint32_t wave_pt_ips = warpInclusivePrefixSum(c_info.contact.numPoints);
                 uint32_t wave_num_pts = __shfl_sync(0xFFFF'FFFF, wave_pt_ips, 31);
@@ -3342,54 +3361,6 @@ inline void computeTotalCOM(Context &ctx,
     body_grp.comPos = hierarchy_com / total_mass;
 }
 
-// Pre-CRB: compute the spatial inertia in common Plücker coordinates
-#if 0
-inline void computeSpatialInertia(Context &ctx,
-                                  BodyGroupHierarchy &body_grp) {
-    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-
-    for(int i = 0; i < body_grp.numBodies; i++)
-    {
-        auto num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[i]);
-        auto obj_id = ctx.get<ObjectID>(body_grp.bodies(ctx)[i]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[i]);
-
-        if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
-            tmp_state.spatialInertia.mass = 0.f;
-            continue;;
-        }
-
-        RigidBodyMetadata metadata = obj_mgr.metadata[obj_id.idx];
-        Diag3x3 inertia = Diag3x3::fromVec(metadata.mass.invInertiaTensor).inv();
-        float mass = 1.f / metadata.mass.invMass;
-
-        // We need to find inertia tensor in world space orientation
-        Mat3x3 rot_mat = Mat3x3::fromQuat(tmp_state.composedRot);
-        // I_world = R * I * R^T (since R^T transforms from world to local)
-        Mat3x3 i_world_frame = rot_mat * inertia * rot_mat.transpose();
-
-        // Compute the 3x3 skew-symmetric matrix (r^x)
-        // (where r is from Plücker origin to COM)
-        Vector3 adjustedCom = tmp_state.comPos - body_grp.comPos;
-        Mat3x3 sym_mat = skewSymmetricMatrix(adjustedCom);
-        // (I_world - m r^x r^x)
-        Mat3x3 inertia_mat = i_world_frame - (mass * sym_mat * sym_mat);
-
-        // Take only the upper triangular part (since it's symmetric)
-        tmp_state.spatialInertia.spatial_inertia[0] = inertia_mat[0][0];
-        tmp_state.spatialInertia.spatial_inertia[1] = inertia_mat[1][1];
-        tmp_state.spatialInertia.spatial_inertia[2] = inertia_mat[2][2];
-        tmp_state.spatialInertia.spatial_inertia[3] = inertia_mat[1][0];
-        tmp_state.spatialInertia.spatial_inertia[4] = inertia_mat[2][0];
-        tmp_state.spatialInertia.spatial_inertia[5] = inertia_mat[2][1];
-
-        // Rest of parameters
-        tmp_state.spatialInertia.mass = mass;
-        tmp_state.spatialInertia.mCom = mass * adjustedCom;
-    }
-}
-#endif
-
 inline void computeSpatialInertias(Context &ctx,
                                    DofObjectTmpState &tmp_state,
                                    const DofObjectHierarchyDesc hier_desc,
@@ -3604,10 +3575,8 @@ inline float* computeContactJacobian(Context &ctx,
     //  where e_{bi} = 1 if body i is an ancestor of b
     //  C^T projects into the contact space
 
-    // memset(J, 0.f, 3 * body_grp.numDofs * sizeof(float));
-
     // Compute prefix sum to determine the start of the block for each body
-    uint32_t *block_start = body_grp.getDofPrefixSum(ctx); //[body_grp.numBodies];
+    uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
 
     // Populate J_C by traversing up the hierarchy
     int32_t curr_idx = hier_desc.index;
@@ -3623,12 +3592,9 @@ inline float* computeContactJacobian(Context &ctx,
                 curr_num_dofs, curr_tmp_state, origin, S);
         // Only use translational part of S
         for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
-#if 1
             float *J_col = J + 
                     j_num_rows * (body_dof_offset + block_start[curr_idx] + i) +
                     jac_row;
-#endif
-            // float *J_col = J + 3 * (block_start[curr_idx] + i);
 
             float *S_col = S + 3 * i;
             for(CountT j = 0; j < 3; ++j) {
@@ -3640,27 +3606,15 @@ inline float* computeContactJacobian(Context &ctx,
 
     // Multiply by C^T to project into contact space
     for(CountT i = 0; i < body_grp.numDofs; ++i) {
-        // float *J_col = J + 3 * i;
-
-#if 1
         float *J_col = J + 
                 j_num_rows * (body_dof_offset + i) +
                 jac_row;
-#endif
 
         Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
         J_col_vec = C.transpose() * J_col_vec;
         J_col[0] = coeff * J_col_vec.x;
         J_col[1] = coeff * J_col_vec.y;
         J_col[2] = coeff * J_col_vec.z;
-
-#if 0
-        if (dbg) {
-            printf("(working) (row=%d, col=%d) dof=%d, J_col=(%f %f %f)\n",
-                    jac_row, body_dof_offset + i,
-                    i, J_col[0], J_col[1], J_col[2]);
-        }
-#endif
     }
     return J;
 }
@@ -4223,19 +4177,25 @@ inline void processContacts(Context &ctx,
                             ContactTmpState &tmp_state)
 {
     ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
+
+    Entity ref = ctx.get<LinkParentDofObject>(contact.ref).parentDofObject;
+    Entity alt = ctx.get<LinkParentDofObject>(contact.alt).parentDofObject;
+
+#if 0
     CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
             contact.ref);
     CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
             contact.alt);
+#endif
 
     // If a parent collides with its direct child, unless the parent is a
     //  fixed body, we should ignore the contact.
-    auto &refHier = ctx.get<DofObjectHierarchyDesc>(ref.physicsEntity);
-    auto &altHier = ctx.get<DofObjectHierarchyDesc>(alt.physicsEntity);
-    if (refHier.parent == alt.physicsEntity
-        || altHier.parent == ref.physicsEntity) {
-        auto &refNumDofs = ctx.get<DofObjectNumDofs>(ref.physicsEntity);
-        auto &altNumDofs = ctx.get<DofObjectNumDofs>(alt.physicsEntity);
+    auto &refHier = ctx.get<DofObjectHierarchyDesc>(ref);
+    auto &altHier = ctx.get<DofObjectHierarchyDesc>(alt);
+    if (refHier.parent == alt
+        || altHier.parent == ref) {
+        auto &refNumDofs = ctx.get<DofObjectNumDofs>(ref);
+        auto &altNumDofs = ctx.get<DofObjectNumDofs>(alt);
         if (refNumDofs.numDofs != (uint32_t)DofType::FixedBody
             && altNumDofs.numDofs != (uint32_t)DofType::FixedBody) {
             contact.numPoints = 0;
@@ -4243,8 +4203,8 @@ inline void processContacts(Context &ctx,
         }
     }
 
-    CountT objID_i = ctx.get<ObjectID>(ref.physicsEntity).idx;
-    CountT objID_j = ctx.get<ObjectID>(alt.physicsEntity).idx;
+    CountT objID_i = ctx.get<ObjectID>(ref).idx;
+    CountT objID_j = ctx.get<ObjectID>(alt).idx;
 
     // Create a coordinate system for the contact
     Vector3 n = contact.normal.normalize();
@@ -4445,10 +4405,11 @@ inline void brobdingnag(Context &ctx,
             ContactConstraint contact = contacts[ct_idx];
             ContactTmpState &tmp_state = contacts_tmp_state[ct_idx];
 
-            auto ref = ctx.get<CVPhysicalComponent>(contact.ref);
-            auto alt = ctx.get<CVPhysicalComponent>(contact.alt);
-            auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref.physicsEntity);
-            auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt.physicsEntity);
+            Entity ref = ctx.get<LinkParentDofObject>(contact.ref).parentDofObject;
+            Entity alt = ctx.get<LinkParentDofObject>(contact.alt).parentDofObject;
+
+            auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref);
+            auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt);
 
             bool ref_fixed = ref_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
             bool alt_fixed = alt_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
@@ -4460,7 +4421,7 @@ inline void brobdingnag(Context &ctx,
                 // Compute the Jacobians for each body at the contact point
                 if(!ref_fixed) {
                     DofObjectHierarchyDesc &ref_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                            ref.physicsEntity);
+                            ref);
                     BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
                             ref_hier_desc.bodyGroup);
 
@@ -4468,22 +4429,10 @@ inline void brobdingnag(Context &ctx,
                         ref_hier_desc, tmp_state.C, contact_pt, J_c,
                         block_start[ref_grp.tmpIdx], jac_row, J_rows, -1.f,
                         (ct_idx == 0 && pt_idx == 0));
-
-#if 0
-                    for(CountT i = 0; i < ref_grp.numDofs; ++i) {
-                        float *J_col = J_c +
-                            J_rows * (block_start[ref_grp.tmpIdx] + i) + jac_row;
-
-                        float *J_ref_col = J_ref + 3 * i;
-                        for(CountT j = 0; j < 3; ++j) {
-                            J_col[j] = -J_ref_col[j];
-                        }
-                    }
-#endif
                 }
                 if(!alt_fixed) {
                     auto &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                            alt.physicsEntity);
+                            alt);
                     auto &alt_grp = ctx.get<BodyGroupHierarchy>(
                             alt_hier_desc.bodyGroup);
                     
@@ -4491,19 +4440,6 @@ inline void brobdingnag(Context &ctx,
                         alt_hier_desc, tmp_state.C, contact_pt, J_c,
                         block_start[alt_grp.tmpIdx], jac_row, J_rows, 1.f,
                         (ct_idx == 0 && pt_idx == 0));
-
-#if 0
-                    for(CountT i = 0; i < alt_grp.numDofs; ++i) {
-                        float *J_col = J_c +
-                            J_rows * (block_start[alt_grp.tmpIdx] + i) + jac_row;
-
-                        float *J_alt_col = J_alt + 3 * i;
-
-                        for(CountT j = 0; j < 3; ++j) {
-                            J_col[j] = J_alt_col[j];
-                        }
-                    }
-#endif
                 }
                 jac_row += 3;
             }
@@ -4607,39 +4543,53 @@ inline void convertPostSolve(
         Context &ctx,
         Position &position,
         Rotation &rotation,
-        const CVPhysicalComponent &phys)
+        Scale &scale,
+        LinkParentDofObject &link)
 {
     // TODO: use some forward kinematics results here
-    Entity physical_entity = phys.physicsEntity;
+    Entity physical_entity = link.parentDofObject;
 
-    DofObjectNumDofs num_dofs = ctx.get<DofObjectNumDofs>(physical_entity);
-    DofObjectTmpState tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
+    DofObjectNumDofs &num_dofs = ctx.get<DofObjectNumDofs>(physical_entity);
+    DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
+    DofObjectHierarchyDesc &hier_desc = ctx.get<DofObjectHierarchyDesc>(physical_entity);
+    BodyGroupHierarchy &grp_info = ctx.get<BodyGroupHierarchy>(hier_desc.bodyGroup);
+
+    BodyObjectData body_obj_data =
+        ((BodyObjectData *)ctx.memoryRangePointer<MRElement128b>(
+                grp_info.mrCollisionVisual))[link.mrOffset];
+
+    scale = body_obj_data.scale;
 
     if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
-        position = tmp_state.comPos;
-        rotation = tmp_state.composedRot;
+        position = tmp_state.comPos + 
+                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+        rotation = tmp_state.composedRot * body_obj_data.rotation;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
-        position = tmp_state.comPos;
-        rotation = tmp_state.composedRot;
+        position = tmp_state.comPos + 
+                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+        rotation = tmp_state.composedRot * body_obj_data.rotation;
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
         // Do nothing
     }
     else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
-        position = tmp_state.comPos;
-        rotation = tmp_state.composedRot;
+        position = tmp_state.comPos + 
+                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+        rotation = tmp_state.composedRot * body_obj_data.rotation;
     }
     else {
         MADRONA_UNREACHABLE();
     }
 }
 
+
+
 }
 
 void registerTypes(ECSRegistry &registry)
 {
-    registry.registerComponent<CVPhysicalComponent>();
+    registry.registerComponent<DummyComponent>();
 
     registry.registerSingleton<CVSolveData>();
 
@@ -4650,142 +4600,19 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<DofObjectTmpState>();
     registry.registerComponent<DofObjectHierarchyDesc>();
     registry.registerComponent<ContactTmpState>();
+    registry.registerComponent<LinkParentDofObject>();
 
     registry.registerArchetype<DofObjectArchetype>();
     registry.registerArchetype<Contact>();
     registry.registerArchetype<Joint>();
+    registry.registerArchetype<LinkCollider>();
+    registry.registerArchetype<LinkVisual>();
 
     registry.registerComponent<BodyGroupHierarchy>();
     registry.registerArchetype<BodyGroup>();
 
-    registry.registerBundle<CVRigidBodyState>();
-    registry.registerBundleAlias<SolverBundleAlias, CVRigidBodyState>();
-
     registry.registerMemoryRangeElement<MRElement128b>();
     registry.registerMemoryRangeElement<SolverScratch256b>();
-
-#if 0
-    registry.registerMemoryRangeElement<PhiUnit>();
-    registry.registerMemoryRangeElement<MassMatrixUnit>();
-    registry.registerMemoryRangeElement<ParentArrayUnit>();
-    registry.registerMemoryRangeElement<BodyFloatUnit>();
-#endif
-}
-
-void setCVGroupRoot(Context &ctx,
-                    Entity body_group,
-                    Entity body)
-{
-    Entity physics_entity =
-        ctx.get<CVPhysicalComponent>(body).physicsEntity;
-
-    auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physics_entity);
-    hierarchy.leaf = true;
-    hierarchy.index = 0;
-    hierarchy.parentIndex = -1;
-    hierarchy.parent = Entity::none();
-    hierarchy.bodyGroup = body_group;
-
-    auto &body_grp_hier = ctx.get<BodyGroupHierarchy>(body_group);
-
-    body_grp_hier.numBodies = 1;
-    body_grp_hier.bodies(ctx)[0] = physics_entity;
-    body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(physics_entity).numDofs;
-}
-
-void makeCVPhysicsEntity(Context &ctx, 
-                         Entity e,
-                         Position position,
-                         Rotation rotation,
-                         ObjectID obj_id,
-                         DofType dof_type)
-{
-    Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
-
-    auto &pos = ctx.get<DofObjectPosition>(physical_entity);
-    auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
-    auto &acc = ctx.get<DofObjectAcceleration>(physical_entity);
-    auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
-
-#if 0
-    auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physical_entity);
-    hierarchy.leaf = true;
-#endif
-
-    switch (dof_type) {
-    case DofType::FreeBody: {
-        pos.q[0] = position.x;
-        pos.q[1] = position.y;
-        pos.q[2] = position.z;
-
-        pos.q[3] = rotation.w;
-        pos.q[4] = rotation.x;
-        pos.q[5] = rotation.y;
-        pos.q[6] = rotation.z;
-
-        for(int i = 0; i < 6; i++) {
-            vel.qv[i] = 0.f;
-            acc.dqv[i] = 0.f;
-        }
-    } break;
-
-    case DofType::Hinge: {
-        pos.q[0] = 0.0f;
-        vel.qv[0] = 0.f;
-    } break;
-    
-    case DofType::Ball: {
-        pos.q[0] = rotation.w;
-        pos.q[1] = rotation.x;
-        pos.q[2] = rotation.y;
-        pos.q[3] = rotation.z;
-
-        for(int i = 0; i < 3; i++) {
-            vel.qv[i] = 0.f;
-            acc.dqv[i] = 0.f;
-        }
-    } break;
-
-    case DofType::FixedBody: {
-        // Keep these around for forward kinematics
-        pos.q[0] = position.x;
-        pos.q[1] = position.y;
-        pos.q[2] = position.z;
-
-        pos.q[3] = rotation.w;
-        pos.q[4] = rotation.x;
-        pos.q[5] = rotation.y;
-        pos.q[6] = rotation.z;
-
-        for(int i = 0; i < 6; i++) {
-            vel.qv[i] = 0.f;
-            acc.dqv[i] = 0.f;
-        }
-    } break;
-    }
-
-
-    ctx.get<ObjectID>(physical_entity) = obj_id;
-    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = (uint32_t)dof_type;
-
-    ctx.get<CVPhysicalComponent>(e) = {
-        .physicsEntity = physical_entity,
-    };
-
-#if 0
-#ifdef MADRONA_GPU_MODE
-    static_assert(false, "Need to implement GPU DOF object hierarchy")
-#else
-    // By default, no parent
-    hierarchy.parent = Entity::none();
-#endif
-#endif
-}
-
-void cleanupPhysicalEntity(Context &ctx, Entity e)
-{
-    CVPhysicalComponent physical_comp = ctx.get<CVPhysicalComponent>(e);
-    ctx.destroyEntity(physical_comp.physicsEntity);
 }
 
 TaskGraphNodeID setupCVInitTasks(
@@ -4796,6 +4623,14 @@ TaskGraphNodeID setupCVInitTasks(
          tasks::initHierarchies,
          BodyGroupHierarchy
      >>(deps);
+
+    node =
+        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Position,
+            Rotation,
+            Scale,
+            LinkParentDofObject
+        >>({node});
 
     return node;
 }
@@ -4936,7 +4771,8 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
             builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
                 Position,
                 Rotation,
-                CVPhysicalComponent
+                Scale,
+                LinkParentDofObject
             >>({post_forward_kinematics});
 
         cur_node = builder.addToGraph<
@@ -4975,6 +4811,390 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
 }
 
+Entity makeBodyGroup(Context &ctx, uint32_t num_bodies)
+{
+    Entity e = ctx.makeEntity<BodyGroup>();
+
+    auto &hier = ctx.get<BodyGroupHierarchy>(e);
+    hier.numBodies = num_bodies;
+    hier.bodyCounter = 0;
+    hier.collisionObjsCounter = 0;
+    hier.visualObjsCounter = 0;
+
+    uint64_t mr_num_bytes = num_bodies * sizeof(Entity);
+    uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
+        sizeof(MRElement128b);
+    hier.mrBodies = ctx.allocMemoryRange<MRElement128b>(num_elems);
+
+    return e;
+}
+
+Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
+{
+    auto &grp_info = ctx.get<BodyGroupHierarchy>(body_grp);
+
+    Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
+
+    auto &pos = ctx.get<DofObjectPosition>(physical_entity);
+    auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
+    auto &acc = ctx.get<DofObjectAcceleration>(physical_entity);
+    auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
+
+    tmp_state.responseType = desc.responseType;
+
+    tmp_state.numCollisionObjs = desc.numCollisionObjs;
+    tmp_state.collisionObjOffset = grp_info.collisionObjsCounter;
+
+    tmp_state.numVisualObjs = desc.numVisualObjs;
+    tmp_state.visualObjOffset = grp_info.visualObjsCounter;
+
+    grp_info.collisionObjsCounter += desc.numCollisionObjs;;
+    grp_info.visualObjsCounter += desc.numVisualObjs;
+
+    switch ((DofType)desc.numDofs) {
+    case DofType::FreeBody: {
+        pos.q[0] = desc.initialPos.x;
+        pos.q[1] = desc.initialPos.y;
+        pos.q[2] = desc.initialPos.z;
+
+        pos.q[3] = desc.initialRot.w;
+        pos.q[4] = desc.initialRot.x;
+        pos.q[5] = desc.initialRot.y;
+        pos.q[6] = desc.initialRot.z;
+
+        for(int i = 0; i < 6; i++) {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
+    } break;
+
+    case DofType::Hinge: {
+        pos.q[0] = 0.0f;
+        vel.qv[0] = 0.f;
+    } break;
+    
+    case DofType::Ball: {
+        pos.q[0] = desc.initialRot.w;
+        pos.q[1] = desc.initialRot.x;
+        pos.q[2] = desc.initialRot.y;
+        pos.q[3] = desc.initialRot.z;
+
+        for(int i = 0; i < 3; i++) {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
+    } break;
+
+    case DofType::FixedBody: {
+        // Keep these around for forward kinematics
+        pos.q[0] = desc.initialPos.x;
+        pos.q[1] = desc.initialPos.y;
+        pos.q[2] = desc.initialPos.z;
+
+        pos.q[3] = desc.initialRot.w;
+        pos.q[4] = desc.initialRot.x;
+        pos.q[5] = desc.initialRot.y;
+        pos.q[6] = desc.initialRot.z;
+
+        for (int i = 0; i < 6; i++) {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
+    } break;
+    }
+
+    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 
+        desc.numDofs;
+
+    grp_info.bodyCounter++;
+
+    if (grp_info.bodyCounter == grp_info.numBodies) {
+        // Now, do allocation for collision / visual info
+        uint64_t mr_num_bytes = 
+            grp_info.collisionObjsCounter * sizeof(BodyObjectData) +
+            grp_info.visualObjsCounter * sizeof(BodyObjectData);
+        uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
+            sizeof(MRElement128b);
+        grp_info.mrCollisionVisual =
+            ctx.allocMemoryRange<MRElement128b>(num_elems);
+
+        grp_info.bodyCounter = 0;
+    }
+}
+
+void attachCollision(
+        Context &ctx,
+        Entity body_grp,
+        Entity body,
+        uint32_t idx,
+        CollisionDesc desc)
+{
+    BodyGroupHierarchy &grp_info = ctx.get<BodyGroupHierarchy>(body_grp);
+    DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body);
+
+    BodyObjectData *col_data = grp_info.getCollisionData(ctx);
+
+    Entity col_obj = ctx.makeEntity<LinkCollider>();
+
+    ctx.get<broadphase::LeafID>(col_obj) =
+        PhysicsSystem::registerEntity(ctx, col_obj, { (int32_t)desc.objID });
+    ctx.get<ResponseType>(col_obj) = tmp_state.responseType;
+    ctx.get<ObjectID>(col_obj) = { (int32_t)desc.objID };
+
+    ctx.get<Velocity>(col_obj) = {
+        Vector3::zero(),
+        Vector3::zero(),
+    };
+
+    ctx.get<ExternalForce>(col_obj) = Vector3::zero();
+    ctx.get<ExternalTorque>(col_obj) = Vector3::zero();
+
+    ctx.get<LinkParentDofObject>(col_obj) = {
+        .parentDofObject = body,
+        .mrOffset = tmp_state.collisionObjOffset + idx,
+    };
+
+    col_data[tmp_state.collisionObjOffset + idx] = {
+        col_obj,
+        desc.offset,
+        desc.rotation,
+        desc.scale,
+    };
+}
+
+void attachVisual(
+        Context &ctx,
+        Entity body_grp,
+        Entity body,
+        uint32_t idx,
+        VisualDesc desc)
+{
+    BodyGroupHierarchy &grp_info = ctx.get<BodyGroupHierarchy>(body_grp);
+    DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body);
+
+    BodyObjectData *viz_data = grp_info.getVisualData(ctx);
+
+    Entity viz_obj = ctx.makeEntity<LinkVisual>();
+
+    ctx.get<ObjectID>(viz_obj) = { (int32_t)desc.objID };
+
+    // Make this entity renderable
+    render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+
+    ctx.get<LinkParentDofObject>(viz_obj) = {
+        .parentDofObject = body,
+        .mrOffset = grp_info.collisionObjsCounter +
+                    tmp_state.visualObjOffset + idx,
+    };
+
+    viz_data[tmp_state.visualObjOffset + idx] = {
+        viz_obj,
+        desc.offset,
+        desc.rotation,
+        desc.scale,
+    };
+}
+
+void setRoot(Context &ctx,
+             Entity body_group,
+             Entity body)
+{
+    auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(body);
+    hierarchy.leaf = true;
+    hierarchy.index = 0;
+    hierarchy.parentIndex = -1;
+    hierarchy.parent = Entity::none();
+    hierarchy.bodyGroup = body_group;
+
+    auto &body_grp_hier = ctx.get<BodyGroupHierarchy>(body_group);
+
+    body_grp_hier.bodyCounter = 1;
+    body_grp_hier.bodies(ctx)[0] = body;
+    body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
+}
+
+void jointBodies(Context &ctx,
+                 Entity body_grp,
+                 Entity parent_physics_entity,
+                 Entity child_physics_entity,
+                 JointHinge hinge_info)
+{
+    BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
+
+    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
+    auto &parent_hier_desc =
+        ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
+
+    hier_desc.parent = parent_physics_entity;
+    hier_desc.relPositionParent = hinge_info.relPositionParent;
+    hier_desc.relPositionLocal = hinge_info.relPositionChild;
+
+    hier_desc.hingeAxis = hinge_info.hingeAxis;
+
+    hier_desc.leaf = true;
+    hier_desc.bodyGroup = body_grp;
+
+    hier_desc.index = grp.bodyCounter;
+    hier_desc.parentIndex = parent_hier_desc.index;
+
+
+    grp.bodies(ctx)[grp.bodyCounter] = child_physics_entity;
+
+    // Make the parent no longer a leaf
+    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
+
+    ++grp.bodyCounter;
+    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
+}
+
+void joinBodies(Context &ctx,
+                Entity body_grp,
+                Entity parent_physics_entity,
+                Entity child_physics_entity,
+                JointBall ball_info)
+{
+    BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
+
+    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
+    auto &parent_hier_desc =
+        ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
+
+    hier_desc.parent = parent_physics_entity;
+    hier_desc.relPositionParent = ball_info.relPositionParent;
+    hier_desc.relPositionLocal = ball_info.relPositionChild;
+
+    hier_desc.leaf = true;
+    hier_desc.bodyGroup = body_grp;
+
+    hier_desc.index = grp.bodyCounter;
+    hier_desc.parentIndex = parent_hier_desc.index;
+
+
+    grp.bodies(ctx)[grp.bodyCounter] = child_physics_entity;
+
+    // Make the parent no longer a leaf
+    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
+
+    ++grp.bodyCounter;
+    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
+}
+
+#if 0
+void setCVGroupRoot(Context &ctx,
+                    Entity body_group,
+                    Entity body)
+{
+    Entity physics_entity =
+        ctx.get<CVPhysicalComponent>(body).physicsEntity;
+
+    auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physics_entity);
+    hierarchy.leaf = true;
+    hierarchy.index = 0;
+    hierarchy.parentIndex = -1;
+    hierarchy.parent = Entity::none();
+    hierarchy.bodyGroup = body_group;
+
+    auto &body_grp_hier = ctx.get<BodyGroupHierarchy>(body_group);
+
+    body_grp_hier.numBodies = 1;
+    body_grp_hier.bodies(ctx)[0] = physics_entity;
+    body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(physics_entity).numDofs;
+}
+
+void makeCVPhysicsEntity(Context &ctx, 
+                         Entity e,
+                         Position position,
+                         Rotation rotation,
+                         ObjectID obj_id,
+                         DofType dof_type)
+{
+    Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
+
+    auto &pos = ctx.get<DofObjectPosition>(physical_entity);
+    auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
+    auto &acc = ctx.get<DofObjectAcceleration>(physical_entity);
+    auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
+
+#if 0
+    auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physical_entity);
+    hierarchy.leaf = true;
+#endif
+
+    switch (dof_type) {
+    case DofType::FreeBody: {
+        pos.q[0] = position.x;
+        pos.q[1] = position.y;
+        pos.q[2] = position.z;
+
+        pos.q[3] = rotation.w;
+        pos.q[4] = rotation.x;
+        pos.q[5] = rotation.y;
+        pos.q[6] = rotation.z;
+
+        for(int i = 0; i < 6; i++) {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
+    } break;
+
+    case DofType::Hinge: {
+        pos.q[0] = 0.0f;
+        vel.qv[0] = 0.f;
+    } break;
+    
+    case DofType::Ball: {
+        pos.q[0] = rotation.w;
+        pos.q[1] = rotation.x;
+        pos.q[2] = rotation.y;
+        pos.q[3] = rotation.z;
+
+        for(int i = 0; i < 3; i++) {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
+    } break;
+
+    case DofType::FixedBody: {
+        // Keep these around for forward kinematics
+        pos.q[0] = position.x;
+        pos.q[1] = position.y;
+        pos.q[2] = position.z;
+
+        pos.q[3] = rotation.w;
+        pos.q[4] = rotation.x;
+        pos.q[5] = rotation.y;
+        pos.q[6] = rotation.z;
+
+        for(int i = 0; i < 6; i++) {
+            vel.qv[i] = 0.f;
+            acc.dqv[i] = 0.f;
+        }
+    } break;
+    }
+
+
+    ctx.get<ObjectID>(physical_entity) = obj_id;
+    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = (uint32_t)dof_type;
+
+    ctx.get<CVPhysicalComponent>(e) = {
+        .physicsEntity = physical_entity,
+    };
+
+#if 0
+#ifdef MADRONA_GPU_MODE
+    static_assert(false, "Need to implement GPU DOF object hierarchy")
+#else
+    // By default, no parent
+    hierarchy.parent = Entity::none();
+#endif
+#endif
+}
+
+void cleanupPhysicalEntity(Context &ctx, Entity e)
+{
+    CVPhysicalComponent physical_comp = ctx.get<CVPhysicalComponent>(e);
+    ctx.destroyEntity(physical_comp.physicsEntity);
+}
 void setCVEntityParentHinge(Context &ctx,
                             Entity body_grp,
                             Entity parent, Entity child,
@@ -5066,5 +5286,6 @@ Entity makeCVBodyGroup(Context &ctx, uint32_t num_bodies)
 
     return e;
 }
+#endif
 
 }

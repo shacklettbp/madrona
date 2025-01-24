@@ -160,12 +160,11 @@ void reset(Context &ctx)
 
 broadphase::LeafID registerEntity(Context &ctx,
                                   Entity e,
-                                  ObjectID obj_id,
-                                  uint32_t num_dofs,
-                                  Solver solver)
+                                  ObjectID obj_id)
 {
     auto &bvh = ctx.singleton<broadphase::BVH>();
 
+#if 0
     if (solver == Solver::Convex) {
         Position initial_position = ctx.get<Position>(e);
         Rotation initial_rotation = ctx.get<Rotation>(e);
@@ -177,6 +176,7 @@ broadphase::LeafID registerEntity(Context &ctx,
                                 obj_id,
                                 cv::DofType(num_dofs));
     }
+#endif
 
     return bvh.reserveLeaf(e, obj_id);
 }
@@ -352,6 +352,12 @@ Entity makeHingeJoint(
     return e;
 }
 
+struct DummyBundleComp {};
+
+struct BundleDummyAlias : Bundle <
+    DummyBundleComp
+> {};
+
 void registerTypes(ECSRegistry &registry,
                    Solver solver)
 {
@@ -360,6 +366,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<Velocity>();
     registry.registerComponent<ExternalForce>();
     registry.registerComponent<ExternalTorque>();
+    registry.registerComponent<DummyBundleComp>();
 
     registry.registerSingleton<broadphase::BVH>();
 
@@ -378,17 +385,22 @@ void registerTypes(ECSRegistry &registry,
     switch (solver) {
     case Solver::XPBD: {
         xpbd::registerTypes(registry);
+        registry.registerBundle<RigidBody>();
     } break;
     case Solver::TGS: {
         tgs::registerTypes(registry);
+        registry.registerBundle<RigidBody>();
     } break;
     case Solver::Convex: {
+        registry.registerBundle<BundleDummyAlias>();
+        registry.registerBundleAlias<SolverBundleAlias, BundleDummyAlias>();
+
+        registry.registerBundle<RigidBody>();
+
         cv::registerTypes(registry);
     } break;
     default: MADRONA_UNREACHABLE();
     }
-
-    registry.registerBundle<RigidBody>();
 }
 
 inline void doNothing(Context &,
