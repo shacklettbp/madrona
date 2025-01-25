@@ -2603,8 +2603,8 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
         struct ContactInfo {
             ContactConstraint contact;
             ContactTmpState tmpState;
-            CVPhysicalComponent ref;
-            CVPhysicalComponent alt;
+            Entity ref;
+            Entity alt;
             uint32_t refNumDofs;
             uint32_t altNumDofs;
             bool refFixed;
@@ -2616,13 +2616,15 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
         auto get_contact_info = [&](uint32_t ct_idx) -> ContactInfo {
             auto contact = contacts[ct_idx];
 
-            auto ref = state_mgr->getUnsafe<CVPhysicalComponent>(contact.ref);
-            auto alt = state_mgr->getUnsafe<CVPhysicalComponent>(contact.alt);
+            Entity ref = state_mgr->getUnsafe<LinkParentDofObject>(
+                    contact.ref).parentDofObject;
+            Entity alt = state_mgr->getUnsafe<LinkParentDofObject>(
+                    contact.alt).parentDofObject;
 
             auto ref_num_dofs = state_mgr->getUnsafe<DofObjectNumDofs>(
-                    ref.physicsEntity).numDofs;
+                    ref).numDofs;
             auto alt_num_dofs = state_mgr->getUnsafe<DofObjectNumDofs>(
-                    alt.physicsEntity).numDofs;
+                    alt).numDofs;
 
             return {
                 contact,
@@ -2663,7 +2665,7 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                         if (!c_info.refFixed) {
                             DofObjectHierarchyDesc *hier = 
                                 &state_mgr->getUnsafe<DofObjectHierarchyDesc>(
-                                    c_info.ref.physicsEntity);
+                                    c_info.ref);
                             BodyGroupHierarchy *grp =
                                 &state_mgr->getUnsafe<BodyGroupHierarchy>(hier->bodyGroup);
 
@@ -2683,7 +2685,7 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                         if (!c_info.altFixed) {
                             DofObjectHierarchyDesc *hier = 
                                 &state_mgr->getUnsafe<DofObjectHierarchyDesc>(
-                                    c_info.alt.physicsEntity);
+                                    c_info.alt);
                             BodyGroupHierarchy *grp =
                                 &state_mgr->getUnsafe<BodyGroupHierarchy>(hier->bodyGroup);
 
