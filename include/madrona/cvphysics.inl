@@ -19,7 +19,7 @@ uint32_t getNumDofs(DofType type)
         return 0;
     }
 
-    case DofType::Sliding: {
+    case DofType::Slider: {
         return 1;
     }
 

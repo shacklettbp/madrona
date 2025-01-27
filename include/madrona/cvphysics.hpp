@@ -25,7 +25,7 @@ enum class DofType {
     Hinge,
     Ball,
     FixedBody,
-    Sliding,
+    Slider,
     None
 };
 
@@ -297,7 +297,7 @@ struct DofObjectHierarchyDesc {
     // For hinge, this is the hinge rotation axis.
     // For ball, this is the vector perpendicular to the plane of allowed
     //           angular velocities
-    math::Vector3 hingeAxis;
+    math::Vector3 axis;
 
     bool leaf;
 
@@ -497,6 +497,20 @@ void joinBodies(
         Entity parent,
         Entity child,
         JointBall ball_info);
+
+struct JointSlider {
+    math::Vector3 relPositionParent;
+    math::Vector3 relPositionChild;
+    // Will be stored in the hinge member
+    math::Vector3 slideVector;
+};
+
+void joinBodies(
+        Context &ctx,
+        Entity body_grp,
+        Entity parent,
+        Entity child,
+        JointSlider slider_info);
 
 void attachLimit(
         Context &ctx,

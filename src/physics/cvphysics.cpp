@@ -1074,18 +1074,18 @@ inline void forwardKinematics(Context &ctx,
         case DofType::Hinge: {
             // Find the hinge axis orientation in world space
             Vector3 rotated_hinge_axis =
-                parent_tmp_state.composedRot.rotateVec(hier_desc.hingeAxis);
+                parent_tmp_state.composedRot.rotateVec(hier_desc.axis);
 
             // Calculate the composed rotation applied to the child entity.
             tmp_state.composedRot = parent_tmp_state.composedRot *
-                Quat::angleAxis(position.q[0], hier_desc.hingeAxis);
+                Quat::angleAxis(position.q[0], hier_desc.axis);
 
             // Calculate the composed COM position of the child
             //  (parent COM + R_{parent} * (rel_pos_parent + R_{hinge} * rel_pos_local))
             tmp_state.comPos = parent_tmp_state.comPos +
                 parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
-                        Quat::angleAxis(position.q[0], hier_desc.hingeAxis).
+                        Quat::angleAxis(position.q[0], hier_desc.axis).
                             rotateVec(hier_desc.relPositionLocal)
                 );
 
@@ -1103,6 +1103,30 @@ inline void forwardKinematics(Context &ctx,
             tmp_state.phi.v[4] = tmp_state.anchorPos[1];
             tmp_state.phi.v[5] = tmp_state.anchorPos[2];
 
+        } break;
+
+        case DofType::Slider: {
+            Vector3 rotated_axis =
+                parent_tmp_state.composedRot.rotateVec(hier_desc.axis);
+
+            // The composed rotation for this body is the same as the parent's
+            tmp_state.composedRot = parent_tmp_state.composedRot;
+
+            tmp_state.comPos = parent_tmp_state.comPos +
+                parent_tmp_state.composedRot.rotateVec(
+                        hier_desc.relPositionParent +
+                        hier_desc.relPositionLocal +
+                        position.q[0] * hier_desc.axis
+                );
+
+            // This is the same as the comPos I guess?
+            tmp_state.anchorPos = tmp_state.comPos;
+
+            Vector3 axis = rotated_axis.normalize();
+
+            tmp_state.phi.v[0] = axis[0];
+            tmp_state.phi.v[1] = axis[1];
+            tmp_state.phi.v[2] = axis[2];
         } break;
 
         case DofType::Ball: {
@@ -1319,6 +1343,11 @@ inline void computePhiTrans(
         S[1 + 3 * 5] = -comPos.x;
         S[2 + 3 * 3] = -comPos.y;
         S[2 + 3 * 4] = comPos.x;
+    }
+    else if (num_dofs.type == DofType::Slider) {
+        S[0] = phi.v[0];
+        S[1] = phi.v[1];
+        S[2] = phi.v[2];
     }
     else if (num_dofs.type == DofType::Hinge) {
         // S = [r \times hinge; hinge]
@@ -3455,8 +3484,15 @@ inline float* computePhi(Context &ctx,
         S[1 + 6 * 5] = -comPos.x;
         S[2 + 6 * 3] = -comPos.y;
         S[2 + 6 * 4] = comPos.x;
-    }
-    else if (num_dofs.type == DofType::Hinge) {
+    } else if (num_dofs.type == DofType::Slider) {
+        // This is just the axis of the slider.
+        S[0] = phi.v[0];
+        S[1] = phi.v[1];
+        S[2] = phi.v[2];
+        S[3] = 0.f;
+        S[4] = 0.f;
+        S[5] = 0.f;
+    } else if (num_dofs.type == DofType::Hinge) {
         // S = [r \times hinge; hinge]
         Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
         Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
@@ -3468,8 +3504,7 @@ inline float* computePhi(Context &ctx,
         S[3] = hinge.x;
         S[4] = hinge.y;
         S[5] = hinge.z;
-    }
-    else if (num_dofs.type == DofType::Ball) {
+    } else if (num_dofs.type == DofType::Ball) {
         // This will just get right-multiplied by the angular velocity
         Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
         anchor_pos -= origin;
@@ -3493,10 +3528,10 @@ inline float* computePhi(Context &ctx,
             S[col * 6 + 4] = parent_rot[col][1];
             S[col * 6 + 5] = parent_rot[col][2];
         }
-    }
-    else {
+    } else {
         MADRONA_UNREACHABLE();
     }
+
     return S;
 }
 
@@ -3521,6 +3556,17 @@ inline float* computePhiDot(Context &ctx,
         S_dot[1 + 6 * 5] = -v_trans.x;
         S_dot[2 + 6 * 3] = -v_trans.y;
         S_dot[2 + 6 * 4] = v_trans.x;
+    }
+    else if (num_dofs.type == DofType::Slider) {
+        // S_dot = v [spatial cross] S
+        SpatialVector S_sv = SpatialVector::fromVec(S);
+        SpatialVector S_dot_sv = v_hat.cross(S_sv);
+        S_dot[0] = S_dot_sv.linear.x;
+        S_dot[1] = S_dot_sv.linear.y;
+        S_dot[2] = S_dot_sv.linear.z;
+        S_dot[3] = S_dot_sv.angular.x;
+        S_dot[4] = S_dot_sv.angular.y;
+        S_dot[5] = S_dot_sv.angular.z;
     }
     else if (num_dofs.type == DofType::Hinge) {
         // S_dot = v [spatial cross] S
@@ -4095,6 +4141,23 @@ inline void recursiveNewtonEuler(Context &ctx,
             tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
             tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
         }
+        else if (num_dofs.type == DofType::Slider) {
+            assert(hier_desc.parent != Entity::none());
+            auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+            tmp_state.sVel = parent_tmp_state.sVel;
+            tmp_state.sAcc = parent_tmp_state.sAcc;
+
+            // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
+            // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
+            float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+                parent_tmp_state.sVel);
+
+            float q_dot = velocity.qv[0];
+            for (int j = 0; j < 6; ++j) {
+                tmp_state.sVel[j] += S[j] * q_dot;
+                tmp_state.sAcc[j] += S_dot[j] * q_dot;
+            }
+        }
         else if (num_dofs.type == DofType::Hinge) {
             assert(hier_desc.parent != Entity::none());
             auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
@@ -4410,7 +4473,7 @@ inline void brobdingnag(Context &ctx,
         float *J_c_body_scratch = (float *)ctx.tmpAlloc(
                 3 * max_dofs * sizeof(float));
 
-        for(CountT ct_idx = 0; ct_idx < num_contacts; ++ct_idx) {
+        for (CountT ct_idx = 0; ct_idx < num_contacts; ++ct_idx) {
             ContactConstraint contact = contacts[ct_idx];
             ContactTmpState &tmp_state = contacts_tmp_state[ct_idx];
 
@@ -4611,6 +4674,12 @@ inline void integrationStep(Context &ctx,
         position.q[5] = new_rot.y;
         position.q[6] = new_rot.z;
     }
+    else if (numDofs.type == DofType::Slider) {
+        printf("slider accel: %f\n", acceleration.dqv[0]);
+
+        velocity.qv[0] += h * acceleration.dqv[0];
+        position.q[0] += h * velocity.qv[0];
+    }
     else if (numDofs.type == DofType::Hinge) {
         velocity.qv[0] += h * acceleration.dqv[0];
         position.q[0] += h * velocity.qv[0];
@@ -4672,6 +4741,11 @@ inline void convertPostSolve(
     }
     else if (num_dofs.type == DofType::Hinge) {
         position = tmp_state.comPos + 
+                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+        rotation = tmp_state.composedRot * body_obj_data.rotation;
+    }
+    else if (num_dofs.type == DofType::Slider) {
+        position = tmp_state.comPos +
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot * body_obj_data.rotation;
     }
@@ -4990,6 +5064,11 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
         }
     } break;
 
+    case DofType::Slider: {
+        pos.q[0] = 0.f;
+        vel.qv[0] = 0.f;
+    } break;
+
     case DofType::Hinge: {
         pos.q[0] = 0.0f;
         vel.qv[0] = 0.f;
@@ -5185,7 +5264,7 @@ void joinBodies(Context &ctx,
     hier_desc.relPositionParent = hinge_info.relPositionParent;
     hier_desc.relPositionLocal = hinge_info.relPositionChild;
 
-    hier_desc.hingeAxis = hinge_info.hingeAxis;
+    hier_desc.axis = hinge_info.hingeAxis;
 
     hier_desc.leaf = true;
     hier_desc.bodyGroup = body_grp;
@@ -5218,6 +5297,41 @@ void joinBodies(Context &ctx,
     hier_desc.parent = parent_physics_entity;
     hier_desc.relPositionParent = ball_info.relPositionParent;
     hier_desc.relPositionLocal = ball_info.relPositionChild;
+
+    hier_desc.leaf = true;
+    hier_desc.bodyGroup = body_grp;
+
+    hier_desc.index = grp.bodyCounter;
+    hier_desc.parentIndex = parent_hier_desc.index;
+
+
+    grp.bodies(ctx)[grp.bodyCounter] = child_physics_entity;
+
+    // Make the parent no longer a leaf
+    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
+
+    ++grp.bodyCounter;
+    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
+}
+
+void joinBodies(
+        Context &ctx,
+        Entity body_grp,
+        Entity parent_physics_entity,
+        Entity child_physics_entity,
+        JointSlider slider_info)
+{
+    BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
+
+    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
+    auto &parent_hier_desc =
+        ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
+
+    hier_desc.parent = parent_physics_entity;
+    hier_desc.relPositionParent = slider_info.relPositionParent;
+    hier_desc.relPositionLocal = slider_info.relPositionChild;
+
+    hier_desc.axis = slider_info.slideVector;
 
     hier_desc.leaf = true;
     hier_desc.bodyGroup = body_grp;
