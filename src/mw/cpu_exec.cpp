@@ -180,7 +180,8 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs,
                 solve->J_c,
                 solve->J_e,
                 solve->mu,
-                solve->penetrations);
+                solve->penetrations,
+                solve->eqResiduals);
 
         solve->resPtr = res;
 

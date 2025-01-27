@@ -879,6 +879,7 @@ struct CVSolveData {
     float *J_e;
     float *mu;
     float *penetrations;
+    float *eqResiduals;
 
     uint32_t massDim;
     uint32_t freeAccDim;
@@ -3293,6 +3294,7 @@ inline void solveCPU(Context &ctx,
         cv_sing.cvxSolve->numEqualityRows = cv_sing.numRowsJe;
         cv_sing.cvxSolve->mu = cv_sing.mu;
         cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
+        cv_sing.cvxSolve->eqResiduals = cv_sing.eqResiduals;
 
         cv_sing.cvxSolve->callSolve.store_release(1);
         while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
@@ -4478,15 +4480,19 @@ inline void brobdingnag(Context &ctx,
             uint32_t total_num_rows = 0;
 
             for (uint32_t i = 0; i < num_grps; ++i) {
-                row_start[i] = block_offset;
-                block_offset += hiers[i].numEqualityRows;
+                row_start[i] = row_offset;
+                row_offset += hiers[i].numEqualityRows;
 
                 total_num_rows += hiers[i].numEqualityRows;
             }
 
             float *J_e = (float *)ctx.tmpAlloc(
-                    total_num_rows * total_num_dofs);
+                    total_num_rows * total_num_dofs * sizeof(float));
             memset(J_e, 0, total_num_rows * total_num_dofs * sizeof(float));
+
+            float *residuals = (float *)ctx.tmpAlloc(
+                    total_num_rows * sizeof(float));
+            memset(residuals, 0, total_num_rows * sizeof(float));
 
             // This is much easier to do with parallel execution
             for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
@@ -4519,6 +4525,8 @@ inline void brobdingnag(Context &ctx,
 
                         to_change[0] =
                             limit.hinge.dConstraintViolation(pos.q[0]);
+
+                        residuals[glob_row_offset] = limit.hinge.constraintViolation(pos.q[0]);
                     } break;
 
                     case DofObjectLimit::Type::Slider: {
@@ -4528,6 +4536,8 @@ inline void brobdingnag(Context &ctx,
 
                         to_change[0] =
                             limit.slider.dConstraintViolation(pos.q[0]);
+
+                        residuals[glob_row_offset] = limit.slider.constraintViolation(pos.q[0]);
                     } break;
 
                     default: {
@@ -4540,6 +4550,7 @@ inline void brobdingnag(Context &ctx,
             cv_sing.J_e = J_e;
             cv_sing.numRowsJe = total_num_rows;
             cv_sing.numColsJe = total_num_dofs;
+            cv_sing.eqResiduals = residuals;
         }
 #endif
 

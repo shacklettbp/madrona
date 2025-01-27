@@ -40,8 +40,23 @@ float HingeLimit::dConstraintViolation(float q)
     } else if (c2 < 0.f) {
         return -1.f;
     } else {
-        // Return anything
-        return -1.f;
+        // Anything
+        return 1.f;
+    }
+}
+
+float HingeLimit::constraintViolation(float q)
+{
+    float c1 = q - lower;
+    float c2 = upper - q;
+
+    if (c1 < 0.f) {
+        return c1;
+    } else if (c2 < 0.f) {
+        return c2;
+    } else {
+        // Anything
+        return 0.f;
     }
 }
 
@@ -56,7 +71,22 @@ float SliderLimit::dConstraintViolation(float q)
         return -1.f;
     } else {
         // Return anything
-        return -1.f;
+        return 1.f;
+    }
+}
+
+float SliderLimit::constraintViolation(float q)
+{
+    float c1 = q - lower;
+    float c2 = upper - q;
+
+    if (c1 < 0.f) {
+        return c1;
+    } else if (c2 < 0.f) {
+        return c2;
+    } else {
+        // Anything
+        return 0.f;
     }
 }
 

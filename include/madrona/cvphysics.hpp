@@ -253,6 +253,7 @@ struct HingeLimit {
 
     // dC/dq
     inline float dConstraintViolation(float q);
+    inline float constraintViolation(float q);
 };
 
 struct SliderLimit {
@@ -261,6 +262,7 @@ struct SliderLimit {
 
     // dC/dq
     inline float dConstraintViolation(float q);
+    inline float constraintViolation(float q);
 };
 
 struct DofObjectLimit {
