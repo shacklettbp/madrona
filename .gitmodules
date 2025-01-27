@@ -37,3 +37,6 @@
 [submodule "external/cccl"]
 	path = external/cccl
 	url = https://github.com/NVIDIA/cccl.git
+[submodule "external/tinyxml2"]
+    path = external/tinyxml2
+    url =https://github.com/leethomason/tinyxml2.git

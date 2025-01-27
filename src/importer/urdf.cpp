@@ -1,11 +1,12 @@
 #include "urdf.hpp"
 #include <madrona/math.hpp>
+#include <madrona/cvphysics.hpp>
 
+#include <map>
 #include <string>
 #include <sstream>
 #include <fstream>
 #include <tinyxml2.h>
-#include <unordered_map>
 
 #define massert(exp, msg) assert((void(msg), exp))
 
@@ -99,9 +100,9 @@ struct URDFLink {
 };
 
 enum class URDFJointType {
-    Revolute,
-    Continuous,
-    Prismatic,
+    Revolute, // Hinge with limits
+    Continuous, // Hinge without limits
+    Prismatic, // Sliding joint with limits
     Floating,
     Planar,
     Fixed,
@@ -155,9 +156,9 @@ struct URDFJoint {
 
 struct URDFModel {
     std::string name;
-    std::unordered_map<std::string, URDFMaterial> materials;
-    std::unordered_map<std::string, URDFLink> links;
-    std::unordered_map<std::string, URDFJoint> joints;
+    std::map<std::string, URDFMaterial> materials;
+    std::map<std::string, URDFLink> links;
+    std::map<std::string, URDFJoint> joints;
     std::string rootLinkName;
 };
 
@@ -792,7 +793,7 @@ static void parseJoint(
 
 static void initTree(
         URDFModel &model,
-        std::unordered_map<std::string, std::string> &parent_link_tree)
+        std::map<std::string, std::string> &parent_link_tree)
 {
     // loop through all joints, for every link, assign children links and children joints
     for (auto joint = model.joints.begin();
@@ -834,13 +835,13 @@ static void initTree(
 
 static void initRoot(
         URDFModel &model,
-        const std::unordered_map<std::string, std::string> &parent_link_tree)
+        const std::map<std::string, std::string> &parent_link_tree)
 { 
     // find the links that have no parent in the tree
     for (auto l = model.links.begin();
             l != model.links.end();
             l++) {
-        std::unordered_map<std::string, std::string>::const_iterator parent =
+        std::map<std::string, std::string>::const_iterator parent =
             parent_link_tree.find(l->first);
 
         if (parent == parent_link_tree.end()) {
@@ -937,7 +938,7 @@ static URDFModel parseURDF(const std::string &xml_string)
 
     // every link has children links and joints, but no parents, so we create a
     // local convenience data structure for keeping child->parent relations
-    std::unordered_map<std::string, std::string> parent_link_tree;
+    std::map<std::string, std::string> parent_link_tree;
     parent_link_tree.clear();
 
     // building tree: name mapping
@@ -955,6 +956,14 @@ URDFLoader::URDFLoader(Span<char> err_buf)
 
 URDFLoader::~URDFLoader()
 {
+}
+
+phys::cv::ModelConfig convertToModelConfig(
+        const URDFModel &model)
+{
+    // First, we need to create an ordering for the links
+    std::vector<std::string> sorted_links;
+    sorted_links.push_back(model.rootLinkName);
 }
 
 bool URDFLoader::load(

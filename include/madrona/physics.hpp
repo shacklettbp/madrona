@@ -117,11 +117,13 @@ using CVXSolveFn = float *(*)(
         void *data,
         uint32_t total_num_dofs,
         uint32_t num_contact_pts,
+        uint32_t num_equality_rows,
         float h,
         float *mass,
         float *free_acc,
         float *vel,
         float *J_c,
+        float *J_e,
         float *mu,
         float *penetrations);
 
@@ -135,11 +137,13 @@ struct CVXSolve {
 
     uint32_t totalNumDofs;
     uint32_t numContactPts;
+    uint32_t numEqualityRows;
     float h;
     float *mass;
     float *free_acc;
     float *vel;
     float *J_c;
+    float *J_e;
     float *mu;
     float *penetrations;
 

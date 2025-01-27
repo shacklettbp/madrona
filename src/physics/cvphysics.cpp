@@ -191,7 +191,7 @@ void warpSetZero(void *dst, uint32_t num_bytes)
     int32_t lane_id = threadIdx.x % 32;
     int32_t bytes_per_warp = (num_bytes + 31) / 32;
     int32_t bytes_to_set =
-        max(0, min(num_bytes - lane_id * bytes_per_warp, bytes_per_warp));
+        max(0, min((int32_t)num_bytes - lane_id * bytes_per_warp, bytes_per_warp));
 
     memset(
         (uint8_t *)dst + bytes_per_warp * lane_id,
@@ -876,14 +876,20 @@ struct CVSolveData {
     float *freeAcc;
     float *vel;
     float *J_c;
+    float *J_e;
     float *mu;
     float *penetrations;
 
     uint32_t massDim;
     uint32_t freeAccDim;
     uint32_t velDim;
+
     uint32_t numRowsJc;
     uint32_t numColsJc;
+
+    uint32_t numRowsJe;
+    uint32_t numColsJe;
+
     uint32_t muDim;
     uint32_t penetrationsDim;
 
@@ -1063,8 +1069,8 @@ inline void forwardKinematics(Context &ctx,
             ctx.get<DofObjectTmpState>(parent_e);
 
         // We can calculate our stuff.
-        switch (num_dofs.numDofs) {
-        case (uint32_t)DofType::Hinge: {
+        switch (num_dofs.type) {
+        case DofType::Hinge: {
             // Find the hinge axis orientation in world space
             Vector3 rotated_hinge_axis =
                 parent_tmp_state.composedRot.rotateVec(hier_desc.hingeAxis);
@@ -1098,7 +1104,7 @@ inline void forwardKinematics(Context &ctx,
 
         } break;
 
-        case (uint32_t)DofType::Ball: {
+        case DofType::Ball: {
             Quat joint_rot = Quat{
                 position.q[0], position.q[1], position.q[2], position.q[3] 
             };
@@ -1229,7 +1235,7 @@ inline void computePhiTrans(
 {
     Phi phi = tmp_state.phi;
 
-    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+    if (num_dofs.type == DofType::FreeBody) {
         // S = [1_3x3 r^x; 0 1_3x3], column-major
         // memset(S, 0.f, 6 * 3 * sizeof(float));
 
@@ -1248,7 +1254,7 @@ inline void computePhiTrans(
         S[2 + 3 * 3] = -comPos.y;
         S[2 + 3 * 4] = comPos.x;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+    else if (num_dofs.type == DofType::Hinge) {
         // S = [r \times hinge; hinge]
         Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
         Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
@@ -1261,7 +1267,7 @@ inline void computePhiTrans(
         // S[4] = hinge.y;
         // S[5] = hinge.z;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+    else if (num_dofs.type == DofType::Ball) {
         // This will just get right-multiplied by the angular velocity
         Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
         anchor_pos -= origin;
@@ -1296,7 +1302,7 @@ inline void computePhiTrans(
 {
     Phi phi = tmp_state.phi;
 
-    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+    if (num_dofs.type == DofType::FreeBody) {
         // S = [1_3x3 r^x; 0 1_3x3], column-major
         memset(S, 0.f, 6 * 3 * sizeof(float));
         // Diagonal identity
@@ -1313,7 +1319,7 @@ inline void computePhiTrans(
         S[2 + 3 * 3] = -comPos.y;
         S[2 + 3 * 4] = comPos.x;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+    else if (num_dofs.type == DofType::Hinge) {
         // S = [r \times hinge; hinge]
         Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
         Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
@@ -1326,7 +1332,7 @@ inline void computePhiTrans(
         // S[4] = hinge.y;
         // S[5] = hinge.z;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+    else if (num_dofs.type == DofType::Ball) {
         // This will just get right-multiplied by the angular velocity
         Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
         anchor_pos -= origin;
@@ -2585,7 +2591,7 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                 for (uint32_t i = 0; i < curr_sd->numBodyGroups; ++i) {
                     world_block_start[i] = accum;
                     accum += hiers[i].numDofs;
-                    hiers[i].tmpIdx = i;
+                    hiers[i].tmpIdx0 = i;
                 }
             }
             __syncwarp();
@@ -2633,8 +2639,8 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                 alt,
                 ref_num_dofs,
                 alt_num_dofs,
-                (ref_num_dofs == (uint32_t)DofType::FixedBody),
-                (alt_num_dofs == (uint32_t)DofType::FixedBody),
+                (ref_num_dofs == 0),
+                (alt_num_dofs == 0),
                 contacts[ct_idx].numPoints
             };
         };
@@ -2675,7 +2681,7 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     c_info.tmpState.C,
                                     contact_pt,
                                     j_c,
-                                    world_block_start[grp->tmpIdx],
+                                    world_block_start[grp->tmpIdx0],
                                     curr_jacc_row,
                                     curr_sd->numRowsJc,
                                     -1.f,
@@ -2695,7 +2701,7 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     c_info.tmpState.C,
                                     contact_pt,
                                     j_c,
-                                    world_block_start[grp->tmpIdx],
+                                    world_block_start[grp->tmpIdx0],
                                     curr_jacc_row,
                                     curr_sd->numRowsJc,
                                     1.f,
@@ -3283,6 +3289,8 @@ inline void solveCPU(Context &ctx,
         cv_sing.cvxSolve->free_acc = cv_sing.freeAcc;
         cv_sing.cvxSolve->vel = cv_sing.vel;
         cv_sing.cvxSolve->J_c = cv_sing.J_c;
+        cv_sing.cvxSolve->J_e = cv_sing.J_e;
+        cv_sing.cvxSolve->numEqualityRows = cv_sing.numRowsJe;
         cv_sing.cvxSolve->mu = cv_sing.mu;
         cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
 
@@ -3323,7 +3331,7 @@ inline void computeBodyCOM(Context &ctx,
                            const DofObjectInertial inertial,
                            const DofObjectNumDofs num_dofs)
 {
-    if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+    if (num_dofs.type == DofType::FixedBody) {
         tmp_state.scratch[0] =
             tmp_state.scratch[1] =
             tmp_state.scratch[2] =
@@ -3365,7 +3373,7 @@ inline void computeSpatialInertias(Context &ctx,
                                    const DofObjectInertial inertial,
                                    const DofObjectNumDofs num_dofs)
 {
-    if(num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+    if(num_dofs.type == DofType::FixedBody) {
         tmp_state.spatialInertia.mass = 0.f;
         return;
     }
@@ -3429,7 +3437,7 @@ inline float* computePhi(Context &ctx,
 
     float *S = tmp_state.getPhiFull(ctx);
 
-    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+    if (num_dofs.type == DofType::FreeBody) {
         // S = [1_3x3 r^x; 0 1_3x3], column-major
         memset(S, 0.f, 6 * 6 * sizeof(float));
         // Diagonal identity
@@ -3446,7 +3454,7 @@ inline float* computePhi(Context &ctx,
         S[2 + 6 * 3] = -comPos.y;
         S[2 + 6 * 4] = comPos.x;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+    else if (num_dofs.type == DofType::Hinge) {
         // S = [r \times hinge; hinge]
         Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
         Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
@@ -3459,7 +3467,7 @@ inline float* computePhi(Context &ctx,
         S[4] = hinge.y;
         S[5] = hinge.z;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+    else if (num_dofs.type == DofType::Ball) {
         // This will just get right-multiplied by the angular velocity
         Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
         anchor_pos -= origin;
@@ -3500,7 +3508,7 @@ inline float* computePhiDot(Context &ctx,
     // Same storage location, but will need to be incremented based on size of S
     float *S_dot = S + 6 * num_dofs.numDofs;
 
-    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+    if (num_dofs.type == DofType::FreeBody) {
         // S_dot = [0_3x3 v^x; 0_3x3 0_3x3], column-major
         memset(S_dot, 0.f, 6 * 6 * sizeof(float));
         // v^x Skew symmetric matrix
@@ -3512,7 +3520,7 @@ inline float* computePhiDot(Context &ctx,
         S_dot[2 + 6 * 3] = -v_trans.y;
         S_dot[2 + 6 * 4] = v_trans.x;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+    else if (num_dofs.type == DofType::Hinge) {
         // S_dot = v [spatial cross] S
         SpatialVector S_sv = SpatialVector::fromVec(S);
         SpatialVector S_dot_sv = v_hat.cross(S_sv);
@@ -3523,7 +3531,7 @@ inline float* computePhiDot(Context &ctx,
         S_dot[4] = S_dot_sv.angular.y;
         S_dot[5] = S_dot_sv.angular.z;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+    else if (num_dofs.type == DofType::Ball) {
         // S_dot = v [spatial cross] S
         for (int i = 0; i < 3; ++i) {
             SpatialVector S_sv = SpatialVector::fromVec(S + (i * 6));
@@ -3911,7 +3919,7 @@ inline void recursiveNewtonEuler(Context &ctx,
 
             float *S = tmp_state.getPhiFull(ctx);
 
-            if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+            if (num_dofs.type == DofType::FreeBody) {
                 // Free bodies must be root of their hierarchy
                 SpatialVector v_body = {
                     {velocity.qv[0], velocity.qv[1], velocity.qv[2]},
@@ -3931,12 +3939,12 @@ inline void recursiveNewtonEuler(Context &ctx,
                     }
                 }
             }
-            else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+            else if (num_dofs.type == DofType::FixedBody) {
                 // Fixeds bodies must also be root of their hierarchy
                 tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
                 tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
             }
-            else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+            else if (num_dofs.type == DofType::Hinge) {
                 assert(hier_desc.parent != Entity::none());
                 auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
                 tmp_state.sVel = parent_tmp_state.sVel;
@@ -3954,7 +3962,7 @@ inline void recursiveNewtonEuler(Context &ctx,
                     tmp_state.sAcc[j] += S_dot[j] * q_dot;
                 }
             }
-            else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+            else if (num_dofs.type == DofType::Ball) {
                 assert(hier_desc.parent != Entity::none());
                 auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
                 tmp_state.sVel = parent_tmp_state.sVel;
@@ -4060,7 +4068,7 @@ inline void recursiveNewtonEuler(Context &ctx,
 
         float *S = tmp_state.getPhiFull(ctx);
 
-        if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+        if (num_dofs.type == DofType::FreeBody) {
             // Free bodies must be root of their hierarchy
             SpatialVector v_body = {
                 {velocity.qv[0], velocity.qv[1], velocity.qv[2]},
@@ -4080,12 +4088,12 @@ inline void recursiveNewtonEuler(Context &ctx,
                 }
             }
         }
-        else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+        else if (num_dofs.type == DofType::FixedBody) {
             // Fixeds bodies must also be root of their hierarchy
             tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
             tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
         }
-        else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+        else if (num_dofs.type == DofType::Hinge) {
             assert(hier_desc.parent != Entity::none());
             auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
             tmp_state.sVel = parent_tmp_state.sVel;
@@ -4103,7 +4111,7 @@ inline void recursiveNewtonEuler(Context &ctx,
                 tmp_state.sAcc[j] += S_dot[j] * q_dot;
             }
         }
-        else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+        else if (num_dofs.type == DofType::Ball) {
             assert(hier_desc.parent != Entity::none());
             auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
             tmp_state.sVel = parent_tmp_state.sVel;
@@ -4191,8 +4199,8 @@ inline void processContacts(Context &ctx,
         || altHier.parent == ref) {
         auto &refNumDofs = ctx.get<DofObjectNumDofs>(ref);
         auto &altNumDofs = ctx.get<DofObjectNumDofs>(alt);
-        if (refNumDofs.numDofs != (uint32_t)DofType::FixedBody
-            && altNumDofs.numDofs != (uint32_t)DofType::FixedBody) {
+        if (refNumDofs.type != DofType::FixedBody
+            && altNumDofs.type != DofType::FixedBody) {
             contact.numPoints = 0;
             return;
         }
@@ -4387,7 +4395,7 @@ inline void brobdingnag(Context &ctx,
         for (CountT i = 0; i < num_grps; ++i) {
             block_start[i] = block_offset;
             block_offset += hiers[i].numDofs;
-            hiers[i].tmpIdx = i;
+            hiers[i].tmpIdx0 = i;
 
             max_dofs = std::max(max_dofs, hiers[i].numDofs);
         }
@@ -4410,8 +4418,8 @@ inline void brobdingnag(Context &ctx,
             auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref);
             auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt);
 
-            bool ref_fixed = ref_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
-            bool alt_fixed = alt_num_dofs.numDofs == (uint32_t)DofType::FixedBody;
+            bool ref_fixed = ref_num_dofs.type == DofType::FixedBody;
+            bool alt_fixed = alt_num_dofs.type == DofType::FixedBody;
 
             // Each of the contact points
             for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
@@ -4426,7 +4434,7 @@ inline void brobdingnag(Context &ctx,
 
                     float *J_ref = computeContactJacobian(ctx, ref_grp,
                         ref_hier_desc, tmp_state.C, contact_pt, J_c,
-                        block_start[ref_grp.tmpIdx], jac_row, J_rows, -1.f,
+                        block_start[ref_grp.tmpIdx0], jac_row, J_rows, -1.f,
                         (ct_idx == 0 && pt_idx == 0));
                 }
                 if(!alt_fixed) {
@@ -4437,7 +4445,7 @@ inline void brobdingnag(Context &ctx,
                     
                     float *J_alt = computeContactJacobian(ctx, alt_grp,
                         alt_hier_desc, tmp_state.C, contact_pt, J_c,
-                        block_start[alt_grp.tmpIdx], jac_row, J_rows, 1.f,
+                        block_start[alt_grp.tmpIdx0], jac_row, J_rows, 1.f,
                         (ct_idx == 0 && pt_idx == 0));
                 }
                 jac_row += 3;
@@ -4445,6 +4453,94 @@ inline void brobdingnag(Context &ctx,
         }
 
         cv_sing.J_c = J_c;
+#endif
+
+#if !defined(MADRONA_GPU_MODE)
+        {
+            // This gives us the start in the global array of generalized
+            // velocities.
+            uint32_t *block_start = (uint32_t *)ctx.tmpAlloc( 
+                    num_grps * sizeof(uint32_t));
+            uint32_t block_offset = 0;
+
+            for (CountT i = 0; i < num_grps; ++i) {
+                block_start[i] = block_offset;
+                block_offset += hiers[i].numDofs;
+                hiers[i].tmpIdx0 = i;
+
+                max_dofs = std::max(max_dofs, hiers[i].numDofs);
+            }
+
+            // Starting row in the equality jacobian for each body group
+            uint32_t *row_start = (uint32_t *)ctx.tmpAlloc(
+                    num_grps * sizeof(uint32_t));
+            uint32_t row_offset = 0;
+            uint32_t total_num_rows = 0;
+
+            for (uint32_t i = 0; i < num_grps; ++i) {
+                row_start[i] = block_offset;
+                block_offset += hiers[i].numEqualityRows;
+
+                total_num_rows += hiers[i].numEqualityRows;
+            }
+
+            float *J_e = (float *)ctx.tmpAlloc(
+                    total_num_rows * total_num_dofs);
+            memset(J_e, 0, total_num_rows * total_num_dofs * sizeof(float));
+
+            // This is much easier to do with parallel execution
+            for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
+                BodyGroupHierarchy &hier = hiers[grp_idx];
+                Entity *bodies = hier.bodies(ctx);
+
+                for (uint32_t body_idx = 0; body_idx < hier.numBodies; ++body_idx) {
+                    DofObjectLimit limit = ctx.get<DofObjectLimit>(
+                            bodies[body_idx]);
+                    DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(
+                            bodies[body_idx]);
+
+                    DofObjectPosition &pos = ctx.get<DofObjectPosition>(
+                            bodies[body_idx]);
+
+                    if (limit.type == DofObjectLimit::Type::None) {
+                        continue;
+                    }
+
+                    uint32_t glob_row_offset = row_start[grp_idx] +
+                                               limit.rowOffset;
+                    uint32_t glob_col_offset = block_start[grp_idx] +
+                                               tmp_state.dofOffset;
+
+                    switch (limit.type) {
+                    case DofObjectLimit::Type::Hinge: {
+                        float *to_change = J_e + 
+                            total_num_rows * glob_col_offset +
+                            glob_row_offset;
+
+                        to_change[0] =
+                            limit.hinge.dConstraintViolation(pos.q[0]);
+                    } break;
+
+                    case DofObjectLimit::Type::Slider: {
+                        float *to_change = J_e + 
+                            total_num_rows * glob_col_offset +
+                            glob_row_offset;
+
+                        to_change[0] =
+                            limit.slider.dConstraintViolation(pos.q[0]);
+                    } break;
+
+                    default: {
+                        MADRONA_UNREACHABLE();
+                    } break;
+                    }
+                }
+            }
+
+            cv_sing.J_e = J_e;
+            cv_sing.numRowsJe = total_num_rows;
+            cv_sing.numColsJe = total_num_dofs;
+        }
 #endif
 
         cv_sing.totalNumDofs = total_num_dofs;
@@ -4458,7 +4554,6 @@ inline void brobdingnag(Context &ctx,
         cv_sing.mu = full_mu;
         cv_sing.penetrations = full_penetration;
         cv_sing.dofOffsets = block_start;
-        // cv_sing.massSparse = mass_sparse;
 #endif
 
         cv_sing.numBodyGroups = num_grps;
@@ -4482,7 +4577,7 @@ inline void integrationStep(Context &ctx,
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     float h = physics_state.h;
 
-    if (numDofs.numDofs == (uint32_t)DofType::FreeBody) {
+    if (numDofs.type == DofType::FreeBody) {
         // Symplectic Euler
         for (int i = 0; i < 6; ++i) {
             velocity.qv[i] += h * acceleration.dqv[i];
@@ -4505,14 +4600,14 @@ inline void integrationStep(Context &ctx,
         position.q[5] = new_rot.y;
         position.q[6] = new_rot.z;
     }
-    else if (numDofs.numDofs == (uint32_t)DofType::Hinge) {
+    else if (numDofs.type == DofType::Hinge) {
         velocity.qv[0] += h * acceleration.dqv[0];
         position.q[0] += h * velocity.qv[0];
     }
-    else if (numDofs.numDofs == (uint32_t)DofType::FixedBody) {
+    else if (numDofs.type == DofType::FixedBody) {
         // Do nothing
     }
-    else if (numDofs.numDofs == (uint32_t)DofType::Ball) {
+    else if (numDofs.type == DofType::Ball) {
         // Symplectic Euler
         for (int i = 0; i < 3; ++i) {
             velocity.qv[i] += h * acceleration.dqv[i];
@@ -4559,23 +4654,23 @@ inline void convertPostSolve(
 
     scale = body_obj_data.scale;
 
-    if (num_dofs.numDofs == (uint32_t)DofType::FreeBody) {
+    if (num_dofs.type == DofType::FreeBody) {
         position = tmp_state.comPos + 
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot * body_obj_data.rotation;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Hinge) {
+    else if (num_dofs.type == DofType::Hinge) {
         position = tmp_state.comPos + 
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot * body_obj_data.rotation;
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::FixedBody) {
+    else if (num_dofs.type == DofType::FixedBody) {
         position = tmp_state.comPos + 
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot * body_obj_data.rotation;
         // Do nothing
     }
-    else if (num_dofs.numDofs == (uint32_t)DofType::Ball) {
+    else if (num_dofs.type == DofType::Ball) {
         position = tmp_state.comPos + 
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot * body_obj_data.rotation;
@@ -4595,6 +4690,7 @@ void registerTypes(ECSRegistry &registry)
 
     registry.registerSingleton<CVSolveData>();
 
+    registry.registerComponent<DofObjectLimit>();
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
     registry.registerComponent<DofObjectAcceleration>();
@@ -4830,6 +4926,8 @@ Entity makeBodyGroup(Context &ctx, uint32_t num_bodies)
         sizeof(MRElement128b);
     hier.mrBodies = ctx.allocMemoryRange<MRElement128b>(num_elems);
 
+    hier.numEqualityRows = 0;
+
     return e;
 }
 
@@ -4845,6 +4943,7 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
     auto &inertial = ctx.get<DofObjectInertial>(physical_entity);
     auto &friction = ctx.get<DofObjectFriction>(physical_entity);
+    auto &limit = ctx.get<DofObjectLimit>(physical_entity);
 
     inertial.mass = desc.mass;
     inertial.inertia = desc.inertia;
@@ -4858,10 +4957,12 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     tmp_state.numVisualObjs = desc.numVisualObjs;
     tmp_state.visualObjOffset = grp_info.visualObjsCounter;
 
+    limit.type = DofObjectLimit::Type::None;
+
     grp_info.collisionObjsCounter += desc.numCollisionObjs;;
     grp_info.visualObjsCounter += desc.numVisualObjs;
 
-    switch ((DofType)desc.numDofs) {
+    switch ((DofType)desc.type) {
     case DofType::FreeBody: {
         pos.q[0] = desc.initialPos.x;
         pos.q[1] = desc.initialPos.y;
@@ -4913,8 +5014,10 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     } break;
     }
 
-    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = 
-        desc.numDofs;
+    ctx.get<DofObjectNumDofs>(physical_entity) = {
+        desc.type,
+        getNumDofs(desc.type),
+    };
 
     grp_info.bodyCounter++;
 
@@ -5007,6 +5110,36 @@ void attachVisual(
     };
 }
 
+void attachLimit(Context &ctx,
+                 Entity grp,
+                 Entity body,
+                 HingeLimit hinge_limit)
+{
+    BodyGroupHierarchy &hier = ctx.get<BodyGroupHierarchy>(grp);
+    DofObjectLimit &limit = ctx.get<DofObjectLimit>(body);
+
+    limit.type = DofObjectLimit::Type::Hinge;
+    limit.hinge = hinge_limit;
+    limit.rowOffset = hier.numEqualityRows;
+
+    hier.numEqualityRows += 1;
+}
+
+void attachLimit(Context &ctx,
+                 Entity grp,
+                 Entity body,
+                 SliderLimit slider_limit)
+{
+    BodyGroupHierarchy &hier = ctx.get<BodyGroupHierarchy>(grp);
+    DofObjectLimit &limit = ctx.get<DofObjectLimit>(body);
+
+    limit.type = DofObjectLimit::Type::Slider;
+    limit.slider = slider_limit;
+    limit.rowOffset = hier.numEqualityRows;
+
+    hier.numEqualityRows += 1;
+}
+
 void setRoot(Context &ctx,
              Entity body_group,
              Entity body)
@@ -5025,7 +5158,7 @@ void setRoot(Context &ctx,
     body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
 }
 
-void jointBodies(Context &ctx,
+void joinBodies(Context &ctx,
                  Entity body_grp,
                  Entity parent_physics_entity,
                  Entity child_physics_entity,
@@ -5091,213 +5224,82 @@ void joinBodies(Context &ctx,
     grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
 }
 
-#if 0
-void setCVGroupRoot(Context &ctx,
-                    Entity body_group,
-                    Entity body)
+Entity loadModel(Context &ctx,
+                 ModelConfig cfg,
+                 ModelData model_data)
 {
-    Entity physics_entity =
-        ctx.get<CVPhysicalComponent>(body).physicsEntity;
+    Entity grp = makeBodyGroup(ctx, cfg.numBodies);
+    Entity *bodies_tmp = 
+        (Entity *)ctx.tmpAlloc(sizeof(Entity) * cfg.numBodies);
 
-    auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physics_entity);
-    hierarchy.leaf = true;
-    hierarchy.index = 0;
-    hierarchy.parentIndex = -1;
-    hierarchy.parent = Entity::none();
-    hierarchy.bodyGroup = body_group;
-
-    auto &body_grp_hier = ctx.get<BodyGroupHierarchy>(body_group);
-
-    body_grp_hier.numBodies = 1;
-    body_grp_hier.bodies(ctx)[0] = physics_entity;
-    body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(physics_entity).numDofs;
-}
-
-void makeCVPhysicsEntity(Context &ctx, 
-                         Entity e,
-                         Position position,
-                         Rotation rotation,
-                         ObjectID obj_id,
-                         DofType dof_type)
-{
-    Entity physical_entity = ctx.makeEntity<DofObjectArchetype>();
-
-    auto &pos = ctx.get<DofObjectPosition>(physical_entity);
-    auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
-    auto &acc = ctx.get<DofObjectAcceleration>(physical_entity);
-    auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
-
-#if 0
-    auto &hierarchy = ctx.get<DofObjectHierarchyDesc>(physical_entity);
-    hierarchy.leaf = true;
-#endif
-
-    switch (dof_type) {
-    case DofType::FreeBody: {
-        pos.q[0] = position.x;
-        pos.q[1] = position.y;
-        pos.q[2] = position.z;
-
-        pos.q[3] = rotation.w;
-        pos.q[4] = rotation.x;
-        pos.q[5] = rotation.y;
-        pos.q[6] = rotation.z;
-
-        for(int i = 0; i < 6; i++) {
-            vel.qv[i] = 0.f;
-            acc.dqv[i] = 0.f;
-        }
-    } break;
-
-    case DofType::Hinge: {
-        pos.q[0] = 0.0f;
-        vel.qv[0] = 0.f;
-    } break;
-    
-    case DofType::Ball: {
-        pos.q[0] = rotation.w;
-        pos.q[1] = rotation.x;
-        pos.q[2] = rotation.y;
-        pos.q[3] = rotation.z;
-
-        for(int i = 0; i < 3; i++) {
-            vel.qv[i] = 0.f;
-            acc.dqv[i] = 0.f;
-        }
-    } break;
-
-    case DofType::FixedBody: {
-        // Keep these around for forward kinematics
-        pos.q[0] = position.x;
-        pos.q[1] = position.y;
-        pos.q[2] = position.z;
-
-        pos.q[3] = rotation.w;
-        pos.q[4] = rotation.x;
-        pos.q[5] = rotation.y;
-        pos.q[6] = rotation.z;
-
-        for(int i = 0; i < 6; i++) {
-            vel.qv[i] = 0.f;
-            acc.dqv[i] = 0.f;
-        }
-    } break;
+    // Create the bodies (links)
+    for (uint32_t i = 0; i < cfg.numBodies; ++i) {
+        bodies_tmp[i] = makeBody(
+                ctx,
+                grp,
+                model_data.bodies[cfg.bodiesOffset + i]);
     }
 
+    // Attach the colliders
+    for (uint32_t i = 0; i < cfg.numColliders; ++i) {
+        CollisionDesc desc = model_data.colliders[cfg.collidersOffset + i];
 
-    ctx.get<ObjectID>(physical_entity) = obj_id;
-    ctx.get<DofObjectNumDofs>(physical_entity).numDofs = (uint32_t)dof_type;
+        attachCollision(
+                ctx, 
+                grp,
+                bodies_tmp[desc.linkIdx],
+                desc.subIndex,
+                desc);
+    }
 
-    ctx.get<CVPhysicalComponent>(e) = {
-        .physicsEntity = physical_entity,
-    };
+    // Attach the visuals
+    for (uint32_t i = 0; i < cfg.numVisuals; ++i) {
+        VisualDesc desc = model_data.visuals[cfg.visualsOffset + i];
 
-#if 0
-#ifdef MADRONA_GPU_MODE
-    static_assert(false, "Need to implement GPU DOF object hierarchy")
-#else
-    // By default, no parent
-    hierarchy.parent = Entity::none();
-#endif
-#endif
+        attachVisual(
+                ctx, 
+                grp,
+                bodies_tmp[desc.linkIdx],
+                desc.subIndex,
+                desc);
+    }
+
+    { // Create the hierarchy
+        setRoot(ctx, grp, bodies_tmp[0]);
+
+        for (uint32_t i = 0; i < cfg.numConnections; ++i) {
+            JointConnection conn =
+                model_data.connections[cfg.connectionsOffset + i];
+
+            switch (conn.type) {
+            case DofType::Hinge: {
+                joinBodies(
+                        ctx,
+                        grp,
+                        bodies_tmp[conn.parentIdx],
+                        bodies_tmp[conn.childIdx],
+                        conn.hinge);
+            } break;
+
+            case DofType::Ball: {
+                joinBodies(
+                        ctx,
+                        grp,
+                        bodies_tmp[conn.parentIdx],
+                        bodies_tmp[conn.childIdx],
+                        conn.ball);
+            } break;
+
+            default: {
+                // Not supported yet
+                assert(false);
+            } break;
+
+            }
+        }
+    }
+
+    return grp;
 }
-
-void cleanupPhysicalEntity(Context &ctx, Entity e)
-{
-    CVPhysicalComponent physical_comp = ctx.get<CVPhysicalComponent>(e);
-    ctx.destroyEntity(physical_comp.physicsEntity);
-}
-void setCVEntityParentHinge(Context &ctx,
-                            Entity body_grp,
-                            Entity parent, Entity child,
-                            Vector3 rel_pos_parent,
-                            Vector3 rel_pos_child,
-                            Vector3 hinge_axis)
-{
-    Entity child_physics_entity =
-        ctx.get<CVPhysicalComponent>(child).physicsEntity;
-    Entity parent_physics_entity =
-        ctx.get<CVPhysicalComponent>(parent).physicsEntity;
-
-    BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
-
-    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
-    auto &parent_hier_desc =
-        ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
-
-    hier_desc.parent = parent_physics_entity;
-    hier_desc.relPositionParent = rel_pos_parent;
-    hier_desc.relPositionLocal = rel_pos_child;
-
-    hier_desc.hingeAxis = hinge_axis;
-
-    hier_desc.leaf = true;
-    hier_desc.bodyGroup = body_grp;
-
-    hier_desc.index = grp.numBodies;
-    hier_desc.parentIndex = parent_hier_desc.index;
-
-
-    grp.bodies(ctx)[grp.numBodies] = child_physics_entity;
-
-    // Make the parent no longer a leaf
-    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
-
-    ++grp.numBodies;
-    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
-}
-
-void setCVEntityParentBall(Context &ctx,
-                           Entity body_grp,
-                           Entity parent, Entity child,
-                           Vector3 rel_pos_parent,
-                           Vector3 rel_pos_child)
-{
-    Entity child_physics_entity =
-        ctx.get<CVPhysicalComponent>(child).physicsEntity;
-    Entity parent_physics_entity =
-        ctx.get<CVPhysicalComponent>(parent).physicsEntity;
-
-    BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
-
-    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
-    auto &parent_hier_desc =
-        ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
-
-    hier_desc.parent = parent_physics_entity;
-    hier_desc.relPositionParent = rel_pos_parent;
-    hier_desc.relPositionLocal = rel_pos_child;
-
-    hier_desc.leaf = true;
-    hier_desc.bodyGroup = body_grp;
-
-    hier_desc.index = grp.numBodies;
-    hier_desc.parentIndex = parent_hier_desc.index;
-
-
-    grp.bodies(ctx)[grp.numBodies] = child_physics_entity;
-
-    // Make the parent no longer a leaf
-    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
-
-    ++grp.numBodies;
-    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
-}
-
-Entity makeCVBodyGroup(Context &ctx, uint32_t num_bodies)
-{
-    Entity e = ctx.makeEntity<BodyGroup>();
-
-    auto &hier = ctx.get<BodyGroupHierarchy>(e);
-    hier.numBodies = 0;
-
-    uint64_t mr_num_bytes = num_bodies * sizeof(Entity);
-    uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
-        sizeof(MRElement128b);
-    hier.mrBodies = ctx.allocMemoryRange<MRElement128b>(num_elems);
-
-    return e;
-}
-#endif
 
 }

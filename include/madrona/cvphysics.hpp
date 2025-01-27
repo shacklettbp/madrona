@@ -7,6 +7,7 @@
 
 namespace madrona::phys::cv {
 
+#if 0
 enum class DofType {
     // The number of unique degrees of freedom (SE3). Maximum number of DOFs is 6
     FreeBody = 6,
@@ -17,6 +18,18 @@ enum class DofType {
     // When we add other types of physics DOF objects, we will encode
     // the number of degrees of freedom they all have here.
 };
+#endif
+
+enum class DofType {
+    FreeBody,
+    Hinge,
+    Ball,
+    FixedBody,
+    Sliding,
+    None
+};
+
+inline uint32_t getNumDofs(DofType type);
 
 static constexpr uint32_t kMaxPositionCoords = 7;
 static constexpr uint32_t kMaxVelocityCoords = 6;
@@ -46,6 +59,7 @@ struct DofObjectAcceleration {
 };
 
 struct DofObjectNumDofs {
+    DofType type;
     uint32_t numDofs;
 };
 
@@ -233,6 +247,41 @@ struct DofObjectTmpState {
     float * getPhiFull(Context &ctx);
 };
 
+struct HingeLimit {
+    float lower;
+    float upper;
+
+    // dC/dq
+    inline float dConstraintViolation(float q);
+};
+
+struct SliderLimit {
+    float lower;
+    float upper;
+
+    // dC/dq
+    inline float dConstraintViolation(float q);
+};
+
+struct DofObjectLimit {
+    enum class Type {
+        Hinge,
+        Slider,
+        None
+    };
+
+    // This is going to depend on the dof type
+    Type type;
+
+    union {
+        HingeLimit hinge;
+        SliderLimit slider;
+    };
+
+    // Offset in the equality jacobian
+    uint32_t rowOffset;
+};
+
 struct DofObjectHierarchyDesc {
     Entity parent;
 
@@ -279,12 +328,8 @@ struct DofObjectArchetype : public Archetype<
     DofObjectInertial,
     DofObjectFriction,
     
-#if 0
-    // Currently, this is being duplicated but it's small. We can
-    // maybe find a way around this later.
-    base::ObjectID,
-#endif
-
+    DofObjectLimit,
+    
     DofObjectNumDofs
 > {};
 
@@ -333,6 +378,8 @@ struct BodyGroupHierarchy {
     // Memory range contains data for all data that is dynamically sized.
     MemoryRange dynData;
 
+    uint32_t numEqualityRows;
+
     // "Expanded" parent array for kinematic tree (chain of 1-DOF joints)
     //   used for factorization. See Featherstone pg. 114
     uint32_t expandedParentOffset;
@@ -354,7 +401,8 @@ struct BodyGroupHierarchy {
     uint32_t dofPrefixSumOffset;
 
     // Temporary index used during stacking
-    uint32_t tmpIdx;
+    uint32_t tmpIdx0;
+    uint32_t tmpIdx1;
 
     // Some scratch space for various calculations
     float scratch[36];
@@ -377,7 +425,7 @@ struct BodyGroup : public Archetype<
 > {};
 
 struct BodyDesc {
-    uint32_t numDofs;
+    DofType type;
     math::Vector3 initialPos;
     math::Quat initialRot;
     ResponseType responseType;
@@ -393,6 +441,10 @@ struct CollisionDesc {
     math::Vector3 offset;
     math::Quat rotation;
     math::Diag3x3 scale;
+
+    uint32_t linkIdx;
+    // Index of the collider within the body
+    uint32_t subIndex;
 };
 
 using VisualDesc = CollisionDesc;
@@ -444,42 +496,17 @@ void joinBodies(
         Entity child,
         JointBall ball_info);
 
-#if 0
-Entity makeCVBodyGroup(Context &ctx, uint32_t num_bodies);
-    
-// For now, initial velocities are just going to be 0
-// Also, when defining a body group, you need to make sure to define in
-// order of parent to children.
-void makeCVPhysicsEntity(Context &ctx, 
-                         Entity body,
-                         base::Position position,
-                         base::Rotation rotation,
-                         base::ObjectID obj_id,
-                         DofType dof_type);
+void attachLimit(
+        Context &ctx,
+        Entity body_grp,
+        Entity body,
+        HingeLimit limit);
 
-void cleanupPhysicalEntity(Context &ctx, Entity e);
-#endif
-
-
-
-#if 0
-void setCVGroupRoot(Context &ctx,
-                    Entity body_group,
-                    Entity body);
-
-void setCVEntityParentHinge(Context &ctx,
-                            Entity body_group,
-                            Entity parent, Entity child,
-                            math::Vector3 rel_pos_parent,
-                            math::Vector3 rel_pos_child,
-                            math::Vector3 hinge_axis);
-
-void setCVEntityParentBall(Context &ctx,
-                           Entity body_group,
-                           Entity parent, Entity child,
-                           math::Vector3 rel_pos_parent,
-                           math::Vector3 rel_pos_child);
-#endif
+void attachLimit(
+        Context &ctx,
+        Entity body_grp,
+        Entity body,
+        SliderLimit limit);
 
 void registerTypes(ECSRegistry &registry);
 void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
@@ -496,4 +523,50 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 
 void initializeHierarchies(Context &ctx);
 
+struct JointConnection {
+    // These are body indices
+    uint32_t parentIdx;
+    uint32_t childIdx;
+
+    // This determines which Joint struct to use
+    DofType type;
+
+    union {
+        JointHinge hinge;
+        JointBall ball;
+        // ...
+    };
+};
+
+// For loading pre-configured models
+struct ModelConfig {
+    // Assume that the first one is the root
+    uint32_t numBodies;
+    uint32_t bodiesOffset;
+
+    uint32_t numConnections;
+    uint32_t connectionsOffset;
+
+    uint32_t numColliders;
+    uint32_t collidersOffset;
+
+    uint32_t numVisuals;
+    uint32_t visualsOffset;
+};
+
+// This is the data for all models in that could possibly be loaded.
+struct ModelData {
+    BodyDesc *bodies;
+    JointConnection *connections;
+    CollisionDesc *colliders;
+    VisualDesc *visuals;
+};
+
+// This returns the body group entity
+Entity loadModel(Context &ctx,
+                 ModelConfig cfg,
+                 ModelData model_data);
+
 }
+
+#include "cvphysics.inl"

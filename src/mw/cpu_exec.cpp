@@ -172,11 +172,13 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs,
                 solve->data,
                 solve->totalNumDofs,
                 solve->numContactPts,
+                solve->numEqualityRows,
                 solve->h,
                 solve->mass,
                 solve->free_acc,
                 solve->vel,
                 solve->J_c,
+                solve->J_e,
                 solve->mu,
                 solve->penetrations);
 
