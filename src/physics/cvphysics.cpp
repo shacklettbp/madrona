@@ -1074,19 +1074,22 @@ inline void forwardKinematics(Context &ctx,
         case DofType::Hinge: {
             // Find the hinge axis orientation in world space
             Vector3 rotated_hinge_axis =
-                parent_tmp_state.composedRot.rotateVec(hier_desc.axis);
+                parent_tmp_state.composedRot.rotateVec(
+                        hier_desc.parentToChildRot.rotateVec(hier_desc.axis));
 
             // Calculate the composed rotation applied to the child entity.
             tmp_state.composedRot = parent_tmp_state.composedRot *
-                Quat::angleAxis(position.q[0], hier_desc.axis);
+                                    hier_desc.parentToChildRot * 
+                                    Quat::angleAxis(position.q[0], hier_desc.axis);
 
             // Calculate the composed COM position of the child
             //  (parent COM + R_{parent} * (rel_pos_parent + R_{hinge} * rel_pos_local))
             tmp_state.comPos = parent_tmp_state.comPos +
                 parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
-                        Quat::angleAxis(position.q[0], hier_desc.axis).
-                            rotateVec(hier_desc.relPositionLocal)
+                        hier_desc.parentToChildRot.rotateVec(
+                            Quat::angleAxis(position.q[0], hier_desc.axis).
+                                rotateVec(hier_desc.relPositionLocal))
                 );
 
             // All we are getting here is the position of the hinge point
@@ -1107,16 +1110,19 @@ inline void forwardKinematics(Context &ctx,
 
         case DofType::Slider: {
             Vector3 rotated_axis =
-                parent_tmp_state.composedRot.rotateVec(hier_desc.axis);
+                parent_tmp_state.composedRot.rotateVec(
+                        hier_desc.parentToChildRot.rotateVec(hier_desc.axis));
 
             // The composed rotation for this body is the same as the parent's
-            tmp_state.composedRot = parent_tmp_state.composedRot;
+            tmp_state.composedRot = parent_tmp_state.composedRot *
+                                    hier_desc.parentToChildRot;
 
             tmp_state.comPos = parent_tmp_state.comPos +
                 parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
-                        hier_desc.relPositionLocal +
-                        position.q[0] * hier_desc.axis
+                        hier_desc.parentToChildRot.rotateVec(
+                            hier_desc.relPositionLocal +
+                            position.q[0] * hier_desc.axis)
                 );
 
             // This is the same as the comPos I guess?
@@ -1135,14 +1141,17 @@ inline void forwardKinematics(Context &ctx,
             };
 
             // Calculate the composed rotation applied to the child entity.
-            tmp_state.composedRot = parent_tmp_state.composedRot * joint_rot;
+            tmp_state.composedRot = parent_tmp_state.composedRot *
+                                    hier_desc.parentToChildRot *
+                                    joint_rot;
 
             // Calculate the composed COM position of the child
             //  (parent COM + R_{parent} * (rel_pos_parent + R_{ball} * rel_pos_local))
             tmp_state.comPos = parent_tmp_state.comPos +
                 parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
-                        joint_rot.rotateVec(hier_desc.relPositionLocal)
+                        hier_desc.parentToChildRot.rotateVec(
+                            joint_rot.rotateVec(hier_desc.relPositionLocal))
                 );
 
             // All we are getting here is the position of the ball point
@@ -4588,8 +4597,10 @@ inline void brobdingnag(Context &ctx,
 
                         to_change[0] =
                             limit.hinge.dConstraintViolation(pos.q[0]);
-
                         residuals[glob_row_offset] = limit.hinge.constraintViolation(pos.q[0]);
+
+                        printf("dviolation = %f; violation = %f\n",
+                                to_change[0], residuals[glob_row_offset]);
                     } break;
 
                     case DofObjectLimit::Type::Slider: {
@@ -4601,6 +4612,9 @@ inline void brobdingnag(Context &ctx,
                             limit.slider.dConstraintViolation(pos.q[0]);
 
                         residuals[glob_row_offset] = limit.slider.constraintViolation(pos.q[0]);
+
+                        printf("dviolation = %f; violation = %f\n",
+                                to_change[0], residuals[glob_row_offset]);
                     } break;
 
                     default: {
@@ -4675,10 +4689,10 @@ inline void integrationStep(Context &ctx,
         position.q[6] = new_rot.z;
     }
     else if (numDofs.type == DofType::Slider) {
-        printf("slider accel: %f\n", acceleration.dqv[0]);
-
         velocity.qv[0] += h * acceleration.dqv[0];
         position.q[0] += h * velocity.qv[0];
+
+        printf("slider acc = %f\n", acceleration.dqv[0]);
     }
     else if (numDofs.type == DofType::Hinge) {
         velocity.qv[0] += h * acceleration.dqv[0];
@@ -4737,28 +4751,33 @@ inline void convertPostSolve(
     if (num_dofs.type == DofType::FreeBody) {
         position = tmp_state.comPos + 
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
-        rotation = tmp_state.composedRot * body_obj_data.rotation;
+        rotation = tmp_state.composedRot * 
+                   body_obj_data.rotation;
     }
     else if (num_dofs.type == DofType::Hinge) {
         position = tmp_state.comPos + 
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
-        rotation = tmp_state.composedRot * body_obj_data.rotation;
+        rotation = tmp_state.composedRot * 
+                   body_obj_data.rotation;
     }
     else if (num_dofs.type == DofType::Slider) {
         position = tmp_state.comPos +
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
-        rotation = tmp_state.composedRot * body_obj_data.rotation;
+        rotation = tmp_state.composedRot *
+                   body_obj_data.rotation;
     }
     else if (num_dofs.type == DofType::FixedBody) {
         position = tmp_state.comPos + 
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
-        rotation = tmp_state.composedRot * body_obj_data.rotation;
+        rotation = tmp_state.composedRot * 
+                   body_obj_data.rotation;
         // Do nothing
     }
     else if (num_dofs.type == DofType::Ball) {
         position = tmp_state.comPos + 
                    tmp_state.composedRot.rotateVec(body_obj_data.offset);
-        rotation = tmp_state.composedRot * body_obj_data.rotation;
+        rotation = tmp_state.composedRot *
+                   body_obj_data.rotation;
     }
     else {
         MADRONA_UNREACHABLE();
@@ -5263,6 +5282,7 @@ void joinBodies(Context &ctx,
     hier_desc.parent = parent_physics_entity;
     hier_desc.relPositionParent = hinge_info.relPositionParent;
     hier_desc.relPositionLocal = hinge_info.relPositionChild;
+    hier_desc.parentToChildRot = hinge_info.relParentRotation;
 
     hier_desc.axis = hinge_info.hingeAxis;
 
@@ -5297,6 +5317,7 @@ void joinBodies(Context &ctx,
     hier_desc.parent = parent_physics_entity;
     hier_desc.relPositionParent = ball_info.relPositionParent;
     hier_desc.relPositionLocal = ball_info.relPositionChild;
+    hier_desc.parentToChildRot = ball_info.relParentRotation;
 
     hier_desc.leaf = true;
     hier_desc.bodyGroup = body_grp;
@@ -5330,6 +5351,7 @@ void joinBodies(
     hier_desc.parent = parent_physics_entity;
     hier_desc.relPositionParent = slider_info.relPositionParent;
     hier_desc.relPositionLocal = slider_info.relPositionChild;
+    hier_desc.parentToChildRot = slider_info.relParentRotation;
 
     hier_desc.axis = slider_info.slideVector;
 

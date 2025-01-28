@@ -41,7 +41,7 @@ float HingeLimit::dConstraintViolation(float q)
         return -1.f;
     } else {
         // Anything
-        return 1.f;
+        return 0.f;
     }
 }
 

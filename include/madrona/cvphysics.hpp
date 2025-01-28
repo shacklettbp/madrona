@@ -292,6 +292,9 @@ struct DofObjectHierarchyDesc {
 
     // Relative position of the child's COM to the joint.
     math::Vector3 relPositionLocal;
+
+    // Rotation applied to the child
+    math::Quat parentToChildRot;
     
     // Extra data:
     // For hinge, this is the hinge rotation axis.
@@ -474,8 +477,17 @@ void setRoot(
         Entity body);
 
 struct JointHinge {
+    // In parent's basis
     math::Vector3 relPositionParent;
+
+    // In child's basis
     math::Vector3 relPositionChild;
+
+    // Rotation applied to child's vectors relative to
+    // parent's coordinate system.
+    math::Quat relParentRotation;
+
+    // In child's basis
     math::Vector3 hingeAxis;
 };
 
@@ -487,8 +499,15 @@ void joinBodies(
         JointHinge hinge_info);
 
 struct JointBall {
+    // In parent's basis
     math::Vector3 relPositionParent;
+
+    // In child's basis
     math::Vector3 relPositionChild;
+
+    // Rotation applied to child's vectors relative to
+    // parent's coordinate system.
+    math::Quat relParentRotation;
 };
 
 void joinBodies(
@@ -499,10 +518,18 @@ void joinBodies(
         JointBall ball_info);
 
 struct JointSlider {
+    // In the parent's coordinate basis
     math::Vector3 relPositionParent;
+
+    // In the child's coordinate basis
     math::Vector3 relPositionChild;
-    // Will be stored in the hinge member
+
+    // This is in the child's coordinate basis
     math::Vector3 slideVector;
+
+    // Rotation applied to child's vectors relative to
+    // parent's coordinate system.
+    math::Quat relParentRotation;
 };
 
 void joinBodies(
