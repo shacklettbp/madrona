@@ -97,6 +97,8 @@ struct URDFLink {
 
     std::vector<std::string> childJointNames;
     std::vector<std::string> childLinkNames;
+
+    uint32_t idx;
 };
 
 enum class URDFJointType {
@@ -108,6 +110,39 @@ enum class URDFJointType {
     Fixed,
     Invalid,
 };
+
+static DofType urdfToDofType(URDFJointType type)
+{
+    switch (type) {
+    case URDFJointType::Revolute: {
+        return DofType::Hinge;
+    };
+
+    case URDFJointType::Continuous: {
+        return DofType::Hinge;
+    };
+
+    case URDFJointType::Prismatic: {
+        return DofType::Slider;
+    };
+
+    case URDFJointType::Floating: {
+        return DofType::FreeBody;
+    };
+
+    case URDFJointType::Planar: {
+        return DofType::Ball;
+    };
+
+    case URDFJointType::Fixed: {
+        return DofType::FixedBody;
+    };
+
+    default: {
+        MADRONA_UNREACHABLE();
+    };
+    }
+}
 
 struct URDFJointDynamics {
     float damping;
@@ -958,12 +993,98 @@ URDFLoader::~URDFLoader()
 {
 }
 
+static void assignOrder(
+        uint32_t &curr_idx,
+        std::vector<std::string> &sorted_links,
+        const std::string &curr_link_name,
+        URDFModel &model)
+{
+    URDFLink &link = model.links[curr_link_name];
+    link.idx = curr_idx;
+
+    sorted_links.push_back(curr_link_name);
+    
+    for (uint32_t i = 0; i < link.childLinkNames.size(); ++i) {
+        assignOrder(++curr_idx,
+                    link.childLinkNames[i],
+                    model);
+    }
+}
+
 phys::cv::ModelConfig convertToModelConfig(
         const URDFModel &model)
 {
-    // First, we need to create an ordering for the links
+    using namespace phys::cv;
+
     std::vector<std::string> sorted_links;
-    sorted_links.push_back(model.rootLinkName);
+
+    { // Assign an ordering to all the links
+        uint32_t num_links = 0;
+        assignOrder(
+                num_links,
+                sorted_links,
+                model.rootLinkName,
+                model);
+
+        assert(num_links == model.links.size());
+    }
+
+    // Now, we perform the full conversion process.
+    ModelData model_data = {
+        .bodies = (BodyDesc *)malloc(
+            sizeof(BodyDesc) * model.links.size()),
+        .connections = (JointConnection *)malloc(
+            sizeof(JointConnection) * model.joints.size())
+        // Still need to take care of the colliders and visuals
+    };
+
+    { // Push the root body
+        std::string link_name = sorted_links[0];
+        URDFLink &link = model.links[link_name];
+
+        BodyDesc body_desc = {
+            .type = DofType::FreeBody,
+            .initialPos = Vector3::all(0.f),
+            .initialRot = Quat::id(),
+            .responseType = ResponseType::Dynamic,
+            .numCollisionObjs = link.collisionArray.size(),
+            .numVisualObjs = linkk.visualArray.size(),
+            .mass = link.inertial.mass,
+            .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
+            // ... ?
+            .muS = 0.1f
+        };
+    }
+
+    for (uint32_t i = 1; i < sorted_links.size(); ++i) {
+        std::string link_name = sorted_links[i];
+        URDFLink &link = model.links[link_name];
+
+        // In cvphysics, the "parent" joint and the link are tied to
+        // the same object: body
+        URDFJoint &joint = model.joints[link.parentJointName];
+        BodyDesc body_desc = {
+            .type = urdfToDofType(joint.type),
+#if 0 // Not needed
+            .initialPos = Vector3::all(0.f),
+            .initialRot = Quat::id(),
+#endif
+            .responseType = ResponseType::Dynamic,
+            .numCollisionObjs = link.collisionArray.size(),
+            .numVisualObjs = linkk.visualArray.size(),
+            .mass = link.inertial.mass,
+            .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
+            // ... ?
+            .muS = 0.1f
+        };
+
+        // Push this to list of BodyDesc
+    }
+
+    for (auto &joint : model.joints) {
+        URDFLink &parent = model[joint.parentLinkName];
+        URDFLink &child = model[joint.childLinkName];
+    }
 }
 
 bool URDFLoader::load(
