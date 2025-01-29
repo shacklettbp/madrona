@@ -50,6 +50,10 @@ struct DofObjectPosition {
     float q[kMaxPositionCoords];
 };
 
+struct DofObjectExtForce {
+    float force[kMaxPositionCoords];
+};
+
 struct DofObjectVelocity {
     float qv[kMaxVelocityCoords];
 };
@@ -295,7 +299,7 @@ struct DofObjectHierarchyDesc {
 
     // Rotation applied to the child
     math::Quat parentToChildRot;
-    
+
     // Extra data:
     // For hinge, this is the hinge rotation axis.
     // For ball, this is the vector perpendicular to the plane of allowed
@@ -325,6 +329,7 @@ struct DofObjectArchetype : public Archetype<
     DofObjectPosition,
     DofObjectVelocity,
     DofObjectAcceleration, // Δv, used for integration
+    DofObjectExtForce,
 
     DofObjectTmpState,
 
@@ -332,9 +337,9 @@ struct DofObjectArchetype : public Archetype<
 
     DofObjectInertial,
     DofObjectFriction,
-    
+
     DofObjectLimit,
-    
+
     DofObjectNumDofs
 > {};
 
@@ -458,9 +463,9 @@ Entity makeBodyGroup(Context &ctx, uint32_t num_bodies);
 Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc);
 
 void attachCollision(
-        Context &ctx, 
+        Context &ctx,
         Entity body_grp,
-        Entity body, 
+        Entity body,
         uint32_t idx,
         CollisionDesc desc);
 

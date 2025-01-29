@@ -4249,6 +4249,22 @@ inline void recursiveNewtonEuler(Context &ctx,
 }
 #endif
 
+// Add applied/external forces, assuming the forces are applied in joint space
+inline void addExternalForces(Context &ctx,
+                              BodyGroupHierarchy &body_grp) {
+    float *tau = body_grp.getBias(ctx);
+
+    uint32_t dof_index = 0;
+    for (CountT i = 0; i < body_grp.numBodies; ++i) {
+        auto body_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[i]);
+        auto &ext_force = ctx.get<DofObjectExtForce>(body_grp.bodies(ctx)[i]);
+        for(CountT j = 0; j < body_dofs.numDofs; ++j) {
+            tau[dof_index + j] += ext_force.force[j];
+        }
+        dof_index += body_dofs.numDofs;
+    }
+}
+
 inline void processContacts(Context &ctx,
                             ContactConstraint &contact,
                             ContactTmpState &tmp_state)
@@ -4798,6 +4814,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<DofObjectPosition>();
     registry.registerComponent<DofObjectVelocity>();
     registry.registerComponent<DofObjectAcceleration>();
+    registry.registerComponent<DofObjectExtForce>();
     registry.registerComponent<DofObjectNumDofs>();
     registry.registerComponent<DofObjectTmpState>();
     registry.registerComponent<DofObjectInertial>();
@@ -4904,10 +4921,15 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
             >>({compute_phi});
 #endif
 
+        auto add_external_forces = builder.addToGraph<ParallelForNode<Context,
+             tasks::addExternalForces,
+                BodyGroupHierarchy
+            >>({recursive_newton_euler});
+
         auto combine_spatial_inertia = builder.addToGraph<ParallelForNode<Context,
              tasks::combineSpatialInertias,
                 BodyGroupHierarchy
-            >>({recursive_newton_euler});
+            >>({add_external_forces});
 
         auto composite_rigid_body = builder.addToGraph<ParallelForNode<Context,
              tasks::compositeRigidBody,
@@ -5044,6 +5066,7 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     auto &pos = ctx.get<DofObjectPosition>(physical_entity);
     auto &vel = ctx.get<DofObjectVelocity>(physical_entity);
     auto &acc = ctx.get<DofObjectAcceleration>(physical_entity);
+    auto &ext_force = ctx.get<DofObjectExtForce>(physical_entity);
     auto &tmp_state = ctx.get<DofObjectTmpState>(physical_entity);
     auto &inertial = ctx.get<DofObjectInertial>(physical_entity);
     auto &friction = ctx.get<DofObjectFriction>(physical_entity);
@@ -5080,17 +5103,20 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
         for(int i = 0; i < 6; i++) {
             vel.qv[i] = 0.f;
             acc.dqv[i] = 0.f;
+            ext_force.force[i] = 0.f;
         }
     } break;
 
     case DofType::Slider: {
         pos.q[0] = 0.f;
         vel.qv[0] = 0.f;
+        acc.dqv[0] = 0.f;
     } break;
 
     case DofType::Hinge: {
         pos.q[0] = 0.0f;
         vel.qv[0] = 0.f;
+        acc.dqv[0] = 0.f;
     } break;
     
     case DofType::Ball: {
@@ -5102,6 +5128,7 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
         for(int i = 0; i < 3; i++) {
             vel.qv[i] = 0.f;
             acc.dqv[i] = 0.f;
+            ext_force.force[i] = 0.f;
         }
     } break;
 
@@ -5119,6 +5146,7 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
         for (int i = 0; i < 6; i++) {
             vel.qv[i] = 0.f;
             acc.dqv[i] = 0.f;
+            ext_force.force[i] = 0.f;
         }
     } break;
     }
