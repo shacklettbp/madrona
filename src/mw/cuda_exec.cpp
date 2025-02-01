@@ -2320,7 +2320,7 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
     REQ_CU(cuDeviceGet(&cu_dev, gpu_id));
     CUcontext cu_ctx;
     REQ_CU(cuDevicePrimaryCtxRetain(&cu_ctx, cu_dev));
-    // setCudaHeapSize();
+    setCudaHeapSize();
     REQ_CU(cuCtxSetCurrent(cu_ctx));
 
     return cu_ctx;
