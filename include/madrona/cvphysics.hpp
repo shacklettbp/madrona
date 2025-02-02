@@ -4,6 +4,7 @@
 #include <madrona/components.hpp>
 #include <madrona/memory_range.hpp>
 #include <madrona/taskgraph_builder.hpp>
+#include <madrona/physics.hpp>
 
 namespace madrona::phys::cv {
 
@@ -416,6 +417,9 @@ struct BodyGroupHierarchy {
     // Temporary index used during stacking
     uint32_t tmpIdx0;
     uint32_t tmpIdx1;
+
+    // Sum of diagonal elements of mass matrix
+    float inertiaSum;
 
     // Some scratch space for various calculations
     float scratch[36];

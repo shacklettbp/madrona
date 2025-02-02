@@ -894,6 +894,7 @@ struct CVSolveData {
     uint32_t muDim;
     uint32_t penetrationsDim;
 
+    // Sum of diagonals of mass matrix
     float totalMass;
 
     enum StateFlags {
@@ -2495,13 +2496,13 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
     { // Get the total mass in the world
         float total_mass = 0.f;
 
-        DofObjectTmpState *tmp_states = state_mgr->getWorldComponents<
-            DofObjectArchetype, DofObjectTmpState>(world_id);
-        uint32_t num_masses = state_mgr->numRows<DofObjectArchetype>(world_id);
+        BodyGroupHierarchy *hiers = state_mgr->getWorldComponents<
+            BodyGroup, BodyGroupHierarchy>(world_id);
+        uint32_t num_masses = state_mgr->numRows<BodyGroup>(world_id);
 
         total_mass = warpSumPred<float>(
             [&](uint32_t iter) -> float {
-                return tmp_states[iter].spatialInertia.mass;
+                return hiers[iter].inertiaSum;
             }, num_masses);
 
         if (lane_id == 0) {
@@ -3027,7 +3028,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
     { // Do the computation
         CVSolveData *curr_sd = &solveDatas[world_id];
 
-        float tol_scale = 1.f / sqrtf(curr_sd->freeAccDim);
+        float tol_scale = 1.f / curr_sd->totalMass;
 
         prepareRegInfos(curr_sd);
 
@@ -4281,6 +4282,18 @@ inline void addExternalForces(Context &ctx,
     }
 }
 
+
+// Sum the diagonals of the mass matrix
+inline void sumInertiaDiagonals(Context &ctx,
+                                BodyGroupHierarchy &body_grp) {
+    float *M = body_grp.getMassMatrix(ctx);
+    float inertiaSum = 0.f;
+    for (CountT i = 0; i < body_grp.numDofs; ++i) {
+        inertiaSum += M[i + i * (body_grp.numDofs + 1)];
+    }
+    body_grp.inertiaSum = inertiaSum;
+}
+
 inline void processContacts(Context &ctx,
                             ContactConstraint &contact,
                             ContactTmpState &tmp_state)
@@ -4957,10 +4970,15 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupHierarchy
             >>({combine_spatial_inertia});
 
+        auto sum_inertia_diagonals = builder.addToGraph<ParallelForNode<Context,
+             tasks::sumInertiaDiagonals,
+                BodyGroupHierarchy
+            >>({combine_spatial_inertia});
+
         auto factorize_mass_matrix = builder.addToGraph<ParallelForNode<Context,
              tasks::factorizeMassMatrix,
                 BodyGroupHierarchy
-            >>({composite_rigid_body});
+            >>({sum_inertia_diagonals});
 
         auto compute_free_acc = builder.addToGraph<ParallelForNode<Context,
              tasks::computeFreeAcceleration,
