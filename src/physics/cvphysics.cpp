@@ -4289,7 +4289,7 @@ inline void sumInertiaDiagonals(Context &ctx,
     float *M = body_grp.getMassMatrix(ctx);
     float inertiaSum = 0.f;
     for (CountT i = 0; i < body_grp.numDofs; ++i) {
-        inertiaSum += M[i + i * (body_grp.numDofs + 1)];
+        inertiaSum += M[i + i * (body_grp.numDofs)];
     }
     body_grp.inertiaSum = inertiaSum;
 }
