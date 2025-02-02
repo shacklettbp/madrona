@@ -1039,17 +1039,18 @@ inline void forwardKinematics(Context &ctx,
         auto &position = ctx.get<DofObjectPosition>(body_grp.bodies(ctx)[0]);
         auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[0]);
 
-        tmp_state.comPos = {
-            position.q[0],
-            position.q[1],
-            position.q[2]
-        };
-
         tmp_state.composedRot = {
             position.q[3],
             position.q[4],
             position.q[5],
             position.q[6]
+        };
+
+        // This is the origin of the body
+        tmp_state.comPos = {
+            position.q[0],
+            position.q[1],
+            position.q[2]
         };
 
         // omega remains unchanged, and v only depends on the COM position

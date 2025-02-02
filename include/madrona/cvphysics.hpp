@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madrona/physics.hpp>
 #include <madrona/render/ecs.hpp>
 #include <madrona/components.hpp>
 #include <madrona/memory_range.hpp>
@@ -462,6 +463,7 @@ struct CollisionDesc {
     math::Quat rotation;
     math::Diag3x3 scale;
 
+    // Required for URDF loading
     uint32_t linkIdx;
     // Index of the collider within the body
     uint32_t subIndex;
@@ -592,6 +594,7 @@ struct JointConnection {
     union {
         JointHinge hinge;
         JointBall ball;
+        JointSlider slider;
         // ...
     };
 };
@@ -614,9 +617,16 @@ struct ModelConfig {
 
 // This is the data for all models in that could possibly be loaded.
 struct ModelData {
+    uint32_t numBodies;
     BodyDesc *bodies;
+
+    uint32_t numConnections;
     JointConnection *connections;
+
+    uint32_t numColliders;
     CollisionDesc *colliders;
+
+    uint32_t numVisuals;
     VisualDesc *visuals;
 };
 

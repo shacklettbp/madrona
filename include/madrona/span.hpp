@@ -39,6 +39,14 @@ public:
           n_(N)
     {}
 
+    template <typename U>
+    Span(const std::vector<U> &vec)
+            requires(std::is_same_v<std::remove_cv_t<T>,
+                                    std::remove_cv_t<U>>)
+        : ptr_(vec.data()),
+          n_(vec.size())
+    {}
+
     // GCC correctly warns that the below constructor is dangerous, but it's
     // convenient as long as the Span doesn't outlive the current expression
 #if MADRONA_GCC
