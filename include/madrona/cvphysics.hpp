@@ -319,6 +319,9 @@ struct DofObjectHierarchyDesc {
 struct DofObjectInertial {
     float mass;
     math::Diag3x3 inertia;
+
+    float initInvMassTrans;
+    float initInvMassRot;
 };
 
 struct DofObjectFriction {

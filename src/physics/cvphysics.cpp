@@ -1249,6 +1249,22 @@ inline void initHierarchies(Context &ctx,
     tasks::forwardKinematics(ctx, grp);
 }
 
+// Compute the inverse weight of each body and DOF at init pos
+inline void computeInvMass(Context &ctx,
+                           BodyGroupHierarchy &grp) {
+    // Compute A = J M^{-1} J^T
+    float *J[0]; // TODO!
+    float *M_ltdl = grp.getMassMatrixLTDL(ctx);
+    // TODO: compute A
+
+    // For each body, find translational and rotational inverse weight
+    for (CountT i = 0; i < grp.numBodies; ++i) {
+        auto body_dofs = ctx.get<DofObjectNumDofs>(grp.bodies(ctx)[i]);
+    }
+
+    // For each DOF, find the inverse weight
+}
+
 inline Mat3x3 skewSymmetricMatrix(Vector3 v)
 {
     return {
@@ -4844,6 +4860,11 @@ TaskGraphNodeID setupCVInitTasks(
          tasks::initHierarchies,
          BodyGroupHierarchy
      >>(deps);
+
+    node = builder.addToGraph<ParallelForNode<Context,
+         tasks::computeInvMass,
+         BodyGroupHierarchy
+     >>({node});
 
     node =
         builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
