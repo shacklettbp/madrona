@@ -4973,7 +4973,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         auto sum_inertia_diagonals = builder.addToGraph<ParallelForNode<Context,
              tasks::sumInertiaDiagonals,
                 BodyGroupHierarchy
-            >>({combine_spatial_inertia});
+            >>({composite_rigid_body});
 
         auto factorize_mass_matrix = builder.addToGraph<ParallelForNode<Context,
              tasks::factorizeMassMatrix,
