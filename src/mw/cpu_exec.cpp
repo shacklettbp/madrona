@@ -181,7 +181,9 @@ void ThreadPoolExecutor::Impl::run(Job *jobs, CountT num_jobs,
                 solve->J_e,
                 solve->mu,
                 solve->penetrations,
-                solve->eqResiduals);
+                solve->eqResiduals,
+                solve->diagApprox_c,
+                solve->diagApprox_e);
 
         solve->resPtr = res;
 

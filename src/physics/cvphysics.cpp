@@ -880,6 +880,9 @@ struct CVSolveData {
     float *mu;
     float *penetrations;
     float *eqResiduals;
+    // Diagonal approximations of A = J * M^-1 * J^T
+    float *diagApprox_c;
+    float *diagApprox_e;
 
     uint32_t massDim;
     uint32_t freeAccDim;
@@ -3334,6 +3337,8 @@ inline void solveCPU(Context &ctx,
         cv_sing.cvxSolve->mu = cv_sing.mu;
         cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
         cv_sing.cvxSolve->eqResiduals = cv_sing.eqResiduals;
+        cv_sing.cvxSolve->diagApprox_c = cv_sing.diagApprox_c;
+        cv_sing.cvxSolve->diagApprox_e = cv_sing.diagApprox_e;
 
         cv_sing.cvxSolve->callSolve.store_release(1);
         while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
@@ -3794,10 +3799,10 @@ inline void computeInvMass(Context &ctx,
         auto body_dofs = ctx.get<DofObjectNumDofs>(body);
         auto tmp_state = ctx.get<DofObjectTmpState>(body);
         auto hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
-        auto dof_inertial = ctx.get<DofObjectInertial>(body);
+        auto &dof_inertial = ctx.get<DofObjectInertial>(body);
         if (body_dofs.type == DofType::FixedBody) {
-            dof_inertial.initInvMassRot = 0.f;
-            dof_inertial.initInvMassTrans = 0.f;
+            dof_inertial.approxInvMassRot = 0.f;
+            dof_inertial.approxInvMassTrans = 0.f;
             continue;
         }
 
@@ -3836,8 +3841,8 @@ inline void computeInvMass(Context &ctx,
             }
         }
         // Compute the inverse weight
-        dof_inertial.initInvMassTrans = (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
-        dof_inertial.initInvMassRot = (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
+        dof_inertial.approxInvMassTrans = (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
+        dof_inertial.approxInvMassRot = (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
     }
 
     // For each DOF, find the inverse weight
@@ -3845,7 +3850,7 @@ inline void computeInvMass(Context &ctx,
     for (CountT i_body = 0; i_body < grp.numBodies; ++i_body) {
         Entity body = grp.bodies(ctx)[i_body];
         auto body_dofs = ctx.get<DofObjectNumDofs>(body);
-        auto dof_inertial = ctx.get<DofObjectInertial>(body);
+        auto &dof_inertial = ctx.get<DofObjectInertial>(body);
         if (body_dofs.type == DofType::FixedBody) {
             continue;
         }
@@ -3894,15 +3899,15 @@ inline void computeInvMass(Context &ctx,
 
         // Update the inverse mass of each DOF
         if (body_dofs.numDofs == 6) {
-           dof_inertial.invMassDOF[0] = dof_inertial.invMassDOF[1] = dof_inertial.invMassDOF[2] =
+           dof_inertial.approxInvMassDof[0] = dof_inertial.approxInvMassDof[1] = dof_inertial.approxInvMassDof[2] =
                (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
-           dof_inertial.invMassDOF[3] = dof_inertial.invMassDOF[4] = dof_inertial.invMassDOF[5] =
+           dof_inertial.approxInvMassDof[3] = dof_inertial.approxInvMassDof[4] = dof_inertial.approxInvMassDof[5] =
                 (Ad(3, 3) + Ad(4, 4) + Ad(5, 5)) / 3.f;
         } else if (body_dofs.numDofs == 3) {
-            dof_inertial.invMassDOF[0] = dof_inertial.invMassDOF[1] = dof_inertial.invMassDOF[2] =
+            dof_inertial.approxInvMassDof[0] = dof_inertial.approxInvMassDof[1] = dof_inertial.approxInvMassDof[2] =
                 (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
         } else {
-            dof_inertial.invMassDOF[0] = Ad(0, 0);
+            dof_inertial.approxInvMassDof[0] = Ad(0, 0);
         }
 
         dof_offset += body_dofs.numDofs;
@@ -4676,6 +4681,8 @@ inline void brobdingnag(Context &ctx,
 
         float *J_c = (float *) ctx.tmpAlloc(
             J_rows * J_cols * sizeof(float));
+        float *diagApprox_c = (float *) ctx.tmpAlloc(
+            J_rows * sizeof(float));
 
         memset(J_c, 0, J_rows * J_cols * sizeof(float));
 
@@ -4691,9 +4698,14 @@ inline void brobdingnag(Context &ctx,
 
             auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref);
             auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt);
-
             bool ref_fixed = ref_num_dofs.type == DofType::FixedBody;
             bool alt_fixed = alt_num_dofs.type == DofType::FixedBody;
+
+            // Diagonal approximation
+            auto &ref_inertial = ctx.get<DofObjectInertial>(ref);
+            auto &alt_inertial = ctx.get<DofObjectInertial>(alt);
+            float inv_weight = 1.f / (ref_inertial.approxInvMassTrans +
+                                      alt_inertial.approxInvMassTrans);
 
             // Each of the contact points
             for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
@@ -4722,11 +4734,16 @@ inline void brobdingnag(Context &ctx,
                         block_start[alt_grp.tmpIdx0], jac_row, J_rows, 1.f,
                         (ct_idx == 0 && pt_idx == 0));
                 }
+                // Compute the diagonal approximation
+                diagApprox_c[jac_row] = diagApprox_c[jac_row + 1] =
+                    diagApprox_c[jac_row + 2] = inv_weight;
+
                 jac_row += 3;
             }
         }
 
         cv_sing.J_c = J_c;
+        cv_sing.diagApprox_c = diagApprox_c;
 #endif
 
 #if !defined(MADRONA_GPU_MODE)
@@ -4762,6 +4779,9 @@ inline void brobdingnag(Context &ctx,
                     total_num_rows * total_num_dofs * sizeof(float));
             memset(J_e, 0, total_num_rows * total_num_dofs * sizeof(float));
 
+            float *diagApprox_e = (float *)ctx.tmpAlloc(
+                    total_num_rows * sizeof(float));
+
             float *residuals = (float *)ctx.tmpAlloc(
                     total_num_rows * sizeof(float));
             memset(residuals, 0, total_num_rows * sizeof(float));
@@ -4772,13 +4792,13 @@ inline void brobdingnag(Context &ctx,
                 Entity *bodies = hier.bodies(ctx);
 
                 for (uint32_t body_idx = 0; body_idx < hier.numBodies; ++body_idx) {
-                    DofObjectLimit limit = ctx.get<DofObjectLimit>(
-                            bodies[body_idx]);
+                    Entity body = bodies[body_idx];
+                    DofObjectLimit limit = ctx.get<DofObjectLimit>(body);
+                    DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);
                     DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(
-                            bodies[body_idx]);
-
-                    DofObjectPosition &pos = ctx.get<DofObjectPosition>(
-                            bodies[body_idx]);
+                            body);
+                    DofObjectInertial &inertial = ctx.get<DofObjectInertial>(
+                            body);
 
                     if (limit.type == DofObjectLimit::Type::None) {
                         continue;
@@ -4798,6 +4818,7 @@ inline void brobdingnag(Context &ctx,
                         to_change[0] =
                             limit.hinge.dConstraintViolation(pos.q[0]);
                         residuals[glob_row_offset] = limit.hinge.constraintViolation(pos.q[0]);
+                        diagApprox_e[glob_row_offset] = 1.f / inertial.approxInvMassDof[0];
 
                         printf("dviolation = %f; violation = %f\n",
                                 to_change[0], residuals[glob_row_offset]);
@@ -4812,6 +4833,7 @@ inline void brobdingnag(Context &ctx,
                             limit.slider.dConstraintViolation(pos.q[0]);
 
                         residuals[glob_row_offset] = limit.slider.constraintViolation(pos.q[0]);
+                        diagApprox_e[glob_row_offset] = 1.f / inertial.approxInvMassDof[0];
 
                         printf("dviolation = %f; violation = %f\n",
                                 to_change[0], residuals[glob_row_offset]);
@@ -4828,6 +4850,7 @@ inline void brobdingnag(Context &ctx,
             cv_sing.numRowsJe = total_num_rows;
             cv_sing.numColsJe = total_num_dofs;
             cv_sing.eqResiduals = residuals;
+            cv_sing.diagApprox_e = diagApprox_e;
         }
 #endif
 

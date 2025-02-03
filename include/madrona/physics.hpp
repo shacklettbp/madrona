@@ -126,7 +126,9 @@ using CVXSolveFn = float *(*)(
         float *J_e,
         float *mu,
         float *penetrations,
-        float *eq_residuals);
+        float *eq_residuals,
+        float *diag_approx_c,
+        float *diag_approx_e);
 
 struct CVXSolve {
     CVXSolveFn fn;
@@ -148,6 +150,8 @@ struct CVXSolve {
     float *mu;
     float *penetrations;
     float *eqResiduals;
+    float *diagApprox_c;
+    float *diagApprox_e;
 
     float *resPtr;
 };
