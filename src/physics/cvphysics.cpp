@@ -1177,9 +1177,6 @@ inline void forwardKinematics(Context &ctx,
         } break;
 
         case DofType::FixedBody: {
-            auto &position = ctx.get<DofObjectPosition>(body_grp.bodies(ctx)[0]);
-            auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[0]);
-
             tmp_state.composedRot = 
                 parent_tmp_state.composedRot *
                 Quat {
@@ -1190,16 +1187,13 @@ inline void forwardKinematics(Context &ctx,
                 };
 
             // This is the origin of the body
-            tmp_state.comPos = 
-                parent_tmp_state.comPos + 
-                s * hier_desc.relPositionParent +
-                s * (parent_tmp_state.composedRot * hier_desc.parentToChildRot).rotateVec(
-                        hier_desc.relPositionLocal + 
-                        Vector3 {
-                            position.q[0],
-                            position.q[1],
-                            position.q[2]
-                        });
+            tmp_state.comPos =
+                parent_tmp_state.comPos +
+                s * parent_tmp_state.composedRot.rotateVec(
+                        hier_desc.relPositionParent +
+                        hier_desc.parentToChildRot.rotateVec(
+                            hier_desc.relPositionLocal)
+                );
 
             // omega remains unchanged, and v only depends on the COM position
             tmp_state.phi.v[0] = tmp_state.comPos[0];
@@ -3427,10 +3421,16 @@ inline void computeBodyCOM(Context &ctx,
                            const DofObjectNumDofs num_dofs)
 {
     if (num_dofs.type == DofType::FixedBody) {
+#if 0
         tmp_state.scratch[0] =
             tmp_state.scratch[1] =
             tmp_state.scratch[2] =
             tmp_state.scratch[3] = 0.f;
+#endif
+        tmp_state.scratch[0] = inertial.mass * tmp_state.comPos.x;
+        tmp_state.scratch[1] = inertial.mass * tmp_state.comPos.y;
+        tmp_state.scratch[2] = inertial.mass * tmp_state.comPos.z;
+        tmp_state.scratch[3] = inertial.mass;
     } else {
         tmp_state.scratch[0] = inertial.mass * tmp_state.comPos.x;
         tmp_state.scratch[1] = inertial.mass * tmp_state.comPos.y;
@@ -3468,10 +3468,12 @@ inline void computeSpatialInertias(Context &ctx,
                                    const DofObjectInertial inertial,
                                    const DofObjectNumDofs num_dofs)
 {
+#if 0
     if(num_dofs.type == DofType::FixedBody) {
         tmp_state.spatialInertia.mass = 0.f;
         return;
     }
+#endif
 
     Vector3 body_grp_com_pos = ctx.get<BodyGroupHierarchy>(
             hier_desc.bodyGroup).comPos;
@@ -3849,11 +3851,14 @@ inline void computeInvMass(Context &ctx,
         auto tmp_state = ctx.get<DofObjectTmpState>(body);
         auto hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
         auto &dof_inertial = ctx.get<DofObjectInertial>(body);
+
+#if 0
         if (body_dofs.type == DofType::FixedBody) {
             dof_inertial.approxInvMassRot = 0.f;
             dof_inertial.approxInvMassTrans = 0.f;
             continue;
         }
+#endif
 
         // Compute J
         memset(J, 0.f, 6 * grp.numDofs * sizeof(float));
@@ -3900,9 +3905,11 @@ inline void computeInvMass(Context &ctx,
         Entity body = grp.bodies(ctx)[i_body];
         auto body_dofs = ctx.get<DofObjectNumDofs>(body);
         auto &dof_inertial = ctx.get<DofObjectInertial>(body);
+#if 0
         if (body_dofs.type == DofType::FixedBody) {
             continue;
         }
+#endif
 
         // Jacobian size (body dofs x total dofs)
         memset(J, 0.f, body_dofs.numDofs * grp.numDofs * sizeof(float));
@@ -4747,8 +4754,11 @@ inline void brobdingnag(Context &ctx,
 
             auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref);
             auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt);
-            bool ref_fixed = ref_num_dofs.type == DofType::FixedBody;
-            bool alt_fixed = alt_num_dofs.type == DofType::FixedBody;
+            uint32_t ref_parent_idx = ctx.get<DofObjectHierarchyDesc>(ref).parentIndex;
+            uint32_t alt_parent_idx = ctx.get<DofObjectHierarchyDesc>(alt).parentIndex;
+
+            bool ref_fixed = (ref_num_dofs.type == DofType::FixedBody && ref_parent_idx == -1);
+            bool alt_fixed = (alt_num_dofs.type == DofType::FixedBody && alt_parent_idx == -1);
 
             // Diagonal approximation
             auto &ref_inertial = ctx.get<DofObjectInertial>(ref);
@@ -5040,11 +5050,23 @@ inline void convertPostSolve(
                    body_obj_data.rotation;
     }
     else if (num_dofs.type == DofType::FixedBody) {
+        // For this, we need to look at the first parent who isn't
+        // fixed body and apply its transform.
+
         position = tmp_state.comPos +
                    hier_desc.globalScale * 
                         tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot *
                    body_obj_data.rotation;
+
+#if 0
+        printf("Fixed body info:\n");
+        printf("\t- comPos = %f %f %f\n",
+                tmp_state.comPos.x, tmp_state.comPos.y, tmp_state.comPos.z);
+        printf("\t- position = %f %f %f\n",
+                position.x, position.y, position.z);
+#endif
+
         // Do nothing
     }
     else if (num_dofs.type == DofType::Ball) {
@@ -5812,6 +5834,11 @@ Entity loadModel(Context &ctx,
     }
 
     return grp;
+}
+
+void addHingeExternalForce(Context &ctx, Entity hinge_joint, float newtons)
+{
+    ctx.get<DofObjectExtForce>(hinge_joint).force[0] = newtons;
 }
 
 }
