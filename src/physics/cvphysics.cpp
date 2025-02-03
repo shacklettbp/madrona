@@ -1070,6 +1070,8 @@ inline void forwardKinematics(Context &ctx,
         auto &tmp_state = ctx.get<DofObjectTmpState>(body);
         auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
 
+        float s = hier_desc.globalScale;
+
         Entity parent_e = hier_desc.parent;
         DofObjectTmpState &parent_tmp_state =
             ctx.get<DofObjectTmpState>(parent_e);
@@ -1090,7 +1092,7 @@ inline void forwardKinematics(Context &ctx,
             // Calculate the composed COM position of the child
             //  (parent COM + R_{parent} * (rel_pos_parent + R_{hinge} * rel_pos_local))
             tmp_state.comPos = parent_tmp_state.comPos +
-                parent_tmp_state.composedRot.rotateVec(
+                s * parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
                         hier_desc.parentToChildRot.rotateVec(
                             Quat::angleAxis(position.q[0], hier_desc.axis).
@@ -1100,7 +1102,7 @@ inline void forwardKinematics(Context &ctx,
             // All we are getting here is the position of the hinge point
             // which is relative to the parent's COM.
             tmp_state.anchorPos = parent_tmp_state.comPos +
-                parent_tmp_state.composedRot.rotateVec(
+                s * parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent);
 
             // Phi only depends on the hinge axis and the hinge point
@@ -1110,7 +1112,6 @@ inline void forwardKinematics(Context &ctx,
             tmp_state.phi.v[3] = tmp_state.anchorPos[0];
             tmp_state.phi.v[4] = tmp_state.anchorPos[1];
             tmp_state.phi.v[5] = tmp_state.anchorPos[2];
-
         } break;
 
         case DofType::Slider: {
@@ -1123,7 +1124,7 @@ inline void forwardKinematics(Context &ctx,
                                     hier_desc.parentToChildRot;
 
             tmp_state.comPos = parent_tmp_state.comPos +
-                parent_tmp_state.composedRot.rotateVec(
+                s * parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
                         hier_desc.parentToChildRot.rotateVec(
                             hier_desc.relPositionLocal +
@@ -1153,7 +1154,7 @@ inline void forwardKinematics(Context &ctx,
             // Calculate the composed COM position of the child
             //  (parent COM + R_{parent} * (rel_pos_parent + R_{ball} * rel_pos_local))
             tmp_state.comPos = parent_tmp_state.comPos +
-                parent_tmp_state.composedRot.rotateVec(
+                s * parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent +
                         hier_desc.parentToChildRot.rotateVec(
                             joint_rot.rotateVec(hier_desc.relPositionLocal))
@@ -1162,7 +1163,7 @@ inline void forwardKinematics(Context &ctx,
             // All we are getting here is the position of the ball point
             // which is relative to the parent's COM.
             tmp_state.anchorPos = parent_tmp_state.comPos +
-                parent_tmp_state.composedRot.rotateVec(
+                s * parent_tmp_state.composedRot.rotateVec(
                         hier_desc.relPositionParent);
 
             // Phi only depends on the hinge point and parent rotation
@@ -1191,8 +1192,8 @@ inline void forwardKinematics(Context &ctx,
             // This is the origin of the body
             tmp_state.comPos = 
                 parent_tmp_state.comPos + 
-                hier_desc.relPositionParent +
-                (parent_tmp_state.composedRot * hier_desc.parentToChildRot).rotateVec(
+                s * hier_desc.relPositionParent +
+                s * (parent_tmp_state.composedRot * hier_desc.parentToChildRot).rotateVec(
                         hier_desc.relPositionLocal + 
                         Vector3 {
                             position.q[0],
@@ -3475,7 +3476,7 @@ inline void computeSpatialInertias(Context &ctx,
     Vector3 body_grp_com_pos = ctx.get<BodyGroupHierarchy>(
             hier_desc.bodyGroup).comPos;
 
-    Diag3x3 inertia = inertial.inertia;
+    Diag3x3 inertia = inertial.inertia * hier_desc.globalScale * hier_desc.globalScale;
     float mass = inertial.mass;
 
     // We need to find inertia tensor in world space orientation
@@ -4962,8 +4963,6 @@ inline void integrationStep(Context &ctx,
     else if (numDofs.type == DofType::Slider) {
         velocity.qv[0] += h * acceleration.dqv[0];
         position.q[0] += h * velocity.qv[0];
-
-        printf("slider acc = %f\n", acceleration.dqv[0]);
     }
     else if (numDofs.type == DofType::Hinge) {
         velocity.qv[0] += h * acceleration.dqv[0];
@@ -5017,36 +5016,41 @@ inline void convertPostSolve(
         ((BodyObjectData *)ctx.memoryRangePointer<MRElement128b>(
                 grp_info.mrCollisionVisual))[link.mrOffset];
 
-    scale = body_obj_data.scale;
+    scale = body_obj_data.scale * hier_desc.globalScale;
 
     if (num_dofs.type == DofType::FreeBody) {
         position = tmp_state.comPos +
-                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+                   hier_desc.globalScale * 
+                        tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot *
                    body_obj_data.rotation;
     }
     else if (num_dofs.type == DofType::Hinge) {
         position = tmp_state.comPos +
-                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+                   hier_desc.globalScale * 
+                        tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot *
                    body_obj_data.rotation;
     }
     else if (num_dofs.type == DofType::Slider) {
         position = tmp_state.comPos +
-                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+                   hier_desc.globalScale * 
+                        tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot *
                    body_obj_data.rotation;
     }
     else if (num_dofs.type == DofType::FixedBody) {
         position = tmp_state.comPos +
-                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+                   hier_desc.globalScale * 
+                        tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot *
                    body_obj_data.rotation;
         // Do nothing
     }
     else if (num_dofs.type == DofType::Ball) {
         position = tmp_state.comPos +
-                   tmp_state.composedRot.rotateVec(body_obj_data.offset);
+                   hier_desc.globalScale * 
+                        tmp_state.composedRot.rotateVec(body_obj_data.offset);
         rotation = tmp_state.composedRot *
                    body_obj_data.rotation;
     }
@@ -5346,7 +5350,7 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
 }
 
-Entity makeBodyGroup(Context &ctx, uint32_t num_bodies)
+Entity makeBodyGroup(Context &ctx, uint32_t num_bodies, float global_scale)
 {
     Entity e = ctx.makeEntity<BodyGroup>();
 
@@ -5355,6 +5359,7 @@ Entity makeBodyGroup(Context &ctx, uint32_t num_bodies)
     hier.bodyCounter = 0;
     hier.collisionObjsCounter = 0;
     hier.visualObjsCounter = 0;
+    hier.globalScale = global_scale;
 
     uint64_t mr_num_bytes = num_bodies * sizeof(Entity);
     uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
@@ -5467,6 +5472,7 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     };
 
     hier_desc.index = grp_info.bodyCounter;
+    hier_desc.globalScale = grp_info.globalScale;
 
     grp_info.bodyCounter++;
 
@@ -5607,14 +5613,15 @@ void setRoot(Context &ctx,
     body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
 }
 
-void joinBodiesGeneral(Context &ctx,
-                       Entity body_grp,
-                       Entity parent_physics_entity,
-                       Entity child_physics_entity,
-                       Vector3 rel_position_parent,
-                       Vector3 rel_position_child,
-                       Quat rel_parent_rotation,
-                       Vector3 axis = Vector3 { 0.f, 0.f, 0.f })
+static inline void joinBodiesGeneral(
+        Context &ctx,
+        Entity body_grp,
+        Entity parent_physics_entity,
+        Entity child_physics_entity,
+        Vector3 rel_position_parent,
+        Vector3 rel_position_child,
+        Quat rel_parent_rotation,
+        Vector3 axis = Vector3 { 0.f, 0.f, 0.f })
 {
     BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
 

@@ -316,6 +316,8 @@ struct DofObjectHierarchyDesc {
     int32_t parentIndex;
 
     Entity bodyGroup;
+
+    float globalScale;
 };
 
 struct DofObjectInertial {
@@ -379,6 +381,8 @@ struct BodyObjectData {
 };
 
 struct BodyGroupHierarchy {
+    float globalScale;
+
     // This includes the free body too which will be at index 0.
     uint32_t numBodies;
     uint32_t bodyCounter;
@@ -471,7 +475,12 @@ struct CollisionDesc {
 
 using VisualDesc = CollisionDesc;
 
-Entity makeBodyGroup(Context &ctx, uint32_t num_bodies);
+// "Global scale" scales everything in the body group uniformly
+Entity makeBodyGroup(
+        Context &ctx,
+        uint32_t num_bodies,
+        float global_scale = 1.f);
+
 Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc);
 
 void attachCollision(
