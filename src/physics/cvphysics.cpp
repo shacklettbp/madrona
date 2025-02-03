@@ -3787,16 +3787,6 @@ inline void computeInvMass(Context &ctx,
     float A[36] = {}; // 6x6
     float J[6 * grp.numDofs]; // col-major (shape 6 x numDofs)
     float MinvJT[grp.numDofs * 6]; // col-major (shape numDofs x 6)
-    // Helper
-    auto Jb = [&](int32_t row, int32_t col) -> float& {
-        return J[row + 6 * col];
-    };
-    auto MinvJTb = [&](int32_t row, int32_t col) -> float& {
-        return MinvJT[row + grp.numDofs * col];
-    };
-    auto Ab = [&](int32_t row, int32_t col) -> float& {
-        return A[row + 6 * col];
-    };
 
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < grp.numBodies; ++i_body) {
@@ -3814,6 +3804,16 @@ inline void computeInvMass(Context &ctx,
         // Compute J
         memset(J, 0.f, 6 * grp.numDofs * sizeof(float));
         computeBodyJacobian(ctx, grp, hier_desc, tmp_state.comPos, J, 0, 0, 6);
+        // Helper
+        auto Jb = [&](int32_t row, int32_t col) -> float& {
+            return J[row + 6 * col];
+        };
+        auto MinvJTb = [&](int32_t row, int32_t col) -> float& {
+            return MinvJT[row + grp.numDofs * col];
+        };
+        auto Ab = [&](int32_t row, int32_t col) -> float& {
+            return A[row + 6 * col];
+        };
 
         // Copy into J^T
         for (CountT i = 0; i < 6; ++i) {
@@ -3849,17 +3849,29 @@ inline void computeInvMass(Context &ctx,
         if (body_dofs.type == DofType::FixedBody) {
             continue;
         }
+
+        // Helper
+        auto Jd = [&](int32_t row, int32_t col) -> float& {
+            return J[row + body_dofs.numDofs * col];
+        };
+        auto MinvJTd = [&](int32_t row, int32_t col) -> float& {
+            return MinvJT[row + grp.numDofs * col];
+        };
+        auto Ad = [&](int32_t row, int32_t col) -> float& {
+            return A[row + body_dofs.numDofs * col];
+        };
+
         // Jacobian size (body dofs x total dofs)
         // Fill in 1 for the corresponding body dofs
         memset(J, 0.f, body_dofs.numDofs * grp.numDofs * sizeof(float));
         for (CountT i = 0; i < body_dofs.numDofs; ++i) {
-            Jb(i, i + dof_offset) = 1.f;
+            Jd(i, i + dof_offset) = 1.f;
         }
 
         // Copy into J^T
         for (CountT i = 0; i < body_dofs.numDofs; ++i) {
             for (CountT j = 0; j < grp.numDofs; ++j) {
-                MinvJTb(j, i) = Jb(i, j);
+                MinvJTd(j, i) = Jd(i, j);
             }
         }
 
@@ -3874,7 +3886,7 @@ inline void computeInvMass(Context &ctx,
         for (CountT i = 0; i < body_dofs.numDofs; ++i) {
             for (CountT j = 0; j < body_dofs.numDofs; ++j) {
                 for (CountT k = 0; k < grp.numDofs; ++k) {
-                    Ab(i, j) += Jb(i, k) * MinvJTb(k, j);
+                    Ad(i, j) += Jd(i, k) * MinvJTd(k, j);
                 }
             }
         }
@@ -3882,14 +3894,14 @@ inline void computeInvMass(Context &ctx,
         // Update the inverse mass of each DOF
         if (body_dofs.numDofs == 6) {
            dof_inertial.invMassDOF[0] = dof_inertial.invMassDOF[1] = dof_inertial.invMassDOF[2] =
-               (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
+               (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
            dof_inertial.invMassDOF[3] = dof_inertial.invMassDOF[4] = dof_inertial.invMassDOF[5] =
-                (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
+                (Ad(3, 3) + Ad(4, 4) + Ad(5, 5)) / 3.f;
         } else if (body_dofs.numDofs == 3) {
             dof_inertial.invMassDOF[0] = dof_inertial.invMassDOF[1] = dof_inertial.invMassDOF[2] =
-                (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
+                (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
         } else {
-            dof_inertial.invMassDOF[0] = Ab(0, 0);
+            dof_inertial.invMassDOF[0] = Ad(0, 0);
         }
 
         dof_offset += body_dofs.numDofs;
