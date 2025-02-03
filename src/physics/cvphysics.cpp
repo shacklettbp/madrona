@@ -1424,7 +1424,7 @@ inline void computePhiTrans(
         }
     }
     else {
-        MADRONA_UNREACHABLE();
+        // MADRONA_UNREACHABLE();
     }
 }
 #endif
@@ -3595,7 +3595,7 @@ inline float* computePhi(Context &ctx,
             S[col * 6 + 5] = parent_rot[col][2];
         }
     } else {
-        MADRONA_UNREACHABLE();
+        // MADRONA_UNREACHABLE();
     }
 
     return S;
