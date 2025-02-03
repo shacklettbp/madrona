@@ -321,8 +321,11 @@ struct DofObjectInertial {
     float mass;
     math::Diag3x3 inertia;
 
+    // Estimated inverse weight for the body
     float initInvMassTrans;
     float initInvMassRot;
+    // Estimated inverse weight for each DOF
+    float invMassDOF[kMaxPositionCoords];
 };
 
 struct DofObjectFriction {

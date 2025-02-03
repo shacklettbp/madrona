@@ -3841,14 +3841,58 @@ inline void computeInvMass(Context &ctx,
     }
 
     // For each DOF, find the inverse weight
-    for (CountT i = 0; i < grp.numBodies; ++i) {
-        Entity body = grp.bodies(ctx)[i];
+    uint32_t dof_offset = 0;
+    for (CountT i_body = 0; i_body < grp.numBodies; ++i_body) {
+        Entity body = grp.bodies(ctx)[i_body];
         auto body_dofs = ctx.get<DofObjectNumDofs>(body);
         auto dof_inertial = ctx.get<DofObjectInertial>(body);
         if (body_dofs.type == DofType::FixedBody) {
             continue;
         }
-        // TODO!
+        // Jacobian size (body dofs x total dofs)
+        // Fill in 1 for the corresponding body dofs
+        memset(J, 0.f, body_dofs.numDofs * grp.numDofs * sizeof(float));
+        for (CountT i = 0; i < body_dofs.numDofs; ++i) {
+            Jb(i, i + dof_offset) = 1.f;
+        }
+
+        // Copy into J^T
+        for (CountT i = 0; i < body_dofs.numDofs; ++i) {
+            for (CountT j = 0; j < grp.numDofs; ++j) {
+                MinvJTb(j, i) = Jb(i, j);
+            }
+        }
+
+        // M^{-1} J^T. (J^T is total dofs x body dofs)
+        for (CountT i = 0; i < body_dofs.numDofs; ++i) {
+            float *col = MinvJT + i * grp.numDofs;
+            solveM(ctx, grp, col);
+        }
+
+        // A = J M^{-1} J^T
+        memset(A, 0.f, 36 * sizeof(float));
+        for (CountT i = 0; i < body_dofs.numDofs; ++i) {
+            for (CountT j = 0; j < body_dofs.numDofs; ++j) {
+                for (CountT k = 0; k < grp.numDofs; ++k) {
+                    Ab(i, j) += Jb(i, k) * MinvJTb(k, j);
+                }
+            }
+        }
+
+        // Update the inverse mass of each DOF
+        if (body_dofs.numDofs == 6) {
+           dof_inertial.invMassDOF[0] = dof_inertial.invMassDOF[1] = dof_inertial.invMassDOF[2] =
+               (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
+           dof_inertial.invMassDOF[3] = dof_inertial.invMassDOF[4] = dof_inertial.invMassDOF[5] =
+                (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
+        } else if (body_dofs.numDofs == 3) {
+            dof_inertial.invMassDOF[0] = dof_inertial.invMassDOF[1] = dof_inertial.invMassDOF[2] =
+                (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
+        } else {
+            dof_inertial.invMassDOF[0] = Ab(0, 0);
+        }
+
+        dof_offset += body_dofs.numDofs;
     }
 }
 
