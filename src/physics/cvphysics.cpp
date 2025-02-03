@@ -1042,17 +1042,18 @@ inline void forwardKinematics(Context &ctx,
         auto &position = ctx.get<DofObjectPosition>(body_grp.bodies(ctx)[0]);
         auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[0]);
 
-        tmp_state.comPos = {
-            position.q[0],
-            position.q[1],
-            position.q[2]
-        };
-
         tmp_state.composedRot = {
             position.q[3],
             position.q[4],
             position.q[5],
             position.q[6]
+        };
+
+        // This is the origin of the body
+        tmp_state.comPos = {
+            position.q[0],
+            position.q[1],
+            position.q[2]
         };
 
         // omega remains unchanged, and v only depends on the COM position
@@ -5662,14 +5663,28 @@ void joinBodies(
 
 Entity loadModel(Context &ctx,
                  ModelConfig cfg,
-                 ModelData model_data)
+                 ModelData model_data,
+                 Vector3 initial_pos,
+                 Quat initial_rot)
 {
     Entity grp = makeBodyGroup(ctx, cfg.numBodies);
     Entity *bodies_tmp =
         (Entity *)ctx.tmpAlloc(sizeof(Entity) * cfg.numBodies);
 
+    { // Make the root
+        BodyDesc desc = model_data.bodies[cfg.bodiesOffset];
+
+        desc.initialPos = initial_pos;
+        desc.initialRot = initial_rot;
+
+        bodies_tmp[0] = makeBody(
+                ctx,
+                grp,
+                desc);
+    }
+
     // Create the bodies (links)
-    for (uint32_t i = 0; i < cfg.numBodies; ++i) {
+    for (uint32_t i = 1; i < cfg.numBodies; ++i) {
         bodies_tmp[i] = makeBody(
                 ctx,
                 grp,

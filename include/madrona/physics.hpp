@@ -271,6 +271,7 @@ struct CollisionPrimitive {
         Sphere = 1 << 0,
         Hull = 1 << 1,
         Plane = 1 << 2,
+        Box = 1 << 3
     };
 
     struct Sphere {
@@ -282,6 +283,10 @@ struct CollisionPrimitive {
     };
 
     struct Plane {};
+
+    struct Box {
+        math::Vector3 dim;
+    };
 
     Type type;
     union {

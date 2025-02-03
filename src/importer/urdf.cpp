@@ -1,5 +1,5 @@
-#include "urdf.hpp"
 #include <madrona/math.hpp>
+#include <madrona/urdf.hpp>
 #include <madrona/cvphysics.hpp>
 
 #include <map>
@@ -13,6 +13,8 @@
 namespace madrona::imp {
 
 using namespace math;
+using namespace phys;
+using namespace phys::cv;
 
 struct URDFMaterial {
     std::string name;
@@ -198,7 +200,17 @@ struct URDFModel {
 };
 
 struct URDFLoader::Impl {
-    
+    std::vector<BodyDesc> bodyDescs;
+    std::vector<JointConnection> jointConnections;
+    std::vector<CollisionDesc> collisionDescs;
+    std::vector<VisualDesc> visualDescs;
+    std::vector<ModelConfig> modelConfigs;
+
+    uint32_t convertToModelConfig(
+            URDFModel &model,
+            BuiltinPrimitives primitives,
+            std::vector<std::string> &render_asset_paths,
+            std::vector<std::string> &physics_asset_paths);
 };
 
 static std::vector<float> getFloats(const std::string &vector_str)
@@ -272,7 +284,8 @@ static Quat getQuatFromRPY(const std::string &vector_str)
 
 static void parsePoseInternal(
     URDFPose &pose,
-    tinyxml2::XMLElement* xml)
+    tinyxml2::XMLElement* xml,
+    bool assert_no_rpy = false)
 {
     if (xml) {
         const char* xyz_str = xml->Attribute("xyz");
@@ -283,6 +296,9 @@ static void parsePoseInternal(
 
         const char* rpy_str = xml->Attribute("rpy");
         if (rpy_str != NULL) {
+            if (assert_no_rpy) {
+                assert(strcmp(rpy_str, "0 0 0") == 0);
+            }
             pose.rotation = getQuatFromRPY(rpy_str);
         }
     }
@@ -422,6 +438,8 @@ static bool parseVisual(URDFVisual &vis, tinyxml2::XMLElement *config)
         // try to parse material element in place
         parseMaterial(vis.material, mat, true);
     }
+
+    return true;
 }
 
 static void parseInertial(
@@ -431,7 +449,7 @@ static void parseInertial(
     // Origin
     tinyxml2::XMLElement *o = config->FirstChildElement("origin");
     if (o) {
-        parsePoseInternal(i.origin, o);
+        parsePoseInternal(i.origin, o, true);
     }
 
     tinyxml2::XMLElement *mass_xml = config->FirstChildElement("mass");
@@ -523,6 +541,8 @@ static bool parseLink(
         parseCollision(col, col_xml);
         link.collisionArray.push_back(col);
     }
+
+    return true;
 }
 
 static void assignMaterial(
@@ -530,14 +550,16 @@ static void assignMaterial(
         URDFModel& model,
         const char* link_name)
 {
-    massert(!visual.materialName.empty(), "Assigning material with no name");
+    // massert(!visual.materialName.empty(), "Assigning material with no name");
 
-    const URDFMaterial &material = model.materials[visual.materialName];
+    if (!visual.materialName.empty()) {
+        const URDFMaterial &material = model.materials[visual.materialName];
 
-    if (model.materials.contains(visual.materialName)) {
-        visual.material = material;
-    } else {
-        model.materials.insert(std::make_pair(visual.material.name, visual.material));
+        if (model.materials.contains(visual.materialName)) {
+            visual.material = material;
+        } else {
+            model.materials.insert(std::make_pair(visual.material.name, visual.material));
+        }
     }
 }
 
@@ -985,7 +1007,8 @@ static URDFModel parseURDF(const std::string &xml_string)
     return model;
 }
 
-URDFLoader::URDFLoader(Span<char> err_buf)
+URDFLoader::URDFLoader()
+    : impl(new Impl)
 {
 }
 
@@ -1006,16 +1029,18 @@ static void assignOrder(
     
     for (uint32_t i = 0; i < link.childLinkNames.size(); ++i) {
         assignOrder(++curr_idx,
+                    sorted_links,
                     link.childLinkNames[i],
                     model);
     }
 }
 
-phys::cv::ModelConfig convertToModelConfig(
-        const URDFModel &model)
+uint32_t URDFLoader::Impl::convertToModelConfig(
+        URDFModel &model,
+        BuiltinPrimitives primitives,
+        std::vector<std::string> &render_asset_paths,
+        std::vector<std::string> &physics_asset_paths)
 {
-    using namespace phys::cv;
-
     std::vector<std::string> sorted_links;
 
     { // Assign an ordering to all the links
@@ -1029,13 +1054,11 @@ phys::cv::ModelConfig convertToModelConfig(
         assert(num_links == model.links.size());
     }
 
-    // Now, we perform the full conversion process.
-    ModelData model_data = {
-        .bodies = (BodyDesc *)malloc(
-            sizeof(BodyDesc) * model.links.size()),
-        .connections = (JointConnection *)malloc(
-            sizeof(JointConnection) * model.joints.size())
-        // Still need to take care of the colliders and visuals
+    ModelConfig cfg = {
+        .bodiesOffset = (uint32_t)bodyDescs.size(),
+        .connectionsOffset = (uint32_t)jointConnections.size(),
+        .collidersOffset = (uint32_t)collisionDescs.size(),
+        .visualsOffset = (uint32_t)visualDescs.size()
     };
 
     { // Push the root body
@@ -1047,13 +1070,16 @@ phys::cv::ModelConfig convertToModelConfig(
             .initialPos = Vector3::all(0.f),
             .initialRot = Quat::id(),
             .responseType = ResponseType::Dynamic,
-            .numCollisionObjs = link.collisionArray.size(),
-            .numVisualObjs = linkk.visualArray.size(),
+            .numCollisionObjs = (uint32_t)link.collisionArray.size(),
+            .numVisualObjs = (uint32_t)link.visualArray.size(),
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
             // ... ?
             .muS = 0.1f
         };
+
+        bodyDescs.push_back(body_desc);
+        cfg.numBodies++;
     }
 
     for (uint32_t i = 1; i < sorted_links.size(); ++i) {
@@ -1065,13 +1091,9 @@ phys::cv::ModelConfig convertToModelConfig(
         URDFJoint &joint = model.joints[link.parentJointName];
         BodyDesc body_desc = {
             .type = urdfToDofType(joint.type),
-#if 0 // Not needed
-            .initialPos = Vector3::all(0.f),
-            .initialRot = Quat::id(),
-#endif
             .responseType = ResponseType::Dynamic,
-            .numCollisionObjs = link.collisionArray.size(),
-            .numVisualObjs = linkk.visualArray.size(),
+            .numCollisionObjs = (uint32_t)link.collisionArray.size(),
+            .numVisualObjs = (uint32_t)link.visualArray.size(),
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
             // ... ?
@@ -1079,17 +1101,204 @@ phys::cv::ModelConfig convertToModelConfig(
         };
 
         // Push this to list of BodyDesc
+        bodyDescs.push_back(body_desc);
+        cfg.numBodies++;
     }
 
     for (auto &joint : model.joints) {
-        URDFLink &parent = model[joint.parentLinkName];
-        URDFLink &child = model[joint.childLinkName];
+        URDFLink &parent = model.links[joint.second.parentLinkName];
+        URDFLink &child = model.links[joint.second.childLinkName];
+
+        DofType dof_type = urdfToDofType(joint.second.type);
+
+        cfg.numConnections++;
+
+        switch (dof_type) {
+        case DofType::Hinge: {
+            // TODO: MAKE SURE TO TAKE INTO ACCOUNT THAT INERTIAL FRAME ISNT
+            // NECESSARILY THE SAME AS CHILD FRAME (bruh)
+            Vector3 parent_com = parent.inertial.origin.position;
+            Vector3 parent_to_joint =
+                joint.second.parentToJointOriginTransform.position;
+            Quat parent_to_child_rot =
+                joint.second.parentToJointOriginTransform.rotation;
+            Vector3 joint_to_child_com =
+                child.inertial.origin.position;
+
+            JointHinge hinge = {
+                .relPositionParent = parent_to_joint - parent_com,
+                .relPositionChild = joint_to_child_com,
+                .relParentRotation = parent_to_child_rot,
+                // joint.axis is already in the child frame.
+                .hingeAxis = joint.second.axis
+            };
+
+            JointConnection conn;
+            conn.parentIdx = parent.idx;
+            conn.childIdx = child.idx;
+            conn.type = DofType::Hinge;
+            conn.hinge = hinge;
+
+            jointConnections.push_back(conn);
+        } break;
+
+        case DofType::Ball: {
+            Vector3 parent_com = parent.inertial.origin.position;
+            Vector3 parent_to_joint =
+                joint.second.parentToJointOriginTransform.position;
+            Quat parent_to_child_rot =
+                joint.second.parentToJointOriginTransform.rotation;
+            Vector3 joint_to_child_com =
+                child.inertial.origin.position;
+
+            JointBall ball = {
+                .relPositionParent = parent_to_joint - parent_com,
+                .relPositionChild = joint_to_child_com,
+                .relParentRotation = parent_to_child_rot,
+            };
+
+            JointConnection conn;
+            conn.parentIdx = parent.idx;
+            conn.childIdx = child.idx;
+            conn.type = DofType::Ball;
+            conn.ball = ball;
+
+            jointConnections.push_back(conn);
+        } break;
+
+        case DofType::Slider: {
+            Vector3 parent_com = parent.inertial.origin.position;
+            Vector3 parent_to_joint =
+                joint.second.parentToJointOriginTransform.position;
+            Quat parent_to_child_rot =
+                joint.second.parentToJointOriginTransform.rotation;
+            Vector3 joint_to_child_com =
+                child.inertial.origin.position;
+
+            JointSlider slider = {
+                .relPositionParent = parent_to_joint - parent_com,
+                .relPositionChild = joint_to_child_com,
+
+                // joint.axis is already in the child frame.
+                .slideVector = joint.second.axis,
+
+                .relParentRotation = parent_to_child_rot,
+            };
+
+            JointConnection conn;
+            conn.parentIdx = parent.idx;
+            conn.childIdx = child.idx;
+            conn.type = DofType::Slider;
+            conn.slider = slider;
+
+            jointConnections.push_back(conn);
+        } break;
+
+        default: {
+            assert(false);
+            MADRONA_UNREACHABLE();
+        } break;
+        }
     }
+
+    for (uint32_t l = 0; l < sorted_links.size(); ++l) {
+        URDFLink &link = model.links[sorted_links[l]];
+
+        for (uint32_t c = 0; c < link.collisionArray.size(); ++c) {
+            URDFCollision &collision = link.collisionArray[c];
+
+            Vector3 scale = Vector3 {1.f, 1.f ,1.f};
+
+            uint32_t obj_id = 0;
+            switch (collision.geometry.type) {
+            case URDFGeometryType::Mesh: {
+                obj_id = physics_asset_paths.size();
+                scale = collision.geometry.mesh.scale;
+                physics_asset_paths.push_back(collision.geometry.mesh.filename);
+            } break;
+
+            case URDFGeometryType::Sphere: {
+                scale = Vector3::all(collision.geometry.sphere.radius);
+                obj_id = primitives.spherePhysicsIdx;
+            } break;
+
+            case URDFGeometryType::Box: {
+                scale = collision.geometry.box.dim;
+                obj_id = primitives.cubePhysicsIdx;
+            } break;
+
+            default: {
+                assert(false);
+            } break;
+            }
+
+            CollisionDesc coll_desc = {
+                .objID = obj_id,
+                .offset = collision.origin.position,
+                .rotation = collision.origin.rotation,
+                .scale = Diag3x3::fromVec(scale),
+                .linkIdx = l,
+                .subIndex = c
+            };
+
+            collisionDescs.push_back(coll_desc);
+            cfg.numColliders++;
+        }
+
+        for (uint32_t v = 0; v < link.visualArray.size(); ++v) {
+            URDFVisual &visual = link.visualArray[v];
+
+            Vector3 scale = Vector3 { 1.f, 1.f, 1.f };
+
+            uint32_t obj_id = 0;
+            switch (visual.geometry.type) {
+            case URDFGeometryType::Mesh: {
+                obj_id = render_asset_paths.size();
+                scale = visual.geometry.mesh.scale;
+                render_asset_paths.push_back(visual.geometry.mesh.filename);
+            } break;
+
+            case URDFGeometryType::Sphere: {
+                scale = Vector3::all(visual.geometry.sphere.radius);
+                obj_id = primitives.sphereRenderIdx;
+            } break;
+
+            case URDFGeometryType::Box: {
+                scale = visual.geometry.box.dim;
+                obj_id = primitives.cubeRenderIdx;
+            } break;
+
+            default: {
+                assert(false);
+            } break;
+            }
+            
+            VisualDesc viz_desc = {
+                .objID = obj_id,
+                .offset = visual.origin.position,
+                .rotation = visual.origin.rotation,
+                .scale = Diag3x3::fromVec(scale),
+                .linkIdx = l,
+                .subIndex = v
+            };
+
+            visualDescs.push_back(viz_desc);
+            cfg.numVisuals++;
+        }
+    }
+
+    uint32_t model_idx = modelConfigs.size();
+
+    modelConfigs.push_back(cfg);
+
+    return model_idx;
 }
 
-bool URDFLoader::load(
+uint32_t URDFLoader::load(
         const char *path,
-        ImportedAssets &imported_assets)
+        BuiltinPrimitives primitives,
+        std::vector<std::string> &render_asset_paths,
+        std::vector<std::string> &physics_asset_paths)
 {
     std::ifstream stream(path);
 
@@ -1103,7 +1312,34 @@ bool URDFLoader::load(
 
     URDFModel model = parseURDF(xml_str);
 
-    return true;
+    return impl->convertToModelConfig(
+            model,
+            primitives,
+            render_asset_paths,
+            physics_asset_paths);
+}
+
+ModelData URDFLoader::getModelData()
+{
+    return {
+        .numBodies = (uint32_t)impl->bodyDescs.size(),
+        .bodies = impl->bodyDescs.data(),
+
+        .numConnections = (uint32_t)impl->jointConnections.size(),
+        .connections = impl->jointConnections.data(),
+
+        .numColliders = (uint32_t)impl->collisionDescs.size(),
+        .colliders = impl->collisionDescs.data(),
+
+        .numVisuals = (uint32_t)impl->visualDescs.size(),
+        .visuals = impl->visualDescs.data(),
+    };
+}
+
+ModelConfig *URDFLoader::getModelConfigs(uint32_t &num_configs)
+{
+    num_configs = (uint32_t)impl->modelConfigs.size();
+    return impl->modelConfigs.data();
 }
 
 }
