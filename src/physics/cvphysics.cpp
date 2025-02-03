@@ -3850,20 +3850,21 @@ inline void computeInvMass(Context &ctx,
             continue;
         }
 
-        // Helper
+        // Jacobian size (body dofs x total dofs)
+        memset(J, 0.f, body_dofs.numDofs * grp.numDofs * sizeof(float));
         auto Jd = [&](int32_t row, int32_t col) -> float& {
             return J[row + body_dofs.numDofs * col];
         };
+        // J^T and M^{-1}J^T (total dofs x body dofs)
         auto MinvJTd = [&](int32_t row, int32_t col) -> float& {
             return MinvJT[row + grp.numDofs * col];
         };
+        // A = JM^{-1}J^T. (body dofs x body dofs)
         auto Ad = [&](int32_t row, int32_t col) -> float& {
             return A[row + body_dofs.numDofs * col];
         };
 
-        // Jacobian size (body dofs x total dofs)
         // Fill in 1 for the corresponding body dofs
-        memset(J, 0.f, body_dofs.numDofs * grp.numDofs * sizeof(float));
         for (CountT i = 0; i < body_dofs.numDofs; ++i) {
             Jd(i, i + dof_offset) = 1.f;
         }
@@ -3882,7 +3883,7 @@ inline void computeInvMass(Context &ctx,
         }
 
         // A = J M^{-1} J^T
-        memset(A, 0.f, 36 * sizeof(float));
+        memset(A, 0.f, body_dofs.numDofs * body_dofs.numDofs * sizeof(float));
         for (CountT i = 0; i < body_dofs.numDofs; ++i) {
             for (CountT j = 0; j < body_dofs.numDofs; ++j) {
                 for (CountT k = 0; k < grp.numDofs; ++k) {
