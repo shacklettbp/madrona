@@ -5640,14 +5640,28 @@ void joinBodies(
 
 Entity loadModel(Context &ctx,
                  ModelConfig cfg,
-                 ModelData model_data)
+                 ModelData model_data,
+                 Vector3 initial_pos,
+                 Quat initial_rot)
 {
     Entity grp = makeBodyGroup(ctx, cfg.numBodies);
     Entity *bodies_tmp =
         (Entity *)ctx.tmpAlloc(sizeof(Entity) * cfg.numBodies);
 
+    { // Make the root
+        BodyDesc desc = model_data.bodies[cfg.bodiesOffset];
+
+        desc.initialPos = initial_pos;
+        desc.initialRot = initial_rot;
+
+        bodies_tmp[0] = makeBody(
+                ctx,
+                grp,
+                desc);
+    }
+
     // Create the bodies (links)
-    for (uint32_t i = 0; i < cfg.numBodies; ++i) {
+    for (uint32_t i = 1; i < cfg.numBodies; ++i) {
         bodies_tmp[i] = makeBody(
                 ctx,
                 grp,

@@ -633,7 +633,9 @@ struct ModelData {
 // This returns the body group entity
 Entity loadModel(Context &ctx,
                  ModelConfig cfg,
-                 ModelData model_data);
+                 ModelData model_data,
+                 math::Vector3 initial_pos,
+                 math::Quat initial_rot);
 
 }
 

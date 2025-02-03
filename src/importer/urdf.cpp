@@ -297,7 +297,7 @@ static void parsePoseInternal(
         const char* rpy_str = xml->Attribute("rpy");
         if (rpy_str != NULL) {
             if (assert_no_rpy) {
-                assert(rpy_str == "0 0 0");
+                assert(strcmp(rpy_str, "0 0 0") == 0);
             }
             pose.rotation = getQuatFromRPY(rpy_str);
         }
@@ -438,6 +438,8 @@ static bool parseVisual(URDFVisual &vis, tinyxml2::XMLElement *config)
         // try to parse material element in place
         parseMaterial(vis.material, mat, true);
     }
+
+    return true;
 }
 
 static void parseInertial(
@@ -539,6 +541,8 @@ static bool parseLink(
         parseCollision(col, col_xml);
         link.collisionArray.push_back(col);
     }
+
+    return true;
 }
 
 static void assignMaterial(
@@ -546,14 +550,16 @@ static void assignMaterial(
         URDFModel& model,
         const char* link_name)
 {
-    massert(!visual.materialName.empty(), "Assigning material with no name");
+    // massert(!visual.materialName.empty(), "Assigning material with no name");
 
-    const URDFMaterial &material = model.materials[visual.materialName];
+    if (!visual.materialName.empty()) {
+        const URDFMaterial &material = model.materials[visual.materialName];
 
-    if (model.materials.contains(visual.materialName)) {
-        visual.material = material;
-    } else {
-        model.materials.insert(std::make_pair(visual.material.name, visual.material));
+        if (model.materials.contains(visual.materialName)) {
+            visual.material = material;
+        } else {
+            model.materials.insert(std::make_pair(visual.material.name, visual.material));
+        }
     }
 }
 
