@@ -67,7 +67,7 @@ TrainInterface::Impl * TrainInterface::Impl::init(
         num_total_interfaces += tensors.size();
     };
 
-    num_total_dims += inputs.actions.dimensions.size();
+    sumStorageRequirements(inputs.actions);
     num_total_dims += inputs.resets.dimensions.size();
     num_total_dims += inputs.simCtrl.dimensions.size();
     sumStorageRequirements(inputs.pbt);
@@ -142,7 +142,7 @@ TrainInterface::Impl * TrainInterface::Impl::init(
     };
 
     TrainStepInputInterface owned_inputs {
-        .actions = makeOwnedInterface(inputs.actions),
+        .actions = makeOwnedNamedInterfaces(inputs.actions),
         .resets = makeOwnedInterface(inputs.resets),
         .simCtrl = makeOwnedInterface(inputs.simCtrl),
         .pbt = makeOwnedNamedInterfaces(inputs.pbt),
