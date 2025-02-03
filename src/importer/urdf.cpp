@@ -968,12 +968,12 @@ static URDFModel parseURDF(const std::string &xml_string)
 
         massert(!model.links.contains(link.name), "link is not unique");
 
+        model.links.insert(std::make_pair(link.name, link));
+
         if (!link.visualArray.empty()) {
             for (auto &visual : link.visualArray) {
                 assignMaterial(visual, model, link.name.c_str());
             }
-
-            model.links.insert(std::make_pair(link.name, link));
         }
     }
 
@@ -1050,8 +1050,6 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 sorted_links,
                 model.rootLinkName,
                 model);
-
-        assert(num_links == model.links.size());
     }
 
     ModelConfig cfg = {
@@ -1066,7 +1064,7 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         URDFLink &link = model.links[link_name];
 
         BodyDesc body_desc = {
-            .type = DofType::FreeBody,
+            .type = DofType::FixedBody,
             .initialPos = Vector3::all(0.f),
             .initialRot = Quat::id(),
             .responseType = ResponseType::Dynamic,
@@ -1190,6 +1188,30 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             conn.childIdx = child.idx;
             conn.type = DofType::Slider;
             conn.slider = slider;
+
+            jointConnections.push_back(conn);
+        } break;
+
+        case DofType::FixedBody: {
+            Vector3 parent_com = parent.inertial.origin.position;
+            Vector3 parent_to_joint =
+                joint.second.parentToJointOriginTransform.position;
+            Quat parent_to_child_rot =
+                joint.second.parentToJointOriginTransform.rotation;
+            Vector3 joint_to_child_com =
+                child.inertial.origin.position;
+
+            JointFixed fixed = {
+                .relPositionParent = parent_to_joint - parent_com,
+                .relPositionChild = joint_to_child_com,
+                .relParentRotation = parent_to_child_rot,
+            };
+
+            JointConnection conn;
+            conn.parentIdx = parent.idx;
+            conn.childIdx = child.idx;
+            conn.type = DofType::FixedBody;
+            conn.fixed = fixed;
 
             jointConnections.push_back(conn);
         } break;

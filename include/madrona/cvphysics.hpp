@@ -556,6 +556,25 @@ void joinBodies(
         Entity child,
         JointSlider slider_info);
 
+struct JointFixed {
+    // In the parent's coordinate basis
+    math::Vector3 relPositionParent;
+
+    // In the child's coordinate basis
+    math::Vector3 relPositionChild;
+
+    // Rotation applied to child's vectors relative to
+    // parent's coordinate system.
+    math::Quat relParentRotation;
+};
+
+void joinBodies(
+        Context &ctx,
+        Entity body_grp,
+        Entity parent,
+        Entity child,
+        JointFixed fixed_info);
+
 void attachLimit(
         Context &ctx,
         Entity body_grp,
@@ -595,6 +614,7 @@ struct JointConnection {
         JointHinge hinge;
         JointBall ball;
         JointSlider slider;
+        JointFixed fixed;
         // ...
     };
 };

@@ -1175,6 +1175,37 @@ inline void forwardKinematics(Context &ctx,
             tmp_state.phi.v[6] = parent_tmp_state.composedRot.z;
         } break;
 
+        case DofType::FixedBody: {
+            auto &position = ctx.get<DofObjectPosition>(body_grp.bodies(ctx)[0]);
+            auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[0]);
+
+            tmp_state.composedRot = 
+                parent_tmp_state.composedRot *
+                Quat {
+                    position.q[3],
+                    position.q[4],
+                    position.q[5],
+                    position.q[6]
+                };
+
+            // This is the origin of the body
+            tmp_state.comPos = 
+                parent_tmp_state.comPos + 
+                hier_desc.relPositionParent +
+                (parent_tmp_state.composedRot * hier_desc.parentToChildRot).rotateVec(
+                        hier_desc.relPositionLocal + 
+                        Vector3 {
+                            position.q[0],
+                            position.q[1],
+                            position.q[2]
+                        });
+
+            // omega remains unchanged, and v only depends on the COM position
+            tmp_state.phi.v[0] = tmp_state.comPos[0];
+            tmp_state.phi.v[1] = tmp_state.comPos[1];
+            tmp_state.phi.v[2] = tmp_state.comPos[2];
+        } break;
+
         default: {
             // Only hinges have parents
             assert(false);
@@ -2178,8 +2209,14 @@ float GaussMinimizationNode::exactLineSearch(
                             float dnp_da = p0;
                             float dtp_da = (p1 * t1 + p2 * t2 +
                                             alpha * (p1 * p1 + p2 * p2)) / tp;
+                            if (tp == 0.f) {
+                                printf("nan going to happen exactLineSearch tp\n");
+                            }
                             float d2tp_da2 = ((p2 * t1 - p1 * t2) * (p2 * t1 - p1 * t2)) /
                                 (tp * tp * tp);
+                            if (tp * tp * tp == 0.f) {
+                                printf("nan going to happen exactLineSearch tp^3\n");
+                            }
                             float tmp = np - mu * tp;
                             float d_tmp = dnp_da - mu * dtp_da;
 
@@ -2223,6 +2260,9 @@ float GaussMinimizationNode::exactLineSearch(
 
     // Newton step
     float alpha1 = alpha - evals_alpha.grad / evals_alpha.hess;
+    if (evals_alpha.hess == 0.f) {
+        printf("nan going to happen exactLineSeaarch hess\n");
+    }
 
     Evals evals_alpha1 = fdh_phi(alpha1);
 
@@ -2262,6 +2302,9 @@ float GaussMinimizationNode::exactLineSearch(
         }
 
         alpha1 -= evals_alpha1.grad / evals_alpha1.hess;
+        if (evals_alpha1.hess == 0.f) {
+            printf("nan going to happen exactLineSeaarch hess1\n");
+        }
     }
 
     if (iters == ls_iters) {
@@ -2272,6 +2315,9 @@ float GaussMinimizationNode::exactLineSearch(
 
     float alpha_low = alpha1;
     float alpha_high = alpha1 - evals_alpha1.grad / evals_alpha1.hess;
+    if (evals_alpha1.hess == 0.f) {
+        printf("nan going to happen exactLineSeaarch hess2\n");
+    }
 
     Evals evals_alpha_mid = fdh_phi(alpha_low);
     if (evals_alpha_mid.grad > 0.f) {
@@ -3078,6 +3124,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
         uint32_t max_iters = 100;
         uint32_t iter = 0;
+
         for (; iter < max_iters; ++iter) {
             // iter_warp_printf("##################### CG iter=%d\n", iter);
 
@@ -5333,6 +5380,7 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     auto &inertial = ctx.get<DofObjectInertial>(physical_entity);
     auto &friction = ctx.get<DofObjectFriction>(physical_entity);
     auto &limit = ctx.get<DofObjectLimit>(physical_entity);
+    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(physical_entity);
 
     inertial.mass = desc.mass;
     inertial.inertia = desc.inertia;
@@ -5417,6 +5465,8 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
         desc.type,
         getNumDofs(desc.type),
     };
+
+    hier_desc.index = grp_info.bodyCounter;
 
     grp_info.bodyCounter++;
 
@@ -5557,11 +5607,14 @@ void setRoot(Context &ctx,
     body_grp_hier.numDofs = ctx.get<DofObjectNumDofs>(body).numDofs;
 }
 
-void joinBodies(Context &ctx,
-                 Entity body_grp,
-                 Entity parent_physics_entity,
-                 Entity child_physics_entity,
-                 JointHinge hinge_info)
+void joinBodiesGeneral(Context &ctx,
+                       Entity body_grp,
+                       Entity parent_physics_entity,
+                       Entity child_physics_entity,
+                       Vector3 rel_position_parent,
+                       Vector3 rel_position_child,
+                       Quat rel_parent_rotation,
+                       Vector3 axis = Vector3 { 0.f, 0.f, 0.f })
 {
     BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
 
@@ -5570,26 +5623,40 @@ void joinBodies(Context &ctx,
         ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
 
     hier_desc.parent = parent_physics_entity;
-    hier_desc.relPositionParent = hinge_info.relPositionParent;
-    hier_desc.relPositionLocal = hinge_info.relPositionChild;
-    hier_desc.parentToChildRot = hinge_info.relParentRotation;
+    hier_desc.relPositionParent = rel_position_parent;
+    hier_desc.relPositionLocal = rel_position_child;
+    hier_desc.parentToChildRot = rel_parent_rotation;
 
-    hier_desc.axis = hinge_info.hingeAxis;
+    hier_desc.axis = axis;
 
     hier_desc.leaf = true;
     hier_desc.bodyGroup = body_grp;
 
-    hier_desc.index = grp.bodyCounter;
+    // hier_desc.index = grp.bodyCounter;
     hier_desc.parentIndex = parent_hier_desc.index;
 
-
-    grp.bodies(ctx)[grp.bodyCounter] = child_physics_entity;
+    grp.bodies(ctx)[hier_desc.index] = child_physics_entity;
 
     // Make the parent no longer a leaf
     ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
 
-    ++grp.bodyCounter;
     grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
+}
+
+void joinBodies(Context &ctx,
+                Entity body_grp,
+                Entity parent_physics_entity,
+                Entity child_physics_entity,
+                JointHinge hinge_info)
+{
+    joinBodiesGeneral(ctx, 
+                      body_grp,
+                      parent_physics_entity,
+                      child_physics_entity,
+                      hinge_info.relPositionParent,
+                      hinge_info.relPositionChild,
+                      hinge_info.relParentRotation,
+                      hinge_info.hingeAxis);
 }
 
 void joinBodies(Context &ctx,
@@ -5598,31 +5665,13 @@ void joinBodies(Context &ctx,
                 Entity child_physics_entity,
                 JointBall ball_info)
 {
-    BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
-
-    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
-    auto &parent_hier_desc =
-        ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
-
-    hier_desc.parent = parent_physics_entity;
-    hier_desc.relPositionParent = ball_info.relPositionParent;
-    hier_desc.relPositionLocal = ball_info.relPositionChild;
-    hier_desc.parentToChildRot = ball_info.relParentRotation;
-
-    hier_desc.leaf = true;
-    hier_desc.bodyGroup = body_grp;
-
-    hier_desc.index = grp.bodyCounter;
-    hier_desc.parentIndex = parent_hier_desc.index;
-
-
-    grp.bodies(ctx)[grp.bodyCounter] = child_physics_entity;
-
-    // Make the parent no longer a leaf
-    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
-
-    ++grp.bodyCounter;
-    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
+    joinBodiesGeneral(ctx, 
+                      body_grp,
+                      parent_physics_entity,
+                      child_physics_entity,
+                      ball_info.relPositionParent,
+                      ball_info.relPositionChild,
+                      ball_info.relParentRotation);
 }
 
 void joinBodies(
@@ -5632,33 +5681,29 @@ void joinBodies(
         Entity child_physics_entity,
         JointSlider slider_info)
 {
-    BodyGroupHierarchy &grp = ctx.get<BodyGroupHierarchy>(body_grp);
+    joinBodiesGeneral(ctx, 
+                      body_grp,
+                      parent_physics_entity,
+                      child_physics_entity,
+                      slider_info.relPositionParent,
+                      slider_info.relPositionChild,
+                      slider_info.relParentRotation,
+                      slider_info.slideVector);
+}
 
-    auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(child_physics_entity);
-    auto &parent_hier_desc =
-        ctx.get<DofObjectHierarchyDesc>(parent_physics_entity);
-
-    hier_desc.parent = parent_physics_entity;
-    hier_desc.relPositionParent = slider_info.relPositionParent;
-    hier_desc.relPositionLocal = slider_info.relPositionChild;
-    hier_desc.parentToChildRot = slider_info.relParentRotation;
-
-    hier_desc.axis = slider_info.slideVector;
-
-    hier_desc.leaf = true;
-    hier_desc.bodyGroup = body_grp;
-
-    hier_desc.index = grp.bodyCounter;
-    hier_desc.parentIndex = parent_hier_desc.index;
-
-
-    grp.bodies(ctx)[grp.bodyCounter] = child_physics_entity;
-
-    // Make the parent no longer a leaf
-    ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
-
-    ++grp.bodyCounter;
-    grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
+void joinBodies(Context &ctx,
+                 Entity body_grp,
+                 Entity parent_physics_entity,
+                 Entity child_physics_entity,
+                 JointFixed fixed_info)
+{
+    joinBodiesGeneral(ctx, 
+                      body_grp,
+                      parent_physics_entity,
+                      child_physics_entity,
+                      fixed_info.relPositionParent,
+                      fixed_info.relPositionChild,
+                      fixed_info.relParentRotation);
 }
 
 Entity loadModel(Context &ctx,
@@ -5739,6 +5784,15 @@ Entity loadModel(Context &ctx,
                         bodies_tmp[conn.parentIdx],
                         bodies_tmp[conn.childIdx],
                         conn.ball);
+            } break;
+
+            case DofType::FixedBody: {
+                joinBodies(
+                        ctx,
+                        grp,
+                        bodies_tmp[conn.parentIdx],
+                        bodies_tmp[conn.childIdx],
+                        conn.fixed);
             } break;
 
             default: {
