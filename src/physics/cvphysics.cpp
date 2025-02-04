@@ -3674,6 +3674,9 @@ inline void computePhiHierarchy(Context &ctx,
     }
 }
 
+// J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
+//  where e_{bi} = 1 if body i is an ancestor of b
+//  C^T projects into the contact space
 inline float* computeContactJacobian(Context &ctx,
                                      BodyGroupHierarchy &body_grp,
                                      DofObjectHierarchyDesc &hier_desc,
@@ -3686,12 +3689,6 @@ inline float* computeContactJacobian(Context &ctx,
                                      float coeff,
                                      bool dbg)
 {
-    uint32_t world_id = ctx.worldID().idx;
-    StateManager *state_mgr = getStateManager(ctx);
-    // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
-    //  where e_{bi} = 1 if body i is an ancestor of b
-    //  C^T projects into the contact space
-
     // Compute prefix sum to determine the start of the block for each body
     uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
 
@@ -3705,8 +3702,7 @@ inline float* computeContactJacobian(Context &ctx,
 
         // Populate columns of J_C
         float S[18] = {};
-        computePhiTrans(
-                curr_num_dofs, curr_tmp_state, origin, S);
+        computePhiTrans(curr_num_dofs, curr_tmp_state, origin, S);
         // Only use translational part of S
         for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
             float *J_col = J +
@@ -4338,8 +4334,7 @@ inline void recursiveNewtonEuler(Context &ctx,
 // May want to do a GPU specific version of this to extract some
 // parallelism out of this
 inline void recursiveNewtonEuler(Context &ctx,
-                                BodyGroupHierarchy &body_grp)
-{
+                                BodyGroupHierarchy &body_grp) {
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     uint32_t total_dofs = body_grp.numDofs;
 
@@ -4380,8 +4375,16 @@ inline void recursiveNewtonEuler(Context &ctx,
         }
         else if (num_dofs.type == DofType::FixedBody) {
             // Fixeds bodies must also be root of their hierarchy
-            tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
-            tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
+            // tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+            // tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
+            if (hier_desc.parent == Entity::none()) {
+                tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+                tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
+            } else {
+                auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                tmp_state.sVel = parent_tmp_state.sVel;
+                tmp_state.sAcc = parent_tmp_state.sAcc;
+            }
         }
         else if (num_dofs.type == DofType::Slider) {
             assert(hier_desc.parent != Entity::none());
@@ -4514,24 +4517,14 @@ inline void processContacts(Context &ctx,
                             ContactConstraint &contact,
                             ContactTmpState &tmp_state)
 {
-    ObjectManager &obj_mgr = *ctx.singleton<ObjectData>().mgr;
-
     Entity ref = ctx.get<LinkParentDofObject>(contact.ref).parentDofObject;
     Entity alt = ctx.get<LinkParentDofObject>(contact.alt).parentDofObject;
-
-#if 0
-    CVPhysicalComponent ref = ctx.get<CVPhysicalComponent>(
-            contact.ref);
-    CVPhysicalComponent alt = ctx.get<CVPhysicalComponent>(
-            contact.alt);
-#endif
 
     // If a parent collides with its direct child, unless the parent is a
     //  fixed body, we should ignore the contact.
     auto &refHier = ctx.get<DofObjectHierarchyDesc>(ref);
     auto &altHier = ctx.get<DofObjectHierarchyDesc>(alt);
-    if (refHier.parent == alt
-        || altHier.parent == ref) {
+    if (refHier.parent == alt || altHier.parent == ref) {
         auto &refNumDofs = ctx.get<DofObjectNumDofs>(ref);
         auto &altNumDofs = ctx.get<DofObjectNumDofs>(alt);
         if (refNumDofs.type != DofType::FixedBody
@@ -4540,11 +4533,6 @@ inline void processContacts(Context &ctx,
             return;
         }
     }
-
-#if 0
-    CountT objID_i = ctx.get<ObjectID>(ref).idx;
-    CountT objID_j = ctx.get<ObjectID>(alt).idx;
-#endif
 
     DofObjectFriction friction_i = ctx.get<DofObjectFriction>(ref);
     DofObjectFriction friction_j = ctx.get<DofObjectFriction>(alt);
@@ -4771,7 +4759,7 @@ inline void brobdingnag(Context &ctx,
                 Vector3 contact_pt = contact.points[pt_idx].xyz();
 
                 // Compute the Jacobians for each body at the contact point
-                if(!ref_fixed) {
+                // if(!ref_fixed) {
                     DofObjectHierarchyDesc &ref_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                             ref);
                     BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
@@ -4781,8 +4769,8 @@ inline void brobdingnag(Context &ctx,
                         ref_hier_desc, tmp_state.C, contact_pt, J_c,
                         block_start[ref_grp.tmpIdx0], jac_row, J_rows, -1.f,
                         (ct_idx == 0 && pt_idx == 0));
-                }
-                if(!alt_fixed) {
+                // }
+                // if(!alt_fixed) {
                     auto &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
                             alt);
                     auto &alt_grp = ctx.get<BodyGroupHierarchy>(
@@ -4792,7 +4780,7 @@ inline void brobdingnag(Context &ctx,
                         alt_hier_desc, tmp_state.C, contact_pt, J_c,
                         block_start[alt_grp.tmpIdx0], jac_row, J_rows, 1.f,
                         (ct_idx == 0 && pt_idx == 0));
-                }
+                // }
                 // Compute the diagonal approximation
                 diagApprox_c[jac_row] = diagApprox_c[jac_row + 1] =
                     diagApprox_c[jac_row + 2] = inv_weight;
