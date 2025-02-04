@@ -100,6 +100,12 @@ struct URDFLink {
     std::vector<std::string> childJointNames;
     std::vector<std::string> childLinkNames;
 
+    // After joint calculations happen in conversion to cvphysics format
+    Vector3 parentCom;
+    Vector3 parentToJoint;
+    Quat parentToChildRot;
+    Vector3 jointToChildCom;
+
     uint32_t idx;
 };
 
@@ -1145,6 +1151,11 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 .hingeAxis = joint.second.axis
             };
 
+            child.parentCom = parent_com;
+            child.parentToJoint = parent_to_joint;
+            child.parentToChildRot = parent_to_child_rot;
+            child.jointToChildCom = joint_to_child_com;
+
             JointConnection conn;
             conn.parentIdx = parent.idx;
             conn.childIdx = child.idx;
@@ -1168,6 +1179,11 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 .relPositionChild = joint_to_child_com,
                 .relParentRotation = parent_to_child_rot,
             };
+
+            child.parentCom = parent_com;
+            child.parentToJoint = parent_to_joint;
+            child.parentToChildRot = parent_to_child_rot;
+            child.jointToChildCom = joint_to_child_com;
 
             JointConnection conn;
             conn.parentIdx = parent.idx;
@@ -1197,6 +1213,11 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 .relParentRotation = parent_to_child_rot,
             };
 
+            child.parentCom = parent_com;
+            child.parentToJoint = parent_to_joint;
+            child.parentToChildRot = parent_to_child_rot;
+            child.jointToChildCom = joint_to_child_com;
+
             JointConnection conn;
             conn.parentIdx = parent.idx;
             conn.childIdx = child.idx;
@@ -1220,6 +1241,11 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 .relPositionChild = joint_to_child_com,
                 .relParentRotation = parent_to_child_rot,
             };
+
+            child.parentCom = parent_com;
+            child.parentToJoint = parent_to_joint;
+            child.parentToChildRot = parent_to_child_rot;
+            child.jointToChildCom = joint_to_child_com;
 
             JointConnection conn;
             conn.parentIdx = parent.idx;
@@ -1270,7 +1296,7 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
 
             CollisionDesc coll_desc = {
                 .objID = obj_id,
-                .offset = collision.origin.position,
+                .offset = collision.origin.position - link.jointToChildCom,
                 .rotation = collision.origin.rotation,
                 .scale = Diag3x3::fromVec(scale),
                 .linkIdx = l,
@@ -1311,7 +1337,7 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             
             VisualDesc viz_desc = {
                 .objID = obj_id,
-                .offset = visual.origin.position,
+                .offset = visual.origin.position - link.jointToChildCom,
                 .rotation = visual.origin.rotation,
                 .scale = Diag3x3::fromVec(scale),
                 .linkIdx = l,
