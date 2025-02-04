@@ -1178,13 +1178,7 @@ inline void forwardKinematics(Context &ctx,
 
         case DofType::FixedBody: {
             tmp_state.composedRot = 
-                parent_tmp_state.composedRot *
-                Quat {
-                    position.q[3],
-                    position.q[4],
-                    position.q[5],
-                    position.q[6]
-                };
+                parent_tmp_state.composedRot;
 
             // This is the origin of the body
             tmp_state.comPos =
@@ -3112,10 +3106,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             p[iter] = -m_grad[iter];
         });
         __syncwarp();
-
-#if 1
-        // printMatrix(p, 1, curr_sd->freeAccDim, "p");
-#endif
 
         uint32_t max_iters = 100;
         uint32_t iter = 0;
@@ -5727,9 +5717,10 @@ Entity loadModel(Context &ctx,
                  ModelConfig cfg,
                  ModelData model_data,
                  Vector3 initial_pos,
-                 Quat initial_rot)
+                 Quat initial_rot,
+                 float global_scale)
 {
-    Entity grp = makeBodyGroup(ctx, cfg.numBodies);
+    Entity grp = makeBodyGroup(ctx, cfg.numBodies, global_scale);
     Entity *bodies_tmp =
         (Entity *)ctx.tmpAlloc(sizeof(Entity) * cfg.numBodies);
 
@@ -5801,6 +5792,15 @@ Entity loadModel(Context &ctx,
                         bodies_tmp[conn.parentIdx],
                         bodies_tmp[conn.childIdx],
                         conn.ball);
+            } break;
+
+            case DofType::Slider: {
+                joinBodies(
+                        ctx,
+                        grp,
+                        bodies_tmp[conn.parentIdx],
+                        bodies_tmp[conn.childIdx],
+                        conn.slider);
             } break;
 
             case DofType::FixedBody: {

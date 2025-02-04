@@ -197,6 +197,8 @@ struct URDFModel {
     std::map<std::string, URDFLink> links;
     std::map<std::string, URDFJoint> joints;
     std::string rootLinkName;
+
+    URDFLink world;
 };
 
 struct URDFLoader::Impl {
@@ -993,6 +995,15 @@ static URDFModel parseURDF(const std::string &xml_string)
         model.joints.insert(std::make_pair(joint.name, joint));
     }
 
+    model.world = URDFLink {
+        .inertial = URDFInertial {
+            .origin = URDFPose {
+                .position = Vector3::all(0.f),
+                .rotation = Quat::id()
+            },
+        },
+    };
+
     // every link has children links and joints, but no parents, so we create a
     // local convenience data structure for keeping child->parent relations
     std::map<std::string, std::string> parent_link_tree;
@@ -1104,7 +1115,10 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
     }
 
     for (auto &joint : model.joints) {
-        URDFLink &parent = model.links[joint.second.parentLinkName];
+        URDFLink &parent = 
+            joint.second.parentLinkName == "world" ?
+            model.world :
+            model.links[joint.second.parentLinkName];
         URDFLink &child = model.links[joint.second.childLinkName];
 
         DofType dof_type = urdfToDofType(joint.second.type);

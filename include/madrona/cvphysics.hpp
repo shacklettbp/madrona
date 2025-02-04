@@ -668,7 +668,8 @@ Entity loadModel(Context &ctx,
                  ModelConfig cfg,
                  ModelData model_data,
                  math::Vector3 initial_pos,
-                 math::Quat initial_rot);
+                 math::Quat initial_rot,
+                 float global_scale);
 
 }
 
