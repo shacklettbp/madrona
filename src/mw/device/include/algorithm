@@ -1,5 +1,11 @@
 #pragma once
 
+#if __has_include(<cuda/std/algorithm>)
+#include <cuda/std/algorithm>
+#elif __has_include(<cuda/std/__algorithm_>)
+#include <cuda/std/__algorithm_>
+#elif __has_include(<cuda/std/__algorithm>)
 #include <cuda/std/__algorithm>
+#endif
 
 #include "cuda_std_post"
