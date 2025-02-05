@@ -4856,9 +4856,6 @@ inline void brobdingnag(Context &ctx,
                             limit.hinge.dConstraintViolation(pos.q[0]);
                         residuals[glob_row_offset] = limit.hinge.constraintViolation(pos.q[0]);
                         diagApprox_e[glob_row_offset] = 1.f / inertial.approxInvMassDof[0];
-
-                        printf("dviolation = %f; violation = %f\n",
-                                to_change[0], residuals[glob_row_offset]);
                     } break;
 
                     case DofObjectLimit::Type::Slider: {
@@ -4871,9 +4868,6 @@ inline void brobdingnag(Context &ctx,
 
                         residuals[glob_row_offset] = limit.slider.constraintViolation(pos.q[0]);
                         diagApprox_e[glob_row_offset] = 1.f / inertial.approxInvMassDof[0];
-
-                        printf("dviolation = %f; violation = %f\n",
-                                to_change[0], residuals[glob_row_offset]);
                     } break;
 
                     default: {
@@ -5506,6 +5500,8 @@ void attachCollision(
 
     Entity col_obj = ctx.makeEntity<LinkCollider>();
 
+    ctx.get<DisabledColliders>(col_obj).numDisabled = 0;
+
     ctx.get<broadphase::LeafID>(col_obj) =
         PhysicsSystem::registerEntity(ctx, col_obj, { (int32_t)desc.objID });
     ctx.get<ResponseType>(col_obj) = tmp_state.responseType;
@@ -5595,6 +5591,27 @@ void attachLimit(Context &ctx,
     hier.numEqualityRows += 1;
 }
 
+void disableJointCollisions(
+        Context &ctx,
+        Entity grp,
+        Entity joint_a,
+        Entity joint_b)
+{
+    BodyGroupHierarchy &grp_hier = ctx.get<BodyGroupHierarchy>(grp);
+    DofObjectTmpState &a_tmp_state = ctx.get<DofObjectTmpState>(joint_a);
+    DofObjectTmpState &b_tmp_state = ctx.get<DofObjectTmpState>(joint_b);
+
+    BodyObjectData *col_data = grp_hier.getCollisionData(ctx);
+
+    for (uint32_t a_idx = 0; a_idx < a_tmp_state.numCollisionObjs; ++a_idx) {
+        for (uint32_t b_idx = 0; b_idx < b_tmp_state.numCollisionObjs; ++b_idx) {
+            Entity a_obj = col_data[a_idx + a_tmp_state.collisionObjOffset].proxy;
+            Entity b_obj = col_data[b_idx + b_tmp_state.collisionObjOffset].proxy;
+            PhysicsSystem::disableCollision(ctx, a_obj, b_obj);
+        }
+    }
+}
+
 void setRoot(Context &ctx,
              Entity body_group,
              Entity body)
@@ -5648,6 +5665,13 @@ static inline void joinBodiesGeneral(
     ctx.get<DofObjectHierarchyDesc>(parent_physics_entity).leaf = false;
 
     grp.numDofs += ctx.get<DofObjectNumDofs>(child_physics_entity).numDofs;
+
+    // You need to disable all the colliders between these two
+    disableJointCollisions(
+            ctx,
+            body_grp,
+            parent_physics_entity,
+            child_physics_entity);
 }
 
 void joinBodies(Context &ctx,
@@ -5818,6 +5842,38 @@ Entity loadModel(Context &ctx,
             } break;
 
             }
+        }
+    }
+
+    { // Disable collisions:
+        // Make sure to disable collisions between colliders in same joints
+        BodyGroupHierarchy &grp_hier = ctx.get<BodyGroupHierarchy>(grp);
+        BodyObjectData *col_data = grp_hier.getCollisionData(ctx);
+
+        for (uint32_t i = 1; i < cfg.numBodies; ++i) {
+            Entity body = bodies_tmp[i];
+
+            DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body);
+
+            for (uint32_t b0 = 0; b0 < tmp_state.numCollisionObjs; ++b0) {
+                for (uint32_t b1 = b0+1; b1 < tmp_state.numCollisionObjs; ++b1) {
+                    Entity a_rb = col_data[b0 + tmp_state.collisionObjOffset].proxy;
+                    Entity b_rb = col_data[b1 + tmp_state.collisionObjOffset].proxy;
+
+                    PhysicsSystem::disableCollision(ctx, a_rb, b_rb);
+                }
+            }
+        }
+
+        for (uint32_t i = 0; i < cfg.numCollisionDisables; ++i) {
+            CollisionDisable disable =
+                model_data.collisionDisables[i + cfg.collisionDisableOffset];
+
+            disableJointCollisions(
+                    ctx, 
+                    grp,
+                    bodies_tmp[disable.aBody],
+                    bodies_tmp[disable.bBody]);
         }
     }
 

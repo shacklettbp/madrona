@@ -10,103 +10,6 @@
 
 namespace madrona::phys {
 
-#if 0
-// Description of a body tree
-struct BodyJointDesc {
-    // For now, we're just using URDF terminology
-    enum class Type {
-        Revolute,
-        Continuous,
-        Prismatic,
-        Floating,
-        Planar,
-        Fixed,
-        Invalid,
-    };
-
-    struct Dynamics {
-        float damping;
-        float friction;
-    };
-
-    struct Limits {
-        float lower;
-        float upper;
-        float effort;
-        float velocity;
-    };
-
-    struct Safety {
-        float softUpperLimit;
-        float softLowerLimit;
-        float kPosition;
-        float kVelocity;
-    };
-
-    struct Calibration {
-        float referencePosition;
-        float rising;
-        float falling;
-    };
-
-    struct Mimic {
-        float offset;
-        float multiplier;
-    };
-
-    Type dofType;
-    math::Vector3 axis;
-
-    uint32_t childLinkIndex;
-    uint32_t parentLinkIndex;
-
-    math::Vector3 parentToJointTrans;
-    math::Quat parentToJointRot;
-};
-
-struct BodyJointLink {
-    static constexpr uint32_t kMaxVisuals = 3;
-    static constexpr uint32_t kMaxCollisions = 3;
-
-    Vector3 origin;
-    Quat rot;
-
-    float mass;
-
-    struct {
-        float ixx, ixy, ixz, iyy, iyz, izz;
-    } inertia;
-
-    struct Visual {
-        // The object will have the material tied to it
-        uint32_t objID;
-
-        // Relative to the link?
-        Vector3 origin;
-        Quat rot;
-    };
-
-    Visual visuals[kMaxVisuals];
-
-    struct Collision {
-        Vector3 origin;
-        Quat rot;
-
-        uint32_t objID;
-    };
-
-    Collision collisions[kMaxCollisions];
-};
-
-struct BodyTreeDesc {
-    uint32_t numLinks;
-    uint32_t *linkIndices;
-
-    uint32_t numJoints;
-    uint32_t *jointIndices;
-};
-#endif
-
 #ifdef MADRONA_GPU_MODE
 struct CVXSolve {
     void *fn;
@@ -182,6 +85,13 @@ struct Velocity {
 
 struct SolverBundleAlias {};
 
+struct DisabledColliders {
+    static constexpr uint32_t kMaxDisabledColliders = 4;
+
+    uint32_t numDisabled;
+    Entity colliders[kMaxDisabledColliders];
+};
+
 struct RigidBody : Bundle<
     base::ObjectInstance,
     ResponseType,
@@ -189,6 +99,7 @@ struct RigidBody : Bundle<
     Velocity, 
     ExternalForce,
     ExternalTorque,
+    DisabledColliders,
     SolverBundleAlias
 > {};
 
@@ -402,6 +313,11 @@ namespace PhysicsSystem {
     TaskGraphNodeID setupStandaloneBroadphaseCleanupTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps);
+
+    void disableCollision(
+            Context &ctx, Entity rigid_body_a, Entity rigid_body_b);
+    bool isCollisionDisabled(
+            Context &ctx, Entity rigid_body_a, Entity rigid_body_b);
 
     float getObjectMass(Context &, int32_t obj_id);
     math::Diag3x3 getObjectInertia(Context &, int32_t obj_id);

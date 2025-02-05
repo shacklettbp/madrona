@@ -109,6 +109,11 @@ struct URDFLink {
     uint32_t idx;
 };
 
+struct URDFCollisionDisable {
+    std::string aLink;
+    std::string bLink;
+};
+
 enum class URDFJointType {
     Revolute, // Hinge with limits
     Continuous, // Hinge without limits
@@ -204,6 +209,8 @@ struct URDFModel {
     std::map<std::string, URDFJoint> joints;
     std::string rootLinkName;
 
+    std::vector<URDFCollisionDisable> disableCollisions;
+
     URDFLink world;
 };
 
@@ -213,6 +220,7 @@ struct URDFLoader::Impl {
     std::vector<CollisionDesc> collisionDescs;
     std::vector<VisualDesc> visualDescs;
     std::vector<ModelConfig> modelConfigs;
+    std::vector<CollisionDisable> collisionDisables;
 
     uint32_t convertToModelConfig(
             URDFModel &model,
@@ -743,6 +751,17 @@ static void parseJointDynamics(
     }
 }
 
+static void parseCollisionDisable(
+        URDFCollisionDisable &disable,
+        tinyxml2::XMLElement *config)
+{
+    const char *a_link = config->Attribute("link1");
+    const char *b_link = config->Attribute("link2");
+
+    disable.aLink = std::string(a_link);
+    disable.bLink = std::string(b_link);
+}
+
 static void parseJoint(
         URDFJoint &joint,
         tinyxml2::XMLElement* config)
@@ -1001,6 +1020,17 @@ static URDFModel parseURDF(const std::string &xml_string)
         model.joints.insert(std::make_pair(joint.name, joint));
     }
 
+    // Disable collisions
+    for (tinyxml2::XMLElement *dc = robot_xml->FirstChildElement("disable_collision");
+            dc;
+            dc = dc->NextSiblingElement("disable_collision")) {
+        URDFCollisionDisable disable;
+
+        parseCollisionDisable(disable, dc);
+
+        model.disableCollisions.push_back(disable);
+    }
+
     model.world = URDFLink {
         .inertial = URDFInertial {
             .origin = URDFPose {
@@ -1073,7 +1103,8 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         .bodiesOffset = (uint32_t)bodyDescs.size(),
         .connectionsOffset = (uint32_t)jointConnections.size(),
         .collidersOffset = (uint32_t)collisionDescs.size(),
-        .visualsOffset = (uint32_t)visualDescs.size()
+        .visualsOffset = (uint32_t)visualDescs.size(),
+        .collisionDisableOffset = (uint32_t)collisionDisables.size(),
     };
 
     { // Push the root body
@@ -1347,6 +1378,18 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             visualDescs.push_back(viz_desc);
             cfg.numVisuals++;
         }
+    }
+
+    for (uint32_t i = 0; i < (uint32_t)model.disableCollisions.size(); ++i) {
+        URDFCollisionDisable &dc = model.disableCollisions[i];
+
+        URDFLink &a_link = model.links[dc.aLink];
+        URDFLink &b_link = model.links[dc.bLink];
+
+        collisionDisables.push_back(CollisionDisable {
+                    .aBody = a_link.idx,
+                    .bBody = b_link.idx
+                });
     }
 
     uint32_t model_idx = modelConfigs.size();

@@ -948,6 +948,11 @@ inline void findIntersectingEntry(
 
     bvh.findLeafIntersecting(leaf_id, [&](Entity intersecting_entity) {
         if (e.id < intersecting_entity.id) {
+            if (PhysicsSystem::isCollisionDisabled(ctx, e, intersecting_entity)) {
+                printf("Collision was disabled!\n");
+                return;
+            }
+
             Loc b_loc = ctx.loc(intersecting_entity);
 
             // FIXME: Change this so static objects are kept in a separate BVH
@@ -971,6 +976,8 @@ inline void findIntersectingEntry(
             // once
             
             CountT total_narrowphase_checks = a_num_prims * b_num_prims;
+
+            printf("Creating contact between %d %d\n", e.id, intersecting_entity.id);
 
             for (CountT prim_check_idx = 0;
                  prim_check_idx < total_narrowphase_checks;

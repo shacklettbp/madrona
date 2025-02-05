@@ -366,6 +366,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<Velocity>();
     registry.registerComponent<ExternalForce>();
     registry.registerComponent<ExternalTorque>();
+    registry.registerComponent<DisabledColliders>();
     registry.registerComponent<DummyBundleComp>();
 
     registry.registerSingleton<broadphase::BVH>();
@@ -491,6 +492,59 @@ TaskGraphNodeID setupStandaloneBroadphaseCleanupTasks(
     Span<const TaskGraphNodeID> deps)
 {
     return builder.addToGraph<ClearTmpNode<CandidateTemporary>>(deps);
+}
+
+void disableCollision(Context &ctx, Entity rigid_body_a, Entity rigid_body_b)
+{
+    // Make sure this wasn't already disabled
+    if (isCollisionDisabled(ctx, rigid_body_a, rigid_body_b)) {
+        return;
+    }
+
+    Entity to_append = (rigid_body_a.id < rigid_body_b.id) ?
+        rigid_body_a : rigid_body_b;
+    Entity other = (rigid_body_a.id < rigid_body_b.id) ?
+        rigid_body_b : rigid_body_a;
+
+    DisabledColliders &to_append_disabled = 
+        ctx.get<DisabledColliders>(to_append);
+
+    // Append this to the other entity's list
+    if (to_append_disabled.numDisabled == 
+            DisabledColliders::kMaxDisabledColliders) {
+        DisabledColliders &other_disabled = 
+            ctx.get<DisabledColliders>(other);
+
+        assert(other_disabled.numDisabled <
+                DisabledColliders::kMaxDisabledColliders);
+
+        other_disabled.colliders[other_disabled.numDisabled++] =
+            to_append;
+    } else {
+        to_append_disabled.colliders[to_append_disabled.numDisabled++] =
+            other;
+    }
+}
+
+bool isCollisionDisabled(
+        Context &ctx, Entity rigid_body_a, Entity rigid_body_b)
+{
+    DisabledColliders &a_disabled = ctx.get<DisabledColliders>(rigid_body_a);
+    DisabledColliders &b_disabled = ctx.get<DisabledColliders>(rigid_body_b);
+
+    for (uint32_t i = 0; i < a_disabled.numDisabled; ++i) {
+        if (a_disabled.colliders[i] == rigid_body_b) {
+            return true;
+        }
+    }
+
+    for (uint32_t i = 0; i < b_disabled.numDisabled; ++i) {
+        if (b_disabled.colliders[i] == rigid_body_a) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 float getObjectMass(Context &ctx, int32_t obj_id)

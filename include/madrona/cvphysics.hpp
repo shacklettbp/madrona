@@ -596,6 +596,14 @@ void attachLimit(
         Entity body,
         SliderLimit limit);
 
+// Disable the collision between all colliders in joint_a
+// and colliders in joint_b
+void disableJointCollisions(
+        Context &ctx,
+        Entity grp,
+        Entity joint_a,
+        Entity joint_b);
+
 // External forces:
 void addHingeExternalForce(
         Context &ctx, Entity hinge_joint, float newtons);
@@ -646,6 +654,14 @@ struct ModelConfig {
 
     uint32_t numVisuals;
     uint32_t visualsOffset;
+
+    uint32_t numCollisionDisables;
+    uint32_t collisionDisableOffset;
+};
+
+struct CollisionDisable {
+    uint32_t aBody;
+    uint32_t bBody;
 };
 
 // This is the data for all models in that could possibly be loaded.
@@ -661,6 +677,9 @@ struct ModelData {
 
     uint32_t numVisuals;
     VisualDesc *visuals;
+
+    uint32_t numCollisionDisables;
+    CollisionDisable *collisionDisables;
 };
 
 // This returns the body group entity
