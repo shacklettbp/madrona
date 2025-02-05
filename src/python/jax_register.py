@@ -168,6 +168,7 @@ def step_func(step_inputs):
     flattened_in = [step_inputs['state']]
 
     for k in step_inputs_iface['actions'].keys():
+        print(step_inputs['actions'])
         flattened_in.append(step_inputs['actions'][k])
 
     flattened_in.append(step_inputs['resets'])

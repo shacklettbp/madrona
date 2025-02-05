@@ -33,8 +33,7 @@ void CudaSync::key_() {}
 
 struct TrainInterface::Impl {
     HeapArray<char> nameBuffer;
-    HeapArray<int64_t> dimsBuffer;
-    HeapArray<NamedTensorInterface> namedInterfaces;
+    HeapArray<NamedTensor> namedTensors;
 
     TrainStepInputInterface inputs;
     TrainStepOutputInterface outputs;
@@ -52,43 +51,31 @@ TrainInterface::Impl * TrainInterface::Impl::init(
     Optional<TrainCheckpointingInterface> checkpointing)
 {
     CountT num_total_name_chars = 0;
-    CountT num_total_dims = 0;
-    CountT num_total_interfaces = 0;
+    CountT num_total_named_tensors = 0;
 
     auto sumStorageRequirements = [
-        &num_total_dims, &num_total_name_chars, &num_total_interfaces
-    ](Span<const NamedTensorInterface> tensors)
+        &num_total_name_chars, &num_total_named_tensors
+    ](Span<const NamedTensor> tensors)
     {
-        for (NamedTensorInterface named_iface : tensors) {
-            num_total_name_chars += strlen(named_iface.name) + 1;
-            num_total_dims += named_iface.interface.dimensions.size();
+        for (NamedTensor named_tensor : tensors) {
+            num_total_name_chars += strlen(named_tensor.name) + 1;
         }
 
-        num_total_interfaces += tensors.size();
+        num_total_named_tensors += tensors.size();
     };
 
     sumStorageRequirements(inputs.actions);
-    num_total_dims += inputs.resets.dimensions.size();
-    num_total_dims += inputs.simCtrl.dimensions.size();
     sumStorageRequirements(inputs.pbt);
 
     sumStorageRequirements(outputs.observations);
-    num_total_dims += outputs.rewards.dimensions.size();
-    num_total_dims += outputs.dones.dimensions.size();
     sumStorageRequirements(outputs.stats);
     sumStorageRequirements(outputs.pbt);
 
-    if (checkpointing.has_value()) {
-        num_total_dims += checkpointing->checkpointData.dimensions.size();
-    }
-
     HeapArray<char> name_buffer(num_total_name_chars);
-    HeapArray<int64_t> dims_buffer(num_total_dims);
-    HeapArray<NamedTensorInterface> named_interfaces(num_total_interfaces);
+    HeapArray<NamedTensor> named_tensors(num_total_named_tensors);
 
     char *cur_name_ptr = name_buffer.data();
-    int64_t *cur_dims_ptr = dims_buffer.data();
-    NamedTensorInterface *cur_iface_ptr = named_interfaces.data();
+    NamedTensor *cur_named_tensor_ptr = named_tensors.data();
 
     auto makeOwnedName = [
         &cur_name_ptr
@@ -103,57 +90,36 @@ TrainInterface::Impl * TrainInterface::Impl::init(
         return out_name;
     };
 
-    auto makeOwnedDims = [
-        &cur_dims_ptr
-    ](Span<const int64_t> in_dims)
+    auto makeOwnedNamedTensors = [
+        &makeOwnedName, &cur_named_tensor_ptr
+    ](Span<const NamedTensor> inputs)
     {
-        Span out_dims(cur_dims_ptr, in_dims.size());
+        NamedTensor *out_start = cur_named_tensor_ptr;
 
-        utils::copyN<int64_t>(cur_dims_ptr, in_dims.data(), in_dims.size());
-        cur_dims_ptr += in_dims.size();
-
-        return out_dims;
-    };
-
-    auto makeOwnedInterface = [
-        &makeOwnedDims
-    ](TensorInterface in_iface)
-    {
-        return TensorInterface {
-            .type = in_iface.type,
-            .dimensions = makeOwnedDims(in_iface.dimensions),
-        };
-    };
-
-    auto makeOwnedNamedInterfaces = [
-        &makeOwnedName, &makeOwnedInterface, &cur_iface_ptr
-    ](Span<const NamedTensorInterface> inputs)
-    {
-        NamedTensorInterface *out_start = cur_iface_ptr;
-
-        for (NamedTensorInterface named_in : inputs) {
-            *(cur_iface_ptr++) = {
-                .name = makeOwnedName(named_in.name),
-                .interface = makeOwnedInterface(named_in.interface),
+        for (const NamedTensor &named_in : inputs) {
+            const char *owned_name = makeOwnedName(named_in.name);
+            *(cur_named_tensor_ptr++) = NamedTensor {
+                .name = owned_name,
+                .tensor = named_in.tensor,
             };
         }
 
-        return Span<const NamedTensorInterface>(out_start, inputs.size());
+        return Span<const NamedTensor>(out_start, inputs.size());
     };
 
     TrainStepInputInterface owned_inputs {
-        .actions = makeOwnedNamedInterfaces(inputs.actions),
-        .resets = makeOwnedInterface(inputs.resets),
-        .simCtrl = makeOwnedInterface(inputs.simCtrl),
-        .pbt = makeOwnedNamedInterfaces(inputs.pbt),
+        .actions = makeOwnedNamedTensors(inputs.actions),
+        .resets = inputs.resets,
+        .simCtrl = inputs.simCtrl,
+        .pbt = makeOwnedNamedTensors(inputs.pbt),
     };
 
     TrainStepOutputInterface owned_outputs {
-        .observations = makeOwnedNamedInterfaces(outputs.observations),
-        .rewards = makeOwnedInterface(outputs.rewards),
-        .dones = makeOwnedInterface(outputs.dones),
-        .stats = makeOwnedNamedInterfaces(outputs.stats),
-        .pbt = makeOwnedNamedInterfaces(outputs.pbt),
+        .observations = makeOwnedNamedTensors(outputs.observations),
+        .rewards = outputs.rewards,
+        .dones = outputs.dones,
+        .stats = makeOwnedNamedTensors(outputs.stats),
+        .pbt = makeOwnedNamedTensors(outputs.pbt),
     };
 
     Optional<TrainCheckpointingInterface> owned_checkpointing =
@@ -161,24 +127,26 @@ TrainInterface::Impl * TrainInterface::Impl::init(
 
     if (checkpointing.has_value()) {
         owned_checkpointing = TrainCheckpointingInterface {
-            .checkpointData = makeOwnedInterface(
-                checkpointing->checkpointData),
+            .checkpointData = checkpointing->checkpointData,
         };
     }
 
     assert(cur_name_ptr == name_buffer.data() + name_buffer.size());
-    assert(cur_dims_ptr == dims_buffer.data() + dims_buffer.size());
-    assert(cur_iface_ptr == named_interfaces.data() + named_interfaces.size());
+    assert(cur_named_tensor_ptr ==
+           named_tensors.data() + named_tensors.size());
 
     return new Impl {
         .nameBuffer = std::move(name_buffer),
-        .dimsBuffer = std::move(dims_buffer),
-        .namedInterfaces = std::move(named_interfaces),
+        .namedTensors = std::move(named_tensors),
         .inputs = owned_inputs,
         .outputs = owned_outputs,
         .checkpointing = std::move(owned_checkpointing),
     };
 }
+
+TrainInterface::TrainInterface()
+  : impl_(nullptr)
+{}
 
 TrainInterface::TrainInterface(
         TrainStepInputInterface step_inputs,
@@ -189,6 +157,8 @@ TrainInterface::TrainInterface(
     
 TrainInterface::TrainInterface(TrainInterface &&) = default;
 TrainInterface::~TrainInterface() = default;
+
+TrainInterface & TrainInterface::operator=(TrainInterface &&o) = default;
 
 TrainStepInputInterface TrainInterface::stepInputs() const
 {
@@ -422,6 +392,86 @@ TensorInterface Tensor::interface() const
 void PyExecMode::key_() {}
 void Tensor::key_() {}
 void TrainInterface::key_() {}
+#endif
+
+#ifdef MADRONA_CUDA_SUPPORT
+[[maybe_unused]] static inline  uint64_t numTensorBytes(const Tensor &t)
+{
+  uint64_t num_items = 1;
+  uint64_t num_dims = t.numDims();
+  for (uint64_t i = 0; i < num_dims; i++) {
+    num_items *= t.dims()[i];
+  }
+
+  return num_items * (uint64_t)t.numBytesPerItem();
+}
+
+void ** TrainInterface::cudaCopyStepInputs(cudaStream_t strm, void **buffers)
+{
+  auto copyToSim = [&strm](const Tensor &dst, void *src) {
+    uint64_t num_bytes = numTensorBytes(dst);
+
+    REQ_CUDA(cudaMemcpyAsync(dst.devicePtr(), src, num_bytes,
+                             cudaMemcpyDeviceToDevice, strm));
+  };
+
+  TrainStepInputInterface &inputs = impl_->inputs;
+
+  for (const NamedTensor &t : inputs.actions) {
+    copyToSim(t.tensor, *buffers++);
+  }
+
+  copyToSim(inputs.resets, *buffers++);
+  copyToSim(inputs.simCtrl, *buffers++);
+
+  for (const NamedTensor &t : inputs.pbt) {
+    copyToSim(t.tensor, *buffers++);
+  }
+
+  return buffers;
+}
+
+void TrainInterface::cudaCopyObservations(cudaStream_t strm, void **buffers)
+{
+  auto copyFromSim = [&strm](void *dst, const Tensor &src) {
+    uint64_t num_bytes = numTensorBytes(src);
+
+    REQ_CUDA(cudaMemcpyAsync(dst, src.devicePtr(), num_bytes,
+                             cudaMemcpyDeviceToDevice, strm));
+  };
+
+  for (const NamedTensor &t : impl_->outputs.observations) {
+    copyFromSim(*buffers++, t.tensor);
+  }
+}
+
+void TrainInterface::cudaCopyStepOutputs(cudaStream_t strm, void **buffers)
+{
+  auto copyFromSim = [&strm](void *dst, const Tensor &src) {
+    uint64_t num_bytes = numTensorBytes(src);
+
+    REQ_CUDA(cudaMemcpyAsync(dst, src.devicePtr(), num_bytes,
+                             cudaMemcpyDeviceToDevice, strm));
+  };
+
+  TrainStepOutputInterface &outputs = impl_->outputs;
+
+  for (const NamedTensor &t : outputs.observations) {
+    copyFromSim(*buffers++, t.tensor);
+  }
+
+  copyFromSim(*buffers++, outputs.rewards);
+  copyFromSim(*buffers++, outputs.dones);
+
+  for (const NamedTensor &t : outputs.stats) {
+    copyFromSim(*buffers++, t.tensor);
+  }
+
+  for (const NamedTensor &t : outputs.pbt) {
+    copyFromSim(*buffers++, t.tensor);
+  }
+}
+
 #endif
 
 }
