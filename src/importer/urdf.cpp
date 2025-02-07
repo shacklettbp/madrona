@@ -1296,6 +1296,9 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         }
     }
 
+    std::unordered_map<std::string, uint32_t> col_path_to_obj;
+    std::unordered_map<std::string, uint32_t> render_path_to_obj;
+
     for (uint32_t l = 0; l < sorted_links.size(); ++l) {
         URDFLink &link = model.links[sorted_links[l]];
 
@@ -1308,15 +1311,39 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             int32_t render_obj_id = -1;
             switch (collision.geometry.type) {
             case URDFGeometryType::Mesh: {
-                obj_id = physics_asset_paths.size();
+                if (auto it = col_path_to_obj.find(collision.geometry.mesh.filename);
+                        it != col_path_to_obj.end()) {
+                    obj_id = it->second;
+                } else {
+                    obj_id = physics_asset_paths.size();
+                    physics_asset_paths.push_back(collision.geometry.mesh.filename);
+                    
+                    auto [new_it, is_inserted] =
+                        col_path_to_obj.emplace(collision.geometry.mesh.filename, obj_id);
+                    assert(is_inserted);
+                }
+
                 scale = collision.geometry.mesh.scale;
-                physics_asset_paths.push_back(collision.geometry.mesh.filename);
 
                 // Optionally attach as render object too
                 if (visualize_colliders) {
+#if 0
                     render_obj_id = (int32_t)render_asset_paths.size();
                     // Must be triangular...
                     render_asset_paths.push_back(collision.geometry.mesh.filename);
+#endif
+
+                    if (auto it = render_path_to_obj.find(collision.geometry.mesh.filename);
+                            it != render_path_to_obj.end()) {
+                        render_obj_id = it->second;
+                    } else {
+                        render_obj_id = (int32_t)render_asset_paths.size();
+                        render_asset_paths.push_back(collision.geometry.mesh.filename);
+                        
+                        auto [new_it, is_inserted] =
+                            render_path_to_obj.emplace(collision.geometry.mesh.filename, render_obj_id);
+                        assert(is_inserted);
+                    }
                 }
             } break;
 
@@ -1359,9 +1386,23 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             uint32_t obj_id = 0;
             switch (visual.geometry.type) {
             case URDFGeometryType::Mesh: {
-                obj_id = render_asset_paths.size();
                 scale = visual.geometry.mesh.scale;
+#if 0
+                obj_id = render_asset_paths.size();
                 render_asset_paths.push_back(visual.geometry.mesh.filename);
+#endif
+
+                if (auto it = render_path_to_obj.find(visual.geometry.mesh.filename);
+                        it != render_path_to_obj.end()) {
+                    obj_id = it->second;
+                } else {
+                    obj_id = (int32_t)render_asset_paths.size();
+                    render_asset_paths.push_back(visual.geometry.mesh.filename);
+                    
+                    auto [new_it, is_inserted] =
+                        render_path_to_obj.emplace(visual.geometry.mesh.filename, obj_id);
+                    assert(is_inserted);
+                }
             } break;
 
             case URDFGeometryType::Sphere: {

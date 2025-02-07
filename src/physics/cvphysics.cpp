@@ -5521,8 +5521,7 @@ void attachCollision(
 
         ctx.get<LinkParentDofObject>(viz_obj) = {
             .parentDofObject = body,
-            .mrOffset = grp_info.collisionObjsCounter +
-                tmp_state.collisionObjOffset + idx,
+            .mrOffset = tmp_state.collisionObjOffset + idx,
             .type = LinkParentDofObject::Type::RenderCollider,
         };
     }
