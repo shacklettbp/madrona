@@ -221,6 +221,7 @@ struct URDFLoader::Impl {
     std::vector<VisualDesc> visualDescs;
     std::vector<ModelConfig> modelConfigs;
     std::vector<CollisionDisable> collisionDisables;
+    std::vector<JointLimit> jointLimits;
 
     uint32_t convertToModelConfig(
             URDFModel &model,
@@ -378,7 +379,7 @@ static void parseGeometry(URDFGeometry &geom, tinyxml2::XMLElement *g)
         geom.type = URDFGeometryType::Mesh;
         parseMesh(geom.mesh, shape);
     } else {
-        printf("Unknown geometry type '%s'", type_name.c_str());
+        printf("Unknown geometry type '%s'\n", type_name.c_str());
     }
 }
 
@@ -587,7 +588,7 @@ static void parseJointLimits(
     // Get lower joint limit
     const char* lower_str = config->Attribute("lower");
     if (lower_str == NULL){
-        printf("no lower, defaults to 0");
+        printf("no lower, defaults to 0\n");
         jl.lower = 0;
     }
     else {
@@ -597,7 +598,7 @@ static void parseJointLimits(
     // Get upper joint limit
     const char* upper_str = config->Attribute("upper");
     if (upper_str == NULL){
-        printf("urdfdom.joint_limit: no upper, , defaults to 0");
+        printf("urdfdom.joint_limit: no upper, , defaults to 0\n");
         jl.upper = 0;
     }
     else {
@@ -607,7 +608,7 @@ static void parseJointLimits(
     // Get joint effort limit
     const char* effort_str = config->Attribute("effort");
     if (effort_str == NULL){
-        printf("joint limit: no effort");
+        printf("joint limit: no effort\n");
     }
     else {
         jl.effort = std::stof(effort_str);
@@ -616,7 +617,7 @@ static void parseJointLimits(
     // Get joint velocity limit
     const char* velocity_str = config->Attribute("velocity");
     if (velocity_str == NULL) {
-        printf("joint limit: no velocity");
+        printf("joint limit: no velocity\n");
     }
     else {
         jl.velocity = std::stof(velocity_str);
@@ -678,7 +679,7 @@ static void parseJointCalibration(
     // Get falling edge position
     const char* falling_position_str = config->Attribute("falling");
     if (falling_position_str == NULL) {
-        printf("urdfdom.joint_calibration: no falling, using default value");
+        printf("urdfdom.joint_calibration: no falling, using default value\n");
         jc.falling = 0.f;
     } else {
         jc.falling = std::stof(falling_position_str);
@@ -748,7 +749,7 @@ static void parseJointDynamics(
     if (damping_str == NULL && friction_str == NULL) {
         printf("joint dynamics element specified with no damping and no friction\n");
     } else {
-        printf("urdfdom.joint_dynamics: damping %f and friction %f", jd.damping, jd.friction);
+        printf("urdfdom.joint_dynamics: damping %f and friction %f\n", jd.damping, jd.friction);
     }
 }
 
@@ -788,7 +789,7 @@ static void parseJoint(
     if (parent_xml) {
         const char *pname = parent_xml->Attribute("link");
         if (!pname) {
-            printf("no parent link name specified for Joint link [%s]. this might be the root?", 
+            printf("no parent link name specified for Joint link [%s]. this might be the root?\n", 
                     joint.name.c_str());
         } else {
             joint.parentLinkName = std::string(pname);
@@ -800,7 +801,7 @@ static void parseJoint(
     if (child_xml) {
         const char *pname = child_xml->Attribute("link");
         if (!pname) {
-            printf("no child link name specified for Joint link [%s].", joint.name.c_str());
+            printf("no child link name specified for Joint link [%s].\n", joint.name.c_str());
         } else {
             joint.childLinkName = std::string(pname);
         }
@@ -832,7 +833,7 @@ static void parseJoint(
         // axis
         tinyxml2::XMLElement *axis_xml = config->FirstChildElement("axis");
         if (!axis_xml) {
-            printf("no axis element for Joint link [%s], defaulting to (1,0,0) axis", joint.name.c_str());
+            printf("no axis element for Joint link [%s], defaulting to (1,0,0) axis\n", joint.name.c_str());
             joint.axis = Vector3(1.0, 0.0, 0.0);
         } else {
             if (axis_xml->Attribute("xyz")) {
@@ -846,9 +847,9 @@ static void parseJoint(
     if (limit_xml) {
         parseJointLimits(joint.limits, limit_xml);
     } else if (joint.type == URDFJointType::Revolute) {
-        printf("Joint [%s] is of type REVOLUTE but it does not specify limits", joint.name.c_str());
+        printf("Joint [%s] is of type REVOLUTE but it does not specify limits\n", joint.name.c_str());
     } else if (joint.type == URDFJointType::Prismatic) {
-        printf("Joint [%s] is of type PRISMATIC without limits", joint.name.c_str());
+        printf("Joint [%s] is of type PRISMATIC without limits\n", joint.name.c_str());
     }
 
     // Get safety
@@ -957,7 +958,7 @@ static URDFModel parseURDF(const std::string &xml_string)
 
     tinyxml2::XMLElement *robot_xml = xml_doc.FirstChildElement("robot");
     if (!robot_xml) {
-        printf("Could not find the 'robot' element in the xml file");
+        printf("Could not find the 'robot' element in the xml file\n");
         assert(false);
     }
 
@@ -1102,11 +1103,18 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
     }
 
     ModelConfig cfg = {
+        .numBodies = 0,
         .bodiesOffset = (uint32_t)bodyDescs.size(),
+        .numConnections = 0,
         .connectionsOffset = (uint32_t)jointConnections.size(),
+        .numColliders = 0,
         .collidersOffset = (uint32_t)collisionDescs.size(),
+        .numVisuals = 0,
         .visualsOffset = (uint32_t)visualDescs.size(),
+        .numCollisionDisables = 0,
         .collisionDisableOffset = (uint32_t)collisionDisables.size(),
+        .numJointLimits = 0,
+        .jointLimitOffset = (uint32_t)jointLimits.size(),
     };
 
     { // Push the root body
@@ -1137,6 +1145,9 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         // In cvphysics, the "parent" joint and the link are tied to
         // the same object: body
         URDFJoint &joint = model.joints[link.parentJointName];
+
+        uint32_t body_idx = cfg.numBodies;
+
         BodyDesc body_desc = {
             .type = urdfToDofType(joint.type),
             .responseType = ResponseType::Dynamic,
@@ -1151,6 +1162,41 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         // Push this to list of BodyDesc
         bodyDescs.push_back(body_desc);
         cfg.numBodies++;
+
+        // If there is a joint limit for this
+        switch (joint.type) {
+        case URDFJointType::Revolute: {
+            HingeLimit hinge_limit = {
+                .lower = joint.limits.lower,
+                .upper = joint.limits.upper
+            };
+
+            JointLimit limit = {
+                .bodyIdx = body_idx,
+                .type = DofType::Hinge,
+                .hinge = hinge_limit
+            };
+
+            jointLimits.push_back(limit);
+            cfg.numJointLimits++;
+        } break;
+
+        case URDFJointType::Prismatic: {
+            SliderLimit slider_limit = {
+                .lower = joint.limits.lower,
+                .upper = joint.limits.upper
+            };
+
+            JointLimit limit = {
+                .bodyIdx = body_idx,
+                .type = DofType::Slider,
+                .slider = slider_limit
+            };
+
+            jointLimits.push_back(limit);
+            cfg.numJointLimits++;
+        } break;
+        }
     }
 
     for (auto &joint : model.joints) {
@@ -1317,6 +1363,9 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 } else {
                     obj_id = physics_asset_paths.size();
                     physics_asset_paths.push_back(collision.geometry.mesh.filename);
+
+                    printf("Collision object %d has path %s\n",
+                        obj_id, collision.geometry.mesh.filename.c_str());
                     
                     auto [new_it, is_inserted] =
                         col_path_to_obj.emplace(collision.geometry.mesh.filename, obj_id);
@@ -1387,10 +1436,6 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             switch (visual.geometry.type) {
             case URDFGeometryType::Mesh: {
                 scale = visual.geometry.mesh.scale;
-#if 0
-                obj_id = render_asset_paths.size();
-                render_asset_paths.push_back(visual.geometry.mesh.filename);
-#endif
 
                 if (auto it = render_path_to_obj.find(visual.geometry.mesh.filename);
                         it != render_path_to_obj.end()) {
@@ -1444,6 +1489,8 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                     .aBody = a_link.idx,
                     .bBody = b_link.idx
                 });
+
+        cfg.numCollisionDisables++;
     }
 
     uint32_t model_idx = modelConfigs.size();
@@ -1494,6 +1541,12 @@ ModelData URDFLoader::getModelData()
 
         .numVisuals = (uint32_t)impl->visualDescs.size(),
         .visuals = impl->visualDescs.data(),
+
+        .numCollisionDisables = (uint32_t)impl->collisionDisables.size(),
+        .collisionDisables = impl->collisionDisables.data(),
+
+        .numJointLimits = (uint32_t)impl->jointLimits.size(),
+        .jointLimits = impl->jointLimits.data(),
     };
 }
 

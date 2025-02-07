@@ -673,6 +673,17 @@ struct JointConnection {
     };
 };
 
+struct JointLimit {
+    uint32_t bodyIdx;
+
+    DofType type;
+
+    union {
+        HingeLimit hinge;
+        SliderLimit slider;
+    };
+};
+
 // For loading pre-configured models
 struct ModelConfig {
     // Assume that the first one is the root
@@ -690,6 +701,9 @@ struct ModelConfig {
 
     uint32_t numCollisionDisables;
     uint32_t collisionDisableOffset;
+
+    uint32_t numJointLimits;
+    uint32_t jointLimitOffset;
 };
 
 struct CollisionDisable {
@@ -713,6 +727,9 @@ struct ModelData {
 
     uint32_t numCollisionDisables;
     CollisionDisable *collisionDisables;
+
+    uint32_t numJointLimits;
+    JointLimit *jointLimits;
 };
 
 // This returns the body group entity

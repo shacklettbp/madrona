@@ -81,8 +81,6 @@ void AssetImporter::Impl::importFromDisk(
 {
     bool load_success = false;
     for (const char *path : asset_paths) {
-        printf("Loading asset %s\n", path);
-
         std::string_view path_view(path);
 
         auto extension_pos = path_view.rfind('.');

@@ -5432,8 +5432,8 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     } break;
 
     case DofType::Hinge: {
-        // pos.q[0] = 0.0f;
-        pos.q[0] = math::pi / 8.f;
+        pos.q[0] = 0.0f;
+        // pos.q[0] = math::pi / 8.f;
         vel.qv[0] = 0.f;
         acc.dqv[0] = 0.f;
     } break;
@@ -5546,7 +5546,7 @@ void attachCollision(
     ctx.get<LinkParentDofObject>(col_obj) = {
         .parentDofObject = body,
         .mrOffset = tmp_state.collisionObjOffset + idx,
-        .type = LinkParentDofObject::Type::RenderCollider,
+        .type = LinkParentDofObject::Type::Collider,
     };
 
     col_data[tmp_state.collisionObjOffset + idx] = {
@@ -5607,6 +5607,11 @@ void attachLimit(Context &ctx,
     limit.rowOffset = hier.numEqualityRows;
 
     hier.numEqualityRows += 1;
+
+
+
+    DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);
+    pos.q[0] = limit.hinge.upper;
 }
 
 void attachLimit(Context &ctx,
@@ -5622,6 +5627,10 @@ void attachLimit(Context &ctx,
     limit.rowOffset = hier.numEqualityRows;
 
     hier.numEqualityRows += 1;
+
+
+    DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);
+    pos.q[0] = limit.hinge.upper;
 }
 
 void setColliderVisualizer(
@@ -5916,6 +5925,32 @@ Entity loadModel(Context &ctx,
                     grp,
                     bodies_tmp[disable.aBody],
                     bodies_tmp[disable.bBody]);
+        }
+    }
+
+    { // Attach joint limits
+        for (uint32_t i = 0; i < cfg.numJointLimits; ++i) {
+            JointLimit limit = model_data.jointLimits[i + cfg.jointLimitOffset];
+
+            switch (limit.type) {
+            case DofType::Hinge: {
+                printf("Attaching hinge limit\n");
+                attachLimit(
+                        ctx, 
+                        grp,
+                        bodies_tmp[limit.bodyIdx],
+                        limit.hinge);
+            } break;
+
+            case DofType::Slider: {
+                printf("Attaching slider limit\n");
+                attachLimit(
+                        ctx, 
+                        grp,
+                        bodies_tmp[limit.bodyIdx],
+                        limit.slider);
+            } break;
+            }
         }
     }
 
