@@ -226,7 +226,8 @@ struct URDFLoader::Impl {
             URDFModel &model,
             BuiltinPrimitives primitives,
             std::vector<std::string> &render_asset_paths,
-            std::vector<std::string> &physics_asset_paths);
+            std::vector<std::string> &physics_asset_paths,
+            bool visualize_colliders);
 };
 
 static std::vector<float> getFloats(const std::string &vector_str)
@@ -1086,7 +1087,8 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         URDFModel &model,
         BuiltinPrimitives primitives,
         std::vector<std::string> &render_asset_paths,
-        std::vector<std::string> &physics_asset_paths)
+        std::vector<std::string> &physics_asset_paths,
+        bool visualize_colliders)
 {
     std::vector<std::string> sorted_links;
 
@@ -1303,11 +1305,19 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             Vector3 scale = Vector3 {1.f, 1.f ,1.f};
 
             uint32_t obj_id = 0;
+            int32_t render_obj_id = -1;
             switch (collision.geometry.type) {
             case URDFGeometryType::Mesh: {
                 obj_id = physics_asset_paths.size();
                 scale = collision.geometry.mesh.scale;
                 physics_asset_paths.push_back(collision.geometry.mesh.filename);
+
+                // Optionally attach as render object too
+                if (visualize_colliders) {
+                    render_obj_id = (int32_t)render_asset_paths.size();
+                    // Must be triangular...
+                    render_asset_paths.push_back(collision.geometry.mesh.filename);
+                }
             } break;
 
             case URDFGeometryType::Sphere: {
@@ -1325,13 +1335,16 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             } break;
             }
 
+            printf("Body %d (%s) has collider obj=%d\n", l, link.name.c_str(), obj_id);
+
             CollisionDesc coll_desc = {
                 .objID = obj_id,
                 .offset = collision.origin.position - link.jointToChildCom,
                 .rotation = collision.origin.rotation,
                 .scale = Diag3x3::fromVec(scale),
                 .linkIdx = l,
-                .subIndex = c
+                .subIndex = c,
+                .renderObjID = render_obj_id,
             };
 
             collisionDescs.push_back(coll_desc);
@@ -1403,7 +1416,8 @@ uint32_t URDFLoader::load(
         const char *path,
         BuiltinPrimitives primitives,
         std::vector<std::string> &render_asset_paths,
-        std::vector<std::string> &physics_asset_paths)
+        std::vector<std::string> &physics_asset_paths,
+        bool visualize_colliders)
 {
     std::ifstream stream(path);
 
@@ -1421,7 +1435,8 @@ uint32_t URDFLoader::load(
             model,
             primitives,
             render_asset_paths,
-            physics_asset_paths);
+            physics_asset_paths,
+            visualize_colliders);
 }
 
 ModelData URDFLoader::getModelData()

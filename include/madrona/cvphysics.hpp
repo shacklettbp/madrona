@@ -354,10 +354,18 @@ struct DofObjectArchetype : public Archetype<
 > {};
 
 struct LinkParentDofObject {
+    enum class Type {
+        Collider,
+        Render,
+        RenderCollider
+    };
+
     Entity parentDofObject;
 
     // Offset in `BodyObjectData`
     uint32_t mrOffset;
+
+    Type type;
 };
 
 // This is the archetype for a signle body's link for collision detection
@@ -378,6 +386,9 @@ struct BodyObjectData {
     math::Vector3 offset;
     math::Quat rotation;
     math::Diag3x3 scale;
+
+    // This is only relevant for the collision objects
+    Entity optionalRender;
 };
 
 struct BodyGroupHierarchy {
@@ -429,6 +440,8 @@ struct BodyGroupHierarchy {
     // Sum of diagonal elements of mass matrix
     float inertiaSum;
 
+    bool visualizeColliders;
+
     // Some scratch space for various calculations
     float scratch[36];
 
@@ -471,9 +484,23 @@ struct CollisionDesc {
     uint32_t linkIdx;
     // Index of the collider within the body
     uint32_t subIndex;
+
+    // Optional to visualize the collision entities (-1 means we didn't
+    // pass the collision objects to the renderer for visualization)
+    int32_t renderObjID;
 };
 
-using VisualDesc = CollisionDesc;
+struct VisualDesc {
+    uint32_t objID;
+    math::Vector3 offset;
+    math::Quat rotation;
+    math::Diag3x3 scale;
+
+    // Required for URDF loading
+    uint32_t linkIdx;
+    // Index of the collider within the body
+    uint32_t subIndex;
+};
 
 // "Global scale" scales everything in the body group uniformly
 Entity makeBodyGroup(
@@ -603,6 +630,12 @@ void disableJointCollisions(
         Entity grp,
         Entity joint_a,
         Entity joint_b);
+
+// Sets whether or not to visualize the colliders
+void setColliderVisualizer(
+        Context &ctx,
+        Entity body_grp,
+        bool visualize);
 
 // External forces:
 void addHingeExternalForce(

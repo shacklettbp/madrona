@@ -5000,6 +5000,14 @@ inline void convertPostSolve(
 
     scale = body_obj_data.scale * hier_desc.globalScale;
 
+    if (grp_info.visualizeColliders && 
+            link.type == LinkParentDofObject::Type::Render) {
+        scale = Diag3x3 { 0.f, 0.f, 0.f };
+    } else if (!grp_info.visualizeColliders && 
+            link.type == LinkParentDofObject::Type::RenderCollider) {
+        scale = Diag3x3 { 0.f, 0.f, 0.f };
+    }
+
     if (num_dofs.type == DofType::FreeBody) {
         position = tmp_state.comPos +
                    hier_desc.globalScale * 
@@ -5354,6 +5362,7 @@ Entity makeBodyGroup(Context &ctx, uint32_t num_bodies, float global_scale)
     hier.collisionObjsCounter = 0;
     hier.visualObjsCounter = 0;
     hier.globalScale = global_scale;
+    hier.visualizeColliders = false;
 
     uint64_t mr_num_bytes = num_bodies * sizeof(Entity);
     uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
@@ -5423,7 +5432,8 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     } break;
 
     case DofType::Hinge: {
-        pos.q[0] = 0.0f;
+        // pos.q[0] = 0.0f;
+        pos.q[0] = math::pi / 8.f;
         vel.qv[0] = 0.f;
         acc.dqv[0] = 0.f;
     } break;
@@ -5495,8 +5505,27 @@ void attachCollision(
 {
     BodyGroupHierarchy &grp_info = ctx.get<BodyGroupHierarchy>(body_grp);
     DofObjectTmpState &tmp_state = ctx.get<DofObjectTmpState>(body);
+    DofObjectHierarchyDesc &hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
 
     BodyObjectData *col_data = grp_info.getCollisionData(ctx);
+
+    // Optionally attach a render object
+    Entity render_entity = Entity::none();
+    if (desc.renderObjID != -1) {
+        Entity viz_obj = ctx.makeEntity<LinkVisual>();
+
+        ctx.get<ObjectID>(viz_obj) = { (int32_t)desc.renderObjID };
+
+        // Make this entity renderable
+        render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
+
+        ctx.get<LinkParentDofObject>(viz_obj) = {
+            .parentDofObject = body,
+            .mrOffset = grp_info.collisionObjsCounter +
+                tmp_state.collisionObjOffset + idx,
+            .type = LinkParentDofObject::Type::RenderCollider,
+        };
+    }
 
     Entity col_obj = ctx.makeEntity<LinkCollider>();
 
@@ -5518,6 +5547,7 @@ void attachCollision(
     ctx.get<LinkParentDofObject>(col_obj) = {
         .parentDofObject = body,
         .mrOffset = tmp_state.collisionObjOffset + idx,
+        .type = LinkParentDofObject::Type::RenderCollider,
     };
 
     col_data[tmp_state.collisionObjOffset + idx] = {
@@ -5525,7 +5555,11 @@ void attachCollision(
         desc.offset,
         desc.rotation,
         desc.scale,
+        render_entity
     };
+
+    printf("Body %d has rigid body %d attached obj=%d\n",
+            hier_desc.index, col_obj.id, desc.objID);
 }
 
 void attachVisual(
@@ -5544,13 +5578,13 @@ void attachVisual(
 
     ctx.get<ObjectID>(viz_obj) = { (int32_t)desc.objID };
 
-    // Make this entity renderable
     render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
 
     ctx.get<LinkParentDofObject>(viz_obj) = {
         .parentDofObject = body,
         .mrOffset = grp_info.collisionObjsCounter +
                     tmp_state.visualObjOffset + idx,
+        .type = LinkParentDofObject::Type::Render,
     };
 
     viz_data[tmp_state.visualObjOffset + idx] = {
@@ -5589,6 +5623,15 @@ void attachLimit(Context &ctx,
     limit.rowOffset = hier.numEqualityRows;
 
     hier.numEqualityRows += 1;
+}
+
+void setColliderVisualizer(
+        Context &ctx,
+        Entity body_grp,
+        bool visualize)
+{
+    BodyGroupHierarchy &hier = ctx.get<BodyGroupHierarchy>(body_grp);
+    hier.visualizeColliders = visualize;
 }
 
 void disableJointCollisions(

@@ -658,9 +658,9 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
     assert(num_hedges % 2 == 0);
 
     // We already know how many polygons there are
-    auto hedges_out = tmp_alloc.allocN<HalfEdge>(num_hedges);
-    auto face_base_hedges_out = tmp_alloc.allocN<uint32_t>(src_mesh.numFaces);
-    auto face_planes_out = tmp_alloc.allocN<Plane>(src_mesh.numFaces);
+    auto hedges_out = tmp_alloc.allocN<HalfEdge>(num_hedges * 2);
+    auto face_base_hedges_out = tmp_alloc.allocN<uint32_t>(src_mesh.numFaces * 2);
+    auto face_planes_out = tmp_alloc.allocN<Plane>(src_mesh.numFaces * 2);
 
     std::unordered_map<uint64_t, uint32_t> edge_to_hedge;
 
@@ -677,6 +677,7 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
         Plane face_plane = computeNewellPlane(src_mesh.positions,
             Span(cur_face_indices, num_face_vertices));
 
+        assert(face_idx < src_mesh.numFaces);
         face_planes_out[face_idx] = face_plane;
 
         for (CountT vert_offset = 0; vert_offset < num_face_vertices;
@@ -696,6 +697,14 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
 
                 uint64_t twin_edge_id = makeEdgeID(b_idx, a_idx);
 
+#if 0
+                if (cur_hedge_id >= num_hedges) {
+                    printf("what the fuck lol\n");
+                }
+
+                printf("Inserting edge id with a = %u; b = %u; cur_edge_id = %llu; cur_hedge_id = %u\n",
+                        a_idx, b_idx, cur_edge_id, cur_hedge_id);
+#endif
                 auto [new_edge_iter, cur_inserted] =
                     edge_to_hedge.emplace(cur_edge_id, cur_hedge_id);
                 assert(cur_inserted);
@@ -709,6 +718,7 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
 
             uint32_t hedge_idx = cur_edge_lookup->second;
             if (vert_offset == 0) {
+                assert(face_idx < src_mesh.numFaces);
                 face_base_hedges_out[face_idx] = hedge_idx;
             }
 
@@ -723,6 +733,7 @@ static inline HalfEdgeMesh buildHalfEdgeMesh(
             uint32_t next_hedge_idx = next_edge_lookup == edge_to_hedge.end() ?
                 num_assigned_hedges : next_edge_lookup->second;
 
+            assert(hedge_idx < num_hedges);
             hedges_out[hedge_idx] = HalfEdge {
                 .next = next_hedge_idx,
                 .rootVertex = a_idx,
@@ -781,6 +792,7 @@ static bool processConvexHulls(
 {
     for (CountT hull_idx = 0; hull_idx < in_meshes.size(); hull_idx++) {
         const imp::SourceMesh &mesh = in_meshes[hull_idx];
+        printf("Processing mesh %s\n", mesh.name);
         bool success = processConvexHull(
             mesh, build_convex_hulls, tmp_alloc, &out_meshes[hull_idx]);
 

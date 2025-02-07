@@ -23,6 +23,8 @@ struct SourceMesh {
     uint32_t numVertices;
     uint32_t numFaces;
     uint32_t materialIDX;
+
+    const char *name;
 };
 
 struct SourceObject {

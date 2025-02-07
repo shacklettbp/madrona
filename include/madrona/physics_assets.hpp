@@ -12,6 +12,8 @@ namespace madrona::phys {
 struct SourceCollisionPrimitive {
     struct HullInput {
         uint32_t hullIDX;
+        // For debugging
+        const char *name;
     };
 
     CollisionPrimitive::Type type;

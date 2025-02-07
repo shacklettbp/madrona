@@ -27,7 +27,8 @@ struct URDFLoader {
           const char *path, 
           BuiltinPrimitives primitives,
           std::vector<std::string> &render_asset_paths,
-          std::vector<std::string> &physics_asset_paths);
+          std::vector<std::string> &physics_asset_paths,
+          bool visualize_colliders = false);
 
     phys::cv::ModelData getModelData();
     phys::cv::ModelConfig * getModelConfigs(uint32_t &num_cfgs);
