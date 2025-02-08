@@ -42,6 +42,8 @@ public:
     // Drops all rows in the table and frees memory
     void clear();
 
+    inline uint32_t columnNumBytes(uint32_t col_idx) const;
+
     static constexpr uint32_t maxColumns = 128;
 
 private:

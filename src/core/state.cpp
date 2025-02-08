@@ -662,6 +662,72 @@ void StateManager::resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id))
 #endif
 }
 
+void StateManager::sortArchetype(
+    MADRONA_MW_COND(uint32_t world_id,)
+    uint32_t archetype_id,
+    uint32_t component_id)
+{
+    ArchetypeStore &archetype_store = *archetype_stores_[archetype_id];
+
+    uint32_t sort_col_idx = archetype_store.columnLookup[component_id];
+
+    Table &tbl =
+#ifndef MADRONA_MW_MODE
+        archetype_store.tblStorage.tbl;
+#else
+      archetype_store.tblStorage.tbls[world_id];
+    assert(archetype_store.tblStorage.maxNumPerWorld == 0);
+#endif
+
+    uint32_t num_rows = tbl.numRows();
+    uint32_t *sort_keys = (uint32_t *)tbl.data(sort_col_idx);
+
+    uint32_t *idxs = (uint32_t *)malloc(sizeof(uint32_t) * num_rows);
+
+    for (uint32_t i = 0; i < num_rows; i++) {
+        idxs[i] = i;
+    }
+
+    std::stable_sort(idxs, idxs + num_rows, [&](uint32_t a_idx, uint32_t b_idx) {
+        return sort_keys[a_idx] < sort_keys[b_idx];
+    });
+
+    uint32_t num_cols = archetype_store.numComponents;
+    uint32_t max_column_num_bytes = 0;
+
+    for (uint32_t col_idx = 0; col_idx < num_cols; col_idx++) {
+        uint32_t num_bytes = tbl.columnNumBytes(col_idx);
+        if (num_bytes > max_column_num_bytes) {
+            max_column_num_bytes = num_bytes;
+        }
+    }
+
+    void *column_staging = malloc((uint64_t)max_column_num_bytes * num_rows);
+
+    for (uint32_t orig_idx = 0; orig_idx < num_rows; orig_idx++) {
+        uint32_t new_idx = idxs[orig_idx];
+        Entity e = ((Entity *)tbl.data(0))[orig_idx];
+        entity_store_.setRow(e, new_idx);
+    }
+
+    for (uint32_t col_idx = 0; col_idx < num_cols; col_idx++) {
+      void *col_dst = tbl.data(col_idx);
+      uint32_t col_num_bytes = tbl.columnNumBytes(col_idx);
+      memcpy(column_staging, col_dst,
+             (uint64_t)col_num_bytes * num_rows);
+      for (uint32_t orig_idx = 0; orig_idx < num_rows; orig_idx++) {
+          uint32_t new_idx = idxs[orig_idx];
+
+          memcpy((char *)col_dst + (uint64_t)new_idx * col_num_bytes,
+                 (char *)column_staging + (uint64_t)orig_idx * col_num_bytes,
+                 col_num_bytes);
+      }
+    }
+
+    free(column_staging);
+    free(idxs);
+}
+
 StateManager::QueryState StateManager::query_state_ = StateManager::QueryState();
 
 uint32_t StateManager::next_component_id_ = 0;

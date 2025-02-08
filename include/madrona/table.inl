@@ -28,5 +28,10 @@ const void * Table::data(uint32_t col_idx) const
 {
     return columns_[col_idx];
 }
+    
+uint32_t Table::columnNumBytes(uint32_t col_idx) const
+{
+    return bytes_per_column_[col_idx];
+}
 
 }

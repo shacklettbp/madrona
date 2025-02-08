@@ -212,6 +212,10 @@ public:
     void * tmpAlloc(MADRONA_MW_COND(uint32_t world_id,) uint64_t num_bytes);
     void resetTmpAlloc(MADRONA_MW_COND(uint32_t world_id));
 
+    void sortArchetype(MADRONA_MW_COND(uint32_t world_id,)
+                       uint32_t archetype_id,
+                       uint32_t component_id);
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};

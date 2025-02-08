@@ -51,6 +51,8 @@ public:
                       Query<ComponentTs...> &query,
                       Fn &&fn);
 
+    inline StateManager & stateManager() const;
+
 private:
     StateManager *state_mgr_;
     StateCache *state_cache_;

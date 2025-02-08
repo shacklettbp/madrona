@@ -20,4 +20,9 @@ void TaskGraph::iterateQuery(ContextT &ctx,
         });
 }
 
+StateManager & TaskGraph::stateManager() const
+{
+  return *state_mgr_;
+}
+
 }
