@@ -91,6 +91,10 @@ LoaderLib * LoaderLib::load()
 
 #if defined(MADRONA_LINUX)
     lib = dlopen("libvulkan.so", RTLD_LAZY | RTLD_LOCAL);
+    if (!lib)
+    {
+        lib = dlopen("libvulkan.so.1", RTLD_LAZY | RTLD_LOCAL);
+    }
 #elif defined(MADRONA_MACOS)
     lib = dlopen("libvulkan.1.dylib", RTLD_LAZY | RTLD_LOCAL);
     if (!lib) {
