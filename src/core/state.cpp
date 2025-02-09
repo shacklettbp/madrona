@@ -196,14 +196,8 @@ void StateManager::destroyEntityNow(MADRONA_MW_COND(uint32_t world_id,)
 
     ArchetypeStore &archetype = *archetype_stores_[loc.archetype];
 
-    bool row_moved = archetype.tblStorage.removeRow(
-        MADRONA_MW_COND(world_id,) loc.row);
-
-    if (row_moved) {
-        Entity moved_entity = archetype.tblStorage.column<Entity>(
-            MADRONA_MW_COND(world_id,) 0)[loc.row];
-        entity_store_.setRow(moved_entity, loc.row);
-    }
+    archetype.tblStorage.column<Entity>(
+        MADRONA_MW_COND(world_id,) 0)[loc.row] = Entity::none();
 
     entity_store_.freeEntity(cache.entity_cache_, e);
 }
@@ -751,14 +745,14 @@ void StateManager::compactArchetype(
         Entity e = entity_col[orig_row_idx];
 
         if (e == Entity::none()) {
-          continue;
+            continue;
         }
 
         uint32_t new_row_idx = num_compacted_rows++;
 
         if (new_row_idx == orig_row_idx) {
-          // Avoid memcpy on same / overlapping data.
-          continue;
+            // Avoid memcpy on same / overlapping data.
+            continue;
         }
 
         entity_store_.setRow(e, new_row_idx);

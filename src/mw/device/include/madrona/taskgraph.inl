@@ -308,15 +308,6 @@ TaskGraph::NodeID ClearTmpNode<ArchetypeT>::addToGraph(
         TypeTracker::typeID<ArchetypeT>());
 }
 
-template <typename ArchetypeT>
-TaskGraph::NodeID CompactArchetypeNode<ArchetypeT>::addToGraph(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> dependencies)
-{
-    return CompactArchetypeNodeBase::addToGraph(builder, dependencies,
-        TypeTracker::typeID<ArchetypeT>());
-}
-
 template <typename ArchetypeT, typename ComponentT>
 TaskGraph::NodeID SortArchetypeNode<ArchetypeT, ComponentT>::addToGraph(
     TaskGraph::Builder &builder,
@@ -325,6 +316,19 @@ TaskGraph::NodeID SortArchetypeNode<ArchetypeT, ComponentT>::addToGraph(
     return SortArchetypeNodeBase::addToGraph(builder, dependencies,
         TypeTracker::typeID<ArchetypeT>(),
         TypeTracker::typeID<ComponentT>());
+}
+
+template <typename ArchetypeT>
+TaskGraph::NodeID CompactArchetypeNode<ArchetypeT>::addToGraph(
+    TaskGraph::Builder &builder,
+    Span<const TaskGraph::NodeID> dependencies)
+{
+    auto sort_sys = builder.addToGraph<SortArchetypeNode<ArchetypeT, WorldID>>(
+        dependencies);
+    auto post_sort_reset_tmp =
+        builder.addToGraph<ResetTmpAllocNode>({sort_sys});
+
+    return post_sort_reset_tmp;
 }
 
 }
