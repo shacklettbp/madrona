@@ -210,4 +210,27 @@ TaskGraphNodeID SortArchetypeNodeBase::addToGraph(
         archetype_id, component_id);
 }
 
+CompactArchetypeNodeBase::CompactArchetypeNodeBase(uint32_t archetype_id)
+  : archetype_id_(archetype_id)
+{}
+
+void CompactArchetypeNodeBase::run(Context &ctx,
+                                TaskGraph &taskgraph)
+{
+  StateManager &state_mgr = taskgraph.stateManager();
+  state_mgr.compactArchetype(MADRONA_MW_COND(ctx.worldID().idx,)
+                             archetype_id_);
+}
+
+TaskGraphNodeID CompactArchetypeNodeBase::addToGraph(
+    StateManager &state_mgr,
+    TaskGraphBuilder &builder,
+    Span<const TaskGraphNodeID> dependencies,
+    uint32_t archetype_id)
+{
+    (void)state_mgr;
+    return builder.addDefaultNode<CompactArchetypeNodeBase>(dependencies, 
+        archetype_id);
+}
+
 }

@@ -37,7 +37,8 @@ public:
     inline void * data(uint32_t col_idx);
     inline const void * data(uint32_t col_idx) const;
 
-    inline uint32_t numRows() const { return num_rows_; }
+    inline uint32_t numRows() const;
+    inline void setNumRows(uint32_t num_rows);
 
     // Drops all rows in the table and frees memory
     void clear();

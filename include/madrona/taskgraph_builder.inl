@@ -120,4 +120,14 @@ TaskGraphNodeID SortArchetypeNode<ArchetypeT, ComponentT>::addToGraph(
         TypeTracker::typeID<ComponentT>());
 }
 
+template <typename ArchetypeT>
+TaskGraphNodeID CompactArchetypeNode<ArchetypeT>::addToGraph(
+        StateManager &state_mgr,
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> dependencies)
+{
+    return CompactArchetypeNodeBase::addToGraph(state_mgr, builder, dependencies,
+        TypeTracker::typeID<ArchetypeT>());
+}
+
 }

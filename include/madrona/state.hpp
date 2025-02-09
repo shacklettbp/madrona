@@ -216,6 +216,9 @@ public:
                        uint32_t archetype_id,
                        uint32_t component_id);
 
+    void compactArchetype(MADRONA_MW_COND(uint32_t world_id,)
+                          uint32_t archetype_id);
+
 private:
     template <typename SingletonT>
     struct SingletonArchetype : public madrona::Archetype<SingletonT> {};

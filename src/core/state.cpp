@@ -669,8 +669,6 @@ void StateManager::sortArchetype(
 {
     ArchetypeStore &archetype_store = *archetype_stores_[archetype_id];
 
-    uint32_t sort_col_idx = archetype_store.columnLookup[component_id];
-
     Table &tbl =
 #ifndef MADRONA_MW_MODE
         archetype_store.tblStorage.tbl;
@@ -680,6 +678,7 @@ void StateManager::sortArchetype(
 #endif
 
     uint32_t num_rows = tbl.numRows();
+    uint32_t sort_col_idx = archetype_store.columnLookup[component_id];
     uint32_t *sort_keys = (uint32_t *)tbl.data(sort_col_idx);
 
     uint32_t *idxs = (uint32_t *)malloc(sizeof(uint32_t) * num_rows);
@@ -726,6 +725,53 @@ void StateManager::sortArchetype(
 
     free(column_staging);
     free(idxs);
+}
+
+void StateManager::compactArchetype(
+    MADRONA_MW_COND(uint32_t world_id,)
+    uint32_t archetype_id)
+{
+    ArchetypeStore &archetype_store = *archetype_stores_[archetype_id];
+
+    Table &tbl =
+#ifndef MADRONA_MW_MODE
+        archetype_store.tblStorage.tbl;
+#else
+      archetype_store.tblStorage.tbls[world_id];
+    assert(archetype_store.tblStorage.maxNumPerWorld == 0);
+#endif
+
+    Entity *entity_col = (Entity *)tbl.data(0);
+
+    uint32_t num_rows = tbl.numRows();
+    uint32_t num_cols = archetype_store.numComponents;
+    uint32_t num_compacted_rows = 0;
+
+    for (uint32_t orig_row_idx = 0; orig_row_idx < num_rows; orig_row_idx++) {
+        Entity e = entity_col[orig_row_idx];
+
+        if (e == Entity::none()) {
+          continue;
+        }
+
+        uint32_t new_row_idx = num_compacted_rows++;
+
+        if (new_row_idx == orig_row_idx) {
+          // Avoid memcpy on same / overlapping data.
+          continue;
+        }
+
+        entity_store_.setRow(e, new_row_idx);
+
+        for (uint32_t col_idx = 0; col_idx < num_cols; col_idx++) {
+            uint32_t num_bytes = tbl.columnNumBytes(col_idx);
+            memcpy(tbl.getValue(col_idx, new_row_idx),
+                   tbl.getValue(col_idx, orig_row_idx),
+                   num_bytes);
+        }
+    }
+
+    tbl.setNumRows(num_compacted_rows);
 }
 
 StateManager::QueryState StateManager::query_state_ = StateManager::QueryState();
