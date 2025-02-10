@@ -571,12 +571,12 @@ struct JointSlider {
     // In the child's coordinate basis
     math::Vector3 relPositionChild;
 
-    // This is in the child's coordinate basis
-    math::Vector3 slideVector;
-
     // Rotation applied to child's vectors relative to
     // parent's coordinate system.
     math::Quat relParentRotation;
+
+    // This is in the child's coordinate basis
+    math::Vector3 slideVector;
 };
 
 void joinBodies(

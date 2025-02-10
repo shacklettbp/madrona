@@ -210,6 +210,9 @@ public:
     template <typename ArchetypeT, typename ComponentT>
     inline ComponentT * getWorldComponents(uint32_t world_id);
 
+    template <typename ArchetypeT>
+    inline Entity * getWorldEntities(uint32_t world_id);
+
     template <typename ElementT>
     inline uint32_t getMemoryRangeNumRows();
     inline uint32_t getMemoryRangeNumRows(uint32_t element_id);

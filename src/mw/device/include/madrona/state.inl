@@ -378,6 +378,20 @@ ComponentT * StateManager::getWorldComponents(uint32_t world_id)
     return base_ptr + archetype.worldOffsets[world_id];
 }
 
+template <typename ArchetypeT>
+inline Entity * StateManager::getWorldEntities(uint32_t world_id)
+{
+    uint32_t archetype_id = TypeTracker::typeID<ArchetypeT>();
+    auto &archetype = *archetypes_[archetype_id];
+
+    assert(!archetype.needsSort);
+
+    uint32_t col_idx = 0;
+
+    Entity *base_ptr = (Entity *)(archetype.tbl.columns[0]);
+    return base_ptr + archetype.worldOffsets[world_id];
+}
+
 template <typename ComponentT>
 ComponentT & StateManager::getDirect(int32_t column_idx, Loc loc)
 {

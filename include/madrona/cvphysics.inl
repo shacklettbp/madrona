@@ -26,6 +26,7 @@ uint32_t getNumDofs(DofType type)
     case DofType::None: {
         // Something is wrong if we're here
         MADRONA_UNREACHABLE();
+        return 0;
     }
     }
 }
