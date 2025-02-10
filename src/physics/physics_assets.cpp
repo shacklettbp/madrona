@@ -1263,6 +1263,10 @@ static void setupRigidBodyAABBsAndPrimitives(
                 setupHullPrimitive(src_prim, hull_meshes,
                     out_prim, &prim_aabb);
             } break;
+            case Type::Box: {
+                // Not implemented yet
+                assert(false);
+            } break;
             }
 
             prim_aabbs[prim_idx] = prim_aabb;

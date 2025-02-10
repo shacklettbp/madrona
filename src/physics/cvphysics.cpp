@@ -1014,7 +1014,7 @@ inline void computeExpandedParent(Context &ctx,
     int32_t *expandedParent = body_grp.getExpandedParent(ctx);
 
     // Initialize n-N_B elements
-    for(int32_t i = 0; i < body_grp.numDofs; ++i) {
+    for(int32_t i = 0; i < (int32_t)body_grp.numDofs; ++i) {
         expandedParent[i] = i - 1;
     }
 
@@ -1063,7 +1063,7 @@ inline void forwardKinematics(Context &ctx,
     }
 
     // Forward pass from parent to children
-    for (int i = 1; i < body_grp.numBodies; ++i) {
+    for (int i = 1; i < (int)body_grp.numBodies; ++i) {
         Entity body = body_grp.bodies(ctx)[i];
         auto &position = ctx.get<DofObjectPosition>(body);
         auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
@@ -1259,12 +1259,12 @@ inline void initHierarchies(Context &ctx,
     for (CountT j = 0; j < grp.numBodies; ++j) {
         Entity body = grp.bodies(ctx)[j];
         auto &tmp_state = ctx.get<DofObjectTmpState>(body);
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
+        auto &curr_num_dofs = ctx.get<DofObjectNumDofs>(body);
 
         tmp_state.dynData = grp.dynData;
         prefix_sum[j] = ps_offset;
 
-        ps_offset += num_dofs.numDofs;
+        ps_offset += curr_num_dofs.numDofs;
     }
 
     // Now do some post-allocation computations
@@ -3354,7 +3354,6 @@ inline void solveCPU(Context &ctx,
     uint32_t world_id = ctx.worldID().idx;
 
     StateManager *state_mgr = getStateManager(ctx);
-    PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
 
     // Call the solver
     if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
@@ -3410,6 +3409,8 @@ inline void computeBodyCOM(Context &ctx,
                            const DofObjectInertial inertial,
                            const DofObjectNumDofs num_dofs)
 {
+    (void)ctx;
+
     if (num_dofs.type == DofType::FixedBody) {
 #if 0
         tmp_state.scratch[0] =
@@ -3437,7 +3438,7 @@ inline void computeTotalCOM(Context &ctx,
 
     Entity *bodies = body_grp.bodies(ctx);
 
-    for (int i = 0; i < body_grp.numBodies; ++i) {
+    for (int i = 0; i < (int)body_grp.numBodies; ++i) {
         auto &tmp_state = ctx.get<DofObjectTmpState>(bodies[i]);
 
         hierarchy_com += Vector3 {
@@ -3455,16 +3456,8 @@ inline void computeTotalCOM(Context &ctx,
 inline void computeSpatialInertias(Context &ctx,
                                    DofObjectTmpState &tmp_state,
                                    const DofObjectHierarchyDesc hier_desc,
-                                   const DofObjectInertial inertial,
-                                   const DofObjectNumDofs num_dofs)
+                                   const DofObjectInertial inertial)
 {
-#if 0
-    if(num_dofs.type == DofType::FixedBody) {
-        tmp_state.spatialInertia.mass = 0.f;
-        return;
-    }
-#endif
-
     Vector3 body_grp_com_pos = ctx.get<BodyGroupHierarchy>(
             hier_desc.bodyGroup).comPos;
 
@@ -3679,6 +3672,8 @@ inline float* computeContactJacobian(Context &ctx,
                                      float coeff,
                                      bool dbg)
 {
+    (void)dbg;
+
     // Compute prefix sum to determine the start of the block for each body
     uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
 
@@ -3833,18 +3828,9 @@ inline void computeInvMass(Context &ctx,
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < grp.numBodies; ++i_body) {
         Entity body = grp.bodies(ctx)[i_body];
-        auto body_dofs = ctx.get<DofObjectNumDofs>(body);
         auto tmp_state = ctx.get<DofObjectTmpState>(body);
         auto hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
         auto &dof_inertial = ctx.get<DofObjectInertial>(body);
-
-#if 0
-        if (body_dofs.type == DofType::FixedBody) {
-            dof_inertial.approxInvMassRot = 0.f;
-            dof_inertial.approxInvMassTrans = 0.f;
-            continue;
-        }
-#endif
 
         // Compute J
         memset(J, 0.f, 6 * grp.numDofs * sizeof(float));
@@ -4040,7 +4026,6 @@ inline void compositeRigidBody(Context &ctx,
 inline void compositeRigidBody(Context &ctx,
                                BodyGroupHierarchy &body_grp)
 {
-    uint32_t world_id = ctx.worldID().idx;
     StateManager *state_mgr = getStateManager(ctx);
 
     // Mass Matrix of this entire body group, column-major
@@ -4089,9 +4074,9 @@ inline void compositeRigidBody(Context &ctx,
         while(parent_j != Entity::none()) {
             j = ctx.get<DofObjectHierarchyDesc>(
                 body_grp.bodies(ctx)[j]).parentIndex;
-            Entity body = body_grp.bodies(ctx)[j];
-            auto &j_tmp_state = ctx.get<DofObjectTmpState>(body);
-            auto &j_num_dofs = ctx.get<DofObjectNumDofs>(body);
+            Entity cur_body = body_grp.bodies(ctx)[j];
+            auto &j_tmp_state = ctx.get<DofObjectTmpState>(cur_body);
+            auto &j_num_dofs = ctx.get<DofObjectNumDofs>(cur_body);
 
             float *S_j = j_tmp_state.getPhiFull(ctx);
 
@@ -5124,8 +5109,7 @@ TaskGraphNodeID setupCVInitTasks(
          tasks::computeSpatialInertias,
             DofObjectTmpState,
             DofObjectHierarchyDesc,
-            DofObjectInertial,
-            DofObjectNumDofs
+            DofObjectInertial
         >>({node});
 
     node = builder.addToGraph<ParallelForNode<Context,
@@ -5208,8 +5192,7 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
              tasks::computeSpatialInertias,
                 DofObjectTmpState,
                 DofObjectHierarchyDesc,
-                DofObjectInertial,
-                DofObjectNumDofs
+                DofObjectInertial
             >>({compute_total_com});
 
         auto compute_phi = builder.addToGraph<ParallelForNode<Context,
