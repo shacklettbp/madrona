@@ -928,7 +928,7 @@ struct CVSolveData {
     MemoryRange prepMemory;
 #endif
 
-    static constexpr uint32_t kNumRegisters = 8;
+    static constexpr uint32_t kNumRegisters = 9;
 
     struct RegInfo {
         uint64_t size;
@@ -939,6 +939,16 @@ struct CVSolveData {
     RegInfo regInfos[kNumRegisters];
 
 #ifdef MADRONA_GPU_MODE
+    float * getContactAccRef(StateManager *state_mgr)
+    {
+        return (float *)accRefMem;
+    }
+
+    float * getEqualityAccRef(StateManager *state_mgr)
+    {
+        return (float *)accRefMem + numRowsJc;
+    }
+
     SparseBlkDiag::Blk * getMassBlks(StateManager *state_mgr)
     {
         (void)state_mgr;
@@ -1510,21 +1520,25 @@ struct GaussMinimizationNode : NodeBase {
         float *x,
         CVSolveData *sd,
         float *scratch,
-        float *jaccref,
+        float *jaccref_cont,
+        float *jaccref_eq,
         float *Mxmin,
-        float *acc_ref,
+        float *acc_ref_cont,
+        float *acc_ref_eq,
         bool dbg = false);
 
     // Call this after calling dobjWarp
     float objWarp(
         float *x,
         CVSolveData *sd,
-        float *jaccref,
+        float *jaccref_cont,
+        float *jaccref_eq,
         float *Mxmin);
 
     float exactLineSearch(
             CVSolveData *sd,
-            float *jaccref,
+            float *jaccref_cont,
+            float *jaccref_eq,
             float *Mxmin,
             float *p,
             float *x,
@@ -1544,13 +1558,26 @@ struct GaussMinimizationNode : NodeBase {
             float coeff,
             bool dbg);
 
+    template <typename Fn>
+    void computeAccRef(
+            float *acc_ref_cont,
+            uint32_t acc_ref_dim,
+            float *j_mat,
+            uint32_t num_rows_j,
+            uint32_t num_cols_j,
+            float *vel,
+            uint32_t vel_dim,
+            float h,
+            Fn &&residual_fn);
+
     void prepareRegInfos(CVSolveData *sd);
 
     // Nodes in the taskgraph:
     void allocateScratch(int32_t invocation_idx);
     // Prepares mass matrix and contact jacobian
     void prepareSolver(int32_t invocation_idx);
-    void computeAccRef(int32_t invocation_idx);
+    void computeContactAccRef(int32_t invocation_idx);
+    void computeEqualityAccRef(int32_t invocation_idx);
     void nonlinearCG(int32_t invocation_idx);
 
 
@@ -1574,7 +1601,8 @@ struct GaussMinimizationNode : NodeBase {
 float GaussMinimizationNode::objWarp(
     float *x,
     CVSolveData *sd,
-    float *jaccref,
+    float *jaccref_cont,
+    float *jaccref_eq,
     float *Mxmin)
 {
     using namespace gpu_utils;
@@ -1592,32 +1620,39 @@ float GaussMinimizationNode::objWarp(
             sd->freeAccDim);
 
     // Calculate s(...) now:
-    warpLoopSync(
-        sd->numRowsJc / 3,
-        [&](uint32_t iter) {
-            float curr_val = 0.f;
-            if (iter != 0xFFFF'FFFF) {
-                float n = jaccref[iter * 3];
-                float t1 = jaccref[iter * 3 + 1];
-                float t2 = jaccref[iter * 3 + 2];
+    warpLoopSync(sd->numRowsJc / 3, [&](uint32_t iter) {
+        float curr_val = 0.f;
+        if (iter != 0xFFFF'FFFF) {
+            float n = jaccref_cont[iter * 3];
+            float t1 = jaccref_cont[iter * 3 + 1];
+            float t2 = jaccref_cont[iter * 3 + 2];
 
-                float t = sqrtf(t1 * t1 + t2 * t2);
-                float mu = sd->mu[iter];
-                float mw = 1.f / (1.f + mu * mu);
+            float t = sqrtf(t1 * t1 + t2 * t2);
+            float mu = sd->mu[iter];
+            float mw = 1.f / (1.f + mu * mu);
 
-                if (n >= mu * t) {
-                    // Do nothing (top zone)
-                } else if (mu * n + t <= 0.f) {
-                    // Bottom zone
-                    curr_val = 0.5f * (n * n + t1 * t1 + t2 * t2);
-                } else {
-                    // Middle zone
-                    curr_val = 0.5f * mw * (n - mu * t) * (n - mu * t);
-                }
+            if (n >= mu * t) {
+                // Do nothing (top zone)
+            } else if (mu * n + t <= 0.f) {
+                // Bottom zone
+                curr_val = 0.5f * (n * n + t1 * t1 + t2 * t2);
+            } else {
+                // Middle zone
+                curr_val = 0.5f * mw * (n - mu * t) * (n - mu * t);
             }
+        }
 
-            res += warpReduceSum(curr_val);
-        });
+        res += warpReduceSum(curr_val);
+    });
+
+    warpLoopSync(sd->numRowsJe, [&](uint32_t iter) {
+        float curr_val = 0.f;
+        if (iter != 0xFFFF'FFFF) {
+            curr_val = 0.5f * jaccref_eq[iter] * jaccref_eq[iter];
+        }
+
+        res += warpReduceSum(curr_val);
+    });
 
     return res;
 }
@@ -1628,9 +1663,11 @@ void GaussMinimizationNode::dobjWarp(
         float *x,
         CVSolveData *sd,
         float *scratch,
-        float *jaccref,
+        float *jaccref_cont,
+        float *jaccref_eq,
         float *Mxmin,
-        float *acc_ref,
+        float *acc_ref_cont,
+        float *acc_ref_eq,
         bool dbg)
 {
     using namespace gpu_utils;
@@ -1657,33 +1694,7 @@ void GaussMinimizationNode::dobjWarp(
     if constexpr (calc_package) {
         warpCopy(Mxmin, res, sd->freeAccDim * sizeof(float));
         __syncwarp();
-
-        if (dbg) {
-            printMatrix(Mxmin, 1, sd->freeAccDim, "mxmin new copied");
-        }
     }
-
-#if 0
-     // Creating J @ x - acc_ref to feed to ds
-    warpLoop(sd->numRowsJc, [&](uint32_t iter) {
-        scratch[iter] = -acc_ref[iter];
-    });
-    __syncwarp();
-
-    if (dbg) {
-        printMatrix(scratch, 1, sd->numRowsJc, "-accref");
-    }
-
-    gmmaWarpSmallReg<float, 4, true, false, false>(
-            scratch,
-            sd->J_c,
-            x,
-            sd->numRowsJc,
-            sd->numColsJc,
-            sd->freeAccDim,
-            1);
-    __syncwarp();
-#endif
 
     gmmaWarpSmallReg<float, 4, true, false, true>(
             scratch,
@@ -1695,47 +1706,14 @@ void GaussMinimizationNode::dobjWarp(
             1);
     __syncwarp();
 
-    if (dbg) {
-        printMatrix(Mxmin, 1, sd->freeAccDim, "after Jx");
-    }
-
-#if 0
-    if (dbg) {
-        printMatrix(scratch, 1, sd->numRowsJc, "J @ x");
-    }
-#endif
-
     warpLoop(sd->numRowsJc, [&](uint32_t iter) {
-        scratch[iter] -= acc_ref[iter];
+        scratch[iter] -= acc_ref_cont[iter];
     });
     __syncwarp();
 
-    if (dbg) {
-        printMatrix(Mxmin, 1, sd->freeAccDim, "after Jx-aref");
-    }
-
     if constexpr (calc_package) {
-        if (dbg) {
-            warp_printf("jaccref at %p; mxmin at %p\n", jaccref, Mxmin);
-            warp_printf("memcpy of %d bytes\n", sd->numRowsJc * sizeof(float));
-        }
-
-        warpCopy(jaccref, scratch, sd->numRowsJc * sizeof(float), dbg);
+        warpCopy(jaccref_cont, scratch, sd->numRowsJc * sizeof(float), dbg);
         __syncwarp();
-    }
-
-    if (dbg) {
-        printMatrix(Mxmin, 1, sd->freeAccDim, "after copy Jx-aref");
-    }
-
-#if 0
-    if (dbg) {
-        printMatrix(scratch, 1, sd->numRowsJc, "J@x - accref");
-    }
-#endif
-
-    if (dbg) {
-        printMatrix(Mxmin, 1, sd->freeAccDim, "mxmin new copied before ds");
     }
 
     // ds
@@ -1781,9 +1759,38 @@ void GaussMinimizationNode::dobjWarp(
             1);
     __syncwarp();
 
-    if (dbg) {
-        printMatrix(Mxmin, 1, sd->freeAccDim, "mxmin new copied eof");
+
+
+    // Get equality part of the gradient
+    gmmaWarpSmallReg<float, 4, true, false, true>(
+            scratch,
+            sd->J_e,
+            x,
+            sd->numRowsJe,
+            sd->numColsJe,
+            sd->freeAccDim,
+            1);
+    __syncwarp();
+
+    warpLoop(sd->numRowsJe, [&](uint32_t iter) {
+        scratch[iter] -= acc_ref_eq[iter];
+    });
+    __syncwarp();
+
+    if constexpr (calc_package) {
+        warpCopy(jaccref_eq, scratch, sd->numRowsJe * sizeof(float), dbg);
+        __syncwarp();
     }
+
+    gmmaWarpSmallReg<float, 4, false, false, false>(
+            res,
+            sd->J_e,
+            scratch,
+            sd->numColsJe,
+            sd->numRowsJe,
+            sd->numRowsJe,
+            1);
+    __syncwarp();
 }
 
 GaussMinimizationNode::GaussMinimizationNode(
@@ -2139,7 +2146,8 @@ void GaussMinimizationNode::testNodeIdenMul(int32_t invocation_idx)
 
 float GaussMinimizationNode::exactLineSearch(
         CVSolveData *sd,
-        float *jaccref,
+        float *jaccref_cont,
+        float *jaccref_eq,
         float *Mxmin,
         float *p,
         float *x,
@@ -2158,7 +2166,7 @@ float GaussMinimizationNode::exactLineSearch(
 
     dbg_matrix_printf(p, 1, sd->freeAccDim, "p");
     dbg_matrix_printf(Mxmin, 1, sd->freeAccDim, "Mx_free");
-    dbg_matrix_printf(jaccref, 1, sd->numRowsJc, "jaccref");
+    dbg_matrix_printf(jaccref_cont, 1, sd->numRowsJc, "jaccref");
 
     dbg_warp_printf("pMx_free = %f\n", pMx_free);
 
@@ -2199,6 +2207,15 @@ float GaussMinimizationNode::exactLineSearch(
     }
     __syncwarp();
 
+    float *Jep = scratch;
+    { // Calculate Je @ p
+        gmmaWarpSmallReg<float, 4, true, false, true>(
+            Jp, sd->J_e, p,
+            sd->numRowsJe, sd->numColsJe,
+            sd->numColsJe, 1);
+    }
+    __syncwarp();
+
     // function, first deriv and second deriv evals
     struct Evals {
         float fun;
@@ -2217,94 +2234,122 @@ float GaussMinimizationNode::exactLineSearch(
                     fun, grad, hess);
         }
 
-        warpLoopSync(sd->numRowsJc / 3,
-            [&](uint32_t iter) {
-                struct Diff {
-                    float dfun;
-                    float dgrad;
-                    float dhess;
-                };
+        struct Diff {
+            float dfun;
+            float dgrad;
+            float dhess;
+        };
 
-                auto d = [&]() -> Diff {
-                    if (iter == 0xFFFF'FFFF) {
-                        return {
-                            0.f, 0.f, 0.f
+        warpLoopSync(sd->numRowsJc / 3, [&](uint32_t iter) {
+            auto d = [&]() -> Diff {
+                if (iter == 0xFFFF'FFFF) {
+                    return {
+                        0.f, 0.f, 0.f
+                    };
+                } else {
+                    float n = jaccref_cont[iter * 3];
+                    float t1 = jaccref_cont[iter * 3 + 1];
+                    float t2 = jaccref_cont[iter * 3 + 2];
+                    float mu = sd->mu[iter];
+                    float mw = 1.f / (1.f + mu * mu);
+
+                    float p0 = Jp[iter * 3];
+                    float p1 = Jp[iter * 3 + 1];
+                    float p2 = Jp[iter * 3 + 2];
+                    float np = n + alpha * p0;
+                    float t1p = t1 + alpha * p1;
+                    float t2p = t2 + alpha * p2;
+                    float tp = sqrtf(t1p * t1p + t2p * t2p);
+
+                    if (np >= mu * tp) {
+                        // Don't add anything up
+                        return {0.f, 0.f, 0.f};
+
+                        if (print)
+                            printf("iter = %d; first return (0)\n", iter);
+                    } else if (mu * np + tp <= 0.f) {
+                        float p_sq = p0 * p0 + p1 * p1 + p2 * p2;
+
+                        Diff diff = {
+                            np * np + tp * tp,
+                            p0 * n + p1 * t1 + p2 * t2 + alpha * p_sq,
+                            p_sq,
                         };
+
+                        if (print)
+                            printf("iter = %d; second return; f=%f; g=%f; h=%f\n",
+                                    iter, diff.dfun, diff.dgrad, diff.dhess);
+
+                        return diff;
                     } else {
-                        float n = jaccref[iter * 3];
-                        float t1 = jaccref[iter * 3 + 1];
-                        float t2 = jaccref[iter * 3 + 2];
-                        float mu = sd->mu[iter];
-                        float mw = 1.f / (1.f + mu * mu);
-
-                        float p0 = Jp[iter * 3];
-                        float p1 = Jp[iter * 3 + 1];
-                        float p2 = Jp[iter * 3 + 2];
-                        float np = n + alpha * p0;
-                        float t1p = t1 + alpha * p1;
-                        float t2p = t2 + alpha * p2;
-                        float tp = sqrtf(t1p * t1p + t2p * t2p);
-
-                        if (np >= mu * tp) {
-                            // Don't add anything up
-                            return {0.f, 0.f, 0.f};
-
-                            if (print)
-                                printf("iter = %d; first return (0)\n", iter);
-                        } else if (mu * np + tp <= 0.f) {
-                            float p_sq = p0 * p0 + p1 * p1 + p2 * p2;
-
-                            Diff diff = {
-                                np * np + tp * tp,
-                                p0 * n + p1 * t1 + p2 * t2 + alpha * p_sq,
-                                p_sq,
-                            };
-
-                            if (print)
-                                printf("iter = %d; second return; f=%f; g=%f; h=%f\n",
-                                        iter, diff.dfun, diff.dgrad, diff.dhess);
-
-                            return diff;
-                        } else {
-                            float dnp_da = p0;
-                            float dtp_da = (p1 * t1 + p2 * t2 +
-                                            alpha * (p1 * p1 + p2 * p2)) / tp;
-                            if (tp == 0.f) {
-                                printf("nan going to happen exactLineSearch tp\n");
-                            }
-                            float d2tp_da2 = ((p2 * t1 - p1 * t2) * (p2 * t1 - p1 * t2)) /
-                                (tp * tp * tp);
-                            if (tp * tp * tp == 0.f) {
-                                printf("nan going to happen exactLineSearch tp^3\n");
-                            }
-                            float tmp = np - mu * tp;
-                            float d_tmp = dnp_da - mu * dtp_da;
-
-                            Diff diff = {
-                                mw * tmp * tmp,
-                                mw * tmp * d_tmp,
-                                mw * (d_tmp * d_tmp + tmp * (-mu * d2tp_da2))
-                            };
-
-                            if (print)
-                                printf("iter = %d; second return; f=%f; g=%f; h=%f\n",
-                                        iter, diff.dfun, diff.dgrad, diff.dhess);
-
-                            return diff;
+                        float dnp_da = p0;
+                        float dtp_da = (p1 * t1 + p2 * t2 +
+                                        alpha * (p1 * p1 + p2 * p2)) / tp;
+                        if (tp == 0.f) {
+                            printf("nan going to happen exactLineSearch tp\n");
                         }
+                        float d2tp_da2 = ((p2 * t1 - p1 * t2) * (p2 * t1 - p1 * t2)) /
+                            (tp * tp * tp);
+                        if (tp * tp * tp == 0.f) {
+                            printf("nan going to happen exactLineSearch tp^3\n");
+                        }
+                        float tmp = np - mu * tp;
+                        float d_tmp = dnp_da - mu * dtp_da;
+
+                        Diff diff = {
+                            mw * tmp * tmp,
+                            mw * tmp * d_tmp,
+                            mw * (d_tmp * d_tmp + tmp * (-mu * d2tp_da2))
+                        };
+
+                        if (print)
+                            printf("iter = %d; second return; f=%f; g=%f; h=%f\n",
+                                    iter, diff.dfun, diff.dgrad, diff.dhess);
+
+                        return diff;
                     }
-                } ();
+                }
+            } ();
 
-                // These are summed from the current iteration
-                float dfun = warpReduceSum(d.dfun);
-                float dgrad = warpReduceSum(d.dgrad);
-                float dhess = warpReduceSum(d.dhess);
+            // These are summed from the current iteration
+            float dfun = warpReduceSum(d.dfun);
+            float dgrad = warpReduceSum(d.dgrad);
+            float dhess = warpReduceSum(d.dhess);
 
-                // Now, fun, grad and hess will contain the full sum.
-                fun += dfun;
-                grad += dgrad;
-                hess += dhess;
-            });
+            // Now, fun, grad and hess will contain the full sum.
+            fun += dfun;
+            grad += dgrad;
+            hess += dhess;
+        });
+
+        warpLoopSync(sd->numRowsJe, [&](uint32_t iter) {
+            auto d = [&]() -> Diff {
+                if (iter == 0xFFFF'FFFF) {
+                    return {
+                        0.f, 0.f, 0.f
+                    };
+                } else {
+                    float orig = jaccref_eq[iter];
+                    float dj = Jep[iter];
+
+                    float np = orig + alpha * dj;
+
+                    return {
+                        np * np,
+                        orig * dj + alpha * (dj * dj),
+                        dj * dj
+                    };
+                }
+            } ();
+
+            float dfun = warpReduceSum(d.dfun);
+            float dgrad = warpReduceSum(d.dgrad);
+            float dhess = warpReduceSum(d.dhess);
+
+            fun += dfun;
+            grad += dgrad;
+            hess += dhess;
+        });
 
         if (print) {
             warp_printf("final: fun=%f; grad=%f; hess=%f\n", fun, grad, hess);
@@ -2447,6 +2492,8 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
         sizes[num_sizes++] = { sizeof(float) * max_num_comps, false };
         // scratch5
         sizes[num_sizes++] = { sizeof(float) * max_num_comps, false };
+        // scratch6
+        sizes[num_sizes++] = { sizeof(float) * max_num_comps, false };
 
         assert(num_sizes == CVSolveData::kNumRegisters);
 
@@ -2490,11 +2537,13 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
 
 
         { // AccRef allocation
-            uint32_t acc_ref_bytes = sizeof(float) * curr_sd->numRowsJc;
+            uint32_t cont_acc_ref_bytes = sizeof(float) * curr_sd->numRowsJc;
+            uint32_t eq_acc_ref_bytes = sizeof(float) * curr_sd->numRowsJe;
 
             curr_sd->accRefMem = (uint8_t *)mwGPU::TmpAllocator::get().alloc(
-                    acc_ref_bytes);
-            curr_sd->accRefAllocatedBytes = acc_ref_bytes;
+                    cont_acc_ref_bytes + eq_acc_ref_bytes);
+            curr_sd->accRefAllocatedBytes = cont_acc_ref_bytes + eq_acc_ref_bytes;
+
 #if 0
             if (curr_sd->accRefAllocatedBytes == 0 && curr_sd->numRowsJc != 0) {
                 curr_sd->accRefMemory = state_mgr->allocMemoryRange(
@@ -3063,9 +3112,70 @@ void GaussMinimizationNode::computeContactJacobian(
     }
 }
 
+template <typename Fn>
+void GaussMinimizationNode::computeAccRef(
+        float *acc_ref,
+        uint32_t acc_ref_dim,
+        float *j_mat,
+        uint32_t num_rows_j,
+        uint32_t num_cols_j,
+        float *vel,
+        uint32_t vel_dim,
+        float h,
+        Fn &&fn)
+{
+    using namespace gpu_utils;
+
+    float time_const = 2.f * h;
+    constexpr float damp_ratio = 1.f;
+    constexpr float d_min = 0.9f,
+                    d_max = 0.95f,
+                    width = 0.001f,
+                    mid = 0.5f,
+                    power = 2.f;
+
+    // First store J @ v
+    gmmaWarpSmallReg<float, 4, true, false, true>(
+            acc_ref,
+            j_mat,
+            vel,
+            num_rows_j,
+            num_cols_j,
+            vel_dim,
+            1);
+
+    warpLoop(num_rows_j, [&](uint32_t iter) {
+#if 0
+        float r = (iter % 3 == 0) ?
+            -curr_sd->penetrations[iter / 3] : 0.f;
+#endif
+        float r = fn(iter);
+
+        float imp_x = fabs(r) / width;
+        float imp_a = (1.f / powf(mid, power-1.f)) * powf(imp_x, power);
+        float imp_b = 1.f - (1.f / powf(1.f - mid, power - 1)) *
+                      powf(1.f - imp_x, power);
+        float imp_y = (imp_x < mid) ? imp_a : imp_b;
+        float imp = d_min + imp_y * (d_max - d_min);
+        if (imp < d_min)
+            imp = d_min;
+        else if (imp > d_max)
+            imp = d_max;
+        imp = (imp_x > 1.f) ? d_max : imp;
+
+        float k = 1.f / (d_max * d_max *
+                         time_const * time_const *
+                         damp_ratio * damp_ratio);
+        float b = 2.f / (d_max * time_const);
+
+        acc_ref[iter] *= -b;
+        acc_ref[iter] -= k * imp * r;
+    });
+}
+
 // Might be overkill to allocate a warp per world but we can obviously
 // experiment.
-void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
+void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
 {
     using namespace gpu_utils;
 
@@ -3105,54 +3215,26 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
                     (float *)state_mgr->memoryRangePointer<
                         SolverScratch256b>(curr_sd->accRefMemory),
 #endif
-                    (float *)curr_sd->accRefMem,
+                    curr_sd->getContactAccRef(state_mgr),
                     false
                 };
             }
         } ();
 
         if (curr_sd->numRowsJc > 0) {
-            float time_const = 2.f * curr_sd->h;
-            constexpr float damp_ratio = 1.f;
-            constexpr float d_min = 0.9f,
-                            d_max = 0.95f,
-                            width = 0.001f,
-                            mid = 0.5f,
-                            power = 2.f;
-
-            // First store J @ v
-            gmmaWarpSmallReg<float, 4, true, false, true>(
+            computeAccRef(
                     acc_ref,
+                    curr_sd->numRowsJc,
                     curr_sd->J_c,
-                    curr_sd->vel,
                     curr_sd->numRowsJc,
                     curr_sd->numColsJc,
+                    curr_sd->vel,
                     curr_sd->velDim,
-                    1);
-
-            warpLoop(curr_sd->numRowsJc, [&](uint32_t iter) {
-                float r = (iter % 3 == 0) ?
-                    -curr_sd->penetrations[iter / 3] : 0.f;
-                float imp_x = fabs(r) / width;
-                float imp_a = (1.f / powf(mid, power-1.f)) * powf(imp_x, power);
-                float imp_b = 1.f - (1.f / powf(1.f - mid, power - 1)) *
-                              powf(1.f - imp_x, power);
-                float imp_y = (imp_x < mid) ? imp_a : imp_b;
-                float imp = d_min + imp_y * (d_max - d_min);
-                if (imp < d_min)
-                    imp = d_min;
-                else if (imp > d_max)
-                    imp = d_max;
-                imp = (imp_x > 1.f) ? d_max : imp;
-
-                float k = 1.f / (d_max * d_max *
-                                 time_const * time_const *
-                                 damp_ratio * damp_ratio);
-                float b = 2.f / (d_max * time_const);
-
-                acc_ref[iter] *= -b;
-                acc_ref[iter] -= k * imp * r;
-            });
+                    curr_sd->h,
+                    [&](uint32_t iter) {
+                        return (iter % 3 == 0) ?
+                            -curr_sd->penetrations[iter / 3] : 0.f;
+                    });
 
             if (acc_ref && in_smem) {
                 float * acc_ref_glob =
@@ -3160,10 +3242,90 @@ void GaussMinimizationNode::computeAccRef(int32_t invocation_idx)
                     (float *)state_mgr->memoryRangePointer<SolverScratch256b>(
                             curr_sd->accRefMemory);
 #endif
-                    (float *)curr_sd->accRefMem;
+                    curr_sd->getContactAccRef(state_mgr);
 
                 warpCopy(acc_ref_glob, acc_ref,
                          sizeof(float) * curr_sd->numRowsJc);
+                acc_ref = (float *)acc_ref_glob;
+            }
+        }
+
+        __syncwarp();
+    }
+}
+
+void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
+{
+    using namespace gpu_utils;
+
+    uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
+    uint32_t total_num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
+
+    // This is the global warp ID
+    // uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
+    uint32_t warp_id = threadIdx.x / 32;
+    uint32_t lane_id = threadIdx.x % 32;
+
+    assert(blockDim.x == consts::numMegakernelThreads);
+
+    StateManager *state_mgr = getStateManager();
+
+    uint32_t world_id = invocation_idx;
+
+    { // Do the actual computation
+        CVSolveData *curr_sd = &solveDatas[world_id];
+
+        float *residuals = curr_sd->eqResiduals;
+
+        // We want acc_ref to have priority in shared memory
+        auto [acc_ref, in_smem] = [&]() -> std::pair<float *, bool> {
+            const int32_t num_smem_bytes_per_warp =
+                mwGPU::SharedMemStorage::numBytesPerWarp();
+
+            uint32_t acc_ref_bytes = sizeof(float) * curr_sd->numRowsJe;
+            auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                            num_smem_bytes_per_warp * warp_id;
+
+            if (acc_ref_bytes == 0) {
+                return { (float *)nullptr, false };
+            } else if (acc_ref_bytes < num_smem_bytes_per_warp) {
+                return { (float *)smem_buf, true };
+            } else {
+                return {
+                    (float *)curr_sd->getEqualityAccRef(state_mgr),
+                    false
+                };
+            }
+        } ();
+
+        if (curr_sd->numRowsJe > 0) {
+            computeAccRef(
+                    acc_ref,
+                    curr_sd->numRowsJe,
+                    curr_sd->J_e,
+                    curr_sd->numRowsJe,
+                    curr_sd->numColsJe,
+                    curr_sd->vel,
+                    curr_sd->velDim,
+                    curr_sd->h,
+                    [&](uint32_t iter) {
+                        return residuals[iter];
+                    });
+
+#if 0
+            printMatrix(
+                    acc_ref,
+                    1,
+                    curr_sd->numRowsJe,
+                    "accref_eq");
+#endif
+
+            if (acc_ref && in_smem) {
+                float * acc_ref_glob =
+                    (float *)curr_sd->getEqualityAccRef(state_mgr);
+
+                warpCopy(acc_ref_glob, acc_ref,
+                         sizeof(float) * curr_sd->numRowsJe);
                 acc_ref = (float *)acc_ref_glob;
             }
         }
@@ -3255,18 +3417,27 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         float *scratch1 = (float *)curr_sd->regInfos[3].ptr;
         float *scratch2 = (float *)curr_sd->regInfos[4].ptr;
         float *scratch3 = (float *)curr_sd->regInfos[5].ptr;
-        float *jaccref = (float *)curr_sd->regInfos[6].ptr;
+        float *jaccref_cont = (float *)curr_sd->regInfos[6].ptr;
         float *mxmin = (float *)curr_sd->regInfos[7].ptr;
+        float *jaccref_eq = (float *)curr_sd->regInfos[8].ptr;
 
-        float *acc_ref = [&]() -> float * {
-            if (curr_sd->accRefAllocatedBytes == 0) {
+        float *acc_ref_cont = [&]() -> float * {
+            if (curr_sd->numRowsJc == 0) {
                 return (float *)nullptr;
             } else {
-                return (float *)curr_sd->accRefMem;
+                return curr_sd->getContactAccRef(state_mgr);
             }
         } ();
 
-        // printMatrix(acc_ref, 1, curr_sd->numRowsJc, "accref");
+        float *acc_ref_eq = [&]() -> float * {
+            if (curr_sd->numRowsJe == 0) {
+                return (float *)nullptr;
+            } else {
+                return curr_sd->getEqualityAccRef(state_mgr);
+            }
+        } ();
+
+        // printMatrix(acc_ref_cont, 1, curr_sd->numRowsJc, "accref");
 
         // We are using freeAcc as initial guess
         warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
@@ -3275,10 +3446,13 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         // printMatrix(x, 1, curr_sd->freeAccDim, "x");
 
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
-                       jaccref, mxmin, acc_ref, false);
+                       jaccref_cont, jaccref_eq, 
+                       mxmin, 
+                       acc_ref_cont, acc_ref_eq,
+                       false);
         __syncwarp();
 
-        float curr_fun = objWarp(x, curr_sd, jaccref, mxmin);
+        float curr_fun = objWarp(x, curr_sd, jaccref_cont, jaccref_eq, mxmin);
         __syncwarp();
 
         // warp_printf("curr_fun = %f\n", curr_fun);
@@ -3321,7 +3495,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
            // float lsTol = lsTolerance * kTolerance * p_norm / tol_scale;
            float lsTol = lsTolerance;
            float alpha = exactLineSearch(
-                curr_sd, jaccref, mxmin, p, x, lsTol, scratch1, false);
+                curr_sd, jaccref_cont, jaccref_eq, 
+                mxmin, p, x, lsTol, scratch1, false);
             __syncwarp();
 
             // iter_warp_printf("alpha = %f\n", alpha);
@@ -3348,28 +3523,19 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 warpCopy(scratch2, m_grad, curr_sd->freeAccDim * sizeof(float));
 
                 dobjWarp<true>(g_new, x, curr_sd, scratch1,
-                               jaccref, mxmin, acc_ref, false);
+                               jaccref_cont, jaccref_eq, mxmin, 
+                               acc_ref_cont, acc_ref_eq, false);
 
                 // iter_matrix_printf(g_new, 1, curr_sd->freeAccDim, "g_new");
                 __syncwarp();
 
-                new_fun = objWarp(x, curr_sd, jaccref, mxmin);
+                new_fun = objWarp(x, curr_sd, jaccref_cont, jaccref_eq, mxmin);
                 __syncwarp();
 
                 g_norm = sqrtf(norm2Warp(g_new, curr_sd->freeAccDim));
             }
 
-            // warp_printf("curr_fun = %f\n", new_fun);
-
             if (tol_scale * (curr_fun - new_fun) < kTolerance) {
-#if 0
-                warp_printf(
-                    "tol_scale (%.17f) * (curr_fun (%.17f) - new_fun (%.17f)) < kTolerance (%.17f)\n",
-                    tol_scale,
-                    curr_fun,
-                    new_fun,
-                    kTolerance);
-#endif
                 break;
             }
 
@@ -3381,8 +3547,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
                 float g_dot_m_grad_new = sparseBlkDiagSolve<float, true>(
                         m_grad, &curr_sd->massSparse, scratch1);
-
-                // iter_matrix_printf(m_grad, 1, curr_sd->freeAccDim, "m_grad_new");
 
                 // By now, m_grad actually has m_grad_new,
                 //         scratch2 has m_grad
@@ -3413,38 +3577,14 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                     [&](uint32_t iter) {
                         p[iter] = -m_grad[iter] + beta * p[iter];
                     });
-
-                // iter_matrix_printf(p, 1, curr_sd->freeAccDim, "p_new");
-
-#if 0
-                if (iter < 4) {
-                    warp_printf("beta=%f\n", beta);
-                    printMatrix(p, 1, curr_sd->freeAccDim, "p");
-                }
-#endif
             }
 
             curr_fun = new_fun;
         }
 
-#if 1
         if (lane_id == 0 && curr_sd->numRowsJc > 0) {
-            if (iter > 20) {
-                printf("world = %d; num CG iterations: %d; g_norm %f\n", world_id, iter, g_norm);
-            }
-
-#if 0
-            if (iter == 100) {
-                printf(
-                    "world_id = %d; num_iters = %d; g_norm = %f; g_dot_m_grad = %f;\n",
-                    world_id, iter, g_norm, g_dot_m_grad);
-                printf(
-                    "tol_scale (%f) * g_norm (%f) < ktolerance (%f)?\n",
-                    tol_scale, g_norm, kTolerance);
-            }
-#endif
+            printf("num_iters = %d (num_rows_jc = %d)\n", iter, curr_sd->numRowsJc);
         }
-#endif
 
         { // Now, we need to copy x into the right components
             auto get_bodies = [state_mgr](BodyGroupHierarchy &hier)
@@ -3515,7 +3655,13 @@ TaskGraph::NodeID GaussMinimizationNode::addToGraph(
                 32);
 
     cur_node = builder.addNodeFn<
-        &GaussMinimizationNode::computeAccRef>(data_id, {cur_node},
+        &GaussMinimizationNode::computeContactAccRef>(data_id, {cur_node},
+                Optional<TaskGraph::NodeID>::none(),
+                num_invocations,
+                32);
+
+    cur_node = builder.addNodeFn<
+        &GaussMinimizationNode::computeEqualityAccRef>(data_id, {cur_node},
                 Optional<TaskGraph::NodeID>::none(),
                 num_invocations,
                 32);
@@ -4904,8 +5050,8 @@ inline void brobdingnag(Context &ctx,
         cv_sing.diagApprox_c = diagApprox_c;
 #endif
 
-#if !defined(MADRONA_GPU_MODE)
         {
+#if !defined(MADRONA_GPU_MODE)
             // This gives us the start in the global array of generalized
             // velocities.
             block_start = (uint32_t *)ctx.tmpAlloc(
@@ -4924,15 +5070,21 @@ inline void brobdingnag(Context &ctx,
             uint32_t *row_start = (uint32_t *)ctx.tmpAlloc(
                     num_grps * sizeof(uint32_t));
             uint32_t row_offset = 0;
+#endif
+
             uint32_t total_num_rows = 0;
 
             for (uint32_t i = 0; i < num_grps; ++i) {
+#if !defined(MADRONA_GPU_MODE)
                 row_start[i] = row_offset;
                 row_offset += hiers[i].numEqualityRows;
+#endif
 
+                // In gpu mode, just calcualte total num rows
                 total_num_rows += hiers[i].numEqualityRows;
             }
 
+#if !defined(MADRONA_GPU_MODE)
             float *J_e = (float *)ctx.tmpAlloc(
                     total_num_rows * total_num_dofs * sizeof(float));
             memset(J_e, 0, total_num_rows * total_num_dofs * sizeof(float));
@@ -4998,12 +5150,12 @@ inline void brobdingnag(Context &ctx,
             }
 
             cv_sing.J_e = J_e;
-            cv_sing.numRowsJe = total_num_rows;
-            cv_sing.numColsJe = total_num_dofs;
             cv_sing.eqResiduals = residuals;
             cv_sing.diagApprox_e = diagApprox_e;
-        }
 #endif
+            cv_sing.numRowsJe = total_num_rows;
+            cv_sing.numColsJe = total_num_dofs;
+        }
 
         cv_sing.totalNumDofs = total_num_dofs;
         cv_sing.numContactPts = total_contact_pts;
