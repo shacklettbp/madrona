@@ -125,6 +125,10 @@ public:
     template <typename SingletonT>
     SingletonT * exportSingleton();
 
+    template <typename ArchetypeT, typename ComponentT>
+    ComponentT * getWorldComponents(
+        MADRONA_MW_COND(uint32_t world_id));
+
     void copyInExportedColumns();
     void copyOutExportedColumns();
 
@@ -218,6 +222,9 @@ public:
 
     void compactArchetype(MADRONA_MW_COND(uint32_t world_id,)
                           uint32_t archetype_id);
+
+    template <typename ArchetypeT>
+    inline CountT numRows(MADRONA_MW_COND(uint32_t world_id));
 
 private:
     template <typename SingletonT>

@@ -1060,9 +1060,6 @@ static void checkAndLoadBVHKernelCache(
     HeapArray<char> cache_data(num_cache_bytes);
     cache_file.read(cache_data.data(), cache_data.size());
 
-    size_t cur_cache_offset = 0;
-    size_t cache_remaining = cache_data.size();
-
     void *cubin_ptr = cache_data.data();
     size_t num_cubin_bytes = num_cache_bytes;
 
@@ -1320,6 +1317,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .timingInfo = timing_info,
         .raycastRGBD = (uint32_t)(render_mode == 
                 CudaBatchRenderConfig::RenderMode::RGBD),
+        .meshBVHData = {},
+        .materialData = {},
     };
 
     return bvh_kernels;
@@ -1496,6 +1495,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         .queueUserInit = nullptr,
         .queueUserRun = nullptr,
         .initBVHParams = nullptr,
+        .destroyECS = nullptr,
     };
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
@@ -1692,7 +1692,7 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
             uint64_t num_reserve_bytes = channel->reserveFree.numReserveBytes;
 
             if (verbose_host_alloc) {
-                printf("Unmapped %llu bytes from %p, and freed %llu reservation\n",
+                printf("Unmapped %lu bytes from %p, and freed %lu reservation\n",
                     num_bytes, ptr, num_reserve_bytes);
             }
 
@@ -2440,7 +2440,6 @@ MWCudaExecutor::~MWCudaExecutor()
 
     for (int i = 0; i < (int)fq->reserveToFree.size(); ++i) {
         void *ptr = fq->reserveToFree[i].addr;
-        uint64_t num_bytes = fq->reserveToFree[i].numBytes;
         uint64_t num_reserve_bytes = fq->reserveToFree[i].numReserveBytes;
 
         REQ_CU(cuMemUnmap((CUdeviceptr)ptr, num_reserve_bytes));
