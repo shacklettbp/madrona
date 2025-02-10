@@ -4030,13 +4030,12 @@ inline void computeInvMass(Context &ctx,
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < grp.numBodies; ++i_body) {
         Entity body = grp.bodies(ctx)[i_body];
-        auto tmp_state = ctx.get<DofObjectTmpState>(body);
         auto hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
         auto &dof_inertial = ctx.get<DofObjectInertial>(body);
 
         // Compute J
         memset(J, 0.f, 6 * grp.numDofs * sizeof(float));
-        computeBodyJacobian(ctx, grp, hier_desc, tmp_state.comPos, J, 0, 0, 6);
+        computeBodyJacobian(ctx, grp, hier_desc, grp.comPos, J, 0, 0, 6);
         // Helper
         auto Jb = [&](int32_t row, int32_t col) -> float& {
             return J[row + 6 * col];
@@ -4860,11 +4859,14 @@ inline void brobdingnag(Context &ctx,
             Entity ref = ctx.get<LinkParentDofObject>(contact.ref).parentDofObject;
             Entity alt = ctx.get<LinkParentDofObject>(contact.alt).parentDofObject;
 
-            // Diagonal approximation
+            // Diagonal approximation for contact is based on weight of body
             auto &ref_inertial = ctx.get<DofObjectInertial>(ref);
             auto &alt_inertial = ctx.get<DofObjectInertial>(alt);
-            float inv_weight = 1.f / (ref_inertial.approxInvMassTrans +
-                                      alt_inertial.approxInvMassTrans);
+            float inv_weight_trans = ref_inertial.approxInvMassTrans +
+                alt_inertial.approxInvMassTrans;
+            // Required for rolling friction
+            float inv_weight_rot = ref_inertial.approxInvMassRot +
+                alt_inertial.approxInvMassRot;
 
             // Each of the contact points
             for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
@@ -4892,7 +4894,7 @@ inline void brobdingnag(Context &ctx,
 
                 // Compute the diagonal approximation
                 diagApprox_c[jac_row] = diagApprox_c[jac_row + 1] =
-                    diagApprox_c[jac_row + 2] = inv_weight;
+                    diagApprox_c[jac_row + 2] = inv_weight_trans;
 
                 jac_row += 3;
             }
@@ -4974,7 +4976,7 @@ inline void brobdingnag(Context &ctx,
                         to_change[0] =
                             limit.hinge.dConstraintViolation(pos.q[0]);
                         residuals[glob_row_offset] = limit.hinge.constraintViolation(pos.q[0]);
-                        diagApprox_e[glob_row_offset] = 1.f / inertial.approxInvMassDof[0];
+                        diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
                     } break;
 
                     case DofObjectLimit::Type::Slider: {
@@ -4985,7 +4987,7 @@ inline void brobdingnag(Context &ctx,
                         to_change[0] =
                             limit.slider.dConstraintViolation(pos.q[0]);
                         residuals[glob_row_offset] = limit.slider.constraintViolation(pos.q[0]);
-                        diagApprox_e[glob_row_offset] = 1.f / inertial.approxInvMassDof[0];
+                        diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
                     } break;
 
                     default: {
