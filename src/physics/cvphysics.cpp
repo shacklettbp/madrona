@@ -4026,8 +4026,6 @@ inline void compositeRigidBody(Context &ctx,
 inline void compositeRigidBody(Context &ctx,
                                BodyGroupHierarchy &body_grp)
 {
-    StateManager *state_mgr = getStateManager(ctx);
-
     // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = body_grp.numDofs;
 
@@ -4103,9 +4101,6 @@ inline void compositeRigidBody(Context &ctx,
 // Computes the LTDL factorization of the mass matrix
 inline void factorizeMassMatrix(Context &ctx,
                                 BodyGroupHierarchy &body_grp) {
-    uint32_t world_id = ctx.worldID().idx;
-    StateManager *state_mgr = getStateManager(ctx);
-
     // First copy in the mass matrix
     uint32_t total_dofs = body_grp.numDofs;
 
@@ -4317,7 +4312,7 @@ inline void recursiveNewtonEuler(Context &ctx,
     //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
     //  2. accelerations. a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i}
     //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-    for (int i = 0; i < body_grp.numBodies; ++i) {
+    for (uint32_t i = 0; i < body_grp.numBodies; ++i) {
         Entity body = body_grp.bodies(ctx)[i];
 
         auto num_dofs = ctx.get<DofObjectNumDofs>(body);
@@ -4341,8 +4336,8 @@ inline void recursiveNewtonEuler(Context &ctx,
             tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
 
             // S\dot{q_i} and \dot{S}\dot{q_i}
-            for (int j = 0; j < 6; ++j) {
-                for (int k = 0; k < num_dofs.numDofs; ++k) {
+            for (uint32_t j = 0; j < 6; ++j) {
+                for (uint32_t k = 0; k < num_dofs.numDofs; ++k) {
                     tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
                     tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
                 }
@@ -4705,23 +4700,12 @@ inline void brobdingnag(Context &ctx,
 
         memset(J_c, 0, J_rows * J_cols * sizeof(float));
 
-        float *J_c_body_scratch = (float *)ctx.tmpAlloc(
-                3 * max_dofs * sizeof(float));
-
         for (CountT ct_idx = 0; ct_idx < num_contacts; ++ct_idx) {
             ContactConstraint contact = contacts[ct_idx];
             ContactTmpState &tmp_state = contacts_tmp_state[ct_idx];
 
             Entity ref = ctx.get<LinkParentDofObject>(contact.ref).parentDofObject;
             Entity alt = ctx.get<LinkParentDofObject>(contact.alt).parentDofObject;
-
-            auto &ref_num_dofs = ctx.get<DofObjectNumDofs>(ref);
-            auto &alt_num_dofs = ctx.get<DofObjectNumDofs>(alt);
-            uint32_t ref_parent_idx = ctx.get<DofObjectHierarchyDesc>(ref).parentIndex;
-            uint32_t alt_parent_idx = ctx.get<DofObjectHierarchyDesc>(alt).parentIndex;
-
-            bool ref_fixed = (ref_num_dofs.type == DofType::FixedBody && ref_parent_idx == -1);
-            bool alt_fixed = (alt_num_dofs.type == DofType::FixedBody && alt_parent_idx == -1);
 
             // Diagonal approximation
             auto &ref_inertial = ctx.get<DofObjectInertial>(ref);
@@ -4734,28 +4718,25 @@ inline void brobdingnag(Context &ctx,
                 Vector3 contact_pt = contact.points[pt_idx].xyz();
 
                 // Compute the Jacobians for each body at the contact point
-                // if(!ref_fixed) {
-                    DofObjectHierarchyDesc &ref_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                            ref);
-                    BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
-                            ref_hier_desc.bodyGroup);
+                DofObjectHierarchyDesc &ref_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                        ref);
+                BodyGroupHierarchy &ref_grp = ctx.get<BodyGroupHierarchy>(
+                        ref_hier_desc.bodyGroup);
 
-                    float *J_ref = computeContactJacobian(ctx, ref_grp,
-                        ref_hier_desc, tmp_state.C, contact_pt, J_c,
-                        block_start[ref_grp.tmpIdx0], jac_row, J_rows, -1.f,
-                        (ct_idx == 0 && pt_idx == 0));
-                // }
-                // if(!alt_fixed) {
-                    auto &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
-                            alt);
-                    auto &alt_grp = ctx.get<BodyGroupHierarchy>(
-                            alt_hier_desc.bodyGroup);
+                computeContactJacobian(ctx, ref_grp,
+                    ref_hier_desc, tmp_state.C, contact_pt, J_c,
+                    block_start[ref_grp.tmpIdx0], jac_row, J_rows, -1.f,
+                    (ct_idx == 0 && pt_idx == 0));
+                auto &alt_hier_desc = ctx.get<DofObjectHierarchyDesc>(
+                        alt);
+                auto &alt_grp = ctx.get<BodyGroupHierarchy>(
+                        alt_hier_desc.bodyGroup);
 
-                    float *J_alt = computeContactJacobian(ctx, alt_grp,
-                        alt_hier_desc, tmp_state.C, contact_pt, J_c,
-                        block_start[alt_grp.tmpIdx0], jac_row, J_rows, 1.f,
-                        (ct_idx == 0 && pt_idx == 0));
-                // }
+                computeContactJacobian(ctx, alt_grp,
+                    alt_hier_desc, tmp_state.C, contact_pt, J_c,
+                    block_start[alt_grp.tmpIdx0], jac_row, J_rows, 1.f,
+                    (ct_idx == 0 && pt_idx == 0));
+
                 // Compute the diagonal approximation
                 diagApprox_c[jac_row] = diagApprox_c[jac_row + 1] =
                     diagApprox_c[jac_row + 2] = inv_weight;
@@ -4772,9 +4753,9 @@ inline void brobdingnag(Context &ctx,
         {
             // This gives us the start in the global array of generalized
             // velocities.
-            uint32_t *block_start = (uint32_t *)ctx.tmpAlloc(
+            block_start = (uint32_t *)ctx.tmpAlloc(
                     num_grps * sizeof(uint32_t));
-            uint32_t block_offset = 0;
+            block_offset = 0;
 
             for (CountT i = 0; i < num_grps; ++i) {
                 block_start[i] = block_offset;
@@ -5451,6 +5432,10 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
             ext_force.force[i] = 0.f;
         }
     } break;
+
+    case DofType::None: {
+        assert(false);
+    } break;
     }
 
     ctx.get<DofObjectNumDofs>(physical_entity) = {
@@ -5537,7 +5522,7 @@ void attachCollision(
         desc.offset,
         desc.rotation,
         desc.scale,
-        render_entity
+        render_entity,
     };
 
     printf("Body %d has rigid body %d attached obj=%d\n",
@@ -5574,6 +5559,7 @@ void attachVisual(
         desc.offset,
         desc.rotation,
         desc.scale,
+        Entity::none(),
     };
 }
 
@@ -5932,6 +5918,10 @@ Entity loadModel(Context &ctx,
                         grp,
                         bodies_tmp[limit.bodyIdx],
                         limit.slider);
+            } break;
+
+            default: {
+                assert(false);
             } break;
             }
         }
