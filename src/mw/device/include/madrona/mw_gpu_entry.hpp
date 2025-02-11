@@ -1,7 +1,5 @@
 #pragma once
 
-#include "bvh.hpp"
-
 #include <madrona/taskgraph.hpp>
 #include <madrona/memory.hpp>
 #include <madrona/mw_gpu/host_print.hpp>

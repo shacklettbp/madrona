@@ -547,12 +547,11 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
 
     (void)mortoncode_update;
 
-#ifdef MADRONA_GPU_MODE
     // Need to sort the instances, as well as the views
 
     // Need to sort by worlds first to handle deleted RenderableArchetypes
     auto sort_instances_by_world1 = 
-        builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
+        builder.addToGraph<CompactArchetypeNode<RenderableArchetype>>(
             {mortoncode_update});
 
     // Then sort by morton
@@ -560,13 +559,13 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
         builder.addToGraph<SortArchetypeNode<RenderableArchetype, MortonCode>>(
             {sort_instances_by_world1});
 
+    auto post_instance_sort_reset_tmp =
+        builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_morton});
+
     // Then sort by world again to group up by world
     auto sort_instances_by_world2 = 
-        builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
-            {sort_instances_by_morton});
-
-    auto post_instance_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_world2});
+        builder.addToGraph<CompactArchetypeNode<RenderableArchetype>>(
+            {post_instance_sort_reset_tmp});
 
 #if 0
     auto sort_views = 
@@ -574,32 +573,28 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             {post_instance_sort_reset_tmp});
 #endif
 
-    auto sort_views_world = builder.addToGraph<SortArchetypeNode<
-        RenderCameraArchetype, WorldID>>(
-                {post_instance_sort_reset_tmp});
+    auto sort_views_world = builder.addToGraph<
+        CompactArchetypeNode<RenderCameraArchetype>>(
+            {sort_instances_by_world2});
 
     auto sort_views_index = builder.addToGraph<SortArchetypeNode<
-        RenderCameraArchetype, RenderOutputIndex>>(
-                {sort_views_world});
+        RenderCameraArchetype, RenderOutputIndex>>({sort_views_world});
 
     auto post_view_sort_reset_tmp =
         builder.addToGraph<ResetTmpAllocNode>({sort_views_index});
 
-    auto sort_lights_world = builder.addToGraph<SortArchetypeNode<
-        LightArchetype, WorldID>>(
-                {post_view_sort_reset_tmp});
+    auto sort_lights_world = builder.addToGraph<CompactArchetypeNode<
+        LightArchetype>>({post_view_sort_reset_tmp});
 
-    auto post_light_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_lights_world});
-
+#ifdef MADRONA_GPU_MODE
     auto export_counts = builder.addToGraph<ParallelForNode<Context,
         exportCountsGPU,
             RenderingSystemState
-        >>({post_light_sort_reset_tmp});
+        >>({sort_lights_world});
 
     return export_counts;
 #else
-    return viewdata_update;
+    return sort_lights_world;
 #endif
 }
 
