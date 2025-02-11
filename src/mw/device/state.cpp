@@ -703,3 +703,10 @@ void StateManager::freeTables()
 }
 
 }
+
+extern "C" __global__ void freeECSTables()
+{
+    using namespace madrona;
+    StateManager *mgr = mwGPU::getStateManager();
+    mgr->freeTables();
+}

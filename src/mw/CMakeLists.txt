@@ -70,6 +70,7 @@ set(TASK_GRAPH_DEVICE_SOURCES
     ${DEVICE_SRC_DIR}/taskgraph_utils.cpp
     ${DEVICE_SRC_DIR}/sort_archetype.cpp
     ${DEVICE_SRC_DIR}/host_print.cpp
+    ${DEVICE_SRC_DIR}/ecs_render_bridge.cpp
     # FIXME
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/hashmap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/navmesh.cpp

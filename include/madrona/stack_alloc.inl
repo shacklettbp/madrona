@@ -64,7 +64,8 @@ void * StackAlloc::alloc(CountT num_bytes, CountT alignment)
         alloc_size = chunk_size_;
     }
 
-    char *new_chunk = StackAlloc::newChunk(alloc_size, 256);
+    char *new_chunk = StackAlloc::newChunk(
+        alloc_size, std::max(alignment, (CountT)chunk_size_));
 
     if (first_chunk_ == nullptr) {
       first_chunk_ = new_chunk;
