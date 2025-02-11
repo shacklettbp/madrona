@@ -268,27 +268,6 @@ struct ResetTmpAllocNode : NodeBase {
         Span<const TaskGraph::NodeID> dependencies);
 };
 
-struct CompactArchetypeNodeBase : NodeBase {
-    CompactArchetypeNodeBase(uint32_t archetype_id);
-
-    void run(int32_t invocation_idx);
-    uint32_t numInvocations();
-
-    static TaskGraph::NodeID addToGraph(
-        TaskGraph::Builder &builder,
-        Span<const TaskGraph::NodeID> dependencies,
-        uint32_t archetype_id);
-
-    uint32_t archetypeID;
-};
-
-template <typename ArchetypeT>
-struct CompactArchetypeNode : CompactArchetypeNodeBase {
-    static TaskGraph::NodeID addToGraph(
-        TaskGraph::Builder &builder,
-        Span<const TaskGraph::NodeID> dependencies);
-};
-
 struct SortArchetypeNodeBase : NodeBase {
     struct RadixSortOnesweepCustom;
 
@@ -389,6 +368,13 @@ struct SortArchetypeNodeBase : NodeBase {
 
 template <typename ArchetypeT, typename ComponentT>
 struct SortArchetypeNode : SortArchetypeNodeBase {
+    static TaskGraph::NodeID addToGraph(
+        TaskGraph::Builder &builder,
+        Span<const TaskGraph::NodeID> dependencies);
+};
+
+template <typename ArchetypeT>
+struct CompactArchetypeNode {
     static TaskGraph::NodeID addToGraph(
         TaskGraph::Builder &builder,
         Span<const TaskGraph::NodeID> dependencies);

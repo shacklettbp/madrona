@@ -165,6 +165,58 @@ public:
         Span<const TaskGraphNodeID> dependencies);
 };
 
+class SortArchetypeNodeBase : public NodeBase {
+public:
+    SortArchetypeNodeBase(uint32_t archetype_id,
+                          uint32_t component_id);
+
+    void run(Context &ctx, TaskGraph &taskgraph);
+
+    static TaskGraphNodeID addToGraph(
+        StateManager &state_mgr,
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> dependencies,
+        uint32_t archetype_id,
+        uint32_t component_id);
+
+private:
+    uint32_t archetype_id_;
+    uint32_t component_id_;
+};
+
+template <typename ArchetypeT, typename ComponentT>
+class SortArchetypeNode : public SortArchetypeNodeBase {
+public:
+    static TaskGraphNodeID addToGraph(
+        StateManager &state_mgr,
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> dependencies);
+};
+
+class CompactArchetypeNodeBase : public NodeBase {
+public:
+    CompactArchetypeNodeBase(uint32_t archetype_id);
+
+    void run(Context &ctx, TaskGraph &taskgraph);
+
+    static TaskGraphNodeID addToGraph(
+        StateManager &state_mgr,
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> dependencies,
+        uint32_t archetype_id);
+
+private:
+    uint32_t archetype_id_;
+};
+
+template <typename ArchetypeT>
+class CompactArchetypeNode : public CompactArchetypeNodeBase {
+public:
+    static TaskGraphNodeID addToGraph(
+        StateManager &state_mgr,
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> dependencies);
+};
 
 }
 

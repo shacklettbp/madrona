@@ -349,6 +349,47 @@ ComponentT & StateManager::getUnsafe(
     return col[loc.row];
 }
 
+template <typename ArchetypeT, typename ComponentT>
+ComponentT *StateManager::getWorldComponents(
+        MADRONA_MW_COND(uint32_t world_id))
+{
+    uint32_t archetype_id = archetypeID<ArchetypeT>().id;
+
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id];
+    auto col_idx =
+        *archetype.columnLookup.lookup(componentID<ComponentT>().id);
+
+    auto col = archetype.tblStorage.column<ComponentT>(
+        MADRONA_MW_COND(world_id,) col_idx);
+
+    return col;
+}
+
+template <typename ArchetypeT>
+Entity * StateManager::getWorldEntities(
+        MADRONA_MW_COND(uint32_t world_id))
+{
+    uint32_t archetype_id = archetypeID<ArchetypeT>().id;
+
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id];
+    auto col_idx = 0;
+
+    auto col = archetype.tblStorage.column<Entity>(
+        MADRONA_MW_COND(world_id,) col_idx);
+
+    return col;
+}
+
+template <typename ArchetypeT>
+inline CountT StateManager::numRows(MADRONA_MW_COND(uint32_t world_id))
+{
+    uint32_t archetype_id = archetypeID<ArchetypeT>().id;
+
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id];
+
+    return archetype.tblStorage.numRows(MADRONA_MW_COND(world_id));
+}
+
 template <typename ComponentT>
 inline ComponentT & StateManager::getDirect(MADRONA_MW_COND(uint32_t world_id,)
                                             CountT col_idx,
