@@ -129,6 +129,10 @@ public:
     ComponentT * getWorldComponents(
         MADRONA_MW_COND(uint32_t world_id));
 
+    template <typename ArchetypeT>
+    Entity * getWorldEntities(
+        MADRONA_MW_COND(uint32_t world_id));
+
     void copyInExportedColumns();
     void copyOutExportedColumns();
 
