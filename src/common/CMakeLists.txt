@@ -164,6 +164,15 @@ if (CUDAToolkit_FOUND)
     target_compile_definitions(madrona_cuda
         PUBLIC
             MADRONA_CUDA_SUPPORT=1
+
+            # CCCL is bugged and will define __sanitizer_annotate_contiguous_container
+            # with visibility hidden if ASAN is detected. This is a problem because
+            # address sanitizer actually provides this symbol with default visibility.
+            # This causes linker failures if compiling a shared object, since the
+            # linker needs to find a definition for undefined hidden symbols, but
+            # ASAN is expecting to provide that definition at runtime (for example
+            # in a preloaded shared-libasan, or linked into the executable
+            _LIBCUDACXX_HAS_NO_ASAN=1
     )
 
     target_link_libraries(madrona_cuda
