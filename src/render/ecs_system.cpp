@@ -127,15 +127,13 @@ inline void instanceTransformUpdate(Context &ctx,
         ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
 
     InstanceData &data = system_state.instancesCPU[instance_id];
+    data = ctx.get<InstanceData>(renderable.renderEntity);
+
 #endif
 
     data.position = pos;
     data.rotation = rot;
     data.scale = scale;
-
-    // Leave it to what is was previously
-    // data.matID = -1;
-    // data.color = 0;
 
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
