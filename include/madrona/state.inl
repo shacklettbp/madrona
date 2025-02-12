@@ -559,6 +559,9 @@ Loc StateManager::makeTemporary(MADRONA_MW_COND(uint32_t world_id,)
     CountT new_row = archetype.tblStorage.addRow(
         MADRONA_MW_COND(world_id));
 
+    archetype.tblStorage.column<Entity>(
+        MADRONA_MW_COND(world_id,) 0)[new_row] = Entity { 0, 0 };
+
     return Loc {
         archetype_id,
         int32_t(new_row),
