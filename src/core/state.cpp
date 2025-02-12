@@ -757,7 +757,9 @@ void StateManager::compactArchetype(
 
         entity_store_.setRow(e, new_row_idx);
 
-        for (uint32_t col_idx = 0; col_idx < num_cols; col_idx++) {
+        for (uint32_t col_idx = 0;
+                col_idx < num_cols + user_component_offset_;
+                col_idx++) {
             uint32_t num_bytes = tbl.columnNumBytes(col_idx);
             memcpy(tbl.getValue(col_idx, new_row_idx),
                    tbl.getValue(col_idx, orig_row_idx),
