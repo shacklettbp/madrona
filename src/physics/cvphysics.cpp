@@ -4031,11 +4031,12 @@ inline void computeInvMass(Context &ctx,
     for (CountT i_body = 0; i_body < grp.numBodies; ++i_body) {
         Entity body = grp.bodies(ctx)[i_body];
         auto hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
+        auto tmp_state = ctx.get<DofObjectTmpState>(body);
         auto &dof_inertial = ctx.get<DofObjectInertial>(body);
 
         // Compute J
         memset(J, 0.f, 6 * grp.numDofs * sizeof(float));
-        computeBodyJacobian(ctx, grp, hier_desc, grp.comPos, J, 0, 0, 6);
+        computeBodyJacobian(ctx, grp, hier_desc, tmp_state.comPos, J, 0, 0, 6);
         // Helper
         auto Jb = [&](int32_t row, int32_t col) -> float& {
             return J[row + 6 * col];
@@ -4055,9 +4056,10 @@ inline void computeInvMass(Context &ctx,
         }
         // M^{-1} J^T
         for (CountT i = 0; i < 6; ++i) {
-            float *col = MinvJT + i * 6;
+            float *col = MinvJT + i * grp.numDofs;
             solveM(ctx, grp, col);
         }
+
         // A = J M^{-1} J^T
         memset(A, 0.f, 36 * sizeof(float));
         for (CountT i = 0; i < 6; ++i) {
@@ -4067,6 +4069,7 @@ inline void computeInvMass(Context &ctx,
                 }
             }
         }
+
         // Compute the inverse weight
         dof_inertial.approxInvMassTrans = (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
         dof_inertial.approxInvMassRot = (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
@@ -4080,7 +4083,6 @@ inline void computeInvMass(Context &ctx,
         auto &dof_inertial = ctx.get<DofObjectInertial>(body);
 
         // Jacobian size (body dofs x total dofs)
-        memset(J, 0.f, body_dofs.numDofs * grp.numDofs * sizeof(float));
         auto Jd = [&](int32_t row, int32_t col) -> float& {
             return J[row + body_dofs.numDofs * col];
         };
@@ -4094,6 +4096,7 @@ inline void computeInvMass(Context &ctx,
         };
 
         // Fill in 1 for the corresponding body dofs
+        memset(J, 0.f, 6 * grp.numDofs * sizeof(float));
         for (CountT i = 0; i < body_dofs.numDofs; ++i) {
             Jd(i, i + dof_offset) = 1.f;
         }
