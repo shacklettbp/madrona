@@ -50,6 +50,7 @@ float HingeLimit::constraintViolation(float q)
 {
     float c1 = q - lower;
     float c2 = upper - q;
+
     if (c1 < 0.f) {
         return c1;
     } else if (c2 < 0.f) {
