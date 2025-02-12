@@ -454,8 +454,10 @@ void StateManager::iterateArchetypesImpl(MADRONA_MW_COND(uint32_t world_id,)
 
         // FIXME: column API sucks here, hopefully the compiler can
         // do common subexpression elimination on the world_id index...
-        fn(num_rows, archetype.tblStorage.column<ComponentTs>(
-            MADRONA_MW_COND(world_id,) cur_query_ptr[Indices]) ...);
+        fn(num_rows, archetype.tblStorage.column<Entity>( 
+                MADRONA_MW_COND(world_id,) 0),
+            archetype.tblStorage.column<ComponentTs>(
+                MADRONA_MW_COND(world_id,) cur_query_ptr[Indices]) ...);
 
         cur_query_ptr += sizeof...(ComponentTs);
     }
@@ -466,8 +468,12 @@ void StateManager::iterateQuery(MADRONA_MW_COND(uint32_t world_id,)
                                    const Query<ComponentTs...> &query, Fn &&fn)
 {
     iterateArchetypes(MADRONA_MW_COND(world_id,) query, 
-            [&fn](int num_rows, auto ...ptrs) {
+            [&fn](int num_rows, Entity *entities, auto ...ptrs) {
         for (int i = 0; i < num_rows; i++) {
+            if (entities[i] == Entity::none()) {
+              continue;
+            }
+
             fn(ptrs[i] ...);
         }
     });
