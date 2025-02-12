@@ -1568,7 +1568,8 @@ struct GaussMinimizationNode : NodeBase {
             float *vel,
             uint32_t vel_dim,
             float h,
-            Fn &&residual_fn);
+            Fn &&residual_fn,
+            bool dbg = false);
 
     void prepareRegInfos(CVSolveData *sd);
 
@@ -2209,12 +2210,17 @@ float GaussMinimizationNode::exactLineSearch(
 
     float *Jep = scratch;
     { // Calculate Je @ p
+        // printMatrix(p, 1, sd->freeAccDim, "p");
+        // printMatrix<true>(sd->J_e, sd->numRowsJe, sd->numColsJe, "J_e");
         gmmaWarpSmallReg<float, 4, true, false, true>(
-            Jp, sd->J_e, p,
+            Jep, sd->J_e, p,
             sd->numRowsJe, sd->numColsJe,
             sd->numColsJe, 1);
     }
     __syncwarp();
+
+    // printMatrix(jaccref_eq, 1, sd->numRowsJe, "Jaccref_eq");
+    // printMatrix(Jep, 1, sd->numRowsJe, "Jep");
 
     // function, first deriv and second deriv evals
     struct Evals {
@@ -3004,6 +3010,14 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                 uint32_t glob_col_offset = world_block_start[body_grp.tmpIdx0] +
                                            tmp_state.dofOffset;
 
+#if 0
+                printf(
+                    "Body with dof offset %d has (glob_row_offset = %d; glob_col_offset = %d)\n",
+                    tmp_state.dofOffset,
+                    glob_row_offset,
+                    glob_col_offset);
+#endif
+
                 switch (limit.type) {
                 case DofObjectLimit::Type::Hinge: {
                     float *to_change = j_e +
@@ -3122,7 +3136,8 @@ void GaussMinimizationNode::computeAccRef(
         float *vel,
         uint32_t vel_dim,
         float h,
-        Fn &&fn)
+        Fn &&fn,
+        bool dbg)
 {
     using namespace gpu_utils;
 
@@ -3133,6 +3148,14 @@ void GaussMinimizationNode::computeAccRef(
                     width = 0.001f,
                     mid = 0.5f,
                     power = 2.f;
+
+    if (dbg) {
+        printMatrix<true>(
+                j_mat,
+                num_rows_j,
+                num_cols_j,
+                "J_e");
+    }
 
     // First store J @ v
     gmmaWarpSmallReg<float, 4, true, false, true>(
@@ -3451,6 +3474,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                        acc_ref_cont, acc_ref_eq,
                        false);
         __syncwarp();
+
+        // printMatrix(m_grad, 1, curr_sd->freeAccDim, "m_grad0");
 
         float curr_fun = objWarp(x, curr_sd, jaccref_cont, jaccref_eq, mxmin);
         __syncwarp();
@@ -5118,6 +5143,14 @@ inline void brobdingnag(Context &ctx,
                                                limit.rowOffset;
                     uint32_t glob_col_offset = block_start[grp_idx] +
                                                tmp_state.dofOffset;
+
+#if 0
+                    printf(
+                        "Body with dof offset %d has (glob_row_offset = %d; glob_col_offset = %d)\n",
+                        tmp_state.dofOffset,
+                        glob_row_offset,
+                        glob_col_offset);
+#endif
 
                     switch (limit.type) {
                     case DofObjectLimit::Type::Hinge: {
