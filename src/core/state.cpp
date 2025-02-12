@@ -738,7 +738,8 @@ void StateManager::compactArchetype(
     Entity *entity_col = (Entity *)tbl.data(0);
 
     uint32_t num_rows = tbl.numRows();
-    uint32_t num_cols = archetype_store.numComponents;
+    uint32_t num_cols = archetype_store.numComponents +
+                        user_component_offset_;
     uint32_t num_compacted_rows = 0;
 
     for (uint32_t orig_row_idx = 0; orig_row_idx < num_rows; orig_row_idx++) {
@@ -757,9 +758,7 @@ void StateManager::compactArchetype(
 
         entity_store_.setRow(e, new_row_idx);
 
-        for (uint32_t col_idx = 0;
-                col_idx < num_cols + user_component_offset_;
-                col_idx++) {
+        for (uint32_t col_idx = 0; col_idx < num_cols; col_idx++) {
             uint32_t num_bytes = tbl.columnNumBytes(col_idx);
             memcpy(tbl.getValue(col_idx, new_row_idx),
                    tbl.getValue(col_idx, orig_row_idx),
