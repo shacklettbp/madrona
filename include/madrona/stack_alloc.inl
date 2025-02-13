@@ -58,7 +58,7 @@ void * StackAlloc::alloc(CountT num_bytes, CountT alignment)
     // round up to chunk_size_ multiple and still use leftover bytes?
     CountT alloc_size;
     if (new_offset > chunk_size_) [[unlikely]] {
-        alloc_size = new_offset;
+        alloc_size = utils::roundUpPow2(new_offset, chunk_size_);
         new_offset = chunk_size_;
     } else {
         alloc_size = chunk_size_;
