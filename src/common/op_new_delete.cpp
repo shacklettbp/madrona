@@ -12,7 +12,8 @@ inline void * opNewImpl(size_t num_bytes) noexcept
     void *ptr = rawAlloc(num_bytes);
     if (!ptr) [[unlikely]] {
         fprintf(stderr, "OOM: %zu\n", num_bytes);
-        exit(EXIT_FAILURE);
+        fflush(stderr);
+        std::abort();
     }
 
     return ptr;
@@ -33,8 +34,9 @@ inline void * opNewAlignImpl(size_t num_bytes, std::align_val_t al) noexcept
     static_assert(sizeof(al) == sizeof(size_t));
     void *ptr = rawAllocAligned(num_bytes, alignment);
     if (!ptr) [[unlikely]] {
-        fprintf(stderr, "OOM: %zu\n", num_bytes);
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "OOM: %zu %zu\n", num_bytes, (size_t)al);
+        fflush(stderr);
+        std::abort();
     }
 
     return ptr;
