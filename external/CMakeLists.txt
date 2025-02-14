@@ -50,6 +50,8 @@ elseif (MADRONA_ANDROID)
 endif ()
 
 add_subdirectory(tinyxml2 EXCLUDE_FROM_ALL)
+set_property(TARGET tinyxml2 PROPERTY
+  POSITION_INDEPENDENT_CODE TRUE)
 
 add_subdirectory(meshoptimizer EXCLUDE_FROM_ALL)
 set_property(TARGET meshoptimizer PROPERTY

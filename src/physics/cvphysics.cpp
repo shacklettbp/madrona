@@ -5876,9 +5876,6 @@ void attachCollision(
         desc.scale,
         render_entity,
     };
-
-    printf("Body %d has rigid body %d attached obj=%d\n",
-            hier_desc.index, col_obj.id, desc.objID);
 }
 
 void attachVisual(
@@ -5931,8 +5928,10 @@ void attachLimit(Context &ctx,
 
 
 
+#if 0
     DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);
     pos.q[0] = limit.hinge.upper;
+#endif
 }
 
 void attachLimit(Context &ctx,
@@ -5950,8 +5949,10 @@ void attachLimit(Context &ctx,
     hier.numEqualityRows += 1;
 
 
+#if 0
     DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);
     pos.q[0] = limit.hinge.upper;
+#endif
 }
 
 void setColliderVisualizer(
@@ -6255,7 +6256,6 @@ Entity loadModel(Context &ctx,
 
             switch (limit.type) {
             case DofType::Hinge: {
-                printf("Attaching hinge limit\n");
                 attachLimit(
                         ctx, 
                         grp,
@@ -6264,7 +6264,6 @@ Entity loadModel(Context &ctx,
             } break;
 
             case DofType::Slider: {
-                printf("Attaching slider limit\n");
                 attachLimit(
                         ctx, 
                         grp,

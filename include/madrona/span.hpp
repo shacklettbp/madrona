@@ -39,6 +39,7 @@ public:
           n_(N)
     {}
 
+#ifndef MADRONA_GPU_MODE
     template <typename U>
     Span(const std::vector<U> &vec)
             requires(std::is_same_v<std::remove_cv_t<T>,
@@ -46,6 +47,7 @@ public:
         : ptr_(vec.data()),
           n_(vec.size())
     {}
+#endif
 
     // GCC correctly warns that the below constructor is dangerous, but it's
     // convenient as long as the Span doesn't outlive the current expression
