@@ -6,12 +6,14 @@
 #define MADRONA_DEBUG_TEST_NUM_LEAVES 11
 #define MADRONA_TREELET_SIZE 7
 
-#include <algorithm>
 #include <madrona/bvh.hpp>
 #include <madrona/math.hpp>
 #include <madrona/memory.hpp>
 #include <madrona/mesh_bvh.hpp>
 #include <madrona/mw_gpu/host_print.hpp>
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 #define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
 
@@ -850,10 +852,10 @@ extern "C" __global__ void bvhBuildFast()
         }
 
         int32_t split_index = tn_offset + rel_split_offset * direction +
-            std::min(direction, 0);
+            MIN(direction, 0);
 
-        int32_t left_index = std::min(tn_offset, other_end);
-        int32_t right_index = std::max(tn_offset, other_end);
+        int32_t left_index = MIN(tn_offset, other_end);
+        int32_t right_index = MAX(tn_offset, other_end);
 
         if (left_index == split_index) {
             // The left node is a leaf and the leaf's index is split_index
@@ -961,7 +963,7 @@ extern "C" __global__ void bvhConstructAABBs()
 
         // If the value before the add is 0, then we are the first to hit this node.
         // => we need to break out of the loop.
-        while (current->reachedCount.fetch_add_release(1) == 1) {
+        while (current->reachedCount.fetch_add_acq_rel(1) == 1) {
             // Merge the AABBs of the children nodes. (Store like this for now to
             // help when we make the tree 4 wide or 8 wide.
             LBVHNode *children[2];

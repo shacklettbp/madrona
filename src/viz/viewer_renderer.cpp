@@ -2928,9 +2928,24 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
                 draw_descriptors.data(),
                 0, nullptr);
 
+#if 0
         DrawPushConst draw_const {
             (uint32_t)view_idx,
             world_idx
+        };
+#endif
+
+        DrawPushConst draw_const {
+            (uint32_t)view_idx,
+            world_idx,
+
+            0,  // Is orthographic
+            30.0f, // x max
+            -30.0f, // x min
+            40.0f, // y max
+            -40.0f, // y min
+            30.0f, // z max
+            -30.0f  // z min
         };
 
         dev.dt.cmdPushConstants(draw_cmd, objectShadowDraw.layout,
@@ -3031,7 +3046,15 @@ bool ViewerRendererState::renderFlycamFrame(const ViewerControl &viz_ctrl)
 
     DrawPushConst draw_const {
         (uint32_t)view_idx,
-        world_idx
+        world_idx,
+
+        0,  // Is orthographic
+        60.0f, // x max
+        -60.0f, // x min
+        80.0f, // y max
+        -80.0f, // y min
+        60.0f, // z max
+        -60.0f  // z min
     };
 
     dev.dt.cmdPushConstants(draw_cmd, rctx.objectDraw.layout,

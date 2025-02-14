@@ -70,52 +70,6 @@ struct TensorInterface {
     Span<const int64_t> dimensions;
 };
 
-struct NamedTensorInterface {
-    const char *name;
-    TensorInterface interface;
-};
-
-struct TrainStepInputInterface {
-    TensorInterface actions;
-    TensorInterface resets;
-    Span<const NamedTensorInterface> pbt = {};
-};
-
-struct TrainStepOutputInterface {
-    Span<const NamedTensorInterface> observations;
-    TensorInterface rewards;
-    TensorInterface dones;
-    Span<const NamedTensorInterface> stats = {};
-    Span<const NamedTensorInterface> pbt = {};
-};
-
-struct TrainCheckpointingInterface {
-    TensorInterface checkpointData;
-};
-
-class TrainInterface {
-public:
-    TrainInterface(TrainStepInputInterface step_inputs,
-                   TrainStepOutputInterface step_outputs,
-                   Optional<TrainCheckpointingInterface> checkpointing = 
-                       Optional<TrainCheckpointingInterface>::none());
-    TrainInterface(TrainInterface &&o);
-    ~TrainInterface();
-
-    TrainStepInputInterface stepInputs() const;
-    TrainStepOutputInterface stepOutputs() const;
-    Optional<TrainCheckpointingInterface> checkpointing() const;
-
-private:
-    struct Impl;
-
-#ifdef MADRONA_LINUX
-    virtual void key_();
-#endif
-
-    std::unique_ptr<Impl> impl_;
-};
-
 class Tensor final {
 public:
     static inline constexpr int64_t maxDimensions = 16;
@@ -185,5 +139,62 @@ private:
     int64_t num_dimensions_;
     std::array<int64_t, maxDimensions> dimensions_;
 };
+
+struct NamedTensor {
+    const char *name;
+    Tensor tensor;
+};
+
+struct TrainStepInputInterface {
+    Span<const NamedTensor> actions;
+    Tensor resets;
+    Tensor simCtrl;
+    Span<const NamedTensor> pbt = {};
+};
+
+struct TrainStepOutputInterface {
+    Span<const NamedTensor> observations;
+    Tensor rewards;
+    Tensor dones;
+    Span<const NamedTensor> stats = {};
+    Span<const NamedTensor> pbt = {};
+};
+
+struct TrainCheckpointingInterface {
+    Tensor checkpointData;
+};
+
+class TrainInterface {
+public:
+    TrainInterface();
+    TrainInterface(TrainStepInputInterface step_inputs,
+                   TrainStepOutputInterface step_outputs,
+                   Optional<TrainCheckpointingInterface> checkpointing = 
+                       Optional<TrainCheckpointingInterface>::none());
+    TrainInterface(TrainInterface &&o);
+    ~TrainInterface();
+
+    TrainInterface & operator=(TrainInterface &&o);
+
+    TrainStepInputInterface stepInputs() const;
+    TrainStepOutputInterface stepOutputs() const;
+    Optional<TrainCheckpointingInterface> checkpointing() const;
+
+#ifdef MADRONA_CUDA_SUPPORT
+    void ** cudaCopyStepInputs(cudaStream_t strm, void **buffers);
+    void cudaCopyObservations(cudaStream_t strm, void **buffers);
+    void cudaCopyStepOutputs(cudaStream_t strm, void **buffers);
+#endif
+
+private:
+    struct Impl;
+
+#ifdef MADRONA_LINUX
+    virtual void key_();
+#endif
+
+    std::unique_ptr<Impl> impl_;
+};
+
 
 }

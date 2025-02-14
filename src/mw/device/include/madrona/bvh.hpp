@@ -113,13 +113,22 @@ struct KernelTimingInfo {
 
 struct BVHParams {
     uint32_t numWorlds;
+
     render::InstanceData *instances;
     render::PerspectiveCameraData *views;
+    render::LightDesc *lights;
+
     render::TLBVHNode *aabbs;
+
     int32_t *instanceOffsets;
     int32_t *instanceCounts;
+
     int32_t *viewOffsets;
     int32_t *viewCounts;
+
+    int32_t *lightOffsets;
+    int32_t *lightCounts;
+
     uint32_t *mortonCodes;
     BVHInternalData *internalData;
 

@@ -42,7 +42,8 @@ SamplerState linearSampler;
 
 struct V2F {
     [[vk::location(0)]] float2 uv : TEXCOORD0;
-    [[vk::location(1)]] uint materialIdx : TEXCOORD1;
+    [[vk::location(1)]] int materialIdx : TEXCOORD1;
+    [[vk::location(2)]] uint color : TEXCOORD2;
 };
 
 float4 composeQuats(float4 a, float4 b)
@@ -108,12 +109,16 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     const float4 d0 = packed.data[0];
     const float4 d1 = packed.data[1];
     const float4 d2 = packed.data[2];
+    const float4 d3 = packed.data[3];
 
     EngineInstanceData o;
     o.position = d0.xyz;
     o.rotation = float4(d1.xyz, d0.w);
     o.scale = float3(d1.w, d2.xy);
-    o.objectID = asint(d2.z);
+    o.matID = asint(d2.z);
+    o.objectID = asint(d2.w);
+    o.worldID = asint(d3.x);
+    o.color = asuint(d3.y);
 
     return o;
 }
@@ -204,7 +209,25 @@ float4 vert(in uint vid : SV_VertexID,
                   something;
 
     v2f.uv = vert.uv;
-    v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
+
+#if 0
+    if (instance_data.matID == -1) {
+        v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
+    } else {
+        v2f.materialIdx = instance_data.matID;
+    }
+#endif
+
+    if (instance_data.matID == -2) {
+        v2f.materialIdx = -2;
+        v2f.color = instance_data.color;
+    } else if (instance_data.matID == -1) {
+        v2f.materialIdx = meshDataBuffer[draw_data.meshID].materialIndex;
+        v2f.color = 0;
+    } else {
+        v2f.materialIdx = instance_data.matID;
+        v2f.color = 0;
+    }
 
     return clip_pos;
 }
@@ -243,15 +266,21 @@ PixelOutput frag(in V2F v2f,
 {
     PixelOutput output;
 
-    MaterialData mat_data = materialBuffer[v2f.materialIdx];
-    float4 color = mat_data.color;
-    
-    if (mat_data.textureIdx != -1) {
-        color *= materialTexturesArray[mat_data.textureIdx].SampleLevel(
-                linearSampler, v2f.uv, 0);
+    if (v2f.materialIdx == -2) {
+        output.rgbOut = hexToRgb(v2f.color);
+
+        return output;
+    } else {
+        MaterialData mat_data = materialBuffer[v2f.materialIdx];
+        float4 color = mat_data.color;
+        
+        if (mat_data.textureIdx != -1) {
+            color *= materialTexturesArray[mat_data.textureIdx].SampleLevel(
+                    linearSampler, v2f.uv, 0);
+        }
+
+        output.rgbOut = color;
+
+        return output;
     }
-
-    output.rgbOut = color;
-
-    return output;
 }

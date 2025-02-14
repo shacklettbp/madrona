@@ -366,6 +366,21 @@ ComponentT *StateManager::getWorldComponents(
 }
 
 template <typename ArchetypeT>
+Entity * StateManager::getWorldEntities(
+        MADRONA_MW_COND(uint32_t world_id))
+{
+    uint32_t archetype_id = archetypeID<ArchetypeT>().id;
+
+    ArchetypeStore &archetype = *archetype_stores_[archetype_id];
+    auto col_idx = 0;
+
+    auto col = archetype.tblStorage.column<Entity>(
+        MADRONA_MW_COND(world_id,) col_idx);
+
+    return col;
+}
+
+template <typename ArchetypeT>
 inline CountT StateManager::numRows(MADRONA_MW_COND(uint32_t world_id))
 {
     uint32_t archetype_id = archetypeID<ArchetypeT>().id;
@@ -439,8 +454,10 @@ void StateManager::iterateArchetypesImpl(MADRONA_MW_COND(uint32_t world_id,)
 
         // FIXME: column API sucks here, hopefully the compiler can
         // do common subexpression elimination on the world_id index...
-        fn(num_rows, archetype.tblStorage.column<ComponentTs>(
-            MADRONA_MW_COND(world_id,) cur_query_ptr[Indices]) ...);
+        fn(num_rows, archetype.tblStorage.column<Entity>( 
+                MADRONA_MW_COND(world_id,) 0),
+            archetype.tblStorage.column<ComponentTs>(
+                MADRONA_MW_COND(world_id,) cur_query_ptr[Indices]) ...);
 
         cur_query_ptr += sizeof...(ComponentTs);
     }
@@ -451,8 +468,12 @@ void StateManager::iterateQuery(MADRONA_MW_COND(uint32_t world_id,)
                                    const Query<ComponentTs...> &query, Fn &&fn)
 {
     iterateArchetypes(MADRONA_MW_COND(world_id,) query, 
-            [&fn](int num_rows, auto ...ptrs) {
+            [&fn](int num_rows, Entity *entities, auto ...ptrs) {
         for (int i = 0; i < num_rows; i++) {
+            if (entities[i] == Entity::none()) {
+              continue;
+            }
+
             fn(ptrs[i] ...);
         }
     });
@@ -537,6 +558,9 @@ Loc StateManager::makeTemporary(MADRONA_MW_COND(uint32_t world_id,)
 
     CountT new_row = archetype.tblStorage.addRow(
         MADRONA_MW_COND(world_id));
+
+    archetype.tblStorage.column<Entity>(
+        MADRONA_MW_COND(world_id,) 0)[new_row] = Entity { 0, 0 };
 
     return Loc {
         archetype_id,

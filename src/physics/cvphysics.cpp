@@ -3608,7 +3608,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         }
 
         if (lane_id == 0 && curr_sd->numRowsJc > 0) {
-            printf("num_iters = %d (num_rows_jc = %d)\n", iter, curr_sd->numRowsJc);
+            // printf("num_iters = %d (num_rows_jc = %d)\n", iter, curr_sd->numRowsJc);
         }
 
         { // Now, we need to copy x into the right components

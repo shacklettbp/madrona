@@ -101,6 +101,14 @@ struct SkyData {
 struct DrawPushConst {
     uint32_t viewIdx;
     uint32_t worldIdx;
+
+    uint32_t isOrtho;
+    float xMax;
+    float xMin;
+    float yMax;
+    float yMin;
+    float zMax;
+    float zMin;
 };
 
 struct ShadowGenPushConst {
@@ -155,7 +163,7 @@ struct ObjectData {
 };
 
 struct PackedInstanceData {
-    float4 data[3];
+    float4 data[4];
 };
 
 struct AABB {
@@ -166,8 +174,10 @@ struct EngineInstanceData {
     float3 position;
     float4 rotation;
     float3 scale;
+    int32_t matID;
     int32_t objectID;
     int32_t worldID;
+    uint32_t color;
 };
 
 struct PackedViewData {
@@ -213,6 +223,7 @@ struct InstanceDataBR {
     float3 position;
     float4 rotation;
     float3 scale;
+    int32_t matID;
     int32_t objectID;
     int32_t worldID;
 };
@@ -235,6 +246,7 @@ struct DrawCmd {
 struct DrawData {
     int instanceID;
     int materialID;
+    uint32_t color;
 };
 
 #if 0

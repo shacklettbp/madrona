@@ -259,35 +259,4 @@ TaskGraph::NodeID ResetTmpAllocNode::addToGraph(
     return builder.addOneOffNode<ResetTmpAllocNode>(dependencies);
 }
 
-CompactArchetypeNodeBase::CompactArchetypeNodeBase(uint32_t archetype_id)
-    : NodeBase(),
-      archetypeID(archetype_id)
-{}
-
-void CompactArchetypeNodeBase::run(int32_t invocation_idx)
-{
-#if 0
-    uint32_t archetype_id = data.compactArchetype.archetypeID;
-    StateManager *state_mgr = mwGPU::getStateManager();
-#endif
-
-    // Actually compact
-    assert(false);
-}
-
-uint32_t CompactArchetypeNodeBase::numInvocations()
-{
-    assert(false);
-    return mwGPU::getStateManager()->numArchetypeRows(archetypeID);
-}
-
-TaskGraph::NodeID CompactArchetypeNodeBase::addToGraph(
-    TaskGraph::Builder &builder,
-    Span<const TaskGraph::NodeID> dependencies,
-    uint32_t archetype_id)
-{
-    return builder.addDynamicCountNode<CompactArchetypeNodeBase>(
-        dependencies, 1, archetype_id);
-}
-
 }

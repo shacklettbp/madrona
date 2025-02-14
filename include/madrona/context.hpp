@@ -131,7 +131,10 @@ public:
     // from CustomContext.
     inline WorldBase & data() { return *data_; }
 
-    StateManager * getStateManager() { return state_mgr_; }
+    // StateManager provides lower-level control of internal data
+    // structures underlying the ECS. Can get direct pointers to
+    // table columns, etc...
+    inline StateManager * getStateManager() { return state_mgr_; }
 
 protected:
     WorldBase *data_;

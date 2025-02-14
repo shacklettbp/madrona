@@ -82,6 +82,33 @@ void HostAllocator::mapMemory(void *addr, uint64_t num_bytes)
     device_lock_.unlock();
 }
 
+void HostAllocator::reserveFree(void *addr, uint64_t num_bytes,
+                                uint64_t num_reserve_bytes)
+{
+    device_lock_.lock();
+
+    channel_->op = HostChannel::Op::ReserveFree;
+    channel_->reserveFree.addr = addr;
+    channel_->reserveFree.numBytes = num_bytes;
+    channel_->reserveFree.numReserveBytes = num_reserve_bytes;
+
+    submitRequest(channel_);
+
+    device_lock_.unlock();
+}
+
+void HostAllocator::allocFree(void *addr)
+{
+    device_lock_.lock();
+
+    channel_->op = HostChannel::Op::AllocFree;
+    channel_->allocFree.addr = addr;
+
+    submitRequest(channel_);
+
+    device_lock_.unlock();
+}
+
 uint64_t HostAllocator::roundUpReservation(uint64_t num_bytes)
 {
     return utils::roundUp(num_bytes, host_page_size_);

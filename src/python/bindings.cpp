@@ -135,18 +135,19 @@ nb::object JAXModule::getDType(TensorElementType type) const
     }
 }
 
-nb::object tensor_iface_to_jax(
+nb::object tensor_to_jax_shape_dtype(
     const JAXModule &jax_mod,
-    TensorInterface iface)
+    const Tensor &t)
 {
     nb::list shape;
 
-    for (int64_t d : iface.dimensions) {
+    for (int64_t i = 0; i < t.numDims(); i++) {
+        int64_t d = t.dims()[i];
         shape.append(d);
     }
 
     return jax_mod.typeShapeDtypeStruct(
-        nb::arg("dtype") = jax_mod.getDType(iface.type),
+        nb::arg("dtype") = jax_mod.getDType(t.type()),
         nb::arg("shape") = shape);
 }
 
@@ -158,12 +159,19 @@ nb::dict train_interface_inputs_to_pytree(
 
     nb::dict d;
 
-    d["actions"] = tensor_iface_to_jax(jax_mod, inputs.actions);
-    d["resets"] = tensor_iface_to_jax(jax_mod, inputs.resets);
+    nb::dict actions;
+    for (const NamedTensor &t : inputs.actions) {
+      actions[t.name] = tensor_to_jax_shape_dtype(jax_mod, t.tensor);
+    }
+
+    d["actions"] = actions;
+
+    d["resets"] = tensor_to_jax_shape_dtype(jax_mod, inputs.resets);
+    d["sim_ctrl"] = tensor_to_jax_shape_dtype(jax_mod, inputs.simCtrl);
 
     nb::dict pbt;
-    for (const NamedTensorInterface &t : inputs.pbt) {
-        pbt[t.name] = tensor_iface_to_jax(jax_mod, t.interface);
+    for (const NamedTensor &t : inputs.pbt) {
+        pbt[t.name] = tensor_to_jax_shape_dtype(jax_mod, t.tensor);
     }
 
     d["pbt"] = pbt;
@@ -180,18 +188,18 @@ nb::dict train_interface_outputs_to_pytree(
     nb::dict d;
 
     nb::dict obs;
-    for (const NamedTensorInterface &t : outputs.observations) {
-        obs[t.name] = tensor_iface_to_jax(jax_mod, t.interface);
+    for (const NamedTensor &t : outputs.observations) {
+        obs[t.name] = tensor_to_jax_shape_dtype(jax_mod, t.tensor);
     }
 
     d["obs"] = obs;
 
-    d["rewards"] = tensor_iface_to_jax(jax_mod, outputs.rewards);
-    d["dones"] = tensor_iface_to_jax(jax_mod, outputs.dones);
+    d["rewards"] = tensor_to_jax_shape_dtype(jax_mod, outputs.rewards);
+    d["dones"] = tensor_to_jax_shape_dtype(jax_mod, outputs.dones);
 
     nb::dict pbt;
-    for (const NamedTensorInterface &t : outputs.pbt) {
-        pbt[t.name] = tensor_iface_to_jax(jax_mod, t.interface);
+    for (const NamedTensor &t : outputs.pbt) {
+        pbt[t.name] = tensor_to_jax_shape_dtype(jax_mod, t.tensor);
     }
 
     d["pbt"] = pbt;
@@ -205,7 +213,7 @@ nb::dict train_interface_checkpointing_to_pytree(
 {
     nb::dict d;
 
-    d["data"] = tensor_iface_to_jax(
+    d["data"] = tensor_to_jax_shape_dtype(
         jax_mod, iface.checkpointing()->checkpointData);
 
     return d;
@@ -322,7 +330,7 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
         });
 
     nb::class_<Tensor>(m, "Tensor")
-        .def("__init__", ([](Tensor *dst, nb::ndarray<> torch_tensor) {
+        .def("__init__", [](Tensor *dst, nb::ndarray<> torch_tensor) {
             Optional<int> gpu_id = Optional<int>::none();
             if (torch_tensor.device_type() == nb::device::cuda::value) {
                 gpu_id = torch_tensor.device_id();
@@ -345,7 +353,7 @@ void setupMadronaSubmodule(nb::module_ parent_mod)
                                 fromDLPackType(torch_tensor.dtype()),
                                 { dims.data(), (CountT)torch_tensor.ndim() },
                                 gpu_id);
-        }))
+        })
         .def("to_torch", tensor_to_pytorch, nb::rv_policy::automatic_reference)
         .def("to_jax", tensor_to_jax, nb::rv_policy::automatic_reference)
     ;

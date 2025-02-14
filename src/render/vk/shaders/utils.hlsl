@@ -231,4 +231,14 @@ float rgbToLuminance(float3 rgb)
     return 0.2126f * rgb.x + 0.7152f * rgb.y + 0.0722f * rgb.z;
 }
 
+float4 hexToRgb(uint32_t hex)
+{
+    // Extract each color component and normalize to [0, 1] range
+    float r = ((hex >> 16) & 0xFF) / 255.0f;
+    float g = ((hex >> 8) & 0xFF) / 255.0f;
+    float b = (hex & 0xFF) / 255.0f;
+
+    return float4(r, g, b, 1.0);
+}
+
 #endif

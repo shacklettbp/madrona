@@ -181,6 +181,8 @@ StateManager::StateManager(uint32_t)
         }
     }
 
+    entity_store_.numGrows = 1;
+
     registerComponent<Entity>();
     registerComponent<WorldID>();
 }
@@ -327,9 +329,11 @@ StateManager::ArchetypeStore::ArchetypeStore(
             if (max_num_entities == 0) {
                 tbl.columns[i] =
                     alloc->reserveMemory(reserve_bytes, init_bytes);
+                tbl.columnFlags[i] |= ComponentFlags::CudaReserveMemory;
             } else {
                 uint64_t alloc_bytes = col_row_bytes * max_num_entities;
                 tbl.columns[i] = alloc->allocMemory(alloc_bytes);
+                tbl.columnFlags[i] |= ComponentFlags::CudaAllocMemory;
             }
         }
 
@@ -350,6 +354,8 @@ StateManager::ArchetypeStore::ArchetypeStore(
         bytes = alloc->roundUpReservation(bytes);
         worldOffsets = (int32_t *)alloc->allocMemory(bytes);
     }
+
+    flags = archetype_flags;
 
     // Allocate space for the counts (one count per world)
     uint64_t bytes = (uint64_t)sizeof(int32_t) * (uint64_t)num_worlds;
@@ -625,6 +631,8 @@ static inline int32_t getEntitySlot(EntityStore &entity_store)
     alloc->mapMemory(available_grow_base, entity_store.numIdxGrowBytes);
     alloc->mapMemory(deleted_grow_base, entity_store.numIdxGrowBytes);
 
+    ++entity_store.numGrows;
+
     for (int32_t i = 0; i < entity_store.numGrowEntities; i++) {
         int32_t idx = i + entity_store.numMappedEntities;
         entity_store.entities[idx].gen = 0;
@@ -897,4 +905,86 @@ uint32_t StateManager::getArchetypeNumRowsInWorld(
     return archetype.worldCounts[world_id];
 }
 
+void StateManager::freeTables()
+{
+    mwGPU::HostAllocator *host_alloc = mwGPU::getHostAllocator();
+
+    for (int i = 0; i < archetypes_.size(); ++i) {
+        if (archetypes_[i].has_value()) {
+            auto &arch_store = *(archetypes_[i]);
+
+            if ((arch_store.flags & ArchetypeFlags::ImportOffsets) !=
+                ArchetypeFlags::ImportOffsets) {
+                host_alloc->allocFree(arch_store.worldOffsets);
+                host_alloc->allocFree(arch_store.worldCounts);
+            }
+
+            uint64_t bytes_per_row = 0;
+            for (int col = 0; col < (int)arch_store.tbl.numColumns; col++) {
+                uint64_t col_row_bytes = arch_store.tbl.columnSizes[col];
+                bytes_per_row += col_row_bytes;
+            }
+
+            for (int col = 0; col < (int32_t)arch_store.tbl.numColumns; ++col) {
+                if ((arch_store.tbl.columnFlags[col] & 
+                            ComponentFlags::ImportMemory) !=
+                    ComponentFlags::ImportMemory) {
+                    if ((arch_store.tbl.columnFlags[col] & 
+                                ComponentFlags::CudaReserveMemory) ==
+                        ComponentFlags::CudaReserveMemory) {
+                        uint64_t num_reserved_rows = ArchetypeTable::maxReservedBytesPerTable /
+                            bytes_per_row;
+                        num_reserved_rows = min(num_reserved_rows, 0x7FFF'FFFF_u64);
+
+                        uint64_t col_row_bytes = arch_store.tbl.columnSizes[col];
+
+                        uint64_t reserve_bytes = col_row_bytes * num_reserved_rows;
+                        reserve_bytes = host_alloc->roundUpReservation(reserve_bytes);
+
+                        host_alloc->reserveFree(
+                                arch_store.tbl.columns[col],
+                                arch_store.tbl.columnMappedBytes[col],
+                                reserve_bytes);
+                    } else if ((arch_store.tbl.columnFlags[col] & 
+                                ComponentFlags::CudaAllocMemory) ==
+                        ComponentFlags::CudaAllocMemory) {
+                        host_alloc->allocFree(arch_store.tbl.columns[col]);
+                    }
+                }
+            }
+        }
+    }
+
+    { // Free the entity store
+        uint64_t num_slot_bytes = entity_store_.numGrows *
+            entity_store_.numSlotGrowBytes;
+        uint64_t num_idx_bytes = entity_store_.numGrows *
+            entity_store_.numIdxGrowBytes;
+
+        uint32_t max_mapped_entities = 2'147'483'648;
+
+        uint64_t reserve_entity_bytes =
+            (uint64_t)max_mapped_entities * sizeof(EntityStore::EntitySlot);
+        uint64_t reserve_idx_bytes =
+            (uint64_t)max_mapped_entities * sizeof(int32_t);
+
+        reserve_entity_bytes = host_alloc->roundUpReservation(reserve_entity_bytes);
+        reserve_idx_bytes = host_alloc->roundUpReservation(reserve_idx_bytes);
+
+        host_alloc->reserveFree(
+                entity_store_.entities, num_slot_bytes, reserve_entity_bytes);
+        host_alloc->reserveFree(
+                entity_store_.availableEntities, num_idx_bytes, reserve_entity_bytes);
+        host_alloc->reserveFree(
+                entity_store_.deletedEntities, num_idx_bytes, reserve_entity_bytes);
+    }
+}
+
+}
+
+extern "C" __global__ void freeECSTables()
+{
+    using namespace madrona;
+    StateManager *mgr = mwGPU::getStateManager();
+    mgr->freeTables();
 }

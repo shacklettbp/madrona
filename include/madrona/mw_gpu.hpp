@@ -99,6 +99,7 @@ class MWCudaExecutor;
 
 class MWCudaLaunchGraph {
 public:
+    MWCudaLaunchGraph();
     MWCudaLaunchGraph(MWCudaLaunchGraph &&);
     ~MWCudaLaunchGraph();
 

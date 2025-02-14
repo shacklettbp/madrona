@@ -6,21 +6,27 @@
 
 Please see the [Madrona engine project page](https://madrona-engine.github.io) for more information, as well as the [Madrona FAQ](https://madrona-engine.github.io#faq).
 
-### Features: ###
-* Fully GPU-driven batch ECS implementation for high-throughput execution.
+### Key Features: ###
+* GPU-driven batch ECS implementation for high-throughput execution.
 * CPU backend for debugging and visualization. Simulators can execute on GPU or CPU with no code changes.
 * Export ECS simulation state as PyTorch tensors for efficient interoperability with learning code.
-* (Optional) [XPBD rigid body physics](https://matthias-research.github.io/pages/publications/PBDBodies.pdf) for basic 3D collision and contact support.
-* (Optional) Simple 3D renderer for visualizing agent behaviors and debugging.
+* [High-throughput batch renderer](https://madrona-engine.github.io/renderer.html) which renders small images from the point of view of agents for purposes like pixels-to-actions training.
+* [XPBD rigid body physics](https://matthias-research.github.io/pages/publications/PBDBodies.pdf) for basic 3D collision and contact support.
+* (Optional) A simple interactive 3D renderer for visualizing agent behaviors and debugging.
 
 **Disclaimer**: The Madrona engine is a research code base. We hope to attract interested users / collaborators with this release, however there will be missing features / documentation / bugs, as well as breaking API changes as we continue to develop the engine. Please post any issues you find on this github repo.
 
-# Technical Paper
+# Technical Papers
 
-For more background and technical details on Madrona's design, please read our SIGGRAPH 2023 paper:
+For more background and technical details on Madrona's design, please read:
 
-[An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation](https://madrona-engine.github.io/shacklett_siggraph23.pdf).
-Shacklett et al. 2023
+* [An Extensible, Data-Oriented Architecture for High-Performance, Many-World Simulation](https://madrona-engine.github.io/shacklett_siggraph23.pdf).
+Shacklett et al. SIGGRAPH 2023
+
+For more details on Madrona's batch renderer (also called ``tiled rendering'' by the AI community), refer to:
+
+* [High-Throughput Batch Rendering for Embodied AI](https://madrona-engine.github.io/madrona-renderer.pdf).
+Rosenzweig et al. SIGGRAPH Asia 2024
 
 Madrona uses an Entity Component System (ECS) architecture for defining game state and expressing game logic. For general background and tutorials on ECS programming abstractions and the motivation for the ECS design pattern's use in games, we recommend Sander Mertens' excellent [ECS FAQ](https://github.com/SanderMertens/ecs-faq).
 
@@ -42,6 +48,12 @@ Madrona itself is not an RL environment simulator. It is a game engine / framewo
 
 ### [Cartpole](https://github.com/bsarkar321/madrona_rl_envs/tree/main/src/cartpole_env#cartpole-environment)
   * The canonical RL training environment.
+
+### [Madrona MJX](https://github.com/shacklettbp/madrona_mjx)
+  * An example of hooking up Madrona's batch renderer to an external simulator like MJX.
+
+### [Madrona Renderer Benchmark](https://github.com/llGuy/madrona_benchmark)
+  * A benchmarking repository with a couple different examples of the renderer's usage that were included in the SIGGRAPH Asia 2024 paper.
 
 Dependencies
 ------------

@@ -21,6 +21,10 @@ struct Renderable {
     Entity renderEntity;
 };
 
+struct LightCarrier {
+    Entity light;
+};
+
 
 
 
@@ -43,8 +47,89 @@ struct alignas(16) InstanceData {
     math::Vector3 position;
     math::Quat rotation;
     math::Diag3x3 scale;
+
+    // If this is -1, we just use whatever default material the model
+    // has defined for it.
+    //
+    // If this is -2, we use the color at the end of this struct.
+    int32_t matID;
+
     int32_t objectID;
     int32_t worldIDX;
+
+    uint32_t color;
+};
+
+// This is all the data required to configure a light. The actual
+// data is read in / written to through SOA.
+struct LightDesc {
+    enum Type : bool {
+        Directional = true,
+        Spotlight = false
+    };
+
+    Type type;
+
+    bool castShadow;
+
+    // Only affects the spotlight (defaults to 0 0 0).
+    math::Vector3 position;
+
+    // Affects both directional/spotlight.
+    math::Vector3 direction;
+
+    // Angle for the spotlight (default to pi/4).
+    float cutoff;
+
+    // Intensity of the light. (1.f is default)
+    float intensity;
+
+    // Gives ability to turn light on or off.
+    bool active;
+};
+
+struct LightDescDirection : math::Vector3 {
+    LightDescDirection(math::Vector3 v)
+        : Vector3(v)
+    {}
+};
+
+struct LightDescType {
+    LightDesc::Type type;
+};
+
+struct LightDescShadow {
+    bool castShadow;
+};
+
+struct LightDescCutoffAngle {
+    float cutoff;
+};
+
+struct LightDescIntensity {
+    float intensity;
+};
+
+struct LightDescActive {
+    bool active;
+};
+
+struct LightArchetype : public Archetype<
+    LightDesc
+> {};
+
+struct MaterialOverride {
+    // These are values that matID can take on if not some override material ID.
+    enum {
+        UseDefaultMaterial = -1,
+        UseOverrideColor = -2
+    };
+
+    int32_t matID;
+};
+
+struct ColorOverride {
+    uint32_t color;
 };
 
 // This contains the actual render output
@@ -101,7 +186,8 @@ namespace RenderingSystem {
 
     TaskGraphNodeID setupTasks(
         TaskGraphBuilder &builder,
-        Span<const TaskGraphNodeID> deps);
+        Span<const TaskGraphNodeID> deps,
+        bool update_visual_properties = false);
 
     void init(Context &ctx,
               const RenderECSBridge *bridge);
@@ -110,6 +196,9 @@ namespace RenderingSystem {
 
     void makeEntityRenderable(Context &ctx,
                               Entity e);
+    
+    void disableEntityRenderable(Context &ctx,
+                                 Entity e);
 
     void attachEntityToView(Context &ctx,
                             Entity e,
@@ -122,6 +211,10 @@ namespace RenderingSystem {
                               Entity e);
     void cleanupRenderableEntity(Context &ctx,
                                  Entity e);
+
+
+    void makeEntityLightCarrier(Context &ctx,
+                                Entity e);
 };
 
 }

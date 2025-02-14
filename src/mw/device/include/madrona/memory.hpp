@@ -48,6 +48,8 @@ struct HostChannel {
         Reserve,
         Map,
         Alloc,
+        ReserveFree,
+        AllocFree,
         Terminate
     };
 
@@ -67,11 +69,23 @@ struct HostChannel {
         void *result;
     };
 
+    struct ReserveFree {
+        void *addr;
+        uint64_t numBytes;
+        uint64_t numReserveBytes;
+    };
+
+    struct AllocFree {
+        void *addr;
+    };
+
     Op op;
     union {
         Reserve reserve;
         Map map;
         Alloc alloc;
+        ReserveFree reserveFree;
+        AllocFree allocFree;
     };
 
     cuda::atomic<uint32_t, cuda::thread_scope_system> ready;
@@ -99,6 +113,8 @@ public:
     void * reserveMemory(uint64_t max_bytes, uint64_t init_num_bytes);
     void * allocMemory(uint64_t num_bytes);
     void mapMemory(void *addr, uint64_t num_bytes);
+    void reserveFree(void *addr, uint64_t num_bytes, uint64_t num_reserve_bytes);
+    void allocFree(void *addr);
 
     uint64_t roundUpReservation(uint64_t num_bytes);
     uint64_t roundUpAlloc(uint64_t num_bytes);

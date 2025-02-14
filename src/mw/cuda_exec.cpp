@@ -266,17 +266,34 @@ namespace madrona {
 
 static void setCudaHeapSize()
 {
-    // FIXME size limit for device side malloc:
-    size_t heap_size = 4ul*1024ul*1024ul*1024ul;
+    char *disable_heap_size = getenv("MADRONA_DISABLE_CUDA_HEAP_SIZE");
 
-    char* user_heap_size = getenv("MADRONA_MWGPU_DEVICE_HEAP_SIZE");
-    if (user_heap_size) {
-        heap_size = strtoul(user_heap_size,nullptr,10);
+    if (disable_heap_size && disable_heap_size[0] == '1') {
+        return;
+    } else {
+        // FIXME size limit for device side malloc:
+        size_t heap_size = 4ul*1024ul*1024ul*1024ul;
+
+        char* user_heap_size = getenv("MADRONA_MWGPU_DEVICE_HEAP_SIZE");
+        if (user_heap_size) {
+            heap_size = strtoul(user_heap_size,nullptr,10);
+        }
+
+        REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
+                                    heap_size));
     }
-
-    REQ_CUDA(cudaDeviceSetLimit(cudaLimitMallocHeapSize,
-                                heap_size));
 }
+
+struct FreeQueue {
+    struct Reserve {
+        void *addr;
+        uint64_t numBytes;
+        uint64_t numReserveBytes;
+    };
+
+    std::vector<void *> toFree;
+    std::vector<Reserve> reserveToFree;
+};
 
 using HostChannel = mwGPU::madrona::mwGPU::HostChannel;
 using HostAllocInit = mwGPU::madrona::mwGPU::HostAllocInit;
@@ -360,6 +377,9 @@ struct BVHKernels {
     mwGPU::madrona::KernelTimingInfo *timingInfo;
 
     uint32_t raycastRGBD;
+
+    render::MeshBVHData meshBVHData;
+    render::MaterialData materialData;
 };
 
 struct GPUKernels {
@@ -372,6 +392,13 @@ struct GPUKernels {
     CUfunction queueUserInit;
     CUfunction queueUserRun;
     CUfunction initBVHParams;
+    CUfunction destroyECS;
+};
+
+struct BVHKernelCache {
+    HeapArray<char> data;
+    const void *cubinStart;
+    size_t numCubinBytes;
 };
 
 struct MegakernelCache {
@@ -400,6 +427,8 @@ struct GPUEngineState {
 #endif
 
     HeapArray<void *> exportedColumns;
+
+    FreeQueue *freeQueue;
 };
 
 struct MWCudaLaunchGraph::Impl {
@@ -425,6 +454,7 @@ struct MWCudaExecutor::Impl {
     TaskGraphsState taskGraphsState;
     bool enableRaycasting;
     BVHKernels bvhKernels;
+    CUfunction destroyKernel;
 
     uint32_t numWorlds;
     uint32_t renderOutputResolution;
@@ -1043,6 +1073,44 @@ static __attribute__((always_inline)) inline void dispatch(
     };
 }
 
+static void checkAndLoadBVHKernelCache(
+    Optional<BVHKernelCache> &cache,
+    Optional<std::string> &cache_write_path)
+{
+    auto *cache_path =
+        getenv("MADRONA_BVH_KERNEL_CACHE");
+
+    if (!cache_path || cache_path[0] == '\0') {
+        return;
+    }
+
+    if (!std::filesystem::exists(cache_path)) {
+        cache_write_path.emplace(cache_path);
+        return;
+    }
+
+    std::ifstream cache_file(cache_path,
+        std::ios::binary | std::ios::ate);
+    if (!cache_file.is_open()) {
+        FATAL("Failed to open megakernel cache file at %s",
+              cache_path);
+    }
+
+    size_t num_cache_bytes = cache_file.tellg();
+    cache_file.seekg(std::ios::beg);
+    HeapArray<char> cache_data(num_cache_bytes);
+    cache_file.read(cache_data.data(), cache_data.size());
+
+    void *cubin_ptr = cache_data.data();
+    size_t num_cubin_bytes = num_cache_bytes;
+
+    cache.emplace(BVHKernelCache {
+        .data = std::move(cache_data),
+        .cubinStart = cubin_ptr,
+        .numCubinBytes = num_cubin_bytes,
+    });
+}
+
 // We still want to have the same compiler flags as passed to the megakernel
 static BVHKernels buildBVHKernels(const CompileConfig &cfg,
                                   int32_t num_sms,
@@ -1051,156 +1119,172 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
 {
     using namespace std;
 
-    array bvh_srcs = {
-        MADRONA_MW_GPU_BVH_INTERNAL_CPP
-    };
+    auto bvh_cache = Optional<BVHKernelCache>::none();
+    auto cache_write_path = Optional<std::string>::none();
 
-    const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
-    const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
-    const char *shadow_enable_env = getenv("MADRONA_RT_SHADOWS");
-
-    // Build architecture string for this GPU
-    string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
-        to_string(cuda_arch.second);
-
-    std::string linker_arch_str =
-        std::string("-arch=") + gpu_arch_str;
-
-    DynArray<const char *> linker_flags {
-        linker_arch_str.c_str(),
-        "-ftz=1",
-        "-prec-div=0",
-        "-prec-sqrt=0",
-        "-fma=1",
-        // "-optimize-unused-variables",
-        "-lto",
-        "-lineinfo",
-        "-maxrregcount=96"
-    };
-
-    if (force_debug_env != nullptr && force_debug_env[0] == '1') {
-        linker_flags.push_back("-g");
-        printf("compiling with debug\n");
-    }
-
-    nvJitLinkHandle linker;
-    REQ_NVJITLINK(nvJitLinkCreate(
-        &linker, linker_flags.size(), linker_flags.data()));
-
-    nvJitLinkInputType linker_input_type = NVJITLINK_INPUT_LTOIR;
-
-    auto printLinkerLogs = [&linker](FILE *out) {
-        size_t info_log_size, err_log_size;
-        REQ_NVJITLINK(
-            nvJitLinkGetInfoLogSize(linker, &info_log_size));
-        REQ_NVJITLINK(
-            nvJitLinkGetErrorLogSize(linker, &err_log_size));
-
-        if (info_log_size > 0) {
-            HeapArray<char> info_log(info_log_size);
-            REQ_NVJITLINK(nvJitLinkGetInfoLog(linker, info_log.data()));
-
-            fprintf(out, "%s\n", info_log.data());
-        }
-
-        if (err_log_size > 0) {
-            HeapArray<char> err_log(err_log_size);
-            REQ_NVJITLINK(nvJitLinkGetErrorLog(linker, err_log.data()));
-
-            fprintf(out, "%s\n", err_log.data());
-        }
-    };
-
-    auto checkLinker = [&printLinkerLogs](nvJitLinkResult res) {
-        if (res != NVJITLINK_SUCCESS) {
-            fprintf(stderr, "CUDA linking Failed!\n");
-
-            printLinkerLogs(stderr);
-
-            fprintf(stderr, "\n");
-
-            ERR_NVJITLINK(res);
-        }
-    };
-
-    auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
-        checkLinker(nvJitLinkAddData(linker, linker_input_type,
-            (char *)cubin.data(), cubin.size(), name));
-    };
-
-    string gpu_arch_flag = std::string("-arch=") + gpu_arch_str;
-
-    std::vector<const char *> common_compile_flags {
-        MADRONA_NVRTC_OPTIONS
-        "-dlto",
-        "-DMADRONA_MWGPU_BVH_MODULE",
-        "-arch", gpu_arch_str.c_str(),
-        "-lineinfo",
-        "-maxrregcount=96"
-    };
-
-    if (shadow_enable_env && shadow_enable_env[0] == '1') {
-        common_compile_flags.push_back("-DMADRONA_RT_SHADOWS");
-    }
-
-    if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
-        common_compile_flags.push_back("-DMADRONA_PROFILE_BVH_KERNEL");
-    }
-
-    if (force_debug_env != nullptr && force_debug_env[0] == '1') {
-        common_compile_flags.push_back("--device-debug");
-    }
-
-    common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
-
-    bool render_rgb = (render_mode == CudaBatchRenderConfig::RenderMode::RGBD);
-
-    if (render_rgb) {
-        common_compile_flags.push_back("-DMADRONA_RENDER_RGB=1");
-    }
-
-    for (const char *user_flag : cfg.userCompileFlags) {
-        common_compile_flags.push_back(user_flag);
-    }
-
-    DynArray<const char *> fast_compile_flags(common_compile_flags.size());
-    for (const char *flag : common_compile_flags) {
-        fast_compile_flags.push_back(flag);
-    }
-
-    std::vector<const char *> compile_flags = std::move(common_compile_flags);
-
-    for (uint32_t i = 0; i < bvh_srcs.size(); ++i) {
-        auto cur_compile_flags = compile_flags;
-        std::string cur_path = bvh_srcs[i];
-
-        std::ifstream bvh_file_stream(bvh_srcs[i]);
-        std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
-            std::istreambuf_iterator<char>());
-
-        printf("Compiling %s\n", bvh_srcs[i]);
-
-        // Gives us LTOIR
-        auto jit_output = cu::jitCompileCPPSrc(
-            bvh_src.c_str(), bvh_srcs[i],
-            cur_compile_flags.data(), cur_compile_flags.size(),
-            cur_compile_flags.data(), cur_compile_flags.size(),
-            true);
-
-        addToLinker(jit_output.outputBinary, bvh_srcs[i]);
-    }
-
-    checkLinker(nvJitLinkComplete(linker));
-
-    size_t cubin_size;
-    REQ_NVJITLINK(nvJitLinkGetLinkedCubinSize(linker, &cubin_size));
-    HeapArray<char> linked_cubin(cubin_size);
-    REQ_NVJITLINK(nvJitLinkGetLinkedCubin(linker, linked_cubin.data()));
+    checkAndLoadBVHKernelCache(bvh_cache, cache_write_path);
 
     CUmodule mod;
-    REQ_CU(cuModuleLoadData(&mod, linked_cubin.data()));
 
-    REQ_NVJITLINK(nvJitLinkDestroy(&linker));
+    if (bvh_cache.has_value()) {
+        printf("loading BVH kernels from cache\n");
+        REQ_CU(cuModuleLoadData(&mod, bvh_cache->cubinStart));
+    } else {
+        array bvh_srcs = {
+            MADRONA_MW_GPU_BVH_INTERNAL_CPP
+        };
+
+        const char *force_debug_env = getenv("MADRONA_MWGPU_FORCE_DEBUG");
+        const char *enable_trace_split_env = getenv("MADRONA_TRACK_TRACE_SPLIT");
+        const char *shadow_enable_env = getenv("MADRONA_RT_SHADOWS");
+
+        // Build architecture string for this GPU
+        string gpu_arch_str = "sm_" + to_string(cuda_arch.first) +
+            to_string(cuda_arch.second);
+
+        std::string linker_arch_str =
+            std::string("-arch=") + gpu_arch_str;
+
+        DynArray<const char *> linker_flags {
+            linker_arch_str.c_str(),
+            "-ftz=1",
+            "-prec-div=0",
+            "-prec-sqrt=0",
+            "-fma=1",
+            // "-optimize-unused-variables",
+            "-lto",
+            "-lineinfo",
+            "-maxrregcount=96"
+        };
+
+        if (force_debug_env != nullptr && force_debug_env[0] == '1') {
+            linker_flags.push_back("-g");
+            printf("compiling with debug\n");
+        }
+
+        nvJitLinkHandle linker;
+        REQ_NVJITLINK(nvJitLinkCreate(
+            &linker, linker_flags.size(), linker_flags.data()));
+
+        nvJitLinkInputType linker_input_type = NVJITLINK_INPUT_LTOIR;
+
+        auto printLinkerLogs = [&linker](FILE *out) {
+            size_t info_log_size, err_log_size;
+            REQ_NVJITLINK(
+                nvJitLinkGetInfoLogSize(linker, &info_log_size));
+            REQ_NVJITLINK(
+                nvJitLinkGetErrorLogSize(linker, &err_log_size));
+
+            if (info_log_size > 0) {
+                HeapArray<char> info_log(info_log_size);
+                REQ_NVJITLINK(nvJitLinkGetInfoLog(linker, info_log.data()));
+
+                fprintf(out, "%s\n", info_log.data());
+            }
+
+            if (err_log_size > 0) {
+                HeapArray<char> err_log(err_log_size);
+                REQ_NVJITLINK(nvJitLinkGetErrorLog(linker, err_log.data()));
+
+                fprintf(out, "%s\n", err_log.data());
+            }
+        };
+
+        auto checkLinker = [&printLinkerLogs](nvJitLinkResult res) {
+            if (res != NVJITLINK_SUCCESS) {
+                fprintf(stderr, "CUDA linking Failed!\n");
+
+                printLinkerLogs(stderr);
+
+                fprintf(stderr, "\n");
+
+                ERR_NVJITLINK(res);
+            }
+        };
+
+        auto addToLinker = [&](const HeapArray<char> &cubin, const char *name) {
+            checkLinker(nvJitLinkAddData(linker, linker_input_type,
+                (char *)cubin.data(), cubin.size(), name));
+        };
+
+        string gpu_arch_flag = std::string("-arch=") + gpu_arch_str;
+
+        std::vector<const char *> common_compile_flags {
+            MADRONA_NVRTC_OPTIONS
+            "-dlto",
+            "-DMADRONA_MWGPU_BVH_MODULE",
+            "-arch", gpu_arch_str.c_str(),
+            "-lineinfo",
+            "-maxrregcount=96"
+        };
+
+        if (shadow_enable_env && shadow_enable_env[0] == '1') {
+            common_compile_flags.push_back("-DMADRONA_RT_SHADOWS");
+        }
+
+        if (enable_trace_split_env && enable_trace_split_env[0] == '1') {
+            common_compile_flags.push_back("-DMADRONA_PROFILE_BVH_KERNEL");
+        }
+
+        if (force_debug_env != nullptr && force_debug_env[0] == '1') {
+            common_compile_flags.push_back("--device-debug");
+        }
+
+        common_compile_flags.push_back("-DMADRONA_TLAS_WIDTH=8");
+
+        bool render_rgb = (render_mode == CudaBatchRenderConfig::RenderMode::RGBD);
+
+        if (render_rgb) {
+            common_compile_flags.push_back("-DMADRONA_RENDER_RGB=1");
+        }
+
+        for (const char *user_flag : cfg.userCompileFlags) {
+            common_compile_flags.push_back(user_flag);
+        }
+
+        DynArray<const char *> fast_compile_flags(common_compile_flags.size());
+        for (const char *flag : common_compile_flags) {
+            fast_compile_flags.push_back(flag);
+        }
+
+        std::vector<const char *> compile_flags = std::move(common_compile_flags);
+
+        for (uint32_t i = 0; i < bvh_srcs.size(); ++i) {
+            auto cur_compile_flags = compile_flags;
+            std::string cur_path = bvh_srcs[i];
+
+            std::ifstream bvh_file_stream(bvh_srcs[i]);
+            std::string bvh_src((std::istreambuf_iterator<char>(bvh_file_stream)),
+                std::istreambuf_iterator<char>());
+
+            printf("Compiling %s\n", bvh_srcs[i]);
+
+            // Gives us LTOIR
+            auto jit_output = cu::jitCompileCPPSrc(
+                bvh_src.c_str(), bvh_srcs[i],
+                cur_compile_flags.data(), cur_compile_flags.size(),
+                cur_compile_flags.data(), cur_compile_flags.size(),
+                true);
+
+            addToLinker(jit_output.outputBinary, bvh_srcs[i]);
+        }
+
+        checkLinker(nvJitLinkComplete(linker));
+
+        size_t cubin_size;
+        REQ_NVJITLINK(nvJitLinkGetLinkedCubinSize(linker, &cubin_size));
+        HeapArray<char> linked_cubin(cubin_size);
+        REQ_NVJITLINK(nvJitLinkGetLinkedCubin(linker, linked_cubin.data()));
+
+        if (cache_write_path.has_value()) {
+            std::ofstream cache_file(*cache_write_path, std::ios::binary);
+            cache_file.write(linked_cubin.data(), linked_cubin.size());
+            cache_file.close();
+        }
+
+        REQ_CU(cuModuleLoadData(&mod, linked_cubin.data()));
+        REQ_NVJITLINK(nvJitLinkDestroy(&linker));
+    }
 
     CUfunction bvh_build_fast;
     REQ_CU(cuModuleGetFunction(&bvh_build_fast, mod,
@@ -1274,6 +1358,8 @@ static BVHKernels buildBVHKernels(const CompileConfig &cfg,
         .timingInfo = timing_info,
         .raycastRGBD = (uint32_t)(render_mode == 
                 CudaBatchRenderConfig::RenderMode::RGBD),
+        .meshBVHData = {},
+        .materialData = {},
     };
 
     return bvh_kernels;
@@ -1450,6 +1536,7 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
         .queueUserInit = nullptr,
         .queueUserRun = nullptr,
         .initBVHParams = nullptr,
+        .destroyECS = nullptr,
     };
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.computeGPUImplConsts,
@@ -1473,6 +1560,8 @@ static GPUKernels buildKernels(const CompileConfig &cfg,
 
     REQ_CU(cuModuleGetFunction(&gpu_kernels.initBVHParams, gpu_kernels.mod,
                                "initBVHParams"));
+    REQ_CU(cuModuleGetFunction(&gpu_kernels.destroyECS, gpu_kernels.mod,
+                               "freeECSTables"));
 
     return gpu_kernels;
 }
@@ -1574,7 +1663,8 @@ static void mapGPUMemory(CUdevice dev, CUdeviceptr base, uint64_t num_bytes)
 
 }
 
-static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
+static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx,
+                                 FreeQueue *free_queue)
 {
     using namespace std::chrono_literals;
     using cuda::std::memory_order_acquire;
@@ -1600,21 +1690,17 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
             uint64_t num_reserve_bytes = channel->reserve.maxBytes;
             uint64_t num_alloc_bytes = channel->reserve.initNumBytes;
 
-            if (verbose_host_alloc) {
-                printf("Reserve request received %lu %lu\n",
-                       num_reserve_bytes, num_alloc_bytes);
-            }
-
             CUdeviceptr dev_ptr;
             REQ_CU(cuMemAddressReserve(&dev_ptr, num_reserve_bytes,
                                        0, 0, 0));
 
-            if (num_alloc_bytes > 0) {
-                mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
+            if (verbose_host_alloc) {
+                printf("Reserve request received %lu %lu, got %p\n",
+                       num_reserve_bytes, num_alloc_bytes, (void *)dev_ptr);
             }
 
-            if (verbose_host_alloc) {
-                printf("Reserved %p\n", (void *)dev_ptr);
+            if (num_alloc_bytes > 0) {
+                mapGPUMemory(dev, dev_ptr, num_alloc_bytes);
             }
 
             channel->reserve.result = (void *)dev_ptr;
@@ -1638,9 +1724,33 @@ static void gpuVMAllocatorThread(HostChannel *channel, CUcontext cu_ctx)
             channel->alloc.result = (void *)dev_ptr;
 
             if (verbose_host_alloc) {
-                printf("Alloc request received %lu\n",
-                    (uint64_t)channel->alloc.numBytes);
+                printf("Alloc request received %lu, got %p\n",
+                    (uint64_t)channel->alloc.numBytes, (void *)dev_ptr);
             }
+        } else if (channel->op == HostChannel::Op::ReserveFree) {
+            void *ptr = channel->reserveFree.addr;
+            uint64_t num_bytes = channel->reserveFree.numBytes;
+            uint64_t num_reserve_bytes = channel->reserveFree.numReserveBytes;
+
+            if (verbose_host_alloc) {
+                printf("Unmapped %lu bytes from %p, and freed %lu reservation\n",
+                    num_bytes, ptr, num_reserve_bytes);
+            }
+
+            free_queue->reserveToFree.push_back(FreeQueue::Reserve {
+                .addr = channel->reserveFree.addr,
+                .numBytes = channel->reserveFree.numBytes,
+                .numReserveBytes = channel->reserveFree.numReserveBytes,
+            });
+        } else if (channel->op == HostChannel::Op::AllocFree) {
+            void *ptr = channel->allocFree.addr;
+
+            if (verbose_host_alloc) {
+                printf("Allocation free request received for %p\n",
+                    ptr);
+            }
+
+            free_queue->toFree.push_back(ptr);
         } else if (channel->op == HostChannel::Op::Terminate) {
             break;
         }
@@ -1737,8 +1847,10 @@ static GPUEngineState initEngineAndUserState(
         allocator_channel,
     };
 
+    FreeQueue *fq = new FreeQueue {};
+
     std::thread allocator_thread(
-        gpuVMAllocatorThread, allocator_channel, cu_ctx);
+        gpuVMAllocatorThread, allocator_channel, cu_ctx, fq);
 
     auto host_print = std::make_unique<HostPrintCPU>(cu_gpu);
 
@@ -1931,6 +2043,7 @@ static GPUEngineState initEngineAndUserState(
         std::move(device_tracing),
 #endif
         std::move(exported_cols),
+        fq
     };
 }
 
@@ -2219,6 +2332,10 @@ static CUgraphExec makeTaskGraphRunGraph(
     return run_graph_exec;
 }
 
+MWCudaLaunchGraph::MWCudaLaunchGraph()
+    : impl_(nullptr)
+{}
+
 MWCudaLaunchGraph::MWCudaLaunchGraph(Impl *impl)
     : impl_(impl)
 {}
@@ -2251,7 +2368,7 @@ CUcontext MWCudaExecutor::initCUDA(int gpu_id)
 }
 
 MWCudaExecutor::MWCudaExecutor()
-  : impl_(nullptr)
+    : impl_(nullptr)
 {}
 
 MWCudaExecutor::MWCudaExecutor(
@@ -2303,6 +2420,8 @@ MWCudaExecutor::MWCudaExecutor(
     if (render_cfg.has_value()) {
         bvh_kernels = buildBVHKernels(
             compile_cfg, num_sms, cu_capability, render_cfg->renderMode);
+        bvh_kernels.meshBVHData = render_cfg->geoBVHData;
+        bvh_kernels.materialData = render_cfg->materialData;
     } 
 
     GPUKernels gpu_kernels = buildKernels(compile_cfg, megakernel_cfgs,
@@ -2331,6 +2450,7 @@ MWCudaExecutor::MWCudaExecutor(
         std::move(taskgraphs_state),
         render_cfg.has_value(),
         bvh_kernels,
+        gpu_kernels.destroyECS,
         state_cfg.numWorlds,
         render_cfg.has_value() ? render_cfg->renderResolution : 0,
         (uint32_t)shared_mem_per_sm,
@@ -2348,6 +2468,62 @@ MWCudaExecutor & MWCudaExecutor::operator=(MWCudaExecutor &&) = default;
 MWCudaExecutor::~MWCudaExecutor()
 {
     if (!impl_) return;
+
+    REQ_CU(cuLaunchKernel(impl_->destroyKernel, 1, 1, 1, 1, 1, 1,
+            0, impl_->cuStream, nullptr, nullptr));
+    REQ_CUDA(cudaStreamSynchronize(impl_->cuStream));
+
+    // Ok now, we go through the free queue
+    auto *fq = impl_->engineState.freeQueue;
+    for (int i = 0; i < (int)fq->toFree.size(); ++i) {
+        REQ_CU(cuMemFree((CUdeviceptr)fq->toFree[i]));
+    }
+
+    for (int i = 0; i < (int)fq->reserveToFree.size(); ++i) {
+        void *ptr = fq->reserveToFree[i].addr;
+        uint64_t num_reserve_bytes = fq->reserveToFree[i].numReserveBytes;
+
+        REQ_CU(cuMemUnmap((CUdeviceptr)ptr, num_reserve_bytes));
+        REQ_CU(cuMemAddressFree((CUdeviceptr)ptr, num_reserve_bytes));
+    }
+
+    // Free mesh bvh data
+    if (impl_->bvhKernels.meshBVHData.numNodes) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.meshBVHData.nodes));
+    }
+
+    if (impl_->bvhKernels.meshBVHData.numLeaves) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.meshBVHData.leafMaterial));
+    }
+
+    if (impl_->bvhKernels.meshBVHData.numVerts) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.meshBVHData.vertices));
+    }
+
+    if (impl_->bvhKernels.meshBVHData.numBVHs) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.meshBVHData.meshBVHs));
+    }
+
+    if (impl_->bvhKernels.materialData.textures) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.materialData.textures));
+    }
+
+    if (impl_->bvhKernels.materialData.materials) {
+        REQ_CUDA(cudaFree(impl_->bvhKernels.materialData.materials));
+    }
+
+#if 0
+    if (impl_->bvhKernels.materialData.textureBuffers) {
+        cudaFree(impl_->bvhKernels.materialData.textures);
+    }
+#endif
+
+    for (uint32_t i = 0;
+            i < impl_->bvhKernels.materialData.numTextureBuffers;
+            ++i) {
+        REQ_CUDA(cudaFreeArray(
+            impl_->bvhKernels.materialData.textureBuffers[i]));
+    }
 
 #ifdef MADRONA_TRACING
     // Seems good to copy the logs before the module is unloaded

@@ -110,12 +110,16 @@ EngineInstanceData unpackEngineInstanceData(PackedInstanceData packed)
     const float4 d0 = packed.data[0];
     const float4 d1 = packed.data[1];
     const float4 d2 = packed.data[2];
+    const float4 d3 = packed.data[3];
 
     EngineInstanceData o;
     o.position = d0.xyz;
     o.rotation = float4(d1.xyz, d0.w);
     o.scale = float3(d1.w, d2.xy);
-    o.objectID = asint(d2.z);
+    o.matID = asint(d2.z);
+    o.objectID = asint(d2.w);
+    o.worldID = asint(d3.x);
+    o.color = asuint(d3.y);
 
     return o;
 }
@@ -188,13 +192,12 @@ float4 vert(in uint vid : SV_VertexID,
     DrawData draw_data = drawDataBuffer[draw_id];
 
     Vertex vert = unpackVertex(vertexDataBuffer[vid]);
-    float4 color = materialBuffer[draw_data.materialID].color;
+
     uint instance_id = draw_data.instanceID;
-
-    PerspectiveCameraData view_data = getCameraData();
-
     EngineInstanceData instance_data = unpackEngineInstanceData(
         engineInstanceBuffer[instance_id]);
+
+    PerspectiveCameraData view_data = getCameraData();
 
     float3 to_view_translation;
     float4 to_view_rotation;
@@ -206,28 +209,78 @@ float4 vert(in uint vid : SV_VertexID,
         rotateVec(to_view_rotation, instance_data.scale * vert.position) +
             to_view_translation;
 
+#if 0
     float4 clip_pos = float4(
         view_data.xScale * view_pos.x,
         view_data.yScale * view_pos.z,
         view_data.zNear,
         view_pos.y);
-
-    // v2f.viewPos = view_pos;
-#if 0
-    v2f.normal = normalize(
-        rotateVec(to_view_rotation, (vert.normal / instance_data.scale)));
 #endif
+
+    float4 clip_pos;
+
+    if (push_const.isOrtho == 1) {
+        float x_max = push_const.xMax * view_data.xScale;
+        float x_min = push_const.xMin * view_data.xScale;
+
+        float y_max = push_const.yMax;
+        float y_min = push_const.yMin;
+
+        float z_max = push_const.zMax * (1.0f / -view_data.yScale);
+        float z_min = push_const.zMin * (1.0f / -view_data.yScale);
+
+        float4x4 m1 = float4x4(
+                float4(2.0f / (x_max - x_min),             0.0f,                       0.0f,                        -(x_max + x_min) / (x_max - x_min)),
+                float4(0.0f,                               0.0f,                      -2.0f / (z_max - z_min),      -(z_max+z_min) / (z_max - z_min)),
+                float4(0.0f,                               1.0f / (y_max - y_min),     0.0f,                        -(y_min) / (y_max - y_min)),
+                float4(0.0f,                               0.0f,                       0.0f,                        1.0f));
+
+        clip_pos = mul(m1, float4(view_pos.x, view_pos.y, view_pos.z, 1.0f));
+        clip_pos.z = 1.0 - clip_pos.z;
+    }
+    else {
+#if 0
+        clip_pos = float4( view_data.xScale * view_pos.x,
+                       view_data.yScale * view_pos.z,
+                       view_data.zNear,
+                       1.0);
+#endif
+
+        clip_pos = float4(
+            view_data.xScale * view_pos.x,
+            view_data.yScale * view_pos.z,
+            view_data.zNear,
+            view_pos.y);
+    }
+
     v2f.normal = normalize(
         rotateVec(instance_data.rotation, (vert.normal / instance_data.scale)));
     v2f.uv = vert.uv;
-    v2f.color = color;
+
     v2f.position = rotateVec(instance_data.rotation,
                              instance_data.scale * vert.position) + instance_data.position;
     v2f.dummy = shadowViewDataBuffer[0].viewProjectionMatrix[0][0];
 
-    v2f.texIdx = materialBuffer[draw_data.materialID].textureIdx;
-    v2f.roughness = materialBuffer[draw_data.materialID].roughness;
-    v2f.metalness = materialBuffer[draw_data.materialID].metalness;
+
+
+    v2f.texIdx = -1;
+    // Defaults for now
+    v2f.roughness = 0.8;
+    v2f.metalness = 0.2;
+
+    if (draw_data.materialID == -2) {
+        v2f.color = hexToRgb(draw_data.color);
+    } else {
+        int32_t material_id = draw_data.materialID;
+        
+        float4 color = materialBuffer[material_id].color;
+
+        // Material
+        v2f.color = color;
+        v2f.texIdx = materialBuffer[material_id].textureIdx;
+        v2f.roughness = materialBuffer[material_id].roughness;
+        v2f.metalness = materialBuffer[material_id].metalness;
+    }
 
     return clip_pos;
 }

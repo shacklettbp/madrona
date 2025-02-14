@@ -1,7 +1,9 @@
 #define MADRONA_MWGPU_MAX_BLOCKS_PER_SM 4
 
+#if 0
 #include <cuda/barrier>
 #include <cuda/pipeline>
+#endif
 
 #include <madrona/bvh.hpp>
 #include <madrona/mesh_bvh.hpp>
@@ -17,6 +19,12 @@
 #define LOG_INST(...) mwGPU::HostPrint::log(__VA_ARGS__)
 #else
 #define LOG_INST(...)
+#endif
+
+#if 1
+#define LOG(...) mwGPU::HostPrint::log(__VA_ARGS__)
+#else
+#define LOG(...)
 #endif
 
 using namespace madrona;
@@ -99,7 +107,9 @@ struct TraceInfo {
 struct TraceWorldInfo {
     QBVHNode *nodes;
     InstanceData *instances;
-    Vector3 lightDir;
+
+    LightDesc *lights;
+    uint32_t numLights;
 };
 
 enum class GroupType : uint8_t {
@@ -271,12 +281,16 @@ struct TriHitInfo {
 
     float tHit;
 
+    int32_t instanceIdx;
+
     Vector3 normal;
     Vector2 uv;
 
     uint32_t leafMaterialIndex;
 
     MeshBVH *bvh;
+
+    InstanceData *instance;
 };
 
 struct TriangleFetch {
@@ -337,6 +351,15 @@ static bool rayTriangleIntersection(
     float U = fmaf(Cx, By, - Cy * Bx);
     float V = fmaf(Ax, Cy, - Ay * Cx);
     float W = fmaf(Bx, Ay, - By * Ax);
+
+    static constexpr float eps_tol = 1e-7;
+
+    if (U > -eps_tol && U < eps_tol)
+        U = 0.f;
+    if (V > -eps_tol && V < eps_tol)
+        V = 0.f;
+    if (W > -eps_tol && W < eps_tol)
+        W = 0.f;
 
     // Perform edge tests
 #ifdef MADRONA_MESHBVH_BACKFACE_CULLING
@@ -469,6 +492,7 @@ static TriHitInfo triangleIntersect(int32_t leaf_idx,
     }
 }
 
+#if 0
 static void prefetchNode(uint32_t node_idx,
                          QBVHNode *node_buffer,
                          QBVHNode *result_smem,
@@ -483,7 +507,9 @@ static void prefetchNode(uint32_t node_idx,
     }
     pipe.producer_commit();
 }
+#endif
 
+#if 0
 static QBVHNode readNode(QBVHNode *node_smem,
                          cuda::pipeline<cuda::thread_scope_thread> &pipe)
 {
@@ -493,11 +519,23 @@ static QBVHNode readNode(QBVHNode *node_smem,
 
     return read_node;
 }
+#endif
+
+static Vector3 hexToRgb(uint32_t hex)
+{
+    // Extract each color component and normalize to [0, 1] range
+    float r = ((hex >> 16) & 0xFF) / 255.0f;
+    float g = ((hex >> 8) & 0xFF) / 255.0f;
+    float b = (hex & 0xFF) / 255.0f;
+
+    return {r, g, b};
+}
 
 static __device__ TraceResult traceRay(
     TraceInfo trace_info,
     TraceWorldInfo world_info)
 {
+#if 0
     uint8_t *smem_scratch = nullptr;
     {
         uint32_t linear_tid =
@@ -508,8 +546,11 @@ static __device__ TraceResult traceRay(
             (blockDim.x * blockDim.y * blockDim.z);
         smem_scratch = &smem::buffer[linear_tid * bytes_per_thread];
     }
+#endif
 
+#if 0
     cuda::pipeline<cuda::thread_scope_thread> pipe = cuda::make_pipeline();
+#endif
 
     // We create these so that we can keep track of the original ray origin,
     // direction in world space. We will need to transform them when we enter
@@ -533,12 +574,14 @@ static __device__ TraceResult traceRay(
     // level structure. Need to maintain some extra state unfortunately.
     TriangleIsectInfo isect_info = {};
     MeshBVH *current_bvh = nullptr;
+    int32_t instance_idx = -1;
     float t_scale = 1.f;
 
     QBVHNode *node_buffer = world_info.nodes;
 
     TriHitInfo tri_hit = {
-        .hit = false
+        .hit = false,
+        .instanceIdx = -1
     };
 
     for (;;) {
@@ -572,7 +615,7 @@ static __device__ TraceResult traceRay(
             if (parent_grp_type == GroupType::TopLevel &&
                 child_is_leaf) {
                 // Need to compute new ray o/d/etc...
-                int32_t instance_idx = (int32_t)(child_node_idx & ~0x8000'0000);
+                instance_idx = (int32_t)(child_node_idx & ~0x8000'0000);
                 InstanceData *instance_data = world_info.instances + 
                                               instance_idx;
 
@@ -592,6 +635,9 @@ static __device__ TraceResult traceRay(
                             ray_d);
                 t_scale = ray_d.length();
                 t_max *= t_scale;
+
+                // mat_id_override = instance_data->matID;
+                // instance_idx = instance_idx;
 
                 ray_d /= t_scale;
                 inv_ray_d = Diag3x3::fromVec(ray_d).inv();
@@ -684,6 +730,7 @@ static __device__ TraceResult traceRay(
                     t_max = hit_info.tHit;
 
                     tri_hit = hit_info;
+                    tri_hit.instanceIdx = instance_idx;
                 }
 
                 triangle_grp = unsetPresentBit(triangle_grp, local_node_tri_idx);
@@ -694,6 +741,9 @@ static __device__ TraceResult traceRay(
         // break out of the tracing loop
         if (getPresentBits(current_grp) == 0) {
             if (stack_size == 0) {
+                t_max = t_max / t_scale;
+                t_scale = 1.f;
+
                 break;
             } else {
                 if (getGroupType(current_grp) == GroupType::BottomLevelRoot) {
@@ -704,6 +754,7 @@ static __device__ TraceResult traceRay(
                     ray_o = trace_info.rayOrigin;
                     ray_d = trace_info.rayDirection;
                     inv_ray_d = Diag3x3::fromVec(ray_d).inv();
+                    instance_idx = -1;
 
                     node_buffer = world_info.nodes;
                 }
@@ -717,12 +768,21 @@ static __device__ TraceResult traceRay(
         tri_hit.tHit = t_max;
 
         if (bvhParams.raycastRGBD && (!trace_info.dOnly)) {
-            int32_t material_idx = tri_hit.bvh->getMaterialIDX(
-                    tri_hit.leafMaterialIndex);
+            InstanceData *instance = world_info.instances + tri_hit.instanceIdx;
+
+            int32_t override_mat_id = instance->matID;
+            int32_t material_idx = override_mat_id;
+
+            if (override_mat_id == MaterialOverride::UseDefaultMaterial) {
+                material_idx = tri_hit.bvh->getMaterialIDX(
+                        tri_hit.leafMaterialIndex);
+            }
 
             Vector3 color = { 1.f, 1.f, 1.f };
 
-            if (material_idx != -1) {
+            if (override_mat_id == MaterialOverride::UseOverrideColor) {
+                color = hexToRgb(instance->color);
+            } else if (material_idx != -1) {
                 Material *mat = &bvhParams.materials[material_idx];
 
                 if (mat->textureIdx != -1) {
@@ -735,9 +795,13 @@ static __device__ TraceResult traceRay(
                         sampled_color.y,
                         sampled_color.z };
 
-                    color.x *= tex_color.x;
-                    color.y *= tex_color.y;
-                    color.z *= tex_color.z;
+                    color.x = tex_color.x * mat->color.x;
+                    color.y = tex_color.y * mat->color.y;
+                    color.z = tex_color.z * mat->color.z;
+                } else {
+                    color.x = mat->color.x;
+                    color.y = mat->color.y;
+                    color.z = mat->color.z;
                 }
 
                 result.metalness = mat->metalness;
@@ -745,7 +809,7 @@ static __device__ TraceResult traceRay(
             }
 
             result.color = color;
-            result.normal = tri_hit.normal;
+            result.normal = instance->rotation.rotateVec(tri_hit.normal);
         }
         
         result.depth = tri_hit.tHit;
@@ -788,10 +852,6 @@ static __device__ FragmentResult computeFragment(
     // Direct hit first
     TraceResult first_hit = traceRay(trace_info, world_info);
 
-#if defined (MADRONA_RT_SHADOWS)
-    TraceResult shadow_hit = {};
-#endif
-
     __syncwarp();
 
     if (!bvhParams.raycastRGBD) {
@@ -802,39 +862,74 @@ static __device__ FragmentResult computeFragment(
             };
         }
     } else if (first_hit.hit) {
+        // Now we need to test against lights.
         Vector3 hit_pos = trace_info.rayOrigin +
                           first_hit.depth * trace_info.rayDirection;
 
-#if defined (MADRONA_RT_SHADOWS)
-        shadow_hit = traceRay(
-                TraceInfo {
-                    .rayOrigin = hit_pos,
-                    .rayDirection = world_info.lightDir,
-                    .tMin = 0.000001f,
-                    .tMax = 10000.f,
-                    .dOnly = true
-                }, world_info);
+        Vector3 acc_color = Vector3{ 0.f, 0.f, 0.f };
 
-        if (shadow_hit.hit) {
-            return FragmentResult {
-                .hit = true,
-                .color = lightingShadow(first_hit.color, first_hit.normal),
-                .normal = first_hit.normal,
-                .depth = first_hit.depth
-            };
-        } else {
-#endif
-            return FragmentResult {
-                .hit = true,
-                .color = lighting(first_hit.color, 
-                                  first_hit.normal,
-                                  world_info.lightDir),
-                .normal = first_hit.normal,
-                .depth = first_hit.depth
-            };
-#if defined (MADRONA_RT_SHADOWS)
+        float light_contrib = 0.f;
+
+        for (int i = 0; i < world_info.numLights; ++i) {
+            LightDesc desc = world_info.lights[i];
+
+            float cutoff = -1.f;
+
+            Vector3 light_dir = -desc.direction;
+            if (desc.type == LightDesc::Type::Spotlight) {
+                light_dir = (desc.position - hit_pos).normalize();
+                cutoff = desc.cutoff;
+            }
+
+            if (cutoff != -1.f && desc.type == LightDesc::Type::Spotlight) {
+                // Dot the vector going from point to light with the direction
+                // of the light.
+                float d = (-light_dir).dot(desc.direction);
+                d /= (light_dir.length() * desc.direction.length());
+                float angle = acosf(d);
+
+                // This pixel isn't affected by this light.
+                if (std::abs(angle) > std::abs(desc.cutoff)) {
+                    continue;
+                }
+            }
+
+            // Make sure the surface is actually pointing to the light
+            // when casting shadow.
+            if (desc.castShadow) {
+                if (light_dir.dot(first_hit.normal) > 0.f) {
+                    // TODO: Definitely do some sort of ray fetching because there will
+                    // be threads doing nothing potentially.
+                    TraceResult shadow_hit = traceRay(
+                            TraceInfo {
+                            .rayOrigin = hit_pos,
+                            .rayDirection = light_dir,
+                            .tMin = 0.000001f,
+                            .tMax = 10000.f,
+                            .dOnly = true
+                            }, world_info);
+
+                    if (!shadow_hit.hit) {
+                        light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
+                    }
+                }
+            } else {
+                light_contrib += fminf(fmaxf(first_hit.normal.dot(light_dir), 0.f), 1.f);
+            }
         }
-#endif
+
+        acc_color = fmaxf(0.2, light_contrib) * first_hit.color;
+        acc_color.x = fminf(1.f, acc_color.x);
+        acc_color.y = fminf(1.f, acc_color.y);
+        acc_color.z = fminf(1.f, acc_color.z);
+
+        // If we are still here, just do normal lighting calculation.
+        return FragmentResult {
+            .hit = true,
+            .color = acc_color,
+            .normal = first_hit.normal,
+            .depth = first_hit.depth
+        };
     }
 
     return FragmentResult {
@@ -893,7 +988,8 @@ extern "C" __global__ void bvhRaycastEntry()
                 .nodes = bvhParams.internalData->traversalNodes + 
                          internal_nodes_offset,
                 .instances = bvhParams.instances + internal_nodes_offset,
-                .lightDir = Vector3{ 0.5, 0.5, 2.f }.normalize()
+                .lights = &bvhParams.lights[bvhParams.lightOffsets[world_idx]],
+                .numLights = (uint32_t)bvhParams.lightCounts[world_idx]
             }
         );
 
@@ -901,7 +997,7 @@ extern "C" __global__ void bvhRaycastEntry()
 
 
         uint32_t linear_pixel_idx = 4 * 
-            (pixel_y + pixel_x * bvhParams.renderOutputResolution);
+            (pixel_x + pixel_y * bvhParams.renderOutputResolution);
 
         uint32_t global_pixel_byte_off = current_view_offset * bytes_per_view +
             linear_pixel_idx;

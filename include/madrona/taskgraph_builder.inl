@@ -109,4 +109,25 @@ TaskGraphNodeID ClearTmpNode<ArchetypeT>::addToGraph(
     return builder.addDefaultNode<ClearTmpNode>(dependencies);
 }
 
+template <typename ArchetypeT, typename ComponentT>
+TaskGraphNodeID SortArchetypeNode<ArchetypeT, ComponentT>::addToGraph(
+        StateManager &state_mgr,
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> dependencies)
+{
+    return SortArchetypeNodeBase::addToGraph(state_mgr, builder, dependencies,
+        TypeTracker::typeID<ArchetypeT>(),
+        TypeTracker::typeID<ComponentT>());
+}
+
+template <typename ArchetypeT>
+TaskGraphNodeID CompactArchetypeNode<ArchetypeT>::addToGraph(
+        StateManager &state_mgr,
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> dependencies)
+{
+    return CompactArchetypeNodeBase::addToGraph(state_mgr, builder, dependencies,
+        TypeTracker::typeID<ArchetypeT>());
+}
+
 }

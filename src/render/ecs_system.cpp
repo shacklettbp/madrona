@@ -88,6 +88,10 @@ inline void mortonCodeUpdate(Context &ctx,
 {
     (void)e;
 
+    if (renderable.renderEntity == Entity::none()) {
+        return;
+    }
+
     // Calculate and set the morton code
     MortonCode &morton_code = ctx.get<MortonCode>(renderable.renderEntity);
     morton_code = encodeMorton3(pos);
@@ -101,6 +105,122 @@ inline void instanceTransformUpdate(Context &ctx,
                                     const ObjectID &obj_id,
                                     const Renderable &renderable)
 {
+    if (renderable.renderEntity == Entity::none()) {
+        return;
+    }
+    // Just update the instance data that is associated with this entity
+#if defined(MADRONA_GPU_MODE)
+    (void)e;
+
+    InstanceData &data = ctx.get<InstanceData>(renderable.renderEntity);
+
+    auto &system_state = ctx.singleton<RenderingSystemState>();
+#else
+    (void)renderable;
+
+    // Just update the instance data that is associated with this entity
+    auto &system_state = ctx.singleton<RenderingSystemState>();
+    uint32_t instance_id = system_state.totalNumInstancesCPU->fetch_add<sync::acq_rel>(1);
+
+    // Required for stable sorting on CPU
+    system_state.instanceWorldIDsCPU[instance_id] = 
+        ((uint64_t)ctx.worldID().idx << 32) | (uint64_t)e.id;
+
+    InstanceData &data = system_state.instancesCPU[instance_id];
+    data = ctx.get<InstanceData>(renderable.renderEntity);
+
+#endif
+
+    data.position = pos;
+    data.rotation = rot;
+    data.scale = scale;
+
+    data.worldIDX = ctx.worldID().idx;
+    data.objectID = obj_id.idx;
+
+    // Get the root AABB from the model and translate it to store
+    // it in the TLBVHNode structure.
+
+#ifdef MADRONA_GPU_MODE
+    bool raycast_enabled = 
+        mwGPU::GPUImplConsts::get().raycastOutputResolution != 0;
+
+    if (raycast_enabled) {
+        MeshBVH *bvh = (MeshBVH *)
+            mwGPU::GPUImplConsts::get().meshBVHsAddr +
+            obj_id.idx;
+
+        math::AABB aabb = bvh->rootAABB.applyTRS(
+                data.position, data.rotation, data.scale);
+
+        ctx.get<TLBVHNode>(renderable.renderEntity).aabb = aabb;
+    }
+#endif
+}
+
+uint32_t rgbToHex(Vector3 c) {
+    float r = c.x;
+    float g = c.y;
+    float b = c.z;
+
+    // Ensure the values are clamped between 0 and 1
+    if (r < 0.0f) r = 0.0f;
+    if (g < 0.0f) g = 0.0f;
+    if (b < 0.0f) b = 0.0f;
+    if (r > 1.0f) r = 1.0f;
+    if (g > 1.0f) g = 1.0f;
+    if (b > 1.0f) b = 1.0f;
+
+    // Convert each component to an integer from 0 to 255
+    uint8_t red = (uint8_t)(r * 255);
+    uint8_t green = (uint8_t)(g * 255);
+    uint8_t blue = (uint8_t)(b * 255);
+
+    // Combine into a single uint32_t hex code
+    return (red << 16) | (green << 8) | blue;
+}
+
+inline void lightUpdate(Context &ctx,
+                        Entity e,
+                        const Position &pos,
+                        const LightDescDirection &dir,
+                        const LightDescType &type,
+                        const LightDescShadow &shadow,
+                        const LightDescCutoffAngle &angle,
+                        const LightDescIntensity &intensity,
+                        const LightDescActive &active,
+                        LightCarrier &carrier)
+{
+    if (carrier.light == Entity::none()) {
+        return;
+    }
+
+    (void)e;
+
+    LightDesc &desc = ctx.get<LightDesc>(carrier.light);
+
+    desc.type = type.type;
+    desc.castShadow = shadow.castShadow;
+    desc.position = pos;
+    desc.direction = dir;
+    desc.cutoff = angle.cutoff;
+    desc.intensity = intensity.intensity;
+    desc.active = active.active;
+}
+
+inline void instanceTransformUpdateWithMat(Context &ctx,
+                                           Entity e,
+                                           const Position &pos,
+                                           const Rotation &rot,
+                                           const Scale &scale,
+                                           const ObjectID &obj_id,
+                                           const MaterialOverride &mat,
+                                           const ColorOverride &color,
+                                           const Renderable &renderable)
+{
+    if (renderable.renderEntity == Entity::none()) {
+        return;
+    }
     // Just update the instance data that is associated with this entity
 #if defined(MADRONA_GPU_MODE)
     (void)e;
@@ -130,6 +250,10 @@ inline void instanceTransformUpdate(Context &ctx,
     data.position = pos;
     data.rotation = rot;
     data.scale = scale;
+
+    data.matID = mat.matID;
+    data.color = color.color;
+
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
 
@@ -261,6 +385,17 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<PerspectiveCameraData>();
     registry.registerComponent<InstanceData>();
     registry.registerComponent<MortonCode>();
+    registry.registerComponent<MaterialOverride>();
+    registry.registerComponent<ColorOverride>();
+    registry.registerComponent<LightDesc>();
+
+    registry.registerComponent<LightDescDirection>();
+    registry.registerComponent<LightDescType>();
+    registry.registerComponent<LightDescShadow>();
+    registry.registerComponent<LightDescCutoffAngle>();
+    registry.registerComponent<LightDescIntensity>();
+    registry.registerComponent<LightDescActive>();
+    registry.registerComponent<LightCarrier>();
 
     registry.registerComponent<RGBOutputBuffer>(rgb_output_bytes);
     registry.registerComponent<DepthOutputBuffer>(depth_output_bytes);
@@ -271,6 +406,7 @@ void registerTypes(ECSRegistry &registry,
     registry.registerComponent<TLBVHNode>();
 
     registry.registerArchetype<RaycastOutputArchetype>();
+    registry.registerArchetype<LightArchetype>();
 
 
     // Pointers get set in RenderingSystem::init
@@ -326,7 +462,8 @@ void registerTypes(ECSRegistry &registry,
 }
 
 TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
-                           Span<const TaskGraphNodeID> deps)
+                           Span<const TaskGraphNodeID> deps,
+                           bool update_visual_properties)
 {
     // FIXME: It feels like we should have persistent slots for renderer
     // state rather than needing to continually reset the instance count
@@ -341,6 +478,33 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             ObjectID,
             Renderable
         >>(deps);
+
+    if (update_visual_properties) {
+        instance_setup = builder.addToGraph<ParallelForNode<Context,
+            instanceTransformUpdateWithMat,
+                Entity,
+                Position,
+                Rotation,
+                Scale,
+                ObjectID,
+                MaterialOverride,
+                ColorOverride,
+                Renderable
+            >>({instance_setup});
+
+        instance_setup = builder.addToGraph<ParallelForNode<Context,
+             lightUpdate,
+                Entity,
+                Position,
+                LightDescDirection,
+                LightDescType,
+                LightDescShadow,
+                LightDescCutoffAngle,
+                LightDescIntensity,
+                LightDescActive,
+                LightCarrier
+            >>({instance_setup});
+    }
 
     auto viewdata_update = builder.addToGraph<ParallelForNode<Context,
         viewTransformUpdate,
@@ -359,12 +523,11 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
 
     (void)mortoncode_update;
 
-#ifdef MADRONA_GPU_MODE
     // Need to sort the instances, as well as the views
 
     // Need to sort by worlds first to handle deleted RenderableArchetypes
     auto sort_instances_by_world1 = 
-        builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
+        builder.addToGraph<CompactArchetypeNode<RenderableArchetype>>(
             {mortoncode_update});
 
     // Then sort by morton
@@ -372,13 +535,13 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
         builder.addToGraph<SortArchetypeNode<RenderableArchetype, MortonCode>>(
             {sort_instances_by_world1});
 
+    auto post_instance_sort_reset_tmp =
+        builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_morton});
+
     // Then sort by world again to group up by world
     auto sort_instances_by_world2 = 
-        builder.addToGraph<SortArchetypeNode<RenderableArchetype, WorldID>>(
-            {sort_instances_by_morton});
-
-    auto post_instance_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_instances_by_world2});
+        builder.addToGraph<CompactArchetypeNode<RenderableArchetype>>(
+            {post_instance_sort_reset_tmp});
 
 #if 0
     auto sort_views = 
@@ -386,25 +549,28 @@ TaskGraphNodeID setupTasks(TaskGraphBuilder &builder,
             {post_instance_sort_reset_tmp});
 #endif
 
-    auto sort_views_world = builder.addToGraph<SortArchetypeNode<
-        RenderCameraArchetype, WorldID>>(
-                {post_instance_sort_reset_tmp});
+    auto sort_views_world = builder.addToGraph<
+        CompactArchetypeNode<RenderCameraArchetype>>(
+            {sort_instances_by_world2});
 
     auto sort_views_index = builder.addToGraph<SortArchetypeNode<
-        RenderCameraArchetype, RenderOutputIndex>>(
-                {sort_views_world});
+        RenderCameraArchetype, RenderOutputIndex>>({sort_views_world});
 
     auto post_view_sort_reset_tmp =
         builder.addToGraph<ResetTmpAllocNode>({sort_views_index});
 
+    auto sort_lights_world = builder.addToGraph<CompactArchetypeNode<
+        LightArchetype>>({post_view_sort_reset_tmp});
+
+#ifdef MADRONA_GPU_MODE
     auto export_counts = builder.addToGraph<ParallelForNode<Context,
         exportCountsGPU,
             RenderingSystemState
-        >>({post_view_sort_reset_tmp});
+        >>({sort_lights_world});
 
     return export_counts;
 #else
-    return viewdata_update;
+    return sort_lights_world;
 #endif
 }
 
@@ -451,6 +617,16 @@ void makeEntityRenderable(Context &ctx,
 {
     Entity render_entity = ctx.makeEntity<RenderableArchetype>();
     ctx.get<Renderable>(e).renderEntity = render_entity;
+
+    // Set default mat / color to not be overriden
+    ctx.get<InstanceData>(render_entity).matID = -1;
+    ctx.get<InstanceData>(render_entity).color = 0;
+}
+
+void disableEntityRenderable(Context &ctx,
+                             Entity e)
+{
+    ctx.get<Renderable>(e).renderEntity = Entity::none();
 }
 
 void attachEntityToView(Context &ctx,
@@ -511,6 +687,29 @@ void cleanupRenderableEntity(Context &ctx,
     Entity render_entity = ctx.get<Renderable>(e).renderEntity;
     ctx.destroyEntity(render_entity);
 }
+
+void makeEntityLightCarrier(Context &ctx, Entity e)
+{
+    Entity light_e = ctx.makeEntity<LightArchetype>();
+    ctx.get<LightCarrier>(e).light = light_e;
+
+    ctx.get<LightDesc>(light_e) = LightDesc {
+        .type = ctx.get<LightDescType>(e).type,
+        .castShadow = ctx.get<LightDescShadow>(e).castShadow,
+        .position = ctx.get<Position>(e),
+        .direction = ctx.get<LightDescDirection>(e),
+        .cutoff = ctx.get<LightDescCutoffAngle>(e).cutoff,
+        .intensity = ctx.get<LightDescIntensity>(e).intensity,
+        .active = ctx.get<LightDescActive>(e).active,
+    };
+}
+
+#if 0
+void configureLight(Context &ctx, Entity light, LightDesc desc)
+{
+    ctx.get<LightDesc>(light) = desc;
+}
+#endif
 
 // Add this later when we decide to make the renderer more flexible
 #if 0

@@ -23,7 +23,7 @@ uint32_t getNumDofs(DofType type)
         return 1;
     }
 
-    case DofType::None: {
+    default: {
         // Something is wrong if we're here
         MADRONA_UNREACHABLE();
         return 0;
