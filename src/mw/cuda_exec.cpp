@@ -12,6 +12,7 @@
 #include <string>
 #include <filesystem>
 #include <charconv>
+#include <mutex>
 
 #include <cuda/atomic>
 
@@ -918,6 +919,37 @@ static __attribute__((always_inline)) inline void dispatch(
     // unlike old driver API
     DynArray<HeapArray<char>> source_bytecodes(num_sources);
     printf("Compiling GPU engine code:\n");
+
+#if 0
+    std::mutex link_mutex;
+
+    std::vector<std::thread> compile_threads;
+    for (int i = 0; i < num_sources; ++i) {
+        compile_threads.emplace_back(
+            std::thread([&](uint32_t iter, const char *src) {
+                printf("%s\n", src);
+
+                auto [ptx, bytecode] = cu::jitCompileCPPFile(src,
+                    compile_flags, num_compile_flags,
+                    fast_compile_flags, num_fast_compile_flags,
+                    opt_mode == CompileConfig::OptMode::LTO);
+
+                std::lock_guard<std::mutex> lock(link_mutex);
+
+                processPTXSymbols(std::string_view(ptx.data(), ptx.size()));
+                addToLinker(bytecode, src);
+
+                source_bytecodes.emplace_back(std::move(bytecode));
+            }, i, sources[i]));
+    }
+
+    for (int i = 0; i < num_sources; ++i) {
+        compile_threads[i].join();
+    }
+#endif
+
+
+#if 1
     for (int64_t i = 0; i < num_sources; i++) {
         //if (verbose_compile) {
             printf("%s\n", sources[i]);
@@ -932,6 +964,7 @@ static __attribute__((always_inline)) inline void dispatch(
 
         source_bytecodes.emplace_back(std::move(bytecode));
     }
+#endif
 
     megakernel_prefix += R"__(
 }
@@ -1018,6 +1051,16 @@ static __attribute__((always_inline)) inline void dispatch(
             opt_mode == CompileConfig::OptMode::LTO);
 
         addToLinker(compiled_megakernel.outputBinary, megakernel_file.c_str());
+
+        auto *save_megakernel_fake_file = getenv("MADRONA_MWGPU_SAVE_MEGAKERNEL");
+        if (save_megakernel_fake_file && save_megakernel_fake_file[0] == '1') {
+            std::ofstream out_file(fake_megakernel_cpp_path);
+
+            out_file << specialized_megakernel;
+
+            std::cout << "Saving megakernel to " << fake_megakernel_cpp_path << std::endl;
+            std::cout << "Megakernel signature: " << megakernel_prefix << std::endl;
+        }
     }
 
     {

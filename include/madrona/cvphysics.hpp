@@ -286,6 +286,7 @@ struct DofObjectLimit {
 
 struct DofObjectHierarchyDesc {
     Entity parent;
+    uint32_t parentRow;
 
     // Relative position of the joint to the parent's COM.
     math::Vector3 relPositionParent;
@@ -310,6 +311,7 @@ struct DofObjectHierarchyDesc {
     int32_t parentIndex;
 
     Entity bodyGroup;
+    uint32_t bodyGroupRow;
 
     float globalScale;
 };
@@ -336,12 +338,9 @@ struct DofObjectArchetype : public Archetype<
     DofObjectExtForce,
 
     DofObjectTmpState,
-
     DofObjectHierarchyDesc,
-
     DofObjectInertial,
     DofObjectFriction,
-
     DofObjectLimit,
 
     DofObjectNumDofs
@@ -447,6 +446,7 @@ struct BodyGroupHierarchy {
     float * getBias(Context &ctx);
     int32_t * getExpandedParent(Context &ctx);
     Entity * bodies(Context &ctx);
+    uint32_t * bodyRows(Context &ctx);
     uint32_t * getDofPrefixSum(Context &ctx);
     BodyObjectData *getCollisionData(Context &ctx);
     BodyObjectData *getVisualData(Context &ctx);

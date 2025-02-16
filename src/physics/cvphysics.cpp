@@ -19,6 +19,99 @@
 #define LOG(...)
 #endif
 
+
+#ifdef MADRONA_GPU_MODE
+#define COUNT_CV_GPU_CLOCKS
+#endif
+
+
+#ifdef COUNT_CV_GPU_CLOCKS
+#define MADRONA_COUNT_CV_GPU_CLOCKS
+
+extern "C" {
+madrona::AtomicU64 cvComputeBodyComClocks = 0;
+madrona::AtomicU64 cvComputeTotalComClocks = 0;
+madrona::AtomicU64 cvComputeSpatialInertiasClocks = 0;
+madrona::AtomicU64 cvComputePhiHierarchyClocks = 0;
+
+madrona::AtomicU64 cvRecursiveNewtonEulerClocks = 0;
+madrona::AtomicU64 cvRecursiveNewtonEulerForwardClocks = 0;
+madrona::AtomicU64 cvRecursiveNewtonEulerBackwardClocks = 0;
+
+madrona::AtomicU64 cvRecursiveNewtonEulerMemAccess = 0;
+madrona::AtomicU64 cvRecursiveNewtonEulerCompute = 0;
+
+madrona::AtomicU64 cvAddExternalForcesClocks = 0;
+madrona::AtomicU64 cvCombineSpatialInertiasClocks = 0;
+madrona::AtomicU64 cvCompositeRigidBodyClocks = 0;
+madrona::AtomicU64 cvSumInertiaDiagonalsClocks = 0;
+madrona::AtomicU64 cvFactorizeMassMatrixClocks = 0;
+madrona::AtomicU64 cvComputeFreeAccelerationClocks = 0;
+madrona::AtomicU64 cvProcessContactsClocks = 0;
+madrona::AtomicU64 cvBrobdingnagClocks = 0;
+madrona::AtomicU64 cvIntegrationStepClocks = 0;
+madrona::AtomicU64 cvForwardKinematicsClocks = 0;
+madrona::AtomicU64 cvConvertPostSolveClocks = 0;
+
+madrona::AtomicU64 gaussAllocateScratchClocks = 0;
+madrona::AtomicU64 gaussPrepareSolverClocks = 0;
+madrona::AtomicU64 gaussComputeContactAccRefClocks = 0;
+madrona::AtomicU64 gaussComputeEqualityAccRefClocks = 0;
+madrona::AtomicU64 gaussNonlinearCGClocks = 0;
+}
+#endif
+
+#ifdef MADRONA_COUNT_CV_GPU_CLOCKS
+class CVClockHelper {
+public:
+    inline CVClockHelper(madrona::AtomicU64 &counter)
+        : counter_(&counter)
+    {
+        cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
+                                  cuda::thread_scope_thread);
+        start_ = timestamp();
+    }
+
+    inline void end()
+    {
+        cuda::atomic_thread_fence(cuda::memory_order_seq_cst,
+                                  cuda::thread_scope_thread);
+        auto end = timestamp();
+        counter_->fetch_add_relaxed(end - start_);
+        counter_ = nullptr;
+    }
+
+    inline ~CVClockHelper()
+    {
+        if (counter_ != nullptr) {
+            end();
+        }
+    }
+
+private:
+    inline uint64_t timestamp() const
+    {
+        uint64_t v;
+        asm volatile("mov.u64 %0, %%globaltimer;"
+                     : "=l"(v));
+        return v;
+    }
+
+    madrona::AtomicU64 *counter_;
+    uint64_t start_;
+};
+
+#define PROF_START(name, counter) \
+    CVClockHelper name(counter)
+
+#define PROF_END(name) name.end()
+#endif
+
+#ifndef PROF_START
+#define PROF_START(name, counter)
+#define PROF_END(name)
+#endif
+
 using namespace madrona::math;
 using namespace madrona::base;
 
@@ -37,6 +130,31 @@ struct SparseBlkDiag {
     uint32_t numBlks;
     Blk *blks;
 };
+
+#if 0
+// For each row, stores block_size x block_size blocks.
+struct SparseContactJacobian {
+    struct Blk {
+        uint32_t offset;
+        float v[block_size * block_size];
+    };
+
+    struct BlkList {
+        uint32_t numBlocks;
+        Blk *blks;
+    };
+
+    struct BlkList {
+        
+    };
+
+    uint32_t numRows;
+    uint32_t numCols;
+
+    uint32_t numBlockLists;
+    BlkList *blockLists;
+};
+#endif
 
 #ifdef MADRONA_GPU_MODE
 namespace madrona::gpu_utils {
@@ -768,6 +886,17 @@ StateManager * getStateManager()
 #endif
 }
 
+template <typename ArchetypeT, typename ComponentT>
+ComponentT * getRows(StateManager *state_mgr, uint32_t world_id)
+{
+#ifdef MADRONA_GPU_MODE
+    (void)world_id;
+    return state_mgr->getArchetypeComponent<ArchetypeT, ComponentT>();
+#else
+    return state_mgr->getWorldComponents<ArchetypeT, ComponentT>(world_id);
+#endif
+}
+
 struct MRElement128b {
     uint8_t d[128];
 };
@@ -821,6 +950,14 @@ Entity * BodyGroupHierarchy::bodies(Context &ctx)
     uint8_t *bytes =
         (uint8_t *)ctx.memoryRangePointer<MRElement128b>(mrBodies);
     return (Entity *)bytes;
+}
+
+uint32_t * BodyGroupHierarchy::bodyRows(Context &ctx)
+{
+    uint8_t *bytes =
+        (uint8_t *)ctx.memoryRangePointer<MRElement128b>(mrBodies) +
+        sizeof(Entity) * numBodies;
+    return (uint32_t *)bytes;
 }
 
 uint32_t * BodyGroupHierarchy::getDofPrefixSum(Context &ctx)
@@ -1088,6 +1225,102 @@ struct CVSolveData {
 
 namespace tasks {
 
+inline void getBodyRows(Context &ctx, BodyGroupHierarchy &hier)
+{
+    Entity *bodies = hier.bodies(ctx);
+    uint32_t *row = hier.bodyRows(ctx);
+
+    for (uint32_t i = 0; i < hier.numBodies; ++i) {
+        row[i] = ctx.loc(bodies[i]).row;
+    }
+}
+
+inline void getParentRows(Context &ctx,
+                          DofObjectHierarchyDesc &hier)
+{
+    if (hier.parent != Entity::none()) {
+        hier.parentRow = ctx.loc(hier.parent).row;
+    }
+
+#if 0
+    if (hier.parent == Entity::none()) {
+        hier.parentRow = 0xFFFF'FFFF;
+    } else {
+        hier.parentRow = ctx.loc(hier.parent).row;
+    }
+#endif
+
+    hier.bodyGroupRow = ctx.loc(hier.bodyGroup).row;
+}
+
+#ifdef MADRONA_COUNT_CV_GPU_CLOCKS
+inline void reportCVClocks(Context &ctx, CVSolveData &)
+{
+#define REPORT_CLOCKS(name) printf("\t - " #name " = %llu (%f percent)\n", \
+                                   name .load<sync::relaxed>(), \
+                                   100.f * (float)((double)name .load<sync::relaxed>() / (double)total_clocks)); \
+                            name .store<sync::relaxed>(0)
+
+    if (ctx.worldID().idx != 0) {
+        return;
+    }
+
+    if (threadIdx.x == 0 && ctx.worldID().idx == 0) {
+        printf("Frame report:\n");
+
+        uint64_t total_clocks =
+            cvComputeBodyComClocks.load_relaxed() +
+            cvComputeTotalComClocks.load_relaxed() +
+            cvComputeSpatialInertiasClocks.load_relaxed() +
+            cvComputePhiHierarchyClocks.load_relaxed() +
+            cvRecursiveNewtonEulerClocks.load_relaxed() +
+            cvAddExternalForcesClocks.load_relaxed() +
+            cvCombineSpatialInertiasClocks.load_relaxed() +
+            cvCompositeRigidBodyClocks.load_relaxed() +
+            cvSumInertiaDiagonalsClocks.load_relaxed() +
+            cvFactorizeMassMatrixClocks.load_relaxed() +
+            cvComputeFreeAccelerationClocks.load_relaxed() +
+            cvProcessContactsClocks.load_relaxed() +
+            cvBrobdingnagClocks.load_relaxed() +
+            cvIntegrationStepClocks.load_relaxed() +
+            cvForwardKinematicsClocks.load_relaxed() +
+            cvConvertPostSolveClocks.load_relaxed() +
+            gaussAllocateScratchClocks.load_relaxed() +
+            gaussPrepareSolverClocks.load_relaxed() +
+            gaussComputeContactAccRefClocks.load_relaxed() +
+            gaussComputeEqualityAccRefClocks.load_relaxed() +
+            gaussNonlinearCGClocks.load_relaxed();
+
+
+        REPORT_CLOCKS(cvComputeBodyComClocks);
+        REPORT_CLOCKS(cvComputeTotalComClocks);
+        REPORT_CLOCKS(cvComputeSpatialInertiasClocks);
+        REPORT_CLOCKS(cvComputePhiHierarchyClocks);
+        REPORT_CLOCKS(cvRecursiveNewtonEulerClocks);
+        REPORT_CLOCKS(cvRecursiveNewtonEulerForwardClocks);
+        REPORT_CLOCKS(cvRecursiveNewtonEulerBackwardClocks);
+        REPORT_CLOCKS(cvRecursiveNewtonEulerMemAccess);
+        REPORT_CLOCKS(cvRecursiveNewtonEulerCompute);
+        REPORT_CLOCKS(cvAddExternalForcesClocks);
+        REPORT_CLOCKS(cvCombineSpatialInertiasClocks);
+        REPORT_CLOCKS(cvCompositeRigidBodyClocks);
+        REPORT_CLOCKS(cvSumInertiaDiagonalsClocks);
+        REPORT_CLOCKS(cvFactorizeMassMatrixClocks);
+        REPORT_CLOCKS(cvComputeFreeAccelerationClocks);
+        REPORT_CLOCKS(cvProcessContactsClocks);
+        REPORT_CLOCKS(cvBrobdingnagClocks);
+        REPORT_CLOCKS(cvIntegrationStepClocks);
+        REPORT_CLOCKS(cvForwardKinematicsClocks);
+        REPORT_CLOCKS(cvConvertPostSolveClocks);
+        REPORT_CLOCKS(gaussAllocateScratchClocks);
+        REPORT_CLOCKS(gaussPrepareSolverClocks);
+        REPORT_CLOCKS(gaussComputeContactAccRefClocks);
+        REPORT_CLOCKS(gaussComputeEqualityAccRefClocks);
+        REPORT_CLOCKS(gaussNonlinearCGClocks);
+    }
+}
+#endif
+
 // Computes the expanded parent array (based on Table 6.4 of Featherstone)
 inline void computeExpandedParent(Context &ctx,
                                   BodyGroupHierarchy &body_grp) {
@@ -1120,6 +1353,8 @@ inline void computeExpandedParent(Context &ctx,
 inline void forwardKinematics(Context &ctx,
                               BodyGroupHierarchy &body_grp)
 {
+    PROF_START(prof, cvForwardKinematicsClocks);
+
     { // Set the parent's state
         auto &position = ctx.get<DofObjectPosition>(body_grp.bodies(ctx)[0]);
         auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[0]);
@@ -1283,6 +1518,8 @@ inline void forwardKinematics(Context &ctx,
         } break;
         }
     }
+
+    PROF_END(prof);
 }
 
 // Init tasks
@@ -2468,6 +2705,8 @@ float GaussMinimizationNode::exactLineSearch(
 
 void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
 {
+    PROF_START(prof, gaussAllocateScratchClocks);
+
     if (threadIdx.x % 32 == 0) {
         const int32_t num_smem_bytes_per_warp =
             mwGPU::SharedMemStorage::numBytesPerWarp();
@@ -2642,10 +2881,14 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
 #endif
         }
     }
+    
+    PROF_END(prof);
 }
 
 void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 {
+    PROF_START(prof, gaussPrepareSolverClocks);
+
     using namespace gpu_utils;
 
     uint32_t warp_id = threadIdx.x / 32;
@@ -2952,10 +3195,6 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                                     1.f,
                                     false);//(ct_idx == 0 && pt_idx == 0));
                         }
-
-                        { // Compute the diagonal approximation
-
-                        }
                     }
                 }
             });
@@ -3010,14 +3249,6 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                 uint32_t glob_col_offset = world_block_start[body_grp.tmpIdx0] +
                                            tmp_state.dofOffset;
 
-#if 0
-                printf(
-                    "Body with dof offset %d has (glob_row_offset = %d; glob_col_offset = %d)\n",
-                    tmp_state.dofOffset,
-                    glob_row_offset,
-                    glob_col_offset);
-#endif
-
                 switch (limit.type) {
                 case DofObjectLimit::Type::Hinge: {
                     float *to_change = j_e +
@@ -3048,6 +3279,8 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
             });
     }
 #endif
+
+    PROF_END(prof);
 }
 
 void GaussMinimizationNode::computeContactJacobian(
@@ -3115,14 +3348,6 @@ void GaussMinimizationNode::computeContactJacobian(
         J_col[0] = coeff * J_col_vec.x;
         J_col[1] = coeff * J_col_vec.y;
         J_col[2] = coeff * J_col_vec.z;
-
-#if 0
-        if (dbg) {
-            printf("(not working) (row=%d, col=%d) dof=%d, J_col=(%f %f %f)\n",
-                    jac_row, body_dof_offset + i,
-                    i, J_col[0], J_col[1], J_col[2]);
-        }
-#endif
     }
 }
 
@@ -3200,6 +3425,8 @@ void GaussMinimizationNode::computeAccRef(
 // experiment.
 void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
 {
+    PROF_START(prof, gaussComputeContactAccRefClocks);
+
     using namespace gpu_utils;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
@@ -3275,10 +3502,14 @@ void GaussMinimizationNode::computeContactAccRef(int32_t invocation_idx)
 
         __syncwarp();
     }
+
+    PROF_END(prof);
 }
 
 void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
 {
+    PROF_START(prof, gaussComputeEqualityAccRefClocks);
+
     using namespace gpu_utils;
 
     uint32_t total_resident_warps = (blockDim.x * gridDim.x) / 32;
@@ -3355,6 +3586,8 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
 
         __syncwarp();
     }
+
+    PROF_END(prof);
 }
 
 void GaussMinimizationNode::prepareRegInfos(CVSolveData *sd)
@@ -3406,6 +3639,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 #define iter_warp_printf(...) if (iter < 4) { warp_printf(__VA_ARGS__); }
 #define iter_matrix_printf(...) if (iter < 4) { printMatrix(__VA_ARGS__); }
 
+    PROF_START(prof, gaussNonlinearCGClocks);
+
     using namespace gpu_utils;
 
     constexpr float kTolerance = 1e-8f;
@@ -3417,7 +3652,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
     uint32_t total_num_worlds = mwGPU::GPUImplConsts::get().numWorlds;
 
     // Global warp ID
-    // uint32_t warp_id = (blockDim.x * blockIdx.x + threadIdx.x) / 32;
     uint32_t warp_id = threadIdx.x / 32;
     uint32_t lane_id = threadIdx.x % 32;
 
@@ -3460,13 +3694,9 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             }
         } ();
 
-        // printMatrix(acc_ref_cont, 1, curr_sd->numRowsJc, "accref");
-
         // We are using freeAcc as initial guess
         warpCopy(x, curr_sd->freeAcc, sizeof(float) * curr_sd->freeAccDim);
         __syncwarp();
-
-        // printMatrix(x, 1, curr_sd->freeAccDim, "x");
 
         dobjWarp<true>(m_grad, x, curr_sd, scratch1,
                        jaccref_cont, jaccref_eq, 
@@ -3475,22 +3705,14 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                        false);
         __syncwarp();
 
-        // printMatrix(m_grad, 1, curr_sd->freeAccDim, "m_grad0");
-
         float curr_fun = objWarp(x, curr_sd, jaccref_cont, jaccref_eq, mxmin);
         __syncwarp();
-
-        // warp_printf("curr_fun = %f\n", curr_fun);
 
         // Keep track of the norm2 of g (m_grad currently has g)
         float g_norm = sqrtf(norm2Warp(m_grad, curr_sd->freeAccDim));
 
         float g_dot_m_grad = sparseBlkDiagSolve<float, true>(
                 m_grad, &curr_sd->massSparse, scratch1);
-
-        // printMatrix(m_grad, 1, curr_sd->freeAccDim, "m_grad");
-
-        // warp_printf("g_dot_m_grad = %f\n", g_dot_m_grad);
 
         // By now, m_grad actually has m_grad
         __syncwarp();
@@ -3504,29 +3726,19 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         uint32_t iter = 0;
 
         for (; iter < max_iters; ++iter) {
-            // iter_warp_printf("##################### CG iter=%d\n", iter);
-
-            // TODO: add improvement check
             if (tol_scale * g_norm < kTolerance)
                 break;
 
             float p_norm = sqrtf(norm2Warp(p, curr_sd->freeAccDim));
 
-            // iter_warp_printf("p_norm = %f\n", p_norm);
-
             if (p_norm < MINVAL)
                 break;
 
-           // float lsTol = lsTolerance * kTolerance * p_norm / tol_scale;
            float lsTol = lsTolerance;
            float alpha = exactLineSearch(
                 curr_sd, jaccref_cont, jaccref_eq, 
                 mxmin, p, x, lsTol, scratch1, false);
             __syncwarp();
-
-            // iter_warp_printf("alpha = %f\n", alpha);
-
-            // warp_printf("alpha = %f\n", alpha);
 
             // No improvement
             if (alpha == 0.f)
@@ -3540,8 +3752,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
             __syncwarp();
 
-            // iter_matrix_printf(x, 1, curr_sd->freeAccDim, "x_new");
-
             float *g_new = m_grad;
             float new_fun = 0.f;
             { // Get the new gradient
@@ -3551,7 +3761,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                                jaccref_cont, jaccref_eq, mxmin, 
                                acc_ref_cont, acc_ref_eq, false);
 
-                // iter_matrix_printf(g_new, 1, curr_sd->freeAccDim, "g_new");
                 __syncwarp();
 
                 new_fun = objWarp(x, curr_sd, jaccref_cont, jaccref_eq, mxmin);
@@ -3578,7 +3787,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
                 //         scratch3 has g_new
                 __syncwarp();
 
-                // dot(g_new, (M_gradnew - m_grad))
                 float g_new_dot_mgradmin =
                     dotVectorsPred<float>(
                         [&](uint32_t iter) {
@@ -3595,8 +3803,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
                 beta = fmax(0.f, beta);
 
-                // iter_warp_printf("beta = %f\n", beta);
-
                 warpLoop(
                     curr_sd->freeAccDim,
                     [&](uint32_t iter) {
@@ -3605,10 +3811,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             }
 
             curr_fun = new_fun;
-        }
-
-        if (lane_id == 0 && curr_sd->numRowsJc > 0) {
-            // printf("num_iters = %d (num_rows_jc = %d)\n", iter, curr_sd->numRowsJc);
         }
 
         { // Now, we need to copy x into the right components
@@ -3649,6 +3851,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 
         world_id += total_resident_warps;
     }
+
+    PROF_END(prof);
 }
 
 TaskGraph::NodeID GaussMinimizationNode::addToGraph(
@@ -3774,17 +3978,23 @@ inline void computeBodyCOM(Context &ctx,
                            const DofObjectInertial inertial,
                            const DofObjectNumDofs num_dofs)
 {
+    PROF_START(prof, cvComputeBodyComClocks);
+
     (void)ctx;
 
     tmp_state.scratch[0] = inertial.mass * tmp_state.comPos.x;
     tmp_state.scratch[1] = inertial.mass * tmp_state.comPos.y;
     tmp_state.scratch[2] = inertial.mass * tmp_state.comPos.z;
     tmp_state.scratch[3] = inertial.mass;
+
+    PROF_END(prof);
 }
 
 inline void computeTotalCOM(Context &ctx,
                             BodyGroupHierarchy &body_grp)
 {
+    PROF_START(prof, cvComputeTotalComClocks);
+
     Vector3 hierarchy_com = Vector3::zero();
     float total_mass = 0.f;
 
@@ -3803,6 +4013,8 @@ inline void computeTotalCOM(Context &ctx,
     }
 
     body_grp.comPos = hierarchy_com / total_mass;
+
+    PROF_END(prof);
 }
 
 inline void computeSpatialInertias(Context &ctx,
@@ -3810,6 +4022,8 @@ inline void computeSpatialInertias(Context &ctx,
                                    const DofObjectHierarchyDesc hier_desc,
                                    const DofObjectInertial inertial)
 {
+    PROF_START(prof, cvComputeSpatialInertiasClocks);
+
     Vector3 body_grp_com_pos = ctx.get<BodyGroupHierarchy>(
             hier_desc.bodyGroup).comPos;
 
@@ -3839,12 +4053,16 @@ inline void computeSpatialInertias(Context &ctx,
     // Rest of parameters
     tmp_state.spatialInertia.mass = mass;
     tmp_state.spatialInertia.mCom = mass * adjustedCom;
+
+    PROF_END(prof);
 }
 
 // Compute spatial inertia of subtree rooted at the body.
 inline void combineSpatialInertias(Context &ctx,
                                    BodyGroupHierarchy &body_grp)
 {
+    PROF_START(prof, cvCombineSpatialInertiasClocks);
+
     // Backward pass from children to parent
     for (CountT i = body_grp.numBodies-1; i > 0; --i) {
         Entity body_i = body_grp.bodies(ctx)[i];
@@ -3857,6 +4075,8 @@ inline void combineSpatialInertias(Context &ctx,
 
         parent_tmp_state.spatialInertia += current_tmp_state.spatialInertia;
     }
+
+    PROF_END(prof);
 }
 
 // Computes the Phi matrix from generalized velocities to Plücker coordinates
@@ -3936,12 +4156,75 @@ inline float* computePhi(Context &ctx,
     return S;
 }
 
+#ifdef MADRONA_GPU_MODE
+inline void computePhiDot(Context &ctx,
+                          DofObjectNumDofs &num_dofs,
+                          float (&S)[6 * 6],
+                          float (&S_dot)[6 * 6],
+                          SpatialVector &v_hat)
+{
+    if (num_dofs.type == DofType::FreeBody) {
+        #pragma unroll
+        for (uint32_t i = 0; i < 6 * 6; ++i) {
+            S_dot[i] = 0.f;
+        }
+
+        // v^x Skew symmetric matrix
+        Vector3 v_trans = v_hat.linear;
+        S_dot[0 + 6 * 4] = -v_trans.z;
+        S_dot[0 + 6 * 5] = v_trans.y;
+        S_dot[1 + 6 * 3] = v_trans.z;
+        S_dot[1 + 6 * 5] = -v_trans.x;
+        S_dot[2 + 6 * 3] = -v_trans.y;
+        S_dot[2 + 6 * 4] = v_trans.x;
+    }
+    else if (num_dofs.type == DofType::Slider) {
+        // S_dot = v [spatial cross] S
+        SpatialVector S_sv = SpatialVector::fromVec(S);
+        SpatialVector S_dot_sv = v_hat.cross(S_sv);
+
+        S_dot[0] = S_dot_sv.linear.x;
+        S_dot[1] = S_dot_sv.linear.y;
+        S_dot[2] = S_dot_sv.linear.z;
+        S_dot[3] = S_dot_sv.angular.x;
+        S_dot[4] = S_dot_sv.angular.y;
+        S_dot[5] = S_dot_sv.angular.z;
+    }
+    else if (num_dofs.type == DofType::Hinge) {
+        // S_dot = v [spatial cross] S
+        SpatialVector S_sv = SpatialVector::fromVec(S);
+        SpatialVector S_dot_sv = v_hat.cross(S_sv);
+        S_dot[0] = S_dot_sv.linear.x;
+        S_dot[1] = S_dot_sv.linear.y;
+        S_dot[2] = S_dot_sv.linear.z;
+        S_dot[3] = S_dot_sv.angular.x;
+        S_dot[4] = S_dot_sv.angular.y;
+        S_dot[5] = S_dot_sv.angular.z;
+    }
+    else if (num_dofs.type == DofType::Ball) {
+        // S_dot = v [spatial cross] S
+        #pragma unroll
+        for (int i = 0; i < 3; ++i) {
+            SpatialVector S_sv = SpatialVector::fromVec(S + (i * 6));
+            SpatialVector S_dot_sv = v_hat.cross(S_sv);
+
+            S_dot[i * 6 + 0] = S_dot_sv.linear.x;
+            S_dot[i * 6 + 1] = S_dot_sv.linear.y;
+            S_dot[i * 6 + 2] = S_dot_sv.linear.z;
+            S_dot[i * 6 + 3] = S_dot_sv.angular.x;
+            S_dot[i * 6 + 4] = S_dot_sv.angular.y;
+            S_dot[i * 6 + 5] = S_dot_sv.angular.z;
+        }
+    }
+}
+#else
 inline float* computePhiDot(Context &ctx,
                             DofObjectNumDofs &num_dofs,
-                            DofObjectTmpState &tmp_state,
+                            // DofObjectTmpState &tmp_state,
+                            float *S,
                             SpatialVector &v_hat)
 {
-    float *S = tmp_state.getPhiFull(ctx);
+    // float *S = tmp_state.getPhiFull(ctx);
 
     // Same storage location, but will need to be incremented based on size of S
     float *S_dot = S + 6 * num_dofs.numDofs;
@@ -3996,6 +4279,7 @@ inline float* computePhiDot(Context &ctx,
     }
     return S_dot;
 }
+#endif
 
 // First pass to compute Phi with body COM as origin
 inline void computePhiHierarchy(Context &ctx,
@@ -4003,10 +4287,14 @@ inline void computePhiHierarchy(Context &ctx,
                                 const DofObjectNumDofs num_dofs,
                                 const DofObjectHierarchyDesc &desc)
 {
+    PROF_START(prof, cvComputePhiHierarchyClocks);
+
     if (num_dofs.numDofs > 0) {
         Vector3 com_pos = ctx.get<BodyGroupHierarchy>(desc.bodyGroup).comPos;
         computePhi(ctx, num_dofs, tmp_state, com_pos);
     }
+
+    PROF_END(prof);
 }
 
 // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
@@ -4320,10 +4608,216 @@ inline void computeInvMass(Context &ctx,
 
 
 
+#ifdef MADRONA_GPU_MODE
+inline void compositeRigidBody(Context &ctx,
+                               BodyGroupHierarchy &body_grp)
+{
+#if 1
+    PROF_START(prof, cvCompositeRigidBodyClocks);
+
+    uint32_t lane_id = threadIdx.x % 32;
+    uint32_t warp_id = threadIdx.x / 32;
+
+    // Mass Matrix of this entire body group, column-major
+    uint32_t total_dofs = body_grp.numDofs;
+    float *M = body_grp.getMassMatrix(ctx);
+    
+    gpu_utils::warpSetZero(M, total_dofs * total_dofs * sizeof(float));
+    __syncwarp();
+
+    // Compute prefix sum to determine the start of the block for each body
+    uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
+
+    StateManager *state_mgr = getStateManager();
+
+    DofObjectHierarchyDesc *hier_descs = getRows<
+        DofObjectArchetype, DofObjectHierarchyDesc>(state_mgr, ctx.worldID().idx);
+    DofObjectTmpState *tmp_states = getRows<
+        DofObjectArchetype, DofObjectTmpState>(state_mgr, ctx.worldID().idx);
+    DofObjectNumDofs *num_dofs = getRows<
+        DofObjectArchetype, DofObjectNumDofs>(state_mgr, ctx.worldID().idx);
+    uint32_t *rows = body_grp.bodyRows(ctx);
+
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    // Backward pass
+    if (lane_id == 0) {
+        for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
+            uint32_t curr_row = rows[i];
+
+            auto &i_hier_desc = hier_descs[curr_row];
+            auto &i_tmp_state = tmp_states[curr_row];
+            auto &i_num_dofs = num_dofs[curr_row];
+
+            float *S_i_ptr = i_tmp_state.getPhiFull(ctx);
+
+            float *S_i = S_i_ptr;
+            float *F = body_grp.scratch;
+
+            for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+                float *S_col = S_i + 6 * col;
+                float *F_col = F + 6 * col;
+                i_tmp_state.spatialInertia.multiply(S_col, F_col);
+            }
+
+            // M_{ii} = S_i^T I_i^C S_i = F^T S_i
+            float *M_ii = M + block_start[i] * total_dofs + block_start[i];
+            for (CountT row = 0; row < i_num_dofs.numDofs; ++row) {
+                float *F_col = F + 6 * row; // take col for transpose
+                for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+                    float *S_col = S_i + 6 * col;
+                    for(CountT k = 0; k < 6; ++k) {
+                        M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
+                    }
+                }
+            }
+
+            // Traverse up hierarchy
+            uint32_t j = i_hier_desc.parentIndex;
+
+            while(j != 0xFFFF'FFFF) {
+                curr_row = rows[j];
+
+
+                auto &j_tmp_state = tmp_states[curr_row];
+                auto &j_num_dofs = num_dofs[curr_row];
+
+                float *S_j_ptr = j_tmp_state.getPhiFull(ctx);
+                float *S_j = S_j_ptr;
+
+                // M_{ij} = M{ji} = F^T S_j
+                float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
+                float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
+
+                for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
+                    float *F_col = F + 6 * row; // take col for transpose
+
+                    for(CountT col = 0; col < j_num_dofs.numDofs; ++col) {
+                        float *S_col = S_j + 6 * col;
+
+                        #pragma unroll
+                        for(CountT k = 0; k < 6; ++k) {
+                            M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
+                            M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
+                        }
+                    }
+                }
+
+                j = hier_descs[curr_row].parentIndex;
+            }
+        }
+    }
+
+    PROF_END(prof);
+#endif
+
+#if 0
+    PROF_START(prof, cvCompositeRigidBodyClocks);
+
+    uint32_t lane_id = threadIdx.x % 32;
+    uint32_t warp_id = threadIdx.x / 32;
+
+    // Mass Matrix of this entire body group, column-major
+    uint32_t total_dofs = body_grp.numDofs;
+    float *M = body_grp.getMassMatrix(ctx);
+    
+    gpu_utils::warpSetZero(M, total_dofs * total_dofs * sizeof(float));
+    __syncwarp();
+
+
+    // Compute prefix sum to determine the start of the block for each body
+    uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
+
+    StateManager *state_mgr = getStateManager();
+
+    DofObjectHierarchyDesc *hier_descs = getRows<
+        DofObjectArchetype, DofObjectHierarchyDesc>(state_mgr, ctx.worldID().idx);
+    DofObjectTmpState *tmp_states = getRows<
+        DofObjectArchetype, DofObjectTmpState>(state_mgr, ctx.worldID().idx);
+    DofObjectNumDofs *num_dofs = getRows<
+        DofObjectArchetype, DofObjectNumDofs>(state_mgr, ctx.worldID().idx);
+    uint32_t *rows = body_grp.bodyRows(ctx);
+
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    if (lane_id == 0) {
+        // Backward pass
+        for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
+            Entity body = body_grp.bodies(ctx)[i];
+
+            auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
+            auto &i_tmp_state = ctx.get<DofObjectTmpState>(body);
+            auto &i_num_dofs = ctx.get<DofObjectNumDofs>(body);
+
+            float *S_i = i_tmp_state.getPhiFull(ctx);
+
+            float *F = body_grp.scratch;
+
+            for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+                float *S_col = S_i + 6 * col;
+                float *F_col = F + 6 * col;
+                i_tmp_state.spatialInertia.multiply(S_col, F_col);
+            }
+
+            // M_{ii} = S_i^T I_i^C S_i = F^T S_i
+            float *M_ii = M + block_start[i] * total_dofs + block_start[i];
+            for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
+                float *F_col = F + 6 * row; // take col for transpose
+                for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+                    float *S_col = S_i + 6 * col;
+                    for(CountT k = 0; k < 6; ++k) {
+                        M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
+                    }
+                }
+            }
+
+            // Traverse up hierarchy
+            uint32_t j = i;
+            auto parent_j = i_hier_desc.parent;
+            while(parent_j != Entity::none()) {
+                j = ctx.get<DofObjectHierarchyDesc>(
+                    body_grp.bodies(ctx)[j]).parentIndex;
+                Entity cur_body = body_grp.bodies(ctx)[j];
+                auto &j_tmp_state = ctx.get<DofObjectTmpState>(cur_body);
+                auto &j_num_dofs = ctx.get<DofObjectNumDofs>(cur_body);
+
+                float *S_j = j_tmp_state.getPhiFull(ctx);
+
+                // M_{ij} = M{ji} = F^T S_j
+                float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
+                float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
+                for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
+                    float *F_col = F + 6 * row; // take col for transpose
+                    for(CountT col = 0; col < j_num_dofs.numDofs; ++col) {
+                        float *S_col = S_j + 6 * col;
+                        for(CountT k = 0; k < 6; ++k) {
+                            M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
+                            M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
+                        }
+                    }
+                }
+                parent_j = ctx.get<DofObjectHierarchyDesc>(
+                    body_grp.bodies(ctx)[j]).parent;
+            }
+        }
+    }
+
+    PROF_END(prof);
+#endif
+}
+#else
 // CRB: Compute the Mass Matrix (n_dofs x n_dofs)
 inline void compositeRigidBody(Context &ctx,
                                BodyGroupHierarchy &body_grp)
 {
+    PROF_START(prof, cvCompositeRigidBodyClocks);
+
     // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = body_grp.numDofs;
 
@@ -4393,12 +4887,18 @@ inline void compositeRigidBody(Context &ctx,
                 body_grp.bodies(ctx)[j]).parent;
         }
     }
+
+    PROF_END(prof);
 }
+#endif
 
 // Computes the LTDL factorization of the mass matrix
 // TODO: Make a warp work on this when in GPU mode
 inline void factorizeMassMatrix(Context &ctx,
-                                BodyGroupHierarchy &body_grp) {
+                                BodyGroupHierarchy &body_grp)
+{
+    PROF_START(prof, cvFactorizeMassMatrixClocks);
+
     // First copy in the mass matrix
     uint32_t total_dofs = body_grp.numDofs;
 
@@ -4429,11 +4929,16 @@ inline void factorizeMassMatrix(Context &ctx,
             i = expandedParent[i];
         }
     }
+
+    PROF_END(prof);
 }
 
 // Computes the unconstrained acceleration of each body
 inline void computeFreeAcceleration(Context &ctx,
-                                    BodyGroupHierarchy &body_grp) {
+                                    BodyGroupHierarchy &body_grp)
+{
+    PROF_START(prof, cvComputeFreeAccelerationClocks);
+
     // Negate the bias forces, solve
     CountT num_dofs = body_grp.numDofs;
 
@@ -4445,12 +4950,16 @@ inline void computeFreeAcceleration(Context &ctx,
 
     // This overwrites bias with the acceleration
     solveM(ctx, body_grp, bias);
+
+    PROF_END(prof);
 }
 
 #if defined(MADRONA_GPU_MODE) && 1
 inline void recursiveNewtonEuler(Context &ctx,
                                 BodyGroupHierarchy &body_grp)
 {
+    PROF_START(prof, cvRecursiveNewtonEulerClocks);
+
     using namespace gpu_utils;
 
     uint32_t lane_id = threadIdx.x % 32;
@@ -4458,21 +4967,52 @@ inline void recursiveNewtonEuler(Context &ctx,
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     uint32_t total_dofs = body_grp.numDofs;
 
+    StateManager *state_mgr = getStateManager(ctx);
+
+
+
+    DofObjectNumDofs *body_num_dofs = getRows<
+        DofObjectArchetype, DofObjectNumDofs>(state_mgr, ctx.worldID().idx);
+    DofObjectVelocity *velocities = getRows<
+        DofObjectArchetype, DofObjectVelocity>(state_mgr, ctx.worldID().idx);
+    DofObjectTmpState *tmp_states = getRows<
+        DofObjectArchetype, DofObjectTmpState>(state_mgr, ctx.worldID().idx);
+    DofObjectHierarchyDesc *hier_descs = getRows<
+        DofObjectArchetype, DofObjectHierarchyDesc>(state_mgr, ctx.worldID().idx);
+
+
+    // PROF_START(prof_forward, cvRecursiveNewtonEulerForwardClocks);
+
     if (lane_id == 0) {
         // Forward pass. Find in Plücker coordinates:
         //  1. velocities. v_i = v_{parent} + S * \dot{q_i}
         //  2. accelerations. a_i = a_{parent} + \dot{S} * \dot{q_i} + S * \ddot{q_i}
         //  3. forces. f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+        uint32_t *rows = body_grp.bodyRows(ctx);
+
         for (int i = 0; i < body_grp.numBodies; ++i) {
-            Entity body = body_grp.bodies(ctx)[i];
+            uint32_t row = rows[i];
 
-            auto num_dofs = ctx.get<DofObjectNumDofs>(body);
-            auto velocity = ctx.get<DofObjectVelocity>(body);
+            auto num_dofs = body_num_dofs[row];
+            auto velocity = velocities[row];
+            auto &tmp_state = tmp_states[row];
+            auto &hier_desc = hier_descs[row];
 
-            auto &tmp_state = ctx.get<DofObjectTmpState>(body);
-            auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
+            float *S_ptr = tmp_state.getPhiFull(ctx);
+            // float *S_dot = S + 6 * num_dofs.numDofs;
 
-            float *S = tmp_state.getPhiFull(ctx);
+            float S[6 * 6];
+            float S_dot[6 * 6];
+
+            #pragma unroll
+            for (uint32_t i = 0; i < 6; ++i) {
+                if (i < num_dofs.numDofs) {
+                    #pragma unroll
+                    for (uint32_t j = 0; j < 6; ++j) {
+                        S[j + i * num_dofs.numDofs] = S_ptr[j + i * num_dofs.numDofs];
+                    }
+                }
+            }
 
             if (num_dofs.type == DofType::FreeBody) {
                 // Free bodies must be root of their hierarchy
@@ -4480,15 +5020,19 @@ inline void recursiveNewtonEuler(Context &ctx,
                     {velocity.qv[0], velocity.qv[1], velocity.qv[2]},
                     Vector3::zero()
                 };
-                float *S_dot = computePhiDot(ctx, num_dofs, tmp_state, v_body);
+
+                computePhiDot(ctx, num_dofs, S, S_dot, v_body);
 
                 // v_0 = 0, a_0 = -g (fictitious upward acceleration)
                 tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
                 tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
 
                 // S\dot{q_i} and \dot{S}\dot{q_i}
+
+                #pragma unroll
                 for (int j = 0; j < 6; ++j) {
-                    for (int k = 0; k < num_dofs.numDofs; ++k) {
+                    #pragma unroll
+                    for (int k = 0; k < 6; ++k) {
                         tmp_state.sVel[j] += S[j + 6 * k] * velocity.qv[k];
                         tmp_state.sAcc[j] += S_dot[j + 6 * k] * velocity.qv[k];
                     }
@@ -4496,29 +5040,32 @@ inline void recursiveNewtonEuler(Context &ctx,
             }
             else if (num_dofs.type == DofType::FixedBody) {
                 // Fixeds bodies must also be root of their hierarchy
-                // tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
-                // tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
                 if (hier_desc.parent == Entity::none()) {
                     tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
                     tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
                 } else {
-                    auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                    auto &parent_tmp_state = tmp_states[hier_desc.parentRow];
+
                     tmp_state.sVel = parent_tmp_state.sVel;
                     tmp_state.sAcc = parent_tmp_state.sAcc;
                 }
             }
             else if (num_dofs.type == DofType::Slider) {
                 assert(hier_desc.parent != Entity::none());
-                auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+
+                // auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                auto &parent_tmp_state = tmp_states[hier_desc.parentRow];
+
                 tmp_state.sVel = parent_tmp_state.sVel;
                 tmp_state.sAcc = parent_tmp_state.sAcc;
 
                 // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
                 // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
-                float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
-                    parent_tmp_state.sVel);
+                computePhiDot(ctx, num_dofs, S, S_dot, parent_tmp_state.sVel);
 
                 float q_dot = velocity.qv[0];
+
+                #pragma unroll
                 for (int j = 0; j < 6; ++j) {
                     tmp_state.sVel[j] += S[j] * q_dot;
                     tmp_state.sAcc[j] += S_dot[j] * q_dot;
@@ -4526,17 +5073,21 @@ inline void recursiveNewtonEuler(Context &ctx,
             }
             else if (num_dofs.type == DofType::Hinge) {
                 assert(hier_desc.parent != Entity::none());
-                auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+
+                // auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                auto &parent_tmp_state = tmp_states[hier_desc.parentRow];
+
                 tmp_state.sVel = parent_tmp_state.sVel;
                 tmp_state.sAcc = parent_tmp_state.sAcc;
 
                 // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
                 // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
                 // Note: we are using the parent velocity here (for hinge itself)
-                float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
-                    parent_tmp_state.sVel);
+                computePhiDot(ctx, num_dofs, S, S_dot, parent_tmp_state.sVel);
 
                 float q_dot = velocity.qv[0];
+
+                #pragma unroll
                 for (int j = 0; j < 6; ++j) {
                     tmp_state.sVel[j] += S[j] * q_dot;
                     tmp_state.sAcc[j] += S_dot[j] * q_dot;
@@ -4544,17 +5095,22 @@ inline void recursiveNewtonEuler(Context &ctx,
             }
             else if (num_dofs.type == DofType::Ball) {
                 assert(hier_desc.parent != Entity::none());
-                auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+
+                // auto parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                auto &parent_tmp_state = tmp_states[hier_desc.parentRow];
+
                 tmp_state.sVel = parent_tmp_state.sVel;
                 tmp_state.sAcc = parent_tmp_state.sAcc;
 
                 // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
                 // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
                 // Note: we are using the parent velocity here (for hinge itself)
-                float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+                computePhiDot(ctx, num_dofs, S, S_dot,
                     parent_tmp_state.sVel);
 
                 float *q_dot = velocity.qv;
+
+                #pragma unroll
                 for (int j = 0; j < 6; ++j) {
                     // TODO: Probably should switch to row major - this isn't
                     // particularly cache-friendly.
@@ -4577,6 +5133,12 @@ inline void recursiveNewtonEuler(Context &ctx,
         }
     }
 
+    __syncwarp();
+
+    // PROF_END(prof_forward);
+
+    // PROF_START(prof_backward, cvRecursiveNewtonEulerBackwardClocks);
+
     // Backward pass to find bias forces
     float *tau = body_grp.getBias(ctx);
 
@@ -4589,11 +5151,17 @@ inline void recursiveNewtonEuler(Context &ctx,
     float *smem_buf = (float *)((uint8_t *)mwGPU::SharedMemStorage::buffer +
                     num_smem_bytes_per_warp * warp_id);
 
+    // PROF_START(prof_backward, cvRecursiveNewtonEulerBackwardClocks);
+
     if (lane_id == 0) {
+        uint32_t *rows = body_grp.bodyRows(ctx);
+
         for (CountT body = body_grp.numBodies-1; body >= 0; --body) {
-            auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body_grp.bodies(ctx)[body]);
-            uint32_t num_dofs = ctx.get<DofObjectNumDofs>(body_grp.bodies(ctx)[body]).numDofs;
-            auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[body]);
+            uint32_t row = rows[body];
+
+            auto &hier_desc = hier_descs[row];
+            uint32_t num_dofs = body_num_dofs[row].numDofs;
+            auto &tmp_state = tmp_states[row];
 
             uint32_t dof_offset = tmp_state.dofOffset;
             const float *S = tmp_state.getPhiFull(ctx);
@@ -4617,11 +5185,15 @@ inline void recursiveNewtonEuler(Context &ctx,
             }
 
             if (hier_desc.parent != Entity::none()) {
-                auto &parent_tmp_state = ctx.get<DofObjectTmpState>(hier_desc.parent);
+                auto &parent_tmp_state = tmp_states[hier_desc.parentRow];
                 parent_tmp_state.sForce += tmp_state.sForce;
             }
         }
     }
+
+    // PROF_END(prof_backward);
+
+    PROF_END(prof);
 }
 #else
 // RNE: Compute bias forces and gravity
@@ -4653,7 +5225,7 @@ inline void recursiveNewtonEuler(Context &ctx,
                 {velocity.qv[0], velocity.qv[1], velocity.qv[2]},
                 Vector3::zero()
             };
-            float *S_dot = computePhiDot(ctx, num_dofs, tmp_state, v_body);
+            float *S_dot = computePhiDot(ctx, num_dofs, S, v_body);
 
             // v_0 = 0, a_0 = -g (fictitious upward acceleration)
             tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
@@ -4688,7 +5260,7 @@ inline void recursiveNewtonEuler(Context &ctx,
 
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
-            float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+            float *S_dot = computePhiDot(ctx, num_dofs, S,
                 parent_tmp_state.sVel);
 
             float q_dot = velocity.qv[0];
@@ -4706,7 +5278,7 @@ inline void recursiveNewtonEuler(Context &ctx,
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
             // Note: we are using the parent velocity here (for hinge itself)
-            float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+            float *S_dot = computePhiDot(ctx, num_dofs, S,
                 parent_tmp_state.sVel);
 
             float q_dot = velocity.qv[0];
@@ -4724,7 +5296,7 @@ inline void recursiveNewtonEuler(Context &ctx,
             // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
             // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
             // Note: we are using the parent velocity here (for hinge itself)
-            float *S_dot = computePhiDot(ctx, num_dofs, tmp_state,
+            float *S_dot = computePhiDot(ctx, num_dofs, S,
                 parent_tmp_state.sVel);
 
             float *q_dot = velocity.qv;
@@ -4785,6 +5357,8 @@ inline void addExternalForces(Context &ctx,
                               DofObjectExtForce ext_force,
                               DofObjectNumDofs num_dofs)
 {
+    PROF_START(prof, cvAddExternalForcesClocks);
+
     uint32_t dof_offset = tmp_state.dofOffset;
 
     BodyGroupHierarchy &body_grp = ctx.get<BodyGroupHierarchy>(desc.bodyGroup);
@@ -4794,6 +5368,8 @@ inline void addExternalForces(Context &ctx,
     for (CountT i = 0; i < num_dofs.numDofs; ++i) {
         tau[i + tmp_state.dofOffset] += ext_force.force[i];
     }
+
+    PROF_END(prof);
 }
 
 
@@ -4801,18 +5377,24 @@ inline void addExternalForces(Context &ctx,
 inline void sumInertiaDiagonals(Context &ctx,
                                 BodyGroupHierarchy &body_grp)
 {
+    PROF_START(prof, cvSumInertiaDiagonalsClocks);
+
     float *M = body_grp.getMassMatrix(ctx);
     float inertiaSum = 0.f;
     for (CountT i = 0; i < body_grp.numDofs; ++i) {
         inertiaSum += M[i + i * (body_grp.numDofs)];
     }
     body_grp.inertiaSum = inertiaSum;
+
+    PROF_END(prof);
 }
 
 inline void processContacts(Context &ctx,
                             ContactConstraint &contact,
                             ContactTmpState &tmp_state)
 {
+    PROF_START(prof, cvProcessContactsClocks);
+
     Entity ref = ctx.get<LinkParentDofObject>(contact.ref).parentDofObject;
     Entity alt = ctx.get<LinkParentDofObject>(contact.alt).parentDofObject;
 
@@ -4826,6 +5408,8 @@ inline void processContacts(Context &ctx,
         if (refNumDofs.type != DofType::FixedBody
             && altNumDofs.type != DofType::FixedBody) {
             contact.numPoints = 0;
+
+            PROF_END(prof);
             return;
         }
     }
@@ -4851,6 +5435,8 @@ inline void processContacts(Context &ctx,
     // Get friction coefficient
     float mu = fminf(friction_i.muS, friction_j.muS);
     tmp_state.mu = mu;
+
+    PROF_END(prof);
 }
 
 // TODO: This will require a complete rewrite for GPU version.
@@ -4864,6 +5450,8 @@ inline void processContacts(Context &ctx,
 inline void brobdingnag(Context &ctx,
                         CVSolveData &cv_sing)
 {
+    PROF_START(prof, cvBrobdingnagClocks);
+
 #ifdef MADRONA_GPU_MODE
 #define GPU_SINGLE_THREAD if (threadIdx.x % 32 == 0)
 #else
@@ -5216,6 +5804,8 @@ inline void brobdingnag(Context &ctx,
         cv_sing.muDim = total_contact_pts;
         cv_sing.penetrationsDim = total_contact_pts;
     }
+
+    PROF_END(prof);
 }
 
 inline void integrationStep(Context &ctx,
@@ -5224,6 +5814,8 @@ inline void integrationStep(Context &ctx,
                             DofObjectAcceleration &acceleration,
                             DofObjectNumDofs &numDofs)
 {
+    PROF_START(prof, cvIntegrationStepClocks);
+
     PhysicsSystemState &physics_state = ctx.singleton<PhysicsSystemState>();
     float h = physics_state.h;
 
@@ -5284,6 +5876,8 @@ inline void integrationStep(Context &ctx,
     else {
         MADRONA_UNREACHABLE();
     }
+
+    PROF_END(prof);
 }
 
 // Convert all the generalized coordinates here.
@@ -5294,6 +5888,8 @@ inline void convertPostSolve(
         Scale &scale,
         LinkParentDofObject &link)
 {
+    PROF_START(prof, cvConvertPostSolveClocks);
+
     // TODO: use some forward kinematics results here
     Entity physical_entity = link.parentDofObject;
 
@@ -5347,14 +5943,6 @@ inline void convertPostSolve(
         rotation = tmp_state.composedRot *
                    body_obj_data.rotation;
 
-#if 0
-        printf("Fixed body info:\n");
-        printf("\t- comPos = %f %f %f\n",
-                tmp_state.comPos.x, tmp_state.comPos.y, tmp_state.comPos.z);
-        printf("\t- position = %f %f %f\n",
-                position.x, position.y, position.z);
-#endif
-
         // Do nothing
     }
     else if (num_dofs.type == DofType::Ball) {
@@ -5367,6 +5955,8 @@ inline void convertPostSolve(
     else {
         MADRONA_UNREACHABLE();
     }
+
+    PROF_END(prof);
 }
 
 
@@ -5415,6 +6005,16 @@ TaskGraphNodeID setupCVInitTasks(
          BodyGroupHierarchy
      >>(deps);
 
+    node = builder.addToGraph<ParallelForNode<Context,
+         tasks::getBodyRows,
+            BodyGroupHierarchy
+        >>({node});
+
+    node = builder.addToGraph<ParallelForNode<Context,
+         tasks::getParentRows,
+            DofObjectHierarchyDesc
+        >>({node});
+
     // Initialization for initial position (e.g., inverse weights)
     node = builder.addToGraph<ParallelForNode<Context,
          tasks::computeBodyCOM,
@@ -5447,10 +6047,17 @@ TaskGraphNodeID setupCVInitTasks(
             BodyGroupHierarchy
         >>({node});
 
+#ifdef MADRONA_GPU_MODE
+    node = builder.addToGraph<CustomParallelForNode<Context,
+         tasks::compositeRigidBody, 32, 1,
+            BodyGroupHierarchy
+        >>({node});
+#else
     node = builder.addToGraph<ParallelForNode<Context,
          tasks::compositeRigidBody,
             BodyGroupHierarchy
         >>({node});
+#endif
 
     node = builder.addToGraph<ParallelForNode<Context,
          tasks::factorizeMassMatrix,
@@ -5476,6 +6083,12 @@ TaskGraphNodeID setupCVInitTasks(
             Scale,
             LinkParentDofObject
         >>({node});
+
+#ifdef MADRONA_COUNT_CV_GPU_CLOCKS
+    node = builder.addToGraph<ParallelForNode<Context, tasks::reportCVClocks,
+         CVSolveData
+        >>({node});
+#endif
 
     return node;
 }
@@ -5506,12 +6119,22 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 {run_narrowphase});
 #endif
 
+        auto get_body_rows = builder.addToGraph<ParallelForNode<Context,
+             tasks::getBodyRows,
+                BodyGroupHierarchy
+            >>({run_narrowphase});
+
+        auto get_parent_rows = builder.addToGraph<ParallelForNode<Context,
+             tasks::getParentRows,
+                DofObjectHierarchyDesc
+            >>({get_body_rows});
+
         auto compute_body_coms = builder.addToGraph<ParallelForNode<Context,
              tasks::computeBodyCOM,
                 DofObjectTmpState,
                 DofObjectInertial,
                 DofObjectNumDofs
-            >>({run_narrowphase});
+            >>({get_parent_rows});
 
         auto compute_total_com = builder.addToGraph<ParallelForNode<Context,
              tasks::computeTotalCOM,
@@ -5557,10 +6180,17 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupHierarchy
             >>({add_external_forces});
 
+#ifdef MADRONA_GPU_MODE
+        auto composite_rigid_body = builder.addToGraph<CustomParallelForNode<Context,
+             tasks::compositeRigidBody, 32, 1,
+                BodyGroupHierarchy
+            >>({combine_spatial_inertia});
+#else
         auto composite_rigid_body = builder.addToGraph<ParallelForNode<Context,
              tasks::compositeRigidBody,
                 BodyGroupHierarchy
             >>({combine_spatial_inertia});
+#endif
 
         auto sum_inertia_diagonals = builder.addToGraph<ParallelForNode<Context,
              tasks::sumInertiaDiagonals,
@@ -5632,6 +6262,13 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 LinkParentDofObject
             >>({post_forward_kinematics});
 
+#ifdef MADRONA_COUNT_CV_GPU_CLOCKS
+        cur_node =
+            builder.addToGraph<ParallelForNode<Context, tasks::reportCVClocks,
+                CVSolveData
+            >>({cur_node});
+#endif
+
         cur_node = builder.addToGraph<
             ClearTmpNode<Contact>>({cur_node});
 
@@ -5680,9 +6317,10 @@ Entity makeBodyGroup(Context &ctx, uint32_t num_bodies, float global_scale)
     hier.globalScale = global_scale;
     hier.visualizeColliders = false;
 
-    uint64_t mr_num_bytes = num_bodies * sizeof(Entity);
+    uint64_t mr_num_bytes = num_bodies * (sizeof(Entity) + sizeof(uint32_t));
     uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
         sizeof(MRElement128b);
+
     hier.mrBodies = ctx.allocMemoryRange<MRElement128b>(num_elems);
 
     hier.numEqualityRows = 0;
