@@ -4612,7 +4612,6 @@ inline void computeInvMass(Context &ctx,
 inline void compositeRigidBody(Context &ctx,
                                BodyGroupHierarchy &body_grp)
 {
-#if 1
     PROF_START(prof, cvCompositeRigidBodyClocks);
 
     uint32_t lane_id = threadIdx.x % 32;
@@ -4643,6 +4642,93 @@ inline void compositeRigidBody(Context &ctx,
     auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
                     num_smem_bytes_per_warp * warp_id;
 
+#if 1
+    for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
+        uint32_t curr_row = rows[i];
+
+        auto &i_hier_desc = hier_descs[curr_row];
+        auto &i_tmp_state = tmp_states[curr_row];
+        auto &i_num_dofs = num_dofs[curr_row];
+
+        float *S_i_ptr = i_tmp_state.getPhiFull(ctx);
+
+        float *S_i = S_i_ptr;
+        float *F = (float *)smem_buf;
+
+#if 0
+        gpu_utils::warpCopy(S_i, S_i_ptr, sizeof(float) * 36);
+        __syncwarp();
+#endif
+
+        if (lane_id == 0) {
+            for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
+                float *S_col = S_i + 6 * col;
+                float *F_col = F + 6 * col;
+                i_tmp_state.spatialInertia.multiply(S_col, F_col);
+            }
+        }
+
+        __syncwarp();
+
+        float *M_ii = M + block_start[i] * total_dofs + block_start[i];
+
+        gpu_utils::warpLoop(i_num_dofs.numDofs * i_num_dofs.numDofs,
+            [&](uint32_t iter) {
+                uint32_t row = iter / i_num_dofs.numDofs;
+                uint32_t col = iter % i_num_dofs.numDofs;
+
+                float *F_col = F + 6 * row;
+                float *S_col = S_i + 6 * col;
+
+                #pragma unroll
+                for (uint32_t k = 0; k < 6; ++k) {
+                    M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
+                }
+            });
+
+        // Traverse up hierarchy
+        uint32_t j = i_hier_desc.parentIndex;
+
+        while(j != 0xFFFF'FFFF) {
+            curr_row = rows[j];
+
+            auto &j_tmp_state = tmp_states[curr_row];
+            auto &j_num_dofs = num_dofs[curr_row];
+
+            float *S_j_ptr = j_tmp_state.getPhiFull(ctx);
+            float *S_j = S_j_ptr;
+            
+#if 0
+            float *S_j = F + 36;
+            gpu_utils::warpCopy(S_j, S_j_ptr, sizeof(float) * 36);
+            __syncwarp();
+#endif
+
+            // M_{ij} = M{ji} = F^T S_j
+            float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
+            float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
+
+            gpu_utils::warpLoop(i_num_dofs.numDofs * j_num_dofs.numDofs,
+                [&](uint32_t iter) {
+                    uint32_t row = iter / j_num_dofs.numDofs;
+                    uint32_t col = iter % j_num_dofs.numDofs;
+
+                    float *F_col = F + 6 * row; // take col for transpose
+                    float *S_col = S_j + 6 * col;
+
+                    #pragma unroll
+                    for(CountT k = 0; k < 6; ++k) {
+                        M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
+                        M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
+                    }
+                });
+
+            j = hier_descs[curr_row].parentIndex;
+        }
+    }
+#endif
+
+#if 0
     // Backward pass
     if (lane_id == 0) {
         for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
@@ -4710,106 +4796,9 @@ inline void compositeRigidBody(Context &ctx,
             }
         }
     }
-
-    PROF_END(prof);
 #endif
 
-#if 0
-    PROF_START(prof, cvCompositeRigidBodyClocks);
-
-    uint32_t lane_id = threadIdx.x % 32;
-    uint32_t warp_id = threadIdx.x / 32;
-
-    // Mass Matrix of this entire body group, column-major
-    uint32_t total_dofs = body_grp.numDofs;
-    float *M = body_grp.getMassMatrix(ctx);
-    
-    gpu_utils::warpSetZero(M, total_dofs * total_dofs * sizeof(float));
-    __syncwarp();
-
-
-    // Compute prefix sum to determine the start of the block for each body
-    uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
-
-    StateManager *state_mgr = getStateManager();
-
-    DofObjectHierarchyDesc *hier_descs = getRows<
-        DofObjectArchetype, DofObjectHierarchyDesc>(state_mgr, ctx.worldID().idx);
-    DofObjectTmpState *tmp_states = getRows<
-        DofObjectArchetype, DofObjectTmpState>(state_mgr, ctx.worldID().idx);
-    DofObjectNumDofs *num_dofs = getRows<
-        DofObjectArchetype, DofObjectNumDofs>(state_mgr, ctx.worldID().idx);
-    uint32_t *rows = body_grp.bodyRows(ctx);
-
-    const int32_t num_smem_bytes_per_warp =
-        mwGPU::SharedMemStorage::numBytesPerWarp();
-    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
-                    num_smem_bytes_per_warp * warp_id;
-
-    if (lane_id == 0) {
-        // Backward pass
-        for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
-            Entity body = body_grp.bodies(ctx)[i];
-
-            auto &i_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
-            auto &i_tmp_state = ctx.get<DofObjectTmpState>(body);
-            auto &i_num_dofs = ctx.get<DofObjectNumDofs>(body);
-
-            float *S_i = i_tmp_state.getPhiFull(ctx);
-
-            float *F = body_grp.scratch;
-
-            for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
-                float *S_col = S_i + 6 * col;
-                float *F_col = F + 6 * col;
-                i_tmp_state.spatialInertia.multiply(S_col, F_col);
-            }
-
-            // M_{ii} = S_i^T I_i^C S_i = F^T S_i
-            float *M_ii = M + block_start[i] * total_dofs + block_start[i];
-            for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
-                float *F_col = F + 6 * row; // take col for transpose
-                for(CountT col = 0; col < i_num_dofs.numDofs; ++col) {
-                    float *S_col = S_i + 6 * col;
-                    for(CountT k = 0; k < 6; ++k) {
-                        M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
-                    }
-                }
-            }
-
-            // Traverse up hierarchy
-            uint32_t j = i;
-            auto parent_j = i_hier_desc.parent;
-            while(parent_j != Entity::none()) {
-                j = ctx.get<DofObjectHierarchyDesc>(
-                    body_grp.bodies(ctx)[j]).parentIndex;
-                Entity cur_body = body_grp.bodies(ctx)[j];
-                auto &j_tmp_state = ctx.get<DofObjectTmpState>(cur_body);
-                auto &j_num_dofs = ctx.get<DofObjectNumDofs>(cur_body);
-
-                float *S_j = j_tmp_state.getPhiFull(ctx);
-
-                // M_{ij} = M{ji} = F^T S_j
-                float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
-                float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
-                for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
-                    float *F_col = F + 6 * row; // take col for transpose
-                    for(CountT col = 0; col < j_num_dofs.numDofs; ++col) {
-                        float *S_col = S_j + 6 * col;
-                        for(CountT k = 0; k < 6; ++k) {
-                            M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
-                            M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
-                        }
-                    }
-                }
-                parent_j = ctx.get<DofObjectHierarchyDesc>(
-                    body_grp.bodies(ctx)[j]).parent;
-            }
-        }
-    }
-
     PROF_END(prof);
-#endif
 }
 #else
 // CRB: Compute the Mass Matrix (n_dofs x n_dofs)

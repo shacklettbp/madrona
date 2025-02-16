@@ -142,9 +142,11 @@ struct InertiaTensor {
     float spatial_inertia[6];
 
     // Helper function to add two inertia tensors together
-    InertiaTensor& operator+=(const InertiaTensor& rhs) {
+    InertiaTensor& operator+=(const InertiaTensor& rhs)
+    {
         mass += rhs.mass;
         mCom += rhs.mCom;
+
         for (int i = 0; i < 6; i++) {
             spatial_inertia[i] += rhs.spatial_inertia[i];
         }
@@ -152,7 +154,8 @@ struct InertiaTensor {
     }
 
     // Multiply with vector [v] of length 6, storing the result in [out]
-    void multiply(const float* v, float* out) const {
+    void multiply(const float* v, float* out) const
+    {
         math::Vector3 v_trans = {v[0], v[1], v[2]};
         math::Vector3 v_rot = {v[3], v[4], v[5]};
         math::Vector3 out_trans = mass * v_trans - mCom.cross(v_rot);
@@ -168,7 +171,26 @@ struct InertiaTensor {
         out[5] = out_rot.z;
     }
 
-    SpatialVector multiply(const SpatialVector& v) const {
+    template <int f_size>
+    void multiplyFReg(const float *v, float (&out)[f_size], uint32_t f_col) {
+        math::Vector3 v_trans = {v[0], v[1], v[2]};
+        math::Vector3 v_rot = {v[3], v[4], v[5]};
+        math::Vector3 out_trans = mass * v_trans - mCom.cross(v_rot);
+        math::Vector3 out_rot = mCom.cross(v_trans);
+        out_rot[0] += spatial_inertia[0] * v_rot[0] + spatial_inertia[3] * v_rot[1] + spatial_inertia[4] * v_rot[2];
+        out_rot[1] += spatial_inertia[3] * v_rot[0] + spatial_inertia[1] * v_rot[1] + spatial_inertia[5] * v_rot[2];
+        out_rot[2] += spatial_inertia[4] * v_rot[0] + spatial_inertia[5] * v_rot[1] + spatial_inertia[2] * v_rot[2];
+
+        out[f_col * 6 + 0] = out_trans.x;
+        out[f_col * 6 + 1] = out_trans.y;
+        out[f_col * 6 + 2] = out_trans.z;
+        out[f_col * 6 + 3] = out_rot.x;
+        out[f_col * 6 + 4] = out_rot.y;
+        out[f_col * 6 + 5] = out_rot.z;
+    }
+
+    SpatialVector multiply(const SpatialVector& v) const
+    {
         SpatialVector out;
         out.linear = mass * v.linear - mCom.cross(v.angular);
         out.angular = mCom.cross(v.linear);
