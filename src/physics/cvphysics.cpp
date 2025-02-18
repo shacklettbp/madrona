@@ -21,7 +21,7 @@
 
 
 #ifdef MADRONA_GPU_MODE
-#define COUNT_CV_GPU_CLOCKS
+// #define COUNT_CV_GPU_CLOCKS
 #endif
 
 
@@ -58,6 +58,9 @@ madrona::AtomicU64 gaussPrepareSolverClocks = 0;
 madrona::AtomicU64 gaussComputeContactAccRefClocks = 0;
 madrona::AtomicU64 gaussComputeEqualityAccRefClocks = 0;
 madrona::AtomicU64 gaussNonlinearCGClocks = 0;
+
+madrona::AtomicU64 gaussNonlinearCGCompute = 0;
+madrona::AtomicU64 gaussNonlinearCGWrite = 0;
 }
 #endif
 
@@ -1436,7 +1439,8 @@ inline void reportCVClocks(Context &ctx, CVSolveData &)
             gaussPrepareSolverClocks.load_relaxed() +
             gaussComputeContactAccRefClocks.load_relaxed() +
             gaussComputeEqualityAccRefClocks.load_relaxed() +
-            gaussNonlinearCGClocks.load_relaxed();
+            gaussNonlinearCGCompute.load_relaxed();
+            gaussNonlinearCGWrite.load_relaxed();
 
 
         REPORT_CLOCKS(cvComputeBodyComClocks);
@@ -1463,7 +1467,9 @@ inline void reportCVClocks(Context &ctx, CVSolveData &)
         REPORT_CLOCKS(gaussPrepareSolverClocks);
         REPORT_CLOCKS(gaussComputeContactAccRefClocks);
         REPORT_CLOCKS(gaussComputeEqualityAccRefClocks);
-        REPORT_CLOCKS(gaussNonlinearCGClocks);
+        // REPORT_CLOCKS(gaussNonlinearCGClocks);
+        REPORT_CLOCKS(gaussNonlinearCGCompute);
+        REPORT_CLOCKS(gaussNonlinearCGWrite);
     }
 }
 #endif
@@ -4087,8 +4093,6 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
 #define iter_warp_printf(...) if (iter < 4) { warp_printf(__VA_ARGS__); }
 #define iter_matrix_printf(...) if (iter < 4) { printMatrix(__VA_ARGS__); }
 
-    PROF_START(prof, gaussNonlinearCGClocks);
-
     using namespace gpu_utils;
 
     constexpr float kTolerance = 1e-8f;
@@ -4110,6 +4114,8 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
     uint32_t world_id = invocation_idx;
 
     { // Do the computation
+        PROF_START(prof, gaussNonlinearCGCompute);
+
         CVSolveData *curr_sd = &solveDatas[world_id];
 
         float tol_scale = 1.f / curr_sd->totalMass;
@@ -4261,6 +4267,10 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             curr_fun = new_fun;
         }
 
+        PROF_END(prof);
+
+        PROF_START(prof2, gaussNonlinearCGWrite);
+
         { // Now, we need to copy x into the right components
             auto get_bodies = [state_mgr](BodyGroupHierarchy &hier)
                 -> Entity * {
@@ -4297,10 +4307,10 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             }
         }
 
+        PROF_END(prof2);
+
         world_id += total_resident_warps;
     }
-
-    PROF_END(prof);
 }
 
 TaskGraph::NodeID GaussMinimizationNode::addToGraph(
@@ -7009,7 +7019,7 @@ void attachLimit(Context &ctx,
 
     // printf("Attaching limit\n");
 
-#if 0
+#if 1
     DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);
     pos.q[0] = limit.hinge.upper;
 #endif
@@ -7031,7 +7041,7 @@ void attachLimit(Context &ctx,
 
     // printf("Attaching limit\n");
 
-#if 0
+#if 1
     DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);
     pos.q[0] = limit.hinge.upper;
 #endif
