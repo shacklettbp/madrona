@@ -131,6 +131,29 @@ struct SparseBlkDiag {
     Blk *blks;
 };
 
+struct SparseEqualityJacobian {
+    uint32_t numRows;
+    uint32_t numCols;
+
+    struct Entry {
+        // This is either the row, or the column
+        uint16_t row;
+        uint16_t col;
+
+        float value;
+    };
+
+    struct EntryList {
+        uint16_t offset;
+        uint16_t numEntries;
+    };
+
+    EntryList *rows;
+    EntryList *cols;
+
+    Entry *entries;
+};
+
 #if 0
 // For each row, stores block_size x block_size blocks.
 struct SparseContactJacobian {
@@ -627,6 +650,71 @@ void gmmaWarpSmallReg(
     }
 }
 
+template <bool transpose_j,
+          bool reset_res>
+void jeqMulVector(
+        float *res,
+        SparseEqualityJacobian *j_e,
+        float *x,
+        uint32_t x_dim)
+{
+    SparseEqualityJacobian::Entry *entries = j_e->entries;
+    
+    SparseEqualityJacobian::EntryList *lists;
+    uint32_t res_dim;
+    uint32_t other_dim;
+
+    if constexpr (transpose_j) {
+        lists = j_e->cols;
+        res_dim = j_e->numCols;
+        other_dim = j_e->numRows;
+    } else {
+        lists = j_e->rows;
+        res_dim = j_e->numRows;
+        other_dim = j_e->numCols;
+    }
+
+#if 0
+    if (threadIdx.x % 32 == 0) {
+        printf("Printing mul vector (%s) - res_dim = %d\n",
+                transpose_j ? "transpose J" : "untransposed J",
+                res_dim);
+    }
+#endif
+
+    __syncwarp();
+    warpLoop(
+        res_dim,
+        [&](uint32_t iter) {
+            auto list = lists[iter];
+
+            if constexpr (reset_res) {
+                res[iter] = 0.f;
+            }
+
+            // printf("iter %d has %d entries %p\n", iter, list.numEntries, &lists[iter]);
+            for (uint32_t i = 0; i < list.numEntries; ++i) {
+                auto entry = entries[i + list.offset];
+                
+                if constexpr (transpose_j) {
+#if 0
+                    printf("value at row = %d, col = %d (%d) -> %f\n",
+                            entry.col, entry.col, iter, entry.value);
+#endif
+
+                    res[iter] += entry.value * x[entry.row];
+                } else {
+#if 0
+                    printf("value at row = %d (%d), col = %d -> %f\n",
+                            entry.row, iter, entry.col, entry.value);
+#endif
+
+                    res[iter] += entry.value * x[entry.col];
+                }
+            }
+        });
+}
+
 template <typename DataT>
 DataT warpInclusivePrefixSum(DataT value)
 {
@@ -1030,6 +1118,7 @@ struct CVSolveData {
 
     uint32_t numRowsJe;
     uint32_t numColsJe;
+    uint32_t totalEqEntries;
 
     uint32_t muDim;
     uint32_t penetrationsDim;
@@ -1045,6 +1134,7 @@ struct CVSolveData {
     uint32_t flags;
 
     SparseBlkDiag massSparse;
+    SparseEqualityJacobian eqSparse;
 
     CVXSolve *cvxSolve;
 
@@ -1170,6 +1260,7 @@ struct CVSolveData {
         return (float *)bytes;
     }
 
+#if 0
     float * getEqualityJacobian(StateManager *state_mgr)
     {
         (void)state_mgr;
@@ -1185,6 +1276,58 @@ struct CVSolveData {
             sizeof(float) * numRowsJc;
         return (float *)bytes;
     }
+#endif
+
+    SparseEqualityJacobian::Entry * getSEJEntries(StateManager *state_mgr)
+    {
+        (void)state_mgr;
+        uint8_t *bytes =
+            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
+            prepMem +
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numRowsJc * numColsJc +
+            sizeof(float) * numRowsJc;
+        return (SparseEqualityJacobian::Entry *)bytes;
+    }
+
+    SparseEqualityJacobian::EntryList * getSEJRowList(StateManager *state_mgr)
+    {
+        (void)state_mgr;
+        uint8_t *bytes =
+            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
+            prepMem +
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numRowsJc * numColsJc +
+            sizeof(float) * numRowsJc +
+            sizeof(SparseEqualityJacobian::Entry) * totalEqEntries * 2;
+        return (SparseEqualityJacobian::EntryList *)bytes;
+    }
+
+    SparseEqualityJacobian::EntryList * getSEJColList(StateManager *state_mgr)
+    {
+        (void)state_mgr;
+        uint8_t *bytes =
+            // (uint8_t *)state_mgr->memoryRangePointer<SolverScratch256b>(prepMemory) +
+            prepMem +
+            sizeof(SparseBlkDiag::Blk) * numBodyGroups +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * totalNumDofs +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numContactPts +
+            sizeof(float) * numRowsJc * numColsJc +
+            sizeof(float) * numRowsJc +
+            sizeof(SparseEqualityJacobian::Entry) * totalEqEntries * 2 +
+            sizeof(SparseEqualityJacobian::EntryList) * numRowsJe;
+        return (SparseEqualityJacobian::EntryList *)bytes;
+    }
 
     float * getEqualityDiagApprox(StateManager *state_mgr)
     {
@@ -1199,7 +1342,9 @@ struct CVSolveData {
             sizeof(float) * numContactPts +
             sizeof(float) * numRowsJc * numColsJc +
             sizeof(float) * numRowsJc +
-            sizeof(float) * numRowsJe * numColsJe;
+            sizeof(SparseEqualityJacobian::Entry) * totalEqEntries * 2 +
+            sizeof(SparseEqualityJacobian::EntryList) * numRowsJe +
+            sizeof(SparseEqualityJacobian::EntryList) * numColsJe;
         return (float *)bytes;
     }
 
@@ -1216,7 +1361,9 @@ struct CVSolveData {
             sizeof(float) * numContactPts +
             sizeof(float) * numRowsJc * numColsJc +
             sizeof(float) * numRowsJc +
-            sizeof(float) * numRowsJe * numColsJe +
+            sizeof(SparseEqualityJacobian::Entry) * totalEqEntries * 2 +
+            sizeof(SparseEqualityJacobian::EntryList) * numRowsJe +
+            sizeof(SparseEqualityJacobian::EntryList) * numColsJe +
             sizeof(float) * numRowsJe;
         return (float *)bytes;
     }
@@ -1808,6 +1955,19 @@ struct GaussMinimizationNode : NodeBase {
             Fn &&residual_fn,
             bool dbg = false);
 
+    template <typename Fn>
+    void computeAccRef(
+            float *acc_ref_cont,
+            uint32_t acc_ref_dim,
+            SparseEqualityJacobian *j_mat,
+            uint32_t num_rows_j,
+            uint32_t num_cols_j,
+            float *vel,
+            uint32_t vel_dim,
+            float h,
+            Fn &&residual_fn,
+            bool dbg = false);
+
     void prepareRegInfos(CVSolveData *sd);
 
     // Nodes in the taskgraph:
@@ -2000,6 +2160,7 @@ void GaussMinimizationNode::dobjWarp(
 
 
     // Get equality part of the gradient
+#if 0
     gmmaWarpSmallReg<float, 4, true, false, true>(
             scratch,
             sd->J_e,
@@ -2008,7 +2169,21 @@ void GaussMinimizationNode::dobjWarp(
             sd->numColsJe,
             sd->freeAccDim,
             1);
+#endif
+
+    jeqMulVector<false, true>(
+            scratch,
+            &sd->eqSparse,
+            x,
+            sd->freeAccDim);
     __syncwarp();
+
+#if 0
+    if (threadIdx.x % 32 == 0) {
+        printMatrix(
+                scratch, 1, sd->numRowsJe, "Jx");
+    }
+#endif
 
     warpLoop(sd->numRowsJe, [&](uint32_t iter) {
         scratch[iter] -= acc_ref_eq[iter];
@@ -2020,6 +2195,7 @@ void GaussMinimizationNode::dobjWarp(
         __syncwarp();
     }
 
+#if 0
     gmmaWarpSmallReg<float, 4, false, false, false>(
             res,
             sd->J_e,
@@ -2028,6 +2204,12 @@ void GaussMinimizationNode::dobjWarp(
             sd->numRowsJe,
             sd->numRowsJe,
             1);
+#endif
+    jeqMulVector<true, false>(
+            res,
+            &sd->eqSparse,
+            scratch,
+            sd->numRowsJe);
     __syncwarp();
 }
 
@@ -2400,14 +2582,6 @@ float GaussMinimizationNode::exactLineSearch(
 
     float pMx_free = dotVectors(p, Mxmin, sd->freeAccDim);
 
-    dbg_warp_printf("@@@@@@@@@@@@@ ENTERING FAUlTY LINE SEARCH\n");
-
-    dbg_matrix_printf(p, 1, sd->freeAccDim, "p");
-    dbg_matrix_printf(Mxmin, 1, sd->freeAccDim, "Mx_free");
-    dbg_matrix_printf(jaccref_cont, 1, sd->numRowsJc, "jaccref");
-
-    dbg_warp_printf("pMx_free = %f\n", pMx_free);
-
     float xmin_M_xmin = dotVectorsPred<float>(
         [&](uint32_t iter) {
             return x[iter] - sd->freeAcc[iter];
@@ -2417,8 +2591,6 @@ float GaussMinimizationNode::exactLineSearch(
         },
         sd->freeAccDim);
     __syncwarp();
-
-    dbg_warp_printf("xmin_M_xmin = %f\n", xmin_M_xmin);
 
     float pMp = 0.f;
     { // Ok, now we don't need to store Mxmin anymore
@@ -2433,8 +2605,6 @@ float GaussMinimizationNode::exactLineSearch(
     }
     __syncwarp();
 
-    dbg_warp_printf("pMp = %f\n", pMp);
-
     // Store J @ p in the scratch space we used for Mp
     float *Jp = Mxmin;
     { // Calculate Jp
@@ -2447,12 +2617,17 @@ float GaussMinimizationNode::exactLineSearch(
 
     float *Jep = scratch;
     { // Calculate Je @ p
-        // printMatrix(p, 1, sd->freeAccDim, "p");
-        // printMatrix<true>(sd->J_e, sd->numRowsJe, sd->numColsJe, "J_e");
+#if 0
         gmmaWarpSmallReg<float, 4, true, false, true>(
             Jep, sd->J_e, p,
             sd->numRowsJe, sd->numColsJe,
             sd->numColsJe, 1);
+#endif
+        jeqMulVector<false, true>(
+                Jep,
+                &sd->eqSparse,
+                p,
+                sd->numColsJe);
     }
     __syncwarp();
 
@@ -2707,6 +2882,38 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
 {
     PROF_START(prof, gaussAllocateScratchClocks);
 
+    uint32_t total_eq_entries = 0;
+    { // Get total number of equality entries
+        using namespace gpu_utils;
+
+        uint32_t world_id = invocation_idx;
+
+        StateManager *state_mgr = getStateManager();
+
+        Entity *body_entities = state_mgr->getWorldEntities<
+            DofObjectArchetype>(world_id);
+        uint32_t num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
+
+        warpLoopSync(
+            num_bodies,
+            [&](uint32_t iter) {
+                uint32_t d = 0;
+
+                if (iter != 0xFFFF'FFFF) {
+                    DofObjectLimit limit = state_mgr->getUnsafe<
+                        DofObjectLimit>(body_entities[iter]);
+
+                    if (limit.type != DofObjectLimit::Type::None) {
+                        d = 1;
+                    }
+                }
+
+                total_eq_entries += gpu_utils::warpReduceSum(d);
+            });
+    }
+
+
+
     if (threadIdx.x % 32 == 0) {
         const int32_t num_smem_bytes_per_warp =
             mwGPU::SharedMemStorage::numBytesPerWarp();
@@ -2851,13 +3058,22 @@ void GaussMinimizationNode::allocateScratch(int32_t invocation_idx)
                 sizeof(float) * 3 * total_contact_pts * total_num_dofs +
                 // diag approx of J_c
                 sizeof(float) * 3 * total_contact_pts +
+                // J_e
+                sizeof(SparseEqualityJacobian::Entry) * total_eq_entries * 2 +
+                sizeof(SparseEqualityJacobian::EntryList) * curr_sd->numRowsJe +
+                sizeof(SparseEqualityJacobian::EntryList) * curr_sd->numColsJe +
+#if 0
                 // J_e    TODO: Make this sparse
                 sizeof(float) * curr_sd->numRowsJe * curr_sd->numColsJe +
+#endif
                 // diag approx of J_e
                 sizeof(float) * curr_sd->numRowsJe +
                 // Equality residuals
                 sizeof(float) * curr_sd->numRowsJe;
 
+            // printf("total_eq_entries = %d\n", total_eq_entries);
+
+            curr_sd->totalEqEntries = total_eq_entries;
             curr_sd->prepMem = (uint8_t *)mwGPU::TmpAllocator::get().alloc(
                     prep_bytes);
             curr_sd->prepAllocatedBytes = prep_bytes;
@@ -2970,21 +3186,60 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
         }
     }
 
+    struct GlobTable {
+        DofObjectVelocity *velocities;
+        DofObjectTmpState *tmpStates;
+        DofObjectNumDofs *numDofs;
+        DofObjectInertial *inertials;
+        DofObjectHierarchyDesc *hierDescs;
+        BodyGroupHierarchy *bodyGroups;
+        DofObjectLimit *limits;
+        DofObjectPosition *positions;
+        uint32_t worldOffset;
+    } gtable;
+
+    gtable.velocities = state_mgr->getArchetypeComponent<
+        DofObjectArchetype, DofObjectVelocity>();
+    gtable.tmpStates = state_mgr->getArchetypeComponent<
+        DofObjectArchetype, DofObjectTmpState>();
+    gtable.numDofs = state_mgr->getArchetypeComponent<
+        DofObjectArchetype, DofObjectNumDofs>();
+    gtable.inertials = state_mgr->getArchetypeComponent<
+        DofObjectArchetype, DofObjectInertial>();
+    gtable.hierDescs = state_mgr->getArchetypeComponent<
+        DofObjectArchetype, DofObjectHierarchyDesc>();
+    gtable.bodyGroups = state_mgr->getArchetypeComponent<
+        BodyGroup, BodyGroupHierarchy>();
+    gtable.limits = state_mgr->getArchetypeComponent<
+        DofObjectArchetype, DofObjectLimit>();
+    gtable.positions = state_mgr->getArchetypeComponent<
+        DofObjectArchetype, DofObjectPosition>();
+    gtable.worldOffset = state_mgr->getArchetypeWorldOffsets<
+        DofObjectArchetype>()[world_id];
+
     { // Prepare full velocity
         float *full_vel = curr_sd->getFullVel(state_mgr);
 
         uint32_t processed_dofs = 0;
         for (uint32_t grp = 0; grp < curr_sd->numBodyGroups; ++grp) {
-            Entity *bodies = (Entity *)
-                (state_mgr->memoryRangePointer<MRElement128b>(hiers[grp].mrBodies));
+            uint32_t *rows = (uint32_t *)
+                ((uint8_t *)state_mgr->memoryRangePointer<MRElement128b>(hiers[grp].mrBodies) +
+                 sizeof(Entity) * hiers[grp].numBodies);
 
             warpLoop(hiers[grp].numBodies,
                 [&](uint32_t iter) {
-                    Entity body = bodies[iter];
+                    uint32_t row = rows[iter];
+                    // Entity body = bodies[iter];
 
+                    DofObjectVelocity vel = gtable.velocities[row];
+                    uint32_t dof_offset = gtable.tmpStates[row].dofOffset;
+                    uint32_t num_dofs = gtable.numDofs[row].numDofs;
+
+#if 0
                     DofObjectVelocity vel = state_mgr->getUnsafe<DofObjectVelocity>(body);
                     uint32_t dof_offset = state_mgr->getUnsafe<DofObjectTmpState>(body).dofOffset;
                     uint32_t num_dofs = state_mgr->getUnsafe<DofObjectNumDofs>(body).numDofs;
+#endif
 
                     #pragma unroll
                     for (uint32_t i = 0; i < 6; ++i) {
@@ -3093,8 +3348,13 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
         struct ContactInfo {
             ContactConstraint contact;
             ContactTmpState tmpState;
+#if 0
             Entity ref;
             Entity alt;
+#endif
+            uint32_t refRow;
+            uint32_t altRow;
+
             uint32_t refNumDofs;
             uint32_t altNumDofs;
             float invWeight;
@@ -3105,18 +3365,17 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
         auto get_contact_info = [&](uint32_t ct_idx) -> ContactInfo {
             auto contact = contacts[ct_idx];
 
-            Entity ref = state_mgr->getUnsafe<LinkParentDofObject>(
-                    contact.ref).parentDofObject;
-            Entity alt = state_mgr->getUnsafe<LinkParentDofObject>(
-                    contact.alt).parentDofObject;
+            uint32_t ref_row = state_mgr->getUnsafe<LinkParentDofObject>(
+                    contact.ref).parentDofObjectRow;
+            uint32_t alt_row = state_mgr->getUnsafe<LinkParentDofObject>(
+                    contact.alt).parentDofObjectRow;
 
-            auto ref_num_dofs = state_mgr->getUnsafe<DofObjectNumDofs>(
-                    ref).numDofs;
-            auto alt_num_dofs = state_mgr->getUnsafe<DofObjectNumDofs>(
-                    alt).numDofs;
+            auto ref_num_dofs = gtable.numDofs[ref_row].numDofs;
+            auto alt_num_dofs = gtable.numDofs[alt_row].numDofs;
 
-            auto &ref_inertial = state_mgr->getUnsafe<DofObjectInertial>(ref);
-            auto &alt_inertial = state_mgr->getUnsafe<DofObjectInertial>(alt);
+            auto &ref_inertial = gtable.inertials[ref_row];
+            auto &alt_inertial = gtable.inertials[alt_row];
+
             float inv_weight = 1.f / (
                     ref_inertial.approxInvMassTrans +
                     alt_inertial.approxInvMassTrans);
@@ -3124,8 +3383,8 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
             return {
                 contact,
                 contacts_tmp_state[ct_idx],
-                ref,
-                alt,
+                ref_row,
+                alt_row,
                 ref_num_dofs,
                 alt_num_dofs,
                 inv_weight,
@@ -3158,10 +3417,10 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
                         { // Compute jacobian for ref
                             DofObjectHierarchyDesc *hier =
-                                &state_mgr->getUnsafe<DofObjectHierarchyDesc>(
-                                    c_info.ref);
+                                &gtable.hierDescs[c_info.refRow];
+
                             BodyGroupHierarchy *grp =
-                                &state_mgr->getUnsafe<BodyGroupHierarchy>(hier->bodyGroup);
+                                &gtable.bodyGroups[hier->bodyGroupRow];
 
                             computeContactJacobian(
                                     grp,
@@ -3178,10 +3437,10 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
                         { // Compute jacobian for alt
                             DofObjectHierarchyDesc *hier =
-                                &state_mgr->getUnsafe<DofObjectHierarchyDesc>(
-                                    c_info.alt);
+                                &gtable.hierDescs[c_info.altRow];
+
                             BodyGroupHierarchy *grp =
-                                &state_mgr->getUnsafe<BodyGroupHierarchy>(hier->bodyGroup);
+                                &gtable.bodyGroups[hier->bodyGroupRow];
 
                             computeContactJacobian(
                                     grp,
@@ -3200,9 +3459,11 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
             });
     }
 
+#if 0
     { // Prepare equality jacobian
         Entity *body_entities = state_mgr->getWorldEntities<
             DofObjectArchetype>(world_id);
+
         uint32_t num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
 
         float *j_e = curr_sd->getEqualityJacobian(state_mgr);
@@ -3225,20 +3486,14 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
             num_bodies,
             [&](uint32_t iter) {
                 Entity body = body_entities[iter];
+                uint32_t body_row = state_mgr->getLoc(body_entities[iter]).row;
 
-                DofObjectLimit limit = state_mgr->getUnsafe<
-                    DofObjectLimit>(body);
-                DofObjectPosition &pos = state_mgr->getUnsafe<
-                    DofObjectPosition>(body);
-                DofObjectTmpState &tmp_state = state_mgr->getUnsafe<
-                    DofObjectTmpState>(body);
-                DofObjectInertial &inertial = state_mgr->getUnsafe<
-                    DofObjectInertial>(body);
-                DofObjectHierarchyDesc &hier = state_mgr->getUnsafe<
-                    DofObjectHierarchyDesc>(body);
-
-                BodyGroupHierarchy &body_grp = state_mgr->getUnsafe<
-                    BodyGroupHierarchy>(hier.bodyGroup);
+                DofObjectLimit limit = gtable.limits[body_row];
+                DofObjectPosition &pos = gtable.positions[body_row];
+                DofObjectTmpState &tmp_state = gtable.tmpStates[body_row];
+                DofObjectInertial &inertial = gtable.inertials[body_row];
+                DofObjectHierarchyDesc &hier = gtable.hierDescs[body_row];
+                BodyGroupHierarchy &body_grp = gtable.bodyGroups[hier.bodyGroupRow];
 
                 if (limit.type == DofObjectLimit::Type::None) {
                     return;
@@ -3257,6 +3512,7 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
                     to_change[0] =
                         limit.hinge.dConstraintViolation(pos.q[0]);
+
                     residuals[glob_row_offset] = limit.hinge.constraintViolation(pos.q[0]);
                     diag_approx[glob_row_offset] = 1.f / inertial.approxInvMassDof[0];
                 } break;
@@ -3268,6 +3524,7 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
                     to_change[0] =
                         limit.slider.dConstraintViolation(pos.q[0]);
+
                     residuals[glob_row_offset] = limit.slider.constraintViolation(pos.q[0]);
                     diag_approx[glob_row_offset] = 1.f / inertial.approxInvMassDof[0];
                 } break;
@@ -3276,6 +3533,143 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
                     MADRONA_UNREACHABLE();
                 } break;
                 }
+            });
+    }
+#endif
+
+    { // Prepare equality jacobian
+        Entity *body_entities = state_mgr->getWorldEntities<
+            DofObjectArchetype>(world_id);
+
+        uint32_t num_bodies = state_mgr->numRows<DofObjectArchetype>(world_id);
+
+        SparseEqualityJacobian *j_e = &curr_sd->eqSparse;
+
+        SparseEqualityJacobian::Entry *row_entries = curr_sd->getSEJEntries(state_mgr);
+        SparseEqualityJacobian::EntryList *row_lists = curr_sd->getSEJRowList(state_mgr);
+        SparseEqualityJacobian::EntryList *col_lists = curr_sd->getSEJColList(state_mgr);
+
+        float *residuals = curr_sd->getEqualityResiduals(state_mgr);
+
+        j_e->numRows = curr_sd->totalEqEntries;
+        j_e->numCols = curr_sd->totalNumDofs;
+        j_e->rows = row_lists;
+        j_e->cols = col_lists;
+        j_e->entries = row_entries;
+
+        curr_sd->eqResiduals = residuals;
+
+        // First, fill in offset and num entries for all rows
+        uint32_t acc_off = 0;
+        warpLoopSync(
+            num_bodies,
+            [&](uint32_t iter) {
+                uint32_t d = 0;
+
+                DofObjectLimit limit = {};
+                DofObjectPosition pos = {};
+                DofObjectTmpState *tmp_state = nullptr;
+                BodyGroupHierarchy *body_grp = nullptr;
+
+                if (iter != 0xFFFF'FFFF) {
+                    limit = gtable.limits[gtable.worldOffset + iter];
+                    pos = gtable.positions[gtable.worldOffset + iter];
+
+                    uint32_t body_grp_row = 
+                        gtable.hierDescs[gtable.worldOffset + iter].bodyGroupRow;
+
+                    body_grp = &gtable.bodyGroups[body_grp_row];
+
+                    tmp_state = &gtable.tmpStates[gtable.worldOffset + iter];
+
+                    if (limit.type != DofObjectLimit::Type::None) {
+                        // For now, all limits just have a size of 1
+                        d = 1;
+                    }
+
+                    // printf("has limit: %d\n", d);
+                }
+
+                uint32_t pf = warpInclusivePrefixSum(d);
+                uint32_t curr_off = pf - d + acc_off;
+                if (d == 1) {
+                    uint32_t glob_row_offset = row_start_eq[body_grp->tmpIdx0] +
+                                               limit.rowOffset;
+                    uint32_t glob_col_offset = world_block_start[body_grp->tmpIdx0] +
+                                               tmp_state->dofOffset;
+
+#if 0
+                    printf("setting row %d to have limit 1 %p\n", glob_row_offset,
+                            &row_lists[glob_row_offset]);
+#endif
+
+                    row_lists[glob_row_offset] = {
+                        .offset = curr_off,
+                        .numEntries = 1,
+                    };
+
+                    switch (limit.type) {
+                    case DofObjectLimit::Type::Hinge: {
+                        row_entries[curr_off] = {
+                            .row = glob_row_offset,
+                            .col = glob_col_offset,
+                            .value = limit.hinge.dConstraintViolation(pos.q[0])
+                        };
+
+                        residuals[glob_row_offset] =
+                            limit.hinge.constraintViolation(pos.q[0]);
+                    } break;
+
+                    case DofObjectLimit::Type::Slider: {
+                        row_entries[curr_off] = {
+                            .row = glob_row_offset,
+                            .col = glob_col_offset,
+                            .value = limit.slider.dConstraintViolation(pos.q[0])
+                        };
+
+                        residuals[glob_row_offset] =
+                            limit.slider.constraintViolation(pos.q[0]);
+                    } break;
+
+                    default: {
+                        MADRONA_UNREACHABLE();
+                    } break;
+                    }
+                }
+
+                acc_off += __shfl_sync(0xFFFF'FFFF, pf, 31);
+            });
+
+        const int32_t num_smem_bytes_per_warp =
+            mwGPU::SharedMemStorage::numBytesPerWarp();
+        auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                        num_smem_bytes_per_warp * warp_id;
+
+        AtomicU32 *counters = (AtomicU32 *)smem_buf;
+        uint32_t num_counters = num_smem_bytes_per_warp / sizeof(AtomicU32);
+
+        assert(num_counters > curr_sd->totalEqEntries);
+
+        warpLoop(
+            curr_sd->numColsJe,
+            [&](uint32_t iter) {
+                col_lists[iter] = {
+                    .offset = 0,
+                    .numEntries = 0,
+                };
+            });
+        __syncwarp();
+
+        // Now, fill in the column entries
+        warpLoop(
+            curr_sd->totalEqEntries,
+            [&](uint32_t iter) {
+                SparseEqualityJacobian::Entry entry = row_entries[iter];
+
+                col_lists[entry.col] = {
+                    .offset = iter,
+                    .numEntries = 1,
+                };
             });
     }
 #endif
@@ -3393,10 +3787,72 @@ void GaussMinimizationNode::computeAccRef(
             1);
 
     warpLoop(num_rows_j, [&](uint32_t iter) {
+        float r = fn(iter);
+
+        float imp_x = fabs(r) / width;
+        float imp_a = (1.f / powf(mid, power-1.f)) * powf(imp_x, power);
+        float imp_b = 1.f - (1.f / powf(1.f - mid, power - 1)) *
+                      powf(1.f - imp_x, power);
+        float imp_y = (imp_x < mid) ? imp_a : imp_b;
+        float imp = d_min + imp_y * (d_max - d_min);
+        if (imp < d_min)
+            imp = d_min;
+        else if (imp > d_max)
+            imp = d_max;
+        imp = (imp_x > 1.f) ? d_max : imp;
+
+        float k = 1.f / (d_max * d_max *
+                         time_const * time_const *
+                         damp_ratio * damp_ratio);
+        float b = 2.f / (d_max * time_const);
+
+        acc_ref[iter] *= -b;
+        acc_ref[iter] -= k * imp * r;
+    });
+}
+
+template <typename Fn>
+void GaussMinimizationNode::computeAccRef(
+        float *acc_ref,
+        uint32_t acc_ref_dim,
+        SparseEqualityJacobian *j_mat,
+        uint32_t num_rows_j,
+        uint32_t num_cols_j,
+        float *vel,
+        uint32_t vel_dim,
+        float h,
+        Fn &&fn,
+        bool dbg)
+{
+    using namespace gpu_utils;
+
+    float time_const = 2.f * h;
+    constexpr float damp_ratio = 1.f;
+    constexpr float d_min = 0.9f,
+                    d_max = 0.95f,
+                    width = 0.001f,
+                    mid = 0.5f,
+                    power = 2.f;
+    
+    // First store J @ v
 #if 0
-        float r = (iter % 3 == 0) ?
-            -curr_sd->penetrations[iter / 3] : 0.f;
+    gmmaWarpSmallReg<float, 4, true, false, true>(
+            acc_ref,
+            j_mat,
+            vel,
+            num_rows_j,
+            num_cols_j,
+            vel_dim,
+            1);
 #endif
+
+    jeqMulVector<false, true>(
+            acc_ref,
+            j_mat,
+            vel,
+            vel_dim);
+
+    warpLoop(num_rows_j, [&](uint32_t iter) {
         float r = fn(iter);
 
         float imp_x = fabs(r) / width;
@@ -3556,7 +4012,7 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
             computeAccRef(
                     acc_ref,
                     curr_sd->numRowsJe,
-                    curr_sd->J_e,
+                    &curr_sd->eqSparse,
                     curr_sd->numRowsJe,
                     curr_sd->numColsJe,
                     curr_sd->vel,
@@ -3565,14 +4021,6 @@ void GaussMinimizationNode::computeEqualityAccRef(int32_t invocation_idx)
                     [&](uint32_t iter) {
                         return residuals[iter];
                     });
-
-#if 0
-            printMatrix(
-                    acc_ref,
-                    1,
-                    curr_sd->numRowsJe,
-                    "accref_eq");
-#endif
 
             if (acc_ref && in_smem) {
                 float * acc_ref_glob =
@@ -5383,9 +5831,15 @@ inline void processContacts(Context &ctx,
                             ContactTmpState &tmp_state)
 {
     PROF_START(prof, cvProcessContactsClocks);
+    
+    LinkParentDofObject &link_ref = ctx.get<LinkParentDofObject>(contact.ref);
+    LinkParentDofObject &link_alt = ctx.get<LinkParentDofObject>(contact.alt);
 
-    Entity ref = ctx.get<LinkParentDofObject>(contact.ref).parentDofObject;
-    Entity alt = ctx.get<LinkParentDofObject>(contact.alt).parentDofObject;
+    Entity ref = link_ref.parentDofObject;
+    Entity alt = link_alt.parentDofObject;
+
+    link_ref.parentDofObjectRow = ctx.loc(ref).row;
+    link_alt.parentDofObjectRow = ctx.loc(alt).row;
 
     // If a parent collides with its direct child, unless the parent is a
     //  fixed body, we should ignore the contact.
@@ -6553,7 +7007,7 @@ void attachLimit(Context &ctx,
 
     hier.numEqualityRows += 1;
 
-
+    // printf("Attaching limit\n");
 
 #if 0
     DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);
@@ -6575,6 +7029,7 @@ void attachLimit(Context &ctx,
 
     hier.numEqualityRows += 1;
 
+    // printf("Attaching limit\n");
 
 #if 0
     DofObjectPosition &pos = ctx.get<DofObjectPosition>(body);

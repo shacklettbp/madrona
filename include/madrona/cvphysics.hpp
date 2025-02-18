@@ -376,6 +376,7 @@ struct LinkParentDofObject {
     };
 
     Entity parentDofObject;
+    uint32_t parentDofObjectRow;
 
     // Offset in `BodyObjectData`
     uint32_t mrOffset;
