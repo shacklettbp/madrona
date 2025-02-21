@@ -20,6 +20,15 @@ struct URDFMaterial {
     std::string name;
     std::string texturePath;
     Vector4 color;
+
+    static URDFMaterial defaultValue()
+    {
+        return URDFMaterial {
+            "",
+            "",
+            { 1.f, 1.f, 1.f, 1.f }
+        };
+    }
 };
 
 struct URDFPose {
@@ -39,24 +48,58 @@ struct URDFInertial {
     URDFPose origin;
     float mass;
     float ixx, ixy, ixz, iyy, iyz, izz;
+
+    static URDFInertial defaultValue()
+    {
+        return {
+            URDFPose::identity(),
+            1.f,
+            1.f, 0.f, 0.f, 1.f, 0.f, 1.f
+        };
+    }
 };
 
 struct URDFSphere {
     float radius;
+
+    static URDFSphere defaultValue()
+    {
+        return { 1.f };
+    }
 };
 
 struct URDFBox {
     Vector3 dim;
+
+    static URDFBox defaultValue()
+    {
+        return { Vector3::all(1.f) };
+    }
 };
 
 struct URDFCylinder {
     float length;
     float radius;
+
+    static URDFCylinder defaultValue()
+    {
+        return URDFCylinder {
+            1.f,
+            1.f
+        };
+    }
 };
 
 struct URDFMesh {
     std::string filename;
     Vector3 scale;
+
+    static URDFMesh defaultValue()
+    {
+        return {
+            "", Vector3::all(1.f)
+        };
+    }
 };
 
 enum class URDFGeometryType {
@@ -80,12 +123,32 @@ struct URDFVisual {
     URDFGeometry geometry;
     std::string materialName;
     URDFMaterial material;
+
+    static URDFVisual defaultValue()
+    {
+        return {
+            "",
+            URDFPose::identity(),
+            {},
+            "",
+            URDFMaterial::defaultValue(),
+        };
+    }
 };
 
 struct URDFCollision {
     std::string name;
     URDFPose origin;
     URDFGeometry geometry;
+
+    static URDFCollision defaultValue()
+    {
+        return URDFCollision {
+            "",
+            URDFPose::identity(),
+            {}
+        };
+    }
 };
 
 struct URDFLink {
@@ -107,6 +170,22 @@ struct URDFLink {
     Vector3 jointToChildCom;
 
     uint32_t idx;
+
+    static URDFLink defaultValue()
+    {
+        return {
+            "",
+            URDFInertial::defaultValue(),
+            {}, {},
+            "", "",
+            {}, {},
+            Vector3::all(0.f),
+            Vector3::all(0.f),
+            Quat::id(),
+            Vector3::all(0.f),
+            0
+        };
+    }
 };
 
 struct URDFCollisionDisable {
@@ -434,6 +513,8 @@ static bool parseVisual(URDFVisual &vis, tinyxml2::XMLElement *config)
     
     if (o) {
         parsePoseInternal(vis.origin, o);
+    } else {
+        vis.origin = URDFPose::identity();
     }
 
     // Geometry
@@ -468,6 +549,9 @@ static void parseInertial(
     tinyxml2::XMLElement *o = config->FirstChildElement("origin");
     if (o) {
         parsePoseInternal(i.origin, o, true);
+    } else {
+        // assert(false);
+        i.origin = { Vector3::all(0.f), Quat::id() };
     }
 
     tinyxml2::XMLElement *mass_xml = config->FirstChildElement("mass");
@@ -540,6 +624,17 @@ static bool parseLink(
     tinyxml2::XMLElement *i = config->FirstChildElement("inertial");
     if (i) {
         parseInertial(link.inertial, i);
+    } else {
+        link.inertial = {
+            .origin = { Vector3::all(0.f), Quat::id() },
+            .mass = 1.f,
+            .ixx = 1.f,
+            .ixy = 0.f,
+            .ixz = 0.f,
+            .iyy = 0.f,
+            .iyz = 0.f,
+            .izz = 1.f
+        };
     }
 
     // Multiple Visuals (optional)
@@ -976,7 +1071,7 @@ static URDFModel parseURDF(const std::string &xml_string)
     for (tinyxml2::XMLElement* material_xml = robot_xml->FirstChildElement("material");
             material_xml;
             material_xml = material_xml->NextSiblingElement("material")) {
-        URDFMaterial material;
+        URDFMaterial material = URDFMaterial::defaultValue();
 
         bool success = parseMaterial(material, material_xml, false);
         assert(success);
@@ -991,7 +1086,7 @@ static URDFModel parseURDF(const std::string &xml_string)
     for (tinyxml2::XMLElement* link_xml = robot_xml->FirstChildElement("link");
             link_xml;
             link_xml = link_xml->NextSiblingElement("link")) {
-        URDFLink link;
+        URDFLink link = URDFLink::defaultValue();
 
         parseLink(link, link_xml);
 
@@ -1012,7 +1107,7 @@ static URDFModel parseURDF(const std::string &xml_string)
     for (tinyxml2::XMLElement* joint_xml = robot_xml->FirstChildElement("joint");
             joint_xml;
             joint_xml = joint_xml->NextSiblingElement("joint")) {
-        URDFJoint joint;
+        URDFJoint joint = {};
 
         parseJoint(joint, joint_xml);
 
@@ -1121,6 +1216,13 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         std::string link_name = sorted_links[0];
         URDFLink &link = model.links[link_name];
 
+        printf("(%d) URDF mass = %f; Inertia = %f %f %f\n",
+                0,
+                link.inertial.mass,
+                link.inertial.ixx,
+                link.inertial.iyy,
+                link.inertial.izz);
+
         BodyDesc body_desc = {
             .type = DofType::FixedBody,
             .initialPos = Vector3::all(0.f),
@@ -1158,6 +1260,13 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             // ... ?
             .muS = 0.1f
         };
+
+        printf("(%d) URDF mass = %f; Inertia = %f %f %f\n",
+                i,
+                link.inertial.mass,
+                link.inertial.ixx,
+                link.inertial.iyy,
+                link.inertial.izz);
 
         // Push this to list of BodyDesc
         bodyDescs.push_back(body_desc);
@@ -1229,6 +1338,12 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 // joint.axis is already in the child frame.
                 .hingeAxis = joint.second.axis
             };
+
+            printf("(%d) URDF relPositionParent = %f %f %f\n",
+                    cfg.numConnections - 1,
+                    hinge.relPositionParent.x,
+                    hinge.relPositionParent.y,
+                    hinge.relPositionParent.z);
 
             child.parentCom = parent_com;
             child.parentToJoint = parent_to_joint;

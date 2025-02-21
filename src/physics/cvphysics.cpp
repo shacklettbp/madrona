@@ -6424,6 +6424,9 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
 
     hier_desc.index = grp_info.bodyCounter;
     hier_desc.globalScale = grp_info.globalScale;
+    hier_desc.relPositionParent = Vector3::all(0.f);
+    hier_desc.relPositionLocal = Vector3::all(0.f);
+    hier_desc.parentToChildRot = Quat::id();
 
     grp_info.bodyCounter++;
 
