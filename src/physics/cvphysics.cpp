@@ -21,7 +21,7 @@
 
 
 #ifdef MADRONA_GPU_MODE
-#define COUNT_CV_GPU_CLOCKS
+// #define COUNT_CV_GPU_CLOCKS
 #endif
 
 
@@ -6294,29 +6294,7 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
 }
 
-Entity makeBodyGroup(Context &ctx, uint32_t num_bodies, float global_scale)
-{
-    Entity e = ctx.makeEntity<BodyGroup>();
-
-    auto &hier = ctx.get<BodyGroupHierarchy>(e);
-    hier.numBodies = num_bodies;
-    hier.bodyCounter = 0;
-    hier.collisionObjsCounter = 0;
-    hier.visualObjsCounter = 0;
-    hier.globalScale = global_scale;
-    hier.visualizeColliders = false;
-
-    uint64_t mr_num_bytes = num_bodies * (sizeof(Entity) + sizeof(uint32_t));
-    uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
-        sizeof(MRElement128b);
-
-    hier.mrBodies = ctx.allocMemoryRange<MRElement128b>(num_elems);
-
-    hier.numEqualityRows = 0;
-
-    return e;
-}
-
+#if 0
 Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
 {
     auto &grp_info = ctx.get<BodyGroupHierarchy>(body_grp);
@@ -6442,6 +6420,7 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
 
     return physical_entity;
 }
+#endif
 
 void attachCollision(
         Context &ctx,
