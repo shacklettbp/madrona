@@ -1770,7 +1770,7 @@ CountT RenderContext::loadObjects(Span<const imp::SourceObject> src_objs,
 
         for (const SourceMesh &mesh : obj.meshes) {
             if (mesh.faceCounts != nullptr) {
-                FATAL("Render mesh isn't triangular");
+                FATAL("Render %s mesh isn't triangular", mesh.name);
             }
 
             num_total_vertices += mesh.numVertices;

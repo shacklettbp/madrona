@@ -54,7 +54,7 @@ struct OBJLoader::Impl {
 
     void recordError(const char *fmt_string, ...) const;
 
-    bool commitMesh(ImportedAssets &out_assets);
+    bool commitMesh(ImportedAssets &out_assets, const char *name);
 
     bool load(const char *path, ImportedAssets &imported_assets);
 
@@ -299,7 +299,7 @@ void OBJLoader::Impl::recordError(const char *fmt_string, ...) const
     }
 }
 
-bool OBJLoader::Impl::commitMesh(ImportedAssets &out_assets)
+bool OBJLoader::Impl::commitMesh(ImportedAssets &out_assets, const char *name)
 {
     if (curIndices.size() == 0) {
         if (curPositions.size() > 0 || curNormals.size() > 0 ||
@@ -445,6 +445,9 @@ bool OBJLoader::Impl::commitMesh(ImportedAssets &out_assets)
     fakeIndices.clear();
     vertexRemap.clear();
 
+    char *new_name = (char *)malloc(strlen(name) + 1);
+    memcpy(new_name, name, strlen(name) + 1);
+
     objMeshes.push_back({
         .positions = new_positions.data(),
         .normals = new_normals.data(),
@@ -456,6 +459,7 @@ bool OBJLoader::Impl::commitMesh(ImportedAssets &out_assets)
         .numVertices = uint32_t(new_positions.size()),
         .numFaces = uint32_t(face_counts_copy.size()),
         .materialIDX = 0xFFFF'FFFF,
+        .name = new_name
     });
 
     out_assets.geoData.positionArrays.emplace_back(
@@ -502,7 +506,7 @@ bool OBJLoader::Impl::load(const char *path, ImportedAssets &imported_assets)
         if (line[0] == '#') continue;
 
         if (line[0] == 'o') {
-            bool valid = commitMesh(imported_assets);
+            bool valid = commitMesh(imported_assets, path);
             if (!valid) {
                 return false;
             }
@@ -571,7 +575,7 @@ bool OBJLoader::Impl::load(const char *path, ImportedAssets &imported_assets)
         }
     }
 
-    if (!commitMesh(imported_assets)) {
+    if (!commitMesh(imported_assets, path)) {
         return false;
     }
 

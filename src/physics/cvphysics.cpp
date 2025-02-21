@@ -21,7 +21,7 @@
 
 
 #ifdef MADRONA_GPU_MODE
-#define COUNT_CV_GPU_CLOCKS
+// #define COUNT_CV_GPU_CLOCKS
 #endif
 
 

@@ -10,6 +10,7 @@
 #include <meshoptimizer.h>
 
 #include "obj.hpp"
+#include "stl.hpp"
 
 #ifdef MADRONA_GLTF_SUPPORT
 #include "gltf.hpp"
@@ -31,6 +32,8 @@ struct AssetImporter::Impl {
     ImageImporter imgImporter;
 
     Optional<OBJLoader> objLoader;
+
+    Optional<STLLoader> stlLoader;
 
 #ifdef MADRONA_GLTF_SUPPORT
     Optional<GLTFLoader> gltfLoader;
@@ -60,6 +63,7 @@ AssetImporter::Impl * AssetImporter::Impl::make(ImageImporter &&img_importer)
     return new Impl {
         .imgImporter = std::move(img_importer),
         .objLoader = Optional<OBJLoader>::none(),
+        .stlLoader = Optional<STLLoader>::none(),
 #ifdef MADRONA_GLTF_SUPPORT
         .gltfLoader = Optional<GLTFLoader>::none(),
 #endif
@@ -96,6 +100,12 @@ void AssetImporter::Impl::importFromDisk(
             }
 
             load_success = objLoader->load(path, imported);
+        } else if (extension == "stl") {
+            if (!stlLoader.has_value()) {
+                stlLoader.emplace(err_buf);
+            }
+
+            load_success = stlLoader->load(path, imported);
         } else if (extension == "gltf" || extension == "glb") {
 #ifdef MADRONA_GLTF_SUPPORT
             if (!gltfLoader.has_value()) {
