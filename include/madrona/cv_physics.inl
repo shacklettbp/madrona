@@ -31,7 +31,7 @@ uint32_t BodyOffsets::getDofTypeDim(DofType type, bool is_pos)
     }
 }
 
-float * BodyGroupMemory::q(BodyGroupProperties p)
+float * BodyGroupMemory::q(BodyGroupProperties)
 {
     return (float *)qVectorsPtr;
 }
@@ -76,39 +76,49 @@ BodyObjectData * BodyGroupMemory::objectData(BodyGroupProperties p)
     return (BodyObjectData *)(expandedParent(p) + p.qDim);
 }
 
+BodyHierarchy * BodyGroupMemory::hierarchies(BodyGroupProperties p)
+{
+    return (BodyHierarchy *)(objectData(p) + p.numObjData);
+}
+
 BodyOffsets * BodyGroupMemory::offsets(BodyGroupProperties p)
 {
-    return (BodyOffsets *)(objectData(p) + p.numObjData);
+    return (BodyOffsets *)(hierarchies(p) + p.numBodies);
 }
 
-BodyTransform * BodyGroupMemory::bodyTransforms(BodyGroupProperties)
+BodyTransform * BodyGroupMemory::bodyTransforms(BodyGroupProperties p)
 {
-    
+    return (BodyTransform *)tmpPtr;
 }
 
-BodyPhi * BodyGroupMemory::bodyPhi(BodyGroupProperties)
+BodyPhi * BodyGroupMemory::bodyPhi(BodyGroupProperties p)
 {
-    
+    return (BodyPhi *)(bodyTransforms(p) + p.numBodies);
 }
 
-BodySpatialVectors * BodyGroupMemory::spatialVectors(BodyGroupProperties)
+BodySpatialVectors * BodyGroupMemory::spatialVectors(BodyGroupProperties p)
 {
-    
+    return (BodySpatialVectors *)(bodyPhi(p) + p.numBodies);
 }
 
-float * BodyGroupMemory::biasVector(BodyGroupProperties)
+float * BodyGroupMemory::biasVector(BodyGroupProperties p)
 {
-    
+    return (float *)(spatialVectors(p) + p.numBodes);
 }
 
-float * BodyGroupMemory::massMatrix(BodyGroupProperties)
+float * BodyGroupMemory::massMatrix(BodyGroupProperties p)
 {
-    
+    return (float *)(biasVector(p) + p.qvDim);
 }
 
-float * BodyGroupMemory::massLTDLMatrix(BodyGroupProperties)
+float * BodyGroupMemory::massLTDLMatrix(BodyGroupProperties p)
 {
-    
+    return (float *)(massMatrix(p) + p.qvDim * p.qvDim);
+}
+
+float * BodyGroupMemory::phiFull(BodyGroupProperties p)
+{
+    return (float *)(massLTDLMatrix(p) + p.qvDim * p.qvDim);
 }
 
 inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
@@ -122,6 +132,7 @@ inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.numDofs * sizeof(int32_t) +            // expanded parent
            p.numObjData * sizeof(BodyObjectData) +  // body object data
+           p.numBodies * sizeof(BodyHierarchy) +    // body hierarchy
            p.numBodies * sizeof(BodyOffsets);
 }
 
@@ -132,7 +143,8 @@ inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
            p.numBodies * sizeof(BodySpatialVectors) +   // spatial vectors
            p.qvDim * sizeof(float) +                    // bias vector
            p.qvDim * p.qvDim * sizeof(float) +          // mass matrix
-           p.qvDim * p.qvDim * sizeof(float);           // LTDL mass matrix
+           p.qvDim * p.qvDim * sizeof(float) +          // LTDL mass matrix
+           p.qvDim * 2 * 6;
 }
 
 SpatialVector SpatialVector::fromVec(const float* v)

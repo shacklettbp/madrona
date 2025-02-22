@@ -58,8 +58,12 @@ struct BodyLimitConstraint {
 struct BodyOffsets {
     uint8_t posOffset;
     uint8_t velOffset;
-    uint8_t parent;
+    uint8_t parent;    // 0xFF is invalid invalid
     DofType dofType;
+
+    uint8_t eqOffset;
+    uint8_t numEqs;
+    uint8_t pad[2];
 
     static inline uint32_t getDofTypeDim(DofType type, bool is_pos = false);
 };
@@ -175,6 +179,7 @@ struct BodyGroupMemory {
     inline BodyInertial * inertials(BodyGroupProperties);
     inline int32_t * expandedParent(BodyGroupProperties);
     inline BodyObjectData * objectData(BodyGroupProperties);
+    inline BodyHierarchy * hierarchies(BodyGroupProperties);
     inline BodyOffsets * offsets(BodyGroupProperties);
 
     inline BodyTransform * bodyTransforms(BodyGroupProperties);
@@ -183,7 +188,10 @@ struct BodyGroupMemory {
     inline float * biasVector(BodyGroupProperties);
     inline float * massMatrix(BodyGroupProperties);
     inline float * massLTDLMatrix(BodyGroupProperties);
-    // Use 2 * 6 * bodyOffsets[i].velOffset
+    // For a body at index i,
+    // For phi use     phiFull(p) + 2 * 6 * bodyOffsets[i].velOffset0
+    // For phi_dot use phiFull(p) + 2 * 6 * bodyOffsets[i].velOffset + 
+    //                              2 * 6 * BodyOffsets::getDofTypeDim(bodyOffsets[i].type)
     inline float * phiFull(BodyGroupProperties);
 
     static inline uint32_t qVectorsNumBytes(BodyGroupProperties p);
@@ -466,12 +474,6 @@ void disableJointCollisions(
         Entity grp,
         Entity joint_a,
         Entity joint_b);
-
-// Sets whether or not to visualize the colliders
-void setColliderVisualizer(
-        Context &ctx,
-        Entity body_grp,
-        bool visualize);
 
 // External forces:
 void addHingeExternalForce(
