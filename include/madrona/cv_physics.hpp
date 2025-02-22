@@ -5,7 +5,6 @@
 #include <madrona/components.hpp>
 #include <madrona/memory_range.hpp>
 #include <madrona/taskgraph_builder.hpp>
-#include <madrona/physics.hpp>
 
 namespace madrona::phys::cv {
 
@@ -99,6 +98,33 @@ struct BodyPhi {
     float phiDot[7];
 };
 
+struct BodyGroupProperties {
+    float globalScale;
+
+    uint32_t qDim;
+    uint32_t qvDim;
+    uint32_t numBodies;
+    uint32_t numEq;
+    uint32_t numObjData;
+
+    struct {
+        uint32_t bodyCounter;
+    } tmp;
+};
+
+struct SpatialVector {
+    math::Vector3 linear;
+    math::Vector3 angular;
+
+    inline SpatialVector fromVec(const float* v);
+    inline float operator[](const CountT i) const;
+    inline float & operator[](const CountT i);
+    inline SpatialVector & operator+=(const SpatialVector &rhs);
+    inline SpatialVector & operator-=(const SpatialVector &rhs);
+    inline SpatialVector cross(const SpatialVector &rhs) const;
+    inline SpatialVector SpatialVector::crossStar(const SpatialVector &rhs) const;
+};
+
 struct BodySpatialVectors {
     SpatialVector sVel;
     SpatialVector sAcc;
@@ -134,11 +160,11 @@ struct BodyGroupMemory {
     // We store these to avoid access to memory range interials at every access.
     void *qVectorsPtr;
 
-    // During initialization time, we use this pointer to store all the 
+    // During initialization time, we use this pointer to store all the
     // desc structs in order to avoid the user needing to pre-determine
     // how many limits / object data etc...
     void *tmpPtr;
-    
+
     // These functions all assume that the qVectorsPtr / tmpPtr are valid.
     inline float * q(BodyGroupProperties);
     inline float * qv(BodyGroupProperties);
@@ -161,21 +187,6 @@ struct BodyGroupMemory {
     static inline uint32_t qVectorsNumBytes(BodyGroupProperties p);
     static inline uint32_t tmpNumBytes(BodyGroupProperties p);
 };
-
-struct BodyGroupProperties {
-    float globalScale;
-
-    uint32_t qDim;
-    uint32_t qvDim;
-    uint32_t numBodies;
-    uint32_t numEq;
-    uint32_t numObjData;
-
-    struct {
-        uint32_t bodyCounter;
-    } tmp;
-};
-
 struct BodyGroupArchetype : Archetype<
     BodyGroupProperties,
     BodyGroupMemory
@@ -238,19 +249,6 @@ struct ContactTmpState {
 struct ContactPointInfo {
     uint32_t parentIdx;
     uint32_t subIdx;
-};
-
-struct SpatialVector {
-    math::Vector3 linear;
-    math::Vector3 angular;
-
-    inline SpatialVector fromVec(const float* v);
-    inline float operator[](const CountT i) const;
-    inline float & operator[](const CountT i);
-    inline SpatialVector & operator+=(const SpatialVector &rhs);
-    inline SpatialVector & operator-=(const SpatialVector &rhs);
-    inline SpatialVector cross(const SpatialVector &rhs) const;
-    inline SpatialVector SpatialVector::crossStar(const SpatialVector &rhs) const;
 };
 
 
@@ -492,4 +490,4 @@ void initializeHierarchies(Context &ctx);
 
 }
 
-#include "cvphysics.inl"
+#include "cv_physics.inl"
