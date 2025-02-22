@@ -183,6 +183,8 @@ struct BodyGroupMemory {
     inline float * biasVector(BodyGroupProperties);
     inline float * massMatrix(BodyGroupProperties);
     inline float * massLTDLMatrix(BodyGroupProperties);
+    // Use 2 * 6 * bodyOffsets[i].velOffset
+    inline float * phiFull(BodyGroupProperties);
 
     static inline uint32_t qVectorsNumBytes(BodyGroupProperties p);
     static inline uint32_t tmpNumBytes(BodyGroupProperties p);
@@ -226,6 +228,8 @@ struct DofObjectGroup {
 };
 
 struct DofObjectProxies {
+    ResponseType responseType;
+
     uint32_t visualOffset;
     uint32_t numVisuals;
 
