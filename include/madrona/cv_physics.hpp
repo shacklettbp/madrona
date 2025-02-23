@@ -111,6 +111,8 @@ struct BodyGroupProperties {
     uint32_t numEq;
     uint32_t numObjData;
 
+    math::Vector3 comPos;
+
     struct {
         uint32_t bodyCounter;
     } tmp;
@@ -120,7 +122,7 @@ struct SpatialVector {
     math::Vector3 linear;
     math::Vector3 angular;
 
-    inline SpatialVector fromVec(const float* v);
+    static inline SpatialVector fromVec(const float* v);
     inline float operator[](const CountT i) const;
     inline float & operator[](const CountT i);
     inline SpatialVector & operator+=(const SpatialVector &rhs);
@@ -129,10 +131,36 @@ struct SpatialVector {
     inline SpatialVector SpatialVector::crossStar(const SpatialVector &rhs) const;
 };
 
+// This represents the spatial inertia in Plücker coordinates
+// [m * 1_{3x3};  -m * r^x
+//  m * r^x;      I_world - m * r^x r^x ]
+struct InertiaTensor {
+    // The spatial inertia tensor is parameterized by 10 values:
+    float mass;
+    math::Vector3 mCom; // mass times [vector from Plücker origin to COM]
+    // The left block of the spatial inertia matrix is symmetric so
+    // 6 values are required to parameterize the first block
+    // (I_world - m * r^x * r^x).
+    // The values are ordered as:
+    // [ 0 3 4
+    //     1 5
+    //       2 ]
+    float spatial_inertia[6];
+
+    // Helper function to add two inertia tensors together
+    inline InertiaTensor & operator+=(const InertiaTensor &rhs);
+
+    // Multiply with vector [v] of length 6, storing the result in [out]
+    inline void multiply(const float* v, float* out) const;
+    inline SpatialVector multiply(const SpatialVector &v) const;
+};
+
+
 struct BodySpatialVectors {
     SpatialVector sVel;
     SpatialVector sAcc;
     SpatialVector sForce;
+    InertiaTensor spatialInertia;
 };
 
 // This contains data for all the bodies within the body group.
@@ -161,7 +189,7 @@ struct BodyGroupMemory {
     // - mass matrix LTDL
     MemoryRange tmp;
 
-    // We store these to avoid access to memory range interials at every access.
+    // We store these to avoid access to memory range intervals at every access.
     void *qVectorsPtr;
 
     // During initialization time, we use this pointer to store all the
@@ -264,30 +292,6 @@ struct ContactPointInfo {
     uint32_t subIdx;
 };
 
-
-// This represents the spatial inertia in Plücker coordinates
-// [m * 1_{3x3};  -m * r^x
-//  m * r^x;      I_world - m * r^x r^x ]
-struct InertiaTensor {
-    // The spatial inertia tensor is parameterized by 10 values:
-    float mass;
-    math::Vector3 mCom; // mass times [vector from Plücker origin to COM]
-    // The left block of the spatial inertia matrix is symmetric so
-    // 6 values are required to parameterize the first block
-    // (I_world - m * r^x * r^x).
-    // The values are ordered as:
-    // [ 0 3 4
-    //     1 5
-    //       2 ]
-    float spatial_inertia[6];
-
-    // Helper function to add two inertia tensors together
-    inline InertiaTensor & operator+=(const InertiaTensor &rhs);
-
-    // Multiply with vector [v] of length 6, storing the result in [out]
-    inline void multiply(const float* v, float* out) const;
-    inline SpatialVector multiply(const SpatialVector &v) const;
-};
 
 // This is the phi linear operator which appears in Featherstone's Composite-
 // Rigid-Body Algorithm. phi maps from our generalized velocities to the
