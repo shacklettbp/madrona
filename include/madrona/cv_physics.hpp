@@ -193,6 +193,7 @@ struct BodyGroupMemory {
     // For phi_dot use phiFull(p) + 2 * 6 * bodyOffsets[i].velOffset + 
     //                              2 * 6 * BodyOffsets::getDofTypeDim(bodyOffsets[i].type)
     inline float * phiFull(BodyGroupProperties);
+    inline float * scratch(BodyGroupProperties);
 
     static inline uint32_t qVectorsNumBytes(BodyGroupProperties p);
     static inline uint32_t tmpNumBytes(BodyGroupProperties p);

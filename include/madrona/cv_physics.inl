@@ -121,6 +121,11 @@ float * BodyGroupMemory::phiFull(BodyGroupProperties p)
     return (float *)(massLTDLMatrix(p) + p.qvDim * p.qvDim);
 }
 
+inline float * BodyGroupMemory::scratch(BodyGroupProperties)
+{
+    return (float *)(phiFull(p) + p.qvDim * 2 * 6);
+}
+
 inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
 {
     return p.qDim * sizeof(float) +                 // q
@@ -144,7 +149,8 @@ inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
            p.qvDim * sizeof(float) +                    // bias vector
            p.qvDim * p.qvDim * sizeof(float) +          // mass matrix
            p.qvDim * p.qvDim * sizeof(float) +          // LTDL mass matrix
-           p.qvDim * 2 * 6;
+           p.qvDim * 2 * 6 +
+           36;
 }
 
 SpatialVector SpatialVector::fromVec(const float* v)
