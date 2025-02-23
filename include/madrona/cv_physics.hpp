@@ -112,6 +112,8 @@ struct BodyGroupProperties {
     uint32_t numObjData;
 
     math::Vector3 comPos;
+    // Sum of diagonals of mass matrix
+    float inertiaSum;
 
     struct {
         uint32_t bodyCounter;

@@ -68,178 +68,6 @@ struct CVRigidBodyState : Bundle<
 > {};
 
 namespace tasks {
-inline void forwardKinematics(Context &ctx,
-                              BodyGroupHierarchy &body_grp)
-{
-    PROF_START(prof, cvForwardKinematicsClocks);
-
-    { // Set the parent's state
-        auto &position = ctx.get<DofObjectPosition>(body_grp.bodies(ctx)[0]);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body_grp.bodies(ctx)[0]);
-
-        tmp_state.composedRot = {
-            position.q[3],
-            position.q[4],
-            position.q[5],
-            position.q[6]
-        };
-
-        // This is the origin of the body
-        tmp_state.comPos = {
-            position.q[0],
-            position.q[1],
-            position.q[2]
-        };
-
-        // omega remains unchanged, and v only depends on the COM position
-        tmp_state.phi.v[0] = tmp_state.comPos[0];
-        tmp_state.phi.v[1] = tmp_state.comPos[1];
-        tmp_state.phi.v[2] = tmp_state.comPos[2];
-    }
-
-    // Forward pass from parent to children
-    for (int i = 1; i < (int)body_grp.numBodies; ++i) {
-        Entity body = body_grp.bodies(ctx)[i];
-        auto &position = ctx.get<DofObjectPosition>(body);
-        auto &num_dofs = ctx.get<DofObjectNumDofs>(body);
-        auto &tmp_state = ctx.get<DofObjectTmpState>(body);
-        auto &hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
-
-        float s = hier_desc.globalScale;
-
-        Entity parent_e = hier_desc.parent;
-        DofObjectTmpState &parent_tmp_state =
-            ctx.get<DofObjectTmpState>(parent_e);
-
-        // We can calculate our stuff.
-        switch (num_dofs.type) {
-        case DofType::Hinge: {
-            // Find the hinge axis orientation in world space
-            Vector3 rotated_hinge_axis =
-                parent_tmp_state.composedRot.rotateVec(
-                        hier_desc.parentToChildRot.rotateVec(hier_desc.axis));
-
-            // Calculate the composed rotation applied to the child entity.
-            tmp_state.composedRot = parent_tmp_state.composedRot *
-                                    hier_desc.parentToChildRot *
-                                    Quat::angleAxis(position.q[0], hier_desc.axis);
-
-            // Calculate the composed COM position of the child
-            //  (parent COM + R_{parent} * (rel_pos_parent + R_{hinge} * rel_pos_local))
-            tmp_state.comPos = parent_tmp_state.comPos +
-                s * parent_tmp_state.composedRot.rotateVec(
-                        hier_desc.relPositionParent +
-                        hier_desc.parentToChildRot.rotateVec(
-                            Quat::angleAxis(position.q[0], hier_desc.axis).
-                                rotateVec(hier_desc.relPositionLocal))
-                );
-
-            // All we are getting here is the position of the hinge point
-            // which is relative to the parent's COM.
-            tmp_state.anchorPos = parent_tmp_state.comPos +
-                s * parent_tmp_state.composedRot.rotateVec(
-                        hier_desc.relPositionParent);
-
-            // Phi only depends on the hinge axis and the hinge point
-            tmp_state.phi.v[0] = rotated_hinge_axis[0];
-            tmp_state.phi.v[1] = rotated_hinge_axis[1];
-            tmp_state.phi.v[2] = rotated_hinge_axis[2];
-            tmp_state.phi.v[3] = tmp_state.anchorPos[0];
-            tmp_state.phi.v[4] = tmp_state.anchorPos[1];
-            tmp_state.phi.v[5] = tmp_state.anchorPos[2];
-        } break;
-
-        case DofType::Slider: {
-            Vector3 rotated_axis =
-                parent_tmp_state.composedRot.rotateVec(
-                        hier_desc.parentToChildRot.rotateVec(hier_desc.axis));
-
-            // The composed rotation for this body is the same as the parent's
-            tmp_state.composedRot = parent_tmp_state.composedRot *
-                                    hier_desc.parentToChildRot;
-
-            tmp_state.comPos = parent_tmp_state.comPos +
-                s * parent_tmp_state.composedRot.rotateVec(
-                        hier_desc.relPositionParent +
-                        hier_desc.parentToChildRot.rotateVec(
-                            hier_desc.relPositionLocal +
-                            position.q[0] * hier_desc.axis)
-                );
-
-            // This is the same as the comPos I guess?
-            tmp_state.anchorPos = tmp_state.comPos;
-
-            Vector3 axis = rotated_axis.normalize();
-
-            tmp_state.phi.v[0] = axis[0];
-            tmp_state.phi.v[1] = axis[1];
-            tmp_state.phi.v[2] = axis[2];
-        } break;
-
-        case DofType::Ball: {
-            Quat joint_rot = Quat{
-                position.q[0], position.q[1], position.q[2], position.q[3]
-            };
-
-            // Calculate the composed rotation applied to the child entity.
-            tmp_state.composedRot = parent_tmp_state.composedRot *
-                                    hier_desc.parentToChildRot *
-                                    joint_rot;
-
-            // Calculate the composed COM position of the child
-            //  (parent COM + R_{parent} * (rel_pos_parent + R_{ball} * rel_pos_local))
-            tmp_state.comPos = parent_tmp_state.comPos +
-                s * parent_tmp_state.composedRot.rotateVec(
-                        hier_desc.relPositionParent +
-                        hier_desc.parentToChildRot.rotateVec(
-                            joint_rot.rotateVec(hier_desc.relPositionLocal))
-                );
-
-            // All we are getting here is the position of the ball point
-            // which is relative to the parent's COM.
-            tmp_state.anchorPos = parent_tmp_state.comPos +
-                s * parent_tmp_state.composedRot.rotateVec(
-                        hier_desc.relPositionParent);
-
-            // Phi only depends on the hinge point and parent rotation
-            tmp_state.phi.v[0] = tmp_state.anchorPos[0];
-            tmp_state.phi.v[1] = tmp_state.anchorPos[1];
-            tmp_state.phi.v[2] = tmp_state.anchorPos[2];
-            tmp_state.phi.v[3] = parent_tmp_state.composedRot.w;
-            tmp_state.phi.v[4] = parent_tmp_state.composedRot.x;
-            tmp_state.phi.v[5] = parent_tmp_state.composedRot.y;
-            tmp_state.phi.v[6] = parent_tmp_state.composedRot.z;
-        } break;
-
-        case DofType::FixedBody: {
-            tmp_state.composedRot =
-                parent_tmp_state.composedRot;
-
-            // This is the origin of the body
-            tmp_state.comPos =
-                parent_tmp_state.comPos +
-                s * parent_tmp_state.composedRot.rotateVec(
-                        hier_desc.relPositionParent +
-                        hier_desc.parentToChildRot.rotateVec(
-                            hier_desc.relPositionLocal)
-                );
-
-            // omega remains unchanged, and v only depends on the COM position
-            tmp_state.phi.v[0] = tmp_state.comPos[0];
-            tmp_state.phi.v[1] = tmp_state.comPos[1];
-            tmp_state.phi.v[2] = tmp_state.comPos[2];
-        } break;
-
-        default: {
-            // Only hinges have parents
-            assert(false);
-        } break;
-        }
-    }
-
-    PROF_END(prof);
-}
-
 inline Mat3x3 skewSymmetricMatrix(Vector3 v)
 {
     return {
@@ -252,8 +80,10 @@ inline Mat3x3 skewSymmetricMatrix(Vector3 v)
 }
 
 inline void computePhiTrans(
-        const DofObjectNumDofs num_dofs,
-        DofObjectTmpState &tmp_state,
+        BodyGroupProperties &prop,
+        BodyGroupMemory &mem,
+        // const DofObjectNumDofs num_dofs,
+        // DofObjectTmpState &tmp_state,
         Vector3 origin,
         float *S)
 {
@@ -321,11 +151,11 @@ inline void computePhiTrans(
 }
 
 // Computes the Phi matrix from generalized velocities to Plücker coordinates
-inline float* computePhi(Context &ctx,
-                         DofType dof_type,
-                         BodyPhi &body_phi,
-                         float* S,
-                         Vector3 origin)
+inline float* computePhi(
+    DofType dof_type,
+    BodyPhi &body_phi,
+    float* S,
+    Vector3 origin)
 {
     float* phi = body_phi.phi;
 
@@ -473,7 +303,7 @@ inline void computeSpatialInertiasAndPhi(Context &ctx,
     float* S = mem.phiFull(prop) + S_offset;
 
     if (dof_type != DofType::None && dof_type != DofType::FixedBody) {
-        computePhi(ctx, dof_type, phis[obj_grp.idx], S, com_pos);
+        computePhi(dof_type, phis[obj_grp.idx], S, com_pos);
     }
 
     // --------- Add external forces -------------
@@ -543,6 +373,8 @@ inline float* computePhiDot(DofType dof_type,
 //  where e_{bi} = 1 if body i is an ancestor of b
 //  C^T projects into the contact space
 inline float* computeContactJacobian(Context &ctx,
+                                     BodyGroupProperties &prop,
+                                     BodyGroupMemory &mem,
                                      BodyGroupHierarchy &body_grp,
                                      DofObjectHierarchyDesc &hier_desc,
                                      Mat3x3 &C,
@@ -599,54 +431,14 @@ inline float* computeContactJacobian(Context &ctx,
     return J;
 }
 
-
-// J = [e_{b1} S_1, e_{b2} S_2, ...], col-major
-//  where e_{bi} = 1 if body i is an ancestor of b
-inline float* computeBodyJacobian(Context &ctx,
-                                  BodyGroupHierarchy &body_grp,
-                                  DofObjectHierarchyDesc &hier_desc,
-                                  Vector3 &origin,
-                                  float *J,
-                                  uint32_t body_dof_offset,
-                                  uint32_t jac_row,
-                                  uint32_t j_num_rows) {
-
-    // Compute prefix sum to determine the start of the block for each body
-    uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
-
-    // Populate J_C by traversing up the hierarchy
-    int32_t curr_idx = hier_desc.index;
-    while(curr_idx != -1) {
-        Entity body = body_grp.bodies(ctx)[curr_idx];
-        auto &curr_tmp_state = ctx.get<DofObjectTmpState>(body);
-        auto &curr_num_dofs = ctx.get<DofObjectNumDofs>(body);
-        auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
-
-        // Populate columns of J_C
-        float *S = computePhi(ctx, curr_num_dofs, curr_tmp_state, origin);
-        for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
-            float *J_col = J +
-                    j_num_rows * (body_dof_offset + block_start[curr_idx] + i) +
-                    jac_row;
-
-            float *S_col = S + 6 * i;
-            for(CountT j = 0; j < 6; ++j) {
-                J_col[j] = S_col[j];
-            }
-        }
-        curr_idx = curr_hier_desc.parentIndex;
-    }
-    return J;
-}
-
 // y = Mx. Based on Table 6.5 in Featherstone
-inline void mulM(Context &ctx, BodyGroupHierarchy &body_grp,
-    float *x, float *y) {
-    CountT total_dofs = body_grp.numDofs;
+inline void mulM(BodyGroupProperties &prop, BodyGroupMemory &mem,
+                 float *x, float *y) {
+    CountT total_dofs = prop.qvDim;
 
-    int32_t *expandedParent = body_grp.getExpandedParent(ctx);
+    int32_t *expandedParent = mem.expandedParent(prop);
 
-    float *massMatrix = body_grp.getMassMatrix(ctx);
+    float *massMatrix = mem.massMatrix(prop);
 
     auto M = [&](int32_t row, int32_t col) -> float& {
         return massMatrix[row + total_dofs * col];
@@ -667,11 +459,11 @@ inline void mulM(Context &ctx, BodyGroupHierarchy &body_grp,
 }
 
 // Solves M^{-1}x, overwriting x. Based on Table 6.5 in Featherstone
-inline void solveM(Context &ctx, BodyGroupHierarchy &body_grp, float *x) {
-    CountT total_dofs = body_grp.numDofs;
+inline void solveM(BodyGroupProperties& prop, BodyGroupMemory& mem, float* x) {
+    CountT total_dofs = prop.qvDim;
 
-    int32_t *expandedParent = body_grp.getExpandedParent(ctx);
-    float *massMatrixLTDL = body_grp.getMassMatrixLTDL(ctx);
+    int32_t *expandedParent = mem.expandedParent(prop);
+    float *massMatrixLTDL = mem.massLTDLMatrix(prop);
 
     auto ltdl = [&](int32_t row, int32_t col) -> float& {
         return massMatrixLTDL[row + total_dofs * col];
@@ -722,7 +514,7 @@ inline void compositeRigidBody(Context &ctx,
         uint32_t num_dofs = BodyOffsets::getDofTypeDim(offsets[i].dofType);
         float* S_i = S + S_offset;
 
-        float *F = mem.scratch;
+        float *F = mem.scratch(prop);
 
         for(CountT col = 0; col < num_dofs; ++col) {
             float *S_col = S_i + 6 * col;
@@ -795,8 +587,13 @@ inline void compositeRigidBody(Context &ctx,
         }
     }
 
-    // ----------------- Mass Matrix Factorization -----------------
-    // TODO: Copy mass fractorize
+    // ----------------- Sum Inertia Diagonals -----------------
+    // Sum the diagonals of the mass matrix (used for solver scaling)
+    float inertiaSum = 0.f;
+    for (CountT i = 0; i < prop.qvDim; ++i) {
+        inertiaSum += M[i + i * (prop.qvDim)];
+    }
+    prop.inertiaSum = inertiaSum;
 
     // ----------------- Compute Free Acceleration -----------------
     float *bias = mem.biasVector(prop);
@@ -806,7 +603,7 @@ inline void compositeRigidBody(Context &ctx,
     }
 
     // This overwrites bias with the acceleration
-    solveM(ctx, body_grp, bias);
+    solveM(prop, mem, bias);
 }
 
 // Recursive Newton Euler algorithm: Compute bias forces and gravity
@@ -976,49 +773,26 @@ inline void rneAndCombineSpatialInertias(Context &ctx,
     }
 }
 
-// Sum the diagonals of the mass matrix (used for solver scaling)
-inline void sumInertiaDiagonals(Context &ctx,
-                                BodyGroupHierarchy &body_grp)
-{
-    PROF_START(prof, cvSumInertiaDiagonalsClocks);
-
-    float *M = body_grp.getMassMatrix(ctx);
-    float inertiaSum = 0.f;
-    for (CountT i = 0; i < body_grp.numDofs; ++i) {
-        inertiaSum += M[i + i * (body_grp.numDofs)];
-    }
-    body_grp.inertiaSum = inertiaSum;
-
-    PROF_END(prof);
-}
-
 inline void processContacts(Context &ctx,
                             ContactConstraint &contact,
                             ContactTmpState &tmp_state)
 {
-    PROF_START(prof, cvProcessContactsClocks);
+    LinkParentDofObject &link_parent_ref = ctx.get<LinkParentDofObject>(contact.ref);
+    LinkParentDofObject &link_parent_alt = ctx.get<LinkParentDofObject>(contact.alt);
 
-    Entity ref = ctx.get<LinkParentDofObject>(contact.ref).parentDofObject;
-    Entity alt = ctx.get<LinkParentDofObject>(contact.alt).parentDofObject;
+    Entity ref_grp = link_parent_ref.bodyGroup;
+    Entity alt_grp = link_parent_alt.bodyGroup;
+    uint32_t ref_body_idx = link_parent_ref.bodyIdx;
+    uint32_t alt_body_idx = link_parent_alt.bodyIdx;
 
-    // If a parent collides with its direct child, unless the parent is a
-    //  fixed body, we should ignore the contact.
-    auto &refHier = ctx.get<DofObjectHierarchyDesc>(ref);
-    auto &altHier = ctx.get<DofObjectHierarchyDesc>(alt);
-    if (refHier.parent == alt || altHier.parent == ref) {
-        auto &refNumDofs = ctx.get<DofObjectNumDofs>(ref);
-        auto &altNumDofs = ctx.get<DofObjectNumDofs>(alt);
-        if (refNumDofs.type != DofType::FixedBody
-            && altNumDofs.type != DofType::FixedBody) {
-            contact.numPoints = 0;
+    BodyGroupProperties &prop_ref = ctx.get<BodyGroupProperties>(ref_grp);
+    BodyGroupProperties &prop_alt = ctx.get<BodyGroupProperties>(alt_grp);
 
-            PROF_END(prof);
-            return;
-        }
-    }
+    BodyGroupMemory &mem_ref = ctx.get<BodyGroupMemory>(ref_grp);
+    BodyGroupMemory &mem_alt = ctx.get<BodyGroupMemory>(alt_grp);
 
-    DofObjectFriction friction_i = ctx.get<DofObjectFriction>(ref);
-    DofObjectFriction friction_j = ctx.get<DofObjectFriction>(alt);
+    float mu_ref = mem_ref.mus(prop_ref)[ref_body_idx];
+    float mu_alt = mem_alt.mus(prop_alt)[alt_body_idx];
 
     // Create a coordinate system for the contact
     Vector3 n = contact.normal.normalize();
@@ -1036,10 +810,8 @@ inline void processContacts(Context &ctx,
     tmp_state.C[2] = s;
 
     // Get friction coefficient
-    float mu = fminf(friction_i.muS, friction_j.muS);
+    float mu = fminf(mu_ref, mu_alt);
     tmp_state.mu = mu;
-
-    PROF_END(prof);
 }
 
 // Will keep for now for the sake of having first iteration
@@ -1104,29 +876,11 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                 BodyGroupMemory
             >>({rne_and_combine_spatial_inertias});
 
-        auto sum_inertia_diagonals = builder.addToGraph<ParallelForNode<Context,
-             tasks::sumInertiaDiagonals,
-                BodyGroupProperties,
-                BodyGroupMemory
-            >>({composite_rigid_body});
-
-        auto factorize_mass_matrix = builder.addToGraph<ParallelForNode<Context,
-             tasks::factorizeMassMatrix,
-                BodyGroupProperties,
-                BodyGroupMemory
-            >>({sum_inertia_diagonals});
-
-        auto compute_free_acc = builder.addToGraph<ParallelForNode<Context,
-             tasks::computeFreeAcceleration,
-                BodyGroupProperties,
-                BodyGroupMemory
-            >>({factorize_mass_matrix});
-
         auto contact_node = builder.addToGraph<ParallelForNode<Context,
              tasks::processContacts,
                 ContactConstraint,
                 ContactTmpState
-            >>({compute_free_acc});
+            >>({composite_rigid_body});
 
         auto thing = builder.addToGraph<ParallelForNode<Context,
              tasks::brobdingnag,
