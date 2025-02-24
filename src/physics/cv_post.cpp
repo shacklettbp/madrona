@@ -20,7 +20,7 @@ inline void integrationStep(Context &ctx,
 
     float *q = m.q(p) + offset.posOffset;
     float *qv = m.qv(p) + offset.velOffset;
-    float *dqv = m.qv(p) + offset.velOffset;
+    float *dqv = m.dqv(p) + offset.velOffset;
 
     if (offset.dofType == DofType::FreeBody) {
         // Symplectic Euler
