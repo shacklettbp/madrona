@@ -79,77 +79,6 @@ inline Mat3x3 skewSymmetricMatrix(Vector3 v)
     };
 }
 
-inline void computePhiTrans(
-        BodyGroupProperties &prop,
-        BodyGroupMemory &mem,
-        // const DofObjectNumDofs num_dofs,
-        // DofObjectTmpState &tmp_state,
-        Vector3 origin,
-        float *S)
-{
-    Phi phi = tmp_state.phi;
-
-    if (num_dofs.type == DofType::FreeBody) {
-        // S = [1_3x3 r^x; 0 1_3x3], column-major
-        memset(S, 0.f, 6 * 3 * sizeof(float));
-        // Diagonal identity
-        for(CountT i = 0; i < 3; ++i) {
-            S[i * 3 + i] = 1.f;
-        }
-        // r^x Skew symmetric matrix
-        Vector3 comPos = {phi.v[0], phi.v[1], phi.v[2]};
-        comPos -= origin;
-        S[0 + 3 * 4] = -comPos.z;
-        S[0 + 3 * 5] = comPos.y;
-        S[1 + 3 * 3] = comPos.z;
-        S[1 + 3 * 5] = -comPos.x;
-        S[2 + 3 * 3] = -comPos.y;
-        S[2 + 3 * 4] = comPos.x;
-    }
-    else if (num_dofs.type == DofType::Slider) {
-        S[0] = phi.v[0];
-        S[1] = phi.v[1];
-        S[2] = phi.v[2];
-    }
-    else if (num_dofs.type == DofType::Hinge) {
-        // S = [r \times hinge; hinge]
-        Vector3 hinge = {phi.v[0], phi.v[1], phi.v[2]};
-        Vector3 anchorPos = {phi.v[3], phi.v[4], phi.v[5]};
-        anchorPos -= origin;
-        Vector3 r_cross_hinge = anchorPos.cross(hinge);
-        S[0] = r_cross_hinge.x;
-        S[1] = r_cross_hinge.y;
-        S[2] = r_cross_hinge.z;
-        // S[3] = hinge.x;
-        // S[4] = hinge.y;
-        // S[5] = hinge.z;
-    }
-    else if (num_dofs.type == DofType::Ball) {
-        // This will just get right-multiplied by the angular velocity
-        Vector3 anchor_pos = {phi.v[0], phi.v[1], phi.v[2]};
-        anchor_pos -= origin;
-
-        // We need to right multiply these by the parent composed rotation
-        // matrix.
-        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
-        Quat parent_composed_rot = Quat{
-            phi.v[3], phi.v[4], phi.v[5], phi.v[6]
-        };
-        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
-
-        rx *= parent_rot;
-
-        for (int col = 0; col < 3; ++col) {
-            S[col * 3 + 0] = rx[col][0];
-            S[col * 3 + 1] = rx[col][1];
-            S[col * 3 + 2] = rx[col][2];
-        }
-    }
-    else {
-        // MADRONA_UNREACHABLE();
-    }
-}
-
 // Computes the Phi matrix from generalized velocities to Plücker coordinates
 inline float* computePhi(
     DofType dof_type,
@@ -223,6 +152,62 @@ inline float* computePhi(
         // MADRONA_UNREACHABLE();
     }
 
+    return S;
+}
+
+// Same as the Phi matrix but only the first 3 rows (translational part)
+inline float* computePhiTrans(
+    DofType dof_type,
+    BodyPhi &body_phi,
+    float* S,
+    Vector3 origin)
+{
+    float* phi = body_phi.phi;
+
+    if (dof_type == DofType::FreeBody) {
+        memset(S, 0.f, 6 * 3 * sizeof(float));
+        for(CountT i = 0; i < 3; ++i) {
+            S[i * 3 + i] = 1.f;
+        }
+        Vector3 comPos = {phi[0], phi[1], phi[2]};
+        comPos -= origin;
+        S[0 + 3 * 4] = -comPos.z;
+        S[0 + 3 * 5] = comPos.y;
+        S[1 + 3 * 3] = comPos.z;
+        S[1 + 3 * 5] = -comPos.x;
+        S[2 + 3 * 3] = -comPos.y;
+        S[2 + 3 * 4] = comPos.x;
+    } else if (dof_type == DofType::Slider) {
+        S[0] = phi[0];
+        S[1] = phi[1];
+        S[2] = phi[2];
+    } else if (dof_type == DofType::Hinge) {
+        // S = [r \times hinge; hinge]
+        Vector3 hinge = {phi[0], phi[1], phi[2]};
+        Vector3 anchorPos = {phi[3], phi[4], phi[5]};
+        anchorPos -= origin;
+        Vector3 r_cross_hinge = anchorPos.cross(hinge);
+        S[0] = r_cross_hinge.x;
+        S[1] = r_cross_hinge.y;
+        S[2] = r_cross_hinge.z;
+    } else if (dof_type == DofType::Ball) {
+        Vector3 anchor_pos = {phi[0], phi[1], phi[2]};
+        anchor_pos -= origin;
+        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
+        Quat parent_composed_rot = Quat{
+            phi[3], phi[4], phi[5], phi[6]
+        };
+        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
+        rx *= parent_rot;
+        for (int col = 0; col < 3; ++col) {
+            S[col * 3 + 0] = rx[col][0];
+            S[col * 3 + 1] = rx[col][1];
+            S[col * 3 + 2] = rx[col][2];
+        }
+    }
+    else {
+        // MADRONA_UNREACHABLE();
+    }
     return S;
 }
 
@@ -372,56 +357,46 @@ inline float* computePhiDot(DofType dof_type,
 // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
 //  where e_{bi} = 1 if body i is an ancestor of b
 //  C^T projects into the contact space
-inline float* computeContactJacobian(Context &ctx,
+inline float* computeContactJacobian(DofObjectGroup &obj_grp,
                                      BodyGroupProperties &prop,
                                      BodyGroupMemory &mem,
-                                     BodyGroupHierarchy &body_grp,
-                                     DofObjectHierarchyDesc &hier_desc,
                                      Mat3x3 &C,
                                      Vector3 &origin,
                                      float *J,
                                      uint32_t body_dof_offset,
                                      uint32_t jac_row,
                                      uint32_t j_num_rows,
-                                     float coeff,
-                                     bool dbg)
+                                     float coeff)
 {
-    (void)dbg;
-
-    // Compute prefix sum to determine the start of the block for each body
-    uint32_t *block_start = body_grp.getDofPrefixSum(ctx);
+    BodyOffsets *offsets = mem.offsets(prop);
+    BodyPhi* phis = mem.bodyPhi(prop);
+    float *S =  mem.phiFull(prop);
 
     // Populate J_C by traversing up the hierarchy
-    int32_t curr_idx = hier_desc.index;
-    while(curr_idx != -1) {
-        Entity body = body_grp.bodies(ctx)[curr_idx];
-        auto &curr_tmp_state = ctx.get<DofObjectTmpState>(body);
-        auto &curr_num_dofs = ctx.get<DofObjectNumDofs>(body);
-        auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
-
-        // Populate columns of J_C
-        float S[18] = {};
-        computePhiTrans(curr_num_dofs, curr_tmp_state, origin, S);
+    uint32_t body_idx = obj_grp.idx;
+    while(body_idx != -1) {
+        // S is no longer used, can overwrite
+        BodyOffsets offset = offsets[body_idx];
+        uint32_t velOffset = offsets[body_idx].velOffset;
+        uint32_t S_offset = 2 * 6 * velOffset;
+        uint32_t numDofs = BodyOffsets::getDofTypeDim(offset.dofType);
+        float* S_i = S + S_offset;
+        computePhiTrans(offset.dofType, phis[body_idx], S_i, origin);
         // Only use translational part of S
-        for(CountT i = 0; i < curr_num_dofs.numDofs; ++i) {
-            float *J_col = J +
-                    j_num_rows * (body_dof_offset + block_start[curr_idx] + i) +
+        for(CountT i = 0; i < numDofs; ++i) {
+            float *J_col = J + j_num_rows * (body_dof_offset + velOffset + i) +
                     jac_row;
-
             float *S_col = S + 3 * i;
             for(CountT j = 0; j < 3; ++j) {
                 J_col[j] = S_col[j];
             }
         }
-        curr_idx = curr_hier_desc.parentIndex;
+        body_idx = offsets[body_idx].parent;
     }
 
     // Multiply by C^T to project into contact space
-    for(CountT i = 0; i < body_grp.numDofs; ++i) {
-        float *J_col = J +
-                j_num_rows * (body_dof_offset + i) +
-                jac_row;
-
+    for(CountT i = 0; i < prop.qvDim; ++i) {
+        float *J_col = J + j_num_rows * (body_dof_offset + i) + jac_row;
         Vector3 J_col_vec = { J_col[0], J_col[1], J_col[2] };
         J_col_vec = C.transpose() * J_col_vec;
         J_col[0] = coeff * J_col_vec.x;
@@ -496,8 +471,8 @@ inline void compositeRigidBody(Context &ctx,
                                BodyGroupProperties &prop,
                                BodyGroupMemory &mem)
 {
+    (void)ctx;
     // ----------------- Composite rigid body -----------------
-
     // Mass Matrix of this entire body group, column-major
     uint32_t total_dofs = prop.qvDim;
     BodyOffsets *offsets = mem.offsets(prop);
@@ -824,6 +799,7 @@ inline void processContacts(Context &ctx,
 inline void brobdingnag(Context &ctx,
                         CVSolveData &cv_sing)
 {
+    // TODO!
 }
 
 }
