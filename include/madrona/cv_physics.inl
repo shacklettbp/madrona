@@ -16,7 +16,7 @@ uint32_t BodyOffsets::getDofTypeDim(DofType type, bool is_pos)
     }
 
     case DofType::FixedBody: {
-        return 0;
+        return is_pos ? 7 : 0;
     }
 
     case DofType::Slider: {

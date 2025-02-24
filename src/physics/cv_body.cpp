@@ -192,6 +192,8 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
             ctx.get<BodyGroupProperties>(body_grp),
             ctx.get<BodyGroupMemory>(body_grp));
     }
+
+    return b;
 }
 
 void attachCollision(
