@@ -992,14 +992,6 @@ struct Joint : Archetype<
     JointConstraint
 > {};
 
-struct DummyComponent {
-
-};
-
-struct CVRigidBodyState : Bundle<
-    DummyComponent
-> {};
-
 struct CVSolveData {
     uint32_t numBodyGroups;
     uint32_t *dofOffsets;
@@ -4163,7 +4155,7 @@ inline void computePhiDot(Context &ctx,
                           float (&S_dot)[6 * 6],
                           SpatialVector &v_hat)
 {
-    if (num_dofs.type == DofType::FreeBody) {
+   if (num_dofs.type == DofType::FreeBody) {
         #pragma unroll
         for (uint32_t i = 0; i < 6 * 6; ++i) {
             S_dot[i] = 0.f;
@@ -5723,14 +5715,6 @@ inline void brobdingnag(Context &ctx,
                                                limit.rowOffset;
                     uint32_t glob_col_offset = block_start[grp_idx] +
                                                tmp_state.dofOffset;
-
-#if 0
-                    printf(
-                        "Body with dof offset %d has (glob_row_offset = %d; glob_col_offset = %d)\n",
-                        tmp_state.dofOffset,
-                        glob_row_offset,
-                        glob_col_offset);
-#endif
 
                     switch (limit.type) {
                     case DofObjectLimit::Type::Hinge: {

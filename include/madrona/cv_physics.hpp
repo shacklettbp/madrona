@@ -61,9 +61,10 @@ struct BodyOffsets {
     uint8_t parent;    // 0xFF is invalid invalid
     DofType dofType;
 
+    uint8_t numDofs; // Dimension of velocity
     uint8_t eqOffset;
     uint8_t numEqs;
-    uint8_t pad[2];
+    uint8_t pad;
 
     static inline uint32_t getDofTypeDim(DofType type, bool is_pos = false);
 };
@@ -79,6 +80,13 @@ struct BodyHierarchy {
 struct BodyInertial {
     float mass;
     math::Diag3x3 inertia;
+
+    // Estimated inverse weight for the body
+    float approxInvMassTrans;
+    float approxInvMassRot;
+
+    // Estimated inverse weight for each DOF
+    float approxInvMassDof[7];
 };
 
 struct BodyObjectData {
@@ -117,6 +125,9 @@ struct BodyGroupProperties {
 
     struct {
         uint32_t bodyCounter;
+
+        // Index of the group in the world
+        uint32_t grpIndex;
     } tmp;
 };
 
@@ -130,7 +141,7 @@ struct SpatialVector {
     inline SpatialVector & operator+=(const SpatialVector &rhs);
     inline SpatialVector & operator-=(const SpatialVector &rhs);
     inline SpatialVector cross(const SpatialVector &rhs) const;
-    inline SpatialVector SpatialVector::crossStar(const SpatialVector &rhs) const;
+    inline SpatialVector crossStar(const SpatialVector &rhs) const;
 };
 
 // This represents the spatial inertia in Plücker coordinates
@@ -210,6 +221,7 @@ struct BodyGroupMemory {
     inline int32_t * expandedParent(BodyGroupProperties);
     inline BodyObjectData * objectData(BodyGroupProperties);
     inline BodyHierarchy * hierarchies(BodyGroupProperties);
+    inline Entity * entities(BodyGroupProperties);
     inline BodyOffsets * offsets(BodyGroupProperties);
 
     inline BodyTransform * bodyTransforms(BodyGroupProperties);
@@ -242,6 +254,7 @@ struct LinkParentDofObject {
 
     Entity bodyGroup;
     uint32_t bodyIdx;
+    uint32_t objDataIdx;
 
     Type type;
 };

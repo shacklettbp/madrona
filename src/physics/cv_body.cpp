@@ -1,6 +1,10 @@
+#include "cv.hpp"
 #include <madrona/cv_physics.hpp>
 
 namespace madrona::phys::cv {
+
+using namespace math;
+using namespace base;
     
 Entity makeBodyGroup(Context &ctx,
                      uint32_t num_bodies,
@@ -23,7 +27,8 @@ Entity makeBodyGroup(Context &ctx,
 
     { // Initialize memory
         BodyGroupMemory &m = ctx.get<BodyGroupMemory>(g);
-        m.tmpPtr = ctx.tmpAlloc(sizeof(BodyDesc) * num_bodies);
+        m.tmpPtr = ctx.tmpAlloc(sizeof(BodyDesc) * num_bodies +
+                                sizeof(Entity) * num_bodies);
     }
 
     return g;
@@ -38,19 +43,18 @@ static void initBodyGroupMemory(
 
     for (uint32_t i = 0; i < p.numBodies; ++i) {
         BodyDesc &bd = body_descs[i];
-        p.qDim += BodyOffsets:getDofTypeDim(bd.type, true);
-        p.qvDim += BodyOffsets:getDofTypeDim(bd.type);
-        p.numDofs += BodyOffsets::getDofTypedim(bd.type);
+        p.qDim += BodyOffsets::getDofTypeDim(bd.type, true);
+        p.qvDim += BodyOffsets::getDofTypeDim(bd.type);
         p.numEq += bd.numLimits;
         p.numObjData += bd.numCollisionObjs + bd.numVisualObjs;
     }
 
-    {// Allocate frame persistent memory
+    { // Allocate frame persistent memory
         uint32_t num_bytes = BodyGroupMemory::qVectorsNumBytes(p);
         uint32_t num_elems = (num_bytes + sizeof(MRElement128b) - 1) /
             sizeof(MRElement128b);
         m.qVectors = ctx.allocMemoryRange<MRElement128b>(num_elems);
-        m.qVectorsPtr = ctx.memoryRangePointer(m.qVectors);
+        m.qVectorsPtr = ctx.memoryRangePointer<MRElement128b>(m.qVectors);
 
         // Set everything to zero initially
         memset(m.qVectorsPtr, 0, num_bytes);
@@ -62,6 +66,7 @@ static void initBodyGroupMemory(
         float *q = m.q(p);
         float *mus = m.mus(p);
         BodyInertial *inertials = m.inertials(p);
+        Entity *entities = m.entities(p);
 
         uint32_t q_dof_offset = 0;
         uint32_t qv_dof_offset = 0;
@@ -72,12 +77,13 @@ static void initBodyGroupMemory(
 
             // First thing to fill in is the offsets
             offsets[i] = BodyOffsets {
-                .posOffset = q_dof_offset,
-                .velOffset = qv_dof_offset,
+                .posOffset = (uint8_t)q_dof_offset,
+                .velOffset = (uint8_t)qv_dof_offset,
                 .parent = 0xFF,
                 .dofType = body_descs[i].type,
-                .eqOffset = eq_offset,
-                .numEqs = bd.numLimits,
+                .numDofs = (uint8_t)BodyOffsets::getDofTypeDim(body_descs[i].type),
+                .eqOffset = (uint8_t)eq_offset,
+                .numEqs = (uint8_t)bd.numLimits,
             };
 
             float *curr_q = q + q_dof_offset;
@@ -103,20 +109,20 @@ static void initBodyGroupMemory(
             } break;
 
             case DofType::Ball: {
-                curr_q[0] = desc.initialRot.w;
-                curr_q[1] = desc.initialRot.x;
-                curr_q[2] = desc.initialRot.y;
-                curr_q[3] = desc.initialRot.z;
+                curr_q[0] = bd.initialRot.w;
+                curr_q[1] = bd.initialRot.x;
+                curr_q[2] = bd.initialRot.y;
+                curr_q[3] = bd.initialRot.z;
             } break;
 
             case DofType::FixedBody: {
-                curr_q[0] = desc.initialPos.x;
-                curr_q[1] = desc.initialPos.y;
-                curr_q[2] = desc.initialPos.z;
-                curr_q[3] = desc.initialRot.w;
-                curr_q[4] = desc.initialRot.x;
-                curr_q[5] = desc.initialRot.y;
-                curr_q[6] = desc.initialRot.z;
+                curr_q[0] = bd.initialPos.x;
+                curr_q[1] = bd.initialPos.y;
+                curr_q[2] = bd.initialPos.z;
+                curr_q[3] = bd.initialRot.w;
+                curr_q[4] = bd.initialRot.x;
+                curr_q[5] = bd.initialRot.y;
+                curr_q[6] = bd.initialRot.z;
             } break;
 
             case DofType::None: {
@@ -133,7 +139,9 @@ static void initBodyGroupMemory(
                 .inertia = bd.inertia
             };
 
-            q_dot_offset += BodyOffsets:getDofTypeDim(bd.type, true);
+            entities[i] = ((Entity *)((BodyDesc *)m.tmpPtr + p.numBodies))[i];
+
+            q_dof_offset += BodyOffsets::getDofTypeDim(bd.type, true);
             qv_dof_offset += BodyOffsets::getDofTypeDim(bd.type);
             eq_offset += bd.numLimits;
         }
@@ -144,7 +152,7 @@ static void initBodyGroupMemory(
         uint32_t num_elems = (num_bytes + sizeof(MRElement128b) - 1) /
             sizeof(MRElement128b);
         m.tmp = ctx.allocMemoryRange<MRElement128b>(num_elems);
-        m.tmpPtr = ctx.memoryRangePointer(m.tmp);
+        m.tmpPtr = ctx.memoryRangePointer<MRElement128b>(m.tmp);
     }
 }
 
@@ -173,10 +181,16 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
     p.numObjData += desc.numVisualObjs + desc.numCollisionObjs;
 
     BodyDesc *body_descs = (BodyDesc *)m.tmpPtr;
+
+    // Record entity b
+    ((Entity *)(body_descs + p.numBodies))[p.tmp.bodyCounter] = b;
     body_descs[p.tmp.bodyCounter++] = desc;
 
     if (p.tmp.bodyCounter == p.numBodies) {
-        initBodyGroupMemory(ctx, body_grp);
+        initBodyGroupMemory(
+            ctx, 
+            ctx.get<BodyGroupProperties>(body_grp),
+            ctx.get<BodyGroupMemory>(body_grp));
     }
 }
 
@@ -189,7 +203,9 @@ void attachCollision(
 {
     BodyGroupMemory m = ctx.get<BodyGroupMemory>(body_grp);
     BodyGroupProperties p = ctx.get<BodyGroupProperties>(body_grp);
-    DofObjectProxies proxies = ctx.get<DofObjectProxies(body);
+
+    DofObjectProxies proxies = ctx.get<DofObjectProxies>(body);
+    DofObjectGroup body_grpinfo = ctx.get<DofObjectGroup>(body);
 
     BodyObjectData *obj_data = m.objectData(p);
 
@@ -204,8 +220,9 @@ void attachCollision(
         render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
 
         ctx.get<LinkParentDofObject>(viz_obj) = {
-            .parentDofObject = body,
-            .mrOffset = proxies.colliderOffset + idx,
+            .bodyGroup = body_grp,
+            .bodyIdx = body_grpinfo.idx,
+            .objDataIdx = proxies.colliderOffset + idx,
             .type = LinkParentDofObject::Type::RenderCollider,
         };
     }
@@ -228,8 +245,9 @@ void attachCollision(
     ctx.get<ExternalTorque>(col_obj) = Vector3::zero();
 
     ctx.get<LinkParentDofObject>(col_obj) = {
-        .parentDofObject = body,
-        .mrOffset = proxies.colliderOffset + idx,
+        .bodyGroup = body_grp,
+        .bodyIdx = body_grpinfo.idx,
+        .objDataIdx = proxies.colliderOffset + idx,
         .type = LinkParentDofObject::Type::Collider,
     };
 
@@ -251,7 +269,8 @@ void attachVisual(
 {
     BodyGroupMemory m = ctx.get<BodyGroupMemory>(body_grp);
     BodyGroupProperties p = ctx.get<BodyGroupProperties>(body_grp);
-    DofObjectProxies proxies = ctx.get<DofObjectProxies(body);
+    DofObjectGroup body_grpinfo = ctx.get<DofObjectGroup>(body);
+    DofObjectProxies proxies = ctx.get<DofObjectProxies>(body);
     BodyObjectData *obj_data = m.objectData(p);
 
     Entity viz_obj = ctx.makeEntity<LinkVisual>();
@@ -261,12 +280,13 @@ void attachVisual(
     render::RenderingSystem::makeEntityRenderable(ctx, viz_obj);
 
     ctx.get<LinkParentDofObject>(viz_obj) = {
-        .parentDofObject = body,
-        .mrOffset = proxies.visualOffset + idx,
+        .bodyGroup = body_grp,
+        .bodyIdx = body_grpinfo.idx,
+        .objDataIdx = proxies.visualOffset + idx,
         .type = LinkParentDofObject::Type::Render,
     };
 
-    viz_data[proxies.visualOffset + idx] = {
+    obj_data[proxies.visualOffset + idx] = {
         viz_obj,
         desc.offset,
         desc.rotation,
@@ -298,6 +318,7 @@ void disableJointCollisions(
         Entity joint_b)
 {
     BodyGroupMemory m = ctx.get<BodyGroupMemory>(grp);
+    BodyGroupProperties p = ctx.get<BodyGroupProperties>(grp);
     
     DofObjectProxies a_proxies = ctx.get<DofObjectProxies>(joint_a);
     DofObjectProxies b_proxies = ctx.get<DofObjectProxies>(joint_b);
@@ -354,8 +375,8 @@ static inline void joinBodiesGeneral(
 void joinBodies(
         Context &ctx,
         Entity body_grp,
-        Entity parent,
-        Entity child,
+        Entity parent_physics_entity,
+        Entity child_physics_entity,
         JointHinge hinge_info)
 {
     joinBodiesGeneral(ctx, 
@@ -371,8 +392,8 @@ void joinBodies(
 void joinBodies(
         Context &ctx,
         Entity body_grp,
-        Entity parent,
-        Entity child,
+        Entity parent_physics_entity,
+        Entity child_physics_entity,
         JointBall ball_info)
 {
     joinBodiesGeneral(ctx, 
@@ -404,8 +425,8 @@ void joinBodies(
 void joinBodies(
         Context &ctx,
         Entity body_grp,
-        Entity parent,
-        Entity child,
+        Entity parent_physics_entity,
+        Entity child_physics_entity,
         JointFixed fixed_info)
 {
     joinBodiesGeneral(ctx, 
@@ -426,10 +447,10 @@ void attachLimit(
     DofObjectGroup body_info = ctx.get<DofObjectGroup>(body);
 
     BodyGroupMemory m = ctx.get<BodyGroupMemory>(body_grp);
-    BodyGroupMemory p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyGroupProperties p = ctx.get<BodyGroupProperties>(body_grp);
 
     BodyOffsets *offsets = m.offsets(p);
-    BodyLimitConstraints *limits = m.limits(p);
+    BodyLimitConstraint *limits = m.limits(p);
 
     assert(offsets[body_info.idx].numEqs > 0);
 
@@ -448,10 +469,10 @@ void attachLimit(
     DofObjectGroup body_info = ctx.get<DofObjectGroup>(body);
 
     BodyGroupMemory m = ctx.get<BodyGroupMemory>(body_grp);
-    BodyGroupMemory p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyGroupProperties p = ctx.get<BodyGroupProperties>(body_grp);
 
     BodyOffsets *offsets = m.offsets(p);
-    BodyLimitConstraints *limits = m.limits(p);
+    BodyLimitConstraint *limits = m.limits(p);
 
     assert(offsets[body_info.idx].numEqs > 0);
 
@@ -468,7 +489,7 @@ void addHingeExternalForce(
     DofObjectGroup joint_info = ctx.get<DofObjectGroup>(hinge_joint);
     
     BodyGroupMemory m = ctx.get<BodyGroupMemory>(joint_info.bodyGroup);
-    BodyGroupMemory p = ctx.get<BodyGroupProperties>(joint_info.bodyGroup);
+    BodyGroupProperties p = ctx.get<BodyGroupProperties>(joint_info.bodyGroup);
 
     BodyOffsets *offsets = m.offsets(p);
     float *f = m.f(p);

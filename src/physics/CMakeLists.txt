@@ -15,6 +15,9 @@ set(MADRONA_PHYSICS_SRCS
     cv_prepare.cpp
     cv_load.cpp
     cv_body.cpp
+    cv_post.cpp
+    cv.cpp cv.hpp
+    cv_init.cpp
 )
 
 add_library(madrona_physics STATIC
