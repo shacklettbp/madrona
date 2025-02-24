@@ -103,7 +103,7 @@ BodySpatialVectors * BodyGroupMemory::spatialVectors(BodyGroupProperties p)
 
 float * BodyGroupMemory::biasVector(BodyGroupProperties p)
 {
-    return (float *)(spatialVectors(p) + p.numBodes);
+    return (float *)(spatialVectors(p) + p.numBodies);
 }
 
 float * BodyGroupMemory::massMatrix(BodyGroupProperties p)
@@ -121,7 +121,7 @@ float * BodyGroupMemory::phiFull(BodyGroupProperties p)
     return (float *)(massLTDLMatrix(p) + p.qvDim * p.qvDim);
 }
 
-inline float * BodyGroupMemory::scratch(BodyGroupProperties)
+inline float * BodyGroupMemory::scratch(BodyGroupProperties p)
 {
     return (float *)(phiFull(p) + p.qvDim * 2 * 6);
 }
@@ -131,11 +131,11 @@ inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
     return p.qDim * sizeof(float) +                 // q
            p.qvDim * sizeof(float) +                // qv
            p.qvDim * sizeof(float) +                // dqv
-           p.dqvDim * sizeof(float) +               // force
+           p.qvDim * sizeof(float) +                // force
            p.numBodies * sizeof(float) +            // mus
            p.numEq * sizeof(BodyLimitConstraint) +  // equalities
            p.numBodies * sizeof(BodyInertial) +     // inertias
-           p.numDofs * sizeof(int32_t) +            // expanded parent
+           p.qvDim * sizeof(int32_t) +              // expanded parent
            p.numObjData * sizeof(BodyObjectData) +  // body object data
            p.numBodies * sizeof(BodyHierarchy) +    // body hierarchy
            p.numBodies * sizeof(BodyOffsets);
