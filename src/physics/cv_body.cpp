@@ -68,6 +68,9 @@ static void initBodyGroupMemory(
         BodyInertial *inertials = m.inertials(p);
         Entity *entities = m.entities(p);
 
+        uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
+                           BodyGroupMemory::qVectorsNumBytes(p);
+
         uint32_t q_dof_offset = 0;
         uint32_t qv_dof_offset = 0;
         uint32_t eq_offset = 0;
@@ -86,7 +89,10 @@ static void initBodyGroupMemory(
                 .numEqs = (uint8_t)bd.numLimits,
             };
 
+            assert((uint8_t *)(offsets + i) < max_ptr);
+
             float *curr_q = q + q_dof_offset;
+            assert((uint8_t *)curr_q < max_ptr);
 
             // Then, fill in initial values for q, etc...
             switch(bd.type) {
@@ -133,13 +139,18 @@ static void initBodyGroupMemory(
             // Fill in mus
             mus[i] = bd.muS;
 
+            assert((uint8_t *)(mus + i) < max_ptr);
+
             // Fill in inertia
             inertials[i] = BodyInertial {
                 .mass = bd.mass,
                 .inertia = bd.inertia
             };
 
+            assert((uint8_t *)(inertials + i) < max_ptr);
+
             entities[i] = ((Entity *)((BodyDesc *)m.tmpPtr + p.numBodies))[i];
+            assert((uint8_t *)(entities + i) < max_ptr);
 
             q_dof_offset += BodyOffsets::getDofTypeDim(bd.type, true);
             qv_dof_offset += BodyOffsets::getDofTypeDim(bd.type);

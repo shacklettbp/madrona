@@ -11,9 +11,12 @@ inline void computeExpandedParent(Context &ctx,
                                   BodyGroupProperties p)
 {
     int32_t *expandedParent = m.expandedParent(p);
+    uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
+                       BodyGroupMemory::qVectorsNumBytes(p);
 
     // Initialize n-N_B elements
-    for(int32_t i = 0; i < (int32_t)p.qvDim; ++i) {
+    expandedParent[0] = -1;
+    for(int32_t i = 1; i < (int32_t)p.qvDim; ++i) {
         expandedParent[i] = i - 1;
     }
 
@@ -30,8 +33,10 @@ inline void computeExpandedParent(Context &ctx,
     }
     // Finish expanded parent array
     for(int32_t i = 1; i < p.numBodies; ++i) {
-        int32_t parent_idx = (int32_t)offsets[i].parent;
+        int32_t parent_idx = (int32_t)(offsets[i].parent == 0xFF ? -1 :
+                                       offsets[i].parent);
         expandedParent[map[i - 1] + 1] = map[parent_idx];
+        ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
     }
 }
 
@@ -52,8 +57,11 @@ inline void combineSpatialInertias(Context &ctx,
 
     // Backward pass from children to parent
     for (CountT i = p.numBodies - 1; i > 0; --i) {
-        InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
+        InertiaTensor &spatial_inertia = spatialVectors[i].spatialInertia;
         uint32_t parent_idx = (uint32_t)offsets[i].parent;
+
+        assert(parent_idx < 0xFF);
+
         InertiaTensor& spatial_inertia_parent = 
             spatialVectors[parent_idx].spatialInertia;
         spatial_inertia_parent += spatial_inertia;
@@ -77,7 +85,7 @@ inline float * computeBodyJacobian(BodyGroupMemory &m,
     while(cur_body_idx != 0xFF) {
         BodyOffsets cur_offset = offsets[cur_body_idx];
 
-        float *S = m.phiFull(p) + 2 * 6 * cur_offset.velOffset;;
+        float *S = m.phiFull(p) + 2 * 6 * cur_offset.velOffset;
 
         // Populate columns of J_C
         S = computePhi(

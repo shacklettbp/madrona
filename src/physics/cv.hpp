@@ -2,6 +2,8 @@
 
 #include <madrona/cv_physics.hpp>
 
+#define ASSERT_PTR_ACCESS(a, offset, b) assert((uint8_t *)(a + offset) < (uint8_t *)b)
+
 namespace madrona::phys::cv {
 
 struct MRElement128b {
