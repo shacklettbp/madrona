@@ -12,30 +12,38 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 {
     auto cur_node = broadphase;
 
-#ifdef MADRONA_GPU_MODE
     cur_node = builder.addToGraph<
-        SortArchetypeNode<BodyGroupArchetype, WorldID>>({cur_node});
+        CompactArchetypeNode<BodyGroupArchetype>>({cur_node});
     cur_node = builder.addToGraph<
-        SortArchetypeNode<DofObjectArchetype, WorldID>>({sort_sys});
-    cur_node = builder.addToGraph<ResetTmpAllocNode>({sort_sys});
-#endif
+        CompactArchetypeNode<DofObjectArchetype>>({cur_node});
 
     for (CountT i = 0; i < num_substeps; ++i) {
         cur_node = narrowphase::setupTasks(builder, {cur_node});
 
 #ifdef MADRONA_GPU_MODE
-        // We need to sort the contacts by world.
         cur_node = builder.addToGraph<
-            SortArchetypeNode<Contact, WorldID>>(
-                {cur_node});
-        cur_node = builder.addToGraph<ResetTmpAllocNode>(
-                {cur_node});
+            CompactArchetypeNode<Contact>>({cur_node});
 #endif
 
         cur_node = setupPrepareTasks(builder, cur_node);
         cur_node = setupSolveTasks(builder, cur_node);
         cur_node = setupPostTasks(builder, cur_node);
+
+        cur_node = builder.addToGraph<
+            ClearTmpNode<Contact>>({cur_node});
+
+        cur_node = builder.addToGraph<
+            ResetTmpAllocNode>({cur_node});
     }
+
+    cur_node = builder.addToGraph<
+        ClearTmpNode<CandidateTemporary>>({cur_node});
+
+#ifdef MADRONA_GPU_MODE
+    cur_node = builder.addToGraph<
+        SortMemoryRangeNode<MRElement128b>>({cur_node});
+    cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
+#endif
 
     return cur_node;
 }
