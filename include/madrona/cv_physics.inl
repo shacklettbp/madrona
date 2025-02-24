@@ -80,8 +80,8 @@ inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
            p.qvDim * sizeof(float) +                    // bias vector
            p.qvDim * p.qvDim * sizeof(float) +          // mass matrix
            p.qvDim * p.qvDim * sizeof(float) +          // LTDL mass matrix
-           p.qvDim * 2 * 6 +
-           36;
+           p.qvDim * 2 * 6 * sizeof(float) +
+           36 * sizeof(float);
 }
 
 SpatialVector SpatialVector::fromVec(const float* v)

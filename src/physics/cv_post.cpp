@@ -114,8 +114,10 @@ inline void convertPostSolve(
         Scale &scale,
         LinkParentDofObject &link)
 {
-    BodyGroupMemory m = ctx.get<BodyGroupMemory>(link.bodyGroup);
-    BodyGroupProperties p = ctx.get<BodyGroupProperties>(link.bodyGroup);
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
+    // BodyGroupProperties &p2 = ctx.get<BodyGroupProperties>(link.bodyGroup);
+    // (void)p2;
 
     BodyOffsets offset = m.offsets(p)[link.bodyIdx];
 

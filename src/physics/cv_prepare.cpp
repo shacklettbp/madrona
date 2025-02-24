@@ -516,7 +516,12 @@ void computeSpatialInertiasAndPhi(Context &ctx,
     uint32_t S_offset = 2 * 6 * velOffset;
     float* S = mem.phiFull(prop) + S_offset;
 
+    uint8_t *max_ptr = (uint8_t *)mem.tmpPtr +
+                       BodyGroupMemory::tmpNumBytes(prop);
+
     if (dof_type != DofType::None && dof_type != DofType::FixedBody) {
+        ASSERT_PTR_ACCESS(S, 0, max_ptr);
+
         computePhi(dof_type, phis[obj_grp.idx], S, com_pos);
     }
 
