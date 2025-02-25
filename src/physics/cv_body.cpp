@@ -471,6 +471,9 @@ void attachLimit(
     l.type = BodyLimitConstraint::Type::Hinge;
     l.bodyIdx = body_info.idx;
     l.hinge = hinge_limit;
+
+    // Set the joint value to be in the limits
+    m.q(p)[offsets[body_info.idx].posOffset] = (hinge_limit.lower + hinge_limit.upper) / 2.f;
 }
 
 void attachLimit(
