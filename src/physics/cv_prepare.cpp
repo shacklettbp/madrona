@@ -1056,7 +1056,7 @@ inline void exportCPUSolverState(
             for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
                 BodyOffsets offset = curr_offsets[body_idx];
 
-                float *q = m.q(p) + offset.velOffset;
+                float *q = m.q(p) + offset.posOffset;
 
                 BodyLimitConstraint limit = m.limits(p)[body_idx];
                 BodyInertial &inertial = m.inertials(p)[body_idx];
@@ -1076,8 +1076,7 @@ inline void exportCPUSolverState(
                         total_num_rows * glob_col_offset +
                         glob_row_offset;
 
-                    to_change[0] =
-                        limit.hinge.dConstraintViolation(q[0]);
+                    to_change[0] = limit.hinge.dConstraintViolation(q[0]);
                     residuals[glob_row_offset] = limit.hinge.constraintViolation(q[0]);
                     diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
                 } break;
