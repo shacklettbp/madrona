@@ -61,10 +61,10 @@ void computeSpatialInertiasAndPhi(Context &ctx,
 void compositeRigidBody(Context &ctx,
                         BodyGroupProperties p,
                         BodyGroupMemory m);
-float * computePhi(DofType dof_type, 
-                   BodyPhi &body_phi,
-                   float* S,
-                   math::Vector3 origin);
+void computePhi(DofType dof_type,
+                BodyPhi& body_phi,
+                float* S,
+                math::Vector3 origin);
 void solveM(
         BodyGroupProperties prop,
         BodyGroupMemory mem, 

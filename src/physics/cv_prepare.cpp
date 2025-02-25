@@ -15,278 +15,12 @@ using namespace madrona::base;
 namespace madrona::phys::cv {
 
 namespace tasks {
-void refreshPointers(Context &ctx,
-                     BodyGroupMemory &m)
-{
-    m.qVectorsPtr = ctx.memoryRangePointer<MRElement128b>(m.qVectors);
-    m.tmpPtr = ctx.memoryRangePointer<MRElement128b>(m.tmp);
-}
 
-void forwardKinematics(Context &,
-                       BodyGroupMemory m,
-                       BodyGroupProperties p)
-{
-    float *all_q = m.q(p);
-    BodyTransform *all_transforms = m.bodyTransforms(p);
-    BodyHierarchy *all_hiers = m.hierarchies(p);
-    BodyPhi *all_phi = m.bodyPhi(p);
-    BodyOffsets *all_offsets = m.offsets(p);
-
-    { // Set the parent's state (we require that the root is fixed or free body
-        Vector3 com = { all_q[0], all_q[1], all_q[2] };
-
-        all_transforms[0] = {
-            .com = com,
-            .composedRot = { all_q[3], all_q[4], all_q[5], all_q[6] },
-        };
-
-        // omega remains unchanged, and v only depends on the COM position
-        all_phi[0].phi[0] = com[0];
-        all_phi[0].phi[1] = com[1];
-        all_phi[0].phi[2] = com[2];
-    }
-
-    // Forward pass from parent to children
-    for (int i = 1; i < (int)p.numBodies; ++i) {
-        BodyOffsets offsets = all_offsets[i];
-
-        const float *q = all_q + all_offsets[i].posOffset;
-
-        BodyTransform *curr_transform = all_transforms + i;
-        BodyPhi *curr_phi = all_phi + i;
-
-        BodyHierarchy hier = all_hiers[i];
-        BodyTransform parent_transform = all_transforms[offsets.parent];
-
-        float s = p.globalScale;
-
-        // We can calculate our stuff.
-        switch (offsets.dofType) {
-        case DofType::Hinge: {
-            // Find the hinge axis orientation in world space
-            Vector3 rotated_hinge_axis =
-                parent_transform.composedRot.rotateVec(
-                        hier.parentToChildRot.rotateVec(hier.axis));
-
-            // Calculate the composed rotation applied to the child entity.
-            curr_transform->composedRot = parent_transform.composedRot *
-                                    hier.parentToChildRot *
-                                    Quat::angleAxis(q[0], hier.axis);
-
-            // Calculate the composed COM position of the child
-            //  (parent COM + R_{parent} * (rel_pos_parent + R_{hinge} * rel_pos_local))
-            curr_transform->com = parent_transform.com +
-                s * parent_transform.composedRot.rotateVec(
-                        hier.relPositionParent +
-                        hier.parentToChildRot.rotateVec(
-                            Quat::angleAxis(q[0], hier.axis).
-                                rotateVec(hier.relPositionLocal))
-                );
-
-            // All we are getting here is the position of the hinge point
-            // which is relative to the parent's COM.
-            Vector3 anchor_pos = parent_transform.com +
-                s * parent_transform.composedRot.rotateVec(
-                        hier.relPositionParent);
-
-            // Phi only depends on the hinge axis and the hinge point
-            curr_phi->phi[0] = rotated_hinge_axis[0];
-            curr_phi->phi[1] = rotated_hinge_axis[1];
-            curr_phi->phi[2] = rotated_hinge_axis[2];
-            curr_phi->phi[3] = anchor_pos[0];
-            curr_phi->phi[4] = anchor_pos[1];
-            curr_phi->phi[5] = anchor_pos[2];
-        } break;
-
-        case DofType::Slider: {
-            Vector3 rotated_axis =
-                parent_transform.composedRot.rotateVec(
-                        hier.parentToChildRot.rotateVec(hier.axis));
-
-            // The composed rotation for this body is the same as the parent's
-            curr_transform->composedRot = parent_transform.composedRot *
-                                    hier.parentToChildRot;
-
-            curr_transform->com = parent_transform.com +
-                s * parent_transform.composedRot.rotateVec(
-                        hier.relPositionParent +
-                        hier.parentToChildRot.rotateVec(
-                            hier.relPositionLocal +
-                            q[0] * hier.axis)
-                );
-
-            // This is the same as the comPos I guess?
-            Vector3 axis = rotated_axis.normalize();
-
-            curr_phi->phi[0] = axis[0];
-            curr_phi->phi[1] = axis[1];
-            curr_phi->phi[2] = axis[2];
-        } break;
-
-        case DofType::Ball: {
-            Quat joint_rot = Quat{
-                q[0], q[1], q[2], q[3]
-            };
-
-            // Calculate the composed rotation applied to the child entity.
-            curr_transform->composedRot = parent_transform.composedRot *
-                                    hier.parentToChildRot *
-                                    joint_rot;
-
-            // Calculate the composed COM position of the child
-            //  (parent COM + R_{parent} * (rel_pos_parent + R_{ball} * rel_pos_local))
-            curr_transform->com = parent_transform.com +
-                s * parent_transform.composedRot.rotateVec(
-                        hier.relPositionParent +
-                        hier.parentToChildRot.rotateVec(
-                            joint_rot.rotateVec(hier.relPositionLocal))
-                );
-
-            // All we are getting here is the position of the ball point
-            // which is relative to the parent's COM.
-            Vector3 anchor_pos = parent_transform.com +
-                s * parent_transform.composedRot.rotateVec(
-                        hier.relPositionParent);
-
-            // Phi only depends on the hinge point and parent rotation
-            curr_phi->phi[0] = anchor_pos[0];
-            curr_phi->phi[1] = anchor_pos[1];
-            curr_phi->phi[2] = anchor_pos[2];
-            curr_phi->phi[3] = parent_transform.composedRot.w;
-            curr_phi->phi[4] = parent_transform.composedRot.x;
-            curr_phi->phi[5] = parent_transform.composedRot.y;
-            curr_phi->phi[6] = parent_transform.composedRot.z;
-        } break;
-
-        case DofType::FixedBody: {
-            curr_transform->composedRot = parent_transform.composedRot;
-
-            // This is the origin of the body
-            curr_transform->com =
-                parent_transform.com +
-                s * parent_transform.composedRot.rotateVec(
-                        hier.relPositionParent +
-                        hier.parentToChildRot.rotateVec(
-                            hier.relPositionLocal)
-                );
-
-            // omega remains unchanged, and v only depends on the COM position
-            curr_phi->phi[0] = curr_transform->com[0];
-            curr_phi->phi[1] = curr_transform->com[1];
-            curr_phi->phi[2] = curr_transform->com[2];
-        } break;
-
-        default: {
-            // Only hinges have parents
-            assert(false);
-        } break;
-        }
-    }
-}
-
-inline Mat3x3 skewSymmetricMatrix(Vector3 v)
-{
-    return {
-        {
-            { 0.f, v.z, -v.y },
-            { -v.z, 0.f, v.x },
-            { v.y, -v.x, 0.f }
-        }
-    };
-}
-
-inline void computePhiTrans(
-        DofType dof_type,
-        BodyPhi &body_phi,
-        Vector3 origin,
-        float *S)
-{
-    if (dof_type == DofType::FreeBody) {
-        // S = [1_3x3 r^x; 0 1_3x3], column-major
-        memset(S, 0.f, 6 * 3 * sizeof(float));
-        // Diagonal identity
-        for(CountT i = 0; i < 3; ++i) {
-            S[i * 3 + i] = 1.f;
-        }
-        // r^x Skew symmetric matrix
-        Vector3 comPos = {
-            body_phi.phi[0],
-            body_phi.phi[1],
-            body_phi.phi[2],
-        };
-
-        comPos -= origin;
-        S[0 + 3 * 4] = -comPos.z;
-        S[0 + 3 * 5] = comPos.y;
-        S[1 + 3 * 3] = comPos.z;
-        S[1 + 3 * 5] = -comPos.x;
-        S[2 + 3 * 3] = -comPos.y;
-        S[2 + 3 * 4] = comPos.x;
-    }
-    else if (dof_type == DofType::Slider) {
-        S[0] = body_phi.phi[0];
-        S[1] = body_phi.phi[1];
-        S[2] = body_phi.phi[2];
-    }
-    else if (dof_type == DofType::Hinge) {
-        // S = [r \times hinge; hinge]
-        Vector3 hinge = {
-            body_phi.phi[0], 
-            body_phi.phi[1],
-            body_phi.phi[2],
-        };
-
-        Vector3 anchorPos = {
-            body_phi.phi[3],
-            body_phi.phi[4],
-            body_phi.phi[5],
-        };
-
-        anchorPos -= origin;
-        Vector3 r_cross_hinge = anchorPos.cross(hinge);
-        S[0] = r_cross_hinge.x;
-        S[1] = r_cross_hinge.y;
-        S[2] = r_cross_hinge.z;
-    }
-    else if (dof_type == DofType::Ball) {
-        // This will just get right-multiplied by the angular velocity
-        Vector3 anchor_pos = {
-            body_phi.phi[0],
-            body_phi.phi[1],
-            body_phi.phi[2],
-        };
-
-        anchor_pos -= origin;
-
-        // We need to right multiply these by the parent composed rotation
-        // matrix.
-        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
-        Quat parent_composed_rot = Quat{
-            body_phi.phi[3],
-            body_phi.phi[4],
-            body_phi.phi[5],
-            body_phi.phi[6]
-        };
-
-        Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
-
-        rx *= parent_rot;
-
-        for (int col = 0; col < 3; ++col) {
-            S[col * 3 + 0] = rx[col][0];
-            S[col * 3 + 1] = rx[col][1];
-            S[col * 3 + 2] = rx[col][2];
-        }
-    }
-    else {
-        // MADRONA_UNREACHABLE();
-    }
-}
-
-// Computes the Phi matrix from generalized velocities to Plücker coordinates
-float * computePhi(
+// Computes the [6 x nDof] Phi matrix which maps from generalized velocities
+// to Plücker coordinates
+inline void computePhi(
     DofType dof_type,
-    BodyPhi &body_phi,
+    BodyPhi& body_phi,
     float* S,
     Vector3 origin)
 {
@@ -353,7 +87,7 @@ float * computePhi(
 
         // We need to right multiply these by the parent composed rotation
         // matrix.
-        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
+        Mat3x3 rx = Mat3x3::skewSym(anchor_pos);
 
         Quat parent_composed_rot = Quat {
             body_phi.phi[3],
@@ -378,25 +112,25 @@ float * computePhi(
     } else {
         // MADRONA_UNREACHABLE();
     }
-
-    return S;
 }
 
-// Same as the Phi matrix but only the first 3 rows (translational part)
-inline float* computePhiTrans(
-    DofType dof_type,
-    BodyPhi &body_phi,
-    float* S,
-    Vector3 origin)
+// Same as computePhi, but only the first 3 rows (translational component)
+inline void computePhiTrans(
+        DofType dof_type,
+        BodyPhi &body_phi,
+        Vector3 origin,
+        float *S)
 {
-    float* phi = body_phi.phi;
-
     if (dof_type == DofType::FreeBody) {
         memset(S, 0.f, 6 * 3 * sizeof(float));
         for(CountT i = 0; i < 3; ++i) {
             S[i * 3 + i] = 1.f;
         }
-        Vector3 comPos = {phi[0], phi[1], phi[2]};
+        Vector3 comPos = {
+            body_phi.phi[0],
+            body_phi.phi[1],
+            body_phi.phi[2],
+        };
         comPos -= origin;
         S[0 + 3 * 4] = -comPos.z;
         S[0 + 3 * 5] = comPos.y;
@@ -404,25 +138,42 @@ inline float* computePhiTrans(
         S[1 + 3 * 5] = -comPos.x;
         S[2 + 3 * 3] = -comPos.y;
         S[2 + 3 * 4] = comPos.x;
-    } else if (dof_type == DofType::Slider) {
-        S[0] = phi[0];
-        S[1] = phi[1];
-        S[2] = phi[2];
-    } else if (dof_type == DofType::Hinge) {
-        // S = [r \times hinge; hinge]
-        Vector3 hinge = {phi[0], phi[1], phi[2]};
-        Vector3 anchorPos = {phi[3], phi[4], phi[5]};
+    }
+    else if (dof_type == DofType::Slider) {
+        S[0] = body_phi.phi[0];
+        S[1] = body_phi.phi[1];
+        S[2] = body_phi.phi[2];
+    }
+    else if (dof_type == DofType::Hinge) {
+        Vector3 hinge = {
+            body_phi.phi[0],
+            body_phi.phi[1],
+            body_phi.phi[2],
+        };
+        Vector3 anchorPos = {
+            body_phi.phi[3],
+            body_phi.phi[4],
+            body_phi.phi[5],
+        };
         anchorPos -= origin;
         Vector3 r_cross_hinge = anchorPos.cross(hinge);
         S[0] = r_cross_hinge.x;
         S[1] = r_cross_hinge.y;
         S[2] = r_cross_hinge.z;
-    } else if (dof_type == DofType::Ball) {
-        Vector3 anchor_pos = {phi[0], phi[1], phi[2]};
+    }
+    else if (dof_type == DofType::Ball) {
+        Vector3 anchor_pos = {
+            body_phi.phi[0],
+            body_phi.phi[1],
+            body_phi.phi[2],
+        };
         anchor_pos -= origin;
-        Mat3x3 rx = skewSymmetricMatrix(anchor_pos);
+        Mat3x3 rx = Mat3x3::skewSym(anchor_pos);
         Quat parent_composed_rot = Quat{
-            phi[3], phi[4], phi[5], phi[6]
+            body_phi.phi[3],
+            body_phi.phi[4],
+            body_phi.phi[5],
+            body_phi.phi[6]
         };
         Mat3x3 parent_rot = Mat3x3::fromQuat(parent_composed_rot);
         rx *= parent_rot;
@@ -435,10 +186,9 @@ inline float* computePhiTrans(
     else {
         // MADRONA_UNREACHABLE();
     }
-    return S;
 }
 
-
+// Computes the center of mass of the body group
 void computeGroupCOM(Context &ctx,
                      BodyGroupProperties &prop,
                      BodyGroupMemory &mem)
@@ -485,7 +235,7 @@ void computeSpatialInertiasAndPhi(Context &ctx,
     // Compute the 3x3 skew-symmetric matrix (r^x)
     // (where r is from Plücker origin to COM)
     Vector3 adjustedCom = transform.com - body_grp_com_pos;
-    Mat3x3 sym_mat = skewSymmetricMatrix(adjustedCom);
+    Mat3x3 sym_mat = Mat3x3::skewSym(adjustedCom);
     // (I_world - m r^x r^x)
     Mat3x3 inertia_mat = i_world_frame - (mass * sym_mat * sym_mat);
 

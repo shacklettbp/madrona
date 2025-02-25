@@ -246,6 +246,7 @@ struct Mat3x3 {
 
     static inline Mat3x3 fromQuat(Quat r);
     static inline Mat3x3 fromRS(Quat r, Diag3x3 s);
+    static inline Mat3x3 skewSym(Vector3 v);
 
     inline Vector3 & operator[](CountT i);
     inline Vector3 operator[](CountT i) const;

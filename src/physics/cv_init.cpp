@@ -88,11 +88,7 @@ inline float * computeBodyJacobian(BodyGroupMemory &m,
         float *S = m.phiFull(p) + 2 * 6 * cur_offset.velOffset;
 
         // Populate columns of J_C
-        S = computePhi(
-                cur_offset.dofType,
-                phis[cur_body_idx],
-                S,
-                origin);
+        computePhi(cur_offset.dofType, phis[cur_body_idx], S, origin);
 
         for(CountT i = 0; i < cur_offset.numDofs; ++i) {
             float *J_col = J +

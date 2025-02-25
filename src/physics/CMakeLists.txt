@@ -12,6 +12,7 @@ set(MADRONA_PHYSICS_SRCS
     ${INC_DIR}/cv_physics.inl
     ${INC_DIR}/cv_load.hpp
     cv_solver.cpp
+    cv_misc.cpp
     cv_prepare.cpp
     cv_load.cpp
     cv_body.cpp
