@@ -128,6 +128,12 @@ struct BodyGroupProperties {
 
         // Index of the group in the world
         uint32_t grpIndex;
+
+        // Offset in the global velocity vector
+        uint32_t qvOffset;
+
+        // Offset (row) in the equality jacobian
+        uint32_t eqOffset;
     } tmp;
 };
 

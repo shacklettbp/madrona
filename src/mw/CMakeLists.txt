@@ -62,7 +62,11 @@ set(BVH_DEVICE_SOURCES
 )
 
 set(TASK_GRAPH_DEVICE_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/cvphysics.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/cv_solver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/cv_body.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/cv_load.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/cv_prepare.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../physics/cv.cpp
     ${DEVICE_SRC_DIR}/memory.cpp
     ${DEVICE_SRC_DIR}/state.cpp
     ${DEVICE_SRC_DIR}/crash.cpp

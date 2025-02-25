@@ -6,6 +6,7 @@ using namespace math;
 using namespace base;
 
 namespace tasks {
+#if 0
 inline void computeExpandedParent(Context &ctx,
                                   BodyGroupMemory m,
                                   BodyGroupProperties p)
@@ -270,8 +271,10 @@ inline void computeInvMass(
         dof_offset += offset.numDofs;
     }
 }
+#endif
 }
 
+#if 0
 TaskGraphNodeID setupCVInitTasks(
         TaskGraphBuilder &builder,
         Span<const TaskGraphNodeID> deps)
@@ -304,7 +307,8 @@ TaskGraphNodeID setupCVInitTasks(
 #ifdef MADRONA_GPU_MODE
     node = builder.addToGraph<CustomParallelForNode<Context,
          tasks::compositeRigidBody, 32, 1,
-            BodyGroupHierarchy
+            BodyGroupProperties,
+            BodyGroupMemory
         >>({node});
 #else
     node = builder.addToGraph<ParallelForNode<Context,
@@ -338,5 +342,6 @@ TaskGraphNodeID setupCVInitTasks(
 
     return node;
 }
+#endif
     
 }

@@ -3,8 +3,14 @@
 
 namespace madrona::phys::cv {
 
+namespace tasks {
 void refreshPointers(Context &ctx,
-                     BodyGroupMemory &m);
+                     BodyGroupMemory &m)
+{
+    m.qVectorsPtr = ctx.memoryRangePointer<MRElement128b>(m.qVectors);
+    m.tmpPtr = ctx.memoryRangePointer<MRElement128b>(m.tmp);
+}
+}
 
 TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
                                    TaskGraphNodeID broadphase,
@@ -16,6 +22,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
         CompactArchetypeNode<BodyGroupArchetype>>({cur_node});
     cur_node = builder.addToGraph<
         CompactArchetypeNode<DofObjectArchetype>>({cur_node});
+
+    cur_node = builder.addToGraph<ParallelForNode<Context, 
+             tasks::refreshPointers,
+                BodyGroupMemory>>({cur_node});
 
     for (CountT i = 0; i < num_substeps; ++i) {
         cur_node = narrowphase::setupTasks(builder, {cur_node});

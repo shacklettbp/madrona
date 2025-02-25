@@ -8,6 +8,7 @@ using namespace math;
 using namespace base;
     
 namespace tasks {
+#if 0
 inline void integrationStep(Context &ctx,
                             DofObjectGroup grp_info)
 {
@@ -167,8 +168,10 @@ inline void convertPostSolve(
         MADRONA_UNREACHABLE();
     }
 }
+#endif
 }
 
+#if 0
 TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
                                TaskGraphNodeID solve)
 {
@@ -193,5 +196,6 @@ TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
 
     return cur_node;
 }
+#endif
     
 }

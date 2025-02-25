@@ -7,6 +7,8 @@
 #include <madrona/cv_physics.hpp>
 #include <madrona/taskgraph.hpp>
 
+#include "cv_gpu.hpp"
+
 #include "physics_impl.hpp"
 
 using namespace madrona::math;
@@ -15,10 +17,171 @@ using namespace madrona::base;
 namespace madrona::phys::cv {
 
 namespace tasks {
+void forwardKinematics(Context &,
+                       BodyGroupMemory m,
+                       BodyGroupProperties p)
+{
+    float *all_q = m.q(p);
+    BodyTransform *all_transforms = m.bodyTransforms(p);
+    BodyHierarchy *all_hiers = m.hierarchies(p);
+    BodyPhi *all_phi = m.bodyPhi(p);
+    BodyOffsets *all_offsets = m.offsets(p);
+
+    { // Set the parent's state (we require that the root is fixed or free body
+        Vector3 com = { all_q[0], all_q[1], all_q[2] };
+
+        all_transforms[0] = {
+            .com = com,
+            .composedRot = { all_q[3], all_q[4], all_q[5], all_q[6] },
+        };
+
+        // omega remains unchanged, and v only depends on the COM position
+        all_phi[0].phi[0] = com[0];
+        all_phi[0].phi[1] = com[1];
+        all_phi[0].phi[2] = com[2];
+    }
+
+    // Forward pass from parent to children
+    for (int i = 1; i < (int)p.numBodies; ++i) {
+        BodyOffsets offsets = all_offsets[i];
+
+        const float *q = all_q + all_offsets[i].posOffset;
+
+        BodyTransform *curr_transform = all_transforms + i;
+        BodyPhi *curr_phi = all_phi + i;
+
+        BodyHierarchy hier = all_hiers[i];
+        BodyTransform parent_transform = all_transforms[offsets.parent];
+
+        float s = p.globalScale;
+
+        // We can calculate our stuff.
+        switch (offsets.dofType) {
+        case DofType::Hinge: {
+            // Find the hinge axis orientation in world space
+            Vector3 rotated_hinge_axis =
+                parent_transform.composedRot.rotateVec(
+                        hier.parentToChildRot.rotateVec(hier.axis));
+
+            // Calculate the composed rotation applied to the child entity.
+            curr_transform->composedRot = parent_transform.composedRot *
+                                    hier.parentToChildRot *
+                                    Quat::angleAxis(q[0], hier.axis);
+
+            // Calculate the composed COM position of the child
+            //  (parent COM + R_{parent} * (rel_pos_parent + R_{hinge} * rel_pos_local))
+            curr_transform->com = parent_transform.com +
+                s * parent_transform.composedRot.rotateVec(
+                        hier.relPositionParent +
+                        hier.parentToChildRot.rotateVec(
+                            Quat::angleAxis(q[0], hier.axis).
+                                rotateVec(hier.relPositionLocal))
+                );
+
+            // All we are getting here is the position of the hinge point
+            // which is relative to the parent's COM.
+            Vector3 anchor_pos = parent_transform.com +
+                s * parent_transform.composedRot.rotateVec(
+                        hier.relPositionParent);
+
+            // Phi only depends on the hinge axis and the hinge point
+            curr_phi->phi[0] = rotated_hinge_axis[0];
+            curr_phi->phi[1] = rotated_hinge_axis[1];
+            curr_phi->phi[2] = rotated_hinge_axis[2];
+            curr_phi->phi[3] = anchor_pos[0];
+            curr_phi->phi[4] = anchor_pos[1];
+            curr_phi->phi[5] = anchor_pos[2];
+        } break;
+
+        case DofType::Slider: {
+            Vector3 rotated_axis =
+                parent_transform.composedRot.rotateVec(
+                        hier.parentToChildRot.rotateVec(hier.axis));
+
+            // The composed rotation for this body is the same as the parent's
+            curr_transform->composedRot = parent_transform.composedRot *
+                                    hier.parentToChildRot;
+
+            curr_transform->com = parent_transform.com +
+                s * parent_transform.composedRot.rotateVec(
+                        hier.relPositionParent +
+                        hier.parentToChildRot.rotateVec(
+                            hier.relPositionLocal +
+                            q[0] * hier.axis)
+                );
+
+            // This is the same as the comPos I guess?
+            Vector3 axis = rotated_axis.normalize();
+
+            curr_phi->phi[0] = axis[0];
+            curr_phi->phi[1] = axis[1];
+            curr_phi->phi[2] = axis[2];
+        } break;
+
+        case DofType::Ball: {
+            Quat joint_rot = Quat{
+                q[0], q[1], q[2], q[3]
+            };
+
+            // Calculate the composed rotation applied to the child entity.
+            curr_transform->composedRot = parent_transform.composedRot *
+                                    hier.parentToChildRot *
+                                    joint_rot;
+
+            // Calculate the composed COM position of the child
+            //  (parent COM + R_{parent} * (rel_pos_parent + R_{ball} * rel_pos_local))
+            curr_transform->com = parent_transform.com +
+                s * parent_transform.composedRot.rotateVec(
+                        hier.relPositionParent +
+                        hier.parentToChildRot.rotateVec(
+                            joint_rot.rotateVec(hier.relPositionLocal))
+                );
+
+            // All we are getting here is the position of the ball point
+            // which is relative to the parent's COM.
+            Vector3 anchor_pos = parent_transform.com +
+                s * parent_transform.composedRot.rotateVec(
+                        hier.relPositionParent);
+
+            // Phi only depends on the hinge point and parent rotation
+            curr_phi->phi[0] = anchor_pos[0];
+            curr_phi->phi[1] = anchor_pos[1];
+            curr_phi->phi[2] = anchor_pos[2];
+            curr_phi->phi[3] = parent_transform.composedRot.w;
+            curr_phi->phi[4] = parent_transform.composedRot.x;
+            curr_phi->phi[5] = parent_transform.composedRot.y;
+            curr_phi->phi[6] = parent_transform.composedRot.z;
+        } break;
+
+        case DofType::FixedBody: {
+            curr_transform->composedRot = parent_transform.composedRot;
+
+            // This is the origin of the body
+            curr_transform->com =
+                parent_transform.com +
+                s * parent_transform.composedRot.rotateVec(
+                        hier.relPositionParent +
+                        hier.parentToChildRot.rotateVec(
+                            hier.relPositionLocal)
+                );
+
+            // omega remains unchanged, and v only depends on the COM position
+            curr_phi->phi[0] = curr_transform->com[0];
+            curr_phi->phi[1] = curr_transform->com[1];
+            curr_phi->phi[2] = curr_transform->com[2];
+        } break;
+
+        default: {
+            // Only hinges have parents
+            assert(false);
+        } break;
+        }
+    }
+}
 
 // Computes the [6 x nDof] Phi matrix which maps from generalized velocities
 // to Plücker coordinates
-inline void computePhi(
+void computePhi(
     DofType dof_type,
     BodyPhi& body_phi,
     float* S,
@@ -115,11 +278,10 @@ inline void computePhi(
 }
 
 // Same as computePhi, but only the first 3 rows (translational component)
-inline void computePhiTrans(
-        DofType dof_type,
-        BodyPhi &body_phi,
-        Vector3 origin,
-        float *S)
+void computePhiTrans(DofType dof_type,
+                     BodyPhi &body_phi,
+                     Vector3 origin,
+                     float (&S)[18])
 {
     if (dof_type == DofType::FreeBody) {
         memset(S, 0.f, 6 * 3 * sizeof(float));
@@ -282,14 +444,18 @@ void computeSpatialInertiasAndPhi(Context &ctx,
     memcpy(tau + velOffset, force + velOffset, num_dofs * sizeof(float));
 }
 
-inline float* computePhiDot(DofType dof_type,
-                            float *S,
-                            float *S_dot,
-                            SpatialVector &v_hat)
+inline void computePhiDot(DofType dof_type,
+                          float (&S)[6 * 6],
+                          float (&S_dot)[6 * 6],
+                          SpatialVector &v_hat)
 {
     if (dof_type == DofType::FreeBody) {
         // S_dot = [0_3x3 v^x; 0_3x3 0_3x3], column-major
-        memset(S_dot, 0.f, 6 * 6 * sizeof(float));
+        MADRONA_UNROLL
+        for (uint32_t i = 0; i < 6 * 6; ++i) {
+            S_dot[i] = 0.f;
+        }
+
         // v^x Skew symmetric matrix
         Vector3 v_trans = v_hat.linear;
         S_dot[0 + 6 * 4] = -v_trans.z;
@@ -335,7 +501,6 @@ inline float* computePhiDot(DofType dof_type,
             S_dot[i * 6 + 5] = S_dot_sv.angular.z;
         }
     }
-    return S_dot;
 }
 
 // J_C = C^T[e_{b1} S_1, e_{b2} S_2, ...], col-major
@@ -362,13 +527,6 @@ inline float * computeContactJacobian(BodyGroupProperties &prop,
     // Populate J_C by traversing up the hierarchy
     uint8_t curr_idx = body_idx;
     while (curr_idx != 0xFF) {
-#if 0
-        Entity body = body_grp.bodies(ctx)[curr_idx];
-
-        auto &curr_tmp_state = ctx.get<DofObjectTmpState>(body);
-        auto &curr_num_dofs = ctx.get<DofObjectNumDofs>(body);
-        auto &curr_hier_desc = ctx.get<DofObjectHierarchyDesc>(body);
-#endif
         BodyOffsets offsets = all_offsets[curr_idx];
 
         // Populate columns of J_C
@@ -472,6 +630,161 @@ void solveM(
 }
 
 
+#ifdef MADRONA_GPU_MODE
+void compositeRigidBody(
+        Context &,
+        BodyGroupProperties prop,
+        BodyGroupMemory mem)
+{
+    uint32_t lane_id = threadIdx.x % 32;
+    uint32_t warp_id = threadIdx.x / 32;
+
+    // ----------------- Composite rigid body -----------------
+    // Mass Matrix of this entire body group, column-major
+    uint32_t total_dofs = prop.qvDim;
+    BodyOffsets *offsets = mem.offsets(prop);
+    BodySpatialVectors *spatialVectors = mem.spatialVectors(prop);
+
+    float *S =  mem.phiFull(prop);
+    float *M = mem.massMatrix(prop);
+
+    // memset(M, 0.f, total_dofs * total_dofs * sizeof(float));
+    gpu_utils::warpSetZero(M, total_dofs * total_dofs * sizeof(float));
+    __syncwarp();
+
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    // Backward pass
+    for (CountT i = prop.numBodies-1; i >= 0; --i) {
+        uint32_t velOffset = offsets[i].velOffset;
+        uint32_t S_offset = 2 * 6 * velOffset;
+        uint32_t num_dofs = BodyOffsets::getDofTypeDim(offsets[i].dofType);
+
+        float* S_i = S + S_offset;
+
+        // float *F = mem.scratch(prop);
+        float *F = (float *)smem_buf;
+
+        if (lane_id == 0) {
+            for(CountT col = 0; col < num_dofs; ++col) {
+                float *S_col = S_i + 6 * col;
+                float *F_col = F + 6 * col;
+                spatialVectors[i].spatialInertia.multiply(S_col, F_col);
+            }
+        }
+
+        __syncwarp();
+
+        // M_{ii} = S_i^T I_i^C S_i = F^T S_i
+        float *M_ii = M + velOffset * total_dofs + velOffset;
+
+        gpu_utils::warpLoop(num_dofs * num_dofs,
+            [&](uint32_t iter) {
+                uint32_t row = iter / num_dofs;
+                uint32_t col = iter % num_dofs;
+
+                float *F_col = F + 6 * row;
+                float *S_col = S_i + 6 * col;
+
+                #pragma unroll
+                for (uint32_t k = 0; k < 6; ++k) {
+                    M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
+                }
+            });
+
+        // Traverse up hierarchy
+        uint8_t j = offsets[i].parent;
+
+        while(j != 0xFF) {
+            uint32_t velOffset_j = offsets[j].velOffset;
+            uint32_t S_offset_j = 2 * 6 * velOffset_j;
+            uint32_t j_num_dofs = BodyOffsets::getDofTypeDim(offsets[j].dofType);
+            float *S_j = S + S_offset_j;
+
+            // M_{ij} = M{ji} = F^T S_j
+            float *M_ij = M + velOffset + total_dofs * velOffset_j; // row i, col j
+            float *M_ji = M + velOffset_j + total_dofs * velOffset; // row j, col i
+
+
+            gpu_utils::warpLoop(num_dofs * j_num_dofs,
+                [&](uint32_t iter) {
+                    uint32_t row = iter / j_num_dofs;
+                    uint32_t col = iter % j_num_dofs;
+
+                    float *F_col = F + 6 * row; // take col for transpose
+                    float *S_col = S_j + 6 * col;
+
+                    #pragma unroll
+                    for(CountT k = 0; k < 6; ++k) {
+                        M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
+                        M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
+                    }
+                });
+
+            j = offsets[j].parent;
+        }
+    }
+
+    // ----------------- Compute LTDL factorization -----------------
+    // First copy M to LTDL
+    float *LTDL = mem.massLTDLMatrix(prop);
+    gpu_utils::warpCopy(LTDL, M, total_dofs * total_dofs * sizeof(float));
+    __syncwarp();
+
+    if (lane_id == 0) {
+        // Helper
+        auto ltdl = [&](int32_t row, int32_t col) -> float& {
+            return LTDL[row + total_dofs * col];
+        };
+
+        int32_t *expandedParent = mem.expandedParent(prop);
+
+        // Backward pass through DOFs
+        for (int32_t k = (int32_t) total_dofs - 1; k >= 0; --k) {
+            int32_t i = expandedParent[k];
+            while (i != -1) {
+                // Temporary storage
+                float a = ltdl(k, i) / ltdl(k, k);
+                int32_t j = i;
+                while (j != -1) {
+                    ltdl(i, j) = ltdl(i, j) - a * ltdl(k, j);
+                    j = expandedParent[j];
+                }
+                ltdl(k, i) = a;
+                i = expandedParent[i];
+            }
+        }
+    }
+
+    // ----------------- Sum Inertia Diagonals -----------------
+    // Sum the diagonals of the mass matrix (used for solver scaling)
+    if (lane_id == 0) {
+        float inertiaSum = 0.f;
+        for (CountT i = 0; i < prop.qvDim; ++i) {
+            inertiaSum += M[i + i * (prop.qvDim)];
+        }
+
+        prop.inertiaSum = inertiaSum;
+    }
+
+    // ----------------- Compute Free Acceleration -----------------
+    float *bias = mem.biasVector(prop);
+
+    gpu_utils::warpLoop(prop.qvDim, [&](uint32_t iter) {
+            bias[iter] = -bias[iter];
+        });
+    __syncwarp();
+
+    if (lane_id == 0) {
+        // This overwrites bias with the acceleration
+        solveM(prop, mem, bias);
+    }
+}
+
+#else
 // CRB: Compute the Mass Matrix (n_dofs x n_dofs)
 void compositeRigidBody(
         Context &,
@@ -586,6 +899,8 @@ void compositeRigidBody(
     // This overwrites bias with the acceleration
     solveM(prop, mem, bias);
 }
+#endif
+
 
 // Recursive Newton Euler algorithm: Compute bias forces and gravity
 inline void rneAndCombineSpatialInertias(
@@ -604,158 +919,183 @@ inline void rneAndCombineSpatialInertias(
     BodyOffsets* offsets = mem.offsets(prop);
     BodySpatialVectors* spatialVectors = mem.spatialVectors(prop);
 
-    for (uint32_t i = 0; i < prop.numBodies; ++i) {
-        BodyOffsets body_offset = offsets[i];
-        DofType dof_type = body_offset.dofType;
-        BodySpatialVectors& spatial_vector = spatialVectors[i];
+    MADRONA_GPU_SINGLE_THREAD {
+        for (uint32_t i = 0; i < prop.numBodies; ++i) {
+            BodyOffsets body_offset = offsets[i];
+            DofType dof_type = body_offset.dofType;
+            BodySpatialVectors& spatial_vector = spatialVectors[i];
 
-        uint32_t num_dofs = BodyOffsets::getDofTypeDim(dof_type);
-        uint32_t velOffset = body_offset.velOffset;
-        uint32_t S_offset = 2 * 6 * velOffset;
-        uint32_t S_dot_offset = S_offset + 6 * num_dofs;
+            uint32_t num_dofs = BodyOffsets::getDofTypeDim(dof_type);
+            uint32_t velOffset = body_offset.velOffset;
+            uint32_t S_offset = 2 * 6 * velOffset;
+            // uint32_t S_dot_offset = S_offset + 6 * num_dofs;
 
-        float* velocity = qv + velOffset;
-        float* S = mem.phiFull(prop) + S_offset;
-        float* S_dot = mem.phiFull(prop) + S_dot_offset;
+            float *velocity = qv + velOffset;
 
-        if (dof_type == DofType::FreeBody) {
-            // Free bodies must be root of their hierarchy
-            SpatialVector v_body = {
-                {velocity[0], velocity[1], velocity[2]}, Vector3::zero()
-            };
-            computePhiDot(dof_type, S, S_dot, v_body);
+            float *S_ptr = mem.phiFull(prop) + S_offset;
+            // float* S_dot = mem.phiFull(prop) + S_dot_offset;
 
-            // v_0 = 0, a_0 = -g (fictitious upward acceleration)
-            spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
-            spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
+            float S[6 * 6];
+            float S_dot[6 * 6];
 
-            // S\dot{q_i} and \dot{S}\dot{q_i}
-            for (uint32_t j = 0; j < 6; ++j) {
-                for (uint32_t k = 0; k < num_dofs; ++k) {
-                    spatial_vector.sVel[j] += S[j + 6 * k] * velocity[k];
-                    spatial_vector.sAcc[j] += S_dot[j + 6 * k] * velocity[k];
+            MADRONA_UNROLL
+            for (uint32_t i = 0; i < 6; ++i) {
+                if (i < num_dofs) {
+                    MADRONA_UNROLL
+                    for (uint32_t j = 0; j < 6; ++j) {
+                        S[j + i * num_dofs] = S_ptr[j + i * num_dofs];
+                    }
                 }
             }
-        }
-        else if (dof_type == DofType::FixedBody) {
-            // Fixed bodies must also be root of their hierarchy
-            // tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
-            // tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
-            if (body_offset.parent == 0xFF) {
-                spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
+
+            if (dof_type == DofType::FreeBody) {
+                // Free bodies must be root of their hierarchy
+                SpatialVector v_body = {
+                    {velocity[0], velocity[1], velocity[2]}, Vector3::zero()
+                };
+
+                computePhiDot(dof_type, S, S_dot, v_body);
+
+                // v_0 = 0, a_0 = -g (fictitious upward acceleration)
                 spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
-            } else {
+                spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
+
+                // S\dot{q_i} and \dot{S}\dot{q_i}
+                MADRONA_UNROLL
+                for (uint32_t j = 0; j < 6; ++j) {
+                    MADRONA_UNROLL
+                    for (uint32_t k = 0; k < 6; ++k) {
+                        spatial_vector.sVel[j] += S[j + 6 * k] * velocity[k];
+                        spatial_vector.sAcc[j] += S_dot[j + 6 * k] * velocity[k];
+                    }
+                }
+            }
+            else if (dof_type == DofType::FixedBody) {
+                // Fixed bodies must also be root of their hierarchy
+                // tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
+                // tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
+                if (body_offset.parent == 0xFF) {
+                    spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
+                    spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
+                } else {
+                    BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
+                    spatial_vector.sVel = parent_spatial_vector.sVel;
+                    spatial_vector.sAcc = parent_spatial_vector.sAcc;
+                }
+            }
+            else if (dof_type == DofType::Slider) {
+                assert(body_offset.parent != 0xFF);
+
                 BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
                 spatial_vector.sVel = parent_spatial_vector.sVel;
                 spatial_vector.sAcc = parent_spatial_vector.sAcc;
+
+                // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
+                // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
+                computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
+
+                float q_dot = velocity[0];
+
+                MADRONA_UNROLL
+                for (int j = 0; j < 6; ++j) {
+                    spatial_vector.sVel[j] += S[j] * q_dot;
+                    spatial_vector.sAcc[j] += S_dot[j] * q_dot;
+                }
+            }
+            else if (dof_type == DofType::Hinge) {
+                assert(body_offset.parent != 0xFF);
+
+                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
+                spatial_vector.sVel = parent_spatial_vector.sVel;
+                spatial_vector.sAcc = parent_spatial_vector.sAcc;
+
+                // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
+                // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
+                // Note: we are using the parent velocity here (for hinge itself)
+                computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
+
+                float q_dot = velocity[0];
+
+                MADRONA_UNROLL
+                for (int j = 0; j < 6; ++j) {
+                    spatial_vector.sVel[j] += S[j] * q_dot;
+                    spatial_vector.sAcc[j] += S_dot[j] * q_dot;
+                }
+            }
+            else if (dof_type == DofType::Ball) {
+                assert(body_offset.parent != 0xFF);
+
+                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
+                spatial_vector.sVel = parent_spatial_vector.sVel;
+                spatial_vector.sAcc = parent_spatial_vector.sAcc;
+
+                // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
+                // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
+                // Note: we are using the parent velocity here (for hinge itself)
+                computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
+
+                float *q_dot = velocity;
+
+                MADRONA_UNROLL
+                for (int j = 0; j < 6; ++j) {
+                    // TODO: Probably should switch to row major - this isn't
+                    // particularly cache-friendly.
+                    spatial_vector.sVel[j] += S[j + 6 * 0] * q_dot[0] +
+                                         S[j + 6 * 1] * q_dot[1] +
+                                         S[j + 6 * 2] * q_dot[2];
+
+                    spatial_vector.sAcc[j] += S_dot[j + 6 * 0] * q_dot[0] +
+                                         S_dot[j + 6 * 1] * q_dot[1] +
+                                         S_dot[j + 6 * 2] * q_dot[2];
+                }
+            } else {
+                MADRONA_UNREACHABLE();
+            }
+
+            // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
+            spatial_vector.sForce = spatial_vector.spatialInertia.multiply(spatial_vector.sAcc);
+            spatial_vector.sForce += spatial_vector.sVel.crossStar(
+                spatial_vector.spatialInertia.multiply(spatial_vector.sVel));
+        }
+
+        // Backward pass to find bias forces
+        float *tau = mem.biasVector(prop);
+
+        CountT dof_index = total_dofs;
+        for (CountT i = prop.numBodies-1; i >= 0; --i) {
+            BodyOffsets body_offset = offsets[i];
+            BodySpatialVectors& spatial_vector = spatialVectors[i];
+            uint32_t num_dofs = BodyOffsets::getDofTypeDim(body_offset.dofType);
+            uint32_t velOffset = body_offset.velOffset;
+            uint32_t S_offset = 2 * 6 * velOffset;
+
+            // tau_i = S_i^T f_i
+            dof_index -= num_dofs;
+            float* S = mem.phiFull(prop) + S_offset;
+            for(CountT row = 0; row < num_dofs; ++row) {
+                float *S_col = S + 6 * row;
+                for(CountT k = 0; k < 6; ++k) {
+                    tau[dof_index + row] += S_col[k] * spatial_vector.sForce[k];
+                }
+            }
+
+            // Add to parent's force
+            if (body_offset.parent != 0xFF) {
+                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
+                parent_spatial_vector.sForce += spatial_vector.sForce;
             }
         }
-        else if (dof_type == DofType::Slider) {
-            assert(body_offset.parent != 0xFF);
 
-            BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-            spatial_vector.sVel = parent_spatial_vector.sVel;
-            spatial_vector.sAcc = parent_spatial_vector.sAcc;
-
-            // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
-            computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
-
-            float q_dot = velocity[0];
-            for (int j = 0; j < 6; ++j) {
-                spatial_vector.sVel[j] += S[j] * q_dot;
-                spatial_vector.sAcc[j] += S_dot[j] * q_dot;
-            }
+        // ----------------- Combine Spatial Inertias -----------------
+        uint32_t num_bodies = prop.numBodies;
+        // Backward pass from children to parent
+        for (CountT i = num_bodies-1; i > 0; --i) {
+            InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
+            uint32_t parent_idx = (uint32_t)offsets[i].parent;
+            InertiaTensor& spatial_inertia_parent = 
+                spatialVectors[parent_idx].spatialInertia;
+            spatial_inertia_parent += spatial_inertia;
         }
-        else if (dof_type == DofType::Hinge) {
-            assert(body_offset.parent != 0xFF);
-
-            BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-            spatial_vector.sVel = parent_spatial_vector.sVel;
-            spatial_vector.sAcc = parent_spatial_vector.sAcc;
-
-            // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
-            // Note: we are using the parent velocity here (for hinge itself)
-            computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
-
-            float q_dot = velocity[0];
-            for (int j = 0; j < 6; ++j) {
-                spatial_vector.sVel[j] += S[j] * q_dot;
-                spatial_vector.sAcc[j] += S_dot[j] * q_dot;
-            }
-        }
-        else if (dof_type == DofType::Ball) {
-            assert(body_offset.parent != 0xFF);
-
-            BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-            spatial_vector.sVel = parent_spatial_vector.sVel;
-            spatial_vector.sAcc = parent_spatial_vector.sAcc;
-
-            // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-            // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
-            // Note: we are using the parent velocity here (for hinge itself)
-            computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
-
-            float *q_dot = velocity;
-            for (int j = 0; j < 6; ++j) {
-                // TODO: Probably should switch to row major - this isn't
-                // particularly cache-friendly.
-                spatial_vector.sVel[j] += S[j + 6 * 0] * q_dot[0] +
-                                     S[j + 6 * 1] * q_dot[1] +
-                                     S[j + 6 * 2] * q_dot[2];
-
-                spatial_vector.sAcc[j] += S_dot[j + 6 * 0] * q_dot[0] +
-                                     S_dot[j + 6 * 1] * q_dot[1] +
-                                     S_dot[j + 6 * 2] * q_dot[2];
-            }
-        } else {
-            MADRONA_UNREACHABLE();
-        }
-
-        // f_i = I_i a_i + v_i [spatial star cross] I_i v_i
-        spatial_vector.sForce = spatial_vector.spatialInertia.multiply(spatial_vector.sAcc);
-        spatial_vector.sForce += spatial_vector.sVel.crossStar(
-            spatial_vector.spatialInertia.multiply(spatial_vector.sVel));
-    }
-
-    // Backward pass to find bias forces
-    float *tau = mem.biasVector(prop);
-
-    CountT dof_index = total_dofs;
-    for (CountT i = prop.numBodies-1; i >= 0; --i) {
-        BodyOffsets body_offset = offsets[i];
-        BodySpatialVectors& spatial_vector = spatialVectors[i];
-        uint32_t num_dofs = BodyOffsets::getDofTypeDim(body_offset.dofType);
-        uint32_t velOffset = body_offset.velOffset;
-        uint32_t S_offset = 2 * 6 * velOffset;
-
-        // tau_i = S_i^T f_i
-        dof_index -= num_dofs;
-        float* S = mem.phiFull(prop) + S_offset;
-        for(CountT row = 0; row < num_dofs; ++row) {
-            float *S_col = S + 6 * row;
-            for(CountT k = 0; k < 6; ++k) {
-                tau[dof_index + row] += S_col[k] * spatial_vector.sForce[k];
-            }
-        }
-
-        // Add to parent's force
-        if (body_offset.parent != 0xFF) {
-            BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-            parent_spatial_vector.sForce += spatial_vector.sForce;
-        }
-    }
-
-    // ----------------- Combine Spatial Inertias -----------------
-    uint32_t num_bodies = prop.numBodies;
-    // Backward pass from children to parent
-    for (CountT i = num_bodies-1; i > 0; --i) {
-        InertiaTensor& spatial_inertia = spatialVectors[i].spatialInertia;
-        uint32_t parent_idx = (uint32_t)offsets[i].parent;
-        InertiaTensor& spatial_inertia_parent = 
-            spatialVectors[parent_idx].spatialInertia;
-        spatial_inertia_parent += spatial_inertia;
     }
 }
 
@@ -896,7 +1236,7 @@ inline void exportCPUSolverState(
     CountT num_contacts = state_mgr->numRows<Contact>(world_id);
     CountT total_contact_pts = 0;
 
-    printf("num contact points: %d\n", num_contacts);
+    // printf("num contact points: %d\n", num_contacts);
 
     for (int i = 0; i < num_contacts; ++i) {
         total_contact_pts += contacts[i].numPoints;
@@ -1130,64 +1470,430 @@ inline void exportCPUSolverState(
     cv_sing.penetrationsDim = total_contact_pts;
 }
 
-inline void solveCPU(Context &ctx,
-                     CVSolveData &cv_sing)
+inline void computeExpandedParent(Context &ctx,
+                                  BodyGroupMemory m,
+                                  BodyGroupProperties p)
 {
-    uint32_t world_id = ctx.worldID().idx;
+    int32_t *expandedParent = m.expandedParent(p);
+    uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
+                       BodyGroupMemory::qVectorsNumBytes(p);
 
-    StateManager *state_mgr = getStateManager(ctx);
+    // Initialize n-N_B elements
+    expandedParent[0] = -1;
+    for(int32_t i = 1; i < (int32_t)p.qvDim; ++i) {
+        expandedParent[i] = i - 1;
+    }
 
-    // Call the solver
-    if (cv_sing.cvxSolve && cv_sing.cvxSolve->fn) {
-        cv_sing.cvxSolve->totalNumDofs = cv_sing.totalNumDofs;
-        cv_sing.cvxSolve->numContactPts = cv_sing.numContactPts;
-        cv_sing.cvxSolve->h = cv_sing.h;
-        cv_sing.cvxSolve->mass = cv_sing.mass;
-        cv_sing.cvxSolve->free_acc = cv_sing.freeAcc;
-        cv_sing.cvxSolve->vel = cv_sing.vel;
-        cv_sing.cvxSolve->J_c = cv_sing.J_c;
-        cv_sing.cvxSolve->J_e = cv_sing.J_e;
-        cv_sing.cvxSolve->numEqualityRows = cv_sing.numRowsJe;
-        cv_sing.cvxSolve->mu = cv_sing.mu;
-        cv_sing.cvxSolve->penetrations = cv_sing.penetrations;
-        cv_sing.cvxSolve->eqResiduals = cv_sing.eqResiduals;
-        cv_sing.cvxSolve->diagApprox_c = cv_sing.diagApprox_c;
-        cv_sing.cvxSolve->diagApprox_e = cv_sing.diagApprox_e;
+    // Create a mapping from body index to start of block
+    int32_t *map = (int32_t *)ctx.tmpAlloc(sizeof(int32_t) * p.numBodies);
 
-        cv_sing.cvxSolve->callSolve.store_release(1);
-        while (cv_sing.cvxSolve->callSolve.load_acquire() != 2);
-        cv_sing.cvxSolve->callSolve.store_relaxed(0);
+    map[0] = -1;
+    
+    BodyOffsets *offsets = m.offsets(p);
 
-        float *res = cv_sing.cvxSolve->resPtr;
-
-        if (res) {
-            BodyGroupMemory *all_memories = state_mgr->getWorldComponents<
-                BodyGroupArchetype, BodyGroupMemory>(world_id);
-            BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
-                BodyGroupArchetype, BodyGroupProperties>(world_id);
-
-            CountT num_grps = state_mgr->numRows<BodyGroupArchetype>(world_id);
-
-            // Update the body accelerations
-            uint32_t processed_dofs = 0;
-            for (CountT i = 0; i < num_grps; ++i) {
-                BodyGroupMemory &m = all_memories[i];
-                BodyGroupProperties &p = all_properties[i];
-
-                for (CountT j = 0; j < all_properties[i].numBodies; j++) {
-                    BodyOffsets offsets = m.offsets(p)[j];
-                    float *dqv = m.dqv(p) + offsets.velOffset;
-
-                    for (CountT k = 0; k < BodyOffsets::getDofTypeDim(offsets.dofType); k++) {
-                        dqv[k] = res[processed_dofs];
-                        processed_dofs++;
-                    }
-                }
-            }
-        }
+    for(int32_t i = 1; i < p.numBodies; ++i) {
+        uint32_t n_i = offsets[i].numDofs;
+        map[i] = map[i - 1] + (int32_t) n_i;
+    }
+    // Finish expanded parent array
+    for(int32_t i = 1; i < p.numBodies; ++i) {
+        int32_t parent_idx = (int32_t)(offsets[i].parent == 0xFF ? -1 :
+                                       offsets[i].parent);
+        expandedParent[map[i - 1] + 1] = map[parent_idx];
+        ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
     }
 }
 
+inline void initHierarchies(Context &ctx,
+                            BodyGroupMemory m,
+                            BodyGroupProperties p)
+{
+    computeExpandedParent(ctx, m, p);
+    forwardKinematics(ctx, m, p);
+}
+
+inline void combineSpatialInertias(Context &ctx,
+                                   BodyGroupMemory m,
+                                   BodyGroupProperties p)
+{
+    BodySpatialVectors* spatialVectors = m.spatialVectors(p);
+    BodyOffsets* offsets = m.offsets(p);
+
+    // Backward pass from children to parent
+    for (CountT i = p.numBodies - 1; i > 0; --i) {
+        InertiaTensor &spatial_inertia = spatialVectors[i].spatialInertia;
+        uint32_t parent_idx = (uint32_t)offsets[i].parent;
+
+        assert(parent_idx < 0xFF);
+
+        InertiaTensor& spatial_inertia_parent = 
+            spatialVectors[parent_idx].spatialInertia;
+        spatial_inertia_parent += spatial_inertia;
+    }
+}
+
+inline float * computeBodyJacobian(BodyGroupMemory &m,
+                                   BodyGroupProperties &p,
+                                   uint8_t cur_body_idx,
+                                   Vector3 &origin,
+                                   float *J,
+                                   uint32_t body_dof_offset,
+                                   uint32_t jac_row,
+                                   uint32_t j_num_rows)
+{
+    // Compute prefix sum to determine the start of the block for each body
+    BodyOffsets *offsets = m.offsets(p);
+    BodyPhi *phis = m.bodyPhi(p);
+
+    // Populate J_C by traversing up the hierarchy
+    while(cur_body_idx != 0xFF) {
+        BodyOffsets cur_offset = offsets[cur_body_idx];
+
+        float *S = m.phiFull(p) + 2 * 6 * cur_offset.velOffset;
+
+        // Populate columns of J_C
+        computePhi(cur_offset.dofType, phis[cur_body_idx], S, origin);
+
+        for(CountT i = 0; i < cur_offset.numDofs; ++i) {
+            float *J_col = J +
+                    j_num_rows * (body_dof_offset + cur_offset.velOffset + i) +
+                    jac_row;
+
+            float *S_col = S + 6 * i;
+            for(CountT j = 0; j < 6; ++j) {
+                J_col[j] = S_col[j];
+            }
+        }
+
+        cur_body_idx = cur_offset.parent;
+    }
+
+    return J;
+}
+
+inline void computeInvMass(
+        Context &ctx,
+        BodyGroupMemory m,
+        BodyGroupProperties p)
+{
+#ifdef MADRONA_GPU_MODE
+    if (threadIdx.x % 32 != 0) {
+        return;
+    }
+
+    uint32_t warp_id = threadIdx.x / 32;
+
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    float *A = (float *)smem_buf;
+    float *J = A + 36;
+    float *MinvJT = J + 6 * p.qvDim;
+
+    assert(sizeof(float) * (36 + 6 * p.qvDim + p.qvDim * 6) <
+            num_smem_bytes_per_warp);
+#else
+    // For each body, find translational and rotational inverse weight
+    //  by computing A = J M^{-1} J^T
+    float A[36] = {}; // 6x6
+    float J[6 * p.qvDim]; // col-major (shape 6 x numDofs)
+    float MinvJT[p.qvDim * 6]; // col-major (shape numDofs x 6)
+#endif
+
+    BodyOffsets *offsets = m.offsets(p);
+    BodyTransform *transforms = m.bodyTransforms(p);
+    BodyInertial *inertials = m.inertials(p);
+
+    // Compute the inverse weight for each body
+    for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
+        BodyTransform transform = transforms[i_body];
+
+        // Compute J
+        memset(J, 0.f, 6 * p.qvDim * sizeof(float));
+        computeBodyJacobian(
+                m,
+                p,
+                (uint8_t)i_body,
+                transform.com,
+                J, 0, 0, 6);
+
+        // Helper
+        auto Jb = [&](int32_t row, int32_t col) -> float& {
+            return J[row + 6 * col];
+        };
+        auto MinvJTb = [&](int32_t row, int32_t col) -> float& {
+            return MinvJT[row + p.qvDim * col];
+        };
+        auto Ab = [&](int32_t row, int32_t col) -> float& {
+            return A[row + 6 * col];
+        };
+
+        // Copy into J^T
+        for (CountT i = 0; i < 6; ++i) {
+            for (CountT j = 0; j < p.qvDim; ++j) {
+                MinvJTb(j, i) = Jb(i, j);
+            }
+        }
+        // M^{-1} J^T
+        for (CountT i = 0; i < 6; ++i) {
+            float *col = MinvJT + i * p.qvDim;
+            solveM( p, m, col);
+        }
+
+        // A = J M^{-1} J^T
+        memset(A, 0.f, 36 * sizeof(float));
+        for (CountT i = 0; i < 6; ++i) {
+            for (CountT j = 0; j < 6; ++j) {
+                for (CountT k = 0; k < p.qvDim; ++k) {
+                    Ab(i, j) += Jb(i, k) * MinvJTb(k, j);
+                }
+            }
+        }
+
+        // Compute the inverse weight
+        inertials[i_body].approxInvMassTrans =
+            (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
+        inertials[i_body].approxInvMassRot =
+            (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
+    }
+
+    // For each DOF, find the inverse weight
+    uint32_t dof_offset = 0;
+    for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
+#if 0
+        Entity body = grp.bodies(ctx)[i_body];
+        auto body_dofs = ctx.get<DofObjectNumDofs>(body);
+        auto &dof_inertial = ctx.get<DofObjectInertial>(body);
+#endif
+        BodyOffsets offset = offsets[i_body];
+        auto &dof_inertial = inertials[i_body];
+
+        // Jacobian size (body dofs x total dofs)
+        auto Jd = [&](int32_t row, int32_t col) -> float& {
+            return J[row + offset.numDofs * col];
+        };
+        // J^T and M^{-1}J^T (total dofs x body dofs)
+        auto MinvJTd = [&](int32_t row, int32_t col) -> float& {
+            return MinvJT[row + p.qvDim * col];
+        };
+        // A = JM^{-1}J^T. (body dofs x body dofs)
+        auto Ad = [&](int32_t row, int32_t col) -> float& {
+            return A[row + offset.numDofs * col];
+        };
+
+        // Fill in 1 for the corresponding body dofs
+        memset(J, 0.f, 6 * p.qvDim * sizeof(float));
+        for (CountT i = 0; i < offset.numDofs; ++i) {
+            Jd(i, i + dof_offset) = 1.f;
+        }
+
+        // Copy into J^T
+        for (CountT i = 0; i < offset.numDofs; ++i) {
+            for (CountT j = 0; j < p.qvDim; ++j) {
+                MinvJTd(j, i) = Jd(i, j);
+            }
+        }
+
+        // M^{-1} J^T. (J^T is total dofs x body dofs)
+        for (CountT i = 0; i < offset.numDofs; ++i) {
+            float *col = MinvJT + i * p.qvDim;
+            solveM(p, m, col);
+        }
+
+        // A = J M^{-1} J^T
+        memset(A, 0.f, offset.numDofs * offset.numDofs * sizeof(float));
+        for (CountT i = 0; i < offset.numDofs; ++i) {
+            for (CountT j = 0; j < offset.numDofs; ++j) {
+                for (CountT k = 0; k < p.qvDim; ++k) {
+                    Ad(i, j) += Jd(i, k) * MinvJTd(k, j);
+                }
+            }
+        }
+
+        // Update the inverse mass of each DOF
+        if (offset.numDofs == 6) {
+           dof_inertial.approxInvMassDof[0] = 
+               dof_inertial.approxInvMassDof[1] =
+               dof_inertial.approxInvMassDof[2] =
+               (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
+           dof_inertial.approxInvMassDof[3] =
+               dof_inertial.approxInvMassDof[4] =
+               dof_inertial.approxInvMassDof[5] =
+                (Ad(3, 3) + Ad(4, 4) + Ad(5, 5)) / 3.f;
+        } else if (offset.numDofs == 3) {
+            dof_inertial.approxInvMassDof[0] =
+                dof_inertial.approxInvMassDof[1] =
+                dof_inertial.approxInvMassDof[2] =
+                (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
+        } else {
+            dof_inertial.approxInvMassDof[0] = Ad(0, 0);
+        }
+
+        dof_offset += offset.numDofs;
+    }
+}
+
+inline void integrationStep(Context &ctx,
+                            DofObjectGroup grp_info)
+{
+    float h = ctx.singleton<PhysicsSystemState>().h;
+
+    BodyGroupMemory m = ctx.get<BodyGroupMemory>(grp_info.bodyGroup);
+    BodyGroupProperties p = ctx.get<BodyGroupProperties>(grp_info.bodyGroup);
+
+    BodyOffsets offset = m.offsets(p)[grp_info.idx];
+
+    float *q = m.q(p) + offset.posOffset;
+    float *qv = m.qv(p) + offset.velOffset;
+    float *dqv = m.dqv(p) + offset.velOffset;
+
+    if (offset.dofType == DofType::FreeBody) {
+        // Symplectic Euler
+        for (int i = 0; i < 6; ++i) {
+            qv[i] += h * dqv[i];
+        }
+        for (int i = 0; i < 3; ++i) {
+            q[i] += h * qv[i];
+        }
+
+        // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
+        Vector3 omega = { qv[3], qv[4], qv[5] };
+        Quat rot_quat = { q[3], q[4], q[5], q[6] };
+        Quat new_rot = {rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z};
+        new_rot.w += 0.5f * h * (-rot_quat.x * omega.x - 
+                                 rot_quat.y * omega.y - 
+                                 rot_quat.z * omega.z);
+
+        new_rot.x += 0.5f * h * (rot_quat.w * omega.x + 
+                                 rot_quat.z * omega.y -
+                                 rot_quat.y * omega.z);
+        
+        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x + 
+                                 rot_quat.w * omega.y +
+                                 rot_quat.x * omega.z);
+
+        new_rot.z += 0.5f * h * (rot_quat.y * omega.x - 
+                                 rot_quat.x * omega.y +
+                                 rot_quat.w * omega.z);
+
+        new_rot = new_rot.normalize();
+
+        q[3] = new_rot.w;
+        q[4] = new_rot.x;
+        q[5] = new_rot.y;
+        q[6] = new_rot.z;
+    }
+    else if (offset.dofType == DofType::Slider) {
+        qv[0] += h * dqv[0];
+        q[0] += h * qv[0];
+    }
+    else if (offset.dofType == DofType::Hinge) {
+        qv[0] += h * dqv[0];
+        q[0] += h * qv[0];
+    }
+    else if (offset.dofType == DofType::FixedBody) {
+        // Do nothing
+    }
+    else if (offset.dofType == DofType::Ball) {
+        // Symplectic Euler
+        for (int i = 0; i < 3; ++i) {
+            qv[i] += h * dqv[i];
+        }
+
+        // From angular velocity to quaternion [Q_w, Q_x, Q_y, Q_z]
+        Vector3 omega = { qv[0], qv[1], qv[2] };
+        Quat rot_quat = { q[0], q[1], q[2], q[3] };
+        Quat new_rot = { rot_quat.w, rot_quat.x, rot_quat.y, rot_quat.z };
+        new_rot.w += 0.5f * h * (-rot_quat.x * omega.x -
+                                 rot_quat.y * omega.y -
+                                 rot_quat.z * omega.z);
+
+        new_rot.x += 0.5f * h * (rot_quat.w * omega.x +
+                                 rot_quat.z * omega.y -
+                                 rot_quat.y * omega.z);
+
+        new_rot.y += 0.5f * h * (-rot_quat.z * omega.x + 
+                                 rot_quat.w * omega.y +
+                                 rot_quat.x * omega.z);
+
+        new_rot.z += 0.5f * h * (rot_quat.y * omega.x -
+                                 rot_quat.x * omega.y +
+                                 rot_quat.w * omega.z);
+
+        new_rot = new_rot.normalize();
+
+        q[0] = new_rot.w;
+        q[1] = new_rot.x;
+        q[2] = new_rot.y;
+        q[3] = new_rot.z;
+    }
+    else {
+        MADRONA_UNREACHABLE();
+    }
+}
+
+inline void convertPostSolve(
+        Context &ctx,
+        Position &position,
+        Rotation &rotation,
+        Scale &scale,
+        LinkParentDofObject &link)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(link.bodyGroup);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(link.bodyGroup);
+    // BodyGroupProperties &p2 = ctx.get<BodyGroupProperties>(link.bodyGroup);
+    // (void)p2;
+
+    BodyOffsets offset = m.offsets(p)[link.bodyIdx];
+
+    BodyTransform transforms = m.bodyTransforms(p)[link.bodyIdx];
+    BodyObjectData obj_data = m.objectData(p)[link.objDataIdx];
+
+    scale = obj_data.scale * p.globalScale;
+
+    if (offset.dofType == DofType::FreeBody) {
+        position = transforms.com +
+                   p.globalScale * 
+                        transforms.composedRot.rotateVec(obj_data.offset);
+        rotation = transforms.composedRot * obj_data.rotation;
+    }
+    else if (offset.dofType == DofType::Hinge) {
+        position = transforms.com +
+                   p.globalScale * 
+                        transforms.composedRot.rotateVec(obj_data.offset);
+        rotation = transforms.composedRot * obj_data.rotation;
+    }
+    else if (offset.dofType == DofType::Slider) {
+        position = transforms.com +
+                   p.globalScale * 
+                        transforms.composedRot.rotateVec(obj_data.offset);
+        rotation = transforms.composedRot *
+                   obj_data.rotation;
+    }
+    else if (offset.dofType == DofType::FixedBody) {
+        // For this, we need to look at the first parent who isn't
+        // fixed body and apply its transform.
+
+        position = transforms.com +
+                   p.globalScale * 
+                        transforms.composedRot.rotateVec(obj_data.offset);
+        rotation = transforms.composedRot * obj_data.rotation;
+
+        // Do nothing
+    }
+    else if (offset.dofType == DofType::Ball) {
+        position = transforms.com +
+                   p.globalScale * 
+                        transforms.composedRot.rotateVec(obj_data.offset);
+        rotation = transforms.composedRot *
+                   obj_data.rotation;
+    }
+    else {
+        MADRONA_UNREACHABLE();
+    }
+}
 }
 
 TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
@@ -1204,17 +1910,33 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
             DofObjectGroup
         >>({cur_node});
 
+#ifdef MADRONA_GPU_MODE
+    cur_node = builder.addToGraph<CustomParallelForNode<Context,
+         tasks::rneAndCombineSpatialInertias, 32, 1,
+            BodyGroupProperties,
+            BodyGroupMemory
+        >>({cur_node});
+#else
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::rneAndCombineSpatialInertias,
             BodyGroupProperties,
             BodyGroupMemory
         >>({cur_node});
+#endif
 
+#ifdef MADRONA_GPU_MODE
+    cur_node = builder.addToGraph<CustomParallelForNode<Context,
+         tasks::compositeRigidBody, 32, 1,
+            BodyGroupProperties,
+            BodyGroupMemory
+        >>({cur_node});
+#else
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::compositeRigidBody,
             BodyGroupProperties,
             BodyGroupMemory
         >>({cur_node});
+#endif
 
     cur_node = builder.addToGraph<ParallelForNode<Context,
          tasks::processContacts,
@@ -1228,6 +1950,99 @@ TaskGraphNodeID setupPrepareTasks(TaskGraphBuilder &builder,
             CVSolveData
         >>({cur_node});
 #endif
+
+    return cur_node;
+}
+
+TaskGraphNodeID setupCVInitTasks(
+        TaskGraphBuilder &builder,
+        Span<const TaskGraphNodeID> deps)
+{
+    // Initialize memory and run forward kinematics
+    auto node = builder.addToGraph<ParallelForNode<Context,
+         tasks::initHierarchies,
+             BodyGroupMemory,
+             BodyGroupProperties
+         >>(deps);
+
+    // Initialization for initial position (e.g., inverse weights)
+    node = builder.addToGraph<ParallelForNode<Context,
+         tasks::computeGroupCOM,
+            BodyGroupProperties,
+            BodyGroupMemory
+        >>({node});
+
+    node = builder.addToGraph<ParallelForNode<Context,
+         tasks::computeSpatialInertiasAndPhi,
+            DofObjectGroup
+        >>({node});
+
+    node = builder.addToGraph<ParallelForNode<Context,
+         tasks::combineSpatialInertias,
+            BodyGroupMemory,
+            BodyGroupProperties
+        >>({node});
+
+#ifdef MADRONA_GPU_MODE
+    node = builder.addToGraph<CustomParallelForNode<Context,
+         tasks::compositeRigidBody, 32, 1,
+            BodyGroupProperties,
+            BodyGroupMemory
+        >>({node});
+#else
+    node = builder.addToGraph<ParallelForNode<Context,
+         tasks::compositeRigidBody,
+            BodyGroupProperties,
+            BodyGroupMemory
+        >>({node});
+#endif
+
+#ifdef MADRONA_GPU_MODE
+    node = builder.addToGraph<CustomParallelForNode<Context,
+         tasks::computeInvMass, 32, 1,
+         BodyGroupMemory,
+         BodyGroupProperties
+     >>({node});
+#else
+    node = builder.addToGraph<ParallelForNode<Context,
+         tasks::computeInvMass,
+         BodyGroupMemory,
+         BodyGroupProperties
+     >>({node});
+#endif
+
+    node =
+        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Position,
+            Rotation,
+            Scale,
+            LinkParentDofObject
+        >>({node});
+
+    return node;
+}
+
+TaskGraphNodeID setupPostTasks(TaskGraphBuilder &builder,
+                               TaskGraphNodeID solve)
+{
+    auto cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::integrationStep,
+            DofObjectGroup
+        >>({solve});
+
+    cur_node = builder.addToGraph<ParallelForNode<Context,
+         tasks::forwardKinematics,
+            BodyGroupMemory,
+            BodyGroupProperties
+        >>({cur_node});
+
+    cur_node =
+        builder.addToGraph<ParallelForNode<Context, tasks::convertPostSolve,
+            Position,
+            Rotation,
+            Scale,
+            LinkParentDofObject
+        >>({cur_node});
 
     return cur_node;
 }

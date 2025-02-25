@@ -4,6 +4,18 @@
 
 #define ASSERT_PTR_ACCESS(a, offset, b) assert((uint8_t *)(a + offset) < (uint8_t *)b)
 
+#ifdef MADRONA_GPU_MODE
+#define MADRONA_GPU_SINGLE_THREAD if (threadIdx.x % 32 == 0)
+#else
+#define MADRONA_GPU_SINGLE_THREAD
+#endif
+
+#ifdef MADRONA_GPU_MODE
+#define MADRONA_SYNCWARP() __syncwarp()
+#else
+#define MADRONA_SYNCWARP()
+#endif
+
 namespace madrona::phys::cv {
 
 struct MRElement128b {
@@ -65,6 +77,10 @@ void computePhi(DofType dof_type,
                 BodyPhi& body_phi,
                 float* S,
                 math::Vector3 origin);
+void computePhiTrans(DofType dof_type,
+                     BodyPhi &body_phi,
+                     math::Vector3 origin,
+                     float (&S)[18]);
 void solveM(
         BodyGroupProperties prop,
         BodyGroupMemory mem, 

@@ -4634,7 +4634,6 @@ inline void compositeRigidBody(Context &ctx,
     auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
                     num_smem_bytes_per_warp * warp_id;
 
-#if 1
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
         uint32_t curr_row = rows[i];
 
@@ -4646,11 +4645,6 @@ inline void compositeRigidBody(Context &ctx,
 
         float *S_i = S_i_ptr;
         float *F = (float *)smem_buf;
-
-#if 0
-        gpu_utils::warpCopy(S_i, S_i_ptr, sizeof(float) * 36);
-        __syncwarp();
-#endif
 
         if (lane_id == 0) {
             for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
@@ -4690,12 +4684,6 @@ inline void compositeRigidBody(Context &ctx,
             float *S_j_ptr = j_tmp_state.getPhiFull(ctx);
             float *S_j = S_j_ptr;
             
-#if 0
-            float *S_j = F + 36;
-            gpu_utils::warpCopy(S_j, S_j_ptr, sizeof(float) * 36);
-            __syncwarp();
-#endif
-
             // M_{ij} = M{ji} = F^T S_j
             float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
             float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
@@ -4718,77 +4706,6 @@ inline void compositeRigidBody(Context &ctx,
             j = hier_descs[curr_row].parentIndex;
         }
     }
-#endif
-
-#if 0
-    // Backward pass
-    if (lane_id == 0) {
-        for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
-            uint32_t curr_row = rows[i];
-
-            auto &i_hier_desc = hier_descs[curr_row];
-            auto &i_tmp_state = tmp_states[curr_row];
-            auto &i_num_dofs = num_dofs[curr_row];
-
-            float *S_i_ptr = i_tmp_state.getPhiFull(ctx);
-
-            float *S_i = S_i_ptr;
-            float *F = body_grp.scratch;
-
-            for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
-                float *S_col = S_i + 6 * col;
-                float *F_col = F + 6 * col;
-                i_tmp_state.spatialInertia.multiply(S_col, F_col);
-            }
-
-            // M_{ii} = S_i^T I_i^C S_i = F^T S_i
-            float *M_ii = M + block_start[i] * total_dofs + block_start[i];
-            for (CountT row = 0; row < i_num_dofs.numDofs; ++row) {
-                float *F_col = F + 6 * row; // take col for transpose
-                for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
-                    float *S_col = S_i + 6 * col;
-                    for(CountT k = 0; k < 6; ++k) {
-                        M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
-                    }
-                }
-            }
-
-            // Traverse up hierarchy
-            uint32_t j = i_hier_desc.parentIndex;
-
-            while(j != 0xFFFF'FFFF) {
-                curr_row = rows[j];
-
-
-                auto &j_tmp_state = tmp_states[curr_row];
-                auto &j_num_dofs = num_dofs[curr_row];
-
-                float *S_j_ptr = j_tmp_state.getPhiFull(ctx);
-                float *S_j = S_j_ptr;
-
-                // M_{ij} = M{ji} = F^T S_j
-                float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
-                float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
-
-                for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
-                    float *F_col = F + 6 * row; // take col for transpose
-
-                    for(CountT col = 0; col < j_num_dofs.numDofs; ++col) {
-                        float *S_col = S_j + 6 * col;
-
-                        #pragma unroll
-                        for(CountT k = 0; k < 6; ++k) {
-                            M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
-                            M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
-                        }
-                    }
-                }
-
-                j = hier_descs[curr_row].parentIndex;
-            }
-        }
-    }
-#endif
 
     PROF_END(prof);
 }
@@ -4961,8 +4878,6 @@ inline void recursiveNewtonEuler(Context &ctx,
     DofObjectHierarchyDesc *hier_descs = getRows<
         DofObjectArchetype, DofObjectHierarchyDesc>(state_mgr, ctx.worldID().idx);
 
-
-    // PROF_START(prof_forward, cvRecursiveNewtonEulerForwardClocks);
 
     if (lane_id == 0) {
         // Forward pass. Find in Plücker coordinates:
