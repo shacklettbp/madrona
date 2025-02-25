@@ -1058,7 +1058,7 @@ inline void exportCPUSolverState(
 
                 float *q = m.q(p) + offset.posOffset;
 
-                BodyLimitConstraint limit = m.limits(p)[body_idx];
+                BodyLimitConstraint limit = m.limits(p)[offset.eqOffset];
                 BodyInertial &inertial = m.inertials(p)[body_idx];
 
                 if (limit.type == BodyLimitConstraint::Type::None) {
