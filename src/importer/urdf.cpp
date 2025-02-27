@@ -1612,7 +1612,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
     modelConfigs.push_back(cfg);
 
-    return { model_idx, total_num_dofs };
+    return { model_idx, total_num_dofs, cfg.numBodies };
 }
 
 URDFLoader::URDFInfo URDFLoader::load(

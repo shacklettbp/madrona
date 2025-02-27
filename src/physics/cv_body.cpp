@@ -531,4 +531,39 @@ float* getBodyGroupDofAcc(Context &ctx, Entity body_grp) {
     return m.dqv(p);
 }
 
+uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, uint32_t body_idx)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return offsets[body_idx].numDofs;
+}
+
+float* getBodyDofPos(Context &ctx, Entity body_grp, uint32_t body_idx) {
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.q(p) + offsets[body_idx].posOffset;
+}
+
+float* getBodyDofVel(Context &ctx, Entity body_grp, uint32_t body_idx) {
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.qv(p) + offsets[body_idx].velOffset;
+}
+
+float* getBodyDofAcc(Context &ctx, Entity body_grp, uint32_t body_idx) {
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.dqv(p) + offsets[body_idx].velOffset;
+}
+
+BodyTransform* getBodyGroupWorldPos(Context &ctx, Entity body_grp) {
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.bodyTransforms(p);
+}
+
 }

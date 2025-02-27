@@ -26,6 +26,7 @@ struct URDFLoader {
     struct URDFInfo {
         uint32_t idx;
         uint32_t numDofs;
+        uint32_t numBodies;
     };
 
     URDFInfo load(
