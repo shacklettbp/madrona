@@ -501,17 +501,13 @@ void disableJointCollisions(
         Entity joint_a,
         Entity joint_b);
 
-// All positions, velocities, accelerations in joint space of body group
-float* getBodyGroupDofPos(Context &ctx, Entity body_grp);
-float* getBodyGroupDofVel(Context &ctx, Entity body_grp);
-float* getBodyGroupDofAcc(Context &ctx, Entity body_grp);
-//
+// Positions, velocities, accelerations in joint space
 uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, uint32_t body_idx);
 float* getBodyDofPos(Context &ctx, Entity body_grp, uint32_t body_idx);
 float* getBodyDofVel(Context &ctx, Entity body_grp, uint32_t body_idx);
 float* getBodyDofAcc(Context &ctx, Entity body_grp, uint32_t body_idx);
-    // Cartesian
-BodyTransform* getBodyGroupWorldPos(Context &ctx, Entity body_grp);
+// Cartesian
+BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, uint32_t body_idx);
 
 // External forces:
 void addHingeExternalForce(Context &ctx, Entity hinge_joint, float newtons);

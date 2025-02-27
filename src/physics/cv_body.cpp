@@ -560,10 +560,12 @@ float* getBodyDofAcc(Context &ctx, Entity body_grp, uint32_t body_idx) {
     return m.dqv(p) + offsets[body_idx].velOffset;
 }
 
-BodyTransform* getBodyGroupWorldPos(Context &ctx, Entity body_grp) {
+BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, uint32_t body_idx)
+{
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
-    return m.bodyTransforms(p);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.bodyTransforms(p)[body_idx];
 }
 
 }
