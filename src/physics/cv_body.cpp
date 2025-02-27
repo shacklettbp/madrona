@@ -513,4 +513,22 @@ void addHingeExternalForce(
     f[offsets[joint_info.idx].velOffset] = newtons;
 }
 
+float* getBodyGroupDofPos(Context &ctx, Entity body_grp) {
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.q(p);
+}
+
+float* getBodyGroupDofVel(Context &ctx, Entity body_grp) {
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.qv(p);
+}
+
+float* getBodyGroupDofAcc(Context &ctx, Entity body_grp) {
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.dqv(p);
+}
+
 }

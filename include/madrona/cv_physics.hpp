@@ -501,9 +501,13 @@ void disableJointCollisions(
         Entity joint_a,
         Entity joint_b);
 
+// Position, velocity, accelerations in joint space
+float* getBodyGroupDofPos(Context &ctx, Entity body_grp);
+float* getBodyGroupDofVel(Context &ctx, Entity body_grp);
+float* getBodyGroupDofAcc(Context &ctx, Entity body_grp);
+
 // External forces:
-void addHingeExternalForce(
-        Context &ctx, Entity hinge_joint, float newtons);
+void addHingeExternalForce(Context &ctx, Entity hinge_joint, float newtons);
 
 void registerTypes(ECSRegistry &registry);
 void getSolverArchetypeIDs(uint32_t *contact_archetype_id,
