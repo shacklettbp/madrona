@@ -7,7 +7,15 @@ set(MADRONA_PHYSICS_SRCS
     narrowphase.cpp broadphase.cpp
     xpbd.hpp xpbd.cpp
     tgs.hpp tgs.cpp
-    ${INC_DIR}/cvphysics.hpp cvphysics.cpp
+    #${INC_DIR}/cvphysics.hpp cvphysics.cpp
+    ${INC_DIR}/cv_physics.hpp
+    ${INC_DIR}/cv_physics.inl
+    ${INC_DIR}/cv_load.hpp
+    cv_solver.cpp
+    cv_prepare.cpp
+    cv_load.cpp
+    cv_body.cpp
+    cv.cpp cv.hpp
 )
 
 add_library(madrona_physics STATIC

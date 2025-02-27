@@ -1142,6 +1142,15 @@ Mat3x3 Mat3x3::fromRS(Quat r, Diag3x3 s)
     }};
 }
 
+Mat3x3 Mat3x3::skewSym(Vector3 v)
+{
+    return Mat3x3 {{
+        { 0, -v.z, v.y },
+        { v.z, 0, -v.x },
+        { -v.y, v.x, 0 },
+    }};
+}
+
 Vector3 & Mat3x3::operator[](CountT i)
 {
     return cols[i];

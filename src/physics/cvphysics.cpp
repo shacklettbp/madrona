@@ -992,14 +992,6 @@ struct Joint : Archetype<
     JointConstraint
 > {};
 
-struct DummyComponent {
-
-};
-
-struct CVRigidBodyState : Bundle<
-    DummyComponent
-> {};
-
 struct CVSolveData {
     uint32_t numBodyGroups;
     uint32_t *dofOffsets;
@@ -4163,7 +4155,7 @@ inline void computePhiDot(Context &ctx,
                           float (&S_dot)[6 * 6],
                           SpatialVector &v_hat)
 {
-    if (num_dofs.type == DofType::FreeBody) {
+   if (num_dofs.type == DofType::FreeBody) {
         #pragma unroll
         for (uint32_t i = 0; i < 6 * 6; ++i) {
             S_dot[i] = 0.f;
@@ -4642,7 +4634,6 @@ inline void compositeRigidBody(Context &ctx,
     auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
                     num_smem_bytes_per_warp * warp_id;
 
-#if 1
     for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
         uint32_t curr_row = rows[i];
 
@@ -4654,11 +4645,6 @@ inline void compositeRigidBody(Context &ctx,
 
         float *S_i = S_i_ptr;
         float *F = (float *)smem_buf;
-
-#if 0
-        gpu_utils::warpCopy(S_i, S_i_ptr, sizeof(float) * 36);
-        __syncwarp();
-#endif
 
         if (lane_id == 0) {
             for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
@@ -4698,12 +4684,6 @@ inline void compositeRigidBody(Context &ctx,
             float *S_j_ptr = j_tmp_state.getPhiFull(ctx);
             float *S_j = S_j_ptr;
             
-#if 0
-            float *S_j = F + 36;
-            gpu_utils::warpCopy(S_j, S_j_ptr, sizeof(float) * 36);
-            __syncwarp();
-#endif
-
             // M_{ij} = M{ji} = F^T S_j
             float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
             float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
@@ -4726,77 +4706,6 @@ inline void compositeRigidBody(Context &ctx,
             j = hier_descs[curr_row].parentIndex;
         }
     }
-#endif
-
-#if 0
-    // Backward pass
-    if (lane_id == 0) {
-        for (CountT i = body_grp.numBodies-1; i >= 0; --i) {
-            uint32_t curr_row = rows[i];
-
-            auto &i_hier_desc = hier_descs[curr_row];
-            auto &i_tmp_state = tmp_states[curr_row];
-            auto &i_num_dofs = num_dofs[curr_row];
-
-            float *S_i_ptr = i_tmp_state.getPhiFull(ctx);
-
-            float *S_i = S_i_ptr;
-            float *F = body_grp.scratch;
-
-            for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
-                float *S_col = S_i + 6 * col;
-                float *F_col = F + 6 * col;
-                i_tmp_state.spatialInertia.multiply(S_col, F_col);
-            }
-
-            // M_{ii} = S_i^T I_i^C S_i = F^T S_i
-            float *M_ii = M + block_start[i] * total_dofs + block_start[i];
-            for (CountT row = 0; row < i_num_dofs.numDofs; ++row) {
-                float *F_col = F + 6 * row; // take col for transpose
-                for (CountT col = 0; col < i_num_dofs.numDofs; ++col) {
-                    float *S_col = S_i + 6 * col;
-                    for(CountT k = 0; k < 6; ++k) {
-                        M_ii[row + total_dofs * col] += F_col[k] * S_col[k];
-                    }
-                }
-            }
-
-            // Traverse up hierarchy
-            uint32_t j = i_hier_desc.parentIndex;
-
-            while(j != 0xFFFF'FFFF) {
-                curr_row = rows[j];
-
-
-                auto &j_tmp_state = tmp_states[curr_row];
-                auto &j_num_dofs = num_dofs[curr_row];
-
-                float *S_j_ptr = j_tmp_state.getPhiFull(ctx);
-                float *S_j = S_j_ptr;
-
-                // M_{ij} = M{ji} = F^T S_j
-                float *M_ij = M + block_start[i] + total_dofs * block_start[j]; // row i, col j
-                float *M_ji = M + block_start[j] + total_dofs * block_start[i]; // row j, col i
-
-                for(CountT row = 0; row < i_num_dofs.numDofs; ++row) {
-                    float *F_col = F + 6 * row; // take col for transpose
-
-                    for(CountT col = 0; col < j_num_dofs.numDofs; ++col) {
-                        float *S_col = S_j + 6 * col;
-
-                        #pragma unroll
-                        for(CountT k = 0; k < 6; ++k) {
-                            M_ij[row + total_dofs * col] += F_col[k] * S_col[k];
-                            M_ji[col + total_dofs * row] += F_col[k] * S_col[k];
-                        }
-                    }
-                }
-
-                j = hier_descs[curr_row].parentIndex;
-            }
-        }
-    }
-#endif
 
     PROF_END(prof);
 }
@@ -4969,8 +4878,6 @@ inline void recursiveNewtonEuler(Context &ctx,
     DofObjectHierarchyDesc *hier_descs = getRows<
         DofObjectArchetype, DofObjectHierarchyDesc>(state_mgr, ctx.worldID().idx);
 
-
-    // PROF_START(prof_forward, cvRecursiveNewtonEulerForwardClocks);
 
     if (lane_id == 0) {
         // Forward pass. Find in Plücker coordinates:
@@ -5724,14 +5631,6 @@ inline void brobdingnag(Context &ctx,
                     uint32_t glob_col_offset = block_start[grp_idx] +
                                                tmp_state.dofOffset;
 
-#if 0
-                    printf(
-                        "Body with dof offset %d has (glob_row_offset = %d; glob_col_offset = %d)\n",
-                        tmp_state.dofOffset,
-                        glob_row_offset,
-                        glob_col_offset);
-#endif
-
                     switch (limit.type) {
                     case DofObjectLimit::Type::Hinge: {
                         float *to_change = J_e +
@@ -6294,29 +6193,7 @@ void init(Context &ctx, CVXSolve *cvx_solve)
     ctx.singleton<CVSolveData>().accRefAllocatedBytes = 0;
 }
 
-Entity makeBodyGroup(Context &ctx, uint32_t num_bodies, float global_scale)
-{
-    Entity e = ctx.makeEntity<BodyGroup>();
-
-    auto &hier = ctx.get<BodyGroupHierarchy>(e);
-    hier.numBodies = num_bodies;
-    hier.bodyCounter = 0;
-    hier.collisionObjsCounter = 0;
-    hier.visualObjsCounter = 0;
-    hier.globalScale = global_scale;
-    hier.visualizeColliders = false;
-
-    uint64_t mr_num_bytes = num_bodies * (sizeof(Entity) + sizeof(uint32_t));
-    uint32_t num_elems = (mr_num_bytes + sizeof(MRElement128b) - 1) /
-        sizeof(MRElement128b);
-
-    hier.mrBodies = ctx.allocMemoryRange<MRElement128b>(num_elems);
-
-    hier.numEqualityRows = 0;
-
-    return e;
-}
-
+#if 0
 Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
 {
     auto &grp_info = ctx.get<BodyGroupHierarchy>(body_grp);
@@ -6445,6 +6322,7 @@ Entity makeBody(Context &ctx, Entity body_grp, BodyDesc desc)
 
     return physical_entity;
 }
+#endif
 
 void attachCollision(
         Context &ctx,

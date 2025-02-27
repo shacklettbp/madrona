@@ -1,6 +1,6 @@
 #include <madrona/math.hpp>
 #include <madrona/urdf.hpp>
-#include <madrona/cvphysics.hpp>
+#include <madrona/cv_physics.hpp>
 
 #include <map>
 #include <string>
@@ -1230,6 +1230,7 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             .responseType = ResponseType::Dynamic,
             .numCollisionObjs = (uint32_t)link.collisionArray.size(),
             .numVisualObjs = (uint32_t)link.visualArray.size(),
+            .numLimits = 0,
             .mass = link.inertial.mass,
             .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
             // ... ?
@@ -1250,27 +1251,7 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
 
         uint32_t body_idx = cfg.numBodies;
 
-        BodyDesc body_desc = {
-            .type = urdfToDofType(joint.type),
-            .responseType = ResponseType::Dynamic,
-            .numCollisionObjs = (uint32_t)link.collisionArray.size(),
-            .numVisualObjs = (uint32_t)link.visualArray.size(),
-            .mass = link.inertial.mass,
-            .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
-            // ... ?
-            .muS = 0.1f
-        };
-
-        printf("(%d) URDF mass = %f; Inertia = %f %f %f\n",
-                i,
-                link.inertial.mass,
-                link.inertial.ixx,
-                link.inertial.iyy,
-                link.inertial.izz);
-
-        // Push this to list of BodyDesc
-        bodyDescs.push_back(body_desc);
-        cfg.numBodies++;
+        uint32_t num_limits = 0;
 
         // If there is a joint limit for this
         switch (joint.type) {
@@ -1285,6 +1266,8 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 .type = DofType::Hinge,
                 .hinge = hinge_limit
             };
+
+            num_limits = 1;
 
             jointLimits.push_back(limit);
             cfg.numJointLimits++;
@@ -1302,10 +1285,28 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 .slider = slider_limit
             };
 
+            num_limits = 1;
+
             jointLimits.push_back(limit);
             cfg.numJointLimits++;
         } break;
         }
+
+        BodyDesc body_desc = {
+            .type = urdfToDofType(joint.type),
+            .responseType = ResponseType::Dynamic,
+            .numCollisionObjs = (uint32_t)link.collisionArray.size(),
+            .numVisualObjs = (uint32_t)link.visualArray.size(),
+            .numLimits = num_limits,
+            .mass = link.inertial.mass,
+            .inertia = { link.inertial.ixx, link.inertial.iyy, link.inertial.izz },
+            // ... ?
+            .muS = 0.1f
+        };
+
+        // Push this to list of BodyDesc
+        bodyDescs.push_back(body_desc);
+        cfg.numBodies++;
     }
 
     for (auto &joint : model.joints) {

@@ -1,7 +1,6 @@
 #include <madrona/physics.hpp>
 #include <madrona/context.hpp>
-
-#include <madrona/cvphysics.hpp>
+#include <madrona/cv_physics.hpp>
 
 #include "physics_impl.hpp"
 #include "xpbd.hpp"

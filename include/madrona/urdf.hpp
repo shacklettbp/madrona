@@ -1,7 +1,7 @@
 #pragma once
 
+#include <madrona/cv_load.hpp>
 #include <madrona/importer.hpp>
-#include <madrona/cvphysics.hpp>
 #include <madrona/physics_assets.hpp>
 
 namespace madrona::imp {
