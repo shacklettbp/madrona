@@ -792,7 +792,7 @@ static bool processConvexHulls(
 {
     for (CountT hull_idx = 0; hull_idx < in_meshes.size(); hull_idx++) {
         const imp::SourceMesh &mesh = in_meshes[hull_idx];
-        printf("Processing mesh %s\n", mesh.name);
+        // printf("Processing mesh %s\n", mesh.name);
         bool success = processConvexHull(
             mesh, build_convex_hulls, tmp_alloc, &out_meshes[hull_idx]);
 

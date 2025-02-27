@@ -23,7 +23,12 @@ struct URDFLoader {
         uint32_t spherePhysicsIdx;
     };
 
-    uint32_t load(
+    struct URDFInfo {
+        uint32_t idx;
+        uint32_t numDofs;
+    };
+
+    URDFInfo load(
           const char *path, 
           BuiltinPrimitives primitives,
           std::vector<std::string> &render_asset_paths,

@@ -302,7 +302,7 @@ struct URDFLoader::Impl {
     std::vector<CollisionDisable> collisionDisables;
     std::vector<JointLimit> jointLimits;
 
-    uint32_t convertToModelConfig(
+    URDFLoader::URDFInfo convertToModelConfig(
             URDFModel &model,
             BuiltinPrimitives primitives,
             std::vector<std::string> &render_asset_paths,
@@ -826,7 +826,7 @@ static void parseJointDynamics(
     // Get joint damping
     const char* damping_str = config->Attribute("damping");
     if (damping_str == NULL){
-        printf("urdfdom.joint_dynamics: no damping, defaults to 0\n");
+        // printf("urdfdom.joint_dynamics: no damping, defaults to 0\n");
         jd.damping = 0.f;
     } else {
         jd.damping = std::stof(damping_str);
@@ -835,16 +835,16 @@ static void parseJointDynamics(
     // Get joint friction
     const char* friction_str = config->Attribute("friction");
     if (friction_str == NULL){
-        printf("urdfdom.joint_dynamics: no friction, defaults to 0\n");
+        // printf("urdfdom.joint_dynamics: no friction, defaults to 0\n");
         jd.friction = 0;
     } else {
         jd.friction = std::stof(friction_str);
     }
 
     if (damping_str == NULL && friction_str == NULL) {
-        printf("joint dynamics element specified with no damping and no friction\n");
+        // printf("joint dynamics element specified with no damping and no friction\n");
     } else {
-        printf("urdfdom.joint_dynamics: damping %f and friction %f\n", jd.damping, jd.friction);
+        // printf("urdfdom.joint_dynamics: damping %f and friction %f\n", jd.damping, jd.friction);
     }
 }
 
@@ -1179,7 +1179,7 @@ static void assignOrder(
     }
 }
 
-uint32_t URDFLoader::Impl::convertToModelConfig(
+URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
         URDFModel &model,
         BuiltinPrimitives primitives,
         std::vector<std::string> &render_asset_paths,
@@ -1216,13 +1216,6 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         std::string link_name = sorted_links[0];
         URDFLink &link = model.links[link_name];
 
-        printf("(%d) URDF mass = %f; Inertia = %f %f %f\n",
-                0,
-                link.inertial.mass,
-                link.inertial.ixx,
-                link.inertial.iyy,
-                link.inertial.izz);
-
         BodyDesc body_desc = {
             .type = DofType::FixedBody,
             .initialPos = Vector3::all(0.f),
@@ -1240,6 +1233,8 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
         bodyDescs.push_back(body_desc);
         cfg.numBodies++;
     }
+
+    uint32_t total_num_dofs = 0;
 
     for (uint32_t i = 1; i < sorted_links.size(); ++i) {
         std::string link_name = sorted_links[i];
@@ -1304,6 +1299,8 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
             .muS = 0.1f
         };
 
+        total_num_dofs += BodyOffsets::getDofTypeDim(body_desc.type);
+
         // Push this to list of BodyDesc
         bodyDescs.push_back(body_desc);
         cfg.numBodies++;
@@ -1340,11 +1337,13 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
                 .hingeAxis = joint.second.axis
             };
 
+#if 0
             printf("(%d) URDF relPositionParent = %f %f %f\n",
                     cfg.numConnections - 1,
                     hinge.relPositionParent.x,
                     hinge.relPositionParent.y,
                     hinge.relPositionParent.z);
+#endif
 
             child.parentCom = parent_com;
             child.parentToJoint = parent_to_joint;
@@ -1613,10 +1612,10 @@ uint32_t URDFLoader::Impl::convertToModelConfig(
 
     modelConfigs.push_back(cfg);
 
-    return model_idx;
+    return { model_idx, total_num_dofs };
 }
 
-uint32_t URDFLoader::load(
+URDFLoader::URDFInfo URDFLoader::load(
         const char *path,
         BuiltinPrimitives primitives,
         std::vector<std::string> &render_asset_paths,
@@ -1627,7 +1626,7 @@ uint32_t URDFLoader::load(
 
     if (!stream) {
         printf("File %s does not exist", path);
-        return false;
+        assert(false);
     }
 
     std::string xml_str((std::istreambuf_iterator<char>(stream)),
