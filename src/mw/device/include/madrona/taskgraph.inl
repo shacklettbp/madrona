@@ -178,6 +178,12 @@ CustomParallelForNode()
       }())
 {}
 
+template <typename T>
+struct TypedPointerSizePair {
+    T *ptr;
+    uint32_t size;
+};
+
 template <typename ContextT, auto Fn,
           int32_t threads_per_invocation,
           int32_t items_per_invocation,
@@ -187,6 +193,14 @@ void CustomParallelForNode<ContextT, Fn,
                            items_per_invocation,
                            ComponentTs...>::run(const int32_t invocation_idx)
 {
+    auto get_ptr = []<typename ComponentT>(
+            ComponentT *base, 
+            uint32_t comp_size,
+            uint32_t offset) {
+        uint8_t *ptr_u8 = (uint8_t *)(base) + comp_size * offset;
+        return (ComponentT *)ptr_u8;
+    };
+
     // Special case the vastly common case
     if constexpr (items_per_invocation == 1) {
         StateManager *state_mgr = mwGPU::getStateManager();
@@ -194,7 +208,7 @@ void CustomParallelForNode<ContextT, Fn,
         int32_t cumulative_num_rows = 0;
         state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref_,
                 [&](int32_t num_rows, WorldID *world_column,
-                    auto ...raw_ptrs) {
+                    auto ...raw_ptr_size_pairs) {
             int32_t tbl_offset = invocation_idx - cumulative_num_rows;
             cumulative_num_rows += num_rows;
             if (tbl_offset >= num_rows) {
@@ -216,12 +230,13 @@ void CustomParallelForNode<ContextT, Fn,
             //Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...);
 
             cuda::std::tuple typed_ptrs {
-                (ComponentTs *)raw_ptrs
-                ...
+                TypedPointerSizePair<ComponentTs>{
+                    (ComponentTs *)raw_ptr_size_pairs.first, raw_ptr_size_pairs.second  
+                } ...
             };
 
             std::apply([&](auto ...ptrs) {
-                Fn(ctx, ptrs[tbl_offset] ...);
+                Fn(ctx, *get_ptr(ptrs.ptr, ptrs.size, tbl_offset) ...);
             }, typed_ptrs);
 
             return true;
@@ -234,7 +249,7 @@ void CustomParallelForNode<ContextT, Fn,
         int32_t cumulative_num_rows = 0;
         state_mgr->iterateArchetypesRaw<sizeof...(ComponentTs)>(query_ref_,
                 [&](int32_t num_rows, WorldID *world_column,
-                    auto ...raw_ptrs) {
+                    auto ...raw_ptr_size_pairs) {
             int32_t item_idx = base_item_idx + cur_item_offset;
             int32_t tbl_offset = item_idx - cumulative_num_rows;
             cumulative_num_rows += num_rows;
@@ -249,14 +264,22 @@ void CustomParallelForNode<ContextT, Fn,
             // Need to put arguments in tuple for some reason instead
             //Fn(ctx, ((ComponentTs *)raw_ptrs)[tbl_offset] ...);
 
+#if 0
             cuda::std::tuple typed_ptrs {
-                (ComponentTs *)raw_ptrs
+                (ComponentTs *)raw_ptr_size_pairs.first
                 ...
+            };
+#endif
+            cuda::std::tuple typed_ptrs {
+                TypedPointerSizePair<ComponentTs>{
+                    (ComponentTs *)raw_ptr_size_pairs.first, raw_ptr_size_pairs.second  
+                } ...
             };
 
             std::apply([&](auto ...ptrs) {
                 Fn(world_column + tbl_offset,
-                   ptrs + tbl_offset ...,
+                    get_ptr(ptrs.ptr, ptrs.size, tbl_offset) ...,
+                   //ptrs + tbl_offset ...,
                    launch_size);
             }, typed_ptrs);
 

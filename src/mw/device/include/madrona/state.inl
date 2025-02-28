@@ -208,7 +208,10 @@ void StateManager::iterateArchetypesRawImpl(QueryRef *query_ref, Fn &&fn,
 
         bool early_out = fn(tbl.numRows.load_relaxed(),
             (WorldID *)(tbl.columns[1]),
-            tbl.columns[query_values[Indices]] ...);
+            std::pair<void *, uint32_t> { 
+                tbl.columns[query_values[Indices]],
+                (uint32_t)tbl.columnSizes[query_values[Indices]]
+            } ...);
         if (early_out) {
             return;
         }
