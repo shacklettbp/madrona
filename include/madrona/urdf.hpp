@@ -38,6 +38,10 @@ struct URDFLoader {
 
     phys::cv::ModelData getModelData();
     phys::cv::ModelConfig * getModelConfigs(uint32_t &num_cfgs);
+
+
+
+    uint32_t getBodyIndex(uint32_t urdf_index, const std::string &name);
 };
     
 }

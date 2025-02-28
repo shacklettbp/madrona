@@ -302,6 +302,8 @@ struct URDFLoader::Impl {
     std::vector<CollisionDisable> collisionDisables;
     std::vector<JointLimit> jointLimits;
 
+    std::vector<std::unordered_map<std::string, uint32_t>> jointNameToIndices;
+
     URDFLoader::URDFInfo convertToModelConfig(
             URDFModel &model,
             BuiltinPrimitives primitives,
@@ -1460,8 +1462,12 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
     std::unordered_map<std::string, uint32_t> col_path_to_obj;
     std::unordered_map<std::string, uint32_t> render_path_to_obj;
 
+    std::unordered_map<std::string, uint32_t> link_name_to_index;
+
     for (uint32_t l = 0; l < sorted_links.size(); ++l) {
         URDFLink &link = model.links[sorted_links[l]];
+
+        link_name_to_index[sorted_links[l]] = l;
 
         for (uint32_t c = 0; c < link.collisionArray.size(); ++c) {
             URDFCollision &collision = link.collisionArray[c];
@@ -1612,6 +1618,8 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
     modelConfigs.push_back(cfg);
 
+    jointNameToIndices.push_back(std::move(link_name_to_index));
+
     return { model_idx, total_num_dofs, cfg.numBodies };
 }
 
@@ -1669,6 +1677,13 @@ ModelConfig *URDFLoader::getModelConfigs(uint32_t &num_configs)
 {
     num_configs = (uint32_t)impl->modelConfigs.size();
     return impl->modelConfigs.data();
+}
+
+uint32_t URDFLoader::getBodyIndex(uint32_t urdf_index, const std::string &name)
+{
+    auto &map = impl->jointNameToIndices[urdf_index];
+    assert(map.find(name) != map.end());
+    return map[name];
 }
 
 }
