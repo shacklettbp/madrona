@@ -564,7 +564,6 @@ BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, uint32_t body_idx)
 {
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
-    BodyOffsets *offsets = m.offsets(p);
     return m.bodyTransforms(p)[body_idx];
 }
 
