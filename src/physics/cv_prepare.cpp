@@ -1242,7 +1242,8 @@ inline void exportCPUSolverState(
         total_contact_pts += contacts[i].numPoints;
     }
 
-    CountT num_full_contact_bytes = sizeof(float) * total_contact_pts;
+    // Assuming cone dimension 3. TODO: Rolling friction
+    CountT num_full_contact_bytes = sizeof(float) * total_contact_pts * 3;
     float *full_mu = (float *)ctx.tmpAlloc(
             num_full_contact_bytes);
     float *full_penetration = (float *)ctx.tmpAlloc(
@@ -1251,7 +1252,9 @@ inline void exportCPUSolverState(
     for (int i = 0; i < num_contacts; ++i) {
         ContactTmpState &tmp_state = contacts_tmp_state[i];
         for (int j = 0; j < contacts[i].numPoints; ++j) {
-            full_mu[processed_pts] = tmp_state.mu;
+            full_mu[3 * processed_pts] = tmp_state.mu;
+            full_mu[3 * processed_pts + 1] = tmp_state.mu;
+            full_mu[3 * processed_pts + 2] = tmp_state.mu;
             full_penetration[processed_pts] = contacts[i].points[j].w;
             processed_pts++;
         }
