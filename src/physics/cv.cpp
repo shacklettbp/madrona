@@ -55,6 +55,10 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
     cur_node = builder.addToGraph<ResetTmpAllocNode>({cur_node});
 #endif
 
+    cur_node = builder.addToGraph<ParallelForNode<Context, 
+             tasks::refreshPointers,
+                BodyGroupMemory>>({cur_node});
+
     return cur_node;
 }
 

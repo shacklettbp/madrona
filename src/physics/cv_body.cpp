@@ -72,15 +72,58 @@ static void initBodyGroupMemory(
                            BodyGroupMemory::qVectorsNumBytes(p);
 
         uint32_t q_dof_offset = 0;
+        uint32_t fixed_body_q_offset = 0;
         uint32_t qv_dof_offset = 0;
         uint32_t eq_offset = 0;
+
+        uint32_t num_real_q = 0;
 
         for (uint32_t i = 0; i < p.numBodies; ++i) {
             BodyDesc &bd = body_descs[i];
 
+            switch (bd.type) {
+            case DofType::FreeBody: {
+                num_real_q += 7;
+            } break;
+
+            case DofType::Hinge: {
+                num_real_q += 1;
+            } break;
+
+            case DofType::Slider: {
+                num_real_q += 1;
+            } break;
+
+            case DofType::Ball: {
+                num_real_q += 4;
+            } break;
+
+            case DofType::FixedBody: {
+                // Do nothing
+            } break;
+
+            case DofType::None: {
+                assert(false);
+            } break;
+            }
+        }
+
+        p.numFixedQ = p.qDim - num_real_q;
+
+        for (uint32_t i = 0; i < p.numBodies; ++i) {
+            BodyDesc &bd = body_descs[i];
+
+            uint32_t curr_q_offset = q_dof_offset;
+            if (bd.type == DofType::FixedBody) {
+                curr_q_offset = num_real_q + fixed_body_q_offset;
+                fixed_body_q_offset += 7;
+            } else {
+                q_dof_offset += BodyOffsets::getDofTypeDim(bd.type, true);
+            }
+
             // First thing to fill in is the offsets
             offsets[i] = BodyOffsets {
-                .posOffset = (uint8_t)q_dof_offset,
+                .posOffset = (uint8_t)curr_q_offset,
                 .velOffset = (uint8_t)qv_dof_offset,
                 .parent = 0xFF,
                 .dofType = body_descs[i].type,
@@ -91,8 +134,11 @@ static void initBodyGroupMemory(
 
             assert((uint8_t *)(offsets + i) < max_ptr);
 
-            float *curr_q = q + q_dof_offset;
+            float *curr_q = q + curr_q_offset;
             assert((uint8_t *)curr_q < max_ptr);
+
+            qv_dof_offset += BodyOffsets::getDofTypeDim(bd.type);
+            eq_offset += bd.numLimits;
 
             // Then, fill in initial values for q, etc...
             switch(bd.type) {
@@ -151,10 +197,6 @@ static void initBodyGroupMemory(
 
             entities[i] = ((Entity *)((BodyDesc *)m.tmpPtr + p.numBodies))[i];
             assert((uint8_t *)(entities + i) < max_ptr);
-
-            q_dof_offset += BodyOffsets::getDofTypeDim(bd.type, true);
-            qv_dof_offset += BodyOffsets::getDofTypeDim(bd.type);
-            eq_offset += bd.numLimits;
         }
     }
 
@@ -531,6 +573,13 @@ float * getBodyGroupDofAcc(Context &ctx, Entity body_grp) {
     return m.dqv(p);
 }
 
+float * getBodyGroupForces(Context &ctx, Entity body_grp)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.f(p);
+}
+
 uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, uint32_t body_idx)
 {
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
@@ -565,6 +614,14 @@ BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, uint32_t body_idx)
     BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
     return m.bodyTransforms(p)[body_idx];
+}
+
+float * getBodyForces(Context &ctx, Entity body_grp, uint32_t body_idx)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.f(p) + offsets[body_idx].velOffset;
 }
 
 }

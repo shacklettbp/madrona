@@ -113,7 +113,11 @@ struct BodyPhi {
 struct BodyGroupProperties {
     float globalScale;
 
+    // qDim is the total amount of floats in the position vector (includes fixed
+    // body Q values). numFixedQ is just the number of fixed body q values
     uint32_t qDim;
+    uint32_t numFixedQ;
+
     uint32_t qvDim;
     uint32_t numBodies;
     uint32_t numEq;
@@ -505,10 +509,14 @@ void disableJointCollisions(
 float * getBodyGroupDofPos(Context &ctx, Entity body_grp);
 float * getBodyGroupDofVel(Context &ctx, Entity body_grp);
 float * getBodyGroupDofAcc(Context &ctx, Entity body_grp);
+float * getBodyGroupForces(Context &ctx, Entity body_grp);
+
 uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, uint32_t body_idx);
+
 float * getBodyDofPos(Context &ctx, Entity body_grp, uint32_t body_idx);
 float * getBodyDofVel(Context &ctx, Entity body_grp, uint32_t body_idx);
 float * getBodyDofAcc(Context &ctx, Entity body_grp, uint32_t body_idx);
+float * getBodyForces(Context &ctx, Entity body_grp, uint32_t body_idx);
 
 // Cartesian
 BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, uint32_t body_idx);

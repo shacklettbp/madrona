@@ -28,11 +28,14 @@ void forwardKinematics(Context &,
     BodyOffsets *all_offsets = m.offsets(p);
 
     { // Set the parent's state (we require that the root is fixed or free body
-        Vector3 com = { all_q[0], all_q[1], all_q[2] };
+        uint32_t root_q_offset = all_offsets[0].posOffset;
+        float *q = all_q + root_q_offset;
+
+        Vector3 com = { q[0], q[1], q[2] };
 
         all_transforms[0] = {
             .com = com,
-            .composedRot = { all_q[3], all_q[4], all_q[5], all_q[6] },
+            .composedRot = { q[3], q[4], q[5], q[6] },
         };
 
         // omega remains unchanged, and v only depends on the COM position
