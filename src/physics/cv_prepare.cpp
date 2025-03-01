@@ -957,17 +957,32 @@ inline void rneAndCombineSpatialInertias(
                 }
             }
 
-            if (dof_type == DofType::FreeBody) {
+            // Common initialization for all joint types
+            SpatialVector v_body;
+            if (body_offset.parent == 0xFF || dof_type == DofType::FreeBody) {
+                // v_0 = 0, a_0 = -g (fictitious upward acceleration)
+                spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
+                spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
+
                 // Free bodies must be root of their hierarchy
+                v_body = {velocity[0], velocity[1], velocity[2]}, Vector3::zero();
+            } else {
+                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
+                spatial_vector.sVel = parent_spatial_vector.sVel;
+                spatial_vector.sAcc = parent_spatial_vector.sAcc;
+
+                // Note: we are using the parent velocity here (for hinge itself)
+                v_body = parent_spatial_vector.sVel;
+            }
+
+            if (dof_type != DofType::FixedBody) {
+                computePhiDot(dof_type, S, S_dot, v_body);
+            }
+
+            if (dof_type == DofType::FreeBody) {
                 SpatialVector v_body = {
                     {velocity[0], velocity[1], velocity[2]}, Vector3::zero()
                 };
-
-                computePhiDot(dof_type, S, S_dot, v_body);
-
-                // v_0 = 0, a_0 = -g (fictitious upward acceleration)
-                spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
-                spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
 
                 // S\dot{q_i} and \dot{S}\dot{q_i}
                 MADRONA_UNROLL
@@ -978,30 +993,9 @@ inline void rneAndCombineSpatialInertias(
                         spatial_vector.sAcc[j] += S_dot[j + 6 * k] * velocity[k];
                     }
                 }
-            }
-            else if (dof_type == DofType::FixedBody) {
-                // Fixed bodies must also be root of their hierarchy
-                // tmp_state.sVel = {Vector3::zero(), Vector3::zero()};
-                // tmp_state.sAcc = {-physics_state.g, Vector3::zero()};
-                if (body_offset.parent == 0xFF) {
-                    spatial_vector.sVel = {Vector3::zero(), Vector3::zero()};
-                    spatial_vector.sAcc = {-physics_state.g, Vector3::zero()};
-                } else {
-                    BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-                    spatial_vector.sVel = parent_spatial_vector.sVel;
-                    spatial_vector.sAcc = parent_spatial_vector.sAcc;
-                }
-            }
-            else if (dof_type == DofType::Slider) {
+            } else if (dof_type == DofType::FixedBody) {
+            } else if (dof_type == DofType::Slider || dof_type == DofType::Hinge) {
                 assert(body_offset.parent != 0xFF);
-
-                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-                spatial_vector.sVel = parent_spatial_vector.sVel;
-                spatial_vector.sAcc = parent_spatial_vector.sAcc;
-
-                // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-                // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
-                computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
 
                 float q_dot = velocity[0];
 
@@ -1010,38 +1004,8 @@ inline void rneAndCombineSpatialInertias(
                     spatial_vector.sVel[j] += S[j] * q_dot;
                     spatial_vector.sAcc[j] += S_dot[j] * q_dot;
                 }
-            }
-            else if (dof_type == DofType::Hinge) {
+            } else if (dof_type == DofType::Ball) {
                 assert(body_offset.parent != 0xFF);
-
-                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-                spatial_vector.sVel = parent_spatial_vector.sVel;
-                spatial_vector.sAcc = parent_spatial_vector.sAcc;
-
-                // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-                // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
-                // Note: we are using the parent velocity here (for hinge itself)
-                computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
-
-                float q_dot = velocity[0];
-
-                MADRONA_UNROLL
-                for (int j = 0; j < 6; ++j) {
-                    spatial_vector.sVel[j] += S[j] * q_dot;
-                    spatial_vector.sAcc[j] += S_dot[j] * q_dot;
-                }
-            }
-            else if (dof_type == DofType::Ball) {
-                assert(body_offset.parent != 0xFF);
-
-                BodySpatialVectors& parent_spatial_vector = spatialVectors[body_offset.parent];
-                spatial_vector.sVel = parent_spatial_vector.sVel;
-                spatial_vector.sAcc = parent_spatial_vector.sAcc;
-
-                // v_i = v_{parent} + S * \dot{q_i}, compute S * \dot{q_i}
-                // a_i = a_{parent} + \dot{S} * \dot{q_i} [+ S * \ddot{q_i}, which is 0]
-                // Note: we are using the parent velocity here (for hinge itself)
-                computePhiDot(dof_type, S, S_dot, parent_spatial_vector.sVel);
 
                 float *q_dot = velocity;
 
