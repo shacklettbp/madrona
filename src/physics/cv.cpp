@@ -105,6 +105,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerComponent<DofObjectGroup>();
     registry.registerComponent<BodyGroupMemory>();
     registry.registerComponent<BodyGroupProperties>();
+    registry.registerComponent<InitBodyGroup>();
     registry.registerComponent<ContactTmpState>();
     registry.registerComponent<LinkParentDofObject>();
 
@@ -114,6 +115,7 @@ void registerTypes(ECSRegistry &registry)
     registry.registerArchetype<Joint>();
     registry.registerArchetype<LinkCollider>();
     registry.registerArchetype<LinkVisual>();
+    registry.registerArchetype<InitBodyGroupArchetype>();
 
     registry.registerMemoryRangeElement<MRElement128b>();
     registry.registerMemoryRangeElement<SolverScratch256b>();

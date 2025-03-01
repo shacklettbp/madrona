@@ -31,6 +31,9 @@ Entity makeBodyGroup(Context &ctx,
                                 sizeof(Entity) * num_bodies);
     }
 
+    Loc init = ctx.makeTemporary<InitBodyGroupArchetype>();
+    ctx.get<InitBodyGroup>(init).bodyGroup = g;
+
     return g;
 }
 

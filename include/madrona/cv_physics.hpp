@@ -272,6 +272,15 @@ struct BodyGroupArchetype : Archetype<
     BodyGroupMemory
 > {};
 
+// Body group should run initialization tasks on init or setup
+struct InitBodyGroup {
+    Entity bodyGroup;
+};
+
+struct InitBodyGroupArchetype : Archetype<
+    InitBodyGroup
+> {};
+
 struct LinkParentDofObject {
     enum class Type {
         Collider,

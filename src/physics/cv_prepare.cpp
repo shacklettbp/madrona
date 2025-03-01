@@ -1530,9 +1530,10 @@ inline void computeExpandedParent(Context &ctx,
 }
 
 inline void initHierarchies(Context &ctx,
-                            BodyGroupMemory m,
-                            BodyGroupProperties p)
+                            InitBodyGroup body_grp)
 {
+    auto&m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
+    auto&p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
     computeExpandedParent(ctx, m, p);
     forwardKinematics(ctx, m, p);
 }
@@ -1791,9 +1792,11 @@ inline void computeInvMassGPU(
 
 inline void computeInvMass(
         Context &ctx,
-        BodyGroupMemory m,
-        BodyGroupProperties p)
+        InitBodyGroup body_grp)
 {
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp.bodyGroup);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp.bodyGroup);
+
 #ifdef MADRONA_GPU_MODE
     if (threadIdx.x % 32 != 0) {
         return;
@@ -2201,8 +2204,7 @@ TaskGraphNodeID setupCVInitTasks(
     // Initialize memory and run forward kinematics
     auto node = builder.addToGraph<ParallelForNode<Context,
          tasks::initHierarchies,
-             BodyGroupMemory,
-             BodyGroupProperties
+            InitBodyGroup
          >>(deps);
 
     // Initialization for initial position (e.g., inverse weights)
@@ -2240,14 +2242,12 @@ TaskGraphNodeID setupCVInitTasks(
 #ifdef MADRONA_GPU_MODE
     node = builder.addToGraph<CustomParallelForNode<Context,
          tasks::computeInvMassGPU, 32, 1,
-         BodyGroupMemory,
-         BodyGroupProperties
+         InitBodyGroup
      >>({node});
 #else
     node = builder.addToGraph<ParallelForNode<Context,
          tasks::computeInvMass,
-         BodyGroupMemory,
-         BodyGroupProperties
+         InitBodyGroup
      >>({node});
 #endif
 
