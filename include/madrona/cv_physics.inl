@@ -194,6 +194,10 @@ SpatialVector InertiaTensor::multiply(const SpatialVector &v) const
     return out;
 }
 
+inline bool HingeLimit::isActive(float q) {
+    return q < lower || q > upper;
+}
+
 float HingeLimit::dConstraintViolation(float q)
 {
     float c1 = q - lower;
@@ -223,6 +227,11 @@ float HingeLimit::constraintViolation(float q)
         return 0.f;
     }
 }
+
+inline bool SliderLimit::isActive(float q) {
+    return q < lower || q > upper;
+}
+
 
 float SliderLimit::dConstraintViolation(float q)
 {

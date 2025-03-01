@@ -1367,23 +1367,51 @@ inline void exportCPUSolverState(
         }
 
         // Starting row in the equality jacobian for each body group
-        uint32_t *row_start = (uint32_t *)ctx.tmpAlloc(
-                num_grps * sizeof(uint32_t));
-        uint32_t row_offset = 0;
+        // Count number of equality constraints that are active
+        uint32_t num_active_constraints = 0;
+        for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
+            BodyGroupMemory &m = all_memories[grp_idx];
+            BodyGroupProperties &p = all_properties[grp_idx];
+            BodyOffsets *curr_offsets = m.offsets(p);
 
-        uint32_t total_num_rows = 0;
+            for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
+                BodyOffsets offset = curr_offsets[body_idx];
+                float *q = m.q(p) + offset.posOffset;
+                if (offset.dofType == DofType::FixedBody) {
+                    continue;
+                }
+                BodyLimitConstraint limit = m.limits(p)[offset.eqOffset];
+                if (limit.type == BodyLimitConstraint::Type::None) {
+                    continue;
+                }
 
-        for (uint32_t i = 0; i < num_grps; ++i) {
-            row_start[i] = row_offset;
-            row_offset += all_properties[i].numEq;
+                switch (limit.type) {
+                case BodyLimitConstraint::Type::Hinge: {
+                    if(limit.hinge.isActive(q[0])) {
+                        num_active_constraints++;
+                    }
+                } break;
 
-            // In gpu mode, just calcualte total num rows
-            total_num_rows += all_properties[i].numEq;
+                case BodyLimitConstraint::Type::Slider: {
+                    if(limit.slider.isActive(q[0])) {
+                        num_active_constraints++;
+                    }
+                } break;
+
+                default: {
+                    MADRONA_UNREACHABLE();
+                } break;
+                }
+            }
         }
+        uint32_t total_num_rows = num_active_constraints;
 
         float *J_e = (float *)ctx.tmpAlloc(
                 total_num_rows * total_num_dofs * sizeof(float));
         memset(J_e, 0, total_num_rows * total_num_dofs * sizeof(float));
+        auto Je = [&](int32_t row, int32_t col) -> float& {
+            return J_e[row + total_num_rows * col];
+        };
 
         float *diagApprox_e = (float *)ctx.tmpAlloc(
                 total_num_rows * sizeof(float));
@@ -1393,6 +1421,7 @@ inline void exportCPUSolverState(
         memset(residuals, 0, total_num_rows * sizeof(float));
 
         // This is much easier to do with parallel execution
+        num_active_constraints = 0;
         for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
             BodyGroupMemory &m = all_memories[grp_idx];
             BodyGroupProperties &p = all_properties[grp_idx];
@@ -1401,6 +1430,9 @@ inline void exportCPUSolverState(
 
             for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
                 BodyOffsets offset = curr_offsets[body_idx];
+                if (offset.dofType == DofType::FixedBody) {
+                    continue;
+                }
 
                 float *q = m.q(p) + offset.posOffset;
 
@@ -1411,31 +1443,29 @@ inline void exportCPUSolverState(
                     continue;
                 }
 
-                uint32_t glob_row_offset = row_start[grp_idx] +
-                                           offset.eqOffset;
+                uint32_t glob_row_offset = num_active_constraints;
                 uint32_t glob_col_offset = block_start[grp_idx] +
                                            offset.velOffset;
 
                 switch (limit.type) {
                 case BodyLimitConstraint::Type::Hinge: {
-                    float *to_change = J_e +
-                        total_num_rows * glob_col_offset +
-                        glob_row_offset;
-
-                    to_change[0] = limit.hinge.dConstraintViolation(q[0]);
-                    residuals[glob_row_offset] = limit.hinge.constraintViolation(q[0]);
-                    diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
+                    if(limit.hinge.isActive(q[0])) {
+                        Je(glob_row_offset, glob_col_offset) =
+                            limit.hinge.dConstraintViolation(q[0]);
+                        residuals[glob_row_offset] = limit.hinge.constraintViolation(q[0]);
+                        diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
+                        num_active_constraints++;
+                    }
                 } break;
 
                 case BodyLimitConstraint::Type::Slider: {
-                    float *to_change = J_e +
-                        total_num_rows * glob_col_offset +
-                        glob_row_offset;
-
-                    to_change[0] =
-                        limit.slider.dConstraintViolation(q[0]);
-                    residuals[glob_row_offset] = limit.slider.constraintViolation(q[0]);
-                    diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
+                    if(limit.slider.isActive(q[0])) {
+                        Je(glob_row_offset, glob_col_offset) =
+                            limit.slider.dConstraintViolation(q[0]);
+                        residuals[glob_row_offset] = limit.slider.constraintViolation(q[0]);
+                        diagApprox_e[glob_row_offset] = inertial.approxInvMassDof[0];
+                        num_active_constraints++;
+                    }
                 } break;
 
                 default: {

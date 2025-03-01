@@ -538,6 +538,8 @@ void attachLimit(
     l.type = BodyLimitConstraint::Type::Slider;
     l.bodyIdx = body_info.idx;
     l.slider = slider_limit;
+
+    m.q(p)[offsets[body_info.idx].posOffset] = (slider_limit.lower + slider_limit.upper) / 2.f;
 }
 
 // External forces:

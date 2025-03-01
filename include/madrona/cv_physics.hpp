@@ -23,6 +23,7 @@ struct HingeLimit {
     float upper;
 
     // dC/dq
+    inline bool isActive(float q);
     inline float dConstraintViolation(float q);
     inline float constraintViolation(float q);
 };
@@ -32,6 +33,7 @@ struct SliderLimit {
     float upper;
 
     // dC/dq
+    inline bool isActive(float q);
     inline float dConstraintViolation(float q);
     inline float constraintViolation(float q);
 };
