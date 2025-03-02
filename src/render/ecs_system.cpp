@@ -135,6 +135,13 @@ inline void instanceTransformUpdate(Context &ctx,
     data.rotation = rot;
     data.scale = scale;
 
+#if 0
+    printf("(render system) pos = %f %f %f; rot = %f %f %f %f; scale = %f %f %f\n",
+            pos.x, pos.y, pos.z,
+            rot.w, rot.x, rot.y, rot.z,
+            scale.d0, scale.d1, scale.d2);
+#endif
+
     data.worldIDX = ctx.worldID().idx;
     data.objectID = obj_id.idx;
 

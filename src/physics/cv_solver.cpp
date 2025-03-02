@@ -1271,6 +1271,12 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
     uint32_t num_contacts = state_mgr->numRows<Contact>(world_id);
 
+#if 0
+    if (lane_id == 0) {
+        printf("num_contacts = %d\n", num_contacts);
+    }
+#endif
+
     ContactConstraint *contacts = state_mgr->getWorldComponents<
         Contact, ContactConstraint>(world_id);
     ContactTmpState *contacts_tmp_state = state_mgr->getWorldComponents<

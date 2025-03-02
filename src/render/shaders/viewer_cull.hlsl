@@ -107,6 +107,8 @@ void instanceCull(uint3 tid           : SV_DispatchThreadID,
         uint draw_offset;
         InterlockedAdd(drawCount[0], obj.numMeshes, draw_offset);
 
+        printf("obj.numMeshes = %d\n", obj.numMeshes);
+
         for (int32_t i = 0; i < obj.numMeshes; i++) {
             MeshData mesh = meshDataBuffer[obj.meshOffset + i];
 

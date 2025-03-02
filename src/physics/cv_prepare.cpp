@@ -1929,6 +1929,15 @@ inline void convertPostSolve(
     else {
         MADRONA_UNREACHABLE();
     }
+
+#if 0
+    if (link.type == LinkParentDofObject::Type::Render) {
+        printf("pos = %f %f %f; rot = %f %f %f %f; scale = %f %f %f\n",
+                position.x, position.y, position.z,
+                rotation.w, rotation.x, rotation.y, rotation.z,
+                scale.d0, scale.d1, scale.d2);
+    }
+#endif
 }
 }
 
