@@ -17,6 +17,8 @@ Entity loadModel(Context &ctx,
     Entity *bodies_tmp =
         (Entity *)ctx.tmpAlloc(sizeof(Entity) * cfg.numBodies);
 
+    ctx.get<BodyGroupProperties>(grp).numHashes = cfg.numHashes;
+
     { // Make the root
         BodyDesc desc = model_data.bodies[cfg.bodiesOffset];
 
@@ -35,6 +37,21 @@ Entity loadModel(Context &ctx,
                 ctx,
                 grp,
                 model_data.bodies[cfg.bodiesOffset + i]);
+    }
+
+    { // Copy name hashes
+        BodyGroupMemory m = ctx.get<BodyGroupMemory>(grp);
+        BodyGroupProperties p = ctx.get<BodyGroupProperties>(grp);
+        BodyNameHash *hashes = m.nameHashes(p);
+
+        for (uint32_t i = 0; i < cfg.numHashes; ++i) {
+            NameHash src = model_data.nameHashes[cfg.hashOffset + i];
+
+            hashes[i] = {
+                .bodyIdx = src.bodyIdx,
+                .hash = src.hash
+            };
+        }
     }
 
     // Attach the colliders

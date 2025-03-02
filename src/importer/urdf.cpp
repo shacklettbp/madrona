@@ -301,6 +301,7 @@ struct URDFLoader::Impl {
     std::vector<ModelConfig> modelConfigs;
     std::vector<CollisionDisable> collisionDisables;
     std::vector<JointLimit> jointLimits;
+    std::vector<NameHash> nameHashes;
 
     std::vector<std::unordered_map<std::string, uint32_t>> jointNameToIndices;
 
@@ -1212,6 +1213,8 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
         .collisionDisableOffset = (uint32_t)collisionDisables.size(),
         .numJointLimits = 0,
         .jointLimitOffset = (uint32_t)jointLimits.size(),
+        .numHashes = 0,
+        .hashOffset = (uint32_t)nameHashes.size(),
     };
 
     { // Push the root body
@@ -1234,6 +1237,12 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
         bodyDescs.push_back(body_desc);
         cfg.numBodies++;
+
+        nameHashes.push_back({
+            0,
+            compileHash(link_name.c_str(), link_name.length())
+        });
+        cfg.numHashes++;
     }
 
     uint32_t total_num_dofs = 0;
@@ -1245,6 +1254,21 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
         // In cvphysics, the "parent" joint and the link are tied to
         // the same object: body
         URDFJoint &joint = model.joints[link.parentJointName];
+
+        // Push a name hash for the link
+        nameHashes.push_back({
+            i,
+            compileHash(link_name.c_str(), link_name.length())
+        });
+        cfg.numHashes++;
+
+        // Push a name hash for the parent joint as well
+        nameHashes.push_back({
+            i,
+            compileHash(link.parentJointName.c_str(),
+                    link.parentJointName.length())
+        });
+        cfg.numHashes++;
 
         uint32_t body_idx = cfg.numBodies;
 
@@ -1664,6 +1688,9 @@ ModelData URDFLoader::getModelData()
 
         .numJointLimits = (uint32_t)impl->jointLimits.size(),
         .jointLimits = impl->jointLimits.data(),
+
+        .numNameHashes = (uint32_t)impl->nameHashes.size(),
+        .nameHashes = impl->nameHashes.data(),
     };
 }
 

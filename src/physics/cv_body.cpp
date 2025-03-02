@@ -67,6 +67,7 @@ static void initBodyGroupMemory(
         float *mus = m.mus(p);
         BodyInertial *inertials = m.inertials(p);
         Entity *entities = m.entities(p);
+        BodyNameHash *hashes = m.nameHashes(p);
 
         uint8_t *max_ptr = (uint8_t *)m.qVectorsPtr +
                            BodyGroupMemory::qVectorsNumBytes(p);
@@ -624,6 +625,69 @@ float * getBodyForces(Context &ctx, Entity body_grp, uint32_t body_idx)
     BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
     BodyOffsets *offsets = m.offsets(p);
     return m.f(p) + offsets[body_idx].velOffset;
+}
+
+static uint32_t getBodyIndex(
+        BodyGroupMemory &m,
+        BodyGroupProperties &p,
+        StringID string_id)
+{
+    BodyNameHash *hashes = m.nameHashes(p);
+    for (uint32_t i = 0; i < p.numHashes; ++i) {
+        if (string_id.hash == hashes[i].hash) {
+            return hashes[i].bodyIdx;
+        }
+    }
+
+    assert(false);
+    return 0xFFFF'FFFF;
+}
+
+uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, StringID string_id)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return offsets[getBodyIndex(m, p, string_id)].numDofs;
+}
+
+float * getBodyDofPos(Context &ctx, Entity body_grp, StringID string_id)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.q(p) + offsets[getBodyIndex(m, p, string_id)].posOffset;
+}
+
+float * getBodyDofVel(Context &ctx, Entity body_grp, StringID string_id)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.qv(p) + offsets[getBodyIndex(m, p, string_id)].velOffset;
+}
+
+float * getBodyDofAcc(Context &ctx, Entity body_grp, StringID string_id)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.dqv(p) + offsets[getBodyIndex(m, p, string_id)].velOffset;
+}
+
+float * getBodyForces(Context &ctx, Entity body_grp, StringID string_id)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    BodyOffsets *offsets = m.offsets(p);
+    return m.f(p) + offsets[getBodyIndex(m, p, string_id)].velOffset;
+}
+
+BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, StringID string_id)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.bodyTransforms(p)[getBodyIndex(m, p, string_id)];
 }
 
 }

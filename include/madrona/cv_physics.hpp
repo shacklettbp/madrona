@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madrona/string.hpp>
 #include <madrona/physics.hpp>
 #include <madrona/render/ecs.hpp>
 #include <madrona/components.hpp>
@@ -129,6 +130,8 @@ struct BodyGroupProperties {
     // Sum of diagonals of mass matrix
     float inertiaSum;
 
+    uint32_t numHashes;
+
     struct {
         uint32_t bodyCounter;
 
@@ -188,6 +191,11 @@ struct BodySpatialVectors {
     InertiaTensor spatialInertia;
 };
 
+struct BodyNameHash {
+    uint32_t bodyIdx;
+    uint32_t hash;
+};
+
 // This contains data for all the bodies within the body group.
 struct BodyGroupMemory {
     // This memory range contains data which must persist from frame to frame.
@@ -202,6 +210,7 @@ struct BodyGroupMemory {
     // - expanded parent
     // - object data
     // - offsets
+    // - name hashes
     MemoryRange qVectors;
 
     // This memory range contains data which will be overwritten from frame to frame.
@@ -235,6 +244,7 @@ struct BodyGroupMemory {
     inline BodyHierarchy * hierarchies(BodyGroupProperties);
     inline Entity * entities(BodyGroupProperties);
     inline BodyOffsets * offsets(BodyGroupProperties);
+    inline BodyNameHash * nameHashes(BodyGroupProperties);
 
     inline BodyTransform * bodyTransforms(BodyGroupProperties);
     inline BodyPhi * bodyPhi(BodyGroupProperties);
@@ -348,6 +358,7 @@ struct BodyDesc {
     float mass;
     math::Diag3x3 inertia;
     float muS;
+    BodyNameHash hash;
 };
 
 // "Global scale" scales everything in the body group uniformly
@@ -520,8 +531,17 @@ float * getBodyDofVel(Context &ctx, Entity body_grp, uint32_t body_idx);
 float * getBodyDofAcc(Context &ctx, Entity body_grp, uint32_t body_idx);
 float * getBodyForces(Context &ctx, Entity body_grp, uint32_t body_idx);
 
+uint8_t getBodyNumDofs(Context &ctx, Entity body_grp, StringID string_id);
+
+// The string ID can either be the link or joint name
+float * getBodyDofPos(Context &ctx, Entity body_grp, StringID string_id);
+float * getBodyDofVel(Context &ctx, Entity body_grp, StringID string_id);
+float * getBodyDofAcc(Context &ctx, Entity body_grp, StringID string_id);
+float * getBodyForces(Context &ctx, Entity body_grp, StringID string_id);
+
 // Cartesian
 BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, uint32_t body_idx);
+BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, StringID string_id);
 
 // External forces:
 void addHingeExternalForce(Context &ctx, Entity hinge_joint, float newtons);

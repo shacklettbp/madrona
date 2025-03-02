@@ -32,6 +32,12 @@ struct JointLimit {
     };
 };
 
+// Either link or joint name hashes
+struct NameHash {
+    uint32_t bodyIdx;
+    uint32_t hash;
+};
+
 // For loading pre-configured models
 struct ModelConfig {
     // Assume that the first one is the root
@@ -52,6 +58,9 @@ struct ModelConfig {
 
     uint32_t numJointLimits;
     uint32_t jointLimitOffset;
+
+    uint32_t numHashes;
+    uint32_t hashOffset;
 };
 
 struct CollisionDisable {
@@ -78,6 +87,9 @@ struct ModelData {
 
     uint32_t numJointLimits;
     JointLimit *jointLimits;
+
+    uint32_t numNameHashes;
+    NameHash *nameHashes;
 };
 
 // This returns the body group entity

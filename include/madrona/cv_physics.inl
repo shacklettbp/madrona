@@ -43,6 +43,7 @@ BodyObjectData * BodyGroupMemory::objectData(BodyGroupProperties p) { return (Bo
 BodyHierarchy * BodyGroupMemory::hierarchies(BodyGroupProperties p) { return (BodyHierarchy *)(objectData(p) + p.numObjData); }
 Entity * BodyGroupMemory::entities(BodyGroupProperties p) { return (Entity *)(hierarchies(p) + p.numBodies); }
 BodyOffsets * BodyGroupMemory::offsets(BodyGroupProperties p) { return (BodyOffsets *)(entities(p) + p.numBodies); }
+BodyNameHash * BodyGroupMemory::nameHashes(BodyGroupProperties p) { return (BodyNameHash *)(offsets(p) + p.numBodies); }
 
 
 
@@ -61,15 +62,16 @@ inline uint32_t BodyGroupMemory::qVectorsNumBytes(BodyGroupProperties p)
     return p.qDim * sizeof(float) +                 // q
            p.qvDim * sizeof(float) +                // qv
            p.qvDim * sizeof(float) +                // dqv
-           p.qvDim * sizeof(float) +               // force
+           p.qvDim * sizeof(float) +                // force
            p.numBodies * sizeof(float) +            // mus
            p.numEq * sizeof(BodyLimitConstraint) +  // equalities
            p.numBodies * sizeof(BodyInertial) +     // inertias
            p.qvDim * sizeof(int32_t) +              // expanded parent
            p.numObjData * sizeof(BodyObjectData) +  // body object data
            p.numBodies * sizeof(BodyHierarchy) +    // body hierarchy
-           p.numBodies * sizeof(Entity) +
-           p.numBodies * sizeof(BodyOffsets);
+           p.numBodies * sizeof(Entity) +           // Entity list
+           p.numBodies * sizeof(BodyOffsets) +      // Body offsets
+           p.numHashes * sizeof(BodyNameHash);      // Body name hashes
 }
 
 inline uint32_t BodyGroupMemory::tmpNumBytes(BodyGroupProperties p)
