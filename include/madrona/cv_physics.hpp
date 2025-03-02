@@ -543,6 +543,9 @@ float * getBodyForces(Context &ctx, Entity body_grp, StringID string_id);
 BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, uint32_t body_idx);
 BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, StringID string_id);
 
+BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, uint32_t body_idx);
+BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, StringID string_id);
+
 // External forces:
 void addHingeExternalForce(Context &ctx, Entity hinge_joint, float newtons);
 

@@ -690,4 +690,18 @@ BodyTransform getBodyWorldPos(Context &ctx, Entity body_grp, StringID string_id)
     return m.bodyTransforms(p)[getBodyIndex(m, p, string_id)];
 }
 
+BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, uint32_t body_idx)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.inertials(p)[body_idx];
+}
+
+BodyInertial & getBodyInertial(Context &ctx, Entity body_grp, StringID string_id)
+{
+    BodyGroupMemory &m = ctx.get<BodyGroupMemory>(body_grp);
+    BodyGroupProperties &p = ctx.get<BodyGroupProperties>(body_grp);
+    return m.inertials(p)[getBodyIndex(m, p, string_id)];
+}
+
 }
