@@ -2095,6 +2095,10 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
             curr_fun = new_fun;
         }
 
+        if (threadIdx.x % 32 == 0) {
+            printf("num_iters = %d (num_contacts = %d)\n", iter, curr_sd->numRowsJc / 3);
+        }
+
         { // Now, we need to copy x into the right components
             BodyGroupProperties *all_properties = state_mgr->getWorldComponents<
                 BodyGroupArchetype, BodyGroupProperties>(world_id);

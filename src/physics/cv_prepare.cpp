@@ -1603,6 +1603,199 @@ inline float * computeBodyJacobian(BodyGroupMemory &m,
     return J;
 }
 
+// We are using this for now.
+#ifdef MADRONA_GPU_MODE
+inline void computeInvMassGPU(
+        Context &ctx,
+        BodyGroupMemory m,
+        BodyGroupProperties p)
+{
+    using namespace gpu_utils;
+
+    uint32_t lane_id = threadIdx.x % 32;
+    uint32_t warp_id = threadIdx.x / 32;
+    const int32_t num_smem_bytes_per_warp =
+        mwGPU::SharedMemStorage::numBytesPerWarp();
+    auto smem_buf = (uint8_t *)mwGPU::SharedMemStorage::buffer +
+                    num_smem_bytes_per_warp * warp_id;
+
+    uint32_t num_bytes_per_body = sizeof(float) * 
+        (36 + 2 * 6 * p.qvDim);
+
+    uint32_t bodies_in_smem = std::min(
+            p.numBodies,
+            num_smem_bytes_per_warp / num_bytes_per_body);
+
+    float *gmem_buf = nullptr;
+    if (lane_id == 0 && bodies_in_smem < 32) {
+        uint32_t to_allocate = std::min(p.numBodies - bodies_in_smem, 
+                                        32 - bodies_in_smem);
+
+        if (to_allocate) {
+            printf("need to allocate %d bodies in gmem out of %d\n", to_allocate, p.numBodies);
+            gmem_buf = (float *)ctx.tmpAlloc(to_allocate * num_bytes_per_body);
+        }
+    }
+
+    gmem_buf = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)gmem_buf, 0);
+
+    float *data_start = nullptr;
+    if (lane_id < bodies_in_smem) {
+        data_start = (float *)(
+            (uint8_t *)smem_buf + 
+                       lane_id * num_bytes_per_body); 
+    } else if (lane_id < p.numBodies) {
+        data_start = (float *)
+            ((uint8_t *)gmem_buf +
+                        (lane_id - bodies_in_smem) * num_bytes_per_body);
+    }
+
+    gmem_buf = (float *)__shfl_sync(0xFFFF'FFFF, (uint64_t)gmem_buf, 0);
+    gmem_buf += lane_id * (36 + 36 + 6 * p.qvDim);
+
+    BodyOffsets *offsets = m.offsets(p);
+    BodyTransform *transforms = m.bodyTransforms(p);
+    BodyInertial *inertials = m.inertials(p);
+
+    warpLoop(
+        p.numBodies,
+        [&](uint32_t i_body) {
+            float *A = data_start;
+            float *J = A + 36;
+            float *MinvJT = J + 6 * p.qvDim;
+
+            BodyTransform transform = transforms[i_body];
+            memset(J, 0.f, 6 * p.qvDim * sizeof(float));
+
+            computeBodyJacobian(
+                    m,
+                    p,
+                    (uint8_t)i_body,
+                    transform.com,
+                    J, 0, 0, 6);
+
+            // Helper
+            auto Jb = [&](int32_t row, int32_t col) -> float& {
+                return J[row + 6 * col];
+            };
+            auto MinvJTb = [&](int32_t row, int32_t col) -> float& {
+                return MinvJT[row + p.qvDim * col];
+            };
+            auto Ab = [&](int32_t row, int32_t col) -> float& {
+                return A[row + 6 * col];
+            };
+
+            MADRONA_UNROLL
+            for (CountT i = 0; i < 6; ++i) {
+                for (CountT j = 0; j < p.qvDim; ++j) {
+                    MinvJTb(j, i) = Jb(i, j);
+                }
+            }
+
+            MADRONA_UNROLL
+            for (CountT i = 0; i < 6; ++i) {
+                float *col = MinvJT + i * p.qvDim;
+                solveM( p, m, col);
+            }
+
+            // A = J M^{-1} J^T
+            memset(A, 0.f, 36 * sizeof(float));
+
+            MADRONA_UNROLL
+            for (CountT i = 0; i < 6; ++i) {
+                MADRONA_UNROLL
+                for (CountT j = 0; j < 6; ++j) {
+                    for (CountT k = 0; k < p.qvDim; ++k) {
+                        Ab(i, j) += Jb(i, k) * MinvJTb(k, j);
+                    }
+                }
+            }
+
+            // Compute the inverse weight
+            float a = inertials[i_body].approxInvMassTrans =
+                (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
+            float b = inertials[i_body].approxInvMassRot =
+                (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
+
+            printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
+        });
+
+    warpLoop(
+        p.numBodies,
+        [&](uint32_t i_body) {
+            float *A = data_start;
+            float *J = A + 36;
+            float *MinvJT = J + 6 * p.qvDim;
+
+            BodyOffsets offset = offsets[i_body];
+            auto &dof_inertial = inertials[i_body];
+
+            uint32_t dof_offset = offset.velOffset;
+
+            // Jacobian size (body dofs x total dofs)
+            auto Jd = [&](int32_t row, int32_t col) -> float& {
+                return J[row + offset.numDofs * col];
+            };
+            // J^T and M^{-1}J^T (total dofs x body dofs)
+            auto MinvJTd = [&](int32_t row, int32_t col) -> float& {
+                return MinvJT[row + p.qvDim * col];
+            };
+            // A = JM^{-1}J^T. (body dofs x body dofs)
+            auto Ad = [&](int32_t row, int32_t col) -> float& {
+                return A[row + offset.numDofs * col];
+            };
+
+            // Fill in 1 for the corresponding body dofs
+            memset(J, 0.f, 6 * p.qvDim * sizeof(float));
+            for (CountT i = 0; i < offset.numDofs; ++i) {
+                Jd(i, i + dof_offset) = 1.f;
+            }
+
+            // Copy into J^T
+            for (CountT i = 0; i < offset.numDofs; ++i) {
+                for (CountT j = 0; j < p.qvDim; ++j) {
+                    MinvJTd(j, i) = Jd(i, j);
+                }
+            }
+
+            // M^{-1} J^T. (J^T is total dofs x body dofs)
+            for (CountT i = 0; i < offset.numDofs; ++i) {
+                float *col = MinvJT + i * p.qvDim;
+                solveM(p, m, col);
+            }
+
+            // A = J M^{-1} J^T
+            memset(A, 0.f, offset.numDofs * offset.numDofs * sizeof(float));
+            for (CountT i = 0; i < offset.numDofs; ++i) {
+                for (CountT j = 0; j < offset.numDofs; ++j) {
+                    for (CountT k = 0; k < p.qvDim; ++k) {
+                        Ad(i, j) += Jd(i, k) * MinvJTd(k, j);
+                    }
+                }
+            }
+
+            // Update the inverse mass of each DOF
+            if (offset.numDofs == 6) {
+               dof_inertial.approxInvMassDof[0] = 
+                   dof_inertial.approxInvMassDof[1] =
+                   dof_inertial.approxInvMassDof[2] =
+                   (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
+               dof_inertial.approxInvMassDof[3] =
+                   dof_inertial.approxInvMassDof[4] =
+                   dof_inertial.approxInvMassDof[5] =
+                    (Ad(3, 3) + Ad(4, 4) + Ad(5, 5)) / 3.f;
+            } else if (offset.numDofs == 3) {
+                dof_inertial.approxInvMassDof[0] =
+                    dof_inertial.approxInvMassDof[1] =
+                    dof_inertial.approxInvMassDof[2] =
+                    (Ad(0, 0) + Ad(1, 1) + Ad(2, 2)) / 3.f;
+            } else {
+                dof_inertial.approxInvMassDof[0] = Ad(0, 0);
+            }
+        });
+}
+#endif
+
 inline void computeInvMass(
         Context &ctx,
         BodyGroupMemory m,
@@ -1685,10 +1878,12 @@ inline void computeInvMass(
         }
 
         // Compute the inverse weight
-        inertials[i_body].approxInvMassTrans =
+        float a = inertials[i_body].approxInvMassTrans =
             (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
-        inertials[i_body].approxInvMassRot =
+        float b = inertials[i_body].approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
+
+        printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
     }
 
     // For each DOF, find the inverse weight
@@ -2040,7 +2235,7 @@ TaskGraphNodeID setupCVInitTasks(
 
 #ifdef MADRONA_GPU_MODE
     node = builder.addToGraph<CustomParallelForNode<Context,
-         tasks::computeInvMass, 32, 1,
+         tasks::computeInvMassGPU, 32, 1,
          BodyGroupMemory,
          BodyGroupProperties
      >>({node});
