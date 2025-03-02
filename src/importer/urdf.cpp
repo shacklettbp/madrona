@@ -310,6 +310,7 @@ struct URDFLoader::Impl {
             BuiltinPrimitives primitives,
             std::vector<std::string> &render_asset_paths,
             std::vector<std::string> &physics_asset_paths,
+            bool make_root_free_body,
             bool visualize_colliders);
 };
 
@@ -1187,6 +1188,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
         BuiltinPrimitives primitives,
         std::vector<std::string> &render_asset_paths,
         std::vector<std::string> &physics_asset_paths,
+        bool make_root_free_body,
         bool visualize_colliders)
 {
     std::vector<std::string> sorted_links;
@@ -1222,7 +1224,7 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
         URDFLink &link = model.links[link_name];
 
         BodyDesc body_desc = {
-            .type = DofType::FixedBody,
+            .type = make_root_free_body ? DofType::FreeBody : DofType::FixedBody,
             .initialPos = Vector3::all(0.f),
             .initialRot = Quat::id(),
             .responseType = ResponseType::Dynamic,
@@ -1646,6 +1648,7 @@ URDFLoader::URDFInfo URDFLoader::load(
         BuiltinPrimitives primitives,
         std::vector<std::string> &render_asset_paths,
         std::vector<std::string> &physics_asset_paths,
+        bool make_root_free_body,
         bool visualize_colliders)
 {
     std::ifstream stream(path);
@@ -1665,6 +1668,7 @@ URDFLoader::URDFInfo URDFLoader::load(
             primitives,
             render_asset_paths,
             physics_asset_paths,
+            make_root_free_body,
             visualize_colliders);
 }
 

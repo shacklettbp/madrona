@@ -34,6 +34,7 @@ struct URDFLoader {
           BuiltinPrimitives primitives,
           std::vector<std::string> &render_asset_paths,
           std::vector<std::string> &physics_asset_paths,
+          bool make_root_free_body = false,
           bool visualize_colliders = false);
 
     phys::cv::ModelData getModelData();
