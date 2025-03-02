@@ -643,7 +643,7 @@ static bool parseLink(
     for (tinyxml2::XMLElement* vis_xml = config->FirstChildElement("visual");
             vis_xml;
             vis_xml = vis_xml->NextSiblingElement("visual")) {
-        URDFVisual vis;
+        URDFVisual vis = URDFVisual::defaultValue();
         parseVisual(vis, vis_xml);
         link.visualArray.push_back(vis);
     }
@@ -652,7 +652,7 @@ static bool parseLink(
     for (tinyxml2::XMLElement* col_xml = config->FirstChildElement("collision");
             col_xml;
             col_xml = col_xml->NextSiblingElement("collision")) {
-        URDFCollision col;
+        URDFCollision col = URDFCollision::defaultValue();
         parseCollision(col, col_xml);
         link.collisionArray.push_back(col);
     }
@@ -1497,12 +1497,6 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
 
                 // Optionally attach as render object too
                 if (visualize_colliders) {
-#if 0
-                    render_obj_id = (int32_t)render_asset_paths.size();
-                    // Must be triangular...
-                    render_asset_paths.push_back(collision.geometry.mesh.filename);
-#endif
-
                     if (auto it = render_path_to_obj.find(collision.geometry.mesh.filename);
                             it != render_path_to_obj.end()) {
                         render_obj_id = it->second;
