@@ -370,6 +370,12 @@ void computeGroupCOM(Context &ctx,
     for (uint32_t i = 0; i < num_bodies; ++i) {
         BodyInertial body_inertia = inertials[i];
         BodyTransform body_transform = transforms[i];
+        // If infinite mass (likely ground plane)
+        if (1.f / body_inertia.mass == 0.f) {
+            assert(num_bodies == 1);
+            prop.comPos = body_transform.com;
+            return;
+        }
 
         hierarchy_com += body_inertia.mass * body_transform.com;
         total_mass += body_inertia.mass;
@@ -1239,8 +1245,6 @@ inline void exportCPUSolverState(
     CountT num_contacts = state_mgr->numRows<Contact>(world_id);
     CountT total_contact_pts = 0;
 
-    // printf("num contact points: %d\n", num_contacts);
-
     for (int i = 0; i < num_contacts; ++i) {
         total_contact_pts += contacts[i].numPoints;
     }
@@ -1315,12 +1319,6 @@ inline void exportCPUSolverState(
             float inv_weight_trans = ref_inertial.approxInvMassTrans +
                 alt_inertial.approxInvMassTrans;
 
-#if 0
-            // Required for rolling friction
-            float inv_weight_rot = ref_inertial.approxInvMassRot +
-                alt_inertial.approxInvMassRot;
-#endif
-
             // Each of the contact points
             for(CountT pt_idx = 0; pt_idx < contact.numPoints; pt_idx++) {
                 Vector3 contact_pt = contact.points[pt_idx].xyz();
@@ -1330,8 +1328,6 @@ inline void exportCPUSolverState(
                     ref_m, ref_link.bodyIdx,  tmp_state.C, contact_pt, J_c,
                     block_start[ref_p.tmp.grpIndex], jac_row, J_rows, -1.f,
                     (ct_idx == 0 && pt_idx == 0));
-
-
 
                 computeContactJacobian(alt_p,
                     alt_m, alt_link.bodyIdx, tmp_state.C, contact_pt, J_c,
