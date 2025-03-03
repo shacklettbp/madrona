@@ -2002,6 +2002,10 @@ inline void integrationStep(Context &ctx,
                             DofObjectGroup grp_info)
 {
     float h = ctx.singleton<PhysicsSystemState>().h;
+    
+    if (!ctx.singleton<CVSolveData>().enablePhysics) {
+        h = 0.f;
+    }
 
     BodyGroupMemory m = ctx.get<BodyGroupMemory>(grp_info.bodyGroup);
     BodyGroupProperties p = ctx.get<BodyGroupProperties>(grp_info.bodyGroup);

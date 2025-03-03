@@ -110,6 +110,8 @@ struct SparseBlkDiag {
 };
 
 struct CVSolveData {
+    uint32_t enablePhysics;
+
     uint32_t numBodyGroups;
     uint32_t *dofOffsets;
 

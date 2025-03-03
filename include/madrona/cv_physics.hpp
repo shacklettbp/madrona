@@ -569,6 +569,8 @@ TaskGraphNodeID setupCVSolverTasks(TaskGraphBuilder &builder,
 
 void initializeHierarchies(Context &ctx);
 
+void setEnablePhysics(Context &ctx, bool value);
+
 }
 
 #include "cv_physics.inl"
