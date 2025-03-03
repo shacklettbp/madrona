@@ -1431,7 +1431,10 @@ inline void exportCPUSolverState(
         for (uint32_t grp_idx = 0; grp_idx < num_grps; ++grp_idx) {
             BodyGroupMemory &m = all_memories[grp_idx];
             BodyGroupProperties &p = all_properties[grp_idx];
-            
+            if (p.numEq == 0) {
+                continue;
+            }
+
             BodyOffsets *curr_offsets = m.offsets(p);
 
             for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
