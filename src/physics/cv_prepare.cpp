@@ -1857,11 +1857,8 @@ inline void computeInvMass(
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
         BodyInertial &inertial = inertials[i_body];
         if(fixed_root[i_body]) {
-            inertial.approxInvMassTrans = 1 / inertial.mass;
-            inertial.approxInvMassRot = 3 / (inertial.inertia.d0 +
-                                             inertial.inertia.d1 +
-                                             inertial.inertia.d2);
-
+            inertial.approxInvMassTrans = 0.f;
+            inertial.approxInvMassRot = 0.f;
             continue;
         }
         BodyTransform transform = transforms[i_body];
