@@ -1126,6 +1126,13 @@ inline void processContacts(Context &ctx,
     BodyGroupMemory &mem_ref = ctx.get<BodyGroupMemory>(ref_grp);
     BodyGroupMemory &mem_alt = ctx.get<BodyGroupMemory>(alt_grp);
 
+    bool ref_fixed_root = mem_ref.fixedRoot(prop_ref)[ref_body_idx];
+    bool alt_fixed_root = mem_alt.fixedRoot(prop_alt)[alt_body_idx];
+    if (ref_fixed_root && alt_fixed_root) {
+        contact.numPoints = 0;
+        return;
+    }
+
     float mu_ref = mem_ref.mus(prop_ref)[ref_body_idx];
     float mu_alt = mem_alt.mus(prop_alt)[alt_body_idx];
 
