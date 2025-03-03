@@ -1549,13 +1549,6 @@ inline void computeExpandedParent(Context &ctx,
         expandedParent[map[i - 1] + 1] = map[parent_idx];
         ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
     }
-
-    // print MAP
-    printf("MAp: ");
-    for(int32_t i = 0; i < p.numBodies; ++i) {
-        printf("%d ", map[i]);
-    }
-    printf("\n");
 }
 
 inline void initHierarchies(Context &ctx,
