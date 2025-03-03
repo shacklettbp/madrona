@@ -1126,9 +1126,9 @@ inline void processContacts(Context &ctx,
     BodyGroupMemory &mem_ref = ctx.get<BodyGroupMemory>(ref_grp);
     BodyGroupMemory &mem_alt = ctx.get<BodyGroupMemory>(alt_grp);
 
-    bool ref_fixed_root = mem_ref.fixedRoot(prop_ref)[ref_body_idx];
-    bool alt_fixed_root = mem_alt.fixedRoot(prop_alt)[alt_body_idx];
-    if (ref_fixed_root && alt_fixed_root) {
+    bool ref_static = mem_ref.isStatic(prop_ref)[ref_body_idx];
+    bool alt_static = mem_alt.isStatic(prop_alt)[alt_body_idx];
+    if (ref_static && alt_static) {
         contact.numPoints = 0;
         return;
     }
@@ -1535,7 +1535,7 @@ inline void computeExpandedParent(Context &ctx,
     map[0] = -1;
     
     BodyOffsets *offsets = m.offsets(p);
-    bool* fixed_root = m.fixedRoot(p);
+    bool* fixed_root = m.isStatic(p);
 
     for(int32_t i = 1; i < p.numBodies; ++i) {
         uint32_t n_i = offsets[i].numDofs;
@@ -1851,12 +1851,12 @@ inline void computeInvMass(
     BodyOffsets *offsets = m.offsets(p);
     BodyTransform *transforms = m.bodyTransforms(p);
     BodyInertial *inertials = m.inertials(p);
-    bool *fixed_root = m.fixedRoot(p);
+    bool *is_static = m.isStatic(p);
 
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
         BodyInertial &inertial = inertials[i_body];
-        if(fixed_root[i_body]) {
+        if(is_static[i_body]) {
             inertial.approxInvMassTrans = 0.f;
             inertial.approxInvMassRot = 0.f;
             continue;

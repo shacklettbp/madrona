@@ -240,7 +240,7 @@ struct BodyGroupMemory {
     inline BodyLimitConstraint * limits(BodyGroupProperties);
     inline BodyInertial * inertials(BodyGroupProperties);
     inline int32_t * expandedParent(BodyGroupProperties);
-    inline bool * fixedRoot(BodyGroupProperties);
+    inline bool * isStatic(BodyGroupProperties);
     inline BodyObjectData * objectData(BodyGroupProperties);
     inline BodyHierarchy * hierarchies(BodyGroupProperties);
     inline Entity * entities(BodyGroupProperties);
