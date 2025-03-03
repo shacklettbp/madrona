@@ -1522,10 +1522,18 @@ inline void computeExpandedParent(Context &ctx,
     map[0] = -1;
     
     BodyOffsets *offsets = m.offsets(p);
+    bool* fixed_root = m.fixedRoot(p);
 
     for(int32_t i = 1; i < p.numBodies; ++i) {
         uint32_t n_i = offsets[i].numDofs;
         map[i] = map[i - 1] + (int32_t) n_i;
+
+        // Whether this body is fixed and root (or fixed and parent is fixed root)
+        if(map[i] == -1 && offsets[i].dofType == DofType::FixedBody) {
+            fixed_root[i] = true;
+        } else {
+            fixed_root[i] = false;
+        }
     }
     // Finish expanded parent array
     for(int32_t i = 1; i < p.numBodies; ++i) {
@@ -1534,6 +1542,13 @@ inline void computeExpandedParent(Context &ctx,
         expandedParent[map[i - 1] + 1] = map[parent_idx];
         ASSERT_PTR_ACCESS(expandedParent, (map[i - 1] + 1), max_ptr);
     }
+
+    // print MAP
+    printf("MAp: ");
+    for(int32_t i = 0; i < p.numBodies; ++i) {
+        printf("%d ", map[i]);
+    }
+    printf("\n");
 }
 
 inline void initHierarchies(Context &ctx,
@@ -1830,9 +1845,19 @@ inline void computeInvMass(
     BodyOffsets *offsets = m.offsets(p);
     BodyTransform *transforms = m.bodyTransforms(p);
     BodyInertial *inertials = m.inertials(p);
+    bool *fixed_root = m.fixedRoot(p);
 
     // Compute the inverse weight for each body
     for (CountT i_body = 0; i_body < p.numBodies; ++i_body) {
+        BodyInertial &inertial = inertials[i_body];
+        if(fixed_root[i_body]) {
+            inertial.approxInvMassTrans = 1 / inertial.mass;
+            inertial.approxInvMassRot = 3 / (inertial.inertia.d0 +
+                                             inertial.inertia.d1 +
+                                             inertial.inertia.d2);
+
+            continue;
+        }
         BodyTransform transform = transforms[i_body];
 
         // Compute J
@@ -1878,9 +1903,9 @@ inline void computeInvMass(
         }
 
         // Compute the inverse weight
-        float a = inertials[i_body].approxInvMassTrans =
+        float a = inertial.approxInvMassTrans =
             (Ab(0, 0) + Ab(1, 1) + Ab(2, 2)) / 3.f;
-        float b = inertials[i_body].approxInvMassRot =
+        float b = inertial.approxInvMassRot =
             (Ab(3, 3) + Ab(4, 4) + Ab(5, 5)) / 3.f;
 
         printf("(body %d) approx inv mass trans = %f; approx inv mass rot %f\n", i_body, a, b);
