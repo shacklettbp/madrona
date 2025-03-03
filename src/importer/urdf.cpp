@@ -1578,15 +1578,26 @@ URDFLoader::URDFInfo URDFLoader::Impl::convertToModelConfig(
             case URDFGeometryType::Mesh: {
                 scale = visual.geometry.mesh.scale;
 
-                if (auto it = render_path_to_obj.find(visual.geometry.mesh.filename);
+                std::string filename = visual.geometry.mesh.filename;
+#if 0
+                if (link.collisionArray.size() && link.collisionArray[0].geometry.type == URDFGeometryType::Mesh) {
+                    filename = link.collisionArray[0].geometry.mesh.filename;
+                } else {
+                    filename = visual.geometry.mesh.filename;
+                }
+#endif
+
+                if (auto it = render_path_to_obj.find(filename);
                         it != render_path_to_obj.end()) {
                     obj_id = it->second;
                 } else {
                     obj_id = (int32_t)render_asset_paths.size();
-                    render_asset_paths.push_back(visual.geometry.mesh.filename);
+
+                    printf("pushing render filename %s\n", filename.c_str());
+                    render_asset_paths.push_back(filename);
                     
                     auto [new_it, is_inserted] =
-                        render_path_to_obj.emplace(visual.geometry.mesh.filename, obj_id);
+                        render_path_to_obj.emplace(filename, obj_id);
                     assert(is_inserted);
                 }
             } break;

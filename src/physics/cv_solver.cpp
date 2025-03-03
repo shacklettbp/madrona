@@ -340,14 +340,6 @@ void GaussMinimizationNode::testNodeTransposeMul(int32_t invocation_idx)
                 }
             }
 
-#if 0
-            for (int i = 0; i < a_mat_rows; ++i) {
-                for (int j = 0; j < a_mat_cols; ++j) {
-                    test_a_mat[i * a_mat_cols + j] = (i * a_mat_cols + j) % 5;
-                }
-            }
-#endif
-
             for (int i = 0; i < b_mat_rows; ++i) {
                 for (int j = 0; j < b_mat_cols; ++j) {
                     test_b_mat[i * b_mat_cols + j] = (i * b_mat_cols + j) % 7;

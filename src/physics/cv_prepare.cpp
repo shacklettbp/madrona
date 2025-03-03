@@ -1323,6 +1323,9 @@ inline void exportCPUSolverState(
             auto &ref_inertial = ref_m.inertials(ref_p)[ref_link.bodyIdx];
             auto &alt_inertial = alt_m.inertials(alt_p)[alt_link.bodyIdx];
 
+            printf("ref.approxInvMassTrans = %f; alt.approxInvMassTrans = %f\n",
+                    ref_inertial.approxInvMassTrans,
+                    alt_inertial.approxInvMassTrans);
             float inv_weight_trans = ref_inertial.approxInvMassTrans +
                 alt_inertial.approxInvMassTrans;
 
@@ -1380,6 +1383,9 @@ inline void exportCPUSolverState(
             }
             BodyOffsets *curr_offsets = m.offsets(p);
 
+            num_active_constraints += p.numEq;
+
+#if 0
             for (uint32_t body_idx = 0; body_idx < p.numBodies; ++body_idx) {
                 BodyOffsets offset = curr_offsets[body_idx];
                 float *q = m.q(p) + offset.posOffset;
@@ -1409,7 +1415,9 @@ inline void exportCPUSolverState(
                 } break;
                 }
             }
+#endif
         }
+
         uint32_t total_num_rows = num_active_constraints;
 
         float *J_e = (float *)ctx.tmpAlloc(

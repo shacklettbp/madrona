@@ -132,6 +132,10 @@ struct BodyGroupProperties {
 
     uint32_t numHashes;
 
+    // Reset means that we want to calculate first time things like
+    // memory, expanded parent, etc...
+    bool reset;
+
     struct {
         uint32_t bodyCounter;
 
