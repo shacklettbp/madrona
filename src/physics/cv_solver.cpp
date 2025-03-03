@@ -1263,11 +1263,9 @@ void GaussMinimizationNode::prepareSolver(int32_t invocation_idx)
 
     uint32_t num_contacts = state_mgr->numRows<Contact>(world_id);
 
-#if 0
     if (lane_id == 0) {
         printf("num_contacts = %d\n", num_contacts);
     }
-#endif
 
     ContactConstraint *contacts = state_mgr->getWorldComponents<
         Contact, ContactConstraint>(world_id);
@@ -2088,7 +2086,7 @@ void GaussMinimizationNode::nonlinearCG(int32_t invocation_idx)
         }
 
         if (threadIdx.x % 32 == 0) {
-            printf("num_iters = %d (num_contacts = %d)\n", iter, curr_sd->numRowsJc / 3);
+            printf("num_iters = %d\n", iter);
         }
 
         { // Now, we need to copy x into the right components
